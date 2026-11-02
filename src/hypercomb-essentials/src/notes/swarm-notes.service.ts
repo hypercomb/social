@@ -129,6 +129,27 @@ export class SwarmNotes extends EventTarget {
     return [...keys].map(pubkey => ({ pubkey, always: this.#ignoredAlways.has(pubkey) }))
   }
 
+  /** Everyone else on this tile, or in the room, and whether their notes are
+   *  showing. You are not in the list — your notes stay. Off is an ignore,
+   *  or the whole room hidden. */
+  peopleFor(cell: string): { pubkey: string; on: boolean }[] {
+    this.#syncPage()
+    const key = moleculeKey(cell)
+    const seen = new Set<string>()
+    const take = (pubkey: string): void => {
+      const k = String(pubkey ?? '').toLowerCase()
+      if (SIG.test(k)) seen.add(k)
+    }
+    for (const root of this.#roots.get(key) ?? []) for (const holder of root.holders) take(holder)
+    for (const holders of this.#heldMine.get(key)?.values() ?? []) for (const holder of holders) take(holder)
+    try {
+      for (const pubkey of get<SwarmShape>('@diamondcoreprocessor.com/SwarmDrone')?.participantsInZone?.() ?? []) take(pubkey)
+    } catch { /* no swarm — the people already collected still answer */ }
+    for (const ignored of this.ignored()) take(ignored.pubkey)
+    const hidden = this.#roomHidden
+    return [...seen].sort().map(pubkey => ({ pubkey, on: !hidden && !this.#isIgnored(pubkey) }))
+  }
+
   /** Hide everyone else's notes for this session (and show them again). */
   setRoomHidden(hidden: boolean): void {
     if (this.#roomHidden === hidden) return

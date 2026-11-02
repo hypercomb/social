@@ -36,6 +36,7 @@
        the opt-in exists for. It keeps the bar's bottom clearance either way. -->
   <div class="notes-strip cv2-panel"
        [class.mode-chips]="mode() === 'chips'" [class.mode-rows]="mode() === 'rows'"
+       [class.is-tree]="treeMode()"
        #panel
        data-consumes-wheel
        data-hc-sheet="full"
@@ -62,9 +63,13 @@
            nothing but the list. Click it to rename, the same in-place
            gesture the lines use. -->
       <span class="cv2-dragbar-title">
-        <span class="hex-mark" aria-hidden="true"></span>
-        <span>{{ cell() || ('writing.title' | t) }}</span>
-        @if (tab() === 'lists' && cell()) {
+        @if (treeMode() && cell()) {
+          <span class="cv2-tilehead-mark" aria-hidden="true">{{ plateInitial() }}</span>
+        } @else if (!treeMode()) {
+          <span class="hex-mark" aria-hidden="true"></span>
+        }
+        <span class="cv2-dragbar-tile">{{ cell() || ('writing.title' | t) }}</span>
+        @if (tab() === 'lists' && cell() && !treeMode()) {
           @if (listRoot(); as root) {
             <span class="cv2-dragbar-sep" aria-hidden="true">/</span>
             @if (editingItemId() === root.id) {
@@ -93,6 +98,12 @@
            tree you edit in place; the reader is for reading one note at a
            time, big, with the hierarchy around it. Only offered when a tile
            is active, since there is nothing to read otherwise. -->
+      <button type="button" class="cv2-mini-btn" [class.is-on]="treeMode()"
+              (click)="toggleTreeMode()"
+              [attr.aria-pressed]="treeMode()"
+              [attr.aria-label]="'notes.tree.mode' | t" [title]="'notes.tree.modeHint' | t">
+        <span class="mat-sym">account_tree</span>
+      </button>
       @if (cell()) {
         <button type="button" class="cv2-mini-btn" (click)="openReader()"
                 [attr.aria-label]="'notes.read' | t" [title]="'notes.read' | t">
@@ -102,6 +113,92 @@
       <button type="button" class="cv2-mini-btn cv2-close" (click)="hide()"
               [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button>
     </div>
+
+    @if (treeMode() && cell()) {
+      <!-- People across, then the groups at this level. Drag a person onto a
+           group to add them to it. They can be in many. The notes stay where
+           the command line left them. -->
+      <div class="cv2-people" role="group" [attr.aria-label]="'notes.tree.people' | t">
+        <span class="cv2-person is-you is-on" draggable="true"
+              [title]="youDragTitle()"
+              (dragstart)="personDragStart($event, null)"
+              (dragend)="personDragEnd()">{{ 'notes.tree.you' | t }}</span>
+        @for (who of roomPeople(); track who.pubkey) {
+          <button type="button" class="cv2-person" draggable="true"
+                  [class.is-on]="who.on"
+                  [style.--peer]="who.color"
+                  [attr.aria-pressed]="who.on"
+                  (click)="togglePerson(who.pubkey)"
+                  (dragstart)="personDragStart($event, who.pubkey)"
+                  (dragend)="personDragEnd()"
+                  [title]="(who.on ? 'notes.tree.personOn' : 'notes.tree.personOff') | t: { name: who.label }">{{ who.label }}</button>
+        }
+        <form class="cv2-ask" (submit)="askAgent($event)">
+          <input type="text" class="cv2-ask-input" data-escape-local autocomplete="off"
+                 [value]="askText()"
+                 (input)="setAskText($event)"
+                 (pointerdown)="$event.stopPropagation()"
+                 [placeholder]="'notes.tree.askPlaceholder' | t"
+                 [attr.aria-label]="'notes.tree.ask' | t" />
+          @if (exploringName()) {
+            <span class="cv2-ask-status" role="status">{{ 'notes.tree.asking' | t: { name: exploringName() } }}</span>
+          }
+          <button type="submit" class="cv2-ask-go" [disabled]="!!catBusy() || !catAiReady() || notes().length === 0"
+                  [title]="(catAiReady() ? 'notes.tree.ask' : 'notes.cats.noAi') | t">
+            <span class="mat-sym" [class.is-spinning]="catBusy() === 'explore'" aria-hidden="true">auto_awesome</span>
+            <span>{{ 'notes.tree.ask' | t }}</span>
+          </button>
+        </form>
+      </div>
+      <div class="cv2-groups" role="group" [attr.aria-label]="'notes.cats.aria' | t">
+        @for (row of groupSwitch(); track row.key) {
+          @if (catRenaming() === row.key) {
+            <input type="text" class="cv2-group-rename" data-escape-local autocomplete="off"
+                   [attr.data-cat-key]="row.key"
+                   [value]="row.name"
+                   [attr.aria-label]="groupNameLabel()"
+                   (pointerdown)="$event.stopPropagation()"
+                   (keydown)="onRenameKey($event, row.path)"
+                   (blur)="catRenaming.set(null)" />
+          } @else {
+            <button type="button" class="cv2-group"
+                    [class.is-over]="groupOver() === row.key"
+                    [class.is-exploring]="exploringKey() === row.key"
+                    [attr.data-cat-key]="row.key"
+                    [title]="groupDropTitle()"
+                    (dblclick)="startRename(row.key)"
+                    (dragover)="allowPersonDrop($event, row.key)"
+                    (dragleave)="clearGroupOver($event, row.key)"
+                    (drop)="dropPersonOnGroup($event, row)">
+              <span class="cv2-group-label">{{ row.name }}</span>
+              @if (peopleInGroup(row.key); as marks) {
+                @if (marks.length) {
+                  <span class="cv2-group-who" aria-hidden="true">
+                    @for (mark of marks; track mark.id) {
+                      <span>{{ mark.mark }}</span>
+                    }
+                  </span>
+                }
+              }
+            </button>
+          }
+        }
+        <input type="text" class="cv2-group-name" data-escape-local autocomplete="off"
+               [placeholder]="groupNameLabel()"
+               [attr.aria-label]="groupNameLabel()"
+               (pointerdown)="$event.stopPropagation()"
+               (keydown)="onNameGroup($event)" />
+        <button type="button" class="cv2-group"
+                [class.is-over]="groupOver() === UNSORTED"
+                [title]="groupOutTitle()"
+                (dragover)="allowPersonDrop($event, UNSORTED)"
+                (dragleave)="clearGroupOver($event, UNSORTED)"
+                (drop)="dropPersonUnsorted($event)">{{ 'notes.cats.unsorted' | t }}</button>
+      </div>
+      @if (groupSaid()) {
+        <p class="cv2-group-finding" role="status">{{ groupSaid() }}</p>
+      }
+    }
 
     <!-- The writing window's two tabs — plain NOTES (prose and the
          question/answer conversation) and LISTS (the hierarchical list-notes:
@@ -575,7 +672,8 @@
           </button>
 
           @for (row of catRows(); track row.key) {
-            <div class="cv2-cat-row" [style.--depth]="row.depth">
+            <div class="cv2-cat-row" [class.is-exploring]="exploringKey() === row.key"
+                 [attr.data-cat-key]="row.key" [style.--depth]="row.depth">
               @if (catRenaming() === row.key) {
                 <input type="text" class="cv2-cat-input" data-escape-local autocomplete="off"
                        [value]="row.name" (keydown)="onRenameKey($event, row.path)" (blur)="catRenaming.set(null)" />
@@ -625,6 +723,9 @@
                        (keydown)="onAddCategoryKey($event)" (blur)="catAddingUnder.set(null)" />
               </div>
             }
+            @if (groupFinding(row.key); as said) {
+              <p class="cv2-cat-finding">{{ said }}</p>
+            }
           }
           @if (catAddingUnder() === '') {
             <div class="cv2-cat-row">
@@ -635,7 +736,9 @@
           }
 
           @if (catRows().length > 0) {
-            <button type="button" class="cv2-cat cv2-cat-unsorted" [class.is-on]="catBranch() === UNSORTED" (click)="pickBranch(UNSORTED)">
+            <button type="button" class="cv2-cat cv2-cat-unsorted" [class.is-on]="catBranch() === UNSORTED"
+                    [class.is-exploring]="exploringKey() === UNSORTED" [attr.data-cat-key]="UNSORTED"
+                    (click)="pickBranch(UNSORTED)">
               <span class="mat-sym cv2-cat-glyph" aria-hidden="true">{{ catGlyph(UNSORTED) }}</span>
               <span class="cv2-cat-name">{{ 'notes.cats.unsorted' | t }}</span>
               <span class="cv2-cat-count">{{ catUnsorted() }}</span>
@@ -1116,8 +1219,14 @@
          It spans the desk's full width, below every column, and is ALWAYS
          there: with a tile in hand it writes on it, and on a page with no
          tile yet the line names the first one (`#startFirstTile`). -->
-    <div class="cv2-composer">
-      @if (composerDepth() > 0) {
+    <div class="cv2-composer" [attr.title]="placeHint() || null">
+      @if (treeMode() && placeLabel()) {
+        <!-- WHERE THE NEXT LINE LANDS: the category you are in. -->
+        <span class="cv2-composer-depth">
+          <span class="mat-sym" aria-hidden="true">subdirectory_arrow_right</span>
+          <span class="cv2-composer-place">{{ placeLabel() }}</span>
+        </span>
+      } @else if (!treeMode() && composerDepth() > 0) {
         <!-- WHERE THE NEXT LINE LANDS, said before it is typed. A depth you
              cannot see is a depth you will be surprised by. -->
         <span class="cv2-composer-depth"

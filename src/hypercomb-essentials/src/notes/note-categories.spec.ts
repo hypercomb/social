@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  EMPTY_DOC, addCategory, categoryDocJson, countUnder, fileNote, filedNotes, flattenCategories, mergeOutline,
-  parseOutline, readCategoryDoc, removeCategory, renameCategory, roomCategories, unfileNote,
+  EMPTY_DOC, addCategory, addPerson, categoryDocJson, clearPerson, countUnder, exploreGroups, fileNote, filedNotes, flattenCategories, mergeOutline,
+  parseOutline, placeNames, placeToGo, readCategoryDoc, readPlaceLine, removeCategory, removePerson, renameCategory, roomCategories, unfileNote,
 } from './note-categories.js'
 import { jevSortInput, jevSortQuestions, jevSortResult } from '../assistant/jev-sort.js'
 
@@ -17,6 +17,51 @@ describe('the category tree of a tile\'s notes', () => {
     ;({ doc, path } = addCategory(doc, [0], 'Krebs cycle'))
     expect(path).toEqual([0, 0])
     expect(flattenCategories(doc).map(c => c.label)).toEqual(['Energy', 'Energy › Krebs cycle'])
+  })
+
+  it('adds a person to any group and to many, and a note still has one place', () => {
+    let doc = mergeOutline(EMPTY_DOC, [{ name: 'Energy', children: [] }, { name: 'Cells', children: [] }])
+    expect(categoryDocJson(doc)).not.toContain('people')
+    const once = addPerson(doc, [0], 'self')
+    expect(addPerson(once, [0], 'self')).toBe(once)
+    expect(addPerson(once, [0], 'nope')).toBe(once)
+    doc = addPerson(once, [1], 'self')
+    doc = addPerson(doc, [1], sig(4))
+    expect(doc.categories[0].people).toEqual(['self'])
+    expect(doc.categories[1].people).toEqual(['self', sig(4)])
+    const round = readCategoryDoc(JSON.parse(categoryDocJson(doc)))
+    expect(round?.categories[0].people).toEqual(['self'])
+    expect(round?.categories[1].people).toEqual(['self', sig(4)])
+    doc = removePerson(doc, [1], 'self')
+    expect(doc.categories[0].people).toEqual(['self'])
+    expect(doc.categories[1].people).toEqual([sig(4)])
+    doc = clearPerson(doc, 'self')
+    expect(doc.categories[0].people ?? []).toEqual([])
+    expect(doc.categories[1].people).toEqual([sig(4)])
+    doc = fileNote(doc, [0], sig(1))
+    doc = fileNote(doc, [1], sig(1))
+    expect(filedNotes(doc).get(sig(1))).toEqual([1])
+    expect(doc.categories[1].people).toEqual([sig(4)])
+  })
+
+  it('walks groups in tree order, a child apart from its parent, unsorted last', () => {
+    let doc = mergeOutline(EMPTY_DOC, [
+      { name: 'Energy', children: [{ name: 'Krebs', children: [] }] },
+      { name: 'Cells', children: [] },
+    ])
+    doc = fileNote(doc, [0], sig(1))
+    doc = fileNote(doc, [0, 0], sig(2))
+    const notes = [
+      { id: sig(1), text: 'mitochondria' },
+      { id: sig(2), text: 'cycle' },
+      { id: sig(3), text: 'not filed' },
+    ]
+    expect(exploreGroups(doc, notes)).toEqual([
+      { key: '0', name: 'Energy', notes: ['mitochondria'] },
+      { key: '0.0', name: 'Krebs', notes: ['cycle'] },
+      { key: '1', name: 'Cells', notes: [] },
+      { key: 'unsorted', name: 'Unsorted', notes: ['not filed'] },
+    ])
   })
 
   it('files a note in one place, and moving it takes it out of the last', () => {
@@ -167,5 +212,54 @@ describe('categories settle by count', () => {
     ])
     // 8 people: four holders needed — only Energy (three) does not make it.
     expect(settledOutline(mine, peers, 8)).toEqual([])
+  })
+})
+
+describe('a command line places a note', () => {
+  const place = (raw: string) => readPlaceLine(raw)
+
+  it('files a line where you are, and a slash steps in', () => {
+    expect(place('')).toBeNull()
+    expect(place('   ')).toBeNull()
+    expect(place('atp')).toEqual({ absolute: false, root: false, categories: [], note: 'atp' })
+    expect(place('energy/atp')).toEqual({ absolute: false, root: false, categories: ['energy'], note: 'atp' })
+    expect(place('a/b/note')).toEqual({ absolute: false, root: false, categories: ['a', 'b'], note: 'note' })
+    expect(place('energy/')).toEqual({ absolute: false, root: false, categories: ['energy'], note: null })
+    expect(place('energy/atp/')).toEqual({ absolute: false, root: false, categories: ['energy', 'atp'], note: null })
+    expect(place('/')).toEqual({ absolute: true, root: true, categories: [], note: null })
+    expect(place('/atp')).toEqual({ absolute: true, root: true, categories: [], note: 'atp' })
+    expect(place('/energy/atp')).toEqual({ absolute: true, root: false, categories: ['energy'], note: 'atp' })
+    expect(place('a//b')).toEqual({ absolute: false, root: false, categories: [], note: 'a/b' })
+    expect(place('a///b')).toEqual({ absolute: false, root: false, categories: ['a/'], note: 'b' })
+    expect(place('cost 1//2/')).toEqual({ absolute: false, root: false, categories: ['cost 1/2'], note: null })
+    expect(place('hello//')).toEqual({ absolute: false, root: false, categories: [], note: 'hello/' })
+    expect(place('//')).toEqual({ absolute: false, root: false, categories: [], note: '/' })
+    expect(place(' energy / atp ')).toEqual({ absolute: false, root: false, categories: ['energy'], note: 'atp' })
+  })
+
+  it('escape finishes the line as a place', () => {
+    expect(placeToGo(place('energy/atp')!)).toEqual({ absolute: false, root: false, categories: ['energy', 'atp'], note: null })
+    expect(placeToGo(place('energy/')!)).toEqual(place('energy/'))
+    expect(placeToGo(place('/')!)).toEqual(place('/'))
+    expect(placeToGo(place('a//b')!)).toEqual({ absolute: false, root: false, categories: ['a/b'], note: null })
+  })
+
+  it('stops when the tree cannot go deeper and keeps the last category that worked', () => {
+    const { doc, path } = placeNames(EMPTY_DOC, [], ['a', 'b', 'c', 'd'])
+    expect(path).toEqual([0, 0, 0])
+    expect(flattenCategories(doc).map(c => c.name)).toEqual(['a', 'b', 'c'])
+    const again = placeNames(doc, [], ['a', 'b'])
+    expect(again.path).toEqual([0, 0])
+    expect(again.doc).toBe(doc)
+  })
+})
+
+describe('asking an agent to look through the groups', () => {
+  it('does not call out when no AI may read the notes', async () => {
+    const { NoteCategories } = await import('./note-categories.service.js')
+    const cats = new NoteCategories()
+    const outcome = await cats.explore('lecture', [{ id: sig(1), text: 'mitochondria' }], 'what is here')
+    expect(outcome.ok).toBe(false)
+    if (!outcome.ok) expect(outcome.reason).toBe('no-ai')
   })
 })
