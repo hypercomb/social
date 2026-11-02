@@ -4156,8 +4156,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // may not contain `[`, `:` or `/`, so no tag input can parse as one.
     const feat = this.#parseFeatureInput(v)
     if (feat) {
-      await this.#applyFeatureOps(feat)
-      this.clear()
+      const typed = this.shell?.value() ?? v
+      if (await this.#answering(typed, feat.view, () => this.#applyFeatureOps(feat))) this.clear()
+      else this.#restoreLine(typed)
       return
     }
 
@@ -4175,8 +4176,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         }
         const queen = get('@diamondcoreprocessor.com/KeywordsQueenBee') as
           { invoke(args: string): Promise<void> | void } | undefined
-        await queen?.invoke(targetedKeywords.transcript)
-        this.clear()
+        const typed = this.shell?.value() ?? v
+        if (await this.#answering(typed, 'keywords', () => queen?.invoke(targetedKeywords.transcript))) this.clear()
+        else this.#restoreLine(typed)
         return
       }
     }
@@ -4187,7 +4189,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // Create a synthetic Enter event for match()
       const synth = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
       if (behavior.match(synth, raw)) {
-        void Promise.resolve(behavior.execute(raw)).then(() => {
+        // A bare-bracket selection echoes itself into the bar, so its line is
+        // not taken away at the start; every other behaviour's line goes.
+        const typed = this.shell?.value() ?? raw
+        const echoes = behavior.name === 'bracket'
+        void this.#answering(typed, behavior.name, () => behavior.execute(raw), !echoes).then(ran => {
+          if (!ran) { if (!echoes) this.#restoreLine(typed); return }
           // A bare-bracket selection (`[a, b]`) leaves the tiles selected — echo
           // the active selection in the bar (so it matches click-select and you
           // can chain an op) rather than clearing to empty. Other behaviors clear.
@@ -4228,7 +4235,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // create cell in place
   // -------------------------------------------------
 
+  /** Making a tile keeps its name in the bar until it is made (a refusal leaves
+   *  it for editing), so it is the pill alone that says it is on its way. */
   private readonly commitCreateCellInPlace = async (requireCommitter = false): Promise<void> => {
+    this.#beginRun(false)
+    try { await this.#createCellInPlace(requireCommitter) }
+    finally { this.#endRun() }
+  }
+
+  readonly #createCellInPlace = async (requireCommitter = false): Promise<void> => {
     const rawInput = this.value().trim()
     if (!rawInput) return
 
@@ -4544,17 +4559,43 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   #beginRun(clearLine: boolean): void {
     this.#runs++
     if (clearLine) this.#setShellValue('', true)
-    this.#indicators.update(m => {
-      const n = new Map(m)
-      n.set('running', { key: 'running', icon: 'sync', label: 'Running…', dismissable: false })
-      return n
-    })
+    // The pill waits a beat, so a command that is done at once never flickers
+    // one; a line that went away is not left unexplained for longer than this.
+    if (this.#runPillTimer || this.#indicators().has('running')) return
+    this.#runPillTimer = setTimeout(() => {
+      this.#runPillTimer = null
+      if (this.#runs === 0) return
+      this.#indicators.update(m => {
+        const n = new Map(m)
+        n.set('running', { key: 'running', icon: 'sync', label: 'Running…', dismissable: false })
+        return n
+      })
+    }, 150)
   }
+
+  #runPillTimer: ReturnType<typeof setTimeout> | null = null
 
   #endRun(): void {
     this.#runs = Math.max(0, this.#runs - 1)
     if (this.#runs > 0) return
+    if (this.#runPillTimer) { clearTimeout(this.#runPillTimer); this.#runPillTimer = null }
     this.#indicators.update(m => { const n = new Map(m); n.delete('running'); return n })
+  }
+
+  /** One step of the Enter flow, answered at once: the line goes (unless the
+   *  step keeps it on purpose, `clear` false), the pill shows, and a step that
+   *  throws says so. The caller gives the line back. Returns whether it ran. */
+  async #answering(typed: string, word: string, work: () => unknown, clear = true): Promise<boolean> {
+    this.#beginRun(clear)
+    try {
+      await work()
+      return true
+    } catch (error) {
+      this.#behaviourDidNotRun(word, error)
+      return false
+    } finally {
+      this.#endRun()
+    }
   }
 
   /** Give the line back after a failure — unless the participant has already
@@ -4723,8 +4764,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         // The tiles are already selected above, which is the contract a
         // selection-driven behaviour reads (BreakApartProvider, etc.).
         const args = afterBracket.slice(opMatch![0].length).trim()
+        // The line is the selection's echo, so it stays; the pill says it is running.
+        this.#beginRun(false)
         try { await slash.execute(op, args) }
         catch (error) { this.#behaviourDidNotRun(op, error) }
+        finally { this.#endRun() }
         this.#collapseToSelect(labels)
         return
       }
