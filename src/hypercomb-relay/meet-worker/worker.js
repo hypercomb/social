@@ -177,10 +177,17 @@ export class MeetingPoint {
     if (!open && !codeOpens(request.headers.get('x-hc-access') || '', this.#access.hash)) {
       return json(403, { error: this.#access.hash ? 'access: code required' : 'access: the meeting point is closed' })
     }
-    const answer = await this.#sfu.handle(request, {
-      ip: request.headers.get('cf-connecting-ip') || '',
-      meeting: String(request.headers.get('x-hc-meeting') || '').trim().toLowerCase(),
-    })
+    let answer
+    try {
+      answer = await this.#sfu.handle(request, {
+        ip: request.headers.get('cf-connecting-ip') || '',
+        meeting: String(request.headers.get('x-hc-meeting') || '').trim().toLowerCase(),
+      })
+    } catch (error) {
+      // Never a bare 500: without CORS headers a browser reads any failure
+      // here as "blocked by CORS policy" and the real reason is lost.
+      answer = json(502, { error: `video: ${String(error?.message ?? error).slice(0, 200)}` })
+    }
     await this.#keepLedger()
     if (this.#sfu.sessionCount) this.#armSweep()
     return answer

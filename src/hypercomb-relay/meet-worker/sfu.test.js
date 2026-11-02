@@ -73,6 +73,26 @@ test('without the app secrets, video is simply off', async () => {
   assert.equal(res.status, 501)
 })
 
+test('the default fetch is called as the runtime requires (no foreign this)', async () => {
+  // The Workers runtime throws "Illegal invocation" when its global fetch is
+  // called with any `this` but the global. This one does the same.
+  const real = globalThis.fetch
+  const urls = []
+  globalThis.fetch = function (url) {
+    if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation')
+    urls.push(String(url))
+    return Promise.resolve(new Response(JSON.stringify({ sessionId: 'session-ok-12345678' }), { status: 200 }))
+  }
+  try {
+    const d = new SfuDesk({ appId: 'app', token: 'secret-token', monthlyGb: 500 })
+    const res = await d.handle(request('POST', `${P}/session`), { ip: '1.1.1.1', meeting: MEETING })
+    assert.equal(res.status, 200)
+    assert.deepEqual(urls, ['https://rtc.live.cloudflare.com/v1/apps/app/sessions/new'])
+  } finally {
+    globalThis.fetch = real
+  }
+})
+
 test('the token goes to Cloudflare, never back to the browser', async () => {
   const { d, cf } = desk()
   const id = await open(d)
