@@ -100,7 +100,8 @@ verification is, what time feels like), so each gets one continuous drawn
 world with a camera travelling through it. The clips are **silent**: the deck
 plays the scene's narration and the pane plays the clip muted from t=0, so the
 beats are timed to the narration's own sentence boundaries — measured from the
-cached mp3 with silencedetect, matched by word-count expectation. Editing a
+cached mp3 with silencedetect, the sentence ends chosen together so every
+sentence is read at one pace (`timing.cjs`, shared with `recorder.cjs`). Editing a
 scene's `say` re-times the clip on the next run; `film:vocabulary` /
 `film:integrity` / `film:time` in the scene instruction is what mounts them.
 The clips are drawn on the deck's own material — the template's `<style>` and
@@ -306,12 +307,24 @@ you like: every take is kept and listed with its length against the slot, each
 playable with its own karaoke. **←/→** step line by line.
 
 **Enter** (or a take's Choose) chooses it, and the server REMASTERS it into the
-slot: `master.cjs`'s chain, silence trimmed at both ends, then fitted. Within
-±15% of the slot it is stretched (ffmpeg `atempo`, pitch kept) to the slot's
-exact length; further off, it keeps its own length, the bar says by how much,
-and everything after it in that scene moves. The scene's mp3 is rebuilt from
-the generated voice with only that sentence replaced (the other sentences and
-every gap untouched); a beat or caption is the take alone. The generated voice
+slot: `master.cjs`'s chain, then brought down to the generated voice's own
+measured loudness (the voice sits near -20 LUFS, the chain's target is -16, so
+an unmatched take would stand out), silence trimmed at both ends, then fitted.
+Its SPEECH is measured against the slot (the voice's speech, pause to pause);
+20 ms before and 50 ms after ride along in the gaps. Within ±15% it is
+stretched (ffmpeg `atempo`, pitch kept) to the slot's exact length; further
+off, it keeps its own length, the bar says by how much, and everything after it
+in that scene moves (by whole 24 ms frames). The scene's mp3 is rebuilt from
+the generated voice by SPLICING, not re-encoding: the voice is a bare stream of
+144-byte mp3 frames, so every frame before and after the chosen sentence is
+copied as it is and only the stretch from the gap before it to the gap after it
+is encoded anew (the two frames before the copy resume are rebuilt silent but
+still carry the original bytes the bit reservoir reads, and the copy resumes
+two frames before the next word, so the decoder has settled). Every other
+sentence then decodes to the very same samples, and a fitted take leaves the
+file's length unchanged. A voice that is not such a stream (one built around
+`[pause]` marks has a header) is re-encoded whole instead. A beat or caption
+with no voice yet is the take alone. The generated voice
 is kept once, as `audio-cache/generated/<hash>.mp3` (git-ignored), and the
 result is written to `audio-cache/<hash>.mp3`, the same key, so `build.cjs`,
 the pages and `concepts.cjs` pick it up with no other change. A scene with no

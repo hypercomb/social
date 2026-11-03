@@ -34,7 +34,7 @@ const http = require('http')
 const { spawnSync, execFileSync } = require('child_process')
 
 const T = require('./build.cjs')
-const { master } = require('./master.cjs')
+const { master, LUFS } = require('./master.cjs')
 const { sentencesOf, sentenceTimes, silencesOf, durationOf, exists } = require('./timing.cjs')
 const LP = path.join(__dirname, '..', 'bridge', 'living-presentation')
 const tree = require(path.join(LP, 'tree.cjs'))
@@ -81,40 +81,60 @@ const remember = (kind, file, fn) => {
 const syllables = (w) => {
   const s = w.toLowerCase().replace(/[^a-z0-9]/g, '')
   if (/^\d+$/.test(s)) return s.length
-  const n = (s.replace(/e$/, '').match(/[aeiouy]+/g) || []).length
+  // the usual rough count: a silent final e (but "people" is two), -ed and -es mostly silent
+  const n = (s.replace(/(?:[^laeiouy]es|[^laeiouytd]ed|[^laeiouy]e)$/, '').match(/[aeiouy]{1,2}/g) || []).length
   return Math.max(1, n)
 }
 const holdOf = (w) => /[.!?]["”’)]*$/.test(w) ? 1.6 : /[,;:—–]["”’)]*$/.test(w) ? 1 : 0
 
+/** which word each pause heard inside [a, b] follows: chosen TOGETHER, so that
+ *  every stretch between pauses is read at one pace (syllables a second), a
+ *  pause after a comma or full stop counting for a little more and a pause
+ *  left unexplained for a little less. Placing each pause at the word nearest
+ *  where it ought to fall slips a word early or late whenever one phrase is
+ *  quicker than the next; this does not. → [{ word, endAt }, { word: word + 1, at }] */
+function anchorsOf(unit, hold, a, b, gaps) {
+  const n = unit.length, G = gaps.length
+  if (!G || n < 2) return []
+  const P = [0]
+  for (const u of unit) P.push(P[P.length - 1] + u)
+  const avg = P[n] / Math.max(0.1, b - a - gaps.reduce((t, g) => t + g.end - g.start, 0))
+  const seg = (u, d) => d <= 0.04 ? 1e9 : Math.log(u / d / avg) ** 2
+  const SKIP = 0.15, PUNCT = 0.25        // a voice pauses at a comma or full stop far more often than anywhere else
+  const best = gaps.map(() => new Array(n - 1).fill(Infinity)), from = gaps.map(() => new Array(n - 1).fill(null))
+  for (let i = 0; i < G; i++) for (let k = 0; k < n - 1; k++) {
+    const bonus = hold[k] ? -PUNCT : 0
+    let c = seg(P[k + 1], gaps[i].start - a) + SKIP * i, f = null
+    for (let i2 = 0; i2 < i; i2++) for (let k2 = 0; k2 < k; k2++) {
+      const v = best[i2][k2] + seg(P[k + 1] - P[k2 + 1], gaps[i].start - gaps[i2].end) + SKIP * (i - i2 - 1)
+      if (v < c) { c = v; f = [i2, k2] }
+    }
+    best[i][k] = c + bonus; from[i][k] = f
+  }
+  let end = null, cost = seg(P[n], b - a) + SKIP * G
+  for (let i = 0; i < G; i++) for (let k = 0; k < n - 1; k++) {
+    const v = best[i][k] + seg(P[n] - P[k + 1], b - gaps[i].end) + SKIP * (G - 1 - i)
+    if (v < cost) { cost = v; end = [i, k] }
+  }
+  const out = []
+  for (let at = end; at; at = from[at[0]][at[1]]) {
+    const g = gaps[at[0]]
+    out.unshift({ word: at[1], endAt: g.start }, { word: at[1] + 1, at: g.end })
+  }
+  return out
+}
+
 /** each word's moment in [a, b]: anchored on the pauses heard inside the span
- *  where they fall near where a word ends, proportional to syllables between,
- *  commas and full stops holding a little */
+ *  (anchorsOf), proportional to syllables between, commas and full stops
+ *  holding a little */
 function wordTimes(text, a, b, silences = []) {
   const words = text.split(/\s+/).filter(Boolean)
   if (!words.length) return []
   const n = words.length
   const unit = words.map(w => syllables(w) + 0.4)
   const hold = words.map((w, i) => i < n - 1 ? holdOf(w) : 0)
-  const span = Math.max(0.2, b - a)
-  const total = unit.reduce((t, u, i) => t + u + hold[i], 0)
-  const expect = []                              // where word i is expected to end, holds included
-  let cum = 0
-  for (let i = 0; i < n - 1; i++) { cum += unit[i] + hold[i]; expect.push(a + cum / total * span) }
-  // anchors: a gap heard inside the span is the end of the word nearest it
   const gaps = silences.filter(g => g.start > a + 0.05 && g.end < b - 0.05 && g.end - g.start >= 0.12)
-  const anchors = [{ word: 0, at: a }]          // word index that starts at a given time
-  let last = -1
-  for (const g of gaps) {
-    const mid = (g.start + g.end) / 2
-    let best = -1, score = Infinity
-    for (let k = last + 1; k < n - 1; k++) {
-      const s = Math.abs(expect[k] - mid) * (hold[k] ? 0.6 : 1)
-      if (s < score) { score = s; best = k }
-    }
-    if (best < 0 || Math.abs(expect[best] - mid) > Math.max(0.8, span * 0.25)) continue
-    anchors.push({ word: best, endAt: g.start }, { word: best + 1, at: g.end })
-    last = best
-  }
+  const anchors = [{ word: 0, at: a }, ...anchorsOf(unit, hold, a, b, gaps)]
   // distribute each run of words between its anchors
   const out = new Array(n)
   const starts = anchors.filter(x => x.at != null)
@@ -185,7 +205,7 @@ function layoutOf(clip, chosen) {
     const slot = sp.end - sp.start
     const len = p && p.fitted && !waiting ? p.fitted : slot
     const at = { start: sp.start + shift, end: sp.start + shift + len, slot }
-    shift += len - slot
+    shift += len - slot + (p && p.fitted && !waiting ? p.round || 0 : 0)
     return at
   })
   return { now, picks, waiting, dur: clip.audioDur + shift, n }
@@ -211,7 +231,7 @@ function takeInfo(dir, file) {
   let s = 0, e = dur
   if (silences.length && silences[0].start < 0.05) s = silences[0].end
   const tail = silences[silences.length - 1]
-  if (tail && tail.end >= dur - 0.05 && tail.start > s) e = tail.start
+  if (tail && tail.end >= dur - 0.15 && tail.start > s) e = tail.start
   const info = { stamp: st, dur: +dur.toFixed(3), speech: [+s.toFixed(3), +Math.max(s, e).toFixed(3)], silences }
   try { fs.writeFileSync(side, JSON.stringify(info)) } catch {}
   return info
@@ -309,10 +329,17 @@ function clipForKey(key) {
 }
 
 // ---------- remastering ------------------------------------------------------
-const ff = (args) => execFileSync('ffmpeg', ['-y', '-hide_banner', '-loglevel', 'error', ...args], { stdio: ['ignore', 'ignore', 'pipe'] })
+const ff = (args) => execFileSync('ffmpeg', ['-y', '-hide_banner', '-loglevel', 'error', ...args], { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 1 << 30 })
+const SR = 24000                 // the voice's rate: 24 kHz mono
+const PCM = ['-f', 's16le', '-ac', '1', '-ar', String(SR)]
 
-/** trim, master, and fit one take to its slot: a 24 kHz mono wav, and what was done */
-function fitTake(raw, slot, tmp, name) {
+/** master, trim and fit one take to its slot: 24 kHz mono samples, and what was done.
+ *  The SPEECH is what is measured and fitted (the slot is the voice's speech,
+ *  pause to pause); 20 ms before it and 50 ms after ride along in the gaps, so
+ *  a word's onset and decay are never clipped. `room` is the slot in samples
+ *  (a scene's first sentence can give its first 50 ms to the encoder, below). */
+const PRE = 0.02, POST = 0.05
+function fitTake(raw, slot, tmp, name, room = Math.round(slot * SR), gain = 0) {
   const mastered = path.join(tmp, name + '.m.mp3')
   master(raw, mastered)
   const dur = durationOf(mastered)
@@ -320,23 +347,141 @@ function fitTake(raw, slot, tmp, name) {
   let s = 0, e = dur
   if (sil.length && sil[0].start < 0.03) s = sil[0].end
   const tail = sil[sil.length - 1]
-  if (tail && tail.end >= dur - 0.03 && tail.start > s) e = tail.start
-  s = Math.max(0, s - 0.02); e = Math.min(dur, e + 0.05)
-  const natural = e - s
-  if (natural < 0.25) throw new Error('the take is silent — nothing above the noise floor')
-  const ratio = natural / slot
-  const stretch = Math.abs(ratio - 1) <= FIT
-  const out = path.join(tmp, name + '.fit.wav')
-  const af = [`atrim=start=${s.toFixed(4)}:end=${e.toFixed(4)}`, 'asetpts=PTS-STARTPTS']
-  if (stretch) af.push(`atempo=${ratio.toFixed(5)}`, 'apad', `atrim=end=${slot.toFixed(4)}`)
-  af.push('aresample=24000')
-  ff(['-i', mastered, '-af', af.join(','), '-ac', '1', '-ar', '24000', '-c:a', 'pcm_s16le', out])
-  return { file: out, natural: +natural.toFixed(3), fitted: +(stretch ? slot : natural).toFixed(3),
-    mode: stretch ? 'stretched' : 'natural', tempo: +ratio.toFixed(4) }
+  if (tail && tail.end >= dur - 0.15 && tail.start > s) e = tail.start     // an mp3 ends on a few frames of encoder tail
+  const speech = e - s
+  if (speech < 0.2) throw new Error('the take is silent — nothing above the noise floor')
+  const cutS = Math.max(0, s - PRE), cutE = Math.min(dur, e + POST)
+  const stretch = Math.abs(speech / slot - 1) <= FIT
+  const tempo = stretch ? speech * SR / room : 1
+  const want = Math.round((cutE - cutS) * SR / tempo)
+  const af = [`atrim=start=${cutS.toFixed(4)}:end=${cutE.toFixed(4)}`, 'asetpts=PTS-STARTPTS']
+  if (stretch) af.push(`atempo=${tempo.toFixed(6)}`)
+  if (gain) af.push(`volume=${gain.toFixed(2)}dB`)
+  af.push(`aresample=${SR}`)
+  const out = path.join(tmp, name + '.fit.raw')
+  ff(['-i', mastered, '-af', af.join(','), ...PCM, out])
+  const pcm = Buffer.alloc(want * 2)               // exactly that long: pad or cut the last samples
+  fs.readFileSync(out).copy(pcm, 0, 0, want * 2)
+  const pre = Math.round((s - cutS) * SR / tempo)
+  const said = stretch ? room : Math.round(speech * SR)
+  return { pcm, pre, post: want - pre - said, natural: +speech.toFixed(3), fitted: +(said / SR).toFixed(3),
+    mode: stretch ? 'stretched' : 'natural', tempo: +tempo.toFixed(4), gain: +gain.toFixed(2) }
+}
+
+/** integrated loudness (LUFS) of a file as it is, no cleanup in front */
+function loudnessOf(file) {
+  const r = spawnSync('ffmpeg', ['-hide_banner', '-i', file, '-af', 'ebur128', '-f', 'null', '-'], { encoding: 'utf8' })
+  const m = /Integrated loudness:\s*I:\s*(-?[\d.]+) LUFS/.exec(r.stderr || '')
+  return m ? +m[1] : NaN
+}
+
+// ---------- the voice, frame by frame -----------------------------------------
+// The generated voice is a bare stream of 144-byte MPEG-2 layer III frames
+// (24 kHz mono, 48 kbit/s, 576 samples = 24 ms each). Re-encoding the whole
+// scene would put every other sentence through a second generation of loss, so
+// it is spliced instead: the frames before and after a replaced sentence are
+// COPIED, and only the stretch from the gap before it to the gap after it is
+// encoded anew. Three things make the copy exact. A fresh encoder says nothing
+// for PRIME samples, so a new stretch starts in the gap. A frame may keep part
+// of its data in the frames before it (the bit reservoir, up to 255 bytes), so
+// the CARRY frames before the first copied one are rebuilt as silent frames
+// that still carry the original's bytes. And the decoder's overlap needs a
+// couple of frames to settle, so the copy resumes SETTLE frames before the
+// next sentence's first word. Everything outside the new stretch then decodes
+// to the very same samples. A voice that is not such a stream (one assembled
+// around [pause] marks has a header) is re-encoded whole instead.
+const FRAME = 576, PRIME = 1105, CARRY = 2, SETTLE = 2, TAIL = 2
+function plainFrames(buf) {
+  if (buf.length < 4 || buf[0] !== 0xff) return null
+  const [h1, h2, h3] = [buf[1], buf[2], buf[3]]
+  // MPEG-2, layer III, no CRC; 48 kbit/s, 24 kHz, no padding; mono
+  if ((h1 & 0xff) !== 0xf3 || (h2 & 0xfe) !== 0x64 || (h3 & 0xc0) !== 0xc0) return null
+  const size = 144
+  if (buf.length % size) return null
+  for (let i = 0; i < buf.length; i += size)
+    if (buf[i] !== 0xff || buf[i + 1] !== h1 || (buf[i + 2] & 0xfe) !== (h2 & 0xfe) || (buf[i + 3] & 0xc0) !== 0xc0) return null
+  return { size, count: buf.length / size, side: 9 }
+}
+/** a frame that says nothing but still carries an original frame's bytes for the reservoir */
+function carrier(buf, k, fr) {
+  const f = Buffer.from(buf.subarray(k * fr.size, (k + 1) * fr.size))
+  f.fill(0, 4, 4 + fr.side)                       // main_data_begin 0, no bits: a silent granule
+  return f
+}
+function encodeFrames(pcm, tmp, name, want) {
+  const inp = path.join(tmp, name + '.raw'), out = path.join(tmp, name + '.mp3')
+  fs.writeFileSync(inp, pcm)
+  ff([...PCM, '-i', inp, '-c:a', 'libmp3lame', '-b:a', '48k', '-write_xing', '0', '-id3v2_version', '0', '-f', 'mp3', out])
+  const b = fs.readFileSync(out), fr = plainFrames(b)
+  if (!fr || fr.count < want) throw new Error('the encoder did not give the frames the splice needs')
+  return b.subarray(0, want * fr.size)
+}
+const decode = (file) => execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-i', file, ...PCM, '-'], { maxBuffer: 1 << 30 })
+
+/** the scene with its chosen sentences spliced in, every other frame copied */
+function splice(clip, picks, fitted, original, voice, fr, tmp) {
+  const N = fr.count
+  const pcm = decode(original)
+  const at = (sec) => Math.round(sec * SR)
+  const span = (a, b) => { const out = Buffer.alloc(Math.max(0, b - a) * 2); pcm.copy(out, 0, Math.max(0, a) * 2, Math.max(0, Math.min(b, pcm.length / 2)) * 2); return out }
+  const n = clip.spans.length
+  // each chosen sentence's stretch of frames [A, B): from the gap before it to the gap after
+  const runs = []
+  picks.forEach((p, j) => {
+    if (!p) return
+    const sp = clip.spans[j]
+    const A = j === 0 ? 0 : Math.ceil((at(clip.spans[j - 1].end) + 240) / FRAME)
+    let B = N
+    if (j < n - 1) {
+      const next = at(clip.spans[j + 1].start)
+      B = Math.ceil((at(sp.end) + fitted[j].post + TAIL * FRAME) / FRAME) + CARRY
+      B = Math.max(Math.ceil(at(sp.end) / FRAME) + CARRY, Math.min(B, Math.floor(next / FRAME) - SETTLE))
+    }
+    const last = runs[runs.length - 1]
+    if (last && A < last.B + 1) { last.B = B; last.js.push(j) } else runs.push({ A, B, js: [j] })
+  })
+  const parts = []
+  let copied = 0
+  runs.forEach((run, r) => {
+    const { A, js } = run
+    const B = Math.min(N, run.B)
+    parts.push(voice.subarray(copied * fr.size, A * fr.size))
+    const seg = []
+    let cursor = A * FRAME                                // where the original is read from
+    let longer = 0                                        // seconds the takes run past their slots
+    let said = 0                                          // where the last take ends in the new stretch
+    js.forEach((j, i) => {
+      const sp = clip.spans[j], f = fitted[j]
+      // the take replaces its sentence and the margins around it, which come out of the gaps
+      let start = at(sp.start) - f.pre
+      if (i === 0) start = Math.max(start, A * FRAME + PRIME + 120)
+      seg.push(span(cursor, start))
+      seg.push(f.pcm)
+      said = seg.reduce((t, b) => t + b.length / 2, 0)
+      longer += f.fitted - (sp.end - sp.start)
+      cursor = at(sp.end) + f.post
+    })
+    const stop = B < N ? (B - CARRY) * FRAME : N * FRAME
+    seg.push(span(cursor, stop))
+    let body = Buffer.concat(seg)
+    // whole frames: the nearest count, with at least a frame of the gap after the take
+    const m = Math.max(Math.ceil(said / FRAME) + 1, Math.round(body.length / 2 / FRAME))
+    body = body.length / 2 >= m * FRAME ? body.subarray(0, m * FRAME * 2)
+      : Buffer.concat([body, span(stop, stop + m * FRAME - body.length / 2)])
+    body = Buffer.concat([body, Buffer.alloc(4 * FRAME * 2)])          // the encoder's last frames say nothing we keep
+    parts.push(encodeFrames(body.subarray(PRIME * 2), tmp, `run${r}`, m))
+    if (B < N) for (let k = B - CARRY; k < B; k++) parts.push(carrier(voice, k, fr))
+    const moved = (A + m + (B < N ? CARRY : 0) - B) * FRAME / SR
+    // what the frames move beyond the takes' own lengths (whole frames), carried by the run's last line
+    picks[js[js.length - 1]].round = +(moved - longer).toFixed(6)
+    copied = B
+  })
+  parts.push(voice.subarray(copied * fr.size))
+  return Buffer.concat(parts)
 }
 
 /** rebuild a clip's mp3 from its generated voice and every chosen take in it */
-const FMT = 'aresample=24000,aformat=sample_fmts=fltp:sample_rates=24000:channel_layouts=mono'
+const FMT = `aresample=${SR},aformat=sample_fmts=fltp:sample_rates=${SR}:channel_layouts=mono`
 function rebuildClip(clip, chosen = loadChosen()) {
   const { hash } = clip
   const keys = clip.spans.map((_, j) => lineKey(clip, j))
@@ -356,34 +501,57 @@ function rebuildClip(clip, chosen = loadChosen()) {
   if (!original && picks.some(p => !p)) return { waiting: true }
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'recorder-'))
   try {
+    const voice = original ? fs.readFileSync(original) : null
+    const fr = voice && plainFrames(voice)
+    // master.cjs brings a take to its broadcast level; the generated voice around it is
+    // quieter (about -20 LUFS against -16), so a take spliced into it is brought down to
+    // the voice's own measured level and never sticks out (never brought UP: no clipping)
+    const level = original ? remember('loudness', original, () => loudnessOf(original)) : LUFS
+    const gain = Number.isFinite(level) ? Math.min(0, level - LUFS) : 0
     const fitted = picks.map((p, j) => {
       if (!p) return null
       const sp = clip.spans[j]
-      const r = fitTake(path.join(TAKES, keys[j], p.take), sp.end - sp.start, tmp, `t${j}`)
-      Object.assign(p, { natural: r.natural, fitted: r.fitted, mode: r.mode, tempo: r.tempo, slot: +(sp.end - sp.start).toFixed(3) })
+      const slot = sp.end - sp.start
+      // a scene that speaks before a fresh encoder can gives it those first samples
+      const head = fr && j === 0 ? Math.max(0, PRIME + 120 + Math.round(PRE * SR) - Math.round(sp.start * SR)) : 0
+      const r = fitTake(path.join(TAKES, keys[j], p.take), slot, tmp, `t${j}`, Math.round(slot * SR) - head, gain)
+      Object.assign(p, { natural: r.natural, fitted: r.fitted, mode: r.mode, tempo: r.tempo, gain: r.gain, slot: +slot.toFixed(3) })
+      delete p.round
       return r
     })
-    // the pieces in order: the lead, each sentence (generated or fitted take) and
-    // the gap after it, the tail — every gap the voice left is kept as it was
-    const pieces = []
-    const gap = (a, b) => { if (b - a > 0.004) pieces.push(original ? { a, b } : { d: b - a }) }
-    clip.spans.forEach((sp, j) => {
-      gap(j === 0 ? 0 : clip.spans[j - 1].end, sp.start)
-      pieces.push(fitted[j] ? { j } : { a: sp.start, b: sp.end })
-    })
-    gap(clip.spans[clip.spans.length - 1].end, clip.audioDur)
-    const lent = pieces.filter(x => x.a != null)
-    const inputs = [], graph = []
-    if (lent.length) { inputs.push('-i', original); graph.push(`[0:a]${FMT},asplit=${lent.length}` + lent.map((_, i) => `[s${i}]`).join('')) }
-    let si = 0, zi = 0
-    const labels = pieces.map(x => {
-      if (x.a != null) { const i = si++; graph.push(`[s${i}]atrim=start=${x.a.toFixed(4)}:end=${x.b.toFixed(4)},asetpts=PTS-STARTPTS[o${i}]`); return `o${i}` }
-      if (x.j != null) { const k = inputs.length / 2; inputs.push('-i', fitted[x.j].file); graph.push(`[${k}:a]${FMT}[t${x.j}]`); return `t${x.j}` }
-      const z = zi++; graph.push(`aevalsrc=0:c=mono:s=24000:d=${x.d.toFixed(4)},${FMT}[z${z}]`); return `z${z}`
-    })
-    graph.push(labels.map(l => `[${l}]`).join('') + `concat=n=${labels.length}:v=0:a=1[out]`)
-    const built = path.join(tmp, 'clip.mp3')
-    ff([...inputs, '-filter_complex', graph.join(';'), '-map', '[out]', '-ar', '24000', '-ac', '1', '-c:a', 'libmp3lame', '-b:a', '48k', built])
+    let built
+    if (fr) built = splice(clip, picks, fitted, original, voice, fr, tmp)
+    else {
+      // no frames to keep: the pieces in order, each gap the voice left (or the
+      // reading pace's) kept as it was, the whole encoded once
+      const pieces = []
+      const gap = (a, b) => { if (b - a > 0.004) pieces.push(original ? { a, b } : { d: b - a }) }
+      // a take's margins come out of the gaps beside it
+      const left = (j) => fitted[j] ? Math.max(0, clip.spans[j].start - fitted[j].pre / SR) : clip.spans[j].start
+      const right = (j) => fitted[j] ? clip.spans[j].end + fitted[j].post / SR : clip.spans[j].end
+      clip.spans.forEach((sp, j) => {
+        gap(j === 0 ? 0 : right(j - 1), left(j))
+        pieces.push(fitted[j] ? { j } : { a: sp.start, b: sp.end })
+      })
+      gap(right(clip.spans.length - 1), Math.max(clip.audioDur, right(clip.spans.length - 1)))
+      const lent = pieces.filter(x => x.a != null)
+      const inputs = [], graph = []
+      let ins = 0
+      if (lent.length) { inputs.push('-i', original); ins++; graph.push(`[0:a]${FMT},asplit=${lent.length}` + lent.map((_, i) => `[s${i}]`).join('')) }
+      let si = 0, zi = 0
+      const labels = pieces.map(x => {
+        if (x.a != null) { const i = si++; graph.push(`[s${i}]atrim=start=${x.a.toFixed(4)}:end=${x.b.toFixed(4)},asetpts=PTS-STARTPTS[o${i}]`); return `o${i}` }
+        if (x.j != null) {
+          const f = path.join(tmp, `t${x.j}.pcm`); fs.writeFileSync(f, fitted[x.j].pcm)
+          inputs.push(...PCM, '-i', f); graph.push(`[${ins++}:a]${FMT}[t${x.j}]`); return `t${x.j}`
+        }
+        const z = zi++; graph.push(`aevalsrc=0:c=mono:s=${SR}:d=${x.d.toFixed(4)},${FMT}[z${z}]`); return `z${z}`
+      })
+      graph.push(labels.map(l => `[${l}]`).join('') + `concat=n=${labels.length}:v=0:a=1[out]`)
+      const file = path.join(tmp, 'clip.mp3')
+      ff([...inputs, '-filter_complex', graph.join(';'), '-map', '[out]', '-ar', String(SR), '-ac', '1', '-c:a', 'libmp3lame', '-b:a', '48k', file])
+      built = fs.readFileSync(file)
+    }
     // the generated voice is kept once, before the first replacement
     fs.mkdirSync(GEN, { recursive: true })
     if (!exists(genFile(hash)) && !exists(noneMark(hash))) {
@@ -391,9 +559,9 @@ function rebuildClip(clip, chosen = loadChosen()) {
       else fs.writeFileSync(noneMark(hash), 'no generated voice existed when the takes were chosen\n')
     }
     const part = out + '.part'
-    fs.copyFileSync(built, part)
+    fs.writeFileSync(part, built)
     fs.renameSync(part, out)
-    return { written: true, dur: durationOf(out) }
+    return { written: true, spliced: !!fr, dur: durationOf(out) }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true })
   }
@@ -477,6 +645,10 @@ async function handle(req, res) {
   // only this machine, by name too (a page elsewhere cannot rebind a host name onto it)
   const host = String(req.headers.host || '')
   if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host)) return send(res, 403, { error: 'local only' })
+  // and only this page may change anything: another site's page can still send a
+  // request here (its Host is this one), but not with this Origin
+  const origin = req.headers.origin
+  if (req.method !== 'GET' && origin && !/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(origin)) return send(res, 403, { error: 'local only' })
   const url = new URL(req.url, 'http://127.0.0.1')
   const p = url.pathname
   if (req.method === 'GET' && p === '/') return send(res, 200, fs.readFileSync(PAGE), 'text/html; charset=utf-8')
@@ -512,7 +684,10 @@ async function handle(req, res) {
     return send(res, 200, { take })
   }
   if (req.method === 'POST' && (p === '/api/choose' || p === '/api/restore')) {
-    const q = JSON.parse((await body(req, 1e5)).toString('utf8') || '{}')
+    // JSON only: a form or a plain-text post from elsewhere is not a simple request this accepts
+    if (!/^application\/json\b/.test(String(req.headers['content-type'] || ''))) return send(res, 415, { error: 'send JSON' })
+    let q
+    try { q = JSON.parse((await body(req, 1e5)).toString('utf8') || '{}') } catch { return send(res, 400, { error: 'bad JSON' }) }
     if ((q.key && !KEY.test(q.key)) || (q.clip && !/^[0-9a-f]{16}$/.test(q.clip))) return send(res, 400, { error: 'bad key' })
     try {
       const r = p === '/api/choose' ? choose(q.key, q.take) : restore(q)

@@ -799,11 +799,13 @@ page, a gantt chart with a lane per tile in the tree's order and a bar per
 line, each as long as its time slot: a scene's sentences where the voice
 actually says them, a page's beats and captions. Click a line and it lights
 word by word as it plays; record against it after a count-in, as many takes as
-it needs, and choose one. The chosen take is mastered, fitted to the slot
-(stretched when within 15%, otherwise the slot grows and the rest of the scene
-moves), and spliced into the same `audio-cache/<hash>.mp3` the generated voice
-had, so the tour, the pages and the drawn clips use it with nothing else
-changed; the generated voice is kept to restore. Then re-time the drawn clips
+it needs, and choose one. The chosen take is mastered and brought to the
+voice's own loudness, fitted to the slot (stretched when within 15%, otherwise
+the slot grows and the rest of the scene moves), and spliced into the same
+`audio-cache/<hash>.mp3` the generated voice had, its frames copied around the
+sentence so the other sentences are not touched, so the tour, the pages and the
+drawn clips use it with nothing else changed; the generated voice is kept to
+restore. Then re-time the drawn clips
 (`concepts.cjs`) and replant (`plant.cjs --blocks`).
 
 ## Every piece of the presentation is a tile
