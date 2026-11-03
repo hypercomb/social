@@ -80,7 +80,7 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 
 /* one column; every size reads from its width (cqi), so the page is the same
    page standing alone or mounted inside the hive */
-.page{container-type:inline-size;width:min(1040px,100%);margin:0 auto;padding:20px 16px 72px}
+.page{container-type:inline-size;width:min(1040px,100%);margin:0 auto;padding:20px 16px 72px;--measure:760px}
 .mono-label{font-family:var(--mono);font-size:12px;line-height:1.3;letter-spacing:var(--track-label);text-transform:uppercase}
 
 /* ---------- where you are ---------- */
@@ -95,7 +95,7 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .stage{margin-top:clamp(28px,5cqi,56px);text-align:center}
 .stage-label{color:var(--faint-text);margin:0 0 clamp(18px,3cqi,32px)}
 .frame{display:none;justify-items:center}
-.frame.on{display:grid}
+.frame.on{display:grid;grid-template-columns:minmax(0,1fr)}
 .frame>*{opacity:0;transform:translateY(14px);transition:opacity .7s var(--ease),transform .7s var(--ease)}
 .frame.in>*{opacity:1;transform:none}
 .frame.in>:nth-child(2){transition-delay:.1s}
@@ -109,15 +109,15 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .frame h1 b{font-weight:500;color:var(--honey-text)}
 .frame .sub{color:var(--dim);font-size:clamp(16px,1.9cqi,20px);line-height:1.4;max-width:56ch;margin:clamp(16px,2.6cqi,26px) 0 0;text-wrap:balance}
 .frame .sub b{font-weight:500;color:var(--ink)}
-.fz{width:100%;display:grid;justify-items:center}
+.fz{width:100%;display:grid;grid-template-columns:minmax(0,1fr);justify-items:center}
 
 /* the tour's figures */
-.figbox{display:grid;row-gap:6px;width:100%;justify-items:start}
+.figbox{display:grid;grid-template-columns:minmax(0,1fr);row-gap:6px;width:100%;justify-items:start}
 .fig.film,.fig.plate,.fig.shot{width:100%;aspect-ratio:var(--ratio);border:1px solid var(--line-strong);border-radius:var(--r-card);
   overflow:hidden;background:var(--panel);box-shadow:var(--shadow)}
 .fig.film video,.fig.shot img{display:block;width:100%;height:100%;object-fit:cover;background:#111419}
 .fig.plate svg{display:block;width:100%;height:100%}
-.figcap{width:100%;display:flex;align-items:center;gap:.7em;font-family:var(--mono);font-size:12px;line-height:1.3;
+.figcap{width:100%;min-width:0;display:flex;align-items:center;gap:.7em;font-family:var(--mono);font-size:12px;line-height:1.3;
   letter-spacing:var(--track-label);text-transform:uppercase;color:var(--faint-text);white-space:nowrap;text-align:left}
 .figcap>span{overflow:hidden;text-overflow:ellipsis}
 .figcap .g{color:var(--honey);font-size:1.05em}
@@ -174,7 +174,7 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .cta:hover{background:var(--honey-tint);border-color:var(--honey)}
 
 /* the narration: a strip under one hairline, the tour's caption */
-.caption{position:relative;width:100%;max-width:72ch;margin:clamp(22px,3.4cqi,34px) auto 0;padding:14px 0 0;text-align:left;
+.caption{position:relative;width:100%;max-width:var(--measure);margin:clamp(22px,3.4cqi,34px) auto 0;padding:14px 0 0;text-align:left;
   font-size:clamp(16px,1.9cqi,19px);line-height:1.55;color:var(--ink);min-height:calc(1.55em * 2 + 14px);text-wrap:pretty}
 .caption::before{content:"";position:absolute;left:0;right:0;top:0;height:1px;background:var(--line)}
 .caption p{margin:0}
@@ -182,7 +182,7 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 @keyframes rise{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 
 /* the transport: the tour's bar, in the column */
-.transport{display:flex;align-items:center;gap:6px;width:100%;max-width:72ch;margin:14px auto 0}
+.transport{display:flex;align-items:center;gap:6px;width:100%;max-width:var(--measure);margin:14px auto 0}
 .ib{width:34px;height:34px;display:inline-grid;place-items:center;background:none;border:1px solid transparent;border-radius:var(--r-ctl);
   color:var(--dim);cursor:pointer;padding:0;transition:border-color .15s,background .15s,color .15s;flex:none}
 .ib svg.g{width:16px;height:16px}
