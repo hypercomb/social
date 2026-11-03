@@ -12,7 +12,7 @@ import { CommunityDraft } from './community.draft.js'
 import { publisherKeyHex } from './key-list.client.js'
 import {
   addCommunity, communityKey, readSignedShowcase, removeCommunity, renameCommunity, setCommunityView, setView,
-  signShowcase, toggleCommunityItem, toggleItem,
+  signShowcase, stepView, toggleCommunityItem, toggleItem, viewLabel,
   type Showcase, type ShowcaseItem, type ShowcaseView,
 } from './showcase-record.js'
 
@@ -20,6 +20,17 @@ const STYLE_ID = 'hc-community-window-styles'
 const SIG = /^[0-9a-f]{64}$/
 
 const say = (message: string, type = 'info'): void => { EffectBus.emit('toast:show', { type, message }) }
+
+/** The front door's gestureStep, kept here because a module may not import the shim.
+ *  Across is back and forward; up and down is the other axis. A drag that is neither is not a swipe. */
+const gestureStep = (dx: number, dy: number, ms: number): { readonly axis: 'x' | 'y'; readonly by: -1 | 1 } | null => {
+  const across = Math.abs(dx)
+  const down = Math.abs(dy)
+  const far = (span: number): boolean => span >= 56 || (span >= 24 && span / Math.max(1, ms) >= 0.3)
+  if (far(across) && across >= 1.4 * down) return { axis: 'x', by: dx < 0 ? 1 : -1 }
+  if (far(down) && down >= 1.4 * across) return { axis: 'y', by: dy < 0 ? 1 : -1 }
+  return null
+}
 
 /** The lineages this key publishes on the zone — what can be put in the showcase. */
 const candidates = async (zone: string, pubkey: string): Promise<ShowcaseItem[]> => {
@@ -88,12 +99,18 @@ export class CommunityView extends EventTarget {
     win.addEventListener('keydown', event => this.#key(event))
     let startX = 0
     let startY = 0
-    win.addEventListener('pointerdown', event => { startX = event.clientX; startY = event.clientY })
+    let startAt = 0
+    win.addEventListener('pointerdown', event => { startX = event.clientX; startY = event.clientY; startAt = event.timeStamp })
     win.addEventListener('pointerup', event => {
       if (event.pointerType === 'mouse') return
-      const dx = event.clientX - startX
-      const dy = event.clientY - startY
-      if (Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy) * 1.4) this.#turn(dx < 0 ? 1 : -1)
+      const step = gestureStep(event.clientX - startX, event.clientY - startY, event.timeStamp - startAt)
+      if (!step) return
+      // Managing: sideways changes the template, up and down changes the set.
+      // Otherwise a sideways swipe is back and forward through the sets.
+      if (this.#managing) {
+        if (step.axis === 'x') this.#stepTemplate(step.by)
+        else this.#turn(step.by)
+      } else if (step.axis === 'x') this.#turn(step.by)
     })
     document.body.appendChild(win)
     this.#window = win
@@ -132,8 +149,10 @@ export class CommunityView extends EventTarget {
     const letter = event.key.toLowerCase()
     if (mod && !event.shiftKey && letter === 'z') { event.preventDefault(); this.#undo() }
     else if (mod && (letter === 'y' || (event.shiftKey && letter === 'z'))) { event.preventDefault(); this.#redo() }
-    else if (!typing && event.key === 'ArrowRight') this.#turn(1)
-    else if (!typing && event.key === 'ArrowLeft') this.#turn(-1)
+    else if (!typing && event.key === 'ArrowRight') { event.preventDefault(); if (this.#managing) this.#stepTemplate(1); else this.#turn(1) }
+    else if (!typing && event.key === 'ArrowLeft') { event.preventDefault(); if (this.#managing) this.#stepTemplate(-1); else this.#turn(-1) }
+    else if (!typing && this.#managing && event.key === 'ArrowDown') { event.preventDefault(); this.#turn(1) }
+    else if (!typing && this.#managing && event.key === 'ArrowUp') { event.preventDefault(); this.#turn(-1) }
     else if (!typing && event.key === 'Escape') this.close()
   }
 
@@ -165,6 +184,18 @@ export class CommunityView extends EventTarget {
     if (!result.ok) { say(`That name is not available (${result.reason}).`, 'warning'); this.#render(); return }
     draft.apply(result.showcase)
     this.#page = result.key
+    this.#render()
+  }
+
+  /** Sideways while managing: the next template for this page. All's hexagons are stored by saying nothing. */
+  #stepTemplate(by: -1 | 1): void {
+    const draft = this.#draft
+    if (!draft) return
+    const record = draft.current
+    const current = (record.communities ?? []).find(row => communityKey(row.name) === this.#page)
+    const view: ShowcaseView = (current ? current.view : undefined) ?? record.view ?? 'hex'
+    const next = stepView(view, by)
+    draft.apply(current ? setCommunityView(record, this.#page, next) : setView(record, next === 'hex' ? undefined : next))
     this.#render()
   }
 
@@ -235,11 +266,7 @@ export class CommunityView extends EventTarget {
       fresh.addEventListener('keydown', event => { if (event.key === 'Enter' && fresh.value.trim()) this.#create(fresh.value) })
       label.append(fresh)
       const view: ShowcaseView = (current ? current.view : undefined) ?? record.view ?? 'hex'
-      const next: ShowcaseView = view === 'hex' ? 'launcher' : 'hex'
-      label.append(this.#button(view === 'hex' ? 'Hexagons' : 'Launcher', () => {
-        draft.apply(current ? setCommunityView(record, this.#page, next) : setView(record, next))
-        this.#render()
-      }, 'Change how this group is drawn'))
+      label.append(this.#button(viewLabel(view), () => this.#stepTemplate(1), 'Swipe sideways to change the template. Up or down changes the set.'))
       if (current) label.append(this.#button('Delete group', () => { draft.apply(removeCommunity(record, this.#page)); this.#page = ''; this.#render() }))
     }
 

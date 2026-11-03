@@ -1455,6 +1455,7 @@
   "slash.opens": "Bir karonun nasıl açılacağını ayarla: görünümlerinden biri olarak ya da altıgenler olarak",
   "slash.groups": "Bu katmandaki yayın grupları — oluştur, doldur, adlandır, renklendir, yayınla",
   "slash.card": "Bir kart şablonu giy veya kartın ne giydiğini söyle",
+  "slash.layout": "Bu katmanın hangi çocukları gösterdiği: yalnızca özellik sözcüklerinin adlandırdıkları ya da tümü",
   "slash.trait": "Bu karonun doldurulmak üzere açık bıraktığı özellikler",
   "slash.fill": "Bu karonun bir özelliğini neyin dolduracağını seç",
   "slash.tutor": "Çalışma oyunları — bu kovanı aralıklı tekrar oyunlarına dönüştür; on | off | here | build | list",

@@ -12,11 +12,14 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
+// Where the participant stands; a test moves it to wander off mid-call.
+const place = vi.hoisted(() => ({ at: ['presentation'] as string[] }))
+
 vi.hoisted(() => {
   ;(window as unknown as { ioc: unknown }).ioc = {
     register: () => { /* noop */ },
     get: (key: string) => key === '@hypercomb.social/Lineage'
-      ? { explorerSegments: () => ['presentation'] }
+      ? { explorerSegments: () => place.at }
       : undefined,
     whenReady: () => { /* noop */ },
     onRegister: () => () => { /* noop */ },
@@ -42,6 +45,7 @@ let opened: string[] = []
 let shown: (ExternalAsk | null)[] = []
 
 beforeEach(() => {
+  place.at = ['presentation']
   turns.length = 0
   said = []
   opened = []
@@ -51,6 +55,8 @@ beforeEach(() => {
 EffectBus.on<RemoteSubmitRequest>(REMOTE_SUBMIT, ({ text, accept, complete }) => {
   said.push(text)
   accept?.()
+  // The participant clicks away while this line runs.
+  if (text === '/create while-you-wander') place.at = ['elsewhere']
   if (text.startsWith('read ')) {
     EffectBus.emit('activity:log', { message: `/games/bubble: ${text}` })
     EffectBus.emit('toast:show', { title: 'read', message: 'two tiles' })
@@ -164,6 +170,33 @@ describe('external calls', () => {
     await flush(); await flush()
     expect(said).toEqual(['go deeper', '/create inside'])
     expect(c.outcome()?.kind).toBe('ran')
+  })
+
+  it('walks back to where the call stands when the participant moved between lines', async () => {
+    const c = call('planter', ['go /presentation/simple', '/create while-you-wander', '/create next'])
+    EffectBus.emitTransient(EXTERNAL_ANSWER, { id: lastAsk()!.id, decision: 'run' })
+    await flush(); await flush()
+    expect(said).toEqual(['go /presentation/simple'])
+
+    place.at = ['presentation', 'simple']
+    EffectBus.emit('activity:log', { message: 'Go: now at /presentation/simple' })
+    await flush()
+    window.dispatchEvent(new Event('synchronize'))
+    await flush(); await flush(); await flush()
+    // the line ran where the call stood; then the participant wandered off,
+    // so the call walks back before its next line
+    expect(said).toEqual(['go /presentation/simple', '/create while-you-wander', 'go /presentation/simple'])
+
+    place.at = ['presentation', 'simple']
+    EffectBus.emit('activity:log', { message: 'Go: now at /presentation/simple' })
+    await flush()
+    window.dispatchEvent(new Event('synchronize'))
+    await flush(); await flush(); await flush()
+    expect(said).toEqual(['go /presentation/simple', '/create while-you-wander', 'go /presentation/simple', '/create next'])
+    const out = c.outcome()
+    expect(out?.kind).toBe('ran')
+    const back = out && out.kind === 'ran' ? out.results.find(r => r.heard?.some(h => h.includes('walked back'))) : undefined
+    expect(back?.text).toBe('go /presentation/simple')
   })
 
   it('performs an act instead of saying its lines, and records the verdict', async () => {

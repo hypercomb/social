@@ -9,7 +9,7 @@ import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure
 import { describe, expect, it, vi } from 'vitest'
 import { parseShowcase, readZoneOwners, type ShowcaseRecord, type ZoneOwners } from './showcase-record'
 import { aggregate, aggregateMatches, bandZones, coverOf, followCandidate, ledgerPublishes, ownersLabel, parseLedger,
-  pageFlip, readPeerLedger, sharedPublishes, showcase } from './showcase'
+  gestureStep, pageFlip, readPeerLedger, sharedPublishes, showcase } from './showcase'
 import { parseWelcome } from './welcome'
 
 // Pictures are asked of real doors; here every hive wears its cover.
@@ -539,6 +539,15 @@ describe('pageFlip — which way a drag turns the page', () => {
     expect(pageFlip(-100, 60, 120)).toBe(1)
     expect(pageFlip(0, 0, 0)).toBe(0)
   })
+
+  it('reads a clear up or down drag as the other axis, and a diagonal as neither', () => {
+    expect(gestureStep(-100, 4, 120)).toEqual({ axis: 'x', by: 1 })
+    expect(gestureStep(100, -4, 120)).toEqual({ axis: 'x', by: -1 })
+    expect(gestureStep(4, -100, 120)).toEqual({ axis: 'y', by: 1 })
+    expect(gestureStep(-4, 100, 120)).toEqual({ axis: 'y', by: -1 })
+    expect(gestureStep(-100, 90, 120)).toBeNull()
+    expect(gestureStep(-30, 2, 600)).toBeNull()
+  })
 })
 
 describe('communities — pages after All', () => {
@@ -747,6 +756,170 @@ describe('the launcher — the same tiles, drawn in rows of four', () => {
       await vi.waitFor(() => expect(hex.bands.querySelector('.dex-row.own .comb-row')).not.toBeNull())
     } finally { history.replaceState(null, '', '/' + original) }
   })
+
+  const dragTo = (bands: HTMLElement, fromX: number, fromY: number, toX: number, toY: number, props: Record<string, unknown> = {}): void => {
+    const list = bands.querySelector('.hosted')!
+    const down = new Event('pointerdown', { bubbles: true, cancelable: true })
+    const up = new Event('pointerup', { bubbles: true, cancelable: true })
+    for (const [key, value] of Object.entries({ pointerId: 1, pointerType: 'touch', timeStamp: 0, ...props, clientX: fromX, clientY: fromY })) Object.defineProperty(down, key, { value })
+    for (const [key, value] of Object.entries({ pointerId: 1, pointerType: 'touch', timeStamp: 100, ...props, clientX: toX, clientY: toY })) Object.defineProperty(up, key, { value })
+    list.dispatchEvent(down)
+    list.dispatchEvent(up)
+  }
+
+  it('draws the iPhone launcher as a phone screen, and docks the first four once there are more', async () => {
+    const { bands } = draw(record({ view: 'iphone' }))
+    await vi.waitFor(() => expect(own(bands)?.dataset['shape']).toBe('iphone'))
+    const grid = own(bands).querySelector('.spring-grid')!
+    const dock = own(bands).querySelector('.spring-dock') as HTMLElement
+    expect(own(bands).querySelector('.comb-row')).toBeNull()
+    expect(own(bands).querySelector('.spring-home')).not.toBeNull()
+    // Two hives and one door: everything stays in the grid, and the dock is only the home bar.
+    expect([...grid.children].map(node => node.querySelector('.hex-name')?.textContent)).toEqual(['camelflage', 'dylan', 'Minimal host'])
+    expect(dock.hidden).toBe(true)
+    const many = showcase({
+      self: 'hypercomb.com', groups: true, title: 'hypercomb', tagline: '', sources: [],
+      links: ['One', 'Two', 'Three', 'Four', 'Five'].map(label => ({ label, href: `/${label}`, note: '', icon: 'host' as const })),
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
+      readOwners: async () => ({ showcase: record({ view: 'iphone' }), reached: true, unreadable: false, doors: new Map() }),
+    })
+    await vi.waitFor(() => expect(own(many.bands).querySelectorAll('.spring-dock .hex')).toHaveLength(4))
+    const dockNames = [...own(many.bands).querySelectorAll('.spring-dock .hex-name')].map(name => name.textContent)
+    const gridNames = [...own(many.bands).querySelectorAll('.spring-grid .hex-name')].map(name => name.textContent)
+    expect(dockNames).toEqual(['camelflage', 'dylan', 'One', 'Two'])
+    expect(gridNames).toEqual(['Three', 'Four', 'Five'])
+  })
+
+  it('draws a list of blocks: a tap on your own opens it, and a tap under another domain switches it', async () => {
+    const { bands, hero } = draw(record({ view: 'list' }), ['jwize.com'])
+    await vi.waitFor(() => expect(own(bands)?.dataset['shape']).toBe('list'))
+    expect(own(bands).querySelector('.comb-row, .spring')).toBeNull()
+    const rows = [...own(bands).children]
+    expect(rows.map(node => node.querySelector('.hex-name')?.textContent)).toEqual(['camelflage', 'dylan', 'Minimal host'])
+    expect(rows.every(node => node.tagName === 'A' && node.querySelector('.hex-art') && node.querySelector('.hex-address'))).toBe(true)
+    // View mode: the block is a link, and the click is left to it.
+    const visit = new MouseEvent('click', { bubbles: true, cancelable: true })
+    rows[0]!.dispatchEvent(visit)
+    expect(visit.defaultPrevented).toBe(false)
+    expect((rows[0] as HTMLAnchorElement).getAttribute('href')).toBeTruthy()
+    ;(hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
+    ;(bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
+    const peerComb = bands.querySelector('.dex-row:not(.own) .comb') as HTMLElement
+    expect(peerComb.dataset['shape']).toBe('list')
+    const peer = peerComb.querySelector('a.hex') as HTMLAnchorElement
+    // Already in this showcase: the block is on. A tap is the switch, not a visit.
+    expect(peer.querySelector('.hex-name')?.textContent).toBe('dylan')
+    expect(peer.classList.contains('in-showcase')).toBe(true)
+    expect(peer.classList.contains('off')).toBe(false)
+    const toggle = new MouseEvent('click', { bubbles: true, cancelable: true })
+    const opened = vi.spyOn(window, 'open').mockImplementation(() => null)
+    try {
+      peer.dispatchEvent(toggle)
+      expect(toggle.defaultPrevented).toBe(true)
+    } finally { opened.mockRestore() }
+  })
+
+  it('draws tiles as squares of the same tiles, the picture filling each one', async () => {
+    const { bands } = draw(record({ view: 'tiles' }))
+    await vi.waitFor(() => expect(own(bands)?.dataset['shape']).toBe('tiles'))
+    expect(own(bands).querySelector('.comb-row, .spring')).toBeNull()
+    const kids = [...own(bands).children]
+    expect(kids.map(node => node.querySelector('.hex-name')?.textContent)).toEqual(['camelflage', 'dylan', 'Minimal host'])
+    expect(kids.every(node => node.tagName === 'A' && node.querySelector('.hex-art') && (node as HTMLAnchorElement).getAttribute('href'))).toBe(true)
+    // The picture is the square: it is not set inside a smaller icon, and the name stays on the tile.
+    const art = kids[0]!.querySelector('.hex-art') as HTMLElement
+    expect(art.parentElement).toBe(kids[0])
+    expect(kids[0]!.querySelector('.hex-label')).not.toBeNull()
+  })
+
+  it('a vertical flick on the square column moves the frame, and does not turn the set', async () => {
+    const { bands, hero } = draw(record({ view: 'tiles' }))
+    await vi.waitFor(() => expect(tabs(bands)).toEqual(['All*', 'Favourites', 'Daily']))
+    ;(hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
+    const tile = own(bands).querySelector('.hex')!
+    const down = new Event('pointerdown', { bubbles: true })
+    const up = new Event('pointerup', { bubbles: true })
+    for (const [key, value] of Object.entries({ pointerId: 1, pointerType: 'touch', clientX: 200, clientY: 400, timeStamp: 0 })) Object.defineProperty(down, key, { value })
+    for (const [key, value] of Object.entries({ pointerId: 1, pointerType: 'touch', clientX: 204, clientY: 180, timeStamp: 100 })) Object.defineProperty(up, key, { value })
+    tile.dispatchEvent(down)
+    tile.dispatchEvent(up)
+    expect(tabs(bands)).toEqual(['All*', 'Favourites', 'Daily'])
+  })
+
+  it('while managing, sideways changes the template and up or down changes the set; leaving manage restores back and forward', async () => {
+    const { bands, hero } = draw(record({}))
+    await vi.waitFor(() => expect(tabs(bands)).toEqual(['All*', 'Favourites', 'Daily']))
+    const manage = hero.querySelector('.manage-toggle') as HTMLButtonElement
+    manage.click()
+    expect(own(bands).dataset['shape']).toBeUndefined()
+    expect(bands.querySelector('.pager-template')?.textContent).toBe('Hexagons')
+    dragTo(bands, 300, 200, 100, 204)
+    expect(tabs(bands)).toEqual(['All*', 'Favourites', 'Daily'])
+    expect(own(bands).dataset['shape']).toBe('launcher')
+    expect(bands.querySelector('.pager-template')?.textContent).toBe('Launcher')
+    dragTo(bands, 300, 200, 100, 204)
+    expect(own(bands).dataset['shape']).toBe('iphone')
+    // Up goes to the next set. Favourites says nothing, so it is drawn as All now is.
+    dragTo(bands, 200, 400, 204, 200)
+    expect(tabs(bands)).toEqual(['All', 'Favourites*', 'Daily'])
+    expect(own(bands).dataset['shape']).toBe('iphone')
+    dragTo(bands, 200, 400, 204, 200)
+    expect(tabs(bands)).toEqual(['All', 'Favourites', 'Daily*'])
+    // Daily chose the row launcher, and that beats what All is trying.
+    expect(own(bands).dataset['shape']).toBe('launcher')
+    manage.click()
+    // Back and forward again: on from Daily is All, and the template tried there stays.
+    dragTo(bands, 300, 200, 100, 204)
+    expect(tabs(bands)).toEqual(['All*', 'Favourites', 'Daily'])
+    expect(own(bands).dataset['shape']).toBe('iphone')
+    dragTo(bands, 100, 200, 300, 204)
+    expect(tabs(bands)).toEqual(['All', 'Favourites', 'Daily*'])
+  })
+})
+
+describe('back and forward when there is no set to turn', () => {
+  const sites = parseLedger(LEDGER)
+  it('a sideways swipe goes back and forward in the browser, and managing spends that swipe on the template', async () => {
+    const back = vi.spyOn(history, 'back').mockImplementation(() => undefined)
+    const forward = vi.spyOn(history, 'forward').mockImplementation(() => undefined)
+    try {
+      const { bands, hero } = showcase({
+        self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
+        ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
+      })
+      await vi.waitFor(() => expect(bands.querySelector('.dex-row.own .hex')).not.toBeNull())
+      const list = bands.querySelector('.hosted')!
+      const drag = (fromX: number, toX: number, props: Record<string, unknown> = {}): void => {
+        const down = new Event('pointerdown', { bubbles: true })
+        const up = new Event('pointerup', { bubbles: true })
+        for (const [key, value] of Object.entries({ pointerId: 1, pointerType: 'touch', clientY: 200, timeStamp: 0, ...props, clientX: fromX })) Object.defineProperty(down, key, { value })
+        for (const [key, value] of Object.entries({ pointerId: 1, pointerType: 'touch', clientY: 204, timeStamp: 100, ...props, clientX: toX })) Object.defineProperty(up, key, { value })
+        list.dispatchEvent(down)
+        list.dispatchEvent(up)
+      }
+      drag(100, 300)
+      expect(back).toHaveBeenCalledTimes(1)
+      drag(300, 100)
+      expect(forward).toHaveBeenCalledTimes(1)
+      drag(300, 100, { pointerType: 'mouse' })
+      drag(8, 200)
+      expect(forward).toHaveBeenCalledTimes(1)
+      ;(hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
+      drag(300, 100)
+      expect(forward).toHaveBeenCalledTimes(1)
+      expect(bands.querySelector('.dex-row.own .comb')?.getAttribute('data-shape')).toBe('launcher')
+      expect(bands.querySelector('.pager-label')?.textContent).toBe('hypercomb.com')
+      // Up and down walks the domains you follow, since no community was named.
+      const down = new Event('pointerdown', { bubbles: true })
+      const up = new Event('pointerup', { bubbles: true })
+      for (const [key, value] of Object.entries({ pointerId: 1, pointerType: 'touch', clientX: 200, clientY: 400, timeStamp: 0 })) Object.defineProperty(down, key, { value })
+      for (const [key, value] of Object.entries({ pointerId: 1, pointerType: 'touch', clientX: 204, clientY: 180, timeStamp: 100 })) Object.defineProperty(up, key, { value })
+      list.dispatchEvent(down)
+      list.dispatchEvent(up)
+      expect(bands.querySelector('.pager-label')?.textContent).toBe('jwize.com')
+      expect(bands.querySelector('.dex-row.open .dex-name')?.textContent).toBe('jwize.com')
+    } finally { back.mockRestore(); forward.mockRestore() }
+  })
 })
 
 // What the review of 2026-10-25 confirmed, held in place.
@@ -927,6 +1100,31 @@ describe('a tile — a tap goes to the content, a hold comes up with where else 
     expect(hero.classList.contains('hero')).toBe(true)
     expect(hero.querySelector(':scope > .hero-brand')).not.toBeNull()
     expect(hero.querySelector(':scope > .search')).not.toBeNull()
+  })
+
+  it('hides the search until the magnifier is pressed, and keeps Manage in the bar', () => {
+    const { hero, bands } = draw()
+    const search = hero.querySelector(':scope > .search') as HTMLElement
+    const dock = hero.querySelector(':scope > .page-dock') as HTMLElement
+    const glass = dock.querySelector('.dock-search') as HTMLButtonElement
+    const manage = dock.querySelector('.manage-toggle') as HTMLButtonElement
+    expect(search.hidden).toBe(true)
+    expect(glass.getAttribute('aria-pressed')).toBe('false')
+    expect(glass.querySelector('svg')).not.toBeNull()
+    expect(manage.getAttribute('aria-label')).toBe('Manage')
+    glass.click()
+    expect(search.hidden).toBe(false)
+    expect(glass.getAttribute('aria-pressed')).toBe('true')
+    const input = search.querySelector('input') as HTMLInputElement
+    input.value = 'dylan'
+    input.dispatchEvent(new Event('input'))
+    glass.click()
+    expect(search.hidden).toBe(true)
+    expect(glass.getAttribute('aria-pressed')).toBe('false')
+    expect(input.value).toBe('')
+    manage.click()
+    expect(manage.getAttribute('aria-pressed')).toBe('true')
+    expect(bands.classList.contains('managing')).toBe(true)
   })
 })
 

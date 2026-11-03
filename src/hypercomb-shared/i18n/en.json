@@ -2095,6 +2095,7 @@
   "slash.opens": "Set how a tile opens: as one of its views, or as hexagons",
   "slash.groups": "Publish groups on this layer — make them, fill them, name and colour them, publish them",
   "slash.card": "Wear a card template, or say what a card wears",
+  "slash.layout": "Which of this layer's children it shows: only the ones its trait words name, or all",
   "slash.trait": "The traits this tile leaves open for a filler",
   "slash.fill": "Choose what fills one of this tile's traits",
   "slash.tutor": "Study games — turn this hive into spaced-repetition games; on | off | here | build | list",

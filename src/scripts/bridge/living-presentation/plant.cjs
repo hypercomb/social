@@ -46,6 +46,12 @@
 // The slash matters: on the command line a bare line is read as prose first,
 // and in the tiles stance plain text lays a tile of that name.
 // --dry prints the sentences and says nothing; they can also be typed by hand.
+// --blocks [<route>] [--out <file>] writes each tile's BLOCK (its page) and its
+// included files (the documents and source it explains), for the tiles under
+// the route that have content (blocks/content.cjs). A file's text cannot ride a
+// command line, so this writes one snippet to paste into the hive tab's
+// console: it hands each page and file to the hive's own tile-files door, the
+// one the chat's write block uses. Plant the tiles first; a page needs its tile.
 // Saying the notes twice files them twice, so re-run with --tiles-only.
 
 const path = require('path')
@@ -65,9 +71,52 @@ const PUBLISH_ONLY = args.includes('--publish-only')
 const ALL = args.includes('--all')
 const DOMAINS = [...new Set(valuesOf('--publish').flatMap(v => v.split(',')).map(d => d.trim().toLowerCase()).filter(Boolean))]
 const LABEL = valueOf('--as')
-const flagValues = new Set([...valuesOf('--publish'), valueOf('--revision'), LABEL, SAY_URL].filter(Boolean))
-const route = (args.find(a => !a.startsWith('--') && !flagValues.has(a)) || tree.name).replace(/^\/+|\/+$/g, '')
+const flagValues = new Set([...valuesOf('--publish'), valueOf('--revision'), valueOf('--out'), LABEL, SAY_URL].filter(Boolean))
+// Two trees, two relations (tree.cjs): presentation (what is shown, and what is
+// published) and presenter (what shows it). With --all and no route, both are
+// planted; a route plants under its own tree.
+const ROOTS = tree.roots || [tree]
+const named = args.find(a => !a.startsWith('--') && !flagValues.has(a))
+const route = (named || tree.name).replace(/^\/+|\/+$/g, '')
+const EVERY_ROOT = ALL && !named
 const SAY = path.join(__dirname, '..', 'say.cjs')
+
+if (args.includes('--blocks')) {
+  // Pages and files, not sentences: one console snippet, written to a file
+  // (OS temp unless --out names one), since it is long.
+  const fs = require('fs')
+  const os = require('os')
+  const { buildBlocks } = require('./blocks/build.cjs')
+  const under = named ? route : ''
+  const blocks = buildBlocks({ under })
+  if (!blocks.length) { console.error(`no block content under /${under || '(everything)'} yet (blocks/content.cjs)`); process.exit(2) }
+  const out = valueOf('--out') || path.join(os.tmpdir(), `living-blocks-${Date.now()}.js`)
+  const snippet = `// Paste into the hive tab's console (F12 → Console). Writes ${blocks.length} pages and their files.
+(async () => {
+  const door = globalThis.ioc?.get?.('@diamondcoreprocessor.com/TileFilesDrone')
+  if (!door?.write) { console.error('Open this in the hive tab: the tile-files door is not here.'); return }
+  const blocks = ${JSON.stringify(blocks)}
+  let ok = 0, failed = 0
+  for (const b of blocks) {
+    const at = '/' + b.route.join('/')
+    const page = await door.write({ route: b.route, kind: 'page' }, b.page)
+    if (page.ok) ok++; else { failed++; console.error(at + ' page: ' + page.error); continue }
+    console.log(at + ': page' + (page.unchanged ? ' (unchanged)' : ''))
+    for (const f of b.files) {
+      const file = await door.write({ route: b.route, kind: 'file', name: f.name }, f.text)
+      if (file.ok) ok++; else { failed++; console.error(at + ' ' + f.name + ': ' + file.error) }
+    }
+  }
+  console.log('Done: ' + ok + ' written, ' + failed + ' failed.')
+})()
+`
+  fs.writeFileSync(out, snippet, 'utf8')
+  const files = blocks.reduce((n, b) => n + b.files.length, 0)
+  console.log(`${blocks.length} blocks (${blocks.map(b => b.route.at(-1)).join(', ')}) and ${files} files.`)
+  console.log(`Console snippet: ${out}`)
+  console.log('Open the hive tab, press F12 → Console, paste the file\'s contents, press Enter.')
+  process.exit(0)
+}
 
 if (PUBLISH_ONLY && !DOMAINS.length) { console.error('--publish-only needs --publish <domain>'); process.exit(2) }
 if (args.includes('--publish') && !DOMAINS.length) { console.error('--publish needs a domain, e.g. --publish example.com'); process.exit(2) }
@@ -75,42 +124,56 @@ if (args.includes('--as') && (!LABEL || LABEL.startsWith('--'))) { console.error
 if (LABEL && !DOMAINS.length) { console.error('--as names an address on a domain: add --publish <domain>'); process.exit(2) }
 
 const segments = route.split('/')
-if (segments[0] !== tree.name) { console.error(`the route starts at ${tree.name}`); process.exit(2) }
-let node = tree
+const root = ROOTS.find(r => r.name === segments[0])
+if (!root) { console.error(`the route starts at ${ROOTS.map(r => r.name).join(' or ')}`); process.exit(2) }
+let node = root
 for (const name of segments.slice(1)) {
   node = (node.children || []).find(child => child.name === name)
   if (!node) { console.error(`no tile ${name} in tree.cjs under /${route}`); process.exit(2) }
 }
 const children = node.children || []
 if (!children.length) { console.error(`/${route} has no planned children yet`); process.exit(2) }
+// What gets planted: the named place, or with --all and no route, every tree.
+const plantings = EVERY_ROOT ? ROOTS.map(r => ({ node: r, route: r.name, top: true })) : [{ node, route, top: segments.length === 1 }]
 
 // A build name is a plain word, never a behaviour word: the layer and the minute.
 const stamp = new Date().toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-')
 const REVISION = valueOf('--revision') || `${segments[segments.length - 1]}-layer-${stamp}`
 
+// Only the reader's note is planted; a tile's `brief` is the builder's and
+// stays in the repo (tree.cjs), so the published presentation carries no work
+// notes.
 const noteFor = (tile) => tile.note || tile.name
 
 // The layers to plant: this tile's, and with --all every layer beneath it,
 // parents before children.
 const layers = []
-const walk = (tile, at) => {
+const walk = (tile, at, into) => {
   if (!(tile.children || []).length) return
-  layers.push({ tile, at })
-  if (ALL) for (const child of tile.children) walk(child, `${at}/${child.name}`)
+  into.push({ tile, at })
+  if (ALL) for (const child of tile.children) walk(child, `${at}/${child.name}`, into)
 }
-walk(node, route)
+for (const p of plantings) { p.layers = []; walk(p.node, p.route, p.layers); layers.push(...p.layers) }
 
 const sentences = []
 if (!PUBLISH_ONLY) {
-  if (segments.length === 1) sentences.push('go /', `create ${node.name}`)
-  for (const { tile, at } of layers) sentences.push(`go /${at}`, `trait ${tile.children.map(c => c.name).join(' ')}`)
+  for (const p of plantings) {
+    if (p.top) sentences.push('go /', `create ${p.node.name}`)
+    for (const { tile, at } of p.layers) sentences.push(`go /${at}`, `trait ${tile.children.map(c => c.name).join(' ')}`)
+  }
 }
 if (!TILES_ONLY && !PUBLISH_ONLY) {
-  if (segments.length === 1 && node.note) sentences.push(`file on /${route}: ${noteFor(node)}`)
-  for (const { tile, at } of layers) for (const child of tile.children) if (child.note) sentences.push(`file on /${at}/${child.name}: ${noteFor(child)}`)
+  for (const p of plantings) {
+    if (p.top && p.node.note) sentences.push(`file on /${p.route}: ${noteFor(p.node)}`)
+    for (const { tile, at } of p.layers) for (const child of tile.children) if (child.note) sentences.push(`file on /${at}/${child.name}: ${noteFor(child)}`)
+  }
 }
-sentences.push(`go /${segments[0]}`, `builds ${REVISION}`)
-for (const domain of DOMAINS) sentences.push(`publish /${segments[0]} on ${domain}${LABEL ? ` as ${LABEL}` : ''}`)
+// Each planted tree is sealed as one build; only the presentation (the tree
+// the route names, or presentation itself) is published.
+const sealed = [...new Set(plantings.map(p => p.route.split('/')[0]))]
+for (const top of sealed) sentences.push(`go /${top}`, `builds ${REVISION}`)
+const publishing = EVERY_ROOT ? tree.name : segments[0]
+for (const domain of DOMAINS) sentences.push(`publish /${publishing} on ${domain}${LABEL ? ` as ${LABEL}` : ''}`)
 
 // The participant's door reads a line as a behaviour only with its slash.
 const slashed = sentences.map(line => (line.startsWith('/') ? line : `/${line}`))
@@ -163,7 +226,7 @@ if (CONSOLE) {
 }
 console.log(PUBLISH_ONLY
   ? `${DRY ? '[DRY] ' : ''}sealing and publishing /${segments[0]}\n`
-  : `${DRY ? '[DRY] ' : ''}planting ${ALL ? 'every layer' : 'one layer'} under /${route}: ${children.map(c => c.name).join(', ')}${ALL ? ', and everything beneath them' : ''}\n`)
+  : `${DRY ? '[DRY] ' : ''}planting ${ALL ? 'every layer' : 'one layer'} under ${plantings.map(p => `/${p.route}`).join(' and ')}: ${plantings.flatMap(p => (p.node.children || []).map(c => c.name)).join(', ')}${ALL ? ', and everything beneath them' : ''}\n`)
 ;(async () => {
 if (DRY) {
   for (const sentence of sentences) console.log(sentence)
@@ -196,8 +259,8 @@ if (DRY) {
   if (outcome.kind === 'declined') { console.log('Declined in the hive. Nothing ran.'); process.exit(3) }
   for (const result of outcome.results || []) console.log(`${result.text}\n  hive: ${result.verdict}`)
 }
-const published = DOMAINS.length ? `, published to ${DOMAINS.map(d => `${LABEL || segments[0]}.${d}`).join(', ')}` : ''
+const published = DOMAINS.length ? `, published to ${DOMAINS.map(d => `${LABEL || publishing}.${d}`).join(', ')}` : ''
 const tileCount = layers.reduce((n, { tile }) => n + tile.children.length, 0)
-const planted = PUBLISH_ONLY ? `/${route}` : `${tileCount} tiles${TILES_ONLY ? '' : ' and their notes'} in ${layers.length} layer${layers.length === 1 ? '' : 's'} under /${route}`
+const planted = PUBLISH_ONLY ? `/${publishing}` : `${tileCount} tiles${TILES_ONLY ? '' : ' and their notes'} in ${layers.length} layer${layers.length === 1 ? '' : 's'} under ${plantings.map(p => `/${p.route}`).join(' and ')}`
 console.log(`\n${DRY ? '[DRY] ' : ''}${planted}, build ${REVISION}${published}.`)
 })()
