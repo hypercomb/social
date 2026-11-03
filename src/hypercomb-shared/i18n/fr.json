@@ -1455,6 +1455,7 @@
   "slash.opens": "Définir comment une tuile s'ouvre : dans l'une de ses vues ou en hexagones",
   "slash.groups": "Groupes de publication de cette couche — créez-les, remplissez-les, nommez-les, colorez-les, publiez-les",
   "slash.card": "Porter un modèle de carte, ou dire ce que porte une carte",
+  "slash.layout": "Quels enfants cette couche affiche : seulement ceux que nomment ses mots de trait, ou tous",
   "slash.trait": "Les traits que cette tuile laisse ouverts à remplir",
   "slash.fill": "Choisir ce qui remplit un trait de cette tuile",
   "slash.tutor": "Jeux de révision — transformez cette ruche en jeux de répétition espacée ; on | off | here | build | list",

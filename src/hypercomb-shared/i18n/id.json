@@ -1455,6 +1455,7 @@
   "slash.opens": "Atur cara ubin terbuka: sebagai salah satu tampilannya, atau sebagai segi enam",
   "slash.groups": "Grup terbitan di lapisan ini — buat, isi, beri nama dan warna, terbitkan",
   "slash.card": "Kenakan templat kartu, atau sebutkan apa yang dikenakan kartu",
+  "slash.layout": "Anak mana yang ditampilkan lapisan ini: hanya yang dinamai kata sifatnya, atau semua",
   "slash.trait": "Sifat yang dibiarkan terbuka oleh ubin ini untuk diisi",
   "slash.fill": "Pilih apa yang mengisi salah satu sifat ubin ini",
   "slash.tutor": "Permainan belajar — ubah sarang ini menjadi permainan pengulangan berjarak; on | off | here | build | list",

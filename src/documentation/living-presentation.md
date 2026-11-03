@@ -513,13 +513,21 @@ the grammar exists already, in the trait word:
 - **fill**, followed by a word, chooses what fills a marker when there is
   more than one candidate.
 
-Only one new word is needed, for the layout behaviour itself:
+Only one new word is needed, for the layout behaviour itself. It is **built**
+(2026-11-03, `commands/layout.queen.ts`; jwize: "a layout is just a history
+item … each has a list of traits, these can be assigned"): a layout is a
+`layout:extrude` record on the tile naming, by signature, its ordered list of
+words; every switch is a new version of the layer, and `layout from` assigns
+the same list to another tile. The grid leaves out what a layout that is on
+does not name (`layout-view.drone.ts`, through the grid's presence claim):
 
 - **layout** says whether the layer shows only its markers' tiles, and which
   children are left out.
 - **layout on** makes the layer show only the tiles its markers extruded, in
   the markers' order, and leave every other child out.
 - **layout off** shows every child again.
+- **layout from**, followed by a tile's route, takes that tile's layout: the
+  same word list, by signature.
 
 So the order of markers is the layout, placing a marker is allowing one more
 extruded trait, and taking one away blocks it out. The new names are few:
@@ -735,6 +743,14 @@ replant"); the tree lives in `scripts/bridge/living-presentation/tree.cjs`.
   planted, so the published presentation carries no work notes.
 - **Order is the order of the words.** The order of markers is the layout,
   so the seven opening moves are given first to last.
+- **One block per tile.** Each tile's page is a block: one whole page that
+  fills its trait, carries its own look, plays like a short video (beats, each
+  lighting part of a picture with one sentence), quotes the real code it
+  explains, and asks the network for nothing. The documents and source it
+  explains are attached to the tile as included files. A block is extruded
+  later, when it needs finer parts: the tile wears a layout of words and a
+  component fills each (`scripts/bridge/living-presentation/blocks/`;
+  `plant.cjs --blocks` writes them through the hive's tile-files door).
 
 ## Every piece of the presentation is a tile
 
