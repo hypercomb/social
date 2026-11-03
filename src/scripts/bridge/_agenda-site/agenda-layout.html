@@ -3,25 +3,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="dark">
 <title>Meetup agenda</title>
 <meta name="description" content="One Hypercomb meetup agenda. The page is a layout resource. The agenda resource is the parameter.">
 <style>
   /* The layout resource a date's page uses. The page is this resource.
      It is not a behaviour. The agenda resource is the parameter: the page
      decoration's payload.parameter, or the cell's parameter slot. Nothing
-     about a particular morning is copied into this file. Scoped under .mp. */
+     about a particular morning is copied into this file. The meetings dark
+     look is locked, so the date page matches the home's open agenda.
+     Scoped under .mp. */
   :root,.mp{
-    --mp-outer:#eae7e7;--mp-bg:#f3f2f2;--mp-surface:#eae9e9;--mp-text:#201e1d;
-    --mp-accent:#ec3013;--mp-strong:#ae1800;--mp-muted:#605d5d;--mp-soft:#444141;
-    --mp-divider:rgba(32,30,29,.4);--mp-hover:rgba(32,30,29,.05);
+    --mp-outer:#121110;--mp-bg:#1b1a19;--mp-surface:#2c2a29;--mp-text:#f1efee;
+    --mp-accent:#ff5a3d;--mp-strong:#ff8a72;--mp-muted:#a8a4a3;--mp-soft:#cfcbca;
+    --mp-divider:rgba(241,239,238,.28);--mp-hover:rgba(241,239,238,.06);
     --mp-font:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
-    --mp-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-  @media (prefers-color-scheme:dark){
-    :root,.mp{
-      --mp-outer:#121110;--mp-bg:#1b1a19;--mp-surface:#2c2a29;--mp-text:#f1efee;
-      --mp-accent:#ff5a3d;--mp-strong:#ff8a72;--mp-muted:#a8a4a3;--mp-soft:#cfcbca;
-      --mp-divider:rgba(241,239,238,.28);--mp-hover:rgba(241,239,238,.06)}}
+    --mp-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    color-scheme:dark}
   body:has(> .mp){margin:0;background:var(--mp-outer)}
   .mp{display:block;min-height:100vh;min-height:100dvh;background:var(--mp-outer);color:var(--mp-text);
     font:400 16px/1.55 var(--mp-font);-webkit-font-smoothing:antialiased;text-wrap:pretty}

@@ -5,61 +5,106 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <title>Meetup agendas</title>
-<meta name="description" content="Every Hypercomb meetup agenda, one date a row.">
+<meta name="description" content="The next Hypercomb meetup agenda. Pull it up, or the list, and every date is a row.">
 <style>
-  /* The agenda home is the business-card list: a dark column, a search that
-     stays at the top, and one row per date. The row is a link to that date's
-     child. The date's page is the layout resource. It is not a behaviour.
-     The agenda resource is the parameter. Card text comes from the child's
-     parameter,
+  /* The home opens on the default agenda — the nearest upcoming date, else
+     the latest — full screen, in the meetings dark look. Pulling up, or the
+     list icon, collapses it into the list's top row the way a card collapses
+     into its row. A row grows back into that agenda. The date's own page is
+     still the layout resource. Card text comes from the child's parameter,
      then from the parent's list. Opening the page never creates the pool.
-     Scoped under .ag so a hive mounting the page inline never touches its shell. */
+     Scoped under .ag so a hive mounting the page inline never touches its shell.
+     The dark tokens are the meetings page's, locked: first paint does not
+     wait on a media query. */
   .ag{
-    --ag-bg:#060606;--ag-ink:#ececee;--ag-muted:#b4b4b9;--ag-line:rgba(255,255,255,.09);
-    --ag-gold:#f2b63e;--ag-gold-hi:#f6c453;--ag-gold-rgb:242,182,62;
-    display:block;min-height:100vh;min-height:100dvh;background:#000;color:var(--ag-ink);
-    font:16px/1.45 "Segoe UI",system-ui,-apple-system,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
-  body:has(> .ag){margin:0;background:#000}
+    --mp-outer:#121110;--mp-bg:#1b1a19;--mp-surface:#2c2a29;--mp-text:#f1efee;
+    --mp-accent:#ff5a3d;--mp-strong:#ff8a72;--mp-muted:#a8a4a3;--mp-soft:#cfcbca;
+    --mp-divider:rgba(241,239,238,.28);--mp-hover:rgba(241,239,238,.06);
+    --mp-font:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    display:block;min-height:100vh;min-height:100dvh;background:var(--mp-outer);color:var(--mp-text);
+    font:400 16px/1.55 var(--mp-font);-webkit-font-smoothing:antialiased;text-wrap:pretty;color-scheme:dark}
+  body:has(> .ag){margin:0;background:var(--mp-outer,#121110);color-scheme:dark}
   .ag *,.ag *::before,.ag *::after{box-sizing:border-box}
-  .ag a{color:inherit;text-decoration:none}
-  .ag :focus-visible{outline:2px solid var(--ag-gold-hi);outline-offset:2px}
-  .ag ::selection{background:rgba(var(--ag-gold-rgb),.35)}
-  .ag .app{max-width:520px;min-height:100vh;min-height:100dvh;margin:0 auto;
-    padding:max(22px,env(safe-area-inset-top)) 16px calc(28px + env(safe-area-inset-bottom))}
-  .ag h1{font-size:.74rem;letter-spacing:.2em;text-transform:uppercase;color:var(--ag-gold);
-    margin:2px 2px 12px;font-weight:600}
-  .ag .search{display:block;position:sticky;top:max(10px,env(safe-area-inset-top));z-index:2;
-    width:100%;min-height:44px;margin:0 0 12px;padding:9px 11px;
-    border:1px solid var(--ag-line);border-radius:2px;background:rgba(8,8,9,.92);color:var(--ag-ink);
-    font:inherit}
-  .ag .search::placeholder{color:var(--ag-muted)}
-  .ag .search:focus{outline:none;border-color:rgba(var(--ag-gold-rgb),.7);box-shadow:0 0 0 1px rgba(var(--ag-gold-rgb),.35)}
-  .ag .rows{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
-  .ag .mini{display:flex;align-items:center;gap:10px;height:68px;padding:0 14px 0 8px;border-radius:6px;
-    background:linear-gradient(160deg,#1d1d20,#0f0f10 55%,#070708);border:1px solid rgba(var(--ag-gold-rgb),.5);
-    box-shadow:0 6px 22px rgba(0,0,0,.45)}
-  .ag .mini:hover{border-color:var(--ag-gold-hi)}
-  .ag .slot{flex:none;width:40px;height:44px;display:grid;place-items:center;color:var(--ag-gold);font-weight:600;font-size:15px}
-  .ag .who{flex:1;min-width:0}
-  .ag .who b{display:block;color:var(--ag-gold-hi);font-weight:500;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .ag .who small{display:block;color:var(--ag-muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .ag .none{color:var(--ag-muted);text-align:center;padding:26px 10px;font-size:.9rem}
-  .ag .mini{width:100%;color:inherit;cursor:pointer}
+  .ag :focus-visible{outline:2px solid var(--mp-accent);outline-offset:2px}
+  .ag ::selection{background:rgba(255,90,61,.35)}
+  .ag .app{max-width:760px;min-height:100vh;min-height:100dvh;margin:0 auto;background:var(--mp-bg)}
+  @media (min-width:762px){.ag .app{border-left:1px solid var(--mp-divider);border-right:1px solid var(--mp-divider)}}
+  .ag header.top{position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding:12px max(16px,env(safe-area-inset-right)) 12px max(16px,env(safe-area-inset-left));
+    background:var(--mp-bg);border-bottom:2px solid var(--mp-divider)}
+  .ag .brand{font-weight:800;font-size:17px;letter-spacing:-.01em}
+  .ag .brand em{font-style:normal;color:var(--mp-accent)}
+  .ag .list-btn{width:40px;height:40px;min-height:40px;padding:0;display:grid;place-items:center;cursor:pointer;
+    border:1px solid var(--mp-divider);background:transparent;color:var(--mp-text)}
+  .ag .list-btn:hover{background:var(--mp-hover)}
+  .ag .list-btn[aria-pressed="true"]{color:var(--mp-strong);border-color:var(--mp-accent)}
+  .ag .stage{display:block}
+  .ag[data-view="list"] .stage{display:none}
+  .ag .listview{display:block;padding:16px max(16px,env(safe-area-inset-right)) 28px max(16px,env(safe-area-inset-left))}
+  .ag[data-view="agenda"] .listview{display:none}
+  .ag .kicker{display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mp-strong);font-weight:600}
+  .ag .search{display:block;position:sticky;top:64px;z-index:1;width:100%;min-height:44px;margin:12px 0;
+    padding:9px 11px;border:1px solid var(--mp-divider);background:var(--mp-bg);color:var(--mp-text);font:inherit}
+  .ag .search::placeholder{color:var(--mp-muted)}
+  .ag .rows{list-style:none;margin:0;padding:0;display:grid;border-top:2px solid var(--mp-divider)}
+  .ag .rows button{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;align-items:center;
+    width:100%;min-height:44px;padding:12px 4px;border:0;border-bottom:1px solid var(--mp-divider);
+    background:transparent;color:var(--mp-text);font:inherit;text-align:left;cursor:pointer}
+  .ag .rows button:hover{background:var(--mp-hover)}
+  .ag .rows b{grid-column:1;font-weight:800;font-size:16px;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ag .rows .when{grid-row:1 / 3;grid-column:2;font-weight:600;font-size:13px;color:var(--mp-strong);white-space:nowrap}
+  .ag .rows .meta{grid-column:1;font-size:12px;color:var(--mp-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ag .rows button.sel b{color:var(--mp-strong)}
+  .ag .none{color:var(--mp-muted);text-align:center;padding:26px 10px;font-size:.9rem}
+  .ag .panel{display:block;padding:20px max(16px,env(safe-area-inset-right)) 20px max(16px,env(safe-area-inset-left));border-top:2px solid var(--mp-divider)}
+  .ag .panel.lead{border-top:0}
+  .ag h1{font-size:clamp(28px,7.5vw,40px);line-height:1.05;letter-spacing:-.02em;font-weight:800;margin:4px 0 0}
+  .ag h2{font-size:20px;line-height:1.15;font-weight:800;margin:0}
+  .ag .mini{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mp-muted)}
+  .ag .sub{font-size:14px;color:var(--mp-soft);margin-top:8px}
+  .ag .facts{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);border-top:2px solid var(--mp-divider);margin-top:16px}
+  .ag .facts > div{padding:8px 12px 8px 0}
+  .ag .facts > div + div{padding:8px 0 8px 12px;border-left:1px solid var(--mp-divider)}
+  .ag .big{font-weight:800;font-size:19px;line-height:1.15;margin-top:2px}
+  .ag .facts .sub{margin-top:2px;font-size:13px}
+  .ag .bring{border-top:1px solid var(--mp-divider);padding-top:12px;margin-top:12px;font-size:15px;color:var(--mp-soft)}
+  .ag .bring b{color:var(--mp-text);font-weight:800}
+  .ag .show{list-style:none;margin:12px 0 0;padding:0;border-top:2px solid var(--mp-divider)}
+  .ag .show li{display:grid;grid-template-columns:3.3em minmax(0,1fr) auto;gap:0 12px;align-items:baseline;
+    padding:12px 4px;border-bottom:1px solid var(--mp-divider)}
+  .ag .show time{font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}
+  .ag .show b{display:block;font-weight:800;font-size:16px;line-height:1.25}
+  .ag .show .note{display:block;font-size:14px;line-height:1.45;color:var(--mp-soft);margin-top:3px}
+  .ag .show .min{font-size:13px;font-weight:600;color:var(--mp-strong);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .ag .show li.end{border-bottom:0}
+  .ag .show li.end b{color:var(--mp-strong)}
   .ag .sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  @media (prefers-reduced-motion: reduce){
+    .ag .stage{transition:none}
+  }
 </style>
 </head>
 <body>
-<div class="ag">
+<div class="ag" data-view="agenda">
 <div class="app">
-  <main>
-    <h1>Agendas</h1>
+  <header class="top">
+    <span class="brand">Hypercomb <em>Meetup</em></span>
+    <button type="button" class="list-btn" data-list aria-pressed="false" aria-label="All agendas">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2"></path>
+      </svg>
+    </button>
+  </header>
+  <section class="stage" data-stage aria-live="polite"></section>
+  <section class="listview" data-listview hidden>
+    <p class="kicker">Agendas</p>
     <p class="sr" data-count role="status"></p>
     <label class="sr" for="ag-q">Search agendas</label>
     <input class="search" id="ag-q" type="search" placeholder="Search dates" data-search>
     <ul class="rows" data-rows></ul>
     <p class="none" data-empty hidden>No agendas yet.</p>
     <p class="none" data-nomatch hidden>Nothing matches.</p>
-  </main>
+  </section>
 </div>
 </div>
 <script>
@@ -73,7 +118,7 @@
   var DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
   var HISTORY = '@diamondcoreprocessor.com/HistoryService';
   var STORE = '@hypercomb.social/Store';
-  var state = { rows: [], q: '' };
+  var state = { rows: [], q: '', selected: '', view: 'agenda', busy: false, touched: false };
 
   function ioc(key) {
     try { return window.ioc && window.ioc.get && window.ioc.get(key); } catch (e) { return null; }
@@ -411,59 +456,225 @@
       return a.date < b.date ? 1 : a.date > b.date ? -1 : 0;
     });
   }
-  function span(text) {
-    var when = String(text || '').trim();
-    if (!when) return '';
-    var ends = String(arguments[1] || '').trim();
-    var where = String(arguments[2] || '').trim();
-    return [when && ends ? when + '–' + ends : when || ends, where].filter(Boolean).join(' · ');
-  }
   function matches(row) {
     if (!state.q) return true;
     var blocks = (row.blocks || []).map(function (b) { return (b.title || '') + ' ' + (b.note || ''); }).join(' ');
     var hay = [row.date, row.title, row.line, row.where, row.address, longDate(row.date), blocks].join(' ').toLowerCase();
     return state.q.toLowerCase().split(/\s+/).every(function (w) { return !w || hay.indexOf(w) >= 0; });
   }
-  function render() {
+  function rowByDate(date) {
+    for (var i = 0; i < state.rows.length; i++) if (state.rows[i].date === date) return state.rows[i];
+    return null;
+  }
+  function chosen() {
+    return rowByDate(state.selected) || ordered(state.rows)[0] || null;
+  }
+  function shownRows() {
+    var rows = ordered(state.rows).filter(matches);
+    if (state.q || !state.selected) return rows;
+    var at = -1;
+    for (var i = 0; i < rows.length; i++) if (rows[i].date === state.selected) { at = i; break; }
+    if (at > 0) { rows = rows.slice(); rows.unshift(rows.splice(at, 1)[0]); }
+    return rows;
+  }
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text != null) node.textContent = text;
+    return node;
+  }
+  function paintStage(row) {
+    var stage = $('[data-stage]');
+    stage.textContent = '';
+    if (!row) return;
+    var lead = el('section', 'panel lead');
+    lead.setAttribute('aria-label', 'The meeting');
+    var head = document.createElement('header');
+    head.appendChild(el('span', 'kicker', 'Meetup agenda'));
+    head.appendChild(el('h1', '', row.title || 'Agenda'));
+    lead.appendChild(head);
+    if (row.line) lead.appendChild(el('p', 'sub', row.line));
+    var facts = el('div', 'facts');
+    var when = el('div');
+    when.appendChild(el('div', 'mini', 'When'));
+    when.appendChild(el('div', 'big', row.time && row.ends ? row.time + '–' + row.ends : (row.time || '')));
+    if (row.whenNote) when.appendChild(el('div', 'sub', row.whenNote));
+    else if (row.date) when.appendChild(el('div', 'sub', longDate(row.date)));
+    var where = el('div');
+    where.appendChild(el('div', 'mini', 'Where'));
+    where.appendChild(el('div', 'big', row.where || ''));
+    if (row.address) where.appendChild(el('div', 'sub', row.address));
+    facts.appendChild(when);
+    facts.appendChild(where);
+    lead.appendChild(facts);
+    if (row.bring) {
+      var bring = el('p', 'bring');
+      bring.appendChild(el('b', '', 'Bring'));
+      bring.appendChild(document.createTextNode(' ' + row.bring));
+      lead.appendChild(bring);
+    }
+    stage.appendChild(lead);
+    var show = el('section', 'panel');
+    show.appendChild(el('span', 'kicker', 'Run of show'));
+    var h2 = el('h2', '', 'The morning, block by block.');
+    h2.id = 'show-title';
+    show.setAttribute('aria-labelledby', 'show-title');
+    show.appendChild(h2);
+    var ol = el('ol', 'show');
+    (row.blocks || []).forEach(function (block, index, all) {
+      var li = document.createElement('li');
+      if (index === all.length - 1) li.className = 'end';
+      li.appendChild(el('time', '', block.time || ''));
+      var text = document.createElement('div');
+      text.appendChild(el('b', '', block.title || ''));
+      if (block.note) text.appendChild(el('span', 'note', block.note));
+      li.appendChild(text);
+      li.appendChild(el('span', 'min', block.min || ''));
+      ol.appendChild(li);
+    });
+    show.appendChild(ol);
+    stage.appendChild(show);
+  }
+  function paintList() {
     var into = $('[data-rows]');
     into.textContent = '';
-    var shown = ordered(state.rows).filter(matches);
-    shown.forEach(function (row) {
+    shownRows().forEach(function (row) {
       var li = document.createElement('li');
-      var link = document.createElement('a');
-      link.className = 'mini';
-      link.href = '/' + encodeURIComponent(row.date);
-      var slot = document.createElement('span');
-      slot.className = 'slot';
-      slot.textContent = row.date.slice(8);
-      var who = document.createElement('span');
-      who.className = 'who';
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.setAttribute('data-date', row.date);
+      if (row.date === state.selected) button.className = 'sel';
       var b = document.createElement('b');
-      b.textContent = row.title;
-      var small = document.createElement('small');
-      small.textContent = span(row.time, row.ends, row.where) || longDate(row.date);
-      who.appendChild(b); who.appendChild(small);
-      link.appendChild(slot); link.appendChild(who);
-      li.appendChild(link);
+      b.textContent = row.title || row.date;
+      var when = document.createElement('span');
+      when.className = 'when';
+      when.textContent = row.time && row.ends ? row.time + '–' + row.ends : (row.time || row.date.slice(5));
+      var meta = document.createElement('span');
+      meta.className = 'meta';
+      meta.textContent = [longDate(row.date), row.where].filter(Boolean).join(' · ');
+      button.appendChild(b);
+      button.appendChild(when);
+      button.appendChild(meta);
+      li.appendChild(button);
       into.appendChild(li);
     });
+  }
+  function setView(next) {
+    state.view = next;
+    root.setAttribute('data-view', next);
+    var button = $('[data-list]');
+    var onList = next === 'list';
+    button.setAttribute('aria-pressed', onList ? 'true' : 'false');
+    button.setAttribute('aria-label', onList ? 'Show the agenda' : 'All agendas');
+    $('[data-listview]').hidden = !onList;
+    $('[data-stage]').hidden = onList;
+  }
+  function render() {
+    var row = chosen();
+    state.selected = row ? row.date : '';
+    paintStage(row);
+    paintList();
     var n = state.rows.length;
+    var shown = shownRows();
     $('[data-count]').textContent = n === 1 ? '1 date' : n + ' dates';
     $('[data-empty]').hidden = n > 0;
     $('[data-nomatch]').hidden = !(n > 0 && shown.length === 0);
+    if (!row) setView('list');
+  }
+  function atTop() {
+    var page = document.scrollingElement ? document.scrollingElement.scrollTop : 0;
+    var app = $('.app');
+    return page < 8 && (!app || app.scrollTop < 8);
+  }
+  function reduced() {
+    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  }
+  function expand(date) {
+    state.touched = true;
+    var row = rowByDate(date) || chosen();
+    if (!row) { setView('list'); return; }
+    state.selected = row.date;
+    setView('agenda');
+    paintStage(row);
+    paintList();
+    var page = document.scrollingElement;
+    if (page) page.scrollTop = 0;
+  }
+  function collapse() {
+    state.touched = true;
+    if (state.busy) return;
+    if (!chosen()) { setView('list'); render(); return; }
+    if (state.view === 'list') { expand(state.selected); return; }
+    var stage = $('[data-stage]');
+    var finish = function () {
+      state.busy = false;
+      setView('list');
+      paintList();
+      var page = document.scrollingElement;
+      if (page) page.scrollTop = 0;
+    };
+    if (reduced() || !stage || typeof stage.animate !== 'function') { finish(); return; }
+    state.busy = true;
+    var from = stage.getBoundingClientRect().height || 68;
+    stage.style.overflow = 'hidden';
+    var anim = stage.animate(
+      [{ height: from + 'px' }, { height: '68px' }],
+      { duration: 220, easing: 'cubic-bezier(.2,.7,.2,1)' }
+    );
+    var done = false;
+    var end = function () {
+      if (done) return;
+      done = true;
+      stage.style.overflow = '';
+      stage.style.height = '';
+      finish();
+    };
+    anim.onfinish = end;
+    anim.oncancel = end;
   }
   $('[data-search]').addEventListener('input', function (e) {
+    state.touched = true;
     state.q = String(e.target.value || '').trim();
     render();
   });
+  $('[data-list]').addEventListener('click', function () { collapse(); });
+  $('[data-rows]').addEventListener('click', function (e) {
+    var button = e.target && e.target.closest ? e.target.closest('button') : null;
+    if (!button || !root.contains(button)) return;
+    var date = button.getAttribute('data-date');
+    if (date) expand(date);
+  });
+  var swipe = null;
+  root.addEventListener('touchstart', function (e) {
+    if (state.view !== 'agenda' || e.touches.length !== 1) { swipe = null; return; }
+    swipe = { y: e.touches[0].clientY, x: e.touches[0].clientX, t: Date.now(), top: atTop() };
+  }, { passive: true });
+  root.addEventListener('touchend', function (e) {
+    if (!swipe || !swipe.top) { swipe = null; return; }
+    var t = e.changedTouches[0];
+    var dy = swipe.y - t.clientY;
+    var dx = Math.abs(swipe.x - t.clientX);
+    var dt = Date.now() - swipe.t;
+    swipe = null;
+    if (dy > 48 && dx < 40 && dt < 420) collapse();
+  }, { passive: true });
+  root.addEventListener('touchcancel', function () { swipe = null; });
   var history = ioc(HISTORY);
   var read = history && history.sign && history.currentLayerAt
     ? agendaLayer(history).then(function (layer) { return layer || doorLayer(); })
     : doorLayer();
   read.then(function (layer) { return itemsOf(layer); }).then(function (rows) {
     state.rows = rows;
+    var first = ordered(rows)[0];
+    if (!state.selected) state.selected = first ? first.date : '';
+    // A pull or a search before the dates arrive keeps the view they chose.
+    if (!state.touched) setView(first ? 'agenda' : 'list');
+    else if (!first) setView('list');
     render();
-  }, function () { render(); });
+  }, function () {
+    if (!state.touched) setView('list');
+    render();
+  });
 })();
 </script>
 </body>
