@@ -108,7 +108,7 @@ module.exports = {
         { id: 'c1', label: 'primitive', x: 170, y: 222, r: 42 },
         { id: 'c2', label: 'act', x: 320, y: 222, r: 42 },
         { id: 'c3', label: 'opening', x: 470, y: 222, r: 42 },
-        { id: 'v', label: '0000 · 0001 · 0002', sub: 'versions, newest is the heart', kind: 'box', x: 320, y: 318, w: 300 },
+        { id: 'v', label: '00000000 · 00000001 · 00000002', sub: 'versions, newest is the heart', kind: 'box', x: 320, y: 318, w: 330 },
       ],
       edges: [['name', 'c1'], ['name', 'c2'], ['name', 'c3']],
     },
@@ -151,4 +151,207 @@ module.exports = {
     ],
     files: ['documentation/life-primitive.md', 'documentation/ontology-is-the-name.md', 'hypercomb-core/src/core/life-primitive.ts'],
   },
+  // ── the opening: seven moves, from one hexagon to the cube ──────────────
+  // (living-presentation.md, "From one hexagon to the cube, in seven moves")
+
+  'presentation/simple/opening': {
+    title: 'The opening',
+    lede: 'Seven moves, from one hexagon to a cube that was never drawn.',
+    picture: {
+      label: 'The seven moves in order',
+      nodes: [
+        { id: 'm1', label: 'hexagon', sub: '1', x: 62, y: 120, r: 36 },
+        { id: 'm2', label: 'row', sub: '2', x: 148, y: 250, r: 36 },
+        { id: 'm3', label: 'stack', sub: '3', x: 234, y: 120, r: 36 },
+        { id: 'm4', label: 'column', sub: '4', x: 320, y: 250, r: 36 },
+        { id: 'm5', label: 'spread', sub: '5', x: 406, y: 120, r: 36 },
+        { id: 'm6', label: 'fill', sub: '6', x: 492, y: 250, r: 36 },
+        { id: 'm7', label: 'tesseract', sub: '7', x: 578, y: 120, r: 36 },
+      ],
+      edges: [['m1', 'm2'], ['m2', 'm3'], ['m3', 'm4'], ['m4', 'm5'], ['m5', 'm6'], ['m6', 'm7']],
+    },
+    beats: [
+      { say: 'The cube is not saved for later. It is built first, on screen, from the primitive.', lit: ['m1'] },
+      { say: 'Each part of the primitive gives a direction, so no axis has to be invented.', lit: ['m1', 'm2', 'm3', 'm1-m2', 'm2-m3'] },
+      { say: 'The layer gives breadth and depth of words; the signature gives versions; origin gives width.', lit: ['m2', 'm3', 'm4', 'm5', 'm2-m3', 'm3-m4', 'm4-m5'] },
+      { say: 'Then the points fill a cube, and every trait is one more direction.', lit: ['m6', 'm7', 'm5-m6', 'm6-m7'] },
+      { say: 'Each move ends on one plain sentence. Step into a move to see it.', lit: ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm1-m2', 'm2-m3', 'm3-m4', 'm4-m5', 'm5-m6', 'm6-m7'] },
+    ],
+    code: [],
+    files: ['documentation/living-presentation.md'],
+  },
+
+  'presentation/simple/opening/hexagon': {
+    title: 'Move one: one hexagon',
+    lede: 'One hexagon, named hypercomb. For now it is only a name.',
+    picture: { label: 'Hypercomb alone, then opening into its four parts', nodes: PRIMITIVE_NODES, edges: PRIMITIVE_EDGES },
+    beats: [
+      { say: 'Hypercomb sits alone.', lit: ['hypercomb'] },
+      { say: 'It opens into its four parts: word, signature, layer, and meta.', lit: ALL },
+      { say: 'Nothing else is introduced, now or later. Every move after this is the same tile again.', lit: ['hypercomb'] },
+      { say: 'This is hypercomb, and for now it is only a name.', lit: ['hypercomb', 'word', 'hypercomb-word'] },
+    ],
+    code: [{ path: 'hypercomb-core/src/core/life-primitive.ts', from: 'export type LifeLayer = {', lines: 5 }],
+    files: ['documentation/life-primitive.md', 'hypercomb-core/src/core/life-primitive.ts'],
+  },
+
+  'presentation/simple/opening/row': {
+    title: 'Move two: a row',
+    lede: 'A layer is the words that sit under one word.',
+    picture: {
+      label: 'Hypercomb with its six values in a row beneath it',
+      nodes: [
+        { id: 'top', label: 'hypercomb', x: 320, y: 80, r: 44 },
+        { id: 'v1', label: 'simple', x: 70, y: 260, r: 40 },
+        { id: 'v2', label: 'organized', x: 170, y: 260, r: 40 },
+        { id: 'v3', label: 'collab…', x: 270, y: 260, r: 40 },
+        { id: 'v4', label: 'intelligent', x: 370, y: 260, r: 40 },
+        { id: 'v5', label: 'accessible', x: 470, y: 260, r: 40 },
+        { id: 'v6', label: 'localized', x: 570, y: 260, r: 40 },
+      ],
+      edges: [['top', 'v1'], ['top', 'v2'], ['top', 'v3'], ['top', 'v4'], ['top', 'v5'], ['top', 'v6']],
+    },
+    beats: [
+      { say: 'Under the tile, its layer lays out as a row.', lit: ['top'] },
+      { say: 'Six values, side by side: simple, organized, collaborative, intelligent, accessible, localized.', lit: ['top', 'v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'top-v1', 'top-v2', 'top-v3', 'top-v4', 'top-v5', 'top-v6'] },
+      { say: 'Each one opens to the same four parts. The same shape, six more times, proves the shape.', lit: ['v1', 'v2', 'v3', 'v4', 'v5', 'v6'] },
+      { say: 'This is the word direction: a row of words under one word.', lit: ['top', 'v1', 'v6', 'top-v1', 'top-v6'] },
+      { say: 'A layer is the words that sit under one word.', lit: ['top', 'v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'top-v1', 'top-v2', 'top-v3', 'top-v4', 'top-v5', 'top-v6'] },
+    ],
+    code: [{ path: 'hypercomb-core/src/core/canonical-layer.ts', from: 'export type CanonicalLayerContent = {', lines: 5 }],
+    files: ['documentation/concepts.md', 'hypercomb-core/src/core/canonical-layer.ts'],
+  },
+
+  'presentation/simple/opening/stack': {
+    title: 'Move three: rows under rows',
+    lede: 'Every word can hold a layer of its own.',
+    picture: {
+      label: 'Values, each with a row of its own beneath it',
+      nodes: [
+        { id: 'a', label: 'simple', x: 130, y: 90, r: 38 },
+        { id: 'b', label: 'organized', x: 320, y: 90, r: 38 },
+        { id: 'c', label: 'collab…', x: 510, y: 90, r: 38 },
+        { id: 'a1', label: 'primitive', x: 80, y: 260, r: 30 },
+        { id: 'a2', label: 'act', x: 180, y: 260, r: 30 },
+        { id: 'b1', label: 'heart', x: 270, y: 260, r: 30 },
+        { id: 'b2', label: 'history', x: 370, y: 260, r: 30 },
+        { id: 'c1', label: 'domain', x: 460, y: 260, r: 30 },
+        { id: 'c2', label: 'sharing', x: 560, y: 260, r: 30 },
+      ],
+      edges: [['a', 'a1'], ['a', 'a2'], ['b', 'b1'], ['b', 'b2'], ['c', 'c1'], ['c', 'c2']],
+    },
+    beats: [
+      { say: 'Each value opens into a row of its own.', lit: ['a', 'a1', 'a2', 'a-a1', 'a-a2'] },
+      { say: 'And each of those is a tile with a layer, so there are rows under rows.', lit: ['a', 'b', 'c', 'a1', 'a2', 'b1', 'b2', 'c1', 'c2', 'a-a1', 'a-a2', 'b-b1', 'b-b2', 'c-c1', 'c-c2'] },
+      { say: 'The plane becomes a stack of planes.', lit: ['a1', 'a2', 'b1', 'b2', 'c1', 'c2'] },
+      { say: 'A path from the top reads aloud: simple, primitive, word.', lit: ['a', 'a1', 'a-a1'] },
+      { say: 'Every word can hold a layer of its own.', lit: ['a', 'b', 'c', 'a1', 'a2', 'b1', 'b2', 'c1', 'c2', 'a-a1', 'a-a2', 'b-b1', 'b-b2', 'c-c1', 'c-c2'] },
+    ],
+    code: [{ path: 'hypercomb-core/src/core/lineage-key.ts', from: 'export const lineageKey', lines: 4 }],
+    files: ['documentation/concepts.md', 'hypercomb-core/src/core/lineage-key.ts'],
+  },
+
+  'presentation/simple/opening/column': {
+    title: 'Move four: a column',
+    lede: 'Nothing is replaced. Every change is kept, and the newest is the heart.',
+    picture: {
+      label: 'One tile\'s versions stacked into a column, the newest on top',
+      nodes: [
+        { id: 'v0', label: '00000000', sub: 'first', kind: 'box', x: 320, y: 300, w: 170 },
+        { id: 'v1', label: '00000001', kind: 'box', x: 320, y: 220, w: 170 },
+        { id: 'v2', label: '00000002', kind: 'box', x: 320, y: 140, w: 170 },
+        { id: 'heart', label: 'heart', sub: 'what answers now', x: 540, y: 140, r: 40 },
+        { id: 'tile', label: 'primitive', x: 110, y: 220, r: 40 },
+      ],
+      edges: [['v2', 'heart'], ['tile', 'v0'], ['tile', 'v1'], ['tile', 'v2']],
+    },
+    beats: [
+      { say: 'One tile changes, and gets a new signature.', lit: ['tile', 'v0', 'v1', 'tile-v0', 'tile-v1'] },
+      { say: 'The old one does not vanish. It stays, and the new one sits above it.', lit: ['v0', 'v1'] },
+      { say: 'Every change adds a marker on top, and the stack becomes a column.', lit: ['v0', 'v1', 'v2', 'tile', 'tile-v2'] },
+      { say: 'The top of the column is the heart: what a read lands on, what a publish points at.', lit: ['v2', 'heart', 'v2-heart'] },
+      { say: 'Versions belong to each tile; two tiles\' second versions are not the same thing.', lit: ['v1'] },
+      { say: 'Nothing is replaced. Every change is kept, one above the other.', lit: ['v0', 'v1', 'v2', 'heart', 'v2-heart'] },
+    ],
+    code: [
+      { path: 'hypercomb-core/src/core/directory-safety.ts', from: 'export const markerName', lines: 4 },
+      { path: 'hypercomb-essentials/src/history/history.service.ts', from: ' * One history entry.', lines: 9 },
+    ],
+    files: ['documentation/history-sigbag-as-root.md', 'documentation/revision-mode.md', 'hypercomb-core/src/core/directory-safety.ts', 'hypercomb-essentials/src/history/history.service.ts'],
+  },
+
+  'presentation/simple/opening/spread': {
+    title: 'Move five: spread',
+    lede: 'The same word can come from many hands.',
+    picture: {
+      label: 'One word answered by tiles from different origins, one a chain',
+      nodes: [
+        { id: 'word', label: 'simple', sub: 'one word', x: 320, y: 70, r: 40 },
+        { id: 'mine', label: 'yours', sub: 'origin: you', kind: 'box', x: 120, y: 205, w: 150 },
+        { id: 'ann', label: 'from ann', sub: 'origin: ann', kind: 'box', x: 320, y: 205, w: 150 },
+        { id: 'bo', label: 'from bo', sub: 'via ann', kind: 'box', x: 520, y: 205, w: 150 },
+        { id: 'thread', label: 'bo → ann → you', sub: 'a thread', kind: 'box', x: 420, y: 312, w: 190 },
+      ],
+      edges: [['word', 'mine'], ['word', 'ann'], ['word', 'bo'], ['bo', 'thread'], ['ann', 'thread']],
+    },
+    beats: [
+      { say: 'The same word can be answered by a tile from somewhere else.', lit: ['word', 'mine', 'word-mine'] },
+      { say: 'Your own, or one replicated from someone you follow.', lit: ['word', 'mine', 'ann', 'word-mine', 'word-ann'] },
+      { say: 'Where a tile came from is a trait it wears, like any other mark: its origin.', lit: ['ann', 'bo'] },
+      { say: 'An origin can be a chain, drawn as a thread running back through other hives.', lit: ['bo', 'ann', 'thread', 'bo-thread', 'ann-thread'] },
+      { say: 'The same word can come from many hands.', lit: ['word', 'mine', 'ann', 'bo', 'word-mine', 'word-ann', 'word-bo'] },
+    ],
+    code: [{ path: 'hypercomb-core/src/core/molecule-address.ts', from: 'export const moleculeKey', lines: 2 }],
+    files: ['documentation/pools-across-hosts.md', 'documentation/hypergraph-molecule-lineage.md', 'hypercomb-core/src/core/molecule-address.ts'],
+  },
+
+  'presentation/simple/opening/fill': {
+    title: 'Move six: the cube fills',
+    lede: 'Every tile is a point, and the points fill a cube. We never drew the cube.',
+    picture: {
+      label: 'Three directions, words, versions and origins, filling a cube',
+      nodes: [
+        { id: 'cube', label: 'cube', sub: 'never drawn', x: 320, y: 190, r: 52 },
+        { id: 'words', label: 'words', sub: 'the layer', kind: 'box', x: 110, y: 300, w: 150 },
+        { id: 'versions', label: 'versions', sub: 'the signature', kind: 'box', x: 320, y: 60, w: 150 },
+        { id: 'origins', label: 'origins', sub: 'where from', kind: 'box', x: 530, y: 300, w: 150 },
+      ],
+      edges: [['words', 'cube'], ['versions', 'cube'], ['origins', 'cube']],
+    },
+    beats: [
+      { say: 'Every tile is now a point: a word, at a version, from an origin.', lit: ['words', 'versions', 'origins'] },
+      { say: 'The words run one way, the versions another, the origins a third.', lit: ['words', 'versions', 'origins', 'words-cube', 'versions-cube', 'origins-cube'] },
+      { say: 'The points fill a cube.', lit: ['cube', 'words-cube', 'versions-cube', 'origins-cube'] },
+      { say: 'No cube was drawn. The primitive was repeated in three directions, and this is what that looks like.', lit: ['cube'] },
+    ],
+    code: [],
+    files: ['documentation/superimposition.md'],
+  },
+
+  'presentation/simple/opening/tesseract': {
+    title: 'Move seven: every other direction',
+    lede: 'Meaning and traits add more directions. Everything here is the same thing, used again.',
+    picture: {
+      label: 'More traits as more directions, a fourth making a tesseract',
+      nodes: [
+        { id: 'cube', label: 'cube', x: 200, y: 190, r: 46 },
+        { id: 'tess', label: 'tesseract', sub: 'a fourth trait', x: 460, y: 190, r: 54 },
+        { id: 'locale', label: 'locale', kind: 'box', x: 110, y: 60, w: 120 },
+        { id: 'platform', label: 'platform', kind: 'box', x: 290, y: 60, w: 120 },
+        { id: 'audience', label: 'audience', kind: 'box', x: 110, y: 320, w: 120 },
+        { id: 'reviews', label: 'reviews', kind: 'box', x: 290, y: 320, w: 120 },
+      ],
+      edges: [['locale', 'cube'], ['platform', 'cube'], ['audience', 'cube'], ['reviews', 'cube'], ['cube', 'tess']],
+    },
+    beats: [
+      { say: 'One point opens its meta layer. Whatever it says is another word that can divide the points.', lit: ['cube'] },
+      { say: 'Locale, platform, audience, reviews: traits, exactly as origin is.', lit: ['locale', 'platform', 'audience', 'reviews', 'locale-cube', 'platform-cube', 'audience-cube', 'reviews-cube'] },
+      { say: 'A trait picker chooses any three to draw as the cube\'s directions.', lit: ['cube', 'locale', 'platform', 'locale-cube', 'platform-cube'] },
+      { say: 'Add a fourth, and the cube becomes a tesseract: a cube inside a cube.', lit: ['cube', 'tess', 'cube-tess'] },
+      { say: 'Everything here is the same thing, used again.', lit: ['cube', 'tess', 'locale', 'platform', 'audience', 'reviews', 'cube-tess', 'locale-cube', 'platform-cube', 'audience-cube', 'reviews-cube'] },
+    ],
+    code: [{ path: 'hypercomb-core/src/core/trait.ts', from: 'export interface TraitWant', lines: 2 }],
+    files: ['documentation/traits.md', 'documentation/superimposition.md', 'hypercomb-core/src/core/trait.ts'],
+  },
+
 }

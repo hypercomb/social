@@ -17,7 +17,7 @@
 
 import { EffectBus, QueenBee, TRAIT_WANT_KIND, traitWords, type TraitWant } from '@hypercomb/core'
 import { listDecorations, removeDecorationAndWait, writeDecoration } from './decoration-manifest.js'
-import { LAYOUT_KIND, layoutNames, leftOut, parseLayoutArgs, type LayoutRecord } from './layout.js'
+import { LAYOUT_KIND, layoutNames, layoutSeats, leftOut, parseLayoutArgs, type LayoutRecord } from './layout.js'
 import { layoutAt, namesOf, store } from './layout-read.js'
 import { childNamesAt, say, standing } from './trait-read.js'
 
@@ -89,7 +89,14 @@ export class LayoutQueenBee extends QueenBee {
 
     if (!next.on) { say(`"${name}": layout off — every child shows`); return }
     const names = await namesOf(next)
-    const out = leftOut(await childNamesAt(here), names)
+    const children = await childNamesAt(here)
+    // IN THE WORDS' ORDER: the named children take the first seats, one after
+    // another (the page's order claim, history/tile-order.ts). A child left
+    // out claims no seat while the layout is on.
+    const seats = layoutSeats(children, names)
+    const committer = window.ioc.get<{ commitOrder?(segments: readonly string[], order: { set?: Record<string, number> }): Promise<string> }>('@diamondcoreprocessor.com/LayerCommitter')
+    if (Object.keys(seats).length) await committer?.commitOrder?.(here, { set: seats })
+    const out = leftOut(children, names)
     say(`"${name}": layout on — ${names.join(', ')}${out.length ? `. Left out: ${out.join(', ')}` : ''}`)
   }
 

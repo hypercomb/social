@@ -70,3 +70,16 @@ export function currentLayout(records: readonly { record?: { payload?: unknown }
   }
   return null
 }
+
+/** The seats a layout gives: each named child, in the words' order, takes the
+ *  next seat from 0. Children the words do not name get none: they are left
+ *  out, so they claim no seat while the layout is on. */
+export function layoutSeats(children: readonly string[], names: readonly string[]): Record<string, number> {
+  const seats: Record<string, number> = {}
+  let next = 0
+  for (const name of names) {
+    const child = children.find(c => sameTraitWord(c, name))
+    if (child !== undefined && !(child in seats)) seats[child] = next++
+  }
+  return seats
+}

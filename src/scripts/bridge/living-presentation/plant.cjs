@@ -171,9 +171,11 @@ if (!PUBLISH_ONLY) {
       sentences.push(`go /${at}`, `trait ${tile.children.map(c => c.name).join(' ')}`)
       const old = RETIRE ? retired.markers[at] ?? [] : []
       if (old.length) sentences.push(`trait ~ ${old.join(' ')}`)
-      sentences.push('layout on')
     }
   }
+  // Layouts last, once every layer's tiles exist: `layout on` seats the
+  // named children in the markers' order, and a tile not made yet gets no seat.
+  for (const p of plantings) for (const { at } of p.layers) sentences.push(`go /${at}`, 'layout on')
 }
 if (!TILES_ONLY && !PUBLISH_ONLY) {
   // The earlier planting's notes first, under the routes planted now.
