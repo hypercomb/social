@@ -22,6 +22,7 @@ const world = vi.hoisted(() => ({
   here: ['presentation', 'simple'] as string[],
   said: [] as string[],
   claims: [] as ((name: string, segments: readonly string[]) => boolean)[],
+  orders: [] as { segments: string[]; set: Record<string, number> }[],
   seq: 0,
 }))
 
@@ -36,7 +37,10 @@ vi.hoisted(() => {
     getResource: async (sig: string) => (world.resources.has(sig) ? { text: async () => world.resources.get(sig)! } : null),
   }
   ;(window as unknown as { ioc: unknown }).ioc = {
-    get: (key: string) => (key === '@hypercomb.social/Store' ? store : undefined),
+    get: (key: string) => key === '@hypercomb.social/Store' ? store
+      : key === '@diamondcoreprocessor.com/LayerCommitter'
+        ? { commitOrder: async (segments: readonly string[], order: { set: Record<string, number> }) => { world.orders.push({ segments: [...segments], set: order.set }); return 'order' } }
+        : undefined,
     register: () => {},
     whenReady: () => {},
   }
@@ -68,7 +72,7 @@ vi.mock('./decoration-kind-index.js', () => ({
 }))
 
 import { EffectBus, TRAIT_WANT_KIND } from '@hypercomb/core'
-import { LAYOUT_KIND, currentLayout, layoutNames, leftOut, parseLayoutArgs } from './layout.js'
+import { LAYOUT_KIND, currentLayout, layoutNames, layoutSeats, leftOut, parseLayoutArgs } from './layout.js'
 import { LayoutQueenBee } from './layout.queen.js'
 import './layout-view.drone.js'
 
@@ -82,6 +86,7 @@ beforeEach(() => {
   world.slots.clear()
   world.children.clear()
   world.said = []
+  world.orders = []
   world.here = ['presentation', 'simple']
 })
 
@@ -102,6 +107,11 @@ describe('the layout rules', () => {
     expect(layoutNames(['act', ' ', 'Act', 'opening'])).toEqual(['act', 'opening'])
   })
 
+  it('seats the named children first, in the words\' order', () => {
+    expect(layoutSeats(['opening', 'Act', 'extra', 'primitive'], ['primitive', 'act', 'opening'])).toEqual({ primitive: 0, Act: 1, opening: 2 })
+    expect(layoutSeats(['a'], ['missing', 'a'])).toEqual({ a: 0 })
+  })
+
   it('reads the newest record as the layout', () => {
     const sig = 'a'.repeat(64)
     expect(currentLayout([{ record: { payload: { on: true, names: sig } } }, { record: { payload: { on: false } } }])).toEqual({ on: false })
@@ -120,6 +130,7 @@ describe('the layout word', () => {
     expect(payload.on).toBe(true)
     expect(JSON.parse(world.resources.get(payload.names)!)).toEqual(['primitive', 'act', 'opening'])
     expect(world.said.at(-1)).toContain('Left out: marker')
+    expect(world.orders.at(-1)).toEqual({ segments: ['presentation', 'simple'], set: { primitive: 0, act: 1, opening: 2 } })
 
     await new LayoutQueenBee().invoke('off')
     const records = layoutsAt('presentation/simple')
