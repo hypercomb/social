@@ -196,18 +196,45 @@ brand"; "there should be a way on the groups to change launcher renderings").
 - A **view** is a property: `view` on the showcase (how All is drawn) and `view`
   on a community (how that page is drawn). Absent, a community is drawn as All
   is, and All is drawn as **hexagons**, the brand's default. An explicit `hex`
-  on a community beats an inherited `launcher`.
+  on a community beats an inherited `launcher`, `iphone`, `list`, or `tiles`.
 - `hex` is the comb of hexagons. `launcher` is the traditional launcher: the
   same tiles in rows of four, rounded icons with the name beneath, the same
-  owner counts, check marks and links. A name this reader does not know is not a
-  view, and the page is drawn as hexagons.
+  owner counts, check marks and links. `iphone` is the iPhone launcher: those
+  same tiles as icons in four columns on a phone-shaped screen, the name under
+  each one. Once the page has more than four, the first four sit in the dock
+  and the rest in the grid above it. `list` is a column of blocks: the picture
+  at the left, the name and address beside it. A block on your own page is a
+  link, and a tap opens it. A block under another domain is on or off — on
+  wears the check, off is gray — and a tap switches it, the same as the other
+  shapes. `tiles` is one column of squares, and the column is a scroller: the
+  frame is square, each square fills it, the picture goes to every edge, and a
+  flick lands on the next square. The name and address sit on the picture. Up
+  and down in that column moves the next square into the frame. It does not
+  turn the set.
+- The names walk in that order — `hex`, then `launcher`, then `iphone`, then
+  `list`, then `tiles`, then back to `hex`. A new idea is another name in that list, drawn
+  by both readers (the hive that writes the record and the front door that
+  reads it). A name neither knows is not a view, and the page is drawn as
+  hexagons.
 - The followed domains stay the master list, drawn in the shape All has.
-- `?view=launcher` (or `?view=hex`) on the address asks for a shape for whoever
-  is looking, and signs nothing: the way to try one before choosing it.
+- `?view=tiles` (or `list`, or `iphone`, or `launcher`, or `hex`) on the address asks for a shape for
+  whoever is looking, and signs nothing: the way to try one before choosing it.
 - The set is closed on purpose: a view is a name this reader draws. A piece
   someone plugs in to draw a new shape would arrive as a signature-addressed
   resource, and that needs a decision about running foreign styling that is not
   made yet.
+
+**Managing changes what a swipe does (built).** With Manage off, a sideways
+swipe goes back and forward: through the sets when the page is showing them,
+and through the browser's own back and forward when it is not. An up or down
+drag stays a scroll. With Manage on, a sideways swipe changes the template of
+the page you are on (hexagons, the row launcher, the iPhone launcher, the list, the square column), and an
+up or down swipe changes the filtered set — the communities, or, when none are
+named, the domains you follow. Leaving Manage puts the sideways swipe back to
+back and forward. The template you landed on stays for this visit and signs
+nothing; choosing it for visitors is the community window's template control,
+then Publish. The arrow keys follow the same split. A line under the set's
+name says which template is showing, and how the two swipes are split.
 
 **Not built.**
 
@@ -240,7 +267,7 @@ tile is switched on or off for that group; leaving Manage hides the ones switche
 `community <domain>` opens the window (`sharing/community.view.ts`): the search with the Manage icon to its
 right, the current group's label (tap, swipe or arrow keys turn it; in Manage it renames), every candidate
 tile with the ones off grayed (a tap switches it for the group; leaving Manage hides them), new group,
-hexagons/launcher per group, delete, undo/redo (`community.draft.ts`) and **Publish**
+the template per group (hexagons, the row launcher, the iPhone launcher, the list, the square column), delete, undo/redo (`community.draft.ts`) and **Publish**
 (`community publish`), which asks first and signs `showcase:<zone>`. **Still owed:** the draft is
 in-window undo only, not yet the hive's own history slot, so closing the window drops the undo trail; and the
 candidates are this key's lineages on the zone, not yet the followed domains' tiles.
@@ -281,6 +308,10 @@ only the showcase open. Search and Follow are unchanged.
 arrival the page is the brand, the search, and the showcase's tiles, nothing else: no row headers, no other domains, no
 follow box. The Manage icon, to the right of the search, turns that same view into the manager: every domain you
 follow as a row, their tiles grayed until turned on, and the follow box. Pressing it again returns to the showcase.
+
+### The buttons sit at the bottom
+
+The page arrives as the brand and the tiles. The search is not there until it is asked for. A bar fixed at the bottom holds two buttons. The magnifying glass shows the search across the top and focuses it, or hides it and clears what was typed, so the top is only the brand. Manage opens the management screen — the domains, the tiles that can be turned on or off, and the follow box — and pressing it again returns to the showcase. Escape in the search hides it the same way.
 
 ### Groups are set aside (jwize 2026-10-25: "we aren't doing groups for now")
 
