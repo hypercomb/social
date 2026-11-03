@@ -9,9 +9,13 @@
 const content = require('./content.cjs')
 const tour = require('./tour.cjs')
 
-const lines = Object.entries(content)
-  .filter(([route, block]) => !tour.sceneAt(route) && Array.isArray(block.beats))
-  .flatMap(([route, block]) => block.beats.map((b, i) => ({ say: b.say, n: `${route} #${i + 1}`, name: b.say.slice(0, 48) })))
+// Every spoken line a page adds to the tour: a block's beats, and a capture's
+// caption (the scene's last beat, said while the narration turns to it). The
+// tour's own scenes are voiced by scripts/presentation/build.cjs.
+const lines = Object.entries(content).flatMap(([route, block]) => [
+  ...(!tour.sceneAt(route) && Array.isArray(block.beats) ? block.beats.map((b, i) => ({ say: b.say, n: `${route} #${i + 1}`, name: b.say.slice(0, 48) })) : []),
+  ...(block.live || []).map(l => ({ say: l.caption, n: `${route} (capture ${l.shot})`, name: l.caption.slice(0, 48) })),
+])
 
 tour.T.ensureAudio(lines, { check: process.argv.includes('--check') })
   .then(() => { if (!process.argv.includes('--check')) console.log(`${lines.length} beats voiced.`) })
