@@ -432,17 +432,21 @@ function integrityWorld(T, p) {
       if (fill > 0) {
         s += `<rect x="${MACH.x + 116}" y="${y - 5}" width="180" height="10" rx="5" fill="none" stroke="var(--line)" stroke-width="1.5"/>`
         s += `<rect x="${MACH.x + 116}" y="${y - 5}" width="${180 * easeOut(fill)}" height="10" rx="5" fill="var(--honey-fill)" opacity=".8"/>`
-        s += txt(MACH.x + 116 + 90, y + 28, 'hash(bytes) = sig', { size: 15, fill: 'var(--faint-text)', op: clamp01(fill * 2) * 0.9 })
+        s += txt(MACH.x + 116 + 90, y + 28, 'sha256(bytes) = signature', { size: 15, fill: 'var(--faint-text)', op: clamp01(fill * 2) * 0.9 })
       }
       const ok = easeOut(sp(1, 0.74 + k * 0.09, 0.88 + k * 0.09))
       if (ok > 0) s += check(MACH.x + 336, y, 1.3 * ok, { op: ok })
     })
   }
 
-  // beat 2 — identical content collapses to one copy; the network is a cache
+  // beat 2 — each host keeps its own replica under the same name; inside each,
+  // the same content is stored once (A6). You fetch from one host and check it on
+  // arrival (T1: replicate from a host; S3/T2: verify before you keep it)
   const e2 = sp(2, 0, 1)
   const PEERS = [{ x: 3060, y: 138 }, { x: 3330, y: 350 }, { x: 3670, y: 118 }, { x: 3850, y: 312 }]
-  const C = { x: 3490, y: 232 }
+  const replicaAt = n => ({ x: n.x + 54, y: n.y - 26 })
+  const SRC = PEERS[1]                                   // the host you happen to fetch from
+  const MINE = { x: PEERS[0].x, y: PEERS[0].y - 50 }     // the copy that arrives at you
   if (e2 > 0) {
     const eT = easeOut(sp(2, 0, 0.14))
     const MESH = [[0, 1], [1, 2], [2, 3], [0, 3], [1, 3]]
@@ -451,35 +455,36 @@ function integrityWorld(T, p) {
       s += `<circle cx="${n.x}" cy="${n.y}" r="30" fill="var(--bg)" stroke="${k === 0 ? 'var(--honey)' : 'var(--steel)'}" stroke-width="${k === 0 ? 2.4 : 1.5}" opacity="${eT.toFixed(2)}"/>`
       s += txt(n.x, n.y + 5, k === 0 ? 'you' : 'host', { size: 15, spacing: '.06em', fill: k === 0 ? 'var(--honey)' : 'var(--steel)', op: eT })
     })
-    const collapse = easeInOut(sp(2, 0.12, 0.42))
-    PEERS.forEach((n, k) => {
-      const hx = lerp(n.x + 44, C.x, collapse), hy = lerp(n.y - 20, C.y, collapse)
-      if (collapse < 1) s += hex(hx, hy, lerp(20, 27, collapse), { made: true, op: (1 - collapse * 0.5) * e2, sw: 1.6 })
-      s += link(n.x, n.y, C.x, C.y, easeOut(sp(2, 0.36, 0.55)) * 0.9, { dim: 0.45 })
+    const merge = easeInOut(sp(2, 0.14, 0.4))           // two uses of the same bytes, one stored copy — per host
+    const eL = easeOut(sp(2, 0.36, 0.52))
+    PEERS.slice(1).forEach((n, k) => {
+      const r = replicaAt(n), eH = easeOut(sp(2, 0.04 + k * 0.04, 0.2 + k * 0.04))
+      if (merge < 1) s += hex(r.x + 11 * (1 - merge), r.y - 6 * (1 - merge), 18, { made: true, op: eH * (1 - merge) * 0.9, sw: 1.4 })
+      s += hex(r.x - 11 * (1 - merge), r.y + 6 * (1 - merge), 18, { made: true, op: eH, sw: 1.6 })
+      s += txt(r.x, r.y - 30, '#e3a1', { size: 15, fill: 'var(--honey)', weight: 600, op: eL })
     })
-    if (collapse >= 1) {
-      s += hex(C.x, C.y, 29, { made: true, sw: 2.4 })
-      s += txt(C.x, C.y + 56, '#e3a1 · one copy', { size: 16, fill: 'var(--honey)', weight: 600 })
-    }
-    const out = easeInOut(sp(2, 0.6, 0.76)), back = easeInOut(sp(2, 0.78, 0.94))
-    if (out > 0 && back < 1) {
-      const a = PEERS[0], from = { x: a.x, y: a.y }
-      const at = back > 0 ? { x: lerp(C.x, from.x, back), y: lerp(C.y, from.y, back) } : { x: lerp(from.x, C.x, out), y: lerp(from.y, C.y, out) }
-      s += `<circle cx="${at.x.toFixed(1)}" cy="${at.y.toFixed(1)}" r="${back > 0 ? 9 : 5}" fill="var(--honey)" opacity=".9"/>`
+    const R = replicaAt(SRC)
+    const ask = easeInOut(sp(2, 0.58, 0.72)), back = easeInOut(sp(2, 0.74, 0.92))
+    if (ask > 0 && back < 1) {
+      const at = back > 0 ? { x: lerp(R.x, MINE.x, back), y: lerp(R.y, MINE.y, back) } : { x: lerp(PEERS[0].x, R.x, ask), y: lerp(PEERS[0].y, R.y, ask) }
       if (back > 0) s += hex(at.x, at.y, 13, { made: true, sw: 1.4, op: 0.95 })
+      else s += `<circle cx="${at.x.toFixed(1)}" cy="${at.y.toFixed(1)}" r="5" fill="var(--honey)" opacity=".9"/>`
     }
-    if (back >= 1) { s += hex(PEERS[0].x, PEERS[0].y - 46, 14, { made: true, sw: 1.5 }); s += check(PEERS[0].x + 30, PEERS[0].y - 46, 0.9) }
+    if (back >= 1) {
+      s += hex(MINE.x, MINE.y, 14, { made: true, sw: 1.5 })
+      s += check(MINE.x + 30, MINE.y, 0.9, { op: 1 - easeOut(sp(3, 0.1, 0.4)) })   // beat 3's seal takes it over
+    }
   }
 
-  // beat 3 — sharing a hash is sharing a proof
+  // beat 3 — sharing a signature is sharing a proof: the copy that arrived proves itself
   const e3 = sp(3, 0, 1)
   if (e3 > 0) {
     const seal = easeOut(sp(3, 0.1, 0.5))
-    s += ring(C.x, C.y + 8, 74 * seal, seal * 0.9, { dash: '10 7', sw: 2.6 })
+    s += ring(MINE.x, MINE.y, 40 * seal, seal * 0.9, { dash: '10 7', sw: 2.6 })
     const spin = (T * 40) % 360
-    s += `<g transform="rotate(${spin.toFixed(1)} ${C.x} ${C.y + 8})">` + ring(C.x, C.y + 8, 84 * seal, seal * 0.5, { dash: '2 12', sw: 2 }) + '</g>'
+    s += `<g transform="rotate(${spin.toFixed(1)} ${MINE.x} ${MINE.y})">` + ring(MINE.x, MINE.y, 48 * seal, seal * 0.5, { dash: '2 12', sw: 2 }) + '</g>'
     const ck = easeOut(sp(3, 0.45, 0.7))
-    if (ck > 0) s += check(C.x, C.y + 8, 2.2 * ck, { op: ck, sw: 2.6 })
+    if (ck > 0) s += check(MINE.x, MINE.y, 1.6 * ck, { op: ck, sw: 2.6 })
   }
   return s
 }
@@ -601,8 +606,8 @@ const CLIPS = {
     beats: [
       { term: 'integrity', gloss: 'verify, don’t trust', cam: { x: 760, y: 240, s: 1.15 } },
       { term: 'share = signatures', gloss: 'every byte proven on arrival', cam: { x: 1990, y: 240, s: 0.92 } },
-      { term: 'one copy', gloss: 'any host can serve it', cam: { x: 3585, y: 235, s: 0.76 } },
-      { term: 'proof', gloss: 'sharing a hash is sharing a proof', cam: { x: 3575, y: 262, s: 1.55 } },
+      { term: 'one name', gloss: 'any host can serve it', cam: { x: 3585, y: 235, s: 0.76 } },
+      { term: 'proof', gloss: 'sharing a signature is sharing a proof', cam: { x: 3000, y: 120, s: 1.55 } },
     ],
   },
   time: {
