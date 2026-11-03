@@ -225,11 +225,11 @@ is a domain and its hives are its subdomains, so the page is:
   community, and a sideways swipe on a phone turns the pages, round the ends.
   A community only filters this domain's row; the followed domains stay the
   master list (`showcase.md`, "Communities").
-- **Hexagons or a launcher** (jwize, 2026-10-25): the same tiles in the brand's
-  hexagons (the default) or in the traditional launcher, rows of four. The
-  owners choose it per page and per community in the signed showcase (`view`);
-  `?view=launcher` asks for it on the address (`showcase.md`, "How a page is
-  drawn").
+- **How a page is drawn** (jwize, 2026-10-25): the same tiles in the brand's
+  hexagons (the default), or in another template the record names (`view`):
+  the row launcher, the iPhone launcher, a list of blocks, or a square column. The owners
+  choose it per page and per community; `?view=` asks for one on the address
+  (`showcase.md`, "How a page is drawn").
 - **Follow a domain** (jwize, 2026-10-25): a search line that names a domain
   this browser does not follow offers **Follow <domain>** (when nothing matches
   it says so too); an input at the foot follows one as well, fixed to the bottom
