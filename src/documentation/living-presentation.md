@@ -792,6 +792,20 @@ every page, and its 25 scenes are folded into the tiles they explain:
   a phone, or plate text outside its frame. `blocks/preview.cjs <dir>` writes
   the pages as plain files to look at outside the hive.
 
+**Read it yourself, line by line.** The voice can be replaced one sentence at
+a time with your own (jwize, 2026-11-03: "we record and stop and then choose
+one for you to remaster"). `scripts/presentation/recorder.cjs` serves a local
+page, a gantt chart with a lane per tile in the tree's order and a bar per
+line, each as long as its time slot: a scene's sentences where the voice
+actually says them, a page's beats and captions. Click a line and it lights
+word by word as it plays; record against it after a count-in, as many takes as
+it needs, and choose one. The chosen take is mastered, fitted to the slot
+(stretched when within 15%, otherwise the slot grows and the rest of the scene
+moves), and spliced into the same `audio-cache/<hash>.mp3` the generated voice
+had, so the tour, the pages and the drawn clips use it with nothing else
+changed; the generated voice is kept to restore. Then re-time the drawn clips
+(`concepts.cjs`) and replant (`plant.cjs --blocks`).
+
 ## Every piece of the presentation is a tile
 
 Every element you see on screen is its own tile in the hive. A server is a

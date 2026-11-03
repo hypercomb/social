@@ -17,7 +17,7 @@ without touching the rest.
 | Drawn concept clips | `media/concept-*.mp4` | never by hand — `concepts.cjs` draws them from the template's tokens |
 | The splash directory | `hosts.json` | never by hand — `hosts.cjs` derives it |
 | Pronunciation rules | `pronunciations.json` | how a word is said (`say`) and heard (`hear`) |
-| Narration audio | `audio-cache/<h16>.mp3` | never by hand — `record.cjs` or `voice.cjs` |
+| Narration audio | `audio-cache/<h16>.mp3` | never by hand — `recorder.cjs`, `record.cjs` or `voice.cjs` |
 | Deliverable | `dist/hypercomb-presentation.html` | never by hand — build output |
 
 A scene instruction has these fields:
@@ -274,6 +274,59 @@ node record.cjs            # master them and seed the cache
 node voice.cjs --reference "…\Recording.m4a" --from 24.6 --to 43.6
 node voice.cjs --teaser    # speak the teaser beats in that voice
 ```
+
+### The track recorder: line by line, into each line's own slot
+
+`recorder.cjs` is the third way, and the finest-grained: one sentence at a time.
+
+```bash
+node recorder.cjs                  # http://127.0.0.1:4280 — local only, no network
+node recorder.cjs --port 4281
+node recorder.cjs --master         # re-remaster every chosen take from its raw file, then exit
+node recorder.cjs --cache <dir> --takes <dir>   # another cache / takes folder (for tests)
+```
+
+The page is a gantt chart of LINES. A lane per tile, in the tree's order
+(`presentation`, then `road`; the toggle shows the tour's own order, scenes 1 to
+25), and in each lane its lines on one time axis: a tour scene's sentences, each
+placed at its real start and end in the scene's mp3 (`timing.cjs`, the same
+sentence finder `concepts.cjs` times its drawn clips with), or a page's beats
+and capture captions, back to back with the 800 ms a page holds between them.
+A bar's width is the line's time slot; ctrl+wheel or the slider zooms. Honey is
+your chosen take, steel the generated voice, a honey outline means takes
+recorded but none chosen, dashed means no audio yet (timed from the words at
+2.6 a second).
+
+Click a bar and the line opens large. **Space** plays the slot with the words
+lit as they are said; **R** counts in 3-2-1, then lights the words at the
+slot's own pace while you read (word times come from the pauses the voice left
+inside the slot, otherwise from the syllables, with commas and full stops
+holding a little); **R** again, Stop or Esc ends the take. Record as often as
+you like: every take is kept and listed with its length against the slot, each
+playable with its own karaoke. **←/→** step line by line.
+
+**Enter** (or a take's Choose) chooses it, and the server REMASTERS it into the
+slot: `master.cjs`'s chain, silence trimmed at both ends, then fitted. Within
+±15% of the slot it is stretched (ffmpeg `atempo`, pitch kept) to the slot's
+exact length; further off, it keeps its own length, the bar says by how much,
+and everything after it in that scene moves. The scene's mp3 is rebuilt from
+the generated voice with only that sentence replaced (the other sentences and
+every gap untouched); a beat or caption is the take alone. The generated voice
+is kept once, as `audio-cache/generated/<hash>.mp3` (git-ignored), and the
+result is written to `audio-cache/<hash>.mp3`, the same key, so `build.cjs`,
+the pages and `concepts.cjs` pick it up with no other change. A scene with no
+generated voice yet is written once every one of its sentences has a take.
+**Restore** (per line, or the whole scene) brings the generated voice back.
+After a choice the page names what to run next: `concepts.cjs` (re-time the
+drawn clips) and `node scripts/bridge/living-presentation/plant.cjs --blocks`.
+
+Raw takes live in `record/takes/<line key>/<time>.<ext>` and the choices in
+`record/takes/chosen.json` (line key: the scene's hash and the sentence's
+index, `<hash>-<n>`, or a beat's hash); `record/` is git-ignored. Every rebuild
+starts again from the generated voice and the raw takes, so `--master` after
+tuning `master.cjs` redoes them all, and running it twice gives the same bytes.
+Reword a line and its hash moves: it shows as a fresh line with no takes, and
+the old takes stay on disk.
 
 ## The hive is the authoring surface
 

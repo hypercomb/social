@@ -651,7 +651,10 @@ function servedWorld(T, p) {
     }
     return g
   }
-  s += replica(HOSTS[ORIGIN], easeOut(sp(0, 0.62, 0.9)), 0)
+  // the maker's own host checks it too as it is written (S3), so "every replica
+  // checked" shows a check on every replica, the first one included
+  const eCap = easeOut(sp(2, 0.8, 0.96))
+  s += replica(HOSTS[ORIGIN], easeOut(sp(0, 0.62, 0.9)), eCap)
 
   // beat 2 — replicated host to host, each replica checked against its signature
   const t1 = easeInOut(sp(2, 0.06, 0.32)), t2 = easeInOut(sp(2, 0.42, 0.68))
@@ -659,7 +662,6 @@ function servedWorld(T, p) {
   s += replica(HOSTS[NEXT], t1 >= 1 ? 1 : 0, easeOut(sp(2, 0.32, 0.42)))
   s += travel(HOSTS[NEXT], HOSTS[NEAR], t2)
   s += replica(HOSTS[NEAR], t2 >= 1 ? 1 : 0, easeOut(sp(2, 0.68, 0.78)))
-  const eCap = easeOut(sp(2, 0.8, 0.96))
   s += txt(720, 470, `${SIG} · every replica checked`, { size: 16, fill: 'var(--honey)', weight: 600, op: eCap })
 
   // beat 3 — you ask the host you chose, take its replica and check it yourself
