@@ -73,6 +73,11 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
   readonly rewound = signal(false)
   // saving: guards re-entry while the merge (promote + optional branch) runs.
   readonly saving = signal(false)
+  // sync: this device is paired with another (the word shows only then), and a
+  // walk is running (the word dims). Both come from the one `device-sync:state`
+  // the service publishes — the button never asks the service anything.
+  readonly syncPaired = signal(false)
+  readonly syncing = signal(false)
   // selected tiles — gates the to-shelf and remove verbs.
   readonly selectionCount = signal(0)
   // Current hive orientation, used to describe the rotate button's destination.
@@ -104,6 +109,7 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
   #selectionUnsub: (() => void) | null = null
   #orientationUnsub: (() => void) | null = null
   #viewActiveUnsub: (() => void) | null = null
+  #syncUnsub: (() => void) | null = null
 
   ngOnInit(): void {
     // Start the shared inset→CSS-var bridge. edit-actions is template-mounted in
@@ -136,6 +142,12 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
 
     this.#viewActiveUnsub = EffectBus.on<{ active: boolean }>('view:shell-hidden', ({ active }) => {
       this.viewActive.set(!!active)
+    })
+
+    // Last-value replayed, so a late mount sees whether this device is paired.
+    this.#syncUnsub = EffectBus.on<{ paired?: boolean; phase?: string }>('device-sync:state', (s) => {
+      this.syncPaired.set(!!s?.paired)
+      this.syncing.set(s?.phase === 'syncing')
     })
   }
 
@@ -177,6 +189,16 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
     this.#selectionUnsub?.()
     this.#orientationUnsub?.()
     this.#viewActiveUnsub?.()
+    this.#syncUnsub?.()
+  }
+
+  // ── sync = walk the other devices' trees (only shown when paired) ─
+  // The service answers on the bus, like every verb in this cluster; what it
+  // moved is reported by its own toast. Pressing while a walk runs does nothing.
+
+  readonly sync = (): void => {
+    if (this.syncing()) return
+    EffectBus.emit('device-sync:run', {})
   }
 
   // Reuse the keyboard command path so persistence, rendering and layout
