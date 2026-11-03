@@ -25,6 +25,7 @@ const crypto = require('crypto')
 const { execFileSync, spawnSync } = require('child_process')
 
 const { fontsCss } = require('./build.cjs')
+const { sentencesOf, sentenceTimes } = require('./timing.cjs')
 
 const ROOT = __dirname
 const OUT = path.join(ROOT, 'concepts')
@@ -91,34 +92,13 @@ function textBeatTimes(say, beatCount) {
 function beatTimes(say, beatCount) {
   const audio = audioPathOf(say)
   if (!fs.existsSync(audio)) return textBeatTimes(say, beatCount)
-  const dur = parseFloat(execFileSync('ffprobe',
-    ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', audio], { encoding: 'utf8' }).trim())
-  const det = spawnSync('ffmpeg', ['-i', audio, '-af', 'silencedetect=noise=-38dB:d=0.25', '-f', 'null', '-'], { encoding: 'utf8' })
-  const silences = []
-  for (const m of (det.stderr || '').matchAll(/silence_start: ([\d.]+)[\s\S]*?silence_end: ([\d.]+)/g))
-    silences.push({ start: +m[1], end: +m[2] })
-  const trailing = silences.length && Math.abs(silences[silences.length - 1].end - dur) < 0.08
-  const speechEnd = trailing ? silences[silences.length - 1].start : dur
-  const gaps = silences.filter(s => s.end < dur - 0.08).map(s => s.end)
-
-  const sentences = spokenOf(say).split(/(?<=[.!?])\s+/).filter(s => s.trim())
+  // the sentence finder is shared with recorder.cjs (timing.cjs), so a line
+  // re-read there is cut exactly where these beats land
+  const sentences = sentencesOf(spokenOf(say))
   if (sentences.length !== beatCount)
     throw new Error(`beat count ${beatCount} != sentence count ${sentences.length}: ${sentences.map(s => s.slice(0, 30)).join(' | ')}`)
-  const words = sentences.map(s => s.split(/\s+/).length)
-  const total = words.reduce((a, b) => a + b, 0)
-
-  const starts = [0]
-  let cum = 0, last = 0
-  for (let j = 0; j < beatCount - 1; j++) {
-    cum += words[j]
-    const expect = cum / total * speechEnd
-    const usable = gaps.filter(g => g > last + 0.3)
-    const pick = usable.length
-      ? usable.reduce((a, b) => Math.abs(b - expect) < Math.abs(a - expect) ? b : a)
-      : expect
-    starts.push(pick); last = pick
-  }
-  return { starts, audioDur: dur }
+  const { starts, audioDur } = sentenceTimes(audio, sentences)
+  return { starts, audioDur }
 }
 
 // ---------- drawing primitives ----------------------------------------------
