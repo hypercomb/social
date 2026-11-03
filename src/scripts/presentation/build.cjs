@@ -106,11 +106,13 @@ const CLIP = {
   navigate: { kind: 'live', title: 'a real hive' }, zoom: { kind: 'live', title: 'the whole hive' },
   children: { kind: 'live', title: 'building structure' }, create: { kind: 'live', title: 'the first tile' },
   vocabulary: { kind: 'drawn', title: 'vocabulary' }, integrity: { kind: 'drawn', title: 'integrity' }, time: { kind: 'drawn', title: 'time' },
+  served: { kind: 'drawn', title: 'replicas' },
 }
 const RATIO = { live: '960/328', drawn: '1440/492' }
 /** each clip's file under media/ */
 const CLIP_FILE = { navigate: 'hive-navigate.mp4', zoom: 'hive-zoom.mp4', create: 'hive-create.mp4', children: 'hive-children.mp4',
-  vocabulary: 'concept-vocabulary.mp4', integrity: 'concept-integrity.mp4', time: 'concept-time.mp4' }
+  vocabulary: 'concept-vocabulary.mp4', integrity: 'concept-integrity.mp4', time: 'concept-time.mp4',
+  served: 'concept-served.mp4' }
 // the sig stamp (scene field "sig": true): the caption's own sha-256, first eight hex in honey
 const stamp = s => { const h = crypto.createHash('sha256').update(captionOf(s.say)).digest('hex'); return `<span class="sig" title="sha-256 of the caption"><b>${h.slice(0, 8)}</b>${h.slice(8, 16)}…</span>` }
 const figcap = (kind, title, sig = '') => `<div class="figcap ${kind}">${icon('hex')}<span>${esc(kind)} · ${esc(title)}</span>${sig}</div>`

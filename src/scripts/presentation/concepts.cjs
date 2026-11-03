@@ -1,11 +1,13 @@
 // Concept clips — the flow of the experience, drawn.
 //
-// Three scenes of the deck talk about things live capture cannot show: what
+// Four scenes of the deck talk about things live capture cannot show: what
 // the words MEAN (scene 8), what verification IS (scene 13), what time FEELS
-// like (scene 14). Each gets a drawn concept clip: one continuous world per
-// scene, a camera that travels through it, and beats that land on the
-// narration's own sentence boundaries — measured from the cached audio with
-// silencedetect, so an edited line re-times the clip on the next run.
+// like (scene 14), and who SERVES the work (scene 17). Each gets a drawn concept
+// clip: one continuous world per scene, a camera that travels through it, and
+// beats that land on the narration's own sentence boundaries — measured from the
+// cached audio with silencedetect, so an edited line re-times the clip on the
+// next run. Until a reworded line has been voiced, the beats are timed from its
+// text instead (textBeatTimes), and the next run after build.cjs re-times them.
 //
 // The clips are silent by design: the deck plays the scene's narration and the
 // film pane plays the clip muted from t=0, so matching the audio's length and
@@ -14,7 +16,7 @@
 // Same filmstrip pipeline as verbs.cjs: many frames per headless launch,
 // ffmpeg untile to cut them apart, one encode per clip.
 //
-//   node concepts.cjs                 → media/concept-{vocabulary,integrity,time}.mp4
+//   node concepts.cjs                 → media/concept-{vocabulary,integrity,time,served}.mp4
 //   node concepts.cjs vocabulary      → just that clip
 //   node concepts.cjs time --frames   → draw frames only, no encode
 const fs = require('fs')
@@ -318,9 +320,10 @@ function vocabularyWorld(T, p) {
     s += `<circle cx="${HOST.x}" cy="${HOST.y}" r="30" fill="var(--bg)" stroke="var(--steel)" stroke-width="1.5" opacity="${eT.toFixed(2)}"/>`
     s += txt(HOST.x, HOST.y + 5, 'host', { size: 15, spacing: '.06em', fill: 'var(--steel)', op: eT })
     // leg one: the work rises from its tile to the host
-    const LEG1 = [{ x: PERCH.x, y: PERCH.y }, { x: 2540, y: 40 }, { x: HOST.x - 6, y: HOST.y + 4 }]
+    const HELD = { x: HOST.x, y: HOST.y - 50 }
+    const LEG1 = [{ x: PERCH.x, y: PERCH.y }, { x: 2540, y: 20 }, HELD]
     // leg two: only after the other hive asks does it come down to the slot
-    const LEG2 = [{ x: HOST.x + 6, y: HOST.y + 4 }, { x: 2960, y: 90 }, { x: SLOT.x, y: SLOT.y }]
+    const LEG2 = [HELD, { x: 2900, y: 60 }, { x: SLOT.x, y: SLOT.y }]
     const up = easeInOut(sp(7, 0.22, 0.48))
     const ask = easeOut(sp(7, 0.5, 0.64))
     const down = easeInOut(sp(7, 0.66, 0.9))
@@ -334,10 +337,12 @@ function vocabularyWorld(T, p) {
       return g
     }
     if (up > 0 && up < 1) s += traveller(LEG1, up)
-    if (up >= 1 && down <= 0) s += hex(HOST.x, HOST.y - 48, 16, { made: true, sw: 1.5 })   // the host holds it
+    if (up >= 1 && down <= 0) s += hex(HELD.x, HELD.y, 22, { made: true, sw: 1.6 })       // the host holds it
     if (ask > 0) {                                                                         // the request, from the reader
-      const a = { x: R2.x - 30, y: R2.y - 38 }, b = { x: HOST.x + 28, y: HOST.y + 10 }
-      s += link(a.x, a.y, lerp(a.x, b.x, ask), lerp(a.y, b.y, ask), 1, { dash: '4 6', dim: 0.7, stroke: 'var(--honey)' })
+      const REQ = [{ x: R2.x - 24, y: R2.y - 46 }, { x: 3080, y: -10 }, { x: HELD.x + 34, y: HELD.y + 6 }]
+      const pts = []
+      for (let k = 0; k <= 24; k++) { const q = qbez(...REQ, ask * k / 24); pts.push(`${q.x.toFixed(1)},${q.y.toFixed(1)}`) }
+      s += `<polyline points="${pts.join(' ')}" fill="none" stroke="var(--honey)" stroke-width="1.8" stroke-dasharray="4 6" opacity="${(0.7 * clamp01(ask * 3)).toFixed(3)}"/>`
     }
     if (down > 0 && down < 1) s += traveller(LEG2, down)
   }
@@ -351,15 +356,15 @@ function vocabularyWorld(T, p) {
     const accept = easeOut(sp(8, 0.5, 0.66))           // your hand: the check beside it
     const live = easeOut(sp(8, 0.68, 0.85))            // only then does the slot go solid and the bee move
     s += hex(SLOT.x, SLOT.y, SLOT.r, { dash: live > 0.5 ? '' : '5 4', op: 0.9, sw: 1.8 + live, made: live > 0.5 })
-    if (e8 <= 0) s += check(SLOT.x, SLOT.y + 48, 0.9, { op: easeOut(sp(7, 0.9, 1)) })   // bytes checked on arrival
     const eHeld = easeOut(sp(8, 0.04, 0.3))
+    s += check(SLOT.x, SLOT.y + 48, 0.9, { op: easeOut(sp(7, 0.9, 1)) * (1 - eHeld) })   // bytes checked on arrival
     if (eHeld > 0) {
       const wob = live > 0 ? Math.sin(T * 5) * 3 * live : 0
       const bx = SLOT.x + 8 * live * Math.sin(T * 1.7), by = SLOT.y + 2 + wob - 22 * (1 - eHeld)
       s += beeGlyph(bx, by, 8 * live, live > 0 ? T : 0, 0.95, eHeld * (0.4 + 0.6 * live))
       s += txt(SLOT.x, SLOT.y + 52, 'held', { size: 13, spacing: '.1em', fill: 'var(--faint-text)', op: eHeld * (1 - live) })
     }
-    if (accept > 0) s += check(SLOT.x + 46, SLOT.y - 4, 1.1 * accept, { op: accept })
+    if (accept > 0) s += check(SLOT.x + 44, SLOT.y - 26, 1.1 * accept, { op: accept })
   }
 
   // beat 9 — the colony: everything alive, nothing central
@@ -446,7 +451,7 @@ function integrityWorld(T, p) {
   const PEERS = [{ x: 3060, y: 138 }, { x: 3330, y: 350 }, { x: 3670, y: 118 }, { x: 3850, y: 312 }]
   const replicaAt = n => ({ x: n.x + 54, y: n.y - 26 })
   const SRC = PEERS[1]                                   // the host you happen to fetch from
-  const MINE = { x: PEERS[0].x, y: PEERS[0].y - 50 }     // the copy that arrives at you
+  const MINE = { x: PEERS[0].x + 74, y: PEERS[0].y - 42 }  // the copy that arrives at you
   if (e2 > 0) {
     const eT = easeOut(sp(2, 0, 0.14))
     const MESH = [[0, 1], [1, 2], [2, 3], [0, 3], [1, 3]]
@@ -472,6 +477,7 @@ function integrityWorld(T, p) {
     }
     if (back >= 1) {
       s += hex(MINE.x, MINE.y, 14, { made: true, sw: 1.5 })
+      s += txt(MINE.x, MINE.y - 52, '#e3a1', { size: 15, fill: 'var(--honey)', weight: 600 })   // the same name it had on every host
       s += check(MINE.x + 30, MINE.y, 0.9, { op: 1 - easeOut(sp(3, 0.1, 0.4)) })   // beat 3's seal takes it over
     }
   }
@@ -480,11 +486,11 @@ function integrityWorld(T, p) {
   const e3 = sp(3, 0, 1)
   if (e3 > 0) {
     const seal = easeOut(sp(3, 0.1, 0.5))
-    s += ring(MINE.x, MINE.y, 40 * seal, seal * 0.9, { dash: '10 7', sw: 2.6 })
+    s += ring(MINE.x, MINE.y, 34 * seal, seal * 0.9, { dash: '10 7', sw: 2.6 })
     const spin = (T * 40) % 360
-    s += `<g transform="rotate(${spin.toFixed(1)} ${MINE.x} ${MINE.y})">` + ring(MINE.x, MINE.y, 48 * seal, seal * 0.5, { dash: '2 12', sw: 2 }) + '</g>'
+    s += `<g transform="rotate(${spin.toFixed(1)} ${MINE.x} ${MINE.y})">` + ring(MINE.x, MINE.y, 42 * seal, seal * 0.5, { dash: '2 12', sw: 2 }) + '</g>'
     const ck = easeOut(sp(3, 0.45, 0.7))
-    if (ck > 0) s += check(MINE.x, MINE.y, 1.6 * ck, { op: ck, sw: 2.6 })
+    if (ck > 0) s += check(MINE.x, MINE.y, 1.4 * ck, { op: ck, sw: 2.6 })
   }
   return s
 }
@@ -537,7 +543,7 @@ function timeWorld(T, p) {
                   : easeOut(sp(0, 0.02 + k * 0.075, 0.3 + k * 0.075))
     const state = k === RESTORE ? 8 : k                                    // the restore holds the snapshot's state
     if (e <= 0) continue
-    const x = cardX(k) + (1 - e) * 220, y = CY
+    const x = cardX(k) + (1 - e) * (k >= N ? 60 : 220), y = CY      // beat 4's cards stay inside the frame
     const behind = p(1) > 0.05 && k > headU + 0.3 && p(2) <= 0
     const dim = behind ? 0.5 : 1
     // beat 5 — the ripple back through every immutable state
@@ -597,6 +603,109 @@ function timeWorld(T, p) {
   return s
 }
 
+// one work, held by several hosts: each keeps its own replica under the same
+// signature, checked as it arrives (T1: replicate from a host; S3: verify before
+// write; A6: same content, one signature). You take it from one host you chose
+// (T4: the consumer requests; T5: selection is yours) and check it yourself.
+const person = (x, y, op) => op <= 0.01 ? '' :
+  `<g opacity="${op.toFixed(3)}" fill="none" stroke="var(--steel)" stroke-width="1.5">` +
+  `<circle cx="${x}" cy="${y - 7}" r="4.5"/><path d="M${x - 7},${y + 7} Q${x},${y - 3} ${x + 7},${y + 7}"/></g>`
+function servedWorld(T, p) {
+  const sp = (i, a, b) => clamp01((p(i) - a) / (b - a))
+  let s = ''
+  const YOU = { x: 260, y: 250 }
+  const HOSTS = [{ x: 560, y: 390 }, { x: 900, y: 130 }, { x: 1110, y: 330 }]
+  const ORIGIN = 2, NEXT = 1, NEAR = 0                    // made at one host, replicated on, fetched from another
+  const replicaAt = n => ({ x: n.x + 54, y: n.y - 26 })
+  const MINE = { x: YOU.x + 54, y: YOU.y - 26 }
+  const SIG = '#e3a1'
+
+  // beat 0 — the community: hosts, the mesh between them, you, and one work
+  const eHost = k => easeOut(sp(0, 0.06 + k * 0.12, 0.36 + k * 0.12))
+  const eMesh = easeOut(sp(0, 0.4, 0.7)), eYou = easeOut(sp(0, 0.5, 0.78))
+  ;[[0, 1], [1, 2], [0, 2]].forEach(([a, b]) => { s += link(HOSTS[a].x, HOSTS[a].y, HOSTS[b].x, HOSTS[b].y, eMesh * 0.6, { dash: '2 6', dim: 0.5 }) })
+  // you could reach any host; the one you choose is the allowance you give (beat 3)
+  const allow = easeOut(sp(3, 0.05, 0.3))
+  HOSTS.forEach((n, k) => {
+    const chosen = k === NEAR
+    s += link(YOU.x, YOU.y, n.x, n.y, eYou * (chosen ? 0.5 + 0.5 * allow : 0.5), chosen && allow > 0.3
+      ? { stroke: 'var(--honey)', dim: 0.75, sw: 1.8 } : { dash: '2 6', dim: 0.35 })
+  })
+  HOSTS.forEach((n, k) => {
+    const e = eHost(k); if (e <= 0) return
+    s += `<circle cx="${n.x}" cy="${n.y}" r="30" fill="var(--bg)" stroke="var(--steel)" stroke-width="1.5" opacity="${e.toFixed(2)}"/>`
+    s += txt(n.x, n.y + 5, 'host', { size: 15, spacing: '.06em', fill: 'var(--steel)', op: e })
+  })
+  if (eYou > 0) {
+    s += `<circle cx="${YOU.x}" cy="${YOU.y}" r="30" fill="var(--bg)" stroke="var(--honey)" stroke-width="2.4" opacity="${eYou.toFixed(2)}"/>`
+    s += txt(YOU.x, YOU.y + 5, 'you', { size: 15, spacing: '.06em', fill: 'var(--honey)', op: eYou })
+  }
+
+  // beat 1 — hosts are run by the people who use them; one is shared with friends
+  HOSTS.forEach((n, k) => {
+    const e = easeOut(sp(1, 0.05 + k * 0.1, 0.3 + k * 0.1))
+    s += person(n.x - 44, n.y + 40, e); s += person(n.x - 20, n.y + 48, e)
+  })
+  const F = HOSTS[NEXT]
+  ;[{ x: F.x - 86, y: F.y - 34 }, { x: F.x - 50, y: F.y - 58 }].forEach((q, j) => {
+    const e = easeOut(sp(1, 0.55 + j * 0.12, 0.8 + j * 0.12))
+    s += link(q.x + 9, q.y + 2, F.x - 22, F.y - 20, e, { dash: '3 4', dim: 0.4 })
+    s += person(q.x, q.y, e)
+  })
+
+  // the work and its replicas: each host's own copy, the same signature
+  const replica = (n, e, checked) => {
+    if (e <= 0) return ''
+    const r = replicaAt(n)
+    return hex(r.x, r.y, 18 * e, { made: true, sw: 1.6, op: e }) +
+      txt(r.x, r.y - 30, SIG, { size: 15, fill: 'var(--honey)', weight: 600, op: e }) +
+      (checked > 0 ? check(r.x + 32, r.y, 0.9 * checked, { op: checked }) : '')
+  }
+  const travel = (a, b, tt) => {
+    if (tt <= 0 || tt >= 1) return ''
+    const A = replicaAt(a), B = replicaAt(b), c = { x: (A.x + B.x) / 2, y: Math.min(A.y, B.y) - 70 }
+    let g = hex(qbez(A, c, B, tt).x, qbez(A, c, B, tt).y, 14, { made: true, sw: 1.4, op: 0.95 })
+    for (let d = 1; d <= 3; d++) {
+      const q = qbez(A, c, B, clamp01(tt - d * 0.07))
+      g += `<circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="2.2" fill="var(--honey)" opacity="${(0.5 - d * 0.13).toFixed(2)}"/>`
+    }
+    return g
+  }
+  s += replica(HOSTS[ORIGIN], easeOut(sp(0, 0.62, 0.9)), 0)
+
+  // beat 2 — replicated host to host, each replica checked against its signature
+  const t1 = easeInOut(sp(2, 0.06, 0.32)), t2 = easeInOut(sp(2, 0.42, 0.68))
+  s += travel(HOSTS[ORIGIN], HOSTS[NEXT], t1)
+  s += replica(HOSTS[NEXT], t1 >= 1 ? 1 : 0, easeOut(sp(2, 0.32, 0.42)))
+  s += travel(HOSTS[NEXT], HOSTS[NEAR], t2)
+  s += replica(HOSTS[NEAR], t2 >= 1 ? 1 : 0, easeOut(sp(2, 0.68, 0.78)))
+  const eCap = easeOut(sp(2, 0.8, 0.96))
+  s += txt(720, 470, `${SIG} · every replica checked`, { size: 16, fill: 'var(--honey)', weight: 600, op: eCap })
+
+  // beat 3 — you ask the host you chose, take its replica and check it yourself
+  const R = replicaAt(HOSTS[NEAR])
+  const ask = easeInOut(sp(3, 0.32, 0.5)), back = easeInOut(sp(3, 0.52, 0.78))
+  if (ask > 0 && back < 1) {
+    if (back > 0) s += hex(lerp(R.x, MINE.x, back), lerp(R.y, MINE.y, back), 13, { made: true, sw: 1.4, op: 0.95 })
+    else s += `<circle cx="${lerp(YOU.x, R.x, ask).toFixed(1)}" cy="${lerp(YOU.y, R.y, ask).toFixed(1)}" r="5" fill="var(--honey)" opacity=".9"/>`
+  }
+  if (back >= 1) {
+    s += hex(MINE.x, MINE.y, 16, { made: true, sw: 1.6 })
+    s += txt(MINE.x, MINE.y - 30, SIG, { size: 15, fill: 'var(--honey)', weight: 600 })
+    s += check(MINE.x + 32, MINE.y, 0.9 * easeOut(sp(3, 0.8, 0.92)))
+  }
+
+  // beat 5 — served by everyone: every place that holds it, alive
+  const e5 = sp(5, 0, 1)
+  if (e5 > 0) {
+    [...HOSTS.map(replicaAt), MINE].forEach((r, k) => {
+      const o = (0.3 + 0.24 * Math.sin(T * 2.1 + k * 1.7)) * easeOut(sp(5, 0, 0.3))
+      s += ring(r.x, r.y, 28, Math.max(0, o), { sw: 1.6 })
+    })
+  }
+  return s
+}
+
 // ---------- clip definitions -------------------------------------------------
 const CLIPS = {
   vocabulary: {
@@ -608,9 +717,9 @@ const CLIPS = {
       { term: 'layer', gloss: 'one moment of a place, kept', cam: { x: 2200, y: 238, s: 2.0 } },
       { term: 'signature', gloss: 'the name the content gives itself', cam: { x: 2230, y: 282, s: 2.0 } },
       { term: 'bee', gloss: 'senses, then acts', cam: { x: 2280, y: 226, s: 1.25 } },
-      { term: 'pheromone', gloss: 'an interest someone leaves', cam: { x: 2400, y: 212, s: 1.65 } },
+      { term: 'pheromone', gloss: 'an interest someone leaves', cam: { x: 2350, y: 250, s: 1.25 } },
       { term: 'replication', gloss: 'work crossing between hives', cam: { x: 2740, y: 240, s: 0.56 } },
-      { term: 'brood', gloss: 'held, never run, until you accept', cam: { x: 3010, y: 246, s: 2.2 } },
+      { term: 'brood', gloss: 'held, never run, until you accept', cam: { x: 3090, y: 246, s: 1.7 } },
       { term: 'colony', gloss: 'no central authority', cam: { x: 2620, y: 246, s: 0.55 } },
     ],
   },
@@ -620,7 +729,7 @@ const CLIPS = {
       { term: 'integrity', gloss: 'verify, don’t trust', cam: { x: 760, y: 240, s: 1.15 } },
       { term: 'share = signatures', gloss: 'every byte proven on arrival', cam: { x: 1990, y: 240, s: 0.92 } },
       { term: 'one name', gloss: 'any host can serve it', cam: { x: 3585, y: 235, s: 0.76 } },
-      { term: 'proof', gloss: 'sharing a signature is sharing a proof', cam: { x: 3000, y: 120, s: 1.55 } },
+      { term: 'proof', gloss: 'sharing a signature is sharing a proof', cam: { x: 3070, y: 110, s: 1.55 } },
     ],
   },
   time: {
@@ -632,6 +741,17 @@ const CLIPS = {
       { term: 'revisions', gloss: 'updates wait for you', cam: { x: 720, y: 270, s: 1.0 } },
       { term: 'snapshots', gloss: 'try something risky, come back', cam: { x: 880, y: 278, s: 0.9 } },
       { term: 'immutable', gloss: 'the past is one signature away', cam: { x: 840, y: 282, s: 0.86 } },
+    ],
+  },
+  served: {
+    scene: 17, file: 'concept-served.mp4', world: servedWorld,
+    beats: [
+      { term: 'community', gloss: 'carried by the people who use it', cam: { x: 700, y: 250, s: 1.0 } },
+      { term: 'hosts', gloss: 'run by people, shared with friends', cam: { x: 700, y: 260, s: 1.0 } },
+      { term: 'replicas', gloss: 'every replica checked', cam: { x: 720, y: 246, s: 1.0 } },
+      { term: 'trust', gloss: 'an allowance you give', cam: { x: 690, y: 250, s: 1.0 } },
+      { term: 'no tracking', gloss: 'not one statistic about you', cam: { x: 690, y: 250, s: 1.0 } },
+      { term: 'served by everyone', gloss: 'secured by your peers', cam: { x: 700, y: 246, s: 0.97 } },
     ],
   },
 }
@@ -688,6 +808,7 @@ function shootStrip(html, rows, stripPng) {
   fs.writeFileSync(htmlPath, html)
   try { fs.unlinkSync(stripPng) } catch {}
   execFileSync(EDGE, ['--headless=new', '--disable-gpu', '--hide-scrollbars',
+    ...(process.getuid && process.getuid() === 0 ? ['--no-sandbox'] : []),   // a root container refuses the sandbox
     `--window-size=${W},${H * rows}`, '--virtual-time-budget=4000',
     `--screenshot=${stripPng}`, require('url').pathToFileURL(htmlPath).href], { stdio: 'ignore' })
   const deadline = Date.now() + 30_000
