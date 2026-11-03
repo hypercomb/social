@@ -713,6 +713,29 @@ removing one never removes an asset. The structure this presentation starts
 with, the hypercomb tile and its values, is only the first organization, and
 it can be joined by others, or rebuilt, whenever that helps.
 
+## The tree as planted: two trees, one relation per layer
+
+Audited 2026-11-03 against this plan's own rules (jwize: "fix all three and
+replant"); the tree lives in `scripts/bridge/living-presentation/tree.cjs`.
+
+- **Two trees, because they are two relations.** `presentation` is what the
+  reader is shown: the six values, and under each value the ideas that show
+  it. `presenter` is what shows it: the primitive marker, the same-shape
+  check, the lift, and the cube viewer with its points, faces and slices. The
+  machinery used to sit among the ideas, so a path read "simple has a
+  marker"; now every layer keeps one relation and every path reads aloud.
+  Only `presentation` is published.
+- **No word twice.** A name is one molecule hive-wide, so two tiles named
+  `cube` would feed one molecule. The opening's sixth move is `fill` ("the
+  points fill a cube"), and `cube` is the viewer alone.
+- **A reader's note, and a builder's brief.** What is filed on a tile is a
+  sentence or two for the reader, and nothing unbuilt is shown as built (a
+  planned piece says "Planned"). What a tile must show and the documents it
+  draws on are its brief, kept in the tree file for builders and never
+  planted, so the published presentation carries no work notes.
+- **Order is the order of the words.** The order of markers is the layout,
+  so the seven opening moves are given first to last.
+
 ## Every piece of the presentation is a tile
 
 Every element you see on screen is its own tile in the hive. A server is a
