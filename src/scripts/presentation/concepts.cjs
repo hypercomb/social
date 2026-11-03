@@ -495,7 +495,8 @@ function timeWorld(T, p) {
   let s = ''
   const CY = 330, CW = 92, CH = 64, X0 = 240, DX = 120
   const cardX = u => X0 + u * DX
-  const N = 9                                   // the strip; experiments add 9 and 10
+  const N = 9                                   // the strip; experiments add 9 and 10, the restore 11
+  const RESTORE = 11
 
   // what the page looked like at continuous position u — morphs smoothly
   const pageAt = (cx, cy, u, scale, op) => {
@@ -512,13 +513,17 @@ function timeWorld(T, p) {
   // undo/rewind/checkpoint state of the playhead, shared across beats
   const undoU = 8 - 6 * easeInOut(sp(1, 0.08, 0.9))                       // 8 → 2, across the session break
   const scrubU = 2 + 3.6 * Math.sin(Math.PI * easeInOut(sp(2, 0.12, 0.96)))  // out and back
-  const expandN = sp(4, 0, 1) > 0 ? 11 : N
+  const expandN = sp(4, 0, 1) > 0 ? RESTORE + 1 : N
   let headU = 8
   if (p(1) > 0) headU = undoU
   if (p(2) > 0) headU = scrubU
   if (p(3) > 0) headU = 2 + 4 * easeInOut(sp(3, 0.1, 0.5))                // drift to the revisions
-  if (p(4) > 0) headU = lerp(6, 10, easeInOut(sp(4, 0.55, 0.95)))         // out to the experiments
-  if (p(5) > 0) headU = 10
+  // beat 4: back to the live state, snapshot it, out through the experiments, then
+  // restore — a new head that matches the snapshot (restore.queen.ts: append, never rewrite)
+  if (p(4) > 0) headU = sp(4, 0.3, 1) > 0
+    ? lerp(8, RESTORE, easeInOut(sp(4, 0.42, 0.95)))
+    : lerp(6, 8, easeInOut(sp(4, 0, 0.14)))
+  if (p(5) > 0) headU = RESTORE
 
   // session break between cards 3 and 4
   const eDiv = easeOut(sp(0, 0.7, 1))
@@ -526,9 +531,11 @@ function timeWorld(T, p) {
   s += link(660, 262, 660, 408, eDiv * (0.5 + divPulse), { dash: '5 6', dim: 0.8, sw: 1.8, stroke: divPulse ? 'var(--honey)' : 'var(--faint)' })
 
   for (let k = 0; k < expandN; k++) {
-    const exp = k >= N                                                     // experimental cards
-    const e = exp ? easeOut(sp(4, 0.34 + (k - N) * 0.16, 0.6 + (k - N) * 0.16))
+    const exp = k >= N && k < RESTORE                                      // experimental cards, kept in history
+    const e = k === RESTORE ? easeOut(sp(4, 0.74, 0.9))
+            : exp ? easeOut(sp(4, 0.34 + (k - N) * 0.16, 0.6 + (k - N) * 0.16))
                   : easeOut(sp(0, 0.02 + k * 0.075, 0.3 + k * 0.075))
+    const state = k === RESTORE ? 8 : k                                    // the restore holds the snapshot's state
     if (e <= 0) continue
     const x = cardX(k) + (1 - e) * 220, y = CY
     const behind = p(1) > 0.05 && k > headU + 0.3 && p(2) <= 0
@@ -539,9 +546,9 @@ function timeWorld(T, p) {
     s += `<rect x="${(x - CW / 2).toFixed(1)}" y="${(y - CH / 2 - lift).toFixed(1)}" width="${CW}" height="${CH}" rx="3" ` +
       `fill="${exp ? 'var(--panel)' : 'var(--bg)'}" stroke="${rip > 0.5 ? 'var(--honey)' : exp ? 'var(--honey-deep)' : 'var(--line)'}" ` +
       `stroke-width="${rip > 0.5 ? 2 : 1.6}" ${exp ? 'stroke-dasharray="6 4" ' : ''}opacity="${(e * dim).toFixed(2)}"/>`
-    s += pageAt(x, y - lift, k, 1, e * dim)
+    s += pageAt(x, y - lift, state, 1, e * dim)
     const sigOn = p(5) > 0 ? clamp01(rip * 2) : 0
-    s += txt(x, y + 52, '#' + hex4(k + 3), { size: k === 0 && sp(5, 0.75, 0.95) > 0 ? 18 : 15, fill: sigOn > 0.4 ? 'var(--honey)' : 'var(--faint-text)', weight: sigOn > 0.4 ? 600 : 400, op: e * (0.65 + 0.35 * sigOn) })
+    s += txt(x, y + 52, '#' + hex4(state + 3), { size: k === 0 && sp(5, 0.75, 0.95) > 0 ? 18 : 15, fill: sigOn > 0.4 ? 'var(--honey)' : 'var(--faint-text)', weight: sigOn > 0.4 ? 600 : 400, op: e * (0.65 + 0.35 * sigOn) })
   }
   // the oldest state, as reachable as the head
   const eOld = easeOut(sp(5, 0.75, 0.95))
@@ -565,7 +572,7 @@ function timeWorld(T, p) {
   }
 
   // beat 3 — named revisions dropping onto the strip
-  ;[['adopt', 4, 0.08, 0.38], ['upgrade', 6, 0.45, 0.75]].forEach(([name, u, a, b]) => {
+  ;[['adopted', 4, 0.08, 0.38], ['synced', 6, 0.45, 0.75]].forEach(([name, u, a, b]) => {
     const e = easeOut(sp(3, a, b)); if (e <= 0) return
     const x = cardX(u), ty = CY - CH / 2 - 58 + (1 - e) * -26
     s += link(x, ty + 12, x, CY - CH / 2 - 2, e * 0.8, { dim: 0.6 })
@@ -573,13 +580,19 @@ function timeWorld(T, p) {
     s += txt(x, ty + 6, name, { size: 16, fill: 'var(--honey)', weight: 600, op: e })
   })
 
-  // beat 4 — the checkpoint pin, then the experiments it protects against
-  const ePin = easeOut(sp(4, 0.04, 0.3))
+  // beat 4 — the snapshot pin on the live state (snapshot.queen.ts: the whole hive,
+  // one commit), the experiments, then the restore that comes back to it
+  const ePin = easeOut(sp(4, 0.14, 0.34))
   if (ePin > 0) {
     const x = cardX(8)
     s += link(x, CY - CH / 2 - 40 * ePin, x, CY - CH / 2 - 2, ePin * 0.9, { dim: 0.8, sw: 2 })
     s += hex(x, CY - CH / 2 - 46, 11 * ePin, { made: true, sw: 2 })
-    s += txt(x, CY - CH / 2 - 66, 'snapshot', { size: 16, spacing: '.08em', fill: 'var(--honey)', op: ePin })
+    s += txt(x, CY - CH / 2 - 66, 'snapshot · whole hive', { size: 16, spacing: '.04em', fill: 'var(--honey)', op: ePin })
+  }
+  const eBack = easeOut(sp(4, 0.74, 0.92))
+  if (eBack > 0) {
+    const x = cardX(RESTORE)
+    s += txt(x, CY - CH / 2 - 66, 'restore', { size: 16, spacing: '.08em', fill: 'var(--honey)', op: eBack })
   }
   return s
 }
