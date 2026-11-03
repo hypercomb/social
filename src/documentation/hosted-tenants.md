@@ -158,7 +158,11 @@ mark on what a head move left behind**:
   upload goes ahead and lifts the mark), the landing pack (a withdrawn head's
   pack is a miss; a kept pack is answered without the members a move
   withdrew), and the AI context (a hidden signature is never fed to the
-  model).
+  model). A pack whose stored epoch is the current `content:packs:standing`
+  version is that filtered answer, served without heading each member. A
+  withdrawal moves the epoch, so the next read filters and stamps again. A
+  pack with no epoch, or a member still inside its grace window, is filtered
+  on the request and is not stamped while anything in it is only kept.
 - **Sigbags keep their history back too.** A route bag, a creation bag and a
   sandbox door's bag list and serve only their newest marker — every marker
   only for a route whose branch has public history (4b).
