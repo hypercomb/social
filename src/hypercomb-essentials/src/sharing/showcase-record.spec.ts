@@ -2,8 +2,8 @@
 // and as the front door reads it.
 
 import { describe, expect, it } from 'vitest'
-import { addCommunity, communityKey, communityName, parseShowcase, removeCommunity, showcaseBytes, showcaseKey, showcases,
-  setCommunityView, setView, toggleCommunityItem, toggleDomain, toggleItem, type Showcase } from './showcase-record'
+import { addCommunity, communityKey, communityName, parseShowcase, removeCommunity, SHOWCASE_VIEWS, showcaseBytes, showcaseKey, showcases,
+  setCommunityView, setView, stepView, toggleCommunityItem, toggleDomain, toggleItem, viewLabel, type Showcase } from './showcase-record'
 
 const key = (char: string): string => char.repeat(64)
 const empty: Showcase = { zone: 'hypercomb.com', items: [], domains: [] }
@@ -163,6 +163,9 @@ describe('view — how a page is drawn, a property of the page and of each commu
   it('is set on the page, or on one community, and cleared again', () => {
     const page = setView(two(), 'launcher')
     expect(JSON.parse(text(page)).view).toBe('launcher')
+    expect(JSON.parse(text(setView(two(), 'iphone'))).view).toBe('iphone')
+    expect(JSON.parse(text(setView(two(), 'list'))).view).toBe('list')
+    expect(JSON.parse(text(setView(two(), 'tiles'))).view).toBe('tiles')
     const one = setCommunityView(page, 'weekend', 'hex')
     const written = JSON.parse(text(one))
     expect(written.communities.map((row: { name: string; view?: string }) => [row.name, row.view])).toEqual([['Daily', undefined], ['Weekend', 'hex']])
@@ -170,7 +173,13 @@ describe('view — how a page is drawn, a property of the page and of each commu
   })
 
   it('is read back the same by the front door, and a name nobody knows is no view', async () => {
-    const shim = await import(/* @vite-ignore */ SHIM_RECORD) as { parseShowcase: (raw: unknown, zone: string) => unknown; parseView: (raw: unknown) => unknown }
+    const shim = await import(/* @vite-ignore */ SHIM_RECORD) as {
+      parseShowcase: (raw: unknown, zone: string) => { view?: string; communities?: { view?: string }[] } | null
+      parseView: (raw: unknown) => unknown
+      SHOWCASE_VIEWS: readonly string[]
+      stepView: (current: 'hex' | 'launcher' | 'iphone' | 'list' | 'tiles' | undefined, by: -1 | 1) => string
+      viewLabel: (view: 'hex' | 'launcher' | 'iphone' | 'list' | 'tiles') => string
+    }
     const written = setCommunityView(setView(two(), 'launcher'), 'daily', 'hex')
     const raw = JSON.parse(text(written))
     expect(shim.parseShowcase(raw, 'hypercomb.com')).toEqual(parseShowcase(raw, 'hypercomb.com'))
@@ -182,6 +191,16 @@ describe('view — how a page is drawn, a property of the page and of each commu
       expect(read.view).toBeUndefined()
       expect(read.communities![0]!.view).toBeUndefined()
     }
-    for (const value of ['hex', 'launcher', 'Launcher', '', null, 4, {}]) expect(shim.parseView(value)).toBe(['hex', 'launcher'].includes(value as string) ? value : undefined)
+    for (const value of ['hex', 'launcher', 'iphone', 'list', 'tiles', 'Launcher', '', null, 4, {}]) expect(shim.parseView(value)).toBe((SHOWCASE_VIEWS as readonly unknown[]).includes(value) ? value : undefined)
+    expect(shim.SHOWCASE_VIEWS).toEqual([...SHOWCASE_VIEWS])
+    expect(shim.viewLabel('tiles')).toBe(viewLabel('tiles'))
+    expect(shim.stepView('hex', 1)).toBe('launcher')
+    expect(stepView('launcher', 1)).toBe('iphone')
+    expect(stepView('iphone', 1)).toBe('list')
+    expect(stepView('list', 1)).toBe('tiles')
+    expect(stepView('tiles', 1)).toBe('hex')
+    expect(stepView('tiles', -1)).toBe('list')
+    expect(stepView(undefined, -1)).toBe('tiles')
+    expect(shim.stepView('tiles', -1)).toBe(stepView('tiles', -1))
   })
 })

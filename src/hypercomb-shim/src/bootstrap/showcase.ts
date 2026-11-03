@@ -18,7 +18,7 @@
 
 import type { HostCreation, HostOffering } from '@hypercomb/core'
 import { pictureOrigins, tilePicture } from './tile-picture'
-import { communityKey, doorsOpen, parseView, type ShowcaseCommunity, type ShowcaseItem, type ShowcaseView, type ZoneOwners } from './showcase-record'
+import { communityKey, doorsOpen, parseView, stepView, viewLabel, type ShowcaseCommunity, type ShowcaseItem, type ShowcaseView, type ZoneOwners } from './showcase-record'
 import { DEFAULT_HOME, homeOrigin, turnOffHref } from './turn-off-link'
 import type { OwnerBridge } from './owner-bridge'
 import { showcaseHref } from './showcase-link'
@@ -391,6 +391,23 @@ export const pageFlip = (dx: number, dy: number, ms: number): -1 | 0 | 1 => {
   return far && across >= 1.4 * Math.abs(dy) ? (dx < 0 ? 1 : -1) : 0
 }
 
+/**
+ * A drag that is clearly one way, by the page-flip rule on either axis.
+ * Across: -1 back, 1 on (a finger moving left goes on). Up and down: -1 the
+ * previous set, 1 the next (a finger moving up goes on). A drag that is
+ * neither clearly across nor clearly down is not a swipe, so a scroll stays a scroll.
+ */
+export const gestureStep = (dx: number, dy: number, ms: number): { readonly axis: 'x' | 'y'; readonly by: -1 | 1 } | null => {
+  const across = pageFlip(dx, dy, ms)
+  if (across) return { axis: 'x', by: across }
+  const down = Math.abs(dy)
+  const far = down >= 56 || (down >= 24 && down / Math.max(1, ms) >= 0.3)
+  return far && down >= 1.4 * Math.abs(dx) ? { axis: 'y', by: dy < 0 ? 1 : -1 } : null
+}
+
+/** How many icons the iPhone dock holds, once the page has more than that. */
+const IPHONE_DOCK = 4
+
 /** The domain a typed line names, or '' when it names none: a bare hostname
  *  with a dot, whatever scheme or path was pasted around it. */
 export const followCandidate = (text: string): string => {
@@ -435,7 +452,7 @@ const ICONS: Record<LinkIcon | 'search' | 'arrow' | 'chevron' | 'hive' | 'sparkl
   sliders: svg('<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>'),
   people: svg('<circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19c.6-3.3 2.8-5.2 5.5-5.2s4.9 1.9 5.5 5.2"/><circle cx="16.8" cy="9.5" r="2.6"/><path d="M15.6 14.1c2.6.2 4.4 1.9 4.9 4.9"/>'),
   close: svg('<path d="m6 6 12 12M18 6 6 18"/>'),
-  search: svg('<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/>'),
+  search: svg('<circle cx="10.25" cy="10.25" r="6.25"/><path d="M7.55 8.05a3.5 3.5 0 0 1 2.9-1.45"/><path d="m14.85 14.85 5.3 5.3"/>'),
   arrow: svg('<path d="M7 17 17 7M9 7h8v8"/>'),
   chevron: svg('<path d="m6 9 6 6 6-6"/>'),
   hive: svg('<path d="M12 2.8 20 7.4v9.2l-8 4.6-8-4.6V7.4Z"/><path d="M12 8.6v6.8M8.6 12h6.8"/>'),
@@ -585,18 +602,41 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     brand.append(join)
   }
   const searchBox = el('label', 'search')
+  // The search is not on the page until the magnifier asks for it. Hidden, the top is only the brand.
+  searchBox.hidden = true
   const search = el('input')
   search.type = 'search'
+  search.id = 'showcase-search'
   search.placeholder = 'Search hives, creations and domains'
   search.setAttribute('aria-label', 'Search hives, creations and domains')
   search.autocomplete = 'off'
   search.spellcheck = false
   searchBox.append(iconOf('search'), search)
-  // MANAGE (jwize 2026-10-25: "it should just be the branding and the tiles with a manage button and the
-  // current view becomes manage"). On arrival the page is the brand and the showcase's tiles. The button, to the
-  // right of the search, turns that same view into the manager: the domains you follow as rows, their tiles grayed
-  // until you turn them on, and the follow box.
+  // THE BAR IS AT THE BOTTOM. The magnifier shows the search across the top, or hides it and clears what was
+  // typed. Manage opens the management screen: the domains you follow as rows, their tiles grayed until you
+  // turn them on, and the follow box. Pressing it again returns to the showcase.
   let managing = false
+  const dock = el('nav', 'page-dock')
+  dock.setAttribute('aria-label', 'Page')
+  const searchButton = el('button', 'dock-search')
+  searchButton.type = 'button'
+  searchButton.title = 'Search'
+  searchButton.setAttribute('aria-label', 'Search')
+  searchButton.setAttribute('aria-pressed', 'false')
+  searchButton.setAttribute('aria-controls', search.id)
+  searchButton.append(iconOf('search'))
+  const setSearchOpen = (on: boolean): void => {
+    searchBox.hidden = !on
+    searchButton.setAttribute('aria-pressed', String(on))
+    if (on) search.focus()
+    else if (search.value) { search.value = ''; paint() }
+  }
+  searchButton.addEventListener('click', () => setSearchOpen(searchBox.hidden))
+  search.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return
+    event.preventDefault()
+    setSearchOpen(false)
+  })
   const manageButton = el('button', 'manage-toggle')
   manageButton.type = 'button'
   manageButton.title = 'Manage'
@@ -612,8 +652,8 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     paint()
   }
   manageButton.addEventListener('click', () => setManaging(!managing))
-  searchBox.append(manageButton)
-  hero.append(brand, searchBox)
+  dock.append(searchButton, manageButton)
+  hero.append(brand, searchBox, dock)
 
   const bandsHost = el('div', 'bands')
 
@@ -942,20 +982,47 @@ ${entry.key}`
   const combTiles = new WeakMap<HTMLElement, readonly HTMLElement[]>()
   const combWidths = new WeakMap<HTMLElement, number>()
   const combShapes = new WeakMap<HTMLElement, ShowcaseView>()
+  const placeFlat = (parent: HTMLElement, tiles: readonly HTMLElement[]): void => {
+    const kept = [...parent.children]
+    if (kept.length !== tiles.length || kept.some((node, index) => node !== tiles[index])) parent.replaceChildren(...tiles)
+  }
+  /** The iPhone launcher: a phone-shaped screen, icons in a grid, the first four in the dock once there are more. */
+  const arrangeIphone = (comb: HTMLElement, tiles: readonly HTMLElement[]): void => {
+    let spring = comb.querySelector(':scope > .spring')
+    if (!spring) {
+      spring = el('div', 'spring')
+      const grid = el('div', 'spring-grid')
+      const dock = el('div', 'spring-dock')
+      dock.setAttribute('aria-label', 'Dock')
+      const home = el('div', 'spring-home')
+      home.setAttribute('aria-hidden', 'true')
+      spring.append(grid, dock, home)
+      comb.replaceChildren(spring)
+    }
+    const dockCount = tiles.length > IPHONE_DOCK ? IPHONE_DOCK : 0
+    const grid = spring.querySelector('.spring-grid') as HTMLElement
+    const dock = spring.querySelector('.spring-dock') as HTMLElement
+    placeFlat(grid, tiles.slice(dockCount))
+    placeFlat(dock, tiles.slice(0, dockCount))
+    dock.hidden = dockCount === 0
+    combTiles.set(comb, tiles)
+  }
   const arrange = (comb: HTMLElement, tiles: readonly HTMLElement[], shape: ShowcaseView = combShapes.get(comb) ?? 'hex'): void => {
     // A change of shape starts the comb over: a launcher is the tiles in a plain
-    // grid, hexagons are rows counted from the width.
+    // grid, an iPhone page is a springboard, a list is a column of blocks, tiles are squares, hexagons are rows counted from the width.
     if (combShapes.get(comb) !== shape) {
       combShapes.set(comb, shape)
       combTiles.delete(comb)
       combWidths.delete(comb)
       comb.replaceChildren()
-      if (shape === 'launcher') comb.dataset['shape'] = 'launcher'
-      else delete comb.dataset['shape']
+      if (shape === 'hex') delete comb.dataset['shape']
+      else comb.dataset['shape'] = shape
     }
-    if (shape === 'launcher') {
-      const kept = [...comb.children]
-      if (kept.length !== tiles.length || kept.some((node, index) => node !== tiles[index])) comb.replaceChildren(...tiles)
+    if (shape === 'iphone') { arrangeIphone(comb, tiles); return }
+    // A launcher, a list and tiles are the same tiles, flat. The stylesheet makes one a grid of icons,
+    // one a column of blocks, and one a column of squares that snaps like a scroller.
+    if (shape === 'launcher' || shape === 'list' || shape === 'tiles') {
+      placeFlat(comb, tiles)
       combTiles.set(comb, tiles)
       return
     }
@@ -1117,8 +1184,21 @@ ${entry.key}`
   const label = el('button', 'pager-label')
   label.type = 'button'
   label.id = 'community-label'
-  const pages = (): ShowcaseCommunity[] => (options.groups ? signed?.showcase?.communities ?? [] : [])
-    .filter(community => community.items.length > 0 || community.domains.length > 0)
+  const templateNote = el('span', 'pager-template')
+  templateNote.hidden = true
+  const hint = el('p', 'pager-hint')
+  hint.hidden = true
+  hint.textContent = 'Sideways changes the template. Up or down changes the set.'
+  /** The template tried on this visit, by community key ('' is All). It wins over the signed one until the page is left. */
+  const tried = new Map<string, ShowcaseView>()
+  const namedCommunities = (): ShowcaseCommunity[] =>
+    (signed?.showcase?.communities ?? []).filter(community => community.items.length > 0 || community.domains.length > 0)
+  // Groups stay off the public page unless asked for. Manage brings the named sets back, because that is
+  // when an up or down swipe walks them.
+  const pages = (): ShowcaseCommunity[] => (options.groups || managing) ? namedCommunities() : []
+  /** This domain, then the domains followed, then one being checked. The sets an up or down swipe walks when no community is named. */
+  const zoneSets = (): string[] =>
+    [options.self, ...[...held].sort(), ...[...pending.keys()].filter(zone => !held.includes(zone) && zone !== options.self)]
   const select = (key: string, focus = false): void => {
     page = key
     paint()
@@ -1130,9 +1210,50 @@ ${entry.key}`
     const next = (Math.max(0, keys.indexOf(page)) + by + keys.length) % keys.length
     if (keys[next] !== page) select(keys[next]!)
   }
-  label.addEventListener('click', () => turn(1))
+  /** The template showing now: a try on this page, else the community's own, else All's, else hexagons. */
+  const showing = (): ShowcaseView => {
+    const community = pages().find(row => communityKey(row.name) === page)
+    const base = tried.get('') ?? viewAsked ?? signed?.showcase?.view ?? 'hex'
+    return tried.get(page) ?? community?.view ?? base
+  }
+  const cycleTemplate = (by: -1 | 1): void => {
+    tried.set(page, stepView(showing(), by))
+    paint()
+  }
+  /** Up or down while managing: the named sets, or the domains you follow when none are named. */
+  const cycleSet = (by: -1 | 1): void => {
+    if (namedCommunities().length > 0) { turn(by); return }
+    const keys = zoneSets()
+    if (keys.length < 2) return
+    const at = Math.max(0, keys.indexOf(openRow))
+    const next = keys[(at + by + keys.length) % keys.length]!
+    if (next === openRow) return
+    openRow = next
+    paint()
+  }
+  label.addEventListener('click', () => { if (managing && namedCommunities().length === 0) cycleSet(1); else turn(1) })
   pager.addEventListener('keydown', event => {
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+    if (managing && (event.key === 'ArrowRight' || event.key === 'ArrowLeft')) {
+      event.preventDefault()
+      cycleTemplate(event.key === 'ArrowRight' ? 1 : -1)
+      return
+    }
+    if (managing && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+      event.preventDefault()
+      cycleSet(event.key === 'ArrowDown' ? 1 : -1)
+      return
+    }
+    const domainKeys = managing && namedCommunities().length === 0
+    if (domainKeys && (event.key === 'Home' || event.key === 'End')) {
+      const keys = zoneSets()
+      if (!keys.length) return
+      event.preventDefault()
+      openRow = event.key === 'Home' ? keys[0]! : keys[keys.length - 1]!
+      paint()
+      label.focus()
+      return
+    }
     const keys = ['', ...pages().map(community => communityKey(community.name))]
     const at = keys.indexOf(page)
     const to = event.key === 'ArrowRight' ? (at + 1) % keys.length : event.key === 'ArrowLeft' ? (at - 1 + keys.length) % keys.length
@@ -1144,11 +1265,12 @@ ${entry.key}`
   // The swipe: touch and pen only (a mouse has the tabs and the arrows), never
   // from the screen's own edge, never calling preventDefault — the browser
   // keeps the vertical scroll — and the click a swipe ends with is swallowed so
-  // it can never press a tile.
+  // it can never press a tile. Managing turns the axes: sideways changes the
+  // template, up and down changes the set. Otherwise sideways is back and forward.
   let drag: { id: number; x: number; y: number; at: number } | null = null
   let swiped = false
   hosted.addEventListener('pointerdown', event => {
-    if (event.pointerType === 'mouse' || pages().length === 0 || event.clientX < 24 || event.clientX > innerWidth - 24) return
+    if (event.pointerType === 'mouse' || event.clientX < 24 || event.clientX > innerWidth - 24) return
     drag = { id: event.pointerId, x: event.clientX, y: event.clientY, at: event.timeStamp }
   })
   hosted.addEventListener('pointercancel', () => { drag = null })
@@ -1156,11 +1278,21 @@ ${entry.key}`
     const start = drag
     drag = null
     if (!start || event.pointerId !== start.id) return
-    const by = pageFlip(event.clientX - start.x, event.clientY - start.y, event.timeStamp - start.at)
-    if (!by) return
+    const step = gestureStep(event.clientX - start.x, event.clientY - start.y, event.timeStamp - start.at)
+    if (!step) return
     swiped = true
     setTimeout(() => { swiped = false }, 0)
-    turn(by)
+    // The square column is its own scroller. Up and down moves the next tile into the frame, and does not turn the set.
+    const tiling = step.axis === 'y' && event.target instanceof Element && !!event.target.closest('.comb[data-shape="tiles"]')
+    if (managing) {
+      if (step.axis === 'x') cycleTemplate(step.by)
+      else if (!tiling) cycleSet(step.by)
+      return
+    }
+    if (step.axis !== 'x') return
+    if (pages().length > 0) turn(step.by)
+    else if (step.by < 0) { try { history.back() } catch { /* a page with nowhere to go stays */ } }
+    else { try { history.forward() } catch { /* a page with nowhere to go stays */ } }
   })
   hosted.addEventListener('click', event => {
     if (!swiped) return
@@ -1296,14 +1428,20 @@ ${entry.key}`
       try { return within(new URL(place.href).hostname, zone) } catch { return false }
     }))) : []
   }
-  /** The label of the current group — All, or a community's name — kept in place so a repaint never takes its focus. */
-  const paintPager = (communities: readonly ShowcaseCommunity[]): void => {
-    const names = ['All', ...communities.map(row => row.name)]
-    const at = Math.max(0, ['', ...communities.map(row => communityKey(row.name))].indexOf(page))
-    label.textContent = names[at]!
-    label.setAttribute('aria-label', `${names[at]}, group ${at + 1} of ${names.length}. Press for the next.`)
-    if (label.parentElement !== pager) pager.replaceChildren(label)
-    pager.hidden = communities.length === 0
+  /** The label of the current group — All, or a community's name — kept in place so a repaint never takes its focus.
+   *  While managing with no named set, the label is the domain whose tiles are open. */
+  const paintPager = (communities: readonly ShowcaseCommunity[], shape: ShowcaseView): void => {
+    const domains = managing && namedCommunities().length === 0
+    const names = domains ? zoneSets() : ['All', ...communities.map(row => row.name)]
+    const keys = domains ? names : ['', ...communities.map(row => communityKey(row.name))]
+    const at = Math.max(0, keys.indexOf(domains ? openRow : page))
+    label.textContent = names[at] ?? 'All'
+    label.setAttribute('aria-label', `${label.textContent}, group ${at + 1} of ${Math.max(1, names.length)}. Press for the next.`)
+    templateNote.hidden = !managing
+    templateNote.textContent = managing ? viewLabel(shape) : ''
+    hint.hidden = !managing
+    if (label.parentElement !== pager) pager.replaceChildren(label, templateNote, hint)
+    pager.hidden = !managing && communities.length === 0
     if (pager.hidden) hosted.removeAttribute('aria-labelledby')
     else hosted.setAttribute('aria-labelledby', label.id)
   }
@@ -1326,17 +1464,18 @@ ${entry.key}`
       .filter(entry => !community || covers(entry, community.items, community.domains)).sort(byTitle)
     // The platform's doors are the first page's; a community is about what is shared.
     const links = community ? [] : options.links ?? []
-    // HOW IT IS DRAWN: a community's own view, else All's, else the brand's hexagons;
-    // `?view=` on the address overrides it for whoever is looking, and changes nothing signed.
-    const base = viewAsked ?? signed?.showcase?.view ?? 'hex'
-    const shape = viewAsked ?? community?.view ?? base
+    // HOW IT IS DRAWN: a try from this visit, else a community's own view, else All's
+    // (`?view=` on the address, else what was signed), else the brand's hexagons.
+    // A try changes nothing signed. An explicit view on a community beats what All lends it.
+    const base = tried.get('') ?? viewAsked ?? signed?.showcase?.view ?? 'hex'
+    const shape = tried.get(page) ?? community?.view ?? base
     // This domain first; then the domains this browser follows, by name.
     const rows: HTMLElement[] = []
     let visible = 0
     // AN ACCORDION OF DOMAINS, THE OPEN ONE ALWAYS AT THE TOP (jwize 2026-10-26: "you click the domain view and it is an accordion
     // of domains with the open one showing the available; they are below the open item, which is always at the top"). While
     // managing, every domain is a row; the open row shows its tiles and is first, the rest follow below it as headers.
-    const everyZone = [options.self, ...[...held].sort(), ...[...pending.keys()].filter(zone => !held.includes(zone))]
+    const everyZone = zoneSets()
     const order = managing && openRow && everyZone.includes(openRow) ? [openRow, ...everyZone.filter(zone => zone !== openRow)] : everyZone
     for (const zone of order) {
       const view = rowView(zone)
@@ -1371,14 +1510,14 @@ ${entry.key}`
     // Re-insert only when the order changed: moving a row takes focus from it.
     const current = [...hosted.children]
     if (current.length !== rows.length || current.some((node, index) => node !== rows[index])) hosted.replaceChildren(...rows)
-    paintPager(communities)
+    paintPager(communities, shape)
     bandsHost.classList.toggle('managing', managing)
     // WHEN THE OPEN ROW IS COLLAPSED, EVERY ROW SITS AT THE TOP (jwize 2026-10-26: "if you collapse the row showing data they should
     // all collapse to the top"): with nothing open there is no row to take the free height, so the rows stack from the top.
     hosted.classList.toggle('none-open', managing && !everyZone.includes(openRow))
     // The follow box stays at the foot, always (jwize 2026-10-25: "just show the input and follow at the bottom all the time").
     followBar.hidden = !options.follow
-    hosted.classList.toggle('swipeable', communities.length > 0 && !terms.length)
+    hosted.classList.toggle('swipeable', (managing || communities.length > 0) && !terms.length)
     nothing.hidden = !terms.length || visible > 0
     // THE SEARCH IS ONLY FOR SEARCH; the follow box at the foot may suggest what was typed in the search when that
     // is a valid domain nobody follows yet (jwize 2026-10-25: "the follow can suggest the search if it is a
@@ -1534,6 +1673,7 @@ export const SHOWCASE_STYLE = `
 .hero-stats svg, .band-meta svg { width: .95rem; height: .95rem; color: var(--md-primary); }
 .search { position: sticky; top: 0; z-index: 25; display: flex; align-items: center; margin: 0; padding: .55rem 0;
   background: color-mix(in srgb, var(--md-surface-c-low) 90%, transparent); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.search[hidden] { display: none; }
 .search svg { position: absolute; z-index: 1; left: .95rem; top: 50%; margin-top: -.575rem; width: 1.15rem; height: 1.15rem; color: var(--md-primary); pointer-events: none; }
 .search input {
   flex: 1; width: 100%; padding: .78rem 1rem .78rem 2.8rem; font: 400 1rem/1.3 var(--md-font-ui, Inter, system-ui, sans-serif);
@@ -1541,12 +1681,20 @@ export const SHOWCASE_STYLE = `
   background: var(--md-surface-c-lowest);
   border: 1px solid color-mix(in srgb, var(--md-primary) 32%, var(--md-outline-variant));
 }
-.search .manage-toggle { flex: none; display: grid; place-items: center; width: 2.9rem; height: 2.9rem; margin-left: .5rem; padding: 0; cursor: pointer;
-  border: 1px solid color-mix(in srgb, var(--md-primary) 32%, var(--md-outline-variant)); border-radius: var(--hc-radius-control, 2px);
+/* the two buttons live at the thumb: the glass asks for the search, Manage opens the management screen */
+.page-dock { position: fixed; z-index: 40; left: 50%; bottom: 0; transform: translateX(-50%); box-sizing: border-box;
+  display: flex; justify-content: center; align-items: center; gap: .55rem; width: min(100%, 100rem); margin: 0;
+  padding: .5rem .75rem calc(.5rem + env(safe-area-inset-bottom));
+  background: color-mix(in srgb, var(--md-surface) 90%, transparent); border-top: 1px solid var(--md-outline-variant);
+  -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); }
+.page-dock button { display: grid; place-items: center; width: 2.75rem; height: 2.75rem; margin: 0; padding: 0; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--md-primary) 32%, var(--md-outline-variant)); border-radius: 999px;
   background: var(--md-surface-c-lowest); color: var(--md-on-surface); }
-.search .manage-toggle svg { position: static; margin: 0; width: 1.25rem; height: 1.25rem; color: inherit; }
-.search .manage-toggle[aria-pressed='true'] { border-color: var(--md-primary); color: var(--md-primary); }
-.search .manage-toggle:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+.page-dock button svg { width: 1.3rem; height: 1.3rem; }
+.page-dock button:hover { border-color: var(--md-primary); color: var(--md-primary); }
+.page-dock button[aria-pressed='true'] { background: var(--md-primary); border-color: var(--md-primary); color: var(--md-on-primary); }
+.page-dock button[aria-pressed='true']:hover { color: var(--md-on-primary); filter: brightness(1.06); }
+.page-dock button:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
 .bands:not(.managing) .dex-row > .dex-head { display: none; }
 /* managing: the open domain is the first row and takes the free height; the others sit below it as plain header rows */
 .bands.managing > .hosted { grid-template-rows: minmax(min-content, 1fr); grid-auto-rows: min-content; align-content: start; }
@@ -1586,8 +1734,11 @@ export const SHOWCASE_STYLE = `
   font: 500 .66rem/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--md-on-surface-faint); }
 .hosted-empty[hidden], .dex-row[hidden], .hosted-nothing[hidden], .follow-suggest[hidden], .follow[hidden], .follow-note:empty { display: none; }
 /* the communities: a strip of names after All; the list beneath turns with a swipe */
-.pager { margin: 0 0 .5rem; padding: .3rem 0; }
+.pager { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem .75rem; margin: 0 0 .5rem; padding: .3rem 0; }
 .pager[hidden] { display: none; }
+.pager-template { color: var(--md-primary); font: 600 .78rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); }
+.pager-hint { flex-basis: 100%; margin: 0; color: var(--md-on-surface-faint); font-size: .75rem; line-height: 1.35; }
+.pager-template[hidden], .pager-hint[hidden] { display: none; }
 .owner-note { margin: 0 0 .5rem; color: var(--md-on-surface-var); font-size: .85rem; }
 .owner-note[hidden] { display: none; }
 .hex.off { opacity: .35; filter: grayscale(1); }
@@ -1611,6 +1762,90 @@ export const SHOWCASE_STYLE = `
 .comb[data-shape='launcher'] .hex:hover > .hex-art { transform: translateY(-2px); }
 .comb[data-shape='launcher'] a.hex:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 3px; }
 .comb[data-shape='launcher'] a.hex:focus-visible > .hex-art { inset: auto; }
+/* THE IPHONE LAUNCHER: the same tiles on a phone-shaped screen. Four columns, the name under each icon,
+   a dock of the first four once there are more, and the home bar. */
+.comb[data-shape='iphone'] { display: flex; justify-content: center; min-width: 0; max-width: 100%; }
+.comb[data-shape='iphone'] .spring { box-sizing: border-box; display: flex; flex-direction: column; min-width: 0; width: min(100%, 26rem); max-width: 100%;
+  min-height: 28rem; padding: 1.15rem .85rem .7rem; border-radius: 1.75rem; color: #fff;
+  background:
+    radial-gradient(120% 80% at 12% -10%, color-mix(in srgb, var(--md-primary) 72%, #fff), transparent 48%),
+    radial-gradient(90% 70% at 110% 8%, color-mix(in srgb, var(--gold-1) 50%, #9ab), transparent 46%),
+    radial-gradient(80% 60% at 50% 110%, color-mix(in srgb, #e0607e 35%, transparent), transparent 52%),
+    linear-gradient(165deg, #1a2744, #2c3358 58%, #1b2433);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / .14), 0 1rem 2.4rem -1.2rem rgb(12 16 32 / .55); }
+.comb[data-shape='iphone'] .spring-grid, .comb[data-shape='iphone'] .spring-dock { display: grid; min-width: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.05rem .45rem; align-content: start; }
+.comb[data-shape='iphone'] .spring-grid { flex: 1 1 auto; }
+.comb[data-shape='iphone'] .spring-dock { margin-top: .85rem; padding: .65rem .35rem .5rem; border-radius: 1.5rem;
+  background: rgb(255 255 255 / .16); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); }
+.comb[data-shape='iphone'] .spring-dock[hidden] { display: none; }
+.comb[data-shape='iphone'] .spring-home { width: 34%; height: .28rem; margin: .65rem auto 0; border-radius: 999px; background: rgb(255 255 255 / .88); }
+.comb[data-shape='iphone'] .hex { width: 100%; height: auto; display: grid; justify-items: center; align-content: start; gap: .35rem;
+  clip-path: none; background: none; transition: none; }
+.comb[data-shape='iphone'] .hex > .hex-art { position: relative; inset: auto; width: 100%; max-width: 4.4rem; aspect-ratio: 1; clip-path: none; border-radius: 22.5%;
+  box-shadow: 0 .4rem .9rem rgb(0 0 0 / .28), inset 0 0 0 1px rgb(255 255 255 / .22); transition: transform .2s; }
+.comb[data-shape='iphone'] .hex > .hex-art::after { display: none; }
+.comb[data-shape='iphone'] .link-art > svg { position: absolute; inset: 0; width: 42%; height: 42%; margin: auto; }
+.comb[data-shape='iphone'] .hex-label { position: static; width: 100%; color: #fff; }
+.comb[data-shape='iphone'] .hex-name { font-size: .68rem; font-weight: 500; line-height: 1.15; letter-spacing: 0; text-shadow: 0 1px 2px rgb(0 0 0 / .7); -webkit-line-clamp: 1; }
+.comb[data-shape='iphone'] .hex-address, .comb[data-shape='iphone'] .hex-kind { display: none; }
+.comb[data-shape='iphone'] .hex-owners, .comb[data-shape='iphone'] .hex.in-showcase::after { top: -.2rem; right: auto;
+  left: calc(50% + min(2.2rem, 50%) - .85rem); transform: none; }
+.comb[data-shape='iphone'] .hex.in-showcase::after { width: 1.15rem; height: 1.15rem; font-size: .65rem; }
+.comb[data-shape='iphone'] a.hex:hover, .comb[data-shape='iphone'] a.hex:focus-visible { background: none; }
+.comb[data-shape='iphone'] .hex:hover > .hex-art { transform: translateY(-2px); }
+.comb[data-shape='iphone'] a.hex:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.comb[data-shape='iphone'] a.hex:focus-visible > .hex-art { inset: auto; }
+/* THE LIST: the same tiles as blocks down the page. One in your own showcase is a link.
+   One under another domain is on (a check) or off (gray), and a tap switches it. */
+.comb[data-shape='list'] { display: flex; flex-direction: column; gap: .4rem; min-width: 0; max-width: 100%; }
+.comb[data-shape='list'] .hex { box-sizing: border-box; width: 100%; min-width: 0; height: auto; min-height: 3.4rem; display: flex; align-items: center; gap: .75rem;
+  padding: .45rem .75rem; clip-path: none; border-radius: var(--hc-radius-card, 3px);
+  background: color-mix(in srgb, var(--md-surface-c-lowest) 80%, transparent);
+  border: 1px solid var(--md-outline-variant); }
+.comb[data-shape='list'] .hex > .hex-art { position: relative; inset: auto; flex: none; width: 2.6rem; height: 2.6rem; aspect-ratio: 1;
+  clip-path: none; border-radius: 22%; }
+.comb[data-shape='list'] .hex > .hex-art::after { display: none; }
+.comb[data-shape='list'] .link-art > svg { position: absolute; inset: 0; width: 46%; height: 46%; margin: auto; }
+.comb[data-shape='list'] .hex-label { position: static; flex: 1 1 auto; min-width: 0; display: grid; justify-items: start; gap: .1rem; text-align: left;
+  color: var(--md-on-surface-strong); }
+.comb[data-shape='list'] .hex-name { -webkit-line-clamp: 1; font-size: .92rem; line-height: 1.2; letter-spacing: 0; text-shadow: none; }
+.comb[data-shape='list'] .hex-address { display: block; opacity: .75; }
+.comb[data-shape='list'] .hex-kind { display: none; }
+.comb[data-shape='list'] .hex-owners { position: static; transform: none; flex: none; }
+.comb[data-shape='list'] .hex.in-showcase { padding-right: 2.4rem; border-color: color-mix(in srgb, var(--md-primary) 55%, var(--md-outline-variant)); }
+.comb[data-shape='list'] .hex.in-showcase::after { top: 50%; right: .75rem; left: auto; transform: translateY(-50%); }
+.comb[data-shape='list'] a.hex:not(.off):not(.in-showcase) { padding-right: 2rem; }
+.comb[data-shape='list'] a.hex:not(.off):not(.in-showcase)::after { content: ''; position: absolute; right: .95rem; top: 50%; width: .4rem; height: .4rem;
+  border-right: 2px solid var(--md-on-surface-var); border-top: 2px solid var(--md-on-surface-var); transform: translateY(-50%) rotate(45deg); }
+.comb[data-shape='list'] a.hex:hover, .comb[data-shape='list'] a.hex:focus-visible { background: color-mix(in srgb, var(--md-primary) 10%, transparent); }
+.comb[data-shape='list'] a.hex:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+.comb[data-shape='list'] a.hex:focus-visible > .hex-art { inset: auto; }
+/* TILES: one column, and the column is a scroller. The frame is a square (a container cannot
+   query its own size, so the side is the width and the ratio makes the height). Each square fills
+   that frame, the picture goes to every edge, and a flick lands on the next square. Up and down
+   inside the column move the frame; they do not turn the set. */
+.comb[data-shape='tiles'] { box-sizing: border-box; display: flex; flex-direction: column; flex: none; align-self: center;
+  width: min(100%, 30rem, 78dvh); max-width: 100%; aspect-ratio: 1; height: auto; min-width: 0; min-height: 0;
+  margin-inline: auto; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
+  scroll-snap-type: y mandatory; touch-action: pan-y; scrollbar-width: none; background: #0c1016;
+  border-radius: var(--hc-radius-card, 3px);
+  box-shadow: 0 1.25rem 2.8rem -1.4rem rgb(8 10 16 / .65), inset 0 0 0 1px rgb(255 255 255 / .08); }
+.comb[data-shape='tiles']::-webkit-scrollbar { width: 0; height: 0; }
+.comb[data-shape='tiles'] .hex { flex: none; width: 100%; min-width: 0; height: auto; aspect-ratio: 1; clip-path: none;
+  border-radius: 0; background: none; scroll-snap-align: start; scroll-snap-stop: always; }
+.comb[data-shape='tiles'] .hex > .hex-art { position: absolute; inset: 0; width: auto; height: auto; clip-path: none; border-radius: 0; }
+.comb[data-shape='tiles'] .hex > .hex-art::after { background: linear-gradient(180deg, transparent 52%, rgb(8 10 14 / .28) 74%, rgb(8 10 14 / .82)); }
+.comb[data-shape='tiles'] .link-art > svg { position: absolute; inset: 0; width: 28%; height: 28%; margin: auto; }
+.comb[data-shape='tiles'] .hex-label { position: absolute; left: .9rem; right: .9rem; top: auto; bottom: .85rem; z-index: 3;
+  display: grid; justify-items: start; gap: .22rem; text-align: left; color: #fff; }
+.comb[data-shape='tiles'] .hex-name { -webkit-line-clamp: 1; font-size: 1.05rem; font-weight: 600; line-height: 1.15; letter-spacing: -.01em; }
+.comb[data-shape='tiles'] .hex-address { display: block; opacity: .78; font-size: .62rem; letter-spacing: .12em; text-transform: uppercase; }
+.comb[data-shape='tiles'] .hex-kind { display: none; }
+.comb[data-shape='tiles'] .hex-owners { top: .7rem; right: .7rem; left: auto; transform: none; }
+.comb[data-shape='tiles'] .hex.in-showcase::after { top: .7rem; left: .7rem; right: auto; transform: none; }
+.comb[data-shape='tiles'] a.hex:hover, .comb[data-shape='tiles'] a.hex:focus-visible { background: none; }
+.comb[data-shape='tiles'] a.hex:focus-visible { outline: 2px solid #fff; outline-offset: -3px; }
+.comb[data-shape='tiles'] a.hex:focus-visible > .hex-art { inset: 0; }
 .hosted-nothing { margin: .4rem 0 1rem; color: var(--md-on-surface-var); }
 /* the platform's doors are tiles: the same hexagon, a glyph for a picture, a link for a click */
 a.hex { color: inherit; text-decoration: none; cursor: pointer; }
@@ -1627,13 +1862,14 @@ a.hex { color: inherit; text-decoration: none; cursor: pointer; }
 .follow-suggest button:disabled, .follow-field button:disabled { opacity: .6; cursor: default; }
 .follow-suggest button:focus-visible, .follow-field button:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
 .follow { display: grid; grid-template-columns: minmax(0, 1fr); gap: .45rem; margin: auto 0 0; padding: .55rem 0;
-  position: sticky; bottom: 0; z-index: 25;
+  position: sticky; bottom: calc(3.85rem + env(safe-area-inset-bottom)); z-index: 25;
   background: color-mix(in srgb, var(--md-surface-c-low) 90%, transparent); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
 /* ANCHORED TO THE BOTTOM (jwize 2026-10-26: "anchor the input and follow to the bottom and expand the div fit to content, aside
    from the same gutter as the top input and the div"): the panel is at least the screen tall and the follow bar is pushed to
    its foot, so a short list leaves the bar at the bottom of the screen and a long one carries it along; the card above
    is exactly as tall as its tiles, and the gap to the bar is the search's own .55rem. */
-.card.showcase-page .panel { display: flex; flex-direction: column; min-height: calc(100dvh - 1.75rem); margin-bottom: 0; }
+.card.showcase-page .panel { display: flex; flex-direction: column; min-height: calc(100dvh - 1.75rem); margin-bottom: 0;
+  padding-bottom: calc(4.1rem + env(safe-area-inset-bottom)); }
 .bands { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; }
 .bands > .hosted { margin-bottom: 0; flex: 1 1 auto; align-content: stretch; }
 /* NO DEAD AREA (jwize 2026-10-26: "need to close the dead area"): the open card takes the whole space between the search and
@@ -1732,7 +1968,8 @@ a.version-visit { color: var(--md-primary); }
   /* ONE SIDE MARGIN, NARROW OR WIDE (jwize 2026-10-26: "when squeezed it has a margin again"): everything sits .5rem from the
      screen edge, the same as the wide page, and the follow bar is in the flow at the foot of a screen-tall panel, so the card
      fills right down to it with no band between. */
-  .card.showcase-page .panel { margin-top: 0; width: 100%; min-width: 0; padding-bottom: 0; min-height: 100dvh; }
+  .card.showcase-page .panel { margin-top: 0; width: 100%; min-width: 0; min-height: 100dvh;
+    padding-bottom: calc(4.1rem + env(safe-area-inset-bottom)); }
   .hero-brand { padding: .8rem .5rem .15rem; }
   .search { padding: .55rem .5rem; }
   .search svg { left: calc(.5rem + .95rem); }
@@ -1745,7 +1982,7 @@ a.version-visit { color: var(--md-primary); }
      search above them and the follow input fixed at the bottom where a thumb is
      — nothing else. The desktop keeps the setup beneath, because it is the
      dashboard and the hosting. */
-  .follow { position: sticky; z-index: 25; bottom: 0; margin: auto 0 0;
+  .follow { position: sticky; z-index: 25; bottom: calc(3.85rem + env(safe-area-inset-bottom)); margin: auto 0 0;
     padding: .55rem .5rem calc(.55rem + env(safe-area-inset-bottom));
     background: color-mix(in srgb, var(--md-surface) 94%, transparent); border-top: 1px solid var(--md-outline-variant);
     -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
@@ -1762,6 +1999,8 @@ a.version-visit { color: var(--md-primary); }
   .comb { --s: 6.1rem; --g: .18rem; }
   .comb[data-shape='launcher'] { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.1rem .7rem; }
   .comb[data-shape='launcher'] .hex-name { font-size: .72rem; }
+  .comb[data-shape='iphone'] .spring { width: 100%; min-height: 22rem; padding: .85rem .55rem .6rem; border-radius: 0; }
+  .comb[data-shape='iphone'] .hex-name { font-size: .64rem; }
   .hex-name { font-size: .74rem; }
   .hex-address { display: none; }
   .hex-label { top: 60%; }

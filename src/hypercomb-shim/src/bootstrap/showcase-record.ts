@@ -34,10 +34,23 @@ export type ShowcaseRecord = { readonly zone: string; readonly items: readonly S
  *  launcher. The default is hexagons for the brand"; "a way on the groups to
  *  change launcher renderings"). The tiles, their pictures and their
  *  properties never change; only the shape they are drawn in does. A closed set
- *  of names here — a name this reader does not know is not a view, and the page
- *  is drawn as hexagons. */
-export type ShowcaseView = 'hex' | 'launcher'
-export const parseView = (raw: unknown): ShowcaseView | undefined => (raw === 'hex' || raw === 'launcher' ? raw : undefined)
+ *  of names here, in the order a sideways swipe walks them while managing —
+ *  a name this reader does not know is not a view, and the page is drawn as
+ *  hexagons. A new idea is another name in this list, drawn by both readers. */
+export const SHOWCASE_VIEWS = ['hex', 'launcher', 'iphone', 'list', 'tiles'] as const
+export type ShowcaseView = (typeof SHOWCASE_VIEWS)[number]
+export const parseView = (raw: unknown): ShowcaseView | undefined =>
+  (typeof raw === 'string' && (SHOWCASE_VIEWS as readonly string[]).includes(raw) ? raw as ShowcaseView : undefined)
+
+const VIEW_LABELS: Record<ShowcaseView, string> = { hex: 'Hexagons', launcher: 'Launcher', iphone: 'iPhone', list: 'List', tiles: 'Tiles' }
+/** The words a person sees for a template. */
+export const viewLabel = (view: ShowcaseView): string => VIEW_LABELS[view]
+
+/** The template a sideways step lands on. Absent is hexagons, the brand's default. */
+export const stepView = (current: ShowcaseView | undefined, by: -1 | 1): ShowcaseView => {
+  const at = Math.max(0, SHOWCASE_VIEWS.indexOf(current ?? 'hex'))
+  return SHOWCASE_VIEWS[(at + by + SHOWCASE_VIEWS.length) % SHOWCASE_VIEWS.length]!
+}
 
 /** A community: a named page of the showcase — a filter over what it already
  *  shows, never a way to show more (jwize 2026-10-25: "you create a community
