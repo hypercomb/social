@@ -6885,3 +6885,41 @@ test('a request holds its name against another key until it lapses', async () =>
     })
   })
 })
+
+// A READ IN FLIGHT BELONGS TO ITS REQUEST (2026-11-02). When a request ends
+// first — the reader hung up, a waitUntil hit its limit — its storage reads
+// never settle. A door page that joined such a read, or waited behind sixteen
+// of them for a slot, hung with it: every *.hypercomb.com door `canceled` at
+// ~12 s wall and ~10 ms CPU until the isolate was recycled.
+const stalled = (env, hosts) => (async () => {
+  const dead = new Set(await Promise.all(hosts.map(async (host) => `${await sha256Hex(host)}/`)))
+  const content = env.CONTENT
+  return { ...env, CONTENT: { ...content, list: (options) => dead.has(options.prefix) ? new Promise(() => {}) : content.list(options) } }
+})()
+
+async function answersWithin(promise, ms = 2_000) {
+  let timer
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('the door hung')), ms) })])
+  } finally { clearTimeout(timer) }
+}
+
+test('a door read whose request ended holds no later request for the same door', async () => {
+  const { env } = await fixture()
+  const url = 'https://revolucion.pluginthematrix.com/'
+  worker.fetch(new Request(url), await stalled(env, ['revolucion.pluginthematrix.com']))
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  const page = await answersWithin(worker.fetch(new Request(url), env))
+  assert.equal(page.status, 200)
+})
+
+test('sixteen door reads that never settle leave every other door answering', async () => {
+  const labels = Array.from({ length: 17 }, (_, i) => `stall${i}`)
+  const { env } = await fixture(await signedIndex(Object.fromEntries(labels.map((label) => [label, head]))))
+  const hosts = labels.map((label) => `${label}.pluginthematrix.com`)
+  const dead = await stalled(env, hosts.slice(0, 16))
+  for (const host of hosts.slice(0, 16)) worker.fetch(new Request(`https://${host}/`), dead)
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  const page = await answersWithin(worker.fetch(new Request(`https://${hosts[16]}/`), env))
+  assert.equal(page.status, 200)
+})
