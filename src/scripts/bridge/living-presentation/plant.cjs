@@ -46,6 +46,12 @@
 // The slash matters: on the command line a bare line is read as prose first,
 // and in the tiles stance plain text lays a tile of that name.
 // --dry prints the sentences and says nothing; they can also be typed by hand.
+// --blocks [<route>] [--out <file>] writes each tile's BLOCK (its page) and its
+// included files (the documents and source it explains), for the tiles under
+// the route that have content (blocks/content.cjs). A file's text cannot ride a
+// command line, so this writes one snippet to paste into the hive tab's
+// console: it hands each page and file to the hive's own tile-files door, the
+// one the chat's write block uses. Plant the tiles first; a page needs its tile.
 // Saying the notes twice files them twice, so re-run with --tiles-only.
 
 const path = require('path')
@@ -65,7 +71,7 @@ const PUBLISH_ONLY = args.includes('--publish-only')
 const ALL = args.includes('--all')
 const DOMAINS = [...new Set(valuesOf('--publish').flatMap(v => v.split(',')).map(d => d.trim().toLowerCase()).filter(Boolean))]
 const LABEL = valueOf('--as')
-const flagValues = new Set([...valuesOf('--publish'), valueOf('--revision'), LABEL, SAY_URL].filter(Boolean))
+const flagValues = new Set([...valuesOf('--publish'), valueOf('--revision'), valueOf('--out'), LABEL, SAY_URL].filter(Boolean))
 // Two trees, two relations (tree.cjs): presentation (what is shown, and what is
 // published) and presenter (what shows it). With --all and no route, both are
 // planted; a route plants under its own tree.
@@ -74,6 +80,43 @@ const named = args.find(a => !a.startsWith('--') && !flagValues.has(a))
 const route = (named || tree.name).replace(/^\/+|\/+$/g, '')
 const EVERY_ROOT = ALL && !named
 const SAY = path.join(__dirname, '..', 'say.cjs')
+
+if (args.includes('--blocks')) {
+  // Pages and files, not sentences: one console snippet, written to a file
+  // (OS temp unless --out names one), since it is long.
+  const fs = require('fs')
+  const os = require('os')
+  const { buildBlocks } = require('./blocks/build.cjs')
+  const under = named ? route : ''
+  const blocks = buildBlocks({ under })
+  if (!blocks.length) { console.error(`no block content under /${under || '(everything)'} yet (blocks/content.cjs)`); process.exit(2) }
+  const out = valueOf('--out') || path.join(os.tmpdir(), `living-blocks-${Date.now()}.js`)
+  const snippet = `// Paste into the hive tab's console (F12 → Console). Writes ${blocks.length} pages and their files.
+(async () => {
+  const door = globalThis.ioc?.get?.('@diamondcoreprocessor.com/TileFilesDrone')
+  if (!door?.write) { console.error('Open this in the hive tab: the tile-files door is not here.'); return }
+  const blocks = ${JSON.stringify(blocks)}
+  let ok = 0, failed = 0
+  for (const b of blocks) {
+    const at = '/' + b.route.join('/')
+    const page = await door.write({ route: b.route, kind: 'page' }, b.page)
+    if (page.ok) ok++; else { failed++; console.error(at + ' page: ' + page.error); continue }
+    console.log(at + ': page' + (page.unchanged ? ' (unchanged)' : ''))
+    for (const f of b.files) {
+      const file = await door.write({ route: b.route, kind: 'file', name: f.name }, f.text)
+      if (file.ok) ok++; else { failed++; console.error(at + ' ' + f.name + ': ' + file.error) }
+    }
+  }
+  console.log('Done: ' + ok + ' written, ' + failed + ' failed.')
+})()
+`
+  fs.writeFileSync(out, snippet, 'utf8')
+  const files = blocks.reduce((n, b) => n + b.files.length, 0)
+  console.log(`${blocks.length} blocks (${blocks.map(b => b.route.at(-1)).join(', ')}) and ${files} files.`)
+  console.log(`Console snippet: ${out}`)
+  console.log('Open the hive tab, press F12 → Console, paste the file\'s contents, press Enter.')
+  process.exit(0)
+}
 
 if (PUBLISH_ONLY && !DOMAINS.length) { console.error('--publish-only needs --publish <domain>'); process.exit(2) }
 if (args.includes('--publish') && !DOMAINS.length) { console.error('--publish needs a domain, e.g. --publish example.com'); process.exit(2) }
