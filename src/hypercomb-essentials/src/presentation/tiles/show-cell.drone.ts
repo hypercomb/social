@@ -112,7 +112,11 @@ const previewRgb = (hex: string | null | undefined): [number, number, number] | 
 
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
-type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean; unshared?: boolean; plain?: boolean; pendingProps?: boolean; shaded?: boolean }
+type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean; unshared?: boolean; plain?: boolean; pendingProps?: boolean; shaded?: boolean; honeyMode?: HoneyMode }
+
+/** The quick menu's honey material, as the shader's aShapeMode takes it:
+ *  3 rest · 4 back · 5 lit · 6 back lit · 7 lit and dripping (hex-sdf.shader). */
+type HoneyMode = 3 | 4 | 5 | 6 | 7
 
 /** `tile:preview` — the tile editor's edit in progress (editor/tile-editor.view.ts).
  *  `page` is the page the tile sits on, segments joined with '/'. Pictures are
@@ -158,13 +162,32 @@ type FlowerCell = {
   /** The tile being worked on: it keeps its own picture, rim and name. */
   subject?: boolean
   lit?: boolean
+  /** An option of the quick menu, poured in honey. Opt-in, so a flower painted
+   *  by anyone else (the guide's ideas) keeps the page's own tiles. Never the
+   *  subject. */
+  honey?: boolean
+  /** The way back: crystallised honey, a dashed rim, no lip. */
+  back?: boolean
+  /** A Material Symbols glyph worn in place of the name; the DOM name layer
+   *  (tile-name.drone.ts) sets it, the shader never draws it. */
+  icon?: string
 }
+
+/** Which honey a flower option is poured as; `still` takes the drip off the lit one. */
+const honeyModeOf = (f: FlowerCell, still: boolean): HoneyMode =>
+  f.back ? (f.lit ? 6 : 4) : f.lit ? (still ? 5 : 7) : 3
 
 /** Above the veil the quick menu lays over the hive. */
 const FLOWER_Z = 10045
 /** Flower tiles are counted from here, so the page's hover index, which the
  *  shader is shared with, can never land on one. */
 const FLOWER_INDEX_BASE = 1000000
+/** The honey drip is 11 s round; the flower clock wraps on 60 of them (660 s),
+ *  which keeps u_time small and the loop seamless. */
+const FLOWER_CLOCK_PERIOD_S = 660
+/** The clock writes u_time at most this often (30 Hz is smooth for a drip that
+ *  moves under 8 px/s). */
+const FLOWER_CLOCK_STEP_MS = 33
 
 type ReferenceDraftPreview = {
   name: string
@@ -1125,6 +1148,14 @@ export class ShowCellDrone extends Drone {
   #diveMesh: any | null = null
   #flowerMesh: any | null = null
   #flowerGeom: Geometry | null = null
+  // The flower's one moving part: the lit honey tile's drip (aShapeMode 7). Its
+  // clock writes u_time on the page's own #driftStart origin (so it can never
+  // fight the pathway-hover or mark-preview clocks over the shared uniform),
+  // and runs only while such a tile is up, the tab is visible and reduced
+  // motion is off. '' = no dripping tile, no clock.
+  #flowerClockKey = ''
+  #flowerClockRaf = 0
+  #flowerClockAt = 0
   #diveGeom: Geometry | null = null
   #diveCells: Cell[] = []
   readonly #diveLabelToIndex = new Map<string, number>()
@@ -7774,6 +7805,8 @@ export class ShowCellDrone extends Drone {
       this.#pathwayHoverRaf = 0
     }
 
+    this.#stopFlowerClock()
+
     if (this.lineageChangeListening) {
       const lineage = this.resolve<EventTarget>('lineage')
       lineage?.removeEventListener('change', this.onLineageChange)
@@ -11607,8 +11640,13 @@ export class ShowCellDrone extends Drone {
 
       // Per-tile launcher silhouette. Only launcher tiles carry a launch:target
       // `shape`; everything else resolves to 0 (hexagon).
-      const sm = !onLauncherPage ? 0 : launchShapeToMode(launchShapeForLabel(c.label))
-      this.#shapeModeByLabel.set(c.label, sm)
+      // The flower's honey (3..7) is the same channel: a material, not a shape,
+      // and per cell, so the page's tiles on the same mesh never wear it.
+      const sm = c.honeyMode ?? (!onLauncherPage ? 0 : launchShapeToMode(launchShapeForLabel(c.label)))
+      // A foreign cell's label belongs to another layer: written here, it would
+      // tell shaderDrawsName that a same-named PAGE tile is drawn by the shader
+      // and the DOM layer would drop its name.
+      if (!foreign) this.#shapeModeByLabel.set(c.label, sm)
       shapeAttr.set([sm, sm, sm, sm], sap)
       sap += 4
 
@@ -11662,12 +11700,16 @@ export class ShowCellDrone extends Drone {
     const parent = this.pixiContainer
     if (!atlas || !parent || !this.layer || !this.hexMesh || !this.shader) return
 
+    // Read at every paint, like the other surfaces: under reduced motion the lit
+    // tile is the static honey (5), whose frozen pose is the complete picture.
+    const still = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
     const cells: Cell[] = input.map((f) => {
       const own = f.subject ? this.renderedCells.get(f.label) : undefined
       return {
         q: f.q, r: f.r, label: f.label, external: false, imageSig: own?.imageSig,
         hasBranch: own?.hasBranch ?? false, hideText: own?.hideText ?? false, heat: 0,
         borderColor: f.lit ? this.#accentColor : own?.borderColor,
+        ...(f.honey && !f.subject ? { honeyMode: honeyModeOf(f, still) } : {}),
       }
     })
     atlas.setPinned([...this.renderedCells.keys(), ...cells.map(c => c.label), PENDING_CELL_LABEL])
@@ -11699,9 +11741,59 @@ export class ShowCellDrone extends Drone {
       layer.position.x + this.hexMesh.position.x * layer.scale.x,
       layer.position.y + this.hexMesh.position.y * layer.scale.y,
     )
+    this.#syncFlowerClock(cells.find(c => c.honeyMode === 7) ?? null)
+  }
+
+  /** The dripping tile's clock. It starts when a tile lights and restarts when
+   *  a different one does, so a drip always begins at rest; a repaint of the
+   *  same lit tile (the cue pulse) leaves it running. Where launcher drift
+   *  already ticks u_time the drip rides that clock instead. */
+  #syncFlowerClock(dripping: Cell | null): void {
+    if (!dripping) { this.#stopFlowerClock(); return }
+    const key = `${dripping.q},${dripping.r}`
+    if (key !== this.#flowerClockKey) {
+      this.#flowerClockKey = key
+      if (!this.#driftActive) {
+        this.#driftStart = performance.now()
+        this.shader?.setTime(0)
+      }
+    }
+    document.addEventListener('visibilitychange', this.#onFlowerVisibility)
+    this.#runFlowerClock()
+  }
+
+  /** A hidden tab never fires rAF: the drip simply holds, and the clock is
+   *  started again when the tab is shown (#onFlowerVisibility). */
+  #runFlowerClock(): void {
+    if (this.#flowerClockRaf || document.hidden || this.#driftActive) return
+    const tick = (): void => {
+      if (!this.#flowerClockKey || this.#driftActive || document.hidden) { this.#flowerClockRaf = 0; return }
+      const now = performance.now()
+      if (now - this.#flowerClockAt >= FLOWER_CLOCK_STEP_MS) {
+        this.#flowerClockAt = now
+        this.shader?.setTime(((now - this.#driftStart) / 1000) % FLOWER_CLOCK_PERIOD_S)
+      }
+      this.#flowerClockRaf = requestAnimationFrame(tick)
+    }
+    this.#flowerClockRaf = requestAnimationFrame(tick)
+  }
+
+  #stopFlowerClock(): void {
+    this.#flowerClockKey = ''
+    if (this.#flowerClockRaf) { cancelAnimationFrame(this.#flowerClockRaf); this.#flowerClockRaf = 0 }
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.#onFlowerVisibility)
+  }
+
+  #onFlowerVisibility = (): void => {
+    if (document.hidden) {
+      if (this.#flowerClockRaf) { cancelAnimationFrame(this.#flowerClockRaf); this.#flowerClockRaf = 0 }
+      return
+    }
+    if (this.#flowerClockKey) this.#runFlowerClock()
   }
 
   #clearFlower(): void {
+    this.#stopFlowerClock()
     if (this.#flowerMesh) {
       try { this.#flowerMesh.parent?.removeChild(this.#flowerMesh) } catch { /* gone */ }
       try { this.#flowerMesh.destroy?.() } catch { /* gone */ }
