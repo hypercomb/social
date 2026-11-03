@@ -301,7 +301,7 @@ export class SiteViewDrone extends Drone {
       const websiteUp = (): boolean => (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
         ?.get<{ mode: string }>('@hypercomb.social/ViewMode')?.mode === 'website'
       this.#backOff = window.ioc?.get<BackGesture>('@diamondcoreprocessor.com/BackGesture')
-        ?.register({ owner: 'site-view', back: () => this.#exitToHive(), active: () => websiteUp() && !isPublishedVisitorShell() }) ?? null
+        ?.register({ owner: 'site-view', back: () => this.#exitToHive(), exact: true, active: () => websiteUp() && !isPublishedVisitorShell() }) ?? null
     }
     if (!this.#publishedRootBound) {
       // Last-value replay covers the boot order: the visit engine mounts the
