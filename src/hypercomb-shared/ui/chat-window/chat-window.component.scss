@@ -999,8 +999,8 @@ $accent: #7eb6d6;
 // thread you are reading; that one leaves it) without drawing two boxes.
 // ONE ICON SIZE PER ROW, and it is the header gear's: a 1.75rem box with a
 // 1.0625rem glyph (28px / 17px at the root), in rem so neither the panel's
-// text ladder nor a px literal decides it. The peek and providers controls in
-// chat-peek.scss take the same two numbers.
+// text ladder nor a px literal decides it. The providers control in
+// chat-peek.scss takes the same two numbers.
 .chat-new,
 .chat-put {
   flex: 0 0 auto;

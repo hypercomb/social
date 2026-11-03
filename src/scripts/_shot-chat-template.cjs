@@ -95,10 +95,6 @@ async function main() {
         clip: { x: Math.max(0, box.x + box.width - 460), y: 0, width: 460, height: box.y + box.height + 8 },
       })
     }
-    // Folded away — the tool row must survive, with the way back in it.
-    await page.locator('hc-chat-window .chat-peek').click()
-    await page.waitForTimeout(700)
-    await page.screenshot({ path: path.join(OUT, '03-chat-folded.png') })
     await browser.close()
     console.log(errors.length ? `page errors:\n  ${errors.slice(0, 6).join('\n  ')}` : 'no page errors')
     console.log(`wrote ${OUT}`)

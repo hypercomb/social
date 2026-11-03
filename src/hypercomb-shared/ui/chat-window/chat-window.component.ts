@@ -125,7 +125,6 @@ import { applySectionEdits, draftModule } from '@hypercomb/runtime/module-drafts
 import { installedPackageSig } from '@hypercomb/runtime/installed-package'
 import { doctrineFailedMessage, doctrineRanMessage, fileFailedMessage, fileRanMessage, pageChangeUnready, parseWriteBlock, readsAskedIn, routesNamedIn, sandboxRule, tileFileLabel, unreadAskedMessage, unreadClaimMessage, writeFailedMessage, writeRanMessage, writeSkippedMessage, type TileFileWriteRequest } from './hypercomb-work-fence'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
-import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { signalSession } from '../window-session'
 import { highlightBlocks } from './chat-highlight'
 import { resolveEntryImageUrl } from '../shelf-thumbs'
@@ -1624,8 +1623,7 @@ const SURFACE_OWNER = 'chat-window'
  *  A second owner-counted mode says so, rather than the bar learning this
  *  window's name: any view that leaves the bar its edge can hold it, and the
  *  bar stays while ANY owner does. Claimed and released in lockstep with
- *  `view:active` — the fold releases both, which is what brings the hive AND
- *  its chrome back. */
+ *  `view:active`: both follow whether this window is showing. */
 const KEEPS_CONTROLS = 'view:keeps-controls'
 
 const MODE_REGISTRY_IOC_KEY = '@diamondcoreprocessor.com/ModeRegistry'
@@ -1653,7 +1651,7 @@ const conversationOnLayer = (path: string, here: readonly string[]): boolean => 
 @Component({
   selector: 'hc-chat-window',
   standalone: true,
-  imports: [NgTemplateOutlet, TranslatePipe, HcDockedPanelDirective, DockInsetDirective],
+  imports: [NgTemplateOutlet, TranslatePipe, HcDockedPanelDirective],
   templateUrl: './chat-window.component.html',
   // TWO SHEETS, in source order. Angular's `anyComponentStyle` budget is
   // measured per compiled stylesheet and one output is emitted per `styleUrls`
@@ -1661,7 +1659,7 @@ const conversationOnLayer = (path: string, here: readonly string[]): boolean => 
   // partial cannot. The markdown sheet is last because it styles the message
   // bodies the first sheet lays out.
   // Four sheets, not one: Angular's component style budget is per-sheet, and
-  // the peek geometry and the picture viewer are self-contained states that
+  // the header tool buttons and the picture viewer are self-contained and
   // read better apart.
   // A fifth for the route and the question wizard (chat-route.scss): the
   // main sheet is at the budget, and the pipe is its own vocabulary.
@@ -1719,30 +1717,20 @@ export class ChatWindowComponent implements OnDestroy {
   /** Parked while the hive is covered and brought back intact — the thread is
    *  durable, but the scroll position and the half-typed message are not.
    *
-   *  PARKING IS THE SHELL TAKING THE WINDOW OFF SCREEN, and everything the
-   *  fold turned on OUT IN THE HIVE has to go with it. `announce` fires only
-   *  on park/unpark (open/close emit `chat:window-state` themselves), which
-   *  makes this the one seam where that can be said once:
+   *  PARKING IS THE SHELL TAKING THE WINDOW OFF SCREEN. `announce` fires only
+   *  on park/unpark (open/close emit `chat:window-state` themselves).
    *
-   *    • the tile icon comes off. A parked window keeps `peeking` true — that
-   *      is the whole point of parking — so without this the hexagons went on
-   *      offering "add to the request" for a shelf that was not on screen,
-   *      which is exactly the thing chat-context-action.drone.ts exists to
-   *      prevent.
-   *    • the `view:active` claim follows the SCREEN, not the intent: a parked
-   *      window covers nothing, so it must not go on claiming the surface.
-   *    • WHAT A RELOAD COMES BACK TO follows the screen as well. Escape puts
-   *      every showing window away (tool-windows.ts) and the one-window rule
-   *      parks this one the moment another opens (window-rule.ts) — neither
-   *      is a close, so remembering only open()/close() left the stored
-   *      choice saying "open" for a window that was not on screen, and the
-   *      next refresh laid the chat back over a hive the participant had
-   *      cleared. Parked still forgets nothing else; it simply is not
-   *      SHOWING, and showing is what a reload brings back. */
+   *  WHAT A RELOAD COMES BACK TO follows the screen. Escape puts every showing
+   *  window away (tool-windows.ts) and the one-window rule parks this one the
+   *  moment another opens (window-rule.ts) — neither is a close, so remembering
+   *  only open()/close() left the stored choice saying "open" for a window that
+   *  was not on screen, and the next refresh laid the chat back over a hive the
+   *  participant had cleared. Parked still forgets nothing else; it simply is
+   *  not SHOWING, and showing is what a reload brings back. The `view:active`
+   *  claim follows `visible` on its own. */
   readonly session = signalSession(this.visible, open => {
     EffectBus.emit('chat:window-state', { open })
     rememberChatVisibility(open)
-    this.#applyFold()
     // PARKED IS OFF SCREEN: a keymap the wizard or the route was holding is
     // let go, or the whole hive stays deaf behind a window nobody can see.
     // The open question itself survives as a record and is drawn again on
@@ -1753,9 +1741,9 @@ export class ChatWindowComponent implements OnDestroy {
     // the capture phase and the cascade asks the focused window to unwind ONE
     // level; only when nothing was consumed does the sweep park the window.
     // The window used to answer the same keydown a second time from its own
-    // bubbling listener — after the sweep had already parked it — and a fold
-    // unwound on a window no longer showing re-claimed the surface for
-    // nothing: hidden canvas, hidden header, no window (2026-10-18).
+    // bubbling listener — after the sweep had already parked it — and that
+    // second unwind re-claimed the surface for a window nobody could see
+    // (2026-10-18).
     dismiss: () => this.#dismissOne(),
   })
 
@@ -1770,9 +1758,6 @@ export class ChatWindowComponent implements OnDestroy {
     if (this.viewing()) { this.closePicture(); return true }
     // The flyout is the smallest thing open over the transcript.
     if (this.shelfOpen()) { this.shelfOpen.set(false); return true }
-    // Folded away is a smaller commitment than the window itself: Escape
-    // brings the conversation back before it takes the window down.
-    if (this.peeking()) { this.togglePeek(); return true }
     // Then the RAIL'S OWN picks; a reference on the shelf is let go with its
     // × or by dragging it back, never by a keystroke that means "go up".
     if (this.#railSeen.size) { this.#rail?.clearSelection(); return true }
@@ -2318,22 +2303,6 @@ export class ChatWindowComponent implements OnDestroy {
     const paths = this.references().map(pick =>
       pick.key.startsWith('/') ? pick.key : '/' + [...pick.path, pick.name].join('/'))
     EffectBus.emit('context:active-set', { paths })
-  }
-
-  /** ON OR OFF, from a press out in the hive. The tile icon that raises this
-   *  is the SAME control both directions — pressing a tile that is already on
-   *  the shelf takes it off — because a lit icon you cannot un-press is an
-   *  icon you have to come back to the window to undo. */
-  toggleContext(tile: DroppedTile): void {
-    const segments = tile.path.split('/').filter(Boolean)
-    const key = tile.path.startsWith('/') ? tile.path : '/' + segments.join('/')
-    if (this.references().some(held => held.key === key)) {
-      this.references.set(this.references().filter(held => held.key !== key))
-      this.#announceSet()
-      void this.#refreshContextThumbs()
-      return
-    }
-    this.addContext(tile)
   }
 
   /** The × — take it off the shelf and out of the request. Deliberately NOT
@@ -4375,7 +4344,7 @@ export class ChatWindowComponent implements OnDestroy {
    *  holds. The current step stays while any of its rows is still being read;
    *  a gap between cards keeps what is current. */
   #applyReading(): void {
-    if (!this.routeSideShown() || this.peeking() || this.#steer || this.#routeDrag?.pulling || this.routeHold()) return
+    if (!this.routeSideShown() || this.#steer || this.#routeDrag?.pulling || this.routeHold()) return
     if (this.routePointerInside) return
     const rows = this.rendered()
     if (!rows.length) return
@@ -4948,97 +4917,26 @@ export class ChatWindowComponent implements OnDestroy {
   readonly railVisible = signal(true)
   #railQuery: MediaQueryList | null = null
 
-  // ── PEEK: the hive, without leaving the conversation ────────────────────
-  //
-  // The window is full screen, which is right while you are reading an answer
-  // and wrong while you are deciding WHICH tiles the next question should
-  // carry. The rail names tiles; it does not show you the hive.
-  //
-  // So: peek. The transcript, the rail and the conversation bar fold away and
-  // the panel stops taking pointer events, leaving the header (the shelf) and
-  // the footer (the input) floating over the LIVE hive. Navigation is the
-  // hive's own — an ordinary click walks in, and nothing about that changes,
-  // because a second navigation grammar over the same hexagons is a second
-  // thing to learn for no gain. Putting a tile ON the shelf is a per-tile icon
-  // that arrives with the fold (assistant/chat-context-action.drone.ts); it
-  // could not be a chord, because ctrl-click on a hexagon is already the
-  // selection toggle.
-  //
-  // Peek is a state of the OPEN window, not a second shape: the conversation,
-  // the draft and the shelf are all still there, and unfolding returns to
-  // exactly what you left, now carrying whatever you picked up.
-  readonly peeking = signal(false)
-
   /** Whether the providers console is standing. Reported BY the console, never
    *  guessed here: the same press opens and shuts it, and a toggle that draws
    *  itself from its own last press goes wrong the moment the console is shut
    *  any other way (Escape, `/providers`, the command line). */
   readonly providersOpen = signal(false)
 
-  /** Fold the window away to the hive, or bring it back. */
-  togglePeek(): void {
-    const next = !this.peeking()
-    this.peeking.set(next)
-    // Folding away closes the things that only make sense over a transcript —
-    // and a full-bleed picture would cover the live hive the fold exists to
-    // show. Closed, not merely hidden: an invisible surface still standing is
-    // one Escape would unwind before the fold, which reads as a dead key.
-    if (next) { this.shelfOpen.set(false); this.listOpen.set(false); this.closePicture() }
-    this.#applyFold()
-    if (!next) this.#focus()
-  }
-
-  /** EVERYTHING THAT FOLLOWS THE FOLD, in one place — so park, close, open
-   *  and the toggle cannot disagree about it. Two things follow:
-   *
-   *  1. WHO IS GATHERING. The hexagons grow a per-tile "add to the request"
-   *     icon while folded away and lose it again when the window comes back
-   *     (assistant/chat-context-action.drone.ts) — an affordance for a shelf
-   *     nobody can see would be an affordance for nothing.
-   *  2. THE LAYER'S SAVED FRAMING IS NOT OURS TO CHANGE. Reserving the bars
-   *     resizes the canvas, and the canvas owner answers a resize by
-   *     recentring and (when the saved zoom was a fit) refitting — which is
-   *     exactly what we want to SEE and exactly what must not be WRITTEN. A
-   *     fit computed for the band between two bars is not the framing this
-   *     layer should open with next time. `suspend()` blocks automatic writes
-   *     only, so a pan or zoom the participant performs while folded is still
-   *     theirs and still persists. Unfolding resumes, the bars stop
-   *     reserving, and the same resize path restores the framing from the
-   *     value that was never overwritten. */
-  #applyFold(): void {
-    const folded = this.visible() && this.peeking()
-    EffectBus.emit('chat:peek', { peeking: folded })
-
-    if (folded === this.#foldSuspendedViewport) return
-    const viewport = ioc()?.get('@diamondcoreprocessor.com/ViewportPersistence') as
-      { suspend?(): void; resume?(): void } | undefined
-    if (!viewport?.suspend || !viewport.resume) return
-    // Only ever resume what THIS window suspended — the flag is global and a
-    // blanket resume would clear somebody else's.
-    if (folded) viewport.suspend()
-    else viewport.resume()
-    this.#foldSuspendedViewport = folded
-  }
-
-  /** Whether the fold is currently holding viewport persistence down. */
-  #foldSuspendedViewport = false
-
   /** THE CLAIM FOLLOWS WHAT IS ON SCREEN, reactively — the same reading the
-   *  notes desk makes (notes-strip.component.ts). Open, close, park, unpark
-   *  and the fold all move `visible` or `peeking`, and the claim is a function
-   *  of those two and nothing else, so no path can strand it: a window that is
-   *  not showing cannot be claiming the surface. It used to be claimed
-   *  imperatively from each of those paths, and one of them (the fold
-   *  unwinding on a keydown that had already parked the window) left
-   *  `view:active` owned by a window nobody could see. */
-  readonly #surfaceClaim = effect(() => this.#claimSurface(this.visible() && !this.peeking()))
+   *  notes desk makes (notes-strip.component.ts). Open, close, park and unpark
+   *  all move `visible`, and the claim is a function of that and nothing else,
+   *  so no path can strand it: a window that is not showing cannot be claiming
+   *  the surface. It used to be claimed imperatively from each of those paths,
+   *  and one of them left `view:active` owned by a window nobody could see. */
+  readonly #surfaceClaim = effect(() => this.#claimSurface(this.visible()))
 
   /** THE SURFACE IS OWNED, and the owner is counted (ModeRegistry). A full
    *  screen window is a view covering the canvas by any honest reading, and
    *  everything that hides itself for a view — the pixi canvas, the post-it
    *  stickies, the empty-collection prompt — was drawing straight over this
-   *  window because it never said so. Peeking releases the claim, which is
-   *  what makes the hive underneath live and clickable again. */
+   *  window because it never said so. Closing or parking releases the claim,
+   *  which is what makes the hive underneath live and clickable again. */
   #claimSurface(active: boolean): void {
     this.#surfaceWanted = active
     const modes = ioc()?.get(MODE_REGISTRY_IOC_KEY) as ModeRegistryLike | undefined
@@ -5157,19 +5055,6 @@ export class ChatWindowComponent implements OnDestroy {
       if (now) bring(now)
       else registry?.whenReady?.(key, value => bring(value as TilesRailFactoryLike))
     })
-
-    // A TILE PRESSED OUT IN THE HIVE. The hexagons carry the icon while the
-    // window is folded away; the window owns the shelf, so the press arrives
-    // here as a plain reference rather than the canvas reaching into it.
-    this.#cleanups.push(EffectBus.on<DroppedTile>(
-      'chat:add-context', payload => {
-        if (!payload?.path && !payload?.sig) return
-        this.toggleContext({
-          name: String(payload.name ?? ''),
-          path: String(payload.path ?? ''),
-          sig: String(payload.sig ?? ''),
-        })
-      }))
 
     this.#cleanups.push(EffectBus.on<ExternalAsk | null>(EXTERNAL_ASK, ask => {
       const next = ask && typeof ask.id === 'string' ? ask : null
@@ -5463,8 +5348,8 @@ export class ChatWindowComponent implements OnDestroy {
         else if (this.enabled() && this.visible() && this.turns().length === 0 && !this.waiting()) void this.#resume()
         // WHETHER OR NOT THE WINDOW IS OPEN. A question left out over a reload
         // is marked on its TILE as much as in here, and the rail's thinking
-        // mark is the only sign of it for someone who has the panel folded
-        // away. So the pass runs on the threads module arriving, not on the
+        // mark is the only sign of it for someone who has the window closed.
+        // So the pass runs on the threads module arriving, not on the
         // window being looked at.
         void this.#recoverWaits()
       })
@@ -5513,7 +5398,7 @@ export class ChatWindowComponent implements OnDestroy {
     if (this.#keySettle !== null) { clearTimeout(this.#keySettle); this.#keySettle = null }
     if (this.#preferTimer !== null) { clearTimeout(this.#preferTimer); this.#preferTimer = null }
     // A DESTROY IS NOT A STOP. This used to abort the host's stream, so
-    // folding the panel away — or any surface swap that rebuilds this
+    // parking the window — or any surface swap that rebuilds this
     // component — threw away an answer mid-arrival, unstored. The run lives in
     // host-stream.ts precisely so it can carry on without a window; only the
     // participant pressing Stop calls it back.
@@ -5670,7 +5555,7 @@ export class ChatWindowComponent implements OnDestroy {
   // Every other kind of work in the hive raises one — an ask from the ask
   // screen, a routine, a sync — and the one thing a person does most often
   // did not. A chat question was visible only inside this window: send it,
-  // fold the window away, and the hive showed nothing at all happening, on
+  // close the window, and the hive showed nothing at all happening, on
   // the tile it was happening to.
   //
   // WHOSE MODEL IT IS COMES FOR FREE. The registry derives kind → vendor →
@@ -6068,9 +5953,6 @@ export class ChatWindowComponent implements OnDestroy {
     const prefill = String(payload?.prefill ?? '').trim()
     this.visible.set(true)
     rememberChatVisibility(true)
-    // Reopening always lands on the conversation, never folded away.
-    this.peeking.set(false)
-    this.#applyFold()
     // Announce symmetrically with close() — the controls-bar launcher light
     // (and anything else watching) reads this state.
     EffectBus.emit('chat:window-state', { open: true })
@@ -6145,8 +6027,6 @@ export class ChatWindowComponent implements OnDestroy {
     if (!this.visible()) return
     this.visible.set(false)
     rememberChatVisibility(false)
-    this.peeking.set(false)
-    this.#applyFold()
     this.listOpen.set(false)
     this.armed.set('')
     // A keymap held by the wizard or the route goes with the window.
@@ -8933,7 +8813,7 @@ export class ChatWindowComponent implements OnDestroy {
   }
 
   /** Re-attach to an answer still arriving on the conversation being shown.
-   *  A window rebuilt mid-stream (folded away and back, a surface swap, a
+   *  A window rebuilt mid-stream (closed and reopened, a surface swap, a
    *  route change) finds the partial where the run kept it. */
   #attachHostRun(convoId: string): void {
     const live = liveHostRun(convoId)
@@ -9345,21 +9225,15 @@ export class ChatWindowComponent implements OnDestroy {
   }
 
   /** Go where the answer said. Raw segments: an answer names a place with the
-   *  characters it is spelled with, not a normalized guess at them.
-   *
-   *  GOING THERE IS SEEING IT. The hive moved behind a window that still
-   *  covered it, so the place you asked for was not on screen and closing the
-   *  chat later dropped you somewhere you had stopped thinking about (the
-   *  window-restore audit's F6). The window folds instead — the same fold its
-   *  own button makes: the place is on screen, the conversation is one press
-   *  (or Escape) away, and closing leaves you where you went. */
+   *  characters it is spelled with, not a normalized guess at them. The
+   *  conversation stays up; the shelf is how tiles are gathered for the next
+   *  question. */
   goPath(path: string): void {
     const segments = hivePathSegments(path)
     if (!segments.length) return
     const navigation = ioc()?.get('@hypercomb.social/Navigation') as NavigationLike | undefined
     if (!navigation?.goRaw) return
     navigation.goRaw(segments)
-    if (this.visible() && !this.peeking()) this.togglePeek()
   }
 
   /** Outside the hive: the OS browser on native, a new tab on the web. Never
