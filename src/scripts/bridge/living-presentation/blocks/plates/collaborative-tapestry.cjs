@@ -7,7 +7,7 @@
 // The labels are the first four hex of sha256 of the package words in the
 // living-presentation plan (cards, theme, journal, chat, core) — short, real
 // digests standing in for each piece's signature.
-const { hex, CELL, LIT, GHOST, ghost, text, svg } = require('../../../../presentation/plates/lib.cjs')
+const { hex, CELL, LIT, text, svg } = require('../../../../presentation/plates/lib.cjs')
 
 const R = 28
 const AT = [[0, 0], [1.732, 0], [0.866, -1.5], [-0.866, -1.5], [-1.732, 0], [-0.866, 1.5], [0.866, 1.5]]
@@ -48,14 +48,16 @@ const thread = (t) => {
   return `<g data-id="${t.id}"><path d="M${(ax + ux * k).toFixed(1)},${(ay + uy * k).toFixed(1)} L${(bx - ux * k).toFixed(1)},${(by - uy * k).toFixed(1)}" stroke="var(--honey)" stroke-width="2"/></g>`
 }
 
-// the picture keeps going: hives further out, reached the same way
+// the picture keeps going: new hives further out, each joining the moment it
+// takes one piece (its lit centre) from a hive already woven in
+const NEW = 'fill="none" stroke="var(--line-strong)" stroke-width="1.2"'
 const FAR = [{ x: 640, y: 60, r: 13, from: ['ann', 2] }, { x: 896, y: 330, r: 14, from: ['cy', 6] }, { x: 62, y: 338, r: 13, from: ['you', 5] }]
 const far = () => `<g data-id="more"><rect x="48" y="36" width="872" height="328" fill="none" stroke="none"/>` +
   FAR.map(({ x, y, r, from }) => {
     const [fx, fy] = cell(...from)
     const w = r * 1.732
-    return ghost(`M${fx.toFixed(1)},${fy.toFixed(1)} L${x},${y}`) +
-      [[0, 0], [w, 0], [-w, 0], [w / 2, r * 1.5], [-w / 2, r * 1.5], [w / 2, -r * 1.5], [-w / 2, -r * 1.5]].map(([dx, dy]) => hex(x + dx, y + dy, r - 1, GHOST)).join('')
+    return `<path d="M${fx.toFixed(1)},${fy.toFixed(1)} L${x},${y}" stroke="var(--honey-deep)" stroke-width="1.5" stroke-dasharray="4 6"/>` +
+      [[0, 0], [w, 0], [-w, 0], [w / 2, r * 1.5], [-w / 2, r * 1.5], [w / 2, -r * 1.5], [-w / 2, -r * 1.5]].map(([dx, dy], i) => hex(x + dx, y + dy, r - 1, i ? NEW : LIT)).join('')
   }).join('') + `</g>`
 
 module.exports = () => svg('four hives, your hive, ann, bo and cy; wherever two hold the same piece by the same signature, the same lit cell appears in both and a thread joins them, weaving one picture nobody owns', [

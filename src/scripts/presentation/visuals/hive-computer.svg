@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 400" role="img" aria-label="script and input cells meet at a junction that computes a signed result; the result is cached for the whole network" stroke-linecap="round" stroke-linejoin="round">
-<defs><marker id="cp-ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M1,1 L8,5 L1,9" fill="none" stroke="var(--honey)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 400" role="img" aria-label="script and input cells meet at a junction that computes a signed result; others ask for it by its signature instead of computing it again" stroke-linecap="round" stroke-linejoin="round">
+<defs><marker id="cp-ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M1,1 L8,5 L1,9" fill="none" stroke="var(--honey)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="cp-as" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M1,1 L8,5 L1,9" fill="none" stroke="var(--steel)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
 <polygon points="195,52 262.5,91 262.5,169 195,208 127.5,169 127.5,91" fill="none" stroke="var(--line)" stroke-width="1"/>
 <polygon points="465,52 532.5,91 532.5,169 465,208 397.5,169 397.5,91" fill="none" stroke="var(--line)" stroke-width="1"/>
 <polygon points="532.5,169 600,208 600,286 532.5,325 465,286 465,208" fill="none" stroke="var(--line)" stroke-width="1"/>
@@ -13,7 +13,7 @@
 <path class="flow" d="M284,230 L316,214" pathLength="1" fill="none" stroke="var(--honey)" stroke-width="1.5" stroke-linecap="round" marker-end="url(#cp-ah)"/>
 <path class="flow" d="M340,216 L372,232" pathLength="1" fill="none" stroke="var(--honey)" stroke-width="1.5" stroke-linecap="round" marker-end="url(#cp-ah)"/>
 <circle cx="330" cy="208" r="12" fill="var(--bg)" stroke="var(--honey)" stroke-width="1.5"/><circle cx="330" cy="208" r="5" fill="var(--honey-fill)"/>
-<g stroke="var(--steel)" stroke-width="1" stroke-dasharray="3 6" fill="none"><path d="M466,236 C540,200 590,170 626,158"/><path d="M466,247 C560,247 620,247 684,247"/><path d="M466,258 C540,294 590,324 626,336"/></g>
+<g stroke="var(--steel)" stroke-width="1" stroke-dasharray="3 6" fill="none"><path d="M626,158 C590,170 540,200 470,234" marker-end="url(#cp-as)"/><path d="M684,247 C620,247 560,247 470,247" marker-end="url(#cp-as)"/><path d="M626,336 C590,324 540,294 470,260" marker-end="url(#cp-as)"/></g>
 <polygon points="642,134 655.9,142 655.9,158 642,166 628.1,158 628.1,142" fill="var(--panel)" stroke="var(--steel)" stroke-width="1.5"/><path d="M637,150 L640.5,153.5 L648,146" fill="none" stroke="var(--honey)" stroke-width="1.8"/><polygon points="700,231 713.9,239 713.9,255 700,263 686.1,255 686.1,239" fill="var(--panel)" stroke="var(--steel)" stroke-width="1.5"/><path d="M695,247 L698.5,250.5 L706,243" fill="none" stroke="var(--honey)" stroke-width="1.8"/><polygon points="642,328 655.9,336 655.9,352 642,360 628.1,352 628.1,336" fill="var(--panel)" stroke="var(--steel)" stroke-width="1.5"/><path d="M637,344 L640.5,347.5 L648,340" fill="none" stroke="var(--honey)" stroke-width="1.8"/>
-<text class="st" x="790" y="254" font-size="18" text-anchor="start" >cached</text>
+<text class="st" x="790" y="244" font-size="18" text-anchor="start" >asked for<tspan x="790" dy="22">not recomputed</tspan></text>
 </svg>

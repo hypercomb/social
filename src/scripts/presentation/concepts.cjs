@@ -29,7 +29,9 @@ const OUT = path.join(ROOT, 'concepts')
 const WORK = path.join(OUT, 'frames')
 const MEDIA = path.join(ROOT, 'media')
 const CACHE = path.join(ROOT, 'audio-cache')
-const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
+// the headless browser that shoots the filmstrips: Edge on the Windows desk, or
+// any Chromium named by CHROMIUM (e.g. CHROMIUM=/opt/pw-browsers/chromium)
+const EDGE = process.env.CHROMIUM || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
 const VOICE = 'en-US-AndrewMultilingualNeural'
 const RATE = '+2%'
 // the filmwrap pane is 960/328 — draw at 1.5× for a crisp downscale
@@ -62,9 +64,31 @@ function sceneSay(n) {
 const audioPathOf = say => path.join(CACHE,
   crypto.createHash('sha256').update(`${VOICE}|${RATE}|${spokenOf(say)}`).digest('hex').slice(0, 16) + '.mp3')
 
+// No voice recorded yet (a line was just reworded): time the beats from the text
+// alone — sentence starts at an even speaking rate, [pause:N] honoured — so the
+// clip can be drawn now. Once the mp3 exists the audio path above takes over.
+const WORDS_PER_SEC = 2.6
+const PAUSE = /\[pause(?::(\d+))?\]/g
+function textBeatTimes(say, beatCount) {
+  const tokens = spokenOf(say).split(PAUSE)          // even: speech, odd: pause ms (or undefined)
+  const starts = []
+  let t = 0, open = true, sentences = 0
+  tokens.forEach((part, i) => {
+    if (i % 2) { t += (Number(part) || 700) / 1000; return }
+    for (const w of part.split(/\s+/).filter(Boolean)) {
+      if (open) { starts.push(t); sentences++; open = false }
+      t += 1 / WORDS_PER_SEC
+      if (/[.!?]["”’)]*$/.test(w)) open = true
+    }
+  })
+  if (sentences !== beatCount)
+    throw new Error(`beat count ${beatCount} != sentence count ${sentences} (timed from text)`)
+  return { starts, audioDur: t, fromText: true }
+}
+
 function beatTimes(say, beatCount) {
   const audio = audioPathOf(say)
-  if (!fs.existsSync(audio)) throw new Error(`no cached narration for this scene — run build.cjs first (${path.basename(audio)})`)
+  if (!fs.existsSync(audio)) return textBeatTimes(say, beatCount)
   const dur = parseFloat(execFileSync('ffprobe',
     ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', audio], { encoding: 'utf8' }).trim())
   const det = spawnSync('ffmpeg', ['-i', audio, '-af', 'silencedetect=noise=-38dB:d=0.25', '-f', 'null', '-'], { encoding: 'utf8' })
@@ -229,11 +253,10 @@ function vocabularyWorld(T, p) {
     const e = easeOut(sp(1, 0.5 + (k * 2 + j) * 0.055, 0.8 + (k * 2 + j) * 0.055)); if (e <= 0) return
     const isPerch = n === PERCH
     const acted = isPerch ? easeOut(sp(5, 0.75, 1)) : 0
-    const restyled = isPerch ? easeOut(sp(6, 0.55, 0.85)) : 0
-    s += hex(n.x, n.y, 30 * e * (1 + 0.12 * restyled), {
-      sw: 1.8 + restyled, op: e,
-      fill: restyled > 0.3 ? 'var(--honey-tint)' : acted > 0 ? 'var(--honey-fill)' : 'var(--panel)', fo: restyled > 0.3 ? 1 : acted > 0 ? 0.22 * acted : 1,
-      stroke: restyled > 0.3 ? 'var(--honey)' : 'var(--honey-deep)',
+    // a pheromone never changes how the tile looks (R2: it never labels; A8: appearance is the incidence's)
+    s += hex(n.x, n.y, 30 * e, {
+      sw: 1.8, op: e,
+      fill: acted > 0 ? 'var(--honey-fill)' : 'var(--panel)', fo: acted > 0 ? 0.22 * acted : 1,
     })
   }))
 
@@ -270,18 +293,20 @@ function vocabularyWorld(T, p) {
     if (sense > 0 && sense < 1) s += ring(PERCH.x, PERCH.y, 34 + 16 * sense, (1 - sense) * 0.8, { dash: '3 5', sw: 1.6 })
   }
 
-  // beat 6 — the pheromone mark lands and the tile re-renders from it
+  // beat 6 — a signed interest mark lands on the content; the tile itself is unchanged
   s += mark(PERCH.x, PERCH.y, easeOut(sp(6, 0.1, 0.38)))
   for (const [a, b] of [[0.32, 0.62], [0.48, 0.78]]) {
     const e = sp(6, a, b)
     if (e > 0 && e < 1) s += ring(PERCH.x, PERCH.y, 30 + 34 * e, (1 - e) * 0.7)
   }
 
-  // beat 7 — pollination: another hive, and work crossing to it
+  // beat 7 — replication: the work goes up to a host; the other hive asks for it,
+  // takes it from the host and checks it (T1: from a host; T4: the consumer requests)
   const e7 = sp(7, 0, 1)
   const R2 = { x: 3260, y: 246, r: 48 }
   const R2L = [{ x: 3010, y: 156, r: 32 }, { x: 3010, y: 336, r: 32 }]
   const SLOT = { x: 3010, y: 246, r: 30 }
+  const HOST = { x: 2740, y: 60 }
   if (e7 > 0) {
     const eT = easeOut(sp(7, 0, 0.25))
     R2L.forEach(n => { s += link(R2.x - R2.r * 0.8, R2.y, n.x + n.r, n.y, eT) })
@@ -289,36 +314,52 @@ function vocabularyWorld(T, p) {
     s += hex(R2.x, R2.y, R2.r * eT, { sw: 2.2, op: eT })
     s += glyph('hive', R2.x, R2.y, eT * 0.9)
     R2L.forEach(n => { s += hex(n.x, n.y, n.r * eT, { sw: 1.8, op: eT }) })
-    const tt = easeInOut(sp(7, 0.3, 0.88))
-    if (tt > 0 && tt < 1) {
-      const q = qbez({ x: PERCH.x, y: PERCH.y }, { x: 2740, y: -10 }, { x: SLOT.x, y: SLOT.y }, tt)
-      s += hex(q.x, q.y, 26, { dash: '5 4', op: 0.9 })
-      s += mark(q.x, q.y, 0.7, 0.9)
+    // the host, drawn like the integrity clip's host nodes
+    s += `<circle cx="${HOST.x}" cy="${HOST.y}" r="30" fill="var(--bg)" stroke="var(--steel)" stroke-width="1.5" opacity="${eT.toFixed(2)}"/>`
+    s += txt(HOST.x, HOST.y + 5, 'host', { size: 15, spacing: '.06em', fill: 'var(--steel)', op: eT })
+    // leg one: the work rises from its tile to the host
+    const LEG1 = [{ x: PERCH.x, y: PERCH.y }, { x: 2540, y: 40 }, { x: HOST.x - 6, y: HOST.y + 4 }]
+    // leg two: only after the other hive asks does it come down to the slot
+    const LEG2 = [{ x: HOST.x + 6, y: HOST.y + 4 }, { x: 2960, y: 90 }, { x: SLOT.x, y: SLOT.y }]
+    const up = easeInOut(sp(7, 0.22, 0.48))
+    const ask = easeOut(sp(7, 0.5, 0.64))
+    const down = easeInOut(sp(7, 0.66, 0.9))
+    const traveller = (leg, tt) => {
+      const q = qbez(...leg, tt)
+      let g = hex(q.x, q.y, 26, { dash: '5 4', op: 0.9 })
       for (let d = 1; d <= 3; d++) {
-        const q2 = qbez({ x: PERCH.x, y: PERCH.y }, { x: 2740, y: -10 }, { x: SLOT.x, y: SLOT.y }, clamp01(tt - d * 0.07))
-        s += `<circle cx="${q2.x.toFixed(1)}" cy="${q2.y.toFixed(1)}" r="2.2" fill="var(--honey)" opacity="${(0.5 - d * 0.13).toFixed(2)}"/>`
+        const q2 = qbez(...leg, clamp01(tt - d * 0.07))
+        g += `<circle cx="${q2.x.toFixed(1)}" cy="${q2.y.toFixed(1)}" r="2.2" fill="var(--honey)" opacity="${(0.5 - d * 0.13).toFixed(2)}"/>`
       }
+      return g
     }
+    if (up > 0 && up < 1) s += traveller(LEG1, up)
+    if (up >= 1 && down <= 0) s += hex(HOST.x, HOST.y - 48, 16, { made: true, sw: 1.5 })   // the host holds it
+    if (ask > 0) {                                                                         // the request, from the reader
+      const a = { x: R2.x - 30, y: R2.y - 38 }, b = { x: HOST.x + 28, y: HOST.y + 10 }
+      s += link(a.x, a.y, lerp(a.x, b.x, ask), lerp(a.y, b.y, ask), 1, { dash: '4 6', dim: 0.7, stroke: 'var(--honey)' })
+    }
+    if (down > 0 && down < 1) s += traveller(LEG2, down)
   }
 
-  // beat 8 — brooding fills the cell; eclosion hatches it
+  // beat 7's arrival is checked; beat 8 — the brood: code from someone else lands
+  // in the slot and is HELD, still and dim, never run, until your hand accepts it
+  // (brood.ts: held, inspectable, inert; script-preloader asks mayRunBee)
   const e8 = sp(8, 0, 1)
-  const landed = sp(7, 0.88, 1) > 0
+  const landed = sp(7, 0.9, 1) > 0
   if (landed || e8 > 0) {
-    const brood = easeOut(sp(8, 0.02, 0.5))
-    const burst = sp(8, 0.55, 0.82)
-    const done = easeOut(sp(8, 0.62, 0.9))
-    s += hex(SLOT.x, SLOT.y, SLOT.r, { dash: done > 0.5 ? '' : '5 4', op: 0.9, sw: 1.8 + done, made: done > 0.5 })
-    if (brood > 0 && done < 0.5) s += hex(SLOT.x, SLOT.y, SLOT.r * 0.82 * brood, { fill: 'var(--honey-tint)', stroke: 'var(--honey-fill)', sw: 1.2, op: 0.85 })
-    if (burst > 0 && burst < 1) {
-      s += ring(SLOT.x, SLOT.y, 30 + 40 * burst, (1 - burst) * 0.9, { sw: 2.4 })
-      for (let k = 0; k < 6; k++) {
-        const a = Math.PI / 3 * k + 0.26, rr = 32 + 30 * burst
-        s += link(SLOT.x + Math.cos(a) * 30, SLOT.y + Math.sin(a) * 30, SLOT.x + Math.cos(a) * rr, SLOT.y + Math.sin(a) * rr, (1 - burst), { stroke: 'var(--honey)', dim: 0.8 })
-      }
+    const accept = easeOut(sp(8, 0.5, 0.66))           // your hand: the check beside it
+    const live = easeOut(sp(8, 0.68, 0.85))            // only then does the slot go solid and the bee move
+    s += hex(SLOT.x, SLOT.y, SLOT.r, { dash: live > 0.5 ? '' : '5 4', op: 0.9, sw: 1.8 + live, made: live > 0.5 })
+    if (e8 <= 0) s += check(SLOT.x, SLOT.y + 48, 0.9, { op: easeOut(sp(7, 0.9, 1)) })   // bytes checked on arrival
+    const eHeld = easeOut(sp(8, 0.04, 0.3))
+    if (eHeld > 0) {
+      const wob = live > 0 ? Math.sin(T * 5) * 3 * live : 0
+      const bx = SLOT.x + 8 * live * Math.sin(T * 1.7), by = SLOT.y + 2 + wob - 22 * (1 - eHeld)
+      s += beeGlyph(bx, by, 8 * live, live > 0 ? T : 0, 0.95, eHeld * (0.4 + 0.6 * live))
+      s += txt(SLOT.x, SLOT.y + 52, 'held', { size: 13, spacing: '.1em', fill: 'var(--faint-text)', op: eHeld * (1 - live) })
     }
-    s += contentLines(SLOT.x, SLOT.y, done, 0.62)
-    s += mark(SLOT.x + 16, SLOT.y - 15, done * 0.58, 0.9)   // the pollinated work keeps its mark
+    if (accept > 0) s += check(SLOT.x + 46, SLOT.y - 4, 1.1 * accept, { op: accept })
   }
 
   // beat 9 — the colony: everything alive, nothing central
@@ -544,14 +585,14 @@ const CLIPS = {
     scene: 8, file: 'concept-vocabulary.mp4', world: vocabularyWorld,
     beats: [
       { term: 'the language', gloss: 'precise words', cam: { x: 720, y: 246, s: 1.0 } },
-      { term: 'hive', gloss: 'where you and your people meet', cam: { x: 2215, y: 246, s: 1.25 } },
+      { term: 'hive', gloss: 'your own place, kept', cam: { x: 2215, y: 246, s: 1.25 } },
       { term: 'tile', gloss: 'one cell of content', cam: { x: 2238, y: 246, s: 2.5 } },
       { term: 'layer', gloss: 'one moment of a place, kept', cam: { x: 2200, y: 238, s: 2.0 } },
       { term: 'signature', gloss: 'the name the content gives itself', cam: { x: 2230, y: 282, s: 2.0 } },
       { term: 'bee', gloss: 'senses, then acts', cam: { x: 2280, y: 226, s: 1.25 } },
       { term: 'pheromone', gloss: 'an interest someone leaves', cam: { x: 2400, y: 212, s: 1.65 } },
       { term: 'replication', gloss: 'work crossing between hives', cam: { x: 2740, y: 240, s: 0.56 } },
-      { term: 'brooding · eclosion', gloss: 'prepared, then hatched', cam: { x: 3010, y: 246, s: 2.2 } },
+      { term: 'brood', gloss: 'held, never run, until you accept', cam: { x: 3010, y: 246, s: 2.2 } },
       { term: 'colony', gloss: 'no central authority', cam: { x: 2620, y: 246, s: 0.55 } },
     ],
   },
@@ -630,7 +671,7 @@ function shootStrip(html, rows, stripPng) {
   try { fs.unlinkSync(stripPng) } catch {}
   execFileSync(EDGE, ['--headless=new', '--disable-gpu', '--hide-scrollbars',
     `--window-size=${W},${H * rows}`, '--virtual-time-budget=4000',
-    `--screenshot=${stripPng}`, 'file:///' + htmlPath.split(path.sep).join('/')], { stdio: 'ignore' })
+    `--screenshot=${stripPng}`, require('url').pathToFileURL(htmlPath).href], { stdio: 'ignore' })
   const deadline = Date.now() + 30_000
   let size = -1
   for (;;) {
@@ -639,7 +680,7 @@ function shootStrip(html, rows, stripPng) {
     try { z = fs.statSync(stripPng).size } catch {}
     if (z > 0 && z === size) break
     size = z
-    execFileSync('powershell', ['-NoProfile', '-Command', 'Start-Sleep -Milliseconds 200'], { stdio: 'ignore' })
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200)
   }
   try { fs.unlinkSync(htmlPath) } catch {}
   return parseInt(execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0',
@@ -650,7 +691,8 @@ const ff = (...a) => execFileSync('ffmpeg', ['-y', '-loglevel', 'error', ...a], 
 function drawClip(name) {
   const clip = CLIPS[name]
   const say = sceneSay(clip.scene)
-  const { starts, audioDur } = beatTimes(say, clip.beats.length)
+  const { starts, audioDur, fromText } = beatTimes(say, clip.beats.length)
+  if (fromText) console.log(`${name}: no recorded narration for scene ${clip.scene} yet — beats timed from the text at ${WORDS_PER_SEC} words/s; run build.cjs, then this again, to re-time from the voice`)
   console.log(`${name}: narration ${audioDur.toFixed(1)}s · beats at ${starts.map(t => t.toFixed(1)).join(' ')}`)
 
   const dir = path.join(WORK, name)

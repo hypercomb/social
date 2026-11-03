@@ -5,7 +5,9 @@
 // the shipped one, and the community's words healed in only where it had a
 // gap (healTranslations). The shipped Japanese catalog really lacks
 // `controls.sync`, so English shows through until the community fills it.
-// Read down each column: the first word found is the one you see.
+// Read down each column: the first word found is the one you see; the last
+// beat lights only those, a staircase (yours, shipped, community).
+// The active theme's words sit between yours and the catalogs; no theme here.
 const { LIT, CELL, STEEL, text, svg } = require('../../../../presentation/plates/lib.cjs')
 
 const COL = [240, 470, 700]                // left edge of each word's column
@@ -28,9 +30,12 @@ module.exports = () => svg('three of the hive’s words read in Japanese, in thr
   `<g data-id="yours">${sheet(ROW.yours)}${label(ROW.yours, 'yours', 'k hy')}${cell(0, ROW.yours, CELL, '保存する', 'k')}</g>`,
   `<g data-id="community">${sheet(ROW.community)}${label(ROW.community, 'community', 'k st')}${cell(2, ROW.community, STEEL, '同期', 'k')}</g>`,
   `<g data-id="shipped">${sheet(ROW.shipped)}${label(ROW.shipped, 'shipped', 'k d')}` +
-    cell(0, ROW.shipped, SHIPPED, '保存', 'd') + cell(1, ROW.shipped, SHIPPED, '共有', 'd') +
+    cell(0, ROW.shipped, SHIPPED, '保存', 'd') +
     `<rect x="${COL[2]}" y="${ROW.shipped - CH / 2}" width="${CW}" height="${CH}" rx="3" fill="none" stroke="var(--dim)" stroke-width="1.2" stroke-dasharray="5 6"/>` +
     text(cx(2), ROW.shipped + 9, 'sync', 'm f', 26) + `</g>`,
+  // the one shipped word nothing above covers: in the last beat it lights with
+  // the words found above it, so each column shows where its reading stopped
+  `<g data-id="share">${cell(1, ROW.shipped, SHIPPED, '共有', 'd')}</g>`,
   // the sum: what you see
   `<path d="M${SHEET.x},${RULE} H${SHEET.x + SHEET.w}" stroke="var(--line-strong)" stroke-width="1.5"/>`,
   `<g data-id="seen"><rect x="30" y="${ROW.seen - 40}" width="${SHEET.x + SHEET.w - 30}" height="80" fill="none" stroke="none"/>${label(ROW.seen, 'you see', 'k hy')}` +

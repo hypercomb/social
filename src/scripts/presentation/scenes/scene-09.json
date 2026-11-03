@@ -4,11 +4,11 @@
   "chapter": "what is hypercomb",
   "slug": "beehaviors",
   "eyebrow": "modules",
-  "headline": "Everything alive is a *bee*",
+  "headline": "Everything alive becomes a *bee*",
   "sub": "",
   "visual": "plate:bee-modules",
   "visualData": [
-    "the shell is a loader"
+    "the shell becomes a loader"
   ],
-  "say": "Every behavior in Hypercomb is a bee, short for beehavior: a small, self-contained part that knows when it is needed, and acts. Navigation, editing, games, the words you type: all of them are bees. Each one is named by its signature, so anyone can read it, improve it, and share it back. And nothing runs on faith. Before you take a bee from someone else, you can try it on their domain, and have your own A.I. read it for you. Powers stay off until you allow them."
+  "say": "Behavior in Hypercomb lives in bees, short for beehavior: small, self-contained parts that act when they are needed, or when you say their word. Navigation, editing, games, the words you type: all of them are bees, and what still sits in the shell is moving out into bees too. Each one is named by its signature, so anyone can read it, improve it, and share it back. And a bee from a stranger does not just run. Before you take it, you can try it on their domain, and have your own A.I. read it for you. Once you take it, it waits, held, until your own hand accepts it."
 }

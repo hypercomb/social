@@ -4,7 +4,7 @@ const { f1, hexPts, hex, LIT, CELL, GHOST, STEEL, marker, markerS, flow, ghost, 
 module.exports = () => {
   const bytes = (x, y, flipped = -1) => { let s = ''; for (let r = 0; r < 3; r++) for (let c = 0; c < 8; c++) { const i = r * 8 + c; s += `<rect x="${x + 12 + c * 15}" y="${y + 16 + r * 18}" width="11" height="8" rx="1" fill="${i === flipped ? 'var(--steel)' : 'var(--line)'}"${i === flipped ? ' stroke="var(--ink)" stroke-width="1"' : ''}/>` } return s }
   const card = (x, y, flipped) => `<path d="M${x + 3},${y} H${x + 124} L${x + 150},${y + 26} V${y + 77} a3,3 0 0 1 -3,3 H${x + 3} a3,3 0 0 1 -3,-3 V${y + 3} a3,3 0 0 1 3,-3 Z" fill="var(--bg)" stroke="var(--line)" stroke-width="1.5"/><path d="M${x + 124},${y} V${y + 26} H${x + 150}" fill="none" stroke="var(--line)" stroke-width="1.5"/>` + bytes(x, y, flipped)
-  return svg('two identical files pass through sign() and get one name; one byte flipped gets a different name', [
+  return svg('two identical files pass through sign() and get one signature; one byte flipped gets a different signature', [
     `<defs>${marker('sg-ah')}${markerS('sg-as')}</defs>`,
     card(48, 44), text(48, 142, 'photo.png', 'm d', 18, 'start'),
     card(48, 152),

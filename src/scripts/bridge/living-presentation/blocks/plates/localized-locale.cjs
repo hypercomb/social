@@ -15,7 +15,9 @@ const cx = i => COL[i] + CW / 2
 const ROW = { en: 126, ja: 208, es: 290 }
 const FRAME = { x: 30, w: 536 }
 // your hive: three tiles, drawn in the reading chosen
-const HIVE = [[782, 164], [882, 164], [832, 251]], HR = 57
+// a small honeycomb: pointy-top hexagons a hair apart, never overlapping
+const HR = 62, HDX = 116, HDY = 100       // HDX = 2 x 0.866 x HR + a gap of eight
+const HIVE = [[764, 158], [764 + HDX, 158], [764 + HDX / 2, 158 + HDY]]
 
 // an unseen bound, first in a group of several parts, so the group has one extent
 const bound = (x, y, w, h) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="none"/>`
@@ -32,7 +34,7 @@ module.exports = () => svg('three tiles, music, home and meadow, each read in En
   // the chosen direction
   `<g data-id="pick">${bound(FRAME.x, ROW.ja - 70, HIVE[0][0] - FRAME.x, 110)}<rect x="${FRAME.x}" y="${ROW.ja - CH / 2 - 10}" width="${FRAME.w}" height="${CH + 20}" rx="4" fill="var(--honey-tint)" stroke="var(--honey)" stroke-width="1.5"/>` +
     flow(`M${FRAME.x + FRAME.w + 6},${ROW.ja} C${FRAME.x + FRAME.w + 50},${ROW.ja} ${HIVE[0][0] - 110},${HIVE[0][1] + 40} ${HIVE[0][0] - HR * 0.866 - 8},${HIVE[0][1] + 22}`, 'll-ah') +
-    text(FRAME.x + FRAME.w + 82, ROW.ja - 24, 'language ja', 'm hy', 18) + `</g>`,
+    text(FRAME.x + FRAME.w + 64, ROW.ja - 44, 'language ja', 'm hy', 18) + `</g>`,
   // the readings, one row per language
   row('en', ROW.en, ['music', 'home']),
   row('ja', ROW.ja, ['音楽']),
@@ -42,8 +44,8 @@ module.exports = () => svg('three tiles, music, home and meadow, each read in En
   // no reading anywhere: the name shows through
   `<g data-id="meadow">${bare(2, ROW.en)}${bare(2, ROW.ja)}${bare(2, ROW.es)}</g>`,
   // your hive, drawn in the chosen reading
-  `<g data-id="hive">${bound(HIVE[0][0] - HR, HIVE[0][1] - HR, HIVE[1][0] - HIVE[0][0] + 2 * HR, 370 - HIVE[0][1] + HR)}${hex(...HIVE[0], HR, CELL)}${text(HIVE[0][0], HIVE[0][1] + 9, '音楽', 'k', 24)}` +
+  `<g data-id="hive">${bound(HIVE[0][0] - HR, HIVE[0][1] - HR, HIVE[1][0] - HIVE[0][0] + 2 * HR, 372 - HIVE[0][1] + HR)}${hex(...HIVE[0], HR, CELL)}${text(HIVE[0][0], HIVE[0][1] + 9, '音楽', 'k', 26)}` +
     hex(...HIVE[1], HR, LIT) + text(HIVE[1][0], HIVE[1][1] + 7, 'わたしの家', 'k', 18) +
-    hex(...HIVE[2], HR, CELL) + text(HIVE[2][0], HIVE[2][1] + 7, 'meadow', 'k', 18) +
-    text(HIVE[2][0], 352, 'your hive', 'k hy', 22) + `</g>`,
+    hex(...HIVE[2], HR, CELL) + text(HIVE[2][0], HIVE[2][1] + 7, 'meadow', 'k', 20) +
+    text(HIVE[2][0], 362, 'your hive', 'k hy', 22) + `</g>`,
 ].join('\n'))

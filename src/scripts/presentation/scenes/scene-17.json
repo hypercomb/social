@@ -9,5 +9,5 @@
   "visual": "film:zoom",
   "visualData": [],
   "media": "zoom",
-  "say": "Reason five: it is carried by its community. Hosts are run by the people who use them, and a host can be shared with friends. Work is copied from host to host and checked byte by byte, so every copy proves itself, and the more people care about something, the more places it lives. Your peers keep each other safe: trust is an allowance you give, never a switch that is on by default. And nothing tracks you; not one statistic about you is collected. It is source control for everyone's work, secured by your peers, and served by everyone."
+  "say": "Reason five: it is carried by its community. Hosts are run by the people who use them, and a host can be shared with friends. Work is replicated from host to host and checked against its signature, so every replica proves itself, and the more people care about something, the more places it lives. Your peers keep each other safe: trust is an allowance you give, never a switch that is on by default. And nothing tracks you; not one statistic about you is collected. It is source control for everyone's work, secured by your peers, and served by everyone."
 }
