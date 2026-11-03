@@ -204,6 +204,10 @@ export class SiteViewDrone extends Drone {
   /** The page a back press is walking to: arriving there is the walk, not a
    *  new visit to remember. */
   #returningTo: readonly string[] | null = null
+  /** The reader has moved inside this site session. From then on an arrival
+   *  verdict for the entry page is back walking onto it, not the arrival that
+   *  opened the site, and must not move the way out. */
+  #movedInSite = false
 
   /**
    * Raw-DOM exit overlay — the GUARANTEED way out of website mode. It is
@@ -274,6 +278,7 @@ export class SiteViewDrone extends Drone {
         const spawn = this.#spawn
         const entry = this.#siteEntrySegments
         if (!spawn || !entry) return
+        if (this.#movedInSite) return
         if (!sameSiteSegments([...(payload.segments ?? [])], entry)) return
         this.#spawn = { mode: spawn.mode, segments: [...this.#prevSegments] }
       })
@@ -385,7 +390,10 @@ export class SiteViewDrone extends Drone {
       // back press walks to is the walk itself.
       const returning = this.#returningTo !== null && sameSiteSegments(segments, this.#returningTo)
       this.#returningTo = null
-      if (!returning && this.#siteEntrySegments !== null && this.#websiteUp()) this.#trail.left(this.#lastSegments, segments)
+      if (this.#siteEntrySegments !== null && this.#websiteUp()) {
+        this.#movedInSite = true
+        if (!returning) this.#trail.left(this.#lastSegments, segments)
+      }
       this.#prevSegments = this.#lastSegments
       this.#lastSegments = segments
     }
@@ -402,6 +410,7 @@ export class SiteViewDrone extends Drone {
     } else {
       this.#trail.clear()
       this.#returningTo = null
+      this.#movedInSite = false
       const spawn = this.#spawn
       const entry = this.#siteEntrySegments
       this.#siteEntrySegments = null
@@ -431,6 +440,7 @@ export class SiteViewDrone extends Drone {
     const here = [...(lineage?.explorerSegments?.() ?? [])]
     this.#siteEntrySegments = siteFloorFor(here, this.#publishedRoot)
     this.#trail.clear()
+    this.#movedInSite = false
     const vm = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
       ?.get<{ previous?: string }>('@hypercomb.social/ViewMode')
     // The spawning PLACE starts as "right here"; a `view:arrival` verdict for

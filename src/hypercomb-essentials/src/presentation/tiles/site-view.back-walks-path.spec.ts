@@ -53,6 +53,7 @@ const services = new Map<string, unknown>([
   whenReady: () => {},
 }
 
+const { EffectBus } = await import('@hypercomb/core')
 await import('./site-view.drone.js')
 const drone = registered.get('@diamondcoreprocessor.com/SiteViewDrone') as { pulse(g: string): Promise<void> }
 await drone.pulse('')
@@ -132,6 +133,23 @@ describe('back inside a website', () => {
     expect(segments).toEqual(['site'])
     await back()                       // and out
     expect(mode).toBe('hexagons')
+  })
+
+  it('back onto an entry page that opens as a website still leaves from there, the way it came in', async () => {
+    // /presentation opens as a website by its own mark: arriving there from
+    // the root opens the site, and the way out is the root.
+    walkTo(['presentation'])
+    setMode('website')
+    EffectBus.emit('view:arrival', { segments: ['presentation'], view: 'website' })
+    walkTo(['presentation', 'simple'])
+    await back()
+    // Landing back on /presentation is an arrival on a page that opens as a
+    // website too; it is the walk, not the site opening again.
+    EffectBus.emit('view:arrival', { segments: ['presentation'], view: 'website' })
+    expect(segments).toEqual(['presentation'])
+    await back()
+    expect(mode).toBe('hexagons')
+    expect(segments).toEqual([])
   })
 
   it('a new site session starts with nothing to walk back to', async () => {
