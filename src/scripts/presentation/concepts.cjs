@@ -318,11 +318,12 @@ function vocabularyWorld(T, p) {
     }
     if (up > 0 && up < 1) s += traveller(LEG1, up)
     if (up >= 1 && down <= 0) s += hex(HELD.x, HELD.y, 22, { made: true, sw: 1.6 })       // the host holds it
-    if (ask > 0) {                                                                         // the request, from the reader
+    const answered = sp(7, 0.92, 1)                                                        // the request is answered once the work lands
+    if (ask > 0 && answered < 1) {                                                         // the request, from the reader
       const REQ = [{ x: R2.x - 24, y: R2.y - 46 }, { x: 3080, y: -10 }, { x: HELD.x + 34, y: HELD.y + 6 }]
       const pts = []
       for (let k = 0; k <= 24; k++) { const q = qbez(...REQ, ask * k / 24); pts.push(`${q.x.toFixed(1)},${q.y.toFixed(1)}`) }
-      s += `<polyline points="${pts.join(' ')}" fill="none" stroke="var(--honey)" stroke-width="1.8" stroke-dasharray="4 6" opacity="${(0.7 * clamp01(ask * 3)).toFixed(3)}"/>`
+      s += `<polyline points="${pts.join(' ')}" fill="none" stroke="var(--honey)" stroke-width="1.8" stroke-dasharray="4 6" opacity="${(0.7 * clamp01(ask * 3) * (1 - answered)).toFixed(3)}"/>`
     }
     if (down > 0 && down < 1) s += traveller(LEG2, down)
   }
@@ -695,14 +696,14 @@ const CLIPS = {
     beats: [
       { term: 'the language', gloss: 'precise words', cam: { x: 720, y: 246, s: 1.0 } },
       { term: 'hive', gloss: 'your own place, kept', cam: { x: 2215, y: 246, s: 1.25 } },
-      { term: 'tile', gloss: 'one cell of content', cam: { x: 2238, y: 246, s: 2.5 } },
+      { term: 'tile', gloss: 'one piece of content', cam: { x: 2238, y: 246, s: 2.5 } },
       { term: 'layer', gloss: 'one moment of a place, kept', cam: { x: 2200, y: 238, s: 2.0 } },
       { term: 'signature', gloss: 'the name the content gives itself', cam: { x: 2230, y: 282, s: 2.0 } },
-      { term: 'bee', gloss: 'senses, then acts', cam: { x: 2280, y: 226, s: 1.25 } },
-      { term: 'pheromone', gloss: 'an interest someone leaves', cam: { x: 2350, y: 250, s: 1.25 } },
-      { term: 'replication', gloss: 'work crossing between hives', cam: { x: 2740, y: 240, s: 0.56 } },
+      { term: 'bee', gloss: 'acts when needed, or on its word', cam: { x: 2280, y: 226, s: 1.25 } },
+      { term: 'pheromone', gloss: 'a signed signal of interest', cam: { x: 2350, y: 250, s: 1.25 } },
+      { term: 'replication', gloss: 'work crossing hives, checked', cam: { x: 2740, y: 240, s: 0.56 } },
       { term: 'brood', gloss: 'held, never run, until you accept', cam: { x: 3090, y: 246, s: 1.7 } },
-      { term: 'colony', gloss: 'no central authority', cam: { x: 2620, y: 246, s: 0.55 } },
+      { term: 'colony', gloss: 'a domain and its hives; none in charge', cam: { x: 2620, y: 246, s: 0.55 } },
     ],
   },
   integrity: {
