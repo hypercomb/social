@@ -6,7 +6,8 @@
 const { hex, LIT, CELL, marker, flow, ghost, text, svg } = require('../../../../presentation/plates/lib.cjs')
 
 const R = 29, STEP = 64, BASE = 296
-const DX = 150, DY = -54                    // one step back along the origins
+const DX = 150, DY = -75                    // one step back along the origins: half a step up, as in move six
+const FLOOR_END = 500
 const col = (k, n) => {
   const x = 130 + k * DX, b = BASE + k * DY
   return Array.from({ length: n }, (_, l) => hex(x, b - l * STEP, R, l === n - 1 ? LIT : CELL)).join('')
@@ -26,8 +27,8 @@ const comb = (cx, cy) => {
 module.exports = () => svg('the word simple answered by three columns, one behind another: yours, ann’s, and bo’s that came through ann; each wears a tag naming its origin, and a thread runs back to the hives it came from', [
   `<defs>${marker('os-ah')}</defs>`,
   // the third direction: the floor the columns stand on
-  ghost(`M${130 - 40},${BASE + 15} L556,${BASE + 15 - (556 - 90) * 0.36}`),
-  text(568, BASE + 21 - (556 - 90) * 0.36, 'origins', 'f', 18, 'start'),
+  ghost(`M${130 - 40},${BASE + 20} L${FLOOR_END},${BASE + 20 + (FLOOR_END - 90) * DY / DX}`),
+  text(FLOOR_END + 12, BASE + 26 + (FLOOR_END - 90) * DY / DX, 'origins', 'f', 18, 'start'),
   // back to front, so the nearer column stands in front
   `<g data-id="bo">${col(2, 2)}</g>`,
   `<g data-id="ann">${col(1, 3)}</g>`,

@@ -20,7 +20,7 @@ const SKEW = 60, DEPTH = 30, LEFT = 140, RIGHT = 860
 const plane = yb => `<path d="M${LEFT},${yb + DEPTH} L${RIGHT},${yb + DEPTH} L${RIGHT + SKEW},${yb} L${LEFT + SKEW},${yb} Z" fill="var(--bg)" stroke="var(--line-strong)" stroke-width="1.2"/>`
 const flat = (cx, cy, r, a) => `<polygon points="${[[0, -1], [0.866, -0.5], [0.866, 0.5], [0, 1], [-0.866, 0.5], [-0.866, -0.5]]
   .map(([x, y]) => `${f1(cx + x * r)},${f1(cy + y * r * 0.42)}`).join(' ')}" ${a}/>`
-const P1 = 172, P2 = 238, P3 = 304            // the back edge of each plane
+const P1 = 178, P2 = 248, P3 = 318            // the back edge of each plane
 const MID = yb => yb + DEPTH / 2
 const PATH = 200                              // the lit path runs down this line
 
@@ -56,6 +56,6 @@ module.exports = () => {
     `<g data-id="name-simple">${text(LEFT + 4, MID(P1) + 6, 'simple', 'k hy', 18, 'end')}</g>`,
     `<g data-id="name-primitive">${text(LEFT + 4, MID(P2) + 6, 'primitive', 'k hy', 18, 'end')}</g>`,
     `<g data-id="name-word">${text(LEFT + 4, MID(P3) + 6, 'word', 'k hy', 18, 'end')}</g>`,
-    `<g data-id="hypercomb">${hex(HX, HY, R, LIT)}${text(HX, HY + 6, 'hypercomb', 'k', 18)}</g>`,
+    `<g data-id="hypercomb">${hex(HX, HY, R, LIT)}${text(HX, HY - 14, 'word', 'm f', 16)}${text(HX, HY + 16, 'hypercomb', 'k', 18)}</g>`,
   ].join('\n'))
 }

@@ -16,13 +16,13 @@ const card = (id, cx, title, value, from, to) =>
 module.exports = () => svg('hypercomb above its layer, which now holds six words in a row: simple, organized, collaborative, intelligent, accessible, localized', [
   card('meta', 270, 'meta', 'empty', HX - R * 0.866, 358),
   card('signature', 690, 'signature', '1a843151…', HX + R * 0.866, 602),
-  `<g data-id="layer"><path d="M${HX},${HY + R} V250" stroke="var(--line-strong)" stroke-width="1.2"/>` +
-    text(HX + 14, 208, 'layer', 'k', 18, 'start') +
-    `<rect x="60" y="250" width="840" height="124" rx="6" fill="none" stroke="var(--line-strong)" stroke-width="1.2"/></g>`,
-  // its order, first to last: the one ordered list the layer holds
+  `<g data-id="layer"><path d="M${HX},${HY + R} V236" stroke="var(--line-strong)" stroke-width="1.2"/>` +
+    text(HX + 14, 202, 'layer', 'k', 18, 'start') +
+    `<rect x="60" y="236" width="840" height="138" rx="6" fill="none" stroke="var(--line-strong)" stroke-width="1.2"/></g>`,
+  // read across: words beside words, in the layer's own order, first to last
   `<defs>${marker('or-ah')}</defs>`,
-  `<g data-id="order">${flow(`M${X(0) - 10},258 H${X(5) + 12}`, 'or-ah', 1.5)}</g>`,
+  `<g data-id="across">${flow(`M${X(0) - 10},251 H${X(5) + 12}`, 'or-ah', 1.5)}</g>`,
   WORDS.map((w, i) => `<g data-id="${w}">${hex(X(i), Y, r, CELL)}</g>`).join('\n'),
   WORDS.map((w, i) => text(X(i), Y + r + 30, w, 'd', 18)).join(''),
-  `<g data-id="hypercomb">${hex(HX, HY, R, LIT)}${text(HX, HY + 6, 'hypercomb', 'k', 18)}</g>`,
+  `<g data-id="hypercomb">${hex(HX, HY, R, LIT)}${text(HX, HY - 14, 'word', 'm f', 16)}${text(HX, HY + 16, 'hypercomb', 'k', 18)}</g>`,
 ].join('\n'))

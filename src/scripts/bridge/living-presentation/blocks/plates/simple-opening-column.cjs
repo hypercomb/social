@@ -2,7 +2,8 @@
 // two, each word now carrying its own history upward. The newest layer is the
 // heart (honey); everything beneath it is kept. Columns differ in height,
 // because versions belong to each tile; the dashed line at the second step
-// lines them up for the eye only.
+// lines them up for the eye only, and a not-equal sign between neighbours
+// says so.
 const { hex, LIT, CELL, marker, flow, text, svg } = require('../../../../presentation/plates/lib.cjs')
 
 const WORDS = ['simple', 'organized', 'collaborative', 'intelligent', 'accessible', 'localized']
@@ -18,11 +19,16 @@ module.exports = () => {
     for (let l = 0; l < HEIGHT[i] - 1; l++) old.push(hex(X(i), Y(l), R, CELL))
     tops.push(hex(X(i), Y(HEIGHT[i] - 1), R, LIT))
   })
-  return svg('six words in a row, each with a column of versions above it; the newest on top of each column is lit as its heart', [
+  // the second step, lined up across the columns for the eye only: between
+  // neighbours that both have one, a not-equal sign (the tour's, from
+  // signature-name): the same height, never the same thing
+  const NE = [200, 340, 760], y1 = Y(1)
+  const cuts = [96, ...NE.flatMap(x => [x - 18, x + 18]), 866]
+  const dash = cuts.reduce((d, x, i) => i % 2 ? d + ` L${x},${y1}` : d + ` M${x},${y1}`, '')
+  const ne = NE.map(x => `<path d="M${x - 11},${y1 - 6} H${x + 11} M${x - 11},${y1 + 6} H${x + 11} M${x + 6},${y1 - 13} L${x - 6},${y1 + 13}" stroke="var(--steel)" stroke-width="1.8"/>`).join('')
+  return svg('six words in a row, each with a column of versions above it; the newest on top of each column is lit as its heart; the second steps line up, but none equals another', [
     `<defs>${marker('oc-ah')}</defs>`,
-    // the second step, lined up across the columns for the eye only
-    `<g data-id="level"><path d="M96,${Y(1)} H866" stroke="var(--steel)" stroke-width="1.5" stroke-dasharray="3 7"/>` +
-      text(880, Y(1) + 6, '0001', 'm st', 16, 'start') + `</g>`,
+    `<g data-id="level"><path d="${dash}" stroke="var(--steel)" stroke-width="1.5" stroke-dasharray="3 7"/>${ne}</g>`,
     // simple: three kept layers, then the new one on top
     `<g data-id="simple-old">${[0, 1, 2].map(l => hex(X(0), Y(l), R, CELL)).join('')}</g>`,
     `<g data-id="simple-new">${hex(X(0), Y(3), R, LIT)}${text(X(0), Y(3) - R - 14, 'heart', 'k hy', 18)}</g>`,

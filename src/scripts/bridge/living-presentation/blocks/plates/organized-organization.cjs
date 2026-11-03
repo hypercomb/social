@@ -5,7 +5,7 @@
 // one per set it is in (pheromones/enrollment.ts: group { sig, meaning, order }).
 // On the right, a question reads the pieces that carry the word travel, as one
 // flat list (the tag filter, which today matches any of the chosen words).
-// Photo and map sit in both, at a different place in each; nothing moves.
+// Photo and map sit in both at once, and neither reading owns them; nothing moves.
 const { hex, CELL, STEEL, text, svg } = require('../../../../presentation/plates/lib.cjs')
 
 const PX = 480, R = 34

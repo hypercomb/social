@@ -15,9 +15,9 @@ const card = (id, cx, title, value, from, to) =>
 module.exports = () => svg('one hexagon named hypercomb, with its signature and its meta beside it and its layer below it, empty', [
   card('meta', 270, 'meta', 'empty', HX - R * 0.866, 358),
   card('signature', 690, 'signature', '92020378…', HX + R * 0.866, 602),
-  `<g data-id="layer"><path d="M${HX},${HY + R} V250" stroke="var(--line-strong)" stroke-width="1.2"/>` +
-    text(HX + 14, 208, 'layer', 'k', 18, 'start') +
-    `<rect x="60" y="250" width="840" height="124" rx="6" fill="none" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5 7"/>` +
-    text(HX, 318, 'empty', 'f', 18) + `</g>`,
-  `<g data-id="hypercomb">${hex(HX, HY, R, LIT)}${text(HX, HY + 6, 'hypercomb', 'k', 18)}</g>`,
+  `<g data-id="layer"><path d="M${HX},${HY + R} V236" stroke="var(--line-strong)" stroke-width="1.2"/>` +
+    text(HX + 14, 202, 'layer', 'k', 18, 'start') +
+    `<rect x="60" y="236" width="840" height="138" rx="6" fill="none" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5 7"/>` +
+    text(HX, 311, 'empty', 'f', 18) + `</g>`,
+  `<g data-id="hypercomb">${hex(HX, HY, R, LIT)}${text(HX, HY - 14, 'word', 'm f', 16)}${text(HX, HY + 16, 'hypercomb', 'k', 18)}</g>`,
 ].join('\n'))

@@ -1,59 +1,57 @@
 // move six — the points fill a cube nobody drew. Every tile from moves four
 // and five shrinks to a point: words run across, versions climb, origins run
-// back (the same slant as move five). The front face is move four's six
-// columns, at their own heights; behind simple stand move five's other hands.
-// A place no version fills yet stays an outline, so the cube is whole. Its
-// edges appear only at the end, faintly: the shape the points already make.
-const { hex, LIT, CELL, GHOST, ghost, text, svg } = require('../../../../presentation/plates/lib.cjs')
+// back along move five's slant (one step back is half a step up). The front
+// face is move four's six columns, at their own heights; behind simple stand
+// move five's other hands, on move five's floor. Only versions that exist are
+// drawn, so the cube is nothing but the points: its edges appear at the end,
+// faintly, as the shape the points already make.
+//
+// The depth step is kept well under half the word step and the version step,
+// so a point behind never lands between two columns in front; nearer points
+// are larger and stronger, so depth reads without a single extra line.
+const { hex, LIT, CELL, ghost, text, svg } = require('../../../../presentation/plates/lib.cjs')
 
 // the cube's frame (move seven draws the same cube in the same place)
-const X0 = 314, Y0 = 306, SW = 44, SV = 73, DX = 56, DY = -20, R = 13
+const X0 = 244, Y0 = 318, SW = 76, SV = 70, DX = 46, DY = -23
+const RS = [13, 11, 9]                       // a point's size, nearest first
+const R = RS[0]
 const P = (w, v, o) => [X0 + w * SW + o * DX, Y0 - v * SV + o * DY]
 // how many versions each word has, from each hand: you (move four), ann, bo
 const HEIGHT = [[4, 2, 3, 1, 3, 2], [3, 4, 4, 3, 4, 4], [2, 4, 3, 4, 4, 3]]
-// nearer points read stronger: depth told by the stroke alone
+// nearer points read stronger
 const NEAR = ['1', '.7', '.45']
-
-const corners = (pad) => {
-  const [l, b] = [X0 - pad, Y0 + pad], [r, t] = [X0 + 5 * SW + pad, Y0 - 3 * SV - pad]
-  const d = [2 * DX, 2 * DY]
-  return { l, b, r, t, d }
-}
+const PAD = R + 10
+// the eight corners of the frame the points span, padded
+const FRAME = [[0, 0, 0], [5, 0, 0], [5, 3, 0], [0, 3, 0], [0, 0, 2], [5, 0, 2], [5, 3, 2], [0, 3, 2]]
+  .map(([w, v, o]) => { const [x, y] = P(w, v, o); return [x + (w ? PAD : -PAD), y + (v ? -PAD : PAD)] })
+const EDGES = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]
+const point = (w, v, o) => { const [x, y] = P(w, v, o); return hex(x, y, RS[o], `${CELL} stroke-opacity="${NEAR[o]}"`) }
 
 const plate = () => {
   const groups = { front: [], spread: [], rest: [] }
-  const empty = []
-  for (let o = 2; o >= 0; o--) for (let w = 0; w < 6; w++) for (let v = 0; v < 4; v++) {
-    const [x, y] = P(w, v, o)
-    const filled = v < HEIGHT[o][w]
-    if (!filled) { empty.push(hex(x, y, R, GHOST)); continue }
-    const shape = hex(x, y, R, `${CELL} stroke-opacity="${NEAR[o]}"`)
+  for (let o = 2; o >= 0; o--) for (let w = 0; w < 6; w++) for (let v = 0; v < HEIGHT[o][w]; v++) {
+    if (o === 0 && w === 0 && v === 0) continue        // simple itself, drawn lit
+    const shape = point(w, v, o)
     if (o === 0) groups.front.push(shape)
     else if (w === 0) groups.spread.push(shape)
     else groups.rest.push(shape)
   }
-  const { l, b, r, t, d } = corners(R + 10)
-  const [ex, ey] = d
-  const hull = [
-    `M${l},${b} H${r} V${t} H${l} Z`,
-    `M${l + ex},${b + ey} H${r + ex} V${t + ey} H${l + ex} Z`,
-    `M${l},${b} l${ex},${ey} M${r},${b} l${ex},${ey} M${r},${t} l${ex},${ey} M${l},${t} l${ex},${ey}`,
-  ].map(ghost).join('')
-  const [sx, sy] = P(0, 0, 0)
-  return svg('six words, four versions and three origins as points in three directions; together they fill a cube that was never drawn', [
+  const hull = EDGES.map(([a, b]) => `M${FRAME[a][0]},${FRAME[a][1]} L${FRAME[b][0]},${FRAME[b][1]}`).map(ghost).join('')
+  const [sx, sy] = P(0, 0, 0), [fx, fy] = P(0, 0, 2)
+  return svg('six words, their versions and three origins as points in three directions; together they fill a cube that was never drawn', [
     `<g data-id="hull">${hull.replace(/stroke="var\(--line\)"/g, 'stroke="var(--honey-deep)" stroke-opacity=".6"')}</g>`,
-    `<g data-id="empty">${empty.join('')}</g>`,
     `<g data-id="rest">${groups.rest.join('')}</g>`,
-    `<g data-id="spread">${groups.spread.join('')}</g>`,
+    // move five's floor: simple's other hands, standing behind it
+    `<g data-id="spread">${ghost(`M${sx - 18},${sy + 9} L${fx + 18},${fy - 9}`)}${groups.spread.join('')}</g>`,
     `<g data-id="front">${groups.front.join('')}</g>`,
     `<g data-id="simple">${hex(sx, sy, R + 3, LIT)}</g>`,
-    `<g data-id="ax-words">${text(X0 + 2.5 * SW, Y0 + R + 34, 'words', 'k', 18)}</g>`,
-    `<g data-id="ax-versions">${text(X0 - R - 26, Y0 - 1.5 * SV + 6, 'versions', 'k', 18, 'end')}</g>`,
-    `<g data-id="ax-origins">${text(X0 + 5 * SW + 2 * DX + R + 26, Y0 + 2 * DY + 6, 'origins', 'k', 18, 'start')}</g>`,
-    text(sx - R - 10, sy + 6, 'simple', 'hy', 18, 'end'),
+    `<g data-id="ax-words">${text(X0 + 2.5 * SW, Y0 + R + 36, 'words', 'k', 18)}</g>`,
+    `<g data-id="ax-versions">${text(X0 - PAD - 14, Y0 - 1.5 * SV + 6, 'versions', 'k', 18, 'end')}</g>`,
+    `<g data-id="ax-origins">${text(FRAME[5][0] + 16, FRAME[5][1] + 6, 'origins', 'k', 18, 'start')}</g>`,
+    text(sx - R - 12, sy + 6, 'simple', 'hy', 18, 'end'),
   ].join('\n'))
 }
 
 // move seven draws this same cube, in the same place
-plate.cube = { X0, Y0, SW, SV, DX, DY, R, P, HEIGHT, NEAR }
+plate.cube = { X0, Y0, SW, SV, DX, DY, R, RS, P, HEIGHT, NEAR, PAD, FRAME, EDGES }
 module.exports = plate

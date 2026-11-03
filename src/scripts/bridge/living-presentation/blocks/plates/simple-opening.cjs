@@ -2,9 +2,11 @@
 // move's plate, so the hexagon is seen growing: one hexagon over an empty
 // layer; the layer filled as a row; the row tilted into a stack of planes;
 // versions rising into columns; columns from other hands behind; the points
-// filling a cube no one drew; a cube inside a cube. One honey line runs under
-// them, first to last.
-const { f1, hex, LIT, CELL, marker, flow, text, svg } = require('../../../../presentation/plates/lib.cjs')
+// filling a cube no one drew; a cube inside a cube. Under each frame, the part
+// of the primitive that move takes its direction from: the word, the layer
+// (twice), the signature, the origin it wears, nothing new for the cube, and
+// its meta, whatever that says. The frame and its part light together.
+const { f1, hex, LIT, text, svg } = require('../../../../presentation/plates/lib.cjs')
 
 const W = 112, GAP = 16, TOP = 56, H = 252
 const CX = i => 40 + i * (W + GAP) + W / 2
@@ -15,6 +17,9 @@ const flat = (cx, cy, r, a) => `<polygon points="${[[0, -1], [0.866, -0.5], [0.8
 const column = (x, base, n, r = 7, step = 15) => Array.from({ length: n }, (_, l) => hex(x, base - l * step, r, l === n - 1 ? LIT : SMALL)).join('')
 const cube = (x, y, s, d, a = 'fill="none" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="3 4"') =>
   `<path d="M${x},${y} h${s} v${s} h${-s} Z M${x + d},${y - d * 0.7} h${s} v${s} h${-s} Z M${x},${y} l${d},${-d * 0.7} M${x + s},${y} l${d},${-d * 0.7} M${x + s},${y + s} l${d},${-d * 0.7} M${x},${y + s} l${d},${-d * 0.7}" ${a}/>`
+
+// what each move takes from the primitive (frame six adds nothing)
+const PARTS = ['word', 'layer', 'layer', 'signature', 'origin', 'nothing new', 'meta']
 
 const MOVES = [
   ['hexagon', cx => hex(cx, 168, 30, LIT) +
@@ -35,12 +40,12 @@ const MOVES = [
     `<path d="M${cx - 38},180 L${cx - 20},198 M${cx + 22},180 L${cx + 4},198 M${cx + 22},240 L${cx + 4},222 M${cx - 38},240 L${cx - 20},222" fill="none" stroke="var(--honey-deep)" stroke-width="1"/>`],
 ]
 
-module.exports = () => svg('seven frames in a row: one hexagon; its layer as a row; rows under rows as a stack of planes; versions as columns; columns from other origins; points filling a cube; a cube inside a cube', [
-  `<defs>${marker('op-ah')}</defs>`,
+module.exports = () => svg('seven frames in a row, each over the part of the primitive it comes from: one hexagon, its word; a row and a stack of planes, its layer; columns of versions, its signature; columns from other hands, their origin; points filling a cube, nothing new; a cube inside a cube, its meta', [
   MOVES.map(([name, draw], i) => {
     const cx = CX(i), x = cx - W / 2
     return `<g data-id="m${i + 1}"><rect x="${x}" y="${TOP}" width="${W}" height="${H}" rx="3" fill="var(--bg)" stroke="var(--line-strong)" stroke-width="1.2"/>` +
-      text(x + 12, TOP + 24, String(i + 1), 'm f', 16, 'start') + draw(cx) + text(cx, TOP + H - 18, name, 'k', 18) + `</g>`
+      text(x + 12, TOP + 24, String(i + 1), 'm f', 16, 'start') + draw(cx) + text(cx, TOP + H - 18, name, 'k', 18) +
+      `<path d="M${x + 14},${TOP + H + 14} H${x + W - 14}" stroke="${i === 5 ? 'var(--line)' : 'var(--honey-deep)'}" stroke-width="1.5"/>` +
+      text(cx, TOP + H + 42, PARTS[i], i === 5 ? 'f' : 'hy', 18) + `</g>`
   }).join('\n'),
-  flow(`M${CX(0) - 40},${TOP + H + 30} H${CX(6) + 44}`, 'op-ah', 1.5),
 ].join('\n'))

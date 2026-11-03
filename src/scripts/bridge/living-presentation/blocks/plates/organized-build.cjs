@@ -48,7 +48,7 @@ module.exports = () => svg('the opening and its seven moves, three changed by on
     text(SX, SY + SR + 72, 'sealed again: a41c…', 'm f', 16) +
     text(SX, SY + SR + 100, 'nothing added', 'd', 18) + `</g>`,
   // the branch's versions: each step marked by its seal, two of them named
-  text(CX, 80, 'versions', 'f', 18),
+  text(CX - 30, 80, 'versions of opening', 'f', 18),
   `<g data-id="steps">${step(1, CELL)}</g>`,
   `<g data-id="first-cut">${box(0, 112)}${step(0, CELL)}${tag(VY[0], 'first-cut', 112)}</g>`,
   `<g data-id="seven-moves">${box(2, 132)}${step(2, CELL)}${tag(VY[2], 'seven-moves', 132)}</g>`,

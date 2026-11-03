@@ -27,8 +27,8 @@ module.exports = () => svg('a translator offers her own words as a signed catalo
   `<g data-id="ann">${hex(...ANN, R, STEEL)}${text(ANN[0], ANN[1] + 10, '同期', 'k', 28)}` +
     text(ANN[0], ANN[1] + R + 38, 'ann', 'k st', 22) + text(ANN[0], ANN[1] + R + 64, 'a translator', 'd', 20) + `</g>`,
   // offer: her words, one signed catalog, to the host she names
-  `<g data-id="offer"><rect x="${ANN[0] + R}" y="44" width="${HOST.x - ANN[0] - R - 6}" height="${ANN[1] - 44}" fill="none" stroke="none"/><path d="M${ANN[0] + R * 0.866 + 8},${ANN[1] - 12} C${ANN[0] + 140},${ANN[1] - 44} ${HOST.x - 80},${ANN[1] - 44} ${HOST.x - 10},${ANN[1] - 18}" fill="none" stroke="var(--steel)" stroke-width="1.5" marker-end="url(#lt-as)"/>` +
-    catalog(266, 92) + text(292, 70, 'language offer', 'm', 20) + `</g>`,
+  `<g data-id="offer"><rect x="200" y="44" width="${HOST.x - 206}" height="${ANN[1] - 44}" fill="none" stroke="none"/><path d="M${ANN[0] + R * 0.866 + 8},${ANN[1] - 12} C${ANN[0] + 140},${ANN[1] - 44} ${HOST.x - 80},${ANN[1] - 44} ${HOST.x - 10},${ANN[1] - 18}" fill="none" stroke="var(--steel)" stroke-width="1.5" marker-end="url(#lt-as)"/>` +
+    catalog(266, 92) + text(298, 70, 'language offer', 'm', 20) + `</g>`,
   // the host: the catalogs it lists for the language, each checked
   `<g data-id="host">${server(HOST.x, HOST.y, HOST.w)}` +
     [0, 1, 2].map(i => check(HOST.x + HOST.w - 22, HOST.y + i * 34 + 13)).join('') +
