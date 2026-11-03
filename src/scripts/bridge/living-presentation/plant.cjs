@@ -150,11 +150,15 @@ if (args.includes('--blocks')) {
       if (file.ok) files++; else { failed++; console.error(at + ' ' + f.name + ': ' + file.error) }
     }
   }
-  // The presentation OPENS AS its pages: one view:default mark on its top
-  // tile, which every tile under it inherits, so walking in shows a page and
-  // walking back up lands on one too (a tile with no face of its own drops
-  // the website view back to hexagons). \`h\` is hexagons for one visit.
-  for (const top of ${JSON.stringify([...new Set(blocks.map(b => b.route[0]))])}) lines.push('go /', 'opens ' + top + ' as website')
+  // Every tile OPENS AS HEXAGONS (jwize 2026-11-03: "walk the hive tiles and
+  // just open the website part … it is the entrance point"; "full flexibility
+  // to just walk into and out of tile views"). A reader walks the hexagons and
+  // opens a tile's page from its view icon; that tile is the site's entrance,
+  // a page's word links go deeper inside it, and walking back (a link up, or
+  // the right button) comes out to the hexagons where the reader opened it.
+  // An earlier planting set \`opens <top> as website\`, which cascades to every
+  // tile beneath and made each arrival open a page; this clears it.
+  for (const top of ${JSON.stringify([...new Set(blocks.map(b => b.route[0]))])}) lines.push('go /', 'opens ' + top + ' as hexagons')
   console.log('Files: ' + files + ' written, ' + failed + ' failed.')
   // 3. Dressing each tile with its page is YOUR word, website page <sig>: the
   //    lines wait on the command line, and Enter says them all.
