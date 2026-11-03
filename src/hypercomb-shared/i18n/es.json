@@ -1455,6 +1455,7 @@
   "slash.opens": "Define cómo se abre un mosaico: como una de sus vistas o como hexágonos",
   "slash.groups": "Grupos de publicación de esta capa: créalos, llénalos, nómbralos, coloréalos y publícalos",
   "slash.card": "Usar una plantilla de tarjeta o decir qué lleva una tarjeta",
+  "slash.layout": "Qué hijos muestra esta capa: solo los que nombran sus palabras de rasgo, o todos",
   "slash.trait": "Los rasgos que esta casilla deja abiertos para rellenar",
   "slash.fill": "Elige qué llena uno de los rasgos de esta casilla",
   "slash.tutor": "Juegos de estudio — convierte esta colmena en juegos de repetición espaciada; on | off | here | build | list",

@@ -126,6 +126,16 @@ const goReported = (): { done: Promise<void>; stop: () => void } => {
   return { done, stop }
 }
 
+/** Where the participant stands now, as tile names from the root. */
+const standingNow = (): string[] => {
+  const lineage = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+    ?.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+  return [...(lineage?.explorerSegments?.() ?? [])].map(String)
+}
+
+const samePlace = (a: readonly string[], b: readonly string[]): boolean =>
+  a.length === b.length && a.every((name, i) => name === b[i])
+
 /** The processor's next settled pass, or a short wait if none comes. */
 const settled = (): Promise<void> => new Promise(resolve => {
   const finish = (): void => { clearTimeout(timer); window.removeEventListener('synchronize', finish); resolve() }
@@ -236,7 +246,30 @@ export class ExternalCallDrone extends Drone {
       return { kind: 'ran', convoId, results: [{ text, verdict }] }
     }
     const results: ExternalLineResult[] = []
+    // WHERE THE CALL STANDS, NOT WHERE THE PARTICIPANT HAS WANDERED (jwize,
+    // 2026-11-03: "make sure the presentation isn't messed up if you navigate
+    // during the command"). A line like `trait` or `create` acts where it
+    // stands, and the participant may click elsewhere while a long call runs.
+    // So the call remembers where its own last `go` left it, and before each
+    // later line, if the hive is somewhere else, walks back there first and
+    // says so. Only the call's own `go` moves that place.
+    let callStandsAt: string[] | null = null
+    const walkTo = async (text: string): Promise<RemoteSubmitOutcome> => {
+      const walking = goReported()
+      const outcome = await sayLine(text)
+      if (outcome.kind === 'refused' || outcome.kind === 'ambiguous') walking.stop()
+      await walking.done
+      await settled()
+      return outcome
+    }
     for (const text of call.lines) {
+      if (callStandsAt && verbOf(text) !== 'go' && !samePlace(standingNow(), callStandsAt)) {
+        const back = `go /${callStandsAt.join('/')}`
+        const verdict = formatRemoteSubmitOutcome(await walkTo(back))
+        const note = `(the hive had moved: walked back to /${callStandsAt.join('/')} before the next line)`
+        results.push({ text: back, verdict, heard: [note] })
+        await deliverTurn(convoId, 'assistant', `${back}\n→ ${verdict}\n${note}`)
+      }
       const walking = verbOf(text) === 'go' ? goReported() : null
       // WHAT THE HIVE SAYS WHILE THE LINE RUNS — a word that answers (`read`,
       // `find`) answers in the activity log and toasts, not in its verdict.
@@ -248,6 +281,7 @@ export class ExternalCallDrone extends Drone {
         if (outcome.kind === 'refused' || outcome.kind === 'ambiguous') walking.stop()
         await walking.done
         await settled()
+        if (outcome.kind !== 'refused' && outcome.kind !== 'ambiguous') callStandsAt = standingNow()
       } else if (outcome.kind === 'unknown') {
         await settled()
       }

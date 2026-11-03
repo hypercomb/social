@@ -1322,7 +1322,7 @@ async function declaredListing(env, read) {
 /** The host's own private ledgers. Each member names a key or a domain and
  *  holds what only its own endpoint may hand out, so no declaration lists
  *  them — not even an operator's signed `listed`. */
-const PRIVATE_POOL_MEANINGS = ['host:claims', 'host:grants', 'host:ai-meters', 'host:tenants', 'host:whole-packages', 'host:forgotten', 'history:public']
+const PRIVATE_POOL_MEANINGS = ['host:claims', 'host:grants', 'host:ai-meters', 'host:tenants', 'host:whole-packages', 'host:forgotten', 'history:public', 'content:packs:standing']
 
 /** Is this pool listed here? The floor answers without an index read — the
  *  addresses every follower asks stay on the hot path; anything else is
@@ -5132,6 +5132,10 @@ async function withdrawSuperseded(env, pubkey, before, after) {
     await reclaim(env, sig, mark)
     count++
   }
+  // A landing pack stamped for the previous standing would still name these
+  // members. Moving the epoch makes the next read filter; it does not walk
+  // them here. /forget does not move it — a missing member stays 'open'.
+  if (count > 0) await bumpPackStanding(env)
   return count
 }
 
@@ -5482,6 +5486,23 @@ const CONTENT_PACK_MEMBER_MAX = 16_384
 const CONTENT_PACK_MAX = 524_288
 const CONTENT_PACK_READS_MAX = 800
 const CONTENT_PACK_BATCH = 48
+// One private object. Its R2 version is the epoch a stored pack may carry.
+// A withdrawal moves it. A pack stamped with the current epoch was filtered
+// under that standing, so a later read serves the stored bytes and does not
+// head every member. Hosting's pack is a few hundred tiny records; heading
+// each of them on every request was the whole wait (measured 2026-11-02:
+// 283 members, ~4.3s, and the same on the repeat). Grace is not stamped:
+// a member still inside its ten minutes must be stood again when they end.
+const PACK_STANDING_MEANING = 'content:packs:standing'
+const packStandingKey = async () => `${await poolAddress(PACK_STANDING_MEANING)}/00000000`
+async function packEpoch(env) {
+  try { return forgetGenerationOf(await env.CONTENT?.head?.(await packStandingKey())) }
+  catch { return 'none' }
+}
+async function bumpPackStanding(env) {
+  try { await env.CONTENT?.put?.(await packStandingKey(), new TextEncoder().encode(crypto.randomUUID())) }
+  catch { /* the next withdrawal moves it */ }
+}
 
 const contentPackHeaders = (length) => ({
   'Content-Type': 'application/octet-stream',
@@ -5538,7 +5559,22 @@ async function serveContentPack(request, env, host, head) {
   if (standing === 'hidden') return new Response(null, { status: 404, headers: CORS })
   const held = await env.CONTENT?.get?.(key)
   if (held) {
-    const pack = await packWithoutHidden(request, env, new Uint8Array(await held.arrayBuffer()))
+    const bytes = new Uint8Array(await held.arrayBuffer())
+    const epoch = headOnly(env) ? await packEpoch(env) : null
+    const current = epoch !== null && held.customMetadata?.epoch === epoch
+    const pack = current
+      ? { bytes, kept: false }
+      : await packWithoutHidden(request, env, bytes)
+    // Stamp only the answer just filtered, and only while the epoch is the
+    // one that filter saw. A withdrawal during the heads leaves it unstamped.
+    if (!current && pack.stamp && epoch !== null && await packEpoch(env) === epoch) {
+      try {
+        await env.CONTENT.put(key, pack.bytes, {
+          httpMetadata: { contentType: 'application/octet-stream' },
+          customMetadata: { epoch },
+        })
+      } catch { /* filtered again next time */ }
+    }
     const headers = contentPackHeaders(pack.bytes.byteLength)
     // A pack served only while its head or a member is kept may stop being served.
     if (standing === 'kept' || pack.kept) headers['Cache-Control'] = KEPT_CACHE
@@ -5549,25 +5585,33 @@ async function serveContentPack(request, env, host, head) {
   if (!door || String(door.layer || '').toLowerCase() !== head || !env.CONTENT?.get) {
     return new Response(null, { status: 404, headers: CORS })
   }
-  // Walked as a stranger reads: the pack is kept for every reader.
+  // Walked as a stranger reads: the pack is kept for every reader. The walk
+  // already skips a hidden member. Stamp only when no withdrawal moved the
+  // epoch while the walk ran.
+  const epoch = headOnly(env) ? await packEpoch(env) : null
   const members = await walkLandingMembers(env, head)
   if (!members.has(head)) return new Response(null, { status: 404, headers: CORS })
   const bytes = await gzipBytes(encodeTransferPack([...members]))
+  const stable = epoch !== null && await packEpoch(env) === epoch
   try {
-    await env.CONTENT.put(key, bytes, { httpMetadata: { contentType: 'application/octet-stream' } })
+    await env.CONTENT.put(key, bytes, stable
+      ? { httpMetadata: { contentType: 'application/octet-stream' }, customMetadata: { epoch } }
+      : { httpMetadata: { contentType: 'application/octet-stream' } })
   } catch { /* built again next time */ }
   return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers: contentPackHeaders(bytes.byteLength) })
 }
 
-/** A pack kept from before a head move may hold members the move withdrew:
- *  under head only, those are left out of the answer (the kept record stays
- *  as it was — the visitor fetches loose whatever a pack lacks). Bytes that do
- *  not decode as a pack name no member, and go out as they are. */
+/** A pack kept from before a head move may hold members the move withdrew.
+ *  Under head only, those are left out of the answer. The caller stamps that
+ *  answer when nothing in it is only kept for grace, so the next read does
+ *  not head every member. The visitor still fetches loose whatever a pack
+ *  lacks. Bytes that do not decode as a pack name no member, and go out as
+ *  they are. */
 async function packWithoutHidden(request, env, bytes) {
-  if (!headOnly(env)) return { bytes, kept: false }
+  if (!headOnly(env)) return { bytes, kept: false, stamp: false }
   let members = null
   try { members = decodeTransferPack(await gunzipBytes(bytes, CONTENT_PACK_MAX * 4)) } catch { members = null }
-  if (!members) return { bytes, kept: false }
+  if (!members) return { bytes, kept: false, stamp: false }
   const served = []
   let kept = false
   for (let at = 0; at < members.length; at += CONTENT_PACK_BATCH) {
@@ -5579,7 +5623,13 @@ async function packWithoutHidden(request, env, bytes) {
       if (standings[i] !== 'hidden') served.push(member)
     })
   }
-  return { bytes: served.length === members.length ? bytes : await gzipBytes(encodeTransferPack(served)), kept }
+  // A member still in grace must not be stamped: when the grace ends the
+  // epoch has not moved, and a stamp would keep serving it.
+  return {
+    bytes: served.length === members.length ? bytes : await gzipBytes(encodeTransferPack(served)),
+    kept,
+    stamp: !kept,
+  }
 }
 
 /** The members of a pool of meaning: the R2 objects under sign(meaning)/, by
