@@ -34,11 +34,10 @@ import type {
   OverlayActionDescriptor, OverlayProfileKey, OverlayTileContext,
 } from '../presentation/tiles/tile-overlay.drone.js'
 
-/** A speech bubble with the line of a report inside it. Deliberately NOT the
- *  tray-with-a-plus the chat shelf wears (chat-context-action.drone.ts): that
- *  one PUTS a tile into a request, this one OPENS what an agent has to say
- *  about this tile, and two icons that mean different things must not read as
- *  the same icon. */
+/** A speech bubble with the line of a report inside it. Deliberately not a
+ *  shelf mark: that one puts a tile onto the shelf, this one opens what an
+ *  agent has to say about this tile, and two icons that mean different things
+ *  must not read as the same icon. */
 const AGENT_LOG_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8"/><path d="M8 12.5h5"/></svg>'
 
 const OWNER = '@diamondcoreprocessor.com/AgentLogActionDrone'

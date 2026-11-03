@@ -53,8 +53,8 @@
 //                (the choice survives walking in and out), because what is
 //                being built is a LIST OF SIGNATURES: content-addressed, so
 //                the same choice composes the same payload every time. Out in
-//                the HIVE the same gathering is a per-tile ICON, not this
-//                chord (assistant/chat-context-action.drone.ts) — on a
+//                the HIVE the same gathering is the shelf — a tile's shelf
+//                icon, or To shelf on a selection — not this chord. On a
 //                hexagon ctrl-click is already the selection toggle, and one
 //                chord meaning two things by invisible state is the thing
 //                this window was built to kill.
