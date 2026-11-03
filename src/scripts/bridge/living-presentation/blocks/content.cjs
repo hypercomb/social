@@ -21,6 +21,19 @@ const PRIMITIVE_NODES = [
 const PRIMITIVE_EDGES = [['hypercomb', 'word'], ['hypercomb', 'signature'], ['hypercomb', 'layer'], ['hypercomb', 'meta']]
 const ALL = ['hypercomb', 'word', 'signature', 'layer', 'meta', 'hypercomb-word', 'hypercomb-signature', 'hypercomb-layer', 'hypercomb-meta']
 
+
+/** A tile and its children: the tile above, the children in one or two rows. */
+const hub = (top, children, label) => {
+  const rows = children.length > 6 ? [children.slice(0, Math.ceil(children.length / 2)), children.slice(Math.ceil(children.length / 2))] : [children]
+  const nodes = [{ id: top, label: top, x: 320, y: rows.length > 1 ? 68 : 80, r: 48 }]
+  rows.forEach((row, ri) => row.forEach((name, i) => {
+    nodes.push({ id: name, label: name, x: Math.round(640 / (row.length + 1) * (i + 1)), y: rows.length > 1 ? 190 + ri * 110 : 260, r: rows.length > 1 ? 32 : 38 })
+  }))
+  return { label, nodes, edges: children.map(c => [top, c]) }
+}
+/** Light a tile with some of its children, and the lines between. */
+const lit = (top, ...names) => [top, ...names, ...names.map(n => `${top}-${n}`)]
+
 module.exports = {
   'presentation/simple/primitive': {
     title: 'The primitive',
@@ -352,6 +365,111 @@ module.exports = {
     ],
     code: [{ path: 'hypercomb-core/src/core/trait.ts', from: 'export interface TraitWant', lines: 2 }],
     files: ['documentation/traits.md', 'documentation/superimposition.md', 'hypercomb-core/src/core/trait.ts'],
+  },
+
+  // ── the top: the presentation and its six values ──────────────────────
+
+  'presentation': {
+    title: 'Welcome to Hypercomb',
+    lede: 'Everything here is one idea, used again: a tile. Start with any of the six values, and step in to go deeper.',
+    picture: hub('presentation', ['simple', 'organized', 'collaborative', 'intelligent', 'accessible', 'localized'], 'The presentation and its six values'),
+    beats: [
+      { say: 'This is Hypercomb, told by Hypercomb: every piece of this presentation is a tile.', lit: ['presentation'] },
+      { say: 'Under it, six values. Each is a word, and each is a tile you can step into.', lit: lit('presentation', 'simple', 'organized', 'collaborative', 'intelligent', 'accessible', 'localized') },
+      { say: 'Simple and organized: one idea, and a place for everything.', lit: lit('presentation', 'simple', 'organized') },
+      { say: 'Collaborative and intelligent: shared between people, and spoken by people and AI alike.', lit: lit('presentation', 'collaborative', 'intelligent') },
+      { say: 'Accessible and localized: open to anyone, in their own language.', lit: lit('presentation', 'accessible', 'localized') },
+      { say: 'It is a living document. Copy it, change it, make it yours. Step into a value below.', lit: lit('presentation', 'simple', 'organized', 'collaborative', 'intelligent', 'accessible', 'localized') },
+    ],
+    code: [],
+    files: ['documentation/living-presentation.md'],
+  },
+
+  'presentation/simple': {
+    title: 'Simple',
+    lede: 'Everything is a tile, and every tile is a word you can say. One idea, used everywhere.',
+    picture: hub('simple', ['primitive', 'act', 'opening'], 'Simple, shown by the primitive, the act and the opening'),
+    beats: [
+      { say: 'Simple means there is only one thing to learn.', lit: ['simple'] },
+      { say: 'The primitive: a word, its signature, a layer, and a meta layer. Nothing else is ever introduced.', lit: lit('simple', 'primitive') },
+      { say: 'The act: take a word, find its current layer, read its children. A click and a sentence do the same.', lit: lit('simple', 'act') },
+      { say: 'The opening: seven moves that grow one hexagon into a cube nobody drew.', lit: lit('simple', 'opening') },
+    ],
+    code: [{ path: 'hypercomb-core/src/core/life-primitive.ts', from: 'export type LifeLayer = {', lines: 5 }],
+    files: ['documentation/life-primitive.md', 'documentation/the-algorithm-is-the-application.md'],
+  },
+
+  'presentation/organized': {
+    title: 'Organized',
+    lede: 'Everything has its place by its name, and every version is kept by its signature. Nothing is ever lost.',
+    picture: hub('organized', ['heart', 'history', 'build', 'layout', 'trait', 'organization'], 'Organized, shown by heart, history, build, layout, trait and organization'),
+    beats: [
+      { say: 'Organized means a place for everything, found by its name.', lit: ['organized'] },
+      { say: 'The heart is what answers now; the history keeps every version beneath it.', lit: lit('organized', 'heart', 'history') },
+      { say: 'A build seals a piece of work under a name you can come back to.', lit: lit('organized', 'build') },
+      { say: 'A trait is a place a tile leaves open; a layout says which of them show, and in what order.', lit: lit('organized', 'trait', 'layout') },
+      { say: 'And the same pieces can be organized many ways at once, without moving any of them.', lit: lit('organized', 'organization') },
+    ],
+    code: [{ path: 'hypercomb-essentials/src/commands/layout.ts', from: 'export function leftOut', lines: 3 }],
+    files: ['documentation/history-sigbag-as-root.md', 'documentation/traits.md', 'documentation/layout-templates.md', 'hypercomb-essentials/src/commands/layout.ts'],
+  },
+
+  'presentation/collaborative': {
+    title: 'Collaborative',
+    lede: 'Share what you make from your own domain. Take what others make, whole or one piece at a time.',
+    picture: hub('collaborative', ['workbench', 'domain', 'trial', 'publishing', 'participant', 'sharing', 'discovery', 'tapestry'], 'Collaborative and its eight parts'),
+    beats: [
+      { say: 'Collaborative means your work is yours, and still easy to share.', lit: ['collaborative'] },
+      { say: 'You work on your own workbench, and publish from a domain you claimed with one sentence.', lit: lit('collaborative', 'workbench', 'domain') },
+      { say: 'A trial lets you try a change in public first; publishing keeps every older version working.', lit: lit('collaborative', 'trial', 'publishing') },
+      { say: 'Other participants share themes, styles and code with no dependencies between them.', lit: lit('collaborative', 'participant', 'sharing') },
+      { say: 'Discovery finds parts across every domain you follow, and the shared pieces weave a tapestry.', lit: lit('collaborative', 'discovery', 'tapestry') },
+    ],
+    code: [],
+    files: ['documentation/domain-claim.md', 'documentation/publishing-a-revision.md', 'documentation/pools-across-hosts.md'],
+  },
+
+  'presentation/intelligent': {
+    title: 'Intelligent',
+    lede: 'People and AI use the same words under the same rules, and every change waits for a person to accept it.',
+    picture: hub('intelligent', ['sentence', 'automaton', 'debugging', 'agent', 'merging'], 'Intelligent and its five parts'),
+    beats: [
+      { say: 'Intelligent does not mean the machine decides. It means the machine can speak the same language.', lit: ['intelligent'] },
+      { say: 'A sentence is the program: plain words, and you can see what they will touch before they run.', lit: lit('intelligent', 'sentence') },
+      { say: 'The same words run differently on different domains: each is its own automaton.', lit: lit('intelligent', 'automaton') },
+      { say: 'Problems are found and fixed in sentences too, one tried change at a time.', lit: lit('intelligent', 'debugging') },
+      { say: 'An agent speaks the same sentences as a person, and a person decides what runs.', lit: lit('intelligent', 'agent') },
+      { say: 'Planned: when changes meet, the AI drafts the merge, and you choose.', lit: lit('intelligent', 'merging') },
+    ],
+    code: [],
+    files: ['documentation/every-act-has-a-word.md', 'documentation/speak-dont-bridge.md', 'documentation/agents.md'],
+  },
+
+  'presentation/accessible': {
+    title: 'Accessible',
+    lede: 'Plain words, free and open source, and your work lives on your own device.',
+    picture: hub('accessible', ['reader', 'listening', 'phone', 'motion'], 'Accessible and its four parts'),
+    beats: [
+      { say: 'Accessible means nobody is kept out.', lit: ['accessible'] },
+      { say: 'Anyone can read what is published, with no account and nothing asked of a third party.', lit: lit('accessible', 'reader') },
+      { say: 'Every part is written to be listened to, in plain sentences.', lit: lit('accessible', 'listening') },
+      { say: 'It works on a phone, one column at a time, and still reads with motion turned off.', lit: lit('accessible', 'phone', 'motion') },
+    ],
+    code: [],
+    files: ['documentation/read-only-deployment.md', 'documentation/no-third-party-requests.md', 'documentation/mobile-one-column.md'],
+  },
+
+  'presentation/localized': {
+    title: 'Localized',
+    lede: 'The hive speaks your language: the community translates it, and anyone can add their own.',
+    picture: hub('localized', ['translating', 'locale'], 'Localized and its two parts'),
+    beats: [
+      { say: 'Localized means the hive speaks your language.', lit: ['localized'] },
+      { say: 'Translations come from the community, and a hive fills in the words it is missing.', lit: lit('localized', 'translating') },
+      { say: 'Your language is one more direction you can choose, like any other trait.', lit: lit('localized', 'locale') },
+    ],
+    code: [],
+    files: ['documentation/community-translations.md', 'documentation/cell-localization.md'],
   },
 
 }

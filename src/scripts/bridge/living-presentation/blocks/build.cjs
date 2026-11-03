@@ -8,6 +8,7 @@ const fs = require('fs')
 const path = require('path')
 const { render } = require('./page.cjs')
 const content = require('./content.cjs')
+const tree = require('../tree.cjs')
 
 const SRC = path.join(__dirname, '..', '..', '..', '..')
 
@@ -31,13 +32,32 @@ const filesOf = (rels) => {
   })
 }
 
+/** The tile at a route in the trees (tree.cjs), or null. */
+const tileAt = (route) => {
+  let node = (tree.roots || [tree]).find(r => r.name === route[0])
+  for (const name of route.slice(1)) node = node && (node.children || []).find(c => c.name === name)
+  return node || null
+}
+
+/** Where a reader can go from a block: its children by word, each marked by
+ *  whether it has a page yet, and its parent. */
+const waysOf = (route) => {
+  const tile = tileAt(route)
+  const children = (tile?.children || []).map(c => ({
+    name: c.name,
+    note: c.note || '',
+    page: Object.prototype.hasOwnProperty.call(content, [...route, c.name].join('/')),
+  }))
+  return { children, parent: route.length > 1 ? route[route.length - 2] : null, parentRoute: route.slice(0, -1) }
+}
+
 const buildBlocks = ({ under = '' } = {}) => {
   const prefix = String(under).replace(/^\/+|\/+$/g, '')
   return Object.entries(content)
     .filter(([route]) => !prefix || route === prefix || route.startsWith(`${prefix}/`))
     .map(([route, block]) => ({
       route: route.split('/'),
-      page: render(block, { code: (block.code ?? []).map(excerpt) }),
+      page: render(block, { code: (block.code ?? []).map(excerpt), ways: waysOf(route.split('/')) }),
       files: filesOf(block.files ?? []),
     }))
 }

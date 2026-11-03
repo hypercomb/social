@@ -12,8 +12,17 @@
 // those words and a component for each (the layout word); nothing here has to
 // know about that.
 //
-// render(block, { code }) -> the page's HTML. `code` is the source excerpts,
-// read from the repo at plant time so a page quotes the code as it is.
+// render(block, { code, ways }) -> the page's HTML. `code` is the source
+// excerpts, read from the repo at plant time so a page quotes the code as it
+// is. `ways` is where a reader can go from here: the children by their word
+// (`./word`, which the hive's website view follows one level down) and the
+// parent by its route (`/presentation/simple`: the website view reads `..` as
+// walking out of the site and drops back to the hexagons). A link names a WORD, never another artifact: the child that
+// fills that word answers it.
+//
+// IN THE HIVE a page is mounted inline (site-view.drone.ts), so its script
+// finds its own elements from its own root and lets go of the keyboard and its
+// timer the moment it is unmounted.
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
@@ -71,9 +80,17 @@ async function show(v) {
 }
 
 /** One block's page. */
-const render = (block, { code = [] } = {}) => {
+const render = (block, { code = [], ways = null } = {}) => {
   const beats = block.beats.map(b => ({ say: b.say, lit: b.lit ?? [] }))
   const tryPart = block.try ? TRY[block.try] : null
+  const waysPart = ways && (ways.children.length || ways.parent) ? `
+  <nav class="part ways" data-part="ways" aria-label="Where to go from here">
+    ${ways.children.length ? `<h2>Step in</h2>
+    <ul>${ways.children.map(c => c.page
+      ? `<li><a href="./${esc(c.name)}">${esc(c.name)}</a><span>${esc(c.note)}</span></li>`
+      : `<li class="later"><b>${esc(c.name)}</b><span>${esc(c.note)}</span></li>`).join('')}</ul>` : ''}
+    ${ways.parent ? `<p class="up"><a href="/${ways.parentRoute.map(esc).join('/')}">&#8593; back to ${esc(ways.parent)}</a></p>` : ''}
+  </nav>` : ''
   const codePart = code.length ? `
   <section class="part code" data-part="code" aria-label="The code">
     <h2>The code</h2>
@@ -129,6 +146,18 @@ main { max-width: 52rem; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
 .try .k { color: var(--quiet); font-size: .85rem; }
 .try code { font: .95rem var(--mono); word-break: break-all; }
 .try code.sig { color: var(--accent); }
+.ways { margin-top: 1.5rem; }
+.ways h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
+.ways ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .4rem; }
+.ways li { display: grid; grid-template-columns: minmax(7rem, max-content) 1fr; gap: .2rem 1rem; align-items: baseline; padding: .5rem .7rem; border: 1px solid var(--line); border-radius: 4px; }
+.ways li a { font-weight: 650; color: var(--accent); text-decoration: none; }
+.ways li a:hover { text-decoration: underline; }
+.ways li span { color: var(--quiet); font-size: .9rem; }
+.ways li.later b { color: var(--quiet); font-weight: 600; }
+.ways .up { margin: .8rem 0 0; }
+.ways .up a { color: var(--quiet); text-decoration: none; }
+.ways .up a:hover { color: var(--accent); }
+@media (max-width: 560px) { .ways li { grid-template-columns: 1fr; } }
 .code { margin-top: 1.5rem; }
 .code h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
 .code figure { margin: 0 0 1rem; }
@@ -155,15 +184,18 @@ main { max-width: 52rem; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
     <label for="try-in">${esc(tryPart.label)}</label>
     <input id="try-in" value="${esc(tryPart.value)}" autocomplete="off" spellcheck="false">
     <output id="try-out"></output>
-  </section>` : ''}${codePart}
+  </section>` : ''}${waysPart}${codePart}
 </main>
 <script>
 (() => {
+  // Its own root: in the hive the page is mounted inline beside the hive's
+  // own elements, so it never searches the whole document.
+  const root = (document.currentScript && document.currentScript.parentElement) || document
   const beats = ${JSON.stringify(beats)}
-  const svg = document.querySelector('.picture svg')
-  let line = document.querySelector('.narration p')
-  const dots = [...document.querySelectorAll('.dots span')]
-  const play = document.querySelector('[data-act=play]')
+  const svg = root.querySelector('.picture svg')
+  let line = root.querySelector('.narration p')
+  const dots = [...root.querySelectorAll('.dots span')]
+  const play = root.querySelector('[data-act=play]')
   const still = matchMedia('(prefers-reduced-motion: reduce)').matches
   let at = 0, timer = null, playing = !still
   const show = (i) => {
@@ -174,23 +206,30 @@ main { max-width: 52rem; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
     const p = document.createElement('p'); p.textContent = beats[at].say; line.replaceWith(p); line = p
     dots.forEach((d, j) => d.classList.toggle('on', j === at))
   }
-  const tick = () => { clearTimeout(timer); if (playing) timer = setTimeout(() => { if (at < beats.length - 1) { show(at + 1); tick() } else { playing = false; play.textContent = 'Play again' } }, 4200) }
+  const gone = () => !svg.isConnected
+  const tick = () => { clearTimeout(timer); if (gone()) return; if (playing) timer = setTimeout(() => { if (at < beats.length - 1) { show(at + 1); tick() } else { playing = false; play.textContent = 'Play again' } }, 4200) }
   const setPlaying = (on) => { playing = on; play.textContent = on ? 'Pause' : (at === beats.length - 1 ? 'Play again' : 'Play'); tick() }
-  document.querySelector('[data-act=back]').onclick = () => { setPlaying(false); show(at - 1) }
-  document.querySelector('[data-act=next]').onclick = () => { setPlaying(false); show(at + 1) }
+  root.querySelector('[data-act=back]').onclick = () => { setPlaying(false); show(at - 1) }
+  root.querySelector('[data-act=next]').onclick = () => { setPlaying(false); show(at + 1) }
   play.onclick = () => { if (!playing && at === beats.length - 1) show(0); setPlaying(!playing) }
-  addEventListener('keydown', (e) => {
-    if (e.target instanceof HTMLInputElement) return
+  // The arrows and space step this page only while it is on screen; once the
+  // page is gone, the listener removes itself.
+  const keys = (e) => {
+    if (gone()) { removeEventListener('keydown', keys); clearTimeout(timer); return }
+    const t = e.target
+    if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || (t && t.isContentEditable)) return
     if (e.key === 'ArrowRight') { setPlaying(false); show(at + 1) }
     else if (e.key === 'ArrowLeft') { setPlaying(false); show(at - 1) }
     else if (e.key === ' ') { e.preventDefault(); play.click() }
-  })
+  }
+  addEventListener('keydown', keys)
   show(0); setPlaying(playing)
 })()${tryPart ? `
 ;(() => {
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
-  const input = document.getElementById('try-in')
-  const out = document.getElementById('try-out')
+  const root = (document.currentScript && document.currentScript.parentElement) || document
+  const input = root.querySelector('#try-in')
+  const out = root.querySelector('#try-out')
   ${tryPart.script}
   input.addEventListener('input', () => show(input.value))
   show(input.value)
