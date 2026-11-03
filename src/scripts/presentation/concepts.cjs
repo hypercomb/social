@@ -708,7 +708,7 @@ const CLIPS = {
     beats: [
       { term: 'integrity', gloss: 'verify, don’t trust', cam: { x: 760, y: 240, s: 1.15 } },
       { term: 'share = signatures', gloss: 'every byte proven on arrival', cam: { x: 1990, y: 240, s: 0.92 } },
-      { term: 'one name', gloss: 'any host can serve it', cam: { x: 3585, y: 235, s: 0.76 } },
+      { term: 'one name', gloss: 'any host can serve it', cam: { x: 3585, y: 215, s: 0.76 } },
       { term: 'proof', gloss: 'sharing a signature is sharing a proof', cam: { x: 3070, y: 110, s: 1.55 } },
     ],
   },
