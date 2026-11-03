@@ -44,6 +44,7 @@ type IconProviderRegistryLike = {
     svgMarkup: string
     profiles?: readonly string[]
     defaultActive?: boolean
+    leading?: boolean
     hoverTint?: number
     labelKey?: string
     descriptionKey?: string
@@ -123,6 +124,7 @@ export class PortalCarryDrone extends Drone {
       svgMarkup: TRAY_ICON_SVG,
       profiles: ['private', 'public-own'],
       defaultActive: true,
+      leading: true,
       hoverTint: 0xa8c8ff,
       labelKey: 'action.portal-carry',
       descriptionKey: 'action.portal-carry.description',

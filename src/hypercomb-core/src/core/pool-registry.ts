@@ -699,6 +699,11 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // keeps its hive awake and in the swarm while nobody is at it. One document,
   // this machine's own setting; it never travels with content.
   'swarm:keep-alive',
+  // DEVICE PAIRING (essentials/sharing/device-pairing.ts): which participant this
+  // device shares a hive with, and the master-signed grants and revocations it
+  // knows (documentation/device-sync.md). One document, this device's own
+  // record; it never travels with content. Colon meaning: no tile may name it.
+  'device:pairing',
   // IGNORED (essentials/notes/swarm-notes.service.ts): the keys whose notes
   // this participant ignores ALWAYS. One document, a reading preference — never
   // a layer, never travels with content.

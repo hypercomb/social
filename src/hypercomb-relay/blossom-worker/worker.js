@@ -531,7 +531,7 @@ async function rootPlaceRoot(env, zone, lineage, publisher, read = indexReader(e
   const head = String(index?.roots?.[lineage] || '').toLowerCase()
   if (!SIG_RE.test(head) || !opensOn(index, lineage, zone, env)) return null
   const meta = locationMeta({ lineage, title: lineage.split('/').at(-1) }, publisher.pubkey, head, index)
-  if (await currentRouteHead(env, rootPlaceKey(zone, lineage), head, meta) !== head) return null
+  if (await currentRouteHead(env, rootPlaceKey(zone, lineage), head, meta, read.locations) !== head) return null
   return { head, pubkey: publisher.pubkey, publishedAt: index.createdAt }
 }
 
@@ -620,6 +620,7 @@ function indexReader(env, defer) {
   }
   read.failed = failed
   read.raw = raw
+  read.locations = locationReads()
   return read
 }
 
@@ -959,7 +960,7 @@ async function publishedRoot(env, publisher, lineage, read = indexReader(env), h
   // signed index authorizes the route; its hostname bag names the current
   // revision. A disagreement is a closed door until the publisher repairs it.
   if (host && !card
-    && await currentRouteHead(env, host, head, meta) !== head) return null
+    && await currentRouteHead(env, host, head, meta, read.locations) !== head) return null
   return {
     head,
     pubkey: publisher.pubkey,
@@ -1467,38 +1468,49 @@ async function routeMarkers(env, host) {
  *  isolate's write is seen within this window. */
 const LOCATION_TTL_MS = 5_000
 const newestAt = new Map()
-/** One list in flight per location, so a directory that asks the same door
- *  from several plates shares the bag read. */
-const newestPending = new Map()
-/** How many location bags one isolate lists at once. The directory used to
+/** How many location bags one request lists at once. The directory used to
  *  walk every plate's bag in a single line — measured on hypercomb.com
  *  2026-10-27, publications.json took 3–6s and the tiles could not draw until
  *  it returned, while one bag was ~100ms. Sixteen keeps that walk wide
  *  without opening a list per plate all at once. */
 const LOCATION_READS = 16
-let locationReadsActive = 0
-const locationReadQueue = []
-const locationGate = (task) => new Promise((resolve, reject) => {
-  const start = () => {
-    locationReadsActive++
-    Promise.resolve().then(task).then(resolve, reject).finally(() => {
-      locationReadsActive--
-      const next = locationReadQueue.shift()
-      if (next) next()
-    })
-  }
-  if (locationReadsActive < LOCATION_READS) start()
-  else locationReadQueue.push(start)
-})
 
-/** A location's marker names and its newest record, cached per isolate. */
-async function newestLocation(env, location) {
+/** ONE REQUEST'S BAG READS: at most LOCATION_READS lists at once, and one list
+ *  in flight per location, so a directory that asks the same door from several
+ *  plates shares the bag read. It lives on the request's reader (indexReader)
+ *  and dies with it. It was once per isolate, and a read whose request ended
+ *  first never settled: its slot was never given back, and every request that
+ *  joined it waited with it — after sixteen, every door page in the isolate
+ *  hung until the isolate was recycled (2026-11-02, every *.hypercomb.com door
+ *  `canceled` at ~12 s wall and ~10 ms CPU, while the apex answered). */
+function locationReads() {
+  let active = 0
+  const queue = []
+  const pending = new Map()
+  const gate = (task) => new Promise((resolve, reject) => {
+    const start = () => {
+      active++
+      Promise.resolve().then(task).then(resolve, reject).finally(() => {
+        active--
+        const next = queue.shift()
+        if (next) next()
+      })
+    }
+    if (active < LOCATION_READS) start()
+    else queue.push(start)
+  })
+  return { gate, pending }
+}
+
+/** A location's marker names and its newest record — the ANSWER cached per
+ *  isolate, a read in flight shared only within `reads`' request. */
+async function newestLocation(env, location, reads = locationReads()) {
   const freshEnough = (held) => held && Date.now() - held.at < LOCATION_TTL_MS && held.env === env.CONTENT
   const held = newestAt.get(location)
   if (freshEnough(held)) return held
-  const pending = newestPending.get(location)
+  const pending = reads.pending.get(location)
   if (pending) return pending
-  const promise = locationGate(async () => {
+  const promise = reads.gate(async () => {
     const again = newestAt.get(location)
     if (freshEnough(again)) return again
     const names = await locationMarkers(env, location)
@@ -1507,9 +1519,9 @@ async function newestLocation(env, location) {
     newestAt.set(location, fresh)
     return fresh
   })
-  newestPending.set(location, promise)
+  reads.pending.set(location, promise)
   try { return await promise }
-  finally { if (newestPending.get(location) === promise) newestPending.delete(location) }
+  finally { if (reads.pending.get(location) === promise) reads.pending.delete(location) }
 }
 
 /** One marker's record, or null. Markers are small, immutable JSON. */
@@ -1555,9 +1567,9 @@ async function putLocationMarker(env, location, name, record) {
  *  newest marker from before doors carried their meta gains a successor with
  *  the SAME head and the meta, so the bag describes its door (data moves
  *  forward; nothing is rewritten or deleted). */
-async function currentRouteHead(env, host, signedHead, meta) {
+async function currentRouteHead(env, host, signedHead, meta, reads) {
   const location = await poolAddress(host.toLowerCase())
-  const { names: markers, record: newest } = await newestLocation(env, location)
+  const { names: markers, record: newest } = await newestLocation(env, location, reads)
   if (!markers) return null
   if (markers.length === 0) {
     if (!SIG_RE.test(String(signedHead))) return null

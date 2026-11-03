@@ -36,6 +36,9 @@ type IconProviderEntry = {
   profiles?: readonly string[]
   /** Auto-join the default arrangement for each profile (no DEFAULT_ACTIVE edit). */
   defaultActive?: boolean
+  /** With `defaultActive`: join the arrangement at the LEFT edge, ahead of
+   *  every other icon, instead of before `remove`. */
+  leading?: boolean
   /** Ride the hidden row revealed by the ⋮ (more) toggle instead of the
    *  always-visible row — for secondary or destructive actions. */
   dangerRow?: boolean
@@ -120,6 +123,8 @@ export type IconRegistryEntry = {
    *  arrangement — `#getActiveNames` auto-joins it for its profile, so a
    *  feature icon takes part without editing DEFAULT_ACTIVE. */
   defaultActive?: boolean
+  /** Joins the default arrangement at the left edge (see provider `leading`). */
+  leading?: boolean
   /** Lives in the hidden "danger" row revealed by tapping the overlay's ⋮
    *  (more) icon — used for destructive actions (delete) so they're never a
    *  one-tap default. Suppressed entirely while the tile has visible
@@ -498,6 +503,7 @@ export class TileActionsDrone extends Drone {
           hoverTint: p.hoverTint,
           profile: prof as OverlayProfileKey,
           defaultActive: p.defaultActive,
+          leading: p.leading,
           dangerRow: p.dangerRow,
           featureRow: p.featureRow,
           labelRow: p.labelRow,
@@ -652,6 +658,7 @@ export class TileActionsDrone extends Drone {
       // rightmost action.
       for (const e of merged) {
         if (!e.defaultActive || e.profile !== profile || desired.includes(e.name)) continue
+        if (e.leading) { desired.unshift(e.name); continue }
         const ri = desired.indexOf('remove')
         if (ri >= 0) desired.splice(ri, 0, e.name)
         else desired.push(e.name)
