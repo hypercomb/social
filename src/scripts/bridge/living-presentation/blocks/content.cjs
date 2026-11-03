@@ -653,4 +653,193 @@ module.exports = {
     files: ['documentation/website-artifact-paradigm.md', 'documentation/known-location-pools.md'],
   },
 
+  // ── collaborative ─────────────────────────────────────────────────────
+
+  'presentation/collaborative/workbench': {
+    title: 'Workbench',
+    lede: 'Your workbench is your own hive, private to your machine until you publish.',
+    picture: {
+      label: 'Your hive on your machine, publishing outward only when you choose',
+      nodes: [
+        { id: 'device', label: 'your device', sub: 'your hive lives here', kind: 'box', x: 160, y: 180, w: 170 },
+        { id: 'host', label: 'your host', sub: 'when you register one', kind: 'box', x: 470, y: 120, w: 170 },
+        { id: 'world', label: 'readers', sub: 'what you publish', kind: 'box', x: 470, y: 260, w: 170 },
+      ],
+      edges: [['device', 'host'], ['host', 'world']],
+    },
+    beats: [
+      { say: 'You work in your own hive, and it lives on your own device.', lit: ['device'] },
+      { say: 'Nothing leaves it on its own. There is no account and no central server holding your work.', lit: ['device'] },
+      { say: 'When you are ready, a host you register can carry what you choose to publish.', lit: ['device', 'host', 'device-host'] },
+      { say: 'Readers see what you published, and only that.', lit: ['host', 'world', 'host-world'] },
+    ],
+    code: [],
+    files: ['documentation/becoming-a-host.md', 'documentation/hosting-from-a-machine.md'],
+  },
+
+  'presentation/collaborative/domain': {
+    title: 'Domain',
+    lede: 'A domain is claimed with one sentence. Everything on it is a name pointing at your work.',
+    picture: {
+      label: 'One sentence claims a domain; its names point at your work',
+      nodes: [
+        { id: 'say', label: 'domain claim', sub: 'one sentence', kind: 'box', x: 130, y: 90, w: 170 },
+        { id: 'ns', label: 'two nameservers', sub: 'set at your registrar', kind: 'box', x: 400, y: 90, w: 200 },
+        { id: 'domain', label: 'your domain', sub: 'yours to publish on', x: 320, y: 240, r: 48 },
+        { id: 'name', label: 'name.domain', sub: 'a pointer', kind: 'box', x: 110, y: 300, w: 150 },
+        { id: 'apex', label: 'the apex', sub: 'your front door', kind: 'box', x: 530, y: 300, w: 150 },
+      ],
+      edges: [['say', 'ns'], ['ns', 'domain'], ['domain', 'name'], ['domain', 'apex']],
+    },
+    beats: [
+      { say: 'You claim a domain with one sentence: domain claim, and its name.', lit: ['say'] },
+      { say: 'The hive answers with two nameservers. Setting them at your registrar is the proof.', lit: ['say', 'ns', 'say-ns'] },
+      { say: 'Once they are seen, the domain is yours, and nobody else can publish there.', lit: ['ns', 'domain', 'ns-domain'] },
+      { say: 'Its apex is your front door, and every name under it is a place you can switch on.', lit: ['domain', 'name', 'apex', 'domain-name', 'domain-apex'] },
+      { say: 'The key that claims is the key that publishes.', lit: ['domain'] },
+    ],
+    code: [],
+    files: ['documentation/domain-claim.md', 'documentation/domain-folder-sharing.md', 'documentation/showcase.md'],
+  },
+
+  'presentation/collaborative/trial': {
+    title: 'Trial',
+    lede: 'A trial address lets you try a change in public, on its own, before anyone depends on it.',
+    picture: {
+      label: 'A change tried at its own try- address, then promoted by one move',
+      nodes: [
+        { id: 'change', label: 'a change', sub: 'in your hive', kind: 'box', x: 110, y: 180, w: 140 },
+        { id: 'trial', label: 'try-name', sub: 'its own address', x: 320, y: 180, r: 50 },
+        { id: 'live', label: 'the live name', sub: 'one pointer move', kind: 'box', x: 530, y: 180, w: 160 },
+      ],
+      edges: [['change', 'trial'], ['trial', 'live']],
+    },
+    beats: [
+      { say: 'A change can be tried before anyone relies on it.', lit: ['change'] },
+      { say: 'It opens at its own trial address, on its own origin: no writes, no keys.', lit: ['change', 'trial', 'change-trial'] },
+      { say: 'Anyone you show it to can look, and nothing they rely on moves.', lit: ['trial'] },
+      { say: 'When it is ready, promoting it is one pointer move.', lit: ['trial', 'live', 'trial-live'] },
+    ],
+    code: [{ path: 'hypercomb-essentials/src/files/try-page.ts', from: 'export const trialLabel', lines: 7 }],
+    files: ['documentation/module-sandbox.md', 'hypercomb-essentials/src/files/try-page.ts'],
+  },
+
+  'presentation/collaborative/publishing': {
+    title: 'Publishing',
+    lede: 'Publishing puts the bytes up first and then moves a pointer. Nothing is removed, so older versions keep working.',
+    picture: {
+      label: 'Bytes uploaded first, then a signed pointer moved to the new root',
+      nodes: [
+        { id: 'bytes', label: 'the bytes', sub: 'by signature', kind: 'box', x: 130, y: 110, w: 160 },
+        { id: 'pointer', label: 'signed pointer', sub: 'your key', x: 340, y: 200, r: 50 },
+        { id: 'new', label: 'new root', sub: 'what readers get', kind: 'box', x: 540, y: 110, w: 150 },
+        { id: 'old', label: 'older root', sub: 'still held', kind: 'box', x: 540, y: 290, w: 150 },
+      ],
+      edges: [['bytes', 'pointer'], ['pointer', 'new'], ['pointer', 'old']],
+    },
+    beats: [
+      { say: 'Publishing puts the bytes up first, each named by its signature.', lit: ['bytes'] },
+      { say: 'Then one signed pointer moves to the new root.', lit: ['bytes', 'pointer', 'new', 'bytes-pointer', 'pointer-new'] },
+      { say: 'A host can withhold the pointer, but never forge it: it is checked against your key.', lit: ['pointer'] },
+      { say: 'Nothing is removed. Going back is moving the pointer to an older root, still held.', lit: ['pointer', 'old', 'pointer-old'] },
+    ],
+    code: [{ path: 'hypercomb-essentials/src/sharing/hive-pointer.ts', from: '// Client for the per-publisher hive index', lines: 12 }],
+    files: ['documentation/read-only-deployment.md', 'documentation/deployment-stages.md', 'documentation/derivations.md', 'hypercomb-essentials/src/sharing/hive-pointer.ts'],
+  },
+
+  'presentation/collaborative/participant': {
+    title: 'Participant',
+    lede: 'Each participant serves their own domain. You can take a whole creation or just one piece of it.',
+    picture: {
+      label: 'Participants on their own domains; you take a whole creation or one piece',
+      nodes: [
+        { id: 'ann', label: 'ann', sub: 'her domain', x: 120, y: 110, r: 40 },
+        { id: 'bo', label: 'bo', sub: 'his domain', x: 320, y: 110, r: 40 },
+        { id: 'cy', label: 'cy', sub: 'their domain', x: 520, y: 110, r: 40 },
+        { id: 'whole', label: 'take it whole', kind: 'box', x: 200, y: 290, w: 160 },
+        { id: 'piece', label: 'take one piece', kind: 'box', x: 440, y: 290, w: 160 },
+      ],
+      edges: [['ann', 'whole'], ['bo', 'piece'], ['cy', 'piece']],
+    },
+    beats: [
+      { say: 'Everyone serves their own work, from their own domain.', lit: ['ann', 'bo', 'cy'] },
+      { say: 'You can take a creation whole, and it runs as its publisher made it.', lit: ['ann', 'whole', 'ann-whole'] },
+      { say: 'Or take just one piece of it, and use it in your own.', lit: ['bo', 'piece', 'bo-piece'] },
+      { say: 'When a shared piece changes, you choose whether to take the new version.', lit: ['cy', 'piece', 'cy-piece'] },
+    ],
+    code: [],
+    files: ['documentation/using-a-creation.md', 'documentation/collections-sharing.md'],
+  },
+
+  'presentation/collaborative/sharing': {
+    title: 'Sharing',
+    lede: 'Themes, styles and code are shared without dependencies: parts name words, never each other.',
+    picture: {
+      label: 'Parts naming theme words; a theme answering them; no part naming another',
+      nodes: [
+        { id: 'card', label: 'card', sub: 'a part', kind: 'box', x: 120, y: 100, w: 130 },
+        { id: 'menu', label: 'menu', sub: 'a part', kind: 'box', x: 120, y: 280, w: 130 },
+        { id: 'ink', label: 'ink', sub: 'a word', x: 320, y: 100, r: 38 },
+        { id: 'accent', label: 'accent', sub: 'a word', x: 320, y: 280, r: 38 },
+        { id: 'theme', label: 'a theme', sub: 'answers the words', kind: 'box', x: 530, y: 190, w: 160 },
+      ],
+      edges: [['card', 'ink'], ['menu', 'accent'], ['card', 'accent'], ['theme', 'ink'], ['theme', 'accent']],
+    },
+    beats: [
+      { say: 'Parts never name each other. They name only the words they need.', lit: ['card', 'menu'] },
+      { say: 'A card asks for ink and accent; a menu asks for accent.', lit: ['card', 'menu', 'ink', 'accent', 'card-ink', 'card-accent', 'menu-accent'] },
+      { say: 'A theme is a layer that answers those words.', lit: ['theme', 'ink', 'accent', 'theme-ink', 'theme-accent'] },
+      { say: 'Change the theme and everything that names its words follows, with nothing rewired.', lit: ['theme', 'ink', 'accent', 'card', 'menu', 'theme-ink', 'theme-accent', 'card-ink', 'card-accent', 'menu-accent'] },
+    ],
+    code: [],
+    files: ['documentation/website-artifact-paradigm.md', 'documentation/background-themes.md'],
+  },
+
+  'presentation/collaborative/discovery': {
+    title: 'Discovery',
+    lede: 'Find parts across every domain you follow, with and, or and not.',
+    picture: {
+      label: 'One question asked of every followed domain, answered as one list',
+      nodes: [
+        { id: 'q', label: 'menu and dark', sub: 'not christmas', kind: 'box', x: 320, y: 70, w: 210 },
+        { id: 'h1', label: 'ann', x: 140, y: 200, r: 36 },
+        { id: 'h2', label: 'bo', x: 320, y: 200, r: 36 },
+        { id: 'h3', label: 'cy', x: 500, y: 200, r: 36 },
+        { id: 'list', label: 'one list of offers', sub: 'marked by domain', kind: 'box', x: 320, y: 318, w: 240 },
+      ],
+      edges: [['q', 'h1'], ['q', 'h2'], ['q', 'h3'], ['h1', 'list'], ['h2', 'list'], ['h3', 'list']],
+    },
+    beats: [
+      { say: 'Every word is the same address on every host.', lit: ['h1', 'h2', 'h3'] },
+      { say: 'So one question can be asked of every domain you follow: and, or, not.', lit: ['q', 'h1', 'h2', 'h3', 'q-h1', 'q-h2', 'q-h3'] },
+      { say: 'The answers come back as one flat list of offers, each marked by its domain.', lit: ['list', 'h1-list', 'h2-list', 'h3-list'] },
+      { say: 'And the question itself can be kept as a tile, to ask again.', lit: ['q'] },
+    ],
+    code: [],
+    files: ['documentation/pools-across-hosts.md', 'documentation/traits.md', 'documentation/signature-algebra.md'],
+  },
+
+  'presentation/collaborative/tapestry': {
+    title: 'Tapestry',
+    lede: 'Where two hives hold the same piece, they are joined. Together they form one larger picture.',
+    picture: {
+      label: 'Hives joined wherever they hold the same signature',
+      nodes: [
+        { id: 'you', label: 'your hive', x: 120, y: 200, r: 46 },
+        { id: 'ann', label: 'ann', x: 320, y: 100, r: 40 },
+        { id: 'bo', label: 'bo', x: 320, y: 300, r: 40 },
+        { id: 'cy', label: 'cy', x: 520, y: 200, r: 40 },
+      ],
+      edges: [['you', 'ann'], ['you', 'bo'], ['ann', 'cy'], ['bo', 'cy']],
+    },
+    beats: [
+      { say: 'Every hive is the same shape: the primitive, repeated.', lit: ['you', 'ann', 'bo', 'cy'] },
+      { say: 'Wherever two hold the same piece, by the same signature, there is a thread between them.', lit: ['you', 'ann', 'you-ann'] },
+      { say: 'Threads run from your root outward, hive to hive.', lit: ['you', 'ann', 'bo', 'cy', 'you-ann', 'you-bo', 'ann-cy', 'bo-cy'] },
+      { say: 'Together they weave one larger picture that nobody owns.', lit: ['you', 'ann', 'bo', 'cy', 'you-ann', 'you-bo', 'ann-cy', 'bo-cy'] },
+    ],
+    code: [],
+    files: ['documentation/pools-across-hosts.md', 'documentation/superimposition.md'],
+  },
+
 }
