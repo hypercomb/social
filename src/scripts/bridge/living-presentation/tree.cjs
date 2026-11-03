@@ -112,6 +112,24 @@ const presenter = t('presenter',
     ]),
   ])
 
+// The road: the tour's opening protocol scene and its close, one scene per
+// tile (jwize 2026-11-03: "the entire hierarchy will have one scene per tile").
+// Kept out of the values so /presentation's layer stays the six values (one
+// relation per layer). Relation of its children: the way ahead.
+const road = t('road',
+  'Where Hypercomb is going: what it is for, what people make with it, what comes next, and how to begin.',
+  'The tour\'s scene 2 and scenes 20 to 25 (blocks/tour.cjs), one per tile, in the tour\'s order.',
+  [
+    t('protocol', 'Hypercomb is an open protocol for people: one shared way of naming, keeping and passing on what we make.', 'Tour scene 2, An open protocol.'),
+    t('creations', 'What people make with it today: cards, websites and games, the language, communities.', 'Tour scene 20, Shown by its creations.'),
+    t('coming', 'In progress: the next things being built.', 'Tour scene 21, What comes next. Everything here is planned or in progress, and says so.'),
+    t('vision', 'Further out: where the protocol is headed.', 'Tour scene 22, The vision. Planned.'),
+    t('computer', 'The horizon: the hive as a computer.', 'Tour scene 23, The hive is a computer. Planned.'),
+    t('yours', 'The invitation: the hive is yours.', 'Tour scene 24, The hive is yours.'),
+    t('first-day', 'Your first day: type help, and everything you can do is laid out for you.', 'Tour scene 25, How to bee.'),
+  ])
+
 module.exports = presentation
 module.exports.presenter = presenter
-module.exports.roots = [presentation, presenter]
+module.exports.road = road
+module.exports.roots = [presentation, road, presenter]

@@ -83,9 +83,10 @@ const ALL = args.includes('--all')
 const DOMAINS = [...new Set(valuesOf('--publish').flatMap(v => v.split(',')).map(d => d.trim().toLowerCase()).filter(Boolean))]
 const LABEL = valueOf('--as')
 const flagValues = new Set([...valuesOf('--publish'), valueOf('--revision'), valueOf('--out'), LABEL, SAY_URL].filter(Boolean))
-// Two trees, two relations (tree.cjs): presentation (what is shown, and what is
-// published) and presenter (what shows it). With --all and no route, both are
-// planted; a route plants under its own tree.
+// Three trees, three relations (tree.cjs): presentation (the values, what is
+// shown and published), road (the way ahead, one tour scene per tile) and
+// presenter (what shows them). With --all and no route, all are planted; a
+// route plants under its own tree.
 const ROOTS = tree.roots || [tree]
 const named = args.find(a => !a.startsWith('--') && !flagValues.has(a))
 const route = (named || tree.name).replace(/^\/+|\/+$/g, '')

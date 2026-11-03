@@ -635,4 +635,20 @@ module.exports = {
     files: ['documentation/pools-across-hosts.md', 'documentation/superimposition.md'],
   },
 
+
+  'road': {
+    eyebrow: 'the road',
+    headline: 'Where it is *going*',
+    sub: 'One scene per tile, in the order the tour tells them.',
+    picture: hub('road', ['protocol', 'creations', 'coming', 'vision', 'computer', 'yours', 'first-day'], 'The road and its seven scenes'),
+    beats: [
+      { say: 'This is the road: where Hypercomb is going, one scene at a time.', lit: ['road'] },
+      { say: 'It starts with what Hypercomb is for: an open protocol, for people.', lit: lit('road', 'protocol') },
+      { say: 'Then what people already make with it.', lit: lit('road', 'creations') },
+      { say: 'Then what is being built next, what is further out, and the horizon.', lit: lit('road', 'coming', 'vision', 'computer') },
+      { say: 'And it ends where you begin: the hive is yours, and your first day.', lit: lit('road', 'yours', 'first-day') },
+    ],
+    files: ['documentation/living-presentation.md'],
+  },
+
 }

@@ -10,7 +10,7 @@ const content = require('./content.cjs')
 const tour = require('./tour.cjs')
 
 const lines = Object.entries(content)
-  .filter(([route, block]) => !tour.stagesOf(route).length && Array.isArray(block.beats))
+  .filter(([route, block]) => !tour.sceneAt(route) && Array.isArray(block.beats))
   .flatMap(([route, block]) => block.beats.map((b, i) => ({ say: b.say, n: `${route} #${i + 1}`, name: b.say.slice(0, 48) })))
 
 tour.T.ensureAudio(lines, { check: process.argv.includes('--check') })
