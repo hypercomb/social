@@ -335,8 +335,9 @@ const SCRIPT = `
     }
     all.push(stage)
     pp.onclick = () => stage.play(!playing)
-    el.querySelector('[data-act=back]').onclick = () => stage.go(at - 1)
-    el.querySelector('[data-act=next]').onclick = () => stage.go(at + 1)
+    const back = el.querySelector('[data-act=back]'), fwd = el.querySelector('[data-act=next]')
+    if (back) back.onclick = () => stage.go(at - 1)
+    if (fwd) fwd.onclick = () => stage.go(at + 1)
     ticks.forEach((t, k) => { t.onclick = () => stage.go(k) })
     if (voiceBtn) voiceBtn.onclick = () => { voiceOn = !voiceOn; voiceBtn.setAttribute('aria-pressed', String(voiceOn)); voiceBtn.setAttribute('aria-label', voiceOn ? 'Mute the voice' : 'Unmute the voice'); if (playing) speak() }
     show(0)
@@ -417,10 +418,12 @@ const stageHtml = (st) => {
     <div class="caption" aria-live="polite"><p></p></div>
     <nav class="transport" aria-label="Play">
       <button type="button" class="ib pp${voiced ? ' lead' : ''}" aria-label="Play">${icon('play', 'i-play')}${icon('pause', 'i-pause')}<span class="lead-text">Listen${st.minutes ? ` · ${esc(st.minutes)}` : ''}</span></button>
+${st.steps.length > 1 ? `
       <button type="button" class="ib" data-act="back" aria-label="Back">${icon('left')}</button>
       <button type="button" class="ib" data-act="next" aria-label="Next">${icon('right')}</button>
       <span class="ticks">${st.steps.map((s, k) => `<button type="button" class="tick" aria-label="${esc(`${k + 1}: ${s.name || s.say.slice(0, 60)}`)}"></button>`).join('')}</span>
-      <span class="count">01 / ${String(st.steps.length).padStart(2, '0')}</span>${voiced ? `
+      <span class="count">01 / ${String(st.steps.length).padStart(2, '0')}</span>` : `
+      <span class="ticks" aria-hidden="true"></span>`}${voiced ? `
       <button type="button" class="ib voice" aria-pressed="true" aria-label="Mute the voice">${icon('speaker', 'i-speaker')}${icon('muted', 'i-muted')}</button>` : ''}
     </nav>
     <script type="application/json">${JSON.stringify(steps).replace(/</g, '\\u003c')}</script>
