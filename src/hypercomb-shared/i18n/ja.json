@@ -203,7 +203,6 @@
   "quick-tray.drag": "ハイブへドラッグして配置 · Shift を押しながらで移動 · ポータルの行に重ねてそこへ追加",
   "quick-tray.appearance": "配置",
   "quick-tray.custody": "移動",
-  "quick-tray.empty": "まだ棚には何もありません。タイルの棚アイコンか、選択した状態で「棚へ」を押すとここに置かれます。",
   "pheromone.cue.mark": "付ける",
   "pheromone.cue.marked": "付いている",
   "pheromone.cue.unmark": "取り除く",

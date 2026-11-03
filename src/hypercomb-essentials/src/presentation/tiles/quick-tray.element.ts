@@ -1,7 +1,7 @@
 // presentation/tiles/quick-tray.element.ts
 //
-// <hc-quick-tray> — THE SHELF. A full-width shelf under the header, always in
-// view, holding the references you are carrying: a tile's shelf icon sends one
+// <hc-quick-tray> — THE SHELF. A full-width shelf under the header, in view
+// whenever it holds the references you are carrying: a tile's shelf icon sends one
 // here (`quick-tray:take`, PortalCarryDrone), the bottom-right "to shelf"
 // button sends the selection, and a row dragged off it onto the hive places it
 // (documentation/recents-and-the-quick-tray.md, codex A9). The clipboard it
@@ -17,7 +17,8 @@
 //
 // THE SHELF HOLDS ITS OWN BAND. It reserves the top of the canvas
 // (`viewport:inset`, pixi-host shrinks its box and refits), so fitted tiles
-// are framed below it, never under it. Folded, it gives the band back.
+// are framed below it, never under it. Folded, it gives the band back — and
+// so does an empty shelf: holding nothing, it shows nothing.
 //
 // Nothing is written at the take. The shelf holds {label, source page, the sig
 // the page lists it by} — a selection that survives navigation: walk through a
@@ -140,8 +141,6 @@ const STYLE = `
   overflow-x:auto;overflow-y:hidden;scrollbar-width:none;
   mask-image:linear-gradient(90deg,#000 calc(100% - 1.5rem),transparent);-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 1.5rem),transparent);}
 .rows::-webkit-scrollbar{display:none;}
-.empty{position:relative;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  color:var(--hc-window-ink-quiet,currentColor);}
 .row{flex:0 0 auto;position:relative;display:inline-flex;align-items:center;gap:0.4rem;height:1.9rem;box-sizing:border-box;
   padding:0 0.2rem 0 0.25rem;border-radius:var(--hc-radius-control,2px);border:1px solid rgba(var(--shelf),0.22);
   background:rgba(var(--shelf),0.06);cursor:grab;white-space:nowrap;touch-action:none;outline:none;
@@ -314,7 +313,8 @@ export class QuickTrayElement extends HTMLElement {
   // ── paint ────────────────────────────────────────────────────────────────
 
   #render(): void {
-    if (this.#folded) {
+    // Nothing held, nothing shown: an empty shelf is a band with no use.
+    if (this.#folded || this.#entries.length === 0) {
       this.#root.innerHTML = `<style>${STYLE}</style>`
       this.#reserve()
       return
@@ -334,9 +334,7 @@ export class QuickTrayElement extends HTMLElement {
         <button class="remove" type="button" data-index="${index}" tabindex="-1" aria-label="${remove}: ${esc(entry.label)}" title="${remove}">×</button>
       </li>`
     }).join('')
-    const body = this.#entries.length
-      ? `<ul class="rows" aria-label="${esc(t('quick-tray.title', 'Shelf'))}">${rows}</ul>`
-      : `<span class="empty">${esc(t('quick-tray.empty', 'Nothing on the shelf yet. A tile\u2019s shelf icon, or To shelf on a selection, puts it here.'))}</span>`
+    const body = `<ul class="rows" aria-label="${esc(t('quick-tray.title', 'Shelf'))}">${rows}</ul>`
     const hide = esc(t('quick-tray.hide', 'Hide the shelf'))
     this.#root.innerHTML = `<style>${STYLE}</style>
       <section class="shelf${this.#dragging ? ' dragging' : ''}" aria-label="${esc(t('quick-tray.title', 'Shelf'))}" data-consumes-wheel>
