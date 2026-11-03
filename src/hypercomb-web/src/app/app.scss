@@ -12,7 +12,7 @@
   // of which stand on that, stand above the notice instead of over it. A flat
   // 2.8rem put the pill under a package's empty-hive prompt (z 100000) on the
   // desktop and across the phone strip (2026-09-22).
-  bottom: calc(max(var(--hc-controls-bar-bottom, 0px), var(--hc-cmd-bottom, 0px), var(--hc-safe-bottom, 0px)) + 0.6rem);
+  bottom: calc(max(var(--hc-controls-bar-bottom, 0px), var(--hc-safe-bottom, 0px)) + 0.6rem);
   z-index: 60010;
   display: flex;
   align-items: center;
