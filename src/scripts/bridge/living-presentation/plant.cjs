@@ -46,6 +46,12 @@
 // The slash matters: on the command line a bare line is read as prose first,
 // and in the tiles stance plain text lays a tile of that name.
 // --dry prints the sentences and says nothing; they can also be typed by hand.
+// Each planted layer is shown by its own words: after its markers, any marker
+// an earlier planting left (retired.cjs) is retired with `trait ~` (its tile
+// stays), and `layout on` shows only the markers' children; whatever else is
+// referenced there is left out, untouched, one `layout off` away. Before the
+// notes are filed, an earlier planting's notes are taken off with `unfile` (a
+// list change; history keeps them). --no-retire skips both retirements.
 // --blocks [<route>] [--out <file>] writes each tile's BLOCK (its page) and its
 // included files (the documents and source it explains), for the tiles under
 // the route that have content (blocks/content.cjs). A file's text cannot ride a
@@ -57,6 +63,7 @@
 const path = require('path')
 const { spawnSync } = require('child_process')
 const tree = require('./tree.cjs')
+const retired = require('./retired.cjs')
 
 const args = process.argv.slice(2)
 const valueOf = (flag) => { const i = args.indexOf(flag); return i >= 0 ? args[i + 1] : undefined }
@@ -67,6 +74,7 @@ const HTTP_SAY = args.includes('--say')
 const SAY_URL = (() => { const i = args.indexOf('--say'); const v = args[i + 1]; return i >= 0 && v && /^https?:/.test(v) ? v : 'http://127.0.0.1:4262/say' })()
 const DRY = args.includes('--dry') || SENTENCES || CONSOLE
 const TILES_ONLY = args.includes('--tiles-only')
+const RETIRE = !args.includes('--no-retire')
 const PUBLISH_ONLY = args.includes('--publish-only')
 const ALL = args.includes('--all')
 const DOMAINS = [...new Set(valuesOf('--publish').flatMap(v => v.split(',')).map(d => d.trim().toLowerCase()).filter(Boolean))]
@@ -159,10 +167,21 @@ const sentences = []
 if (!PUBLISH_ONLY) {
   for (const p of plantings) {
     if (p.top) sentences.push('go /', `create ${p.node.name}`)
-    for (const { tile, at } of p.layers) sentences.push(`go /${at}`, `trait ${tile.children.map(c => c.name).join(' ')}`)
+    for (const { tile, at } of p.layers) {
+      sentences.push(`go /${at}`, `trait ${tile.children.map(c => c.name).join(' ')}`)
+      const old = RETIRE ? retired.markers[at] ?? [] : []
+      if (old.length) sentences.push(`trait ~ ${old.join(' ')}`)
+      sentences.push('layout on')
+    }
   }
 }
 if (!TILES_ONLY && !PUBLISH_ONLY) {
+  // The earlier planting's notes first, under the routes planted now.
+  if (RETIRE) {
+    for (const [at, start] of Object.entries(retired.notes)) {
+      if (plantings.some(p => at === p.route || at.startsWith(`${p.route}/`))) sentences.push(`unfile on /${at}: ${start}`)
+    }
+  }
   for (const p of plantings) {
     if (p.top && p.node.note) sentences.push(`file on /${p.route}: ${noteFor(p.node)}`)
     for (const { tile, at } of p.layers) for (const child of tile.children) if (child.note) sentences.push(`file on /${at}/${child.name}: ${noteFor(child)}`)
