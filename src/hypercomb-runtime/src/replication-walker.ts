@@ -22,6 +22,9 @@
 
 import { SignatureService } from '@hypercomb/core'
 
+/** The key the walker is registered under. */
+export const WALKER_IOC_KEY = '@hypercomb.social/ReplicationWalker'
+
 export const SIGNATURE_RE = /^[a-f0-9]{64}$/
 
 const DEFAULT_LIMIT = 20_000
@@ -160,3 +163,11 @@ export const resolveInventory = async (
   }
   return result
 }
+
+// The ONE walker, lent to modules. Essentials cannot import the runtime, and a
+// second walker would be a second dialect (SQUEAKY CLEAN RULE above), so a
+// module that must pull a closure from somewhere other than a host — device
+// sync pulls it from a paired device — asks for this one by key.
+// The shell's registry (window.ioc) is the one every module reads; core's own
+// map is a different instance wherever core is loaded twice.
+;(globalThis as { ioc?: { register?: (key: string, value: unknown) => void } }).ioc?.register?.(WALKER_IOC_KEY, { resolveSignatureClosure, isComplete })

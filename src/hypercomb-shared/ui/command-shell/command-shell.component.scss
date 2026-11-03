@@ -1434,6 +1434,102 @@ $default-face: #c8b8ff;
   .shell-actions { touch-action: pan-x; }
 }
 
+// ── DESKTOP: THE LINE LIVES AT THE BOTTOM, THE ICONS STAY AT THE TOP ─────
+//
+// Everywhere but a phone the text box is docked to the bottom edge of the
+// screen and the header keeps only what is quick to reach and quiet to look at:
+// the icon rail at its right end, and — centred — the name of the tile under
+// the pointer (`.hover-title`; the line used to echo it after the caret).
+//
+// The box leaves the header's flow with `position: fixed` and stays where it
+// is in the DOM, so nothing about how it is mounted, focused or measured
+// changes. Fixed escapes the header's overflow clip the way `.command-intel`
+// already does. Only 0 and percentages are used for offsets: the header
+// carries a CSS `zoom`, and a zero or a percentage means the same thing in
+// zoomed and unzoomed units.
+//
+// The query is the complement of the two phone queries (narrow, or wide and
+// short) and is spelled again as DOCKED_BOTTOM_QUERY in command-shell.ts.
+//
+// Reserving the edge: controls-bar measures this box and publishes
+// `--hc-cmd-bottom` (its distance from the viewport's bottom), which the left
+// rail, the controls pill and the update notice stand on, and folds it into
+// `--hc-controls-bottom` for toasts and banners. A docked tool window keeps the
+// line clear of itself through `--hc-inset-left` / `--hc-inset-right`.
+@media (min-width: 600px) and (min-height: 450px) {
+  :host(:not(.is-embedded)) {
+    .command-bar {
+      // Only the rail is left in the row, so it takes the end of it.
+      justify-content: flex-end;
+    }
+
+    .command-shell {
+      position: fixed;
+      left: var(--hc-inset-left, 0px);
+      right: var(--hc-inset-right, 0px);
+      bottom: 0;
+      height: 2.2rem;
+      z-index: 60000;
+      border-top: 0.5px solid rgba(var(--hc-chrome-rule), 0.38);
+      transition: border-top-color var(--md-dur-medium, 200ms) var(--md-easing-standard, ease);
+
+      // The frost, on a pseudo-layer for the header's reason: `backdrop-filter`
+      // on the box itself would make it the containing block of the indicator
+      // roll-down, which is fixed and must mean the viewport.
+      &::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        background: rgba(var(--hc-chrome-glass), var(--hc-chrome-glass-a));
+        backdrop-filter: blur(14px) saturate(1.05);
+        pointer-events: none;
+      }
+
+      &:focus-within { border-top-color: rgba(var(--hc-chrome-rule-firm), 0.55); }
+
+      // The line on demand, at rest: no strip for a line that is not there.
+      &.collapsed {
+        border-top-color: transparent;
+        &::before { display: none; }
+      }
+    }
+
+    // THE NAME OF THE TILE UNDER THE POINTER, top and centre. The rail is at
+    // the right and the (empty) prompt column is gone from this row, so the
+    // middle of the header is free. The same warm hue the echo had — a name
+    // being read, off the blue axis of anything typed — set a little wider so
+    // it reads as a title. Never takes a pointer: it reports, it is not a
+    // control, and it must not sit between the pointer and the hive.
+    .hover-title {
+      position: fixed;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 60000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      height: 2.2rem;
+      max-width: min(40vw, 34rem);
+      padding: 0 0.6rem;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    .hover-title-text {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--hover-echo-color);
+      font: 500 0.95rem / 1 var(--terminal-font);
+      letter-spacing: 0.07em;
+    }
+  }
+}
+
 // ── EMBEDDED: this line is inside another surface ────────────────────────
 //
 // See the `embedded` input for why. Two things go, and only two: the icon
