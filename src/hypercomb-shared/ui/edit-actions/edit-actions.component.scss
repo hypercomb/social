@@ -26,7 +26,7 @@ $steel: rgb(126, 182, 214);
   // by viewport-inset-vars.ts.)
   right: calc(0.675rem + var(--hc-inset-right, 0px));
   // Above a band an overlay holds along the bottom (`--hc-band-bottom`).
-  bottom: calc(0.525rem + var(--hc-band-bottom, 0px) + var(--hc-cmd-bottom, 0px));
+  bottom: calc(0.525rem + var(--hc-band-bottom, 0px));
   z-index: 59995;
 
   // row-reverse pins UNDO (first child) at the fixed right edge, so it never

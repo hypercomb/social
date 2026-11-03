@@ -293,9 +293,7 @@ $actions-corner: 12rem;
   // A band an overlay holds along the bottom edge (the meeting's participants'
   // hive: its foot bar) lifts the strip above it (`--hc-band-bottom`, 0 when
   // no such band is open).
-  // The command line docked to the bottom (`--hc-cmd-bottom`, 0 when it is not)
-  // is a band like that one.
-  bottom: calc(0.45rem + var(--hc-band-bottom, 0px) + var(--hc-cmd-bottom, 0px));
+  bottom: calc(0.45rem + var(--hc-band-bottom, 0px));
   // BESIDE AN OPEN TOOLWINDOW, NOT UNDER IT. The strip is position:fixed
   // chrome like the breadcrumb and the undo/redo corner, so it reads the
   // reserved edges (core/viewport-inset-vars.ts) rather than the raw
@@ -490,9 +488,7 @@ $actions-corner: 12rem;
 
 .pill-stage {
   position: fixed;
-  // Stands on the command line when that is docked to the bottom edge
-  // (`--hc-cmd-bottom`, published by this component; 0 otherwise).
-  bottom: calc(0.6rem + var(--hc-band-bottom, 0px) + var(--hc-cmd-bottom, 0px));
+  bottom: calc(0.6rem + var(--hc-band-bottom, 0px));
   left: 50%;
   transform: translateX(-50%);
   z-index: 60000;
@@ -603,8 +599,7 @@ $actions-corner: 12rem;
   width: $rail-width;
   // clears the header bottom at any size: 2.8rem × the active header zoom
   top: var(--hc-header-anchor);
-  // …down to the command line when that is docked along the bottom edge.
-  bottom: var(--hc-cmd-bottom, 0px);
+  bottom: 0;
 
   // …EXCEPT when the header is not on screen at all. The gap at the top is
   // there to clear the header bar; with the bar gone the gap clears nothing

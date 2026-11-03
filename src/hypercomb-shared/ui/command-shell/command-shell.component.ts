@@ -46,10 +46,6 @@ const EMPTY_ALIASES: readonly string[] = Object.freeze([])
  *  string, not a signature: this is a settings key, not content. */
 const COMPLETION_WINDOW = 'command-intel'
 
-/** Where the line docks to the bottom edge: everything but a phone (narrow, or
- *  wide and short). The stylesheet's desktop block spells the same query. */
-const DOCKED_BOTTOM_QUERY = '(min-width: 600px) and (min-height: 450px)'
-
 @Component({
   selector: 'hc-command-shell',
   standalone: true,
@@ -135,9 +131,7 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
    *  pin the bar to the bottom), so the list is always on-screen. */
   #positionIntel(): void {
     const host = this.#host.nativeElement
-    // The text box itself, not `.command-bar`: docked to the bottom the bar is
-    // only the icon rail up at the top, and the list belongs to the line.
-    const bar = host.querySelector('.command-shell') as HTMLElement | null
+    const bar = host.querySelector('.command-bar') as HTMLElement | null
     const r = (bar ?? host).getBoundingClientRect()
     if (r.width === 0 && r.height === 0) return
     const vw = window.innerWidth || document.documentElement.clientWidth
@@ -721,16 +715,7 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
    * and the echo occupy the SAME column, and the two on top of each other are
    * unreadable. The prompt comes straight back when the pointer leaves.
    */
-  readonly effectivePlaceholder = computed(() =>
-    ((this.hoverEcho() && !this.dockedBottom()) || this.ghostSuffix()) ? '' : this.placeholder())
-
-  /**
-   * The line is docked to the bottom edge (desktop). Then the hovered tile's
-   * name is reported at the top centre instead of inside the line, so the echo
-   * no longer shares the prompt's column and the prompt stays put. The same
-   * query gates the dock in the stylesheet — keep the two in step.
-   */
-  readonly dockedBottom = signal(typeof matchMedia === 'function' && matchMedia(DOCKED_BOTTOM_QUERY).matches)
+  readonly effectivePlaceholder = computed(() => (this.hoverEcho() || this.ghostSuffix()) ? '' : this.placeholder())
 
   /**
    * The ONLY part of the ghost that is ever painted: what the completion adds
@@ -785,14 +770,9 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
     // Opening or resizing a tool window does not resize the viewport, and the
     // options pane is what that window would otherwise cover.
     const offInset = EffectBus.on('viewport:inset', () => reflow())
-    const dockQuery = typeof matchMedia === 'function' ? matchMedia(DOCKED_BOTTOM_QUERY) : null
-    const onDock = (): void => this.dockedBottom.set(!!dockQuery?.matches)
-    dockQuery?.addEventListener('change', onDock)
-    onDock()
     this.#reflowTeardown = (): void => {
       window.removeEventListener('resize', reflow)
       window.removeEventListener('scroll', reflow, true)
-      dockQuery?.removeEventListener('change', onDock)
       offInset()
     }
   }
