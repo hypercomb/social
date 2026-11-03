@@ -59,9 +59,20 @@ spawn.
 
 **On the home domain the right button goes back** (2026-10-24). In the
 reader's own hive — hypercomb.io, their own domain, localhost — a right-click
-on a site opens no menu: the back gesture answers it, and the site's
-registered way out is the exit button's, so it lands on the spawn (an arrival
-face navigates back instead). See `back-gesture.md`.
+on a site opens no menu: the back gesture answers it. See `back-gesture.md`.
+
+**Back walks the path you took** (2026-11-03, jwize: "the back button needs
+to walk the path you took ... when going back it doesn't exit the website
+except for the root"). Every page opened inside a site is a visit, the same
+as stepping into a tile, however the reader got there: a link, the menu, a
+word. Back — the right button, the browser's back, a phone's back, all
+through the back gesture — returns to the page before, one page per press,
+and stays in the website. Only back from the page the site was entered on
+leaves it, to the spawn. The site still moves the explorer with
+`explorerReplace`, so the browser's history does not grow; the path is kept
+by the view (`presentation/tiles/site-trail.ts`) for as long as the site is
+on screen, and a new site session starts with an empty one. The exit button,
+Escape and `/website off` still leave at once, from any page.
 
 **The right button is not an exit on a published website** (2026-10-22). On a
 published door a site reads like a website, so a right-click opens the

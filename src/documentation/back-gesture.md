@@ -36,14 +36,15 @@ On the **home domain** — the reader's own hive, whether it is served from
 hypercomb.io, a domain of their own, or localhost — a website is a surface
 like any other, and the right button **goes back** (jwize, 2026-10-24: "it is
 critical that back click inside hypercomb.io the navigation is used and not
-the context"). No menu opens. The site registers its way out under the owner
-`site-view`, the same call its exit button makes, live only while website mode
-is up (an entry whose `active()` holds answers EVERY right-click on rung 3, so
-a liveness that forgets the mode swallows the hexagons' own back). Rung 2
-answers: an
-ARRIVAL FACE navigates back, and a site the reader opened returns to the page
-and view that spawned it. Reading a site adds no history, so back leaves the
-site; it does not step between the site's pages.
+the context"). No menu opens. The site registers its way back under the owner
+`site-view`, live only while website mode is up (an entry whose `active()`
+holds answers EVERY right-click on rung 3, so a liveness that forgets the mode
+swallows the hexagons' own back). Rung 2 answers, and the site's entry is
+`exact`, so it decides for itself: **back walks the path the reader took
+through the site** (2026-11-03), one page per press, and only back from the
+page the site was entered on leaves it, to the page and view that spawned it.
+Reading a site adds no browser history; the site view keeps the path itself
+(`presentation/tiles/site-trail.ts`, `embedded-sites.md` → *Coming back out*).
 
 A **published** website is the one surface where the right button is NOT the
 way out (jwize, 2026-10-22: "they operate like they usually do on their side —

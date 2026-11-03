@@ -27,6 +27,7 @@ import { openExternalLink } from './document-view-links.js'
 import { scopeCellPageCss } from './cell-page-css-scope.js'
 import { hoistPageStylesheets, stylesheetsSettled } from './cell-page-stylesheets.js'
 import { HEXAGONS_SURFACE, sameSiteSegments, siteFlipTarget, siteFloorFor, type SiteSpawn } from './site-return.js'
+import { SiteTrail } from './site-trail.js'
 import { closeSiteContextMenu, isOnSiteContextMenu, openSiteContextMenu, type SiteMenuItem } from './site-context-menu.js'
 import { browserKeepsMenu, isLongPressMenu } from '../../navigation/browser-menu.js'
 import type { BackGesture } from '../../navigation/back-gesture.service.js'
@@ -197,6 +198,12 @@ export class SiteViewDrone extends Drone {
   /** Re-entrancy guard: leaving sets ViewMode a second time (hexagons → the
    *  spawning view) from inside the mode-change handler. */
   #restoringSpawn = false
+  /** The pages this site session has walked through, so back can walk them
+   *  in reverse (site-trail.ts). Empty on the page the site was entered on. */
+  readonly #trail = new SiteTrail()
+  /** The page a back press is walking to: arriving there is the walk, not a
+   *  new visit to remember. */
+  #returningTo: readonly string[] | null = null
 
   /**
    * Raw-DOM exit overlay — the GUARANTEED way out of website mode. It is
@@ -292,16 +299,17 @@ export class SiteViewDrone extends Drone {
       this.#globalContextMenuBound = true
     }
     if (!this.#backOff) {
-      // On the home domain the right button comes back out of the site the
-      // way the exit button does — the back gesture's ladder, so an ARRIVAL
-      // FACE navigates back and a site the reader opened returns to its
-      // spawn. Not on a published door: there the menu answers instead.
-      // Live only while website mode is up — an entry whose `active()` holds
-      // answers every right-click on the ladder's third rung.
+      // On the home domain back walks the path the reader took through the
+      // site, one page per press — the right button, the browser's back and a
+      // phone's back all reach it through the back gesture — and back from
+      // the page the site was entered on leaves it the way the exit button
+      // does: to its spawn. Not on a published door: there the menu answers
+      // instead. Live only while website mode is up — an entry whose
+      // `active()` holds answers every right-click on the ladder's third rung.
       const websiteUp = (): boolean => (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
         ?.get<{ mode: string }>('@hypercomb.social/ViewMode')?.mode === 'website'
       this.#backOff = window.ioc?.get<BackGesture>('@diamondcoreprocessor.com/BackGesture')
-        ?.register({ owner: 'site-view', back: () => this.#exitToHive(), exact: true, active: () => websiteUp() && !isPublishedVisitorShell() }) ?? null
+        ?.register({ owner: 'site-view', back: () => this.#back(), exact: true, active: () => websiteUp() && !isPublishedVisitorShell() }) ?? null
     }
     if (!this.#publishedRootBound) {
       // Last-value replay covers the boot order: the visit engine mounts the
@@ -372,6 +380,12 @@ export class SiteViewDrone extends Drone {
       // The menu was about the page that was up; a new page is a new
       // question. A change that leaves the page where it was keeps it.
       closeSiteContextMenu()
+      // Every page opened inside the site is a visit back can return to,
+      // however the reader got there (a link, the menu, a word); the page a
+      // back press walks to is the walk itself.
+      const returning = this.#returningTo !== null && sameSiteSegments(segments, this.#returningTo)
+      this.#returningTo = null
+      if (!returning && this.#siteEntrySegments !== null && this.#websiteUp()) this.#trail.left(this.#lastSegments, segments)
       this.#prevSegments = this.#lastSegments
       this.#lastSegments = segments
     }
@@ -386,6 +400,8 @@ export class SiteViewDrone extends Drone {
     if (vm?.mode === 'website') {
       if (this.#siteEntrySegments === null) this.#captureSiteEntry()
     } else {
+      this.#trail.clear()
+      this.#returningTo = null
       const spawn = this.#spawn
       const entry = this.#siteEntrySegments
       this.#siteEntrySegments = null
@@ -414,6 +430,7 @@ export class SiteViewDrone extends Drone {
     const lineage = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')
     const here = [...(lineage?.explorerSegments?.() ?? [])]
     this.#siteEntrySegments = siteFloorFor(here, this.#publishedRoot)
+    this.#trail.clear()
     const vm = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
       ?.get<{ previous?: string }>('@hypercomb.social/ViewMode')
     // The spawning PLACE starts as "right here"; a `view:arrival` verdict for
@@ -1161,6 +1178,20 @@ export class SiteViewDrone extends Drone {
    *  on the page they are reading and sees its hexagons. view.bee's arrival
    *  latch already holds this address, so the site's default mark does not
    *  reopen it under them. */
+  /** Back: the page the reader was on before this one, or, on the page the
+   *  site was entered on, out of the site to its spawn. */
+  #back(): void {
+    const previous = this.#trail.back()
+    if (!previous) { this.#exitToHive(); return }
+    this.#returningTo = previous
+    void this.#navigate(previous)
+  }
+
+  #websiteUp(): boolean {
+    return (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+      ?.get<{ mode: string }>('@hypercomb.social/ViewMode')?.mode === 'website'
+  }
+
   #exitToHive(peel = false): void {
     const ioc = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
     this.#peelHere = peel
@@ -1525,10 +1556,10 @@ export class SiteViewDrone extends Drone {
 
     const next = [...path]
 
-    // Reading a site is not tile navigation. Move the explorer in ONE step
-    // that REPLACES the history entry, so browsing a site never grows the
-    // browser back-stack — the whole session collapses back to where it stood
-    // when the site was opened (see Lineage.explorerReplace). The per-segment
+    // Move the explorer in ONE step that REPLACES the history entry, so
+    // browsing a site never grows the browser back-stack (see
+    // Lineage.explorerReplace). The path through the site is kept by the
+    // view itself (#trail), which is what back walks. The per-segment
     // enter/up walk stays as the fallback for a shell without it.
     if (typeof lineage.explorerReplace === 'function') {
       lineage.explorerReplace(next)
