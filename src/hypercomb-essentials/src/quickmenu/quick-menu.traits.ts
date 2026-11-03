@@ -65,9 +65,11 @@ function applyToSlot(slot: QuickMenuSlot, seats: TileSeats): QuickMenuSlot {
   if (fill?.children.length) return { ...slot, action: { kind: 'menu', menu: SEAT_MENU + fill.word } }
   const swapped = fill && !sameTraitWord(fill.runs, slot.label)
   const action: QuickMenuSlot['action'] = swapped ? { kind: 'command', command: fill.runs } : slot.action
+  // A tile's own automaton is that tile's: it runs on the tile it was raised over.
+  const base = swapped ? { ...slot, action, onTile: true } : { ...slot, action }
   // A pathway always opens on arrival: its job is to move the flower.
-  if (action.kind === 'menu' || !trigger) return { ...slot, action }
-  return { ...slot, action, activation: ACTIVATION[trigger] }
+  if (action.kind === 'menu' || !trigger) return base
+  return { ...base, activation: ACTIVATION[trigger] }
 }
 
 /** The flower a seat's own children make. `back` keeps its cell, so the children
@@ -82,6 +84,7 @@ export function seatMenu(name: string, seats: TileSeats, back: QuickMenuDirectio
     direction: cells[at],
     label: child,
     action: { kind: 'command', command: child },
+    onTile: true,
   }))
   return { name, title: word, contexts: [], slots }
 }

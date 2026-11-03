@@ -210,6 +210,12 @@ export interface QuickMenuSlot {
    * only closes the flower.
    */
   readonly activation?: 'release' | 'arrive' | 'hold' | 'click'
+  /**
+   * The verb acts on tiles, not on the surface. When it fires it is given its
+   * operands (quick-menu.operands.ts): the selection when the tile the menu was
+   * raised over is part of it, otherwise that tile alone.
+   */
+  readonly onTile?: boolean
 }
 
 export interface QuickMenuDefinition {
