@@ -1,6 +1,14 @@
 <!-- hypercomb-shared/ui/command-shell/command-shell.component.html -->
 
 <div class="command-bar">
+  <!-- THE HOVERED TILE'S NAME, top and centre of the screen. On desktop the
+       line is docked to the bottom edge, so the name it used to echo after the
+       caret is reported where the icons are instead: the header keeps the
+       rail, and the middle of it says what the pointer is on. Elsewhere the
+       echo stays in the line (below). -->
+  @if (hoverEcho() && dockedBottom()) {
+    <div class="hover-title" aria-hidden="true"><span class="hover-title-text">{{ hoverEcho() }}</span></div>
+  }
   <div class="command-shell" [class.collapsed]="collapsed()" [class.stance-command]="promptSigil() === 'slash'"
        [class.stance-find]="promptSigil() === 'question'"
        [class.stance-external]="promptSigil() === 'dollar'" (mousedown)="onShellMouseDown($event)">
@@ -109,7 +117,7 @@
              `.echo-pad` is the typed (or ghosted) text repeated invisibly:
              identical font and padding to the input, so the echo lands
              exactly at the caret's column without measuring anything. -->
-        @if (hoverEcho()) {
+        @if (hoverEcho() && !dockedBottom()) {
           <span class="hover-echo" aria-hidden="true"
             ><span class="echo-pad">{{ echoPad() }}</span
             ><span class="echo-name">({{ hoverEcho() }})</span></span>

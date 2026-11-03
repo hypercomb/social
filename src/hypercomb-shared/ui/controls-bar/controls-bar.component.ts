@@ -1045,6 +1045,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  re-measures the band. */
   #bandObserver: ResizeObserver | null = null
   #observedBand: readonly HTMLElement[] = []
+  /** The command line's text box, while the desktop dock holds it to the bottom
+   *  edge (command-shell.component.scss). Observed so it appearing, resizing or
+   *  leaving re-measures what stands on it. */
+  #cmdObserver: ResizeObserver | null = null
+  #observedCmd: HTMLElement | null = null
   // Pill stays anchored to the bottom of the viewport. We track the
   // distance from the top of the pill to the bottom of the viewport
   // (`fromBottom`) and recompute y on every window resize so the pill
@@ -1858,6 +1863,26 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
         this.#controlsObserver.observe(stage)
       }
     }
+    // THE COMMAND LINE IS A BOTTOM DOCK on desktop. Its distance from the
+    // viewport's bottom is published first and on its own (`--hc-cmd-bottom`):
+    // the rail, the pill and the update notice stand on it, so it has to be in
+    // place before the stage's offsetTop is read below. A phone keeps the line
+    // in the header's flow (`position` is not `fixed`), where it reserves nothing.
+    const cmd = document.querySelector('.header-bar .command-shell') as HTMLElement | null
+    if (cmd !== this.#observedCmd) {
+      this.#cmdObserver?.disconnect()
+      this.#cmdObserver = null
+      this.#observedCmd = cmd
+      if (cmd && typeof ResizeObserver !== 'undefined') {
+        this.#cmdObserver = new ResizeObserver(this.#measureControlsEdge)
+        this.#cmdObserver.observe(cmd)
+      }
+    }
+    const cmdBottom = cmd && cmd.offsetHeight > 0 && getComputedStyle(cmd).position === 'fixed'
+      ? Math.max(0, window.innerHeight - cmd.getBoundingClientRect().top)
+      : 0
+    document.documentElement.style.setProperty('--hc-cmd-bottom', `${Math.round(cmdBottom)}px`)
+
     const side = this.#dockSide()
     let left = 0
     let right = 0
@@ -1942,6 +1967,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     for (const member of this.#bottomBand()) {
       if (member.offsetHeight > 0) bottom = Math.max(bottom, window.innerHeight - member.getBoundingClientRect().top)
     }
+    // …and the line docked under everything is the floor of that reservation.
+    bottom = Math.max(bottom, cmdBottom)
     root.style.setProperty('--hc-controls-left', `${Math.round(left)}px`)
     root.style.setProperty('--hc-controls-right', `${Math.round(right)}px`)
     root.style.setProperty('--hc-controls-bottom', `${Math.round(bottom)}px`)
@@ -2187,6 +2214,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#headerObserver?.disconnect()
     this.#controlsObserver?.disconnect()
     this.#bandObserver?.disconnect()
+    this.#cmdObserver?.disconnect()
+    document.documentElement.style.removeProperty('--hc-cmd-bottom')
     this.#tagFloatObserver?.disconnect()
     document.documentElement.style.removeProperty('--hc-tag-float-top')
     window.removeEventListener('resize', this.#measureControlsEdge)
