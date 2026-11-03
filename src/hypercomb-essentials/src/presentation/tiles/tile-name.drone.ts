@@ -47,7 +47,7 @@ type BandRowsPayload = { rows: number; label: string | null }
 type HoverPayload = { label: string | null }
 /** What a dive's name needs (show-cell's DiveCell). */
 type DiveNameCell = { q: number; r: number; label: string; hideText?: boolean }
-type FlowerCell = Axial & { label: string; subject?: boolean; icon?: string; lit?: boolean }
+type FlowerCell = Axial & { label: string; subject?: boolean; icon?: string; lit?: boolean; note?: string }
 type ShowCellLike = {
   nameHidden(label: string): boolean
   displayNameFor(label: string): string
@@ -122,6 +122,7 @@ const STYLE = `
 .hc-tile-names.hc-diving .hc-tile-names-world>span:not(.hc-dive-name){display:none}
 .hc-tile-names.hc-flower-up .hc-tile-names-world>span{opacity:.5}
 .hc-tile-names.hc-flower-up .hc-tile-names-world>span.hc-flower-name{opacity:1}
+.hc-flower-note{flex:none;margin-left:.45em;font-size:.6em;letter-spacing:0;color:var(--hc-accent,#d9a441)}
 .hc-flower-icon{font-size:2.4em;line-height:1;opacity:.82}
 .hc-flower-icon.lit{opacity:1;color:var(--hc-accent,#d9a441)}
 `
@@ -328,14 +329,25 @@ export class TileNameDrone extends Drone {
     this.#root?.classList.toggle('hc-flower-up', cells.length > 0)
     const sc = this.#showCell()
     for (const cell of cells) {
-      if (cell.subject && sc?.nameHidden(cell.label)) continue
+      // A name the tile keeps to itself stays unwritten, but the note says how
+      // many tiles the menu speaks for and must always be read.
+      const nameless = !!cell.subject && !!sc?.nameHidden(cell.label)
+      if (nameless && !cell.note) continue
       const span = document.createElement('span')
       span.className = 'hc-flower-name'
-      const name = document.createElement('span')
-      name.className = 'hc-tile-name-text'
-      name.textContent = cell.icon ?? (cell.subject ? sc?.displayNameFor(cell.label) ?? cell.label : cell.label)
-      if (cell.icon) name.className = cell.lit ? 'hc-flower-icon mat-sym lit' : 'hc-flower-icon mat-sym'
-      span.appendChild(name)
+      if (!nameless) {
+        const name = document.createElement('span')
+        name.className = 'hc-tile-name-text'
+        name.textContent = cell.icon ?? (cell.subject ? sc?.displayNameFor(cell.label) ?? cell.label : cell.label)
+        if (cell.icon) name.className = cell.lit ? 'hc-flower-icon mat-sym lit' : 'hc-flower-icon mat-sym'
+        span.appendChild(name)
+      }
+      if (cell.note) {
+        const note = document.createElement('span')
+        note.className = 'hc-flower-note'
+        note.textContent = cell.note
+        span.appendChild(note)
+      }
       const px = this.#axialToPixel(cell.q, cell.r)
       const at = this.#placement(px.x + this.#meshOffset.x, px.y + this.#meshOffset.y)
       span.style.maxWidth = at.maxWidth

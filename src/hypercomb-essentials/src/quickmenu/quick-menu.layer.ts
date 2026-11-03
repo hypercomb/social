@@ -11,6 +11,7 @@ import { EffectBus } from '@hypercomb/core'
 import { Container, Graphics, Point, Text, TextStyle, type Application } from 'pixi.js'
 import { containerScreenScale, screenTextResolution } from '../presentation/grid/screen-text-resolution.js'
 import { DEFAULT_HEX_GEOMETRY, type HexGeometry } from '../presentation/grid/hex-geometry.js'
+import { currentOperands, operandNote } from './quick-menu.operands.js'
 import {
   cellUnit,
   menuMetrics,
@@ -55,6 +56,8 @@ export type FlowerCell = {
   /** This is the tile being worked on, wearing its own look. */
   subject?: boolean
   lit?: boolean
+  /** Worn beside the name: how many other tiles the verbs here will reach. */
+  note?: string
   /** A Material Symbols glyph worn in place of the name. */
   icon?: string
 }
@@ -212,7 +215,12 @@ export class QuickMenuLayer {
     const cellAt = (x: number, y: number) =>
       pixelToAxial(x - this.#offset.x, y - this.#offset.y, this.#geo.spacing, this.#flat)
     const cells: FlowerCell[] = []
-    if (this.#subject) cells.push({ ...cellAt(at.x, at.y), label: this.#subject, subject: true, lit: this.#cueCentre })
+    // The tile wears how many it speaks for, so a verb on the ring never
+    // reads as acting on this tile alone when it will reach the rest of the set.
+    if (this.#subject) {
+      const note = operandNote(this.#subject, currentOperands(this.#subject))
+      cells.push({ ...cellAt(at.x, at.y), label: this.#subject, subject: true, lit: this.#cueCentre, ...(note ? { note } : {}) })
+    }
     const { reach, flat } = this.#metrics()
     for (const direction of QUICK_MENU_RING) {
       const slot = this.#byDirection.get(direction)
