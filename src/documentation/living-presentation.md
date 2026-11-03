@@ -752,6 +752,46 @@ replant"); the tree lives in `scripts/bridge/living-presentation/tree.cjs`.
   component fills each (`scripts/bridge/living-presentation/blocks/`;
   `plant.cjs --blocks` writes them through the hive's tile-files door).
 
+### The tour is the standard
+
+jwize, 2026-11-03: "use the initial presentation as the standard", "make
+sure we aren't redundant". The narrated tour (`scripts/presentation`,
+hypercomb.com/tour/) sets the words, the voice, the figures and the look of
+every page, and its 25 scenes are folded into the tiles they explain:
+
+- **A scene tile shows its scene, and only its scene.** Its headline, its
+  figure (the tour's own plate, clip, badges, list or road), its narration as
+  the caption, and its recorded voice. The tile's block adds only what the
+  scene does not say: pictures from a running hive, a part to try, the source
+  it explains. `blocks/tour.cjs` holds the mapping (every scene on exactly one
+  tile; `presentation` carries the opening, scenes 1 and 2, and the road
+  ahead, 20 to 25, with the six values between), and `blocks/build.cjs`
+  refuses a scene tile whose block would say a headline or narration again.
+- **A tile no scene explains speaks the same way.** An eyebrow, a headline
+  with one honey word, a plate drawn in the tour's plate language (960 by
+  400, tokens only, `blocks/plates/`), and beats that light the plate's parts
+  as they are said. `blocks/narrate.cjs` voices the beats through the tour's
+  one voice path; until then a beat holds for its reading time.
+- **One look.** The tour's ink and honey, its two vendored faces, its icon
+  sprite. Dark as the tour is; light only where the hive says so explicitly.
+  Every size reads from the column's width, so a page is the same page
+  standing alone and mounted in the hive.
+- **Every medium by its signature.** The voice, the clips, the faces and the
+  captured pictures are named `resource:<sig>` (the SHA-256 of the bytes):
+  stored once in the hive however many pages name them, rewritten by the
+  website view to `/@resource/<sig>`, and carried by the publish closure.
+  `plant.cjs --blocks` serves them on 127.0.0.1 while its console snippet
+  stores each one and checks the hive named it the same, before any page is
+  dressed.
+- **Pictures from the hive.** `blocks/captures/` holds pictures taken in a
+  running hive, shown on a page under "In the hive" with what they show.
+- **Checked.** `blocks/check.cjs` fails on a scene placed twice or said on
+  two pages, a page that asks another host for anything, a medium whose bytes
+  are not its name, or a link no page answers; `--render` also opens every
+  page at 1280 and 390 pixels and fails on a script error, a page wider than
+  a phone, or plate text outside its frame. `blocks/preview.cjs <dir>` writes
+  the pages as plain files to look at outside the hive.
+
 ## Every piece of the presentation is a tile
 
 Every element you see on screen is its own tile in the hive. A server is a

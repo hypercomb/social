@@ -93,27 +93,50 @@ const EVERY_ROOT = ALL && !named
 const SAY = path.join(__dirname, '..', 'say.cjs')
 
 if (args.includes('--blocks')) {
-  // Pages and files, not sentences: one console snippet, written to a file
-  // (OS temp unless --out names one), since it is long.
+  // Pages, files and media, not sentences: one console snippet, written to a
+  // file (OS temp unless --out names one), since it is long.
+  //
+  // The media (the voice, the clips, the faces, the captured pictures) are
+  // too large to paste, so this serves them on 127.0.0.1 while the snippet
+  // runs (the hive's connect-src allows it): the snippet GETs each by its
+  // signature, skips any the hive already holds, stores the rest, and checks
+  // that the hive named each one by the same signature before a single page
+  // is dressed. --port <n> picks the port (default 4271).
   const fs = require('fs')
   const os = require('os')
+  const http = require('http')
   const { buildBlocks } = require('./blocks/build.cjs')
   const under = named ? route : ''
-  const blocks = buildBlocks({ under })
-  if (!blocks.length) { console.error(`no block content under /${under || '(everything)'} yet (blocks/content.cjs)`); process.exit(2) }
+  const { blocks, media } = buildBlocks({ under })
+  if (!blocks.length) { console.error(`no pages under /${under || '(everything)'} yet (blocks/content.cjs, blocks/tour.cjs)`); process.exit(2) }
+  const PORT = Number(valueOf('--port') || 4271)
+  const SERVE = `http://127.0.0.1:${PORT}`
   const out = valueOf('--out') || path.join(os.tmpdir(), `living-blocks-${Date.now()}.js`)
   const snippet = `// Paste into the hive tab's console (F12 → Console), then press Enter on the
-// hive's command line when it asks. ${blocks.length} pages and their files.
+// hive's command line when it asks. ${blocks.length} pages, their files, and ${media.length} media.
 (async () => {
   const ioc = globalThis.ioc
   const bus = globalThis.__hypercombEffectBus
   const store = ioc?.get?.('@hypercomb.social/Store')
   const door = ioc?.get?.('@diamondcoreprocessor.com/TileFilesDrone')
   if (!bus || !store?.putResource || !door?.write) { console.error('Open this in the hive tab: the hive is not here.'); return }
+  // 1. The media, each by its signature, before any page names it.
+  const media = ${JSON.stringify(media.map(m => ({ sig: m.sig, name: m.name, type: m.type })))}
+  let kept = 0, stored = 0
+  for (const m of media) {
+    if (await store.getResourceLocal?.(m.sig)) { kept++; continue }
+    const res = await fetch('${SERVE}/' + m.sig).catch(e => ({ ok: false, statusText: e.message }))
+    if (!res.ok) { console.error('Could not fetch ' + m.name + ' (' + res.statusText + '): is plant.cjs --blocks still running?'); return }
+    const sig = await store.putResource(new Blob([await res.arrayBuffer()], { type: m.type }))
+    if (sig !== m.sig) { console.error(m.name + ' arrived as ' + sig + ', not ' + m.sig + '. Nothing was dressed.'); return }
+    stored++
+  }
+  console.log('Media: ' + stored + ' stored, ' + kept + ' already here.')
+  fetch('${SERVE}/done', { method: 'POST' }).catch(() => {})
   // Each file's text once, however many tiles carry it.
   const texts = ${JSON.stringify(Object.fromEntries(blocks.flatMap(b => b.files.map(f => [f.path, f.text]))))}
   const blocks = ${JSON.stringify(blocks.map(b => ({ route: b.route, page: b.page, files: b.files.map(f => ({ name: f.name, path: f.path })) })))}
-  // 1. Each page's bytes into the hive (nothing is dressed yet), and each
+  // 2. Each page's bytes into the hive (nothing is dressed yet), and each
   //    tile's included files onto it.
   const lines = []
   let files = 0, failed = 0
@@ -132,7 +155,7 @@ if (args.includes('--blocks')) {
   // the website view back to hexagons). \`h\` is hexagons for one visit.
   for (const top of ${JSON.stringify([...new Set(blocks.map(b => b.route[0]))])}) lines.push('go /', 'opens ' + top + ' as website')
   console.log('Files: ' + files + ' written, ' + failed + ' failed.')
-  // 2. Dressing each tile with its page is YOUR word, website page <sig>: the
+  // 3. Dressing each tile with its page is YOUR word, website page <sig>: the
   //    lines wait on the command line, and Enter says them all.
   const outcome = await new Promise(resolve => bus.emitTransient('external:call', {
     from: 'living-blocks', lines, accept: () => {}, complete: resolve,
@@ -145,11 +168,30 @@ if (args.includes('--blocks')) {
 `
   fs.writeFileSync(out, snippet, 'utf8')
   const files = blocks.reduce((n, b) => n + b.files.length, 0)
-  console.log(`${blocks.length} blocks (${blocks.map(b => b.route.at(-1)).join(', ')}) and ${files} files.`)
+  const mb = (media.reduce((n, m) => n + m.size, 0) / 1e6).toFixed(1)
+  console.log(`${blocks.length} pages, ${files} files, ${media.length} media (${mb} MB).`)
   console.log(`Console snippet: ${out}`)
-  console.log('Open the hive tab, press F12 → Console, paste the file\'s contents, press Enter;')
-  console.log('then press Enter on the hive\'s command line to give each tile its page.')
-  process.exit(0)
+  if (args.includes('--no-serve')) process.exit(0)
+  const bySig = new Map(media.map(m => [m.sig, m]))
+  const server = http.createServer((req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    if (req.method === 'POST' && req.url === '/done') {
+      res.end('ok')
+      console.log('The hive has every medium; the snippet goes on to the pages. Stopping the media server.')
+      setTimeout(() => server.close(() => process.exit(0)), 200)
+      return
+    }
+    const m = bySig.get(String(req.url).slice(1))
+    if (req.method !== 'GET' || !m) { res.statusCode = 404; res.end('not one of the pages\' media'); return }
+    res.setHeader('Content-Type', m.type)
+    fs.createReadStream(m.path).pipe(res)
+  })
+  server.listen(PORT, '127.0.0.1', () => {
+    console.log(`Serving the media on ${SERVE} until the snippet has them (Ctrl+C to stop).`)
+    console.log('Open the hive tab, press F12 → Console, paste the file\'s contents, press Enter;')
+    console.log('then press Enter on the hive\'s command line to give each tile its page.')
+  })
+  return
 }
 
 if (PUBLISH_ONLY && !DOMAINS.length) { console.error('--publish-only needs --publish <domain>'); process.exit(2) }
