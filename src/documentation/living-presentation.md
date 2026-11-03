@@ -752,6 +752,53 @@ replant"); the tree lives in `scripts/bridge/living-presentation/tree.cjs`.
   component fills each (`scripts/bridge/living-presentation/blocks/`;
   `plant.cjs --blocks` writes them through the hive's tile-files door).
 
+### The pages: the narrated tour is the standard
+
+Decided 2026-11-03 (jwize: "use the initial presentation as the standard",
+"make sure we aren't redundant", "make the picture worth a trillion words").
+The narrated tour (`scripts/presentation`, hypercomb.com/tour/) sets the
+words, the voice, the figures and the look of every page.
+
+- **A tile a scene explains shows that scene, and only that.** Each of the
+  tour's 25 scenes lands on one tile already in the tree (`blocks/tour.cjs`
+  holds the mapping, and every scene is placed exactly once). The page shows
+  the scene's own eyebrow, headline, figure, narration and recorded voice. The
+  tile's block may add only what the scene does not say: pictures from a
+  running hive, a part to try, the source, the documents. `build.cjs` refuses
+  a block that would say the headline or narration a second time.
+- **A tile no scene explains speaks in the tour's voice.** Its block has an
+  eyebrow, a headline with one word in emphasis, one sentence under the
+  figure, and beats. Its figure is a plate drawn by hand in the tour's plate
+  language (`blocks/plates/`, on `scripts/presentation/plates/lib.cjs`): the
+  960×400 frame, the hexagon, tokens only, and every part a beat lights is a
+  group with a `data-id`.
+- **Every beat is voiced the tour's way.** `blocks/narrate.cjs` records each
+  beat with the tour's voice into the tour's own cache
+  (`scripts/presentation/audio-cache`), and a page picks the voice up by
+  itself. A beat with no voice yet holds for its reading time.
+- **Pictures from a running hive.** A page's "In the hive" part shows the hive
+  doing the thing the page explains (`blocks/captures/`). `blocks/captures.cjs`
+  stages the shots a sentence can show: it opens Edge on the dev hive in a
+  profile of its own (never a second tab on a hive in use, and never the
+  bridge), plants the tree, and takes layout on and off, a waiting trait, help
+  in Japanese, and an agent's lines waiting for Enter. The pictures of a
+  lived-in hive (picture tiles, a layer, a website, the tile editor, chat,
+  a long history, the tutorials) were taken by hand in the author's own hive.
+- **Every medium is named by its signature.** The voice, the clips, the faces
+  and the pictures are written into a page as `resource:<sig>`. The website
+  view rewrites that to `/@resource/<sig>`, and the publish closure carries it
+  to a host. `plant.cjs --blocks` stores every medium, and checks that each one
+  lands under the signature its pages name it by, before any tile is given
+  its page.
+- **Looked at outside the hive.** `blocks/preview.cjs <out-dir>` writes every
+  page as plain files beside its media, with links between them. The out-dir
+  belongs in the OS temp directory.
+- **Checked before planting.** `blocks/blocks.spec.ts` runs with the suite. It
+  checks that every page loads nothing from another host, every medium a page
+  names travels with it, every link lands on a page, every plate stays inside
+  its frame, every beat has its voice, and every picture in `captures/` is on
+  a page.
+
 ## Every piece of the presentation is a tile
 
 Every element you see on screen is its own tile in the hive. A server is a

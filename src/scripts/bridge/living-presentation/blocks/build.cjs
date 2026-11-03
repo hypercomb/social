@@ -93,10 +93,10 @@ const sizeOf = (file) => {
   throw new Error(`not a PNG or WebP: ${file}`)
 }
 
-/** A capture: a picture taken in a running hive (captures.cjs), by name. */
+/** A capture: a picture taken in a running hive (blocks/captures/), by name. */
 const liveOf = (shots, media) => (shots || []).map(l => {
   const file = ['webp', 'png'].map(x => path.join(CAPTURES, `${l.shot}.${x}`)).find(f => fs.existsSync(f))
-  if (!file) throw new Error(`capture ${l.shot} is missing — node scripts/bridge/living-presentation/blocks/captures.cjs ${l.shot}`)
+  if (!file) throw new Error(`capture ${l.shot} is missing from blocks/captures/ (captures.cjs --list names the ones it stages; the rest are taken by hand in a hive)`)
   return { ...sizeOf(file), src: media.ref(media.add(file)), title: l.title, caption: l.caption, alt: l.alt || l.caption || l.title }
 })
 

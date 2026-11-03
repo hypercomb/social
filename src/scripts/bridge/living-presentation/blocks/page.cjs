@@ -112,7 +112,7 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .fz{width:100%;display:grid;justify-items:center}
 
 /* the tour's figures */
-.figbox{display:grid;row-gap:6px;width:100%;justify-items:start}
+.figbox{display:grid;grid-template-columns:minmax(0,1fr);row-gap:6px;width:100%;justify-items:start}
 .fig.film,.fig.plate,.fig.shot{width:100%;aspect-ratio:var(--ratio);border:1px solid var(--line-strong);border-radius:var(--r-card);
   overflow:hidden;background:var(--panel);box-shadow:var(--shadow)}
 .fig.film video,.fig.shot img{display:block;width:100%;height:100%;object-fit:cover;background:#111419}
@@ -210,9 +210,10 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .part-head h2{margin:0;font-family:var(--mono);font-weight:400;font-size:12px;letter-spacing:var(--track-label);text-transform:uppercase;color:var(--honey-deep)}
 .part-head::after{content:"";flex:1;height:1px;background:var(--line);align-self:center}
 .live,.try,.ways,.code{margin-top:clamp(52px,8cqi,88px)}
-.live .grid{display:grid;gap:clamp(22px,3.4cqi,34px)}
-.live .grid.two{grid-template-columns:1fr 1fr}
-.live figure{margin:0}
+/* minmax(0,…): a caption line never widens a track past the column */
+.live .grid{display:grid;grid-template-columns:minmax(0,1fr);gap:clamp(22px,3.4cqi,34px)}
+.live .grid.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.live figure{margin:0;min-width:0}
 .live figure p{margin:10px 0 0;color:var(--dim);font-size:15px;line-height:1.5;max-width:70ch}
 
 .try .box{border:1px solid var(--line);border-radius:var(--r-card);background:var(--panel);padding:18px}
@@ -246,7 +247,7 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .code pre{margin:0;padding:14px;overflow-x:auto;font:13px/1.55 var(--mono);color:var(--ink);tab-size:2}
 
 @container (max-width:620px){
-  .live .grid.two{grid-template-columns:1fr}
+  .live .grid.two{grid-template-columns:minmax(0,1fr)}
   .lay{grid-template-columns:1fr;row-gap:2px;font-size:12px}
   .lay>span:last-child{text-align:left}
   .ways .row{grid-template-columns:1fr auto;row-gap:4px}
