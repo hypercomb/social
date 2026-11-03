@@ -472,4 +472,185 @@ module.exports = {
     files: ['documentation/community-translations.md', 'documentation/cell-localization.md'],
   },
 
+  // ── the rest of simple, and organized ─────────────────────────────────
+
+  'presentation/simple/act': {
+    title: 'The one act',
+    lede: 'Take a word, find its current layer, and read its children. A person clicking and an agent speaking do the same thing.',
+    picture: {
+      label: 'A word, its address, its heart, and its children, in one chain',
+      nodes: [
+        { id: 'word', label: 'simple', sub: 'a word', kind: 'box', x: 85, y: 180, w: 110 },
+        { id: 'sig', label: 'address', sub: 'its signature', kind: 'box', x: 250, y: 180, w: 120 },
+        { id: 'heart', label: 'heart', sub: 'current layer', kind: 'box', x: 410, y: 180, w: 120 },
+        { id: 'kids', label: 'children', sub: 'under it', kind: 'box', x: 555, y: 180, w: 110 },
+        { id: 'click', label: 'a click', x: 170, y: 300, r: 34 },
+        { id: 'say', label: 'a sentence', x: 470, y: 300, r: 34 },
+      ],
+      edges: [['word', 'sig'], ['sig', 'heart'], ['heart', 'kids'], ['click', 'word'], ['say', 'word']],
+    },
+    beats: [
+      { say: 'Every step into Hypercomb is one act, and only one.', lit: ['word'] },
+      { say: 'Take a word, and sign it: that is its address.', lit: ['word', 'sig', 'word-sig'] },
+      { say: 'The address gives its heart: the current version of its layer.', lit: ['sig', 'heart', 'sig-heart'] },
+      { say: 'The heart names its children, and each child is a word again.', lit: ['heart', 'kids', 'heart-kids'] },
+      { say: 'A person clicking and an agent speaking take the very same steps.', lit: ['click', 'say', 'word', 'click-word', 'say-word'] },
+    ],
+    code: [
+      { path: 'hypercomb-core/src/core/molecule-address.ts', from: 'export const moleculeAddress', lines: 5 },
+      { path: 'hypercomb-essentials/src/history/history.service.ts', from: '  public readonly currentLayerAt = async (', lines: 4 },
+    ],
+    files: ['documentation/the-algorithm-is-the-application.md', 'documentation/speak-dont-bridge.md', 'hypercomb-core/src/core/molecule-address.ts'],
+  },
+
+  'presentation/organized/heart': {
+    title: 'Heart',
+    lede: 'A tile\'s current layer: the newest of its versions. Every change moves the heart forward.',
+    picture: {
+      label: 'A tile\'s markers, the newest one being the heart',
+      nodes: [
+        { id: 'm0', label: '00000000', kind: 'box', x: 200, y: 300, w: 150 },
+        { id: 'm1', label: '00000001', kind: 'box', x: 200, y: 220, w: 150 },
+        { id: 'm2', label: '00000002', kind: 'box', x: 200, y: 140, w: 150 },
+        { id: 'heart', label: 'heart', sub: 'newest marker', x: 450, y: 140, r: 44 },
+        { id: 'read', label: 'read · publish · update', kind: 'box', x: 450, y: 290, w: 200 },
+      ],
+      edges: [['m2', 'heart'], ['heart', 'read']],
+    },
+    beats: [
+      { say: 'A tile keeps every version as a marker, numbered upward.', lit: ['m0', 'm1', 'm2'] },
+      { say: 'The newest marker is the heart: the layer that answers now.', lit: ['m2', 'heart', 'm2-heart'] },
+      { say: 'Reading lands on it, publishing points at it, and an update notice compares it.', lit: ['heart', 'read', 'heart-read'] },
+      { say: 'A change adds a marker on top, and the heart moves up to it. That is the heartbeat.', lit: ['m2', 'heart', 'm2-heart'] },
+      { say: 'It needs nothing new: it is simply the newest marker.', lit: ['heart'] },
+    ],
+    code: [{ path: 'hypercomb-essentials/src/history/history.service.ts', from: ' * One history entry.', lines: 9 }],
+    files: ['documentation/history-sigbag-as-root.md', 'documentation/revision-mode.md'],
+  },
+
+  'presentation/organized/history': {
+    title: 'History',
+    lede: 'Every version is kept, one above the other. Undo and restore move forward; nothing is deleted.',
+    picture: {
+      label: 'Versions kept in a list; undo walks it, a restore adds a new version',
+      nodes: [
+        { id: 'a', label: 'v1', kind: 'box', x: 110, y: 120, w: 90 },
+        { id: 'b', label: 'v2', kind: 'box', x: 250, y: 120, w: 90 },
+        { id: 'c', label: 'v3', kind: 'box', x: 390, y: 120, w: 90 },
+        { id: 'd', label: 'v4 = v2', sub: 'restored', kind: 'box', x: 530, y: 120, w: 110 },
+        { id: 'undo', label: 'undo', sub: 'walks back', x: 250, y: 290, r: 40 },
+        { id: 'snap', label: 'snapshot', sub: 'a name for a moment', x: 470, y: 290, r: 46 },
+      ],
+      edges: [['a', 'b'], ['b', 'c'], ['c', 'd'], ['undo', 'b'], ['snap', 'd']],
+    },
+    beats: [
+      { say: 'Every change you make is a new version, added after the last.', lit: ['a', 'b', 'c', 'a-b', 'b-c'] },
+      { say: 'Undo walks back along the list. Every version is still there to walk to.', lit: ['undo', 'b', 'undo-b'] },
+      { say: 'Going back is itself a step forward: the old version is written again, on top.', lit: ['c', 'd', 'c-d'] },
+      { say: 'A snapshot gives a moment a name you can come back to.', lit: ['snap', 'd', 'snap-d'] },
+      { say: 'Nothing is deleted, so nothing is ever lost.', lit: ['a', 'b', 'c', 'd', 'a-b', 'b-c', 'c-d'] },
+    ],
+    code: [{ path: 'hypercomb-essentials/src/history/history-cursor.service.ts', from: '// Layer-based history cursor.', lines: 6 }],
+    files: ['documentation/universal-history-plan.md', 'documentation/hive-snapshots.md', 'documentation/revision-mode.md'],
+  },
+
+  'presentation/organized/build': {
+    title: 'Build',
+    lede: 'A piece of work is sealed as one build, with a name you can return to.',
+    picture: {
+      label: 'A pass of work sealed as one named build, which can be returned to',
+      nodes: [
+        { id: 'work', label: 'a pass of work', sub: 'many changes', kind: 'box', x: 130, y: 180, w: 170 },
+        { id: 'build', label: 'builds', sub: 'one name', x: 330, y: 180, r: 44 },
+        { id: 'named', label: 'opening-v2', sub: 'sealed', kind: 'box', x: 530, y: 110, w: 150 },
+        { id: 'revert', label: 'builds revert', sub: 'live again', kind: 'box', x: 530, y: 260, w: 150 },
+      ],
+      edges: [['work', 'build'], ['build', 'named'], ['named', 'revert']],
+    },
+    beats: [
+      { say: 'Working on a branch makes many small changes.', lit: ['work'] },
+      { say: 'Saying builds with a name seals the whole branch as one build.', lit: ['work', 'build', 'named', 'work-build', 'build-named'] },
+      { say: 'Sealing an unchanged branch changes nothing; the same build has the same name.', lit: ['named'] },
+      { say: 'Builds revert makes an old build live again, as a new step: nothing rewinds.', lit: ['named', 'revert', 'named-revert'] },
+    ],
+    code: [{ path: 'hypercomb-essentials/src/commands/builds.queen.ts', from: '  async #record(label: string): Promise<void> {', lines: 12 }],
+    files: ['documentation/build-revisions.md', 'documentation/publishing-a-revision.md', 'hypercomb-essentials/src/commands/builds.queen.ts'],
+  },
+
+  'presentation/organized/layout': {
+    title: 'Layout',
+    lede: 'A layout decides what shows. A child left out is hidden, never deleted.',
+    picture: {
+      label: 'A layout naming three of four children, in order; the fourth left out',
+      nodes: [
+        { id: 'layout', label: 'layout', sub: 'a list of words', kind: 'box', x: 320, y: 70, w: 190 },
+        { id: 'a', label: 'primitive', sub: 'seat 0', x: 130, y: 230, r: 40 },
+        { id: 'b', label: 'act', sub: 'seat 1', x: 270, y: 230, r: 40 },
+        { id: 'c', label: 'opening', sub: 'seat 2', x: 410, y: 230, r: 40 },
+        { id: 'x', label: 'extra', sub: 'left out', x: 550, y: 230, r: 40 },
+      ],
+      edges: [['layout', 'a'], ['layout', 'b'], ['layout', 'c']],
+    },
+    beats: [
+      { say: 'A layout is a list of the words a layer shows, in order.', lit: ['layout'] },
+      { say: 'The children those words name are shown, and seated in that order.', lit: ['layout', 'a', 'b', 'c', 'layout-a', 'layout-b', 'layout-c'] },
+      { say: 'Anything else stays where it is, untouched. It is only left out.', lit: ['x'] },
+      { say: 'Every layout is a version of the layer, so changing it can be undone.', lit: ['layout'] },
+      { say: 'And one layout can be given to many tiles, by its signature: layout from another tile.', lit: ['layout', 'a', 'b', 'c', 'layout-a', 'layout-b', 'layout-c'] },
+    ],
+    code: [{ path: 'hypercomb-essentials/src/commands/layout.ts', from: 'export function layoutSeats', lines: 9 }],
+    files: ['documentation/layout-templates.md', 'documentation/template-addressing.md', 'hypercomb-essentials/src/commands/layout.ts', 'hypercomb-essentials/src/commands/layout.queen.ts'],
+  },
+
+  'presentation/organized/trait': {
+    title: 'Trait',
+    lede: 'A trait is a place a tile leaves open, waiting for whatever fills it.',
+    picture: {
+      label: 'A tile with open traits, one filled by a child, one by a choice, one still waiting',
+      nodes: [
+        { id: 'tile', label: 'card', sub: 'a creation', x: 320, y: 80, r: 44 },
+        { id: 'portrait', label: 'portrait', sub: 'a child fills it', x: 140, y: 260, r: 42 },
+        { id: 'tagline', label: 'tagline', sub: 'your choice', x: 320, y: 260, r: 42 },
+        { id: 'contact', label: 'contact', sub: 'waiting', x: 500, y: 260, r: 42 },
+      ],
+      edges: [['tile', 'portrait'], ['tile', 'tagline'], ['tile', 'contact']],
+    },
+    beats: [
+      { say: 'A trait is a word a tile leaves open: a place for something to go.', lit: ['tile'] },
+      { say: 'A child with that name fills it.', lit: ['tile', 'portrait', 'tile-portrait'] },
+      { say: 'Or you choose a filler from anywhere, and that choice wins.', lit: ['tile', 'tagline', 'tile-tagline'] },
+      { say: 'Unfilled, it waits as a silhouette: a finished state, not a missing piece.', lit: ['contact'] },
+      { say: 'A trait is a mark, never a parent: whatever fills it still stands on its own.', lit: lit('tile', 'portrait', 'tagline', 'contact') },
+    ],
+    code: [
+      { path: 'hypercomb-core/src/core/trait.ts', from: 'export interface TraitWant', lines: 2 },
+      { path: 'hypercomb-core/src/core/trait.ts', from: 'export const sameTraitWord', lines: 4 },
+    ],
+    files: ['documentation/traits.md', 'documentation/tag-pools.md', 'hypercomb-core/src/core/trait.ts'],
+  },
+
+  'presentation/organized/organization': {
+    title: 'Organization',
+    lede: 'The same pieces can be organized in many ways at once, and none of them moves anything.',
+    picture: {
+      label: 'The same pieces, read by a layout and by a saved question',
+      nodes: [
+        { id: 'p1', label: 'photo', kind: 'box', x: 120, y: 150, w: 110 },
+        { id: 'p2', label: 'slide', kind: 'box', x: 320, y: 150, w: 110 },
+        { id: 'p3', label: 'note', kind: 'box', x: 520, y: 150, w: 110 },
+        { id: 'site', label: 'a website', sub: 'a layout of words', x: 200, y: 296, r: 40 },
+        { id: 'ask', label: 'a question', sub: 'and · or · not', x: 440, y: 296, r: 40 },
+      ],
+      edges: [['site', 'p1'], ['site', 'p2'], ['ask', 'p2'], ['ask', 'p3']],
+    },
+    beats: [
+      { say: 'Pieces stand on their own, each with its own look.', lit: ['p1', 'p2', 'p3'] },
+      { say: 'A website is one way to organize them: a layout of words.', lit: ['site', 'p1', 'p2', 'site-p1', 'site-p2'] },
+      { say: 'A saved question is another: the pieces that answer it.', lit: ['ask', 'p2', 'p3', 'ask-p2', 'ask-p3'] },
+      { say: 'Make as many as you like. None of them owns a piece, and nothing moves.', lit: ['site', 'ask', 'p1', 'p2', 'p3', 'site-p1', 'site-p2', 'ask-p2', 'ask-p3'] },
+    ],
+    code: [],
+    files: ['documentation/website-artifact-paradigm.md', 'documentation/known-location-pools.md'],
+  },
+
 }

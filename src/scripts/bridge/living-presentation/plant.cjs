@@ -110,7 +110,9 @@ if (args.includes('--blocks')) {
   const store = ioc?.get?.('@hypercomb.social/Store')
   const door = ioc?.get?.('@diamondcoreprocessor.com/TileFilesDrone')
   if (!bus || !store?.putResource || !door?.write) { console.error('Open this in the hive tab: the hive is not here.'); return }
-  const blocks = ${JSON.stringify(blocks)}
+  // Each file's text once, however many tiles carry it.
+  const texts = ${JSON.stringify(Object.fromEntries(blocks.flatMap(b => b.files.map(f => [f.path, f.text]))))}
+  const blocks = ${JSON.stringify(blocks.map(b => ({ route: b.route, page: b.page, files: b.files.map(f => ({ name: f.name, path: f.path })) })))}
   // 1. Each page's bytes into the hive (nothing is dressed yet), and each
   //    tile's included files onto it.
   const lines = []
@@ -120,7 +122,7 @@ if (args.includes('--blocks')) {
     const sig = await store.putResource(new Blob([b.page], { type: 'text/html' }))
     lines.push('go ' + at, 'website page ' + sig)
     for (const f of b.files) {
-      const file = await door.write({ route: b.route, kind: 'file', name: f.name }, f.text)
+      const file = await door.write({ route: b.route, kind: 'file', name: f.name }, texts[f.path])
       if (file.ok) files++; else { failed++; console.error(at + ' ' + f.name + ': ' + file.error) }
     }
   }
