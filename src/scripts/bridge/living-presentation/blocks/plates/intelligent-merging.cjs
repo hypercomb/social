@@ -2,8 +2,8 @@
 // yours (a line changed, honey) and theirs (another line changed, steel).
 // What is built today: both stay whole, side by side, and a path holds one
 // layer, so only one can be picked there (runtime module-drafts.ts, one pick
-// per path). Jev's pass over a zone already names two trials that change one
-// source file as a clash (module-review.ts trialClashes, `module focus`).
+// per path). Jev's pass over a zone (`module focus`) already names two trials
+// that change one source file as a clash (module-review.ts trialClashes).
 // What is planned (living-presentation.md, module-sandbox.md "Two changes to
 // one path"): a model drafts one version holding both changes, and that
 // draft waits like any model's draft, in the brood, until a person accepts
@@ -42,7 +42,7 @@ module.exports = () => svg('one file in three versions: the one both started fro
   `<g data-id="theirs">${card(THEIRS.x, THEIRS.y, THEIRS.w, THEIRS.h, 'theirs', 'k st', { 3: 'var(--steel)' }, 'stroke="var(--steel)" stroke-width="1.5"')}</g>`,
   // the clash: two changes to one file, named together
   `<g data-id="clash"><rect x="${YOURS.x + 8}" y="${YOURS.y + YOURS.h + 2}" width="${YOURS.w - 16}" height="${THEIRS.y - YOURS.y - YOURS.h - 4}" fill="none" stroke="none"/>` +
-    text(YOURS.x + YOURS.w / 2, YOURS.y + YOURS.h + 26, 'same file', 'k', 18) + `</g>`,
+    text(YOURS.x + YOURS.w / 2, YOURS.y + YOURS.h + 27, 'clash: one file', 'k', 18) + `</g>`,
   // planned: one draft holding both changes
   `<g data-id="draft">` +
     `<path d="M${YOURS.x + YOURS.w + 6},${YOURS.y + 70} C${DRAFT.x - 40},${YOURS.y + 70} ${DRAFT.x - 44},${DRAFT.y + 56} ${DRAFT.x - 6},${DRAFT.y + 56}" fill="none" stroke="var(--honey-deep)" stroke-width="1.5" stroke-dasharray="5 6"/>` +

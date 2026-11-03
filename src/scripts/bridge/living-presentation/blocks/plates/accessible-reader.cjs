@@ -1,13 +1,15 @@
-// a reader asks one host — the page carries what reading needs. On the left,
-// the one host that serves the presentation. In the middle, the reader's
-// screen, and on it a page holding its four kinds of piece: its words, its
-// typefaces, its voice and its pictures (page.cjs: everything is inside the
-// page or named `resource:<sig>`, served by the same host). The one honey
-// line is the only request the page makes. On the right, the hosts an
-// ordinary page would also call — a font service, a script library, a visitor
-// counter — drawn as silhouettes, each line to them cut (doctrine T7;
-// check.cjs fails a page that names another host).
-const { hex, CELL, GHOST, marker, flow, text, svg, server, device } = require('../../../../presentation/plates/lib.cjs')
+// reading calls one host. On the left, the host whose address you opened. In
+// the middle, the reader's screen, and on it a page holding its four kinds of
+// piece: its words, its typefaces, its voice and its pictures (page.cjs:
+// everything is inside the page or named `resource:<sig>`, answered by that
+// same host). The one honey line is that answer arriving. On the right, the
+// hosts an ordinary page would also call (a font service, a script library, a
+// visitor counter), drawn as silhouettes. Two guards keep them out: the
+// reader's door, which refuses to fetch from any origin but its own
+// (hypercomb-web/src/setup/readonly-network.ts), drawn as the struck lines;
+// and the presentation's own check, which fails a page that names another
+// host for any part (blocks/check.cjs; doctrine T7).
+const { hex, CELL, GHOST, STEEL, marker, flow, text, svg, server, device, check } = require('../../../../presentation/plates/lib.cjs')
 
 const P = { x: 348, y: 74, w: 136, h: 94, gx: 12, gy: 12 }   // the page's four pieces, two by two
 const at = (c, r) => [P.x + c * (P.w + P.gx), P.y + r * (P.h + P.gy)]
@@ -22,9 +24,11 @@ const voice = (cx, cy) => `<path d="M${cx - 22},${cy - 6} h8 l10,-9 v30 l-10,-9 
   `<path d="M${cx + 4},${cy - 6} q6,6 0,12 M${cx + 11},${cy - 12} q12,12 0,24" fill="none" stroke="var(--honey)" stroke-width="1.8"/>`
 const picture = (cx, cy) => hex(cx, cy, 20, CELL)
 
-const ELSEWHERE = [['font service', 70], ['script library', 160], ['visitor counter', 250]]
+// the hosts an ordinary page would also call, and the reader's door between
+const O = { x: 726, w: 206, h: 56, ys: [62, 140, 218] }
+const DOOR = 692
 
-module.exports = () => svg('one host serves the presentation; the page on your screen carries its words, typefaces, voice and pictures; the font service, script library and visitor counter an ordinary page would call are never asked', [
+module.exports = () => svg('the host you opened answers the page on your screen with its words, typefaces, voice and pictures; the font service, script library and visitor counter an ordinary page would call are refused at the reader’s door, and the presentation’s check fails any page that names another host', [
   `<defs>${marker('rd-ah')}</defs>`,
   // the one host
   `<g data-id="host">${server(48, 124, 180)}${text(138, 104, 'one host', 'st', 24)}</g>`,
@@ -35,11 +39,18 @@ module.exports = () => svg('one host serves the presentation; the page on your s
   `<g data-id="page"><rect x="342" y="68" width="296" height="212" fill="none" stroke="none"/>` +
     piece(0, 0, 'words', words) + piece(1, 0, 'typefaces', faces) +
     piece(0, 1, 'voice', voice) + piece(1, 1, 'pictures', picture) + `</g>`,
-  // the hosts an ordinary page would also call: never asked
-  `<g data-id="others"><rect x="668" y="${ELSEWHERE[0][1] - 4}" width="268" height="${ELSEWHERE[2][1] - ELSEWHERE[0][1] + 64}" fill="none" stroke="none"/>` +
-    ELSEWHERE.map(([name, y]) =>
-      `<path d="M666,${y + 30} H716" fill="none" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="4 6"/>` +
-      `<path d="M684,${y + 17} L698,${y + 43}" stroke="var(--danger)" stroke-width="2"/>` +
-      `<rect x="720" y="${y}" width="212" height="60" rx="3" ${GHOST} stroke-dasharray="5 5"/>` +
-      text(826, y + 38, name, 'f', 22)).join('') + `</g>`,
+  // the hosts an ordinary page would also call
+  `<g data-id="others"><rect x="664" y="${O.ys[0]}" width="${O.x + O.w - 664}" height="${O.ys[2] + O.h - O.ys[0]}" fill="none" stroke="none"/>` +
+    O.ys.map(y =>
+      `<path d="M664,${y + O.h / 2} H${O.x - 6}" fill="none" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="4 6"/>` +
+      `<rect x="${O.x}" y="${y}" width="${O.w}" height="${O.h}" rx="3" ${GHOST} stroke-dasharray="5 5"/>`).join('') +
+    [['font service', 0], ['script library', 1], ['visitor counter', 2]].map(([name, i]) => text(O.x + O.w / 2, O.ys[i] + O.h / 2 + 8, name, 'f', 22)).join('') + `</g>`,
+  // the reader's door: every call to another host refused
+  `<g data-id="door"><rect x="${DOOR - 14}" y="${O.ys[0] - 4}" width="28" height="${O.ys[2] + O.h - O.ys[0] + 8}" fill="none" stroke="none"/>` +
+    `<path d="M${DOOR},${O.ys[0] - 2} V${O.ys[2] + O.h + 2}" stroke="var(--danger)" stroke-width="1.5" stroke-opacity=".5"/>` +
+    O.ys.map(y => `<path d="M${DOOR - 8},${y + O.h / 2 - 13} L${DOOR + 8},${y + O.h / 2 + 13}" stroke="var(--danger)" stroke-width="2.5"/>`).join('') + `</g>`,
+  // the presentation's own check: no page names another host
+  `<g data-id="check"><rect x="${O.x}" y="304" width="${O.w}" height="56" rx="3" ${STEEL}/>` +
+    `<g transform="translate(${O.x + 34},332) scale(2)">${check(0, 0, 'var(--honey)')}</g>` +
+    text(O.x + 62, 340, 'the check', 'k', 22, 'start') + `</g>`,
 ].join('\n'))
