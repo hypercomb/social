@@ -11,7 +11,7 @@ import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from '../grid/hex-geometry.js'
 import { entryClaimFor, hasDecorationKind, referenceTargetForLabel, tagsForLabel } from '../../commands/decoration-kind-index.js'
 import { peerDivergesAt } from '../../sharing/peer-divergence.js'
 import type { IconRegistryEntry } from './tile-actions.drone.js'
-import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-action-icons.js'
+import { ICON_SPACING, ICON_Y, computeIconPositions, raisedNameY } from './tile-action-icons.js'
 import { clickNeedsCoordinateHitTest, resolveTilePress, usesTileCloseUp } from './tile-tap-policy.js'
 import { openTileMenu } from './viewer-walk.js'
 import { isPublishedVisitorShell } from '../../sharing/behavior-enablement.js'
@@ -228,11 +228,6 @@ const HEX_INRADIUS = 27.7
 const ICON_ROW_AVAILABLE = (HEX_INRADIUS - 5.2) * 2
 
 // ── The label row, for icons PINNED to it (`labelRow`) ────────────
-/** HALF-height of one band row in overlay-local units — the shader's
- *  `rowH = u_radiusPx * 0.15` (hex-sdf.shader.ts) at the hex radius of 32.
- *  The NAME's row centre sits (bandRows − 1) × this ABOVE the hex centre
- *  (the shader's nameShift), which is where a pinned icon must land. */
-const NAME_ROW_HALF = 32 * 0.15
 /** Centre x of the first icon pinned to the label row: hard against the band's
  *  LEFT edge, so it is LEFT OF THE NAME at every name length. The name is
  *  centred and the widest one reaches about ±19.3 here — the shader maps the
@@ -1748,11 +1743,11 @@ export class TileOverlayDrone extends Drone {
       : null
     this.emitEffect('overlay:band-rows', { rows: this.#bandRows, label: bandLabel })
 
-    // Pin label-row icons on the NAME's row, left-aligned. The name's row
-    // centre sits (bandRows − 1) × NAME_ROW_HALF above the hex centre — the
-    // shader's nameShift — so the pin lands beside the name at every band
-    // height, including the single-row band (no icon rows: y = 0).
-    const nameRowY = Math.round(-(this.#bandRows - 1) * NAME_ROW_HALF)
+    // Pin label-row icons on the NAME's row, left-aligned. The name rides just
+    // above the top icon row (raisedNameY, shared with the name layer), so the
+    // pin lands beside it at every band height; with no icon rows the name
+    // stays on the hex centre (y = 0).
+    const nameRowY = rows.length === 0 ? 0 : Math.round(raisedNameY(rows.length))
     pinned.forEach((a, i) =>
       a.button.position.set(LABEL_ROW_LEFT_X + i * ICON_SPACING, nameRowY))
 
