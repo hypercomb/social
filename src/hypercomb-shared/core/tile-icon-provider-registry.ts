@@ -34,6 +34,11 @@ export type TileIconProvider = {
    */
   defaultActive?: boolean
   /**
+   * With `defaultActive`: join at the LEFT edge, ahead of every other icon,
+   * instead of just before `remove`.
+   */
+  leading?: boolean
+  /**
    * A FEATURE affordance (website, files, contact, …): never rendered in the
    * always-visible top row. The ⋮ (more) toggle reveals the feature row(s) —
    * bigger icons showcasing what this tile actually carries. While a tile has
