@@ -110,9 +110,11 @@ const render = (block, { code = [], ways = null } = {}) => {
   --read: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --paper: #17150f; --ink: #efe9dc; --quiet: #a39b8a; --line: #3a352b;
-    --accent: #e0a440; --accent-soft: #3b2f17; --code: #211e17; }
+  :root:not([data-theme="light"]) { --paper: #17150f; --ink: #efe9dc; --quiet: #a39b8a; --line: #3a352b;
+    --accent: #e0a440; --accent-soft: #3b2f17; --code: #211e17; color-scheme: dark; }
 }
+:root[data-theme="dark"] { --paper: #17150f; --ink: #efe9dc; --quiet: #a39b8a; --line: #3a352b;
+  --accent: #e0a440; --accent-soft: #3b2f17; --code: #211e17; color-scheme: dark; }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.55 var(--read); }
 main { max-width: 52rem; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
