@@ -2400,6 +2400,57 @@ test('a door packs its head\'s landing view, keeps it, and builds nothing else',
   assert.ok(!held.has(`${PACKS}/${childSig}`))
 })
 
+test('head only: a landing pack stamped for this standing is served without heading its members', async () => {
+  const host = 'stamped.pluginthematrix.com'
+  const enc = (text) => new TextEncoder().encode(text)
+  const childText = '{"name":"child","cells":[]}'
+  const child = enc(childText)
+  const childSig = await sha256Hex(childText)
+  const headText = JSON.stringify({ name: 'home', cells: [childSig] })
+  const headSig = await sha256Hex(headText)
+  const held = new Map([[headSig, enc(headText)], [childSig, child]])
+  const bag = await sha256Hex(host)
+  held.set(`${bag}/00000001`, enc(JSON.stringify({ layer: headSig })))
+  const CONTENT = contentBag(held)
+  let childHeads = 0
+  const realHead = CONTENT.head.bind(CONTENT)
+  CONTENT.head = async (key) => {
+    if (key === childSig) childHeads++
+    return realHead(key)
+  }
+  const env = { SITE_BINDINGS: '{}', CONTENT, HEAD_ONLY: '1' }
+  const PACKS = await sha256Hex('content:packs')
+  const ask = () => worker.fetch(new Request(`https://${host}/${PACKS}/${headSig}`), env)
+  const namesOf = async (res) => decodeTransferPack(await gunzipBytes(new Uint8Array(await res.arrayBuffer()))).map(([sig]) => sig)
+
+  const first = await ask()
+  assert.equal(first.status, 200)
+  assert.deepEqual((await namesOf(first)).sort(), [headSig, childSig].sort())
+  const stored = await realHead(`${PACKS}/${headSig}`)
+  assert.equal(stored?.customMetadata?.epoch, 'none', 'built before any withdrawal, the epoch is none')
+
+  childHeads = 0
+  const second = await ask()
+  assert.equal(second.status, 200)
+  assert.equal(childHeads, 0, 'a stamped pack does not head its members')
+  assert.deepEqual((await namesOf(second)).sort(), [headSig, childSig].sort())
+
+  // A withdrawal moves the epoch. The stored pack is filtered again, and the
+  // filtered answer is what the request after that one serves.
+  await CONTENT.put(childSig, child, { customMetadata: { withdrawn: '1', at: '1' } })
+  await CONTENT.put(`${await sha256Hex('content:packs:standing')}/00000000`, enc(crypto.randomUUID()))
+  childHeads = 0
+  const third = await ask()
+  assert.equal(third.status, 200)
+  assert.ok(childHeads > 0, 'a moved epoch filters again')
+  assert.deepEqual(await namesOf(third), [headSig])
+  childHeads = 0
+  const fourth = await ask()
+  assert.equal(fourth.status, 200)
+  assert.equal(childHeads, 0, 'the filtered answer is stamped')
+  assert.deepEqual(await namesOf(fourth), [headSig])
+})
+
 // ── claiming a domain (documentation/domain-claim.md) ─────────────────────
 // `domain claim <name>`: the worker makes the zone, the participant moves the
 // nameservers, the first active reading wires the domain to the forwarder,
