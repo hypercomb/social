@@ -5,7 +5,6 @@
   <aside
     #panel
     class="chat-panel"
-    [class.peeking]="peeking()"
     hcDockedPanel="chat-window"
     [hasReadingSurface]="true"
     [hcSession]="session"
@@ -25,9 +24,6 @@
          is about. Built by essentials (agent-tiles-rail.ts) and mounted
          through IoC; absolutely positioned, so the column flow of the window
          is untouched. -->
-    <!-- Hidden by the stylesheet while folded away, never removed: the rail
-         holds the level you walked to and the picks you made, and a fold is
-         not a reason to lose either. -->
     <div class="chat-rail" #chatRail [attr.aria-label]="'chat.rail' | t"></div>
     <div class="chat-rail-grip" role="separator" aria-orientation="vertical"
       tabindex="0"
@@ -95,9 +91,8 @@
           @if (execWaiting()) { <span class="chat-exec-badge">{{ execWaiting() }}</span> }
         </button>
         <span class="chat-head-split" aria-hidden="true"></span>
-        <!-- Fold-away and the providers console live on this row with the
-             column toggles. The gear and close stay the window's own pair,
-             pinned at the end. -->
+        <!-- The providers console lives on this row with the column toggles.
+             The gear and close stay the window's own pair, pinned at the end. -->
         <ng-container *ngTemplateOutlet="chatTools"></ng-container>
       </div>
       <button class="chat-close" type="button" (click)="close()"
@@ -105,20 +100,10 @@
         [attr.aria-label]="'chat.close' | t">×</button>
     </header>
 
-    <!-- FOLD-AWAY AND PROVIDERS. They sit in the header with the column
-         toggles, one size with the gear. The template is named so the header
-         can outlet it; setup has no second row of its own. -->
+    <!-- PROVIDERS. It sits in the header with the column toggles, one size
+         with the gear. The template is named so the header can outlet it;
+         setup has no second row of its own. -->
     <ng-template #chatTools>
-      <!-- FOLD AWAY TO THE HIVE. Not a second shape to choose between — the
-           conversation is still here, it is just not in front of the tiles
-           while you go and find them. -->
-      <button class="chat-tool chat-peek" type="button" (click)="togglePeek()"
-        [class.on]="peeking()"
-        [attr.aria-pressed]="peeking()"
-        [title]="(peeking() ? 'chat.peek.off' : 'chat.peek.on') | t"
-        [attr.aria-label]="(peeking() ? 'chat.peek.off' : 'chat.peek.on') | t">
-        <span class="mat-sym" aria-hidden="true">{{ peeking() ? 'unfold_more' : 'unfold_less' }}</span>
-      </button>
       <!-- SHOW THE PROVIDERS. The footer line already points at the console,
            but it only reads as a link once you have noticed the model word in
            it; this is the same console as a standing affordance.
@@ -695,8 +680,7 @@
     </div>
     <!-- THE COMPOSER STANDS UNDER THE THREAD IT ANSWERS, not under the whole
          row: the workflow and Execution columns run the full height beside it. -->
-    <footer class="chat-foot"
-      hcDockInset="bottom" [hcDockInsetActive]="peeking()">
+    <footer class="chat-foot">
 
       <!-- WHAT IS HAPPENING, pinned above the composer so a quiet stretch, a
            retry, a token budget, and a wait on you each stay visible. The
