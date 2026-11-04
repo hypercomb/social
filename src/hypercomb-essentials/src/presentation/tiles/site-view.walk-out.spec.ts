@@ -13,7 +13,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 let mode = 'hexagons'
 let segments: string[] = []
-const viewBee = { releasingArrival: false }
+const viewBee = { releasingArrival: false, arriveAsHexagons: vi.fn(), holdSurfaceOnce: vi.fn() }
+const backs = new Map<string, () => void>()
 
 const setMode = vi.fn((next: string) => {
   if (next === mode) return
@@ -40,6 +41,7 @@ const services = new Map<string, unknown>([
   // No hypercombRoot: #reconcile stands down, which isolates the flip.
   ['@hypercomb.social/Store', {}],
   ['@diamondcoreprocessor.com/ViewBee', viewBee],
+  ['@diamondcoreprocessor.com/BackGesture', { register: (entry: { owner: string; back: () => void }) => { backs.set(entry.owner, entry.back); return () => backs.delete(entry.owner) } }],
 ])
 ;(window as unknown as { ioc: unknown }).ioc = {
   register: (key: string, value: unknown) => { registered.set(key, value) },
@@ -71,6 +73,7 @@ beforeEach(() => {
   walkTo([])
   setMode.mockClear()
   explorerReplace.mockClear()
+  viewBee.arriveAsHexagons.mockClear()
 })
 
 describe('leaving a website', () => {
@@ -97,6 +100,57 @@ describe('leaving a website', () => {
     explorerReplace.mockClear()
     setMode('hexagons')                // Escape
     expect(explorerReplace).toHaveBeenCalledWith(['dolphin'])
+    expect(segments).toEqual(['dolphin'])
+  })
+
+  // jwize 2026-11-03: "the close website button is going to a website refresh".
+  // The way back lands on a place whose own (or cascading) default is a
+  // website; leaving must land on the tiles, so the exit arms the one-shot
+  // hexagons for exactly the arrival it causes.
+  it('an EXIT back to the hexagons lands on tiles even where a default would re-open the site', () => {
+    arriveIntoSite(['presentation', 'simple'])   // spawned from /presentation's hexagons
+    walkTo(['presentation', 'simple', 'primitive'])
+    explorerReplace.mockClear()
+    const order: string[] = []
+    viewBee.arriveAsHexagons.mockImplementation(() => { order.push('arm') })
+    explorerReplace.mockImplementationOnce((next: string[]) => { order.push('move'); segments = [...next]; lineage.dispatchEvent(new CustomEvent('change')) })
+    setMode('hexagons')
+    expect(viewBee.arriveAsHexagons).toHaveBeenCalledTimes(1)
+    expect(order).toEqual(['arm', 'move'])
+  })
+
+  it('an EXIT that stays where it stands arms nothing (no arrival would consume it)', () => {
+    walkTo(['dolphin'])
+    setMode('website')                 // opened standing here: the spawn is right here
+    setMode('hexagons')
+    expect(explorerReplace).not.toHaveBeenCalled()
+    expect(viewBee.arriveAsHexagons).not.toHaveBeenCalled()
+  })
+
+  it('the BACK gesture at the site\'s entry turns the website off and steps OUT to the layer hosting the entry tile', () => {
+    walkTo(['room-host'])
+    setMode('website')                           // the room-host tile's page, opened on it
+    explorerReplace.mockClear()
+    backs.get('site-view')?.()
+    expect(mode).toBe('hexagons')
+    expect(segments).toEqual([])                 // the root, where the room-host tile sits — not inside it
+    expect(viewBee.arriveAsHexagons).toHaveBeenCalledTimes(1)
+  })
+
+  it('the EXIT button still returns to where the site was opened', () => {
+    walkTo(['room-host'])
+    setMode('website')
+    setMode('hexagons')                          // the close button / Escape
+    expect(segments).toEqual(['room-host'])
+  })
+
+  it('a HELD arrival (the site stepping between its own pages) never rewrites where the site was opened', () => {
+    walkTo(['dolphin'])
+    setMode('website')                           // opened standing on /dolphin
+    walkTo(['dolphin', 'pod'])
+    walkTo(['dolphin'])
+    EffectBus.emit('view:arrival', { segments: ['dolphin'], view: 'website', held: true })
+    setMode('hexagons')                          // the exit
     expect(segments).toEqual(['dolphin'])
   })
 })

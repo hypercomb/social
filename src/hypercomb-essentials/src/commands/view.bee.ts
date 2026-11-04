@@ -349,6 +349,25 @@ export class ViewBee extends Worker {
   #releasingArrival = false
   get releasingArrival(): boolean { return this.#releasingArrival }
 
+  /** Land the NEXT arrival on the hexagons, whatever the place's default —
+   *  the `h` key's one-shot, armed silently (no cue: it is consumed by the
+   *  very navigation that follows). The website's exit asks for it on its
+   *  way back to the spawn when the spawn was the hexagons (site-view.drone
+   *  `#returnToSpawn`): leaving a site lands on tiles, never on a page the
+   *  place's `view:default` would re-open — the reported "close website
+   *  goes to a website refresh" (jwize 2026-11-03). */
+  arriveAsHexagons = (): void => { this.#hexagonsOnce = true }
+
+  /** Keep the surface that is up through the NEXT arrival. A website's own
+   *  navigation (a page's link, or stepping back along the pages read)
+   *  moves between pages of ONE site: an ancestor page is not a retreat out
+   *  of it, so the surface must not drop to the hexagons in between — the
+   *  reported "the back changes webpages but glitches tiles in between"
+   *  (jwize 2026-11-03). Armed by site-view only for a move that stays inside
+   *  the site and only when a move follows, so this very arrival consumes it. */
+  #holdOnce = false
+  holdSurfaceOnce = (): void => { this.#holdOnce = true }
+
   isArrivalSurface = (): boolean => {
     if (!this.#autoOpenedView) return false
     const vm = get<ViewModeLike>('@hypercomb.social/ViewMode')
@@ -569,7 +588,10 @@ export class ViewBee extends Worker {
       })
     }
     this.#emit(toggles)
-    this.#openDefaultView(segments, toggles, layer, defaultView, vm, optedOut)
+    // WHOSE PIN opened it: the place's own mark (its part is pinned) or one
+    // inherited from an ancestor (the website is pinned above it) — the
+    // website view roots the site accordingly (site-view.drone).
+    this.#openDefaultView(segments, toggles, layer, defaultView, vm, optedOut, !ownDefault && !!resolved && !optedOut)
   }
 
   /** THE ARRIVAL SURFACE — a layer can declare which view it opens as, and
@@ -607,6 +629,7 @@ export class ViewBee extends Worker {
     want: string,
     vm: ViewModeLike,
     optedOut = false,
+    inherited = false,
   ): void {
     // A cold layer read is indistinguishable from "no default" — don't latch
     // on it, let the next trigger answer properly.
@@ -629,6 +652,15 @@ export class ViewBee extends Worker {
     // decorations, ViewMode change, enablement flips), and a second pass must
     // not undo an Escape back to the hexagons.
     this.#autoOpenedKey = key
+    // A HELD ARRIVAL: the surface that is up stays up — a site moving between
+    // its own pages. Nothing opens, nothing is released; the claim on the
+    // surface (an arrival's, or the participant's) is unchanged. `held` tells
+    // listeners this is the site's own step, not a walk into a new place.
+    if (this.#holdOnce) {
+      this.#holdOnce = false
+      EffectBus.emit('view:arrival', { segments: [...segments], view: vm.mode === DEFAULT_SURFACE ? '' : vm.mode, held: true })
+      return
+    }
     // ONE-SHOT HEXAGONS: this arrival lands on the grid whatever the place
     // (or a surface riding along) would open as. Consumed here, so the next
     // navigation is back to normal. The surface releases only once the
@@ -686,7 +718,7 @@ export class ViewBee extends Worker {
       // while still riding the previous arrival inside its own scope.
       this.#autoOpenedView = ''
     }
-    EffectBus.emit('view:arrival', { segments: [...segments], view: opened })
+    EffectBus.emit('view:arrival', { segments: [...segments], view: opened, inherited: !!opened && inherited })
   }
 
   /** Drop the surface to hexagons once show-cell's painted location catches

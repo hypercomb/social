@@ -10,5 +10,29 @@
   "visualData": [
     "a door you open"
   ],
-  "say": "Reason seven: A.I., on your terms. Your hive has an assistant of its own, and you choose the model: one in the cloud with your own key, or one that runs on your own machine. It reads what you allow, proposes what to change, and waits for your hand before anything changes. Whatever you keep private stays private, from every model but your own. The A.I. does not scrape your life through someone else's cloud. It walks in through a door you open, and its work lands in your hive, with history."
+  "lights": [
+    "*",
+    [
+      "ask"
+    ],
+    [
+      "ask",
+      "door"
+    ],
+    [
+      "door",
+      "answer"
+    ],
+    [
+      "door"
+    ],
+    [
+      "door"
+    ],
+    [
+      "door",
+      "answer"
+    ]
+  ],
+  "say": "Reason seven: A.I., on your terms. Your hive has an assistant of its own, and you choose the model: one in the cloud with your own key, or one that runs on your own machine. It reads what you allow and proposes what to change. In your own hive it acts by the rules you set, and history can take any of it back; anything that would leave your machine waits for your hand. Whatever you keep private stays private, from every model but the one on your own machine. The A.I. does not scrape your life through someone else's cloud. It walks in through a door you open, and its work lands in your hive, with history."
 }

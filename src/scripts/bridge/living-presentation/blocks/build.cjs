@@ -5,21 +5,23 @@
 // buildBlocks({ under }) -> { blocks: [{ route, page, files }], media: [{ sig, path, name, type, size }] }
 //   `under` limits it to routes at or under a route ('presentation/simple').
 //
-// A tile has a page when the tour explains it (tour.cjs) or when content.cjs
-// says something for it. A scene tile shows its scene; its content may add
-// only what the scene does not say — pictures from a running hive, a part to
-// try, the source — and never a second headline or narration (no idea is said
-// twice; build refuses a block that would).
+// One tile, one scene. A tile has a page when the tour explains it (tour.cjs)
+// or when content.cjs says something for it. A scene tile shows its scene; its
+// content may add only what the scene does not say — a picture from a running
+// hive, or a part to try, beside the figure, and the source as included files —
+// and never a second headline or narration (no idea is said twice; build
+// refuses a block that would). A block's `code` excerpts are still checked
+// against the source here, so an excerpt that no longer matches fails loudly.
 
 const fs = require('fs')
 const path = require('path')
-const { render } = require('./page.cjs')
+const { render, tryPanel, livePanel } = require('./page.cjs')
 const content = require('./content.cjs')
 const tree = require('../tree.cjs')
 const tour = require('./tour.cjs')
 const { createMedia } = require('./media.cjs')
 const { drawn } = require('./drawn.cjs')
-const { liveFigure } = require('./hive-figure.cjs')
+const { liveFigure, hiveFigure } = require('./hive-figure.cjs')
 
 const SRC = path.join(__dirname, '..', '..', '..', '..')
 const CAPTURES = path.join(__dirname, 'captures')
@@ -59,7 +61,7 @@ const pagedRoutes = () => {
   const walk = (node, at) => {
     const route = [...at, node.name]
     const key = route.join('/')
-    if (has(content, key) || tour.stagesOf(key).length) out.push(key)
+    if (has(content, key) || tour.sceneAt(key)) out.push(key)
     for (const c of node.children || []) walk(c, route)
   }
   for (const r of tree.roots || [tree]) walk(r, [])
@@ -78,7 +80,10 @@ const waysOf = (route, paged) => {
     note: c.note || '',
     page: paged.has([...route, c.name].join('/')),
   }))
-  return { children, parent: route.length > 1 ? route[route.length - 2] : null, parentRoute: route.slice(0, -1) }
+  // A top tile shows the other top tiles a reader can walk to (the values and
+  // the road; the presenter's machinery is not a page).
+  const also = route.length === 1 ? (tree.roots || []).filter(r => r.name !== route[0] && paged.has(r.name)).map(r => ({ name: r.name, note: r.note || '' })) : []
+  return { children, also, parent: route.length > 1 ? route[route.length - 2] : null, parentRoute: route.slice(0, -1) }
 }
 
 /** A WebP or PNG's pixel size, read from its header. */
@@ -94,62 +99,69 @@ const sizeOf = (file) => {
   throw new Error(`not a PNG or WebP: ${file}`)
 }
 
-/** A capture: a picture taken in a running hive (blocks/captures/), by name;
- *  or tiles taken out of one (blocks/tiles/), drawn as tiles. */
-const liveOf = (shots, media) => (shots || []).map(l => {
-  if (l.tiles) return { figure: liveFigure(l, media), title: l.title, caption: l.caption }
+/** A capture: a picture taken in a running hive (blocks/captures/<shot>.webp|png). */
+const liveOf = (l, media) => {
+  // tiles taken out of a running hive (blocks/tiles.cjs), drawn as tiles again
+  if (l.tiles) return { tiles: true, html: hiveFigure(l, media), title: l.title, caption: l.caption }
   const file = ['webp', 'png'].map(x => path.join(CAPTURES, `${l.shot}.${x}`)).find(f => fs.existsSync(f))
-  if (!file) throw new Error(`capture ${l.shot} is missing from blocks/captures/ (captures.cjs --list names the ones it stages; the rest are taken by hand in a hive)`)
+  if (!file) throw new Error(`capture ${l.shot} is missing (blocks/captures/${l.shot}.webp)`)
   return { ...sizeOf(file), src: media.ref(media.add(file)), title: l.title, caption: l.caption, alt: l.alt || l.caption || l.title }
-})
+}
 
-/** "1 min", "4 min": the narration's length, from the voice files (48 kbit/s, the tour's rate). */
+/** "1 min": the narration's length, from the voice files (48 kbit/s, the tour's rate). */
 const minutesOf = (steps, media) => {
   const bySig = new Map(media.list().map(m => [m.sig, m]))
-  const secs = steps.reduce((t, s) => t + (s.voice ? bySig.get(s.voice.slice('resource:'.length)).size * 8 / 48000 + 0.8 : 0), 0)
+  const voices = [...new Set(steps.map(s => s.voice).filter(Boolean))]
+  const secs = voices.reduce((t, v) => t + bySig.get(v.slice('resource:'.length)).size * 8 / 48000 + 0.8, 0)
   return secs ? `${Math.max(1, Math.round(secs / 60))} min` : ''
 }
 
 const SCENE_ONLY = ['title', 'lede', 'eyebrow', 'headline', 'sub', 'picture', 'plate', 'beats']
 
-/** A route's stages: the tour's scenes, or the block's own beats. */
-const stagesFor = (key, block, media) => {
-  const scened = tour.stagesOf(key)
-  if (scened.length) {
+/** A route's one scene: the tour's, or the block's own beats over its plate.
+ *  A capture or a part to try stands beside the figure; a capture's caption is
+ *  the scene's last beat, said while the narration turns to it. */
+const sceneFor = (key, block, media) => {
+  const T = tour.T
+  const live = (block.live || []).map(l => liveOf(l, media))
+  if (live.length > 1) throw new Error(`${key}: one scene has room for one picture from the hive beside its figure; ${live.length} are named`)
+  if (live.length && block.try) throw new Error(`${key}: a capture and a part to try cannot both stand beside the figure`)
+  const beside = live.length ? (live[0].tiles ? live[0].html : livePanel(live[0])) : block.try ? tryPanel(block.try) : ''
+  const besideStep = live.length ? [{ say: live[0].caption, voice: tour.voiceOf(live[0].caption, media), beside: true }] : []
+  const n = tour.sceneAt(key)
+  if (n) {
     const said = SCENE_ONLY.filter(k => has(block, k))
-    if (said.length) throw new Error(`${key}: a tour scene explains this tile, so its block must not say ${said.join(', ')} again`)
-    // A scene the tour filmed in its demo hive shows a real hive here
-    // (`figures`, by scene number): real tiles or a capture in place of the
-    // clip, and, where the narration describes the clip, its words for this
-    // picture, voiced the tour's way.
-    const figures = block.figures || {}
-    const placed = scened.flatMap(s => s.scenes)
-    const stray = Object.keys(figures).filter(n => !placed.includes(Number(n)))
-    if (stray.length) throw new Error(`${key}: figures name scene ${stray.join(', ')}, which this tile does not show`)
-    return scened.map(({ label, scenes }) => {
-      const parts = scenes.map(n => {
-        const figure = figures[n]
-        const part = tour.sceneParts(n, media, figure ? () => liveFigure(figure, media) : null)
-        if (!figure?.say) return part
-        const voice = tour.voiceOf(figure.say, media)
-        if (!voice) throw new Error(`${key}: scene ${n}'s words for its picture have no voice yet — node scripts/bridge/living-presentation/blocks/narrate.cjs`)
-        return { ...part, caption: tour.T.captionOf(figure.say), voice }
-      })
-      const steps = parts.map((p, i) => ({ frame: i, say: p.caption, voice: p.voice, name: p.name }))
-      return { label, frames: parts, steps, minutes: minutesOf(steps, media), title: parts[0].name }
-    })
+    if (said.length) throw new Error(`${key}: tour scene ${n} explains this tile, so its block must not say ${said.join(', ')} again`)
+    // A scene the tour filmed in its demo hive shows the author's hive here
+    // (figures, by scene number), told in its own words where they differ.
+    const own = block.figures?.[n] ?? null
+    const p = tour.sceneParts(n, media, own?.say ?? null, !!own)
+    if (own) p.figure = liveFigure(own, media)
+    // One sentence on screen at a time, each playing its own stretch of the
+    // scene's one voice: a scene reads like a film with subtitles.
+    const timed = p.voice && p.lines.every(l => l.from !== null)
+    const steps = [...p.lines.map(l => ({ say: l.say, voice: timed ? p.voice : null, from: timed ? l.from : null, to: timed ? l.to : null, lit: l.lit })), ...besideStep]
+    if (p.voice && !timed) steps.splice(0, p.lines.length, { say: p.caption, voice: p.voice })
+    // Every part a sentence lights must be a part of the figure.
+    const parts = new Set([...p.figure.matchAll(/data-id="([^"]+)"/g)].map(m => m[1]))
+    const unknown = [...new Set(steps.flatMap(st => st.lit || []).filter(id => id !== '*' && !parts.has(id)))]
+    if (unknown.length) throw new Error(`${key}: scene ${n}'s lights name ${unknown.join(', ')}, which its figure does not draw`)
+    const lights = steps.some(st => Array.isArray(st.lit))
+    return { name: p.name, eyebrow: p.eyebrow, headline: p.headline, figure: p.figure, beside, sub: p.sub, link: p.link, steps, lights, minutes: minutesOf(steps, media) }
   }
   for (const k of ['eyebrow', 'headline', 'beats']) if (!has(block, k)) throw new Error(`${key}: a block no scene explains needs its ${k}`)
-  const T = tour.T
-  const figure = drawn(block, key)
-  const steps = block.beats.map(b => ({ frame: 0, say: b.say, voice: tour.voiceOf(b.say, media), lit: b.lit || [] }))
-  return [{
-    label: '',
-    frames: [{ eyebrow: T.esc(T.smart(block.eyebrow)), headline: T.emph(block.headline), figure, sub: block.sub ? T.emph(block.sub) : '', link: null }],
+  const steps = [...block.beats.map(b => ({ say: b.say, voice: tour.voiceOf(b.say, media), lit: b.lit || [] })), ...besideStep]
+  return {
+    name: T.plain(block.headline).replace(/[.]$/, ''),
+    eyebrow: T.esc(T.smart(block.eyebrow)),
+    headline: T.emph(block.headline),
+    figure: drawn(block, key),
+    beside,
+    sub: block.sub ? T.emph(block.sub) : '',
+    link: null,
     steps,
     minutes: minutesOf(steps, media),
-    title: T.plain(block.headline).replace(/[.]$/, ''),
-  }]
+  }
 }
 
 const buildBlocks = ({ under = '' } = {}) => {
@@ -164,21 +176,20 @@ const buildBlocks = ({ under = '' } = {}) => {
     .map(key => {
       const block = content[key] || {}
       const route = key.split('/')
-      const stages = stagesFor(key, block, media)
+      const scene = sceneFor(key, block, media)
       return {
         route,
         page: render({
           route,
-          title: `${stages[0].title} · Hypercomb`,
-          stages,
-          live: liveOf(block.live, media),
+          title: `${scene.name} · Hypercomb`,
+          scene,
           tryPart: block.try || null,
           ways: waysOf(route, paged),
-          code: (block.code ?? []).map(excerpt),
           faces,
           sprite,
         }),
         files: filesOf(block.files ?? []),
+        code: (block.code ?? []).map(excerpt),
       }
     })
   return { blocks, media: media.list() }

@@ -16,44 +16,46 @@
 const fs = require('fs')
 const path = require('path')
 const T = require('../../../presentation/build.cjs')
+const { sentencesOf, sentenceTimes } = require('../../../presentation/timing.cjs')
 
 const TOUR = path.dirname(require.resolve('../../../presentation/build.cjs'))
 
-/** The tile each scene explains. A tile with more than one run of scenes
- *  plays each run on its own stage (the opening, and the close). */
+/** The tile each scene explains: one scene per tile. The tour's opening
+ *  protocol scene and its close have tiles of their own in the road tree. */
 const SCENES_OF = {
-  'presentation': [
-    { label: 'The opening', scenes: [1, 2] },
-    { label: 'The road ahead', scenes: [20, 21, 22, 23, 24, 25] },
-  ],
-  'presentation/simple': [3],
-  'presentation/simple/primitive': [6],
-  'presentation/simple/primitive/signature': [5],
-  'presentation/simple/act': [10],
-  'presentation/organized': [13],
-  'presentation/organized/heart': [14],
-  'presentation/organized/history': [7],
-  'presentation/collaborative': [18],
-  'presentation/collaborative/workbench': [12],
-  'presentation/collaborative/domain': [15],
-  'presentation/collaborative/publishing': [17],
-  'presentation/collaborative/discovery': [16],
-  'presentation/intelligent': [8],
-  'presentation/intelligent/sentence': [11],
-  'presentation/intelligent/automaton': [9],
-  'presentation/intelligent/agent': [19],
-  'presentation/accessible': [4],
+  'presentation': 1,
+  'road/protocol': 2,
+  'presentation/simple': 3,
+  'presentation/accessible': 4,
+  'presentation/simple/primitive/signature': 5,
+  'presentation/simple/primitive': 6,
+  'presentation/organized/history': 7,
+  'presentation/intelligent': 8,
+  'presentation/intelligent/automaton': 9,
+  'presentation/simple/act': 10,
+  'presentation/intelligent/sentence': 11,
+  'presentation/collaborative/workbench': 12,
+  'presentation/organized': 13,
+  'presentation/organized/heart': 14,
+  'presentation/collaborative/domain': 15,
+  'presentation/collaborative/discovery': 16,
+  'presentation/collaborative/publishing': 17,
+  'presentation/collaborative': 18,
+  'presentation/intelligent/agent': 19,
+  'road/creations': 20,
+  'road/coming': 21,
+  'road/vision': 22,
+  'road/computer': 23,
+  'road/yours': 24,
+  'road/first-day': 25,
 }
 
-/** A route's stages: [{ label, scenes: [n] }], or [] when no scene explains it. */
-const stagesOf = (route) => {
-  const v = SCENES_OF[route]
-  if (!v) return []
-  return typeof v[0] === 'number' ? [{ label: '', scenes: v }] : v
-}
+/** The scene a route shows, or null when no scene explains it. One tile, one
+ *  scene (jwize 2026-11-03): the hierarchy is the presentation. */
+const sceneAt = (route) => SCENES_OF[route] ?? null
 
 /** Every scene is placed exactly once. */
-const placed = () => Object.values(SCENES_OF).flatMap(v => typeof v[0] === 'number' ? v : v.flatMap(s => s.scenes))
+const placed = () => Object.values(SCENES_OF)
 
 const sceneOf = (n) => {
   const s = T.scenes.find(x => x.n === n)
@@ -61,25 +63,60 @@ const sceneOf = (n) => {
   return s
 }
 
-/** One scene, ready for a page: its parts as HTML, its caption, its voice.
- *  `figure`, when given, draws the scene's figure instead of the tour's own,
- *  so a clip the page does not show is never carried with it. */
-const sceneParts = (n, media, figure = null) => {
-  const s = sceneOf(n)
+/** One scene, ready for a page: its parts as HTML, its caption, its voice. */
+const sceneParts = (n, media, sayInstead = null, ownFigure = false) => {
+  // A page may tell a scene in other words where its picture differs from the
+  // tour's (a real hive in place of a clip the tour filmed in its demo hive).
+  const tourScene = sceneOf(n)
+  const s = sayInstead ? { ...tourScene, say: sayInstead, lights: undefined } : tourScene
+  // The voice is keyed by the words: a scene whose words changed is silent
+  // (it holds for its reading time) until build.cjs records them again.
   const voice = T.cachePath(s.say)
-  if (!voice) throw new Error(`scene ${n} has no recorded voice for its current words — run node scripts/presentation/build.cjs`)
   const clip = (name) => media.ref(media.add(path.join(TOUR, 'media', T.CLIP_FILE[name])))
   return {
     n,
     name: T.plain(s.headline).replace(/[.]$/, ''),
     eyebrow: T.esc(T.smart(s.eyebrow)),
     headline: T.emph(s.headline),
-    figure: figure ? figure() : T.visualHtml(s, { clipSrc: clip }),
+    // a page with its own figure for this scene carries none of the tour's
+    figure: ownFigure ? '' : T.visualHtml(s, { clipSrc: clip }),
     sub: s.sub ? T.emph(s.sub) : '',
     link: s.link ? { href: s.link.href, label: T.smart(s.link.label) } : null,
     caption: T.captionOf(s.say),
-    voice: media.ref(media.add(voice)),
+    voice: voice ? media.ref(media.add(voice)) : null,
+    lines: linesOf(s.say, voice).map((l, i) => ({ ...l, lit: lightsOf(s, i) })),
   }
+}
+
+/** A scene's narration as the sentences a reader sees one at a time, each
+ *  with where it sits in the voice (seconds; `to` is where the next sentence
+ *  starts, so the voice plays straight through). The timing is the shared
+ *  sentence clock (scripts/presentation/timing.cjs) the recorder and the
+ *  drawn clips use, so all three agree on where a sentence starts. Without a
+ *  voice, or when the spoken and shown sentences do not pair up, a sentence
+ *  carries no times and is held for its reading time. */
+const linesOf = (say, voice) => {
+  const shown = sentencesOf(T.captionOf(say))
+  let spans = null
+  if (voice) {
+    try {
+      const spoken = sentencesOf(T.spokenOf(say))
+      if (spoken.length === shown.length) spans = sentenceTimes(voice, spoken).spans
+    } catch { spans = null }
+  }
+  return shown.map((text, i) => ({
+    say: text,
+    from: spans ? Math.max(0, i === 0 ? 0 : spans[i].start) : null,
+    to: spans ? (spans[i + 1] ? spans[i + 1].start : null) : null,
+  }))
+}
+
+/** The figure's parts a sentence is about (scene "lights", one entry per
+ *  sentence; "*" is the whole figure), or null where the scene names none. */
+const lightsOf = (s, i) => {
+  if (!Array.isArray(s.lights)) return null
+  const l = s.lights[i]
+  return l === '*' ? ['*'] : Array.isArray(l) ? l : null
 }
 
 /** The tour's icon sprite, read from its template: one set of icons. */
@@ -103,4 +140,4 @@ const voiceOf = (say, media) => {
   return file ? media.ref(media.add(file)) : null
 }
 
-module.exports = { SCENES_OF, stagesOf, placed, sceneParts, sprite, fontFaces, voiceOf, T, TOUR }
+module.exports = { SCENES_OF, sceneAt, placed, sceneParts, sprite, fontFaces, voiceOf, T, TOUR }

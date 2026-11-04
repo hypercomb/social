@@ -59,7 +59,9 @@ const hiveFigure = (figure, media) => {
   // Its height comes from its own width (the padding), never from a grid
   // pass; its tiles are never drawn wider than TILE_PX, and the caption sits
   // under the tiles, not under the column.
-  return `<div class="figbox hivebox" style="--cap:${Math.round(width * TILE_PX)}px"><div class="fig hive" style="--tall:${pct(height / width)}" role="img" aria-label="${esc(figure.title)}">${cells.join('')}</div>` +
+  // --tall-n: the same ratio as a number, so a slide can bound the figure by
+  // the height it has (a page is one screen tall).
+  return `<div class="figbox hivebox" style="--cap:${Math.round(width * TILE_PX)}px;--tall-n:${+(height / width).toFixed(4)}"><div class="fig hive" style="--tall:${pct(height / width)}" role="img" aria-label="${esc(figure.title)}">${cells.join('')}</div>` +
     `<div class="figcap live">${icon('hex')}<span>live · ${esc(figure.title)}</span></div></div>`
 }
 
