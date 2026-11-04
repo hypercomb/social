@@ -2628,6 +2628,16 @@ export class ShowCellDrone extends Drone {
     return report
   }
 
+  /** The cells on this page whose picture is `sig` — the arrival lookup (V5). */
+  #labelsHolding(sig: string): string[] {
+    const labels: string[] = []
+    for (const [label, cached] of this.cellImageCache) if (cached === sig) labels.push(label)
+    for (const cell of this.renderedCells.values()) {
+      if (cell.imageSig === sig && !this.cellImageCache.has(cell.label)) labels.push(cell.label)
+    }
+    return labels
+  }
+
   /** A cell's record follows the caches; `fresh` mirrors the full pass's
    *  binding (absent = absent) for a cell whose derivation was just redone. */
   #refreshCellRecord(cell: Cell, fresh: boolean): void {
@@ -6394,7 +6404,12 @@ export class ShowCellDrone extends Drone {
     // and bounded — arrivals only fire once per healed sig.
     this.onEffect<{ sig: string; kind: string }>('content:arrived', (payload) => {
       if (payload?.kind !== 'layer') return
-      this.#rearmResolveGates()
+      // A page with no gate held is complete: these layer bytes belong to
+      // somebody else's page and paint nothing here (single-paint.md V5).
+      const waiting = this.#incompleteResolveAttempts.size > 0
+        || this.#resolveGateExhausted.size > 0
+        || this.#placeholderLocations.size > 0
+      if (waiting) this.#rearmResolveGates()
     })
 
     // render:set-hive-visible — a takeover feature (screensaver bounce mode)
@@ -7690,20 +7705,26 @@ export class ShowCellDrone extends Drone {
     // render writes renderedCellsKey at completion and the do-while
     // re-render sees it non-empty and returns early. Setting
     // #forceNextRender carries the invalidation across that race.
+    //
+    // AN ARRIVAL IS DATA, NOT A PAINT COMMAND (single-paint.md V5). The loop
+    // below is the lookup: the cells holding the arriving signature, plus the
+    // cells whose derivation concluded "no picture" (the arriving bytes may be
+    // the props blob that resolves them). Those cells are dirtied — the one
+    // holding the sig keeps its cached sig and only reloads the atlas slot —
+    // and the drain writes their slots in the next frame. Arrivals within one
+    // frame (a layer, its picture, its meta, its tags) coalesce into one drain;
+    // a page holding none of them writes nothing.
     this.onEffect<{ sig: string }>('swarm:resource-arrived', ({ sig }) => {
-      if (sig) {
-        for (const [label, cached] of this.cellImageCache) {
-          if (cached === sig || cached === null) {
-            this.cellImageCache.delete(label)
-          }
-        }
+      if (!sig) return
+      const labels: string[] = []
+      for (const [label, cached] of this.cellImageCache) {
+        if (cached === sig) labels.push(label)
+        else if (cached === null) { this.cellImageCache.delete(label); labels.push(label) }
       }
-      if (this.renderedLocationKey) {
-        this.#layerCellsCache.delete(this.renderedLocationKey)
+      for (const label of this.renderedCells.keys()) {
+        if (!this.cellImageCache.has(label)) labels.push(label)
       }
-      this.renderedCellsKey = ''
-      this.#forceNextRender = true
-      this.requestRender()
+      if (labels.length > 0) this.#dirty(labels, 'swarm:resource-arrived')
     })
 
     // substrate:rerolled — user rerolled a tile's substrate (single click or
@@ -9707,8 +9728,8 @@ export class ShowCellDrone extends Drone {
             // dimmed/inert for bytes that may never come.
             if (!this.#fillMissedSigs.has(sig)) {
               this.#fillMissedSigs.add(sig)
-              this.#forceNextRender = true
-              this.requestRender()
+              // The shade reads #fillMissedSigs: the cells holding this sig repaint.
+              this.#dirty(label ? [label, ...this.#labelsHolding(sig)] : this.#labelsHolding(sig), 'host-fill-missed')
             }
             return
           }
@@ -9732,9 +9753,15 @@ export class ShowCellDrone extends Drone {
           // bare requestRender is a no-op at an unchanged location
           // (fast-path skip on renderedCellsKey), so the landed bytes
           // would never paint until an unrelated invalidation.
-          if (label && cacheOwner === this.#derivedLocationKey) this.cellImageCache.delete(label)
-          this.#forceNextRender = true
-          this.requestRender()
+          // ONE CELL, NOT A PASS (single-paint.md V5): the label this fill was
+          // for re-derives from the fresh bytes; a nested fetch (no label)
+          // repaints the cells whose cached signature it is.
+          if (label && cacheOwner === this.#derivedLocationKey) {
+            this.cellImageCache.delete(label)
+            this.#dirty(label, 'host-fill')
+          } else {
+            this.#dirty(this.#labelsHolding(sig), 'host-fill')
+          }
         } catch { /* bounded by the Store's miss cache */ }
         finally {
           this.#hostFillInFlight.delete(sig)
@@ -10256,7 +10283,7 @@ export class ShowCellDrone extends Drone {
       void (async () => {
         try {
           const pairs: Array<[string, string]> = []
-          let repaint = false
+          const repaint: string[] = []
           for (const [label, served] of unresolvedByLabel) {
             const headSig = headSigByLabel.get(label)
             if (!headSig || this.#propslessHeads.has(headSig)) continue
@@ -10278,7 +10305,7 @@ export class ShowCellDrone extends Drone {
             // repaint with the canonical answer now, not next pass.
             if (served !== canonical && cacheOwner === this.#derivedLocationKey) {
               this.cellImageCache.delete(label)
-              repaint = true
+              repaint.push(label)
             }
           }
           if (pairs.length > 0) {
@@ -10291,10 +10318,9 @@ export class ShowCellDrone extends Drone {
             }
             if (dirty) writeTilePropsIndex(freshIndex)
           }
-          if (repaint) {
-            this.#forceNextRender = true
-            this.requestRender()
-          }
+          // The pass painted a fallback that disagrees with canonical: those
+          // cells repaint with the canonical answer now, not next pass.
+          if (repaint.length > 0) this.#dirty(repaint, 'canonical-props')
         } catch { /* cache derivation is best-effort */ }
       })()
     }
