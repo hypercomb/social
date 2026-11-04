@@ -136,6 +136,11 @@ export class PeerModelsDrone extends Drone {
   #serving = 0
   /** When the participant last used a local model themselves. */
   #ownUseAt = 0
+  /** Bumped on every resubscribe: an older one still awaiting gives way, so a
+   *  burst of room / secret / zone moves leaves exactly one set of REQs open. */
+  #generation = 0
+  /** A resubscribe is already queued for this turn. */
+  #queued = false
   /** Offers already turned into providers this session (dedup of replays). */
   readonly #seenOffers = new Set<string>()
 
@@ -158,12 +163,23 @@ export class PeerModelsDrone extends Drone {
     // themselves — their work is why the cooldown exists.
     this.onEffect('llm:local-used', () => { this.#ownUseAt = Date.now() })
 
-    await this.#resubscribe()
-    EffectBus.on('mesh:public-changed', () => void this.#resubscribe())
-    EffectBus.on('mesh:room', () => void this.#resubscribe())
-    EffectBus.on('mesh:secret', () => void this.#resubscribe())
+    // Any of these moves the rendezvous; they usually move together (join a
+    // room = room + secret + zone), so they coalesce to one resubscribe after
+    // the writer's turn. Subscribing replays the last value of each - state
+    // the first resubscribe below already reads - so those replays are ignored.
+    let replaying = true
+    const again = (): void => {
+      if (replaying || this.#queued) return
+      this.#queued = true
+      queueMicrotask(() => { this.#queued = false; void this.#resubscribe() })
+    }
+    this.onEffect('mesh:public-changed', again)
+    this.onEffect('mesh:room', again)
+    this.onEffect('mesh:secret', again)
     // Another meeting point is another room (core roomPreimage).
-    EffectBus.on('mesh:zone', () => void this.#resubscribe())
+    this.onEffect('mesh:zone', again)
+    replaying = false
+    await this.#resubscribe()
 
     // Renew while the tab is open; expire what peers stopped renewing.
     this.#offerTimer = setInterval(() => {
@@ -203,22 +219,30 @@ export class PeerModelsDrone extends Drone {
   }
 
   async #resubscribe(): Promise<void> {
-    const mesh = this.#mesh()
-    const me = await this.#me()
+    const generation = ++this.#generation
+    const current = (): boolean => generation === this.#generation
+    // Closed before any await: a newer call owns the subscriptions from here,
+    // and each step below gives way to it the moment it has been superseded.
     this.#offerSub?.close(); this.#offerSub = null
     this.#requestSub?.close(); this.#requestSub = null
     this.#replySub?.close(); this.#replySub = null
-    if (!mesh || !me) return
+
+    const mesh = this.#mesh()
+    const me = await this.#me()
+    if (!current() || !mesh || !me) return
 
     const offers = await this.#channel('peer-models')
+    if (!current()) return
     if (offers) this.#offerSub = mesh.subscribe(offers, e => void this.#onOffer(e))
 
     // Requests addressed to me — only meaningful while lending, but the
     // subscription is cheap and a refusal is a better answer than silence.
     const inbox = await this.#channel('peer-model-request', me)
+    if (!current()) return
     if (inbox) this.#requestSub = mesh.subscribe(inbox, e => void this.#onRequest(e))
 
     const replies = await this.#channel('peer-model-reply', me)
+    if (!current()) return
     if (replies) this.#replySub = mesh.subscribe(replies, e => this.#onReply(e))
 
     void this.#publishOffer()
@@ -483,6 +507,7 @@ export class PeerModelsDrone extends Drone {
   offeringPeers(): number { return this.#offered.size }
 
   override dispose(): void {
+    this.#generation++                            // an in-flight resubscribe gives way
     if (this.#offerTimer) clearInterval(this.#offerTimer)
     this.#offerSub?.close()
     this.#requestSub?.close()
