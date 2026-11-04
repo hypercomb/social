@@ -91,16 +91,14 @@ export class DesktopMoveInput {
     const axial = this.#clientToAxial(e.clientX, e.clientY)
     if (!axial) return
 
-    // Move engages ONLY on an already-selected tile — select first (Ctrl-click),
-    // then drag to move. A press on an UNSELECTED tile is left to the selection
-    // drone so Ctrl-click-to-select is never hijacked by the drag. (One-gesture
-    // grab-and-drag of an unselected tile was reverted: on a trackpad the jitter
-    // in a Ctrl-CLICK crossed the drag threshold, fired move:drag-end, and
-    // suppressed the tile:click — breaking selection entirely.)
+    // A selected tile drags with its whole selection. An UNSELECTED tile drags
+    // alone — but only on a plain press: a Ctrl/Meta press is Ctrl-click-to-select
+    // and stays with the selection drone, so trackpad jitter in that click can
+    // never cross the drag threshold and swallow the tile:click.
     const label = this.#drone?.labelAtAxial(axial) ?? null
     if (!label) return
     const selection = window.ioc.get<{ selected: ReadonlySet<string> }>('@diamondcoreprocessor.com/SelectionService')
-    if (!selection?.selected.has(label)) return
+    if (!selection?.selected.has(label) && (e.ctrlKey || e.metaKey)) return
 
     // Ctrl-drag COPY is disabled for now. A copy would mint a same-content tile
     // with an auto-generated "<label> copy" name — but in Hypercomb the NAME is

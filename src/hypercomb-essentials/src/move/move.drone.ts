@@ -339,20 +339,19 @@ export class MoveDrone extends Drone {
 
     this.#movedGroup.clear()
     if (selected && selected.size > 0) {
-      if (!selected.has(anchorLabel)) {
-        this.#dragLabels = []
-        this.#dragCoords = []
-        this.#end(source)
-        return false
-      }
-      for (let i = 0; i < this.#dragLabels.length; i++) {
-        const label = this.#dragLabels[i]
-        if (!label) continue
-        const coord = this.#dragCoords[i] as Axial | undefined
-        if (!coord) continue
-        if (selected.has(label)) {
-          this.#movedGroup.set(label, { q: coord.q, r: coord.r })
+      // An unselected anchor drags alone; the selection stays where it is.
+      if (selected.has(anchorLabel)) {
+        for (let i = 0; i < this.#dragLabels.length; i++) {
+          const label = this.#dragLabels[i]
+          if (!label) continue
+          const coord = this.#dragCoords[i] as Axial | undefined
+          if (!coord) continue
+          if (selected.has(label)) {
+            this.#movedGroup.set(label, { q: coord.q, r: coord.r })
+          }
         }
+      } else {
+        this.#movedGroup.set(anchorLabel, { q: anchorAxial.q, r: anchorAxial.r })
       }
     } else {
       this.#movedGroup.set(anchorLabel, { q: anchorAxial.q, r: anchorAxial.r })
