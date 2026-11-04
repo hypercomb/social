@@ -40,6 +40,7 @@ import type { Application, Container } from 'pixi.js'
 import { DEFAULT_HEX_GEOMETRY, type HexGeometry } from '../grid/hex-geometry.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import { TILE_STACK_DEPTHS, type TileStackDepths } from './tile-stack.js'
+import { BLOOM, BLOOM_EASE_CSS, BLOOM_TOTAL_MS, bloomDelayMs, flowerRingKey, flowerSlots } from './flower-motion.js'
 
 type Axial = { q: number; r: number }
 type CellCountPayload = { count: number; labels: string[]; coords: Axial[] }
@@ -135,6 +136,14 @@ const HONEY_TEXT_ONLY_FIT_R = 70 / 46
 /** A glyph under this many screen px is dropped; the word stays. */
 const HONEY_ICON_MIN_PX = 11
 
+// THE BLOOM (flower-motion.ts): when the quick menu's ring opens, each name eases
+// in with its tile, from BLOOM.fromScale and nothing, about the TILE's centre, not the
+// span's own. The span is transformed from the world origin (transform-origin
+// 0 0), so scaling about the tile centre c is scale(s) after translate(c(1 - s)),
+// and both interpolate on the same curve: (1 - s) = (1 - fromScale)(1 - e).
+/** How far the tile's centre is pulled in at the start, as a CSS number. */
+const BLOOM_OPEN = Number((1 - BLOOM.fromScale).toFixed(4))
+
 const STYLE = `
 .hc-tile-names{position:absolute;left:0;top:0;overflow:hidden;pointer-events:none;user-select:none;z-index:1}
 .hc-tile-names-world{position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0}
@@ -157,6 +166,9 @@ const STYLE = `
 .hc-tile-names-world>span.hc-flower-name.hc-honey.lit{color:${HONEY_INK_LIT}}
 .hc-tile-names-world>span.hc-flower-name.hc-honey.back{color:${HONEY_INK_BACK}}
 .hc-tile-names-world>span.hc-flower-name.hc-honey .hc-flower-icon{font-size:1em;opacity:1;color:inherit}
+@keyframes hc-flower-bloom{from{opacity:0;scale:${BLOOM.fromScale};translate:calc(var(--hc-bloom-x) * ${BLOOM_OPEN}) calc(var(--hc-bloom-y) * ${BLOOM_OPEN})}to{opacity:1;scale:1;translate:0 0}}
+.hc-tile-names-world>span.hc-flower-name.hc-bloom{animation:hc-flower-bloom ${BLOOM.durationMs}ms ${BLOOM_EASE_CSS} both}
+@media (prefers-reduced-motion:reduce){.hc-tile-names-world>span.hc-flower-name.hc-bloom{animation:none}}
 `
 
 export class TileNameDrone extends Drone {
@@ -190,6 +202,10 @@ export class TileNameDrone extends Drone {
   #flowerSpans: HTMLSpanElement[] = []
   /** The honey options' glyphs among them: dropped when the tile is too small to hold one. */
   #flowerIcons: HTMLSpanElement[] = []
+  /** The ring that last bloomed ('' none), and when (performance.now): a
+   *  highlight repaints the names but never blooms them again. */
+  #flowerRing = ''
+  #flowerBloomAt = -Infinity
   /** Width of a word in em at the name face, by face and word (see #honeyLabelEm). */
   #wordEm = new Map<string, number>()
   #measure: CanvasRenderingContext2D | null | undefined
@@ -369,37 +385,74 @@ export class TileNameDrone extends Drone {
     this.#flowerSpans = []
     this.#flowerIcons = []
     this.#root?.classList.toggle('hc-flower-up', cells.length > 0)
+    const slots = this.#flowerBloomSlots(cells)
     const sc = this.#showCell()
-    for (const cell of cells) {
-      if (cell.honey && !cell.subject) { this.#honeyName(cell, family); continue }
-      // A name the tile keeps to itself stays unwritten, but the note says how
-      // many tiles the menu speaks for and must always be read.
-      const nameless = !!cell.subject && !!sc?.nameHidden(cell.label)
-      if (nameless && !cell.note) continue
-      const span = document.createElement('span')
-      span.className = 'hc-flower-name'
-      if (!nameless) {
-        const name = document.createElement('span')
-        name.className = 'hc-tile-name-text'
-        name.textContent = cell.icon ?? (cell.subject ? sc?.displayNameFor(cell.label) ?? cell.label : cell.label)
-        if (cell.icon) name.className = cell.lit ? 'hc-flower-icon mat-sym lit' : 'hc-flower-icon mat-sym'
-        span.appendChild(name)
-      }
-      if (cell.note) {
-        const note = document.createElement('span')
-        note.className = 'hc-flower-note'
-        note.textContent = cell.note
-        span.appendChild(note)
-      }
-      const px = this.#axialToPixel(cell.q, cell.r)
-      const at = this.#placement(px.x + this.#meshOffset.x, px.y + this.#meshOffset.y)
-      span.style.maxWidth = at.maxWidth
-      span.style.transform = at.transform
-      this.#world?.appendChild(span)
-      this.#flowerSpans.push(span)
+    for (const [i, cell] of cells.entries()) {
+      const from = this.#flowerSpans.length
+      this.#flowerCell(cell, family, sc)
+      // the subject is the tile the menu opened on, already showing: it never blooms
+      if (slots && !cell.subject) this.#bloomSpans(this.#flowerSpans.slice(from), cell, slots[i])
     }
     this.#fitFlowerIcons()
     this.#placeAll()
+  }
+
+  /** The quick menu's ring blooms when it opens (flower-motion.ts): the slots its
+   *  names ease in by, or null when nothing blooms — no honey, reduced motion, a
+   *  hidden tab, or a repaint of a ring whose bloom is over. A repaint during the
+   *  bloom (a highlight) keeps it going where it is. */
+  #flowerBloomSlots(cells: FlowerCell[]): number[] | null {
+    const still = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const ring = !still && cells.some(c => c.honey && !c.subject) ? flowerRingKey(cells) : ''
+    if (ring !== this.#flowerRing) {
+      this.#flowerRing = ring
+      this.#flowerBloomAt = ring && !document.hidden ? performance.now() : -Infinity
+    }
+    if (!ring || performance.now() - this.#flowerBloomAt >= BLOOM_TOTAL_MS) return null
+    return flowerSlots(cells.map(c => ({ ...this.#axialToPixel(c.q, c.r), subject: !!c.subject })), this.#flat)
+  }
+
+  /** Ease a tile's names in with it: about the tile's centre, from its slot's
+   *  moment, already as far along as the bloom is. */
+  #bloomSpans(spans: HTMLSpanElement[], cell: FlowerCell, slot: number): void {
+    const px = this.#axialToPixel(cell.q, cell.r)
+    const delay = bloomDelayMs(slot) - (performance.now() - this.#flowerBloomAt)
+    for (const span of spans) {
+      span.style.setProperty('--hc-bloom-x', `${px.x + this.#meshOffset.x}px`)
+      span.style.setProperty('--hc-bloom-y', `${px.y + this.#meshOffset.y}px`)
+      span.style.animationDelay = `${delay}ms`
+      span.classList.add('hc-bloom')
+    }
+  }
+
+  /** One flower tile's names. */
+  #flowerCell(cell: FlowerCell, family: string, sc: ShowCellLike | null): void {
+    if (cell.honey && !cell.subject) { this.#honeyName(cell, family); return }
+    // A name the tile keeps to itself stays unwritten, but the note says how
+    // many tiles the menu speaks for and must always be read.
+    const nameless = !!cell.subject && !!sc?.nameHidden(cell.label)
+    if (nameless && !cell.note) return
+    const span = document.createElement('span')
+    span.className = 'hc-flower-name'
+    if (!nameless) {
+      const name = document.createElement('span')
+      name.className = 'hc-tile-name-text'
+      name.textContent = cell.icon ?? (cell.subject ? sc?.displayNameFor(cell.label) ?? cell.label : cell.label)
+      if (cell.icon) name.className = cell.lit ? 'hc-flower-icon mat-sym lit' : 'hc-flower-icon mat-sym'
+      span.appendChild(name)
+    }
+    if (cell.note) {
+      const note = document.createElement('span')
+      note.className = 'hc-flower-note'
+      note.textContent = cell.note
+      span.appendChild(note)
+    }
+    const px = this.#axialToPixel(cell.q, cell.r)
+    const at = this.#placement(px.x + this.#meshOffset.x, px.y + this.#meshOffset.y)
+    span.style.maxWidth = at.maxWidth
+    span.style.transform = at.transform
+    this.#world?.appendChild(span)
+    this.#flowerSpans.push(span)
   }
 
   /** A honey option: its glyph above its word, two things set apart, each sized

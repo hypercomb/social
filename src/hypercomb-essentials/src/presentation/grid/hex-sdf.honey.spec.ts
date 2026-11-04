@@ -18,6 +18,7 @@ import {
   hexToRgb,
 } from '../../quickmenu/quick-menu.honey.js'
 import { HONEY_ART_EFFECT } from '../../quickmenu/quick-menu.honey-art.js'
+import { FLOWER_CLOCK_PERIOD_S } from '../tiles/flower-motion.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const shader = readFileSync(join(here, 'hex-sdf.shader.ts'), 'utf8')
@@ -74,7 +75,8 @@ describe('hex shader honey — palette matches quick-menu.honey.ts', () => {
     expect(HONEY_LIGHT.x).toBe(-0.5)
     expect(HONEY_LIGHT.y).toBeCloseTo(-0.8660254, 7)
     expect(shader).toContain('const vec2 HONEY_LIGHT = vec2(-0.5, -0.8660254);')
-    expect(shader).toContain(`u_time / ${DRIP_PERIOD_S}.0`)
+    // the drip starts from rest when its tile lights (u_dripAt), on the flower clock
+    expect(shader).toContain(`fract((u_time - u_dripAt) / ${DRIP_PERIOD_S}.0)`)
   })
 })
 
@@ -179,7 +181,8 @@ describe('hex shader honey — the crafted backgrounds', () => {
   })
 
   it('samples the pre-lit row when lit and turns the picture for a flat-top tile', () => {
-    expect(shader).toContain('vec2 q = u_flat > 0.5 ? rot30(p) : p;')
+    // the camera moves the picture inside the turned frame (hex-sdf.motion.spec)
+    expect(shader).toContain('vec2 q = honeyCamera(u_flat > 0.5 ? rot30(p) : p, art);')
     expect(shader).toContain('vec2 at = vec2(art * cell.x, lit ? cell.y : 0.0)')
     expect(shader).toContain('c = honeyArt(p, art, lit);')
   })
@@ -205,9 +208,9 @@ describe('the flower paints honey only where it was asked', () => {
   })
 
   it('the clock wraps on a whole number of drips', () => {
-    const period = Number(/const FLOWER_CLOCK_PERIOD_S = (\d+)/.exec(showCell)?.[1])
-    expect(period).toBeGreaterThan(0)
-    expect(period % DRIP_PERIOD_S).toBe(0)
+    expect(showCell).toContain('% FLOWER_CLOCK_PERIOD_S')
+    expect(FLOWER_CLOCK_PERIOD_S).toBeGreaterThan(0)
+    expect(FLOWER_CLOCK_PERIOD_S % DRIP_PERIOD_S).toBe(0)
   })
 
   it('a foreign cell never writes the page\'s own shape table', () => {

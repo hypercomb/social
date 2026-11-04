@@ -11,7 +11,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QuickMenuRegistry } from './quick-menu-registry.service.js'
 import { QuickMenuOverlay } from './quick-menu.overlay.js'
-import { HONEY, LAYOUT, backIcon, backgroundFor, cancelIcon, emptyIcon, HONEY_STYLE_ID } from './quick-menu.honey.js'
+import {
+  HONEY, LAYOUT, SHEEN, backIcon, backgroundFor, bloomDelayMs, cancelIcon, emptyIcon, HONEY_STYLE_ID, motionFor,
+  sheenDelayS, sheenZones,
+} from './quick-menu.honey.js'
 import type { HoneyArt } from './quick-menu.honey-art.js'
 import { iconPath } from './quick-menu.icons.js'
 import type { QuickMenuDefinition, QuickMenuDirection } from './quick-menu.types.js'
@@ -430,10 +433,12 @@ describe('the crafted backgrounds', () => {
     for (const g of slotGroups(svg)) {
       const rest = href(g, '.hc-qm-art')!
       expect(href(g, '.hc-qm-art-lit')).toBe(rest.replace('rest', 'lit'))
-      // the picture is the whole point-top tile, clipped to the hexagon
+      // the picture is the whole point-top tile, clipped to the hexagon by a
+      // frame that never moves; inside it the picture drifts
       const image = part(g, '.hc-qm-art')
       expect([image.getAttribute('x'), image.getAttribute('y'), image.getAttribute('width'), image.getAttribute('height')]).toEqual(['-40', '-46', '80', '92'])
-      expect(image.getAttribute('clip-path')).toMatch(/^url\(#hq\d+-hex\)$/)
+      expect(image.parentElement?.getAttribute('class')).toBe('hc-qm-drift')
+      expect(image.parentElement?.parentElement?.getAttribute('clip-path')).toMatch(/^url\(#hq\d+-hex\)$/)
       expect(image.getAttribute('aria-hidden')).toBe('true')
     }
   })
@@ -448,13 +453,16 @@ describe('the crafted backgrounds', () => {
     const honey = part(g, '.hc-hq')
     expect(honey.getAttribute('clip-path')).toMatch(/-hex\)$/)
     expect(honey.firstElementChild?.getAttribute('transform')).toMatch(/^translate\(0,-\d+(\.\d+)?\)$/)
-    // the stack: base, picture, lit copy, lit halo, drip, rim
+    // the stack: base, the framed picture (rest under its lit copy), lit halo,
+    // the light, drip, rim
     const order = [...g.children].map(c => c.getAttribute('class') ?? c.tagName)
     const at = (name: string): number => order.indexOf(name)
-    expect(at('hc-qm-base')).toBeLessThan(at('hc-qm-art'))
-    expect(at('hc-qm-art')).toBeLessThan(at('hc-qm-art-lit'))
-    expect(at('hc-qm-art-lit')).toBeLessThan(at('hc-qm-lit'))
-    expect(at('hc-qm-lit')).toBeLessThan(at('hc-hq'))
+    expect(at('hc-qm-base')).toBeLessThan(at('hc-qm-frame'))
+    const drift = [...part(g, '.hc-qm-drift').children].map(c => c.getAttribute('class'))
+    expect(drift).toEqual(['hc-qm-art', 'hc-qm-art-lit'])
+    expect(at('hc-qm-frame')).toBeLessThan(at('hc-qm-lit'))
+    expect(at('hc-qm-lit')).toBeLessThan(at('hc-qm-sheen'))
+    expect(at('hc-qm-sheen')).toBeLessThan(at('hc-hq'))
     expect(at('hc-hq')).toBeLessThan(at('hc-qm-rim'))
   })
 
@@ -540,6 +548,58 @@ describe('the crafted backgrounds', () => {
     const after = overlay.ensure(ROOT, labelOf)
     expect(after).not.toBe(before)
     expect(after.svg.querySelectorAll('.hc-qm-art')).toHaveLength(7)
+  })
+
+  it('writes each tile\'s motion once, at build: its bloom, its drift, its turn for the light', () => {
+    overlay.useArt(art())
+    const { svg } = overlay.ensure(ROOT, labelOf)
+    for (const [i, direction] of DIRECTIONS.entries()) {
+      const g = slotGroups(svg).find(s => s.querySelector('.hc-qm-art')?.getAttribute('href') === `blob:rest-${backgroundFor(ROOT.name, direction)}`)!
+      expect(g.getAttribute('class')).toBe('hc-qm-slot')
+      expect(g.getAttribute('style')).toContain(`--hc-qm-bloom-delay:${bloomDelayMs(i)}ms`)
+      const m = motionFor(backgroundFor(ROOT.name, direction), i)
+      const drift = part(g, '.hc-qm-drift').getAttribute('style')!
+      expect(drift).toContain(`--hc-qm-drift-period:${m.periodS}s`)
+      expect(drift).toContain(`--hc-qm-dx:${m.dx}px`)
+      expect(part(g, '.hc-qm-sheen').getAttribute('style')).toBe(`--hc-qm-sheen-delay:${sheenDelayS(i)}s`)
+      // one band per region, the cap first
+      const bands = [...g.querySelectorAll('.hc-qm-sheen-band')]
+      expect(bands).toHaveLength(sheenZones().length)
+      expect(bands[0].getAttribute('fill-opacity')).toBe(String(SHEEN.inkRest))
+      expect(bands.at(-1)!.getAttribute('fill-opacity')).toBe(String(SHEEN.peakRest))
+    }
+  })
+
+  it('the light is a touch stronger on the lit tile, and gone from back and cancel', () => {
+    overlay.useArt(art())
+    const svg = paint()
+    overlay.highlight('southeast')
+    const tags = slot(svg, 'tags')
+    const bands = [...tags.querySelectorAll('.hc-qm-sheen-band')]
+    expect(bands[0].getAttribute('fill-opacity')).toBe(String(SHEEN.inkLit))
+    expect(bands.at(-1)!.getAttribute('fill-opacity')).toBe(String(SHEEN.peakLit))
+    expect(part(tags, '.hc-qm-sheen').getAttribute('display')).toBeNull()
+    overlay.highlight('east')
+    expect(bands.at(-1)!.getAttribute('fill-opacity')).toBe(String(SHEEN.peakRest))
+    overlay.cancelLabel = 'cancel'
+    overlay.setCancelArmed(true)
+    expect(part(slot(svg, 'cancel'), '.hc-qm-sheen').getAttribute('display')).toBe('none')
+    const def = registry.byName('selection:organize') as QuickMenuDefinition
+    overlay.warm([def], labelOf)
+    overlay.paint(def, { x: 300, y: 300 }, 'northeast', labelOf, 'back')
+    const ring = document.querySelector('#hc-quick-menu svg') as SVGSVGElement
+    expect(part(slot(ring, 'back'), '.hc-qm-sheen').getAttribute('display')).toBe('none')
+  })
+
+  it('under reduced motion the ring is still: the stylesheet only moves a live ring', () => {
+    reduced = true
+    overlay.useArt(art())
+    const svg = paint()
+    expect(svg.getAttribute('data-motion')).toBe('still')
+    reduced = false
+    overlay.clear()
+    overlay.paint(ROOT, { x: 300, y: 300 }, null, labelOf, 'back')
+    expect(svg.getAttribute('data-motion')).toBe('live')
   })
 
   it('the gesture still builds nothing', () => {

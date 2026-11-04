@@ -3,6 +3,9 @@ import { Shader, Texture } from 'pixi.js'
 
 type Vec2 = [number, number]
 
+/** u_flowerBloomAt when no ring is blooming: so far back every tile reads as bloomed. */
+export const FLOWER_BLOOM_DONE = -1e6
+
 export class HexSdfTextureShader {
   public shader: Shader
 
@@ -68,6 +71,15 @@ export class HexSdfTextureShader {
       // (0 = none: the procedural honey) — honey never wears the heat ring, so the
       // channel is free there, and every other tile's heat is untouched.
       u_honeyArtGrid: { value: [0, 0], type: 'vec2<f32>' },
+      // THE FLOWER'S MOTION (presentation/tiles/flower-motion.ts). Read only by a
+      // flower cell (aCellIndex past FLOWER_INDEX_BASE) and the honey, so every
+      // ordinary tile renders exactly as before. u_flowerMotion 1 lets the art
+      // drift and the sheen pass (0: reduced motion, or no honey flower up);
+      // u_flowerBloomAt is the u_time the ring opened (far past: no bloom); the
+      // lit tile's drip starts from rest at u_dripAt.
+      u_flowerMotion: { value: 0, type: 'f32' },
+      u_flowerBloomAt: { value: FLOWER_BLOOM_DONE, type: 'f32' },
+      u_dripAt: { value: 0, type: 'f32' },
     }
 
     // v8 shaded mesh requires uniforms nested under a group and shader inputs using in/out
@@ -202,6 +214,25 @@ export class HexSdfTextureShader {
     this.#ug.update()
   }
 
+  /** The flower's ambient motion: the art's camera drift and the sheen. Off under
+   *  reduced motion and whenever no honey flower is up. */
+  public setFlowerMotion = (on: boolean): void => {
+    this.#ug.uniforms.u_flowerMotion = on ? 1.0 : 0.0
+    this.#ug.update()
+  }
+
+  /** The u_time the flower's ring opened at; FLOWER_BLOOM_DONE for no bloom. */
+  public setFlowerBloomAt = (t: number): void => {
+    this.#ug.uniforms.u_flowerBloomAt = t
+    this.#ug.update()
+  }
+
+  /** The u_time the lit tile's drip started from rest. */
+  public setDripAt = (t: number): void => {
+    this.#ug.uniforms.u_dripAt = t
+    this.#ug.update()
+  }
+
   private toSource = (t: Texture): any => {
     return (t as any).source ?? (t as any).baseTexture?.source ?? (t as any).texture?.source
   }
@@ -238,12 +269,35 @@ export class HexSdfTextureShader {
     out float vShaded;
     out float vShapeMode;
     out vec2 vPresence;
+    out float vBloom;
 
     uniform mat3 uProjectionMatrix;
     uniform mat3 uWorldTransformMatrix;
     uniform mat3 uTransformMatrix;
     uniform float u_time;
     uniform float u_driftAmp;
+    uniform vec2 u_quadSize;
+    uniform float u_flowerBloomAt;
+
+    // ── THE BLOOM (presentation/tiles/flower-motion.ts bloomAt) ─────────────
+    // When a ring opens, each flower tile eases in from 0.92 and nothing over
+    // 260 ms, cubic-bezier(0.2, 0.8, 0.2, 1), its slot (0 the centre, 1..6
+    // clockwise from east) 30 ms after the last. CSS's curve, solved the way a
+    // browser does: Newton on x(t) = k from t = k (x' never falls under 0.48).
+    float bloomEase(float k) {
+      k = clamp(k, 0.0, 1.0);
+      float t = k;
+      for (int i = 0; i < 6; i++) {
+        float u = 1.0 - t;
+        // x1 = x2 = 0.2: x = 0.6 u²t + 0.6 ut² + t³, x' = 0.6 u² + 2.4 t²
+        float x = 0.6 * u * u * t + 0.6 * u * t * t + t * t * t;
+        float dx = 0.6 * u * u + 2.4 * t * t;
+        t = clamp(t - (x - k) / dx, 0.0, 1.0);
+      }
+      float u = 1.0 - t;
+      // y1 = 0.8, y2 = 1
+      return 2.4 * u * u * t + 3.0 * u * t * t + t * t * t;
+    }
 
     void main() {
       mat3 mvp = uProjectionMatrix * uWorldTransformMatrix * uTransformMatrix;
@@ -258,6 +312,23 @@ export class HexSdfTextureShader {
         float stepX = floor(sin(u_time * 0.55) * 4.0) / 4.0;   // quantized → stepped sway
         float bob   = sin(u_time * 2.0) * 0.06;
         p += vec2(stepX * u_driftAmp * 1.6, bob * u_driftAmp);
+      }
+      // Only a flower tile blooms (its cell index is past FLOWER_INDEX_BASE); the
+      // quad shrinks about its own centre, so the picture, the honey and the rim
+      // shrink as one. A time before the ring opened (the clock went back
+      // under it) reads as bloomed. The centre (slot 0) is the tile the menu
+      // opened on, already on screen under the pointer: it never blooms, or it
+      // would blink out and back.
+      vBloom = 1.0;
+      if (aCellIndex > 999999.5) {
+        float since = u_time - u_flowerBloomAt;
+        float slot = floor(aCellIndex - 1000000.0 + 0.5);
+        float k = since < 0.0 || slot < 0.5 ? 1.0 : bloomEase((since * 1000.0 - slot * 30.0) / 260.0);
+        if (k < 1.0) {
+          vec2 centre = p - (aUV - 0.5) * u_quadSize;
+          p = centre + (p - centre) * mix(0.92, 1.0, k);
+        }
+        vBloom = k;
       }
       gl_Position = vec4((mvp * vec3(p, 1.0)).xy, 0.0, 1.0);
       vUV = aUV;
@@ -294,6 +365,7 @@ export class HexSdfTextureShader {
     in float vShaded;
     in float vShapeMode;
     in vec2 vPresence;
+    in float vBloom;
 
     uniform vec2 u_quadSize;
     uniform float u_radiusPx;
@@ -311,6 +383,8 @@ export class HexSdfTextureShader {
     uniform float u_swapMode;
     uniform vec3 u_swapColor;
     uniform vec2 u_honeyArtGrid;
+    uniform float u_flowerMotion;
+    uniform float u_dripAt;
 
     uniform sampler2D u_label;
     uniform sampler2D u_cellImages;
@@ -558,13 +632,74 @@ export class HexSdfTextureShader {
       return HEX(0xff, 0xf1, 0xcf);
     }
 
+    // ── THE FLOWER'S MOTION (presentation/tiles/flower-motion.ts) ─────────────
+    // The DOM ring's numbers (quickmenu/quick-menu.honey.ts DRIFT, SHEEN,
+    // motionFor, sheenDelayS), restated. A flower cell's index is
+    // FLOWER_INDEX_BASE plus its slot: 0 the centre, 1..6 round the ring
+    // clockwise from east. u_time is seconds since the ring opened (the flower
+    // clock is rebased then); every motion is off (u_flowerMotion 0) under
+    // reduced motion. Lengths below are px at R = 46, the ring's own units.
+    float flowerSlot() {
+      return floor(vCellIndex - 1000000.0 + 0.5);
+    }
+
+    // motionFor's three decimals, so the hive's tile moves as the ring's does
+    float honeyR3(float v) {
+      return floor(v * 1000.0 + 0.5) / 1000.0;
+    }
+
+    // THE CAMERA (motionFor, driftPose). Only the art moves, inside a fixed
+    // hexagon: the picture pushes in to 1.035 about the centre and travels 1.2 px
+    // along its own direction, and back, once a 9-13 s period, a sine there and
+    // back. q is the sample point in R, the picture's own point-top frame; the
+    // picture point drawn at q sits at q x scale + travel, so it is read from
+    // (q - travel) / scale. The travel never outruns what the push opens past
+    // the walls (1.2 < 0.035 x 40), so the picture's own edge never shows.
+    vec2 honeyCamera(vec2 q, float art) {
+      if (u_flowerMotion < 0.5) return q;
+      float slot = flowerSlot();
+      float v = max(floor(art + 0.5), 0.0);
+      float period = honeyR3(9.0 + 4.0 * fract((v + 1.0) * 0.7548777 + slot * 0.5698403));
+      // DRIFT_PHASE: the centre half a period in, the ring a third apart round it
+      float share = slot < 0.5 ? 0.5 : fract((slot - 1.0) / 3.0);
+      float phase = honeyR3(period * share);
+      float angle = 6.2831853 * fract(v * 0.381966 + slot * 0.2763932);
+      vec2 travel = vec2(honeyR3(1.2 * cos(angle)), honeyR3(1.2 * sin(angle))) / 46.0;
+      float e = 0.5 - 0.5 * cos(6.2831853 * fract((u_time + phase) / period));
+      return (q - travel * e) / (1.0 + 0.035 * e);
+    }
+
+    // THE SHEEN (sheenDelayS, sheenOffset). One soft warm band, full across
+    // 12 px with 6 px of fade either side, glides top-left to bottom-right in
+    // 1 s, a sine in and out. The light visits one slot at a time: east first,
+    // clockwise, the middle last, each its own seventh of an 8 s cycle, after a
+    // 0.6 s lead that lets the bloom end. 0.16 at rest, 0.22 lit, and over the
+    // glyph and the word (x -32..32, y -24..27) only 0.06, or 0.10 lit, so the
+    // ink keeps 4.5:1; the cap eases back out to the peak over the 12 px the
+    // ring's feather rings span (sheenZones), never brighter than they are.
+    // p is in R, the tile's screen frame (the words are never turned).
+    float honeySheen(vec2 p, bool lit) {
+      if (u_flowerMotion < 0.5) return 0.0;
+      float k = mod(flowerSlot() - 1.0, 7.0);
+      float local = u_time - honeyR3(0.6 + 8.0 * k / 7.0);
+      if (local < 0.0) return 0.0;
+      float x = mod(local, 8.0);
+      if (x >= 1.0) return 0.0;
+      float at = -58.0 + 116.0 * (0.5 - 0.5 * cos(3.14159265 * x));
+      vec2 u = p * 46.0;
+      float profile = clamp((12.0 - abs((u.x + u.y) * 0.7071068 - at)) / 6.0, 0.0, 1.0);
+      float outside = max(abs(u.x) - 32.0, max(-24.0 - u.y, u.y - 27.0));
+      float share = clamp(outside / 12.0, 0.0, 1.0);
+      return profile * mix(lit ? 0.10 : 0.06, lit ? 0.22 : 0.16, share);
+    }
+
     // ── the crafted backgrounds (quickmenu/quick-menu.honey-art.ts) ──────────
     // Variation art's picture at p (in R, y down), at rest or pre-lit. Each
     // picture is a point-top tile in a -40 -46 80 92 box at R = 46, inside a
     // padded atlas cell; a flat-top tile reads it turned 30°. Laid over the
     // darkest honey wherever the picture is not opaque.
     vec3 honeyArt(vec2 p, float art, bool lit) {
-      vec2 q = u_flat > 0.5 ? rot30(p) : p;
+      vec2 q = honeyCamera(u_flat > 0.5 ? rot30(p) : p, art);
       vec2 box = clamp(vec2((q.x * 46.0 + 40.0) / 80.0, (q.y * 46.0 + 46.0) / 92.0), 0.0, 1.0);
       vec2 size = vec2(textureSize(u_honeyArt, 0));
       vec2 cell = vec2(size.x / u_honeyArtGrid.x, size.y * 0.5);
@@ -623,6 +758,9 @@ export class HexSdfTextureShader {
       }
       // the lit halo, three px inside the wall
       if (lit && !back) c = mix(c, HEX(0xff, 0xd9, 0x8a), 0.22 * honeyBand(e, 0.065, w));
+      // the light passing over the picture, under the drip and the rim (a crafted
+      // background only, as the ring draws it: never the way back)
+      if (crafted) c = mix(c, HEX(0xff, 0xf4, 0xd6), honeySheen(p, lit));
 
       if (!back && p.y < 0.12 && (!crafted || lit)) {
         // THE POUR LIP, with two teardrops hanging either side of the icon. The
@@ -641,7 +779,7 @@ export class HexSdfTextureShader {
         float radB = 0.056 + 0.020 * hB;
 
         // rest · swell · neck · pinch (to 0.58), then it falls and regrows
-        float u = animated ? fract(u_time / 11.0) : 0.0;
+        float u = animated ? fract((u_time - u_dripAt) / 11.0) : 0.0;
         bool fell = u >= 0.58;
         float swell = 0.5 - 0.5 * cos(3.14159265 * clamp((u - 0.10) / 0.28, 0.0, 1.0));
         float neck = clamp((u - 0.38) / 0.14, 0.0, 1.0);
@@ -1270,6 +1408,8 @@ export class HexSdfTextureShader {
       // hover treatments keep their relative contrast as one coherent tile.
       const float HIVE_ALPHA = 0.88;
       color.a *= hexAlpha * (honey ? 1.0 : HIVE_ALPHA);
+      // a flower tile fades in with its bloom (the vertex stage shrinks it)
+      if (vCellIndex > 999999.5) color.a *= vBloom;
       color.rgb *= color.a;
       fragColor = color;
     }

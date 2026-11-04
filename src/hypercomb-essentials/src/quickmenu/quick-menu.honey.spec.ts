@@ -358,11 +358,13 @@ describe('the stylesheet', () => {
 
   it('animates transform and opacity only', () => {
     const keyframes = css.match(/@keyframes[^{]+\{(?:[^{}]*\{[^}]*\})+[^}]*\}/g) ?? []
-    expect(keyframes).toHaveLength(4)
+    // the drip's four, then the bloom, the drift and the light
+    expect(keyframes).toHaveLength(7)
     for (const block of keyframes) {
       const props = [...block.matchAll(/(?:^|[{;\s])([a-z-]+):/g)].map(m => m[1])
       for (const prop of props) {
-        expect(['transform', 'opacity', 'animation-timing-function']).toContain(prop)
+        // `scale` is the individual transform property (the bloom keeps the slot's translate)
+        expect(['transform', 'scale', 'opacity', 'animation-timing-function']).toContain(prop)
       }
     }
   })

@@ -12,9 +12,33 @@ import { Container, Graphics, Point, Text, TextStyle, type Application, type Spr
 import { containerScreenScale, screenTextResolution } from '../presentation/grid/screen-text-resolution.js'
 import { DEFAULT_HEX_GEOMETRY, type HexGeometry } from '../presentation/grid/hex-geometry.js'
 import { drawsAsGlyph } from '../commands/material-glyph.js'
-import { drawHexMask, drawHoney, drawHoneyRim, honeyArtFrames, honeyArtSprite } from './quick-menu.honey-graphics.js'
-import { backgroundFor, backIcon, HONEY, LAYOUT, ringSeed, slotIndexOf } from './quick-menu.honey.js'
-import { HONEY_ART_EFFECT, warmHoneyArt, type HoneyArt } from './quick-menu.honey-art.js'
+import {
+  drawHexMask,
+  drawHoney,
+  drawHoneyRim,
+  drawSheenBand,
+  drawSheenZone,
+  honeyArtFrames,
+  honeyArtSprite,
+} from './quick-menu.honey-graphics.js'
+import {
+  backgroundFor,
+  backIcon,
+  bloomPose,
+  BLOOM,
+  driftPose,
+  HONEY,
+  LAYOUT,
+  motionFor,
+  ringSeed,
+  SHEEN,
+  sheenAlpha,
+  sheenOffset,
+  sheenZones,
+  slotIndexOf,
+  type TileMotion,
+} from './quick-menu.honey.js'
+import { HONEY_ART_EFFECT, HONEY_ART_TILE, warmHoneyArt, type HoneyArt } from './quick-menu.honey-art.js'
 import { HONEY_BACKGROUNDS } from './quick-menu.backgrounds.js'
 import { currentOperands, operandNote } from './quick-menu.operands.js'
 import {
@@ -50,6 +74,8 @@ function prefersReducedMotion(): boolean {
   }
 }
 
+const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now())
+
 type LabelOf =(slot: { label: string; labelKey?: string }) => string
 
 type PendingMenu = {
@@ -84,15 +110,33 @@ export type FlowerCell = {
 
 type SlotView = {
   readonly direction: QuickMenuDirection
+  /** The whole tile, centred on the slot: what the bloom scales and fades. */
+  readonly node: Container
   /** The honey, or with a crafted background only its rim and lit halo. */
   readonly hex: Graphics
   readonly text: Text
   readonly back: boolean
   /** The slot's honey seed: the same slot looks the same on every open. */
   readonly seed: number
-  /** The crafted background and its two frames, when the slot wears one. */
-  readonly art: { readonly sprite: Sprite; readonly rest: Texture; readonly lit: Texture } | null
+  /** slotIndexOf(direction): the bloom's and the light's place in the order. */
+  readonly index: number
+  /** The crafted background and its two frames, when the slot wears one, with
+   *  its slow camera and the light that crosses it. */
+  readonly art: {
+    readonly sprite: Sprite
+    readonly rest: Texture
+    readonly lit: Texture
+    /** The sprite's scale and turn at rest (the drift multiplies the one and follows the other). */
+    readonly base: number
+    readonly turn: number
+    readonly motion: TileMotion
+    readonly sheen: Container
+    readonly bands: readonly { readonly band: Graphics; readonly share: number }[]
+  } | null
 }
+
+/** The band of light runs top-left to bottom-right on screen. */
+const SHEEN_DIR = { x: Math.cos((SHEEN.angleDeg * Math.PI) / 180), y: Math.sin((SHEEN.angleDeg * Math.PI) / 180) }
 
 type HostReady = {
   container?: Container
@@ -146,6 +190,16 @@ export class QuickMenuLayer {
   #asleep = false
   /** The crafted backgrounds, once drawn (quick-menu.honey-art.ts). */
   #art: HoneyArt | null = null
+  /** When the ring now showing appeared (performance.now()): the bloom, the
+   *  drift and the light all run from here. Reset by show(), never by a redraw. */
+  #motionStart = 0
+  /** The ring's frame loop: a requestAnimationFrame chain that runs only while
+   *  a ring is drawn in place, the tab is visible and motion is allowed. */
+  #motionRaf = 0
+  #visibilityWatched = false
+  /** Reduced motion, read at every paint of the ring (not every frame): the
+   *  tiles are simply there and the pictures still. */
+  #still = false
 
   constructor() {
     EffectBus.on<HostReady>('render:host-ready', (payload) => {
@@ -361,6 +415,8 @@ export class QuickMenuLayer {
     this.#stopCue()
     this.#pending = { definition, labelOf, back, backLabel }
     this.#byDirection = slotsByDirection(definition)
+    // a new ring blooms; a redraw of the same one (geometry, the pictures arriving) does not
+    this.#motionStart = now()
     this.#ensureRoot()
     this.#paintSlots()
   }
@@ -376,6 +432,7 @@ export class QuickMenuLayer {
       // A flight: nothing is drawn here. Until it lands the real tile flies in
       // on its own; once it has, the hive draws the flower.
       root.visible = false
+      this.#stopMotion()
       this.#place()
       if (this.#bloomed) this.#paintFlower(pending)
       return
@@ -394,7 +451,12 @@ export class QuickMenuLayer {
       if (!slot && !isBack) continue
       const word = isBack ? pending.backLabel : pending.labelOf(slot!)
       const unit = cellUnit(direction, metrics.flat)
-      const seed = ringSeed(slotIndexOf(direction), pending.definition.name)
+      const index = slotIndexOf(direction)
+      const seed = ringSeed(index, pending.definition.name)
+      // Each tile is one container on its slot, everything in it centred on
+      // the origin: the bloom scales and fades the container, nothing else.
+      const node = new Container()
+      node.position.set(unit.x * metrics.reach, unit.y * metrics.reach)
       const hex = new Graphics()
       const text = new Text({
         text: word,
@@ -406,21 +468,23 @@ export class QuickMenuLayer {
       // The word alone (no glyph here), set to the width the ring gives a bare word.
       const max = (metrics.radius * LAYOUT.usableText) / HEX_RADIUS
       if (text.width > max && text.width > 0) text.scale.set(max / text.width)
-      text.position.set(unit.x * metrics.reach, unit.y * metrics.reach)
-      hex.position.set(text.position.x, text.position.y)
-      const art = isBack ? null : this.#artFor(backgroundFor(pending.definition.name, direction), metrics.radius, metrics.flat)
+      const variation = backgroundFor(pending.definition.name, direction)
+      const art = isBack ? null : this.#artFor(variation, index, metrics.radius, metrics.flat)
       if (art) {
-        art.sprite.position.set(text.position.x, text.position.y)
-        art.mask.position.set(text.position.x, text.position.y)
-        root.addChild(art.sprite)
-        root.addChild(art.mask)
+        node.addChild(art.sprite)
+        node.addChild(art.mask)
+        node.addChild(art.sheen)
       }
-      root.addChild(hex)
-      root.addChild(text)
-      this.#slots.set(direction, { direction, hex, text, back: isBack, seed, art })
+      node.addChild(hex)
+      node.addChild(text)
+      root.addChild(node)
+      this.#slots.set(direction, { direction, node, hex, text, back: isBack, seed, index, art })
       this.#style(direction, direction === lit)
     }
     this.#place()
+    this.#still = prefersReducedMotion()
+    this.#pose(now())
+    this.#runMotion()
   }
 
   highlight(direction: QuickMenuDirection | null): void {
@@ -436,6 +500,7 @@ export class QuickMenuLayer {
     this.#showing = false
     this.#lit = null
     this.#stopCue()
+    this.#stopMotion()
     this.#pending = null
     this.#local = null
     this.#subject = null
@@ -509,6 +574,8 @@ export class QuickMenuLayer {
     if (!view) return
     if (view.art) {
       view.art.sprite.texture = on ? view.art.lit : view.art.rest
+      // the light is a little stronger on the lit tile, and capped over the word
+      for (const { band, share } of view.art.bands) band.alpha = sheenAlpha(share, on)
       drawHoneyRim(view.hex, this.#metrics().radius, this.#flat, on)
     } else {
       drawHoney(view.hex, this.#metrics().radius, this.#flat, { lit: on, back: view.back }, view.seed)
@@ -516,18 +583,119 @@ export class QuickMenuLayer {
     view.text.style.fill = view.back ? HONEY.ink.back : on ? HONEY.ink.lit : HONEY.ink.rest
   }
 
-  /** A crafted background as a Sprite masked to the hexagon, or null while the
-   *  pictures are not drawn (or this one failed): the slot is honey then. */
-  #artFor(index: number, radius: number, flat: boolean): { sprite: Sprite; mask: Graphics; rest: Texture; lit: Texture } | null {
+  /** A crafted background as a Sprite masked to the hexagon, with its slow
+   *  camera and the light that crosses it, or null while the pictures are not
+   *  drawn (or this one failed): the slot is honey then. */
+  #artFor(variation: number, slotIndex: number, radius: number, flat: boolean): (NonNullable<SlotView['art']> & { mask: Graphics }) | null {
     const frames = this.#art ? honeyArtFrames(this.#art) : null
-    const rest = frames?.rest[index]
-    const lit = frames?.lit[index]
+    const rest = frames?.rest[variation]
+    const lit = frames?.lit[variation]
     if (!rest || !lit) return null
     const sprite = honeyArtSprite(rest, radius, flat)
     const mask = new Graphics()
     drawHexMask(mask, radius, flat)
     sprite.mask = mask
-    return { sprite, mask, rest, lit }
+
+    // The light: one band per region (capped over the word, feathered out to
+    // the peak), each masked to its region; the regions tile the hexagon.
+    // Drawn once; the frame loop only moves the bands.
+    const sheen = new Container()
+    sheen.visible = false
+    const bands = sheenZones().map(zone => {
+      const band = new Graphics()
+      drawSheenBand(band, radius)
+      band.rotation = (SHEEN.angleDeg * Math.PI) / 180
+      const region = new Graphics()
+      drawSheenZone(region, radius, flat, zone)
+      band.mask = region
+      band.alpha = sheenAlpha(zone.share, false)
+      sheen.addChild(region)
+      sheen.addChild(band)
+      return { band, share: zone.share }
+    })
+    return {
+      sprite, mask, rest, lit,
+      base: (2 * radius) / HONEY_ART_TILE.height,
+      turn: flat ? -Math.PI / 6 : 0,
+      motion: motionFor(variation, slotIndex),
+      sheen, bands,
+    }
+  }
+
+  // ── ambient motion ──────────────────────────────────────────────────
+
+  /** Every tile at time `at`: its bloom, its picture's drift, the light's place.
+   *  Transforms and alphas on what was drawn at paint; nothing is redrawn. */
+  #pose(at: number): void {
+    const motion = !this.#still
+    const elapsed = at - this.#motionStart
+    const s = this.#metrics().radius / HEX_RADIUS
+    for (const view of this.#slots.values()) {
+      const bloom = motion ? bloomPose(elapsed, view.index) : { scale: 1, opacity: 1 }
+      view.node.scale.set(bloom.scale)
+      view.node.alpha = bloom.opacity
+      const art = view.art
+      if (!art) continue
+      const drift = motion ? driftPose(elapsed / 1000, art.motion) : { scale: 1, dx: 0, dy: 0 }
+      art.sprite.scale.set(art.base * drift.scale)
+      // the drift is along the picture's own axes, so a turned picture turns it too
+      const cos = Math.cos(art.turn), sin = Math.sin(art.turn)
+      art.sprite.position.set((drift.dx * cos - drift.dy * sin) * s, (drift.dx * sin + drift.dy * cos) * s)
+      const offset = motion ? sheenOffset(elapsed / 1000, view.index) : null
+      art.sheen.visible = offset !== null
+      if (offset !== null) {
+        for (const { band } of art.bands) band.position.set(SHEEN_DIR.x * offset * s, SHEEN_DIR.y * offset * s)
+      }
+    }
+  }
+
+  /** Is there anything left to move? Pictures drift for as long as the ring is
+   *  up; procedural honey only blooms. */
+  #moving(at: number): boolean {
+    if (!this.#showing || !this.#root?.visible || this.#still) return false
+    for (const view of this.#slots.values()) if (view.art) return true
+    return at - this.#motionStart < BLOOM.durationMs + BLOOM.staggerMs * 7
+  }
+
+  /** Run the frame loop while there is something to move and the tab is
+   *  visible: a hidden tab holds the pose and restarts when shown. */
+  #runMotion(): void {
+    if (this.#motionRaf || typeof requestAnimationFrame !== 'function') return
+    if (typeof document !== 'undefined' && document.hidden) { this.#watchVisibility(); return }
+    if (!this.#moving(now())) return
+    this.#watchVisibility()
+    const tick = (): void => {
+      this.#motionRaf = 0
+      const at = now()
+      this.#pose(at)
+      if (!this.#moving(at) || (typeof document !== 'undefined' && document.hidden)) return
+      this.#motionRaf = requestAnimationFrame(tick)
+    }
+    this.#motionRaf = requestAnimationFrame(tick)
+  }
+
+  #stopMotion(): void {
+    if (this.#motionRaf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(this.#motionRaf)
+    this.#motionRaf = 0
+    if (this.#visibilityWatched && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.#onVisibility)
+      this.#visibilityWatched = false
+    }
+  }
+
+  #watchVisibility(): void {
+    if (this.#visibilityWatched || typeof document === 'undefined') return
+    document.addEventListener('visibilitychange', this.#onVisibility)
+    this.#visibilityWatched = true
+  }
+
+  #onVisibility = (): void => {
+    if (document.hidden) {
+      if (this.#motionRaf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(this.#motionRaf)
+      this.#motionRaf = 0
+      return
+    }
+    this.#runMotion()
   }
 
   /** The word alone, as the ring sets a bare word: 13 px at R = 46, weight 400

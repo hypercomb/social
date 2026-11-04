@@ -28,7 +28,9 @@
 // bright amber, the rim turns pale gold, the ink flips from cream to near
 // black, and the lit tile alone has ONE slow drip. The drip is a periodic
 // function of time, so reduced motion, a stopped clock and a hidden tab all
-// show a finished picture (u = 0 is the full static look).
+// show a finished picture (u = 0 is the full static look). A crafted
+// background also breathes, quietly (the ambient motion section below): a slow
+// camera drift, one pass of light round the ring, a bloom when a ring opens.
 //
 // ── Units ─────────────────────────────────────────────────────────────
 //
@@ -526,6 +528,196 @@ export function blobStart(drip: DripShape): { cx: number; cy: number; r: number 
   return { cx: drip.x, cy: drip.y0 + drip.h + NECK_PX, r: drip.radius * BEAD_GROW }
 }
 
+// ── ambient motion: the camera on each picture ────────────────────────
+//
+// Three quiet movements, all periodic or one-shot functions of time so every
+// renderer (the DOM ring's CSS, the Pixi ring's frame loop, the flower shader)
+// computes the same pose from the same numbers. Only a crafted background
+// moves: the hexagon, its rim, the icon and the label stay where they are.
+//
+//   1. DRIFT: each picture pushes in and drifts like a slow camera, there and
+//      back once per period, every tile on its own period and phase.
+//   2. SHEEN: a soft diagonal band of warm light glides across one tile at a
+//      time, round the ring clockwise from east, then across the middle.
+//   3. BLOOM: when a ring appears its tiles ease in, centre first.
+//
+// Reduced motion shows none of it: the picture is still, the ring simply there.
+
+/** The drift: a push-in to `scale` while the picture travels `travel` px (at
+ *  R = 46) along its own direction, and back, over `periodMin..periodMax` s. */
+export const DRIFT = { scale: 1.035, travel: 1.2, periodMin: 9, periodMax: 13 } as const
+
+/** One tile's slow camera: its period, where in it the tile starts, and the
+ *  direction it drifts, in px at R = 46 (|dx, dy| = DRIFT.travel). */
+export interface TileMotion {
+  readonly periodS: number
+  readonly phaseS: number
+  readonly dx: number
+  readonly dy: number
+}
+
+/** Where in its own period each slot starts, as a share of it (slotIndexOf
+ *  order: centre, then east clockwise). Neighbours round the ring are a third
+ *  apart, so no two side by side ever breathe together. */
+const DRIFT_PHASE = [0.5, 0, 1 / 3, 2 / 3, 0, 1 / 3, 2 / 3] as const
+
+const r3 = (v: number): number => {
+  const r = Math.round(v * 1000) / 1000
+  return Object.is(r, -0) ? 0 : r
+}
+
+/**
+ * The drift of the picture `variation` (0..9) worn in the slot `slotIndex`
+ * (slotIndexOf: 0 the centre, 1..6 east clockwise). Stable: the same picture
+ * in the same slot moves the same way on every open.
+ */
+export function motionFor(variation: number, slotIndex: number): TileMotion {
+  const v = Math.max(0, Math.floor(variation))
+  const i = Math.max(0, Math.floor(slotIndex))
+  const periodS = DRIFT.periodMin + (DRIFT.periodMax - DRIFT.periodMin) * fract((v + 1) * 0.7548777 + i * 0.5698403)
+  const phaseS = periodS * (DRIFT_PHASE[i % DRIFT_PHASE.length] ?? 0)
+  const angle = TAU * fract(v * 0.381966 + i * 0.2763932)
+  return {
+    periodS: r3(periodS),
+    phaseS: r3(phaseS),
+    dx: r3(DRIFT.travel * Math.cos(angle)),
+    dy: r3(DRIFT.travel * Math.sin(angle)),
+  }
+}
+
+/**
+ * The drift at `timeS` since the ring appeared: how far the picture has pushed
+ * in and where it has travelled. `e` runs 0 → 1 → 0 once per period, a sine
+ * there and back (the CSS keyframes ease each half with the sine bezier).
+ * Push-in and travel share `e`, so the picture covers the hexagon at every
+ * frame: at 1.035 there is 1.6 px of picture past every corner and the drift
+ * is never more than 1.2.
+ */
+export function driftPose(timeS: number, motion: TileMotion): { scale: number; dx: number; dy: number } {
+  const u = motion.periodS > 0 ? fract((timeS + motion.phaseS) / motion.periodS) : 0
+  const e = (1 - Math.cos(TAU * u)) / 2
+  return { scale: 1 + (DRIFT.scale - 1) * e, dx: motion.dx * e, dy: motion.dy * e }
+}
+
+/** The light that crosses the tiles. Lengths in px at R = 46; the band runs
+ *  top-left to bottom-right, `width` at full strength with `soft` either side.
+ *  `ink*` caps it over the icon and label (`inkBand`) so the ink keeps 4.5:1:
+ *  cream ink on the pictures' median under the label keeps 4.75:1 at 0.06 (it
+ *  would fall to 4.38 at 0.10); on the lit tile the ink is dark and light only
+ *  helps. The cap is feathered out to the peak in `featherSteps` rings of
+ *  `feather` px, so the light never shows the edge of a box. */
+export const SHEEN = {
+  cycleS: 8,
+  passS: 1,
+  leadS: 0.6,
+  width: 12,
+  soft: 6,
+  reach: 58,
+  angleDeg: 45,
+  color: '#fff4d6',
+  peakRest: 0.16,
+  peakLit: 0.22,
+  inkRest: 0.06,
+  inkLit: 0.1,
+  inkBand: { x0: -32, x1: 32, y0: -24, y1: 27 },
+  feather: 4,
+  featherSteps: 2,
+} as const
+
+export type SheenRect = { readonly x0: number; readonly x1: number; readonly y0: number; readonly y1: number }
+
+/** One region the light is drawn in at one strength: `outer` less `inner`
+ *  (null outer = the whole tile, null inner = nothing taken out). `share` is
+ *  how far from the cap (0) to the peak (1) the light is there. */
+export interface SheenZone {
+  readonly outer: SheenRect | null
+  readonly inner: SheenRect | null
+  readonly share: number
+}
+
+const growRect = (r: SheenRect, by: number): SheenRect => ({ x0: r.x0 - by, x1: r.x1 + by, y0: r.y0 - by, y1: r.y1 + by })
+
+/** The light's regions, cap first: the ink band, the feather rings round it,
+ *  then the rest of the tile at the peak. */
+export function sheenZones(): readonly SheenZone[] {
+  const f = SHEEN.featherSteps
+  const zones: SheenZone[] = [{ outer: SHEEN.inkBand, inner: null, share: 0 }]
+  for (let k = 1; k <= f; k++) {
+    zones.push({ outer: growRect(SHEEN.inkBand, k * SHEEN.feather), inner: growRect(SHEEN.inkBand, (k - 1) * SHEEN.feather), share: k / (f + 1) })
+  }
+  zones.push({ outer: null, inner: growRect(SHEEN.inkBand, f * SHEEN.feather), share: 1 })
+  return zones
+}
+
+/** The light's peak alpha in a region `share` of the way from cap to peak. */
+export function sheenAlpha(share: number, lit: boolean): number {
+  const cap = lit ? SHEEN.inkLit : SHEEN.inkRest
+  const peak = lit ? SHEEN.peakLit : SHEEN.peakRest
+  return r3(cap + (peak - cap) * Math.max(0, Math.min(1, share)))
+}
+
+/** The centre and the six round it: the slots the light visits in one cycle. */
+export const SHEEN_SLOTS = 7
+
+/**
+ * When the light first reaches slot `slotIndex` after the ring appears, in s.
+ * One cycle visits east first and goes clockwise, the middle last, each slot
+ * its own 1/`slotCount` of the cycle, so only one tile is ever lit at a time.
+ * The lead lets the bloom finish before the first pass.
+ */
+export function sheenDelayS(slotIndex: number, slotCount: number = SHEEN_SLOTS): number {
+  const n = Math.max(1, Math.floor(slotCount))
+  const k = (((Math.floor(slotIndex) - 1) % n) + n) % n
+  return r3(SHEEN.leadS + (SHEEN.cycleS * k) / n)
+}
+
+/**
+ * Where the light's band is on slot `slotIndex` at `timeS` since the ring
+ * appeared: its centre along the top-left → bottom-right diagonal in px at
+ * R = 46 (-reach .. +reach, both clear of the tile), or null between passes.
+ */
+export function sheenOffset(timeS: number, slotIndex: number, slotCount: number = SHEEN_SLOTS): number | null {
+  const local = timeS - sheenDelayS(slotIndex, slotCount)
+  if (local < 0) return null
+  const u = local % SHEEN.cycleS
+  if (u >= SHEEN.passS) return null
+  return -SHEEN.reach + 2 * SHEEN.reach * easeInOutSine(u / SHEEN.passS)
+}
+
+/** The ease-in when a ring appears: from `fromScale` and nothing, to whole. */
+export const BLOOM = { fromScale: 0.92, durationMs: 260, staggerMs: 30, bezier: [0.2, 0.8, 0.2, 1] } as const
+
+/** How long after the ring appears slot `slotIndex` starts to bloom: the
+ *  middle first, then east clockwise, 30 ms apart. */
+export function bloomDelayMs(slotIndex: number): number {
+  return Math.max(0, Math.floor(slotIndex)) * BLOOM.staggerMs
+}
+
+/** A CSS cubic-bezier(x1, y1, x2, y2) as a function of progress 0..1. */
+export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (t: number) => number {
+  const at = (a: number, b: number, s: number): number => 3 * a * s * (1 - s) * (1 - s) + 3 * b * s * s * (1 - s) + s * s * s
+  return (t: number): number => {
+    if (t <= 0) return 0
+    if (t >= 1) return 1
+    let lo = 0, hi = 1, s = t
+    for (let i = 0; i < 24; i++) {
+      s = (lo + hi) / 2
+      if (at(x1, x2, s) < t) lo = s
+      else hi = s
+    }
+    return at(y1, y2, s)
+  }
+}
+
+const bloomEase = cubicBezier(...BLOOM.bezier)
+
+/** Slot `slotIndex`'s bloom `elapsedMs` after the ring appeared. */
+export function bloomPose(elapsedMs: number, slotIndex: number): { scale: number; opacity: number } {
+  const p = Math.max(0, Math.min(1, (elapsedMs - bloomDelayMs(slotIndex)) / BLOOM.durationMs))
+  const e = bloomEase(p)
+  return { scale: BLOOM.fromScale + (1 - BLOOM.fromScale) * e, opacity: e }
+}
+
 // ── the stylesheet ────────────────────────────────────────────────────
 
 /** Id of the one document stylesheet, created once at warm. */
@@ -534,10 +726,11 @@ export const HONEY_STYLE_ID = 'hc-qm-drip-style'
 const pct = (u: number): string => `${Math.round(u * 10000) / 100}%`
 
 /**
- * Everything the ring needs from CSS: the lit-tile drip keyframes (transform and
- * opacity only), the lit crossfade, reduced motion, and forced colours. The
- * keyframes are generated from the same constants as dripPose, so the CSS cannot
- * drift from the shader's timeline.
+ * Everything the ring needs from CSS: the lit-tile drip keyframes and the
+ * ambient bloom, drift and light (transform and opacity only), the lit
+ * crossfade, reduced motion, and forced colours. The keyframes are generated
+ * from the same constants as dripPose, driftPose and sheenOffset, so the CSS
+ * cannot drift from the other renderers' timelines.
  */
 export function honeyStyleSheet(): string {
   const T = DRIP_AT
@@ -553,7 +746,24 @@ export function honeyStyleSheet(): string {
 
   const dur = `${DRIP_PERIOD_S}s linear infinite`
   const sel = '#hc-quick-menu'
+  const live = `${sel} svg[data-motion="live"]`
+  const travel = n2(2 * SHEEN.reach)
   return [
+    // ── ambient motion (transform and opacity only; each slot's numbers are
+    // custom properties written once at build) ──
+    `${sel} .hc-qm-slot,${sel} .hc-qm-drift,${sel} .hc-qm-sheen-band{transform-box:view-box}`,
+    `${sel} .hc-qm-drift,${sel} .hc-qm-sheen-band{transform-origin:0 0}`,
+    `${live} .hc-qm-slot{animation:hc-qm-bloom ${BLOOM.durationMs}ms cubic-bezier(${BLOOM.bezier.join(',')}) var(--hc-qm-bloom-delay,0ms) backwards}`,
+    `${live} .hc-qm-drift{animation:hc-qm-drift var(--hc-qm-drift-period,11s) ${swell} var(--hc-qm-drift-delay,0s) infinite}`,
+    `${live} .hc-qm-sheen-band{animation:hc-qm-sheen ${SHEEN.cycleS}s linear var(--hc-qm-sheen-delay,0s) infinite backwards}`,
+    `${sel} svg:not([data-motion="live"]) .hc-qm-sheen{display:none}`,
+    `@keyframes hc-qm-bloom{from{scale:${BLOOM.fromScale};opacity:0}to{scale:1;opacity:1}}`,
+    `@keyframes hc-qm-drift{0%,100%{transform:translate(0,0) scale(1)}` +
+      `50%{transform:translate(var(--hc-qm-dx,0px),var(--hc-qm-dy,0px)) scale(${DRIFT.scale})}}`,
+    `@keyframes hc-qm-sheen{0%{transform:rotate(${SHEEN.angleDeg}deg) translateX(0);animation-timing-function:${swell}}` +
+      `${pct(SHEEN.passS / SHEEN.cycleS)},100%{transform:rotate(${SHEEN.angleDeg}deg) translateX(${travel}px)}}`,
+
+
     `${sel} .hc-qm-lit,${sel} .hc-qm-art-lit{transition:opacity 90ms linear}`,
     `${sel} .hc-qd-drip,${sel} .hc-qd-neck,${sel} .hc-qd-bead,${sel} .hc-qd-glint,${sel} .hc-qd-blob{transform-box:view-box}`,
     `${sel} .hc-qd-run .hc-qd-drip{animation:hc-qd-regrow ${dur}}`,
@@ -580,12 +790,15 @@ export function honeyStyleSheet(): string {
     // Meaning is never carried by motion alone: lit is rim, luminance and ink.
     `@media (prefers-reduced-motion: reduce){` +
       `${sel} .hc-qd-run .hc-qd-drip,${sel} .hc-qd-run .hc-qd-neck,${sel} .hc-qd-run .hc-qd-bead,` +
-      `${sel} .hc-qd-run .hc-qd-glint,${sel} .hc-qd-run .hc-qd-blob{animation:none !important}` +
+      `${sel} .hc-qd-run .hc-qd-glint,${sel} .hc-qd-run .hc-qd-blob,` +
+      `${sel} .hc-qm-slot,${sel} .hc-qm-drift,${sel} .hc-qm-sheen-band{animation:none !important}` +
+      `${sel} .hc-qm-sheen{display:none !important}` +
       `${sel} .hc-qm-lit,${sel} .hc-qm-art-lit{transition:none}}`,
 
     // Forced colours: no honey, a plain outline, system text.
     `@media (forced-colors: active){` +
-      `${sel} .hc-hq,${sel} .hc-qm-lit,${sel} .hc-qm-shadow,${sel} .hc-qm-art,${sel} .hc-qm-art-lit{display:none !important}` +
+      `${sel} .hc-hq,${sel} .hc-qm-lit,${sel} .hc-qm-shadow,${sel} .hc-qm-art,${sel} .hc-qm-art-lit,${sel} .hc-qm-sheen{display:none !important}` +
+      `${sel} .hc-qm-slot,${sel} .hc-qm-drift,${sel} .hc-qm-sheen-band{animation:none !important}` +
       `${sel} .hc-qd-run .hc-qd-drip,${sel} .hc-qd-run .hc-qd-neck,${sel} .hc-qd-run .hc-qd-bead,` +
       `${sel} .hc-qd-run .hc-qd-glint,${sel} .hc-qd-run .hc-qd-blob{animation:none !important}` +
       `${sel} .hc-qm-base{fill:Canvas !important}` +

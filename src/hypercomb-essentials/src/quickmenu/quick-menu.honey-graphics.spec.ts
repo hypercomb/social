@@ -4,7 +4,11 @@
 
 import { describe, expect, it } from 'vitest'
 import { Texture } from 'pixi.js'
-import { clipConvex, drawHexMask, drawHoney, drawHoneyRim, hexOutline, honeyArtFrames, honeyArtSprite, lipPolygon, paint, type Pt } from './quick-menu.honey-graphics.js'
+import {
+  clipConvex, drawHexMask, drawHoney, drawHoneyRim, drawSheenBand, drawSheenZone, hexOutline, honeyArtFrames,
+  honeyArtSprite, lipPolygon, paint, sheenZonePieces, type Pt,
+} from './quick-menu.honey-graphics.js'
+import { SHEEN, sheenZones } from './quick-menu.honey.js'
 import { HEX_RADIUS } from './quick-menu.types.js'
 
 /** Inside a convex polygon (either winding), allowing a hair of float slack. */
@@ -172,5 +176,53 @@ describe('the crafted backgrounds in Pixi', () => {
       count: 10, width: 280, height: 322, pad: 2, ready: new Array(10).fill(true),
       atlas: document.createElement('canvas'), rest: [], lit: [], texture: null,
     })).toBeNull()
+  })
+})
+
+describe('the light that crosses a tile', () => {
+  const area = (poly: readonly Pt[]): number => {
+    let sum = 0
+    for (let i = 0; i < poly.length; i++) {
+      const [x0, y0] = poly[i], [x1, y1] = poly[(i + 1) % poly.length]
+      sum += x0 * y1 - x1 * y0
+    }
+    return Math.abs(sum) / 2
+  }
+
+  it('cuts its regions into pieces that tile the hexagon exactly once, in either orientation', () => {
+    for (const flat of [false, true]) {
+      for (const radius of [HEX_RADIUS, 30]) {
+        const hex = hexOutline(radius, flat)
+        let total = 0
+        for (const zone of sheenZones()) {
+          for (const piece of sheenZonePieces(radius, flat, zone)) {
+            for (const p of piece) expect(inside(p, hex)).toBe(true)
+            total += area(piece)
+          }
+        }
+        expect(total).toBeCloseTo(area(hex), 6)
+      }
+    }
+  })
+
+  it('keeps the capped region on the icon and label band', () => {
+    const [cap] = sheenZones()
+    const pieces = sheenZonePieces(HEX_RADIUS, false, cap)
+    const band = SHEEN.inkBand
+    expect(pieces.reduce((sum, p) => sum + area(p), 0)).toBeCloseTo((band.x1 - band.x0) * (band.y1 - band.y0), 6)
+  })
+
+  it('draws the band once and each region as plain fills, no holes', () => {
+    const band = recorder()
+    drawSheenBand(band.g, HEX_RADIUS)
+    expect(band.calls[0]).toBe('clear')
+    expect(band.calls.filter(c => c === 'rect').length).toBeGreaterThan(6)
+    for (const zone of sheenZones()) {
+      const region = recorder()
+      drawSheenZone(region.g, HEX_RADIUS, false, zone)
+      expect(region.calls).not.toContain('cut')
+      expect(region.calls.filter(c => c === 'fill')).toHaveLength(1)
+      expect(region.calls.filter(c => c === 'poly').length).toBeGreaterThan(0)
+    }
   })
 })

@@ -45,6 +45,22 @@
 // in. The lit tile alone keeps the one slow drip, hung from the top wall. Back
 // and cancel keep their own honey. Until the pictures are ready, and wherever
 // one failed, the slot is the procedural honey above.
+//
+// ── Ambient motion (quick-menu.honey.ts: DRIFT, SHEEN, BLOOM) ──────────
+//
+// Three quiet CSS animations, transform and opacity only, set up once at build:
+// each slot's numbers are custom properties on its own nodes, the keyframes
+// live in the one stylesheet, and nothing runs JavaScript per frame.
+//
+//   · the picture sits in a frame clipped to the hexagon and drifts inside it
+//     like a slow camera (.hc-qm-drift); the frame, rim, icon and label stay put
+//   · a soft band of warm light glides across one tile at a time (.hc-qm-sheen),
+//     drawn once per region of sheenZones so it is capped over the ink
+//   · a ring that appears blooms in, middle first (.hc-qm-slot)
+//
+// All three run only on an svg whose data-motion is "live" (paint reads reduced
+// motion), and a ring blooms whenever its svg is put on screen, never on a
+// highlight, which writes attributes only.
 
 import { THEME_IOC_KEY } from '@hypercomb/core'
 import {
@@ -65,10 +81,12 @@ import {
   HONEY,
   HONEY_STYLE_ID,
   LAYOUT,
+  SHEEN,
   backIcon,
   backgroundFor,
   beadShade,
   blobStart,
+  bloomDelayMs,
   cancelIcon,
   emptyIcon,
   estimateWidth,
@@ -76,10 +94,14 @@ import {
   hexPoints,
   honeyStyleSheet,
   lipPath,
+  motionFor,
   neckPath,
   neckScales,
   radialStops,
   ringSeed,
+  sheenAlpha,
+  sheenDelayS,
+  sheenZones,
   slotGlyph,
   slotHoney,
   slotIndexOf,
@@ -87,6 +109,7 @@ import {
   type GradientStop,
   type LabelFit,
   type Measure,
+  type SheenRect,
 } from './quick-menu.honey.js'
 import { HONEY_ART_BOX, warmHoneyArt, type HoneyArt } from './quick-menu.honey-art.js'
 import { HONEY_BACKGROUNDS } from './quick-menu.backgrounds.js'
@@ -141,6 +164,11 @@ interface SlotElements {
   /** The slot's crafted background at rest and pre-lit, when it wears one. */
   readonly artRest: SVGImageElement | null
   readonly artLit: SVGImageElement | null
+  /** The light that crosses the picture, one copy of its band per region
+   *  (sheenZones: capped over the icon and label, feathered out to the peak).
+   *  Only with a crafted background. */
+  readonly sheen: SVGGElement | null
+  readonly sheenBands: readonly { readonly rect: SVGRectElement; readonly share: number }[]
   readonly rim: SVGPolygonElement
   readonly ico: SVGGElement
   readonly icoPath: SVGPathElement
@@ -548,6 +576,24 @@ export class QuickMenuOverlay {
     )
     const clip = node('clipPath', { id: id('hex') }, defs)
     node('polygon', { points: HEX_POINTS }, clip)
+    // The light: a soft band across its own box, full in the middle `width`.
+    const W = SHEEN.width + 2 * SHEEN.soft
+    const soft = SHEEN.soft / W
+    gradient(defs, 'linearGradient', id('sheen'), { x1: 0, y1: 0, x2: 1, y2: 0 }, [
+      { offset: 0, color: SHEEN.color, opacity: 0 },
+      { offset: soft, color: SHEEN.color, opacity: 1 },
+      { offset: 1 - soft, color: SHEEN.color, opacity: 1 },
+      { offset: 1, color: SHEEN.color, opacity: 0 },
+    ].map(s => ({ ...s, offset: Math.round(s.offset * 1000) / 1000 })))
+    // The regions it falls in at each strength: capped over the icon and label,
+    // feathered out to the peak (each a ring: its outer less its inner).
+    const box = (r: SheenRect): string => `M${r.x0} ${r.y0}H${r.x1}V${r.y1}H${r.x0}Z`
+    const zones = sheenZones()
+    zones.forEach((zone, k) => {
+      const outer = zone.outer ? box(zone.outer) : `M${HEX_POINTS.replace(/ /g, 'L')}Z`
+      const clipZone = node('clipPath', { id: id(`sheen-${k}`) }, defs)
+      node('path', { d: outer + (zone.inner ? box(zone.inner) : ''), 'clip-rule': 'evenodd' }, clipZone)
+    })
 
     const steel = this.#light ? HONEY.steelLight : HONEY.steel
     const declared = slotsByDirection(definition)
@@ -568,7 +614,10 @@ export class QuickMenuOverlay {
       // An empty label shows the dots instead.
       const glyph = slotGlyph(slot.icon) ?? (label === '' ? slotGlyph(emptyIcon) : undefined)
 
-      const g = node('g', { transform: `translate(${cx.toFixed(2)},${cy.toFixed(2)})` }, svg)
+      const slotIndex = slotIndexOf(direction)
+      const g = node('g', { class: 'hc-qm-slot', transform: `translate(${cx.toFixed(2)},${cy.toFixed(2)})` }, svg)
+      // The bloom eases the whole tile in about its own centre, middle first.
+      g.setAttribute('style', `--hc-qm-bloom-delay:${bloomDelayMs(slotIndex)}ms;transform-origin:${cx.toFixed(2)}px ${cy.toFixed(2)}px`)
 
       if (this.#light) {
         node('polygon', {
@@ -586,12 +635,20 @@ export class QuickMenuOverlay {
       let artRest: SVGImageElement | null = null
       let artLit: SVGImageElement | null = null
       if (art) {
+        // The hexagon is fixed; inside it the picture (rest and lit together)
+        // drifts like a slow camera, on this tile's own period and phase.
+        const frameClip = node('g', { class: 'hc-qm-frame', 'clip-path': url('hex'), 'aria-hidden': 'true' }, g)
+        const motion = motionFor(artIndex, slotIndex)
+        const drift = node('g', { class: 'hc-qm-drift' }, frameClip)
+        drift.setAttribute('style',
+          `--hc-qm-drift-period:${motion.periodS}s;--hc-qm-drift-delay:${-motion.phaseS}s;` +
+          `--hc-qm-dx:${motion.dx}px;--hc-qm-dy:${motion.dy}px`)
         const frame = {
           x: HONEY_ART_BOX.x, y: HONEY_ART_BOX.y, width: HONEY_ART_BOX.width, height: HONEY_ART_BOX.height,
-          preserveAspectRatio: 'none', 'clip-path': url('hex'), 'aria-hidden': 'true',
+          preserveAspectRatio: 'none', 'aria-hidden': 'true',
         }
-        artRest = node('image', { class: 'hc-qm-art', href: art.rest[artIndex] ?? '', ...frame }, g)
-        artLit = node('image', { class: 'hc-qm-art-lit', href: art.lit[artIndex] ?? '', ...frame }, g)
+        artRest = node('image', { class: 'hc-qm-art', href: art.rest[artIndex] ?? '', ...frame }, drift)
+        artLit = node('image', { class: 'hc-qm-art-lit', href: art.lit[artIndex] ?? '', ...frame }, drift)
         artLit.style.opacity = '0'
       }
 
@@ -601,6 +658,23 @@ export class QuickMenuOverlay {
         'clip-path': url('hex'), 'aria-hidden': 'true',
       }, g)
       lit.style.opacity = '0'
+
+      // ── the light ──
+      // One band, drawn once per region at that region's strength. Every copy
+      // glides across in the same keyframes; the hexagon and the regions stay put.
+      let sheen: SVGGElement | null = null
+      const sheenBands: { rect: SVGRectElement; share: number }[] = []
+      if (art) {
+        sheen = node('g', { class: 'hc-qm-sheen', 'clip-path': url('hex'), 'aria-hidden': 'true' }, g)
+        sheen.setAttribute('style', `--hc-qm-sheen-delay:${sheenDelayS(slotIndex)}s`)
+        zones.forEach((zone, k) => {
+          const rect = node('rect', {
+            class: 'hc-qm-sheen-band', fill: url('sheen'), 'fill-opacity': sheenAlpha(zone.share, false),
+            x: -SHEEN.reach - W / 2, y: -50, width: W, height: 100,
+          }, node('g', { 'clip-path': url(`sheen-${k}`) }, sheen!))
+          sheenBands.push({ rect, share: zone.share })
+        })
+      }
 
       // ── the honey group ──
       // With a crafted background it holds the drip alone, hung from the top
@@ -705,7 +779,7 @@ export class QuickMenuOverlay {
       text.textContent = label
 
       const elements: SlotElements = {
-        hex, lit, honey: layers, drip: anim, sliver, glint, artRest, artLit, rim, ico, icoPath, text,
+        hex, lit, honey: layers, drip: anim, sliver, glint, artRest, artLit, sheen, sheenBands, rim, ico, icoPath, text,
         label, glyph, isCentre, sliverScale: honey.sliverScale, steel,
         refs: { body: url('body'), lit: url('lit'), back: url('back'), backlit: url('backlit'), cancel: url('cancel') },
         key: '', shown: label, glyphShown: glyph ?? '',
@@ -1006,18 +1080,22 @@ export class QuickMenuOverlay {
     elements.lit.style.opacity = visible ? '1' : '0'
   }
 
-  /** The crafted background: shown or not, and its pre-lit copy faded in or out. */
+  /** The crafted background: shown or not, its pre-lit copy faded in or out,
+   *  and the light that crosses it (a little stronger on the lit tile). */
   #setArt(elements: SlotElements, shown: boolean, lit: boolean): void {
-    const { artRest, artLit } = elements
+    const { artRest, artLit, sheen, sheenBands } = elements
     if (!artRest || !artLit) return
     if (shown) {
       artRest.removeAttribute('display')
       artLit.removeAttribute('display')
+      sheen?.removeAttribute('display')
     } else {
       artRest.setAttribute('display', 'none')
       artLit.setAttribute('display', 'none')
+      sheen?.setAttribute('display', 'none')
     }
     artLit.style.opacity = shown && lit ? '1' : '0'
+    for (const band of sheenBands) band.rect.setAttribute('fill-opacity', String(sheenAlpha(band.share, shown && lit)))
   }
 
   #setRim(elements: SlotElements, stroke: string, width: number, opacity: number, dash: string | null): void {

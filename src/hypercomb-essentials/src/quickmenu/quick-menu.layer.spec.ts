@@ -13,7 +13,10 @@ vi.mock('pixi.js', () => {
     children: Node[] = []
     parent: Node | null = null
     position = { x: 0, y: 0, set(x: number, y: number) { this.x = x; this.y = y } }
-    scale = { set: () => undefined }
+    scale = { x: 1, y: 1, set(x: number, y = x) { this.x = x; this.y = y } }
+    alpha = 1
+    rotation = 0
+    mask: unknown = null
     anchor = { set: () => undefined }
     visible = true
     eventMode = ''
@@ -57,6 +60,8 @@ vi.mock('./quick-menu.honey-graphics.js', async () => {
     drawHoney: () => { drawn.honey++ },
     drawHoneyRim: () => { drawn.rim++ },
     drawHexMask: () => undefined,
+    drawSheenBand: () => undefined,
+    drawSheenZone: () => undefined,
     honeyArtFrames: (art: { ready: boolean[] }) => ({
       rest: art.ready.map((ok, i) => (ok ? `rest-${i}` : null)),
       lit: art.ready.map((ok, i) => (ok ? `lit-${i}` : null)),
@@ -169,8 +174,10 @@ describe('the crafted backgrounds', () => {
   })
 
   type Sprite = { texture: string; mask: unknown }
+  // each tile is a container on its slot; the pictures sit one level down
   const spritesOf = (root: { children: unknown[] }): Sprite[] =>
-    root.children.filter((c): c is Sprite => typeof (c as Sprite).texture === 'string')
+    root.children.flatMap(c => (c as { children: unknown[] }).children)
+      .filter((c): c is Sprite => typeof (c as Sprite).texture === 'string')
 
   it('the Pixi ring wears the pictures as masked sprites, and lit swaps the frame', () => {
     const container = new Container()
@@ -247,5 +254,106 @@ describe('the flower cues under reduced motion', () => {
     l.rearm()
     vi.advanceTimersByTime(55 * 20)
     expect(seen.lit).toHaveLength(0)
+  })
+})
+
+describe('the ring in motion', () => {
+  type N = { children: N[]; scale: { x: number }; alpha: number; visible: boolean; texture?: string; position: { x: number; y: number } }
+  let frames: (() => void)[] = []
+  let clock = 1000
+  let hidden = false
+
+  beforeEach(() => {
+    frames = []
+    clock = 1000
+    hidden = false
+    vi.stubGlobal('requestAnimationFrame', (cb: () => void) => { frames.push(cb); return frames.length })
+    vi.stubGlobal('cancelAnimationFrame', () => { frames = [] })
+    vi.spyOn(performance, 'now').mockImplementation(() => clock)
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    delete (document as { hidden?: boolean }).hidden
+  })
+
+  /** Run the frame loop up to `ms` after the ring appeared, a frame every 16 ms. */
+  function runTo(ms: number): void {
+    while (clock < 1000 + ms) {
+      clock = Math.min(1000 + ms, clock + 16)
+      const due = frames
+      frames = []
+      for (const f of due) f()
+    }
+  }
+
+  function ring(): { l: InstanceType<typeof QuickMenuLayer>; tiles: N[] } {
+    const container = new Container()
+    const l = new QuickMenuLayer()
+    EffectBus.emit('render:host-ready', { container })
+    l.place(0, 0)
+    EffectBus.emit('quickmenu:honey-art', { ready: Array.from({ length: 10 }, () => true) })
+    l.show(ROOT, labelOf, null, 'back')
+    const root = (container as unknown as { children: { children: N[] }[] }).children.at(-1)!
+    return { l, tiles: root.children }
+  }
+  const sheenOf = (tile: N): N => tile.children.find(c => c.children?.length > 0)!
+  const pictureOf = (tile: N): N => tile.children.find(c => typeof c.texture === 'string')!
+
+  it('blooms in from 0.92 and nothing, the first option before the last, and lands whole', () => {
+    const { tiles } = ring()
+    expect(tiles).toHaveLength(6)
+    for (const t of tiles) {
+      expect(t.scale.x).toBeCloseTo(0.92, 6)
+      expect(t.alpha).toBe(0)
+    }
+    runTo(100)
+    expect(tiles[0].alpha).toBeGreaterThan(tiles[5].alpha)
+    runTo(500)
+    for (const t of tiles) {
+      expect(t.scale.x).toBe(1)
+      expect(t.alpha).toBe(1)
+    }
+  })
+
+  it('drifts each picture and passes the light over one tile at a time, east first', () => {
+    const { tiles } = ring()
+    runTo(1100) // the lead, then half the east pass
+    const lit = tiles.filter(t => sheenOf(t).visible)
+    expect(lit).toEqual([tiles[0]])
+    const scales = new Set<number>()
+    for (let ms = 1200; ms < 8000; ms += 700) {
+      runTo(ms)
+      expect(tiles.filter(t => sheenOf(t).visible).length).toBeLessThanOrEqual(1)
+      scales.add(Math.round(pictureOf(tiles[2]).scale.x * 1e6))
+    }
+    expect(scales.size).toBeGreaterThan(3)
+  })
+
+  it('stops the loop when the ring goes, and holds it while the tab is hidden', () => {
+    const { l } = ring()
+    runTo(50)
+    expect(frames.length).toBe(1)
+    hidden = true
+    runTo(100)
+    expect(frames.length).toBe(0)
+    hidden = false
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(frames.length).toBe(1)
+    l.hide()
+    expect(frames.length).toBe(0)
+  })
+
+  it('under reduced motion nothing moves and no frame is asked for', () => {
+    reduced = true
+    const { tiles } = ring()
+    expect(frames).toHaveLength(0)
+    for (const t of tiles) {
+      expect(t.scale.x).toBe(1)
+      expect(t.alpha).toBe(1)
+      expect(sheenOf(t).visible).toBe(false)
+      expect(pictureOf(t).position.x).toBe(0)
+    }
   })
 })

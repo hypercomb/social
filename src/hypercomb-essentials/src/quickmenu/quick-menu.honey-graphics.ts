@@ -19,7 +19,9 @@
 // Once the crafted backgrounds are drawn (quick-menu.honey-art.ts) an option's
 // body is instead a Sprite of its picture, a frame of the shared atlas texture,
 // masked to the hexagon; lit swaps the frame for the pre-lit copy, and the
-// Graphics then carries only the rim and the lit halo (drawHoneyRim).
+// Graphics then carries only the rim and the lit halo (drawHoneyRim). The
+// layer moves that picture (the drift) and the band of light drawn here
+// (drawSheenBand, masked to each region by drawSheenZone) by transform alone.
 
 import { Rectangle, Sprite, Texture, type Graphics } from 'pixi.js'
 import { HONEY_ART_TILE, atlasFrame, type HoneyArt } from './quick-menu.honey-art.js'
@@ -30,12 +32,15 @@ import {
   BODY_REST,
   HONEY,
   HONEY_LIGHT,
+  SHEEN,
   lipY,
   mixHex,
   sampleRamp,
   slotHoney,
   type DripShape,
   type RampStop,
+  type SheenRect,
+  type SheenZone,
 } from './quick-menu.honey.js'
 import { HEX_RADIUS } from './quick-menu.types.js'
 
@@ -263,6 +268,72 @@ export function drawHoneyRim(g: Graphics, radius: number, flat: boolean, lit: bo
   g.poly(flatten(hexOutline(radius, flat)), true)
   if (lit) stroke(g, HONEY.lit.rim, HONEY.lit.rimWidth * s, HONEY.lit.rimAlpha)
   else stroke(g, HONEY.steel, s)
+}
+
+// ── the light that crosses a tile ─────────────────────────────────────
+
+/** Strips each soft edge of the band is stepped in: Graphics has no gradient
+ *  along a strip, so the falloff is stepped finely enough to read as one. */
+const SHEEN_SOFT_STEPS = 6
+
+/**
+ * The band of light, at full strength (1), in its own coordinates: across x it
+ * is `soft`, `width`, `soft` (the DOM ring's gradient), along y long enough to
+ * cross the whole tile. Drawn once; it moves by its transform alone, and its
+ * strength is the Graphics' alpha (sheenAlpha).
+ */
+export function drawSheenBand(g: Graphics, radius: number): void {
+  const s = radius / HEX_RADIUS
+  const soft = SHEEN.soft * s
+  const half = (SHEEN.width / 2) * s
+  const length = 100 * s
+  const color = paint(SHEEN.color).color
+  g.clear()
+  g.rect(-half, -length / 2, 2 * half, length)
+  g.fill({ color, alpha: 1 })
+  const step = soft / SHEEN_SOFT_STEPS
+  for (let i = 0; i < SHEEN_SOFT_STEPS; i++) {
+    // the strip's mean strength on a linear falloff from the core outward
+    const alpha = 1 - (i + 0.5) / SHEEN_SOFT_STEPS
+    g.rect(half + i * step, -length / 2, step, length)
+    g.rect(-half - (i + 1) * step, -length / 2, step, length)
+    g.fill({ color, alpha })
+  }
+}
+
+/**
+ * One region of the light (sheenZones) at `radius`, as convex pieces inside
+ * the hexagon: its outer box less its inner box is four strips, and each strip
+ * (or the whole box) is cut to the tile. No holes, so a mask is plain fills.
+ * The pieces of every region together tile the hexagon exactly once.
+ */
+export function sheenZonePieces(radius: number, flat: boolean, zone: SheenZone): Pt[][] {
+  const s = radius / HEX_RADIUS
+  const hex = hexOutline(radius, flat)
+  const far = 2 * radius
+  const scaled = (r: SheenRect | null): SheenRect =>
+    r ? { x0: r.x0 * s, x1: r.x1 * s, y0: r.y0 * s, y1: r.y1 * s } : { x0: -far, x1: far, y0: -far, y1: far }
+  const box = (x0: number, y0: number, x1: number, y1: number): Pt[] => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+  const o = scaled(zone.outer)
+  const pieces: Pt[][] = []
+  if (!zone.inner) pieces.push(box(o.x0, o.y0, o.x1, o.y1))
+  else {
+    const i = scaled(zone.inner)
+    pieces.push(
+      box(o.x0, o.y0, o.x1, i.y0), // above
+      box(o.x0, i.y1, o.x1, o.y1), // below
+      box(o.x0, i.y0, i.x0, i.y1), // left
+      box(i.x1, i.y0, o.x1, i.y1), // right
+    )
+  }
+  return pieces.map(piece => clipConvex(piece, hex)).filter(piece => piece.length >= 3)
+}
+
+/** One region of the light as a mask, at `radius`. */
+export function drawSheenZone(g: Graphics, radius: number, flat: boolean, zone: SheenZone): void {
+  g.clear()
+  for (const piece of sheenZonePieces(radius, flat, zone)) g.poly(flatten(piece), true)
+  g.fill({ color: 0xffffff, alpha: 1 })
 }
 
 /** The lip's gradient at `t` (0 at the top of the tile, 1 at the lip line). */

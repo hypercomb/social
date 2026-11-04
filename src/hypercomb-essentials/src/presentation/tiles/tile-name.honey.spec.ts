@@ -190,3 +190,69 @@ describe('what is not honey is left as it was', () => {
     expect(spans()).toHaveLength(0)
   })
 })
+
+describe('the names bloom with their tiles when a ring opens (flower-motion.ts)', () => {
+  const ring = [
+    { q: 0, r: 0, label: 'sunrise', subject: true },
+    { q: 1, r: 0, label: 'tags', icon: 'sell', honey: true },
+    { q: 0, r: 1, label: 'seat', honey: true },
+    { q: -1, r: 1, label: 'back', honey: true, back: true },
+  ]
+  const named = (label: string): HTMLElement[] =>
+    spans().filter(s => s.textContent === label || s.querySelector('.hc-tile-name-text')?.textContent === label)
+  const at = (ms: number) => vi.spyOn(performance, 'now').mockReturnValue(ms)
+
+  it('30 ms a slot clockwise from east, about the tile\'s own centre; the subject stays as it is', () => {
+    at(1000)
+    flower(ring)
+    for (const span of spans()) expect(span.classList.contains('hc-bloom')).toBe(!named('sunrise').includes(span))
+    // the tile the menu opened on is already showing: its name never blinks out
+    expect(named('sunrise')[0].style.animationDelay).toBe('')
+    for (const span of named('tags').concat(iconSpan()!)) expect(span.style.animationDelay).toBe('30ms')   // east: slot 1
+    expect(named('seat')[0].style.animationDelay).toBe('60ms')    // southeast: slot 2
+    expect(named('back')[0].style.animationDelay).toBe('90ms')    // southwest: slot 3
+    const spacing = 38
+    expect(named('tags')[0].style.getPropertyValue('--hc-bloom-x')).toBe(`${Math.sqrt(3) * spacing}px`)
+    expect(named('tags')[0].style.getPropertyValue('--hc-bloom-y')).toBe('0px')
+    vi.restoreAllMocks()
+  })
+
+  it('a highlight during the bloom carries it on from where it is; after it, blooms nothing', () => {
+    at(1000)
+    flower(ring)
+    at(1050)
+    flower([ring[0], { ...ring[1], lit: true }, ring[2], ring[3]])
+    expect(named('tags')[0].style.animationDelay).toBe('-20ms')
+    at(2000)
+    flower([ring[0], ring[1], { ...ring[2], lit: true }, ring[3]])
+    for (const span of spans()) expect(span.classList.contains('hc-bloom')).toBe(false)
+    vi.restoreAllMocks()
+  })
+
+  it('a new ring blooms again', () => {
+    at(1000)
+    flower(ring)
+    at(5000)
+    flower([ring[0], { ...ring[1], label: 'history', icon: 'history' }, ring[2], ring[3]])
+    expect(named('history')[0].classList.contains('hc-bloom')).toBe(true)
+    expect(named('history')[0].style.animationDelay).toBe('30ms')
+    vi.restoreAllMocks()
+  })
+
+  it('never under reduced motion, and never a flower with no honey in it', () => {
+    const was = window.matchMedia
+    window.matchMedia = ((q: string) => ({ matches: q.includes('reduce'), media: q })) as unknown as typeof window.matchMedia
+    flower(ring)
+    for (const span of spans()) expect(span.classList.contains('hc-bloom')).toBe(false)
+    window.matchMedia = was
+    flower([{ q: 0, r: 0, label: 'idea', icon: 'lightbulb' }, { q: 1, r: 0, label: 'other' }])
+    for (const span of spans()) expect(span.classList.contains('hc-bloom')).toBe(false)
+  })
+
+  it('the keyframes scale about the tile centre, and stand down for reduced motion', () => {
+    const css = document.head.querySelector('style[data-hc-tile-names]')!.textContent!
+    expect(css).toContain('@keyframes hc-flower-bloom{from{opacity:0;scale:0.92;translate:calc(var(--hc-bloom-x) * 0.08) calc(var(--hc-bloom-y) * 0.08)}to{opacity:1;scale:1;translate:0 0}}')
+    expect(css).toContain('span.hc-flower-name.hc-bloom{animation:hc-flower-bloom 260ms cubic-bezier(0.2,0.8,0.2,1) both}')
+    expect(css).toContain('@media (prefers-reduced-motion:reduce)')
+  })
+})

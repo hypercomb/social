@@ -8,7 +8,8 @@ import { publishOwnedProjection } from './derived-projection-cache.js'
 import { resolveLocalResourceReference } from './local-resource-reference.js'
 import { readThumbnail, type ThumbnailStore } from './thumbnails.js'
 import { HexImageAtlas } from '../grid/hex-image.atlas.js'
-import { HexSdfTextureShader } from '../grid/hex-sdf.shader.js'
+import { HexSdfTextureShader, FLOWER_BLOOM_DONE } from '../grid/hex-sdf.shader.js'
+import { BLOOM_TOTAL_MS, FLOWER_CLOCK_PERIOD_S, FLOWER_INDEX_BASE, flowerRingKey, flowerSlots } from './flower-motion.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../grid/hex-geometry.js'
 import { TILE_PROPERTIES_SLOT_DECLARATION, isSignature, readCellProperties, cellLocationSig, readTilePropertiesAt, readTilePropsSigAt, readTilePropsIndex, writeTilePropsIndex, recoverableTileImageSig, seedLayerKeyedEntries } from '../../editor/tile-properties.js'
 import { readOrderAt, registerSeatChooser, type OrderChanges } from '../../history/tile-order.js'
@@ -187,15 +188,14 @@ const honeyModeOf = (f: FlowerCell, still: boolean): HoneyMode =>
 
 /** Above the veil the quick menu lays over the hive. */
 const FLOWER_Z = 10045
-/** Flower tiles are counted from here, so the page's hover index, which the
- *  shader is shared with, can never land on one. */
-const FLOWER_INDEX_BASE = 1000000
-/** The honey drip is 11 s round; the flower clock wraps on 60 of them (660 s),
- *  which keeps u_time small and the loop seamless. */
-const FLOWER_CLOCK_PERIOD_S = 660
-/** The clock writes u_time at most this often (30 Hz is smooth for a drip that
- *  moves under 8 px/s). */
-const FLOWER_CLOCK_STEP_MS = 33
+// Flower tiles are counted from FLOWER_INDEX_BASE, so the page's hover index,
+// which the shader is shared with, can never land on one; a honey flower's index
+// is the base plus the tile's slot, which the motion reads. The flower clock
+// wraps on FLOWER_CLOCK_PERIOD_S (flower-motion.ts): a whole number of drips and
+// sheen cycles, so u_time stays small and those loops are seamless.
+/** The clock writes u_time at most this often: every frame at 60 Hz, which the
+ *  sheen's glide needs, and every other one on a faster screen. */
+const FLOWER_CLOCK_STEP_MS = 16
 
 type ReferenceDraftPreview = {
   name: string
@@ -1159,12 +1159,21 @@ export class ShowCellDrone extends Drone {
   /** The quick menu's crafted backgrounds once drawn, and the shader they are bound to. */
   #honeyArt: HoneyArtPayload | null = null
   #honeyArtShader: HexSdfTextureShader | null = null
-  // The flower's one moving part: the lit honey tile's drip (aShapeMode 7). Its
-  // clock writes u_time on the page's own #driftStart origin (so it can never
-  // fight the pathway-hover or mark-preview clocks over the shared uniform),
-  // and runs only while such a tile is up, the tab is visible and reduced
-  // motion is off. '' = no dripping tile, no clock.
+  // The flower's moving parts: the lit honey tile's drip (aShapeMode 7), the
+  // art's camera drift, the sheen and the bloom (flower-motion.ts). Its clock
+  // writes u_time on the page's own #driftStart origin (so it can never fight
+  // the pathway-hover or mark-preview clocks over the shared uniform), and runs
+  // only while a honey flower is up, the tab is visible and reduced motion is
+  // off. '' = no clock. The ring key says which ring last bloomed (a highlight
+  // never blooms again) and the drip key which tile's drip is running.
   #flowerClockKey = ''
+  #flowerRingKey = ''
+  #flowerDripKey = ''
+  #flowerDripAt = 0
+  /** The u_time the ring now up bloomed from (FLOWER_BLOOM_DONE: none). */
+  #flowerBloomAt = FLOWER_BLOOM_DONE
+  /** Until when (performance.now) the bloom is easing in: the clock then writes every frame. */
+  #flowerBloomUntil = 0
   #flowerClockRaf = 0
   #flowerClockAt = 0
   #diveGeom: Geometry | null = null
@@ -11505,7 +11514,7 @@ export class ShowCellDrone extends Drone {
    *  buffer bookkeeping; the hover-reveal comes from the caller. */
   private buildFillQuadGeometry(
     cells: Cell[], r: number, gap: number, hw: number, hh: number,
-    foreign?: { reveal: string | null; indexBase?: number },
+    foreign?: { reveal: string | null; indexBase?: number; slots?: readonly number[] },
   ): Geometry {
     const spacing = r + gap
 
@@ -11637,7 +11646,9 @@ export class ShowCellDrone extends Drone {
       borderColor.set([bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb], bcp)
       bcp += 12
 
-      const ix = ci + (foreign?.indexBase ?? 0)
+      // A honey flower counts its tiles by slot (flower-motion.ts): the shader's
+      // camera, sheen and bloom read where each one sits round the ring.
+      const ix = (foreign?.slots?.[ci] ?? ci) + (foreign?.indexBase ?? 0)
       cellIndex.set([ix, ix, ix, ix], cip)
       cip += 4
       ci++
@@ -11744,9 +11755,16 @@ export class ShowCellDrone extends Drone {
     const pointReachPx = circumRadiusPx / 0.8660254
     const hexHalfW = this.#flat ? pointReachPx : circumRadiusPx
     const hexHalfH = this.#flat ? circumRadiusPx : pointReachPx
+    // THE MOTION (flower-motion.ts) is the quick menu's alone: a flower with honey
+    // in it, and never under reduced motion. Its tiles are counted by slot, so
+    // the shader knows where each sits round the ring.
+    const moving = !still && cells.some(c => c.honeyMode !== undefined)
+    const slots = moving
+      ? flowerSlots(input.map(f => ({ ...this.axialToPixel(f.q, f.r, circumRadiusPx + gapPx, this.#flat), subject: !!f.subject })), this.#flat)
+      : undefined
     const geom = this.buildFillQuadGeometry(
       cells, circumRadiusPx, gapPx, hexHalfW + padPx, hexHalfH + padPx,
-      { reveal: null, indexBase: FLOWER_INDEX_BASE },
+      { reveal: null, indexBase: FLOWER_INDEX_BASE, ...(slots ? { slots } : {}) },
     )
     if (!this.#flowerMesh) {
       this.#flowerMesh = new Mesh({ geometry: geom as any, shader: (this.shader as any).shader, texture: Texture.WHITE as any } as any)
@@ -11766,7 +11784,7 @@ export class ShowCellDrone extends Drone {
       layer.position.x + this.hexMesh.position.x * layer.scale.x,
       layer.position.y + this.hexMesh.position.y * layer.scale.y,
     )
-    this.#syncFlowerClock(cells.find(c => c.honeyMode === 7) ?? null)
+    this.#syncFlowerClock(moving ? flowerRingKey(input) : '', cells.find(c => c.honeyMode === 7) ?? null)
   }
 
   /** Is crafted background `art` drawn and bindable? Otherwise the option is
@@ -11776,34 +11794,77 @@ export class ShowCellDrone extends Drone {
     return art !== undefined && !!drawn?.texture && art >= 0 && art < drawn.count && drawn.ready[art] === true
   }
 
-  /** The dripping tile's clock. It starts when a tile lights and restarts when
-   *  a different one does, so a drip always begins at rest; a repaint of the
-   *  same lit tile (the cue pulse) leaves it running. Where launcher drift
-   *  already ticks u_time the drip rides that clock instead. */
-  #syncFlowerClock(dripping: Cell | null): void {
-    if (!dripping) { this.#stopFlowerClock(); return }
-    const key = `${dripping.q},${dripping.r}`
-    if (key !== this.#flowerClockKey) {
-      this.#flowerClockKey = key
-      if (!this.#driftActive) {
-        this.#driftStart = performance.now()
-        this.shader?.setTime(0)
-      }
+  /** The flower's clock. `ring` is the moving flower's ring key ('' when nothing
+   *  on it moves). A ring it has not seen blooms: the clock is rebased to 0 (the
+   *  launcher drift's clock, when it runs, is ridden instead) and the bloom
+   *  starts now. A lit tile it has not seen starts its drip from rest; a repaint
+   *  of the same ring and the same lit tile (a highlight, the cue pulse) changes
+   *  neither, so the camera and the sheen never jump. */
+  #syncFlowerClock(ring: string, dripping: Cell | null): void {
+    const shader = this.shader
+    if (!ring) {
+      this.#stopFlowerClock()
+      shader?.setFlowerMotion(false)
+      shader?.setFlowerBloomAt(FLOWER_BLOOM_DONE)
+      return
     }
+    shader?.setFlowerMotion(true)
+    const fresh = ring !== this.#flowerRingKey
+    if (fresh) {
+      this.#flowerRingKey = ring
+      this.#flowerDripKey = ''
+    }
+    const drip = dripping ? `${dripping.q},${dripping.r}` : ''
+    const dripStarts = drip !== '' && drip !== this.#flowerDripKey
+    this.#flowerDripKey = drip
+    if (fresh || dripStarts) {
+      // One reading of the clock, written to u_time as it is taken. A start
+      // even a moment ahead of u_time reads as before it (since < 0: bloomed),
+      // so the frame the Pixi ticker draws before the clock's first tick would
+      // show every tile whole, then blank it and bloom; a drip would start at
+      // its end. The launcher drift's clock, when it runs, is ridden instead.
+      if (fresh && !this.#driftActive) this.#driftStart = performance.now()
+      const t = fresh && !this.#driftActive ? 0 : this.#flowerNow()
+      shader?.setTime(t)
+      this.#flowerClockAt = performance.now()
+      if (fresh) {
+        // A tab that is hidden as the ring opens never sees it open: no bloom.
+        this.#flowerBloomAt = document.hidden ? FLOWER_BLOOM_DONE : t
+        this.#flowerBloomUntil = document.hidden ? 0 : performance.now() + BLOOM_TOTAL_MS
+      }
+      if (dripStarts) this.#flowerDripAt = t
+    }
+    // Bloomed: forget when, so the clock's wrap back never blooms it again.
+    if (this.#flowerBloomUntil && performance.now() >= this.#flowerBloomUntil) this.#flowerBloomUntil = 0
+    // pushed every paint: a rebuilt shader starts without them
+    shader?.setFlowerBloomAt(this.#flowerBloomUntil ? this.#flowerBloomAt : FLOWER_BLOOM_DONE)
+    shader?.setDripAt(this.#flowerDripAt)
+    this.#flowerClockKey = ring
     document.addEventListener('visibilitychange', this.#onFlowerVisibility)
     this.#runFlowerClock()
   }
 
-  /** A hidden tab never fires rAF: the drip simply holds, and the clock is
+  /** The flower's time, as its clock writes it to u_time. */
+  #flowerNow(): number {
+    const t = (performance.now() - this.#driftStart) / 1000
+    return this.#driftActive ? t : t % FLOWER_CLOCK_PERIOD_S
+  }
+
+  /** A hidden tab never fires rAF: the flower simply holds, and the clock is
    *  started again when the tab is shown (#onFlowerVisibility). */
   #runFlowerClock(): void {
     if (this.#flowerClockRaf || document.hidden || this.#driftActive) return
     const tick = (): void => {
       if (!this.#flowerClockKey || this.#driftActive || document.hidden) { this.#flowerClockRaf = 0; return }
       const now = performance.now()
-      if (now - this.#flowerClockAt >= FLOWER_CLOCK_STEP_MS) {
+      if (now < this.#flowerBloomUntil || now - this.#flowerClockAt >= FLOWER_CLOCK_STEP_MS) {
         this.#flowerClockAt = now
-        this.shader?.setTime(((now - this.#driftStart) / 1000) % FLOWER_CLOCK_PERIOD_S)
+        this.shader?.setTime(this.#flowerNow())
+      }
+      // Bloomed: forget when, so the clock's wrap back to 0 never blooms it again.
+      if (this.#flowerBloomUntil && now >= this.#flowerBloomUntil) {
+        this.#flowerBloomUntil = 0
+        this.shader?.setFlowerBloomAt(FLOWER_BLOOM_DONE)
       }
       this.#flowerClockRaf = requestAnimationFrame(tick)
     }
@@ -11812,6 +11873,9 @@ export class ShowCellDrone extends Drone {
 
   #stopFlowerClock(): void {
     this.#flowerClockKey = ''
+    this.#flowerRingKey = ''
+    this.#flowerDripKey = ''
+    this.#flowerBloomUntil = 0
     if (this.#flowerClockRaf) { cancelAnimationFrame(this.#flowerClockRaf); this.#flowerClockRaf = 0 }
     if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.#onFlowerVisibility)
   }
