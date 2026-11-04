@@ -57,51 +57,98 @@ const coordsToIndexes = (
 // rectangle on the point-top hex grid (each row shifts by half a hex, the
 // natural brick layout), centred on the origin hex.
 
-export const rectangleCoords = (count: number): AxialLike[] => {
+// A point-top hex is sqrt(3) wide and 1.5 tall once rows nest, so a block of
+// `cols x rows` reads as (cols * sqrt(3)) : (rows * 1.5) on screen.
+const HEX_COL = Math.sqrt(3)
+const HEX_ROW = 1.5
+
+/** `aspect` is the viewport's width / height. Given it, the block is shaped to
+ *  FILL that rectangle: as many rows as the long side takes, so a landscape
+ *  screen gets a wide block and a portrait one a tall block. Without it the
+ *  block is the closest to square (the old behaviour). */
+const rectangleShape = (n: number, aspect?: number): { cols: number; rows: number } => {
+  if (!aspect || !Number.isFinite(aspect) || aspect <= 0) {
+    const cols = Math.max(1, Math.ceil(Math.sqrt(n)))
+    return { cols, rows: Math.max(1, Math.ceil(n / cols)) }
+  }
+  let best = { cols: 1, rows: n }
+  let bestScore = Infinity
+  for (let cols = 1; cols <= n; cols++) {
+    const rows = Math.ceil(n / cols)
+    const shape = Math.abs(Math.log((cols * HEX_COL) / (rows * HEX_ROW) / aspect))
+    const score = shape + ((cols * rows - n) / n) * 0.25   // a ragged last row costs a little
+    if (score < bestScore) { bestScore = score; best = { cols, rows } }
+  }
+  return best
+}
+
+export const rectangleCoords = (count: number, aspect?: number): AxialLike[] => {
   const n = Math.max(0, Math.floor(count))
   if (n === 0) return []
-  const cols = Math.max(1, Math.ceil(Math.sqrt(n)))
-  const rows = Math.max(1, Math.ceil(n / cols))
+  const { cols, rows } = rectangleShape(n, aspect)
   const r0 = -Math.floor(rows / 2)
   const c0 = -Math.floor(cols / 2)
   const coords: AxialLike[] = []
   for (let row = 0; row < rows; row++) {
     const r = r0 + row
     for (let col = 0; col < cols; col++) {
-      // odd-r offset → axial: q = col - floor(r / 2)
+      // odd-r offset -> axial: q = col - floor(r / 2)
       const q = c0 + col - Math.floor(r / 2)
       coords.push({ q, r })
     }
   }
-  return coords
+  return coords.slice(0, n)
 }
 
 export const rectangleIndexes = (
   count: number,
   coordToIndex: Map<string, number>,
-): number[] => coordsToIndexes(rectangleCoords(count), coordToIndex)
+  aspect?: number,
+): number[] => coordsToIndexes(rectangleCoords(count, aspect), coordToIndex)
 
-// ── Flower (clusters of 7) ───────────────────────────────────────────
+// -- Flower (clusters of 7, never touching) ----------------------------
 //
-// Tiles fill flowers of 7 — a centre hex plus its 6 neighbours — in
-// spiral order (centre, then NE, E, SE, SW, W, NW, matching
-// AxialService.getAdjacentCoordinates so a flower's ring reads the same
-// way the grid's own first ring does). Flower CENTRES are themselves laid
-// out on a rectangle, then spread by FLOWER_SPACING so neighbouring
-// flowers stay visually distinct (radius-1 flowers, ≥1 hex gap between).
+// A flower is a centre hex plus its 6 neighbours, filled in spiral order
+// (centre, then NE, E, SE, SW, W, NW, matching AxialService.getAdjacentCoordinates).
+// Flowers are NOT contiguous: leaving a flower's outer tile, one tile is
+// skipped as space, then the next flower's outer tile and its centre follow,
+// so centres sit FLOWER_SPACING = 4 apart along a face (outer, space, outer,
+// centre). The first flower sits in the middle and the rest grow AROUND it:
+// each ring of flowers is completed before the next ring begins.
 
 const NEIGHBOURS: readonly AxialLike[] = [
   { q: 1, r: -1 }, { q: 1, r: 0 }, { q: 0, r: 1 },
   { q: -1, r: 1 }, { q: -1, r: 0 }, { q: 0, r: -1 },
 ]
 
-const FLOWER_SPACING = 3
+export const FLOWER_SPACING = 4
+
+// Lattice cells in spiral order: the origin, then ring 1 (6), ring 2 (12), ...
+const RING_WALK: readonly AxialLike[] = [
+  { q: 0, r: 1 }, { q: -1, r: 1 }, { q: -1, r: 0 },
+  { q: 0, r: -1 }, { q: 1, r: -1 }, { q: 1, r: 0 },
+]
+
+const latticeSpiral = (count: number): AxialLike[] => {
+  const out: AxialLike[] = [{ q: 0, r: 0 }]
+  for (let k = 1; out.length < count; k++) {
+    let q = k, r = -k
+    for (const d of RING_WALK) {
+      for (let step = 0; step < k; step++) {
+        out.push({ q, r })
+        q += d.q
+        r += d.r
+      }
+    }
+  }
+  return out.slice(0, count)
+}
 
 export const flowerCoords = (count: number): AxialLike[] => {
   const n = Math.max(0, Math.floor(count))
   if (n === 0) return []
   const flowers = Math.ceil(n / 7)
-  const centres = rectangleCoords(flowers)
+  const centres = latticeSpiral(flowers)
   const coords: AxialLike[] = []
   for (let f = 0; f < flowers; f++) {
     const c = centres[f] ?? { q: 0, r: 0 }
@@ -270,7 +317,7 @@ export interface BuiltinArrangement {
   readonly id: string
   readonly label: string
   readonly labelKey: string
-  readonly generate: (count: number, coordToIndex: Map<string, number>) => number[]
+  readonly generate: (count: number, coordToIndex: Map<string, number>, aspect?: number) => number[]
 }
 
 // Lanes are NOT an arrangement any more: on a phone they are a projection of

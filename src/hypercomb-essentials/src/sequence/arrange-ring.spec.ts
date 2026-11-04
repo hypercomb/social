@@ -1,4 +1,4 @@
-// THE LAYOUT RING.
+// THE CURRENT LAYOUT (a ring of one).
 //
 // Pressing `a` used to keep one session-only "Initial" snapshot, and a drag,
 // an add or a remove threw it away — exactly when the way back was needed.
@@ -68,26 +68,17 @@ describe('the arrange layout ring', () => {
     await new Promise(r => setTimeout(r, 0))
   }
 
-  it('saves the hand-made layout on the first press, and only once', async () => {
+  it('keeps the layout on screen as current, without any press', async () => {
     show(LABELS, [3, 0, 2, 1])
-    await press()
     expect((await ringHere())).toEqual([{ alpha: 3, beta: 0, gamma: 2, delta: 1 }])
-
-    // Pressing again from the same hand-made layout does not duplicate it.
-    show(LABELS, [3, 0, 2, 1])
-    await press()
-    expect((await ringHere())).toHaveLength(1)
   })
 
-  it('keeps earlier layouts across a drag, newest first', async () => {
+  it('replaces current on every change instead of piling up earlier layouts', async () => {
     show(LABELS, [3, 0, 2, 1])
-    await press()
     show(LABELS, [1, 3, 0, 2])  // a drag the participant made afterwards
+    expect((await ringHere())).toEqual([{ alpha: 1, beta: 3, gamma: 0, delta: 2 }])
     await press()
-    expect((await ringHere())).toEqual([
-      { alpha: 1, beta: 3, gamma: 0, delta: 2 },
-      { alpha: 3, beta: 0, gamma: 2, delta: 1 },
-    ])
+    expect((await ringHere())).toHaveLength(1)
   })
 })
 

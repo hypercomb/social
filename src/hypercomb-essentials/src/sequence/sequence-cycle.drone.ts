@@ -8,26 +8,23 @@
 // existing index) — only WHICH spiral slot each occupies changes, so the
 // view reorganises without scrambling the order the participant built.
 //
-// The cycle is:
-//   [ Rectangle, Flowers, …every set saved via /sequence, …the layout ring ]
-// THE LAYOUT RING. Every press first saves the layout on screen — unless
-// that layout is one this cycle itself produced (those regenerate on
-// demand) — so arranging never costs the participant what they had. The
-// ring is per location, newest first, capped at RING_SIZE, and outlives a
-// refresh (participant-local, like the active pointer). Cycling onward
-// reaches each earlier layout in turn; restoring one puts every tile back
-// in the slot it held, and any tile added since fills the free slots in
-// its current order. A drag, an add or a remove no longer throws the way
-// back away — that is exactly when it is needed.
+// The cycle is three layouts, nothing else:
+//   [ Current, Rectangle, Flowers ]
+// CURRENT is one slot per location: the layout on screen, refreshed every time
+// a change settles on the layer (a drag, an add, a remove) unless the change is
+// one this cycle itself produced — those regenerate on demand. Cycling onward
+// from Current reaches Rectangle and Flowers; coming back restores every tile
+// to the slot it held, and any tile added since fills the free slots in its
+// current order. The slot is participant-local, like the active pointer, and
+// outlives a refresh. Saved /sequence sets and the older-layout ring are
+// retired for now.
 // The phone's rails are deliberately NOT an arrangement at all any more: they
 // are a PROJECTION of the layer's order owned by RailProjectionDrone
 // (documentation/mobile-rails-projection.md), never a commit, so nothing
 // here knows about lanes.
-// The built-ins (commands/../arrangements.ts) are computed live from
-// the current tile count, so they always fit. The saved sets are the ones
-// "we have already created" — authored with the SequenceEditorBee and held
-// by SequenceService (content-addressed, shareable, bound per-location via
-// the cascading `sequence:target` decoration).
+// The built-ins (arrangements.ts) are computed live from the current tile
+// count and the viewport's aspect, so they always fit: Rectangle fills the
+// screen's long side, Flowers are non-touching clusters of seven.
 //
 // The active position in the cycle is participant-local (its own document,
 // keyed by location) — it is a view preference, like the viewport, not
@@ -72,11 +69,6 @@ type CellCountPayload = {
 
 type AxialServiceLike = { items?: Map<number, AxialLike> }
 type LineageLike = { explorerSegments?: () => readonly string[] }
-type SequenceServiceLike = {
-  list(): string[]
-  get(name: string): { name: string; indexes: number[] } | null
-  applyTo(segments: readonly string[], name: string): Promise<void>
-}
 type StoreLike = { putResource(blob: Blob): Promise<string> }
 type I18nLike = { t: (k: string, p?: Record<string, string | number>) => string }
 
@@ -98,8 +90,8 @@ const ringDoc = (): ParticipantDocument<Record<string, Record<string, number>[]>
 /** Test seam: forget both records so the next read starts from the store. */
 export const _resetArrangeRecords = (): void => { activeDocument = null; ringDocument = null }
 const RING_ID_PREFIX = 'ring:'
-/** Earlier layouts kept per location. */
-const RING_SIZE = 8
+/** Layouts kept per location: just the current one. */
+const RING_SIZE = 1
 
 /** How long the arrange gate will wait for a targeted pass to settle. */
 const PAINT_SETTLE_TIMEOUT = 3000
@@ -107,7 +99,6 @@ const PAINT_SETTLE_TIMEOUT = 3000
 /** One slot in the cycle: a built-in generator or a saved palette set. */
 type CycleEntry =
   | { kind: 'builtin'; id: string; label: string; labelKey: string }
-  | { kind: 'saved'; id: string; label: string; labelKey: string }
   | { kind: 'ring'; id: string; label: string; labelKey: string; position: number; placement: Map<string, number> }
 
 /** One saved layout: tile label → spiral slot. */
@@ -117,7 +108,7 @@ export class SequenceCycleDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'arrangement'
   override description =
-    'Press "a" to arrange the current tiles by the next tile target sequence (Rectangle, Flowers, or any saved /sequence set); Shift+A steps back. Tiles keep their relative order.'
+    'Press "a" to arrange the current tiles by the next tile target sequence (Current, Rectangle or Flowers); Shift+A steps back. Tiles keep their relative order.'
 
   protected override deps = {
     axial: '@diamondcoreprocessor.com/AxialService',
@@ -220,6 +211,27 @@ export class SequenceCycleDrone extends Drone {
     this.#snapshotWhole = payload?.settled !== false
     this.#snapshotLocation = typeof payload?.locationKey === 'string' ? payload.locationKey : null
     this.#settleGate(wasOpen)
+    this.#captureCurrent()
+  }
+
+  /** Keep the CURRENT slot equal to the layout on screen. Runs whenever a whole
+   *  snapshot lands, so a drag, an add or a remove updates it at once; layouts
+   *  this cycle produced are skipped (they regenerate). Writes only on change. */
+  #captureCurrent = (): void => {
+    if (this.#busy || this.#tilesComingIntoView()) return
+    const axialSvc = this.resolve<AxialServiceLike>('axial')
+    if (!axialSvc?.items?.size) return
+    const current = this.#currentLayout(buildCoordToIndex(axialSvc.items))
+    if (current.size === 0) return
+    const segments = (this.resolve<LineageLike>('lineage')?.explorerSegments?.() ?? [])
+      .map((x) => String(x ?? '').trim()).filter(Boolean)
+    const locationKey = segments.join('/')
+    const before = this.#readRing(locationKey)[0]
+    this.#remember(locationKey, current)
+    const after = this.#readRing(locationKey)[0]
+    if (after && after !== before && (!before || fingerprint(after) !== fingerprint(before))) {
+      this.#writeActive(locationKey, 0)   // the layout on screen IS current
+    }
   }
 
   /** Arm the watchdog when the gate closes, clear it when it opens. Armed
@@ -251,6 +263,19 @@ export class SequenceCycleDrone extends Drone {
     this.#paintWatchdog = null
   }
 
+  /** label -> spiral slot for the tiles on screen. */
+  #currentLayout = (coordToIndex: Map<string, number>): Map<string, number> => {
+    const current = new Map<string, number>()
+    for (let i = 0; i < this.#cellLabels.length; i++) {
+      const label = this.#cellLabels[i]
+      const coord = this.#cellCoords[i]
+      if (!label || !coord) continue
+      const idx = coordToIndex.get(`${coord.q},${coord.r}`)
+      if (idx !== undefined) current.set(label, idx)
+    }
+    return current
+  }
+
   #cycle = async (dir: number, requestedId?: string): Promise<void> => {
     if (this.#busy) return
 
@@ -269,14 +294,7 @@ export class SequenceCycleDrone extends Drone {
     // Current tiles → name → existing index, read from the live render
     // snapshot via the grid's reverse map (coord → index).
     const coordToIndex = buildCoordToIndex(axialSvc.items)
-    const current = new Map<string, number>()
-    for (let i = 0; i < this.#cellLabels.length; i++) {
-      const label = this.#cellLabels[i]
-      const coord = this.#cellCoords[i]
-      if (!label || !coord) continue
-      const idx = coordToIndex.get(`${coord.q},${coord.r}`)
-      if (idx !== undefined) current.set(label, idx)
-    }
+    const current = this.#currentLayout(coordToIndex)
     if (current.size === 0) return
 
     // Relative order preserved: tiles sorted by their existing index.
@@ -367,46 +385,35 @@ export class SequenceCycleDrone extends Drone {
     }, 80)
   }
 
-  /** Built-ins first, then saved sets, then the ring, newest first. */
+  /** Current first, then the two built-ins. */
   #buildCycle = (ring: readonly Placement[]): CycleEntry[] => {
-    const entries: CycleEntry[] = BUILTIN_ARRANGEMENTS.map((b) => ({
-      kind: 'builtin' as const,
-      id: b.id,
-      label: b.label,
-      labelKey: b.labelKey,
-    }))
-    const svc = this.resolve<SequenceServiceLike>('sequences')
-    for (const name of svc?.list() ?? []) {
-      entries.push({ kind: 'saved', id: name, label: name, labelKey: '' })
-    }
-    ring.forEach((placement, i) => {
+    const entries: CycleEntry[] = []
+    ring.slice(0, RING_SIZE).forEach((placement, i) => {
       entries.push({
         kind: 'ring',
         id: RING_ID_PREFIX + i,
-        label: `Earlier layout ${i + 1}`,
-        labelKey: 'arrange.earlier',
+        label: 'Current',
+        labelKey: 'arrange.current',
         position: i + 1,
         placement: new Map(placement),
       })
     })
+    for (const b of BUILTIN_ARRANGEMENTS) {
+      entries.push({ kind: 'builtin', id: b.id, label: b.label, labelKey: b.labelKey })
+    }
     return entries
   }
 
-  /** The index list for a cycle entry — generated (built-in) or looked
-   *  up from the saved set (palette). */
+  /** The index list for a cycle entry: generated (built-in) for the
+   *  viewport's shape, or the captured slots (current). */
   #indexesFor = (
     entry: CycleEntry,
     count: number,
     coordToIndex: Map<string, number>,
   ): number[] | null => {
     if (entry.kind === 'ring') return [...entry.placement.values()]
-    if (entry.kind === 'builtin') {
-      const builtin = BUILTIN_ARRANGEMENTS.find((b) => b.id === entry.id)
-      return builtin ? builtin.generate(count, coordToIndex) : null
-    }
-    const svc = this.resolve<SequenceServiceLike>('sequences')
-    const set = svc?.get(entry.id)
-    return set?.indexes?.length ? [...set.indexes] : null
+    const builtin = BUILTIN_ARRANGEMENTS.find((b) => b.id === entry.id)
+    return builtin ? builtin.generate(count, coordToIndex, viewportAspect()) : null
   }
 
   // ── commit ──────────────────────────────────────────────────────────
@@ -500,12 +507,6 @@ export class SequenceCycleDrone extends Drone {
       // also stop new tiles from inheriting the last generated/saved one.
       if (entry.kind === 'ring') return
 
-      if (entry.kind === 'saved') {
-        const svc = this.resolve<SequenceServiceLike>('sequences')
-        await svc?.applyTo?.(segments, entry.id)
-        return
-      }
-
       const store = window.ioc.get<StoreLike>('@hypercomb.social/Store')
       if (!store?.putResource) return
       const record = { kind: 'sequence', name: entry.id, indexes: [...indexes] }
@@ -574,6 +575,13 @@ export class SequenceCycleDrone extends Drone {
     const message = prefix && prefix !== 'arrange.toast' ? prefix : `Arranged: ${name}`
     this.emitEffect('toast:show', { type: 'tip', message })
   }
+}
+
+/** The viewport's width / height: what Rectangle and Flowers fill. */
+const viewportAspect = (): number | undefined => {
+  if (typeof window === 'undefined') return undefined
+  const w = window.innerWidth, h = window.innerHeight
+  return w > 0 && h > 0 ? w / h : undefined
 }
 
 /** Order-independent identity of a layout. */

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { LANE_DEFAULT, clampLanes, laneCoords, threeLaneCoords, threeLaneIndexes } from './arrangements.js'
+import { LANE_DEFAULT, clampLanes, laneCoords, threeLaneCoords, threeLaneIndexes, rectangleCoords, flowerCoords } from './arrangements.js'
 
 describe('threeLaneCoords', () => {
   afterEach(() => localStorage.removeItem('hc:hex-orientation'))
@@ -101,5 +101,56 @@ describe('threeLaneCoords', () => {
     expect(threeLaneIndexes(8, flatIndexes)).toEqual(
       flatCoords.map((_, index) => index),
     )
+  })
+})
+
+const hexDist = (a: { q: number; r: number }, b: { q: number; r: number }): number => {
+  const dq = a.q - b.q, dr = a.r - b.r
+  return Math.max(Math.abs(dq), Math.abs(dr), Math.abs(dq + dr))
+}
+
+describe('rectangleCoords fills the viewport', () => {
+  const span = (n: number, aspect: number) => {
+    const xs = rectangleCoords(n, aspect).map(({ q, r }) => (q + r / 2) * Math.sqrt(3))
+    const ys = rectangleCoords(n, aspect).map(({ r }) => r * 1.5)
+    return { w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) }
+  }
+  it('runs wide in landscape and tall in portrait', () => {
+    const wide = span(40, 16 / 9), tall = span(40, 9 / 16)
+    expect(wide.w).toBeGreaterThan(wide.h)
+    expect(tall.h).toBeGreaterThan(tall.w)
+  })
+  it('places every tile on its own hex', () => {
+    const c = rectangleCoords(37, 2)
+    expect(c).toHaveLength(37)
+    expect(new Set(c.map(({ q, r }) => `${q},${r}`)).size).toBe(37)
+  })
+})
+
+describe('flowerCoords never touch', () => {
+  it('keeps a free hex between neighbouring flowers', () => {
+    const c = flowerCoords(7 * 19)
+    for (let i = 0; i < c.length; i++) {
+      for (let j = i + 1; j < c.length; j++) {
+        if (Math.floor(i / 7) === Math.floor(j / 7)) continue
+        expect(hexDist(c[i], c[j])).toBeGreaterThan(1)
+      }
+    }
+  })
+  it('seats the centre first, then its six petals', () => {
+    const c = flowerCoords(7)
+    expect(c[0]).toEqual({ q: 0, r: 0 })
+    expect(c.slice(1).every((p) => hexDist(p, c[0]) === 1)).toBe(true)
+  })
+})
+
+describe('flowers grow around the first, ring by ring', () => {
+  const centres = (flowers: number) =>
+    flowerCoords(flowers * 7).filter((_, i) => i % 7 === 0)
+  it('puts the next six flowers around the first before going further out', () => {
+    const c = centres(19)
+    expect(c[0]).toEqual({ q: 0, r: 0 })
+    for (let i = 1; i <= 6; i++) expect(hexDist(c[i], c[0])).toBe(4)
+    for (let i = 7; i < 19; i++) expect(hexDist(c[i], c[0])).toBeGreaterThanOrEqual(8)
   })
 })
