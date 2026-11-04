@@ -86,9 +86,6 @@ const JITTER_PX = 12
 
 const OWNER = 'quick-menu'
 
-/** Alt held this long over a tile flies it to the middle for the flower, so a
- *  tap of the key passes without moving the hive. Ctrl is selection's alone. */
-const ALT_HOLD_MS = 220
 
 /**
  * Drag-to-move's gate source. It CLAIMS the gate when its own hold matures at
@@ -1238,9 +1235,9 @@ export class QuickMenuInput {
       return
     }
     if (want && this.#hoverCell && this.#flightWanted()) {
-      if (!this.#altTimer) {
-        this.#altTimer = setTimeout(() => { this.#altTimer = null; this.#startFlight() }, ALT_HOLD_MS)
-      }
+      // The flight is only the container zooming, so it starts on the press and
+      // not after a wait; the guards in #startFlight are the only gate.
+      this.#startFlight()
       return
     }
     if (this.#altTimer) { clearTimeout(this.#altTimer); this.#altTimer = null }

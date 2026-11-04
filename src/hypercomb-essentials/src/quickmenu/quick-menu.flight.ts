@@ -45,7 +45,7 @@ const FLY_MS = 240
 /** Rest on a hold leaf this long and it fires. */
 const HOLD_FIRE_MS = 600
 /** On-screen circumradius of the context tile (and so every option), in px. */
-const TILE_RADIUS_PX = 72
+const TILE_RADIUS_PX = 83
 
 /** Pathways the flower may walk outward from the tile, and still fit. */
 const STEPS_OUT = 2
@@ -164,11 +164,13 @@ export class QuickMenuFlight {
     document.documentElement.classList.add('hc-quick-menu-active')
     this.#requestLock()
 
+    // The flower is drawn from the first frame: it is hive cells in the
+    // container's own space, so it rides the zoom and lands with the camera.
+    this.#layer.bloom()
+    this.#layer.dim(true)
     this.#flyTo(at, this.#menuScale(), FLY_MS, () => {
-      // Centred: the camera and every tile are frozen from here to the end, and
-      // the rest of the hive goes half transparent.
-      this.#layer.bloom()
-      this.#layer.dim(true)
+      // Centred: the camera and every tile are frozen from here to the end,
+      // and only now does the pointer aim.
       this.#ready = true
     })
     return true
@@ -255,18 +257,15 @@ export class QuickMenuFlight {
     this.#aim(slot)
   }
 
-  /** Right-click: one ring back, wherever the pointer is. The pointer is not
-   *  moved to the middle, so it cannot land on an option and fire it — the
-   *  options sleep until it comes back. At the first ring there is no back. */
+  /** Right-click: one ring back, wherever the pointer is. The cursor is put on
+   *  the parent ring's middle, so the pointer is already where the ring wants
+   *  it: the options stay awake and nothing has to be walked back to the centre.
+   *  At the first ring there is no back. */
   back(): boolean {
     if (!this.#active || !this.#ready || this.#levels.length <= 1) return false
     this.#clearHold()
     this.#levels.pop()
-    this.#step(this.#levels[this.#levels.length - 1], false)
-    this.#armed = false
-    this.#layer.disarm()
-    this.#paintCursor()
-    this.#tell()
+    this.#step(this.#levels[this.#levels.length - 1])
     return true
   }
 

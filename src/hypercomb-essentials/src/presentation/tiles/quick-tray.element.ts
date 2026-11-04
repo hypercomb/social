@@ -66,7 +66,7 @@
 import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { listGroups, readGroup, startGroup } from '../../assistant/context-groups.js'
 import { dropEntries, entryKey, takeEntries, type TrayEntry } from './quick-tray.entries.js'
-import { entriesToMembers, membersToEntries } from './quick-tray.ring.js'
+import { bouquetOf, entriesToMembers, membersToEntries, shelfType, tagSignature } from './quick-tray.ring.js'
 
 export const QUICK_TRAY_SURFACE = 'hc-quick-tray'
 
@@ -76,6 +76,11 @@ export const QUICK_TRAY_SURFACE = 'hc-quick-tray'
 const DRAG_THRESHOLD = 5
 /** How long a folded shelf stays open after a take, unless the pointer arrives. */
 const PEEK_MS = 4000
+/** A shelf this full asks to be kept as a group — the seven-tile flower: one
+ *  at the heart and the six around it, the same shape as the quick menu ring. */
+const DEFAULT_FILL = 7
+const FILL_MIN = 2
+const FILL_MAX = 24
 const SIG_RE = /^[0-9a-f]{64}$/
 
 type LineageLike = { explorerSegments?: () => readonly string[] }
@@ -89,6 +94,7 @@ type StoreLike = {
   getPoolDoc?: (pool: FileSystemDirectoryHandle) => Promise<ArrayBuffer | null>
   putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey: undefined, options: { keep: 'current' }) => Promise<unknown>
 }
+type TagRegistryLike = { names?: string[]; ensureLoaded?: () => Promise<void>; add?: (name: string, color?: string) => Promise<void> }
 type PlacementLike = { propsSigAt?: (segments: readonly string[]) => Promise<string | null> }
 type SelectionLike = EventTarget & { selected?: ReadonlySet<string>; remove?: (label: string) => void }
 /** The image wall walking the selection, one tile at a time (sharing/image-choice.drone.ts). */
@@ -106,6 +112,14 @@ const here = (): string[] =>
     .map(s => String(s ?? '').trim()).filter(Boolean)
 /** Where the fold is kept: one current record, written only by a press. */
 const STATE_POOL = 'shelf:state'
+
+/** The tags set on this layer's tiles — the ones in use here, never the hive's
+ *  whole list. A tag counts when a visible tile carries it. */
+const layerTags = (): string[] => {
+  const names = (ioc()?.get?.('@hypercomb.social/TagRegistry') as TagRegistryLike | undefined)?.names ?? []
+  const metrics = ioc()?.get?.('@diamondcoreprocessor.com/OverlapMetrics') as { tagCount?: (name: string) => number } | undefined
+  return names.filter(name => (metrics?.tagCount?.(name) ?? 0) > 0).sort((a, b) => a.localeCompare(b))
+}
 
 const t = (key: string, fallback: string): string =>
   (ioc()?.get?.(I18N_IOC_KEY) as I18nProvider | undefined)?.t?.(key) ?? fallback
@@ -188,6 +202,14 @@ const STYLE = `
   font:inherit;font-size:0.95rem;line-height:1;cursor:pointer;opacity:0;transition:opacity 120ms ease;}
 .row:hover .remove,.row:focus-within .remove{opacity:0.75;}
 .remove:hover,.remove:focus-visible{opacity:1;background:rgba(var(--shelf),0.2);outline:none;}
+.row.tag{cursor:pointer;}
+.row.tag.lit{outline:1px solid currentColor;}
+.ask{display:inline-flex;align-items:center;gap:0.4rem;}
+.ask button{appearance:none;border:1px solid currentColor;border-radius:var(--hc-radius-control,2px);background:none;color:inherit;font:inherit;cursor:pointer;padding:0 0.5em;}
+.fill{width:3rem;box-sizing:border-box;background:transparent;color:inherit;border:0;border-bottom:1px solid currentColor;font:inherit;padding:0.1em 0.2em;opacity:0.8;outline:none;}
+.apply{appearance:none;border:1px solid currentColor;border-radius:var(--hc-radius-control,2px);background:none;color:inherit;font:inherit;letter-spacing:0.12em;text-transform:uppercase;cursor:pointer;padding:0 0.6em;}
+.kind{appearance:none;border:0;background:none;color:inherit;font:inherit;letter-spacing:0.12em;text-transform:uppercase;opacity:0.7;cursor:pointer;padding:0 0.4em;}
+.add{min-width:8rem;max-width:14rem;box-sizing:border-box;background:transparent;color:inherit;border:0;border-bottom:1px solid currentColor;opacity:0.85;font:inherit;padding:0.1em 0.3em;outline:none;}
 .fold{position:relative;appearance:none;width:1.75rem;height:1.75rem;display:inline-grid;place-items:center;border:0;padding:0;
   border-radius:var(--hc-radius-control,2px);background:transparent;color:var(--hc-window-ink-plain,currentColor);cursor:pointer;}
 .fold:hover,.fold:focus-visible{background:rgba(var(--shelf),0.16);color:var(--hc-window-ink-loud,currentColor);outline:none;}
@@ -249,6 +271,27 @@ export class QuickTrayElement extends HTMLElement {
   #selection: SelectionLike | null = null
   #selectionFrame = 0
   #queue: ImageQueue | null = null
+  /** The participant chose a number this session, so the saved one no longer speaks. */
+  #fillChosen = false
+  /** Open for typing though empty: the shell's shelf button brought it up. */
+  #opened = false
+  /** Which kept shelves the wheel walks, and the words that narrow them. Both
+   *  last the session only: a refresh starts on every shelf again. */
+  #type: 'all' | 'tags' | 'tiles' = 'all'
+  #filter = ''
+  /** The kept shelf the wheel last brought back. */
+  #cycled: string | null = null
+  /** The tags the hive is filtered on (the sticky `tags:filter`), and the reach
+   *  they were set with. Mirrored, never owned: the shelf toggles, the hive filters. */
+  #lens: readonly string[] = []
+  /** How many a shelf holds before it asks to become a group. The participant's
+   *  number, kept with the fold in `shelf:state`. */
+  #fill = DEFAULT_FILL
+  /** The size the shelf was at when it last asked, so it asks again only after
+   *  another full fill has gathered. */
+  #askedAt = 0
+  #asking = false
+  #reach: 'local' | 'children' | 'global' = 'local'
 
   constructor() {
     super()
@@ -285,7 +328,15 @@ export class QuickTrayElement extends HTMLElement {
     // The ring: keep what the shelf holds as a group, or bring a kept one back.
     // Both are presses, sent transient, so a shelf that mounts later never
     // replays one.
+    this.#offs.push(EffectBus.on<{ active?: string[]; scope?: 'local' | 'children' | 'global' } | undefined>('tags:filter', (p) => {
+      this.#lens = Array.isArray(p?.active) ? p.active : []
+      if (p?.scope) this.#reach = p.scope
+      this.#render()
+    }))
     this.#offs.push(EffectBus.on('shelf:save', () => { void this.#keepShelf() }))
+    this.#offs.push(EffectBus.on<{ name?: string } | undefined>('shelf:take-tag', (p) => {
+      if (typeof p?.name === 'string') void this.#takeTag(p.name)
+    }))
     this.#offs.push(EffectBus.on<{ id?: string } | undefined>('shelf:recall', (p) => {
       if (typeof p?.id === 'string') void this.#recallShelf(p.id)
     }))
@@ -294,6 +345,7 @@ export class QuickTrayElement extends HTMLElement {
     // Transient on the sender's side: a shelf that mounts later must not
     // replay an old press and fold itself.
     this.#offs.push(EffectBus.on<{ open?: boolean } | undefined>('shelf:toggle', (p) => {
+      if (p?.open === true || (p?.open === undefined && this.#folded)) { this.#opened = true; this.#render() }
       this.#press(typeof p?.open === 'boolean' ? !p.open : !this.#folded)
     }))
     // The image wall walking the selection says where it is on every step;
@@ -356,9 +408,65 @@ export class QuickTrayElement extends HTMLElement {
     this.#peek()
     this.#entries = takeEntries(this.#entries, incoming)
     for (const entry of this.#entries) void this.#loadThumb(entry)
+    this.#asking = this.#entries.length >= this.#askedAt + this.#fill
     this.#render()
     this.#answer(incoming)
     this.#announce()
+  }
+
+  /** Keep what the shelf holds as a group and clear it, so the next handful starts fresh. */
+  async #keepAndClear(): Promise<void> {
+    await this.#keepShelf()
+    this.#asking = false
+    this.#askedAt = 0
+    this.letGo(new Set(this.#entries.map(entryKey)))
+  }
+
+  /** A tag onto the shelf, created if the hive does not know it yet. */
+  async #takeTag(raw: string): Promise<void> {
+    const name = raw.trim()
+    if (!name) return
+    const registry = ioc()?.get?.('@hypercomb.social/TagRegistry') as TagRegistryLike | undefined
+    if (registry) { await registry.ensureLoaded?.(); if (!registry.names?.includes(name)) await registry.add?.(name) }
+    this.take([{ label: name, sourceSegments: [], sig: await tagSignature(name), kind: 'tag' }])
+  }
+
+  /** The wheel: the next kept shelf of the chosen type that matches the words
+   *  typed, brought back as what the shelf holds. */
+  async #cycle(step: 1 | -1): Promise<void> {
+    const kept = (await listGroups()).filter(group =>
+      (this.#type === 'all' || shelfType(group) === this.#type)
+      && group.label.toLowerCase().includes(this.#filter.toLowerCase()))
+    if (kept.length === 0) return
+    const at = kept.findIndex(group => group.id === this.#cycled)
+    const next = kept[(at + step + kept.length) % kept.length]
+    this.#cycled = next.id
+    await this.#recallShelf(next.id)
+  }
+
+  /** Put the shelf's tags to work: on the picked tiles at once, or, with none
+   *  picked, in hand for the hive to shade and the next click to scent. This is
+   *  the pheromone bridge's own lane (pheromone-tiles.drone.ts), unchanged. */
+  #applyBouquet(): void {
+    const tags = bouquetOf(this.#entries)
+    if (tags.length === 0) return
+    const picked = [...((ioc()?.get?.(SELECTION_KEY) as SelectionLike | undefined)?.selected ?? [])]
+    EffectBus.emitTransient('tags:apply-begin', { tags })
+    if (picked.length === 0) return
+    for (const label of picked) EffectBus.emitTransient('tags:apply-paint', { label, add: true })
+    EffectBus.emitTransient('tags:apply-commit', {})
+  }
+
+  /** Toggle one tag in the hive's filter. The reach stays as it was set. */
+  #filterBy(tag: string): void {
+    const active = this.#lens.includes(tag) ? this.#lens.filter(t => t !== tag) : [...this.#lens, tag]
+    EffectBus.emit('tags:filter', { active, scope: this.#reach })
+  }
+
+  #turnType(): void {
+    this.#type = this.#type === 'all' ? 'tags' : this.#type === 'tags' ? 'tiles' : 'all'
+    this.#cycled = null
+    this.#render()
   }
 
   /** Keep the shelf as a new group on the ring. An empty shelf, or one whose
@@ -407,6 +515,8 @@ export class QuickTrayElement extends HTMLElement {
 
   letGo(keys: ReadonlySet<string>): void {
     this.#entries = dropEntries(this.#entries, keys)
+    this.#askedAt = Math.min(this.#askedAt, this.#entries.length)
+    if (this.#entries.length < this.#askedAt + this.#fill) this.#asking = false
     for (const key of keys) {
       const url = this.#thumbs.get(key)
       if (url) { URL.revokeObjectURL(url); this.#thumbs.delete(key) }
@@ -416,6 +526,7 @@ export class QuickTrayElement extends HTMLElement {
   }
 
   async #loadThumb(entry: TrayEntry): Promise<void> {
+    if (entry.kind === 'tag') return
     const key = entryKey(entry)
     if (this.#thumbs.has(key)) return
     const url = await resolveThumb(entry)
@@ -555,7 +666,7 @@ export class QuickTrayElement extends HTMLElement {
     // holds or however it is folded. The shelf's rows wait, untouched.
     if (this.#picking()) { this.#renderPicks(); return }
     // Nothing held, nothing shown: an empty shelf is a band with no use.
-    if (this.#folded || this.#entries.length === 0) {
+    if (this.#folded || (this.#entries.length === 0 && !this.#opened)) {
       this.#root.innerHTML = `<style>${STYLE}</style>`
       this.#reserve()
       return
@@ -567,10 +678,13 @@ export class QuickTrayElement extends HTMLElement {
     const rows = this.#entries.map((entry, index) => {
       const key = entryKey(entry)
       const thumb = this.#thumbs.get(key)
-      const face = thumb
+      const face = entry.kind === 'tag'
+        ? `<span class="glyph" aria-hidden="true">#</span>`
+        : thumb
         ? `<span class="thumb"><img src="${thumb}" alt="" draggable="false"></span>`
         : `<span class="glyph" aria-hidden="true">⬢</span>`
-      return `<li class="row${this.#dragging === entry ? ' lifted' : ''}" data-index="${index}" tabindex="0" title="${drag}">
+      const lit = entry.kind === 'tag' && this.#lens.includes(entry.label)
+      return `<li class="row${this.#dragging === entry ? ' lifted' : ''}${entry.kind === 'tag' ? ' tag' : ''}${lit ? ' lit' : ''}"${entry.kind === 'tag' ? ` aria-pressed="${lit}"` : ''} data-index="${index}" tabindex="0" title="${drag}">
         ${face}<span class="label">${esc(entry.label)}</span>
         <button class="remove" type="button" data-index="${index}" tabindex="-1" aria-label="${remove}: ${esc(entry.label)}" title="${remove}">×</button>
       </li>`
@@ -580,6 +694,12 @@ export class QuickTrayElement extends HTMLElement {
     this.#root.innerHTML = `<style>${STYLE}</style>
       <section class="shelf${this.#dragging ? ' dragging' : ''}" aria-label="${esc(t('quick-tray.title', 'Shelf'))}" data-consumes-wheel>
         <span class="legend"><span class="word">${esc(t('quick-tray.title', 'Shelf'))}</span><span class="count">${this.#entries.length}</span></span>
+        ${this.#asking ? `<span class="ask"><span class="ask-word">${esc(t('quick-tray.ask', 'keep these as a group?'))}</span><button class="ask-keep" type="button">${esc(t('quick-tray.ask-keep', 'keep'))}</button><button class="ask-later" type="button">${esc(t('quick-tray.ask-later', 'not yet'))}</button></span>` : ''}
+        <input class="fill" type="number" min="${FILL_MIN}" max="${FILL_MAX}" value="${this.#fill}" title="${esc(t('quick-tray.fill', 'How many gather before the shelf asks to keep them as a group'))}" aria-label="${esc(t('quick-tray.fill', 'How many gather before the shelf asks to keep them as a group'))}">
+        ${bouquetOf(this.#entries).length > 0 ? `<button class="apply" type="button" title="${esc(t('quick-tray.apply', 'Scent the picked tiles with these tags, or hold them for the next tile you click'))}">${esc(t('quick-tray.apply-word', 'apply'))}</button>` : ''}
+        <button class="kind" type="button" title="${esc(t('quick-tray.type', 'Wheel: next shelf · Shift+wheel: kind of shelf'))}">${esc(this.#type)}</button>
+        <input class="add" type="text" list="hc-shelf-tags" spellcheck="false" autocomplete="off" value="${esc(this.#filter)}" placeholder="${esc(t('quick-tray.add', 'search or add a tag'))}" aria-label="${esc(t('quick-tray.add', 'search or add a tag'))}">
+        <datalist id="hc-shelf-tags">${layerTags().map(n => `<option value="${esc(n)}">`).join('')}</datalist>
         ${body}
         <button class="fold" type="button" aria-expanded="true" title="${hide}" aria-label="${hide}">${CHEVRON_UP}</button>
       </section>`
@@ -593,6 +713,14 @@ export class QuickTrayElement extends HTMLElement {
         if (entry) this.letGo(new Set([entryKey(entry)]))
       })
     }
+    // A tag is a lens: a click on its row filters the hive by it, a second click lets it go.
+    for (const row of this.#root.querySelectorAll<HTMLLIElement>('.row.tag')) {
+      row.addEventListener('click', (e) => {
+        if ((e.target as HTMLElement).closest('.remove')) return
+        const tag = this.#entries[Number(row.dataset['index'])]?.label
+        if (tag) this.#filterBy(tag)
+      })
+    }
     for (const button of this.#root.querySelectorAll<HTMLButtonElement>('.remove')) {
       button.addEventListener('pointerdown', (e) => e.stopPropagation())
       button.addEventListener('click', (e) => {
@@ -603,7 +731,48 @@ export class QuickTrayElement extends HTMLElement {
     }
     this.#wireWheel()
     this.#wireFold()
+    this.#wireHead()
     this.#reserve()
+  }
+
+  /** The head's own acts: type to narrow the wheel's shelves, Enter to add the
+   *  word as a tag, the kind button to turn between kinds, the wheel to walk. */
+  #wireHead(): void {
+    const input = this.#root.querySelector<HTMLInputElement>('.add')
+    input?.addEventListener('input', () => { this.#filter = input.value; this.#cycled = null })
+    input?.addEventListener('keydown', (e) => {
+      e.stopPropagation()
+      if (e.key !== 'Enter' || !input.value.trim()) return
+      e.preventDefault()
+      const name = input.value
+      this.#filter = ''
+      void this.#takeTag(name)
+    })
+    this.#root.querySelector('.kind')?.addEventListener('click', () => this.#turnType())
+    this.#root.querySelector('.apply')?.addEventListener('click', () => this.#applyBouquet())
+    this.#root.querySelector('.ask-keep')?.addEventListener('click', () => { void this.#keepAndClear() })
+    this.#root.querySelector('.ask-later')?.addEventListener('click', () => {
+      this.#asking = false
+      this.#askedAt = this.#entries.length
+      this.#render()
+    })
+    const fill = this.#root.querySelector<HTMLInputElement>('.fill')
+    fill?.addEventListener('keydown', (e) => e.stopPropagation())
+    fill?.addEventListener('change', () => {
+      const n = Math.round(Number(fill.value))
+      this.#fill = Number.isFinite(n) ? Math.min(FILL_MAX, Math.max(FILL_MIN, n)) : DEFAULT_FILL
+      this.#fillChosen = true
+      void this.#keepFold(this.#folded)
+      this.#render()
+    })
+    for (const head of this.#root.querySelectorAll('.legend, .kind, .add')) {
+      head.addEventListener('wheel', (e) => {
+        const ev = e as WheelEvent
+        ev.preventDefault()
+        if (ev.shiftKey) { if (ev.deltaY !== 0 || ev.deltaX !== 0) this.#turnType(); return }
+        void this.#cycle(ev.deltaY > 0 || ev.deltaX > 0 ? 1 : -1)
+      }, { passive: false })
+    }
   }
 
   /** A wheel over the rows scrolls them sideways, so a long shelf reads with a mouse. */
@@ -674,7 +843,7 @@ export class QuickTrayElement extends HTMLElement {
     const store = ioc()?.get?.(STORE_KEY) as StoreLike | undefined
     const pool = await store?.getPool?.(STATE_POOL)
     if (!pool || !store?.putPoolDoc) return
-    const bytes = new TextEncoder().encode(JSON.stringify({ folded, at: Date.now() })).buffer as ArrayBuffer
+    const bytes = new TextEncoder().encode(JSON.stringify({ folded, fill: this.#fill, at: Date.now() })).buffer as ArrayBuffer
     await store.putPoolDoc(pool, bytes, undefined, { keep: 'current' }).catch(() => undefined)
   }
 
@@ -686,8 +855,13 @@ export class QuickTrayElement extends HTMLElement {
       if (!pool || !store?.getPoolDoc) return
       try {
         const bytes = await store.getPoolDoc(pool)
-        if (!bytes || this.#pressed) return
-        const record = JSON.parse(new TextDecoder().decode(bytes)) as { folded?: unknown }
+        if (!bytes) return
+        const record = JSON.parse(new TextDecoder().decode(bytes)) as { folded?: unknown; fill?: unknown }
+        if (typeof record?.fill === 'number' && !this.#fillChosen) {
+          this.#fill = Math.min(FILL_MAX, Math.max(FILL_MIN, Math.round(record.fill)))
+          this.#render()
+        }
+        if (this.#pressed) return
         if (record?.folded === true) this.#setFolded(true)
       } catch { /* no record, or not ours: the shelf stays open */ }
     }
@@ -723,7 +897,7 @@ export class QuickTrayElement extends HTMLElement {
   // ── the drop ─────────────────────────────────────────────────────────────
 
   #onRowPointerDown(event: PointerEvent, entry: TrayEntry | undefined): void {
-    if (event.button !== 0 || !entry) return
+    if (event.button !== 0 || !entry || entry.kind === 'tag') return
     this.#pending = { entry, x: event.clientX, y: event.clientY }
     document.addEventListener('pointermove', this.#onDragMove)
     document.addEventListener('pointerup', this.#onDragUp)

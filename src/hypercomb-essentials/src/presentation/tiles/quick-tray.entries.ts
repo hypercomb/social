@@ -17,6 +17,9 @@ export interface TrayEntry {
   /** An atom no page lists (recents-census.ts). It has no source to seal from
    *  or release, so the drop places this exact sig, and only as an appearance. */
   readonly loose?: true
+  /** A tag on the shelf: a name, not a tile. It has no page, and its sig names
+   *  the tag (tagSignature), so a kept shelf can hold it like any other member. */
+  readonly kind?: 'tag'
 }
 
 const SIG = /^[0-9a-f]{64}$/
@@ -25,8 +28,8 @@ const SIG = /^[0-9a-f]{64}$/
  *  taken twice is one row; two same-named tiles from different pages are two.
  *  Loose atoms have no source path, so two of one name share a key: the later
  *  take replaces the earlier row. */
-export const entryKey = (e: Pick<TrayEntry, 'label' | 'sourceSegments'>): string =>
-  e.label + '\u0000' + e.sourceSegments.join('/')
+export const entryKey = (e: Pick<TrayEntry, 'label' | 'sourceSegments'> & { kind?: 'tag' }): string =>
+  (e.kind === 'tag' ? '#' : '') + e.label + '\u0000' + e.sourceSegments.join('/')
 
 /** Add references to what is held. Upserts by key: a second take of the same
  *  tile refreshes its sig when the second brought one and never erases the
@@ -40,10 +43,11 @@ export const takeEntries = (held: readonly TrayEntry[], incoming: readonly TrayE
     const sourceSegments = Array.isArray(raw.sourceSegments)
       ? raw.sourceSegments.map(s => String(s ?? '').trim()).filter(Boolean)
       : []
-    const key = entryKey({ label, sourceSegments })
+    const kind = raw.kind === 'tag' ? ('tag' as const) : undefined
+    const key = entryKey({ label, sourceSegments, kind })
     const prior = byKey.get(key)
     const sig = (typeof raw.sig === 'string' && SIG.test(raw.sig)) ? raw.sig : prior?.sig
-    byKey.set(key, { label, sourceSegments, ...(sig ? { sig } : {}), ...(raw.loose ? { loose: true as const } : {}) })
+    byKey.set(key, { label, sourceSegments, ...(sig ? { sig } : {}), ...(raw.loose ? { loose: true as const } : {}), ...(kind ? { kind } : {}) })
   }
   return [...byKey.values()]
 }
