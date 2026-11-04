@@ -1092,6 +1092,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // replayed, so a late header mount reads the boot-open correctly).
   readonly #chatPanelOpen = signal(false)
   readonly chatPanelOpen = this.#chatPanelOpen.asReadonly()
+  /** What the chat icon says when the window is shut: turns are being written
+   *  into a conversation right now ("writing", an external call running), or
+   *  were written and wait unread behind the icon ("unread"). Read from
+   *  `chat:activity` (external-call.drone.ts); opening the chat clears it. */
+  readonly #chatActivity = signal<'none' | 'writing' | 'unread'>('none')
+  readonly chatActivity = this.#chatActivity.asReadonly()
   /** The meeting icon's state, read from the meeting (hive-meeting.drone.ts). */
   readonly #meetingState = signal<'none' | 'live' | 'in'>('none')
   readonly meetingState = this.#meetingState.asReadonly()
@@ -1183,6 +1189,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       }),
       EffectBus.on<{ open?: boolean }>('chat:window-state', ({ open }) => {
         this.#chatPanelOpen.set(!!open)
+        if (open) this.#chatActivity.set('none')
+      }),
+      EffectBus.on<{ writing?: boolean }>('chat:activity', ({ writing }) => {
+        this.#chatActivity.set(writing ? 'writing' : this.#chatPanelOpen() ? 'none' : 'unread')
       }),
       EffectBus.on<{ joined?: boolean; here?: number }>('meeting:presence', p => {
         this.#meetingState.set(p?.joined ? 'in' : (p?.here ?? 0) > 0 ? 'live' : 'none')

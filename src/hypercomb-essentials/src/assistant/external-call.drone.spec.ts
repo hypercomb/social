@@ -45,6 +45,7 @@ const flush = () => new Promise(resolve => setTimeout(resolve, 0))
 
 let said: string[] = []
 let opened: string[] = []
+let writing: boolean[] = []
 let shown: (ExternalAsk | null)[] = []
 let logged: string[] = []
 let toasts: string[] = []
@@ -54,6 +55,7 @@ beforeEach(() => {
   turns.length = 0
   said = []
   opened = []
+  writing = []
   shown = []
   logged = []
   toasts = []
@@ -75,6 +77,7 @@ EffectBus.on<RemoteSubmitRequest>(REMOTE_SUBMIT, ({ text, accept, complete }) =>
     : { kind: 'ran', actions: [{ command: text.slice(1).split(' ')[0], args: '', ok: true }] })
 })
 EffectBus.on<{ convoId?: string }>('chat:open', payload => { if (payload?.convoId) opened.push(payload.convoId) })
+EffectBus.on<{ writing?: boolean }>('chat:activity', p => { writing.push(!!p?.writing) })
 EffectBus.on<{ message?: string; icon?: string }>('activity:log', p => { if (p?.icon === '$' && p.message) logged.push(p.message) })
 EffectBus.on<{ message?: string; title?: string }>('toast:show', p => { if (p?.title === '$' && p.message) toasts.push(p.message) })
 EffectBus.on<ExternalAsk | null>(EXTERNAL_ASK, ask => { shown.push(ask) })
@@ -118,6 +121,8 @@ describe('external calls', () => {
     // watched in the hive: the chat stays shut, each line's place goes to the
     // activity log, and the end is told in a toast
     expect(opened).toEqual([])
+    // the chat icon is told while the turns are written, and when they stop
+    expect(writing).toEqual([true, false])
     expect(logged).toContain('claude-code 1/2: /create word → ran /create')
     expect(logged).toContain('claude-code 2/2: /remove word → refused: a person must say this')
     expect(toasts[toasts.length - 1]).toBe('claude-code: 2 lines said, 1 refused. The run is written in its conversation on this layer.')
@@ -147,6 +152,7 @@ describe('external calls', () => {
 
     expect(said).toEqual([])
     expect(opened).toEqual([])
+    expect(writing).toEqual([true, false])
     expect(c.outcome()?.kind).toBe('declined')
     expect(turns.map(t => t.text)).toEqual(['from an agent:\n/create other', 'Declined. Nothing ran.'])
   })
