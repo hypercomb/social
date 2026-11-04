@@ -25,7 +25,9 @@ import type { QuickMenuLayer } from './quick-menu.layer.js'
 import type { QuickMenuRegistry } from './quick-menu-registry.service.js'
 import { fireQuickMenuSlot } from './quick-menu.fire.js'
 import { QuickMenuGuide, guideFor } from './quick-menu.guide.js'
+import { listGroups, type ContextGroup } from '../assistant/context-groups.js'
 import { MANY_TILES_MENU, currentOperands, swarmMenu } from './quick-menu.operands.js'
+import { shelvesMenu } from './quick-menu.shelves.js'
 import { aimLive } from './quick-menu.tile-menu.js'
 import { NO_SEATS, applyTileSeats, readTileSeats, seatMenu, type TileSeats } from './quick-menu.traits.js'
 import {
@@ -98,6 +100,8 @@ export class QuickMenuFlight {
   /** Which flight the seats being read belong to. */
   #seatRead = 0
   #holdTimer: ReturnType<typeof setTimeout> | null = null
+  /** The kept shelves, newest first, for the context data ring. */
+  #shelves: readonly ContextGroup[] = []
 
   /** Called once a flight has ended, however it ended. */
   onEnd: (() => void) | null = null
@@ -151,6 +155,8 @@ export class QuickMenuFlight {
     // Many tiles share one ring: no single tile's own seats may stand in for a
     // verb that is meant for all of them.
     if (definition.name !== MANY_TILES_MENU) this.#readSeats(definition, subject)
+    // The kept shelves ride in before the ring is walked, never during it.
+    void listGroups().then(groups => { this.#shelves = groups }, () => undefined)
 
     this.#virtual = this.#screenCentreClient()
     this.#showCursor()
@@ -343,6 +349,7 @@ export class QuickMenuFlight {
     // No slot is spent on the way back: right-click is the only back, so every
     // ring keeps all six directions for verbs.
     const definition = registry.byName(via.action.menu) ?? seatMenu(via.action.menu, this.#seats, null)
+      ?? shelvesMenu(via.action.menu, this.#shelves)
     const at = this.#layer.slotLocal(direction)
     if (!definition || !at) return
     this.#levels.push({ definition: applyTileSeats(definition, this.#seats), back: null, at })

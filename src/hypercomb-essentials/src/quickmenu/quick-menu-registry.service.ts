@@ -70,14 +70,36 @@ const ROOT: QuickMenuDefinition = {
     // Release without moving: the command line, which is both "make" and
     // "find" here — typing a name creates it or goes to it.
     { direction: 'centre', label: 'command', labelKey: 'quickmenu.command', icon: 'terminal', action: { kind: 'effect', effect: 'command:focus', payload: { cell: '' } } },
-    { direction: 'east', label: 'collections', labelKey: 'quickmenu.collections', icon: 'folder_open', action: { kind: 'command', command: 'collections' } },
+    // Looking outward: public domains, images, hosts, and the agent. Collections
+    // moved inside, since they are one of the places to look.
+    { direction: 'east', label: 'explore', labelKey: 'quickmenu.explore', icon: 'explore', action: { kind: 'menu', menu: 'root:explore' } },
     { direction: 'southeast', label: 'tags', labelKey: 'quickmenu.tags', icon: 'sell', action: { kind: 'command', command: 'tags' } },
     { direction: 'southwest', label: 'history', labelKey: 'quickmenu.history', icon: 'history', action: { kind: 'command', command: 'history' } },
     { direction: 'west', label: 'tree', labelKey: 'quickmenu.tree', icon: 'account_tree', action: { kind: 'command', command: 'tree' } },
-    { direction: 'northwest', label: 'help', labelKey: 'quickmenu.help', icon: 'tips_and_updates', action: { kind: 'command', command: 'help' } },
+    // The context data ring: the shelf's kept groups, and a way to start one as you collect.
+    { direction: 'northwest', label: 'shelves', labelKey: 'quickmenu.shelves', icon: 'bookmark', action: { kind: 'menu', menu: 'root:shelves' } },
     // The one nested ring in the shipped set — proves the descend gesture
     // and keeps the surface verbs off the root.
     { direction: 'northeast', label: 'view', labelKey: 'quickmenu.view', icon: 'layers', action: { kind: 'menu', menu: 'root:view' } },
+  ],
+}
+
+const ROOT_EXPLORE: QuickMenuDefinition = {
+  name: 'root:explore',
+  title: 'Explore',
+  titleKey: 'quickmenu.explore',
+  contexts: [],
+  slots: [
+    { direction: 'centre', label: 'find', labelKey: 'quickmenu.find', icon: 'search', action: { kind: 'command', command: 'find' } },
+    { direction: 'east', label: 'images', labelKey: 'quickmenu.images', icon: 'photo_library', action: { kind: 'command', command: 'images' } },
+    { direction: 'southeast', label: 'hosts', labelKey: 'quickmenu.hosts', icon: 'web', action: { kind: 'command', command: 'hosts' } },
+    { direction: 'southwest', label: 'collections', labelKey: 'quickmenu.collections', icon: 'folder_open', action: { kind: 'command', command: 'collections' } },
+    // Your own behaviours, to explore servers in ways of your own making.
+    { direction: 'west', label: 'behavior', labelKey: 'quickmenu.behavior', icon: 'build', action: { kind: 'command', command: 'behavior' } },
+    // The hint page: one page of tiles for everything the hosts you carry share —
+    // the communities and listings there are to explore.
+    { direction: 'northeast', label: 'discover', labelKey: 'quickmenu.discover', icon: 'explore', action: { kind: 'command', command: 'discover' } },
+    { direction: 'northwest', label: 'agent', labelKey: 'quickmenu.agent', icon: 'auto_awesome', action: { kind: 'command', command: 'chat' } },
   ],
 }
 
@@ -303,7 +325,7 @@ export class QuickMenuRegistry extends EventTarget {
 
   constructor() {
     super()
-    for (const definition of [ROOT, ROOT_VIEW, WORKFLOW, WEBSITE, SLIDES, SELECTION, SELECTION_MANY, SELECTION_TILE, SELECTION_EDIT, SELECTION_ORGANIZE, SELECTION_VIEW, SELECTION_GO, SELECTION_SHARE]) {
+    for (const definition of [ROOT, ROOT_EXPLORE, ROOT_VIEW, WORKFLOW, WEBSITE, SLIDES, SELECTION, SELECTION_MANY, SELECTION_TILE, SELECTION_EDIT, SELECTION_ORGANIZE, SELECTION_VIEW, SELECTION_GO, SELECTION_SHARE]) {
       this.#definitions.set(definition.name, definition)
     }
   }
