@@ -139,7 +139,7 @@ export class QuickMenuGuide {
       root.setAttribute('aria-live', 'polite')
       root.style.cssText = [
         'position:fixed', 'transform:translateX(-50%)', 'max-width:min(92vw,40rem)',
-        'flex-direction:column', 'align-items:center', 'gap:.25rem', 'padding:.5rem .9rem',
+        'flex-direction:column', 'align-items:center', 'gap:.3rem', 'padding:.65rem 1.15rem',
         'background:rgba(11,15,20,.88)', 'border:1px solid rgba(126,182,214,.4)',
         'font:600 .95rem/1.2 var(--hc-font, system-ui, sans-serif)', 'text-align:center',
         'pointer-events:none', 'z-index:2147482999',
