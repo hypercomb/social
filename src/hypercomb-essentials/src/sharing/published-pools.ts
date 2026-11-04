@@ -43,7 +43,7 @@
 
 import { EffectBus, poolKindOfMeaning, registerPoolMeaning, SignatureService } from '@hypercomb/core'
 import { allows as intakeAllows } from '../pheromones/intake-filter.js'
-import { fetchWithDeadline, HOST_CONCURRENCY, mapBounded } from './bounded-fetch.js'
+import { fetchWithDeadline, HOST_CONCURRENCY, isDeadlineError, mapBounded } from './bounded-fetch.js'
 import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
 
 /** How many members one domain may offer per meaning. A published index is
@@ -198,8 +198,11 @@ const verifiedMember = async (origin: string, sig: string): Promise<unknown | nu
   } catch { return null }
 }
 
-/** (origin, meaning) already probed this session — a 404 counts. */
+/** (origin, meaning) already probed this session — an ANSWER counts (a 404
+ *  too); a deadline does not, so a host that was slow is asked again. */
 const probed = new Set<string>()
+/** (origin, meaning) with a request in flight — one at a time per pair. */
+const asking = new Set<string>()
 
 /** What a host has DECLARED and this participant has not yet PLACED. Keyed
  *  `origin::meaning`; memory only — an offer is a fact about a host, and the
@@ -261,7 +264,7 @@ export const dismissOffers = (rawOrigin: string, meaning?: string): void => {
 }
 
 /** Test seam. */
-export const _resetOffers = (): void => { offers.clear(); probed.clear() }
+export const _resetOffers = (): void => { offers.clear(); probed.clear(); asking.clear() }
 
 /**
  * Read one meaning from one domain. Returns the sigs OFFERED — verified,
@@ -284,16 +287,28 @@ export const probePublishedPool = async (
   if (!origin || !handler) return []
 
   const once = `${origin}::${meaning}`
-  if (!options.force && probed.has(once)) return []
-  probed.add(once)
+  if (!options.force && (probed.has(once) || asking.has(once))) return []
 
+  // A probe is DONE when the host has answered: a pool (success), a 404 (the
+  // normal answer), or a refusal on the wire (offline, CORS, not a content
+  // host). A deadline is not an answer, and neither is a host that is busy
+  // (5xx, 408, 429), so those leave the pair unmarked and the next
+  // `domain:learned` asks again. `asking` keeps one request in flight per pair.
   let index: unknown
+  asking.add(once)
   try {
     const response = await fetchWithDeadline(`${originUrl(origin)}/${await poolAddress(meaning)}`)
-    if (!response.ok) return []              // the normal answer
+    if (!response.ok) {
+      if (response.status < 500 && response.status !== 408 && response.status !== 429) probed.add(once)
+      return []                              // the normal answer
+    }
     const text = await response.text()
     try { index = JSON.parse(text) } catch { index = text }   // a worker lists one signature per line
-  } catch { return [] }                      // offline, CORS, not a content host
+    probed.add(once)
+  } catch (error) {
+    if (!isDeadlineError(error)) probed.add(once)   // offline, CORS, not a content host
+    return []
+  } finally { asking.delete(once) }
 
   const members = membersOf(index)
   if (!members.length) return []
