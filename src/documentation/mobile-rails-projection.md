@@ -335,7 +335,7 @@ Pixi), 390×844, `hc:mobile-mode=on`, seeds the example hives:
    properties are byte-identical before and after (no commit).
 5. `/scroller` on a branch seeded with image and video links through
    `link:intake`: N full-height sections, one flick advances exactly one.
-6. A sheet (`tags:view-open`) leaves every bar disc under
+6. A sheet (any `*:view-open`; the tags panel it once used was removed) leaves every bar disc under
    `elementFromPoint`; the Back disc closes it.
 
 Plus vitest: `rail-grid.spec.ts`, `rail-projection.spec.ts`, the existing

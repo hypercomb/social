@@ -180,9 +180,8 @@
          steps it on click: page → children → global, wrapping. It used to
          open the pheromone panel while merely DISPLAYING the reach, and the
          opened-out strip carried a second identical glyph that did the
-         stepping — two globes side by side saying the same word. The panel
-         has its own doors (the command rail's pheromone button, /tags, the
-         layer deck); this spot belongs to the reach. -->
+         stepping — two globes side by side saying the same word. This spot
+         belongs to the reach. -->
     <button class="tag-scope" [attr.data-scope]="tagScope()"
             (click)="cycleTagScope()"
             [attr.aria-label]="'tags.scope-' + tagScope() | t"
@@ -312,14 +311,6 @@
                     [attr.aria-label]="(meshPublic() ? 'mesh.swarm' : 'mesh.solo') | t">
               <span class="mat-sym" [class.filled]="meshPublic()">{{ meshPublic() ? 'groups' : 'person' }}</span>
               <span class="ctl-label" aria-hidden="true">{{ (meshPublic() ? 'controls.swarm' : 'controls.solo') | t }}</span>
-            </button>
-
-            <!-- PHEROMONES — the pheromone panel. -->
-            <button class="ctl-btn pheromone-btn"
-                    (click)="openPheromones()"
-                    [attr.aria-label]="'tags.panel.open' | t">
-              <span class="mat-sym">label</span>
-              <span class="ctl-label" aria-hidden="true">{{ 'quickmenu.tags' | t }}</span>
             </button>
 
             <!-- PIN — hold this layer's view where it is. -->

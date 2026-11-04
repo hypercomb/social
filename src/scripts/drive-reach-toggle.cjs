@@ -140,21 +140,9 @@ async function main() {
   }
 
   const results = {}
-  let filterScopes = [], filesReaches = [], stripScopes = []
+  let filesReaches = [], stripScopes = []
 
-  // ── 1. pheromone panel ───────────────────────────────────────────────────
-  await stage('pheromone panel', async () => {
-    await page.evaluate(() => window.__hypercombEffectBus.emit('tags:view-open', {}))
-    const panelBtn = page.locator('.tags-scope .tags-scope-btn')
-    await panelBtn.waitFor({ state: 'visible', timeout: 8000 })
-    results.panel = await lap(page, panelBtn)
-    filterScopes = await page.evaluate(() => window.__reachLog.filter.splice(0))
-    log('pheromone panel →', results.panel.join(' → '), '· tags:filter carried', filterScopes.join(', '))
-    await page.locator('.tags-panel').screenshot({ path: suffix('panel') }).catch(() => null)
-    await page.evaluate(() => window.__hypercombEffectBus.emit('tags:viewer-close', {})).catch(() => null)
-  })
-
-  // ── 2. feedback panel ────────────────────────────────────────────────────
+  // ── 1. feedback panel ────────────────────────────────────────────────────
   await stage('feedback panel', async () => {
     await page.evaluate(() => window.__hypercombEffectBus.emit('feedback:toggle', {}))
     const fvBtn = page.locator('.fv-scope .fv-scope-btn')
@@ -195,7 +183,6 @@ async function main() {
 
   const pass =
     Object.values(results).every(lapOk)
-    && String(filterScopes) === 'children,global,local'
     && String(filesReaches) === 'children,global,local'
     && String(stripScopes) === 'children,global,local'
   log(pass ? 'PASS' : 'FAIL', JSON.stringify(results))

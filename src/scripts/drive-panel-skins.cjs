@@ -45,7 +45,6 @@ const PANELS = [
   { id: 'features', sel: '.features-panel', btn: '.rail-btn.features-toggle-btn' },
   { id: 'files', sel: '.files-panel', effect: 'files:view-toggle' },
   { id: 'notes', sel: '.notes-panel, .notes-viewer', effect: 'notes:view-toggle' },
-  { id: 'tags', sel: '.tags-panel', effect: 'tags:view-toggle' },
   { id: 'history', sel: '.history-panel', effect: 'history:view-toggle' },
   { id: 'publish', sel: '.publish-panel', effect: 'publish:view-toggle' },
   { id: 'observe', sel: '.observe-panel', effect: 'observe:view-toggle' },

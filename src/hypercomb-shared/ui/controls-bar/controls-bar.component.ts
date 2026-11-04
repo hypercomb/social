@@ -1298,23 +1298,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Set the reach from the tag strip. Always re-broadcasts `tags:filter`
    *  carrying the CURRENT filter set — a live filter must re-scan at the new
    *  width, and with nothing filtered the emit is what keeps the panel and the
-   *  readout glyph in step. Mirrors the panel's own `setScope`. */
+   *  readout glyph in step. */
   readonly setTagScope = (id: 'local' | 'children' | 'global'): void => {
     if (this.#tagScope() === id) return
     this.#tagScope.set(id)
     EffectBus.emit('tags:filter', { active: [...this.#activeTagFilters()], scope: id })
   }
 
-
-  /** Open the pheromone panel — the phone tools row's `label` cell.
-   *  The tag strip's head glyph does NOT come here: it carries the reach, and
-   *  when it opened the panel while merely displaying the reach the opened-out
-   *  strip had to add a second, identical globe to do the stepping. The panel
-   *  keeps its own doors — this button, the command rail, `/tags`, the layer
-   *  deck. */
-  readonly openPheromones = (): void => {
-    EffectBus.emit('tags:view-open', undefined)
-  }
 
   /** Open the full-screen viewfinder (hc-camera-capture). The shutter there
    *  creates a tile from the frame — the bar only asks for the camera. */

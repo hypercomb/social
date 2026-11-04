@@ -50,7 +50,6 @@ const WINDOWS = [
   // the panel asks the drone about the loaded layer and raises itself.
   { id: 'behaviors',  effect: 'features:context-open', payload: {},                  sel: '.features-panel' },
   { id: 'files',      effect: 'files:open',          payload: {},                    sel: '.files-panel' },
-  { id: 'tags',       effect: 'tags:view-open',      payload: {},                    sel: '.tags-panel' },
   { id: 'history',    effect: 'history:view-open',   payload: {},                    sel: '.history-viewer' },
   { id: 'sequence',   effect: 'sequence:view-open',  payload: {},                    sel: '.sequence-panel, .seq-panel' },
   { id: 'workflow',   effect: 'workflow:view-open',  payload: {},                    sel: '.workflow-panel' },

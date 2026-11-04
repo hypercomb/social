@@ -109,8 +109,8 @@ describe('the shipped vocabulary', () => {
       const shipped = catalog(locale)
       for (const key of Object.keys(beehive[locale])) expect(shipped, `${locale} ${key}`).toHaveProperty(key)
     }
-    expect(beehive.en['tags.viewer.title']).toBe('Pheromones')
-    expect(beehive.ja['tags.viewer.title']).toBe('フェロモン')
+    expect(beehive.en['pheromone.card.title']).toBe('Pheromones')
+    expect(beehive.ja['pheromone.card.title']).toBe('フェロモン')
   })
 
   it('the theme word registers them as the beehive theme', () => {

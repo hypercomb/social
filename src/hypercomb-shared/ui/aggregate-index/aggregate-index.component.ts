@@ -6,8 +6,8 @@
 //
 // ── The drag ─────────────────────────────────────────────────────────────────
 //
-// POINTER events, not HTML5 drag — the same gesture the pheromone panel already
-// uses (tags-viewer #onRowPointerDown → #onDragMove → #onDragUp), so a row-drag
+// POINTER events, not HTML5 drag — the same gesture the retired pheromone panel used
+// (pointer down → drag move → drag up), so a row-drag
 // behaves identically wherever it starts. Crossing the threshold promotes to a
 // drag and emits `drop:dragging {active:true}`, which puts the tile overlay into
 // its bare drop-target mode (icons hidden) — the hive reads as a surface to land

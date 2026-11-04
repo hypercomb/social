@@ -82,7 +82,6 @@ const settle = async (page, id, want, timeout = 1500) => {
  *  and the session, so a panel that renames its CSS cannot drop out of here. */
 const CASES = [
   { command: '/tutorial', id: 'tutorials-window', name: 'tutorials' },
-  { command: '/tags', id: 'tags-viewer', name: 'tags' },
   { command: '/sequence', id: 'sequence-viewer', name: 'arrangements' },
 ]
 const sel = (id) => `[hcdockedpanel="${id}"]`

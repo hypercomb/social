@@ -196,8 +196,8 @@ centre cell — the viewfinder, whose shutter makes a tile here, one tap
 again. *Add* is the Add sheet, unchanged (it keeps its own photo door).
 *Tools* toggles the **tools row**, a second band directly above with one
 hairline between — **Share ·
-Swarm/Solo · Tags · Pin · Fullscreen**, where Tags is the pheromone panel
-and Fullscreen stands only where the browser supports fullscreen (its
+Swarm/Solo · Pin · Fullscreen** (a Tags cell opened the pheromone panel until
+the panel was removed, 2026-11-04), where Fullscreen stands only where the browser supports fullscreen (its
 column stays empty otherwise). The choice is remembered
 (`hc:phone-tools-row`) and no tap elsewhere closes it. Each tool stands
 over a column of the row below, and every cell is a glyph over its word —

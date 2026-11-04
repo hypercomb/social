@@ -66,7 +66,6 @@ const PANELS = () => Array.from(document.querySelectorAll('[hcdockedpanel], [dat
 const CASES = [
   { command: '/tutorial', id: 'tutorials-window', name: 'tutorials' },
   { command: '/files', id: 'files-viewer', name: 'files' },
-  { command: '/tags', id: 'tags-viewer', name: 'tags' },
   { command: '/sequence', id: 'sequence-viewer', name: 'arrangements' },
   { command: '/context', id: 'context-window', name: 'context' },
   { command: '/publish', id: 'publish-panel', name: 'publish' },

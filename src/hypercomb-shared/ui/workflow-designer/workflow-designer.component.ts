@@ -213,7 +213,7 @@ export class WorkflowDesignerComponent implements OnDestroy {
   #cleanups: (() => void)[] = []
 
   // The shell is ZONELESS: signals written from EffectBus callbacks do not
-  // schedule a render on their own (see tags-viewer for the same remedy).
+  // schedule a render on their own (detectChanges after the write).
   readonly #cdr = inject(ChangeDetectorRef)
   #flush(): void { try { this.#cdr.detectChanges() } catch { /* view gone */ } }
 

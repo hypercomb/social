@@ -71,7 +71,8 @@ const ROOT: QuickMenuDefinition = {
     // "find" here — typing a name creates it or goes to it.
     { direction: 'centre', label: 'command', labelKey: 'quickmenu.command', icon: 'terminal', action: { kind: 'effect', effect: 'command:focus', payload: { cell: '' } } },
     { direction: 'east', label: 'collections', labelKey: 'quickmenu.collections', icon: 'folder_open', action: { kind: 'command', command: 'collections' } },
-    { direction: 'southeast', label: 'tags', labelKey: 'quickmenu.tags', icon: 'sell', action: { kind: 'command', command: 'tags' } },
+    // The shelf took the tags panel's place on the root ring: the bouquet lives there.
+    { direction: 'southeast', label: 'shelf', icon: 'bookmark', action: { kind: 'effect', effect: 'shelf:toggle', payload: {} } },
     { direction: 'southwest', label: 'history', labelKey: 'quickmenu.history', icon: 'history', action: { kind: 'command', command: 'history' } },
     { direction: 'west', label: 'tree', labelKey: 'quickmenu.tree', icon: 'account_tree', action: { kind: 'command', command: 'tree' } },
     { direction: 'northwest', label: 'help', labelKey: 'quickmenu.help', icon: 'tips_and_updates', action: { kind: 'command', command: 'help' } },
@@ -199,7 +200,6 @@ const SELECTION_TILE: QuickMenuDefinition = {
   slots: [
     { direction: 'northeast', label: 'select', icon: 'check_circle', action: { kind: 'effect', effect: 'select:toggle', payload: {} } },
     alone({ direction: 'east', label: 'shelf', labelKey: 'quickmenu.shelf', icon: 'bookmark', action: { kind: 'effect', effect: 'shelf:take-selection', payload: {} } }),
-    alone({ ...cmd('southeast', 'tags', 'tags', 'quickmenu.tags'), icon: 'sell' }),
     alone({ ...cmd('southwest', 'groups', 'groups'), icon: 'hub' }),
     alone({ ...cmd('west', 'hide', 'hide'), icon: 'visibility_off' }),
     alone({ ...cmd('northwest', 'remove', 'remove', 'quickmenu.remove'), icon: 'delete' }),
@@ -251,7 +251,6 @@ const SELECTION_ORGANIZE: QuickMenuDefinition = {
   title: 'Organize',
   contexts: [],
   slots: [
-    onTile({ ...cmd('east', 'tags', 'tags', 'quickmenu.tags'), icon: 'sell' }),
     { ...cmd('southeast', 'arrange', 'arrange'), icon: 'view_module' },
     onTile({ ...cmd('southwest', 'groups', 'groups'), icon: 'hub' }),
     { direction: 'west', label: 'all', labelKey: 'quickmenu.all', icon: 'select_all', action: { kind: 'effect', effect: 'select:all', payload: {} } },

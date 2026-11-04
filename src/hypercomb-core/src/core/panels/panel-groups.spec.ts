@@ -56,7 +56,7 @@ describe('tool window groups', () => {
 
   it('shares a width with every window whose text matches', () => {
     const files = mount(new FakeWindow('files-viewer', 360))
-    const tags = mount(new FakeWindow('tags-viewer', 480))
+    const tags = mount(new FakeWindow('palette-window', 480))
 
     files.join('reference')                    // first in: defines the width
     expect(readGroupAttrs('reference')).toEqual({ width: 360 })
@@ -72,7 +72,7 @@ describe('tool window groups', () => {
 
   it('never pushes to windows whose text differs', () => {
     const inA = mount(new FakeWindow('files-viewer', 360))
-    const inB = mount(new FakeWindow('tags-viewer', 300))
+    const inB = mount(new FakeWindow('palette-window', 300))
     const loner = mount(new FakeWindow('observe-viewer', 280))
     inA.join('reference')
     inB.join('Reference')                      // matching is exact — not a match
@@ -86,7 +86,7 @@ describe('tool window groups', () => {
 
   it('clamps a shared width to each window\'s own limits', () => {
     const wide = mount(new FakeWindow('files-viewer', 600))
-    const narrow = mount(new FakeWindow('tags-viewer', 300, 420))
+    const narrow = mount(new FakeWindow('palette-window', 300, 420))
     wide.join('reference')
     narrow.join('reference')
     expect(narrow.width).toBe(420)
@@ -108,7 +108,7 @@ describe('tool window groups', () => {
 
   it('shares ONE text size across the group, and back off it again', () => {
     const files = mount(new FakeWindow('files-viewer', 360))
-    const tags = mount(new FakeWindow('tags-viewer', 360))
+    const tags = mount(new FakeWindow('palette-window', 360))
     files.join('reference')
     tags.join('reference')
 
@@ -151,7 +151,7 @@ describe('tool window groups', () => {
     const files = mount(new FakeWindow('files-viewer', 360))
     files.join('reference')                    // group now stands for a width only
 
-    const tags = mount(new FakeWindow('tags-viewer', 480))
+    const tags = mount(new FakeWindow('palette-window', 480))
     tags.setText(1.32)                         // …and this one arrives with a size
     tags.join('reference')
     expect(tags.width).toBe(360)               // takes the width
@@ -179,8 +179,8 @@ describe('tool window groups', () => {
     writeMembership('files-viewer', 'reference')
     expect(readMembership('files-viewer')).toBe('reference')
 
-    localStorage.setItem('hc:panel-group:tags-viewer', '  reference  ')
-    expect(readMembership('tags-viewer')).toBe('reference')
+    localStorage.setItem('hc:panel-group:palette-window', '  reference  ')
+    expect(readMembership('palette-window')).toBe('reference')
 
     writeMembership('files-viewer', '')
     expect(localStorage.getItem('hc:panel-group:files-viewer')).toBeNull()

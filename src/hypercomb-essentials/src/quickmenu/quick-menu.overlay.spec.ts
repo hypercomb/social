@@ -160,7 +160,7 @@ describe('the built menu', () => {
 
   it('lays the icon over the label in the specified places', () => {
     const { svg } = overlay.ensure(ROOT, labelOf)
-    const tags = slot(svg, 'tags')
+    const tags = slot(svg, 'shelf')
     expect(part(tags, '.hc-qm-ico').getAttribute('transform')).toBe('translate(-12,-21)')
     expect(part(tags, 'text').getAttribute('y')).toBe('19')
     expect(part(tags, 'text').getAttribute('font-size')).toBe('11.5')
@@ -169,12 +169,12 @@ describe('the built menu', () => {
     const centre = slot(svg, 'command')
     expect(part(centre, '.hc-qm-ico').getAttribute('transform')).toBe('translate(-14,-24) scale(1.1667)')
     expect(part(centre, 'text').getAttribute('y')).toBe('21')
-    expect(part(tags, '.hc-qm-ico path').getAttribute('d')).toBe(iconPath('sell'))
+    expect(part(tags, '.hc-qm-ico path').getAttribute('d')).toBe(iconPath('bookmark'))
   })
 
   it('lays out the honey in the specified stack', () => {
     const { svg } = overlay.ensure(ROOT, labelOf)
-    const g = slot(svg, 'tags')
+    const g = slot(svg, 'shelf')
     const order = [...g.children].map(c => c.getAttribute('class') ?? c.tagName)
     const at = (name: string): number => order.findIndex(c => c.includes(name))
     expect(at('hc-qm-base')).toBeLessThan(at('hc-qm-lit'))
@@ -188,7 +188,7 @@ describe('the built menu', () => {
 
   it('keeps the drip B nodes on their own keyframes: neck, bead with its shade and glint, a drop', () => {
     const { svg } = overlay.ensure(ROOT, labelOf)
-    const g = slot(svg, 'tags')
+    const g = slot(svg, 'shelf')
     const drip = part(g, '.hc-qd')
     expect(drip.querySelectorAll('.hc-qd-drip > .hc-qd-neck')).toHaveLength(1)
     expect(drip.querySelectorAll('.hc-qd-drip > .hc-qd-bead')).toHaveLength(2) // the bead and its shade
@@ -254,18 +254,18 @@ describe('on the gesture', () => {
 
   it('rewrites only the label text node, never the icon or the shape', () => {
     const svg = paint()
-    const g = slot(svg, 'tags')
+    const g = slot(svg, 'shelf')
     const before = part(g, '.hc-qm-ico path').getAttribute('d')
     overlay.highlight('southeast')
     expect(part(g, '.hc-qm-ico path').getAttribute('d')).toBe(before)
-    expect(part(g, 'text').textContent).toBe('tags')
+    expect(part(g, 'text').textContent).toBe('shelf')
   })
 })
 
 describe('states', () => {
   it('REST is calm: honey on, nothing moving, cream ink', () => {
     const svg = paint()
-    const g = slot(svg, 'tags')
+    const g = slot(svg, 'shelf')
     expect(part(g, '.hc-hq').getAttribute('display')).toBeNull()
     expect(isLit(g)).toBe(false)
     expect(running(g)).toBe(false)
@@ -279,7 +279,7 @@ describe('states', () => {
   it('LIT lifts the body, turns the rim gold, flips the ink and runs one drip', () => {
     const svg = paint()
     overlay.highlight('southeast')
-    const g = slot(svg, 'tags')
+    const g = slot(svg, 'shelf')
     expect(isLit(g)).toBe(true)
     expect(part(g, '.hc-qm-lit').getAttribute('fill')).toMatch(/-lit\)$/)
     expect(part(g, '.hc-qm-lit').getAttribute('stroke-opacity')).toBe('0.22')
@@ -299,7 +299,7 @@ describe('states', () => {
     const svg = paint()
     overlay.highlight('southeast')
     overlay.highlight('east')
-    const tags = slot(svg, 'tags')
+    const tags = slot(svg, 'shelf')
     expect(isLit(tags)).toBe(false)
     expect(running(tags)).toBe(false)
     expect(part(tags, '.hc-qm-rim').getAttribute('stroke')).toBe(HONEY.steel)
@@ -312,7 +312,7 @@ describe('states', () => {
     reduced = true
     const svg = paint()
     overlay.highlight('southeast')
-    const g = slot(svg, 'tags')
+    const g = slot(svg, 'shelf')
     expect(svg.getAttribute('data-motion')).toBe('still')
     expect(isLit(g)).toBe(true) // lit is rim, luminance and ink: not motion
     expect(running(g)).toBe(false)
@@ -322,12 +322,12 @@ describe('states', () => {
   it('reads reduced motion at every paint', () => {
     const svg = paint()
     overlay.highlight('southeast')
-    expect(running(slot(svg, 'tags'))).toBe(true)
+    expect(running(slot(svg, 'shelf'))).toBe(true)
     overlay.clear()
     reduced = true
     overlay.paint(ROOT, { x: 300, y: 300 }, null, labelOf, 'back')
     overlay.highlight('southeast')
-    expect(running(slot(svg, 'tags'))).toBe(false)
+    expect(running(slot(svg, 'shelf'))).toBe(false)
     expect(svg.getAttribute('data-motion')).toBe('still')
   })
 
@@ -346,7 +346,7 @@ describe('states', () => {
     expect(part(g, 'text').getAttribute('fill')).toBe(HONEY.ink.back)
     expect(running(g)).toBe(false)
     // the other slots keep their honey
-    expect(part(slot(ring, 'tags'), '.hc-hq').getAttribute('display')).toBeNull()
+    expect(part(slot(ring, 'arrange'), '.hc-hq').getAttribute('display')).toBeNull()
   })
 
   it('BACK LIT keeps the dashes and lights the back ramp without gold or drips', () => {
@@ -474,7 +474,7 @@ describe('the crafted backgrounds', () => {
   it('replaces the procedural lip, bloom and sliver, and hangs the drip from the wall', () => {
     overlay.useArt(art())
     const { svg } = overlay.ensure(ROOT, labelOf)
-    const g = slot(svg, 'tags')
+    const g = slot(svg, 'shelf')
     expect(g.querySelector('path[fill$="-lip)"]')).toBeNull()
     expect(g.querySelector('[fill$="-bloom)"]')).toBeNull()
     expect(g.querySelector('[stroke$="-sliv)"]')).toBeNull()
@@ -497,7 +497,7 @@ describe('the crafted backgrounds', () => {
   it('REST shows the picture and nothing else moves', () => {
     overlay.useArt(art())
     const svg = paint()
-    const g = slot(svg, 'tags')
+    const g = slot(svg, 'shelf')
     expect(part(g, '.hc-qm-art').getAttribute('display')).toBeNull()
     expect(litShown(g)).toBe(false)
     expect(part(g, '.hc-hq').getAttribute('display')).toBe('none')
@@ -510,7 +510,7 @@ describe('the crafted backgrounds', () => {
     overlay.useArt(art())
     const svg = paint()
     overlay.highlight('southeast')
-    const g = slot(svg, 'tags')
+    const g = slot(svg, 'shelf')
     expect(litShown(g)).toBe(true)
     expect(isLit(g)).toBe(true)
     expect(part(g, '.hc-qm-lit').getAttribute('fill')).toBe('none')
@@ -531,7 +531,7 @@ describe('the crafted backgrounds', () => {
     overlay.useArt(art())
     const svg = paint()
     overlay.highlight('southeast')
-    const g = slot(svg, 'tags')
+    const g = slot(svg, 'shelf')
     expect(litShown(g)).toBe(true)
     expect(running(g)).toBe(false)
   })
@@ -563,7 +563,7 @@ describe('the crafted backgrounds', () => {
     const centre = slot(svg, 'command')
     expect(centre.querySelector('.hc-qm-art')).toBeNull()
     expect(centre.querySelector('path[fill$="-lip)"]')).not.toBeNull()
-    expect(slot(svg, 'tags').querySelector('.hc-qm-art')).not.toBeNull()
+    expect(slot(svg, 'shelf').querySelector('.hc-qm-art')).not.toBeNull()
   })
 
   it('pictures that arrive after warm rebuild what was warm, off the gesture', () => {
@@ -602,7 +602,7 @@ describe('the crafted backgrounds', () => {
     overlay.useArt(art())
     const svg = paint()
     overlay.highlight('southeast')
-    const tags = slot(svg, 'tags')
+    const tags = slot(svg, 'shelf')
     const bands = [...tags.querySelectorAll('.hc-qm-sheen-band')]
     expect(bands[0].getAttribute('fill-opacity')).toBe(String(SHEEN.inkLit))
     expect(bands.at(-1)!.getAttribute('fill-opacity')).toBe(String(SHEEN.peakLit))
@@ -744,7 +744,7 @@ describe('words without a drawing', () => {
       { direction: 'east', label: 'zebra', action: { kind: 'command', command: 'zebra' } },
       { direction: 'west', label: 'known', icon: 'not_a_glyph', action: { kind: 'command', command: 'x' } },
       { direction: 'northeast', label: '', icon: undefined, action: { kind: 'command', command: 'y' } },
-      { direction: 'centre', label: 'tags', icon: 'sell', action: { kind: 'command', command: 'tags' } },
+      { direction: 'centre', label: 'shelf', icon: 'bookmark', action: { kind: 'effect', effect: 'shelf:toggle', payload: {} } },
       { direction: 'southeast', label: 'extraordinarily-long-seat-word', action: { kind: 'command', command: 'z' } },
     ],
   }
@@ -774,7 +774,7 @@ describe('words without a drawing', () => {
     expect(part(g, 'text').getAttribute('textLength')).toBe(String(LAYOUT.usableText))
     expect(part(g, 'text').getAttribute('lengthAdjust')).toBe('spacingAndGlyphs')
     // a short word is never squeezed
-    expect(slot(svg, 'tags').hasAttribute('textLength')).toBe(false)
+    expect(slot(svg, 'shelf').hasAttribute('textLength')).toBe(false)
   })
 })
 

@@ -35,7 +35,6 @@ export const sleepers: readonly Sleeper[] = [
   { command: "rewind", description: "Open the visual rewind window", load: () => import('./commands/rewind.queen') },
   { command: "slice", description: "Choose a handful of tiles as one merkle slice — an agent-or-participant-chosen set that projects as one", load: () => import('./commands/slice.queen') },
   { command: "spotlight", description: "Light a tile up until it is found", load: () => import('./commands/spotlight.queen') },
-  { command: "tags", description: "Open the tags panel, listing the tags you know with their colours and counts", load: () => import('./commands/tags-view.queen') },
   { command: "theme", description: "Switch the UI theme (light, dark, system, or a registered theme)", load: () => import('./commands/theme.queen') },
   { command: "upgrade", description: "Open Packages — what loads, and what has an update. `upgrade allow` lets your followed publisher\\", load: () => import('./commands/upgrade.queen') },
   { command: "verify-history", description: "Walk the current location's history forward and backward; verify undo and redo render the same tile count at every position", load: () => import('./commands/verify-history.queen') },
