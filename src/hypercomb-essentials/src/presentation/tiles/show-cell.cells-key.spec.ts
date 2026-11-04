@@ -77,8 +77,9 @@ describe('show-cell: cells key vs atlas generations', () => {
   it('the in-place fast paths claim no generation they did not bake', () => {
     // #paintDirty is the single-paint drain (show-cell.paint.ts): the one
     // in-place writer tile:saved and its kin now go through.
+    // #repaintReadinessInPlace flips its cells through the drain now, so
+    // the drain is the one body that re-states the key.
     for (const marker of [
-      '#repaintReadinessInPlace = (): boolean =>',
       '#paintDirty(only?: Iterable<string>): DrainReport | null {',
     ]) {
       const body = memberBody(marker)

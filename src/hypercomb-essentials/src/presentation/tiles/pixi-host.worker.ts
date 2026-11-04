@@ -22,6 +22,92 @@ export type HostReadyPayload = {
   renderer: Application['renderer']
 }
 
+/** THE TICKER GATE (single-paint.md V3/V4): a converged page costs no frames.
+ *  IoC `@diamondcoreprocessor.com/RenderGate`. Anything that changes what the
+ *  next frame shows asks for it: a pushed buffer, a running clock (`wake`), a
+ *  gesture or an animation that lasts (`hold` / `release`). Pointer, wheel,
+ *  key and touch input wake it on their own. OPT-IN for now
+ *  (`localStorage['hc:ticker-gate'] = '1'`): every ticker client — the
+ *  avatars, the screensaver, the overlay's and the selection's animations,
+ *  the DOM names' follow — must wake or hold it before it can be the default,
+ *  or a pan would freeze them. The gate measures what the default would save. */
+export type RenderGate = {
+  readonly enabled: boolean
+  /** Draw at least this many more frames. */
+  wake(frames?: number): void
+  /** Keep drawing until released (a gesture, an animation that lasts). */
+  hold(token: string): void
+  release(token: string): void
+  /** Frames the ticker did NOT run because nothing asked for one. */
+  readonly idleFrames: number
+  /** Called once per drawn frame by the host's existing frame consumer:
+   *  stops the ticker after a frame nobody asked for. */
+  frame(): void
+}
+
+export const RENDER_GATE_KEY = '@diamondcoreprocessor.com/RenderGate'
+
+const TICKER_GATE_ON = (() => { try { return localStorage.getItem('hc:ticker-gate') === '1' } catch { return false } })()
+
+/** How long after the last input the ticker keeps running on its own. */
+const GATE_INPUT_QUIET_MS = 1000
+
+/** Build the gate over an application's ticker. With the gate off the ticker
+ *  runs as it always has and `wake` is a no-op; only the input listeners are
+ *  skipped too. */
+const createRenderGate = (app: Application): RenderGate => {
+  let framesWanted = 0
+  let lastInput = performance.now()
+  const holds = new Set<string>()
+  let idleFrames = 0
+  let idleTimer: ReturnType<typeof setTimeout> | null = null
+
+  const start = (): void => {
+    if (!app.ticker.started) app.ticker.start()
+    if (idleTimer) { clearTimeout(idleTimer); idleTimer = null }
+  }
+  const wanted = (): boolean =>
+    holds.size > 0 || framesWanted > 0 || performance.now() - lastInput < GATE_INPUT_QUIET_MS
+  // While stopped, count the frames the display would have drawn: the proof
+  // number for "a converged page costs no frames".
+  const countIdle = (): void => {
+    idleTimer = setTimeout(() => {
+      idleTimer = null
+      if (!app.ticker.started) { idleFrames++; countIdle() }
+    }, 1000 / 60)
+  }
+
+  const gate: RenderGate = {
+    get enabled() { return TICKER_GATE_ON },
+    get idleFrames() { return idleFrames },
+    wake(frames = 1) {
+      framesWanted = Math.max(framesWanted, frames)
+      if (TICKER_GATE_ON) start()
+    },
+    hold(token) { holds.add(token); if (TICKER_GATE_ON) start() },
+    release(token) { holds.delete(token) },
+    // After a drawn frame: was it wanted? If not, stop the ticker so the next
+    // one is not drawn at all. Rides the host's one existing frame consumer —
+    // the doctrine ratchet admits no new always-on ticker callback.
+    frame() {
+      if (!TICKER_GATE_ON) return
+      if (wanted()) { if (framesWanted > 0) framesWanted--; return }
+      app.ticker.stop()
+      countIdle()
+    },
+  }
+  if (!TICKER_GATE_ON) return gate
+
+  const input = (): void => { lastInput = performance.now(); start() }
+  for (const type of ['pointerdown', 'pointermove', 'pointerup', 'wheel', 'keydown', 'touchstart', 'touchmove'] as const) {
+    window.addEventListener(type, input, { passive: true, capture: true })
+  }
+  window.addEventListener('resize', input)
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) input() })
+  console.info('[pixi-host] ticker gate ON (hc:ticker-gate=1): frames are drawn only when asked for')
+  return gate
+}
+
 /** Browser zoom (Ctrl+wheel, Ctrl+plus) and a move to another monitor change
  *  devicePixelRatio AFTER boot. Pixi resizes the canvas for the new CSS box
  *  (resizeTo) but keeps the resolution it was created with, so the backing
@@ -258,7 +344,13 @@ export class PixiHostWorker extends Worker {
     // Keep every registered scene text baked at the density it is DISPLAYED
     // at (see grid/screen-text-resolution.ts). Priority −27 puts it after
     // Pixi's own render, so the transforms it reads are the ones just drawn.
-    app.ticker.add(() => refreshSceneText(app.renderer.resolution), undefined, -27)
+    // The ticker gate exists before the first drone paints, so a drain's
+    // push can wake it from the first frame on; its per-frame check rides
+    // this one consumer (after Pixi's own render).
+    const gate = createRenderGate(app)
+    try { window.ioc.register(RENDER_GATE_KEY, gate) } catch { /* a second host keeps the first gate */ }
+    ;(window as unknown as { __hcRenderGate?: RenderGate }).__hcRenderGate = gate
+    app.ticker.add(() => { refreshSceneText(app.renderer.resolution); gate.frame() }, undefined, -27)
     const pixiInitMs = performance.now() - tPixiInit
     console.log(`[pixi-host] Application.init() ${pixiInitMs.toFixed(0)}ms`)
     ;(window as any).__hcBoot?.(`Application.init() done (${pixiInitMs.toFixed(0)}ms)`)

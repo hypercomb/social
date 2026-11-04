@@ -2710,7 +2710,23 @@ export class ShowCellDrone extends Drone {
     const { foreign } = ctx
     const { x, y } = this.axialToPixel(c.q, c.r, ctx.spacing, this.#flat)
 
-    const imgUV = c.plain ? null : (c.imageSig ? this.imageAtlas?.getImageUV(c.imageSig) ?? null : null)
+    let imgUV = c.plain ? null : (c.imageSig ? this.imageAtlas?.getImageUV(c.imageSig) ?? null : null)
+    let borderColor = c.borderColor
+    let hideText = c.hideText
+    // THE LIVE PREVIEW — the tile editor's edit, on its own tile, over what is
+    // stored: the framing, a new picture or none, the rim colour, whether the
+    // name shows. Never written into a cache; ending it is a repaint from them.
+    const preview = foreign ? undefined : this.#tilePreviews.get(c.label)
+    if (preview) {
+      if (preview.removed) imgUV = null
+      else {
+        const picture = this.#flat ? preview.flat : preview.point
+        // Not decoded yet: keep what the tile shows (#writeTilePreview reloads).
+        if (picture) imgUV = this.imageAtlas?.getImageUV(picture.sig) ?? imgUV
+      }
+      if (preview.border !== undefined) borderColor = previewRgb(preview.border) ?? PREVIEW_DEFAULT_BORDER
+      if (preview.hideText !== undefined) hideText = preview.hideText
+    }
 
     // label UV: collapse to [0,0,0,0] when hideText + image present so the
     // shader samples a transparent corner and the label is effectively
@@ -2726,7 +2742,7 @@ export class ShowCellDrone extends Drone {
     // would take a slot from another out-of-view cell — every pass, for
     // every such cell.
     const unbaked = !foreign && !!this.#labelView && !this.#labelView.has(c.label) && !this.atlas!.hasLabel(atlasLabel)
-    const ruv = (this.#hidesName(c.hideText, !!imgUV) && !this.#revealsName(c.label, ctx.revealLabel)) || unbaked
+    const ruv = (this.#hidesName(hideText, !!imgUV) && !this.#revealsName(c.label, ctx.revealLabel)) || unbaked
       ? { u0: 0, v0: 0, u1: 0, v1: 0 }
       : this.atlas!.getLabelUV(atlasLabel)
 
@@ -2749,7 +2765,7 @@ export class ShowCellDrone extends Drone {
       cr = gray * 0.5; cg = gray * 0.5; cb = gray * 0.5
     }
 
-    let [bcr, bcg, bcb] = c.borderColor ?? [0.784, 0.592, 0.353]
+    let [bcr, bcg, bcb] = borderColor ?? PREVIEW_DEFAULT_BORDER
     if (isHiddenItem) {
       const bgray = bcr * 0.3 + bcg * 0.3 + bcb * 0.3
       bcr = bgray * 0.5; bcg = bgray * 0.5; bcb = bgray * 0.5
@@ -2845,6 +2861,22 @@ export class ShowCellDrone extends Drone {
   /** One push per drain (V4): every touched buffer, uploaded once. */
   readonly #pushAttrs = (attrs: readonly string[]): void => {
     for (const attr of attrs) this.#pushBuffer(attr)
+    this.#wakeFrame()
+  }
+
+  /** An animation's frame: these labels re-plan and write NOW, with one push,
+   *  while everything else stays dirty for the frame drain (V4). */
+  #paintFrame(labels: readonly string[]): void {
+    if (labels.length === 0) return
+    this.#paint.dirty(labels, 'frame')
+    this.#paintDirty(labels)
+  }
+
+  /** The ticker gate (pixi-host.worker.ts): a pushed buffer or a running clock
+   *  wants the next frame drawn. */
+  #wakeFrame(): void {
+    const gate = (window as any).ioc?.get?.('@diamondcoreprocessor.com/RenderGate') as { wake?: (frames?: number) => void } | undefined
+    gate?.wake?.(2)
   }
 
   /** A full pass over RETAINED buffers: every cell re-planned, only changed
@@ -5917,9 +5949,6 @@ export class ShowCellDrone extends Drone {
     // property of the open window, not of this frame, so re-apply it here or
     // the cut rim vanishes the first time anything re-renders under it.
     this.#applySwapMode()
-    // A full render rebuilt every attribute from the caches; the edit in
-    // progress goes back on top of its tiles.
-    for (const preview of this.#tilePreviews.values()) this.#writeTilePreview(preview)
     this.#emitRenderTags(cells)
   }
 
@@ -6268,6 +6297,7 @@ export class ShowCellDrone extends Drone {
       if (this.#substrateFadeStart === null) return
       const mix = this.#substrateFadeMix()
       this.shader?.setImageMix(mix)
+      this.#wakeFrame()
       if (mix < 1.0) {
         this.#substrateFadeRaf = requestAnimationFrame(tick)
       } else {
@@ -7369,8 +7399,8 @@ export class ShowCellDrone extends Drone {
       for (const label of payload.labels) {
         this.#translatingLabels.add(label)
         this.#heatByLabel.set(label, 0.5)
-        this.#updateCellHeat(label, 0.5)
       }
+      this.#dirty(payload.labels, 'translation')
 
       if (!this.#translationPulseTimer) {
         this.#translationPulseTimer = setInterval(() => {
@@ -7381,10 +7411,9 @@ export class ShowCellDrone extends Drone {
           }
           const t = Date.now() / 1000
           const pulse = 0.3 + 0.2 * Math.sin(t * 3)
-          for (const label of this.#translatingLabels) {
-            this.#heatByLabel.set(label, pulse)
-            this.#updateCellHeat(label, pulse)
-          }
+          for (const label of this.#translatingLabels) this.#heatByLabel.set(label, pulse)
+          // One push per pulse for every translating tile.
+          this.#paintFrame([...this.#translatingLabels])
         }, 100)
       }
     })
@@ -7394,7 +7423,7 @@ export class ShowCellDrone extends Drone {
       if (!payload?.label) return
       this.#translatingLabels.delete(payload.label)
       this.#heatByLabel.delete(payload.label)
-      this.#updateCellHeat(payload.label, 0)
+      this.#dirty(payload.label, 'translation')
     })
 
     // locale:changed — flush label atlas so all tile labels re-resolve through i18n.
@@ -8173,30 +8202,30 @@ export class ShowCellDrone extends Drone {
     this.#newCellFadeStart.set(label, performance.now())
     this.#heatByLabel.set(label, 1.0)
     // Don't force a full render — the incremental render kicked off by
-    // cell:added will put the cell on screen; we just need to drive the heat
-    // attribute each frame. If the cell isn't indexed yet this frame, the
-    // next RAF will pick it up.
-    this.#updateCellHeat(label, 1.0)
+    // cell:added will put the cell on screen; the heat is read live by the
+    // slot plan, so each frame is one drain of the fading cells and ONE push
+    // (single-paint.md V4). A cell not indexed yet this frame is picked up
+    // by the next.
+    this.#dirty(label, 'heat')
     if (this.#newCellFadeRaf) return
 
     const tick = (): void => {
       const now = performance.now()
-      let alive = false
+      const frame: string[] = []
       for (const [cell, start] of this.#newCellFadeStart) {
         const elapsed = now - start
         if (elapsed >= ShowCellDrone.#NEW_CELL_FADE_MS) {
           this.#newCellFadeStart.delete(cell)
           this.#heatByLabel.delete(cell)
-          this.#updateCellHeat(cell, 0)
+          frame.push(cell)
           continue
         }
         const t = 1 - (elapsed / ShowCellDrone.#NEW_CELL_FADE_MS)
-        const eased = t * t * t
-        this.#heatByLabel.set(cell, eased)
-        this.#updateCellHeat(cell, eased)
-        alive = true
+        this.#heatByLabel.set(cell, t * t * t)
+        frame.push(cell)
       }
-      this.#newCellFadeRaf = alive ? requestAnimationFrame(tick) : 0
+      this.#paintFrame(frame)
+      this.#newCellFadeRaf = this.#newCellFadeStart.size > 0 ? requestAnimationFrame(tick) : 0
     }
     this.#newCellFadeRaf = requestAnimationFrame(tick)
   }
@@ -8214,6 +8243,7 @@ export class ShowCellDrone extends Drone {
         const tick = (): void => {
           if (!this.#driftActive) { this.#driftRaf = 0; return }
           this.shader?.setTime((performance.now() - this.#driftStart) / 1000)
+          this.#wakeFrame()
           this.#driftRaf = requestAnimationFrame(tick)
         }
         this.#driftRaf = requestAnimationFrame(tick)
@@ -8239,6 +8269,7 @@ export class ShowCellDrone extends Drone {
         const tick = (): void => {
           if (!this.#pathwayHoverActive || this.#driftActive) { this.#pathwayHoverRaf = 0; return }
           this.shader?.setTime((performance.now() - this.#driftStart) / 1000)
+          this.#wakeFrame()
           this.#pathwayHoverRaf = requestAnimationFrame(tick)
         }
         this.#pathwayHoverRaf = requestAnimationFrame(tick)
@@ -8309,12 +8340,10 @@ export class ShowCellDrone extends Drone {
    *  clear-then-paint. */
   #paintMarkPreviewBuffer(): void {
     if (!this.#buf.divergence || !this.geom) return
-    for (const [label, i] of this.#labelToIndex) {
-      const baked = this.renderedCells.get(label)?.divergence ?? 0
-      this.#writeCellScalar(this.#buf.divergence, i, this.#markPreviewLabels.has(label) ? 3 : baked)
-    }
-    this.#pushBuffer('aDivergence')
+    // The plan reads #markPreviewLabels while #markPreviewGeom is this
+    // geometry: every cell re-plans, only the carriers that changed are written.
     this.#markPreviewGeom = this.geom
+    this.#paintFrame([...this.#labelToIndex.keys()])
   }
 
   /** Put every cell back to its baked divergence. Runs at the END of the fade
@@ -8324,10 +8353,7 @@ export class ShowCellDrone extends Drone {
   #restoreMarkPreviewBuffer(): void {
     this.#markPreviewGeom = null
     if (!this.#buf.divergence || !this.geom) return
-    for (const [label, i] of this.#labelToIndex) {
-      this.#writeCellScalar(this.#buf.divergence, i, this.renderedCells.get(label)?.divergence ?? 0)
-    }
-    this.#pushBuffer('aDivergence')
+    this.#paintFrame([...this.#labelToIndex.keys()])
   }
 
   /** Ramp the preview in or out. The rAF runs for as long as the treatment is
@@ -8349,6 +8375,7 @@ export class ShowCellDrone extends Drone {
     this.#markPreviewK = k
     const shader = this.shader
     shader?.setMarkPreview(k)
+    this.#wakeFrame()
     if (k > 0) {
       shader?.setMarkColor(this.#markPreviewColor[0], this.#markPreviewColor[1], this.#markPreviewColor[2])
       // The breath needs a clock. u_time is frozen on an ordinary hive page and
@@ -11234,35 +11261,23 @@ export class ShowCellDrone extends Drone {
    *  writes only; the next full render paints the tile native. */
   #flashWandTake(label: string): void {
     this.#wandTakingLabels.add(label)
-    const i = this.#labelToIndex.get(label)
-    if (i === undefined || !this.geom) return
-    const shadedBuf = this.#buf?.shaded
-    if (shadedBuf) {
-      this.#shadedLabels.delete(label)
-      this.#writeCellScalar(shadedBuf, i, 0)
-      this.#pushBuffer('aShaded')
-    }
-    const borderBuf = this.#buf?.borderColor
-    if (borderBuf) {
-      this.#writeCellRgb(borderBuf, i, WAND_TAKING_BORDER[0], WAND_TAKING_BORDER[1], WAND_TAKING_BORDER[2])
-      this.#pushBuffer('aBorderColor')
-    }
+    if (!this.#labelToIndex.has(label) || !this.geom) return
+    // The plan reads #wandTakingLabels: the lift and the taking rim are one
+    // dirty label, written by the next frame's drain.
+    this.#shadedLabels.delete(label)
+    this.#dirty(label, 'swarm:wand')
   }
 
-  /** Write one cell's current shade value into the geometry and push it. */
+  /** One cell's shade changed: the next frame's drain writes it (the plan
+   *  reads #shadeValueFor live — a hover's instant lift, a release's fade). */
   #writeShadeFor(label: string | null): boolean {
     if (!label) return false
     const cell = this.renderedCells.get(label)
-    const shadedBuf = this.#buf?.shaded
-    const i = this.#labelToIndex.get(label)
-    if (!cell || !shadedBuf || i === undefined || !this.geom) return false
-    const shaded = this.#cellIsShaded(cell)
-    if (shaded) this.#shadedLabels.add(label)
+    if (!cell || !this.#labelToIndex.has(label) || !this.geom) return false
+    if (this.#cellIsShaded(cell)) this.#shadedLabels.add(label)
     else this.#shadedLabels.delete(label)
-    // Hover lifts instantly (it is a pointer response, not an arrival); a real
-    // release fades. #shadeValueFor honours whichever is in play.
-    this.#writeCellScalar(shadedBuf, i, this.#shadeValueFor(cell))
-    return this.#pushBuffer('aShaded')
+    this.#dirty(label, 'shade')
+    return true
   }
 
   // ── Fade-in ────────────────────────────────────────────────────────────
@@ -11312,15 +11327,14 @@ export class ShowCellDrone extends Drone {
     if (this.#shadeFadeFrame !== null || this.#shadeFadeStartedAt.size === 0) return
     this.#shadeFadeFrame = requestAnimationFrame(() => {
       this.#shadeFadeFrame = null
-      const shadedBuf = this.#buf?.shaded
-      if (!shadedBuf || !this.geom) { this.#shadeFadeStartedAt.clear(); return }
+      if (!this.#buf.shaded || !this.geom) { this.#shadeFadeStartedAt.clear(); return }
+      const frame: string[] = []
       for (const label of [...this.#shadeFadeStartedAt.keys()]) {
-        const cell = this.renderedCells.get(label)
-        const i = this.#labelToIndex.get(label)
-        if (!cell || i === undefined) { this.#shadeFadeStartedAt.delete(label); continue }
-        this.#writeCellScalar(shadedBuf, i, this.#shadeValueFor(cell))
+        if (!this.renderedCells.has(label) || !this.#labelToIndex.has(label)) { this.#shadeFadeStartedAt.delete(label); continue }
+        frame.push(label)
       }
-      this.#pushBuffer('aShaded')
+      // The plan reads #shadeValueFor live: the ramp is one drain per frame.
+      this.#paintFrame(frame)
       this.#pumpShadeFade()
     })
   }
@@ -11626,24 +11640,22 @@ export class ShowCellDrone extends Drone {
    *  one-way within a visit, so a would-be re-shade means the membership
    *  changed and the full path owns it. */
   #repaintReadinessInPlace = (): boolean => {
-    const shadedBuf = this.#buf?.shaded
-    if (!shadedBuf || !this.geom || this.#shadedLabels.size === 0) return false
+    if (!this.#buf.shaded || !this.geom || this.#shadedLabels.size === 0) return false
     const flipped: string[] = []
     for (const label of [...this.#shadedLabels]) {
       const cell = this.renderedCells.get(label)
       if (!cell) return false
       if (this.#cellIsShaded(cell)) continue
-      const i = this.#labelToIndex.get(label)
-      if (i === undefined) return false
+      if (!this.#labelToIndex.has(label)) return false
       this.#shadedLabels.delete(label)
       // Start the fade rather than snapping to full — the ramp owns this
       // cell's attribute from here (see #pumpShadeFade).
       this.#beginShadeFade(label)
-      this.#writeCellScalar(shadedBuf, i, this.#shadeValueFor(cell))
       flipped.push(label)
     }
     if (flipped.length === 0) return false
-    if (!this.#pushBuffer('aShaded')) return false
+    // The flipped cells, one drain, one push (single-paint.md V4).
+    this.#paintFrame(flipped)
     // Update only the readiness gate. Re-emitting render:cell-count here can
     // release navigation against a partial renderedCells snapshot.
     this.emitEffect('render:tile-readiness', { shadedLabels: this.#preloadingLabels() })
@@ -11656,11 +11668,8 @@ export class ShowCellDrone extends Drone {
     // rendering). The narrow readiness event above updates only the gate and
     // cannot be confused with a completed level render.
     //
-    // Safe to recompute the WHOLE key only because it describes cells and
-    // nothing else. It must never carry an atlas eviction generation again:
-    // this path re-baked nothing, so adopting one here would retire a pending
-    // rebake and strand the wiped slots (band, no name). See #bakedLabelAtlasGen.
-    this.renderedCellsKey = this.buildCellsKey([...this.renderedCells.values()])
+    // The drain re-stated the cells key (it describes cells and nothing else —
+    // never an atlas eviction generation; see #bakedLabelAtlasGen).
     if (DIAG) console.info(`[diag:readiness] brightened in place: ${flipped.join(',')}`)
     return true
   }
@@ -11931,6 +11940,7 @@ export class ShowCellDrone extends Drone {
       if (now < this.#flowerBloomUntil || now - this.#flowerClockAt >= FLOWER_CLOCK_STEP_MS) {
         this.#flowerClockAt = now
         this.shader?.setTime(this.#flowerNow())
+        this.#wakeFrame()
       }
       // Bloomed: forget when, so the clock's wrap back to 0 never blooms it again.
       if (this.#flowerBloomUntil && now >= this.#flowerBloomUntil) {
@@ -12110,38 +12120,9 @@ export class ShowCellDrone extends Drone {
   }
 
   // ─────────────────────────────────────────────────────────────────────
-  // Per-cell buffer slice accessors — the standard way to write cell data
-  // into a geometry attribute buffer. All per-cell writes go through these
-  // helpers; the strides are not repeated anywhere else in this file.
-  //
-  // Each hex is a quad with 4 vertices. Attributes come in three shapes:
-  //   - scalar (1 float/vertex) → 4 floats per cell
-  //   - rgb    (3 floats/vertex) → 12 floats per cell
-  //   - vec4   (4 floats/vertex) → 16 floats per cell
+  // The per-cell slices are written by the drain alone (#writeInto, from a
+  // slot plan — single-paint.md V3). Strides live there and nowhere else.
   // ─────────────────────────────────────────────────────────────────────
-
-  #writeCellScalar(buf: Float32Array | undefined, i: number, value: number): void {
-    if (!buf) return
-    const b = i * 4
-    buf[b] = value; buf[b + 1] = value; buf[b + 2] = value; buf[b + 3] = value
-  }
-
-  #writeCellRgb(buf: Float32Array | undefined, i: number, r: number, g: number, bl: number): void {
-    if (!buf) return
-    const b = i * 12
-    for (let v = 0; v < 4; v++) {
-      buf[b + v * 3] = r; buf[b + v * 3 + 1] = g; buf[b + v * 3 + 2] = bl
-    }
-  }
-
-  #writeCellVec4(buf: Float32Array | undefined, i: number, a: number, b: number, c: number, d: number): void {
-    if (!buf) return
-    const base = i * 16
-    for (let v = 0; v < 4; v++) {
-      buf[base + v * 4] = a; buf[base + v * 4 + 1] = b
-      buf[base + v * 4 + 2] = c; buf[base + v * 4 + 3] = d
-    }
-  }
 
   /** Push a named attribute's CPU-side buffer to the GPU. Returns false if not available. */
   #pushBuffer(attrName: string): boolean {
@@ -12200,22 +12181,11 @@ export class ShowCellDrone extends Drone {
 
     this.#hoverRevealLabel = next
     if (!HOVER_REVEALS_NAME || (!prevFlips && !nextFlips)) return
-
-    const labelUV = this.#buf.labelUV
-    if (!labelUV || !this.atlas || !this.geom) return
-
-    for (const l of [prevFlips ? prev : null, nextFlips ? next : null]) {
-      if (!l) continue
-      const i = this.#labelToIndex.get(l)
-      if (i === undefined) continue
-      if (this.#labelIsHidden(l)) {
-        this.#writeCellVec4(labelUV, i, 0, 0, 0, 0)
-      } else {
-        const r = this.atlas.getLabelUV(l)
-        this.#writeCellVec4(labelUV, i, r.u0, r.v0, r.u1, r.v1)
-      }
-    }
-    this.#pushBuffer('aLabelUV')
+    // The plan reads the reveal: the two names flip in the next frame's drain.
+    const flips: string[] = []
+    if (prevFlips && prev) flips.push(prev)
+    if (nextFlips && next) flips.push(next)
+    this.#dirty(flips, 'hover-reveal')
   }
 
   // ─────────────────────────────────────────────────────────────────────
@@ -12306,99 +12276,36 @@ export class ShowCellDrone extends Drone {
   /** Paint a preview onto its tile. False when there is nothing to paint or
    *  the tile is not in the current geometry. */
   #writeTilePreview(preview: TilePreview): boolean {
-    const i = this.#labelToIndex.get(preview.label)
-    const { imageUV, hasImage, borderColor, labelUV } = this.#buf
-    if (i === undefined || !imageUV || !hasImage || !borderColor || !labelUV) return false
-    if (!this.geom || !this.imageAtlas || !this.atlas) return false
-
+    if (!this.#labelToIndex.has(preview.label) || !this.geom || !this.imageAtlas || !this.atlas) return false
     const picture = this.#flat ? preview.flat : preview.point
-    const stored = this.cellImageCache.get(preview.label)
-    let uv = preview.removed
-      ? null
-      : picture
-        ? this.imageAtlas.getImageUV(picture.sig)
-        : (stored ? this.imageAtlas.getImageUV(stored) : null)
-    if (!preview.removed && picture && !uv) {
-      // Evicted or not decoded yet: keep what the tile shows and paint again
-      // the moment it lands.
-      uv = stored ? this.imageAtlas.getImageUV(stored) : null
+    if (!preview.removed && picture && !this.imageAtlas.getImageUV(picture.sig)) {
+      // Evicted or not decoded yet: the plan keeps what the tile shows and
+      // paints the picture the moment it lands.
       void this.imageAtlas.loadImage(picture.sig, picture.blob)
         .then(() => { if (this.#tilePreviews.get(preview.label) === preview) this.#writeTilePreview(preview) })
         .catch(() => { /* the stored picture stays */ })
     }
-
-    this.#writeCellVec4(imageUV, i, uv?.u0 ?? 0, uv?.v0 ?? 0, uv?.u1 ?? 0, uv?.v1 ?? 0)
-    this.#writeCellScalar(hasImage, i, uv ? 1 : 0)
-
-    const [r, g, b] = preview.border === undefined
-      ? this.cellBorderColorCache.get(preview.label) ?? PREVIEW_DEFAULT_BORDER
-      : previewRgb(preview.border) ?? PREVIEW_DEFAULT_BORDER
-    this.#writeCellRgb(borderColor, i, r, g, b)
-
-    const hideText = preview.hideText ?? this.cellHideTextCache.get(preview.label) ?? false
-    if (this.#hidesName(hideText, !!uv) && !this.#revealsName(preview.label, this.#hoverRevealLabel)) {
-      this.#writeCellVec4(labelUV, i, 0, 0, 0, 0)
-    } else {
-      const ruv = this.atlas.getLabelUV(preview.label)
-      this.#writeCellVec4(labelUV, i, ruv.u0, ruv.v0, ruv.u1, ruv.v1)
-    }
-
-    const pushed = this.#pushBuffer('aImageUV') && this.#pushBuffer('aHasImage')
-      && this.#pushBuffer('aBorderColor') && this.#pushBuffer('aLabelUV')
+    // The plan reads #tilePreviews: one slot, one push.
+    this.#paintFrame([preview.label])
     // Tile names are real DOM text (tile-name.drone) — tell them to re-ask.
     this.emitEffect('render:name-visibility', { label: preview.label })
-    return pushed
+    return true
   }
 
-  /** A preview ended with no save: paint the tile from the caches again. */
+  /** A preview ended with no save: the tile paints from the caches again. */
   #restoreTileFromCaches(label: string): void {
-    const i = this.#labelToIndex.get(label)
-    const { imageUV, hasImage, borderColor, labelUV } = this.#buf
-    if (i === undefined || !imageUV || !hasImage || !borderColor || !labelUV || !this.geom || !this.imageAtlas || !this.atlas) {
-      this.requestRender()
-      return
-    }
-    const sig = this.cellImageCache.get(label) ?? null
-    const uv = sig ? this.imageAtlas.getImageUV(sig) : null
-    if (sig && !uv) { this.requestRender(); return }
-    this.#writeCellVec4(imageUV, i, uv?.u0 ?? 0, uv?.v0 ?? 0, uv?.u1 ?? 0, uv?.v1 ?? 0)
-    this.#writeCellScalar(hasImage, i, uv ? 1 : 0)
-    const [r, g, b] = this.cellBorderColorCache.get(label) ?? PREVIEW_DEFAULT_BORDER
-    this.#writeCellRgb(borderColor, i, r, g, b)
-    const hideText = this.cellHideTextCache.get(label) ?? false
-    if (this.#hidesName(hideText, !!uv) && !this.#revealsName(label, this.#hoverRevealLabel)) {
-      this.#writeCellVec4(labelUV, i, 0, 0, 0, 0)
-    } else {
-      const ruv = this.atlas.getLabelUV(label)
-      this.#writeCellVec4(labelUV, i, ruv.u0, ruv.v0, ruv.u1, ruv.v1)
-    }
     // The editor may already be previewing the next tile — keep its pictures.
-    this.imageAtlas.setPinned([
+    this.imageAtlas?.setPinned([
       ...[...this.renderedCells.values()].flatMap(c => (c.imageSig ? [c.imageSig] : [])),
       ...this.#tilePreviewSigs(),
     ])
-    this.#pushBuffer('aImageUV')
-    this.#pushBuffer('aHasImage')
-    this.#pushBuffer('aBorderColor')
-    this.#pushBuffer('aLabelUV')
+    // The preview is gone from #tilePreviews, so the plan is the stored tile
+    // again; an evicted picture is reloaded by the drain.
+    this.#dirty(label, 'tile:preview-ended')
     this.emitEffect('render:name-visibility', { label })
   }
 
 
-  /**
-   * Phase 2 fast path for heat — mutate just the heat slice for one cell
-   * and push the aHeat buffer. Used by the new-cell fade RAF loop so it
-   * never triggers a full render per frame.
-   * Returns true on success; false if the label isn't currently indexed
-   * (in which case the caller may skip or fall back to requestRender).
-   */
-  #updateCellHeat(label: string, heatValue: number): boolean {
-    const i = this.#labelToIndex.get(label)
-    if (i === undefined) return false
-    if (!this.#buf.heat || !this.geom) return false
-    this.#writeCellScalar(this.#buf.heat, i, heatValue)
-    return this.#pushBuffer('aHeat')
-  }
 }
 // THE BEE WIRES (atomic-modules-plan.md). A render-critical bee registers
 // the services it needs for the first paint, so they exist before it.
