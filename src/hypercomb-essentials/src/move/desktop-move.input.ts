@@ -1,6 +1,7 @@
 // input/move/desktop-move.input.ts
 import { Point } from 'pixi.js'
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, POINTER_GESTURE_END, isPointerConsumed } from '@hypercomb/core'
+import { primaryStillDown } from './press-liveness.js'
 import type { Axial } from '../navigation/hex-detector.js'
 import type { MoveDroneApi } from './move.drone.js'
 
@@ -24,6 +25,8 @@ export class DesktopMoveInput {
   readonly #threshold = 6
 
   #downPos: { x: number; y: number } | null = null
+  #pointerId = -1
+  #dragEndOff: (() => void) | null = null
   #downAxial: Axial | null = null
   #lastAxial: Axial | null = null
   #dragging = false
@@ -50,6 +53,14 @@ export class DesktopMoveInput {
     document.addEventListener('keydown', this.#onKeyDown)
     document.addEventListener('keyup', this.#onKeyUp)
     window.addEventListener('blur', this.#onBlur)
+    // A press the overlay acted on has its release swallowed at window
+    // capture; the consumer re-announces the end so this press is over too.
+    window.addEventListener(POINTER_GESTURE_END, this.#onGestureEnd as EventListener)
+    // The drone can end a drag on its own (the page moved out from under it);
+    // the input must not keep a grabbing cursor and a dead press behind.
+    this.#dragEndOff = EffectBus.on<{ active?: boolean }>('move:drag', payload => {
+      if (payload?.active === false && this.#dragging) this.#resetDrag()
+    })
 
     this.#enabled = true
   }
@@ -64,6 +75,9 @@ export class DesktopMoveInput {
     document.removeEventListener('keydown', this.#onKeyDown)
     document.removeEventListener('keyup', this.#onKeyUp)
     window.removeEventListener('blur', this.#onBlur)
+    window.removeEventListener(POINTER_GESTURE_END, this.#onGestureEnd as EventListener)
+    this.#dragEndOff?.()
+    this.#dragEndOff = null
 
     this.#cancel()
 
@@ -80,6 +94,11 @@ export class DesktopMoveInput {
   #onPointerDown = (e: PointerEvent): void => {
     if (e.pointerType === 'touch') return
     if (e.button !== 0) return
+    // A press that never released — its pointerup was swallowed — ends here.
+    if (this.#downPos && !this.#dragging) this.#resetDrag()
+    // Spoken for: the overlay navigated on this press (its canvas listener
+    // ran first) and will swallow the release. There is no drag in it.
+    if (isPointerConsumed(e.pointerId)) return
     if (e.shiftKey || e.altKey) return
     if (this.#spaceHeld) return
     if (!this.#canvas) return
@@ -110,6 +129,7 @@ export class DesktopMoveInput {
     this.#copyAtBegin = false
 
     this.#downPos = { x: e.clientX, y: e.clientY }
+    this.#pointerId = e.pointerId
     this.#downAxial = axial
     this.#dragging = false
   }
@@ -117,6 +137,9 @@ export class DesktopMoveInput {
   #onPointerMove = (e: PointerEvent): void => {
     if (!this.#downPos || !this.#downAxial || !this.#drone) return
     if (e.pointerType === 'touch') return
+    // The event outranks the remembered press: no primary button held means
+    // the release was never delivered here. A drag cannot begin or continue.
+    if (!primaryStillDown(e.buttons)) { this.#cancel(); return }
 
     const dx = e.clientX - this.#downPos.x
     const dy = e.clientY - this.#downPos.y
@@ -216,6 +239,11 @@ export class DesktopMoveInput {
     }
   }
 
+  #onGestureEnd = (e: CustomEvent<{ pointerId?: number }>): void => {
+    if (e.detail?.pointerId !== this.#pointerId) return
+    this.#cancel()
+  }
+
   #onBlur = (): void => {
     if (this.#dragging) {
       this.#drone?.cancelMove(this.#source)
@@ -235,6 +263,7 @@ export class DesktopMoveInput {
 
   #resetDrag(): void {
     this.#downPos = null
+    this.#pointerId = -1
     this.#downAxial = null
     this.#lastAxial = null
     this.#dragging = false

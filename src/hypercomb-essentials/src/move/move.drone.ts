@@ -10,6 +10,7 @@ import { getLaneScrollAxis } from '../sequence/lane-viewport-mode.js'
 import { LayerTransferService } from './layer-transfer.service.js'
 import { DesktopMoveInput } from './desktop-move.input.js'
 import { TouchMoveInput } from './touch-move.input.js'
+import { dragOutlivesLocation } from './press-liveness.js'
 
 // Committer/store shapes for the Ctrl-drag COPY path — it re-homes a dragged
 // cell's whole subtree under a fresh sibling name using the SAME signature-
@@ -36,7 +37,7 @@ interface CopyStoreLike {
   putResource?: (blob: Blob) => Promise<string>
 }
 
-type CellCountPayload = { count: number; labels: string[]; coords?: Axial[]; branchLabels?: string[]; externalLabels?: string[] }
+type CellCountPayload = { locationKey?: string; count: number; labels: string[]; coords?: Axial[]; branchLabels?: string[]; externalLabels?: string[] }
 type MoveRefs = {
   canvas: HTMLCanvasElement
   container: any
@@ -77,6 +78,10 @@ export class MoveDrone extends Drone {
 
   #moveActive = false
   #activeSource: string | null = null
+  /** The location the live cell snapshot was painted for (render:cell-count's
+   *  stamp), and the one the tiles in hand were taken from. */
+  #cellsLocation: string | null = null
+  #dragLocation: string | null = null
   #anchorAxial: Axial | null = null
   #movedGroup = new Map<string, Axial>()       // label → original axial
   #occupancy = new Map<string, string>()        // axialKey → label
@@ -141,7 +146,7 @@ export class MoveDrone extends Drone {
     selection: '@diamondcoreprocessor.com/SelectionService',
   }
 
-  protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'controls:action', 'tile:action']
+  protected override listens = ['render:host-ready', 'render:cell-count', 'render:tiles-target', 'render:mesh-offset', 'controls:action', 'tile:action']
   protected override emits = ['move:preview', 'move:committed', 'move:mode', 'move:drag', 'cell:reorder', 'move:drop-into', 'move:drop-into-commit', 'move:copy-drag', 'cell:added']
 
   #effectsRegistered = false
@@ -181,6 +186,16 @@ export class MoveDrone extends Drone {
       this.#cellLabels = payload.labels
       this.#cellCoords = payload.coords ?? []
       this.#externalLabels = new Set(payload.externalLabels ?? [])
+      this.#cellsLocation = typeof payload.locationKey === 'string' ? payload.locationKey : null
+    })
+
+    // THE PAGE MOVED OUT FROM UNDER THE DRAG. A render for another location
+    // means the tiles in hand are no longer on screen; committing them would
+    // write the old level's order into the new one, and previewing them
+    // paints the old level under the new address. The drag ends, unfired.
+    this.onEffect<{ locationKey?: string }>('render:tiles-target', (payload) => {
+      if (!this.#activeSource) return
+      if (dragOutlivesLocation(this.#dragLocation, payload?.locationKey)) this.cancelMove(this.#activeSource)
     })
 
     this.onEffect<{ x: number; y: number }>('render:mesh-offset', (offset) => {
@@ -273,6 +288,12 @@ export class MoveDrone extends Drone {
       this.#dragCoords = []
     }
 
+    // The snapshot must describe the page on screen. Right after a navigation
+    // it still describes the level being left: a drag begun from it would
+    // carry that level's tiles into this one.
+    const live = this.resolve<any>('lineage')?.explorerLabel?.()
+    if (typeof live === 'string' && dragOutlivesLocation(this.#cellsLocation, live)) return false
+
     if (!this.#begin(source)) return false
 
     const anchorKey = axialKey(anchorAxial.q, anchorAxial.r)
@@ -363,6 +384,7 @@ export class MoveDrone extends Drone {
     // A tile is now genuinely in hand. Announced HERE and not in #begin so the
     // half-dozen refusal paths above (no axial service, anchor on empty ground,
     // a peer's tile, an unselected anchor) never flash a drag that isn't.
+    this.#dragLocation = this.#cellsLocation
     this.emitEffect('move:drag', { active: true })
     return true
   }
