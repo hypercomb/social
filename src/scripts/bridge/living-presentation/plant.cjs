@@ -8,7 +8,7 @@
 //                                                     [--revision <name>]
 //
 // <route> is the tile whose children are planted, as a path in tree.cjs:
-// `presentation` (the default) plants the first layer, the values; a deeper
+// `protocol` (the default) plants the first layer, the values; a deeper
 // route plants that tile's children. With --all, every layer under the route
 // is planted in one pass — the whole mesh — so agents can take tiles in
 // parallel, and the pass is still sealed as one build revision.
@@ -26,8 +26,9 @@
 //      host and <top>.<domain> opens on the new head, on every domain at once.
 //      With --as <label>, the tile gets its own address instead:
 //      <label>.<domain> (`publish /<top> on <domain> as <label>`), so
-//      The top tile is already named presentation, so `--publish hypercomb.com`
-//      alone is presentation.hypercomb.com.
+//      The top tile is named protocol, so `--publish hypercomb.com` alone is
+//      protocol.hypercomb.com. An earlier root (retired.cjs `roots`) is
+//      withdrawn from each domain first, `publish /<old> off <domain>`.
 //      Publishing is not joining or sharing; the hive asks for consent in the
 //      browser before each publish.
 // The usual order is two runs with a step by hand between them: plant the
@@ -83,7 +84,7 @@ const ALL = args.includes('--all')
 const DOMAINS = [...new Set(valuesOf('--publish').flatMap(v => v.split(',')).map(d => d.trim().toLowerCase()).filter(Boolean))]
 const LABEL = valueOf('--as')
 const flagValues = new Set([...valuesOf('--publish'), valueOf('--revision'), valueOf('--out'), LABEL, SAY_URL].filter(Boolean))
-// Three trees, three relations (tree.cjs): presentation (the values, what is
+// Three trees, three relations (tree.cjs): protocol (the values, what is
 // shown and published), road (the way ahead, one tour scene per tile) and
 // presenter (what shows them). With --all and no route, all are planted; a
 // route plants under its own tree.
@@ -201,7 +202,7 @@ if (args.includes('--blocks')) {
 
 if (PUBLISH_ONLY && !DOMAINS.length) { console.error('--publish-only needs --publish <domain>'); process.exit(2) }
 if (args.includes('--publish') && !DOMAINS.length) { console.error('--publish needs a domain, e.g. --publish example.com'); process.exit(2) }
-if (args.includes('--as') && (!LABEL || LABEL.startsWith('--'))) { console.error('--as needs a label, e.g. --as presentation'); process.exit(2) }
+if (args.includes('--as') && (!LABEL || LABEL.startsWith('--'))) { console.error('--as needs a label, e.g. --as protocol'); process.exit(2) }
 if (LABEL && !DOMAINS.length) { console.error('--as names an address on a domain: add --publish <domain>'); process.exit(2) }
 
 const segments = route.split('/')
@@ -239,7 +240,12 @@ for (const p of plantings) { p.layers = []; walk(p.node, p.route, p.layers); lay
 const sentences = []
 if (!PUBLISH_ONLY) {
   for (const p of plantings) {
-    if (p.top) sentences.push('go /', `create ${p.node.name}`)
+    if (p.top) {
+      sentences.push('go /', `create ${p.node.name}`)
+      // An earlier root is retired at the root, once: its marker forgotten, its tile kept.
+      const old = RETIRE && p === plantings[0] ? (retired.roots ?? []).filter(r => !ROOTS.some(x => x.name === r)) : []
+      if (old.length) sentences.push(`trait ~ ${old.join(' ')}`)
+    }
     for (const { tile, at } of p.layers) {
       sentences.push(`go /${at}`, `trait ${tile.children.map(c => c.name).join(' ')}`)
       const old = RETIRE ? retired.markers[at] ?? [] : []
@@ -262,11 +268,13 @@ if (!TILES_ONLY && !PUBLISH_ONLY) {
     for (const { tile, at } of p.layers) for (const child of tile.children) if (child.note) sentences.push(`file on /${at}/${child.name}: ${noteFor(child)}`)
   }
 }
-// Each planted tree is sealed as one build; only the presentation (the tree
-// the route names, or presentation itself) is published.
+// Each planted tree is sealed as one build; only the protocol (the tree the
+// route names, or protocol itself) is published. An earlier root is withdrawn
+// from each domain first, so the one address serves the one presentation.
 const sealed = [...new Set(plantings.map(p => p.route.split('/')[0]))]
 for (const top of sealed) sentences.push(`go /${top}`, `builds ${REVISION}`)
 const publishing = EVERY_ROOT ? tree.name : segments[0]
+if (RETIRE) for (const domain of DOMAINS) for (const old of retired.roots ?? []) if (old !== publishing) sentences.push(`publish /${old} off ${domain}`)
 for (const domain of DOMAINS) sentences.push(`publish /${publishing} on ${domain}${LABEL ? ` as ${LABEL}` : ''}`)
 
 // The participant's door reads a line as a behaviour only with its slash.

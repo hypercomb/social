@@ -21,7 +21,7 @@
 // it or named by signature (`resource:<sig>` — the faces, the voice, the
 // clips, the captured pictures), and it asks no other host for anything
 // (doctrine T7). It names no other block: a link names a WORD (`./word` steps
-// one level down; an ancestor is its route, `/presentation/simple`), and the
+// one level down; an ancestor is its route, `/protocol/simple`), and the
 // tile that fills the word answers it. The source a tile explains rides on
 // the tile as included files, not on the slide.
 //
@@ -36,7 +36,7 @@
 // voice and its clips the moment it is unmounted.
 //
 // render(parts) -> the page's HTML. Every part is prepared by build.cjs:
-//   route    ['presentation', 'simple']
+//   route    ['protocol', 'simple']
 //   title    the document title
 //   scene    { eyebrow, headline, figure, beside, sub, link, minutes,
 //              steps: [{ say, voice, lit, name }] }

@@ -3,7 +3,7 @@
 // code as it is and names each medium by the signature of its bytes.
 //
 // buildBlocks({ under }) -> { blocks: [{ route, page, files }], media: [{ sig, path, name, type, size }] }
-//   `under` limits it to routes at or under a route ('presentation/simple').
+//   `under` limits it to routes at or under a route ('protocol/simple').
 //
 // One tile, one scene. A tile has a page when the tour explains it (tour.cjs)
 // or when content.cjs says something for it. A scene tile shows its scene; its

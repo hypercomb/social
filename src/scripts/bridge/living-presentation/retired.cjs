@@ -5,8 +5,18 @@
 // (named by how each starts; history keeps them, undo puts them back), so the
 // layout shows only this planting's words and readers see only reader notes.
 // On a hive that never had the earlier planting, each line simply finds nothing.
+//
+// `roots` are earlier top tiles: the root was presentation until jwize
+// 2026-11-04 ("the root tile has to change to protocol instead of presentation";
+// "unpublish the presentation and we use the other from now on"). plant.cjs
+// retires each at `/` with `trait ~` and, for every domain it publishes to,
+// withdraws it with `publish /<root> off <domain>`. Its notes below stay as
+// the record of that planting; they sit under a retired root now.
 
 module.exports = {
+  "roots": [
+    "presentation"
+  ],
   "markers": {
     "presentation/simple": [
       "marker",
@@ -18,6 +28,9 @@ module.exports = {
     ],
     "presentation/organized": [
       "cube"
+    ],
+    "road": [
+      "protocol"
     ]
   },
   "notes": {
