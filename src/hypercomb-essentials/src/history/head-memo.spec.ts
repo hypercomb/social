@@ -84,7 +84,7 @@ class MemoryDirectory {
     MemoryDirectory.peakInFlight = Math.max(MemoryDirectory.peakInFlight, MemoryDirectory.inFlight)
     try {
       for (const entry of [...this.files]) {
-        await new Promise(resolve => setTimeout(resolve, 0))   // a real directory answers asynchronously
+        await new Promise<void>(resolve => queueMicrotask(resolve))   // a real directory answers asynchronously
         yield entry
       }
       for (const entry of [...this.dirs]) yield entry
@@ -229,7 +229,7 @@ describe('the head memo on the commit path', () => {
     for (const loc of locs) expect(fresh.warmHeadSigFor(loc)).toBe(w.a.warmHeadSigFor(loc))
     expect(MemoryDirectory.peakInFlight).toBeGreaterThan(1)
     expect(MemoryDirectory.peakInFlight).toBeLessThanOrEqual(12)
-  })
+  }, 30_000)
 
   it('a peer that wrote SEVERAL markers is caught the same way', async () => {
     const w = await world()

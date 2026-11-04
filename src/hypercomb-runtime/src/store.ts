@@ -1837,6 +1837,10 @@ export class Store extends EventTarget {
   // load-bearing: a reader that lacks it only decodes once more). It is
   // minted where the positive record is: `optimizeVisual`, the optimize
   // phase.
+  /** The sub-bucket's name is `sign('within-target')` — the same hash a
+   *  sub-key takes under `putPoolDoc` — derived directly: it is a bucket
+   *  INSIDE a pool, not a pool of meaning of its own, so it is not entered
+   *  in the pool registry (the census ratchet seeds only root pools). */
   static readonly #WITHIN_TARGET_BUCKET = 'within-target'
   #withinTargetDir?: FileSystemDirectoryHandle | null
   /** Source sigs this session knows derive nothing — the record, read once. */
@@ -1851,7 +1855,8 @@ export class Store extends EventTarget {
     try {
       const dir = await this.#visualOptimDir()
       if (!dir) return null
-      const bucket = await dir.getDirectoryHandle(await Store.poolSignature(Store.#WITHIN_TARGET_BUCKET), { create })
+      const name = await SignatureService.sign(new TextEncoder().encode(Store.#WITHIN_TARGET_BUCKET).buffer as ArrayBuffer)
+      const bucket = await dir.getDirectoryHandle(name, { create })
       this.#withinTargetDir = bucket
       return bucket
     } catch {
