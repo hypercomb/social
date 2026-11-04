@@ -9,7 +9,7 @@
 // point, is OFFERED (one tap fills the selector's field), never seeded. A
 // host named before is the participant's own: a joined tab dials it at boot
 // (its zone), exactly as fast as ever.
-import { Drone } from '@hypercomb/core'
+import { Drone, KIND_FETCH_CANCEL, KIND_FETCH_REQUEST, KIND_FETCH_RESPONSE, SWARM_RESOURCE_KIND } from '@hypercomb/core'
 import { isJoinedHere } from './membership.js'
 
 // The local dev relay (scripts/local-relay.ts). Never a seed: dialled only
@@ -327,7 +327,7 @@ const LEASE_MS = 10_000
 const SEND_BURST = 400
 const SEND_REFILL_PER_SEC = 10
 const BULK_RESERVE = 40
-const BULK_KINDS = new Set([30401, 30201, 20400, 20402])
+const BULK_KINDS = new Set([KIND_FETCH_RESPONSE, SWARM_RESOURCE_KIND, KIND_FETCH_REQUEST, KIND_FETCH_CANCEL])
 const BULK_HELD_MAX = 512
 
 // ── relay clock memory ───────────────────────────────────────────────────────

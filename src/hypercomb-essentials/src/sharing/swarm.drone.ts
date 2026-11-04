@@ -27,6 +27,13 @@
 // arrives, so we don't need to dispatch a render signal ourselves.
 
 import { Drone, EffectBus, lifecyclePreimage, meetingPointKey, normalizeCell, poolAddresses, roomPreimage, SignatureService } from '@hypercomb/core'
+// Nostr kinds come from core's one vocabulary (nostr-kinds.ts): the wire
+// shapes each kind carries are described at the anchors below.
+import {
+  CHANGE_ITEM_KIND, CLIENT_PRESENCE_KIND, FEEDBACK_ITEM_KIND, HIVE_MEETING_KIND, KIND_FETCH_CANCEL, KIND_FETCH_REQUEST, KIND_FETCH_RESPONSE,
+  PEER_MODEL_OFFER_KIND, PEER_MODEL_REPLY_KIND, PEER_MODEL_REQUEST_KIND, SWARM_BEHAVIOR_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_LAYER_KIND,
+  SWARM_LIFECYCLE_KIND, SWARM_PRESENCE_KIND, SWARM_RESOURCE_KIND, SWARM_SUBSCRIBE_REQUEST_KIND,
+} from '@hypercomb/core'
 import { verifyEvent } from 'nostr-tools/pure'
 import { readTilePropertiesAt, withoutSubstrateImage } from '../editor/tile-properties.js'
 import { readOrderAt } from '../history/tile-order.js'
@@ -47,7 +54,7 @@ import { swarmFilterService } from './swarm-filter.service.js'
 import { nameService } from './names.service.js'
 import { isJoinedHere } from './membership.js'
 
-const SWARM_LAYER_KIND = 30200
+// SWARM_LAYER_KIND (30200) — core nostr-kinds, the one vocabulary.
 
 // Per-pubkey-per-lineage hidden-tile list. Stored on the mesh — the
 // session (room + secret) is the boundary. d-tag = composed lineage
@@ -59,7 +66,7 @@ const SWARM_LAYER_KIND = 30200
 // keeps the list alive while the user is active; stop publishing
 // (close tab) and the hide list naturally evaporates from the relay
 // at expiration time.
-const SWARM_HIDE_KIND = 30202
+// SWARM_HIDE_KIND (30202) — core nostr-kinds, the one vocabulary.
 
 // Companion event kind for content-addressed resource streaming.
 // d-tag = resource sig (sha256 of bytes); content = base64 of bytes.
@@ -70,7 +77,7 @@ const SWARM_HIDE_KIND = 30202
 // mismatched bytes). Parameterized-replaceable per (pubkey, kind, sig)
 // so a peer that republishes the same image bytes doesn't fan out
 // duplicates, and late subscribers always get the latest copy.
-const SWARM_RESOURCE_KIND = 30201
+// SWARM_RESOURCE_KIND (30201) — core nostr-kinds, the one vocabulary.
 
 // Interest events — "I'm clicking your tile, please come show me what's
 // inside." Published at the PARENT lineage's composedSig (not the
@@ -89,7 +96,7 @@ const SWARM_RESOURCE_KIND = 30201
 // the tile ("X is interested in this"). The tile-clicker also
 // navigates into the child as usual — interest is the side-channel
 // signal, NOT a gate on navigation.
-const SWARM_INTEREST_KIND = 30203
+// SWARM_INTEREST_KIND (30203) — core nostr-kinds, the one vocabulary.
 
 // Presence event — broadcasts the participant's CURRENT pathSegments
 // to a per-pubkey sig (sha256(`presence:${pubkey}\0room\0secret`)).
@@ -99,7 +106,7 @@ const SWARM_INTEREST_KIND = 30203
 //
 // Parameterized-replaceable per (pubkey, kind, d-tag=presenceSig),
 // NIP-40 expiration. Out-of-date positions naturally evaporate.
-const SWARM_PRESENCE_KIND = 30204
+// SWARM_PRESENCE_KIND (30204) — core nostr-kinds, the one vocabulary.
 
 // Subscribe-request event. The would-be subscriber publishes one of
 // these at the leader's "request channel" sig
@@ -111,7 +118,7 @@ const SWARM_PRESENCE_KIND = 30204
 // "Follow" (nav-sync) is a SEPARATE concept and doesn't carry a
 // consent handshake — it's a local choice to mirror someone's
 // navigation, no broadcast involved.
-const SWARM_SUBSCRIBE_REQUEST_KIND = 30205
+// SWARM_SUBSCRIBE_REQUEST_KIND (30205) — core nostr-kinds, the one vocabulary.
 
 // Swarm lifecycle (presence roster) event. ONE shared channel per zone
 // (sha256(`lifecycle\0room\0secret\0point`), core lifecyclePreimage —
@@ -139,7 +146,7 @@ const SWARM_SUBSCRIBE_REQUEST_KIND = 30205
 // delete) or on the relay slot's clock (expiration + grace) — never because
 // a socket blinked, and never the navigation-coupled flush that made a
 // peer's tiles vanish when YOU moved.
-const SWARM_LIFECYCLE_KIND = 30206
+// SWARM_LIFECYCLE_KIND (30206) — core nostr-kinds, the one vocabulary.
 
 // Withheld-behaviors event — the behavior axis of the share shortlist.
 // The publisher broadcasts WHICH decoration kinds they hold back (their
@@ -150,7 +157,7 @@ const SWARM_LIFECYCLE_KIND = 30206
 // withheld kinds at the adopted root (behavior-enablement's
 // `hc:withheld-at-roots`) and the enablement lens renders those behaviors
 // inert there. 30207 belongs to client-presence; this is the next free slot.
-const SWARM_BEHAVIOR_KIND = 30208
+// SWARM_BEHAVIOR_KIND (30208) — core nostr-kinds, the one vocabulary.
 
 // Debug logging — gated on the same master flag the mesh uses
 // (localStorage['hc:nostrmesh:debug'] = '1'). The publish walk logs PER
@@ -2567,7 +2574,11 @@ export class SwarmDrone extends Drone {
     // nobody publishes and nobody handles has no business in the filter.)
     // 30219 = the remote change channel item (ChangeChannelDrone): a change
     // asked for on another machine, and the answer sent back, both sealed.
-    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_PRESENCE_KIND, SWARM_SUBSCRIBE_REQUEST_KIND, SWARM_LIFECYCLE_KIND, SWARM_BEHAVIOR_KIND, 20400, 20402, 30401, 30207, 30213, 30215, 30216, 30217, 30219], true)
+    mesh.configureKinds([
+      HIVE_MEETING_KIND, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_PRESENCE_KIND,
+      SWARM_SUBSCRIBE_REQUEST_KIND, SWARM_LIFECYCLE_KIND, SWARM_BEHAVIOR_KIND, KIND_FETCH_REQUEST, KIND_FETCH_CANCEL, KIND_FETCH_RESPONSE,
+      CLIENT_PRESENCE_KIND, FEEDBACK_ITEM_KIND, PEER_MODEL_OFFER_KIND, PEER_MODEL_REQUEST_KIND, PEER_MODEL_REPLY_KIND, CHANGE_ITEM_KIND,
+    ], true)
   }
 
   /**

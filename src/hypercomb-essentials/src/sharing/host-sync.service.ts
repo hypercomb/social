@@ -104,7 +104,7 @@
 // statement about that sig, not a bare 200 — so that answer skips the
 // read-back GET. Every other answer keeps the read-back.
 
-import { CHILD_SLOTS, EffectBus, SignatureService, registerPoolMeaning, spellPoolMeaning, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
+import { CHILD_SLOTS, EffectBus, NIP98_KIND, SignatureService, SWARM_LIFECYCLE_KIND, registerPoolMeaning, spellPoolMeaning, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
 import { decorationClosureSigs, nestedResourceSigs } from './decoration-closure.js'
 import { isJoinedHere, ownZone } from './membership.js'
 import { foldContentLabel, HOST_DOMAIN_RE, isLoopbackHost, isPublishNode, legacyContentFace } from './zone-door.js'
@@ -218,13 +218,13 @@ const DEFAULT_PUBLIC_HOST_DOMAIN = ''
 // content:wrote enqueue. `.public` deliberately fails ENTRY_RE, so markers
 // coexist in the push pool without ever being listed as queue entries.
 const PUBLIC_MARKER_SUFFIX = 'public'
-const NIP98_KIND = 27235
+// NIP98_KIND (27235) — core nostr-kinds, the one vocabulary.
 /** The device's anchor binding, when it has one (anchor-binding.ts). */
 const ANCHOR_BINDING_KEY = '@hypercomb.social/AnchorBinding'
 // The swarm's liveness beacon (swarm.drone.ts SWARM_LIFECYCLE_KIND and its
 // generation), carried inside a NIP-98 upload to a host that said not-live
 // (#nip98, D7): tag `[ALIVE_TAG, <the signed 30206 event as JSON>]`.
-const SWARM_LIFECYCLE_KIND = 30206
+// SWARM_LIFECYCLE_KIND (30206) — core nostr-kinds, the one vocabulary.
 const ALIVE_BEACON_VERSION = 2
 const ALIVE_TAG = 'alive'
 const ALIVE_REUSE_MS = 60_000

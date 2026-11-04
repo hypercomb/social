@@ -71,7 +71,7 @@
 // self-cleaning drain removes it. Layer/resource paths use the
 // canonical Store APIs.
 
-import { Drone, EffectBus, isMetaEnvelope, registerPoolMeaning, roomPreimage } from '@hypercomb/core'
+import { Drone, EffectBus, isMetaEnvelope, KIND_FETCH_CANCEL, KIND_FETCH_REQUEST, KIND_FETCH_RESPONSE, registerPoolMeaning, roomPreimage, SWARM_LAYER_KIND } from '@hypercomb/core'
 import { decorationClosureSigs } from './decoration-closure.js'
 import { adoptDescendantsOf } from './adopt-descendants.js'
 import { firstAvailableHost } from './first-available-host.js'
@@ -87,7 +87,7 @@ const STORE_KEY = '@hypercomb.social/Store'
 // alias registration at the bottom of the file.
 const RUNTIME_BROKER_KEY = '@ContentBrokerDrone'
 
-const KIND_FETCH_REQUEST = 20400
+// KIND_FETCH_REQUEST (20400) — core nostr-kinds, the one vocabulary.
 // Responses are PARAMETERIZED-REPLACEABLE (30000-39999 range). The
 // relay enforces one stored event per (pubkey, kind, d-tag=sig), so
 // each responder's bytes for a given sig live in the relay cache and
@@ -101,7 +101,7 @@ const KIND_FETCH_REQUEST = 20400
 // implements the doctrine's "live shrinking broadcast" — first valid
 // wins, others stand down, bandwidth converges to 1x per resource
 // regardless of peer count.
-const KIND_FETCH_RESPONSE = 30401
+// KIND_FETCH_RESPONSE (30401) — core nostr-kinds, the one vocabulary.
 
 // Cancel signals — published by an asker once a sig has been resolved
 // with verified bytes. Any peer currently preparing a response for that
@@ -112,7 +112,7 @@ const KIND_FETCH_RESPONSE = 30401
 // every broker already subscribed there sees it without needing
 // per-sig subscriptions. Short expiration — just long enough to outlast
 // in-flight preparations.
-const KIND_FETCH_CANCEL = 20402
+// KIND_FETCH_CANCEL (20402) — core nostr-kinds, the one vocabulary.
 const CANCEL_TTL_MS = 30_000  // 30s — enough to cover any reasonable readLocal duration
 
 // A cancel from an asker a HOST served (its HTTP leg won the race) says only
@@ -248,7 +248,7 @@ const ANSWER_MAX_WAIT_MS = 8_000
 const MESH_LEGS_MAX = 16
 
 const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
-const SWARM_LAYER_KIND = 30200
+// SWARM_LAYER_KIND (30200) — core nostr-kinds, the one vocabulary.
 
 /** Insert or refresh `key` in a bounded map, oldest dropped first. */
 const remember = <V>(map: Map<string, V>, key: string, value: V, max = KNOWLEDGE_MAX): void => {
