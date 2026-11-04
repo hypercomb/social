@@ -31,7 +31,7 @@ import {
   requestConfirm,
   type I18nProvider,
 } from '@hypercomb/core'
-import { Container, Graphics, Point, Sprite, Text, Texture } from 'pixi.js'
+import { Container, Graphics, Point, Rectangle, Sprite, Text, Texture } from 'pixi.js'
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
 import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import { referenceEditsRootDefaultForLabel, referenceTargetForLabel } from '../commands/decoration-kind-index.js'
@@ -42,6 +42,7 @@ import { canonicalPeerImageCandidates, type PeerImageCandidate, type PeerImagePr
 import { imageChoiceWriteTargets } from './image-choice-targets.js'
 import { markSeen, unseenNow } from './image-updates.js'
 import { readThumbnail, type ThumbnailStore } from '../presentation/tiles/thumbnails.js'
+import { divideBySheet, fillFrame, readFillSheet, type FillDivision } from '../presentation/tiles/fill-sprite.js'
 
 type Axial = { q: number; r: number }
 
@@ -138,6 +139,10 @@ export class ImageChoiceDrone extends Drone {
 
   #textures = new Map<string, Texture | null>()
   #inflight = new Set<string>()
+  /** Sigs whose texture is a frame of a fill sheet (shares the sheet's source). */
+  #sheetCut = new Set<string>()
+  /** The decoded sheets those frames are cut from; released on dispose. */
+  #sheetBases: Texture[] = []
   #entries: ChoiceEntry[] = []
   #loading = false
   #repaintQueued = false
@@ -197,8 +202,9 @@ export class ImageChoiceDrone extends Drone {
     window.removeEventListener('keydown', this.#onKeyDown, true)
     window.removeEventListener('blur', this.#onWindowBlur)
     this.#close()                            // never strand a hidden hive
-    for (const t of this.#textures.values()) { try { t?.destroy(true) } catch { /* gone */ } }
-    this.#textures.clear()
+    for (const sig of [...this.#textures.keys()]) this.#drop(sig)
+    for (const base of this.#sheetBases) { try { base.destroy(true) } catch { /* gone */ } }
+    this.#sheetBases = []
   }
 
   #locationKey(): string {
@@ -302,8 +308,7 @@ export class ImageChoiceDrone extends Drone {
       const result = await forgetPicture(address, c.props.imageSig ?? '')
       if (result.reason === 'worn') { this.emitEffect('toast:show', { type: 'info', message: this.#t('images.forget-worn', 'That is the picture this tile wears — it cannot be removed.') }); return }
       if (!result.removed) return
-      this.#textures.get(c.previewSig)?.destroy(true)
-      this.#textures.delete(c.previewSig)
+      this.#drop(c.previewSig)
       this.emitEffect('toast:show', { type: 'info', message: result.bytesRemoved ? this.#t('images.forgot', 'Picture removed') : this.#t('images.forgot-kept', 'Picture removed from this tile; the file stays because another tile uses it.') })
       await this.#open(label, segments)         // repaint the wall without it
     } catch (err) {
@@ -390,11 +395,66 @@ export class ImageChoiceDrone extends Drone {
     this.#loadTextures(token, added)
   }
 
-  /** Start every picture's bytes; each repaints the wall as it lands. */
+  /** Start every picture's bytes; each repaints the wall as it lands. What is
+   *  needed is DIVIDED first: a fill sheet holding two or more of these is one
+   *  read and one decode, cut into frames; the rest load one by one. */
   #loadTextures(token: number, entries: readonly ChoiceEntry[]): void {
-    for (const entry of entries) {
-      void this.#texture(entry.previewSig).then(() => this.#scheduleRepaint(token))
+    const wanted = entries.map(entry => entry.previewSig).filter(sig => sig && !this.#textures.has(sig))
+    if (!wanted.length) return
+    for (const sig of wanted) this.#inflight.add(sig)
+    const store = this.#store() as ThumbnailStore | undefined
+    void (async () => {
+      const division = store?.getPool
+        ? await divideBySheet(store, wanted).catch(() => ({ sheets: new Map(), singles: wanted }) as FillDivision)
+        : { sheets: new Map(), singles: wanted } as FillDivision
+      for (const [sheet, members] of division.sheets) {
+        void this.#cutSheet(store!, sheet, members).then(missed => {
+          this.#scheduleRepaint(token)
+          for (const sig of missed) void this.#texture(sig).then(() => this.#scheduleRepaint(token))
+        })
+      }
+      for (const sig of division.singles) {
+        this.#inflight.delete(sig)
+        void this.#texture(sig).then(() => this.#scheduleRepaint(token))
+      }
+    })()
+  }
+
+  /** Decode one fill sheet and cut a texture per wanted slot. Returns the sigs
+   *  it could not serve (sheet reaped, undecodable) for the single path. */
+  async #cutSheet(store: ThumbnailStore, sheet: string, members: readonly { sig: string; slot: number }[]): Promise<string[]> {
+    const release = (): string[] => {
+      for (const member of members) this.#inflight.delete(member.sig)
+      return members.map(member => member.sig)
     }
+    try {
+      const blob = await readFillSheet(store, sheet)
+      if (!blob) return release()
+      const base = Texture.from(await createImageBitmap(blob))
+      this.#sheetBases.push(base)
+      const missed: string[] = []
+      for (const { sig, slot } of members) {
+        this.#inflight.delete(sig)
+        if (this.#textures.has(sig)) continue
+        const frame = fillFrame(slot)
+        // A slot past the sheet's edge is a record that outran its sheet.
+        if (frame.x + frame.width > base.width || frame.y + frame.height > base.height) { missed.push(sig); continue }
+        this.#sheetCut.add(sig)
+        this.#remember(sig, new Texture({ source: base.source, frame: new Rectangle(frame.x, frame.y, frame.width, frame.height) }))
+      }
+      return missed
+    } catch {
+      return release()
+    }
+  }
+
+  /** Destroy a cached texture. A frame cut from a sheet shares the sheet's
+   *  source, so only the frame goes — never the source under its neighbours. */
+  #drop(sig: string): void {
+    const tex = this.#textures.get(sig)
+    try { tex?.destroy(!this.#sheetCut.has(sig)) } catch { /* gone */ }
+    this.#textures.delete(sig)
+    this.#sheetCut.delete(sig)
   }
 
   #scheduleRepaint(token: number): void {
@@ -837,15 +897,16 @@ export class ImageChoiceDrone extends Drone {
     } catch { tex = null }
     this.#inflight.delete(sig)
     if (!tex) return null
+    this.#remember(sig, tex)
+    return tex
+  }
+
+  #remember(sig: string, tex: Texture): void {
     if (this.#textures.size >= TEXTURE_CACHE_MAX) {
       const oldest = this.#textures.keys().next().value
-      if (oldest !== undefined) {
-        try { this.#textures.get(oldest)?.destroy(true) } catch { /* gone */ }
-        this.#textures.delete(oldest)
-      }
+      if (oldest !== undefined) this.#drop(oldest)
     }
     this.#textures.set(sig, tex)
-    return tex
   }
 
   // ── geometry (same transforms as wave-view / move-preview / tile-overlay) ──
