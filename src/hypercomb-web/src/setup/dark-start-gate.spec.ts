@@ -32,6 +32,14 @@ vi.mock('@hypercomb/core', () => ({
   },
   registerPoolMeaning: async () => 'f'.repeat(64),
   SignatureService: { sign: async () => 'e'.repeat(64) },
+  // The store's pool-head memo is an accelerator, never truth (store-cost,
+  // 2026-11-04), so a memo that remembers nothing is exact here.
+  MarkerHeadMemo: class MarkerHeadMemo {
+    peek(): undefined { return undefined }
+    note(): void { /* no-op */ }
+    forget(): void { /* no-op */ }
+    async head(): Promise<null> { return null }
+  },
 }))
 vi.mock('@hypercomb/shared/core', () => ({
   Store: class Store {
