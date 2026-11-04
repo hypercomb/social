@@ -2461,7 +2461,12 @@ export class ShowCellDrone extends Drone {
     const cascading = this.#heldRenders > 0
       && this.#heldAtKey === this.#locationKeyNow()
       && (now - this.#lastHeldAt) < ShowCellDrone.#CASCADE_QUIET_MS
-    if (this.#quietLanding || cascading) {
+    // A pass for a DIFFERENT location than the one painted is the participant
+    // walking somewhere: it must always paint (see #heldAtKey). The open window
+    // used to hold it too — no render, no render:cell-count, the overlay kept the
+    // LEAVING level's maps and the hive felt dead until the producer closed.
+    const onPaintedLevel = this.renderedLocationKey !== '' && this.#locationKeyNow() === this.renderedLocationKey
+    if ((this.#quietLanding && onPaintedLevel) || cascading) {
       if (this.#heldRenders === 0) this.#heldAtKey = this.#locationKeyNow()
       this.#heldRenders++
       this.#lastHeldAt = now
@@ -8610,6 +8615,9 @@ export class ShowCellDrone extends Drone {
 
   #buildCellCountPayload(cells: readonly Cell[]): {
     locationKey: string
+    /** False while renderedLocationKey is blank (room / secret / launcher
+     *  reset): locationKey then reads '/' only as a default, not a claim. */
+    locationKnown: boolean
     renderPassId: number
     count: number
     labels: string[]
@@ -8659,6 +8667,7 @@ export class ShowCellDrone extends Drone {
     // 'open' action and the user can't browse a peer's tree.
     return {
       locationKey: this.renderedLocationKey || '/',
+      locationKnown: this.renderedLocationKey !== '',
       renderPassId: this.#tileRenderPassId,
       count: cells.length,
       labels: cells.map(c => c.label),
