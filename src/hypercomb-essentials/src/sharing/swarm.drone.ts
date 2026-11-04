@@ -26,7 +26,7 @@
 // subscription on the same sig auto-triggers that paint when an event
 // arrives, so we don't need to dispatch a render signal ourselves.
 
-import { Drone, EffectBus, lifecyclePreimage, meetingPointKey, normalizeCell, poolAddresses, roomPreimage, SignatureService } from '@hypercomb/core'
+import { Drone, EffectBus, isSystemDirectoryName, lifecyclePreimage, meetingPointKey, normalizeCell, roomPreimage, SignatureService } from '@hypercomb/core'
 import { verifyEvent } from 'nostr-tools/pure'
 import { readTilePropertiesAt, withoutSubstrateImage } from '../editor/tile-properties.js'
 import { readOrderAt } from '../history/tile-order.js'
@@ -795,48 +795,17 @@ interface TileSourceRegistryLike {
 
 // Publish-exclusion FIREWALL for the OPFS-fallback walk. The user tree
 // root IS the OPFS root now, so an enumeration there sees — besides
-// tile dirs — legacy `__x__` drain sources, the legacy `hypercomb.io/`
-// content root, the i18n `overrides/` dir, lineage sigbags and every
+// tile dirs — retired drain sources, the legacy `hypercomb.io/` content
+// root, the i18n `overrides/` dir, lineage sigbags and every
 // sign(meaning) pool. None of those are tiles and none may ever
 // publish to peers as one.
-const SYSTEM_DIR_NAMES = new Set([
-  // LEGACY `__x__` drain sources — read-fallback dirs until their
-  // self-cleaning absorb removes them. The generic `__*__` test in
-  // isSystemDirName covers these too; listed for documentation.
-  '__dependencies__', '__bees__', '__layers__', '__location__',
-  '__history__', '__optimization__', '__resources__',
-  // Legacy pre-`__hive__` content root (drain source) and the legacy
-  // non-signed i18n dirs — the non-sig, non-underscore root residents,
-  // all self-cleaning drain sources now.
-  'hypercomb.io', 'overrides', 'translations',
-])
-
-// POOLS OF MEANING are signature-addressed — dir name = sign(meaning).
-// Every known pool is excluded: pool records never ride the swarm.
-// Sourced from the core POOL REGISTRY rather than a local list, which
-// went stale as new pools appeared (it was missing `registry`,
-// `viewport`, `authored` and `visual-optimization`). The registry
-// self-extends — addressing a pool registers it.
 //
-// The derivations are async, but the synchronous 64-hex rule in
-// isSystemDirName already excludes every sig-named dir (pools AND
-// lineage sigbags), so a walk racing these additions cannot leak a pool
-// onto the wire — this set is defence in depth + documentation.
-void poolAddresses().then((sigs) => { for (const sig of sigs) SYSTEM_DIR_NAMES.add(sig) })
-
+// The judgement is core's, not a list kept here: the retired names are
+// `LEGACY_DIRECTORIES`, a reserved pool word is `isReservedPoolWord` (the one
+// reserved-word list), and a 64-hex name is a lineage sigbag or a pool
+// (`isPoolAddress` answers for the pool half, the shape for both, and the shape
+// is synchronous so the publish walk cannot race the async registry).
 const SIG_DIR_RE = /^[0-9a-f]{64}$/
-
-function isSystemDirName(name: string): boolean {
-  if (!name) return true
-  if (SYSTEM_DIR_NAMES.has(name)) return true
-  // Legacy `__x__` dirs — drain sources only, never tiles.
-  if (name.startsWith('__') && name.endsWith('__')) return true
-  // Sig-named dirs: lineage sigbags and sign(meaning) pools live at the
-  // root as 64-hex names. Tiles are human-named — a 64-hex dir is never
-  // a publishable tile. Synchronous, so the publish walk cannot race
-  // the async pool derivations above.
-  return SIG_DIR_RE.test(name)
-}
 
 /** Deep-canonicalize a JSON-shaped value before signing. Object keys
  *  are sorted alphabetically recursively; arrays preserve their order
@@ -937,7 +906,7 @@ async function listLocalChildren(dir: FileSystemDirectoryHandle): Promise<string
       entries: () => AsyncIterable<[string, FileSystemHandle]>
     }).entries()) {
       if (h.kind !== 'directory') continue
-      if (isSystemDirName(name)) continue
+      if (isSystemDirectoryName(name)) continue
       out.push(name)
     }
   } catch { /* ignore — return what we have */ }
@@ -950,7 +919,7 @@ async function listLocalChildren(dir: FileSystemDirectoryHandle): Promise<string
 // presentation/editor import chain. Returns {} on missing/parse-fail
 // — callers treat absence as "no index field". NOTE: lineage sigbag
 // MARKER files are also named 0000/0001/… — safe here only because
-// isSystemDirName keeps sig-named dirs out of the walk entirely, so a
+// isSystemDirectoryName keeps sig-named dirs out of the walk entirely, so a
 // dir reaching this helper is always a tile dir.
 async function readChildProperties(cellDir: FileSystemDirectoryHandle): Promise<Record<string, unknown>> {
   let fh: FileSystemFileHandle

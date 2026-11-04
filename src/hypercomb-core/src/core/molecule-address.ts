@@ -27,6 +27,7 @@
 
 import { SignatureService } from './signature.service.js'
 import { canonicalizeLineageSegment } from './lineage-key.js'
+import { isLegacyDirectoryName, isTypedFolderName } from './legacy-dirs.js'
 import { BARE_WORD_POOL_MEANINGS, reservedColonScopes, spellPoolMeaning } from './pool-registry.js'
 
 /** A 64-hex signature — the only thing that may follow a colon besides a
@@ -280,4 +281,21 @@ export const validatePoolSpelling = (
   return looksPlural(word)
     ? { ok: true, form: 'molecule', advice: `a bare word is singular — it names what each member IS, so it reads at every level. Did you mean '${word.replace(/e?s$/, '')}'?` }
     : { ok: true, form: 'molecule' }
+}
+
+const SIGNATURE_NAME = /^[0-9a-f]{64}$/
+
+/**
+ * Is this root directory something the system owns — never a tile, never
+ * published as one? True for the empty name, a retired name or typed-folder
+ * shape (`legacy-dirs.ts`), a reserved pool word (`isReservedPoolWord`: the one
+ * reserved-word list), and any 64-hex name — a lineage sigbag or a
+ * `sign(meaning)` pool, the shape covering both so no pool needs listing and
+ * `isPoolAddress` (async) is never raced.
+ */
+export const isSystemDirectoryName = (name: string): boolean => {
+  if (!name) return true
+  if (isLegacyDirectoryName(name) || isTypedFolderName(name)) return true
+  if (SIGNATURE_NAME.test(name)) return true
+  return isReservedPoolWord(name)
 }

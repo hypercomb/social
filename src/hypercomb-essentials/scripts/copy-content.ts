@@ -26,6 +26,7 @@ import { fileURLToPath } from 'url'
 import { formatPoolEntry, packageClosure, poolEntries, retentionSet } from './retention.js'
 import { hostPackagesPool, poolAddress } from './pool-address.js'
 import { entryComplete, healEntry, sweepPartials, writeFileAtomic } from './atomic-copy.js'
+import { LEGACY_BUILD_DIRECTORIES, LEGACY_DIRECTORIES } from '../../hypercomb-core/src/core/legacy-dirs.js'
 import { TRANSFER_PACKS_MEANING } from '../../hypercomb-runtime/src/transfer-pack.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -60,8 +61,8 @@ const SIG_NAME = /^[0-9a-f]{64}$/i
 // at mirrored targets its provenance is unknown, and draining it into a
 // root that mirror-deletes would eventually destroy it — so it is left
 // untouched there.
-const LEGACY_BUILD_DIRS = ['__layers__', '__bees__', '__dependencies__']
-const LEGACY_RESOURCES_DIR = '__resources__'
+const LEGACY_BUILD_DIRS = LEGACY_BUILD_DIRECTORIES
+const LEGACY_RESOURCES_DIR = LEGACY_DIRECTORIES.resources
 const MANIFEST_FILE = 'manifest.json'
 
 // DISCOVERY IS A POOL OF MEANING (documentation/host-packages-pool.md). A host

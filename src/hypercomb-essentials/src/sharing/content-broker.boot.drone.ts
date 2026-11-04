@@ -71,7 +71,7 @@
 // self-cleaning drain removes it. Layer/resource paths use the
 // canonical Store APIs.
 
-import { Drone, EffectBus, isMetaEnvelope, registerPoolMeaning, roomPreimage } from '@hypercomb/core'
+import { Drone, EffectBus, LEGACY_DIRECTORIES, isMetaEnvelope, registerPoolMeaning, roomPreimage } from '@hypercomb/core'
 import { decorationClosureSigs } from './decoration-closure.js'
 import { adoptDescendantsOf } from './adopt-descendants.js'
 import { firstAvailableHost } from './first-available-host.js'
@@ -2867,7 +2867,7 @@ export class ContentBrokerDrone extends Drone {
     const root = this.#getStore()?.opfsRoot
     if (!root) return null
     try {
-      const legacy = await root.getDirectoryHandle('__dependencies__', { create: false })
+      const legacy = await root.getDirectoryHandle(LEGACY_DIRECTORIES.dependencies, { create: false })
       const handle = await legacy.getFileHandle(sig, { create: false })
       const file = await handle.getFile()
       return new Uint8Array(await file.arrayBuffer())
