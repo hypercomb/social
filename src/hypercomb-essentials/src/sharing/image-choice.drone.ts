@@ -42,7 +42,7 @@ import { canonicalPeerImageCandidates, type PeerImageCandidate, type PeerImagePr
 import { imageChoiceWriteTargets } from './image-choice-targets.js'
 import { markSeen, unseenNow } from './image-updates.js'
 import { readThumbnail, type ThumbnailStore } from '../presentation/tiles/thumbnails.js'
-import { divideBySheet, fillFrame, readFillSheet, type FillDivision } from '../presentation/tiles/fill-sprite.js'
+import { FILL_HEX_R, divideBySheet, fillFrame, readFillSheet, type FillDivision } from '../presentation/tiles/fill-sprite.js'
 
 type Axial = { q: number; r: number }
 
@@ -405,7 +405,8 @@ export class ImageChoiceDrone extends Drone {
     const store = this.#store() as ThumbnailStore | undefined
     void (async () => {
       const division = store?.getPool
-        ? await divideBySheet(store, wanted).catch(() => ({ sheets: new Map(), singles: wanted }) as FillDivision)
+        // The wall draws pointy-top hexagons, so it reads the pointy sheet of each pair.
+        ? await divideBySheet(store, wanted, 'point').catch(() => ({ sheets: new Map(), singles: wanted }) as FillDivision)
         : { sheets: new Map(), singles: wanted } as FillDivision
       for (const [sheet, members] of division.sheets) {
         void this.#cutSheet(store!, sheet, members).then(missed => {
@@ -436,7 +437,7 @@ export class ImageChoiceDrone extends Drone {
       for (const { sig, slot } of members) {
         this.#inflight.delete(sig)
         if (this.#textures.has(sig)) continue
-        const frame = fillFrame(slot)
+        const frame = fillFrame(slot, 'point')
         // A slot past the sheet's edge is a record that outran its sheet.
         if (frame.x + frame.width > base.width || frame.y + frame.height > base.height) { missed.push(sig); continue }
         this.#sheetCut.add(sig)
@@ -729,9 +730,15 @@ export class ImageChoiceDrone extends Drone {
     if (tex) {
       const sprite = new Sprite(tex)
       sprite.anchor.set(0.5)
-      const side = tileR * 1.75
-      const s = Math.max(side / (tex.width || side), side / (tex.height || side))
-      sprite.scale.set(s)
+      if (this.#sheetCut.has(c.previewSig)) {
+        // A sheet frame is a hexagon's bounding box whose corners hold its
+        // neighbours: the cell's own hexagon is drawn at the tile's radius,
+        // so the clip below (0.97 r) shows this cell and nothing beside it.
+        sprite.scale.set(tileR / FILL_HEX_R)
+      } else {
+        const side = tileR * 1.75
+        sprite.scale.set(Math.max(side / (tex.width || side), side / (tex.height || side)))
+      }
       const mask = new Graphics()
       mask.poly(this.#hexVerts(0, 0, tileR * 0.97), true)
       mask.fill({ color: 0xffffff })
