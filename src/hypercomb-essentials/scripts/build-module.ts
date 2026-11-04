@@ -114,9 +114,10 @@ const UNIT_EXTERNALS = [...PLATFORM_EXTERNALS, ...VENDOR_PACKAGES]
 // AxialService and LayoutService are namespace dependencies of these
 // artifacts, not bee artifacts themselves. The signed root layer publishes the
 // resolved sigs as `criticalBees`, an optimization hint; the runtime still
-// verifies readiness and can fall back to the full bee wave. (Runtimes today
-// accept a hint of exactly their three known classes — hypercomb-runtime
-// critical-bees.ts — and take the cold path for any other.)
+// verifies readiness and can fall back to the full bee wave. The runtime
+// keeps no list of its own: it accepts any non-empty hint made entirely of
+// enabled bees, and learns its warm start from the same `lane` mark
+// (hypercomb-runtime critical-bees.ts).
 //
 // `boot`: the boot lane's bees, named in the root as `bootBees`.
 const LANE_RE = /readonly\s+lane\s*(?::[^=]+)?=\s*['"]([^'"]+)['"]/

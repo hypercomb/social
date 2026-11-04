@@ -1138,10 +1138,10 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     try { localStorage.removeItem('hc:critical-bee-sigs') } catch { /* best-effort cache */ }
   }
 
-  /** Persist a complete sig→class mapping for render-critical bees so an
+  /** Persist the sigs of the bees that declare the first-paint lane so an
    *  older package with no signed hint can hit the fast path next boot.
-   *  Names come from iocKey (or constructor.name), never instance identity,
-   *  and the cache is bound to the exact installed package signature. */
+   *  The mark is read off the bee, never a class-name list, and the cache is
+   *  bound to the exact installed package signature. */
   static #updateLearnedCriticalSigs(beeCache: Map<string, Bee>): void {
     try {
       const packageSig = installedPackageSig()

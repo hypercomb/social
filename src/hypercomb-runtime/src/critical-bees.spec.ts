@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  FIRST_PAINT_LANE,
   RENDER_CRITICAL_IOC_GROUPS,
   learnedCriticalBeeSigs,
-  normalizeCriticalClassName,
   parseLearnedCriticalBeeSigs,
   renderCriticalStatus,
   serializeLearnedCriticalBeeSigs,
@@ -27,13 +27,6 @@ describe('critical bee hints', () => {
     expect(RENDER_CRITICAL_IOC_GROUPS.flat()).not.toContain('@diamondcoreprocessor.com/_ShowCellDrone')
   })
 
-  it('normalizes qualified, legacy-short, and collision-renamed class names', () => {
-    expect(normalizeCriticalClassName('@diamondcoreprocessor.com/PixiHostWorker')).toBe('PixiHostWorker')
-    expect(normalizeCriticalClassName('@BackgroundDrone')).toBe('BackgroundDrone')
-    expect(normalizeCriticalClassName('@diamondcoreprocessor.com/_ShowCellDrone')).toBe('ShowCellDrone')
-    expect(normalizeCriticalClassName(null)).toBe('')
-  })
-
   it('canonicalizes a valid hint and verifies every member is enabled', () => {
     expect(validateCriticalBeeHints([`${SHOW.toUpperCase()}.js`, ` ${PIXI} `, BACKGROUND], ENABLED))
       .toEqual([PIXI, SHOW, BACKGROUND].sort())
@@ -42,7 +35,6 @@ describe('critical bee hints', () => {
   it.each([
     ['a non-array value', PIXI],
     ['an empty list', []],
-    ['a partial list', [PIXI, SHOW]],
     ['a non-string member', [PIXI, SHOW, 7]],
     ['an invalid signature', [PIXI, SHOW, 'not-a-signature']],
     ['a duplicate after canonicalization', [PIXI, SHOW, PIXI.toUpperCase()]],
@@ -85,37 +77,41 @@ describe('render-critical readiness', () => {
 })
 
 describe('learned critical bees', () => {
+  // A bee is critical because IT says so (`readonly lane = 'first-paint'`) —
+  // not because its class name is on a list here.
+  const marked = (iocKey: string) => ({ iocKey, lane: FIRST_PAINT_LANE })
   const completeEntries = [
-    [PIXI, { iocKey: '@diamondcoreprocessor.com/PixiHostWorker' }],
-    [SHOW, { iocKey: '@diamondcoreprocessor.com/_ShowCellDrone' }],
-    [BACKGROUND, { iocKey: '@diamondcoreprocessor.com/BackgroundDrone' }],
-    [OTHER, { iocKey: '@diamondcoreprocessor.com/UnrelatedDrone' }],
+    [PIXI, marked('@diamondcoreprocessor.com/PixiHostWorker')],
+    [SHOW, marked('@diamondcoreprocessor.com/_ShowCellDrone')],
+    [BACKGROUND, marked('@diamondcoreprocessor.com/BackgroundDrone')],
+    [OTHER, { iocKey: '@diamondcoreprocessor.com/UnrelatedDrone', lane: 'boot' }],
   ] as const
 
-  it('learns exactly the three loadable critical classes', () => {
+  it('learns every bee that declares the first-paint lane, and only those', () => {
     expect(learnedCriticalBeeSigs(completeEntries)).toEqual([PIXI, SHOW, BACKGROUND].sort())
   })
 
-  it('falls back to constructor names when a loaded product has no iocKey', () => {
+  it('needs no list: a fourth marked bee is learned, an unmarked class of the same name is not', () => {
+    const FOURTH = sig('1')
+    expect(learnedCriticalBeeSigs([...completeEntries, [FOURTH, marked('@x.com/AnythingAtAll')]]))
+      .toEqual([PIXI, SHOW, BACKGROUND, FOURTH].sort())
     class PixiHostWorker {}
-    class ShowCellDrone {}
-    class BackgroundDrone {}
-    expect(learnedCriticalBeeSigs([
-      [PIXI, new PixiHostWorker()],
-      [SHOW, new ShowCellDrone()],
-      [BACKGROUND, new BackgroundDrone()],
-    ])).toEqual([PIXI, SHOW, BACKGROUND].sort())
+    expect(learnedCriticalBeeSigs([[PIXI, new PixiHostWorker()], [OTHER, { lane: 'boot' }]])).toBeNull()
   })
 
-  it('rejects a partial learned mapping', () => {
-    expect(learnedCriticalBeeSigs(completeEntries.slice(0, 2))).toBeNull()
+  it('learns nothing from bees with no mark, or from a bee whose lane throws', () => {
+    expect(learnedCriticalBeeSigs([[PIXI, {}], [SHOW, null], [BACKGROUND, 'x']])).toBeNull()
+    const hostile = { get lane(): string { throw new Error('no') } }
+    expect(learnedCriticalBeeSigs([[PIXI, hostile]])).toBeNull()
   })
 
-  it('rejects an ambiguous class mapping', () => {
-    expect(learnedCriticalBeeSigs([
-      ...completeEntries,
-      [sig('f'), { iocKey: '@diamondcoreprocessor.com/PixiHostWorker' }],
-    ])).toBeNull()
+  it('rejects a list holding a marked bee with a malformed signature', () => {
+    expect(learnedCriticalBeeSigs([...completeEntries, ['nope', marked('@x.com/Bad')]])).toBeNull()
+  })
+
+  it('counts a bee once however many times it is offered', () => {
+    expect(learnedCriticalBeeSigs([...completeEntries, [PIXI, marked('@diamondcoreprocessor.com/PixiHostWorker')]]))
+      .toEqual([PIXI, SHOW, BACKGROUND].sort())
   })
 
   it('round-trips a versioned record bound to the active package', () => {
@@ -135,13 +131,13 @@ describe('learned critical bees', () => {
     ['unknown record version', JSON.stringify({ version: 2, packageSig: PACKAGE, sigs: [PIXI, SHOW, BACKGROUND] }), PACKAGE, ENABLED],
     ['a different package', serializeLearnedCriticalBeeSigs(PACKAGE, [PIXI, SHOW, BACKGROUND]), sig('f'), ENABLED],
     ['a disabled learned bee', serializeLearnedCriticalBeeSigs(PACKAGE, [PIXI, SHOW, BACKGROUND]), PACKAGE, [PIXI, SHOW]],
-    ['a partial learned list', JSON.stringify({ version: 1, packageSig: PACKAGE, sigs: [PIXI, SHOW] }), PACKAGE, ENABLED],
+    ['an empty learned list', JSON.stringify({ version: 1, packageSig: PACKAGE, sigs: [] }), PACKAGE, ENABLED],
   ])('rejects %s', (_label, raw, packageSig, enabled) => {
     expect(parseLearnedCriticalBeeSigs(raw, packageSig, enabled)).toBeNull()
   })
 
   it('refuses to serialize malformed or partial learned data', () => {
-    expect(() => serializeLearnedCriticalBeeSigs(PACKAGE, [PIXI, SHOW])).toThrow(TypeError)
+    expect(() => serializeLearnedCriticalBeeSigs(PACKAGE, [])).toThrow(TypeError)
     expect(() => serializeLearnedCriticalBeeSigs('bad-package', [PIXI, SHOW, BACKGROUND])).toThrow(TypeError)
     expect(() => serializeLearnedCriticalBeeSigs(PACKAGE, [PIXI, PIXI, BACKGROUND])).toThrow(TypeError)
   })
