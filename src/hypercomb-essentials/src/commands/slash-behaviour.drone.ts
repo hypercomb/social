@@ -296,7 +296,7 @@ class HelpProvider implements SlashBehaviourProvider {
   ]
 
   execute(): void {
-    EffectBus.emit('keymap:invoke', { cmd: 'ui.shortcutSheet', binding: null, event: null })
+    EffectBus.emitTransient('keymap:invoke', { cmd: 'ui.shortcutSheet', binding: null, event: null })
   }
 }
 

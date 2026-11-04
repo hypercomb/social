@@ -471,14 +471,14 @@ export class LayerDeckDrone extends Drone {
       glyph: 'undo',
       labelKey: 'controls.undo',
       fallback: 'undo',
-      run: () => { EffectBus.emit('keymap:invoke', { cmd: 'history.undo' }) },
+      run: () => { EffectBus.emitTransient('keymap:invoke', { cmd: 'history.undo' }) },
     })
     chips.push({
       action: 'redo',
       glyph: 'redo',
       labelKey: 'controls.redo',
       fallback: 'redo',
-      run: () => { EffectBus.emit('keymap:invoke', { cmd: 'history.redo' }) },
+      run: () => { EffectBus.emitTransient('keymap:invoke', { cmd: 'history.redo' }) },
     })
     return chips
   }

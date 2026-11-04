@@ -303,7 +303,7 @@ export class UseLiveRelayQueenBee {
   /** The same guarded toggle the keymap rides — with a complete zone it
    *  flips public and resyncs. */
   #togglePublic(): void {
-    EffectBus.emit('keymap:invoke', { cmd: 'mesh.togglePublic', binding: null, event: null })
+    EffectBus.emitTransient('keymap:invoke', { cmd: 'mesh.togglePublic', binding: null, event: null })
   }
 
   /** `door` is a toast action — the way to a window this word only offers. */

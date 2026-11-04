@@ -122,7 +122,7 @@ export class CommandPaletteDrone extends EventTarget {
 
     // dispatch the command
     if (item.binding) {
-      EffectBus.emit('keymap:invoke', { cmd: item.id, binding: item.binding, event: null })
+      EffectBus.emitTransient('keymap:invoke', { cmd: item.id, binding: item.binding, event: null })
     }
   }
 

@@ -222,7 +222,7 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
   // Reuse the keyboard command path so persistence, rendering and layout
   // history stay identical whether the participant clicks here or presses J.
   readonly toggleOrientation = (): void => {
-    EffectBus.emit('keymap:invoke', { cmd: 'render.toggleOrientation' })
+    EffectBus.emitTransient('keymap:invoke', { cmd: 'render.toggleOrientation' })
   }
 
   /** ANNOTATE THE SCREEN — the drawing sheet over the whole app. It reads the
@@ -238,12 +238,12 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
 
   readonly undo = (): void => {
     if (!this.canUndo()) return
-    EffectBus.emit('keymap:invoke', { cmd: 'history.undo' })
+    EffectBus.emitTransient('keymap:invoke', { cmd: 'history.undo' })
   }
 
   readonly redo = (): void => {
     if (!this.canRedo()) return
-    EffectBus.emit('keymap:invoke', { cmd: 'history.redo' })
+    EffectBus.emitTransient('keymap:invoke', { cmd: 'history.redo' })
   }
 
   // ── selection verbs (shown only while tiles are selected) ─

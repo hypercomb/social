@@ -376,12 +376,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Rotate the grid: point-top ⇄ flat-top. In lane mode the lanes follow it —
    *  the rail drone repacks for whichever orientation the hive is in. */
   readonly rotateHexes = (): void => {
-    EffectBus.emit('keymap:invoke', { cmd: 'render.toggleOrientation' })
+    EffectBus.emitTransient('keymap:invoke', { cmd: 'render.toggleOrientation' })
   }
   /** Walk the ordinary arrangements (Rectangle, Flowers, saved sets) — the
    *  same `a` cycle the desktop has, which touch could not reach. */
   readonly cycleArrangement = (): void => {
-    EffectBus.emit('keymap:invoke', { cmd: 'sequence.cycle' })
+    EffectBus.emitTransient('keymap:invoke', { cmd: 'sequence.cycle' })
   }
   readonly toggleLanes = (): void => {
     EffectBus.emit('lanes:toggle', {})

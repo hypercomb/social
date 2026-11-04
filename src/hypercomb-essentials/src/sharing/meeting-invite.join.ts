@@ -358,7 +358,7 @@ export async function joinMeetingPlace(stored: MeetingInviteBundle & MeetingPoin
   // THE ONE DOOR in: the same toggle the control, the shortcut and the
   // `join` word use (its zone guard lives in runtime-initializer). Only
   // when this tab is not already a member — a toggle would make it leave.
-  if (!isJoinedHere()) EffectBus.emit('keymap:invoke', { cmd: 'mesh.togglePublic', binding: null, event: null })
+  if (!isJoinedHere()) EffectBus.emitTransient('keymap:invoke', { cmd: 'mesh.togglePublic', binding: null, event: null })
   // ARRIVE = JOIN, AT THE ROOM'S DOOR (documentation/swarm-pools.md). On the
   // host's swarm door a room is a shared notes ledger, so arriving says where
   // to write — and opens nothing by itself: a window opens only from its own

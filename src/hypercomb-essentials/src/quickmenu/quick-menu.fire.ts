@@ -34,7 +34,10 @@ export function fireQuickMenuSlot(slot: QuickMenuSlot, subject?: string): void {
   if (action.kind === 'effect') {
     // The tile an alt menu was raised over rides along, for verbs that act on it.
     const payload = (action.payload ?? {}) as Record<string, unknown>
-    EffectBus.emit(action.effect, subject ? { ...payload, subject } : payload)
+    const body = subject ? { ...payload, subject } : payload
+    // a chord is a command, not a state: never replayed to a late listener
+    if (action.effect === 'keymap:invoke') EffectBus.emitTransient(action.effect, body)
+    else EffectBus.emit(action.effect, body)
     return
   }
   if (action.kind === 'key') {

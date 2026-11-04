@@ -211,7 +211,7 @@ export class KeyMapService extends EventTarget {
           matched = true
 
           e.preventDefault()
-          EffectBus.emit('keymap:invoke', { cmd: binding.cmd, binding, event: e })
+          EffectBus.emitTransient('keymap:invoke', { cmd: binding.cmd, binding, event: e })
         } else {
           // advance sequence
           this.#sequenceState.set(binding.cmd, step + 1)
