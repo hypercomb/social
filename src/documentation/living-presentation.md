@@ -726,13 +726,24 @@ it can be joined by others, or rebuilt, whenever that helps.
 Audited 2026-11-03 against this plan's own rules (jwize: "fix all three and
 replant"); the tree lives in `scripts/bridge/living-presentation/tree.cjs`.
 
-- **Two trees, because they are two relations.** `presentation` is what the
-  reader is shown: the six values, and under each value the ideas that show
-  it. `presenter` is what shows it: the primitive marker, the same-shape
-  check, the lift, and the cube viewer with its points, faces and slices. The
-  machinery used to sit among the ideas, so a path read "simple has a
-  marker"; now every layer keeps one relation and every path reads aloud.
-  Only `presentation` is published.
+- **Two trees, because they are two relations.** `protocol` is what the
+  reader is shown: the protocol, its six values, and under each value the
+  ideas that show it. `presenter` is what shows it: the primitive marker, the
+  same-shape check, the lift, and the cube viewer with its points, faces and
+  slices. The machinery used to sit among the ideas, so a path read "simple
+  has a marker"; now every layer keeps one relation and every path reads
+  aloud. Only `protocol` is published. (A third tree, `road`, carries the
+  tour's question and its close; see "The tour is the standard".)
+- **The root is `protocol`.** jwize, 2026-11-04: "the root tile has to
+  change to protocol instead of presentation"; "unpublish the presentation
+  and we use the other from now on". The root tile is the protocol itself,
+  and its scene is the tour's *An open protocol*, so the name and the first
+  words agree. The earlier root, `presentation`, is retired the way every
+  earlier planting is (`retired.cjs` `roots`): `plant.cjs` forgets its marker
+  at `/` with `trait ~ presentation`, so the tile stays one trait away with
+  its history, and withdraws it from every domain it publishes to with
+  `publish /presentation off <domain>` before publishing `protocol` there.
+  Nothing is deleted; the one address serves the one presentation.
 - **No word twice.** A name is one molecule hive-wide, so two tiles named
   `cube` would feed one molecule. The opening's sixth move is `fill` ("the
   points fill a cube"), and `cube` is the viewer alone.
@@ -764,10 +775,10 @@ every page, and its 25 scenes are folded into the tiles they explain:
   the caption, and its recorded voice. The tile's block adds only what the
   scene does not say: pictures from a running hive, a part to try, the source
   it explains. `blocks/tour.cjs` holds the mapping (every scene on exactly one
-  tile; `presentation` carries the opening, scene 1, the six values hold
-  scenes 3 to 19, and the `road` tree carries the protocol, scene 2, and the
-  road ahead, 20 to 25), and `blocks/build.cjs` refuses a scene tile whose
-  block would say a headline or narration again.
+  tile; the root, `protocol`, carries scene 2, *An open protocol*; the six
+  values hold scenes 3 to 19; and the `road` tree carries the opening
+  question, scene 1, and the road ahead, 20 to 25), and `blocks/build.cjs`
+  refuses a scene tile whose block would say a headline or narration again.
 - **Every tile is an interactive video of its concept.** jwize, 2026-11-04:
   "every tile is an interactive video that shows in detail the concept. If
   too much we break it apart into its elements the hypercomb way." A page
