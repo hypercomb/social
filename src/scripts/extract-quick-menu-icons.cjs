@@ -34,13 +34,13 @@ const GRID = 24
 // cells (back, cancel) and the empty-label stand-in. Add a name here when a
 // slot gains a new icon, then re-run the script.
 const NAMES = [
-  'terminal', 'folder_open', 'sell', 'history', 'account_tree', 'help', 'layers',
+  'terminal', 'folder_open', 'sell', 'history', 'account_tree', 'layers',
   'center_focus_strong', 'slideshow', 'palette', 'dashboard', 'view_module', 'web',
   'school', 'play_arrow', 'skip_next', 'stop', 'view_list', 'add', 'save', 'build',
   'hexagon', 'chevron_right', 'chevron_left', 'skip_previous', 'check', 'check_circle',
   'select_all', 'edit', 'category', 'hub', 'search', 'explore', 'share', 'cloud_upload',
   'sync', 'key', 'person_add', 'notifications', 'visibility_off', 'delete', 'bookmark',
-  'arrow_back', 'close', 'more_horiz',
+  'arrow_back', 'close', 'more_horiz', 'tips_and_updates',
 ]
 
 // ── woff2 container ────────────────────────────────────────────────────

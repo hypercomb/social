@@ -73,7 +73,7 @@ const ROOT: QuickMenuDefinition = {
     { direction: 'southeast', label: 'tags', labelKey: 'quickmenu.tags', icon: 'sell', action: { kind: 'command', command: 'tags' } },
     { direction: 'southwest', label: 'history', labelKey: 'quickmenu.history', icon: 'history', action: { kind: 'command', command: 'history' } },
     { direction: 'west', label: 'tree', labelKey: 'quickmenu.tree', icon: 'account_tree', action: { kind: 'command', command: 'tree' } },
-    { direction: 'northwest', label: 'help', labelKey: 'quickmenu.help', icon: 'help', action: { kind: 'command', command: 'help' } },
+    { direction: 'northwest', label: 'help', labelKey: 'quickmenu.help', icon: 'tips_and_updates', action: { kind: 'command', command: 'help' } },
     // The one nested ring in the shipped set — proves the descend gesture
     // and keeps the surface verbs off the root.
     { direction: 'northeast', label: 'view', labelKey: 'quickmenu.view', icon: 'layers', action: { kind: 'menu', menu: 'root:view' } },
@@ -108,7 +108,7 @@ const WORKFLOW: QuickMenuDefinition = {
     { direction: 'southeast', label: 'stop', labelKey: 'quickmenu.stop', icon: 'stop', action: { kind: 'effect', effect: 'workflow:run-stop', payload: {} } },
     { direction: 'southwest', label: 'list', labelKey: 'quickmenu.list', icon: 'view_list', action: { kind: 'command', command: 'workflow', args: 'list' } },
     { direction: 'west', label: 'tree', labelKey: 'quickmenu.tree', icon: 'account_tree', action: { kind: 'command', command: 'tree' } },
-    { direction: 'northwest', label: 'help', labelKey: 'quickmenu.help', icon: 'help', action: { kind: 'command', command: 'help' } },
+    { direction: 'northwest', label: 'help', labelKey: 'quickmenu.help', icon: 'tips_and_updates', action: { kind: 'command', command: 'help' } },
     { direction: 'northeast', label: 'new', labelKey: 'quickmenu.new', icon: 'add', action: { kind: 'effect', effect: 'workflow:view-open', payload: {} } },
   ],
 }
@@ -131,7 +131,7 @@ const WEBSITE: QuickMenuDefinition = {
     { direction: 'southeast', label: 'build', labelKey: 'quickmenu.build', icon: 'build', action: { kind: 'command', command: 'website', args: 'build' } },
     { direction: 'southwest', label: 'list', labelKey: 'quickmenu.list', icon: 'view_list', action: { kind: 'command', command: 'website', args: 'list' } },
     { direction: 'west', label: 'tree', labelKey: 'quickmenu.tree', icon: 'account_tree', action: { kind: 'command', command: 'tree' } },
-    { direction: 'northwest', label: 'help', labelKey: 'quickmenu.help', icon: 'help', action: { kind: 'command', command: 'help' } },
+    { direction: 'northwest', label: 'help', labelKey: 'quickmenu.help', icon: 'tips_and_updates', action: { kind: 'command', command: 'help' } },
     { direction: 'northeast', label: 'new', labelKey: 'quickmenu.new', icon: 'add', action: { kind: 'command', command: 'website', args: 'new' } },
   ],
 }
@@ -152,7 +152,7 @@ const SLIDES: QuickMenuDefinition = {
     { direction: 'northeast', label: 'first', labelKey: 'quickmenu.first', icon: 'skip_previous', action: { kind: 'key', key: 'Home' } },
     { direction: 'southeast', label: 'last', labelKey: 'quickmenu.last', icon: 'skip_next', action: { kind: 'key', key: 'End' } },
     { direction: 'southwest', label: 'theme', labelKey: 'quickmenu.theme', icon: 'palette', action: { kind: 'command', command: 'theme' } },
-    { direction: 'northwest', label: 'help', labelKey: 'quickmenu.help', icon: 'help', action: { kind: 'command', command: 'help' } },
+    { direction: 'northwest', label: 'help', labelKey: 'quickmenu.help', icon: 'tips_and_updates', action: { kind: 'command', command: 'help' } },
   ],
 }
 
@@ -232,7 +232,7 @@ const SELECTION_GO: QuickMenuDefinition = {
     { ...cmd('southeast', 'history', 'history', 'quickmenu.history'), icon: 'history' },
     { ...cmd('southwest', 'collections', 'collections', 'quickmenu.collections'), icon: 'folder_open' },
     { ...cmd('west', 'tree', 'tree', 'quickmenu.tree'), icon: 'account_tree' },
-    { ...cmd('northwest', 'help', 'help', 'quickmenu.help'), icon: 'help' },
+    { ...cmd('northwest', 'help', 'help', 'quickmenu.help'), icon: 'tips_and_updates' },
     { ...cmd('northeast', 'find', 'find'), icon: 'search' },
   ],
 }

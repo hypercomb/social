@@ -9,8 +9,8 @@
 // LAYERED: concentric hexagons stepping through the same ramp, outermost first.
 // The pour lip is the hexagon clipped to the region above its wavy line, in
 // bands that step through the lip's gradient; the two teardrops are frozen
-// (the ring in Pixi never animates — only the shader's lit tile moves). No
-// icons: the word is the identity here, set by the layer.
+// (the ring in Pixi never animates — only the shader's lit tile moves). The
+// icon and the word above the honey are the layer's.
 //
 // Everything is drawn in the hexagon's own coordinates, centred on the origin,
 // at `radius` (the true circumradius). The numbers in quick-menu.honey.ts are

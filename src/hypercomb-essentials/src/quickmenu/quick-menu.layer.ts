@@ -8,7 +8,7 @@
 // you point at an option. Nothing here hides the pointer or takes a lock.
 
 import { EffectBus } from '@hypercomb/core'
-import { Container, Graphics, Point, Text, TextStyle, type Application, type Sprite, type Texture } from 'pixi.js'
+import { Container, Graphics, GraphicsPath, Point, Text, TextStyle, type Application, type Sprite, type Texture } from 'pixi.js'
 import { containerScreenScale, screenTextResolution } from '../presentation/grid/screen-text-resolution.js'
 import { DEFAULT_HEX_GEOMETRY, type HexGeometry } from '../presentation/grid/hex-geometry.js'
 import { drawsAsGlyph } from '../commands/material-glyph.js'
@@ -35,6 +35,7 @@ import {
   sheenAlpha,
   sheenOffset,
   sheenZones,
+  slotGlyph,
   slotIndexOf,
   type TileMotion,
 } from './quick-menu.honey.js'
@@ -76,6 +77,14 @@ function prefersReducedMotion(): boolean {
 
 const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now())
 
+/** A glyph's path data parsed once, holes kept (the ring's drawings are outlines). */
+const glyphPaths = new Map<string, GraphicsPath>()
+function glyphPath(d: string): GraphicsPath {
+  let path = glyphPaths.get(d)
+  if (!path) glyphPaths.set(d, path = new GraphicsPath(d, true))
+  return path
+}
+
 type LabelOf =(slot: { label: string; labelKey?: string }) => string
 
 type PendingMenu = {
@@ -115,6 +124,8 @@ type SlotView = {
   /** The honey, or with a crafted background only its rim and lit halo. */
   readonly hex: Graphics
   readonly text: Text
+  /** The slot's icon above its word, in the word's ink, when the ring draws one. */
+  readonly icon: Graphics | null
   readonly back: boolean
   /** The slot's honey seed: the same slot looks the same on every open. */
   readonly seed: number
@@ -440,7 +451,9 @@ export class QuickMenuLayer {
     root.visible = true
 
     const metrics = this.#metrics()
-    const font = this.#font(metrics.radius)
+    const k = metrics.radius / HEX_RADIUS
+    const font = this.#font(metrics.radius, LAYOUT.textOnly.labelSize)
+    const iconFont = this.#font(metrics.radius, LAYOUT.ring.labelSize)
     const lit = this.#lit
     // The six directions are the options. The tile already occupies the centre,
     // so the centre slot is not drawn on top of it.
@@ -458,15 +471,26 @@ export class QuickMenuLayer {
       const node = new Container()
       node.position.set(unit.x * metrics.reach, unit.y * metrics.reach)
       const hex = new Graphics()
+      // The icon above the word, as the DOM ring wears it; a name the ring has
+      // no drawing for leaves the word alone, centred.
+      const glyph = slotGlyph(isBack ? backIcon : slot!.icon)
+      const icon = glyph ? new Graphics().path(glyphPath(glyph)).fill(0xffffff) : null
+      if (icon) {
+        icon.scale.set(k * LAYOUT.ring.iconScale)
+        icon.position.set(LAYOUT.ring.iconX * k, LAYOUT.ring.iconY * k)
+      }
+      // Each word its own style: the ink changes per tile when one is lit.
+      const style = (icon ? iconFont : font).clone()
       const text = new Text({
         text: word,
-        style: font,
+        style,
         resolution: this.#textResolution(),
         roundPixels: true,
       })
       text.anchor.set(0.5)
-      // The word alone (no glyph here), set to the width the ring gives a bare word.
-      const max = (metrics.radius * LAYOUT.usableText) / HEX_RADIUS
+      // LAYOUT's label y is a baseline; the anchor is the middle of the line.
+      if (icon) text.position.set(0, (LAYOUT.ring.labelY - LAYOUT.ring.labelSize * 0.35) * k)
+      const max = k * (icon ? LAYOUT.usableIcon : LAYOUT.usableText)
       if (text.width > max && text.width > 0) text.scale.set(max / text.width)
       const variation = backgroundFor(pending.definition.name, direction)
       const art = isBack ? null : this.#artFor(variation, index, metrics.radius, metrics.flat)
@@ -476,9 +500,10 @@ export class QuickMenuLayer {
         node.addChild(art.sheen)
       }
       node.addChild(hex)
+      if (icon) node.addChild(icon)
       node.addChild(text)
       root.addChild(node)
-      this.#slots.set(direction, { direction, node, hex, text, back: isBack, seed, index, art })
+      this.#slots.set(direction, { direction, node, hex, text, icon, back: isBack, seed, index, art })
       this.#style(direction, direction === lit)
     }
     this.#place()
@@ -580,7 +605,9 @@ export class QuickMenuLayer {
     } else {
       drawHoney(view.hex, this.#metrics().radius, this.#flat, { lit: on, back: view.back }, view.seed)
     }
-    view.text.style.fill = view.back ? HONEY.ink.back : on ? HONEY.ink.lit : HONEY.ink.rest
+    const ink = view.back ? HONEY.ink.back : on ? HONEY.ink.lit : HONEY.ink.rest
+    view.text.style.fill = ink
+    if (view.icon) view.icon.tint = ink
   }
 
   /** A crafted background as a Sprite masked to the hexagon, with its slow
@@ -698,15 +725,15 @@ export class QuickMenuLayer {
     this.#runMotion()
   }
 
-  /** The word alone, as the ring sets a bare word: 13 px at R = 46, weight 400
-   *  (the default face fakes anything bolder). */
-  #font(radius: number): TextStyle {
+  /** A slot's word at `size` px at R = 46 (LAYOUT: 13 alone, 11.5 under an
+   *  icon), weight 400 (the default face fakes anything bolder). */
+  #font(radius: number, size: number): TextStyle {
     const family = typeof document !== 'undefined'
       ? getComputedStyle(document.documentElement).getPropertyValue('--hc-font').trim()
       : ''
     return new TextStyle({
       fontFamily: family || 'system-ui, sans-serif',
-      fontSize: Math.max(8, Math.round((radius * LAYOUT.textOnly.labelSize) / HEX_RADIUS)),
+      fontSize: Math.max(8, Math.round((radius * size) / HEX_RADIUS)),
       fontWeight: '400',
       fill: HONEY.ink.rest,
       align: 'center',

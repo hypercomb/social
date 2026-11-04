@@ -40,14 +40,21 @@ vi.mock('pixi.js', () => {
     circle() { return this }
     roundRect() { return this }
     ellipse() { return this }
+    glyph: unknown = null
+    tint: unknown = undefined
+    path(p: unknown) { this.glyph = p; return this }
   }
   class Text extends Node {
     style: Record<string, unknown>
     constructor(o: { style?: Record<string, unknown> }) { super(); this.style = o?.style ?? {} }
   }
-  class TextStyle { constructor(o: Record<string, unknown>) { Object.assign(this, o) } }
+  class TextStyle {
+    constructor(o: Record<string, unknown>) { Object.assign(this, o) }
+    clone() { return new TextStyle({ ...(this as Record<string, unknown>) }) }
+  }
+  class GraphicsPath { constructor(readonly d: string, readonly holes: boolean) {} }
   class Point { x = 0; y = 0 }
-  return { Container, Graphics, Text, TextStyle, Point }
+  return { Container, Graphics, GraphicsPath, Text, TextStyle, Point }
 })
 
 // the honey drawing itself is covered by quick-menu.honey-graphics.spec.ts; the
@@ -203,6 +210,33 @@ describe('the crafted backgrounds', () => {
     expect(spritesOf(root).filter(s => s.texture.startsWith('lit-'))).toHaveLength(1)
     l.highlight(null)
     expect(spritesOf(root).every(s => s.texture.startsWith('rest-'))).toBe(true)
+  })
+
+  it("the Pixi ring wears each option's icon above its word, in the word's ink", () => {
+    const container = new Container()
+    const l = new QuickMenuLayer()
+    EffectBus.emit('render:host-ready', { container })
+    l.place(0, 0)
+    l.show(ROOT, labelOf, null, 'back')
+    type Kid = { glyph?: { d: string; holes: boolean } | null; tint?: unknown; style?: { fill?: unknown }; position: { y: number } }
+    const root = (container as unknown as { children: { children: { children: Kid[] }[] }[] }).children.at(-1)!
+    const tiles = root.children.map(node => ({
+      icon: node.children.find(c => c.glyph)!,
+      word: node.children.find(c => c.style)!,
+    }))
+    expect(tiles).toHaveLength(6)
+    for (const { icon, word } of tiles) {
+      expect(icon, 'every option of the root ring has a drawing').toBeTruthy()
+      expect(icon.glyph!.holes).toBe(true)
+      expect(icon.position.y).toBeLessThan(0)
+      expect(word.position.y).toBeGreaterThan(0)
+      expect(icon.tint).toBe(word.style!.fill)
+    }
+    // each word has its own style, so lighting one inks only that one
+    l.highlight('east')
+    const fills = tiles.map(t => t.word.style!.fill)
+    expect(new Set(fills).size).toBe(2)
+    expect(tiles.map(t => t.icon.tint)).toEqual(fills)
   })
 })
 

@@ -427,7 +427,7 @@ describe('label fit', () => {
 /** The iconMap: the glyph each WORD wears. Data, in the order the design states it. */
 const ICON_MAP: Readonly<Record<string, string>> = {
   command: 'terminal', collections: 'folder_open', tags: 'sell', history: 'history', tree: 'account_tree',
-  help: 'help', view: 'layers', fit: 'center_focus_strong', present: 'slideshow', theme: 'palette',
+  help: 'tips_and_updates', view: 'layers', fit: 'center_focus_strong', present: 'slideshow', theme: 'palette',
   layout: 'dashboard', arrange: 'view_module', website: 'web', tutor: 'school', run: 'play_arrow',
   step: 'skip_next', stop: 'stop', list: 'view_list', new: 'add', save: 'save', build: 'build',
   exit: 'hexagon', next: 'chevron_right', previous: 'chevron_left', first: 'skip_previous',
