@@ -32,12 +32,21 @@ line stands up its fourth stance, `$`, showing who sent it and its lines, and
 a toast says a call is waiting. You answer on the command line
 ([command-line-reference.md](command-line-reference.md#external-stance--a-call-from-outside-answered-here)):
 
-- **Enter** opens a new conversation on the layer you stand in, starting with
-  the request, and says each sentence through the machine door
+- **Enter** writes a new conversation on the layer you stand in, starting
+  with the request, and says each sentence through the machine door
   (`command-line:remote-submit`). Every word is judged against your grants
   (`grant`) exactly as any machine's line is, so pressing Enter lets the call
   be said; it does not let it say more than a machine may. Each sentence's
   verdict is written into the conversation as it is said.
+- **The run is watched in the hive, not in the chat.** jwize, 2026-11-04:
+  "when we are planting we shouldn't open the chat. That is confusing. Then
+  we can just see the files processing instead of getting taken away." The
+  conversation is written but never opened for you: each sentence's place in
+  the run and its verdict appear in the activity log as it is said
+  (`agent 12/125: /trait simple organized … → ran /trait`), you stay on the
+  layers the call is building, and a toast at the end says how many lines
+  were said and how many refused. Open the conversation yourself when you
+  want the record.
 - **Esc** declines. Nothing is said, and the request and the decline are
   written into a new conversation on this layer.
 

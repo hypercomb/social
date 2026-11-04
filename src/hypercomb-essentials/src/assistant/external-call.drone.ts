@@ -9,9 +9,15 @@
 //
 // EITHER WAY IT IS WRITTEN DOWN, in a new conversation on the layer the
 // participant stands in: first the request, as who asked and the lines; then,
-// on Enter, each line's verdict as it is said, and the conversation opens so
-// the run is watched where it happens. A decline is written there too, and
-// nothing opens.
+// on Enter, each line's verdict as it is said. A decline is written there too.
+//
+// THE RUN IS WATCHED IN THE HIVE, NOT IN THE CHAT (jwize, 2026-11-04: "when we
+// are planting we shouldn't open the chat. That is confusing. Then we can just
+// see the files processing instead of getting taken away"). Nothing opens: each
+// line's place in the run and its verdict go to the activity log as it is said,
+// the participant stays on the layers the lines are building, and a toast at
+// the end says how the run went and where it is written. The conversation is
+// there to open, never opened for them.
 //
 // WHEN IT RUNS, EVERY LINE GOES THROUGH THE MACHINE DOOR (`REMOTE_SUBMIT`),
 // never the participant's own: each word is judged against the participant's
@@ -133,6 +139,13 @@ const standingNow = (): string[] => {
   return [...(lineage?.explorerSegments?.() ?? [])].map(String)
 }
 
+/** A line in the participant's language, or its English when no catalog has it. */
+const say = (key: string, params: Record<string, string | number>, english: string): string => {
+  const i18n = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc?.get<I18nProvider>(I18N_IOC_KEY)
+  const said = i18n?.t(key, params)
+  return said && said !== key ? said : english
+}
+
 const samePlace = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((name, i) => name === b[i])
 
@@ -150,7 +163,7 @@ export class ExternalCallDrone extends Drone {
     'Holds lines sent from outside until you answer them on the command line, then says them through the machine door and writes the run into a conversation.'
 
   protected override listens: string[] = [EXTERNAL_CALL, EXTERNAL_ANSWER]
-  protected override emits: string[] = [EXTERNAL_ASK, REMOTE_SUBMIT, 'chat:open', 'ask:chat-reply', 'toast:show', 'activity:log']
+  protected override emits: string[] = [EXTERNAL_ASK, REMOTE_SUBMIT, 'ask:chat-reply', 'toast:show', 'activity:log']
 
   #bound = false
   #queue: Pending[] = []
@@ -236,7 +249,6 @@ export class ExternalCallDrone extends Drone {
 
   async #run(call: Pending): Promise<ExternalCallOutcome> {
     const convoId = await this.#record(call)
-    EffectBus.emit('chat:open', { convoId })
     // AN ACT, NOT A SENTENCE: performed once, the lines only describe it.
     if (call.perform) {
       const text = call.lines.join(' · ')
@@ -246,6 +258,15 @@ export class ExternalCallDrone extends Drone {
       return { kind: 'ran', convoId, results: [{ text, verdict }] }
     }
     const results: ExternalLineResult[] = []
+    const total = call.lines.length
+    let done = 0
+    // Each line's place in the run and its verdict, said where the hive shows
+    // its own acts (the activity log), after the line's own hearing has stopped
+    // so the caller never hears it back.
+    const progress = (text: string, verdict: string): void => {
+      EffectBus.emit('activity:log', { message: say('external-call.line', { from: call.from, at: done, total, line: text, verdict },
+        `${call.from} ${done}/${total}: ${text} → ${verdict}`), icon: '$' })
+    }
     // WHERE THE CALL STANDS, NOT WHERE THE PARTICIPANT HAS WANDERED (jwize,
     // 2026-11-03: "make sure the presentation isn't messed up if you navigate
     // during the command"). A line like `trait` or `create` acts where it
@@ -269,6 +290,7 @@ export class ExternalCallDrone extends Drone {
         const note = `(the hive had moved: walked back to /${callStandsAt.join('/')} before the next line)`
         results.push({ text: back, verdict, heard: [note] })
         await deliverTurn(convoId, 'assistant', `${back}\n→ ${verdict}\n${note}`)
+        progress(back, verdict)
       }
       const walking = verbOf(text) === 'go' ? goReported() : null
       // WHAT THE HIVE SAYS WHILE THE LINE RUNS — a word that answers (`read`,
@@ -289,10 +311,16 @@ export class ExternalCallDrone extends Drone {
       const heard = listening.stop()
       results.push(heard.length ? { text, verdict, heard } : { text, verdict })
       await deliverTurn(convoId, 'assistant', [`${text}\n→ ${verdict}`, ...heard].join('\n'))
+      done++
+      progress(text, verdict)
     }
-    // A line may have walked the hive elsewhere, and the chat follows the
-    // layer: bring the run's own conversation back in front of the participant.
-    EffectBus.emit('chat:open', { convoId })
+    const refused = results.filter(r => r.verdict.startsWith('refused')).length
+    const message = say(refused ? 'external-call.done-refused' : 'external-call.done', { from: call.from, lines: total, refused },
+      refused
+        ? `${call.from}: ${total} lines said, ${refused} refused. The run is written in its conversation on this layer.`
+        : `${call.from}: ${total} lines said. The run is written in its conversation on this layer.`)
+    EffectBus.emit('activity:log', { message, icon: '$' })
+    EffectBus.emit('toast:show', { type: refused ? 'warning' : 'success', title: '$', message, duration: 8000 })
     return { kind: 'ran', convoId, results }
   }
 
