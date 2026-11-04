@@ -36,7 +36,7 @@ export function fireQuickMenuSlot(slot: QuickMenuSlot, subject?: string): void {
     const payload = (action.payload ?? {}) as Record<string, unknown>
     const body = subject ? { ...payload, subject } : payload
     // a chord is a command, not a state: never replayed to a late listener
-    if (action.effect === 'keymap:invoke') EffectBus.emitTransient(action.effect, body)
+    if (action.effect === 'keymap:invoke' || action.effect === 'shelf:save' || action.effect === 'shelf:recall') EffectBus.emitTransient(action.effect, body)
     else EffectBus.emit(action.effect, body)
     return
   }
