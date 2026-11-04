@@ -438,7 +438,6 @@ const ICON_MAP: Readonly<Record<string, string>> = {
   follow: 'notifications', hide: 'visibility_off', remove: 'delete', shelf: 'bookmark',
   'to shelf': 'bookmark', back: 'arrow_back', cancel: 'close',
   images: 'photo_library', generate: 'auto_awesome',
-  explore: 'explore', hosts: 'web', behavior: 'build', agent: 'auto_awesome', discover: 'explore', shelves: 'bookmark',
 }
 
 describe('slot icons', () => {
