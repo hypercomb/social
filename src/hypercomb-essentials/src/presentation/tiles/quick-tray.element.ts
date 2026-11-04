@@ -64,9 +64,7 @@
 // rebuilt in a burst never shows the shelf for the instant it is empty.
 
 import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
-import { listGroups, readGroup, startGroup } from '../../assistant/context-groups.js'
 import { dropEntries, entryKey, takeEntries, type TrayEntry } from './quick-tray.entries.js'
-import { entriesToMembers, membersToEntries } from './quick-tray.ring.js'
 
 export const QUICK_TRAY_SURFACE = 'hc-quick-tray'
 
@@ -282,13 +280,6 @@ export class QuickTrayElement extends HTMLElement {
     }
     this.#offs.push(EffectBus.on('shelf:placed', letGoOf))
     this.#offs.push(EffectBus.on('shelf:let-go', letGoOf))
-    // The ring: keep what the shelf holds as a group, or bring a kept one back.
-    // Both are presses, sent transient, so a shelf that mounts later never
-    // replays one.
-    this.#offs.push(EffectBus.on('shelf:save', () => { void this.#keepShelf() }))
-    this.#offs.push(EffectBus.on<{ id?: string } | undefined>('shelf:recall', (p) => {
-      if (typeof p?.id === 'string') void this.#recallShelf(p.id)
-    }))
     // A canvas owner that started late asks for every reservation again.
     this.#offs.push(EffectBus.on('viewport:inset-poll', () => { this.#reserved = -1; this.#reserve() }))
     // Transient on the sender's side: a shelf that mounts later must not
@@ -358,26 +349,6 @@ export class QuickTrayElement extends HTMLElement {
     for (const entry of this.#entries) void this.#loadThumb(entry)
     this.#render()
     this.#answer(incoming)
-    this.#announce()
-  }
-
-  /** Keep the shelf as a new group on the ring. An empty shelf, or one whose
-   *  rows have no signature to name them by, keeps nothing. */
-  async #keepShelf(): Promise<void> {
-    const members = entriesToMembers(this.#entries)
-    if (members.length === 0) return
-    const count = (await listGroups()).length + 1
-    await startGroup(`${t('shelf.ring.name', 'shelf')} ${count}`, members)
-  }
-
-  /** Bring a kept group back as what the shelf holds. */
-  async #recallShelf(id: string): Promise<void> {
-    const group = await readGroup(id)
-    if (!group) return
-    this.#entries = membersToEntries(group.members)
-    for (const entry of this.#entries) void this.#loadThumb(entry)
-    this.#peek()
-    this.#render()
     this.#announce()
   }
 

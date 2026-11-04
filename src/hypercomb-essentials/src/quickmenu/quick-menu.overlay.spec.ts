@@ -305,7 +305,7 @@ describe('states', () => {
     expect(part(tags, '.hc-qm-rim').getAttribute('stroke')).toBe(HONEY.steel)
     expect(part(tags, 'text').getAttribute('fill')).toBe(HONEY.ink.rest)
     expect(part(tags, 'circle[fill="#fffaf0"]').getAttribute('r')).toBe(HONEY.glint.rRest.toFixed(2))
-    expect(isLit(slot(svg, 'explore'))).toBe(true)
+    expect(isLit(slot(svg, 'collections'))).toBe(true)
   })
 
   it('never starts the drip under reduced motion, and says so', () => {

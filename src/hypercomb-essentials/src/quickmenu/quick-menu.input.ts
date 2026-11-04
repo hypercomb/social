@@ -302,11 +302,6 @@ export class QuickMenuInput {
     window.addEventListener('mousedown', this.#suppressMiddleMouse, { capture: true })
     window.addEventListener('auxclick', this.#suppressAux, { capture: true })
     window.addEventListener('contextmenu', this.#onContextMenu, { capture: true })
-    // The right button belongs to the flower from press to release: the press is
-    // taken above, and the rest of the click must not reach the hive underneath.
-    for (const type of ['pointerup', 'mouseup', 'auxclick'] as const) {
-      window.addEventListener(type, this.#keepRightClickInMenu, { capture: true })
-    }
 
     // Losing the lock IS the end of the gesture — the browser drops it on
     // Escape, on tab switch, and on anything that steals focus. Treating that
@@ -396,7 +391,6 @@ export class QuickMenuInput {
       e.stopPropagation()
       if (e.button === 0) this.#flight.confirm()
       else if (e.button === 2) this.#flight.back()
-      e.stopImmediatePropagation()
       return
     }
     // A click on a selection-menu option. The tile body is not one, so a
@@ -1058,12 +1052,6 @@ export class QuickMenuInput {
     e.preventDefault()
     e.stopPropagation()
     this.#end()
-  }
-
-  #keepRightClickInMenu = (e: MouseEvent): void => {
-    if (e.button !== 2 || !this.#flight?.active) return
-    e.preventDefault()
-    e.stopImmediatePropagation()
   }
 
   #suppressMiddleMouse = (e: MouseEvent): void => {
