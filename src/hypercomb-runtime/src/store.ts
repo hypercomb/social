@@ -10,9 +10,10 @@ import {
   documentSweepVeto,
   isMetaEnvelope,
   isSignature,
-  latestLayerMarker,
   llmKeyStore,
   markerName,
+  MarkerHeadMemo,
+  readLayerMarker,
   metaPayloadOf,
   mintMetaEnvelope,
   DERIVED_OPTIMIZATION_POOLS,
@@ -70,6 +71,32 @@ export type DevManifest = {
  *  a failed write aborts the stream and rethrows what actually happened, and
  *  a full device is said once (`storage.full`). The `createWritable()` stays
  *  at each site — this only finishes the stream it is handed. */
+/** A small in-memory cache for bytes that are IMMUTABLE BY SIGNATURE:
+ *  content under a sig never changes, so a hit is pure — present or absent
+ *  is the only question, never stale. Insertion-ordered; a hit moves the
+ *  key to the end; past the cap the oldest key goes. The session caches
+ *  that already exist (`#resourceCache`, `#layerBytesCache`) set no cap,
+ *  so this one is deliberately small: it spares the OPFS round trip on the
+ *  repeat reads of a walk, not a copy of the hive in memory. */
+class SigCache<T> {
+  readonly #map = new Map<string, T>()
+  constructor(readonly cap: number) {}
+  get = (sig: string): T | undefined => {
+    const hit = this.#map.get(sig)
+    if (hit !== undefined) { this.#map.delete(sig); this.#map.set(sig, hit) }
+    return hit
+  }
+  set = (sig: string, value: T): void => {
+    this.#map.delete(sig)
+    this.#map.set(sig, value)
+    while (this.#map.size > this.cap) {
+      const oldest = this.#map.keys().next().value
+      if (oldest === undefined) break
+      this.#map.delete(oldest)
+    }
+  }
+}
+
 const writeKeepingError = async (
   writable: FileSystemWritableFileStream,
   data: FileSystemWriteChunkType,
@@ -458,6 +485,20 @@ export class Store extends EventTarget {
   /** The tail of each document's write queue, keyed by pool address + subKey. */
   readonly #documentWrites = new Map<string, Promise<string | null>>()
 
+  /** The head marker of every document space this tab has read or written,
+   *  keyed by `<pool address>/<sub-bucket name>`. A read used to enumerate
+   *  the whole directory to find the max marker (`latestLayerMarker`), on
+   *  EVERY `getPoolDoc`; a write enumerated it twice. The memo answers a
+   *  read with one targeted lookup and is told about this tab's own marker
+   *  writes; another tab's write is found by the same lookup, because its
+   *  marker is the next name in sequence. */
+  readonly #poolHeads = new MarkerHeadMemo()
+
+  /** The memo key for a document space: the pool, then the sub-bucket the
+   *  caller's `subKey` signs to (`''` for the pool's own directory). */
+  static #documentKey = async (pool: FileSystemDirectoryHandle, subKey?: string): Promise<string> =>
+    `${pool?.name ?? ''}/${subKey ? await Store.poolSignature(subKey) : ''}`
+
   #writePoolDoc = async (
     pool: FileSystemDirectoryHandle,
     bytes: ArrayBuffer,
@@ -503,6 +544,7 @@ export class Store extends EventTarget {
       const space = proven
         ? await Store.#documentSpace(target)
         : { veto: `the pool address ${pool.name.slice(0, 8)}… is a bare word or unregistered meaning`, head: null }
+      const headKey = await Store.#documentKey(pool, subKey)
       if (space.veto) {
         // Not fatal: the new atom is on disk and nothing was removed. With no
         // marker of ours here, `getPoolDoc` returns the first non-empty
@@ -511,8 +553,17 @@ export class Store extends EventTarget {
         console.warn(`[pool] no history marker in ${target.name.slice(0, 8)}… — ${space.veto}`)
         return sig
       }
-      if (currentOnly) return await Store.#keepOnly(target, sig) ? sig : null
-      return await Store.#appendDocumentMarker(target, sig, space.head) ? sig : null
+      // The proof above enumerated the directory and found its head; the
+      // memo learns it so the marker append and every later read start
+      // from it instead of scanning again.
+      this.#poolHeads.note(headKey, space.head)
+      if (currentOnly) {
+        // Every marker goes; whatever is written next starts the sequence
+        // over, so the memo must not remember this head.
+        this.#poolHeads.forget(headKey)
+        return await Store.#keepOnly(target, sig) ? sig : null
+      }
+      return await Store.#appendDocumentMarker(target, sig, space.head, this.#poolHeads, headKey) ? sig : null
     } catch { return null }
   }
 
@@ -537,19 +588,19 @@ export class Store extends EventTarget {
         const currentSig = await Store.poolSignature(spellPoolMeaning(label))
         if (currentSig !== pool.name) {
           const current = await this.opfsRoot.getDirectoryHandle(currentSig, { create: false })
-          const newer = await Store.#readPoolDoc(current, subKey)
+          const newer = await Store.#readPoolDoc(current, subKey, this.#poolHeads)
           if (newer) return newer
         }
       } catch { /* the spelled directory is not on this replica yet */ }
     }
-    const local = await Store.#readPoolDoc(pool, subKey)
+    const local = await Store.#readPoolDoc(pool, subKey, this.#poolHeads)
     if (local || !label || !this.opfsRoot) return local
     for (const obsolete of funneledFrom(label)) {
       try {
         const sig = await Store.poolSignature(obsolete)
         if (sig === pool.name) continue
         const dir = await this.opfsRoot.getDirectoryHandle(sig, { create: false })
-        const older = await Store.#readPoolDoc(dir, subKey)
+        const older = await Store.#readPoolDoc(dir, subKey, this.#poolHeads)
         if (older) return older
       } catch { /* that ref is not held here */ }
     }
@@ -560,14 +611,14 @@ export class Store extends EventTarget {
    *  decides which directories are the same name. */
   static #readPoolDoc = async (
     pool: FileSystemDirectoryHandle | undefined,
-    subKey?: string,
+    subKey: string | undefined,
+    heads: MarkerHeadMemo,
   ): Promise<ArrayBuffer | null> => {
     if (!pool) return null
     try {
-      const target = subKey
-        ? await pool.getDirectoryHandle(await Store.poolSignature(subKey), { create: false })
-        : pool
-      const current = await Store.#currentPoolDoc(target)
+      const bucket = subKey ? await Store.poolSignature(subKey) : ''
+      const target = bucket ? await pool.getDirectoryHandle(bucket, { create: false }) : pool
+      const current = await Store.#currentPoolDoc(target, heads, `${pool.name ?? ''}/${bucket}`)
       if (current) return current
       for await (const [name, handle] of (target as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
         if (handle.kind !== 'file' || !isSignature(name)) continue
@@ -580,9 +631,13 @@ export class Store extends EventTarget {
 
   /** The bytes of the atom the head marker names, or null when there is no
    *  marker, the head is unreadable, or its atom is not held beside it. */
-  static #currentPoolDoc = async (target: FileSystemDirectoryHandle): Promise<ArrayBuffer | null> => {
+  static #currentPoolDoc = async (
+    target: FileSystemDirectoryHandle,
+    heads: MarkerHeadMemo,
+    key: string,
+  ): Promise<ArrayBuffer | null> => {
     try {
-      const head = await latestLayerMarker(target)
+      const head = await heads.head(key, target)
       if (!head) return null
       const file = await (await target.getFileHandle(head.layer, { create: false })).getFile()
       return file.size > 0 ? await file.arrayBuffer() : null
@@ -606,10 +661,17 @@ export class Store extends EventTarget {
   ): Promise<{ veto: string | null; head: { name: string; layer: string } | null }> => {
     const others: DirectoryEntry[] = []
     let markers = 0
+    // The max marker is found in THIS walk; the head is then one file read,
+    // not a second walk of the same directory.
+    let latest = ''
     try {
       for await (const [name, handle] of (target as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
         const isDirectory = handle?.kind === 'directory'
-        if (!isDirectory && classifyDirectoryEntry(name) === 'marker') { markers++; continue }
+        if (!isDirectory && classifyDirectoryEntry(name) === 'marker') {
+          markers++
+          if (name > latest) latest = name
+          continue
+        }
         others.push({ name, isDirectory })
       }
     } catch (err) {
@@ -619,7 +681,7 @@ export class Store extends EventTarget {
     if (structural) return { veto: structural, head: null }
     if (markers === 0) return { veto: null, head: null }
     let head: { name: string; layer: string } | null
-    try { head = await latestLayerMarker(target) } catch (err) {
+    try { head = await readLayerMarker(target, latest) } catch (err) {
       return { veto: `its current marker is unreadable (${String((err as Error)?.message ?? err)})`, head: null }
     }
     const layer = head?.layer
@@ -665,6 +727,8 @@ export class Store extends EventTarget {
     target: FileSystemDirectoryHandle,
     sig: string,
     head: { name: string; layer: string } | null,
+    heads: MarkerHeadMemo,
+    key: string,
   ): Promise<boolean> => {
     let current = head
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -676,9 +740,12 @@ export class Store extends EventTarget {
       }
       try {
         await writeLayerMarker(target, sig, next)
+        heads.note(key, { name: next, layer: sig })
         return true
       } catch { /* the name was taken by a racing write — read the head again */ }
-      try { current = await latestLayerMarker(target) } catch { return false }
+      // The racing writer's marker is the next name in sequence: the memo
+      // walks forward to it instead of enumerating the directory.
+      try { current = await heads.head(key, target) } catch { return false }
     }
     console.warn(`[pool] could not append a marker in ${target.name.slice(0, 8)}… — the document was kept but is not current`)
     return false
@@ -1745,27 +1812,113 @@ export class Store extends EventTarget {
     try {
       const dir = await this.#visualOptimDir()
       if (!dir) return
-      const handle = await dir.getFileHandle(sourceSig, { create: true })
-      const writable = await handle.createWritable()
-      await writeKeepingError(writable, bytes)
+      await Store.#writeDerivedRecord(dir, sourceSig, bytes)
       this.noteOptimizationUse(Store.VISUAL_OPTIMIZATION_MEANING, sourceSig, OPTIMIZATION_MINT_WEIGHT)
     } catch { /* best-effort cache */ }
   }
 
+  /** The one write of a derived visual record: the cell-sized rendition
+   *  under the source sig, or the within-target record in its sub-bucket. */
+  static #writeDerivedRecord = async (dir: FileSystemDirectoryHandle, name: string, bytes: ArrayBuffer): Promise<void> => {
+    const handle = await dir.getFileHandle(name, { create: true })
+    const writable = await handle.createWritable()
+    await writeKeepingError(writable, bytes)
+  }
+
+  // ── "Within target, no derivative" ────────────────────────────────
+  // A source already at or under the atlas target derives nothing — and
+  // that answer was never recorded, so EVERY session opened the optimized
+  // entry, missed, decoded the full raw to measure it, found it within
+  // target, wrote nothing, and did the same again next boot: one decode per
+  // small image per session, forever. The negative result is itself a pure
+  // derivation of the source signature (D1): it lives beside the positive
+  // records, in the visual-optimization pool, in the `within-target`
+  // sub-bucket, keyed by the source sig (D2 — recomputable, never
+  // load-bearing: a reader that lacks it only decodes once more). It is
+  // minted where the positive record is: `optimizeVisual`, the optimize
+  // phase.
+  /** The sub-bucket's name is `sign('within-target')` — the same hash a
+   *  sub-key takes under `putPoolDoc` — derived directly: it is a bucket
+   *  INSIDE a pool, not a pool of meaning of its own, so it is not entered
+   *  in the pool registry (the census ratchet seeds only root pools). */
+  static readonly #WITHIN_TARGET_BUCKET = 'within-target'
+  #withinTargetDir?: FileSystemDirectoryHandle | null
+  /** Source sigs this session knows derive nothing — the record, read once. */
+  readonly #withinTarget = new Set<string>()
+  /** One decode per source sig at a time: the two optimizer drones (and an
+   *  arrival) ask for the same sig independently and used to decode it
+   *  independently. The second asker joins the first's work. */
+  readonly #optimizing = new Map<string, Promise<void>>()
+
+  #withinTargetBucket = async (create: boolean): Promise<FileSystemDirectoryHandle | null> => {
+    if (this.#withinTargetDir !== undefined && (this.#withinTargetDir || !create)) return this.#withinTargetDir
+    try {
+      const dir = await this.#visualOptimDir()
+      if (!dir) return null
+      const name = await SignatureService.sign(new TextEncoder().encode(Store.#WITHIN_TARGET_BUCKET).buffer as ArrayBuffer)
+      const bucket = await dir.getDirectoryHandle(name, { create })
+      this.#withinTargetDir = bucket
+      return bucket
+    } catch {
+      if (!create) this.#withinTargetDir = null
+      return null
+    }
+  }
+
+  /** Is `sourceSig` recorded as within the atlas target? Session memo, then
+   *  one targeted lookup in the sub-bucket; never an enumeration. */
+  public isVisualWithinTarget = async (sourceSig: string): Promise<boolean> => {
+    if (this.#withinTarget.has(sourceSig)) return true
+    try {
+      const bucket = await this.#withinTargetBucket(false)
+      if (!bucket) return false
+      const file = await (await bucket.getFileHandle(sourceSig, { create: false })).getFile()
+      if (file.size <= 0) return false
+      this.#withinTarget.add(sourceSig)
+      return true
+    } catch { return false }
+  }
+
+  #noteWithinTarget = async (sourceSig: string, width: number, height: number): Promise<void> => {
+    this.#withinTarget.add(sourceSig)
+    try {
+      const bucket = await this.#withinTargetBucket(true)
+      if (!bucket) return
+      const record = { source: sourceSig, width, height, target: Store.#VISUAL_OPTIM_TARGET }
+      await Store.#writeDerivedRecord(bucket, sourceSig, new TextEncoder().encode(JSON.stringify(record)).buffer as ArrayBuffer)
+    } catch { /* best-effort — one more decode next session */ }
+  }
+
   /** Produce + persist the cell-sized optimized form of a raw visual so the
    *  next COLD load decodes a small image instead of the full original.
-   *  Idempotent (skips when already cached) and a no-op when the raw is
-   *  already within the atlas target (nothing to gain). Best-effort: a
-   *  failure just means the raw is re-decoded next session. */
-  public optimizeVisual = async (sourceSig: string, rawBlob: Blob): Promise<void> => {
+   *  Idempotent (skips when already cached, or already recorded as within
+   *  target) and shared: concurrent calls for one sig decode once.
+   *  Best-effort: a failure just means the raw is re-decoded next session. */
+  public optimizeVisual = (sourceSig: string, rawBlob: Blob): Promise<void> => {
+    const pending = this.#optimizing.get(sourceSig)
+    if (pending) return pending
+    const run = this.#optimizeVisualOnce(sourceSig, rawBlob)
+      .finally(() => { if (this.#optimizing.get(sourceSig) === run) this.#optimizing.delete(sourceSig) })
+    this.#optimizing.set(sourceSig, run)
+    return run
+  }
+
+  #optimizeVisualOnce = async (sourceSig: string, rawBlob: Blob): Promise<void> => {
     try {
       if (await this.getOptimizedVisual(sourceSig)) return
+      if (await this.isVisualWithinTarget(sourceSig)) return
       if (typeof createImageBitmap !== 'function' || typeof OffscreenCanvas === 'undefined') return
       const raw = await createImageBitmap(rawBlob)
       const target = Store.#VISUAL_OPTIM_TARGET
       // Already within the atlas target — caching a same-size copy buys
-      // nothing, so leave the raw as the source of truth.
-      if (raw.width <= target && raw.height <= target) { raw.close(); return }
+      // nothing, so leave the raw as the source of truth and RECORD that,
+      // so no later session measures it again.
+      if (raw.width <= target && raw.height <= target) {
+        const { width, height } = raw
+        raw.close()
+        await this.#noteWithinTarget(sourceSig, width, height)
+        return
+      }
       const aspect = raw.width / raw.height
       const w = aspect >= 1 ? target : Math.max(1, Math.round(target * aspect))
       const h = aspect >= 1 ? Math.max(1, Math.round(target / aspect)) : target
@@ -2310,6 +2463,11 @@ export class Store extends EventTarget {
 
   // Sig-addressed bytes are immutable, so this cache is safe across the session.
   readonly #layerBytesCache = new Map<string, Uint8Array>()
+  /** Recent reads by signature, bounded (see `SigCache`). The preloader and
+   *  the optimizer drones read the same layers through `getLayerPoolBytes`
+   *  within one pass; each repeat was an OPFS open and a full read. */
+  readonly #recentLayerBytes = new SigCache<Uint8Array>(512)
+  readonly #recentOptimizedBytes = new SigCache<Uint8Array>(128)
   readonly #layerBytesPending = new Map<string, Promise<Uint8Array | null>>()
 
   // PERF INSTRUMENTATION (temporary — remove after diagnosis)
@@ -2406,10 +2564,15 @@ export class Store extends EventTarget {
    *  source serves it is immaterial. Markers in lineage sigbags
    *  reference into this content. */
   public getLayerPoolBytes = async (signature: string): Promise<Uint8Array | null> => {
+    // Immutable by signature: a byte array already held under this sig —
+    // by the session cache or by the recent-reads LRU — IS the answer.
+    const held = this.#layerBytesCache.get(signature) ?? this.#recentLayerBytes.get(signature)
+    if (held) { this.#stageToHost(signature, 'layer', held); return held }
     try {
       const file = await this.#readContentFile(signature, this.layers)
       if (!file) return null
       const bytes = new Uint8Array(await file.arrayBuffer())
+      this.#recentLayerBytes.set(signature, bytes)
       // The warmup/preloader reads layers through the pool directly (not via
       // getLayerBytes), so without this the author only pushed the branches it
       // navigated, leaving sibling tiles 404 on the relay. Push here too so the
@@ -2783,10 +2946,14 @@ export class Store extends EventTarget {
    *  misses. Read-only back-compat — nothing writes here anymore. */
   public getOptimizedBytes = async (signature: string): Promise<Uint8Array | null> => {
     if (!this.optimized) return null
+    const held = this.#recentOptimizedBytes.get(signature)
+    if (held) return held
     try {
       const handle = await this.optimized.getFileHandle(signature, { create: false })
       const file = await handle.getFile()
-      return new Uint8Array(await file.arrayBuffer())
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      this.#recentOptimizedBytes.set(signature, bytes)
+      return bytes
     } catch { return null }
   }
 

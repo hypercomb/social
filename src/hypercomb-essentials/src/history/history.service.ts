@@ -1,5 +1,5 @@
 // core/history.service.ts
-import { CHILD_SLOTS, EffectBus, LEGACY_DIRECTORIES, MARKER_CEILING, SignatureService, SignatureStore, classifyDirectoryEntry, hardDeleteVetoFor, healLegacyLayer, homeMoleculeKey, isMetaEnvelope, isPoolAddress, markerName as markerNameOf, metaPayloadOf, packedStoreEnabled, poolAddresses, poolCreditsMemberNames, poolKindOfAddress, poolMeaningOf, rootMoleculeAddress, writeLayerMarker, type MetaEnvelope } from '@hypercomb/core'
+import { CHILD_SLOTS, EffectBus, LEGACY_DIRECTORIES, MARKER_CEILING, SignatureService, SignatureStore, classifyDirectoryEntry, hardDeleteVetoFor, healLegacyLayer, homeMoleculeKey, isMetaEnvelope, isPoolAddress, markerFileExists, markerName as markerNameOf, metaPayloadOf, packedStoreEnabled, poolAddresses, poolCreditsMemberNames, poolKindOfAddress, poolMeaningOf, rootMoleculeAddress, writeLayerMarker, type MetaEnvelope } from '@hypercomb/core'
 import { lineageKey, rawLineageKey } from './lineage-key.js'
 import { canonicalizeLayer } from './canonical-layer.js'
 import { isBareLayer } from './child-sig-guard.js'
@@ -183,6 +183,27 @@ export type MarkerRecord = {
 }
 
 const SIG_RE = /^[0-9a-f]{64}$/i
+
+/** Run `work` over `items` with at most `limit` in flight. The bag walks
+ *  below awaited one bag at a time — 293 bags took 5.1 s serially — and
+ *  OPFS answers independent directories in parallel; unbounded would open
+ *  every bag at once. A failed item rejects the whole run, as a serial
+ *  loop would have thrown at that item. */
+const forEachBounded = async <T>(
+  items: Iterable<T>,
+  limit: number,
+  work: (item: T) => Promise<void>,
+): Promise<void> => {
+  const queue = [...items]
+  let next = 0
+  const worker = async (): Promise<void> => {
+    while (next < queue.length) await work(queue[next++]!)
+  }
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, queue.length)) }, worker))
+}
+
+/** Bags opened at once by the boot-time walks. */
+const BAG_WALK_CONCURRENCY = 12
 /** PRUNE'S DESTROY — the only removals that ask a never-deleting store (the
  *  desktop app's, the packed store) to delete for real; OPFS ignores the
  *  flag and deletes as it always has (removeContentSigs, removeLineageBag). */
@@ -226,9 +247,24 @@ export async function extractLayerSigFromMarker(
 
 export class HistoryService {
 
-  // In-memory cache of full replay per signature. Keeps navigation instant —
-  // history is the same until the next record()/updateLayer() append.
-  readonly #replayCache = new Map<string, HistoryOp[]>()
+  // In-memory cache of full replay per lineage. A replay is a function of
+  // the bag's marker set, so each entry carries the head it was read under
+  // — the head layer sig and the marker it came from — and is served only
+  // while both still hold. A commit, a peer's marker, an archive: any of
+  // them moves the head and the entry simply stops matching. Nothing has
+  // to remember to invalidate it (it never was invalidated, and served a
+  // page's old op list for the rest of the session). Bounded, oldest out.
+  readonly #replayCache = new Map<string, { head: string; stamp: string; ops: HistoryOp[] }>()
+  static readonly #REPLAY_CACHE_CAP = 256
+
+  /** The identity a replay of `signature` is a function of, or null while
+   *  this tab has not resolved the lineage's head (then nothing is cached:
+   *  a cache with no key would be the uninvalidated one again). */
+  readonly #replayKey = (signature: string): { head: string; stamp: string } | null => {
+    const head = this.#headSigFor(signature)
+    if (!head) return null
+    return { head, stamp: this.#headStamp.get(signature) ?? '' }
+  }
 
   constructor() {
     // Warm-start. Restore the persisted per-lineage head index BEFORE the
@@ -574,10 +610,12 @@ export class HistoryService {
     await scan(this.hiveRoot)
     for (const src of this.#legacyBagSources()) await scan(src)
     const bags = new Map<string, FileSystemDirectoryHandle>()
-    for (const name of names) {
+    // Bounded, not serial: each name is its own directory, promoted and
+    // opened independently of the others.
+    await forEachBounded(names, BAG_WALK_CONCURRENCY, async (name) => {
       await this.#promoteBag(name)
       try { bags.set(name, await this.hiveRoot.getDirectoryHandle(name, { create: false })) } catch { /* vanished mid-scan — skip */ }
-    }
+    })
     return bags
   }
 
@@ -851,17 +889,22 @@ export class HistoryService {
    * If upTo is provided, stop at that index (inclusive).
    */
   public readonly replay = async (signature: string, upTo?: number): Promise<HistoryOp[]> => {
-    // cache-only fast path: full replay is memoized by signature
-    if (upTo === undefined) {
+    // cache-only fast path: a full replay is memoized under the head it was
+    // read under, and served only while that is still the head.
+    const key = upTo === undefined ? this.#replayKey(signature) : null
+    if (key) {
       const cached = this.#replayCache.get(signature)
-      if (cached) return cached
+      if (cached && cached.head === key.head && cached.stamp === key.stamp) {
+        this.#replayCache.delete(signature)
+        this.#replayCache.set(signature, cached)
+        return cached.ops
+      }
     }
 
     let bag: FileSystemDirectoryHandle
     try {
       bag = await this.bagForRead(signature)
     } catch {
-      if (upTo === undefined) this.#replayCache.set(signature, [])
       return []
     }
 
@@ -896,7 +939,15 @@ export class HistoryService {
       }
     }
 
-    if (upTo === undefined) this.#replayCache.set(signature, ops)
+    if (key) {
+      this.#replayCache.delete(signature)
+      this.#replayCache.set(signature, { ...key, ops })
+      while (this.#replayCache.size > HistoryService.#REPLAY_CACHE_CAP) {
+        const oldest = this.#replayCache.keys().next().value
+        if (oldest === undefined) break
+        this.#replayCache.delete(oldest)
+      }
+    }
     return ops
   }
 
@@ -936,17 +987,30 @@ export class HistoryService {
     let maxName = ''
     let maxHandle: FileSystemFileHandle | null = null
 
-    for await (const [name, handle] of bag.entries()) {
-      if (handle.kind !== 'file') continue
-      // A RAW STRING MAX DOES NOT MERELY TOLERATE MEMBERS, IT PREFERS THEM.
-      // Markers read `000000NN`, and essentially every 64-hex name sorts above
-      // them ('00abc' > '00000012'; '9abc' > '99999999'), so an unguarded max
-      // read the head of the lineage out of a pool member 100% of the time
-      // once one was present.
-      if (classifyDirectoryEntry(name) !== 'marker') continue
-      if (name > maxName) {
-        maxName = name
-        maxHandle = handle as FileSystemFileHandle
+    // The head memo: the stamped marker is the max unless the next name in
+    // sequence exists, and both are targeted lookups. A probe that finds a
+    // peer's newer marker (or cannot answer) falls back to the walk.
+    const probed = await this.#probeStampedMax(bag, signature)
+    if (probed && probed === this.#headStamp.get(signature)) {
+      try {
+        maxHandle = await bag.getFileHandle(probed, { create: false })
+        maxName = probed
+      } catch { maxHandle = null }
+    }
+
+    if (!maxHandle) {
+      for await (const [name, handle] of bag.entries()) {
+        if (handle.kind !== 'file') continue
+        // A RAW STRING MAX DOES NOT MERELY TOLERATE MEMBERS, IT PREFERS THEM.
+        // Markers read `000000NN`, and essentially every 64-hex name sorts above
+        // them ('00abc' > '00000012'; '9abc' > '99999999'), so an unguarded max
+        // read the head of the lineage out of a pool member 100% of the time
+        // once one was present.
+        if (classifyDirectoryEntry(name) !== 'marker') continue
+        if (name > maxName) {
+          maxName = name
+          maxHandle = handle as FileSystemFileHandle
+        }
       }
     }
 
@@ -1149,7 +1213,7 @@ export class HistoryService {
       try {
         const seedList = this.#layerListCache.get(locationSig)
         const seedMarkerName = (seedList && seedList.length > 0)
-          ? markerNameOf(seedList.reduce((max, e) => Math.max(max, Number(e.filename) || 0), 0) + 1)
+          ? markerNameOf(HistoryService.#listMax(seedList) + 1)
           : await this.#nextMarkerName(bag, locationSig)
         // Null = past the 8-digit ceiling. Refuse rather than pad-and-hope:
         // a nine-digit name is written but invisible to every reader.
@@ -1198,7 +1262,7 @@ export class HistoryService {
     const knownList = this.#layerListCache.get(locationSig)
     const scanned = { liveMax: '' }
     const markerName = (knownList && knownList.length > 0)
-      ? markerNameOf(knownList.reduce((max, e) => Math.max(max, Number(e.filename) || 0), 0) + 1)
+      ? markerNameOf(HistoryService.#listMax(knownList) + 1)
       : await this.#nextMarkerName(bag, locationSig, scanned)
     if (!markerName) throw new Error(`[history] lineage ${locationSig.slice(0, 8)}… is at the marker ceiling; refusing to mint an out-of-range name`)
     // ANOTHER WRITER MOVED THIS BAG (a second tab of the same hive). The cold
@@ -1701,12 +1765,25 @@ export class HistoryService {
     scanned?: { liveMax: string },
   ): Promise<string> => {
     let max = 0
-    for await (const [name, handle] of (bag as any).entries()) {
-      if (handle.kind !== 'file') continue
-      if (!HistoryService.#MARKER_RE.test(name)) continue
-      const n = Number(name)
-      if (!isNaN(n) && n > max) max = n
-      if (scanned && name > scanned.liveMax) scanned.liveMax = name
+    // THE HEAD MEMO FIRST. The marker this tab's head was read from is the
+    // bag's max unless another tab has written since — and that tab's
+    // marker is the NEXT name in sequence. Two targeted lookups answer
+    // instead of a walk of the whole bag: the stamped marker is still there,
+    // and the next name is absent (the memo holds) or present (a peer moved
+    // the bag; `liveMax` carries that name and commitLayer refuses). Only a
+    // lineage with no validated stamp walks the directory.
+    const probed = locationSig ? await this.#probeStampedMax(bag, locationSig) : null
+    if (probed) {
+      max = Number(probed)
+      if (scanned && probed > scanned.liveMax) scanned.liveMax = probed
+    } else {
+      for await (const [name, handle] of (bag as any).entries()) {
+        if (handle.kind !== 'file') continue
+        if (!HistoryService.#MARKER_RE.test(name)) continue
+        const n = Number(name)
+        if (!isNaN(n) && n > max) max = n
+        if (scanned && name > scanned.liveMax) scanned.liveMax = name
+      }
     }
     // ARCHIVING MUST NOT REWIND THE COUNTER. `archiveEntries` (/flatten,
     // the retired /collapse-history) moves markers out of the bag, so a LIVE-ONLY scan
@@ -1724,6 +1801,33 @@ export class HistoryService {
       throw new Error(`[history] lineage is at the marker ceiling (${MARKER_CEILING}); refusing to mint an out-of-range name`)
     }
     return next
+  }
+
+  /** The max marker NAME of a warm, sorted marker list: `listLayers` sorts
+   *  by filename before caching and `commitLayer` appends only names it has
+   *  just minted above every existing one, so the tail IS the max — O(1)
+   *  where a reduce over the list made every commit O(history depth). */
+  static readonly #listMax = (list: ReadonlyArray<{ filename: string }>): number =>
+    Number(list[list.length - 1]?.filename) || 0
+
+  /** The bag's live max marker name by two targeted lookups from the
+   *  lineage's head stamp, or null when the stamp cannot answer (no stamp,
+   *  an unvalidated restored stamp, a stamped marker that is no longer in
+   *  the bag, a probe that threw). When the next name in sequence EXISTS,
+   *  that name is returned: it is at least the live max, and a commit built
+   *  on the stamp must refuse either way. */
+  readonly #probeStampedMax = async (
+    bag: FileSystemDirectoryHandle,
+    lineageSig: string,
+  ): Promise<string | null> => {
+    const stamp = this.#headStamp.get(lineageSig)
+    if (!stamp || this.#headUnvalidated.has(lineageSig)) return null
+    try {
+      if (!(await markerFileExists(bag, stamp))) return null
+      const next = markerNameOf(Number(stamp) + 1)
+      if (next === null) return stamp
+      return (await markerFileExists(bag, next)) ? next : stamp
+    } catch { return null }
   }
 
   /** The highest marker index this lineage ever minted, remembered outside
@@ -3105,6 +3209,36 @@ export class HistoryService {
     return latestName && latestBag ? { name: latestName, bag: latestBag } : null
   }
 
+  /** The root bag's max marker by targeted lookups from the head stamp: the
+   *  stamped marker is still there, then forward one name at a time until
+   *  the sequence ends (a peer's markers are the next names). Null when the
+   *  stamp cannot answer — no stamp, unvalidated, the stamped marker gone,
+   *  or a walk past its bound — and the caller takes the union scan. Reads
+   *  the root bag only: every bag this tab holds was promoted on first
+   *  touch, so the root carries the max of every source. */
+  readonly #probeLatestMarker = async (
+    lineageSig: string,
+  ): Promise<{ name: string; bag: FileSystemDirectoryHandle } | null> => {
+    const root = this.hiveRoot
+    if (!root) throw new Error('history: store not ready')
+    const stamp = this.#headStamp.get(lineageSig)
+    if (!stamp || this.#headUnvalidated.has(lineageSig)) return null
+    try {
+      const bag = await root.getDirectoryHandle(lineageSig, { create: false })
+      if (!(await markerFileExists(bag, stamp))) return null
+      let latest = stamp
+      for (let step = 0; ; step++) {
+        const next = markerNameOf(Number(latest) + 1)
+        if (next === null || !(await markerFileExists(bag, next))) return { name: latest, bag }
+        if (step >= HistoryService.#PROBE_WALK) return null
+        latest = next
+      }
+    } catch { return null }
+  }
+
+  /** How far a forward probe walks before a scan takes over. */
+  static readonly #PROBE_WALK = 32
+
   /** A RESTORED head is a hint, not truth. Confirm the entry's stamped
    *  marker is still the bag's max (filename-only dir check — zero byte
    *  reads on the happy path); on mismatch, missing stamp (legacy entry),
@@ -3312,7 +3446,10 @@ export class HistoryService {
       // marker winning. `root` was only needed to gate on Store readiness
       // above; the scan itself spans every source.
       const bags = await this.enumerateBags()
-      for (const [lineageSig, dirHandle] of bags) {
+      // Bounded concurrency across bags: the per-bag work is independent
+      // (each sets its own lineage's head) and OPFS serves directories in
+      // parallel; the slice yield still interleaves paint and input.
+      await forEachBounded(bags, BAG_WALK_CONCURRENCY, async ([lineageSig, dirHandle]) => {
         await yieldIfDue()
         bagCount++
         const bag = dirHandle as FileSystemDirectoryHandle
@@ -3329,7 +3466,7 @@ export class HistoryService {
           if (name > latestName) latestName = name
           if (markerCount % 200 === 0) await yieldIfDue()
         }
-        if (!latestName) continue
+        if (!latestName) return
 
         // Pass 2: read latest marker, extract layer sig. Handles BOTH
         // pointer-record markers (modern) and legacy layer-byte markers
@@ -3353,7 +3490,7 @@ export class HistoryService {
           cachedCount++
           if (previewSigs.length < 10) previewSigs.push(layerSig.slice(0, 12))
         } catch { /* skip unreadable */ }
-      }
+      })
 
       // Reconciliation complete — persist the freshly-derived head index so
       // the NEXT boot warm-starts from it instead of re-running this scan.
@@ -4281,7 +4418,7 @@ export class HistoryService {
     lineageSig: string,
   ): Promise<{ from: string | null; to: string } | null> => {
     if (!HistoryService.#SIG_RE.test(lineageSig)) return null
-    const latest = await this.#scanLatestMarker(lineageSig)
+    const latest = await this.#probeLatestMarker(lineageSig) ?? await this.#scanLatestMarker(lineageSig)
     if (!latest) return null
     const from = this.#headSigFor(lineageSig) ?? null
     const stamp = this.#headStamp.get(lineageSig)

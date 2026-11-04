@@ -126,6 +126,23 @@ export const writeMarkerMetaRecord = async (
  *  current record is then asked of `getPoolDoc`, which follows the head
  *  marker and falls back to the first member for a bucket written before
  *  markers existed. */
+/** The key each bucket is named by, learned from one member and remembered:
+ *  a member is immutable by signature (its name is the hash of its bytes),
+ *  so the `layer` it carries never changes and the file is read once per
+ *  session, not once per listing. Keyed by bucket and member so a record
+ *  is never read across buckets. Bounded, oldest out. */
+const bucketKeys = new Map<string, MarkerMetaRecord>()
+const BUCKET_KEYS_CAP = 1024
+const rememberBucketKey = (key: string, record: MarkerMetaRecord): void => {
+  bucketKeys.delete(key)
+  bucketKeys.set(key, record)
+  while (bucketKeys.size > BUCKET_KEYS_CAP) {
+    const oldest = bucketKeys.keys().next().value
+    if (oldest === undefined) break
+    bucketKeys.delete(oldest)
+  }
+}
+
 export const listMarkerMetaRecords = async (store: MarkerMetaStore | undefined): Promise<MarkerMetaRecord[]> => {
   if (!store?.getPool) return []
   let pool: FileSystemDirectoryHandle | undefined
@@ -133,12 +150,17 @@ export const listMarkerMetaRecords = async (store: MarkerMetaStore | undefined):
   if (!pool) return []
   const out: MarkerMetaRecord[] = []
   try {
-    for await (const [, bucket] of (pool as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
+    for await (const [bucketName, bucket] of (pool as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
       if (bucket.kind !== 'directory') continue
       try {
         for await (const [name, handle] of (bucket as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
           if (handle.kind !== 'file' || !SIG_RE.test(name)) continue
-          const record = parse(await (await (handle as FileSystemFileHandle).getFile()).arrayBuffer())
+          const memberKey = `${bucketName}/${name}`
+          let record = bucketKeys.get(memberKey) ?? null
+          if (!record) {
+            record = parse(await (await (handle as FileSystemFileHandle).getFile()).arrayBuffer())
+            if (record) rememberBucketKey(memberKey, record)
+          }
           if (!record) continue
           const current = store.getPoolDoc
             ? parse(await store.getPoolDoc(pool, record.layer).catch(() => null))
