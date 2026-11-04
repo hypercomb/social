@@ -197,6 +197,15 @@ export class SiteViewDrone extends Drone {
   /** Re-entrancy guard: leaving sets ViewMode a second time (hexagons → the
    *  spawning view) from inside the mode-change handler. */
   #restoringSpawn = false
+  /** THE PAGES READ THIS SESSION, entry first (jwize 2026-11-03: "if you are
+   *  deep inside a website the back navigates back until the entry point").
+   *  The site's own moves push onto it; the back gesture steps back along it
+   *  and, at the entry, turns the website off — back to where it was opened.
+   *  Empty outside a session. */
+  #trail: string[][] = []
+  /** Set while the back gesture steps along the trail, so that move is not
+   *  pushed again. */
+  #trailStep = false
 
   /**
    * Raw-DOM exit overlay — the GUARANTEED way out of website mode. It is
@@ -261,9 +270,11 @@ export class SiteViewDrone extends Drone {
       // The subscription's own last-value replay is not a live arrival —
       // ignore it, or a boot replay would rewrite a session's spawn.
       let replay = true
-      this.onEffect<{ segments?: readonly string[]; view?: string }>('view:arrival', (payload) => {
+      this.onEffect<{ segments?: readonly string[]; view?: string; held?: boolean }>('view:arrival', (payload) => {
         if (replay) return
         if (payload?.view !== 'website') return
+        // The site's own step between its pages is not an arrival into it.
+        if (payload.held) return
         const spawn = this.#spawn
         const entry = this.#siteEntrySegments
         if (!spawn || !entry) return
@@ -301,7 +312,7 @@ export class SiteViewDrone extends Drone {
       const websiteUp = (): boolean => (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
         ?.get<{ mode: string }>('@hypercomb.social/ViewMode')?.mode === 'website'
       this.#backOff = window.ioc?.get<BackGesture>('@diamondcoreprocessor.com/BackGesture')
-        ?.register({ owner: 'site-view', back: () => this.#exitToHive(), active: () => websiteUp() && !isPublishedVisitorShell() }) ?? null
+        ?.register({ owner: 'site-view', back: () => this.#back(), active: () => websiteUp() && !isPublishedVisitorShell() }) ?? null
     }
     if (!this.#publishedRootBound) {
       // Last-value replay covers the boot order: the visit engine mounts the
@@ -390,6 +401,7 @@ export class SiteViewDrone extends Drone {
       const entry = this.#siteEntrySegments
       this.#siteEntrySegments = null
       this.#spawn = null
+      this.#trail = []
       // Leaving the site returns to WHERE IT WAS SPAWNED FROM — the page the
       // reader was on, in the view they were looking at — never the page they
       // happened to browse to inside it, and never the raw hexagons just
@@ -419,6 +431,22 @@ export class SiteViewDrone extends Drone {
     // The spawning PLACE starts as "right here"; a `view:arrival` verdict for
     // this same cell corrects it to the page the reader came from.
     this.#spawn = { mode: (vm?.previous ?? '').trim(), segments: here }
+    this.#trail = [here]
+  }
+
+  /** The back gesture inside a site (home domain): one page back along the
+   *  pages read this session, the website staying up the whole way; at the
+   *  entry page, the website turns off and the reader is where they opened it
+   *  (the exit's own return to the spawn). */
+  #back(): void {
+    if (this.#trail.length > 1) {
+      this.#trail.pop()
+      const previous = this.#trail[this.#trail.length - 1]
+      this.#trailStep = true
+      void this.#navigate(previous).finally(() => { this.#trailStep = false })
+      return
+    }
+    this.#exitToHive()
   }
 
   /** Come back out of the site: the view that spawned it, at the page it was
@@ -440,6 +468,14 @@ export class SiteViewDrone extends Drone {
       try { vm?.setMode(target.mode) } finally { this.#restoringSpawn = false }
     }
     if (sameSiteSegments(target.segments, current)) return
+    // Back to the HEXAGONS: the place we return to must not re-open a view
+    // of its own on arrival (its `view:default`, or one cascading from
+    // above) — leaving a site lands on tiles. Armed only when a move follows,
+    // so the one-shot is consumed by exactly this arrival.
+    if (target.mode === HEXAGONS_SURFACE) {
+      ;(window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+        ?.get<{ arriveAsHexagons?: () => void }>('@diamondcoreprocessor.com/ViewBee')?.arriveAsHexagons?.()
+    }
     const segments = [...target.segments]
     if (typeof lineage?.explorerReplace === 'function') { lineage.explorerReplace(segments); return }
     ;(window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
@@ -1524,6 +1560,21 @@ export class SiteViewDrone extends Drone {
     }
 
     const next = [...path]
+
+    // A move between pages of THIS site keeps the website up through the
+    // arrival — an ancestor page is not a retreat out of the site, and the
+    // hexagons must never flash between two pages (view.bee holdSurfaceOnce).
+    // A move above the site's entry leaves it, as walking out does. The page
+    // joins the trail the back gesture steps along.
+    const here: string[] = [...(lineage.explorerSegments?.() ?? [])]
+    const entry = this.#siteEntrySegments
+    const vmNow = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc?.get<{ mode: string }>('@hypercomb.social/ViewMode')
+    if (vmNow?.mode === 'website' && entry && !sameSiteSegments(next, here)
+      && next.length >= entry.length && entry.every((seg, i) => next[i] === seg)) {
+      ;(window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+        ?.get<{ holdSurfaceOnce?: () => void }>('@diamondcoreprocessor.com/ViewBee')?.holdSurfaceOnce?.()
+      if (!this.#trailStep) this.#trail.push(next)
+    }
 
     // Reading a site is not tile navigation. Move the explorer in ONE step
     // that REPLACES the history entry, so browsing a site never grows the
