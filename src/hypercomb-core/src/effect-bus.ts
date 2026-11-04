@@ -58,10 +58,18 @@ class EffectBusImpl {
   }
 
   once<T = unknown>(effect: string, handler: EffectHandler<T>): () => void {
-    const unsub = this.on<T>(effect, (payload) => {
+    // on() replays the last value synchronously, before it has returned, so
+    // the wrapper can run while `unsub` is still unassigned. A fired flag takes
+    // the first delivery, and the unsubscribe is finished once it exists.
+    let fired = false
+    let unsub: () => void = () => {}
+    unsub = this.on<T>(effect, (payload) => {
+      if (fired) return
+      fired = true
       unsub()
       handler(payload)
     })
+    if (fired) unsub()
     return unsub
   }
 
