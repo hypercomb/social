@@ -127,14 +127,21 @@ describe('leaving a website', () => {
     expect(viewBee.arriveAsHexagons).not.toHaveBeenCalled()
   })
 
-  it('the BACK gesture at the site\'s entry turns the website off and returns to where it was opened', () => {
-    walkTo([])                                   // the root's hexagons, where the reader stood
-    walkTo(['presentation'])
-    setMode('website')                           // opened standing on /presentation
+  it('the BACK gesture at the site\'s entry turns the website off and steps OUT to the layer hosting the entry tile', () => {
+    walkTo(['room-host'])
+    setMode('website')                           // the room-host tile's page, opened on it
     explorerReplace.mockClear()
     backs.get('site-view')?.()
     expect(mode).toBe('hexagons')
-    expect(segments).toEqual(['presentation'])
+    expect(segments).toEqual([])                 // the root, where the room-host tile sits — not inside it
+    expect(viewBee.arriveAsHexagons).toHaveBeenCalledTimes(1)
+  })
+
+  it('the EXIT button still returns to where the site was opened', () => {
+    walkTo(['room-host'])
+    setMode('website')
+    setMode('hexagons')                          // the close button / Escape
+    expect(segments).toEqual(['room-host'])
   })
 
   it('a HELD arrival (the site stepping between its own pages) never rewrites where the site was opened', () => {

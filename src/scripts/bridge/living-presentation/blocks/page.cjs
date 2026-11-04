@@ -285,6 +285,13 @@ const SCRIPT = `
   const voiced = steps.some(s => s.voice)
   const videos = [...el.querySelectorAll('video')]
   let at = -1, playing = false, timer = null, audio = null, voiceOn = true, started = false
+  // BACK RESUMES, FORWARD STARTS OVER: the hive's website view marks a page
+  // the back gesture returned to (data-hc-returning on its host), and only
+  // then does the scene pick up at the beat the reader left it on.
+  const KEY = 'hc-scene:' + location.pathname
+  const returning = root instanceof Element && root.hasAttribute('data-hc-returning')
+  let resumeAt = 0
+  if (returning) { try { const n = Number(sessionStorage.getItem(KEY)); if (Number.isInteger(n) && n >= 0) resumeAt = n } catch {} }
   const readTime = (say) => Math.max(3.4, say.split(/\\s+/).length / 2.6) * 1000 + 600
   const idle = () => { if (still || playing || gone()) return; for (const v of videos) { v.loop = true; v.play().catch(() => {}) } }
   const quiet = () => { clearTimeout(timer); timer = null; if (audio) { audio.onended = audio.onerror = null; audio.pause(); audio = null } }
@@ -299,6 +306,7 @@ const SCRIPT = `
     requestAnimationFrame(() => cap.classList.toggle('more', cap.scrollHeight - cap.clientHeight > 4))
     ticks.forEach((t, k) => { t.classList.toggle('done', k < at); t.classList.toggle('now', k === at); if (k === at) t.setAttribute('aria-current', 'step'); else t.removeAttribute('aria-current') })
     if (count) count.textContent = String(at + 1).padStart(2, '0') + ' / ' + String(steps.length).padStart(2, '0')
+    try { sessionStorage.setItem(KEY, String(at)) } catch {}
   }
   const paint = () => { pp.classList.toggle('playing', playing); pp.setAttribute('aria-label', playing ? 'Pause' : 'Play'); if (started) pp.classList.remove('lead') }
   const halt = () => { playing = false; quiet(); for (const v of videos) v.pause() }
@@ -332,9 +340,9 @@ const SCRIPT = `
   // typing in a part to try holds the scene where it is
   cap.addEventListener('scroll', () => cap.classList.toggle('more', cap.scrollHeight - cap.scrollTop - cap.clientHeight > 4), { passive: true })
   el.addEventListener('focusin', (e) => { if (e.target instanceof HTMLInputElement && playing) play(false) })
-  show(0)
+  show(returning ? resumeAt : 0)
   el.classList.add('in')
-  if (!voiced && !still) setTimeout(() => { if (!gone() && !started) play(true) }, 900)
+  if (!voiced && !still && !returning) setTimeout(() => { if (!gone() && !started) play(true) }, 900)
   else idle()
   // The arrows and space step the scene while the page is on screen; once
   // the page is gone, the listener removes itself.

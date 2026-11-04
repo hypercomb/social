@@ -203,9 +203,24 @@ export class SiteViewDrone extends Drone {
    *  and, at the entry, turns the website off — back to where it was opened.
    *  Empty outside a session. */
   #trail: string[][] = []
+  /** Where the reader was on each page of the trail when they left it (the
+   *  host's scroll), restored when the back gesture returns to it — back
+   *  only (jwize 2026-11-04: "keep the position on the page when you navigate
+   *  back (only)"); a page reached forward starts at its top. */
+  #trailScroll: number[] = []
   /** Set while the back gesture steps along the trail, so that move is not
    *  pushed again. */
   #trailStep = false
+  /** The scroll to restore on the page the back gesture is returning to, or
+   *  null. While set, the mounted host carries `data-hc-returning`, so the
+   *  page's own script can resume where it was (its step, its playback). */
+  #returningScroll: number | null = null
+  /** Set for the one exit the back gesture makes at the site's entry: the
+   *  reader goes back OUT, to the layer that hosts the entry tile (its
+   *  parent), not into that tile's own hexagons (jwize 2026-11-04: "when you
+   *  click back on a webpage you just entered … you go to the parent of the
+   *  page you entered"). */
+  #backOutTo: string[] | null = null
 
   /**
    * Raw-DOM exit overlay — the GUARANTEED way out of website mode. It is
@@ -402,6 +417,8 @@ export class SiteViewDrone extends Drone {
       this.#siteEntrySegments = null
       this.#spawn = null
       this.#trail = []
+      this.#trailScroll = []
+      this.#returningScroll = null
       // Leaving the site returns to WHERE IT WAS SPAWNED FROM — the page the
       // reader was on, in the view they were looking at — never the page they
       // happened to browse to inside it, and never the raw hexagons just
@@ -417,7 +434,11 @@ export class SiteViewDrone extends Drone {
       // leaving the site, back the way in.
       const walkedOut = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
         ?.get<{ releasingArrival?: boolean }>('@diamondcoreprocessor.com/ViewBee')?.releasingArrival === true
-      if (vm?.mode === 'hexagons' && !this.#peelHere && (entry || this.#mount)) this.#returnToSpawn(spawn, walkedOut)
+      const backOut = this.#backOutTo
+      this.#backOutTo = null
+      if (vm?.mode === 'hexagons' && !this.#peelHere && (entry || this.#mount)) {
+        this.#returnToSpawn(backOut ? { mode: HEXAGONS_SURFACE, segments: backOut } : spawn, backOut ? false : walkedOut)
+      }
     }
     void this.#reconcile()
   }
@@ -432,20 +453,27 @@ export class SiteViewDrone extends Drone {
     // this same cell corrects it to the page the reader came from.
     this.#spawn = { mode: (vm?.previous ?? '').trim(), segments: here }
     this.#trail = [here]
+    this.#trailScroll = []
+    this.#returningScroll = null
   }
 
   /** The back gesture inside a site (home domain): one page back along the
    *  pages read this session, the website staying up the whole way; at the
-   *  entry page, the website turns off and the reader is where they opened it
-   *  (the exit's own return to the spawn). */
+   *  entry page, the website turns off and the reader steps OUT to the layer
+   *  that hosts the entry tile — its hexagons, whatever that layer's own
+   *  default. (The exit button still returns to where the site was opened.) */
   #back(): void {
     if (this.#trail.length > 1) {
       this.#trail.pop()
       const previous = this.#trail[this.#trail.length - 1]
+      this.#returningScroll = this.#trailScroll.pop() ?? 0
       this.#trailStep = true
       void this.#navigate(previous).finally(() => { this.#trailStep = false })
       return
     }
+    // At the entry: out to the layer that hosts it.
+    const entry = this.#siteEntrySegments
+    this.#backOutTo = entry ? entry.slice(0, -1) : null
     this.#exitToHive()
   }
 
@@ -952,6 +980,11 @@ export class SiteViewDrone extends Drone {
     // The page's content sig on the host itself, so a page with no inline
     // <style> is still named (the domain links key what it names by it).
     host.setAttribute('data-hc-cell-page', pageSig)
+    // A page the back gesture returned to says so before its scripts run,
+    // so it can resume where the reader left it (back only).
+    const returningTo = this.#returningScroll
+    this.#returningScroll = null
+    if (returningTo !== null) host.setAttribute('data-hc-returning', '')
     host.style.cssText =
       // Inset by any docked panel's reservation (`--hc-inset-<side>`, mirrored
       // from `viewport:inset`) so the Views window can stay open beside the page.
@@ -1050,6 +1083,13 @@ export class SiteViewDrone extends Drone {
     }
     runScripts(Array.from(parsed.head.querySelectorAll('script')))
     runScripts(Array.from(host.querySelectorAll('script')).filter(s => !scriptNodes.includes(s)))
+    if (returningTo) {
+      // Back to where the reader was: once laid out (and again after the
+      // page's late content lands), never past the end.
+      const restore = (): void => { if (host.isConnected) host.scrollTop = returningTo }
+      requestAnimationFrame(restore)
+      setTimeout(restore, 250)
+    }
 
     // Anchor click → the site's own navigation. Bubbling listener on the host
     // catches every click on an inflated <a>. Resolution for internal hrefs is
@@ -1573,7 +1613,11 @@ export class SiteViewDrone extends Drone {
       && next.length >= entry.length && entry.every((seg, i) => next[i] === seg)) {
       ;(window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
         ?.get<{ holdSurfaceOnce?: () => void }>('@diamondcoreprocessor.com/ViewBee')?.holdSurfaceOnce?.()
-      if (!this.#trailStep) this.#trail.push(next)
+      if (!this.#trailStep) {
+        // Forward: remember where the reader is on the page being left.
+        this.#trailScroll.push(this.#mount?.host.scrollTop ?? 0)
+        this.#trail.push(next)
+      }
     }
 
     // Reading a site is not tile navigation. Move the explorer in ONE step

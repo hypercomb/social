@@ -701,7 +701,7 @@ module.exports = {
     ],
     code: [
       { path: 'scripts/bridge/living-presentation/blocks/page.cjs', from: '@media (prefers-reduced-motion:reduce){', lines: 5 },
-      { path: 'scripts/bridge/living-presentation/blocks/page.cjs', from: '  if (!voiced && !still) setTimeout(', lines: 2 },
+      { path: 'scripts/bridge/living-presentation/blocks/page.cjs', from: '  if (!voiced && !still && !returning) setTimeout(', lines: 2 },
     ],
     files: ['scripts/bridge/living-presentation/blocks/page.cjs', 'scripts/presentation/template.html', 'documentation/living-presentation.md'],
   },
