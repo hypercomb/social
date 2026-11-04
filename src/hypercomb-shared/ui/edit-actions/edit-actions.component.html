@@ -101,6 +101,20 @@
 
   @if (!rewound() && selectionCount() > 0) {
     <span class="ea-divider" aria-hidden="true"></span>
+    <!-- ADOPT — only while the selection holds tiles that are somebody
+         else's. One press takes them all; the batch is owed in the adopt
+         queue, so a reload finishes it. -->
+    @if (adoptableCount() > 0) {
+      <button
+        class="ea-btn"
+        type="button"
+        (click)="adopt()"
+        [attr.aria-label]="'selection.adopt' | t: { count: adoptableCount() }"
+        [title]="'selection.adopt' | t: { count: adoptableCount() }"
+      >
+        <span class="mat-sym">cloud_download</span>
+      </button>
+    }
     <button
       class="ea-btn"
       type="button"

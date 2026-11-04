@@ -18,7 +18,7 @@ const get = <T,>(key: string): T | undefined =>
 export function fireQuickMenuSlot(slot: QuickMenuSlot, subject?: string): void {
   const action = slot.action
   if (action.kind === 'menu') return
-  const operands = slot.onTile ? bindOperands(subject) : []
+  const operands = slot.onTile ? bindOperands(subject, slot.alone) : []
   if (action.kind === 'command') {
     const slash = get<SlashLike>('@diamondcoreprocessor.com/SlashBehaviourDrone')
     const args = slot.onTile ? argsWithOperands(action.command, action.args, operands) : action.args ?? ''

@@ -489,7 +489,67 @@ class CellSlots {
 // Memo: child head sig → does that head have children. A child's head sig
 // only changes when the child (or its own children) change, so a stable
 // subtree costs one head-index lookup per render, never a layer reparse.
+// A miss is never stored. Heads are immutable, so a stored false is the
+// head's own children list, not a cold pool.
 const branchByHeadSig = new Map<string, boolean>()
+
+type FreshBranches = {
+  branches: Set<string>
+  cold: boolean
+  /** Names whose current head could not be read. They are not leaves. */
+  unresolved: Set<string>
+}
+
+/** Pathway status from each child's CURRENT head. The parent's stored copy
+ *  of that child goes stale under per-page history: a grandchild commits the
+ *  child, not the parent. No head marker is a leaf. A cold pool miss is not. */
+async function readFreshBranches(
+  history: HistoryService,
+  parentSegments: readonly string[],
+  names: Iterable<string>,
+): Promise<FreshBranches> {
+  const branches = new Set<string>()
+  const unresolved = new Set<string>()
+  let cold = false
+  await Promise.all([...names].map(async (name) => {
+    try {
+      const childLocSig = await history.sign({ explorerSegments: () => [...parentSegments, name] })
+      const headSig = await history.latestMarkerSigFor(childLocSig, name)
+      // No head marker = the child never committed a layer of its own = an
+      // authoritative leaf. NOT a cold miss — don't flag the pass cold, or a
+      // leaf-heavy layer would retry forever.
+      if (!headSig) return
+      let hasChildren = branchByHeadSig.get(headSig)
+      if (hasChildren === undefined) {
+        const head = await history.getLayerBySig(headSig)
+        if (!head) {
+          // TRANSIENT cold-pool miss: the head sig exists but its bytes
+          // aren't pooled yet. getLayerBySig returns null here EXACTLY as it
+          // does for a genuine absence, so this must NOT conclude "no children"
+          // and must NOT cache that false. A cached false painted the tile as
+          // a leaf and routed its click to open instead of navigating in.
+          cold = true
+          unresolved.add(name)
+          return
+        }
+        const kids = (head as { children?: unknown } | null)?.children
+        hasChildren = Array.isArray(kids) && kids.length > 0
+        branchByHeadSig.set(headSig, hasChildren)
+      }
+      if (hasChildren) branches.add(name)
+    } catch {
+      // A read threw mid-resolution — transient. Leave it unresolved.
+      cold = true
+      unresolved.add(name)
+    }
+  }))
+  return { branches, cold, unresolved }
+}
+
+function adoptFreshBranches(into: Set<string>, fresh: FreshBranches): void {
+  for (const name of fresh.branches) into.add(name)
+  for (const name of fresh.unresolved) into.add(name)
+}
 
 async function resolveChildNames(
   history: HistoryService,
@@ -511,12 +571,12 @@ async function resolveChildNames(
     resolved: number
     unresolvedSigs?: string[]
   },
-  // Optional out-param: child NAMES that are branches (have their own
-  // children). Derived from each child's `children` array LENGTH — one level
-  // down, never loading grandchildren — from the SAME manifest / per-child
-  // resolution that produces names. Lets the render get name + branch-status
-  // from a single read and DELETE the separate per-child branchSet walk that
-  // re-loaded every child on every frame.
+  // Optional out-param: child NAMES that are pathways. Filled from each
+  // child's CURRENT head (`readFreshBranches`) after the names resolve.
+  // The parent's stored copy of the child is not a source: per-page history
+  // leaves it stale. A cold head is not a leaf — it is added here so the
+  // click can still enter, and `branchStats.cold` tells the caller not to
+  // cache that answer.
   branchesOut?: Set<string>,
   // Optional out-param: set `cold=true` when a child's branch-STATUS could not
   // be read this pass because its head-layer bytes weren't pooled yet (a
@@ -532,7 +592,6 @@ async function resolveChildNames(
   // for the optimize phase.
   options?: {
     mayUpgradePack?: boolean
-    onBranchesFreshened?: (branches: Set<string>) => void
   },
 ): Promise<Set<string>> {
   const out = new Set<string>()
@@ -542,74 +601,13 @@ async function resolveChildNames(
   }
   if (!content?.children?.length) return out
 
-  // Branch-status (does a child have its OWN children?) must come from the
-  // child's CURRENT head, not the parent's stored child sig — per-page
-  // history leaves that sig stale, so a child that gained grandchildren since
-  // the parent last committed would otherwise show no branch dot. Path-address
-  // each child by name and read its head's children length. branchesOut only
-  // gets fresh adds now; the stale parent-sig derivation is gone.
-  const readFreshBranches = async (names: Iterable<string>): Promise<{ branches: Set<string>; cold: boolean }> => {
-    const branches = new Set<string>()
-    let cold = false
-    await Promise.all([...names].map(async (name) => {
-      try {
-        const childLocSig = await history.sign({ explorerSegments: () => [...parentSegments, name] })
-        const headSig = await history.latestMarkerSigFor(childLocSig, name)
-        // No head marker = the child never committed a layer of its own = an
-        // authoritative leaf. NOT a cold miss — don't flag the pass cold, or a
-        // leaf-heavy layer would retry forever.
-        if (!headSig) return
-        let hasChildren = branchByHeadSig.get(headSig)
-        if (hasChildren === undefined) {
-          const head = await history.getLayerBySig(headSig)
-          if (!head) {
-            // TRANSIENT cold-pool miss: the head sig exists but its bytes
-            // aren't pooled yet. getLayerBySig returns null here EXACTLY as it
-            // does for a genuine absence (history.service.ts getLayerBySig), so
-            // we must NOT conclude "no children" — and, critically, must NOT
-            // cache that false into the module-global branchByHeadSig. Doing so
-            // poisoned the branch dot for the whole session: the tile painted
-            // as a non-branch, so #onPointerDown/#onClick routed its click to
-            // the 'open' editor action instead of navigating in — locking the
-            // user out of the child branch until a full reload. Leave it
-            // unresolved and flag the pass cold so the caller re-renders once
-            // the neighbourhood warms.
-            cold = true
-            return
-          }
-          const kids = (head as { children?: unknown } | null)?.children
-          hasChildren = Array.isArray(kids) && kids.length > 0
-          branchByHeadSig.set(headSig, hasChildren)
-        }
-        if (hasChildren) branches.add(name)
-      } catch {
-        // A read threw mid-resolution — transient. Leave the dot off for now
-        // and flag cold so the caller retries; never cache a false.
-        cold = true
-      }
-    }))
-    return { branches, cold }
-  }
-
-  // A current-layer pack already contains each direct child's layer. Names and
-  // branch flags therefore come from that ONE read. Per-child path/head checks
-  // are only a repair for old packs whose ancestor sig was not propagated; they
-  // must never sit between a navigation gesture and paint. Run the repair at
-  // idle and ask the owner to repaint only when a complete fresh result differs.
-  const freshenBranchesAfterPaint = (names: Iterable<string>): void => {
-    if (!options?.onBranchesFreshened) return
-    const snapshot = [...names]
-    const run = () => {
-      void readFreshBranches(snapshot).then(({ branches, cold }) => {
-        if (branchStats) branchStats.cold = cold
-        if (!cold) options.onBranchesFreshened?.(branches)
-      }).catch(() => {
-        if (branchStats) branchStats.cold = true
-      })
-    }
-    const ric = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback
-    if (typeof ric === 'function') ric(run, { timeout: 4_000 })
-    else setTimeout(run, 0)
+  // Names come from the pack. Pathway status waits for the current head,
+  // in this same pass, before the caller paints or caches hasBranch.
+  const settleBranches = async (): Promise<void> => {
+    if (!branchesOut || out.size === 0) return
+    const fresh = await readFreshBranches(history, parentSegments, out)
+    adoptFreshBranches(branchesOut, fresh)
+    if (branchStats) branchStats.cold = fresh.cold
   }
 
   // Children manifest fast-path. When the parent's sig is known, try
@@ -652,9 +650,6 @@ async function resolveChildNames(
         ShowCellDrone.adoptPackedVisual(entry as { visual?: { sig?: string; webp?: string; type?: string } })
         if (entry?.layer?.name) {
           out.add(entry.layer.name)
-          if (branchesOut && Array.isArray(entry.layer.children) && entry.layer.children.length > 0) {
-            branchesOut.add(entry.layer.name)
-          }
           resolvedCount++
           if (seed && entry.sig) seed.call(history, entry.sig, entry.layer)
         } else if (entry?.sig) {
@@ -674,7 +669,7 @@ async function resolveChildNames(
       // an immutable content sig, so a successful upgrade is permanent.
       // Render pass only — see `options.mayUpgradePack`.
       if (options?.mayUpgradePack) upgradeThinPack(parentLayerSig, manifest, content.children)
-      freshenBranchesAfterPaint(out)
+      await settleBranches()
       return out
     }
   }
@@ -696,9 +691,6 @@ async function resolveChildNames(
     const child = children[__i]
     if (child?.name) {
       out.add(child.name); __resolvedCount++
-      if (branchesOut && Array.isArray(child.children) && child.children.length > 0) {
-        branchesOut.add(child.name)
-      }
     }
     else if (content.children[__i]) __nullSigs.push(content.children[__i])
   }
@@ -731,7 +723,7 @@ async function resolveChildNames(
   const allResolved = children.length === content.children.length && children.every(c => !!c?.name)
   if (parentLayerSig && allResolved) manifestOptimizer()?.enqueue?.(parentLayerSig, content.children)
 
-  freshenBranchesAfterPaint(out)
+  await settleBranches()
   return out
 }
 
@@ -919,16 +911,14 @@ export class ShowCellDrone extends Drone {
   #bakedImageAtlasGen = -1
   #bakedLabelAtlasGen = -1
 
-  // Complete child membership, memoized by the PARENT layer's content sig:
-  // names + the subset that are branches (have their own children). Only a
-  // COMPLETE resolution is stored, so a warm re-render reads the full set —
-  // names AND branch-status — with ZERO per-child lookups, and a partial can
-  // never be cached. The parent's content sig is the perfect key: the child
-  // set cannot change without the sig changing, so an entry stays valid until
-  // the layer itself does. This is the "optimize once, read until the list
-  // changes" pattern — safe only because we gate on completeness before
-  // writing here.
-  readonly #completeChildNamesByParentSig = new Map<string, { names: string[]; branches: string[] }>()
+  // Complete child NAMES, memoized by the PARENT layer's content sig.
+  // Names change only when the parent layer does, so the sig is the right key.
+  // Pathway status is NOT stored here. A grandchild commits the child, not
+  // the parent, so a branch flag cached under the parent sig stays "leaf"
+  // after the child has children. Every pass reads the child's current head.
+  readonly #completeChildNamesByParentSig = new Map<string, { names: string[] }>()
+  /** This pass's head read missed. Do not write hasBranch into the back-nav cache. */
+  #branchReadCold = false
 
   /** How many prepared views to keep. Was 256 — smaller than the number of
    *  locations a single neighbourhood warm prepares (512 nodes), so the memo
@@ -2973,28 +2963,32 @@ export class ShowCellDrone extends Drone {
       if (fillAdded && change.added.length > 0) {
         const added = change.added.map(a => a.name)
         const lineage = this.resolve<any>('lineage')
-        void Promise.resolve(lineage?.explorerDir?.()).then(async (dir) => {
-          if (!dir) return
-          // Branch flags (cheap, parallel). A flip must PROPAGATE: the
-          // payload/cache/paint above were built from the pre-fill snapshot,
-          // so a silently-marked branch stays invisible to tile-overlay
-          // (#branchLabels) and stale in #layerCellsCache. Queue an empty
-          // incremental flush to rebuild + re-emit from the marked state.
-          // added is empty on that re-run, so the fill doesn't recurse.
+        void (async () => {
+          // Pathway status is the new tile's current head, not a named
+          // folder. A cold head stays enterable. A flip must PROPAGATE:
+          // the payload above was built before this read, so a marked
+          // branch stays invisible to tile-overlay until an empty
+          // incremental flush rebuilds it. added is empty on that re-run.
+          const history = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
+          const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
           let branchFlipped = false
-          await Promise.all(added.map(async name => {
-            const hasBranch = await this.checkCellHasBranch(dir, name)
-            if (hasBranch && !this.#slots.hasBranch(name)) {
-              this.#slots.markBranch(name)  // idempotent; pinned-safe
-              branchFlipped = true
+          if (history) {
+            const fresh = await readFreshBranches(history, parentSegments, added)
+            for (const name of added) {
+              if ((fresh.branches.has(name) || fresh.unresolved.has(name)) && !this.#slots.hasBranch(name)) {
+                this.#slots.markBranch(name)
+                branchFlipped = true
+              }
             }
-          }))
-          // Images + props — pushed per-cell via in-place update
-          for (const name of added) {
-            await this.#tryInPlaceCellUpdate(name, { dir })
+          }
+          const dir = await lineage?.explorerDir?.()
+          if (dir) {
+            for (const name of added) {
+              await this.#tryInPlaceCellUpdate(name, { dir })
+            }
           }
           if (branchFlipped) this.#queueIncremental({})
-        }).catch(() => { /* best effort */ })
+        })().catch(() => { /* best effort */ })
       }
 
       this.emitEffect('render:cell-count', this.#buildCellCountPayload(cells))
@@ -3046,8 +3040,13 @@ export class ShowCellDrone extends Drone {
       for (const name of change.removed) { this.#slots.remove(name); this.renderedCells.delete(name) }
     }
     if (change.added?.length) {
+      const history = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
+      const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
+      const fresh = history
+        ? await readFreshBranches(history, parentSegments, change.added)
+        : { branches: new Set<string>(), unresolved: new Set<string>(), cold: false }
       for (const name of change.added) {
-        const hasBranch = await this.checkCellHasBranch(dir, name)
+        const hasBranch = fresh.branches.has(name) || fresh.unresolved.has(name)
         if (!this.#slots.add(name, hasBranch)) {
           this.#layerCellsCache.delete(this.renderedLocationKey)
           this.renderedCellsKey = ''
@@ -3340,6 +3339,7 @@ export class ShowCellDrone extends Drone {
   // The body of renderFromSynchronize, factored out so the dedup wrapper
   // above stays readable. All the existing logic lives here unchanged.
   readonly #renderFromSynchronizeInner = async (lineage: any, locationKey: string, axial: any, passSegments: readonly string[]): Promise<void> => {
+    this.#branchReadCold = false
     // Re-narrow pixi handles. The outer renderFromSynchronize already
     // guarded these but TS can't carry the narrowing across the function
     // boundary. Cheap re-check.
@@ -3759,11 +3759,9 @@ export class ShowCellDrone extends Drone {
     const ephemeralCellSet = new Set<string>()
     const peerCellSet = new Set<string>()
 
-    // branchSet holds names whose tile has its own sub-tiles (so a
+    // branchSet holds names whose current head lists children (so a
     // click drills in instead of opening the editor). Starts empty;
-    // populated from layer sublayers once the cursor's content is
-    // resolved below. The old OPFS-walking #computeBranchSet path is
-    // retired — branches are a property of the merkle tree, not OPFS.
+    // filled from those heads once the cursor's content is resolved.
     let branchSet: Set<string> = new Set()
 
     // note: apply history — filter out cells whose last operation is "remove"
@@ -3990,12 +3988,9 @@ export class ShowCellDrone extends Drone {
             this.#seedChildReadinessForLocation(passLocSig)
           }
           childResolveExpected = Array.isArray(content.children) ? content.children.length : 0
-          // Warm-path memo: a prior COMPLETE resolution under this exact
-          // parent content sig is authoritative — the child set can't have
-          // changed without the sig changing. Read the full membership —
-          // names AND branch-status — with ZERO per-child lookups. Only a
-          // partial (cold) pass ever touches resolveChildNames, and only a
-          // complete pass writes the memo.
+          // Names are memoized by the parent content sig. Pathway status is
+          // read from each child's current head on every pass, including a
+          // memo hit — a grandchild does not change this sig.
           const branchSetFromResolve = new Set<string>()
           const memoRaw = parentLayerSig ? this.#completeChildNamesByParentSig.get(parentLayerSig) : undefined
           // Defense-in-depth: a memo entry is valid only if its size matches
@@ -4003,23 +3998,20 @@ export class ShowCellDrone extends Drone {
           // stale cross-location sig) ever returning another location's
           // children — the leak is then a cache miss, not wrong tiles.
           const memo = (memoRaw && memoRaw.names.length === childResolveExpected) ? memoRaw : undefined
+          const branchStats = { cold: false }
           if (memo) {
             layerAllowed = new Set(memo.names)
-            for (const b of memo.branches) branchSetFromResolve.add(b)
             childResolveComplete = true
+            const fresh = await readFreshBranches(historyService, parentSegments, memo.names)
+            adoptFreshBranches(branchSetFromResolve, fresh)
+            branchStats.cold = fresh.cold
           } else {
             const stats: {
               expected: number
               resolved: number
               unresolvedSigs: string[]
             } = { expected: 0, resolved: 0, unresolvedSigs: [] }
-            const branchStats = { cold: false }
             const membershipGenerationAtStart = this.#membershipGeneration
-            // branchSetFromResolve is filled in the SAME pass that resolves
-            // names — one read, no separate per-child branch walk. branchStats
-            // reports separately whether any child's branch-STATUS came back on
-            // a cold pool miss (see freshenBranches) — names can be complete
-            // while branch-status is not.
             layerAllowed = await resolveChildNames(
               historyService,
               parentSegments,
@@ -4029,48 +4021,19 @@ export class ShowCellDrone extends Drone {
               stats,
               branchSetFromResolve,
               branchStats,
-              {
-                mayUpgradePack: true,
-                onBranchesFreshened: fresh => {
-                  if (!parentLayerSig) return
-                  const prepared = this.#completeChildNamesByParentSig.get(parentLayerSig)
-                  if (!prepared) return
-                  const old = new Set(prepared.branches)
-                  if (old.size === fresh.size && [...fresh].every(name => old.has(name))) return
-                  this.#completeChildNamesByParentSig.set(parentLayerSig, {
-                    names: prepared.names,
-                    branches: [...fresh],
-                  })
-                  // The repair ran after paint. If the participant is still on
-                  // this location, one targeted pass updates branch dots and
-                  // click routing; otherwise the corrected memo is ready for
-                  // the next visit. Never put the head walk back on navigation.
-                  if (this.renderedLocationKey === locationKey) {
-                    this.#forceNextRender = true
-                    this.requestRender()
-                  }
-                },
-              },
+              { mayUpgradePack: true },
             )
             // Complete iff every child sig produced a name. expected===0 is
             // a (trivially complete) empty layer.
             childResolveComplete = stats.expected === 0 || stats.resolved >= stats.expected
             childResolveUnresolved = stats.unresolvedSigs
-            // A complete NAME set does NOT mean branch-status is settled: a
-            // child's head bytes can be cold while its name resolved from the
-            // manifest. Only memoize when BOTH are settled — caching a cold
-            // branch set under this parent sig would re-serve a missing branch
-            // dot on every later render at this location and lock the tile out
-            // of navigation (the same poison the per-headSig guard in
-            // freshenBranches prevents). When branch-status is cold, schedule a
-            // bounded, NON-blocking re-render so the dot fills in this visit;
-            // the layer still paints now — a missing dot is not a missing tile,
-            // so we never hold the paint the way the name gate does.
-            const branchComplete = !branchStats.cold
-            // Membership moved under this pass: its answer predates an add or
-            // remove, so it must not become the memo (see #membershipGeneration).
+            // Names may be memoized while a head is still cold. Branch flags
+            // are not stored on this memo. A cold head is not a leaf: it is
+            // already in branchSetFromResolve so the click can enter, and the
+            // retry below reads it again. Caching that provisional answer
+            // would lock the tile out of navigation.
             const membershipStill = membershipGenerationAtStart === this.#membershipGeneration
-            if (childResolveComplete && branchComplete && membershipStill && parentLayerSig && stats.expected > 0) {
+            if (childResolveComplete && membershipStill && parentLayerSig && stats.expected > 0) {
               const names: string[] = []
               for (const n of layerAllowed) if (typeof n === 'string' && n.length > 0) names.push(n)
               // Bound: evict oldest (Map keeps insertion order) past a cap so
@@ -4080,19 +4043,20 @@ export class ShowCellDrone extends Drone {
                 const oldest = this.#completeChildNamesByParentSig.keys().next().value
                 if (oldest !== undefined) this.#completeChildNamesByParentSig.delete(oldest)
               }
-              this.#completeChildNamesByParentSig.set(parentLayerSig, { names, branches: [...branchSetFromResolve] })
+              this.#completeChildNamesByParentSig.set(parentLayerSig, { names })
               this.#preparedViewPath.set(parentLayerSig, (this.#passSegments ?? []).join('/'))
             }
-            if (parentLayerSig) {
-              if (branchComplete) {
-                this.#branchColdRetries.delete(parentLayerSig)
-              } else {
-                const n = (this.#branchColdRetries.get(parentLayerSig) ?? 0) + 1
-                if (n <= ShowCellDrone.#BRANCH_COLD_MAX_RETRIES) {
-                  this.#branchColdRetries.set(parentLayerSig, n)
-                  this.#forceNextRender = true
-                  setTimeout(() => this.requestRender(), Math.min(500, 100 * n))
-                }
+          }
+          this.#branchReadCold = branchStats.cold
+          if (parentLayerSig) {
+            if (!branchStats.cold) {
+              this.#branchColdRetries.delete(parentLayerSig)
+            } else {
+              const n = (this.#branchColdRetries.get(parentLayerSig) ?? 0) + 1
+              if (n <= ShowCellDrone.#BRANCH_COLD_MAX_RETRIES) {
+                this.#branchColdRetries.set(parentLayerSig, n)
+                this.#forceNextRender = true
+                setTimeout(() => this.requestRender(), Math.min(500, 100 * n))
               }
             }
           }
@@ -4116,14 +4080,8 @@ export class ShowCellDrone extends Drone {
           }
           layerAllowed = new Set(validNames)
 
-          // Branch-set comes from the SAME resolution that produced names —
-          // populated by resolveChildNames from each child's `children` array
-          // length (manifest hit OR the one-time cold per-child build), and
-          // memoized alongside names. The old separate per-child
-          // getLayerBySig walk — which re-loaded every child on EVERY render,
-          // even on a manifest hit — is GONE. The render now loads the
-          // current layer + its manifest, and never a child layer at draw
-          // time.
+          // Pathway status is the child's current head: its children list is
+          // non-empty. The parent's stored copy of that child is not consulted.
           branchSet = branchSetFromResolve
         } else if (layerLookupSucceeded && !isRewound) {
           // Layer-as-primitive: a location with no committed layer owns
@@ -4916,7 +4874,7 @@ export class ShowCellDrone extends Drone {
       const maxCells = Math.min(cellNames.length, axialMax)
       const eagerCells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
       if (eagerCells.length > 0) {
-        this.#layerCellsCache.set(locationKey, {
+        this.#storeBackNavCells(locationKey, {
           cells: [...eagerCells], cellNames, localCellSet, branchSet,
         })
       }
@@ -4934,7 +4892,7 @@ export class ShowCellDrone extends Drone {
       // streamCells signature still wants a non-null dir for image loads;
       // when we have none, hand a typed sentinel and let the function's
       // null-tolerant branches no-op the disk lookups.
-      void this.streamCells(dir as FileSystemDirectoryHandle, cellNames, localCellSet, axial, branchSet, myToken, locationKey)
+      void this.streamCells(dir as FileSystemDirectoryHandle, cellNames, localCellSet, axial, branchSet, myToken, locationKey, !this.#branchReadCold)
       return
     }
 
@@ -5039,7 +4997,7 @@ export class ShowCellDrone extends Drone {
     }
 
     // cache for instant back-navigation
-    this.#layerCellsCache.set(locationKey, { cells: [...cells], cellNames, localCellSet, branchSet })
+    this.#storeBackNavCells(locationKey, { cells: [...cells], cellNames, localCellSet, branchSet })
     // seed the slot state machine — incremental paths read from here after every full render
     this.#slots.seed({ names: cellNames, localCells: localCellSet, branches: branchSet, mode: this.#layoutMode })
   }
@@ -5077,15 +5035,27 @@ export class ShowCellDrone extends Drone {
     branchSet: Set<string> | undefined,
     myToken: number,
     myLocationKey: string,
+    branchSettled = true,
   ): Promise<void> => {
     try {
-      await this.#streamCellsBody(dir, cellNames, localCellSet, axial, branchSet, myToken, myLocationKey)
+      await this.#streamCellsBody(dir, cellNames, localCellSet, axial, branchSet, myToken, myLocationKey, branchSettled)
     } finally {
       if (this.streamActive && myToken === this.#streamToken) {
         this.streamActive = false
         this.emitEffect('navigation:guard-end', {})
       }
     }
+  }
+
+  /** Back-nav paints hasBranch from this cache verbatim. A cold head read
+   *  must not be stored: the next visit would treat an unresolved pathway
+   *  as a leaf. Drop any previous entry so that visit reads the head again. */
+  #storeBackNavCells(key: string, entry: { cells: Cell[]; cellNames: string[]; localCellSet: Set<string>; branchSet: Set<string> }): void {
+    if (this.#branchReadCold) {
+      this.#layerCellsCache.delete(key)
+      return
+    }
+    this.#layerCellsCache.set(key, entry)
   }
 
   readonly #streamCellsBody = async (
@@ -5096,6 +5066,7 @@ export class ShowCellDrone extends Drone {
     branchSet: Set<string> | undefined,
     myToken: number,
     myLocationKey: string,
+    branchSettled = true,
   ): Promise<void> => {
     this.streamActive = true
     const hcNav = (window as unknown as { __hcNav?: (l: string, e?: string) => void }).__hcNav
@@ -5195,7 +5166,11 @@ export class ShowCellDrone extends Drone {
     // cells under the wrong cache key and make subsequent back-nav
     // resurrect them on the wrong layer.
     const bset = branchSet ?? new Set<string>()
-    this.#layerCellsCache.set(myLocationKey, { cells: [...allCells], cellNames, localCellSet, branchSet: bset })
+    if (branchSettled) {
+      this.#layerCellsCache.set(myLocationKey, { cells: [...allCells], cellNames, localCellSet, branchSet: bset })
+    } else {
+      this.#layerCellsCache.delete(myLocationKey)
+    }
     this.#slots.seed({ names: cellNames, localCells: localCellSet, branches: bset, mode: this.#layoutMode })
 
     this.requestRender()
@@ -6514,36 +6489,17 @@ export class ShowCellDrone extends Drone {
     // into a single render.
     this.onEffect<{ cell: string; segments?: string[]; groupId?: string }>('cell:added', (payload) => {
       if (!payload?.cell) return
-      // A child gaining its FIRST child flips its branch-status AS SEEN FROM ITS
-      // PARENT — but per-page history commits only the leaf (the child's own
-      // layer), never re-committing the parent, so the parent's content sig is
-      // unchanged and its #completeChildNamesByParentSig entry still lists this
-      // child as a leaf. On a later memo HIT that stale branch-set is re-served
-      // and freshenBranches never re-runs, so the parent's tile paints with no
-      // branch dot and refuses to navigate in. Drop the whole memo (a pure perf
-      // cache; re-resolution runs warm right after an edit) so the parent
-      // re-derives branch-status on its next render. Cleared BEFORE the
-      // current-location guard below so an add at ANY location invalidates a
-      // possibly-ancestor entry. branchByHeadSig is intentionally NOT cleared —
-      // it is keyed by the immutable head sig, so a changed head is just a miss.
-      // TARGETED: only the ancestors of the add can have a stale branch dot.
-      // Dropping EVERY prepared view (what this used to do) threw away the
-      // entire session's preloading on a single tile creation — anywhere.
+      // A grandchild does not change the parent's content sig. The name memo
+      // is still valid, but drop the ancestors anyway: a warm pass then
+      // re-reads the new head instead of a neighbourhood view prepared
+      // against the old one. branchByHeadSig stays — a new head is a miss.
+      // Targeted so one create does not throw away every prepared view.
       this.#invalidatePreparedViewsFor(payload.segments)
-      // The memo clear above only heals the SLOW render path. Back-nav restores
-      // a parent location SYNCHRONOUSLY from #layerCellsCache — a SEPARATE cache
-      // the fast path paints VERBATIM, cell-by-cell hasBranch flags included,
-      // never re-resolving branch-status. Those flags were captured when the
-      // parent last rendered, with this child still a LEAF; so after the child
-      // gains its first grandchild, the parent's cached cells still mark it
-      // hasBranch=false. #buildCellCountPayload then omits it from branchLabels,
-      // and the tile-overlay routes its click to the 'open' editor action
-      // instead of #navigateInto — the branch is un-enterable until a full
-      // reload drops the in-memory cache ("can't click into the branch until I
-      // refresh"). Invalidate the fast-path cache alongside the memo. Same
-      // perf-cache rationale (it re-warms on the next render) and same reason
-      // it's cleared BEFORE the location guard: an add at a DESCENDANT location
-      // still flips an ancestor's branch dot.
+      // Back-nav paints hasBranch from #layerCellsCache verbatim. Those flags
+      // were captured when this child was still a leaf, so after it gains a
+      // child the cached tile stays out of branchLabels and the click runs
+      // open. Drop the cache before the location guard: an add under a
+      // descendant still has to flip the ancestor's pathway.
       this.#layerCellsCache.clear()
       // Only react to additions at the location we're currently showing.
       // One create can emit cell:added for several locations at once — a
@@ -6551,14 +6507,9 @@ export class ShowCellDrone extends Drone {
       // the other locations must NOT appear in this view. When segments are
       // absent (legacy emitters) we assume the current location.
       if (payload.segments && !this.#segmentsAreCurrent(payload.segments)) {
-        // A child added ONE level below this screen is deterministic proof
-        // that its parent tile — visible HERE — is now a branch. Flip it
-        // synchronously from the event itself: the eager async branch check
-        // (checkCellHasBranch in the incremental fill) races importTree and
-        // usually reads OPFS before the child bag exists, so a command-line
-        // `abc/123` left `abc` painted as a leaf — omitted from branchLabels,
-        // click routed to the editor instead of #navigateInto, un-enterable
-        // until refresh. No OPFS read needed: the event IS the proof.
+        // A child added one level below this screen is proof the parent tile
+        // is a pathway. Flip it from the event. The head read in the
+        // incremental fill arrives later and is not required for the click.
         this.#flipParentBranchFor(payload.segments)
         return
       }
@@ -6596,18 +6547,10 @@ export class ShowCellDrone extends Drone {
 
     this.onEffect<{ cell: string; groupId?: string }>('cell:removed', (payload) => {
       if (!payload?.cell) return
-      // Symmetric to cell:added: a child losing its LAST child flips it back to
-      // a leaf, and the parent is not re-committed, so its cached branch-set is
-      // stale. Invalidate the parent-branch memo so the (now stale) branch dot
-      // is re-derived on the next render. See the cell:added note above.
-      // TARGETED, same as cell:added — a removal invalidates its ancestors,
-      // not every prepared view in the session.
+      // Symmetric to cell:added: a child losing its last child becomes a leaf
+      // without a new parent signature. Drop the ancestor name memo and the
+      // back-nav cache, which still paints the old pathway.
       this.#invalidatePreparedViewsFor((payload as { segments?: readonly string[] }).segments)
-      // Same back-nav fast-path staleness as cell:added: a child losing its LAST
-      // grandchild flips branch→leaf, but the parent's #layerCellsCache entry
-      // still marks it a branch (a stale dot + a click that drills into a now-
-      // empty layer) until reload. Invalidate the fast-path cache alongside the
-      // memo. See the cell:added note.
       this.#layerCellsCache.clear()
       this.#pendingRemoves.add(payload.cell)
       this.cellImageCache.delete(payload.cell)
@@ -7299,8 +7242,12 @@ export class ShowCellDrone extends Drone {
       // (not keyed by the often-empty renderedLocationKey) so the next pass
       // takes the full path and re-resolves peers; the emit is debounced
       // ~150ms upstream, so this is one rebuild per burst.
+      // #sourceEntriesCache is deliberately KEPT: it is the last-known
+      // answer the render falls back to when source resolution overruns its
+      // budget (and every resolve overwrites it). Clearing it here made a
+      // slow source drop every peer tile for a pass, then bring them back —
+      // the tiles-in-and-out flicker.
       this.#layerCellsCache.clear()
-      this.#sourceEntriesCache.clear()
       this.renderedCellsKey = ''
       this.#slots.clear()
       this.requestRender()
@@ -7346,11 +7293,17 @@ export class ShowCellDrone extends Drone {
     // a rebuild so the heat ring updates. Cheap: same cells, only the heat
     // attribute changes. renderedCellsKey is cleared because buildCellsKey
     // doesn't hash heat, so without this the pass would short-circuit.
+    // Coalesced: peers entering children arrive in bursts, and each one used
+    // to force its own full rebuild.
+    let interestTimer: ReturnType<typeof setTimeout> | null = null
     this.onEffect('swarm:interest-changed', () => {
-      if (!this.#publicMode) return
-      this.#refreshPresenceGlow()
-      this.renderedCellsKey = ''
-      this.requestRender()
+      if (!this.#publicMode || interestTimer !== null) return
+      interestTimer = setTimeout(() => {
+        interestTimer = null
+        this.#refreshPresenceGlow()
+        this.renderedCellsKey = ''
+        this.requestRender()
+      }, 150)
     })
 
     // Location change — different lineage means different cell set;
@@ -8305,52 +8258,9 @@ export class ShowCellDrone extends Drone {
     this.atlasRenderer = renderer
   }
 
-  // Per-revision cache. Multiple callers per nav ask for the same dir's
-  // children; the OPFS scan is the same answer until lineage's #fsRevision
-  // listCellFolders retired: tile membership is read exclusively from
-  // the current layer's children slot via history.currentLayerAt +
-  // history.getLayerBySig. The OPFS hierarchy at hypercomb.io/<tile>/
-  // is no longer the source of truth for tile lists.
-
-  // Per-revision branch detection cache. checkCellHasBranch is one OPFS
-  // getDirectoryHandle + entries() iteration per cell — for an N-tile
-  // layer (root often has the most), every full render redid N+ OPFS
-  // calls even though nothing in the dir changed. WeakMap on the dir
-  // handle, keyed by lineage revision so any user FS mutation (which
-  // calls lineage.invalidate) busts the cache automatically. In-flight
-  // dedup mirrors listCellFolders so concurrent renders share one walk.
-  readonly #branchSetCache = new WeakMap<FileSystemDirectoryHandle, { revision: number; result: Set<string> }>()
-  readonly #branchSetPending = new WeakMap<FileSystemDirectoryHandle, { revision: number; promise: Promise<Set<string>> }>()
-
-  #computeBranchSet = async (dir: FileSystemDirectoryHandle, localCells: readonly string[]): Promise<Set<string>> => {
-    const lineage = this.resolve<any>('lineage')
-    const revision = Number(lineage?.changed?.() ?? 0)
-
-    const cached = this.#branchSetCache.get(dir)
-    if (cached?.revision === revision) return cached.result
-
-    const pending = this.#branchSetPending.get(dir)
-    if (pending?.revision === revision) return pending.promise
-
-    const promise = (async (): Promise<Set<string>> => {
-      const out = new Set<string>()
-      await Promise.all(localCells.map(async (name) => {
-        if (await this.checkCellHasBranch(dir, name)) out.add(name)
-      }))
-      if (Number(lineage?.changed?.() ?? 0) === revision) {
-        this.#branchSetCache.set(dir, { revision, result: out })
-      }
-      return out
-    })()
-
-    this.#branchSetPending.set(dir, { revision, promise })
-    promise.finally(() => {
-      const p = this.#branchSetPending.get(dir)
-      if (p?.promise === promise) this.#branchSetPending.delete(dir)
-    })
-
-    return promise
-  }
+  // Pathway status is the child's current head (`readFreshBranches`).
+  // Named OPFS folders are not a source: a new layer does not mint one,
+  // so a directory walk reported "leaf" for a tile that has children.
 
   // Single source of truth for the render:cell-count payload. Listeners
   // (TileSelectionDrone, TileOverlayDrone, etc.) read coords[i],
@@ -9146,19 +9056,6 @@ export class ShowCellDrone extends Drone {
     this.renderedCellsKey = ''
     this.#layerCellsCache.clear()
     this.requestRender()
-  }
-
-  private checkCellHasBranch = async (parentDir: FileSystemDirectoryHandle, cellName: string): Promise<boolean> => {
-    try {
-      const cellDir = await parentDir.getDirectoryHandle(cellName, { create: false })
-      for await (const [name, handle] of cellDir.entries()) {
-        // A branch is a NAMED child dir. Skip legacy underscore sidecars and
-        // sig-named dirs (64-hex: a sign(meaning) pool or a lineage sigbag)
-        // so a flat-root sibling never registers as a false branch.
-        if (handle.kind === 'directory' && !name.startsWith('__') && !/^[0-9a-f]{64}$/.test(name)) return true
-      }
-    } catch { /* cell doesn't exist or can't be read */ }
-    return false
   }
 
   // Rebuild #presenceGlowByLabel from the swarm's interest snapshot at the
@@ -11286,16 +11183,11 @@ export class ShowCellDrone extends Drone {
    *  shade said ready while the view was still cold. Preparing the view is what
    *  connects the two.
    *
-   *  GLOBAL BY CONSTRUCTION: the memo is keyed by the layer's CONTENT SIG, so
-   *  a prepared view is valid from anywhere, forever — content-addressed layers
-   *  are atomic, a changed child set is a different sig and simply misses. So
-   *  this can be run over the whole hive (usage-ordered by the preloader,
-   *  proximity-ordered by the visible branches) and never goes stale.
-   *
-   *  Writes the memo under EXACTLY the render pass's own conditions (complete
-   *  names + settled branch status), using the same resolver — a memo built
-   *  over a cold branch status would paint a branch as a leaf and lock the tile
-   *  out of navigation. */
+   *  The name memo is keyed by the layer's content sig: the direct child set
+   *  changes only when that sig does. Pathway flags are not in that memo.
+   *  They are read from each child's current head before the cell cache is
+   *  written, and a cold head writes nothing — a cached "leaf" is what locked
+   *  the click on open. */
   prepareView = async (layerSig: string, segments: readonly string[]): Promise<boolean> => {
     if (!layerSig || !isSignature(layerSig)) return false
     const locationKey = segments.length ? `/${segments.join('/')}` : '/'
@@ -11334,12 +11226,10 @@ export class ShowCellDrone extends Drone {
       let memo = this.#completeChildNamesByParentSig.get(layerSig)
       if (!memo || memo.names.length !== expected) {
         const stats = { expected: 0, resolved: 0, unresolvedSigs: [] as string[] }
-        const branches = new Set<string>()
-        const branchStats = { cold: false }
         const membershipGenerationAtStart = this.#membershipGeneration
-        const resolved = await resolveChildNames(history, segments, null, content, layerSig, stats, branches, branchStats)
+        const resolved = await resolveChildNames(history, segments, null, content, layerSig, stats)
         const complete = stats.expected > 0 && stats.resolved >= stats.expected
-        if (!complete || branchStats.cold) return false
+        if (!complete) return false
         // A child was added or removed while this resolved: the answer is
         // pre-add and may not become the memo or the fast-path cells.
         if (membershipGenerationAtStart !== this.#membershipGeneration) return false
@@ -11349,16 +11239,17 @@ export class ShowCellDrone extends Drone {
           const oldest = this.#completeChildNamesByParentSig.keys().next().value
           if (oldest !== undefined) this.#completeChildNamesByParentSig.delete(oldest)
         }
-        memo = { names, branches: [...branches] }
+        memo = { names }
         this.#completeChildNamesByParentSig.set(layerSig, memo)
         this.#preparedViewPath.set(layerSig, segments.join('/'))
       }
 
-      // "Prepared" must mean the whole first paint, not merely child names.
-      // Resolve durable tile order, hydrate every per-cell display cache, and
-      // build the same cache object the revisit fast path consumes.
+      // Pathway flags are settled here, even when the names were already
+      // memoized. A cold head is not stored.
+      const fresh = await readFreshBranches(history, segments, memo.names)
+      if (fresh.cold) return false
       const localCellSet = new Set(memo.names)
-      const branchSet = new Set(memo.branches)
+      const branchSet = fresh.branches
       const ordered = await this.#orderByIndexPinned(
         null as unknown as FileSystemDirectoryHandle,
         [...memo.names],

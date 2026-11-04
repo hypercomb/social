@@ -112,6 +112,8 @@ interface HostSyncLike {
    *  hosts (host-sync.service markPublic). */
   markPublic?: (sig: string, kind?: string, closure?: boolean, page?: readonly string[] | null | false) => Promise<void>
   drain?: () => Promise<void>
+  /** Sigs queued for the host and not yet receipted. */
+  pending?: () => Promise<string[]>
   reDrain?: () => Promise<unknown>
   isClosureAvailable?: (sig: string, kind: string, closure: boolean) => Promise<boolean>
   /** Available on one of THESE hosts (the nodes this publish writes to). */
@@ -141,6 +143,8 @@ export interface PublishProgress {
   phase: PublishPhase
   /** Objects still queued for the host, when known. */
   pending?: number
+  /** The files the host does not have yet (sigs), while they upload. */
+  owed?: string[]
 }
 
 /** Why a publish stopped short. Each maps to one thing the participant can do. */
@@ -424,7 +428,8 @@ async function publishBranchNow(
       if (available) break
       if (verdict.ownerHeld) { refusal = verdict.blocking ?? { host: answering[0] ?? '', state: 'refused', reason: '' }; break }
       if (Date.now() >= deadline) break
-      report({ phase: 'waiting', ...(pending >= 0 ? { pending } : {}) })
+      const owed = await hostSync.pending?.().catch(() => undefined)
+      report({ phase: 'waiting', ...(pending >= 0 ? { pending } : {}), ...(owed ? { owed } : {}) })
       await new Promise<void>(resolve => {
         const timer = setTimeout(() => { wake = null; resolve() }, AVAILABILITY_POLL_MS)
         wake = () => { clearTimeout(timer); wake = null; resolve() }

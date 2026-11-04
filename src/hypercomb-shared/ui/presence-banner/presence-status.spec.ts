@@ -340,10 +340,6 @@ describe("the room's two words", () => {
     // the page's own domain picks no host there either
     expect(modal).not.toMatch(/location\??\.(host|hostname|origin)\b/)
 
-    const banner = readFileSync(join(UI, 'presence-banner', 'presence-banner.component.ts'), 'utf8')
-    expect(banner).toContain('wordsAtHost(wordsBeside(this.#room(), this.#secret(), this.#swarmHost(), this.#locale()), this.#swarmHost())')
-    expect(banner).not.toContain('secretTag(')
-    expect(banner).not.toMatch(/location\??\.(host|hostname|origin)\b/)
   })
 
   it("the crumb's root is never the page's domain while in a swarm — it reads as home; the host stands beside the words (2026-10-11)", () => {

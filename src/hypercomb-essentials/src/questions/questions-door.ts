@@ -28,9 +28,8 @@ export const QUESTIONS_DOOR_SURFACE = 'hc-questions-door'
 const DOOR_Z = 59994
 const STYLE_ID = 'hc-questions-door-css'
 
-// Placed BELOW the presence strip (presence-banner.component.scss: it sits
-// just under the header and is 1.85rem tall), on the same header anchors, so
-// the two never overlap in a swarm — where both always show.
+// Just under the header, on its anchors. (It used to clear a presence strip
+// there; that strip is gone — the swarm's members live in the header rail.)
 const CSS = `
 hc-questions-door { position: fixed; z-index: ${DOOR_Z};
   top: max(calc(2.5rem * var(--hc-header-zoom, 1) + 2.75rem), calc(var(--hc-header-anchor, 2.5rem) + 2.4rem));

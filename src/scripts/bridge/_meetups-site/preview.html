@@ -113,6 +113,9 @@
   .mh .rows button.past{color:var(--n700)}
   .mh .rows button.past .rc{color:var(--n700)}
   .mh .rows button.sel b{color:var(--a700)}
+  .mh .rows .pastbox details{border-top:2px solid var(--divider)}
+  .mh .rows .pastbox summary .title{color:var(--n700)}
+  .mh .rows .pastbox .rows{border-top:0}
 
   /* the index controls: search, then the groups as filters */
   .mh .search{display:block;width:100%;min-height:42px;margin-top:var(--s3);padding:var(--s2) var(--s3);
@@ -211,6 +214,7 @@
         </div>
       </div>
       <div class="agenda"><b>01</b> Say hello — coffee, small bites · <b>02</b> Hypercomb fundamentals, a live demo · <b>03</b> Your projects and questions</div>
+      <div class="agenda"><b>9:00</b> Arrive · <b>9:15</b> Networking · <b>9:30–10:45</b> The meetup · <b>10:45–11:00</b> Networking · <b>11:00–12:00</b> Focus group · <b>1:30–2:30</b> Workshop</div>
       <div class="actions">
         <button type="button" class="btn btn-primary" data-join><span data-join-label>Join the meeting</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></button>
       </div>
@@ -249,10 +253,10 @@
     <!-- MEMBERS -->
     <section class="panel" data-panel="members" aria-label="Members">
       <span class="kicker">Members</span>
-      <h2>The people of this community.</h2>
-      <p class="sub">Everyone who has joined a meeting, from the lists the meetings keep. A hosted member carries their own picture and line, from their own host.</p>
+      <h2 data-people-title>Who is coming.</h2>
+      <p class="sub" data-people-sub>Each meeting keeps its own list, so every week starts fresh. The organizers are always on it. Choose a meeting in the Meetings list to see who is coming to it.</p>
       <ul class="people" data-people></ul>
-      <p class="none" data-people-none>Nobody has joined a meeting yet.</p>
+      <p class="none" data-people-none>Nobody has joined this meeting yet.</p>
     </section>
 
     <!-- 3 · COMMUNITY -->
@@ -283,7 +287,7 @@
       <span class="kicker">Weekly meetup · hosted by Hypercomb</span>
       <h2>Build your online community.</h2>
       <p class="sub">A free weekly get-together for anyone with a passion project or a business they want to see thrive online — web builders, startups and communities co-creating a humanity-first internet. Beginners welcome. No account, no email.</p>
-      <figure class="hero grayscale"><img src="hero.webp" alt="The Hypercomb workspace — a honeycomb of cells"></figure>
+      <figure class="hero"><img src="hero.webp" alt="The Hypercomb workspace — a honeycomb of cells"></figure>
       <div class="mini" style="margin-bottom:6px">Nine promises we make to everyone who joins</div>
       <div class="promises">
         <details><summary><span class="num">01</span><span class="title">No email or personal information</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
@@ -441,7 +445,7 @@
             if (!c || Number(c.kind) !== 30568 || !Array.isArray(c.tags)) return;
             var tag = function (k) { var t = c.tags.filter(function (t) { return t[0] === k; })[0]; return t ? String(t[1] || '') : ''; };
             var profile = tag('profile').toLowerCase();
-            var row = { who: tag('name').trim(), going: tag('going'), at: Number(c.created_at) || 0, signer: String(c.pubkey || '').toLowerCase(), member: names[i],
+            var row = { who: shownName(tag('name').trim()), going: tag('going'), at: Number(c.created_at) || 0, signer: String(c.pubkey || '').toLowerCase(), member: names[i],
               profile: SIG.test(profile) && tag('host') ? profile : '' };
             if (!row.who || !row.signer) return;
             var held = newest[row.signer];
@@ -451,11 +455,17 @@
           return Promise.all(rows.map(function (r) {
             if (!r.profile) return r;
             return readProfile(base, r.profile, r.signer).then(function (p) { if (p) { r.picture = p.picture; r.about = p.about; } return r; });
-          }));
+          })).then(function (all) { return withOrganizers(ev, all); });
         });
       });
       });
     });
+  }
+  // The page promises no email and no personal information: a name typed as
+  // an email address is shown as what comes before the @ — never the address.
+  function shownName(name) {
+    var at = String(name || '').indexOf('@');
+    return at < 0 ? name : (name.slice(0, at).trim() || 'A guest');
   }
   // A hosted attendee's profile, as this door picked it up from their host:
   // believed only when its bytes hash to the name their claim gave, it is a
@@ -573,7 +583,7 @@
       } else hex.textContent = initial(r.who);
       ring.appendChild(hex); li.appendChild(ring);
       var nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = r.who; li.appendChild(nm);
-      li.title = r.who + (r.about ? ' — ' + r.about : '') + (r.going === 'here' ? ' · here now' : '');
+      li.title = r.who + (r.organizer ? ' — organizer' : '') + (r.about ? ' — ' + r.about : '') + (r.going === 'here' ? ' · here now' : '');
       list.appendChild(li);
     });
     none.hidden = rows.length > 0;
@@ -616,8 +626,12 @@
       var names = groups();
       shown = shown.slice().sort(function (a, b) { return names.indexOf(groupOf(a)) - names.indexOf(groupOf(b)); });
     }
-    shown.forEach(function (ev) {
-      if (grouping && groupOf(ev) !== lastGroup) {
+    // THE WEEK ROLLS OVER on its own: a meeting is "to come" until its day has
+    // passed, so the list always opens on the coming week. What is behind us
+    // stays, folded shut — last week first, then everything earlier.
+    var target = into;
+    var placeRow = function (ev) {
+      if (grouping && ev.record.date >= t && groupOf(ev) !== lastGroup) {
         lastGroup = groupOf(ev);
         var gh = document.createElement('li'); gh.className = 'ghead';
         var gm = document.createElement('span'); gm.className = 'mini'; gm.textContent = lastGroup;
@@ -655,8 +669,29 @@
       row.addEventListener('contextmenu', function (e) { e.preventDefault(); });
       row.addEventListener('click', function () { if (held) { held = false; return; } select(ev); show('meeting'); });
       li.appendChild(row);
-      into.appendChild(li);
-    });
+      target.appendChild(li);
+    };
+    shown.filter(function (ev) { return ev.record.date >= t; }).forEach(placeRow);
+    var weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
+    var cutoff = weekAgo.getFullYear() + '-' + ('0' + (weekAgo.getMonth() + 1)).slice(-2) + '-' + ('0' + weekAgo.getDate()).slice(-2);
+    var folded = function (label, events) {
+      if (!events.length) return;
+      var box = document.createElement('li'); box.className = 'pastbox';
+      var det = document.createElement('details');
+      var sum = document.createElement('summary');
+      var num = document.createElement('span'); num.className = 'num'; num.textContent = String(events.length);
+      var title = document.createElement('span'); title.className = 'title'; title.textContent = label;
+      sum.appendChild(num); sum.appendChild(title);
+      sum.insertAdjacentHTML('beforeend', '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>');
+      var ul = document.createElement('ul'); ul.className = 'rows';
+      det.appendChild(sum); det.appendChild(ul); box.appendChild(det);
+      into.appendChild(box);
+      target = ul;
+      events.forEach(placeRow);
+    };
+    var behind = shown.filter(function (ev) { return ev.record.date < t; });
+    folded('Last week', behind.filter(function (ev) { return ev.record.date >= cutoff; }));
+    folded('Earlier', behind.filter(function (ev) { return ev.record.date < cutoff; }));
     return shown.length;
   }
   function renderFilters() {
@@ -691,50 +726,74 @@
     });
     none.hidden = (state.doors || []).length > 0;
   }
-  // THE MEMBERS: one row per key across every meeting's list — the newest
-  // claim names them, a verified profile dresses them, the count says how
-  // many meetings they joined, and a check-in today marks them here now.
+  // THE ORGANIZERS: always on the invites list of every meeting still to come.
+  // Said once by the organizer and published with this page — they are not
+  // claims anyone signed, so they are marked as organizers, never as people who
+  // joined, and a meeting already past keeps only the claims it really had.
+  var ORGANIZERS = [
+    { who: 'Jaime Weise' },
+    { who: 'Pavlos' },
+    { who: 'Lea L.' },
+    { who: 'Susan' },
+    { who: 'Ian' }
+  ];
+  function withOrganizers(ev, rows) {
+    if (!ev || ev.record.date < today()) return rows;
+    var named = {};
+    rows.forEach(function (r) { named[String(r.who || '').toLowerCase()] = true; });
+    var mine = ORGANIZERS.filter(function (o) { return !named[o.who.toLowerCase()]; }).map(function (o) {
+      return { who: o.who, going: 'yes', at: 0, signer: 'organizer:' + o.who.toLowerCase(), member: '', organizer: true };
+    });
+    return mine.concat(rows);
+  }
+  function personRow(m, note) {
+    var li = document.createElement('li');
+    if (m.here) li.classList.add('here');
+    var ring = document.createElement('span'); ring.className = 'ring';
+    var hex = document.createElement('span'); hex.className = 'hex';
+    if (m.picture) {
+      var img = document.createElement('img');
+      img.alt = ''; img.loading = 'lazy'; img.src = m.picture;
+      img.onerror = function () { img.remove(); hex.textContent = initial(m.who); };
+      hex.appendChild(img);
+    } else hex.textContent = initial(m.who);
+    ring.appendChild(hex); li.appendChild(ring);
+    var mid = document.createElement('span');
+    var nm = document.createElement('b'); nm.textContent = m.who; mid.appendChild(nm);
+    if (m.about) { var ab = document.createElement('span'); ab.className = 'ab'; ab.textContent = m.about; mid.appendChild(ab); }
+    li.appendChild(mid);
+    var pm = document.createElement('span'); pm.className = 'pm';
+    pm.textContent = note;
+    if (m.here) { var now = document.createElement('span'); now.className = 'now'; now.textContent = ' · here now'; pm.appendChild(now); }
+    li.appendChild(pm);
+    return li;
+  }
+  // THE MEMBERS OF ONE MEETING: the list that meeting keeps, nothing from any
+  // other week. A new meeting is a new record and so a new, empty list — each
+  // week starts fresh. The newest claim names a person, a verified profile
+  // dresses them, and a check-in on the day marks them here now.
   function membersOf() {
-    var by = {};
-    state.events.forEach(function (ev) {
-      (state.coming[ev.sig] || []).forEach(function (r) {
-        if (!isComing(r)) return;
-        var m = by[r.signer] || (by[r.signer] = { who: r.who, picture: '', about: '', meetings: 0, at: 0, here: false });
-        m.meetings++;
-        if (r.at >= m.at) { m.at = r.at; m.who = r.who; }
-        if (r.picture) m.picture = r.picture;
-        if (r.about) m.about = r.about;
-        if (r.going === 'here' && ev.record.date === today()) m.here = true;
-      });
+    var ev = state.selected, by = {};
+    if (!ev) return [];
+    (state.coming[ev.sig] || []).forEach(function (r) {
+      if (!isComing(r)) return;
+      var m = by[r.signer] || (by[r.signer] = { who: r.who, picture: '', about: '', at: 0, here: false, organizer: !!r.organizer });
+      if (r.at >= m.at) { m.at = r.at; m.who = r.who; }
+      if (r.picture) m.picture = r.picture;
+      if (r.about) m.about = r.about;
+      if (r.going === 'here' && ev.record.date === today()) m.here = true;
     });
     return Object.keys(by).map(function (k) { return by[k]; })
-      .sort(function (a, b) { return (b.here - a.here) || (b.meetings - a.meetings) || (b.at - a.at); });
+      .sort(function (a, b) { return ((b.organizer ? 1 : 0) - (a.organizer ? 1 : 0)) || (b.here - a.here) || (b.at - a.at); });
   }
   function renderPeople() {
     var list = $('[data-people]'), none = $('[data-people-none]');
     list.textContent = '';
+    var ev = state.selected;
+    $('[data-people-title]').textContent = ev ? 'Who is coming — ' + dayOf(ev.record) + '.' : 'Who is coming.';
     var rows = membersOf();
     rows.forEach(function (m) {
-      var li = document.createElement('li');
-      if (m.here) li.classList.add('here');
-      var ring = document.createElement('span'); ring.className = 'ring';
-      var hex = document.createElement('span'); hex.className = 'hex';
-      if (m.picture) {
-        var img = document.createElement('img');
-        img.alt = ''; img.loading = 'lazy'; img.src = m.picture;
-        img.onerror = function () { img.remove(); hex.textContent = initial(m.who); };
-        hex.appendChild(img);
-      } else hex.textContent = initial(m.who);
-      ring.appendChild(hex); li.appendChild(ring);
-      var mid = document.createElement('span');
-      var nm = document.createElement('b'); nm.textContent = m.who; mid.appendChild(nm);
-      if (m.about) { var ab = document.createElement('span'); ab.className = 'ab'; ab.textContent = m.about; mid.appendChild(ab); }
-      li.appendChild(mid);
-      var pm = document.createElement('span'); pm.className = 'pm';
-      pm.textContent = m.meetings + (m.meetings === 1 ? ' meeting' : ' meetings');
-      if (m.here) { var now = document.createElement('span'); now.className = 'now'; now.textContent = ' · here now'; pm.appendChild(now); }
-      li.appendChild(pm);
-      list.appendChild(li);
+      list.appendChild(personRow(m, m.organizer ? 'organizer' : 'coming'));
     });
     none.hidden = rows.length > 0;
   }

@@ -113,6 +113,9 @@
   .mh .rows button.past{color:var(--n700)}
   .mh .rows button.past .rc{color:var(--n700)}
   .mh .rows button.sel b{color:var(--a700)}
+  .mh .rows .pastbox details{border-top:2px solid var(--divider)}
+  .mh .rows .pastbox summary .title{color:var(--n700)}
+  .mh .rows .pastbox .rows{border-top:0}
 
   /* the index controls: search, then the groups as filters */
   .mh .search{display:block;width:100%;min-height:42px;margin-top:var(--s3);padding:var(--s2) var(--s3);
@@ -623,8 +626,12 @@
       var names = groups();
       shown = shown.slice().sort(function (a, b) { return names.indexOf(groupOf(a)) - names.indexOf(groupOf(b)); });
     }
-    shown.forEach(function (ev) {
-      if (grouping && groupOf(ev) !== lastGroup) {
+    // THE WEEK ROLLS OVER on its own: a meeting is "to come" until its day has
+    // passed, so the list always opens on the coming week. What is behind us
+    // stays, folded shut — last week first, then everything earlier.
+    var target = into;
+    var placeRow = function (ev) {
+      if (grouping && ev.record.date >= t && groupOf(ev) !== lastGroup) {
         lastGroup = groupOf(ev);
         var gh = document.createElement('li'); gh.className = 'ghead';
         var gm = document.createElement('span'); gm.className = 'mini'; gm.textContent = lastGroup;
@@ -662,8 +669,29 @@
       row.addEventListener('contextmenu', function (e) { e.preventDefault(); });
       row.addEventListener('click', function () { if (held) { held = false; return; } select(ev); show('meeting'); });
       li.appendChild(row);
-      into.appendChild(li);
-    });
+      target.appendChild(li);
+    };
+    shown.filter(function (ev) { return ev.record.date >= t; }).forEach(placeRow);
+    var weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
+    var cutoff = weekAgo.getFullYear() + '-' + ('0' + (weekAgo.getMonth() + 1)).slice(-2) + '-' + ('0' + weekAgo.getDate()).slice(-2);
+    var folded = function (label, events) {
+      if (!events.length) return;
+      var box = document.createElement('li'); box.className = 'pastbox';
+      var det = document.createElement('details');
+      var sum = document.createElement('summary');
+      var num = document.createElement('span'); num.className = 'num'; num.textContent = String(events.length);
+      var title = document.createElement('span'); title.className = 'title'; title.textContent = label;
+      sum.appendChild(num); sum.appendChild(title);
+      sum.insertAdjacentHTML('beforeend', '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>');
+      var ul = document.createElement('ul'); ul.className = 'rows';
+      det.appendChild(sum); det.appendChild(ul); box.appendChild(det);
+      into.appendChild(box);
+      target = ul;
+      events.forEach(placeRow);
+    };
+    var behind = shown.filter(function (ev) { return ev.record.date < t; });
+    folded('Last week', behind.filter(function (ev) { return ev.record.date >= cutoff; }));
+    folded('Earlier', behind.filter(function (ev) { return ev.record.date < cutoff; }));
     return shown.length;
   }
   function renderFilters() {

@@ -1112,28 +1112,54 @@ export class SwarmAdoptDrone extends Drone {
    *  tail of a big selection. Sequential folds keep commit order; the
    *  Beehaviors panel lands once, on the first tile that made it in. */
   #adoptMany = async (picks: readonly { label: string; pubkey?: string }[]): Promise<void> => {
-    const resolved = picks.map(pick => ({
-      label: pick.label,
-      pubkey: pick.pubkey || undefined,
-      entry: this.#peerEntryFor(pick.label, pick.pubkey || undefined),
-    }))
-    let first: string | null = null
-    let landed = 0
-    for (const r of resolved) {
-      if (!r.entry) {
-        this.#rowOutcome(r.label, undefined, false, `couldn't keep "${r.label}" — it's no longer offered here`)
+    // DURABLE, LIKE THE WAND. Every pick whose signature is witnessed goes
+    // through the persisted adopt queue (snapshot the handles while the peer
+    // cache is warm, then fold from first to last) — so a reload mid-batch,
+    // or a publisher who leaves, never cancels the rest: the queue heals the
+    // owed tiles from whichever host serves the signature. Folding each pick
+    // directly here was the old way, and it died with the page.
+    const at = this.#currentSegments()
+    const queue = this.#adoptQueue()
+    const batch = `many:${Date.now()}`
+    const queued: { sig: string; label: string; at: string[]; domain?: string; page: true; pubkey?: string }[] = []
+    const direct: { label: string; pubkey?: string; entry: Record<string, unknown> }[] = []
+    for (const pick of picks) {
+      const pubkey = pick.pubkey || undefined
+      const entry = this.#peerEntryFor(pick.label, pubkey)
+      if (!entry) {
+        this.#rowOutcome(pick.label, undefined, false, `couldn't keep "${pick.label}" — it's no longer offered here`)
         continue
       }
+      const branch = queue ? this.#resolvePeerBranch(pick.label, pubkey) : null
+      if (branch) queued.push({ sig: branch.layerSig, label: pick.label, at, domain: branch.domain, page: true, pubkey: branch.pubkey })
+      else direct.push({ label: pick.label, pubkey, entry })
+    }
+    let first: string | null = null
+    if (queue && queued.length > 0) {
+      for (const q of queued) {
+        // An explicit gesture is the way back in after a delete (as the wand).
+        clearAdoptTombstone([...at, q.label])
+        EffectBus.emitTransient('swarm:wand', { label: q.label })
+        EffectBus.emit('adopt:queued', { label: q.label, at })
+      }
+      queue.enqueueAll(queued, batch)
+      first = queued[0]?.label ?? null
+    }
+    // No signature witnessed (a static offer without one): the direct fold, as before.
+    let landed = 0
+    for (const r of direct) {
       const ok = await this.#adoptPageTile(r.label, r.pubkey, { entry: r.entry, silent: true })
       if (ok) { landed++; if (!first) first = r.label }
     }
-    if (landed > 0) {
+    if (queued.length > 0 || landed > 0) {
+      const n = queued.length + landed
       EffectBus.emit('activity:log', {
-        message: `kept ${landed} tile${landed === 1 ? '' : 's'} from this page`,
+        message: `keeping ${n} tile${n === 1 ? '' : 's'} from this page`,
         icon: '●',
       })
-      if (first) this.#openBehaviours(first)
     }
+    if (queue && queued.length > 0) await this.#drainAdoptQueue(batch, first ?? undefined)
+    else if (first) this.#openBehaviours(first)
   }
 
   /** One picked page tile. Held → additive (its missing PAGE children fold,

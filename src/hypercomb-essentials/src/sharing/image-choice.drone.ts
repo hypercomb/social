@@ -69,6 +69,8 @@ type Choice = {
   fresh?: boolean
   /** Not a picture: the queue's skip tile, which moves on to the next tile. */
   skip?: boolean
+  /** The stand-in tile shown while hosts and the swarm are still answering. */
+  pending?: boolean
 }
 type ChoiceEntry = Omit<Choice, 'slot' | 'pos'>
 
@@ -105,6 +107,7 @@ const BAND_ALPHA = 0.55
 const LABEL_RESOLUTION = (worldScale: number): number =>
   Math.min(4, Math.max(2, worldScale * (globalThis.devicePixelRatio || 1)))
 const TEXTURE_CACHE_MAX = 128
+const TEXTURE_TIMEOUT_MS = 20000
 
 export class ImageChoiceDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -146,6 +149,10 @@ export class ImageChoiceDrone extends Drone {
   #queue = new ImageQueue()
 
   #textures = new Map<string, Texture | null>()
+  #inflight = new Set<string>()
+  #entries: ChoiceEntry[] = []
+  #loading = false
+  #repaintQueued = false
 
   protected override listens = [
     'render:host-ready', 'render:mesh-offset', 'render:geometry-changed',
@@ -416,20 +423,36 @@ export class ImageChoiceDrone extends Drone {
     }
     if (entries.length > MAX_CHOICES) entries.length = MAX_CHOICES
 
-    // Hosts at `sign(name)`, plus the pictures the swarm is showing for this
-    // name. One picture from either place is enough to choose.
+    // Paint at once with what is held. Hosts and the swarm answer later: a
+    // loading tile stands in for them, and each picture fills its tile as its
+    // bytes land. Nothing on this path waits on the network.
+    this.#entries = entries
+    this.#loading = true
+    this.#paintNow(token)
+    this.#loadTextures(token, entries)
+
+    void this.#gatherOffered(token, label, entries)
+  }
+
+  /** Hosts at `sign(name)`, plus the pictures the swarm is showing for this
+   *  name, folded into the wall as they arrive. */
+  async #gatherOffered(token: number, label: string, entries: ChoiceEntry[]): Promise<void> {
     const offered = await canonicalPeerImageCandidates(label).catch(() => [] as readonly PeerImageCandidate[])
     const fresh = await unseenNow(label).catch(() => new Set<string>() as ReadonlySet<string>)
     if (token !== this.#buildToken) return
+    const added: ChoiceEntry[] = []
     for (const candidate of offered) {
       if (entries.length >= MAX_CHOICES) break
       if (entries.some(entry => entry.previewSig === candidate.previewSig)) continue
-      entries.push({ props: candidate.props, previewSig: candidate.previewSig, who: this.#who(candidate), mine: false, held: false, fresh: fresh.has(candidate.previewSig) })
+      const entry: ChoiceEntry = { props: candidate.props, previewSig: candidate.previewSig, who: this.#who(candidate), mine: false, held: false, fresh: fresh.has(candidate.previewSig) }
+      entries.push(entry)
+      added.push(entry)
     }
+    this.#loading = false
     // One picture the tile is not wearing is still a choice — a paste onto
     // the tile that has not been picked yet. The worn picture alone is not.
     if (!imageWallHasChoice(entries)) {
-      this.#open_ = false
+      this.#close()
       // In a queue a tile with nothing to choose is answered as it stands: say
       // so, and carry on to the next rather than stopping the whole run.
       if (this.#queue.running) {
@@ -440,15 +463,29 @@ export class ImageChoiceDrone extends Drone {
       this.emitEffect('toast:show', { type: 'info', message: this.#t('images.none', 'Only one picture for this tile — nothing to choose from yet.') })
       return
     }
+    this.#paintNow(token)
+    this.#loadTextures(token, added)
+  }
 
-    await Promise.all(entries.map(entry => this.#texture(entry.previewSig)))
-    if (token !== this.#buildToken) return
-    // The skip tile sits after the pictures, on the same matrix, so moving on
-    // is a tile like any choice — never a button bolted onto the canvas.
-    if (this.#queue.running) {
-      entries.push({ props: {}, previewSig: '', who: this.#t('images.skip', 'skip ›'), mine: false, held: false, skip: true })
+  /** Start every picture's bytes; each repaints the wall as it lands. */
+  #loadTextures(token: number, entries: readonly ChoiceEntry[]): void {
+    for (const entry of entries) {
+      void this.#texture(entry.previewSig).then(() => this.#scheduleRepaint(token))
     }
-    this.#paintEntries(entries)
+  }
+
+  #scheduleRepaint(token: number): void {
+    if (this.#repaintQueued || token !== this.#buildToken) return
+    this.#repaintQueued = true
+    setTimeout(() => {
+      this.#repaintQueued = false
+      if (token === this.#buildToken) this.#paintNow(token)
+    }, 60)
+  }
+
+  #paintNow(token: number): void {
+    if (token !== this.#buildToken || !this.#open_) return
+    this.#paintEntries(this.#entries)
   }
 
   /** What the caption says under the title: the tile, and — when some pictures are
@@ -465,8 +502,17 @@ export class ImageChoiceDrone extends Drone {
   }
 
   #paintEntries(entries: readonly ChoiceEntry[]): void {
-    const slots = this.#gridSlots(entries.length)
-    const choices: Choice[] = entries.slice(0, slots.length).map((entry, index) => {
+    // While hosts and the swarm are still being asked, one more tile says so.
+    const shown: ChoiceEntry[] = this.#loading
+      ? [...entries, { props: { imageSig: '' }, previewSig: '', who: this.#t('images.loading', 'loading…'), mine: false, held: false, pending: true }]
+      : [...entries]
+    // In a queue the skip tile sits after the pictures, on the same matrix, so
+    // moving on is a tile like any choice — never a button bolted onto the canvas.
+    if (this.#queue.running) {
+      shown.push({ props: {}, previewSig: '', who: this.#t('images.skip', 'skip ›'), mine: false, held: false, skip: true })
+    }
+    const slots = this.#gridSlots(shown.length)
+    const choices: Choice[] = shown.slice(0, slots.length).map((entry, index) => {
       const p = this.#axialToPixel(slots[index].q, slots[index].r)
       return { ...entry, slot: slots[index], pos: { x: p.x + this.#meshOffset.x, y: p.y + this.#meshOffset.y } }
     })
@@ -511,9 +557,9 @@ export class ImageChoiceDrone extends Drone {
     if (label && shown.length) void markSeen(label, shown)
   }
 
-  /** The pictures on the wall — the skip tile is not one. */
+  /** The pictures on the wall — the skip and loading tiles are not. */
   #shownSigs(): string[] {
-    return this.#choices.filter(c => !c.skip).map(c => c.previewSig)
+    return this.#choices.filter(c => !c.skip && !c.pending).map(c => c.previewSig)
   }
 
   /** Restore the hive and drop everything the wall owned. Safe to call twice. */
@@ -743,7 +789,8 @@ export class ImageChoiceDrone extends Drone {
     // choice from another, so it is always on, over the picture, like the
     // mesh superimposes a tile's name.
     const size = tileR * LABEL_SIZE_FACTOR
-    const who = tex || c.skip ? c.who : `${c.who} · ${this.#t('images.unavailable', 'not sent')}`
+    const waiting = c.pending || this.#inflight.has(c.previewSig)
+    const who = tex || c.pending || c.skip ? c.who : `${c.who} · ${waiting ? this.#t('images.loading', 'loading…') : this.#t('images.unavailable', 'not sent')}`
     const text = new Text({
       text: who.length > 16 ? `${who.slice(0, 15)}…` : who,
       style: {
@@ -879,12 +926,21 @@ export class ImageChoiceDrone extends Drone {
   }
 
   async #texture(sig: string): Promise<Texture | null> {
+    if (!sig) return null
     if (this.#textures.has(sig)) return this.#textures.get(sig) ?? null
+    this.#inflight.add(sig)
     let tex: Texture | null = null
     try {
-      const blob = await this.#bytes(sig)
+      // A picture nobody serves must not hold its tile "loading" forever; a
+      // timeout is not cached, so opening the wall again asks again.
+      const blob = await Promise.race([
+        this.#bytes(sig),
+        new Promise<null>(resolve => setTimeout(() => resolve(null), TEXTURE_TIMEOUT_MS)),
+      ])
       if (blob) tex = Texture.from(await createImageBitmap(blob))
     } catch { tex = null }
+    this.#inflight.delete(sig)
+    if (!tex) return null
     if (this.#textures.size >= TEXTURE_CACHE_MAX) {
       const oldest = this.#textures.keys().next().value
       if (oldest !== undefined) {

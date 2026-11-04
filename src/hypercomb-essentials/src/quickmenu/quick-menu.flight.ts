@@ -25,11 +25,10 @@ import type { QuickMenuLayer } from './quick-menu.layer.js'
 import type { QuickMenuRegistry } from './quick-menu-registry.service.js'
 import { fireQuickMenuSlot } from './quick-menu.fire.js'
 import { QuickMenuGuide, guideFor } from './quick-menu.guide.js'
-import { MANY_TILES_MENU, currentOperands } from './quick-menu.operands.js'
+import { MANY_TILES_MENU, currentOperands, swarmMenu } from './quick-menu.operands.js'
 import { aimLive } from './quick-menu.tile-menu.js'
 import { NO_SEATS, applyTileSeats, readTileSeats, seatMenu, type TileSeats } from './quick-menu.traits.js'
 import {
-  OPPOSITE_DIRECTION,
   slotsByDirection,
   type QuickMenuDefinition,
   type QuickMenuDirection,
@@ -123,7 +122,9 @@ export class QuickMenuFlight {
 
   // ── begin / end ─────────────────────────────────────────────────────
 
-  begin(anchor: { q: number; r: number }, definition: QuickMenuDefinition, subject?: string): boolean {
+  begin(anchor: { q: number; r: number }, shipped: QuickMenuDefinition, subject?: string): boolean {
+    // A swarm is picked: the ring speaks for the set, the badge opens the tile's own.
+    const definition = swarmMenu(shipped, subject)
     const host = this.#host
     const registry = get<QuickMenuRegistry>('@diamondcoreprocessor.com/QuickMenuRegistry')
     if (!host || !registry || this.#active || viewportIsFramed()) return false
@@ -339,11 +340,12 @@ export class QuickMenuFlight {
   #descend(via: QuickMenuSlot, direction: QuickMenuDirection): void {
     const registry = get<QuickMenuRegistry>('@diamondcoreprocessor.com/QuickMenuRegistry')
     if (via.action.kind !== 'menu' || !registry) return
-    const back = OPPOSITE_DIRECTION[direction]
-    const definition = registry.byName(via.action.menu) ?? seatMenu(via.action.menu, this.#seats, back)
+    // No slot is spent on the way back: right-click is the only back, so every
+    // ring keeps all six directions for verbs.
+    const definition = registry.byName(via.action.menu) ?? seatMenu(via.action.menu, this.#seats, null)
     const at = this.#layer.slotLocal(direction)
     if (!definition || !at) return
-    this.#levels.push({ definition: applyTileSeats(definition, this.#seats), back, at })
+    this.#levels.push({ definition: applyTileSeats(definition, this.#seats), back: null, at })
     this.#step(this.#levels[this.#levels.length - 1])
   }
 

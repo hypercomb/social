@@ -8,6 +8,7 @@ import { Component, computed, effect, ElementRef, HostBinding, inject, input, ou
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { TextScaleComponent, surfaceScale, stepSurfaceScale } from '../text-scale/text-scale.component'
+import { RailParticipantsComponent } from '../participants/rail-participants.component'
 
 /** One status pill, as a producer states it on `indicator:set`. `label` is
  *  its name (tooltip and aria-label). An actionable pill may carry `items`:
@@ -49,7 +50,7 @@ const COMPLETION_WINDOW = 'command-intel'
 @Component({
   selector: 'hc-command-shell',
   standalone: true,
-  imports: [TranslatePipe, TextScaleComponent],
+  imports: [TranslatePipe, TextScaleComponent, RailParticipantsComponent],
   templateUrl: './command-shell.component.html',
   styleUrls: ['./command-shell.component.scss']
 })

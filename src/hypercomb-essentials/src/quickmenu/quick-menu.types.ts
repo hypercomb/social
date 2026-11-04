@@ -224,6 +224,11 @@ export interface QuickMenuSlot {
    * raised over is part of it, otherwise that tile alone.
    */
   readonly onTile?: boolean
+  /**
+   * With `onTile`: act on the tile the menu was raised over and no other, even
+   * when that tile is part of a swarm. This is the badge's own menu.
+   */
+  readonly alone?: boolean
 }
 
 export interface QuickMenuDefinition {

@@ -74,7 +74,7 @@ function applyToSlot(slot: QuickMenuSlot, seats: TileSeats): QuickMenuSlot {
 
 /** The flower a seat's own children make. `back` keeps its cell, so the children
  *  take the rest of the ring in order; a tile with more than fit shows the first. */
-export function seatMenu(name: string, seats: TileSeats, back: QuickMenuDirection): QuickMenuDefinition | undefined {
+export function seatMenu(name: string, seats: TileSeats, back: QuickMenuDirection | null): QuickMenuDefinition | undefined {
   if (!name.startsWith(SEAT_MENU)) return undefined
   const word = name.slice(SEAT_MENU.length)
   const fill = seats.fills.find(f => sameTraitWord(f.word, word))

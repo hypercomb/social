@@ -89,10 +89,16 @@
         @if (updateKey(row); as update) {
           <button class="pcur-action" type="button" (click)="run(row)">{{ update | t }}</button>
         }
-        @if (row.live && !row.promoted) {
-          <button class="pcur-action" type="button" [disabled]="!!row.busyPhase" [attr.title]="'publish.promote.tip' | t" (click)="promote(row)">{{ 'publish.promote' | t }}</button>
+        @if (row.canPromote) {
+          <button class="pcur-action" type="button" [attr.title]="'publish.promote.tip' | t" (click)="promote(row)">{{ 'publish.promote' | t }}</button>
         }
       </div>
+      @if (row.busyPhase && row.owed.length) {
+        <p class="pcur-why">{{ row.owed.length }} not on the server yet</p>
+        <ul class="pcur-owed">
+          @for (sig of row.owed.slice(0, 12); track sig) { <li>{{ sig.slice(0, 12) }}</li> }
+        </ul>
+      }
       @if (whyKey(row)) {
         <p class="pcur-why">{{ whyKey(row) | t: whyParams(row) }}</p>
       }
