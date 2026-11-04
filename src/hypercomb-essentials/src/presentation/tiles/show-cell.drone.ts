@@ -41,6 +41,7 @@ import { CenterSlotTracker } from '../grid/center-slot-tracker.js'
 import { TILE_SOURCE_REGISTRY_KEY, TileSourceRegistry } from './tile-source-registry.js'
 import { IndexNurse } from './index.nurse.js'
 import { PaintLedger, type SlotPlan, type DrainReport } from './show-cell.paint.js'
+import { eggAttribute, eggLabelsAt, readyToHatch, hatchProgress, type EggPhase, type EggEntryLike } from './egg-stage.js'
 
 // Render-path diagnostics are opt-in (localStorage 'hc:diag' = '1').
 // resolveChildNames runs on every non-memoized pass; the per-pass info
@@ -134,12 +135,13 @@ type SlotBuffers = {
   shaded?: Float32Array
   shapeMode?: Float32Array
   presence?: Float32Array
+  egg?: Float32Array
 }
 /** Shader attribute → the buffer that backs it. Every plan key is one of these. */
 const SLOT_BUFFER_OF: Record<string, keyof SlotBuffers> = {
   aPosition: 'pos', aUV: 'uv', aLabelUV: 'labelUV', aImageUV: 'imageUV', aHasImage: 'hasImage', aHeat: 'heat',
   aIdentityColor: 'identityColor', aHasBranch: 'branch', aBorderColor: 'borderColor', aCellIndex: 'cellIndex',
-  aDivergence: 'divergence', aUnshared: 'unshared', aShaded: 'shaded', aShapeMode: 'shapeMode', aPresence: 'presence',
+  aDivergence: 'divergence', aUnshared: 'unshared', aShaded: 'shaded', aShapeMode: 'shapeMode', aPresence: 'presence', aEgg: 'egg',
 }
 /** What one pass lays its plans out with (see #planContext). */
 type PlanContext = {
@@ -2850,6 +2852,7 @@ export class ShowCellDrone extends Drone {
       aShaded: [sh],
       aShapeMode: [sm],
       aPresence: [held, below ? 1 : 0],
+      aEgg: [foreign ? 0 : this.#eggValueFor(c)],
     }
   }
 
@@ -11362,6 +11365,108 @@ export class ShowCellDrone extends Drone {
     })
   }
 
+  // ── The egg ────────────────────────────────────────────────────────────
+  // Adoption is never a race (jwize, 2026-11-04: "it is never about speed
+  // anymore it is about health growing"). A tile the adopt queue holds as an
+  // EGG shows a white shell; once the queue's fold lands it INCUBATES, frosted
+  // over its thumbnail while the full picture arrives; then it HATCHES — a bee
+  // breaks out and the tile is revealed. The queue is the only truth: the
+  // phases below are what this page has seen of it, never kept anywhere.
+
+  readonly #eggPhases = new Map<string, EggPhase>()
+  #eggLocation: string | null = null
+  #eggQueueWatched = false
+  #eggFrame: number | null = null
+
+  #eggQueue(): { entries?: readonly EggEntryLike[]; addEventListener?: (t: string, h: () => void) => void } | undefined {
+    return (window as any).ioc?.get?.('@diamondcoreprocessor.com/AdoptQueueService')
+  }
+
+  #eggSegments(): readonly string[] {
+    return this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
+  }
+
+  /** The aEgg value for one cell, read live by the plan. */
+  #eggValueFor(c: Cell): number {
+    if (!this.#eggQueueWatched) this.#watchEggQueue()
+    if (this.#eggLocation !== this.#eggSegments().join('/')) this.#syncEggs()
+    const phase = this.#eggPhases.get(c.label)
+    if (!phase) return 0
+    const hasThumbnail = !!c.imageSig && !!this.imageAtlas?.hasImage(c.imageSig)
+    return eggAttribute(phase, performance.now(), hasThumbnail)
+  }
+
+  #watchEggQueue(): void {
+    const queue = this.#eggQueue()
+    if (!queue?.addEventListener) return
+    this.#eggQueueWatched = true
+    queue.addEventListener('change', () => this.#syncEggs())
+  }
+
+  /** Read the eggs laid here off the queue. A location change starts fresh (an
+   *  egg never hatches across a navigation); an egg the queue let go of — its
+   *  fold landed — begins to incubate. */
+  #syncEggs(): void {
+    const segments = this.#eggSegments()
+    const location = segments.join('/')
+    const laid = eggLabelsAt(this.#eggQueue()?.entries ?? [], segments)
+    const changed: string[] = []
+    if (location !== this.#eggLocation) {
+      this.#eggLocation = location
+      changed.push(...this.#eggPhases.keys())
+      this.#eggPhases.clear()
+      for (const label of laid) { this.#eggPhases.set(label, { kind: 'egg' }); changed.push(label) }
+    } else {
+      const now = performance.now()
+      for (const label of laid) {
+        if (this.#eggPhases.get(label)?.kind !== 'egg') { this.#eggPhases.set(label, { kind: 'egg' }); changed.push(label) }
+      }
+      for (const [label, phase] of this.#eggPhases) {
+        if (phase.kind === 'egg' && !laid.has(label)) { this.#eggPhases.set(label, { kind: 'incubating', since: now }); changed.push(label) }
+      }
+    }
+    if (changed.length) this.#dirty(changed, 'egg')
+    this.#pumpEggs()
+  }
+
+  /** One frame per frame while an egg incubates or hatches: incubating eggs
+   *  are asked whether their full picture is in; hatching ones step. */
+  #pumpEggs = (): void => {
+    if (this.#eggFrame !== null) return
+    let moving = false
+    for (const phase of this.#eggPhases.values()) if (phase.kind !== 'egg') { moving = true; break }
+    if (!moving) return
+    this.#eggFrame = requestAnimationFrame(() => {
+      this.#eggFrame = null
+      if (!this.geom) return
+      const now = performance.now()
+      const frame: string[] = []
+      for (const [label, phase] of [...this.#eggPhases]) {
+        const cell = this.renderedCells.get(label)
+        if (!cell || !this.#labelToIndex.has(label)) {
+          // Not on the page (yet): an incubating egg waits for its cell; a
+          // hatch with nowhere to play is simply over.
+          if (phase.kind === 'hatching') this.#eggPhases.delete(label)
+          continue
+        }
+        if (phase.kind === 'incubating') {
+          const sig = cell.imageSig
+          const atlas = this.imageAtlas
+          const imageSharp = !!sig && !!atlas?.hasImage(sig) && !atlas.isSoon(sig)
+          if (readyToHatch({ hasImageSig: !!sig, imageSharp, since: phase.since, now })) {
+            this.#eggPhases.set(label, { kind: 'hatching', since: now })
+            frame.push(label)
+          }
+        } else if (phase.kind === 'hatching') {
+          if (hatchProgress(phase.since, now) >= 1) this.#eggPhases.delete(label)
+          frame.push(label)
+        }
+      }
+      this.#paintFrame(frame)
+      this.#pumpEggs()
+    })
+  }
+
   /** Is this click target's paint work actually RESIDENT — every child name in
    *  the label atlas, every child image decoded (or concluded absent)? Asked
    *  live: brightness is a promise that this exact first paint is warm. */
@@ -11768,6 +11873,8 @@ export class ShowCellDrone extends Drone {
       // hold the tile (the wax), y is 1 when the layer on top does not hold it
       // (it sits below). A dive writes zeros: its tiles are nobody's here.
       presence: new Float32Array(n * 8),
+      // The egg (egg-stage.ts): 0 none, 1 white, 2 thumbnail, 3 + p hatching.
+      egg: new Float32Array(n * 4),
     }
     const idx = new Uint32Array(n * 6)
     const ctx = this.#planContext(r, gap, hw, hh, foreign)
@@ -11802,6 +11909,7 @@ export class ShowCellDrone extends Drone {
       ; (g as any).addAttribute('aShaded', bufs.shaded, 1)
       ; (g as any).addAttribute('aShapeMode', bufs.shapeMode, 1)
       ; (g as any).addAttribute('aPresence', bufs.presence, 2)
+      ; (g as any).addAttribute('aEgg', bufs.egg, 1)
       ; (g as any).addIndex(idx)
 
     // The page's buffers and label→index map: what the drain writes into.

@@ -254,6 +254,7 @@ export class HexSdfTextureShader {
     in float aShaded;
     in float aShapeMode;
     in vec2 aPresence;
+    in float aEgg;
 
     out vec2 vUV;
     out vec4 vLabelUV;
@@ -269,6 +270,7 @@ export class HexSdfTextureShader {
     out float vShaded;
     out float vShapeMode;
     out vec2 vPresence;
+    out float vEgg;
     out float vBloom;
 
     uniform mat3 uProjectionMatrix;
@@ -345,6 +347,7 @@ export class HexSdfTextureShader {
       vShaded = aShaded;
       vShapeMode = aShapeMode;
       vPresence = aPresence;
+      vEgg = aEgg;
     }
   `
 
@@ -365,6 +368,7 @@ export class HexSdfTextureShader {
     in float vShaded;
     in float vShapeMode;
     in vec2 vPresence;
+    in float vEgg;
     in float vBloom;
 
     uniform vec2 u_quadSize;
@@ -1251,6 +1255,93 @@ export class HexSdfTextureShader {
         float lgray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
         color.rgb = mix(color.rgb, vec3(lgray), 0.45);
         color.rgb *= 0.62;
+      }
+
+      // THE EGG (presentation/tiles/egg-stage.ts). vEgg: 1 a white shell, the
+      // content still out of reach · 2 the shell frosted over the thumbnail ·
+      // 3 + p the hatch: the shell cracks, its cap lifts away, a bee breaks
+      // out and flies off, and the tile underneath is revealed. Calm by
+      // design — growth, never a race.
+      if (vEgg > 0.5) {
+        float R = u_radiusPx;
+        vec2 q = local / R;
+        bool hatching = vEgg > 2.99;
+        float hp = hatching ? clamp(vEgg - 3.0, 0.0, 1.0) : 0.0;
+
+        // the shell's two pieces: the jagged crack runs across its waist; the
+        // cap above it lifts and tips away while the cup below sinks and fades.
+        float crackY = -0.04 + 0.07 * (abs(fract(q.x * 3.2) - 0.5) * 2.0 - 0.5);
+        bool cap = q.y < crackY;
+        float lift = smoothstep(0.32, 0.80, hp);
+        vec2 sq = q;
+        if (cap) {
+          sq += vec2(lift * 0.10 * sign(q.x + 0.001), lift * 0.55);
+        } else {
+          sq.y -= lift * 0.12;
+        }
+        // the egg: narrower at the top (y grows downward)
+        vec2 ep = vec2(sq.x / 0.56, (sq.y - 0.04) / 0.74);
+        ep.x *= 1.0 + 0.16 * ep.y * -1.0;
+        float de = (length(ep) - 1.0) * 0.56 * R;
+        float shell = 1.0 - smoothstep(-aa, aa, de);
+
+        // pearl shell, lit from the upper left, with a soft rim and freckles
+        vec3 pearl = vec3(0.97, 0.955, 0.92);
+        float lightK = clamp(0.92 - 0.22 * ep.x - 0.20 * ep.y, 0.70, 1.05);
+        vec3 shellCol = pearl * lightK;
+        float freckle = step(0.985, fract(sin(dot(floor(sq * 14.0), vec2(12.9898, 78.233))) * 43758.5453));
+        shellCol = mix(shellCol, vec3(0.82, 0.76, 0.66), freckle * 0.5);
+        float rim = 1.0 - smoothstep(0.0, aa * 1.6, abs(de));
+        shellCol = mix(shellCol, vec3(0.70, 0.66, 0.58), rim * 0.55);
+
+        // the crack line itself, drawn as the hatch begins
+        float crackLine = (1.0 - smoothstep(0.0, 0.035, abs(q.y - crackY))) * shell;
+        float crackShow = smoothstep(0.02, 0.22, hp) * (1.0 - lift);
+
+        // how much of the shell stands: solid white, frosted over the
+        // thumbnail, then gone as the pieces part
+        // A tile with a picture frosts over it (the thumbnail stage, and its
+        // hatch); one without stays a white egg until it opens.
+        bool pictured = vHasImage > 0.5;
+        float frost = pictured ? 0.58 : 1.0;
+        float opening = 1.0 - smoothstep(0.55, 0.98, hp);
+        float shellA = shell * frost * opening;
+        if (!pictured) {
+          // the white egg: the hexagon's ground goes pale around it too
+          color.rgb = mix(color.rgb, vec3(0.86, 0.87, 0.88), 0.35 * opening);
+        }
+        color.rgb = mix(color.rgb, shellCol, shellA);
+        color.rgb = mix(color.rgb, vec3(0.32, 0.27, 0.20), crackLine * crackShow);
+
+        // the light of the hatch: a soft glow from the crack while it opens
+        float glow = smoothstep(0.10, 0.45, hp) * (1.0 - smoothstep(0.55, 1.0, hp));
+        color.rgb += vec3(1.0, 0.85, 0.45) * glow * 0.35 * (1.0 - smoothstep(0.0, 0.7, length(q)));
+
+        // the bee: it breaks out of the crack, wings beating, and rises away
+        if (hatching) {
+          float t = smoothstep(0.28, 1.0, hp);
+          vec2 bp = vec2(0.10 * sin(t * 7.0), -0.02 - t * 1.05);
+          float bs = 0.15 + 0.05 * t;
+          vec2 b = (q - bp) / bs;
+          float baa = aa / (R * bs);
+          float vis = smoothstep(0.26, 0.40, hp) * (1.0 - smoothstep(0.86, 1.0, hp));
+          // wings first (behind the body), beating fast
+          float flap = 0.55 + 0.45 * abs(sin(hp * 70.0));
+          vec2 wl = (b - vec2(-0.25, -0.70)) / vec2(0.42, 0.62 * flap);
+          vec2 wr = (b - vec2( 0.30, -0.66)) / vec2(0.40, 0.58 * flap);
+          float wing = max(1.0 - smoothstep(1.0 - baa * 2.0, 1.0 + baa * 2.0, length(wl)),
+                           1.0 - smoothstep(1.0 - baa * 2.0, 1.0 + baa * 2.0, length(wr)));
+          color.rgb = mix(color.rgb, vec3(0.92, 0.96, 1.0), wing * 0.6 * vis);
+          // body: a striped oval with a dark head
+          float db = length(b / vec2(1.0, 0.66)) - 1.0;
+          float body = 1.0 - smoothstep(-baa * 2.0, baa * 2.0, db);
+          float stripe = step(0.5, fract(b.x * 1.7 + 0.25));
+          vec3 bodyCol = mix(vec3(1.0, 0.78, 0.12), vec3(0.12, 0.09, 0.05), stripe);
+          float dh = length(b - vec2(1.05, -0.05)) - 0.42;
+          float head = 1.0 - smoothstep(-baa * 2.0, baa * 2.0, dh);
+          color.rgb = mix(color.rgb, bodyCol, body * vis);
+          color.rgb = mix(color.rgb, vec3(0.10, 0.08, 0.05), head * vis);
+        }
       }
 
       // readiness shade: this tile's content is still arriving (image/props
