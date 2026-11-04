@@ -395,7 +395,7 @@ describe('an ordinary tile never reads any of it', () => {
   })
 
   it('the flower counts a moving ring\'s tiles by slot; anything else by order, as before', () => {
-    expect(showCell).toContain('const ix = (foreign?.slots?.[ci] ?? ci) + (foreign?.indexBase ?? 0)')
+    expect(showCell).toContain('const ix = (foreign?.slots?.[i] ?? i) + (foreign?.indexBase ?? 0)')
     expect(showCell).toContain('{ reveal: null, indexBase: FLOWER_INDEX_BASE, ...(slots ? { slots } : {}) },')
     // the dive and the page pass no slots
     expect(showCell.match(/slots \? \{ slots \}/g)).toHaveLength(1)

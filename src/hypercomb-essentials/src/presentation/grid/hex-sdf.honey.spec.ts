@@ -190,7 +190,14 @@ describe('hex shader honey — the crafted backgrounds', () => {
 
 describe('the flower paints honey only where it was asked', () => {
   it('an ordinary tile\'s heat is written as before; only a honey option carries a picture', () => {
-    expect(showCell).toContain('const h = c.honeyArt !== undefined ? c.honeyArt + 1 : (c.heat ?? 0)')
+    // The slot plan (single-paint.md, V4) reads a page tile's heat live so a
+    // fade step is one dirty label; a foreign cell still carries its own heat.
+    expect(showCell).toContain(
+      'const h = c.honeyArt !== undefined\n'
+      + '      ? c.honeyArt + 1\n'
+      + '      : foreign\n'
+      + '        ? (c.heat ?? 0)',
+    )
     // honeyArt is set in exactly one place: the flower's honey opt-in, never on the subject or the way back
     expect(showCell.match(/honeyArt: f\.art/g)).toHaveLength(1)
     expect(showCell).toContain('...(f.honey && !f.subject && !f.back && this.#honeyArtReady(f.art) ? { honeyArt: f.art } : {}),')

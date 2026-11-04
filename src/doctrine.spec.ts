@@ -261,6 +261,34 @@ describe('doctrine ratchets', () => {
     ], 'open / toggle / run command sent with emit() instead of emitTransient()')
   })
 
+  it('page-key wipes, forced renders and stray buffer writes may only shrink — invalidation names cells (V2, V3, V7)', () => {
+    // documentation/single-paint.md. A handler that wipes `renderedCellsKey`
+    // or arms `#forceNextRender` asks for a FULL pass over the page. The rule
+    // is that invalidation names cells (`#dirty(label)`) and the page is
+    // wiped only by a location or layout-mode change (`#dirtyAll`), whose
+    // call sites are frozen too so the debt cannot simply move there. And
+    // nothing writes geometry outside the drain: every `#pushBuffer` and
+    // `#writeCell*` outside the ledger's two hands (`#writeAttr`,
+    // `#pushAttrs`) is a second owner, counted here until it is folded in.
+    // Every site counted on 2026-11-04 is frozen PER FILE in
+    // doctrine.paint-wipes.json: never raise a count, delete the entry at zero.
+    const home = 'doctrine.paint-wipes.json'
+    const allowed = JSON.parse(readFileSync(join(ROOT, home), 'utf8')) as Record<string, Record<string, number>>
+    const results = [
+      countRatchet(countsMatching(/renderedCellsKey = ''/g), allowed["renderedCellsKey = ''"], "renderedCellsKey = ''",
+        'name the cells that changed with #dirty(label); the page key is wiped only for a location or layout-mode change (#dirtyAll)', home),
+      countRatchet(countsMatching(/#forceNextRender = true/g), allowed['#forceNextRender = true'], '#forceNextRender = true',
+        'a forced full pass is a page-wide invalidation; dirty the cells and let the drain write them', home),
+      countRatchet(countsMatching(/#dirtyAll\(/g), allowed['#dirtyAll('], '#dirtyAll(',
+        'a page-wide invalidation is legal for a location or layout-mode change only; anything else names its cells', home),
+      countRatchet(countsMatching(/#pushBuffer\(/g), allowed['#pushBuffer('], '#pushBuffer(',
+        'buffers are pushed once per drain (#pushAttrs); mutate state, #dirty the labels and let the drain push', home),
+      countRatchet(countsMatching(/#writeCell(?:Scalar|Rgb|Vec4)\(/g), allowed['#writeCell(Scalar|Rgb|Vec4)('], '#writeCell(Scalar|Rgb|Vec4)(',
+        'slots are written from their plan by the drain (#slotPlanFor → #writeAttr); fold the writer into the plan', home),
+    ]
+    expect(results.flatMap(r => r.problems), results.map(r => r.msg).join('')).toEqual([])
+  })
+
   it('reserved scratch workspaces are ignored without hiding ordinary source', () => {
     // This is a behavior check, not a text check: it proves Git will contain a
     // future accidental checkout/dependency tree even when it is created deep

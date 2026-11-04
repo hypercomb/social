@@ -8,9 +8,9 @@
 // re-points every cell. The atlas signals this with `evictionGeneration`.
 //
 // That signal used to be folded into buildCellsKey. But the cells key is
-// recomputed WHOLESALE by two in-place fast paths that touch one attribute and
-// rebuild nothing — #repaintReadinessInPlace (aShaded flip) and
-// #tryInPlaceCellUpdate (one cell on tile:saved). Either one landing between
+// recomputed WHOLESALE by the in-place fast paths that touch attributes and
+// rebuild nothing — #repaintReadinessInPlace (aShaded flip) and the
+// single-paint drain, #paintDirty (the cells a handler named). Either one landing between
 // the wipe and the repaint stamped the new generation into renderedCellsKey,
 // so the pending pass found its key unchanged, took applyGeometry's
 // early-return, and the wiped slots were never re-baked. On screen: those
@@ -75,9 +75,12 @@ describe('show-cell: cells key vs atlas generations', () => {
   })
 
   it('the in-place fast paths claim no generation they did not bake', () => {
+    // #paintDirty is the single-paint drain (show-cell.paint.ts): the one
+    // in-place writer tile:saved and its kin now go through.
+    // #repaintReadinessInPlace flips its cells through the drain now, so
+    // the drain is the one body that re-states the key.
     for (const marker of [
-      '#repaintReadinessInPlace = (): boolean =>',
-      'readonly #tryInPlaceCellUpdate = async (',
+      '#paintDirty(only?: Iterable<string>): DrainReport | null {',
     ]) {
       const body = memberBody(marker)
       // Both legitimately re-state renderedCellsKey — they DID rewrite the

@@ -1,0 +1,15 @@
+{
+  "renderedCellsKey = ''": {
+    "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts": 49
+  },
+  "#forceNextRender = true": {
+    "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts": 22
+  },
+  "#dirtyAll(": {
+    "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts": 7
+  },
+  "#pushBuffer(": {
+    "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts": 2
+  },
+  "#writeCell(Scalar|Rgb|Vec4)(": {}
+}
