@@ -1861,8 +1861,9 @@ async function servePoolListing(request, env, sig) {
   }
   // A DERIVATION'S ATTESTATION POOL is listed to whoever asks its address —
   // the attesters' keys; each one's word is read from their own index. So is
+  // A NAME'S PICTURE POOL (its publishers' keys, read the same way). So is
   // an EVENT'S RSVP POOL an organizer opened here, empty or not.
-  if (!listed && !await isAttestPool(env, sig) && !await isRsvpPool(env, sig)) {
+  if (!listed && !await isAttestPool(env, sig) && !await isPicturePool(env, sig) && !await isRsvpPool(env, sig)) {
     return new Response(request.method === 'HEAD' ? null : 'no pool at this address\n', {
       status: 404, headers: { ...headers, 'X-Reason': 'no pool at this address' },
     })
@@ -2594,6 +2595,37 @@ async function noteAttesters(env, pubkey, evt) {
 async function isAttestPool(env, sig) {
   if (!SIG_RE.test(sig) || !env.CONTENT?.head) return false
   return !!(await env.CONTENT.head(`${await poolAddress(ATTEST_POOLS_MEANING)}/${sig}`))
+}
+
+// ── pictures for a name (documentation/pools-across-hosts.md, "What a host adds")
+//
+// PICTURES TRAVEL ONLY THROUGH HOSTS. A tile's name pool is never listed, so a
+// publisher names a picture in their OWN signed index as
+// `pictures:<sign(name)>` → the tile's own published layer (the Publish act is
+// the only writer). The index write keeps one derived list per name — the
+// members of sign('pictures:<sign(name)>'), each named by the publisher's key
+// — and a list of those lists, sign('pictures:pools'), so the listing route
+// knows a picture pool when it is asked its address. Membership only, exactly
+// as attestations: what each publisher offers is read back, and re-verified,
+// from their own index by whoever reads the pool.
+const PICTURES_KEY_RE = /^pictures:([0-9a-f]{64})$/
+const PICTURES_POOLS_MEANING = 'pictures:pools'
+
+async function notePicturePublishers(env, pubkey, evt) {
+  let roots = {}
+  try { roots = JSON.parse(evt.content)?.roots ?? {} } catch { return }
+  for (const key of Object.keys(roots)) {
+    const name = PICTURES_KEY_RE.exec(key)?.[1]
+    if (!name) continue
+    await addPoolMember(env, `pictures:${name}`, pubkey)
+    await addPoolMember(env, PICTURES_POOLS_MEANING, await poolAddress(`pictures:${name}`))
+  }
+}
+
+/** Is `sig` the address of a name's picture pool this host holds? */
+async function isPicturePool(env, sig) {
+  if (!SIG_RE.test(sig) || !env.CONTENT?.head) return false
+  return !!(await env.CONTENT.head(`${await poolAddress(PICTURES_POOLS_MEANING)}/${sig}`))
 }
 
 // ── the calendar (documentation/calendar-events.md) ─────────────────────────
@@ -5745,6 +5777,7 @@ async function putHive(request, env, pubkey, ctx) {
   await noteTranslators(env, pubkey, evt)
   await noteAssessors(env, pubkey, evt)
   await noteAttesters(env, pubkey, evt)
+  await notePicturePublishers(env, pubkey, evt)
   await noteEvents(env, pubkey, evt)
   await noteFollows(env, pubkey, evt)
   await noteSharedPools(env, pubkey, evt)

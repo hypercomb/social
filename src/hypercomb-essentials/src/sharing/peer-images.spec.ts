@@ -16,6 +16,16 @@ import {
   peerImageCandidates,
   previewSigOf,
 } from './peer-images.js'
+import { picturesKey, picturesPoolAddress } from './picture-pools.js'
+
+// Each publisher's own signed index, as the reader fetches it.
+const indexes = new Map<string, Record<string, string>>()
+vi.mock('./hive-pointer.js', () => ({
+  fetchHiveIndex: async (_host: string, pubkey: string) => {
+    const roots = indexes.get(pubkey)
+    return roots ? { ok: true, manifest: { roots } } : { ok: false, reason: 'http', status: 404 }
+  },
+}))
 
 const POINT = 'a'.repeat(64)
 const FLAT = 'b'.repeat(64)
@@ -144,13 +154,14 @@ describe('peer image candidates', () => {
     ])
   })
 
-  it('discovers fixed-name image variants from every known content server', async () => {
-    const RECORD = '1'.repeat(64)
+  it('finds a name\'s pictures through every host that lists its publishers, each read from their own index', async () => {
     const LAYER = '2'.repeat(64)
     const PROPS = '3'.repeat(64)
+    const ANN = '4'.repeat(64)
+    const BO = '5'.repeat(64)
+    const STRAY = '6'.repeat(64)
     const jsonBlob = (value: unknown) => ({ text: async () => JSON.stringify(value) })
     const resources = new Map<string, { text(): Promise<string> }>([
-      [RECORD, jsonBlob({ kind: 'canonical:variant', payload: { layerSig: LAYER } })],
       [LAYER, jsonBlob({ name: 'tile', properties: [PROPS] })],
       [PROPS, jsonBlob({ small: { image: POINT } })],
     ])
@@ -165,46 +176,60 @@ describe('peer image candidates', () => {
         return undefined
       },
     }
+    const key = await picturesKey('tile')
+    const address = await picturesPoolAddress('tile')
+    // ann names the picture in her index; STRAY is listed but its index no
+    // longer names it, so it is not counted.
+    indexes.set(ANN, { [key!]: LAYER })
+    indexes.set(BO, { [key!]: LAYER })
+    indexes.set(STRAY, {})
     const fetchMock = vi.fn(async (url: string) => ({
       ok: true,
-      json: async () => ({ members: [RECORD] }),
-      url,
+      status: 200,
+      text: async () => (String(url).startsWith('https://one.example/') ? `${ANN}\n${STRAY}\n` : `${BO}\n`),
     }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const found = await canonicalPeerImageCandidates('tile')
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const found = await meaningPoolImageCandidates('tile')
+    expect(fetchMock.mock.calls.map(([url]) => String(url)).sort())
+      .toEqual([`https://one.example/${address}/`, `https://two.example/${address}/`])
     expect(found).toHaveLength(1)
     expect(found[0].previewSig).toBe(POINT)
-    expect(found[0].peers.map(peer => peer.label)).toEqual(['one.example', 'two.example'])
+    expect(found[0].peers.map(peer => peer.pubkey).sort()).toEqual([ANN, BO])
+    expect(found[0].peers.map(peer => peer.label).sort()).toEqual(['one.example', 'two.example'])
+  })
+
+  it('never asks a host for the name pool itself', async () => {
+    ;(window as unknown as { ioc: unknown }).ioc = {
+      get: (key: string) => {
+        if (key === '@diamondcoreprocessor.com/ContentBrokerDrone') return { knownContentHosts: () => ['one.example'] }
+        if (key === '@hypercomb.social/Store') return { getResource: async () => null }
+        return undefined
+      },
+    }
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 404, text: async () => '' }))
+    vi.stubGlobal('fetch', fetchMock)
+    await meaningPoolImageCandidates('garden', 'choose')
+    const asked = fetchMock.mock.calls.map(call => String((call as unknown[])[0]))
+    const address = await picturesPoolAddress('garden')
+    expect(asked).toEqual([`https://one.example/${address}/`])
   })
 
   it('a scan stays quiet until a host has answered a pool', async () => {
-    const RECORD = '1'.repeat(64)
-    const LAYER = '2'.repeat(64)
-    const PROPS = '3'.repeat(64)
-    const jsonBlob = (value: unknown) => ({ text: async () => JSON.stringify(value) })
-    const resources = new Map<string, { text(): Promise<string> }>([
-      [RECORD, jsonBlob({ kind: 'canonical:variant', payload: { layerSig: LAYER } })],
-      [LAYER, jsonBlob({ name: 'tile', properties: [PROPS] })],
-      [PROPS, jsonBlob({ small: { image: POINT } })],
-    ])
     ;(window as unknown as { ioc: unknown }).ioc = {
       get: (key: string) => {
         if (key === '@diamondcoreprocessor.com/ContentBrokerDrone') {
           return { knownContentHosts: () => ['empty.example', 'full.example', 'hypercomb.com'] }
         }
-        if (key === '@hypercomb.social/Store') {
-          return { getResource: async (sig: string) => resources.get(sig) ?? null }
-        }
+        if (key === '@hypercomb.social/Store') return { getResource: async () => null }
         return undefined
       },
     }
     const fetchMock = vi.fn(async (url: string) => {
       if (String(url).startsWith('https://full.example/')) {
-        return { ok: true, status: 200, json: async () => ({ members: [RECORD] }) }
+        return { ok: true, status: 200, text: async () => '' }
       }
-      return { ok: false, status: 404, json: async () => ({}) }
+      return { ok: false, status: 404, text: async () => '' }
     })
     vi.stubGlobal('fetch', fetchMock)
 

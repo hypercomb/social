@@ -537,6 +537,10 @@ function dropEvent(id) {
 // of them moved — never per request, since parsing every index costs a read per writer.
 let writerIndexMoves = 0
 const movesWriterIndex = (evt) => Number(evt.kind) === HIVE_INDEX_KIND && writers.has(evt.pubkey)
+// Bumped whenever ANY hive index enters or leaves the store, so the picture
+// pools (picturePublishers) are re-read only when an index moved.
+let hiveIndexMoves = 0
+const movesHiveIndex = (evt) => Number(evt.kind) === HIVE_INDEX_KIND
 
 const isEphemeralKind = (kind) => kind >= 20000 && kind < 30000
 const isAddressableKind = (kind) => kind >= 30000 && kind < 40000                       // one per pubkey+kind+d
@@ -695,6 +699,7 @@ function insertEvent(evt) {
   storeEvent({ id: evt.id, pubkey: evt.pubkey, created_at: Number(evt.created_at), kind, tags: evt.tags, content: evt.content, sig: evt.sig })
   if (kind === BROKER_ANSWER_KIND) answerStored(events.get(evt.id))
   if (movesWriterIndex(evt)) writerIndexMoves++
+  if (movesHiveIndex(evt)) hiveIndexMoves++
   return 'stored'
 }
 
@@ -759,6 +764,7 @@ function deleteExpired() {
     if (exp && exp < now) {
       dropEvent(id)
       if (movesWriterIndex(evt)) writerIndexMoves++
+      if (movesHiveIndex(evt)) hiveIndexMoves++
       if ((isAddressableKind(evt.kind) || isReplaceableKind(evt.kind)) && slots.get(slotKey(evt, evt.kind)) === id) slots.delete(slotKey(evt, evt.kind))
     }
   }
@@ -1633,6 +1639,38 @@ function tryServeHiveIndex(req, res) {
   return true
 }
 
+// PICTURES FOR A NAME (documentation/pools-across-hosts.md, "What a host
+// adds"). A tile's name pool is never listed; a publisher names a picture in
+// their OWN signed index as `pictures:<sign(name)>` → the tile's own layer,
+// and this host lists the keys whose held index names it, at
+// sign('pictures:<sign(name)>'). Membership only, as the worker keeps it:
+// each reader re-reads every publisher's own index. Rebuilt from the held
+// indexes when one moves, never per request.
+const PICTURES_KEY_RE = /^pictures:([0-9a-f]{64})$/
+let picturePools = { moves: -1, members: new Map() }
+function picturePublishers(sig) {
+  if (picturePools.moves !== hiveIndexMoves) {
+    const members = new Map()
+    for (const slot of idsByAuthorKind.keys()) {
+      const [pubkey, kind] = slot.split('\0')
+      if (Number(kind) !== HIVE_INDEX_KIND) continue
+      let roots
+      try { roots = JSON.parse(newestEvent(pubkey, HIVE_INDEX_KIND)?.content ?? '{}')?.roots ?? {} } catch { continue }
+      for (const key of Object.keys(roots)) {
+        const name = PICTURES_KEY_RE.exec(key)?.[1]
+        if (!name) continue
+        const address = sha256Hex(Buffer.from(`pictures:${name}`, 'utf8'))
+        const keys = members.get(address) ?? new Set()
+        keys.add(pubkey)
+        members.set(address, keys)
+      }
+    }
+    picturePools = { moves: hiveIndexMoves, members }
+  }
+  const keys = picturePools.members.get(sig)
+  return keys ? [...keys].sort() : null
+}
+
 /** Is this pool LISTED here? The floor always is (replicate.js
  *  PUBLIC_POOL_ADDRESSES); any other meaning only while an operator's signed
  *  index declares it in `listed` (host-listing.js). The floor answers without
@@ -1820,7 +1858,7 @@ function tryServeContent(req, res) {
     if (!listedPool(dirMatch[1])) {
       // A ROOM POOL is listed to whoever asks its address (swarm-pools.md) —
       // its verified members only. Anything else answers as before.
-      const members = roomMembers(dirMatch[1])
+      const members = roomMembers(dirMatch[1]) ?? picturePublishers(dirMatch[1])
       if (!members) { respondText(res, 404, 'pool not held'); return true }
       const body = Buffer.from(members.length ? members.join('\n') + '\n' : '', 'utf8')
       res.writeHead(200, {

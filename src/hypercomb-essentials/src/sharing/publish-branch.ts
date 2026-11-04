@@ -35,6 +35,7 @@ import {
 } from './hive-link.js'
 import { fetchWithDeadline, firstBounded, HOST_CONCURRENCY } from './bounded-fetch.js'
 import { fetchHiveIndex, fetchHiveManifestFromAny, nip98Header, putHiveManifest, type HiveManifest } from './hive-pointer.js'
+import { pictureRootsOf } from './picture-pools.js'
 import { prepareAnchorHosts, publisherKeyHex } from './key-list.client.js'
 import {
   STAGE_LIVE,
@@ -98,7 +99,23 @@ const CONFIRM_POLL_MS = 2_000
  *  a green branch with a 404 link is still a broken share. */
 const BUNDLE_RECEIPT_MS = 12_000
 
-interface StoreLike { putResource: (b: Blob, options?: { emit?: boolean }) => Promise<string> }
+interface StoreLike {
+  putResource: (b: Blob, options?: { emit?: boolean }) => Promise<string>
+  getResourceLocal?: (sig: string) => Promise<Blob | null>
+}
+/** The picture entries a branch head offers (picture-pools.ts), read from
+ *  this hive's own store. Empty when the store or a layer cannot be read: a
+ *  picture offer is a courtesy to readers, never a gate on the act. */
+const branchPictureRoots = async (head: string): Promise<Record<string, string>> => {
+  const store = get<StoreLike>(STORE_KEY)
+  if (!store?.getResourceLocal) return {}
+  const readJson = async (sig: string): Promise<Record<string, unknown> | null> => {
+    const blob = await store.getResourceLocal!(sig)
+    if (!blob) return null
+    try { return JSON.parse(await blob.text()) as Record<string, unknown> } catch { return null }
+  }
+  try { return await pictureRootsOf(head, readJson) } catch { return {} }
+}
 interface HistoryLike {
   sealSubtree: (segments: readonly string[]) => Promise<string | null>
 }
@@ -548,7 +565,17 @@ async function publishBranchNow(
     }
   }
 
-  const roots = { ...nextRoots, ...stageRoots, ...planRoots }
+  // THE PICTURES (pools-across-hosts.md, "What a host adds"): every pictured
+  // tile in this branch is offered under its name — `pictures:<sign(name)>`
+  // naming the tile's own layer, which is already in the closure on the host.
+  // This write is the only place one is made, so a picture is public only
+  // because its tile was published. An entry another publish made stays.
+  const pictureRoots: Record<string, string> = {}
+  for (const [pictureKey, layerSig] of Object.entries(await branchPictureRoots(sealed))) {
+    if (existing[pictureKey] !== layerSig) pictureRoots[pictureKey] = layerSig
+  }
+
+  const roots = { ...nextRoots, ...stageRoots, ...planRoots, ...pictureRoots }
   const put = await putHiveManifest(indexHost, roots, doors,
     read.ok ? read.manifest.createdAt : 0, read.ok ? read.manifest.signedContent : undefined)
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason, sealed }
@@ -719,6 +746,11 @@ async function unpublishBranchNow(
   const roots = { ...read.manifest.roots }
   const head = String(roots[key] ?? '').toLowerCase()
   delete roots[key]
+  // Its pictures go with it: an entry naming one of this branch's layers is
+  // withdrawn in the same write, so no picture stays public after its tile.
+  for (const [pictureKey, layerSig] of Object.entries(await branchPictureRoots(head))) {
+    if (roots[pictureKey] === layerSig) delete roots[pictureKey]
+  }
   const doors = { ...(read.manifest.doors ?? {}) }
   delete doors[key]
   // Its own addresses go with it: a host never names a creation the index
