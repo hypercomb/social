@@ -2946,5 +2946,22 @@
   "meeting.lobby-sharp": "Nítida",
   "meeting.icon-start": "Iniciar uma reunião",
   "meeting.icon-live": "Há uma reunião no seu enxame: participe",
-  "meeting.icon-in": "Mostrar ou ocultar a reunião"
+  "meeting.icon-in": "Mostrar ou ocultar a reunião",
+  "meeting.camera-on": "Ligar a câmara",
+  "meeting.camera-off": "Desligar a câmara",
+  "meeting.hive-hide": "ocultar",
+  "meeting.hive-show": "Mostrar a reunião",
+  "meeting.hive-camera-hint": "Clique na sua flor para ligar a câmara.",
+  "meeting.hive": "reunião",
+  "meeting.you": "você",
+  "meeting.copy-link": "copiar ligação",
+  "meeting.share-link": "partilhar ligação",
+  "meeting.leave": "sair",
+  "meeting.full-screen": "ecrã inteiro",
+  "meeting.exit-full-screen": "sair do ecrã inteiro",
+  "meeting.leads": "conduz",
+  "meeting.hive-alone": "Só você por agora. Copie a ligação para trazer alguém.",
+  "meeting.hive-not-in": "Não está na reunião.",
+  "meeting.spend-left": "de quem saiu",
+  "meeting.spend-meeting": "Vídeo desta reunião"
 }

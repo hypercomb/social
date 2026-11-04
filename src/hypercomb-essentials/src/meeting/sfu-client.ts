@@ -6,8 +6,11 @@
 // holds the app token, this never does. Nobody connects to anybody else, so
 // nobody learns another person's address (documentation/meeting-lobby.md).
 //
-// Every request goes one at a time: Cloudflare answers a second offer while
-// one is still being negotiated with a 406, so the client queues them.
+// Every request goes one at a time. That is not the whole rule: Cloudflare
+// answers a second tracks request while the previous offer and answer are
+// still being applied with a 406, and drops a feed. The caller (the meeting
+// drone) holds one queue across the HTTP call AND the SDP exchange. The
+// queue here only keeps the HTTP itself from overlapping.
 
 /** Where a meeting point's video routes live, from its relay address:
  *  wss://hypercomb.com → https://hypercomb.com/.well-known/hc-meet/sfu.
@@ -22,7 +25,25 @@ export const sfuBase = (relay: string): string => {
 
 export const SESSION_ID = /^[A-Za-z0-9_-]{8,160}$/
 
-export type SfuTrack = { readonly mid: string; readonly trackName: string; readonly error?: unknown }
+export type SfuTrack = {
+  readonly mid: string
+  readonly trackName: string
+  readonly error?: unknown
+  readonly errorCode?: unknown
+}
+
+const tracksOf = (raw: unknown): SfuTrack[] => {
+  if (!Array.isArray(raw)) return []
+  return raw.map(item => {
+    const row = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+    return {
+      mid: String(row['mid'] ?? ''),
+      trackName: String(row['trackName'] ?? ''),
+      ...(row['error'] !== undefined ? { error: row['error'] } : {}),
+      ...(row['errorCode'] !== undefined ? { errorCode: row['errorCode'] } : {}),
+    }
+  })
+}
 
 export type SubscribeAnswer = {
   /** Cloudflare's offer to apply, when the new tracks need renegotiating. */
@@ -87,25 +108,26 @@ export class SfuClient {
     return id
   }
 
-  /** Publish local tracks with this connection's offer; the SFU's answer. */
-  async publish(offerSdp: string, tracks: readonly { mid: string; trackName: string }[]): Promise<string> {
-    const data = await this.#send<{ sessionDescription?: { type?: string; sdp?: string } }>('POST', `/session/${this.sessionId}/tracks`, {
+  /** Publish local tracks with this connection's offer; the SFU's answer,
+   *  and the tracks it actually took (`errorCode` on one that it refused). */
+  async publish(offerSdp: string, tracks: readonly { mid: string; trackName: string }[]): Promise<{ sdp: string; tracks: SfuTrack[] }> {
+    const data = await this.#send<{ sessionDescription?: { type?: string; sdp?: string }; tracks?: unknown }>('POST', `/session/${this.sessionId}/tracks`, {
       sessionDescription: { type: 'offer', sdp: offerSdp },
       tracks: tracks.map(t => ({ location: 'local', mid: t.mid, trackName: t.trackName })),
     })
     const sdp = data?.sessionDescription?.type === 'answer' ? data.sessionDescription.sdp : undefined
     if (!sdp) throw new SfuError(502, 'video: no answer')
-    return sdp
+    return { sdp, tracks: tracksOf(data?.tracks) }
   }
 
   /** Subscribe to another person's tracks. */
   async subscribe(from: string, trackNames: readonly string[]): Promise<SubscribeAnswer> {
-    const data = await this.#send<{ sessionDescription?: { type?: string; sdp?: string }; tracks?: SfuTrack[] }>(
+    const data = await this.#send<{ sessionDescription?: { type?: string; sdp?: string }; tracks?: unknown }>(
       'POST', `/session/${this.sessionId}/tracks`,
       { tracks: trackNames.map(trackName => ({ location: 'remote', sessionId: from, trackName })) },
     )
     const offer = data?.sessionDescription?.type === 'offer' ? data.sessionDescription.sdp : undefined
-    return { ...(offer ? { offer } : {}), tracks: Array.isArray(data?.tracks) ? data.tracks : [] }
+    return { ...(offer ? { offer } : {}), tracks: tracksOf(data?.tracks) }
   }
 
   async renegotiate(answerSdp: string): Promise<void> {

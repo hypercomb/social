@@ -2946,5 +2946,22 @@
   "meeting.lobby-sharp": "Scharf",
   "meeting.icon-start": "Ein Meeting starten",
   "meeting.icon-live": "In deinem Schwarm läuft ein Meeting: beitreten",
-  "meeting.icon-in": "Meeting zeigen oder ausblenden"
+  "meeting.icon-in": "Meeting zeigen oder ausblenden",
+  "meeting.camera-on": "Kamera einschalten",
+  "meeting.camera-off": "Kamera ausschalten",
+  "meeting.hive-hide": "ausblenden",
+  "meeting.hive-show": "Meeting zeigen",
+  "meeting.hive-camera-hint": "Klicke auf deine Blume, um die Kamera einzuschalten.",
+  "meeting.hive": "Meeting",
+  "meeting.you": "du",
+  "meeting.copy-link": "Link kopieren",
+  "meeting.share-link": "Link teilen",
+  "meeting.leave": "verlassen",
+  "meeting.full-screen": "Vollbild",
+  "meeting.exit-full-screen": "Vollbild beenden",
+  "meeting.leads": "leitet",
+  "meeting.hive-alone": "Bisher nur du. Kopiere den Link, um jemanden zu holen.",
+  "meeting.hive-not-in": "Du bist nicht im Meeting.",
+  "meeting.spend-left": "von Personen, die gegangen sind",
+  "meeting.spend-meeting": "Video dieses Meetings"
 }

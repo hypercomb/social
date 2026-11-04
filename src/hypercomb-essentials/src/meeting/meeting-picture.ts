@@ -1,11 +1,10 @@
 // meeting/meeting-picture.ts
 //
-// IS THERE A PICTURE? Video is off by default (jwize, 2026-11-02: "if we are
-// showing video we need it to be off by default"). A person who has not shared
-// their video still sends a stream, for their voice, and the SFU still hands
-// every subscriber a video track for them: one that carries no frames, so the
-// browser marks it muted. A face is shown only where a live, unmuted video
-// track is; everywhere else the seat stays, and the sound still plays.
+// IS THERE A PICTURE? The camera stays off until that person shares it
+// (jwize, 2026-11-02, and the flower click on 2026-11-03). Voice still
+// arrives on its own. A face is drawn only where a live, unmuted video track
+// is; everywhere else the seat keeps the name and picture, and the sound
+// still plays.
 
 export const showsPicture = (stream: MediaStream | null | undefined): boolean =>
   !!stream?.getVideoTracks().some(track => track.readyState === 'live' && track.enabled && !track.muted)

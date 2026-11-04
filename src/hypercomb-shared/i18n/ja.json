@@ -3436,5 +3436,22 @@
   "meeting.lobby-error": "カメラを起動できませんでした。",
   "meeting.lobby-saver": "節約",
   "meeting.lobby-auto": "自動",
-  "meeting.lobby-sharp": "高画質"
+  "meeting.lobby-sharp": "高画質",
+  "meeting.camera-on": "カメラをオンにする",
+  "meeting.camera-off": "カメラをオフにする",
+  "meeting.hive-hide": "隠す",
+  "meeting.hive-show": "会議を表示",
+  "meeting.hive-camera-hint": "自分の花をクリックするとカメラがオンになります。",
+  "meeting.hive": "会議",
+  "meeting.you": "あなた",
+  "meeting.copy-link": "リンクをコピー",
+  "meeting.share-link": "リンクを共有",
+  "meeting.leave": "退出",
+  "meeting.full-screen": "全画面",
+  "meeting.exit-full-screen": "全画面を終了",
+  "meeting.leads": "進行",
+  "meeting.hive-alone": "まだあなただけです。リンクをコピーして誰かを招いてください。",
+  "meeting.hive-not-in": "会議に参加していません。",
+  "meeting.spend-left": "退出した人の分",
+  "meeting.spend-meeting": "この会議の映像"
 }
