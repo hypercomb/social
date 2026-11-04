@@ -8,7 +8,7 @@
 //                                                     [--revision <name>]
 //
 // <route> is the tile whose children are planted, as a path in tree.cjs:
-// `presentation` (the default) plants the first layer, the values; a deeper
+// `protocol` (the default) plants the first layer, the values; a deeper
 // route plants that tile's children. With --all, every layer under the route
 // is planted in one pass — the whole mesh — so agents can take tiles in
 // parallel, and the pass is still sealed as one build revision.
@@ -26,8 +26,9 @@
 //      host and <top>.<domain> opens on the new head, on every domain at once.
 //      With --as <label>, the tile gets its own address instead:
 //      <label>.<domain> (`publish /<top> on <domain> as <label>`), so
-//      The top tile is already named presentation, so `--publish hypercomb.com`
-//      alone is presentation.hypercomb.com.
+//      The top tile is named protocol, so `--publish hypercomb.com` alone is
+//      protocol.hypercomb.com. An earlier root (retired.cjs `roots`) is
+//      withdrawn from each domain first, `publish /<old> off <domain>`.
 //      Publishing is not joining or sharing; the hive asks for consent in the
 //      browser before each publish.
 // The usual order is two runs with a step by hand between them: plant the
@@ -57,10 +58,8 @@
 // the route that have content (blocks/content.cjs). A file's text cannot ride a
 // command line, so this writes one snippet to paste into the hive tab's
 // console: it stores each page, attaches each file through the hive's own
-// tile-files door, stores every medium its page names (the voice, the clips,
-// the faces, the captured pictures) and checks each lands under the signature
-// the page already names it by, then puts `go` and `website page <sig>` lines
-// on the command line: dressing a tile with its page is the participant's own word,
+// tile-files door, then puts `go` and `website page <sig>` lines on the
+// command line: dressing a tile with its page is the participant's own word,
 // so one Enter says them all (a page a model writes is a trial instead, shown
 // as a door to its sandbox). Plant the tiles first; a page needs its tile.
 // Saying the notes twice files them twice, so re-run with --tiles-only.
@@ -85,9 +84,10 @@ const ALL = args.includes('--all')
 const DOMAINS = [...new Set(valuesOf('--publish').flatMap(v => v.split(',')).map(d => d.trim().toLowerCase()).filter(Boolean))]
 const LABEL = valueOf('--as')
 const flagValues = new Set([...valuesOf('--publish'), valueOf('--revision'), valueOf('--out'), LABEL, SAY_URL].filter(Boolean))
-// Two trees, two relations (tree.cjs): presentation (what is shown, and what is
-// published) and presenter (what shows it). With --all and no route, both are
-// planted; a route plants under its own tree.
+// Three trees, three relations (tree.cjs): protocol (the values, what is
+// shown and published), road (the way ahead, one tour scene per tile) and
+// presenter (what shows them). With --all and no route, all are planted; a
+// route plants under its own tree.
 const ROOTS = tree.roots || [tree]
 const named = args.find(a => !a.startsWith('--') && !flagValues.has(a))
 const route = (named || tree.name).replace(/^\/+|\/+$/g, '')
@@ -95,17 +95,25 @@ const EVERY_ROOT = ALL && !named
 const SAY = path.join(__dirname, '..', 'say.cjs')
 
 if (args.includes('--blocks')) {
-  // Pages and files, not sentences: one console snippet, written to a file
-  // (OS temp unless --out names one), since it is long.
+  // Pages, files and media, not sentences: one console snippet, written to a
+  // file (OS temp unless --out names one), since it is long.
+  //
+  // The media (the voice, the clips, the faces, the captured pictures) are
+  // too large to paste, so this serves them on 127.0.0.1 while the snippet
+  // runs (the hive's connect-src allows it): the snippet GETs each by its
+  // signature, skips any the hive already holds, stores the rest, and checks
+  // that the hive named each one by the same signature before a single page
+  // is dressed. --port <n> picks the port (default 4271).
   const fs = require('fs')
   const os = require('os')
+  const http = require('http')
   const { buildBlocks } = require('./blocks/build.cjs')
   const under = named ? route : ''
   const { blocks, media } = buildBlocks({ under })
-  if (!blocks.length) { console.error(`no block content under /${under || '(everything)'} yet (blocks/content.cjs)`); process.exit(2) }
+  if (!blocks.length) { console.error(`no pages under /${under || '(everything)'} yet (blocks/content.cjs, blocks/tour.cjs)`); process.exit(2) }
+  const PORT = Number(valueOf('--port') || 4271)
+  const SERVE = `http://127.0.0.1:${PORT}`
   const out = valueOf('--out') || path.join(os.tmpdir(), `living-blocks-${Date.now()}.js`)
-  // Each medium once, as base64, however many pages name it.
-  const bytes = media.map(m => ({ sig: m.sig, type: m.type, name: m.name, base64: fs.readFileSync(m.path).toString('base64') }))
   const snippet = `// Paste into the hive tab's console (F12 → Console), then press Enter on the
 // hive's command line when it asks. ${blocks.length} pages, their files, and ${media.length} media.
 (async () => {
@@ -114,18 +122,22 @@ if (args.includes('--blocks')) {
   const store = ioc?.get?.('@hypercomb.social/Store')
   const door = ioc?.get?.('@diamondcoreprocessor.com/TileFilesDrone')
   if (!bus || !store?.putResource || !door?.write) { console.error('Open this in the hive tab: the hive is not here.'); return }
+  // 1. The media, each by its signature, before any page names it.
+  const media = ${JSON.stringify(media.map(m => ({ sig: m.sig, name: m.name, type: m.type })))}
+  let kept = 0, stored = 0
+  for (const m of media) {
+    if (await store.getResourceLocal?.(m.sig)) { kept++; continue }
+    const res = await fetch('${SERVE}/' + m.sig).catch(e => ({ ok: false, statusText: e.message }))
+    if (!res.ok) { console.error('Could not fetch ' + m.name + ' (' + res.statusText + '): is plant.cjs --blocks still running?'); return }
+    const sig = await store.putResource(new Blob([await res.arrayBuffer()], { type: m.type }))
+    if (sig !== m.sig) { console.error(m.name + ' arrived as ' + sig + ', not ' + m.sig + '. Nothing was dressed.'); return }
+    stored++
+  }
+  console.log('Media: ' + stored + ' stored, ' + kept + ' already here.')
+  fetch('${SERVE}/done', { method: 'POST' }).catch(() => {})
   // Each file's text once, however many tiles carry it.
   const texts = ${JSON.stringify(Object.fromEntries(blocks.flatMap(b => b.files.map(f => [f.path, f.text]))))}
   const blocks = ${JSON.stringify(blocks.map(b => ({ route: b.route, page: b.page, files: b.files.map(f => ({ name: f.name, path: f.path })) })))}
-  // 1. The media first, each checked against the signature its pages name
-  //    it by: a page is never dressed while a medium it names is missing.
-  const media = ${JSON.stringify(bytes)}
-  for (const m of media) {
-    const raw = Uint8Array.from(atob(m.base64), c => c.charCodeAt(0))
-    const sig = await store.putResource(new Blob([raw], { type: m.type }))
-    if (sig !== m.sig) { console.error(m.name + ' stored as ' + sig + ', not the ' + m.sig + ' its pages name; no page was dressed.'); return }
-  }
-  console.log('Media: ' + media.length + ' stored.')
   // 2. Each page's bytes into the hive (nothing is dressed yet), and each
   //    tile's included files onto it.
   const lines = []
@@ -139,11 +151,15 @@ if (args.includes('--blocks')) {
       if (file.ok) files++; else { failed++; console.error(at + ' ' + f.name + ': ' + file.error) }
     }
   }
-  // The presentation OPENS AS its pages: one view:default mark on its top
-  // tile, which every tile under it inherits, so walking in shows a page and
-  // walking back up lands on one too (a tile with no face of its own drops
-  // the website view back to hexagons). \`h\` is hexagons for one visit.
-  for (const top of ${JSON.stringify([...new Set(blocks.map(b => b.route[0]))])}) lines.push('go /', 'opens ' + top + ' as website')
+  // Every tile OPENS AS HEXAGONS (jwize 2026-11-03: "walk the hive tiles and
+  // just open the website part … it is the entrance point"; "full flexibility
+  // to just walk into and out of tile views"). A reader walks the hexagons and
+  // opens a tile's page from its view icon; that tile is the site's entrance,
+  // a page's word links go deeper inside it, and walking back (a link up, or
+  // the right button) comes out to the hexagons where the reader opened it.
+  // An earlier planting set \`opens <top> as website\`, which cascades to every
+  // tile beneath and made each arrival open a page; this clears it.
+  for (const top of ${JSON.stringify([...new Set(blocks.map(b => b.route[0]))])}) lines.push('go /', 'opens ' + top + ' as hexagons')
   console.log('Files: ' + files + ' written, ' + failed + ' failed.')
   // 3. Dressing each tile with its page is YOUR word, website page <sig>: the
   //    lines wait on the command line, and Enter says them all.
@@ -158,16 +174,35 @@ if (args.includes('--blocks')) {
 `
   fs.writeFileSync(out, snippet, 'utf8')
   const files = blocks.reduce((n, b) => n + b.files.length, 0)
-  console.log(`${blocks.length} blocks (${blocks.map(b => b.route.at(-1)).join(', ')}), ${files} files and ${media.length} media (${Math.round(fs.statSync(out).size / 1048576)} MB of snippet).`)
+  const mb = (media.reduce((n, m) => n + m.size, 0) / 1e6).toFixed(1)
+  console.log(`${blocks.length} pages, ${files} files, ${media.length} media (${mb} MB).`)
   console.log(`Console snippet: ${out}`)
-  console.log('Open the hive tab, press F12 → Console, paste the file\'s contents, press Enter;')
-  console.log('then press Enter on the hive\'s command line to give each tile its page.')
-  process.exit(0)
+  if (args.includes('--no-serve')) process.exit(0)
+  const bySig = new Map(media.map(m => [m.sig, m]))
+  const server = http.createServer((req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    if (req.method === 'POST' && req.url === '/done') {
+      res.end('ok')
+      console.log('The hive has every medium; the snippet goes on to the pages. Stopping the media server.')
+      setTimeout(() => server.close(() => process.exit(0)), 200)
+      return
+    }
+    const m = bySig.get(String(req.url).slice(1))
+    if (req.method !== 'GET' || !m) { res.statusCode = 404; res.end('not one of the pages\' media'); return }
+    res.setHeader('Content-Type', m.type)
+    fs.createReadStream(m.path).pipe(res)
+  })
+  server.listen(PORT, '127.0.0.1', () => {
+    console.log(`Serving the media on ${SERVE} until the snippet has them (Ctrl+C to stop).`)
+    console.log('Open the hive tab, press F12 → Console, paste the file\'s contents, press Enter;')
+    console.log('then press Enter on the hive\'s command line to give each tile its page.')
+  })
+  return
 }
 
 if (PUBLISH_ONLY && !DOMAINS.length) { console.error('--publish-only needs --publish <domain>'); process.exit(2) }
 if (args.includes('--publish') && !DOMAINS.length) { console.error('--publish needs a domain, e.g. --publish example.com'); process.exit(2) }
-if (args.includes('--as') && (!LABEL || LABEL.startsWith('--'))) { console.error('--as needs a label, e.g. --as presentation'); process.exit(2) }
+if (args.includes('--as') && (!LABEL || LABEL.startsWith('--'))) { console.error('--as needs a label, e.g. --as protocol'); process.exit(2) }
 if (LABEL && !DOMAINS.length) { console.error('--as names an address on a domain: add --publish <domain>'); process.exit(2) }
 
 const segments = route.split('/')
@@ -205,7 +240,12 @@ for (const p of plantings) { p.layers = []; walk(p.node, p.route, p.layers); lay
 const sentences = []
 if (!PUBLISH_ONLY) {
   for (const p of plantings) {
-    if (p.top) sentences.push('go /', `create ${p.node.name}`)
+    if (p.top) {
+      sentences.push('go /', `create ${p.node.name}`)
+      // An earlier root is retired at the root, once: its marker forgotten, its tile kept.
+      const old = RETIRE && p === plantings[0] ? (retired.roots ?? []).filter(r => !ROOTS.some(x => x.name === r)) : []
+      if (old.length) sentences.push(`trait ~ ${old.join(' ')}`)
+    }
     for (const { tile, at } of p.layers) {
       sentences.push(`go /${at}`, `trait ${tile.children.map(c => c.name).join(' ')}`)
       const old = RETIRE ? retired.markers[at] ?? [] : []
@@ -228,11 +268,13 @@ if (!TILES_ONLY && !PUBLISH_ONLY) {
     for (const { tile, at } of p.layers) for (const child of tile.children) if (child.note) sentences.push(`file on /${at}/${child.name}: ${noteFor(child)}`)
   }
 }
-// Each planted tree is sealed as one build; only the presentation (the tree
-// the route names, or presentation itself) is published.
+// Each planted tree is sealed as one build; only the protocol (the tree the
+// route names, or protocol itself) is published. An earlier root is withdrawn
+// from each domain first, so the one address serves the one presentation.
 const sealed = [...new Set(plantings.map(p => p.route.split('/')[0]))]
 for (const top of sealed) sentences.push(`go /${top}`, `builds ${REVISION}`)
 const publishing = EVERY_ROOT ? tree.name : segments[0]
+if (RETIRE) for (const domain of DOMAINS) for (const old of retired.roots ?? []) if (old !== publishing) sentences.push(`publish /${old} off ${domain}`)
 for (const domain of DOMAINS) sentences.push(`publish /${publishing} on ${domain}${LABEL ? ` as ${LABEL}` : ''}`)
 
 // The participant's door reads a line as a behaviour only with its slash.

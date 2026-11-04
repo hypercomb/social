@@ -12,5 +12,30 @@
     "icon:network your domain",
     "icon:layers your content"
   ],
+  "lights": [
+    "*",
+    [
+      "r1",
+      "r2"
+    ],
+    "*",
+    [
+      "r2"
+    ],
+    [
+      "r0"
+    ],
+    [
+      "r0",
+      "r1"
+    ],
+    [
+      "r1"
+    ],
+    [
+      "r1"
+    ],
+    "*"
+  ],
   "say": "Reason four: digital sovereignty that is real. It comes from one thing: hosting your own domain, and your own content. Hypercomb guides you there in steps. Start in your browser. Share through a friend's host. Then run your own, on your own machine, under your own domain. Your domain becomes your front door, and the people who follow it get your work straight from you. No platform decides who gets to see you. You do."
 }

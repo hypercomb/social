@@ -1,16 +1,18 @@
 // The living presentation's tile tree (documentation/living-presentation.md).
 //
 // The whole mesh, planted at once so agents can take tiles in parallel. The
-// first layer is the six values under one tile called presentation; under each
-// value sit the ideas that show it, so every layer keeps ONE relation and every
-// path reads aloud ("presentation is simple; simple is shown by the primitive;
+// first layer is the six values under one tile called protocol (jwize
+// 2026-11-04: "the root tile has to change to protocol instead of presentation");
+// under each value sit the ideas that show it, so every layer keeps ONE relation
+// and every path reads aloud ("the protocol is simple; simple is shown by the primitive;
 // the primitive is made of a word, ..."). Every piece stands alone, so the
 // arrangement can be rebuilt later without breaking anything.
 //
 // TWO TREES, because they are two relations (audit, jwize 2026-11-03: "fix all
 // three and replant"):
-//   presentation — what the reader is shown: the values and the ideas under
-//                  them. This is what gets published.
+//   protocol     — what the reader is shown: the protocol, its values and the
+//                  ideas under them. This is what gets published. (The earlier
+//                  root, presentation, is retired and withdrawn: retired.cjs.)
 //   presenter    — what shows it: the marker, the same-shape check, the lift,
 //                  and the cube viewer. The presentation's own machinery, each
 //                  piece a tile like everything else, kept out of the values
@@ -36,9 +38,9 @@ const t = (name, note, brief, children) => {
   return tile
 }
 
-const presentation = t('presentation',
-  'Welcome to Hypercomb. Everything here is one idea, used again: a tile. Start with any of the six values below, and step in to go deeper.',
-  'The flagship presentation. It follows its own values and grows into a grammar viewer. Read flat, the six values are its first view. Plan: documentation/living-presentation.md',
+const protocol = t('protocol',
+  'Hypercomb is an open protocol for people: one shared way of naming, keeping and passing on what we make. Everything here is one idea, used again: a tile. Start with any of the six values below, and step in to go deeper.',
+  'The root: tour scene 2, An open protocol. It follows its own values and grows into a grammar viewer. Read flat, the six values are its first view. Plan: documentation/living-presentation.md',
   [
     t('simple', 'Everything is a tile, and every tile is a word you can say. One idea, used everywhere.', 'Value. Relation of its children: shown by.', [
       t('primitive', 'There is only one primitive: a word, its signature, a layer of children under it, and a meta layer that says what it means.',
@@ -112,6 +114,25 @@ const presenter = t('presenter',
     ]),
   ])
 
-module.exports = presentation
+// The road: the tour's opening question and its close, one scene per tile
+// (jwize 2026-11-03: "the entire hierarchy will have one scene per tile").
+// Kept out of the values so /protocol's layer stays the six values (one
+// relation per layer). Relation of its children: the way ahead.
+const road = t('road',
+  'Where Hypercomb is going: what it is for, what people make with it, what comes next, and how to begin.',
+  'The tour\'s scene 1 and scenes 20 to 25 (blocks/tour.cjs), one per tile, in the tour\'s order. Scene 2, the protocol, is the root.',
+  [
+    t('question', 'It starts with a question: where does your corner of the internet actually live? Here, your work lives with you, and leaves only when you share it.', 'Tour scene 1, A new way to bee: the question the protocol answers.'),
+    t('creations', 'What people make with it today: cards, websites and games, the language, communities.', 'Tour scene 20, Shown by its creations.'),
+    t('coming', 'In progress: the next things being built.', 'Tour scene 21, What comes next. Everything here is planned or in progress, and says so.'),
+    t('vision', 'Further out: where the protocol is headed.', 'Tour scene 22, The vision. Planned.'),
+    t('computer', 'The horizon: the hive as a computer.', 'Tour scene 23, The hive is a computer. Planned.'),
+    t('yours', 'The invitation: the hive is yours.', 'Tour scene 24, The hive is yours.'),
+    t('first-day', 'Your first day: type help, and everything you can do is laid out for you.', 'Tour scene 25, How to bee.'),
+  ])
+
+module.exports = protocol
+module.exports.protocol = protocol
 module.exports.presenter = presenter
-module.exports.roots = [presentation, presenter]
+module.exports.road = road
+module.exports.roots = [protocol, road, presenter]

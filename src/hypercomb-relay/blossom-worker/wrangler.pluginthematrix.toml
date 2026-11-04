@@ -347,16 +347,17 @@ CLAIM_SCRIPT = "hypercomb-hosts"
 # answers `text/html` from Azure. A named host under a wildcard-routed zone is
 # reachable; only the APEX needs its own route, because `*` never matches it.
 #
-# hosting.hypercomb.com is bound for its TITLE alone (documentation/hosting-
-# pages.md). An implicit name is titled by its label, so the door, the tab
-# and every share card read "hosting"; this entry makes them read "Host your
-# hive". It opens exactly as the implicit name would (the `hosting` root in
-# jwize's signed index). Beside the title, only the unpublished hint differs:
+# host-setup.hypercomb.com is the hosting pages' door (documentation/hosting-
+# pages.md; jwize 2026-11-04: "change from hosting to host-setup.hypercomb.com
+# not host"). It is bound for its ADDRESS and its TITLE: the lineage is the
+# `hosting` root in jwize's signed index, published `as host-setup`, and an
+# implicit name would be titled by its label, so this entry makes the door,
+# the tab and every share card read "Host your hive". Beside the title, only the unpublished hint differs:
 # an exact binding has no zone to point back to, so before /hosting is
 # published its "nothing here" page names the whole host (as
 # replication.hypercomb.com's does). The door's bag keeps the title of the
-# marker that seeded it, so deploy this BEFORE the first `publish /hosting on
-# hypercomb.com`, or the title waits for jwize's next index write. The same
+# marker that seeded it, so deploy this BEFORE the first `publish /hosting as
+# host-setup on hypercomb.com`, or the title waits for jwize's next index write. The same
 # gap titles every implicit door by its label (meetups.hypercomb.com reads
 # "meetups") — a title the publisher signs is the general fix.
 #
@@ -365,7 +366,7 @@ CLAIM_SCRIPT = "hypercomb-hosts"
 # <name>.hypercomb.com when Publish has it on for hypercomb.com"). A lineage
 # whose signed index entry has no doors opens everywhere elsewhere (data never
 # heals), but not here: under hypercomb.com a name answers only while its doors
-# name the zone. Exact bindings (replication., hosting.) are their own zones and
+# name the zone. Exact bindings (replication., host-setup.) are their own zones and
 # keep opening as before.
 #
 # realones.online is a ZONE ANCHOR, not a site: it exists so resolveSite can
@@ -375,4 +376,4 @@ CLAIM_SCRIPT = "hypercomb-hosts"
 # so no hive location can ever mint a lineage containing a dot. A plausible
 # anchor lineage like "realones" would instead sit in the publications ledger's
 # `named` set and silently deny a real hive of that name its plate.
-SITE_BINDINGS = '{"pluginthematrix.com":{"title":"Plugin the Matrix","lineage":"pluginthematrix.com","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"frontDoor":true},"revolucion.pluginthematrix.com":{"title":"Revolución","lineage":"revolucion","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"meetup.pluginthematrix.com":{"title":"Meetup","lineage":"revolucion/meetup","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"arkanoid.pluginthematrix.com":{"title":"Arkanoid","lineage":"games/arkanoid","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"realones.online":{"title":"Real Ones","lineage":"realones.online","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"frontDoor":true},"hypercomb.com":{"title":"Hypercomb","lineage":"hypercomb","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"routed":false,"installs":"essentials","farm":["jwize.com"],"explicitDoors":true},"replication.hypercomb.com":{"title":"Replication by Signature","lineage":"hypercomb/architecture/replication-by-signature","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"hosting.hypercomb.com":{"title":"Host your hive","lineage":"hosting","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"jwize.com":{"title":"jwize","lineage":"jwize.com","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"routed":false},"cafesociety.buzz":{"title":"Café Society","lineage":"cafesociety.buzz","publishers":[{"pubkey":"83814be50701e8cd997e7021f8cb2e3390281ec63b3fdc503bd17bf436686e0d","label":"Leanne","primary":true}],"frontDoor":true},"pointblanksolutions.ca":{"title":"pointblanksolutions.ca","lineage":"pointblanksolutions.ca","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"frontDoor":true,"explicitDoors":true},"susanpaulekasper.ca":{"title":"Susan Paule Kasper","lineage":"susanpaulekasper.ca","publishers":[{"pubkey":"a860e154a7a403ada721297b979663248bd38e5ee8d664e99809e3cf67ec2236","label":"Susan","primary":true}],"frontDoor":true}}'
+SITE_BINDINGS = '{"pluginthematrix.com":{"title":"Plugin the Matrix","lineage":"pluginthematrix.com","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"frontDoor":true},"revolucion.pluginthematrix.com":{"title":"Revolución","lineage":"revolucion","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"meetup.pluginthematrix.com":{"title":"Meetup","lineage":"revolucion/meetup","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"arkanoid.pluginthematrix.com":{"title":"Arkanoid","lineage":"games/arkanoid","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"realones.online":{"title":"Real Ones","lineage":"realones.online","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"frontDoor":true},"hypercomb.com":{"title":"Hypercomb","lineage":"hypercomb","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"routed":false,"installs":"essentials","farm":["jwize.com"],"explicitDoors":true},"replication.hypercomb.com":{"title":"Replication by Signature","lineage":"hypercomb/architecture/replication-by-signature","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"host-setup.hypercomb.com":{"title":"Host your hive","lineage":"hosting","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"jwize.com":{"title":"jwize","lineage":"jwize.com","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"routed":false},"cafesociety.buzz":{"title":"Café Society","lineage":"cafesociety.buzz","publishers":[{"pubkey":"83814be50701e8cd997e7021f8cb2e3390281ec63b3fdc503bd17bf436686e0d","label":"Leanne","primary":true}],"frontDoor":true},"pointblanksolutions.ca":{"title":"pointblanksolutions.ca","lineage":"pointblanksolutions.ca","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"frontDoor":true,"explicitDoors":true},"susanpaulekasper.ca":{"title":"Susan Paule Kasper","lineage":"susanpaulekasper.ca","publishers":[{"pubkey":"a860e154a7a403ada721297b979663248bd38e5ee8d664e99809e3cf67ec2236","label":"Susan","primary":true}],"frontDoor":true}}'

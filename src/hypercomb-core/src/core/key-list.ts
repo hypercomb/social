@@ -278,3 +278,36 @@ export function acceptKeyListChain(anchor: string, held: readonly SignedKeyList[
   }
   return walk(anchor, offered, verify, held.length ? { now: nowSeconds, at: held.length } : undefined)
 }
+
+// ── the invite as it travels ─────────────────────────────────────────────────
+//
+// Read and written by every place that hands an invite on or takes one: the
+// hive's `keys` words (essentials key-list.client.ts) and a front door's Allow
+// (the shim's device-invite.ts). One spelling, here, so the two never drift.
+
+export interface InviteParts { host: string; anchor: string; secret: string }
+
+const INVITE_RE = /(?:^|[#?&\s])invite=([a-z0-9.:[\]-]+)\/([0-9a-f]{64})\/([0-9a-f]{64})(?![0-9a-f])/i
+const BARE_INVITE_RE = /^([a-z0-9.:[\]-]+)\/([0-9a-f]{64})\/([0-9a-f]{64})$/i
+// Loopback hosts speak plain http.
+const INVITE_LOOPBACK_RE = /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i
+
+/** A host as a bare name: no scheme, no trailing slash, lower case. */
+export const bareInviteHost = (host: string): string =>
+  String(host ?? '').replace(/^wss?:\/\//, '').replace(/^https?:\/\//, '').replace(/\/+$/, '').trim().toLowerCase()
+
+/** An invite in a link, a fragment, `invite=…` or the bare `host/anchor/secret`. */
+export function parseInvite(text: string): InviteParts | null {
+  const raw = String(text ?? '').trim()
+  const m = INVITE_RE.exec(raw) ?? BARE_INVITE_RE.exec(raw)
+  if (!m) return null
+  const host = bareInviteHost(m[1]!)
+  return host ? { host, anchor: m[2]!.toLowerCase(), secret: m[3]!.toLowerCase() } : null
+}
+
+/** The link to open where the new place lives. The secret is in the fragment,
+ *  which a browser never sends to a server. */
+export function inviteLink(where: string, parts: InviteParts): string {
+  const bare = bareInviteHost(where)
+  return `${INVITE_LOOPBACK_RE.test(bare) ? 'http' : 'https'}://${bare}/#invite=${parts.host}/${parts.anchor}/${parts.secret}`
+}

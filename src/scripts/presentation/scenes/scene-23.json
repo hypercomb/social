@@ -8,7 +8,23 @@
   "sub": "",
   "visual": "plate:hive-computer",
   "visualData": [
-    "junctions compute"
+    "computed once"
   ],
-  "say": "And the horizon: the hive as a computer. A script and its input give a result, and the result has a signature of its own. Compute something once, and nobody ever has to compute it again. Junctions in the tree become processors, and the shape of your hive becomes the program. The pieces, signatures, layers, and behaviors that always give the same answer, are already in your hands. The road ahead is the staircase from here to there."
+  "lights": [
+    "*",
+    [
+      "inputs",
+      "result"
+    ],
+    [
+      "result",
+      "asked"
+    ],
+    [
+      "inputs"
+    ],
+    "*",
+    "*"
+  ],
+  "say": "And the horizon: the hive as a computer. A script and its input give a result, and the result has a signature of its own. Compute something once, and nobody ever has to compute it again. Junctions in the tree become processors, and the shape of your hive becomes the program. The pieces, signatures, layers, and records of what each result was made from, are already in your hands. The road ahead is the staircase from here to there."
 }

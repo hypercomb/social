@@ -7,6 +7,7 @@
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { describe, expect, it, vi } from 'vitest'
+import { KEY_LIST_MEANING, firstKeyList, keyListTemplate, nextKeyList } from '@hypercomb/core'
 import { parseShowcase, readZoneOwners, type ShowcaseRecord, type ZoneOwners } from './showcase-record'
 import { aggregate, aggregateMatches, bandZones, coverOf, followCandidate, ledgerPublishes, ownersLabel, parseLedger,
   gestureStep, pageFlip, readPeerLedger, sharedPublishes, showcase } from './showcase'
@@ -1223,6 +1224,57 @@ describe('readZoneOwners — every owner counts', () => {
   })
 })
 
+describe('readZoneOwners — an index another of the owner\'s places signed', () => {
+  const anchorSecret = generateSecretKey(), phoneSecret = generateSecretKey(), strangerSecret = generateSecretKey()
+  const anchor = getPublicKey(anchorSecret), phone = getPublicKey(phoneSecret)
+  const zone = 'hypercomb.com'
+  const hash = async (text: string) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))]
+    .map(b => b.toString(16).padStart(2, '0')).join('')
+  const chain = () => {
+    const first = finalizeEvent(keyListTemplate(firstKeyList(anchor), 10) as never, anchorSecret)
+    const next = nextKeyList(firstKeyList(anchor), first.id, { op: 'add', pubkey: phone, label: 'phone' }, 11)!
+    return [first, finalizeEvent(keyListTemplate(next, 11) as never, anchorSecret)]
+  }
+  const run = async (secret: Uint8Array, tags: string[][], list: unknown = chain()) => {
+    const [indexes, lists] = await Promise.all([hash('hive:indexes'), hash(KEY_LIST_MEANING)])
+    const index = finalizeEvent({ kind: 30564, created_at: 20, tags, content: JSON.stringify({ v: 1, roots: {}, doors: { dylan: [zone] } }) }, secret)
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === `https://${zone}/${indexes}/${anchor}`) return new Response(JSON.stringify(index), { status: 200 })
+      if (url === `https://${zone}/${lists}/${anchor}` && list) return new Response(JSON.stringify(list), { status: 200 })
+      return new Response('', { status: 404 })
+    }))
+    try { return await readZoneOwners(zone, [anchor]) } finally { vi.unstubAllGlobals() }
+  }
+
+  it('reads an index the anchor signed itself', async () => {
+    const read = await run(anchorSecret, [])
+    expect(read.reached).toBe(true)
+    expect(read.doors.get(anchor)?.get('dylan')).toEqual([zone])
+  })
+
+  it('reads an index a listed place signed for the anchor', async () => {
+    const read = await run(phoneSecret, [['anchor', anchor]])
+    expect(read.reached).toBe(true)
+    expect(read.doors.get(anchor)?.get('dylan')).toEqual([zone])
+  })
+
+  it('refuses an index a key the list does not name signed', async () => {
+    expect((await run(strangerSecret, [['anchor', anchor]])).reached).toBe(false)
+  })
+
+  it('refuses a listed key\'s index that does not say it is for this anchor', async () => {
+    expect((await run(phoneSecret, [])).reached).toBe(false)
+    expect((await run(phoneSecret, [['anchor', 'b'.repeat(64)]])).reached).toBe(false)
+  })
+
+  it('refuses a listed key\'s index when the zone holds no list, or one that does not verify', async () => {
+    expect((await run(phoneSecret, [['anchor', anchor]], null)).reached).toBe(false)
+    const forged = chain()
+    forged[1] = { ...forged[1]!, sig: forged[1]!.sig.replace(/^./, c => (c === '0' ? '1' : '0')) }
+    expect((await run(phoneSecret, [['anchor', anchor]], forged)).reached).toBe(false)
+  })
+})
+
 describe('a held tile lists its domains', () => {
   const sites = parseLedger(LEDGER)
   const draw = () => showcase({
@@ -1372,9 +1424,14 @@ describe('a tap visits, a hold toggles', () => {
     } finally { vi.useRealTimers() }
   })
 
-  it('stays in its domain row when it is out of the showcase, grayed, and a tap lights it up and asks to put it in', async () => {
+  it('managing, a tap under another domain brings it into your community, and a tap in your row promotes it live', async () => {
     const owner = bridge(a)
-    const { hero, bands } = draw(owner, ['jwize.com'])
+    const keepCommunity = vi.fn(async () => true)
+    const { hero, bands } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => owners(),
+      owner, keepCommunity,
+    })
     document.body.append(hero, bands)
     try {
       ;(hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
@@ -1384,8 +1441,38 @@ describe('a tap visits, a hold toggles', () => {
       expect(dylan.classList.contains('off')).toBe(true)
       await vi.waitFor(() => expect(owner.hello).toHaveBeenCalled())
       await new Promise(resolve => setTimeout(resolve, 0))
+      // In the followed row the tap only picks: it lights up in place and nothing is signed.
       expect(click(dylan).defaultPrevented).toBe(true)
+      await vi.waitFor(() => expect(keepCommunity).toHaveBeenCalled())
+      expect(dylan.classList.contains('off')).toBe(false)
+      expect(owner.toggle).not.toHaveBeenCalled()
+      // Your row holds it gray until a tap promotes it.
+      ;(bands.querySelector('.dex-row.own .dex-head') as HTMLButtonElement).click()
+      const waiting = await tileIn(bands, '.dex-row.own a.hex', 'dylan')
+      expect(waiting.classList.contains('off')).toBe(true)
+      expect(click(waiting).defaultPrevented).toBe(true)
       await vi.waitFor(() => expect(owner.toggle).toHaveBeenCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'dylan', on: true }))
+      // A second tap in the followed row lets it go.
+      ;(bands.querySelector('.dex-row:not(.own) .dex-head') as HTMLButtonElement).click()
+      const again = await tileIn(bands, '.dex-row:not(.own) a.hex', 'dylan')
+      click(again)
+      await vi.waitFor(() => expect(again.classList.contains('off')).toBe(true))
+    } finally { hero.remove(); bands.remove() }
+  })
+
+  it('with no hive answering (a phone), promoting says why instead of doing nothing', async () => {
+    const { hero, bands } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => owners(),
+      keepCommunity: async () => true, readCommunity: async () => [{ zone: 'jwize.com', key: 'hive:dylan' }],
+    })
+    document.body.append(hero, bands)
+    try {
+      ;(hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
+      const waiting = await tileIn(bands, '.dex-row.own a.hex', 'dylan')
+      expect(waiting.classList.contains('off')).toBe(true)
+      expect(click(waiting).defaultPrevented).toBe(true)
+      await vi.waitFor(() => expect(bands.querySelector('.owner-note')?.textContent).toContain("your hive's key"))
     } finally { hero.remove(); bands.remove() }
   })
 })

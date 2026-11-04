@@ -21,3 +21,7 @@ __pycache__/
 walkthrough/
 voice/jobs.json
 voice/target.wav
+# recorder.cjs keeps the generated voice here, once, before a chosen take
+# replaces it in audio-cache/<hash>.mp3 — the copy Restore brings back.
+# (Raw takes and record/takes/chosen.json sit under record/, ignored above.)
+audio-cache/generated/

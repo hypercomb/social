@@ -13,5 +13,29 @@
     "icon:platform your domain",
     "icon:source community"
   ],
+  "lights": [
+    "*",
+    [
+      "r1"
+    ],
+    [
+      "r1",
+      "r0"
+    ],
+    [
+      "r1"
+    ],
+    [
+      "r1"
+    ],
+    [
+      "r0",
+      "r2",
+      "r3"
+    ],
+    [
+      "r3"
+    ]
+  ],
   "say": "Welcome to Hypercomb. It is not another app to sign up for. It is an open protocol for people: one shared way of naming, keeping and passing on what we make, that anyone can speak and no one owns. Your work is plain content, named by its own fingerprint. Its history is kept, step by step. And all of it is carried by the people who use it: your friends, your community, your own domain. Its code is public, under a licence that keeps every copy open, for everyone who wants their corner of the internet to belong to them."
 }

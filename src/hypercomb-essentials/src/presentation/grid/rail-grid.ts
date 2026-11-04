@@ -35,10 +35,38 @@ export interface RailCoord { q: number; r: number }
 
 export { LANE_DEFAULT as RAIL_DEFAULT, LANE_MAX as RAIL_MAX, LANE_MIN as RAIL_MIN, clampLanes as clampRails }
 
-/** Where rail slot `slot` sits. `flatTop` = the strip runs left↔right. */
-export const railCoord = (slot: number, lanes: number, flatTop: boolean): RailCoord => {
+/** Where rail slot `slot` sits. `flatTop` is the hex orientation; `horizontal`
+ *  = the strip runs left↔right (it defaults to `flatTop`, the matched pairing
+ *  that packs straight). The two CROSS pairings are plain honeycomb, so a
+ *  participant may hold the hive in either orientation and the lanes still
+ *  pack without gaps:
+ *    flat-top, vertical strip   — lanes are columns, one tile per lane per
+ *                                 row; odd columns sit half a cell lower;
+ *    point-top, horizontal strip — lanes are rows, one tile per lane per
+ *                                 column; odd rows sit half a cell along.
+ *  The ragged start edge is inside the mesh bounds, so the fit keeps every
+ *  point of every tile on screen. */
+export const railCoord = (
+  slot: number,
+  lanes: number,
+  flatTop: boolean,
+  horizontal: boolean = flatTop,
+): RailCoord => {
   const i = Math.max(0, Math.floor(slot))
   const n = clampLanes(lanes)
+
+  if (flatTop && !horizontal) {
+    // flat-top screen y ∝ r + q/2: r = depth - floor(q/2) keeps columns straight.
+    const depth = Math.floor(i / n)
+    const q = -Math.floor((n - 1) / 2) + (i % n)
+    return { q, r: depth - Math.floor(q / 2) }
+  }
+  if (!flatTop && horizontal) {
+    // point-top screen x ∝ q + r/2: q = depth - floor(r/2) keeps rows straight.
+    const depth = Math.floor(i / n)
+    const r = -Math.floor((n - 1) / 2) + (i % n)
+    return { q: depth - Math.floor(r / 2), r }
+  }
 
   if (!flatTop) {
     // Point-top: row r holds lanes c0..c0+n-1. odd-r offset → axial keeps the
@@ -66,18 +94,23 @@ export const railCoord = (slot: number, lanes: number, flatTop: boolean): RailCo
 }
 
 /** Slot → coordinate for the whole strip, `capacity` slots long. */
-export const buildRailMatrix = (lanes: number, flatTop: boolean, capacity: number): Map<number, RailCoord> => {
+export const buildRailMatrix = (
+  lanes: number,
+  flatTop: boolean,
+  capacity: number,
+  horizontal: boolean = flatTop,
+): Map<number, RailCoord> => {
   const out = new Map<number, RailCoord>()
   const cap = Math.max(0, Math.floor(capacity))
-  for (let slot = 0; slot < cap; slot++) out.set(slot, railCoord(slot, lanes, flatTop))
+  for (let slot = 0; slot < cap; slot++) out.set(slot, railCoord(slot, lanes, flatTop, horizontal))
   return out
 }
 
 /** The strip's long-axis position of a slot, in hex rows/columns — what a
  *  reader would call "how far down (or along) the strip". */
-export const railDepth = (slot: number, lanes: number, flatTop: boolean): number => {
+export const railDepth = (slot: number, lanes: number, flatTop: boolean, horizontal: boolean = flatTop): number => {
   const n = clampLanes(lanes)
-  if (!flatTop) return Math.floor(Math.max(0, slot) / n)
+  if (!flatTop || !horizontal) return Math.floor(Math.max(0, slot) / n)
   if (n === 1) return Math.max(0, slot)
   const per = n + (n - 1)
   const within = Math.max(0, slot) % per

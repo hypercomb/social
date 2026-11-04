@@ -94,7 +94,9 @@ describe('back inside a website', () => {
     expect(mode).toBe('website')
   })
 
-  it('leaves the website only from the page it was entered on', async () => {
+  it('leaves the website only from the page it was entered on, out to the layer hosting it', async () => {
+    // jwize 2026-11-04: "when you click back on a webpage you just entered you
+    // don't go to the same page, you go to the parent of the page you entered".
     walkTo(['presentation'])
     setMode('website')
     walkTo(['presentation', 'simple'])
@@ -102,7 +104,7 @@ describe('back inside a website', () => {
     expect(mode).toBe('website')
     await back()
     expect(mode).toBe('hexagons')
-    expect(segments).toEqual(['presentation'])
+    expect(segments).toEqual([])
   })
 
   it('walks the path, not the tree: a page visited twice comes back twice', async () => {

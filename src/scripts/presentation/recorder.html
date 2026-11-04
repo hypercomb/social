@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Track recorder</title>
+<link rel="icon" href="data:,">
+<style>
+@font-face{font-family:"Inter";font-style:normal;font-weight:300 700;font-display:swap;src:url(/fonts/inter-latin.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-style:normal;font-weight:400;font-display:swap;src:url(/fonts/JetBrainsMono-Regular.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-style:normal;font-weight:600;font-display:swap;src:url(/fonts/JetBrainsMono-SemiBold.woff2) format("woff2")}
+:root{
+  --bg:#15181c;--panel:#1c2027;--panel-2:#20252d;--line:rgba(255,255,255,.12);--line-strong:rgba(255,255,255,.2);
+  --ink:#eef1f4;--dim:#b4bcc6;--faint:#8b94a1;--steel:#7f8da0;
+  --honey:#f0c050;--honey-fill:#e0a520;--honey-text:#d19a22;--honey-tint:rgba(224,165,32,.12);--danger:#d9605a;
+  --sans:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;--mono:"JetBrains Mono",ui-monospace,"Cascadia Mono",monospace;
+  --label:240px;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 14px/1.45 var(--sans);display:grid;grid-template-rows:auto minmax(150px,1fr) auto;overflow:hidden}
+button{font:inherit;color:inherit}
+kbd{font:600 10px/1 var(--mono);padding:2px 4px;border:1px solid var(--line-strong);border-radius:2px;color:var(--faint);margin-left:.5em}
+.eyebrow{font:600 11px/1 var(--mono);letter-spacing:.24em;text-transform:uppercase;color:var(--honey-text)}
+
+/* header */
+header{display:flex;flex-wrap:wrap;align-items:center;gap:10px 22px;padding:12px 16px;border-bottom:1px solid var(--line)}
+header h1{margin:0;font-size:17px;font-weight:600;letter-spacing:-.01em}
+.counts{display:flex;flex-wrap:wrap;gap:6px 14px;font:400 12px/1 var(--mono);color:var(--dim)}
+.counts b{font-weight:600;color:var(--ink)}
+.sw{display:inline-block;width:12px;height:8px;border-radius:1px;margin-right:6px;vertical-align:0}
+.sw.chosen{background:var(--honey-fill)} .sw.generated{background:var(--steel)}
+.sw.takes{border:1.5px solid var(--honey)} .sw.none{border:1.5px dashed var(--faint)}
+.tools{margin-left:auto;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.seg{display:inline-flex;border:1px solid var(--line-strong);border-radius:2px;overflow:hidden}
+.seg button{background:none;border:0;padding:6px 10px;font:600 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint);cursor:pointer}
+.seg button[aria-pressed=true]{background:var(--honey-tint);color:var(--honey)}
+.zoom{display:inline-flex;align-items:center;gap:6px;font:400 11px/1 var(--mono);color:var(--faint)}
+.zoom input{width:110px;accent-color:var(--honey-fill)}
+.ib{background:none;border:1px solid var(--line-strong);border-radius:2px;width:26px;height:26px;cursor:pointer;color:var(--dim)}
+.next{flex-basis:100%;display:none;padding:8px 12px;border:1px solid rgba(224,165,32,.4);background:var(--honey-tint);border-radius:3px;font-size:13px;color:var(--dim)}
+.next.on{display:block}
+.next code{font:400 12px/1.4 var(--mono);color:var(--honey)}
+
+/* the gantt */
+#gantt{overflow:auto;position:relative;border-bottom:1px solid var(--line)}
+.grid{position:relative;min-width:100%}
+.ruler{position:sticky;top:0;z-index:3;height:26px;background:var(--bg);border-bottom:1px solid var(--line);display:flex}
+.ruler .corner{position:sticky;left:0;z-index:4;width:var(--label);flex:none;background:var(--bg);border-right:1px solid var(--line);
+  font:600 10px/26px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint);padding-left:12px}
+.ruler .ticks{position:relative;flex:none}
+.tick{position:absolute;top:0;bottom:0;border-left:1px solid var(--line);font:400 10px/26px var(--mono);color:var(--faint);padding-left:4px;white-space:nowrap}
+.lane{display:flex;min-height:34px;border-bottom:1px solid rgba(255,255,255,.05)}
+.lane:hover{background:rgba(255,255,255,.015)}
+.lane .lab{position:sticky;left:0;z-index:2;width:var(--label);flex:none;background:var(--bg);border-right:1px solid var(--line);
+  display:flex;align-items:center;gap:8px;padding:0 10px 0 calc(12px + var(--d,0) * 14px);min-width:0}
+.lab .nm{font:600 12px/1.2 var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lab .sc{font:400 10px/1 var(--mono);color:var(--honey-text);flex:none}
+.lab .rt{font:400 10px/1.2 var(--mono);color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left}
+.lab .stack{display:grid;min-width:0}
+.lane .track{position:relative;flex:none;background-image:linear-gradient(90deg,rgba(255,255,255,.04) 1px,transparent 1px);background-size:var(--grid,48px) 100%}
+.bar{position:absolute;top:6px;height:22px;border-radius:2px;padding:0 6px;font:400 11px/22px var(--sans);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  cursor:pointer;border:1.5px solid transparent;text-align:left}
+.bar.generated{background:rgba(127,141,160,.55);color:#f4f6f8}
+.bar.chosen{background:var(--honey-fill);color:#1b1608;font-weight:500}
+.bar.takes{border-color:var(--honey);color:var(--honey);background:rgba(224,165,32,.06)}
+.bar.none{border:1.5px dashed rgba(139,148,161,.7);color:var(--faint);background:none}
+.bar.waiting{background:repeating-linear-gradient(135deg,rgba(224,165,32,.55) 0 6px,rgba(224,165,32,.25) 6px 12px);color:#1b1608}
+.bar.sel{outline:2px solid var(--ink);outline-offset:1px;z-index:1}
+.bar .grew{font:600 10px/1 var(--mono);margin-left:6px;padding:2px 4px;border-radius:2px;background:rgba(0,0,0,.28);color:#fff}
+.bar.beat-start{border-left-width:3px}
+.empty{font:400 11px/34px var(--mono);color:rgba(139,148,161,.6);padding-left:8px}
+
+/* the stage */
+#stage{max-height:46vh;overflow:hidden;display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,360px);gap:0}
+#stage>*{overflow:auto}
+.read{padding:16px 22px 18px;min-width:0}
+.meta{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:baseline;font:400 12px/1.3 var(--mono);color:var(--faint)}
+.meta .route{color:var(--dim)}
+.meta .state{color:var(--honey)}
+#prompt{margin:14px 0 16px;font:300 clamp(24px,2.6vw,38px)/1.38 var(--sans);letter-spacing:-.015em;max-width:40ch;min-height:2.8em}
+#prompt span{color:#59616d;transition:color .1s linear}
+#prompt span.said{color:var(--ink)}
+#prompt span.now{color:var(--honey)}
+#prompt.idle span{color:var(--ink)}
+#prompt .hint{font-size:18px;color:var(--faint)}
+.transport{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.btn{display:inline-flex;align-items:center;gap:.4em;padding:8px 12px;border:1px solid var(--line-strong);border-radius:2px;background:var(--panel);cursor:pointer;font-size:13px}
+.btn:hover{border-color:var(--dim)}
+.btn:disabled{opacity:.4;cursor:default}
+.btn.rec{border-color:rgba(217,96,90,.6)}
+.btn.rec .dot{width:9px;height:9px;border-radius:50%;background:var(--danger)}
+.btn.rec.on{background:rgba(217,96,90,.18)}
+.btn.choose{background:var(--honey-fill);border-color:var(--honey-fill);color:#1b1608;font-weight:600}
+.btn.choose kbd{color:#1b1608;border-color:rgba(0,0,0,.3)}
+.btn.quiet{background:none}
+.meter{width:160px;height:8px;border-radius:1px;background:rgba(255,255,255,.07);position:relative;overflow:hidden}
+.meter i{position:absolute;inset:0 auto 0 0;width:0;background:linear-gradient(90deg,#5aa37a 0 70%,var(--honey) 70% 88%,var(--danger) 88%)}
+.meter b{position:absolute;top:0;bottom:0;width:2px;background:var(--ink);left:0}
+.mlabel{font:400 11px/1 var(--mono);color:var(--faint)}
+#status{margin-top:10px;font:400 12px/1.4 var(--mono);color:var(--dim);min-height:1.4em}
+#status.err{color:var(--danger)}
+.side{border-left:1px solid var(--line);padding:14px 16px;min-width:0}
+.side h2{margin:0 0 8px}
+.take{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 10px;align-items:center;padding:8px;border:1px solid transparent;border-radius:3px;cursor:pointer}
+.take:hover{background:rgba(255,255,255,.03)}
+.take.sel{border-color:var(--line-strong);background:var(--panel)}
+.take.chosen{border-color:rgba(224,165,32,.6)}
+.take .when{font:400 12px/1.2 var(--mono);color:var(--dim)}
+.take .len{font:400 11px/1.3 var(--mono);color:var(--faint);grid-column:2}
+.take .len.fit{color:#7bd6a0} .take .len.far{color:var(--honey)}
+.take .mark{font:600 10px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--honey)}
+.take .ib{width:28px;height:28px}
+.restore{margin-top:12px;display:flex;flex-wrap:wrap;gap:6px}
+.none-yet{color:var(--faint);font-size:13px}
+#count{position:fixed;inset:0;z-index:10;display:none;align-items:center;justify-content:center;background:rgba(21,24,28,.82);
+  font:200 26vh/1 var(--sans);color:var(--honey)}
+#count.on{display:flex}
+footer{display:none}
+@media (max-width:760px){
+  :root{--label:150px}
+  /* a phone scrolls the page: the chart keeps a usable height above the line */
+  html,body{height:auto}
+  body{display:block;overflow:auto}
+  #gantt{height:52vh}
+  #stage{max-height:none;overflow:visible;grid-template-columns:1fr}
+  #stage>*{overflow:visible}
+  .side{border-left:0;border-top:1px solid var(--line)}
+  .tools{margin-left:0}
+}
+</style>
+</head>
+<body>
+<header>
+  <div><div class="eyebrow">the tour · narration</div><h1>Track recorder</h1></div>
+  <div class="counts" id="counts"></div>
+  <div class="tools">
+    <div class="seg" role="group" aria-label="Lane order">
+      <button type="button" data-view="tree" aria-pressed="true">Tree</button>
+      <button type="button" data-view="tour" aria-pressed="false">Tour 1–25</button>
+    </div>
+    <label class="zoom"><button type="button" class="ib" data-z="-1" aria-label="Zoom out">−</button>
+      <input type="range" id="zoom" min="4" max="160" step="1" value="22" aria-label="Pixels per second">
+      <button type="button" class="ib" data-z="1" aria-label="Zoom in">+</button><span id="pps"></span></label>
+  </div>
+  <div class="next" id="next"></div>
+</header>
+<section id="gantt" aria-label="Lines by tile, on one time axis"><div class="grid" id="grid"></div></section>
+<section id="stage">
+  <div class="read">
+    <div class="meta" id="meta"><span>Click a line in the chart to read it.</span></div>
+    <p id="prompt" class="idle"><span class="hint">Each bar is one line, as long as its time slot. Pick one, press <b>Space</b> to hear it with the words lit, <b>R</b> to record against it.</span></p>
+    <div class="transport">
+      <button type="button" class="btn" id="play" disabled>Play slot<kbd>Space</kbd></button>
+      <button type="button" class="btn rec" id="rec" disabled><span class="dot"></span><span id="recl">Record</span><kbd>R</kbd></button>
+      <button type="button" class="btn quiet" id="stop" disabled>Stop<kbd>Esc</kbd></button>
+      <button type="button" class="btn quiet" id="prev" disabled aria-label="Previous line">←</button>
+      <button type="button" class="btn quiet" id="nextl" disabled aria-label="Next line">→</button>
+      <span class="meter" title="Input level"><i id="lvl"></i><b id="peak"></b></span><span class="mlabel" id="db">mic off</span>
+    </div>
+    <div id="status" role="status" aria-live="polite"></div>
+  </div>
+  <aside class="side">
+    <h2 class="eyebrow">Takes</h2>
+    <div id="takes"><p class="none-yet">No line selected.</p></div>
+    <div class="restore" id="restore"></div>
+  </aside>
+</section>
+<div id="count" aria-hidden="true"></div>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id)
+  const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+  const store = { get(k, d) { try { const v = localStorage.getItem('recorder:' + k); return v == null ? d : v } catch { return d } },
+    set(k, v) { try { localStorage.setItem('recorder:' + k, v) } catch {} } }
+  const FIT = 0.15
+  let state = null, view = store.get('view', 'tree'), pps = +store.get('pps', 22)
+  let sel = null, selTake = null            // the selected line key, and take file
+  let words = [], spans = []                 // the prompt's words and their elements
+  const audio = new Audio()
+  let mode = 'idle'                          // idle | play | take | count | rec | busy
+  let raf = 0, clock = null
+  let stream = null, analyser = null, recorder = null, chunks = [], recStart = 0, countTimer = 0
+
+  // ---------- state ----------
+  async function load() {
+    const r = await fetch('/api/state'); state = await r.json()
+    renderCounts(); renderGantt(); renderLine()
+  }
+  const lanes = () => {
+    if (!state) return []
+    if (view !== 'tour') return state.lanes
+    return state.lanes.filter(l => l.scene).sort((a, b) => a.scene - b.scene)
+  }
+  const order = () => lanes().flatMap(l => l.lines)
+  const lineOf = (key) => { for (const l of state.lanes) for (const x of l.lines) if (x.key === key) return { lane: l, line: x }; return null }
+
+  function renderCounts() {
+    const c = state.counts
+    $('counts').innerHTML = `<span><b>${c.lines}</b> lines</span>` +
+      `<span><i class="sw chosen"></i><b>${c.chosen}</b> yours</span>` +
+      `<span><i class="sw takes"></i><b>${c.takes}</b> recorded, none chosen</span>` +
+      `<span><i class="sw generated"></i><b>${c.generated}</b> generated voice</span>` +
+      `<span><i class="sw none"></i><b>${c.none}</b> no audio yet</span>` +
+      `<span><b>${c.recorded}</b> takes kept</span>` + (c.waiting ? `<span><b>${c.waiting}</b> waiting</span>` : '')
+    const n = $('next')
+    n.classList.toggle('on', !!state.changed)
+    n.innerHTML = state.changed ? `Choices changed. Next, re-time the drawn clips: <code>node scripts/presentation/concepts.cjs</code>, then replant the pages: <code>node scripts/bridge/living-presentation/plant.cjs --blocks</code>` : ''
+  }
+
+  // ---------- the chart ----------
+  function step() { for (const s of [0.5, 1, 2, 5, 10, 15, 30, 60]) if (s * pps >= 56) return s; return 120 }
+  function renderGantt() {
+    const end = Math.max(...lanes().map(l => l.end), 10) + 2
+    const w = Math.ceil(end * pps)
+    const st = step()
+    let ticks = ''
+    for (let t = 0; t <= end; t += st) ticks += `<span class="tick" style="left:${t * pps}px">${t >= 60 ? Math.floor(t / 60) + ':' + String(Math.round(t % 60)).padStart(2, '0') : t + 's'}</span>`
+    let html = `<div class="ruler"><div class="corner">${view === 'tour' ? 'scene' : 'tile'}</div><div class="ticks" style="width:${w}px">${ticks}</div></div>`
+    for (const lane of lanes()) {
+      const route = lane.route.split('/')
+      const label = view === 'tour'
+        ? `<span class="sc">${String(lane.scene).padStart(2, '0')}</span><span class="stack"><span class="nm">${esc(route[route.length - 1])}</span><span class="rt">${esc(lane.route)}</span></span>`
+        : `<span class="stack"><span class="nm">${esc(route[route.length - 1])}</span>${lane.depth ? `<span class="rt">${esc(route.slice(0, -1).join('/'))}</span>` : ''}</span>${lane.scene ? `<span class="sc">scene ${lane.scene}</span>` : ''}`
+      const bars = lane.lines.map(l => {
+        const cls = ['bar', l.waiting ? 'waiting' : l.state, l.key === sel ? 'sel' : '', l.kind !== 'sentence' && l.j === 0 ? 'beat-start' : ''].join(' ')
+        const grew = l.chosen && l.chosen.mode === 'natural' ? `<span class="grew">${l.chosen.fitted > l.slot ? '+' : '−'}${Math.abs(l.chosen.fitted - l.slot).toFixed(1)}s</span>` : ''
+        const title = `${l.text}\n${(l.end - l.start).toFixed(2)}s slot · ${stateName(l)}`
+        return `<button type="button" class="${cls}" data-key="${l.key}" style="left:${l.start * pps}px;width:${Math.max(4, (l.end - l.start) * pps - 2)}px" title="${esc(title)}">${grew}${(l.end - l.start) * pps > 36 ? esc(l.text) : ''}</button>`
+      }).join('')
+      html += `<div class="lane"><div class="lab" style="--d:${view === 'tour' ? 0 : lane.depth}" title="${esc(lane.route)}">${label}</div>` +
+        `<div class="track" style="width:${w}px;--grid:${st * pps}px">${bars || '<span class="empty">no lines</span>'}</div></div>`
+    }
+    const g = $('grid'); g.style.width = (w + labelW()) + 'px'; g.innerHTML = html
+    $('pps').textContent = pps + ' px/s'
+    $('zoom').value = pps
+    for (const b of document.querySelectorAll('.seg button')) b.setAttribute('aria-pressed', String(b.dataset.view === view))
+  }
+  const labelW = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--label')) || 240
+  const stateName = (l) => l.waiting ? 'chosen — waiting for the other sentences (no generated voice)'
+    : l.state === 'chosen' ? (l.chosen.mode === 'natural' ? `your take, kept at ${l.chosen.fitted.toFixed(2)}s (slot ${l.slot.toFixed(2)}s)` : 'your take, fitted to the slot')
+    : l.state === 'takes' ? `${l.takes.length} take(s), none chosen` : l.state === 'generated' ? 'generated voice' : 'no audio yet'
+  $('grid').addEventListener('click', (e) => { const b = e.target.closest('.bar'); if (b) select(b.dataset.key) })
+  document.querySelectorAll('.seg button').forEach(b => b.onclick = () => { view = b.dataset.view; store.set('view', view); renderGantt() })
+  const zoomTo = (v, anchor) => {
+    const g = $('gantt'), x = anchor ?? g.clientWidth / 2
+    const lab = labelW(), t = (g.scrollLeft + x - lab) / pps
+    pps = Math.max(4, Math.min(160, Math.round(v))); store.set('pps', pps); renderGantt()
+    g.scrollLeft = t * pps + lab - x
+  }
+  $('zoom').oninput = (e) => zoomTo(+e.target.value)
+  document.querySelectorAll('[data-z]').forEach(b => b.onclick = () => zoomTo(pps * (b.dataset.z > 0 ? 1.4 : 1 / 1.4)))
+  $('gantt').addEventListener('wheel', (e) => { if (!e.ctrlKey && !e.metaKey) return; e.preventDefault(); zoomTo(pps * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX - $('gantt').getBoundingClientRect().left) }, { passive: false })
+
+  // ---------- the line ----------
+  function select(key) {
+    if (mode === 'rec' || mode === 'count' || mode === 'busy') return
+    halt()
+    sel = key
+    const f = lineOf(key)
+    selTake = f && f.line.chosen ? f.line.chosen.take : f && f.line.takes.length ? f.line.takes[f.line.takes.length - 1].file : null
+    for (const b of document.querySelectorAll('.bar')) b.classList.toggle('sel', b.dataset.key === key)
+    const bar = document.querySelector(`.bar[data-key="${key}"]`)
+    if (bar) bar.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    say('')
+    renderLine()
+  }
+  function setWords(list) {
+    words = list
+    $('prompt').className = ''
+    $('prompt').innerHTML = list.map((w, i) => `<span data-i="${i}">${esc(w.w)}</span>`).join(' ')
+    spans = [...$('prompt').querySelectorAll('span')]
+  }
+  function light(t) {
+    let now = -1
+    words.forEach((w, i) => { if (t >= w.t0) now = i })
+    spans.forEach((s, i) => { s.classList.toggle('said', i < now || (i === now && t >= words[i].t1)); s.classList.toggle('now', i === now && t < words[i].t1) })
+  }
+  function renderLine() {
+    const f = sel && lineOf(sel)
+    const on = !!f
+    for (const id of ['play', 'rec', 'stop', 'prev', 'nextl']) $(id).disabled = !on
+    if (!f) return
+    const { lane, line } = f
+    const where = line.kind === 'sentence' ? `scene ${lane.scene} · sentence ${line.j + 1} of ${line.n}`
+      : line.kind === 'beat' ? `beat ${line.beat}` : `capture caption${line.shot ? ' · ' + esc(line.shot) : ''}`
+    $('meta').innerHTML = `<span class="route">${esc(lane.route)}</span><span>${where}</span><span>slot ${line.slot.toFixed(2)}s` +
+      `${line.chosen && line.chosen.mode === 'natural' ? ` → ${line.chosen.fitted.toFixed(2)}s` : ''}</span><span class="state">${esc(stateName(line))}</span>`
+    if (mode === 'idle') { setWords(line.words); $('prompt').className = 'idle' }
+    $('play').firstChild.textContent = line.audio ? 'Play slot' : 'Show the pace'
+    renderTakes(line)
+  }
+  function renderTakes(line) {
+    if (!line.takes.length) $('takes').innerHTML = `<p class="none-yet">No takes yet. Press <b>R</b>: after a 3-2-1 count-in the words light at the slot's pace. Record as many as you like.</p>`
+    else $('takes').innerHTML = line.takes.slice().reverse().map(t => {
+      const r = t.speech / line.slot, d = t.speech - line.slot
+      const fit = Math.abs(r - 1) <= FIT
+      const note = fit ? `should fit: stretched ${r < 1 ? 'out' : 'in'} ${(Math.abs(1 - r) * 100).toFixed(0)}% to the slot` : `${d > 0 ? 'long' : 'short'} by ${Math.abs(d).toFixed(1)}s: would keep its length, the slot ${d > 0 ? 'grows' : 'shrinks'}`
+      const chosen = line.chosen && line.chosen.take === t.file
+      const when = t.file.replace(/^(\d{4}-\d\d-\d\d)T(\d\d)-(\d\d)-(\d\d).*$/, '$1 $2:$3:$4')
+      return `<div class="take${t.file === selTake ? ' sel' : ''}${chosen ? ' chosen' : ''}" data-file="${esc(t.file)}">` +
+        `<button type="button" class="ib" data-act="play" aria-label="Play this take">▶</button>` +
+        `<span class="when">${esc(when)}${chosen ? ' <span class="mark">chosen</span>' : ''}</span>` +
+        `<button type="button" class="btn ${chosen ? 'quiet' : 'choose'}" data-act="choose" style="padding:5px 9px;font-size:12px">${chosen ? 'Remaster' : 'Choose'}${t.file === selTake ? '<kbd>Enter</kbd>' : ''}</button>` +
+        `<span class="len ${fit ? 'fit' : 'far'}">${t.speech.toFixed(2)}s spoken / ${line.slot.toFixed(2)}s slot · ${note}</span></div>`
+    }).join('')
+    const scene = line.kind === 'sentence'
+    $('restore').innerHTML = (line.chosen ? `<button type="button" class="btn quiet" data-restore="line">${line.voiced ? 'Restore the generated voice' : 'Remove your take (no generated voice yet)'}</button>` : '') +
+      (scene && lineOf(sel).lane.lines.some(l => l.chosen) ? `<button type="button" class="btn quiet" data-restore="clip">Restore the whole scene</button>` : '')
+  }
+  $('takes').addEventListener('click', (e) => {
+    const row = e.target.closest('.take'); if (!row || mode === 'rec' || mode === 'count' || mode === 'busy') return
+    selTake = row.dataset.file
+    const act = e.target.closest('[data-act]')
+    if (act && act.dataset.act === 'play') return playTake(selTake)
+    if (act && act.dataset.act === 'choose') return choose(selTake)
+    renderTakes(lineOf(sel).line)
+  })
+  $('restore').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-restore]'); if (!b || mode !== 'idle') return
+    const line = lineOf(sel).line
+    mode = 'busy'; say('restoring…')
+    const r = await post('/api/restore', b.dataset.restore === 'line' ? { key: line.key } : { clip: line.clip })
+    mode = 'idle'
+    if (r.error) return say(r.error, true)
+    await load(); say(b.dataset.restore === 'clip' ? 'The whole scene is the generated voice again.'
+      : line.voiced ? 'The generated voice is back for this line.' : 'Your take is removed; the line is silent until it is voiced or you choose a take.')
+  })
+
+  // ---------- playing ----------
+  function halt() {
+    cancelAnimationFrame(raf); raf = 0; clock = null
+    audio.pause()
+    if (mode === 'play' || mode === 'take') mode = 'idle'
+    const f = sel && lineOf(sel)
+    if (mode === 'idle' && f) { setWords(f.line.words); $('prompt').className = 'idle' }
+  }
+  function run(tick) { const loop = () => { if (tick() !== false) raf = requestAnimationFrame(loop) }; raf = requestAnimationFrame(loop) }
+  function playSlot() {
+    const line = lineOf(sel).line
+    halt(); mode = 'play'; setWords(line.words)
+    if (!line.audio) {
+      say('No audio for this line yet: the words light at the pace of its slot.')
+      const t0 = performance.now()
+      return run(() => { const t = line.clipStart + (performance.now() - t0) / 1000; light(t); if (t > line.clipEnd + 0.3) { halt(); return false } })
+    }
+    audio.src = line.audio
+    audio.onloadedmetadata = () => { audio.currentTime = line.clipStart; audio.play().catch(() => halt()) }
+    run(() => { const t = audio.currentTime; light(t); if (t >= line.clipEnd || audio.ended) { halt(); return false } })
+  }
+  function playTake(file) {
+    const line = lineOf(sel).line, take = line.takes.find(t => t.file === file)
+    if (!take) return
+    halt(); mode = 'take'; setWords(take.words)
+    audio.src = `/audio/take/${line.key}/${encodeURIComponent(file)}`
+    audio.onloadedmetadata = null
+    audio.play().catch(() => halt())
+    renderTakes(line)
+    run(() => { light(audio.currentTime); if (audio.ended) { halt(); return false } })
+  }
+
+  // ---------- recording ----------
+  async function arm() {
+    if (stream) return true
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 } })
+    } catch (e) { say('No microphone: ' + e.message, true); return false }
+    const ctx = new AudioContext()
+    analyser = ctx.createAnalyser(); analyser.fftSize = 2048
+    ctx.createMediaStreamSource(stream).connect(analyser)
+    const buf = new Float32Array(analyser.fftSize)
+    let peak = -60, held = 0
+    const meter = () => {
+      analyser.getFloatTimeDomainData(buf)
+      let sum = 0, max = 0
+      for (const v of buf) { sum += v * v; max = Math.max(max, Math.abs(v)) }
+      const db = Math.max(-60, 20 * Math.log10(Math.sqrt(sum / buf.length) || 1e-6))
+      const pk = Math.max(-60, 20 * Math.log10(max || 1e-6))
+      if (pk > peak || performance.now() - held > 1200) { peak = pk; held = performance.now() }
+      $('lvl').style.width = ((db + 60) / 60 * 100) + '%'
+      $('peak').style.left = ((peak + 60) / 60 * 100) + '%'
+      $('db').textContent = db.toFixed(0) + ' dB'
+      requestAnimationFrame(meter)
+    }
+    meter()
+    return true
+  }
+  async function record() {
+    if (mode === 'rec') return stopRec()
+    if (mode === 'count') { clearTimeout(countTimer); $('count').classList.remove('on'); mode = 'idle'; $('rec').classList.remove('on'); return say('count-in cancelled') }
+    if (mode === 'busy') return
+    halt()
+    if (!(await arm())) return
+    const line = lineOf(sel).line
+    mode = 'count'; $('rec').classList.add('on'); $('recl').textContent = 'Cancel'
+    setWords(line.words); light(-1)
+    let n = 3
+    const tickCount = () => {
+      if (mode !== 'count') return
+      if (n > 0) { $('count').textContent = n; $('count').classList.add('on'); n--; countTimer = setTimeout(tickCount, 750); return }
+      $('count').classList.remove('on')
+      begin(line)
+    }
+    tickCount()
+  }
+  function begin(line) {
+    const type = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/webm', 'audio/mp4'].find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || ''
+    recorder = new MediaRecorder(stream, type ? { mimeType: type } : undefined)
+    chunks = []
+    recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data) }
+    recorder.onstop = () => upload(line, new Blob(chunks, { type: (recorder.mimeType || type || 'audio/webm').split(';')[0] }))
+    recorder.start(250)
+    mode = 'rec'; $('recl').textContent = 'Stop take'
+    recStart = performance.now()
+    say('recording — read with the light; R or Stop ends the take')
+    const cap = line.slot * 3 + 12
+    run(() => {
+      if (mode !== 'rec') return false
+      const el = (performance.now() - recStart) / 1000
+      light(line.clipStart + el)
+      if (el > cap) { stopRec(); return false }
+    })
+  }
+  function stopRec() {
+    if (mode !== 'rec' || !recorder) return
+    cancelAnimationFrame(raf)
+    mode = 'busy'; $('rec').classList.remove('on'); $('recl').textContent = 'Record'
+    say('saving the take…')
+    recorder.stop()
+  }
+  async function upload(line, blob) {
+    try {
+      const r = await fetch(`/api/take/${line.key}`, { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob })
+      const j = await r.json()
+      mode = 'idle'
+      if (!r.ok) return say(j.error || 'the take was not saved', true)
+      selTake = j.take.file
+      await load()
+      say(`take kept: ${j.take.speech.toFixed(2)}s spoken against a ${line.slot.toFixed(2)}s slot. Enter chooses it; R records another.`)
+    } catch (e) { mode = 'idle'; say('the take was not saved: ' + e.message, true) }
+  }
+
+  // ---------- choosing ----------
+  async function choose(file) {
+    const line = lineOf(sel).line
+    if (!file) return say('Record a take first.', true)
+    halt(); mode = 'busy'; say('remastering: trim, master, fit to the slot, splice into the scene…')
+    const r = await post('/api/choose', { key: line.key, take: file })
+    mode = 'idle'
+    if (r.error) return say(r.error, true)
+    await load()
+    const l = lineOf(sel).line, c = l.chosen
+    if (r.result.waiting) return say('Chosen. This scene has no generated voice yet, so it is written once every sentence has a take.')
+    say(!c ? 'Chosen.' : c.mode === 'stretched'
+      ? `Remastered into the slot: ${c.natural.toFixed(2)}s read, stretched to ${c.fitted.toFixed(2)}s (tempo ${c.tempo.toFixed(3)}, pitch kept).`
+      : `Remastered, kept at its own ${c.fitted.toFixed(2)}s — more than 15% off the ${l.slot.toFixed(2)}s slot, so the slot ${c.fitted > l.slot ? 'grew' : 'shrank'} and everything after it in this ${l.kind === 'sentence' ? 'scene' : 'page'} moved.`)
+  }
+  const post = (url, data) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json()).catch(e => ({ error: e.message }))
+  function say(text, err) { $('status').textContent = text; $('status').className = err ? 'err' : '' }
+
+  // ---------- keys and buttons ----------
+  const move = (d) => {
+    const all = order(), i = all.findIndex(l => l.key === sel)
+    const next = all[Math.max(0, Math.min(all.length - 1, (i < 0 ? 0 : i + d)))]
+    if (next) select(next.key)
+  }
+  $('play').onclick = () => (mode === 'play' ? halt() : playSlot())
+  $('rec').onclick = () => record()
+  $('stop').onclick = () => (mode === 'rec' || mode === 'count' ? record() : halt())
+  $('prev').onclick = () => move(-1)
+  $('nextl').onclick = () => move(1)
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return
+    const typing = e.target instanceof HTMLInputElement && e.target.type !== 'range'
+    if (typing) return
+    const k = e.key
+    if (!sel && k !== 'ArrowRight') return
+    if (k === ' ') { e.preventDefault(); if (mode === 'play' || mode === 'take') halt(); else if (mode === 'idle') playSlot() }
+    else if (k === 'r' || k === 'R') { e.preventDefault(); record() }
+    else if (k === 'Enter') { if (e.target.closest && e.target.closest('button') && e.target.closest('#takes')) return; e.preventDefault(); if (mode === 'idle') choose(selTake) }
+    else if (k === 'Escape') { if (mode === 'rec' || mode === 'count') record(); else halt() }
+    else if (k === 'ArrowRight' && mode === 'idle') { e.preventDefault(); move(1) }
+    else if (k === 'ArrowLeft' && mode === 'idle') { e.preventDefault(); move(-1) }
+  })
+
+  load().catch(e => say('could not load the lines: ' + e.message, true))
+})()
+</script>
+</body>
+</html>

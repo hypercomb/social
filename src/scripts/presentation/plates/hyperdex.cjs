@@ -5,7 +5,7 @@
 // depends on the place, and it takes many shapes. So: a domain → your hive
 // (a comb, lit) → the same hive read as an index (rows; the business card one
 // of them) → many views of that index.
-const { hex, LIT, marker, flow, text, svg } = require('./lib.cjs')
+const { hex, LIT, marker, flow, text, svg, part } = require('./lib.cjs')
 
 module.exports = () => {
   const HX = 344, HY = 186, HR = 62
@@ -35,16 +35,16 @@ module.exports = () => {
     `<path d="M${686 + i * 60},245 h${i === 0 ? 28 : 20}" stroke="${i === 0 ? 'var(--honey-fill)' : 'var(--line)'}" stroke-width="2"/>`).join('')
   return svg('a domain serves your hive read from outside: an index of names and signatures, the business card one entry, shown in many views', [
     `<defs>${marker('hx-ah')}</defs>`,
-    `<rect x="32" y="164" width="188" height="44" rx="3" fill="var(--panel)" stroke="var(--steel)" stroke-width="1.5"/>`,
+    part('domain', `<rect x="32" y="164" width="188" height="44" rx="3" fill="var(--panel)" stroke="var(--steel)" stroke-width="1.5"/>`,
     text(126, 192, 'yourname.com', 'm d', 18),
-    flow(`M228,${HY} L${HX - HR * 0.866 - 8},${HY}`, 'hx-ah'),
-    hex(HX, HY, HR, LIT), comb,
-    text(HX, HY + HR + 34, 'your hive', 'k hy', 22),
-    `<path d="M${HX + HR * 0.866 + 4},${HY} L${IX - 6},${HY}" stroke="var(--honey-deep)" stroke-width="1.5" stroke-dasharray="4 5"/>`,
+    flow(`M228,${HY} L${HX - HR * 0.866 - 8},${HY}`, 'hx-ah')),
+    part('hive', hex(HX, HY, HR, LIT), comb,
+    text(HX, HY + HR + 34, 'your hive', 'k hy', 22)),
+    part('index', `<path d="M${HX + HR * 0.866 + 4},${HY} L${IX - 6},${HY}" stroke="var(--honey-deep)" stroke-width="1.5" stroke-dasharray="4 5"/>`,
     idx,
     text(IX + 40, IY + ROW * 1.5 + 6, 'card', 'd', 18, 'start'),
-    text(IX + 84, IY + ROW * 4 + 32, 'its index', 'd', 18),
-    list, combView, cards,
-    text(792, 330, 'many views', 'd', 18),
+    text(IX + 84, IY + ROW * 4 + 32, 'its index', 'd', 18)),
+    part('views', list, combView, cards,
+    text(792, 330, 'many views', 'd', 18)),
   ].join('\n'))
 }

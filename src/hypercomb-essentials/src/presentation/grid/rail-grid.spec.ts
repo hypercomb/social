@@ -84,6 +84,39 @@ describe('rail-grid — landscape (flat-top, strip runs left→right)', () => {
   })
 })
 
+describe('rail-grid — the cross pairings (either orientation, either strip direction)', () => {
+  it('flat-top in a vertical strip: straight columns, odd columns half a cell lower', () => {
+    const row = (d: number): number[] => [0, 1, 2].map(l => flatTopY(railCoord(d * 3 + l, 3, true, false)))
+    expect(row(0)).toEqual([1, 0, 1])
+    expect(row(5)).toEqual([11, 10, 11])
+    // Rows are consecutive q's left→right and the strip only grows downward.
+    expect([0, 1, 2].map(l => railCoord(l, 3, true, false).q)).toEqual([-1, 0, 1])
+    for (let i = 0; i < 300; i++) expect(flatTopY(railCoord(i, 3, true, false))).toBeGreaterThanOrEqual(0)
+  })
+
+  it('point-top in a horizontal strip: straight rows, odd rows half a cell along', () => {
+    const col = (d: number): number[] => [0, 1, 2].map(l => pointTopX(railCoord(d * 3 + l, 3, false, true)))
+    expect(col(0)).toEqual([1, 0, 1])
+    expect(col(5)).toEqual([11, 10, 11])
+    expect([0, 1, 2].map(l => railCoord(l, 3, false, true).r)).toEqual([-1, 0, 1])
+    for (let i = 0; i < 300; i++) expect(pointTopX(railCoord(i, 3, false, true))).toBeGreaterThanOrEqual(0)
+  })
+
+  it('every combination has one distinct coordinate per slot, and the matched ones are unchanged', () => {
+    for (const flat of [false, true]) for (const horizontal of [false, true]) for (const lanes of [1, 2, 3]) {
+      const m = buildRailMatrix(lanes, flat, 600, horizontal)
+      expect(new Set([...m.values()].map(c => `${c.q},${c.r}`)).size).toBe(600)
+    }
+    expect(railCoord(7, 3, true)).toEqual(railCoord(7, 3, true, true))
+    expect(railCoord(7, 3, false)).toEqual(railCoord(7, 3, false, false))
+  })
+
+  it('depth is rows of lanes in a cross pairing', () => {
+    expect([0, 2, 3, 5, 6].map(s => railDepth(s, 3, true, false))).toEqual([0, 0, 1, 1, 2])
+    expect([0, 2, 3, 5, 6].map(s => railDepth(s, 3, false, true))).toEqual([0, 0, 1, 1, 2])
+  })
+})
+
 describe('rail-grid — the matrix', () => {
   it('has one distinct coordinate per slot', () => {
     for (const flat of [false, true]) {

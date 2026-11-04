@@ -4,12 +4,40 @@
   "chapter": "what is hypercomb",
   "slug": "signatures",
   "eyebrow": "identity",
-  "headline": "One name: the *signature*",
+  "headline": "One address: the *signature*",
   "sub": "",
   "visual": "plate:signature-name",
   "visualData": [
-    "the name is the bytes"
+    "the bytes make the address"
+  ],
+  "lights": [
+    [
+      "same",
+      "sign",
+      "name"
+    ],
+    [
+      "same",
+      "sign",
+      "name"
+    ],
+    [
+      "flipped",
+      "sign"
+    ],
+    "*",
+    [
+      "same",
+      "name"
+    ],
+    [
+      "name"
+    ],
+    [
+      "sign"
+    ],
+    "*"
   ],
   "sig": true,
-  "say": "Everything in Hypercomb has one kind of name: a signature, a fingerprint computed from the content itself. The same content gets the same name, on every machine, in every country, for good. Change one byte, and it is a different thing, with a different name. So the name proves the content. The same picture, kept twice, is kept once. And a signature can be passed along as a short string that anyone can check. It does not ask you to trust a company. It lets you check for yourself."
+  "say": "Everything in Hypercomb has one kind of address: a signature, a fingerprint computed from the content itself. The same content gets the same signature, on every machine, in every country, for good. Change one byte, and it is a different thing, with a different signature. So the signature proves the content. The same picture, kept twice, is kept once. And a signature can be passed along as a short string that anyone can check. It does not ask you to trust a company. It lets you check for yourself."
 }

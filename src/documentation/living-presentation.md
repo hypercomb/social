@@ -726,13 +726,24 @@ it can be joined by others, or rebuilt, whenever that helps.
 Audited 2026-11-03 against this plan's own rules (jwize: "fix all three and
 replant"); the tree lives in `scripts/bridge/living-presentation/tree.cjs`.
 
-- **Two trees, because they are two relations.** `presentation` is what the
-  reader is shown: the six values, and under each value the ideas that show
-  it. `presenter` is what shows it: the primitive marker, the same-shape
-  check, the lift, and the cube viewer with its points, faces and slices. The
-  machinery used to sit among the ideas, so a path read "simple has a
-  marker"; now every layer keeps one relation and every path reads aloud.
-  Only `presentation` is published.
+- **Two trees, because they are two relations.** `protocol` is what the
+  reader is shown: the protocol, its six values, and under each value the
+  ideas that show it. `presenter` is what shows it: the primitive marker, the
+  same-shape check, the lift, and the cube viewer with its points, faces and
+  slices. The machinery used to sit among the ideas, so a path read "simple
+  has a marker"; now every layer keeps one relation and every path reads
+  aloud. Only `protocol` is published. (A third tree, `road`, carries the
+  tour's question and its close; see "The tour is the standard".)
+- **The root is `protocol`.** jwize, 2026-11-04: "the root tile has to
+  change to protocol instead of presentation"; "unpublish the presentation
+  and we use the other from now on". The root tile is the protocol itself,
+  and its scene is the tour's *An open protocol*, so the name and the first
+  words agree. The earlier root, `presentation`, is retired the way every
+  earlier planting is (`retired.cjs` `roots`): `plant.cjs` forgets its marker
+  at `/` with `trait ~ presentation`, so the tile stays one trait away with
+  its history, and withdraws it from every domain it publishes to with
+  `publish /presentation off <domain>` before publishing `protocol` there.
+  Nothing is deleted; the one address serves the one presentation.
 - **No word twice.** A name is one molecule hive-wide, so two tiles named
   `cube` would feed one molecule. The opening's sixth move is `fill` ("the
   points fill a cube"), and `cube` is the viewer alone.
@@ -752,64 +763,115 @@ replant"); the tree lives in `scripts/bridge/living-presentation/tree.cjs`.
   component fills each (`scripts/bridge/living-presentation/blocks/`;
   `plant.cjs --blocks` writes them through the hive's tile-files door).
 
-### The pages: the narrated tour is the standard
+### The tour is the standard
 
-Decided 2026-11-03 (jwize: "use the initial presentation as the standard",
-"make sure we aren't redundant", "make the picture worth a trillion words").
-The narrated tour (`scripts/presentation`, hypercomb.com/tour/) sets the
-words, the voice, the figures and the look of every page.
+jwize, 2026-11-03: "use the initial presentation as the standard", "make
+sure we aren't redundant". The narrated tour (`scripts/presentation`,
+hypercomb.com/tour/) sets the words, the voice, the figures and the look of
+every page, and its 25 scenes are folded into the tiles they explain:
 
-- **A tile a scene explains shows that scene, and only that.** Each of the
-  tour's 25 scenes lands on one tile already in the tree (`blocks/tour.cjs`
-  holds the mapping, and every scene is placed exactly once). The page shows
-  the scene's own eyebrow, headline, figure, narration and recorded voice. The
-  tile's block may add only what the scene does not say: pictures from a
-  running hive, a part to try, the source, the documents. `build.cjs` refuses
-  a block that would say the headline or narration a second time.
-- **A tile no scene explains speaks in the tour's voice.** Its block has an
-  eyebrow, a headline with one word in emphasis, one sentence under the
-  figure, and beats. Its figure is a plate drawn by hand in the tour's plate
-  language (`blocks/plates/`, on `scripts/presentation/plates/lib.cjs`): the
-  960×400 frame, the hexagon, tokens only, and every part a beat lights is a
-  group with a `data-id`.
-- **Every beat is voiced the tour's way.** `blocks/narrate.cjs` records each
-  beat with the tour's voice into the tour's own cache
-  (`scripts/presentation/audio-cache`), and a page picks the voice up by
-  itself. A beat with no voice yet holds for its reading time.
-- **Pictures from a running hive.** A page's "In the hive" part shows the hive
-  doing the thing the page explains (`blocks/captures/`). `blocks/captures.cjs`
+- **A scene tile shows its scene, and only its scene.** Its headline, its
+  figure (the tour's own plate, clip, badges, list or road), its narration as
+  the caption, and its recorded voice. The tile's block adds only what the
+  scene does not say: pictures from a running hive, a part to try, the source
+  it explains. `blocks/tour.cjs` holds the mapping (every scene on exactly one
+  tile; the root, `protocol`, carries scene 2, *An open protocol*; the six
+  values hold scenes 3 to 19; and the `road` tree carries the opening
+  question, scene 1, and the road ahead, 20 to 25), and `blocks/build.cjs`
+  refuses a scene tile whose block would say a headline or narration again.
+- **Every tile is an interactive video of its concept.** jwize, 2026-11-04:
+  "every tile is an interactive video that shows in detail the concept. If
+  too much we break it apart into its elements the hypercomb way." A page
+  plays one sentence at a time to its voice and lights the figure's parts as
+  they are said; it may add interactive features (a part to try, a picture
+  from a running hive), but it stays one concept. A concept too big for one
+  page is never a longer page: it is broken apart into child tiles, each its
+  own video, and the parent tells only what holds them together.
+  `blocks/check.cjs` fails a presentation or road tile with no page, and a
+  page past twelve sentences.
+- **A tile no scene explains speaks the same way.** An eyebrow, a headline
+  with one honey word, a plate drawn in the tour's plate language (960 by
+  400, tokens only, `blocks/plates/`), and beats that light the plate's parts
+  as they are said. `blocks/narrate.cjs` voices the beats through the tour's
+  one voice path; until then a beat holds for its reading time.
+- **An exploration into building the hypercomb way.** jwize, 2026-11-04:
+  "the very elements of construction are the pathways to manageability and
+  clarity without overlap. The picture can be expressed in as many ways as
+  possible and shown integrally." The presentation is built of the things it
+  explains: one tile per concept, one word per name, one relation per layer,
+  one signature per medium, one scene per tile. Because each element is one
+  thing said once, the whole stays manageable and clear with no overlap: a
+  concept has one tile, a medium one signature, a scene one place, and a
+  change is made where the thing lives. And the one picture is shown in
+  every way there is, all from the same hierarchy: as hexagons walked, as a
+  website read, as a film played one sentence at a time, as a plate lit part
+  by part, as tiles captured from a hive in use, as a cube of points. None
+  of these is a copy; each is the same tiles, shown integrally.
+- **One look.** The tour's ink and honey, its two vendored faces, its icon
+  sprite. Dark as the tour is; light only where the hive says so explicitly.
+  Every size reads from the column's width, so a page is the same page
+  standing alone and mounted in the hive.
+- **Every medium by its signature.** The voice, the clips, the faces and the
+  captured pictures are named `resource:<sig>` (the SHA-256 of the bytes):
+  stored once in the hive however many pages name them, rewritten by the
+  website view to `/@resource/<sig>`, and carried by the publish closure.
+  `plant.cjs --blocks` serves them on 127.0.0.1 while its console snippet
+  stores each one and checks the hive named it the same, before any page is
+  dressed.
+- **Pictures from a running hive.** A tile may show one picture of the hive
+  doing what its page explains (`blocks/captures/`), beside its figure, and
+  the narration turns to it as the scene's last beat. `blocks/captures.cjs`
   stages the shots a sentence can show: it opens Edge on the dev hive in a
   profile of its own (never a second tab on a hive in use, and never the
   bridge), plants the tree, and takes layout on and off, a waiting trait, help
   in Japanese, and an agent's lines waiting for Enter. The pictures of a
-  lived-in hive (picture tiles, a layer, a website, the tile editor, chat,
-  a long history, the tutorials) were taken by hand in the author's own hive.
+  lived-in hive (a layer, a website, the tile editor, chat, a long history,
+  the tutorials) were taken by hand in the author's own hive.
 - **Real tiles, never the demo hive** (2026-11-03, jwize: "you have stock
-  garbage default images in the presentation"). The tour's four live clips
-  were filmed in a demo hive of example postcards, and some tiles in the
-  author's hive carry placeholder or stock art. `blocks/tiles.cjs` takes
-  tiles out of the author's hive over the bridge: each one's own picture,
-  border colour and name, into `blocks/tiles/`. `blocks/hive-figure.cjs` draws
-  them as tiles again, in the hive's staggered rows. A scene the tour filmed
-  in its demo hive shows them instead (`figures` in `content.cjs`, by scene
-  number), with the scene's words changed only where they describe the clip,
-  voiced the tour's way. The "In the hive" part can show extracted tiles too.
-  Pictures with a stock watermark, another company's branding, or other
-  people's faces are left out.
-- **Every medium is named by its signature.** The voice, the clips, the faces
-  and the pictures are written into a page as `resource:<sig>`. The website
-  view rewrites that to `/@resource/<sig>`, and the publish closure carries it
-  to a host. `plant.cjs --blocks` stores every medium, and checks that each one
-  lands under the signature its pages name it by, before any tile is given
-  its page.
-- **Looked at outside the hive.** `blocks/preview.cjs <out-dir>` writes every
-  page as plain files beside its media, with links between them. The out-dir
-  belongs in the OS temp directory.
-- **Checked before planting.** `blocks/blocks.spec.ts` runs with the suite. It
-  checks that every page loads nothing from another host, every medium a page
-  names travels with it, every link lands on a page, every plate stays inside
-  its frame, every beat has its voice, and every picture in `captures/` is on
-  a page.
+  garbage default images in the presentation"). The tour's live clips were
+  filmed in a demo hive of example postcards. `blocks/tiles.cjs` takes tiles
+  out of the author's hive over the bridge (each one's own picture, border
+  colour and name, into `blocks/tiles/`), and `blocks/hive-figure.cjs` draws
+  them as tiles again, in the hive's staggered rows. A scene the tour filmed in
+  its demo hive shows them instead (`figures` in `content.cjs`, by scene
+  number), told in its own words where the clip's differ. Pictures with a stock
+  watermark, another company's branding, or other people's faces are left
+  out. `blocks/blocks.spec.ts` checks that no page carries a demo-hive clip,
+  that every capture and every extracted tile is on a page, and that every
+  spoken line has its recorded voice.
+- **A part, or the website.** The website belongs to the root (jwize,
+  2026-11-04). A tile's page opened on its own is just that part: one slide,
+  no crumbs, no ways, and a website icon. The icon opens the website, rooted at
+  the top tile, on that same page: every slide then shows its crumbs and the
+  words to step into, every link stays in the website, and back steps back
+  along the pages read, then out to the layer hosting the page first opened.
+  In the hive, tiles walk as hexagons unless something is pinned: a tile's own
+  pin (`opens <tile> as website`) opens its part; a pin on a top tile reaches
+  every tile under it and opens the whole website there. Scenes play like a
+  film: one sentence on screen at a time, timed to the voice, the figure's
+  part it is about lit.
+- **Checked.** `blocks/check.cjs` fails on a scene placed twice or said on
+  two pages, a page that asks another host for anything, a medium whose bytes
+  are not its name, or a link no page answers; `--render` also opens every
+  page at 1280 and 390 pixels and fails on a script error, a page wider than
+  a phone, or plate text outside its frame. `blocks/preview.cjs <dir>` writes
+  the pages as plain files to look at outside the hive.
+
+**Read it yourself, line by line.** The voice can be replaced one sentence at
+a time with your own (jwize, 2026-11-03: "we record and stop and then choose
+one for you to remaster"). `scripts/presentation/recorder.cjs` serves a local
+page, a gantt chart with a lane per tile in the tree's order and a bar per
+line, each as long as its time slot: a scene's sentences where the voice
+actually says them, a page's beats and captions. Click a line and it lights
+word by word as it plays; record against it after a count-in, as many takes as
+it needs, and choose one. The chosen take is mastered and brought to the
+voice's own loudness, fitted to the slot (stretched when within 15%, otherwise
+the slot grows and the rest of the scene moves), and spliced into the same
+`audio-cache/<hash>.mp3` the generated voice had, its frames copied around the
+sentence so the other sentences are not touched, so the tour, the pages and the
+drawn clips use it with nothing else changed; the generated voice is kept to
+restore. Then re-time the drawn clips
+(`concepts.cjs`) and replant (`plant.cjs --blocks`).
 
 ## Every piece of the presentation is a tile
 

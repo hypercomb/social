@@ -13,14 +13,21 @@ import { join } from 'node:path'
 
 const require_ = createRequire(import.meta.url)
 const { buildBlocks } = require_('./build.cjs')
-const { linkTo } = require_('./preview.cjs')
 const content = require_('./content.cjs')
 const tour = require_('./tour.cjs')
 
 const { blocks, media } = buildBlocks()
 const sigs = new Set(media.map((m: { sig: string }) => m.sig))
 const paged = new Set(blocks.map((b: { route: string[] }) => b.route.join('/')))
-const plateNames = readdirSync(join(__dirname, 'plates')).filter(f => f.endsWith('.cjs') && f !== 'pieces.cjs').map(f => f.slice(0, -4))
+const plateNames = readdirSync(join(__dirname, 'plates')).filter(f => f.endsWith('.cjs')).map(f => f.slice(0, -4))
+
+/** The page a link names: `./word` one level down, `/a/b` from the root. */
+const linkTo = (href: string, route: string[], pages: Set<string>): string => {
+  const to = href.startsWith('/') ? href.split('/').filter(Boolean) : href.startsWith('./') ? [...route, href.slice(2)] : null
+  if (!to) return href
+  if (!pages.has(to.join('/'))) throw new Error(`/${route.join('/')} links to /${to.join('/')}, which has no page`)
+  return to.join('/')
+}
 
 describe('every page stands alone', () => {
   for (const b of blocks) {
@@ -55,8 +62,12 @@ describe('the tour is placed whole', () => {
 })
 
 describe('every beat has its voice', () => {
-  const beats = Object.entries(content as Record<string, { beats?: { say: string }[] }>)
-    .flatMap(([route, block]) => (block.beats || []).map(b => ({ route, say: b.say })))
+  const beats = Object.entries(content as Record<string, { beats?: { say: string }[], live?: { caption: string }[], figures?: Record<string, { say?: string }> }>)
+    .flatMap(([route, block]) => [
+      ...(tour.sceneAt(route) ? [] : (block.beats || []).map(b => ({ route, say: b.say }))),
+      ...(block.live || []).map(l => ({ route, say: l.caption })),
+      ...Object.values(block.figures || {}).filter(f => f.say).map(f => ({ route, say: f.say as string })),
+    ])
   it('finds the beats', () => expect(beats.length).toBeGreaterThan(0))
   it('has a recorded voice for every one (blocks/narrate.cjs)', () => {
     expect(beats.filter(b => !tour.T.cachePath(b.say))).toEqual([])
