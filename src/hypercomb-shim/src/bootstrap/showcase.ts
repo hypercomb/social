@@ -29,6 +29,11 @@ const SIG = /^[a-f0-9]{64}$/
 const HOSTNAME = /^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$/
 const LOOPBACK = /^(?:[a-z0-9-]+\.)*localhost(?::\d{1,5})?$/
 
+/** A phone, as the hive's phone gateway asks it (hypercomb-web index.html): a coarse pointer on a small screen. */
+const onPhone = (): boolean => {
+  try { return matchMedia('(pointer: coarse)').matches && matchMedia('(max-width: 599px), (max-height: 449px)').matches } catch { return false }
+}
+
 /** One publisher of a site: its key, the name the ledger gives it, the head it signed. */
 export type LedgerPublisher = { readonly pubkey: string; readonly label: string; readonly head: string }
 
@@ -884,8 +889,10 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     if (!item) { say(`${entry.title} names no lineage to sign, so it cannot go live from here.`); return }
     const bridge = options.owner
     if (!bridge || !ownerKey) {
-      // No hive of yours answers here: hand the switch to the hive that has the key, when the page knows it.
-      const href = showcaseHref(options.home, { zone: options.self, pubkey: item.pubkey, lineage: item.lineage, on,
+      // No hive of yours answers here: hand the switch to the hive that has the key, when the page knows it —
+      // except on a phone, where the hive's address serves this same front door (hypercomb-web index.html, the
+      // phone gateway) and a handed-off tap would land on a page that cannot sign either.
+      const href = onPhone() ? null : showcaseHref(options.home, { zone: options.self, pubkey: item.pubkey, lineage: item.lineage, on,
         title: entry.title, back: location.href.split('#')[0]! })
       if (href) { window.open(href, '_blank', 'noopener'); return }
       say(`Going live is signed with your hive's key, and no hive of yours answers in this browser. To promote ${entry.title} from here, `

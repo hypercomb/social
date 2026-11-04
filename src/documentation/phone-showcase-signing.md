@@ -1,9 +1,8 @@
 # Promoting from a phone
 
-Status: **built, 2026-11-04**, specs green. Not yet proved against a live
-worker: the loopback shim serves static files and holds no key list, so the
-whole path runs end to end only in `device-owner.spec.ts`, against a fake host
-that keeps the worker's rules.
+Status: **built and proved against the worker, 2026-11-04** (run locally; see
+step 5 of the build order). `device-owner.spec.ts` keeps the worker's rules in
+a fake; `device-owner.live.spec.ts` asks the worker itself.
 
 > "once in our community we can promote it by clicking to go live" — jwize,
 > 2026-11-04
@@ -155,5 +154,19 @@ says:
    phone width on `localhost:4270`, where Allow refuses in words and leaves no
    key, because that static server holds no list.
 4. **Promote from the phone** (part 2). **Built**, with a retry on a stale
-   `prev`. Proved only in `device-owner.spec.ts`. Still owed: one real run
-   against a worker that holds an invite.
+   `prev`.
+5. **Proved against the worker** (2026-11-04), run locally with
+   `wrangler dev --local --local-upstream localhost:8787` (without
+   `--local-upstream` the worker sees the route's hostname and refuses every
+   NIP-98 `u` tag). `device-owner.live.spec.ts`, skipped unless
+   `HC_LIVE_HOST` is set, passes all four: Allow puts the phone's key on the
+   list the worker keeps; the spent invite refuses a second browser and leaves
+   it no key; a tap uploads the showcase and the worker takes the index the
+   phone signs for the anchor, which every reader reads back; a stale `prev`
+   is refused with 409 and the next tap reads fresh and goes through. In the
+   browser at phone width, the card on `localhost:4270` took an invite the
+   local worker held, and Allow left the worker's list naming the browser's
+   key as `phone`.
+   Not proved: the page and the zone on one origin, as in production. The
+   worker serves the front door only from an `https` `HOST_DOOR_ORIGIN`, so
+   that needs a deploy.
