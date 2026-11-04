@@ -220,6 +220,7 @@
     "hypercomb-shared/ui/pools-of-meaning/pools-data.ts": 1,
     "hypercomb-shared/ui/tutorials-window/tutorials-window.component.ts": 1,
     "hypercomb-shim/src/bootstrap-loader.ts": 1,
+    "hypercomb-shim/src/bootstrap/device-key.ts": 1,
     "hypercomb-shim/src/bootstrap/host-panel.ts": 1,
     "hypercomb-shim/src/import-map.ts": 1,
     "hypercomb-shim/src/main.ts": 1,

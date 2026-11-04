@@ -24,9 +24,9 @@
 
 import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from 'nostr-tools/pure'
 import {
-  KEY_LIST_MEANING, SignatureService, firstKeyList, get, keyListTemplate, nextKeyList,
-  registerPoolMeaning, verifyKeyListChain,
-  type KeyList, type SignedKeyList,
+  KEY_LIST_MEANING, SignatureService, firstKeyList, get, inviteLink, keyListTemplate, nextKeyList,
+  parseInvite, registerPoolMeaning, verifyKeyListChain,
+  type InviteParts, type KeyList, type SignedKeyList,
 } from '@hypercomb/core'
 import { nip98Header } from './hive-pointer.js'
 
@@ -39,6 +39,8 @@ const SIG_RE = /^[0-9a-f]{64}$/
 const LOOPBACK_RE = /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i
 /** How long this tab trusts what it read of a host's list. */
 const READ_TTL_MS = 30_000
+/** Chain urls a host answered 404 for, and when. */
+const absent = new Map<string, number>()
 
 export interface KeySigner {
   signEvent: (evt: { kind: number; created_at: number; tags: string[][]; content: string }) => Promise<Record<string, unknown>>
@@ -100,8 +102,16 @@ export async function fetchKeyChain(host: string, anchor: string, deps: KeyListD
   const key = String(anchor ?? '').toLowerCase()
   if (!SIG_RE.test(key)) return { ok: false, reason: 'malformed' }
   let res: Response
-  try { res = await fetcher(deps)(await keyChainUrl(host, key), { cache: 'no-store' }) } catch { return { ok: false, reason: 'unreachable' } }
-  if (res.status === 404) return { ok: false, reason: 'none', status: 404 }
+  const url = await keyChainUrl(host, key)
+  // A host with no list answers 404 every time; the browser logs each one, so the live
+  // fetch remembers an absence for a while. An injected fetch (tests) is never memoised.
+  const seen = deps.fetch ? undefined : absent.get(url)
+  if (seen && Date.now() - seen < READ_TTL_MS) return { ok: false, reason: 'none', status: 404 }
+  try { res = await fetcher(deps)(url, { cache: 'no-store' }) } catch { return { ok: false, reason: 'unreachable' } }
+  if (res.status === 404) {
+    if (!deps.fetch) { if (absent.size > 256) absent.clear(); absent.set(url, Date.now()) }
+    return { ok: false, reason: 'none', status: 404 }
+  }
   if (!res.ok) return { ok: false, reason: 'http', status: res.status }
   let chain: unknown
   try { chain = await res.json() } catch { return { ok: false, reason: 'malformed' } }
@@ -128,6 +138,7 @@ export async function putKeyChain(host: string, anchor: string, chain: readonly 
   try {
     const res = await fetcher(deps)(url, { method: 'PUT', headers: { Authorization: auth, 'Content-Type': 'application/json' }, body })
     if (!res.ok) return { ok: false, status: res.status, reason: `host said ${res.status}: ${res.headers.get('X-Reason') ?? ''}`.trim() }
+    absent.delete(url)
     return { ok: true }
   } catch { return { ok: false, reason: 'host unreachable' } }
 }
@@ -244,26 +255,8 @@ export async function prepareAnchorHosts(hosts: readonly string[], deps: KeyList
 
 // ── invites ──────────────────────────────────────────────────────────────────
 
-export interface InviteParts { host: string; anchor: string; secret: string }
-
-const INVITE_RE = /(?:^|[#?&\s])invite=([a-z0-9.:[\]-]+)\/([0-9a-f]{64})\/([0-9a-f]{64})(?![0-9a-f])/i
-const BARE_INVITE_RE = /^([a-z0-9.:[\]-]+)\/([0-9a-f]{64})\/([0-9a-f]{64})$/i
-
-/** An invite in a link, a fragment, `invite=…` or the bare `host/anchor/secret`. */
-export function parseInvite(text: string): InviteParts | null {
-  const raw = String(text ?? '').trim()
-  const m = INVITE_RE.exec(raw) ?? BARE_INVITE_RE.exec(raw)
-  if (!m) return null
-  const host = bareHost(m[1])
-  return host ? { host, anchor: m[2].toLowerCase(), secret: m[3].toLowerCase() } : null
-}
-
-/** The link to open where the new place lives. The secret is in the fragment,
- *  which a browser never sends to a server. */
-export function inviteLink(where: string, parts: InviteParts): string {
-  const bare = bareHost(where)
-  return `${LOOPBACK_RE.test(bare) ? 'http' : 'https'}://${bare}/#invite=${parts.host}/${parts.anchor}/${parts.secret}`
-}
+// The invite's spelling is core's (key-list.ts), shared with a front door's Allow.
+export { inviteLink, parseInvite, type InviteParts }
 
 // An invite that merely LANDED is held, never spent: opening a link must not
 // make this device publish as somebody else's anchor.

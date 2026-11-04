@@ -4,8 +4,9 @@
 // is my domain I should be able to unpublish directly from hypercomb.com
 // because I have the ownership key").
 //
-// A front door holds no key and never will: the secret lives in the
-// participant's hive. So an Off button here only builds a link to that hive
+// The owner's secret never comes to a front door: it lives in the participant's
+// hive. (A browser that took the owner's invite holds a key of its OWN —
+// device-key.ts — never this one.) So an Off button here only builds a link to that hive
 // carrying the row's PUBLIC coordinates — which publish, whose key, which
 // domain, here or everywhere, the head it showed, and the way back — in the
 // fragment, which no server sees. The hive checks it holds the key, asks,

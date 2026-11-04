@@ -22,6 +22,7 @@ import { communityKey, doorsOpen, parseView, stepView, viewLabel, type ShowcaseC
 import { DEFAULT_HOME, homeOrigin, turnOffHref } from './turn-off-link'
 import type { OwnerBridge } from './owner-bridge'
 import { showcaseHref } from './showcase-link'
+import type { CommunityPick } from './community-tiles'
 import type { LinkIcon, WelcomeLink } from './welcome'
 
 const SIG = /^[a-f0-9]{64}$/
@@ -558,6 +559,9 @@ export type ShowcaseOptions = {
   readonly onManage?: (managing: boolean) => void
   /** The hive beside this page, when this device is its owner's: a tap on a tile puts it in the showcase or takes it out. */
   readonly owner?: OwnerBridge | null
+  /** The tiles this browser brought into its community while managing (community-tiles.ts). */
+  readonly readCommunity?: () => Promise<readonly CommunityPick[]>
+  readonly keepCommunity?: (picks: readonly CommunityPick[]) => Promise<boolean>
   readonly readPeerLedger?: (zone: string) => Promise<readonly LedgerSite[]>
   /** Open this signature as files on the host page. */
   readonly onOpenHead?: (head: string, zone: string) => void
@@ -854,19 +858,51 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     const owner = version?.owners.find(candidate => candidate.pubkey === ownerKey) ?? version?.owners[0]
     return lineage && owner ? { pubkey: owner.pubkey, lineage } : null
   }
+  const say = (words: string): void => { ownerNote.hidden = false; ownerNote.textContent = words }
+  // ── YOUR COMMUNITY (jwize 2026-11-04): while managing, a tap on a followed domain's tile brings it in (lit) or
+  //    lets it go (gray), in place; in your own row a community tile waits gray until a tap promotes it live ──
+  let picks: CommunityPick[] = []
+  const picked = (entry: Aggregate): boolean => picks.some(pick => pick.key === entry.key)
+  let picking = false
+  const pickTile = async (entry: Aggregate, row: string): Promise<void> => {
+    if (picking) return
+    if (!options.keepCommunity) { say('This page cannot keep a community.'); return }
+    const was = picks
+    const on = !picked(entry)
+    picks = on ? [...picks, { zone: row, key: entry.key }] : picks.filter(pick => pick.key !== entry.key)
+    picking = true
+    paint()
+    const kept = await options.keepCommunity(picks).catch(() => false)
+    picking = false
+    if (!kept) { picks = was; paint(); say(`Could not keep ${entry.title} in your community.`); return }
+    say(on ? `${entry.title} is in your community. Tap it in your row to go live.` : `${entry.title} left your community.`)
+  }
   const tapTile = async (entry: Aggregate, row: string): Promise<void> => {
-    const bridge = options.owner
-    if (!bridge || !ownerKey || tapping) return
+    if (tapping) return
+    const on = !showcased(entry)
     const item = itemOf(entry, row)
-    if (!item) return
-    // In your own row a tap takes it out; in another domain's row it puts it in, or takes it out again.
-    const on = row === options.self ? false : !showcased(entry)
+    if (!item) { say(`${entry.title} names no lineage to sign, so it cannot go live from here.`); return }
+    const bridge = options.owner
+    if (!bridge || !ownerKey) {
+      // No hive of yours answers here: hand the switch to the hive that has the key, when the page knows it.
+      const href = showcaseHref(options.home, { zone: options.self, pubkey: item.pubkey, lineage: item.lineage, on,
+        title: entry.title, back: location.href.split('#')[0]! })
+      if (href) { window.open(href, '_blank', 'noopener'); return }
+      say(`Going live is signed with your hive's key, and no hive of yours answers in this browser. To promote ${entry.title} from here, `
+        + `type "keys allow ${options.self}" in your hive and open its link in this browser; or open ${options.self} where your hive runs.`)
+      return
+    }
+    // A tile taken out stays in your community, gray, in place.
+    if (!picked(entry) && options.keepCommunity) {
+      picks = [...picks, { zone: row, key: entry.key }]
+      void options.keepCommunity(picks).catch(() => false)
+    }
     tapping = true
     ownerNote.hidden = false
-    ownerNote.textContent = on ? `Putting ${entry.title} in your showcase…` : `Taking ${entry.title} out of your showcase…`
+    ownerNote.textContent = on ? `Promoting ${entry.title}…` : `Taking ${entry.title} off your page…`
     const result = await bridge.toggle({ zone: options.self, pubkey: item.pubkey, lineage: item.lineage, on })
     tapping = false
-    ownerNote.textContent = result.ok ? (on ? `${entry.title} is in your showcase.` : `${entry.title} is out of your showcase.`) : `Not changed: ${result.reason}.`
+    ownerNote.textContent = result.ok ? (on ? `${entry.title} is live.` : `${entry.title} is off your page. It stays in your community.`) : `Not changed: ${result.reason}.`
     if (result.ok && result.changed) takeLedger(options.ledger)
   }
   /** Where a tap goes: this row's own place for the name, else its first. */
@@ -930,16 +966,14 @@ ${entry.key}`
       // IN THE SHOWCASE A TAP VISITS. UNDER ANOTHER DOMAIN A TAP TURNS THE TILE ON OR OFF (jwize 2026-10-25: "of
       // course on other domains it is just toggling"; "they should all be grayed out under other domains and
       // when you click it lights up and it is added to the showcase"). The click a hold ends with is swallowed.
+      // MANAGING, A TAP IS THE SWITCH (jwize 2026-11-04): under another domain it brings the tile into your
+      // community or lets it go; in your own row it promotes a community tile live, or takes a live one off.
       tile.addEventListener('click', event => {
         if (held) { held = false; event.preventDefault(); event.stopPropagation(); return }
-        if (row === options.self) return
+        if (row === options.self && !managing) return
         event.preventDefault()
-        if (options.owner && ownerKey) { void tapTile(made.entry, row); return }
-        // No hive beside this page: the hive that has the key does it, and the page waits here.
-        const item = itemOf(made.entry, row)
-        const href = item ? showcaseHref(options.home, { zone: options.self, pubkey: item.pubkey, lineage: item.lineage,
-          on: !showcased(made.entry), title: made.entry.title, back: location.href.split('#')[0]! }) : null
-        if (href) window.open(href, '_blank', 'noopener')
+        if (row === options.self) void tapTile(made.entry, row)
+        else void pickTile(made.entry, row)
       })
       tile.addEventListener('contextmenu', event => { event.preventDefault(); stop(); heldOpen = true; openVersions(made.entry, tile, row) })
       tile.addEventListener('keydown', event => {
@@ -950,7 +984,9 @@ ${entry.key}`
       tileViews.set(id, view = made)
     }
     view.entry = entry
-    view.tile.classList.toggle('off', row !== options.self && !showcased(entry))
+    const live = showcased(entry)
+    // Gray: under another domain, not in your community; in your own row while managing, not live yet.
+    view.tile.classList.toggle('off', row === options.self ? managing && !live : !live && !picked(entry))
     if (view.head !== lead.head) {
       // A new lead version: its own cover and picture, and the old head forgets this box.
       wearers.get(view.head)?.delete(view.art)
@@ -965,9 +1001,10 @@ ${entry.key}`
     // Somewhere else on the web opens in its own tab; this origin is this site still.
     if (view.tile.origin !== location.origin) { view.tile.target = '_blank'; view.tile.rel = 'noopener' }
     else { view.tile.removeAttribute('target'); view.tile.removeAttribute('rel') }
-    view.tile.title = row === options.self
-      ? `${entry.title} · ${place.address} — tap to visit, hold for more`
-      : `${entry.title} · ${place.address} — tap to ${showcased(entry) ? 'take it out of' : 'put it in'} your showcase, hold for its domains`
+    view.tile.title = row !== options.self
+      ? `${entry.title} · ${place.address} — tap to ${picked(entry) ? 'let it go from' : 'bring it into'} your community, hold for its domains`
+      : managing ? `${entry.title} · ${place.address} — tap to ${live ? 'take it off your page' : 'promote it live'}, hold for more`
+        : `${entry.title} · ${place.address} — tap to visit, hold for more`
     view.name.textContent = entry.title
     view.address.textContent = place.address
     view.owners.hidden = entry.owners < 2
@@ -1406,9 +1443,13 @@ ${entry.key}`
     if (record) {
       if (entry.zones.some(zone => record.domains.includes(zone))) return true
       // A named item is shown unless Publish has turned it off for this domain.
-      return entry.versions.some(version => liveHere(version.head) && version.claims.some(claim =>
+      if (entry.versions.some(version => liveHere(version.head) && version.claims.some(claim =>
         record.items.some(item => item.pubkey === claim.pubkey && item.lineage === claim.lineage)
-        && doorsOpen(signed!, claim.pubkey, claim.lineage, options.self) !== false))
+        && doorsOpen(signed!, claim.pubkey, claim.lineage, options.self) !== false))) return true
+      // A followed domain's tile has no claim this ledger verified: the owners' signed record naming its
+      // publisher and lineage is the choice, so a tile promoted from your community is live.
+      return entry.versions.some(version => !version.claims.length && !!version.lineage && version.owners.some(owner =>
+        record.items.some(item => item.pubkey === owner.pubkey && item.lineage === version.lineage)))
     }
     const claims = entry.versions.flatMap(version => version.claims)
     // A domain's own pool offers what it shares here by putting it there.
@@ -1462,6 +1503,9 @@ ${entry.key}`
     // A community only ever filters: its members must already be in the showcase.
     const everything = unread ? [] : all.flatMap(band => band.tiles).filter(showcased)
       .filter(entry => !community || covers(entry, community.items, community.domains)).sort(byTitle)
+    /** Your community's tiles, found wherever a row offers them now; a pick no row offers waits unseen. */
+    const known = new Map(all.flatMap(band => band.open).map(entry => [entry.key, entry] as const))
+    const communityTiles = picks.map(pick => known.get(pick.key)).filter((entry): entry is Aggregate => !!entry)
     // The platform's doors are the first page's; a community is about what is shared.
     const links = community ? [] : options.links ?? []
     // HOW IT IS DRAWN: a try from this visit, else a community's own view, else All's
@@ -1480,7 +1524,9 @@ ${entry.key}`
     for (const zone of order) {
       const view = rowView(zone)
       const own = zone === options.self
-      const items = own ? everything : rowItems(all, zone).slice().sort(byTitle)
+      // Managing, your row also holds your community: what is not live yet is drawn gray, waiting to be promoted.
+      const waiting = own && managing ? communityTiles.filter(entry => !everything.includes(entry)) : []
+      const items = own ? (waiting.length ? [...everything, ...waiting].sort(byTitle) : everything) : rowItems(all, zone).slice().sort(byTitle)
       const shown = items.filter(entry => aggregateMatches(entry, terms))
       // The doors wait for the ledger: the row draws once, not the doors and then the hives.
       const doors = own && ledgerRead && !unread ? links.filter(link => linkMatches(link, terms)) : []
@@ -1610,6 +1656,7 @@ ${entry.key}`
   takeLedger(options.ledger)
   paint()
   options.owner?.hello().then(key => { if (key) { ownerKey = key; paint() } }).catch(() => undefined)
+  options.readCommunity?.().then(found => { if (found.length && !picks.length) { picks = [...found]; paint() } }).catch(() => undefined)
   /** Read again: what is published now replaces what was, and each domain's
    *  pools are asked again. */
   const refresh = (ledger: Promise<readonly LedgerSite[]>): void => {

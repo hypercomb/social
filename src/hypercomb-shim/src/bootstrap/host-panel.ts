@@ -15,6 +15,7 @@
 // there is nothing to render with but the DOM.
 
 import { addHostZone, hostZone, listHostZones, removeHostZone } from './hosts'
+import { keepCommunityTiles, readCommunityTiles } from './community-tiles'
 import { hostRouteName } from '@hypercomb/runtime/host-activation'
 import { askHostPackages } from '@hypercomb/runtime/host-packages'
 import { acquire, installPackage, installedPackageSig, type HostPackage, type InstallOutcome } from './replicate'
@@ -23,6 +24,8 @@ import { pictureOrigins, tilePicture } from './tile-picture'
 import { SHOWCASE_STYLE, doorOrigin, matchesDomain, readLedger, readPeerLedger, rootZones, searchTerms, showcase,
   type LedgerSite } from './showcase'
 import { ownerBridge } from './owner-bridge'
+import { allowInvite, captureDeviceInvite, dropInvite, heldInvite } from './device-invite'
+import { deviceOwner, eitherOwner } from './device-owner'
 import { readZoneOwners } from './showcase-record'
 import { branchView } from './branch-view'
 import { readFromZone, readVerified } from './branch-files'
@@ -113,6 +116,17 @@ button:disabled { opacity: .5; cursor: default; }
 ul { list-style: none; margin: 0; padding: 0; }
 li { display: flex; align-items: center; gap: .75rem; padding: .55rem .75rem; border-top: 1px solid var(--md-outline-variant); }
 .status { min-height: 1.4em; margin: 1rem 0 0; color: var(--md-on-surface-var); }
+.invite-card { margin: .75rem 0; padding: .9rem 1rem; border: 1px solid var(--md-outline-variant); border-radius: var(--hc-radius-card, 3px);
+  background: var(--md-surface-c-low); color: var(--md-on-surface); }
+.invite-card p { margin: 0; line-height: 1.45; }
+.invite-actions { display: flex; gap: .5rem; margin-top: .75rem; }
+.invite-actions button { min-height: 2.5rem; padding: 0 1.1rem; border-radius: 999px; font: inherit; cursor: pointer;
+  border: 1px solid var(--md-outline-variant); background: transparent; color: var(--md-on-surface); }
+.invite-actions .invite-allow { border-color: transparent; background: var(--md-primary); color: var(--md-on-primary); font-weight: 600; }
+.invite-actions .invite-allow:hover:not(:disabled) { border-color: transparent; background: color-mix(in srgb, var(--md-primary) 86%, white); }
+.invite-actions button:disabled { opacity: .55; cursor: default; }
+.invite-note { margin-top: .5rem !important; color: var(--md-on-surface-var); font-size: .9rem; }
+.invite-note:empty { display: none; }
 .status[data-tone="bad"] { color: var(--hc-status-alert); }
 .status[data-tone="good"] { color: var(--hc-status-ok); }
 .gallery-search { display: block; width: 100%; margin: 0 0 .75rem; padding: 1rem 1.15rem; font-size: 1.02rem; box-shadow: var(--md-elev-1); }
@@ -564,7 +578,51 @@ class HostPanelElement extends HTMLElement {
     status.setAttribute('data-tone', tone)
   }
 
+  /** THE INVITE, HELD (device-invite.ts): opening the link spends nothing; the Allow tap is the owner's
+   *  word that this browser may publish for them. Null when the page was not opened with one. */
+  #inviteCard(): HTMLElement | null {
+    const parts = heldInvite()
+    if (!parts) return null
+    const card = document.createElement('section')
+    card.className = 'invite-card'
+    card.setAttribute('role', 'region')
+    card.setAttribute('aria-label', 'Invitation to publish')
+    const words = document.createElement('p')
+    words.textContent = `This browser is invited to publish for ${parts.anchor.slice(0, 8)}… on ${parts.host}. `
+      + 'Allow makes a key for this browser and adds it to that list. The key never leaves this browser.'
+    const note = document.createElement('p')
+    note.className = 'invite-note'
+    note.setAttribute('role', 'status')
+    const actions = document.createElement('div')
+    actions.className = 'invite-actions'
+    const allow = document.createElement('button')
+    allow.type = 'button'
+    allow.className = 'invite-allow'
+    allow.textContent = 'Allow'
+    const later = document.createElement('button')
+    later.type = 'button'
+    later.className = 'invite-later'
+    later.textContent = 'Not now'
+    later.addEventListener('click', () => { dropInvite(); card.remove() })
+    allow.addEventListener('click', () => {
+      allow.disabled = true
+      later.disabled = true
+      note.textContent = 'Adding this browser to the list…'
+      void allowInvite(parts).then(result => {
+        if (!result.ok) { note.textContent = result.reason; allow.disabled = false; later.disabled = false; return }
+        note.textContent = 'This browser publishes for you now. Turn on Manage and tap a tile in your row to go live.'
+        // Drawn again so the page asks the new key who it publishes for.
+        setTimeout(() => { void this.#render() }, 1200)
+      })
+    })
+    actions.append(allow, later)
+    card.append(words, actions, note)
+    return card
+  }
+
   async #render(): Promise<void> {
+    // An invite in the address is taken out of it at once and held, unspent.
+    captureDeviceInvite(location, history)
     // The front door is read once per card, not once per render: adding a
     // domain must not re-ask the origin for a file that cannot have changed.
     // The welcome and the followed domains are asked together. The selection
@@ -625,7 +683,11 @@ class HostPanelElement extends HTMLElement {
         readShared: zone => Promise.all([zone === (this.#self || location.host) ? readOfferings(zone).catch(() => []) : Promise.resolve([]),
           readPublicCreations(zone).catch(() => [])]).then(([offers, creations]) => ({ offers, creations })),
         readOwners: readZoneOwners,
-        owner: ownerBridge(),
+        // The hive beside this page signs when there is one; else this browser's own key, when it took its
+        // owner's invite (device-owner.ts) — a phone, where no hive runs.
+        owner: eitherOwner(ownerBridge(), deviceOwner(this.#self || location.host)),
+        readCommunity: readCommunityTiles,
+        keepCommunity: keepCommunityTiles,
         onManage: on => { manage.hidden = !on },
         // EVERYTHING ON THE HOME PAGE IS A TILE (jwize 2026-10-25): the staged doors
         // and the platform's own are tiles in this domain's row, not panels.
@@ -637,6 +699,8 @@ class HostPanelElement extends HTMLElement {
       })
       this.#showcaseRefresh = refresh
       panel.append(hero)
+      const invite = this.#inviteCard()
+      if (invite) panel.append(invite)
       if (this.#reviews?.length) panel.append(this.#reviewSection(this.#reviews))
       else waitingAnchor = bands
       panel.append(bands)
