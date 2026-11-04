@@ -15,7 +15,7 @@
 //   2. THE SHEEN: a soft warm band glides top-left to bottom-right across one
 //      tile at a time, east first and clockwise, the middle last, 8 s round.
 //   3. THE BLOOM: when a ring opens its tiles ease in from 0.92 and nothing,
-//      30 ms a tile clockwise from east. The hive's centre is the tile the
+//      over 140 ms, 5 ms a tile clockwise from east. The hive's centre is the tile the
 //      menu opened on, already showing, so it (and its name) stays as it is.
 //
 // Times are seconds since the ring opened: the flower clock is rebased to 0 then.
@@ -59,7 +59,7 @@ export const SHEEN = {
 export const SHEEN_SLOTS = 7
 
 /** THE BLOOM (quick-menu.honey.ts BLOOM). */
-export const BLOOM = { fromScale: 0.92, durationMs: 260, staggerMs: 30, bezier: [0.2, 0.8, 0.2, 1] } as const
+export const BLOOM = { fromScale: 0.92, durationMs: 140, staggerMs: 5, bezier: [0.2, 0.8, 0.2, 1] } as const
 export const BLOOM_EASE_CSS = `cubic-bezier(${BLOOM.bezier.join(',')})`
 /** Every slot of a ring has bloomed this many ms after it opened. */
 export const BLOOM_TOTAL_MS = BLOOM.durationMs + 6 * BLOOM.staggerMs
@@ -148,7 +148,7 @@ export function sheenAt(timeS: number, slot: number, x: number, y: number, lit: 
 }
 
 /** How long after the ring opens slot `slot` starts to bloom: the middle first,
- *  then east clockwise, 30 ms apart. */
+ *  then east clockwise, 5 ms apart. */
 export function bloomDelayMs(slot: number): number {
   return Math.max(0, Math.floor(slot)) * BLOOM.staggerMs
 }
