@@ -16,8 +16,9 @@ import { clickNeedsCoordinateHitTest, resolveTilePress, usesTileCloseUp } from '
 import { openTileMenu } from './viewer-walk.js'
 import { isPublishedVisitorShell } from '../../sharing/behavior-enablement.js'
 import { hoverActionsSuppressed } from '../../quickmenu/quick-menu.tile-menu.js'
+import { judgeEntry, pendingStillValid, type MapsLocation, type PendingEnter } from './tile-enter-guard.js'
 
-type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; swarmTakeLabels?: string[]; noImageLabels?: string[]; substrateLabels?: string[]; linkLabels?: string[]; hiddenLabels?: string[]; shadedLabels?: string[]; flatPaths?: Record<string, string[]>; filterBlocked?: string[] }
+type CellCountPayload = { locationKey?: string; locationKnown?: boolean; count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; swarmTakeLabels?: string[]; noImageLabels?: string[]; substrateLabels?: string[]; linkLabels?: string[]; hiddenLabels?: string[]; shadedLabels?: string[]; flatPaths?: Record<string, string[]>; filterBlocked?: string[] }
 
 // Backstop timeout (ms) for the navigation-transition guard. This is NOT the
 // normal release — the guard lifts on render:cell-count (the renderer has
@@ -425,7 +426,11 @@ export class TileOverlayDrone extends Drone {
   // A tile entry / launcher open pressed while #tileEnterRefused was latched:
   // honored on the next render:cell-count if its label survives into the
   // fresh maps.
-  #pendingEnter: string | null = null
+  #pendingEnter: PendingEnter | null = null
+  // The location the tile maps below were painted FOR (render:cell-count's
+  // locationKey). Entering a label read off the LEAVING level's maps appends a
+  // phantom segment (/people → /people/people → …); see tile-enter-guard.ts.
+  #mapsLocation: MapsLocation = undefined
   #pendingGroupOpen: string | null = null
   /** Monotonic axial-map generation — bumped on every #rebuildOccupiedMap.
    *  A press captures it so the trailing click can detect that the map was
@@ -824,6 +829,10 @@ export class TileOverlayDrone extends Drone {
 
       this.onEffect<CellCountPayload>('render:cell-count', (payload) => {
         this.#cellCount = payload.count
+        // A render that does not know where it painted (key blanked by a room /
+        // secret / launcher reset) says so; an older emitter says nothing.
+        this.#mapsLocation = payload.locationKnown === false ? null
+          : typeof payload.locationKey === 'string' ? payload.locationKey : undefined
         this.#cellLabels = payload.labels
         this.#cellCoords = payload.coords
         this.#branchLabels = new Set(payload.branchLabels ?? [])
@@ -857,9 +866,13 @@ export class TileOverlayDrone extends Drone {
         // never. Absent label = the level genuinely changed under the click —
         // drop it (entering would mint a phantom segment).
         if (this.#pendingEnter) {
-          const label = this.#pendingEnter
+          const { label } = this.#pendingEnter
+          const moved = !pendingStillValid(this.#pendingEnter, this.#liveLabel())
           this.#pendingEnter = null
-          if (this.#cellLabels.includes(label)) this.#navigateInto(label)
+          // A press aimed at one level is never replayed on another that happens
+          // to hold a tile of the same name.
+          if (moved) console.warn('[tile-overlay] deferred tile-enter dropped — location changed since the press:', label)
+          else if (this.#cellLabels.includes(label)) this.#navigateInto(label)
           else console.warn('[tile-overlay] deferred tile-enter dropped — level changed before render landed:', label)
         }
         if (this.#pendingGroupOpen) {
@@ -3464,6 +3477,15 @@ export class TileOverlayDrone extends Drone {
     }
   }
 
+  // The live address in the spelling the renderer stamps on its passes
+  // (lineage.explorerLabel). Without a lineage it echoes the maps' own stamp,
+  // so an absent lineage can never read as "another level".
+  #liveLabel(): string {
+    const lineage = this.resolve<{ explorerLabel?: () => string }>('lineage')
+    const own = typeof this.#mapsLocation === 'string' ? this.#mapsLocation : '/'
+    return String(lineage?.explorerLabel?.() ?? own)
+  }
+
   // Current lineage location as a normalized "/"-joined key. Captured BEFORE a
   // nav commit so we can tell whether the commit actually moved.
   #currentLocationKey(): string {
@@ -3504,8 +3526,23 @@ export class TileOverlayDrone extends Drone {
       // still contain this label the entry fires — the click lands LATE, never
       // never. A label absent from the fresh maps (the level really changed
       // underneath) is dropped there, with the warn.
-      this.#pendingEnter = label
+      this.#pendingEnter = { label, at: this.#liveLabel() }
       console.warn('[tile-overlay] tile-enter deferred — render not landed yet; will enter', label, 'when maps are fresh')
+      return
+    }
+
+    // STALE MAPS NEVER ENTER. Whatever released the other guards (backstop timer,
+    // a late repaint of the level we left), the labels on hand describe
+    // #mapsLocation. Another level: drop — the press was read off a level we are
+    // no longer on. Unknown: queue it WITH where it was made; the next render
+    // that knows its location settles it (the replay re-judges).
+    const verdict = judgeEntry(this.#mapsLocation, this.#liveLabel())
+    if (verdict === 'drop') {
+      console.warn('[tile-overlay] tile-enter dropped — maps are for', this.#mapsLocation, 'but the address is', this.#liveLabel(), '→', label)
+      return
+    }
+    if (verdict === 'defer') {
+      this.#pendingEnter = { label, at: this.#liveLabel() }
       return
     }
 
