@@ -53,6 +53,9 @@ class MemoryDirectory {
   readonly dirs = new Map<string, MemoryDirectory>()
   /** Every `entries()` walk of THIS directory. */
   walks = 0
+  /** Walks in flight across EVERY directory, and the most at once. */
+  static inFlight = 0
+  static peakInFlight = 0
   constructor(readonly name = '') {}
   async getFileHandle(name: string, options: { create?: boolean } = {}) {
     if (this.dirs.has(name)) throw new DOMException('Directory at file address', 'TypeMismatchError')
@@ -77,8 +80,15 @@ class MemoryDirectory {
   }
   async *entries() {
     this.walks++
-    for (const entry of [...this.files]) yield entry
-    for (const entry of [...this.dirs]) yield entry
+    MemoryDirectory.inFlight++
+    MemoryDirectory.peakInFlight = Math.max(MemoryDirectory.peakInFlight, MemoryDirectory.inFlight)
+    try {
+      for (const entry of [...this.files]) {
+        await new Promise(resolve => setTimeout(resolve, 0))   // a real directory answers asynchronously
+        yield entry
+      }
+      for (const entry of [...this.dirs]) yield entry
+    } finally { MemoryDirectory.inFlight-- }
   }
 }
 
@@ -202,6 +212,23 @@ describe('the head memo on the commit path', () => {
     await adds(w.b, w.rootLoc, 'b1')                         // a peer's marker, learned on revalidation
     await w.a.revalidateHead(w.rootLoc)
     expect((await w.a.replay(w.rootLoc)).length).toBe(second.length + 1)
+  })
+
+  it('preloadAllBags walks bags with bounded concurrency — more than one at a time, never all', async () => {
+    const w = await world()
+    // Forty lineages, each with a head: forty bags on disk.
+    const locs: string[] = []
+    for (let i = 0; i < 40; i++) {
+      const loc = await w.a.sign({ explorerSegments: () => [`bag-${i}`] })
+      locs.push(loc)
+      await adds(w.a, loc, `tile-${i}`)
+    }
+    const fresh = withMute(() => new HistoryService())
+    MemoryDirectory.peakInFlight = 0
+    await fresh.preloadAllBags()
+    for (const loc of locs) expect(fresh.warmHeadSigFor(loc)).toBe(w.a.warmHeadSigFor(loc))
+    expect(MemoryDirectory.peakInFlight).toBeGreaterThan(1)
+    expect(MemoryDirectory.peakInFlight).toBeLessThanOrEqual(12)
   })
 
   it('a peer that wrote SEVERAL markers is caught the same way', async () => {

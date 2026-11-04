@@ -183,6 +183,27 @@ export type MarkerRecord = {
 }
 
 const SIG_RE = /^[0-9a-f]{64}$/i
+
+/** Run `work` over `items` with at most `limit` in flight. The bag walks
+ *  below awaited one bag at a time — 293 bags took 5.1 s serially — and
+ *  OPFS answers independent directories in parallel; unbounded would open
+ *  every bag at once. A failed item rejects the whole run, as a serial
+ *  loop would have thrown at that item. */
+const forEachBounded = async <T>(
+  items: Iterable<T>,
+  limit: number,
+  work: (item: T) => Promise<void>,
+): Promise<void> => {
+  const queue = [...items]
+  let next = 0
+  const worker = async (): Promise<void> => {
+    while (next < queue.length) await work(queue[next++]!)
+  }
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, queue.length)) }, worker))
+}
+
+/** Bags opened at once by the boot-time walks. */
+const BAG_WALK_CONCURRENCY = 12
 /** PRUNE'S DESTROY — the only removals that ask a never-deleting store (the
  *  desktop app's, the packed store) to delete for real; OPFS ignores the
  *  flag and deletes as it always has (removeContentSigs, removeLineageBag). */
@@ -589,10 +610,12 @@ export class HistoryService {
     await scan(this.hiveRoot)
     for (const src of this.#legacyBagSources()) await scan(src)
     const bags = new Map<string, FileSystemDirectoryHandle>()
-    for (const name of names) {
+    // Bounded, not serial: each name is its own directory, promoted and
+    // opened independently of the others.
+    await forEachBounded(names, BAG_WALK_CONCURRENCY, async (name) => {
       await this.#promoteBag(name)
       try { bags.set(name, await this.hiveRoot.getDirectoryHandle(name, { create: false })) } catch { /* vanished mid-scan — skip */ }
-    }
+    })
     return bags
   }
 
@@ -3423,7 +3446,10 @@ export class HistoryService {
       // marker winning. `root` was only needed to gate on Store readiness
       // above; the scan itself spans every source.
       const bags = await this.enumerateBags()
-      for (const [lineageSig, dirHandle] of bags) {
+      // Bounded concurrency across bags: the per-bag work is independent
+      // (each sets its own lineage's head) and OPFS serves directories in
+      // parallel; the slice yield still interleaves paint and input.
+      await forEachBounded(bags, BAG_WALK_CONCURRENCY, async ([lineageSig, dirHandle]) => {
         await yieldIfDue()
         bagCount++
         const bag = dirHandle as FileSystemDirectoryHandle
@@ -3440,7 +3466,7 @@ export class HistoryService {
           if (name > latestName) latestName = name
           if (markerCount % 200 === 0) await yieldIfDue()
         }
-        if (!latestName) continue
+        if (!latestName) return
 
         // Pass 2: read latest marker, extract layer sig. Handles BOTH
         // pointer-record markers (modern) and legacy layer-byte markers
@@ -3464,7 +3490,7 @@ export class HistoryService {
           cachedCount++
           if (previewSigs.length < 10) previewSigs.push(layerSig.slice(0, 12))
         } catch { /* skip unreadable */ }
-      }
+      })
 
       // Reconciliation complete — persist the freshly-derived head index so
       // the NEXT boot warm-starts from it instead of re-running this scan.
