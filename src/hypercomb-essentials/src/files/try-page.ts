@@ -15,7 +15,8 @@
 import { isSandboxLabel } from '@hypercomb/core'
 import { extractPageRefSigs } from '../sharing/decoration-closure.js'
 
-const KEY = 'hc:page-trials'
+/** Pool of meaning for the pages that run as trials. Colon-scoped so it can never be a tile's bag. */
+const TRIAL_MEANING = 'trials:pages'
 /** Kept so older callers still resolve. The door is this hive's own origin, not a side port. */
 export const TRY_PAGE_PORT = 4292
 const VERSION_TAIL = /-v([1-9][0-9]*)$/
@@ -94,24 +95,78 @@ export const trialOrigin = (label: string, here?: string): string => {
   return `${page.protocol}//${label}.${trialZone(page.hostname)}${port}`
 }
 
-const read = (): Record<string, string> => {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(KEY) || '{}') as unknown
-    if (!parsed || typeof parsed !== 'object') return {}
-    const out: Record<string, string> = {}
-    for (const [sig, label] of Object.entries(parsed)) {
-      if (SIG.test(sig) && isSandboxLabel(String(label))) out[sig] = String(label)
-    }
-    return out
-  } catch { return {} }
+type TrialLedgerStore = {
+  getPool?(meaning: string): Promise<FileSystemDirectoryHandle | null>
+  getPoolDoc?(pool: FileSystemDirectoryHandle | undefined, subKey?: string): Promise<ArrayBuffer | null>
+  putPoolDoc?(pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string, options?: { keep?: 'versions' | 'current' }): Promise<string | null>
 }
+
+const ledgerStore = (): TrialLedgerStore | undefined => {
+  const holder = globalThis as { window?: { ioc?: { get?: <T>(key: string) => T | undefined } } }
+  return holder.window?.ioc?.get?.<TrialLedgerStore>('@hypercomb.social/Store')
+}
+
+// The trials live in a pool of meaning, one current document. Callers ask
+// synchronously, so the ledger is held here and loaded from the pool the first
+// time it is asked; a load never overwrites what was remembered meanwhile.
+let ledger: Record<string, string> = {}
+let loading: Promise<void> | null = null
+/** Released before the load landed, so the stored copy cannot bring them back. */
+const released = new Set<string>()
+
+const clean = (parsed: unknown): Record<string, string> => {
+  const out: Record<string, string> = {}
+  if (!parsed || typeof parsed !== 'object') return out
+  for (const [sig, label] of Object.entries(parsed)) {
+    if (SIG.test(sig) && isSandboxLabel(String(label))) out[sig] = String(label)
+  }
+  return out
+}
+
+const load = (): void => {
+  if (loading) return
+  const store = ledgerStore()
+  if (!store?.getPool || !store.getPoolDoc) return
+  loading = (async () => {
+    try {
+      const pool = await store.getPool!(TRIAL_MEANING)
+      const bytes = pool ? await store.getPoolDoc!(pool) : null
+      if (!bytes) return
+      const stored = clean(JSON.parse(new TextDecoder().decode(bytes)))
+      for (const sig of released) delete stored[sig]
+      ledger = { ...stored, ...ledger }
+    } catch { /* nothing stored yet */ }
+  })()
+}
+
+const save = (): void => {
+  const store = ledgerStore()
+  if (!store?.getPool || !store.putPoolDoc) return
+  const bytes = new TextEncoder().encode(JSON.stringify(ledger)).buffer as ArrayBuffer
+  void (async () => {
+    try {
+      await loading
+      const pool = await store.getPool!(TRIAL_MEANING)
+      if (pool) await store.putPoolDoc!(pool, bytes, undefined, { keep: 'current' })
+    } catch { /* the resource is still stored */ }
+  })()
+}
+
+const read = (): Record<string, string> => {
+  load()
+  return { ...ledger }
+}
+
+/** Forget every remembered trial in this tab. For tests. */
+export const forgetTrials = (): void => { ledger = {}; loading = null; released.clear() }
 
 /** Remember that this resource is a trial, so the site view will not mount it. */
 export const rememberTrial = (sig: string, label: string): void => {
   if (!SIG.test(sig) || !isSandboxLabel(label)) return
-  const next = read()
-  next[sig] = label
-  try { localStorage.setItem(KEY, JSON.stringify(next)) } catch { /* the resource is still stored */ }
+  load()
+  ledger[sig] = label
+  released.delete(sig)
+  save()
 }
 
 /** The trial label for a page resource, or null when this page runs in the hive. */
@@ -134,9 +189,9 @@ export const pageHome = (): { where: 'localhost' | 'domain'; name: string } => {
  *  click was a person's. */
 export const releaseTrial = (sig: string): boolean => {
   if (!SIG.test(sig) || !trialOf(sig)) return false
-  const next = read()
-  delete next[sig]
-  try { localStorage.setItem(KEY, JSON.stringify(next)) } catch { return false }
+  delete ledger[sig]
+  released.add(sig)
+  save()
   return trialOf(sig) === null
 }
 

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { pageHomeOf, releaseTrial, rememberTrial, stageTrial, trialBase, trialLabel, trialOf, trialOrigin, trialVector, trialVersion, trialVersionLabel, trialZone } from './try-page.js'
+import { forgetTrials, pageHomeOf, releaseTrial, rememberTrial, stageTrial, trialBase, trialLabel, trialOf, trialOrigin, trialVector, trialVersion, trialVersionLabel, trialZone } from './try-page.js'
 
-afterEach(() => localStorage.clear())
+afterEach(() => forgetTrials())
 
 describe('a page trial', () => {
   it('names the door from the tile, as one try- label', () => {
