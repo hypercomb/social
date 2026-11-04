@@ -65,7 +65,7 @@ vi.mock('../commands/decoration-kind-index.js', async (importOriginal) => ({
 
 type Published = { kind: number; sig: string; payload: { visuals?: Record<string, unknown>[] } & Record<string, unknown>; tags: string[][]; at: number }
 const published: Published[] = []
-type MeshEvt = { relay: string; sig: string; event: Record<string, unknown>; payload: unknown }
+type MeshEvt = { relay: string; sig: string; event: Record<string, unknown>; payload: unknown; signed?: boolean }
 const subs = new Map<string, Set<(e: MeshEvt) => void>>()
 
 const mesh = {
@@ -225,7 +225,9 @@ const goTo = async (segments: string[]): Promise<void> => {
 
 const nowSec = (): number => Math.floor(Date.now() / 1000)
 const deliver = (sig: string, event: Record<string, unknown>, payload: unknown): void => {
-  for (const cb of [...(subs.get(sig) ?? [])]) cb({ relay: `wss://${POINT}`, sig, event, payload })
+  // `signed` is the mesh's admission verdict: a sig means it verified there, '' is the relay's will.
+  const signed = String((event as { sig?: unknown })['sig'] ?? '') !== ''
+  for (const cb of [...(subs.get(sig) ?? [])]) cb({ relay: `wss://${POINT}`, sig, event, payload, signed })
 }
 const lifecycle = (pubkey: string, payload: Record<string, unknown>, sig: string, createdSec = nowSec()): void => {
   deliver(LIFE, { kind: 30206, pubkey, created_at: createdSec, sig, tags: [['d', pubkey], ['expiration', String(createdSec + 90)]] }, payload)

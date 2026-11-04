@@ -20,6 +20,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
+import { finalizeEvent } from 'nostr-tools/pure'
 
 const membership = vi.hoisted(() => ({ joined: false }))
 vi.mock('./membership.js', () => ({ isJoinedHere: () => membership.joined }))
@@ -96,6 +97,10 @@ class FakeWebSocket {
 
 let seq = 0
 const PK = 'a'.repeat(64)
+// Inbound fixtures are signed for real (the mesh admits only what verifies);
+// this tab's own sends stay fake-signed — nothing here verifies outbound, and
+// the bulk lanes below send thousands.
+const PEER_SK = new Uint8Array(32).fill(9)
 const services: Record<string, unknown> = {
   '@diamondcoreprocessor.com/NostrSigner': {
     signEvent: async (e: Record<string, unknown>) => ({ ...e, id: (++seq).toString(16).padStart(64, '0'), pubkey: PK, sig: 'f'.repeat(128) }),
@@ -202,7 +207,7 @@ describe('LS-1: a lease closes when it settles', () => {
     ws.open()
     const sig = sigN(9)
     mesh.ensureStartedForSig(sig)
-    ws.receive(['EVENT', subIdOf(ws, sig), { id: 'e'.repeat(64), pubkey: 'b'.repeat(64), created_at: nowSec(), kind: 30200, tags: [['x', sig], ['d', 'p']], content: '{"peer":1}', sig: '0'.repeat(128) }])
+    ws.receive(['EVENT', subIdOf(ws, sig), finalizeEvent({ created_at: nowSec(), kind: 30200, tags: [['x', sig], ['d', 'p']], content: '{"peer":1}' }, PEER_SK)])
     ws.receive(['EOSE', subIdOf(ws, sig)])
     expect(buckets(mesh)).toEqual([])
     expect(mesh.getNonExpired(sig).map(e => e.payload)).toEqual([{ peer: 1 }])
@@ -249,7 +254,7 @@ describe('LS-1: at the subscription cap, the page outranks a lease', () => {
     expect(buckets(mesh).map(b => b.sig)).toEqual([leases[1], leases[2], PAGE])
 
     // probe-c: the explorer's new tile on that page arrives
-    ws.receive(['EVENT', first, { id: '9'.repeat(64), pubkey: 'b'.repeat(64), created_at: nowSec(), kind: 30200, tags: [['x', PAGE], ['d', 'p']], content: '{"probe":"c"}', sig: '0'.repeat(128) }])
+    ws.receive(['EVENT', first, finalizeEvent({ created_at: nowSec(), kind: 30200, tags: [['x', PAGE], ['d', 'p']], content: '{"probe":"c"}' }, PEER_SK)])
     ws.receive(['EOSE', first])
     expect(got).toEqual([{ probe: 'c' }])
     expect(mesh.connectionState().refused).toBeUndefined()

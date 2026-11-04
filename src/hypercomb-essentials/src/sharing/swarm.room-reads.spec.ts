@@ -61,7 +61,7 @@ vi.mock('../commands/decoration-kind-index.js', async (importOriginal) => ({
 
 type Published = { kind: number; sig: string; payload: Record<string, unknown>; tags: string[][]; at: number }
 const published: Published[] = []
-type MeshEvt = { relay: string; sig: string; event: Record<string, unknown>; payload: unknown }
+type MeshEvt = { relay: string; sig: string; event: Record<string, unknown>; payload: unknown; signed?: boolean }
 const subs = new Map<string, Set<(e: MeshEvt) => void>>()
 const mesh = {
   publish: vi.fn(async (kind: number, sig: string, payload: unknown, tags?: string[][]) => {
@@ -144,7 +144,9 @@ const LIFE = sha(`lifecycle\0${roomPreimage(ROOM, SECRET, 'jwize.com')}`)
 const nowSec = (): number => Math.floor(Date.now() / 1000)
 const tick = async (ms = 20): Promise<void> => { await vi.advanceTimersByTimeAsync(ms) }
 const deliver = (sig: string, event: Record<string, unknown>, payload: unknown): void => {
-  for (const cb of [...(subs.get(sig) ?? [])]) cb({ relay: 'wss://jwize.com', sig, event, payload })
+  // `signed` is the mesh's admission verdict: a sig means it verified there, '' is the relay's will.
+  const signed = String((event as { sig?: unknown })['sig'] ?? '') !== ''
+  for (const cb of [...(subs.get(sig) ?? [])]) cb({ relay: 'wss://jwize.com', sig, event, payload, signed })
 }
 const peerLayer = (pubkey: string, visuals: Record<string, unknown>[], createdSec = nowSec(), segments: readonly string[] = state.segments): void => {
   const sig = pageSig(segments)

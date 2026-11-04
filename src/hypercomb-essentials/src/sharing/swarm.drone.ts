@@ -34,7 +34,6 @@ import {
   PEER_MODEL_OFFER_KIND, PEER_MODEL_REPLY_KIND, PEER_MODEL_REQUEST_KIND, SWARM_BEHAVIOR_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_LAYER_KIND,
   SWARM_LIFECYCLE_KIND, SWARM_PRESENCE_KIND, SWARM_RESOURCE_KIND, SWARM_SUBSCRIBE_REQUEST_KIND,
 } from '@hypercomb/core'
-import { verifyEvent } from 'nostr-tools/pure'
 import { readTilePropertiesAt, withoutSubstrateImage } from '../editor/tile-properties.js'
 import { readOrderAt } from '../history/tile-order.js'
 import { sanitizeVisual } from './visual-sanitizer.js'
@@ -447,12 +446,15 @@ interface MeshEvtLike {
     // past their expiration — without this, ghost tiles from past
     // sessions appear for up to PEER_STALE_MS after subscribing.
     created_at?: number
-    // The event's Schnorr signature. EMPTY on the relay's own last-will
-    // tombstone (it cannot sign as the participant) — the one field that
-    // tells "they left" from "their socket died".
     sig?: string
   }
   payload: unknown
+  // The mesh's admission verdict (T2): the signature verified at relay ingress.
+  // FALSE for the relay's own last-will tombstone (it cannot sign as the
+  // participant; the mesh admits that one unsigned thing to mean away) and for
+  // our own pre-sign local fanout. THIS tells "they left" from "their socket
+  // died" — never the sig field, which a forger fills as easily as anyone.
+  signed?: boolean
 }
 
 interface MeshSubLike { close: () => void }
@@ -3613,17 +3615,14 @@ export class SwarmDrone extends Drone {
     // EXPIRY_GRACE_SECS of slack: a device whose own clock runs 90 s slow
     // used to see every fresh event as already expired, and a peer the room
     // could see was invisible to it (clock-skew-zero-tolerance).
+    //
+    // Check 1 is the mesh's now: admission refuses an event whose own
+    // expiration tag is past (T2 — verified once, at ingress, for every kind).
+    // Only the untagged fallback stays here, since it is this channel's TTL.
     if (kind === SWARM_LAYER_KIND || kind === SWARM_HIDE_KIND || kind === SWARM_INTEREST_KIND || kind === SWARM_SUBSCRIBE_REQUEST_KIND || kind === SWARM_PRESENCE_KIND) {
-      const nowSec = this.#nowSec()
       const tags = evt?.event?.tags ?? []
-      const expirationTag = tags.find(t => t[0] === 'expiration')?.[1]
-      if (expirationTag) {
-        const expirationSec = Number(expirationTag)
-        if (Number.isFinite(expirationSec) && expirationSec + EXPIRY_GRACE_SECS <= nowSec) {
-          slog('[swarm] onEvent DROPPED: expired', { kind, fromPubkey: evt?.event?.pubkey?.slice(0,8), expirationSec, nowSec, delta: expirationSec - nowSec })
-          return
-        }
-      } else {
+      if (!tags.find(t => t[0] === 'expiration')?.[1]) {
+        const nowSec = this.#nowSec()
         const createdAt = Number(evt?.event?.created_at ?? 0)
         if (Number.isFinite(createdAt) && createdAt > 0 && createdAt + EVENT_TTL_SECS + EXPIRY_GRACE_SECS < nowSec) {
           slog('[swarm] onEvent DROPPED: stale created_at', { kind, fromPubkey: evt?.event?.pubkey?.slice(0,8), createdAt, nowSec, ageS: nowSec - createdAt })
@@ -4929,8 +4928,9 @@ export class SwarmDrone extends Drone {
 
   /** File an event the relay replayed under OUR key at page `sig`: each full
    *  entry (one with a layerSig) it names, the newest per child. Only from a
-   *  relay (never our local fanout), only while its slot is alive, and only
-   *  when its signature verifies — a relay cannot put words in our mouth.
+   *  relay (never our local fanout) and only while its slot is alive. Its
+   *  signature was verified at the mesh's admission seam (T2) — a relay cannot
+   *  put words in our mouth, and nothing unverified is ever cached there.
    *  A page whose last walk sent names alone is walked again. */
   #noteOwnReplay = (sig: string, evt: MeshEvtLike): void => {
     const event = evt?.event
@@ -4944,7 +4944,6 @@ export class SwarmDrone extends Drone {
     if (expSec > 0 && this.#nowSec() > expSec + EXPIRY_GRACE_SECS) return
     let visuals: unknown
     try {
-      if (!verifyEvent(event as never)) return
       visuals = (JSON.parse(String(event.content ?? '')) as { visuals?: unknown } | null)?.visuals
     } catch { return }
     if (!Array.isArray(visuals)) return
@@ -6836,20 +6835,21 @@ export class SwarmDrone extends Drone {
 
     const createdAtSec = Number(evt.event?.created_at ?? 0)
     if (left) {
-      // UNSIGNED — the relay's last will for a socket that died (it cannot
-      // sign as them): a phone lock, a wifi roam, a reload. That is not the
-      // participant leaving. Mark them AWAY on the roster and keep every
-      // tile they shared until its own slot expires, exactly as the relay
-      // keeps it — a late joiner sees the same room. Their next event of any
-      // kind brings them back.
-      if (!String(evt.event?.sig ?? '')) {
+      // NOT THEIR SIGNED WORD — the relay's last will for a socket that died
+      // (it cannot sign as them): a phone lock, a wifi roam, a reload. That is
+      // not the participant leaving. Mark them AWAY on the roster and keep
+      // every tile they shared until its own slot expires, exactly as the
+      // relay keeps it — a late joiner sees the same room. Their next event of
+      // any kind brings them back. The mesh's verdict decides, never whether
+      // the sig field is filled: a forged tombstone with any sig used to evict.
+      if (evt.signed !== true) {
         if (this.#markAway(pubkey, createdAtSec || this.#nowSec())) this.#scheduleRosterEmit()
         slog('[swarm] lifecycle will — away', { pubkey: pubkey.slice(0, 8) })
         return
       }
-      // SIGNED — their own leave. Drop everything this participant
-      // contributed, at every location, in one shot (evictPubkey walks all
-      // sigs + repaints).
+      // SIGNED AND VERIFIED — their own leave. Drop everything this
+      // participant contributed, at every location, in one shot (evictPubkey
+      // walks all sigs + repaints).
       this.#departedAtSec.set(pubkey, createdAtSec || this.#nowSec())
       this.#participantAliveMs.delete(pubkey)
       this.#awayPubkeys.delete(pubkey)
@@ -6861,18 +6861,14 @@ export class SwarmDrone extends Drone {
       return
     }
 
-    // Alive beacon — refresh identity-level liveness. Drop a beacon that's
-    // already past its own expiration / TTL (on the relay's clock, with
-    // EXPIRY_GRACE_SECS of slack) so a stale relay replay can't resurrect a
-    // departed peer.
+    // Alive beacon — refresh identity-level liveness. A beacon past its own
+    // expiration tag never gets here (the mesh's admission refuses it, on the
+    // relay's clock with EXPIRY_GRACE_SECS of slack); an untagged legacy
+    // beacon past this channel's TTL is dropped here, so a stale relay replay
+    // can't resurrect a departed peer.
     const nowSec = this.#nowSec()
     const expTag = (evt.event?.tags ?? []).find(t => t[0] === 'expiration')?.[1]
-    if (expTag) {
-      const exp = Number(expTag)
-      if (Number.isFinite(exp) && exp + EXPIRY_GRACE_SECS <= nowSec) return
-    } else {
-      if (createdAtSec > 0 && createdAtSec + EVENT_TTL_SECS + EXPIRY_GRACE_SECS < nowSec) return
-    }
+    if (!expTag && createdAtSec > 0 && createdAtSec + EVENT_TTL_SECS + EXPIRY_GRACE_SECS < nowSec) return
     const departedAt = this.#departedAtSec.get(pubkey)
     if (departedAt !== undefined) {
       if (createdAtSec > departedAt) this.#departedAtSec.delete(pubkey)

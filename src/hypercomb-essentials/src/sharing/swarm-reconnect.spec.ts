@@ -54,7 +54,7 @@ vi.mock('../commands/decoration-kind-index.js', async (importOriginal) => ({
 
 type Published = { kind: number; sig: string; payload: Record<string, unknown>; tags: string[][] }
 const published: Published[] = []
-type MeshEvt = { relay: string; sig: string; event: Record<string, unknown>; payload: unknown }
+type MeshEvt = { relay: string; sig: string; event: Record<string, unknown>; payload: unknown; signed?: boolean }
 const subs = new Map<string, Set<(e: MeshEvt) => void>>()
 
 const mesh = {
@@ -155,7 +155,9 @@ const pageSig = (segments: readonly string[]): string => sha(`${lineageKey(segme
 const LIFE = sha(`lifecycle\0${roomPreimage(ROOM, SECRET, 'jwize.com')}`)
 
 const deliver = (sig: string, event: Record<string, unknown>, payload: unknown): void => {
-  for (const cb of [...(subs.get(sig) ?? [])]) cb({ relay: 'wss://jwize.com', sig, event, payload })
+  // `signed` is the mesh's admission verdict: a sig means it verified there, '' is the relay's will.
+  const signed = String((event as { sig?: unknown })['sig'] ?? '') !== ''
+  for (const cb of [...(subs.get(sig) ?? [])]) cb({ relay: 'wss://jwize.com', sig, event, payload, signed })
 }
 const peerLayer = (pubkey: string, name: string, expSec: number, createdSec = nowSec()): void => {
   const sig = pageSig(state.segments)
@@ -250,6 +252,24 @@ describe('reconnect and presence', () => {
     expect(swarm.awayInZone()).not.toContain(PEER)
   })
 
+  it('a tombstone the mesh did not vouch for only marks away, whatever its sig field says', async () => {
+    // Before the admission seam the handler read a FILLED sig as the participant's
+    // own leave; a forged tombstone with any 128 hex evicted them. The mesh's
+    // verdict (`signed`) decides now — a sig field is a claim, not a proof.
+    const PEER = 'd'.repeat(64)
+    peerLayer(PEER, 'vouched-tile', nowSec() + 90)
+    lifecycle(PEER, { alive: true, v: 2 }, SIGNED)
+    await settle()
+    expect(tileNames()).toContain('vouched-tile')
+    const at = nowSec() + 1
+    for (const cb of [...(subs.get(LIFE) ?? [])]) {
+      cb({ relay: 'wss://jwize.com', sig: LIFE, signed: false, payload: { left: true },
+        event: { kind: 30206, pubkey: PEER, created_at: at, sig: SIGNED, tags: [['d', PEER], ['expiration', String(at + 90)]] } })
+    }
+    await settle()
+    expect(tileNames()).toContain('vouched-tile')
+    expect(swarm.awayInZone()).toContain(PEER)
+  })
   it('an entry leaves at its own expiration + 30 s — not before', async () => {
     const PEER = 'c'.repeat(64)
     peerLayer(PEER, 'short-lived', nowSec() + 5)

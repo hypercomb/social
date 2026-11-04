@@ -9,7 +9,10 @@
 // point, is OFFERED (one tap fills the selector's field), never seeded. A
 // host named before is the participant's own: a joined tab dials it at boot
 // (its zone), exactly as fast as ever.
-import { Drone, KIND_FETCH_CANCEL, KIND_FETCH_REQUEST, KIND_FETCH_RESPONSE, SWARM_RESOURCE_KIND } from '@hypercomb/core'
+import { Drone, KIND_FETCH_CANCEL, KIND_FETCH_REQUEST, KIND_FETCH_RESPONSE, SPEAKS_FOR_KINDS, SWARM_LIFECYCLE_KIND, SWARM_RESOURCE_KIND } from '@hypercomb/core'
+// THE ONE PLACE inbound traffic is verified (admit, below). No handler
+// imports these: after admission runtime trusts the heap (T2).
+import { getEventHash, verifyEvent } from 'nostr-tools/pure'
 import { isJoinedHere } from './membership.js'
 
 // The local dev relay (scripts/local-relay.ts). Never a seed: dialled only
@@ -109,7 +112,12 @@ export const NO_DEFAULT_HOST_MARK = 'hc:mesh:no-default-host'
 })
 
 type NostrEvent = { id?: string; pubkey?: string; created_at: number; kind: number; tags: string[][]; content: string; sig?: string }
-type MeshEvt = { relay: string; sig: string; event: NostrEvent; payload: any }
+// signed — the event's Schnorr signature verified at admission (admit). FALSE
+// for the two unsigned things a subscriber can hear: our own pre-sign local
+// fanout, and the relay's last will for a dead socket (a {left:true} lifecycle
+// event with sig ''), which can only ever mean AWAY. A handler that acts on
+// a participant's word (a tombstone evicts) asks this, never the sig field.
+type MeshEvt = { relay: string; sig: string; event: NostrEvent; payload: any; signed: boolean }
 type MeshCb = (e: MeshEvt) => void
 type MeshSub = { close: () => void }
 
@@ -299,6 +307,44 @@ const INFLIGHT_TTL_MS = 60_000
 const RATE_RETRY_MS = [1_000, 2_000, 4_000, 8_000, 15_000]
 const CLOSED_RETRY_CAP_MS = 30_000
 const SEEN_CAP = 1024
+
+// ADMISSION (T2: verify at admission, never at runtime — one seam, at relay
+// ingress, before the cache and the fan-out). What a relay hands us is a
+// claim until it is checked here:
+//   shape       — id and pubkey 64 hex, created_at > 0, tags of strings
+//   future      — created_at past the relay's clock by more than the relay
+//                 itself allows (relay.js FUTURE_SKEW_SECS)
+//   expired     — its own `expiration` tag is past, with the swarm's grace
+//                 for clock skew (swarm.drone.ts EXPIRY_GRACE_SECS); judged
+//                 on the relay's clock (the hc:host card)
+//   speaks-for  — a lifecycle or withheld event whose `d` names another key:
+//                 nobody tombstones, beacons or withholds for someone else
+//   id          — the id is not the hash of the canonical fields
+//   unsigned    — no signature, and not the one unsigned thing a relay may
+//                 say: its last will, {left:true} on the lifecycle kind, which
+//                 is admitted UNSIGNED (MeshEvt.signed = false) and can only
+//                 ever mean away
+//   signature   — the Schnorr signature does not verify for the pubkey
+// Two more outcomes are not refusals but still never reach a subscriber:
+//   self-echo   — an id this tab sent, back from a replay: the cache is
+//                 re-confirmed (query()'s read-back) and nobody hears it twice
+//   replay      — an id this bucket already delivered on this connection
+// Counted by outcome (getDebug().admission); said on the console under
+// hc:verbose=1. Admission comes BEFORE the id dedupe: a forged event carrying
+// a genuine id must not be able to poison `seen` against the genuine one.
+const ADMIT_FUTURE_SECS = 15 * 60
+const ADMIT_GRACE_SECS = 30
+const SENT_IDS_CAP = 4096
+const HEX64 = /^[0-9a-f]{64}$/
+type AdmitReason = 'shape' | 'future' | 'expired' | 'speaks-for' | 'id' | 'unsigned' | 'signature'
+type AdmitOutcome = AdmitReason | 'self-echo' | 'replay'
+export type AdmitVerdict = { ok: true; signed: boolean } | { ok: false; reason: AdmitReason }
+const refused = (reason: AdmitReason): AdmitVerdict => ({ ok: false, reason })
+/** The relay's last will: `{left:true}` and nothing else it could mean. */
+const isWill = (content: string): boolean => {
+  try { const o = JSON.parse(content); return !!o && typeof o === 'object' && o.left === true } catch { return false }
+}
+const verboseOn = (): boolean => { try { return localStorage.getItem('hc:verbose') === '1' } catch { return false } }
 const SLOT_FLOOR_CAP = 4096
 const CLOCK_APPLY_MS = 2_000
 // publish(…, onTaken): callers waiting on a relay's OK, by event id. Bounded —
@@ -432,6 +478,7 @@ type MeshStats = {
   retired: number
   retrySent: number
   rejected: number
+  admitRefused: number
 }
 
 type MeshLog = { atMs: number; type: string; relay?: string; sig?: string; subId?: string; kind?: number; note?: string; data?: any }
@@ -441,7 +488,7 @@ type MeshLog = { atMs: number; type: string; relay?: string; sig?: string; subId
 type RelayBackoff = { attempts: number; nextAtMs: number; timer?: number; accessN?: number; accessUntilMs?: number }
 type SigReadyWaiter = { resolve: () => void; timer?: number }
 
-type CachedItem = { relay: string; sig: string; event: NostrEvent; payload: any; receivedAtMs: number; createdAtMs: number }
+type CachedItem = { relay: string; sig: string; event: NostrEvent; payload: any; receivedAtMs: number; createdAtMs: number; signed: boolean }
 type MeshExpiryRule = {
   id: string
   ttlMs: number
@@ -541,6 +588,11 @@ export class NostrMeshDrone extends Drone {
   #takenWaiters = new Map<string, () => void>()
   #slotFloor = new Map<string, number>()
   #selfPubkey = ''
+  /** Ids this tab sent (publish, sendSigned, re-sends): a relay replay of
+   *  one is a self-echo. Bounded, oldest first out. */
+  #sentIds = new Set<string>()
+  /** Admission outcomes since start, by outcome (getDebug().admission). */
+  #admission = new Map<AdmitOutcome, number>()
 
   // relay clock — from the 'hc:host' card the relay sends as its first frame
   #clockOffsetMs = 0
@@ -942,7 +994,7 @@ export class NostrMeshDrone extends Drone {
       .slice()
       .sort((a, b) => (b.createdAtMs || b.receivedAtMs) - (a.createdAtMs || a.receivedAtMs))
 
-    return sorted.map(i => ({ relay: i.relay, sig: i.sig, event: i.event, payload: i.payload }))
+    return sorted.map(i => ({ relay: i.relay, sig: i.sig, event: i.event, payload: i.payload, signed: i.signed }))
   }
 
   // note: one-shot READ-BACK query.
@@ -1067,6 +1119,7 @@ export class NostrMeshDrone extends Drone {
       bulkHeld: Array.from(this.#bulkHeld.values()).reduce((n, q) => n + q.length, 0),
       hostCard: this.#hostCard ? { ...this.#hostCard } : null,
       stats: { ...this.stats },
+      admission: Object.fromEntries(this.#admission),
       logs: this.logs.slice()
     }
   }
@@ -2332,8 +2385,6 @@ export class NostrMeshDrone extends Drone {
     const evt = msg[2] as NostrEvent | undefined
     if (!subId || !evt) return
 
-    this.#absorbOwn(evt)
-
     const bucket = this.bucketsBySubId.get(subId)
     if (!bucket) {
       this.stats.noBucket++
@@ -2346,34 +2397,112 @@ export class NostrMeshDrone extends Drone {
       if (!this.kinds.includes(Number(evt.kind ?? 0))) return
     }
 
+    // THE ADMISSION SEAM (see ADMIT_FUTURE_SECS). Nothing below this line, and
+    // no subscriber, ever sees an event that did not pass it.
+    const verdict = this.admit(evt)
+    if (!verdict.ok) { this.#account(verdict.reason, relay, bucket, evt); return }
+
+    // Under our own key — our replay, or the relay's will for us — it sets the
+    // floor for its slot. Only once admitted: a forged event under our key
+    // with a far-future created_at would otherwise push every later publish
+    // of ours into the relay's future and have it refused.
+    this.#absorbOwn(evt)
+
+    const id = String(evt.id)
+    // Our own send, back from a replay: the relay's copy re-confirms the cache
+    // (query()'s read-back) and nobody hears it a second time — the local
+    // fanout already said it.
+    if (this.#sentIds.has(id)) {
+      this.cacheItem(relay, bucket.sig, evt, this.parsePayload(evt), verdict.signed)
+      this.resolveReadyWaiters(bucket.sig)
+      this.#account('self-echo', relay, bucket, evt)
+      return
+    }
+
     // note: dedupe by event id within this bucket (across relays)
-    if (evt.id) {
-      const id = String(evt.id)
-      if (bucket.seen.has(id)) {
-        this.stats.dupDrop++
-        return
-      }
-      bucket.seen.add(id)
-      if (bucket.seen.size > SEEN_CAP) {
-        const oldest = bucket.seen.values().next().value
-        if (oldest !== undefined) bucket.seen.delete(oldest)
-      }
+    if (bucket.seen.has(id)) {
+      this.stats.dupDrop++
+      this.#account('replay', relay, bucket, evt)
+      return
+    }
+    bucket.seen.add(id)
+    if (bucket.seen.size > SEEN_CAP) {
+      const oldest = bucket.seen.values().next().value
+      if (oldest !== undefined) bucket.seen.delete(oldest)
     }
 
     const payload = this.parsePayload(evt)
 
     // note: cache first so heartbeat queries see it immediately
-    this.cacheItem(relay, bucket.sig, evt, payload)
+    this.cacheItem(relay, bucket.sig, evt, payload, verdict.signed)
     this.resolveReadyWaiters(bucket.sig)
 
-    const out: MeshEvt = { relay, sig: bucket.sig, event: evt, payload }
+    const out: MeshEvt = { relay, sig: bucket.sig, event: evt, payload, signed: verdict.signed }
 
     for (const cb of bucket.cbs) {
       try { cb(out) } catch { /* ignore */ }
     }
   }
 
-  private cacheItem = (relay: string, sig: string, evt: NostrEvent, payload: any): void => {
+  /** Is this event what it claims to be? The one verification of inbound
+   *  traffic (T2); the EVENT branch above asks it, and so does the content
+   *  broker for the signed events a late-join recovery answer carries. `ok`
+   *  with `signed: false` is the relay's will, admitted to mean away only. */
+  public admit = (evt: NostrEvent | undefined): AdmitVerdict => {
+    if (!evt || typeof evt !== 'object' || Array.isArray(evt)) return refused('shape')
+    const id = String(evt.id ?? '')
+    const pubkey = String(evt.pubkey ?? '')
+    const kind = Number(evt.kind)
+    const createdAt = Number(evt.created_at)
+    if (!HEX64.test(id) || !HEX64.test(pubkey) || !Number.isInteger(kind) || kind < 0
+      || !Number.isFinite(createdAt) || createdAt <= 0 || !Array.isArray(evt.tags) || typeof evt.content !== 'string') return refused('shape')
+    const now = this.nowSec()
+    if (createdAt > now + ADMIT_FUTURE_SECS) return refused('future')
+    const exp = Number(evt.tags.find(t => Array.isArray(t) && t[0] === 'expiration')?.[1])
+    if (Number.isFinite(exp) && exp > 0 && exp + ADMIT_GRACE_SECS <= now) return refused('expired')
+    if (SPEAKS_FOR_KINDS.has(kind)) {
+      const d = evt.tags.find(t => Array.isArray(t) && t[0] === 'd')?.[1]
+      if (String(d ?? '').toLowerCase() !== pubkey) return refused('speaks-for')
+    }
+    // A plain copy of the seven fields: nostr-tools remembers a verdict on the
+    // object it verified, and a caller's object (a fixture, a carried event
+    // spread from another) may carry one. Only the fields are judged.
+    const sig = String(evt.sig ?? '')
+    const plain = { id, pubkey, created_at: createdAt, kind, tags: evt.tags, content: evt.content, sig }
+    let hash = ''
+    try { hash = getEventHash(plain) } catch { return refused('shape') }
+    if (hash !== id) return refused('id')
+    if (!sig) {
+      if (kind !== SWARM_LIFECYCLE_KIND || !isWill(evt.content)) return refused('unsigned')
+      return { ok: true, signed: false }
+    }
+    if (!verifyEvent(plain)) return refused('signature')
+    return { ok: true, signed: true }
+  }
+
+  #account = (outcome: AdmitOutcome, relay: string, bucket: Bucket, evt: NostrEvent): void => {
+    this.#admission.set(outcome, (this.#admission.get(outcome) ?? 0) + 1)
+    if (outcome !== 'self-echo' && outcome !== 'replay') this.stats.admitRefused++
+    const kind = Number(evt?.kind ?? 0)
+    const id = String(evt?.id ?? '').slice(0, 8)
+    const pubkey = String(evt?.pubkey ?? '').slice(0, 8)
+    this.note('in:not-admitted', relay, bucket.sig, bucket.subId, kind, { outcome, id, pubkey })
+    if (outcome !== 'self-echo' && outcome !== 'replay' && verboseOn()) {
+      console.info(`[nostr-mesh] refused (${outcome}): kind ${kind} from ${pubkey} on ${relay} (${id})`)
+    }
+  }
+
+  #noteSent = (id: string): void => {
+    if (!id) return
+    this.#sentIds.delete(id)
+    this.#sentIds.add(id)
+    if (this.#sentIds.size > SENT_IDS_CAP) {
+      const oldest = this.#sentIds.values().next().value
+      if (oldest !== undefined) this.#sentIds.delete(oldest)
+    }
+  }
+
+  private cacheItem = (relay: string, sig: string, evt: NostrEvent, payload: any, signed: boolean): void => {
     const now = Date.now()
     const list = this.itemsBySig.get(sig) ?? []
 
@@ -2385,12 +2514,12 @@ export class NostrMeshDrone extends Drone {
     const id = evt?.id ? String(evt.id) : ''
     const held = id ? list.find(i => i.event?.id === id) : undefined
     if (held) {
-      if (relay !== 'local') { held.relay = relay; held.receivedAtMs = now }
+      if (relay !== 'local') { held.relay = relay; held.receivedAtMs = now; held.signed = held.signed || signed }
       return
     }
 
     const createdAtMs = Number(evt?.created_at ?? 0) > 0 ? Number(evt.created_at) * 1000 : now
-    const item: CachedItem = { relay, sig, event: evt, payload, receivedAtMs: now, createdAtMs }
+    const item: CachedItem = { relay, sig, event: evt, payload, receivedAtMs: now, createdAtMs, signed }
 
     list.push(item)
 
@@ -2537,6 +2666,7 @@ export class NostrMeshDrone extends Drone {
    *  reached a socket is held until that relay's OK (see #onOk). */
   private sendEventToAll = (evt: NostrEvent): boolean => {
     const out = this.#outbound(evt)
+    this.#noteSent(out.id)
 
     this.stats.eventSent++
 
@@ -2981,15 +3111,16 @@ export class NostrMeshDrone extends Drone {
 
   private fanoutToSig = (relay: string, sig: string, evt: NostrEvent): void => {
     // note: always cache local fanout too so heartbeat queries see local publishes
+    // Our own event before the signer saw it: nothing to verify, `signed` false.
     const payload = this.parsePayload(evt)
-    this.cacheItem(relay, sig, evt, payload)
+    this.cacheItem(relay, sig, evt, payload, false)
 
     const bucket = this.bucketsBySig.get(sig)
     if (!bucket || bucket.cbs.size === 0) return
 
     this.stats.localFanout++
 
-    const out: MeshEvt = { relay, sig, event: evt, payload }
+    const out: MeshEvt = { relay, sig, event: evt, payload, signed: false }
 
     for (const cb of bucket.cbs) {
       try { cb(out) } catch { /* ignore */ }
@@ -3278,7 +3409,8 @@ export class NostrMeshDrone extends Drone {
       probeSent: 0,
       retired: 0,
       retrySent: 0,
-      rejected: 0
+      rejected: 0,
+      admitRefused: 0
     }
   }
 
