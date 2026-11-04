@@ -55,5 +55,16 @@ describe('locale catalogs stay UTF-8', () => {
         .map(([key]) => key)
       expect(damaged, `${file} still has ${damaged.length} mojibake string(s)`).toEqual([])
     })
+
+    // A write through a code page that cannot hold the text loses it for good:
+    // every character it cannot encode becomes "?" ("Fr?chte", "3????").
+    // A real question mark never sits doubled or between two Latin letters.
+    it(`${file} has no characters replaced by question marks`, () => {
+      const json = JSON.parse(readFileSync(join(DIR, file), 'utf8')) as Record<string, string>
+      const damaged = Object.entries(json)
+        .filter(([, value]) => typeof value === 'string' && /\?\?|\p{Script=Latin}\?\p{Script=Latin}/u.test(value))
+        .map(([key]) => key)
+      expect(damaged, `${file} has ${damaged.length} string(s) whose characters were replaced by "?"`).toEqual([])
+    })
   }
 })

@@ -2733,7 +2733,7 @@ readonly #readingWatch = effect(() => {
 }
 
 #applyReading(): void {
-  if (!this.routeSideShown() || this.peeking() || this.#steer || this.#routeDrag?.pulling || this.routeHold()) return
+  if (!this.routeSideShown() || this.#steer || this.#routeDrag?.pulling || this.routeHold()) return
   if (this.routePointerInside) return
   const rows = this.rendered(); if (!rows.length) return
   const current = this.routeCurrent()

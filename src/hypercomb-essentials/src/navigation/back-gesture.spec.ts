@@ -68,6 +68,19 @@ const el = (tag = 'div', parent: Element = document.body): Element => {
 }
 
 describe('back gesture', () => {
+  it('lets an exact view return to its own spawn even on an arrival face', () => {
+    viewOwners = ['site-view']
+    const services = (globalThis as unknown as { ioc: { get: (k: string) => unknown } }).ioc
+    const get = services.get
+    services.get = (key: string) => key === '@diamondcoreprocessor.com/ViewBee' ? { isArrivalSurface: () => true } : get(key)
+    const back = vi.fn()
+    const gesture = stand()
+    gesture.register({ owner: 'site-view', back, exact: true } as never)
+    rightClick(el())
+    expect(back).toHaveBeenCalledOnce()
+    expect(navigationBack).not.toHaveBeenCalled()
+  })
+
   it('walks the lineage back when nothing is registered', () => {
     stand()
     expect(rightClick(el())).toBe(true)

@@ -56,8 +56,13 @@
 // included files (the documents and source it explains), for the tiles under
 // the route that have content (blocks/content.cjs). A file's text cannot ride a
 // command line, so this writes one snippet to paste into the hive tab's
-// console: it hands each page and file to the hive's own tile-files door, the
-// one the chat's write block uses. Plant the tiles first; a page needs its tile.
+// console: it stores each page, attaches each file through the hive's own
+// tile-files door, stores every medium its page names (the voice, the clips,
+// the faces, the captured pictures) and checks each lands under the signature
+// the page already names it by, then puts `go` and `website page <sig>` lines
+// on the command line: dressing a tile with its page is the participant's own word,
+// so one Enter says them all (a page a model writes is a trial instead, shown
+// as a door to its sandbox). Plant the tiles first; a page needs its tile.
 // Saying the notes twice files them twice, so re-run with --tiles-only.
 
 const path = require('path')
@@ -96,33 +101,67 @@ if (args.includes('--blocks')) {
   const os = require('os')
   const { buildBlocks } = require('./blocks/build.cjs')
   const under = named ? route : ''
-  const blocks = buildBlocks({ under })
+  const { blocks, media } = buildBlocks({ under })
   if (!blocks.length) { console.error(`no block content under /${under || '(everything)'} yet (blocks/content.cjs)`); process.exit(2) }
   const out = valueOf('--out') || path.join(os.tmpdir(), `living-blocks-${Date.now()}.js`)
-  const snippet = `// Paste into the hive tab's console (F12 → Console). Writes ${blocks.length} pages and their files.
+  // Each medium once, as base64, however many pages name it.
+  const bytes = media.map(m => ({ sig: m.sig, type: m.type, name: m.name, base64: fs.readFileSync(m.path).toString('base64') }))
+  const snippet = `// Paste into the hive tab's console (F12 → Console), then press Enter on the
+// hive's command line when it asks. ${blocks.length} pages, their files, and ${media.length} media.
 (async () => {
-  const door = globalThis.ioc?.get?.('@diamondcoreprocessor.com/TileFilesDrone')
-  if (!door?.write) { console.error('Open this in the hive tab: the tile-files door is not here.'); return }
-  const blocks = ${JSON.stringify(blocks)}
-  let ok = 0, failed = 0
+  const ioc = globalThis.ioc
+  const bus = globalThis.__hypercombEffectBus
+  const store = ioc?.get?.('@hypercomb.social/Store')
+  const door = ioc?.get?.('@diamondcoreprocessor.com/TileFilesDrone')
+  if (!bus || !store?.putResource || !door?.write) { console.error('Open this in the hive tab: the hive is not here.'); return }
+  // Each file's text once, however many tiles carry it.
+  const texts = ${JSON.stringify(Object.fromEntries(blocks.flatMap(b => b.files.map(f => [f.path, f.text]))))}
+  const blocks = ${JSON.stringify(blocks.map(b => ({ route: b.route, page: b.page, files: b.files.map(f => ({ name: f.name, path: f.path })) })))}
+  // 1. The media first, each checked against the signature its pages name
+  //    it by: a page is never dressed while a medium it names is missing.
+  const media = ${JSON.stringify(bytes)}
+  for (const m of media) {
+    const raw = Uint8Array.from(atob(m.base64), c => c.charCodeAt(0))
+    const sig = await store.putResource(new Blob([raw], { type: m.type }))
+    if (sig !== m.sig) { console.error(m.name + ' stored as ' + sig + ', not the ' + m.sig + ' its pages name; no page was dressed.'); return }
+  }
+  console.log('Media: ' + media.length + ' stored.')
+  // 2. Each page's bytes into the hive (nothing is dressed yet), and each
+  //    tile's included files onto it.
+  const lines = []
+  let files = 0, failed = 0
   for (const b of blocks) {
     const at = '/' + b.route.join('/')
-    const page = await door.write({ route: b.route, kind: 'page' }, b.page)
-    if (page.ok) ok++; else { failed++; console.error(at + ' page: ' + page.error); continue }
-    console.log(at + ': page' + (page.unchanged ? ' (unchanged)' : ''))
+    const sig = await store.putResource(new Blob([b.page], { type: 'text/html' }))
+    lines.push('go ' + at, 'website page ' + sig)
     for (const f of b.files) {
-      const file = await door.write({ route: b.route, kind: 'file', name: f.name }, f.text)
-      if (file.ok) ok++; else { failed++; console.error(at + ' ' + f.name + ': ' + file.error) }
+      const file = await door.write({ route: b.route, kind: 'file', name: f.name }, texts[f.path])
+      if (file.ok) files++; else { failed++; console.error(at + ' ' + f.name + ': ' + file.error) }
     }
   }
-  console.log('Done: ' + ok + ' written, ' + failed + ' failed.')
+  // The presentation OPENS AS its pages: one view:default mark on its top
+  // tile, which every tile under it inherits, so walking in shows a page and
+  // walking back up lands on one too (a tile with no face of its own drops
+  // the website view back to hexagons). \`h\` is hexagons for one visit.
+  for (const top of ${JSON.stringify([...new Set(blocks.map(b => b.route[0]))])}) lines.push('go /', 'opens ' + top + ' as website')
+  console.log('Files: ' + files + ' written, ' + failed + ' failed.')
+  // 3. Dressing each tile with its page is YOUR word, website page <sig>: the
+  //    lines wait on the command line, and Enter says them all.
+  const outcome = await new Promise(resolve => bus.emitTransient('external:call', {
+    from: 'living-blocks', lines, accept: () => {}, complete: resolve,
+  }))
+  if (outcome?.kind === 'declined') { console.log('Declined: no tile was given its page.'); return }
+  const missed = (outcome?.results || []).filter(r => !/^ran/i.test(String(r.verdict || '')))
+  console.log('Pages: ' + blocks.length + ' tiles dressed' + (missed.length ? ', ' + missed.length + ' lines did not run:' : '.'))
+  for (const r of missed) console.error(r.text + ' → ' + r.verdict)
 })()
 `
   fs.writeFileSync(out, snippet, 'utf8')
   const files = blocks.reduce((n, b) => n + b.files.length, 0)
-  console.log(`${blocks.length} blocks (${blocks.map(b => b.route.at(-1)).join(', ')}) and ${files} files.`)
+  console.log(`${blocks.length} blocks (${blocks.map(b => b.route.at(-1)).join(', ')}), ${files} files and ${media.length} media (${Math.round(fs.statSync(out).size / 1048576)} MB of snippet).`)
   console.log(`Console snippet: ${out}`)
-  console.log('Open the hive tab, press F12 → Console, paste the file\'s contents, press Enter.')
+  console.log('Open the hive tab, press F12 → Console, paste the file\'s contents, press Enter;')
+  console.log('then press Enter on the hive\'s command line to give each tile its page.')
   process.exit(0)
 }
 
@@ -171,9 +210,11 @@ if (!PUBLISH_ONLY) {
       sentences.push(`go /${at}`, `trait ${tile.children.map(c => c.name).join(' ')}`)
       const old = RETIRE ? retired.markers[at] ?? [] : []
       if (old.length) sentences.push(`trait ~ ${old.join(' ')}`)
-      sentences.push('layout on')
     }
   }
+  // Layouts last, once every layer's tiles exist: `layout on` seats the
+  // named children in the markers' order, and a tile not made yet gets no seat.
+  for (const p of plantings) for (const { at } of p.layers) sentences.push(`go /${at}`, 'layout on')
 }
 if (!TILES_ONLY && !PUBLISH_ONLY) {
   // The earlier planting's notes first, under the routes planted now.

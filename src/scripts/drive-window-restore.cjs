@@ -104,20 +104,6 @@ async function main() {
     ['escape again', async () => { await page.waitForTimeout(300); await page.keyboard.press('Escape') }],
     ['close', () => emit(page, 'chat:close', {})],
   ])
-  await S('chat: open → peek (fold) → close', [
-    ['open', () => emit(page, 'chat:open', {})],
-    ['peek', () => page.click('.chat-peek', { timeout: 3000 }).catch(e => ({ skipped: String(e.message).slice(0, 80) }))],
-    ['close', () => emit(page, 'chat:close', {})],
-  ])
-  // Escape on a folded chat UNFOLDS it (the window's own dismiss, one level);
-  // the press after parks it. Two presses to the hexagons, by design.
-  await S('chat: open → peek → Escape (unfold) → Escape (park) → wait 4s', [
-    ['open', () => emit(page, 'chat:open', {})],
-    ['peek', () => page.click('.chat-peek', { timeout: 3000 }).catch(e => ({ skipped: String(e.message).slice(0, 80) }))],
-    ['escape', () => page.keyboard.press('Escape')],
-    ['escape again', async () => { await page.waitForTimeout(300); await page.keyboard.press('Escape') }],
-    ['wait 4s', () => page.waitForTimeout(4000)],
-  ])
   await S('chat: open → navigate under it → close', [
     ['open', () => emit(page, 'chat:open', {})],
     ['goRaw alpha', () => page.evaluate(() => window.ioc.get('@hypercomb.social/Navigation').goRaw(['alpha']))],
@@ -283,17 +269,18 @@ async function main() {
     ['chat back?', () => expectShowing(page, ['chat-window'])],
     ['chat close', () => emit(page, 'chat:close', {})],
   ])
-  // F6: following a place in an answer shows the place — the chat folds, the
-  // hive is live at the destination, and closing leaves you there.
-  await S('chat: open → follow a place link → folded on the place → close stays', [
+  // Following a place in an answer moves the hive there. The conversation
+  // stays up, and closing leaves you where you went.
+  await S('chat: open → follow a place link → still there after close', [
     ['open', () => emit(page, 'chat:open', {})],
     ['follow alpha', () => followPlace(page, 'alpha')],
-    ['folded on alpha?', () => page.evaluate(() => {
+    ['on alpha, chat still up?', () => page.evaluate(() => {
       const owners = window.ioc.get('@diamondcoreprocessor.com/ModeRegistry').ownersOf('view:active')
       const seg = window.ioc.get('@hypercomb.social/Lineage').explorerSegments()
       const folded = !!document.querySelector('.chat-panel.peeking')
-      return folded && owners.length === 0 && seg.join('/') === 'alpha'
-        ? { folded, seg } : { fail: `folded ${folded}, owners ${JSON.stringify(owners)}, seg ${JSON.stringify(seg)}` }
+      const chatUp = owners.includes('chat-window')
+      return !folded && chatUp && seg.join('/') === 'alpha'
+        ? { seg } : { fail: `folded ${folded}, owners ${JSON.stringify(owners)}, seg ${JSON.stringify(seg)}` }
     })],
     ['close', () => emit(page, 'chat:close', {})],
     ['still on alpha?', () => page.evaluate(() => {
@@ -323,28 +310,6 @@ async function main() {
     ['escape', () => page.keyboard.press('Escape')],
     ['escape again', async () => { await page.waitForTimeout(300); await page.keyboard.press('Escape') }],
     ['close', () => emit(page, 'chat:close', {})],
-  ])
-  await S('chat: open → peek → Escape → Escape (back) → close  [recovery]', [
-    ['open', () => emit(page, 'chat:open', {})],
-    ['peek', () => page.click('.chat-peek', { timeout: 3000 }).catch(e => ({ skipped: String(e.message).slice(0, 80) }))],
-    ['escape', () => page.keyboard.press('Escape')],
-    ['escape again', async () => { await page.waitForTimeout(300); await page.keyboard.press('Escape') }],
-    ['close', () => emit(page, 'chat:close', {})],
-  ])
-  await S('chat: open → peek → Escape → chat:open → chat:close  [recovery via door]', [
-    ['open', () => emit(page, 'chat:open', {})],
-    ['peek', () => page.click('.chat-peek', { timeout: 3000 }).catch(e => ({ skipped: String(e.message).slice(0, 80) }))],
-    ['escape', () => page.keyboard.press('Escape')],
-    ['wait 4s', () => page.waitForTimeout(4000)],
-    ['open again', () => emit(page, 'chat:open', {})],
-    ['close', () => emit(page, 'chat:close', {})],
-  ])
-  await S('chat: open → peek → blur (click hive) → Escape → wait 4s', [
-    ['open', () => emit(page, 'chat:open', {})],
-    ['peek', () => page.click('.chat-peek', { timeout: 3000 }).catch(e => ({ skipped: String(e.message).slice(0, 80) }))],
-    ['blur to body', () => page.evaluate(() => { document.activeElement?.blur?.() })],
-    ['escape', () => page.keyboard.press('Escape')],
-    ['wait 4s', () => page.waitForTimeout(4000)],
   ])
   await S('notes: open → focus composer → Escape → wait 4s', [
     ['open', () => emit(page, 'notes:panel', { visible: true })],

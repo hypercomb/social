@@ -52,6 +52,11 @@ const cmd = (direction: QuickMenuSlot['direction'], label: string, command: stri
 const key = (direction: QuickMenuSlot['direction'], label: string, command: string, labelKey: string): QuickMenuSlot =>
   ({ direction, label, labelKey, action: { kind: 'effect', effect: 'keymap:invoke', payload: { cmd: command } } })
 
+// A verb that acts on tiles. It is handed the tiles the menu was raised over
+// when it fires (quick-menu.operands.ts), so it never reads a selection the
+// participant is not looking at.
+const onTile = (slot: QuickMenuSlot): QuickMenuSlot => ({ ...slot, onTile: true })
+
 const group = (direction: QuickMenuSlot['direction'], label: string, menu: string): QuickMenuSlot =>
   ({ direction, label, action: { kind: 'menu', menu } })
 
@@ -187,9 +192,9 @@ const SELECTION_EDIT: QuickMenuDefinition = {
   contexts: [],
   slots: [
     // The selection onto the shelf: a reference, never a cut (codex A9).
-    { direction: 'east', label: 'shelf', labelKey: 'quickmenu.shelf', action: { kind: 'effect', effect: 'shelf:take-selection', payload: {} } },
-    cmd('northwest', 'remove', 'remove', 'quickmenu.remove'),
-    cmd('northeast', 'hide', 'hide'),
+    onTile({ direction: 'east', label: 'shelf', labelKey: 'quickmenu.shelf', action: { kind: 'effect', effect: 'shelf:take-selection', payload: {} } }),
+    onTile(cmd('northwest', 'remove', 'remove', 'quickmenu.remove')),
+    onTile(cmd('northeast', 'hide', 'hide')),
   ],
 }
 
@@ -198,9 +203,9 @@ const SELECTION_ORGANIZE: QuickMenuDefinition = {
   title: 'Organize',
   contexts: [],
   slots: [
-    cmd('east', 'tags', 'tags', 'quickmenu.tags'),
+    onTile(cmd('east', 'tags', 'tags', 'quickmenu.tags')),
     cmd('southeast', 'arrange', 'arrange'),
-    cmd('southwest', 'groups', 'groups'),
+    onTile(cmd('southwest', 'groups', 'groups')),
     { direction: 'west', label: 'all', labelKey: 'quickmenu.all', action: { kind: 'effect', effect: 'select:all', payload: {} } },
     { direction: 'northeast', label: 'done', labelKey: 'quickmenu.done', action: { kind: 'effect', effect: 'select:done', payload: {} } },
   ],
@@ -239,7 +244,7 @@ const SELECTION_SHARE: QuickMenuDefinition = {
   slots: [
     cmd('east', 'publish', 'publish'),
     cmd('southwest', 'keys', 'keys'),
-    cmd('west', 'invite', 'invite'),
+    onTile(cmd('west', 'invite', 'invite')),
     cmd('northwest', 'follow', 'follow'),
     cmd('northeast', 'republish', 'republish'),
   ],
