@@ -25,7 +25,7 @@ import type { QuickMenuLayer } from './quick-menu.layer.js'
 import type { QuickMenuRegistry } from './quick-menu-registry.service.js'
 import { fireQuickMenuSlot } from './quick-menu.fire.js'
 import { QuickMenuGuide, guideFor } from './quick-menu.guide.js'
-import { currentOperands, swarmMenu } from './quick-menu.operands.js'
+import { MANY_TILES_MENU, currentOperands, swarmMenu } from './quick-menu.operands.js'
 import { aimLive } from './quick-menu.tile-menu.js'
 import { NO_SEATS, applyTileSeats, readTileSeats, seatMenu, type TileSeats } from './quick-menu.traits.js'
 import {
@@ -148,7 +148,9 @@ export class QuickMenuFlight {
     const at = this.#layer.centreLocal()
     if (!at) { this.#active = false; return false }
     this.#levels = [{ definition, back: null, at }]
-    this.#readSeats(definition, subject)
+    // Many tiles share one ring: no single tile's own seats may stand in for a
+    // verb that is meant for all of them.
+    if (definition.name !== MANY_TILES_MENU) this.#readSeats(definition, subject)
 
     this.#virtual = this.#screenCentreClient()
     this.#showCursor()

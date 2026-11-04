@@ -9,7 +9,7 @@ import { resolveLocalResourceReference } from './local-resource-reference.js'
 import { readThumbnail, type ThumbnailStore } from './thumbnails.js'
 import { HexImageAtlas } from '../grid/hex-image.atlas.js'
 import { HexSdfTextureShader, FLOWER_BLOOM_DONE } from '../grid/hex-sdf.shader.js'
-import { BLOOM_TOTAL_MS, FLOWER_CLOCK_PERIOD_S, FLOWER_INDEX_BASE, flowerRingKey, flowerSlots } from './flower-motion.js'
+import { BLOOM_TOTAL_MS, FLOWER_CLOCK_PERIOD_S, FLOWER_INDEX_BASE, flowerRingKey, flowerSlots, manyHoneyMode, pouredInHoney } from './flower-motion.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../grid/hex-geometry.js'
 import { TILE_PROPERTIES_SLOT_DECLARATION, isSignature, readCellProperties, cellLocationSig, readTilePropertiesAt, readTilePropsSigAt, readTilePropsIndex, writeTilePropsIndex, recoverableTileImageSig, seedLayerKeyedEntries } from '../../editor/tile-properties.js'
 import { readOrderAt, registerSeatChooser, type OrderChanges } from '../../history/tile-order.js'
@@ -160,7 +160,8 @@ type FlowerCell = {
   q: number
   r: number
   label: string
-  /** The tile being worked on: it keeps its own picture, rim and name. */
+  /** The tile being worked on: it keeps its own picture, rim and name, unless
+   *  it stands for many tiles (`many`). */
   subject?: boolean
   lit?: boolean
   /** An option of the quick menu, poured in honey. Opt-in, so a flower painted
@@ -174,6 +175,10 @@ type FlowerCell = {
   icon?: string
   /** Which of the quick menu's crafted backgrounds an option wears, 0..9. */
   art?: number
+  /** The subject stands for this many tiles (2 or more): it is the stack, plain
+   *  honey with no picture (never the subject's own, never a crafted one), so it
+   *  reads as unlike both an option and the way back. Still slot 0: no bloom. */
+  many?: number
 }
 
 /** The quick menu's crafted backgrounds, drawn once at warm (quickmenu/
@@ -11624,12 +11629,16 @@ export class ShowCellDrone extends Drone {
     // tile is the static honey (5), whose frozen pose is the complete picture.
     const still = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
     const cells: Cell[] = input.map((f) => {
-      const own = f.subject ? this.renderedCells.get(f.label) : undefined
+      // The many-tiles stack is not the subject's tile: none of its picture,
+      // rim or branch, and plain honey (never a crafted picture) in its place.
+      const stack = f.subject && pouredInHoney(f)
+      const own = f.subject && !stack ? this.renderedCells.get(f.label) : undefined
       return {
         q: f.q, r: f.r, label: f.label, external: false, imageSig: own?.imageSig,
         hasBranch: own?.hasBranch ?? false, hideText: own?.hideText ?? false, heat: 0,
         borderColor: f.lit ? this.#accentColor : own?.borderColor,
         ...(f.honey && !f.subject ? { honeyMode: honeyModeOf(f, still) } : {}),
+        ...(stack ? { honeyMode: manyHoneyMode(f.lit) } : {}),
         ...(f.honey && !f.subject && !f.back && this.#honeyArtReady(f.art) ? { honeyArt: f.art } : {}),
       }
     })

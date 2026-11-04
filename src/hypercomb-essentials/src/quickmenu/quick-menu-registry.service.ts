@@ -28,6 +28,7 @@
 // IoC key: @diamondcoreprocessor.com/QuickMenuRegistry
 
 import { I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { MANY_TILES_MENU } from './quick-menu.operands.js'
 import type { QuickMenuDefinition, QuickMenuSlot } from './quick-menu.types.js'
 
 const get = <T,>(key: string): T | undefined =>
@@ -217,6 +218,34 @@ const SELECTION_EDIT: QuickMenuDefinition = {
   ],
 }
 
+// Two or more tiles at once. The selection ring above is built round ONE tile
+// (select it, then walk into a group); once the verbs will reach a set, the
+// ring holds only what is worth doing to every one of them, each a single
+// flick with no group to walk into. There is no centre slot: on the hive the
+// middle is the stack of tiles with its count (quick-menu.layer.ts), the
+// subject of every verb, never an option of its own.
+//
+// Images on east, the easiest flick, because it is the act a fresh set of
+// tiles most often wants. Remove sits alone at southwest with west left empty,
+// so the one verb that cannot be undone at a glance is never a near miss for
+// another. Every slot is onTile: the operands become the selection before the
+// word runs, so `images` and `comfy each` read exactly the tiles shown.
+const SELECTION_MANY: QuickMenuDefinition = {
+  name: MANY_TILES_MENU,
+  title: 'Tiles',
+  titleKey: 'quickmenu.tiles',
+  contexts: [],
+  slots: [
+    // the image wall, one tile at a time (sharing/image-choice.drone.ts)
+    onTile({ ...cmd('east', 'images', 'images', 'quickmenu.images'), icon: 'photo_library' }),
+    // one picture per tile, each prompted by that tile's own name
+    onTile({ direction: 'northeast', label: 'generate', labelKey: 'quickmenu.generate', icon: 'auto_awesome', action: { kind: 'command', command: 'comfy', args: 'each' } }),
+    onTile({ direction: 'southeast', label: 'shelf', labelKey: 'quickmenu.shelf', icon: 'bookmark', action: { kind: 'effect', effect: 'shelf:take-selection', payload: {} } }),
+    onTile({ ...cmd('northwest', 'hide', 'hide'), icon: 'visibility_off' }),
+    onTile({ ...cmd('southwest', 'remove', 'remove', 'quickmenu.remove'), icon: 'delete' }),
+  ],
+}
+
 const SELECTION_ORGANIZE: QuickMenuDefinition = {
   name: 'selection:organize',
   title: 'Organize',
@@ -274,7 +303,7 @@ export class QuickMenuRegistry extends EventTarget {
 
   constructor() {
     super()
-    for (const definition of [ROOT, ROOT_VIEW, WORKFLOW, WEBSITE, SLIDES, SELECTION, SELECTION_TILE, SELECTION_EDIT, SELECTION_ORGANIZE, SELECTION_VIEW, SELECTION_GO, SELECTION_SHARE]) {
+    for (const definition of [ROOT, ROOT_VIEW, WORKFLOW, WEBSITE, SLIDES, SELECTION, SELECTION_MANY, SELECTION_TILE, SELECTION_EDIT, SELECTION_ORGANIZE, SELECTION_VIEW, SELECTION_GO, SELECTION_SHARE]) {
       this.#definitions.set(definition.name, definition)
     }
   }

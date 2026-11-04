@@ -41,6 +41,8 @@ const NAMES = [
   'select_all', 'edit', 'category', 'hub', 'search', 'explore', 'share', 'cloud_upload',
   'sync', 'key', 'person_add', 'notifications', 'visibility_off', 'delete', 'bookmark',
   'arrow_back', 'close', 'more_horiz', 'tips_and_updates',
+  // the many-tiles ring (selection:many): its centre stack, images and generate
+  'hive', 'photo_library', 'auto_awesome',
 ]
 
 // ── woff2 container ────────────────────────────────────────────────────

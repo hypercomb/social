@@ -40,7 +40,7 @@ import type { Application, Container } from 'pixi.js'
 import { DEFAULT_HEX_GEOMETRY, type HexGeometry } from '../grid/hex-geometry.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import { TILE_STACK_DEPTHS, type TileStackDepths } from './tile-stack.js'
-import { BLOOM, BLOOM_EASE_CSS, BLOOM_TOTAL_MS, bloomDelayMs, flowerRingKey, flowerSlots } from './flower-motion.js'
+import { BLOOM, BLOOM_EASE_CSS, BLOOM_TOTAL_MS, bloomDelayMs, flowerRingKey, flowerSlots, pouredInHoney } from './flower-motion.js'
 
 type Axial = { q: number; r: number }
 type CellCountPayload = { count: number; labels: string[]; coords: Axial[] }
@@ -48,7 +48,19 @@ type BandRowsPayload = { rows: number; label: string | null }
 type HoverPayload = { label: string | null }
 /** What a dive's name needs (show-cell's DiveCell). */
 type DiveNameCell = { q: number; r: number; label: string; hideText?: boolean }
-type FlowerCell = Axial & { label: string; subject?: boolean; icon?: string; lit?: boolean; note?: string; honey?: boolean; back?: boolean }
+/** `many`: the subject stands for that many tiles and is the stack: its word is
+ *  `N tiles`, never the subject's name (quickmenu/quick-menu.layer.ts FlowerCell). */
+type FlowerCell = Axial & { label: string; subject?: boolean; icon?: string; lit?: boolean; note?: string; honey?: boolean; back?: boolean; many?: number }
+type I18nLike = { t?: (key: string, params?: Record<string, unknown>) => string }
+
+/** The stack's word, `3 tiles`. Restated from quickmenu/quick-menu.operands.ts
+ *  (manyTilesWord) so the name layer never loads the ring's module. */
+function manyTilesWord(count: number): string {
+  const i18n = (globalThis as { ioc?: { get?: (k: string) => I18nLike | undefined } }).ioc?.get?.('@hypercomb.social/I18n')
+  const key = 'quickmenu.many-tiles'
+  const said = i18n?.t?.(key, { count })
+  return said && said !== key && !said.startsWith(`${key}.`) ? said : `${count} tiles`
+}
 type ShowCellLike = {
   nameHidden(label: string): boolean
   displayNameFor(label: string): string
@@ -182,7 +194,7 @@ export class TileNameDrone extends Drone {
     'render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:geometry-changed',
     'render:set-orientation', 'render:set-pivot', 'render:set-text-only', 'tile:toggle-text',
     'tile:hover', 'overlay:band-rows', 'render:big-head-mode', 'render:name-visibility', 'render:set-hive-visible', 'render:dive', 'render:dive-painted', 'render:flower',
-    TILE_STACK_DEPTHS, 'location:changed',
+    'quick-menu:many-centre', TILE_STACK_DEPTHS, 'location:changed',
   ]
   protected override emits: string[] = ['tile-names:dom']
 
@@ -202,6 +214,11 @@ export class TileNameDrone extends Drone {
   #flowerSpans: HTMLSpanElement[] = []
   /** The honey options' glyphs among them: dropped when the tile is too small to hold one. */
   #flowerIcons: HTMLSpanElement[] = []
+  /** The cell under the quick menu's in-place many-tiles stack, or null. That
+   *  ring is drawn by the menu's own Pixi layer, not by a flower, so the stack
+   *  says where it lies (quick-menu:many-centre) and the tile's own name steps
+   *  aside, as it does under a flower, rather than sit on top of "N tiles". */
+  #manyCentre: Axial | null = null
   /** The ring that last bloomed ('' none), and when (performance.now): a
    *  highlight repaints the names but never blooms them again. */
   #flowerRing = ''
@@ -265,6 +282,11 @@ export class TileNameDrone extends Drone {
       this.#syncRoot()
     })
     this.onEffect<{ cells?: FlowerCell[] | null }>('render:flower', (p) => this.#setFlower(p?.cells ?? []))
+    this.onEffect<{ cell?: Axial | null }>('quick-menu:many-centre', (p) => {
+      const cell = p?.cell
+      this.#manyCentre = cell && typeof cell.q === 'number' && typeof cell.r === 'number' ? { q: cell.q, r: cell.r } : null
+      this.#refreshAll()
+    })
     this.onEffect<HoverPayload>('tile:hover', (p) => { this.#hovered = p?.label ?? null; this.#refreshAll() })
     // Depths belong to a page: arriving somewhere else drops them, so a count
     // from the last page never lands on a same-named tile of this one.
@@ -387,7 +409,7 @@ export class TileNameDrone extends Drone {
   #setFlower(cells: FlowerCell[]): void {
     // Read once, before any span is added or removed, so the style is clean: the
     // word measure below must not ask for it again after each appended span.
-    const family = cells.some(c => c.honey && !c.subject) ? this.#nameFamily() : FONT_STACK
+    const family = cells.some(pouredInHoney) ? this.#nameFamily() : FONT_STACK
     this.#flower = cells
     for (const span of this.#flowerSpans) span.remove()
     this.#flowerSpans = []
@@ -435,7 +457,7 @@ export class TileNameDrone extends Drone {
 
   /** One flower tile's names. */
   #flowerCell(cell: FlowerCell, family: string, sc: ShowCellLike | null): void {
-    if (cell.honey && !cell.subject) { this.#honeyName(cell, family); return }
+    if (pouredInHoney(cell)) { this.#honeyName(cell, family); return }
     // A name the tile keeps to itself stays unwritten, but the note says how
     // many tiles the menu speaks for and must always be read.
     const nameless = !!cell.subject && !!sc?.nameHidden(cell.label)
@@ -494,13 +516,15 @@ export class TileNameDrone extends Drone {
       set(span, HONEY_ICON_Y_R, HONEY_ICON_R * R)
       this.#flowerIcons.push(span)
     }
-    if (cell.label) {
+    // The stack says how many it is; its label is the subject's, kept for the ring.
+    const text = (cell.many ?? 0) >= 2 ? manyTilesWord(cell.many!) : cell.label
+    if (text) {
       const span = document.createElement('span')
       const word = document.createElement('span')
       word.className = 'hc-tile-name-text'
-      word.textContent = cell.label
+      word.textContent = text
       span.appendChild(word)
-      set(span, textOnly ? HONEY_TEXT_ONLY_Y_R : HONEY_LABEL_Y_R, this.#honeyLabelEm(cell.label, R, family, textOnly))
+      set(span, textOnly ? HONEY_TEXT_ONLY_Y_R : HONEY_LABEL_Y_R, this.#honeyLabelEm(text, R, family, textOnly))
     }
   }
 
@@ -627,7 +651,9 @@ export class TileNameDrone extends Drone {
     if (holders.textContent !== count) holders.textContent = count
     if (holders.hidden !== !count) holders.hidden = !count
 
+    const stack = this.#manyCentre
     const covered = this.#flower.some(c => c.q === axial.q && c.r === axial.r)
+      || (!!stack && stack.q === axial.q && stack.r === axial.r)
     const hidden = covered || (!!sc && (sc.shaderDrawsName(label) || sc.nameHidden(label)))
     if (span.hidden !== hidden) span.hidden = hidden
     if (hidden) return

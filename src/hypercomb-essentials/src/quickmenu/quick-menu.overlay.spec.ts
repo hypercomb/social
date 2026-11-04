@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QuickMenuRegistry } from './quick-menu-registry.service.js'
 import { QuickMenuOverlay } from './quick-menu.overlay.js'
 import {
-  HONEY, LAYOUT, SHEEN, backIcon, backgroundFor, bloomDelayMs, cancelIcon, emptyIcon, HONEY_STYLE_ID, motionFor,
+  HONEY, LAYOUT, SHEEN, backIcon, backgroundFor, bloomDelayMs, cancelIcon, emptyIcon, HONEY_STYLE_ID, manyIcon, motionFor,
   sheenDelayS, sheenZones,
 } from './quick-menu.honey.js'
 import type { HoneyArt } from './quick-menu.honey-art.js'
@@ -404,6 +404,34 @@ describe('states', () => {
     overlay.paint(ROOT, { x: 300, y: 300 }, null, labelOf, 'back')
     expect(part(g, 'text').textContent).toBe('command')
     expect(iconShown(g)).toBe(true)
+  })
+
+  it('THE MANY-TILES RING draws the stack in its middle: the hive glyph, the count, never lit', () => {
+    const many = registry.byName('selection:many') as QuickMenuDefinition
+    const svg = paint(many)
+    // six cells: the five verbs and the stack the definition does not declare
+    expect(slotGroups(svg)).toHaveLength(6)
+    overlay.setCentreMany(3)
+    const g = slot(svg, '3 tiles')
+    expect(iconShown(g)).toBe(true)
+    expect(part(g, '.hc-qm-ico path').getAttribute('d')).toBe(iconPath(manyIcon))
+    // the middle is where the pointer rests, and the stack still never lights
+    overlay.highlight('centre')
+    expect(isLit(g)).toBe(false)
+    expect(running(g)).toBe(false)
+    // leaving the dead zone makes it the way out, and coming home the stack again
+    overlay.setCancelArmed(true)
+    expect(part(g, 'text').textContent).toBe('cancel')
+    overlay.setCancelArmed(false)
+    expect(part(g, 'text').textContent).toBe('3 tiles')
+    // the next summon starts from the built middle
+    overlay.paint(many, { x: 300, y: 300 }, null, labelOf, 'back')
+    expect(part(g, 'text').textContent).toBe('tiles')
+  })
+
+  it('no other ring gains a middle it did not declare', () => {
+    const edit = registry.byName('selection:edit') as QuickMenuDefinition
+    expect(slotGroups(paint(edit))).toHaveLength(edit.slots.length)
   })
 })
 

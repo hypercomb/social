@@ -256,3 +256,65 @@ describe('the names bloom with their tiles when a ring opens (flower-motion.ts)'
     expect(css).toContain('@media (prefers-reduced-motion:reduce)')
   })
 })
+
+describe('the many-tiles stack in the middle', () => {
+  const stack = { q: 0, r: 0, label: 'sunrise', subject: true, many: 3, honey: true, icon: 'hive' }
+
+  it('is poured like an option: the hive glyph above, the count below, never the subject\'s name', () => {
+    flower([stack])
+    expect(spans()).toHaveLength(2)
+    for (const span of spans()) expect(span.classList.contains('hc-honey')).toBe(true)
+    expect(iconSpan()!.querySelector('.hc-flower-icon')!.textContent).toBe('hive')
+    expect(wordSpan()!.querySelector('.hc-tile-name-text')!.textContent).toBe('3 tiles')
+    expect(document.body.textContent).not.toContain('sunrise')
+  })
+
+  it('says the count in the catalog\'s words when there is one', () => {
+    services.set('@hypercomb.social/I18n', { t: (k: string, p?: { count?: number }) => (k === 'quickmenu.many-tiles' ? `タイル ${p?.count} 枚` : k) })
+    flower([stack])
+    expect(wordSpan()!.querySelector('.hc-tile-name-text')!.textContent).toBe('タイル 3 枚')
+  })
+
+  it('never blooms: it is the subject, already on screen', () => {
+    flower([stack, { q: 1, r: 0, label: 'images', icon: 'photo_library', honey: true }])
+    const mine = spans().filter(s => s.textContent === '3 tiles' || s.textContent === 'hive')
+    expect(mine).toHaveLength(2)
+    for (const span of mine) expect(span.classList.contains('hc-bloom')).toBe(false)
+  })
+
+  it('a subject standing for one tile keeps its own name and note, as before', () => {
+    flower([{ q: 0, r: 0, label: 'sunrise', subject: true, note: '+1' }])
+    expect(spans()).toHaveLength(1)
+    expect(spans()[0].classList.contains('hc-honey')).toBe(false)
+    expect(spans()[0].textContent).toBe('sunrise+1')
+  })
+})
+
+describe("the in-place many-tiles stack covers the hovered tile's own name", () => {
+  // The ring drawn in place (no flight could run) is the quick menu's own Pixi
+  // layer, not a flower, so it says where its stack lies and that tile's DOM
+  // name steps aside rather than sit on top of "N tiles".
+  const nameOf = (label: string): HTMLElement =>
+    [...document.querySelectorAll<HTMLElement>('.hc-tile-names-world > span')]
+      .find(s => s.querySelector('.hc-tile-name-text')?.textContent === label)!
+
+  beforeEach(() => {
+    EffectBus.emit('render:cell-count', { count: 2, labels: ['sunrise', 'dusk'], coords: [{ q: 0, r: 0 }, { q: 1, r: 0 }] })
+  })
+
+  it("the stacked tile's name is hidden while the stack is there, and back after", () => {
+    expect(nameOf('sunrise').hidden).toBe(false)
+    EffectBus.emit('quick-menu:many-centre', { cell: { q: 0, r: 0 } })
+    expect(nameOf('sunrise').hidden).toBe(true)
+    expect(nameOf('dusk').hidden).toBe(false)
+    EffectBus.emit('quick-menu:many-centre', { cell: null })
+    expect(nameOf('sunrise').hidden).toBe(false)
+  })
+
+  it('the stack moving on frees the tile it left', () => {
+    EffectBus.emit('quick-menu:many-centre', { cell: { q: 0, r: 0 } })
+    EffectBus.emit('quick-menu:many-centre', { cell: { q: 1, r: 0 } })
+    expect(nameOf('sunrise').hidden).toBe(false)
+    expect(nameOf('dusk').hidden).toBe(true)
+  })
+})

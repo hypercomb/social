@@ -23,6 +23,15 @@
 // A cross-host picture is a POINTER until clicked: its bytes are pulled for the
 // preview, and again, as a guarantee, before anything is written. One nobody can
 // serve paints as a labelled hex that refuses to be picked.
+//
+// MANY TILES, ONE AT A TIME. `images:open` may carry `labels` — the selected
+// tiles, in selection order — and the wall then opens for each in turn
+// (image-queue.ts). Choosing a picture moves on to the next tile; so does the
+// SKIP tile at the end of the wall (or →). The caption counts "2 of 5 — name".
+// Leaving the wall any other way (Esc, empty space, navigating, the window
+// losing focus) ends the queue. Every step is said as `images:queue`, so the
+// selection shelf can mark the tiles already answered. A single label is the
+// wall exactly as it always was: no skip tile, no counter.
 
 import {
   Drone,
@@ -41,6 +50,7 @@ import { fetchThroughContentHop, terminalContentSig } from '../presentation/tile
 import { canonicalPeerImageCandidates, type PeerImageCandidate, type PeerImageProps } from './peer-images.js'
 import { imageChoiceWriteTargets } from './image-choice-targets.js'
 import { markSeen, unseenNow } from './image-updates.js'
+import { ImageQueue } from './image-queue.js'
 import { readThumbnail, type ThumbnailStore } from '../presentation/tiles/thumbnails.js'
 import { FILL_HEX_R, divideBySheet, fillFrame, readFillSheet, type FillDivision } from '../presentation/tiles/fill-sprite.js'
 
@@ -59,6 +69,8 @@ type Choice = {
   held: boolean
   /** Offered by a domain and not yet shown to this participant — the reason a badge was raised. */
   fresh?: boolean
+  /** Not a picture: the queue's skip tile, which moves on to the next tile. */
+  skip?: boolean
   /** The stand-in tile shown while hosts and the swarm are still answering. */
   pending?: boolean
 }
@@ -136,6 +148,9 @@ export class ImageChoiceDrone extends Drone {
    *  a cell-count from anywhere else means the participant navigated away. */
   #open_ = false
   #openedAt = ''
+  /** The tiles still to dress when many were asked for at once. Survives the
+   *  #close every #open begins with; only leaving the wall ends it. */
+  #queue = new ImageQueue()
 
   #textures = new Map<string, Texture | null>()
   #inflight = new Set<string>()
@@ -151,7 +166,7 @@ export class ImageChoiceDrone extends Drone {
     'render:host-ready', 'render:mesh-offset', 'render:geometry-changed',
     'render:set-orientation', 'images:open', 'render:cell-count',
   ]
-  protected override emits = ['render:set-hive-visible', 'tile:hover', 'caption:show', 'caption:clear', 'tile:saved', 'toast:show', 'thumbnail:wanted']
+  protected override emits = ['render:set-hive-visible', 'tile:hover', 'caption:show', 'caption:clear', 'tile:saved', 'toast:show', 'thumbnail:wanted', 'images:queue']
 
   #wired = false
 
@@ -172,16 +187,26 @@ export class ImageChoiceDrone extends Drone {
     })
     this.onEffect<{ flat?: boolean }>('render:set-orientation', (p) => { this.#flat = !!p?.flat })
 
-    this.onEffect<{ label?: string; segments?: readonly string[] }>('images:open', (payload) => {
-      const label = String(payload?.label ?? '').trim()
+    this.onEffect<{ label?: string; labels?: readonly string[]; segments?: readonly string[] }>('images:open', (payload) => {
+      const segments = payload?.segments ?? []
+      // Two or more tiles: the wall opens for each in turn. One is today's wall.
+      const labels = Array.isArray(payload?.labels) ? payload.labels : []
+      if (new Set(labels.map(l => String(l ?? '').trim()).filter(Boolean)).size > 1) {
+        const first = this.#queue.start(labels, segments)
+        this.#emitQueue()
+        if (first) void this.#open(first, this.#queue.segments)
+        return
+      }
+      const label = String(payload?.label ?? labels[0] ?? '').trim()
       if (!label) return
-      void this.#open(label, payload?.segments ?? [])
+      this.#endQueue()                          // a plain open is not part of a queue
+      void this.#open(label, segments)
     })
 
     // A layer landing under the wall: back out ONLY when it is a different PLACE.
     this.onEffect('render:cell-count', () => {
       if (!this.#layer && !this.#open_) return
-      if (this.#locationKey() !== this.#openedAt) this.#close()
+      if (this.#locationKey() !== this.#openedAt) { this.#close(); this.#endQueue() }
     })
 
     window.addEventListener('pointermove', this.#onPointerMove, true)
@@ -202,6 +227,7 @@ export class ImageChoiceDrone extends Drone {
     window.removeEventListener('keydown', this.#onKeyDown, true)
     window.removeEventListener('blur', this.#onWindowBlur)
     this.#close()                            // never strand a hidden hive
+    this.#endQueue()
     for (const sig of [...this.#textures.keys()]) this.#drop(sig)
     for (const base of this.#sheetBases) { try { base.destroy(true) } catch { /* gone */ } }
     this.#sheetBases = []
@@ -213,9 +239,10 @@ export class ImageChoiceDrone extends Drone {
     return segs.map(s => String(s ?? '').trim()).filter(Boolean).join('/')
   }
 
-  #t(key: string, fallback: string): string {
-    const value = window.ioc.get<I18nProvider>(I18N_IOC_KEY)?.t?.(key)
-    return value && value !== key ? value : fallback
+  #t(key: string, fallback: string, params?: Record<string, string | number>): string {
+    const value = window.ioc.get<I18nProvider>(I18N_IOC_KEY)?.t?.(key, params)
+    if (value && value !== key) return value
+    return params ? fallback.replace(/\{(\w+)\}/g, (all, token: string) => token in params ? String(params[token]) : all) : fallback
   }
 
   // ── input ─────────────────────────────────────────────────────────
@@ -245,6 +272,8 @@ export class ImageChoiceDrone extends Drone {
     // The small x on a latent picture of this tile forgets it, never picks it.
     const forgettable = this.#nearestChoice(e.clientX, e.clientY)
     if (forgettable && this.#canForget(forgettable) && this.#onForgetBadge(forgettable, e.clientX, e.clientY)) { void this.#forget(forgettable); return }
+    // The skip tile answers this tile with "none" and moves on.
+    if (choice?.skip) { this.#skip(); return }
     // Empty space backs out; the picture already worn has nothing to write.
     if (!choice || choice.mine) { this.#dismiss(); return }
     void this.#apply(choice)
@@ -267,6 +296,14 @@ export class ImageChoiceDrone extends Drone {
       void this.#forget(this.#hoverChoice)
       return
     }
+    // → is the skip tile from the keyboard, only while a queue runs and no
+    // pick is still being written.
+    if (e.key === 'ArrowRight' && this.#queue.running && !this.#applying) {
+      e.preventDefault()
+      e.stopPropagation()
+      this.#skip()
+      return
+    }
     if (e.key !== 'Escape') return
     e.stopPropagation()
     this.#dismiss()
@@ -274,7 +311,7 @@ export class ImageChoiceDrone extends Drone {
 
   // ── forgetting a latent picture (local gallery only; peers get none) ──
 
-  #canForget(c: Choice): boolean { return c.held && !c.mine }
+  #canForget(c: Choice): boolean { return c.held && !c.mine && !c.skip }
 
   #onForgetBadge(c: Choice, clientX: number, clientY: number): boolean {
     if (!this.#layer) return false
@@ -318,7 +355,43 @@ export class ImageChoiceDrone extends Drone {
     }
   }
 
-  #onWindowBlur = (): void => { this.#close() }
+  #onWindowBlur = (): void => {
+    this.#close()
+    this.#endQueue()
+  }
+
+  // ── the queue: many tiles, one wall each ──────────────────────────
+
+  /** Say where the queue stands. Last-value, so a shelf opened late reads it. */
+  #emitQueue(): void {
+    this.emitEffect('images:queue', this.#queue.state())
+  }
+
+  /** End the queue, if one runs, and say so — once. */
+  #endQueue(): void {
+    if (!this.#queue.running) return
+    this.#queue.end()
+    this.#emitQueue()
+  }
+
+  /** The tile on the wall is answered; open the wall for the next one, or close
+   *  for good after the last. */
+  #advance(): void {
+    if (!this.#queue.running) return
+    const next = this.#queue.advance()
+    this.#emitQueue()
+    if (next) void this.#open(next, this.#queue.segments)
+    else this.#close()
+  }
+
+  /** Skip: this tile keeps what it wears. Nothing is written, nothing marked seen.
+   *  Not while a pick is being written: that pick's own close would then shut
+   *  the NEXT tile's wall and count it done, though nobody saw it. */
+  #skip(): void {
+    if (!this.#queue.running || this.#applying) return
+    this.#close()
+    this.#advance()
+  }
 
   // ── lifecycle ─────────────────────────────────────────────────────
 
@@ -388,6 +461,13 @@ export class ImageChoiceDrone extends Drone {
     // the tile that has not been picked yet. The worn picture alone is not.
     if (!imageWallHasChoice(entries)) {
       this.#close()
+      // In a queue a tile with nothing to choose is answered as it stands: say
+      // so, and carry on to the next rather than stopping the whole run.
+      if (this.#queue.running) {
+        this.emitEffect('toast:show', { type: 'info', message: this.#t('images.none-next', 'Nothing to choose for "{cell}" — on to the next tile.', { cell: label }) })
+        this.#advance()
+        return
+      }
       this.emitEffect('toast:show', { type: 'info', message: this.#t('images.none', 'Only one picture for this tile — nothing to choose from yet.') })
       return
     }
@@ -475,9 +555,14 @@ export class ImageChoiceDrone extends Drone {
   /** What the caption says under the title: the tile, and — when some pictures are
    *  new — how to answer them. */
   #wallText(choices: readonly Choice[]): string {
-    return choices.some(c => c.fresh)
-      ? `${this.#label} — ${this.#t('images.dismiss', 'new pictures are ringed; Esc dismisses them')}`
+    // In a queue the tile is named with where it stands: "2 of 5 — garden".
+    const { index, total } = this.#queue.position()
+    const name = this.#queue.running && total > 1
+      ? `${this.#t('images.queue-of', '{index} of {total}', { index, total })} — ${this.#label}`
       : this.#label
+    return choices.some(c => c.fresh)
+      ? `${name} — ${this.#t('images.dismiss', 'new pictures are ringed; Esc dismisses them')}`
+      : name
   }
 
   #paintEntries(entries: readonly ChoiceEntry[]): void {
@@ -485,6 +570,11 @@ export class ImageChoiceDrone extends Drone {
     const shown: ChoiceEntry[] = this.#loading
       ? [...entries, { props: { imageSig: '' }, previewSig: '', who: this.#t('images.loading', 'loading…'), mine: false, held: false, pending: true }]
       : [...entries]
+    // In a queue the skip tile sits after the pictures, on the same matrix, so
+    // moving on is a tile like any choice — never a button bolted onto the canvas.
+    if (this.#queue.running) {
+      shown.push({ props: {}, previewSig: '', who: this.#t('images.skip', 'skip ›'), mine: false, held: false, skip: true })
+    }
     const slots = this.#gridSlots(shown.length)
     const choices: Choice[] = shown.slice(0, slots.length).map((entry, index) => {
       const p = this.#axialToPixel(slots[index].q, slots[index].r)
@@ -525,9 +615,15 @@ export class ImageChoiceDrone extends Drone {
    *  window losing focus, is not an answer — that is a plain #close.) */
   #dismiss(): void {
     const label = this.#label
-    const shown = this.#choices.filter(c => !c.pending).map(c => c.previewSig)
+    const shown = this.#shownSigs()
     this.#close()
+    this.#endQueue()                         // leaving the wall ends the run of tiles
     if (label && shown.length) void markSeen(label, shown)
+  }
+
+  /** The pictures on the wall — the skip and loading tiles are not. */
+  #shownSigs(): string[] {
+    return this.#choices.filter(c => !c.skip && !c.pending).map(c => c.previewSig)
   }
 
   /** Restore the hive and drop everything the wall owned. Safe to call twice. */
@@ -568,7 +664,9 @@ export class ImageChoiceDrone extends Drone {
     if (this.#applying) return
     this.#applying = true
     const label = this.#label
-    const shown = this.#choices.filter(c => !c.pending).map(c => c.previewSig)
+    const segments = [...this.#segments]
+    const shown = this.#shownSigs()
+    let worn = false
     try {
       const sigs = choice.held
         ? [choice.props.imageSig]
@@ -581,7 +679,9 @@ export class ImageChoiceDrone extends Drone {
 
       // Readers follow the Life Primitive hop explicitly — every fetch here goes
       // through `fetchThroughContentHop`; `getResource` does not do it alone.
-      const targets = imageChoiceWriteTargets(this.#segments, label, this.#portalTarget(label))
+      // The place captured at the click: a wall closed mid-fetch (focus lost)
+      // has emptied #segments, and the pick must not land at the hive root.
+      const targets = imageChoiceWriteTargets(segments, label, this.#portalTarget(label))
       for (const target of targets) {
         const existing = await readTilePropertiesAt(target.parentSegments, target.cell)
         const oldLarge = ((existing['large'] as { image?: string } | undefined)?.image) ?? ''
@@ -616,19 +716,26 @@ export class ImageChoiceDrone extends Drone {
       }
       // Taking a picture answers the badge: everything on the wall was seen.
       if (shown.length) void markSeen(label, shown)
+      worn = true
     } catch (err) {
       console.warn('[image-choice] apply failed', err)
       this.emitEffect('toast:show', { type: 'warning', message: this.#t('images.failed', 'That picture could not be fetched — nothing changed.') })
     } finally {
       this.#applying = false
       this.#close()                          // the hive comes back wearing the pick
+      // In a queue: a pick moves on to the next tile; a pick that could not be
+      // fetched leaves this tile unanswered, so its wall opens again.
+      if (this.#queue.running) {
+        if (worn) this.#advance()
+        else void this.#open(label, segments)
+      }
     }
   }
 
   // ── painting ──────────────────────────────────────────────────────
 
   #paint(choices: Choice[]): void {
-    if (!this.#renderContainer) { this.#open_ = false; return }
+    if (!this.#renderContainer) { this.#open_ = false; this.#endQueue(); return }
 
     if (!this.#hiveHidden) {
       this.#hiveHidden = true
@@ -720,13 +827,14 @@ export class ImageChoiceDrone extends Drone {
     body.fill({ color: TILE_FILL, alpha: TILE_FILL_ALPHA })
     body.poly(verts, true)
     body.stroke({
-      color: c.mine ? MINE_BORDER : c.fresh ? HOVER_BORDER : TILE_BORDER,
+      // The skip tile wears the mint hairline a click would light, at the plain width.
+      color: c.mine ? MINE_BORDER : c.fresh || c.skip ? HOVER_BORDER : TILE_BORDER,
       alpha: TILE_BORDER_ALPHA,
       width: c.mine ? MINE_BORDER_WIDTH : c.fresh ? HOVER_BORDER_WIDTH : TILE_BORDER_WIDTH,
     })
     node.addChild(body)
 
-    const tex = this.#textures.get(c.previewSig) ?? null
+    const tex = c.skip ? null : this.#textures.get(c.previewSig) ?? null
     if (tex) {
       const sprite = new Sprite(tex)
       sprite.anchor.set(0.5)
@@ -752,7 +860,7 @@ export class ImageChoiceDrone extends Drone {
     // mesh superimposes a tile's name.
     const size = tileR * LABEL_SIZE_FACTOR
     const waiting = c.pending || this.#inflight.has(c.previewSig)
-    const who = tex || c.pending ? c.who : `${c.who} · ${waiting ? this.#t('images.loading', 'loading…') : this.#t('images.unavailable', 'not sent')}`
+    const who = tex || c.pending || c.skip ? c.who : `${c.who} · ${waiting ? this.#t('images.loading', 'loading…') : this.#t('images.unavailable', 'not sent')}`
     const text = new Text({
       text: who.length > 16 ? `${who.slice(0, 15)}…` : who,
       style: {
@@ -811,14 +919,25 @@ export class ImageChoiceDrone extends Drone {
   #updateHover(): void {
     if (!this.#layer) return
     const choice = this.#lastClient ? this.#nearestChoice(this.#lastClient.x, this.#lastClient.y) : null
-    const hit = choice && this.#textures.get(choice.previewSig) && !choice.mine
+    const hit = choice && (choice.skip || this.#textures.get(choice.previewSig)) && !choice.mine
       ? `${choice.slot.q},${choice.slot.r}` : null
     if (hit === this.#hoverKey) return
     this.#hoverKey = hit
     this.#hoverChoice = choice && hit ? choice : null
     // Who offers the picture under the pointer — the caption says it, so the
     // tile itself stays a picture. Back to the wall's own words when none is hovered.
-    if (choice && hit) this.emitEffect('caption:show', { source: CAPTION_SOURCE, title: choice.who, text: choice.held ? this.#t('images.held', 'held on this tile') : choice.fresh ? this.#t('images.fresh', 'new — not seen before') : this.#t('images.offered', 'offered by another host') })
+    // The skip tile says where it goes: the next tile's name, or that this is the last.
+    if (choice?.skip && hit) {
+      const next = this.#queue.peekNext()
+      this.emitEffect('caption:show', {
+        source: CAPTION_SOURCE,
+        title: this.#t('images.skip-title', 'skip this tile'),
+        text: next
+          ? this.#t('images.skip-next', 'next: {cell}', { cell: next })
+          : this.#t('images.skip-last', 'the last tile — the wall closes'),
+      })
+    }
+    else if (choice && hit) this.emitEffect('caption:show', { source: CAPTION_SOURCE, title: choice.who, text: choice.held ? this.#t('images.held', 'held on this tile') : choice.fresh ? this.#t('images.fresh', 'new — not seen before') : this.#t('images.offered', 'offered by another host') })
     else this.emitEffect('caption:show', { source: CAPTION_SOURCE, title: this.#t('images.select', 'select image'), text: this.#wallText(this.#choices) })
 
     for (let i = 0; i < this.#choices.length; i++) {
@@ -835,7 +954,7 @@ export class ImageChoiceDrone extends Drone {
   #choiceUnderCursor(clientX: number, clientY: number): Choice | null {
     const choice = this.#nearestChoice(clientX, clientY)
     // An unresolved picture is a labelled hex, not a choice.
-    return choice && (choice.mine || this.#textures.get(choice.previewSig)) ? choice : null
+    return choice && (choice.mine || choice.skip || this.#textures.get(choice.previewSig)) ? choice : null
   }
 
   /** The choice under a screen point: nearest centre within a hexagon's reach,

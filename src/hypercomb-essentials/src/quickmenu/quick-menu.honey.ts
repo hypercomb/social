@@ -60,6 +60,9 @@ export const backIcon = 'arrow_back'
 export const cancelIcon = 'close'
 /** A slot with no label at all. */
 export const emptyIcon = 'more_horiz'
+/** The middle of the many-tiles ring: a cluster of hexagons, the stack of tiles
+ *  every verb on it reaches. Never a ring option's glyph. */
+export const manyIcon = 'hive'
 
 /** The ring's drawing for a glyph name, or undefined when it has none (then the
  *  slot is text-only: the word itself is the identity, never a stand-in). */

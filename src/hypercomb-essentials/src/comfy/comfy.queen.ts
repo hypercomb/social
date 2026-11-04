@@ -12,6 +12,7 @@
 //   /comfy workflow portrait        — work with that one
 //   /comfy models                   — the checkpoints the host actually has
 //   /comfy reroll                   — this tile's picture again, new seed
+//   /comfy each                     — every selected tile, its own name the prompt
 //   /comfy cancel                   — stop the run
 //
 // THE ARGUMENT IS A SENTENCE, AND THAT IS THE WHOLE DESIGN. Every other
@@ -48,7 +49,7 @@ import {
 
 /** The verbs. A first word in this set is an instruction; anything else is
  *  the picture you want. */
-const VERBS = new Set(['host', 'folder', 'workflow', 'workflows', 'models', 'checkpoints', 'reroll', 'cancel', 'stop'])
+const VERBS = new Set(['host', 'folder', 'workflow', 'workflows', 'models', 'checkpoints', 'reroll', 'each', 'cancel', 'stop'])
 
 const comfyObject: CommandObject = {
   members(path: readonly string[]): readonly CommandMember[] {
@@ -67,6 +68,7 @@ const comfyObject: CommandObject = {
         { name: 'workflow', description: `working with "${activeWorkflow().label}"` },
         { name: 'models', description: 'the checkpoints this host has', leaf: true },
         { name: 'reroll', description: 'this tile’s picture again, new seed', leaf: true },
+        { name: 'each', description: 'one picture for each selected tile, made from its own name', leaf: true },
         { name: 'cancel', description: 'stop the run', leaf: true },
       ]
     }
@@ -99,12 +101,13 @@ export class ComfyQueenBee extends QueenBee {
   override descriptionKey = 'slash.comfy'
   override options = [
     '<prompt>', 'host', 'host discover', 'host <address>', 'folder',
-    'workflow', 'workflow <name>', 'models', 'reroll', 'cancel',
+    'workflow', 'workflow <name>', 'models', 'reroll', 'each', 'cancel',
   ]
   override examples = [
     { input: '/comfy', result: 'Opens the ComfyUI desk' },
     { input: '/comfy a paper lantern in fog', result: 'Generates that: on the selected tiles, else an asset on the desk' },
     { input: '/comfy reroll', result: 'Makes this tile’s picture again with a new seed' },
+    { input: '/comfy each', result: 'One picture for each selected tile, each made from that tile’s name' },
   ]
 
   // The argument is a sentence (see the module comment), so the whole line is
@@ -157,6 +160,7 @@ export class ComfyQueenBee extends QueenBee {
         if (!results.length) this.#log(comfyService.job.message ?? 'nothing to re-roll')
         return
       }
+      case 'each': return await this.#each()
       case 'cancel':
       case 'stop': {
         await comfyService.cancel()
@@ -180,6 +184,43 @@ export class ComfyQueenBee extends QueenBee {
       reviewers: help.reviewers,
     })
     if (!results.length) { this.#log(comfyService.job.message ?? 'no picture'); return }
+  }
+
+  // ── one for every tile ──────────────────────────────────────────────────
+
+  /**
+   * A picture for every selected tile, each prompted by that tile's own name
+   * and landing on it — the multi-tile quick menu's Generate. One at a time,
+   * in selection order, so a slow card works through them and Stop ends the
+   * run between tiles.
+   *
+   * THE HOST IS ASKED FIRST. Ten tiles queued at a machine that is not
+   * answering is ten failures said one by one; one sentence and the desk —
+   * where the address is set — is the honest answer.
+   */
+  async #each(): Promise<void> {
+    const cells = comfyService.selectedCells().filter(name => name.trim().length > 0)
+    if (!cells.length) { this.#log('select the tiles first'); return }
+    const reach = comfyHost.reach.ok ? comfyHost.reach : await comfyHost.probe()
+    if (!reach.ok) {
+      this.#log(`ComfyUI is not answering at ${comfyHost.endpoint} — ${reach.reason ?? 'no answer'}`)
+      EffectBus.emit('comfy:open', { section: 'host' })
+      return
+    }
+    this.#log(`${activeWorkflow().label} — a picture for each of ${cells.length} tile${cells.length === 1 ? '' : 's'}`, '◇')
+    const help = comfyService.help
+    const results = await comfyService.run({
+      each: true,
+      tiles: true,
+      attach: false,
+      fromTile: help.fromTile,
+      reviewers: help.reviewers,
+    })
+    if (results.length < cells.length) {
+      this.#log(results.length
+        ? `${results.length} of ${cells.length} tiles have a picture — ${comfyService.job.message ?? 'stopped'}`
+        : comfyService.job.message ?? 'no picture')
+    }
   }
 
   // ── where it runs ───────────────────────────────────────────────────────

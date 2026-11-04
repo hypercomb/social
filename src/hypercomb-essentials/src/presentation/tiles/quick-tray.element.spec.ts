@@ -4,7 +4,7 @@
 // NUL once went through an attribute, the parser rewrote it, and both the × and
 // the row's drag found nothing while every entry-level spec stayed green.
 
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
 import { QuickTrayElement, defineQuickTray } from './quick-tray.element'
 
@@ -110,9 +110,8 @@ describe('a take answers where it landed', () => {
 
   it('tells the shell button when the shelf is folded', () => {
     click(tray, '.fold')
-    tray.take([{ label: 'fourth', sourceSegments: [] }])
     expect(said()).toMatchObject({ folded: true })
-    expect(said().entries).toHaveLength(4)
+    expect(said().entries).toHaveLength(3)
   })
 })
 
@@ -125,11 +124,21 @@ describe('hiding the shelf', () => {
     expect(tray.entries).toHaveLength(3)
   })
 
-  it('stays folded when a take lands, with the count moving', () => {
-    click(tray, '.fold')
-    tray.take([{ label: 'fourth', sourceSegments: [] }])
-    expect(shown(tray)).toEqual([])
-    expect(said().entries).toHaveLength(4)
+  // A take on a folded shelf peeks it open so the add is seen (PEEK_MS), then
+  // folds back; the participant's own fold is what it returns to.
+  it('peeks open when a take lands, then folds back, with the count moving', () => {
+    vi.useFakeTimers()
+    try {
+      click(tray, '.fold')
+      tray.take([{ label: 'fourth', sourceSegments: [] }])
+      expect(shown(tray)).toEqual(['first', 'second', 'third', 'fourth'])
+      vi.advanceTimersByTime(4000)
+      expect(shown(tray)).toEqual([])
+      expect(said()).toMatchObject({ folded: true })
+      expect(said().entries).toHaveLength(4)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('comes back on shelf:toggle with every row', () => {
