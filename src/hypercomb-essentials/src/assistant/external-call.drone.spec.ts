@@ -4,8 +4,11 @@
 //
 //   1. Nothing is said on arrival. The call is shown (EXTERNAL_ASK) and waits.
 //   2. Enter (`run`) records the request in a new conversation on the current
-//      layer, opens it, says each line through the machine door, and records
-//      each verdict there. The caller hears the same verdicts.
+//      layer, says each line through the machine door, and records each
+//      verdict there. The caller hears the same verdicts. The chat does NOT
+//      open (jwize 2026-11-04): each line's place in the run goes to the
+//      activity log, and a toast says how it went, so the participant watches
+//      the hive build instead of being taken away.
 //   3. Escape (`decline`) says nothing, records the decline, opens nothing.
 //   4. An answer for a call that is not the one shown does nothing.
 //   5. A call is refused, not queued, when it has no lines.
@@ -43,6 +46,8 @@ const flush = () => new Promise(resolve => setTimeout(resolve, 0))
 let said: string[] = []
 let opened: string[] = []
 let shown: (ExternalAsk | null)[] = []
+let logged: string[] = []
+let toasts: string[] = []
 
 beforeEach(() => {
   place.at = ['presentation']
@@ -50,6 +55,8 @@ beforeEach(() => {
   said = []
   opened = []
   shown = []
+  logged = []
+  toasts = []
 })
 
 EffectBus.on<RemoteSubmitRequest>(REMOTE_SUBMIT, ({ text, accept, complete }) => {
@@ -68,6 +75,8 @@ EffectBus.on<RemoteSubmitRequest>(REMOTE_SUBMIT, ({ text, accept, complete }) =>
     : { kind: 'ran', actions: [{ command: text.slice(1).split(' ')[0], args: '', ok: true }] })
 })
 EffectBus.on<{ convoId?: string }>('chat:open', payload => { if (payload?.convoId) opened.push(payload.convoId) })
+EffectBus.on<{ message?: string; icon?: string }>('activity:log', p => { if (p?.icon === '$' && p.message) logged.push(p.message) })
+EffectBus.on<{ message?: string; title?: string }>('toast:show', p => { if (p?.title === '$' && p.message) toasts.push(p.message) })
 EffectBus.on<ExternalAsk | null>(EXTERNAL_ASK, ask => { shown.push(ask) })
 
 const call = (from: string, lines: string[]) => {
@@ -106,7 +115,12 @@ describe('external calls', () => {
     expect(turns.map(t => t.role)).toEqual(['user', 'assistant', 'assistant'])
     expect(turns[0].text).toBe('from claude-code:\n/create word\n/remove word')
     expect(turns[2].text).toBe('/remove word\n→ refused: a person must say this')
-    expect(opened).toContain(outcome.convoId)
+    // watched in the hive: the chat stays shut, each line's place goes to the
+    // activity log, and the end is told in a toast
+    expect(opened).toEqual([])
+    expect(logged).toContain('claude-code 1/2: /create word → ran /create')
+    expect(logged).toContain('claude-code 2/2: /remove word → refused: a person must say this')
+    expect(toasts[toasts.length - 1]).toBe('claude-code: 2 lines said, 1 refused. The run is written in its conversation on this layer.')
     expect(lastAsk()).toBeNull()
   })
 
