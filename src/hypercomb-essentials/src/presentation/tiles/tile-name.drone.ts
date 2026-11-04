@@ -269,7 +269,15 @@ export class TileNameDrone extends Drone {
     // Depths belong to a page: arriving somewhere else drops them, so a count
     // from the last page never lands on a same-named tile of this one.
     this.onEffect<TileStackDepths>(TILE_STACK_DEPTHS, (p) => { this.#depths = p?.depths ?? {}; this.#placeHovered() })
-    this.onEffect('location:changed', () => { this.#depths = {}; this.#placeHovered() })
+    // Names are DOM text over the canvas, so they would hang over the new screen
+    // until its cell-count lands. They go first; the next cell-count rebuilds them.
+    this.onEffect('location:changed', () => {
+      this.#depths = {}
+      for (const span of this.#spans.values()) span.remove()
+      this.#spans.clear()
+      this.#cells = new Map()
+      this.#placeHovered()
+    })
     this.onEffect<BandRowsPayload>('overlay:band-rows', (p) => { this.#band = { rows: p?.rows ?? 1, label: p?.label ?? null }; this.#placeAll() })
     this.onEffect<{ on: boolean }>('render:big-head-mode', (p) => {
       this.#bigHead = !!p?.on
