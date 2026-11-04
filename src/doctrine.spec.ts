@@ -199,7 +199,6 @@ describe('doctrine ratchets', () => {
       'hypercomb-essentials/src/assistant/claude-bridge.worker.ts',
       'hypercomb-essentials/src/assistant/conversation.queen.ts',
       'hypercomb-essentials/src/assistant/doctrine.queen.ts',
-      'hypercomb-essentials/src/assistant/external-call.drone.ts',
       'hypercomb-essentials/src/assistant/harness-tiles.ts',
       'hypercomb-essentials/src/assistant/llm.drone.ts',
       'hypercomb-essentials/src/assistant/llm.queen.ts',
