@@ -147,7 +147,7 @@ const childCount = async (tab: History, rootLoc: string): Promise<number> => {
 }
 
 describe('the head memo on the commit path', () => {
-  it('a run of commits with a COLD marker list walks the bag once, not once per commit', async () => {
+  it('a run of commits walks the bag on first touch only — never per commit', async () => {
     const w = await world()
     expect(await adds(w.a, w.rootLoc, 'c1')).toBeNull()
     const afterFirst = w.bag().walks

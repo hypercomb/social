@@ -1786,27 +1786,108 @@ export class Store extends EventTarget {
     try {
       const dir = await this.#visualOptimDir()
       if (!dir) return
-      const handle = await dir.getFileHandle(sourceSig, { create: true })
-      const writable = await handle.createWritable()
-      await writeKeepingError(writable, bytes)
+      await Store.#writeDerivedRecord(dir, sourceSig, bytes)
       this.noteOptimizationUse(Store.VISUAL_OPTIMIZATION_MEANING, sourceSig, OPTIMIZATION_MINT_WEIGHT)
     } catch { /* best-effort cache */ }
   }
 
+  /** The one write of a derived visual record: the cell-sized rendition
+   *  under the source sig, or the within-target record in its sub-bucket. */
+  static #writeDerivedRecord = async (dir: FileSystemDirectoryHandle, name: string, bytes: ArrayBuffer): Promise<void> => {
+    const handle = await dir.getFileHandle(name, { create: true })
+    const writable = await handle.createWritable()
+    await writeKeepingError(writable, bytes)
+  }
+
+  // ── "Within target, no derivative" ────────────────────────────────
+  // A source already at or under the atlas target derives nothing — and
+  // that answer was never recorded, so EVERY session opened the optimized
+  // entry, missed, decoded the full raw to measure it, found it within
+  // target, wrote nothing, and did the same again next boot: one decode per
+  // small image per session, forever. The negative result is itself a pure
+  // derivation of the source signature (D1): it lives beside the positive
+  // records, in the visual-optimization pool, in the `within-target`
+  // sub-bucket, keyed by the source sig (D2 — recomputable, never
+  // load-bearing: a reader that lacks it only decodes once more). It is
+  // minted where the positive record is: `optimizeVisual`, the optimize
+  // phase.
+  static readonly #WITHIN_TARGET_BUCKET = 'within-target'
+  #withinTargetDir?: FileSystemDirectoryHandle | null
+  /** Source sigs this session knows derive nothing — the record, read once. */
+  readonly #withinTarget = new Set<string>()
+  /** One decode per source sig at a time: the two optimizer drones (and an
+   *  arrival) ask for the same sig independently and used to decode it
+   *  independently. The second asker joins the first's work. */
+  readonly #optimizing = new Map<string, Promise<void>>()
+
+  #withinTargetBucket = async (create: boolean): Promise<FileSystemDirectoryHandle | null> => {
+    if (this.#withinTargetDir !== undefined && (this.#withinTargetDir || !create)) return this.#withinTargetDir
+    try {
+      const dir = await this.#visualOptimDir()
+      if (!dir) return null
+      const bucket = await dir.getDirectoryHandle(await Store.poolSignature(Store.#WITHIN_TARGET_BUCKET), { create })
+      this.#withinTargetDir = bucket
+      return bucket
+    } catch {
+      if (!create) this.#withinTargetDir = null
+      return null
+    }
+  }
+
+  /** Is `sourceSig` recorded as within the atlas target? Session memo, then
+   *  one targeted lookup in the sub-bucket; never an enumeration. */
+  public isVisualWithinTarget = async (sourceSig: string): Promise<boolean> => {
+    if (this.#withinTarget.has(sourceSig)) return true
+    try {
+      const bucket = await this.#withinTargetBucket(false)
+      if (!bucket) return false
+      const file = await (await bucket.getFileHandle(sourceSig, { create: false })).getFile()
+      if (file.size <= 0) return false
+      this.#withinTarget.add(sourceSig)
+      return true
+    } catch { return false }
+  }
+
+  #noteWithinTarget = async (sourceSig: string, width: number, height: number): Promise<void> => {
+    this.#withinTarget.add(sourceSig)
+    try {
+      const bucket = await this.#withinTargetBucket(true)
+      if (!bucket) return
+      const record = { source: sourceSig, width, height, target: Store.#VISUAL_OPTIM_TARGET }
+      await Store.#writeDerivedRecord(bucket, sourceSig, new TextEncoder().encode(JSON.stringify(record)).buffer as ArrayBuffer)
+    } catch { /* best-effort — one more decode next session */ }
+  }
+
   /** Produce + persist the cell-sized optimized form of a raw visual so the
    *  next COLD load decodes a small image instead of the full original.
-   *  Idempotent (skips when already cached) and a no-op when the raw is
-   *  already within the atlas target (nothing to gain). Best-effort: a
-   *  failure just means the raw is re-decoded next session. */
-  public optimizeVisual = async (sourceSig: string, rawBlob: Blob): Promise<void> => {
+   *  Idempotent (skips when already cached, or already recorded as within
+   *  target) and shared: concurrent calls for one sig decode once.
+   *  Best-effort: a failure just means the raw is re-decoded next session. */
+  public optimizeVisual = (sourceSig: string, rawBlob: Blob): Promise<void> => {
+    const pending = this.#optimizing.get(sourceSig)
+    if (pending) return pending
+    const run = this.#optimizeVisualOnce(sourceSig, rawBlob)
+      .finally(() => { if (this.#optimizing.get(sourceSig) === run) this.#optimizing.delete(sourceSig) })
+    this.#optimizing.set(sourceSig, run)
+    return run
+  }
+
+  #optimizeVisualOnce = async (sourceSig: string, rawBlob: Blob): Promise<void> => {
     try {
       if (await this.getOptimizedVisual(sourceSig)) return
+      if (await this.isVisualWithinTarget(sourceSig)) return
       if (typeof createImageBitmap !== 'function' || typeof OffscreenCanvas === 'undefined') return
       const raw = await createImageBitmap(rawBlob)
       const target = Store.#VISUAL_OPTIM_TARGET
       // Already within the atlas target — caching a same-size copy buys
-      // nothing, so leave the raw as the source of truth.
-      if (raw.width <= target && raw.height <= target) { raw.close(); return }
+      // nothing, so leave the raw as the source of truth and RECORD that,
+      // so no later session measures it again.
+      if (raw.width <= target && raw.height <= target) {
+        const { width, height } = raw
+        raw.close()
+        await this.#noteWithinTarget(sourceSig, width, height)
+        return
+      }
       const aspect = raw.width / raw.height
       const w = aspect >= 1 ? target : Math.max(1, Math.round(target * aspect))
       const h = aspect >= 1 ? Math.max(1, Math.round(target / aspect)) : target

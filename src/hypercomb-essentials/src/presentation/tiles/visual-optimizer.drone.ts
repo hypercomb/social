@@ -37,6 +37,7 @@ type VisualStore = {
   getResourceLocal(sig: string): Promise<Blob | null>
   getResourceResolvedLocal?(sig: string): Promise<Blob | null>
   getOptimizedVisual?(sig: string): Promise<Blob | null>
+  isVisualWithinTarget?(sig: string): Promise<boolean>
   optimizeVisual?(sig: string, raw: Blob): Promise<void>
 }
 
@@ -73,8 +74,11 @@ export class VisualOptimizerDrone extends Drone {
       this.#pending.delete(sig)
       this.#attempted.add(sig)
       try {
-        // Another pass may already have minted it.
+        // Another pass may already have minted it — or recorded that the
+        // source is within target and derives nothing (then the source
+        // bytes are not even read).
         if (await store.getOptimizedVisual?.(sig)) continue
+        if (await store.isVisualWithinTarget?.(sig)) continue
         // LOCAL only — a derived cache is minted from bytes already here;
         // fetching would put network traffic on an optimization path.
         const source = await (store.getResourceResolvedLocal?.(sig) ?? store.getResourceLocal(sig))

@@ -63,6 +63,7 @@ type ManifestStore = {
   getLayerLocalBytes?: (sig: string) => Promise<Uint8Array | null>
   getResourceLocal?: (sig: string) => Promise<Blob | null>
   getOptimizedVisual?: (sourceSig: string) => Promise<Blob | null>
+  isVisualWithinTarget?: (sourceSig: string) => Promise<boolean>
   optimizeVisual?: (sourceSig: string, raw: Blob) => Promise<void>
 }
 
@@ -404,7 +405,10 @@ export class ManifestOptimizerDrone extends Drone {
       // megabytes — the pack carries a sig-only reference instead and the
       // atlas reads the source file for that one image.
       let optimized = await store.getOptimizedVisual?.(imageSig) ?? null
-      if (!optimized && store.optimizeVisual && (!budget || budget.mints > 0)) {
+      // A source recorded as within target derives nothing: the entry keeps
+      // the sig and no decode is spent measuring it again.
+      const withinTarget = !optimized && (await store.isVisualWithinTarget?.(imageSig) ?? false)
+      if (!optimized && !withinTarget && store.optimizeVisual && (!budget || budget.mints > 0)) {
         const raw = await getLocal(imageSig)
         if (raw) {
           if (budget) budget.mints--
