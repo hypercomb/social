@@ -96,6 +96,8 @@ const LABEL_RESOLUTION = (worldScale: number): number =>
   Math.min(4, Math.max(2, worldScale * (globalThis.devicePixelRatio || 1)))
 const TEXTURE_CACHE_MAX = 128
 const TEXTURE_TIMEOUT_MS = 20000
+/** Longest side of a wall thumbnail — a wall hex is ~60px across at life size. */
+const THUMB_PX = 96
 
 export class ImageChoiceDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -818,7 +820,7 @@ export class ImageChoiceDrone extends Drone {
         this.#bytes(sig),
         new Promise<null>(resolve => setTimeout(() => resolve(null), TEXTURE_TIMEOUT_MS)),
       ])
-      if (blob) tex = Texture.from(await createImageBitmap(blob))
+      if (blob) tex = Texture.from(await thumbnailOf(blob))
     } catch { tex = null }
     this.#inflight.delete(sig)
     if (!tex) return null
@@ -929,7 +931,33 @@ export class ImageChoiceDrone extends Drone {
   }
 }
 
-const formatBytes = (n: number | null): string => {
+/** A quick shot: the wall only ever draws a picture a few dozen pixels across,
+ *  so it keeps a small decode, never the full bitmap. The full bytes are pulled
+ *  once, by `#apply`, for the picture actually chosen — everything else on the
+ *  wall is released when the wall closes. Decoders that ignore the resize hint
+ *  (older Safari/Firefox) fall back to a canvas draw, then to the plain decode. */
+const thumbnailOf = async (blob: Blob): Promise<ImageBitmap | HTMLCanvasElement> => {
+  try {
+    const bitmap = await createImageBitmap(blob, { resizeWidth: THUMB_PX, resizeQuality: 'medium' })
+    if (bitmap.width <= THUMB_PX * 2) return bitmap
+    bitmap.close()
+  } catch { /* resize options unsupported */ }
+  const full = await createImageBitmap(blob)
+  try {
+    const scale = Math.min(1, THUMB_PX / Math.max(full.width, full.height))
+    if (scale === 1) return full
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(full.width * scale))
+    canvas.height = Math.max(1, Math.round(full.height * scale))
+    const context = canvas.getContext('2d')
+    if (!context) return full
+    context.drawImage(full, 0, 0, canvas.width, canvas.height)
+    full.close()
+    return canvas
+  } catch { return full }
+}
+
+const formatBytes =(n: number | null): string => {
   if (n === null) return '?'
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
