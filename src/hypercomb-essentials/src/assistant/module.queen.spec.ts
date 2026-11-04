@@ -3,6 +3,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus, INSTALL_IOC_KEY, MODULE_DRAFTS_IOC_KEY } from '@hypercomb/core'
+import { readdirSync, readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 vi.hoisted(() => {
   ;(window as unknown as { ioc: unknown }).ioc = {
@@ -124,5 +127,47 @@ describe('promote goes live only with what you accepted', () => {
   it('says it cannot tell when the trial cannot be read here', async () => {
     expect(await unacceptedIn('r', ['h'], { modulesOf: async () => null })).toBeNull()
     expect(await unacceptedIn('r', ['h'], undefined)).toBeNull()
+  })
+})
+
+// The sub-words are the queen's own `options` — completion and dispatch read
+// that one list — and the command line runs every behaviour word on a line in
+// order, so a sub-word that is ALSO a behaviour word would run twice unless
+// the queen keeps the rest of the line verbatim (`rawArgs`). `changes` is both
+// a sub-word of `module` and a word of its own; `module` is safe only because
+// it keeps its arguments.
+describe('the sub-words of module', () => {
+  const queen = new ModuleQueenBee()
+  const here = dirname(fileURLToPath(import.meta.url))
+
+  /** Every behaviour word the essentials tree declares (a queen's `command`). */
+  const behaviourWords = (): Set<string> => {
+    const words = new Set<string>()
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name)
+        if (entry.isDirectory()) { if (entry.name !== 'node_modules') walk(full) }
+        else if (/\.queen\.ts$/.test(entry.name)) {
+          const word = /readonly\s+command\s*=\s*'([^']+)'/.exec(readFileSync(full, 'utf8'))?.[1]
+          if (word) words.add(word)
+        }
+      }
+    }
+    walk(join(here, '..'))
+    return words
+  }
+
+  it('are the words of its options, and completion is derived from them', () => {
+    expect([...queen.subWords]).toEqual(['list', 'drop', 'commit', 'promote', 'withdraw', 'review', 'assess', 'trials', 'changes', 'take', 'focus', 'audit'])
+    expect(queen.slashComplete('')).toEqual(['list', 'drop ', 'commit ', 'promote ', 'withdraw ', 'review ', 'assess ', 'trials ', 'changes ', 'take ', 'focus ', 'audit '])
+    expect(queen.slashComplete('ta')).toEqual(['take '])
+    expect(queen.slashComplete('list')).toEqual([])
+  })
+
+  it('may be a behaviour word only because the queen keeps its arguments verbatim', () => {
+    const behaviours = behaviourWords()
+    expect(behaviours.has('module'), 'the scan found no queens').toBe(true)
+    const colliding = [...queen.subWords].filter(word => behaviours.has(word))
+    if (colliding.length) expect(queen.rawArgs, `${colliding.join(', ')} would run as its own action`).toBe(true)
   })
 })
