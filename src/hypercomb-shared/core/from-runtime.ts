@@ -1,6 +1,18 @@
 // hypercomb-shared/core/from-runtime.ts
 
-import { signal, type Signal, type WritableSignal } from '@angular/core'
+import { DestroyRef, inject, signal, type Signal, type WritableSignal } from '@angular/core'
+
+export type FromRuntimeOptions<T> = {
+  /** When two readings are the same value and nobody need hear about it.
+   *  `Object.is` by default; a getter that builds a fresh array on every read
+   *  passes a structural compare here so an unchanged list never notifies. */
+  equal?: (a: T, b: T) => boolean
+  /** Whose life the listener shares. Left out, the injection context's
+   *  DestroyRef when there is one (a component's field initializer), so a
+   *  component that goes away takes its listener with it; `null` for a
+   *  bridge meant to live as long as its target (a module-scope signal). */
+  destroyRef?: DestroyRef | null
+}
 
 /**
  * Bridges an EventTarget property to an Angular Signal.
@@ -13,11 +25,13 @@ import { signal, type Signal, type WritableSignal } from '@angular/core'
  * @param target   The EventTarget instance (the runtime service)
  * @param getter   A function that reads the current value from the service
  * @param event    The event name to listen for (default: 'change')
+ * @param options  Equality and lifetime, see FromRuntimeOptions
  */
 export function fromRuntime<T>(
   target: EventTarget | undefined | null,
   getter: () => T,
-  event = 'change'
+  event = 'change',
+  options: FromRuntimeOptions<T> = {},
 ): Signal<T> {
   // Run the getter even when the target service is missing — getters are
   // written null-safe by convention (`this.#svc?.value ?? fallback`), so
@@ -29,7 +43,9 @@ export function fromRuntime<T>(
   // that genuinely can't run without the service.
   let initial: T
   try { initial = getter() } catch { initial = undefined as T }
-  const s: WritableSignal<T> = signal(initial)
+  // The signal's own equality is the guard: a reading equal to the last one
+  // bumps no version and wakes no consumer.
+  const s: WritableSignal<T> = signal(initial, { equal: options.equal ?? Object.is })
   if (target) {
     // Defer the signal update to a microtask so it lands AFTER any
     // in-flight Angular change-detection pass completes. Without this,
@@ -37,9 +53,33 @@ export function fromRuntime<T>(
     // can flip a downstream impure-pipe value mid-pass (e.g. the i18n
     // `| t` pipe returning a key first then a translation) and trigger
     // NG0100 ExpressionChangedAfterItHasBeenChecked.
-    target.addEventListener(event, () => {
-      queueMicrotask(() => s.set(getter()))
-    })
+    //
+    // ONE read per burst: a service that dispatches ten 'change' events in
+    // one task used to cost ten deferred reads of the same value. The first
+    // event schedules the read, the rest find it scheduled.
+    let scheduled = false
+    const onChange = (): void => {
+      if (scheduled) return
+      scheduled = true
+      queueMicrotask(() => {
+        scheduled = false
+        s.set(getter())
+      })
+    }
+    target.addEventListener(event, onChange)
+    // The listener leaves with its owner. A bar, a panel or a header that is
+    // destroyed and re-created (dock swaps, view mode changes) used to leave
+    // every previous instance's listener on the service, each still reading
+    // the getter of a component that was gone.
+    const destroyRef = options.destroyRef === undefined ? currentDestroyRef() : options.destroyRef
+    destroyRef?.onDestroy(() => target.removeEventListener(event, onChange))
   }
   return s.asReadonly()
+}
+
+/** The DestroyRef of the running injection context, or null outside one —
+ *  `inject` throws there (NG0203), and a bridge made at module scope or from
+ *  a plain function has no owner to follow. */
+function currentDestroyRef(): DestroyRef | null {
+  try { return inject(DestroyRef) } catch { return null }
 }

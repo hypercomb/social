@@ -21,7 +21,7 @@
 // surfaces position themselves (fixed/absolute) exactly as they did when they
 // were direct children of app-root.
 
-import { Component, ElementRef, ViewContainerRef, inject, type ComponentRef, type OnDestroy } from '@angular/core'
+import { ChangeDetectionStrategy, Component, ElementRef, ViewContainerRef, inject, type ComponentRef, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import {
   SHELL_SURFACE_REGISTRY_KEY,
@@ -45,6 +45,7 @@ type Mounted = { node: HTMLElement; ref?: ComponentRef<unknown> }
 
 @Component({
   selector: 'hc-shell-surfaces',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   standalone: true,
   styles: [':host { display: contents; }'],
   template: '',

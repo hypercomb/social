@@ -4,6 +4,7 @@ import type { InputMode, InputModeStack } from '../input-mode-stack.service.js'
 import { getLaneScrollAxis } from '../../sequence/lane-viewport-mode.js'
 import { framedHere, scrollFramedBy } from '../../sequence/frame-lock.js'
 import { hoveredStackDepth, rollHoveredStack } from '../../presentation/tiles/tile-stack.js'
+import { WheelGestureOwner } from './wheel-gesture.js'
 
 type Point = { x: number; y: number }
 
@@ -14,32 +15,35 @@ const SNAP_LEVELS = [
   6.0, 8.0, 12.0,
 ]
 
-/** True when the wheel is over DOM content that owns scrolling.
+/** The DOM element that owns scrolling under the wheel, or null when none does.
  *
  * Most first-party panels carry [data-consumes-wheel], but relying on every
  * present and future tool window to remember that marker is brittle. Detect
  * real CSS scroll containers as well, including elements reached through a
  * shadow-DOM composed path. Once a scroll region owns the pointer it keeps the
  * whole wheel gesture, even at its boundary; falling through to canvas zoom at
- * the top/bottom of a list is surprising and makes scrollbars feel broken. */
-function wheelBelongsToUi(event: WheelEvent): boolean {
+ * the top/bottom of a list is surprising and makes scrollbars feel broken.
+ *
+ * This is the full question — a style per ancestor — and it is asked once per
+ * gesture (WheelGestureOwner), not once per event. */
+function wheelOwner(event: WheelEvent): Element | null {
   const path = typeof event.composedPath === 'function'
     ? event.composedPath()
     : [event.target]
 
   for (const node of path) {
     if (!(node instanceof Element)) continue
-    if (node.hasAttribute('data-consumes-wheel')) return true
+    if (node.hasAttribute('data-consumes-wheel')) return node
 
     const style = getComputedStyle(node)
     const scrollsY = /^(auto|scroll|overlay)$/.test(style.overflowY)
       && node.scrollHeight > node.clientHeight + 1
     const scrollsX = /^(auto|scroll|overlay)$/.test(style.overflowX)
       && node.scrollWidth > node.clientWidth + 1
-    if (scrollsY || scrollsX) return true
+    if (scrollsY || scrollsX) return node
   }
 
-  return false
+  return null
 }
 
 export class MousewheelZoomInput {
@@ -58,6 +62,8 @@ export class MousewheelZoomInput {
   private gate: InputGate | null = null
   private stack: InputModeStack | null = null
   #mode: InputMode | null = null
+  /** Who owns the current wheel gesture — decided on its first event. */
+  readonly #gesture = new WheelGestureOwner()
 
   /** Registers this wheel-zoom handler as the default input mode on the
    *  InputModeStack so other modes (notes-hover, future overlays) can
@@ -133,8 +139,9 @@ export class MousewheelZoomInput {
     // marker can never turn a tool window's mouse wheel into canvas zoom.
     // Canvas is full-screen so geometric rect checks alone wouldn't
     // distinguish "over the history viewer overlay" from "over the
-    // canvas beneath it".
-    if (wheelBelongsToUi(event)) return
+    // canvas beneath it". Asked once per gesture: the first event of a
+    // burst decides, the rest inherit (wheel-gesture.ts).
+    if (this.#gesture.owner(event, wheelOwner)) return
 
     const rect = this.canvas.getBoundingClientRect()
     if (

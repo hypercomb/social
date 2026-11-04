@@ -46,7 +46,7 @@
 // The answers are pure, in publish-apps.ts.
 
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
-import { Component, computed, effect, inject, signal, type OnDestroy } from '@angular/core'
+import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, type OnDestroy } from '@angular/core'
 import { DomSanitizer, type SafeHtml, type SafeResourceUrl } from '@angular/platform-browser'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -222,6 +222,7 @@ type NavigationLike = { go?: (segments: readonly string[]) => void }
 
 @Component({
   selector: 'hc-publish-panel',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   standalone: true,
   imports: [TranslatePipe, DockInsetDirective, HcDockedPanelDirective],
   templateUrl: './publish-panel.component.html',

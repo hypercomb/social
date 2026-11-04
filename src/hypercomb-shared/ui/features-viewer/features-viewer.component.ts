@@ -25,7 +25,7 @@
 // `features:open` / `features:roster`.
 
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
-import { Component, computed, signal, type OnDestroy } from '@angular/core'
+import { ChangeDetectionStrategy, Component, computed, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { onSelection } from '../../core/selection-context'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -237,6 +237,7 @@ let rosterAnswered = false
 
 @Component({
   selector: 'hc-features-viewer',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   standalone: true,
   imports: [TranslatePipe, DockInsetDirective, HcDockedPanelDirective],
   templateUrl: './features-viewer.component.html',
