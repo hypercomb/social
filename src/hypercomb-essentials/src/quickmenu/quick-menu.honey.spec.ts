@@ -31,6 +31,7 @@ import {
   HONEY,
   LAYOUT,
   backIcon,
+  manyIcon,
   blobFall,
   blobStart,
   cancelIcon,
@@ -436,6 +437,7 @@ const ICON_MAP: Readonly<Record<string, string>> = {
   publish: 'cloud_upload', republish: 'sync', keys: 'key', invite: 'person_add',
   follow: 'notifications', hide: 'visibility_off', remove: 'delete', shelf: 'bookmark',
   'to shelf': 'bookmark', back: 'arrow_back', cancel: 'close',
+  images: 'photo_library', generate: 'auto_awesome',
 }
 
 describe('slot icons', () => {
@@ -466,6 +468,8 @@ describe('slot icons', () => {
       const names = menu.slots.map(s => s.icon)
       expect(new Set(names).size, menu.name).toBe(names.length)
       expect(names).not.toContain(backIcon)
+      // the many-tiles stack's glyph is the middle's alone
+      expect(names).not.toContain(manyIcon)
       expect(names).not.toContain(cancelIcon)
     }
   })

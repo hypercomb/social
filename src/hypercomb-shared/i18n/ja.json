@@ -203,6 +203,9 @@
   "quick-tray.drag": "ハイブへドラッグして配置 · Shift を押しながらで移動 · ポータルの行に重ねてそこへ追加",
   "quick-tray.appearance": "配置",
   "quick-tray.custody": "移動",
+  "quick-tray.selected": "選択中",
+  "quick-tray.unselect": "選択から外す",
+  "quick-tray.done": "完了",
   "pheromone.cue.mark": "付ける",
   "pheromone.cue.marked": "付いている",
   "pheromone.cue.unmark": "取り除く",
@@ -3436,5 +3439,16 @@
   "meeting.lobby-error": "カメラを起動できませんでした。",
   "meeting.lobby-saver": "節約",
   "meeting.lobby-auto": "自動",
-  "meeting.lobby-sharp": "高画質"
+  "meeting.lobby-sharp": "高画質",
+  "images.queue-of": "{total}件中{index}件目",
+  "images.skip": "スキップ ›",
+  "images.skip-title": "このタイルをスキップ",
+  "images.skip-next": "次: {cell}",
+  "images.skip-last": "最後のタイルです — ウォールを閉じます",
+  "images.none-next": "「{cell}」には選べる画像がありません — 次のタイルへ進みます。",
+  "quickmenu.images": "画像",
+  "quickmenu.generate": "生成",
+  "quickmenu.tiles": "タイル",
+  "quickmenu.many-tiles.one": "タイル {count} 枚",
+  "quickmenu.many-tiles.other": "タイル {count} 枚"
 }

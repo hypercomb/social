@@ -29,6 +29,7 @@ import {
   driftPose,
   HONEY,
   LAYOUT,
+  manyIcon,
   motionFor,
   ringSeed,
   SHEEN,
@@ -41,7 +42,7 @@ import {
 } from './quick-menu.honey.js'
 import { HONEY_ART_EFFECT, HONEY_ART_TILE, warmHoneyArt, type HoneyArt } from './quick-menu.honey-art.js'
 import { HONEY_BACKGROUNDS } from './quick-menu.backgrounds.js'
-import { currentOperands, operandNote } from './quick-menu.operands.js'
+import { currentOperands, manyCount, manyTilesWord, operandNote } from './quick-menu.operands.js'
 import {
   cellUnit,
   menuMetrics,
@@ -108,13 +109,19 @@ export type FlowerCell = {
    *  quick menu (`honey`) it is worn above the name, which stays. */
   icon?: string
   /** An option of the quick menu: the hive pours it in honey (hex-sdf, aShapeMode
-   *  3..7) instead of the page's own tile. Never the subject. */
+   *  3..7) instead of the page's own tile. Never the subject, except as the
+   *  many-tiles stack (`many`). */
   honey?: boolean
   /** The way back, in crystallised honey. */
   back?: boolean
   /** Which crafted background an option wears, 0..9 (backgroundFor): never
    *  the same twice in one flower. Absent on the way back and the subject. */
   art?: number
+  /** The middle stands for this many tiles (2 or more): instead of the subject's
+   *  own picture it is the stack — plain honey, never a picture, the hive glyph
+   *  and `N tiles` — so it reads as the set every verb reaches, and unlike both
+   *  an option and the way back. Still the subject: it never blooms. */
+  many?: number
 }
 
 type SlotView = {
@@ -185,6 +192,12 @@ export class QuickMenuLayer {
   #subject: string | null = null
   /** The flight has landed: the hive itself draws the flower (`render:flower`). */
   #bloomed = false
+  /** How many tiles the ring drawn in place speaks for (setMany); a flight's
+   *  count is read from its subject instead. */
+  #many = 0
+  /** The cell the in-place stack was last said to lie on ('' none), so the
+   *  announcement is only made when it changes. */
+  #stackAt = ''
   #slots = new Map<QuickMenuDirection, SlotView>()
   #byDirection = new Map<QuickMenuDirection, QuickMenuSlot>()
   #showing = false
@@ -254,6 +267,7 @@ export class QuickMenuLayer {
     this.#at = { q, r }
     this.#local = null
     this.#place()
+    this.#announceStack()
   }
 
   /** Centre the menu on a point in the render container's own space — the
@@ -261,6 +275,7 @@ export class QuickMenuLayer {
   placeLocal(x: number, y: number): void {
     this.#local = { x, y }
     this.#place()
+    this.#announceStack()
   }
 
   /** Fade the rest of the hive back (or restore it). The hex mesh's shader has
@@ -294,6 +309,19 @@ export class QuickMenuLayer {
     this.#subject = label
   }
 
+  /** The ring drawn in place sits on the hovered tile, which this layer is not
+   *  told; the input says how many tiles its middle stands for (0 or 1: the
+   *  tile itself, 2 or more: the stack). Cleared by hide(). */
+  setMany(count: number): void {
+    this.#many = count >= 2 ? count : 0
+  }
+
+  /** How many tiles the middle stands for now, 0 when it is one tile. A flight
+   *  reads it live from its subject, so the count is the one the verbs reach. */
+  #manyNow(): number {
+    return this.#subject ? manyCount(currentOperands(this.#subject)) : this.#many
+  }
+
   /** The flight has landed. From here the options are hive tiles in hive cells,
    *  drawn by the hive's own renderer, and this layer only says which. */
   bloom(): void {
@@ -307,9 +335,18 @@ export class QuickMenuLayer {
     const cellAt = (x: number, y: number) =>
       pixelToAxial(x - this.#offset.x, y - this.#offset.y, this.#geo.spacing, this.#flat)
     const cells: FlowerCell[] = []
-    // The tile wears how many it speaks for, so a verb on the ring never
-    // reads as acting on this tile alone when it will reach the rest of the set.
-    if (this.#subject) {
+    const many = this.#manyNow()
+    if (this.#subject && many) {
+      // Two or more tiles: the middle is the stack of them, not this tile's
+      // picture. It keeps the subject's label (the flower is still about the
+      // tile the hand is on) and says the count itself, so it wears no note.
+      cells.push({
+        ...cellAt(at.x, at.y), label: this.#subject, subject: true, many, honey: true, lit: this.#cueCentre,
+        ...(drawsAsGlyph(manyIcon) === true ? { icon: manyIcon } : {}),
+      })
+    } else if (this.#subject) {
+      // The tile wears how many it speaks for, so a verb on the ring never
+      // reads as acting on this tile alone when it will reach the rest of the set.
       const note = operandNote(this.#subject, currentOperands(this.#subject))
       cells.push({ ...cellAt(at.x, at.y), label: this.#subject, subject: true, lit: this.#cueCentre, ...(note ? { note } : {}) })
     }
@@ -445,6 +482,7 @@ export class QuickMenuLayer {
       root.visible = false
       this.#stopMotion()
       this.#place()
+      this.#announceStack()
       if (this.#bloomed) this.#paintFlower(pending)
       return
     }
@@ -455,6 +493,10 @@ export class QuickMenuLayer {
     const font = this.#font(metrics.radius, LAYOUT.textOnly.labelSize)
     const iconFont = this.#font(metrics.radius, LAYOUT.ring.labelSize)
     const lit = this.#lit
+    // Two or more tiles: the stack is laid over the hovered tile, as the flower
+    // lays it. It is already there when the ring opens, so it never blooms.
+    const many = this.#manyNow()
+    if (many) root.addChild(this.#stackNode(many, pending.definition.name, metrics.radius, metrics.flat, k, iconFont))
     // The six directions are the options. The tile already occupies the centre,
     // so the centre slot is not drawn on top of it.
     for (const direction of QUICK_MENU_RING) {
@@ -507,9 +549,50 @@ export class QuickMenuLayer {
       this.#style(direction, direction === lit)
     }
     this.#place()
+    this.#announceStack()
     this.#still = prefersReducedMotion()
     this.#pose(now())
     this.#runMotion()
+  }
+
+  /** Where the in-place stack lies, said to the names (quick-menu:many-centre).
+   *  Tile names are DOM text over the canvas and only step aside for a flower,
+   *  so without this the hovered tile's own name sat on top of "N tiles" and
+   *  the middle read as that one tile. Only a stack on a tile's own cell is
+   *  said: a flight's flower covers its names itself, and a ring centred on a
+   *  pathway (placeLocal) sits on no tile. */
+  #announceStack(): void {
+    const at = this.#at
+    const drawn = this.#showing && !!this.#root && this.#subject === null && !this.#local && !!at && this.#manyNow() > 0
+    const key = drawn ? `${at!.q},${at!.r}` : ''
+    if (key === this.#stackAt) return
+    this.#stackAt = key
+    EffectBus.emit('quick-menu:many-centre', { cell: drawn ? { q: at!.q, r: at!.r } : null })
+  }
+
+  /** The many-tiles stack for the ring drawn in place: plain honey that never
+   *  lights, the hive glyph above `N tiles`. Not a slot: nothing aims at it,
+   *  the bloom passes it by, and it is freed with the root's other children. */
+  #stackNode(count: number, menu: string, radius: number, flat: boolean, k: number, font: TextStyle): Container {
+    const node = new Container()
+    const hex = new Graphics()
+    drawHoney(hex, radius, flat, { lit: false, back: false }, ringSeed(0, menu))
+    node.addChild(hex)
+    const glyph = slotGlyph(manyIcon)
+    if (glyph) {
+      const icon = new Graphics().path(glyphPath(glyph)).fill(0xffffff)
+      icon.scale.set(k * LAYOUT.centre.iconScale)
+      icon.position.set(LAYOUT.centre.iconX * k, LAYOUT.centre.iconY * k)
+      icon.tint = HONEY.ink.rest
+      node.addChild(icon)
+    }
+    const text = new Text({ text: manyTilesWord(count), style: font.clone(), resolution: this.#textResolution(), roundPixels: true })
+    text.anchor.set(0.5)
+    text.position.set(0, (LAYOUT.centre.labelY - LAYOUT.centre.labelSize * 0.35) * k)
+    const max = k * LAYOUT.usableIcon
+    if (text.width > max && text.width > 0) text.scale.set(max / text.width)
+    node.addChild(text)
+    return node
   }
 
   highlight(direction: QuickMenuDirection | null): void {
@@ -529,6 +612,7 @@ export class QuickMenuLayer {
     this.#pending = null
     this.#local = null
     this.#subject = null
+    this.#many = 0
     if (this.#bloomed) EffectBus.emit('render:flower', { cells: null })
     this.#bloomed = false
     this.dim(false)
@@ -536,6 +620,7 @@ export class QuickMenuLayer {
       this.#clearRoot(this.#root)
       this.#root.visible = false
     }
+    this.#announceStack()
   }
 
   /** Take every slot off the root AND free it: a Graphics keeps its draw data

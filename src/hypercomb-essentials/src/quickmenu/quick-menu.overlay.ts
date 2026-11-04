@@ -71,6 +71,7 @@ import {
   slotsByDirection,
   type QuickMenuDefinition,
   type QuickMenuDirection,
+  type QuickMenuSlot,
 } from './quick-menu.types.js'
 import {
   BODY_BACK,
@@ -89,6 +90,7 @@ import {
   bloomDelayMs,
   cancelIcon,
   emptyIcon,
+  manyIcon,
   estimateWidth,
   fitLabel,
   hexPoints,
@@ -113,8 +115,21 @@ import {
 } from './quick-menu.honey.js'
 import { HONEY_ART_BOX, warmHoneyArt, type HoneyArt } from './quick-menu.honey-art.js'
 import { HONEY_BACKGROUNDS } from './quick-menu.backgrounds.js'
+import { MANY_TILES_MENU, manyTilesWord } from './quick-menu.operands.js'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
+
+/** The many-tiles ring declares no centre (on the hive the middle is the stack,
+ *  never an option), but drawn here there is no tile in the middle, so the ring
+ *  draws one: the stack, worn as plain honey with its count. Drawing only — the
+ *  input reads slots from the definition, so releasing on it fires nothing. */
+const MANY_CENTRE: QuickMenuSlot = {
+  direction: 'centre',
+  label: 'tiles',
+  labelKey: 'quickmenu.tiles',
+  icon: manyIcon,
+  action: { kind: 'menu', menu: MANY_TILES_MENU },
+}
 
 const CURSOR = 'rgb(126,182,214)'
 const FOCUS_EASE_MS = 120
@@ -233,6 +248,8 @@ export class QuickMenuOverlay {
   #centreLabel = ''
   #cancelArmed = false
   #override = false
+  /** The centre is the many-tiles stack for this summon (setCentreMany). */
+  #many = false
   /** Reduced motion is read at every paint; the drip only runs when this is true. */
   #motion = true
   /** `--md-is-light`, read once at warm: the contact edge is the only thing that follows the theme. */
@@ -597,6 +614,7 @@ export class QuickMenuOverlay {
 
     const steel = this.#light ? HONEY.steelLight : HONEY.steel
     const declared = slotsByDirection(definition)
+    if (definition.name === MANY_TILES_MENU && !declared.has('centre')) declared.set('centre', MANY_CENTRE)
     const slots = new Map<QuickMenuDirection, SlotElements>()
 
     for (const direction of ['centre', ...QUICK_MENU_RING] as QuickMenuDirection[]) {
@@ -884,6 +902,7 @@ export class QuickMenuOverlay {
     this.#centreLabel = built.slots.get('centre')?.label ?? ''
     this.#cancelArmed = false
     this.#override = false
+    this.#many = false
     this.#highlight = null
 
     for (const [direction, elements] of built.slots) {
@@ -951,6 +970,24 @@ export class QuickMenuOverlay {
     this.#style('centre', elements, this.#highlight === 'centre')
   }
 
+  /**
+   * Make the centre the many-tiles stack for THIS summon: the hive glyph and
+   * `N tiles`, in plain honey that never lights, so it reads as the set every
+   * verb reaches and never as an option or the way back. Under 2 it is the
+   * centre as built again. Per summon like the override: `paint` restores it.
+   */
+  setCentreMany(count: number): void {
+    if (!this.#active) return
+    const elements = this.#active.slots.get('centre')
+    if (!elements) return
+    this.#many = count >= 2
+    const shown = this.#many ? manyTilesWord(count) : elements.label
+    this.#centreLabel = shown
+    if (this.#cancelArmed) return
+    this.#setText(elements, shown)
+    this.#style('centre', elements, false)
+  }
+
   #cancelLabel = 'cancel'
 
   /** Supply the localised word for the armed centre. */
@@ -975,6 +1012,9 @@ export class QuickMenuOverlay {
   #style(direction: QuickMenuDirection, elements: SlotElements, on: boolean): void {
     const isBack = direction === this.#backDirection
     const isCancel = direction === 'centre' && this.#cancelArmed
+    // The stack is never lit: it is what the verbs act on, not one of them.
+    const many = direction === 'centre' && this.#many && !isCancel && !isBack
+    if (many) on = false
     const kind: SlotKind = isCancel
       ? (on ? 'cancelLit' : 'cancel')
       : isBack
@@ -982,7 +1022,7 @@ export class QuickMenuOverlay {
         : (on ? 'lit' : 'rest')
     const override = direction === 'centre' && this.#override && !isCancel && !isBack
     const motion = kind === 'lit' && this.#motion
-    const key = `${kind}|${motion ? 1 : 0}|${override ? 1 : 0}|${elements.shown}`
+    const key = `${kind}|${motion ? 1 : 0}|${override ? 1 : 0}|${many ? 1 : 0}|${elements.shown}`
     if (elements.key === key) return
     elements.key = key
 
@@ -999,7 +1039,7 @@ export class QuickMenuOverlay {
         const isLit = kind === 'lit'
         elements.hex.setAttribute('fill', elements.refs.body)
         elements.hex.setAttribute('fill-opacity', String(HONEY.bodyAlpha))
-        if (elements.artRest) {
+        if (elements.artRest && !many) {
           // the picture carries the body; lit fades its pre-lit copy in, and
           // the lit polygon keeps only its halo
           this.#setArt(elements, true, isLit)
@@ -1007,6 +1047,8 @@ export class QuickMenuOverlay {
           if (isLit) elements.honey.removeAttribute('display')
           else elements.honey.setAttribute('display', 'none')
         } else {
+          // the stack wears no picture: plain honey sets it apart from every option
+          this.#setArt(elements, false, false)
           this.#setLit(elements, isLit, elements.refs.lit, isLit)
           elements.honey.removeAttribute('display')
         }
@@ -1047,7 +1089,7 @@ export class QuickMenuOverlay {
     }
 
     // ── icon and label ──
-    const glyph = isCancel ? slotGlyph(cancelIcon) : isBack ? slotGlyph(backIcon) : override ? undefined : elements.glyph
+    const glyph = isCancel ? slotGlyph(cancelIcon) : isBack ? slotGlyph(backIcon) : many ? slotGlyph(manyIcon) : override ? undefined : elements.glyph
     const centreCell = elements.isCentre
     if (glyph) {
       if (elements.glyphShown !== glyph) {
@@ -1115,6 +1157,7 @@ export class QuickMenuOverlay {
     this.#backDirection = null
     this.#cancelArmed = false
     this.#override = false
+    this.#many = false
     if (this.#host) this.#host.style.display = 'none'
   }
 }

@@ -200,6 +200,20 @@ export function flowerSlots(cells: readonly { x: number; y: number; subject?: bo
   })
 }
 
+/** Is this flower cell poured in honey? Every option and the way back are; the
+ *  subject keeps its own tile, except when it stands for two or more tiles
+ *  (`many`): then it is the stack, poured in plain honey. */
+export function pouredInHoney(cell: { honey?: boolean; subject?: boolean; many?: number }): boolean {
+  return !!cell.honey && (!cell.subject || (cell.many ?? 0) >= 2)
+}
+
+/** The many-tiles stack, from the subject's place: still for, and the light passes
+ *  it by — only the ring blooms. Plain honey (3), pre-lit while the middle blinks
+ *  for the pointer (5, never the dripping 7: it is not an option being aimed at). */
+export function manyHoneyMode(lit: boolean | undefined): 3 | 5 {
+  return lit ? 5 : 3
+}
+
 /** What makes two paints the same ring: where its tiles are and what they are,
  *  never which one is lit (a highlight never blooms again). */
 export function flowerRingKey(cells: readonly { q: number; r: number; label: string; subject?: boolean; back?: boolean; honey?: boolean }[]): string {

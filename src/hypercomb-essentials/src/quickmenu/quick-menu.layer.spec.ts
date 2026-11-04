@@ -391,3 +391,156 @@ describe('the ring in motion', () => {
     }
   })
 })
+
+describe('the many-tiles middle', () => {
+  type Cell = { label: string; subject?: boolean; honey?: boolean; many?: number; note?: string; art?: number; lit?: boolean }
+  type Ioc = { get: (key: string) => unknown }
+  const original = (globalThis as { ioc?: Ioc }).ioc
+  const select = (labels: string[]): void => {
+    ;(globalThis as { ioc?: Ioc }).ioc = {
+      get: (key: string) => key.endsWith('SelectionService') ? { selected: new Set(labels) } : undefined,
+    }
+  }
+  afterEach(() => { (globalThis as { ioc?: Ioc }).ioc = original })
+
+  function cellsOf(run: () => void): Cell[] {
+    let cells: Cell[] = []
+    const emit = vi.spyOn(EffectBus, 'emit')
+    emit.mockImplementation(((effect: string, payload: unknown) => {
+      if (effect === 'render:flower') cells = (payload as { cells: Cell[] | null }).cells ?? []
+    }) as never)
+    run()
+    emit.mockRestore()
+    return cells
+  }
+
+  function flowerOver(subject: string): Cell[] {
+    const l = new QuickMenuLayer()
+    EffectBus.emit('render:host-ready', { container: new Container() })
+    l.setSubject(subject)
+    l.place(0, 0)
+    l.show(registry.byName('selection:many')!, labelOf, null, 'back')
+    return cellsOf(() => l.bloom())
+  }
+
+  it('a subject in a set of three is the stack: many, honey, its own label, no note, no picture', () => {
+    select(['a', 'b', 'sunrise'])
+    const middle = flowerOver('sunrise').find(c => c.subject)!
+    expect(middle).toMatchObject({ label: 'sunrise', subject: true, many: 3, honey: true })
+    expect(middle.note).toBeUndefined()
+    expect(middle.art).toBeUndefined()
+  })
+
+  it('a tile held outside the set joins it, so the stack counts it too', () => {
+    select(['a', 'b'])
+    expect(flowerOver('sunrise').find(c => c.subject)!.many).toBe(3)
+  })
+
+  it('a lone tile is the tile itself, as before', () => {
+    select([])
+    const middle = flowerOver('sunrise').find(c => c.subject)!
+    expect(middle.many).toBeUndefined()
+    expect(middle.honey).toBeUndefined()
+  })
+
+  it('the options round the stack are the many ring\'s five, each its own picture', () => {
+    select(['a', 'sunrise'])
+    const options = flowerOver('sunrise').filter(c => c.honey && !c.subject)
+    expect(options.map(c => c.label).sort()).toEqual(['generate', 'hide', 'images', 'remove', 'shelf'])
+    expect(new Set(options.map(c => c.art)).size).toBe(5)
+  })
+
+  it('the ring drawn in place lays the stack over the tile, outside the slots, and never blooms it', () => {
+    const container = new Container()
+    const l = new QuickMenuLayer()
+    EffectBus.emit('render:host-ready', { container })
+    l.place(0, 0)
+    l.setMany(4)
+    l.show(registry.byName('selection:many')!, labelOf, null, 'back')
+    type Kid = { text?: string; style?: unknown; glyph?: unknown; scale: { x: number }; alpha: number; children: Kid[] }
+    const root = (container as unknown as { children: { children: Kid[] }[] }).children.at(-1)!
+    // five options and the stack
+    expect(root.children).toHaveLength(6)
+    const stack = root.children[0]
+    expect(stack.children.some(c => c.glyph)).toBe(true)
+    expect(stack.scale.x).toBe(1)
+    expect(stack.alpha).toBe(1)
+    // nothing aims at it: the middle is not an option
+    l.highlight('centre')
+    expect(l.slotFor('centre')).toBeUndefined()
+    // and hide forgets the count
+    l.hide()
+    l.show(registry.byName('selection:many')!, labelOf, null, 'back')
+    expect((container as unknown as { children: { children: Kid[] }[] }).children.at(-1)!.children).toHaveLength(5)
+  })
+
+  it('under two, the ring drawn in place leaves the tile uncovered', () => {
+    const container = new Container()
+    const l = new QuickMenuLayer()
+    EffectBus.emit('render:host-ready', { container })
+    l.place(0, 0)
+    l.setMany(1)
+    l.show(ROOT, labelOf, null, 'back')
+    expect((container as unknown as { children: { children: unknown[] }[] }).children.at(-1)!.children).toHaveLength(6)
+  })
+
+  function stackSays(run: () => void): unknown[] {
+    const said: unknown[] = []
+    const emit = vi.spyOn(EffectBus, 'emit')
+    emit.mockImplementation(((effect: string, payload: unknown) => {
+      if (effect === 'quick-menu:many-centre') said.push(payload)
+    }) as never)
+    run()
+    emit.mockRestore()
+    return said
+  }
+
+  it('the stack drawn in place says which cell it covers, once, and lets it go on hide', () => {
+    const l = new QuickMenuLayer()
+    EffectBus.emit('render:host-ready', { container: new Container() })
+    const said = stackSays(() => {
+      l.place(2, -1)
+      l.setMany(3)
+      l.show(registry.byName('selection:many')!, labelOf, null, 'back')
+      // a redraw of the same ring on the same tile says nothing new
+      EffectBus.emit('render:geometry-changed', { circumRadiusPx: 40, spacing: 46 })
+      l.highlight('east')
+      l.hide()
+    })
+    expect(said).toEqual([{ cell: { q: 2, r: -1 } }, { cell: null }])
+  })
+
+  it('the stack moving to another tile says the new cell', () => {
+    const l = new QuickMenuLayer()
+    EffectBus.emit('render:host-ready', { container: new Container() })
+    const said = stackSays(() => {
+      l.place(0, 0); l.setMany(2); l.show(registry.byName('selection:many')!, labelOf, null, 'back')
+      l.place(1, 0); l.setMany(2); l.show(registry.byName('selection:many')!, labelOf, null, 'back')
+    })
+    expect(said).toEqual([{ cell: { q: 0, r: 0 } }, { cell: { q: 1, r: 0 } }])
+  })
+
+  it('dropping under two lets the tile go, and a lone ring never says anything', () => {
+    const l = new QuickMenuLayer()
+    EffectBus.emit('render:host-ready', { container: new Container() })
+    expect(stackSays(() => {
+      l.place(0, 0); l.setMany(2); l.show(registry.byName('selection:many')!, labelOf, null, 'back')
+      l.setMany(0); l.show(ROOT, labelOf, null, 'back')
+    })).toEqual([{ cell: { q: 0, r: 0 } }, { cell: null }])
+    const lone = new QuickMenuLayer()
+    expect(stackSays(() => {
+      lone.place(0, 0); lone.setMany(1); lone.show(ROOT, labelOf, null, 'back'); lone.hide()
+    })).toEqual([])
+  })
+
+  it('a flight never says it: its flower covers the names itself', () => {
+    select(['a', 'b', 'sunrise'])
+    const l = new QuickMenuLayer()
+    EffectBus.emit('render:host-ready', { container: new Container() })
+    expect(stackSays(() => {
+      l.setSubject('sunrise'); l.place(0, 0)
+      l.show(registry.byName('selection:many')!, labelOf, null, 'back')
+      l.bloom(); l.hide()
+    })).toEqual([])
+  })
+})

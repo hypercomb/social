@@ -48,6 +48,20 @@
 // button can say the shelf still holds something. The rows last the session;
 // the fold is sticky — one current record in the `shelf:state` pool, read
 // back on boot (a press that lands before the read wins).
+//
+// THE SELECTION SHELF takes the same band while two or more tiles are
+// selected: it lists what the next act will fall on — the multi-tile quick
+// menu, the image wall in turn — BEFORE anything fires, so a participant sees
+// the set and can trim it (a row's × takes that tile out of the selection,
+// nothing else). It is the shelf's slot, never a second strip: the shelf's
+// rows are kept as they were and come back when the selection drops below
+// two. It has no fold — it is what you are about to act on — and no drag: a
+// selected tile is already on the hive. It never speaks on `shelf:changed`
+// (the controls bar and the chat count what is HELD there); it says what it
+// lists on `selection-shelf:changed`. While the image wall walks the set
+// (`images:queue`), the tile being chosen for is lit and the ones done are
+// ticked. The switch between the two is taken on a frame, so a selection
+// rebuilt in a burst never shows the shelf for the instant it is empty.
 
 import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { dropEntries, entryKey, takeEntries, type TrayEntry } from './quick-tray.entries.js'
@@ -74,10 +88,20 @@ type StoreLike = {
   putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey: undefined, options: { keep: 'current' }) => Promise<unknown>
 }
 type PlacementLike = { propsSigAt?: (segments: readonly string[]) => Promise<string | null> }
+type SelectionLike = EventTarget & { selected?: ReadonlySet<string>; remove?: (label: string) => void }
+/** The image wall walking the selection, one tile at a time (sharing/image-choice.drone.ts). */
+type ImageQueue = { segments?: string[]; labels?: string[]; done?: string[]; current?: string | null }
 
 type IocLike = { get?: (k: string) => unknown; whenReady?: (k: string, cb: (v: unknown) => void) => void }
 const ioc = (): IocLike | undefined => (globalThis as { ioc?: IocLike }).ioc
 const STORE_KEY = '@hypercomb.social/Store'
+const SELECTION_KEY = '@diamondcoreprocessor.com/SelectionService'
+/** Fewer selected than this is a single tile's business: the shelf stays. */
+const SELECTION_SHELF_MIN = 2
+
+const here = (): string[] =>
+  ((ioc()?.get?.('@hypercomb.social/Lineage') as LineageLike | undefined)?.explorerSegments?.() ?? [])
+    .map(s => String(s ?? '').trim()).filter(Boolean)
 /** Where the fold is kept: one current record, written only by a press. */
 const STATE_POOL = 'shelf:state'
 
@@ -115,6 +139,9 @@ const resolveThumb = async (entry: TrayEntry): Promise<string | null> => {
 const STYLE = `
 :host{position:fixed;inset:0;z-index:59998;pointer-events:none;
   --shelf:73,214,208;
+  /* The selection shelf's accent: the quick menu's honey, so the strip and the
+     ring that acts on it read as one gesture, apart from the cyan shelf. */
+  --pick:255,206,110;
   --shelf-top:calc(var(--hc-header-anchor,0px) + 0.375rem);
   --shelf-left:calc(max(var(--hc-controls-left,0px),var(--hc-inset-left,0px),var(--hc-seam-right,0px)) + 0.5rem);
   --shelf-right:calc(var(--hc-inset-right,0px) + 0.5rem);}
@@ -174,6 +201,12 @@ const STYLE = `
 .ghost .verb{font-family:var(--hc-mono,system-ui);font-size:0.65rem;letter-spacing:0.08em;text-transform:uppercase;color:rgb(var(--shelf));}
 .ghost.custody .verb{color:var(--hc-window-warn,#ffc46b);}
 .ghost .name{overflow:hidden;text-overflow:ellipsis;}
+.shelf.picks{--shelf:var(--pick);grid-template-columns:auto minmax(0,1fr);padding-right:0.95rem;}
+.shelf.picks::before{--cut:rgba(var(--pick),0.5);}
+.pick{cursor:default;}
+.pick.current{border-color:rgba(var(--pick),0.9);background:rgba(var(--pick),0.2);box-shadow:0 0 0 1px rgba(var(--pick),0.5);}
+.pick.done{opacity:0.7;}
+.pick .mark{color:rgb(var(--pick));font-size:0.85rem;line-height:1;}
 `
 
 /** Chevrons drawn inline: an icon font does not reach into a shadow root. */
@@ -205,6 +238,15 @@ export class QuickTrayElement extends HTMLElement {
   /** Open only because a take just landed, and not yet hovered. */
   #peeking = false
   #peekTimer: ReturnType<typeof setTimeout> | undefined
+  /** The selection as last painted, in selection order. Two or more and the
+   *  band is the selection shelf. */
+  #picks: readonly string[] = []
+  /** The page the picks were read on: a selection is a set of names on it. */
+  #picksPage: readonly string[] = []
+  #pickThumbs = new Map<string, string>()
+  #selection: SelectionLike | null = null
+  #selectionFrame = 0
+  #queue: ImageQueue | null = null
 
   constructor() {
     super()
@@ -213,6 +255,9 @@ export class QuickTrayElement extends HTMLElement {
 
   /** What the shelf holds — read by specs and the bee, never written from outside. */
   get entries(): readonly TrayEntry[] { return this.#entries }
+
+  /** What the selection shelf lists — empty while the shelf has the band. */
+  get picks(): readonly string[] { return this.#picking() ? this.#picks : [] }
 
   connectedCallback(): void {
     this.#offs.push(EffectBus.on<{ label?: string; segments?: string[]; sig?: string; loose?: true }>('quick-tray:take', (p) => {
@@ -242,10 +287,31 @@ export class QuickTrayElement extends HTMLElement {
     this.#offs.push(EffectBus.on<{ open?: boolean } | undefined>('shelf:toggle', (p) => {
       this.#press(typeof p?.open === 'boolean' ? !p.open : !this.#folded)
     }))
+    // The image wall walking the selection says where it is on every step;
+    // the rows tick and light from it. Last-value, so a shelf that mounts
+    // mid-walk still marks it.
+    this.#offs.push(EffectBus.on<ImageQueue>('images:queue', (q) => {
+      this.#queue = q && Array.isArray(q.labels) && q.labels.length > 0 ? q : null
+      if (this.#picking()) this.#render()
+    }))
+    // A tile in the selection that took a new picture (the wall walking it)
+    // must show that picture now: the cached thumbnail is the old one, and
+    // nothing else would let it go while the selection lasts.
+    this.#offs.push(EffectBus.on<{ cell?: string; label?: string; segments?: readonly string[] }>('tile:saved', (p) => {
+      const label = p?.cell ?? p?.label
+      if (!label || !this.#picks.includes(label)) return
+      if (Array.isArray(p?.segments) && p.segments.join('\u0000') !== this.#picksPage.join('\u0000')) return
+      const key = entryKey({ label, sourceSegments: this.#picksPage })
+      const url = this.#pickThumbs.get(key)
+      if (url) { URL.revokeObjectURL(url); this.#pickThumbs.delete(key) }
+      if (this.#picking()) void this.#loadPickThumb(label, this.#picksPage)
+    }))
     window.addEventListener('resize', this.#onResize)
     this.addEventListener('pointerenter', this.#endPeek)
+    this.#watchSelection()
     this.#render()
     this.#announce()
+    this.#announcePicks()
     this.#recallFold()
   }
 
@@ -253,9 +319,21 @@ export class QuickTrayElement extends HTMLElement {
     for (const off of this.#offs.splice(0)) off()
     window.removeEventListener('resize', this.#onResize)
     this.removeEventListener('pointerenter', this.#endPeek)
+    this.#selection?.removeEventListener('change', this.#onSelectionChange)
+    this.#selection = null
+    cancelAnimationFrame(this.#selectionFrame)
+    this.#selectionFrame = 0
+    for (const url of this.#pickThumbs.values()) URL.revokeObjectURL(url)
+    this.#pickThumbs.clear()
+    // Forget what was listed too, so a remount with the same selection is a
+    // change: it repaints and loads its pictures again.
+    this.#picks = []
+    this.#picksPage = []
     clearTimeout(this.#peekTimer)
     cancelAnimationFrame(this.#measureFrame)
     EffectBus.emit('viewport:inset', { owner: INSET_OWNER, side: 'top', size: 0 })
+    // Last-value: a late reader must not be told a shelf is on screen.
+    EffectBus.emit('selection-shelf:changed', { labels: [], shown: false })
     this.#trailingClickCleanup?.()
     this.#detachDrag()
     this.#ghost?.remove()
@@ -319,9 +397,134 @@ export class QuickTrayElement extends HTMLElement {
     this.#render()
   }
 
+  // ── the selection shelf ──────────────────────────────────────────────────
+
+  #picking(): boolean { return this.#picks.length >= SELECTION_SHELF_MIN }
+
+  /** Follow the selection. The service may register after the shelf mounts,
+   *  so this waits for it; a shelf taken off the page meanwhile stays off. */
+  #watchSelection(): void {
+    const attach = (service: SelectionLike | undefined): void => {
+      if (!service || !this.isConnected || this.#selection === service) return
+      this.#selection?.removeEventListener('change', this.#onSelectionChange)
+      this.#selection = service
+      service.addEventListener('change', this.#onSelectionChange)
+      // Nothing is on the band yet that a half-built set could flash through,
+      // so the first read is painted at once.
+      this.#commitPicks()
+    }
+    const container = ioc()
+    const service = container?.get?.(SELECTION_KEY) as SelectionLike | undefined
+    if (service) attach(service)
+    else container?.whenReady?.(SELECTION_KEY, v => attach(v as SelectionLike))
+  }
+
+  /** A selection can be rebuilt as a burst of announcements (cleared, then
+   *  added to one by one). Read it once, on the next frame, so the band shows
+   *  where the burst ended and never the empty set it passed through. */
+  #onSelectionChange = (): void => {
+    if (this.#selectionFrame) return
+    this.#selectionFrame = requestAnimationFrame(() => {
+      this.#selectionFrame = 0
+      this.#commitPicks()
+    })
+  }
+
+  #commitPicks(): void {
+    const next = [...(this.#selection?.selected ?? [])]
+    const page = here()
+    const same = next.length === this.#picks.length && next.every((label, i) => label === this.#picks[i])
+      && page.join('\u0000') === this.#picksPage.join('\u0000')
+    if (same) return
+    const wasPicking = this.#picking()
+    this.#picks = next
+    this.#picksPage = page
+    // A picture whose tile left the selection is let go now, not on unmount.
+    const keep = new Set(next.map(label => entryKey({ label, sourceSegments: page })))
+    for (const [key, url] of this.#pickThumbs) {
+      if (!keep.has(key)) { URL.revokeObjectURL(url); this.#pickThumbs.delete(key) }
+    }
+    // The band changes hands: a shelf row in flight has nowhere to land.
+    if (!wasPicking && this.#picking()) this.#endDrag()
+    if (this.#picking()) for (const label of next) void this.#loadPickThumb(label, page)
+    this.#render()
+    this.#announcePicks()
+  }
+
+  async #loadPickThumb(label: string, page: readonly string[]): Promise<void> {
+    const key = entryKey({ label, sourceSegments: page })
+    if (this.#pickThumbs.has(key)) return
+    const url = await resolveThumb({ label, sourceSegments: [...page] })
+    if (!url) return
+    const still = this.#picks.includes(label) && page.join('\u0000') === this.#picksPage.join('\u0000')
+    if (!still || this.#pickThumbs.has(key)) { URL.revokeObjectURL(url); return }
+    this.#pickThumbs.set(key, url)
+    if (this.#picking()) this.#render()
+  }
+
+  /** What the selection shelf lists, apart from `shelf:changed`: the shelf's
+   *  readers count what is held, and a selection is not held. */
+  #announcePicks(): void {
+    const shown = this.#picking()
+    EffectBus.emit('selection-shelf:changed', { labels: shown ? [...this.#picks] : [], shown })
+  }
+
+  /** The × on a selection row: that tile leaves the selection. The service
+   *  announces it, and the band follows on the next frame. */
+  #unpick(label: string | undefined): void {
+    if (label) this.#selection?.remove?.(label)
+  }
+
+  #renderPicks(): void {
+    const queue = this.#queue
+    const done = new Set(queue?.done ?? [])
+    const current = queue?.current ?? null
+    const remove = esc(t('quick-tray.unselect', 'Take it out of the selection'))
+    const doneWord = esc(t('quick-tray.done', 'done'))
+    const rows = this.#picks.map((label, index) => {
+      const thumb = this.#pickThumbs.get(entryKey({ label, sourceSegments: this.#picksPage }))
+      const face = thumb
+        ? `<span class="thumb"><img src="${thumb}" alt="" draggable="false"></span>`
+        : `<span class="glyph" aria-hidden="true">⬢</span>`
+      const isDone = done.has(label)
+      const state = `${isDone ? ' done' : ''}${current === label ? ' current' : ''}`
+      const mark = isDone ? `<span class="mark" title="${doneWord}" aria-label="${doneWord}">✓</span>` : ''
+      return `<li class="row pick${state}" data-pick="${index}" tabindex="0"${current === label ? ' aria-current="true"' : ''}>
+        ${face}<span class="label">${esc(label)}</span>${mark}
+        <button class="remove" type="button" data-pick="${index}" tabindex="-1" aria-label="${remove}: ${esc(label)}" title="${remove}">×</button>
+      </li>`
+    }).join('')
+    const title = esc(t('quick-tray.selected', 'Selected'))
+    // No fold: this is the set the next act falls on, and hiding it would hide
+    // what is about to change.
+    this.#root.innerHTML = `<style>${STYLE}</style>
+      <section class="shelf picks" aria-label="${title}" data-consumes-wheel>
+        <span class="legend"><span class="word">${title}</span><span class="count">${this.#picks.length}</span></span>
+        <ul class="rows" aria-label="${title}">${rows}</ul>
+      </section>`
+    for (const row of this.#root.querySelectorAll<HTMLLIElement>('.pick')) {
+      row.addEventListener('keydown', (e) => {
+        if (e.key !== 'Delete' && e.key !== 'Backspace') return
+        e.preventDefault()
+        this.#unpick(this.#picks[Number(row.dataset['pick'])])
+      })
+    }
+    for (const button of this.#root.querySelectorAll<HTMLButtonElement>('.pick .remove')) {
+      button.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.#unpick(this.#picks[Number(button.dataset['pick'])])
+      })
+    }
+    this.#wireWheel()
+    this.#reserve()
+  }
+
   // ── paint ────────────────────────────────────────────────────────────────
 
   #render(): void {
+    // Two or more selected: the band is the selection's, whatever the shelf
+    // holds or however it is folded. The shelf's rows wait, untouched.
+    if (this.#picking()) { this.#renderPicks(); return }
     // Nothing held, nothing shown: an empty shelf is a band with no use.
     if (this.#folded || this.#entries.length === 0) {
       this.#root.innerHTML = `<style>${STYLE}</style>`
@@ -369,7 +572,13 @@ export class QuickTrayElement extends HTMLElement {
         if (entry) this.letGo(new Set([entryKey(entry)]))
       })
     }
-    // A wheel over the rows scrolls them sideways, so a long shelf reads with a mouse.
+    this.#wireWheel()
+    this.#wireFold()
+    this.#reserve()
+  }
+
+  /** A wheel over the rows scrolls them sideways, so a long shelf reads with a mouse. */
+  #wireWheel(): void {
     this.#root.querySelector('.rows')?.addEventListener('wheel', (e) => {
       const rowsEl = e.currentTarget as HTMLElement
       const ev = e as WheelEvent
@@ -377,16 +586,16 @@ export class QuickTrayElement extends HTMLElement {
       rowsEl.scrollLeft += ev.deltaY
       ev.preventDefault()
     }, { passive: false })
-    this.#wireFold()
-    this.#reserve()
   }
 
   /** Hold the band under the shelf on the canvas, measured after layout. A
-   *  folded shelf holds nothing. */
+   *  folded shelf holds nothing. Both shelves hold it under ONE owner, so the
+   *  hive does not jump when they trade places. */
   #reserve(): void {
     cancelAnimationFrame(this.#measureFrame)
     this.#measureFrame = requestAnimationFrame(() => {
-      const shelf = this.#folded ? null : this.#root.querySelector('.shelf')
+      // A folded shelf paints no band; the selection shelf paints one whatever the fold.
+      const shelf = this.#root.querySelector('.shelf')
       const size = shelf ? Math.round(shelf.getBoundingClientRect().bottom + INSET_GAP) : 0
       if (size === this.#reserved) return
       this.#reserved = size
@@ -569,17 +778,16 @@ export class QuickTrayElement extends HTMLElement {
     const overlay = ioc()?.get?.('@diamondcoreprocessor.com/TileOverlayDrone') as OverlayLike | undefined
     const exact = overlay?.dropTargetAtClient?.(event.clientX, event.clientY) ?? null
     const label = exact?.label ?? overlay?.labelAtClient?.(event.clientX, event.clientY) ?? null
-    const here = ((ioc()?.get?.('@hypercomb.social/Lineage') as LineageLike | undefined)?.explorerSegments?.() ?? [])
-      .map(s => String(s ?? '').trim()).filter(Boolean)
+    const page = here()
 
     let targetSegments: string[]
     let targets: Record<string, number> | undefined
     if (label) {
       // Over a tile: INTO it — the incidence lands as that tile's child.
-      targetSegments = [...here, label]
+      targetSegments = [...page, label]
     } else if (exact && !exact.occupied) {
       // Over an empty hex: here, in that seat.
-      targetSegments = here
+      targetSegments = page
       if (exact.index >= 0) targets = { [entry.label]: exact.index }
     } else {
       return   // not over the hive — nothing happens

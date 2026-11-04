@@ -411,16 +411,31 @@ export class TileSelectionDrone extends Drone {
   }
 
   #syncSelectionService(_axialKeyStr?: string): void {
-    const selection = this.resolve<{ clear(): void; add(label: string): void; remove(label: string): void }>('selection')
+    const selection = this.resolve<{
+      clear(): void; add(label: string): void; remove(label: string): void
+      replace?(labels: readonly string[], active?: string): void
+    }>('selection')
     if (!selection) return
-    // Sync the full selection set to SelectionService
-    this.#syncing = true
-    selection.clear()
+    const labels: string[] = []
     for (const key of this.#selected) {
       const entry = this.#occupiedByAxial.get(key)
-      if (entry) selection.add(entry.label)
+      if (entry) labels.push(entry.label)
     }
-    this.#syncing = false
+    // Sync the full selection set to SelectionService in ONE announcement.
+    // Clearing and adding back one by one told every listener the selection
+    // was empty halfway through — the selection shelf flashed back to the
+    // shelf on every arrow press. The active tile stays the first label, as
+    // the clear-then-add loop left it.
+    this.#syncing = true
+    try {
+      if (selection.replace) selection.replace(labels)
+      else {
+        selection.clear()
+        for (const label of labels) selection.add(label)
+      }
+    } finally {
+      this.#syncing = false
+    }
   }
 
   // ── layer setup ───────────────────────────────────────────────

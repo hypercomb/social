@@ -61,6 +61,7 @@ import { QuickMenuFlight } from './quick-menu.flight.js'
 import { isLongPressMenu } from '../navigation/browser-menu.js'
 import type { QuickMenuRegistry } from './quick-menu-registry.service.js'
 import { selectionMenuWanted } from './quick-menu.tile-menu.js'
+import { MANY_TILES_MENU, SELECTION_MENU, currentOperands, manyCount, menuForOperands } from './quick-menu.operands.js'
 import {
   HEX_RADIUS,
   OPPOSITE_DIRECTION,
@@ -132,8 +133,6 @@ type Level = {
   /** Screen location this level treats as its centre of focus. */
   readonly focus: { readonly x: number; readonly y: number }
 }
-
-const SELECTION_MENU = 'selection'
 
 export class QuickMenuInput {
   #overlay = new QuickMenuOverlay()
@@ -615,6 +614,8 @@ export class QuickMenuInput {
       document.documentElement.classList.remove('hc-quick-menu-active')
       const layer = this.#tiles()
       layer.place(this.#anchor.q, this.#anchor.r)
+      // Opened by name on a tile, the many-tiles ring's middle is the set itself.
+      layer.setMany(level.definition.name === MANY_TILES_MENU ? manyCount(currentOperands()) : 0)
       layer.show(level.definition, registry.label, level.back, backLabel)
       layer.highlight(this.#current)
       this.#painted = true
@@ -626,6 +627,9 @@ export class QuickMenuInput {
     // Only the ROOT ring carries the tile: descend and the centre is that
     // ring's own zero-travel verb again.
     this.#overlay.setCentreOverride(this.#levels.length === 1 ? this.#tileLabel : null)
+    // Off the hive the many-tiles ring has no tile in its middle: the overlay
+    // draws the stack there instead, with the count of the set it reaches.
+    if (level.definition.name === MANY_TILES_MENU) this.#overlay.setCentreMany(currentOperands(this.#tileLabel).length)
     this.#overlay.highlight(this.#current)
     this.#overlay.setCancelArmed(this.#leftDeadZone)
     this.#overlay.setCursor(this.#virtual.x - centre.x, this.#virtual.y - centre.y)
@@ -1209,11 +1213,15 @@ export class QuickMenuInput {
       return
     }
     const registry = get<QuickMenuRegistry>('@diamondcoreprocessor.com/QuickMenuRegistry')
-    const definition = registry?.byName(SELECTION_MENU)
+    const operands = currentOperands(this.#hoverCell.label)
+    const definition = this.#altMenu(registry, operands)
     if (!registry || !definition) return
     this.#altShown = true
     const layer = this.#tiles()
     layer.place(this.#hoverCell.q, this.#hoverCell.r)
+    // Drawn in place the ring has no subject (the hovered tile is under it), so
+    // it is told how many tiles its middle stands for.
+    layer.setMany(manyCount(operands))
     layer.show(definition, registry.label, null, '')
     this.#publishOnTile()
   }
@@ -1242,10 +1250,17 @@ export class QuickMenuInput {
     return this.#flight
   }
 
+  /** The ring an alt hold raises: the many-tiles ring once the verbs reach two
+   *  or more tiles (the hovered one joins a selection it is not in), else the
+   *  selection ring. A registry without the many ring keeps the selection one. */
+  #altMenu(registry: QuickMenuRegistry | undefined, operands: readonly string[]): QuickMenuDefinition | undefined {
+    return registry?.byName(menuForOperands(operands)) ?? registry?.byName(SELECTION_MENU)
+  }
+
   #startFlight(): void {
     const cell = this.#hoverCell
     const registry = get<QuickMenuRegistry>('@diamondcoreprocessor.com/QuickMenuRegistry')
-    const definition = registry?.byName(SELECTION_MENU)
+    const definition = cell ? this.#altMenu(registry, currentOperands(cell.label)) : undefined
     if (!cell || !definition || !this.#altDown || this.#pointerDown) return
     if (this.#armed || this.#sticky) return
     this.#flightFor().begin({ q: cell.q, r: cell.r }, definition, cell.label)

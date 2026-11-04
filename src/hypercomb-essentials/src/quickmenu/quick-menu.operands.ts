@@ -8,11 +8,20 @@
 // meant:
 //
 //   the tile is in the selection   the verb acts on the whole selection
-//   the tile is not in it          the verb acts on that tile alone
+//   the tile is not in it          the tile JOINS it: the selection and that tile
+//   nothing is selected            the verb acts on that tile alone
 //   no tile (a picked set's ring)  the verb acts on the selection
 //
-// Reading a selection that does not include the tile the menu is drawn round
-// would have the verb quietly act on tiles the participant is not looking at.
+// A tile held outside a selection used to stand alone, so the set the
+// participant had built was quietly dropped the moment alt landed on one more
+// tile. Holding alt over a tile is pointing at it; with a set already picked,
+// pointing means "and this one too". The tile goes last, so the order the set
+// was built in is the order the verbs walk it.
+//
+// Two or more operands raise the many-tiles ring (`selection:many`) instead of
+// the selection ring: its verbs are the ones that make sense for every tile at
+// once, and its middle is a stack of tiles with the count, never one tile's
+// picture.
 
 const SELECTION_KEY = '@diamondcoreprocessor.com/SelectionService'
 
@@ -24,11 +33,37 @@ type SelectionLike = {
 const selection = (): SelectionLike | undefined =>
   (globalThis as { ioc?: { get?: (k: string) => SelectionLike | undefined } }).ioc?.get?.(SELECTION_KEY)
 
+/** The ring for one tile, and the ring for a set of them. */
+export const SELECTION_MENU = 'selection'
+export const MANY_TILES_MENU = 'selection:many'
+
 /** The tiles a verb raised over `subject` acts on. Pure. */
 export function operandsOf(subject: string | null | undefined, selected: Iterable<string>): string[] {
   const picked = [...selected]
   if (!subject) return picked
-  return picked.includes(subject) ? picked : [subject]
+  return picked.includes(subject) ? picked : [...picked, subject]
+}
+
+/** The ring an alt hold raises for these operands: the many-tiles ring once
+ *  the verbs will reach two or more, the selection ring for one. Pure. */
+export function menuForOperands(operands: readonly string[]): string {
+  return operands.length >= 2 ? MANY_TILES_MENU : SELECTION_MENU
+}
+
+/** How many tiles the middle of the ring stands for: the count when it is two
+ *  or more (the middle is the stack of them), else 0 (the middle is the tile). */
+export function manyCount(operands: readonly string[]): number {
+  return operands.length >= 2 ? operands.length : 0
+}
+
+type I18nLike = { t?: (key: string, params?: Record<string, unknown>) => string }
+
+/** The word the stack in the middle wears: `3 tiles`. */
+export function manyTilesWord(count: number): string {
+  const i18n = (globalThis as { ioc?: { get?: (k: string) => I18nLike | undefined } }).ioc?.get?.('@hypercomb.social/I18n')
+  const key = 'quickmenu.many-tiles'
+  const said = i18n?.t?.(key, { count })
+  return said && said !== key && !said.startsWith(`${key}.`) ? said : `${count} tiles`
 }
 
 /** What the subject's tile says beside its name when the verb will reach more

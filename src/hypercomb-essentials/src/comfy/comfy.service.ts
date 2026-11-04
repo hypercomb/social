@@ -124,6 +124,9 @@ export interface ComfyRunRequest extends ComfyParams {
   fromTile?: boolean
   /** How many reviewers write a prompt. Jev picks one. */
   reviewers?: number
+  /** `/comfy each`: every selected tile is its own prompt — its name, not the
+   *  typed line — and receives its own picture. Implies `tiles`. */
+  each?: boolean
 }
 
 /** A tiles run paints every selected tile, one picture each. An empty
@@ -131,6 +134,11 @@ export interface ComfyRunRequest extends ComfyParams {
  *  a substrate candidate) does not paint the selection. */
 export const cellsToPaint = (makeTiles: boolean, selected: readonly string[]): string[] =>
   makeTiles ? selected.filter(name => name.trim().length > 0) : []
+
+/** The prompt a tile's own name makes for `/comfy each`. A name is written
+ *  the way tiles are named (`brass-lantern`); a prompt is words. */
+export const promptFromName = (cell: string): string =>
+  cell.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim() || cell.trim()
 
 const assetsMessage = (count: number): string =>
   count === 1 ? '1 picture in your assets' : `${count} pictures in your assets`
@@ -332,6 +340,15 @@ export class ComfyService extends EventTarget {
     // A selection means those tiles. One picture each, on the tile itself.
     // An asset run still reads them when the tile is helping, and lands nowhere.
     const selected = this.selectedCells()
+    // `each` has no picture to make without tiles: every prompt IS a tile.
+    if (request.each) {
+      const named = cellsToPaint(true, selected)
+      if (!named.length) {
+        this.#setJob({ state: 'error', message: 'Select the tiles first.' })
+        return []
+      }
+      return this.#paintEach(request, named)
+    }
     const painting = cellsToPaint(request.tiles === true, selected)
     if (painting.length) return this.#paintEach(request, painting)
     if (request.assets && request.fromTile && selected.length) return this.#paintEach(request, selected, false)
@@ -370,9 +387,14 @@ export class ComfyService extends EventTarget {
     for (let i = 0; i < cells.length; i++) {
       if (i > 0 && (this.#job.state === 'idle' || this.#job.state === 'error')) break
       const cell = cells[i] as string
-      let next = request
+      // `each`: this tile's name is the prompt, so each picture is of its own tile.
+      const own = request.each ? promptFromName(cell) : (request.positive ?? '')
+      let next: ComfyRunRequest = request.each ? { ...request, positive: own } : request
+      if (request.each && cells.length > 1) {
+        EffectBus.emit('activity:log', { message: `making "${cell}" (${i + 1}/${cells.length})`, icon: '◇' })
+      }
       if (request.fromTile === true) {
-        const positive = await this.#helpPositive(cell, request.positive ?? '', request.reviewers)
+        const positive = await this.#helpPositive(cell, own, request.reviewers)
         if (positive === null) {
           if (painted.length && this.#job.state !== 'idle') this.#finishPainted(painted, gathered, request.workflowId)
           return gathered
