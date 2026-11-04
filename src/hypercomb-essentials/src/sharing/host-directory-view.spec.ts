@@ -274,8 +274,11 @@ describe('the host directory', () => {
   })
 
   it('a package that is off does not load: the preloader keeps the activation record\'s bees, not every bee the layers declare', () => {
-    const run = PRELOADER.slice(PRELOADER.indexOf('const layerRoots = ScriptPreloader.readManifestLayers()'))
-    expect(run).toMatch(/const enabled = ScriptPreloader\.readManifestBees\(\)/)
+    // The manifest is read once per package (#readManifest memo, 2026-11-04);
+    // the gate reads the activation record's bees off that one read.
+    const run = PRELOADER.slice(PRELOADER.indexOf('const manifest = this.#readManifest()'))
+    expect(run).toMatch(/const layerRoots = manifest\.layers/)
+    expect(run).toMatch(/const enabled = manifest\.bees/)
     expect(run).toMatch(/const keep = new Set\(\[\.\.\.enabled, \.\.\.walked\.criticalBees\]\)/)
     expect(run.indexOf('walked.bees.filter(sig => keep.has(sig))')).toBeLessThan(run.indexOf('#loadBeesPrioritized(walked.bees'))
   })

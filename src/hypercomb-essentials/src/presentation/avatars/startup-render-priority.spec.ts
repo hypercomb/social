@@ -42,7 +42,10 @@ describe('startup render priority', () => {
     const barrier = BOOT.indexOf('const firstTilePaint = awaitFirstTilePaint(targetLocationKey)')
     const navigation = BOOT.indexOf('this.dispatchPopState()')
     const wait = BOOT.indexOf('await firstTilePaint')
-    const pulse = BOOT.indexOf("await this.encounter(preloader, '')")
+    // The shell's first act('') is every bee's first pulse (one owner,
+    // 2026-11-04); what bootstrap holds behind the barrier is the path's
+    // segment passes, each one act of the processor.
+    const pulse = BOOT.indexOf('processor.act(seg)')
 
     expect(barrier).toBeGreaterThan(-1)
     expect(barrier).toBeLessThan(navigation)
