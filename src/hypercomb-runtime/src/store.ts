@@ -10,9 +10,10 @@ import {
   documentSweepVeto,
   isMetaEnvelope,
   isSignature,
-  latestLayerMarker,
   llmKeyStore,
   markerName,
+  MarkerHeadMemo,
+  readLayerMarker,
   metaPayloadOf,
   mintMetaEnvelope,
   DERIVED_OPTIMIZATION_POOLS,
@@ -458,6 +459,20 @@ export class Store extends EventTarget {
   /** The tail of each document's write queue, keyed by pool address + subKey. */
   readonly #documentWrites = new Map<string, Promise<string | null>>()
 
+  /** The head marker of every document space this tab has read or written,
+   *  keyed by `<pool address>/<sub-bucket name>`. A read used to enumerate
+   *  the whole directory to find the max marker (`latestLayerMarker`), on
+   *  EVERY `getPoolDoc`; a write enumerated it twice. The memo answers a
+   *  read with one targeted lookup and is told about this tab's own marker
+   *  writes; another tab's write is found by the same lookup, because its
+   *  marker is the next name in sequence. */
+  readonly #poolHeads = new MarkerHeadMemo()
+
+  /** The memo key for a document space: the pool, then the sub-bucket the
+   *  caller's `subKey` signs to (`''` for the pool's own directory). */
+  static #documentKey = async (pool: FileSystemDirectoryHandle, subKey?: string): Promise<string> =>
+    `${pool?.name ?? ''}/${subKey ? await Store.poolSignature(subKey) : ''}`
+
   #writePoolDoc = async (
     pool: FileSystemDirectoryHandle,
     bytes: ArrayBuffer,
@@ -503,6 +518,7 @@ export class Store extends EventTarget {
       const space = proven
         ? await Store.#documentSpace(target)
         : { veto: `the pool address ${pool.name.slice(0, 8)}… is a bare word or unregistered meaning`, head: null }
+      const headKey = await Store.#documentKey(pool, subKey)
       if (space.veto) {
         // Not fatal: the new atom is on disk and nothing was removed. With no
         // marker of ours here, `getPoolDoc` returns the first non-empty
@@ -511,8 +527,17 @@ export class Store extends EventTarget {
         console.warn(`[pool] no history marker in ${target.name.slice(0, 8)}… — ${space.veto}`)
         return sig
       }
-      if (currentOnly) return await Store.#keepOnly(target, sig) ? sig : null
-      return await Store.#appendDocumentMarker(target, sig, space.head) ? sig : null
+      // The proof above enumerated the directory and found its head; the
+      // memo learns it so the marker append and every later read start
+      // from it instead of scanning again.
+      this.#poolHeads.note(headKey, space.head)
+      if (currentOnly) {
+        // Every marker goes; whatever is written next starts the sequence
+        // over, so the memo must not remember this head.
+        this.#poolHeads.forget(headKey)
+        return await Store.#keepOnly(target, sig) ? sig : null
+      }
+      return await Store.#appendDocumentMarker(target, sig, space.head, this.#poolHeads, headKey) ? sig : null
     } catch { return null }
   }
 
@@ -537,19 +562,19 @@ export class Store extends EventTarget {
         const currentSig = await Store.poolSignature(spellPoolMeaning(label))
         if (currentSig !== pool.name) {
           const current = await this.opfsRoot.getDirectoryHandle(currentSig, { create: false })
-          const newer = await Store.#readPoolDoc(current, subKey)
+          const newer = await Store.#readPoolDoc(current, subKey, this.#poolHeads)
           if (newer) return newer
         }
       } catch { /* the spelled directory is not on this replica yet */ }
     }
-    const local = await Store.#readPoolDoc(pool, subKey)
+    const local = await Store.#readPoolDoc(pool, subKey, this.#poolHeads)
     if (local || !label || !this.opfsRoot) return local
     for (const obsolete of funneledFrom(label)) {
       try {
         const sig = await Store.poolSignature(obsolete)
         if (sig === pool.name) continue
         const dir = await this.opfsRoot.getDirectoryHandle(sig, { create: false })
-        const older = await Store.#readPoolDoc(dir, subKey)
+        const older = await Store.#readPoolDoc(dir, subKey, this.#poolHeads)
         if (older) return older
       } catch { /* that ref is not held here */ }
     }
@@ -560,14 +585,14 @@ export class Store extends EventTarget {
    *  decides which directories are the same name. */
   static #readPoolDoc = async (
     pool: FileSystemDirectoryHandle | undefined,
-    subKey?: string,
+    subKey: string | undefined,
+    heads: MarkerHeadMemo,
   ): Promise<ArrayBuffer | null> => {
     if (!pool) return null
     try {
-      const target = subKey
-        ? await pool.getDirectoryHandle(await Store.poolSignature(subKey), { create: false })
-        : pool
-      const current = await Store.#currentPoolDoc(target)
+      const bucket = subKey ? await Store.poolSignature(subKey) : ''
+      const target = bucket ? await pool.getDirectoryHandle(bucket, { create: false }) : pool
+      const current = await Store.#currentPoolDoc(target, heads, `${pool.name ?? ''}/${bucket}`)
       if (current) return current
       for await (const [name, handle] of (target as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
         if (handle.kind !== 'file' || !isSignature(name)) continue
@@ -580,9 +605,13 @@ export class Store extends EventTarget {
 
   /** The bytes of the atom the head marker names, or null when there is no
    *  marker, the head is unreadable, or its atom is not held beside it. */
-  static #currentPoolDoc = async (target: FileSystemDirectoryHandle): Promise<ArrayBuffer | null> => {
+  static #currentPoolDoc = async (
+    target: FileSystemDirectoryHandle,
+    heads: MarkerHeadMemo,
+    key: string,
+  ): Promise<ArrayBuffer | null> => {
     try {
-      const head = await latestLayerMarker(target)
+      const head = await heads.head(key, target)
       if (!head) return null
       const file = await (await target.getFileHandle(head.layer, { create: false })).getFile()
       return file.size > 0 ? await file.arrayBuffer() : null
@@ -606,10 +635,17 @@ export class Store extends EventTarget {
   ): Promise<{ veto: string | null; head: { name: string; layer: string } | null }> => {
     const others: DirectoryEntry[] = []
     let markers = 0
+    // The max marker is found in THIS walk; the head is then one file read,
+    // not a second walk of the same directory.
+    let latest = ''
     try {
       for await (const [name, handle] of (target as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
         const isDirectory = handle?.kind === 'directory'
-        if (!isDirectory && classifyDirectoryEntry(name) === 'marker') { markers++; continue }
+        if (!isDirectory && classifyDirectoryEntry(name) === 'marker') {
+          markers++
+          if (name > latest) latest = name
+          continue
+        }
         others.push({ name, isDirectory })
       }
     } catch (err) {
@@ -619,7 +655,7 @@ export class Store extends EventTarget {
     if (structural) return { veto: structural, head: null }
     if (markers === 0) return { veto: null, head: null }
     let head: { name: string; layer: string } | null
-    try { head = await latestLayerMarker(target) } catch (err) {
+    try { head = await readLayerMarker(target, latest) } catch (err) {
       return { veto: `its current marker is unreadable (${String((err as Error)?.message ?? err)})`, head: null }
     }
     const layer = head?.layer
@@ -665,6 +701,8 @@ export class Store extends EventTarget {
     target: FileSystemDirectoryHandle,
     sig: string,
     head: { name: string; layer: string } | null,
+    heads: MarkerHeadMemo,
+    key: string,
   ): Promise<boolean> => {
     let current = head
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -676,9 +714,12 @@ export class Store extends EventTarget {
       }
       try {
         await writeLayerMarker(target, sig, next)
+        heads.note(key, { name: next, layer: sig })
         return true
       } catch { /* the name was taken by a racing write — read the head again */ }
-      try { current = await latestLayerMarker(target) } catch { return false }
+      // The racing writer's marker is the next name in sequence: the memo
+      // walks forward to it instead of enumerating the directory.
+      try { current = await heads.head(key, target) } catch { return false }
     }
     console.warn(`[pool] could not append a marker in ${target.name.slice(0, 8)}… — the document was kept but is not current`)
     return false
