@@ -137,7 +137,7 @@ describe('rail projection — the phone posture', () => {
     expect(drone.active).toBe(true)
   })
 
-  it('re-projects flat-top when the phone turns, once the rotation settles — and back', async () => {
+  it('re-projects along the new long axis when the phone turns, once the rotation settles — and back', async () => {
     await beat()
     landscape()
     window.dispatchEvent(new Event('orientationchange'))
@@ -146,15 +146,16 @@ describe('rail projection — the phone posture', () => {
     expect(project).toHaveBeenCalledTimes(2)
     const flat = matrixAt(1)
     expect(flat.size).toBe(CAPACITY)
-    for (let slot = 0; slot < CAPACITY; slot++) expect(flat.get(slot)).toEqual(railCoord(slot, 3, true))
-    expect(last('render:set-orientation')).toEqual({ flat: true })
+    // The hive stays point-top: the strip runs sideways as honeycomb rows.
+    for (let slot = 0; slot < CAPACITY; slot++) expect(flat.get(slot)).toEqual(railCoord(slot, 3, false, true))
+    expect(last('render:set-orientation')).toBeUndefined()
     expect(last('render:grid-changed')).toEqual({ active: true, lanes: 3, horizontal: true })
 
     portrait()
     await rotate()
     expect(project).toHaveBeenCalledTimes(3)
     expect(matrixAt(2).get(0)).toEqual(railCoord(0, 3, false))
-    expect(last('render:set-orientation')).toEqual({ flat: false })
+    expect(last('render:set-orientation')).toBeUndefined()
   })
 
   it('a rotation that does not flip the long axis re-projects nothing', async () => {
@@ -335,12 +336,24 @@ describe('rail projection — the phone posture', () => {
     expect(project).toHaveBeenCalledTimes(4)
   })
 
-  it('owns the orientation only while active — the standing preference comes back on release', async () => {
-    landscape()
+  it('never owns the orientation: turning the hive repacks the lanes, release changes nothing', async () => {
     await beat()
-    expect(last('render:set-orientation')).toEqual({ flat: true })
+    expect(project).toHaveBeenCalledTimes(1)
+    // The participant turns the hive flat-top while the strip is vertical.
+    EffectBus.emit('render:set-orientation', { flat: true })
+    expect(project).toHaveBeenCalledTimes(2)
+    for (let slot = 0; slot < CAPACITY; slot++) expect(matrixAt(1).get(slot)).toEqual(railCoord(slot, 3, true, false))
+    // The same orientation again is no change.
+    EffectBus.emit('render:set-orientation', { flat: true })
+    expect(project).toHaveBeenCalledTimes(2)
+
+    // Rotating the device keeps their orientation and runs the strip sideways.
+    landscape()
+    await rotate()
+    for (let slot = 0; slot < CAPACITY; slot++) expect(matrixAt(2).get(slot)).toEqual(railCoord(slot, 3, true, true))
+
     EffectBus.emit('lanes:off', {})
-    expect(last('render:set-orientation')).toEqual({ flat: false })
+    expect(last('render:set-orientation')).toEqual({ flat: true })
     expect(localStorage.getItem('hc:hex-orientation')).toBeNull()
   })
 })

@@ -351,3 +351,15 @@ lane/arrangement specs, and the doctrine ratchets.
   `axial.items` contract — a different matrix.
 - **No `<hc-*>` tags in `app.html`, no hand-listed views** — the deck and the
   Views sheet read the registries.
+
+## Orientation is the participant's (2026-11-04)
+
+The rail no longer owns the hex orientation. It reads it (`render:set-orientation`)
+and packs for the pair (orientation, strip direction). Matched pairs (point-top
+vertical, flat-top horizontal) are unchanged; the cross pairs are plain honeycomb:
+flat-top vertical = lanes are columns, odd columns half a cell lower; point-top
+horizontal = lanes are rows, odd rows half a cell along. `railCoord(slot, lanes,
+flatTop, horizontal = flatTop)`. The fit measures mesh bounds, so every point of
+every tile stays on screen; the ragged start edge is the only difference.
+Turning the hive while lanes are up re-projects; release touches nothing. The
+lines above that say the rail owns or hands back the orientation are superseded.
