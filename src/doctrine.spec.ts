@@ -457,18 +457,35 @@ describe('doctrine ratchets', () => {
         'app-header', 'hc-controls-bar', 'hc-edit-actions', 'hc-mesh-header',
         'hc-shell-surfaces', 'hc-sync-indicator', 'hc-upgrade-indicator', 'router-outlet',
       ],
+      // `<app-header>` (web's app.html) is a thin wrapper whose template mounts
+      // the command line: the tag lives HERE, one hop out of app.html, where
+      // this ratchet used to be blind to it while dev mounted it in app.html.
+      'hypercomb-web/src/app/header/header.html': ['hc-command-line'],
       'hypercomb-dev/src/app/app.html': [
         'hc-command-line', 'hc-controls-bar', 'hc-edit-actions', 'hc-mesh-header',
         'hc-shell-surfaces', 'hc-sync-indicator', 'hc-upgrade-indicator', 'router-outlet',
       ],
     }
-    for (const [file, allowed] of Object.entries(TEMPLATE_ALLOW)) {
+    const tagsIn = (file: string): string[] => {
       const html = readFileSync(join(ROOT, file), 'utf8')
-      const tags = [...new Set(
+      return [...new Set(
         [...html.matchAll(/<([a-z][a-z0-9]*(?:-[a-z0-9]+)+)[\s>]/g)].map(m => m[1]),
       )].sort()
-      assertRatchet(tags, allowed, `template surface (${file})`)
     }
+    for (const [file, allowed] of Object.entries(TEMPLATE_ALLOW)) {
+      assertRatchet(tagsIn(file), allowed, `template surface (${file})`)
+    }
+
+    // PARITY. The two shells mount the same structural chrome; web reaches the
+    // command line through `<app-header>`, so its set is app.html with that
+    // wrapper expanded into header.html. A tag one shell mounts and the other
+    // does not is the web/dev drift bug class this registry exists to end.
+    const web = [...new Set([
+      ...tagsIn('hypercomb-web/src/app/app.html').filter(tag => tag !== 'app-header'),
+      ...tagsIn('hypercomb-web/src/app/header/header.html'),
+    ])].sort()
+    expect(web, 'web (app.html + header.html) and dev (app.html) mount the same structural chrome')
+      .toEqual(tagsIn('hypercomb-dev/src/app/app.html'))
   })
 
   it('shell bootstrap never imports the side-effectful shared UI index', () => {

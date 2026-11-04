@@ -183,3 +183,9 @@ upgrade + sync indicators, mesh header), `router-outlet`, the Pixi host div,
 `hc-controls-bar` + `hc-edit-actions` (live `meshPublic`/`viewActive()`
 bindings), and web's install prompt. The doctrine ratchet's allowlist is the
 exact inventory; it may only shrink.
+
+Web mounts the command line through `<app-header>`, so its tag sits in
+`hypercomb-web/src/app/header/header.html`, one hop out of `app.html`; dev
+mounts `<hc-command-line>` in its `app.html` directly. The ratchet covers
+`header.html` too, and a parity check expands `<app-header>` and compares the
+two shells' sets, so neither shell can gain or lose a structural tag alone.
