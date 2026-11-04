@@ -96,7 +96,7 @@ function glslBloomEase(k: number): number {
 
 /** The vertex stage's bloom for a flower cell (k: scale is mix(0.92, 1, k), opacity k). */
 function glslBloom(since: number, slot: number): number {
-  return since < 0.0 || slot < 0.5 ? 1.0 : glslBloomEase((since * 1000.0 - slot * 30.0) / 260.0)
+  return since < 0.0 || slot < 0.5 ? 1.0 : glslBloomEase((since * 1000.0 - slot * 5.0) / 140.0)
 }
 
 describe('the GLSL the mirror transcribes is the GLSL in the shader', () => {
@@ -137,7 +137,7 @@ describe('the GLSL the mirror transcribes is the GLSL in the shader', () => {
       'return 2.4 * u * u * t + 3.0 * u * t * t + t * t * t;',
       'float since = u_time - u_flowerBloomAt;',
       'float slot = floor(aCellIndex - 1000000.0 + 0.5);',
-      'float k = since < 0.0 || slot < 0.5 ? 1.0 : bloomEase((since * 1000.0 - slot * 30.0) / 260.0);',
+      'float k = since < 0.0 || slot < 0.5 ? 1.0 : bloomEase((since * 1000.0 - slot * 5.0) / 140.0);',
       'p = centre + (p - centre) * mix(0.92, 1.0, k);',
     ]) expect(shader).toContain(line)
   })
@@ -331,11 +331,11 @@ describe('the light visits one tile at a time and spares the ink', () => {
 })
 
 describe('the bloom', () => {
-  it('eases from 0.92 and nothing to whole in 260 ms, 30 ms a slot from east', () => {
+  it('eases from 0.92 and nothing to whole in 140 ms, 5 ms a slot from east', () => {
     expect(glslBloom(0, 1)).toBe(0)
-    expect(glslBloom(0.029, 1)).toBe(0)
-    expect(glslBloom(0.03 + 0.26, 1)).toBeCloseTo(1, 6)
-    expect(BLOOM_TOTAL_MS).toBe(260 + 6 * 30)
+    expect(glslBloom(0.004, 1)).toBe(0)
+    expect(glslBloom(0.005 + 0.14, 1)).toBeCloseTo(1, 6)
+    expect(BLOOM_TOTAL_MS).toBe(140 + 6 * 5)
     for (const slot of SLOTS) expect(glslBloom(BLOOM_TOTAL_MS / 1000, slot)).toBeCloseTo(1, 6)
   })
 

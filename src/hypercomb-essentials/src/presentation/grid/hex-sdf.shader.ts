@@ -281,8 +281,8 @@ export class HexSdfTextureShader {
 
     // ── THE BLOOM (presentation/tiles/flower-motion.ts bloomAt) ─────────────
     // When a ring opens, each flower tile eases in from 0.92 and nothing over
-    // 260 ms, cubic-bezier(0.2, 0.8, 0.2, 1), its slot (0 the centre, 1..6
-    // clockwise from east) 30 ms after the last. CSS's curve, solved the way a
+    // 140 ms, cubic-bezier(0.2, 0.8, 0.2, 1), its slot (0 the centre, 1..6
+    // clockwise from east) 5 ms after the last. CSS's curve, solved the way a
     // browser does: Newton on x(t) = k from t = k (x' never falls under 0.48).
     float bloomEase(float k) {
       k = clamp(k, 0.0, 1.0);
@@ -323,7 +323,7 @@ export class HexSdfTextureShader {
       if (aCellIndex > 999999.5) {
         float since = u_time - u_flowerBloomAt;
         float slot = floor(aCellIndex - 1000000.0 + 0.5);
-        float k = since < 0.0 || slot < 0.5 ? 1.0 : bloomEase((since * 1000.0 - slot * 30.0) / 260.0);
+        float k = since < 0.0 || slot < 0.5 ? 1.0 : bloomEase((since * 1000.0 - slot * 5.0) / 140.0);
         if (k < 1.0) {
           vec2 centre = p - (aUV - 0.5) * u_quadSize;
           p = centre + (p - centre) * mix(0.92, 1.0, k);

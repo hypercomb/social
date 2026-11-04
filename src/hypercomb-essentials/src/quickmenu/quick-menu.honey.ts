@@ -539,7 +539,7 @@ export function blobStart(drip: DripShape): { cx: number; cy: number; r: number 
 //      back once per period, every tile on its own period and phase.
 //   2. SHEEN: a soft diagonal band of warm light glides across one tile at a
 //      time, round the ring clockwise from east, then across the middle.
-//   3. BLOOM: when a ring appears its tiles ease in, centre first.
+//   3. BLOOM: when a ring appears its tiles ease in, 5 ms a tile.
 //
 // Reduced motion shows none of it: the picture is still, the ring simply there.
 
@@ -685,10 +685,11 @@ export function sheenOffset(timeS: number, slotIndex: number, slotCount: number 
 }
 
 /** The ease-in when a ring appears: from `fromScale` and nothing, to whole. */
-export const BLOOM = { fromScale: 0.92, durationMs: 260, staggerMs: 30, bezier: [0.2, 0.8, 0.2, 1] } as const
+export const BLOOM = { fromScale: 0.92, durationMs: 140, staggerMs: 5, bezier: [0.2, 0.8, 0.2, 1] } as const
 
 /** How long after the ring appears slot `slotIndex` starts to bloom: the
- *  middle first, then east clockwise, 30 ms apart. */
+ *  middle first, then east clockwise, 5 ms apart, so the ring arrives near
+ *  whole and never visibly fans round. */
 export function bloomDelayMs(slotIndex: number): number {
   return Math.max(0, Math.floor(slotIndex)) * BLOOM.staggerMs
 }
