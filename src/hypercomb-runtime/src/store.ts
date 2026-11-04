@@ -1913,6 +1913,15 @@ export class Store extends EventTarget {
   #absorbBarePools = async (): Promise<void> => {
     const drain = async (source: FileSystemDirectoryHandle | undefined, target: FileSystemDirectoryHandle, meaning: string): Promise<boolean> => {
       if (!source) return true
+      // A MARKER PROVES A TILE. `sign('threads')` is also the lineage bag
+      // of a tile named "threads", and a bag holds more than markers: the
+      // molecule's per-author buckets (sig-shaped dirs) and membership
+      // members (sig-shaped files) look exactly like pool records. Skipping
+      // the markers alone would still carry the tile's buckets and members
+      // into the system pool. So when the bare directory holds any marker it
+      // is somebody's history, and nothing in it is drained — the dual read
+      // keeps working and the directory is left whole.
+      if (await this.#holdsMarker(source)) return false
       const name = await Store.poolSignature(meaning)
       await this.#absorbLegacyBucketDir(source, target, name)
       return this.#absorbLegacyPool(source, target, name, true)
@@ -1924,6 +1933,18 @@ export class Store extends EventTarget {
     if (await drain(this.#bareOptimization, this.optimization, Store.LEGACY_OPTIMIZATION_MEANING)) this.#bareOptimization = undefined
     if (await drain(this.#bareOverrides, this.overrides, Store.LEGACY_OVERRIDES_MEANING)) this.#bareOverrides = undefined
     if (await drain(this.#bareTranslations, this.translations, Store.LEGACY_TRANSLATIONS_MEANING)) this.#bareTranslations = undefined
+  }
+
+  /** True when the directory holds at least one `000x` marker file — the
+   *  shape proof that it is (also) a tile's lineage bag. Unreadable counts
+   *  as held: the safe answer when the question is whether to move things. */
+  #holdsMarker = async (dir: FileSystemDirectoryHandle): Promise<boolean> => {
+    try {
+      for await (const [name, handle] of (dir as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
+        if (handle.kind === 'file' && classifyDirectoryEntry(name) === 'marker') return true
+      }
+      return false
+    } catch { return true }
   }
 
   static #bytesEqual = (a: ArrayBuffer, b: ArrayBuffer): boolean => {
@@ -2400,10 +2421,16 @@ export class Store extends EventTarget {
 
   /** Write layer bytes as a sig-named file at the flat root.
    *  Idempotent (sig === hash(bytes), so identical writes produce
-   *  identical bytes). Best-effort; the marker is the canonical
-   *  reference, the root entry is its resolved content. Every writer —
-   *  participant commits AND the install/sentinel path — targets the
-   *  root; no code writes a legacy typed pool. */
+   *  identical bytes); a COMPLETE copy already at the root is left alone
+   *  rather than rewritten. The marker is the canonical reference, the
+   *  root entry is its resolved content. Every writer — participant
+   *  commits AND the install/sentinel path — targets the root; no code
+   *  writes a legacy typed pool.
+   *
+   *  A WRITE THAT FAILS THROWS. `commitLayer` awaits this before it
+   *  appends the marker, so swallowing the failure here let a head name
+   *  a layer nobody holds — every reader after that found a marker and
+   *  no bytes. Callers that only fill a cache wrap the call themselves. */
   public writeLayerBytes = async (signature: string, bytes: ArrayBuffer): Promise<void> => {
     if (!this.hypercombRoot) return
     // THE NAME IS THE HASH, OR NOTHING IS WRITTEN. writeBeeBytes and
@@ -2417,11 +2444,21 @@ export class Store extends EventTarget {
       console.warn(`[store] refusing to write layer ${expected.slice(0, 8)}… — bytes do not hash to their name`)
       return
     }
+    // Content-addressed, so equal size is the completeness proof (the same
+    // test the relocators use); a 0-byte or short root entry is an
+    // interrupted earlier write and is finished here.
+    try {
+      const existing = await this.hypercombRoot.getFileHandle(expected, { create: false })
+      if ((await existing.getFile()).size === bytes.byteLength) return
+    } catch { /* absent — write it */ }
     try {
       const handle = await this.hypercombRoot.getFileHandle(expected, { create: true })
       const writable = await handle.createWritable()
       await writeKeepingError(writable, bytes)
-    } catch { /* best-effort */ }
+    } catch (err) {
+      console.warn(`[store] layer ${expected.slice(0, 8)}… did not reach the root`, err)
+      throw err
+    }
   }
 
   /** Read a bee module from its canonical meaning pool or legacy drain. */
@@ -2597,8 +2634,16 @@ export class Store extends EventTarget {
 
   /** Union-merge one legacy lineage sigbag into the root bag of the same
    *  lineage sig: copy every marker file the root bag lacks. Returns true
-   *  only when every source marker is confirmed present in the root bag —
-   *  the caller's GC gate. */
+   *  only when every source marker is confirmed present in the root bag
+   *  WITH THE SAME BYTES — the caller's GC gate.
+   *
+   *  BYTES, NOT NAMES (the same lesson `HistoryService.#dirShadowed`
+   *  learned on `__history__`). The union never overwrites, so a legacy
+   *  `0003` naming one layer and a root `0003` naming another is a
+   *  DIVERGENCE: counting it as merged let the caller remove the source
+   *  recursively with the only copy of that generation inside it. A
+   *  marker that differs is kept where it is and holds the source open
+   *  for a later pass — the only answer on never-wipe history. */
   #mergeLineageBag = async (
     sourceBag: FileSystemDirectoryHandle,
     lineageSig: string,
@@ -2614,14 +2659,22 @@ export class Store extends EventTarget {
         if (handle.kind !== 'file') { allPresent = false; continue }
         try {
           const file = await (handle as FileSystemFileHandle).getFile()
-          // A non-empty root marker under the same index wins (the root
-          // bag is the live era). A 0-byte root marker is an interrupted
-          // copy, not a divergence — heal it from the source.
+          const bytes = await file.arrayBuffer()
+          // A root marker under the same index with the SAME bytes is the
+          // merge already done. A 0-byte root marker is an interrupted
+          // copy, not a divergence — heal it from the source. Different
+          // non-empty bytes are a divergence: never overwrite, never count
+          // the source as merged.
           try {
             const existing = await rootBag.getFileHandle(name, { create: false })
-            if ((await existing.getFile()).size > 0 || file.size === 0) continue
+            const theirs = await (await existing.getFile()).arrayBuffer()
+            if (Store.#bytesEqual(theirs, bytes)) continue
+            if (theirs.byteLength > 0) {
+              console.warn(`[store] lineage ${lineageSig.slice(0, 8)}…/${name}: legacy and root markers differ — both kept`)
+              allPresent = false
+              continue
+            }
           } catch { /* absent — copy */ }
-          const bytes = await file.arrayBuffer()
           const dest = await rootBag.getFileHandle(name, { create: true })
           const writable = await dest.createWritable()
           await writeKeepingError(writable, bytes)

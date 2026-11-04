@@ -171,9 +171,10 @@ $bp-phone-max: 599px;
 // Find stance: a cooler cast than command's honey, because what the line
 // does here is READ the hive rather than change it. Nothing is destructive
 // in this stance, and the box says so before a character is typed.
+// ONE HEADER, ONE GROUND (jwize, 2026-11-04): no stance paints the box. The
+// bar wears the header's glass end to end; the caret and the sigil carry
+// the stance.
 .command-shell.stance-find {
-  background: color-mix(in srgb, var(--cmd-accent, var(--md-primary)) 6%, transparent);
-
   .command-input { caret-color: var(--cmd-accent, var(--md-primary)); }
   .prompt-question { color: var(--cmd-accent, var(--md-primary)); }
 }
@@ -189,8 +190,6 @@ $bp-phone-max: 599px;
 }
 
 .command-shell.stance-external {
-  background: color-mix(in srgb, var(--cmd-accent-command) 14%, transparent);
-
   .command-input { caret-color: var(--cmd-accent-command); }
 }
 
@@ -200,8 +199,6 @@ $bp-phone-max: 599px;
 // READING lights get color (see .reading below) — the light is the contract.
 // The caret and the slash sigil carry the register's honey.
 .command-shell.stance-command {
-  background: color-mix(in srgb, var(--glow-color) 12%, transparent);
-
   .command-input { caret-color: var(--cmd-accent-command); }
   .prompt-slash { color: var(--cmd-accent-command); }
 }
