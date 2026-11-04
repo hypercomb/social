@@ -118,16 +118,27 @@ function takesNextWord(entry: UtteranceLexiconEntry, lower: string): boolean {
  * The pure reading. `resolutions` maps an ambiguity span's START offset to
  * the chosen command — a pinned choice turns that span into a plain action.
  */
-export function readUtterance(
-  text: string,
-  entries: readonly UtteranceLexiconEntry[],
-  resolutions?: ReadonlyMap<number, string>,
-): UtteranceReading {
+type Lexicon = {
+  /** word → the distinct canonical commands claiming it (command → description) */
+  readonly claims: ReadonlyMap<string, ReadonlyMap<string, string>>
+  /** command → its row (rawArgs, options) */
+  readonly entryOf: ReadonlyMap<string, UtteranceLexiconEntry>
+}
+
+/** The word table, compiled once per census: the slash drone hands back the
+ *  same `entries` array until the census changes, and a keystroke must not
+ *  rebuild the table it reads. Keyed by identity, so a fresh array is simply
+ *  compiled afresh — the reading stays pure. */
+const lexicons = new WeakMap<readonly UtteranceLexiconEntry[], Lexicon>()
+
+function lexiconOf(entries: readonly UtteranceLexiconEntry[]): Lexicon {
+  const held = lexicons.get(entries)
+  if (held) return held
   // word → the distinct canonical commands claiming it (name and aliases;
   // hidden behaviours are destructive/dev surfaces typed in full on purpose —
   // prose must never light them).
-  const claims = new Map<string, Map<string, string>>()   // word → (command → description)
-  const entryOf = new Map<string, UtteranceLexiconEntry>()  // command → its row (rawArgs, options)
+  const claims = new Map<string, Map<string, string>>()
+  const entryOf = new Map<string, UtteranceLexiconEntry>()
   for (const e of entries) {
     if (e.hidden || e.lineStart) continue
     if (!entryOf.has(e.name)) entryOf.set(e.name, e)
@@ -139,6 +150,17 @@ export function readUtterance(
       if (!m.has(e.name)) m.set(e.name, e.description ?? '')
     }
   }
+  const lexicon: Lexicon = { claims, entryOf }
+  lexicons.set(entries, lexicon)
+  return lexicon
+}
+
+export function readUtterance(
+  text: string,
+  entries: readonly UtteranceLexiconEntry[],
+  resolutions?: ReadonlyMap<number, string>,
+): UtteranceReading {
+  const { claims, entryOf } = lexiconOf(entries)
 
   const tokens = tokenize(text)
   type Role = UtteranceSpan['role']
