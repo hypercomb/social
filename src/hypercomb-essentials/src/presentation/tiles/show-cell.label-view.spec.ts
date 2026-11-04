@@ -73,8 +73,10 @@ describe('show-cell: an oversized layer pins and bakes only what is in view (SCA
     expect(body).toMatch(/cells\.length \+ 1 <= atlas\.capacity\) return null/)
   })
 
-  it('an out-of-view cell never claims a slot while the geometry is built', () => {
-    const body = memberBody('private buildFillQuadGeometry(')
+  it('an out-of-view cell never claims a slot while its plan is laid out', () => {
+    // The plan is the one place a cell's slices are computed (single-paint.md);
+    // the geometry builder and the drain both read it.
+    const body = memberBody('#slotPlanFor(c: Cell, i: number, ctx: PlanContext): SlotPlan {')
     expect(body).toMatch(/const unbaked = !foreign && !!this\.#labelView && !this\.#labelView\.has\(c\.label\) && !this\.atlas!\.hasLabel\(atlasLabel\)/)
     expect(body).toMatch(/\|\| unbaked\s*\n?\s*\? \{ u0: 0, v0: 0, u1: 0, v1: 0 \}/)
   })
