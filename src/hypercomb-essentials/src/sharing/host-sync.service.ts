@@ -105,6 +105,7 @@
 // read-back GET. Every other answer keeps the read-back.
 
 import { CHILD_SLOTS, EffectBus, SignatureService, registerPoolMeaning, spellPoolMeaning, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
+import { fetchWithDeadline } from './bounded-fetch.js'
 import { decorationClosureSigs, nestedResourceSigs } from './decoration-closure.js'
 import { isJoinedHere, ownZone } from './membership.js'
 import { foldContentLabel, HOST_DOMAIN_RE, isLoopbackHost, isPublishNode, legacyContentFace } from './zone-door.js'
@@ -3723,7 +3724,7 @@ export class HostSyncService extends EventTarget {
       // The host checked every body against its name when it took it; a page
       // (an SPA fallback answering 200) is not a held file.
       try {
-        const there = await fetch(url, { method: 'HEAD', cache: 'no-store' })
+        const there = await fetchWithDeadline(url, { method: 'HEAD', cache: 'no-store' })
         if (there.ok && !(there.headers.get('content-type') ?? '').toLowerCase().includes('text/html')) { held++; continue }
       } catch { /* not reachable yet — the PUT below says so */ }
       const bytes = await bytesOf(sig)
@@ -3733,10 +3734,13 @@ export class HostSyncService extends EventTarget {
       const auth = await this.#nip98(url, 'PUT')
       if (!auth) return { ok: false, error: 'no Nostr signer is available to sign the upload' }
       try {
-        const put = await fetch(url, { method: 'PUT', headers: { Authorization: auth }, body })
+        // A host that never answers ends the commit at its deadline (15 s, plus
+        // 1 s per 100 KB sent — the same allowance #fetchWithin gives a push).
+        const allowance = REQUEST_TIMEOUT_MS + Math.ceil(body.byteLength / 102_400) * TIMEOUT_PER_100KB_MS
+        const put = await fetchWithDeadline(url, { method: 'PUT', headers: { Authorization: auth }, body }, { timeoutMs: allowance })
         if (put.status === 401 || put.status === 403) return { ok: false, error: `${domain} does not accept uploads from this key`, sig }
         if (!put.ok) return { ok: false, error: `${domain} refused ${sig.slice(0, 12)}… (HTTP ${put.status})`, sig }
-        const back = await fetch(url, { cache: 'no-store' })
+        const back = await fetchWithDeadline(url, { cache: 'no-store' }, { timeoutMs: allowance })
         if (!back.ok || await SignatureService.sign(await back.arrayBuffer()) !== sig) {
           return { ok: false, error: `${domain} accepted ${sig.slice(0, 12)}… but does not serve it back`, sig }
         }

@@ -33,6 +33,7 @@ import {
   encodeHiveLinkBundle,
   type HiveLinkBundle,
 } from './hive-link.js'
+import { firstBounded, HOST_CONCURRENCY } from './bounded-fetch.js'
 import { fetchHiveIndex, fetchHiveManifestFromAny, nip98Header, putHiveManifest, type HiveManifest } from './hive-pointer.js'
 import { prepareAnchorHosts, publisherKeyHex } from './key-list.client.js'
 import {
@@ -270,15 +271,22 @@ export async function resolveIndexDoor(
   fetchIndex: typeof fetchHiveIndex = fetchHiveIndex,
 ): Promise<{ host: string; read: Awaited<ReturnType<typeof fetchHiveIndex>> }> {
   type Door = { host: string; read: Awaited<ReturnType<typeof fetchHiveIndex>> }
+  // The doors are asked a few at a time, so one that never answers costs its
+  // deadline and not the act; a verified index at any of them wins at once.
+  const { winner, results } = await firstBounded(
+    doors, HOST_CONCURRENCY, (host, signal) => fetchIndex(host, pubkey, signal), read => read.ok,
+    { hostOf: host => host },
+  )
+  if (winner) return { host: winner.item, read: winner.result }
   let last: Door | null = null
   let absent: Door | null = null
-  for (const host of doors) {
-    const read = await fetchIndex(host, pubkey)
+  for (const [at, host] of doors.entries()) {
+    const read = results[at]
+    if (!read || read.ok) continue
     last = { host, read }
-    if (read.ok) return last
     if (read.reason === 'http' && read.status === 404) absent ??= last
   }
-  return absent ?? last ?? { host: '', read: { ok: false, reason: 'unreachable' } as Awaited<ReturnType<typeof fetchHiveIndex>> }
+  return absent ?? last ??{ host: '', read: { ok: false, reason: 'unreachable' } as Awaited<ReturnType<typeof fetchHiveIndex>> }
 }
 
 /** Publish one branch and record the act. Never throws. */
@@ -1017,11 +1025,16 @@ async function verifiedIndexDoor(
   doors: readonly string[],
   pubkey: string,
 ): Promise<{ host: string; read: Awaited<ReturnType<typeof fetchHiveIndex>>; nothing: boolean }> {
+  const { winner, results } = await firstBounded(
+    doors, HOST_CONCURRENCY, (host, signal) => fetchHiveIndex(host, pubkey, signal), read => read.ok,
+    { hostOf: host => host },
+  )
+  if (winner) return { host: winner.item, read: winner.result, nothing: false }
   let failed: { host: string; read: Awaited<ReturnType<typeof fetchHiveIndex>> } | null = null
   let missing: { host: string; read: Awaited<ReturnType<typeof fetchHiveIndex>> } | null = null
-  for (const host of doors) {
-    const read = await fetchHiveIndex(host, pubkey)
-    if (read.ok) return { host, read, nothing: false }
+  for (const [at, host] of doors.entries()) {
+    const read = results[at]
+    if (!read || read.ok) continue
     if (read.reason === 'http' && read.status === 404) missing ??= { host, read }
     else failed ??= { host, read }
   }

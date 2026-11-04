@@ -16,6 +16,7 @@
 
 import { get, nip98Authorization, nip98Template, poolKindOfMeaning, registerPoolMeaning, SignatureService } from '@hypercomb/core'
 import { verifyEvent } from 'nostr-tools/pure'
+import { fetchWithDeadline, firstBounded, HOST_CONCURRENCY, isDeadlineError } from './bounded-fetch.js'
 import { HIVE_INDEX_EVENT_KIND, HIVE_LINK_VERSION } from './hive-link.js'
 import { isPoweredEntrance, readAddresses, readDoorsOf, readEntrances, type ZoneEntrance } from './zone-door.js'
 
@@ -110,17 +111,20 @@ export async function hiveIndexUrl(host: string, pubkey: string): Promise<string
  *  index missing every branch it could not see — see publish-branch.ts), and
  *  a status surface must render `forged` loudly while rendering `unreachable`
  *  as silence. */
-export async function fetchHiveIndex(host: string, pubkey: string): Promise<HiveIndexResult> {
+export async function fetchHiveIndex(host: string, pubkey: string, signal?: AbortSignal): Promise<HiveIndexResult> {
   const key = String(pubkey ?? '').trim().toLowerCase()
   if (!SIG_RE.test(key)) return { ok: false, reason: 'malformed' }
   let res: Response
   try {
-    res = await fetch(await hiveIndexUrl(host, key), { cache: 'no-store' })
+    // A host that never answers is `unreachable` after the deadline — the same
+    // quiet "unknown" as a refused connection, never a stalled act.
+    res = await fetchWithDeadline(await hiveIndexUrl(host, key), { cache: 'no-store' }, { signal })
   } catch { return { ok: false, reason: 'unreachable' } }
   if (!res.ok) return { ok: false, reason: 'http', status: res.status }
 
   let evt: Record<string, unknown>
-  try { evt = await res.json() as Record<string, unknown> } catch { return { ok: false, reason: 'malformed' } }
+  // The deadline covers the body too: a host that stalls mid-answer is unreachable, not malformed.
+  try { evt = await res.json() as Record<string, unknown> } catch (error) { return { ok: false, reason: isDeadlineError(error) ? 'unreachable' : 'malformed' } }
 
   // An index another key signed stands only when this host's list for the
   // anchor names that key (key-list.client.ts), so the list is asked for only then.
@@ -220,8 +224,8 @@ export async function fetchHiveManifest(host: string, pubkey: string): Promise<H
   return result.ok ? result.manifest : null
 }
 
-/** Try each host in order; first verified index wins. The signature check
- *  makes order a matter of latency, never of trust. */
+/** Ask the hosts (a few at once); the first verified index wins. The signature
+ *  check makes order a matter of latency, never of trust. */
 /** The signed index the page this code runs in carries (#hc-index, written by
  *  the door that served it), verified exactly as a fetched one — or null. */
 function carriedHiveIndex(pubkey: string): HiveManifest | null {
@@ -239,12 +243,15 @@ export async function fetchHiveManifestFromAny(hosts: readonly string[], pubkey:
   const carried = carriedHiveIndex(pubkey)
   if (carried) return carried
   // Zone roots only — the retired `content.<zone>` face serves the same heap
-  // (zone-door.ts).
-  for (const host of readDoorsOf(hosts)) {
-    const manifest = await fetchHiveManifest(host, pubkey)
-    if (manifest) return manifest
-  }
-  return null
+  // (zone-door.ts). Asked together, a few at a time: the first verified index
+  // wins and a hung host costs its deadline, not the walk.
+  const { winner } = await firstBounded(
+    readDoorsOf(hosts), HOST_CONCURRENCY,
+    (host, signal) => fetchHiveIndex(host, pubkey, signal),
+    result => result.ok,
+    { hostOf: host => host },
+  )
+  return winner?.result.ok ? winner.result.manifest : null
 }
 
 export interface PutHiveResult {
