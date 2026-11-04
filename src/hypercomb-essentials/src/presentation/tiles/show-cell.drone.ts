@@ -7755,13 +7755,12 @@ export class ShowCellDrone extends Drone {
     // a page holding none of them writes nothing.
     this.onEffect<{ sig: string }>('swarm:resource-arrived', ({ sig }) => {
       if (!sig) return
+      // A cell with NO entry has no picture to arrive (a tile without props,
+      // resolved as such): it is not re-derived for somebody else's bytes.
       const labels: string[] = []
       for (const [label, cached] of this.cellImageCache) {
         if (cached === sig) labels.push(label)
         else if (cached === null) { this.cellImageCache.delete(label); labels.push(label) }
-      }
-      for (const label of this.renderedCells.keys()) {
-        if (!this.cellImageCache.has(label)) labels.push(label)
       }
       if (labels.length > 0) this.#dirty(labels, 'swarm:resource-arrived')
     })
