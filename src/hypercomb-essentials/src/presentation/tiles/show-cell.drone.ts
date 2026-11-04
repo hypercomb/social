@@ -1305,6 +1305,11 @@ export class ShowCellDrone extends Drone {
   // clearing it once we proceed) makes the invalidation survive the race.
   #forceNextRender = false
   private renderedLocationKey = ''
+  /** The location `renderedCells` were painted FOR. renderedLocationKey moves
+   *  at the START of a layer change while the cells still belong to the level
+   *  being left; until the new cells land this is null and render:cell-count
+   *  says locationKnown:false, so nothing trusts old tiles under a new key. */
+  #cellsLocation: string | null = null
   /** Owner of the label-keyed derived caches. Labels are only unique inside a
    * lineage: `/friends/jaime` and `/team/jaime` may select different atomic
    * variants from the same name pool. Crossing this boundary must drop every
@@ -3219,6 +3224,7 @@ export class ShowCellDrone extends Drone {
     const finishPreview = (): void => {
       this.renderedCells.clear()
       for (const cell of cells) this.renderedCells.set(cell.label, cell)
+      this.#cellsLocation = this.renderedLocationKey
       void this.applyGeometry(cells)
     }
 
@@ -3400,6 +3406,7 @@ export class ShowCellDrone extends Drone {
     const finishIncremental = (fillAdded = true): void => {
       this.renderedCells.clear()
       for (const cell of cells) this.renderedCells.set(cell.label, cell)
+      this.#cellsLocation = this.renderedLocationKey
 
       this.#layerCellsCache.set(this.renderedLocationKey, {
         cells: [...cells], cellNames, localCellSet, branchSet,
@@ -3816,6 +3823,7 @@ export class ShowCellDrone extends Drone {
         vp?.setCurrentLocation?.(lineage.explorerSegments?.() ?? [])
 
         this.renderedLocationKey = locationKey
+        this.#cellsLocation = locationKey
         this.cachedCellNames = cached.cellNames
         this.cachedLocalCellSet = cached.localCellSet
         this.cachedBranchSet = cached.branchSet
@@ -4052,6 +4060,7 @@ export class ShowCellDrone extends Drone {
 
       this.renderedCells.clear()
       for (const cell of cells) this.renderedCells.set(cell.label, cell)
+      this.#cellsLocation = this.renderedLocationKey
       await this.applyGeometry(cells)
 
       this.#emitRenderTags(cells)
@@ -5123,6 +5132,11 @@ export class ShowCellDrone extends Drone {
       this.renderedLocationKey = locationKey
       this.renderedCellsKey = ''
       this.renderedCells.clear()
+      this.#cellsLocation = null
+      // The move-preview fast path rebuilds geometry from these names; after a
+      // layer change they are the OLD level's and would paint it under the
+      // new address. A preview that arrives now takes the full render instead.
+      this.cachedCellNames = null
       this.#pendingRemoves.clear()
       this.#slots.clear()  // layer change invalidates the slot state machine
 
@@ -5294,6 +5308,7 @@ export class ShowCellDrone extends Drone {
 
     this.renderedCells.clear()
     for (const cell of cells) this.renderedCells.set(cell.label, cell)
+    this.#cellsLocation = locationKey
 
     await this.applyGeometry(cells)
 
@@ -5476,6 +5491,7 @@ export class ShowCellDrone extends Drone {
     // changing" just means that one pass runs again — never a partial.
     this.renderedCells.clear()
     for (const cell of allCells) this.renderedCells.set(cell.label, cell)
+    this.#cellsLocation = myLocationKey
 
     // Launcher silhouettes are baked into the geometry (aShapeMode), so on an
     // `agg-` page the shape index must be warm BEFORE the single paint below —
@@ -8670,7 +8686,7 @@ export class ShowCellDrone extends Drone {
     // 'open' action and the user can't browse a peer's tree.
     return {
       locationKey: this.renderedLocationKey || '/',
-      locationKnown: this.renderedLocationKey !== '',
+      locationKnown: this.renderedLocationKey !== '' && this.#cellsLocation === this.renderedLocationKey,
       renderPassId: this.#tileRenderPassId,
       count: cells.length,
       labels: cells.map(c => c.label),
