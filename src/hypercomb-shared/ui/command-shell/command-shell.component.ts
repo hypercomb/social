@@ -9,6 +9,7 @@ import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { TextScaleComponent, surfaceScale, stepSurfaceScale } from '../text-scale/text-scale.component'
 import { RailParticipantsComponent } from '../participants/rail-participants.component'
+import { inSwarm } from '../participants/participants-roster'
 
 /** One status pill, as a producer states it on `indicator:set`. `label` is
  *  its name (tooltip and aria-label). An actionable pill may carry `items`:
@@ -310,6 +311,8 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
    *  `actionable` indicators are producer-owned attention entries: clicking
    *  activates their workflow without dismissing the underlying state. */
   readonly indicators = input<readonly CommandIndicator[]>([])
+  /** The swarm's badges share the indicator tray, so it stands while in a swarm. */
+  readonly inSwarm = inSwarm
 
   /**
    * Whether the "open for subscribers" floating icon is rendered. When

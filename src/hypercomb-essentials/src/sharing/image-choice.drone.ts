@@ -40,7 +40,7 @@ import {
   requestConfirm,
   type I18nProvider,
 } from '@hypercomb/core'
-import { Container, Graphics, Point, Sprite, Text, Texture } from 'pixi.js'
+import { Container, Graphics, Point, Rectangle, Sprite, Text, Texture } from 'pixi.js'
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
 import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import { referenceEditsRootDefaultForLabel, referenceTargetForLabel } from '../commands/decoration-kind-index.js'
@@ -51,6 +51,8 @@ import { canonicalPeerImageCandidates, type PeerImageCandidate, type PeerImagePr
 import { imageChoiceWriteTargets } from './image-choice-targets.js'
 import { markSeen, unseenNow } from './image-updates.js'
 import { ImageQueue } from './image-queue.js'
+import { readThumbnail, type ThumbnailStore } from '../presentation/tiles/thumbnails.js'
+import { FILL_HEX_R, divideBySheet, fillFrame, readFillSheet, type FillDivision } from '../presentation/tiles/fill-sprite.js'
 
 type Axial = { q: number; r: number }
 
@@ -108,6 +110,8 @@ const LABEL_RESOLUTION = (worldScale: number): number =>
   Math.min(4, Math.max(2, worldScale * (globalThis.devicePixelRatio || 1)))
 const TEXTURE_CACHE_MAX = 128
 const TEXTURE_TIMEOUT_MS = 20000
+/** Longest side of a wall thumbnail — a wall hex is ~60px across at life size. */
+const THUMB_PX = 96
 
 export class ImageChoiceDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -150,6 +154,10 @@ export class ImageChoiceDrone extends Drone {
 
   #textures = new Map<string, Texture | null>()
   #inflight = new Set<string>()
+  /** Sigs whose texture is a frame of a fill sheet (shares the sheet's source). */
+  #sheetCut = new Set<string>()
+  /** The decoded sheets those frames are cut from; released on dispose. */
+  #sheetBases: Texture[] = []
   #entries: ChoiceEntry[] = []
   #loading = false
   #repaintQueued = false
@@ -158,7 +166,7 @@ export class ImageChoiceDrone extends Drone {
     'render:host-ready', 'render:mesh-offset', 'render:geometry-changed',
     'render:set-orientation', 'images:open', 'render:cell-count',
   ]
-  protected override emits = ['render:set-hive-visible', 'tile:hover', 'caption:show', 'caption:clear', 'tile:saved', 'toast:show', 'images:queue']
+  protected override emits = ['render:set-hive-visible', 'tile:hover', 'caption:show', 'caption:clear', 'tile:saved', 'toast:show', 'thumbnail:wanted', 'images:queue']
 
   #wired = false
 
@@ -220,8 +228,9 @@ export class ImageChoiceDrone extends Drone {
     window.removeEventListener('blur', this.#onWindowBlur)
     this.#close()                            // never strand a hidden hive
     this.#endQueue()
-    for (const t of this.#textures.values()) { try { t?.destroy(true) } catch { /* gone */ } }
-    this.#textures.clear()
+    for (const sig of [...this.#textures.keys()]) this.#drop(sig)
+    for (const base of this.#sheetBases) { try { base.destroy(true) } catch { /* gone */ } }
+    this.#sheetBases = []
   }
 
   #locationKey(): string {
@@ -336,8 +345,7 @@ export class ImageChoiceDrone extends Drone {
       const result = await forgetPicture(address, c.props.imageSig ?? '')
       if (result.reason === 'worn') { this.emitEffect('toast:show', { type: 'info', message: this.#t('images.forget-worn', 'That is the picture this tile wears — it cannot be removed.') }); return }
       if (!result.removed) return
-      this.#textures.get(c.previewSig)?.destroy(true)
-      this.#textures.delete(c.previewSig)
+      this.#drop(c.previewSig)
       this.emitEffect('toast:show', { type: 'info', message: result.bytesRemoved ? this.#t('images.forgot', 'Picture removed') : this.#t('images.forgot-kept', 'Picture removed from this tile; the file stays because another tile uses it.') })
       await this.#open(label, segments)         // repaint the wall without it
     } catch (err) {
@@ -467,11 +475,67 @@ export class ImageChoiceDrone extends Drone {
     this.#loadTextures(token, added)
   }
 
-  /** Start every picture's bytes; each repaints the wall as it lands. */
+  /** Start every picture's bytes; each repaints the wall as it lands. What is
+   *  needed is DIVIDED first: a fill sheet holding two or more of these is one
+   *  read and one decode, cut into frames; the rest load one by one. */
   #loadTextures(token: number, entries: readonly ChoiceEntry[]): void {
-    for (const entry of entries) {
-      void this.#texture(entry.previewSig).then(() => this.#scheduleRepaint(token))
+    const wanted = entries.map(entry => entry.previewSig).filter(sig => sig && !this.#textures.has(sig))
+    if (!wanted.length) return
+    for (const sig of wanted) this.#inflight.add(sig)
+    const store = this.#store() as ThumbnailStore | undefined
+    void (async () => {
+      const division = store?.getPool
+        // The wall draws pointy-top hexagons, so it reads the pointy sheet of each pair.
+        ? await divideBySheet(store, wanted, 'point').catch(() => ({ sheets: new Map(), singles: wanted }) as FillDivision)
+        : { sheets: new Map(), singles: wanted } as FillDivision
+      for (const [sheet, members] of division.sheets) {
+        void this.#cutSheet(store!, sheet, members).then(missed => {
+          this.#scheduleRepaint(token)
+          for (const sig of missed) void this.#texture(sig).then(() => this.#scheduleRepaint(token))
+        })
+      }
+      for (const sig of division.singles) {
+        this.#inflight.delete(sig)
+        void this.#texture(sig).then(() => this.#scheduleRepaint(token))
+      }
+    })()
+  }
+
+  /** Decode one fill sheet and cut a texture per wanted slot. Returns the sigs
+   *  it could not serve (sheet reaped, undecodable) for the single path. */
+  async #cutSheet(store: ThumbnailStore, sheet: string, members: readonly { sig: string; slot: number }[]): Promise<string[]> {
+    const release = (): string[] => {
+      for (const member of members) this.#inflight.delete(member.sig)
+      return members.map(member => member.sig)
     }
+    try {
+      const blob = await readFillSheet(store, sheet)
+      if (!blob) return release()
+      const base = Texture.from(await createImageBitmap(blob))
+      this.#sheetBases.push(base)
+      const missed: string[] = []
+      for (const { sig, slot } of members) {
+        this.#inflight.delete(sig)
+        if (this.#textures.has(sig)) continue
+        const frame = fillFrame(slot, 'point')
+        // A slot past the sheet's edge is a record that outran its sheet.
+        if (frame.x + frame.width > base.width || frame.y + frame.height > base.height) { missed.push(sig); continue }
+        this.#sheetCut.add(sig)
+        this.#remember(sig, new Texture({ source: base.source, frame: new Rectangle(frame.x, frame.y, frame.width, frame.height) }))
+      }
+      return missed
+    } catch {
+      return release()
+    }
+  }
+
+  /** Destroy a cached texture. A frame cut from a sheet shares the sheet's
+   *  source, so only the frame goes — never the source under its neighbours. */
+  #drop(sig: string): void {
+    const tex = this.#textures.get(sig)
+    try { tex?.destroy(!this.#sheetCut.has(sig)) } catch { /* gone */ }
+    this.#textures.delete(sig)
+    this.#sheetCut.delete(sig)
   }
 
   #scheduleRepaint(token: number): void {
@@ -774,9 +838,15 @@ export class ImageChoiceDrone extends Drone {
     if (tex) {
       const sprite = new Sprite(tex)
       sprite.anchor.set(0.5)
-      const side = tileR * 1.75
-      const s = Math.max(side / (tex.width || side), side / (tex.height || side))
-      sprite.scale.set(s)
+      if (this.#sheetCut.has(c.previewSig)) {
+        // A sheet frame is a hexagon's bounding box whose corners hold its
+        // neighbours: the cell's own hexagon is drawn at the tile's radius,
+        // so the clip below (0.97 r) shows this cell and nothing beside it.
+        sprite.scale.set(tileR / FILL_HEX_R)
+      } else {
+        const side = tileR * 1.75
+        sprite.scale.set(Math.max(side / (tex.width || side), side / (tex.height || side)))
+      }
       const mask = new Graphics()
       mask.poly(this.#hexVerts(0, 0, tileR * 0.97), true)
       mask.fill({ color: 0xffffff })
@@ -933,23 +1003,36 @@ export class ImageChoiceDrone extends Drone {
     try {
       // A picture nobody serves must not hold its tile "loading" forever; a
       // timeout is not cached, so opening the wall again asks again.
-      const blob = await Promise.race([
-        this.#bytes(sig),
-        new Promise<null>(resolve => setTimeout(() => resolve(null), TEXTURE_TIMEOUT_MS)),
-      ])
-      if (blob) tex = Texture.from(await createImageBitmap(blob))
+      // The cached quick shot first (sign('thumbnails:hex'), keyed by this very
+      // sig): one tiny local read, no network. A miss falls back to the full
+      // bytes and asks the optimizer to cut the shot for next time.
+      const store = this.#store() as ThumbnailStore | undefined
+      const cached = store?.getPool ? await readThumbnail(store, sig) : null
+      if (cached) {
+        tex = Texture.from(await createImageBitmap(cached))
+      } else {
+        const blob = await Promise.race([
+          this.#bytes(sig),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), TEXTURE_TIMEOUT_MS)),
+        ])
+        if (blob) {
+          tex = Texture.from(await thumbnailOf(blob))
+          this.emitEffect('thumbnail:wanted', { sig })
+        }
+      }
     } catch { tex = null }
     this.#inflight.delete(sig)
     if (!tex) return null
+    this.#remember(sig, tex)
+    return tex
+  }
+
+  #remember(sig: string, tex: Texture): void {
     if (this.#textures.size >= TEXTURE_CACHE_MAX) {
       const oldest = this.#textures.keys().next().value
-      if (oldest !== undefined) {
-        try { this.#textures.get(oldest)?.destroy(true) } catch { /* gone */ }
-        this.#textures.delete(oldest)
-      }
+      if (oldest !== undefined) this.#drop(oldest)
     }
     this.#textures.set(sig, tex)
-    return tex
   }
 
   // ── geometry (same transforms as wave-view / move-preview / tile-overlay) ──
@@ -1048,7 +1131,33 @@ export class ImageChoiceDrone extends Drone {
   }
 }
 
-const formatBytes = (n: number | null): string => {
+/** A quick shot: the wall only ever draws a picture a few dozen pixels across,
+ *  so it keeps a small decode, never the full bitmap. The full bytes are pulled
+ *  once, by `#apply`, for the picture actually chosen — everything else on the
+ *  wall is released when the wall closes. Decoders that ignore the resize hint
+ *  (older Safari/Firefox) fall back to a canvas draw, then to the plain decode. */
+const thumbnailOf = async (blob: Blob): Promise<ImageBitmap | HTMLCanvasElement> => {
+  try {
+    const bitmap = await createImageBitmap(blob, { resizeWidth: THUMB_PX, resizeQuality: 'medium' })
+    if (bitmap.width <= THUMB_PX * 2) return bitmap
+    bitmap.close()
+  } catch { /* resize options unsupported */ }
+  const full = await createImageBitmap(blob)
+  try {
+    const scale = Math.min(1, THUMB_PX / Math.max(full.width, full.height))
+    if (scale === 1) return full
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(full.width * scale))
+    canvas.height = Math.max(1, Math.round(full.height * scale))
+    const context = canvas.getContext('2d')
+    if (!context) return full
+    context.drawImage(full, 0, 0, canvas.width, canvas.height)
+    full.close()
+    return canvas
+  } catch { return full }
+}
+
+const formatBytes =(n: number | null): string => {
   if (n === null) return '?'
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`

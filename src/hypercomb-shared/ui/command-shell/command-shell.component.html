@@ -126,7 +126,7 @@
         >push_pin</span>
       }
 
-      @if (indicators().length) {
+      @if (indicators().length || inSwarm()) {
         <div class="indicators">
           @for (ind of indicators(); track ind.key) {
             @if (ind.actionable) {
@@ -159,6 +159,12 @@
               </span>
             }
           }
+
+          <!-- WHO IS IN THE SWARM — the members' badges, to the right of the
+               pills, with a hairline after them; only while this tab is in a
+               swarm (rail-participants). A click opens the participants
+               sidebar on the left. -->
+          <hc-rail-participants></hc-rail-participants>
 
           <!-- THE ROLL-DOWN — a pill that carries items unrolls them here while
                it is hovered or focused: its label as the heading, one row per
@@ -252,11 +258,6 @@
            here". Raised only when both groups are populated. -->
       <span class="rail-divider" aria-hidden="true"></span>
     }
-
-    <!-- WHO IS IN THE SWARM — one more divider and the members' initials,
-         only while this tab is in a swarm (rail-participants). A click opens
-         the left participants sidebar. -->
-    <hc-rail-participants></hc-rail-participants>
 
     <div class="action-group tools">
       @if (showOpenForSubscribersToggle()) {

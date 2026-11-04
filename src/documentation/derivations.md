@@ -173,6 +173,7 @@ when next touched — nothing is rewritten in place (data never heals).
 | import-map bags | a package's aliases | computed by every client (`bags.ts`) | reproduce |
 | children manifests, visual optimization | layers | `system:manifests` / `system:optimization` (`optimize-phase.md`) | reproduce |
 | hex thumbnails | a picture | `thumbnails:hex`, keyed by source (`thumbnails.ts`) | reproduce if the encoder is pinned, else witness |
+| hex sheet pairs | up to 16 hex thumbnails, in slot order | `sprites:boot`, keyed by `sign(F ‖ orientation ‖ members)` (`fill-sprite.ts`): a pointy and a flat sheet on the normal hexagon matrix, slot i at spiral slot i, filled as thumbnails are minted | witness (webp) |
 | derived arrival plan | a branch's view declaration | signed index `plan:<lineage>`, `{arrive, derived: true}` (`arrival-derive.ts`) | reproduce |
 | minified package | the readable package | its root's `derivedFrom` / `derivation` | reproduce |
 | community translation | a catalog in another language | `i18n:<locale>` (`community-translations.md`) | witness |

@@ -232,6 +232,18 @@ const PAL: Record<Palette, Pal> = {
  *  to be told twice which world it belongs to. */
 export const paletteIsLight = (palette: string): boolean => PAL[palette as Palette]?.light === true
 
+/** A look painted in the chrome's world. The panels, the tag strip and every
+ *  label are drawn for the chrome they wear, so a bright backdrop under dark
+ *  chrome (or the reverse) leaves text on a ground it was never made to be
+ *  read on — and `/theme` can move the chrome after the backdrop was chosen.
+ *  The look stays reachable and keeps its accents; only its GROUND crosses
+ *  over to the neutral one of the world the chrome is in. */
+const inWorld = (p: Pal, light: boolean): Pal => {
+  if (p.light === light) return p
+  const ground = light ? PAL.daylight : PAL.steel
+  return { ...p, light, base: ground.base, base2: ground.base2, deep: ground.deep }
+}
+
 /** Is the chrome currently a bright look? Read from the `--md-is-light` token
  *  every value-set declares, falling back to the OS preference — a theme
  *  nobody here has heard of, including one a community module registered at
@@ -457,11 +469,11 @@ export class CanvasBackgroundService extends EventTarget {
     this.#hydration = this.#hydrate()
     void this.#hydration.then(() => this.#followLineage())
     // Re-apply when the colour theme flips so an auto palette tracks it.
-    EffectBus.on('theme:changed', () => { if (!this.#palette) this.apply() })
+    EffectBus.on('theme:changed', () => { this.apply() })
     // matchMedia covers the 'system' theme (no data-theme attribute).
     try {
       window.matchMedia?.('(prefers-color-scheme: light)')
-        ?.addEventListener?.('change', () => { if (!this.#palette) this.apply() })
+        ?.addEventListener?.('change', () => { this.apply() })
     } catch { /* matchMedia unavailable */ }
     window.addEventListener('resize', () => {
       if (!this.#pictureUrl) return
@@ -793,7 +805,7 @@ export class CanvasBackgroundService extends EventTarget {
       return
     }
 
-    const p = PAL[this.resolvedPalette()]
+    const p = inWorld(PAL[this.resolvedPalette()], this.#isLight())
 
     // A PICTURE THAT IS COMING GETS THE SCREEN HELD FOR IT. Painting the
     // pattern first and swapping it for a photograph a second later is the

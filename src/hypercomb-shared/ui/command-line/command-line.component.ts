@@ -2232,19 +2232,14 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
       const selected = payload.selected
       if (selected.length === 0) {
-        this.#indicators.update(m => { const n = new Map(m); n.delete('move-hint'); return n })
         if (this.#selectPhase() !== 'none') {
           this.clear()
         }
         return
       }
 
-      // show move-hint indicator when tiles are selected
-      this.#indicators.update(m => {
-        const n = new Map(m)
-        n.set('move-hint', { key: 'move-hint', icon: 'open_with', label: 'Move mode', dismissable: false })
-        return n
-      })
+      // (The move-mode pill that used to light here is retired — jwize,
+      // 2026-11-04: a selection needs no badge in the tray.)
 
       const ctx = this.context()
       if (!ctx.active || ctx.mode === 'select' || this.value() === '') {

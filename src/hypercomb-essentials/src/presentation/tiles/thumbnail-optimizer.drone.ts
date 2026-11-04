@@ -21,6 +21,7 @@ import { Drone } from '@hypercomb/core'
 import {
   readThumbnail, writeThumbnail, deriveThumbnail, type ThumbnailStore,
 } from './thumbnails.js'
+import { appendToFill } from './fill-sprite.js'
 
 const SIG = /^[0-9a-f]{64}$/
 /** Derives per idle pass. Decoding is the expensive part, so keep each pass
@@ -61,12 +62,21 @@ export class ThumbnailOptimizerDrone extends Drone {
       this.#attempted.add(sig)
       try {
         // Another pass (or another client's sync) may already have it.
-        if (await readThumbnail(store, sig)) continue
-        const source = await store.getResource(sig)
-        if (!source) continue
-        const bytes = await deriveThumbnail(source)
-        if (!bytes) continue   // too small to bother, or undecodable
-        await writeThumbnail(store, sig, bytes)
+        let cell = await readThumbnail(store, sig)
+        if (!cell) {
+          const source = await store.getResource(sig)
+          if (!source) continue
+          const bytes = await deriveThumbnail(source)
+          if (bytes) {
+            await writeThumbnail(store, sig, bytes)
+            cell = new Blob([bytes], { type: 'image/webp' })
+          } else {
+            // Too small to need a thumbnail: the picture is its own cell.
+            cell = source
+          }
+        }
+        // Then onto the sheet that is filling, so a screen of these is one read.
+        await appendToFill(store, sig, cell)
       } catch {
         // Pure cache — a failure here changes nothing a reader depends on.
       }
