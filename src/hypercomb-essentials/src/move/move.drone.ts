@@ -46,6 +46,8 @@ type MoveRefs = {
   container: any
   renderer: any
   getMeshOffset: () => { x: number; y: number }
+  /** The hive's hex orientation right now (flat-top vs point-top). */
+  getFlat: () => boolean
 }
 
 export type MoveDroneApi = {
@@ -78,6 +80,11 @@ export class MoveDrone extends Drone {
   #container: any = null
   #renderer: any = null
   #meshOffset = { x: 0, y: 0 }
+  // Hex orientation (render:set-orientation). A press has to be read back to a
+  // hex with the SAME inverse the grid was laid out with — the point-top one on
+  // a flat-top grid lands on the wrong hex, so a move could only be grabbed or
+  // dropped where the two layouts happen to agree.
+  #flat = false
 
   #moveActive = false
   #activeSource: string | null = null
@@ -149,7 +156,7 @@ export class MoveDrone extends Drone {
     selection: '@diamondcoreprocessor.com/SelectionService',
   }
 
-  protected override listens = ['render:host-ready', 'render:cell-count', 'render:tiles-target', 'render:mesh-offset', 'controls:action', 'tile:action']
+  protected override listens = ['render:host-ready', 'render:cell-count', 'render:tiles-target', 'render:mesh-offset', 'render:set-orientation', 'controls:action', 'tile:action']
   protected override emits = ['move:preview', 'move:committed', 'move:mode', 'move:drag', 'cell:reorder', 'move:drop-into', 'move:drop-into-commit', 'move:copy-drag', 'cell:added']
 
   #effectsRegistered = false
@@ -168,6 +175,7 @@ export class MoveDrone extends Drone {
         container: this.#container,
         renderer: this.#renderer,
         getMeshOffset: () => this.#meshOffset,
+        getFlat: () => this.#flat,
       }
 
       const desktopMove = this.resolve<any>('desktopMove')
@@ -203,6 +211,10 @@ export class MoveDrone extends Drone {
 
     this.onEffect<{ x: number; y: number }>('render:mesh-offset', (offset) => {
       this.#meshOffset = offset
+    })
+
+    this.onEffect<{ flat?: boolean }>('render:set-orientation', (p) => {
+      this.#flat = !!p?.flat
     })
 
     // controls:action is a command, not state — skip last-value replay

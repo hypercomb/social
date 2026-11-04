@@ -10,6 +10,7 @@ type MoveRefs = {
   container: any
   renderer: any
   getMeshOffset: () => { x: number; y: number }
+  getFlat: () => boolean
 }
 
 export class TouchMoveInput {
@@ -18,6 +19,7 @@ export class TouchMoveInput {
   #container: any = null
   #renderer: any = null
   #getMeshOffset: (() => { x: number; y: number }) | null = null
+  #getFlat: (() => boolean) | null = null
 
   #drone: MoveDroneApi | null = null
   #gate: InputGate | null = null
@@ -60,6 +62,7 @@ export class TouchMoveInput {
     this.#container = refs.container
     this.#renderer = refs.renderer
     this.#getMeshOffset = refs.getMeshOffset
+    this.#getFlat = refs.getFlat
 
     window.addEventListener('pointerdown', this.#onPointerDown, { passive: false })
     window.addEventListener('pointermove', this.#onPointerMove, { passive: false })
@@ -88,6 +91,7 @@ export class TouchMoveInput {
     this.#container = null
     this.#renderer = null
     this.#getMeshOffset = null
+    this.#getFlat = null
     this.#enabled = false
   }
 
@@ -251,7 +255,7 @@ export class TouchMoveInput {
   #clientToAxial(cx: number, cy: number): Axial | null {
     if (!this.#container || !this.#renderer || !this.#getMeshOffset) return null
 
-    const detector = window.ioc.get<{ pixelToAxial(px: number, py: number): Axial }>(
+    const detector = window.ioc.get<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>(
       '@diamondcoreprocessor.com/HexDetector'
     )
     if (!detector) return null
@@ -259,7 +263,7 @@ export class TouchMoveInput {
     const pixiGlobal = this.#clientToPixiGlobal(cx, cy)
     const local = this.#container.toLocal(new Point(pixiGlobal.x, pixiGlobal.y))
     const offset = this.#getMeshOffset()
-    return detector.pixelToAxial(local.x - offset.x, local.y - offset.y)
+    return detector.pixelToAxial(local.x - offset.x, local.y - offset.y, this.#getFlat?.() ?? false)
   }
 
   #clientToPixiGlobal(cx: number, cy: number) {

@@ -32,6 +32,7 @@ new TouchMoveInput().attach(drone as never, {
   container: { toLocal: (p: { x: number; y: number }) => p },
   renderer: { screen: { width: 400, height: 800 } },
   getMeshOffset: () => ({ x: 0, y: 0 }),
+  getFlat: () => false,
 })
 
 let nextId = 10
