@@ -726,13 +726,24 @@ it can be joined by others, or rebuilt, whenever that helps.
 Audited 2026-11-03 against this plan's own rules (jwize: "fix all three and
 replant"); the tree lives in `scripts/bridge/living-presentation/tree.cjs`.
 
-- **Two trees, because they are two relations.** `presentation` is what the
-  reader is shown: the six values, and under each value the ideas that show
-  it. `presenter` is what shows it: the primitive marker, the same-shape
-  check, the lift, and the cube viewer with its points, faces and slices. The
-  machinery used to sit among the ideas, so a path read "simple has a
-  marker"; now every layer keeps one relation and every path reads aloud.
-  Only `presentation` is published.
+- **Two trees, because they are two relations.** `protocol` is what the
+  reader is shown: the protocol, its six values, and under each value the
+  ideas that show it. `presenter` is what shows it: the primitive marker, the
+  same-shape check, the lift, and the cube viewer with its points, faces and
+  slices. The machinery used to sit among the ideas, so a path read "simple
+  has a marker"; now every layer keeps one relation and every path reads
+  aloud. Only `protocol` is published. (A third tree, `road`, carries the
+  tour's question and its close; see "The tour is the standard".)
+- **The root is `protocol`.** jwize, 2026-11-04: "the root tile has to
+  change to protocol instead of presentation"; "unpublish the presentation
+  and we use the other from now on". The root tile is the protocol itself,
+  and its scene is the tour's *An open protocol*, so the name and the first
+  words agree. The earlier root, `presentation`, is retired the way every
+  earlier planting is (`retired.cjs` `roots`): `plant.cjs` forgets its marker
+  at `/` with `trait ~ presentation`, so the tile stays one trait away with
+  its history, and withdraws it from every domain it publishes to with
+  `publish /presentation off <domain>` before publishing `protocol` there.
+  Nothing is deleted; the one address serves the one presentation.
 - **No word twice.** A name is one molecule hive-wide, so two tiles named
   `cube` would feed one molecule. The opening's sixth move is `fill` ("the
   points fill a cube"), and `cube` is the viewer alone.
@@ -764,14 +775,38 @@ every page, and its 25 scenes are folded into the tiles they explain:
   the caption, and its recorded voice. The tile's block adds only what the
   scene does not say: pictures from a running hive, a part to try, the source
   it explains. `blocks/tour.cjs` holds the mapping (every scene on exactly one
-  tile; `presentation` carries the opening, scenes 1 and 2, and the road
-  ahead, 20 to 25, with the six values between), and `blocks/build.cjs`
+  tile; the root, `protocol`, carries scene 2, *An open protocol*; the six
+  values hold scenes 3 to 19; and the `road` tree carries the opening
+  question, scene 1, and the road ahead, 20 to 25), and `blocks/build.cjs`
   refuses a scene tile whose block would say a headline or narration again.
+- **Every tile is an interactive video of its concept.** jwize, 2026-11-04:
+  "every tile is an interactive video that shows in detail the concept. If
+  too much we break it apart into its elements the hypercomb way." A page
+  plays one sentence at a time to its voice and lights the figure's parts as
+  they are said; it may add interactive features (a part to try, a picture
+  from a running hive), but it stays one concept. A concept too big for one
+  page is never a longer page: it is broken apart into child tiles, each its
+  own video, and the parent tells only what holds them together.
+  `blocks/check.cjs` fails a presentation or road tile with no page, and a
+  page past twelve sentences.
 - **A tile no scene explains speaks the same way.** An eyebrow, a headline
   with one honey word, a plate drawn in the tour's plate language (960 by
   400, tokens only, `blocks/plates/`), and beats that light the plate's parts
   as they are said. `blocks/narrate.cjs` voices the beats through the tour's
   one voice path; until then a beat holds for its reading time.
+- **An exploration into building the hypercomb way.** jwize, 2026-11-04:
+  "the very elements of construction are the pathways to manageability and
+  clarity without overlap. The picture can be expressed in as many ways as
+  possible and shown integrally." The presentation is built of the things it
+  explains: one tile per concept, one word per name, one relation per layer,
+  one signature per medium, one scene per tile. Because each element is one
+  thing said once, the whole stays manageable and clear with no overlap: a
+  concept has one tile, a medium one signature, a scene one place, and a
+  change is made where the thing lives. And the one picture is shown in
+  every way there is, all from the same hierarchy: as hexagons walked, as a
+  website read, as a film played one sentence at a time, as a plate lit part
+  by part, as tiles captured from a hive in use, as a cube of points. None
+  of these is a copy; each is the same tiles, shown integrally.
 - **One look.** The tour's ink and honey, its two vendored faces, its icon
   sprite. Dark as the tour is; light only where the hive says so explicitly.
   Every size reads from the column's width, so a page is the same page
