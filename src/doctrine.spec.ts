@@ -318,6 +318,26 @@ describe('doctrine ratchets', () => {
     ], 'hardcoded signature')
   })
 
+  it('no build script hashes a pool meaning by hand — scripts/pool-address.ts is the one derivation', () => {
+    // P2: pool addresses are DERIVED from the meaning. A script that writes
+    // `createHash('sha256').update('host:packages')` (or `sign('x:y')`, or
+    // hashes a *_MEANING constant) keeps its own copy of the derivation, and
+    // three copies of it is how the stamp, the copy and the build came to
+    // spell one pool three ways. Import the constant from where its pool lives
+    // and the address from pool-address.ts. Empty allowlist, and it stays empty.
+    const colonLiteral = String.raw`['"\x60][^'"\x60\s]*:[^'"\x60\s]*['"\x60]`
+    const meaningName = String.raw`[A-Za-z_]*MEANING[A-Za-z_]*`
+    const caller = String.raw`(?:createHash\(\s*['"]sha256['"]\s*\)\s*\.update|\bsha256|\bsign|\bpoolSignature)`
+    const hashed = new RegExp(String.raw`${caller}\(\s*(?:${colonLiteral}|${meaningName})`)
+    const actual: string[] = []
+    for (const file of walk(join(ROOT, 'hypercomb-essentials/scripts'))) {
+      const rel = relative(ROOT, file).replace(/\\/g, '/')
+      if (rel.endsWith('/pool-address.ts')) continue   // the derivation itself
+      if (hashed.test(stripComments(readFileSync(file, 'utf8')))) actual.push(rel)
+    }
+    assertRatchet(actual.sort(), [], 'hand-hashed pool meaning in scripts/')
+  })
+
   it('no new typed-folder (__x__) string literals — legacy names are drain-source constants only', () => {
     // Typed folders are eradicated. The only dirs in OPFS are
     // signature-named (lineage sigbags, sign(meaning) pools). This

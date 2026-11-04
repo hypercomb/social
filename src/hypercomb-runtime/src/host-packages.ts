@@ -28,7 +28,7 @@
 // It reads nothing but public URLs and writes nothing anywhere.
 
 import { HOST_IOC_KEY, registerPoolMeaning, type HostProvider } from '@hypercomb/core'
-import { HOST_PACKAGES_MEANING, markerIndices, parseMember, parsePoolListing, poolEntryName } from './host-pool.js'
+import { HIVE_INDEXES_MEANING, HOST_PACKAGES_MEANING, markerIndices, parseMember, parsePoolListing, poolEntryName } from './host-pool.js'
 import { DEFAULT_HOST_ZONES, hostZone } from './host-zones.js'
 
 const SIG_RE = /^[a-f0-9]{64}$/
@@ -417,7 +417,6 @@ const rowsFrom = async (
 // dependency, so the shell passes its verifier in (core host-offerings.ts uses
 // the same seam).
 
-const HIVE_INDEXES_MEANING = 'hive:indexes'
 const HIVE_INDEX_KIND = 30564
 
 /** The participant's own follow record. MIRRORED from essentials

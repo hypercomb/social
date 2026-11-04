@@ -60,7 +60,8 @@ import { createHash } from 'node:crypto'
 import { readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { HOST_PACKAGES_MEANING, markerIndices, parseMember, parsePoolListing, poolEntryName } from '../../hypercomb-runtime/src/host-pool.js'
+import { hostPackagesPool, poolAddress } from './pool-address.js'
+import { HIVE_INDEXES_MEANING, markerIndices, parseMember, parsePoolListing, poolEntryName } from '../../hypercomb-runtime/src/host-pool.js'
 
 const ESSENTIALS = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const SIG_RE = /^[a-f0-9]{64}$/
@@ -113,7 +114,7 @@ export async function hostPoolHead(
   zone: string,
   fetchImpl: (url: string, init?: RequestInit) => Promise<Pick<Response, 'ok' | 'status' | 'text'>> = fetch,
 ): Promise<{ answered: boolean; head: string | null }> {
-  const pool = createHash('sha256').update(HOST_PACKAGES_MEANING, 'utf8').digest('hex')
+  const pool = hostPackagesPool()
   let answered = false
   for (const base of [`https://${zone}`, `https://${zone}/content`]) {
     let listing: string[] | null
@@ -467,7 +468,7 @@ async function signedRoot(host: string, publisher: Publisher): Promise<string | 
   const { pubkey, channel } = publisher
   if (!SIG_RE.test(pubkey)) return null
   const { verifyEvent } = await import('nostr-tools/pure') as { verifyEvent(event: unknown): boolean }
-  const indexes = createHash('sha256').update('hive:indexes', 'utf8').digest('hex')
+  const indexes = poolAddress(HIVE_INDEXES_MEANING)
   for (const zone of [...new Set([host, ...publisher.hosts])]) {
     let event: { kind?: number; pubkey?: string; content?: string }
     try {

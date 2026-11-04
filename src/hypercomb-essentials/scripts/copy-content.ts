@@ -25,6 +25,7 @@ import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { createHash } from 'node:crypto'
 import { formatPoolEntry, packageClosure, poolEntries, retentionSet } from './retention.js'
+import { hostPackagesPool, poolAddress } from './pool-address.js'
 import { TRANSFER_PACKS_MEANING } from '../../hypercomb-runtime/src/transfer-pack.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -75,11 +76,10 @@ const MANIFEST_FILE = 'manifest.json'
 // the two sides address different directories. The colon is the collision
 // rule — `lineageKey` folds every non-alphanumeric to `-`, so no location can
 // ever produce this address.
-const HOST_PACKAGES_MEANING = 'host:packages'
-const HOST_PACKAGES_POOL = createHash('sha256').update(HOST_PACKAGES_MEANING, 'utf8').digest('hex')
+const HOST_PACKAGES_POOL = hostPackagesPool()
 // One member per package (hypercomb-runtime/src/transfer-pack.ts), so this
 // pool grows and is merged into a target, never skipped as a finished bag.
-const TRANSFER_PACKS_POOL = createHash('sha256').update(TRANSFER_PACKS_MEANING, 'utf8').digest('hex')
+const TRANSFER_PACKS_POOL = poolAddress(TRANSFER_PACKS_MEANING)
 const poolEntryName = (index: number): string => String(index).padStart(8, '0')
 
 // A REVISION IS A DELIBERATE ACT. A build copies bytes; it does not enter the

@@ -20,6 +20,7 @@ import { spawnSync } from 'child_process'
 import { createHash } from 'node:crypto'
 import { builtinModules } from 'node:module'
 import { TRANSFER_PACKS_MEANING, encodeTransferPack, gzipBytes } from '../../hypercomb-runtime/src/transfer-pack.js'
+import { hostPackagesPool, poolAddress } from './pool-address.js'
 import { effectSleeper, passiveQueen, viewSleeper } from './passive-queen.js'
 import { fileURLToPath } from 'url'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
@@ -1713,10 +1714,9 @@ const main = async (): Promise<void> => {
   // skip-write compare reads, and copy-content never mirrors it to a target
   // any more, so it does not reach a host.
   //
-  // The address is DERIVED — sha256 of the meaning, byte for byte what core's
+  // The address is DERIVED — derived by pool-address.ts, byte for byte what core's
   // registerPoolMeaning mints and what every client computes for itself.
-  const poolAddress = createHash('sha256').update('host:packages', 'utf8').digest('hex')
-  const poolDir = join(DIST_ROOT, poolAddress)
+  const poolDir = join(DIST_ROOT, hostPackagesPool())
   ensureDir(poolDir)
   const memberBytes = `${rootLayerSig}\n${resolveGenesisLabel()}`
   const memberPath = join(poolDir, '00000000')
@@ -1741,7 +1741,7 @@ const main = async (): Promise<void> => {
   const packBytes = await gzipBytes(packPlain)
   const packSig = await SignatureService.sign(toArrayBuffer(packBytes))
   writeSigFile(DIST_ROOT, packSig, packBytes)
-  const packPoolDir = join(DIST_ROOT, createHash('sha256').update(TRANSFER_PACKS_MEANING, 'utf8').digest('hex'))
+  const packPoolDir = join(DIST_ROOT, poolAddress(TRANSFER_PACKS_MEANING))
   ensureDir(packPoolDir)
   writeFileSync(join(packPoolDir, rootLayerSig), packSig, 'utf8')
   const mb = (n: number): string => (n / 1024 / 1024).toFixed(1)
