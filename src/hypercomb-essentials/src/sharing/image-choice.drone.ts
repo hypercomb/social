@@ -41,6 +41,7 @@ import { fetchThroughContentHop, terminalContentSig } from '../presentation/tile
 import { canonicalPeerImageCandidates, type PeerImageCandidate, type PeerImageProps } from './peer-images.js'
 import { imageChoiceWriteTargets } from './image-choice-targets.js'
 import { markSeen, unseenNow } from './image-updates.js'
+import { readThumbnail, type ThumbnailStore } from '../presentation/tiles/thumbnails.js'
 
 type Axial = { q: number; r: number }
 
@@ -145,7 +146,7 @@ export class ImageChoiceDrone extends Drone {
     'render:host-ready', 'render:mesh-offset', 'render:geometry-changed',
     'render:set-orientation', 'images:open', 'render:cell-count',
   ]
-  protected override emits = ['render:set-hive-visible', 'tile:hover', 'caption:show', 'caption:clear', 'tile:saved', 'toast:show']
+  protected override emits = ['render:set-hive-visible', 'tile:hover', 'caption:show', 'caption:clear', 'tile:saved', 'toast:show', 'thumbnail:wanted']
 
   #wired = false
 
@@ -816,11 +817,23 @@ export class ImageChoiceDrone extends Drone {
     try {
       // A picture nobody serves must not hold its tile "loading" forever; a
       // timeout is not cached, so opening the wall again asks again.
-      const blob = await Promise.race([
-        this.#bytes(sig),
-        new Promise<null>(resolve => setTimeout(() => resolve(null), TEXTURE_TIMEOUT_MS)),
-      ])
-      if (blob) tex = Texture.from(await thumbnailOf(blob))
+      // The cached quick shot first (sign('thumbnails:hex'), keyed by this very
+      // sig): one tiny local read, no network. A miss falls back to the full
+      // bytes and asks the optimizer to cut the shot for next time.
+      const store = this.#store() as ThumbnailStore | undefined
+      const cached = store?.getPool ? await readThumbnail(store, sig) : null
+      if (cached) {
+        tex = Texture.from(await createImageBitmap(cached))
+      } else {
+        const blob = await Promise.race([
+          this.#bytes(sig),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), TEXTURE_TIMEOUT_MS)),
+        ])
+        if (blob) {
+          tex = Texture.from(await thumbnailOf(blob))
+          this.emitEffect('thumbnail:wanted', { sig })
+        }
+      }
     } catch { tex = null }
     this.#inflight.delete(sig)
     if (!tex) return null
