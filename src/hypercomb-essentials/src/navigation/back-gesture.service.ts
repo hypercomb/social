@@ -66,6 +66,12 @@ export type BackGestureEntry = {
   /** Optional liveness for surfaces that are neither a view nor an element
    *  (a page-covering mode). Checked for every entry that declares it. */
   active?: () => boolean
+  /** The view answers back itself even when it is the ARRIVAL FACE of the
+   *  place (a default it did not open). A website does: reading it moves
+   *  between pages without history entries, so a history back would skip
+   *  every page read and land outside the site; the site steps back along
+   *  its own pages, and out at the page it was entered on. */
+  ownsBack?: boolean
 }
 
 type Ioc = { get<T>(key: string): T | undefined }
@@ -153,7 +159,7 @@ export class BackGesture {
       }
       if (entry.within) continue
       if (entry.active && !entry.active()) continue
-      return { ...entry, back: () => this.backOutOfView(entry.back) }
+      return { ...entry, back: entry.ownsBack ? entry.back : () => this.backOutOfView(entry.back) }
     }
 
     // 3. A page-covering mode that is not a view (clipboard), most recent first.

@@ -21,10 +21,12 @@ let BackGesture: Registry
 let viewOwners: string[] = []
 let navigationBack: ReturnType<typeof vi.fn>
 let segments: string[] = []
+let arrival = false
 
 beforeEach(async () => {
   viewOwners = []
   segments = ['a', 'b']
+  arrival = false
   navigationBack = vi.fn()
   const services: Record<string, unknown> = {
     '@diamondcoreprocessor.com/ModeRegistry': {
@@ -32,6 +34,7 @@ beforeEach(async () => {
     },
     '@hypercomb.social/Lineage': { explorerSegments: () => segments },
     '@hypercomb.social/Navigation': { back: navigationBack },
+    '@diamondcoreprocessor.com/ViewBee': { isArrivalSurface: () => arrival },
   }
   ;(globalThis as unknown as { ioc: unknown }).ioc = {
     get: (key: string) => services[key],
@@ -140,6 +143,31 @@ describe('back gesture', () => {
     rightClick(el())
     expect(over).toHaveBeenCalledOnce()
     expect(under).not.toHaveBeenCalled()
+    expect(navigationBack).not.toHaveBeenCalled()
+  })
+
+  it('backs out of an ARRIVAL FACE by navigating, unless the view owns its back', () => {
+    const gesture = stand()
+    const face = vi.fn()
+    gesture.register({ owner: 'slides-view', back: face })
+    viewOwners = ['slides-view']
+    arrival = true
+    rightClick(el())
+    expect(navigationBack).toHaveBeenCalledOnce()
+    expect(face).not.toHaveBeenCalled()
+  })
+
+  // jwize 2026-11-04: inside a website that opened by itself (a pinned
+  // default), back after a link went to the hexagons: history back skipped
+  // every page read. A website steps back along its own pages.
+  it('lets a view that OWNS its back answer even as the arrival face (the website)', () => {
+    const gesture = stand()
+    const site = vi.fn()
+    gesture.register({ owner: 'site-view', back: site, ownsBack: true })
+    viewOwners = ['site-view']
+    arrival = true
+    rightClick(el())
+    expect(site).toHaveBeenCalledOnce()
     expect(navigationBack).not.toHaveBeenCalled()
   })
 
