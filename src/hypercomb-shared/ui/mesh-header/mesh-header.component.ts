@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, computed, signal, type OnInit, type OnDestroy, type OnChanges, type SimpleChanges } from '@angular/core'
+import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output, computed, signal, type OnInit, type OnDestroy, type OnChanges, type SimpleChanges } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { fromRuntime } from '../../core/from-runtime'
@@ -13,6 +13,7 @@ const STAGE_HOST = 2
 
 @Component({
   selector: 'hc-mesh-header',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   standalone: true,
   imports: [TranslatePipe],
   templateUrl: './mesh-header.component.html',

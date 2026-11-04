@@ -92,7 +92,7 @@
 // Shell UI — resolves everything through `window.ioc` at call time and never
 // imports essentials.
 
-import { Component, ElementRef, Injector, afterNextRender, computed, effect, inject, signal, viewChild, type OnDestroy } from '@angular/core'
+import { ChangeDetectionStrategy, Component, ElementRef, Injector, afterNextRender, computed, effect, inject, signal, viewChild, type OnDestroy } from '@angular/core'
 import { NgTemplateOutlet } from '@angular/common'
 import { DomSanitizer, type SafeHtml } from '@angular/platform-browser'
 import {
@@ -1650,6 +1650,7 @@ const conversationOnLayer = (path: string, here: readonly string[]): boolean => 
 
 @Component({
   selector: 'hc-chat-window',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   standalone: true,
   imports: [NgTemplateOutlet, TranslatePipe, HcDockedPanelDirective],
   templateUrl: './chat-window.component.html',

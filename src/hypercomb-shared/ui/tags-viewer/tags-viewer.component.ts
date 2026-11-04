@@ -51,7 +51,7 @@
 
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { NgTemplateOutlet } from '@angular/common'
-import { ChangeDetectorRef, Component, computed, ElementRef, inject, signal, type OnDestroy } from '@angular/core'
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, computed, ElementRef, inject, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { onSelection } from '../../core/selection-context'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -122,6 +122,7 @@ type BouquetRegistryLike = {
 
 @Component({
   selector: 'hc-tags-viewer',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   standalone: true,
   imports: [NgTemplateOutlet, TranslatePipe, DockInsetDirective, HcDockedPanelDirective],
   templateUrl: './tags-viewer.component.html',

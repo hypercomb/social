@@ -60,6 +60,7 @@
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { NgTemplateOutlet } from '@angular/common'
 import {
+  ChangeDetectionStrategy,
   Component, ElementRef, computed, effect, signal, untracked, viewChild,
   type OnDestroy,
 } from '@angular/core'
@@ -321,6 +322,7 @@ const HANDLES: readonly Handle[] = ['se']
 
 @Component({
   selector: 'hc-layout-designer',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   standalone: true,
   imports: [TranslatePipe, DockInsetDirective, HcDockedPanelDirective, RawHtmlDirective, NgTemplateOutlet],
   templateUrl: './layout-designer.component.html',

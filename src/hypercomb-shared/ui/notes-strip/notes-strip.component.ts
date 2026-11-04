@@ -5,7 +5,7 @@
 // viewer; click the plus to enter capture mode for that tile. Collapses
 // entirely when the active tile has no notes.
 
-import { Component, ElementRef, HostListener, computed, effect, inject, signal, untracked, viewChild, type OnDestroy } from '@angular/core'
+import { ChangeDetectionStrategy, Component, ElementRef, HostListener, computed, effect, inject, signal, untracked, viewChild, type OnDestroy } from '@angular/core'
 import { NgTemplateOutlet } from '@angular/common'
 import { EffectBus, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -292,6 +292,7 @@ type InputModeStackLike = {
 
 @Component({
   selector: 'hc-notes-strip',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   standalone: true,
   imports: [TranslatePipe, NgTemplateOutlet, HcDockedPanelDirective, CommandShellComponent],
   templateUrl: './notes-strip.component.html',

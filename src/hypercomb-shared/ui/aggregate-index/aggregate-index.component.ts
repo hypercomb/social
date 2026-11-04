@@ -27,7 +27,7 @@
 // Shell UI — resolves everything through `window.ioc` at call time, never
 // imports essentials.
 
-import { ChangeDetectorRef, Component, computed, inject, signal, type OnDestroy } from '@angular/core'
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, computed, inject, signal, type OnDestroy } from '@angular/core'
 import { EffectBus, hypercomb } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
@@ -80,6 +80,7 @@ const KEY_SEP = '\u0000'
 
 @Component({
   selector: 'hc-aggregate-index',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   standalone: true,
   imports: [TranslatePipe, DockInsetDirective, HcDockedPanelDirective],
   templateUrl: './aggregate-index.component.html',

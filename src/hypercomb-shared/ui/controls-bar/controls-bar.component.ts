@@ -2,6 +2,7 @@
 // Floating contextual controls pill — minimal by default, mode-adaptive.
 
 import {
+  ChangeDetectionStrategy,
   Component,
   computed,
   effect,
@@ -230,6 +231,7 @@ function overridesOf(map: Record<string, boolean>): Record<string, boolean> {
 
 @Component({
   selector: 'hc-controls-bar',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   standalone: true,
   imports: [TranslatePipe],
   templateUrl: './controls-bar.component.html',

@@ -31,7 +31,7 @@
 // without the presentation module simply has a window with nothing in it, and
 // a community module that registers a theme of its own appears here for free.
 
-import { Component, HostListener, computed, signal, type OnDestroy } from '@angular/core'
+import { ChangeDetectionStrategy, Component, HostListener, computed, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
@@ -177,6 +177,7 @@ const MAX_BACKDROP_EDGE = 2560
 
 @Component({
   selector: 'hc-backgrounds-window',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   standalone: true,
   imports: [TranslatePipe, DockInsetDirective, HcDockedPanelDirective],
   templateUrl: './backgrounds-window.component.html',

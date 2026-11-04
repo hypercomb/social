@@ -37,7 +37,7 @@
 // Shell UI: NEVER imports essentials — it reaches the runtime only through
 // window.ioc (the local `get` helper) and EffectBus.
 
-import { Component, ElementRef, inject, type AfterViewInit, type OnDestroy, type OnInit, signal } from '@angular/core'
+import { ChangeDetectionStrategy, Component, ElementRef, inject, type AfterViewInit, type OnDestroy, type OnInit, signal } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { ensureViewportInsetVars } from '../../core/viewport-inset-vars'
@@ -58,6 +58,7 @@ type SentinelBridgeLike = { saveBranch?: (name: string) => Promise<string | null
 
 @Component({
   selector: 'hc-edit-actions',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   standalone: true,
   imports: [TranslatePipe],
   templateUrl: './edit-actions.component.html',
