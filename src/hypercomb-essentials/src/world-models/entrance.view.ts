@@ -15,7 +15,7 @@ import {
   WORLD_MODEL_TRAITS,
   WORLD_MODELS_SURFACE,
   WORLD_MODELS_WINDOW,
-} from './world-models.drone.js'
+} from './world-models.words.js'
 
 const GATE = '@diamondcoreprocessor.com/InputGate'
 const BACK = '@diamondcoreprocessor.com/BackGesture'
