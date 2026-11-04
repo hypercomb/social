@@ -1,4 +1,11 @@
-# The hosting pages — hosting.hypercomb.com
+# The hosting pages — host-setup.hypercomb.com
+
+**The door, 2026-11-04.** jwize: *"change from hosting to
+host-setup.hypercomb.com not host"*. The tile stays `/hosting` (its lineage
+and its history); its address on hypercomb.com is `host-setup`, said with the
+publish's own-address modifier (`publish /hosting as host-setup on
+hypercomb.com`), and the worker's exact binding for `host-setup.hypercomb.com`
+carries the title. Every link to the pages says `host-setup.hypercomb.com`.
 
 **Status:** PLAN, 2026-10-22. jwize: *"we really need a detailed plan on how
 this works so people can pick one of those processes and go through the
@@ -8,7 +15,7 @@ up the quality and standards of our websites, they're always so dry and
 inconsistent."*
 
 The pages are a creation in the hive — a tile at `/hosting` with one child
-per path — published to the door `hosting.hypercomb.com`. They are made and
+per path — published to the door `host-setup.hypercomb.com`. They are made and
 kept through the hive like any creation (`documentation/website-artifact-
 paradigm.md`), never as files in the shell. This document is the brief: what
 each page says, in what order, and the standard every page meets.
@@ -38,10 +45,10 @@ price, linked only by a page that carries a price.
 ## The shape
 
 ```
-/hosting                      Host your hive            hosting.hypercomb.com
-  /hosting/device             Host it on your device          device.hosting, free, 2 minutes
-  /hosting/self               Run it on your own server       self.hosting, free, 60 minutes
-  /hosting/cloud              Run it in the cloud             cloud.hosting, free, 60 minutes
+/hosting                      Host your hive            host-setup.hypercomb.com
+  /hosting/device             Host it on your device          device.host-setup, free, 2 minutes
+  /hosting/self               Run it on your own server       self.host-setup, free, 60 minutes
+  /hosting/cloud              Run it in the cloud             cloud.host-setup, free, 60 minutes
   /hosting/basics             The basics                      read, 1 minute
   /hosting/safety             Stay in control                 (from any page)
   /hosting/fix-it             Fix it                          (from any page)
@@ -258,7 +265,7 @@ working.*
 - **Sign-up** (`hosted-tenants.md`, step 3): then the hosted page's notes get
   their steps and card, and the generator draws the plan list.
 - **The door's title — deploy the worker BEFORE publishing `/hosting`.**
-  `hosting.hypercomb.com` has an exact `SITE_BINDINGS` entry (title *Host
+  `host-setup.hypercomb.com` has an exact `SITE_BINDINGS` entry (title *Host
   your hive*, lineage `hosting`), so the door record, the tab and the share
   card read it; without it they read *hosting*. The door's bag keeps the
   title of the marker that seeded it, so a publish before the deploy keeps
@@ -281,9 +288,10 @@ working.*
 2. ~~Make the three components once; have every page use them.~~ Done
    2026-10-23 (`chrome.css`, `generate.cjs`).
 3. Open the door, in this order: deploy the worker (it carries the title and
-   the plans-pool guard), then `publish /hosting on hypercomb.com` in jwize's
-   hive (it asks him first). Success is `hosting` in his signed index, then
-   the address opening the main page titled *Host your hive*.
+   the plans-pool guard), then `publish /hosting as host-setup on
+   hypercomb.com` in jwize's hive (it asks him first). Success is `hosting`
+   in his signed index with the address `host-setup`, then
+   host-setup.hypercomb.com opening the main page titled *Host your hive*.
 4. Walk each path with someone who has not done it; fix the note where they
    stopped and run the generator.
 5. When sign-up lands, give the hosted page its steps and card.

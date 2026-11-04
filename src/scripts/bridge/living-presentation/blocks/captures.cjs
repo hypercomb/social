@@ -34,14 +34,14 @@ const VIEW = { width: 1280, height: 800 }
 /** The shots, in the order they are taken. `say` runs before the picture,
  *  `after` puts the hive back for the shots that follow. */
 const SHOTS = [
-  { shot: 'layout-on', say: ['go /presentation/organized', 'create notes', 'layout on'] },
-  { shot: 'layout-off', say: ['go /presentation/organized', 'layout off'], after: ['layout on'] },
-  { shot: 'trait-silhouette', say: ['go /presentation/organized/trait', 'trait portrait tagline contact', 'hide contact'] },
+  { shot: 'layout-on', say: ['go /protocol/organized', 'create notes', 'layout on'] },
+  { shot: 'layout-off', say: ['go /protocol/organized', 'layout off'], after: ['layout on'] },
+  { shot: 'trait-silhouette', say: ['go /protocol/organized/trait', 'trait portrait tagline contact', 'hide contact'] },
   // help, in Japanese, filtered to the words for tiles
-  { shot: 'hive-in-japanese', say: ['go /presentation', 'language ja', 'help'], filter: 'タイル', after: ['language en'] },
+  { shot: 'hive-in-japanese', say: ['go /protocol', 'language ja', 'help'], filter: 'タイル', after: ['language en'] },
   {
     shot: 'sentence-before-it-runs',
-    say: ['go /presentation/intelligent'],
+    say: ['go /protocol/intelligent'],
     // An outside caller's lines wait on the command line until the
     // participant answers; the picture is taken while they wait, and Escape
     // declines them, so nothing runs.

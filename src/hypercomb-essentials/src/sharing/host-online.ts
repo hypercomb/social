@@ -112,7 +112,7 @@ const bringOnline = async (
 }
 
 /** The way to the how-to, from wherever hosting is read about. */
-const HOSTING_PAGES = 'https://hosting.hypercomb.com/'
+const HOSTING_PAGES = 'https://host-setup.hypercomb.com/'
 
 const howToLink = (helpers: Helpers): HTMLAnchorElement => {
   const link = helpers.make('a', 'hd-online-link', helpers.t('host-online.how', 'How hosting works'))

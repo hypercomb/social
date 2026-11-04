@@ -35,7 +35,7 @@ const hub = (top, children, label) => {
 const lit = (top, ...names) => [top, ...names, ...names.map(n => `${top}-${n}`)]
 
 module.exports = {
-  'presentation/simple/primitive': {
+  'protocol/simple/primitive': {
     live: [
       { shot: 'the-tile-editor', title: 'one tile, opened', caption: 'One tile in its editor: a name, a picture, a border, a link, and its words. Every tile is these same few parts.' },
     ],
@@ -46,7 +46,7 @@ module.exports = {
     files: ['documentation/life-primitive.md', 'hypercomb-core/src/core/life-primitive.ts'],
   },
 
-  'presentation/simple/primitive/word': {
+  'protocol/simple/primitive/word': {
     eyebrow: 'naming',
     headline: 'Any spelling, one *address*',
     sub: 'Letters and digits of every script are kept: café stays café, and chapter 1 is not chapter 2.',
@@ -67,7 +67,7 @@ module.exports = {
     files: ['documentation/ontology-is-the-name.md', 'documentation/hypergraph-molecule-lineage.md', 'hypercomb-core/src/core/molecule-address.ts', 'hypercomb-core/src/core/lineage-key.ts'],
   },
 
-  'presentation/simple/primitive/signature': {
+  'protocol/simple/primitive/signature': {
     try: 'signature',
     code: [
       { path: 'hypercomb-core/src/core/signature.service.ts', from: '  public static async sign(bytes: ArrayBuffer)', lines: 7 },
@@ -75,7 +75,7 @@ module.exports = {
     files: ['documentation/signature-system.md', 'documentation/signature-algebra.md', 'hypercomb-core/src/core/signature.service.ts'],
   },
 
-  'presentation/simple/primitive/layer': {
+  'protocol/simple/primitive/layer': {
     live: [
       { tiles: ['humanity-centres', 'humanity-centres/participants', 'humanity-centres/places', 'humanity-centres/purse'], title: 'a layer', caption: 'Humanity centres and the words under it, from a hive in use. Each of them can hold a layer of its own.' },
     ],
@@ -97,7 +97,7 @@ module.exports = {
     files: ['documentation/life-primitive.md', 'documentation/concepts.md', 'documentation/history-sigbag-as-root.md', 'documentation/signature-system.md', 'hypercomb-core/src/core/canonical-layer.ts'],
   },
 
-  'presentation/simple/primitive/meta': {
+  'protocol/simple/primitive/meta': {
     eyebrow: 'meaning',
     headline: 'Meaning *wraps* the content',
     sub: 'The envelope declares its own kind. Nothing is ever guessed from the bytes.',
@@ -120,7 +120,7 @@ module.exports = {
   // ── the opening: seven moves, from one hexagon to the cube ──────────────
   // (living-presentation.md, "From one hexagon to the cube, in seven moves")
 
-  'presentation/simple/opening': {
+  'protocol/simple/opening': {
     eyebrow: 'the opening',
     headline: 'The cube comes *first*',
     plate: 'simple-opening',
@@ -136,7 +136,7 @@ module.exports = {
     files: ['documentation/living-presentation.md', 'documentation/life-primitive.md'],
   },
 
-  'presentation/simple/opening/hexagon': {
+  'protocol/simple/opening/hexagon': {
     eyebrow: 'move one',
     headline: 'One hexagon, four *parts*',
     sub: 'A layer that holds a name and nothing else is already complete.',
@@ -156,7 +156,7 @@ module.exports = {
     files: ['documentation/life-primitive.md', 'hypercomb-core/src/core/life-primitive.ts'],
   },
 
-  'presentation/simple/opening/row': {
+  'protocol/simple/opening/row': {
     eyebrow: 'move two',
     headline: 'The layer becomes a *row*',
     sub: 'These six words were hypercomb.io\'s original title.',
@@ -175,7 +175,7 @@ module.exports = {
     files: ['documentation/life-primitive.md', 'documentation/concepts.md', 'hypercomb-core/src/core/canonical-layer.ts'],
   },
 
-  'presentation/simple/opening/stack': {
+  'protocol/simple/opening/stack': {
     eyebrow: 'move three',
     headline: 'Rows under *rows*',
     sub: 'These rows are this presentation\'s own: the page you are reading is a word on the third plane.',
@@ -196,7 +196,7 @@ module.exports = {
     files: ['documentation/life-primitive.md', 'documentation/the-algorithm-is-the-application.md', 'hypercomb-core/src/core/life-primitive.ts', 'hypercomb-core/src/core/level-roster.ts'],
   },
 
-  'presentation/simple/opening/column': {
+  'protocol/simple/opening/column': {
     eyebrow: 'move four',
     headline: 'Each word grows a *column*',
     sub: 'Every step is a whole layer, never a list of edits.',
@@ -217,7 +217,7 @@ module.exports = {
     files: ['documentation/history-sigbag-as-root.md', 'documentation/revision-mode.md', 'hypercomb-essentials/src/history/history.service.ts', 'hypercomb-core/src/core/directory-safety.ts'],
   },
 
-  'presentation/simple/opening/spread': {
+  'protocol/simple/opening/spread': {
     eyebrow: 'move five',
     headline: 'One word, many *hands*',
     sub: 'A word\'s notes already keep each author\'s history apart; for tiles, and the origin mark, it is planned.',
@@ -238,7 +238,7 @@ module.exports = {
     files: ['documentation/hypergraph-molecule-lineage.md', 'documentation/pools-across-hosts.md', 'hypercomb-core/src/core/head-claim.ts', 'hypercomb-essentials/src/notes/notes-facet.ts'],
   },
 
-  'presentation/simple/opening/fill': {
+  'protocol/simple/opening/fill': {
     eyebrow: 'move six',
     headline: 'A cube nobody *drew*',
     sub: 'Nothing stores the cube; it is read from the points. A viewer that draws it in the hive is planned.',
@@ -254,7 +254,7 @@ module.exports = {
     files: ['documentation/living-presentation.md', 'documentation/superimposition.md'],
   },
 
-  'presentation/simple/opening/tesseract': {
+  'protocol/simple/opening/tesseract': {
     eyebrow: 'move seven',
     headline: 'A fourth *direction*',
     sub: 'Marks and the meta layer are built; drawing them as directions, the picker and the tesseract are planned.',
@@ -275,14 +275,14 @@ module.exports = {
     files: ['documentation/life-primitive.md', 'documentation/superimposition.md', 'documentation/living-presentation.md', 'hypercomb-core/src/core/life-primitive.ts', 'hypercomb-core/src/core/group-signature.ts'],
   },
 
-  // ── the top: the presentation and its six values ──────────────────────
+  // ── the top: the protocol and its six values ──────────────────────
 
-  'presentation': {
+  'protocol': {
     code: [],
     files: ['documentation/living-presentation.md'],
   },
 
-  'presentation/simple': {
+  'protocol/simple': {
     figures: {
       3: {
         tiles: ['revolucion', 'knowledge', 'room-host', 'scratch-organize', 'play', 'work', 'misc', 'behavior-where-visual'],
@@ -294,22 +294,22 @@ module.exports = {
     files: ['documentation/life-primitive.md', 'documentation/the-algorithm-is-the-application.md'],
   },
 
-  'presentation/organized': {
+  'protocol/organized': {
     code: [{ path: 'hypercomb-essentials/src/commands/layout.ts', from: 'export function leftOut', lines: 3 }],
     files: ['documentation/history-sigbag-as-root.md', 'documentation/traits.md', 'documentation/layout-templates.md', 'hypercomb-essentials/src/commands/layout.ts'],
   },
 
-  'presentation/collaborative': {
+  'protocol/collaborative': {
     code: [],
     files: ['documentation/domain-claim.md', 'documentation/publishing-a-revision.md', 'documentation/pools-across-hosts.md'],
   },
 
-  'presentation/intelligent': {
+  'protocol/intelligent': {
     code: [],
     files: ['documentation/every-act-has-a-word.md', 'documentation/speak-dont-bridge.md', 'documentation/agents.md'],
   },
 
-  'presentation/accessible': {
+  'protocol/accessible': {
     live: [
       { shot: 'tutorials-beside-the-hive', title: 'lessons beside the hive', caption: 'Forty-five lessons, open beside the hive itself. Each one opens the real thing, and puts it away again.' },
     ],
@@ -317,7 +317,7 @@ module.exports = {
     files: ['documentation/read-only-deployment.md', 'documentation/no-third-party-requests.md', 'documentation/mobile-one-column.md'],
   },
 
-  'presentation/localized': {
+  'protocol/localized': {
     live: [
       { shot: 'hive-in-japanese', title: 'the hive in Japanese', caption: 'After language ja, the hive’s own reference speaks Japanese, here filtered to the words about tiles.' },
     ],
@@ -342,7 +342,7 @@ module.exports = {
 
   // ── the rest of simple, and organized ─────────────────────────────────
 
-  'presentation/simple/act': {
+  'protocol/simple/act': {
     figures: {
       10: {
         tiles: ['revolucion', 'revolucion/journal', 'revolucion/experience', 'revolucion/cigars', 'revolucion/flavor-wheel', 'revolucion/discovery', 'revolucion/community', 'revolucion/insights', 'revolucion/collaborations', 'revolucion/humidor', 'revolucion/mission', 'revolucion/lounge', 'revolucion/store', 'revolucion/meetup', 'revolucion/wholesale'],
@@ -359,12 +359,12 @@ module.exports = {
     files: ['documentation/the-algorithm-is-the-application.md', 'documentation/speak-dont-bridge.md', 'hypercomb-core/src/core/molecule-address.ts'],
   },
 
-  'presentation/organized/heart': {
+  'protocol/organized/heart': {
     code: [{ path: 'hypercomb-essentials/src/history/history.service.ts', from: ' * One history entry.', lines: 9 }],
     files: ['documentation/history-sigbag-as-root.md', 'documentation/revision-mode.md'],
   },
 
-  'presentation/organized/history': {
+  'protocol/organized/history': {
     live: [
       { shot: 'history-of-a-layer', title: 'history, open', caption: 'One layer with 478 versions, newest on top. Each is a step you can go back to, and none is ever removed.' },
     ],
@@ -372,7 +372,7 @@ module.exports = {
     files: ['documentation/universal-history-plan.md', 'documentation/hive-snapshots.md', 'documentation/revision-mode.md'],
   },
 
-  'presentation/organized/build': {
+  'protocol/organized/build': {
     eyebrow: 'one pass',
     headline: 'Many tiles, one *signature*',
     sub: 'A site builder that writes many pages records one on its own, at the end of its pass.',
@@ -393,7 +393,7 @@ module.exports = {
     files: ['documentation/build-revisions.md', 'documentation/publishing-a-revision.md', 'hypercomb-essentials/src/commands/builds.queen.ts', 'hypercomb-essentials/src/history/builds-slot.ts'],
   },
 
-  'presentation/organized/layout': {
+  'protocol/organized/layout': {
     live: [
       { shot: 'layout-on-off', title: 'layout on, then off', caption: 'Layout on shows the six named words in order; layout off shows every child again. Nothing was deleted or moved.' },
     ],
@@ -416,7 +416,7 @@ module.exports = {
     files: ['documentation/layout-templates.md', 'documentation/template-addressing.md', 'hypercomb-essentials/src/commands/layout.ts', 'hypercomb-essentials/src/commands/layout.queen.ts'],
   },
 
-  'presentation/organized/trait': {
+  'protocol/organized/trait': {
     live: [
       { shot: 'trait-silhouette', title: 'a trait waiting', caption: 'Three traits given, one tile hidden: contact stays as a silhouette, a place still open for whatever fills it.' },
     ],
@@ -439,7 +439,7 @@ module.exports = {
     files: ['documentation/traits.md', 'documentation/tag-pools.md', 'hypercomb-core/src/core/trait.ts'],
   },
 
-  'presentation/organized/organization': {
+  'protocol/organized/organization': {
     live: [
       { shot: 'a-tile-as-its-website', title: 'a tile as its website', caption: 'The same tile opened as a website: a card made of its own pieces. Switch back, and the hexagons are all still there.' },
     ],
@@ -464,12 +464,12 @@ module.exports = {
 
   // ── collaborative ─────────────────────────────────────────────────────
 
-  'presentation/collaborative/workbench': {
+  'protocol/collaborative/workbench': {
     code: [],
     files: ['documentation/becoming-a-host.md', 'documentation/hosting-from-a-machine.md'],
   },
 
-  'presentation/collaborative/domain': {
+  'protocol/collaborative/domain': {
     live: [
       { shot: 'a-community-domain', title: 'a community on its domain', caption: 'Revolución, a cigar journal built as a hive for its own domain: the journal, the flavour wheel, the lounge and the store are all tiles.' },
     ],
@@ -477,7 +477,7 @@ module.exports = {
     files: ['documentation/domain-claim.md', 'documentation/domain-folder-sharing.md', 'documentation/showcase.md'],
   },
 
-  'presentation/collaborative/trial': {
+  'protocol/collaborative/trial': {
     eyebrow: 'a trial address',
     headline: 'Try first, then *promote*',
     sub: 'Proven on a local hive; on a public domain, a trial opens only for a publisher that domain approves.',
@@ -498,7 +498,7 @@ module.exports = {
     files: ['documentation/module-sandbox.md', 'hypercomb-essentials/src/files/try-page.ts', 'hypercomb-core/src/core/sandbox-door.ts', 'hypercomb-essentials/src/assistant/module.queen.ts', 'hypercomb-essentials/src/sharing/hive-pointer.ts'],
   },
 
-  'presentation/collaborative/publishing': {
+  'protocol/collaborative/publishing': {
     live: [
       { tiles: ['work/domains', 'knowledge/replication', 'knowledge/diagrams', 'knowledge/behaviors'], title: 'domains, replication, the shared pieces', caption: 'From a hive in use: its domains, how replication works, and the shared pieces it is built from, each one a tile.' },
     ],
@@ -506,7 +506,7 @@ module.exports = {
     files: ['documentation/read-only-deployment.md', 'documentation/deployment-stages.md', 'documentation/derivations.md', 'hypercomb-essentials/src/sharing/hive-pointer.ts'],
   },
 
-  'presentation/collaborative/participant': {
+  'protocol/collaborative/participant': {
     eyebrow: 'your choice',
     headline: 'Take it whole, or a *piece*',
     sub: 'Whole packages, and single pieces taken into your own build, work today; the same for every published creation is planned.',
@@ -527,7 +527,7 @@ module.exports = {
     files: ['documentation/using-a-creation.md', 'hypercomb-runtime/src/acquire.ts', 'hypercomb-runtime/src/module-drafts.ts'],
   },
 
-  'presentation/collaborative/sharing': {
+  'protocol/collaborative/sharing': {
     eyebrow: 'no dependencies',
     headline: 'Parts meet at a *word*',
     sub: 'The hive\'s own look works this way today; a theme kept as a layer, for the pages you publish, is planned.',
@@ -547,12 +547,12 @@ module.exports = {
     files: ['documentation/website-artifact-paradigm.md', 'documentation/background-themes.md', 'hypercomb-core/src/theme.types.ts'],
   },
 
-  'presentation/collaborative/discovery': {
+  'protocol/collaborative/discovery': {
     code: [],
     files: ['documentation/pools-across-hosts.md', 'documentation/traits.md', 'documentation/signature-algebra.md'],
   },
 
-  'presentation/collaborative/tapestry': {
+  'protocol/collaborative/tapestry': {
     eyebrow: 'the larger picture',
     headline: 'Joined by the same *signature*',
     sub: 'The threads already exist wherever signatures match; drawing the whole tapestry as one view you can turn is planned.',
@@ -574,10 +574,10 @@ module.exports = {
     eyebrow: 'the road',
     headline: 'Where it is *going*',
     sub: 'One scene per tile, in the order the tour tells them.',
-    picture: hub('road', ['protocol', 'creations', 'coming', 'vision', 'computer', 'yours', 'first-day'], 'The road and its seven scenes'),
+    picture: hub('road', ['question', 'creations', 'coming', 'vision', 'computer', 'yours', 'first-day'], 'The road and its seven scenes'),
     beats: [
       { say: 'This is the road: where Hypercomb is going, one scene at a time.', lit: ['road'] },
-      { say: 'It starts with what Hypercomb is for: an open protocol, for people.', lit: lit('road', 'protocol') },
+      { say: 'It starts with a question: where does your corner of the internet actually live?', lit: lit('road', 'question') },
       { say: 'Then what people already make with it.', lit: lit('road', 'creations') },
       { say: 'Then what is being built next, what is further out, and the horizon.', lit: lit('road', 'coming', 'vision', 'computer') },
       { say: 'And it ends where you begin: the hive is yours, and your first day.', lit: lit('road', 'yours', 'first-day') },
@@ -586,7 +586,7 @@ module.exports = {
   },
 
 
-  'presentation/localized/translating': {
+  'protocol/localized/translating': {
     eyebrow: 'the community',
     headline: 'Gaps that *heal*',
     sub: 'What sync fills is kept in your own hive, so it survives a reload, and a host that goes away.',
@@ -607,7 +607,7 @@ module.exports = {
     files: ['documentation/community-translations.md', 'hypercomb-essentials/src/commands/language.queen.ts', 'hypercomb-essentials/src/sharing/community-translations.ts', 'hypercomb-runtime/src/i18n.service.ts'],
   },
 
-  'presentation/localized/locale': {
+  'protocol/localized/locale': {
     eyebrow: 'a direction',
     headline: 'One name, many *readings*',
     sub: 'Words you give a tile live on the tile itself, so they travel with it, and undo like any change.',
@@ -628,7 +628,7 @@ module.exports = {
     files: ['documentation/cell-localization.md', 'hypercomb-essentials/src/commands/title.queen.ts', 'hypercomb-essentials/src/commands/language.queen.ts', 'hypercomb-runtime/src/i18n.service.ts'],
   },
 
-  'presentation/intelligent/debugging': {
+  'protocol/intelligent/debugging': {
     eyebrow: 'when it breaks',
     headline: 'Debugging is *spoken* too',
     sub: 'Only you can say take, audit or drop: a model never brings someone else\'s code into your hive.',
@@ -649,7 +649,7 @@ module.exports = {
     files: ['documentation/module-sandbox.md', 'documentation/living-presentation.md', 'hypercomb-essentials/src/assistant/module.queen.ts'],
   },
 
-  'presentation/intelligent/merging': {
+  'protocol/intelligent/merging': {
     eyebrow: 'planned',
     headline: 'Two changes, one *choice*',
     sub: 'Planned, not built. Only the clash is named today.',
@@ -669,7 +669,7 @@ module.exports = {
     files: ['documentation/module-sandbox.md', 'documentation/using-a-creation.md', 'hypercomb-essentials/src/assistant/module-review.ts'],
   },
 
-  'presentation/accessible/reader': {
+  'protocol/accessible/reader': {
     eyebrow: 'read only',
     headline: 'Reading calls *one* host',
     sub: 'A reader\'s page never even loads the parts its publisher keeps for the people who make things.',
@@ -690,7 +690,7 @@ module.exports = {
     files: ['documentation/no-third-party-requests.md', 'documentation/read-only-deployment.md', 'hypercomb-web/src/setup/readonly-network.ts', 'scripts/bridge/living-presentation/blocks/check.cjs'],
   },
 
-  'presentation/accessible/listening': {
+  'protocol/accessible/listening': {
     eyebrow: 'the narration',
     headline: 'Written to be *heard*',
     sub: 'The arrow keys step through the beats, and the space bar plays and pauses.',
@@ -711,7 +711,7 @@ module.exports = {
     files: ['documentation/living-presentation.md', 'scripts/bridge/living-presentation/blocks/narrate.cjs', 'scripts/bridge/living-presentation/blocks/page.cjs'],
   },
 
-  'presentation/accessible/phone': {
+  'protocol/accessible/phone': {
     eyebrow: 'one column',
     headline: 'The same page, *narrower*',
     plate: 'accessible-phone',
@@ -731,7 +731,7 @@ module.exports = {
     files: ['scripts/bridge/living-presentation/blocks/page.cjs', 'scripts/bridge/living-presentation/blocks/check.cjs', 'documentation/living-presentation.md'],
   },
 
-  'presentation/accessible/motion': {
+  'protocol/accessible/motion': {
     eyebrow: 'reduced motion',
     headline: 'Less motion, nothing *lost*',
     sub: 'Clips stop playing on their own as well: they move only when you press play.',
@@ -752,13 +752,13 @@ module.exports = {
     files: ['scripts/bridge/living-presentation/blocks/page.cjs', 'scripts/presentation/template.html', 'documentation/living-presentation.md'],
   },
 
-  'presentation/intelligent/sentence': {
+  'protocol/intelligent/sentence': {
     live: [
       { shot: 'sentence-before-it-runs', title: 'a sentence, waiting', caption: 'An agent asks to say three lines. They wait on the command line in plain words until a person presses Enter.' },
     ],
   },
 
-  'presentation/intelligent/agent': {
+  'protocol/intelligent/agent': {
     live: [
       { shot: 'an-agents-sentences-in-chat', title: 'an agent’s sentences, on the record', caption: 'A side session asked to add three meetups. Its lines were shown first, a person pressed Enter, and every line is kept.' },
     ],
