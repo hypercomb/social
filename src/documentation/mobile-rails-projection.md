@@ -363,3 +363,28 @@ flatTop, horizontal = flatTop)`. The fit measures mesh bounds, so every point of
 every tile stays on screen; the ragged start edge is the only difference.
 Turning the hive while lanes are up re-projects; release touches nothing. The
 lines above that say the rail owns or hands back the orientation are superseded.
+
+## The strip is a window; a pan shifts it (2026-11-04)
+
+Lanes show only the tiles that FIT. `presentation/grid/rail-window.ts` (pure)
+sizes a window: whole columns along the long axis that fit the fit's own safe
+area at the tile size the lane fit gives (`railWindowSize`), times the lanes
+(3-2-3 nesting counted exactly: `railTilesBefore`). The projection's slot count
+is that capacity, so the renderer places, loads and draws only those tiles —
+`show-cell`'s `#railRanks` hands on `RailProjectionDrone.windowOf(dense)`, the
+rest get no cell, no image, no geometry.
+
+A pan never moves the camera. `PanningDrone.panBy` (touch, drag, coast) folds
+distance into whole steps (`accumulateRailPan`, tile pitch × 2) and the wheel
+takes one step per notch; both call the drone's `shiftBy`, which clamps to
+[0, last window that shows the final tile] and re-renders via
+`render:grid-changed {shift}`. Slot s shows tile `s + shift × railStepTiles`.
+The matrix is NOT re-projected by a shift: slots are fixed, tiles change place.
+A step is one rhythm period (two columns, 5 tiles at 3-2-3), the smallest move
+that is an exact translation of a honeycomb; a single column would re-nest.
+
+The capacity is seeded from first principles (`railSeedScale`) and corrected
+from the scale the fit actually settled on (the rail fit now snaps so that
+scale is known at once); a different answer re-projects and refits once.
+A drag inside a window commits the WHOLE order (`mergeWindowOrder`), never only
+the visible tiles. Nothing here is written, and `/lanes off` returns the spiral.

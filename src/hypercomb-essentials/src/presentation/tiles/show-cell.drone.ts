@@ -2815,6 +2815,14 @@ export class ShowCellDrone extends Drone {
   #railRanks = (names: readonly string[]): string[] | null => {
     if (!getLaneScrollAxis()) return null
     const dense = names.filter(Boolean)
+    // THE STRIP IS READ THROUGH A WINDOW. Only the columns that fit the screen
+    // are handed on: tiles outside it get no cell, no image load, no geometry
+    // — they are not drawn off-screen, they are not drawn. Ranks inside the
+    // window are slot numbers, so the walk below places them unchanged.
+    const win = window.ioc.get<{ windowOf?: (d: readonly string[]) => string[] | null }>(
+      '@diamondcoreprocessor.com/RailProjectionDrone',
+    )?.windowOf?.(dense)
+    if (win) return win
     return dense.length === names.length ? null : dense
   }
 

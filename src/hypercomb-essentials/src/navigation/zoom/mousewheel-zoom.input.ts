@@ -173,6 +173,18 @@ export class MousewheelZoomInput {
 
     const laneAxis = getLaneScrollAxis()
     if (laneAxis) {
+      // One notch, one step of the window along the strip (the camera stays).
+      // Falls through to the pan below only when no window is up.
+      const rail = window.ioc.get<{ readonly active: boolean; shiftBy: (steps: number) => boolean }>(
+        '@diamondcoreprocessor.com/RailProjectionDrone',
+      )
+      if (rail?.active) {
+        const notch = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
+        if (notch !== 0) rail.shiftBy(notch > 0 ? 1 : -1)
+        event.preventDefault()
+        event.stopPropagation()
+        return
+      }
       const pan = window.ioc.get<{ panBy: (delta: Point) => void }>(
         '@diamondcoreprocessor.com/PanningDrone',
       )

@@ -39,6 +39,18 @@
 
 import { Drone, EffectBus } from '@hypercomb/core'
 import { buildRailMatrix } from '../presentation/grid/rail-grid.js'
+import {
+  accumulateRailPan,
+  clampRailShift,
+  RAIL_STEP_COLUMNS,
+  railPitch,
+  railSeedScale,
+  railShiftOffset,
+  railWindowOf,
+  railWindowSize,
+} from '../presentation/grid/rail-window.js'
+import { DEFAULT_HEX_GEOMETRY, type HexGeometry } from '../presentation/grid/hex-geometry.js'
+import { safeArea } from '../navigation/zoom/safe-area.js'
 import type { SlotMatrix } from '../presentation/grid/axial-service.js'
 import { MOBILE_MODE_EFFECT } from '../preferences/mobile-pheromones.js'
 import {
@@ -54,13 +66,17 @@ const ORIENTATION_KEY = 'hc:hex-orientation'
 const REFLOW_MS = 160
 /** Deferred so the re-render lands before the fit measures live bounds. */
 const FIT_MS = 80
+/** The fit's own margin, so the window is measured against the same area. */
+const WINDOW_MARGIN_PX = 5
+/** A pan gesture's leftover distance is forgotten after this long idle. */
+const PAN_CARRY_MS = 400
 
 type AxialLike = {
   project?: (matrix: SlotMatrix | null) => boolean
   readonly capacity?: number
   readonly projected?: boolean
 }
-type ZoomLike = { zoomToFit?: (snap?: boolean, source?: 'user' | 'auto' | 'auto-persist') => void }
+type ZoomLike = { zoomToFit?: (snap?: boolean, source?: 'user' | 'auto' | 'auto-persist') => boolean | void }
 type ViewportSnapshotLike = {
   zoom?: { scale: number; cx: number; cy: number; fit?: boolean }
   pan?: { dx: number; dy: number }
@@ -72,6 +88,30 @@ type ViewportLike = EventTarget & {
   setPan?: (dx: number, dy: number, source?: 'user' | 'auto' | 'auto-persist') => void
 }
 type Posture = 'map' | 'strip'
+type HostLike = {
+  app?: { stage?: { scale?: { x: number } } }
+  renderer?: { screen: { width: number; height: number } }
+  container?: { scale?: { x: number } }
+  canvas?: HTMLCanvasElement
+}
+
+/** What the renderer (show-cell), the mover and the pan input ask of the
+ *  strip's window over IoC — never through module scope, which each bundle
+ *  inlines separately. */
+export interface RailWindowApi {
+  readonly active: boolean
+  /** The tiles the window shows, in slot order, from the layer's dense order;
+   *  null when no window is up (the caller reads the strip whole). */
+  windowOf(dense: readonly string[]): string[] | null
+  /** The layer's whole dense order with the window's tiles replaced by
+   *  `reordered`; null if it is not a permutation of what the window shows. */
+  mergeWindowOrder(reordered: readonly string[]): string[] | null
+  /** Move the window `steps` steps along the strip. False at an end. */
+  shiftBy(steps: number): boolean
+  /** Fold a pan distance (screen px along the strip) into steps. Returns the
+   *  travel consumed: zero at an end, so a coast knows to stop. */
+  panAlong(deltaPx: number): number
+}
 
 export const railsPreferenceOff = (): boolean => {
   try { return window.localStorage?.getItem(RAILS_KEY) !== 'on' } catch { return true }
@@ -88,7 +128,7 @@ export class RailProjectionDrone extends Drone {
   }
   protected override listens = [
     'render:host-ready', 'render:cell-count', MOBILE_MODE_EFFECT, 'render:set-orientation',
-    'lanes:toggle', 'lanes:set', 'lanes:step', 'lanes:off', 'lanes:on',
+    'render:geometry-changed', 'lanes:toggle', 'lanes:set', 'lanes:step', 'lanes:off', 'lanes:on',
   ]
   protected override emits = [
     'lanes:changed', 'render:grid-changed', 'toast:show',
@@ -117,6 +157,25 @@ export class RailProjectionDrone extends Drone {
   /** The page the strip was last fitted on arrival at. */
   #fittedLocation: string | null = null
 
+  // ── the window over the strip ───────────────────────────────────────
+  /** Hex size the mesh is drawn with (last `render:geometry-changed`). */
+  #hexGeo: HexGeometry = DEFAULT_HEX_GEOMETRY
+  #host: HostLike | null = null
+  /** Slots the projection was built with: the columns that fit × lanes. */
+  #capacity = 0
+  /** Steps the window is shifted along the strip (0 = the strip's start). */
+  #shift = 0
+  /** Tiles in the layer, as last seen by the renderer's window read. */
+  #total: number | null = null
+  /** The layer's dense order, as last handed to `windowOf`. */
+  #dense: readonly string[] | null = null
+  #windowLocation: string | null = null
+  #carry = 0
+  #carryAt = 0
+  /** The scale the lane fit actually settled on, for the shape it was
+   *  measured in. Until then the capacity comes from the seed. */
+  #measured: { key: string; scale: number } | null = null
+
   protected override heartbeat = async (): Promise<void> => {
     if (this.#bound) return
     this.#bound = true
@@ -125,7 +184,13 @@ export class RailProjectionDrone extends Drone {
 
     // The grid exists once the pixi host has initialised the AxialService —
     // `project()` is a no-op before that, so this is the first real apply.
-    this.onEffect('render:host-ready', () => this.#apply())
+    this.onEffect<HostLike>('render:host-ready', (host) => { this.#host = host ?? null; this.#apply() })
+    this.onEffect<HexGeometry>('render:geometry-changed', (geo) => {
+      if (!geo || !(geo.spacing > 0)) return
+      this.#hexGeo = geo
+      this.#measured = null
+      if (this.#active) this.#apply()
+    })
     this.onEffect<{ active?: boolean }>(MOBILE_MODE_EFFECT, () => this.#apply())
     // THE STRIP STARTS AT THE TOP, WHEREVER YOU ARRIVE. A projection change
     // asks the renderer for a full pass (OPFS reads, images) that lands well
@@ -134,7 +199,9 @@ export class RailProjectionDrone extends Drone {
     // a new page fits too: a page's own remembered viewport was framed on a
     // desktop map, and the phone reads a strip from its start edge.
     this.onEffect<{ count?: number; settled?: boolean }>('render:cell-count', ({ count, settled }) => {
-      if (typeof count === 'number' && Number.isFinite(count)) this.#count = count
+      // Once the renderer reports the whole layer (`windowOf`), the count it
+      // emits here is only the WINDOW's — never the layer's.
+      if (typeof count === 'number' && Number.isFinite(count) && (!this.#active || this.#total === null)) this.#count = count
       const here = this.#locationKey()
       // Fewer tiles than lanes: the strip narrows to them (and widens back as
       // tiles arrive). The re-projection asks for another render, and whatever
@@ -228,13 +295,16 @@ export class RailProjectionDrone extends Drone {
     const lanes = this.#lanesFor()
     const horizontal = laneStripHorizontal()
     const flat = this.#flat
-    if (this.#active && this.#lanes === lanes && this.#horizontal === horizontal && this.#projectedFlat === flat) {
+    // The capacity is part of the shape: a different screen, tile size or
+    // orientation fits a different number of columns.
+    const axial = this.resolve<AxialLike>('axial')
+    if (!axial?.project) return
+    const capacity = this.#windowCapacity(lanes, flat, horizontal, axial.capacity ?? 0)
+    if (this.#active && this.#lanes === lanes && this.#horizontal === horizontal && this.#projectedFlat === flat
+      && this.#capacity === capacity) {
       if (say) this.#toast(lanes)
       return
     }
-    const axial = this.resolve<AxialLike>('axial')
-    if (!axial?.project) return
-    const capacity = Math.max(1, axial.capacity ?? 0)
     // Leaving the free map: park how this page was framed on it, before the
     // projection moves anything.
     const entering = !this.#active
@@ -242,6 +312,7 @@ export class RailProjectionDrone extends Drone {
     if (!axial.project(buildRailMatrix(lanes, flat, capacity, horizontal))) return
 
     this.#active = true
+    this.#capacity = capacity
     this.#lanes = lanes
     this.#horizontal = horizontal
     this.#projectedFlat = flat
@@ -263,6 +334,11 @@ export class RailProjectionDrone extends Drone {
     const axial = this.resolve<AxialLike>('axial')
     axial?.project?.(null)
     this.#active = false
+    this.#capacity = 0
+    this.#shift = 0
+    this.#total = null
+    this.#dense = null
+    this.#windowLocation = null
     this.#lanes = 0
     this.#horizontal = null
     this.#projectedFlat = null
@@ -275,7 +351,7 @@ export class RailProjectionDrone extends Drone {
   /** Never more lanes than tiles: a page of one or two reads in that many.
    *  An unknown or empty count keeps the three. */
   #lanesFor(): number {
-    const n = this.#count
+    const n = this.#total ?? this.#count
     return n !== null && n > 0 && n < LANES ? n : LANES
   }
 
@@ -335,8 +411,138 @@ ${location}`
     if (this.#fitTimer !== null) clearTimeout(this.#fitTimer)
     this.#fitTimer = setTimeout(() => {
       this.#fitTimer = null
-      window.ioc.get<ZoomLike>('@diamondcoreprocessor.com/ZoomDrone')?.zoomToFit?.(false, 'auto-persist')
+      // Snapped, not eased: the window is sized from the scale the fit settles
+      // on, and an animation would leave that unknown for 200ms.
+      const fitted = window.ioc.get<ZoomLike>('@diamondcoreprocessor.com/ZoomDrone')?.zoomToFit?.(true, 'auto-persist')
+      if (fitted !== false) this.#remeasure()
     }, FIT_MS)
+  }
+
+  // ── window geometry ─────────────────────────────────────────────────
+
+  #screenScale(): number {
+    const c = this.#host?.container?.scale?.x ?? 1
+    const s = this.#host?.app?.stage?.scale?.x ?? 1
+    return c * s
+  }
+
+  /** The area the strip is read through: the fit's own safe area. */
+  #safe(): { along: number; across: number } | null {
+    const screen = this.#host?.renderer?.screen
+    if (!screen) return null
+    const a = safeArea(screen, this.#host?.canvas?.getBoundingClientRect() ?? null, WINDOW_MARGIN_PX)
+    const w = a.right - a.left
+    const h = a.bottom - a.top
+    if (!(w > 0) || !(h > 0)) return null
+    return laneStripHorizontal() ? { along: w, across: h } : { along: h, across: w }
+  }
+
+  #shapeKey(lanes: number, flat: boolean, horizontal: boolean): string {
+    const screen = this.#host?.renderer?.screen
+    return `${horizontal ? 'x' : 'y'}${flat ? 'f' : 'p'}${lanes}:${Math.round(screen?.width ?? 0)}x${Math.round(screen?.height ?? 0)}`
+  }
+
+  /** Slots that fit: the whole columns × lanes the safe area holds at the
+   *  tile size the lane fit gives — measured once a fit has run for this
+   *  shape, seeded from first principles before that. Never more than the
+   *  spiral held (every slot keeps an `index` the allocator knows), never
+   *  fewer than one column. `fallback` is the spiral's size, used alone
+   *  before the host is up. */
+  #windowCapacity(lanes: number, flat: boolean, horizontal: boolean, fallback: number): number {
+    const safe = this.#safe()
+    if (!safe) return Math.max(1, fallback)
+    const key = this.#shapeKey(lanes, flat, horizontal)
+    const scale = this.#measured?.key === key
+      ? this.#measured.scale
+      : railSeedScale(safe.across, this.#hexGeo, lanes, flat, horizontal)
+    const { capacity } = railWindowSize(safe.along, scale, this.#hexGeo, lanes, flat, horizontal)
+    return Math.max(1, fallback > 0 ? Math.min(capacity, fallback) : capacity)
+  }
+
+  /** The fit has settled: size the window from the scale it actually chose.
+   *  A different answer re-projects (and refits, centring the new block); the
+   *  same answer ends the exchange. */
+  #remeasure(): void {
+    if (!this.#active || this.#projectedFlat === null || this.#horizontal === null) return
+    const scale = this.#screenScale()
+    if (!(scale > 0)) return
+    this.#measured = { key: this.#shapeKey(this.#lanes, this.#projectedFlat, this.#horizontal), scale }
+    this.#apply()
+  }
+
+  /** Pixels one shift step travels on screen. */
+  #stepPx(): number {
+    if (this.#projectedFlat === null || this.#horizontal === null) return 0
+    return railPitch(this.#hexGeo, this.#projectedFlat, this.#horizontal).longPitch
+      * RAIL_STEP_COLUMNS * this.#screenScale()
+  }
+
+  // ── RailWindowApi ───────────────────────────────────────────────────
+
+  public windowOf(dense: readonly string[]): string[] | null {
+    if (!this.#active || this.#capacity <= 0 || this.#projectedFlat === null || this.#horizontal === null) return null
+    // A new page starts at the strip's start.
+    const here = this.#locationKey()
+    if (here !== this.#windowLocation) {
+      this.#windowLocation = here
+      this.#shift = 0
+      this.#total = null
+    }
+    this.#dense = dense
+    if (dense.length !== this.#total) {
+      this.#total = dense.length
+      const clamped = clampRailShift(this.#shift, dense.length, this.#capacity, this.#lanes, this.#projectedFlat, this.#horizontal)
+      // The layer shrank under the window (or the lane count must narrow):
+      // settle after this pass, never inside it.
+      if (clamped !== this.#shift) {
+        this.#shift = clamped
+        queueMicrotask(() => this.#windowMoved())
+      } else if (this.#lanesFor() !== this.#lanes) {
+        queueMicrotask(() => this.#apply())
+      }
+    }
+    return railWindowOf(dense, this.#shift, this.#capacity, this.#lanes, this.#projectedFlat, this.#horizontal)
+  }
+
+  public mergeWindowOrder(reordered: readonly string[]): string[] | null {
+    const dense = this.#dense
+    if (!this.#active || !dense || this.#projectedFlat === null || this.#horizontal === null) return null
+    const from = railShiftOffset(this.#shift, this.#lanes, this.#projectedFlat, this.#horizontal)
+    const shown = dense.slice(from, from + this.#capacity)
+    if (shown.length !== reordered.length) return null
+    const set = new Set(shown)
+    for (const label of reordered) if (!set.delete(label)) return null
+    return [...dense.slice(0, from), ...reordered, ...dense.slice(from + shown.length)]
+  }
+
+  public shiftBy(steps: number): boolean {
+    if (!this.#active || this.#total === null || this.#projectedFlat === null || this.#horizontal === null) return false
+    const next = clampRailShift(this.#shift + Math.trunc(steps), this.#total, this.#capacity, this.#lanes, this.#projectedFlat, this.#horizontal)
+    if (next === this.#shift) return false
+    this.#shift = next
+    this.#windowMoved()
+    return true
+  }
+
+  public panAlong(deltaPx: number): number {
+    const stepPx = this.#stepPx()
+    if (!(stepPx > 0)) return 0
+    const now = performance.now()
+    if (now - this.#carryAt > PAN_CARRY_MS) this.#carry = 0
+    this.#carryAt = now
+    const folded = accumulateRailPan(this.#carry, deltaPx, stepPx)
+    this.#carry = folded.carry
+    if (folded.steps === 0) return deltaPx
+    if (this.shiftBy(folded.steps)) return deltaPx
+    this.#carry = 0
+    return 0
+  }
+
+  /** The slots stay; the tiles in them changed. */
+  #windowMoved(): void {
+    this.emitEffect('render:grid-changed', {
+      active: true, lanes: this.#lanes, horizontal: this.#horizontal, shift: this.#shift,
+    })
   }
 
   #toast(lanes: number): void {

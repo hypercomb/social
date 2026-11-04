@@ -208,6 +208,23 @@ export class PanningDrone extends Drone {
     if (viewportIsFramed()) return { x: 0, y: 0 }
 
     const laneAxis = getLaneScrollAxis()
+
+    // IN LANES THE CAMERA DOES NOT PAN. The strip is a fixed block of slots
+    // sized to the screen; a pan walks the WINDOW along the strip instead —
+    // the tiles change position, the layout holds. Wheel, drag and touch (and
+    // a touch coast) all arrive here, so all of them become the same shift.
+    // Travel that moved nothing (an end of the strip) reports zero, which is
+    // how a coast knows to stop.
+    if (laneAxis) {
+      const rail = window.ioc.get<{ readonly active: boolean; panAlong: (deltaPx: number) => number }>(
+        '@diamondcoreprocessor.com/RailProjectionDrone',
+      )
+      if (rail?.active) {
+        const used = rail.panAlong(laneAxis === 'x' ? delta.x : delta.y)
+        return laneAxis === 'x' ? { x: used, y: 0 } : { x: 0, y: used }
+      }
+    }
+
     const dx = laneAxis === 'y' ? 0 : delta.x
     const dy = laneAxis === 'x' ? 0 : delta.y
     const clamped = this.#clampStageDelta(dx, dy)
