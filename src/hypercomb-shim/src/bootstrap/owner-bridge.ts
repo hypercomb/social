@@ -8,6 +8,9 @@
 // device is its owner's and a tap on a tile may put it into the showcase or take it out. Nothing leaves
 // the device, and with no hive beside the page nobody answers and the page stays what a visitor sees.
 //
+// The one exception (jwize 2026-11-04): a browser that accepted its owner's invite holds its OWN key, and
+// answers this same bridge itself — device-owner.ts. A visitor still holds nothing.
+//
 // MIRRORED: hypercomb-essentials/src/sharing/showcase-bridge.ts is the other end of this protocol.
 
 export const SHOWCASE_CHANNEL = 'hc:showcase'

@@ -157,7 +157,7 @@ describe('doctrine ratchets', () => {
       countRatchet(countsMatching(/localStorage\??\.setItem\(/g), allowed['localStorage.setItem'], 'localStorage.setItem',
         'durable state belongs in a pool of meaning (putPoolDoc / ParticipantDocument), never a browser key — '
         + 'except a credential: its only home is this device\'s localStorage (llm-keys.ts, nostr-signer.ts, '
-        + 'change-channel.ts) and it never moves into a pool'),
+        + 'change-channel.ts, the shim\'s device-key.ts) and it never moves into a pool'),
     ]
     expect(results.flatMap(r => r.problems), results.map(r => r.msg).join('')).toEqual([])
   })
@@ -931,6 +931,7 @@ describe('doctrine ratchets', () => {
       'hypercomb-core/src/core/llm-keys.ts',
       'hypercomb-essentials/src/sharing/nostr-signer.ts',
       'hypercomb-essentials/src/assistant/change-channel.ts',
+      'hypercomb-shim/src/bootstrap/device-key.ts',
     ]) expect(readers).toContain(home)
     // translation.service.ts is the last deprecated getApiKey() caller (its
     // key rides a request header; only translated text is stored). Moving it

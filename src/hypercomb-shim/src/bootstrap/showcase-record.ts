@@ -13,7 +13,7 @@
 // writes it (hypercomb-essentials sharing/showcase-record.ts): a module may not
 // import the shim, and the shim may not import a module.
 
-import { SignatureService, moleculeKey } from '@hypercomb/core'
+import { KEY_LIST_MEANING, SignatureService, moleculeKey, verifyKeyListChain, type SignedKeyList } from '@hypercomb/core'
 import { verifyEvent } from 'nostr-tools/pure'
 
 const SIG = /^[0-9a-f]{64}$/
@@ -208,6 +208,104 @@ const fetchJson = async (url: string, limit: number): Promise<{ bytes: ArrayBuff
   } catch { return null }
 }
 
+/** The keys the anchor's signed key list on this zone names, or null when the zone holds no list that
+ *  verifies (core key-list.ts; becoming-a-host.md, "Letting another place publish for you"). Asked only
+ *  for an index the anchor did not sign itself. */
+const listedSigners = async (origin: string, anchor: string): Promise<ReadonlySet<string> | null> => {
+  const pool = await SignatureService.sign(new TextEncoder().encode(KEY_LIST_MEANING).buffer as ArrayBuffer)
+  const read = await fetchJson(`${origin}/${pool}/${anchor}`, 1_048_576)
+  if (!read || read === 'missing' || !Array.isArray(read.value)) return null
+  // nostr-tools caches a verdict on the object it is handed; a copy keeps that off the chain.
+  const verdict = verifyKeyListChain(anchor, read.value as SignedKeyList[], event => {
+    try { return verifyEvent(structuredClone(event) as never) } catch { return false }
+  })
+  return verdict.ok ? new Set(verdict.keys) : null
+}
+
+/** Is this index the owner's? Signed by the owner, or by a key the owner's list names on an event that
+ *  says it is for this owner — the tag stops one event standing under another anchor that lists the key. */
+const signedFor = async (origin: string, event: Record<string, unknown>, owner: string): Promise<boolean> => {
+  const signer = String(event['pubkey'] ?? '').toLowerCase()
+  if (signer === owner) return true
+  if (!SIG.test(signer)) return false
+  const tags = Array.isArray(event['tags']) ? event['tags'] as unknown[] : []
+  if (!tags.some(tag => Array.isArray(tag) && tag[0] === 'anchor' && String(tag[1] ?? '').toLowerCase() === owner)) return false
+  return (await listedSigners(origin, owner))?.has(signer) === true
+}
+
+/** Where a zone is read and written: plain http on this machine. */
+export const zoneOrigin = (zone: string): string => `${LOOPBACK.test(zone) ? 'http' : 'https'}://${zone}`
+
+/** One owner's signed index on a zone, checked: its kind, whose it is, its signature, and that its
+ *  content is a map. `'missing'` when the zone answers it holds none; null when it could not be read
+ *  or did not pass. */
+export const readOwnerIndex = async (zone: string, owner: string): Promise<{ event: Record<string, unknown>; content: Record<string, unknown> } | 'missing' | null> => {
+  if (!SIG.test(owner) || (!ZONE.test(zone) && !LOOPBACK.test(zone))) return null
+  const origin = zoneOrigin(zone)
+  const indexes = await SignatureService.sign(new TextEncoder().encode('hive:indexes').buffer as ArrayBuffer)
+  const index = await fetchJson(`${origin}/${indexes}/${owner}`, 524_288)
+  if (index === 'missing') return 'missing'
+  const event = index?.value as Record<string, unknown> | undefined
+  if (!event || Number(event['kind']) !== 30564 || !await signedFor(origin, event, owner)) return null
+  try { if (!verifyEvent(structuredClone(event) as never)) return null } catch { return null }
+  let content: unknown
+  try { content = JSON.parse(String(event['content'] ?? '')) } catch { return null }
+  return content && typeof content === 'object' && !Array.isArray(content) ? { event, content: content as Record<string, unknown> } : null
+}
+
+/** The record a showcase atom at `sig` on this zone holds, or null when it cannot be fetched, verified
+ *  or understood. */
+export const readShowcaseAtom = async (zone: string, sig: string): Promise<ShowcaseRecord | null> => {
+  if (!SIG.test(sig)) return null
+  const value = await verified(zoneOrigin(zone), sig, 262_144)
+  return value ? parseShowcase(value, zone) : null
+}
+
+const itemId = (item: ShowcaseItem): string => `${item.pubkey}\n${item.lineage}`
+const byCode = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
+
+/** A record's bytes, canonical: the same record is always the same signature. The hive writes the same
+ *  bytes (hypercomb-essentials sharing/showcase-record.ts showcaseBytes); the shim spec holds them together. */
+export const showcaseBytes = (showcase: ShowcaseRecord): Uint8Array => {
+  const sortedItems = (items: readonly ShowcaseItem[]): { pubkey: string; lineage: string }[] =>
+    [...new Map(items.map(item => [itemId(item), item])).values()]
+      .sort((a, b) => byCode(itemId(a), itemId(b)))
+      .map(item => ({ pubkey: item.pubkey, lineage: item.lineage }))
+  const sortedDomains = (domains: readonly string[]): string[] => [...new Set(domains)].sort(byCode)
+  const seen = new Set<string>()
+  const communities: { name: string; items: { pubkey: string; lineage: string }[]; domains: string[]; view?: ShowcaseView }[] = []
+  for (const community of showcase.communities ?? []) {
+    const name = communityName(community.name)
+    const key = communityKey(name)
+    if (!key || seen.has(key) || communities.length >= COMMUNITIES_MAX) continue
+    seen.add(key)
+    const view = parseView(community.view)
+    communities.push({ name, items: sortedItems(community.items), domains: sortedDomains(community.domains), ...(view ? { view } : {}) })
+  }
+  return new TextEncoder().encode(JSON.stringify({
+    kind: 'host:showcase', zone: showcase.zone, items: sortedItems(showcase.items), domains: sortedDomains(showcase.domains),
+    ...(communities.length ? { communities } : {}),
+    ...(parseView(showcase.view) ? { view: parseView(showcase.view) } : {}),
+  }))
+}
+
+/** Is this creation in the showcase by name? */
+export const showcasesItem = (showcase: ShowcaseRecord, item: ShowcaseItem): boolean =>
+  showcase.items.some(row => itemId(row) === itemId(item))
+
+/** The record with one creation put in, or taken out — out of every community too, as the hive's
+ *  toggleItem does: a community only ever filters what the showcase shows. */
+export const toggleShowcaseItem = (showcase: ShowcaseRecord, item: ShowcaseItem): ShowcaseRecord => {
+  const id = itemId(item)
+  if (!showcasesItem(showcase, item)) return { ...showcase, items: [...showcase.items, item] }
+  return {
+    ...showcase,
+    items: showcase.items.filter(row => itemId(row) !== id),
+    ...(showcase.communities ? { communities: showcase.communities.map(community =>
+      ({ ...community, items: community.items.filter(row => itemId(row) !== id) })) } : {}),
+  }
+}
+
 /**
  * What the zone's owners sign now — the primary owner first — read from the
  * zone itself and checked here: each index by its signature, the showcase by
@@ -228,16 +326,12 @@ export const readZoneOwners = async (zone: string, owners: readonly string[]): P
   let decided = false
   const listed = owners.filter(key => SIG.test(key)).slice(0, 8)
   if (!ZONE.test(zone) && !LOOPBACK.test(zone)) return { showcase, doors, reached: false, unreadable }
-  const origin = `${LOOPBACK.test(zone) ? 'http' : 'https'}://${zone}`
-  const indexes = await SignatureService.sign(new TextEncoder().encode('hive:indexes').buffer as ArrayBuffer)
+  const origin = zoneOrigin(zone)
   for (const pubkey of listed) {
-    const index = await fetchJson(`${origin}/${indexes}/${pubkey}`, 524_288)
-    if (index === 'missing') continue
-    const event = index?.value as Record<string, unknown> | undefined
-    if (!event || Number(event['kind']) !== 30564 || event['pubkey'] !== pubkey) { failed = true; continue }
-    try { if (!verifyEvent(event as never)) { failed = true; continue } } catch { failed = true; continue }
-    let content: { roots?: Record<string, unknown>; doors?: Record<string, unknown> } | undefined
-    try { content = JSON.parse(String(event['content'] ?? '')) } catch { failed = true; continue }
+    const read = await readOwnerIndex(zone, pubkey)
+    if (read === 'missing') continue
+    if (!read) { failed = true; continue }
+    const content = read.content as { roots?: Record<string, unknown>; doors?: Record<string, unknown> }
     const opened = new Map<string, readonly string[]>()
     for (const [lineage, listed] of Object.entries(content?.doors ?? {})) {
       if (Array.isArray(listed)) opened.set(lineage, listed.filter((door): door is string => typeof door === 'string').map(door => door.toLowerCase()))

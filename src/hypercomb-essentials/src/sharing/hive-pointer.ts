@@ -14,7 +14,7 @@
 // authenticates the HTTP write with a NIP-98 header — the same envelope
 // HostSyncService uses for byte PUTs.
 
-import { get, poolKindOfMeaning, registerPoolMeaning, SignatureService } from '@hypercomb/core'
+import { get, nip98Authorization, nip98Template, poolKindOfMeaning, registerPoolMeaning, SignatureService } from '@hypercomb/core'
 import { verifyEvent } from 'nostr-tools/pure'
 import { HIVE_INDEX_EVENT_KIND, HIVE_LINK_VERSION } from './hive-link.js'
 import { isPoweredEntrance, readAddresses, readDoorsOf, readEntrances, type ZoneEntrance } from './zone-door.js'
@@ -85,7 +85,6 @@ export type HiveIndexResult =
   | { ok: false; reason: HiveIndexFailure; status?: number }
 
 const SIG_RE = /^[a-f0-9]{64}$/
-const NIP98_KIND = 27235
 // Loopback hosts use plain http (content-side analog of allow-loopback);
 // real domains use https. Same rule as HostSyncService / the invite queen.
 // Any *.localhost name is loopback too (RFC 6761): a zone's content face on
@@ -701,13 +700,7 @@ export async function nip98Header(
   signer: SignerLike, url: string, method: string, payload?: string, extraTags: readonly string[][] = [],
 ): Promise<string | null> {
   try {
-    const signed = await signer.signEvent({
-      kind: NIP98_KIND,
-      created_at: Math.floor(Date.now() / 1000),
-      tags: [['u', url], ['method', method], ...(payload ? [['payload', payload]] : []), ...extraTags.map(tag => [...tag])],
-      content: '',
-    })
-    return 'Nostr ' + btoa(unescape(encodeURIComponent(JSON.stringify(signed))))
+    return nip98Authorization(await signer.signEvent(nip98Template(url, method, Date.now() / 1000, payload, extraTags)))
   } catch { return null }
 }
 

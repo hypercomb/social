@@ -291,6 +291,10 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // all: replication has no fixed origin, so the set of machines willing to
   // serve is itself content. TRUTH POOL — "I know this host" is an act.
   'community:hosts',
+  // THE TILES YOU BROUGHT INTO YOUR COMMUNITY from the domains you follow, on
+  // a domain's front page while managing (shim/bootstrap/community-tiles.ts).
+  // One current document per browser; going live is the signed showcase record.
+  'community:tiles',
   // WHAT YOU ASKED TO SEE from the hosts you carry — the creations offered as
   // shaded peer tiles in your hive (essentials/sharing/static-peers.drone.ts).
   // One current JSON document per participant, replaced whole; never sent.
