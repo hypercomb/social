@@ -150,6 +150,56 @@ the root. This is the directory-as-set fork already found on
   filter is a bouquet of them, weighted by author and host trust (sybil
   rule). The reserved negative vocabulary is evaluated regardless.
 
+## What a host adds
+
+**Status: DIRECTION — jwize 2026-11-04** ("only share images with hosts";
+"hosts can use meaning pools, so this is an upsell: you don't get this
+flexibility"). Protocol hive node: `protocol/collaborative/hosting`.
+
+A participant with no host has the swarm: the hives online at the same time,
+joined for as long as both stay. Everything it sees, it sees live, from
+whoever is present. A participant who runs a host, or joins one, gets the
+thing a swarm cannot give: **pools of meaning answered at a derived
+address**. One word, `sign(meaning)`, the same address on every host; ask any
+host for `/<sign(meaning)>/` and it lists, as plain entry names, what it holds
+there from whoever made it — whether or not the maker is online. That reach
+is what hosting adds, and it is the reason to run or join one.
+
+The listing is never an inventory and never a switch, so the trust model is
+unchanged: each member is checked by its signature, and where a member is a
+person's word, by that person's own signed index.
+
+What a host lists, and why each is safe:
+
+| Listing | Which pools | Who decides |
+|---|---|---|
+| **the floor** | `host:packages`, `host:offerings`, `community:hosts`, `community:offers` (`hypercomb-relay/host-listing.floor.json`) | the protocol — every host lists them |
+| **declared** | any colon meaning an operator names in their signed index (`listed`) | the host's operator |
+| **index-driven** | a pool whose members are the keys that named an entry in their own signed index — `attest:<record>` today | each participant, one key at a time; the host only gathers who said so |
+| **never** | a tile's name pool (a molecule) and the host's private ledgers | nobody — a 404 says nothing, so a probe learns nothing |
+
+**Pictures travel only through hosts.** A tile's pictures are never offered
+from a name pool (those stay closed, as the last row says). A publisher who
+wants a picture found under a name says so in their own signed index, as
+`pictures:<sign(name)>` → the signature of a small picture record (the image
+pointers of the tile they published: `imageSig`, `small`, `flat.small`,
+`point`, or `large` alone). The host lists the keys that did, at
+`sign('pictures:<sign(name)>')` — index-driven, exactly as `attest:` is — and
+a reader reads each key's index, fetches the record by its signature, and
+offers the picture with that publisher named. The entry is made by the
+Publish act, never in the background, so a picture is public only because its
+publisher published it. Keyed by the name's signature, not the name, so the
+index carries no free text and the pool address is the molecule address with
+a colon in front. Without a host, the images wall shows only what the live
+swarm is showing. **Not built yet:** the index entry on Publish, the host
+listing rule (worker and relay), and the reader in `peer-images.ts`, which
+today asks the closed name pool and always misses.
+
+The same door carries what is derived from a picture (`derivations.md`): a
+thumbnail or hex sheet pair is a derivation record under `derived:<picture>`,
+found through a host the same way, so a hive that joins late is handed shots
+someone already cut instead of cutting them again.
+
 ## Not this
 
 - No named file at the root as the discovery surface — no `<family>.json`,

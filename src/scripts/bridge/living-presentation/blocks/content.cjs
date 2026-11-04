@@ -552,6 +552,23 @@ module.exports = {
     files: ['documentation/pools-across-hosts.md', 'documentation/traits.md', 'documentation/signature-algebra.md'],
   },
 
+  'protocol/collaborative/hosting': {
+    eyebrow: 'what a host adds',
+    headline: 'One word, one address, on *every host*',
+    sub: 'Hosts list packages, offerings and attestations this way today; pictures for a tile name are next.',
+    plate: 'collaborative-hosting',
+    figcap: 'no host, and three hosts',
+    beats: [
+      { say: 'Without a host, your hive sees only what the people online beside it are showing, for as long as they stay.', lit: ['you', 'online'] },
+      { say: 'A host keeps pools of meaning: a word, answered at one address that every host derives the same way.', lit: ['hosts', 'address'] },
+      { say: 'Ask any host for that address, and it lists what it holds there, from whoever made it.', lit: ['hosts', 'address', 'pool'] },
+      { say: 'Your hive asks every host it follows, and finds those pieces whether or not their makers are online.', lit: ['you', 'found', 'hosts', 'pool'] },
+      { say: 'Each piece is checked by its signature and each maker by their own signed index, so no host can make one up.', lit: ['pool', 'address'] },
+      { say: 'Running a host, or joining one, is what gives your hive that reach.', lit: ['you', 'found', 'hosts', 'address', 'pool'] },
+    ],
+    files: ['documentation/pools-across-hosts.md', 'documentation/becoming-a-host.md', 'documentation/hosting-from-a-machine.md'],
+  },
+
   'protocol/collaborative/tapestry': {
     eyebrow: 'the larger picture',
     headline: 'Joined by the same *signature*',
