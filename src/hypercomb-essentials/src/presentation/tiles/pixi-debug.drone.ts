@@ -150,6 +150,7 @@ export class PixiDebugDrone extends Drone {
 
   #panel: HTMLDivElement | null = null
   #hitListPanel: HTMLDivElement | null = null
+  #bound = false
   #listening = false
   #active = false
   #pinnedObj: DisplayObject | null = null
@@ -157,6 +158,8 @@ export class PixiDebugDrone extends Drone {
   protected override listens = ['render:host-ready']
 
   protected override heartbeat = async (): Promise<void> => {
+    if (this.#bound) return
+    this.#bound = true
     this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
       this.#app = payload.app
       this.#renderContainer = payload.container

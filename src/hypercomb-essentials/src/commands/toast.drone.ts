@@ -188,7 +188,9 @@ export class ToastDrone extends EventTarget {
     if (!toast) return
     const action = toast.actions?.[actionIndex]
     if (!action?.effect) return
-    EffectBus.emit(action.effect, action.payload)
+    // a button bound to a chord is a command, not a state: never replayed to a late listener
+    if (action.effect === 'keymap:invoke') EffectBus.emitTransient(action.effect, action.payload)
+    else EffectBus.emit(action.effect, action.payload)
     this.dismiss(id)
   }
 

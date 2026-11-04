@@ -76,7 +76,7 @@ export const sayLine = (text: string): Promise<RemoteSubmitOutcome> => new Promi
 })
 
 export const fireCommand = (cmd: string): void => {
-  EffectBus.emit('keymap:invoke', { cmd, binding: null, event: null })
+  EffectBus.emitTransient('keymap:invoke', { cmd, binding: null, event: null })
 }
 
 export interface RunPorts {

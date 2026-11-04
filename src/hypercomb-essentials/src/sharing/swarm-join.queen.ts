@@ -43,7 +43,7 @@ const say = (key: string, fallback: string): void => {
 
 /** The one gesture. The guard, the selector and the flag all live behind it. */
 const toggle = (): void => {
-  EffectBus.emit('keymap:invoke', { cmd: 'mesh.togglePublic', binding: null, event: null })
+  EffectBus.emitTransient('keymap:invoke', { cmd: 'mesh.togglePublic', binding: null, event: null })
 }
 
 export class JoinQueenBee extends QueenBee {

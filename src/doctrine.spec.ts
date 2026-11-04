@@ -162,6 +162,105 @@ describe('doctrine ratchets', () => {
     expect(results.flatMap(r => r.problems), results.map(r => r.msg).join('')).toEqual([])
   })
 
+  it('a command is never sent on the last-value-replay channel', () => {
+    // EffectBus.emit() stores the payload and hands it to EVERY later
+    // subscriber (effect-bus.ts, on()). That is right for a STATE and wrong for a
+    // COMMAND: a bee that wakes late re-ran the last chord (`history.undo`,
+    // `selection.remove`) because `keymap:invoke` was sent with emit(). A command
+    // goes out with `EffectBus.emitTransient` (no replay).
+    //
+    //   `:invoke`  -> never. A chord / command stream is always transient.
+    //   `:open` `:toggle` `:run` -> frozen below: today's emit()/emitEffect()
+    //     sites. Many are DOORS - the listener is a lazily loaded view that
+    //     is made by the first press, and the bus's replay of that press is what
+    //     opens it (providers-window.door.spec.ts) - so each entry leaves only
+    //     after its listener is shown to be mounted at boot, or its door is
+    //     taught to carry the press itself. The list may only shrink.
+    const sent = /\b(?:emit|emitEffect)\(\s*'[^']*:(invoke|open|toggle|run)'/
+    const offenders = (kind: (word: string) => boolean): string[] => {
+      const hits = new Set<string>()
+      for (const dir of SCAN_DIRS) {
+        let files: string[]
+        try { files = walk(join(ROOT, dir)) } catch { continue }
+        for (const file of files) {
+          const code = stripComments(readFileSync(file, 'utf8'))
+          for (const m of code.matchAll(new RegExp(sent.source, 'g'))) {
+            if (kind(m[1])) hits.add(relative(ROOT, file).replace(/\\/g, '/'))
+          }
+        }
+      }
+      return [...hits].sort()
+    }
+    assertRatchet(offenders(word => word === 'invoke'), [], 'command stream sent with emit() instead of emitTransient()')
+    assertRatchet(offenders(word => word !== 'invoke'), [
+      'hypercomb-essentials/src/assistant/agent-log-action.drone.ts',
+      'hypercomb-essentials/src/assistant/agent-panel.view.ts',
+      'hypercomb-essentials/src/assistant/ai-key.drone.ts',
+      'hypercomb-essentials/src/assistant/claude-bridge.worker.ts',
+      'hypercomb-essentials/src/assistant/conversation.queen.ts',
+      'hypercomb-essentials/src/assistant/doctrine.queen.ts',
+      'hypercomb-essentials/src/assistant/external-call.drone.ts',
+      'hypercomb-essentials/src/assistant/harness-tiles.ts',
+      'hypercomb-essentials/src/assistant/llm.drone.ts',
+      'hypercomb-essentials/src/assistant/llm.queen.ts',
+      'hypercomb-essentials/src/assistant/models.queen.ts',
+      'hypercomb-essentials/src/assistant/providers-window.view.ts',
+      'hypercomb-essentials/src/assistant/skills-window.view.ts',
+      'hypercomb-essentials/src/comfy/comfy.queen.ts',
+      'hypercomb-essentials/src/commands/aliases/aliases.queen.ts',
+      'hypercomb-essentials/src/commands/annotate.queen.ts',
+      'hypercomb-essentials/src/commands/ask.queen.ts',
+      'hypercomb-essentials/src/commands/background.queen.ts',
+      'hypercomb-essentials/src/commands/keywords.queen.ts',
+      'hypercomb-essentials/src/commands/lanes.queen.ts',
+      'hypercomb-essentials/src/commands/rewind.queen.ts',
+      'hypercomb-essentials/src/commands/slash-behaviour.drone.ts',
+      'hypercomb-essentials/src/commands/upgrade.queen.ts',
+      'hypercomb-essentials/src/commands/visual-bee-icons.ts',
+      'hypercomb-essentials/src/commands/website.queen.ts',
+      'hypercomb-essentials/src/files/file-drop.drone.ts',
+      'hypercomb-essentials/src/format/format.queen.ts',
+      'hypercomb-essentials/src/guide/guide.queen.ts',
+      'hypercomb-essentials/src/keyboard-desk/keyboard.queen.ts',
+      'hypercomb-essentials/src/link/link-open.worker.ts',
+      'hypercomb-essentials/src/link/youtube-metadata-queue.ts',
+      'hypercomb-essentials/src/presentation/avatars/agent-bee.drone.ts',
+      'hypercomb-essentials/src/presentation/tiles/image-update-badge.drone.ts',
+      'hypercomb-essentials/src/presentation/tiles/launcher-view.drone.ts',
+      'hypercomb-essentials/src/presentation/tiles/layer-deck.drone.ts',
+      'hypercomb-essentials/src/presentation/tiles/site-view.drone.ts',
+      'hypercomb-essentials/src/presentation/tiles/square-tile-view.drone.ts',
+      'hypercomb-essentials/src/presentation/tiles/tile-overlay.drone.ts',
+      'hypercomb-essentials/src/recording/recording.queen.ts',
+      'hypercomb-essentials/src/revolucionstyle.com/journal/journal-entry.drone.ts',
+      'hypercomb-essentials/src/sharing/community.queen.ts',
+      'hypercomb-essentials/src/sharing/folder-sync.queen.ts',
+      'hypercomb-essentials/src/sharing/host-directory.view.ts',
+      'hypercomb-essentials/src/sharing/images.queen.ts',
+      'hypercomb-essentials/src/sharing/tile-images.drone.ts',
+      'hypercomb-essentials/src/substrate/substrate.queen.ts',
+      'hypercomb-essentials/src/tutorial/lessons/expert.lessons.ts',
+      'hypercomb-essentials/src/tutorial/tutorial.queen.ts',
+      'hypercomb-essentials/src/workflow/workflow.queen.ts',
+      'hypercomb-essentials/src/world-models/world-models.queen.ts',
+      'hypercomb-shared/ui/chat-window/chat-window.component.ts',
+      'hypercomb-shared/ui/command-line/command-line.component.ts',
+      'hypercomb-shared/ui/context-window/context-window.component.ts',
+      'hypercomb-shared/ui/controls-bar/controls-bar.component.ts',
+      'hypercomb-shared/ui/edit-actions/edit-actions.component.ts',
+      'hypercomb-shared/ui/features-viewer/features-viewer.component.ts',
+      'hypercomb-shared/ui/layout-designer/layout-designer.component.ts',
+      'hypercomb-shared/ui/mesh-modal/mesh-modal.component.ts',
+      'hypercomb-shared/ui/notes-strip/notes-strip.component.ts',
+      'hypercomb-shared/ui/publish-panel/publish-panel.component.ts',
+      'hypercomb-shared/ui/references-window/references-window.component.ts',
+      'hypercomb-shared/ui/shell-surfaces/shell-surfaces.component.ts',
+      'hypercomb-shared/ui/shortcut-sheet/shortcut-sheet.component.ts',
+      'hypercomb-shared/ui/upgrade-indicator/upgrade-indicator.component.ts',
+      'hypercomb-shared/ui/workflow-designer/workflow-designer.component.ts',
+    ], 'open / toggle / run command sent with emit() instead of emitTransient()')
+  })
+
   it('reserved scratch workspaces are ignored without hiding ordinary source', () => {
     // This is a behavior check, not a text check: it proves Git will contain a
     // future accidental checkout/dependency tree even when it is created deep
@@ -358,18 +457,35 @@ describe('doctrine ratchets', () => {
         'app-header', 'hc-controls-bar', 'hc-edit-actions', 'hc-mesh-header',
         'hc-shell-surfaces', 'hc-sync-indicator', 'hc-upgrade-indicator', 'router-outlet',
       ],
+      // `<app-header>` (web's app.html) is a thin wrapper whose template mounts
+      // the command line: the tag lives HERE, one hop out of app.html, where
+      // this ratchet used to be blind to it while dev mounted it in app.html.
+      'hypercomb-web/src/app/header/header.html': ['hc-command-line'],
       'hypercomb-dev/src/app/app.html': [
         'hc-command-line', 'hc-controls-bar', 'hc-edit-actions', 'hc-mesh-header',
         'hc-shell-surfaces', 'hc-sync-indicator', 'hc-upgrade-indicator', 'router-outlet',
       ],
     }
-    for (const [file, allowed] of Object.entries(TEMPLATE_ALLOW)) {
+    const tagsIn = (file: string): string[] => {
       const html = readFileSync(join(ROOT, file), 'utf8')
-      const tags = [...new Set(
+      return [...new Set(
         [...html.matchAll(/<([a-z][a-z0-9]*(?:-[a-z0-9]+)+)[\s>]/g)].map(m => m[1]),
       )].sort()
-      assertRatchet(tags, allowed, `template surface (${file})`)
     }
+    for (const [file, allowed] of Object.entries(TEMPLATE_ALLOW)) {
+      assertRatchet(tagsIn(file), allowed, `template surface (${file})`)
+    }
+
+    // PARITY. The two shells mount the same structural chrome; web reaches the
+    // command line through `<app-header>`, so its set is app.html with that
+    // wrapper expanded into header.html. A tag one shell mounts and the other
+    // does not is the web/dev drift bug class this registry exists to end.
+    const web = [...new Set([
+      ...tagsIn('hypercomb-web/src/app/app.html').filter(tag => tag !== 'app-header'),
+      ...tagsIn('hypercomb-web/src/app/header/header.html'),
+    ])].sort()
+    expect(web, 'web (app.html + header.html) and dev (app.html) mount the same structural chrome')
+      .toEqual(tagsIn('hypercomb-dev/src/app/app.html'))
   })
 
   it('shell bootstrap never imports the side-effectful shared UI index', () => {

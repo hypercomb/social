@@ -40,6 +40,7 @@ import { HIVE_TREE_READER_IOC_KEY, HypercombHiveTreeReader } from './hive-tree-r
 import { tileContextSeam } from './tile-context.js'
 import { TILE_PICTURES_IOC_KEY, TilePictures } from './tile-pictures.js'
 import { DoctrineQueenBee } from './doctrine.queen.js'
+import { lazyWindow } from './lazy-window.js'
 
 const SIG_RE = /^[0-9a-f]{64}$/i
 
@@ -115,37 +116,12 @@ window.ioc.register('@diamondcoreprocessor.com/LlmContextDrone', new LlmContextD
 // registers them; doctrine.queen.ts is a dependency and registers nothing.
 window.ioc.register('@diamondcoreprocessor.com/DoctrineQueenBee', new DoctrineQueenBee())
 
-// THE VIEWER ARRIVES WITH ITS FIRST OPEN, not at boot (atomic-modules-plan.md,
-// "adopt the proper load"): nothing needs its code until `/doctrine` asks, so it
-// loads then, once. The view subscribes to `doctrine:open` as it is made and the
-// bus replays the press that loaded it, so the first press opens it like every
-// later one. The key is spelled here: importing even a constant from the view
-// would keep it on boot.
-const DOCTRINE_WINDOW_KEY = '@diamondcoreprocessor.com/DoctrineWindowView'
-let doctrineWindow: Promise<void> | null = null
-let doctrineBuilt = false
-/** Presses heard while the viewer loads. The replay plays only the last, and
- *  every press toggles — so an even count ends closed. */
-let doctrinePresses = 0
-
-EffectBus.on('doctrine:open', () => {
-  if (doctrineBuilt) return
-  doctrinePresses++
-  doctrineWindow ??= import('./doctrine-window.view.js').then(({ DoctrineWindowView }) => {
-    // BUILT ONCE, even when making it throws: it subscribes before its replay
-    // opens it, so a second one would answer every later press twice.
-    doctrineBuilt = true
-    try {
-      const view = new DoctrineWindowView()
-      window.ioc.register(DOCTRINE_WINDOW_KEY, view)
-      if (doctrinePresses % 2 === 0) view.close()
-    } catch (error) {
-      console.error('[doctrine] the viewer could not be made', error)
-    }
-  }, (error: unknown) => {
-    // A failed load says so, and the next press tries again.
-    doctrineWindow = null
-    doctrinePresses = 0
-    EffectBus.emit('activity:log', { message: `Could not load the doctrine viewer: ${error instanceof Error ? error.message : String(error)}` })
-  })
+// The doctrine viewer arrives with its first open (lazy-window.ts): nothing
+// needs its code until `/doctrine` asks.
+lazyWindow({
+  effect: 'doctrine:open',
+  place: view => window.ioc.register('@diamondcoreprocessor.com/DoctrineWindowView', view),
+  load: () => import('./doctrine-window.view.js').then(m => m.DoctrineWindowView),
+  what: 'doctrine viewer',
+  tag: 'doctrine',
 })

@@ -293,7 +293,7 @@ class HelpGroup extends LaunchGroupBase {
       return
     }
     if (m.key === 'ui.shortcutSheet') {
-      EffectBus.emit('keymap:invoke', { cmd: m.key, binding: null, event: null })
+      EffectBus.emitTransient('keymap:invoke', { cmd: m.key, binding: null, event: null })
       return
     }
     if (m.key === MORE_MEMBER.key) {

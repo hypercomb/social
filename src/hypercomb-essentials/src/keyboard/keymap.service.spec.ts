@@ -70,6 +70,19 @@ describe('a chosen press', () => {
   })
 })
 
+describe('a chord is a command, not a state', () => {
+  it('is not replayed to a listener that subscribes after the press', () => {
+    chosen({ cmd: 'mine', sequence: [[{ key: 'q', ctrl: true, shift: false, alt: false, meta: false }]] })
+    press('q', { ctrlKey: true })
+    expect(fired()).toEqual(['mine'])
+
+    const late: string[] = []
+    const stop = EffectBus.on<{ cmd: string }>('keymap:invoke', payload => { late.push(payload.cmd) })
+    stop()
+    expect(late).toEqual([])
+  })
+})
+
 describe('a chord of several steps', () => {
   const plain = (key: string) => ({ key, ctrl: false, shift: false, alt: false, meta: false })
 

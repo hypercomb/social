@@ -419,7 +419,7 @@ export class BeeTutorialDrone extends Drone {
       depth: () => (this.resolve<LineageApi>('lineage')?.explorerSegments?.() ?? []).length,
 
       typeAndSubmit: (text, slow = true) => this.#typeAndSubmit(text, slow),
-      invoke: (cmd) => { this.emitEffect('keymap:invoke', { cmd, binding: null, event: null }) },
+      invoke: (cmd) => { EffectBus.emitTransient('keymap:invoke', { cmd, binding: null, event: null }) },
       emit: (effect, payload) => { this.emitEffect(effect, payload) },
 
       create: (name, cover) => this.#create(name, cover),
@@ -599,7 +599,7 @@ export class BeeTutorialDrone extends Drone {
     if (window.matchMedia('(max-width: 599px), (max-height: 599px)').matches) {
       this.emitEffect('mobile:input-visible', { visible: true, mobile: true })
     }
-    this.emitEffect('keymap:invoke', { cmd: 'ui.commandLineToggle' })
+    EffectBus.emitTransient('keymap:invoke', { cmd: 'ui.commandLineToggle' })
 
     if (slow) {
       const per = name.length > 30 ? 14 : 36 // long lines type brisker
