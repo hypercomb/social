@@ -32,7 +32,7 @@
 // swarm-adopt uses (including the tile-props-index seed, without which the
 // substrate clobbers each imported image).
 
-import { CHILD_SLOTS, EffectBus, hypercomb, I18N_IOC_KEY, SignatureService, type I18nProvider } from '@hypercomb/core'
+import { CHILD_SLOTS, EffectBus, LEGACY_DIRECTORIES, hypercomb, I18N_IOC_KEY, SignatureService, type I18nProvider } from '@hypercomb/core'
 import { buildStoreZip, readStoreZip } from './store-zip.js'
 import { decorationClosureSigs } from '../sharing/decoration-closure.js'
 import {
@@ -62,7 +62,13 @@ const CHILD_SLOT_SET: ReadonlySet<string> = new Set(CHILD_SLOTS)
 // v1 archives (already downloaded by users) used the legacy underscore
 // paths — the LEGACY_ENTRY_RE below keeps them importing forever; only
 // the exporter moved to the new shape.
-const LEGACY_ENTRY_RE = /^(__layers__|__bees__|__dependencies__|__resources__)\/([0-9a-f]{64})(?:\.js|\.json)?$/
+const LEGACY_ENTRY_KINDS: Readonly<Record<string, 'layer' | 'resource' | 'bee' | 'dependency'>> = {
+  [LEGACY_DIRECTORIES.layers]: 'layer',
+  [LEGACY_DIRECTORIES.resources]: 'resource',
+  [LEGACY_DIRECTORIES.bees]: 'bee',
+  [LEGACY_DIRECTORIES.dependencies]: 'dependency',
+}
+const LEGACY_ENTRY_RE = new RegExp(`^(${Object.keys(LEGACY_ENTRY_KINDS).join('|')})/([0-9a-f]{64})(?:\\.js|\\.json)?$`)
 const POOL_ENTRY_RE = /^([0-9a-f]{64})\/([0-9a-f]{64})(?:\.js)?$/
 const FLAT_ENTRY_RE = /^([0-9a-f]{64})$/
 
@@ -388,9 +394,7 @@ export async function importArchive(): Promise<void> {
   const classify = (path: string): { kind: LandKind; sig: string } | null => {
     const legacy = LEGACY_ENTRY_RE.exec(path)
     if (legacy) {
-      const kind: LandKind = legacy[1] === '__layers__' ? 'layer'
-        : legacy[1] === '__resources__' ? 'resource'
-        : legacy[1] === '__bees__' ? 'bee' : 'dependency'
+      const kind: LandKind = LEGACY_ENTRY_KINDS[legacy[1]] ?? 'dependency'
       return { kind, sig: legacy[2] }
     }
     const pooled = POOL_ENTRY_RE.exec(path)

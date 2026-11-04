@@ -1,5 +1,5 @@
 // core/history.service.ts
-import { CHILD_SLOTS, EffectBus, MARKER_CEILING, SignatureService, SignatureStore, classifyDirectoryEntry, hardDeleteVetoFor, healLegacyLayer, homeMoleculeKey, isMetaEnvelope, isPoolAddress, markerName as markerNameOf, metaPayloadOf, packedStoreEnabled, poolAddresses, poolCreditsMemberNames, poolKindOfAddress, poolMeaningOf, rootMoleculeAddress, writeLayerMarker, type MetaEnvelope } from '@hypercomb/core'
+import { CHILD_SLOTS, EffectBus, LEGACY_DIRECTORIES, MARKER_CEILING, SignatureService, SignatureStore, classifyDirectoryEntry, hardDeleteVetoFor, healLegacyLayer, homeMoleculeKey, isMetaEnvelope, isPoolAddress, markerName as markerNameOf, metaPayloadOf, packedStoreEnabled, poolAddresses, poolCreditsMemberNames, poolKindOfAddress, poolMeaningOf, rootMoleculeAddress, writeLayerMarker, type MetaEnvelope } from '@hypercomb/core'
 import { lineageKey, rawLineageKey } from './lineage-key.js'
 import { canonicalizeLayer } from './canonical-layer.js'
 import { isBareLayer } from './child-sig-guard.js'
@@ -692,8 +692,8 @@ export class HistoryService {
   // sources: absorbed into this pool and removed by the self-clean.
 
   static readonly #TEMPORARY_MEANING = 'temporary'
-  static readonly #LEGACY_TEMPORARY_DIRECTORY = '__temporary__'
-  static readonly #LEGACY_HISTORY_DIRECTORY = '__history__'
+  static readonly #LEGACY_TEMPORARY_DIRECTORY = LEGACY_DIRECTORIES.temporary
+  static readonly #LEGACY_HISTORY_DIRECTORY = LEGACY_DIRECTORIES.history
 
   #temporaryPoolPromise: Promise<FileSystemDirectoryHandle | null> | null = null
   readonly #temporaryPool = async (): Promise<FileSystemDirectoryHandle | null> => {

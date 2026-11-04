@@ -45,12 +45,12 @@
 // always safe to run — and a HAND invocation stays best-effort (exit 0) so
 // re-running it while the hive is closed is a nudge, not a failure.
 
-import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import WebSocket from 'ws'
+import { hostPackagesPool } from './pool-address.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const BRIDGE = process.env.BRIDGE_URL || 'ws://localhost:2401'
@@ -75,7 +75,7 @@ export function packageSigFromDist(explicit?: string, distDir: string = DIST): s
   const named = String(explicit ?? '').trim().toLowerCase()
   if (named) return SIG_RE.test(named) ? named : null
   try {
-    const pool = createHash('sha256').update('host:packages', 'utf8').digest('hex')
+    const pool = hostPackagesPool()
     const entry = readFileSync(resolve(distDir, pool, '00000000'), 'utf8')
     const sig = (entry.split('\n')[0] ?? '').trim().toLowerCase()
     return SIG_RE.test(sig) ? sig : null

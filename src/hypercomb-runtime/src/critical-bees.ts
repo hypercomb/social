@@ -4,6 +4,22 @@
 // inventory still comes from the signed layer closure.  These helpers keep
 // both the signed-root hint and the learned warm-start cache fail-closed so a
 // stale or partial hint can only select the ordinary cold path.
+//
+// WHICH BEES ARE CRITICAL IS THE BEE'S OWN MARK, NOT A LIST HERE. A bee that
+// must evaluate before the first frame declares `readonly lane = 'first-paint'`
+// (the build reads the same declaration to sign the root's `criticalBees`).
+// Classification belongs on the thing classified, so this module asks the bee
+// and keeps no class-name list and asserts no count: a fourth first-paint bee
+// is one `lane` field, not an edit here and a failing exact-count check.
+//
+// What stays a list is READINESS, below: IoC keys of services (Settings,
+// AxialService, LayoutService) that namespace bundles register in their
+// constructors. They are not bee artifacts, so there is no bee to wear a mark,
+// and the set is boot ordering — what must exist before paint — which nothing
+// else in the package states.
+
+/** The lane a bee declares when it must evaluate before the first frame. */
+export const FIRST_PAINT_LANE = 'first-paint'
 
 const SIGNATURE_RE = /^[a-f0-9]{64}$/
 const LEARNED_CACHE_VERSION = 1
@@ -21,34 +37,22 @@ export const RENDER_CRITICAL_IOC_GROUPS = Object.freeze([
   Object.freeze(['@diamondcoreprocessor.com/BackgroundDrone']),
 ] as const)
 
-const LOADABLE_CRITICAL_CLASSES = Object.freeze([
-  'PixiHostWorker',
-  'ShowCellDrone',
-  'BackgroundDrone',
-] as const)
-
 const canonicalSignature = (value: unknown): string | null => {
   if (typeof value !== 'string') return null
   const canonical = value.trim().toLowerCase().replace(/\.js$/i, '')
   return SIGNATURE_RE.test(canonical) ? canonical : null
 }
 
-/** Reduce a fully-qualified IoC key, a legacy short key, or an esbuild
- *  collision-renamed class to the stable class name used for learning. */
-export const normalizeCriticalClassName = (value: unknown): string => {
-  if (typeof value !== 'string') return ''
-  const tail = value.trim().split('/').pop() ?? ''
-  return tail.replace(/^@+/, '').replace(/^_+/, '')
-}
-
 /** Validate an optional critical-bee hint against the authoritative enabled
  *  inventory. Any malformed, duplicate, or foreign entry rejects the whole
- *  hint; accepting a useful-looking subset would make a corrupt hint unsafe. */
+ *  hint; accepting a useful-looking subset would make a corrupt hint unsafe.
+ *  How many bees are critical is the signed root's statement, not this
+ *  module's: any non-empty hint that is entirely enabled is accepted. */
 export const validateCriticalBeeHints = (
   value: unknown,
   enabled: Iterable<string>,
 ): string[] | null => {
-  if (!Array.isArray(value) || value.length !== LOADABLE_CRITICAL_CLASSES.length) return null
+  if (!Array.isArray(value) || value.length === 0) return null
 
   const enabledSet = new Set<string>()
   for (const signature of enabled) {
@@ -98,34 +102,27 @@ export const renderCriticalStatus = (ioc: CriticalIoc | null | undefined): Rende
 
 export type CriticalBeeEntry = readonly [signature: string, bee: unknown]
 
-/** Derive a learned fast-path list from evaluated bees. Partial learning is
- *  rejected: all three loadable render classes must be identified. */
+/** The lane a bee declares, read off the instance. */
+const laneOf = (bee: unknown): unknown => {
+  if (!bee || typeof bee !== 'object') return undefined
+  try { return (bee as { lane?: unknown }).lane } catch { return undefined }
+}
+
+/** Derive a learned fast-path list from evaluated bees: every one that DECLARES
+ *  the first-paint lane. Nothing is named here — the bee says what it is. An
+ *  entry with a malformed signature rejects the list (fail closed); a list
+ *  naming no first-paint bee is no list. */
 export const learnedCriticalBeeSigs = (
   entries: Iterable<CriticalBeeEntry>,
 ): string[] | null => {
-  const byClass = new Map<string, string>()
-  const wanted = new Set<string>(LOADABLE_CRITICAL_CLASSES)
-
+  const sigs = new Set<string>()
   for (const [rawSignature, bee] of entries) {
-    let rawKey: unknown = typeof bee === 'string' ? bee : undefined
-    if (bee && typeof bee === 'object') {
-      try { rawKey = (bee as { iocKey?: unknown }).iocKey } catch { /* use constructor below */ }
-      if (typeof rawKey !== 'string') {
-        rawKey = (bee as { constructor?: { name?: unknown } }).constructor?.name
-      }
-    }
-    const className = normalizeCriticalClassName(rawKey)
-    if (!wanted.has(className)) continue
-
+    if (laneOf(bee) !== FIRST_PAINT_LANE) continue
     const signature = canonicalSignature(rawSignature)
     if (!signature) return null
-    const prior = byClass.get(className)
-    if (prior && prior !== signature) return null
-    byClass.set(className, signature)
+    sigs.add(signature)
   }
-
-  if (LOADABLE_CRITICAL_CLASSES.some(className => !byClass.has(className))) return null
-  return LOADABLE_CRITICAL_CLASSES.map(className => byClass.get(className)!).sort()
+  return sigs.size ? [...sigs].sort() : null
 }
 
 type LearnedCriticalBeeRecord = {
@@ -135,8 +132,8 @@ type LearnedCriticalBeeRecord = {
 }
 
 /** Parse the warm-start cache only when it belongs to the active package and
- *  still names exactly the three expected, enabled loadable bees. Legacy
- *  unbound arrays intentionally miss and take the safe cold path once. */
+ *  every bee it names is still enabled. Legacy unbound arrays intentionally
+ *  miss and take the safe cold path once. */
 export const parseLearnedCriticalBeeSigs = (
   raw: unknown,
   packageSig: string,
@@ -157,8 +154,7 @@ export const parseLearnedCriticalBeeSigs = (
   if (parsed.version !== LEARNED_CACHE_VERSION) return null
   if (canonicalSignature(parsed.packageSig) !== expectedPackage) return null
 
-  const signatures = validateCriticalBeeHints(parsed.sigs, enabled)
-  return signatures?.length === LOADABLE_CRITICAL_CLASSES.length ? signatures : null
+  return validateCriticalBeeHints(parsed.sigs, enabled)
 }
 
 /** Serialize the learned list in a versioned, package-bound envelope. */
@@ -168,8 +164,8 @@ export const serializeLearnedCriticalBeeSigs = (
 ): string => {
   const canonicalPackage = canonicalSignature(packageSig)
   const canonicalSigs = validateCriticalBeeHints(sigs, sigs)
-  if (!canonicalPackage || canonicalSigs?.length !== LOADABLE_CRITICAL_CLASSES.length) {
-    throw new TypeError('learned critical bees require one package signature and three unique bee signatures')
+  if (!canonicalPackage || !canonicalSigs) {
+    throw new TypeError('learned critical bees require one package signature and unique bee signatures')
   }
   return JSON.stringify({
     version: LEARNED_CACHE_VERSION,

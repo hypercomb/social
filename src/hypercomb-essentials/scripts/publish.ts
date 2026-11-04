@@ -38,6 +38,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PUBLIC_INSTALL_HOST_ENV, publicInstallHost, replicateRevision, replicationVerdict } from './replicate-public-host.js'
 import { PUBLISHER_FILES, packageSigFromDist } from './stamp-install-channel.js'
+import { checkBuildStamp } from './build-determinism.js'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const DEFAULT_NAME = 'essentials'
@@ -88,6 +89,17 @@ export async function confirmOnPublicHost(
   return report.ok ? 0 : EXIT_HOST_BEHIND
 }
 
+/**
+ * `--no-build` signs whatever `dist` holds, so dist must PROVE it was built from
+ * the sources as they are: the build leaves a stamp (inputs digest + root) and
+ * this refuses a dist without one, with a stale one, or whose root is not the
+ * one the stamp names (build-determinism.ts).
+ */
+export function noBuildVerdict(root: string = ROOT): { ok: true } | { ok: false; reason: string } {
+  const dist = resolve(root, 'dist')
+  return checkBuildStamp(root, dist, packageSigFromDist(undefined, dist))
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2)
   const skipBuild = args.includes('--no-build')
@@ -115,7 +127,15 @@ async function main(): Promise<void> {
 
   console.log(`[publish] revision under "${name}"${name === DEFAULT_NAME ? ' (the default name)' : asked !== name ? ` (from "${asked}")` : ''}`)
 
-  if (!skipBuild) run('build', 'build-module.ts')
+  if (skipBuild) {
+    const verdict = noBuildVerdict()
+    if (!verdict.ok) {
+      console.error(`\n[publish] REFUSED --no-build: ${verdict.reason} — run without --no-build so dist is built from these sources`)
+      process.exit(1)
+    }
+  } else {
+    run('build', 'build-module.ts')
+  }
   run('ship', 'copy-content.ts', ['--publish', '--name', name])
 
   // The channel the public host installs is the publisher record's.

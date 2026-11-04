@@ -381,9 +381,19 @@ export class ModuleQueenBee extends QueenBee {
     },
   }
 
+  /** The sub-words are this queen's own `options` (one form per word), read
+   *  back here instead of retyped: completion, dispatch and the usage line all
+   *  ask the one list. A word that takes arguments completes with its space. */
   override slashComplete(args: string): readonly string[] {
     const typed = args.trim().toLowerCase()
-    return ['list', 'drop ', 'commit ', 'promote ', 'withdraw ', 'review ', 'assess ', 'trials', 'changes ', 'take ', 'focus', 'audit '].filter(word => word.startsWith(typed) && word.trim() !== typed)
+    return (this.options ?? [])
+      .map(form => { const [word = '', ...more] = form.split(/\s+/); return more.length ? `${word} ` : word })
+      .filter(word => word.startsWith(typed) && word.trim() !== typed)
+  }
+
+  /** The words `module` answers to, derived from `options`. */
+  get subWords(): ReadonlySet<string> {
+    return new Set((this.options ?? []).map(form => form.split(/\s+/)[0] ?? ''))
   }
 
   protected async execute(args: string): Promise<void> {
@@ -421,7 +431,7 @@ export class ModuleQueenBee extends QueenBee {
       toast(t('module.dropped', 'Dropped the draft at {path} — reload to run the package as it was.', { path }), 'success')
       return
     }
-    if (!PUBLISHING.has(word) && !['trials', 'changes', 'take', 'audit'].includes(word)) { toast(t('module.usage', '/module takes list, drop <path>, commit [<change>], promote <change>, withdraw <change>, review <change>, assess <change>, trials, changes <change>, take <change> [<path>], focus or audit <change>.'), 'warning'); return }
+    if (!this.subWords.has(word)) { toast(t('module.usage', '/module takes list, drop <path>, commit [<change>], promote <change>, withdraw <change>, review <change>, assess <change>, trials, changes <change>, take <change> [<path>], focus or audit <change>.'), 'warning'); return }
 
     // @<host> names the host (a machine running hypercomb-serve, a relay, a
     // zone); the other words are the change's name and, for promote, the live

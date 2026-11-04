@@ -41,6 +41,10 @@
  *  non-alphanumeric to `-`, so no location can ever mint this address. */
 export const HOST_PACKAGES_MEANING = 'host:packages'
 
+/** The meaning whose signature addresses a publisher's signed index record
+ *  (`<sign(HIVE_INDEXES_MEANING)>/<pubkey>`). Colon-scoped for the same reason. */
+export const HIVE_INDEXES_MEANING = 'hive:indexes'
+
 /** Entry filenames are fixed-width so they sort lexically as they sort
  *  numerically — the width builds already emit for sigbag markers. */
 export const poolEntryName = (index: number): string => String(index).padStart(8, '0')

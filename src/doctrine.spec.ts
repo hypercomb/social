@@ -17,7 +17,7 @@ import { readdirSync, readFileSync, existsSync } from 'fs'
 import { dirname, join, relative, resolve } from 'path'
 import { spawnSync } from 'child_process'
 import { createRequire } from 'module'
-import { BARE_WORD_POOL_MEANINGS, RETIRED_POOL_MEANINGS, SCOPED_POOL_MEANINGS } from '@hypercomb/core'
+import { BARE_WORD_POOL_MEANINGS, LEGACY_DIRECTORIES, RETIRED_POOL_MEANINGS, SCOPED_POOL_MEANINGS } from '@hypercomb/core'
 
 const ROOT = __dirname
 const REPO_ROOT = join(ROOT, '..')
@@ -417,6 +417,26 @@ describe('doctrine ratchets', () => {
     ], 'hardcoded signature')
   })
 
+  it('no build script hashes a pool meaning by hand — scripts/pool-address.ts is the one derivation', () => {
+    // P2: pool addresses are DERIVED from the meaning. A script that writes
+    // `createHash('sha256').update('host:packages')` (or `sign('x:y')`, or
+    // hashes a *_MEANING constant) keeps its own copy of the derivation, and
+    // three copies of it is how the stamp, the copy and the build came to
+    // spell one pool three ways. Import the constant from where its pool lives
+    // and the address from pool-address.ts. Empty allowlist, and it stays empty.
+    const colonLiteral = String.raw`['"\x60][^'"\x60\s]*:[^'"\x60\s]*['"\x60]`
+    const meaningName = String.raw`[A-Za-z_]*MEANING[A-Za-z_]*`
+    const caller = String.raw`(?:createHash\(\s*['"]sha256['"]\s*\)\s*\.update|\bsha256|\bsign|\bpoolSignature)`
+    const hashed = new RegExp(String.raw`${caller}\(\s*(?:${colonLiteral}|${meaningName})`)
+    const actual: string[] = []
+    for (const file of walk(join(ROOT, 'hypercomb-essentials/scripts'))) {
+      const rel = relative(ROOT, file).replace(/\\/g, '/')
+      if (rel.endsWith('/pool-address.ts')) continue   // the derivation itself
+      if (hashed.test(stripComments(readFileSync(file, 'utf8')))) actual.push(rel)
+    }
+    assertRatchet(actual.sort(), [], 'hand-hashed pool meaning in scripts/')
+  })
+
   it('no new typed-folder (__x__) string literals — legacy names are drain-source constants only', () => {
     // Typed folders are eradicated. The only dirs in OPFS are
     // signature-named (lineage sigbags, sign(meaning) pools). This
@@ -426,21 +446,44 @@ describe('doctrine ratchets', () => {
     // drain constants (or known write debt: layout.service
     // `__layout__`); they may only leave this
     // list as drains complete.
+    //
+    // The retired names live in ONE map, core's `legacy-dirs.ts`
+    // (`LEGACY_DIRECTORIES`); callers import a name from it and never type
+    // one. That file is the source of truth, not an allowlist entry, so it is
+    // excluded by path. The five sites that used to keep their own copy
+    // (copy-content, the website archive, history, the content broker, the
+    // swarm walk) now consult it.
     const actual = filesMatching(/['"`]__[a-z][a-z0-9_-]*__['"`]/)
+      .filter(file => file !== 'hypercomb-core/src/core/legacy-dirs.ts')
     assertRatchet(actual, [
       'hypercomb-shared/core/initializers/location-parser.ts',
       'hypercomb-runtime/src/store.ts',
-      'hypercomb-essentials/scripts/copy-content.ts',
-      'hypercomb-essentials/src/commands/website-archive.queen.ts',
       'hypercomb-essentials/src/editor/viewport-store.ts',
-      'hypercomb-essentials/src/history/history.service.ts',
       'hypercomb-essentials/src/move/layout.service.ts',
-      'hypercomb-essentials/src/sharing/content-broker.boot.drone.ts',
       'hypercomb-essentials/src/sharing/feedback-channel.drone.ts',
       'hypercomb-essentials/src/sharing/host-sync.service.ts',
       'hypercomb-essentials/src/sharing/retired-push-pool.ts',
-      'hypercomb-essentials/src/sharing/swarm.drone.ts',
     ], 'typed-folder literal')
+  })
+
+  it('the retired directory names have one source, the core map, and nothing opens one by a typed name', () => {
+    // 1. The non-underscore retired names (`hypercomb.io`, `overrides`,
+    //    `translations`) are ordinary words, so the literal ratchet above cannot
+    //    see them; what gives them away is being handed to a directory call.
+    //    Empty allowlist.
+    const opened = filesMatching(/(?:getDirectoryHandle|removeEntry|getFileHandle)\(\s*['"`](?:hypercomb\.io|overrides|translations)['"`]/)
+      .filter(file => file !== 'hypercomb-core/src/core/legacy-dirs.ts')
+    assertRatchet(opened, [], 'retired directory opened by a typed name')
+
+    // 2. The store keeps its own LEGACY_*_DIRECTORY constants for its drains
+    //    (it is the one other file allowed to spell them). Every one must be a
+    //    name the map knows, so the two cannot drift apart: a retired name added
+    //    to the store without the map would be a dir the swarm walk would publish.
+    const known = new Set<string>(Object.values(LEGACY_DIRECTORIES))
+    const store = readFileSync(join(ROOT, 'hypercomb-runtime/src/store.ts'), 'utf8')
+    const declared = [...store.matchAll(/LEGACY_[A-Z_]+_DIRECTORY\s*=\s*'([^']+)'/g)].map(m => m[1]!)
+    expect(declared.length, 'store.ts LEGACY_*_DIRECTORY constants did not parse').toBeGreaterThan(10)
+    expect(declared.filter(name => !known.has(name)), 'a store legacy directory missing from LEGACY_DIRECTORIES').toEqual([])
   })
 
   it('shell templates mount only structural chrome — every other surface is registry-fed', () => {

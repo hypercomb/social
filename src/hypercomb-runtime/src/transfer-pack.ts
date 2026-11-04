@@ -23,7 +23,7 @@ const NEWLINE = 10
 
 /** Pack members, sorted by signature so the same set packs to the same bytes. */
 export const encodeTransferPack = (members: ReadonlyArray<readonly [string, Uint8Array]>): Uint8Array<ArrayBuffer> => {
-  const sorted = [...members].sort(([a], [b]) => a.localeCompare(b))
+  const sorted = [...members].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
   const head = new TextEncoder().encode(`${MAGIC}\n${JSON.stringify(sorted.map(([sig, bytes]) => [sig, bytes.byteLength]))}\n`)
   const out = new Uint8Array(head.byteLength + sorted.reduce((total, [, bytes]) => total + bytes.byteLength, 0))
   out.set(head, 0)

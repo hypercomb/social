@@ -14,6 +14,7 @@ import { basename, dirname, extname, join, resolve } from 'path'
 import ts from 'typescript'
 import { fileURLToPath } from 'url'
 import { effectSleeper, passiveQueen, viewSleeper } from './passive-queen.js'
+import { byCodeUnit } from './build-determinism.js'
 
 // -------------------------------------------------
 // anchors
@@ -345,7 +346,7 @@ const buildMasterKeysContent = (allDomainKeys: Map<string, FolderSymbols[]>): st
 
   // hierarchical object: EssentialsKeys.domain.folder.Symbol
   lines.push('export const EssentialsKeys = {')
-  for (const [domain, folders] of Array.from(allDomainKeys.entries()).sort(([a], [b]) => a.localeCompare(b))) {
+  for (const [domain, folders] of Array.from(allDomainKeys.entries()).sort(([a], [b]) => byCodeUnit(a, b))) {
     const domainProp = toCamel(domain.replace(/\.com$|\.ca$|\.io$/i, ''))
     lines.push(`  ${domainProp}: {`)
 

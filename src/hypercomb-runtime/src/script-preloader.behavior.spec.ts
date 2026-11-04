@@ -248,10 +248,13 @@ describe('ScriptPreloader priority scheduling', () => {
     expect([...harness.pulses.values()]).toEqual([1, 1, 1, 1])
   })
 
-  it('rejects a partial root hint and starts the ordinary cold wave', async () => {
+  // How many bees are critical is the signed root's statement (the build derives
+  // it from each bee's `lane` mark), so a hint is rejected for naming a bee the
+  // package does not hold — never for being shorter than some count kept here.
+  it('rejects a root hint naming a bee outside the inventory and starts the ordinary cold wave', async () => {
     let releaseCritical: () => void = () => {}
     const criticalGate = new Promise<void>(resolve => { releaseCritical = resolve })
-    const harness = fakeStore({ criticalGate, criticalBees: [PIXI, SHOW] })
+    const harness = fakeStore({ criticalGate, criticalBees: [PIXI, SHOW, signature('f')] })
     currentStore = harness.store
     publishRoot()
 
