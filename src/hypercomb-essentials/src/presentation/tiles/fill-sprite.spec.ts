@@ -7,19 +7,29 @@ import type { ThumbnailStore } from './thumbnails.js'
 
 const sig = (n: number): string => n.toString(16).padStart(64, '0')
 
-/** A sprites:boot pool held in memory: file name → text. */
+// jsdom's Blob has no text(); a browser's does.
+if (typeof Blob.prototype.text !== 'function') {
+  Blob.prototype.text = function (this: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.onerror = () => reject(reader.error)
+      reader.readAsText(this)
+    })
+  }
+}
+
+/** A sprites:boot pool held in memory: sub-key → the current document. */
 const storeWith = async (records: Record<string, unknown>): Promise<ThumbnailStore> => {
-  const files = new Map<string, string>()
-  for (const [key, value] of Object.entries(records)) files.set(key, JSON.stringify(value))
-  const pool = {
-    getFileHandle: async (name: string) => {
-      const text = files.get(name)
-      if (text === undefined) throw new DOMException('missing', 'NotFoundError')
-      // A file as the reader uses it (jsdom's Blob has no text()).
-      return { getFile: async () => ({ size: text.length, text: async () => text }) }
-    },
-  } as unknown as FileSystemDirectoryHandle
-  return { getPool: async () => pool, getResource: async () => null }
+  const docs = new Map<string, ArrayBuffer>()
+  for (const [key, value] of Object.entries(records)) docs.set(key, new TextEncoder().encode(JSON.stringify(value)).buffer as ArrayBuffer)
+  const pool = {} as FileSystemDirectoryHandle
+  return {
+    getPool: async () => pool,
+    getResource: async () => null,
+    getPoolDoc: async (_pool: unknown, key: string) => docs.get(key) ?? null,
+    putPoolDoc: async (_pool: unknown, bytes: ArrayBuffer, key: string) => { docs.set(key, bytes); return 'sig' },
+  } as unknown as ThumbnailStore
 }
 
 const pair = (a: number, b: number) => ({ point: sig(a), flat: sig(b) })

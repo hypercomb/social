@@ -62,16 +62,30 @@ export function spriteSliceStyle(
   return { size: `${cols * 100}% ${rows * 100}%`, position: `${x}% ${y}%` }
 }
 
+/** The store as this cache needs it: the pool document pair. Each record is a
+ *  document under the key (the key is the sub-bucket, `keep: 'current'` leaves
+ *  one version), so the bytes enter through the store, never a raw write. */
+type BootSpriteStore = ThumbnailStore & {
+  getPoolDoc?(pool: FileSystemDirectoryHandle | undefined, subKey?: string): Promise<ArrayBuffer | null>
+  putPoolDoc?(
+    pool: FileSystemDirectoryHandle,
+    bytes: ArrayBuffer,
+    subKey?: string,
+    options?: { keep?: 'versions' | 'current' },
+  ): Promise<string | null>
+}
+
 export async function readBootSprite(store: ThumbnailStore, key: string): Promise<Blob | null> {
   if (!SIG.test(key)) return null
   try {
+    const { getPoolDoc } = store as BootSpriteStore
+    if (!getPoolDoc) return null
     const pool = await store.getPool(BOOT_SPRITE_MEANING)
     if (!pool) return null
-    const handle = await pool.getFileHandle(key, { create: false })
-    const file = await handle.getFile()
-    if (file.size <= 0) return null
+    const bytes = await getPoolDoc.call(store, pool, key)
+    if (!bytes || bytes.byteLength <= 0) return null
     noteDerivedUse(store, BOOT_SPRITE_MEANING, key)
-    return file
+    return new Blob([bytes])
   } catch {
     return null
   }
@@ -84,11 +98,11 @@ export async function writeBootSprite(
 ): Promise<boolean> {
   if (!SIG.test(key) || bytes.byteLength === 0) return false
   try {
+    const { putPoolDoc } = store as BootSpriteStore
+    if (!putPoolDoc) return false
     const pool = await store.getPool(BOOT_SPRITE_MEANING)
     if (!pool) return false
-    const handle = await pool.getFileHandle(key, { create: true })
-    const writable = await handle.createWritable()
-    try { await writable.write(bytes) } finally { await writable.close() }
+    if (!await putPoolDoc.call(store, pool, bytes, key, { keep: 'current' })) return false
     noteDerivedMint(store, BOOT_SPRITE_MEANING, key)
     return true
   } catch {

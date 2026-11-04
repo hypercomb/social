@@ -595,6 +595,9 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // one thing that cannot be re-derived afterwards, so a walker mistaking
   // this directory for a bag would erase the evidence of the erasure.
   'receipts:prune',
+  // trials:pages — which page resources run as a try- trial instead of in the
+  // hive, one current document (files/try-page.ts).
+  'trials:pages',
   // DERIVED CACHES — recomputable, wipe-safe, GC-able, and minted in the
   // optimize phase (optimize-phase.md). They are seeded for the same reason
   // the truth pools are: "safe to wipe DELIBERATELY, by the code that owns
