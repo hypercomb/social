@@ -36,11 +36,14 @@ const cachePath = say => {
   return fs.existsSync(p) ? p : null
 }
 
-async function ensureAudio() {
-  const stale = scenes.filter(s => !cachePath(s.say))
-  if (process.argv.includes('--check')) {
+// Any list of lines can be voiced the same way: `{ say, n?, name? }` each. The
+// tour voices its scenes; the living presentation voices its pages' beats
+// (scripts/bridge/living-presentation/blocks/narrate.cjs) through this one path.
+async function ensureAudio(lines = scenes, { check = process.argv.includes('--check') } = {}) {
+  const stale = lines.filter(s => !cachePath(s.say))
+  if (check) {
     for (const s of stale) console.log(`stale audio: scene ${s.n} (${s.name})`)
-    console.log(stale.length ? `${stale.length} scene(s) need audio regeneration` : 'audio cache complete')
+    console.log(stale.length ? `${stale.length} line(s) need audio regeneration` : 'audio cache complete')
     if (stale.length) process.exit(2)
     return
   }
@@ -105,18 +108,24 @@ const CLIP = {
   vocabulary: { kind: 'drawn', title: 'vocabulary' }, integrity: { kind: 'drawn', title: 'integrity' }, time: { kind: 'drawn', title: 'time' },
 }
 const RATIO = { live: '960/328', drawn: '1440/492' }
+/** each clip's file under media/ */
+const CLIP_FILE = { navigate: 'hive-navigate.mp4', zoom: 'hive-zoom.mp4', create: 'hive-create.mp4', children: 'hive-children.mp4',
+  vocabulary: 'concept-vocabulary.mp4', integrity: 'concept-integrity.mp4', time: 'concept-time.mp4' }
 // the sig stamp (scene field "sig": true): the caption's own sha-256, first eight hex in honey
 const stamp = s => { const h = crypto.createHash('sha256').update(captionOf(s.say)).digest('hex'); return `<span class="sig" title="sha-256 of the caption"><b>${h.slice(0, 8)}</b>${h.slice(8, 16)}…</span>` }
 const figcap = (kind, title, sig = '') => `<div class="figcap ${kind}">${icon('hex')}<span>${esc(kind)} · ${esc(title)}</span>${sig}</div>`
 
-function visualHtml(s) {
+// `clipSrc(name)`, when given, is the clip's own address (a page in the hive
+// names its clip by signature); without it the tour fills the clip from its
+// inert media blocks on first use.
+function visualHtml(s, { clipSrc } = {}) {
   const rows = s.visualData || []
   const [kind, arg] = (s.visual || 'none').split(':').map(x => (x || '').trim())
   switch (kind) {
     case 'film': {
       const c = CLIP[arg]; if (!c) throw new Error(`unknown clip ${arg} on scene ${s.n}`)
       return `<div class="figbox"><div class="fig film" style="--ratio:${RATIO[c.kind]}">` +
-        `<video muted playsinline preload="metadata" data-clip="${arg}"${c.kind === 'drawn' ? ' data-drawn="1"' : ''}></video></div>${figcap(c.kind, c.title)}</div>`
+        `<video muted playsinline preload="metadata" data-clip="${arg}"${c.kind === 'drawn' ? ' data-drawn="1"' : ''}${clipSrc ? ` src="${esc(clipSrc(arg))}"` : ''}></video></div>${figcap(c.kind, c.title)}</div>`
     }
     case 'hexes':
       return `<div class="fig hexrow">` + rows.map((r, i) => {
@@ -218,8 +227,7 @@ function assemble(doors) {
   html = html.replace('{{DOORS}}', () => doorsHtml(doors))
   // media follow the engine as inert text blocks, read lazily on first use
   const blocks = []
-  const clips = { navigate: 'hive-navigate.mp4', zoom: 'hive-zoom.mp4', create: 'hive-create.mp4', children: 'hive-children.mp4',
-    vocabulary: 'concept-vocabulary.mp4', integrity: 'concept-integrity.mp4', time: 'concept-time.mp4' }
+  const clips = CLIP_FILE
   scenes.forEach((s, i) => blocks.push(`<template id="aud-${String(i).padStart(2, '0')}">data:audio/mpeg;base64,${fs.readFileSync(cachePath(s.say)).toString('base64')}</template>`))
   for (const [k, f] of Object.entries(clips)) blocks.push(`<template id="vid-${k}">data:video/mp4;base64,${fs.readFileSync(path.join(ROOT, 'media', f)).toString('base64')}</template>`)
   html = html.replace('{{MEDIA}}', () => blocks.join('\n'))
@@ -236,8 +244,10 @@ async function currentDoors() {
 }
 
 // the pieces other recipes share (concepts.cjs draws its clips with the same fonts and caption text)
-module.exports = { fontsCss, captionOf, spokenOf, hashOf, VOICE, RATE }
+// (the living presentation's pages draw a scene with the same figures: scripts/bridge/living-presentation/blocks/tour.cjs)
+module.exports = { fontsCss, captionOf, spokenOf, hashOf, cachePath, ensureAudio, VOICE, RATE,
+  scenes, visualHtml, emph, plain, smart, esc, icon, CLIP, CLIP_FILE, FONTS, FONT_DIRS, ACT_OF }
 
-if (require.main === module) ensureAudio()
+if (require.main === module) ensureAudio(scenes)
   .then(async () => { if (!process.argv.includes('--check')) assemble(await currentDoors()) })
   .catch(e => { console.error('build failed:', e.message); process.exit(1) })

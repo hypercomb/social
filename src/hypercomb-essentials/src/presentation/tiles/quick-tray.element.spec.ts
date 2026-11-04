@@ -44,10 +44,20 @@ describe('the × on a row', () => {
     expect(tray.entries.map(e => e.label)).toEqual(['first', 'third'])
   })
 
-  it('empties the strip when the last row goes', () => {
+  it('takes the shelf away when the last row goes', () => {
     click(tray, '.remove'); click(tray, '.remove'); click(tray, '.remove')
     expect(tray.entries).toEqual([])
-    expect(tray.shadowRoot?.querySelector('.tray')).toBeNull()
+    expect(tray.shadowRoot?.querySelector('.shelf, .fold')).toBeNull()
+  })
+})
+
+describe('an empty shelf', () => {
+  it('never shows, and comes up with the first take', () => {
+    const fresh = document.createElement('hc-quick-tray') as QuickTrayElement
+    document.body.appendChild(fresh)
+    expect(fresh.shadowRoot?.querySelector('.shelf')).toBeNull()
+    fresh.take([{ label: 'first', sourceSegments: [] }])
+    expect(fresh.shadowRoot?.querySelector('.shelf')).not.toBeNull()
   })
 })
 

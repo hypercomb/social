@@ -66,6 +66,10 @@ export type BackGestureEntry = {
   /** Optional liveness for surfaces that are neither a view nor an element
    *  (a page-covering mode). Checked for every entry that declares it. */
   active?: () => boolean
+  /** The entry's `back` already knows the exact way out (a site returns to
+   *  the spawn it was opened from). Skip the arrival-face rule, which would
+   *  walk the lineage back through pages browsed INSIDE the view instead. */
+  exact?: boolean
 }
 
 type Ioc = { get<T>(key: string): T | undefined }
@@ -153,6 +157,7 @@ export class BackGesture {
       }
       if (entry.within) continue
       if (entry.active && !entry.active()) continue
+      if (entry.exact) return entry
       return { ...entry, back: () => this.backOutOfView(entry.back) }
     }
 
