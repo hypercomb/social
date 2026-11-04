@@ -71,11 +71,6 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   readonly #readableArtifactProviders: ReadableArtifactProvider[] = []
   readonly #readableArtifactReads = new Map<string, Promise<ReadableArtifact | null>>()
 
-  // Bees pulsed at least once (either by the processor's encounter loop
-  // for the first wave, or individually here once they land off the
-  // critical path). Ensures every bee gets exactly one initial pulse.
-  readonly #firstPulsed = new Set<string>()
-
   public get actions(): readonly ActionDescriptor[] { return this.#actions }
   public get actionNames(): readonly string[] { return this.#actionNames }
   public get resourceCount(): number { return this.#resourceCount }
@@ -300,14 +295,12 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         ;(window as any).__hcBoot?.(`first preloader.find done (total=${findMs.toFixed(0)}ms walk=${walkMs.toFixed(0)}ms bees=${beesMs.toFixed(0)}ms)`)
       }
 
-      // Atomically assign pulse ownership. A background import can finish at
-      // any microtask boundary, so taking a live cache snapshot in find() and
-      // letting a separate continuation infer ownership caused timing-specific
-      // double pulses. Everything in this exact snapshot belongs to the
-      // processor encounter; the finisher owns only later arrivals.
+      // This exact snapshot is the processor's pass. A bee that lands after
+      // it (a background import finishing at any later microtask) is an
+      // ARRIVAL: the processor hears its registration and gives it its first
+      // pulse itself (core/hypercomb.ts) — nothing here pulses.
       const encounterEntries = [...this.#beeCache.entries()]
         .filter(([, bee]) => typeof (bee as any)?.pulse === 'function')
-      for (const [sig] of encounterEntries) this.#firstPulsed.add(sig)
       if (deferredBeeLoads) {
         this.#finishBeeLoadsInBackground(deferredBeeLoads.pending, deferredBeeLoads.loads)
       }
@@ -446,8 +439,9 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   }
 
   /** Load one sleeper: by its dev loader when it has one, by signature
-   *  otherwise. The dev processor pulses no bee it did not start with, so a
-   *  bee a dev module registers gets its first heartbeat here. */
+   *  otherwise. Its first heartbeat is the processor's: the registration is
+   *  an arrival, pulsed in the next pass (core/hypercomb.ts) — in the dev
+   *  shell too, whose resolver returns no bees of its own. */
   #wakeLoad = async (id: string): Promise<Bee | null> => {
     const load = this.#devLoaders.get(id)
     if (!load) return this.#loadBeeBySignature(id)
@@ -456,17 +450,12 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       console.warn(`[script-preloader] dev sleeper ${id} failed to load:`, err)
       return null
     }
-    let first: Bee | null = null
     for (const key of window.ioc.list()) {
       if (before.has(key)) continue
       const bee = window.ioc.get(key) as Bee | undefined
-      if (!bee) continue
-      first ??= bee
-      if (typeof (bee as any).pulse === 'function') {
-        try { await bee.pulse('') } catch (err) { console.warn(`[script-preloader] woken ${key} failed its first pulse:`, err) }
-      }
+      if (bee) return bee
     }
-    return first
+    return null
   }
 
   #noteSleepers = (walked: { bees: readonly string[]; classes: ReadonlyMap<string, BeeClass> }): void => {
@@ -981,10 +970,11 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
    *     than the warm path, but populates the cache so the next boot is
    *     fast.
    *
-   * Non-critical bees that arrive after find() returns get their own
-   * first pulse from the background continuation — drones whose
-   * heartbeat wires EffectBus listeners (NostrMeshDrone, PairedChannelDrone)
-   * require this or their listeners never register.
+   * Non-critical bees that arrive after find() returns are arrivals: the
+   * processor pulses each once as it registers (core/hypercomb.ts) — drones
+   * whose heartbeat wires EffectBus listeners (NostrMeshDrone,
+   * PairedChannelDrone) require that first pulse or their listeners never
+   * register.
    */
   #loadBeesPrioritized = async (
     sigs: readonly string[],
@@ -1093,19 +1083,10 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     pending: readonly string[],
     loads: readonly Promise<Bee | null>[],
   ): void => {
+    // The finisher pulses nothing: each bee that lands here registered
+    // itself, and the processor pulses every arrival once (core/hypercomb.ts).
     void (async () => {
       await Promise.allSettled(loads)
-      for (const [sig, bee] of this.#beeCache) {
-        if (this.#firstPulsed.has(sig)) continue
-        this.#firstPulsed.add(sig)
-        // Pulse-less entries are legitimate: EventTarget UI drones
-        // (palette, toast, notes…) are constructor-wired and don't
-        // participate in the pulse cycle.
-        if (typeof (bee as any)?.pulse !== 'function') continue
-        try { await bee.pulse('') } catch (err) {
-          console.warn(`[script-preloader] late pulse failed for ${bee.iocKey}:`, err)
-        }
-      }
       this.#refreshProjection()
       ScriptPreloader.#updateLearnedCriticalSigs(this.#beeCache)
       const loaded = pending.filter(sig => this.#beeCache.has(sig)).length

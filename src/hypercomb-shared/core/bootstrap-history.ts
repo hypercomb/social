@@ -1,7 +1,7 @@
 // hypercomb-shared/core/bootstrap-history.ts
 // hypercomb-web/src/bootstrap/bootstrap-history.ts
 
-import { EffectBus, addressSegment } from '@hypercomb/core'
+import { EffectBus, addressSegment, hypercomb } from '@hypercomb/core'
 import { CompletionUtility } from './completion-utility'
 import { awaitFirstTilePaint } from './first-tile-paint'
 
@@ -135,16 +135,22 @@ export class BootstrapHistory {
       }, { once: true })
     }
 
-    // Phase 2: background bee loading in URL order. Errors are
-    // swallowed per level so one failure can't strand the chain. Nothing in
-    // this phase runs until the renderer has published its first settled tile
-    // snapshot; tiles own startup, then behaviours follow.
+    // Phase 2: the path's segments, each one pass of the processor, trunk to
+    // leaf. The empty grammar is NOT ours: the shell's first `act('')` is
+    // every bee's first pulse, and a bee that lands later is an arrival the
+    // processor pulses itself (core/hypercomb.ts) — so nothing here calls
+    // `find()` or `pulse()`. Going through `act()` is what gives each segment
+    // its `synchronize` and its optimize phase (doctrine `D4`). The segments
+    // are asked for together: the latch runs the first now and folds the rest
+    // into the one trailing pass, in order. Errors are swallowed per segment
+    // so one failure can't strand the chain. Nothing in this phase runs until
+    // the renderer has published its first settled tile snapshot; tiles own
+    // startup, then behaviours follow.
     void (async () => {
       await firstTilePaint
-      await this.encounter(preloader, '').catch(() => {})
-      for (const seg of segments) {
-        await this.encounter(preloader, seg).catch(() => {})
-      }
+      void preloader
+      const processor = new hypercomb()
+      await Promise.all(segments.map(seg => processor.act(seg).catch(() => {})))
     })()
   }
 
@@ -189,24 +195,6 @@ export class BootstrapHistory {
     }
 
     return []
-  }
-
-  private encounter = async (preloader: any, seg: string): Promise<void> => {
-    let bees: any[] = []
-    try {
-      bees = await preloader.find(seg)
-    } catch {
-      return
-    }
-
-    for (const b of bees) {
-      try {
-        const res = b?.pulse?.(seg)
-        if (res && typeof res.then === 'function') await res
-      } catch {
-        // ignore
-      }
-    }
   }
 
   private dispatchPopState = (): void => {

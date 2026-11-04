@@ -187,7 +187,7 @@ describe('ScriptPreloader priority scheduling', () => {
     expect(readArtifact).toHaveBeenCalledTimes(1)
   })
 
-  it('starts only the signed critical wave first and pulses every bee once', async () => {
+  it('starts only the signed critical wave first; the pass pulses what landed, the rest is the processor\'s', async () => {
     let releaseCritical: () => void = () => {}
     const criticalGate = new Promise<void>(resolve => { releaseCritical = resolve })
     const harness = fakeStore({ criticalGate })
@@ -208,7 +208,11 @@ describe('ScriptPreloader priority scheduling', () => {
     for (const bee of encounter) await bee.pulse('')
     await nextTask()
 
-    expect([...harness.pulses.values()]).toEqual([1, 1, 1, 1])
+    // The backgrounded bee registered itself (the processor hears that and
+    // gives it its first pulse — core/hypercomb.ts); the preloader pulses
+    // nothing of its own.
+    expect([...harness.pulses.values()]).toEqual([1, 1, 1, 0])
+    expect(services.has('@diamondcoreprocessor.com/RestDrone')).toBe(true)
   })
 
   it('falls back to every bee when a hinted critical module fails', async () => {
@@ -229,7 +233,7 @@ describe('ScriptPreloader priority scheduling', () => {
     expect(harness.pulses.get(REST)).toBe(1)
   })
 
-  it('gives a genuinely late background bee exclusive pulse ownership', async () => {
+  it('leaves a genuinely late background bee to the processor: it registers, the preloader never pulses it', async () => {
     let releaseRest: () => void = () => {}
     const restGate = new Promise<void>(resolve => { releaseRest = resolve })
     const harness = fakeStore({ restGate })
@@ -242,10 +246,12 @@ describe('ScriptPreloader priority scheduling', () => {
 
     expect(harness.started).toContain(REST)
     expect(harness.pulses.get(REST)).toBe(0)
+    expect(services.has('@diamondcoreprocessor.com/RestDrone')).toBe(false)
 
     releaseRest()
     await nextTask()
-    expect([...harness.pulses.values()]).toEqual([1, 1, 1, 1])
+    expect(services.has('@diamondcoreprocessor.com/RestDrone')).toBe(true)
+    expect([...harness.pulses.values()]).toEqual([1, 1, 1, 0])
   })
 
   it('rejects a partial root hint and starts the ordinary cold wave', async () => {

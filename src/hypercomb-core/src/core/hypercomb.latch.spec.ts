@@ -70,8 +70,10 @@ describe('hypercomb.act — the latch', () => {
     // one pass for `one`, one trailing pass for the rest — each grammar once
     expect(finds).toEqual(['one', 'two', 'three'])
     expect(synchronized).toBe(2)
+    // (a first pulse is always '' — see below — so the first pass gives each
+    // newcomer '' before 'one')
     expect(pulses).toEqual([
-      ['a', 'one'], ['b', 'one'],
+      ['a', ''], ['a', 'one'], ['b', ''], ['b', 'one'],
       ['a', 'two'], ['b', 'two'],
       ['a', 'three'], ['b', 'three'],
     ])
@@ -96,7 +98,7 @@ describe('hypercomb.act — the latch', () => {
   it('a bee that throws neither silences the bees after it nor skips synchronize — the pass still rejects', async () => {
     answer = async () => [bee('first', true), { iocKey: '@test.com/Plain' }, bee('last')]
     await expect(new hypercomb().act('x')).rejects.toThrow('boom:first')
-    expect(pulses).toEqual([['first', 'x'], ['last', 'x']])
+    expect(pulses).toEqual([['first', ''], ['first', 'x'], ['last', ''], ['last', 'x']])
     expect(synchronized).toBe(1)
   })
 
@@ -136,8 +138,17 @@ describe('hypercomb.act — the latch', () => {
     await pass
     await tick(80)
 
-    expect(pulses).toEqual([['found', 'g'], ['during', '']])
+    expect(pulses).toEqual([['found', ''], ['found', 'g'], ['during', '']])
     expect(synchronized).toBe(1)
+  })
+
+  it("a bee's first pulse is the empty grammar, even when it first meets the processor under a word", async () => {
+    const newcomer = bee('newcomer')
+    answer = async () => [newcomer]
+    await new hypercomb().act('word')
+    await new hypercomb().act('other')
+    expect(pulses).toEqual([['newcomer', ''], ['newcomer', 'word'], ['newcomer', 'other']])
+    expect(synchronized).toBe(2)
   })
 
   it('the census counts pulses per bee per grammar and passes', () => {

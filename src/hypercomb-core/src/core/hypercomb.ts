@@ -115,6 +115,9 @@ export class hypercomb extends web {
           // A module may register a constructor-wired product with no pulse —
           // skip it, never throw.
           if (typeof (bee as unknown as Pulseable)?.pulse !== 'function') continue
+          // A bee's first pulse is always the empty grammar — "you are here" —
+          // before any word reaches it, whichever pass it first meets.
+          if (grammar && !hypercomb.#pulsed.has(bee as object)) await pulse(bee as unknown as Pulseable, '')
           await pulse(bee as unknown as Pulseable, grammar)
         }
       }
