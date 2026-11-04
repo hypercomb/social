@@ -102,6 +102,16 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .crumbs a:hover{color:var(--honey)}
 .crumbs .sep{color:var(--line-strong)}
 .crumbs [aria-current]{color:var(--ink)}
+/* A PART is one slide on its own: no crumbs, no ways. The website icon opens
+   the website — rooted at the top tile — on this same page. */
+.top{display:flex;align-items:center;gap:12px;min-height:20px}
+.top .crumbs{flex:1}
+.to-site{display:none;align-items:center;gap:.45em;margin-left:auto;font-family:var(--mono);font-size:12px;letter-spacing:var(--track-label);
+  text-transform:uppercase;color:var(--dim);background:none;border:1px solid var(--line);border-radius:var(--r-ctl);padding:5px 10px;cursor:pointer}
+.to-site:hover{color:var(--honey);border-color:var(--honey-deep);background:var(--honey-tint)}
+.to-site .g{color:var(--honey);font-size:13px}
+.page.part .crumbs,.page.part .ways{visibility:hidden}
+.page.part .to-site{display:inline-flex}
 
 /* ---------- the scene ---------- */
 .scene{display:grid;grid-template-rows:auto auto minmax(0,1fr) auto auto;justify-items:center;align-content:stretch;
@@ -288,6 +298,16 @@ const SCRIPT = `
   // BACK RESUMES, FORWARD STARTS OVER: the hive's website view marks a page
   // the back gesture returned to (data-hc-returning on its host), and only
   // then does the scene pick up at the beat the reader left it on.
+  // PART OR WEBSITE: the hive's website view says where the site was entered
+  // (data-hc-site-entry). Entered at a top tile, this page is part of the
+  // website and shows its ways; entered anywhere deeper, it is just this part.
+  // Standing alone (no hive), it is the website.
+  const host = root instanceof Element && root.hasAttribute('data-hc-site-entry') ? root : null
+  const mode = () => { const e = host ? host.getAttribute('data-hc-site-entry') || '/' : '/'; page.classList.toggle('part', e.split('/').filter(Boolean).length > 1) }
+  mode()
+  if (host) new MutationObserver(() => { if (gone()) return; mode() }).observe(host, { attributes: true, attributeFilter: ['data-hc-site-entry'] })
+  const toSite = page.querySelector('.to-site')
+  if (toSite) toSite.onclick = () => page.dispatchEvent(new CustomEvent('hc-site-widen', { bubbles: true }))
   const KEY = 'hc-scene:' + location.pathname
   const returning = root instanceof Element && root.hasAttribute('data-hc-returning')
   let resumeAt = 0
@@ -481,7 +501,7 @@ ${STYLE}
 </head>
 <body>
 ${sprite}
-<main class="page">${crumbsHtml(route)}${sceneHtml(scene)}${waysHtml(ways)}
+<main class="page"><div class="top">${crumbsHtml(route)}<button type="button" class="to-site" aria-label="Open the website at this page">${icon('hex')}website</button></div>${sceneHtml(scene)}${waysHtml(ways)}
 </main>
 <script>${SCRIPT}${tryDef ? `
 ;(() => {

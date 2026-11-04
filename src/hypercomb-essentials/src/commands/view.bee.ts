@@ -588,7 +588,10 @@ export class ViewBee extends Worker {
       })
     }
     this.#emit(toggles)
-    this.#openDefaultView(segments, toggles, layer, defaultView, vm, optedOut)
+    // WHOSE PIN opened it: the place's own mark (its part is pinned) or one
+    // inherited from an ancestor (the website is pinned above it) — the
+    // website view roots the site accordingly (site-view.drone).
+    this.#openDefaultView(segments, toggles, layer, defaultView, vm, optedOut, !ownDefault && !!resolved && !optedOut)
   }
 
   /** THE ARRIVAL SURFACE — a layer can declare which view it opens as, and
@@ -626,6 +629,7 @@ export class ViewBee extends Worker {
     want: string,
     vm: ViewModeLike,
     optedOut = false,
+    inherited = false,
   ): void {
     // A cold layer read is indistinguishable from "no default" — don't latch
     // on it, let the next trigger answer properly.
@@ -714,7 +718,7 @@ export class ViewBee extends Worker {
       // while still riding the previous arrival inside its own scope.
       this.#autoOpenedView = ''
     }
-    EffectBus.emit('view:arrival', { segments: [...segments], view: opened })
+    EffectBus.emit('view:arrival', { segments: [...segments], view: opened, inherited: !!opened && inherited })
   }
 
   /** Drop the surface to hexagons once show-cell's painted location catches

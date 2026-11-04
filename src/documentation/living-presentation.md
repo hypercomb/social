@@ -785,6 +785,17 @@ every page, and its 25 scenes are folded into the tiles they explain:
   dressed.
 - **Pictures from the hive.** `blocks/captures/` holds pictures taken in a
   running hive, shown on a page under "In the hive" with what they show.
+- **A part, or the website.** The website belongs to the root (jwize,
+  2026-11-04). A tile's page opened on its own is just that part: one slide,
+  no crumbs, no ways, and a website icon. The icon opens the website, rooted at
+  the top tile, on that same page: every slide then shows its crumbs and the
+  words to step into, every link stays in the website, and back steps back
+  along the pages read, then out to the layer hosting the page first opened.
+  In the hive, tiles walk as hexagons unless something is pinned: a tile's own
+  pin (`opens <tile> as website`) opens its part; a pin on a top tile reaches
+  every tile under it and opens the whole website there. Scenes play like a
+  film: one sentence on screen at a time, timed to the voice, the figure's
+  part it is about lit.
 - **Checked.** `blocks/check.cjs` fails on a scene placed twice or said on
   two pages, a page that asks another host for anything, a medium whose bytes
   are not its name, or a link no page answers; `--render` also opens every

@@ -221,6 +221,13 @@ export class SiteViewDrone extends Drone {
    *  click back on a webpage you just entered … you go to the parent of the
    *  page you entered"). */
   #backOutTo: string[] | null = null
+  /** The tile whose page the reader opened, kept when the session widens to
+   *  the whole website (#widen): back out of the website still steps out to
+   *  the layer hosting the page they first opened. */
+  #enteredAt: string[] | null = null
+  /** Widen the session to the whole website as soon as its page is mounted
+   *  (an arrival under a website pinned above). */
+  #widenOnMount = false
 
   /**
    * Raw-DOM exit overlay — the GUARANTEED way out of website mode. It is
@@ -285,7 +292,7 @@ export class SiteViewDrone extends Drone {
       // The subscription's own last-value replay is not a live arrival —
       // ignore it, or a boot replay would rewrite a session's spawn.
       let replay = true
-      this.onEffect<{ segments?: readonly string[]; view?: string; held?: boolean }>('view:arrival', (payload) => {
+      this.onEffect<{ segments?: readonly string[]; view?: string; held?: boolean; inherited?: boolean }>('view:arrival', (payload) => {
         if (replay) return
         if (payload?.view !== 'website') return
         // The site's own step between its pages is not an arrival into it.
@@ -295,6 +302,13 @@ export class SiteViewDrone extends Drone {
         if (!spawn || !entry) return
         if (!sameSiteSegments([...(payload.segments ?? [])], entry)) return
         this.#spawn = { mode: spawn.mode, segments: [...this.#prevSegments] }
+        // THE WEBSITE IS PINNED above this place (its default is inherited):
+        // the reader arrives in the whole website, not in one part.
+        if (payload.inherited) {
+          const up = this.#mount?.host
+          if (up?.isConnected) void this.#widen(up)
+          else this.#widenOnMount = true
+        }
       })
       replay = false
       this.#arrivalBound = true
@@ -419,6 +433,8 @@ export class SiteViewDrone extends Drone {
       this.#trail = []
       this.#trailScroll = []
       this.#returningScroll = null
+      this.#enteredAt = null
+      this.#widenOnMount = false
       // Leaving the site returns to WHERE IT WAS SPAWNED FROM — the page the
       // reader was on, in the view they were looking at — never the page they
       // happened to browse to inside it, and never the raw hexagons just
@@ -455,6 +471,26 @@ export class SiteViewDrone extends Drone {
     this.#trail = [here]
     this.#trailScroll = []
     this.#returningScroll = null
+    this.#enteredAt = this.#siteEntrySegments ? [...this.#siteEntrySegments] : null
+  }
+
+  /** THE WEBSITE BELONGS TO THE ROOT (jwize 2026-11-04). A tile's page opened
+   *  on its own is just that part; its website icon (the page asks with a
+   *  bubbling 'hc-site-widen') widens the session to the whole website — the
+   *  nearest top ancestor that has a page — on this same page. From here
+   *  every link stays in the website, and back steps back along the pages
+   *  read, then out. */
+  async #widen(host: HTMLElement): Promise<void> {
+    const lineage = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')
+    const here = [...(lineage?.explorerSegments?.() ?? [])]
+    let floor = here
+    for (let n = 1; n < here.length; n++) {
+      const at = here.slice(0, n)
+      if (await this.#hasPage(at)) { floor = at; break }
+    }
+    if (!host.isConnected || !this.#siteEntrySegments) return
+    this.#siteEntrySegments = floor
+    host.setAttribute('data-hc-site-entry', '/' + floor.join('/'))
   }
 
   /** The back gesture inside a site (home domain): one page back along the
@@ -471,8 +507,8 @@ export class SiteViewDrone extends Drone {
       void this.#navigate(previous).finally(() => { this.#trailStep = false })
       return
     }
-    // At the entry: out to the layer that hosts it.
-    const entry = this.#siteEntrySegments
+    // At the entry: out to the layer that hosts the page first opened.
+    const entry = this.#enteredAt ?? this.#siteEntrySegments
     this.#backOutTo = entry ? entry.slice(0, -1) : null
     this.#exitToHive()
   }
@@ -985,6 +1021,11 @@ export class SiteViewDrone extends Drone {
     const returningTo = this.#returningScroll
     this.#returningScroll = null
     if (returningTo !== null) host.setAttribute('data-hc-returning', '')
+    // Where this site was entered, for the page's own script: a site entered
+    // at a top tile is the whole site (a page shows its ways in); a page
+    // entered on its own is just that part (jwize 2026-11-04: "the website
+    // belongs to the root. When I view the part I view just the part").
+    host.setAttribute('data-hc-site-entry', '/' + (this.#siteEntrySegments ?? segments).join('/'))
     host.style.cssText =
       // Inset by any docked panel's reservation (`--hc-inset-<side>`, mirrored
       // from `viewport:inset`) so the Views window can stay open beside the page.
@@ -1124,6 +1165,9 @@ export class SiteViewDrone extends Drone {
       void this.#resolveAndNavigate(href, segments)
     }
     host.addEventListener('click', onAnchorClick, true)
+    const onWiden = (): void => { void this.#widen(host) }
+    host.addEventListener('hc-site-widen', onWiden)
+    if (this.#widenOnMount) { this.#widenOnMount = false; void this.#widen(host) }
 
     this.#mount = {
       host,
@@ -1131,6 +1175,7 @@ export class SiteViewDrone extends Drone {
       sitePath: [...segments],
       unmount: () => {
         host.removeEventListener('click', onAnchorClick, true)
+        host.removeEventListener('hc-site-widen', onWiden)
         rootObserver.disconnect()
         placeExit.disconnect()
         for (const node of styleNodes) node.remove()
