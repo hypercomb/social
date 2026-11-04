@@ -1,17 +1,17 @@
 {
   "renderedCellsKey = ''": {
-    "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts": 58
+    "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts": 50
   },
   "#forceNextRender = true": {
-    "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts": 28
+    "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts": 26
   },
   "#dirtyAll(": {
     "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts": 7
   },
   "#pushBuffer(": {
-    "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts": 24
+    "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts": 19
   },
   "#writeCell(Scalar|Rgb|Vec4)(": {
-    "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts": 30
+    "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts": 23
   }
 }

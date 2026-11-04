@@ -170,7 +170,7 @@ type TilePreviewPayload =
   | { label: string; clear?: false; page: string; point?: TilePreviewPicture | null; flat?: TilePreviewPicture | null; removed?: boolean; border?: string | null; hideText?: boolean }
 type TilePreview = Extract<TilePreviewPayload, { page: string }>
 
-/** The rim a tile wears when it names no colour — as #tryInPlaceCellUpdate paints it. */
+/** The rim a tile wears when it names no colour — as the drain's plan paints it. */
 const PREVIEW_DEFAULT_BORDER: [number, number, number] = [0.784, 0.592, 0.353]
 
 /** One tile of a DIVE (`render:dive`, wave-view): what another layer's tile
@@ -932,7 +932,7 @@ export class ShowCellDrone extends Drone {
   // that was wiped or handed to another label", and the only cure is a
   // geometry rebuild (applyGeometry re-bakes and re-points every cell). While
   // the generations lived inside buildCellsKey, the in-place fast paths —
-  // #repaintReadinessInPlace and #tryInPlaceCellUpdate, which recompute the
+  // #repaintReadinessInPlace and the drain (#paintDirty), which recompute the
   // WHOLE key after touching one attribute — ADOPTED a bump they had not
   // acted on. The pending pass then found its key unchanged, took the
   // early-return below, and the wiped slots were never re-baked: those tiles
@@ -1748,6 +1748,8 @@ export class ShowCellDrone extends Drone {
   /** Dirty cells whose fresh signature is still loading; a frame drain skips
    *  them and the load's own drain paints them. */
   readonly #loadingLabels = new Set<string>()
+  /** Dirty cells whose derivation is redone even though a cached entry exists. */
+  readonly #forceLoad = new Set<string>()
   /** What the retained buffers were built for — label order and quad shape.
    *  Equal → the next full pass re-plans in place and writes only what
    *  changed; different → the buffers are rebuilt. */
@@ -2523,6 +2525,14 @@ export class ShowCellDrone extends Drone {
     this.#scheduleDrain()
   }
 
+  /** A cell whose derivation must be redone from OPFS (a new propsSig, a
+   *  commit that may have a picture after all) while its cached entry stays
+   *  live until the fresh one lands — so nothing paints empty in between. */
+  #dirtyFresh(label: string, why: string): void {
+    this.#forceLoad.add(label)
+    this.#dirty(label, why)
+  }
+
   /** The PAGE changed. Legal for a location change and a layout-mode change
    *  only (V2 — doctrine.spec.ts freezes the call sites). Every slot is
    *  re-planned; unchanged plans are still skipped (V3). */
@@ -2560,7 +2570,12 @@ export class ShowCellDrone extends Drone {
       // A dropped cache entry means the signature changed (a save, a retitle,
       // an arrival): the loader re-derives it. A cached signature the atlas
       // lost (eviction, or bytes that have only now landed) is reloaded.
-      if (!this.cellImageCache.has(label)) { needLoad.push(cell); force.add(label); continue }
+      if (!this.cellImageCache.has(label) || this.#forceLoad.has(label)) {
+        this.#forceLoad.delete(label)
+        needLoad.push(cell)
+        force.add(label)
+        continue
+      }
       const sig = this.cellImageCache.get(label) ?? undefined
       if (sig && !this.imageAtlas.hasImage(sig) && !this.imageAtlas.hasFailed(sig)) needLoad.push(cell)
     }
@@ -2587,13 +2602,20 @@ export class ShowCellDrone extends Drone {
     const ctx = this.#planContext()
     const plans = new Map<string, SlotPlan>()
     const labels = only ? [...only] : this.#paint.dirtyLabels
-    for (const label of labels) {
-      if (this.#loadingLabels.has(label)) continue
-      const cell = this.renderedCells.get(label)
-      const i = this.#labelToIndex.get(label)
-      if (!cell || i === undefined) continue
-      this.#refreshCellRecord(cell, false)
-      plans.set(label, this.#slotPlanFor(cell, i, ctx))
+    // A plan may bake a label (a retitle); an eviction that bake causes is
+    // this paint's own and must not re-arm a pass (#onLabelAtlasEvicted).
+    this.#inPaintBake = true
+    try {
+      for (const label of labels) {
+        if (this.#loadingLabels.has(label)) continue
+        const cell = this.renderedCells.get(label)
+        const i = this.#labelToIndex.get(label)
+        if (!cell || i === undefined) continue
+        this.#refreshCellRecord(cell, false)
+        plans.set(label, this.#slotPlanFor(cell, i, ctx))
+      }
+    } finally {
+      this.#inPaintBake = false
     }
     const report = this.#paint.drain(plans, this.#writeAttr, this.#pushAttrs, { skip: this.#loadingLabels, only })
     if (report.written.length > 0) {
@@ -3348,12 +3370,7 @@ export class ShowCellDrone extends Drone {
               }
             }
           }
-          const dir = await lineage?.explorerDir?.()
-          if (dir) {
-            for (const name of added) {
-              await this.#tryInPlaceCellUpdate(name, { dir })
-            }
-          }
+          for (const name of added) this.#dirtyFresh(name, 'cell:added')
           if (branchFlipped) this.#queueIncremental({})
         })().catch(() => { /* best effort */ })
       }
@@ -3377,116 +3394,6 @@ export class ShowCellDrone extends Drone {
         finishIncremental(false)
       })().catch(() => { /* the pending shade is the visible failure state */ })
     }
-  }
-
-  /**
-   * Async incremental render — kept for callers that legitimately need to
-   * update cached content (tile:saved fallback, tags:changed, substrate
-   * fallback). Never invoked for cell:added/removed.
-   */
-  private readonly renderIncremental = async (change: {
-    added?: string[]
-    removed?: string[]
-    changedContent?: string[]
-    changedTags?: string[]
-  }): Promise<void> => {
-    const axial = this.resolve<any>('axial')
-    const lineage = this.resolve<any>('lineage')
-    // Framed pages re-place from the whole set — see #runIncrementalSync.
-    if (!axial?.items || !lineage || !this.#slots.seeded || this.#locationIsFramed()) {
-      this.#layerCellsCache.delete(this.renderedLocationKey)
-      this.renderedCellsKey = ''
-      this.requestRender()
-      return
-    }
-
-    const dir = await lineage.explorerDir?.()
-    if (!dir) { this.requestRender(); return }
-
-    if (change.removed?.length) {
-      for (const name of change.removed) { this.#slots.remove(name); this.renderedCells.delete(name) }
-    }
-    if (change.added?.length) {
-      const history = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
-      const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
-      const fresh = history
-        ? await readFreshBranches(history, parentSegments, change.added)
-        : { branches: new Set<string>(), unresolved: new Set<string>(), cold: false }
-      for (const name of change.added) {
-        const hasBranch = fresh.branches.has(name) || fresh.unresolved.has(name)
-        if (!this.#slots.add(name, hasBranch)) {
-          this.#layerCellsCache.delete(this.renderedLocationKey)
-          this.renderedCellsKey = ''
-          this.requestRender()
-          return
-        }
-      }
-    }
-
-    const snap = this.#slots.snapshot()
-    const cellNames = snap.names
-    const localCellSet = snap.localCells
-    const branchSet = snap.branches
-
-    this.cachedCellNames = cellNames
-    this.cachedLocalCellSet = localCellSet
-    this.cachedBranchSet = branchSet
-
-    const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
-    const maxCells = Math.min(cellNames.length, axialMax)
-    if (maxCells <= 0) { this.clearMesh(`changed-pass: maxCells=0 (names=${cellNames.length}, axial=${axialMax})`); return }
-
-    const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
-    if (cells.length === 0) { this.clearMesh("changed-pass: axial yielded 0 cells"); return }
-
-    const touched = new Set<string>([...(change.added ?? []), ...(change.changedContent ?? [])])
-    // Include cells whose cached sig is no longer in the atlas — the
-    // atlas may have evicted it since the last render (wrap around the
-    // slot allocator). Without this, the cell keeps its stale cached
-    // sig but the atlas can't resolve its UV, and the shader falls
-    // back to the label forever. loadOne's fast-path reload handles
-    // the actual re-fetch; here we just make sure loadOne is called.
-    const atlas = this.imageAtlas
-    const needLoad = cells.filter(c => {
-      if (touched.has(c.label)) return true
-      if (!this.cellImageCache.has(c.label)) return true
-      const cachedSig = this.cellImageCache.get(c.label)
-      if (cachedSig && atlas && !atlas.hasImage(cachedSig) && !atlas.hasFailed(cachedSig)) return true
-      return false
-    })
-    if (needLoad.length > 0) await this.loadCellImages(needLoad, dir)
-
-    for (const cell of cells) {
-      // EXTERNAL cells: needLoad above already queued the no-cache and
-      // evicted cases (loadOne binds those directly); here just bind the
-      // coherent cache value when loadOne didn't touch this cell. Local
-      // decoration caches stay local-only.
-      if (cell.external) {
-        if (!cell.imageSig) {
-          const cachedSig = this.cellImageCache.get(cell.label) ?? undefined
-          if (cachedSig) cell.imageSig = cachedSig
-        }
-        continue
-      }
-      if (this.cellImageCache.has(cell.label)) cell.imageSig = this.cellImageCache.get(cell.label) ?? undefined
-      const bc = this.cellBorderColorCache.get(cell.label)
-      if (bc) cell.borderColor = bc
-      cell.hasLink = this.cellLinkCache.get(cell.label) ?? false
-      cell.hasSubstrate = this.cellSubstrateCache.get(cell.label) ?? false
-      cell.hideText = this.cellHideTextCache.get(cell.label) ?? false
-    }
-
-    this.renderedCells.clear()
-    for (const cell of cells) this.renderedCells.set(cell.label, cell)
-
-    this.#layerCellsCache.set(this.renderedLocationKey, {
-      cells: [...cells], cellNames, localCellSet, branchSet,
-    })
-
-    await this.applyGeometry(cells)
-
-    this.emitEffect('render:cell-count', this.#buildCellCountPayload(cells))
-    this.#emitRenderTags(cells)
   }
 
   private readonly renderFromSynchronize = async (): Promise<void> => {
@@ -6567,26 +6474,24 @@ export class ShowCellDrone extends Drone {
     this.onEffect<TilePreviewPayload>('tile:preview', (payload) => { void this.#applyTilePreview(payload) })
 
     this.onEffect<{ cell: string }>('tile:saved', (payload) => {
-      if (payload?.cell) this.#tilePreviewSaved.add(payload.cell)
-      if (payload?.cell) {
-        const oldSig = this.cellImageCache.get(payload.cell)
-        this.cellImageCache.delete(payload.cell)
-        this.cellBorderColorCache.delete(payload.cell)
-        this.cellTagsCache.delete(payload.cell)
-        this.cellLinkCache.delete(payload.cell)
-        this.cellSubstrateCache.delete(payload.cell)
-        this.cellHideTextCache.delete(payload.cell)
-        if (oldSig && this.imageAtlas) {
-          this.imageAtlas.invalidate(oldSig)
-        }
+      if (!payload?.cell) return
+      this.#tilePreviewSaved.add(payload.cell)
+      const oldSig = this.cellImageCache.get(payload.cell)
+      this.cellImageCache.delete(payload.cell)
+      this.cellBorderColorCache.delete(payload.cell)
+      this.cellTagsCache.delete(payload.cell)
+      this.cellLinkCache.delete(payload.cell)
+      this.cellSubstrateCache.delete(payload.cell)
+      this.cellHideTextCache.delete(payload.cell)
+      if (oldSig && this.imageAtlas) {
+        this.imageAtlas.invalidate(oldSig)
       }
-      // Fully invalidate cached state and trigger a locked full render.
-      // The incremental and in-place fast paths both raced with concurrent
-      // synchronize renders, leaving the tile blank. requestRender is
-      // serialized via the rendering lock and rebuilds from OPFS.
+      // ONE CELL (single-paint.md V2). The drain re-derives this label from
+      // OPFS and writes its slot; the rest of the grid is untouched. The race
+      // that once justified a full pass here — two writers of geometry — is
+      // gone: the drain is the only writer, and it waits for a running pass.
       this.#layerCellsCache.delete(this.renderedLocationKey)
-      this.renderedCellsKey = ''
-      this.requestRender()
+      this.#dirty(payload.cell, 'tile:saved')
     })
 
     // Root properties are live defaults for every same-named appearance.
@@ -6611,9 +6516,8 @@ export class ShowCellDrone extends Drone {
       // and display flags. They are cheap to rebuild and cannot be surgically
       // edited without repeating the property projection here.
       this.#layerCellsCache.clear()
-      this.renderedCellsKey = ''
-      this.#forceNextRender = true
-      this.requestRender()
+      // The page on screen re-composes root + outer for this one label.
+      this.#dirty(label, 'tile:root-default-changed')
     })
 
     // tags:changed — invalidate only the affected cells' tag caches, then run
@@ -6625,12 +6529,9 @@ export class ShowCellDrone extends Drone {
         this.cellTagsCache.delete(cell)
         changedCells.push(cell)
       }
-      if (this.cachedCellNames && changedCells.length > 0) {
-        void this.renderIncremental({ changedTags: changedCells })
-      } else {
-        this.#layerCellsCache.delete(this.renderedLocationKey)
-        this.renderedCellsKey = ''
-        this.requestRender()
+      if (changedCells.length > 0) {
+        this.#dirty(changedCells, 'tags:changed')
+        if (this.renderedCells.size > 0) this.#emitRenderTags([...this.renderedCells.values()])
       }
       // With the bouquet in hand, a landed scent changes the answer to "who
       // wears the whole set?" — the tile it just landed on must LIGHT. Re-ask
@@ -6754,11 +6655,20 @@ export class ShowCellDrone extends Drone {
     // dropped, so the retitled cell actually re-bakes under its new name.
     this.onEffect<{ label?: string }>('title:indexed', (payload) => {
       const label = payload?.label
-      if (typeof label === 'string' && label) this.atlas?.invalidateLabel(label)
-      else this.atlas?.invalidateLabels()
-      this.renderedCellsKey = ''
-      this.#forceNextRender = true
-      this.requestRender()
+      if (typeof label === 'string' && label) {
+        this.atlas?.invalidateLabel(label)
+        // One cell re-bakes under its new name (single-paint.md V2): the
+        // drain reads the fresh atlas rect into that slot alone. Hydration's
+        // one event per titled cell is one drain, not one pass each.
+        this.#dirty(label, 'title:indexed')
+        // The name is DOM text (tile-name.drone): it re-asks whether or not
+        // the slot's rect moved.
+        this.emitEffect('render:name-visibility', { label })
+      } else {
+        this.atlas?.invalidateLabels()
+        this.#dirty([...this.renderedCells.keys()], 'title:indexed')
+        this.emitEffect('render:name-visibility', {})
+      }
     })
 
     // reference:indexed — the index resolved a reference tile's FACE from its
@@ -6771,8 +6681,7 @@ export class ShowCellDrone extends Drone {
       const label = payload?.label
       if (typeof label !== 'string' || !label) return
       this.cellImageCache.delete(label)
-      this.renderedCellsKey = ''
-      this.requestRender()
+      this.#dirty(label, 'reference:indexed')
     })
 
     // A dropped Portal first becomes an in-memory tile at the release slot.
@@ -7700,20 +7609,16 @@ export class ShowCellDrone extends Drone {
     // `cell.imageSig = undefined`, and buildFillQuadGeometry bakes
     // `hasImage = 0` into the buffer — permanently, because subsequent
     // renders see the same cellsKey and skip the rebuild. Keep the old
-    // cache entry live until #tryInPlaceCellUpdate has re-read props
+    // cache entry live until the drain's forced re-read has re-read props
     // and re-populated it; any concurrent render then sees the stale-
     // but-valid sig and renders the previous image instead of an empty
     // tile. When the update finishes, the buffer is patched in place
     // with the new sig.
     this.onEffect<{ cell: string }>('substrate:applied', (payload) => {
       if (!payload?.cell) return
-      void this.#tryInPlaceCellUpdate(payload.cell, { dir: null }).then(done => {
-        this.cellSubstrateCache.delete(payload.cell)
-        if (!done && this.#slots.seeded) {
-          this.cellImageCache.delete(payload.cell)
-          void this.renderIncremental({ changedContent: [payload.cell] })
-        }
-      })
+      // The old entry stays live until the drain's forced re-read lands, so a
+      // concurrent plan paints the previous picture, never an empty tile.
+      this.#dirtyFresh(payload.cell, 'substrate:applied')
     })
 
     // cell:committed — a typed create has landed in the layer. The picture
@@ -7730,9 +7635,7 @@ export class ShowCellDrone extends Drone {
       // and never clear what is on screen while the real answer loads.
       const shown = this.cellImageCache.get(cell)
       if (shown && this.imageAtlas?.hasImage(shown)) return
-      void this.#tryInPlaceCellUpdate(cell, { dir: null }).then(done => {
-        if (!done && this.#slots.seeded) void this.renderIncremental({ changedContent: [cell] })
-      })
+      this.#dirtyFresh(cell, 'cell:committed')
     })
 
     // tile:hidden / tile:unhidden — instant local response to the
@@ -7813,15 +7716,14 @@ export class ShowCellDrone extends Drone {
     // image immediately. Reroll is an explicit user gesture, and requestRender
     // coalesces a bulk burst into a single pass, so the full render is cheap.
     this.onEffect<{ cell: string }>('substrate:rerolled', (payload) => {
-      if (payload?.cell) {
-        const oldSig = this.cellImageCache.get(payload.cell)
-        this.cellImageCache.delete(payload.cell)
-        this.cellSubstrateCache.delete(payload.cell)
-        if (oldSig && this.imageAtlas) this.imageAtlas.invalidate(oldSig)
-      }
+      if (!payload?.cell) return
+      const oldSig = this.cellImageCache.get(payload.cell)
+      this.cellImageCache.delete(payload.cell)
+      this.cellSubstrateCache.delete(payload.cell)
+      if (oldSig && this.imageAtlas) this.imageAtlas.invalidate(oldSig)
+      // Same shape as tile:saved: the one cell re-derives and repaints.
       this.#layerCellsCache.delete(this.renderedLocationKey)
-      this.renderedCellsKey = ''
-      this.requestRender()
+      this.#dirty(payload.cell, 'substrate:rerolled')
     })
 
     // Image only — every name off, via the shader's label mix. The payload
@@ -11745,7 +11647,7 @@ export class ShowCellDrone extends Drone {
     // signal lives in #bakedImageAtlasGen / #bakedLabelAtlasGen, checked
     // separately by applyGeometry. This key describes the CELLS, and it is
     // recomputed by paths that only touched one attribute
-    // (#repaintReadinessInPlace, #tryInPlaceCellUpdate); a generation folded in
+    // (#repaintReadinessInPlace, #paintDirty); a generation folded in
     // here is a rebake those paths can mark as done without doing it, which is
     // how tiles ended up with a label band and no name inside it. Keep them apart.
     let s = `p${this.#pivot ? 1 : 0}f${this.#flat ? 1 : 0}|`
@@ -12224,12 +12126,6 @@ export class ShowCellDrone extends Drone {
     } catch { return false }
   }
 
-  /**
-   * Phase 2 fast path for tile:saved — mutate the single cell's attribute
-   * slices directly and push to GPU. Skips geometry rebuild entirely.
-   * Returns true on success; false if the caller should fall back to the
-   * incremental render path.
-   */
   /** Would this cell's name be hidden right now? True only for a hideText
    *  tile whose image is actually in the atlas (an image that has not
    *  landed yet never hid anything) — and never for the hovered tile,
@@ -12302,7 +12198,7 @@ export class ShowCellDrone extends Drone {
   //
   // While a tile is being edited, its hexagon in the hive shows the edit as it
   // happens: the framing, a new picture or none, the rim colour, whether the
-  // name shows. It is painted the way #tryInPlaceCellUpdate paints a saved
+  // name shows. It is painted the way the drain paints a saved
   // change — attribute writes on one tile, never a render pass — but from the
   // editor's payload, and it is NEVER written into a cache: the caches go on
   // describing what is stored, so ending a preview is a repaint from them.
@@ -12462,87 +12358,6 @@ export class ShowCellDrone extends Drone {
     this.emitEffect('render:name-visibility', { label })
   }
 
-  readonly #tryInPlaceCellUpdate = async (
-    label: string,
-    _ctx: { dir: FileSystemDirectoryHandle | null },
-  ): Promise<boolean> => {
-    const i = this.#labelToIndex.get(label)
-    if (i === undefined) return false
-    const { imageUV, hasImage, borderColor, labelUV } = this.#buf
-    if (!imageUV || !hasImage || !borderColor || !labelUV) return false
-    if (!this.geom || !this.imageAtlas || !this.atlas) return false
-
-    const lineage = this.resolve<any>('lineage')
-    const dir = _ctx.dir ?? (await lineage?.explorerDir?.())
-    if (!dir) return false
-
-    // Force-reload this cell so the loader bypasses the fast path
-    // (which would otherwise serve the stale cached sig — substrate
-    // has just written a new propsSig for this label).
-    const probe: Cell = { q: 0, r: 0, label, external: false }
-    try { await this.loadCellImages([probe], dir, new Set([label])) } catch { return false }
-
-    const sig = this.cellImageCache.get(label) ?? null
-    const imgUV = sig ? (this.imageAtlas.getImageUV(sig) ?? null) : null
-
-    if (imgUV) {
-      this.#writeCellVec4(imageUV, i, imgUV.u0, imgUV.v0, imgUV.u1, imgUV.v1)
-    } else {
-      this.#writeCellVec4(imageUV, i, 0, 0, 0, 0)
-    }
-    this.#writeCellScalar(hasImage, i, imgUV ? 1 : 0)
-
-    const [bcr, bcg, bcb] = this.cellBorderColorCache.get(label) ?? [0.784, 0.592, 0.353]
-    this.#writeCellRgb(borderColor, i, bcr, bcg, bcb)
-
-    // labelUV: collapse to origin when hideText + image so the label is
-    // hidden — unless this is the hovered tile, which is revealing its name,
-    // or text-only mode is on, where no tile hides its name (#hidesName).
-    const ht = this.cellHideTextCache.get(label) ?? false
-    if (this.#hidesName(ht, !!imgUV) && !this.#revealsName(label, this.#hoverRevealLabel)) {
-      this.#writeCellVec4(labelUV, i, 0, 0, 0, 0)
-    } else {
-      const atlasLabel = this.#pendingCellMutations.has(label) && !this.atlas.hasLabel(label)
-        ? PENDING_CELL_LABEL
-        : label
-      const ruv = this.atlas.getLabelUV(atlasLabel)
-      this.#writeCellVec4(labelUV, i, ruv.u0, ruv.v0, ruv.u1, ruv.v1)
-    }
-
-    // Readiness shade follows the fresh image state — brighten (or shade)
-    // in place with the same attribute-only push, and keep the mirrored
-    // inertness set in step.
-    const probeCell = { ...probe, imageSig: sig ?? undefined }
-    const shadedNow = this.#cellIsShaded(probeCell)
-    if (shadedNow) this.#shadedLabels.add(label)
-    else if (this.#shadedLabels.delete(label)) this.#beginShadeFade(label)
-    this.#writeCellScalar(this.#buf.shaded, i, this.#shadeValueFor(probeCell))
-
-    if (!this.#pushBuffer('aImageUV') || !this.#pushBuffer('aHasImage') || !this.#pushBuffer('aBorderColor') || !this.#pushBuffer('aLabelUV') || !this.#pushBuffer('aShaded')) {
-      return false
-    }
-
-    const rec = this.renderedCells.get(label)
-    if (rec) {
-      rec.imageSig = sig ?? undefined
-      rec.borderColor = [bcr, bcg, bcb]
-      rec.hasLink = this.cellLinkCache.get(label) ?? false
-      rec.hasSubstrate = this.cellSubstrateCache.get(label) ?? false
-      rec.hideText = ht
-      const cellsSnapshot = [...this.renderedCells.values()]
-      // One cell's attributes were rewritten, so the cells key may legitimately
-      // be re-stated here. The atlas generations may NOT — every OTHER cell's
-      // label UV is untouched by this path, and claiming a generation it did
-      // not apply is what left tiles with a band and no name inside it.
-      this.renderedCellsKey = this.buildCellsKey(cellsSnapshot)
-      // Shade state may have flipped — refresh tile-overlay's mirrored
-      // sets so click inertness matches what is on screen.
-      this.emitEffect('render:cell-count', this.#buildCellCountPayload(cellsSnapshot))
-    }
-
-    this.#emitRenderTags([...this.renderedCells.values()])
-    return true
-  }
 
   /**
    * Phase 2 fast path for heat — mutate just the heat slice for one cell
