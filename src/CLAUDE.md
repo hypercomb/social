@@ -2,7 +2,7 @@
 
 ## The doctrine codex — the go-to for agents
 
-`documentation/doctrine.codex` is THE artifact: the doctrine in dependency order, base to leaf (identity, store, layer, history, name, pool, artifact, derived, reach, interest, conduct, build), one line per axiom, each citing only earlier axioms. It is what the hive's AI chat is taught (`npm run prepare` in essentials bakes it into the anatomy; the build refuses a codex that breaks its order or names a missing document). Read it first, cite axioms by id (`H2`, `P4`), and when a rule changes, change the codex — the longer `.md` documents carry the argument, the codex carries the rule.
+`documentation/doctrine.codex` is THE artifact: the doctrine in dependency order, base to leaf (identity, store, layer, history, name, pool, artifact, derived, reach, interest, conduct, build, paint), one line per axiom, each citing only earlier axioms. It is what the hive's AI chat is taught (`npm run prepare` in essentials bakes it into the anatomy; the build refuses a codex that breaks its order or names a missing document). Read it first, cite axioms by id (`H2`, `P4`), and when a rule changes, change the codex — the longer `.md` documents carry the argument, the codex carries the rule.
 
 ## Philosophy
 

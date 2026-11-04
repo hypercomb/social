@@ -81,3 +81,11 @@ B4<B1: Doctrine ratchets (doctrine.spec.ts) compare against frozen allowlists: n
 B5<B1: Shell surfaces are registry-fed; never add an hc- tag to app.html. UI text goes through i18n keys.
 B6<B1: Private fields use #name; reactivity is EventTarget plus a change event; ESM only with .js relative imports.
 B7<N6: Documentation lives only in src/documentation. The retired mirror paradigm is not reintroduced.
+@12 Paint [code] ~single-paint.md
+V1<I1,D1: A cell's pixels are a pure function of its paint key: the signatures it shows, its label, its slot, its state. Same key, same pixels; a slot is never rewritten under an unchanged key. Such a repaint is a defect, not a cost.
+V2<V1: Invalidation names cells, never the page. Wiping the page key is legal only on a location or layout-mode change.
+V3<V2,D4: One render owner: one dirty set, drained once per frame; a full pass is dirty-all and still skips unchanged keys. Nothing writes geometry outside the drain.
+V4<V3: Buffers are written per slot and pushed once per drain.
+V5<V2,T2: An arrival is data, not a paint command: it dirties only the cells holding that signature, and arrivals in one frame coalesce. A peer change costs each participant O(changed cells), never O(page).
+V6<V5,A6: Signatures travel first, bytes on miss: diff the new head against what is held, request only missing atoms, once per signature. Paint never waits on a fetch: substrate now, picture when it lands, visible first.
+V7<V1,B4: Page-key wipes and forced renders are frozen per file and only shrink; an unchanged-key repaint is reported by name; a spec asserts one tile change, one slot, one push.

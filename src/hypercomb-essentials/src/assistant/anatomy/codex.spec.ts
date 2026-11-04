@@ -26,8 +26,13 @@ describe('the codex file', () => {
     expect(lines).toHaveLength(parsed)
   })
 
-  it('stays lean: the whole artifact rides every request', () => {
-    expect(text.length).toBeLessThan(12_000)
+  it('stays lean: what rides every request is the taught doctrine, builders\' tiers stay behind', () => {
+    // The chat is taught codexSections(tiers) — the `all`-scope tiers. A
+    // `[code]` tier (Build, Paint) is for the agents that change code and never
+    // rides a hive request, so it is not what this budget protects. Measured
+    // on the whole file the budget was already spent at 12,019 before the
+    // Paint tier existed (2026-11-04).
+    expect(codexSections(tiers).join('\n\n').length).toBeLessThan(12_000)
   })
 })
 
