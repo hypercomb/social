@@ -6,7 +6,7 @@
 //   · SHEEN: one pass per tile per 8 s cycle, east first and clockwise, the
 //     middle last, never two tiles lit at once; capped over the ink so the
 //     label keeps 4.5:1, feathered so the cap has no edge
-//   · BLOOM: the middle first, then 30 ms a tile clockwise, 0.92 → 1 and
+//   · BLOOM: the middle first, then 5 ms a tile clockwise, 0.92 → 1 and
 //     nothing → whole on the stated bezier
 //   · the stylesheet runs all three only while the ring says it may move, and
 //     never under reduced motion
@@ -185,15 +185,14 @@ describe('the light', () => {
 })
 
 describe('the bloom', () => {
-  it('starts with the middle, then 30 ms a tile clockwise from east', () => {
+  it('starts with the middle, then 5 ms a tile clockwise from east', () => {
     expect(bloomDelayMs(0)).toBe(0)
-    expect(QUICK_MENU_RING.map(d => bloomDelayMs(slotIndexOf(d)))).toEqual([30, 60, 90, 120, 150, 180])
+    expect(QUICK_MENU_RING.map(d => bloomDelayMs(slotIndexOf(d)))).toEqual([5, 10, 15, 20, 25, 30])
   })
 
-  it('eases from 0.92 and nothing to whole over 260 ms, and only gets fuller', () => {
+  it('eases from 0.92 and nothing to whole over 140 ms, and only gets fuller', () => {
     expect(bloomPose(0, 0)).toEqual({ scale: BLOOM.fromScale, opacity: 0 })
-    expect(bloomPose(30, 1)).toEqual({ scale: BLOOM.fromScale, opacity: 0 })
-    expect(bloomPose(BLOOM.durationMs, 0)).toEqual({ scale: 1, opacity: 1 })
+        expect(bloomPose(BLOOM.durationMs, 0)).toEqual({ scale: 1, opacity: 1 })
     let before = bloomPose(0, 3)
     for (let ms = 0; ms <= 600; ms += 5) {
       const pose = bloomPose(ms, 3)
