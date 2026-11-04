@@ -632,8 +632,8 @@ const LAUNCHER_CSS = `
 .ln-tile{display:flex;flex-direction:column;align-items:center;gap:.35rem;min-width:0;padding:0;border:0;background:none;color:inherit;cursor:pointer}
 .ln-tile:active .ln-plate{transform:scale(.92)}
 .ln-plate{position:relative;display:grid;place-items:center;overflow:hidden;background:hsl(var(--hue,200),32%,30%);box-shadow:inset 0 0 0 1px rgba(126,182,214,.22)}
-.hc-launcher[data-style="icons"] .ln-plate{width:3.4rem;height:3.4rem;border-radius:.8rem}
-.hc-launcher[data-style="square"] .ln-plate{width:100%;aspect-ratio:1;border-radius:.7rem}
+.hc-launcher[data-style="icons"] .ln-plate{width:3.4rem;height:3.4rem;border-radius:4px}
+.hc-launcher[data-style="square"] .ln-plate{width:100%;aspect-ratio:1;border-radius:4px}
 .ln-plate img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .ln-letter{font:600 1.15rem/1 system-ui,sans-serif;color:rgba(248,252,255,.94)}
 .ln-plate[data-ready] .ln-letter{opacity:0}
