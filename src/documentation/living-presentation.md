@@ -784,6 +784,18 @@ words, the voice, the figures and the look of every page.
   in Japanese, and an agent's lines waiting for Enter. The pictures of a
   lived-in hive (picture tiles, a layer, a website, the tile editor, chat,
   a long history, the tutorials) were taken by hand in the author's own hive.
+- **Real tiles, never the demo hive** (2026-11-03, jwize: "you have stock
+  garbage default images in the presentation"). The tour's four live clips
+  were filmed in a demo hive of example postcards, and some tiles in the
+  author's hive carry placeholder or stock art. `blocks/tiles.cjs` takes
+  tiles out of the author's hive over the bridge: each one's own picture,
+  border colour and name, into `blocks/tiles/`. `blocks/hive-figure.cjs` draws
+  them as tiles again, in the hive's staggered rows. A scene the tour filmed
+  in its demo hive shows them instead (`figures` in `content.cjs`, by scene
+  number), with the scene's words changed only where they describe the clip,
+  voiced the tour's way. The "In the hive" part can show extracted tiles too.
+  Pictures with a stock watermark, another company's branding, or other
+  people's faces are left out.
 - **Every medium is named by its signature.** The voice, the clips, the faces
   and the pictures are written into a page as `resource:<sig>`. The website
   view rewrites that to `/@resource/<sig>`, and the publish closure carries it

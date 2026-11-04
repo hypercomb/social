@@ -4,7 +4,7 @@
 // says — no headline, no narration, no figure — and build.cjs refuses one that
 // would. It may add only what the scene does not:
 //
-//   live          pictures taken in a running hive: [{ shot, title, caption, alt }]
+//   live          pictures taken in a running hive: [{ shot | tiles, title, caption, alt }]
 //                 (blocks/captures/<shot>.webp: captures.cjs stages the ones a
 //                 sentence can show in an empty hive; the pictures of a lived-in
 //                 hive were taken by hand in the author's own, in Edge)
@@ -13,6 +13,11 @@
 //                 (`from` is the first line's text, so an excerpt follows the code)
 //   files         the documents and source the block explains, attached to its
 //                 tile as included files (paths from src/)
+//   figures       by scene number: the real hive in place of a clip the tour
+//                 filmed in its demo hive — { tiles: [route...] } taken out of
+//                 the author's hive (blocks/tiles.cjs) or { shot } a capture,
+//                 with a title, and `say` where the tour's words describe the
+//                 clip (voiced by blocks/narrate.cjs)
 //
 // A tile no scene explains speaks in the tour's voice, in the same parts:
 //
@@ -33,18 +38,22 @@ module.exports = {
   // ── the top: scenes 1 and 2 open it, 20 to 25 close it ─────────────────
 
   'presentation': {
-    live: [
-      { shot: 'presentation-in-your-hive', title: 'the presentation, as tiles', caption: 'The six values as hexagons in the hive this presentation was written in, beside the pictures it is still collecting. Every page here is one of these tiles, opened.' },
-    ],
+    figures: {
+      24: { tiles: ['knowledge/pheromone-workflow', 'knowledge/ai-inside', 'knowledge/camelflage'], title: 'three tiles from a hive in use' },
+    },
     files: ['documentation/living-presentation.md'],
   },
 
   // ── simple ─────────────────────────────────────────────────────────────
 
   'presentation/simple': {
-    live: [
-      { shot: 'hive-of-pictures', title: 'a hive of picture tiles', caption: 'A hive in use: every hexagon a tile, most of them wearing a picture, each one a word you can step into.' },
-    ],
+    figures: {
+      3: {
+        tiles: ['revolucion', 'knowledge', 'room-host', 'scratch-organize', 'play', 'work', 'misc', 'behavior-where-visual'],
+        title: 'tiles from a hive in use',
+        say: 'Here is what it looks like. Your work lives on a grid of cells, called tiles. A tile can hold anything: a picture, a note, a document, a game, a whole website. Open a tile and you travel into it, and every tile can open into a honeycomb of its own. These tiles come from a hive in use: a cigar journal, a library of knowledge, a room for hosting, each one a honeycomb of its own. Cells inside cells, all the way down.',
+      },
+    },
     code: [{ path: 'hypercomb-core/src/core/life-primitive.ts', from: 'export type LifeLayer = {', lines: 5 }],
     files: ['documentation/life-primitive.md', 'documentation/the-algorithm-is-the-application.md'],
   },
@@ -95,7 +104,7 @@ module.exports = {
     sub: 'Every tile can hold a layer of its own.',
     plate: 'layer-and-versions',
     live: [
-      { shot: 'a-layer-of-pictures', title: 'a layer', caption: 'The words under one word, laid out as picture tiles. Each of them can hold a layer of its own.' },
+      { tiles: ['humanity-centres', 'humanity-centres/participants', 'humanity-centres/places', 'humanity-centres/purse'], title: 'a layer', caption: 'Humanity centres and the words under it, taken out of a hive in use. Each of them can hold a layer of its own.' },
     ],
     beats: [
       { say: 'A layer is a name and the words under it.', lit: ['name', 'c1', 'c2', 'c3', 'name-c1', 'name-c2', 'name-c3'] },
@@ -129,6 +138,12 @@ module.exports = {
   },
 
   'presentation/simple/act': {
+    figures: {
+      10: {
+        tiles: ['revolucion', 'revolucion/journal', 'revolucion/experience', 'revolucion/cigars', 'revolucion/flavor-wheel', 'revolucion/discovery', 'revolucion/community', 'revolucion/insights', 'revolucion/collaborations', 'revolucion/humidor', 'revolucion/mission', 'revolucion/lounge', 'revolucion/store', 'revolucion/meetup', 'revolucion/wholesale'],
+        title: 'revolucion, and the names typed under it',
+      },
+    },
     live: [
       { shot: 'a-tile-and-its-acts', title: 'a tile and its acts', caption: 'Hover a tile and its acts appear: shelf, edit, website, notes, link, remove. Each is also a word you can type.' },
     ],
@@ -397,6 +412,9 @@ module.exports = {
   },
 
   'presentation/collaborative/publishing': {
+    figures: {
+      17: { tiles: ['work/domains', 'knowledge/replication', 'knowledge/diagrams', 'knowledge/behaviors'], title: 'domains, replication, the shared pieces' },
+    },
     code: [{ path: 'hypercomb-essentials/src/sharing/hive-pointer.ts', from: '// Client for the per-publisher hive index', lines: 12 }],
     files: ['documentation/read-only-deployment.md', 'documentation/deployment-stages.md', 'documentation/derivations.md', 'hypercomb-essentials/src/sharing/hive-pointer.ts'],
   },

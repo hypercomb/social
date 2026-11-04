@@ -61,8 +61,10 @@ const sceneOf = (n) => {
   return s
 }
 
-/** One scene, ready for a page: its parts as HTML, its caption, its voice. */
-const sceneParts = (n, media) => {
+/** One scene, ready for a page: its parts as HTML, its caption, its voice.
+ *  `figure`, when given, draws the scene's figure instead of the tour's own,
+ *  so a clip the page does not show is never carried with it. */
+const sceneParts = (n, media, figure = null) => {
   const s = sceneOf(n)
   const voice = T.cachePath(s.say)
   if (!voice) throw new Error(`scene ${n} has no recorded voice for its current words — run node scripts/presentation/build.cjs`)
@@ -72,7 +74,7 @@ const sceneParts = (n, media) => {
     name: T.plain(s.headline).replace(/[.]$/, ''),
     eyebrow: T.esc(T.smart(s.eyebrow)),
     headline: T.emph(s.headline),
-    figure: T.visualHtml(s, { clipSrc: clip }),
+    figure: figure ? figure() : T.visualHtml(s, { clipSrc: clip }),
     sub: s.sub ? T.emph(s.sub) : '',
     link: s.link ? { href: s.link.href, label: T.smart(s.link.label) } : null,
     caption: T.captionOf(s.say),
