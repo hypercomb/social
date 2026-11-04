@@ -242,7 +242,12 @@ export class TileNameDrone extends Drone {
     this.onEffect<{ pivot: boolean }>('render:set-pivot', (p) => { this.#pivot = p.pivot; this.#placeAll() })
     this.onEffect('render:set-text-only', () => this.#refreshAll())
     // A live edit (the tile editor's preview) changed whether a name shows.
-    this.onEffect('render:name-visibility', () => this.#refreshAll())
+    // A tile's name changed, or whether it shows: that one name re-asks. A
+    // payload without a label (the editor's mode flips) is every name.
+    this.onEffect<{ label?: string } | undefined>('render:name-visibility', (p) => {
+      if (typeof p?.label === 'string' && p.label) this.#placeOne(p.label)
+      else this.#refreshAll()
+    })
     // Image only states its mode (`{ imageOnly }`, image-only.queen.ts); a
     // bare emit still flips.
     this.onEffect<{ imageOnly?: boolean } | undefined>('tile:toggle-text', (p) => {
@@ -265,7 +270,15 @@ export class TileNameDrone extends Drone {
       this.#syncRoot()
     })
     this.onEffect<{ cells?: FlowerCell[] | null }>('render:flower', (p) => this.#setFlower(p?.cells ?? []))
-    this.onEffect<HoverPayload>('tile:hover', (p) => { this.#hovered = p?.label ?? null; this.#refreshAll() })
+    // Hover moving from A to B re-places A and B — the only two names whose
+    // holder count can change — and no others (single-paint.md).
+    this.onEffect<HoverPayload>('tile:hover', (p) => {
+      const previous = this.#hovered
+      this.#hovered = p?.label ?? null
+      if (previous === this.#hovered) return
+      this.#placeOne(previous)
+      this.#placeHovered()
+    })
     // Depths belong to a page: arriving somewhere else drops them, so a count
     // from the last page never lands on a same-named tile of this one.
     this.onEffect<TileStackDepths>(TILE_STACK_DEPTHS, (p) => { this.#depths = p?.depths ?? {}; this.#placeHovered() })
@@ -603,8 +616,10 @@ export class TileNameDrone extends Drone {
 
   /** Only the hovered name can carry a holder count, so a depth update
    *  repaints that one name and nothing else. */
-  #placeHovered(): void {
-    const label = this.#hovered
+  #placeHovered(): void { this.#placeOne(this.#hovered) }
+
+  /** One name, re-placed: text, visibility and position for that label alone. */
+  #placeOne(label: string | null): void {
     if (label === null) return
     const axial = this.#cells.get(label)
     const span = this.#spans.get(label)

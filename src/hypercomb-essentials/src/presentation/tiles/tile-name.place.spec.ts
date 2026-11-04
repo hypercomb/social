@@ -130,6 +130,33 @@ describe('TileNameDrone places only the names that moved', () => {
     expect(root.querySelectorAll('.hc-dive-name')).toHaveLength(0)
   })
 
+  it('hover moving from A to B re-places names A and B only (single-paint.md)', () => {
+    const asked: string[] = []
+    services.set('@diamondcoreprocessor.com/ShowCellDrone', {
+      nameHidden: () => false,
+      displayNameFor: (label: string) => { asked.push(label); return label },
+      shaderDrawsName: () => false,
+    })
+    EffectBus.emit('render:cell-count', page(60))
+    asked.length = 0
+    EffectBus.emit('tile:hover', { label: 't4' })
+    expect(asked).toEqual(['t4'])
+    asked.length = 0
+    EffectBus.emit('tile:hover', { label: 't9' })
+    expect(asked.sort()).toEqual(['t4', 't9'])
+    asked.length = 0
+    // The same hover again asks nothing.
+    EffectBus.emit('tile:hover', { label: 't9' })
+    expect(asked).toEqual([])
+    // Leaving the hive re-places the one name that was hovered.
+    EffectBus.emit('tile:hover', { label: null })
+    expect(asked).toEqual(['t9'])
+    // A single tile's name change re-asks for that tile alone.
+    asked.length = 0
+    EffectBus.emit('render:name-visibility', { label: 't2' })
+    expect(asked).toEqual(['t2'])
+  })
+
   it('a name that was hidden and shows again keeps its place without a write', () => {
     let hidden = false
     services.set('@diamondcoreprocessor.com/ShowCellDrone', {
