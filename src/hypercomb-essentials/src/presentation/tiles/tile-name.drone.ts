@@ -40,6 +40,7 @@ import type { Application, Container } from 'pixi.js'
 import { DEFAULT_HEX_GEOMETRY, type HexGeometry } from '../grid/hex-geometry.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import { TILE_STACK_DEPTHS, type TileStackDepths } from './tile-stack.js'
+import { BLOOM, BLOOM_EASE_CSS, BLOOM_TOTAL_MS, bloomDelayMs, flowerRingKey, flowerSlots } from './flower-motion.js'
 
 type Axial = { q: number; r: number }
 type CellCountPayload = { count: number; labels: string[]; coords: Axial[] }
@@ -47,7 +48,7 @@ type BandRowsPayload = { rows: number; label: string | null }
 type HoverPayload = { label: string | null }
 /** What a dive's name needs (show-cell's DiveCell). */
 type DiveNameCell = { q: number; r: number; label: string; hideText?: boolean }
-type FlowerCell = Axial & { label: string; subject?: boolean; icon?: string; lit?: boolean; note?: string }
+type FlowerCell = Axial & { label: string; subject?: boolean; icon?: string; lit?: boolean; note?: string; honey?: boolean; back?: boolean }
 type ShowCellLike = {
   nameHidden(label: string): boolean
   displayNameFor(label: string): string
@@ -107,6 +108,42 @@ const NAME_WEIGHT = 400
  *  (hex-sdf, vPresence), so the number and the wax read as one cue. */
 const HOLDERS_INK = '#f7d180'
 
+// THE QUICK MENU'S HONEY OPTIONS (hex-sdf honeyTile) set a glyph and a word apart
+// on the tile, in the inks the shader wears: cream on rest honey, near-black on
+// lit honey, a dimmer cream on the crystallised way back. Plain fill: no halo,
+// outline or shadow on either (the hard rule of the SDF names holds here too).
+const HONEY_INK = '#fff1cf'
+const HONEY_INK_LIT = '#1a1003'
+const HONEY_INK_BACK = '#e6d4a8'
+const HONEY_TRACKING = 0.02
+/** The tile's circumradius over the apothem the geometry reports as `circumRadiusPx`. */
+const APOTHEM = 0.8660254
+/** All lengths below are fractions of R, the tile's circumradius (the shader's
+ *  keep-outs: the glyph owns |x| < 0.33 R above +0.09 R, the word |x| < 0.72 R
+ *  from +0.17 R down, and the drips stay out of both). */
+const HONEY_ICON_R = 0.52
+const HONEY_ICON_Y_R = -0.20
+const HONEY_LABEL_R = 0.25
+const HONEY_LABEL_Y_R = 0.32
+/** A word is set at HONEY_LABEL_R, or smaller to fit this width, never below the floor. */
+const HONEY_LABEL_FIT_R = 1.41
+const HONEY_LABEL_FLOOR_R = 0.196
+/** A word with no glyph stands alone, as the ring sets it (13 px at R = 46, baseline
+ *  +4.5, which is the middle of the tile) and may take the ring's wider 70 px. */
+const HONEY_TEXT_ONLY_R = 13 / 46
+const HONEY_TEXT_ONLY_Y_R = 0
+const HONEY_TEXT_ONLY_FIT_R = 70 / 46
+/** A glyph under this many screen px is dropped; the word stays. */
+const HONEY_ICON_MIN_PX = 11
+
+// THE BLOOM (flower-motion.ts): when the quick menu's ring opens, each name eases
+// in with its tile, from BLOOM.fromScale and nothing, about the TILE's centre, not the
+// span's own. The span is transformed from the world origin (transform-origin
+// 0 0), so scaling about the tile centre c is scale(s) after translate(c(1 - s)),
+// and both interpolate on the same curve: (1 - s) = (1 - fromScale)(1 - e).
+/** How far the tile's centre is pulled in at the start, as a CSS number. */
+const BLOOM_OPEN = Number((1 - BLOOM.fromScale).toFixed(4))
+
 const STYLE = `
 .hc-tile-names{position:absolute;left:0;top:0;overflow:hidden;pointer-events:none;user-select:none;z-index:1}
 .hc-tile-names-world{position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0}
@@ -125,6 +162,13 @@ const STYLE = `
 .hc-flower-note{flex:none;margin-left:.45em;font-size:.6em;letter-spacing:0;color:var(--hc-accent,#d9a441)}
 .hc-flower-icon{font-size:2.4em;line-height:1;opacity:.82}
 .hc-flower-icon.lit{opacity:1;color:var(--hc-accent,#d9a441)}
+.hc-tile-names-world>span.hc-flower-name.hc-honey{color:${HONEY_INK};letter-spacing:${HONEY_TRACKING}em;text-transform:none}
+.hc-tile-names-world>span.hc-flower-name.hc-honey.lit{color:${HONEY_INK_LIT}}
+.hc-tile-names-world>span.hc-flower-name.hc-honey.back{color:${HONEY_INK_BACK}}
+.hc-tile-names-world>span.hc-flower-name.hc-honey .hc-flower-icon{font-size:1em;opacity:1;color:inherit}
+@keyframes hc-flower-bloom{from{opacity:0;scale:${BLOOM.fromScale};translate:calc(var(--hc-bloom-x) * ${BLOOM_OPEN}) calc(var(--hc-bloom-y) * ${BLOOM_OPEN})}to{opacity:1;scale:1;translate:0 0}}
+.hc-tile-names-world>span.hc-flower-name.hc-bloom{animation:hc-flower-bloom ${BLOOM.durationMs}ms ${BLOOM_EASE_CSS} both}
+@media (prefers-reduced-motion:reduce){.hc-tile-names-world>span.hc-flower-name.hc-bloom{animation:none}}
 `
 
 export class TileNameDrone extends Drone {
@@ -156,6 +200,15 @@ export class TileNameDrone extends Drone {
   /** The quick menu's flower: its tiles' names, and the cells they cover. */
   #flower: FlowerCell[] = []
   #flowerSpans: HTMLSpanElement[] = []
+  /** The honey options' glyphs among them: dropped when the tile is too small to hold one. */
+  #flowerIcons: HTMLSpanElement[] = []
+  /** The ring that last bloomed ('' none), and when (performance.now): a
+   *  highlight repaints the names but never blooms them again. */
+  #flowerRing = ''
+  #flowerBloomAt = -Infinity
+  /** Width of a word in em at the name face, by face and word (see #honeyLabelEm). */
+  #wordEm = new Map<string, number>()
+  #measure: CanvasRenderingContext2D | null | undefined
   #cells = new Map<string, Axial>()
   #meshOffset = { x: 0, y: 0 }
   #geo: HexGeometry = DEFAULT_HEX_GEOMETRY
@@ -225,7 +278,7 @@ export class TileNameDrone extends Drone {
     })
 
     // Fallback metrics measure wrong until the face arrives; re-fit then.
-    document.fonts?.load(`${NAME_WEIGHT} ${LAYOUT_PX}px 'Source Sans 3'`).then(() => this.#placeAll()).catch(() => { /* face optional */ })
+    document.fonts?.load(`${NAME_WEIGHT} ${LAYOUT_PX}px 'Source Sans 3'`).then(() => { this.#wordEm.clear(); this.#placeAll() }).catch(() => { /* face optional */ })
   }
 
   protected override dispose(): void {
@@ -302,6 +355,7 @@ export class TileNameDrone extends Drone {
     if (m.a === l[0] && m.b === l[1] && m.c === l[2] && m.d === l[3] && m.tx === l[4] && m.ty === l[5]) return
     this.#last = [m.a, m.b, m.c, m.d, m.tx, m.ty]
     this.#world.style.transform = `matrix(${m.a},${m.b},${m.c},${m.d},${m.tx},${m.ty})`
+    this.#fitFlowerIcons()
   }
 
   // ── cells ──────────────────────────────────────────────────────────
@@ -323,39 +377,164 @@ export class TileNameDrone extends Drone {
    *  the same place, over the cells they cover. The rest of the hive's names
    *  fall back with the rest of the hive. */
   #setFlower(cells: FlowerCell[]): void {
+    // Read once, before any span is added or removed, so the style is clean: the
+    // word measure below must not ask for it again after each appended span.
+    const family = cells.some(c => c.honey && !c.subject) ? this.#nameFamily() : FONT_STACK
     this.#flower = cells
     for (const span of this.#flowerSpans) span.remove()
     this.#flowerSpans = []
+    this.#flowerIcons = []
     this.#root?.classList.toggle('hc-flower-up', cells.length > 0)
+    const slots = this.#flowerBloomSlots(cells)
     const sc = this.#showCell()
-    for (const cell of cells) {
-      // A name the tile keeps to itself stays unwritten, but the note says how
-      // many tiles the menu speaks for and must always be read.
-      const nameless = !!cell.subject && !!sc?.nameHidden(cell.label)
-      if (nameless && !cell.note) continue
-      const span = document.createElement('span')
-      span.className = 'hc-flower-name'
-      if (!nameless) {
-        const name = document.createElement('span')
-        name.className = 'hc-tile-name-text'
-        name.textContent = cell.icon ?? (cell.subject ? sc?.displayNameFor(cell.label) ?? cell.label : cell.label)
-        if (cell.icon) name.className = cell.lit ? 'hc-flower-icon mat-sym lit' : 'hc-flower-icon mat-sym'
-        span.appendChild(name)
-      }
-      if (cell.note) {
-        const note = document.createElement('span')
-        note.className = 'hc-flower-note'
-        note.textContent = cell.note
-        span.appendChild(note)
-      }
-      const px = this.#axialToPixel(cell.q, cell.r)
-      const at = this.#placement(px.x + this.#meshOffset.x, px.y + this.#meshOffset.y)
-      span.style.maxWidth = at.maxWidth
-      span.style.transform = at.transform
+    for (const [i, cell] of cells.entries()) {
+      const from = this.#flowerSpans.length
+      this.#flowerCell(cell, family, sc)
+      // the subject is the tile the menu opened on, already showing: it never blooms
+      if (slots && !cell.subject) this.#bloomSpans(this.#flowerSpans.slice(from), cell, slots[i])
+    }
+    this.#fitFlowerIcons()
+    this.#placeAll()
+  }
+
+  /** The quick menu's ring blooms when it opens (flower-motion.ts): the slots its
+   *  names ease in by, or null when nothing blooms — no honey, reduced motion, a
+   *  hidden tab, or a repaint of a ring whose bloom is over. A repaint during the
+   *  bloom (a highlight) keeps it going where it is. */
+  #flowerBloomSlots(cells: FlowerCell[]): number[] | null {
+    const still = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const ring = !still && cells.some(c => c.honey && !c.subject) ? flowerRingKey(cells) : ''
+    if (ring !== this.#flowerRing) {
+      this.#flowerRing = ring
+      this.#flowerBloomAt = ring && !document.hidden ? performance.now() : -Infinity
+    }
+    if (!ring || performance.now() - this.#flowerBloomAt >= BLOOM_TOTAL_MS) return null
+    return flowerSlots(cells.map(c => ({ ...this.#axialToPixel(c.q, c.r), subject: !!c.subject })), this.#flat)
+  }
+
+  /** Ease a tile's names in with it: about the tile's centre, from its slot's
+   *  moment, already as far along as the bloom is. */
+  #bloomSpans(spans: HTMLSpanElement[], cell: FlowerCell, slot: number): void {
+    const px = this.#axialToPixel(cell.q, cell.r)
+    const delay = bloomDelayMs(slot) - (performance.now() - this.#flowerBloomAt)
+    for (const span of spans) {
+      span.style.setProperty('--hc-bloom-x', `${px.x + this.#meshOffset.x}px`)
+      span.style.setProperty('--hc-bloom-y', `${px.y + this.#meshOffset.y}px`)
+      span.style.animationDelay = `${delay}ms`
+      span.classList.add('hc-bloom')
+    }
+  }
+
+  /** One flower tile's names. */
+  #flowerCell(cell: FlowerCell, family: string, sc: ShowCellLike | null): void {
+    if (cell.honey && !cell.subject) { this.#honeyName(cell, family); return }
+    // A name the tile keeps to itself stays unwritten, but the note says how
+    // many tiles the menu speaks for and must always be read.
+    const nameless = !!cell.subject && !!sc?.nameHidden(cell.label)
+    if (nameless && !cell.note) return
+    const span = document.createElement('span')
+    span.className = 'hc-flower-name'
+    if (!nameless) {
+      const name = document.createElement('span')
+      name.className = 'hc-tile-name-text'
+      name.textContent = cell.icon ?? (cell.subject ? sc?.displayNameFor(cell.label) ?? cell.label : cell.label)
+      if (cell.icon) name.className = cell.lit ? 'hc-flower-icon mat-sym lit' : 'hc-flower-icon mat-sym'
+      span.appendChild(name)
+    }
+    if (cell.note) {
+      const note = document.createElement('span')
+      note.className = 'hc-flower-note'
+      note.textContent = cell.note
+      span.appendChild(note)
+    }
+    const px = this.#axialToPixel(cell.q, cell.r)
+    const at = this.#placement(px.x + this.#meshOffset.x, px.y + this.#meshOffset.y)
+    span.style.maxWidth = at.maxWidth
+    span.style.transform = at.transform
+    this.#world?.appendChild(span)
+    this.#flowerSpans.push(span)
+  }
+
+  /** A honey option: its glyph above its word, two things set apart, each sized
+   *  to the tile — never one span, so the word stays when the glyph does not fit.
+   *  R is the tile's true circumradius; the geometry's `circumRadiusPx` is the
+   *  apothem. They are not rotated with the pivot: the honey is not. */
+  #honeyName(cell: FlowerCell, family: string): void {
+    const R = this.#geo.circumRadiusPx / APOTHEM
+    const textOnly = !cell.icon
+    const px = this.#axialToPixel(cell.q, cell.r)
+    const x = px.x + this.#meshOffset.x
+    const y = px.y + this.#meshOffset.y
+    const className = `hc-flower-name hc-honey${cell.lit ? ' lit' : ''}${cell.back ? ' back' : ''}`
+    const fitR = textOnly ? HONEY_TEXT_ONLY_FIT_R : HONEY_LABEL_FIT_R
+    const set = (span: HTMLSpanElement, at: number, em: number): void => {
+      // #placement bounds a span in the geometry's own radius, the apothem
+      const placed = this.#placement(x, y + at * R, em, fitR / APOTHEM, false)
+      span.className = className
+      span.style.maxWidth = placed.maxWidth
+      span.style.transform = placed.transform
       this.#world?.appendChild(span)
       this.#flowerSpans.push(span)
     }
-    this.#placeAll()
+    if (cell.icon) {
+      const span = document.createElement('span')
+      const glyph = document.createElement('span')
+      glyph.className = 'hc-flower-icon mat-sym'
+      glyph.setAttribute('aria-hidden', 'true')
+      glyph.textContent = cell.icon
+      span.appendChild(glyph)
+      set(span, HONEY_ICON_Y_R, HONEY_ICON_R * R)
+      this.#flowerIcons.push(span)
+    }
+    if (cell.label) {
+      const span = document.createElement('span')
+      const word = document.createElement('span')
+      word.className = 'hc-tile-name-text'
+      word.textContent = cell.label
+      span.appendChild(word)
+      set(span, textOnly ? HONEY_TEXT_ONLY_Y_R : HONEY_LABEL_Y_R, this.#honeyLabelEm(cell.label, R, family, textOnly))
+    }
+  }
+
+  /** The em a word is set in: its size, shrunk to fit the tile's width, never
+   *  below the floor (past it the span's ellipsis takes over). Under a glyph the
+   *  word is 0.25 R; alone it is the ring's text-only size. */
+  #honeyLabelEm(text: string, R: number, family: string, textOnly: boolean): number {
+    const size = textOnly ? HONEY_TEXT_ONLY_R : HONEY_LABEL_R
+    const fitR = textOnly ? HONEY_TEXT_ONLY_FIT_R : HONEY_LABEL_FIT_R
+    const fit = (fitR * R) / Math.max(this.#wordWidthEm(text, family), 1e-3)
+    return Math.max(HONEY_LABEL_FLOOR_R * R, Math.min(size * R, fit))
+  }
+
+  /** The face the names are set in (the page's own variable, else the stack). */
+  #nameFamily(): string {
+    return this.#root ? getComputedStyle(this.#root).getPropertyValue('--hc-tile-name-font').trim() || FONT_STACK : FONT_STACK
+  }
+
+  /** A word's width in em, measured once per face and word on a canvas. */
+  #wordWidthEm(text: string, family: string): number {
+    const key = `${family}|${text}`
+    let em = this.#wordEm.get(key)
+    if (em === undefined) {
+      if (this.#measure === undefined) this.#measure = document.createElement('canvas').getContext('2d')
+      let width = text.length * 0.6 * LAYOUT_PX
+      if (this.#measure) {
+        this.#measure.font = `${NAME_WEIGHT} ${LAYOUT_PX}px ${family}`
+        width = this.#measure.measureText(text).width
+      }
+      em = width / LAYOUT_PX + text.length * HONEY_TRACKING
+      this.#wordEm.set(key, em)
+    }
+    return em
+  }
+
+  /** Drop a honey glyph that would be under HONEY_ICON_MIN_PX on screen, bring
+   *  it back when the tile is larger. The word is never dropped. */
+  #fitFlowerIcons(): void {
+    if (this.#flowerIcons.length === 0) return
+    const R = this.#geo.circumRadiusPx / APOTHEM
+    const hidden = HONEY_ICON_R * R * (this.#container?.worldTransform.a ?? 1) < HONEY_ICON_MIN_PX
+    for (const span of this.#flowerIcons) if (span.hidden !== hidden) span.hidden = hidden
   }
 
   /** A dive's tiles are tiles, so their names are names: the same text in the
@@ -462,7 +641,14 @@ export class TileNameDrone extends Drone {
     span.style.transform = transform
   }
 
-  #placement(x: number, y: number): { maxWidth: string; transform: string } {
+  /** `em`, `widthR` and `pivot` are for the honey options, which set their own
+   *  size and bound (the flower's names keep the hive's one size otherwise). */
+  #placement(
+    x: number, y: number,
+    em = this.#bigHead ? BIG_HEAD_EM : NAME_EM,
+    widthR = MAX_WIDTH_R,
+    pivot = this.#pivot,
+  ): { maxWidth: string; transform: string } {
     const R = this.#geo.circumRadiusPx
 
     // ONE SIZE, ONE LINE, ALWAYS. A name is never shrunk to fit and never
@@ -470,12 +656,11 @@ export class TileNameDrone extends Drone {
     // tile decide how its name is set, and the whole point is that every name
     // on the hive wears the same alphabet. A name longer than its tile simply
     // runs wider; nothing about its letters changes.
-    const em = this.#bigHead ? BIG_HEAD_EM : NAME_EM
     const scale = em / LAYOUT_PX
     // Cut, never spill. maxWidth is in the span's own layout units, so it is
     // the world bound divided back through the scale the span is drawn at.
-    const maxWidth = `${(MAX_WIDTH_R * R) / scale}px`
-    const rotate = this.#pivot ? ' rotate(90deg)' : ''
+    const maxWidth = `${(widthR * R) / scale}px`
+    const rotate = pivot ? ' rotate(90deg)' : ''
     const transform = `translate(${x}px,${y}px)${rotate} scale(${scale}) translate(-50%,-50%)`
     return { maxWidth, transform }
   }

@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { createRequire } from 'node:module'
-import { readdirSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const require_ = createRequire(import.meta.url)
@@ -103,10 +103,33 @@ describe('every plate stays inside its frame', () => {
   })
 })
 
+type Figure = { shot?: string; tiles?: string[] }
+type Shown = { live?: Figure[]; figures?: Record<string, Figure> }
+const blocksShown = Object.values(content as Record<string, Shown>)
+const figuresShown = blocksShown.flatMap(b => [...Object.values(b.figures || {}), ...(b.live || [])])
+
 describe('every picture is on a page', () => {
   it('leaves nothing in captures/ that no page shows', () => {
-    const shown = new Set(Object.values(content as Record<string, { live?: { shot: string }[] }>).flatMap(b => (b.live || []).map(l => l.shot)))
+    const shown = new Set([
+      ...figuresShown.flatMap(f => f.shot ? [f.shot] : []),
+    ])
     const kept = readdirSync(join(__dirname, 'captures')).map(f => f.replace(/\.(webp|png)$/, ''))
     expect(kept.filter(k => !shown.has(k))).toEqual([])
+  })
+
+  it('leaves no tile taken out of the hive that no page shows, and shows only tiles taken out', () => {
+    const index = JSON.parse(readFileSync(join(__dirname, 'tiles', 'tiles.json'), 'utf8')) as Record<string, { file: string }>
+    const shown = new Set(figuresShown.flatMap(f => f.tiles || []))
+    expect(Object.keys(index).filter(route => !shown.has(route))).toEqual([])
+    expect([...shown].filter(route => !index[route])).toEqual([])
+    const files = readdirSync(join(__dirname, 'tiles')).filter(f => f.endsWith('.webp'))
+    expect(files.filter(f => !Object.values(index).some(t => t.file === f))).toEqual([])
+  })
+})
+
+describe('no page shows the demo hive', () => {
+  it('carries none of the tour\'s clips filmed in its demo hive', () => {
+    const demo = ['hive-navigate.mp4', 'hive-zoom.mp4', 'hive-children.mp4', 'hive-create.mp4']
+    expect(media.map((m: { name: string }) => m.name).filter((n: string) => demo.includes(n))).toEqual([])
   })
 })

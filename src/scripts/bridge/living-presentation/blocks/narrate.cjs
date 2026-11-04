@@ -14,8 +14,11 @@ const content = require('./content.cjs')
 const tour = require('./tour.cjs')
 
 const lines = Object.entries(content)
-  .filter(([route]) => !tour.stagesOf(route).length)
-  .flatMap(([route, block]) => (block.beats || []).map((beat, i) => ({ say: beat.say, n: `${route.split('/').pop()} ${i + 1}`, name: route })))
+  .flatMap(([route, block]) => [
+    ...(block.beats || []).map((beat, i) => ({ say: beat.say, n: `${route.split('/').pop()} ${i + 1}`, name: route })),
+    // a scene shown with a real hive, in words for that picture
+    ...Object.entries(block.figures || {}).filter(([, f]) => f.say).map(([n, f]) => ({ say: f.say, n: `scene ${n}`, name: route })),
+  ])
 
 const unique = [...new Map(lines.map(l => [tour.T.hashOf(l.say), l])).values()]
 

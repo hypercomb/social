@@ -68,15 +68,15 @@ const ROOT: QuickMenuDefinition = {
   slots: [
     // Release without moving: the command line, which is both "make" and
     // "find" here — typing a name creates it or goes to it.
-    { direction: 'centre', label: 'command', labelKey: 'quickmenu.command', action: { kind: 'effect', effect: 'command:focus', payload: { cell: '' } } },
-    { direction: 'east', label: 'collections', labelKey: 'quickmenu.collections', action: { kind: 'command', command: 'collections' } },
-    { direction: 'southeast', label: 'tags', labelKey: 'quickmenu.tags', action: { kind: 'command', command: 'tags' } },
-    { direction: 'southwest', label: 'history', labelKey: 'quickmenu.history', action: { kind: 'command', command: 'history' } },
-    { direction: 'west', label: 'tree', labelKey: 'quickmenu.tree', action: { kind: 'command', command: 'tree' } },
-    { direction: 'northwest', label: 'help', labelKey: 'quickmenu.help', action: { kind: 'command', command: 'help' } },
+    { direction: 'centre', label: 'command', labelKey: 'quickmenu.command', icon: 'terminal', action: { kind: 'effect', effect: 'command:focus', payload: { cell: '' } } },
+    { direction: 'east', label: 'collections', labelKey: 'quickmenu.collections', icon: 'folder_open', action: { kind: 'command', command: 'collections' } },
+    { direction: 'southeast', label: 'tags', labelKey: 'quickmenu.tags', icon: 'sell', action: { kind: 'command', command: 'tags' } },
+    { direction: 'southwest', label: 'history', labelKey: 'quickmenu.history', icon: 'history', action: { kind: 'command', command: 'history' } },
+    { direction: 'west', label: 'tree', labelKey: 'quickmenu.tree', icon: 'account_tree', action: { kind: 'command', command: 'tree' } },
+    { direction: 'northwest', label: 'help', labelKey: 'quickmenu.help', icon: 'tips_and_updates', action: { kind: 'command', command: 'help' } },
     // The one nested ring in the shipped set — proves the descend gesture
     // and keeps the surface verbs off the root.
-    { direction: 'northeast', label: 'view', labelKey: 'quickmenu.view', action: { kind: 'menu', menu: 'root:view' } },
+    { direction: 'northeast', label: 'view', labelKey: 'quickmenu.view', icon: 'layers', action: { kind: 'menu', menu: 'root:view' } },
   ],
 }
 
@@ -86,12 +86,12 @@ const ROOT_VIEW: QuickMenuDefinition = {
   titleKey: 'quickmenu.view',
   contexts: [],
   slots: [
-    { direction: 'centre', label: 'fit', labelKey: 'quickmenu.fit', action: { kind: 'command', command: 'fit' } },
-    { direction: 'east', label: 'present', labelKey: 'quickmenu.present', action: { kind: 'command', command: 'present' } },
-    { direction: 'southeast', label: 'theme', labelKey: 'quickmenu.theme', action: { kind: 'command', command: 'theme' } },
-    { direction: 'southwest', label: 'layout', labelKey: 'quickmenu.layout', action: { kind: 'command', command: 'layout' } },
-    { direction: 'northwest', label: 'website', labelKey: 'quickmenu.website', action: { kind: 'command', command: 'website' } },
-    { direction: 'northeast', label: 'tutor', labelKey: 'quickmenu.tutor', action: { kind: 'command', command: 'tutor' } },
+    { direction: 'centre', label: 'fit', labelKey: 'quickmenu.fit', icon: 'center_focus_strong', action: { kind: 'command', command: 'fit' } },
+    { direction: 'east', label: 'present', labelKey: 'quickmenu.present', icon: 'slideshow', action: { kind: 'command', command: 'present' } },
+    { direction: 'southeast', label: 'theme', labelKey: 'quickmenu.theme', icon: 'palette', action: { kind: 'command', command: 'theme' } },
+    { direction: 'southwest', label: 'layout', labelKey: 'quickmenu.layout', icon: 'dashboard', action: { kind: 'command', command: 'layout' } },
+    { direction: 'northwest', label: 'website', labelKey: 'quickmenu.website', icon: 'web', action: { kind: 'command', command: 'website' } },
+    { direction: 'northeast', label: 'tutor', labelKey: 'quickmenu.tutor', icon: 'school', action: { kind: 'command', command: 'tutor' } },
   ],
 }
 
@@ -103,13 +103,13 @@ const WORKFLOW: QuickMenuDefinition = {
   slots: [
     // In the designer the thing you do over and over is run what you just
     // changed, so it takes the zero-travel slot.
-    { direction: 'centre', label: 'run', labelKey: 'quickmenu.run', action: { kind: 'command', command: 'workflow', args: 'run' } },
-    { direction: 'east', label: 'step', labelKey: 'quickmenu.step', action: { kind: 'command', command: 'workflow', args: 'step' } },
-    { direction: 'southeast', label: 'stop', labelKey: 'quickmenu.stop', action: { kind: 'effect', effect: 'workflow:run-stop', payload: {} } },
-    { direction: 'southwest', label: 'list', labelKey: 'quickmenu.list', action: { kind: 'command', command: 'workflow', args: 'list' } },
-    { direction: 'west', label: 'tree', labelKey: 'quickmenu.tree', action: { kind: 'command', command: 'tree' } },
-    { direction: 'northwest', label: 'help', labelKey: 'quickmenu.help', action: { kind: 'command', command: 'help' } },
-    { direction: 'northeast', label: 'new', labelKey: 'quickmenu.new', action: { kind: 'effect', effect: 'workflow:view-open', payload: {} } },
+    { direction: 'centre', label: 'run', labelKey: 'quickmenu.run', icon: 'play_arrow', action: { kind: 'command', command: 'workflow', args: 'run' } },
+    { direction: 'east', label: 'step', labelKey: 'quickmenu.step', icon: 'skip_next', action: { kind: 'command', command: 'workflow', args: 'step' } },
+    { direction: 'southeast', label: 'stop', labelKey: 'quickmenu.stop', icon: 'stop', action: { kind: 'effect', effect: 'workflow:run-stop', payload: {} } },
+    { direction: 'southwest', label: 'list', labelKey: 'quickmenu.list', icon: 'view_list', action: { kind: 'command', command: 'workflow', args: 'list' } },
+    { direction: 'west', label: 'tree', labelKey: 'quickmenu.tree', icon: 'account_tree', action: { kind: 'command', command: 'tree' } },
+    { direction: 'northwest', label: 'help', labelKey: 'quickmenu.help', icon: 'tips_and_updates', action: { kind: 'command', command: 'help' } },
+    { direction: 'northeast', label: 'new', labelKey: 'quickmenu.new', icon: 'add', action: { kind: 'effect', effect: 'workflow:view-open', payload: {} } },
   ],
 }
 
@@ -126,13 +126,13 @@ const WEBSITE: QuickMenuDefinition = {
   titleKey: 'quickmenu.website',
   contexts: ['website'],
   slots: [
-    { direction: 'centre', label: 'exit', labelKey: 'quickmenu.exit', action: { kind: 'command', command: 'view', args: 'hexagons' } },
-    { direction: 'east', label: 'save', labelKey: 'quickmenu.save', action: { kind: 'command', command: 'website', args: 'save' } },
-    { direction: 'southeast', label: 'build', labelKey: 'quickmenu.build', action: { kind: 'command', command: 'website', args: 'build' } },
-    { direction: 'southwest', label: 'list', labelKey: 'quickmenu.list', action: { kind: 'command', command: 'website', args: 'list' } },
-    { direction: 'west', label: 'tree', labelKey: 'quickmenu.tree', action: { kind: 'command', command: 'tree' } },
-    { direction: 'northwest', label: 'help', labelKey: 'quickmenu.help', action: { kind: 'command', command: 'help' } },
-    { direction: 'northeast', label: 'new', labelKey: 'quickmenu.new', action: { kind: 'command', command: 'website', args: 'new' } },
+    { direction: 'centre', label: 'exit', labelKey: 'quickmenu.exit', icon: 'hexagon', action: { kind: 'command', command: 'view', args: 'hexagons' } },
+    { direction: 'east', label: 'save', labelKey: 'quickmenu.save', icon: 'save', action: { kind: 'command', command: 'website', args: 'save' } },
+    { direction: 'southeast', label: 'build', labelKey: 'quickmenu.build', icon: 'build', action: { kind: 'command', command: 'website', args: 'build' } },
+    { direction: 'southwest', label: 'list', labelKey: 'quickmenu.list', icon: 'view_list', action: { kind: 'command', command: 'website', args: 'list' } },
+    { direction: 'west', label: 'tree', labelKey: 'quickmenu.tree', icon: 'account_tree', action: { kind: 'command', command: 'tree' } },
+    { direction: 'northwest', label: 'help', labelKey: 'quickmenu.help', icon: 'tips_and_updates', action: { kind: 'command', command: 'help' } },
+    { direction: 'northeast', label: 'new', labelKey: 'quickmenu.new', icon: 'add', action: { kind: 'command', command: 'website', args: 'new' } },
   ],
 }
 
@@ -146,13 +146,13 @@ const SLIDES: QuickMenuDefinition = {
   titleKey: 'quickmenu.slides',
   contexts: ['slides', 'lightbox'],
   slots: [
-    { direction: 'centre', label: 'exit', labelKey: 'quickmenu.exit', action: { kind: 'command', command: 'view', args: 'hexagons' } },
-    { direction: 'east', label: 'next', labelKey: 'quickmenu.next', action: { kind: 'key', key: 'ArrowRight' } },
-    { direction: 'west', label: 'previous', labelKey: 'quickmenu.previous', action: { kind: 'key', key: 'ArrowLeft' } },
-    { direction: 'northeast', label: 'first', labelKey: 'quickmenu.first', action: { kind: 'key', key: 'Home' } },
-    { direction: 'southeast', label: 'last', labelKey: 'quickmenu.last', action: { kind: 'key', key: 'End' } },
-    { direction: 'southwest', label: 'theme', labelKey: 'quickmenu.theme', action: { kind: 'command', command: 'theme' } },
-    { direction: 'northwest', label: 'help', labelKey: 'quickmenu.help', action: { kind: 'command', command: 'help' } },
+    { direction: 'centre', label: 'exit', labelKey: 'quickmenu.exit', icon: 'hexagon', action: { kind: 'command', command: 'view', args: 'hexagons' } },
+    { direction: 'east', label: 'next', labelKey: 'quickmenu.next', icon: 'chevron_right', action: { kind: 'key', key: 'ArrowRight' } },
+    { direction: 'west', label: 'previous', labelKey: 'quickmenu.previous', icon: 'chevron_left', action: { kind: 'key', key: 'ArrowLeft' } },
+    { direction: 'northeast', label: 'first', labelKey: 'quickmenu.first', icon: 'skip_previous', action: { kind: 'key', key: 'Home' } },
+    { direction: 'southeast', label: 'last', labelKey: 'quickmenu.last', icon: 'skip_next', action: { kind: 'key', key: 'End' } },
+    { direction: 'southwest', label: 'theme', labelKey: 'quickmenu.theme', icon: 'palette', action: { kind: 'command', command: 'theme' } },
+    { direction: 'northwest', label: 'help', labelKey: 'quickmenu.help', icon: 'tips_and_updates', action: { kind: 'command', command: 'help' } },
   ],
 }
 
@@ -172,17 +172,17 @@ const SELECTION: QuickMenuDefinition = {
   titleKey: 'quickmenu.selection',
   contexts: [],
   slots: [
-    { direction: 'centre', label: 'done', labelKey: 'quickmenu.done', action: { kind: 'effect', effect: 'select:done', payload: {} } },
+    { direction: 'centre', label: 'done', labelKey: 'quickmenu.done', icon: 'check', action: { kind: 'effect', effect: 'select:done', payload: {} } },
     // The alt menu belongs to the tile under the pointer, so NORTHEAST is
     // select — the one verb every tile has — and the other five are GROUPS of
     // the common behaviours. A group's way back is the direction opposite the
     // one that led in, so each group holds five verbs.
-    { direction: 'northeast', label: 'select', action: { kind: 'effect', effect: 'select:toggle', payload: {} } },
-    group('east', 'edit', 'selection:edit'),
-    group('southeast', 'organize', 'selection:organize'),
-    group('southwest', 'view', 'selection:view'),
-    group('west', 'go', 'selection:go'),
-    group('northwest', 'share', 'selection:share'),
+    { direction: 'northeast', label: 'select', icon: 'check_circle', action: { kind: 'effect', effect: 'select:toggle', payload: {} } },
+    { ...group('east', 'edit', 'selection:edit'), icon: 'edit' },
+    { ...group('southeast', 'organize', 'selection:organize'), icon: 'category' },
+    { ...group('southwest', 'view', 'selection:view'), icon: 'layers' },
+    { ...group('west', 'go', 'selection:go'), icon: 'explore' },
+    { ...group('northwest', 'share', 'selection:share'), icon: 'share' },
   ],
 }
 
@@ -192,9 +192,9 @@ const SELECTION_EDIT: QuickMenuDefinition = {
   contexts: [],
   slots: [
     // The selection onto the shelf: a reference, never a cut (codex A9).
-    onTile({ direction: 'east', label: 'shelf', labelKey: 'quickmenu.shelf', action: { kind: 'effect', effect: 'shelf:take-selection', payload: {} } }),
-    onTile(cmd('northwest', 'remove', 'remove', 'quickmenu.remove')),
-    onTile(cmd('northeast', 'hide', 'hide')),
+    onTile({ direction: 'east', label: 'shelf', labelKey: 'quickmenu.shelf', icon: 'bookmark', action: { kind: 'effect', effect: 'shelf:take-selection', payload: {} } }),
+    onTile({ ...cmd('northwest', 'remove', 'remove', 'quickmenu.remove'), icon: 'delete' }),
+    onTile({ ...cmd('northeast', 'hide', 'hide'), icon: 'visibility_off' }),
   ],
 }
 
@@ -203,11 +203,11 @@ const SELECTION_ORGANIZE: QuickMenuDefinition = {
   title: 'Organize',
   contexts: [],
   slots: [
-    onTile(cmd('east', 'tags', 'tags', 'quickmenu.tags')),
-    cmd('southeast', 'arrange', 'arrange'),
-    onTile(cmd('southwest', 'groups', 'groups')),
-    { direction: 'west', label: 'all', labelKey: 'quickmenu.all', action: { kind: 'effect', effect: 'select:all', payload: {} } },
-    { direction: 'northeast', label: 'done', labelKey: 'quickmenu.done', action: { kind: 'effect', effect: 'select:done', payload: {} } },
+    onTile({ ...cmd('east', 'tags', 'tags', 'quickmenu.tags'), icon: 'sell' }),
+    { ...cmd('southeast', 'arrange', 'arrange'), icon: 'view_module' },
+    onTile({ ...cmd('southwest', 'groups', 'groups'), icon: 'hub' }),
+    { direction: 'west', label: 'all', labelKey: 'quickmenu.all', icon: 'select_all', action: { kind: 'effect', effect: 'select:all', payload: {} } },
+    { direction: 'northeast', label: 'done', labelKey: 'quickmenu.done', icon: 'check', action: { kind: 'effect', effect: 'select:done', payload: {} } },
   ],
 }
 
@@ -216,11 +216,11 @@ const SELECTION_VIEW: QuickMenuDefinition = {
   title: 'View',
   contexts: [],
   slots: [
-    cmd('east', 'fit', 'fit', 'quickmenu.fit'),
-    cmd('southeast', 'theme', 'theme', 'quickmenu.theme'),
-    cmd('southwest', 'layout', 'layout', 'quickmenu.layout'),
-    cmd('west', 'present', 'present', 'quickmenu.present'),
-    cmd('northwest', 'website', 'website', 'quickmenu.website'),
+    { ...cmd('east', 'fit', 'fit', 'quickmenu.fit'), icon: 'center_focus_strong' },
+    { ...cmd('southeast', 'theme', 'theme', 'quickmenu.theme'), icon: 'palette' },
+    { ...cmd('southwest', 'layout', 'layout', 'quickmenu.layout'), icon: 'dashboard' },
+    { ...cmd('west', 'present', 'present', 'quickmenu.present'), icon: 'slideshow' },
+    { ...cmd('northwest', 'website', 'website', 'quickmenu.website'), icon: 'web' },
   ],
 }
 
@@ -229,11 +229,11 @@ const SELECTION_GO: QuickMenuDefinition = {
   title: 'Go',
   contexts: [],
   slots: [
-    cmd('southeast', 'history', 'history', 'quickmenu.history'),
-    cmd('southwest', 'collections', 'collections', 'quickmenu.collections'),
-    cmd('west', 'tree', 'tree', 'quickmenu.tree'),
-    cmd('northwest', 'help', 'help', 'quickmenu.help'),
-    cmd('northeast', 'find', 'find'),
+    { ...cmd('southeast', 'history', 'history', 'quickmenu.history'), icon: 'history' },
+    { ...cmd('southwest', 'collections', 'collections', 'quickmenu.collections'), icon: 'folder_open' },
+    { ...cmd('west', 'tree', 'tree', 'quickmenu.tree'), icon: 'account_tree' },
+    { ...cmd('northwest', 'help', 'help', 'quickmenu.help'), icon: 'tips_and_updates' },
+    { ...cmd('northeast', 'find', 'find'), icon: 'search' },
   ],
 }
 
@@ -242,11 +242,11 @@ const SELECTION_SHARE: QuickMenuDefinition = {
   title: 'Share',
   contexts: [],
   slots: [
-    cmd('east', 'publish', 'publish'),
-    cmd('southwest', 'keys', 'keys'),
-    onTile(cmd('west', 'invite', 'invite')),
-    cmd('northwest', 'follow', 'follow'),
-    cmd('northeast', 'republish', 'republish'),
+    { ...cmd('east', 'publish', 'publish'), icon: 'cloud_upload' },
+    { ...cmd('southwest', 'keys', 'keys'), icon: 'key' },
+    onTile({ ...cmd('west', 'invite', 'invite'), icon: 'person_add' }),
+    { ...cmd('northwest', 'follow', 'follow'), icon: 'notifications' },
+    { ...cmd('northeast', 'republish', 'republish'), icon: 'sync' },
   ],
 }
 
