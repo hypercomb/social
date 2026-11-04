@@ -131,12 +131,15 @@ describe('startup render priority', () => {
     expect(BEE).toMatch(/setTimeout\(\(\) => \{[\s\S]{0,200}?this\.#refreshResting\(\)[\s\S]{0,40}?\}, REST_SETTLE_MS\)/)
   })
 
-  it('keeps per-child head repair behind the current-layer paint', () => {
-    expect(TILES).toContain('freshenBranchesAfterPaint(out)')
-    expect(TILES).toContain("requestIdleCallback?: (cb: () => void")
-    expect(TILES).toContain('onBranchesFreshened: fresh =>')
-    expect(TILES).toContain('Array.isArray(entry.layer.children) && entry.layer.children.length > 0')
-    expect(TILES).not.toContain('await freshenBranches(out)')
+  it('settles a pathway from the child head before the paint caches it', () => {
+    expect(TILES).toContain('A cold head is not a leaf')
+    expect(TILES).toContain('hasChildren = Array.isArray(kids) && kids.length > 0')
+    expect(TILES).toContain('await settleBranches()')
+    expect(TILES).not.toContain('checkCellHasBranch')
+    expect(TILES).not.toContain('freshenBranchesAfterPaint')
+    expect(TILES).not.toContain('onBranchesFreshened')
+    expect(TILES).not.toContain('Array.isArray(entry.layer.children) && entry.layer.children.length > 0')
+    expect(TILES).not.toContain('Array.isArray(child.children) && child.children.length > 0')
   })
 
   it('does not let the dev processor resolver walk OPFS before first paint', () => {

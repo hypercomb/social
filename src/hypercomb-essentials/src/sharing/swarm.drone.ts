@@ -1368,6 +1368,7 @@ export class SwarmDrone extends Drone {
   // Coalesced to one emit per ~150ms so the canvas settles between
   // bursts but live updates still feel responsive.
   #peersChangedTimer: ReturnType<typeof setTimeout> | null = null
+  #peersChangedAtCurrent = false
 
   #initialized = false
 
@@ -1509,7 +1510,7 @@ export class SwarmDrone extends Drone {
         if (this.#peerLayersBySig.get(sig)?.delete(pk)) evicted = pk
       }
       if (expiries.size === 0) this.#peerExpirySecBySig.delete(sig)
-      if (evicted) this.emitEffect('swarm:peers-changed', { sig, pubkey: evicted, reason: 'slot-expired' })
+      if (evicted) this.#schedulePeersChangedEmit({ sig, pubkey: evicted, reason: 'slot-expired' })
     }
     let rosterChanged = false
     for (const [pk, ms] of [...this.#participantAliveMs]) {
@@ -3488,7 +3489,7 @@ export class SwarmDrone extends Drone {
     }
     if (injected > 0) {
       slog(`[swarm] late-join recovery injected ${injected} peer visual(s) at ${sig.slice(0, 8)}`)
-      this.emitEffect('swarm:peers-changed', { sig, reason: 'late-join-recovery' })
+      this.#schedulePeersChangedEmit({ sig, pubkey: '', reason: 'late-join-recovery' })
     }
   }
 
@@ -3835,9 +3836,14 @@ export class SwarmDrone extends Drone {
   }
 
   #schedulePeersChangedEmit = (payload: { sig: string; pubkey: string; reason: string }): void => {
+    // A burst keeps its FIRST payload, but must not lose the presence emit
+    // when a later payload in the same burst was for the page we stand on.
+    if (payload.sig === this.#currentSig) this.#peersChangedAtCurrent = true
     if (this.#peersChangedTimer !== null) return  // already queued for this burst
     this.#peersChangedTimer = setTimeout(() => {
       this.#peersChangedTimer = null
+      const atCurrent = this.#peersChangedAtCurrent
+      this.#peersChangedAtCurrent = false
       this.emitEffect('swarm:peers-changed', payload)
       // Convenience presence signal — UI doesn't have to compute the
       // count itself or know about peerLayersBySig. Emitted alongside
@@ -3849,7 +3855,7 @@ export class SwarmDrone extends Drone {
       // UI uses this for "you're the first one in here" indicators
       // when a user navigates into an empty location, and updates
       // when a host arrives.
-      if (payload.sig === this.#currentSig) this.#emitPresence(payload.reason)
+      if (atCurrent || payload.sig === this.#currentSig) this.#emitPresence(payload.reason)
     }, 150)
   }
 

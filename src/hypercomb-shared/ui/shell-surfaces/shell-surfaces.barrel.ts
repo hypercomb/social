@@ -67,7 +67,7 @@ import '../sensitivity-bar/sensitivity-bar.component'
 import '../docs-overlay/docs-overlay.component'
 import '../shortcut-sheet/shortcut-sheet.component'
 import '../toast/toast.component'
-import '../presence-banner/presence-banner.component'
+import '../participants/participants-sidebar.component'
 import '../preview-banner/preview-banner.component'
 // The quiet-landing badge — a background write landed and the repaint is
 // being held until the participant taps for it (show-cell #quietLanding).

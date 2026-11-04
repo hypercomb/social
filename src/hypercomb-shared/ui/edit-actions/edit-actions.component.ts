@@ -80,6 +80,13 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
   readonly syncing = signal(false)
   // selected tiles — gates the to-shelf and remove verbs.
   readonly selectionCount = signal(0)
+  // selected tiles that are somebody else's (the renderer reported them
+  // EXTERNAL) — gates the adopt verb. Selecting several shaded tiles and
+  // pressing it is the multi-take; SwarmAdoptDrone queues every pick, so the
+  // batch survives a reload.
+  readonly adoptableCount = signal(0)
+  #selected: string[] = []
+  #external = new Set<string>()
   // Current hive orientation, used to describe the rotate button's destination.
   // The actual toggle remains owned by runtime-initializer.
   readonly flatTop = signal(false)
@@ -107,6 +114,7 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
 
   #cursorUnsub: (() => void) | null = null
   #selectionUnsub: (() => void) | null = null
+  #cellCountUnsub: (() => void) | null = null
   #orientationUnsub: (() => void) | null = null
   #viewActiveUnsub: (() => void) | null = null
   #syncUnsub: (() => void) | null = null
@@ -132,7 +140,16 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
     // SelectionService broadcasts every mutation (clicks, URL brackets,
     // Escape-clear) — last-value replayed, so a late mount sees the live set.
     this.#selectionUnsub = EffectBus.on<{ selected?: string[] }>('selection:changed', (s) => {
-      this.selectionCount.set(s?.selected?.length ?? 0)
+      this.#selected = (s?.selected ?? []).map(l => String(l ?? '')).filter(Boolean)
+      this.selectionCount.set(this.#selected.length)
+      this.#refreshAdoptable()
+    })
+
+    // show-cell reports which painted tiles are not yours on every render
+    // (last-value replayed). Adopt shows only for the selected ones among them.
+    this.#cellCountUnsub = EffectBus.on<{ externalLabels?: string[] }>('render:cell-count', (p) => {
+      this.#external = new Set((p?.externalLabels ?? []).map(l => String(l ?? '')).filter(Boolean))
+      this.#refreshAdoptable()
     })
 
     this.flatTop.set(localStorage.getItem('hc:hex-orientation') === 'flat-top')
@@ -187,6 +204,7 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
     document.documentElement.style.removeProperty('--hc-actions-width')
     this.#cursorUnsub?.()
     this.#selectionUnsub?.()
+    this.#cellCountUnsub?.()
     this.#orientationUnsub?.()
     this.#viewActiveUnsub?.()
     this.#syncUnsub?.()
@@ -235,6 +253,17 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
 
   readonly toShelf = (): void => {
     EffectBus.emit('shelf:take-selection', {})
+  }
+
+  #adoptable = (): string[] => this.#selected.filter(l => this.#external.has(l))
+  #refreshAdoptable = (): void => { this.adoptableCount.set(this.#adoptable().length) }
+
+  // Adopt: the selected peer tiles, as page tiles, through SwarmAdoptDrone's
+  // `adopt` verb — the same path the wand takes, every pick queued durably.
+  readonly adopt = (): void => {
+    const labels = this.#adoptable()
+    if (labels.length === 0) return
+    EffectBus.emit('tile:action', { action: 'adopt', labels })
   }
 
   readonly remove = (): void => {

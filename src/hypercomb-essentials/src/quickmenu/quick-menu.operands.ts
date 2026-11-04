@@ -14,6 +14,8 @@
 // Reading a selection that does not include the tile the menu is drawn round
 // would have the verb quietly act on tiles the participant is not looking at.
 
+import type { QuickMenuDefinition, QuickMenuSlot } from './quick-menu.types.js'
+
 const SELECTION_KEY = '@diamondcoreprocessor.com/SelectionService'
 
 type SelectionLike = {
@@ -47,10 +49,21 @@ export function currentOperands(subject?: string | null): string[] {
 /** Make the operands the selection, so a verb that reads the selection reads
  *  exactly them. Returns them. Announces nothing when the selection is already
  *  that set. */
-export function bindOperands(subject?: string | null): string[] {
-  const operands = currentOperands(subject)
+export function bindOperands(subject?: string | null, alone = false): string[] {
+  const operands = alone && subject ? [subject] : currentOperands(subject)
   if (operands.length) selection()?.replace?.(operands, subject && operands.includes(subject) ? subject : undefined)
   return operands
+}
+
+/** The menu a swarm's ring is drawn from. While more than one tile is picked
+ *  the ring speaks for the swarm, and the tile it was raised over — the badge,
+ *  `+N` — becomes one seat that opens that tile's own options. Pure. */
+export const TILE_MENU = 'selection:tile'
+
+export function swarmMenu(definition: QuickMenuDefinition, subject: string | null | undefined): QuickMenuDefinition {
+  if (!subject || definition.name !== 'selection' || currentOperands(subject).length < 2) return definition
+  const badge: QuickMenuSlot = { direction: 'northeast', label: subject, icon: 'hexagon', action: { kind: 'menu', menu: TILE_MENU } }
+  return { ...definition, slots: definition.slots.map(slot => (slot.direction === 'northeast' ? badge : slot)) }
 }
 
 /** Verbs that take tiles by name and will not read the selection. */

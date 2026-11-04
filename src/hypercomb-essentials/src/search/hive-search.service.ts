@@ -31,6 +31,10 @@ import {
 
 const get = <T>(key: string): T | undefined => window.ioc?.get<T>(key)
 
+/** The recents census (history/recents-census.service.ts RECENTS_CENSUS_KEY) —
+ *  named, not imported: search reads it through IoC like its other neighbours. */
+const RECENTS_CENSUS_KEY = '@diamondcoreprocessor.com/RecentsCensus'
+
 type LayerLike = { name?: string; children?: unknown; [k: string]: unknown }
 
 // No `getLayerBySig` here, on purpose: it fires a host fetch on a local miss,
@@ -80,6 +84,11 @@ export type SearchAnswer = {
    *  as a handful of places rather than one wall. */
   readonly groups: ReadonlyArray<{ branch: string; hits: readonly SearchHit[] }>
   readonly reach: SearchReach
+  /** How many tiles this hive made that are placed nowhere now — removed —
+   *  carry the name asked for. They are not on any page, so they are not
+   *  hits; the surface offers them (the recents view lists them, and they can
+   *  be put back from there). Absent when the census cannot say. */
+  readonly removed?: number
   /** True when the answer came from an incomplete picture — a truncated
    *  record, or a reach served before its record exists. The rows are real;
    *  there may simply be more of them than were reachable this cheaply. */
@@ -315,6 +324,34 @@ export class HiveSearchService {
    */
   search = async (query: string, reach: SearchReach, limit = 60): Promise<SearchAnswer> => {
     const q = query.trim().toLowerCase()
+    const found = await this.#find(q, reach, limit)
+    if (!q) return found
+    // REMOVED TILES ARE LOOKED FOR TOO. A tile deleted from every page is not
+    // in any record, so the live answer can never name it; the recents census
+    // (every atom this hive made) can, and the answer says how many match.
+    const removed = await this.#removed(q)
+    return removed === undefined ? found : { ...found, removed }
+  }
+
+  /** The labels of the atoms placed nowhere, from the recents census — kept
+   *  for a few seconds, because a find asks on every pause in typing. */
+  #unplaced: { at: number; labels: readonly string[] } | null = null
+  static readonly #UNPLACED_MS = 10_000
+
+  async #removed(q: string): Promise<number | undefined> {
+    const now = Date.now()
+    if (!this.#unplaced || now - this.#unplaced.at > HiveSearchService.#UNPLACED_MS) {
+      const census = get<{ atoms(): Promise<readonly { label: string; placed: boolean }[]> }>(RECENTS_CENSUS_KEY)
+      if (!census?.atoms) return undefined
+      try {
+        const atoms = await census.atoms()
+        this.#unplaced = { at: now, labels: atoms.filter(a => !a.placed).map(a => String(a.label ?? '').toLowerCase()) }
+      } catch { return undefined }
+    }
+    return this.#unplaced.labels.filter(label => label.includes(q)).length
+  }
+
+  async #find(q: string, reach: SearchReach, limit: number): Promise<SearchAnswer> {
     if (!q) return this.#answer([], reach, false, limit)
 
     const segments = this.#segments()

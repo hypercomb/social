@@ -50,7 +50,7 @@ import { PUBLIC_CONTENT_HOSTS, isReservedRootKey } from './hive-link.js'
 import { fetchHiveIndex } from './hive-pointer.js'
 import { publisherKeyHex } from './key-list.client.js'
 import { arrivalPointer, publishArrivalPlan, readArrivalPlan, withdrawArrivalPlan } from './arrival-plan-publish.js'
-import { promoteBranch, promotedPointer, promotesHead, readPromotionRecord } from './promote.js'
+import { promoteBranch, promotedPointer, readyToPromote, promotesHead, readPromotionRecord } from './promote.js'
 import {
   PARTICIPANT_FEATURES_POINTER,
   addParticipantFeature,
@@ -216,6 +216,8 @@ export interface PublishRow {
   doors: string[] | null
   /** Present while this row is publishing. */
   busyPhase: string | null
+  /** The files the host does not have yet, while this row publishes. */
+  owed: string[]
   /** The view the branch ROOT opens as — its own `view:default` mark, '' for
    *  hexagons. The root face is the one publishing decides: it is what a
    *  visitor lands on, and it is read from (and written back as) the same
@@ -231,6 +233,8 @@ export interface PublishRow {
    *  head: its arrival plan and minified derivation are on the host. A branch
    *  published again is not promoted until it is promoted again. */
   promoted: boolean
+  /** Ready to promote — live on a subdomain of its own (readyToPromote). */
+  canPromote: boolean
   /** zone → the address this creation is shown at there: the zone's root
    *  path (`https://<zone>/<path>`) by default, its own address
    *  (`https://<label>.<zone>`) when the signed index gives it one. */
@@ -934,10 +938,12 @@ export class PublishStatusDrone extends Drone {
       zones: this.#zonesFor(key),
       doors: null,
       busyPhase: null,
+      owed: [],
       opensAs: '',
       versions: [],
       plan: null,
       promoted: false,
+      canPromote: false,
       urls: {},
       ownLabels: {},
       defaultLabel: foldDnsLabel(segments[segments.length - 1] ?? ''),
@@ -1148,7 +1154,7 @@ export class PublishStatusDrone extends Drone {
   /** PROMOTE: the branch's arrival plan and minified head, sent to its host and named in the index. */
   async #promote(key: string): Promise<void> {
     const row = this.#rows.find(r => r.key === key)
-    if (!row || !row.live || row.busyPhase) return
+    if (!row?.live || !readyToPromote(row)) return
     const door = this.#writeDoorFor(key)
     if (!door) { this.#refuseNoHost(); return }
     row.busyPhase = 'optimize'
@@ -1296,11 +1302,13 @@ export class PublishStatusDrone extends Drone {
         ...(head ? { head } : {}),
         onProgress: (p: PublishProgress) => {
           row.busyPhase = p.phase
+          if (p.owed) row.owed = p.owed
           this.#emit()
         },
       })
     } finally {
       row.busyPhase = null
+      row.owed = []
       this.#inFlight.delete(key)
     }
 
@@ -1800,6 +1808,7 @@ export class PublishStatusDrone extends Drone {
   }
 
   #emit(): void {
+    for (const row of this.#rows) row.canPromote = readyToPromote(row)
     this.#payload = {
       ...this.#payload, open: this.#open, rows: this.#rows,
       entrancePreview: this.#preview, previewed: [...this.#previewed],

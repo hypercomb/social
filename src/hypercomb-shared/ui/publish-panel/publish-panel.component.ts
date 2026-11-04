@@ -85,6 +85,8 @@ interface PublishRow {
   /** Domains the signed index opens this branch on; null = every domain. */
   doors: string[] | null
   busyPhase: string | null
+  /** The files the host does not have yet, while this row publishes. */
+  owed: string[]
   /** The view the branch ROOT opens as ('' = hexagons) — view:default mark. */
   opensAs: string
   /** Published heads, newest first — a version IS a signature. */
@@ -93,6 +95,8 @@ interface PublishRow {
   plan: string[] | null
   /** Minified, with its arrival plan, and available to the community — for THIS head. */
   promoted: boolean
+  /** Live on a subdomain of its own, unchanged — the only place Promote is offered. */
+  canPromote: boolean
   /** zone → where this creation is shown there: the zone's root path by
    *  default, its own address when the signed index gives it one. */
   urls: Record<string, string>
@@ -1096,7 +1100,7 @@ export class PublishPanelComponent implements OnDestroy {
 
   /** Promote the branch: minified, with its arrival plan, to the community. */
   promote(row: PublishRow): void {
-    if (row.busyPhase || !row.live || row.promoted) return
+    if (!row.canPromote) return
     EffectBus.emit('publish:promote', { key: row.key })
   }
 

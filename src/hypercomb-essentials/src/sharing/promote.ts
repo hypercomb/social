@@ -47,6 +47,22 @@ export type PromoteResult =
   | { ok: true; sig: string; arrival: string | null; derivation: string | null }
   | { ok: false; reason: string }
 
+/** PROMOTE ONLY FROM DEVELOPMENT (jwize 2026-11-04): a branch is offered to the
+ *  community from the subdomain it was made ready on — live at its current
+ *  head, open on an own address (`<label>.<zone>`), not already promoted. A
+ *  branch at a domain's root path, or one that has moved on since it went
+ *  live, is not ready to be made live for the community. */
+export const readyToPromote = (row: {
+  state: string
+  live: string | null
+  promoted: boolean
+  busyPhase: string | null
+  doors: readonly string[] | null
+  ownLabels: Readonly<Record<string, string>>
+}): boolean =>
+  row.state === 'live' && !!row.live && !row.promoted && !row.busyPhase
+  && Object.keys(row.ownLabels).some(zone => !row.doors || row.doors.includes(zone))
+
 /** The signed-index key a branch's promotion is named under. */
 export const promotedPointer = (lineage: string): string => `promoted:${lineage}`
 

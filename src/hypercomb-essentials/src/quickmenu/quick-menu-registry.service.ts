@@ -186,6 +186,25 @@ const SELECTION: QuickMenuDefinition = {
   ],
 }
 
+// The badge's menu: while a swarm is picked its ring speaks for the whole set,
+// and the tile it was raised over opens this one — that tile's options, acting
+// on it alone. All six directions are verbs; right-click is the way back.
+const alone = (slot: QuickMenuSlot): QuickMenuSlot => ({ ...onTile(slot), alone: true })
+
+const SELECTION_TILE: QuickMenuDefinition = {
+  name: 'selection:tile',
+  title: 'Tile',
+  contexts: [],
+  slots: [
+    { direction: 'northeast', label: 'select', icon: 'check_circle', action: { kind: 'effect', effect: 'select:toggle', payload: {} } },
+    alone({ direction: 'east', label: 'shelf', labelKey: 'quickmenu.shelf', icon: 'bookmark', action: { kind: 'effect', effect: 'shelf:take-selection', payload: {} } }),
+    alone({ ...cmd('southeast', 'tags', 'tags', 'quickmenu.tags'), icon: 'sell' }),
+    alone({ ...cmd('southwest', 'groups', 'groups'), icon: 'hub' }),
+    alone({ ...cmd('west', 'hide', 'hide'), icon: 'visibility_off' }),
+    alone({ ...cmd('northwest', 'remove', 'remove', 'quickmenu.remove'), icon: 'delete' }),
+  ],
+}
+
 const SELECTION_EDIT: QuickMenuDefinition = {
   name: 'selection:edit',
   title: 'Edit',
@@ -255,7 +274,7 @@ export class QuickMenuRegistry extends EventTarget {
 
   constructor() {
     super()
-    for (const definition of [ROOT, ROOT_VIEW, WORKFLOW, WEBSITE, SLIDES, SELECTION, SELECTION_EDIT, SELECTION_ORGANIZE, SELECTION_VIEW, SELECTION_GO, SELECTION_SHARE]) {
+    for (const definition of [ROOT, ROOT_VIEW, WORKFLOW, WEBSITE, SLIDES, SELECTION, SELECTION_TILE, SELECTION_EDIT, SELECTION_ORGANIZE, SELECTION_VIEW, SELECTION_GO, SELECTION_SHARE]) {
       this.#definitions.set(definition.name, definition)
     }
   }

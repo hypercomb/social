@@ -1,0 +1,134 @@
+// hypercomb-shared/ui/participants/participants-sidebar.component.scss
+//
+// Left-docked participant list. Same quiet steel as the observe panel: the
+// hive stays visible, the list is chrome. Drag-resize comes from the shared
+// `hcDockedPanel` directive; inner sizes are em so the panel scale holds.
+
+@use '../toolwindow' as tw;
+
+$accent: #7eb6d6;
+
+:host {
+  position: fixed;
+  inset: 0;
+  z-index: 100002;
+  pointer-events: none;
+}
+
+.participants-panel {
+  pointer-events: auto;
+  position: absolute;
+  top: var(--hc-header-anchor);
+  left: 0;
+  bottom: 0;
+  width: 240px;
+  min-width: 200px;
+  max-width: calc(100vw - 1.5rem);
+  display: flex;
+  flex-direction: column;
+  background: rgba(var(--hc-panel-pane), 0.96);
+  border-right: 1px solid rgba(var(--acc), 0.45);
+  box-shadow: 10px 0 40px rgba(var(--hc-panel-shadow), 0.5), 0 0 0 1px rgba(var(--acc), 0.06) inset;
+  font-family: var(--hc-mono, system-ui);
+  font-size: calc(1rem * var(--hc-panel-scale, 1));
+  color: var(--hc-window-ink-loud);
+  outline: none;
+  user-select: none;
+  @include tw.panel($accent, left);
+}
+
+.participants-header {
+  @include tw.header;
+}
+
+.participants-title {
+  flex: 1;
+  font-size: 0.9em;
+  letter-spacing: 0.05em;
+  color: var(--hc-window-accent);
+}
+
+.participants-chip {
+  flex: 0 0 auto;
+  background: rgba(var(--acc), 0.1);
+  border: 1px solid rgba(var(--acc), 0.25);
+  border-radius: 999px;
+  color: var(--hc-window-ink-plain);
+  font-family: inherit;
+  font-size: 0.66em;
+  padding: 0.2em 0.6em;
+  cursor: pointer;
+  &:hover { background: rgba(var(--acc), 0.2); }
+}
+
+.participants-close {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: var(--hc-window-ink-plain);
+  font: inherit;
+  font-size: 1.1em;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.25em;
+  &:hover { color: var(--hc-window-ink-loud); }
+}
+
+.participants-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.4em 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.participants-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.45em 0.8em;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background 120ms ease, border-color 120ms ease;
+  touch-action: none;
+
+  &:hover { background: rgba(var(--acc), 0.08); }
+  &.selected {
+    background: rgba(var(--acc), 0.16);
+    border-left-color: rgb(var(--acc));
+  }
+  &.self { cursor: default; }
+  &.elsewhere .participants-badge, &.elsewhere .participants-name { opacity: 0.6; }
+  &.away .participants-badge, &.away .participants-name { opacity: 0.35; }
+}
+
+.participants-badge {
+  flex: 0 0 auto;
+  width: 1.7em;
+  height: 1.7em;
+  border-radius: 50%;
+  border: 1px solid rgba(var(--acc), 0.4);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  .self & { border-style: dashed; }
+  .away & { border-style: dotted; }
+}
+
+.participants-name {
+  flex: 1;
+  font-size: 0.8em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.participants-where {
+  flex: 0 0 auto;
+  font-size: 0.6em;
+  letter-spacing: 0.05em;
+  opacity: 0.55;
+}

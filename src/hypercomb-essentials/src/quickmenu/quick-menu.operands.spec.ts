@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { argsWithOperands, bindOperands, operandNote, operandsOf } from './quick-menu.operands.js'
+import { argsWithOperands, bindOperands, operandNote, operandsOf, swarmMenu, TILE_MENU } from './quick-menu.operands.js'
 import { fireQuickMenuSlot } from './quick-menu.fire.js'
-import type { QuickMenuSlot } from './quick-menu.types.js'
+import type { QuickMenuDefinition, QuickMenuSlot } from './quick-menu.types.js'
 
 describe('operandsOf', () => {
   it('acts on the whole selection when the tile is part of it', () => {
@@ -87,5 +87,35 @@ describe('firing a tile verb', () => {
     fireQuickMenuSlot(fit, 'z')
     expect(replace).not.toHaveBeenCalled()
     expect(execute).toHaveBeenCalledWith('fit', '')
+  })
+})
+
+describe('swarmMenu', () => {
+  const selection: QuickMenuDefinition = {
+    name: 'selection',
+    title: 'Selection',
+    contexts: [],
+    slots: [
+      { direction: 'northeast', label: 'select', action: { kind: 'effect', effect: 'select:toggle', payload: {} } },
+      { direction: 'east', label: 'edit', action: { kind: 'menu', menu: 'selection:edit' } },
+    ],
+  }
+
+  afterEach(() => { delete (globalThis as { ioc?: unknown }).ioc })
+
+  const pick = (...labels: string[]) => {
+    ;(globalThis as { ioc?: unknown }).ioc = { get: () => ({ selected: new Set(labels) }) }
+  }
+
+  it('leaves a lone tile on the shipped ring', () => {
+    pick('a')
+    expect(swarmMenu(selection, 'a')).toBe(selection)
+  })
+
+  it('seats the badge as a pathway to the tile\'s own menu when a swarm is picked', () => {
+    pick('a', 'b')
+    const slots = swarmMenu(selection, 'a').slots
+    expect(slots.find(s => s.direction === 'northeast')).toMatchObject({ label: 'a', action: { kind: 'menu', menu: TILE_MENU } })
+    expect(slots.find(s => s.direction === 'east')?.label).toBe('edit')
   })
 })

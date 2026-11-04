@@ -253,6 +253,11 @@
       <span class="rail-divider" aria-hidden="true"></span>
     }
 
+    <!-- WHO IS IN THE SWARM — one more divider and the members' initials,
+         only while this tab is in a swarm (rail-participants). A click opens
+         the left participants sidebar. -->
+    <hc-rail-participants></hc-rail-participants>
+
     <div class="action-group tools">
       @if (showOpenForSubscribersToggle()) {
         <button

@@ -66,6 +66,34 @@ describe('writeRecord', () => {
   })
 })
 
+describe('removed tiles', () => {
+  const withCensus = (atoms: readonly { label: string; placed: boolean }[] | null) => {
+    const resolve = (key: string) => key === '@diamondcoreprocessor.com/RecentsCensus' && atoms
+      ? { atoms: async () => atoms }
+      : undefined
+    ;(globalThis as unknown as { ioc: { get: (k: string) => unknown } }).ioc.get = resolve
+  }
+
+  it('counts the tiles placed nowhere that carry the name — they are in no record, so not hits', async () => {
+    withCensus([
+      { label: 'Dolphin', placed: false },
+      { label: 'dolphin shows', placed: false },
+      { label: 'Dolphin kept', placed: true },
+      { label: 'cat', placed: false },
+    ])
+    const service = new HiveSearchService()
+    expect((await service.search('dolphin', 'layer')).removed).toBe(2)
+    expect((await service.search('zebra', 'layer')).removed).toBe(0)
+    expect(await service.search('  ', 'layer')).not.toHaveProperty('removed')
+  })
+
+  it('says nothing about removed tiles when there is no census to ask', async () => {
+    withCensus(null)
+    const service = new HiveSearchService()
+    expect((await service.search('dolphin', 'hive')).removed).toBeUndefined()
+  })
+})
+
 describe('warmBranches', () => {
   it('gives every branch of a root too big for one record a record of its own', async () => {
     // A root past the row cap keeps no record, and its derive stops adding

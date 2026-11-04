@@ -1,0 +1,48 @@
+@if (open() && inSwarm()) {
+  <aside
+    class="participants-panel"
+    hcDockInset="left"
+    hcDockedPanel="participants-sidebar"
+    [hcSession]="session"
+    (hcDockedPanelClose)="close()"
+    dockSide="left"
+    [minWidth]="200"
+    [maxWidth]="420"
+    [defaultWidth]="240"
+    data-consumes-wheel
+    tabindex="-1"
+    [attr.aria-label]="'participants.title' | t"
+  >
+    <header class="participants-header">
+      <span class="participants-title">{{ 'participants.title' | t }}</span>
+      @if (anySelected()) {
+        <button class="participants-chip" type="button" (click)="everyone()">{{ 'participants.everyone' | t }}</button>
+      }
+      <button class="participants-close" type="button" (click)="close()" [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button>
+    </header>
+
+    <ul class="participants-list" role="listbox" aria-multiselectable="true">
+      @for (p of participants(); track p.key) {
+        <li
+          class="participants-row"
+          role="option"
+          [class.self]="p.where === 'self'"
+          [class.selected]="p.selected"
+          [class.elsewhere]="p.where === 'elsewhere'"
+          [class.away]="p.where === 'away'"
+          [attr.aria-selected]="p.where === 'self' ? null : p.selected"
+          (pointerdown)="onRowDown($event, p)"
+          (pointerenter)="onRowEnter(p)"
+        >
+          <span class="participants-badge" aria-hidden="true">{{ p.initials }}</span>
+          <span class="participants-name">{{ p.label || ('participants.unnamed' | t) }}</span>
+          @if (p.where === 'self') {
+            <span class="participants-where">{{ 'participants.you' | t }}</span>
+          } @else if (p.where !== 'here') {
+            <span class="participants-where">{{ ('participants.' + p.where) | t }}</span>
+          }
+        </li>
+      }
+    </ul>
+  </aside>
+}
