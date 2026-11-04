@@ -23,7 +23,7 @@ type Layer = { name: string; children?: string[]; properties?: string[] }
 
 /** One page holding `desk`, `inbox` and an empty `work`; desk carries the
  *  `index` an older build wrote inside it. */
-const hive = () => {
+const hive = (workHolds: string[] = []) => {
   const layers = new Map<string, Layer>()
   const heads = new Map<string, string>()
   let n = 0
@@ -34,7 +34,8 @@ const hive = () => {
   }
   const desk = put({ name: 'desk', properties: ['props-with-index-3'] })
   const inbox = put({ name: 'inbox' })
-  const work = put({ name: 'work' })
+  const held = workHolds.map(name => put({ name }))
+  const work = put({ name: 'work', ...(held.length ? { children: held } : {}) })
   heads.set('loc:', put({ name: 'root', children: [desk, inbox, work] }))
   const remints: unknown[] = []
   const history = {
@@ -80,5 +81,62 @@ describe('commitMoveMany — a move is a membership edit and nothing else', () =
       order: { remove: ['desk', 'inbox'] },
     })
     expect(h.commits).toHaveLength(2)
+  })
+})
+
+describe('commitMoveMany — the preflight: blocked landings are asked about, never half-moved in silence', () => {
+  const setup = async (workHolds: string[]) => {
+    const h = hive(workHolds)
+    registry.set('@diamondcoreprocessor.com/HistoryService', h.history)
+    registry.set('@diamondcoreprocessor.com/LayerCommitter', h.committer)
+    registry.set('@hypercomb.social/Lineage', { explorerSegments: () => [], domain: undefined })
+    await import('./move.drone.js')
+    return { h, move: registry.get('@diamondcoreprocessor.com/MoveDrone') }
+  }
+  const toasts = async () => {
+    const { EffectBus } = await import('@hypercomb/core')
+    const seen: any[] = []
+    const off = EffectBus.on<any>('toast:show', t => { seen.push(t) })
+    // The bus replays its last value to a new subscriber — that is the
+    // previous test's toast, not this act's.
+    seen.length = 0
+    return { seen, off }
+  }
+
+  it('some blocked: writes nothing, asks, and Move lands only the tiles that have a spot', async () => {
+    const { h, move } = await setup(['desk'])
+    const { seen, off } = await toasts()
+    const landed = await move.commitMoveMany([], [{ labels: ['desk', 'inbox'], targetSegments: ['work'] }])
+    expect(landed).toEqual([[]])
+    expect(h.commits).toHaveLength(0)
+    const ask = seen.find(t => t.key === 'move-partial')
+    expect(ask.actions.map((a: any) => a.effect)).toEqual(['move:partial-resume', 'move:partial-cancel'])
+
+    const answered = await move.resumePartial(ask.actions[0].payload.token)
+    expect(answered).toEqual([['inbox']])
+    expect(h.commits[0].changes).toMatchObject({ appends: [h.inbox] })
+    off()
+  })
+
+  it('some blocked: Cancel drops the held move and nothing is ever written', async () => {
+    const { h, move } = await setup(['desk'])
+    const { seen, off } = await toasts()
+    await move.commitMoveMany([], [{ labels: ['desk', 'inbox'], targetSegments: ['work'] }])
+    const token = seen.find(t => t.key === 'move-partial').actions[1].payload.token
+    move.dropPartial(token)
+    expect(await move.resumePartial(token)).toEqual([])
+    expect(h.commits).toHaveLength(0)
+    off()
+  })
+
+  it('all blocked: refuses with no question and writes nothing', async () => {
+    const { h, move } = await setup(['desk', 'inbox'])
+    const { seen, off } = await toasts()
+    const landed = await move.commitMoveMany([], [{ labels: ['desk', 'inbox'], targetSegments: ['work'] }])
+    expect(landed).toEqual([[]])
+    expect(h.commits).toHaveLength(0)
+    expect(seen.some(t => t.key === 'move-partial')).toBe(false)
+    expect(seen.length).toBeGreaterThan(0)
+    off()
   })
 })

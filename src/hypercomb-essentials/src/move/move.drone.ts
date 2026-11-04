@@ -860,6 +860,36 @@ export class MoveDrone extends Drone {
           `“${name}” already holds a tile by each of those names, and a name is an address — nothing was overwritten.`)
       }
 
+      // ── some tiles have no landing spot: ask, never half-move in silence ────
+      // Nothing has been written. A name already taken at a destination is a
+      // blocked landing; the tiles that DO have one wait for the participant's
+      // answer, and ignoring the question is the same as cancelling.
+      const blocked = live.flatMap(leg => {
+        const c = captured.find(x => same(x.target, leg.target))
+        return leg.labels.filter(l => !c?.landed.includes(l))
+      })
+      if (blocked.length > 0) {
+        const clear = captured.filter(c => c.landed.length > 0)
+          .map(c => ({ labels: c.landed, targetSegments: c.target }))
+        const count = clear.reduce((n, m) => n + m.labels.length, 0)
+        const token = `move-partial-${++this.#partialSeq}`
+        this.#partials.set(token, { source, moves: clear })
+        const names = blocked.slice(0, 3).map(l => `“${l}”`).join(', ') + (blocked.length > 3 ? ` and ${blocked.length - 3} more` : '')
+        EffectBus.emit('toast:show', {
+          type: 'info',
+          key: 'move-partial',
+          title: i18n?.t('move.into.partial.title') ?? 'Some tiles can’t land there',
+          message: i18n?.t('move.into.partial.message', { names, count })
+            ?? `${names} already exist${blocked.length === 1 ? 's' : ''} at the destination. Move the other ${count}? Nothing has moved yet.`,
+          duration: 12000,
+          actions: [
+            { label: i18n?.t('move.into.partial.move', { count }) ?? `Move ${count}`, effect: 'move:partial-resume', payload: { token }, kind: 'primary' },
+            { label: i18n?.t('move.into.partial.cancel') ?? 'Cancel', effect: 'move:partial-cancel', payload: { token } },
+          ],
+        })
+        return none
+      }
+
       EffectBus.emit('fs:changed', { segments: [...source] })
       for (const c of captured) if (c.appends.length) await this.#seedPropsIndex(history, c.appends, c.target)
 
@@ -932,6 +962,22 @@ export class MoveDrone extends Drone {
       return none
     }
   }
+
+  /** Moves held for an answer: the tiles that had a landing spot while others
+   *  did not. Nothing in them has been written. */
+  #partialSeq = 0
+  #partials = new Map<string, { source: readonly string[]; moves: { labels: readonly string[]; targetSegments: readonly string[] }[] }>()
+
+  /** The participant said yes: move the tiles that have a landing spot. It runs
+   *  the whole preflight again, so a page that changed meanwhile is re-checked. */
+  async resumePartial(token: string): Promise<readonly (readonly string[])[]> {
+    const held = this.#partials.get(token)
+    if (!held) return []
+    this.#partials.delete(token)
+    return this.commitMoveMany(held.source, held.moves)
+  }
+
+  dropPartial(token: string): void { this.#partials.delete(token) }
 
   /**
    * The destination layer, guaranteed to have a MARKER of its own.
@@ -1514,6 +1560,11 @@ window.ioc.register('@diamondcoreprocessor.com/TouchMoveInput', new TouchMoveInp
 
 const _move = new MoveDrone()
 window.ioc.register('@diamondcoreprocessor.com/MoveDrone', _move)
+
+// A PARTIAL MOVE'S ANSWER (the toast commitMoveMany raises). Commands, never
+// replayed to late subscribers.
+EffectBus.on<{ token?: string }>('move:partial-resume', p => { if (p?.token) void _move.resumePartial(p.token) })
+EffectBus.on<{ token?: string }>('move:partial-cancel', p => { if (p?.token) _move.dropPartial(p.token) })
 
 // THE LIST'S REORDER. The phone's list (layer-list.drone.ts) drags a row
 // to a new place and hands the WHOLE order here — the same commit a rail
