@@ -33,7 +33,7 @@ describe('host your hive from this computer', () => {
   it('on the web, where nothing can serve, it holds only the way to the how-to', () => {
     expect(canHostHere()).toBe(false)
     const block = hostOnlineBlock({ t, make, button, repaint: () => {} })
-    expect(block?.querySelector('a')?.getAttribute('href')).toBe('https://hosting.hypercomb.com/')
+    expect(block?.querySelector('a')?.getAttribute('href')).toBe('https://host-setup.hypercomb.com/')
     expect(block?.querySelector('button')).toBeNull()
   })
 
