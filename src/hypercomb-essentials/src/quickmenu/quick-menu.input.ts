@@ -61,6 +61,7 @@ import { QuickMenuFlight } from './quick-menu.flight.js'
 import { isLongPressMenu } from '../navigation/browser-menu.js'
 import type { QuickMenuRegistry } from './quick-menu-registry.service.js'
 import { selectionMenuWanted } from './quick-menu.tile-menu.js'
+import { altProvenUp } from './quick-menu.alt-held.js'
 import { MANY_TILES_MENU, SELECTION_MENU, currentOperands, manyCount, menuForOperands } from './quick-menu.operands.js'
 import {
   HEX_RADIUS,
@@ -290,6 +291,15 @@ export class QuickMenuInput {
       this.#syncAltMenu()
     })
 
+    // A navigation takes the page out from under the menu: the flower of the
+    // level being left must not outlive it (camera in stone, tiles hidden).
+    const leaveLevel = (): void => {
+      if (this.#flight?.active) this.#flight.end(false)
+      if (this.#armed || this.#sticky) this.#end()
+    }
+    EffectBus.on('tile:navigate-in', leaveLevel)
+    EffectBus.on('tile:navigate-back', leaveLevel)
+
     EffectBus.on<{ active?: boolean }>('touch:dragging', payload => {
       this.#touchDragging = !!payload?.active
       // The pull won. The screen this hold would have opened is not what the
@@ -390,6 +400,7 @@ export class QuickMenuInput {
   }
 
   #onPointerDown = (e: PointerEvent): void => {
+    this.#reconcileAlt(e)
     // Flying to the middle: a press is the click that answers the flower.
     if (this.#flight?.active) {
       e.preventDefault()
@@ -647,6 +658,7 @@ export class QuickMenuInput {
   // ── aim ─────────────────────────────────────────────────────────────
 
   #onPointerMove = (e: PointerEvent): void => {
+    this.#reconcileAlt(e)
     if (this.#flight?.active) {
       e.preventDefault()
       this.#flight.move(e)
@@ -996,9 +1008,24 @@ export class QuickMenuInput {
   // ── end ─────────────────────────────────────────────────────────────
 
   #onWheel = (e: WheelEvent): void => {
+    this.#reconcileAlt(e)
     if (!this.#flight?.active) return
     e.preventDefault()
     e.stopPropagation()
+  }
+
+  /** The event outranks the flag. A lost Alt keyup leaves #altDown true for
+   *  good � the flower rises on every hover, the flight keeps the camera in
+   *  stone and the right click that should go back stays inside the menu. Any
+   *  event that says Alt is not held clears it; a flight in the air is ended
+   *  WITHOUT firing, because nobody chose the leaf that happens to be lit. */
+  #reconcileAlt(e: { readonly altKey?: boolean }): void {
+    if (!altProvenUp(this.#altDown, e)) return
+    this.#altDown = false
+    this.#altLatchedOff = false
+    if (this.#flight?.active) this.#flight.end(false)
+    if (this.#altTimer) { clearTimeout(this.#altTimer); this.#altTimer = null }
+    this.#syncAltMenu()
   }
 
   #onKeyUp = (e: KeyboardEvent): void => {
@@ -1023,6 +1050,7 @@ export class QuickMenuInput {
       }
       return
     }
+    this.#reconcileAlt(e)
     if (this.#flight?.active) {
       if (e.key === 'Enter') {
         e.preventDefault()
