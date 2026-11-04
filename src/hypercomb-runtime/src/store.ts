@@ -71,6 +71,32 @@ export type DevManifest = {
  *  a failed write aborts the stream and rethrows what actually happened, and
  *  a full device is said once (`storage.full`). The `createWritable()` stays
  *  at each site — this only finishes the stream it is handed. */
+/** A small in-memory cache for bytes that are IMMUTABLE BY SIGNATURE:
+ *  content under a sig never changes, so a hit is pure — present or absent
+ *  is the only question, never stale. Insertion-ordered; a hit moves the
+ *  key to the end; past the cap the oldest key goes. The session caches
+ *  that already exist (`#resourceCache`, `#layerBytesCache`) set no cap,
+ *  so this one is deliberately small: it spares the OPFS round trip on the
+ *  repeat reads of a walk, not a copy of the hive in memory. */
+class SigCache<T> {
+  readonly #map = new Map<string, T>()
+  constructor(readonly cap: number) {}
+  get = (sig: string): T | undefined => {
+    const hit = this.#map.get(sig)
+    if (hit !== undefined) { this.#map.delete(sig); this.#map.set(sig, hit) }
+    return hit
+  }
+  set = (sig: string, value: T): void => {
+    this.#map.delete(sig)
+    this.#map.set(sig, value)
+    while (this.#map.size > this.cap) {
+      const oldest = this.#map.keys().next().value
+      if (oldest === undefined) break
+      this.#map.delete(oldest)
+    }
+  }
+}
+
 const writeKeepingError = async (
   writable: FileSystemWritableFileStream,
   data: FileSystemWriteChunkType,
@@ -2432,6 +2458,11 @@ export class Store extends EventTarget {
 
   // Sig-addressed bytes are immutable, so this cache is safe across the session.
   readonly #layerBytesCache = new Map<string, Uint8Array>()
+  /** Recent reads by signature, bounded (see `SigCache`). The preloader and
+   *  the optimizer drones read the same layers through `getLayerPoolBytes`
+   *  within one pass; each repeat was an OPFS open and a full read. */
+  readonly #recentLayerBytes = new SigCache<Uint8Array>(512)
+  readonly #recentOptimizedBytes = new SigCache<Uint8Array>(128)
   readonly #layerBytesPending = new Map<string, Promise<Uint8Array | null>>()
 
   // PERF INSTRUMENTATION (temporary — remove after diagnosis)
@@ -2528,10 +2559,15 @@ export class Store extends EventTarget {
    *  source serves it is immaterial. Markers in lineage sigbags
    *  reference into this content. */
   public getLayerPoolBytes = async (signature: string): Promise<Uint8Array | null> => {
+    // Immutable by signature: a byte array already held under this sig —
+    // by the session cache or by the recent-reads LRU — IS the answer.
+    const held = this.#layerBytesCache.get(signature) ?? this.#recentLayerBytes.get(signature)
+    if (held) { this.#stageToHost(signature, 'layer', held); return held }
     try {
       const file = await this.#readContentFile(signature, this.layers)
       if (!file) return null
       const bytes = new Uint8Array(await file.arrayBuffer())
+      this.#recentLayerBytes.set(signature, bytes)
       // The warmup/preloader reads layers through the pool directly (not via
       // getLayerBytes), so without this the author only pushed the branches it
       // navigated, leaving sibling tiles 404 on the relay. Push here too so the
@@ -2905,10 +2941,14 @@ export class Store extends EventTarget {
    *  misses. Read-only back-compat — nothing writes here anymore. */
   public getOptimizedBytes = async (signature: string): Promise<Uint8Array | null> => {
     if (!this.optimized) return null
+    const held = this.#recentOptimizedBytes.get(signature)
+    if (held) return held
     try {
       const handle = await this.optimized.getFileHandle(signature, { create: false })
       const file = await handle.getFile()
-      return new Uint8Array(await file.arrayBuffer())
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      this.#recentOptimizedBytes.set(signature, bytes)
+      return bytes
     } catch { return null }
   }
 
