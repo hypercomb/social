@@ -764,9 +764,20 @@ every page, and its 25 scenes are folded into the tiles they explain:
   the caption, and its recorded voice. The tile's block adds only what the
   scene does not say: pictures from a running hive, a part to try, the source
   it explains. `blocks/tour.cjs` holds the mapping (every scene on exactly one
-  tile; `presentation` carries the opening, scenes 1 and 2, and the road
-  ahead, 20 to 25, with the six values between), and `blocks/build.cjs`
-  refuses a scene tile whose block would say a headline or narration again.
+  tile; `presentation` carries the opening, scene 1, the six values hold
+  scenes 3 to 19, and the `road` tree carries the protocol, scene 2, and the
+  road ahead, 20 to 25), and `blocks/build.cjs` refuses a scene tile whose
+  block would say a headline or narration again.
+- **Every tile is an interactive video of its concept.** jwize, 2026-11-04:
+  "every tile is an interactive video that shows in detail the concept. If
+  too much we break it apart into its elements the hypercomb way." A page
+  plays one sentence at a time to its voice and lights the figure's parts as
+  they are said; it may add interactive features (a part to try, a picture
+  from a running hive), but it stays one concept. A concept too big for one
+  page is never a longer page: it is broken apart into child tiles, each its
+  own video, and the parent tells only what holds them together.
+  `blocks/check.cjs` fails a presentation or road tile with no page, and a
+  page past twelve sentences.
 - **A tile no scene explains speaks the same way.** An eyebrow, a headline
   with one honey word, a plate drawn in the tour's plate language (960 by
   400, tokens only, `blocks/plates/`), and beats that light the plate's parts

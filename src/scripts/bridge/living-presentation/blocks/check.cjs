@@ -11,6 +11,8 @@
 //     only a link the reader follows may leave;
 //   - a `resource:<sig>` no medium answers, or a medium whose bytes are not its name;
 //   - a word link (`./word`) no child page answers, or an ancestor link to no page;
+//   - a tile of the presentation or the road with no page, or a page too long
+//     to watch at once (it is broken apart into child tiles instead);
 //   - with --render: a script error, a page wider than a phone, or plate text outside its frame.
 
 const fs = require('fs')
@@ -47,6 +49,25 @@ for (const b of blocks) {
   for (const m of html.matchAll(/@import|<link\b[^>]*rel="stylesheet"/g)) fail(`${at}: imports a stylesheet (${m[0]})`)
   for (const m of html.matchAll(/href="\.\/([^"/]+)"/g)) if (!routes.has(`${at}/${m[1]}`)) fail(`${at}: links ./${m[1]}, which has no page`)
   for (const m of html.matchAll(/href="\/([^"]+)"/g)) if (!routes.has(m[1])) fail(`${at}: links /${m[1]}, which has no page`)
+}
+
+// Every tile is an interactive video of its concept (jwize 2026-11-04): each
+// tile of the presentation and the road has its page, and a page that says too
+// much to watch at once is broken apart into its elements the hypercomb way —
+// child tiles, each its own video — never a longer page.
+const tree = require('../tree.cjs')
+const LONGEST = 12
+for (const root of tree.roots.filter(r => r !== tree.presenter)) {
+  const walk = (node, at) => {
+    const key = [...at, node.name].join('/')
+    if (!routes.has(key)) fail(`${key} is a tile with no page; every tile plays its concept`)
+    for (const c of node.children || []) walk(c, [...at, node.name])
+  }
+  walk(root, [])
+}
+for (const b of blocks) {
+  const steps = JSON.parse(b.page.match(/<script type="application\/json"[^>]*>([\s\S]*?)<\/script>/)[1])
+  if (steps.length > LONGEST) fail(`${b.route.join('/')} says ${steps.length} sentences; past ${LONGEST}, break it apart into child tiles`)
 }
 
 // No scene's narration on two pages.
