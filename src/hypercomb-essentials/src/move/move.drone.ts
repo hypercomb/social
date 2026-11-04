@@ -11,6 +11,9 @@ import { LayerTransferService } from './layer-transfer.service.js'
 import { DesktopMoveInput } from './desktop-move.input.js'
 import { TouchMoveInput } from './touch-move.input.js'
 import { dragOutlivesLocation } from './press-liveness.js'
+import { OperationQueue, OPERATION_QUEUE_KEY, conflictsOf, type Expectation, type QueuedOperation } from '../history/operation-queue.service.js'
+
+type MoveLeg = { labels: readonly string[]; targetSegments: readonly string[] }
 
 // Committer/store shapes for the Ctrl-drag COPY path — it re-homes a dragged
 // cell's whole subtree under a fresh sibling name using the SAME signature-
@@ -759,7 +762,80 @@ export class MoveDrone extends Drone {
    */
   commitMoveMany = async (
     sourceSegments: readonly string[],
-    moves: readonly { labels: readonly string[]; targetSegments: readonly string[] }[],
+    moves: readonly MoveLeg[],
+  ): Promise<readonly (readonly string[])[]> => {
+    // THE CLICK IS THE CONTEXT (history/operation-queue.service.ts). What
+    // each named tile IS right now is written down with the act, and the act
+    // waits its turn on the one lane every structural change shares. When its
+    // turn comes, a tile that is no longer what the click saw cancels it.
+    const operations = this.#operations()
+    const expect = operations
+      ? await this.#captureSigs(sourceSegments, moves.flatMap(m => m.labels))
+      : null
+    if (!operations || !expect) return this.#moveMany(sourceSegments, moves)
+    const legs = moves.map(m => ({ labels: [...m.labels], targetSegments: [...m.targetSegments] }))
+    return operations.submit<readonly (readonly string[])[]>('move-many', sourceSegments, expect, { moves: legs })
+  }
+
+  /** The queue's turn for a move-many (also a replay after a reload). */
+  runQueuedMoveMany = (op: QueuedOperation): Promise<readonly (readonly string[])[]> => {
+    const moves = ((op.args as { moves?: MoveLeg[] } | null)?.moves ?? [])
+      .filter(m => Array.isArray(m?.labels) && Array.isArray(m?.targetSegments))
+    return this.#moveMany(op.at, moves, op.expect)
+  }
+
+  #operations(): OperationQueue | undefined {
+    return window.ioc.get<OperationQueue>(OPERATION_QUEUE_KEY)
+  }
+
+  /** Each named tile's signature at `segments`, read NOW — the click. Null
+   *  when the page can't be read; the move then reports that itself. */
+  async #captureSigs(segments: readonly string[], labels: readonly string[]): Promise<Expectation | null> {
+    const history = window.ioc.get<PlacementHistory>('@diamondcoreprocessor.com/HistoryService')
+    const lineage = this.resolve<any>('lineage')
+    if (!history || !lineage) return null
+    try {
+      const here = (lineage.explorerSegments?.() ?? []).map(String)
+      const same = here.length === segments.length && here.every((s: string, i: number) => s === segments[i])
+      const parent = same
+        ? await this.#resolveCurrentParent(history, lineage, segments)
+        : await resolveLayerAt(history, lineage.domain, segments)
+      if (!parent) return null
+      const { entries } = await childEntriesOf(history, parent)
+      const sigByName = new Map(entries.map(e => [e.name, e.sig]))
+      const expect: Record<string, string> = {}
+      for (const label of labels) {
+        if (!sigByName.has(label)) return null
+        expect[label] = sigByName.get(label) ?? ''
+      }
+      return expect
+    } catch { return null }
+  }
+
+  /** Someone got there first: say so, change nothing. */
+  #alreadyMoved(labels: readonly string[]): void {
+    const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
+    const names = labels.slice(0, 3).map(l => `“${l}”`).join(', ') + (labels.length > 3 ? ` and ${labels.length - 3} more` : '')
+    const one = labels.length === 1
+    // A catalog that lacks the key answers with the key itself.
+    const say = (key: string, fallback: string, params?: Record<string, string | number>): string => {
+      const text = i18n?.t(key, params)
+      return text && text !== key ? text : fallback
+    }
+    EffectBus.emit('toast:show', {
+      type: 'info',
+      key: 'move-conflict',
+      title: say(one ? 'move.conflict.title.one' : 'move.conflict.title.other',
+        one ? 'That tile was already moved' : 'Those tiles were already moved'),
+      message: say('move.conflict.message', `${names} changed after you moved ${one ? 'it' : 'them'}, so nothing was moved.`, { names }),
+    })
+    this.emitEffect('move:preview', null)
+  }
+
+  #moveMany = async (
+    sourceSegments: readonly string[],
+    moves: readonly MoveLeg[],
+    expect?: Expectation,
   ): Promise<readonly (readonly string[])[]> => {
     const none = moves.map((): readonly string[] => [])
 
@@ -848,6 +924,10 @@ export class MoveDrone extends Drone {
       }
       const { entries: sourceEntries } = await childEntriesOf(history, sourceParent)
       const sigByName = new Map(sourceEntries.map(e => [e.name, e.sig]))
+      // The page is not what the click saw: a named tile left, or another
+      // tile wears its name. The act was made against the old page — cancel.
+      const clash = expect ? conflictsOf(expect, sigByName) : []
+      if (clash.length > 0) { this.#alreadyMoved(clash); return none }
       if (!live.every(leg => leg.labels.every(l => sigByName.has(l)))) {
         console.warn('[move] move-into aborted — tiles not resolvable in the source', { source, moves: live })
         return none
@@ -1550,10 +1630,45 @@ export class MoveDrone extends Drone {
   async #commitSeats(set: Record<string, number>): Promise<void> {
     if (Object.keys(set).length === 0) return
     const lineage = this.resolve<any>('lineage')
-    const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
+    // Bound at the click: the page the drag was made on, and the tiles in
+    // hand (a peer's tile is never ours to seat, so it is never expected).
+    const parentSegments: readonly string[] = [...(lineage?.explorerSegments?.() ?? [])].map(String)
+    const expect: Record<string, string> = {}
+    for (const label of this.#movedGroup.keys()) if (!this.#externalLabels.has(label)) expect[label] = ''
+    const operations = this.#operations()
+    if (operations) {
+      await operations.submit('seats', parentSegments, expect, { set })
+      return
+    }
+    await this.#writeSeats(parentSegments, set)
+  }
+
+  /** The queue's turn for a re-seat: the tiles in hand must all still be on
+   *  the page the drag was made on. */
+  runQueuedSeats = async (op: QueuedOperation): Promise<void> => {
+    const set = (op.args as { set?: Record<string, number> } | null)?.set
+    if (!set || typeof set !== 'object') return
+    if (Object.keys(op.expect).length > 0) {
+      const history = window.ioc.get<PlacementHistory>('@diamondcoreprocessor.com/HistoryService')
+      const lineage = this.resolve<any>('lineage')
+      if (history && lineage) {
+        const parent = await resolveLayerAt(history, lineage.domain, op.at).catch(() => null)
+        if (parent) {
+          const { names, coldMiss } = await childNamesOfStrict(history, parent)
+          if (!coldMiss) {
+            const clash = conflictsOf(op.expect, new Map(names.map(n => [n, undefined])))
+            if (clash.length > 0) { this.#alreadyMoved(clash); return }
+          }
+        }
+      }
+    }
+    await this.#writeSeats(op.at, set)
+  }
+
+  async #writeSeats(segments: readonly string[], set: Record<string, number>): Promise<void> {
     const committer = window.ioc.get<{ commitOrder?: (segments: readonly string[], order: { set: Record<string, number> }) => Promise<string> }>('@diamondcoreprocessor.com/LayerCommitter')
     try {
-      await committer?.commitOrder?.(parentSegments, { set })
+      await committer?.commitOrder?.(segments, { set })
     } catch (err) {
       console.warn('[move] failed to persist the arrangement', err)
     }
@@ -1582,6 +1697,13 @@ window.ioc.register('@diamondcoreprocessor.com/TouchMoveInput', new TouchMoveInp
 
 const _move = new MoveDrone()
 window.ioc.register('@diamondcoreprocessor.com/MoveDrone', _move)
+
+// THE ONE LANE (history/operation-queue.service.ts): moves and re-seats are
+// written down at the click and run in turn; swarm adopts share the lane.
+const _operations = new OperationQueue()
+window.ioc.register(OPERATION_QUEUE_KEY, _operations)
+_operations.handle('move-many', _move.runQueuedMoveMany)
+_operations.handle('seats', _move.runQueuedSeats)
 
 // A PARTIAL MOVE'S ANSWER (the toast commitMoveMany raises). Commands, never
 // replayed to late subscribers.

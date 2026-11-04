@@ -79,6 +79,7 @@ type StaticPeersLike = {
 }
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 const COMMITTER_KEY = '@diamondcoreprocessor.com/LayerCommitter'
+const OPERATION_QUEUE_KEY = '@diamondcoreprocessor.com/OperationQueue'
 const SNAPSHOT_QUEEN_KEY = '@diamondcoreprocessor.com/SnapshotQueenBee'
 // Recoverable receipt of branches this hive has folded in — the baseline the
 // pending-diff (portal counts) and the un-fold (remove) path read from.
@@ -1264,7 +1265,12 @@ export class SwarmAdoptDrone extends Drone {
         const branch = { layerSig: entry.sig, at: entry.at, domain: entry.domain, label: entry.label }
         let landed = false
         queue.setActive?.(entry.sig, entry.at)
-        try {
+        // Each fold takes its turn on the ONE lane moves and re-seats share
+        // (history/operation-queue.service.ts), so a fold and a move never
+        // read and write the same page at once.
+        const lane = this.#ioc()?.get?.(OPERATION_QUEUE_KEY) as { run?: <T>(task: () => Promise<T>) => Promise<T> } | undefined
+        const inTurn = <T>(task: () => Promise<T>): Promise<T> => lane?.run ? lane.run(task) : task()
+        await inTurn(async () => { try {
           // A tile we already hold is ADDITIVE — add the children the peer
           // publishes that we lack, never re-home (a shared tile stays one
           // tile). Anything else folds whole through the normal gates.
@@ -1296,7 +1302,7 @@ export class SwarmAdoptDrone extends Drone {
           }
         } catch (err) {
           console.warn('[swarm-adopt] queued adopt threw', { sig: entry.sig.slice(0, 8), err })
-        }
+        } })
         if (landed) queue.complete(entry.sig, entry.at)
         else queue.defer(entry.sig, entry.at)
       }

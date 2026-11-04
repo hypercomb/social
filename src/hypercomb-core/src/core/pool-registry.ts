@@ -204,6 +204,12 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // never minted from the optimize phase. Colon-scoped so it can never
   // collide with a tile slugged 'commands'.
   'commands:aliases',
+  // The structural acts owed but not yet run — a move, a re-seat — each
+  // captured whole at the click with what its tiles were then
+  // (essentials/history/operation-queue.service.ts). A pool so a reload
+  // replays them; participant-local intent, nothing references it, and
+  // losing it costs a re-click. Never minted from the optimize phase.
+  'operations:queue',
   // How this participant actually TALKS to the command line — one record
   // holding the lead-in→behaviour phrasings learned from utterances that RAN,
   // plus per-behaviour run counts (essentials/commands/utterance/
