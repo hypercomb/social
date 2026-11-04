@@ -66,7 +66,7 @@ vi.mock('../commands/decoration-kind-index.js', async (importOriginal) => ({
 // THE MESH'S BUCKETS: one per sig, with its consumers. A bucket opened by
 // awaitReadyForSig with no consumer is what LS-1 leaked (ensureStartedForSig,
 // closed only from unsubscribe).
-type MeshEvt = { relay: string; sig: string; event: Record<string, unknown>; payload: unknown }
+type MeshEvt = { relay: string; sig: string; event: Record<string, unknown>; payload: unknown; signed?: boolean }
 const consumers = new Map<string, Set<(e: MeshEvt) => void>>()
 const buckets = new Set<string>()
 const awaitedFor: string[] = []
@@ -159,7 +159,9 @@ const seedPage = (segments: string[], names: string[]): void => {
 const pageSig = (segments: readonly string[]): string => sha(`${lineageKey(segments)}\0${roomPreimage(ROOM, SECRET, 'jwize.com')}`)
 const LIFE = sha(`lifecycle\0${roomPreimage(ROOM, SECRET, 'jwize.com')}`)
 const deliver = (sig: string, event: Record<string, unknown>, payload: unknown): void => {
-  for (const cb of [...(consumers.get(sig) ?? [])]) cb({ relay: 'wss://jwize.com', sig, event, payload })
+  // `signed` is the mesh's admission verdict: a sig means it verified there, '' is the relay's will.
+  const signed = String((event as { sig?: unknown })['sig'] ?? '') !== ''
+  for (const cb of [...(consumers.get(sig) ?? [])]) cb({ relay: 'wss://jwize.com', sig, event, payload, signed })
 }
 const layerAt = (segments: readonly string[]): Published[] =>
   published.filter(p => p.kind === 30200 && p.sig === pageSig(segments))

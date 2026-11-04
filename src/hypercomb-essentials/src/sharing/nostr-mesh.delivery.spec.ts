@@ -14,6 +14,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
+// Real keys: the mesh admits only what verifies (nostr-mesh.admission.spec.ts),
+// so every fixture event is signed as a participant would sign it.
+import { finalizeEvent, getEventHash, getPublicKey } from 'nostr-tools/pure'
 
 const membership = vi.hoisted(() => ({ joined: false }))
 vi.mock('./membership.js', () => ({ isJoinedHere: () => membership.joined }))
@@ -58,12 +61,14 @@ class FakeWebSocket {
   drop(): void { this.readyState = FakeWebSocket.CLOSED; if (this.closedAt < 0) this.closedAt = Date.now(); this.onclose?.() }
 }
 
-let seq = 0
-const PK = 'a'.repeat(64)
-const PEER = 'b'.repeat(64)
+const SK = new Uint8Array(32).fill(7)
+const PK = getPublicKey(SK)
+const PEER_SK = new Uint8Array(32).fill(9)
+const PEER = getPublicKey(PEER_SK)
 const services: Record<string, unknown> = {
   '@diamondcoreprocessor.com/NostrSigner': {
-    signEvent: async (e: Record<string, unknown>) => ({ ...e, id: (++seq).toString(16).padStart(64, '0'), pubkey: PK, sig: 'f'.repeat(128) }),
+    signEvent: async (e: Record<string, unknown>) =>
+      finalizeEvent({ kind: Number(e['kind']), created_at: Number(e['created_at']), tags: e['tags'] as string[][], content: String(e['content']) }, SK),
   },
 }
 ;(globalThis as unknown as { WebSocket: unknown }).WebSocket = FakeWebSocket
@@ -88,9 +93,10 @@ const reqs = (ws: FakeWebSocket, sig: string): Frame[] =>
 const subIdOf = (ws: FakeWebSocket, sig: string): string => String(reqs(ws, sig)[0]?.[1] ?? '')
 const nowSec = (): number => Math.floor(Date.now() / 1000)
 
-const peerEvent = (id: string, extra: Partial<Evt> = {}): Evt => ({
-  id: id.padStart(64, '0'), pubkey: PEER, created_at: nowSec(), kind: 30200, tags: [['x', S], ['d', 'p']], content: '{"peer":1}', sig: 'e'.repeat(128), ...extra,
-})
+/** A peer's signed layer event; `label` keeps its id apart from another's. */
+const peerEvent = (label: string, extra: Partial<Evt> = {}): Evt => finalizeEvent({
+  created_at: nowSec(), kind: 30200, tags: [['x', S], ['d', 'p'], ['n', label]], content: '{"peer":1}', ...extra,
+}, PEER_SK) as Evt
 
 const boot = async (): Promise<{ mesh: Mesh; ws: FakeWebSocket }> => {
   localStorage.setItem('hc:nostrmesh:relays', JSON.stringify([RELAY]))
@@ -267,12 +273,13 @@ describe('created_at', () => {
     const { mesh, ws } = await boot()
     const X = 'd'.repeat(64)
     mesh.subscribe(X, () => void 0)
-    await mesh.publish(30206, X, { alive: true }, [['d', 'me']])   // learns our key
+    await mesh.publish(30206, X, { alive: true }, [['d', PK]])   // learns our key
 
     const T = nowSec() + 40   // the relay's clock is ahead; it made the will
-    ws.receive(['EVENT', subIdOf(ws, X), { id: 'f'.repeat(64), pubkey: PK, created_at: T, kind: 30206, tags: [['x', X], ['d', 'me']], content: '{"left":true}', sig: '' }])
+    const will = { pubkey: PK, created_at: T, kind: 30206, tags: [['x', X], ['d', PK]], content: '{"left":true}' }
+    ws.receive(['EVENT', subIdOf(ws, X), { ...will, id: getEventHash(will), sig: '' }])
 
-    await mesh.publish(30206, X, { alive: true }, [['d', 'me']])
+    await mesh.publish(30206, X, { alive: true }, [['d', PK]])
     const beacon = events(ws)[1]
     expect(beacon.created_at).toBeGreaterThanOrEqual(T + 1)
   })

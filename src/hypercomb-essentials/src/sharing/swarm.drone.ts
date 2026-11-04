@@ -27,7 +27,13 @@
 // arrives, so we don't need to dispatch a render signal ourselves.
 
 import { Drone, EffectBus, isSystemDirectoryName, lifecyclePreimage, meetingPointKey, normalizeCell, roomPreimage, SignatureService } from '@hypercomb/core'
-import { verifyEvent } from 'nostr-tools/pure'
+// Nostr kinds come from core's one vocabulary (nostr-kinds.ts): the wire
+// shapes each kind carries are described at the anchors below.
+import {
+  CHANGE_ITEM_KIND, CLIENT_PRESENCE_KIND, FEEDBACK_ITEM_KIND, HIVE_MEETING_KIND, KIND_FETCH_CANCEL, KIND_FETCH_REQUEST, KIND_FETCH_RESPONSE,
+  PEER_MODEL_OFFER_KIND, PEER_MODEL_REPLY_KIND, PEER_MODEL_REQUEST_KIND, SWARM_BEHAVIOR_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_LAYER_KIND,
+  SWARM_LIFECYCLE_KIND, SWARM_PRESENCE_KIND, SWARM_RESOURCE_KIND, SWARM_SUBSCRIBE_REQUEST_KIND,
+} from '@hypercomb/core'
 import { readTilePropertiesAt, withoutSubstrateImage } from '../editor/tile-properties.js'
 import { readOrderAt } from '../history/tile-order.js'
 import { sanitizeVisual } from './visual-sanitizer.js'
@@ -47,7 +53,7 @@ import { swarmFilterService } from './swarm-filter.service.js'
 import { nameService } from './names.service.js'
 import { isJoinedHere } from './membership.js'
 
-const SWARM_LAYER_KIND = 30200
+// SWARM_LAYER_KIND (30200) — core nostr-kinds, the one vocabulary.
 
 // Per-pubkey-per-lineage hidden-tile list. Stored on the mesh — the
 // session (room + secret) is the boundary. d-tag = composed lineage
@@ -59,7 +65,7 @@ const SWARM_LAYER_KIND = 30200
 // keeps the list alive while the user is active; stop publishing
 // (close tab) and the hide list naturally evaporates from the relay
 // at expiration time.
-const SWARM_HIDE_KIND = 30202
+// SWARM_HIDE_KIND (30202) — core nostr-kinds, the one vocabulary.
 
 // Companion event kind for content-addressed resource streaming.
 // d-tag = resource sig (sha256 of bytes); content = base64 of bytes.
@@ -70,7 +76,7 @@ const SWARM_HIDE_KIND = 30202
 // mismatched bytes). Parameterized-replaceable per (pubkey, kind, sig)
 // so a peer that republishes the same image bytes doesn't fan out
 // duplicates, and late subscribers always get the latest copy.
-const SWARM_RESOURCE_KIND = 30201
+// SWARM_RESOURCE_KIND (30201) — core nostr-kinds, the one vocabulary.
 
 // Interest events — "I'm clicking your tile, please come show me what's
 // inside." Published at the PARENT lineage's composedSig (not the
@@ -89,7 +95,7 @@ const SWARM_RESOURCE_KIND = 30201
 // the tile ("X is interested in this"). The tile-clicker also
 // navigates into the child as usual — interest is the side-channel
 // signal, NOT a gate on navigation.
-const SWARM_INTEREST_KIND = 30203
+// SWARM_INTEREST_KIND (30203) — core nostr-kinds, the one vocabulary.
 
 // Presence event — broadcasts the participant's CURRENT pathSegments
 // to a per-pubkey sig (sha256(`presence:${pubkey}\0room\0secret`)).
@@ -99,7 +105,7 @@ const SWARM_INTEREST_KIND = 30203
 //
 // Parameterized-replaceable per (pubkey, kind, d-tag=presenceSig),
 // NIP-40 expiration. Out-of-date positions naturally evaporate.
-const SWARM_PRESENCE_KIND = 30204
+// SWARM_PRESENCE_KIND (30204) — core nostr-kinds, the one vocabulary.
 
 // Subscribe-request event. The would-be subscriber publishes one of
 // these at the leader's "request channel" sig
@@ -111,7 +117,7 @@ const SWARM_PRESENCE_KIND = 30204
 // "Follow" (nav-sync) is a SEPARATE concept and doesn't carry a
 // consent handshake — it's a local choice to mirror someone's
 // navigation, no broadcast involved.
-const SWARM_SUBSCRIBE_REQUEST_KIND = 30205
+// SWARM_SUBSCRIBE_REQUEST_KIND (30205) — core nostr-kinds, the one vocabulary.
 
 // Swarm lifecycle (presence roster) event. ONE shared channel per zone
 // (sha256(`lifecycle\0room\0secret\0point`), core lifecyclePreimage —
@@ -139,7 +145,7 @@ const SWARM_SUBSCRIBE_REQUEST_KIND = 30205
 // delete) or on the relay slot's clock (expiration + grace) — never because
 // a socket blinked, and never the navigation-coupled flush that made a
 // peer's tiles vanish when YOU moved.
-const SWARM_LIFECYCLE_KIND = 30206
+// SWARM_LIFECYCLE_KIND (30206) — core nostr-kinds, the one vocabulary.
 
 // Withheld-behaviors event — the behavior axis of the share shortlist.
 // The publisher broadcasts WHICH decoration kinds they hold back (their
@@ -150,7 +156,7 @@ const SWARM_LIFECYCLE_KIND = 30206
 // withheld kinds at the adopted root (behavior-enablement's
 // `hc:withheld-at-roots`) and the enablement lens renders those behaviors
 // inert there. 30207 belongs to client-presence; this is the next free slot.
-const SWARM_BEHAVIOR_KIND = 30208
+// SWARM_BEHAVIOR_KIND (30208) — core nostr-kinds, the one vocabulary.
 
 // Debug logging — gated on the same master flag the mesh uses
 // (localStorage['hc:nostrmesh:debug'] = '1'). The publish walk logs PER
@@ -440,12 +446,15 @@ interface MeshEvtLike {
     // past their expiration — without this, ghost tiles from past
     // sessions appear for up to PEER_STALE_MS after subscribing.
     created_at?: number
-    // The event's Schnorr signature. EMPTY on the relay's own last-will
-    // tombstone (it cannot sign as the participant) — the one field that
-    // tells "they left" from "their socket died".
     sig?: string
   }
   payload: unknown
+  // The mesh's admission verdict (T2): the signature verified at relay ingress.
+  // FALSE for the relay's own last-will tombstone (it cannot sign as the
+  // participant; the mesh admits that one unsigned thing to mean away) and for
+  // our own pre-sign local fanout. THIS tells "they left" from "their socket
+  // died" — never the sig field, which a forger fills as easily as anyone.
+  signed?: boolean
 }
 
 interface MeshSubLike { close: () => void }
@@ -2536,7 +2545,11 @@ export class SwarmDrone extends Drone {
     // nobody publishes and nobody handles has no business in the filter.)
     // 30219 = the remote change channel item (ChangeChannelDrone): a change
     // asked for on another machine, and the answer sent back, both sealed.
-    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_PRESENCE_KIND, SWARM_SUBSCRIBE_REQUEST_KIND, SWARM_LIFECYCLE_KIND, SWARM_BEHAVIOR_KIND, 20400, 20402, 30401, 30207, 30213, 30215, 30216, 30217, 30219], true)
+    mesh.configureKinds([
+      HIVE_MEETING_KIND, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_PRESENCE_KIND,
+      SWARM_SUBSCRIBE_REQUEST_KIND, SWARM_LIFECYCLE_KIND, SWARM_BEHAVIOR_KIND, KIND_FETCH_REQUEST, KIND_FETCH_CANCEL, KIND_FETCH_RESPONSE,
+      CLIENT_PRESENCE_KIND, FEEDBACK_ITEM_KIND, PEER_MODEL_OFFER_KIND, PEER_MODEL_REQUEST_KIND, PEER_MODEL_REPLY_KIND, CHANGE_ITEM_KIND,
+    ], true)
   }
 
   /**
@@ -3377,10 +3390,12 @@ export class SwarmDrone extends Drone {
   }
 
   // Inject recovered visuals into the peer cache, mirroring the live
-  // #onEvent cache write. Sanitization is MANDATORY here: fetchVisualsAt
-  // does none (the broker defers it to "the swarm cache injection point" —
-  // this). Live data wins: a pubkey already cached from a live broadcast
-  // is left untouched.
+  // #onEvent cache write. What arrives here is admitted (T2): each entry is
+  // the key's own signed layer event, judged at the mesh's seam by the
+  // broker, or an older responder's word about itself. Sanitization is
+  // still MANDATORY here: fetchVisualsAt does none (the broker defers it to
+  // "the swarm cache injection point" — this). Live data wins: a pubkey
+  // already cached from a live broadcast is left untouched.
   #injectRecoveredVisuals = (
     sig: string,
     entries: readonly { pubkey: string; content: string; tags?: string[][]; created_at?: number }[],
@@ -3432,9 +3447,8 @@ export class SwarmDrone extends Drone {
         // Never a LIVE entry's (`served: 'owner'`): no host kept its bytes.
         noteVisualHosts(cleanVisuals.filter(v => v['served'] !== 'owner'), domainTags, broker.noteDomainsForSig)
       }
-      // NOT where their name is asked: a recovered entry is a responder's
-      // unsigned JSON, so it could tie any key to any host. Only the key's own
-      // signed layer event (#onEvent) hints its host to the name service.
+      // NOT where their name is asked: only the live path (#onEvent) hints a
+      // key's host to the name service — one writer for that hint.
       // A recovered entry is a LIVE answer from a participant who is in the
       // zone right now — the late-joiner path, which is the exact moment the
       // user means by "it should be immediate when participants connect".
@@ -3571,17 +3585,14 @@ export class SwarmDrone extends Drone {
     // EXPIRY_GRACE_SECS of slack: a device whose own clock runs 90 s slow
     // used to see every fresh event as already expired, and a peer the room
     // could see was invisible to it (clock-skew-zero-tolerance).
+    //
+    // Check 1 is the mesh's now: admission refuses an event whose own
+    // expiration tag is past (T2 — verified once, at ingress, for every kind).
+    // Only the untagged fallback stays here, since it is this channel's TTL.
     if (kind === SWARM_LAYER_KIND || kind === SWARM_HIDE_KIND || kind === SWARM_INTEREST_KIND || kind === SWARM_SUBSCRIBE_REQUEST_KIND || kind === SWARM_PRESENCE_KIND) {
-      const nowSec = this.#nowSec()
       const tags = evt?.event?.tags ?? []
-      const expirationTag = tags.find(t => t[0] === 'expiration')?.[1]
-      if (expirationTag) {
-        const expirationSec = Number(expirationTag)
-        if (Number.isFinite(expirationSec) && expirationSec + EXPIRY_GRACE_SECS <= nowSec) {
-          slog('[swarm] onEvent DROPPED: expired', { kind, fromPubkey: evt?.event?.pubkey?.slice(0,8), expirationSec, nowSec, delta: expirationSec - nowSec })
-          return
-        }
-      } else {
+      if (!tags.find(t => t[0] === 'expiration')?.[1]) {
+        const nowSec = this.#nowSec()
         const createdAt = Number(evt?.event?.created_at ?? 0)
         if (Number.isFinite(createdAt) && createdAt > 0 && createdAt + EVENT_TTL_SECS + EXPIRY_GRACE_SECS < nowSec) {
           slog('[swarm] onEvent DROPPED: stale created_at', { kind, fromPubkey: evt?.event?.pubkey?.slice(0,8), createdAt, nowSec, ageS: nowSec - createdAt })
@@ -4887,8 +4898,9 @@ export class SwarmDrone extends Drone {
 
   /** File an event the relay replayed under OUR key at page `sig`: each full
    *  entry (one with a layerSig) it names, the newest per child. Only from a
-   *  relay (never our local fanout), only while its slot is alive, and only
-   *  when its signature verifies — a relay cannot put words in our mouth.
+   *  relay (never our local fanout) and only while its slot is alive. Its
+   *  signature was verified at the mesh's admission seam (T2) — a relay cannot
+   *  put words in our mouth, and nothing unverified is ever cached there.
    *  A page whose last walk sent names alone is walked again. */
   #noteOwnReplay = (sig: string, evt: MeshEvtLike): void => {
     const event = evt?.event
@@ -4902,7 +4914,6 @@ export class SwarmDrone extends Drone {
     if (expSec > 0 && this.#nowSec() > expSec + EXPIRY_GRACE_SECS) return
     let visuals: unknown
     try {
-      if (!verifyEvent(event as never)) return
       visuals = (JSON.parse(String(event.content ?? '')) as { visuals?: unknown } | null)?.visuals
     } catch { return }
     if (!Array.isArray(visuals)) return
@@ -6794,20 +6805,21 @@ export class SwarmDrone extends Drone {
 
     const createdAtSec = Number(evt.event?.created_at ?? 0)
     if (left) {
-      // UNSIGNED — the relay's last will for a socket that died (it cannot
-      // sign as them): a phone lock, a wifi roam, a reload. That is not the
-      // participant leaving. Mark them AWAY on the roster and keep every
-      // tile they shared until its own slot expires, exactly as the relay
-      // keeps it — a late joiner sees the same room. Their next event of any
-      // kind brings them back.
-      if (!String(evt.event?.sig ?? '')) {
+      // NOT THEIR SIGNED WORD — the relay's last will for a socket that died
+      // (it cannot sign as them): a phone lock, a wifi roam, a reload. That is
+      // not the participant leaving. Mark them AWAY on the roster and keep
+      // every tile they shared until its own slot expires, exactly as the
+      // relay keeps it — a late joiner sees the same room. Their next event of
+      // any kind brings them back. The mesh's verdict decides, never whether
+      // the sig field is filled: a forged tombstone with any sig used to evict.
+      if (evt.signed !== true) {
         if (this.#markAway(pubkey, createdAtSec || this.#nowSec())) this.#scheduleRosterEmit()
         slog('[swarm] lifecycle will — away', { pubkey: pubkey.slice(0, 8) })
         return
       }
-      // SIGNED — their own leave. Drop everything this participant
-      // contributed, at every location, in one shot (evictPubkey walks all
-      // sigs + repaints).
+      // SIGNED AND VERIFIED — their own leave. Drop everything this
+      // participant contributed, at every location, in one shot (evictPubkey
+      // walks all sigs + repaints).
       this.#departedAtSec.set(pubkey, createdAtSec || this.#nowSec())
       this.#participantAliveMs.delete(pubkey)
       this.#awayPubkeys.delete(pubkey)
@@ -6819,18 +6831,14 @@ export class SwarmDrone extends Drone {
       return
     }
 
-    // Alive beacon — refresh identity-level liveness. Drop a beacon that's
-    // already past its own expiration / TTL (on the relay's clock, with
-    // EXPIRY_GRACE_SECS of slack) so a stale relay replay can't resurrect a
-    // departed peer.
+    // Alive beacon — refresh identity-level liveness. A beacon past its own
+    // expiration tag never gets here (the mesh's admission refuses it, on the
+    // relay's clock with EXPIRY_GRACE_SECS of slack); an untagged legacy
+    // beacon past this channel's TTL is dropped here, so a stale relay replay
+    // can't resurrect a departed peer.
     const nowSec = this.#nowSec()
     const expTag = (evt.event?.tags ?? []).find(t => t[0] === 'expiration')?.[1]
-    if (expTag) {
-      const exp = Number(expTag)
-      if (Number.isFinite(exp) && exp + EXPIRY_GRACE_SECS <= nowSec) return
-    } else {
-      if (createdAtSec > 0 && createdAtSec + EVENT_TTL_SECS + EXPIRY_GRACE_SECS < nowSec) return
-    }
+    if (!expTag && createdAtSec > 0 && createdAtSec + EVENT_TTL_SECS + EXPIRY_GRACE_SECS < nowSec) return
     const departedAt = this.#departedAtSec.get(pubkey)
     if (departedAt !== undefined) {
       if (createdAtSec > departedAt) this.#departedAtSec.delete(pubkey)
@@ -7033,8 +7041,11 @@ export class SwarmDrone extends Drone {
   // runtime via IoC (no import); inert until the broker registers.
   #getBroker = () =>
     (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.('@diamondcoreprocessor.com/ContentBrokerDrone') as {
+      /** Peers' original signed layer events at a location, each judged at
+       *  the mesh's admission seam by the broker (or, from an older
+       *  responder's bare shape, only that responder's own entry). */
       fetchVisualsAt?: (sig: string, timeoutMs?: number) =>
-        Promise<readonly { pubkey: string; content: string; created_at: number; tags: string[][] }[] | null>
+        Promise<readonly { pubkey: string; content: string; created_at: number; tags: string[][]; id?: string; kind?: number; sig?: string }[] | null>
       noteDomainsForSig?: (sig: string, domains: string[]) => void
       notePeerLiveness?: NotePeerLiveness
     } | undefined

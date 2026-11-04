@@ -20,7 +20,7 @@ import {
 import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { WEBSITE_SLOT } from '../../commands/website-slot.js'
 import { composeDivision, hydrateSeatedParts } from './division-render.js'
-import { featureNeedsReview } from '../../sharing/feature-availability.js'
+import { mayRunPage } from './page-run-gate.js'
 import { isPublishedVisitorShell } from '../../sharing/behavior-enablement.js'
 import { isFeatureHiddenWithin } from '../../sharing/feature-hidden.js'
 import { openExternalLink } from './document-view-links.js'
@@ -770,8 +770,8 @@ export class SiteViewDrone extends Drone {
       }
       this.#removeTrial()
 
-      const publisher = this.#pagePublisherDomain(cellPageSig)
-      if (featureNeedsReview(segments, cellPageSig, publisher)) {
+      // The one question every page surface asks (page-run-gate.ts).
+      if (!mayRunPage(segments, cellPageSig)) {
         this.#teardown()
         this.#showReviewGate(segments, cellPageSig)
         return
@@ -1327,14 +1327,6 @@ export class SiteViewDrone extends Drone {
    *  adopt hand-off via the broker's address graph). Empty when unknown —
    *  which, for adopted content, the gate treats as "not trusted" (fail-closed:
    *  unknown-origin foreign code stays inert until reviewed). */
-  #pagePublisherDomain(sig: string): string {
-    try {
-      const broker = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
-        ?.get<{ getKnownDomains?: (s: string) => string[] }>('@diamondcoreprocessor.com/ContentBrokerDrone')
-      return broker?.getKnownDomains?.(sig)?.[0] ?? ''
-    } catch { return '' }
-  }
-
   /** Show the review gate over a foreign, unverified page INSTEAD of mounting
    *  it. The page never enters the document, so its scripts don't run and its
    *  resources don't stream. The "Review & enable" action hands the page sig to

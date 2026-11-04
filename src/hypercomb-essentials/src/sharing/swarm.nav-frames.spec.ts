@@ -64,10 +64,12 @@ const PAGES = Array.from({ length: 120 }, (_, i) => `p${i}`)
 
 type Frame = { at: number; what: string }
 const frames: Frame[] = []
-type MeshEvt = { relay: string; sig: string; event: Record<string, unknown>; payload: unknown }
+type MeshEvt = { relay: string; sig: string; event: Record<string, unknown>; payload: unknown; signed?: boolean }
 const subs = new Map<string, Set<(e: MeshEvt) => void>>()
 const deliver = (sig: string, event: Record<string, unknown>, payload: unknown): void => {
-  for (const cb of [...(subs.get(sig) ?? [])]) cb({ relay: 'wss://relay', sig, event, payload })
+  // `signed` is the mesh's admission verdict: a sig means it verified there, '' is the relay's will.
+  const signed = String((event as { sig?: unknown })['sig'] ?? '') !== ''
+  for (const cb of [...(subs.get(sig) ?? [])]) cb({ relay: 'wss://relay', sig, event, payload, signed })
 }
 const sharerSays = (segments: readonly string[]): void => {
   const sig = pageSig(segments)
