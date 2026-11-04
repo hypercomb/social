@@ -27,6 +27,7 @@
 // KEPT, never dropped — every failure path here widens the set.
 
 import { createHash } from 'node:crypto'
+import { byCodeUnit } from './build-determinism.js'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -51,8 +52,8 @@ const readAtom = (dir: string, sig: string): string | null => {
 /** A bag's address: entries sorted by signature, contents joined with NUL.
  *  Byte-identical to `writeBag` in build-module.ts and `bagSignature` in
  *  hypercomb-runtime/src/bags.ts — three sites, one format, by necessity. */
-const bagAddress = (entries: { sig: string; content: string }[]): string =>
-  sha256([...entries].sort((a, b) => a.sig.localeCompare(b.sig)).map(e => e.content).join('\0'))
+export const bagAddress = (entries: { sig: string; content: string }[]): string =>
+  sha256([...entries].sort((a, b) => byCodeUnit(a.sig, b.sig)).map(e => e.content).join('\0'))
 
 /** The signatures one package needs, walked from its sealed root. */
 export const packageClosure = (dir: string, root: string): Set<string> => {

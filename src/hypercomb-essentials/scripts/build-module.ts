@@ -21,6 +21,7 @@ import { createHash } from 'node:crypto'
 import { builtinModules } from 'node:module'
 import { TRANSFER_PACKS_MEANING, encodeTransferPack, gzipBytes } from '../../hypercomb-runtime/src/transfer-pack.js'
 import { hostPackagesPool, poolAddress } from './pool-address.js'
+import { buildInputsDigest, buildScriptPaths, byCodeUnit, fileContentSig, inputsMoved, sortedNames, writeBuildStamp } from './build-determinism.js'
 import { effectSleeper, passiveQueen, viewSleeper } from './passive-queen.js'
 import { fileURLToPath } from 'url'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
@@ -153,15 +154,15 @@ const resolveGenesisLabel = (): string => {
 }
 
 // -------------------------------------------------
-// build cache — Merkle tree with mtime pre-filter
+// build cache — Merkle tree keyed on file CONTENT (build-determinism.ts)
 // -------------------------------------------------
 
-/** Leaf: per-source-file mtime + content hash */
-interface FileLeaf { mtime: number; sig: string }
+/** Leaf: per-source-file content hash. No mtime — a clock is not identity. */
+interface FileLeaf { sig: string }
 
 /** Namespace or bee compilation unit cache */
 interface UnitCache {
-  files: Record<string, FileLeaf>   // relPath → { mtime, sig }
+  files: Record<string, FileLeaf>   // absPath → { sig }
   inputSig: string                  // Merkle hash of all file sigs + entry source
   outputSig: string                 // SHA-256 of compiled output
 }
@@ -221,8 +222,11 @@ interface BeeDepCacheEntry {
 // atom with its own specifier, and every unit reaches it through the import
 // map instead of inlining it. Source content did not change, the builder did,
 // so every v8 bee/namespace that inlined a game file must rebuild.
+// version 11 = the cache keys on file CONTENT, never mtime, and every order that
+// reaches a signature is by code unit (build-determinism.ts); leaves carry no
+// mtime. A v10 cache recorded clock-keyed leaves and locale-ordered layers.
 interface BuildCache {
-  version: 10
+  version: 11
   /** BUILD_SHAPE when this cache was written. */
   shape?: string
   /** DOCS_SHAPE when this cache was written: how layer docs are derived. */
@@ -250,7 +254,7 @@ const OUTPUT_CACHE_DIR = join(DIST_ROOT, '.cache')
 const loadCache = (): BuildCache | null => {
   try {
     const raw = JSON.parse(readFileSync(CACHE_FILE, 'utf8'))
-    if (raw?.version === 10) return raw
+    if (raw?.version === 11) return raw
   } catch {}
   return null
 }
@@ -259,38 +263,33 @@ const saveCache = (c: BuildCache): void =>
   writeFileSync(CACHE_FILE, JSON.stringify(c, null, 2), 'utf8')
 
 /**
- * For each file: if mtime matches cache, reuse cached sig.
- * Otherwise read + hash the file (and record new mtime).
+ * For each file: read it and hash its bytes (once per run). The cached leaf is
+ * consulted only to report whether the content really changed — never to skip
+ * the read, because an unchanged mtime proves nothing about the bytes.
  * Returns the per-file leaves and a combined inputSig (Merkle node).
  */
+const runHashes = new Map<string, string>()
+const contentSigOnce = (path: string): string => {
+  let sig = runHashes.get(path)
+  if (sig === undefined) { sig = fileContentSig(path); runHashes.set(path, sig) }
+  return sig
+}
+
 const resolveUnitInputs = async (
   files: string[],
   cachedFiles: Record<string, FileLeaf> | undefined,
   extra?: string
 ): Promise<{ leaves: Record<string, FileLeaf>; inputSig: string; changed: boolean }> => {
-  const sorted = [...files].sort()
+  const sorted = [...files].sort(byCodeUnit)
   const leaves: Record<string, FileLeaf> = {}
-  let changed = false
+  let changed = !cachedFiles
   const sigParts: string[] = []
 
   for (const f of sorted) {
-    const relKey = f  // absolute path as key
-    const st = statSync(f)
-    const mtime = st.mtimeMs
-    const prev = cachedFiles?.[relKey]
-
-    if (prev && prev.mtime === mtime) {
-      // mtime match — trust cached content hash, skip file read
-      leaves[relKey] = prev
-      sigParts.push(prev.sig)
-    } else {
-      // mtime changed or no cache — read + hash
-      const content = readFileSync(f, 'utf8')
-      const sig = await SignatureService.sign(toArrayBuffer(textToBytes(content)))
-      leaves[relKey] = { mtime, sig }
-      changed = changed || (prev?.sig !== sig)  // content actually changed?
-      sigParts.push(sig)
-    }
+    const sig = contentSigOnce(f)
+    leaves[f] = { sig }
+    changed = changed || cachedFiles?.[f]?.sig !== sig
+    sigParts.push(sig)
   }
 
   if (extra) sigParts.push(extra)
@@ -299,11 +298,6 @@ const resolveUnitInputs = async (
   const inputSig = await SignatureService.sign(
     toArrayBuffer(textToBytes(sigParts.join(':')))
   )
-
-  // If we had no previous cache at all, it's changed
-  if (!cachedFiles) changed = true
-  // If the combined sig differs from what we'd compute, mark changed
-  // (handles case where mtime changed but content didn't — still need to check inputSig)
 
   return { leaves, inputSig, changed }
 }
@@ -328,7 +322,7 @@ const relPosix = (from: string, to: string): string =>
 const walkFiles = (dir: string): string[] => {
   if (!existsSync(dir)) return []
   const out: string[] = []
-  const names = readdirSync(dir).slice().sort((a, b) => a.localeCompare(b))
+  const names = sortedNames(dir)
   for (const name of names) {
     const full = join(dir, name)
     const st = statSync(full)
@@ -586,7 +580,7 @@ const splitPath = (p: string): string[] =>
 const uniq = (xs: string[]): string[] => Array.from(new Set(xs))
 
 const uniqSorted = (xs: string[]): string[] =>
-  uniq(xs).sort((a, b) => a.localeCompare(b))
+  uniq(xs).sort(byCodeUnit)
 
 const namespaceRelDirFromRelDir = (relDir: string): string => {
   const parts = splitPath(relDir)
@@ -630,6 +624,8 @@ const ATOMIZED_ROOTS: readonly string[] =
 const BUILD_SCRIPTS_SIG = createHash('sha256')
   .update(readFileSync(fileURLToPath(import.meta.url)))
   .update(readFileSync(join(__dirname, 'passive-queen.ts')))
+  .update(readFileSync(join(__dirname, 'build-determinism.ts')))
+  .update(readFileSync(join(__dirname, 'pool-address.ts')))
   .digest('hex')
 const BUILD_SHAPE = `atomized:${[...ATOMIZED_ROOTS].sort().join(',')}|vendor:${VENDOR_PACKAGES.join(',')}|scripts:${BUILD_SCRIPTS_SIG}`
 
@@ -776,7 +772,7 @@ type DirNode = { rel: string; children: DirNode[] }
 const readDirTree = (root: string, rel: string): DirNode => {
   const children: DirNode[] = []
   const full = join(root, rel)
-  const names = readdirSync(full).slice().sort((a, b) => a.localeCompare(b))
+  const names = sortedNames(full)
   for (const name of names) {
     if (!rel && name === 'types') continue
     if (!rel && EXCLUDED_DOMAINS.includes(name)) continue
@@ -1035,13 +1031,18 @@ const buildBee = async (
 // main
 // -------------------------------------------------
 
+/** Leave the proof a publish that skips the build looks for: the digest of the
+ *  inputs this dist was made from, and the root it holds (build-determinism.ts). */
+const stampBuild = (root: string): void =>
+  writeBuildStamp(DIST_ROOT, { inputs: buildInputsDigest(PROJECT_ROOT, buildScriptPaths(__dirname)), root })
+
 const main = async (): Promise<void> => {
   const t0 = performance.now()
 
   const sources = discoverSources()
   if (!sources.length) throw new Error('no sources found')
 
-  // --- Phase 1: Merkle tree mtime scan (cheap: stat only, no file reads) ---
+  // --- Phase 1: Merkle tree content scan (each file hashed once per run) ---
 
   const cache = loadCache()
 
@@ -1075,7 +1076,7 @@ const main = async (): Promise<void> => {
     throw new Error(`atom specifier collides with a namespace: ${collidingAtoms.map(s => s.relPath).join(', ')}`)
   }
 
-  // Quick mtime scan: check if ANY file has a changed mtime — every file a
+  // Quick scan: check if ANY recorded input's CONTENT changed — every file a
   // unit really bundled, not only its entries. A bundle inlines modules from
   // other folders through relative imports; checking entries alone let a
   // change to such a module skip the build and ship the old copy (2026-09-22:
@@ -1083,48 +1084,46 @@ const main = async (): Promise<void> => {
   // over the new one).
   const unitMoved = (cachedUnit: UnitCache, entries: readonly string[]): boolean => {
     for (const entry of entries) if (!cachedUnit.files[entry]) return true
-    for (const [file, prev] of Object.entries(cachedUnit.files)) {
-      try { if (statSync(file).mtimeMs !== prev.mtime) return true } catch { return true }
-    }
-    return false
+    return inputsMoved(cachedUnit.files, contentSigOnce)
   }
-  let anyMtimeChanged = !cache || cache.shape !== BUILD_SHAPE
-  if (cache && !anyMtimeChanged) {
+  let anyInputChanged = !cache || cache.shape !== BUILD_SHAPE
+  if (cache && !anyInputChanged) {
     for (const ns of allNs) {
       const cachedUnit = cache.namespaces[ns]
-      if (!cachedUnit || unitMoved(cachedUnit, (namespaceToMembers.get(ns) ?? []).map(m => m.entry))) { anyMtimeChanged = true; break }
+      if (!cachedUnit || unitMoved(cachedUnit, (namespaceToMembers.get(ns) ?? []).map(m => m.entry))) { anyInputChanged = true; break }
     }
-    if (!anyMtimeChanged) {
+    if (!anyInputChanged) {
       for (const src of beeSources) {
         const cachedUnit = cache.bees[src.relPath]
-        if (!cachedUnit || unitMoved(cachedUnit, [src.entry])) { anyMtimeChanged = true; break }
+        if (!cachedUnit || unitMoved(cachedUnit, [src.entry])) { anyInputChanged = true; break }
       }
     }
-    if (!anyMtimeChanged) {
+    if (!anyInputChanged) {
       for (const src of atomSources) {
         const cachedUnit = cache.atoms?.[src.relPath]
-        if (!cachedUnit || unitMoved(cachedUnit, [src.entry])) { anyMtimeChanged = true; break }
+        if (!cachedUnit || unitMoved(cachedUnit, [src.entry])) { anyInputChanged = true; break }
       }
-      if (Object.keys(cache.atoms ?? {}).length !== atomSources.length) anyMtimeChanged = true
+      if (Object.keys(cache.atoms ?? {}).length !== atomSources.length) anyInputChanged = true
     }
     // Also check file count hasn't changed (files added/removed)
-    if (!anyMtimeChanged) {
+    if (!anyInputChanged) {
       const cachedNsCount = Object.keys(cache.namespaces).length
       const cachedBeeCount = Object.keys(cache.bees).length
       if (cachedNsCount !== allNs.length || cachedBeeCount !== beeSources.length) {
-        anyMtimeChanged = true
+        anyInputChanged = true
       }
     }
   }
 
   // --- Early exit: nothing changed at all ---
-  if (!anyMtimeChanged && cache && cache.docsShape === DOCS_SHAPE) {
+  if (!anyInputChanged && cache && cache.docsShape === DOCS_SHAPE) {
     const manifestFile = join(DIST_ROOT, MANIFEST_FILE)
 
     // Verify output still exists (not wiped externally)
     if (existsSync(manifestFile)) {
       const elapsed = ((performance.now() - t0) / 1000).toFixed(3)
       console.log(`[build-module] Merkle root unchanged — skipping build entirely`)
+      stampBuild(cache.rootLayerSig)
       console.log(`[build-module] root signature: ${cache.rootLayerSig}`)
       console.log(`[build-module] completed in ${elapsed}s`)
       return
@@ -1144,7 +1143,7 @@ const main = async (): Promise<void> => {
   ensureDir(DIST_ROOT)
   ensureDir(OUTPUT_CACHE_DIR)
 
-  // --- Phase 3: Per-unit builds with mtime-aware Merkle caching ---
+  // --- Phase 3: Per-unit builds with content-keyed Merkle caching ---
 
   const resourcesByDir = new Map<string, { bees: string[]; deps: string[] }>()
   const dependencyBytes = new Map<string, Uint8Array>()
@@ -1285,7 +1284,7 @@ const main = async (): Promise<void> => {
   if (VENDOR_PACKAGES.length) console.log(`[build-module] vendor atoms: ${VENDOR_PACKAGES.join(', ')}`)
 
   const rootDependencies = uniqSorted(Array.from(dependencyBytes.keys()).map(jsFileName))
-  const dependencySigs = Array.from(dependencyBytes.keys()).sort((a, b) => a.localeCompare(b))
+  const dependencySigs = Array.from(dependencyBytes.keys()).sort(byCodeUnit)
 
   // class-to-dep reverse index: scan each namespace bundle for exported class names
   const classToDepSig = new Map<string, string>()
@@ -1542,7 +1541,7 @@ const main = async (): Promise<void> => {
    *  lives in a single place on the emitting side. */
   const markerFilename = (index: number): string => String(index).padStart(8, '0')
   const writeBag = async (parentDir: string, entries: BagEntry[]): Promise<string> => {
-    const sorted = [...entries].sort((a, b) => a.sig.localeCompare(b.sig))
+    const sorted = [...entries].sort((a, b) => byCodeUnit(a.sig, b.sig))
     const canonical = sorted.map(e => e.content).join('\0')
     const bagSig = await SignatureService.sign(toArrayBuffer(textToBytes(canonical)))
     const bagDir = join(parentDir, bagSig)
@@ -1594,8 +1593,8 @@ const main = async (): Promise<void> => {
   // `generation` (the version counter) against the remote manifest at deploy
   // time; `label` stays this short genesis name.)
   const packageEntry = {
-    layers: Array.from(layers.keys()).sort((a, b) => a.localeCompare(b)),
-    bees: Array.from(resourceBytes.keys()).sort((a, b) => a.localeCompare(b)),
+    layers: Array.from(layers.keys()).sort(byCodeUnit),
+    bees: Array.from(resourceBytes.keys()).sort(byCodeUnit),
     dependencies: dependencySigs,
     beeDeps: Object.fromEntries(beeDepsMap),
     dependenciesBag,
@@ -1751,7 +1750,7 @@ const main = async (): Promise<void> => {
 
   const rootHash = await computeRootHash(allUnitSigs)
   saveCache({
-    version: 10,
+    version: 11,
     shape: BUILD_SHAPE,
     docsShape: DOCS_SHAPE,
     rootHash,
@@ -1778,6 +1777,7 @@ const main = async (): Promise<void> => {
   // deploy step and no second destination: Azure blob storage was the ORIGINAL
   // delivery standard and is not a host — it holds no publisher key and signs
   // no sentinel, so it can never vouch for a root.
+  stampBuild(rootLayerSig)
   console.log(`[build-module] root signature: ${rootLayerSig}`)
   console.log(`[build-module] output: ${DIST_ROOT}`)
   console.log(`[build-module] completed in ${elapsed}s`)

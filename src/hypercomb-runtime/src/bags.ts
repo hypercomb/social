@@ -73,7 +73,7 @@ export const beeEntries = (bees: readonly string[]): BagEntry[] =>
  */
 export const bagSignature = async (entries: readonly BagEntry[]): Promise<string> => {
   const canonical = [...entries]
-    .sort((a, b) => a.sig.localeCompare(b.sig))
+    .sort((a, b) => (a.sig < b.sig ? -1 : a.sig > b.sig ? 1 : 0))
     .map(entry => entry.content)
     .join('\0')
   return SignatureService.sign(new TextEncoder().encode(canonical).buffer as ArrayBuffer)
@@ -82,4 +82,4 @@ export const bagSignature = async (entries: readonly BagEntry[]): Promise<string
 /** The entries in the order they are written — sorted by signature, so index
  *  i means the same member to everyone who builds this bag. */
 export const orderedEntries = (entries: readonly BagEntry[]): BagEntry[] =>
-  [...entries].sort((a, b) => a.sig.localeCompare(b.sig))
+  [...entries].sort((a, b) => (a.sig < b.sig ? -1 : a.sig > b.sig ? 1 : 0))
