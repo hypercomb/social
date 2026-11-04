@@ -2738,8 +2738,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     //     unchanged, so even a canvas observer would not fire, yet the safe
     //     area zoomToFit measures against has moved.
     // So reconcile on the same terms zoomToFit uses: sample the surface AND
-    // the chrome, refit only when that signature actually changes. Same shape
-    // and cadence as resyncToHost, which had to learn this lesson first.
+    // the chrome, refit only when that signature actually changes. The
+    // signature is still the gate; what changed is who asks for it — the
+    // things that move the framing say so (below), nothing is polled.
     const frameSignature = (): string => {
       const box = this.zoom?.canvas?.getBoundingClientRect?.()
         ?? document.querySelector('canvas')?.getBoundingClientRect()
@@ -2765,12 +2766,40 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       return sig.startsWith('0:0:') ? null : sig
     }
     let lastFrame = liveFrame()
-    const frameTimer = setInterval(() => {
+    const reconcile = (): void => {
       const next = liveFrame()
       if (next === null || next === lastFrame) return
       lastFrame = next
       onResize()
-    }, 250)
+    }
+    // EVERYTHING THE SIGNATURE READS IS WATCHED, so a 250 ms poll is not
+    // needed to notice a change in it:
+    //   - the surface: the canvas and its host, by ResizeObserver, and
+    //     `render:surface-resized`, which pixi-host emits from the one place
+    //     that knows the drawing surface changed (resyncToHost);
+    //   - the chrome: the header bar's box by ResizeObserver, its
+    //     `line-on-demand` class by MutationObserver (a mode, not a size);
+    //   - the bar's own reservation (`--hc-controls-left/right`), which
+    //     `#measureControlsEdge` publishes and announces as
+    //     `viewport:inset-poll` the moment it lands.
+    // The canvas can arrive after the switch is turned on, so the observer
+    // re-collects its targets whenever the surface says it changed (observing
+    // a target twice is a no-op).
+    const frameObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(reconcile) : null
+    const header = document.querySelector('.header-bar')
+    const observeFrame = (): void => {
+      if (!frameObserver) return
+      const targets = [
+        this.zoom?.canvas, document.querySelector('canvas'), document.getElementById('pixi-host'),
+        header, this.#host.nativeElement.querySelector('.pill-stage'),
+      ]
+      for (const target of targets) if (target instanceof Element) frameObserver.observe(target)
+    }
+    observeFrame()
+    const headerModeObserver = header && typeof MutationObserver !== 'undefined' ? new MutationObserver(reconcile) : null
+    if (header && headerModeObserver) headerModeObserver.observe(header, { attributes: true, attributeFilter: ['class'] })
+    const offSurface = EffectBus.on('render:surface-resized', () => { observeFrame(); reconcile() })
+    const offInset = EffectBus.on('viewport:inset-poll', reconcile)
 
     window.addEventListener('navigate', arm)
     window.addEventListener('resize', onResize)
@@ -2780,7 +2809,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       window.removeEventListener('navigate', arm)
       window.removeEventListener('resize', onResize)
       if (resizeTimer !== null) { clearTimeout(resizeTimer); resizeTimer = null }
-      clearInterval(frameTimer)
+      frameObserver?.disconnect()
+      headerModeObserver?.disconnect()
+      offSurface()
+      offInset()
       offGuard()
       offCount()
       this.#fitArmedUntil = 0
