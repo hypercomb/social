@@ -332,6 +332,8 @@
       <button
         class="rail-btn chat-toggle-btn"
         [class.on]="chatPanelOpen()"
+        [class.writing]="!chatPanelOpen() && chatActivity() === 'writing'"
+        [class.unread]="!chatPanelOpen() && chatActivity() === 'unread'"
         type="button"
         (mousedown)="$event.preventDefault(); chatToggle.emit()"
         [attr.aria-label]="chatLabel()"
