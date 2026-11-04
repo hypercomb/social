@@ -451,17 +451,27 @@ export type ContentType = 'layer' | 'resource' | 'dependency' | 'bee'
 //
 // Wire-shape difference from the content-addressed flavor:
 //   - Response content is NOT verified against the sig hash (the
-//     sig isn't a content hash; it's a location). Trust comes from
-//     the responder being a swarm member at the same room+secret —
-//     they can already publish under their own pubkey freely, so
-//     forwarding cached events is no worse than re-publishing them.
-//   - Response content is a JSON array of per-pubkey visuals records
-//     so the requester can preserve peer attribution in their cache.
+//     sig isn't a content hash; it's a location).
+//   - Response content is a JSON array of the ORIGINAL kind-30200 events,
+//     each as its publisher signed it (id, pubkey, created_at, kind, tags,
+//     content, sig). The asker hands each one to the mesh's admission seam
+//     (T2: verify at admission) exactly as if the relay had delivered it, so
+//     a responder can carry a peer's word but never put words in a peer's
+//     mouth. Before 2026-11-04 a responder sent the bare shape below
+//     (pubkey, content, created_at, tags) and the asker attributed it on the
+//     responder's say-so. An older responder still sends that shape (H3): the
+//     asker keeps reading it, and takes from it only the responder's own
+//     entry — the one key its signed answer can vouch for.
 export interface CachedVisualsEntry {
   pubkey: string
   content: string  // The original kind-30200 event content (visuals JSON string).
   created_at: number
   tags: string[][]
+  /** The original event's id, kind and signature — absent from an older
+   *  responder's bare shape. */
+  id?: string
+  kind?: number
+  sig?: string
 }
 
 interface NostrEventLike {
@@ -471,6 +481,7 @@ interface NostrEventLike {
   tags?: string[][]
   content?: string
   created_at?: number
+  sig?: string
 }
 
 interface MeshEvtLike {
@@ -493,6 +504,10 @@ interface MeshApi {
   getNonExpired?: (sig: string) => readonly { event: NostrEventLike }[]
   /** The relay this tab meets at, host[:port] — the room's meeting point. */
   swarmHost?: () => string
+  /** The mesh's admission seam (T2), asked for an event that arrived INSIDE
+   *  another: a late-join recovery answer carries peers' original signed
+   *  layer events. `signed` true = the signature verified for the pubkey. */
+  admit?: (evt: unknown) => { ok: boolean; signed?: boolean; reason?: string }
 }
 
 interface SignerApi {
@@ -545,6 +560,7 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 }
 
 const SIG_RE = /^[0-9a-f]{64}$/
+const verboseOn = (): boolean => { try { return localStorage.getItem('hc:verbose') === '1' } catch { return false } }
 
 /** How long a first ask waits for the landing pack still in flight. The pack
  *  starts at page load, so it is normally there first; past this the ask goes
@@ -2686,9 +2702,15 @@ export class ContentBrokerDrone extends Drone {
           const decoded = new TextDecoder().decode(bytes)
           const parsed = JSON.parse(decoded)
           if (!Array.isArray(parsed)) return
-          // Light shape validation — entries must have pubkey + content
-          // strings. Anything else gets filtered out.
+          // Each entry is a peer's ORIGINAL signed layer event: the mesh's
+          // admission seam judges it exactly as it would at relay ingress
+          // (T2 — one verification, one place). An entry that fails is a
+          // responder's word about another key, and is not taken. An older
+          // responder's bare shape (no sig, H3) carries nothing to judge, so
+          // from it only the responder's OWN entry is taken: the 30401 that
+          // carried it is that key's signed word, verified at the seam.
           const entries: CachedVisualsEntry[] = []
+          let refused = 0
           for (const raw of parsed) {
             if (!raw || typeof raw !== 'object') continue
             const pk = String(raw.pubkey ?? '').toLowerCase()
@@ -2696,8 +2718,17 @@ export class ContentBrokerDrone extends Drone {
             const content = typeof raw.content === 'string' ? raw.content : ''
             const createdAt = Number(raw.created_at ?? 0)
             const tags = Array.isArray(raw.tags) ? raw.tags : []
+            const sig = typeof raw.sig === 'string' ? raw.sig : ''
+            if (sig) {
+              const verdict = mesh.admit?.(raw)
+              if (!verdict?.ok || !verdict.signed || Number(raw.kind) !== SWARM_LAYER_KIND) { refused++; continue }
+              entries.push({ id: String(raw.id), pubkey: pk, kind: SWARM_LAYER_KIND, content, created_at: createdAt, tags, sig })
+              continue
+            }
+            if (pk !== pubkey) { refused++; continue }
             entries.push({ pubkey: pk, content, created_at: createdAt, tags })
           }
+          if (refused > 0 && verboseOn()) console.info(`[content-broker] recovery answer from ${pubkey.slice(0, 8)}: ${refused} carried entr${refused === 1 ? 'y' : 'ies'} not admitted`)
           if (entries.length === 0) return
           // Cooperative cancellation for visuals too — signal that this
           // composedSig has been resolved so other peers preparing
@@ -3436,13 +3467,22 @@ export class ContentBrokerDrone extends Drone {
       }
     }
 
+    // The original events, as their publishers signed them: the asker's
+    // seam re-judges each one. An event the cache holds without a signature
+    // (nothing admitted from a relay lacks one) is nobody's word to carry.
     const entries: CachedVisualsEntry[] = []
     for (const [pubkey, ev] of latestByPubkey) {
+      const id = String(ev.id ?? '')
+      const sig = String(ev.sig ?? '')
+      if (!id || !sig) continue
       entries.push({
+        id,
         pubkey,
-        content: String(ev.content ?? ''),
         created_at: Number(ev.created_at ?? 0),
+        kind: SWARM_LAYER_KIND,
         tags: Array.isArray(ev.tags) ? ev.tags : [],
+        content: String(ev.content ?? ''),
+        sig,
       })
     }
     if (entries.length === 0) return

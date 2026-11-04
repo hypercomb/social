@@ -3421,10 +3421,12 @@ export class SwarmDrone extends Drone {
   }
 
   // Inject recovered visuals into the peer cache, mirroring the live
-  // #onEvent cache write. Sanitization is MANDATORY here: fetchVisualsAt
-  // does none (the broker defers it to "the swarm cache injection point" —
-  // this). Live data wins: a pubkey already cached from a live broadcast
-  // is left untouched.
+  // #onEvent cache write. What arrives here is admitted (T2): each entry is
+  // the key's own signed layer event, judged at the mesh's seam by the
+  // broker, or an older responder's word about itself. Sanitization is
+  // still MANDATORY here: fetchVisualsAt does none (the broker defers it to
+  // "the swarm cache injection point" — this). Live data wins: a pubkey
+  // already cached from a live broadcast is left untouched.
   #injectRecoveredVisuals = (
     sig: string,
     entries: readonly { pubkey: string; content: string; tags?: string[][]; created_at?: number }[],
@@ -3476,9 +3478,8 @@ export class SwarmDrone extends Drone {
         // Never a LIVE entry's (`served: 'owner'`): no host kept its bytes.
         noteVisualHosts(cleanVisuals.filter(v => v['served'] !== 'owner'), domainTags, broker.noteDomainsForSig)
       }
-      // NOT where their name is asked: a recovered entry is a responder's
-      // unsigned JSON, so it could tie any key to any host. Only the key's own
-      // signed layer event (#onEvent) hints its host to the name service.
+      // NOT where their name is asked: only the live path (#onEvent) hints a
+      // key's host to the name service — one writer for that hint.
       // A recovered entry is a LIVE answer from a participant who is in the
       // zone right now — the late-joiner path, which is the exact moment the
       // user means by "it should be immediate when participants connect".
@@ -7071,8 +7072,11 @@ export class SwarmDrone extends Drone {
   // runtime via IoC (no import); inert until the broker registers.
   #getBroker = () =>
     (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.('@diamondcoreprocessor.com/ContentBrokerDrone') as {
+      /** Peers' original signed layer events at a location, each judged at
+       *  the mesh's admission seam by the broker (or, from an older
+       *  responder's bare shape, only that responder's own entry). */
       fetchVisualsAt?: (sig: string, timeoutMs?: number) =>
-        Promise<readonly { pubkey: string; content: string; created_at: number; tags: string[][] }[] | null>
+        Promise<readonly { pubkey: string; content: string; created_at: number; tags: string[][]; id?: string; kind?: number; sig?: string }[] | null>
       noteDomainsForSig?: (sig: string, domains: string[]) => void
       notePeerLiveness?: NotePeerLiveness
     } | undefined
