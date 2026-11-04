@@ -794,6 +794,19 @@ every page, and its 25 scenes are folded into the tiles they explain:
   400, tokens only, `blocks/plates/`), and beats that light the plate's parts
   as they are said. `blocks/narrate.cjs` voices the beats through the tour's
   one voice path; until then a beat holds for its reading time.
+- **An exploration into building the hypercomb way.** jwize, 2026-11-04:
+  "the very elements of construction are the pathways to manageability and
+  clarity without overlap. The picture can be expressed in as many ways as
+  possible and shown integrally." The presentation is built of the things it
+  explains: one tile per concept, one word per name, one relation per layer,
+  one signature per medium, one scene per tile. Because each element is one
+  thing said once, the whole stays manageable and clear with no overlap: a
+  concept has one tile, a medium one signature, a scene one place, and a
+  change is made where the thing lives. And the one picture is shown in
+  every way there is, all from the same hierarchy: as hexagons walked, as a
+  website read, as a film played one sentence at a time, as a plate lit part
+  by part, as tiles captured from a hive in use, as a cube of points. None
+  of these is a copy; each is the same tiles, shown integrally.
 - **One look.** The tour's ink and honey, its two vendored faces, its icon
   sprite. Dark as the tour is; light only where the hive says so explicitly.
   Every size reads from the column's width, so a page is the same page
