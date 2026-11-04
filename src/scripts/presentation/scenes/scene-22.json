@@ -8,9 +8,29 @@
   "sub": "",
   "visual": "road:vision",
   "visualData": [
-    "Superimposable trees — your view and mine of one place, stacked and reconciled",
-    "Interests, not feeds — only what meets your private interests reaches you",
-    "One decoration model — a filter is a bouquet of marks, not a hardcoded type"
+    "Superimposable trees — whole trees of one place, laid over each other and read for where they differ",
+    "Interests, not feeds — pheromones travel with the content; what meets your private interests surfaces",
+    "One decoration model — everything decorated the same way; what a thing is lives in its name",
+    "Workflows that check themselves — wake when what they watch changes, and leave an ask where the hive drifted",
+    "Hives that ask hives — request work, receive answers that fit the contract, as proposals you accept"
   ],
-  "say": "Further out. Superimposable trees: your view and my view of the same place, stacked, and reconciled like layers. Interests instead of feeds: people leave interests on what they read, and only what matches your own private interests reaches you. And one decoration model, where a filter is a bouquet of marks instead of a hardcoded type."
+  "lights": [
+    "*",
+    [
+      "r0"
+    ],
+    [
+      "r1"
+    ],
+    [
+      "r2"
+    ],
+    [
+      "r3"
+    ],
+    [
+      "r4"
+    ]
+  ],
+  "say": "Further out. Superimposable trees: your tree and mine of the same place, laid over each other, and read for where they differ. Interests instead of feeds: people leave pheromones on what they read, the pheromones travel with it, and what matches your own private interests rises to meet you. One decoration model, where every kind of thing is decorated the same way, and what a thing is lives in its name, never in a type written into code. Workflows that wake when what they watch changes, and leave a question where the hive has drifted. And hives that can ask each other for work, and receive answers they can check before they accept them."
 }

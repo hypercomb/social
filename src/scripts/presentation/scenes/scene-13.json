@@ -8,5 +8,5 @@
   "sub": "",
   "visual": "film:integrity",
   "visualData": [],
-  "say": "Reason two: integrity you can check for yourself, instead of trust you are asked to give. When someone shares their work with you, you receive signatures, and your own machine checks every byte as it arrives. The same content is kept once, no matter how many people hold it, and any host that holds it can hand you a copy. Sharing a signature is sharing a proof."
+  "say": "Reason two: integrity you can check for yourself, instead of trust you are asked to give. When someone shares their work with you, you receive signatures, and your own machine checks every byte as it arrives. Each hive stores the same content once, however many times it is used, and any host that holds it can hand you a copy. Sharing a signature is sharing a proof of exactly what it names."
 }

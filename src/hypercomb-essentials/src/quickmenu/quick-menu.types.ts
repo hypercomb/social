@@ -195,6 +195,14 @@ export interface QuickMenuSlot {
   readonly label: string
   /** i18n key; falls back to `label`. */
   readonly labelKey?: string
+  /**
+   * Material Symbols name worn above the label (`sell`, `account_tree`). The
+   * word stays the identity — the label, its key, the action and the trait
+   * matching are untouched — so a slot with no icon, or one the renderer has no
+   * drawing for, is simply text-only. User-authored words (a tile's own seats)
+   * carry none: no monogram, no stand-in glyph.
+   */
+  readonly icon?: string
   readonly action: QuickMenuAction
   /**
    * When the leaf acts. `release` preserves the marking-menu gesture: arrive

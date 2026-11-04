@@ -58,6 +58,8 @@ export const QUICK_TRAY_SURFACE = 'hc-quick-tray'
  *  threshold the aggregate index's rows use, so a row-drag feels the same
  *  wherever it starts. */
 const DRAG_THRESHOLD = 5
+/** How long a folded shelf stays open after a take, unless the pointer arrives. */
+const PEEK_MS = 4000
 const SIG_RE = /^[0-9a-f]{64}$/
 
 type LineageLike = { explorerSegments?: () => readonly string[] }
@@ -200,6 +202,9 @@ export class QuickTrayElement extends HTMLElement {
   /** The top band last reserved on the canvas, in px. */
   #reserved = -1
   #measureFrame = 0
+  /** Open only because a take just landed, and not yet hovered. */
+  #peeking = false
+  #peekTimer: ReturnType<typeof setTimeout> | undefined
 
   constructor() {
     super()
@@ -238,6 +243,7 @@ export class QuickTrayElement extends HTMLElement {
       this.#press(typeof p?.open === 'boolean' ? !p.open : !this.#folded)
     }))
     window.addEventListener('resize', this.#onResize)
+    this.addEventListener('pointerenter', this.#endPeek)
     this.#render()
     this.#announce()
     this.#recallFold()
@@ -246,6 +252,8 @@ export class QuickTrayElement extends HTMLElement {
   disconnectedCallback(): void {
     for (const off of this.#offs.splice(0)) off()
     window.removeEventListener('resize', this.#onResize)
+    this.removeEventListener('pointerenter', this.#endPeek)
+    clearTimeout(this.#peekTimer)
     cancelAnimationFrame(this.#measureFrame)
     EffectBus.emit('viewport:inset', { owner: INSET_OWNER, side: 'top', size: 0 })
     this.#trailingClickCleanup?.()
@@ -258,6 +266,7 @@ export class QuickTrayElement extends HTMLElement {
   // ── holding ──────────────────────────────────────────────────────────────
 
   take(incoming: readonly TrayEntry[]): void {
+    this.#peek()
     this.#entries = takeEntries(this.#entries, incoming)
     for (const entry of this.#entries) void this.#loadThumb(entry)
     this.#render()
@@ -391,8 +400,32 @@ export class QuickTrayElement extends HTMLElement {
     this.#root.querySelector('.fold')?.addEventListener('click', () => { this.#press(!this.#folded) })
   }
 
+  /** A take on a folded shelf shows it for PEEK_MS, so the add is seen. The
+   *  pointer arriving within that time keeps it open; nothing is saved either
+   *  way — the participant's own fold stays what it was. */
+  #peek(): void {
+    if (this.#folded) {
+      this.#peeking = true
+      this.#setFolded(false)
+    }
+    if (!this.#peeking) return
+    clearTimeout(this.#peekTimer)
+    this.#peekTimer = setTimeout(() => {
+      if (!this.#peeking) return
+      this.#peeking = false
+      this.#setFolded(true)
+    }, PEEK_MS)
+  }
+
+  /** The pointer is over the shelf, or a press took over: the peek is over. */
+  #endPeek = (): void => {
+    this.#peeking = false
+    clearTimeout(this.#peekTimer)
+  }
+
   /** A participant's fold: applied, and kept for the next boot. */
   #press(folded: boolean): void {
+    this.#endPeek()
     this.#pressed = true
     if (folded === this.#folded) return
     this.#setFolded(folded)

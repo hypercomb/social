@@ -373,9 +373,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   /** The single lane-view state, shared by desktop and mobile. */
   readonly laneCount = signal(3)
   readonly lanesActive = signal(false)
-  /** Rotate the grid: point-top ⇄ flat-top. In lane mode the lanes own the
-   *  orientation (they turn with the device), so this is the manual override
-   *  for the free viewport. */
+  /** Rotate the grid: point-top ⇄ flat-top. In lane mode the lanes follow it —
+   *  the rail drone repacks for whichever orientation the hive is in. */
   readonly rotateHexes = (): void => {
     EffectBus.emit('keymap:invoke', { cmd: 'render.toggleOrientation' })
   }

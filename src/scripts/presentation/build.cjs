@@ -106,15 +106,20 @@ const CLIP = {
   navigate: { kind: 'live', title: 'a real hive' }, zoom: { kind: 'live', title: 'the whole hive' },
   children: { kind: 'live', title: 'building structure' }, create: { kind: 'live', title: 'the first tile' },
   vocabulary: { kind: 'drawn', title: 'vocabulary' }, integrity: { kind: 'drawn', title: 'integrity' }, time: { kind: 'drawn', title: 'time' },
+  served: { kind: 'drawn', title: 'replicas' },
 }
 const RATIO = { live: '960/328', drawn: '1440/492' }
 /** each clip's file under media/ */
 const CLIP_FILE = { navigate: 'hive-navigate.mp4', zoom: 'hive-zoom.mp4', create: 'hive-create.mp4', children: 'hive-children.mp4',
-  vocabulary: 'concept-vocabulary.mp4', integrity: 'concept-integrity.mp4', time: 'concept-time.mp4' }
+  vocabulary: 'concept-vocabulary.mp4', integrity: 'concept-integrity.mp4', time: 'concept-time.mp4',
+  served: 'concept-served.mp4' }
 // the sig stamp (scene field "sig": true): the caption's own sha-256, first eight hex in honey
 const stamp = s => { const h = crypto.createHash('sha256').update(captionOf(s.say)).digest('hex'); return `<span class="sig" title="sha-256 of the caption"><b>${h.slice(0, 8)}</b>${h.slice(8, 16)}…</span>` }
 const figcap = (kind, title, sig = '') => `<div class="figcap ${kind}">${icon('hex')}<span>${esc(kind)} · ${esc(title)}</span>${sig}</div>`
 
+// Every part of a figure carries a data-id (a plate's own parts; a badge, row
+// or milestone by its position, r0 r1 …) so a scene's "lights" can say which
+// part each sentence is about; the tour shows every part lit.
 // `clipSrc(name)`, when given, is the clip's own address (a page in the hive
 // names its clip by signature); without it the tour fills the clip from its
 // inert media blocks on first use.
@@ -132,7 +137,7 @@ function visualHtml(s, { clipSrc } = {}) {
         const m = String(r).trim().match(/^icon:(\S+)\s+(.*)$/)
         if (!m) throw new Error(`badge row needs icon:<name> <label> on scene ${s.n}: ${r}`)
         if (m[2].length > 12) console.warn(`scene ${s.n}: badge label over 12 characters: ${m[2]}`)
-        return `<div class="hexb" style="--i:${i}"><div class="hx">${hexSvg()}${icon(m[1])}</div><span class="t">${esc(m[2])}</span></div>`
+        return `<div class="hexb" data-id="r${i}" style="--i:${i}"><div class="hx">${hexSvg()}${icon(m[1])}</div><span class="t">${esc(m[2])}</span></div>`
       }).join('') + `</div>`
     case 'stack': case 'list':
       return `<div class="fig ${kind}">` + rows.map((r, i) => {
@@ -140,14 +145,14 @@ function visualHtml(s, { clipSrc } = {}) {
         const parts = String(r).replace(/^\*\s/, '').split('|').map(x => x.trim())
         if (parts[1] && parts[1].length > 36) console.warn(`scene ${s.n}: row value over 36 characters: ${parts[1]}`)
         const cls = ['lay', head ? 'head' : '', parts.length === 1 ? 'one' : ''].filter(Boolean).join(' ')
-        return `<div class="${cls}" style="--i:${i}">` + parts.map(p => `<span>${esc(smart(p))}</span>`).join('') + `</div>`
+        return `<div class="${cls}" data-id="r${i}" style="--i:${i}">` + parts.map(p => `<span>${esc(smart(p))}</span>`).join('') + `</div>`
       }).join('') + `</div>`
     case 'road': {
       const state = arg || 'landed'
       return `<div class="fig road">` + rows.map((r, i) => {
         const [title, ...rest] = String(r).split('—')
         if (rest.length !== 1) console.warn(`scene ${s.n}: roadmap row needs exactly one em dash: ${r}`)
-        return `<div class="mile ${state}" style="--i:${i}">${MARK14}<div><div class="mt">${esc(smart(title.trim()))}</div>` +
+        return `<div class="mile ${state}" data-id="r${i}" style="--i:${i}">${MARK14}<div><div class="mt">${esc(smart(title.trim()))}</div>` +
                `<div class="md">${esc(smart(rest.join('—').trim()))}</div></div></div>`
       }).join('') + `</div>`
     }

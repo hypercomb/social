@@ -1,11 +1,13 @@
 // Concept clips — the flow of the experience, drawn.
 //
-// Three scenes of the deck talk about things live capture cannot show: what
+// Four scenes of the deck talk about things live capture cannot show: what
 // the words MEAN (scene 8), what verification IS (scene 13), what time FEELS
-// like (scene 14). Each gets a drawn concept clip: one continuous world per
-// scene, a camera that travels through it, and beats that land on the
-// narration's own sentence boundaries — measured from the cached audio with
-// silencedetect, so an edited line re-times the clip on the next run.
+// like (scene 14), and who SERVES the work (scene 17). Each gets a drawn concept
+// clip: one continuous world per scene, a camera that travels through it, and
+// beats that land on the narration's own sentence boundaries — measured from the
+// cached audio with silencedetect, so an edited line re-times the clip on the
+// next run. Until a reworded line has been voiced, the beats are timed from its
+// text instead (textBeatTimes), and the next run after build.cjs re-times them.
 //
 // The clips are silent by design: the deck plays the scene's narration and the
 // film pane plays the clip muted from t=0, so matching the audio's length and
@@ -14,7 +16,7 @@
 // Same filmstrip pipeline as verbs.cjs: many frames per headless launch,
 // ffmpeg untile to cut them apart, one encode per clip.
 //
-//   node concepts.cjs                 → media/concept-{vocabulary,integrity,time}.mp4
+//   node concepts.cjs                 → media/concept-{vocabulary,integrity,time,served}.mp4
 //   node concepts.cjs vocabulary      → just that clip
 //   node concepts.cjs time --frames   → draw frames only, no encode
 const fs = require('fs')
@@ -23,13 +25,16 @@ const crypto = require('crypto')
 const { execFileSync, spawnSync } = require('child_process')
 
 const { fontsCss } = require('./build.cjs')
+const { sentencesOf, sentenceTimes } = require('./timing.cjs')
 
 const ROOT = __dirname
 const OUT = path.join(ROOT, 'concepts')
 const WORK = path.join(OUT, 'frames')
 const MEDIA = path.join(ROOT, 'media')
 const CACHE = path.join(ROOT, 'audio-cache')
-const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
+// the headless browser that shoots the filmstrips: Edge on the Windows desk, or
+// any Chromium named by CHROMIUM (e.g. CHROMIUM=/opt/pw-browsers/chromium)
+const EDGE = process.env.CHROMIUM || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
 const VOICE = 'en-US-AndrewMultilingualNeural'
 const RATE = '+2%'
 // the filmwrap pane is 960/328 — draw at 1.5× for a crisp downscale
@@ -62,37 +67,38 @@ function sceneSay(n) {
 const audioPathOf = say => path.join(CACHE,
   crypto.createHash('sha256').update(`${VOICE}|${RATE}|${spokenOf(say)}`).digest('hex').slice(0, 16) + '.mp3')
 
+// No voice recorded yet (a line was just reworded): time the beats from the text
+// alone — sentence starts at an even speaking rate, [pause:N] honoured — so the
+// clip can be drawn now. Once the mp3 exists the audio path above takes over.
+const WORDS_PER_SEC = 2.6
+const PAUSE = /\[pause(?::(\d+))?\]/g
+function textBeatTimes(say, beatCount) {
+  const tokens = spokenOf(say).split(PAUSE)          // even: speech, odd: pause ms (or undefined)
+  const starts = []
+  let t = 0, open = true, sentences = 0
+  tokens.forEach((part, i) => {
+    if (i % 2) { t += (Number(part) || 700) / 1000; return }
+    for (const w of part.split(/\s+/).filter(Boolean)) {
+      if (open) { starts.push(t); sentences++; open = false }
+      t += 1 / WORDS_PER_SEC
+      if (/[.!?]["”’)]*$/.test(w)) open = true
+    }
+  })
+  if (sentences !== beatCount)
+    throw new Error(`beat count ${beatCount} != sentence count ${sentences} (timed from text)`)
+  return { starts, audioDur: t, fromText: true }
+}
+
 function beatTimes(say, beatCount) {
   const audio = audioPathOf(say)
-  if (!fs.existsSync(audio)) throw new Error(`no cached narration for this scene — run build.cjs first (${path.basename(audio)})`)
-  const dur = parseFloat(execFileSync('ffprobe',
-    ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', audio], { encoding: 'utf8' }).trim())
-  const det = spawnSync('ffmpeg', ['-i', audio, '-af', 'silencedetect=noise=-38dB:d=0.25', '-f', 'null', '-'], { encoding: 'utf8' })
-  const silences = []
-  for (const m of (det.stderr || '').matchAll(/silence_start: ([\d.]+)[\s\S]*?silence_end: ([\d.]+)/g))
-    silences.push({ start: +m[1], end: +m[2] })
-  const trailing = silences.length && Math.abs(silences[silences.length - 1].end - dur) < 0.08
-  const speechEnd = trailing ? silences[silences.length - 1].start : dur
-  const gaps = silences.filter(s => s.end < dur - 0.08).map(s => s.end)
-
-  const sentences = spokenOf(say).split(/(?<=[.!?])\s+/).filter(s => s.trim())
+  if (!fs.existsSync(audio)) return textBeatTimes(say, beatCount)
+  // the sentence finder is shared with recorder.cjs (timing.cjs), so a line
+  // re-read there is cut exactly where these beats land
+  const sentences = sentencesOf(spokenOf(say))
   if (sentences.length !== beatCount)
     throw new Error(`beat count ${beatCount} != sentence count ${sentences.length}: ${sentences.map(s => s.slice(0, 30)).join(' | ')}`)
-  const words = sentences.map(s => s.split(/\s+/).length)
-  const total = words.reduce((a, b) => a + b, 0)
-
-  const starts = [0]
-  let cum = 0, last = 0
-  for (let j = 0; j < beatCount - 1; j++) {
-    cum += words[j]
-    const expect = cum / total * speechEnd
-    const usable = gaps.filter(g => g > last + 0.3)
-    const pick = usable.length
-      ? usable.reduce((a, b) => Math.abs(b - expect) < Math.abs(a - expect) ? b : a)
-      : expect
-    starts.push(pick); last = pick
-  }
-  return { starts, audioDur: dur }
+  const { starts, audioDur } = sentenceTimes(audio, sentences)
+  return { starts, audioDur }
 }
 
 // ---------- drawing primitives ----------------------------------------------
@@ -229,11 +235,10 @@ function vocabularyWorld(T, p) {
     const e = easeOut(sp(1, 0.5 + (k * 2 + j) * 0.055, 0.8 + (k * 2 + j) * 0.055)); if (e <= 0) return
     const isPerch = n === PERCH
     const acted = isPerch ? easeOut(sp(5, 0.75, 1)) : 0
-    const restyled = isPerch ? easeOut(sp(6, 0.55, 0.85)) : 0
-    s += hex(n.x, n.y, 30 * e * (1 + 0.12 * restyled), {
-      sw: 1.8 + restyled, op: e,
-      fill: restyled > 0.3 ? 'var(--honey-tint)' : acted > 0 ? 'var(--honey-fill)' : 'var(--panel)', fo: restyled > 0.3 ? 1 : acted > 0 ? 0.22 * acted : 1,
-      stroke: restyled > 0.3 ? 'var(--honey)' : 'var(--honey-deep)',
+    // a pheromone never changes how the tile looks (R2: it never labels; A8: appearance is the incidence's)
+    s += hex(n.x, n.y, 30 * e, {
+      sw: 1.8, op: e,
+      fill: acted > 0 ? 'var(--honey-fill)' : 'var(--panel)', fo: acted > 0 ? 0.22 * acted : 1,
     })
   }))
 
@@ -270,18 +275,20 @@ function vocabularyWorld(T, p) {
     if (sense > 0 && sense < 1) s += ring(PERCH.x, PERCH.y, 34 + 16 * sense, (1 - sense) * 0.8, { dash: '3 5', sw: 1.6 })
   }
 
-  // beat 6 — the pheromone mark lands and the tile re-renders from it
+  // beat 6 — a signed interest mark lands on the content; the tile itself is unchanged
   s += mark(PERCH.x, PERCH.y, easeOut(sp(6, 0.1, 0.38)))
   for (const [a, b] of [[0.32, 0.62], [0.48, 0.78]]) {
     const e = sp(6, a, b)
     if (e > 0 && e < 1) s += ring(PERCH.x, PERCH.y, 30 + 34 * e, (1 - e) * 0.7)
   }
 
-  // beat 7 — pollination: another hive, and work crossing to it
+  // beat 7 — replication: the work goes up to a host; the other hive asks for it,
+  // takes it from the host and checks it (T1: from a host; T4: the consumer requests)
   const e7 = sp(7, 0, 1)
   const R2 = { x: 3260, y: 246, r: 48 }
   const R2L = [{ x: 3010, y: 156, r: 32 }, { x: 3010, y: 336, r: 32 }]
   const SLOT = { x: 3010, y: 246, r: 30 }
+  const HOST = { x: 2740, y: 60 }
   if (e7 > 0) {
     const eT = easeOut(sp(7, 0, 0.25))
     R2L.forEach(n => { s += link(R2.x - R2.r * 0.8, R2.y, n.x + n.r, n.y, eT) })
@@ -289,36 +296,56 @@ function vocabularyWorld(T, p) {
     s += hex(R2.x, R2.y, R2.r * eT, { sw: 2.2, op: eT })
     s += glyph('hive', R2.x, R2.y, eT * 0.9)
     R2L.forEach(n => { s += hex(n.x, n.y, n.r * eT, { sw: 1.8, op: eT }) })
-    const tt = easeInOut(sp(7, 0.3, 0.88))
-    if (tt > 0 && tt < 1) {
-      const q = qbez({ x: PERCH.x, y: PERCH.y }, { x: 2740, y: -10 }, { x: SLOT.x, y: SLOT.y }, tt)
-      s += hex(q.x, q.y, 26, { dash: '5 4', op: 0.9 })
-      s += mark(q.x, q.y, 0.7, 0.9)
+    // the host, drawn like the integrity clip's host nodes
+    s += `<circle cx="${HOST.x}" cy="${HOST.y}" r="30" fill="var(--bg)" stroke="var(--steel)" stroke-width="1.5" opacity="${eT.toFixed(2)}"/>`
+    s += txt(HOST.x, HOST.y + 5, 'host', { size: 15, spacing: '.06em', fill: 'var(--steel)', op: eT })
+    // leg one: the work rises from its tile to the host
+    const HELD = { x: HOST.x, y: HOST.y - 50 }
+    const LEG1 = [{ x: PERCH.x, y: PERCH.y }, { x: 2540, y: 20 }, HELD]
+    // leg two: only after the other hive asks does it come down to the slot
+    const LEG2 = [HELD, { x: 2900, y: 60 }, { x: SLOT.x, y: SLOT.y }]
+    const up = easeInOut(sp(7, 0.22, 0.48))
+    const ask = easeOut(sp(7, 0.5, 0.64))
+    const down = easeInOut(sp(7, 0.66, 0.9))
+    const traveller = (leg, tt) => {
+      const q = qbez(...leg, tt)
+      let g = hex(q.x, q.y, 26, { dash: '5 4', op: 0.9 })
       for (let d = 1; d <= 3; d++) {
-        const q2 = qbez({ x: PERCH.x, y: PERCH.y }, { x: 2740, y: -10 }, { x: SLOT.x, y: SLOT.y }, clamp01(tt - d * 0.07))
-        s += `<circle cx="${q2.x.toFixed(1)}" cy="${q2.y.toFixed(1)}" r="2.2" fill="var(--honey)" opacity="${(0.5 - d * 0.13).toFixed(2)}"/>`
+        const q2 = qbez(...leg, clamp01(tt - d * 0.07))
+        g += `<circle cx="${q2.x.toFixed(1)}" cy="${q2.y.toFixed(1)}" r="2.2" fill="var(--honey)" opacity="${(0.5 - d * 0.13).toFixed(2)}"/>`
       }
+      return g
     }
+    if (up > 0 && up < 1) s += traveller(LEG1, up)
+    if (up >= 1 && down <= 0) s += hex(HELD.x, HELD.y, 22, { made: true, sw: 1.6 })       // the host holds it
+    const answered = sp(7, 0.92, 1)                                                        // the request is answered once the work lands
+    if (ask > 0 && answered < 1) {                                                         // the request, from the reader
+      const REQ = [{ x: R2.x - 24, y: R2.y - 46 }, { x: 3080, y: -10 }, { x: HELD.x + 34, y: HELD.y + 6 }]
+      const pts = []
+      for (let k = 0; k <= 24; k++) { const q = qbez(...REQ, ask * k / 24); pts.push(`${q.x.toFixed(1)},${q.y.toFixed(1)}`) }
+      s += `<polyline points="${pts.join(' ')}" fill="none" stroke="var(--honey)" stroke-width="1.8" stroke-dasharray="4 6" opacity="${(0.7 * clamp01(ask * 3) * (1 - answered)).toFixed(3)}"/>`
+    }
+    if (down > 0 && down < 1) s += traveller(LEG2, down)
   }
 
-  // beat 8 — brooding fills the cell; eclosion hatches it
+  // beat 7's arrival is checked; beat 8 — the brood: code from someone else lands
+  // in the slot and is HELD, still and dim, never run, until your hand accepts it
+  // (brood.ts: held, inspectable, inert; script-preloader asks mayRunBee)
   const e8 = sp(8, 0, 1)
-  const landed = sp(7, 0.88, 1) > 0
+  const landed = sp(7, 0.9, 1) > 0
   if (landed || e8 > 0) {
-    const brood = easeOut(sp(8, 0.02, 0.5))
-    const burst = sp(8, 0.55, 0.82)
-    const done = easeOut(sp(8, 0.62, 0.9))
-    s += hex(SLOT.x, SLOT.y, SLOT.r, { dash: done > 0.5 ? '' : '5 4', op: 0.9, sw: 1.8 + done, made: done > 0.5 })
-    if (brood > 0 && done < 0.5) s += hex(SLOT.x, SLOT.y, SLOT.r * 0.82 * brood, { fill: 'var(--honey-tint)', stroke: 'var(--honey-fill)', sw: 1.2, op: 0.85 })
-    if (burst > 0 && burst < 1) {
-      s += ring(SLOT.x, SLOT.y, 30 + 40 * burst, (1 - burst) * 0.9, { sw: 2.4 })
-      for (let k = 0; k < 6; k++) {
-        const a = Math.PI / 3 * k + 0.26, rr = 32 + 30 * burst
-        s += link(SLOT.x + Math.cos(a) * 30, SLOT.y + Math.sin(a) * 30, SLOT.x + Math.cos(a) * rr, SLOT.y + Math.sin(a) * rr, (1 - burst), { stroke: 'var(--honey)', dim: 0.8 })
-      }
+    const accept = easeOut(sp(8, 0.5, 0.66))           // your hand: the check beside it
+    const live = easeOut(sp(8, 0.68, 0.85))            // only then does the slot go solid and the bee move
+    s += hex(SLOT.x, SLOT.y, SLOT.r, { dash: live > 0.5 ? '' : '5 4', op: 0.9, sw: 1.8 + live, made: live > 0.5 })
+    const eHeld = easeOut(sp(8, 0.04, 0.3))
+    s += check(SLOT.x, SLOT.y + 48, 0.9, { op: easeOut(sp(7, 0.9, 1)) * (1 - eHeld) })   // bytes checked on arrival
+    if (eHeld > 0) {
+      const wob = live > 0 ? Math.sin(T * 5) * 3 * live : 0
+      const bx = SLOT.x + 8 * live * Math.sin(T * 1.7), by = SLOT.y + 2 + wob - 22 * (1 - eHeld)
+      s += beeGlyph(bx, by, 8 * live, live > 0 ? T : 0, 0.95, eHeld * (0.4 + 0.6 * live))
+      s += txt(SLOT.x, SLOT.y + 52, 'held', { size: 13, spacing: '.1em', fill: 'var(--faint-text)', op: eHeld * (1 - live) })
     }
-    s += contentLines(SLOT.x, SLOT.y, done, 0.62)
-    s += mark(SLOT.x + 16, SLOT.y - 15, done * 0.58, 0.9)   // the pollinated work keeps its mark
+    if (accept > 0) s += check(SLOT.x + 44, SLOT.y - 26, 1.1 * accept, { op: accept })
   }
 
   // beat 9 — the colony: everything alive, nothing central
@@ -391,17 +418,21 @@ function integrityWorld(T, p) {
       if (fill > 0) {
         s += `<rect x="${MACH.x + 116}" y="${y - 5}" width="180" height="10" rx="5" fill="none" stroke="var(--line)" stroke-width="1.5"/>`
         s += `<rect x="${MACH.x + 116}" y="${y - 5}" width="${180 * easeOut(fill)}" height="10" rx="5" fill="var(--honey-fill)" opacity=".8"/>`
-        s += txt(MACH.x + 116 + 90, y + 28, 'hash(bytes) = sig', { size: 15, fill: 'var(--faint-text)', op: clamp01(fill * 2) * 0.9 })
+        s += txt(MACH.x + 116 + 90, y + 28, 'sha256(bytes) = signature', { size: 15, fill: 'var(--faint-text)', op: clamp01(fill * 2) * 0.9 })
       }
       const ok = easeOut(sp(1, 0.74 + k * 0.09, 0.88 + k * 0.09))
       if (ok > 0) s += check(MACH.x + 336, y, 1.3 * ok, { op: ok })
     })
   }
 
-  // beat 2 — identical content collapses to one copy; the network is a cache
+  // beat 2 — each host keeps its own replica under the same name; inside each,
+  // the same content is stored once (A6). You fetch from one host and check it on
+  // arrival (T1: replicate from a host; S3/T2: verify before you keep it)
   const e2 = sp(2, 0, 1)
   const PEERS = [{ x: 3060, y: 138 }, { x: 3330, y: 350 }, { x: 3670, y: 118 }, { x: 3850, y: 312 }]
-  const C = { x: 3490, y: 232 }
+  const replicaAt = n => ({ x: n.x + 54, y: n.y - 26 })
+  const SRC = PEERS[1]                                   // the host you happen to fetch from
+  const MINE = { x: PEERS[0].x + 74, y: PEERS[0].y - 42 }  // the copy that arrives at you
   if (e2 > 0) {
     const eT = easeOut(sp(2, 0, 0.14))
     const MESH = [[0, 1], [1, 2], [2, 3], [0, 3], [1, 3]]
@@ -410,35 +441,37 @@ function integrityWorld(T, p) {
       s += `<circle cx="${n.x}" cy="${n.y}" r="30" fill="var(--bg)" stroke="${k === 0 ? 'var(--honey)' : 'var(--steel)'}" stroke-width="${k === 0 ? 2.4 : 1.5}" opacity="${eT.toFixed(2)}"/>`
       s += txt(n.x, n.y + 5, k === 0 ? 'you' : 'host', { size: 15, spacing: '.06em', fill: k === 0 ? 'var(--honey)' : 'var(--steel)', op: eT })
     })
-    const collapse = easeInOut(sp(2, 0.12, 0.42))
-    PEERS.forEach((n, k) => {
-      const hx = lerp(n.x + 44, C.x, collapse), hy = lerp(n.y - 20, C.y, collapse)
-      if (collapse < 1) s += hex(hx, hy, lerp(20, 27, collapse), { made: true, op: (1 - collapse * 0.5) * e2, sw: 1.6 })
-      s += link(n.x, n.y, C.x, C.y, easeOut(sp(2, 0.36, 0.55)) * 0.9, { dim: 0.45 })
+    const merge = easeInOut(sp(2, 0.14, 0.4))           // two uses of the same bytes, one stored copy — per host
+    const eL = easeOut(sp(2, 0.36, 0.52))
+    PEERS.slice(1).forEach((n, k) => {
+      const r = replicaAt(n), eH = easeOut(sp(2, 0.04 + k * 0.04, 0.2 + k * 0.04))
+      if (merge < 1) s += hex(r.x + 11 * (1 - merge), r.y - 6 * (1 - merge), 18, { made: true, op: eH * (1 - merge) * 0.9, sw: 1.4 })
+      s += hex(r.x - 11 * (1 - merge), r.y + 6 * (1 - merge), 18, { made: true, op: eH, sw: 1.6 })
+      s += txt(r.x, r.y - 30, '#e3a1', { size: 15, fill: 'var(--honey)', weight: 600, op: eL })
     })
-    if (collapse >= 1) {
-      s += hex(C.x, C.y, 29, { made: true, sw: 2.4 })
-      s += txt(C.x, C.y + 56, '#e3a1 · one copy', { size: 16, fill: 'var(--honey)', weight: 600 })
-    }
-    const out = easeInOut(sp(2, 0.6, 0.76)), back = easeInOut(sp(2, 0.78, 0.94))
-    if (out > 0 && back < 1) {
-      const a = PEERS[0], from = { x: a.x, y: a.y }
-      const at = back > 0 ? { x: lerp(C.x, from.x, back), y: lerp(C.y, from.y, back) } : { x: lerp(from.x, C.x, out), y: lerp(from.y, C.y, out) }
-      s += `<circle cx="${at.x.toFixed(1)}" cy="${at.y.toFixed(1)}" r="${back > 0 ? 9 : 5}" fill="var(--honey)" opacity=".9"/>`
+    const R = replicaAt(SRC)
+    const ask = easeInOut(sp(2, 0.58, 0.72)), back = easeInOut(sp(2, 0.74, 0.92))
+    if (ask > 0 && back < 1) {
+      const at = back > 0 ? { x: lerp(R.x, MINE.x, back), y: lerp(R.y, MINE.y, back) } : { x: lerp(PEERS[0].x, R.x, ask), y: lerp(PEERS[0].y, R.y, ask) }
       if (back > 0) s += hex(at.x, at.y, 13, { made: true, sw: 1.4, op: 0.95 })
+      else s += `<circle cx="${at.x.toFixed(1)}" cy="${at.y.toFixed(1)}" r="5" fill="var(--honey)" opacity=".9"/>`
     }
-    if (back >= 1) { s += hex(PEERS[0].x, PEERS[0].y - 46, 14, { made: true, sw: 1.5 }); s += check(PEERS[0].x + 30, PEERS[0].y - 46, 0.9) }
+    if (back >= 1) {
+      s += hex(MINE.x, MINE.y, 14, { made: true, sw: 1.5 })
+      s += txt(MINE.x, MINE.y - 52, '#e3a1', { size: 15, fill: 'var(--honey)', weight: 600 })   // the same name it had on every host
+      s += check(MINE.x + 30, MINE.y, 0.9, { op: 1 - easeOut(sp(3, 0.1, 0.4)) })   // beat 3's seal takes it over
+    }
   }
 
-  // beat 3 — sharing a hash is sharing a proof
+  // beat 3 — sharing a signature is sharing a proof: the copy that arrived proves itself
   const e3 = sp(3, 0, 1)
   if (e3 > 0) {
     const seal = easeOut(sp(3, 0.1, 0.5))
-    s += ring(C.x, C.y + 8, 74 * seal, seal * 0.9, { dash: '10 7', sw: 2.6 })
+    s += ring(MINE.x, MINE.y, 34 * seal, seal * 0.9, { dash: '10 7', sw: 2.6 })
     const spin = (T * 40) % 360
-    s += `<g transform="rotate(${spin.toFixed(1)} ${C.x} ${C.y + 8})">` + ring(C.x, C.y + 8, 84 * seal, seal * 0.5, { dash: '2 12', sw: 2 }) + '</g>'
+    s += `<g transform="rotate(${spin.toFixed(1)} ${MINE.x} ${MINE.y})">` + ring(MINE.x, MINE.y, 42 * seal, seal * 0.5, { dash: '2 12', sw: 2 }) + '</g>'
     const ck = easeOut(sp(3, 0.45, 0.7))
-    if (ck > 0) s += check(C.x, C.y + 8, 2.2 * ck, { op: ck, sw: 2.6 })
+    if (ck > 0) s += check(MINE.x, MINE.y, 1.4 * ck, { op: ck, sw: 2.6 })
   }
   return s
 }
@@ -449,7 +482,8 @@ function timeWorld(T, p) {
   let s = ''
   const CY = 330, CW = 92, CH = 64, X0 = 240, DX = 120
   const cardX = u => X0 + u * DX
-  const N = 9                                   // the strip; experiments add 9 and 10
+  const N = 9                                   // the strip; experiments add 9 and 10, the restore 11
+  const RESTORE = 11
 
   // what the page looked like at continuous position u — morphs smoothly
   const pageAt = (cx, cy, u, scale, op) => {
@@ -466,13 +500,17 @@ function timeWorld(T, p) {
   // undo/rewind/checkpoint state of the playhead, shared across beats
   const undoU = 8 - 6 * easeInOut(sp(1, 0.08, 0.9))                       // 8 → 2, across the session break
   const scrubU = 2 + 3.6 * Math.sin(Math.PI * easeInOut(sp(2, 0.12, 0.96)))  // out and back
-  const expandN = sp(4, 0, 1) > 0 ? 11 : N
+  const expandN = sp(4, 0, 1) > 0 ? RESTORE + 1 : N
   let headU = 8
   if (p(1) > 0) headU = undoU
   if (p(2) > 0) headU = scrubU
   if (p(3) > 0) headU = 2 + 4 * easeInOut(sp(3, 0.1, 0.5))                // drift to the revisions
-  if (p(4) > 0) headU = lerp(6, 10, easeInOut(sp(4, 0.55, 0.95)))         // out to the experiments
-  if (p(5) > 0) headU = 10
+  // beat 4: back to the live state, snapshot it, out through the experiments, then
+  // restore — a new head that matches the snapshot (restore.queen.ts: append, never rewrite)
+  if (p(4) > 0) headU = sp(4, 0.3, 1) > 0
+    ? lerp(8, RESTORE, easeInOut(sp(4, 0.42, 0.95)))
+    : lerp(6, 8, easeInOut(sp(4, 0, 0.14)))
+  if (p(5) > 0) headU = RESTORE
 
   // session break between cards 3 and 4
   const eDiv = easeOut(sp(0, 0.7, 1))
@@ -480,11 +518,13 @@ function timeWorld(T, p) {
   s += link(660, 262, 660, 408, eDiv * (0.5 + divPulse), { dash: '5 6', dim: 0.8, sw: 1.8, stroke: divPulse ? 'var(--honey)' : 'var(--faint)' })
 
   for (let k = 0; k < expandN; k++) {
-    const exp = k >= N                                                     // experimental cards
-    const e = exp ? easeOut(sp(4, 0.34 + (k - N) * 0.16, 0.6 + (k - N) * 0.16))
+    const exp = k >= N && k < RESTORE                                      // experimental cards, kept in history
+    const e = k === RESTORE ? easeOut(sp(4, 0.74, 0.9))
+            : exp ? easeOut(sp(4, 0.34 + (k - N) * 0.16, 0.6 + (k - N) * 0.16))
                   : easeOut(sp(0, 0.02 + k * 0.075, 0.3 + k * 0.075))
+    const state = k === RESTORE ? 8 : k                                    // the restore holds the snapshot's state
     if (e <= 0) continue
-    const x = cardX(k) + (1 - e) * 220, y = CY
+    const x = cardX(k) + (1 - e) * (k >= N ? 60 : 220), y = CY      // beat 4's cards stay inside the frame
     const behind = p(1) > 0.05 && k > headU + 0.3 && p(2) <= 0
     const dim = behind ? 0.5 : 1
     // beat 5 — the ripple back through every immutable state
@@ -493,9 +533,9 @@ function timeWorld(T, p) {
     s += `<rect x="${(x - CW / 2).toFixed(1)}" y="${(y - CH / 2 - lift).toFixed(1)}" width="${CW}" height="${CH}" rx="3" ` +
       `fill="${exp ? 'var(--panel)' : 'var(--bg)'}" stroke="${rip > 0.5 ? 'var(--honey)' : exp ? 'var(--honey-deep)' : 'var(--line)'}" ` +
       `stroke-width="${rip > 0.5 ? 2 : 1.6}" ${exp ? 'stroke-dasharray="6 4" ' : ''}opacity="${(e * dim).toFixed(2)}"/>`
-    s += pageAt(x, y - lift, k, 1, e * dim)
+    s += pageAt(x, y - lift, state, 1, e * dim)
     const sigOn = p(5) > 0 ? clamp01(rip * 2) : 0
-    s += txt(x, y + 52, '#' + hex4(k + 3), { size: k === 0 && sp(5, 0.75, 0.95) > 0 ? 18 : 15, fill: sigOn > 0.4 ? 'var(--honey)' : 'var(--faint-text)', weight: sigOn > 0.4 ? 600 : 400, op: e * (0.65 + 0.35 * sigOn) })
+    s += txt(x, y + 52, '#' + hex4(state + 3), { size: k === 0 && sp(5, 0.75, 0.95) > 0 ? 18 : 15, fill: sigOn > 0.4 ? 'var(--honey)' : 'var(--faint-text)', weight: sigOn > 0.4 ? 600 : 400, op: e * (0.65 + 0.35 * sigOn) })
   }
   // the oldest state, as reachable as the head
   const eOld = easeOut(sp(5, 0.75, 0.95))
@@ -519,7 +559,7 @@ function timeWorld(T, p) {
   }
 
   // beat 3 — named revisions dropping onto the strip
-  ;[['adopt', 4, 0.08, 0.38], ['upgrade', 6, 0.45, 0.75]].forEach(([name, u, a, b]) => {
+  ;[['adopted', 4, 0.08, 0.38], ['synced', 6, 0.45, 0.75]].forEach(([name, u, a, b]) => {
     const e = easeOut(sp(3, a, b)); if (e <= 0) return
     const x = cardX(u), ty = CY - CH / 2 - 58 + (1 - e) * -26
     s += link(x, ty + 12, x, CY - CH / 2 - 2, e * 0.8, { dim: 0.6 })
@@ -527,13 +567,124 @@ function timeWorld(T, p) {
     s += txt(x, ty + 6, name, { size: 16, fill: 'var(--honey)', weight: 600, op: e })
   })
 
-  // beat 4 — the checkpoint pin, then the experiments it protects against
-  const ePin = easeOut(sp(4, 0.04, 0.3))
+  // beat 4 — the snapshot pin on the live state (snapshot.queen.ts: the whole hive,
+  // one commit), the experiments, then the restore that comes back to it
+  const ePin = easeOut(sp(4, 0.14, 0.34))
   if (ePin > 0) {
     const x = cardX(8)
     s += link(x, CY - CH / 2 - 40 * ePin, x, CY - CH / 2 - 2, ePin * 0.9, { dim: 0.8, sw: 2 })
     s += hex(x, CY - CH / 2 - 46, 11 * ePin, { made: true, sw: 2 })
-    s += txt(x, CY - CH / 2 - 66, 'snapshot', { size: 16, spacing: '.08em', fill: 'var(--honey)', op: ePin })
+    s += txt(x, CY - CH / 2 - 66, 'snapshot · whole hive', { size: 16, spacing: '.04em', fill: 'var(--honey)', op: ePin })
+  }
+  const eBack = easeOut(sp(4, 0.74, 0.92))
+  if (eBack > 0) {
+    const x = cardX(RESTORE)
+    s += txt(x, CY - CH / 2 - 66, 'restore', { size: 16, spacing: '.08em', fill: 'var(--honey)', op: eBack })
+  }
+  return s
+}
+
+// one work, held by several hosts: each keeps its own replica under the same
+// signature, checked as it arrives (T1: replicate from a host; S3: verify before
+// write; A6: same content, one signature). You take it from one host you chose
+// (T4: the consumer requests; T5: selection is yours) and check it yourself.
+const person = (x, y, op) => op <= 0.01 ? '' :
+  `<g opacity="${op.toFixed(3)}" fill="none" stroke="var(--steel)" stroke-width="1.5">` +
+  `<circle cx="${x}" cy="${y - 7}" r="4.5"/><path d="M${x - 7},${y + 7} Q${x},${y - 3} ${x + 7},${y + 7}"/></g>`
+function servedWorld(T, p) {
+  const sp = (i, a, b) => clamp01((p(i) - a) / (b - a))
+  let s = ''
+  const YOU = { x: 260, y: 250 }
+  const HOSTS = [{ x: 560, y: 390 }, { x: 900, y: 130 }, { x: 1110, y: 330 }]
+  const ORIGIN = 2, NEXT = 1, NEAR = 0                    // made at one host, replicated on, fetched from another
+  const replicaAt = n => ({ x: n.x + 54, y: n.y - 26 })
+  const MINE = { x: YOU.x + 54, y: YOU.y - 26 }
+  const SIG = '#e3a1'
+
+  // beat 0 — the community: hosts, the mesh between them, you, and one work
+  const eHost = k => easeOut(sp(0, 0.06 + k * 0.12, 0.36 + k * 0.12))
+  const eMesh = easeOut(sp(0, 0.4, 0.7)), eYou = easeOut(sp(0, 0.5, 0.78))
+  ;[[0, 1], [1, 2], [0, 2]].forEach(([a, b]) => { s += link(HOSTS[a].x, HOSTS[a].y, HOSTS[b].x, HOSTS[b].y, eMesh * 0.6, { dash: '2 6', dim: 0.5 }) })
+  // you could reach any host; the one you choose is the allowance you give (beat 3)
+  const allow = easeOut(sp(3, 0.05, 0.3))
+  HOSTS.forEach((n, k) => {
+    const chosen = k === NEAR
+    s += link(YOU.x, YOU.y, n.x, n.y, eYou * (chosen ? 0.5 + 0.5 * allow : 0.5), chosen && allow > 0.3
+      ? { stroke: 'var(--honey)', dim: 0.75, sw: 1.8 } : { dash: '2 6', dim: 0.35 })
+  })
+  HOSTS.forEach((n, k) => {
+    const e = eHost(k); if (e <= 0) return
+    s += `<circle cx="${n.x}" cy="${n.y}" r="30" fill="var(--bg)" stroke="var(--steel)" stroke-width="1.5" opacity="${e.toFixed(2)}"/>`
+    s += txt(n.x, n.y + 5, 'host', { size: 15, spacing: '.06em', fill: 'var(--steel)', op: e })
+  })
+  if (eYou > 0) {
+    s += `<circle cx="${YOU.x}" cy="${YOU.y}" r="30" fill="var(--bg)" stroke="var(--honey)" stroke-width="2.4" opacity="${eYou.toFixed(2)}"/>`
+    s += txt(YOU.x, YOU.y + 5, 'you', { size: 15, spacing: '.06em', fill: 'var(--honey)', op: eYou })
+  }
+
+  // beat 1 — hosts are run by the people who use them; one is shared with friends
+  HOSTS.forEach((n, k) => {
+    const e = easeOut(sp(1, 0.05 + k * 0.1, 0.3 + k * 0.1))
+    s += person(n.x - 44, n.y + 40, e); s += person(n.x - 20, n.y + 48, e)
+  })
+  const F = HOSTS[NEXT]
+  ;[{ x: F.x - 86, y: F.y - 34 }, { x: F.x - 50, y: F.y - 58 }].forEach((q, j) => {
+    const e = easeOut(sp(1, 0.55 + j * 0.12, 0.8 + j * 0.12))
+    s += link(q.x + 9, q.y + 2, F.x - 22, F.y - 20, e, { dash: '3 4', dim: 0.4 })
+    s += person(q.x, q.y, e)
+  })
+
+  // the work and its replicas: each host's own copy, the same signature
+  const replica = (n, e, checked) => {
+    if (e <= 0) return ''
+    const r = replicaAt(n)
+    return hex(r.x, r.y, 18 * e, { made: true, sw: 1.6, op: e }) +
+      txt(r.x, r.y - 30, SIG, { size: 15, fill: 'var(--honey)', weight: 600, op: e }) +
+      (checked > 0 ? check(r.x + 32, r.y, 0.9 * checked, { op: checked }) : '')
+  }
+  const travel = (a, b, tt) => {
+    if (tt <= 0 || tt >= 1) return ''
+    const A = replicaAt(a), B = replicaAt(b), c = { x: (A.x + B.x) / 2, y: Math.min(A.y, B.y) - 70 }
+    let g = hex(qbez(A, c, B, tt).x, qbez(A, c, B, tt).y, 14, { made: true, sw: 1.4, op: 0.95 })
+    for (let d = 1; d <= 3; d++) {
+      const q = qbez(A, c, B, clamp01(tt - d * 0.07))
+      g += `<circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="2.2" fill="var(--honey)" opacity="${(0.5 - d * 0.13).toFixed(2)}"/>`
+    }
+    return g
+  }
+  // the maker's own host checks it too as it is written (S3), so "every replica
+  // checked" shows a check on every replica, the first one included
+  const eCap = easeOut(sp(2, 0.8, 0.96))
+  s += replica(HOSTS[ORIGIN], easeOut(sp(0, 0.62, 0.9)), eCap)
+
+  // beat 2 — replicated host to host, each replica checked against its signature
+  const t1 = easeInOut(sp(2, 0.06, 0.32)), t2 = easeInOut(sp(2, 0.42, 0.68))
+  s += travel(HOSTS[ORIGIN], HOSTS[NEXT], t1)
+  s += replica(HOSTS[NEXT], t1 >= 1 ? 1 : 0, easeOut(sp(2, 0.32, 0.42)))
+  s += travel(HOSTS[NEXT], HOSTS[NEAR], t2)
+  s += replica(HOSTS[NEAR], t2 >= 1 ? 1 : 0, easeOut(sp(2, 0.68, 0.78)))
+  s += txt(720, 470, `${SIG} · every replica checked`, { size: 16, fill: 'var(--honey)', weight: 600, op: eCap })
+
+  // beat 3 — you ask the host you chose, take its replica and check it yourself
+  const R = replicaAt(HOSTS[NEAR])
+  const ask = easeInOut(sp(3, 0.32, 0.5)), back = easeInOut(sp(3, 0.52, 0.78))
+  if (ask > 0 && back < 1) {
+    if (back > 0) s += hex(lerp(R.x, MINE.x, back), lerp(R.y, MINE.y, back), 13, { made: true, sw: 1.4, op: 0.95 })
+    else s += `<circle cx="${lerp(YOU.x, R.x, ask).toFixed(1)}" cy="${lerp(YOU.y, R.y, ask).toFixed(1)}" r="5" fill="var(--honey)" opacity=".9"/>`
+  }
+  if (back >= 1) {
+    s += hex(MINE.x, MINE.y, 16, { made: true, sw: 1.6 })
+    s += txt(MINE.x, MINE.y - 30, SIG, { size: 15, fill: 'var(--honey)', weight: 600 })
+    s += check(MINE.x + 32, MINE.y, 0.9 * easeOut(sp(3, 0.8, 0.92)))
+  }
+
+  // beat 5 — served by everyone: every place that holds it, alive
+  const e5 = sp(5, 0, 1)
+  if (e5 > 0) {
+    [...HOSTS.map(replicaAt), MINE].forEach((r, k) => {
+      const o = (0.3 + 0.24 * Math.sin(T * 2.1 + k * 1.7)) * easeOut(sp(5, 0, 0.3))
+      s += ring(r.x, r.y, 28, Math.max(0, o), { sw: 1.6 })
+    })
   }
   return s
 }
@@ -544,15 +695,15 @@ const CLIPS = {
     scene: 8, file: 'concept-vocabulary.mp4', world: vocabularyWorld,
     beats: [
       { term: 'the language', gloss: 'precise words', cam: { x: 720, y: 246, s: 1.0 } },
-      { term: 'hive', gloss: 'where you and your people meet', cam: { x: 2215, y: 246, s: 1.25 } },
-      { term: 'tile', gloss: 'one cell of content', cam: { x: 2238, y: 246, s: 2.5 } },
+      { term: 'hive', gloss: 'your own place, kept', cam: { x: 2215, y: 246, s: 1.25 } },
+      { term: 'tile', gloss: 'one piece of content', cam: { x: 2238, y: 246, s: 2.5 } },
       { term: 'layer', gloss: 'one moment of a place, kept', cam: { x: 2200, y: 238, s: 2.0 } },
       { term: 'signature', gloss: 'the name the content gives itself', cam: { x: 2230, y: 282, s: 2.0 } },
-      { term: 'bee', gloss: 'senses, then acts', cam: { x: 2280, y: 226, s: 1.25 } },
-      { term: 'pheromone', gloss: 'an interest someone leaves', cam: { x: 2400, y: 212, s: 1.65 } },
-      { term: 'replication', gloss: 'work crossing between hives', cam: { x: 2740, y: 240, s: 0.56 } },
-      { term: 'brooding · eclosion', gloss: 'prepared, then hatched', cam: { x: 3010, y: 246, s: 2.2 } },
-      { term: 'colony', gloss: 'no central authority', cam: { x: 2620, y: 246, s: 0.55 } },
+      { term: 'bee', gloss: 'acts when needed, or on its word', cam: { x: 2280, y: 226, s: 1.25 } },
+      { term: 'pheromone', gloss: 'a signed signal of interest', cam: { x: 2350, y: 250, s: 1.25 } },
+      { term: 'replication', gloss: 'work crossing hives, checked', cam: { x: 2740, y: 240, s: 0.56 } },
+      { term: 'brood', gloss: 'held, never run, until you accept', cam: { x: 3090, y: 246, s: 1.7 } },
+      { term: 'colony', gloss: 'a domain and its hives; none in charge', cam: { x: 2620, y: 246, s: 0.55 } },
     ],
   },
   integrity: {
@@ -560,8 +711,8 @@ const CLIPS = {
     beats: [
       { term: 'integrity', gloss: 'verify, don’t trust', cam: { x: 760, y: 240, s: 1.15 } },
       { term: 'share = signatures', gloss: 'every byte proven on arrival', cam: { x: 1990, y: 240, s: 0.92 } },
-      { term: 'one copy', gloss: 'any host can serve it', cam: { x: 3585, y: 235, s: 0.76 } },
-      { term: 'proof', gloss: 'sharing a hash is sharing a proof', cam: { x: 3575, y: 262, s: 1.55 } },
+      { term: 'one name', gloss: 'any host can serve it', cam: { x: 3585, y: 215, s: 0.76 } },
+      { term: 'proof', gloss: 'sharing a signature is sharing a proof', cam: { x: 3070, y: 110, s: 1.55 } },
     ],
   },
   time: {
@@ -573,6 +724,17 @@ const CLIPS = {
       { term: 'revisions', gloss: 'updates wait for you', cam: { x: 720, y: 270, s: 1.0 } },
       { term: 'snapshots', gloss: 'try something risky, come back', cam: { x: 880, y: 278, s: 0.9 } },
       { term: 'immutable', gloss: 'the past is one signature away', cam: { x: 840, y: 282, s: 0.86 } },
+    ],
+  },
+  served: {
+    scene: 17, file: 'concept-served.mp4', world: servedWorld,
+    beats: [
+      { term: 'community', gloss: 'carried by the people who use it', cam: { x: 700, y: 250, s: 1.0 } },
+      { term: 'hosts', gloss: 'run by people, shared with friends', cam: { x: 700, y: 260, s: 1.0 } },
+      { term: 'replicas', gloss: 'every replica checked', cam: { x: 720, y: 246, s: 1.0 } },
+      { term: 'trust', gloss: 'an allowance you give', cam: { x: 690, y: 250, s: 1.0 } },
+      { term: 'no tracking', gloss: 'not one statistic about you', cam: { x: 690, y: 250, s: 1.0 } },
+      { term: 'served by everyone', gloss: 'secured by your peers', cam: { x: 700, y: 246, s: 0.97 } },
     ],
   },
 }
@@ -629,8 +791,9 @@ function shootStrip(html, rows, stripPng) {
   fs.writeFileSync(htmlPath, html)
   try { fs.unlinkSync(stripPng) } catch {}
   execFileSync(EDGE, ['--headless=new', '--disable-gpu', '--hide-scrollbars',
+    ...(process.getuid && process.getuid() === 0 ? ['--no-sandbox'] : []),   // a root container refuses the sandbox
     `--window-size=${W},${H * rows}`, '--virtual-time-budget=4000',
-    `--screenshot=${stripPng}`, 'file:///' + htmlPath.split(path.sep).join('/')], { stdio: 'ignore' })
+    `--screenshot=${stripPng}`, require('url').pathToFileURL(htmlPath).href], { stdio: 'ignore' })
   const deadline = Date.now() + 30_000
   let size = -1
   for (;;) {
@@ -639,7 +802,7 @@ function shootStrip(html, rows, stripPng) {
     try { z = fs.statSync(stripPng).size } catch {}
     if (z > 0 && z === size) break
     size = z
-    execFileSync('powershell', ['-NoProfile', '-Command', 'Start-Sleep -Milliseconds 200'], { stdio: 'ignore' })
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200)
   }
   try { fs.unlinkSync(htmlPath) } catch {}
   return parseInt(execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0',
@@ -650,7 +813,8 @@ const ff = (...a) => execFileSync('ffmpeg', ['-y', '-loglevel', 'error', ...a], 
 function drawClip(name) {
   const clip = CLIPS[name]
   const say = sceneSay(clip.scene)
-  const { starts, audioDur } = beatTimes(say, clip.beats.length)
+  const { starts, audioDur, fromText } = beatTimes(say, clip.beats.length)
+  if (fromText) console.log(`${name}: no recorded narration for scene ${clip.scene} yet — beats timed from the text at ${WORDS_PER_SEC} words/s; run build.cjs, then this again, to re-time from the voice`)
   console.log(`${name}: narration ${audioDur.toFixed(1)}s · beats at ${starts.map(t => t.toFixed(1)).join(' ')}`)
 
   const dir = path.join(WORK, name)

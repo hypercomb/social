@@ -21,9 +21,10 @@
 //     axis into AxialService, and re-projects on rotation and rung change;
 //   • engages the lane viewport (`setLaneViewport`) so pan, pinch, wheel and
 //     every fit read the strip's axis — the finger travels ONE way only;
-//   • owns the hex orientation at RENDER time (point-top strip in portrait,
-//     flat-top in landscape) without touching the participant's standing
-//     `hc:hex-orientation` preference, and hands it back on release;
+//   • READS the hex orientation, never owns it: point-top or flat-top, the
+//     strip packs gap-free in either (matched pairings stay straight, the
+//     cross pairings are plain honeycomb — see rail-grid.ts), and turning the
+//     hive while the lanes are up re-projects them;
 //   • publishes `lanes:changed {active, lanes}` for the chrome and
 //     `render:grid-changed` for the renderer;
 //   • PARKS THE VIEWPORT IT LEAVES. Each posture — the free map and the strip
@@ -90,7 +91,7 @@ export class RailProjectionDrone extends Drone {
     'lanes:toggle', 'lanes:set', 'lanes:step', 'lanes:off', 'lanes:on',
   ]
   protected override emits = [
-    'lanes:changed', 'render:grid-changed', 'render:set-orientation', 'toast:show',
+    'lanes:changed', 'render:grid-changed', 'toast:show',
   ]
 
   #bound = false
@@ -100,11 +101,8 @@ export class RailProjectionDrone extends Drone {
   /** What the renderer is drawing, from the last `render:set-orientation`
    *  (or the standing preference before any). */
   #flat = false
-  /** The participant's standing orientation, parked while the rail owns it. */
-  #flatBefore: boolean | null = null
-  /** Set around our own `render:set-orientation`, so the echo is not read as
-   *  the participant rotating the hive under us. */
-  #orientationEcho = false
+  /** The orientation the current projection was packed for. */
+  #projectedFlat: boolean | null = null
   #reflowTimer: ReturnType<typeof setTimeout> | null = null
   #fitTimer: ReturnType<typeof setTimeout> | null = null
   /** Owed on the render that follows: a toggle hands the posture arrived at
@@ -167,14 +165,10 @@ export class RailProjectionDrone extends Drone {
 
     this.onEffect<{ flat?: boolean }>('render:set-orientation', ({ flat }) => {
       const next = !!flat
-      if (this.#orientationEcho) { this.#orientationEcho = false; this.#flat = next; return }
+      if (next === this.#flat) return
       this.#flat = next
-      if (!this.#active) return
-      // The participant rotated the hive while the rail owns the orientation.
-      // Their choice is remembered for the release; the strip keeps the
-      // orientation that packs it straight.
-      this.#flatBefore = next
-      if (next !== this.#horizontal) this.#orient(this.#horizontal === true)
+      // The participant turned the hive: repack the lanes for it.
+      if (this.#active) this.#apply()
     })
 
     // One switch, one layout. Older count/step emitters remain harmless
@@ -233,7 +227,8 @@ export class RailProjectionDrone extends Drone {
     if (!this.#wanted()) { this.#release(); return }
     const lanes = this.#lanesFor()
     const horizontal = laneStripHorizontal()
-    if (this.#active && this.#lanes === lanes && this.#horizontal === horizontal) {
+    const flat = this.#flat
+    if (this.#active && this.#lanes === lanes && this.#horizontal === horizontal && this.#projectedFlat === flat) {
       if (say) this.#toast(lanes)
       return
     }
@@ -244,13 +239,13 @@ export class RailProjectionDrone extends Drone {
     // projection moves anything.
     const entering = !this.#active
     if (entering) this.#park('map')
-    if (!axial.project(buildRailMatrix(lanes, horizontal, capacity))) return
+    if (!axial.project(buildRailMatrix(lanes, flat, capacity, horizontal))) return
 
     this.#active = true
     this.#lanes = lanes
     this.#horizontal = horizontal
+    this.#projectedFlat = flat
     setLaneViewport(true)
-    this.#orient(horizontal)
     this.emitEffect('render:grid-changed', { active: true, lanes, horizontal })
     this.#publish()
     // A rotation or a lane change re-projects the same posture: the strip is
@@ -270,13 +265,8 @@ export class RailProjectionDrone extends Drone {
     this.#active = false
     this.#lanes = 0
     this.#horizontal = null
+    this.#projectedFlat = null
     setLaneViewport(false)
-    const before = this.#flatBefore
-    this.#flatBefore = null
-    if (before !== null && before !== this.#flat) {
-      this.#orientationEcho = true
-      this.emitEffect('render:set-orientation', { flat: before })
-    }
     this.emitEffect('render:grid-changed', { active: false, lanes: LANES, horizontal: null })
     this.#publish()
     this.#framePending = 'map'
@@ -292,7 +282,9 @@ export class RailProjectionDrone extends Drone {
   /** A strip reading is along one long axis and one lane count; the map is
    *  the same whichever way the phone is held. */
   #parkKey(posture: Posture, location: string): string {
-    const shape = posture === 'strip' ? `${laneStripHorizontal() ? 'x' : 'y'}${this.#lanesFor()}` : ''
+    const shape = posture === 'strip'
+      ? `${laneStripHorizontal() ? 'x' : 'y'}${this.#flat ? 'f' : 'p'}${this.#lanesFor()}`
+      : ''
     return `${posture}${shape}
 ${location}`
   }
@@ -324,17 +316,6 @@ ${location}`
     vp.setPan?.(snap.pan?.dx ?? 0, snap.pan?.dy ?? 0, 'auto-persist')
     vp.dispatchEvent(new CustomEvent('restore', { detail: snap }))
     return true
-  }
-
-  /** The strip is only straight one way: point-top rows for a vertical strip,
-   *  flat-top columns for a horizontal one. Runtime only — the standing
-   *  preference in localStorage is never written, so releasing the rail gives
-   *  the participant's own choice back untouched. */
-  #orient(flat: boolean): void {
-    if (this.#flatBefore === null) this.#flatBefore = this.#flat
-    if (this.#flat === flat) return
-    this.#orientationEcho = true
-    this.emitEffect('render:set-orientation', { flat })
   }
 
   #standingFlat(): boolean {
