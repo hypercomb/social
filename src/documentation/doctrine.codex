@@ -39,7 +39,7 @@ P5<P1: User names never mint root addresses for system purposes; they live one l
 P6<P1: Pools hold membership or derived state, never truth. Truth stays in layers.
 P7<S2: No typed double-underscore folders, ever, and no new one proposed. Legacy ones are drain sources: open without create, read as fallback, never write, never wipe.
 @6 Artifact ~website-artifact-paradigm.md
-A1<L2: Every artifact is atomic and standalone: it carries what it is and stays valid if any other is deleted. A creation starts as one artifact; to refine it, break it apart into parts that are each artifacts with their own visual. The whole keeps a placeholder per part; an empty placeholder is valid.
+A1<L2: Every artifact is atomic and standalone: it carries what it is and stays valid if any other is deleted. A creation starts as one artifact; to refine it, break it apart into parts that are each artifacts with their own visual. The whole keeps a placeholder per part (an empty one is valid).
 A2<A1: No parent or container artifacts. The one sanctioned dependency is a declared interface that belongs to neither side. Nesting tiles in the tile tree is ordinary use, not a container.
 A3<A1,N5: A relation is a mark each member wears (group = sign('group:'+meaning), a referent with no bytes behind it). One peer artifact names the relation. Grouping is compatibility: no pairing table. Types interoperate; none depends on another.
 A4<A3: A fact about the thing goes in its content record; about the relation, in the group mark (order lives here, never on the member); about the set, in the naming artifact.
@@ -47,7 +47,7 @@ A5<A3: Sets nest by enrolling, never containing. A set has no member type. A vie
 A6<I1: Share resources, never copy: same content is one signature, stored once, referenced by many.
 A7<A3,H2: An atom is one-to-many: placing adds an incidence, cut drops one, copy does not exist; none touches bytes. No cut, copy or paste words.
 A8<A4,A7: Appearance belongs to the incidence: a trait group is a signature-addressed properties set worn where the atom is placed; another group is a second incidence.
-A9<A7,H5: The hand is the shelf, a quick tray of signatures always in view atop the screen; the tile's handle sends a reference there, never a cut. Only the drop writes: appearance (add an incidence) or custody (move it), and picks the trait group.
+A9<A7,H5: The hand is the shelf, a quick tray of signatures always in view; the tile's handle sends a reference there, never a cut. Only the drop writes: appearance (add an incidence) or custody (move it), and picks the trait group.
 @7 Derived ~optimize-phase.md
 D1<I1: A derived record is a pure derivation of signature-addressed inputs, keyed by the input signature, never by name, path or position. Changed source is a new signature and no record yet: derive on miss, never update.
 D2<D1,P6: Derived records live in derived-cache pools. They are recomputable and wipe-safe, never load-bearing: no layer references one, no read path requires one, a cold path gives identical results. Complete or absent, never partial.
@@ -56,7 +56,7 @@ D4<D2: Caches are minted only in the optimize phase (idle, after synchronize). N
 D5<D2: A summary is a derived record keyed by the signature of what it summarises. If summary and subtree disagree, the subtree is truth.
 @8 Reach ~install-by-replication.md pools-across-hosts.md intake-filter.md no-third-party-requests.md
 T1<I1: Bytes reach a reader by replicate(root), the one verb, from a host. Sharing requires hosting. A relay is a meeting point, not a store.
-T2<T1,S3: Verify at admission, never at runtime. Integrity: every atom hashes to its name. Completeness: a tree runs only when its closure has no holes. Authority: a root advances only on a publisher-signed sentinel. After admission runtime trusts the heap.
+T2<T1,S3: Verify at admission, never at runtime. Integrity: every atom hashes to its name. Completeness: a tree runs only when its closure has no holes. Authority: a root advances only on a publisher-signed sentinel. After admission runtime trusts it.
 T3<T2: Never activate a package no followed publisher signed, nor one the shell core cannot serve.
 T4<T1: Never push updates. The consumer requests, an icon informs, the human decides.
 T5<T1: Three gates, never conflated: selection (whom I take from), intake (what I keep, by marks), activation (what may execute). Publishing and activating are separate choices; holding bytes implies neither.
