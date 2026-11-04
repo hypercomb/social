@@ -43,6 +43,7 @@
 
 import { EffectBus, poolKindOfMeaning, registerPoolMeaning, SignatureService } from '@hypercomb/core'
 import { allows as intakeAllows } from '../pheromones/intake-filter.js'
+import { fetchWithDeadline, HOST_CONCURRENCY, isDeadlineError, mapBounded } from './bounded-fetch.js'
 import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
 
 /** How many members one domain may offer per meaning. A published index is
@@ -175,11 +176,12 @@ export const membersOf = (parsed: unknown): string[] => {
 const verifiedMember = async (origin: string, sig: string): Promise<unknown | null> => {
   let response: Response
   try {
-    response = await fetch(`${originUrl(origin)}/${sig}`)
+    response = await fetchWithDeadline(`${originUrl(origin)}/${sig}`)
   } catch { return null }
   if (!response.ok) return null
 
-  const bytes = await response.arrayBuffer()
+  let bytes: ArrayBuffer
+  try { bytes = await response.arrayBuffer() } catch { return null }
   if (bytes.byteLength > MAX_MEMBER_BYTES) {
     console.warn(`[published-pools] ${origin} member ${sig.slice(0, 12)}… is too large — dropped`)
     return null
@@ -196,8 +198,11 @@ const verifiedMember = async (origin: string, sig: string): Promise<unknown | nu
   } catch { return null }
 }
 
-/** (origin, meaning) already probed this session — a 404 counts. */
+/** (origin, meaning) already probed this session — an ANSWER counts (a 404
+ *  too); a deadline does not, so a host that was slow is asked again. */
 const probed = new Set<string>()
+/** (origin, meaning) with a request in flight — one at a time per pair. */
+const asking = new Set<string>()
 
 /** What a host has DECLARED and this participant has not yet PLACED. Keyed
  *  `origin::meaning`; memory only — an offer is a fact about a host, and the
@@ -259,7 +264,7 @@ export const dismissOffers = (rawOrigin: string, meaning?: string): void => {
 }
 
 /** Test seam. */
-export const _resetOffers = (): void => { offers.clear(); probed.clear() }
+export const _resetOffers = (): void => { offers.clear(); probed.clear(); asking.clear() }
 
 /**
  * Read one meaning from one domain. Returns the sigs OFFERED — verified,
@@ -282,24 +287,36 @@ export const probePublishedPool = async (
   if (!origin || !handler) return []
 
   const once = `${origin}::${meaning}`
-  if (!options.force && probed.has(once)) return []
-  probed.add(once)
+  if (!options.force && (probed.has(once) || asking.has(once))) return []
 
+  // A probe is DONE when the host has answered: a pool (success), a 404 (the
+  // normal answer), or a refusal on the wire (offline, CORS, not a content
+  // host). A deadline is not an answer, and neither is a host that is busy
+  // (5xx, 408, 429), so those leave the pair unmarked and the next
+  // `domain:learned` asks again. `asking` keeps one request in flight per pair.
   let index: unknown
+  asking.add(once)
   try {
-    const response = await fetch(`${originUrl(origin)}/${await poolAddress(meaning)}`)
-    if (!response.ok) return []              // the normal answer
+    const response = await fetchWithDeadline(`${originUrl(origin)}/${await poolAddress(meaning)}`)
+    if (!response.ok) {
+      if (response.status < 500 && response.status !== 408 && response.status !== 429) probed.add(once)
+      return []                              // the normal answer
+    }
     const text = await response.text()
     try { index = JSON.parse(text) } catch { index = text }   // a worker lists one signature per line
-  } catch { return [] }                      // offline, CORS, not a content host
+    probed.add(once)
+  } catch (error) {
+    if (!isDeadlineError(error)) probed.add(once)   // offline, CORS, not a content host
+    return []
+  } finally { asking.delete(once) }
 
   const members = membersOf(index)
   if (!members.length) return []
 
-  const offered: PublishedOffer[] = []
-  for (const sig of members) {
+  // The members are read a few at a time; the result keeps the index's order.
+  const kept = await mapBounded(members, HOST_CONCURRENCY, async (sig): Promise<PublishedOffer | null> => {
     const record = await verifiedMember(origin, sig)
-    if (record === null) continue
+    if (record === null) return null
     // THE INTAKE GATE. Verification answered "are these the bytes the domain
     // named"; it cannot answer "do I want them". One pass per member, at most
     // MAX_MEMBERS of them per domain per session, so it can afford the awaited
@@ -308,9 +325,10 @@ export const probePublishedPool = async (
     // dropped the location carrier — it was already asking the right question.
     // Allows everything until the participant expresses an interest. An offer
     // the gate refuses is never even shown.
-    if (!await intakeAllows({ sig })) continue
-    offered.push({ origin, meaning, sig, record })
-  }
+    if (!await intakeAllows({ sig })) return null
+    return { origin, meaning, sig, record }
+  })
+  const offered = kept.filter((offer): offer is PublishedOffer => !!offer)
   if (offered.length) {
     offers.set(once, offered)
     console.log(`[published-pools] ${origin} offers ${offered.length} ${meaning} — held for a gesture`)
@@ -324,11 +342,11 @@ export const probePublishedPool = async (
 export const probeDomain = async (rawOrigin: string, options: { force?: boolean } = {}): Promise<string[]> => {
   const origin = originHost(rawOrigin)
   if (!origin) return []
-  const kept: string[] = []
-  for (const meaning of handlers.keys()) {
-    kept.push(...await probePublishedPool(origin, meaning, options))
-  }
-  return kept
+  // One request per claimed meaning, a few at a time: a host that never
+  // answers costs one deadline for the lot, not one per meaning in turn.
+  const meanings = [...handlers.keys()]
+  const answers = await mapBounded(meanings, HOST_CONCURRENCY, meaning => probePublishedPool(origin, meaning, options))
+  return answers.flatMap(sigs => sigs ?? [])
 }
 
 // ── the trigger ─────────────────────────────────────────────────────────

@@ -5,6 +5,8 @@ import type { ActiveGenomeService } from '../history/active-genome.service.js'
 
 const STATE_KEY = 'hc:replication:intents:v1'
 const SIG_RE = /^[a-f0-9]{64}$/
+/** One queued act (status, replicate, receipts, verify) gets this long in all. */
+const PASSIVE_ACT_MS = 60_000
 export const PASSIVE_REPLICATION_KEY = '@diamondcoreprocessor.com/PassiveReplicationQueue'
 type StoredIntent = ReplicationRequest & { domain: string }
 type StoredState = { currentGenomeGeneration: number; signatures: StoredIntent[] }
@@ -147,7 +149,12 @@ export class PassiveReplicationQueue {
     }
   }
 
-  async #complete(intent: StoredIntent, signal: AbortSignal): Promise<boolean> {
+  async #complete(intent: StoredIntent, foreground: AbortSignal): Promise<boolean> {
+    // Each request to the host already has its own deadline (the replication
+    // client); this bounds the whole act, so a host that answers slowly every
+    // time cannot hold the queue's one running slot for good. The intent stays
+    // durable and the next idle edge tries again.
+    const signal = AbortSignal.any([foreground, AbortSignal.timeout(PASSIVE_ACT_MS)])
     if (signal.aborted) return false
     let status = await this.#replication.status(intent.domain, intent.signature, signal)
     // A 202 from an older relay proves only byte replication: old servers

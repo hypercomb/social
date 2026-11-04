@@ -21,6 +21,7 @@
 
 import { registerPoolMeaning } from '@hypercomb/core'
 import { allows as intakeAllows } from '../pheromones/intake-filter.js'
+import { fetchWithDeadline, HOST_CONCURRENCY, mapBounded } from './bounded-fetch.js'
 import { listCommunityHosts } from './community-hosts.js'
 import { membersOf, originHost, originUrl } from './published-pools.js'
 
@@ -46,7 +47,7 @@ export const SCOUT_MAX_OFFERS = 24
 
 const readPool: ScoutRead = async (host, meaning) => {
   try {
-    const response = await fetch(`${originUrl(host)}/${await registerPoolMeaning(meaning)}`)
+    const response = await fetchWithDeadline(`${originUrl(host)}/${await registerPoolMeaning(meaning)}`)
     if (!response.ok) return []
     const text = await response.text()
     let index: unknown
@@ -62,14 +63,17 @@ export const scout = async (rawMeanings: readonly string[], deps: ScoutDeps = {}
 
   const read = deps.read ?? readPool
   const found = new Map<string, { meanings: Set<string>; hosts: Set<string> }>()
-  await Promise.all(hosts.flatMap(host => meanings.map(async meaning => {
+  // Every (host, pool) pair is one read; a few at a time, so a host that never
+  // answers costs its deadline for its own pairs and holds nobody else's.
+  const asks = hosts.flatMap(host => meanings.map(meaning => ({ host, meaning })))
+  await mapBounded(asks, HOST_CONCURRENCY, async ({ host, meaning }) => {
     for (const sig of await read(host, meaning)) {
       const at = found.get(sig) ?? { meanings: new Set<string>(), hosts: new Set<string>() }
       at.meanings.add(meaning)
       at.hosts.add(host)
       found.set(sig, at)
     }
-  })))
+  }, { hostOf: ask => ask.host })
 
   const gate = deps.allows ?? intakeAllows
   const ranked = [...found.entries()]

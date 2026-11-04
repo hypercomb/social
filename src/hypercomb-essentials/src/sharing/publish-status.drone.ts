@@ -47,7 +47,8 @@ import {
   readPageBytes,
 } from './entrance-scout.service.js'
 import { PUBLIC_CONTENT_HOSTS, isReservedRootKey } from './hive-link.js'
-import { fetchHiveIndex } from './hive-pointer.js'
+import { HOST_CONCURRENCY, mapBounded } from './bounded-fetch.js'
+import { fetchHiveIndex, type HiveIndexResult } from './hive-pointer.js'
 import { publisherKeyHex } from './key-list.client.js'
 import { arrivalPointer, publishArrivalPlan, readArrivalPlan, withdrawArrivalPlan } from './arrival-plan-publish.js'
 import { promoteBranch, promotedPointer, readyToPromote, promotesHead, readPromotionRecord } from './promote.js'
@@ -754,8 +755,19 @@ export class PublishStatusDrone extends Drone {
         entrances: Record<string, ZoneEntrance>
         createdAt: number; stale: boolean
       }>()
-      for (const door of doors) {
-        const read = await fetchHiveIndex(door, pubkey)
+      // Every door is read, a few at a time: a door that never answers is
+      // `unreachable` after its deadline and the rows behind the others still show.
+      const doorList = [...doors]
+      const doorReads = await mapBounded(doorList, HOST_CONCURRENCY, async door => ({
+        read: await fetchHiveIndex(door, pubkey),
+        // Authentic, but is it the LATEST? Only our own signed stamps —
+        // which are recorded per host — can say.
+        highWater: await highWaterIndexStamp(door, pubkey),
+      }), { hostOf: door => door })
+      for (const [at, door] of doorList.entries()) {
+        const asked = doorReads[at]
+        const read: HiveIndexResult = asked?.read ?? { ok: false, reason: 'unreachable' }
+        const highWater = asked?.highWater ?? 0
         const roots = read.ok ? read.manifest.roots : {}
         const doorsMap = read.ok ? read.manifest.doors ?? {} : {}
         const addresses = read.ok ? read.manifest.addresses ?? {} : {}
@@ -764,9 +776,6 @@ export class PublishStatusDrone extends Drone {
         const state: PublishIndexState = read.ok
           ? 'ok'
           : read.reason === 'http' && read.status === 404 ? 'none' : read.reason
-        // Authentic, but is it the LATEST? Only our own signed stamps —
-        // which are recorded per host — can say.
-        const highWater = await highWaterIndexStamp(door, pubkey)
         indexes.set(door, {
           state, roots, doors: doorsMap, addresses, entrances, createdAt,
           stale: read.ok && highWater > 0 && createdAt < highWater,
