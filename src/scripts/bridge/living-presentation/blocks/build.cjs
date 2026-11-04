@@ -108,7 +108,8 @@ const liveOf = (l, media) => {
 /** "1 min": the narration's length, from the voice files (48 kbit/s, the tour's rate). */
 const minutesOf = (steps, media) => {
   const bySig = new Map(media.list().map(m => [m.sig, m]))
-  const secs = steps.reduce((t, s) => t + (s.voice ? bySig.get(s.voice.slice('resource:'.length)).size * 8 / 48000 + 0.8 : 0), 0)
+  const voices = [...new Set(steps.map(s => s.voice).filter(Boolean))]
+  const secs = voices.reduce((t, v) => t + bySig.get(v.slice('resource:'.length)).size * 8 / 48000 + 0.8, 0)
   return secs ? `${Math.max(1, Math.round(secs / 60))} min` : ''
 }
 
@@ -129,7 +130,11 @@ const sceneFor = (key, block, media) => {
     const said = SCENE_ONLY.filter(k => has(block, k))
     if (said.length) throw new Error(`${key}: tour scene ${n} explains this tile, so its block must not say ${said.join(', ')} again`)
     const p = tour.sceneParts(n, media)
-    const steps = [{ say: p.caption, voice: p.voice }, ...besideStep]
+    // One sentence on screen at a time, each playing its own stretch of the
+    // scene's one voice: a scene reads like a film with subtitles.
+    const timed = p.voice && p.lines.every(l => l.from !== null)
+    const steps = [...p.lines.map(l => ({ say: l.say, voice: timed ? p.voice : null, from: timed ? l.from : null, to: timed ? l.to : null })), ...besideStep]
+    if (p.voice && !timed) steps.splice(0, p.lines.length, { say: p.caption, voice: p.voice })
     return { name: p.name, eyebrow: p.eyebrow, headline: p.headline, figure: p.figure, beside, sub: p.sub, link: p.link, steps, minutes: minutesOf(steps, media) }
   }
   for (const k of ['eyebrow', 'headline', 'beats']) if (!has(block, k)) throw new Error(`${key}: a block no scene explains needs its ${k}`)

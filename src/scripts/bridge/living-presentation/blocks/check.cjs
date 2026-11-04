@@ -18,6 +18,7 @@ const path = require('path')
 const crypto = require('crypto')
 const { buildBlocks } = require('./build.cjs')
 const tour = require('./tour.cjs')
+const { sentencesOf } = require('../../../presentation/timing.cjs')
 
 const problems = []
 const fail = (what) => problems.push(what)
@@ -50,7 +51,8 @@ for (const b of blocks) {
 
 // No scene's narration on two pages.
 for (const n of placed) {
-  const said = tour.T.captionOf(tour.T.scenes.find(s => s.n === n).say)
+  // A scene is shown a sentence at a time; its longest sentence is the probe.
+  const said = sentencesOf(tour.T.captionOf(tour.T.scenes.find(s => s.n === n).say)).sort((a, b) => b.length - a.length)[0]
   const probe = JSON.stringify(said).slice(1, 80)
   const on = blocks.filter(b => b.page.includes(probe)).map(b => b.route.join('/'))
   if (on.length !== 1) fail(`scene ${n}'s narration is on ${on.length} pages${on.length ? ` (${on.join(', ')})` : ''}`)

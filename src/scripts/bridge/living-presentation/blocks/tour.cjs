@@ -16,6 +16,7 @@
 const fs = require('fs')
 const path = require('path')
 const T = require('../../../presentation/build.cjs')
+const { sentencesOf, sentenceTimes } = require('../../../presentation/timing.cjs')
 
 const TOUR = path.dirname(require.resolve('../../../presentation/build.cjs'))
 
@@ -79,7 +80,31 @@ const sceneParts = (n, media) => {
     link: s.link ? { href: s.link.href, label: T.smart(s.link.label) } : null,
     caption: T.captionOf(s.say),
     voice: voice ? media.ref(media.add(voice)) : null,
+    lines: linesOf(s.say, voice),
   }
+}
+
+/** A scene's narration as the sentences a reader sees one at a time, each
+ *  with where it sits in the voice (seconds; `to` is where the next sentence
+ *  starts, so the voice plays straight through). The timing is the shared
+ *  sentence clock (scripts/presentation/timing.cjs) the recorder and the
+ *  drawn clips use, so all three agree on where a sentence starts. Without a
+ *  voice, or when the spoken and shown sentences do not pair up, a sentence
+ *  carries no times and is held for its reading time. */
+const linesOf = (say, voice) => {
+  const shown = sentencesOf(T.captionOf(say))
+  let spans = null
+  if (voice) {
+    try {
+      const spoken = sentencesOf(T.spokenOf(say))
+      if (spoken.length === shown.length) spans = sentenceTimes(voice, spoken).spans
+    } catch { spans = null }
+  }
+  return shown.map((text, i) => ({
+    say: text,
+    from: spans ? Math.max(0, i === 0 ? 0 : spans[i].start) : null,
+    to: spans ? (spans[i + 1] ? spans[i + 1].start : null) : null,
+  }))
 }
 
 /** The tour's icon sprite, read from its template: one set of icons. */

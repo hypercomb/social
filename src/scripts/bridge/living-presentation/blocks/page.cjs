@@ -203,8 +203,8 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 
 /* the narration: a strip under one hairline, the tour's caption, and its transport */
 .dock{width:100%;max-width:var(--measure);margin:0 auto}
-.caption{position:relative;margin:clamp(10px,2vh,22px) 0 0;padding:12px 0 0;text-align:left;
-  font-size:clamp(15px,1.75cqi,18px);line-height:1.5;color:var(--ink);text-wrap:pretty;max-height:26vh;overflow:auto;overscroll-behavior:contain}
+.caption{position:relative;margin:clamp(10px,2vh,22px) 0 0;padding:12px 0 0;text-align:left;min-height:calc(2 * 1.5em + 12px);
+  font-size:clamp(16px,1.95cqi,21px);line-height:1.5;color:var(--ink);text-wrap:pretty;max-height:26vh;overflow:auto;overscroll-behavior:contain}
 .caption.more{-webkit-mask-image:linear-gradient(#000 calc(100% - 2.2em),transparent);mask-image:linear-gradient(#000 calc(100% - 2.2em),transparent)}
 .caption::before{content:"";position:sticky;display:block;top:-12px;left:0;right:0;height:1px;margin:-12px 0 11px;background:var(--line)}
 .caption.long{font-size:clamp(14px,1.5cqi,16px);line-height:1.5}
@@ -294,7 +294,9 @@ const SCRIPT = `
   if (returning) { try { const n = Number(sessionStorage.getItem(KEY)); if (Number.isInteger(n) && n >= 0) resumeAt = n } catch {} }
   const readTime = (say) => Math.max(3.4, say.split(/\\s+/).length / 2.6) * 1000 + 600
   const idle = () => { if (still || playing || gone()) return; for (const v of videos) { v.loop = true; v.play().catch(() => {}) } }
-  const quiet = () => { clearTimeout(timer); timer = null; if (audio) { audio.onended = audio.onerror = null; audio.pause(); audio = null } }
+  let watch = 0
+  const stopWatch = () => { cancelAnimationFrame(watch); watch = 0 }
+  const quiet = () => { clearTimeout(timer); timer = null; stopWatch(); if (audio) { audio.onended = audio.onerror = null; audio.pause(); audio = null } }
   const show = (i) => {
     at = Math.max(0, Math.min(steps.length - 1, i))
     const s = steps[at]
@@ -311,18 +313,42 @@ const SCRIPT = `
   const paint = () => { pp.classList.toggle('playing', playing); pp.setAttribute('aria-label', playing ? 'Pause' : 'Play'); if (started) pp.classList.remove('lead') }
   const halt = () => { playing = false; quiet(); for (const v of videos) v.pause() }
   const next = () => { if (gone()) return halt(); if (at < steps.length - 1) { show(at + 1); speak() } else { playing = false; paint(); idle() } }
+  // ONE SENTENCE ON SCREEN AT A TIME, like a film's subtitles. A scene's
+  // sentences share its one voice: each plays its own stretch of it (from →
+  // to), and the voice runs straight on from one sentence to the next while
+  // the line under the figure changes with it. Jumping (a tick, back, next)
+  // seeks; a drawn clip, timed to the same voice, follows the jump.
   const speak = () => {
-    quiet()
+    clearTimeout(timer); timer = null; stopWatch()
     if (!playing) return
     const s = steps[at]
-    if (at === 0) for (const v of videos) { v.loop = false; try { v.currentTime = 0 } catch {} v.play().catch(() => {}) }
+    for (const v of videos) {
+      v.loop = false
+      if (at === 0 && s.from == null) { try { v.currentTime = 0 } catch {} }
+      else if (v.dataset.drawn && s.from != null) { try { v.currentTime = s.from } catch {} }
+      if (v.paused) v.play().catch(() => {})
+    }
     const hold = () => { timer = setTimeout(next, readTime(s.say)) }
-    if (voiceOn && s.voice) {
-      const a = new Audio(s.voice); audio = a
-      a.onended = () => { if (audio === a) timer = setTimeout(next, 800) }
-      a.onerror = () => { if (audio === a) hold() }
-      a.play().catch(() => { if (audio === a) hold() })
-    } else hold()
+    if (!(voiceOn && s.voice)) { if (audio) { audio.onended = audio.onerror = null; audio.pause(); audio = null } hold(); return }
+    let a = audio
+    if (!a || a.dataset.src !== s.voice) {
+      if (a) { a.onended = a.onerror = null; a.pause() }
+      a = new Audio(s.voice); a.dataset.src = s.voice; audio = a
+    }
+    a.onended = () => { if (audio === a) { audio = null; timer = setTimeout(next, 800) } }
+    a.onerror = () => { if (audio === a) { audio = null; hold() } }
+    const from = s.from ?? 0
+    const seek = () => { if (Math.abs(a.currentTime - from) > 0.35) { try { a.currentTime = from } catch {} } }
+    if (a.readyState >= 1) seek(); else a.addEventListener('loadedmetadata', seek, { once: true })
+    if (a.paused) a.play().catch(() => { if (audio === a) { audio = null; hold() } })
+    if (s.to != null) {
+      const follow = () => {
+        if (audio !== a || !playing || gone()) return
+        if (a.currentTime >= s.to - 0.03) { if (at < steps.length - 1) { show(at + 1); speak() } else { a.pause(); playing = false; paint(); idle() } return }
+        watch = requestAnimationFrame(follow)
+      }
+      watch = requestAnimationFrame(follow)
+    }
   }
   const play = (on) => {
     if (on) started = true
@@ -404,7 +430,7 @@ const crumbsHtml = (route) => `
 
 const sceneHtml = (sc) => {
   const voiced = sc.steps.some(s => s.voice)
-  const steps = sc.steps.map(s => ({ say: s.say, voice: s.voice || null, lit: s.lit || [], beside: !!s.beside }))
+  const steps = sc.steps.map(s => ({ say: s.say, voice: s.voice || null, from: s.from ?? null, to: s.to ?? null, lit: s.lit || [], beside: !!s.beside }))
   return `
   <section class="scene" data-part="scene" aria-label="${esc(sc.name || 'The scene')}">
     <div class="eyebrow">${sc.eyebrow}</div>
