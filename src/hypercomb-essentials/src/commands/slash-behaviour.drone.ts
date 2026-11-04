@@ -21,16 +21,41 @@ const prototypesShown = (): boolean => {
 
 export class SlashBehaviourDrone extends EventTarget {
   #providers: SlashBehaviourProvider[] = []
+  /** Sorted by priority on the next read, not on every add: boot adds a
+   *  provider per queen, and one sort after the batch is all that is owed. */
+  #sorted = true
+
+  /** THE CENSUS VERSION. Bumped when a provider comes or goes, and when the
+   *  census changes shape from outside (a locale, a catalog, a given alias —
+   *  see the subscriptions at the foot of this file). Everything derived from
+   *  the providers — the name set, each behaviour's names, the entries the
+   *  utterance reader reads — is computed once per version, never per queen
+   *  at boot or per keystroke at the command line. */
+  #version = 0
+  get version(): number { return this.#version }
+
+  /** Say the census changed for a reason the registry cannot see. */
+  invalidate(): void { this.#version++ }
+
+  #ordered(): readonly SlashBehaviourProvider[] {
+    if (!this.#sorted) {
+      this.#providers.sort((a, b) => b.priority - a.priority)
+      this.#sorted = true
+    }
+    return this.#providers
+  }
 
   addProvider(provider: SlashBehaviourProvider): void {
     this.#providers.push(provider)
-    this.#providers.sort((a, b) => b.priority - a.priority)
+    this.#sorted = false
+    this.#version++
   }
 
   /** A stand-in leaves when the one it stood in for arrives (a sleeping
    *  queen's provider, replaced by her own when she wakes). */
   removeProvider(provider: SlashBehaviourProvider): void {
     this.#providers = this.#providers.filter(held => held !== provider)
+    this.#version++
   }
 
   /**
@@ -49,18 +74,46 @@ export class SlashBehaviourDrone extends EventTarget {
 
   /** Every name that reaches `behaviour`: canonical first, then declared-seam
    *  and participant-given names, deduped (queens hold the given ones on the
-   *  seam already, so the two sources overlap on purpose). */
+   *  seam already, so the two sources overlap on purpose). Held per census
+   *  version: `aliases:changed` bumps it, so a name given in the aliases
+   *  window still works on the very next keystroke. */
+  #namesVersion = -1
+  #namesHeld = new Map<SlashBehaviour, string[]>()
   #names(behaviour: SlashBehaviour): string[] {
-    const names = [behaviour.name, ...(behaviour.aliases ?? [])]
+    if (this.#namesVersion !== this.#version) {
+      this.#namesHeld = new Map()
+      this.#namesVersion = this.#version
+    }
+    let names = this.#namesHeld.get(behaviour)
+    if (names) return names
+    names = [behaviour.name, ...(behaviour.aliases ?? [])]
     for (const name of this.#given(behaviour.name)) {
       if (!names.includes(name)) names.push(name)
     }
+    this.#namesHeld.set(behaviour, names)
     return names
+  }
+
+  /** Every name any provider answers to — one set per census version. */
+  #allNamesVersion = -1
+  #allNames = new Set<string>()
+  #everyName(): ReadonlySet<string> {
+    if (this.#allNamesVersion !== this.#version) {
+      const names = new Set<string>()
+      for (const provider of this.#ordered()) {
+        for (const behaviour of provider.behaviours) {
+          for (const name of this.#names(behaviour)) names.add(name)
+        }
+      }
+      this.#allNames = names
+      this.#allNamesVersion = this.#version
+    }
+    return this.#allNames
   }
 
   all(): SlashBehaviour[] {
     const results: SlashBehaviour[] = []
-    for (const provider of this.#providers) {
+    for (const provider of this.#ordered()) {
       for (const behaviour of provider.behaviours) {
         const presented = this.#present(behaviour)
         results.push(presented)
@@ -73,17 +126,28 @@ export class SlashBehaviourDrone extends EventTarget {
   }
 
   /** Primary behaviours only (every reachable extra name folded onto each
-   *  entry's `aliases` field, so the display surfaces show what works). */
+   *  entry's `aliases` field, so the display surfaces show what works).
+   *  THE LEXICON: the utterance reader reads this on every keystroke, so it
+   *  is built once per census version (and per prototypes-filter state) and
+   *  the same array is handed back until something changes — the reader
+   *  keys its own compiled word table on that identity. */
+  #entriesKey = ''
+  #entries: SlashBehaviour[] = []
   entries(): SlashBehaviour[] {
-    return this.#providers.flatMap(p => p.behaviours)
-      .map(b => ({ ...this.#present(b), aliases: this.#names(b).slice(1) }))
+    const key = `${this.#version}|${prototypesShown() ? 'p' : ''}`
+    if (key !== this.#entriesKey) {
+      this.#entries = this.#ordered().flatMap(p => p.behaviours)
+        .map(b => ({ ...this.#present(b), aliases: this.#names(b).slice(1) }))
+      this.#entriesKey = key
+    }
+    return this.#entries
   }
 
   match(query: string): SlashBehaviourMatch[] {
     const q = query.toLowerCase().trim()
     const results: SlashBehaviourMatch[] = []
 
-    for (const provider of this.#providers) {
+    for (const provider of this.#ordered()) {
       for (const behaviour of provider.behaviours) {
         // Behaviours flagged hidden are still invokable via execute()
         // but never surface in autocomplete suggestions. Used for
@@ -137,7 +201,7 @@ export class SlashBehaviourDrone extends EventTarget {
   complete(behaviourName: string, args: string): readonly string[] {
     const name = behaviourName.toLowerCase().trim()
 
-    for (const provider of this.#providers) {
+    for (const provider of this.#ordered()) {
       for (const behaviour of provider.behaviours) {
         if (this.#names(behaviour).includes(name) && provider.complete) {
           return provider.complete(behaviour.name, args)
@@ -150,7 +214,7 @@ export class SlashBehaviourDrone extends EventTarget {
   execute(behaviourName: string, args: string): Promise<void> | void {
     const name = behaviourName.toLowerCase().trim()
 
-    for (const provider of this.#providers) {
+    for (const provider of this.#ordered()) {
       for (const behaviour of provider.behaviours) {
         if (this.#names(behaviour).includes(name)) {
           return provider.execute(behaviour.name, args)
@@ -165,7 +229,7 @@ export class SlashBehaviourDrone extends EventTarget {
   executePublicCanonical(behaviourName: string, args: string): Promise<void> | void {
     const name = behaviourName.toLowerCase().trim()
 
-    for (const provider of this.#providers) {
+    for (const provider of this.#ordered()) {
       for (const behaviour of provider.behaviours) {
         if (behaviour.name.toLowerCase().trim() !== name) continue
         const presented = this.#present(behaviour)
@@ -181,12 +245,7 @@ export class SlashBehaviourDrone extends EventTarget {
    *  swallowing it. */
   has(behaviourName: string): boolean {
     const name = behaviourName.toLowerCase().trim()
-    for (const provider of this.#providers) {
-      for (const behaviour of provider.behaviours) {
-        if (this.#names(behaviour).includes(name)) return true
-      }
-    }
-    return false
+    return this.#everyName().has(name)
   }
 
   #retired = new Map<string, RetiredWord>()
@@ -238,7 +297,7 @@ export class SlashBehaviourDrone extends EventTarget {
    *  only — a caller that can wait asks `rawArgsAwake` instead. */
   rawArgs(behaviourName: string): boolean {
     const name = behaviourName.toLowerCase().trim()
-    for (const provider of this.#providers) {
+    for (const provider of this.#ordered()) {
       for (const behaviour of provider.behaviours) {
         if (this.#names(behaviour).includes(name)) return (behaviour as RawArgsBehaviour).rawArgs === true
       }
@@ -257,7 +316,7 @@ export class SlashBehaviourDrone extends EventTarget {
   async rawArgsAwake(behaviourName: string): Promise<boolean> {
     const name = behaviourName.toLowerCase().trim()
     if (this.rawArgs(name)) return true
-    for (const provider of this.#providers) {
+    for (const provider of this.#ordered()) {
       for (const behaviour of provider.behaviours) {
         if (!this.#names(behaviour).includes(name)) continue
         if (sleepers.get(behaviour.name) !== provider) return false
@@ -1100,9 +1159,9 @@ const isQueen = (value: unknown): value is {
     && typeof (value as any).invoke === 'function'
 }
 
-const alreadyDeclared = (command: string): boolean => {
-  return _slashBehaviours.all().some(b => b.name === command)
-}
+/** One set lookup per queen — the name set is built once per census version,
+ *  not a full alias-expanded census per queen (boot was quadratic). */
+const alreadyDeclared = (command: string): boolean => _slashBehaviours.has(command)
 
 const wrapQueen = (queen: ReturnType<typeof isQueen> extends true ? never : any): SlashBehaviourProvider => ({
   name: `auto-${queen.command}`,
@@ -1318,4 +1377,16 @@ for (const key of window.ioc.list()) {
 
 // Subscribe to future registrations so dynamically-loaded queens auto-wire too.
 window.ioc.onRegister((_key, value) => considerQueen(value))
+
+// The census changes shape outside the registry too — a given alias, a
+// locale, a catalog arriving, the alias ledger itself registering. Each says
+// so once here, and the held census is rebuilt on the next read.
+EffectBus.on('aliases:changed', () => _slashBehaviours.invalidate())
+EffectBus.on('locale:changed', () => _slashBehaviours.invalidate())
+window.ioc.onRegister((key) => {
+  if (key === '@diamondcoreprocessor.com/ParticipantAliases') _slashBehaviours.invalidate()
+})
+;(window.ioc as { whenReady?: (key: string, cb: (value: unknown) => void) => void }).whenReady?.(I18N_IOC_KEY, (i18n) => {
+  (i18n as Partial<EventTarget>).addEventListener?.('change', () => _slashBehaviours.invalidate())
+})
 window.ioc.register('@diamondcoreprocessor.com/SlashBehaviourDrone', _slashBehaviours)

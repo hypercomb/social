@@ -1,5 +1,5 @@
 import { AfterViewInit, Component, computed, effect, HostBinding, inject, signal } from '@angular/core'
-import { type Bee, EffectBus, hypercomb } from '@hypercomb/core'
+import { EffectBus, hypercomb } from '@hypercomb/core'
 import { isWorkbenchMode } from '@hypercomb/runtime/workbench-page'
 import { type BootStatus } from '../setup/ensure-install'
 import { acquire, installedPackageSig, listHostPackages } from '@hypercomb/runtime/acquire'
@@ -274,38 +274,16 @@ export class App implements AfterViewInit {
     })
   }
 
-  private readonly pulseBee = (bee: Bee): void => {
-    void bee.pulse('').catch(error =>
-      console.warn('[app] failed to start bee', bee.constructor?.name, error)
-    )
-  }
-
   private readonly startRegisteredBees = async (): Promise<void> => {
-    // Bees may register over time (BootstrapHistory's Phase 2 loads them
-    // from OPFS in the background, after runtimeReady has resolved), so
-    // subscribe to future registrations BEFORE pulsing the current ones.
-    // Without this, late-registered workers like PixiHostWorker never
-    // get their first pulse and the canvas never mounts.
-    window.ioc.onRegister((_key, value) => {
-      if (value && typeof (value as Bee).pulse === 'function') {
-        this.pulseBee(value as Bee)
-      }
-    })
-
-    const values = list()
-      .map(key => get(key))
-      .filter((value): value is Bee => !!value && typeof (value as Bee).pulse === 'function')
-
-    await Promise.allSettled(values.map(bee =>
-      bee.pulse('').catch(error =>
-        console.warn('[app] failed to start bee', bee.constructor?.name, error)
-      )
-    ))
-
-    // Boot kick through the processor — hypercomb.act() owns the
-    // `synchronize` dispatch (and the optimize phase). A second pulse of
-    // already-started bees is normal processor behavior, identical to the
-    // first user act.
+    // ONE OWNER. The first `act('')` is every bee's first pulse: the
+    // processor asks the preloader for the package's bees (the boot lane
+    // already held, the first wave loaded here), pulses each once, and
+    // dispatches the one `synchronize` (and the optimize phase). A bee that
+    // registers later — the background wave, a woken sleeper, PixiHostWorker
+    // on a cold profile — is an arrival the processor pulses itself the
+    // moment it lands (core/hypercomb.ts). The shell pulses nothing by hand:
+    // the on-register hook and the registry pre-pulse that used to live here
+    // gave every bee two extra first pulses.
     await new hypercomb().act('')
 
     // broadcast initial mesh state so drones can react

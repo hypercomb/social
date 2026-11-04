@@ -47,6 +47,14 @@ type DeferredBeeLoads = {
   loads: readonly Promise<Bee | null>[]
 }
 
+type WalkedPackage = {
+  bees: readonly string[]
+  dependencies: readonly string[]
+  resources: readonly string[]
+  criticalBees: readonly string[]
+  classes: ReadonlyMap<string, BeeClass>
+}
+
 export class ScriptPreloader extends EventTarget implements BeeResolver {
 
   // SHA-256 of canonical JSON: [] → 4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
@@ -59,6 +67,17 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   #resourceCount = 0
   #finding: Promise<Bee[]> | null = null
 
+  // THE WALK, ONCE PER PACKAGE. What the layers declare can change only when
+  // the install pointer or the manifest text changes, so the manifest is
+  // parsed and the layers walked once per such key — never per act. The
+  // negative cache rides the same key: a bee that failed to load is reported
+  // once and not asked for again until the package changes.
+  #packageKey: string | null = null
+  #manifest: { layers: string[]; bees: string[] } = { layers: [], bees: [] }
+  #walked: WalkedPackage | null = null
+  /** Bee signature → why it did not load (not found, null product, threw). */
+  readonly #failed = new Map<string, unknown>()
+
   // Angular development bundles import every bee through side-effects.ts.
   // Re-reading the installed manifest and evaluating those same modules from
   // OPFS is duplicate work, and blob-module imports cannot resolve the
@@ -70,11 +89,6 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   #registeredBees: readonly Bee[] | null = null
   readonly #readableArtifactProviders: ReadableArtifactProvider[] = []
   readonly #readableArtifactReads = new Map<string, Promise<ReadableArtifact | null>>()
-
-  // Bees pulsed at least once (either by the processor's encounter loop
-  // for the first wave, or individually here once they land off the
-  // critical path). Ensures every bee gets exactly one initial pulse.
-  readonly #firstPulsed = new Set<string>()
 
   public get actions(): readonly ActionDescriptor[] { return this.#actions }
   public get actionNames(): readonly string[] { return this.#actionNames }
@@ -199,36 +213,43 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       // Layer-walk: layers are the source of truth. Union every signature
       // array they declare (bees, dependencies, resources, nested layers).
       // Falls back to the flat install-manifest bees list for legacy/dev.
-      const layerRoots = ScriptPreloader.readManifestLayers()
+      // Done once per package (see #readManifest): a later act finds the
+      // walk already held and pays only for what is still unloaded.
+      const manifest = this.#readManifest()
+      const layerRoots = manifest.layers
       const tWalk = performance.now()
-      let walked = layerRoots.length
+      const fresh = !this.#walked
+      let walked: WalkedPackage = this.#walked ?? (layerRoots.length
         ? await this.#walkLayers(layerRoots)
         : {
-            bees: ScriptPreloader.readManifestBees(),
+            bees: manifest.bees,
             dependencies: ScriptPreloader.#EMPTY_SIGS,
             resources: ScriptPreloader.#EMPTY_SIGS,
             criticalBees: ScriptPreloader.#EMPTY_SIGS,
             classes: new Map<string, BeeClass>(),
-          }
-      // WHAT LOADS is the activation record's bee list — acquire.ts writes
-      // every bee the root names minus the units the participant turned off
-      // (package-units.ts). The layers say what EXISTS; the record says what
-      // runs. The render-critical bees stay regardless: without them there is
-      // no hive to turn anything back on from.
-      const enabled = ScriptPreloader.readManifestBees()
-      if (layerRoots.length && enabled.length) {
-        const keep = new Set([...enabled, ...walked.criticalBees])
-        walked = { ...walked, bees: walked.bees.filter(sig => keep.has(sig)) }
-      }
-      // FEATURES FOR PARTICIPANTS ONLY: a read-only reader never loads a bee
-      // under a layer its publisher's `features:participant` pool names —
-      // not at arrival, not on the approach. Decided once.
-      if (layerRoots.length && (globalThis as { __HC_READONLY__?: boolean }).__HC_READONLY__ === true) {
-        const quiet = await this.#quietBees(layerRoots)
-        if (quiet.size) walked = { ...walked, bees: walked.bees.filter(sig => !quiet.has(sig)) }
+          })
+      if (fresh) {
+        // WHAT LOADS is the activation record's bee list — acquire.ts writes
+        // every bee the root names minus the units the participant turned off
+        // (package-units.ts). The layers say what EXISTS; the record says what
+        // runs. The render-critical bees stay regardless: without them there is
+        // no hive to turn anything back on from.
+        const enabled = manifest.bees
+        if (layerRoots.length && enabled.length) {
+          const keep = new Set([...enabled, ...walked.criticalBees])
+          walked = { ...walked, bees: walked.bees.filter(sig => keep.has(sig)) }
+        }
+        // FEATURES FOR PARTICIPANTS ONLY: a read-only reader never loads a bee
+        // under a layer its publisher's `features:participant` pool names —
+        // not at arrival, not on the approach. Decided once.
+        if (layerRoots.length && (globalThis as { __HC_READONLY__?: boolean }).__HC_READONLY__ === true) {
+          const quiet = await this.#quietBees(layerRoots)
+          if (quiet.size) walked = { ...walked, bees: walked.bees.filter(sig => !quiet.has(sig)) }
+        }
+        this.#walked = walked
+        this.#package = { classes: walked.classes, bees: new Set(walked.bees) }
       }
       const walkMs = performance.now() - tWalk
-      this.#package = { classes: walked.classes, bees: new Set(walked.bees) }
 
       // Cache warming, AT IDLE AND IN SMALL BATCHES.
       //
@@ -245,13 +266,13 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       // hands us time only when the main thread has nothing better to do, which
       // is exactly the priority this deserves, and a small batch keeps the
       // transport free for reads someone is actually waiting on.
-      if (walked.resources.length) this.#preheatAtIdle(walked.resources)
+      if (fresh && walked.resources.length) this.#preheatAtIdle(walked.resources)
 
       // THE ARRIVAL (arrival-plan.ts): a published branch that names what
       // its arrival needs loads that and nothing more; the rest of the
       // package stays passive until the visitor approaches it.
-      if (layerRoots.length) await this.#decideArrival(walked)
-      if (layerRoots.length) this.#noteSleepers(walked)
+      if (fresh && layerRoots.length) await this.#decideArrival(walked)
+      if (fresh && layerRoots.length) this.#noteSleepers(walked)
       const passive = this.#passive
       const sleeping = this.#asleep()
 
@@ -270,7 +291,9 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
 
       // Enforce manifest: dispose and evict bees that are no longer enabled.
       // This is the trust boundary — if DCP says a bee is off, it must not pulse.
-      if (walked.bees.length) {
+      // The enabled set changes only with the package key, so a held walk
+      // has nothing to evict.
+      if (fresh && walked.bees.length) {
         const enabledSet = new Set(walked.bees)
         let evicted = false
         for (const [sig, bee] of this.#beeCache) {
@@ -292,22 +315,23 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       }
 
       const findMs = performance.now() - tFind
-      const findMsg = `[script-preloader] find: total=${findMs.toFixed(0)}ms walk=${walkMs.toFixed(0)}ms bees=${beesMs.toFixed(0)}ms (${walked.bees.length}b/${walked.dependencies.length}d/${walked.resources.length}r)`
-      console.log(findMsg)
+      // Said when something happened: a walk, or loads. A held walk with
+      // nothing to load is the common act and stays quiet.
+      if (fresh || deferredBeeLoads) {
+        console.log(`[script-preloader] find: total=${findMs.toFixed(0)}ms walk=${walkMs.toFixed(0)}ms bees=${beesMs.toFixed(0)}ms (${walked.bees.length}b/${walked.dependencies.length}d/${walked.resources.length}r)${this.#failed.size ? ` ${this.#failed.size} failed` : ''}`)
+      }
 
       if (!ScriptPreloader.#firstFindMarked) {
         ScriptPreloader.#firstFindMarked = true
         ;(window as any).__hcBoot?.(`first preloader.find done (total=${findMs.toFixed(0)}ms walk=${walkMs.toFixed(0)}ms bees=${beesMs.toFixed(0)}ms)`)
       }
 
-      // Atomically assign pulse ownership. A background import can finish at
-      // any microtask boundary, so taking a live cache snapshot in find() and
-      // letting a separate continuation infer ownership caused timing-specific
-      // double pulses. Everything in this exact snapshot belongs to the
-      // processor encounter; the finisher owns only later arrivals.
+      // This exact snapshot is the processor's pass. A bee that lands after
+      // it (a background import finishing at any later microtask) is an
+      // ARRIVAL: the processor hears its registration and gives it its first
+      // pulse itself (core/hypercomb.ts) — nothing here pulses.
       const encounterEntries = [...this.#beeCache.entries()]
         .filter(([, bee]) => typeof (bee as any)?.pulse === 'function')
-      for (const [sig] of encounterEntries) this.#firstPulsed.add(sig)
       if (deferredBeeLoads) {
         this.#finishBeeLoadsInBackground(deferredBeeLoads.pending, deferredBeeLoads.loads)
       }
@@ -446,8 +470,9 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   }
 
   /** Load one sleeper: by its dev loader when it has one, by signature
-   *  otherwise. The dev processor pulses no bee it did not start with, so a
-   *  bee a dev module registers gets its first heartbeat here. */
+   *  otherwise. Its first heartbeat is the processor's: the registration is
+   *  an arrival, pulsed in the next pass (core/hypercomb.ts) — in the dev
+   *  shell too, whose resolver returns no bees of its own. */
   #wakeLoad = async (id: string): Promise<Bee | null> => {
     const load = this.#devLoaders.get(id)
     if (!load) return this.#loadBeeBySignature(id)
@@ -456,17 +481,12 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       console.warn(`[script-preloader] dev sleeper ${id} failed to load:`, err)
       return null
     }
-    let first: Bee | null = null
     for (const key of window.ioc.list()) {
       if (before.has(key)) continue
       const bee = window.ioc.get(key) as Bee | undefined
-      if (!bee) continue
-      first ??= bee
-      if (typeof (bee as any).pulse === 'function') {
-        try { await bee.pulse('') } catch (err) { console.warn(`[script-preloader] woken ${key} failed its first pulse:`, err) }
-      }
+      if (bee) return bee
     }
-    return first
+    return null
   }
 
   #noteSleepers = (walked: { bees: readonly string[]; classes: ReadonlyMap<string, BeeClass> }): void => {
@@ -583,7 +603,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
    *  is asked for. Whatever the wake-all has already taken is skipped. */
   #loadIdleHive = (): void => {
     const asleep = this.#asleep()
-    const queue = [...this.#idleHive].filter(sig => !this.#beeCache.has(sig) && !asleep.has(sig))
+    const queue = [...this.#idleHive].filter(sig => !this.#beeCache.has(sig) && !asleep.has(sig) && !this.#failed.has(sig))
     this.#idleHive = new Set()
     if (!queue.length) return
     const whenIdle: (run: () => void) => void =
@@ -738,7 +758,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
    *  background finisher — which pulses them and says `loader:bees-done`
    *  for this arrival, so nothing downstream waits on the whole package. */
   #loadArrival = async (sigs: readonly string[]): Promise<DeferredBeeLoads | null> => {
-    const pending = sigs.filter(sig => this.#isSignature(sig) && !this.#beeCache.has(sig))
+    const pending = sigs.filter(sig => this.#isSignature(sig) && !this.#beeCache.has(sig) && !this.#failed.has(sig))
     if (!pending.length) return null
     const loads = pending.map(sig => this.#loadBeeBySignature(sig))
     await Promise.allSettled(loads)
@@ -761,7 +781,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     // A queen asleep until her word stays asleep: stepping into the hive is
     // not asking for her.
     const asleep = this.#asleep()
-    const pending = [...passive].filter(sig => !this.#beeCache.has(sig) && !asleep.has(sig))
+    const pending = [...passive].filter(sig => !this.#beeCache.has(sig) && !asleep.has(sig) && !this.#failed.has(sig))
     if (!pending.length) return
     console.log(`[script-preloader] approached: waking ${pending.length} passive bees`)
     const first = pending.filter(sig => this.#arrivalCritical.includes(sig))
@@ -940,27 +960,31 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   // manifest-driven loading (primary path)
   // -------------------------------------------------
 
-  private static readManifestLayers(): string[] {
+  /** The installed manifest's roots and enabled bees, parsed once per
+   *  package key (install pointer + manifest text). A changed key drops the
+   *  held walk and the negative cache: the next find walks the new package
+   *  and may try again what failed under the old one. */
+  #readManifest(): { layers: string[]; bees: string[] } {
+    let raw = ''
+    try { raw = localStorage.getItem('core-adapter.installed-manifest') ?? '' } catch { raw = '' }
+    const key = `${installedPackageSig() ?? ''}|${raw}`
+    if (key === this.#packageKey) return this.#manifest
+    this.#packageKey = key
+    this.#walked = null
+    this.#failed.clear()
+    let layers: string[] = []
+    let bees: string[] = []
     try {
-      const raw = localStorage.getItem('core-adapter.installed-manifest')
-      if (!raw) return []
-      const manifest = JSON.parse(raw)
-      return Array.isArray(manifest?.layers) ? manifest.layers.filter(Boolean) : []
-    } catch {
-      return []
-    }
+      const manifest = raw ? JSON.parse(raw) : null
+      layers = Array.isArray(manifest?.layers) ? manifest.layers.filter(Boolean) : []
+      bees = Array.isArray(manifest?.bees) ? manifest.bees.filter(Boolean) : []
+    } catch { /* unreadable manifest: nothing to walk */ }
+    this.#manifest = { layers, bees }
+    return this.#manifest
   }
 
-  private static readManifestBees(): string[] {
-    try {
-      const raw = localStorage.getItem('core-adapter.installed-manifest')
-      if (!raw) return []
-      const manifest = JSON.parse(raw)
-      return Array.isArray(manifest?.bees) ? manifest.bees.filter(Boolean) : []
-    } catch {
-      return []
-    }
-  }
+  /** Bees of the live package that did not load, with why — said once each. */
+  public get failedBees(): ReadonlyMap<string, unknown> { return this.#failed }
 
   /**
    * Priority-aware bee loading.
@@ -981,16 +1005,17 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
    *     than the warm path, but populates the cache so the next boot is
    *     fast.
    *
-   * Non-critical bees that arrive after find() returns get their own
-   * first pulse from the background continuation — drones whose
-   * heartbeat wires EffectBus listeners (NostrMeshDrone, PairedChannelDrone)
-   * require this or their listeners never register.
+   * Non-critical bees that arrive after find() returns are arrivals: the
+   * processor pulses each once as it registers (core/hypercomb.ts) — drones
+   * whose heartbeat wires EffectBus listeners (NostrMeshDrone,
+   * PairedChannelDrone) require that first pulse or their listeners never
+   * register.
    */
   #loadBeesPrioritized = async (
     sigs: readonly string[],
     signedCriticalBees: readonly string[],
   ): Promise<DeferredBeeLoads | null> => {
-    const pending = sigs.filter(sig => sig && this.#isSignature(sig) && !this.#beeCache.has(sig))
+    const pending = sigs.filter(sig => sig && this.#isSignature(sig) && !this.#beeCache.has(sig) && !this.#failed.has(sig))
     if (!pending.length) return null
 
     EffectBus.emit('loader:bees-progress', { loading: pending.length, total: this.#beeCache.size + pending.length })
@@ -1093,19 +1118,10 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     pending: readonly string[],
     loads: readonly Promise<Bee | null>[],
   ): void => {
+    // The finisher pulses nothing: each bee that lands here registered
+    // itself, and the processor pulses every arrival once (core/hypercomb.ts).
     void (async () => {
       await Promise.allSettled(loads)
-      for (const [sig, bee] of this.#beeCache) {
-        if (this.#firstPulsed.has(sig)) continue
-        this.#firstPulsed.add(sig)
-        // Pulse-less entries are legitimate: EventTarget UI drones
-        // (palette, toast, notes…) are constructor-wired and don't
-        // participate in the pulse cycle.
-        if (typeof (bee as any)?.pulse !== 'function') continue
-        try { await bee.pulse('') } catch (err) {
-          console.warn(`[script-preloader] late pulse failed for ${bee.iocKey}:`, err)
-        }
-      }
       this.#refreshProjection()
       ScriptPreloader.#updateLearnedCriticalSigs(this.#beeCache)
       const loaded = pending.filter(sig => this.#beeCache.has(sig)).length
@@ -1138,6 +1154,10 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     try { localStorage.removeItem('hc:critical-bee-sigs') } catch { /* best-effort cache */ }
   }
 
+  /** What the last write said — the finisher runs once per load batch, and
+   *  the mapping it learns is the same every time; one write per change. */
+  static #learnedWritten = ''
+
   /** Persist the sigs of the bees that declare the first-paint lane so an
    *  older package with no signed hint can hit the fast path next boot.
    *  The mark is read off the bee, never a class-name list, and the cache is
@@ -1147,10 +1167,10 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       const packageSig = installedPackageSig()
       const sigs = learnedCriticalBeeSigs(beeCache)
       if (!packageSig || !sigs) return
-      localStorage.setItem(
-        'hc:critical-bee-sigs',
-        serializeLearnedCriticalBeeSigs(packageSig, sigs),
-      )
+      const serialized = serializeLearnedCriticalBeeSigs(packageSig, sigs)
+      if (serialized === ScriptPreloader.#learnedWritten) return
+      ScriptPreloader.#learnedWritten = serialized
+      localStorage.setItem('hc:critical-bee-sigs', serialized)
       console.log(`[script-preloader] cached ${sigs.length} package-bound critical bee signatures`)
     } catch (err) {
       console.warn('[script-preloader] failed to persist critical bee sigs:', err)
@@ -1158,7 +1178,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   }
 
   #loadBeesFromList = async (sigs: string[]): Promise<void> => {
-    const pending = sigs.filter(sig => sig && this.#isSignature(sig) && !this.#beeCache.has(sig))
+    const pending = sigs.filter(sig => sig && this.#isSignature(sig) && !this.#beeCache.has(sig) && !this.#failed.has(sig))
     if (!pending.length) return
 
     EffectBus.emit('loader:bees-progress', { loading: pending.length, total: this.#beeCache.size + pending.length })
@@ -1176,13 +1196,21 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
 
   #loadBeeBySignature = async (signature: string): Promise<Bee | null> => {
     if (this.#beeCache.has(signature)) return this.#beeCache.get(signature)!
+    // Remembered failure: said once when it happened, not retried every act.
+    // (A bee held in the brood is not a failure — a hand may still accept it.)
+    if (this.#failed.has(signature)) return null
     const existing = this.#inFlight.get(signature)
     if (existing) return existing
 
     const promise = this.#tryLoadBee(signature)
     this.#inFlight.set(signature, promise)
     try {
-      return await promise
+      const bee = await promise
+      if (!bee && !this.#heldBack.has(signature)) this.#failed.set(signature, new Error('bee did not load'))
+      return bee
+    } catch (error) {
+      this.#failed.set(signature, error)
+      throw error
     } finally {
       this.#inFlight.delete(signature)
     }
