@@ -62,11 +62,15 @@ Enter answers the whole call. A toast says a call is waiting in case a window
 covers the line. Nothing runs until you answer:
 
 - **Enter**, once the call has been on the line for a second (so an Enter
-  meant for your own line cannot run it), opens a new conversation on the
+  meant for your own line cannot run it), writes a new conversation on the
   layer you stand in, with the request as its first turn, and says each line through the machine door,
   checked against your grants (`grant`) exactly as any machine's line is. Each
   line's verdict (ran, refused, ambiguous or unknown) is written into the
-  conversation as it happens, and the caller hears the same verdicts.
+  conversation as it happens, and the caller hears the same verdicts. The
+  conversation is not opened for you: you watch the hive while the call runs,
+  each line's place and verdict show in the activity log
+  (`claude-code 12/125: /trait … → ran /trait`), and a toast at the end says
+  how many lines were said and refused.
 - **Esc** declines. Nothing is said; the request and the decline are written
   into a new conversation on this layer, which stays closed.
 
