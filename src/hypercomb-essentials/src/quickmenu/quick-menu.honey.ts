@@ -253,6 +253,34 @@ export function ringSeed(slotIndex: number, menuName: string): number {
   return fract((slotIndex * 7 + (menuHash(menuName) % 97)) * 0.6180339)
 }
 
+// ── the ten backgrounds ───────────────────────────────────────────────
+
+/** How many crafted backgrounds there are (quickmenu/backgrounds, honey-01..10). */
+export const HONEY_BACKGROUND_COUNT = 10
+
+/** Steps round the ten that never revisit one before all ten are used: each is
+ *  coprime with 10, so seven slots stepped by any of them land on seven. */
+const BACKGROUND_STRIDES = [1, 3, 7, 9] as const
+
+/**
+ * Which of the ten backgrounds the option at `direction` of the menu `menuName`
+ * wears, 0..9. A ring never repeats one: the menu's hash picks where it starts
+ * and how far each slot steps (a stride coprime with ten), and the seven slots
+ * (the centre and the six round it, the way back among them) are seven steps.
+ * Different menus start, and step, differently.
+ */
+export function backgroundFor(menuName: string, direction: QuickMenuDirection): number {
+  const h = menuHash(menuName)
+  const stride = BACKGROUND_STRIDES[(h >>> 8) % BACKGROUND_STRIDES.length]
+  return (h % HONEY_BACKGROUND_COUNT + stride * slotIndexOf(direction)) % HONEY_BACKGROUND_COUNT
+}
+
+/** The top wall of a point-top tile at `x`, in px (y down): where a drip hangs
+ *  from when the tile wears a crafted background and has no pour lip. */
+export function wallY(x: number): number {
+  return -R + Math.abs(x) / Math.sqrt(3)
+}
+
 /** The lip line: -0.50 R with a 0.03 R wave. Tiles differ only by phase. */
 export function lipY(x: number, seed: number): number {
   return -0.5 * R + 0.03 * R * Math.sin((2.1 * x) / R + TAU * seed)
@@ -526,7 +554,7 @@ export function honeyStyleSheet(): string {
   const dur = `${DRIP_PERIOD_S}s linear infinite`
   const sel = '#hc-quick-menu'
   return [
-    `${sel} .hc-qm-lit{transition:opacity 90ms linear}`,
+    `${sel} .hc-qm-lit,${sel} .hc-qm-art-lit{transition:opacity 90ms linear}`,
     `${sel} .hc-qd-drip,${sel} .hc-qd-neck,${sel} .hc-qd-bead,${sel} .hc-qd-glint,${sel} .hc-qd-blob{transform-box:view-box}`,
     `${sel} .hc-qd-run .hc-qd-drip{animation:hc-qd-regrow ${dur}}`,
     `${sel} .hc-qd-run .hc-qd-neck{animation:hc-qd-neck ${dur}}`,
@@ -553,11 +581,11 @@ export function honeyStyleSheet(): string {
     `@media (prefers-reduced-motion: reduce){` +
       `${sel} .hc-qd-run .hc-qd-drip,${sel} .hc-qd-run .hc-qd-neck,${sel} .hc-qd-run .hc-qd-bead,` +
       `${sel} .hc-qd-run .hc-qd-glint,${sel} .hc-qd-run .hc-qd-blob{animation:none !important}` +
-      `${sel} .hc-qm-lit{transition:none}}`,
+      `${sel} .hc-qm-lit,${sel} .hc-qm-art-lit{transition:none}}`,
 
     // Forced colours: no honey, a plain outline, system text.
     `@media (forced-colors: active){` +
-      `${sel} .hc-hq,${sel} .hc-qm-lit,${sel} .hc-qm-shadow{display:none !important}` +
+      `${sel} .hc-hq,${sel} .hc-qm-lit,${sel} .hc-qm-shadow,${sel} .hc-qm-art,${sel} .hc-qm-art-lit{display:none !important}` +
       `${sel} .hc-qd-run .hc-qd-drip,${sel} .hc-qd-run .hc-qd-neck,${sel} .hc-qd-run .hc-qd-bead,` +
       `${sel} .hc-qd-run .hc-qd-glint,${sel} .hc-qd-run .hc-qd-blob{animation:none !important}` +
       `${sel} .hc-qm-base{fill:Canvas !important}` +

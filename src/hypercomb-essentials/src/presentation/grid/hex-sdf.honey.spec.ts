@@ -17,6 +17,7 @@ import {
   HONEY_LIGHT,
   hexToRgb,
 } from '../../quickmenu/quick-menu.honey.js'
+import { HONEY_ART_EFFECT } from '../../quickmenu/quick-menu.honey-art.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const shader = readFileSync(join(here, 'hex-sdf.shader.ts'), 'utf8')
@@ -148,7 +149,61 @@ describe('hex shader honey — the lit drip never divides by zero', () => {
   })
 })
 
+describe('hex shader honey — the crafted backgrounds', () => {
+  it('binds one atlas and a grid that says how many columns it has (0: none yet)', () => {
+    expect(shader).toContain('uniform sampler2D u_honeyArt;')
+    expect(shader).toContain('uniform vec2 u_honeyArtGrid;')
+    expect(shader).toContain("u_honeyArtGrid: { value: [0, 0], type: 'vec2<f32>' },")
+    expect(shader).toContain('u_honeyArt: this.toSource(Texture.WHITE),')
+  })
+
+  it('reads the variation only inside the honey branch, from the heat channel', () => {
+    const honeyBranch = shader.indexOf('if (honey) {')
+    const bevel = shader.indexOf('// bevel highlight (top-left light)')
+    const read = shader.indexOf('float honeyArtIndex = floor(vHeat + 0.5) - 1.0;')
+    expect(read).toBeGreaterThan(honeyBranch)
+    expect(read).toBeLessThan(bevel)
+    expect(shader).toContain('honeyTile(local, d, aa, vShapeMode, vBorderColor, honeySeed, honeyArtIndex)')
+    // honey never wears the heat ring, which is what frees the channel
+    expect(shader).toContain('heatRing * heatAlpha * (honey ? 0.0 : 1.0)')
+  })
+
+  it('wears a picture only on a non-back option with a drawn variation', () => {
+    expect(shader).toContain('bool crafted = !back && art > -0.5 && art < u_honeyArtGrid.x - 0.5;')
+    // the lip, bloom, meniscus and sliver are the procedural tile's alone
+    expect(shader).toContain('if (!back && !crafted) {\n        // one small warm bloom')
+    expect(shader).toContain('if (!back && !crafted) {\n        // the meniscus')
+    // a crafted tile draws a drip only when lit, hung from the wall
+    expect(shader).toContain('if (!back && p.y < 0.12 && (!crafted || lit)) {')
+    expect(shader).toContain('float yB = crafted ? honeyWall(xB) : honeyLip(xB, seed);')
+  })
+
+  it('samples the pre-lit row when lit and turns the picture for a flat-top tile', () => {
+    expect(shader).toContain('vec2 q = u_flat > 0.5 ? rot30(p) : p;')
+    expect(shader).toContain('vec2 at = vec2(art * cell.x, lit ? cell.y : 0.0)')
+    expect(shader).toContain('c = honeyArt(p, art, lit);')
+  })
+})
+
 describe('the flower paints honey only where it was asked', () => {
+  it('an ordinary tile\'s heat is written as before; only a honey option carries a picture', () => {
+    expect(showCell).toContain('const h = c.honeyArt !== undefined ? c.honeyArt + 1 : (c.heat ?? 0)')
+    // honeyArt is set in exactly one place: the flower's honey opt-in, never on the subject or the way back
+    expect(showCell.match(/honeyArt: f\.art/g)).toHaveLength(1)
+    expect(showCell).toContain('...(f.honey && !f.subject && !f.back && this.#honeyArtReady(f.art) ? { honeyArt: f.art } : {}),')
+  })
+
+  it('listens on the effect the pictures are announced on', () => {
+    expect(showCell).toContain(`const HONEY_ART_EFFECT = '${HONEY_ART_EFFECT}'`)
+  })
+
+  it('the variation index survives the heat channel round trip', () => {
+    // as written by show-cell (index + 1) and read by the shader (floor(v + 0.5) - 1)
+    for (let art = 0; art < 10; art++) expect(Math.floor(art + 1 + 0.5) - 1).toBe(art)
+    // a plain honey cell (no picture) reads as -1: the procedural honey
+    expect(Math.floor(0 + 0.5) - 1).toBe(-1)
+  })
+
   it('the clock wraps on a whole number of drips', () => {
     const period = Number(/const FLOWER_CLOCK_PERIOD_S = (\d+)/.exec(showCell)?.[1])
     expect(period).toBeGreaterThan(0)

@@ -15,8 +15,14 @@
 // Everything is drawn in the hexagon's own coordinates, centred on the origin,
 // at `radius` (the true circumradius). The numbers in quick-menu.honey.ts are
 // for R = 46, so lengths in px are scaled by `radius / HEX_RADIUS`.
+//
+// Once the crafted backgrounds are drawn (quick-menu.honey-art.ts) an option's
+// body is instead a Sprite of its picture, a frame of the shared atlas texture,
+// masked to the hexagon; lit swaps the frame for the pre-lit copy, and the
+// Graphics then carries only the rim and the lit halo (drawHoneyRim).
 
-import type { Graphics } from 'pixi.js'
+import { Rectangle, Sprite, Texture, type Graphics } from 'pixi.js'
+import { HONEY_ART_TILE, atlasFrame, type HoneyArt } from './quick-menu.honey-art.js'
 import {
   BODY_BACK,
   BODY_BACK_LIT,
@@ -198,6 +204,63 @@ export function drawHoney(g: Graphics, radius: number, flat: boolean, state: Hon
 
   // 7. the rim: a steel hairline at rest, pale gold when lit
   g.poly(flatten(hex), true)
+  if (lit) stroke(g, HONEY.lit.rim, HONEY.lit.rimWidth * s, HONEY.lit.rimAlpha)
+  else stroke(g, HONEY.steel, s)
+}
+
+// ── the crafted backgrounds ───────────────────────────────────────────
+
+export type HoneyArtFrames = { readonly rest: readonly (Texture | null)[]; readonly lit: readonly (Texture | null)[] }
+
+/** Each variation's rest and lit frame of the atlas, cut once per drawing.
+ *  Null when the atlas never became a texture; a frame is null where its
+ *  variation did not draw. */
+const cut = new WeakMap<HoneyArt, HoneyArtFrames>()
+export function honeyArtFrames(art: HoneyArt): HoneyArtFrames | null {
+  const source = art.texture?.source
+  if (!source) return null
+  const known = cut.get(art)
+  if (known) return known
+  const frame = (i: number, lit: boolean): Texture | null => {
+    if (!art.ready[i]) return null
+    const f = atlasFrame(i, lit)
+    return new Texture({ source, frame: new Rectangle(f.x, f.y, f.width, f.height) })
+  }
+  const frames: HoneyArtFrames = {
+    rest: art.ready.map((_, i) => frame(i, false)),
+    lit: art.ready.map((_, i) => frame(i, true)),
+  }
+  cut.set(art, frames)
+  return frames
+}
+
+/** A tile's crafted background, centred on the origin at `radius`. The picture
+ *  is a point-top tile, 2R tall; a flat-top tile wears it turned 30°. */
+export function honeyArtSprite(texture: Texture, radius: number, flat: boolean): Sprite {
+  const sprite = new Sprite(texture)
+  sprite.anchor.set(0.5)
+  sprite.scale.set((2 * radius) / HONEY_ART_TILE.height)
+  sprite.rotation = flat ? -Math.PI / 6 : 0
+  return sprite
+}
+
+/** The hexagon a crafted background is masked to. */
+export function drawHexMask(g: Graphics, radius: number, flat: boolean): void {
+  g.clear()
+  g.poly(flatten(hexOutline(radius, flat)), true)
+  g.fill({ color: 0xffffff, alpha: 1 })
+}
+
+/** The rim alone, and the lit halo inside it: everything a tile wearing a
+ *  crafted background still draws itself. */
+export function drawHoneyRim(g: Graphics, radius: number, flat: boolean, lit: boolean): void {
+  const s = radius / HEX_RADIUS
+  g.clear()
+  if (lit) {
+    g.poly(flatten(hexOutline(radius, flat, MENISCUS_SCALE)), true)
+    stroke(g, HONEY.lit.rim, (HONEY.lit.haloWidth / 2) * s, HONEY.lit.haloAlpha)
+  }
+  g.poly(flatten(hexOutline(radius, flat)), true)
   if (lit) stroke(g, HONEY.lit.rim, HONEY.lit.rimWidth * s, HONEY.lit.rimAlpha)
   else stroke(g, HONEY.steel, s)
 }

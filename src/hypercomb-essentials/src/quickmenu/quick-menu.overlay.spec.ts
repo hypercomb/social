@@ -11,7 +11,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QuickMenuRegistry } from './quick-menu-registry.service.js'
 import { QuickMenuOverlay } from './quick-menu.overlay.js'
-import { HONEY, LAYOUT, backIcon, cancelIcon, emptyIcon, HONEY_STYLE_ID } from './quick-menu.honey.js'
+import { HONEY, LAYOUT, backIcon, backgroundFor, cancelIcon, emptyIcon, HONEY_STYLE_ID } from './quick-menu.honey.js'
+import type { HoneyArt } from './quick-menu.honey-art.js'
 import { iconPath } from './quick-menu.icons.js'
 import type { QuickMenuDefinition, QuickMenuDirection } from './quick-menu.types.js'
 
@@ -400,6 +401,161 @@ describe('states', () => {
     overlay.paint(ROOT, { x: 300, y: 300 }, null, labelOf, 'back')
     expect(part(g, 'text').textContent).toBe('command')
     expect(iconShown(g)).toBe(true)
+  })
+})
+
+describe('the crafted backgrounds', () => {
+  /** The pictures as quick-menu.honey-art.ts hands them over, minus the drawing. */
+  function art(failed: readonly number[] = []): HoneyArt {
+    return {
+      count: 10, width: 280, height: 322, pad: 2,
+      ready: Array.from({ length: 10 }, (_, i) => !failed.includes(i)),
+      atlas: document.createElement('canvas'),
+      rest: Array.from({ length: 10 }, (_, i) => (failed.includes(i) ? null : `blob:rest-${i}`)),
+      lit: Array.from({ length: 10 }, (_, i) => (failed.includes(i) ? null : `blob:lit-${i}`)),
+      texture: null,
+    }
+  }
+  const href = (g: Element, which: '.hc-qm-art' | '.hc-qm-art-lit'): string | null => g.querySelector(which)?.getAttribute('href') ?? null
+  const litShown = (g: Element): boolean => (part(g, '.hc-qm-art-lit') as SVGElement).style.opacity === '1'
+  const DIRECTIONS: readonly QuickMenuDirection[] = ['centre', 'east', 'southeast', 'southwest', 'west', 'northwest', 'northeast']
+
+  it('dresses every option in its own background: none twice in a ring, each the one backgroundFor names', () => {
+    overlay.useArt(art())
+    const { svg } = overlay.ensure(ROOT, labelOf)
+    const worn = slotGroups(svg).map(g => href(g, '.hc-qm-art'))
+    expect(new Set(worn).size).toBe(7)
+    const expected = DIRECTIONS.map(d => `blob:rest-${backgroundFor(ROOT.name, d)}`)
+    expect(new Set(worn)).toEqual(new Set(expected))
+    for (const g of slotGroups(svg)) {
+      const rest = href(g, '.hc-qm-art')!
+      expect(href(g, '.hc-qm-art-lit')).toBe(rest.replace('rest', 'lit'))
+      // the picture is the whole point-top tile, clipped to the hexagon
+      const image = part(g, '.hc-qm-art')
+      expect([image.getAttribute('x'), image.getAttribute('y'), image.getAttribute('width'), image.getAttribute('height')]).toEqual(['-40', '-46', '80', '92'])
+      expect(image.getAttribute('clip-path')).toMatch(/^url\(#hq\d+-hex\)$/)
+      expect(image.getAttribute('aria-hidden')).toBe('true')
+    }
+  })
+
+  it('replaces the procedural lip, bloom and sliver, and hangs the drip from the wall', () => {
+    overlay.useArt(art())
+    const { svg } = overlay.ensure(ROOT, labelOf)
+    const g = slot(svg, 'tags')
+    expect(g.querySelector('path[fill$="-lip)"]')).toBeNull()
+    expect(g.querySelector('[fill$="-bloom)"]')).toBeNull()
+    expect(g.querySelector('[stroke$="-sliv)"]')).toBeNull()
+    const honey = part(g, '.hc-hq')
+    expect(honey.getAttribute('clip-path')).toMatch(/-hex\)$/)
+    expect(honey.firstElementChild?.getAttribute('transform')).toMatch(/^translate\(0,-\d+(\.\d+)?\)$/)
+    // the stack: base, picture, lit copy, lit halo, drip, rim
+    const order = [...g.children].map(c => c.getAttribute('class') ?? c.tagName)
+    const at = (name: string): number => order.indexOf(name)
+    expect(at('hc-qm-base')).toBeLessThan(at('hc-qm-art'))
+    expect(at('hc-qm-art')).toBeLessThan(at('hc-qm-art-lit'))
+    expect(at('hc-qm-art-lit')).toBeLessThan(at('hc-qm-lit'))
+    expect(at('hc-qm-lit')).toBeLessThan(at('hc-hq'))
+    expect(at('hc-hq')).toBeLessThan(at('hc-qm-rim'))
+  })
+
+  it('REST shows the picture and nothing else moves', () => {
+    overlay.useArt(art())
+    const svg = paint()
+    const g = slot(svg, 'tags')
+    expect(part(g, '.hc-qm-art').getAttribute('display')).toBeNull()
+    expect(litShown(g)).toBe(false)
+    expect(part(g, '.hc-hq').getAttribute('display')).toBe('none')
+    expect(running(g)).toBe(false)
+    expect(part(g, '.hc-qm-rim').getAttribute('stroke')).toBe(HONEY.steel)
+    expect(part(g, 'text').getAttribute('fill')).toBe(HONEY.ink.rest)
+  })
+
+  it('LIT fades the pre-lit copy in, keeps the halo and gold rim, flips the ink, runs one drip', () => {
+    overlay.useArt(art())
+    const svg = paint()
+    overlay.highlight('southeast')
+    const g = slot(svg, 'tags')
+    expect(litShown(g)).toBe(true)
+    expect(isLit(g)).toBe(true)
+    expect(part(g, '.hc-qm-lit').getAttribute('fill')).toBe('none')
+    expect(part(g, '.hc-qm-lit').getAttribute('stroke-opacity')).toBe(String(HONEY.lit.haloAlpha))
+    expect(part(g, '.hc-qm-rim').getAttribute('stroke')).toBe(HONEY.lit.rim)
+    expect(part(g, 'text').getAttribute('fill')).toBe(HONEY.ink.lit)
+    expect(part(g, '.hc-hq').getAttribute('display')).toBeNull()
+    expect(running(g)).toBe(true)
+    expect(slotGroups(svg).filter(litShown)).toHaveLength(1)
+    // and back to rest
+    overlay.highlight('east')
+    expect(litShown(g)).toBe(false)
+    expect(running(g)).toBe(false)
+  })
+
+  it('reduced motion lights the picture and never runs the drip', () => {
+    reduced = true
+    overlay.useArt(art())
+    const svg = paint()
+    overlay.highlight('southeast')
+    const g = slot(svg, 'tags')
+    expect(litShown(g)).toBe(true)
+    expect(running(g)).toBe(false)
+  })
+
+  it('BACK and CANCEL put the picture away and keep their own honey', () => {
+    overlay.useArt(art())
+    const def = registry.byName('selection:organize') as QuickMenuDefinition
+    overlay.warm([def], labelOf)
+    overlay.paint(def, { x: 300, y: 300 }, 'northeast', labelOf, 'back')
+    const ring = document.querySelector('#hc-quick-menu svg') as SVGSVGElement
+    const back = slot(ring, 'back')
+    expect(part(back, '.hc-qm-art').getAttribute('display')).toBe('none')
+    expect(part(back, '.hc-qm-art-lit').getAttribute('display')).toBe('none')
+    expect(part(back, '.hc-qm-base').getAttribute('fill')).toMatch(/-back\)$/)
+    const root = paint()
+    overlay.cancelLabel = 'cancel'
+    overlay.setCancelArmed(true)
+    const centre = slot(root, 'cancel')
+    expect(part(centre, '.hc-qm-art').getAttribute('display')).toBe('none')
+    expect(part(centre, '.hc-qm-base').getAttribute('fill')).toMatch(/-cancel\)$/)
+    overlay.setCancelArmed(false)
+    expect(part(centre, '.hc-qm-art').getAttribute('display')).toBeNull()
+  })
+
+  it('a variation that failed to draw leaves its slot in the procedural honey', () => {
+    const centreArt = backgroundFor(ROOT.name, 'centre')
+    overlay.useArt(art([centreArt]))
+    const { svg } = overlay.ensure(ROOT, labelOf)
+    const centre = slot(svg, 'command')
+    expect(centre.querySelector('.hc-qm-art')).toBeNull()
+    expect(centre.querySelector('path[fill$="-lip)"]')).not.toBeNull()
+    expect(slot(svg, 'tags').querySelector('.hc-qm-art')).not.toBeNull()
+  })
+
+  it('pictures that arrive after warm rebuild what was warm, off the gesture', () => {
+    overlay.warm([ROOT], labelOf)
+    vi.runAllTimers()
+    const before = overlay.ensure(ROOT, labelOf)
+    expect(before.svg.querySelector('.hc-qm-art')).toBeNull()
+    overlay.useArt(art())
+    vi.runAllTimers()
+    const after = overlay.ensure(ROOT, labelOf)
+    expect(after).not.toBe(before)
+    expect(after.svg.querySelectorAll('.hc-qm-art')).toHaveLength(7)
+  })
+
+  it('the gesture still builds nothing', () => {
+    overlay.useArt(art())
+    overlay.warm([ROOT], labelOf)
+    const ns = vi.spyOn(document, 'createElementNS')
+    const el = vi.spyOn(document, 'createElement')
+    overlay.paint(ROOT, { x: 300, y: 300 }, 'west', labelOf, 'back')
+    overlay.highlight('east')
+    overlay.highlight('centre')
+    overlay.setCancelArmed(true)
+    overlay.setCancelArmed(false)
+    overlay.highlight(null)
+    overlay.clear()
+    expect(ns).not.toHaveBeenCalled()
+    expect(el).not.toHaveBeenCalled()
   })
 })
 

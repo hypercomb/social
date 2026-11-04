@@ -61,6 +61,13 @@ export class HexSdfTextureShader {
       // 3..7 are not shapes but the quick menu's HONEY material, worn only by the
       // flower's option tiles (show-cell #paintFlower): 3 rest · 4 back · 5 lit ·
       // 6 back lit · 7 lit with its one slow drip. All hexagons.
+      // The quick menu's CRAFTED BACKGROUNDS (quickmenu/quick-menu.honey-art.ts):
+      // u_honeyArt is one atlas, a column per variation, rest on the top row and
+      // pre-lit below; u_honeyArtGrid is (columns, pad px), columns 0 until the
+      // pictures are drawn. A honey cell names its variation in aHeat as index + 1
+      // (0 = none: the procedural honey) — honey never wears the heat ring, so the
+      // channel is free there, and every other tile's heat is untouched.
+      u_honeyArtGrid: { value: [0, 0], type: 'vec2<f32>' },
     }
 
     // v8 shaded mesh requires uniforms nested under a group and shader inputs using in/out
@@ -70,6 +77,7 @@ export class HexSdfTextureShader {
         uniforms: uniformDefs,
         u_label: this.toSource(labelAtlas),
         u_cellImages: this.toSource(cellImageAtlas),
+        u_honeyArt: this.toSource(Texture.WHITE),
       },
     })
 
@@ -184,6 +192,16 @@ export class HexSdfTextureShader {
     ;(this.shader.resources as any).u_cellImages = this.toSource(t)
   }
 
+  /** The quick menu's crafted backgrounds: the atlas, its column count and the
+   *  pad round each cell in px. Null (or 0 columns) puts every honey cell back on
+   *  the procedural honey. */
+  public setHoneyArt = (t: Texture | null, columns: number, pad: number): void => {
+    ;(this.shader.resources as any).u_honeyArt = this.toSource(t ?? Texture.WHITE)
+    const v = this.#ug.uniforms.u_honeyArtGrid
+    v[0] = t ? columns : 0; v[1] = pad
+    this.#ug.update()
+  }
+
   private toSource = (t: Texture): any => {
     return (t as any).source ?? (t as any).baseTexture?.source ?? (t as any).texture?.source
   }
@@ -292,9 +310,11 @@ export class HexSdfTextureShader {
     uniform float u_markPreview;
     uniform float u_swapMode;
     uniform vec3 u_swapColor;
+    uniform vec2 u_honeyArtGrid;
 
     uniform sampler2D u_label;
     uniform sampler2D u_cellImages;
+    uniform sampler2D u_honeyArt;
 
     out vec4 fragColor;
 
@@ -538,11 +558,33 @@ export class HexSdfTextureShader {
       return HEX(0xff, 0xf1, 0xcf);
     }
 
+    // ── the crafted backgrounds (quickmenu/quick-menu.honey-art.ts) ──────────
+    // Variation art's picture at p (in R, y down), at rest or pre-lit. Each
+    // picture is a point-top tile in a -40 -46 80 92 box at R = 46, inside a
+    // padded atlas cell; a flat-top tile reads it turned 30°. Laid over the
+    // darkest honey wherever the picture is not opaque.
+    vec3 honeyArt(vec2 p, float art, bool lit) {
+      vec2 q = u_flat > 0.5 ? rot30(p) : p;
+      vec2 box = clamp(vec2((q.x * 46.0 + 40.0) / 80.0, (q.y * 46.0 + 46.0) / 92.0), 0.0, 1.0);
+      vec2 size = vec2(textureSize(u_honeyArt, 0));
+      vec2 cell = vec2(size.x / u_honeyArtGrid.x, size.y * 0.5);
+      vec2 at = vec2(art * cell.x, lit ? cell.y : 0.0) + u_honeyArtGrid.y + box * (cell - 2.0 * u_honeyArtGrid.y);
+      vec4 s = texture(u_honeyArt, at / size);
+      return s.rgb + HEX(0x1d, 0x12, 0x04) * (1.0 - s.a);
+    }
+
+    // The top wall at x: with no pour lip, the lit tile's drip hangs from it.
+    float honeyWall(float x) {
+      return u_flat > 0.5 ? -0.8660254 + 1.7320508 * max(abs(x) - 0.5, 0.0) : -1.0 + 0.57735027 * abs(x);
+    }
+
     // The whole tile, in the order the SVG ring lays it: body, bloom, halo, the
     // pour lip and its drips, the meniscus, the sliver, the rim. d is the hex
     // distance in px (negative inside), aa the page's own edge band, which the
-    // rim is set inside of so it never sits in the part that fades out.
-    vec3 honeyTile(vec2 local, float d, float aa, float mode, vec3 accent, float seed) {
+    // rim is set inside of so it never sits in the part that fades out. art is
+    // the crafted background (-1 = none): it replaces the body, bloom, lip,
+    // meniscus and sliver; the halo, the rim and the lit tile's drip stay.
+    vec3 honeyTile(vec2 local, float d, float aa, float mode, vec3 accent, float seed, float art) {
       float R = u_radiusPx / 0.8660254;
       vec2 p = local / R;
       float dd = clamp(1.0 - length(p), 0.0, 1.0);
@@ -553,9 +595,12 @@ export class HexSdfTextureShader {
       bool back = abs(mode - 4.0) < 0.5 || abs(mode - 6.0) < 0.5;
       bool lit = mode > 4.5;
       bool animated = mode > 6.5;
+      bool crafted = !back && art > -0.5 && art < u_honeyArtGrid.x - 0.5;
 
       vec3 c;
-      if (back) {
+      if (crafted) {
+        c = honeyArt(p, art, lit);
+      } else if (back) {
         float t = clamp((dd - 0.134) / 0.866, 0.0, 1.0);
         c = lit ? mix(HEX(0x2f, 0x20, 0x0a), HEX(0x4d, 0x35, 0x10), t)
                 : mix(HEX(0x2a, 0x1c, 0x06), HEX(0x3b, 0x28, 0x09), t);
@@ -567,9 +612,9 @@ export class HexSdfTextureShader {
                       HEX(0x7d, 0x4d, 0x0c), HEX(0x86, 0x52, 0x0e), HEX(0x8c, 0x58, 0x10));
       }
       // no two tiles quite alike: the body breathes a few percent with the seed
-      c *= 1.0 + 0.03 * (2.0 * fract(seed * 2.3 + 0.1) - 1.0);
+      if (!crafted) c *= 1.0 + 0.03 * (2.0 * fract(seed * 2.3 + 0.1) - 1.0);
 
-      if (!back) {
+      if (!back && !crafted) {
         // one small warm bloom, low and right, away from the name
         vec2 q = p - vec2(0.30, 0.72);
         c = mix(c, HEX(0xf0, 0xb4, 0x45), 0.16 * exp(-dot(q, q) / 0.10));
@@ -579,16 +624,17 @@ export class HexSdfTextureShader {
       // the lit halo, three px inside the wall
       if (lit && !back) c = mix(c, HEX(0xff, 0xd9, 0x8a), 0.22 * honeyBand(e, 0.065, w));
 
-      if (!back && p.y < 0.12) {
+      if (!back && p.y < 0.12 && (!crafted || lit)) {
         // THE POUR LIP, with two teardrops hanging either side of the icon. The
-        // second (B) is the one that moves on the lit tile, 11 s round.
+        // second (B) is the one that moves on the lit tile, 11 s round. A crafted
+        // background has no lip: only the lit tile's B, hung from the top wall.
         float flip = seed > 0.5 ? -1.0 : 1.0;
         float hA = fract(seed * 3.7 + 0.13);
         float hB = fract(seed * 6.0 + 0.57);
         float xA = flip * (-0.50 + 0.05 * (2.0 * hA - 1.0));
         float xB = flip * (0.50 + 0.05 * (2.0 * hB - 1.0));
         float yA = honeyLip(xA, seed);
-        float yB = honeyLip(xB, seed);
+        float yB = crafted ? honeyWall(xB) : honeyLip(xB, seed);
         float lenA = 0.12 + 0.10 * hA;
         float radA = 0.056 + 0.020 * hA;
         float lenB = 0.12 + 0.10 * hB;
@@ -617,18 +663,29 @@ export class HexSdfTextureShader {
                                   ws, neckBead, fillet, gs, visB);
         float beadA, beadB, castA, castB;
         vec2 pB, castP;
-        float dAll = honeyField(p, h, beadA, beadB, pB);
-
-        // the lip's shadow on the body: the same shape cast 1.5 px down, so it
-        // falls under the lip and its beads, never round their sides
-        float dCast = p.y < -0.05 ? honeyField(p - vec2(0.0, 0.0326), h, castA, castB, castP) : 1.0;
-        c = mix(c, HEX(0x14, 0x0c, 0x02), 0.35 * (1.0 - smoothstep(-w, w, dCast)));
+        float dAll, dCast;
+        if (crafted) {
+          // B alone, its root in the wall, regrowing about that root
+          vec2 root = vec2(xB, yB);
+          pB = root + (p - root) / gs;
+          dAll = honeyDrip(pB, xB, yB, lenB + extra, radNow, ws, neckBead, beadB) * gs;
+          castP = root + (p - vec2(0.0, 0.0326) - root) / gs;
+          dCast = honeyDrip(castP, xB, yB, lenB + extra, radNow, ws, neckBead, castB) * gs;
+        } else {
+          dAll = honeyField(p, h, beadA, beadB, pB);
+          // the lip's shadow on the body: the same shape cast 1.5 px down, so it
+          // falls under the lip and its beads, never round their sides
+          dCast = p.y < -0.05 ? honeyField(p - vec2(0.0, 0.0326), h, castA, castB, castP) : 1.0;
+        }
+        // with no lip to grow out of, the crafted tile's drip fades in as it regrows
+        float cover = crafted ? visB : 1.0;
+        c = mix(c, HEX(0x14, 0x0c, 0x02), 0.35 * cover * (1.0 - smoothstep(-w, w, dCast)));
         // then the lip: dark at the rim, clear below
         vec3 lipCol = mix(HEX(0x5a, 0x38, 0x09), HEX(0xa8, 0x70, 0x0f), clamp((p.y + 1.0) / 0.225, 0.0, 1.0));
         lipCol = mix(lipCol, HEX(0xc2, 0x84, 0x18), clamp((p.y + 0.775) / 0.275, 0.0, 1.0));
-        c = mix(c, lipCol, 0.92 * (1.0 - smoothstep(-w, w, dAll)));
+        c = mix(c, lipCol, 0.92 * cover * (1.0 - smoothstep(-w, w, dAll)));
 
-        c = honeyBead(c, p, vec2(xA, yA + lenA - radA), radA, beadA, w, 1.0);
+        if (!crafted) c = honeyBead(c, p, vec2(xA, yA + lenA - radA), radA, beadA, w, 1.0);
         c = honeyBead(c, pB, vec2(xB, yB + lenB + extra - radNow), radNow, beadB, w / gs, visB);
         if (animated && fell && u < 0.85) {
           // the bead let go: it falls, narrows, stretches a little, and is gone
@@ -642,7 +699,7 @@ export class HexSdfTextureShader {
         }
       }
 
-      if (!back) {
+      if (!back && !crafted) {
         // the meniscus: a pale line just inside the wall, brightest top-left,
         // and a warm one bottom-right where the light comes through
         float men = honeyLine(e, 0.0326, max(0.0217, px), w);
@@ -822,7 +879,9 @@ export class HexSdfTextureShader {
       // flower cell's ordinal. Fully opaque: an ordinary tile under an option must not show through the honey.
       if (honey) {
         float honeySeed = fract(mod(floor(vCellIndex + 0.5), 1024.0) * 0.6180339 + 0.37);
-        base = vec4(honeyTile(local, d, aa, vShapeMode, vBorderColor, honeySeed), 1.0);
+        // which crafted background, if any: honey carries it in aHeat as index + 1
+        float honeyArtIndex = floor(vHeat + 0.5) - 1.0;
+        base = vec4(honeyTile(local, d, aa, vShapeMode, vBorderColor, honeySeed, honeyArtIndex), 1.0);
       } else {
         // bevel highlight (top-left light) and shadow (bottom-right)
         float highlightStrength = max(bevelDot, 0.0) * edgeProximity * 0.06;

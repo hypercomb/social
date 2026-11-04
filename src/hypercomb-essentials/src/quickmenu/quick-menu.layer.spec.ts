@@ -47,8 +47,23 @@ vi.mock('pixi.js', () => {
   return { Container, Graphics, Text, TextStyle, Point }
 })
 
-// the honey drawing itself is covered by quick-menu.honey-graphics.spec.ts
-vi.mock('./quick-menu.honey-graphics.js', () => ({ drawHoney: () => undefined }))
+// the honey drawing itself is covered by quick-menu.honey-graphics.spec.ts; the
+// crafted backgrounds' frames are named stand-ins, so a test can see which one
+// a sprite wears
+const drawn = vi.hoisted(() => ({ honey: 0, rim: 0 }))
+vi.mock('./quick-menu.honey-graphics.js', async () => {
+  const { Container } = await import('pixi.js')
+  return {
+    drawHoney: () => { drawn.honey++ },
+    drawHoneyRim: () => { drawn.rim++ },
+    drawHexMask: () => undefined,
+    honeyArtFrames: (art: { ready: boolean[] }) => ({
+      rest: art.ready.map((ok, i) => (ok ? `rest-${i}` : null)),
+      lit: art.ready.map((ok, i) => (ok ? `lit-${i}` : null)),
+    }),
+    honeyArtSprite: (texture: string) => Object.assign(new Container(), { texture, mask: null as unknown }),
+  }
+})
 
 const { QuickMenuLayer } = await import('./quick-menu.layer.js')
 const { QuickMenuRegistry } = await import('./quick-menu-registry.service.js')
@@ -114,6 +129,73 @@ describe('the slots are freed, not merely removed', () => {
     expect(destroyed.length).toBeGreaterThan(before)
     // a highlight that arrives after hide() must not draw on a destroyed Graphics
     expect(() => l.highlight('east')).not.toThrow()
+  })
+})
+
+describe('the crafted backgrounds', () => {
+  type Cell = { label: string; honey?: boolean; back?: boolean; subject?: boolean; art?: number }
+  function cellsOf(run: () => void): Cell[] {
+    let cells: Cell[] = []
+    const emit = vi.spyOn(EffectBus, 'emit')
+    emit.mockImplementation(((effect: string, payload: unknown) => {
+      if (effect === 'render:flower') cells = (payload as { cells: Cell[] | null }).cells ?? []
+    }) as never)
+    run()
+    emit.mockRestore()
+    return cells
+  }
+
+  it('names a different background on every option of the flower, and none on the subject', () => {
+    const l = layer('sunrise')
+    const cells = cellsOf(() => l.bloom())
+    const options = cells.filter(c => c.honey)
+    expect(options.length).toBeGreaterThan(3)
+    const worn = options.map(c => c.art)
+    expect(worn.every(a => Number.isInteger(a) && a! >= 0 && a! < 10)).toBe(true)
+    expect(new Set(worn).size).toBe(worn.length)
+    expect(cells.find(c => c.subject)?.art).toBeUndefined()
+  })
+
+  it('leaves the way back in its crystallised honey', () => {
+    const l = new QuickMenuLayer()
+    EffectBus.emit('render:host-ready', { container: new Container() })
+    l.setSubject('sunrise')
+    l.place(0, 0)
+    l.show(registry.byName('selection:organize')!, labelOf, 'northeast', 'back')
+    const cells = cellsOf(() => l.bloom())
+    const back = cells.find(c => c.back)
+    expect(back).toBeTruthy()
+    expect(back!.art).toBeUndefined()
+  })
+
+  type Sprite = { texture: string; mask: unknown }
+  const spritesOf = (root: { children: unknown[] }): Sprite[] =>
+    root.children.filter((c): c is Sprite => typeof (c as Sprite).texture === 'string')
+
+  it('the Pixi ring wears the pictures as masked sprites, and lit swaps the frame', () => {
+    const container = new Container()
+    const l = new QuickMenuLayer()
+    EffectBus.emit('render:host-ready', { container })
+    l.place(0, 0)
+    EffectBus.emit('quickmenu:honey-art', { ready: Array.from({ length: 10 }, () => true) })
+    drawn.honey = 0
+    drawn.rim = 0
+    l.show(ROOT, labelOf, null, 'back')
+    const root = (container as unknown as { children: { children: unknown[] }[] }).children.at(-1)!
+    const sprites = spritesOf(root)
+    expect(sprites).toHaveLength(6)
+    expect(new Set(sprites.map(s => s.texture)).size).toBe(6)
+    for (const s of sprites) {
+      expect(s.texture).toMatch(/^rest-\d$/)
+      expect(s.mask).toBeTruthy()
+    }
+    // the body is the picture: the Graphics carries only the rim
+    expect(drawn.honey).toBe(0)
+    expect(drawn.rim).toBe(6)
+    l.highlight('east')
+    expect(spritesOf(root).filter(s => s.texture.startsWith('lit-'))).toHaveLength(1)
+    l.highlight(null)
+    expect(spritesOf(root).every(s => s.texture.startsWith('rest-'))).toBe(true)
   })
 })
 

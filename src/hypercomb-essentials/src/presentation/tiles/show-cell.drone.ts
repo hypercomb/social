@@ -112,7 +112,7 @@ const previewRgb = (hex: string | null | undefined): [number, number, number] | 
 
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
-type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean; unshared?: boolean; plain?: boolean; pendingProps?: boolean; shaded?: boolean; honeyMode?: HoneyMode }
+type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean; unshared?: boolean; plain?: boolean; pendingProps?: boolean; shaded?: boolean; honeyMode?: HoneyMode; honeyArt?: number }
 
 /** The quick menu's honey material, as the shader's aShapeMode takes it:
  *  3 rest · 4 back · 5 lit · 6 back lit · 7 lit and dripping (hex-sdf.shader). */
@@ -171,7 +171,15 @@ type FlowerCell = {
   /** A Material Symbols glyph worn in place of the name; the DOM name layer
    *  (tile-name.drone.ts) sets it, the shader never draws it. */
   icon?: string
+  /** Which of the quick menu's crafted backgrounds an option wears, 0..9. */
+  art?: number
 }
+
+/** The quick menu's crafted backgrounds, drawn once at warm (quickmenu/
+ *  quick-menu.honey-art.ts, `HONEY_ART_EFFECT`): the atlas as one texture, a
+ *  column per variation, and which variations drew. Only what the flower reads. */
+const HONEY_ART_EFFECT = 'quickmenu:honey-art'
+type HoneyArtPayload = { count: number; pad: number; ready: readonly boolean[]; texture: Texture | null }
 
 /** Which honey a flower option is poured as; `still` takes the drip off the lit one. */
 const honeyModeOf = (f: FlowerCell, still: boolean): HoneyMode =>
@@ -1148,6 +1156,9 @@ export class ShowCellDrone extends Drone {
   #diveMesh: any | null = null
   #flowerMesh: any | null = null
   #flowerGeom: Geometry | null = null
+  /** The quick menu's crafted backgrounds once drawn, and the shader they are bound to. */
+  #honeyArt: HoneyArtPayload | null = null
+  #honeyArtShader: HexSdfTextureShader | null = null
   // The flower's one moving part: the lit honey tile's drip (aShapeMode 7). Its
   // clock writes u_time on the page's own #driftStart origin (so it can never
   // fight the pathway-hover or mark-preview clocks over the shared uniform),
@@ -6147,6 +6158,11 @@ export class ShowCellDrone extends Drone {
     })
     this.onEffect<{ cells?: readonly FlowerCell[] | null }>('render:flower', (payload) => {
       this.#paintFlower(payload?.cells ?? null)
+    })
+    this.onEffect<HoneyArtPayload>(HONEY_ART_EFFECT, (art) => {
+      if (!art?.texture) return
+      this.#honeyArt = art
+      this.#honeyArtShader = null
     })
     this.onEffect<{ label?: string | null }>('render:dive-hover', (payload) => {
       this.#hoverDive(payload?.label ?? null)
@@ -11579,7 +11595,9 @@ export class ShowCellDrone extends Drone {
       hasImage.set([hi, hi, hi, hi], hip)
       hip += 4
 
-      const h = c.heat ?? 0
+      // A flower option's crafted background rides the heat channel as index + 1:
+      // honey never wears the heat ring, and no other tile ever sets honeyArt.
+      const h = c.honeyArt !== undefined ? c.honeyArt + 1 : (c.heat ?? 0)
       heat.set([h, h, h, h], hp)
       hp += 4
 
@@ -11710,8 +11728,15 @@ export class ShowCellDrone extends Drone {
         hasBranch: own?.hasBranch ?? false, hideText: own?.hideText ?? false, heat: 0,
         borderColor: f.lit ? this.#accentColor : own?.borderColor,
         ...(f.honey && !f.subject ? { honeyMode: honeyModeOf(f, still) } : {}),
+        ...(f.honey && !f.subject && !f.back && this.#honeyArtReady(f.art) ? { honeyArt: f.art } : {}),
       }
     })
+    // The crafted backgrounds, handed to whichever shader is current (a
+    // rebuilt one starts without them). Never drawn here: only bound.
+    if (this.#honeyArt?.texture && this.#honeyArtShader !== this.shader) {
+      this.shader.setHoneyArt(this.#honeyArt.texture, this.#honeyArt.count, this.#honeyArt.pad)
+      this.#honeyArtShader = this.shader
+    }
     atlas.setPinned([...this.renderedCells.keys(), ...cells.map(c => c.label), PENDING_CELL_LABEL])
     for (const c of cells) atlas.getLabelUV(c.label)
 
@@ -11742,6 +11767,13 @@ export class ShowCellDrone extends Drone {
       layer.position.y + this.hexMesh.position.y * layer.scale.y,
     )
     this.#syncFlowerClock(cells.find(c => c.honeyMode === 7) ?? null)
+  }
+
+  /** Is crafted background `art` drawn and bindable? Otherwise the option is
+   *  poured in the procedural honey. */
+  #honeyArtReady(art: number | undefined): art is number {
+    const drawn = this.#honeyArt
+    return art !== undefined && !!drawn?.texture && art >= 0 && art < drawn.count && drawn.ready[art] === true
   }
 
   /** The dripping tile's clock. It starts when a tile lights and restarts when

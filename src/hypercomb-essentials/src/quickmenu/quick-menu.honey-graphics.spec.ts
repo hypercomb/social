@@ -3,7 +3,8 @@
 // and a drawing smoke test for every state in either orientation.
 
 import { describe, expect, it } from 'vitest'
-import { clipConvex, drawHoney, hexOutline, lipPolygon, paint, type Pt } from './quick-menu.honey-graphics.js'
+import { Texture } from 'pixi.js'
+import { clipConvex, drawHexMask, drawHoney, drawHoneyRim, hexOutline, honeyArtFrames, honeyArtSprite, lipPolygon, paint, type Pt } from './quick-menu.honey-graphics.js'
 import { HEX_RADIUS } from './quick-menu.types.js'
 
 /** Inside a convex polygon (either winding), allowing a hair of float slack. */
@@ -137,5 +138,39 @@ describe('drawHoney', () => {
     expect(back.calls).not.toContain('ellipse')
     // and the dashed rim is a path of separate strokes, not one closed polygon
     expect(back.calls).toContain('moveTo')
+  })
+})
+
+describe('the crafted backgrounds in Pixi', () => {
+  it('draws only the rim at rest, and the halo inside it when lit', () => {
+    const rest = recorder()
+    drawHoneyRim(rest.g, HEX_RADIUS, false, false)
+    expect(rest.calls).toEqual(['clear', 'poly', 'stroke'])
+    const lit = recorder()
+    drawHoneyRim(lit.g, HEX_RADIUS, true, true)
+    expect(lit.calls).toEqual(['clear', 'poly', 'stroke', 'poly', 'stroke'])
+  })
+
+  it('sizes the picture to the tile (2R tall) and turns it for a flat-top tile', () => {
+    const texture = Texture.EMPTY
+    const pointy = honeyArtSprite(texture, 92, false)
+    expect(pointy.scale.x).toBeCloseTo((2 * 92) / 322, 9)
+    expect(pointy.scale.y).toBeCloseTo((2 * 92) / 322, 9)
+    expect(pointy.rotation).toBe(0)
+    expect(pointy.anchor.x).toBe(0.5)
+    expect(honeyArtSprite(texture, 46, true).rotation).toBeCloseTo(-Math.PI / 6, 9)
+  })
+
+  it('masks to the same hexagon the tile is', () => {
+    const { g, calls } = recorder()
+    drawHexMask(g, HEX_RADIUS, false)
+    expect(calls).toEqual(['clear', 'poly', 'fill'])
+  })
+
+  it('cuts no frames when the atlas never became a texture', () => {
+    expect(honeyArtFrames({
+      count: 10, width: 280, height: 322, pad: 2, ready: new Array(10).fill(true),
+      atlas: document.createElement('canvas'), rest: [], lit: [], texture: null,
+    })).toBeNull()
   })
 })

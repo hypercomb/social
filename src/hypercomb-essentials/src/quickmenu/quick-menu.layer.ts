@@ -8,12 +8,14 @@
 // you point at an option. Nothing here hides the pointer or takes a lock.
 
 import { EffectBus } from '@hypercomb/core'
-import { Container, Graphics, Point, Text, TextStyle, type Application } from 'pixi.js'
+import { Container, Graphics, Point, Text, TextStyle, type Application, type Sprite, type Texture } from 'pixi.js'
 import { containerScreenScale, screenTextResolution } from '../presentation/grid/screen-text-resolution.js'
 import { DEFAULT_HEX_GEOMETRY, type HexGeometry } from '../presentation/grid/hex-geometry.js'
 import { drawsAsGlyph } from '../commands/material-glyph.js'
-import { drawHoney } from './quick-menu.honey-graphics.js'
-import { backIcon, HONEY, LAYOUT, ringSeed, slotIndexOf } from './quick-menu.honey.js'
+import { drawHexMask, drawHoney, drawHoneyRim, honeyArtFrames, honeyArtSprite } from './quick-menu.honey-graphics.js'
+import { backgroundFor, backIcon, HONEY, LAYOUT, ringSeed, slotIndexOf } from './quick-menu.honey.js'
+import { HONEY_ART_EFFECT, warmHoneyArt, type HoneyArt } from './quick-menu.honey-art.js'
+import { HONEY_BACKGROUNDS } from './quick-menu.backgrounds.js'
 import { currentOperands, operandNote } from './quick-menu.operands.js'
 import {
   cellUnit,
@@ -75,15 +77,21 @@ export type FlowerCell = {
   honey?: boolean
   /** The way back, in crystallised honey. */
   back?: boolean
+  /** Which crafted background an option wears, 0..9 (backgroundFor): never
+   *  the same twice in one flower. Absent on the way back and the subject. */
+  art?: number
 }
 
 type SlotView = {
   readonly direction: QuickMenuDirection
+  /** The honey, or with a crafted background only its rim and lit halo. */
   readonly hex: Graphics
   readonly text: Text
   readonly back: boolean
   /** The slot's honey seed: the same slot looks the same on every open. */
   readonly seed: number
+  /** The crafted background and its two frames, when the slot wears one. */
+  readonly art: { readonly sprite: Sprite; readonly rest: Texture; readonly lit: Texture } | null
 }
 
 type HostReady = {
@@ -136,6 +144,8 @@ export class QuickMenuLayer {
   /** The options sleep after a way back, until the pointer returns to the middle
    *  (with or without a timer: reduced motion cues without one). */
   #asleep = false
+  /** The crafted backgrounds, once drawn (quick-menu.honey-art.ts). */
+  #art: HoneyArt | null = null
 
   constructor() {
     EffectBus.on<HostReady>('render:host-ready', (payload) => {
@@ -144,6 +154,13 @@ export class QuickMenuLayer {
       this.#canvas = payload.canvas ?? null
       this.#renderer = payload.renderer ?? null
       this.#ensureRoot()
+      // warm: the pictures are drawn once, now, never on a gesture
+      void warmHoneyArt(HONEY_BACKGROUNDS)
+      if (this.#showing) this.#paintSlots()
+    })
+    EffectBus.on<HoneyArt>(HONEY_ART_EFFECT, (art) => {
+      if (!art || art === this.#art) return
+      this.#art = art
       if (this.#showing) this.#paintSlots()
     })
     EffectBus.on<{ x: number; y: number }>('render:mesh-offset', (offset) => {
@@ -246,7 +263,7 @@ export class QuickMenuLayer {
         label: isBack ? pending.backLabel : pending.labelOf(slot!),
         lit: direction === (this.#lit ?? this.#cueSweep),
         honey: true,
-        ...(isBack ? { back: true } : {}),
+        ...(isBack ? { back: true } : { art: backgroundFor(pending.definition.name, direction) }),
         ...(icon && drawsAsGlyph(icon) === true ? { icon } : {}),
       })
     }
@@ -391,9 +408,16 @@ export class QuickMenuLayer {
       if (text.width > max && text.width > 0) text.scale.set(max / text.width)
       text.position.set(unit.x * metrics.reach, unit.y * metrics.reach)
       hex.position.set(text.position.x, text.position.y)
+      const art = isBack ? null : this.#artFor(backgroundFor(pending.definition.name, direction), metrics.radius, metrics.flat)
+      if (art) {
+        art.sprite.position.set(text.position.x, text.position.y)
+        art.mask.position.set(text.position.x, text.position.y)
+        root.addChild(art.sprite)
+        root.addChild(art.mask)
+      }
       root.addChild(hex)
       root.addChild(text)
-      this.#slots.set(direction, { direction, hex, text, back: isBack, seed })
+      this.#slots.set(direction, { direction, hex, text, back: isBack, seed, art })
       this.#style(direction, direction === lit)
     }
     this.#place()
@@ -483,8 +507,27 @@ export class QuickMenuLayer {
   #style(direction: QuickMenuDirection, on: boolean): void {
     const view = this.#slots.get(direction)
     if (!view) return
-    drawHoney(view.hex, this.#metrics().radius, this.#flat, { lit: on, back: view.back }, view.seed)
+    if (view.art) {
+      view.art.sprite.texture = on ? view.art.lit : view.art.rest
+      drawHoneyRim(view.hex, this.#metrics().radius, this.#flat, on)
+    } else {
+      drawHoney(view.hex, this.#metrics().radius, this.#flat, { lit: on, back: view.back }, view.seed)
+    }
     view.text.style.fill = view.back ? HONEY.ink.back : on ? HONEY.ink.lit : HONEY.ink.rest
+  }
+
+  /** A crafted background as a Sprite masked to the hexagon, or null while the
+   *  pictures are not drawn (or this one failed): the slot is honey then. */
+  #artFor(index: number, radius: number, flat: boolean): { sprite: Sprite; mask: Graphics; rest: Texture; lit: Texture } | null {
+    const frames = this.#art ? honeyArtFrames(this.#art) : null
+    const rest = frames?.rest[index]
+    const lit = frames?.lit[index]
+    if (!rest || !lit) return null
+    const sprite = honeyArtSprite(rest, radius, flat)
+    const mask = new Graphics()
+    drawHexMask(mask, radius, flat)
+    sprite.mask = mask
+    return { sprite, mask, rest, lit }
   }
 
   /** The word alone, as the ring sets a bare word: 13 px at R = 46, weight 400

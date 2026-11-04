@@ -35,6 +35,16 @@
 // Back is crystallised honey, cancel is burnt honey; neither has a lip or drips.
 // Only the label text node is ever rewritten; icons are path data on cached
 // nodes, never a font ligature in a detached tree.
+//
+// ── The crafted backgrounds ───────────────────────────────────────────
+//
+// Once the ten backgrounds are drawn (quick-menu.honey-art.ts, once, at warm)
+// each option wears its own (backgroundFor: no two alike in one ring) in place
+// of the procedural body, lip, bloom, meniscus and sliver: two <image>s, the
+// picture at rest and its pre-lit copy, and lighting a tile fades the lit one
+// in. The lit tile alone keeps the one slow drip, hung from the top wall. Back
+// and cancel keep their own honey. Until the pictures are ready, and wherever
+// one failed, the slot is the procedural honey above.
 
 import { THEME_IOC_KEY } from '@hypercomb/core'
 import {
@@ -56,6 +66,7 @@ import {
   HONEY_STYLE_ID,
   LAYOUT,
   backIcon,
+  backgroundFor,
   beadShade,
   blobStart,
   cancelIcon,
@@ -72,10 +83,13 @@ import {
   slotGlyph,
   slotHoney,
   slotIndexOf,
+  wallY,
   type GradientStop,
   type LabelFit,
   type Measure,
 } from './quick-menu.honey.js'
+import { HONEY_ART_BOX, warmHoneyArt, type HoneyArt } from './quick-menu.honey-art.js'
+import { HONEY_BACKGROUNDS } from './quick-menu.backgrounds.js'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 
@@ -121,8 +135,12 @@ interface SlotElements {
   /** Everything honey: bloom, lip, drips, meniscus, sliver. Hidden on back and cancel. */
   readonly honey: SVGGElement
   readonly drip: SVGGElement
-  readonly sliver: SVGPathElement
-  readonly glint: SVGCircleElement
+  /** Procedural honey only: a crafted background carries its own light. */
+  readonly sliver: SVGPathElement | null
+  readonly glint: SVGCircleElement | null
+  /** The slot's crafted background at rest and pre-lit, when it wears one. */
+  readonly artRest: SVGImageElement | null
+  readonly artLit: SVGImageElement | null
   readonly rim: SVGPolygonElement
   readonly ico: SVGGElement
   readonly icoPath: SVGPathElement
@@ -210,6 +228,10 @@ export class QuickMenuOverlay {
   #measureWith: Measure | null = null
   #family = ''
 
+  /** The ten crafted backgrounds, once drawn; null until then (procedural honey). */
+  #art: HoneyArt | null = null
+  #artAsked = false
+
   /** Is a ring on screen right now? */
   get painted(): boolean {
     return this.#active !== null
@@ -232,6 +254,7 @@ export class QuickMenuOverlay {
     this.#primeMeasure()
     this.#primeFit(labelOf({ label: 'back', labelKey: 'quickmenu.back' }), true)
     this.#primeFit(this.#cancelLabel, true)
+    this.#askArt()
 
     for (const definition of definitions) this.#known.set(definition.name, definition)
     this.#queue = definitions.filter(d => !this.#built.has(d.name))
@@ -264,6 +287,21 @@ export class QuickMenuOverlay {
       this.#clipped = null
       this.#measureWith = null
     }
+  }
+
+  /** Start drawing the crafted backgrounds (once per page, off the gesture). */
+  #askArt(): void {
+    if (this.#artAsked) return
+    this.#artAsked = true
+    void warmHoneyArt(HONEY_BACKGROUNDS).then(art => { if (art) this.useArt(art) })
+  }
+
+  /** Wear the crafted backgrounds: every menu already built is built again,
+   *  one per idle slot, the way a theme change rebuilds. */
+  useArt(art: HoneyArt): void {
+    if (this.#art === art) return
+    this.#art = art
+    if (this.#built.size > 0 || this.#queue.length > 0) this.#rewarm()
   }
 
   #pump(): void {
@@ -541,6 +579,22 @@ export class QuickMenuOverlay {
       const hex = node('polygon', {
         class: 'hc-qm-base', points: HEX_POINTS, fill: url('body'), 'fill-opacity': HONEY.bodyAlpha,
       }, g)
+
+      // The crafted background, when it is drawn: the picture and its pre-lit copy.
+      const artIndex = backgroundFor(definition.name, direction)
+      const art = this.#art?.ready[artIndex] ? this.#art : null
+      let artRest: SVGImageElement | null = null
+      let artLit: SVGImageElement | null = null
+      if (art) {
+        const frame = {
+          x: HONEY_ART_BOX.x, y: HONEY_ART_BOX.y, width: HONEY_ART_BOX.width, height: HONEY_ART_BOX.height,
+          preserveAspectRatio: 'none', 'clip-path': url('hex'), 'aria-hidden': 'true',
+        }
+        artRest = node('image', { class: 'hc-qm-art', href: art.rest[artIndex] ?? '', ...frame }, g)
+        artLit = node('image', { class: 'hc-qm-art-lit', href: art.lit[artIndex] ?? '', ...frame }, g)
+        artLit.style.opacity = '0'
+      }
+
       const lit = node('polygon', {
         class: 'hc-qm-lit', points: HEX_POINTS, fill: url('lit'), 'fill-opacity': HONEY.bodyAlpha,
         stroke: HONEY.lit.rim, 'stroke-opacity': HONEY.lit.haloAlpha, 'stroke-width': HONEY.lit.haloWidth,
@@ -549,30 +603,37 @@ export class QuickMenuOverlay {
       lit.style.opacity = '0'
 
       // ── the honey group ──
+      // With a crafted background it holds the drip alone, hung from the top
+      // wall (there is no pour lip to hang it from) and clipped to the tile.
       const layers = node('g', { class: 'hc-hq', 'aria-hidden': 'true' }, g)
-      node('polygon', { points: HEX_POINTS, fill: url('bloom') }, layers)
-
-      const lipLayer = node('g', { 'clip-path': url('hex') }, layers)
-      const lipD = lipPath(honey)
-      node('path', {
-        d: lipD, transform: `translate(0,${HONEY.lip.shadowDy})`, fill: HONEY.lip.shadow,
-      }, lipLayer)
-      node('path', { d: lipD, fill: url('lip'), 'fill-opacity': HONEY.lip.alpha }, lipLayer)
       const shade = (d: string): Record<string, string | number> => ({
         d, fill: 'none', stroke: HONEY.bead.shade, 'stroke-opacity': HONEY.bead.shadeAlpha,
         'stroke-width': HONEY.bead.shadeWidth.toFixed(2), 'stroke-linecap': 'round',
       })
-      const a = honey.a
-      node('path', shade(beadShade(a.x, a.y0 + a.h, a.radius)), lipLayer)
+      const b = honey.b
+      let dripParent: SVGGElement = layers
+      if (art) {
+        layers.setAttribute('clip-path', url('hex'))
+        dripParent = node('g', { transform: `translate(0,${(wallY(b.x) - b.y0).toFixed(2)})` }, layers)
+      } else {
+        node('polygon', { points: HEX_POINTS, fill: url('bloom') }, layers)
+        const lipLayer = node('g', { 'clip-path': url('hex') }, layers)
+        const lipD = lipPath(honey)
+        node('path', {
+          d: lipD, transform: `translate(0,${HONEY.lip.shadowDy})`, fill: HONEY.lip.shadow,
+        }, lipLayer)
+        node('path', { d: lipD, fill: url('lip'), 'fill-opacity': HONEY.lip.alpha }, lipLayer)
+        const a = honey.a
+        node('path', shade(beadShade(a.x, a.y0 + a.h, a.radius)), lipLayer)
+      }
 
       // Drip B: the one that moves, on the lit tile only. Neck, bead and glint
       // are separate nodes so each can follow its own keyframes; the class that
       // starts them sits on the parent, set by #style.
-      const b = honey.b
       const y1 = b.y0 + b.h
       const scales = neckScales(b.h)
       const origin = (x: number, y: number): string => `transform-origin:${x.toFixed(2)}px ${y.toFixed(2)}px`
-      const anim = node('g', { class: 'hc-qd' }, layers)
+      const anim = node('g', { class: 'hc-qd' }, dripParent)
       const dripGroup = node('g', { class: 'hc-qd-drip' }, anim)
       dripGroup.setAttribute('style', origin(b.x, b.y0))
       const neck = node('path', { class: 'hc-qd-neck', d: neckPath(b), fill: HONEY.lip.neck }, dripGroup)
@@ -603,23 +664,27 @@ export class QuickMenuOverlay {
         fill: HONEY.bead.glint, 'fill-opacity': HONEY.bead.glintAlpha,
       }, blob)
 
-      node('polygon', {
-        points: hexPoints(HONEY.meniscus.circumradius), fill: 'none',
-        stroke: url('men'), 'stroke-width': HONEY.meniscus.width,
-      }, layers)
-      node('polygon', {
-        points: hexPoints(HONEY.transmitted.circumradius), fill: 'none',
-        stroke: url('trn'), 'stroke-width': HONEY.transmitted.width,
-      }, layers)
-      const sliver = node('path', {
-        d: `M${HONEY.sliver.x1.toFixed(2)} ${HONEY.sliver.y1.toFixed(2)}L${HONEY.sliver.x2.toFixed(2)} ${HONEY.sliver.y2.toFixed(2)}`,
-        fill: 'none', stroke: url('sliv'), 'stroke-width': HONEY.sliver.width.toFixed(2), 'stroke-linecap': 'round',
-        'stroke-opacity': (HONEY.sliver.peakRest * honey.sliverScale).toFixed(3),
-      }, layers)
-      const glint = node('circle', {
-        cx: HONEY.glint.x.toFixed(2), cy: HONEY.glint.y.toFixed(2), r: HONEY.glint.rRest.toFixed(2),
-        fill: HONEY.glint.color, 'fill-opacity': HONEY.glint.alpha,
-      }, layers)
+      let sliver: SVGPathElement | null = null
+      let glint: SVGCircleElement | null = null
+      if (!art) {
+        node('polygon', {
+          points: hexPoints(HONEY.meniscus.circumradius), fill: 'none',
+          stroke: url('men'), 'stroke-width': HONEY.meniscus.width,
+        }, layers)
+        node('polygon', {
+          points: hexPoints(HONEY.transmitted.circumradius), fill: 'none',
+          stroke: url('trn'), 'stroke-width': HONEY.transmitted.width,
+        }, layers)
+        sliver = node('path', {
+          d: `M${HONEY.sliver.x1.toFixed(2)} ${HONEY.sliver.y1.toFixed(2)}L${HONEY.sliver.x2.toFixed(2)} ${HONEY.sliver.y2.toFixed(2)}`,
+          fill: 'none', stroke: url('sliv'), 'stroke-width': HONEY.sliver.width.toFixed(2), 'stroke-linecap': 'round',
+          'stroke-opacity': (HONEY.sliver.peakRest * honey.sliverScale).toFixed(3),
+        }, layers)
+        glint = node('circle', {
+          cx: HONEY.glint.x.toFixed(2), cy: HONEY.glint.y.toFixed(2), r: HONEY.glint.rRest.toFixed(2),
+          fill: HONEY.glint.color, 'fill-opacity': HONEY.glint.alpha,
+        }, layers)
+      }
 
       // The outermost hairline; also where back draws its dashes and lit its gold.
       const rim = node('polygon', {
@@ -640,7 +705,7 @@ export class QuickMenuOverlay {
       text.textContent = label
 
       const elements: SlotElements = {
-        hex, lit, honey: layers, drip: anim, sliver, glint, rim, ico, icoPath, text,
+        hex, lit, honey: layers, drip: anim, sliver, glint, artRest, artLit, rim, ico, icoPath, text,
         label, glyph, isCentre, sliverScale: honey.sliverScale, steel,
         refs: { body: url('body'), lit: url('lit'), back: url('back'), backlit: url('backlit'), cancel: url('cancel') },
         key: '', shown: label, glyphShown: glyph ?? '',
@@ -860,14 +925,23 @@ export class QuickMenuOverlay {
         const isLit = kind === 'lit'
         elements.hex.setAttribute('fill', elements.refs.body)
         elements.hex.setAttribute('fill-opacity', String(HONEY.bodyAlpha))
-        this.#setLit(elements, isLit, elements.refs.lit, isLit)
-        elements.honey.removeAttribute('display')
+        if (elements.artRest) {
+          // the picture carries the body; lit fades its pre-lit copy in, and
+          // the lit polygon keeps only its halo
+          this.#setArt(elements, true, isLit)
+          this.#setLit(elements, isLit, 'none', isLit)
+          if (isLit) elements.honey.removeAttribute('display')
+          else elements.honey.setAttribute('display', 'none')
+        } else {
+          this.#setLit(elements, isLit, elements.refs.lit, isLit)
+          elements.honey.removeAttribute('display')
+        }
         this.#setRim(elements, isLit ? HONEY.lit.rim : elements.steel, isLit ? HONEY.lit.rimWidth : 1, isLit ? HONEY.lit.rimAlpha : 1, null)
-        elements.sliver.setAttribute(
+        elements.sliver?.setAttribute(
           'stroke-opacity',
           ((isLit ? HONEY.sliver.peakLit : HONEY.sliver.peakRest) * elements.sliverScale).toFixed(3),
         )
-        elements.glint.setAttribute('r', (isLit ? HONEY.glint.rLit : HONEY.glint.rRest).toFixed(2))
+        elements.glint?.setAttribute('r', (isLit ? HONEY.glint.rLit : HONEY.glint.rRest).toFixed(2))
         // The drip is the only thing that moves, and only on the lit tile.
         elements.drip.classList.toggle('hc-qd-run', motion)
         break
@@ -877,6 +951,7 @@ export class QuickMenuOverlay {
         const isLit = kind === 'backLit'
         elements.hex.setAttribute('fill', elements.refs.back)
         elements.hex.setAttribute('fill-opacity', String(HONEY.backAlpha))
+        this.#setArt(elements, false, false)
         this.#setLit(elements, isLit, elements.refs.backlit, false)
         elements.honey.setAttribute('display', 'none')
         elements.drip.classList.remove('hc-qd-run')
@@ -887,6 +962,7 @@ export class QuickMenuOverlay {
         const isLit = kind === 'cancelLit'
         elements.hex.setAttribute('fill', elements.refs.cancel)
         elements.hex.setAttribute('fill-opacity', String(HONEY.bodyAlpha))
+        this.#setArt(elements, false, false)
         this.#setLit(elements, false, elements.refs.lit, false)
         elements.honey.setAttribute('display', 'none')
         elements.drip.classList.remove('hc-qd-run')
@@ -928,6 +1004,20 @@ export class QuickMenuOverlay {
     elements.lit.setAttribute('fill', fill)
     elements.lit.setAttribute('stroke-opacity', halo ? String(HONEY.lit.haloAlpha) : '0')
     elements.lit.style.opacity = visible ? '1' : '0'
+  }
+
+  /** The crafted background: shown or not, and its pre-lit copy faded in or out. */
+  #setArt(elements: SlotElements, shown: boolean, lit: boolean): void {
+    const { artRest, artLit } = elements
+    if (!artRest || !artLit) return
+    if (shown) {
+      artRest.removeAttribute('display')
+      artLit.removeAttribute('display')
+    } else {
+      artRest.setAttribute('display', 'none')
+      artLit.setAttribute('display', 'none')
+    }
+    artLit.style.opacity = shown && lit ? '1' : '0'
   }
 
   #setRim(elements: SlotElements, stroke: string, width: number, opacity: number, dash: string | null): void {
