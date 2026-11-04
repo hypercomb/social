@@ -454,7 +454,8 @@ const svg = (body: string): string =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${body}</svg>`
 
 const ICONS: Record<LinkIcon | 'search' | 'arrow' | 'chevron' | 'hive' | 'sparkle' | 'heart' | 'share' | 'globe' | 'link'
-  | 'people' | 'close' | 'sliders', string> = {
+  | 'people' | 'close' | 'sliders' | 'folder', string> = {
+  folder: svg('<path d="M3.5 6.5A1.5 1.5 0 0 1 5 5h4.2l2 2.2H19a1.5 1.5 0 0 1 1.5 1.5v8.8A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5Z"/>'),
   sliders: svg('<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>'),
   people: svg('<circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19c.6-3.3 2.8-5.2 5.5-5.2s4.9 1.9 5.5 5.2"/><circle cx="16.8" cy="9.5" r="2.6"/><path d="M15.6 14.1c2.6.2 4.4 1.9 4.9 4.9"/>'),
   close: svg('<path d="m6 6 12 12M18 6 6 18"/>'),
@@ -570,6 +571,8 @@ export type ShowcaseOptions = {
   readonly readPeerLedger?: (zone: string) => Promise<readonly LedgerSite[]>
   /** Open this signature as files on the host page. */
   readonly onOpenHead?: (head: string, zone: string) => void
+  /** The Files section (a signature to open, the latest revisions): kept out of the page's flow, opened as a sheet from the bar. */
+  readonly files?: HTMLElement
 }
 
 export type Showcase = {
@@ -578,6 +581,8 @@ export type Showcase = {
   /** The one list of everything hosted, beneath it. */
   readonly bands: HTMLElement
   readonly refresh: (ledger: Promise<readonly LedgerSite[]>) => void
+  /** Open or close the Files sheet (a branch opened from anywhere on the page shows in it). */
+  readonly showFiles: (on: boolean) => void
 }
 
 export const showcase = (options: ShowcaseOptions): Showcase => {
@@ -661,7 +666,34 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     paint()
   }
   manageButton.addEventListener('click', () => setManaging(!managing))
-  dock.append(searchButton, manageButton)
+  // FILES WAIT AT THE THUMB (jwize 2026-11-04: "we are trying not to have anything scroll except for the tiles"): the
+  // signature box and the latest revisions open as a sheet above the bar, never as a section the page scrolls down to.
+  const files = options.files
+  const filesButton = el('button', 'dock-files')
+  filesButton.type = 'button'
+  filesButton.title = 'Files'
+  filesButton.setAttribute('aria-label', 'Files')
+  filesButton.setAttribute('aria-pressed', 'false')
+  filesButton.append(iconOf('folder'))
+  const setFilesOpen = (on: boolean): void => {
+    if (!files) return
+    files.hidden = !on
+    filesButton.setAttribute('aria-pressed', String(on))
+  }
+  dock.append(searchButton)
+  if (files) {
+    files.classList.add('files-sheet')
+    files.hidden = true
+    filesButton.addEventListener('click', () => setFilesOpen(files.hidden))
+    files.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      setFilesOpen(false)
+      filesButton.focus()
+    })
+    dock.append(filesButton)
+  }
+  dock.append(manageButton)
   hero.append(brand, searchBox, dock)
 
   const bandsHost = el('div', 'bands')
@@ -1672,7 +1704,7 @@ ${entry.key}`
     peerAsked.clear()
     takeLedger(ledger)
   }
-  return { hero, bands: bandsHost, refresh }
+  return { hero, bands: bandsHost, refresh, showFiles: setFilesOpen }
 }
 
 const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
@@ -1749,6 +1781,18 @@ export const SHOWCASE_STYLE = `
 .page-dock button[aria-pressed='true'] { background: var(--md-primary); border-color: var(--md-primary); color: var(--md-on-primary); }
 .page-dock button[aria-pressed='true']:hover { color: var(--md-on-primary); filter: brightness(1.06); }
 .page-dock button:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+/* the Files sheet: above the bar, its own scroll when a branch is open in it; the page beneath never moves */
+.files-sheet { position: fixed; z-index: 39; left: 50%; bottom: calc(4rem + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  box-sizing: border-box; width: min(calc(100% - 1rem), 56rem); max-height: calc(100dvh - 9rem); margin: 0; padding: .9rem 1rem 1rem;
+  overflow: auto; overscroll-behavior: contain; border: 1px solid var(--md-outline-variant); border-radius: 1rem;
+  background: color-mix(in srgb, var(--md-surface-c-low) 96%, transparent); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+  box-shadow: 0 18px 48px -18px rgb(0 0 0 / .55); }
+.files-sheet[hidden] { display: none; }
+.files-sheet > h2 { margin: 0 0 .6rem; }
+.files-sheet > form { display: flex; gap: .5rem; margin: 0 0 .6rem; }
+.files-sheet > form input { flex: 1; min-width: 0; }
+.files-sheet > button { margin: 0 .4rem .4rem 0; }
+.files-sheet .branch-view { margin-top: .8rem; }
 .bands:not(.managing) .dex-row > .dex-head { display: none; }
 /* managing: the open domain is the first row and takes the free height; the others sit below it as plain header rows */
 .bands.managing > .hosted { grid-template-rows: minmax(min-content, 1fr); grid-auto-rows: min-content; align-content: start; }
@@ -2044,6 +2088,15 @@ a.version-visit { color: var(--md-primary); }
   .dex-body { padding: .5rem; }
   /* the swipe's ground: a short community must not shrink the place a thumb can turn the page */
   .hosted.swipeable { min-height: 60vh; min-height: 60dvh; align-content: start; }
+  /* ONLY THE TILES SCROLL (jwize 2026-11-04: "we are trying not to have anything scroll except for the tiles or the viewport
+     for other sections"): the panel is exactly the screen, the brand and the follow bar hold still at its ends, and the list
+     between them is the one thing a thumb moves. */
+  .card.showcase-page { overflow: hidden; }
+  .card.showcase-page .panel { height: 100dvh; min-height: 0; }
+  .bands { min-height: 0; }
+  .bands > .hosted, .hosted.swipeable { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .follow { position: static; margin: 0; }
+  .files-sheet { width: calc(100% - 1rem); }
   .hero-brand { gap: .6rem; }
   .hero-mark { width: 1.7rem; height: 1.7rem; }
   .hero h1 { font-size: 1.2rem; }

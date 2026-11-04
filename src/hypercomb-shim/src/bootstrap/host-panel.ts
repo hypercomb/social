@@ -518,6 +518,8 @@ class HostPanelElement extends HTMLElement {
   #ledger: Promise<LedgerSite[]> | undefined = undefined
   #ledgerAt = 0
   #showcaseRefresh: ((ledger: Promise<LedgerSite[]>) => void) | null = null
+  /** The showcase's Files sheet, while the page is a showcase; null on the choosing page, where Files stays in the flow. */
+  #showFiles: ((on: boolean) => void) | null = null
   /** A re-render after an action keeps the keeper where they were. */
   #manageOpen = false
   #curationOpen = false
@@ -658,6 +660,8 @@ class HostPanelElement extends HTMLElement {
     let waitingAnchor: HTMLElement | null = null
     const manageBody = document.createElement('div')
     manageBody.className = 'manage-body'
+    const filesSection = this.#filesOpener(zones)
+    this.#showFiles = null
     if (selecting) {
       this.#showcaseRefresh = null
       const [identity, ...doorLinks] = this.#frontDoor(door)
@@ -670,7 +674,7 @@ class HostPanelElement extends HTMLElement {
       // connections; the doors to everything else at the foot.
       card.classList.add('showcase-page')
       if (!this.#ledger) { this.#ledger = readLedger(); this.#ledgerAt = Date.now() }
-      const { hero, bands, refresh } = showcase({
+      const { hero, bands, refresh, showFiles } = showcase({
         self: this.#self || location.host,
         title: door.title,
         tagline: door.tagline,
@@ -696,8 +700,10 @@ class HostPanelElement extends HTMLElement {
         unfollow: zone => removeHostZone(zone),
         readPeerLedger,
         onOpenHead: (head, zone) => { this.#openBranch(head, zone) },
+        files: filesSection,
       })
       this.#showcaseRefresh = refresh
+      this.#showFiles = showFiles
       panel.append(hero)
       const invite = this.#inviteCard()
       if (invite) panel.append(invite)
@@ -736,7 +742,7 @@ class HostPanelElement extends HTMLElement {
       : 'creations, sources, packages and deployments'
     manageSummary.append(document.createTextNode('Manage this hive'), manageNote)
     manage.append(manageSummary, manageBody)
-    panel.append(this.#filesOpener(zones))
+    panel.append(filesSection)
     manageBody.append(this.#packages(zones))
     const technical = document.createElement('details')
     technical.className = 'technical'
@@ -1892,6 +1898,14 @@ class HostPanelElement extends HTMLElement {
       installed: installedPackageSig() ?? undefined,
       read: file => base ? readVerified(base, file) : zone ? readFromZone(zone, file) : Promise.resolve(null),
     })
+    // The showcase keeps the page still: the branch opens in the Files sheet, which scrolls on its own.
+    const sheet = this.#showFiles ? this.#root.querySelector('.files-sheet') : null
+    if (sheet && this.#showFiles) {
+      sheet.append(view)
+      this.#showFiles(true)
+      view.scrollIntoView({ block: 'nearest' })
+      return
+    }
     panel.append(view)
     view.scrollIntoView({ block: 'start' })
   }
