@@ -2546,11 +2546,21 @@ export class ShowCellDrone extends Drone {
   #scheduleDrain(): void {
     if (this.#drainScheduled) return
     this.#drainScheduled = true
-    const run = (): void => { this.#drainScheduled = false; void this.#drainDirty() }
-    // Once per frame. A hidden tab's rAF never fires (the names and the
-    // readiness mirror still converge there), so a timer stands in.
-    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') setTimeout(run, 16)
-    else requestAnimationFrame(run)
+    // Once per frame — whichever comes first: the next animation frame, or a
+    // timer two frames out. A hidden tab's rAF never fires, and a tab that
+    // is not being composited (a background pane) reports itself visible
+    // while its rAF is starved; the ledger must still converge there, so the
+    // names and the readiness mirror describe what the buffers hold.
+    let raf = 0
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const run = (): void => {
+      if (raf) cancelAnimationFrame(raf)
+      if (timer !== null) clearTimeout(timer)
+      this.#drainScheduled = false
+      void this.#drainDirty()
+    }
+    timer = setTimeout(run, 34)
+    raf = requestAnimationFrame(run)
   }
 
   /** Drain the named cells: refresh their records from the caches, load what
