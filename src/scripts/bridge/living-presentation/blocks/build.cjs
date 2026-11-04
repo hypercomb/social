@@ -21,6 +21,7 @@ const tree = require('../tree.cjs')
 const tour = require('./tour.cjs')
 const { createMedia } = require('./media.cjs')
 const { drawn } = require('./drawn.cjs')
+const { liveFigure, hiveFigure } = require('./hive-figure.cjs')
 
 const SRC = path.join(__dirname, '..', '..', '..', '..')
 const CAPTURES = path.join(__dirname, 'captures')
@@ -100,6 +101,8 @@ const sizeOf = (file) => {
 
 /** A capture: a picture taken in a running hive (blocks/captures/<shot>.webp|png). */
 const liveOf = (l, media) => {
+  // tiles taken out of a running hive (blocks/tiles.cjs), drawn as tiles again
+  if (l.tiles) return { tiles: true, html: hiveFigure(l, media), title: l.title, caption: l.caption }
   const file = ['webp', 'png'].map(x => path.join(CAPTURES, `${l.shot}.${x}`)).find(f => fs.existsSync(f))
   if (!file) throw new Error(`capture ${l.shot} is missing (blocks/captures/${l.shot}.webp)`)
   return { ...sizeOf(file), src: media.ref(media.add(file)), title: l.title, caption: l.caption, alt: l.alt || l.caption || l.title }
@@ -123,13 +126,17 @@ const sceneFor = (key, block, media) => {
   const live = (block.live || []).map(l => liveOf(l, media))
   if (live.length > 1) throw new Error(`${key}: one scene has room for one picture from the hive beside its figure; ${live.length} are named`)
   if (live.length && block.try) throw new Error(`${key}: a capture and a part to try cannot both stand beside the figure`)
-  const beside = live.length ? livePanel(live[0]) : block.try ? tryPanel(block.try) : ''
+  const beside = live.length ? (live[0].tiles ? live[0].html : livePanel(live[0])) : block.try ? tryPanel(block.try) : ''
   const besideStep = live.length ? [{ say: live[0].caption, voice: tour.voiceOf(live[0].caption, media), beside: true }] : []
   const n = tour.sceneAt(key)
   if (n) {
     const said = SCENE_ONLY.filter(k => has(block, k))
     if (said.length) throw new Error(`${key}: tour scene ${n} explains this tile, so its block must not say ${said.join(', ')} again`)
-    const p = tour.sceneParts(n, media)
+    // A scene the tour filmed in its demo hive shows the author's hive here
+    // (figures, by scene number), told in its own words where they differ.
+    const own = block.figures?.[n] ?? null
+    const p = tour.sceneParts(n, media, own?.say ?? null, !!own)
+    if (own) p.figure = liveFigure(own, media)
     // One sentence on screen at a time, each playing its own stretch of the
     // scene's one voice: a scene reads like a film with subtitles.
     const timed = p.voice && p.lines.every(l => l.from !== null)

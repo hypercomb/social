@@ -51,6 +51,8 @@ const KEYS = {
 } as const
 
 const MODIFIERS: readonly Modifier[] = ['ctrl', 'shift', 'alt', 'meta']
+/** The same words the caps print, so the layer marks and the board cannot disagree. */
+const MODIFIER_LABEL: Readonly<Record<Modifier, string>> = { ctrl: 'Ctrl', shift: 'Shift', alt: 'Alt', meta: 'Win' }
 
 type KeymapShape = { getEffective(): KeyBinding[]; addLayer(layer: KeyMapLayer): void }
 type SlashShape = { entries(): readonly { name: string; description: string; hidden?: boolean }[] }
@@ -147,6 +149,8 @@ export class KeyboardDeskElement extends HTMLElement {
   /** What the pointer is on: its keys light without anything being chosen. */
   #peek: string | null = null
   #note = ''
+  /** A note that could not be saved reads as an alert; anything kept reads as said. */
+  #noteTone: '' | 'alert' = ''
   #parked = false
 
   readonly #session: WindowSession = {
@@ -372,6 +376,7 @@ export class KeyboardDeskElement extends HTMLElement {
     this.#adding = false
     this.#peek = null
     this.#note = ''
+    this.#noteTone = ''
   }
 
   #claimModes(panel: HTMLElement): void {
@@ -467,6 +472,7 @@ export class KeyboardDeskElement extends HTMLElement {
     // The board stays on the layer the chord is in, with its modifiers down.
     this.#latched = { ctrl: press.ctrl, shift: press.shift, alt: press.alt, meta: press.meta }
     this.#note = ''
+    this.#noteTone = ''
     if (draft.length) { this.#setLineup(draft); return }
     this.#lineup = []
     this.#paint()
@@ -513,6 +519,7 @@ export class KeyboardDeskElement extends HTMLElement {
     this.#loading++
     this.#lineup = steps
     this.#note = ''
+    this.#noteTone = ''
     this.#paint()
     if (chord.length) this.#inTurn(() => this.#writeLineup(steps, chord))
   }
@@ -575,6 +582,7 @@ export class KeyboardDeskElement extends HTMLElement {
 
   #saveFailed(): void {
     this.#note = t('keyboard.save-failed', 'This works until you reload: it could not be saved.')
+    this.#noteTone = 'alert'
     this.#paint()
   }
 
@@ -583,6 +591,7 @@ export class KeyboardDeskElement extends HTMLElement {
     this.#choices = choices
     ioc<KeymapShape>(KEYS.keymap)?.addLayer(this.#parts.bindings.layerOf(choices))
     this.#note = said
+    this.#noteTone = ''
     this.#paint()
     if (this.#live) this.#live.textContent = said
     void this.#parts.bindings.save(choices).then(sig => {
@@ -630,7 +639,8 @@ export class KeyboardDeskElement extends HTMLElement {
     this.#paintCaps()
     this.#paintCallouts()
 
-    if (this.#address) this.#address.textContent = chord ? `/${chord}` : ''
+    this.#panel.toggleAttribute('data-adding', this.#adding)
+    this.#paintAddress()
     if (this.#then) {
       this.#then.hidden = !this.#steps.length
       this.#then.setAttribute('aria-pressed', String(this.#adding))
@@ -643,6 +653,25 @@ export class KeyboardDeskElement extends HTMLElement {
     return this.#parts.chord.read(chord).map(step => step.join('+')).join(` ${t('keyboard.then', 'then')} `)
   }
 
+  /** The chord in hand, as the keys themselves, beside the title. */
+  #paintAddress(): void {
+    const address = this.#address
+    if (!address) return
+    const steps = this.#parts.chord.read(this.#steps)
+    if (!steps.length) {
+      address.replaceChildren()
+      address.hidden = true
+      return
+    }
+    address.hidden = false
+    const nodes: Node[] = []
+    steps.forEach((step, index) => {
+      if (index) nodes.push(make('i', 'kb-address-then', t('keyboard.then', 'then')))
+      for (const part of step) nodes.push(make('kbd', '', part))
+    })
+    address.replaceChildren(...nodes)
+  }
+
   /** What a step reads as: the sentence without its slash, or the behaviour's name. */
   #stepLabel(step: Step, tiles: readonly ShownBehaviour[]): string {
     if ('say' in step) return step.say.replace(/^\//, '')
@@ -653,18 +682,37 @@ export class KeyboardDeskElement extends HTMLElement {
   #paintTag(chord: string): void {
     const tag = this.#tag
     if (!tag) return
-    const held = MODIFIERS.filter(modifier => this.#held[modifier])
-    const layer = held.length ? held.join('+') : t('keyboard.layer-none', 'no modifier')
-    const hint = this.#note
+    const held = this.#held
+
+    const board = make('span', 'kb-meta')
+    board.append(make('span', '', t('keyboard.tag-board', 'board')), make('b', '', this.#parts.board.id))
+
+    const layers = make('span', 'kb-layers')
+    layers.setAttribute('role', 'group')
+    layers.setAttribute('aria-label', t('keyboard.tag-layer', 'layer'))
+    for (const modifier of MODIFIERS) {
+      const chip = make('button', 'kb-layer', MODIFIER_LABEL[modifier])
+      chip.type = 'button'
+      const on = held[modifier]
+      chip.setAttribute('aria-pressed', String(on))
+      if (on) chip.dataset['on'] = ''
+      chip.addEventListener('click', () => {
+        this.#latched = { ...this.#latched, [modifier]: !this.#latched[modifier] }
+        this.#paint()
+        // A pointer leaves focus here, as a cap does: the next press names a key.
+        this.#panel?.focus({ preventScroll: true })
+      })
+      layers.append(chip)
+    }
+
+    const hint = make('span', 'kb-hint', this.#note
       || (this.#adding ? t('keyboard.hint-next', 'Press the next key of {chord}', { chord })
         : chord ? t('keyboard.hint-chosen', 'Choose from the list to add to {chord}', { chord })
           : this.#lineup.length ? t('keyboard.hint-armed', 'Press a key for this lineup')
-            : t('keyboard.hint-start', 'Click a key or press it'))
-    tag.replaceChildren(
-      `${t('keyboard.tag-board', 'board')} `, make('b', '', this.#parts.board.id),
-      ` · ${t('keyboard.tag-layer', 'layer')} `, make('b', '', layer),
-      ` · ${hint}`,
-    )
+            : t('keyboard.hint-start', 'Click a key or press it')))
+    if (this.#note) hint.dataset['note'] = this.#noteTone === 'alert' ? 'alert' : 'said'
+
+    tag.replaceChildren(board, layers, hint)
   }
 
   #paintCaps(): void {

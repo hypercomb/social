@@ -64,8 +64,11 @@ const sceneOf = (n) => {
 }
 
 /** One scene, ready for a page: its parts as HTML, its caption, its voice. */
-const sceneParts = (n, media) => {
-  const s = sceneOf(n)
+const sceneParts = (n, media, sayInstead = null, ownFigure = false) => {
+  // A page may tell a scene in other words where its picture differs from the
+  // tour's (a real hive in place of a clip the tour filmed in its demo hive).
+  const tourScene = sceneOf(n)
+  const s = sayInstead ? { ...tourScene, say: sayInstead, lights: undefined } : tourScene
   // The voice is keyed by the words: a scene whose words changed is silent
   // (it holds for its reading time) until build.cjs records them again.
   const voice = T.cachePath(s.say)
@@ -75,7 +78,8 @@ const sceneParts = (n, media) => {
     name: T.plain(s.headline).replace(/[.]$/, ''),
     eyebrow: T.esc(T.smart(s.eyebrow)),
     headline: T.emph(s.headline),
-    figure: T.visualHtml(s, { clipSrc: clip }),
+    // a page with its own figure for this scene carries none of the tour's
+    figure: ownFigure ? '' : T.visualHtml(s, { clipSrc: clip }),
     sub: s.sub ? T.emph(s.sub) : '',
     link: s.link ? { href: s.link.href, label: T.smart(s.link.label) } : null,
     caption: T.captionOf(s.say),

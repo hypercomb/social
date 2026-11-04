@@ -51,6 +51,8 @@ module.exports = () => svg('the host you opened answers the page on your screen 
     O.ys.map(y => `<path d="M${DOOR - 8},${y + O.h / 2 - 13} L${DOOR + 8},${y + O.h / 2 + 13}" stroke="var(--danger)" stroke-width="2.5"/>`).join('') + `</g>`,
   // the presentation's own check: no page names another host
   `<g data-id="check"><rect x="${O.x}" y="304" width="${O.w}" height="56" rx="3" ${STEEL}/>` +
-    `<g transform="translate(${O.x + 34},332) scale(2)">${check(0, 0, 'var(--honey)')}</g>` +
+    // the check, drawn at twice its size where it stands (no transform, so
+    // every point is in the plate's own frame)
+    `<path d="M${O.x + 24},332 L${O.x + 31},339 L${O.x + 46},324" fill="none" stroke="var(--honey)" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>` +
     text(O.x + 62, 340, 'the check', 'k', 22, 'start') + `</g>`,
 ].join('\n'))

@@ -14,7 +14,9 @@ const tour = require('./tour.cjs')
 // tour's own scenes are voiced by scripts/presentation/build.cjs.
 const lines = Object.entries(content).flatMap(([route, block]) => [
   ...(!tour.sceneAt(route) && Array.isArray(block.beats) ? block.beats.map((b, i) => ({ say: b.say, n: `${route} #${i + 1}`, name: b.say.slice(0, 48) })) : []),
-  ...(block.live || []).map(l => ({ say: l.caption, n: `${route} (capture ${l.shot})`, name: l.caption.slice(0, 48) })),
+  ...(block.live || []).map(l => ({ say: l.caption, n: `${route} (capture ${l.shot || 'tiles'})`, name: l.caption.slice(0, 48) })),
+  // a scene a page tells in its own words (a real hive in place of a demo clip)
+  ...Object.entries(block.figures || {}).filter(([, f]) => f.say).map(([n, f]) => ({ say: f.say, n: `scene ${n} on ${route}`, name: f.say.slice(0, 48) })),
 ])
 
 tour.T.ensureAudio(lines, { check: process.argv.includes('--check') })

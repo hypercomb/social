@@ -157,6 +157,15 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .flow{stroke-dasharray:1;stroke-dashoffset:1;transition:stroke-dashoffset .9s var(--ease) .5s}
 .scene.in .flow{stroke-dashoffset:0}
 
+/* real tiles, taken out of a running hive (hive-figure.cjs): each its own
+   picture, edged in its own border colour, in the hive's staggered rows */
+.figbox.hivebox{width:min(100%,var(--cap),calc((100cqh - 26px) / var(--tall-n, .8)));margin-inline:auto;justify-self:center}
+.fig.hive{position:relative;width:100%;height:0;padding-bottom:var(--tall)}
+.fig.hive .hx{position:absolute;box-sizing:border-box;padding:0.45%;transform:scale(.965);background:var(--edge,var(--line-strong));
+  clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
+.fig.hive .hx img{display:block;width:100%;height:100%;object-fit:cover;background:var(--panel);
+  clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
+
 /* the beats: each part lights as it is said; a panel beside dims until its beat */
 .plate.beats [data-id],.fz.lights [data-id]{opacity:.38;transition:opacity .5s var(--ease)}
 .plate.beats [data-id].lit,.fz.lights [data-id].lit{opacity:1}

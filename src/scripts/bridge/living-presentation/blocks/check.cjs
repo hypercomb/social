@@ -52,7 +52,10 @@ for (const b of blocks) {
 // No scene's narration on two pages.
 for (const n of placed) {
   // A scene is shown a sentence at a time; its longest sentence is the probe.
-  const said = sentencesOf(tour.T.captionOf(tour.T.scenes.find(s => s.n === n).say)).sort((a, b) => b.length - a.length)[0]
+  // a page may tell the scene in its own words (figures[n].say, a real hive in
+  // place of the tour's demo-hive clip)
+  const own = Object.values(require('./content.cjs')).map(bl => bl.figures?.[n]?.say).find(Boolean)
+  const said = sentencesOf(tour.T.captionOf(own || tour.T.scenes.find(s => s.n === n).say)).sort((a, b) => b.length - a.length)[0]
   const probe = JSON.stringify(said).slice(1, 80)
   const on = blocks.filter(b => b.page.includes(probe)).map(b => b.route.join('/'))
   if (on.length !== 1) fail(`scene ${n}'s narration is on ${on.length} pages${on.length ? ` (${on.join(', ')})` : ''}`)

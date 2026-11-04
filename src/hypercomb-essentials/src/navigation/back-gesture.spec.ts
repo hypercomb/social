@@ -71,6 +71,19 @@ const el = (tag = 'div', parent: Element = document.body): Element => {
 }
 
 describe('back gesture', () => {
+  it('lets an exact view return to its own spawn even on an arrival face', () => {
+    viewOwners = ['site-view']
+    const services = (globalThis as unknown as { ioc: { get: (k: string) => unknown } }).ioc
+    const get = services.get
+    services.get = (key: string) => key === '@diamondcoreprocessor.com/ViewBee' ? { isArrivalSurface: () => true } : get(key)
+    const back = vi.fn()
+    const gesture = stand()
+    gesture.register({ owner: 'site-view', back, exact: true } as never)
+    rightClick(el())
+    expect(back).toHaveBeenCalledOnce()
+    expect(navigationBack).not.toHaveBeenCalled()
+  })
+
   it('walks the lineage back when nothing is registered', () => {
     stand()
     expect(rightClick(el())).toBe(true)
@@ -160,10 +173,10 @@ describe('back gesture', () => {
   // jwize 2026-11-04: inside a website that opened by itself (a pinned
   // default), back after a link went to the hexagons: history back skipped
   // every page read. A website steps back along its own pages.
-  it('lets a view that OWNS its back answer even as the arrival face (the website)', () => {
+  it('lets a view that is EXACT answer even as the arrival face (the website)', () => {
     const gesture = stand()
     const site = vi.fn()
-    gesture.register({ owner: 'site-view', back: site, ownsBack: true })
+    gesture.register({ owner: 'site-view', back: site, exact: true })
     viewOwners = ['site-view']
     arrival = true
     rightClick(el())

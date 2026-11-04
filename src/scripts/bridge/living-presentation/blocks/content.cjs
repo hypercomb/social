@@ -36,6 +36,9 @@ const lit = (top, ...names) => [top, ...names, ...names.map(n => `${top}-${n}`)]
 
 module.exports = {
   'presentation/simple/primitive': {
+    live: [
+      { shot: 'the-tile-editor', title: 'one tile, opened', caption: 'One tile in its editor: a name, a picture, a border, a link, and its words. Every tile is these same few parts.' },
+    ],
     code: [
       { path: 'hypercomb-core/src/core/life-primitive.ts', from: 'export type MetaEnvelope = {', lines: 16 },
       { path: 'hypercomb-core/src/core/canonical-layer.ts', from: 'export type CanonicalLayerContent = {', lines: 5 },
@@ -73,6 +76,9 @@ module.exports = {
   },
 
   'presentation/simple/primitive/layer': {
+    live: [
+      { tiles: ['humanity-centres', 'humanity-centres/participants', 'humanity-centres/places', 'humanity-centres/purse'], title: 'a layer', caption: 'Humanity centres and the words under it, from a hive in use. Each of them can hold a layer of its own.' },
+    ],
     eyebrow: 'holding',
     headline: 'A tile, *written* down',
     sub: 'Empty fields are left out entirely, so nothing that is missing can change the bytes.',
@@ -277,6 +283,13 @@ module.exports = {
   },
 
   'presentation/simple': {
+    figures: {
+      3: {
+        tiles: ['revolucion', 'knowledge', 'room-host', 'scratch-organize', 'play', 'work', 'misc', 'behavior-where-visual'],
+        title: 'tiles from a hive in use',
+        say: 'Here is what it looks like. Your work lives on a grid of tiles. A tile can hold anything: a picture, a note, a document, a game, a whole website. Open a tile and you travel into it, and every tile can open into a honeycomb of its own. These tiles come from a hive in use: a cigar journal, a library of knowledge, a room for hosting, each one a honeycomb of its own. Tiles inside tiles, all the way down.',
+      },
+    },
     code: [{ path: 'hypercomb-core/src/core/life-primitive.ts', from: 'export type LifeLayer = {', lines: 5 }],
     files: ['documentation/life-primitive.md', 'documentation/the-algorithm-is-the-application.md'],
   },
@@ -297,11 +310,17 @@ module.exports = {
   },
 
   'presentation/accessible': {
+    live: [
+      { shot: 'tutorials-beside-the-hive', title: 'lessons beside the hive', caption: 'Forty-five lessons, open beside the hive itself. Each one opens the real thing, and puts it away again.' },
+    ],
     code: [],
     files: ['documentation/read-only-deployment.md', 'documentation/no-third-party-requests.md', 'documentation/mobile-one-column.md'],
   },
 
   'presentation/localized': {
+    live: [
+      { shot: 'hive-in-japanese', title: 'the hive in Japanese', caption: 'After language ja, the hive’s own reference speaks Japanese, here filtered to the words about tiles.' },
+    ],
     eyebrow: 'value six',
     headline: 'Your language, in *layers*',
     sub: 'Shown here in Japanese. Every language the hive speaks is read the same way.',
@@ -324,6 +343,15 @@ module.exports = {
   // ── the rest of simple, and organized ─────────────────────────────────
 
   'presentation/simple/act': {
+    figures: {
+      10: {
+        tiles: ['revolucion', 'revolucion/journal', 'revolucion/experience', 'revolucion/cigars', 'revolucion/flavor-wheel', 'revolucion/discovery', 'revolucion/community', 'revolucion/insights', 'revolucion/collaborations', 'revolucion/humidor', 'revolucion/mission', 'revolucion/lounge', 'revolucion/store', 'revolucion/meetup', 'revolucion/wholesale'],
+        title: 'revolucion, and the names typed under it',
+      },
+    },
+    live: [
+      { shot: 'a-tile-and-its-acts', title: 'a tile and its acts', caption: 'Hover a tile and its acts appear: shelf, edit, website, notes, link, remove. Each is also a word you can type.' },
+    ],
     code: [
       { path: 'hypercomb-core/src/core/molecule-address.ts', from: 'export const moleculeAddress', lines: 5 },
       { path: 'hypercomb-essentials/src/history/history.service.ts', from: '  public readonly currentLayerAt = async (', lines: 4 },
@@ -337,6 +365,9 @@ module.exports = {
   },
 
   'presentation/organized/history': {
+    live: [
+      { shot: 'history-of-a-layer', title: 'history, open', caption: 'One layer with 478 versions, newest on top. Each is a step you can go back to, and none is ever removed.' },
+    ],
     code: [{ path: 'hypercomb-essentials/src/history/history-cursor.service.ts', from: '// Layer-based history cursor.', lines: 6 }],
     files: ['documentation/universal-history-plan.md', 'documentation/hive-snapshots.md', 'documentation/revision-mode.md'],
   },
@@ -363,6 +394,9 @@ module.exports = {
   },
 
   'presentation/organized/layout': {
+    live: [
+      { shot: 'layout-on-off', title: 'layout on, then off', caption: 'Layout on shows the six named words in order; layout off shows every child again. Nothing was deleted or moved.' },
+    ],
     eyebrow: 'what shows',
     headline: 'Named in order, *shown* in order',
     sub: 'The words are the tile\'s trait markers, placed in order with the trait word.',
@@ -383,6 +417,9 @@ module.exports = {
   },
 
   'presentation/organized/trait': {
+    live: [
+      { shot: 'trait-silhouette', title: 'a trait waiting', caption: 'Three traits given, one tile hidden: contact stays as a silhouette, a place still open for whatever fills it.' },
+    ],
     eyebrow: 'left open',
     headline: 'Named before it is *filled*',
     sub: 'The same word is the same trait on every server; gathering fillers from the hosts you follow is planned.',
@@ -403,6 +440,9 @@ module.exports = {
   },
 
   'presentation/organized/organization': {
+    live: [
+      { shot: 'a-tile-as-its-website', title: 'a tile as its website', caption: 'The same tile opened as a website: a card made of its own pieces. Switch back, and the hexagons are all still there.' },
+    ],
     eyebrow: 'many at once',
     headline: 'Gathered, never *contained*',
     sub: 'Keeping a question as a tile, to ask it again later, is planned.',
@@ -430,6 +470,9 @@ module.exports = {
   },
 
   'presentation/collaborative/domain': {
+    live: [
+      { shot: 'a-community-domain', title: 'a community on its domain', caption: 'Revolución, a cigar journal built as a hive for its own domain: the journal, the flavour wheel, the lounge and the store are all tiles.' },
+    ],
     code: [],
     files: ['documentation/domain-claim.md', 'documentation/domain-folder-sharing.md', 'documentation/showcase.md'],
   },
@@ -456,6 +499,9 @@ module.exports = {
   },
 
   'presentation/collaborative/publishing': {
+    live: [
+      { tiles: ['work/domains', 'knowledge/replication', 'knowledge/diagrams', 'knowledge/behaviors'], title: 'domains, replication, the shared pieces', caption: 'From a hive in use: its domains, how replication works, and the shared pieces it is built from, each one a tile.' },
+    ],
     code: [{ path: 'hypercomb-essentials/src/sharing/hive-pointer.ts', from: '// Client for the per-publisher hive index', lines: 12 }],
     files: ['documentation/read-only-deployment.md', 'documentation/deployment-stages.md', 'documentation/derivations.md', 'hypercomb-essentials/src/sharing/hive-pointer.ts'],
   },
@@ -704,5 +750,26 @@ module.exports = {
       { path: 'scripts/bridge/living-presentation/blocks/page.cjs', from: '  if (!voiced && !still && !returning) setTimeout(', lines: 2 },
     ],
     files: ['scripts/bridge/living-presentation/blocks/page.cjs', 'scripts/presentation/template.html', 'documentation/living-presentation.md'],
+  },
+
+  'presentation/intelligent/sentence': {
+    live: [
+      { shot: 'sentence-before-it-runs', title: 'a sentence, waiting', caption: 'An agent asks to say three lines. They wait on the command line in plain words until a person presses Enter.' },
+    ],
+  },
+
+  'presentation/intelligent/agent': {
+    live: [
+      { shot: 'an-agents-sentences-in-chat', title: 'an agent’s sentences, on the record', caption: 'A side session asked to add three meetups. Its lines were shown first, a person pressed Enter, and every line is kept.' },
+    ],
+  },
+
+  'road/yours': {
+    figures: {
+      24: {
+        tiles: ['knowledge/pheromone-workflow', 'knowledge/ai-inside', 'knowledge/camelflage'],
+        title: 'three tiles from a hive in use',
+      },
+    },
   },
 }

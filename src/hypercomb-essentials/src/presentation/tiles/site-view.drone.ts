@@ -27,6 +27,7 @@ import { openExternalLink } from './document-view-links.js'
 import { scopeCellPageCss } from './cell-page-css-scope.js'
 import { hoistPageStylesheets, stylesheetsSettled } from './cell-page-stylesheets.js'
 import { HEXAGONS_SURFACE, sameSiteSegments, siteFlipTarget, siteFloorFor, type SiteSpawn } from './site-return.js'
+import { SiteTrail } from './site-trail.js'
 import { closeSiteContextMenu, isOnSiteContextMenu, openSiteContextMenu, type SiteMenuItem } from './site-context-menu.js'
 import { browserKeepsMenu, isLongPressMenu } from '../../navigation/browser-menu.js'
 import type { BackGesture } from '../../navigation/back-gesture.service.js'
@@ -197,12 +198,12 @@ export class SiteViewDrone extends Drone {
   /** Re-entrancy guard: leaving sets ViewMode a second time (hexagons → the
    *  spawning view) from inside the mode-change handler. */
   #restoringSpawn = false
-  /** THE PAGES READ THIS SESSION, entry first (jwize 2026-11-03: "if you are
-   *  deep inside a website the back navigates back until the entry point").
-   *  The site's own moves push onto it; the back gesture steps back along it
-   *  and, at the entry, turns the website off — back to where it was opened.
-   *  Empty outside a session. */
-  #trail: string[][] = []
+  /** THE PAGES WALKED THROUGH THIS SESSION (site-trail.ts; jwize 2026-11-03:
+   *  "if you are deep inside a website the back navigates back until the entry
+   *  point"). The site's own moves remember the page left; the back gesture
+   *  walks them in reverse and, on the page the site was entered on, steps out
+   *  to the layer hosting it. Empty on the entry page. */
+  readonly #trail = new SiteTrail()
   /** Where the reader was on each page of the trail when they left it (the
    *  host's scroll), restored when the back gesture returns to it — back
    *  only (jwize 2026-11-04: "keep the position on the page when you navigate
@@ -228,6 +229,10 @@ export class SiteViewDrone extends Drone {
   /** Widen the session to the whole website as soon as its page is mounted
    *  (an arrival under a website pinned above). */
   #widenOnMount = false
+  /** The reader has moved inside this site session. From then on an arrival
+   *  verdict for the entry page is back walking onto it, not the arrival that
+   *  opened the site, and must not move the way out (#89). */
+  #movedInSite = false
 
   /**
    * Raw-DOM exit overlay — the GUARANTEED way out of website mode. It is
@@ -295,8 +300,10 @@ export class SiteViewDrone extends Drone {
       this.onEffect<{ segments?: readonly string[]; view?: string; held?: boolean; inherited?: boolean }>('view:arrival', (payload) => {
         if (replay) return
         if (payload?.view !== 'website') return
-        // The site's own step between its pages is not an arrival into it.
-        if (payload.held) return
+        // The site's own step between its pages is not an arrival into it, and
+        // once the reader has moved inside the site, an arrival on the entry
+        // is the walk back onto it, not the arrival that opened it (#89).
+        if (payload.held || this.#movedInSite) return
         const spawn = this.#spawn
         const entry = this.#siteEntrySegments
         if (!spawn || !entry) return
@@ -341,7 +348,7 @@ export class SiteViewDrone extends Drone {
       const websiteUp = (): boolean => (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
         ?.get<{ mode: string }>('@hypercomb.social/ViewMode')?.mode === 'website'
       this.#backOff = window.ioc?.get<BackGesture>('@diamondcoreprocessor.com/BackGesture')
-        ?.register({ owner: 'site-view', back: () => this.#back(), ownsBack: true, active: () => websiteUp() && !isPublishedVisitorShell() }) ?? null
+        ?.register({ owner: 'site-view', back: () => this.#back(), exact: true, active: () => websiteUp() && !isPublishedVisitorShell() }) ?? null
     }
     if (!this.#publishedRootBound) {
       // Last-value replay covers the boot order: the visit engine mounts the
@@ -412,6 +419,17 @@ export class SiteViewDrone extends Drone {
       // The menu was about the page that was up; a new page is a new
       // question. A change that leaves the page where it was keeps it.
       closeSiteContextMenu()
+      // A MOVE INSIDE THE SITE is a visit, however it was made (a link, the
+      // menu, a typed `go`): remember the page left, and where the reader
+      // was on it, so back can walk to it. A step back along the trail is
+      // not a new visit.
+      const vm = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc?.get<{ mode: string }>('@hypercomb.social/ViewMode')
+      if (vm?.mode === 'website' && this.#siteEntrySegments && !this.#trailStep) {
+        this.#trail.left(this.#lastSegments, segments)
+        this.#trailScroll.push(this.#mount?.host.scrollTop ?? 0)
+        if (this.#trailScroll.length > 200) this.#trailScroll.shift()
+        this.#movedInSite = true
+      }
       this.#prevSegments = this.#lastSegments
       this.#lastSegments = segments
     }
@@ -430,7 +448,8 @@ export class SiteViewDrone extends Drone {
       const entry = this.#siteEntrySegments
       this.#siteEntrySegments = null
       this.#spawn = null
-      this.#trail = []
+      this.#trail.clear()
+      this.#movedInSite = false
       this.#trailScroll = []
       this.#returningScroll = null
       this.#enteredAt = null
@@ -468,7 +487,8 @@ export class SiteViewDrone extends Drone {
     // The spawning PLACE starts as "right here"; a `view:arrival` verdict for
     // this same cell corrects it to the page the reader came from.
     this.#spawn = { mode: (vm?.previous ?? '').trim(), segments: here }
-    this.#trail = [here]
+    this.#trail.clear()
+    this.#movedInSite = false
     this.#trailScroll = []
     this.#returningScroll = null
     this.#enteredAt = this.#siteEntrySegments ? [...this.#siteEntrySegments] : null
@@ -499,9 +519,8 @@ export class SiteViewDrone extends Drone {
    *  that hosts the entry tile — its hexagons, whatever that layer's own
    *  default. (The exit button still returns to where the site was opened.) */
   #back(): void {
-    if (this.#trail.length > 1) {
-      this.#trail.pop()
-      const previous = this.#trail[this.#trail.length - 1]
+    const previous = this.#trail.back()
+    if (previous) {
       this.#returningScroll = this.#trailScroll.pop() ?? 0
       this.#trailStep = true
       void this.#navigate(previous).finally(() => { this.#trailStep = false })
@@ -1658,11 +1677,7 @@ export class SiteViewDrone extends Drone {
       && next.length >= entry.length && entry.every((seg, i) => next[i] === seg)) {
       ;(window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
         ?.get<{ holdSurfaceOnce?: () => void }>('@diamondcoreprocessor.com/ViewBee')?.holdSurfaceOnce?.()
-      if (!this.#trailStep) {
-        // Forward: remember where the reader is on the page being left.
-        this.#trailScroll.push(this.#mount?.host.scrollTop ?? 0)
-        this.#trail.push(next)
-      }
+      this.#movedInSite = true
     }
 
     // Reading a site is not tile navigation. Move the explorer in ONE step

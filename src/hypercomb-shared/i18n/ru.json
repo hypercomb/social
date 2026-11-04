@@ -1038,7 +1038,7 @@
   "slash.reroll": "Перегенерировать фоновые изображения субстрата на плитках",
   "slash.screensaver": "Заставка в простое вкл/выкл + стиль; on | off | now | hexagon | circle | thought",
   "slash.solomon": "Solomon's Key — головоломка с созданием блоков + дизайнер уровней; on | off | design",
-  "slash.bubble": "Bubble Bobble ? ??? ???????? ??????; ?????? ?????? ? ?????? ? ????????? ??????; on | off",
+  "slash.bubble": "Bubble Bobble — три аркадных раунда; ловите врагов в пузыри и собирайте фрукты; on | off",
   "slash.arkanoid": "Arkanoid — отбивайте мяч от ракетки, разбейте все кирпичи, ловите бонусы + дизайнер уровней; on | off | design",
   "slash.roper": "Roper — пошаговая артиллерия в стиле Worms с ниндзя-верёвкой; on | off",
   "substrate.on": "подложка включена → {path}",

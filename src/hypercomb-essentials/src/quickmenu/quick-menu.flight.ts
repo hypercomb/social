@@ -24,6 +24,8 @@ import { viewportIsFramed } from '../sequence/frame-lock.js'
 import type { QuickMenuLayer } from './quick-menu.layer.js'
 import type { QuickMenuRegistry } from './quick-menu-registry.service.js'
 import { fireQuickMenuSlot } from './quick-menu.fire.js'
+import { QuickMenuGuide, guideFor } from './quick-menu.guide.js'
+import { currentOperands } from './quick-menu.operands.js'
 import { aimLive } from './quick-menu.tile-menu.js'
 import { NO_SEATS, applyTileSeats, readTileSeats, seatMenu, type TileSeats } from './quick-menu.traits.js'
 import {
@@ -88,6 +90,8 @@ export class QuickMenuFlight {
   #last: Pt | null = null
   #locked = false
   #cursor: HTMLElement | null = null
+  /** Says what the flower is about and what the next move does, until it ends. */
+  #guide = new QuickMenuGuide()
   /** The tile the flower was raised over; verbs that act on a tile get it. */
   #subject: string | null = null
   /** What this tile has made of its seats. Empty until the read lands. */
@@ -147,6 +151,7 @@ export class QuickMenuFlight {
 
     this.#virtual = this.#screenCentreClient()
     this.#showCursor()
+    this.#tell()
     document.documentElement.classList.add('hc-quick-menu-active')
     this.#requestLock()
 
@@ -176,6 +181,7 @@ export class QuickMenuFlight {
     this.#levels = []
     this.#layer.hide()
     this.#hideCursor()
+    this.#guide.hide()
     document.documentElement.classList.remove('hc-quick-menu-active')
     if (document.pointerLockElement) {
       try { document.exitPointerLock?.() } catch { /* already gone */ }
@@ -251,6 +257,7 @@ export class QuickMenuFlight {
     this.#armed = false
     this.#layer.disarm()
     this.#paintCursor()
+    this.#tell()
     return true
   }
 
@@ -258,6 +265,7 @@ export class QuickMenuFlight {
     this.#armed = true
     this.#layer.rearm()
     this.#paintCursor()
+    this.#tell()
   }
 
   #aim(slot: QuickMenuDirection | null): void {
@@ -266,6 +274,7 @@ export class QuickMenuFlight {
     this.#clearHold()
     this.#lit = slot
     this.#layer.highlight(slot)
+    this.#tell()
     if (!slot) return
     if (level.back && slot === level.back) { this.#ascend(); return }
     const found = slotsByDirection(level.definition).get(slot)
@@ -294,7 +303,27 @@ export class QuickMenuFlight {
       const mine = applyTileSeats(definition, seats)
       this.#levels[0] = { ...root, definition: mine }
       if (this.#levels.length === 1) this.#layer.show(mine, registry.label, null, '')
+      this.#tell()
     })
+  }
+
+  /** Keep the guide true to the flower: the tile, the rings walked, and what the
+   *  option under the pointer will do to which tiles. */
+  #tell(): void {
+    const registry = get<QuickMenuRegistry>('@diamondcoreprocessor.com/QuickMenuRegistry')
+    const level = this.#levels[this.#levels.length - 1]
+    if (!this.#active || !registry || !level) return
+    const slot = this.#lit && this.#lit !== level.back ? slotsByDirection(level.definition).get(this.#lit) : undefined
+    const guide = guideFor({
+      subject: this.#subject,
+      operands: currentOperands(this.#subject),
+      path: this.#levels.slice(1).map(l => registry.label({ label: l.definition.title, labelKey: l.definition.titleKey })),
+      lit: slot ? { label: registry.label(slot), slot } : null,
+      asleep: !this.#armed,
+    })
+    const rect = this.#host!.canvas.getBoundingClientRect()
+    const area = this.#area()
+    this.#guide.show(guide, { left: rect.left + area.left, right: rect.left + area.right, top: rect.top + area.top })
   }
 
   /** The lit option, when it is a verb rather than a pathway or the way back. */
@@ -333,6 +362,7 @@ export class QuickMenuFlight {
     this.#layer.placeLocal(level.at.x, level.at.y)
     this.#layer.show(level.definition, registry.label, level.back, registry.label({ label: 'back', labelKey: 'quickmenu.back' }))
     this.#paintCursor()
+    this.#tell()
     if (!recentre) return
     // The faux cursor is on the option just taken, which is now the middle.
     this.#virtual = this.#layer.clientAtLocal(level.at.x, level.at.y) ?? this.#screenCentreClient()

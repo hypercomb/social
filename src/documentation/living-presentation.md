@@ -783,8 +783,27 @@ every page, and its 25 scenes are folded into the tiles they explain:
   `plant.cjs --blocks` serves them on 127.0.0.1 while its console snippet
   stores each one and checks the hive named it the same, before any page is
   dressed.
-- **Pictures from the hive.** `blocks/captures/` holds pictures taken in a
-  running hive, shown on a page under "In the hive" with what they show.
+- **Pictures from a running hive.** A tile may show one picture of the hive
+  doing what its page explains (`blocks/captures/`), beside its figure, and
+  the narration turns to it as the scene's last beat. `blocks/captures.cjs`
+  stages the shots a sentence can show: it opens Edge on the dev hive in a
+  profile of its own (never a second tab on a hive in use, and never the
+  bridge), plants the tree, and takes layout on and off, a waiting trait, help
+  in Japanese, and an agent's lines waiting for Enter. The pictures of a
+  lived-in hive (a layer, a website, the tile editor, chat, a long history,
+  the tutorials) were taken by hand in the author's own hive.
+- **Real tiles, never the demo hive** (2026-11-03, jwize: "you have stock
+  garbage default images in the presentation"). The tour's live clips were
+  filmed in a demo hive of example postcards. `blocks/tiles.cjs` takes tiles
+  out of the author's hive over the bridge (each one's own picture, border
+  colour and name, into `blocks/tiles/`), and `blocks/hive-figure.cjs` draws
+  them as tiles again, in the hive's staggered rows. A scene the tour filmed in
+  its demo hive shows them instead (`figures` in `content.cjs`, by scene
+  number), told in its own words where the clip's differ. Pictures with a stock
+  watermark, another company's branding, or other people's faces are left
+  out. `blocks/blocks.spec.ts` checks that no page carries a demo-hive clip,
+  that every capture and every extracted tile is on a page, and that every
+  spoken line has its recorded voice.
 - **A part, or the website.** The website belongs to the root (jwize,
   2026-11-04). A tile's page opened on its own is just that part: one slide,
   no crumbs, no ways, and a website icon. The icon opens the website, rooted at
