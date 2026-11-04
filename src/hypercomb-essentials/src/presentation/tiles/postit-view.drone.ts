@@ -28,6 +28,7 @@ import { onPageCellsChanged, pageCellsAt } from './page-cells.js'
 import { readTilePropertiesAt, tilePictureCandidates } from '../../editor/tile-properties.js'
 import { resolveLocalResourceReference } from './local-resource-reference.js'
 import { trackScrollGutter } from './scroll-gutter.js'
+import { inertPageText, mayRunPage } from './page-run-gate.js'
 import { POSTIT_KIND, POSTIT_VIEW, POSTIT_SIZE_KEY } from '../../commands/postit-kind.js'
 import type { PostitPayload } from '../../commands/postit.queen.js'
 import type { BackGesture } from '../../navigation/back-gesture.service.js'
@@ -665,6 +666,10 @@ export class PostitViewDrone extends Drone {
     const blob = payload?.htmlSig ? await store?.getResource(payload.htmlSig) : null
     const page = blob ? await blob.text() : null
     const imageSig = payload?.htmlSig || payload?.text ? null : await this.#tileImageSig(segments)
+    // THE GATE (T5 activation, page-run-gate.ts): a page from elsewhere that
+    // has not been reviewed here is shown as text, inert — never run, never
+    // blank. The site view asks the same question of the same helper.
+    const runs = payload?.htmlSig ? mayRunPage(segments, payload.htmlSig) : true
     if (gen !== this.#gen || this.#vm()?.mode !== POSTIT_VIEW) return
 
     // A PASS THAT CHANGES NOTHING LEAVES THE POST ALONE. Reconcile runs on
@@ -676,7 +681,7 @@ export class PostitViewDrone extends Drone {
     // loop ran ~15 times a second from the first background pulse on
     // (2026-10-24), restarting the page each turn.
     const shows = [segments.join('\u0000'), payload?.htmlSig ?? '', page === null ? '' : 'arrived', payload?.text ?? '',
-      imageSig ?? '', title, this.#sealedOpen() ? 'sealed' : 'open'].join('\u0001')
+      imageSig ?? '', title, this.#sealedOpen() ? 'sealed' : 'open', runs ? 'runs' : 'inert'].join('\u0001')
     if (this.#post?.isConnected && this.#shows === shows) return
 
     // From here to the append is one synchronous step, so the post swaps in
@@ -693,7 +698,19 @@ export class PostitViewDrone extends Drone {
     close.textContent = '×'
     close.onclick = () => this.#vm()?.setMode('hexagons')
 
-    if (payload?.htmlSig) {
+    if (payload?.htmlSig && !runs) {
+      const note = document.createElement('article')
+      note.className = 'postit-paper postit-inert'
+      const heading = document.createElement('h1')
+      heading.textContent = title
+      const notice = document.createElement('p')
+      notice.className = 'postit-inert-notice'
+      notice.textContent = 'This page came from elsewhere and has not been reviewed here, so it is shown as text and nothing in it runs.'
+      const body = document.createElement('p')
+      body.textContent = page !== null ? inertPageText(page) : 'This post-it' + String.fromCharCode(39) + 's page has not arrived yet.'
+      note.append(heading, notice, body)
+      host.append(note)
+    } else if (payload?.htmlSig) {
       const paper = document.createElement('article')
       paper.className = 'postit-page'
       // Shadow root: the page is a standalone artifact — its CSS stays its
@@ -859,6 +876,7 @@ const POST_CSS = `
 .postit-paper{box-sizing:border-box;width:min(680px,calc(100% - 2rem));margin:8vh auto;padding:3.2rem 3rem 4.4rem;background:linear-gradient(178deg,#fef9c3 0%,#fde68a 100%);color:#3f350c;box-shadow:0 22px 60px rgba(0,0,0,.5),inset 0 -2.5rem 2rem -2rem rgba(120,90,10,.16);transform:rotate(-.6deg);font-family:'Segoe Print','Comic Sans MS',cursive,system-ui}
 .postit-paper h1{margin:0 0 1.2rem;font-size:1.6rem;line-height:1.25}
 .postit-paper p{margin:0;font-size:1.08rem;line-height:1.75;white-space:pre-wrap}
+.postit-inert-notice{margin:0 0 1.2rem;padding:.6rem .8rem;border-left:3px solid rgba(120,90,10,.45);font-family:system-ui;font-size:.92rem;line-height:1.4;opacity:.8}
 .postit-image{min-height:100%;display:flex;align-items:center;justify-content:center;padding:2rem;box-sizing:border-box}
 .postit-image img{max-width:min(94vw,1100px);max-height:88vh;box-shadow:0 22px 60px rgba(0,0,0,.55)}
 .postit-empty{color:#8fa3b3;font-family:system-ui;font-size:1rem}

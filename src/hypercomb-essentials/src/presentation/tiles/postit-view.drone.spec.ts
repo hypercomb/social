@@ -15,6 +15,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
+import { _resetAdoptedRootsCache } from '../../sharing/adopted-roots.js'
 import type { HistoryLike, ViewBack as ViewBackType } from '../../navigation/view-back.js'
 import type { ModeRegistry as ModeRegistryType } from '../../navigation/mode-registry.service.js'
 
@@ -123,6 +124,8 @@ beforeEach(async () => {
 })
 
 afterEach(() => {
+  localStorage.removeItem('hc:adopted-roots')
+  _resetAdoptedRootsCache()
   drone.markDisposed()
   viewBack.dispose()
   window.removeEventListener('popstate', popToNavigate)
@@ -185,5 +188,60 @@ describe('the opened post — a change swaps in place', () => {
     await settle(500)
     expect(pageText()).toContain('Late page')
     expect(claims).toEqual([true])
+  })
+})
+
+describe('the gate — a page from elsewhere that has not been reviewed renders inert (page-run-gate.ts)', () => {
+  const FOREIGN = 'c'.repeat(64)
+  const FOREIGN_PAGE = '<h1>Foreign</h1><p>hello from elsewhere</p><script>window.__postitRan = true</script><style>h1{color:red}</style>'
+
+  it('shows the page as text, runs nothing, and is never blank', async () => {
+    pages.set(FOREIGN, FOREIGN_PAGE)
+    // Under an adopted root, with no domain attributed and nothing reviewed:
+    // foreign by position, unverified — exactly the page the site view gates.
+    localStorage.setItem('hc:adopted-roots', JSON.stringify([['games']]))
+    _resetAdoptedRootsCache()
+    payload = { version: 1, title: 'Foreign', htmlSig: FOREIGN }
+    EffectBus.emit('decorations:changed', {})
+    await settle(500)
+
+    const inert = post()?.querySelector('.postit-inert')
+    expect(inert).toBeTruthy()
+    expect(inert?.textContent).toContain('hello from elsewhere')
+    expect(inert?.textContent).toContain('shown as text and nothing in it runs')
+    expect(inert?.textContent).not.toContain('__postitRan')
+    expect(inert?.textContent).not.toContain('color:red')
+    expect(post()?.querySelector('.postit-page')).toBeNull()
+    expect(post()?.querySelector('script')).toBeNull()
+    expect((window as { __postitRan?: boolean }).__postitRan).toBeUndefined()
+    expect(claims).toEqual([true])                // the surface is held, not blanked
+  })
+
+  it('the same page runs where it is your own — no adopted root over it', async () => {
+    pages.set(FOREIGN, FOREIGN_PAGE)
+    payload = { version: 1, title: 'Foreign', htmlSig: FOREIGN }
+    EffectBus.emit('decorations:changed', {})
+    await settle(500)
+    const page = post()?.querySelector('.postit-page')
+    expect(page?.shadowRoot?.querySelector('script')).toBeTruthy()
+    expect(post()?.querySelector('.postit-inert')).toBeNull()
+  })
+
+  it('a review that lands flips the post from inert to live in place', async () => {
+    pages.set(FOREIGN, FOREIGN_PAGE)
+    localStorage.setItem('hc:adopted-roots', JSON.stringify([['games']]))
+    _resetAdoptedRootsCache()
+    payload = { version: 1, title: 'Foreign', htmlSig: FOREIGN }
+    EffectBus.emit('decorations:changed', {})
+    await settle(500)
+    expect(post()?.querySelector('.postit-inert')).toBeTruthy()
+
+    // The participant reviewed and accepted it (the shared writer's record).
+    localStorage.setItem('hc:feature-verified', JSON.stringify([{ sig: FOREIGN }]))
+    window.dispatchEvent(new Event('synchronize'))
+    await settle(500)
+    expect(post()?.querySelector('.postit-inert')).toBeNull()
+    expect(post()?.querySelector('.postit-page')?.shadowRoot?.textContent).toContain('hello from elsewhere')
+    localStorage.removeItem('hc:feature-verified')
   })
 })
