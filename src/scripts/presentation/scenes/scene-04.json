@@ -10,5 +10,36 @@
   "visualData": [
     "the edge is yours"
   ],
+  "lights": [
+    "*",
+    [
+      "device"
+    ],
+    [
+      "device"
+    ],
+    [
+      "device",
+      "gate"
+    ],
+    [
+      "gate",
+      "hosts"
+    ],
+    [
+      "hosts"
+    ],
+    [
+      "device",
+      "gate"
+    ],
+    [
+      "device",
+      "gate"
+    ],
+    [
+      "hosts"
+    ]
+  ],
   "say": "Here is the part that surprises people. There is no account, and no sign-up. Hypercomb runs in your browser, with a desktop app on the way, and your work is kept on your own device. Nothing leaves it until you decide. When you do share, your work goes to a host: a home for it on the open web. That can be your own machine, your own domain, or the host of a friend you trust. Presence is permission. Your work is where you are, and it leaves only when you share it. Once it is served, others can keep a copy."
 }

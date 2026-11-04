@@ -13,5 +13,24 @@
     "icon:format signature",
     "icon:layers more inside"
   ],
+  "lights": [
+    "*",
+    [
+      "r0"
+    ],
+    [
+      "r1",
+      "r2"
+    ],
+    [
+      "r3"
+    ],
+    "*",
+    [
+      "r3"
+    ],
+    "*",
+    "*"
+  ],
   "say": "One pattern ties all of it together, and it is so simple that it was overlooked. A thing has a name. What it holds is named by its own signature. And what it holds can be another thing just like it, holding more. That is the whole of it. A page, a game, a whole community: each one is built from that one pattern, tile inside tile, down to the pictures and words at the ends. Hypercomb does not ask you to study it. It shows it to you, in everything people make with it."
 }

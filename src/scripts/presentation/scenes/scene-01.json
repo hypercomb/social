@@ -10,5 +10,31 @@
   "visualData": [
     "where your work lives"
   ],
+  "lights": [
+    [
+      "yours"
+    ],
+    [
+      "yours"
+    ],
+    [
+      "yours"
+    ],
+    "*",
+    [
+      "theirs"
+    ],
+    [
+      "yours"
+    ],
+    [
+      "yours"
+    ],
+    [
+      "yours"
+    ],
+    "*",
+    "*"
+  ],
   "say": "This is Hypercomb. [pause:1300] A new way to bee. It brings people together, from every walk of life, around the things they make and the places they gather. And it starts with a question: where does your corner of the internet actually live? For most of what we use, the honest answer is: on someone else's computer, behind someone else's login, by someone else's rules. Hypercomb starts somewhere else. Your work lives with you, it leaves only when you share it, and it stays yours. Whenever you see the hive running, it was recorded live. The drawings show how it works, and anything still planned, we call planned. By the end, you will know what Hypercomb is, why it matters, and how to take part."
 }

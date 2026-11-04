@@ -13,5 +13,21 @@
     "The language — fourteen tongues, and its community fills what each one lacks",
     "Communities — meetups and gathering places, in hives"
   ],
+  "lights": [
+    "*",
+    [
+      "r0"
+    ],
+    [
+      "r1"
+    ],
+    [
+      "r2"
+    ],
+    [
+      "r3"
+    ],
+    "*"
+  ],
   "say": "Here is the pattern, shown through what people make with it. The business card: your card and your links, passed on with a scan, with nothing to sign up for, and kept as one entry in their Hyperdex. Websites and games, published straight from tiles. The language itself, in fourteen tongues, with its community filling in whatever each one lacks. And real communities, gathering in hives: meetups, meetings, and centres where people belong. Each one is the same simple pattern, in a different shape."
 }

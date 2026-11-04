@@ -10,6 +10,34 @@
   "visualData": [
     "the bytes make the address"
   ],
+  "lights": [
+    [
+      "same",
+      "sign",
+      "name"
+    ],
+    [
+      "same",
+      "sign",
+      "name"
+    ],
+    [
+      "flipped",
+      "sign"
+    ],
+    "*",
+    [
+      "same",
+      "name"
+    ],
+    [
+      "name"
+    ],
+    [
+      "sign"
+    ],
+    "*"
+  ],
   "sig": true,
   "say": "Everything in Hypercomb has one kind of address: a signature, a fingerprint computed from the content itself. The same content gets the same signature, on every machine, in every country, for good. Change one byte, and it is a different thing, with a different signature. So the signature proves the content. The same picture, kept twice, is kept once. And a signature can be passed along as a short string that anyone can check. It does not ask you to trust a company. It lets you check for yourself."
 }

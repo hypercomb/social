@@ -25,8 +25,11 @@ const beeDef = id => `<g id="${id}"><polygon points="${hexPts(2, 1, 9)}" fill="v
 // server: three stacked hairline rows
 const server = (x, y, w, c = 'var(--steel)') => [0, 1, 2].map(i => `<rect x="${x}" y="${y + i * 34}" width="${w}" height="26" rx="3" fill="none" stroke="${c}" stroke-width="1.5"/><circle cx="${x + 13}" cy="${y + i * 34 + 13}" r="2.5" fill="${c}"/>`).join('')
 const check = (x, y, c = 'var(--honey)') => `<path d="M${x - 5},${y} L${x - 1.5},${y + 3.5} L${x + 6},${y - 4}" fill="none" stroke="${c}" stroke-width="1.8"/>`
+// a part a sentence can light: the living presentation dims the others while
+// it is said (scenes/*.json "lights"); the tour draws every part lit
+const part = (id, ...pieces) => `<g data-id="${id}">${pieces.join('')}</g>`
 const device = (x, y, w, h) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="none" stroke="var(--dim)" stroke-width="1.5"/>` +
   `<path d="M${x - 22},${y + h + 16} H${x + w + 22}" stroke="var(--line)" stroke-width="1.5"/><path d="M${x + w / 2 - 34},${y + h + 16} h68" stroke="var(--dim)" stroke-width="1.5"/>`
 
 
-module.exports = { f1, hexPts, hex, LIT, CELL, GHOST, STEEL, marker, markerS, flow, ghost, text, svg, note, beeDef, server, check, device }
+module.exports = { f1, hexPts, hex, LIT, CELL, GHOST, STEEL, marker, markerS, flow, ghost, text, svg, note, beeDef, server, check, device, part }

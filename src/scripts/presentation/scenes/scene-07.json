@@ -13,5 +13,25 @@
     "0002 | changed a picture",
     "* 0003 | current — the newest marker"
   ],
+  "lights": [
+    [
+      "r3"
+    ],
+    "*",
+    [
+      "r3"
+    ],
+    [
+      "r2"
+    ],
+    [
+      "r0"
+    ],
+    "*",
+    "*",
+    [
+      "r3"
+    ]
+  ],
   "say": "Every change you make becomes a new layer, a complete record of the place at that moment. Nothing is ever overwritten. The history of a place is a numbered list, and the newest entry is how it looks now. So undo is not a trick: it is reading an earlier step. You can rewind any page, restore any moment, or take a snapshot of everything before you try something bold. This is source control for everything you make, not only for code. Your history is not a log about your work. It is your work."
 }

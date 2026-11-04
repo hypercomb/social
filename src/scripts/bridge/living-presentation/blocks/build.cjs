@@ -133,9 +133,14 @@ const sceneFor = (key, block, media) => {
     // One sentence on screen at a time, each playing its own stretch of the
     // scene's one voice: a scene reads like a film with subtitles.
     const timed = p.voice && p.lines.every(l => l.from !== null)
-    const steps = [...p.lines.map(l => ({ say: l.say, voice: timed ? p.voice : null, from: timed ? l.from : null, to: timed ? l.to : null })), ...besideStep]
+    const steps = [...p.lines.map(l => ({ say: l.say, voice: timed ? p.voice : null, from: timed ? l.from : null, to: timed ? l.to : null, lit: l.lit })), ...besideStep]
     if (p.voice && !timed) steps.splice(0, p.lines.length, { say: p.caption, voice: p.voice })
-    return { name: p.name, eyebrow: p.eyebrow, headline: p.headline, figure: p.figure, beside, sub: p.sub, link: p.link, steps, minutes: minutesOf(steps, media) }
+    // Every part a sentence lights must be a part of the figure.
+    const parts = new Set([...p.figure.matchAll(/data-id="([^"]+)"/g)].map(m => m[1]))
+    const unknown = [...new Set(steps.flatMap(st => st.lit || []).filter(id => id !== '*' && !parts.has(id)))]
+    if (unknown.length) throw new Error(`${key}: scene ${n}'s lights name ${unknown.join(', ')}, which its figure does not draw`)
+    const lights = steps.some(st => Array.isArray(st.lit))
+    return { name: p.name, eyebrow: p.eyebrow, headline: p.headline, figure: p.figure, beside, sub: p.sub, link: p.link, steps, lights, minutes: minutesOf(steps, media) }
   }
   for (const k of ['eyebrow', 'headline', 'beats']) if (!has(block, k)) throw new Error(`${key}: a block no scene explains needs its ${k}`)
   const steps = [...block.beats.map(b => ({ say: b.say, voice: tour.voiceOf(b.say, media), lit: b.lit || [] })), ...besideStep]

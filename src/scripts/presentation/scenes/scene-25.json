@@ -13,6 +13,21 @@
     "beyond | palette · arrange · public mode",
     "* /tutorial | a bee flies it with you"
   ],
+  "lights": [
+    "*",
+    "*",
+    [
+      "r0",
+      "r1",
+      "r2"
+    ],
+    [
+      "r3"
+    ],
+    "*",
+    "*",
+    "*"
+  ],
   "link": {
     "href": "https://hypercomb.com/",
     "label": "Start your hive · hypercomb.com"

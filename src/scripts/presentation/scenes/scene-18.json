@@ -10,5 +10,34 @@
   "visualData": [
     "hive to hive"
   ],
+  "lights": [
+    [
+      "middleman"
+    ],
+    [
+      "yours",
+      "theirs",
+      "path"
+    ],
+    [
+      "yours",
+      "path"
+    ],
+    [
+      "yours",
+      "theirs"
+    ],
+    [
+      "path"
+    ],
+    [
+      "yours",
+      "theirs",
+      "path"
+    ],
+    [
+      "middleman"
+    ]
+  ],
   "say": "Reason six: being together, without a middleman. Open a swarm, and the people in the room share tiles live. Take what you like, and it lands in your own hive. When people leave, their tiles leave with them. When you want something to stay, publish it to a host. Either way, work goes from hive to hive by its signature, through a meeting point or a host you chose, and it is checked when it lands. No accounts to reconcile, and no feed deciding what you see."
 }

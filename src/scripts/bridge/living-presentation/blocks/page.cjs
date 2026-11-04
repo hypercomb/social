@@ -148,8 +148,8 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .scene.in .flow{stroke-dashoffset:0}
 
 /* the beats: each part lights as it is said; a panel beside dims until its beat */
-.plate.beats [data-id]{opacity:.38;transition:opacity .5s var(--ease)}
-.plate.beats [data-id].lit{opacity:1}
+.plate.beats [data-id],.fz.lights [data-id]{opacity:.38;transition:opacity .5s var(--ease)}
+.plate.beats [data-id].lit,.fz.lights [data-id].lit{opacity:1}
 .fz.duo .pane{transition:opacity .5s var(--ease)}
 .fz.duo.aside .pane:first-child,.fz.duo.main .pane:last-child{opacity:.45}
 
@@ -257,7 +257,7 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
   .caption{max-height:36vh}
 }
 @media (prefers-reduced-motion:reduce){
-  .scene>*,.caption p.rise,.plate.beats [data-id],.fz.duo .pane,.flow,.tick::after{transition:none!important;animation:none!important;transform:none!important}
+  .scene>*,.caption p.rise,.plate.beats [data-id],.fz.lights [data-id],.fz.duo .pane,.flow,.tick::after{transition:none!important;animation:none!important;transform:none!important}
   .scene>*{opacity:1}
   .flow{stroke-dashoffset:0!important}
 }`
@@ -300,8 +300,8 @@ const SCRIPT = `
   const show = (i) => {
     at = Math.max(0, Math.min(steps.length - 1, i))
     const s = steps[at]
-    const lit = new Set(s.lit)
-    for (const n of el.querySelectorAll('.plate.beats [data-id]')) n.classList.toggle('lit', lit.has(n.dataset.id))
+    const lit = new Set(s.lit || ['*'])
+    for (const n of el.querySelectorAll('.plate.beats [data-id], .fz.lights [data-id]')) n.classList.toggle('lit', lit.has('*') || lit.has(n.dataset.id))
     if (fz.classList.contains('duo')) { fz.classList.toggle('aside', !!s.beside); fz.classList.toggle('main', !s.beside && steps.some(x => x.beside)) }
     const p = document.createElement('p'); p.textContent = s.say; if (!still) p.className = 'rise'; line.replaceWith(p); line = p
     cap.classList.toggle('long', s.say.split(/\\s+/).length > 70); cap.scrollTop = 0
@@ -430,12 +430,12 @@ const crumbsHtml = (route) => `
 
 const sceneHtml = (sc) => {
   const voiced = sc.steps.some(s => s.voice)
-  const steps = sc.steps.map(s => ({ say: s.say, voice: s.voice || null, from: s.from ?? null, to: s.to ?? null, lit: s.lit || [], beside: !!s.beside }))
+  const steps = sc.steps.map(s => ({ say: s.say, voice: s.voice || null, from: s.from ?? null, to: s.to ?? null, lit: s.lit ?? null, beside: !!s.beside }))
   return `
   <section class="scene" data-part="scene" aria-label="${esc(sc.name || 'The scene')}">
     <div class="eyebrow">${sc.eyebrow}</div>
     <h1>${sc.headline}</h1>
-    <div class="fz${sc.beside ? ' duo' : ''}"><div class="pane">${sc.figure}</div>${sc.beside ? `<div class="pane">${sc.beside}</div>` : ''}</div>${sc.sub ? `
+    <div class="fz${sc.beside ? ' duo' : ''}${sc.lights ? ' lights' : ''}"><div class="pane">${sc.figure}</div>${sc.beside ? `<div class="pane">${sc.beside}</div>` : ''}</div>${sc.sub ? `
     <p class="sub">${sc.sub}</p>` : '<span></span>'}
     <div class="dock">${sc.link ? `
       <a class="cta" href="${esc(sc.link.href)}" target="_blank" rel="noopener">${esc(sc.link.label)}${icon('external')}</a>` : ''}

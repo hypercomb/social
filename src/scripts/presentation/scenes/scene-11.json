@@ -13,5 +13,28 @@
     "website | pages show as a site",
     "* say it again | teach it to a friend"
   ],
+  "lights": [
+    "*",
+    "*",
+    [
+      "r0"
+    ],
+    [
+      "r1",
+      "r2"
+    ],
+    [
+      "r1"
+    ],
+    [
+      "r2"
+    ],
+    [
+      "r3"
+    ],
+    [
+      "r3"
+    ]
+  ],
   "say": "And you do everything by saying it. The command line speaks plain words. Type a name to make a tile. Type a slash, then say what to do. Say present, and your hive shows as slides. Say website, and its pages show as a site. Nearly every act in Hypercomb has a word, and the rest are getting theirs, so what you do, you can say again, teach to a friend, and remember. The language belongs to its community, too: people translate it into their own tongue and offer it on a host, and any hive that follows that host can take their words in."
 }

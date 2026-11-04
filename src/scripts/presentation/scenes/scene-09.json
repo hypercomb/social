@@ -10,5 +10,27 @@
   "visualData": [
     "the shell becomes a loader"
   ],
+  "lights": [
+    [
+      "shell"
+    ],
+    [
+      "shell"
+    ],
+    [
+      "shell",
+      "signed"
+    ],
+    [
+      "signed"
+    ],
+    [
+      "signed",
+      "held"
+    ],
+    [
+      "held"
+    ]
+  ],
   "say": "Behavior in Hypercomb lives in bees, short for beehavior: small, self-contained parts that act when they are needed, or when you say their word. Navigation, editing, games, the words you type: all of them are bees, and what still sits in the shell is moving out into bees too. Each one is named by its signature, so anyone can read it, improve it, and share it back. And a bee from a stranger does not just run. Before you take it, you can try it on their domain, and have your own A.I. read it for you. Once you take it, it waits, held, until your own hand accepts it."
 }

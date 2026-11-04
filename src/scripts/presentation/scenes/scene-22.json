@@ -14,5 +14,23 @@
     "Workflows that check themselves — wake when what they watch changes, and leave an ask where the hive drifted",
     "Hives that ask hives — request work, receive answers that fit the contract, as proposals you accept"
   ],
+  "lights": [
+    "*",
+    [
+      "r0"
+    ],
+    [
+      "r1"
+    ],
+    [
+      "r2"
+    ],
+    [
+      "r3"
+    ],
+    [
+      "r4"
+    ]
+  ],
   "say": "Further out. Superimposable trees: your tree and mine of the same place, laid over each other, and read for where they differ. Interests instead of feeds: people leave pheromones on what they read, the pheromones travel with it, and what matches your own private interests rises to meet you. One decoration model, where every kind of thing is decorated the same way, and what a thing is lives in its name, never in a type written into code. Workflows that wake when what they watch changes, and leave a question where the hive has drifted. And hives that can ask each other for work, and receive answers they can check before they accept them."
 }

@@ -80,7 +80,7 @@ const sceneParts = (n, media) => {
     link: s.link ? { href: s.link.href, label: T.smart(s.link.label) } : null,
     caption: T.captionOf(s.say),
     voice: voice ? media.ref(media.add(voice)) : null,
-    lines: linesOf(s.say, voice),
+    lines: linesOf(s.say, voice).map((l, i) => ({ ...l, lit: lightsOf(s, i) })),
   }
 }
 
@@ -105,6 +105,14 @@ const linesOf = (say, voice) => {
     from: spans ? Math.max(0, i === 0 ? 0 : spans[i].start) : null,
     to: spans ? (spans[i + 1] ? spans[i + 1].start : null) : null,
   }))
+}
+
+/** The figure's parts a sentence is about (scene "lights", one entry per
+ *  sentence; "*" is the whole figure), or null where the scene names none. */
+const lightsOf = (s, i) => {
+  if (!Array.isArray(s.lights)) return null
+  const l = s.lights[i]
+  return l === '*' ? ['*'] : Array.isArray(l) ? l : null
 }
 
 /** The tour's icon sprite, read from its template: one set of icons. */
