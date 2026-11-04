@@ -188,6 +188,22 @@ describe('the head memo on the commit path', () => {
     expect(await childCount(w.a, w.rootLoc)).toBe(3)
   })
 
+  it('replay() is memoized under the head it was read under — a commit or a peer\'s marker is never hidden', async () => {
+    const w = await world()
+    await adds(w.a, w.rootLoc, 'a1')
+    const first = await w.a.replay(w.rootLoc)
+    const before = w.bag().walks
+    expect(await w.a.replay(w.rootLoc)).toBe(first)        // served from the memo
+    expect(w.bag().walks).toBe(before)
+    await adds(w.a, w.rootLoc, 'a2')                         // the head moved: the entry stops matching
+    const second = await w.a.replay(w.rootLoc)
+    expect(second).not.toBe(first)
+    expect(second.length).toBe(first.length + 1)
+    await adds(w.b, w.rootLoc, 'b1')                         // a peer's marker, learned on revalidation
+    await w.a.revalidateHead(w.rootLoc)
+    expect((await w.a.replay(w.rootLoc)).length).toBe(second.length + 1)
+  })
+
   it('a peer that wrote SEVERAL markers is caught the same way', async () => {
     const w = await world()
     await adds(w.a, w.rootLoc, 'a1')

@@ -226,9 +226,24 @@ export async function extractLayerSigFromMarker(
 
 export class HistoryService {
 
-  // In-memory cache of full replay per signature. Keeps navigation instant —
-  // history is the same until the next record()/updateLayer() append.
-  readonly #replayCache = new Map<string, HistoryOp[]>()
+  // In-memory cache of full replay per lineage. A replay is a function of
+  // the bag's marker set, so each entry carries the head it was read under
+  // — the head layer sig and the marker it came from — and is served only
+  // while both still hold. A commit, a peer's marker, an archive: any of
+  // them moves the head and the entry simply stops matching. Nothing has
+  // to remember to invalidate it (it never was invalidated, and served a
+  // page's old op list for the rest of the session). Bounded, oldest out.
+  readonly #replayCache = new Map<string, { head: string; stamp: string; ops: HistoryOp[] }>()
+  static readonly #REPLAY_CACHE_CAP = 256
+
+  /** The identity a replay of `signature` is a function of, or null while
+   *  this tab has not resolved the lineage's head (then nothing is cached:
+   *  a cache with no key would be the uninvalidated one again). */
+  readonly #replayKey = (signature: string): { head: string; stamp: string } | null => {
+    const head = this.#headSigFor(signature)
+    if (!head) return null
+    return { head, stamp: this.#headStamp.get(signature) ?? '' }
+  }
 
   constructor() {
     // Warm-start. Restore the persisted per-lineage head index BEFORE the
@@ -851,17 +866,22 @@ export class HistoryService {
    * If upTo is provided, stop at that index (inclusive).
    */
   public readonly replay = async (signature: string, upTo?: number): Promise<HistoryOp[]> => {
-    // cache-only fast path: full replay is memoized by signature
-    if (upTo === undefined) {
+    // cache-only fast path: a full replay is memoized under the head it was
+    // read under, and served only while that is still the head.
+    const key = upTo === undefined ? this.#replayKey(signature) : null
+    if (key) {
       const cached = this.#replayCache.get(signature)
-      if (cached) return cached
+      if (cached && cached.head === key.head && cached.stamp === key.stamp) {
+        this.#replayCache.delete(signature)
+        this.#replayCache.set(signature, cached)
+        return cached.ops
+      }
     }
 
     let bag: FileSystemDirectoryHandle
     try {
       bag = await this.bagForRead(signature)
     } catch {
-      if (upTo === undefined) this.#replayCache.set(signature, [])
       return []
     }
 
@@ -896,7 +916,15 @@ export class HistoryService {
       }
     }
 
-    if (upTo === undefined) this.#replayCache.set(signature, ops)
+    if (key) {
+      this.#replayCache.delete(signature)
+      this.#replayCache.set(signature, { ...key, ops })
+      while (this.#replayCache.size > HistoryService.#REPLAY_CACHE_CAP) {
+        const oldest = this.#replayCache.keys().next().value
+        if (oldest === undefined) break
+        this.#replayCache.delete(oldest)
+      }
+    }
     return ops
   }
 
