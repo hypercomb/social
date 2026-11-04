@@ -31,7 +31,7 @@
 //   title    the document title
 //   stages   [{ label, minutes, frames: [{ eyebrow, headline, figure, sub, link }],
 //               steps: [{ frame, say, voice, lit, name }] }]
-//   live     [{ src, width, height, title, caption, alt }] — pictures taken in a running hive
+//   live     [{ src, width, height, title, caption, alt } | { figure, caption }] — pictures taken in a running hive, or tiles taken out of one
 //   tryPart  'word' | 'signature' | null
 //   ways     { children: [{ name, note, page }], parent, parentRoute }
 //   code     [{ path, text }]
@@ -131,6 +131,15 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .flow{stroke-dasharray:1;stroke-dashoffset:1;transition:stroke-dashoffset .9s var(--ease) .5s}
 .frame.in .flow{stroke-dashoffset:0}
 
+/* real tiles, taken out of a running hive (hive-figure.cjs): each its own
+   picture, edged in its own border colour, in the hive's staggered rows */
+.figbox.hivebox{width:min(100%,var(--cap));margin-inline:auto;justify-self:center}
+.fig.hive{position:relative;width:100%;height:0;padding-bottom:var(--tall)}
+.fig.hive .hx{position:absolute;box-sizing:border-box;padding:0.45%;transform:scale(.965);background:var(--edge,var(--line-strong));
+  clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
+.fig.hive .hx img{display:block;width:100%;height:100%;object-fit:cover;background:var(--panel);
+  clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
+
 /* a drawn figure that plays its beats: each part lights as it is said */
 .plate.beats [data-id]{opacity:.38;transition:opacity .5s var(--ease)}
 .plate.beats [data-id].lit{opacity:1}
@@ -209,7 +218,7 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .part-head{display:flex;align-items:baseline;gap:.8em;margin:0 0 16px}
 .part-head h2{margin:0;font-family:var(--mono);font-weight:400;font-size:12px;letter-spacing:var(--track-label);text-transform:uppercase;color:var(--honey-deep)}
 .part-head::after{content:"";flex:1;height:1px;background:var(--line);align-self:center}
-.live,.try,.ways,.code{margin-top:clamp(52px,8cqi,88px)}
+section.live,.try,.ways,.code{margin-top:clamp(52px,8cqi,88px)}
 /* minmax(0,…): a caption line never widens a track past the column */
 .live .grid{display:grid;grid-template-columns:minmax(0,1fr);gap:clamp(22px,3.4cqi,34px)}
 .live .grid.two{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -431,7 +440,11 @@ const stageHtml = (st) => {
 const liveHtml = (live) => !live.length ? '' : `
   <section class="live" data-part="live" aria-label="In a running hive">
     <div class="part-head"><h2>In the hive</h2></div>
-    <div class="grid${live.length === 2 ? ' two' : ''}">${live.map(l => `
+    <div class="grid${live.length === 2 ? ' two' : ''}">${live.map(l => l.figure ? `
+      <figure>
+        ${l.figure}${l.caption ? `
+        <p>${esc(l.caption)}</p>` : ''}
+      </figure>` : `
       <figure>
         <div class="figbox">
           <div class="fig shot" style="--ratio:${l.width}/${l.height}"><img src="${esc(l.src)}" width="${l.width}" height="${l.height}" alt="${esc(l.alt)}" loading="lazy" decoding="async"></div>

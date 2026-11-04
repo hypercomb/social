@@ -19,6 +19,7 @@ const tree = require('../tree.cjs')
 const tour = require('./tour.cjs')
 const { createMedia } = require('./media.cjs')
 const { drawn } = require('./drawn.cjs')
+const { liveFigure } = require('./hive-figure.cjs')
 
 const SRC = path.join(__dirname, '..', '..', '..', '..')
 const CAPTURES = path.join(__dirname, 'captures')
@@ -93,8 +94,10 @@ const sizeOf = (file) => {
   throw new Error(`not a PNG or WebP: ${file}`)
 }
 
-/** A capture: a picture taken in a running hive (blocks/captures/), by name. */
+/** A capture: a picture taken in a running hive (blocks/captures/), by name;
+ *  or tiles taken out of one (blocks/tiles/), drawn as tiles. */
 const liveOf = (shots, media) => (shots || []).map(l => {
+  if (l.tiles) return { figure: liveFigure(l, media), title: l.title, caption: l.caption }
   const file = ['webp', 'png'].map(x => path.join(CAPTURES, `${l.shot}.${x}`)).find(f => fs.existsSync(f))
   if (!file) throw new Error(`capture ${l.shot} is missing from blocks/captures/ (captures.cjs --list names the ones it stages; the rest are taken by hand in a hive)`)
   return { ...sizeOf(file), src: media.ref(media.add(file)), title: l.title, caption: l.caption, alt: l.alt || l.caption || l.title }
@@ -115,8 +118,23 @@ const stagesFor = (key, block, media) => {
   if (scened.length) {
     const said = SCENE_ONLY.filter(k => has(block, k))
     if (said.length) throw new Error(`${key}: a tour scene explains this tile, so its block must not say ${said.join(', ')} again`)
+    // A scene the tour filmed in its demo hive shows a real hive here
+    // (`figures`, by scene number): real tiles or a capture in place of the
+    // clip, and, where the narration describes the clip, its words for this
+    // picture, voiced the tour's way.
+    const figures = block.figures || {}
+    const placed = scened.flatMap(s => s.scenes)
+    const stray = Object.keys(figures).filter(n => !placed.includes(Number(n)))
+    if (stray.length) throw new Error(`${key}: figures name scene ${stray.join(', ')}, which this tile does not show`)
     return scened.map(({ label, scenes }) => {
-      const parts = scenes.map(n => tour.sceneParts(n, media))
+      const parts = scenes.map(n => {
+        const figure = figures[n]
+        const part = tour.sceneParts(n, media, figure ? () => liveFigure(figure, media) : null)
+        if (!figure?.say) return part
+        const voice = tour.voiceOf(figure.say, media)
+        if (!voice) throw new Error(`${key}: scene ${n}'s words for its picture have no voice yet — node scripts/bridge/living-presentation/blocks/narrate.cjs`)
+        return { ...part, caption: tour.T.captionOf(figure.say), voice }
+      })
       const steps = parts.map((p, i) => ({ frame: i, say: p.caption, voice: p.voice, name: p.name }))
       return { label, frames: parts, steps, minutes: minutesOf(steps, media), title: parts[0].name }
     })

@@ -1,0 +1,167 @@
+{
+  "behavior-where-visual": {
+    "name": "behavior-where-visual",
+    "border": null,
+    "file": "behavior-where-visual.webp"
+  },
+  "humanity-centres": {
+    "name": "humanity-centres",
+    "border": "#c8975a",
+    "file": "humanity-centres.webp"
+  },
+  "humanity-centres/participants": {
+    "name": "participants",
+    "border": null,
+    "file": "humanity-centres--participants.webp"
+  },
+  "humanity-centres/places": {
+    "name": "places",
+    "border": null,
+    "file": "humanity-centres--places.webp"
+  },
+  "humanity-centres/purse": {
+    "name": "purse",
+    "border": null,
+    "file": "humanity-centres--purse.webp"
+  },
+  "knowledge": {
+    "name": "knowledge",
+    "border": null,
+    "file": "knowledge.webp"
+  },
+  "knowledge/ai-inside": {
+    "name": "ai-inside",
+    "border": "#c8975a",
+    "file": "knowledge--ai-inside.webp"
+  },
+  "knowledge/behaviors": {
+    "name": "behaviors",
+    "border": null,
+    "file": "knowledge--behaviors.webp"
+  },
+  "knowledge/camelflage": {
+    "name": "camelflage",
+    "border": null,
+    "file": "knowledge--camelflage.webp"
+  },
+  "knowledge/diagrams": {
+    "name": "diagrams",
+    "border": null,
+    "file": "knowledge--diagrams.webp"
+  },
+  "knowledge/pheromone-workflow": {
+    "name": "pheromone-workflow",
+    "border": "#be6f0e",
+    "file": "knowledge--pheromone-workflow.webp"
+  },
+  "knowledge/replication": {
+    "name": "replication",
+    "border": null,
+    "file": "knowledge--replication.webp"
+  },
+  "misc": {
+    "name": "misc",
+    "border": null,
+    "file": "misc.webp"
+  },
+  "play": {
+    "name": "play",
+    "border": null,
+    "file": "play.webp"
+  },
+  "revolucion": {
+    "name": "revolucion",
+    "border": "#c8975a",
+    "file": "revolucion.webp"
+  },
+  "revolucion/cigars": {
+    "name": "cigars",
+    "border": null,
+    "file": "revolucion--cigars.webp"
+  },
+  "revolucion/collaborations": {
+    "name": "collaborations",
+    "border": null,
+    "file": "revolucion--collaborations.webp"
+  },
+  "revolucion/community": {
+    "name": "community",
+    "border": null,
+    "file": "revolucion--community.webp"
+  },
+  "revolucion/discovery": {
+    "name": "discovery",
+    "border": null,
+    "file": "revolucion--discovery.webp"
+  },
+  "revolucion/experience": {
+    "name": "experience",
+    "border": null,
+    "file": "revolucion--experience.webp"
+  },
+  "revolucion/flavor-wheel": {
+    "name": "flavor-wheel",
+    "border": null,
+    "file": "revolucion--flavor-wheel.webp"
+  },
+  "revolucion/humidor": {
+    "name": "humidor",
+    "border": null,
+    "file": "revolucion--humidor.webp"
+  },
+  "revolucion/insights": {
+    "name": "insights",
+    "border": null,
+    "file": "revolucion--insights.webp"
+  },
+  "revolucion/journal": {
+    "name": "journal",
+    "border": null,
+    "file": "revolucion--journal.webp"
+  },
+  "revolucion/lounge": {
+    "name": "lounge",
+    "border": null,
+    "file": "revolucion--lounge.webp"
+  },
+  "revolucion/meetup": {
+    "name": "meetup",
+    "border": null,
+    "file": "revolucion--meetup.webp"
+  },
+  "revolucion/mission": {
+    "name": "mission",
+    "border": null,
+    "file": "revolucion--mission.webp"
+  },
+  "revolucion/store": {
+    "name": "store",
+    "border": null,
+    "file": "revolucion--store.webp"
+  },
+  "revolucion/wholesale": {
+    "name": "wholesale",
+    "border": null,
+    "file": "revolucion--wholesale.webp"
+  },
+  "room-host": {
+    "name": "room-host",
+    "border": null,
+    "file": "room-host.webp"
+  },
+  "scratch-organize": {
+    "name": "scratch-organize",
+    "border": null,
+    "file": "scratch-organize.webp"
+  },
+  "work": {
+    "name": "work",
+    "border": null,
+    "file": "work.webp"
+  },
+  "work/domains": {
+    "name": "domains",
+    "border": null,
+    "file": "work--domains.webp"
+  }
+}
