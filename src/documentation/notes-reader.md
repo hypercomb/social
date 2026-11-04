@@ -42,10 +42,11 @@ silently change shape because the surface it is read in changed.
 
 Notes carry their own pheromones, in a `tags` slot on the note layer.
 
-The gesture is a drag. The reader's header has a pheromone button that opens
-the **Pheromones panel** beside it (the card slides left of the 320px dock so
-neither surface covers the other); drag a keyword out of the panel and drop it
-on any row. Each chip's `×` on the focused note takes it back off.
+The gesture is a drag onto a row (rows advertise themselves with
+`data-pheromone-note`). The Pheromones panel that used to be the drag source —
+and the reader header's button that opened it beside the card — was **removed**
+(2026-11-04); the shelf's bouquet replaces it as the place tags are gathered.
+Each chip's `×` on the focused note takes it back off.
 
 Two contracts make that work:
 
@@ -90,8 +91,6 @@ note to *exactly* its original signature.
 | `notes:viewer { active }` | reader → | Visibility, so the escape cascade can close the reader ahead of clearing selection. |
 | `notes:viewer-close` | → reader | The cascade's close. |
 | `note:tag { cellLabel, noteId, tag, add }` | → notes drone | Put a pheromone on a note, or take it off. `add` omitted means put on. |
-| `tags:view-open` / `tags:view-close` | reader → | Open or close the Pheromones panel alongside. |
-| `tags:view-state { open }` | → reader | Whether to step the card clear of the dock. |
 
 `note:tag` rewrites **one node at any depth** and re-materializes from the
 leaves up, exactly as `note:mark` does, so a tagged parent keeps its children

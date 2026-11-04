@@ -9,7 +9,7 @@
 //   • A whole class of gesture became impossible. Dragging a pheromone from
 //     the pheromone panel onto a row of the notes window needs BOTH windows on
 //     screen at once — and the drop code for it was already written on both
-//     ends (tags-viewer resolves `data-pheromone-note` ahead of the hex map;
+//     ends (the pheromone panel, since removed, resolved `data-pheromone-note` ahead of the hex map;
 //     the notes strip and the reader both advertise it). The feature was
 //     built and unreachable.
 //   • The shell threw away work it never announced. The displaced window was

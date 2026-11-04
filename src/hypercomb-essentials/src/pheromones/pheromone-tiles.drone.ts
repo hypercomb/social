@@ -1,9 +1,14 @@
 // pheromones/pheromone-tiles.drone.ts
 //
-// The Pheromones window's bridge to the tiles themselves. The panel
-// (hypercomb-shared/ui/tags-viewer) manages the KEYWORDS; this drone lets the
-// participant put those keywords ON tiles and take them OFF, directly on the
-// hive, while the window is open.
+// The bridge from a bouquet of keywords to the tiles themselves. The Pheromones
+// panel was REMOVED; the SHELF now holds the
+// bouquet and sends `tags:apply-begin` / `-paint` / `-commit`. This drone lets
+// the participant put those keywords ON tiles and take them OFF, directly on
+// the hive.
+//
+// KNOWN LOSS (panel removal): `tags:view-state` is no longer broadcast by
+// anything, so `#windowOpen` stays false and the on-tile ×-to-remove hover card
+// (`#canHover`) never shows. The apply lanes below do not depend on it.
 //
 //   THE BOUQUET IN HAND — the direct path, the additive twin of bulk removal.
 //     The panel gathers a bouquet of keywords; gathering arms it

@@ -38,7 +38,7 @@
 // with no lesson at all. Retiring a window means retiring its lesson in the
 // same pass, exactly as adding one means adding a lesson.
 
-import { type TutorialLesson, TUTORIAL_DEMO_MARK as PRACTICE_MARK } from '../tutorial-lesson.js'
+import { type TutorialLesson } from '../tutorial-lesson.js'
 import { hasBehaviour, hasWindow, showFilter, subject, subjects } from './lesson-kit.js'
 import { isLocalClaudeBridgeConfigured, isParticipantAiHostConfigured } from '@hypercomb/core'
 
@@ -337,48 +337,6 @@ EXPERT_LESSONS.push({
     await stage.say('files-window-done', 'Reach as far as you like',
       'It can list just this tile, this page, or the whole branch below you — so “what have I actually got in here?” is one question, not an expedition. Our practice page is nearly empty; on a real branch this fills up fast.')
     stage.emit('files:viewer-close', {})
-    await stage.wait(600)
-  },
-})
-
-// ── 70 · the tags window ───────────────────────────────────────────────
-
-EXPERT_LESSONS.push({
-  id: 'window-tags',
-  level: L,
-  order: 70,
-  title: 'The tags window',
-  summary: 'Every mark your hive is built from, plus the collecting walk that arms them and marks as you go.',
-  pheromones: ['tutorial', 'lesson', 'expert', 'meaning'],
-  teaches: ['tags', 'keyword'],
-  requires: () => hasBehaviour('tags') && hasWindow('hc-tags-viewer'),
-  async run(stage) {
-    const two = await subjects(stage, 2, names(stage), 23)
-
-    await stage.flyToRect(stage.commandInput())
-    await stage.say('tags-window', 'Your whole vocabulary',
-      'Pheromones are the marks that gather tiles. This window is every mark you have ever used, in one place — the vocabulary your hive is actually built from.')
-    stage.highlight(null)
-
-    await stage.typeAndSubmit('/tags', false)
-    await stage.wait(1600)
-
-    stage.select(two)
-    await stage.wait(400)
-    // The PAINT BRUSH is gone (the collecting walk replaced it): armed marks no
-    // longer take over the pointer, ctrl+click is the marking gesture, and a
-    // mark dropped on empty canvas does nothing at all — it has to land on a
-    // tile. A participant told to "paint" would click tiles and just walk in.
-    await stage.say('tags-window-collect', 'Gather, then walk',
-      'Gather marks in the window and they arm — then walk the hive exactly as you always do and ctrl+click each tile into the grouping. Plain clicks still go in and out; marking never takes the hive over. Done commits the whole collection in one pass, and dropping a mark straight onto a tile lands it there and then.')
-
-    await stage.typeAndSubmit(`/keyword ${PRACTICE_MARK}`, true)
-    await stage.wait(1200)
-    await stage.say('tags-window-done', 'A bouquet',
-      'Marks that belong together make a BOUQUET — a named handful you can arm at once. Nothing here moves a tile; a mark is meaning, never a location.')
-
-    stage.clearSelection()
-    stage.emit('tags:view-close', {})
     await stage.wait(600)
   },
 })

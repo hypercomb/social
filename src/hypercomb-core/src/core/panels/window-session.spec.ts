@@ -73,7 +73,7 @@ describe('window session', () => {
 
   it('leaves a window opened DURING the park alone', () => {
     const parkedOne = fakeSignal(true)
-    holdWindow('tags-viewer', signalSession(parkedOne))
+    holdWindow('palette-window', signalSession(parkedOne))
     parkWindows()
 
     const opened = fakeSignal(true)

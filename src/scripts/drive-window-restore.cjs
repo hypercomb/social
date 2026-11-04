@@ -317,27 +317,6 @@ async function main() {
     ['escape', () => page.keyboard.press('Escape')],
     ['wait 4s', () => page.waitForTimeout(4000)],
   ])
-  await S('notes: open → close → palette left standing → tags:view-close', [
-    ['open', () => emit(page, 'notes:panel', { visible: true })],
-    ['close', () => emit(page, 'notes:panel', { visible: false })],
-    ['tags close', () => emit(page, 'tags:view-close', {})],
-  ])
-  await S('palette: tags:view-open → tags:view-close', [
-    ['open', () => emit(page, 'tags:view-open', {})],
-    ['close', () => emit(page, 'tags:view-close', {})],
-  ])
-  await S('pair: palette + chat → chat close', [
-    ['palette open', () => emit(page, 'tags:view-open', {})],
-    ['chat open', () => emit(page, 'chat:open', {})],
-    ['chat close', () => emit(page, 'chat:close', {})],
-    ['tags close', () => emit(page, 'tags:view-close', {})],
-  ])
-  await S('pair: palette + behaviours → behaviours close', [
-    ['palette open', () => emit(page, 'tags:view-open', {})],
-    ['behaviours open', () => emit(page, 'features:context-open', {})],
-    ['behaviours close', () => emit(page, 'features:viewer-close', {})],
-    ['tags close', () => emit(page, 'tags:view-close', {})],
-  ])
   await S('position: user pan → behaviours open → close (pan kept?)', [
     ['pan 150,90', async () => {
       await page.evaluate(() => window.ioc.get('@diamondcoreprocessor.com/ViewportPersistence').setPan(150, 90, 'user'))
@@ -465,7 +444,6 @@ async function resetBetween(page) {
   await emit(page, 'chat:close', {})
   await emit(page, 'notes:panel', { visible: false })
   await emit(page, 'features:viewer-close', {})
-  await emit(page, 'tags:view-close', {})
   await emit(page, 'view:toggle', { view: 'tree', mode: 'off' })
   await page.evaluate(() => {
     const ws = globalThis.__hypercombWindowSession
@@ -475,7 +453,6 @@ async function resetBetween(page) {
   await emit(page, 'chat:close', {})
   await emit(page, 'notes:panel', { visible: false })
   await emit(page, 'features:viewer-close', {})
-  await emit(page, 'tags:view-close', {})
   await page.evaluate(() => {
     const modes = window.ioc.get('@diamondcoreprocessor.com/ModeRegistry')
     for (const o of modes.ownersOf('view:active')) modes.releaseOwner(o)

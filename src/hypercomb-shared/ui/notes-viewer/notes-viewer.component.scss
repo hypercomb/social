@@ -122,18 +122,6 @@ $hex: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
   transition: transform 140ms ease;
 }
 
-// Pheromones panel open → step left of its 320px dock so the two surfaces
-// sit side by side and the drag has somewhere to start and somewhere to land.
-.viewer-card.is-shifted {
-  transform: translateX(-168px);
-}
-
-// Too narrow to sit beside the dock — the panel overlays instead, and
-// shoving the card left would only push it off the other edge.
-@media (max-width: 900px) {
-  .viewer-card.is-shifted { transform: none; }
-}
-
 // ── Header ──────────────────────────────────────────────────
 .viewer-header {
   @include tw.header;
@@ -175,13 +163,6 @@ $hex: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
     color: var(--md-on-surface);
   }
 
-  // The pheromone toggle reads ON so it's obvious the panel next door
-  // belongs to this reader.
-  &.is-on {
-    border-color: color-mix(in srgb, var(--md-secondary) 55%, transparent);
-    background: color-mix(in srgb, var(--md-secondary) 18%, transparent);
-    color: var(--md-on-surface);
-  }
 }
 
 // ── Split: rail | main ──────────────────────────────────────

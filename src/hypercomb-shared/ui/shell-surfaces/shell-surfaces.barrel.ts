@@ -39,7 +39,6 @@ import '../backgrounds-window/backgrounds-window.component'
 // The ledger lives in essentials and crosses on aliases:render.
 import '../aliases-panel/aliases-panel.component'
 import '../sequence-viewer/sequence-viewer.component'
-import '../tags-viewer/tags-viewer.component'
 import '../workflow-designer/workflow-designer.component'
 import '../layout-designer/layout-designer.component'
 import '../flex-editor/flex-editor.component'

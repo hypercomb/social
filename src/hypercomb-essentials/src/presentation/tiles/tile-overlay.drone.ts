@@ -478,11 +478,10 @@ export class TileOverlayDrone extends Drone {
   /** Either picking mode is armed: a press must not navigate and the trailing
    *  tap is an ADD-TO-SET toggle. The one thing both modes mean. */
   get #picking(): boolean { return this.#sampling || this.#selectMode }
-  /** The Pheromones window is open. While it is, hover pops that tile's
-   *  keyword card and a dragged pheromone lands on the tile under the release.
-   *  The hover band would sit on top of both, so it stands down for as long as
-   *  the window is up — not just while the removal takeover is armed (closing
-   *  the window disarms that anyway, via tags-viewer `close()`). */
+  /** The Pheromones window is open (`tags:view-state`). The window was removed
+   *  and nothing broadcasts that state now, so this stays false; the gate is
+   *  kept because it is harmless. While it was up, hover popped that tile's
+   *  keyword card and the hover band stood down. */
   #pheromoneWindowOpen = false
   /** A pheromone removal is armed (TagRemovalDrone): tile clicks stage and
    *  unstage tiles instead of entering or opening them. Cleared when the

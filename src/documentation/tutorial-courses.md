@@ -126,7 +126,6 @@ primary window**, each carrying every behaviour that lives in that window:
 | `window-notes` | annotations window | notes and lists tabs, nesting, marks, reorder, the reading pane |
 | `window-reader` | notes reader | hierarchy tabs, prev/next, mark-onto-a-note |
 | `window-files` | files viewer | `/files`, scope and reach |
-| `window-tags` | tags viewer | `/tags`, `/keyword`, gathering, the collecting walk, bouquets |
 | `window-collections` | aggregate index | `/collections`, Add vs Move, `/requires`, `/hive` |
 | `window-filters` | filter configurations | `?` filter mode, saved filters, `/clear` |
 | `window-clipboard` | clipboard panel | copy, cut, the swap in both directions |

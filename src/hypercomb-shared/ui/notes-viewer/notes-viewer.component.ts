@@ -71,10 +71,6 @@ export class NotesViewerComponent implements OnDestroy {
   readonly hierarchyIndex = signal(0)
   /** Which row inside that hierarchy the big hexagon is showing. */
   readonly focusIndex = signal(0)
-  /** True while the Pheromones panel is open, so the card can step aside
-   *  and leave the right-hand dock reachable for a drag. */
-  readonly pheromonesOpen = signal(false)
-
   readonly #version = signal(0)
 
   readonly visible = computed<boolean>(() => this.cell() !== null)
@@ -188,10 +184,6 @@ export class NotesViewerComponent implements OnDestroy {
       if (this.visible()) this.close()
     }))
 
-    this.#cleanups.push(EffectBus.on<{ open?: boolean }>('tags:view-state', (p) => {
-      this.pheromonesOpen.set(p?.open === true)
-    }))
-
     this.#cleanups.push(EffectBus.on<{ segments?: readonly string[] }>('notes:changed', async (p) => {
       const cell = this.cell()
       if (!cell) return
@@ -272,14 +264,6 @@ export class NotesViewerComponent implements OnDestroy {
   /** Notes written before the `tags` slot existed simply have none. */
   tagsOf(note: Note | null | undefined): readonly string[] {
     return Array.isArray(note?.tags) ? note!.tags! : []
-  }
-
-  /** Open (or close) the Pheromones panel next to the reader. Dragging a
-   *  keyword out of it onto a row is what puts it on a note; the panel's
-   *  own drag-out gesture does the work, and the rows advertise
-   *  themselves with `data-pheromone-note`. */
-  togglePheromones(): void {
-    EffectBus.emit(this.pheromonesOpen() ? 'tags:view-close' : 'tags:view-open', {})
   }
 
   /** Take one pheromone off the focused note (the chip's ×). */

@@ -1102,28 +1102,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   //  and then the feedback window itself was retired — 2026-09-04. That corner
   //  opens the annotation sheet now: documentation/annotate-the-screen.md.)
 
-  // ── pheromones button ─────────────────────────────────
-  //
-  // Mirrors the pheromone reach carried on the sticky `tags:filter`
-  // broadcast so the top-chrome glyph reads out the current scope
-  // (page → children → global), exactly like the controls-bar tag-scope
-  // button at the bottom. Clicks TOGGLE the pheromone panel, and the
-  // panel's open-state (mirrored below) lights the button.
-  readonly #tagScope = signal<'local' | 'children' | 'global'>('local')
-  readonly pheromoneScopeIcon = computed(() => {
-    switch (this.#tagScope()) {
-      case 'children': return 'account_tree'
-      case 'global': return 'public'
-      default: return 'blur_on'
-    }
-  })
-  // Whether the pheromone panel is open — mirrored from the panel's own
-  // `tags:view-state` broadcast (like notes / feedback) so the header toggle
-  // lights and the click flips the right way regardless of how the panel was
-  // opened (bottom strip, `/tags`, or this button).
-  readonly #pheromonePanelOpen = signal(false)
-  readonly pheromonePanelOpen = this.#pheromonePanelOpen.asReadonly()
-
   // ── locked-attempt flash ──────────────────────────────
   //
   // A brief lock icon that flashes to the left of the right-side icons
@@ -1189,15 +1167,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       }),
       EffectBus.on<{ open?: boolean }>('meeting:view', ({ open }) => {
         this.#meetingOpen.set(!!open)
-      }),
-      // Pheromone panel open/closed — lights the pheromones toggle.
-      EffectBus.on<{ open?: boolean }>('tags:view-state', ({ open }) => {
-        this.#pheromonePanelOpen.set(!!open)
-      }),
-      // Pheromone reach — sticky broadcast, so the glyph hydrates on mount
-      // and follows changes made from the panel or the bottom strip.
-      EffectBus.on<{ scope?: 'local' | 'children' | 'global' }>('tags:filter', (p) => {
-        if (p?.scope) this.#tagScope.set(p.scope)
       }),
     )
 
@@ -1318,13 +1287,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     EffectBus.emitTransient('meeting:view-toggle', {})
   }
 
-
-  /** Toggle the pheromone panel — open it when closed, close it when open.
-   *  The panel owns reach selection and filtering, and mirrors its open-state
-   *  back on `tags:view-state` so this button lights and flips in step. */
-  onPheromonesToggle(): void {
-    EffectBus.emit(this.#pheromonePanelOpen() ? 'tags:view-close' : 'tags:view-open', undefined)
-  }
 
   /** Forward a view-toggle click to ViewBee, which flips the single GLOBAL
    *  render surface. A plain click toggles the view on/off; `disable`

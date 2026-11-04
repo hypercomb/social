@@ -88,7 +88,7 @@ export const hasBehaviour = (name: string): boolean => {
  * nothing and narrate over an empty screen.
  *
  * `name` is the surface's registered name — its selector by convention
- * (`hc-tags-viewer`). Answers optimistically before the registry is up; the
+ * (`hc-history-viewer`). Answers optimistically before the registry is up; the
  * course gates again when the lesson actually runs.
  */
 export const hasWindow = (name: string): boolean => {

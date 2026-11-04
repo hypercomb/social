@@ -8,28 +8,13 @@
     aria-modal="false"
     [attr.aria-label]="'notes.viewer.aria' | t"
   >
-    <!-- `aria-modal=false` and a pointer-transparent backdrop are deliberate:
-         the Pheromones panel docks to the right edge and must stay reachable
-         while this is open, because dragging a keyword OUT of it and onto a
-         row is the whole tagging gesture. `is-shifted` slides the card clear
-         of that dock so neither surface covers the other. -->
     <div class="viewer-card"
-         [class.is-shifted]="pheromonesOpen()"
          data-consumes-wheel
          hcWidget="notes-viewer" anchor="center">
 
       <header class="viewer-header">
         <span class="viewer-cell">{{ cell() }}</span>
         <div class="viewer-header-actions">
-          <button type="button"
-                  class="viewer-icon-btn"
-                  [class.is-on]="pheromonesOpen()"
-                  (click)="togglePheromones()"
-                  [title]="'notes.viewer.pheromones' | t"
-                  [attr.aria-pressed]="pheromonesOpen()"
-                  [attr.aria-label]="'notes.viewer.pheromones' | t">
-            <span class="mat-sym" aria-hidden="true">blur_on</span>
-          </button>
           <button class="viewer-icon-btn viewer-close" type="button" (click)="close()"
                   [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button>
         </div>

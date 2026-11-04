@@ -26,7 +26,7 @@
 //               the bar's Add disc — took every make-a-tile door.)
 //   see       — the lane rung (3 / 2 / 1, a lens, never a commit), fullscreen
 //               where the platform has it (iPhone has no element fullscreen;
-//               an inert button is worse than none), pheromones, and UNDO ·
+//               an inert button is worse than none), and UNDO ·
 //               REDO — every phone gesture writes truth and the phone had no
 //               way back at all.
 //
@@ -88,7 +88,7 @@ export class LayerDeckDrone extends Drone {
   /** The phone's face — list or hexagons — as the list surface publishes it. */
   #face: 'list' | 'hexagons' = 'list'
   protected override emits = [
-    'view:toggle', 'feature:apply', 'tags:view-open',
+    'view:toggle', 'feature:apply',
     'keymap:invoke', 'lanes:on', 'lanes:toggle', 'viewport:pin-toggle',
     'publish:view-toggle', 'mesh:open-modal', 'mesh:leave', 'phone:face-set',
   ]
@@ -415,16 +415,6 @@ export class LayerDeckDrone extends Drone {
         },
       })
     }
-    chips.push({
-      action: 'pheromones',
-      glyph: 'label',
-      labelKey: 'layer-deck.pheromones',
-      fallback: 'pheromones',
-      run: () => {
-        this.close()
-        EffectBus.emit('tags:view-open', {})
-      },
-    })
     chips.push({
       action: 'pin',
       glyph: 'push_pin',

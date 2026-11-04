@@ -104,8 +104,8 @@ describe('one window at a time', () => {
   describe('the pheromone palette', () => {
 
     it('stays when a window opens beside it', async () => {
-      const palette = new FakeWindow('tags-viewer', true)
-      await opened(['tags-viewer', palette])
+      const palette = new FakeWindow('palette-window', true)
+      await opened(['palette-window', palette])
       await opened(['notes-strip', new FakeWindow()])
       expect(palette.parked).toBe(0)
     })
@@ -113,14 +113,14 @@ describe('one window at a time', () => {
     it('keeps the window it is there to paint on', async () => {
       const notes = new FakeWindow()
       await opened(['notes-strip', notes])
-      await opened(['tags-viewer', new FakeWindow('tags-viewer', true)])
+      await opened(['palette-window', new FakeWindow('palette-window', true)])
       expect(notes.parked).toBe(0)
     })
 
     it('does not spare a THIRD window', async () => {
-      const palette = new FakeWindow('tags-viewer', true)
+      const palette = new FakeWindow('palette-window', true)
       const history = new FakeWindow()
-      await opened(['tags-viewer', palette], ['history-viewer', history])
+      await opened(['palette-window', palette], ['history-viewer', history])
       const notes = new FakeWindow()
       await opened(['notes-strip', notes])
       expect(history.parked).toBe(1)
@@ -130,16 +130,16 @@ describe('one window at a time', () => {
 
     it('is spent on a phone, where a second panel is a second slab', async () => {
       setViewport(390, 844)
-      const palette = new FakeWindow('tags-viewer', true)
-      await opened(['tags-viewer', palette])
+      const palette = new FakeWindow('palette-window', true)
+      await opened(['palette-window', palette])
       await opened(['notes-strip', new FakeWindow()])
       expect(palette.parked).toBe(1)
     })
 
     it('is spent on a LANDSCAPE phone too — wide, and still no room', async () => {
       setViewport(932, 430)
-      const palette = new FakeWindow('tags-viewer', true)
-      await opened(['tags-viewer', palette])
+      const palette = new FakeWindow('palette-window', true)
+      await opened(['palette-window', palette])
       await opened(['notes-strip', new FakeWindow()])
       expect(palette.parked).toBe(1)
     })
@@ -235,10 +235,10 @@ describe('one window at a time', () => {
     })
 
     it('restores the window, not the companion beside it', async () => {
-      const palette = new FakeWindow('tags-viewer', true)
+      const palette = new FakeWindow('palette-window', true)
       const notes = new FakeWindow('notes-strip')
       const chat = new FakeWindow('chat-window')
-      await opened(['notes-strip', notes], ['tags-viewer', palette])
+      await opened(['notes-strip', notes], ['palette-window', palette])
       await opened(['chat-window', chat])
       expect(displacedBy('chat-window')).toBe('notes-strip')
       chat.close(); await settle()
@@ -289,9 +289,9 @@ describe('one window at a time', () => {
 
   describe('who may stay', () => {
     it('names the arriving window and the palette', async () => {
-      await opened(['tags-viewer', new FakeWindow('tags-viewer', true)], ['history-viewer', new FakeWindow()])
+      await opened(['palette-window', new FakeWindow('palette-window', true)], ['history-viewer', new FakeWindow()])
       await opened(['notes-strip', new FakeWindow()])
-      expect([...windowsToKeep('notes-strip')].sort()).toEqual(['notes-strip', 'tags-viewer'])
+      expect([...windowsToKeep('notes-strip')].sort()).toEqual(['notes-strip', 'palette-window'])
     })
 
     it('is empty for a window that is not showing', () => {

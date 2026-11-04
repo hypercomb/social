@@ -73,7 +73,7 @@ const ROOT: QuickMenuDefinition = {
     // Looking outward: public domains, images, hosts, and the agent. Collections
     // moved inside, since they are one of the places to look.
     { direction: 'east', label: 'explore', labelKey: 'quickmenu.explore', icon: 'explore', action: { kind: 'menu', menu: 'root:explore' } },
-    { direction: 'southeast', label: 'tags', labelKey: 'quickmenu.tags', icon: 'sell', action: { kind: 'command', command: 'tags' } },
+    { direction: 'southeast', label: 'help', labelKey: 'quickmenu.help', icon: 'tips_and_updates', action: { kind: 'command', command: 'help' } },
     { direction: 'southwest', label: 'history', labelKey: 'quickmenu.history', icon: 'history', action: { kind: 'command', command: 'history' } },
     { direction: 'west', label: 'tree', labelKey: 'quickmenu.tree', icon: 'account_tree', action: { kind: 'command', command: 'tree' } },
     // The context data ring: the shelf's kept groups, and a way to start one as you collect.
@@ -221,7 +221,6 @@ const SELECTION_TILE: QuickMenuDefinition = {
   slots: [
     { direction: 'northeast', label: 'select', icon: 'check_circle', action: { kind: 'effect', effect: 'select:toggle', payload: {} } },
     alone({ direction: 'east', label: 'shelf', labelKey: 'quickmenu.shelf', icon: 'bookmark', action: { kind: 'effect', effect: 'shelf:take-selection', payload: {} } }),
-    alone({ ...cmd('southeast', 'tags', 'tags', 'quickmenu.tags'), icon: 'sell' }),
     alone({ ...cmd('southwest', 'groups', 'groups'), icon: 'hub' }),
     alone({ ...cmd('west', 'hide', 'hide'), icon: 'visibility_off' }),
     alone({ ...cmd('northwest', 'remove', 'remove', 'quickmenu.remove'), icon: 'delete' }),
@@ -273,7 +272,6 @@ const SELECTION_ORGANIZE: QuickMenuDefinition = {
   title: 'Organize',
   contexts: [],
   slots: [
-    onTile({ ...cmd('east', 'tags', 'tags', 'quickmenu.tags'), icon: 'sell' }),
     { ...cmd('southeast', 'arrange', 'arrange'), icon: 'view_module' },
     onTile({ ...cmd('southwest', 'groups', 'groups'), icon: 'hub' }),
     { direction: 'west', label: 'all', labelKey: 'quickmenu.all', icon: 'select_all', action: { kind: 'effect', effect: 'select:all', payload: {} } },

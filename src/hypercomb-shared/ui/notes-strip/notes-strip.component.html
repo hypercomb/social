@@ -47,9 +47,6 @@
        [dockExclusive]="false"
        [hcSession]="session"
     (hcDockedPanelClose)="hide()"
-       pairWindow="tags-viewer" pairOpenEffect="tags:view-open"
-       pairCloseEffect="tags:view-close" [pairWhen]="deskWide()"
-       [pairLabel]="'tags.viewer.title' | t"
        [minWidth]="256" [maxWidth]="900"
        role="list" [attr.aria-label]="'notes.strip.aria' | t"
        (pointerenter)="onNotesEnter()" (pointerleave)="onNotesLeave()">

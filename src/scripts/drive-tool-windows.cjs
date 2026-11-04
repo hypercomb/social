@@ -91,8 +91,6 @@ const TOP_GEOMETRY = () => {
   const clInner = cl?.querySelector('form, .cmd-row, .command-row, [class*="row"]') ?? null
   const notes = document.querySelector('hc-notes-strip [hcdockedpanel]')
     ?? document.querySelector('hc-notes-strip')
-  const tags = document.querySelector('hc-tags-viewer [hcdockedpanel]')
-    ?? document.querySelector('hc-tags-viewer')
   const styles = getComputedStyle(root)
   const numbers = (name) => styles.getPropertyValue(name).trim() || '(unset)'
   return {
@@ -102,8 +100,6 @@ const TOP_GEOMETRY = () => {
     commandLineZ: cl ? getComputedStyle(cl).zIndex : null,
     notes: rect(notes),
     notesZ: notes ? getComputedStyle(notes).zIndex : null,
-    tags: rect(tags),
-    tagsZ: tags ? getComputedStyle(tags).zIndex : null,
     vars: {
       insetRight: numbers('--hc-inset-right'),
       insetLeft: numbers('--hc-inset-left'),
@@ -188,8 +184,6 @@ async function main() {
     // ── SET: which windows survive opening another ────────────────────
     await emit('notes:panel', { visible: false })
     await page.waitForTimeout(600)
-    await emit('tags:view-close')
-    await page.waitForTimeout(600)
 
     // A concurrent session editing watched source reloads the page under the
     // probe — the dev server rebuilds and pushes. That is a fact of this repo,
@@ -216,14 +210,12 @@ async function main() {
     await step('history:view-open', 'history:view-open')
     await step('sequence:view-open', 'sequence:view-open')
     await step('aggregate:view-open (collections)', 'aggregate:view-open', { id: 'collections' })
-    await step('tags:view-open (pheromones)', 'tags:view-open')
     const final = await step('notes:panel visible', 'notes:panel', { visible: true })
     await page.screenshot({ path: path.resolve(`${out}-set.png`) })
 
     const ids = final.map(p => p.id)
-    const others = ids.filter(id => id !== 'tags-viewer')
-    const ok = others.length <= 1
-    console.log(`\nRULE: one window at a time (+ pheromones) → ${ok ? 'PASS' : 'FAIL'}`)
+    const ok = ids.length <= 1
+    console.log(`\nRULE: one window at a time → ${ok ? 'PASS' : 'FAIL'}`)
     console.log(`  showing: [${ids.join(', ')}]`)
 
     if (errors.length) console.log('\npage errors:', errors.slice(0, 8))

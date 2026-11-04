@@ -248,7 +248,7 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
    * is typing a line and there should be one line-typing thing in the app, not
    * two that look alike and behave differently. But two parts of the standard
    * presentation belong to the command line's PLACE rather than to typing:
-   *   • the icon rail — Beehaviors, Chat, notes, pheromones — which are ways
+   *   • the icon rail — Beehaviors, Chat, notes — which are ways
    *     to reach other surfaces, meaningless inside one of them (and on a
    *     portrait phone the rail is a whole second strip);
    *   • the portrait phone's full-bleed dark slab, which is how the command
@@ -352,17 +352,6 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
    *  are on always has beehaviors to look at, even if the answer is none. */
   readonly featuresPanelOpen = input<boolean>(false)
   readonly featuresLabel = input<string>('features')
-
-  /** Material Symbol readout of the current pheromone reach — page /
-   *  children / global. Same vocabulary as the controls-bar tag-scope
-   *  button at the bottom; the parent owns the `tags:filter` mirror. */
-  readonly pheromoneScopeIcon = input<string>('blur_on')
-
-  /** Whether the pheromone panel is currently open — lights the pheromones toggle. */
-  readonly pheromonePanelOpen = input<boolean>(false)
-
-  /** Aria-label / tooltip for the pheromones button. */
-  readonly pheromonesLabel = input<string>('tags')
 
   /** Show the MIC on the rail. Mobile only: dictation used to live on the
    *  mobile control bar, but the words it produces land in this text box, so
@@ -574,11 +563,6 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   readonly meetingToggle = output<void>()
 
   readonly featuresToggle = output<void>()
-
-  /** Emitted when the pheromones button is clicked. Parent toggles the
-   *  pheromone panel (`tags:view-open` / `tags:view-close`) — the shell
-   *  stays presentational. */
-  readonly pheromonesToggle = output<void>()
 
   /** Mic pressed / released. The parent owns the dictation state machine
    *  (tap = toggle listening, hold = push-to-talk) — the shell only reports

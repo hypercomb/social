@@ -3,7 +3,7 @@
 //   · `layer:deck-open` opens it (phone only, never under a view); again closes
 //   · three groups from the registries, nothing hand-listed: open as (the
 //     layer's toggles, default accented) · add here (attachable bees the layer
-//     lacks + camera + library) · see (lanes rung with its digit, pheromones,
+//     lacks + camera + library) · see (lanes rung with its digit,
 //     undo, redo; no fullscreen where the platform has none)
 //   · every plate emits the contract it was written against, and the ones that
 //     hand the screen to something else close the sheet first
@@ -54,7 +54,7 @@ services['@diamondcoreprocessor.com/ImagePasteWorker'] = { createTileFromImage: 
 
 // OUT contracts, spied before anything is emitted so a replay cannot confuse.
 const out = {
-  toggle: vi.fn(), apply: vi.fn(), camera: vi.fn(), tags: vi.fn(), pin: vi.fn(), keymap: vi.fn(), lanesOn: vi.fn(), lanesToggle: vi.fn(),
+  toggle: vi.fn(), apply: vi.fn(), camera: vi.fn(), pin: vi.fn(), keymap: vi.fn(), lanesOn: vi.fn(), lanesToggle: vi.fn(),
   publish: vi.fn(), meshModal: vi.fn(), meshLeave: vi.fn(), face: vi.fn(),
 }
 EffectBus.on('phone:face-set', out.face)
@@ -64,7 +64,6 @@ EffectBus.on('mesh:leave', out.meshLeave)
 EffectBus.on('view:toggle', out.toggle)
 EffectBus.on('feature:apply', out.apply)
 EffectBus.on('camera:capture-open', out.camera)
-EffectBus.on('tags:view-open', out.tags)
 EffectBus.on('viewport:pin-toggle', out.pin)
 EffectBus.on('keymap:invoke', out.keymap)
 EffectBus.on('lanes:on', out.lanesOn)
@@ -227,16 +226,14 @@ describe('the three groups', () => {
     expect(out.lanesToggle).toHaveBeenCalledTimes(2)
   })
 
-  it('see: pheromones hands over; undo and redo keep the sheet up', () => {
+  it('see: undo and redo keep the sheet up', () => {
     open()
     plate('undo')!.click()
     expect(out.keymap).toHaveBeenCalledWith({ cmd: 'history.undo' })
     expect(isOpen()).toBe(true)
     plate('redo')!.click()
     expect(out.keymap).toHaveBeenCalledWith({ cmd: 'history.redo' })
-    plate('pheromones')!.click()
-    expect(out.tags).toHaveBeenCalledTimes(1)
-    expect(isOpen()).toBe(false)
+    expect(plate('pheromones')).toBeUndefined()
   })
 
   it('see: pin asks the controls owner to toggle persisted pin state, then closes', () => {

@@ -637,7 +637,6 @@ describe('doctrine ratchets', () => {
       "sensitivity-bar/sensitivity-bar.component",
       "sequence-viewer/sequence-viewer.component",
       "shortcut-sheet/shortcut-sheet.component",
-      "tags-viewer/tags-viewer.component",
       "toast/toast.component",
       "trust-prompt/trust-prompt.component",
       "tutorials-window/tutorials-window.component",

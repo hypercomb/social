@@ -1,5 +1,15 @@
 # Pheromones — living signals over dead labels
 
+> **The Tags / Pheromones panel was removed (2026-11-04).** The Angular
+> component `hc-tags-viewer`, its `/tags` queen and the `tags:view-open` /
+> `tags:view-close` / `tags:view-state` doors are gone, together with the
+> panel's hive tag-filter mirror and its page / children / whole-hive reach
+> selector. The SHELF replaces it: a shelf holds a bouquet of tags and its apply
+> button sends `tags:apply-begin` / `tags:apply-paint` / `tags:apply-commit`
+> (`hypercomb-essentials/src/pheromones/pheromone-tiles.drone.ts`). The data
+> layer is untouched (`TagRegistry`, the decoration tag API, `name:tag`).
+> Mentions of the panel below, and in older audits, describe the retired UI.
+
 **Status: PARTLY BUILT (2026-09-13).** Signing, verifying, minting and local
 reading of authored deposits: `hypercomb-essentials/src/pheromones/pheromone-
 deposits.ts`, consulted by the intake gate alongside this participant's own
