@@ -84,7 +84,11 @@ class MemoryDirectory {
     MemoryDirectory.peakInFlight = Math.max(MemoryDirectory.peakInFlight, MemoryDirectory.inFlight)
     try {
       for (const entry of [...this.files]) {
-        await new Promise<void>(resolve => queueMicrotask(resolve))   // a real directory answers asynchronously
+        // A real directory answers from outside the JS thread: a MACROtask per
+        // entry (setImmediate — no 4 ms clamp), so walks can overlap the way
+        // OPFS walks do. A microtask here let one walk finish inside another's
+        // turn and read as "one at a time" under a loaded suite.
+        await new Promise<void>(resolve => setImmediate(resolve))
         yield entry
       }
       for (const entry of [...this.dirs]) yield entry
