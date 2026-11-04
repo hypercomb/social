@@ -2127,3 +2127,58 @@ describe('the no-default-host mark is one string in two places', () => {
     expect(pick(read('hypercomb-web/src/setup/package-floor.ts'))).toBe(mesh)
   })
 })
+
+describe('a read of a host has a deadline', () => {
+  it('no bare fetch of a host URL in sharing/ — it goes through fetchWithDeadline (or carries its own signal); the list only shrinks', () => {
+    // T7 / T1: bytes reach a reader by replication from hosts the participant
+    // follows, so every act that reads a host is as slow as the slowest host
+    // it asks. A bare `fetch(url, init)` with no signal waits as long as the
+    // browser does; one hung host stalled publish and status. The helper is
+    // sharing/bounded-fetch.ts (`fetchWithDeadline`, `mapBounded`,
+    // `firstBounded`): it bounds the requests that exist and adds none.
+    //
+    // A call is BARE when it is a free `fetch(` (not `.fetch(`, `#fetch(`, a
+    // method declaration) whose argument list never names a `signal`. The
+    // files below still hold one today; never add to them — route the read
+    // through `fetchWithDeadline` — and delete an entry when its file is paid.
+    const SHARING = 'hypercomb-essentials/src/sharing/'
+    const bare = (code: string): boolean => {
+      for (const m of code.matchAll(/(?<![\w$.#])fetch\s*\(/g)) {
+        const open = (m.index ?? 0) + m[0].length
+        let depth = 1
+        let at = open
+        while (at < code.length && depth > 0) {
+          const ch = code[at++]
+          if (ch === '(') depth++
+          else if (ch === ')') depth--
+        }
+        const args = code.slice(open, at)
+        // `fetch(signature: string): …` is a method declaration, not a call.
+        if (/^\s*\w+\s*:/.test(args)) continue
+        if (!/\bsignal\b/.test(args)) return true
+      }
+      return false
+    }
+    const actual: string[] = []
+    for (const file of walk(join(ROOT, SHARING))) {
+      if (bare(stripComments(readFileSync(file, 'utf8')))) actual.push(relative(ROOT, file).replace(/\\/g, '/'))
+    }
+    assertRatchet(actual.sort(), [
+      'hypercomb-essentials/src/sharing/arrival-plan-publish.ts',
+      'hypercomb-essentials/src/sharing/community-translations.ts',
+      'hypercomb-essentials/src/sharing/derivation-attestation.ts',
+      'hypercomb-essentials/src/sharing/derive-verify.ts',
+      'hypercomb-essentials/src/sharing/domain-claim.ts',
+      'hypercomb-essentials/src/sharing/example-hives.worker.ts',
+      'hypercomb-essentials/src/sharing/hive-format.ts',
+      'hypercomb-essentials/src/sharing/hosts.queen.ts',
+      'hypercomb-essentials/src/sharing/key-list.client.ts',
+      'hypercomb-essentials/src/sharing/meeting-invite.join.ts',
+      'hypercomb-essentials/src/sharing/profile.queen.ts',
+      'hypercomb-essentials/src/sharing/promote.ts',
+      'hypercomb-essentials/src/sharing/publications-ledger.ts',
+      'hypercomb-essentials/src/sharing/sealed-publish.ts',
+      'hypercomb-essentials/src/sharing/text-theme-offering.ts',
+    ], 'bare fetch of a host URL')
+  })
+})

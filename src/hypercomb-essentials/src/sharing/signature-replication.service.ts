@@ -2,10 +2,11 @@
 // not subscribed to content writes or any render/navigation effect.
 
 import { SignatureService } from '@hypercomb/core'
-import { fetchWithDeadline } from './bounded-fetch.js'
 import { foldContentLabel } from './zone-door.js'
 
 const SIG_RE = /^[a-f0-9]{64}$/
+// Lazy: this file is in the eager boot lane (doctrine.spec.ts), the helper is not.
+const bounded = () => import('./bounded-fetch.js')
 const SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
 
 type SignerLike = {
@@ -68,7 +69,7 @@ export class SignatureReplicationService {
     const auth = await this.#nip98(url, 'POST', body)
     if (!auth) return false
     try {
-      const response = await fetchWithDeadline(url, {
+      const response = await (await bounded()).fetchWithDeadline(url, {
         method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/json' }, body, signal,
       })
       return response.status === 202
@@ -84,7 +85,7 @@ export class SignatureReplicationService {
     const headers: Record<string, string> = { Authorization: auth }
     if (state.etag) headers['If-None-Match'] = state.etag
     try {
-      const response = await fetchWithDeadline(url, { headers, cache: 'no-store' }, { signal })
+      const response = await (await bounded()).fetchWithDeadline(url, { headers, cache: 'no-store' }, { signal })
       if (response.status === 304) return this.#document(state)
       if (!response.ok) return null
       const document = await response.json() as ReceiptDocument
@@ -103,7 +104,7 @@ export class SignatureReplicationService {
     const auth = await this.#nip98(url, 'GET')
     if (!auth) return null
     try {
-      const response = await fetchWithDeadline(url, { headers: { Authorization: auth }, cache: 'no-store' }, { signal })
+      const response = await (await bounded()).fetchWithDeadline(url, { headers: { Authorization: auth }, cache: 'no-store' }, { signal })
       return response.ok ? await response.json() as ReplicationStatus : null
     } catch { return null }
   }
@@ -119,7 +120,7 @@ export class SignatureReplicationService {
     if (!SIG_RE.test(signature)) return false
     const base = this.#base(domain)
     let held = false
-    try { held = (await fetchWithDeadline(`${base}/${signature}`, { method: 'HEAD', cache: 'no-store' }, { signal })).status === 200 } catch {}
+    try { held = (await (await bounded()).fetchWithDeadline(`${base}/${signature}`, { method: 'HEAD', cache: 'no-store' }, { signal })).status === 200 } catch {}
     const state = this.#domains.get(base) ?? { receipts: new Set(), etag: null, updatedAt: null }
     if (held) state.receipts.add(signature)
     else state.receipts.delete(signature)

@@ -105,7 +105,6 @@
 // read-back GET. Every other answer keeps the read-back.
 
 import { CHILD_SLOTS, EffectBus, SignatureService, registerPoolMeaning, spellPoolMeaning, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
-import { fetchWithDeadline } from './bounded-fetch.js'
 import { decorationClosureSigs, nestedResourceSigs } from './decoration-closure.js'
 import { isJoinedHere, ownZone } from './membership.js'
 import { foldContentLabel, HOST_DOMAIN_RE, isLoopbackHost, isPublishNode, legacyContentFace } from './zone-door.js'
@@ -3473,6 +3472,10 @@ export class HostSyncService extends EventTarget {
     return Promise.race([work, late]).finally(() => clearTimeout(timer))
   }
 
+  /** The shared deadline helper, loaded on first use: this file is in the eager
+   *  boot lane (doctrine.spec.ts) and the helper is not. */
+  static readonly #bounded = () => import('./bounded-fetch.js')
+
   /** fetch with a deadline: 15 s, plus 1 s per 100 KB sent. */
   static async #fetchWithin(url: string, init: RequestInit, sentBytes = 0): Promise<Response> {
     const ctrl = new AbortController()
@@ -3724,7 +3727,7 @@ export class HostSyncService extends EventTarget {
       // The host checked every body against its name when it took it; a page
       // (an SPA fallback answering 200) is not a held file.
       try {
-        const there = await fetchWithDeadline(url, { method: 'HEAD', cache: 'no-store' })
+        const there = await (await HostSyncService.#bounded()).fetchWithDeadline(url, { method: 'HEAD', cache: 'no-store' })
         if (there.ok && !(there.headers.get('content-type') ?? '').toLowerCase().includes('text/html')) { held++; continue }
       } catch { /* not reachable yet — the PUT below says so */ }
       const bytes = await bytesOf(sig)
@@ -3737,6 +3740,7 @@ export class HostSyncService extends EventTarget {
         // A host that never answers ends the commit at its deadline (15 s, plus
         // 1 s per 100 KB sent — the same allowance #fetchWithin gives a push).
         const allowance = REQUEST_TIMEOUT_MS + Math.ceil(body.byteLength / 102_400) * TIMEOUT_PER_100KB_MS
+        const { fetchWithDeadline } = await HostSyncService.#bounded()
         const put = await fetchWithDeadline(url, { method: 'PUT', headers: { Authorization: auth }, body }, { timeoutMs: allowance })
         if (put.status === 401 || put.status === 403) return { ok: false, error: `${domain} does not accept uploads from this key`, sig }
         if (!put.ok) return { ok: false, error: `${domain} refused ${sig.slice(0, 12)}… (HTTP ${put.status})`, sig }

@@ -33,7 +33,7 @@ import {
   encodeHiveLinkBundle,
   type HiveLinkBundle,
 } from './hive-link.js'
-import { firstBounded, HOST_CONCURRENCY } from './bounded-fetch.js'
+import { fetchWithDeadline, firstBounded, HOST_CONCURRENCY } from './bounded-fetch.js'
 import { fetchHiveIndex, fetchHiveManifestFromAny, nip98Header, putHiveManifest, type HiveManifest } from './hive-pointer.js'
 import { prepareAnchorHosts, publisherKeyHex } from './key-list.client.js'
 import {
@@ -1295,7 +1295,7 @@ async function secureDeleteBranchNow(segments: readonly string[]): Promise<Secur
       const auth = await nip98Header(signer as Parameters<typeof nip98Header>[0], url, 'POST')
       if (!auth) { error = 'signing failed'; break }
       try {
-        const res = await fetch(url, {
+        const res = await fetchWithDeadline(url, {
           method: 'POST',
           headers: { Authorization: auth, 'Content-Type': 'application/json' },
           body: JSON.stringify({ sigs: sigs.slice(i, i + 1000) }),

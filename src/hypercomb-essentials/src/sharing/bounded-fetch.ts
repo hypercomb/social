@@ -51,7 +51,11 @@ export const hostOfUrl = (url: string): string => {
 export const isSlowHost = (host: string): boolean => timedOut.has(hostOfUrl(host))
 
 /** Test seam. */
-export const _resetBackoff = (): void => { timedOut.clear() }
+export const _resetBackoff = (): void => { timedOut.clear(); forced = null }
+
+/** Test seam: every deadline becomes `ms` (a spec cannot wait out eight seconds). */
+let forced: number | null = null
+export const _forceDeadlineMs = (ms: number | null): void => { forced = ms }
 
 /** True for the error a deadline (or a caller's abort) raises. */
 export const isDeadlineError = (error: unknown): boolean => {
@@ -74,7 +78,7 @@ const anySignal = (signals: readonly AbortSignal[]): AbortSignal => {
  *  caller's abort reason), exactly as a fetch would; callers keep the `catch`
  *  they already have. */
 export const fetchWithDeadline = async (url: string, init: RequestInit = {}, options: DeadlineOptions = {}): Promise<Response> => {
-  const deadline = AbortSignal.timeout(options.timeoutMs ?? FETCH_DEADLINE_MS)
+  const deadline = AbortSignal.timeout(forced ?? options.timeoutMs ?? FETCH_DEADLINE_MS)
   const signals = [deadline, init.signal, options.signal].filter((signal): signal is AbortSignal => !!signal)
   const host = hostOfUrl(url)
   try {

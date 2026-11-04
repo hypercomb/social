@@ -16,7 +16,6 @@
 
 import { get, nip98Authorization, nip98Template, poolKindOfMeaning, registerPoolMeaning, SignatureService } from '@hypercomb/core'
 import { verifyEvent } from 'nostr-tools/pure'
-import { fetchWithDeadline, firstBounded, HOST_CONCURRENCY, isDeadlineError } from './bounded-fetch.js'
 import { HIVE_INDEX_EVENT_KIND, HIVE_LINK_VERSION } from './hive-link.js'
 import { isPoweredEntrance, readAddresses, readDoorsOf, readEntrances, type ZoneEntrance } from './zone-door.js'
 
@@ -86,6 +85,8 @@ export type HiveIndexResult =
   | { ok: false; reason: HiveIndexFailure; status?: number }
 
 const SIG_RE = /^[a-f0-9]{64}$/
+// Lazy: this file is in the eager boot lane (doctrine.spec.ts), the helper is not.
+const bounded = () => import('./bounded-fetch.js')
 // Loopback hosts use plain http (content-side analog of allow-loopback);
 // real domains use https. Same rule as HostSyncService / the invite queen.
 // Any *.localhost name is loopback too (RFC 6761): a zone's content face on
@@ -118,13 +119,13 @@ export async function fetchHiveIndex(host: string, pubkey: string, signal?: Abor
   try {
     // A host that never answers is `unreachable` after the deadline — the same
     // quiet "unknown" as a refused connection, never a stalled act.
-    res = await fetchWithDeadline(await hiveIndexUrl(host, key), { cache: 'no-store' }, { signal })
+    res = await (await bounded()).fetchWithDeadline(await hiveIndexUrl(host, key), { cache: 'no-store' }, { signal })
   } catch { return { ok: false, reason: 'unreachable' } }
   if (!res.ok) return { ok: false, reason: 'http', status: res.status }
 
   let evt: Record<string, unknown>
   // The deadline covers the body too: a host that stalls mid-answer is unreachable, not malformed.
-  try { evt = await res.json() as Record<string, unknown> } catch (error) { return { ok: false, reason: isDeadlineError(error) ? 'unreachable' : 'malformed' } }
+  try { evt = await res.json() as Record<string, unknown> } catch (error) { return { ok: false, reason: (await bounded()).isDeadlineError(error) ? 'unreachable' : 'malformed' } }
 
   // An index another key signed stands only when this host's list for the
   // anchor names that key (key-list.client.ts), so the list is asked for only then.
@@ -245,6 +246,7 @@ export async function fetchHiveManifestFromAny(hosts: readonly string[], pubkey:
   // Zone roots only — the retired `content.<zone>` face serves the same heap
   // (zone-door.ts). Asked together, a few at a time: the first verified index
   // wins and a hung host costs its deadline, not the walk.
+  const { firstBounded, HOST_CONCURRENCY } = await bounded()
   const { winner } = await firstBounded(
     readDoorsOf(hosts), HOST_CONCURRENCY,
     (host, signal) => fetchHiveIndex(host, pubkey, signal),
@@ -417,7 +419,7 @@ async function putHiveManifestNow(
   if (!auth) return { ok: false, pubkey, createdAt, reason: 'nip-98 signing failed' }
 
   try {
-    const res = await fetch(url, {
+    const res = await (await bounded()).fetchWithDeadline(url, {
       method: 'PUT',
       headers: { Authorization: auth, 'Content-Type': 'application/json' },
       body,
