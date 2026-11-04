@@ -7,6 +7,7 @@
 // switch off a live one. That second half is the property worth guarding.
 
 import { describe, expect, it } from 'vitest'
+import { EffectBus } from '@hypercomb/core'
 
 const held = new Map<string, unknown>()
 const listeners: ((key: string, value: unknown) => void)[] = []
@@ -19,8 +20,16 @@ const listeners: ((key: string, value: unknown) => void)[] = []
 }
 const ioc = (window as unknown as { ioc: { register(key: string, value: unknown): void; get(key: string): unknown } }).ioc
 
-// The participant's own names, which the census folds in live.
+// The participant's own names, which the census folds in. The census is
+// held per version and the ledger says `aliases:changed` on every change
+// (participant-aliases.ts: set, and the hydrate fold), so this stand-in says
+// it the same way.
 const given = new Map<string, string[]>()
+const give = (command: string, names: string[] | null): void => {
+  if (names) given.set(command, names)
+  else given.delete(command)
+  EffectBus.emit('aliases:changed', {})
+}
 ioc.register('@diamondcoreprocessor.com/ParticipantAliases', {
   aliasesFor: (command: string) => given.get(command) ?? [],
 })
@@ -91,12 +100,12 @@ describe('the words this census retired', () => {
 
 describe('live always wins', () => {
   it('a participant who gives the old word back gets it back — the record is never read', () => {
-    given.set('remove', ['delete'])
+    give('remove', ['delete'])
     try {
       expect(drone.has('delete')).toBe(true)
       expect(drone.retired('delete')).toBeUndefined()
     } finally {
-      given.delete('remove')
+      give('remove', null)
     }
     expect(drone.retired('delete')).toEqual({ word: 'delete', by: 'remove' })
   })
