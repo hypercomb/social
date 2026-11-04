@@ -20,6 +20,13 @@ Commit the ignore rule, not the generated files.
 work on a dedicated task branch and may commit and push only that branch; they
 must never commit, merge, rebase, or push directly to `development`.
 
+Before opening or updating a pull request, fetch `origin/development` and merge
+it into the task branch. Resolve every conflict there, then push only that
+branch. The pull request must already contain the current `development` tip, so
+the landing squash is a small update and other people's open pull requests stay
+easy to merge. Do not merge the task branch into `development`. The owner, or
+the merge thread, squash-merges the pull request.
+
 The shared pre-push hook rejects any direct update of `development`. Do not
 disable, edit around, or bypass that hook, including by setting
 `HYPERCOMB_ALLOW_DIRECT_DEVELOPMENT_PUSH`. Only the repository owner may use
