@@ -20,12 +20,12 @@
 //                                      resolution endpoints from here — see
 //                                      memory: project_domain_as_identity.md)
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync, unlinkSync } from 'fs'
 import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
-import { createHash } from 'node:crypto'
 import { formatPoolEntry, packageClosure, poolEntries, retentionSet } from './retention.js'
 import { hostPackagesPool, poolAddress } from './pool-address.js'
+import { entryComplete, healEntry, sweepPartials, writeFileAtomic } from './atomic-copy.js'
 import { TRANSFER_PACKS_MEANING } from '../../hypercomb-runtime/src/transfer-pack.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -95,19 +95,6 @@ const publishName = ((): string => {
   return at >= 0 ? String(argv[at + 1] ?? '').trim() : ''
 })()
 
-const copyDirRecursive = (srcDir: string, tgtDir: string): void => {
-  mkdirSync(tgtDir, { recursive: true })
-  for (const name of readdirSync(srcDir)) {
-    const srcPath = join(srcDir, name)
-    const tgtPath = join(tgtDir, name)
-    if (statSync(srcPath).isDirectory()) {
-      copyDirRecursive(srcPath, tgtPath)
-    } else {
-      copyFileSync(srcPath, tgtPath)
-    }
-  }
-}
-
 // recursive (name → size) fingerprint, used to verify a bag copy landed
 // completely before its source is removed.
 const dirFingerprint = (dir: string, prefix = ''): Map<string, number> => {
@@ -150,7 +137,7 @@ const drainLegacyDirs = (targetDir: string, additive: boolean): number => {
         // sigbag dir — relocate whole, verify by recursive fingerprint
         if (!SIG_NAME.test(name)) continue // unknown subdir — leave, blocks rmdir
         const tgtPath = join(targetDir, name)
-        if (!existsSync(tgtPath)) copyDirRecursive(srcPath, tgtPath)
+        healEntry(srcPath, tgtPath)
         if (fingerprintsMatch(dirFingerprint(srcPath), dirFingerprint(tgtPath))) {
           rmSync(srcPath, { recursive: true, force: true })
           drained++
@@ -159,8 +146,7 @@ const drainLegacyDirs = (targetDir: string, additive: boolean): number => {
         const sig = name.replace(/\.(js|json)$/i, '')
         if (!SIG_NAME.test(sig)) continue // not content-addressed — leave
         const tgtPath = join(targetDir, sig)
-        const needsCopy = !existsSync(tgtPath) || statSync(tgtPath).size !== st.size
-        if (needsCopy) copyFileSync(srcPath, tgtPath)
+        healEntry(srcPath, tgtPath)
         if (existsSync(tgtPath) && statSync(tgtPath).size === st.size) {
           unlinkSync(srcPath)
           drained++
@@ -183,8 +169,7 @@ const backfillFrom = (sources: string[], name: string, targetDir: string): boole
     const srcPath = join(src, name)
     if (!existsSync(srcPath)) continue
     const tgtPath = join(targetDir, name)
-    if (statSync(srcPath).isDirectory()) copyDirRecursive(srcPath, tgtPath)
-    else copyFileSync(srcPath, tgtPath)
+    healEntry(srcPath, tgtPath)
     return true
   }
   return false
@@ -196,7 +181,7 @@ const syncTarget = (
   poolOrder: { sig: string; label: string }[],
   keep: Set<string>,
   peers: string[],
-): { copied: number; skipped: number; removed: number; drained: number; healed: number } => {
+): { copied: number; skipped: number; removed: number; drained: number; healed: number; torn: number } => {
   mkdirSync(targetDir, { recursive: true })
 
   let copied = 0
@@ -206,13 +191,20 @@ const syncTarget = (
   // drain BEFORE mirroring so relocated-then-stale entries get pruned in the
   // same run (mirrored targets) and reads keep resolving throughout.
   const drained = drainLegacyDirs(targetDir, additive)
+  // A crashed copy leaves `<sig>.partial` beside its target; it is never
+  // content, so it goes before anything is judged complete.
+  sweepPartials(targetDir)
+  let torn = 0
 
   const srcEntries = new Set(readdirSync(DIST_ROOT).filter(n => SIG_NAME.test(n)))
   const tgtEntries = new Set(readdirSync(targetDir).filter(n => SIG_NAME.test(n)))
 
   // beeline: entry name IS the signature (file = leaf, directory = bag).
-  // Either way, if the name exists in target, content-addressing guarantees
-  // it's the same content — skip.
+  // A name is a CLAIM, not a proof: a copy that died half-way leaves the right
+  // name over the wrong bytes. Content-addressing makes equal size the
+  // completeness proof, so a target is skipped only when it is complete and a
+  // short one is replaced — every copy lands through a temp name and a rename
+  // (atomic-copy.ts), so a reader never sees half a file.
   for (const name of srcEntries) {
     // The package pool is written below, from what is PUBLISHED — never copied
     // wholesale from dist, whose one member is the build just made.
@@ -221,24 +213,17 @@ const syncTarget = (
     // already has it takes the members it lacks rather than skipping the
     // folder the way a finished bag is skipped.
     if (name === TRANSFER_PACKS_POOL && tgtEntries.has(name)) {
-      for (const member of readdirSync(join(DIST_ROOT, name))) {
-        if (existsSync(join(targetDir, name, member))) continue
-        copyFileSync(join(DIST_ROOT, name, member), join(targetDir, name, member))
-        copied++
-      }
-      continue
-    }
-    if (tgtEntries.has(name)) {
-      skipped++
+      copied += healEntry(join(DIST_ROOT, name), join(targetDir, name))
       continue
     }
     const srcPath = join(DIST_ROOT, name)
     const tgtPath = join(targetDir, name)
-    if (statSync(srcPath).isDirectory()) {
-      copyDirRecursive(srcPath, tgtPath)
-    } else {
-      copyFileSync(srcPath, tgtPath)
+    if (tgtEntries.has(name) && entryComplete(srcPath, tgtPath)) {
+      skipped++
+      continue
     }
+    if (tgtEntries.has(name)) torn++
+    healEntry(srcPath, tgtPath)
     copied++
   }
 
@@ -277,7 +262,7 @@ const syncTarget = (
     const path = join(targetDir, name)
     const existing = existsSync(path) ? readFileSync(path, 'utf8') : null
     if (existing === json) { skipped++; return }
-    writeFileSync(path, json, 'utf8')
+    writeFileAtomic(path, json)
     copied++
   }
   // NO MANIFEST IS WRITTEN. A target that already carries one keeps it — it is
@@ -305,7 +290,7 @@ const syncTarget = (
       // The mirrored dev feed is regenerable: its head is the working build
       // and moves with every build, so it is rewritten rather than reported.
       if (heldSig !== member.sig && !additive) {
-        writeFileSync(entry, bytes, 'utf8')
+        writeFileAtomic(entry, bytes)
         copied++
         return
       }
@@ -321,11 +306,11 @@ const syncTarget = (
       // Same package, fuller bytes: an entry written before members carried
       // their branch mark. The signature — the only line a reader must have —
       // is unchanged, so this adds to an entry rather than rewriting one.
-      writeFileSync(entry, bytes, 'utf8')
+      writeFileAtomic(entry, bytes)
       copied++
       return
     }
-    writeFileSync(entry, bytes, 'utf8')
+    writeFileAtomic(entry, bytes)
     copied++
   })
 
@@ -351,13 +336,13 @@ const syncTarget = (
   const listing = poolOrder.map((_, index) => poolEntryName(index)).sort().join('\n')
   const indexPath = join(poolDir, 'index.html')
   if (!existsSync(indexPath) || readFileSync(indexPath, 'utf8') !== listing) {
-    writeFileSync(indexPath, listing, 'utf8')
+    writeFileAtomic(indexPath, listing)
     copied++
   } else skipped++
   if (!additive) {
     const listingPath = join(poolDir, 'listing.txt')
     if (!existsSync(listingPath) || readFileSync(listingPath, 'utf8') !== listing) {
-      writeFileSync(listingPath, listing, 'utf8')
+      writeFileAtomic(listingPath, listing)
       copied++
     } else skipped++
   }
@@ -383,7 +368,7 @@ const syncTarget = (
     }
   }
 
-  return { copied, skipped, removed, drained, healed }
+  return { copied, skipped, removed, drained, healed, torn }
 }
 
 const main = () => {
@@ -451,9 +436,9 @@ const main = () => {
 
   for (const { dir, additive } of TARGETS) {
     const peers = sourceOrder.filter(d => d !== dir && existsSync(d))
-    const { copied, skipped, removed, drained, healed } = syncTarget(dir, additive, additive ? publishedOrder : poolOrder, keep, peers)
+    const { copied, skipped, removed, drained, healed, torn } = syncTarget(dir, additive, additive ? publishedOrder : poolOrder, keep, peers)
     console.log(`[copy-content] ${dir}${additive ? ' (additive/persistent)' : ''}`)
-    console.log(`  ${copied} copied, ${skipped} unchanged, ${removed} removed${healed ? `, ${healed} backfilled for older versions` : ''}${drained ? `, ${drained} drained from legacy dirs` : ''}`)
+    console.log(`  ${copied} copied, ${skipped} unchanged, ${removed} removed${healed ? `, ${healed} backfilled for older versions` : ''}${torn ? `, ${torn} short copies replaced` : ''}${drained ? `, ${drained} drained from legacy dirs` : ''}`)
   }
 }
 
