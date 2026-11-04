@@ -77,6 +77,17 @@ describe('window size', () => {
     expect(pointH.longPitch).toBeCloseTo(Math.sqrt(3) * s)
   })
 
+  it('reserves the half-cell the cross pairings sit along, so no column is clipped', () => {
+    const cross = railPitch(GEO, false, true, 3)
+    expect(cross.longOffset).toBeCloseTo(cross.longPitch / 2)
+    expect(railPitch(GEO, false, true, 1).longOffset).toBe(0)
+    expect(railPitch(GEO, true, true, 3).longOffset).toBe(0)
+    // exactly the room for 4 columns plus the offset: 4 fit, a pixel less: 3
+    const room = cross.longSpan + cross.longOffset + 3 * cross.longPitch
+    expect(railColumnsThatFit(room, 1, cross)).toBe(4)
+    expect(railColumnsThatFit(room - 1, 1, cross)).toBe(3)
+  })
+
   it('counts only whole columns that fit, and at least one', () => {
     const p = railPitch(GEO, true, true)
     expect(railColumnsThatFit(10, 1, p)).toBe(1)

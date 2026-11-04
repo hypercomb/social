@@ -85,6 +85,12 @@ export interface RailPitch {
   longSpan: number
   /** A tile's drawn extent across the strip, mesh px (pad included). */
   acrossSpan: number
+  /** Extra extent along the strip from the honeycomb's half-cell alternation
+   *  (the cross pairings: every other lane-row sits half a column along). */
+  longOffset: number
+  /** Extra extent across the strip from the same alternation (point-top
+   *  rows running down: every other row sits half a lane across). */
+  acrossOffset: number
 }
 
 /** The mesh's own spacing (`axialToPixel` in show-cell): flat-top steps
@@ -95,17 +101,23 @@ export const railPitch = (
   geo: RailHexSize,
   flatTop: boolean,
   horizontal: boolean = flatTop,
+  lanes: number = 3,
 ): RailPitch => {
   const s = geo.circumRadiusPx + geo.gapPx
   const reach = geo.circumRadiusPx / APOTHEM_RATIO
   const w = (flatTop ? 2 * reach : 2 * geo.circumRadiusPx) + 2 * geo.padPx
   const h = (flatTop ? 2 * geo.circumRadiusPx : 2 * reach) + 2 * geo.padPx
   const matched = flatTop === horizontal
+  const longPitch = matched ? 1.5 * s : SQRT3 * s
+  const acrossPitch = matched ? SQRT3 * s : 1.5 * s
+  const many = clampLanes(lanes) > 1
   return {
-    longPitch: matched ? 1.5 * s : SQRT3 * s,
-    acrossPitch: matched ? SQRT3 * s : 1.5 * s,
+    longPitch,
+    acrossPitch,
     longSpan: horizontal ? w : h,
     acrossSpan: horizontal ? h : w,
+    longOffset: many && !matched ? longPitch / 2 : 0,
+    acrossOffset: many && matched && !flatTop ? acrossPitch / 2 : 0,
   }
 }
 
@@ -121,9 +133,9 @@ export const railSeedScale = (
   flatTop: boolean,
   horizontal: boolean = flatTop,
 ): number => {
-  const p = railPitch(geo, flatTop, horizontal)
+  const p = railPitch(geo, flatTop, horizontal, lanes)
   const n = clampLanes(lanes)
-  const extent = (n - 1) * p.acrossPitch + p.acrossSpan + (n > 1 ? p.acrossPitch / 2 : 0)
+  const extent = (n - 1) * p.acrossPitch + p.acrossSpan + p.acrossOffset
   return extent > 0 && availAcross > 0 ? availAcross / extent : 1
 }
 
@@ -131,7 +143,7 @@ export const railSeedScale = (
  *  per mesh px). Only columns that fit ENTIRELY count; always at least one. */
 export const railColumnsThatFit = (availLong: number, scale: number, pitch: RailPitch): number => {
   const step = pitch.longPitch * scale
-  const span = pitch.longSpan * scale
+  const span = (pitch.longSpan + pitch.longOffset) * scale
   if (!(step > 0) || !(availLong > span)) return 1
   return Math.max(1, Math.floor((availLong - span) / step + 1e-9) + 1)
 }
@@ -153,7 +165,7 @@ export const railWindowSize = (
   flatTop: boolean,
   horizontal: boolean = flatTop,
 ): RailWindowSize => {
-  const columns = railColumnsThatFit(availLong, scale, railPitch(geo, flatTop, horizontal))
+  const columns = railColumnsThatFit(availLong, scale, railPitch(geo, flatTop, horizontal, lanes))
   return { columns, capacity: railTilesBefore(columns, lanes, flatTop, horizontal) }
 }
 
