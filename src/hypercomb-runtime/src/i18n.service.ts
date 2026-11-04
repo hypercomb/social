@@ -141,6 +141,18 @@ export class LocalizationService extends EventTarget implements I18nProvider {
     this.#emitChange()
   }
 
+  // THE CATALOG'S VERSION. A counter that moves the instant any word can
+  // change — the locale, a catalog, an override, a theme's words, a heal —
+  // synchronously, where the 'change' event below lands a microtask later.
+  // The shell's `| t` pipe memoizes each binding against the version it last
+  // resolved under (read through a signal, so the flip is still one tick
+  // behind the write and NG0100 stays quiet): a change-detection pass that
+  // changed no word costs one compare per binding instead of a lookup.
+  #version = 0
+  get version(): number {
+    return this.#version
+  }
+
   // Defer dispatch to a microtask so the impure `t` pipe's value flip
   // (key → translated string) lands in a NEW change-detection tick rather
   // than within the same tick as the registration. Without this, Angular's
@@ -151,6 +163,7 @@ export class LocalizationService extends EventTarget implements I18nProvider {
   // sync registrations coalesce into one dispatch via the scheduled flag.
   #pendingDispatch = false
   #emitChange = (): void => {
+    this.#version++
     if (this.#pendingDispatch) return
     this.#pendingDispatch = true
     queueMicrotask(() => {
