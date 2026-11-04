@@ -5,36 +5,23 @@
 // with the other surfaces. It has no pulse of its own — the caption is driven
 // entirely by `caption:show` / `caption:clear`.
 //
-// It is also the one place the HOVERED TILE speaks: `tile:hover` carries the
-// label under the pointer, and the caption shows it big, top-centre — the name
-// the tile used to draw over its own picture. An icon's hint (source
-// 'icon-hint') is newer, so it sits over the tile's name while the pointer is
-// on the icon and gives it back when it leaves.
+// The hovered tile no longer speaks here: its name rides on the tile itself,
+// just above the icons' top row (tile-name.drone.ts, a raised name). The caption
+// keeps what is not a tile's name — an icon's hint, the image wall's words.
 
 import { Drone, EffectBus } from '@hypercomb/core'
 import { CAPTION_OWNER, CAPTION_SURFACE, CaptionElement } from './caption.view.js'
 
-const TILE_SOURCE = 'tile'
-
 export class CaptionDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'presentation'
-  override description = 'Wires the caption: one quiet line of words, top-centre under the command line, for what is hovered or being chosen.'
+  override description = 'Wires the caption: one quiet line of words, top-centre under the command line, for an icon hint or what is being chosen.'
 
-  protected override listens: string[] = ['caption:show', 'caption:clear', 'tile:hover']
+  protected override listens: string[] = ['caption:show', 'caption:clear']
   protected override emits: string[] = ['caption:show', 'caption:clear']
   protected override sense = (): boolean => false
   protected override heartbeat = async (): Promise<void> => { /* driven by effects, never pulsed */ }
 }
-
-type ShowCellNames = { displayNameFor?: (label: string) => string }
-
-EffectBus.on<{ label?: string | null }>('tile:hover', (p) => {
-  const label = String(p?.label ?? '').trim()
-  if (!label) { EffectBus.emit('caption:clear', { source: TILE_SOURCE }); return }
-  const names = window.ioc.get<ShowCellNames>('@diamondcoreprocessor.com/ShowCellDrone')
-  EffectBus.emit('caption:show', { source: TILE_SOURCE, title: names?.displayNameFor?.(label) ?? label })
-})
 
 const _caption = new CaptionDrone()
 window.ioc.register('@diamondcoreprocessor.com/CaptionDrone', _caption)

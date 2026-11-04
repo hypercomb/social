@@ -41,6 +41,7 @@ import { DEFAULT_HEX_GEOMETRY, type HexGeometry } from '../grid/hex-geometry.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import { TILE_STACK_DEPTHS, type TileStackDepths } from './tile-stack.js'
 import { BLOOM, BLOOM_EASE_CSS, BLOOM_TOTAL_MS, bloomDelayMs, flowerRingKey, flowerSlots, pouredInHoney } from './flower-motion.js'
+import { raisedNameY } from './tile-action-icons.js'
 
 type Axial = { q: number; r: number }
 type CellCountPayload = { count: number; labels: string[]; coords: Axial[] }
@@ -96,8 +97,14 @@ const NAME_TRACKING = 0.04
  *  wrapping is out — and a name must never spill onto its neighbour
  *  (Jaime, 2026-09-09: "the text can't go over the outside"). */
 const MAX_WIDTH_R = 1.55
-/** Half-height of one band row — the shader's `u_radiusPx * 0.15`. */
-const ROW_H_R = 0.15
+/** The hex radius the overlay's local units are measured at. */
+const OVERLAY_R = 32
+/** Em of a raised name, in world px at the overlay's radius: about half the old
+ *  top-of-screen caption (1.6rem), which was ~0.55 of a tile's radius — so this
+ *  reads as a real label, not a smaller tile name. */
+const RAISED_EM = 8.4
+/** …and it may run wider than the tile: it bleeds past the border. */
+const RAISED_MAX_WIDTH_R = 3.4
 /** Runs after Pixi's own render (UPDATE_PRIORITY.LOW = −25) so the transform
  *  read is the one that was just drawn, never a frame behind. */
 const TICK_PRIORITY = -26
@@ -164,6 +171,10 @@ const STYLE = `
   font-family:var(--hc-tile-name-font,${FONT_STACK});font-weight:var(--hc-tile-name-weight,${NAME_WEIGHT});
   font-size:${LAYOUT_PX}px;letter-spacing:${NAME_TRACKING}em;color:var(--hc-tile-name-color,#fff)}
 .hc-tile-names-world>span[hidden]{display:none}
+/* The raised name wears the icons' plate (hex-icon-button.ts): dark fill, pale-blue hairline, two chamfered corners (top-left, bottom-right). */
+.hc-tile-names-world>span.hc-raised{padding:.28em .6em;box-sizing:border-box;letter-spacing:.08em;color:#fff;
+  background:rgba(12,12,26,.78);box-shadow:inset 0 0 0 .1em rgba(126,182,214,.45),0 .15em .5em rgba(0,0,0,.35);
+  clip-path:polygon(.45em 0,100% 0,100% calc(100% - .45em),calc(100% - .45em) 100%,0 100%,0 .45em)}
 .hc-tile-name-text{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .hc-tile-name-holders{flex:none;margin-left:.45em;font-size:.5em;letter-spacing:0;color:var(--hc-tile-name-holders-color,${HOLDERS_INK})}
 .hc-tile-name-holders[hidden]{display:none}
@@ -666,19 +677,30 @@ export class TileNameDrone extends Drone {
     if (holders.textContent !== count) holders.textContent = count
     if (holders.hidden !== !count) holders.hidden = !count
 
+    // THE RAISED NAME. Under the pointer, on a tile that offers icons, the name
+    // leaves the tile's middle and rides just above the icons' top row at half
+    // size, on a plate cut like the icons' own — it may bleed past the border.
+    // It is also the hovered tile's ONLY caption now (the top-of-screen one is
+    // gone), so a name the tile keeps to itself is still read under the pointer.
+    const iconRows = this.#band.label === label ? Math.max(1, this.#band.rows) - 1 : 0
+    const nameless = !!sc && sc.nameHidden(label)
+    const raised = iconRows > 0 || (label === this.#hovered && nameless)
+
     const stack = this.#manyCentre
     const covered = this.#flower.some(c => c.q === axial.q && c.r === axial.r)
       || (!!stack && stack.q === axial.q && stack.r === axial.r)
-    const hidden = covered || (!!sc && (sc.shaderDrawsName(label) || sc.nameHidden(label)))
+    const hidden = covered || (!!sc && (sc.shaderDrawsName(label) || (nameless && !raised)))
     if (span.hidden !== hidden) span.hidden = hidden
     if (hidden) return
 
     const R = this.#geo.circumRadiusPx
     const px = this.#axialToPixel(axial.q, axial.r)
     const x = px.x + this.#meshOffset.x
-    const rows = this.#band.label === label ? Math.max(1, this.#band.rows) : 1
-    const y = px.y + this.#meshOffset.y - (rows - 1) * ROW_H_R * R
-    const { maxWidth, transform } = this.#placement(x, y)
+    if (span.classList.contains('hc-raised') !== raised) span.classList.toggle('hc-raised', raised)
+    const y = px.y + this.#meshOffset.y + (iconRows > 0 ? raisedNameY(iconRows) * R / OVERLAY_R : 0)
+    const { maxWidth, transform } = raised
+      ? this.#placement(x, y, RAISED_EM, RAISED_MAX_WIDTH_R)
+      : this.#placement(x, y)
     // A name that has not moved is not written again: every render pass places
     // every name, and at a meeting of a thousand tiles re-setting two styles
     // per name (each parsed again by the browser) was a cost of every pass —
@@ -690,8 +712,9 @@ export class TileNameDrone extends Drone {
     span.style.transform = transform
   }
 
-  /** `em`, `widthR` and `pivot` are for the honey options, which set their own
-   *  size and bound (the flower's names keep the hive's one size otherwise). */
+  /** `em`, `widthR` and `pivot` are for the honey options and the raised name,
+   *  which set their own size and bound (every other name keeps the hive's one
+   *  size and the tile's own width). */
   #placement(
     x: number, y: number,
     em = this.#bigHead ? BIG_HEAD_EM : NAME_EM,

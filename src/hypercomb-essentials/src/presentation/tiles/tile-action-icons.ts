@@ -20,6 +20,22 @@ export const ICON_SIZE = 7           // matches DEFAULT_ICON_SIZE in tile-overla
 export const HEX_INRADIUS = 27.7     // √3/2 × 32 — safe horizontal bound
 export const EDGE_MARGIN = 5.2       // icon CENTRES stay this far from the hex edge, so a plate clears the border
 
+/** Centre-to-centre between icon rows (tile-overlay's ICON_ROW_PITCH). */
+const ROW_PITCH = 12
+/** Half the height of a raised name's plate, and the air between it and the
+ *  icons' top plates — overlay-local units, hex radius 32. */
+const NAME_PLATE_HALF = 6.6
+const NAME_PLATE_GAP = 1.6
+
+/** Where the hovered tile's NAME rides: just above the top icon row (the icon
+ *  plates are 9.4 tall), measured up from the hex centre in overlay-local units
+ *  (hex radius 32). The name drone and the overlay's pinned icons both read it,
+ *  so they cannot disagree. */
+export function raisedNameY(iconRows: number): number {
+  const topRowY = ICON_Y - (Math.max(1, iconRows) - 1) * ROW_PITCH / 2
+  return topRowY - 4.7 - NAME_PLATE_GAP - NAME_PLATE_HALF
+}
+
 export function computeIconPositions(activeNames: string[]): { x: number; y: number }[] {
   const count = activeNames.length
   if (count === 0) return []
