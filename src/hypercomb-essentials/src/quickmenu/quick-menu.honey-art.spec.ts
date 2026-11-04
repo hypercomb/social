@@ -5,18 +5,23 @@
 //   · the contract every background keeps, checked against two placeholders
 //     written here (the real ten are checked in quick-menu.backgrounds.spec.ts)
 //   · the atlas geometry, and drawing that fails soft where there is no canvas
+//   · the lit copy: 1.6x (once more at 0.6, 'lighter') plus a warm screened glow
 
 import { describe, expect, it } from 'vitest'
 import { QuickMenuRegistry } from './quick-menu-registry.service.js'
 import { HONEY_BACKGROUND_COUNT, backgroundFor, wallY } from './quick-menu.honey.js'
 import {
+  HONEY_ART_LIT_GAIN,
+  HONEY_ART_LIT_GLOW,
   HONEY_ART_TILE,
   HONEY_ART_VIEWBOX,
   atlasFrame,
   honeyBackgroundProblems,
+  paintLit,
   sizedSvg,
   warmHoneyArt,
   type HoneyBackground,
+  type LitContext,
 } from './quick-menu.honey-art.js'
 import { QUICK_MENU_RING, type QuickMenuDirection } from './quick-menu.types.js'
 
@@ -167,5 +172,73 @@ describe('drawing it once', () => {
     const first = warmHoneyArt([PLACEHOLDER_A, PLACEHOLDER_B])
     expect(warmHoneyArt([PLACEHOLDER_A])).toBe(first)
     await expect(first).resolves.toBeNull()
+  })
+})
+
+describe('the lit copy', () => {
+  /** A recording 2D context: every call, with the state it was made in. */
+  function recorder() {
+    const calls: { op: string; args: unknown[]; mode: string; alpha: number; fill?: unknown; clipped: boolean }[] = []
+    const stops: [number, string][] = []
+    let saved: { mode: string; alpha: number; clipped: boolean }[] = []
+    const t = {
+      globalCompositeOperation: 'source-over' as GlobalCompositeOperation,
+      globalAlpha: 1,
+      fillStyle: '#000' as unknown,
+      clipped: false,
+      save() { saved.push({ mode: t.globalCompositeOperation, alpha: t.globalAlpha, clipped: t.clipped }) },
+      restore() { const s = saved.pop()!; t.globalCompositeOperation = s.mode as GlobalCompositeOperation; t.globalAlpha = s.alpha; t.clipped = s.clipped },
+      record(op: string, args: unknown[]) {
+        calls.push({ op, args, mode: t.globalCompositeOperation, alpha: t.globalAlpha, fill: t.fillStyle, clipped: t.clipped })
+      },
+      drawImage(...args: unknown[]) { t.record('drawImage', args) },
+      beginPath() { t.record('beginPath', []) },
+      moveTo(...args: unknown[]) { t.record('moveTo', args) },
+      lineTo(...args: unknown[]) { t.record('lineTo', args) },
+      closePath() { t.record('closePath', []) },
+      clip() { t.clipped = true; t.record('clip', []) },
+      fillRect(...args: unknown[]) { t.record('fillRect', args) },
+      createRadialGradient(...args: unknown[]) {
+        t.record('createRadialGradient', args)
+        return { addColorStop: (o: number, c: string) => stops.push([o, c]) }
+      },
+    }
+    saved = []
+    return { t, calls, stops }
+  }
+
+  it('is the picture once more at 0.6 (1.6x), then a warm glow screened inside the tile', () => {
+    const { t, calls, stops } = recorder()
+    const image = {} as CanvasImageSource
+    const { width, height } = HONEY_ART_TILE
+    paintLit(t as unknown as LitContext, image, width, height)
+
+    expect(HONEY_ART_LIT_GAIN).toBe(1.6)
+    const draws = calls.filter(c => c.op === 'drawImage')
+    expect(draws).toHaveLength(1)
+    expect(draws[0]).toMatchObject({ args: [image, 0, 0, width, height], mode: 'lighter' })
+    expect(draws[0].alpha).toBeCloseTo(0.6, 9)
+
+    // the glow: centred at (0,-6), radius 46, in tile px
+    const s = width / 80
+    const gradient = calls.find(c => c.op === 'createRadialGradient')!
+    const [x0, y0, r0, x1, y1, r1] = gradient.args as number[]
+    expect([x0, y0, r0]).toEqual([40 * s, 40 * s, 0])
+    expect([x1, y1]).toEqual([40 * s, 40 * s])
+    expect(r1).toBeCloseTo(46 * s, 9)
+    expect(stops).toEqual([[0, HONEY_ART_LIT_GLOW.color], [1, HONEY_ART_LIT_GLOW.clear]])
+    expect(HONEY_ART_LIT_GLOW.color).toBe('rgba(255,214,120,0.35)')
+
+    const fill = calls.find(c => c.op === 'fillRect')!
+    expect(fill).toMatchObject({ mode: 'screen', alpha: 1, clipped: true, args: [0, 0, width, height] })
+    // clipped to the point-top hexagon: six vertices, the first the top point
+    expect(calls.filter(c => c.op === 'lineTo')).toHaveLength(5)
+    expect(calls.find(c => c.op === 'moveTo')!.args).toEqual([40 * s, 0])
+    expect(calls.findIndex(c => c.op === 'drawImage')).toBeLessThan(calls.findIndex(c => c.op === 'fillRect'))
+
+    // and hands the context back as it found it
+    expect(t.globalCompositeOperation).toBe('source-over')
+    expect(t.globalAlpha).toBe(1)
+    expect(t.clipped).toBe(false)
   })
 })

@@ -13,7 +13,7 @@
 //   · the hive flower — the hex shader samples the atlas texture by variation
 //
 // The atlas is one canvas: a column per variation, the REST picture in the top
-// row and a pre-lit copy (about 2.4x brighter) in the bottom row, so lighting a
+// row and a pre-lit copy (1.6x brighter, warm glow inside) in the bottom row, so lighting a
 // tile is a swap of picture, never a filter on the gesture. Each cell carries a
 // transparent pad round the tile so a sampler never reads a neighbour.
 //
@@ -65,8 +65,58 @@ export const HONEY_ART_BOX = { x: -40, y: -46, width: 80, height: 92 } as const
  */
 export const HONEY_ART_TILE = { width: 280, height: 322, pad: 2 } as const
 
-/** How much brighter the pre-lit copy is: the lit body lifts about 2.5x. */
-export const HONEY_ART_LIT_GAIN = 2.4
+/** How much brighter the pre-lit copy is: the picture once more, added at 0.6, = 1.6x. */
+export const HONEY_ART_LIT_GAIN = 1.6
+
+/**
+ * The warm inner glow laid over the lit copy, in viewBox units: a radial
+ * gradient from (0,-6), radius 46, rgba(255,214,120,0.35) to transparent,
+ * drawn with 'screen' and kept inside the tile.
+ */
+export const HONEY_ART_LIT_GLOW = { cx: 0, cy: -6, r: 46, color: 'rgba(255,214,120,0.35)', clear: 'rgba(255,214,120,0)' } as const
+
+/** The tile's outline, point-top, circumradius 46, in viewBox units. */
+const HEX_OUTLINE: readonly (readonly [number, number])[] = [
+  [0, -46], [39.84, -23], [39.84, 23], [0, 46], [-39.84, 23], [-39.84, -23],
+]
+
+/** The part of a 2D context the lit treatment uses. */
+export type LitContext = Pick<
+  CanvasRenderingContext2D,
+  'save' | 'restore' | 'drawImage' | 'beginPath' | 'moveTo' | 'lineTo' | 'closePath' | 'clip' | 'fillRect' | 'createRadialGradient'
+> & { globalCompositeOperation: GlobalCompositeOperation; globalAlpha: number; fillStyle: CanvasRenderingContext2D['fillStyle'] }
+
+/**
+ * Turn a context holding the REST picture (drawn at width x height) into the
+ * LIT picture: the picture added once more at 0.6 (1.6x, clamped), then a warm
+ * inner glow screened over it inside the tile. No pixel is read, so nothing
+ * here can trip over a tainted canvas. Leaves the context's state as it found it.
+ */
+export function paintLit(t: LitContext, image: CanvasImageSource, width: number, height: number): void {
+  const scale = width / HONEY_ART_BOX.width
+  const px = (x: number): number => (x - HONEY_ART_BOX.x) * scale
+  const py = (y: number): number => (y - HONEY_ART_BOX.y) * (height / HONEY_ART_BOX.height)
+  t.save()
+  t.globalCompositeOperation = 'lighter'
+  t.globalAlpha = HONEY_ART_LIT_GAIN - 1
+  t.drawImage(image, 0, 0, width, height)
+  t.restore()
+
+  const g = HONEY_ART_LIT_GLOW
+  t.save()
+  t.beginPath()
+  HEX_OUTLINE.forEach(([x, y], i) => (i ? t.lineTo(px(x), py(y)) : t.moveTo(px(x), py(y))))
+  t.closePath()
+  t.clip()
+  const glow = t.createRadialGradient(px(g.cx), py(g.cy), 0, px(g.cx), py(g.cy), g.r * scale)
+  glow.addColorStop(0, g.color)
+  glow.addColorStop(1, g.clear)
+  t.globalCompositeOperation = 'screen'
+  t.globalAlpha = 1
+  t.fillStyle = glow
+  t.fillRect(0, 0, width, height)
+  t.restore()
+}
 
 /** A background may weigh no more than this, in bytes. */
 export const HONEY_BACKGROUND_MAX_BYTES = 80 * 1024
@@ -192,12 +242,8 @@ async function draw(backgrounds: readonly HoneyBackground[]): Promise<HoneyArt |
       if (!t) continue
       t.drawImage(image, 0, 0, width, height)
       const restUrl = await objectUrl(tile)
-      // lit: the same picture added onto itself, 1 + 1 + 0.4 = 2.4x, clamped —
-      // no pixel read, so nothing here can trip over a tainted canvas
-      t.globalCompositeOperation = 'lighter'
-      t.drawImage(image, 0, 0, width, height)
-      t.globalAlpha = HONEY_ART_LIT_GAIN - 2
-      t.drawImage(image, 0, 0, width, height)
+      // lit: 1.6x brighter plus a warm inner glow (paintLit)
+      paintLit(t, image, width, height)
       const litUrl = await objectUrl(tile)
       const r = atlasFrame(i, false), l = atlasFrame(i, true)
       context.drawImage(image, r.x, r.y, width, height)
