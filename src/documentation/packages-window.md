@@ -137,6 +137,59 @@ input gate, the back gesture):
   Escape goes by the focus, so the desk keeps it: a repaint never drops the row
   that held it, and focus is never left on the page behind.
 
+## Two ways to look — simple, and the four panes
+
+(jwize, 2026-11-05: "we need to up the participant experience — this is advanced mode;
+the other should just be the hosts list large in the middle with a drill down to the
+code. Nothing fancy, the same things but single drill in, maybe the items can be toggled
+as a multiselect." Then: "no I think we need both", "just do a simple version", and "this
+four pane view is beautiful".)
+
+**Simple is how the desk opens.** There is no rail and no strip of columns — one
+large list in the middle and a step in at a time:
+
+1. **The hosts** — this origin, every host you carry (a dot saying whether an update
+   waits, how many packages it lists), your own host, and the field to add one.
+2. **A host's packages** — the host's name, its door to Publish and what it carries on
+   top, then the packages as large rows with everything the four panes' rows have (the
+   light, the update mark, the manage menu). A click goes into the package: the parts
+   inside it are listed, and under them the files it declares.
+3. **The code** — a file clicked is read, full width, in the code theme, with the ✎ to
+   describe it.
+
+Above every page is **Back** and a trail of where you are (*Hosts › try.localhost ›
+assistant › anatomy*); **Escape** goes the same one step back, and the list of hosts is
+the last stop before the desk closes. It is the same state the four panes read (`#stack`,
+`#cols`, `#files`), shown one step at a time, so nothing a pane could do is out of reach
+and the two views agree about where you are.
+
+**Select** (top right of a list) turns every row into a check box. A click then checks
+instead of going in, and a bar at the foot says what to do with what is checked, together:
+*Open N* stacks the checked hosts into one list, opens the checked packages side by side
+(their parts and their files are one list), and *Read N* reads the checked files at once.
+Escape drops the checks, then the boxes.
+
+**Advanced** (top right, beside ×) is the four panes, exactly as they were: hosts in the
+rail, then packages, files and code, side by side. Its switch says *Simple view* to come back.
+
+**Both are remembered.** One current record in the pool `hosts:desk`
+(`{ mode, panes }`, `sharing/host-directory.drill.ts`), written only by a press or a drag —
+never by the desk's own initiative — and read without minting the pool; a switch or a
+drag made before it was read is newer than it. Simple is the answer to "not set".
+
+**The panes are dragged.** In the four panes the edge of the rail, of the package
+columns and of the files is a separator: drag it to set the width you prefer (the code
+takes what is left), nudge it with the arrow keys, double-click it to give it back. The
+widths are custom properties on the desk (`--hd-rail-w`, `--hd-pkg-w`, `--hd-files-w`) with
+the stylesheet's own as fallbacks, held between 11 and 30–32 rem, and kept when the
+drag is let go.
+
+**Finished updates go last.** While *Update all* runs, the list is what is changing,
+each row filling as its changed files arrive. A package whose update has landed (every
+changed file of it is in) drops to the bottom of the list with a **completed** look —
+dimmed, a ✓ before its name — so what is still moving stays in view. The order is
+`finishedLast` (stable inside each group); the look is the `completed` class.
+
 ## The columns — the Finder's column view, over code and files
 
 *jwize, 2026-11-04:* "let's make this like the mac finder of code and files with
@@ -410,5 +463,13 @@ sandbox before you bring them into hypercomb.io."*
   names are in, every pick and every letting go ending it, a fresh one for every
   opening, start and stack, the Files and Code panes always drawn with their
   placeholders, and the four widths adding up to a 1280px desk.
-- `pool-registry.ts` seeds `meta:bees`, so the doctrine ratchet that every derived pool
-  meaning is in the census holds.
+- `pool-registry.ts` seeds `meta:bees` and `hosts:desk`, so the doctrine ratchet that
+  every derived pool meaning is in the census holds.
+- `essentials/src/sharing/host-directory.drill.spec.ts` — which page a state is, the
+  list a packages page shows, the trail, the kept record (simple unless advanced, widths
+  held inside their limits, the same choices the same bytes), and finished work last.
+- `essentials/src/sharing/host-directory-simple.spec.ts` — the shape the view keeps: simple
+  by default and the four panes one switch away and drawn as before, a click going in and
+  Select only checking, what is checked opened together, Escape's steps in order, the drag
+  setting a custom property live and keeping it on release, the record written only by a
+  press or a drag and read without minting the pool, and a landed update dropping last.

@@ -329,7 +329,7 @@ describe('the host directory', () => {
     // dropped — a read still in flight from before a close once overwrote the fresh one.
     expect(VIEW).toMatch(/if \(this\.#published\.has\(zone\) \|\| this\.#publishedAsk\.has\(zone\)\) return/)
     expect(VIEW).toMatch(/if \(opening !== this\.#opening\) return\s*this\.#publishedAsk\.delete\(zone\)\s*this\.#published\.set\(zone, count\)/)
-    expect(VIEW).toMatch(/this\.#opening\+\+[\s\S]{0,560}?this\.#published\.clear\(\)/)
+    expect(VIEW).toMatch(/this\.#opening\+\+[\s\S]{0,1100}?this\.#published\.clear\(\)/)
     // The number sits beside the one door, on the pane of a host and never on this origin.
     expect(VIEW).toMatch(/if \(domain\.zone\) \{\s*const published = make\('span', 'hd-published'\)/)
     // A host that did not answer shows no number, not a zero.

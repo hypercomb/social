@@ -507,6 +507,10 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // nothing else — the personal-annotation carrier of uniform-decoration.md
   // "Meta resources". TRUTH POOL: a person chose these words; nothing rebuilds them.
   'meta:bees',
+  // How the host desk is looked at — simple or the four panes — and the width of each
+  // pane the participant dragged: one current record, written only by a press or a
+  // drag (essentials sharing/host-directory.view.ts, host-directory.drill.ts).
+  'hosts:desk',
   // The shelf's fold, sticky across boots: one current record, written only
   // when the participant folds or opens it (presentation/tiles/quick-tray.element.ts).
   'shelf:state',

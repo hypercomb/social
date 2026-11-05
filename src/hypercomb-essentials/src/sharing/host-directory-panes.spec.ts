@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defaultTrail } from './host-directory.view'
+import { PANE_LIMITS } from './host-directory.drill'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const VIEW = readFileSync(join(here, 'host-directory.view.ts'), 'utf8')
@@ -102,7 +103,8 @@ describe('the desk wears it', () => {
 
   it('draws the files and the code panes always, the first of the two before there is a file to put in it', () => {
     const columns = VIEW.slice(VIEW.indexOf('  #renderColumns(): HTMLElement {'), VIEW.indexOf('  /** A pick in a package column'))
-    expect(columns).toMatch(/strip\.append\(this\.#fileColumn\(files, paths\)\)\s*if \(files\.length\) \{\s*this\.#wantCode\(files\)\s*this\.#wantWords\(files\)\s*\}\s*strip\.append\(this\.#codeMatrix\(files\)\)/)
+    // The files pane is followed by its own edge, which is dragged to set its width.
+    expect(columns).toMatch(/strip\.append\(this\.#fileColumn\(files, paths\), this\.#splitter\('files'\)\)\s*if \(files\.length\) \{\s*this\.#wantCode\(files\)\s*this\.#wantWords\(files\)\s*\}\s*strip\.append\(this\.#codeMatrix\(files\)\)/)
     // The empty files pane says what it waits for — a package to pick, or a package with no code.
     const fileColumn = VIEW.slice(VIEW.indexOf('  #fileColumn('), VIEW.indexOf('    const list = make(\'ul\', \'hd-col hd-files\')'))
     expect(fileColumn).toMatch(/t\('hosts\.files', 'Files'\)/)
@@ -123,10 +125,15 @@ describe('the desk wears it', () => {
 
   it('fits all four panes in a 1280px desk with no sideways scroll, the columns giving before the strip scrolls', () => {
     const rem = (pattern: RegExp): number => Number(pattern.exec(VIEW)?.[1])
-    const rail = rem(/\.hd-frame\{[^}]*grid-template-columns:minmax\(13rem,(\d+)rem\) minmax\(0,1fr\)/)
-    const column = rem(/\.hd-colbox\{flex:0 1 (\d+)rem;width:\d+rem;min-width:12\.5rem/)
+    // The widths are the participant's to drag (custom properties on the desk); what is
+    // written here is the default each falls back to — and it is what must fit.
+    const rail = rem(/\.hd-frame\{[^}]*grid-template-columns:var\(--hd-rail-w,(\d+)rem\) minmax\(0,1fr\)/)
+    const column = rem(/\.hd-colbox\{flex:0 1 var\(--hd-pkg-w,(\d+)rem\);width:var\(--hd-pkg-w,\d+rem\);min-width:11rem/)
     const code = rem(/\.hd-codepane\{flex:1 0 (\d+)rem;min-width:\d+rem/)
     expect([rail, column, code]).toEqual([18, 16, 24])
+    expect(PANE_LIMITS.rail.start).toBe(rail)
+    expect(PANE_LIMITS.packages.start).toBe(column)
+    expect(PANE_LIMITS.files.start).toBe(column)
     // Rail, one package column, the files, the code — at their widest.
     expect((rail + column + column + code) * 16).toBeLessThanOrEqual(1280)
     // The matrix no longer holds a width of its own: the pane around it does.

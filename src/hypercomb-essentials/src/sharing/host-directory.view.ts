@@ -54,6 +54,10 @@ import {
 } from '@hypercomb/core'
 import { beeDocsOf, beeWords, normalizeMeta, readBeeMeta, writeBeeMeta, type BeeDoc, type BeeMeta, type BeeWords } from './bee-meta.js'
 import { codeClass, codeLanguage, codeThemeCss, tokenizeCode, type CodeLanguage, type CodeToken } from './code-theme.js'
+import {
+  PANE_LIMITS, clampPane, crumbTrail, deskRecord, deskRecordText, drillPage, drillRows, finishedLast, isFileKey,
+  type DeskMode, type DrillPage, type PaneName,
+} from './host-directory.drill.js'
 import { hostZone } from './community-hosts.js'
 import { fetchHiveIndex, type HiveIndexResult, type HiveManifest } from './hive-pointer.js'
 import { isReservedRootKey } from './hive-link.js'
@@ -760,6 +764,15 @@ type View = 'domains' | 'revisions' | 'creations' | 'mine' | 'own'
 const CODE_KEEP = 400_000
 const CODE_LINES = 300
 const CODE_PANELS = 6
+/** Where the desk keeps what the participant chose: the way to look, and the width
+ *  of each pane — one current record, written only by a press or a drag. */
+const DESK_POOL = 'hosts:desk'
+type DeskStore = {
+  openPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
+  getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
+  getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
+  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string, options?: { keep?: 'versions' | 'current' }) => Promise<string | null>
+}
 interface CodeRead { name: string; text: string; size: number; cut: boolean; language: CodeLanguage }
 /** The words being written for one file: what is typed, and whether the save is out or failed. */
 interface Describing { sig: string; name: string; description: string; busy: boolean; failed: boolean }
@@ -856,6 +869,18 @@ export class HostDirectoryElement extends HTMLElement {
    *  four panes are full on opening. Any pick of the participant's own cancels it. */
   #niceCols = true
   #niceFile = false
+  /** SIMPLE (the default) or ADVANCED (the four panes), and the widths of the panes
+   *  the participant has dragged — both kept between openings (`#keepRecord`). */
+  #mode: DeskMode = 'simple'
+  #panes: Partial<Record<PaneName, number>> = {}
+  /** A press or a drag made before the kept record was read wins over it. */
+  #touched = false
+  /** SIMPLE: on the hosts list or drilled in; reading the code of the picked files;
+   *  the check boxes on, and what is checked in them. */
+  #atHosts = true
+  #readCode = false
+  #multi = false
+  #chosen: Picked = NOTHING_PICKED
   /** The line the keys last moved to — focused again once the columns are redrawn. */
   #focusKey: string | null = null
   /** Code read by signature (null: asked of the hosts and not found). A signature
@@ -1029,9 +1054,12 @@ export class HostDirectoryElement extends HTMLElement {
 
     const head = make('header', 'hd-head')
     head.append(make('span', 'hd-title', t('hosts.title', 'Host directory')), make('span', 'hd-grow'))
+    // ONE SWITCH between the two ways to look: the simple drill, and the four panes.
+    const modeButton = button('hd-link hd-mode', '')
+    modeButton.addEventListener('click', () => this.#setMode(this.#mode === 'simple' ? 'advanced' : 'simple'))
     const close = button('hd-close', '×', t('panel.close', 'close'))
     close.addEventListener('click', () => EffectBus.emit('hosts:close', {}))
-    head.append(close)
+    head.append(modeButton, close)
 
     // THE RAIL: the search, the hosts, and a field to add one. The search and the
     // field are built once — a repaint redraws only the list between them, so a
@@ -1064,9 +1092,11 @@ export class HostDirectoryElement extends HTMLElement {
     const drawer = make('aside', 'hd-drawer')
     drawer.hidden = true
     const frame = make('div', 'hd-frame')
-    frame.append(side, main, drawer)
+    // The rail's edge is draggable; the packages' and files' edges are drawn with the columns.
+    frame.append(side, main, drawer, this.#splitter('rail'))
 
     panel.append(head, frame)
+    this.#refs.set('mode', modeButton)
     this.#refs.set('search', search).set('input', input).set('hosts', hosts).set('side', side).set('railHead', railHead)
       .set('body', main).set('drawer', drawer).set('frame', frame)
     this.appendChild(panel)
@@ -1086,7 +1116,9 @@ export class HostDirectoryElement extends HTMLElement {
       onClose: () => EffectBus.emit('hosts:close', {}),
     })
     this.#claimDesk(panel)
+    this.#applyPanes()
     this.#render()
+    void this.#recallRecord(panel)
     requestAnimationFrame(() => panel.focus({ preventScroll: true }))
   }
 
@@ -1103,6 +1135,12 @@ export class HostDirectoryElement extends HTMLElement {
     this.#niceCols = true
     this.#niceFile = false
     this.#describing = null
+    // The simple drill starts at the hosts list each time, and nothing stays checked.
+    this.#atHosts = true
+    this.#readCode = false
+    this.#multi = false
+    this.#chosen = NOTHING_PICKED
+    this.#touched = false
     this.#published.clear()
     this.#publishedAsk.clear()
     this.#releaseDesk()
@@ -1235,6 +1273,10 @@ export class HostDirectoryElement extends HTMLElement {
     this.#files = NOTHING_PICKED
     this.#niceCols = true
     this.#niceFile = false
+    this.#atHosts = true
+    this.#readCode = false
+    this.#multi = false
+    this.#chosen = NOTHING_PICKED
     this.#at = ''
     this.#query = ''
     this.#view = 'domains'
@@ -1251,6 +1293,8 @@ export class HostDirectoryElement extends HTMLElement {
     this.#scope = scope
     this.#cols = this.#chainTo(at)
     this.#files = NOTHING_PICKED
+    // Back where a restart left it, in the simple drill too: inside the host, not on the list of them.
+    this.#atHosts = false
     this.#at = at
     this.#view = 'domains'
     this.#warning = null
@@ -1308,14 +1352,20 @@ export class HostDirectoryElement extends HTMLElement {
   #back(): boolean {
     if (this.#describing) { this.#describing = null; this.#renderBody(); return true }
     if (this.#menu !== null) { this.#menu = null; this.#renderBody(); return true }
+    // The check boxes (simple drill) let go first: what was checked is dropped, then the boxes.
+    if (this.#multi) { this.#multi = false; this.#chosen = NOTHING_PICKED; this.#renderBody(); return true }
     if (this.#query) { this.#query = ''; this.#render(); return true }
     if (this.#codeGate) { this.#codeGate = null; this.#renderBody(); return true }
     if (this.#warning) { this.#warning = null; this.#renderBody(); return true }
     if (this.#view !== 'domains') { this.#view = 'domains'; this.#render(); return true }
+    // The code page of the simple drill is one step in: back is the list of files.
+    if (this.#readCode) { this.#readCode = false; this.#files = NOTHING_PICKED; this.#renderBody(); return true }
     // Letting go of the default view is the participant's own act: it does not come back.
     if (this.#files.keys.length) { this.#files = NOTHING_PICKED; this.#stopNice(); this.#renderBody(); return true }
     const deepest = this.#cols.map(column => column.keys.length > 0).lastIndexOf(true)
     if (deepest >= 0) { this.#cols = this.#cols.slice(0, deepest); this.#stopNice(); this.#renderBody(); return true }
+    // Out of the first host back to the list of hosts — the simple drill's first step.
+    if (this.#mode === 'simple' && !this.#atHosts) { this.#atHosts = true; this.#renderBody(); return true }
     return false
   }
 
@@ -1346,6 +1396,14 @@ export class HostDirectoryElement extends HTMLElement {
     input.setAttribute('aria-label', placeholder)
     const railHead = this.#refs.get('railHead')
     if (railHead) railHead.textContent = t('hosts.pane.hosts', 'Hosts')
+    // The switch names the OTHER way to look.
+    const mode = this.#refs.get('mode')
+    if (mode) {
+      mode.textContent = this.#mode === 'simple' ? t('hosts.mode.advanced', 'Advanced') : t('hosts.mode.simple', 'Simple view')
+      mode.title = this.#mode === 'simple'
+        ? t('hosts.mode.advanced-tip', 'The four panes: hosts, packages, files and code side by side')
+        : t('hosts.mode.simple-tip', 'One list at a time — drill in to the code')
+    }
     if (input.value !== this.#query) input.value = this.#query
     this.#renderBody()
   }
@@ -1373,11 +1431,17 @@ export class HostDirectoryElement extends HTMLElement {
     // Revisions have a column of their own: under it the columns stay as they were.
     const drawer = this.#view === 'revisions'
     const under: View = drawer ? 'domains' : this.#view
-    body.classList.toggle('with-columns', under === 'domains' && !this.#query.trim())
-    if (under === 'domains') this.#renderPane(body)
-    else if (under === 'creations') this.#renderCreations(body)
-    else if (under === 'mine') this.#renderMine(body)
-    else this.#renderOwn(body)
+    const simple = this.#mode === 'simple'
+    this.#panel?.classList.toggle('simple', simple)
+    body.classList.toggle('with-columns', !simple && under === 'domains' && !this.#query.trim())
+    if (under === 'domains') { if (simple) this.#renderSimple(body); else this.#renderPane(body) }
+    else {
+      // Without the rail there is no way back from these but this.
+      if (simple) body.append(this.#backRow())
+      if (under === 'creations') this.#renderCreations(body)
+      else if (under === 'mine') this.#renderMine(body)
+      else this.#renderOwn(body)
+    }
     this.#renderDrawer(drawer)
     this.#renderMenu()
     const strip = body.querySelector<HTMLElement>('.hd-cols')
@@ -1385,6 +1449,10 @@ export class HostDirectoryElement extends HTMLElement {
       strip.querySelectorAll<HTMLElement>('ul.hd-col').forEach((column, at) => { column.scrollTop = scrolls[at] ?? 0 })
       strip.scrollLeft = strip.querySelectorAll('.hd-colbox').length > columnsBefore ? strip.scrollWidth : sideways
       this.#restoreFocus(strip, held)
+    } else {
+      // The simple drill has no strip: the row the keys were on is found in its page.
+      const page = body.querySelector<HTMLElement>('.hd-simple')
+      if (page) this.#restoreFocus(page, held)
     }
     if (typed) {
       const again = body.querySelector<HTMLInputElement | HTMLTextAreaElement>(`.hd-editor [data-field="${typed.field}"]`)
@@ -1543,6 +1611,14 @@ export class HostDirectoryElement extends HTMLElement {
     }
     const domain = domains.find(row => row.zone === this.#section) ?? domains[0]
     if (!domain) return
+    body.append(this.#hostHead(domain))
+    if (domain.behind) body.append(make('p', 'hd-note hd-behind', this.#behindText(domain.label)))
+    body.append(this.#sectionBody(domain.zone))
+    body.append(this.#renderColumns())
+  }
+
+  /** A host's name, whether an update waits there, and the one door to Publish. */
+  #hostHead(domain: DomainRow): HTMLElement {
     const head = make('div', 'hd-pane-head')
     head.append(make('h2', 'hd-pane-title', domain.label))
     if (domain.update) head.append(make('span', 'hd-mark', t('packages.update-mark', 'update')))
@@ -1563,10 +1639,7 @@ export class HostDirectoryElement extends HTMLElement {
       publish.addEventListener('click', () => this.#openPublish())
       head.append(publish)
     }
-    body.append(head)
-    if (domain.behind) body.append(make('p', 'hd-note hd-behind', this.#behindText(domain.label)))
-    body.append(this.#sectionBody(domain.zone))
-    body.append(this.#renderColumns())
+    return head
   }
 
   /** The count beside the Publish door: nothing until it is told, never a zero
@@ -1880,18 +1953,13 @@ export class HostDirectoryElement extends HTMLElement {
     model.forEach(({ rows, picked, parents }, k) => {
       strip.append(this.#packageColumn(rows, k, picked, k === 0 ? top : parents.join(' · ')))
     })
+    // The packages' edge: drag it to set how wide the package columns are.
+    strip.append(this.#splitter('packages'))
     // Where a restart should put you back: the one package the columns end on.
     const last = [...model].reverse().find(column => column.picked.keys.length)
     this.#at = last && last.picked.keys.length === 1 ? last.picked.keys[0]! : ''
 
-    const { files: held, paths } = this.#pickedFiles(model)
-    this.#files = stillPicked(this.#files, held.map(file => file.sig))
-    // Named by what they are: the order below is the one every pick walks.
-    const files = labelFiles(held, {
-      docs: layer => this.#docs.get(layer),
-      meta: sig => this.#meta.get(sig),
-      source: sig => this.#code.get(sig)?.name ?? '',
-    })
+    const { files, paths } = this.#fileModel(model)
     // The default view's file: the first by name, once the names are in — before that
     // the order is the signatures', and the first of those is nobody's choice.
     if (this.#niceFile && files.length && !this.#files.keys.length && files.every(file => this.#docs.has(file.layer))) {
@@ -1901,13 +1969,431 @@ export class HostDirectoryElement extends HTMLElement {
     if (this.#describing && !this.#files.keys.includes(this.#describing.sig)) this.#describing = null
     // FOUR PANES, always: the hosts in the rail, then packages, files and code. The last
     // two are drawn before there is anything to put in them, and say what they wait for.
-    strip.append(this.#fileColumn(files, paths))
+    strip.append(this.#fileColumn(files, paths), this.#splitter('files'))
     if (files.length) {
       this.#wantCode(files)
       this.#wantWords(files)
     }
     strip.append(this.#codeMatrix(files))
     return strip
+  }
+
+  // ── the simple drill ─────────────────────────────────────────────────────
+  //
+  // One large list in the middle, and a step in at a time: the hosts, a host's
+  // packages (and the packages inside one), the files a package declares, the code.
+  // It is the same state the four panes read — `#stack`, `#cols`, `#files` — shown
+  // one step at a time, so a step in is a pick and a step back is `#back`.
+
+  /** A check box on a row, while Select is on. */
+  #checkBox(on: boolean): HTMLElement {
+    const box = make('span', `hd-check${on ? ' on' : ''}`, on ? '✓' : '')
+    box.setAttribute('aria-hidden', 'true')
+    return box
+  }
+
+  /** A click on a row of the drill: one step in — or, with Select on, check it. */
+  #chooseRow(key: string, kind: 'host' | 'package' | 'file', k: number, order: readonly string[]): void {
+    if (this.#multi) {
+      this.#chosen = pickKey(this.#chosen, key, 'toggle', order)
+      this.#focusKey = key
+      this.#renderBody()
+      return
+    }
+    this.#stopNice()
+    if (kind === 'host') { this.#openHosts([key]); return }
+    if (kind === 'package') {
+      this.#cols = [...this.#cols.slice(0, k), { keys: [key], anchor: key }]
+      this.#files = NOTHING_PICKED
+    } else {
+      this.#files = { keys: [key], anchor: key }
+      this.#readCode = true
+    }
+    this.#renderBody()
+  }
+
+  /** Go into these hosts: one, or several stacked — their packages are one list. */
+  #openHosts(zones: readonly string[]): void {
+    const keys = zones.length ? [...zones] : ['']
+    this.#stack = { keys, anchor: keys[0]! }
+    this.#section = keys[0]!
+    this.#scope = keys[0]!
+    this.#view = 'domains'
+    this.#query = ''
+    this.#warning = null
+    this.#error = ''
+    this.#cols = []
+    this.#files = NOTHING_PICKED
+    this.#at = ''
+    this.#atHosts = false
+    this.#readCode = false
+    this.#multi = false
+    this.#chosen = NOTHING_PICKED
+    this.#stopNice()
+    this.#render()
+  }
+
+  #renderSimple(body: HTMLElement): void {
+    const model = this.#atHosts ? [] : this.#columnModel()
+    const { files, paths } = this.#atHosts ? { files: [] as FileLabel[], paths: [] as string[] } : this.#fileModel(model)
+    const page = drillPage({ atHosts: this.#atHosts, reading: this.#readCode, filesPicked: this.#files.keys.length })
+    // Words being typed in the editor must not outlive the file they are for.
+    if (this.#describing && !this.#files.keys.includes(this.#describing.sig)) this.#describing = null
+    const wrap = make('div', `hd-simple${page === 'code' ? ' wide' : ''}`)
+    wrap.addEventListener('keydown', event => this.#simpleKeys(event))
+    wrap.append(this.#simpleHead(page, model))
+    if (this.#error) {
+      const err = make('p', 'hd-error', this.#error)
+      err.setAttribute('role', 'alert')
+      wrap.append(err)
+    }
+    if (page === 'hosts') this.#hostsPage(wrap)
+    else if (page === 'packages') this.#packagesPage(wrap, model, files, paths)
+    else this.#codePage(wrap, files)
+    this.#selectBar(wrap, page, model)
+    body.append(wrap)
+  }
+
+  /** Back, the trail of where you are, and the Select switch. */
+  #simpleHead(page: DrillPage, model: readonly { picked: Picked }[]): HTMLElement {
+    const head = make('div', 'hd-simple-head')
+    if (page !== 'hosts') {
+      const back = button('hd-back', '‹', t('hosts.back', 'Back'))
+      back.addEventListener('click', () => { this.#back() })
+      head.append(back)
+    }
+    const domains = this.#domains()
+    const labelOf = (zone: string): string => domains.find(row => row.zone === zone)?.label ?? zone
+    const trail = crumbTrail({
+      atHosts: this.#atHosts,
+      hosts: this.#stack.keys.map(labelOf),
+      picks: model.map(column => column.picked.keys),
+      reading: page === 'code' ? this.#files.keys.length : 0,
+    })
+    const nav = make('nav', 'hd-trail')
+    nav.setAttribute('aria-label', t('hosts.trail', 'Where you are'))
+    trail.forEach((crumb, at) => {
+      if (at) nav.append(make('span', 'hd-trail-sep', '›'))
+      const text = crumb.kind === 'hosts' ? t('hosts.pane.hosts', 'Hosts')
+        : crumb.kind === 'host' ? (crumb.one || t('hosts.stacked', '{count} hosts stacked', { count: crumb.count }))
+          : crumb.kind === 'package' ? (crumb.one || t('hosts.trail.packages', '{count} packages', { count: crumb.count }))
+            : t('hosts.trail.files', '{count} files', { count: crumb.count })
+      nav.append(make('span', at === trail.length - 1 ? 'hd-trail-now' : 'hd-trail-step', text))
+    })
+    head.append(nav, make('span', 'hd-grow'))
+    if (page !== 'code') {
+      const select = button('hd-quiet hd-select', t('hosts.select', 'Select'), t('hosts.select-tip', 'Check several rows and open them together'))
+      select.setAttribute('aria-pressed', String(this.#multi))
+      select.addEventListener('click', () => { this.#multi = !this.#multi; this.#chosen = NOTHING_PICKED; this.#renderBody() })
+      head.append(select)
+    }
+    return head
+  }
+
+  /** PAGE ONE: the hosts, large — this origin, every host you carry, your own host,
+   *  and the way to add one. */
+  #hostsPage(wrap: HTMLElement): void {
+    const domains = this.#domains()
+    const order = domains.map(domain => domain.zone)
+    const list = make('ul', 'hd-col hd-bigrows hd-hosts-list')
+    list.setAttribute('role', 'listbox')
+    list.setAttribute('aria-multiselectable', 'true')
+    list.setAttribute('aria-label', t('hosts.rail', 'Hosts you carry'))
+    domains.forEach((domain, at) => {
+      const checked = this.#multi && this.#chosen.keys.includes(domain.zone)
+      const li = make('li', `hd-row hd-host-row${checked ? ' picked' : ''}${this.#multi ? ' hd-checking' : ''}`)
+      li.dataset['key'] = domain.zone
+      li.setAttribute('role', 'option')
+      li.setAttribute('aria-selected', String(checked))
+      li.tabIndex = at === 0 ? 0 : -1
+      if (this.#multi) li.append(this.#checkBox(checked))
+      const dot = make('span', `hd-dot${domain.update ? ' update' : domain.behind ? ' behind' : ''}`)
+      dot.setAttribute('aria-hidden', 'true')
+      const marks = make('span', 'hd-marks')
+      if (domain.update) marks.append(make('span', 'hd-mark', t('packages.update-mark', 'update')))
+      const count = make('span', 'hd-count', domain.count ? t('hosts.package-count', '{count} packages', { count: domain.count }) : '')
+      const opens = make('span', 'hd-opens', '›')
+      opens.setAttribute('aria-hidden', 'true')
+      li.append(dot, make('span', 'hd-host-name', domain.label), marks, count, opens)
+      li.addEventListener('click', () => this.#chooseRow(domain.zone, 'host', -1, order))
+      list.append(li)
+    })
+    const own = make('li', 'hd-row hd-host-row hd-own-row')
+    own.dataset['key'] = OWN_PANE
+    own.setAttribute('role', 'option')
+    own.tabIndex = -1
+    const ring = make('span', 'hd-dot own')
+    ring.setAttribute('aria-hidden', 'true')
+    const ownOpens = make('span', 'hd-opens', '›')
+    ownOpens.setAttribute('aria-hidden', 'true')
+    own.append(ring, make('span', 'hd-host-name', t('hosts.your-host', 'Your host')), make('span', 'hd-marks'), make('span', 'hd-count'), ownOpens)
+    own.addEventListener('click', () => { this.#multi = false; this.#chosen = NOTHING_PICKED; this.#selectOwn() })
+    list.append(own)
+    if (this.#reading && domains.every(domain => !domain.count)) list.append(make('li', 'hd-note', t('packages.reading', 'Reading what is served…')))
+    wrap.append(list, this.#addForm())
+  }
+
+  /** PAGE TWO: what is inside — a host's packages, then the parts of one, with the
+   *  files that package declares under them. */
+  #packagesPage(wrap: HTMLElement, model: readonly { rows: readonly StackRow[]; picked: Picked; parents: string[] }[], files: readonly FileLabel[], paths: readonly string[]): void {
+    const { level, rows } = drillRows(model)
+    // At the top of a host, the host itself: its name, its door to Publish, what it carries.
+    if (level === 0) {
+      const domains = this.#domains()
+      const domain = this.#stack.keys.length === 1 ? domains.find(row => row.zone === this.#stack.keys[0]) : undefined
+      if (domain) {
+        wrap.append(this.#hostHead(domain))
+        if (domain.behind) wrap.append(make('p', 'hd-note hd-behind', this.#behindText(domain.label)))
+        wrap.append(this.#sectionBody(domain.zone))
+      }
+    }
+    if (!model.length) {
+      wrap.append(make('p', 'hd-note', this.#reading || !this.#loaded
+        ? t('packages.reading', 'Reading what is served…')
+        : t('packages.empty', 'Nothing listed here yet.')))
+      return
+    }
+    if (rows.length) {
+      const caption = level === 0
+        ? (this.#stack.keys.length > 1
+          ? t('hosts.stacked-packages', 'Packages across {count} hosts', { count: this.#stack.keys.length })
+          : t('hosts.packages', 'Packages'))
+        : (model[level]?.parents ?? []).join(' · ')
+      wrap.append(this.#packageColumn(rows, level, this.#multi ? this.#chosen : NOTHING_PICKED, caption))
+    }
+    if (paths.length) {
+      wrap.append(this.#fileColumn(files, paths))
+      if (files.length) {
+        this.#wantCode(files)
+        this.#wantWords(files)
+      }
+    }
+  }
+
+  /** PAGE THREE: the code of the file, or files, chosen. */
+  #codePage(wrap: HTMLElement, files: readonly FileLabel[]): void {
+    if (files.length) {
+      this.#wantCode(files)
+      this.#wantWords(files)
+    }
+    wrap.append(this.#codeMatrix(files))
+  }
+
+  /** With Select on and something checked: what to do with it, together. */
+  #selectBar(wrap: HTMLElement, page: DrillPage, model: readonly { rows: readonly StackRow[]; picked: Picked }[]): void {
+    if (!this.#multi || page === 'code') return
+    const keys = this.#chosen.keys
+    const bar = make('div', 'hd-selectbar')
+    bar.setAttribute('role', 'status')
+    bar.append(make('span', 'hd-selected', t('hosts.select.count', '{count} selected', { count: keys.length })))
+    const act = (label: string, enabled: boolean, go: () => void): void => {
+      const choice = button('hd-primary', label)
+      choice.disabled = !enabled
+      choice.addEventListener('click', go)
+      bar.append(choice)
+    }
+    if (page === 'hosts') {
+      act(t('hosts.select.open', 'Open {count}', { count: keys.length }), keys.length > 0, () => this.#openHosts(keys))
+    } else {
+      const picked = keys.filter(key => !isFileKey(key))
+      const read = keys.filter(isFileKey)
+      const { level } = drillRows(model)
+      if (picked.length || !read.length) {
+        act(t('hosts.select.open', 'Open {count}', { count: picked.length }), picked.length > 0, () => {
+          this.#cols = [...this.#cols.slice(0, level), { keys: picked, anchor: picked[0]! }]
+          this.#files = NOTHING_PICKED
+          this.#endSelect()
+        })
+      }
+      if (read.length) {
+        act(t('hosts.select.read', 'Read {count}', { count: read.length }), true, () => {
+          this.#files = { keys: read, anchor: read[0]! }
+          this.#readCode = true
+          this.#endSelect()
+        })
+      }
+    }
+    const clear = button('hd-quiet', t('hosts.select.clear', 'Clear'))
+    clear.disabled = keys.length === 0
+    clear.addEventListener('click', () => { this.#chosen = NOTHING_PICKED; this.#renderBody() })
+    bar.append(clear)
+    wrap.append(bar)
+  }
+
+  #endSelect(): void {
+    this.#multi = false
+    this.#chosen = NOTHING_PICKED
+    this.#stopNice()
+    this.#renderBody()
+  }
+
+  /** Where the way back is for the panes the drill has no list of (your host, the
+   *  creations a host serves, what is in your hive). */
+  #backRow(): HTMLElement {
+    const row = make('div', 'hd-simple-head hd-simple-back')
+    const back = button('hd-back', '‹', t('hosts.back', 'Back'))
+    back.addEventListener('click', () => { this.#back() })
+    row.append(back, make('span', 'hd-trail-now', t('hosts.back', 'Back')))
+    return row
+  }
+
+  /** In the drill the arrows only MOVE along a list; going in is Enter or a click. */
+  #simpleKeys(event: KeyboardEvent): void {
+    const target = event.target
+    if (!(target instanceof HTMLElement)) return
+    const line = target.closest<HTMLElement>('li[data-key]')
+    const list = line?.parentElement
+    if (!line || !list) return
+    const lines = [...list.querySelectorAll<HTMLElement>(':scope > li[data-key]')]
+    const at = lines.indexOf(line)
+    const move = (by: number): void => {
+      event.preventDefault()
+      lines[Math.max(0, Math.min(lines.length - 1, at + by))]?.focus()
+    }
+    if (event.key === 'ArrowDown') move(1)
+    else if (event.key === 'ArrowUp') move(-1)
+    else if ((event.key === 'Enter' || event.key === ' ') && target === line) { event.preventDefault(); line.click() }
+  }
+
+  // ── the way to look, and the width of the panes — both remembered ────────
+
+  #setMode(mode: DeskMode): void {
+    if (mode === this.#mode) return
+    this.#mode = mode
+    this.#touched = true
+    this.#multi = false
+    this.#chosen = NOTHING_PICKED
+    this.#readCode = false
+    this.#menu = null
+    if (mode === 'simple') {
+      // The drill has no search of its own: what was typed is let go, and where the
+      // four panes were is where the drill is — the hosts, if nothing was picked.
+      this.#query = ''
+      this.#atHosts = !this.#cols.some(column => column.keys.length)
+    } else if (!this.#cols.some(column => column.keys.length) && !this.#files.keys.length) {
+      this.#niceCols = true
+      this.#niceFile = false
+    }
+    void this.#keepRecord()
+    this.#render()
+  }
+
+  /** A pane's edge, to drag. The width is set live and kept when it is let go; the
+   *  arrow keys nudge it, and a double-click gives it back to the default. */
+  #splitter(pane: PaneName): HTMLElement {
+    const bar = make('div', `hd-split hd-split-${pane}`)
+    const limits = PANE_LIMITS[pane]
+    bar.setAttribute('role', 'separator')
+    bar.setAttribute('aria-orientation', 'vertical')
+    bar.setAttribute('aria-valuemin', String(limits.min))
+    bar.setAttribute('aria-valuemax', String(limits.max))
+    bar.setAttribute('aria-valuenow', String(this.#paneWidth(pane)))
+    bar.setAttribute('aria-label', t('hosts.split', 'Drag to resize — double-click to reset'))
+    bar.title = t('hosts.split', 'Drag to resize — double-click to reset')
+    bar.tabIndex = 0
+    const rem = (): number => parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
+    bar.addEventListener('pointerdown', down => {
+      if (down.button !== 0) return
+      down.preventDefault()
+      const start = this.#paneWidth(pane)
+      const from = down.clientX
+      bar.setPointerCapture(down.pointerId)
+      bar.classList.add('dragging')
+      const move = (event: PointerEvent): void => this.#setPane(pane, start + (event.clientX - from) / rem(), false)
+      const end = (): void => {
+        bar.removeEventListener('pointermove', move)
+        bar.removeEventListener('pointerup', end)
+        bar.removeEventListener('pointercancel', end)
+        bar.classList.remove('dragging')
+        void this.#keepRecord()
+      }
+      bar.addEventListener('pointermove', move)
+      bar.addEventListener('pointerup', end)
+      bar.addEventListener('pointercancel', end)
+    })
+    bar.addEventListener('keydown', event => {
+      const by = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0
+      if (!by) return
+      event.preventDefault()
+      this.#setPane(pane, this.#paneWidth(pane) + by, true)
+      bar.setAttribute('aria-valuenow', String(this.#paneWidth(pane)))
+    })
+    bar.addEventListener('dblclick', () => this.#resetPane(pane))
+    return bar
+  }
+
+  #paneWidth(pane: PaneName): number {
+    return this.#panes[pane] ?? PANE_LIMITS[pane].start
+  }
+
+  #setPane(pane: PaneName, rem: number, keep: boolean): void {
+    this.#panes[pane] = clampPane(pane, rem)
+    this.#touched = true
+    this.#applyPanes()
+    if (keep) void this.#keepRecord()
+  }
+
+  #resetPane(pane: PaneName): void {
+    delete this.#panes[pane]
+    this.#touched = true
+    this.#applyPanes()
+    void this.#keepRecord()
+  }
+
+  /** The widths the participant set, as custom properties on the desk — a pane that
+   *  has none keeps the stylesheet's own. */
+  #applyPanes(): void {
+    const panel = this.#panel
+    if (!panel) return
+    const names: Record<PaneName, string> = { rail: '--hd-rail-w', packages: '--hd-pkg-w', files: '--hd-files-w' }
+    for (const pane of Object.keys(names) as PaneName[]) {
+      const width = this.#panes[pane]
+      if (typeof width === 'number') panel.style.setProperty(names[pane], `${width}rem`)
+      else panel.style.removeProperty(names[pane])
+    }
+  }
+
+  /** The one current record, written only by a press or a drag — never by the desk itself. */
+  async #keepRecord(): Promise<void> {
+    try {
+      const store = ioc<DeskStore>('@hypercomb.social/Store')
+      const pool = await store?.getPool?.(DESK_POOL)
+      if (!pool || !store?.putPoolDoc) return
+      const bytes = new TextEncoder().encode(deskRecordText({ mode: this.#mode, panes: this.#panes })).buffer as ArrayBuffer
+      await store.putPoolDoc(pool, bytes, undefined, { keep: 'current' })
+    } catch { /* not kept this time: the desk is exactly as it was drawn */ }
+  }
+
+  /** What the participant left: the way to look and the widths. A read never mints the
+   *  pool, and a press or a drag made first is newer than it. */
+  async #recallRecord(panel: HTMLElement): Promise<void> {
+    try {
+      const store = ioc<DeskStore>('@hypercomb.social/Store')
+      const pool = await store?.openPool?.(DESK_POOL)
+      if (!pool || !store?.getPoolDoc) return
+      const bytes = await store.getPoolDoc(pool)
+      if (!bytes || this.#panel !== panel || this.#touched) return
+      const record = deskRecord(JSON.parse(new TextDecoder().decode(bytes)))
+      this.#panes = { ...record.panes }
+      this.#applyPanes()
+      this.#mode = record.mode
+      this.#atHosts = true
+      this.#render()
+    } catch { /* no record, or not ours: the desk opens as it does for everyone */ }
+  }
+
+  /** The files of what is picked, named by what they are — for the four panes and the
+   *  simple drill alike: what is picked here must be among them, and the order is the
+   *  one every pick walks. */
+  #fileModel(model: readonly { picked: Picked }[]): { files: FileLabel[]; paths: string[] } {
+    const { files: held, paths } = this.#pickedFiles(model)
+    this.#files = stillPicked(this.#files, held.map(file => file.sig))
+    const files = labelFiles(held, {
+      docs: layer => this.#docs.get(layer),
+      meta: sig => this.#meta.get(sig),
+      source: sig => this.#code.get(sig)?.name ?? '',
+    })
+    return { files, paths }
   }
 
   /** A pick in a package column: what is deeper no longer applies, and the files
@@ -2038,8 +2524,16 @@ export class HostDirectoryElement extends HTMLElement {
     // filling as its changed files arrive — never the whole package.
     const moving = this.#held
     const changing = moving ? rows.filter(row => row.update) : []
-    const shown = changing.length ? changing : rows
+    // A package whose update has landed (every changed file of it is in) drops to the
+    // bottom of the list with a completed look, so what is still moving stays in view.
+    const landed = (row: StackRow): boolean => {
+      if (!moving || !row.update) return false
+      const measured = updateProgress(row.path, this.#next?.nodes ?? [], this.#had, moving)
+      return !!measured.total && measured.done >= measured.total
+    }
+    const shown = finishedLast(changing.length ? changing : rows, landed)
     const order = shown.map(row => row.path)
+    const simple = this.#mode === 'simple'
     const tabbable = picked.keys.find(path => order.includes(path)) ?? order[0]
     for (const row of shown) {
       const li = make('li', 'hd-row')
@@ -2109,6 +2603,7 @@ export class HostDirectoryElement extends HTMLElement {
       if (progress) {
         const done = progress.total > 0 && progress.done >= progress.total
         li.classList.add(done ? 'updated' : 'updating')
+        if (done) li.classList.add('completed')
         marks.prepend(make('span', `hd-mark${done ? '' : ' quiet'}`, done
           ? t('hosts.update-in', 'in')
           : `${progress.done}/${progress.total}`))
@@ -2131,9 +2626,15 @@ export class HostDirectoryElement extends HTMLElement {
         li.append(opens)
       } else li.append(make('span', 'hd-icon-slot'))
 
+      // The simple drill: a check box on every row while Select is on.
+      if (simple && this.#multi) {
+        li.classList.add('hd-checking')
+        li.prepend(this.#checkBox(picked.keys.includes(row.path)))
+      }
       li.addEventListener('click', event => {
         if ((event.target as HTMLElement).closest('button:not(.hd-name), a')) return
-        this.#pickPackage(k, row.path, pickMode(event), order)
+        if (simple) this.#chooseRow(row.path, 'package', k, order)
+        else this.#pickPackage(k, row.path, pickMode(event), order)
       })
       list.append(li)
     }
@@ -2248,7 +2749,7 @@ export class HostDirectoryElement extends HTMLElement {
    *  picked packages declare, by what they are, or what it waits for. */
   #fileColumn(files: readonly FileLabel[], paths: readonly string[]): HTMLElement {
     if (!files.length) {
-      const waiting = make('div', 'hd-colbox hd-files-empty')
+      const waiting = make('div', 'hd-colbox hd-filesbox hd-files-empty')
       waiting.append(
         this.#colHead(t('hosts.files', 'Files')),
         make('p', 'hd-note hd-pane-empty', paths.length
@@ -2263,14 +2764,18 @@ export class HostDirectoryElement extends HTMLElement {
     const caption = t('hosts.files-in', 'Files in {paths}', { paths: paths.join(' · ') })
     list.setAttribute('aria-label', caption)
     const order = files.map(file => file.sig)
-    const tabbable = this.#files.keys.find(sig => order.includes(sig)) ?? order[0]
+    // The simple drill picks nothing here but what is CHECKED — a file is opened by going in.
+    const simple = this.#mode === 'simple'
+    const picked = simple ? (this.#multi ? this.#chosen : NOTHING_PICKED) : this.#files
+    const tabbable = picked.keys.find(sig => order.includes(sig)) ?? order[0]
     for (const file of files) {
       const li = make('li', 'hd-file')
       li.dataset['key'] = file.sig
       li.setAttribute('role', 'option')
-      li.setAttribute('aria-selected', String(this.#files.keys.includes(file.sig)))
+      li.setAttribute('aria-selected', String(picked.keys.includes(file.sig)))
       li.tabIndex = file.sig === tabbable ? 0 : -1
-      if (this.#files.keys.includes(file.sig)) li.classList.add('picked')
+      if (picked.keys.includes(file.sig)) li.classList.add('picked')
+      if (simple && this.#multi) li.classList.add('hd-checking')
       const yours = file.yoursName || file.yoursDescription
       if (yours) li.classList.add('mine')
       // Its name first; what kind it is, the package that declares it and the start
@@ -2278,10 +2783,14 @@ export class HostDirectoryElement extends HTMLElement {
       li.append(make('span', 'hd-file-name', file.name), make('span', 'hd-file-where', fileWhere(file)))
       li.title = [file.name, file.description, `${file.path} · ${file.sig}`, yours ? t('hosts.meta.yours', 'Described by you') : '']
         .filter(Boolean).join('\n')
-      li.addEventListener('click', event => this.#pickFile(file.sig, pickMode(event), order))
+      if (simple && this.#multi) li.prepend(this.#checkBox(picked.keys.includes(file.sig)))
+      li.addEventListener('click', event => {
+        if (simple) this.#chooseRow(file.sig, 'file', -1, order)
+        else this.#pickFile(file.sig, pickMode(event), order)
+      })
       list.append(li)
     }
-    const box = make('div', 'hd-colbox')
+    const box = make('div', 'hd-colbox hd-filesbox')
     box.append(this.#colHead(caption), list)
     return box
   }
@@ -3066,8 +3575,8 @@ ${S} .hd-grow{flex:1 1 auto;}
 ${S} .hd-title{font-size:.9em;letter-spacing:.05em;color:var(--hc-window-accent);}
 ${S} .hd-close{background:none;border:none;padding:0 .2em;font:inherit;font-size:1.3em;line-height:1;color:var(--hd-ink-quiet);cursor:pointer;}
 ${S} .hd-close:hover{color:var(--hd-ink);}
-${S} .hd-frame{flex:1 1 auto;min-height:0;position:relative;display:grid;grid-template-columns:minmax(13rem,18rem) minmax(0,1fr);}
-${S} .hd-frame.with-drawer{grid-template-columns:minmax(13rem,18rem) minmax(0,1fr) minmax(18rem,26rem);}
+${S} .hd-frame{flex:1 1 auto;min-height:0;position:relative;display:grid;grid-template-columns:var(--hd-rail-w,18rem) minmax(0,1fr);}
+${S} .hd-frame.with-drawer{grid-template-columns:var(--hd-rail-w,18rem) minmax(0,1fr) minmax(18rem,26rem);}
 ${S} .hd-side{min-height:0;overflow-y:auto;border-right:1px solid var(--hd-rule);padding:.5em .5em .8em;}
 ${S} .hd-main{min-width:0;min-height:0;overflow-y:auto;padding:.9em 1.3em 1.6em;}
 ${S} .hd-main > *{max-width:62rem;}
@@ -3082,9 +3591,59 @@ ${S} .hd-main.with-columns > .hd-section-body{max-height:min(11rem,30vh);overflo
 ${S} .hd-cols{display:flex;align-items:stretch;overflow-x:auto;overflow-y:hidden;border-top:1px solid var(--hd-rule);}
 ${S} .hd-cols-empty{margin:.8em 1.3em;}
 /* FOUR PANES — hosts (the rail), packages, files, code — fit a 1280px desk without a scroll: the columns give a little before the strip scrolls, and the code takes what is left. */
-${S} .hd-colbox{flex:0 1 16rem;width:16rem;min-width:12.5rem;min-height:0;display:flex;flex-direction:column;border-right:1px solid var(--hd-rule);}
+${S} .hd-colbox{flex:0 1 var(--hd-pkg-w,16rem);width:var(--hd-pkg-w,16rem);min-width:11rem;min-height:0;display:flex;flex-direction:column;border-right:1px solid var(--hd-rule);}
+${S} .hd-colbox.hd-filesbox{flex-basis:var(--hd-files-w,16rem);width:var(--hd-files-w,16rem);}
+/* THE PANES' EDGES: each is dragged to set the width the participant prefers, which is kept. */
+${S} .hd-split{position:relative;flex:0 0 0;width:0;z-index:3;cursor:col-resize;outline:none;}
+${S} .hd-split::before{content:'';position:absolute;top:0;bottom:0;left:-4px;width:8px;}
+${S} .hd-split:hover::before,${S} .hd-split:focus-visible::before,${S} .hd-split.dragging::before{background:rgba(var(--acc),0.4);}
+${S} .hd-split-rail{position:absolute;top:0;bottom:0;left:var(--hd-rail-w,18rem);}
+${S} .hd-panel.simple .hd-split{display:none;}
 ${S} .hd-pane-empty{margin:.8em .75em;}
 ${S} .hd-rail-head{margin-top:.6em;padding-left:.55em;border-bottom:none;}
+/* A package whose update has landed: dropped to the bottom of the list (the order is the view's), and dimmed. */
+${S} .hd-row.completed{opacity:.62;}
+${S} .hd-row.completed .hd-name{color:var(--hd-ink-quiet);}
+${S} .hd-row.completed .hd-name::before{content:'✓ ';color:var(--hc-status-ok);}
+${S} .hd-row.completed .hd-bulb{color:var(--hc-status-ok);}
+/* THE SIMPLE DRILL: no rail, one large list in the middle, a step in at a time. */
+${S} .hd-panel.simple .hd-side{display:none;}
+${S} .hd-panel.simple .hd-frame,${S} .hd-panel.simple .hd-frame.with-drawer{grid-template-columns:minmax(0,1fr);}
+${S} .hd-panel.simple .hd-main{padding:1.1em 1.3em 2.4em;}
+${S} .hd-panel.simple .hd-drawer{position:absolute;inset:0;z-index:2;border-left:none;background:var(--hd-ground);}
+${S} .hd-mode{margin-right:.7em;font-size:.78em;}
+${S} .hd-mode:hover{color:var(--hd-ink);}
+${S} .hd-simple{max-width:46rem;margin:0 auto;display:flex;flex-direction:column;gap:.8em;}
+${S} .hd-simple.wide{max-width:88rem;}
+${S} .hd-simple > *{max-width:none;}
+${S} .hd-simple-head{display:flex;align-items:center;gap:.6em;min-height:2em;}
+${S} .hd-simple-back{margin-bottom:.5em;}
+${S} .hd-trail{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35em;min-width:0;font-size:.85em;}
+${S} .hd-trail-step{color:var(--hd-ink-quiet);}
+${S} .hd-trail-sep{color:var(--hd-ink-quiet);opacity:.6;}
+${S} .hd-trail-now{color:var(--hd-ink);font-weight:600;}
+${S} .hd-select{font-size:.8em;border-color:var(--hd-rule);}
+${S} .hd-select[aria-pressed="true"]{color:var(--hc-window-on-accent);background:var(--hc-window-accent);border-color:var(--hc-window-accent);}
+${S} .hd-simple .hd-colbox{flex:none;width:auto;min-width:0;border:1px solid var(--hd-rule);border-radius:var(--hc-radius-card,3px);overflow:hidden;}
+${S} .hd-simple .hd-col{overflow:visible;padding:0;}
+${S} .hd-simple .hd-colhead{padding:.5em .95em;font-size:.72em;}
+${S} .hd-simple .hd-row{padding:.8em .95em;column-gap:.7em;font-size:1.05em;}
+${S} .hd-simple .hd-row .hd-name{font-size:.92em;}
+${S} .hd-simple .hd-file{padding:.7em .95em;}
+${S} .hd-simple .hd-file-name{font-size:.95em;}
+${S} .hd-simple .hd-file-where{font-size:.72em;}
+${S} .hd-host-row{grid-template-columns:auto minmax(0,1fr) auto auto auto;cursor:default;user-select:none;}
+${S} .hd-host-row.hd-checking,${S} .hd-row.hd-checking{grid-template-columns:auto auto minmax(0,1fr) auto auto auto auto;}
+${S} .hd-host-row.hd-checking{grid-template-columns:auto auto minmax(0,1fr) auto auto auto;}
+${S} .hd-file.hd-checking{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:.7em;}
+${S} .hd-file.hd-checking .hd-check{grid-row:1 / span 2;align-self:center;}
+${S} .hd-host-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:1.02em;color:var(--hd-ink);}
+${S} .hd-check{display:inline-flex;align-items:center;justify-content:center;width:1.15em;height:1.15em;font-size:.8em;line-height:1;color:var(--hc-window-on-accent);border:1.5px solid var(--hd-ink-quiet);border-radius:3px;}
+${S} .hd-check.on{background:var(--hc-window-accent);border-color:var(--hc-window-accent);}
+${S} .hd-simple .hd-hosts-list + .hd-add{margin-top:1.1em;}
+${S} .hd-selectbar{position:sticky;bottom:0;display:flex;align-items:center;gap:.6em;padding:.6em .8em;background:var(--hd-ground);border:1px solid rgba(var(--acc),0.5);border-radius:var(--hc-radius-card,3px);box-shadow:0 -6px 18px rgba(0,0,0,0.18);}
+${S} .hd-selected{flex:1 1 auto;font-size:.85em;color:var(--hd-ink-quiet);}
+${S} .hd-about{margin:0;}
 ${S} .hd-codepane{flex:1 0 24rem;min-width:24rem;min-height:0;display:flex;flex-direction:column;}
 ${S} .hd-colhead{flex:0 0 auto;padding:.4em .75em;font-size:.68em;letter-spacing:.05em;color:var(--hd-ink-quiet);border-bottom:1px solid rgba(var(--acc),0.08);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 ${S} .hd-col{flex:1 1 auto;min-height:0;overflow-y:auto;margin:0;padding:.15em 0;list-style:none;}
@@ -3239,6 +3798,7 @@ ${S} .hd-drawer{position:absolute;top:0;right:0;bottom:0;width:min(26rem,86%);z-
 }
 @media (max-width:720px){
 ${S} .hd-frame,${S} .hd-frame.with-drawer{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);}
+${S} .hd-split{display:none;}
 ${S} .hd-side{max-height:36vh;border-right:none;border-bottom:1px solid var(--hd-rule);}
 ${S} .hd-drawer{position:absolute;inset:0;z-index:2;border-left:none;background:var(--hd-ground);}
 }
