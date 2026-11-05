@@ -2,28 +2,34 @@
 //
 // <hc-host-directory> — THE HOST DIRECTORY, AND THE SWITCHBOARD IN IT.
 //
-// One window of vertical lists, opening COLLAPSED: an accordion of domains —
-// this origin and every host you carry, each saying how many packages it carries
-// and whether an update is waiting there, the ones with an update first. One
-// section opens at a time, into that domain's packages, on or shaded; one search
-// box finishes into lines, one per matching domain or package. This origin is every package
-// all of your hosts carry; a host is the same list filtered to what it carries,
-// with a count beside each row of how many of your hosts carry that SAME
-// signature. Nothing switches: on and off are by name path, and a package
-// turned off is shaded everywhere it appears.
+// A FULL-SCREEN DESK (jwize, 2026-11-04: "the host window needs to be full
+// screen"). The same shape as the editor, keyboard and comfy desks: a slim
+// header, the hosts you carry as a list down the left, and the selected host's
+// packages in the middle. Hosts are not a publishing setting, and this is not
+// Publish's screen — Publish is what goes OUT, a switch list in a docked panel;
+// this is what comes IN. They meet in one link, the Publish button on a host.
+//
+// The rail lists this origin and every host you carry, each saying how many
+// packages it carries and whether an update is waiting or the host is behind,
+// the ones with an update first. One search box finishes into lines, one per
+// matching domain or package. This origin is every package all of your hosts
+// carry; a host is the same list filtered to what it carries, with a count
+// beside each row of how many of your hosts carry that SAME signature. Nothing
+// switches: on and off are by name path, and a package turned off is shaded
+// everywhere it appears.
 //
 // PACKAGES ARE BRANCHES, AND BRANCHES ARE RECURSIVE. A row with parts inside
 // it is walked into — the list becomes its children, with the way back above
 // it — so a change deep in the tree is reached by walking down to it and taken
 // there, without moving anything beside it.
 //
-// REVISIONS ARE A DRILL-DOWN. Each row's revisions icon replaces the list with
-// that package's revisions, newest first, gathered by signature across every
-// host you carry — decoupled from where you looked. Choose one and you are
-// back at the list. An older revision that would replace newer parts inside it
-// says so first, and sends you to configure those parts one by one; taken
-// anyway, the newer parts are hidden, not deleted, until the package is back on
-// its latest revision.
+// REVISIONS OPEN BESIDE THE LIST. Each row's revisions icon opens that
+// package's revisions in a drawer at the right, newest first, gathered by
+// signature across every host you carry — decoupled from where you looked, and
+// the list stays where it was. Choose one and the change is taken. An older
+// revision that would replace newer parts inside it says so first, and sends
+// you to configure those parts one by one; taken anyway, the newer parts are
+// hidden, not deleted, until the package is back on its latest revision.
 //
 // A framework-free custom element contributed through the ShellSurfaceRegistry
 // (`element:` shape) — never an Angular class, never a tag in app.html. The
@@ -36,6 +42,7 @@ import {
   I18N_IOC_KEY,
   INSTALL_IOC_KEY,
   attachDockedPanel,
+  isWindowShowing,
   type DockedPanel,
   type I18nProvider,
   type InstallNode,
@@ -467,7 +474,20 @@ interface MineRow {
   host: string
 }
 
-type View = 'domains' | 'list' | 'revisions' | 'creations' | 'mine'
+type View = 'domains' | 'list' | 'revisions' | 'creations' | 'mine' | 'own'
+
+/** The desks' shared doors (keyboard-desk, comfy-desk): the view modes that put
+ *  the page behind a full-screen window to sleep, the back gesture, the input gate. */
+const DESK_KEYS = {
+  modes: '@diamondcoreprocessor.com/ModeRegistry',
+  back: '@diamondcoreprocessor.com/BackGesture',
+  gate: '@diamondcoreprocessor.com/InputGate',
+} as const
+type ModesShape = { enter(mode: string, owner: string): void; exit(mode: string, owner: string): void; releaseOwner?(owner: string): void }
+type BackShape = { register(entry: { owner: string; back: () => void; active?: () => boolean }): () => void }
+type GateShape = { lock(reason: string): void; unlock(reason: string): void }
+/** The rail's own entry, beside the hosts: where your own host is set. */
+const OWN_PANE = '#own'
 
 type Warning = { revision: InstallRevision; replaced: string[]; picksBeneath: string[] }
 
@@ -515,14 +535,21 @@ export class HostDirectoryElement extends HTMLElement {
   #loaded = false
 
   #scope = ''
-  /** The one domain section open, or null — `''` is this origin. */
-  #section: string | null = null
+  /** The host whose pane is open — `''` is this origin. Always one: a desk
+   *  opens onto a host, never onto a shut list. */
+  #section = ''
   #at = ''
   #query = ''
   /** The one row open at a time. */
   #opened = ''
-  /** Every fresh open starts collapsed, on the domains. */
+  /** Every fresh open starts on this origin's pane. */
   #view: View = 'domains'
+  /** What the desk holds while it is open, and lets go of when it closes. */
+  #modes: ModesShape | null = null
+  #releaseBack: (() => void) | null = null
+  #deskCleanup: (() => void)[] = []
+  /** The rail entry the keys just moved to: its button is new after the repaint. */
+  #railFocus: string | null = null
   /** The next open continues where an act left off (a restart, a notice)
    *  instead of collapsing. */
   #resume = false
@@ -617,6 +644,18 @@ export class HostDirectoryElement extends HTMLElement {
       }),
     )
 
+    // A press on the hosts glyph while the desk is PARKED — an Escape sweep, or
+    // another window opened over it — means "show it". The drone already says
+    // open, so the render it emits changes nothing here and the press would be
+    // lost; only a second sweep-restore could bring the desk back. A window
+    // that is showing, or closed, is the drone's to open and close as before.
+    // The bus replays the last press to a new listener, and a replay is no press.
+    let live = false
+    this.#cleanup.push(EffectBus.on('hosts:view-toggle', () => {
+      if (live && this.#wanted && !this.#panel) { this.#mount(); void this.#read() }
+    }))
+    live = true
+
     // Back where a change restarted the app from: the list it was chosen in.
     try {
       const raw = sessionStorage.getItem(REOPEN_KEY)
@@ -646,41 +685,66 @@ export class HostDirectoryElement extends HTMLElement {
     panel.setAttribute('role', 'dialog')
     panel.setAttribute('aria-label', t('hosts.title', 'Host directory'))
     panel.setAttribute('data-consumes-wheel', '')
+    panel.dataset['hcSheet'] = 'full'
     panel.tabIndex = -1
 
     const head = make('header', 'hd-head')
-    head.append(make('span', 'hd-title', t('hosts.title', 'Host directory')))
+    head.append(make('span', 'hd-title', t('hosts.title', 'Host directory')), make('span', 'hd-grow'))
     const close = button('hd-close', '×', t('panel.close', 'close'))
     close.addEventListener('click', () => EffectBus.emit('hosts:close', {}))
     head.append(close)
 
+    // THE RAIL: the search, the hosts, and a field to add one. The search and the
+    // field are built once — a repaint redraws only the list between them, so a
+    // read landing never takes the focus from a half-typed domain.
     const search = make('div', 'hd-search')
     const input = make('input', 'hd-input')
     input.type = 'search'
-    input.addEventListener('input', () => { this.#query = input.value; if (this.#view === 'domains') this.#renderBody() })
+    input.addEventListener('input', () => {
+      this.#query = input.value
+      // A search is across every host: it leaves a branch walked into, for the matches.
+      if (this.#query.trim() && this.#view !== 'domains') { this.#view = 'domains'; this.#at = ''; this.#opened = '' }
+      this.#renderBody()
+    })
     search.append(input)
-    const body = make('div', 'hd-body')
+    const hosts = make('ul', 'hd-list hd-hosts')
+    const side = make('nav', 'hd-side')
+    side.setAttribute('aria-label', t('hosts.rail', 'Hosts you carry'))
+    side.append(search, hosts, this.#addForm())
+    side.addEventListener('keydown', event => this.#railKeys(event))
 
-    panel.append(head, search, body)
-    this.#refs.set('search', search).set('input', input).set('body', body)
+    const main = make('section', 'hd-main')
+    const drawer = make('aside', 'hd-drawer')
+    drawer.hidden = true
+    const frame = make('div', 'hd-frame')
+    frame.append(side, main, drawer)
+
+    panel.append(head, frame)
+    this.#refs.set('search', search).set('input', input).set('hosts', hosts).set('side', side)
+      .set('body', main).set('drawer', drawer).set('frame', frame)
     this.appendChild(panel)
     this.#panel = panel
 
+    // A desk, as the editor, keyboard and comfy desks are: docked for the window
+    // session, but it takes the whole page and sizes itself (see the styles).
     this.#dock = attachDockedPanel(panel, {
       id: HOST_DIRECTORY_WINDOW,
-      dockSide: 'right',
-      defaultWidth: 340,
-      minWidth: 280,
-      maxWidth: 560,
       launcherControlId: 'hosts',
+      dockSide: 'right',
+      dockExclusive: false,
+      ownsSize: false,
+      sizeOwner: { panelWidth: () => 400, setPanelWidth: () => undefined },
+      defaultText: 1,
       hcSession: this.#session,
       onClose: () => EffectBus.emit('hosts:close', {}),
     })
+    this.#claimDesk(panel)
     this.#render()
     requestAnimationFrame(() => panel.focus({ preventScroll: true }))
   }
 
   #unmount(): void {
+    this.#releaseDesk()
     this.#dock?.dispose()
     this.#dock = null
     this.#panel?.remove()
@@ -688,9 +752,120 @@ export class HostDirectoryElement extends HTMLElement {
     this.#refs.clear()
   }
 
-  /** Collapse: the domains, every section shut, the search cleared. */
+  /** What a full-screen window takes while it is up: the view modes (the page
+   *  behind sleeps, the controls stay), the keymap and the input gate, the back
+   *  gesture — and Escape, which unwinds this desk before the hive's own keys. */
+  #claimDesk(panel: HTMLElement): void {
+    this.#claimModes(panel)
+    EffectBus.emit('keymap:suppress', { reason: HOST_DIRECTORY_WINDOW })
+    ioc<GateShape>(DESK_KEYS.gate)?.lock(HOST_DIRECTORY_WINDOW)
+    this.#releaseBack = ioc<BackShape>(DESK_KEYS.back)?.register({
+      owner: HOST_DIRECTORY_WINDOW,
+      active: () => this.#panel !== null,
+      back: () => { if (!this.#back()) EffectBus.emit('hosts:close', {}) },
+    }) ?? null
+
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || event.isComposing || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return
+      // The hive's keymap hears it first and unwinds one rung through the window
+      // session (dismiss → #back). A second unwind from here would take two rungs
+      // for one press — the drawer, and then the whole desk.
+      if (event.defaultPrevented) return
+      event.preventDefault()
+      event.stopPropagation()
+      const target = event.target
+      const typing = target instanceof HTMLElement && !!target.closest('input, textarea')
+      // A search in the box clears first; any other field just lets go.
+      if (typing && !(this.#query && target === this.#refs.get('input'))) { (target as HTMLElement).blur(); return }
+      if (!this.#back()) EffectBus.emit('hosts:close', {})
+    }
+    window.addEventListener('keydown', onKeyDown, { capture: true })
+    this.#deskCleanup.push(() => window.removeEventListener('keydown', onKeyDown, { capture: true }))
+    // A field that lets go hands the focus back to the desk, so Escape is heard here.
+    const onFocusOut = (event: FocusEvent): void => {
+      if (event.relatedTarget) return
+      requestAnimationFrame(() => {
+        if (this.#panel === panel && document.activeElement === document.body) panel.focus({ preventScroll: true })
+      })
+    }
+    panel.addEventListener('focusout', onFocusOut)
+  }
+
+  #releaseDesk(): void {
+    const attempt = (what: () => void): void => {
+      try { what() } catch (error) { console.warn('[host-directory] teardown step failed', error) }
+    }
+    const modes = this.#modes
+    this.#modes = null
+    if (modes) attempt(() => {
+      if (modes.releaseOwner) { modes.releaseOwner(HOST_DIRECTORY_WINDOW); return }
+      modes.exit('view:active', HOST_DIRECTORY_WINDOW)
+      modes.exit('view:keeps-controls', HOST_DIRECTORY_WINDOW)
+    })
+    attempt(() => EffectBus.emit('keymap:unsuppress', { reason: HOST_DIRECTORY_WINDOW }))
+    attempt(() => ioc<GateShape>(DESK_KEYS.gate)?.unlock(HOST_DIRECTORY_WINDOW))
+    attempt(() => this.#releaseBack?.())
+    this.#releaseBack = null
+    for (const off of this.#deskCleanup.splice(0)) attempt(off)
+  }
+
+  /** A host is added at the foot of the rail — the hosts drone owns the pool,
+   *  and the new row arrives on its next render. */
+  #addForm(): HTMLFormElement {
+    const add = make('form', 'hd-add')
+    const field = make('input', 'hd-add-input')
+    field.type = 'text'
+    field.autocomplete = 'off'
+    field.spellcheck = false
+    field.placeholder = t('packages.add-placeholder', 'add a domain')
+    field.setAttribute('aria-label', t('packages.add', 'Add a domain'))
+    const go = make('button', 'hd-quiet', t('packages.add-go', 'Add'))
+    go.type = 'submit'
+    add.append(field, go)
+    add.addEventListener('submit', (event) => {
+      event.preventDefault()
+      const zone = zoneOf(field.value)
+      if (!zone) { field.setAttribute('aria-invalid', 'true'); field.focus(); return }
+      field.removeAttribute('aria-invalid')
+      EffectBus.emit('hosts:add', { zone })
+      field.value = ''
+    })
+    return add
+  }
+
+  /** The view modes: the page behind a full-screen window sleeps and the controls
+   *  stay. The registry may not be up yet, so a late one is claimed when it is. */
+  #claimModes(panel: HTMLElement): void {
+    const claim = (modes: ModesShape): void => {
+      this.#modes = modes
+      modes.enter('view:keeps-controls', HOST_DIRECTORY_WINDOW)
+      modes.enter('view:active', HOST_DIRECTORY_WINDOW)
+    }
+    const modes = ioc<ModesShape>(DESK_KEYS.modes)
+    if (modes) { claim(modes); return }
+    ;(window as { ioc?: { whenReady?: (k: string, cb: (v: unknown) => void) => void } }).ioc
+      ?.whenReady?.(DESK_KEYS.modes, value => { if (this.#panel === panel && !this.#modes) claim(value as ModesShape) })
+  }
+
+  /** Arrow keys walk the rail, and the pane follows the focus. Typing in the
+   *  search or the add field is left alone. */
+  #railKeys(event: KeyboardEvent): void {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+    const target = event.target
+    if (!(target instanceof HTMLElement) || target.closest('input')) return
+    const items = [...(this.#refs.get('hosts')?.querySelectorAll<HTMLButtonElement>('button.hd-domain') ?? [])]
+    const at = items.indexOf(target as HTMLButtonElement)
+    if (at < 0) return
+    event.preventDefault()
+    const next = items[Math.max(0, Math.min(items.length - 1, at + (event.key === 'ArrowDown' ? 1 : -1)))]
+    if (!next || next === target) return
+    this.#railFocus = next.dataset['pane'] ?? ''
+    next.click()
+  }
+
+  /** Back to the start: this origin's pane, the search cleared. */
   #toDomains(): void {
-    this.#section = null
+    this.#section = ''
     this.#scope = ''
     this.#at = ''
     this.#query = ''
@@ -712,23 +887,36 @@ export class HostDirectoryElement extends HTMLElement {
     this.#error = ''
   }
 
-  /** ONE SECTION AT A TIME: opening a domain shuts the one that was open, and
-   *  pressing an open domain shuts it. */
-  #toggleSection(zone: string): void {
-    if (this.#section === zone) { this.#section = null; this.#scope = '' }
-    else { this.#section = zone; this.#scope = zone }
+  /** A host chosen in the rail: its pane opens at its top, whatever was open. */
+  #selectHost(zone: string): void {
+    this.#section = zone
+    this.#scope = zone
+    this.#at = ''
+    this.#view = 'domains'
+    this.#query = ''
     this.#opened = ''
+    this.#warning = null
     this.#error = ''
-    this.#renderBody()
+    this.#render()
   }
 
-  /** Escape unwinds one level, innermost first: the search, the warning, a
-   *  drill, the walk, the open section. On the shut accordion it has nothing. */
+  /** The rail's own entry: where your own host is set. */
+  #selectOwn(): void {
+    this.#view = 'own'
+    this.#query = ''
+    this.#warning = null
+    this.#error = ''
+    this.#render()
+  }
+
+  /** Escape unwinds one level, innermost first: the search, the question, the
+   *  warning, the revisions drawer or a pane that was opened from a list, a
+   *  branch walked into. At the top of a host it has nothing, and closes the desk. */
   #back(): boolean {
     if (this.#query) { this.#query = ''; this.#render(); return true }
     if (this.#codeGate) { this.#codeGate = null; this.#renderBody(); return true }
     if (this.#warning) { this.#warning = null; this.#renderBody(); return true }
-    if (this.#view === 'revisions' || this.#view === 'creations' || this.#view === 'mine') {
+    if (this.#view === 'revisions' || this.#view === 'creations' || this.#view === 'mine' || this.#view === 'own') {
       this.#view = this.#at ? 'list' : 'domains'
       this.#render()
       return true
@@ -740,7 +928,6 @@ export class HostDirectoryElement extends HTMLElement {
       this.#render()
       return true
     }
-    if (this.#section !== null) { this.#section = null; this.#scope = ''; this.#renderBody(); return true }
     return false
   }
 
@@ -770,20 +957,35 @@ export class HostDirectoryElement extends HTMLElement {
     input.placeholder = placeholder
     input.setAttribute('aria-label', placeholder)
     if (input.value !== this.#query) input.value = this.#query
-    this.#refs.get('search')!.hidden = this.#view !== 'domains'
     this.#renderBody()
   }
 
   #renderBody(): void {
     const body = this.#refs.get('body')
     if (!body) return
+    this.#renderRail()
     body.replaceChildren()
     if (this.#codeGate) this.#renderCodeGate(body, this.#codeGate)
-    if (this.#view === 'domains') this.#renderAccordion(body)
-    else if (this.#view === 'revisions') this.#renderRevisions(body)
-    else if (this.#view === 'creations') this.#renderCreations(body)
-    else if (this.#view === 'mine') this.#renderMine(body)
+    // Revisions have a column of their own: under it the list stays where it was.
+    const drawer = this.#view === 'revisions'
+    const under: View = drawer ? (this.#at ? 'list' : 'domains') : this.#view
+    if (under === 'domains') this.#renderPane(body)
+    else if (under === 'creations') this.#renderCreations(body)
+    else if (under === 'mine') this.#renderMine(body)
+    else if (under === 'own') this.#renderOwn(body)
     else this.#renderBranch(body)
+    this.#renderDrawer(drawer)
+  }
+
+  /** The revisions column: shown while a package's revisions are open. */
+  #renderDrawer(open: boolean): void {
+    const drawer = this.#refs.get('drawer')
+    const frame = this.#refs.get('frame')
+    if (!drawer || !frame) return
+    drawer.hidden = !open
+    frame.classList.toggle('with-drawer', open)
+    drawer.replaceChildren()
+    if (open) this.#renderRevisions(drawer)
   }
 
   #renderCodeGate(body: HTMLElement, gate: CodeGate): void {
@@ -852,61 +1054,96 @@ export class HostDirectoryElement extends HTMLElement {
     return !!zone && hostBehind(this.#served.get(zone)?.root ?? '', this.#named)
   }
 
-  /** THE ACCORDION: a vertical list of domain headers, one section open. */
-  #renderAccordion(body: HTMLElement): void {
+  /** THE RAIL: this origin, then every host you carry — a dot saying whether an
+   *  update waits there or the host is behind, its name, how many packages it
+   *  lists — and your own host's entry after them. The pane follows the choice. */
+  #renderRail(): void {
+    const list = this.#refs.get('hosts')
+    if (!list) return
     const domains = this.#domains()
-    if (this.#query.trim()) { this.#renderMatches(body, domains); return }
-
-    const list = make('ul', 'hd-list')
+    const searching = !!this.#query.trim()
+    const pane = this.#view === 'own' ? OWN_PANE : this.#section
+    list.replaceChildren()
     for (const domain of domains) {
-      const open = this.#section === domain.zone
+      const open = !searching && pane === domain.zone
       const li = make('li', `hd-section${domain.update ? ' has-update' : ''}${open ? ' open' : ''}`)
       const header = button('hd-domain', '', t('hosts.open-domain', 'Open {host}', { host: domain.label }))
-      header.setAttribute('aria-expanded', String(open))
-      const chevron = make('span', 'hd-chevron', open ? '▾' : '▸')
-      chevron.setAttribute('aria-hidden', 'true')
-      header.append(chevron, make('span', 'hd-domain-name', domain.label))
+      header.dataset['pane'] = domain.zone
+      if (open) header.setAttribute('aria-current', 'true')
+      const dot = make('span', `hd-dot${domain.update ? ' update' : domain.behind ? ' behind' : ''}`)
+      dot.setAttribute('aria-hidden', 'true')
+      header.append(dot, make('span', 'hd-domain-name', domain.label))
       if (domain.update) header.append(make('span', 'hd-mark', t('packages.update-mark', 'update')))
       const count = make('span', 'hd-count', domain.count ? String(domain.count) : '')
       if (domain.count) count.title = t('hosts.package-count', '{count} packages', { count: domain.count })
       header.append(count)
-      header.addEventListener('click', () => this.#toggleSection(domain.zone))
+      header.addEventListener('click', () => this.#selectHost(domain.zone))
       li.append(header)
-      // Under the host, open or shut: it serves an older build than the one
-      // your publisher names, so nothing of it is offered in this hive's list.
-      if (domain.behind) li.append(make('p', 'hd-note hd-behind', this.#behindText(domain.label)))
-      if (open) li.append(this.#sectionBody(domain.zone))
       list.append(li)
     }
-    body.append(list)
+    const ownOpen = !searching && pane === OWN_PANE
+    const own = make('li', `hd-section hd-own-entry${ownOpen ? ' open' : ''}`)
+    const ownButton = button('hd-domain', '', t('hosts.your-host', 'Your host'))
+    ownButton.dataset['pane'] = OWN_PANE
+    if (ownOpen) ownButton.setAttribute('aria-current', 'true')
+    const ring = make('span', 'hd-dot own')
+    ring.setAttribute('aria-hidden', 'true')
+    ownButton.append(ring, make('span', 'hd-domain-name', t('hosts.your-host', 'Your host')))
+    ownButton.addEventListener('click', () => this.#selectOwn())
+    own.append(ownButton)
+    list.append(own)
     if (this.#reading && domains.every(domain => !domain.count)) {
-      body.append(make('p', 'hd-note', t('packages.reading', 'Reading what is served…')))
+      const reading = make('li', 'hd-rail-note')
+      reading.append(make('p', 'hd-note', t('packages.reading', 'Reading what is served…')))
+      list.append(reading)
     }
+    // The keys moved here: the button they landed on is new, so the focus follows.
+    if (this.#railFocus !== null) {
+      const want = this.#railFocus
+      this.#railFocus = null
+      list.querySelectorAll<HTMLButtonElement>('button.hd-domain').forEach(item => { if (item.dataset['pane'] === want) item.focus() })
+    }
+  }
 
-    // A domain is added at the end of the list it joins — the hosts drone owns
-    // the pool, and the new header arrives on its next render.
-    const add = make('form', 'hd-add')
-    const field = make('input', 'hd-add-input')
-    field.type = 'text'
-    field.autocomplete = 'off'
-    field.spellcheck = false
-    field.placeholder = t('packages.add-placeholder', 'add a domain')
-    field.setAttribute('aria-label', t('packages.add', 'Add a domain'))
-    const go = make('button', 'hd-quiet', t('packages.add-go', 'Add'))
-    go.type = 'submit'
-    add.append(field, go)
-    add.addEventListener('submit', (event) => {
-      event.preventDefault()
-      const zone = zoneOf(field.value)
-      if (!zone) { field.setAttribute('aria-invalid', 'true'); field.focus(); return }
-      field.removeAttribute('aria-invalid')
-      EffectBus.emit('hosts:add', { zone })
-      field.value = ''
-    })
-    body.append(add)
+  /** THE PANE of the host chosen in the rail: its name, the way to Publish, then
+   *  what it serves. A search replaces it with its lines, whatever was chosen. */
+  #renderPane(body: HTMLElement): void {
+    const domains = this.#domains()
+    if (this.#query.trim()) { this.#renderMatches(body, domains); return }
+    const domain = domains.find(row => row.zone === this.#section) ?? domains[0]
+    if (!domain) return
+    const head = make('div', 'hd-pane-head')
+    head.append(make('h2', 'hd-pane-title', domain.label))
+    if (domain.update) head.append(make('span', 'hd-mark', t('packages.update-mark', 'update')))
+    head.append(make('span', 'hd-grow'))
+    // THE ONE LINK TO PUBLISH. This is what comes in; Publish is what goes out,
+    // on its own screen. A host is where a branch may be sent, so a host has the
+    // door and this origin, which is no destination, does not.
+    if (domain.zone) {
+      const publish = button('hd-link hd-publish', `${t('hosts.publish', 'Publish')} ›`, t('hosts.publish-tip', 'Open Publish — what goes out to your domains'))
+      publish.addEventListener('click', () => this.#openPublish())
+      head.append(publish)
+    }
+    body.append(head)
+    if (domain.behind) body.append(make('p', 'hd-note hd-behind', this.#behindText(domain.label)))
+    body.append(this.#sectionBody(domain.zone))
+  }
+
+  /** This desk covers the page, so it closes before Publish opens. */
+  #openPublish(): void {
+    EffectBus.emit('hosts:close', {})
+    if (!isWindowShowing('publish-panel')) EffectBus.emit('publish:view-toggle', {})
+  }
+
+  /** YOUR HOST'S PANE: where it is named, and — on the desktop — the walkthrough
+   *  for serving your hive from this computer (host-online.ts; not drawn on the
+   *  web, where nothing can serve). */
+  #renderOwn(body: HTMLElement): void {
+    const head = make('div', 'hd-pane-head')
+    head.append(make('h2', 'hd-pane-title', t('hosts.your-host', 'Your host')))
+    body.append(head)
+    body.append(make('p', 'hd-note', t('hosts.own-host-note', 'The domain you serve from: your backup goes there, and the bytes you share are offered from it.')))
     body.append(this.#ownHostForm())
-    // HOST YOUR HIVE FROM THIS COMPUTER — the desktop's walkthrough
-    // (host-online.ts); not drawn on the web, where nothing can serve.
     const online = hostOnlineBlock({ t, make, button, repaint: () => this.#renderBody() })
     if (online) body.append(online)
   }
@@ -1720,7 +1957,8 @@ export function installHostDirectoryStyles(): void {
   style.id = STYLE_ID
   const S = HOST_DIRECTORY_SURFACE
   style.textContent = `
-${S}{position:fixed;inset:0;z-index:100002;pointer-events:none;display:block;}
+${S}{display:block;}
+${S} [hidden]{display:none!important;}
 ${S} .hd-panel{
   --acc:var(--hc-chrome-accent);
   --hc-window-accent:rgb(var(--acc));
@@ -1728,28 +1966,49 @@ ${S} .hd-panel{
   --hd-ink:var(--hc-window-ink-loud,currentColor);
   --hd-ink-quiet:var(--hc-window-ink-quiet,currentColor);
   --hd-rule:var(--hc-window-line,rgba(128,128,128,0.18));
-  --hd-ground:color-mix(in srgb, var(--md-surface,#0d151e) 90%, transparent);
-  pointer-events:auto;position:absolute;top:var(--hc-header-anchor,0px);right:0;bottom:0;
-  width:340px;min-width:280px;max-width:calc(100vw - 1.5rem);
-  display:flex;flex-direction:column;
+  --hd-ground:var(--md-surface,#0d151e);
+  position:fixed;
+  top:var(--hc-safe-top,0px);
+  left:var(--hc-controls-left,0px)!important;
+  right:max(var(--hc-inset-right,0px), var(--hc-controls-right,0px))!important;
+  bottom:calc(max(var(--hc-controls-bottom,0px), var(--hc-safe-bottom,0px)) + var(--hc-mobile-row-lift,0px));
+  width:auto!important;max-width:none!important;transform:none!important;
+  z-index:60001;pointer-events:auto;box-sizing:border-box;
+  display:flex;flex-direction:column;min-height:0;
   font-family:var(--hc-mono,system-ui);font-size:calc(1rem * var(--hc-panel-scale,1));
-  color:var(--hd-ink);background:var(--hd-ground);backdrop-filter:blur(10px);
-  border-left:1px solid rgba(var(--acc),0.28);outline:none;
+  color:var(--hd-ink);background:var(--hd-ground);outline:none;
 }
-${S} .hd-head{display:flex;align-items:center;gap:.4em;padding:.55em .7em;border-bottom:1px solid var(--hd-rule);}
-${S} .hd-title{flex:1;font-size:.9em;letter-spacing:.05em;color:var(--hc-window-accent);}
-${S} .hd-close{background:none;border:none;padding:0 .2em;font:inherit;font-size:1.1em;line-height:1;color:var(--hd-ink-quiet);cursor:pointer;}
+${S} .hd-panel button:focus-visible,${S} .hd-panel input:focus-visible{outline:2px solid color-mix(in srgb, rgb(var(--acc)) 72%, white);outline-offset:1px;}
+${S} .hd-head{flex:0 0 auto;display:flex;align-items:center;gap:.4em;padding:.55em .9em;border-bottom:1px solid var(--hd-rule);}
+${S} .hd-grow{flex:1 1 auto;}
+${S} .hd-title{font-size:.9em;letter-spacing:.05em;color:var(--hc-window-accent);}
+${S} .hd-close{background:none;border:none;padding:0 .2em;font:inherit;font-size:1.3em;line-height:1;color:var(--hd-ink-quiet);cursor:pointer;}
 ${S} .hd-close:hover{color:var(--hd-ink);}
-${S} .hd-section{border-bottom:1px solid rgba(var(--acc),0.08);}
-${S} .hd-section.open > .hd-domain{color:var(--hc-window-accent);}
-${S} .hd-section-body{padding:0 0 .55em .95em;}
-${S} .hd-lines{list-style:none;margin:.05em 0 .35em;padding:0;display:grid;gap:.2em;font-size:.74em;}
+${S} .hd-frame{flex:1 1 auto;min-height:0;position:relative;display:grid;grid-template-columns:minmax(13rem,18rem) minmax(0,1fr);}
+${S} .hd-frame.with-drawer{grid-template-columns:minmax(13rem,18rem) minmax(0,1fr) minmax(18rem,26rem);}
+${S} .hd-side{min-height:0;overflow-y:auto;border-right:1px solid var(--hd-rule);padding:.5em .5em .8em;}
+${S} .hd-main{min-width:0;min-height:0;overflow-y:auto;padding:.9em 1.3em 1.6em;}
+${S} .hd-main > *{max-width:62rem;}
+${S} .hd-drawer{min-width:0;min-height:0;overflow-y:auto;border-left:1px solid var(--hd-rule);padding:.7em 1em 1.4em;background:color-mix(in srgb, rgb(var(--acc)) 3%, var(--hd-ground));}
+${S} .hd-pane-head{display:flex;align-items:center;gap:.6em;margin:0 0 .6em;}
+${S} .hd-pane-title{margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:1.05em;font-weight:600;color:var(--hd-ink);}
+${S} .hd-publish{font-size:.78em;}
+${S} .hd-dot{width:.55em;height:.55em;border-radius:50%;background:var(--hd-ink-quiet);opacity:.45;}
+${S} .hd-dot.update{background:var(--hc-window-accent);opacity:1;}
+${S} .hd-dot.behind{background:var(--hc-status-warn);opacity:1;}
+${S} .hd-dot.own{background:none;border:1px solid var(--hd-ink-quiet);box-sizing:border-box;opacity:.8;}
+${S} .hd-own-entry{margin-top:.4em;border-top:1px solid rgba(var(--acc),0.12);border-bottom:none;padding-top:.3em;}
+${S} .hd-rail-note{list-style:none;}
+${S} .hd-section{border-bottom:none;}
+${S} .hd-section.open > .hd-domain{color:var(--hc-window-accent);background:rgba(var(--acc),0.09);}
+${S} .hd-section-body{padding:0 0 .55em;}
+${S} .hd-lines{list-style:none;margin:.05em 0 .7em;padding:0;display:flex;flex-wrap:wrap;gap:.25em 1.1em;font-size:.78em;}
 ${S} .hd-match-row{border-bottom:1px solid rgba(var(--acc),0.08);}
 ${S} .hd-match{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;column-gap:.5em;width:100%;padding:.45em .2em;font:inherit;font-size:.8em;color:var(--hd-ink);background:none;border:none;text-align:left;cursor:pointer;}
 ${S} .hd-match:hover{background:rgba(var(--acc),0.05);}
 ${S} .hd-match-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 ${S} .hd-match-where{font-size:.85em;color:var(--hd-ink-quiet);}
-${S} .hd-domain{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;column-gap:.5em;width:100%;padding:.55em .2em;font:inherit;font-size:.82em;color:var(--hd-ink);background:none;border:none;text-align:left;cursor:pointer;}
+${S} .hd-domain{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;column-gap:.6em;width:100%;padding:.5em .55em;border-radius:var(--hc-radius-control,2px);font:inherit;font-size:.82em;color:var(--hd-ink);background:none;border:none;text-align:left;cursor:pointer;}
 ${S} .hd-domain:hover{background:rgba(var(--acc),0.05);}
 ${S} .hd-domain-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 ${S} .hd-chevron{color:var(--hd-ink-quiet);}
@@ -1760,9 +2019,8 @@ ${S} .hd-own-label{flex:0 0 auto;font-size:.7em;color:var(--hd-ink);opacity:.7;w
 ${S} .hd-quiet{padding:.2em .45em;font:inherit;font-size:.7em;color:var(--hd-ink-quiet);background:none;border:1px solid transparent;border-radius:var(--hc-radius-control,2px);cursor:pointer;}
 ${S} .hd-quiet:hover{color:var(--hd-ink);background:rgba(var(--acc),0.07);}
 ${S} .hd-quiet:disabled{cursor:default;opacity:.55;}
-${S} .hd-search{padding:.45em .7em .2em;}
+${S} .hd-search{padding:.2em .1em .5em;}
 ${S} .hd-input{width:100%;box-sizing:border-box;padding:.3em .45em;font:inherit;font-size:.8em;color:var(--hd-ink);background:rgba(var(--acc),0.06);border:1px solid rgba(var(--acc),0.22);border-radius:var(--hc-radius-control,2px);}
-${S} .hd-body{flex:1 1 auto;overflow-y:auto;padding:.3em .7em .8em;}
 ${S} .hd-link{padding:0;font:inherit;color:var(--hd-ink-quiet);background:none;border:none;text-decoration:none;cursor:pointer;}
 ${S} .hd-link:hover{color:var(--hd-ink);text-decoration:underline;}
 ${S} .hd-crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:.25em;margin:.15em 0 .4em;font-size:.74em;}
@@ -1783,7 +2041,6 @@ ${S} .hd-online-steps{margin:.4em 0;padding-left:1.2em;display:flex;flex-directi
 ${S} .hd-online-actions{display:flex;gap:.5em;flex-wrap:wrap;}
 ${S} .hd-online-link{color:var(--hc-window-accent);word-break:break-all;}
 ${S} .hd-online-said.ok{color:var(--hc-window-accent);}
-${S} .hd-section > .hd-behind{margin:-.35em 0 .5em 1.55em;}
 ${S} .hd-list{list-style:none;margin:0;padding:0;}
 ${S} .hd-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto auto;column-gap:.4em;align-items:center;padding:.3em .2em;border-bottom:1px solid rgba(var(--acc),0.08);}
 ${S} .hd-row:hover{background:rgba(var(--acc),0.04);}
@@ -1830,6 +2087,17 @@ ${S} .hd-warning-acts{display:flex;align-items:center;gap:.5em;}
 ${S} .hd-creation{display:grid;grid-template-columns:minmax(0,1fr) auto auto;column-gap:.5em;align-items:center;padding:.3em .2em;border-bottom:1px solid rgba(var(--acc),0.08);font-size:.78em;}
 ${S} .hd-creation-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--hd-ink);text-decoration:none;}
 ${S} a.hd-creation-name:hover{text-decoration:underline;}
+/* Three columns need room. Narrower than that the drawer lies over the list
+   instead of squeezing it: the list underneath is not touched. */
+@media (max-width:1100px){
+${S} .hd-frame.with-drawer{grid-template-columns:minmax(13rem,18rem) minmax(0,1fr);}
+${S} .hd-drawer{position:absolute;top:0;right:0;bottom:0;width:min(26rem,86%);z-index:2;box-shadow:-12px 0 24px rgba(0,0,0,0.18);}
+}
+@media (max-width:720px){
+${S} .hd-frame,${S} .hd-frame.with-drawer{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);}
+${S} .hd-side{max-height:36vh;border-right:none;border-bottom:1px solid var(--hd-rule);}
+${S} .hd-drawer{position:absolute;inset:0;z-index:2;border-left:none;background:var(--hd-ground);}
+}
 ${S} .hd-creation-by{font-size:.85em;color:var(--hd-ink-quiet);}
 `
   document.head.appendChild(style)

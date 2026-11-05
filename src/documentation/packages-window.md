@@ -96,14 +96,37 @@ names that branch: turn it on first.
 `<hc-host-directory>` (`hypercomb-essentials/src/sharing/host-directory.view.ts`)
 — a framework-free element contributed through the ShellSurfaceRegistry,
 reaching runtime through the **install port** core declares
-(`install.types.ts`, `INSTALL_IOC_KEY`, registered by `acquire.ts`). It docks
-as window `hosts-panel` with the `hosts` launcher, so the hosts drone's
+(`install.types.ts`, `INSTALL_IOC_KEY`, registered by `acquire.ts`). It is
+window `hosts-panel` with the `hosts` launcher, so the hosts drone's
 `isWindowShowing('hosts-panel')` and its open/close effects drive it. The
 Angular hosts panel is gone. `packages:open` (the update notice, `/upgrade`)
 lands here.
 
-- **This origin** — the first domain chip — is every package any of your hosts
-  carries, one row per path, on or shaded. **A host chip** is the same list
+**A full-screen desk** (jwize, 2026-11-04: "the host window needs to be full
+screen"). Docked narrow on the right it was a drill-down squeezed into 280–560px;
+it now takes the page the way the editor, keyboard and comfy desks do
+(`data-hc-sheet="full"`, the `view:active` and `view:keeps-controls` modes, the
+input gate, the back gesture):
+
+- **A rail of hosts down the left**: this origin, every host you carry (a dot
+  for *update waiting* or *behind*, the name, how many packages it lists), and
+  **Your host** below them, where your own host is set. The arrow keys walk it
+  and the pane follows. The search and the add field sit in the rail.
+- **The chosen host's pane in the middle**: its name, its acts as a quiet row,
+  the update bar, its packages. A search finishes into lines here.
+- **Revisions open in a drawer** on the right and the list stays where it was.
+  Under about 1100px the drawer lies over the list instead of squeezing it.
+- **Hosts are what comes in; Publish is what goes out.** They stay two windows.
+  A host's pane has one link, *Publish ›*, which closes the desk and opens
+  Publish. This origin is no destination, so it has no link, and the desk holds
+  none of Publish's acts.
+- **Escape** unwinds one level (search, question, warning, drawer, a branch
+  walked into) and at the top of a host does what it does everywhere: one press
+  puts every window away, and a press at once brings them back. The hosts icon
+  also brings a window the sweep parked back in one press.
+
+- **This origin** — the first rail entry — is every package any of your hosts
+  carries, one row per path, on or shaded. **A host** is the same list
   filtered to what that host carries. Beside each row, how many of your hosts
   carry that SAME signature at that path.
 - **Walk in**: a row with parts inside it opens into its children, with the way
@@ -113,7 +136,7 @@ lands here.
 - **Update**: a row the followed publisher moved wears an *update* mark —
   pressing it picks the followed revision of that package alone. *Update all*
   at the top moves the trunk.
-- **Revisions**: each row's ↺ replaces the list with that package's revisions,
+- **Revisions**: each row's ↺ opens that package's revisions in the drawer,
   newest first (by when each first appeared on a host), gathered by signature
   from the trunk, the picks' roots, the followed head and each host's recent
   roots — marked *running* and *latest*. Choose one and the app restarts back

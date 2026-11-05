@@ -195,10 +195,12 @@ describe('the host directory', () => {
     expect(VIEW).not.toMatch(/\byour domain\b(?!s)|isHome|hosts\.home/)
   })
 
-  it('opens collapsed on a vertical list of domains, each saying whether an update waits there', () => {
+  it('opens on a list of every host, each saying whether an update waits there', () => {
     // Jaime 2026-09-13: "a vertical list of domains, not the list of items, and it
     // should always start collapsed. The domain would show if there's new updates
-    // in the row, and then you click that domain and go to the features."
+    // in the row, and then you click that domain and go to the features." It
+    // still starts at the top, on this origin; the list of hosts is now a rail
+    // beside the pane instead of a shut accordion over it.
     const next: ServedTree = { root: 'r2', nodes: [node('games', 'g2')] }
     const served = new Map<string, ServedTree | null>([
       ['plugin.com', { root: 'r1', nodes: [node('games', 'g1')] }],
@@ -219,21 +221,78 @@ describe('the host directory', () => {
     expect(VIEW).not.toMatch(/hd-domains|#renderDomains\(|hd-hostbar/)
   })
 
-  it('is an accordion with one search: one domain section open at a time, a search finishing into lines', () => {
+  it('is a rail of hosts with one pane open, and one search finishing into lines', () => {
     // Jaime 2026-09-13: "only vertical lists of domains and of the installable
-    // updatables… it is a drill down… accordion style with a search."
-    const toggle = VIEW.slice(VIEW.indexOf('#toggleSection(zone: string): void {'))
-    expect(toggle).toMatch(/if \(this\.#section === zone\) \{ this\.#section = null; this\.#scope = '' \}\s*else \{ this\.#section = zone; this\.#scope = zone \}/)
-    expect(VIEW).toMatch(/header\.setAttribute\('aria-expanded', String\(open\)\)/)
+    // updatables… it is a drill down… accordion style with a search." The
+    // accordion became a rail when the window went full screen (2026-11-04):
+    // the list of hosts stays down the left, the chosen host's pane opens in
+    // the middle, and the search still finishes into lines.
+    const select = VIEW.slice(VIEW.indexOf('#selectHost(zone: string): void {'))
+    expect(select).toMatch(/this\.#section = zone\s*this\.#scope = zone/)
+    expect(VIEW).toMatch(/header\.setAttribute\('aria-current', 'true'\)/)
     expect(VIEW).toMatch(/if \(this\.#query\.trim\(\)\) \{ this\.#renderMatches\(body, domains\); return \}/)
-    // Escape clears the search first, then a drill, then the open section.
-    const back = VIEW.slice(VIEW.indexOf('#back(): boolean {'))
-    expect(back.indexOf("if (this.#query) { this.#query = ''")).toBeLessThan(back.indexOf('if (this.#section !== null)'))
+    // A desk opens onto a host: there is always one pane, never a shut list.
+    expect(VIEW).toMatch(/#section = ''/)
+    expect(VIEW).not.toMatch(/#toggleSection|#renderAccordion|#section !== null/)
+    // Escape clears the search first, then a drill; at the top of a host it has nothing.
+    const back = VIEW.slice(VIEW.indexOf('#back(): boolean {'), VIEW.indexOf('// ── what is on screen'))
+    expect(back.indexOf("if (this.#query) { this.#query = ''")).toBeLessThan(back.indexOf("if (this.#view === 'list')"))
+    expect(back).not.toMatch(/this\.#section/)
     expect(EN['hosts.search']).toBeTruthy()
   })
 
+  it('is a full-screen desk beside Publish, not inside it: the desks\' doors, one link out, and no publish act of its own', () => {
+    // jwize 2026-11-04: "the host window needs to be full screen". Hosts are what
+    // comes in and Publish is what goes out, so they stay two windows and meet in
+    // one button — and this window holds no act of Publish's.
+    expect(VIEW).toMatch(/panel\.dataset\['hcSheet'\] = 'full'/)
+    expect(VIEW).toMatch(/dockExclusive: false,\s*ownsSize: false/)
+    expect(VIEW).toMatch(/modes\.enter\('view:keeps-controls', HOST_DIRECTORY_WINDOW\)/)
+    expect(VIEW).toMatch(/modes\.enter\('view:active', HOST_DIRECTORY_WINDOW\)/)
+    expect(VIEW).toMatch(/\.lock\(HOST_DIRECTORY_WINDOW\)/)
+    expect(VIEW).toMatch(/\.unlock\(HOST_DIRECTORY_WINDOW\)/)
+    expect(VIEW).toMatch(/EffectBus\.emit\('keymap:unsuppress', \{ reason: HOST_DIRECTORY_WINDOW \}\)/)
+    // The desk takes the page, so Publish is reached by closing it first.
+    const open = VIEW.slice(VIEW.indexOf('#openPublish(): void {'))
+    expect(open.indexOf("EffectBus.emit('hosts:close', {})")).toBeLessThan(open.indexOf("EffectBus.emit('publish:view-toggle', {})"))
+    expect(VIEW).toMatch(/isWindowShowing\('publish-panel'\)/)
+    expect(VIEW).not.toMatch(/publish:door|publish:run|publish-groups/)
+    // Only a host has the door: this origin is no destination.
+    expect(VIEW).toMatch(/if \(domain\.zone\) \{\s*const publish = button\('hd-link hd-publish'/)
+  })
+
+  it('revisions open in a drawer beside the list and the list stays where it was', () => {
+    // The old drill replaced the list, and a breadcrumb walked back to it.
+    expect(VIEW).toMatch(/const under: View = drawer \? \(this\.#at \? 'list' : 'domains'\) : this\.#view/)
+    expect(VIEW).toMatch(/if \(open\) this\.#renderRevisions\(drawer\)/)
+    expect(VIEW).toMatch(/frame\.classList\.toggle\('with-drawer', open\)/)
+    expect(VIEW).toMatch(/\.hd-frame\.with-drawer\{grid-template-columns:/)
+  })
+
+  it('a press on the glyph shows a parked desk — the drone\'s flag already says open, so only the view can answer', () => {
+    // An Escape sweep parks every window (DOM gone, the drone never told), so the
+    // glyph's press made the drone emit the same `open` the view already held: a
+    // no-op, and the desk could only come back by a second sweep-restore.
+    const connected = VIEW.slice(VIEW.indexOf('connectedCallback(): void {'), VIEW.indexOf('disconnectedCallback(): void {'))
+    expect(connected).toMatch(/EffectBus\.on\('hosts:view-toggle', \(\) => \{\s*if \(live && this\.#wanted && !this\.#panel\) \{ this\.#mount\(\)/)
+    // A replayed press is not a press: nothing answers until the listener is in.
+    const on = connected.indexOf("EffectBus.on('hosts:view-toggle'")
+    expect(connected.indexOf('let live = false')).toBeLessThan(on)
+    expect(connected.indexOf('live = true', on)).toBeGreaterThan(on)
+  })
+
+  it('walks the rail with the arrow keys, the pane following, and your own host has its own entry', () => {
+    const keys = VIEW.slice(VIEW.indexOf('#railKeys(event: KeyboardEvent): void {'), VIEW.indexOf('#railKeys(event: KeyboardEvent): void {') + 900)
+    expect(keys).toMatch(/event\.key !== 'ArrowDown' && event\.key !== 'ArrowUp'/)
+    // Typing in the search or the add field is never taken for a walk.
+    expect(keys).toMatch(/target\.closest\('input'\)\) return/)
+    expect(VIEW).toMatch(/this\.#railFocus = next\.dataset\['pane'\] \?\? ''/)
+    expect(VIEW).toMatch(/const OWN_PANE = '#own'/)
+    expect(VIEW).toMatch(/#renderOwn\(body: HTMLElement\): void/)
+  })
+
   it('revisions are a drill-down that returns to the list, and a change reopens it where it was chosen', () => {
-    expect(VIEW).toMatch(/type View = 'domains' \| 'list' \| 'revisions' \| 'creations' \| 'mine'/)
+    expect(VIEW).toMatch(/type View = 'domains' \| 'list' \| 'revisions' \| 'creations' \| 'mine' \| 'own'/)
     expect(VIEW).toMatch(/#openRevisions\(row\.path\)/)
     expect(VIEW).toMatch(/revisionsOf\(path, this\.#sources\(\), roots\)/)
     const pick = VIEW.slice(VIEW.indexOf('async #pick('))
