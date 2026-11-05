@@ -7,6 +7,7 @@ import { HexLabelAtlas } from '../grid/hex-label.atlas.js'
 import { publishOwnedProjection } from './derived-projection-cache.js'
 import { resolveLocalResourceReference } from './local-resource-reference.js'
 import { readThumbnail, type ThumbnailStore } from './thumbnails.js'
+import { layoutReport } from './layout-report.js'
 import { HexImageAtlas } from '../grid/hex-image.atlas.js'
 import { HexSdfTextureShader, FLOWER_BLOOM_DONE } from '../grid/hex-sdf.shader.js'
 import { BLOOM_TOTAL_MS, FLOWER_CLOCK_PERIOD_S, FLOWER_INDEX_BASE, flowerRingKey, flowerSlots, manyHoneyMode, pouredInHoney } from './flower-motion.js'
@@ -8987,12 +8988,13 @@ export class ShowCellDrone extends Drone {
     const placedUnindexed = seatUnindexed(sparse, unindexed, maxSlot, this.#sessionSlotByLabel,
       navPass ? lowestFree : (s) => this.#bestFreeSlotByScore(s, maxSlot))
 
-    // Stage diagnosis: which cells came in with a persisted index vs which
-    // had to be score-filled this pass (lost/never-had index, or slot
-    // collision). A tile in the score-fill list whose slot lands past the
-    // axial map's size is the one that misses the first paint.
+    // Stage diagnosis, one short line (layout-report.ts): how many came in
+    // with a persisted index and how many were score-filled this pass; the
+    // tiles that will miss the first paint (seated past the map, or not
+    // seated at all) by name; every seat only under hc:verbose. The full
+    // listing on every layout was ~3,000 characters per 192-cell page.
     const indexedPlaced = localNames.filter(n => !unindexed.includes(n)).map(n => `${n}@${idxByName.get(n)}`)
-    console.info('[layout] indexed:', indexedPlaced.join(', ') || '(none)', '| score-filled:', placedUnindexed.join(', ') || '(none)')
+    for (const line of layoutReport({ indexed: indexedPlaced, scoreFilled: placedUnindexed, pile: unindexed, maxSlot, verbose: VERBOSE })) console.info(line)
 
     // A FRAME re-reads the whole placement through a pattern. Everything above
     // still runs, and is still what decides the tiles' RELATIVE ORDER — the
