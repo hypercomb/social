@@ -72,6 +72,10 @@ const TRANSIENT_MODES = new Set<ViewMode>([
   // lets a published game be a place somebody visits rather than a gesture
   // somebody makes from inside the hive.
   'game',
+  // Launcher screens take the whole surface — the place drawn as home screens
+  // you swipe between (launcher-view.drone.ts) — so a reload never boots into
+  // one with nothing mounted. Missed when it registered (153db8f0d).
+  'launcher',
 ])
 
 /** True when `mode` is a full-surface (canvas-covering) view. The shells

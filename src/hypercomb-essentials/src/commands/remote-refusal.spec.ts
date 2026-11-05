@@ -45,12 +45,12 @@ const guard = readFileSync(
 const remoteBlock = (): string => {
   const at = guard.indexOf('REMOTE_SUBMIT, ({ text, accept, complete })')
   expect(at).toBeGreaterThan(-1)
-  // Wide enough to reach the gate AND the behaviour's own refuse (~6.3k in,
-  // widened from 6000 on purpose when the door began running refuse,
-  // 2026-10-01) and stop before the next listener (~7.9k). Measured rather
-  // than guessed — a window that silently falls short would make these
-  // assertions pass for the wrong reason.
-  return guard.slice(at, at + 6600)
+  // Wide enough to reach the gate AND the behaviour's own refuse (~6.8k in;
+  // 6.3k when the door began running refuse, 2026-10-01, then the listener
+  // grew the settle-once guard) and stop before the next listener (~11.2k).
+  // Measured rather than guessed — a window that silently falls short would
+  // make these assertions pass for the wrong reason. Measured 2026-11-05.
+  return guard.slice(at, at + 9000)
 }
 
 describe('the remote door asks the gate, and does not judge for itself', () => {
