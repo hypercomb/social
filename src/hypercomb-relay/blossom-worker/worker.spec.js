@@ -1929,6 +1929,25 @@ test('writing an index that names attest:<record> lists its signer in that deriv
   assert.equal(stranger.status, 404)
 })
 
+test('writing an index that names pictures:<sign(name)> lists its publisher in that name\'s picture pool, and the name pool stays closed', async () => {
+  const name = 'a'.repeat(64)
+  const CONTENT = contentBag()
+  const env = { SITE_BINDINGS: '{}', HIVES: kvMap(), CONTENT }
+  const url = `https://content.hypercomb.com/${INDEXES}/${assessor}`
+  const body = JSON.stringify(await indexBy(assessorKey, { [`pictures:${name}`]: 'f'.repeat(64) }))
+  const response = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', assessorKey) }, body }), env)
+  assert.equal(response.status, 201)
+  const pool = await sha256Hex(`pictures:${name}`)
+  assert(CONTENT.held.has(`${pool}/${assessor}`), 'a member of the name\'s picture pool, named by the publisher\'s key')
+  assert(CONTENT.held.has(`${await sha256Hex('pictures:pools')}/${pool}`), 'and the pool is named among the picture pools')
+  const listing = await worker.fetch(new Request(`https://content.hypercomb.com/${pool}/`), env)
+  assert.equal(listing.status, 200)
+  assert.equal(await listing.text(), `${assessor}\n`)
+  // The name's own pool (the molecule) is never listed.
+  const molecule = await worker.fetch(new Request(`https://content.hypercomb.com/${name}/`), env)
+  assert.equal(molecule.status, 404)
+})
+
 test('a try- door lists every signed assessment of its root, and the host AI verdict', async () => {
   const [root, reviewSig, goodRecord] = ['b'.repeat(64), 'd'.repeat(64), 'c'.repeat(64)]
   const HIVES = kvMap(new Map([

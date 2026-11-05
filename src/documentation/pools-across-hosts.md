@@ -191,9 +191,18 @@ Publish act, never in the background, so a picture is public only because its
 publisher published it. Keyed by the name's signature, not the name, so the
 index carries no free text and the pool address is the molecule address with
 a colon in front. Without a host, the images wall shows only what the live
-swarm is showing. **Not built yet:** the index entry on Publish, the host
-listing rule (worker and relay), and the reader in `peer-images.ts`, which
-today asks the closed name pool and always misses.
+swarm is showing. **Built 2026-11-04:** the record is the tile's own published
+layer (already in the closure on the host), so no new format exists. Publish
+adds one entry per pictured tile of the branch in its one signed index write,
+nearest the branch root first, at most 64 (`sharing/picture-pools.ts`,
+`publish-branch.ts`); withdrawing the branch takes its entries out in the
+same write. The worker lists the keys at `sign('pictures:<sign(name)>')` from
+each index write, as it does `attest:` (`notePicturePublishers`); the relay
+derives the same listing from the indexes it holds (`picturePublishers`). The
+reader (`peer-images.ts` `meaningPoolImageCandidates`) asks
+`/<that address>/`, then each listed key's own index, and never the name pool.
+Not yet: a picture is withdrawn with its branch even when another published
+branch still carries the same layer.
 
 The same door carries what is derived from a picture (`derivations.md`): a
 thumbnail or hex sheet pair is a derivation record under `derived:<picture>`,

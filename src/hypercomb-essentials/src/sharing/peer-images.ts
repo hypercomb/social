@@ -19,7 +19,8 @@
 // Pulling the bytes and committing a pick is the picker's job, on an
 // explicit gesture. Reading this file can never move a byte of anyone's hive.
 
-import { SignatureService } from '@hypercomb/core'
+import { fetchHiveIndex } from './hive-pointer.js'
+import { picturesKey, picturesPoolAddress } from './picture-pools.js'
 
 const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
@@ -101,20 +102,14 @@ const afterPool = (host: string, job: () => Promise<void>): Promise<void> => {
   return next
 }
 
-const poolMembers = (value: unknown): string[] => {
-  const raw = Array.isArray(value)
-    ? value
-    : Array.isArray((value as { members?: unknown })?.members)
-      ? (value as { members: unknown[] }).members
-      : []
-  return raw.map(String).map(value => value.trim().toLowerCase())
-    .filter(value => SIG_RE.test(value)).slice(0, MAX_POOL_MEMBERS)
-}
-
-/** Ask known servers for sign(name), then resolve its canonical variant
- * records through the normal verified content broker. The pool index is the
- * discovery document; every member/layer/property/image byte remains
- * signature-addressed and SHA-gated by Store.getResource.
+/** Ask known hosts who offers a picture for this name, then read each one's
+ *  word from their OWN signed index (pools-across-hosts.md, "What a host
+ *  adds"). A tile's name pool is never listed by a host; a publisher names
+ *  the picture in their index as `pictures:<sign(name)>` → the tile's own
+ *  layer, and the host lists the keys that did at sign('pictures:<sign(name)>').
+ *  Membership is never trusted on its own: a key whose index no longer names
+ *  the entry is not counted, and every layer, properties and image byte is
+ *  signature-addressed and SHA-gated by Store.getResource.
  *
  * `choose` is one name the participant opened — every host is asked.
  * `scan` is the badge walking the visible hive. It asks only hosts that
@@ -130,59 +125,59 @@ export const meaningPoolImageCandidates = async (
   const hosts = mode === 'scan' ? known.filter(host => poolPublishers.has(host)) : known
   if (!hosts.length) return []
 
-  const address = await SignatureService.sign(
-    new TextEncoder().encode(name).buffer as ArrayBuffer,
-  )
-  const membersByHost = new Map<string, string[]>()
+  const key = await picturesKey(name)
+  const address = key ? await picturesPoolAddress(name) : null
+  if (!key || !address) return []
+  const publishersByHost = new Map<string, string[]>()
   const ask = async (host: string): Promise<void> => {
     if (mode === 'scan' && poolQuiet(host)) return
     try {
-      const response = await fetch(`${hostUrl(host)}/${address}`, {
-        cache: 'no-cache',
+      const response = await fetch(`${hostUrl(host)}/${address}/`, {
+        cache: 'no-store',
         signal: AbortSignal.timeout(2_500),
       })
       if (!response.ok) {
         if (response.status === 404 || response.status === 410) notePoolMiss(host)
         return
       }
-      const members = poolMembers(await response.json())
+      const publishers = listedNames(await response.text())
       poolPublishers.add(host)
       poolQuietUntil.delete(host)
-      if (members.length) membersByHost.set(host, members)
+      if (publishers.length) publishersByHost.set(host, publishers)
     } catch { notePoolMiss(host) }
   }
   await Promise.all(hosts.map(host => mode === 'scan' ? afterPool(host, () => ask(host)) : ask(host)))
 
+  const readJson = async (signature: string): Promise<Record<string, unknown> | null> => {
+    const blob = await store.getResource!(signature)
+    if (!blob) return null
+    try { return JSON.parse(await blob.text()) as Record<string, unknown> } catch { return null }
+  }
   const candidates: PeerImageCandidate[] = []
-  for (const [host, members] of membersByHost) {
-    for (const recordSig of members) {
+  for (const [host, publishers] of publishersByHost) {
+    for (const pubkey of publishers) {
       try {
-        const recordBlob = await store.getResource(recordSig)
-        if (!recordBlob) continue
-        const record = JSON.parse(await recordBlob.text()) as Record<string, unknown>
-        const layerSig = sig((record['payload'] as Record<string, unknown> | undefined)?.['layerSig'])
+        // Their own word, from their own signed index — never the listing's.
+        const index = await fetchHiveIndex(host, pubkey)
+        if (!index.ok) continue
+        const layerSig = sig(index.manifest.roots?.[key])
         if (!layerSig) continue
-        const layerBlob = await store.getResource(layerSig)
-        if (!layerBlob) continue
-        const layer = JSON.parse(await layerBlob.text()) as Record<string, unknown>
-        const propsSig = Array.isArray(layer['properties']) ? sig(layer['properties'][0]) : undefined
-        if (!propsSig) continue
-        const propsBlob = await store.getResource(propsSig)
-        if (!propsBlob) continue
-        const props = imagePropsOf(JSON.parse(await propsBlob.text()) as Record<string, unknown>)
-        if (!props) continue
-        const previewSig = previewSigOf(props)
-        if (!previewSig) continue
-        candidates.push({
-          previewSig,
-          props,
-          peers: [{ pubkey: host, label: host }],
-        })
-      } catch { /* malformed or incomplete variant — skip only this member */ }
+        const layer = await readJson(layerSig)
+        const propsSig = Array.isArray(layer?.['properties']) ? sig(layer['properties'][0]) : undefined
+        const props = propsSig ? await readJson(propsSig) : null
+        const pointers = props ? imagePropsOf(props) : undefined
+        const previewSig = pointers ? previewSigOf(pointers) : ''
+        if (!pointers || !previewSig) continue
+        candidates.push({ previewSig, props: pointers, peers: [{ pubkey, label: host }] })
+      } catch { /* an unreadable index or layer — skip only this publisher */ }
     }
   }
   return mergeCandidates(candidates)
 }
+
+/** A host's pool listing: newline-separated entry names, each a key. */
+const listedNames = (text: string): string[] =>
+  text.split(/\r?\n/).map(line => line.trim().toLowerCase()).filter(line => SIG_RE.test(line)).slice(0, MAX_POOL_MEMBERS)
 
 const sig = (value: unknown): string | undefined =>
   typeof value === 'string' && SIG_RE.test(value) ? value : undefined
