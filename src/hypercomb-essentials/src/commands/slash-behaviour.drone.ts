@@ -9,6 +9,9 @@ import type { SlashBehaviour, SlashBehaviourMatch, SlashBehaviourProvider } from
 import { readNamedTarget } from './named-target.js'
 import { readAccentTarget } from './accent-target.js'
 import { UtteranceReader } from './utterance/utterance-reader.js'
+import {
+  DEFAULT_HINT_PLACE, HINT_PLACE, HINT_PLACE_WORDS, hintPlaceOf, keepHintPlace, otherHintPlace, type HintPlace,
+} from '../presentation/tiles/hint-place.js'
 
 /** Participant-local lens: whether the prototypes filter is open. Read live
  *  on every presentation so `/prototypes` takes effect on the next keystroke
@@ -846,6 +849,66 @@ class BigHeadModeProvider implements SlashBehaviourProvider {
   }
 }
 
+/** HINTS — where a tile icon's explanation is said. Resting the pointer on an
+ *  icon says what it does: ON THE TILE, in the label that carries the tile's
+ *  name (the default), or at the TOP, in the caption under the command line.
+ *  `hints` flips between them; `hints tile` and `hints top` say which. Sticky,
+ *  kept in the store (presentation/tiles/hint-place.ts).
+ *
+ *  The one copy of the choice is the bus's: the overlay recalls the stored
+ *  record at boot and says it, so a bare `hints` flips from where it really is
+ *  and this word holds no state that could drift from the picture. */
+class HintPlaceProvider implements SlashBehaviourProvider {
+  readonly name = 'hint-place-provider'
+  readonly priority = 100
+  readonly behaviours: SlashBehaviour[] = [
+    { name: 'hints', description: 'Say what a tile icon does on the tile, or at the top', descriptionKey: 'slash.hints',
+      examples: [
+        { input: '/hints', result: 'Flip between the tile\'s own label and the top of the screen' },
+        { input: '/hints top', result: 'Say it at the top, under the command line' },
+        { input: '/hints tile', result: 'Say it on the tile, in the label that carries its name (the default)' },
+      ] }
+  ]
+
+  #place: HintPlace = DEFAULT_HINT_PLACE
+
+  constructor() {
+    EffectBus.on<{ place?: HintPlace } | undefined>(HINT_PLACE, p => {
+      const place = hintPlaceOf(p?.place)
+      if (place) this.#place = place
+    })
+  }
+
+  complete(_name: string, args: string): readonly string[] {
+    const q = args.trim().toLowerCase()
+    return q ? HINT_PLACE_WORDS.filter(w => w.startsWith(q)) : HINT_PLACE_WORDS
+  }
+
+  execute(_name: string, args: string): void {
+    const word = args.trim()
+    const asked = hintPlaceOf(word)
+    const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
+    const say = (key: string, fallback: string): string => {
+      const said = i18n?.t(key)
+      return said && said !== key ? said : fallback
+    }
+    if (word && !asked) {
+      EffectBus.emit('toast:show', { type: 'warning', message: say('hints.usage', 'Say "hints tile" or "hints top".') })
+      return
+    }
+    const next = asked ?? otherHintPlace(this.#place)
+    this.#place = next
+    EffectBus.emit(HINT_PLACE, { place: next })
+    void keepHintPlace(next)
+    EffectBus.emit('toast:show', {
+      type: 'info',
+      message: next === 'tile'
+        ? say('hints.tile', 'Icon hints show on the tile.')
+        : say('hints.top', 'Icon hints show at the top.'),
+    })
+  }
+}
+
 /** COMMAND LINE ON DEMAND — the command line leaves the bar until it is asked
  *  for. Typing a stance sigil from anywhere summons it wearing that stance (`/`
  *  commands, `?` finds, `>` names tiles), clicking away sends it off again,
@@ -1094,6 +1157,7 @@ _slashBehaviours.addProvider(new OrganizeProvider())
 _slashBehaviours.addProvider(new VoiceProvider())
 _slashBehaviours.addProvider(new PushToTalkProvider())
 _slashBehaviours.addProvider(new BigHeadModeProvider())
+_slashBehaviours.addProvider(new HintPlaceProvider())
 _slashBehaviours.addProvider(new CommandLineOnDemandProvider())
 _slashBehaviours.addProvider(new TextOnlyProvider())
 _slashBehaviours.addProvider(new DocsProvider())

@@ -42,6 +42,7 @@ import type { HostReadyPayload } from './pixi-host.worker.js'
 import { TILE_STACK_DEPTHS, type TileStackDepths } from './tile-stack.js'
 import { BLOOM, BLOOM_EASE_CSS, BLOOM_TOTAL_MS, bloomDelayMs, flowerRingKey, flowerSlots, pouredInHoney } from './flower-motion.js'
 import { raisedNameY } from './tile-action-icons.js'
+import { HINT_SAY, hintWords, type HintSay } from './hint-place.js'
 
 type Axial = { q: number; r: number }
 type CellCountPayload = { count: number; labels: string[]; coords: Axial[] }
@@ -105,6 +106,14 @@ const OVERLAY_R = 32
 const RAISED_EM = 8.4
 /** …and it may run wider than the tile: it bleeds past the border. */
 const RAISED_MAX_WIDTH_R = 3.4
+/** THE ICON HINT, said in this same label while an icon is under the pointer
+ *  (hint-place.ts): a sentence, not a name, so it WRAPS inside this wider bound
+ *  and grows UP from the plate's bottom edge — the icons below it never lose
+ *  their row. */
+const HINT_MAX_WIDTH_R = 6
+/** Half a raised plate's height in layout px (one 1-em line + .28em padding
+ *  above and below): the bottom edge a hint is anchored to. */
+const RAISED_PLATE_HALF_PX = ((1 + 0.28 * 2) / 2) * 40
 /** Runs after Pixi's own render (UPDATE_PRIORITY.LOW = −25) so the transform
  *  read is the one that was just drawn, never a frame behind. */
 const TICK_PRIORITY = -26
@@ -176,6 +185,9 @@ const STYLE = `
   background:rgba(12,12,26,.78);box-shadow:inset 0 0 0 .1em rgba(126,182,214,.45),0 .15em .5em rgba(0,0,0,.35);
   clip-path:polygon(.45em 0,100% 0,100% calc(100% - .45em),calc(100% - .45em) 100%,0 100%,0 .45em)}
 .hc-tile-name-text{min-width:0;overflow:hidden;text-overflow:ellipsis}
+/* The icon hint in the raised label: a sentence, so it wraps (its width is bounded inline) and reads as written, never uppercased. */
+.hc-tile-names .hc-tile-names-world>span.hc-raised.hc-hint{width:max-content;white-space:normal;text-align:center;line-height:1.2;letter-spacing:.04em;text-transform:none}
+.hc-tile-names .hc-tile-names-world>span.hc-raised.hc-hint .hc-tile-name-text{overflow:visible;text-overflow:clip}
 .hc-tile-name-holders{flex:none;margin-left:.45em;font-size:.5em;letter-spacing:0;color:var(--hc-tile-name-holders-color,${HOLDERS_INK})}
 .hc-tile-name-holders[hidden]{display:none}
 .hc-tile-names.hc-big-head .hc-tile-names-world>span{letter-spacing:${BIG_HEAD_TRACKING}em;text-transform:uppercase}
@@ -205,7 +217,7 @@ export class TileNameDrone extends Drone {
     'render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:geometry-changed',
     'render:set-orientation', 'render:set-pivot', 'render:set-text-only', 'tile:toggle-text',
     'tile:hover', 'overlay:band-rows', 'render:big-head-mode', 'render:name-visibility', 'render:set-hive-visible', 'render:dive', 'render:dive-painted', 'render:flower',
-    'quick-menu:many-centre', TILE_STACK_DEPTHS, 'location:changed',
+    'quick-menu:many-centre', TILE_STACK_DEPTHS, 'location:changed', HINT_SAY,
   ]
   protected override emits: string[] = ['tile-names:dom']
 
@@ -250,7 +262,10 @@ export class TileNameDrone extends Drone {
   /** A wave dive is painted over this page (render:dive-painted, count > 0). */
   #diving = false
   #hovered: string | null = null
-  #bigHead = (() => { try { return localStorage.getItem(BIG_HEAD_KEY) === '1' } catch { return false } })()
+  /** The words an icon under the pointer says, for the tile they belong to
+   *  (hint:say). That tile's raised label carries them in place of its name. */
+  #hint: { label: string; words: string } | null = null
+  #bigHead =(() => { try { return localStorage.getItem(BIG_HEAD_KEY) === '1' } catch { return false } })()
   #band: BandRowsPayload = { rows: 1, label: null }
   #last = [NaN, NaN, NaN, NaN, NaN, NaN]
   #tick = (): void => this.#follow()
@@ -312,6 +327,16 @@ export class TileNameDrone extends Drone {
       this.#placeOne(previous)
       this.#placeHovered()
     })
+    // An icon's explanation, said in the label (hint-place.ts). Two names are
+    // re-placed — the one that stops carrying words and the one that starts —
+    // and no others. An empty `label` takes the words down.
+    this.onEffect<HintSay | undefined>(HINT_SAY, (p) => {
+      const previous = this.#hint?.label ?? null
+      const words = p?.label ? hintWords(p) : ''
+      this.#hint = p?.label && words ? { label: p.label, words } : null
+      this.#placeOne(previous)
+      this.#placeOne(this.#hint?.label ?? null)
+    })
     // Depths belong to a page: arriving somewhere else drops them, so a count
     // from the last page never lands on a same-named tile of this one.
     this.onEffect<TileStackDepths>(TILE_STACK_DEPTHS, (p) => { this.#depths = p?.depths ?? {}; this.#placeHovered() })
@@ -319,6 +344,7 @@ export class TileNameDrone extends Drone {
     // until its cell-count lands. They go first; the next cell-count rebuilds them.
     this.onEffect('location:changed', () => {
       this.#depths = {}
+      this.#hint = null
       for (const span of this.#spans.values()) span.remove()
       this.#spans.clear()
       this.#cells = new Map()
@@ -662,20 +688,7 @@ export class TileNameDrone extends Drone {
   }
 
   #place(span: HTMLSpanElement, label: string, axial: Axial, sc: ShowCellLike | null): void {
-    const text = sc?.displayNameFor(label) ?? label
     const name = span.firstElementChild as HTMLElement
-    if (name.textContent !== text) name.textContent = text
-
-    // THE HOLDER COUNT — how many participants hold their own version of this
-    // tile, you included. Under the pointer only, on one name only, small and
-    // right after it: a number on every tile was noise (Jaime, 2026-09-10:
-    // "Distraction is not good"). It sits inside the name's own width, so a
-    // long name is cut a little sooner rather than the number spilling out.
-    const holders = span.lastElementChild as HTMLElement
-    const depth = label === this.#hovered ? (this.#depths[label] ?? 0) : 0
-    const count = depth > 1 ? String(depth) : ''
-    if (holders.textContent !== count) holders.textContent = count
-    if (holders.hidden !== !count) holders.hidden = !count
 
     // THE RAISED NAME. Under the pointer, on a tile that offers icons, the name
     // leaves the tile's middle and rides just above the icons' top row at half
@@ -685,6 +698,26 @@ export class TileNameDrone extends Drone {
     const iconRows = this.#band.label === label ? Math.max(1, this.#band.rows) - 1 : 0
     const nameless = !!sc && sc.nameHidden(label)
     const raised = iconRows > 0 || (label === this.#hovered && nameless)
+
+    // THE ICON HINT. While one of this tile's icons is under the pointer, the
+    // same raised label says what that icon does in place of the name, and the
+    // name is back the moment the pointer leaves it (hint-place.ts). Only a
+    // raised label carries it: the words belong to the icons it sits above.
+    const hint = raised && this.#hint?.label === label ? this.#hint.words : null
+    const text = hint ?? sc?.displayNameFor(label) ?? label
+    if (name.textContent !== text) name.textContent = text
+
+    // THE HOLDER COUNT — how many participants hold their own version of this
+    // tile, you included. Under the pointer only, on one name only, small and
+    // right after it: a number on every tile was noise (Jaime, 2026-09-10:
+    // "Distraction is not good"). It sits inside the name's own width, so a
+    // long name is cut a little sooner rather than the number spilling out.
+    // It belongs to the name, so it steps aside while the label speaks an icon.
+    const holders = span.lastElementChild as HTMLElement
+    const depth = label === this.#hovered && !hint ? (this.#depths[label] ?? 0) : 0
+    const count = depth > 1 ? String(depth) : ''
+    if (holders.textContent !== count) holders.textContent = count
+    if (holders.hidden !== !count) holders.hidden = !count
 
     const stack = this.#manyCentre
     const covered = this.#flower.some(c => c.q === axial.q && c.r === axial.r)
@@ -697,10 +730,13 @@ export class TileNameDrone extends Drone {
     const px = this.#axialToPixel(axial.q, axial.r)
     const x = px.x + this.#meshOffset.x
     if (span.classList.contains('hc-raised') !== raised) span.classList.toggle('hc-raised', raised)
+    if (span.classList.contains('hc-hint') !== !!hint) span.classList.toggle('hc-hint', !!hint)
     const y = px.y + this.#meshOffset.y + (iconRows > 0 ? raisedNameY(iconRows) * R / OVERLAY_R : 0)
-    const { maxWidth, transform } = raised
-      ? this.#placement(x, y, RAISED_EM, RAISED_MAX_WIDTH_R)
-      : this.#placement(x, y)
+    const { maxWidth, transform } = hint
+      ? this.#placement(x, y, RAISED_EM, HINT_MAX_WIDTH_R, this.#pivot, 'up')
+      : raised
+        ? this.#placement(x, y, RAISED_EM, RAISED_MAX_WIDTH_R)
+        : this.#placement(x, y)
     // A name that has not moved is not written again: every render pass places
     // every name, and at a meeting of a thousand tiles re-setting two styles
     // per name (each parsed again by the browser) was a cost of every pass —
@@ -714,12 +750,15 @@ export class TileNameDrone extends Drone {
 
   /** `em`, `widthR` and `pivot` are for the honey options and the raised name,
    *  which set their own size and bound (every other name keeps the hive's one
-   *  size and the tile's own width). */
+   *  size and the tile's own width). `grow: 'up'` holds the label's BOTTOM edge
+   *  where a one-line raised plate's bottom edge is, so words that wrap (the
+   *  icon hint) rise from the icons instead of settling over them. */
   #placement(
     x: number, y: number,
     em = this.#bigHead ? BIG_HEAD_EM : NAME_EM,
     widthR = MAX_WIDTH_R,
     pivot = this.#pivot,
+    grow: 'centre' | 'up' = 'centre',
   ): { maxWidth: string; transform: string } {
     const R = this.#geo.circumRadiusPx
 
@@ -733,7 +772,10 @@ export class TileNameDrone extends Drone {
     // the world bound divided back through the scale the span is drawn at.
     const maxWidth = `${(widthR * R) / scale}px`
     const rotate = pivot ? ' rotate(90deg)' : ''
-    const transform = `translate(${x}px,${y}px)${rotate} scale(${scale}) translate(-50%,-50%)`
+    const anchor = grow === 'up'
+      ? `translate(0,${RAISED_PLATE_HALF_PX}px) translate(-50%,-100%)`
+      : 'translate(-50%,-50%)'
+    const transform = `translate(${x}px,${y}px)${rotate} scale(${scale}) ${anchor}`
     return { maxWidth, transform }
   }
 

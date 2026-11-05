@@ -17,6 +17,7 @@ import { openTileMenu } from './viewer-walk.js'
 import { isPublishedVisitorShell } from '../../sharing/behavior-enablement.js'
 import { hoverActionsSuppressed } from '../../quickmenu/quick-menu.tile-menu.js'
 import { judgeEntry, pendingStillValid, type MapsLocation, type PendingEnter } from './tile-enter-guard.js'
+import { DEFAULT_HINT_PLACE, HINT_PLACE, HINT_SAY, hintPlaceOf, recallHintPlace, type HintPlace, type HintSay } from './hint-place.js'
 
 type CellCountPayload = { locationKey?: string; locationKnown?: boolean; count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; swarmTakeLabels?: string[]; noImageLabels?: string[]; substrateLabels?: string[]; linkLabels?: string[]; hiddenLabels?: string[]; shadedLabels?: string[]; flatPaths?: Record<string, string[]>; filterBlocked?: string[] }
 
@@ -544,6 +545,14 @@ export class TileOverlayDrone extends Drone {
   // ── Action hint state ──────────────────────────────────────────
   #hintTimer: ReturnType<typeof setTimeout> | null = null
   #hintActionName: string | null = null
+  /** Where an icon's explanation is said (hint-place.ts): on the tile's own
+   *  label by default, or the caption at the top. Set by `hint:place`. */
+  #hintPlace: HintPlace = DEFAULT_HINT_PLACE
+  /** Whether a `hint:place` has been heard — a press made before the stored
+   *  choice is read wins over it. */
+  #hintPlaceHeard = false
+  /** The hint on screen is the tile's (HINT_SAY), not the caption's. */
+  #hintOnTile = false
   /** The verb pill over the hovered tile (see SWAP_CUE_* consts). */
   #swapCue: Container | null = null
   /** Last `overlay:verb` published, so a per-move refresh that resolves to
@@ -594,9 +603,9 @@ export class TileOverlayDrone extends Drone {
     'navigation:hexagons-once',
     'sample:mode', 'select:mode', 'tile:enter-request',
     'view:open-for-tile', 'view:active',
-    'default-view:indexed',
+    'default-view:indexed', HINT_PLACE,
   ]
-  protected override emits = ['tile:hover', 'caption:show', 'caption:clear', 'tile:action', 'tile:click', 'tile:open', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-click', 'overlay:verb', 'swarm:wand', 'editor:switch-request']
+  protected override emits = ['tile:hover', 'caption:show', 'caption:clear', HINT_SAY, HINT_PLACE, 'tile:action', 'tile:click', 'tile:open', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-click', 'overlay:verb', 'swarm:wand', 'editor:switch-request']
 
   #dropDragging = false
   #dropGroupOnly = false
@@ -1139,6 +1148,21 @@ export class TileOverlayDrone extends Drone {
         this.#menuOnTile = payload?.active === true
         if (this.#menuOnTile) this.#clearHint()
         this.#updateVisibility()
+      })
+
+      // WHERE THE ICON HINT IS SAID — the `hints` word flips it. A hint already
+      // up is taken down from where it is, and the next move says it again in
+      // the new place. The stored choice is recalled once at boot and said on
+      // the bus so the word (which holds no copy of its own) learns it too.
+      this.onEffect<{ place?: HintPlace }>(HINT_PLACE, (payload) => {
+        const place = hintPlaceOf(payload?.place)
+        this.#hintPlaceHeard = true
+        if (!place || place === this.#hintPlace) return
+        this.#clearHint()
+        this.#hintPlace = place
+      })
+      void recallHintPlace().then(place => {
+        if (place && !this.#hintPlaceHeard) EffectBus.emit(HINT_PLACE, { place })
       })
 
       // SAMPLING — picking tiles with a finger. A pointer says "pick this too"
@@ -1748,11 +1772,7 @@ export class TileOverlayDrone extends Drone {
     // tile from it as well as the height, so the two cannot describe different
     // tiles. Gated on the overlay actually being visible, so a layout run while
     // the band is stood down (editing, selection, a takeover) reads as "nobody".
-    const bandLabel = this.#overlay?.visible && this.#currentAxial
-      ? this.#occupiedByAxial.get(
-          TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r),
-        )?.label ?? null
-      : null
+    const bandLabel = this.#bandTileLabel()
     this.emitEffect('overlay:band-rows', { rows: this.#bandRows, label: bandLabel })
 
     // Pin label-row icons on the NAME's row, left-aligned. The name rides just
@@ -2813,8 +2833,21 @@ export class TileOverlayDrone extends Drone {
     return window.ioc.get<I18nProvider>(I18N_IOC_KEY) ?? undefined
   }
 
-  /** The icon's explanation goes to the CAPTION (top-centre, under the command
-   *  line) — one quiet place, never a dropdown drawn over the tiles it explains. */
+  /** The label of the tile whose icons are on screen — the one the overlay is
+   *  standing over (the same fact `overlay:band-rows` states). */
+  #bandTileLabel(): string | null {
+    return this.#overlay?.visible && this.#currentAxial
+      ? this.#occupiedByAxial.get(
+          TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r),
+        )?.label ?? null
+      : null
+  }
+
+  /** The icon's explanation is said where the participant chose (`hints`): by
+   *  default ON THE TILE, in the label that carries its name (the name layer
+   *  swaps the words and puts the name back); otherwise at the CAPTION
+   *  (top-centre, under the command line). Either way one quiet place, never a
+   *  dropdown drawn over the tiles it explains. */
   #showHint(actionName: string): void {
     if (this.#menuOnTile) return
     const action = this.#actions.find(a => a.name === actionName && a.button.hovered)
@@ -2822,6 +2855,12 @@ export class TileOverlayDrone extends Drone {
     const i18n = this.#resolveI18n()
     const title = i18n?.t(action.labelKey) ?? action.name
     const text = action.descriptionKey ? (i18n?.t(action.descriptionKey) ?? '') : ''
+    const tile = this.#hintPlace === 'tile' ? this.#bandTileLabel() : null
+    if (tile) {
+      this.#hintOnTile = true
+      EffectBus.emitTransient(HINT_SAY, { label: tile, title, text } satisfies HintSay)
+      return
+    }
     this.emitEffect('caption:show', { source: HINT_CAPTION_SOURCE, title, text, icon: action.svgMarkup })
   }
 
@@ -2830,7 +2869,12 @@ export class TileOverlayDrone extends Drone {
       clearTimeout(this.#hintTimer)
       this.#hintTimer = null
     }
-    if (this.#hintActionName) this.emitEffect('caption:clear', { source: HINT_CAPTION_SOURCE })
+    if (this.#hintOnTile) {
+      this.#hintOnTile = false
+      EffectBus.emitTransient(HINT_SAY, { label: null } satisfies HintSay)
+    } else if (this.#hintActionName) {
+      this.emitEffect('caption:clear', { source: HINT_CAPTION_SOURCE })
+    }
     this.#hintActionName = null
   }
 

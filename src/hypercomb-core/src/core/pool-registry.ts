@@ -499,6 +499,11 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // The shelf's fold, sticky across boots: one current record, written only
   // when the participant folds or opens it (presentation/tiles/quick-tray.element.ts).
   'shelf:state',
+  // Where a tile icon's explanation is said — on the tile's own label, or at
+  // the top — sticky across boots: one current record, written only when the
+  // participant says `hints` (presentation/tiles/hint-place.ts). TRUTH POOL —
+  // the participant's own choice, never minted from the optimize phase.
+  'hint:place',
   // Named handfuls of tiles asked about together (assistant/context-groups.ts).
   // A group is IDENTITY over a set of signatures — two groups may hold the
   // same tiles and stay two groups — and it is participant-local working
