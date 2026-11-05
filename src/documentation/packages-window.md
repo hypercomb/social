@@ -112,10 +112,10 @@ input gate, the back gesture):
   for *update waiting* or *behind*, the name, how many packages it lists), and
   **Your host** below them, where your own host is set. The arrow keys walk it
   and the pane follows. The search and the add field sit in the rail.
-- **The chosen host's pane in the middle**: its name, its acts as a quiet row,
-  the update bar, its packages. A search finishes into lines here.
-- **Revisions open in a drawer** on the right and the list stays where it was.
-  Under about 1100px the drawer lies over the list instead of squeezing it.
+- **The chosen host's pane in the middle**: its name, its acts as a quiet row
+  and the update bar over **the columns** (below). A search finishes into lines here.
+- **Revisions open in a drawer** on the right and the columns stay where they were.
+  Under about 1100px the drawer lies over them instead of squeezing them.
 - **Hosts are what comes in; Publish is what goes out.** They stay two windows.
   A host's pane has one link, *Publish ›*, which closes the desk and opens
   Publish. This origin is no destination, so it has no link, and the desk holds
@@ -130,19 +130,68 @@ input gate, the back gesture):
   with no key (looking never mints one) and an index that does not verify show
   **no number** — an unreachable host is not an empty one. A host that answers
   404 holds no index of yours, which is the plain *nothing*.
-- **Escape** unwinds one level (search, question, warning, drawer, a branch
-  walked into) and at the top of a host does what it does everywhere: one press
-  puts every window away, and a press at once brings them back. The hosts icon
-  also brings a window the sweep parked back in one press.
+- **Escape** unwinds one level (search, question, warning, drawer, the code
+  being read, the deepest column's pick) and with nothing picked does what it does
+  everywhere: one press puts every window away, and a press at once brings them
+  back. The hosts icon also brings a window the sweep parked back in one press.
+  Escape goes by the focus, so the desk keeps it: a repaint never drops the row
+  that held it, and focus is never left on the page behind.
+
+## The columns — the Finder's column view, over code and files
+
+*jwize, 2026-11-04:* "let's make this like the mac finder of code and files with
+multiple select on all columns then you can look at code files in the matrix" …
+"multiple layers (I guess four columns) but you should be able to include stacked
+domains or hives to the searching and views."
+
+The pane under a host's acts is a column browser. The rail is its first column,
+each package level is the next, then the code files, then the matrix. The strip
+scrolls sideways when it runs deeper than fits, and a new column scrolls into view.
+
+**Picking is the Finder's, in every column**, the rail included: a click takes one
+line, ctrl/cmd-click adds or takes one away, shift-click extends from where the
+last pick was, ctrl/cmd-A takes the column. Arrow keys walk a column and the pick
+follows (shift extends), right opens the next column on its first line, left goes
+back. A pick in a column drops whatever was picked deeper.
+
+**Stacking.** Several hosts picked in the rail are *stacked*: their packages are
+one list in every column, a package several of them carry is one line, and one
+whose signature they disagree on says *differs*. The pane says *N hosts stacked*
+and draws no act of any one host. The search covers the hosts stacked — one line
+per package, saying which carry it — and choosing a line opens the columns down
+to it. (This origin is already the union of every host's list, so stacking it
+with others adds nothing.)
+
+**Packages.** Each column lists the parts of whatever the one before picked — the
+union across everything picked, across every stacked host. Rows keep their bulb,
+update mark, revisions icon and how many of your hosts carry the same signature.
+Parts inside a package are the next column; the old drill-down, its breadcrumbs
+and the row that expanded into a description are gone (a row's description is its
+tooltip).
+
+**Files.** After the deepest picked package, a column lists the code files — the
+bees — those packages declare, each once, at the package that declares it. A file
+is named by its first line, which the build writes as a comment
+(`// src/assistant/organize.drone.ts`, `// @scope/name`); until it is read the
+file is its signature.
+
+**The matrix.** Pick files and each opens in a panel of its own, side by side, as
+many across as there is room for (six at most, the rest said). A panel shows the
+file's first 300 lines with line numbers drawn by CSS, so copying takes the code and
+not the gutter; *Show the other N lines* opens the rest, and a file over 400 KB
+is read from its start only, and says so. Code is read through the Store: from what
+is held here to name the files, and **from a host only for a file that is picked**
+— a bundle can be a megabyte and nobody asked for it. A signature is immutable, so
+what was read is kept.
+
+Not built: syntax colour, a search inside the code, picking several versions of
+one file to compare, and a bulb or update that acts on the whole pick at once (each
+still acts on its own row).
 
 - **This origin** — the first rail entry — is every package any of your hosts
   carries, one row per path, on or shaded. **A host** is the same list
   filtered to what that host carries. Beside each row, how many of your hosts
   carry that SAME signature at that path.
-- **Walk in**: a row with parts inside it opens into its children, with the way
-  back above the list. A search reaches every depth beneath where you are.
-- **A row is a heading**: one opens at a time, showing its description and
-  every host carrying it, at which version.
 - **Update**: a row the followed publisher moved wears an *update* mark —
   pressing it picks the followed revision of that package alone. *Update all*
   at the top moves the trunk.
@@ -151,7 +200,7 @@ input gate, the back gesture):
   from the trunk, the picks' roots, the followed head and each host's recent
   roots — marked *running* and *latest*. Choose one and the app restarts back
   at the list you chose it from.
-- **A host** carries its own acts above its list: its Creations (a drill of
+- **A host** carries its own acts above the columns: its Creations (a pane of
   their own), Visit (never drawn on this origin — a second tab on your own hive
   is a second writer on one store), and removing it.
 - A shell with no installed package (the dev shell imports modules from source)

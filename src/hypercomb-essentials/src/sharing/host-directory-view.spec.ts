@@ -10,7 +10,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import type { InstallNode, InstallRevision } from '@hypercomb/core'
-import { publishedCount, publishedOn, directoryRows, domainRows, filesOf, hostBehind, isOlder, namedFromVerdict, namedWhenUninstalled, offerableRoots, offeredRevisions, updateProgress, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, type ServedTree } from './host-directory.view'
+import { NOTHING_PICKED, codeLines, codeName, filesPicked, pickAll, pickKey, pickMode, publishedCount, publishedOn, stackRows, stillPicked, directoryRows, domainRows, filesOf, hostBehind, isOlder, namedFromVerdict, namedWhenUninstalled, offerableRoots, offeredRevisions, updateProgress, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, type ServedTree } from './host-directory.view'
 import { ATTESTED_PACKAGES_KEY, attestPackage } from './package-attestation'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -227,16 +227,24 @@ describe('the host directory', () => {
     // accordion became a rail when the window went full screen (2026-11-04):
     // the list of hosts stays down the left, the chosen host's pane opens in
     // the middle, and the search still finishes into lines.
-    const select = VIEW.slice(VIEW.indexOf('#selectHost(zone: string): void {'))
-    expect(select).toMatch(/this\.#section = zone\s*this\.#scope = zone/)
+    // The rail is the first column of a column browser (the Finder's): a click picks a
+    // host, ctrl/cmd stacks another, and the first of the stack is the one whose acts show.
+    const pick = VIEW.slice(VIEW.indexOf('#pickHost(zone: string, mode: PickMode, order: readonly string[]): void {'))
+    expect(pick).toMatch(/let stack = pickKey\(this\.#stack, zone, mode, order\)/)
+    expect(pick).toMatch(/if \(!stack\.keys\.length\) stack = \{ keys: \[zone\], anchor: zone \}/)
+    expect(pick).toMatch(/this\.#section = stack\.keys\[0\] \?\? ''\s*this\.#scope = this\.#section/)
+    expect(VIEW).toMatch(/header\.addEventListener\('click', event => this\.#pickHost\(domain\.zone, pickMode\(event\), order\)\)/)
     expect(VIEW).toMatch(/header\.setAttribute\('aria-current', 'true'\)/)
     expect(VIEW).toMatch(/if \(this\.#query\.trim\(\)\) \{ this\.#renderMatches\(body, domains\); return \}/)
     // A desk opens onto a host: there is always one pane, never a shut list.
     expect(VIEW).toMatch(/#section = ''/)
     expect(VIEW).not.toMatch(/#toggleSection|#renderAccordion|#section !== null/)
-    // Escape clears the search first, then a drill; at the top of a host it has nothing.
+    // Escape clears the search first, then the pane over the columns, then the code being
+    // read, then the deepest pick; with nothing picked it has nothing and the desk closes.
     const back = VIEW.slice(VIEW.indexOf('#back(): boolean {'), VIEW.indexOf('// ── what is on screen'))
-    expect(back.indexOf("if (this.#query) { this.#query = ''")).toBeLessThan(back.indexOf("if (this.#view === 'list')"))
+    const rungs = ["if (this.#query) { this.#query = ''", "if (this.#view !== 'domains')", 'if (this.#files.keys.length)', 'const deepest = this.#cols.map']
+    expect(rungs.map(rung => back.indexOf(rung))).toEqual([...rungs.map(rung => back.indexOf(rung))].sort((a, b) => a - b))
+    expect(rungs.every(rung => back.includes(rung))).toBe(true)
     expect(back).not.toMatch(/this\.#section/)
     expect(EN['hosts.search']).toBeTruthy()
   })
@@ -263,7 +271,7 @@ describe('the host directory', () => {
 
   it('revisions open in a drawer beside the list and the list stays where it was', () => {
     // The old drill replaced the list, and a breadcrumb walked back to it.
-    expect(VIEW).toMatch(/const under: View = drawer \? \(this\.#at \? 'list' : 'domains'\) : this\.#view/)
+    expect(VIEW).toMatch(/const under: View = drawer \? 'domains' : this\.#view/)
     expect(VIEW).toMatch(/if \(open\) this\.#renderRevisions\(drawer\)/)
     expect(VIEW).toMatch(/frame\.classList\.toggle\('with-drawer', open\)/)
     expect(VIEW).toMatch(/\.hd-frame\.with-drawer\{grid-template-columns:/)
@@ -328,6 +336,138 @@ describe('the host directory', () => {
     expect(VIEW).toMatch(/span\.hidden = count === undefined \|\| count === null/)
   })
 
+  it('picks as the Finder picks: a click takes one, ctrl/cmd adds or removes, shift extends from the anchor', () => {
+    const order = ['a', 'b', 'c', 'd', 'e']
+    let picked = pickKey(NOTHING_PICKED, 'b', 'only', order)
+    expect(picked).toEqual({ keys: ['b'], anchor: 'b' })
+    picked = pickKey(picked, 'd', 'toggle', order)
+    expect(picked).toEqual({ keys: ['b', 'd'], anchor: 'd' })
+    picked = pickKey(picked, 'b', 'toggle', order)
+    expect(picked).toEqual({ keys: ['d'], anchor: 'b' })
+    // A run is from the anchor, and it stays the anchor as the run grows or shrinks — in either direction.
+    picked = pickKey(pickKey(NOTHING_PICKED, 'b', 'only', order), 'd', 'range', order)
+    expect(picked).toEqual({ keys: ['b', 'c', 'd'], anchor: 'b' })
+    expect(pickKey(picked, 'a', 'range', order)).toEqual({ keys: ['a', 'b'], anchor: 'b' })
+    expect(pickKey(picked, 'c', 'range', order).keys).toEqual(['b', 'c'])
+    // With no anchor a shift-click is just a click; a key the column does not have takes one only.
+    expect(pickKey(NOTHING_PICKED, 'c', 'range', order)).toEqual({ keys: ['c'], anchor: 'c' })
+    expect(pickKey(picked, 'zzz', 'range', order)).toEqual({ keys: ['zzz'], anchor: 'zzz' })
+    // Select all keeps the anchor if it is still there.
+    expect(pickAll({ keys: ['b'], anchor: 'b' }, order)).toEqual({ keys: order, anchor: 'b' })
+    expect(pickAll(NOTHING_PICKED, order).anchor).toBe('a')
+    // Modifiers: shift extends, ctrl or cmd adds, nothing replaces — and shift wins.
+    expect(pickMode({ shiftKey: false, ctrlKey: false, metaKey: false })).toBe('only')
+    expect(pickMode({ shiftKey: false, ctrlKey: true, metaKey: false })).toBe('toggle')
+    expect(pickMode({ shiftKey: false, ctrlKey: false, metaKey: true })).toBe('toggle')
+    expect(pickMode({ shiftKey: true, ctrlKey: true, metaKey: false })).toBe('range')
+    // A column that changed under a pick does not keep a line it no longer has.
+    expect(stillPicked({ keys: ['a', 'x'], anchor: 'x' }, ['a', 'b'])).toEqual({ keys: ['a'], anchor: 'a' })
+    const same = { keys: ['a'], anchor: 'a' }
+    expect(stillPicked(same, ['a', 'b'])).toBe(same)
+  })
+
+  it('stacks hosts as one list: one line per package, who carries it, and whether they disagree', () => {
+    const row = (path: string, layerSig: string, extra: Partial<ReturnType<typeof rows>[number]> = {}) =>
+      ({ path, name: path, description: '', layerSig, on: false, held: false, blockedBy: '', update: false, picked: false, hidden: 0, count: 1, children: 0, ...extra })
+    const stacked = stackRows([
+      { zone: 'one.com', rows: [row('games', 'g1', { children: 2 }), row('notes', 'n1')] },
+      { zone: 'two.com', rows: [row('games', 'g1', { children: 3, count: 2 }), row('themes', 't1')] },
+      { zone: 'three.com', rows: [row('notes', 'n2', { update: true })] },
+    ])
+    expect(stacked.map(r => r.path)).toEqual(['games', 'notes', 'themes'])
+    const games = stacked.find(r => r.path === 'games')!
+    expect(games.zones).toEqual(['one.com', 'two.com'])
+    expect(games.differs).toBe(false)
+    // The most any host says of its parts and of who carries it; the same signature is no difference.
+    expect([games.children, games.count]).toEqual([3, 2])
+    const notes = stacked.find(r => r.path === 'notes')!
+    expect(notes.zones).toEqual(['one.com', 'three.com'])
+    expect(notes.differs).toBe(true)
+    expect(notes.update).toBe(true)
+    // What runs here comes first, then by path.
+    expect(stackRows([{ zone: 'a', rows: [row('b', 'x'), row('a', 'y', { on: true })] }]).map(r => r.path)).toEqual(['a', 'b'])
+    expect(stackRows([])).toEqual([])
+  })
+
+  it('lists the code files of what is picked: each bee once, at the package that declares it', () => {
+    const sig = (n: number): string => String(n).repeat(64).slice(0, 64)
+    const layer = (path: string, bees: string[]) => ({ ...node(path, sig(9), [], ''), bees })
+    const nodes = [
+      layer('games', [sig(1), sig(2) + '.js']),
+      layer('games/arkanoid', [sig(3)]),
+      layer('notes', [sig(4)]),
+      // A second host's version of games: the same bee again, and one more.
+      layer('games', [sig(1), sig(5)]),
+    ]
+    expect(filesPicked(nodes, ['games']).map(f => f.sig)).toEqual([sig(1), sig(2), sig(5)])
+    expect(filesPicked(nodes, ['games', 'notes']).map(f => f.sig)).toEqual([sig(1), sig(2), sig(5), sig(4)])
+    expect(filesPicked(nodes, ['games']).every(f => f.path === 'games')).toBe(true)
+    expect(filesPicked(nodes, ['nothing'])).toEqual([])
+    // Only a signature is a file: a malformed entry is never listed.
+    expect(filesPicked([layer('x', ['not-a-sig', sig(6)])], ['x']).map(f => f.sig)).toEqual([sig(6)])
+  })
+
+  it('names a code file by its first line, and slices it into the lines a panel shows', () => {
+    expect(codeName('// @hypercomb/essentials/games/solomon\nexport {}')).toBe('@hypercomb/essentials/games/solomon')
+    expect(codeName('//src/sharing/host.ts\n')).toBe('src/sharing/host.ts')
+    expect(codeName('var a = 1\n// later')).toBe('')
+    expect(codeName('')).toBe('')
+    expect(codeName('// ' + 'x'.repeat(300)).length).toBe(90)
+    expect(codeLines('a\nb\nc', 2)).toEqual({ lines: ['a', 'b'], more: 1 })
+    expect(codeLines('a\nb', 5)).toEqual({ lines: ['a', 'b'], more: 0 })
+    expect(codeLines('', 5)).toEqual({ lines: [''], more: 0 })
+  })
+
+  it('is a column browser: stacked hosts feed the search and every column, files and code come last', () => {
+    // jwize 2026-11-04: "like the mac finder of code and files with multiple select on all
+    // columns then you can look at code files in the matrix" … "stacked domains or hives to
+    // the searching and views."
+    expect(VIEW).toMatch(/#columnModel\(\): \{ rows: StackRow\[\]; picked: Picked; parents: string\[\] \}\[\]/)
+    // Each column is the parts of what the one before picked — across every stacked host.
+    expect(VIEW).toMatch(/stackRows\(this\.#stack\.keys\.flatMap\(zone => parents\.map\(at => \(\{ zone, rows: this\.#rows\(zone, at, ''\) \}\)\)\)\)/)
+    // A pick in a column drops what was picked deeper, and the files with it.
+    const pickPackage = VIEW.slice(VIEW.indexOf('#pickPackage(k: number'))
+    expect(pickPackage.slice(0, 520)).toMatch(/this\.#cols = \[\.\.\.this\.#cols\.slice\(0, k\), pickKey\(/)
+    expect(pickPackage.slice(0, 520)).toMatch(/this\.#files = NOTHING_PICKED/)
+    // A row picks on any click that is not on one of its own buttons; its name is the line.
+    expect(VIEW).toMatch(/closest\('button:not\(\.hd-name\), a'\)\) return/)
+    // The search covers the hosts stacked, one line per package however many carry it.
+    const matches = VIEW.slice(VIEW.indexOf('#renderMatches(body: HTMLElement'), VIEW.indexOf('#firewallToggle('))
+    expect(matches).toMatch(/stackRows\(stacked\)/)
+    expect(matches).toMatch(/this\.#stack\.keys\.map\(zone => \(\{ zone, rows: this\.#rows\(zone, '', this\.#query\) \}\)\)/)
+    // Choosing a line opens the columns down to it, and the row takes focus — so Escape, which
+    // goes by focus, unwinds this desk instead of putting every window away.
+    expect(matches).toMatch(/this\.#focusKey = match\.path/)
+    // Hosts stacked are one pane: no act of one host is drawn over several.
+    expect(VIEW).toMatch(/if \(this\.#stack\.keys\.length > 1\) \{/)
+    // Arrow keys walk a column, shift extends, right opens the next, ctrl/cmd-A takes the lot.
+    expect(VIEW).toMatch(/event\.key === 'ArrowDown'\) next\(1\)/)
+    expect(VIEW).toMatch(/pick\(key, event\.shiftKey \? 'range' : 'only'\)/)
+    expect(VIEW).toMatch(/\(event\.ctrlKey \|\| event\.metaKey\)\) \{\s*event\.preventDefault\(\)/)
+    // A redraw puts each column's scroll and the focus back — whichever row held it, for any
+    // repaint — and the focus never falls to the body, where Escape would put every window away.
+    expect(VIEW).toMatch(/column\.scrollTop = scrolls\[at\] \?\? 0/)
+    expect(VIEW).toMatch(/this\.#restoreFocus\(strip, held\)/)
+    expect(VIEW).toMatch(/if \(document\.activeElement === document\.body\) this\.#panel\?\.focus\(\{ preventScroll: true \}\)/)
+  })
+
+  it('reads code from what is held, and from a host only for a file that is picked — never a bundle nobody asked for', () => {
+    const want = VIEW.slice(VIEW.indexOf('#wantCode(files: readonly FileRow[]): void {'), VIEW.indexOf('async #askCode('))
+    expect(want).toMatch(/if \(picked\.has\(sig\)\) void this\.#askCode\(sig, true\)/)
+    expect(want).toMatch(/else if \(!this\.#heldNot\.has\(sig\)\) void this\.#askCode\(sig, false\)/)
+    const ask = VIEW.slice(VIEW.indexOf('async #askCode('), VIEW.indexOf('#codeSoon(): void {'))
+    expect(ask).toMatch(/remote \? await store\?\.getResource\?\.\(sig\) : await store\?\.getResourceLocal\?\.\(sig\)/)
+    // A big file is read from its start only, and the panel says so.
+    expect(ask).toMatch(/const cut = blob\.size > CODE_KEEP/)
+    expect(VIEW).toMatch(/const CODE_PANELS = 6/)
+    // The matrix: one panel per picked file, the count capped and the rest said.
+    expect(VIEW).toMatch(/this\.#files\.keys\.slice\(0, CODE_PANELS\)/)
+    expect(VIEW).toMatch(/\.hd-matrix\{[^}]*grid-template-columns:repeat\(auto-fit,minmax\(22rem,1fr\)\)/)
+    // Line numbers are drawn by CSS, so copying a file copies the code and not the gutter.
+    expect(VIEW).toMatch(/\.hd-code \.cl::before\{content:counter\(l\)/)
+    expect(VIEW).toMatch(/user-select:none/)
+  })
+
   it('walks the rail with the arrow keys, the pane following, and your own host has its own entry', () => {
     const keys = VIEW.slice(VIEW.indexOf('#railKeys(event: KeyboardEvent): void {'), VIEW.indexOf('#railKeys(event: KeyboardEvent): void {') + 900)
     expect(keys).toMatch(/event\.key !== 'ArrowDown' && event\.key !== 'ArrowUp'/)
@@ -339,7 +479,7 @@ describe('the host directory', () => {
   })
 
   it('revisions are a drill-down that returns to the list, and a change reopens it where it was chosen', () => {
-    expect(VIEW).toMatch(/type View = 'domains' \| 'list' \| 'revisions' \| 'creations' \| 'mine' \| 'own'/)
+    expect(VIEW).toMatch(/type View = 'domains' \| 'revisions' \| 'creations' \| 'mine' \| 'own'/)
     expect(VIEW).toMatch(/#openRevisions\(row\.path\)/)
     expect(VIEW).toMatch(/revisionsOf\(path, this\.#sources\(\), roots\)/)
     const pick = VIEW.slice(VIEW.indexOf('async #pick('))
@@ -484,7 +624,7 @@ describe('the host directory', () => {
   it('takes nothing from a host it may not offer, and says the host is behind instead of leading into the gate', () => {
     const carrying = VIEW.slice(VIEW.indexOf('#carrying(path: string): ServedTree | null {'))
     expect(carrying.slice(0, 400)).toMatch(/this\.#offerable\(tree\.root\)/)
-    const list = VIEW.slice(VIEW.indexOf('#packageList(rows: readonly DirectoryRow[]): HTMLElement {'))
+    const list = VIEW.slice(VIEW.indexOf('#packageColumn(rows: readonly StackRow[]'))
     expect(list).toMatch(/const untakeable = !row\.held && !this\.#carrying\(row\.path\)/)
     expect(list).toMatch(/\|\| untakeable\n/)
     const toggle = VIEW.slice(VIEW.indexOf('async #toggle(row: DirectoryRow)'), VIEW.indexOf('async #takeUpdate('))
@@ -493,7 +633,7 @@ describe('the host directory', () => {
   })
 
   it('an update no host can serve yet is said plainly, with the hosts behind — and no Update all button', () => {
-    const section = VIEW.slice(VIEW.indexOf('#sectionBody(zone: string): HTMLElement {'), VIEW.indexOf('#renderBranch(body: HTMLElement): void {'))
+    const section = VIEW.slice(VIEW.indexOf('#sectionBody(zone: string): HTMLElement {'), VIEW.indexOf('// ── the columns'))
     const notHeld = section.slice(section.indexOf('} else if (!zone && (trunk || runsSource()) && this.#named && this.#named !== trunk && !this.#reading) {'), section.indexOf('if (reach && !trunk) {'))
     expect(notHeld).toMatch(/t\('packages\.updates\.not-held'/)
     expect(notHeld).toMatch(/this\.#isBehind\(host\)/)

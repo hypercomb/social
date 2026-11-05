@@ -503,6 +503,116 @@ export const rootsFor = (revision: InstallRevision, trunk: string | null): strin
   return trunk && roots.includes(trunk) ? [trunk, ...roots.filter(root => root !== trunk)] : roots
 }
 
+// ── the browser's pure part: picking, stacking, files, code ──────────────────
+//
+// The desk is a column browser, as the Finder's is: a plain click picks one
+// line, ctrl/cmd-click adds or takes one away, shift-click extends from where
+// the last pick was, and whatever is picked in a column opens the next one.
+
+/** What is picked in one column, and where the last pick was (the anchor a
+ *  shift-click extends from). */
+export interface Picked { readonly keys: readonly string[]; readonly anchor: string | null }
+export const NOTHING_PICKED: Picked = { keys: [], anchor: null }
+export type PickMode = 'only' | 'toggle' | 'range'
+
+/** The Finder's rules. `order` is the column as it is drawn, top to bottom. */
+export function pickKey(picked: Picked, key: string, mode: PickMode, order: readonly string[]): Picked {
+  if (mode === 'toggle') {
+    return { keys: picked.keys.includes(key) ? picked.keys.filter(k => k !== key) : [...picked.keys, key], anchor: key }
+  }
+  if (mode === 'range' && picked.anchor !== null) {
+    const from = order.indexOf(picked.anchor)
+    const to = order.indexOf(key)
+    if (from >= 0 && to >= 0) return { keys: order.slice(Math.min(from, to), Math.max(from, to) + 1), anchor: picked.anchor }
+  }
+  return { keys: [key], anchor: key }
+}
+
+/** Every line of a column, the anchor staying where it was. */
+export const pickAll = (picked: Picked, order: readonly string[]): Picked =>
+  ({ keys: [...order], anchor: picked.anchor !== null && order.includes(picked.anchor) ? picked.anchor : order[0] ?? null })
+
+/** How a click or a key picks: shift extends, ctrl or cmd adds, nothing replaces. */
+export const pickMode = (event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }): PickMode =>
+  event.shiftKey ? 'range' : (event.ctrlKey || event.metaKey) ? 'toggle' : 'only'
+
+/** Only what is still on offer stays picked: a column that changed under a pick
+ *  does not keep a line it no longer has. */
+export const stillPicked = (picked: Picked, order: readonly string[]): Picked => {
+  const keys = picked.keys.filter(key => order.includes(key))
+  return keys.length === picked.keys.length ? picked : { keys, anchor: picked.anchor !== null && keys.includes(picked.anchor) ? picked.anchor : keys[0] ?? null }
+}
+
+/** A line of the stacked list: one package, however many of the stacked hosts
+ *  carry it. `differs` — they do not all carry the SAME signature. */
+export interface StackRow extends DirectoryRow {
+  zones: readonly string[]
+  differs: boolean
+}
+
+/**
+ * SEVERAL HOSTS AS ONE LIST. Each host's own lines in, one line per package
+ * out: the first host that lists a path supplies it, `zones` says who else
+ * does, and `differs` says whether they disagree about the signature. The
+ * order is the list's own — what runs first, then by path.
+ */
+export function stackRows(lists: ReadonlyArray<{ zone: string; rows: readonly DirectoryRow[] }>): StackRow[] {
+  const merged = new Map<string, StackRow>()
+  for (const { zone, rows } of lists) {
+    for (const row of rows) {
+      const seen = merged.get(row.path)
+      if (!seen) { merged.set(row.path, { ...row, zones: [zone], differs: false }); continue }
+      merged.set(row.path, {
+        ...seen,
+        zones: [...seen.zones, zone],
+        differs: seen.differs || seen.layerSig !== row.layerSig,
+        update: seen.update || row.update,
+        count: Math.max(seen.count, row.count),
+        children: Math.max(seen.children, row.children),
+      })
+    }
+  }
+  return [...merged.values()].sort((a, b) => Number(b.on) - Number(a.on) || a.path.localeCompare(b.path))
+}
+
+/** A code file a package declares, and the package that declares it. */
+export interface FileRow { sig: string; path: string }
+
+/**
+ * THE FILES OF WHAT IS PICKED: the bees the picked packages declare, each once
+ * per package that declares it. `nodes` are the layers as they were read; a
+ * picked path with several versions across the stacked hosts lists the files
+ * of every version, so nothing a host carries is hidden behind another.
+ */
+export function filesPicked(nodes: readonly InstallNode[], paths: readonly string[]): FileRow[] {
+  const wanted = new Set(paths)
+  const seen = new Set<string>()
+  const files: FileRow[] = []
+  for (const node of nodes) {
+    if (!wanted.has(node.path)) continue
+    for (const sig of node.bees) {
+      const bare = bareSig(sig)
+      if (!SIG_RE.test(bare) || seen.has(bare)) continue
+      seen.add(bare)
+      files.push({ sig: bare, path: node.path })
+    }
+  }
+  return files.sort((a, b) => a.path.localeCompare(b.path) || a.sig.localeCompare(b.sig))
+}
+
+/** What a code file calls itself: its first line, when that is a comment (the
+ *  build writes `// @scope/name` there). '' when it is not. */
+export const codeName = (text: string): string => {
+  const first = text.slice(0, 400).split('\n', 1)[0]?.trim() ?? ''
+  return first.startsWith('//') ? first.replace(/^\/\/+\s*/, '').slice(0, 90) : ''
+}
+
+/** The first `max` lines, and how many more there are. */
+export const codeLines = (text: string, max: number): { lines: string[]; more: number } => {
+  const all = text.split('\n')
+  return { lines: all.slice(0, max), more: Math.max(0, all.length - max) }
+}
+
 // ── the element ──────────────────────────────────────────────────────────────
 
 /** Mirrors HostCreationRow (static-peers.drone.ts). `offer` is sent back
@@ -523,7 +633,14 @@ interface MineRow {
   host: string
 }
 
-type View = 'domains' | 'list' | 'revisions' | 'creations' | 'mine' | 'own'
+type View = 'domains' | 'revisions' | 'creations' | 'mine' | 'own'
+
+/** How much of a code file is read, how many lines show at first, and how many
+ *  files are read side by side in the matrix. */
+const CODE_KEEP = 400_000
+const CODE_LINES = 300
+const CODE_PANELS = 6
+interface CodeRead { name: string; text: string; size: number; cut: boolean }
 
 /** The desks' shared doors (keyboard-desk, comfy-desk): the view modes that put
  *  the page behind a full-screen window to sleep, the back gesture, the input gate. */
@@ -605,6 +722,23 @@ export class HostDirectoryElement extends HTMLElement {
   #publishedAsk = new Set<string>()
   /** Which opening of the desk this is — a read that outlives its opening is dropped. */
   #opening = 0
+  /** THE BROWSER. The hosts stacked in the rail (`''` is this origin) — their
+   *  packages are one list, and the search and every column read across them. */
+  #stack: Picked = { keys: [''], anchor: '' }
+  /** What is picked in each package column, left to right. */
+  #cols: Picked[] = []
+  /** The code files picked to be read in the matrix. */
+  #files: Picked = NOTHING_PICKED
+  /** The line the keys last moved to — focused again once the columns are redrawn. */
+  #focusKey: string | null = null
+  /** Code read by signature (null: asked of the hosts and not found). A signature
+   *  is immutable, so what was read outlives an opening of the desk. */
+  #code = new Map<string, CodeRead | null>()
+  #codeAsk = new Set<string>()
+  /** Files not held here: a host is not asked for one until it is picked. */
+  #heldNot = new Set<string>()
+  #codeFull = new Set<string>()
+  #codePaint = 0
   /** The next open continues where an act left off (a restart, a notice)
    *  instead of collapsing. */
   #resume = false
@@ -659,7 +793,7 @@ export class HostDirectoryElement extends HTMLElement {
       EffectBus.on<{ open?: boolean; zones?: unknown; loaded?: boolean }>('hosts:render', (p) => {
         this.#zones = Array.isArray(p?.zones) ? p.zones.map(zoneOf).filter(Boolean) : []
         this.#loaded = !!p?.loaded
-        if (this.#scope && !this.#zones.includes(this.#scope)) this.#toDomains()
+        if (this.#stack.keys.some(zone => zone && !this.#zones.includes(zone))) this.#toDomains()
         const wanted = !!p?.open
         if (wanted !== this.#wanted) {
           this.#wanted = wanted
@@ -758,7 +892,7 @@ export class HostDirectoryElement extends HTMLElement {
     input.addEventListener('input', () => {
       this.#query = input.value
       // A search is across every host: it leaves a branch walked into, for the matches.
-      if (this.#query.trim() && this.#view !== 'domains') { this.#view = 'domains'; this.#at = ''; this.#opened = '' }
+      if (this.#query.trim() && this.#view !== 'domains') this.#view = 'domains'
       this.#renderBody()
     })
     search.append(input)
@@ -918,13 +1052,18 @@ export class HostDirectoryElement extends HTMLElement {
     const next = items[Math.max(0, Math.min(items.length - 1, at + (event.key === 'ArrowDown' ? 1 : -1)))]
     if (!next || next === target) return
     this.#railFocus = next.dataset['pane'] ?? ''
-    next.click()
+    // The hosts walked past are picked as the Finder picks them: shift extends the stack.
+    if (this.#railFocus === OWN_PANE) { this.#selectOwn(); return }
+    this.#pickHost(this.#railFocus, event.shiftKey ? 'range' : 'only', items.map(item => item.dataset['pane'] ?? '').filter(pane => pane !== OWN_PANE))
   }
 
-  /** Back to the start: this origin's pane, the search cleared. */
+  /** Back to the start: this origin alone, nothing picked, the search cleared. */
   #toDomains(): void {
+    this.#stack = { keys: [''], anchor: '' }
     this.#section = ''
     this.#scope = ''
+    this.#cols = []
+    this.#files = NOTHING_PICKED
     this.#at = ''
     this.#query = ''
     this.#view = 'domains'
@@ -933,28 +1072,48 @@ export class HostDirectoryElement extends HTMLElement {
     this.#error = ''
   }
 
-  /** A domain's section open at a path inside it: the accordion when the path
-   *  is the domain's top, the drill-down when it is a branch. */
+  /** One host, its columns open down to a path inside it: each level of the
+   *  path picked, so the parts of the path itself are the column that opens. */
   #toList(scope: string, at: string): void {
+    this.#stack = { keys: [scope], anchor: scope }
     this.#section = scope
     this.#scope = scope
+    this.#cols = this.#chainTo(at)
+    this.#files = NOTHING_PICKED
     this.#at = at
-    this.#view = at ? 'list' : 'domains'
+    this.#view = 'domains'
     this.#warning = null
     this.#opened = ''
     this.#error = ''
   }
 
-  /** A host chosen in the rail: its pane opens at its top, whatever was open. */
-  #selectHost(zone: string): void {
-    this.#section = zone
-    this.#scope = zone
-    this.#at = ''
+  /** The picks that lead down a path: one per level. */
+  #chainTo(at: string): Picked[] {
+    if (!at) return []
+    const segments = at.split('/')
+    return segments.map((_, level) => {
+      const key = segments.slice(0, level + 1).join('/')
+      return { keys: [key], anchor: key }
+    })
+  }
+
+  /** A host picked in the rail, as the Finder picks: a click takes one, ctrl/cmd
+   *  stacks another, shift stacks the run between. The hosts stacked are one
+   *  list in every column and one scope for the search. */
+  #pickHost(zone: string, mode: PickMode, order: readonly string[]): void {
+    const before = this.#stack.keys.join('\n')
+    let stack = pickKey(this.#stack, zone, mode, order)
+    // The desk always looks at something: the last host cannot be taken away.
+    if (!stack.keys.length) stack = { keys: [zone], anchor: zone }
+    this.#stack = stack
+    this.#section = stack.keys[0] ?? ''
+    this.#scope = this.#section
     this.#view = 'domains'
     this.#query = ''
-    this.#opened = ''
     this.#warning = null
     this.#error = ''
+    // A different stack is a different list, so the columns start again.
+    if (stack.keys.join('\n') !== before) { this.#cols = []; this.#files = NOTHING_PICKED; this.#at = '' }
     this.#render()
   }
 
@@ -968,24 +1127,17 @@ export class HostDirectoryElement extends HTMLElement {
   }
 
   /** Escape unwinds one level, innermost first: the search, the question, the
-   *  warning, the revisions drawer or a pane that was opened from a list, a
-   *  branch walked into. At the top of a host it has nothing, and closes the desk. */
+   *  warning, the drawer or a pane opened over the columns, the code being read,
+   *  then the deepest column's pick. With nothing picked it has nothing, and
+   *  closes the desk. */
   #back(): boolean {
     if (this.#query) { this.#query = ''; this.#render(); return true }
     if (this.#codeGate) { this.#codeGate = null; this.#renderBody(); return true }
     if (this.#warning) { this.#warning = null; this.#renderBody(); return true }
-    if (this.#view === 'revisions' || this.#view === 'creations' || this.#view === 'mine' || this.#view === 'own') {
-      this.#view = this.#at ? 'list' : 'domains'
-      this.#render()
-      return true
-    }
-    if (this.#view === 'list') {
-      this.#at = parentOf(this.#at)
-      this.#opened = ''
-      if (!this.#at) this.#view = 'domains'
-      this.#render()
-      return true
-    }
+    if (this.#view !== 'domains') { this.#view = 'domains'; this.#render(); return true }
+    if (this.#files.keys.length) { this.#files = NOTHING_PICKED; this.#renderBody(); return true }
+    const deepest = this.#cols.map(column => column.keys.length > 0).lastIndexOf(true)
+    if (deepest >= 0) { this.#cols = this.#cols.slice(0, deepest); this.#renderBody(); return true }
     return false
   }
 
@@ -1021,18 +1173,35 @@ export class HostDirectoryElement extends HTMLElement {
   #renderBody(): void {
     const body = this.#refs.get('body')
     if (!body) return
+    // The columns come back where they were: each one's scroll, how far the strip
+    // had gone sideways — and a column that is new scrolls into view.
+    const scrolls = [...body.querySelectorAll<HTMLElement>('ul.hd-col')].map(column => column.scrollTop)
+    const sideways = body.querySelector<HTMLElement>('.hd-cols')?.scrollLeft ?? 0
+    const columnsBefore = body.querySelectorAll('.hd-colbox').length
+    // A row that holds the focus keeps it through any repaint — a read landing is no reason to lose it.
+    const held = body.contains(document.activeElement)
+      ? (document.activeElement as HTMLElement).closest<HTMLElement>('li[data-key]')?.dataset['key'] ?? null
+      : null
     this.#renderRail()
     body.replaceChildren()
     if (this.#codeGate) this.#renderCodeGate(body, this.#codeGate)
-    // Revisions have a column of their own: under it the list stays where it was.
+    // Revisions have a column of their own: under it the columns stay as they were.
     const drawer = this.#view === 'revisions'
-    const under: View = drawer ? (this.#at ? 'list' : 'domains') : this.#view
+    const under: View = drawer ? 'domains' : this.#view
+    body.classList.toggle('with-columns', under === 'domains' && !this.#query.trim())
     if (under === 'domains') this.#renderPane(body)
     else if (under === 'creations') this.#renderCreations(body)
     else if (under === 'mine') this.#renderMine(body)
-    else if (under === 'own') this.#renderOwn(body)
-    else this.#renderBranch(body)
+    else this.#renderOwn(body)
     this.#renderDrawer(drawer)
+    const strip = body.querySelector<HTMLElement>('.hd-cols')
+    if (strip) {
+      strip.querySelectorAll<HTMLElement>('ul.hd-col').forEach((column, at) => { column.scrollTop = scrolls[at] ?? 0 })
+      strip.scrollLeft = strip.querySelectorAll('.hd-colbox').length > columnsBefore ? strip.scrollWidth : sideways
+      this.#restoreFocus(strip, held)
+    }
+    // Escape goes by the focus: with it on the body it would put every window away.
+    if (document.activeElement === document.body) this.#panel?.focus({ preventScroll: true })
   }
 
   /** The revisions column: shown while a package's revisions are open. */
@@ -1121,9 +1290,11 @@ export class HostDirectoryElement extends HTMLElement {
     const domains = this.#domains()
     const searching = !!this.#query.trim()
     const pane = this.#view === 'own' ? OWN_PANE : this.#section
+    const order = domains.map(domain => domain.zone)
     list.replaceChildren()
     for (const domain of domains) {
-      const open = !searching && pane === domain.zone
+      // Every host stacked is lit, not only the first.
+      const open = !searching && pane !== OWN_PANE && this.#stack.keys.includes(domain.zone)
       const li = make('li', `hd-section${domain.update ? ' has-update' : ''}${open ? ' open' : ''}`)
       const header = button('hd-domain', '', t('hosts.open-domain', 'Open {host}', { host: domain.label }))
       header.dataset['pane'] = domain.zone
@@ -1135,7 +1306,7 @@ export class HostDirectoryElement extends HTMLElement {
       const count = make('span', 'hd-count', domain.count ? String(domain.count) : '')
       if (domain.count) count.title = t('hosts.package-count', '{count} packages', { count: domain.count })
       header.append(count)
-      header.addEventListener('click', () => this.#selectHost(domain.zone))
+      header.addEventListener('click', event => this.#pickHost(domain.zone, pickMode(event), order))
       li.append(header)
       list.append(li)
     }
@@ -1168,6 +1339,15 @@ export class HostDirectoryElement extends HTMLElement {
   #renderPane(body: HTMLElement): void {
     const domains = this.#domains()
     if (this.#query.trim()) { this.#renderMatches(body, domains); return }
+    // HOSTS STACKED: one pane, and no act that belongs to one host. The packages
+    // of them all are the columns, and what the search finds is theirs.
+    if (this.#stack.keys.length > 1) {
+      const stacked = make('div', 'hd-pane-head')
+      stacked.append(make('h2', 'hd-pane-title', t('hosts.stacked', '{count} hosts stacked', { count: this.#stack.keys.length })))
+      body.append(stacked, make('p', 'hd-note hd-stack-note', this.#stack.keys.map(zone => domains.find(row => row.zone === zone)?.label ?? zone).join(' · ')))
+      body.append(this.#renderColumns())
+      return
+    }
     const domain = domains.find(row => row.zone === this.#section) ?? domains[0]
     if (!domain) return
     const head = make('div', 'hd-pane-head')
@@ -1193,6 +1373,7 @@ export class HostDirectoryElement extends HTMLElement {
     body.append(head)
     if (domain.behind) body.append(make('p', 'hd-note hd-behind', this.#behindText(domain.label)))
     body.append(this.#sectionBody(domain.zone))
+    body.append(this.#renderColumns())
   }
 
   /** The count beside the Publish door: nothing until it is told, never a zero
@@ -1278,8 +1459,9 @@ export class HostDirectoryElement extends HTMLElement {
     return own
   }
 
-  /** THE SEARCH FINISHES INTO LINES: one per matching domain, one per matching
-   *  package wherever it is carried. Choosing a line opens its place. */
+  /** THE SEARCH FINISHES INTO LINES: one per matching host, and one per matching
+   *  package across the hosts STACKED in the rail — a package several of them
+   *  carry is one line, saying which. Choosing a line opens its place. */
   #renderMatches(body: HTMLElement, domains: readonly DomainRow[]): void {
     const q = this.#query.trim().toLowerCase()
     const list = make('ul', 'hd-list hd-matches')
@@ -1293,18 +1475,23 @@ export class HostDirectoryElement extends HTMLElement {
       li.append(choose)
       list.append(li)
     }
+    // Any host whose name matches can be taken into the rail's pick.
     for (const domain of domains) {
       if (domain.label.toLowerCase().includes(q)) {
-        line(domain.label, t('hosts.domain', 'domain'), () => { this.#query = ''; this.#toList(domain.zone, ''); this.#render() }, domain.update)
+        line(domain.label, t('hosts.domain', 'domain'), () => this.#pickHost(domain.zone, 'only', [domain.zone]), domain.update)
       }
-      for (const match of this.#rows(domain.zone, '', this.#query)) {
-        line(match.path, domain.label, () => {
-          this.#query = ''
-          this.#toList(domain.zone, parentOf(match.path))
-          this.#opened = match.path
-          this.#render()
-        }, match.update)
-      }
+    }
+    const labelOf = (zone: string): string => domains.find(row => row.zone === zone)?.label ?? zone
+    const stacked = this.#stack.keys.map(zone => ({ zone, rows: this.#rows(zone, '', this.#query) }))
+    for (const match of stackRows(stacked)) {
+      line(match.path, match.zones.map(labelOf).join(' · '), () => {
+        this.#query = ''
+        this.#cols = this.#chainTo(match.path)
+        this.#files = NOTHING_PICKED
+        this.#focusKey = match.path
+        this.#view = 'domains'
+        this.#render()
+      }, match.update)
     }
     if (list.childElementCount) body.append(list)
     else body.append(make('p', 'hd-note', t('hosts.no-match', 'Nothing matches “{query}”.', { query: this.#query.trim() })))
@@ -1425,62 +1612,197 @@ export class HostDirectoryElement extends HTMLElement {
       section.append(err)
     }
 
-    const rows = this.#rows(zone, '', '')
-    if (!rows.length) {
-      section.append(make('p', 'hd-note', this.#reading || !this.#loaded
-        ? t('packages.reading', 'Reading what is served…')
-        : t('packages.empty', 'Nothing listed here yet.')))
-    } else section.append(this.#packageList(rows))
     return section
   }
 
-  /** A branch walked into: the way back, then its parts. */
-  #renderBranch(body: HTMLElement): void {
-    const crumbs = make('nav', 'hd-crumbs')
-    crumbs.setAttribute('aria-label', t('hosts.path', 'Where you are'))
-    const up = button('hd-back', '‹', t('hosts.up', 'Up one level'))
-    up.addEventListener('click', () => {
-      this.#at = parentOf(this.#at)
-      this.#opened = ''
-      if (!this.#at) this.#view = 'domains'
-      this.#render()
-    })
-    const domain = button('hd-crumb', this.#scope || this.#home || t('packages.mine', 'this hive'))
-    domain.addEventListener('click', () => { this.#at = ''; this.#opened = ''; this.#view = 'domains'; this.#render() })
-    crumbs.append(up, domain)
-    const segments = this.#at.split('/')
-    segments.forEach((segment, index) => {
-      const path = segments.slice(0, index + 1).join('/')
-      crumbs.append(make('span', 'hd-sep', '/'))
-      const crumb = button(`hd-crumb${path === this.#at ? ' here' : ''}`, segment)
-      crumb.addEventListener('click', () => { this.#at = path; this.#opened = ''; this.#renderBody() })
-      crumbs.append(crumb)
-    })
-    body.append(crumbs)
-    if (this.#isBehind(this.#scope)) body.append(make('p', 'hd-note hd-behind', this.#behindText(this.#scope)))
-    if (this.#error) {
-      const err = make('p', 'hd-error', this.#error)
-      err.setAttribute('role', 'alert')
-      body.append(err)
+  // ── the columns ──────────────────────────────────────────────────────────
+  //
+  // The Finder's column view, over what the stacked hosts carry. The first column
+  // is the rail (the hosts: stack as many as you like), each package column opens
+  // from whatever is picked in the one before it, the last column is the code
+  // files of what is picked, and a picked file is read in the matrix beside it.
+
+  /** The package columns as data: each is the merged lines of whatever the column
+   *  before it picked, across every stacked host, and what is picked in it. */
+  #columnModel(): { rows: StackRow[]; picked: Picked; parents: string[] }[] {
+    const model: { rows: StackRow[]; picked: Picked; parents: string[] }[] = []
+    let parents: string[] = ['']
+    for (let k = 0; k < 32; k++) {
+      const rows = this.#childRows(parents)
+      if (!rows.length) break
+      const picked = stillPicked(this.#cols[k] ?? NOTHING_PICKED, rows.map(row => row.path))
+      model.push({ rows, picked, parents })
+      parents = picked.keys.filter(path => (rows.find(row => row.path === path)?.children ?? 0) > 0)
+      if (!parents.length) break
     }
-    const rows = this.#rows(this.#scope, this.#at, '')
-    if (!rows.length) body.append(make('p', 'hd-note', t('packages.empty', 'Nothing listed here yet.')))
-    else body.append(this.#packageList(rows))
+    return model
   }
 
-  /** The installable, updatable packages: one vertical line each. */
-  #packageList(rows: readonly DirectoryRow[]): HTMLElement {
+  /** The lines under each of `parents`, from every stacked host, as one list. */
+  #childRows(parents: readonly string[]): StackRow[] {
+    return stackRows(this.#stack.keys.flatMap(zone => parents.map(at => ({ zone, rows: this.#rows(zone, at, '') }))))
+  }
+
+  /** Every layer read from the stacked hosts — what this origin runs and is offered
+   *  (the union a scope of `''` lists), or just what each stacked host serves. */
+  #treeNodes(): InstallNode[] {
+    const nodes: InstallNode[] = []
+    const zones = this.#stack.keys
+    if (zones.includes('')) {
+      nodes.push(...(this.#selection?.nodes ?? []), ...(this.#next?.nodes ?? []))
+      for (const tree of this.#carried()) nodes.push(...tree.nodes)
+    } else for (const zone of zones) nodes.push(...(this.#served.get(zone)?.nodes ?? []))
+    return nodes
+  }
+
+  #carried(): ServedTree[] {
+    return [...this.#served.values()].filter((tree): tree is ServedTree => !!tree && this.#offerable(tree.root))
+  }
+
+  /** The code files of the packages picked in the deepest column that has a pick. */
+  #pickedFiles(model: readonly { picked: Picked }[]): { files: FileRow[]; paths: string[] } {
+    for (let k = model.length - 1; k >= 0; k--) {
+      const paths = [...model[k]!.picked.keys]
+      if (paths.length) return { files: filesPicked(this.#treeNodes(), paths), paths }
+    }
+    return { files: [], paths: [] }
+  }
+
+  #renderColumns(): HTMLElement {
+    const strip = make('div', 'hd-cols')
+    strip.addEventListener('keydown', event => this.#colKeys(event))
+    const model = this.#columnModel()
+    if (!model.length) {
+      strip.append(make('p', 'hd-note hd-cols-empty', this.#reading || !this.#loaded
+        ? t('packages.reading', 'Reading what is served…')
+        : t('packages.empty', 'Nothing listed here yet.')))
+      this.#at = ''
+      return strip
+    }
+    const top = this.#stack.keys.length > 1
+      ? t('hosts.stacked-packages', 'Packages across {count} hosts', { count: this.#stack.keys.length })
+      : t('hosts.packages', 'Packages')
+    model.forEach(({ rows, picked, parents }, k) => {
+      strip.append(this.#packageColumn(rows, k, picked, k === 0 ? top : parents.join(' · ')))
+    })
+    // Where a restart should put you back: the one package the columns end on.
+    const last = [...model].reverse().find(column => column.picked.keys.length)
+    this.#at = last && last.picked.keys.length === 1 ? last.picked.keys[0]! : ''
+
+    const { files, paths } = this.#pickedFiles(model)
+    this.#files = stillPicked(this.#files, files.map(file => file.sig))
+    if (files.length) {
+      strip.append(this.#fileColumn(files, paths))
+      this.#wantCode(files)
+      if (this.#files.keys.length) strip.append(this.#codeMatrix(files))
+    }
+    return strip
+  }
+
+  /** A pick in a package column: what is deeper no longer applies, and the files
+   *  are the picked packages' own. */
+  #pickPackage(k: number, path: string, mode: PickMode, order: readonly string[]): void {
+    this.#cols = [...this.#cols.slice(0, k), pickKey(this.#cols[k] ?? NOTHING_PICKED, path, mode, order)]
+    this.#files = NOTHING_PICKED
+    this.#focusKey = path
+    this.#renderBody()
+  }
+
+  #pickFile(sig: string, mode: PickMode, order: readonly string[]): void {
+    this.#files = pickKey(this.#files, sig, mode, order)
+    this.#focusKey = sig
+    this.#renderBody()
+  }
+
+  /** Arrow keys walk a column and the pick follows (shift extends); right opens
+   *  the next column on its first line, left goes back; ctrl/cmd-A takes the lot. */
+  #colKeys(event: KeyboardEvent): void {
+    const target = event.target
+    if (!(target instanceof HTMLElement)) return
+    const line = target.closest<HTMLElement>('li[data-key]')
+    const column = line?.closest<HTMLElement>('ul.hd-col')
+    if (!line || !column) return
+    const lines = [...column.querySelectorAll<HTMLElement>(':scope > li[data-key]')]
+    const order = lines.map(item => item.dataset['key'] ?? '')
+    const at = lines.indexOf(line)
+    const files = column.classList.contains('hd-files')
+    const k = Number(column.dataset['col'] ?? -1)
+    const pick = (key: string, mode: PickMode): void => {
+      event.preventDefault()
+      if (files) this.#pickFile(key, mode, order)
+      else this.#pickPackage(k, key, mode, order)
+    }
+    const next = (by: number): void => {
+      const key = order[Math.max(0, Math.min(order.length - 1, at + by))]
+      if (key !== undefined) pick(key, event.shiftKey ? 'range' : 'only')
+    }
+    if (event.key === 'ArrowDown') next(1)
+    else if (event.key === 'ArrowUp') next(-1)
+    else if (event.key === 'Enter' || event.key === ' ') pick(order[at] ?? '', 'only')
+    else if ((event.key === 'a' || event.key === 'A') && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault()
+      if (files) { this.#files = pickAll(this.#files, order); this.#renderBody() }
+      else { this.#cols = [...this.#cols.slice(0, k), pickAll(this.#cols[k] ?? NOTHING_PICKED, order)]; this.#files = NOTHING_PICKED; this.#renderBody() }
+    } else if (event.key === 'ArrowRight') {
+      const beside = column.parentElement?.nextElementSibling?.querySelector<HTMLElement>('ul.hd-col > li[data-key]')
+      if (!beside) return
+      event.preventDefault()
+      const key = beside.dataset['key'] ?? ''
+      const nextFiles = beside.closest('ul.hd-col')?.classList.contains('hd-files') ?? false
+      if (nextFiles) { this.#focusKey = key; beside.focus() } else this.#pickPackage(k + 1, key, 'only', [...(beside.closest('ul.hd-col')?.querySelectorAll<HTMLElement>(':scope > li[data-key]') ?? [])].map(item => item.dataset['key'] ?? ''))
+    } else if (event.key === 'ArrowLeft') {
+      const behind = column.parentElement?.previousElementSibling
+      const before = behind?.querySelector<HTMLElement>('ul.hd-col > li[aria-selected="true"]') ?? behind?.querySelector<HTMLElement>('ul.hd-col > li[data-key]')
+      if (!before) return
+      event.preventDefault()
+      this.#focusKey = before.dataset['key'] ?? ''
+      before.focus()
+    }
+  }
+
+  /** The line the keys last moved to, focused again once the columns are redrawn. */
+  #restoreFocus(strip: ParentNode, held: string | null = null): void {
+    const key = this.#focusKey ?? held
+    this.#focusKey = null
+    if (key === null) return
+    for (const item of strip.querySelectorAll<HTMLElement>('li[data-key]')) {
+      if (item.dataset['key'] === key) { item.focus({ preventScroll: false }); break }
+    }
+  }
+
+  /** A caption over a column — what it lists. */
+  #colHead(label: string): HTMLElement {
+    const head = make('div', 'hd-colhead', label)
+    head.title = label
+    return head
+  }
+
+  /** One column of packages, one line each. Whatever is picked here opens the next. */
+  #packageColumn(rows: readonly StackRow[], k: number, picked: Picked, caption: string): HTMLElement {
     const reach = port()
     const trunk = this.#selection?.trunk ?? null
     const acts = !!reach && !!trunk
     const recursive = !!reach?.recursive
-    const list = make('ul', 'hd-list')
+    const list = make('ul', 'hd-col hd-packages')
+    list.setAttribute('role', 'listbox')
+    list.setAttribute('aria-multiselectable', 'true')
+    list.setAttribute('aria-label', caption)
+    list.dataset['col'] = String(k)
     // WHILE UPDATE ALL RUNS, the list is only what it is changing, each row
     // filling as its changed files arrive — never the whole package.
     const moving = this.#held
     const changing = moving ? rows.filter(row => row.update) : []
-    for (const row of changing.length ? changing : rows) {
+    const shown = changing.length ? changing : rows
+    const order = shown.map(row => row.path)
+    const tabbable = picked.keys.find(path => order.includes(path)) ?? order[0]
+    for (const row of shown) {
       const li = make('li', 'hd-row')
+      li.dataset['key'] = row.path
+      li.setAttribute('role', 'option')
+      li.setAttribute('aria-selected', String(picked.keys.includes(row.path)))
+      li.tabIndex = row.path === tabbable ? 0 : -1
+      if (picked.keys.includes(row.path)) li.classList.add('picked')
+      if (row.description) li.title = row.description
       const measured = moving && row.update ? updateProgress(row.path, this.#next?.nodes ?? [], this.#had, moving) : null
       // A change only in a namespace bundle has no file of its own to fill.
       const progress = measured?.total ? measured : null
@@ -1508,11 +1830,9 @@ export class HostDirectoryElement extends HTMLElement {
       bulb.append(glyph)
       bulb.addEventListener('click', () => { void this.#toggle(row) })
 
-      // A row is a heading, and one opens at a time.
-      const opened = this.#opened === row.path
+      // The name is the line: clicking it, or the row around it, picks.
       const name = button('hd-name', row.name)
-      name.setAttribute('aria-expanded', String(opened))
-      name.addEventListener('click', () => { this.#opened = opened ? '' : row.path; this.#renderBody() })
+      name.tabIndex = -1
 
       const marks = make('span', 'hd-marks')
       if (row.update) {
@@ -1524,12 +1844,15 @@ export class HostDirectoryElement extends HTMLElement {
       if (row.picked) marks.append(make('span', 'hd-mark quiet', t('hosts.picked', 'picked')))
       if (row.hidden) marks.append(make('span', 'hd-mark quiet', t('hosts.hidden-beneath', '{count} newer hidden', { count: row.hidden })))
       if (!row.held) marks.append(make('span', 'hd-mark quiet', t('packages.new', 'not here yet')))
+      // Stacked hosts that carry different signatures of one package say so.
+      if (row.differs) marks.append(make('span', 'hd-mark quiet', t('hosts.differs', 'differs')))
 
       const count = make('span', 'hd-count', row.count ? String(row.count) : '')
       if (row.count) count.title = t('hosts.carried-by', '{count} of your hosts carry this signature', { count: row.count })
 
       const revisions = button('hd-icon', '↺', t('hosts.revisions.open', 'Revisions of {name}', { name: row.path }))
       revisions.disabled = !recursive
+      revisions.tabIndex = -1
       revisions.addEventListener('click', () => { void this.#openRevisions(row.path) })
 
       if (progress) {
@@ -1550,35 +1873,137 @@ export class HostDirectoryElement extends HTMLElement {
         li.append(bar)
       }
       li.append(bulb, name, marks, count, revisions)
+      // Parts inside it open as the next column when it is picked.
       if (row.children) {
-        const walk = button('hd-icon', '›', t('hosts.walk-in', 'Open {name}', { name: row.path }))
-        walk.addEventListener('click', () => { this.#at = row.path; this.#view = 'list'; this.#opened = ''; this.#query = ''; this.#render() })
-        li.append(walk)
+        const opens = make('span', 'hd-opens', '›')
+        opens.setAttribute('aria-hidden', 'true')
+        li.append(opens)
       } else li.append(make('span', 'hd-icon-slot'))
 
-      if (opened) {
-        li.classList.add('open')
-        const detail = make('div', 'hd-detail')
-        if (row.description) detail.append(make('p', 'hd-desc', row.description))
-        const mine = this.#selection?.nodes.find(node => node.path === row.path)?.layerSig ?? ''
-        for (const [zone, tree] of this.#served) {
-          const node = tree?.nodes.find(candidate => candidate.path === row.path)
-          if (!node) continue
-          const same = node.layerSig === mine
-          detail.append(make('p', 'hd-where', `${zone} · ${node.layerSig.slice(0, 8)}${same ? ` · ${t('packages.same', 'same as here')}` : ''}`))
-        }
-        li.append(detail)
-      }
+      li.addEventListener('click', event => {
+        if ((event.target as HTMLElement).closest('button:not(.hd-name), a')) return
+        this.#pickPackage(k, row.path, pickMode(event), order)
+      })
       list.append(li)
     }
-    return list
+    const box = make('div', 'hd-colbox')
+    box.append(this.#colHead(caption), list)
+    return box
+  }
+
+  /** The last column: the code files the picked packages declare. */
+  #fileColumn(files: readonly FileRow[], paths: readonly string[]): HTMLElement {
+    const list = make('ul', 'hd-col hd-files')
+    list.setAttribute('role', 'listbox')
+    list.setAttribute('aria-multiselectable', 'true')
+    const caption = t('hosts.files-in', 'Files in {paths}', { paths: paths.join(' · ') })
+    list.setAttribute('aria-label', caption)
+    const order = files.map(file => file.sig)
+    const tabbable = this.#files.keys.find(sig => order.includes(sig)) ?? order[0]
+    for (const file of files) {
+      const read = this.#code.get(file.sig)
+      const li = make('li', 'hd-file')
+      li.dataset['key'] = file.sig
+      li.setAttribute('role', 'option')
+      li.setAttribute('aria-selected', String(this.#files.keys.includes(file.sig)))
+      li.tabIndex = file.sig === tabbable ? 0 : -1
+      if (this.#files.keys.includes(file.sig)) li.classList.add('picked')
+      const name = read?.name || file.sig.slice(0, 12)
+      li.append(make('span', 'hd-file-name', name), make('span', 'hd-file-where', `${file.path} · ${file.sig.slice(0, 8)}`))
+      li.title = `${name}\n${file.path} · ${file.sig}`
+      li.addEventListener('click', event => this.#pickFile(file.sig, pickMode(event), order))
+      list.append(li)
+    }
+    const box = make('div', 'hd-colbox')
+    box.append(this.#colHead(caption), list)
+    return box
+  }
+
+  /** THE MATRIX: every picked file read side by side, one panel each. */
+  #codeMatrix(files: readonly FileRow[]): HTMLElement {
+    const matrix = make('div', 'hd-matrix')
+    matrix.setAttribute('aria-label', t('hosts.code', 'Code'))
+    const order = files.map(file => file.sig)
+    const shown = this.#files.keys.slice(0, CODE_PANELS)
+    for (const sig of shown) {
+      const file = files.find(candidate => candidate.sig === sig)
+      const read = this.#code.get(sig)
+      const box = make('article', 'hd-codebox')
+      const head = make('header', 'hd-codehead')
+      const title = make('span', 'hd-codename', read?.name || sig.slice(0, 12))
+      title.title = sig
+      head.append(title, make('span', 'hd-codewhere', `${file?.path ?? ''} · ${sig.slice(0, 8)}${read ? ` · ${Math.max(1, Math.round(read.size / 1024))} KB` : ''}`))
+      const close = button('hd-icon', '×', t('hosts.code.close', 'Stop reading {name}', { name: read?.name || sig.slice(0, 8) }))
+      close.addEventListener('click', () => this.#pickFile(sig, 'toggle', order))
+      head.append(close)
+      box.append(head)
+      if (read === undefined) box.append(make('p', 'hd-note', t('hosts.code.reading', 'Reading…')))
+      else if (read === null) box.append(make('p', 'hd-note', t('hosts.code.missing', 'Not held here, and none of your hosts answered with it.')))
+      else {
+        const full = this.#codeFull.has(sig)
+        const { lines, more } = codeLines(read.text, full ? Number.MAX_SAFE_INTEGER : CODE_LINES)
+        const pre = make('pre', 'hd-code')
+        for (const text of lines) pre.append(make('div', 'cl', text))
+        box.append(pre)
+        if (more > 0 || read.cut) {
+          const rest = button('hd-quiet', more > 0
+            ? t('hosts.code.more', 'Show the other {count} lines', { count: more })
+            : t('hosts.code.cut', 'Only the start of this file is read'))
+          rest.disabled = more <= 0
+          rest.addEventListener('click', () => { this.#codeFull.add(sig); this.#renderBody() })
+          box.append(rest)
+        }
+      }
+      matrix.append(box)
+    }
+    if (this.#files.keys.length > shown.length) {
+      matrix.append(make('p', 'hd-note', t('hosts.code.others', '{count} more picked — the first {shown} are shown', { count: this.#files.keys.length - shown.length, shown: shown.length })))
+    }
+    return matrix
+  }
+
+  /** Code is read for what is HELD here, to name the files — and from a host only
+   *  for a file that is picked, since a bundle can be a megabyte and nobody asked. */
+  #wantCode(files: readonly FileRow[]): void {
+    const picked = new Set(this.#files.keys)
+    for (const { sig } of files) {
+      if (this.#code.has(sig)) continue
+      if (picked.has(sig)) void this.#askCode(sig, true)
+      else if (!this.#heldNot.has(sig)) void this.#askCode(sig, false)
+    }
+  }
+
+  async #askCode(sig: string, remote: boolean): Promise<void> {
+    const key = `${sig}${remote ? '+' : ''}`
+    if (this.#codeAsk.has(key)) return
+    this.#codeAsk.add(key)
+    try {
+      const store = ioc<{ getResource?(sig: string): Promise<Blob | null>; getResourceLocal?(sig: string): Promise<Blob | null> }>('@hypercomb.social/Store')
+      const blob = remote ? await store?.getResource?.(sig) : await store?.getResourceLocal?.(sig)
+      if (!blob) { if (remote) this.#code.set(sig, null); else this.#heldNot.add(sig); return }
+      const cut = blob.size > CODE_KEEP
+      const text = await (cut ? blob.slice(0, CODE_KEEP) : blob).text()
+      this.#code.set(sig, { name: codeName(text), text, size: blob.size, cut })
+      if (this.#code.size > 80) this.#code.delete(this.#code.keys().next().value as string)
+    } catch {
+      if (remote) this.#code.set(sig, null)
+    } finally {
+      this.#codeAsk.delete(key)
+      this.#codeSoon()
+    }
+  }
+
+  /** Reads land a few at a time: one repaint for them all. */
+  #codeSoon(): void {
+    if (this.#codePaint) return
+    this.#codePaint = window.setTimeout(() => { this.#codePaint = 0; if (this.#panel) this.#renderBody() }, 80)
   }
 
   #renderRevisions(body: HTMLElement): void {
     const path = this.#revPath
     const head = make('div', 'hd-crumbs')
     const back = button('hd-back', '‹', t('hosts.revisions.back', 'Back to the list'))
-    back.addEventListener('click', () => { this.#view = this.#at ? 'list' : 'domains'; this.#warning = null; this.#render() })
+    back.addEventListener('click', () => { this.#view = 'domains'; this.#warning = null; this.#render() })
     head.append(back, make('span', 'hd-drill-title', t('hosts.revisions.title', 'Revisions of {name}', { name: path })))
     body.append(head)
     if (this.#error) {
@@ -2084,6 +2509,38 @@ ${S} .hd-frame.with-drawer{grid-template-columns:minmax(13rem,18rem) minmax(0,1f
 ${S} .hd-side{min-height:0;overflow-y:auto;border-right:1px solid var(--hd-rule);padding:.5em .5em .8em;}
 ${S} .hd-main{min-width:0;min-height:0;overflow-y:auto;padding:.9em 1.3em 1.6em;}
 ${S} .hd-main > *{max-width:62rem;}
+/* THE COLUMN BROWSER. A host's pane is its acts on top and the columns under
+   them, full width and full height; every other pane keeps the readable column. */
+${S} .hd-main.with-columns{display:flex;flex-direction:column;overflow:hidden;padding:.9em 0 0;}
+${S} .hd-main.with-columns > *{max-width:none;}
+${S} .hd-main.with-columns > :not(.hd-cols){flex:0 0 auto;margin-left:1.3em;margin-right:1.3em;}
+${S} .hd-main.with-columns > .hd-cols{flex:1 1 auto;min-height:0;margin:.5em 0 0;}
+/* The host's acts sit over the columns; they scroll before they take the columns' room. */
+${S} .hd-main.with-columns > .hd-section-body{max-height:min(11rem,30vh);overflow-y:auto;}
+${S} .hd-cols{display:flex;align-items:stretch;overflow-x:auto;overflow-y:hidden;border-top:1px solid var(--hd-rule);}
+${S} .hd-cols-empty{margin:.8em 1.3em;}
+${S} .hd-colbox{flex:0 0 17rem;width:17rem;min-height:0;display:flex;flex-direction:column;border-right:1px solid var(--hd-rule);}
+${S} .hd-colhead{flex:0 0 auto;padding:.4em .75em;font-size:.68em;letter-spacing:.05em;color:var(--hd-ink-quiet);border-bottom:1px solid rgba(var(--acc),0.08);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+${S} .hd-col{flex:1 1 auto;min-height:0;overflow-y:auto;margin:0;padding:.15em 0;list-style:none;}
+${S} .hd-col > li{outline:none;}
+${S} .hd-col .hd-row{padding:.32em .6em;cursor:default;user-select:none;}
+${S} .hd-col .hd-row.picked,${S} .hd-file.picked{background:rgba(var(--acc),0.18);}
+${S} .hd-col .hd-row:focus-visible,${S} .hd-file:focus-visible{box-shadow:inset 0 0 0 2px color-mix(in srgb, rgb(var(--acc)) 72%, white);}
+${S} .hd-opens{color:var(--hd-ink-quiet);padding:0 .25em;}
+${S} .hd-file{display:grid;grid-template-columns:minmax(0,1fr);gap:.05em;padding:.38em .75em;border-bottom:1px solid rgba(var(--acc),0.06);cursor:default;user-select:none;}
+${S} .hd-file:hover{background:rgba(var(--acc),0.05);}
+${S} .hd-file-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8em;color:var(--hd-ink);}
+${S} .hd-file-where{font-size:.62em;color:var(--hd-ink-quiet);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* THE MATRIX: one panel per picked file, as many across as there is room for. */
+${S} .hd-matrix{flex:1 0 26rem;min-width:26rem;min-height:0;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(22rem,1fr));gap:.6em;padding:.6em;align-content:start;}
+${S} .hd-codebox{min-width:0;display:flex;flex-direction:column;border:1px solid var(--hd-rule);border-radius:var(--hc-radius-card,3px);background:color-mix(in srgb, rgb(var(--acc)) 2%, var(--hd-ground));}
+${S} .hd-codehead{display:flex;align-items:baseline;gap:.6em;padding:.35em .6em;border-bottom:1px solid var(--hd-rule);}
+${S} .hd-codename{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8em;color:var(--hd-ink);}
+${S} .hd-codewhere{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.62em;color:var(--hd-ink-quiet);}
+${S} .hd-code{margin:0;padding:.4em 0;overflow:auto;max-height:70vh;font-size:.7em;line-height:1.55;counter-reset:l;tab-size:2;}
+${S} .hd-code .cl{counter-increment:l;white-space:pre;padding-right:1em;}
+${S} .hd-code .cl::before{content:counter(l);display:inline-block;width:3.4em;margin-right:1em;text-align:right;color:var(--hd-ink-quiet);opacity:.55;user-select:none;}
+${S} .hd-stack-note{margin:.2em 0 .5em;}
 ${S} .hd-drawer{min-width:0;min-height:0;overflow-y:auto;border-left:1px solid var(--hd-rule);padding:.7em 1em 1.4em;background:color-mix(in srgb, rgb(var(--acc)) 3%, var(--hd-ground));}
 ${S} .hd-pane-head{display:flex;align-items:center;gap:.6em;margin:0 0 .6em;}
 ${S} .hd-pane-title{margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:1.05em;font-weight:600;color:var(--hd-ink);}
