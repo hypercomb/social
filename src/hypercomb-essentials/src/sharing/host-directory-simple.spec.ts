@@ -193,3 +193,81 @@ describe('the strings', () => {
     expect(EN['hosts.trail.files.one']).toBe('One file')
   })
 })
+
+describe('the search, pinned at the top of every page of the drill', () => {
+  // jwize 11-05: "Pin the Search in simple view wherever needed" → "basically the top of
+  // all sections in simple" → "including domains" → "the placeholder is Search Your
+  // Network (do away with header)".
+  it('is one field, built once, so a repaint never takes what is typed', () => {
+    const mount = between('  #mount(): void {', '  #unmount(): void {')
+    expect(mount).toMatch(/const drillInput = make\('input', 'hd-input hd-drill-input'\)/)
+    expect(mount).toMatch(/drillInput\.dataset\['field'\] = 'drill-search'/)
+    // A word still being composed is not a query yet.
+    expect(mount).toMatch(/drillInput\.addEventListener\('input', event => \{ if \(!\(event as InputEvent\)\.isComposing\) narrow\(\) \}\)/)
+    expect(mount).toMatch(/drillInput\.addEventListener\('compositionend', narrow\)/)
+    // The repaint gives the field back its focus and caret, as it does the editor's.
+    expect(VIEW).toMatch(/body\.querySelector<HTMLInputElement \| HTMLTextAreaElement>\(`\[data-field="\$\{typed\.field\}"\]`\)/)
+    expect(VIEW).toMatch(/t\('hosts\.search-network', 'Search Your Network'\)/)
+    expect(EN['hosts.search-network']).toBe('Search Your Network')
+  })
+
+  it('sits in the pinned bar of every page — the domains page, the drill, and the panes behind the back row', () => {
+    expect(between('  #simpleHead(', '  /** The drill\'s one search field')).toMatch(/head\.append\(this\.#drillSearchField\(\)\)/)
+    expect(between('  #backRow(): HTMLElement {', '  /** In the drill the arrows')).toMatch(/this\.#drillSearchField\(\)\)/)
+    // It takes the place of the captions over the drill's lists.
+    expect(VIEW).toMatch(/\.hd-simple \.hd-colhead\{display:none;\}/)
+    expect(VIEW).not.toMatch(/'hd-page-title'/)
+  })
+
+  it('narrows what each page shows', () => {
+    const hosts = between('  #hostsPage(', '  /** PAGE TWO')
+    expect(hosts).toMatch(/domains\.filter\(domain => this\.#hits\(domain\.label, domain\.zone\)\)/)
+    const packages = between('  /** PAGE TWO', '  /** PAGE THREE')
+    // A line is found by its own name and words, never its parent's (which every line on the page shares).
+    expect(packages).toMatch(/rows\.filter\(row => this\.#hits\(row\.name, row\.description\)\)/)
+    expect(between('  #networkMatches(', '  /** Nothing on the page')).toMatch(/!this\.#hits\(match\.name, match\.description\)/)
+    // A new query starts the page at its top.
+    expect(between('  #mount(): void {', '  #unmount(): void {')).toMatch(/this\.#query = drillInput\.value; this\.#scrollTo = 0; this\.#renderBody\(\)/)
+    expect(packages).toMatch(/files\.filter\(file => this\.#hits\(file\.name, file\.kind, file\.source, file\.description\)\)/)
+    // On the code page it finds text in the file: the lines that hold it, each with its own number.
+    expect(VIEW).toMatch(/const seek = this\.#mode === 'simple' \? this\.#query\.trim\(\)\.toLowerCase\(\) : ''/)
+    expect(VIEW).toMatch(/if \(seek\) row\.dataset\['n'\] = String\(at \+ 1\)/)
+    expect(VIEW).toMatch(/\.hd-code\.filtered \.cl::before\{content:attr\(data-n\);\}/)
+    expect(VIEW).toMatch(/known\.rows\.filter\(row => this\.#hits\(row\.title, row\.host, row\.publisherLabel\)\)/)
+    expect(VIEW).toMatch(/this\.#mine\.filter\(row => this\.#hits\(row\.name, row\.host\)\)/)
+  })
+
+  it('finds the rest across the network — domains and packages at any depth — as lines that jump to their place', () => {
+    const across = between('  #networkMatches(', '  /** Nothing on the page')
+    expect(across).toMatch(/const carried = domains\.map\(domain => \(\{ zone: domain\.zone, rows: this\.#rows\(domain\.zone, '', this\.#query\) \}\)\)/)
+    expect(across).toMatch(/stackRows\(carried\)/)
+    expect(across).toMatch(/this\.#openHosts\(\[match\.zones\[0\] \?\? ''\], match\.path\)/)
+    expect(VIEW).toMatch(/this\.#cols = this\.#chainTo\(at\)/)
+  })
+
+  it('keeps the query across the two ways to look, lets go of it on a step in, and gives it up first to Escape', () => {
+    expect(between('  #setMode(', '  /** A pane\'s edge')).not.toMatch(/this\.#query = ''/)
+    expect(between('  #chooseRow(', '  /** Go into these hosts')).toMatch(/this\.#query = ''/)
+    const back = between('  #back(): boolean {', '  // ── what is on screen')
+    expect(back.indexOf('if (this.#query)')).toBeLessThan(back.indexOf("if (this.#view !== 'domains')"))
+  })
+})
+
+describe('the firewall, its own list behind the shield', () => {
+  // jwize 11-05: "the block can be an alternate list toggled by icon in the header".
+  it('opens from the shield in the header and goes back when it is pressed again — only where the shell runs a firewall', () => {
+    const mount = between('  #mount(): void {', '  #unmount(): void {')
+    expect(mount).toMatch(/this\.#view = this\.#view === 'firewall' \? 'domains' : 'firewall'/)
+    expect(VIEW).toMatch(/wall\.hidden = !firewallOf\(\)/)
+    expect(VIEW).toMatch(/wall\.setAttribute\('aria-pressed', String\(this\.#view === 'firewall'\)\)/)
+  })
+
+  it('lists every zone with its state and its act, and the page body has none left', () => {
+    const wall = between('  #renderFirewall(', '  // ── the columns')
+    expect(wall).toMatch(/this\.#firewallToggle\(zone, paused\)/)
+    expect(wall).toMatch(/t\('hosts\.firewall\.blocked', 'blocked'\) : t\('hosts\.firewall\.open', 'open'\)/)
+    expect(between('  #sectionBody(', '  #renderFirewall(')).not.toMatch(/#firewallToggle|__hcFirewall/)
+    // The click stays the human door: the act carries the shell's attribute, and this view writes no list.
+    expect(between('  #firewallToggle(', '  /** An open domain')).toMatch(/toggle\.setAttribute\('data-hc-firewall', owned\)/)
+  })
+})

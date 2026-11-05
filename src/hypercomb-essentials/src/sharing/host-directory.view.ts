@@ -132,6 +132,7 @@ const GLYPHS = {
   creationsIcon: 'collections',
   visitIcon: 'open_in_new',
   blockIcon: 'block',
+  firewallIcon: 'shield',
   resumeIcon: 'play_arrow',
   removeIcon: 'delete',
   hiveIcon: 'hive',
@@ -848,7 +849,7 @@ interface MineRow {
   host: string
 }
 
-type View = 'domains' | 'revisions' | 'creations' | 'mine' | 'own'
+type View = 'domains' | 'revisions' | 'creations' | 'mine' | 'own' | 'firewall'
 
 /** How much of a code file is read, how many lines show at first, and how many
  *  files are read side by side in the matrix. */
@@ -885,6 +886,8 @@ const OWN_PANE = '#own'
 type PageEnter = 'open' | 'in' | 'out' | 'swap'
 /** How long an arrival lasts, the stagger of its rows included (ms) — matched by the styles. */
 const ENTER_MS = 600
+/** How many packages the search lists across the network before it stops. */
+const NETWORK_LINES = 30
 
 type Warning = { revision: InstallRevision; replaced: string[]; picksBeneath: string[] }
 
@@ -912,6 +915,11 @@ type Port = {
    *  top-level packages and turns them on and off, nothing more. */
   recursive: boolean
 }
+
+/** The shell's outgoing firewall, when it runs one: the zones it owns and the ones paused.
+ *  The shell script is its one writer — this view only reads it and offers the click. */
+type Firewall = { zones(): string[]; paused(): string[] }
+const firewallOf = (): Firewall | undefined => (window as { __hcFirewall?: Firewall }).__hcFirewall
 
 const port = (): Port | null => {
   const install = ioc<InstallProvider>(INSTALL_IOC_KEY)
@@ -1183,10 +1191,41 @@ export class HostDirectoryElement extends HTMLElement {
     selectButton.setAttribute('aria-pressed', 'false')
     selectButton.append(glyph('selectIcon'), make('span', 'hd-select-label'))
     selectButton.addEventListener('click', () => this.#setMulti(!this.#multi))
+    // THE FIREWALL, an alternate list (jwize 11-05: "the block can be an alternate list
+    // toggled by icon in the header"): the domains this shell connects to, each with its
+    // Block or Resume. The icon goes there and, pressed again, back. Only a shell that
+    // runs the outgoing firewall has the list, so only that shell shows the icon.
+    const wallButton = button('hd-icon hd-wall-toggle', '')
+    wallButton.append(glyph('firewallIcon'))
+    wallButton.setAttribute('aria-pressed', 'false')
+    wallButton.addEventListener('click', () => {
+      this.#view = this.#view === 'firewall' ? 'domains' : 'firewall'
+      this.#render()
+    })
     const close = button('hd-close', '', t('panel.close', 'close'))
     close.append(glyph('closeIcon'))
     close.addEventListener('click', () => EffectBus.emit('hosts:close', {}))
-    head.append(selectButton, modeButton, close)
+    head.append(wallButton, selectButton, modeButton, close)
+
+    // THE DRILL'S SEARCH (jwize 11-05: "Pin the Search in simple view … basically the top
+    // of all sections … including domains … the placeholder is Search Your Network (do
+    // away with header)"): one field, pinned at the top of every page of the simple drill
+    // in place of the page's caption. Built once, as the rail's is, so a repaint never
+    // takes a half-typed word, its caret or a composition from it.
+    const drillSearch = make('label', 'hd-drill-search')
+    drillSearch.append(glyph('searchIcon', 'hd-search-glyph'))
+    const drillInput = make('input', 'hd-input hd-drill-input')
+    drillInput.type = 'search'
+    drillInput.autocomplete = 'off'
+    drillInput.spellcheck = false
+    drillInput.dataset['field'] = 'drill-search'
+    // A new query starts the page at its top: what it found is there, not scrolled past.
+    const narrow = (): void => { this.#query = drillInput.value; this.#scrollTo = 0; this.#renderBody() }
+    // A word still being composed (an IME) is not a query yet: the page waits for it.
+    drillInput.addEventListener('input', event => { if (!(event as InputEvent).isComposing) narrow() })
+    drillInput.addEventListener('compositionend', narrow)
+    drillInput.addEventListener('keydown', event => this.#drillSearchKeys(event))
+    drillSearch.append(drillInput)
 
     // THE RAIL: the search, the hosts, and a field to add one. The search and the
     // field are built once — a repaint redraws only the list between them, so a
@@ -1224,7 +1263,8 @@ export class HostDirectoryElement extends HTMLElement {
     frame.append(side, main, drawer, this.#splitter('rail'))
 
     panel.append(head, frame)
-    this.#refs.set('mode', modeButton).set('select', selectButton)
+    this.#refs.set('mode', modeButton).set('select', selectButton).set('wall', wallButton)
+    this.#refs.set('drillSearch', drillSearch).set('drillInput', drillInput)
     this.#refs.set('search', search).set('input', input).set('hosts', hosts).set('side', side).set('railHead', railHead)
       .set('body', main).set('drawer', drawer).set('frame', frame)
     this.appendChild(panel)
@@ -1526,6 +1566,24 @@ export class HostDirectoryElement extends HTMLElement {
     input.setAttribute('aria-label', placeholder)
     const railHead = this.#refs.get('railHead')
     if (railHead) railHead.textContent = t('hosts.pane.hosts', 'Hosts')
+    // The drill's search: one query, the same one the rail's search holds, so a move
+    // between the two ways to look never strands what was typed.
+    const drillInput = this.#refs.get('drillInput') as HTMLInputElement | undefined
+    if (drillInput) {
+      const asked = t('hosts.search-network', 'Search Your Network')
+      drillInput.placeholder = asked
+      drillInput.setAttribute('aria-label', asked)
+      if (drillInput.value !== this.#query) drillInput.value = this.#query
+    }
+    // The firewall's icon: only where the shell runs one; lit while its list is up.
+    const wall = this.#refs.get('wall')
+    if (wall) {
+      wall.hidden = !firewallOf()
+      const label = t('hosts.firewall.title', 'Firewall — block or resume the domains this shell connects to')
+      wall.setAttribute('aria-label', label)
+      wall.title = label
+      wall.setAttribute('aria-pressed', String(this.#view === 'firewall'))
+    }
     // The switch shows both ways and lights the one in use; what it is called — and
     // what a key press on it does — is the OTHER way to look.
     const mode = this.#refs.get('mode')
@@ -1591,7 +1649,11 @@ export class HostDirectoryElement extends HTMLElement {
       if (simple) body.append(this.#backRow())
       if (under === 'creations') this.#renderCreations(body)
       else if (under === 'mine') this.#renderMine(body)
+      else if (under === 'firewall') this.#renderFirewall(body)
       else this.#renderOwn(body)
+      // The drill's search reaches across the network from these panes too.
+      const across = simple && under !== 'firewall' ? this.#networkMatches(new Set()) : null
+      if (across) body.append(across)
     }
     this.#renderDrawer(drawer)
     this.#renderMenu()
@@ -1610,7 +1672,7 @@ export class HostDirectoryElement extends HTMLElement {
       if (page) this.#restoreFocus(page, held)
     }
     if (typed) {
-      const again = body.querySelector<HTMLInputElement | HTMLTextAreaElement>(`.hd-editor [data-field="${typed.field}"]`)
+      const again = body.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[data-field="${typed.field}"]`)
       if (again && !again.disabled) {
         again.focus({ preventScroll: true })
         if (typed.from !== null && typed.to !== null) again.setSelectionRange(typed.from, typed.to)
@@ -1966,13 +2028,7 @@ export class HostDirectoryElement extends HTMLElement {
         visit.title = t('hosts.visit-tip', 'Open {host} in a new tab', { host: this.#scope })
         addLine(glyphed(visit, 'visitIcon'))
       }
-      // THE FIREWALL SWITCH: a host is open by default; Block pauses every
-      // connection to its zone until Resume. Only a shell that runs the
-      // outgoing firewall offers it, and only for a zone that shell owns.
-      // The click is the human door. This view does not write the list.
-      const firewall = (window as { __hcFirewall?: { zones(): string[]; paused(): string[] } }).__hcFirewall
-      const owned = firewall?.zones().find(z => this.#scope === z || this.#scope.endsWith('.' + z))
-      if (firewall && owned) addLine(this.#firewallToggle(owned, firewall.paused()))
+      // Blocking this host's zone is the firewall's list now, behind the shield in the header.
       const remove = button('hd-link', t('hosts.remove-short', 'Remove'), t('hosts.remove', 'Remove {host} from your host directory', { host: this.#scope }))
       remove.addEventListener('click', () => {
         const zone = this.#scope
@@ -1987,12 +2043,8 @@ export class HostDirectoryElement extends HTMLElement {
         mine.addEventListener('click', () => { this.#view = 'mine'; this.#render() })
         addLine(glyphed(mine, 'hiveIcon'))
       }
-      // THE FIREWALL: your own zones are open by default and each can be
-      // paused here, by a click. Only a shell that runs the outgoing firewall
-      // has the list. A sentence does not flip one.
-      const wall = (window as { __hcFirewall?: { zones(): string[]; paused(): string[] } }).__hcFirewall
-      const held = wall?.paused() ?? []
-      for (const owned of wall?.zones() ?? []) addLine(this.#firewallToggle(owned, held))
+      // The firewall — every zone this shell owns, Block or Resume — is its own list,
+      // behind the shield in the header (`#renderFirewall`).
     }
     if (lines.childElementCount) section.append(lines)
 
@@ -2040,6 +2092,41 @@ export class HostDirectoryElement extends HTMLElement {
     }
 
     return section
+  }
+
+  /** THE FIREWALL, as its own list (jwize 11-05: "the block can be an alternate list
+   *  toggled by icon in the header"): every zone this shell owns, whether it is open or
+   *  blocked, and the one act that flips it. Every zone is open until it is blocked;
+   *  a block pauses every connection to it until it is resumed. The click is the human
+   *  door — the shell's own script writes the list; this view offers the click and
+   *  draws what the list says. A sentence never flips one. */
+  #renderFirewall(body: HTMLElement): void {
+    const head = make('div', 'hd-pane-head hd-host-hero')
+    const mark = make('span', 'hd-avatar hd-wallmark')
+    mark.setAttribute('aria-hidden', 'true')
+    const hex = make('span', 'hd-hex')
+    hex.append(glyph('firewallIcon'))
+    mark.append(hex)
+    head.append(mark, make('h2', 'hd-pane-title', t('hosts.firewall.heading', 'Firewall')))
+    body.append(head, make('p', 'hd-note', t('hosts.firewall.note', 'Every domain this shell connects to is open until you block it. A block pauses every connection to it until you resume it.')))
+    const wall = firewallOf()
+    const owned = wall?.zones() ?? []
+    const zones = owned.filter(zone => this.#hits(zone))
+    if (!zones.length) {
+      body.append(owned.length ? this.#nothingFound() : make('p', 'hd-note', t('hosts.firewall.empty', 'This shell owns no domain to block.')))
+      return
+    }
+    const paused = wall?.paused() ?? []
+    const list = make('ul', 'hd-list hd-wall')
+    for (const zone of zones) {
+      const blocked = paused.includes(zone)
+      const li = make('li', blocked ? 'hd-wall-row blocked' : 'hd-wall-row')
+      const state = make('span', blocked ? 'hd-mark hd-wall-state' : 'hd-mark quiet hd-wall-state',
+        blocked ? t('hosts.firewall.blocked', 'blocked') : t('hosts.firewall.open', 'open'))
+      li.append(hostBadge(zone, zone), make('span', 'hd-wall-name', zone), state, this.#firewallToggle(zone, paused))
+      list.append(li)
+    }
+    body.append(list)
   }
 
   // ── the columns ──────────────────────────────────────────────────────────
@@ -2174,6 +2261,8 @@ export class HostDirectoryElement extends HTMLElement {
   /** A click on a row of the drill: one step in. */
   #chooseRow(key: string, kind: 'host' | 'package' | 'file', k: number): void {
     this.#stopNice()
+    // A step in from a narrowed list starts the next page whole.
+    this.#query = ''
     if (kind === 'host') { this.#openHosts([key]); return }
     if (kind === 'package') {
       this.#cols = [...this.#cols.slice(0, k), { keys: [key], anchor: key }]
@@ -2185,8 +2274,9 @@ export class HostDirectoryElement extends HTMLElement {
     this.#renderBody()
   }
 
-  /** Go into these hosts: one, or several stacked — their packages are one list. */
-  #openHosts(zones: readonly string[]): void {
+  /** Go into these hosts: one, or several stacked — their packages are one list — and,
+   *  from a line the search found, straight down to that package. */
+  #openHosts(zones: readonly string[], at = ''): void {
     const keys = zones.length ? [...zones] : ['']
     this.#stack = { keys, anchor: keys[0]! }
     this.#section = keys[0]!
@@ -2195,12 +2285,13 @@ export class HostDirectoryElement extends HTMLElement {
     this.#query = ''
     this.#warning = null
     this.#error = ''
-    this.#cols = []
+    this.#cols = this.#chainTo(at)
     this.#files = NOTHING_PICKED
-    this.#at = ''
+    this.#at = at
     this.#atHosts = false
     this.#readCode = false
     this.#stopNice()
+    if (at) this.#focusKey = at
     this.#render()
   }
 
@@ -2245,38 +2336,112 @@ export class HostDirectoryElement extends HTMLElement {
     })
   }
 
-  /** Back, and the trail of where you are — each crumb behind you is a way back to it. */
+  /** THE PINNED BAR at the top of every page of the drill: the way back and the trail
+   *  of where you are — each crumb behind you a way back to it — and the search, in
+   *  place of the page's caption. On the domains page, where there is nothing behind
+   *  you, the search is the whole bar. */
   #simpleHead(page: DrillPage, trail: readonly Crumb[]): HTMLElement {
     const head = make('div', 'hd-simple-head')
     if (page !== 'hosts') {
       const back = button('hd-back', '', t('hosts.back', 'Back'))
       back.append(glyph('backIcon'))
       back.addEventListener('click', () => { this.#back() })
-      head.append(back)
+      const nav = make('nav', 'hd-trail')
+      nav.setAttribute('aria-label', t('hosts.trail', 'Where you are'))
+      trail.forEach((crumb, at) => {
+        if (at) nav.append(glyph('opensIcon', 'hd-trail-sep'))
+        const text = crumb.kind === 'hosts' ? t('hosts.pane.hosts', 'Hosts')
+          : crumb.kind === 'host' ? (crumb.one || t('hosts.stacked', '{count} hosts stacked', { count: crumb.count }))
+            : crumb.kind === 'package' ? (crumb.one || t('hosts.trail.packages', '{count} packages', { count: crumb.count }))
+              : (crumb.one || t('hosts.trail.files', '{count} files', { count: crumb.count }))
+        const icon: Glyph = crumb.kind === 'hosts' ? 'deskIcon' : crumb.kind === 'host' ? (crumb.count > 1 ? 'stackIcon' : 'hostIcon') : crumb.kind === 'package' ? 'packagesIcon' : 'codeIcon'
+        if (at === trail.length - 1) {
+          const now = make('span', 'hd-trail-now', text)
+          now.prepend(glyph(icon))
+          now.setAttribute('aria-current', 'page')
+          nav.append(now)
+          return
+        }
+        const step = button('hd-trail-step', text)
+        step.prepend(glyph(icon))
+        step.addEventListener('click', () => this.#backTo(at + 1))
+        nav.append(step)
+      })
+      head.append(back, nav)
     }
-    const nav = make('nav', 'hd-trail')
-    nav.setAttribute('aria-label', t('hosts.trail', 'Where you are'))
-    trail.forEach((crumb, at) => {
-      if (at) nav.append(glyph('opensIcon', 'hd-trail-sep'))
-      const text = crumb.kind === 'hosts' ? t('hosts.pane.hosts', 'Hosts')
-        : crumb.kind === 'host' ? (crumb.one || t('hosts.stacked', '{count} hosts stacked', { count: crumb.count }))
-          : crumb.kind === 'package' ? (crumb.one || t('hosts.trail.packages', '{count} packages', { count: crumb.count }))
-            : (crumb.one || t('hosts.trail.files', '{count} files', { count: crumb.count }))
-      const icon: Glyph = crumb.kind === 'hosts' ? 'deskIcon' : crumb.kind === 'host' ? (crumb.count > 1 ? 'stackIcon' : 'hostIcon') : crumb.kind === 'package' ? 'packagesIcon' : 'codeIcon'
-      if (at === trail.length - 1) {
-        const now = make('span', 'hd-trail-now', text)
-        now.prepend(glyph(icon))
-        now.setAttribute('aria-current', 'page')
-        nav.append(now)
-        return
-      }
-      const step = button('hd-trail-step', text)
-      step.prepend(glyph(icon))
-      step.addEventListener('click', () => this.#backTo(at + 1))
-      nav.append(step)
-    })
-    head.append(nav, make('span', 'hd-grow'))
+    head.append(this.#drillSearchField())
     return head
+  }
+
+  /** The drill's one search field — the same node on every page, so what is typed,
+   *  the caret and the focus outlive any repaint. */
+  #drillSearchField(): HTMLElement {
+    return this.#refs.get('drillSearch') ?? make('span')
+  }
+
+  /** Keys in the drill's search: Down goes to the first line found, Enter opens it.
+   *  Escape is the desk's — it lets go of the query first (`#back`). */
+  #drillSearchKeys(event: KeyboardEvent): void {
+    if (event.isComposing) return
+    if (event.key !== 'ArrowDown' && event.key !== 'Enter') return
+    const first = this.#refs.get('body')?.querySelector<HTMLElement>('li[data-key], .hd-match')
+    if (!first) return
+    event.preventDefault()
+    if (event.key === 'Enter') first.click()
+    else first.focus()
+  }
+
+  /** What the search asks of a line: every word typed is somewhere in what it says. */
+  #hits(...texts: readonly (string | undefined)[]): boolean {
+    const words = this.#query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    if (!words.length) return true
+    const said = texts.filter(Boolean).join(' ').toLowerCase()
+    return words.every(word => said.includes(word))
+  }
+
+  /** WHAT THE SEARCH FINDS ACROSS YOUR NETWORK, under the page's own narrowed list: the
+   *  domains whose names match, and the packages — at any depth — of every host you
+   *  carry, one line each however many carry it. A line jumps to its place in the
+   *  drill. What the page already shows is left out. Nothing when nothing is typed. */
+  #networkMatches(shown: ReadonlySet<string>): HTMLElement | null {
+    if (!this.#query.trim()) return null
+    const domains = this.#domains()
+    const labelOf = (zone: string): string => domains.find(row => row.zone === zone)?.label ?? zone
+    const list = make('ul', 'hd-list hd-matches')
+    list.setAttribute('aria-label', t('hosts.search.across', 'Across your network'))
+    const line = (badge: HTMLElement, label: string, where: string, go: () => void, update = false): void => {
+      const li = make('li', 'hd-match-row')
+      const choose = button('hd-match', '')
+      choose.append(badge, make('span', 'hd-match-name', label))
+      if (update) choose.append(make('span', 'hd-mark', t('packages.update-mark', 'update')))
+      choose.append(make('span', 'hd-match-where', where))
+      choose.addEventListener('click', go)
+      li.append(choose)
+      list.append(li)
+    }
+    for (const domain of domains) {
+      if (shown.has(`host:${domain.zone}`) || !this.#hits(domain.label, domain.zone)) continue
+      line(hostBadge(domain.zone, domain.label, domain.update ? 'update' : domain.behind ? 'behind' : ''), domain.label, t('hosts.domain', 'domain'),
+        () => this.#openHosts([domain.zone]), domain.update)
+    }
+    const carried = domains.map(domain => ({ zone: domain.zone, rows: this.#rows(domain.zone, '', this.#query) }))
+    let packages = 0
+    for (const match of stackRows(carried)) {
+      // Its own name or words, not a parent's: "desk" finds the desks, not every part of one.
+      if (shown.has(match.path) || !this.#hits(match.name, match.description)) continue
+      if (++packages > NETWORK_LINES) break
+      line(glyph('packagesIcon', 'hd-kind'), match.path, match.zones.map(labelOf).join(' · '),
+        () => this.#openHosts([match.zones[0] ?? ''], match.path), match.update)
+    }
+    if (!list.childElementCount) return null
+    const box = make('section', 'hd-across')
+    box.append(make('h3', 'hd-across-title', t('hosts.search.across', 'Across your network')), list)
+    return box
+  }
+
+  /** Nothing on the page and nothing across the network: said once, plainly. */
+  #nothingFound(): HTMLElement {
+    return make('p', 'hd-note hd-none', t('hosts.no-match', 'Nothing matches “{query}”.', { query: this.#query.trim() }))
   }
 
   /** A crumb pressed: step back, rung by rung, until the trail ends on it. */
@@ -2331,13 +2496,14 @@ export class HostDirectoryElement extends HTMLElement {
     node.style.setProperty('--hd-since', `${Math.round(since)}ms`)
   }
 
-  /** PAGE ONE: the hosts, large — this origin, every host you carry, your own host,
-   *  and the way to add one. */
+  /** PAGE ONE: your network, large — this origin, every host you carry, your Home
+   *  Domain, and the way to add one. The search at the top narrows the domains as it
+   *  is typed, and finds the packages under them across the network. */
   #hostsPage(wrap: HTMLElement): void {
     const domains = this.#domains()
     const list = make('ul', 'hd-col hd-bigrows hd-hosts-list')
     list.setAttribute('role', 'listbox')
-    list.setAttribute('aria-label', t('hosts.rail', 'Hosts you carry'))
+    list.setAttribute('aria-label', t('hosts.network', 'Your Network'))
     // A host is a card: its hexagon, its name, what it carries — and the way in.
     const card = (li: HTMLElement, badge: HTMLElement, name: string, about: string): void => {
       const words = make('span', 'hd-host-words')
@@ -2345,7 +2511,9 @@ export class HostDirectoryElement extends HTMLElement {
       if (about) words.append(make('span', 'hd-host-about', about))
       li.append(badge, words)
     }
-    domains.forEach((domain, at) => {
+    const shown = new Set<string>()
+    domains.filter(domain => this.#hits(domain.label, domain.zone)).forEach((domain, at) => {
+      shown.add(`host:${domain.zone}`)
       const li = make('li', 'hd-row hd-host-row')
       li.dataset['key'] = domain.zone
       li.setAttribute('role', 'option')
@@ -2362,21 +2530,27 @@ export class HostDirectoryElement extends HTMLElement {
       li.addEventListener('click', () => this.#chooseRow(domain.zone, 'host', -1))
       list.append(li)
     })
-    const own = make('li', 'hd-row hd-host-row hd-own-row')
-    own.dataset['key'] = OWN_PANE
-    own.setAttribute('role', 'option')
-    own.tabIndex = -1
-    own.style.setProperty('--i', String(domains.length))
     let ownZone = ''
     try { ownZone = zoneOf(localStorage.getItem(OWN_HOST_KEY) ?? '') } catch { ownZone = '' }
-    card(own, hostBadge('', '', '', true), t('hosts.your-host', 'Home Domain'), ownZone)
-    own.append(make('span', 'hd-marks'), glyph('opensIcon', 'hd-opens'))
-    own.addEventListener('click', () => this.#selectOwn())
-    list.append(own)
+    const ownName = t('hosts.your-host', 'Home Domain')
+    if (this.#hits(ownName, ownZone)) {
+      const own = make('li', 'hd-row hd-host-row hd-own-row')
+      own.dataset['key'] = OWN_PANE
+      own.setAttribute('role', 'option')
+      own.tabIndex = list.childElementCount ? -1 : 0
+      own.style.setProperty('--i', String(list.childElementCount))
+      card(own, hostBadge('', '', '', true), ownName, ownZone)
+      own.append(make('span', 'hd-marks'), glyph('opensIcon', 'hd-opens'))
+      own.addEventListener('click', () => this.#selectOwn())
+      list.append(own)
+    }
     if (this.#reading && domains.every(domain => !domain.count)) list.append(make('li', 'hd-note hd-reading', t('packages.reading', 'Reading what is served…')))
-    // The hosts you carry are your network: what comes in. (Community is the showcase's
-    // word — where a creation is promoted — so it is not this side's.)
-    wrap.append(make('h2', 'hd-page-title', t('hosts.network', 'Your Network')), list, this.#addForm())
+    const across = this.#networkMatches(shown)
+    if (list.childElementCount) wrap.append(list)
+    if (across) wrap.append(across)
+    if (!list.childElementCount && !across) wrap.append(this.#nothingFound())
+    // Adding a domain is not a search: the field stays, whatever is typed above.
+    wrap.append(this.#addForm())
   }
 
   /** PAGE TWO: what is inside — a host's packages, then the parts of one, with the
@@ -2399,21 +2573,30 @@ export class HostDirectoryElement extends HTMLElement {
         : t('packages.empty', 'Nothing listed here yet.')))
       return
     }
-    if (rows.length) {
+    // THE SEARCH narrows this page — the packages listed and the files under them — and
+    // finds the rest across the network below.
+    const searching = !!this.#query.trim()
+    // A line is found by its own name and words — not its parent's, which every line on the page shares.
+    const listed = searching ? rows.filter(row => this.#hits(row.name, row.description)) : rows
+    const found = searching ? files.filter(file => this.#hits(file.name, file.kind, file.source, file.description)) : files
+    if (listed.length) {
       const caption = level === 0
         ? (this.#stack.keys.length > 1
           ? t('hosts.stacked-packages', 'Packages across {count} hosts', { count: this.#stack.keys.length })
           : t('hosts.packages', 'Packages'))
         : (model[level]?.parents ?? []).join(' · ')
-      wrap.append(this.#packageColumn(rows, level, NOTHING_PICKED, caption))
+      wrap.append(this.#packageColumn(listed, level, NOTHING_PICKED, caption))
     }
     if (paths.length) {
-      wrap.append(this.#fileColumn(files, paths))
+      if (!searching || found.length) wrap.append(this.#fileColumn(found, paths))
       if (files.length) {
         this.#wantCode(files)
         this.#wantWords(files)
       }
     }
+    const across = this.#networkMatches(new Set(listed.map(row => row.path)))
+    if (across) wrap.append(across)
+    if (searching && !listed.length && !found.length && !across) wrap.append(this.#nothingFound())
   }
 
   /** PAGE THREE: the code of the file, or files, chosen. */
@@ -2423,6 +2606,8 @@ export class HostDirectoryElement extends HTMLElement {
       this.#wantWords(files)
     }
     wrap.append(this.#codeMatrix(files))
+    const across = this.#networkMatches(new Set())
+    if (across) wrap.append(across)
   }
 
   /** Where the way back is for the panes the drill has no list of (your host, the
@@ -2432,7 +2617,7 @@ export class HostDirectoryElement extends HTMLElement {
     const back = button('hd-back', '', t('hosts.back', 'Back'))
     back.append(glyph('backIcon'))
     back.addEventListener('click', () => { this.#back() })
-    row.append(back, make('span', 'hd-trail-now', t('hosts.back', 'Back')))
+    row.append(back, make('span', 'hd-trail-now', t('hosts.back', 'Back')), this.#drillSearchField())
     return row
   }
 
@@ -2466,9 +2651,9 @@ export class HostDirectoryElement extends HTMLElement {
     this.#readCode = false
     this.#menu = null
     if (mode === 'simple') {
-      // The drill has no search of its own: what was typed is let go, and where the
-      // four panes were is where the drill is — the hosts, if nothing was picked.
-      this.#query = ''
+      // What was typed comes along — the drill's search holds the same query the rail's
+      // does — and where the four panes were is where the drill is: the hosts, if
+      // nothing was picked.
       this.#atHosts = !this.#cols.some(column => column.keys.length)
     } else if (!this.#cols.some(column => column.keys.length) && !this.#files.keys.length) {
       this.#niceCols = true
@@ -3054,20 +3239,26 @@ export class HostDirectoryElement extends HTMLElement {
       if (read === undefined) box.append(make('p', 'hd-note', t('hosts.code.reading', 'Reading…')))
       else if (read === null) box.append(make('p', 'hd-note', t('hosts.code.missing', 'Not held here, and none of your hosts answered with it.')))
       else {
-        const full = this.#codeFull.has(sig)
+        // THE DRILL'S SEARCH, on the code page, finds text in the file being read: only
+        // the lines that hold it, out of the whole file, each keeping its own number.
+        const seek = this.#mode === 'simple' ? this.#query.trim().toLowerCase() : ''
+        const full = this.#codeFull.has(sig) || !!seek
         const { lines, more } = codeLines(read.text, full ? Number.MAX_SAFE_INTEGER : CODE_LINES)
-        const pre = make('pre', 'hd-code')
+        const pre = make('pre', seek ? 'hd-code filtered' : 'hd-code')
         pre.dataset['language'] = read.language
-        for (const tokens of this.#tokensOf(sig, read, lines)) {
+        this.#tokensOf(sig, read, lines).forEach((tokens, at) => {
+          if (seek && !(lines[at] ?? '').toLowerCase().includes(seek)) return
           const row = make('div', 'cl')
+          if (seek) row.dataset['n'] = String(at + 1)
           for (const token of tokens) {
             if (token.kind === 'plain') row.append(document.createTextNode(token.text))
             else row.append(make('span', codeClass(token.kind), token.text))
           }
           pre.append(row)
-        }
-        box.append(pre)
-        if (more > 0 || read.cut) {
+        })
+        if (seek && !pre.childElementCount) box.append(make('p', 'hd-note', t('hosts.code.no-match', 'No line of this file holds “{query}”.', { query: this.#query.trim() })))
+        else box.append(pre)
+        if (!seek && (more > 0 || read.cut)) {
           const rest = button('hd-quiet', more > 0
             ? t('hosts.code.more', 'Show the other {count} lines', { count: more })
             : t('hosts.code.cut', 'Only the start of this file is read'))
@@ -3380,7 +3571,7 @@ export class HostDirectoryElement extends HTMLElement {
       return
     }
     const list = make('ul', 'hd-list')
-    for (const row of known.rows) {
+    for (const row of known.rows.filter(row => this.#hits(row.title, row.host, row.publisherLabel))) {
       const li = make('li', `hd-creation${row.offered ? ' held' : ''}`)
       const link = make('a', 'hd-creation-name', row.title)
       link.href = row.url
@@ -3413,7 +3604,7 @@ export class HostDirectoryElement extends HTMLElement {
     head.append(back, make('span', 'hd-drill-title', t('hosts.mine.open', 'In your hive ({count})', { count: this.#mine.length })))
     body.append(head)
     const list = make('ul', 'hd-list')
-    for (const row of this.#mine) {
+    for (const row of this.#mine.filter(row => this.#hits(row.name, row.host))) {
       const li = make('li', 'hd-creation held')
       li.append(make('span', 'hd-creation-name', row.name), make('span', 'hd-creation-by', row.host))
       const shown = button('hd-mark', t('hosts.creations.shown', 'shown'), t('hosts.creations.shown-title', 'Shown in your hive — press to stop showing it', { name: row.name }))
@@ -3882,7 +4073,18 @@ ${S} .hd-simple{max-width:48rem;margin:0 auto;display:flex;flex-direction:column
 ${S} .hd-simple.wide{max-width:88rem;}
 ${S} .hd-simple > *{max-width:none;}
 /* The trail stays in sight while a long list scrolls under it. */
-${S} .hd-simple-head{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:.6em;min-height:2.3em;padding:.9em 0 .55em;background:linear-gradient(var(--hd-ground) 82%, transparent);}
+${S} .hd-simple-head{position:sticky;top:0;z-index:2;display:flex;flex-wrap:wrap;align-items:center;gap:.55em .7em;min-height:2.3em;padding:.9em 0 .6em;background:linear-gradient(var(--hd-ground) 86%, transparent);}
+/* THE DRILL'S SEARCH, pinned in that bar in place of the page's caption. */
+${S} .hd-drill-search{position:relative;flex:1 1 18rem;min-width:12rem;display:flex;align-items:center;margin:0;}
+${S} .hd-drill-search .hd-search-glyph{position:absolute;top:0;bottom:0;left:.75em;display:flex;align-items:center;font-size:1.2em;color:var(--hd-ink-quiet);pointer-events:none;transition:color .15s;}
+${S} .hd-drill-search:focus-within .hd-search-glyph{color:var(--hc-window-accent);}
+${S} .hd-input.hd-drill-input{height:2.6em;padding:0 .9em 0 2.4em;font-size:.98em;background:var(--hd-raised);border:1px solid var(--hd-rule);transition:border-color .15s,box-shadow .15s,background-color .15s;}
+${S} .hd-input.hd-drill-input:focus{border-color:rgba(var(--acc),.6);background:var(--hd-ground);box-shadow:0 0 0 3px rgba(var(--acc),.14);}
+${S} .hd-panel .hd-drill-input:focus-visible{outline:none;}
+/* The field's own clear, in the desk's ink rather than the browser's blue. */
+${S} .hd-input::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none;width:.9em;height:.9em;margin-left:.4em;cursor:pointer;background:var(--hd-ink-quiet);-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 6l12 12M18 6L6 18' stroke='black' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 6l12 12M18 6L6 18' stroke='black' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E") center/contain no-repeat;}
+${S} .hd-input::-webkit-search-cancel-button:hover{background:var(--hd-ink);}
+${S} .hd-simple-back .hd-trail-now{flex:0 0 auto;}
 ${S} .hd-simple-back{margin-bottom:.5em;}
 ${S} .hd-back{display:inline-grid;place-items:center;flex:none;width:2.1em;height:2.1em;padding:0;color:var(--hd-ink-quiet);background:var(--hd-raised);border:1px solid var(--hd-rule);border-radius:var(--hc-radius-control,2px);cursor:pointer;transition:background-color .15s,color .15s,border-color .15s;}
 ${S} .hd-back:hover{color:var(--hd-ink);background:var(--hd-wash-strong);border-color:rgba(var(--acc),.4);}
@@ -3897,7 +4099,7 @@ ${S} .hd-trail-now{color:var(--hd-ink);font-weight:600;}
 ${S} .hd-trail-now .hd-glyph{color:var(--hc-window-accent);}
 ${S} .hd-simple .hd-colbox{flex:none;width:auto;min-width:0;border:1px solid var(--hd-rule);border-radius:var(--hc-radius-card,3px);overflow:hidden;background:var(--hd-raised);}
 ${S} .hd-simple .hd-col{overflow:visible;padding:0;}
-${S} .hd-simple .hd-colhead{padding:.75em 1em .6em;}
+${S} .hd-simple .hd-colhead{display:none;}
 ${S} .hd-simple .hd-col .hd-row{padding:.72em 1em;column-gap:.85em;font-size:1em;}
 ${S} .hd-simple .hd-row .hd-name{font-size:1em;font-weight:600;}
 ${S} .hd-simple .hd-file{padding:.7em 1em;column-gap:.85em;}
@@ -3906,7 +4108,6 @@ ${S} .hd-simple .hd-file-where{font-size:.72em;}
 ${S} .hd-simple .hd-kind{font-size:1.2em;}
 /* The drill reads code on the page itself: the pane is as tall as the code, not a four-pane column. */
 ${S} .hd-simple .hd-codepane{flex:none;min-width:0;}
-${S} .hd-simple .hd-codepane > .hd-colhead{display:none;}
 ${S} .hd-simple .hd-matrix{overflow:visible;padding:0;}
 ${S} .hd-simple .hd-code{max-height:calc(100vh - 15rem);}
 /* PAGE ONE: a card for every host. */
@@ -3914,7 +4115,6 @@ ${S} .hd-simple .hd-hosts-list{display:flex;flex-direction:column;gap:.55em;}
 ${S} .hd-simple .hd-col .hd-host-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;column-gap:1em;padding:.85em 1.1em .85em 1em;font-size:1em;cursor:pointer;user-select:none;background:var(--hd-raised);border:1px solid var(--hd-rule);border-radius:var(--hc-radius-card,3px);transition:border-color .18s,box-shadow .18s,background-color .18s;}
 ${S} .hd-simple .hd-col .hd-host-row:hover{border-color:rgba(var(--acc),.45);background:color-mix(in srgb, rgb(var(--acc)) 6%, var(--hd-ground));box-shadow:0 2px 12px rgba(0,0,0,.07);}
 ${S} .hd-host-row:hover .hd-hex{background:color-mix(in srgb, var(--hd-tint) 26%, var(--hd-ground));}
-${S} .hd-page-title{margin:.15em 0 .05em;font-size:1.6em;font-weight:600;letter-spacing:-.01em;color:var(--hd-ink);}
 ${S} .hd-host-words{display:flex;flex-direction:column;gap:.12em;min-width:0;}
 ${S} .hd-host-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:1.12em;font-weight:600;color:var(--hd-ink);}
 ${S} .hd-host-about{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8em;color:var(--hd-ink-quiet);}
@@ -3971,6 +4171,7 @@ ${S} .hd-code{margin:0;padding:.45em 0;overflow:auto;max-height:70vh;font-family
 ${S} .hd-code .cl{counter-increment:l;white-space:pre;padding-right:1em;}
 ${S} .hd-code .cl:hover{background:var(--code-line);}
 ${S} .hd-code .cl::before{content:counter(l);display:inline-block;width:3.4em;margin-right:1em;text-align:right;color:var(--code-gutter);user-select:none;}
+${S} .hd-code.filtered .cl::before{content:attr(data-n);}
 ${codeThemeCss(S)}
 ${S} .hd-codebox > .hd-quiet{align-self:stretch;display:flex;align-items:center;justify-content:center;gap:.35em;padding:.55em;border-top:1px solid var(--hd-rule);border-radius:0;}
 ${S} .hd-stack-note{margin:.2em 0 .5em;}
@@ -3996,10 +4197,31 @@ ${S} .hd-section.open .hd-domain-name{font-weight:600;}
 ${S} .hd-section-body{padding:0 0 .6em;}
 /* A HOST'S ACTS: small words with their glyphs. */
 ${S} .hd-lines{list-style:none;margin:.1em 0 .85em;padding:0;display:flex;flex-wrap:wrap;gap:.4em;font-size:.84em;}
-${S} .hd-lines .hd-chip{display:inline-flex;align-items:center;gap:.35em;padding:.3em .65em;color:var(--hd-ink-quiet);background:var(--hd-raised);border:1px solid var(--hd-rule);border-radius:var(--hc-radius-control,2px);text-decoration:none;cursor:pointer;transition:background-color .15s,color .15s,border-color .15s;}
-${S} .hd-lines .hd-chip:hover{color:var(--hd-ink);background:var(--hd-wash-strong);border-color:rgba(var(--acc),.4);text-decoration:none;}
-${S} .hd-lines .hd-chip .hd-glyph{font-size:1.15em;color:var(--hc-window-accent);}
+${S} .hd-lines .hd-chip,${S} .hd-wall .hd-chip{display:inline-flex;align-items:center;gap:.35em;padding:.3em .65em;color:var(--hd-ink-quiet);background:var(--hd-raised);border:1px solid var(--hd-rule);border-radius:var(--hc-radius-control,2px);text-decoration:none;cursor:pointer;transition:background-color .15s,color .15s,border-color .15s;}
+${S} .hd-lines .hd-chip:hover,${S} .hd-wall .hd-chip:hover{color:var(--hd-ink);background:var(--hd-wash-strong);border-color:rgba(var(--acc),.4);text-decoration:none;}
+${S} .hd-lines .hd-chip .hd-glyph,${S} .hd-wall .hd-chip .hd-glyph{font-size:1.15em;color:var(--hc-window-accent);}
 ${S} .hd-match-row{border-bottom:1px solid rgba(var(--acc),0.08);}
+${S} .hd-across{margin-top:.3em;}
+${S} .hd-across-title{margin:.1em 0 .5em;font-size:.68em;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--hd-ink-quiet);}
+${S} .hd-across .hd-matches{background:var(--hd-raised);border:1px solid var(--hd-rule);border-radius:var(--hc-radius-card,3px);overflow:hidden;}
+${S} .hd-across .hd-match-row:last-child{border-bottom:none;}
+${S} .hd-across .hd-match{grid-template-columns:auto minmax(0,1fr) auto auto;column-gap:.75em;padding:.6em .9em;border-radius:0;}
+${S} .hd-across .hd-avatar{width:1.56em;height:1.8em;}
+${S} .hd-across .hd-hex{font-size:.82em;}
+${S} .hd-across .hd-kind{width:1.56em;height:1.56em;font-size:1em;}
+${S} .hd-none{margin:.6em 0;}
+/* THE FIREWALL: one row a zone — its hexagon, its name, open or blocked, the act. */
+${S} .hd-wall{display:flex;flex-direction:column;gap:.45em;margin-top:.7em;}
+${S} .hd-wall-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;column-gap:.85em;padding:.6em .7em .6em .9em;background:var(--hd-raised);border:1px solid var(--hd-rule);border-radius:var(--hc-radius-card,3px);transition:border-color .18s;}
+${S} .hd-wall-row.blocked{border-color:color-mix(in srgb,var(--hc-status-alert) 45%,transparent);}
+${S} .hd-wall-row.blocked .hd-wall-state{color:var(--hc-status-alert);background:color-mix(in srgb,var(--hc-status-alert) 12%,transparent);}
+${S} .hd-wall .hd-avatar{width:1.9em;height:2.2em;}
+${S} .hd-wall .hd-hex{font-size:.9em;}
+${S} .hd-wall-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:var(--hd-ink);}
+${S} .hd-wallmark .hd-hex{color:var(--hc-window-accent);}
+${S} .hd-head .hd-wall-toggle{width:2em;height:2em;font-size:1em;}
+${S} .hd-wall-toggle[aria-pressed="true"]{color:var(--hc-window-on-accent);background:var(--hc-window-accent);}
+${S} .hd-wall-toggle[aria-pressed="true"]:hover{color:var(--hc-window-on-accent);background:var(--hc-window-accent);}
 ${S} .hd-match{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;column-gap:.6em;width:100%;padding:.55em .45em;font:inherit;font-size:.9em;color:var(--hd-ink);background:none;border:none;border-radius:var(--hc-radius-control,2px);text-align:left;cursor:pointer;transition:background-color .15s;}
 ${S} .hd-match:hover{background:var(--hd-wash);}
 ${S} .hd-match-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;}

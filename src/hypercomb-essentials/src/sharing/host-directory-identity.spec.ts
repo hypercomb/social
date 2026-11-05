@@ -39,7 +39,10 @@ describe('every host its own hexagon', () => {
 
   it('calls the hosts you carry Your Network — community is the showcase\'s word, not this side\'s', () => {
     // jwize 11-05: "So call it that Your Community" → "or … Your network on this side" → "Your Network".
-    expect(between('  #hostsPage(', '  /** PAGE TWO')).toMatch(/make\('h2', 'hd-page-title', t\('hosts\.network', 'Your Network'\)\)/)
+    // Then "the placeholder is Search Your Network (do away with header)": the heading went,
+    // and the name lives in the search at the top of the page and in the list's own label.
+    expect(between('  #hostsPage(', '  /** PAGE TWO')).toMatch(/list\.setAttribute\('aria-label', t\('hosts\.network', 'Your Network'\)\)/)
+    expect(VIEW).toMatch(/t\('hosts\.search-network', 'Search Your Network'\)/)
   })
 
   it('draws the hexagon on the hue by role (relative colour), with the Home Domain and this origin as glyphs', () => {
