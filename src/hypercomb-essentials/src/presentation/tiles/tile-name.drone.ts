@@ -71,6 +71,12 @@ type ShowCellLike = {
 
 const SHOW_CELL_KEY = '@diamondcoreprocessor.com/ShowCellDrone'
 
+/** show-cell's word that the level on screen is about to be hidden (a walk into
+ *  or out of a tile that takes the slow path). Transient: it is a moment, not a
+ *  state, so a late subscriber is never handed it. Restated in show-cell (not
+ *  imported) so a drone never loads another drone's module. */
+const LEVEL_LEAVING = 'render:level-leaving'
+
 /** CSS layout size of a name. Scaled down to NAME_EM; never painted at this size. */
 const LAYOUT_PX = 40
 /** Em of a name, in world px. ONE SIZE FOR EVERY NAME — a long name is never
@@ -217,7 +223,7 @@ export class TileNameDrone extends Drone {
     'render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:geometry-changed',
     'render:set-orientation', 'render:set-pivot', 'render:set-text-only', 'tile:toggle-text',
     'tile:hover', 'overlay:band-rows', 'render:big-head-mode', 'render:name-visibility', 'render:set-hive-visible', 'render:dive', 'render:dive-painted', 'render:flower',
-    'quick-menu:many-centre', TILE_STACK_DEPTHS, 'location:changed', HINT_SAY,
+    'quick-menu:many-centre', TILE_STACK_DEPTHS, 'location:changed', LEVEL_LEAVING, HINT_SAY,
   ]
   protected override emits: string[] = ['tile-names:dom']
 
@@ -342,14 +348,15 @@ export class TileNameDrone extends Drone {
     this.onEffect<TileStackDepths>(TILE_STACK_DEPTHS, (p) => { this.#depths = p?.depths ?? {}; this.#placeHovered() })
     // Names are DOM text over the canvas, so they would hang over the new screen
     // until its cell-count lands. They go first; the next cell-count rebuilds them.
-    this.onEffect('location:changed', () => {
-      this.#depths = {}
-      this.#hint = null
-      for (const span of this.#spans.values()) span.remove()
-      this.#spans.clear()
-      this.#cells = new Map()
-      this.#placeHovered()
-    })
+    this.onEffect('location:changed', () => this.#dropNames())
+    // THE NAMES LEAVE BEFORE THE PICTURES DO. Walking into a tile hides the
+    // outgoing level's tiles and images at once, but the new level's names only
+    // arrive with its cell-count — after the viewport read and the image loads —
+    // so the old names used to hang over a blank canvas, late to go (Jaime,
+    // 2026-11-04: "I see the images and tiles disappear and then the text is
+    // late. The text should always go first."). show-cell says so the moment it
+    // starts hiding the level, ahead of hiding it.
+    this.onEffect(LEVEL_LEAVING, () => this.#dropNames())
     this.onEffect<BandRowsPayload>('overlay:band-rows', (p) => { this.#band = { rows: p?.rows ?? 1, label: p?.label ?? null }; this.#placeAll() })
     this.onEffect<{ on: boolean }>('render:big-head-mode', (p) => {
       this.#bigHead = !!p?.on
@@ -408,6 +415,16 @@ export class TileNameDrone extends Drone {
     for (const label of this.#cells.keys()) this.#spanFor(label)
     this.#placeAll()
     this.emitEffect('tile-names:dom', { on: true })
+  }
+
+  /** Every name off the screen and forgotten: the next cell-count rebuilds them. */
+  #dropNames(): void {
+    this.#depths = {}
+    this.#hint = null
+    for (const span of this.#spans.values()) span.remove()
+    this.#spans.clear()
+    this.#cells = new Map()
+    this.#placeHovered()
   }
 
   #syncRoot(): void {
