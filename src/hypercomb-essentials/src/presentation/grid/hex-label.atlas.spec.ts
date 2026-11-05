@@ -207,3 +207,38 @@ describe('HexLabelAtlas with every slot pinned', () => {
     expect(evicted).toEqual([])
   })
 })
+
+// A reused slot is wiped with a scissored gl.clear after binding the atlas
+// WITHOUT clearing it. Pixi 8.20 takes that bind as an options object and
+// warns on positional arguments; 8.17 (the visitor build) only takes
+// positional ones. Both must bind the atlas with clear off.
+describe('HexLabelAtlas binds a reused slot for either pixi', () => {
+  const gl = {
+    SCISSOR_TEST: 1, COLOR_BUFFER_BIT: 2,
+    enable: vi.fn(), disable: vi.fn(), clearColor: vi.fn(), scissor: vi.fn(), clear: vi.fn(),
+  }
+
+  const reuseOneSlot = (renderTarget: Record<string, unknown>): void => {
+    const atlas = new HexLabelAtlas({ render: vi.fn(), gl, renderTarget }, 8, 2, 2) // 4 slots
+    for (const l of ['a', 'b', 'c', 'd', 'e']) atlas.getLabelUV(l) // 'e' reuses a slot
+  }
+
+  it('passes an options object where getBindState exists (8.20+)', () => {
+    const bind = vi.fn()
+    reuseOneSlot({ bind, getBindState: () => ({}) })
+
+    expect(bind).toHaveBeenCalledTimes(1)
+    expect(bind.mock.calls[0]).toHaveLength(1)
+    expect(bind.mock.calls[0][0]).toMatchObject({ clear: false })
+    expect(bind.mock.calls[0][0].target).toHaveProperty('source')
+  })
+
+  it('passes positional arguments where it does not (8.17)', () => {
+    const bind = vi.fn()
+    reuseOneSlot({ bind })
+
+    expect(bind).toHaveBeenCalledTimes(1)
+    expect(bind.mock.calls[0][1]).toBe(false)
+    expect(bind.mock.calls[0][0]).toHaveProperty('source')
+  })
+})

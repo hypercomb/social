@@ -3233,7 +3233,7 @@
   "tree.copied.sig": "Signature copied",
   "tree.copied.ring": "{n} signatures copied",
   "tree.copied.failed": "Clipboard refused the copy",
-  "slash.hive": "Name any location or signature as a hive — a complete, named branch",
+  "slash.hive": "Cut a hive from what this session ran — only those behaviours load when it is opened",
   "slash.workflow": "Design a workflow out of tiles — one step per tile — and run it",
   "view.workflow": "Workflow",
   "view.workflow.description": "Steps are tiles. Design a sequence and run it as a skill.",

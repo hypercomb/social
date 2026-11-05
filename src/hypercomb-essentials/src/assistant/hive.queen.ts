@@ -33,6 +33,7 @@ export class HiveQueenBee extends QueenBee {
   override genotype = 'assistant'
   readonly command = 'hive'
   override description = 'Cut a hive from what this session ran — only those behaviours load when it is opened'
+  override descriptionKey = 'slash.hive'
   override options = ['<name>', '<name> depth 0|1|2']
   override examples = [
     { input: '/hive solomon', result: 'Keeps a hive named solomon and says the link that opens it' },

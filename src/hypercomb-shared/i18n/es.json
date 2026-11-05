@@ -2150,7 +2150,7 @@
   "tree.copied.sig": "Firma copiada",
   "tree.copied.ring": "{n} firmas copiadas",
   "tree.copied.failed": "El portapapeles rechazó la copia",
-  "slash.hive": "Nombrar cualquier ubicación o firma como colmena — una rama completa y con nombre",
+  "slash.hive": "Recortar una colmena a partir de lo que ejecutó esta sesión — al abrirla solo se cargan esos comportamientos",
   "tags.expand": "Mostrar todas las etiquetas en esta página",
   "tags.collapse": "Contraer a una fila",
   "tags.removal.done.title": "{tag} quitada",

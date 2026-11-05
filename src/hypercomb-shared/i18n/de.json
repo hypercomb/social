@@ -2150,7 +2150,7 @@
   "tree.copied.sig": "Signatur kopiert",
   "tree.copied.ring": "{n} Signaturen kopiert",
   "tree.copied.failed": "Die Zwischenablage hat die Kopie verweigert",
-  "slash.hive": "Einen Standort oder eine Signatur als Bienenstock benennen — ein vollständiger, benannter Zweig",
+  "slash.hive": "Einen Bienenstock aus dem schneiden, was in dieser Sitzung lief — beim Öffnen werden nur diese Verhalten geladen",
   "tags.expand": "Alle Tags auf dieser Seite anzeigen",
   "tags.collapse": "Auf eine Zeile zusammenfalten",
   "tags.removal.done.title": "{tag} entfernt",

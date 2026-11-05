@@ -291,7 +291,12 @@ export class HexLabelAtlas {
       const phys = this.cellPx * resolution
       const physHeight = this.rows * this.cellPx * resolution
       // Bind the atlas framebuffer WITHOUT clearing the whole target.
-      renderer.renderTarget.bind(this.atlas, false)
+      // Pixi 8.20 moved bind to an options object and warns on positional
+      // arguments; 8.17 (the visitor build) only takes positional ones. The
+      // options form arrived with getBindState, so its presence picks the call.
+      const targets = renderer.renderTarget
+      if (typeof targets.getBindState === 'function') targets.bind({ target: this.atlas, clear: false })
+      else targets.bind(this.atlas, false)
       gl.enable(gl.SCISSOR_TEST)
       gl.clearColor(0, 0, 0, 0)
       // WebGL framebuffer origin is bottom-left → flip the row.

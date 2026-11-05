@@ -15,6 +15,11 @@ export class SettingsDrone extends Drone {
   }
 }
 
+// The bee registers itself like every drone: the preloader knows a bee by the
+// instance its module registered, and without one it reports the bundle as
+// "returned null from getBee()" even though the wiring below ran.
+window.ioc.register('@diamondcoreprocessor.com/SettingsDrone', new SettingsDrone())
+
 // THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
 // its owner bee registers it.
 window.ioc.register('@diamondcoreprocessor.com/ZoomSettings', ZoomSettings())

@@ -2150,7 +2150,7 @@
   "tree.copied.sig": "Signature copiée",
   "tree.copied.ring": "{n} signatures copiées",
   "tree.copied.failed": "Le presse-papiers a refusé la copie",
-  "slash.hive": "Nommer n'importe quel emplacement ou signature comme ruche — une branche complète et nommée",
+  "slash.hive": "Découper une ruche à partir de ce que cette session a exécuté — à l'ouverture, seuls ces comportements se chargent",
   "tags.expand": "Afficher tous les tags sur cette page",
   "tags.collapse": "Replier sur une ligne",
   "tags.removal.done.title": "{tag} supprime",

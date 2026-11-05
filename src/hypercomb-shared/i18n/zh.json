@@ -2150,7 +2150,7 @@
   "tree.copied.sig": "签名已复制",
   "tree.copied.ring": "已复制 {n} 个签名",
   "tree.copied.failed": "剪贴板拒绝了此次复制",
-  "slash.hive": "将任意位置或签名命名为一个蜂巢 — 一个完整的、有名字的分支",
+  "slash.hive": "从本次会话运行过的内容中裁出一个蜂巢 — 打开时只加载这些行为",
   "tags.expand": "显示此页面上的所有标签",
   "tags.collapse": "折叠为一行",
   "tags.removal.done.title": "已移除 {tag}",

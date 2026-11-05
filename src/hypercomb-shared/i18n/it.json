@@ -2150,7 +2150,7 @@
   "tree.copied.sig": "Firma copiata",
   "tree.copied.ring": "{n} firme copiate",
   "tree.copied.failed": "Gli appunti hanno rifiutato la copia",
-  "slash.hive": "Nomina come alveare qualsiasi posizione o firma — un ramo completo con un nome",
+  "slash.hive": "Ritaglia un alveare da ciò che questa sessione ha eseguito — all'apertura si caricano solo quei comportamenti",
   "tags.expand": "Mostra tutti i tag in questa pagina",
   "tags.collapse": "Ripiega in una riga",
   "tags.removal.done.title": "{tag} rimosso",

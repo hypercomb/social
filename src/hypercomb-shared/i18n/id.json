@@ -2150,7 +2150,7 @@
   "tree.copied.sig": "Tanda tangan disalin",
   "tree.copied.ring": "{n} tanda tangan disalin",
   "tree.copied.failed": "Papan klip menolak salinan",
-  "slash.hive": "Beri nama lokasi atau tanda tangan mana pun sebagai sarang — sebuah cabang utuh yang bernama",
+  "slash.hive": "Potong sarang dari apa yang dijalankan sesi ini — saat dibuka, hanya perilaku itu yang dimuat",
   "tags.expand": "Tampilkan semua tag di halaman ini",
   "tags.collapse": "Lipat kembali ke satu baris",
   "tags.removal.done.title": "{tag} dihapus",

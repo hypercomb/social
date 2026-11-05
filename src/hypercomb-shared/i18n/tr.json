@@ -2150,7 +2150,7 @@
   "tree.copied.sig": "İmza kopyalandı",
   "tree.copied.ring": "{n} imza kopyalandı",
   "tree.copied.failed": "Pano kopyalamayı reddetti",
-  "slash.hive": "Herhangi bir konumu ya da imzayı kovan olarak adlandır — eksiksiz, adlı bir dal",
+  "slash.hive": "Bu oturumda çalışanlardan bir kovan kes — açıldığında yalnızca o davranışlar yüklenir",
   "tags.expand": "Bu sayfadaki tüm etiketleri göster",
   "tags.collapse": "Tek satira katla",
   "tags.removal.done.title": "{tag} kaldirildi",

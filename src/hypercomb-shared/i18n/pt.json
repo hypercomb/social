@@ -2150,7 +2150,7 @@
   "tree.copied.sig": "Assinatura copiada",
   "tree.copied.ring": "{n} assinaturas copiadas",
   "tree.copied.failed": "A área de transferência recusou a cópia",
-  "slash.hive": "Nomear qualquer localização ou assinatura como colmeia — um ramo completo e nomeado",
+  "slash.hive": "Recortar uma colmeia a partir do que esta sessão executou — ao abrir, só esses comportamentos são carregados",
   "tags.expand": "Mostrar todas as tags nesta página",
   "tags.collapse": "Recolher para uma linha",
   "tags.removal.done.title": "{tag} removido",
