@@ -10,7 +10,7 @@
 // anything, so `#windowOpen` stays false and the on-tile ×-to-remove hover card
 // (`#canHover`) never shows. The apply lanes below do not depend on it.
 //
-//   THE BOUQUET IN HAND — the direct path, the additive twin of bulk removal.
+//   THE BOUQUET IN HAND — the direct path.
 //     The panel gathers a bouquet of keywords; gathering arms it
 //     (`tags:apply-begin {tags, color}`) — there is no separate "start" step.
 //     The hive itself is the review surface: show-cell shades every tile
@@ -71,7 +71,7 @@ export class PheromoneTilesDrone extends Drone {
     'Puts pheromone keywords onto tiles and takes them off: the bouquet in hand (the hive shades what is missing it; clicking a shaded tile scents it at once), the one-shot selection commit, the drag-drop quick apply (single mark or whole bouquet), and the on-tile ×-to-remove card — all while the Pheromones window is open.'
 
   protected override listens = [
-    'tags:view-state', 'tags:removal-pending',
+    'tags:view-state',
     'tags:apply-begin', 'tags:apply-paint', 'tags:apply-commit',
     'tags:apply-cancel', 'tags:apply-end', 'tags:apply-click', 'render:cell-count',
     'tile:hover',
@@ -85,9 +85,6 @@ export class PheromoneTilesDrone extends Drone {
   #wired = false
   /** The Pheromones window is open — the whole tile bridge is gated on it. */
   #windowOpen = false
-  /** A bulk removal is armed (TagRemovalDrone) — suppress the hover card so the
-   *  two takeovers never fight over the same tile click. */
-  #removalArmed = false
   /** The keywords in hand — empty when the bouquet is down. It can carry
    *  SEVERAL: the panel gathers a set, and every scented tile gets all of
    *  them. Non-empty === the hive is shading + clicks on shaded tiles scent. */
@@ -96,8 +93,7 @@ export class PheromoneTilesDrone extends Drone {
    *  from the panel so show-cell can light the matching tiles in it. */
   #brushColor: string | null = null
   /** Tiles STAGED to receive the brush — pure intent, nothing written until the
-   *  commit. Feeds the renderer's future-add mark and the panel's list, exactly
-   *  as TagRemovalDrone's `#pending` feeds the future-remove mark. */
+   *  commit. Feeds the renderer's future-add mark and the panel's list. */
   #staged = new Set<string>()
   /** Absolute path per label, captured from the render scan — a tile can live
    *  anywhere, so its name alone doesn't locate it at commit time. */
@@ -131,11 +127,6 @@ export class PheromoneTilesDrone extends Drone {
         if (p?.parked !== true) this.#disarm()
         this.#hideHover()
       }
-    })
-
-    this.onEffect<{ active?: boolean }>('tags:removal-pending', (p) => {
-      this.#removalArmed = p?.active === true
-      if (this.#removalArmed) this.#hideHover()
     })
 
     // The pointer left the card, so the shell is dismissing it. Forget which
@@ -249,9 +240,9 @@ export class PheromoneTilesDrone extends Drone {
 
   // ── the selection one-shot: commit / disarm ────────────────────
 
-  /** Write every staged tile in one pass, then pulse the processor once. Mirror
-   *  of TagRemovalDrone.#commit: nothing was written until now, so a commit with
-   *  nothing staged just means "never mind". Each tile gets every held keyword
+  /** Write every staged tile in one pass, then pulse the processor once.
+   *  Nothing was written until now, so a commit with nothing staged just means
+   *  "never mind". Each tile gets every held keyword
    *  it is missing; addTag is idempotent, so re-scenting an existing one is a
    *  no-op. Disarms afterwards — the committed tiles now carry the keywords for
    *  real, and the future-add marks clear as `tags:apply-pending` goes inactive. */
@@ -480,13 +471,9 @@ export class PheromoneTilesDrone extends Drone {
    *  safe with the brush loaded because the card anchors BESIDE the cursor, so
    *  a press at the cursor still reaches the canvas; only a deliberate move
    *  onto the card hits its ×'s, which is the gesture that means "take this
-   *  off" rather than "paint here".
-   *
-   *  Bulk REMOVAL still suppresses it: that takeover paints tiles struck
-   *  through as you stage them, and a card of ×'s over the top would offer two
-   *  contradictory ways to remove the same keyword. */
+   *  off" rather than "paint here". */
   #canHover(): boolean {
-    return this.#windowOpen && !this.#removalArmed
+    return this.#windowOpen
   }
 
   #parentSegments(): string[] {

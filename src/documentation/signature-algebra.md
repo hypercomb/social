@@ -1,6 +1,6 @@
 # signature algebra
 
-> **status: design — not built (as of 2026-06-18).** a theoretical framework over content-addressed signatures. only the jaccard set-overlap operation (#3) ships today, in `DiscoveryService.similarity`; the composition function `C()` / `authenticity`, the tag-query engine, the `MerkleRoot` helper, and the reactive pipelines are documentation-level constructs. the only universal primitive is the signature — this algebra would ride the existing `kind` discriminant and tag resource, never a new service, field, or OPFS folder.
+> **status: design — not built (as of 2026-06-18).** a theoretical framework over content-addressed signatures. no operation ships today (the one that did, jaccard set-overlap #3 in the cigar `DiscoveryService.similarity`, was retired 2026-11-04 as unused); the composition function `C()` / `authenticity`, the tag-query engine, the `MerkleRoot` helper, and the reactive pipelines are documentation-level constructs. the only universal primitive is the signature — this algebra would ride the existing `kind` discriminant and tag resource, never a new service, field, or OPFS folder.
 
 a theoretical framework for performing algebraic operations over content-addressed signatures in hypercomb. signatures are immutable SHA-256 identities — 64-character hex strings, 256-bit numbers. the algebra never modifies a signature. it operates *over* them: grouping, filtering, composing, projecting, and deriving new structures from the relationships between signatures and their metadata.
 
@@ -201,7 +201,7 @@ the deterministic computation model is itself design (see #4 / `authenticity` ab
 similarity(a, b) = |T(a) ∩ T(b)| / |T(a) ∪ T(b)|
 ```
 
-this is the jaccard index — a number between 0 (no overlap) and 1 (identical sets). it's the **one** algebra operation actually shipped today: `DiscoveryService.similarity` (`hypercomb-essentials/src/revolucionstyle.com/discovery/discovery.service.ts`) computes `intersection / union` over flavor-profile sets for cigar recommendations. signature algebra would generalize it to *any* tagged content:
+this is the jaccard index — a number between 0 (no overlap) and 1 (identical sets). it was the **one** algebra operation ever shipped: the cigar `DiscoveryService.similarity` computed `intersection / union` over flavor-profile sets for cigar recommendations, and was retired 2026-11-04 because nothing called it. signature algebra would generalize it to *any* tagged content:
 
 - "how related are 'cuban' and 'full-bodied'?" → jaccard on their signature sets
 - "what tags are most similar to 'maduro'?" → rank all tags by jaccard similarity to T("maduro")

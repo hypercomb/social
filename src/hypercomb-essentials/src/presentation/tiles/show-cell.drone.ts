@@ -825,7 +825,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'render:names-on-hover', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:grid-changed', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'order:changed', 'arrange:preview', 'render:set-gap', 'move:preview', 'overlay:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'presence:claims-changed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'group:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:committed', 'cell:added','cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover', 'render:flower', 'tile:preview']
+  protected override listens = ['render:host-ready', 'render:names-on-hover', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:grid-changed', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'order:changed', 'arrange:preview', 'render:set-gap', 'move:preview', 'overlay:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'presence:claims-changed', 'tags:apply-pending', 'tags:preview', 'group:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:committed', 'cell:added','cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover', 'render:flower', 'tile:preview']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:tiles-target', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted', 'thumbnail:wanted', 'landing:pending', 'render:dive-painted', 'render:name-visibility']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -1622,16 +1622,10 @@ export class ShowCellDrone extends Drone {
    *  Failure is followed by a compensating cell event from LayerCommitter,
    *  so the UI never waits to learn whether it was allowed to change. */
   #pendingCellMutations = new Set<string>()
-  /** Tiles staged to lose the keyword being removed (TagRemovalDrone). They
-   *  render as a future-remove — struck through, as if the pheromone were
-   *  already gone — while the participant builds the list. Nothing is written
-   *  until the commit, so this is pure intent, cleared on cancel. */
-  #tagRemovalStaged = new Set<string>()
-  /** Tiles painted so far by the armed pheromone brush (PheromoneTilesDrone).
-   *  The mirror of the staged-removal set: those tiles are losing a keyword and
-   *  render as future-removes, these just GAINED one and render as future-adds.
-   *  Without it painting is blind — the click writes and nothing on the hive
-   *  says so. Cleared when the brush is put down. */
+  /** Tiles painted so far by the armed pheromone brush (PheromoneTilesDrone):
+   *  they just GAINED a keyword and render as future-adds. Without it painting
+   *  is blind — the click writes and nothing on the hive says so. Cleared when
+   *  the brush is put down. */
   #tagApplyPainted = new Set<string>()
   /** ── Pheromone preview (hover a mark → its tiles light up) ──────────────
    *  The marks under the cursor somewhere in the chrome, and the labels on
@@ -7108,26 +7102,13 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
-    // tags:removal-pending — TagRemovalDrone's staged set for the keyword being
-    // removed. Purely visual: the staged tiles paint as future-removes so the
-    // pending change is legible on the hive itself, not only in the panel's
-    // list. No geometry moves; only the divergence attribute rebakes.
-    this.onEffect<{ cells?: string[] }>('tags:removal-pending', ({ cells }) => {
-      const next = new Set(Array.isArray(cells) ? cells : [])
-      if (next.size === this.#tagRemovalStaged.size
-        && [...next].every(l => this.#tagRemovalStaged.has(l))) return
-      this.#tagRemovalStaged = next
-      this.renderedCellsKey = ''
-      this.requestRender()
-    })
-
     // tags:apply-pending — the bouquet in hand. TWO visual duties from one
     // sticky payload:
     //   • the ARMED SHADE (#armedApplyMarks): tiles wearing the whole set stay
     //     lit in the bouquet's colour, every tile missing part of it recedes —
     //     the standing "click here to scent" readout;
-    //   • the staged future-ADD marks (`cells`, the selection one-shot) — same
-    //     purely-visual contract as the removal staging above, opposite sign.
+    //   • the staged future-ADD marks (`cells`, the selection one-shot) —
+    //     purely visual: no geometry moves, only the divergence attribute rebakes.
     this.onEffect<{ cells?: string[]; active?: boolean; tags?: string[]; color?: string }>(
       'tags:apply-pending', ({ cells, active, tags, color }) => {
         const armed = active === false
@@ -9704,14 +9685,9 @@ export class ShowCellDrone extends Drone {
       }
       if (!label) continue
 
-      // Staged-for-removal tiles borrow the future-remove treatment: this
-      // pheromone is about to leave them, which is exactly what that mark
-      // means. Ahead of the cursor divergence marks — an armed removal is
-      // what the participant is looking at right now.
-      const div = this.#tagRemovalStaged.has(label) ? 2
-        : this.#tagApplyPainted.has(label) ? 1
-          : this.#divergenceFutureAdds.has(label) ? 1
-            : this.#divergenceFutureRemoves.has(label) ? 2 : 0
+      const div = this.#tagApplyPainted.has(label) ? 1
+        : this.#divergenceFutureAdds.has(label) ? 1
+          : this.#divergenceFutureRemoves.has(label) ? 2 : 0
       // Heat ring = max(transient activity heat, steady peer-presence glow).
       // The activity pulse (new-cell fade, hover) still plays on top; the
       // presence glow keeps a tile lit while peers are exploring inside it.

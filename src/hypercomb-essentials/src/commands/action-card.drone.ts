@@ -33,7 +33,7 @@
 // payload carried `key` fall back to the launcher registry (an IoC read of a
 // shared service — sanctioned; only IMPORTS of shared are forbidden).
 //
-// Mirrors ContactDrone / FilesTeaserDrone: a Drone bridging a shell trigger to
+// Mirrors ContactDrone: a Drone bridging a shell trigger to
 // data + a pinnable shell component, all over EffectBus. No shared import.
 
 import { Drone, EffectBus, formatChord, I18N_IOC_KEY, type I18nProvider, type KeyBinding } from '@hypercomb/core'

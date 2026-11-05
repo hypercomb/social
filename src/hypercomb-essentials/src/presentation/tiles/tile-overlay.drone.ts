@@ -299,8 +299,8 @@ const HINT_PILL_RADIUS = 2.5
 // (see #followTextResolution).
 
 // ── The verb cue ──────────────────────────────────────────────────────
-// While a mode owns the tile click — a bouquet in hand, a staged removal,
-// the hexagon walk — the hovered tile says what the click will DO to it (see
+// While a mode owns the tile click — a bouquet in hand, the hexagon walk —
+// the hovered tile says what the click will DO to it (see
 // #cueVerbFor for the vocabularies). The pill floats ABOVE
 // the hex so it never collides with the name band, the icon rows, or the
 // action hint below — and it lives in its own container because the ctrl
@@ -484,10 +484,6 @@ export class TileOverlayDrone extends Drone {
    *  kept because it is harmless. While it was up, hover popped that tile's
    *  keyword card and the hover band stood down. */
   #pheromoneWindowOpen = false
-  /** A pheromone removal is armed (TagRemovalDrone): tile clicks stage and
-   *  unstage tiles instead of entering or opening them. Cleared when the
-   *  removal commits or is cancelled. */
-  #tagRemovalArmed = false
   /** `h` is armed: the next step opens as hexagons (view.bee decides it,
    *  this drone only SHOWS it — the frame and the hover's hex-walk rim). */
   #hexWalkArmed = false
@@ -573,11 +569,6 @@ export class TileOverlayDrone extends Drone {
     const worn = new Set(tagsForLabel(label))
     return this.#bouquetTags.some(tag => !worn.has(tag))
   }
-  /** The keyword whose removal is staged, and the tiles staged to lose it
-   *  (`tags:removal-pending`). */
-  #removalTag: string | null = null
-  #removalStaged = new Set<string>()
-
   protected override deps = {
     detector: '@diamondcoreprocessor.com/HexDetector',
     axial: '@diamondcoreprocessor.com/AxialService',
@@ -599,7 +590,7 @@ export class TileOverlayDrone extends Drone {
     'behavior:enablement-changed',
     'keymap:invoke',
     'icon:edit-mode', 'icon:override-changed',
-    'tags:view-state', 'tags:removal-pending', 'tags:apply-pending', 'tags:changed',
+    'tags:view-state', 'tags:apply-pending', 'tags:changed',
     'navigation:hexagons-once',
     'sample:mode', 'select:mode', 'tile:enter-request',
     'view:open-for-tile', 'view:active',
@@ -1168,8 +1159,8 @@ export class TileOverlayDrone extends Drone {
       // SAMPLING — picking tiles with a finger. A pointer says "pick this too"
       // by holding ctrl; a finger has no modifiers, so this mode says it
       // instead: while armed, a press does not navigate and the tap becomes a
-      // toggle. It is the same takeover the selection and the staged-removal
-      // already perform, so the gesture is one the participant knows. The mode
+      // toggle. It is the same takeover the selection already performs, so
+      // the gesture is one the participant knows. The mode
       // only has to survive until the FIRST pick — after that `#hasSelection`
       // suppresses navigation on its own — but it stays armed so unpicking the
       // last tile doesn't silently hand navigation back mid-gesture.
@@ -1206,22 +1197,6 @@ export class TileOverlayDrone extends Drone {
         this.#pheromoneWindowOpen = payload?.open === true
         this.#updateVisibility()
         this.#updatePerTileVisibility()
-      })
-
-      // A staged pheromone removal takes over tile clicks: while it is armed,
-      // clicking a tile stages/unstages it rather than entering or opening it.
-      // Same shape as the selection takeover — presses stop navigating and the
-      // click becomes a toggle — so the gesture is one the participant already
-      // knows. (The overlay is already down — the window is open.)
-      this.onEffect<{ active?: boolean; tag?: string | null; cells?: string[] }>('tags:removal-pending', (payload) => {
-        this.#tagRemovalArmed = payload?.active === true
-        // The cue's comparison needs both halves: WHICH keyword is going, and
-        // which tiles are already staged to lose it.
-        this.#removalTag = this.#tagRemovalArmed ? (payload?.tag ?? null) : null
-        this.#removalStaged = new Set(Array.isArray(payload?.cells) ? payload!.cells! : [])
-        this.#updateVisibility()
-        this.#updatePerTileVisibility()
-        this.#refreshSwapCue()
       })
 
       // A BOUQUET IN HAND. Two readers of the same state: the press/click
@@ -2951,9 +2926,6 @@ export class TileOverlayDrone extends Drone {
     // BRANCH, so without this the first pick would walk into it instead of
     // picking it. The trailing click toggles it (see #onClick).
     if (this.#picking) return
-    // Armed removal: the press must not navigate — the trailing click stages
-    // the tile instead (see #onClick).
-    if (this.#tagRemovalArmed) return
     if (this.#touchDragging) return
     if (e.ctrlKey || e.metaKey) return
     if (!this.#renderContainer || !this.#renderer || !this.#canvas) return
@@ -3086,7 +3058,6 @@ export class TileOverlayDrone extends Drone {
       if (this.#arrangeMode || this.#navigationBlocked) return
       if (this.#editing || this.#editCooldown) return
       if (this.#hasSelection || this.#touchDragging) return
-      if (this.#tagRemovalArmed) return
       this.#consumedPointerId = pointerId
       consumePointerGesture(pointerId)
       this.#pressCapture = null
@@ -3152,23 +3123,6 @@ export class TileOverlayDrone extends Drone {
     }
     if (!this.#renderContainer || !this.#renderer || !this.#canvas) { diag('no-renderer'); return }
     if (e.target !== this.#canvas) { diag('target-not-canvas'); return }
-
-    // ── Armed pheromone removal ──────────────────────────────────────────
-    // A click stages (or unstages) the tile for losing the keyword — it never
-    // navigates, opens or selects while the removal is armed. Resolved from
-    // the click's own coordinates so it works without a preceding hover, and
-    // placed ahead of every other branch so no action button can eat it.
-    if (this.#tagRemovalArmed) {
-      const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
-      if (!detector) { diag('no-detector'); return }
-      const pg = this.#clientToPixiGlobal(e.clientX, e.clientY)
-      const lp = this.#renderContainer.toLocal(new Point(pg.x, pg.y))
-      const ax = detector.pixelToAxial(lp.x - this.#meshOffset.x, lp.y - this.#meshOffset.y, this.#flat)
-      const staged = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(ax.q, ax.r))
-      if (!staged?.label) { diag('removal-empty-hex'); return }
-      this.emitEffect('tags:removal-toggle', { label: staged.label })
-      return
-    }
 
     // ── A bouquet in hand ────────────────────────────────────────────────
     // The shaded tiles are the ones still missing part of the set; a plain
@@ -4149,10 +4103,9 @@ export class TileOverlayDrone extends Drone {
 
   // ── THE VERB CUE ───────────────────────────────────────────────────
   // The hovered tile says what the click will DO to it, whichever mode has
-  // taken the click over. One pill, one place, three vocabularies:
+  // taken the click over. One pill, one place, two vocabularies:
   //
   //   a bouquet      ＋ mark · − release · ✓ marked
-  //   a removal      − unmark · ↺ keep
   //   the walk       ⬡ hexagons
   //
   // The bouquet's verb is a COMPARISON, not a fixed word: the marks in hand
@@ -4231,17 +4184,6 @@ export class TileOverlayDrone extends Drone {
   } | null {
     const i18n = this.#resolveI18n()
     const t = (k: string, fallback: string): string => i18n?.t(k) ?? fallback
-
-    // A REMOVAL IN HAND. The tile either carries the keyword being removed
-    // (so the click stages it to lose it) or it does not — and a tile with
-    // nothing to lose is told nothing, rather than offered a no-op.
-    if (this.#tagRemovalArmed && this.#removalTag) {
-      if (this.#removalStaged.has(label)) {
-        return { key: `keep:${label}`, glyph: '↺', word: t('pheromone.cue.keep', 'keep'), color: SWAP_CUE_COPY_COLOR }
-      }
-      if (!tagsForLabel(label).includes(this.#removalTag)) return null
-      return { key: `unmark:${label}`, glyph: '−', word: t('pheromone.cue.unmark', 'unmark'), color: SWAP_CUE_TAKE_COLOR }
-    }
 
     // A BOUQUET IN HAND. THE COMPARISON: the marks held against the marks
     // the tile already wears — the same answer #bouquetMissingFor gives the

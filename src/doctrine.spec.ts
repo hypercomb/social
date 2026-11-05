@@ -251,7 +251,6 @@ describe('doctrine ratchets', () => {
       'hypercomb-shared/ui/layout-designer/layout-designer.component.ts',
       'hypercomb-shared/ui/mesh-modal/mesh-modal.component.ts',
       'hypercomb-shared/ui/notes-strip/notes-strip.component.ts',
-      'hypercomb-shared/ui/publish-panel/publish-panel.component.ts',
       'hypercomb-shared/ui/references-window/references-window.component.ts',
       'hypercomb-shared/ui/shell-surfaces/shell-surfaces.component.ts',
       'hypercomb-shared/ui/shortcut-sheet/shortcut-sheet.component.ts',
@@ -1861,7 +1860,6 @@ describe('doctrine ratchets', () => {
     assertRatchet(actual.sort(), [
       'hypercomb-essentials/src/assistant/llm-provider-registry.ts',
       'hypercomb-essentials/src/revolucionstyle.com/cigar/cigar-catalog.service.ts',
-      'hypercomb-essentials/src/revolucionstyle.com/discovery/discovery.service.ts',
       'hypercomb-essentials/src/revolucionstyle.com/journal/journal.service.ts',
       'hypercomb-essentials/src/revolucionstyle.com/lounge/lounge.queen.ts',
       'hypercomb-essentials/src/revolucionstyle.com/wheel/flavor-wheel.service.ts',

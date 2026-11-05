@@ -124,7 +124,7 @@ src/
 │       │   ├── move/                   # Drag tiles to reorder (MoveDrone, LayoutService)
 │       │   ├── navigation/             # Pan, zoom, touch gestures, hex detection
 │       │   │   ├── pan/                # Spacebar + drag panning
-│       │   │   ├── zoom/               # Mousewheel + pinch zoom, ZoomArbiter
+│       │   │   ├── zoom/               # Mousewheel + pinch zoom
 │       │   │   └── touch/              # Multi-touch gesture coordination
 │       │   ├── preferences/            # User settings + zoom config (SettingsDrone, Settings)
 │       │   ├── presentation/           # Visual rendering engine (Pixi.js)
@@ -137,8 +137,7 @@ src/
 │       └── revolucionstyle.com/        # Cigar journal domain module
 │           ├── journal/                # CigarJournalDrone, JournalEntryDrone, JournalService
 │           ├── wheel/                  # FlavorWheelDrone, FlavorWheelService, flavor taxonomy
-│           ├── cigar/                  # Cigar identity, CigarCatalogService
-│           └── discovery/              # DiscoveryService (Jaccard similarity recommendations)
+│           └── cigar/                  # Cigar identity, CigarCatalogService
 ├── hypercomb-sdk/              # Facade: re-exports core types, env-agnostic IoC proxy, build API
 ├── hypercomb-cli/              # CLI tool: `hypercomb build`, `hypercomb inspect`
 ├── hypercomb-shared/           # Store, Lineage, Navigation, LayerInstaller, UI components
