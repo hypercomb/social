@@ -487,6 +487,26 @@ describe('rail projection — the wheel lands one step at a time', () => {
     expect(last('render:grid-changed')).toMatchObject({ active: true, shift: 1 })
   })
 
+  it('a click that reports little — a one-line wheel, a dense screen — still moves the window, one step each', async () => {
+    portrait()
+    await beat()
+    const rail = drone as unknown as Wheeled
+    const dense = tiles(60)
+    rail.windowOf(dense)
+    expect(firstOf(rail, dense)).toBe('t0')
+    // each click alone after a pause, 33px: the window must move every time
+    for (const expected of ['t3', 't6', 't9']) {
+      rail.wheelBy(33.3)
+      painted()
+      await vi.advanceTimersByTimeAsync(400)
+      expect(firstOf(rail, dense)).toBe(expected)
+    }
+    rail.wheelBy(-33.3)
+    painted()
+    await vi.advanceTimersByTimeAsync(400)
+    expect(firstOf(rail, dense)).toBe('t6')
+  })
+
   it('a step lands before the next begins, and never waits on a render that does not come', async () => {
     portrait()
     await beat()

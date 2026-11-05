@@ -410,6 +410,15 @@ split into ten events, or a trackpad flick, is still a handful of steps. A pause
 (`RAIL_WHEEL_GAP_MS`) or the wheel turning the other way starts the gesture
 over, so a reverse blip pays nothing.
 
+A click is not always a hundred pixels. Chromium reports a notch as lines ×
+33.3px and divides it by the screen's density, so a wheel set to one line, a
+300% display or a 400% page sends 25–40px for ONE click. At the old 40px
+threshold such a click, alone after a pause, was read as the start of a smooth
+gesture whose first step wants 60px — and the wheel moved nothing at all.
+`RAIL_WHEEL_DETENT_PX` is now 24: hi-res wheels and trackpads open a gesture
+with events far under it and stay in distance. The wheel's hop to the rail is
+pinned by `mousewheel-zoom.input.spec.ts`.
+
 The steps a gesture adds are OWED and paid one at a time: the tiles are locked
 until the renderer reports the last step painted (`render:cell-count` settled)
 and it has stood for `LAND_MIN_MS`; a render that never comes releases it after

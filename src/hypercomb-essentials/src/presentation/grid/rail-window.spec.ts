@@ -236,6 +236,19 @@ describe('one mouse increment is one step, however far it reports', () => {
     }
   })
 
+  it('a notch that reports little is still a click: a one-line wheel (33px) or a dense screen (25–40px) steps, one per click', () => {
+    // Chromium reports a notch as lines × 33.3px, and divides by the screen's
+    // density: a wheel set to one line, a 300% display or a 400% page all send
+    // 25–40px for ONE click, each alone after a pause. Read as a smooth
+    // gesture they never reached the 60px a first step wants — the wheel
+    // moved nothing at all.
+    for (const reported of [25, 28, 33.3, 36, 39]) {
+      expect(foldRailWheel(RAIL_WHEEL_REST, reported, 0).steps, `${reported}px`).toBe(1)
+      expect(foldRailWheel(RAIL_WHEEL_REST, -reported, 0).steps, `-${reported}px`).toBe(-1)
+      expect(steps([[reported, 0], [reported, 400], [reported, 800]]), `${reported}px, paused`).toBe(3)
+    }
+  })
+
   it('every detent of a spin is a step of its own, however fast the clicks', () => {
     expect(steps([[100, 0], [100, 40], [100, 80]])).toBe(3)
     expect(steps([[120, 0], [120, 35], [120, 70], [120, 105]])).toBe(4)

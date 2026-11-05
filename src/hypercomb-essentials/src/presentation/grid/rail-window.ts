@@ -252,7 +252,8 @@ export const railWindowOf = <T>(
 // ONE MOUSE INCREMENT IS ONE STEP. A plain mouse sends one event per detent,
 // and what that event says it travelled varies — 100px, 120px, 166px, 50px
 // at a zoomed page, three lines in Firefox — so a step is never counted in
-// px for it: one detent is one column however far it reports. The devices
+// px for it: one detent is one column however far it reports (as little as
+// 25px on a dense screen, as much as 1000). The devices
 // that send MANY small events for one movement — a high-resolution wheel, a
 // trackpad with its inertia tail — are told apart by their size (each too
 // small to be a detent): a stream that BEGINS small, and keeps the cadence of
@@ -261,8 +262,13 @@ export const railWindowOf = <T>(
 // the tail of a flick starts the gesture over and pays nothing.
 
 /** An event this big, on its own, is a whole detent: one step, whatever
- *  distance it reports. Smaller ones add up (a zoomed page's detent is ~50). */
-export const RAIL_WHEEL_DETENT_PX = 40
+ *  distance it reports. Smaller ones add up. A click is not always a hundred
+ *  pixels: Chromium reports lines × 33.3px and divides by the screen's density,
+ *  so a wheel set to one line, a 300% display or a 400% page sends 25–40px for
+ *  ONE click — below this and it was read as a smooth gesture whose first step
+ *  wants 60px, so an isolated click moved nothing. Hi-res wheels and trackpads
+ *  open a gesture with events far under this (≈1–20px) and stay in distance. */
+export const RAIL_WHEEL_DETENT_PX = 24
 /** Smooth travel that makes one step: what a mouse notch reports. */
 export const RAIL_WHEEL_NOTCH_PX = 100
 /** A smooth gesture's first step lands at this travel: a whole notch's worth
