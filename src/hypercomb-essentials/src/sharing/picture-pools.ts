@@ -15,10 +15,11 @@
 // text, and the pool is the molecule address with a colon in front.
 //
 // Pure: no store, no network. Both halves — the publisher's walk and the
-// reader's address — pass in what they read.
+// reader's address — pass in what they read, and the walk is told what counts
+// as a picture (peer-images.ts `imagePropsOf`), so this file never imports the
+// reader that imports it.
 
 import { moleculeAddress, registerPoolMeaning } from '@hypercomb/core'
-import { imagePropsOf } from './peer-images.js'
 
 export const PICTURES_PREFIX = 'pictures:'
 /** Picture entries one publish may add. The index is read by every reader of
@@ -45,6 +46,8 @@ export const picturesPoolAddress = async (name: string): Promise<string | null> 
 export const isPicturesKey = (key: string): boolean => KEY_RE.test(key)
 
 type ReadJson = (sig: string) => Promise<Record<string, unknown> | null>
+/** Does this properties document wear a picture? */
+type WearsPicture = (props: Record<string, unknown>) => boolean
 
 const sigAt = (value: unknown): string => {
   const raw = typeof value === 'string' ? value : String((value as { sig?: unknown } | null)?.sig ?? '')
@@ -54,12 +57,12 @@ const sigAt = (value: unknown): string => {
 
 /** The picture a published layer wears, read the way the reader reads it:
  *  layer → its properties document → the image pointers. */
-export const layerPicture = async (layerSig: string, read: ReadJson): Promise<{ name: string; layer: Record<string, unknown> } | null> => {
+export const layerPicture = async (layerSig: string, read: ReadJson, wears: WearsPicture): Promise<{ name: string; layer: Record<string, unknown> } | null> => {
   const layer = await read(layerSig)
   if (!layer) return null
   const propsSig = Array.isArray(layer['properties']) ? sigAt(layer['properties'][0]) : ''
   const props = propsSig ? await read(propsSig) : null
-  if (!props || !imagePropsOf(props)) return null
+  if (!props || !wears(props)) return null
   return { name: String(layer['name'] ?? '').trim(), layer }
 }
 
@@ -69,7 +72,7 @@ export const layerPicture = async (layerSig: string, read: ReadJson): Promise<{ 
  * tile's own layer. The first tile to wear a name keeps it; a name with no
  * molecule is skipped. Bounded by MAX_PICTURE_ROOTS and MAX_WALK.
  */
-export const pictureRootsOf = async (sealed: string, read: ReadJson): Promise<Record<string, string>> => {
+export const pictureRootsOf = async (sealed: string, read: ReadJson, wears: WearsPicture): Promise<Record<string, string>> => {
   const roots: Record<string, string> = {}
   if (!SIG_RE.test(sealed)) return roots
   const queue = [sealed]
@@ -80,7 +83,7 @@ export const pictureRootsOf = async (sealed: string, read: ReadJson): Promise<Re
     seen.add(sig)
     let layer: Record<string, unknown> | null = null
     try {
-      const pictured = await layerPicture(sig, read)
+      const pictured = await layerPicture(sig, read, wears)
       if (pictured) {
         layer = pictured.layer
         const key = pictured.name ? await picturesKey(pictured.name) : null

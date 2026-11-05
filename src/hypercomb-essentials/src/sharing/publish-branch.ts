@@ -36,6 +36,7 @@ import {
 import { fetchWithDeadline, firstBounded, HOST_CONCURRENCY } from './bounded-fetch.js'
 import { fetchHiveIndex, fetchHiveManifestFromAny, nip98Header, putHiveManifest, type HiveManifest } from './hive-pointer.js'
 import { pictureRootsOf } from './picture-pools.js'
+import { imagePropsOf } from './peer-images.js'
 import { prepareAnchorHosts, publisherKeyHex } from './key-list.client.js'
 import {
   STAGE_LIVE,
@@ -114,7 +115,7 @@ const branchPictureRoots = async (head: string): Promise<Record<string, string>>
     if (!blob) return null
     try { return JSON.parse(await blob.text()) as Record<string, unknown> } catch { return null }
   }
-  try { return await pictureRootsOf(head, readJson) } catch { return {} }
+  try { return await pictureRootsOf(head, readJson, props => !!imagePropsOf(props)) } catch { return {} }
 }
 interface HistoryLike {
   sealSubtree: (segments: readonly string[]) => Promise<string | null>

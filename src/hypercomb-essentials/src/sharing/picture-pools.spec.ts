@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { moleculeAddress } from '@hypercomb/core'
-import { MAX_PICTURE_ROOTS, isPicturesKey, pictureRootsOf, picturesKey, picturesPoolAddress } from './picture-pools.js'
+import { MAX_PICTURE_ROOTS, isPicturesKey, pictureRootsOf as walk, picturesKey, picturesPoolAddress } from './picture-pools.js'
+import { imagePropsOf } from './peer-images.js'
+
+const pictureRootsOf = (sealed: string, read: Parameters<typeof walk>[1]) => walk(sealed, read, props => !!imagePropsOf(props))
 
 const sig = (n: number): string => n.toString(16).padStart(64, '0')
 
