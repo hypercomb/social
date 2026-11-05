@@ -60,11 +60,11 @@ describe('the list a packages page shows', () => {
 
 describe('the trail above a page', () => {
   it('is only the hosts at the hosts', () => {
-    expect(crumbTrail({ atHosts: true, hosts: ['x.com'], picks: [], reading: 0 })).toEqual([{ kind: 'hosts', one: '', count: 0 }])
+    expect(crumbTrail({ atHosts: true, hosts: ['x.com'], picks: [], reading: [] })).toEqual([{ kind: 'hosts', one: '', count: 0 }])
   })
 
   it('names the host, each level of packages by its last part, and the files read', () => {
-    expect(crumbTrail({ atHosts: false, hosts: ['try.localhost'], picks: [['assistant'], ['assistant/anatomy']], reading: 2 })).toEqual([
+    expect(crumbTrail({ atHosts: false, hosts: ['try.localhost'], picks: [['assistant'], ['assistant/anatomy']], reading: ['A', 'B'] })).toEqual([
       { kind: 'hosts', one: '', count: 0 },
       { kind: 'host', one: 'try.localhost', count: 1 },
       { kind: 'package', one: 'assistant', count: 1 },
@@ -73,8 +73,13 @@ describe('the trail above a page', () => {
     ])
   })
 
+  it('names the file when it is the one being read', () => {
+    const trail = crumbTrail({ atHosts: false, hosts: ['x.com'], picks: [['assistant']], reading: ['ChatDrone'] })
+    expect(trail.at(-1)).toEqual({ kind: 'file', one: 'ChatDrone', count: 1 })
+  })
+
   it('counts when there are several, and stops at the first level nothing is picked in', () => {
-    const trail = crumbTrail({ atHosts: false, hosts: ['a.com', 'b.com'], picks: [['x', 'y'], [], ['z']], reading: 0 })
+    const trail = crumbTrail({ atHosts: false, hosts: ['a.com', 'b.com'], picks: [['x', 'y'], [], ['z']], reading: [] })
     expect(trail.map(crumb => `${crumb.kind}:${crumb.one}:${crumb.count}`)).toEqual(['hosts::0', 'host::2', 'package::2'])
   })
 

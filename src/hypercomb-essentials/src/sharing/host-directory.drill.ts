@@ -111,12 +111,13 @@ export interface Crumb {
 }
 
 /** The trail above a page: the hosts, the host(s) opened, each level of packages
- *  picked (its last part, or how many), and the files being read. */
+ *  picked (its last part, or how many), and the files being read (by name when it is one). */
 export function crumbTrail(input: {
   atHosts: boolean
   hosts: readonly string[]
   picks: readonly (readonly string[])[]
-  reading: number
+  /** The names of the files being read, in order; none off the code page. */
+  reading: readonly string[]
 }): Crumb[] {
   const trail: Crumb[] = [{ kind: 'hosts', one: '', count: 0 }]
   if (input.atHosts) return trail
@@ -125,7 +126,7 @@ export function crumbTrail(input: {
     if (!keys.length) break
     trail.push({ kind: 'package', one: keys.length === 1 ? keys[0]!.split('/').pop()! : '', count: keys.length })
   }
-  if (input.reading > 0) trail.push({ kind: 'file', one: '', count: input.reading })
+  if (input.reading.length) trail.push({ kind: 'file', one: input.reading.length === 1 ? input.reading[0]! : '', count: input.reading.length })
   return trail
 }
 

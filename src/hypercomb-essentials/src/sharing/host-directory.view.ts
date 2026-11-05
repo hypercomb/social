@@ -2041,7 +2041,7 @@ export class HostDirectoryElement extends HTMLElement {
     if (this.#describing && !this.#files.keys.includes(this.#describing.sig)) this.#describing = null
     const wrap = make('div', `hd-simple${page === 'code' ? ' wide' : ''}`)
     wrap.addEventListener('keydown', event => this.#simpleKeys(event))
-    wrap.append(this.#simpleHead(page, model))
+    wrap.append(this.#simpleHead(page, model, files))
     if (this.#error) {
       const err = make('p', 'hd-error', this.#error)
       err.setAttribute('role', 'alert')
@@ -2055,7 +2055,7 @@ export class HostDirectoryElement extends HTMLElement {
   }
 
   /** Back, the trail of where you are, and the Select switch. */
-  #simpleHead(page: DrillPage, model: readonly { picked: Picked }[]): HTMLElement {
+  #simpleHead(page: DrillPage, model: readonly { picked: Picked }[], files: readonly FileLabel[]): HTMLElement {
     const head = make('div', 'hd-simple-head')
     if (page !== 'hosts') {
       const back = button('hd-back', '‹', t('hosts.back', 'Back'))
@@ -2068,7 +2068,8 @@ export class HostDirectoryElement extends HTMLElement {
       atHosts: this.#atHosts,
       hosts: this.#stack.keys.map(labelOf),
       picks: model.map(column => column.picked.keys),
-      reading: page === 'code' ? this.#files.keys.length : 0,
+      // The file being read is named — by what it is, not by what it hashes to.
+      reading: page === 'code' ? this.#files.keys.map(sig => files.find(file => file.sig === sig)?.name ?? sig.slice(0, 12)) : [],
     })
     const nav = make('nav', 'hd-trail')
     nav.setAttribute('aria-label', t('hosts.trail', 'Where you are'))
@@ -2077,7 +2078,7 @@ export class HostDirectoryElement extends HTMLElement {
       const text = crumb.kind === 'hosts' ? t('hosts.pane.hosts', 'Hosts')
         : crumb.kind === 'host' ? (crumb.one || t('hosts.stacked', '{count} hosts stacked', { count: crumb.count }))
           : crumb.kind === 'package' ? (crumb.one || t('hosts.trail.packages', '{count} packages', { count: crumb.count }))
-            : t('hosts.trail.files', '{count} files', { count: crumb.count })
+            : (crumb.one || t('hosts.trail.files', '{count} files', { count: crumb.count }))
       nav.append(make('span', at === trail.length - 1 ? 'hd-trail-now' : 'hd-trail-step', text))
     })
     head.append(nav, make('span', 'hd-grow'))
@@ -3627,7 +3628,7 @@ ${S} .hd-select[aria-pressed="true"]{color:var(--hc-window-on-accent);background
 ${S} .hd-simple .hd-colbox{flex:none;width:auto;min-width:0;border:1px solid var(--hd-rule);border-radius:var(--hc-radius-card,3px);overflow:hidden;}
 ${S} .hd-simple .hd-col{overflow:visible;padding:0;}
 ${S} .hd-simple .hd-colhead{padding:.5em .95em;font-size:.72em;}
-${S} .hd-simple .hd-row{padding:.8em .95em;column-gap:.7em;font-size:1.05em;}
+${S} .hd-simple .hd-col .hd-row{padding:.8em .95em;column-gap:.7em;font-size:1.05em;}
 ${S} .hd-simple .hd-row .hd-name{font-size:.92em;}
 ${S} .hd-simple .hd-file{padding:.7em .95em;}
 ${S} .hd-simple .hd-file-name{font-size:.95em;}
@@ -3637,7 +3638,8 @@ ${S} .hd-host-row.hd-checking,${S} .hd-row.hd-checking{grid-template-columns:aut
 ${S} .hd-host-row.hd-checking{grid-template-columns:auto auto minmax(0,1fr) auto auto auto;}
 ${S} .hd-file.hd-checking{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:.7em;}
 ${S} .hd-file.hd-checking .hd-check{grid-row:1 / span 2;align-self:center;}
-${S} .hd-host-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:1.02em;color:var(--hd-ink);}
+${S} .hd-host-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:1.1em;color:var(--hd-ink);}
+${S} .hd-simple .hd-col .hd-host-row{padding:1.05em 1.1em;font-size:1.1em;}
 ${S} .hd-check{display:inline-flex;align-items:center;justify-content:center;width:1.15em;height:1.15em;font-size:.8em;line-height:1;color:var(--hc-window-on-accent);border:1.5px solid var(--hd-ink-quiet);border-radius:3px;}
 ${S} .hd-check.on{background:var(--hc-window-accent);border-color:var(--hc-window-accent);}
 ${S} .hd-simple .hd-hosts-list + .hd-add{margin-top:1.1em;}
