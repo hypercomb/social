@@ -195,9 +195,10 @@ export class RailProjectionDrone extends Drone {
   #landing = false
   #steppedAt = 0
   #landTimer: ReturnType<typeof setTimeout> | null = null
-  /** The scale the lane fit actually settled on, for the shape it was
-   *  measured in. Until then the capacity comes from the seed. */
-  #measured: { key: string; scale: number } | null = null
+  /** The scale the lane fit actually settled on, per shape it was measured
+   *  in (#shapeKey), so walking from a three-lane page to a two-lane one and
+   *  back finds both already measured. A shape not measured yet is seeded. */
+  #measured = new Map<string, number>()
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#bound) return
@@ -211,7 +212,7 @@ export class RailProjectionDrone extends Drone {
     this.onEffect<HexGeometry>('render:geometry-changed', (geo) => {
       if (!geo || !(geo.spacing > 0)) return
       this.#hexGeo = geo
-      this.#measured = null
+      this.#measured.clear()
       if (this.#active) this.#apply()
     })
     this.onEffect<{ active?: boolean }>(MOBILE_MODE_EFFECT, () => this.#apply())
@@ -480,21 +481,33 @@ ${location}`
     const safe = this.#safe()
     if (!safe) return Math.max(1, fallback)
     const key = this.#shapeKey(lanes, flat, horizontal)
-    const scale = this.#measured?.key === key
-      ? this.#measured.scale
+    const scale = this.#measured.has(key)
+      ? this.#measured.get(key)!
       : railSeedScale(safe.across, this.#hexGeo, lanes, flat, horizontal)
     const { capacity } = railWindowSize(safe.along, scale, this.#hexGeo, lanes, flat, horizontal)
     return Math.max(1, fallback > 0 ? Math.min(capacity, fallback) : capacity)
   }
 
   /** The fit has settled: size the window from the scale it actually chose.
-   *  A different answer re-projects (and refits, centring the new block); the
-   *  same answer ends the exchange. */
+   *  A different answer re-projects (and refits, centring the new block).
+   *
+   *  ONCE PER SHAPE (jwize 2026-11-05: "the wrong mode is starting and then
+   *  lanes glitches it back … it renders spasmatically in succession between
+   *  the two modes"). The fit's scale is not a fixed point of the window: a
+   *  window of twelve fits a hair differently from a window of fourteen, so
+   *  re-measuring after every fit re-projected, re-rendered and re-fitted on
+   *  every arrival, the strip flipping between two shapes four times in
+   *  ~350 ms. A shape (screen, lanes, orientation, axis) is measured on its
+   *  first fit and kept; a later fit on the same shape is the same reading and
+   *  moves nothing. A resize or a new tile size is a new shape (#shapeKey,
+   *  `render:geometry-changed`) and is measured afresh. */
   #remeasure(): void {
     if (!this.#active || this.#projectedFlat === null || this.#horizontal === null) return
+    const key = this.#shapeKey(this.#lanes, this.#projectedFlat, this.#horizontal)
+    if (this.#measured.has(key)) return
     const scale = this.#screenScale()
     if (!(scale > 0)) return
-    this.#measured = { key: this.#shapeKey(this.#lanes, this.#projectedFlat, this.#horizontal), scale }
+    this.#measured.set(key, scale)
     this.#apply()
   }
 

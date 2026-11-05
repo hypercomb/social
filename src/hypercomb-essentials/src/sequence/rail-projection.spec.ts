@@ -413,6 +413,35 @@ describe('rail projection — the window over the strip', () => {
     expect(rail.windowOf(dense)).toContain('t39')
   })
 
+  it('a fit that lands a hair off does not re-project the strip again and again (the lanes stutter)', async () => {
+    // Each fit settles on a slightly different scale, and each scale fits a
+    // different number of columns. Before the fix every fit re-measured,
+    // re-projected and asked for another fit: four projections and four full
+    // renders on one arrival, the strip jumping between two shapes.
+    landscape()
+    await beat()
+    const h = host(844, 390)
+    EffectBus.emit('render:host-ready', h)
+    const across = 390 - 10, along = 844 - 10
+    const seed = railSeedScale(across, DEFAULT_HEX_GEOMETRY, 3, false, true)
+    const fits = [seed * 1.6, seed * 2.0]
+    const capacityAt = (scale: number): number => railWindowSize(along, scale, DEFAULT_HEX_GEOMETRY, 3, false, true).capacity
+    // the two scales the fit alternates between frame different windows
+    expect(capacityAt(fits[0])).not.toBe(capacityAt(fits[1]))
+    expect(Math.max(capacityAt(fits[0]), capacityAt(fits[1]))).toBeLessThan(CAPACITY)
+    let n = 0
+    zoomToFit.mockImplementation(() => { h.container.scale.x = fits[n++ % 2]; return true })
+    const before = project.mock.calls.length
+    // the renderer answers every projection with a settled pass
+    for (let i = 0; i < 6; i++) {
+      EffectBus.emit('render:cell-count', { settled: true })
+      await vi.advanceTimersByTimeAsync(100)
+    }
+    // one correction at most: the shape is measured once
+    expect(project.mock.calls.length - before).toBeLessThanOrEqual(1)
+    expect(zoomToFit.mock.calls.length).toBeLessThanOrEqual(2)
+  })
+
   it('folds pan distance into steps and reports zero at an end', async () => {
     portrait()
     await beat()
