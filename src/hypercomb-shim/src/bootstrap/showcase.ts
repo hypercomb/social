@@ -882,7 +882,7 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
         button.addEventListener('click', () => { closeVersions(); void tapTile(entry, row) })
         act = button
       } else {
-        const href = showcaseHref(options.home, { zone: options.self, pubkey: item.pubkey, lineage: item.lineage, on: !inside,
+        const href = showcaseHref(keyHome(), { zone: options.self, pubkey: item.pubkey, lineage: item.lineage, on: !inside,
           title: entry.title, back: location.href.split('#')[0]! })
         if (href) {
           const link = el('a', 'version-act')
@@ -919,6 +919,10 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     return lineage && owner ? { pubkey: owner.pubkey, lineage } : null
   }
   const say = (words: string): void => { ownerNote.hidden = false; ownerNote.textContent = words }
+  /** The hive that holds the key: the one this page was opened from, else your hive's own address (jwize 2026-11-05: "it
+   *  says in order to do this to type keys allow hypercomb.com?" — a click hands the switch to the hive, which asks once,
+   *  signs and comes back). Never on a phone, where the hive's address serves this same front door. */
+  const keyHome = (): unknown => options.home ?? (onPhone() ? undefined : DEFAULT_HOME)
   // ── YOUR COMMUNITY (jwize 2026-11-04): a target, not a domain. While managing, a tap on a tile in any domain's row —
   //    this one's too — brings it into the community row; a tap on it there sends it back to its domain. Going live in
   //    the showcase is its own act (a hold, or the sheet), and only for what is optimized and minimized. ──
@@ -976,7 +980,7 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
       // No hive of yours answers here: hand the switch to the hive that has the key, when the page knows it —
       // except on a phone, where the hive's address serves this same front door (hypercomb-web index.html, the
       // phone gateway) and a handed-off tap would land on a page that cannot sign either.
-      const href = onPhone() ? null : showcaseHref(options.home, { zone: options.self, pubkey: item.pubkey, lineage: item.lineage, on,
+      const href = onPhone() ? null : showcaseHref(keyHome(), { zone: options.self, pubkey: item.pubkey, lineage: item.lineage, on,
         title: entry.title, back: location.href.split('#')[0]! })
       if (href) { window.open(href, '_blank', 'noopener'); return }
       say(`Going live is signed with your hive's key, and no hive of yours answers in this browser. To promote ${entry.title} from here, `
@@ -990,6 +994,40 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     tapping = false
     ownerNote.textContent = result.ok ? (on ? `${entry.title} is in the showcase.` : `${entry.title} is out of the showcase.`) : `Not changed: ${result.reason}.`
     if (result.ok && result.changed) takeLedger(options.ledger)
+  }
+  // ── A TAP IS A TOGGLE AND A CONFIRM (jwize 2026-11-05: "You should just be able to click and maybe confirm then it is
+  //    deployed" / "That simplifies to toggles and confirms" / "remember the community just feeds from the taps" / "it
+  //    needs to be just confirm"). Managing, a tap on a domain's tile asks once; yes brings it into your community and
+  //    puts it live in the showcase. A tap on a community tile asks once; yes sends it back and takes it off. The going
+  //    live is the same signed act as ever (tapTile): gated on optimized and minimized, signed by your hive's key. ──
+  const toggleTile = async (entry: Aggregate, row: string, into: boolean): Promise<void> => {
+    if (into) {
+      if (!picked(entry)) await pickTile(entry, row)
+      if (!showcased(entry)) await tapTile(entry, row)
+      return
+    }
+    const from = picks.find(pick => pick.key === entry.key)?.zone ?? options.self
+    if (picked(entry)) await pickTile(entry, row)
+    if (showcased(entry)) await tapTile(entry, from)
+  }
+  const openConfirm = (entry: Aggregate, from: HTMLElement, row: string): void => {
+    opener = from
+    const into = row !== COMMUNITY
+    const heading = el('h3', 'versions-title')
+    heading.textContent = entry.title
+    const yes = el('button', 'version-act')
+    yes.type = 'button'
+    yes.textContent = into ? 'Put it in my showcase' : 'Take it out of my showcase'
+    yes.addEventListener('click', () => { closeVersions(); void toggleTile(entry, row, into) })
+    const no = el('button', 'version-cancel')
+    no.type = 'button'
+    no.textContent = 'Cancel'
+    no.addEventListener('click', () => closeVersions())
+    sheet.replaceChildren(heading, yes, no)
+    sheet.tabIndex = -1
+    backdrop.hidden = false
+    document.addEventListener('keydown', onKey, true)
+    yes.focus()
   }
   /** Where a tap goes: this row's own place for the name, else its first. */
   const placeFor = (entry: Aggregate, row: string): Place => {
@@ -1052,13 +1090,13 @@ ${entry.key}`
       // IN THE SHOWCASE A TAP VISITS. UNDER ANOTHER DOMAIN A TAP TURNS THE TILE ON OR OFF (jwize 2026-10-25: "of
       // course on other domains it is just toggling"; "they should all be grayed out under other domains and
       // when you click it lights up and it is added to the showcase"). The click a hold ends with is swallowed.
-      // MANAGING, A TAP IS THE SWITCH (jwize 2026-11-04): under another domain it brings the tile into your
-      // community or lets it go; in your own row it promotes a community tile live, or takes a live one off.
+      // MANAGING, A TAP IS THE SWITCH, AND IT ASKS ONCE (jwize 2026-11-05: "it needs to be just confirm"): yes in a
+      // domain's row brings the tile into your community and puts it live; yes in the community takes it back out.
       tile.addEventListener('click', event => {
         if (held) { held = false; event.preventDefault(); event.stopPropagation(); return }
         if (row === options.self && !managing) return
         event.preventDefault()
-        void pickTile(made.entry, row)
+        openConfirm(made.entry, tile, row)
       })
       tile.addEventListener('contextmenu', event => { event.preventDefault(); stop(); heldOpen = true; openVersions(made.entry, tile, row) })
       tile.addEventListener('keydown', event => {
@@ -2373,6 +2411,8 @@ a.hex:focus-visible > .hex-art { inset: 4px; }
   border-radius: var(--hc-radius-card, 3px); outline: 0; }
 .versions-title { margin: 0 0 .6rem; overflow-wrap: anywhere; color: var(--md-on-surface-strong); }
 .version-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .35rem; }
+.version-cancel { display: block; width: 100%; padding: .55rem .8rem; border: 1px solid var(--md-outline-variant); border-radius: var(--hc-radius-control, 2px);
+  background: transparent; color: var(--md-on-surface); font: inherit; cursor: pointer; }
 .version-act { display: block; box-sizing: border-box; width: 100%; margin: 0 0 .7rem; padding: .6rem .8rem; text-align: center; text-decoration: none;
   border: 1px solid var(--md-primary); border-radius: var(--hc-radius-control, 2px); background: transparent; color: var(--md-primary); cursor: pointer;
   font: 600 .9rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); }
