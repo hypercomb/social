@@ -120,10 +120,10 @@ const presenter = t('presenter',
 // Kept out of the values so /protocol's layer stays the six values (one
 // relation per layer). Relation of its children: the way ahead.
 const road = t('road',
-  'Where Hypercomb is going: what it is for, what people make with it, what comes next, and how to begin.',
+  'Where Hypercomb leads: what it is for, what people make with it, and how to begin.',
   'The tour\'s scene 1 and scenes 20 to 25 (blocks/tour.cjs), one per tile, in the tour\'s order. Scene 2, the protocol, is the root.',
   [
-    t('question', 'It starts with a question: where does your corner of the internet actually live? Here, your work lives with you, and leaves only when you share it.', 'Tour scene 1, A new way to bee: the question the protocol answers.'),
+    t('question', 'It starts with a question: who decides where your work lives, and who it reaches? Here, it lives with you, and your community connects directly to the ones it cares about most.', 'Tour scene 1, A new way to bee: the question the protocol answers.'),
     t('creations', 'What people make with it today: cards, websites and games, the language, communities.', 'Tour scene 20, Shown by its creations.'),
     t('coming', 'In progress: the next things being built.', 'Tour scene 21, What comes next. Everything here is planned or in progress, and says so.'),
     t('vision', 'Further out: where the protocol is headed.', 'Tour scene 22, The vision. Planned.'),
@@ -132,8 +132,55 @@ const road = t('road',
     t('first-day', 'Your first day: type help, and everything you can do is laid out for you.', 'Tour scene 25, How to bee.'),
   ])
 
-module.exports = protocol
-module.exports.protocol = protocol
+// PROMOTED, AND WAITING (jwize 2026-11-05: "the language needs to be for
+// absolute beginners but hit the crux of it for the technical people so lets
+// do our best to select on the most important pieces we can put the others
+// aside in waiting in a list as unpromoted"). The tree above is every piece;
+// these routes are set aside. They are not planted, not paged and not
+// published, and a hive that already holds them sees them retired with
+// `trait ~` (plant.cjs), so each stays one `trait` away. Their notes and briefs
+// stay above, ready, and a route promotes again by leaving this list.
+const WAITING = [
+  'protocol/simple/opening',
+  'protocol/simple/primitive/word', 'protocol/simple/primitive/layer', 'protocol/simple/primitive/meta',
+  'protocol/organized/heart', 'protocol/organized/build', 'protocol/organized/layout',
+  'protocol/organized/trait', 'protocol/organized/organization',
+  'protocol/collaborative/trial', 'protocol/collaborative/participant', 'protocol/collaborative/sharing',
+  'protocol/collaborative/discovery', 'protocol/collaborative/hosting', 'protocol/collaborative/tapestry',
+  'protocol/intelligent/automaton', 'protocol/intelligent/debugging', 'protocol/intelligent/merging',
+  'protocol/accessible/reader', 'protocol/accessible/listening', 'protocol/accessible/phone', 'protocol/accessible/motion',
+  'protocol/localized/translating', 'protocol/localized/locale',
+  'road/coming', 'road/vision', 'road/computer',
+]
+const waiting = new Set(WAITING)
+
+/** The tree without what waits: the same tiles, every waiting route and all
+ *  beneath it left out. */
+const promoted = (node, at = []) => {
+  const route = [...at, node.name]
+  if (!node.children) return node
+  const kept = node.children.filter(c => !waiting.has([...route, c.name].join('/')))
+  return { ...node, children: kept.map(c => promoted(c, route)) }
+}
+
+const all = { protocol, road, presenter }
+const shown = { protocol: promoted(protocol), road: promoted(road), presenter }
+for (const route of WAITING) {
+  const [top, ...rest] = route.split('/')
+  let node = all[top]
+  for (const name of rest) node = (node?.children || []).find(c => c.name === name)
+  if (!node) throw new Error(`tree.cjs: waiting route ${route} names no tile`)
+}
+
+module.exports = shown.protocol
+module.exports.protocol = shown.protocol
 module.exports.presenter = presenter
-module.exports.road = road
-module.exports.roots = [protocol, road, presenter]
+module.exports.road = shown.road
+module.exports.roots = [shown.protocol, shown.road, presenter]
+// every piece, promoted or waiting, and the waiting routes themselves
+module.exports.all = [protocol, road, presenter]
+module.exports.waiting = WAITING
+module.exports.isWaiting = (route) => {
+  const parts = String(route).split('/')
+  return parts.some((_, i) => waiting.has(parts.slice(0, i + 1).join('/')))
+}

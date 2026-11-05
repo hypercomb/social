@@ -3,15 +3,14 @@
   "name": "ownership",
   "chapter": "why hypercomb",
   "slug": "ownership",
-  "eyebrow": "reason one",
-  "headline": "*Ownership*, not a metaphor",
+  "eyebrow": "ownership",
+  "headline": "Your work, on your *device*",
   "sub": "",
   "visual": "plate:cell-cube",
   "visualData": [
     "one tile · yours"
   ],
   "lights": [
-    "*",
     [
       "tile"
     ],
@@ -21,8 +20,7 @@
     ],
     [
       "tile"
-    ],
-    "*"
+    ]
   ],
-  "say": "So why does this matter? Reason one: ownership that is not a metaphor. Your hive is files on your own device, and the desktop app works on a plane. It keeps working if any company disappears, because no company sits in the middle. Export it, inspect it, move it. Nothing you make is held hostage."
+  "say": "Your hive is your workbench, and it is files on your own device. It keeps working if any company disappears, because no company sits in the middle. You can export it, inspect it and move it. Nothing leaves until you publish it."
 }

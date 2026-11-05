@@ -2356,7 +2356,6 @@ describe('a read of a host has a deadline', () => {
       'hypercomb-essentials/src/sharing/hosts.queen.ts',
       'hypercomb-essentials/src/sharing/key-list.client.ts',
       'hypercomb-essentials/src/sharing/meeting-invite.join.ts',
-      'hypercomb-essentials/src/sharing/profile.queen.ts',
       'hypercomb-essentials/src/sharing/promote.ts',
       'hypercomb-essentials/src/sharing/publications-ledger.ts',
       'hypercomb-essentials/src/sharing/sealed-publish.ts',

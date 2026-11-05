@@ -3,11 +3,11 @@
   "name": "served by everyone",
   "chapter": "why hypercomb",
   "slug": "served-by-everyone",
-  "eyebrow": "reason five",
+  "eyebrow": "replication",
   "headline": "Served by *everyone*",
   "sub": "",
   "visual": "film:served",
   "visualData": [],
   "media": "served",
-  "say": "Reason five: it is carried by its community. Hosts are run by the people who use them, and a host can be shared with friends. Work is replicated from host to host and checked against its signature, so every replica proves itself, and the more people care about something, the more places it lives. Your peers keep each other safe: trust is an allowance you give, never a switch that is on by default. And nothing tracks you; not one statistic about you is collected. It is source control for everyone's work, secured by your peers, and served by everyone."
+  "say": "Shared work is carried by the people who use it. Hosts are run by those people, and publishing puts each piece up under its own signature before a pointer moves to the new version, so older versions keep working. Work is copied from host to host, and every copy is checked against its signature, so the more people care about something, the more places it lives. Trust is an allowance you give each peer, never a switch that is on by default. And nothing about you is tracked: not one statistic is collected. Your work is served by everyone who cares about it, and kept safe by your peers."
 }

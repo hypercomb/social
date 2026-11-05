@@ -860,6 +860,50 @@ every page, and its 25 scenes are folded into the tiles they explain:
   out. `blocks/blocks.spec.ts` checks that no page carries a demo-hive clip,
   that every capture and every extracted tile is on a page, and that every
   spoken line has its recorded voice.
+- **For absolute beginners, with the crux for the technical reader.** jwize,
+  2026-11-05: *"the language needs to be for absolute beginners but hit the
+  crux of it for the technical people"*; *"the video's need to be compelling
+  and authentic to the architecture and the state of the world in 2026
+  without the reminder of the date. The purpose is to educate, not to sell."*
+  And, on the opening: *"your corner sounds small … more like have the
+  freedom to connect your community to the ones you care about most."*
+  - Every line is plain enough for someone who has never heard of it.
+  - Where it helps, one exact sentence gives the technical reader the core,
+    for example: "a content-addressed tree, where names point to signatures";
+    "the SHA-256 hash of the bytes".
+  - It teaches. No "reason one", no "the part that surprises people", no
+    "bet". Nothing names a year.
+  - Anything not built yet is called planned.
+  - The words live in the tour's own scenes (`scripts/presentation/scenes`),
+    so hypercomb.com/tour says the same.
+  - A scene with a drawn clip (8, 13, 17) keeps its sentence-by-sentence
+    beats (`concepts.cjs`), so the clip is re-timed to the new voice, not
+    redrawn.
+- **Promoted, and waiting.** The same day: *"lets do our best to select on
+  the most important pieces we can put the others aside in waiting in a list
+  as unpromoted."*
+  - `tree.cjs` keeps every piece. What it exports as the roots is the
+    promoted tree. `WAITING` names the routes set aside: they are not planted,
+    paged or published.
+  - A hive that already holds a waiting tile has its marker retired with
+    `trait ~` (plant.cjs). The tile stays, one `trait` away, and its note and
+    brief stay ready. A route promotes again by leaving the list.
+  - A scene on a waiting tile waits with it. The checks ask that every scene
+    be placed once or waiting (`tour.waitingScenes()`).
+  - **Promoted (21 pages):** protocol; simple, primitive, signature, act;
+    organized, history; collaborative, workbench, domain, publishing;
+    intelligent, sentence, agent; accessible; localized; and on the road:
+    road, question, creations, yours, first-day.
+  - **Waiting:**
+    - simple: opening (and its seven moves); word, layer and meta under the
+      primitive.
+    - organized: heart (scene 14), build, layout, trait, organization.
+    - collaborative: trial, participant, sharing, discovery (scene 16, the
+      Hyperdex), hosting, tapestry.
+    - intelligent: automaton (scene 9, bees), debugging, merging.
+    - accessible: reader, listening, phone, motion.
+    - localized: translating, locale.
+    - road: coming, vision, computer (scenes 21 to 23).
 - **Each way said once: crumbs up, tabs across, words in.** jwize,
   2026-11-05: *"show all the current section videos at the bottom while on
   each of those pages and then the breadcrumb at the top for childpages. That
