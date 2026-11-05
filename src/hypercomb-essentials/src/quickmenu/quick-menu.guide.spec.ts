@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { guideFor } from './quick-menu.guide.js'
+import { QuickMenuGuide, guideFor } from './quick-menu.guide.js'
 import type { QuickMenuSlot } from './quick-menu.types.js'
 
 const slot = (extra: Partial<QuickMenuSlot> = {}): QuickMenuSlot =>
@@ -27,16 +27,26 @@ describe('guideFor', () => {
       lit: { label: 'remove', slot: slot({ onTile: true }) },
       asleep: false,
     })
-    expect(guide.crumbs).toEqual(['notes +2', 'Edit', 'remove 3 tiles'])
+    expect(guide.crumbs).toEqual(['notes +2', 'Edit', 'remove'])
+    expect(guide.does).toBe('Remove 3 tiles from this layer')
     expect(guide.litLast).toBe(true)
     expect(guide.instruction).toBe('Release Alt, click or press Enter to run it · Right-click goes back')
   })
 
   it('names the single tile for a lone operand, and nothing for a surface verb', () => {
-    const tile = guideFor({ subject: 'notes', operands: ['notes'], path: [], lit: { label: 'hide', slot: slot({ onTile: true }) }, asleep: false })
-    expect(tile.crumbs).toEqual(['notes', 'hide notes'])
-    const surface = guideFor({ subject: 'notes', operands: ['notes'], path: [], lit: { label: 'fit', slot: slot() }, asleep: false })
+    const hide = { direction: 'east', label: 'hide', action: { kind: 'command', command: 'hide' }, onTile: true } as const
+    const tile = guideFor({ subject: 'notes', operands: ['notes'], path: [], lit: { label: 'hide', slot: hide }, asleep: false })
+    expect(tile.crumbs).toEqual(['notes', 'hide'])
+    expect(tile.does).toBe('Hide “notes” from view here; nothing is deleted')
+    const fit = { direction: 'east', label: 'fit', action: { kind: 'command', command: 'fit' } } as const
+    const surface = guideFor({ subject: 'notes', operands: ['notes'], path: [], lit: { label: 'fit', slot: fit }, asleep: false })
     expect(surface.crumbs).toEqual(['notes', 'fit'])
+    expect(surface.does).toBe('Zoom to fit everything on screen')
+  })
+
+  it('says nothing of what it does until an option is lit, or while the options sleep', () => {
+    expect(guideFor({ subject: 'a', operands: ['a'], path: [], lit: null, asleep: false }).does).toBe('')
+    expect(guideFor({ subject: 'a', operands: ['a'], path: [], lit: null, asleep: true }).does).toBe('')
   })
 
   it('words each way of confirming', () => {
@@ -50,5 +60,28 @@ describe('guideFor', () => {
   it('asks for the middle while the options sleep', () => {
     const guide = guideFor({ subject: 'a', operands: ['a'], path: [], lit: null, asleep: true })
     expect(guide.instruction).toBe('Move to the middle to wake the options')
+  })
+})
+
+describe('QuickMenuGuide', () => {
+  const area = { left: 0, top: 0, right: 800 }
+
+  it('shows the sentence between the crumbs and the instruction, and hides it when nothing is lit', () => {
+    const strip = new QuickMenuGuide()
+    const hide = { direction: 'east', label: 'hide', action: { kind: 'command', command: 'hide' }, onTile: true } as const
+
+    strip.show(guideFor({ subject: 'notes', operands: ['notes'], path: [], lit: { label: 'hide', slot: hide }, asleep: false }), area)
+    const root = document.body.lastElementChild as HTMLElement
+    const [crumbs, does, instruction] = [...root.children] as HTMLElement[]
+    expect(crumbs.textContent).toBe('notes › hide')
+    expect(does.textContent).toBe('Hide “notes” from view here; nothing is deleted')
+    expect(does.style.display).toBe('block')
+    expect(instruction.textContent).toContain('Release Alt')
+
+    strip.show(guideFor({ subject: 'notes', operands: ['notes'], path: [], lit: null, asleep: false }), area)
+    expect(does.textContent).toBe('')
+    expect(does.style.display).toBe('none')
+
+    strip.hide()
   })
 })

@@ -81,6 +81,11 @@ export function currentOperands(subject?: string | null): string[] {
   return operandsOf(subject, selection()?.selected ?? [])
 }
 
+/** Whether `subject` is already part of the picked set. */
+export function isPicked(subject?: string | null): boolean {
+  return !!subject && !!selection()?.selected?.has(subject)
+}
+
 /** Make the operands the selection, so a verb that reads the selection reads
  *  exactly them. Returns them. Announces nothing when the selection is already
  *  that set. */

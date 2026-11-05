@@ -828,7 +828,7 @@ export class ShowCellDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'render:names-on-hover', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:grid-changed', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'order:changed', 'arrange:preview', 'render:set-gap', 'move:preview', 'overlay:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'presence:claims-changed', 'tags:apply-pending', 'tags:preview', 'group:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:committed', 'cell:added','cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover', 'render:flower', 'tile:preview']
-  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:tiles-target', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted', 'thumbnail:wanted', 'landing:pending', 'render:dive-painted', 'render:name-visibility']
+  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:tiles-target', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted', 'thumbnail:wanted', 'landing:pending', 'render:dive-painted', 'render:name-visibility', 'render:level-leaving']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
 
@@ -5187,6 +5187,16 @@ export class ShowCellDrone extends Drone {
       // user saw the CURRENT level visibly re-zoom/jump before the next
       // level's children streamed in. Hiding first makes the transition
       // clean: old level out, then viewport, then children stream in.
+      //
+      // THE NAMES GO FIRST. They are DOM text over the canvas (tile-name), so
+      // hiding the layer alone leaves the outgoing level's names hanging over a
+      // blank screen for the whole slow path - the viewport read, the image
+      // loads - until the new level's cell-count replaces them (Jaime,
+      // 2026-11-04: "I see the images and tiles disappear and then the text is
+      // late. The text should always go first."). Say so before hiding, so the
+      // names are off the screen no later than the pictures are. Transient:
+      // a moment, never state a late subscriber should be handed.
+      EffectBus.emitTransient('render:level-leaving', { locationKey })
       if (this.layer) this.layer.visible = false
 
       // Viewport: prefer the in-memory snapshot (sync). MUST await the

@@ -12,6 +12,7 @@ import {
   railPitch,
   railSeedScale,
   railShiftOffset,
+  railStepColumns,
   railStepTiles,
   railTileIndex,
   railTilesBefore,
@@ -47,11 +48,21 @@ describe('rail rhythm', () => {
     }
   })
 
-  it('a step is one rhythm period of two columns', () => {
+  it('a step is one column — two only where the pairing nests', () => {
+    // every pairing whose columns are all alike slides one cell along the strip
+    expect(railStepColumns(3, false, false)).toBe(1)
+    expect(railStepColumns(3, false, true)).toBe(1)
+    expect(railStepColumns(3, true, false)).toBe(1)
+    expect(railStepColumns(1, true, true)).toBe(1)
+    expect(railStepTiles(3, false, false)).toBe(3)
+    expect(railStepTiles(3, false, true)).toBe(3)
+    expect(railStepTiles(2, false, true)).toBe(2)
+    expect(railStepTiles(1, true, true)).toBe(1)
+    // the nested pairing alternates full and tucked columns: a single column
+    // would re-nest, so there a step is the rhythm's two (3 + 2 tiles)
+    expect(railStepColumns(3, true, true)).toBe(2)
     expect(railStepTiles(3, true, true)).toBe(5)
     expect(railStepTiles(2, true, true)).toBe(3)
-    expect(railStepTiles(3, false, false)).toBe(6)
-    expect(railStepTiles(1, true, true)).toBe(2)
   })
 
   it('a shift is an exact translation: tiles keep their relative slots', () => {
@@ -128,7 +139,7 @@ describe('shift ↔ tile index', () => {
   it('slot s shows tile s + shift * step', () => {
     expect(railTileIndex(0, 0, 3, true, true)).toBe(0)
     expect(railTileIndex(4, 2, 3, true, true)).toBe(14)
-    expect(railShiftOffset(3, 3, false, false)).toBe(18)
+    expect(railShiftOffset(3, 3, false, false)).toBe(9)
   })
 
   it('reaches the last tile and never goes past it', () => {
@@ -169,7 +180,7 @@ describe('shift ↔ tile index', () => {
   it('is a pure function of its inputs', () => {
     const tiles = Array.from({ length: 25 }, (_, i) => i)
     expect(railWindowOf(tiles, 2, 12, 3, false, false)).toEqual(railWindowOf(tiles, 2, 12, 3, false, false))
-    expect(railWindowOf(tiles, 2, 12, 3, false, false)).toEqual(tiles.slice(12, 24))
+    expect(railWindowOf(tiles, 2, 12, 3, false, false)).toEqual(tiles.slice(6, 18))
   })
 })
 
@@ -205,7 +216,7 @@ describe('pan → shift accumulator', () => {
   })
 })
 
-describe('a wheel gesture is measured in distance, not in events', () => {
+describe('one mouse increment is one step, however far it reports', () => {
   /** Total signed steps a run of [deltaPx, at-ms] events pays out. */
   const steps = (events: ReadonlyArray<readonly [number, number]>): number => {
     let wheel = RAIL_WHEEL_REST
@@ -218,40 +229,96 @@ describe('a wheel gesture is measured in distance, not in events', () => {
     return total
   }
 
-  it('a plain notch is one step, on the spot — either way', () => {
-    expect(foldRailWheel(RAIL_WHEEL_REST, 100, 0).steps).toBe(1)
-    expect(foldRailWheel(RAIL_WHEEL_REST, -100, 0).steps).toBe(-1)
+  it('a detent is exactly one step — 50, 100, 120, 166 or 1000 px alike, either way', () => {
+    for (const reported of [50, 100, 120, 166, 240, 1000]) {
+      expect(foldRailWheel(RAIL_WHEEL_REST, reported, 0).steps, `${reported}px`).toBe(1)
+      expect(foldRailWheel(RAIL_WHEEL_REST, -reported, 0).steps, `-${reported}px`).toBe(-1)
+    }
+  })
+
+  it('every detent of a spin is a step of its own, however fast the clicks', () => {
+    expect(steps([[100, 0], [100, 40], [100, 80]])).toBe(3)
+    expect(steps([[120, 0], [120, 35], [120, 70], [120, 105]])).toBe(4)
+    // a free-spinning wheel clicks faster than a trackpad streams; each is still a detent
+    expect(steps([[166, 0], [166, 12], [166, 24]])).toBe(3)
+  })
+
+  it('a pause between detents starts again: each is a step', () => {
+    expect(steps([[100, 0], [100, 400], [100, 800]])).toBe(3)
   })
 
   it('a notch split into ten small events is still one step', () => {
     expect(steps(Array.from({ length: 10 }, (_, i) => [10, i * 12] as const))).toBe(1)
   })
 
-  it('steps follow the distance travelled, not the number of events that carried it', () => {
-    expect(steps([[300, 0]])).toBe(3)
-    expect(steps([[100, 0], [100, 40], [100, 80]])).toBe(3)
+  it('small events at a trackpad’s cadence are measured in distance, not counted one by one', () => {
     expect(steps(Array.from({ length: 30 }, (_, i) => [10, i * 10] as const))).toBe(3)
-  })
-
-  it('a pause starts a new gesture, so every separate notch is a step', () => {
-    expect(steps([[100, 0], [100, 400], [100, 800]])).toBe(3)
+    // a flick that RAMPS UP from small events stays a stream however big they
+    // grow: 346 px in all, three steps, not twelve
+    const ramp = [6, 12, 20, 30, 45, 60, 60, 45, 30, 20, 12, 6]
+    expect(steps(ramp.map((delta, i) => [delta, i * 16] as const))).toBe(3)
   })
 
   it('a reverse blip at the tail of a flick pays nothing and walks nothing back', () => {
-    expect(steps([[100, 0], [100, 30], [-8, 60], [-6, 80]])).toBe(2)
+    expect(steps([[100, 0], [100, 40], [-8, 70], [-6, 85]])).toBe(2)
   })
 
-  it('turning the wheel the other way is a gesture of its own, paying its own steps', () => {
+  it('turning the wheel the other way is a step of its own', () => {
     const forward = foldRailWheel(RAIL_WHEEL_REST, 100, 0)
     expect(forward.steps).toBe(1)
-    expect(foldRailWheel(forward.wheel, -100, 40).steps).toBe(-1)
+    expect(foldRailWheel(forward.wheel, -100, 20).steps).toBe(-1)
   })
 
   it('reads a wheel in lines and pages as the px a notch would be, and ignores nothing-events', () => {
     expect(railWheelPx(120)).toBe(120)
     expect(railWheelPx(3, 1)).toBeCloseTo(100)
     expect(railWheelPx(1, 2)).toBe(400)
+    // Firefox: one detent is three lines — one step
+    expect(foldRailWheel(RAIL_WHEEL_REST, railWheelPx(3, 1), 0).steps).toBe(1)
     expect(foldRailWheel(RAIL_WHEEL_REST, 0, 0).steps).toBe(0)
     expect(foldRailWheel(RAIL_WHEEL_REST, Number.NaN, 0).steps).toBe(0)
+  })
+})
+
+describe('a tile keeps its row, and its place among its siblings, through every shift', () => {
+  /** The row a slot sits in, and where it sits in its column: a plain lane
+   *  index, or — in the nested pairing — whether the column is the tucked one
+   *  and where in it. Two slots with the same key are the same place on the
+   *  screen across the strip. */
+  const placeOf = (slot: number, lanes: number, flatTop: boolean, horizontal: boolean): string => {
+    if (!(flatTop && horizontal && lanes > 1)) return String(slot % lanes)
+    const per = 2 * lanes - 1
+    const within = slot % per
+    return within >= lanes ? `tucked:${within - lanes}` : `full:${within}`
+  }
+
+  const pairings: ReadonlyArray<readonly [string, boolean, boolean]> = [
+    ['point-top, strip down', false, false],
+    ['point-top, strip sideways', false, true],
+    ['flat-top, strip down', true, false],
+    ['flat-top, strip sideways (nested)', true, true],
+  ]
+
+  for (const [name, flatTop, horizontal] of pairings) {
+    for (const lanes of [1, 2, 3]) {
+      it(`${name}, ${lanes} lane${lanes === 1 ? '' : 's'}: a shift is a pure translation`, () => {
+        for (let tile = 0; tile < 80; tile++) {
+          for (let shift = 0; shift <= 6; shift++) {
+            const slot = tile - railShiftOffset(shift, lanes, flatTop, horizontal)
+            if (slot < 0) continue
+            expect(placeOf(slot, lanes, flatTop, horizontal), `tile ${tile} at shift ${shift}`)
+              .toBe(placeOf(tile, lanes, flatTop, horizontal))
+          }
+        }
+      })
+    }
+  }
+
+  it('a step moves one column where it can, and the nested pairing keeps its row by moving two', () => {
+    // one column: the next column's tiles take this column's slots, lane for lane
+    expect(railStepTiles(3, false, true)).toBe(3)
+    // the nested pairing's tucked column sits between its neighbours' rows, so
+    // a single column would put a tile in a row it never had
+    expect(railStepColumns(3, true, true)).toBe(2)
   })
 })

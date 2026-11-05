@@ -20,7 +20,7 @@
 // explicit gesture. Reading this file can never move a byte of anyone's hive.
 
 import { fetchHiveIndex } from './hive-pointer.js'
-import { picturesKey, picturesPoolAddress } from './picture-pools.js'
+import { layerProps, picturesKey, picturesPoolAddress } from './picture-pools.js'
 
 const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
@@ -163,8 +163,8 @@ export const meaningPoolImageCandidates = async (
         const layerSig = sig(index.manifest.roots?.[key])
         if (!layerSig) continue
         const layer = await readJson(layerSig)
-        const propsSig = Array.isArray(layer?.['properties']) ? sig(layer['properties'][0]) : undefined
-        const props = propsSig ? await readJson(propsSig) : null
+        // Through the Life Primitive hop: a hive's properties are an envelope.
+        const props = layer ? await layerProps(layer, readJson) : null
         const pointers = props ? imagePropsOf(props) : undefined
         const previewSig = pointers ? previewSigOf(pointers) : ''
         if (!pointers || !previewSig) continue

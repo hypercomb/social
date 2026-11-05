@@ -9,13 +9,16 @@
 // WINDOW: slot `s` shows tile `s + offset(shift)`. Tiles change position,
 // the layout holds.
 //
-// THE UNIT OF A SHIFT IS THE RHYTHM'S PERIOD (two columns). A honeycomb
-// repeats every two columns (the 3-2-3 nesting at three lanes; the half-cell
-// alternation of the cross pairings), so only a two-column step is an exact
-// TRANSLATION of the tiles: everything that was in column k is in column k-2,
-// nothing re-nests. A one-column step would hand a full column's tiles to a
-// tucked column's slots and reflow the whole window. `railStepTiles` is how
-// many tiles one step carries (2n-1 for the nested pairing, 2n otherwise).
+// THE UNIT OF A SHIFT IS ONE COLUMN where one column is an exact TRANSLATION
+// of the tiles: everything that was in column k is in column k-1, nothing
+// re-nests. That holds for every pairing whose columns are all alike — each
+// lane just slides one cell along the strip (the half-cell offset between
+// lanes is the same before and after). Only the NESTED pairing (flat-top,
+// strip running sideways: 3-2-3 at three lanes) alternates full and tucked
+// columns, so a one-column step would hand a full column's tiles to a tucked
+// column's slots and reflow the whole window; there a step is the rhythm's
+// period of two. `railStepColumns` says which, and `railStepTiles` is how
+// many tiles one step carries (n for a column, 2n-1 for the nested pair).
 //
 // Everything here is a pure function of (lanes, orientation, size, tile
 // count, shift). Nothing is written anywhere; see documentation/
@@ -30,7 +33,10 @@ export interface RailHexSize { circumRadiusPx: number; gapPx: number; padPx: num
 const SQRT3 = Math.sqrt(3)
 const APOTHEM_RATIO = 0.8660254
 
-/** A step is one rhythm period: two columns along the strip. */
+/** The strip's rhythm repeats every two columns: the period the nested
+ *  pairing alternates full and tucked columns by. Counting tiles in a run of
+ *  columns reads it; a step is one column wherever the columns are all alike
+ *  (`railStepColumns`). */
 export const RAIL_STEP_COLUMNS = 2
 
 // ── the strip's rhythm ─────────────────────────────────────────────────
@@ -67,12 +73,20 @@ export const railTilesBefore = (
   return full * per + (c % RAIL_STEP_COLUMNS === 1 ? n : 0)
 }
 
-/** Tiles one shift step carries (one rhythm period). */
+/** Columns one shift step carries: ONE, unless the pairing is nested — there
+ *  a single column would re-nest, so the step is the rhythm's two. */
+export const railStepColumns = (
+  lanes: number,
+  flatTop: boolean,
+  horizontal: boolean = flatTop,
+): number => (nested(lanes, flatTop, horizontal) ? RAIL_STEP_COLUMNS : 1)
+
+/** Tiles one shift step carries. */
 export const railStepTiles = (
   lanes: number,
   flatTop: boolean,
   horizontal: boolean = flatTop,
-): number => railTilesBefore(RAIL_STEP_COLUMNS, lanes, flatTop, horizontal)
+): number => railTilesBefore(railStepColumns(lanes, flatTop, horizontal), lanes, flatTop, horizontal)
 
 // ── how big the window is ──────────────────────────────────────────────
 
@@ -235,27 +249,39 @@ export const railWindowOf = <T>(
 
 // ── wheel → steps ──────────────────────────────────────────────────────
 //
-// A WHEEL EVENT IS NOT A NOTCH. A plain mouse sends one event of ~100px per
-// detent, but a high-resolution wheel sends ten of ~10px, and a trackpad
-// sends dozens with an inertia tail. Taking one step per EVENT made a single
-// nudge race through the strip and pin at its end, and a reverse blip at the
-// tail of a flick walk it straight back. So a wheel gesture is measured in
-// DISTANCE: steps = travel ÷ a notch, whatever the event count.
+// ONE MOUSE INCREMENT IS ONE STEP. A plain mouse sends one event per detent,
+// and what that event says it travelled varies — 100px, 120px, 166px, 50px
+// at a zoomed page, three lines in Firefox — so a step is never counted in
+// px for it: one detent is one column however far it reports. The devices
+// that send MANY small events for one movement — a high-resolution wheel, a
+// trackpad with its inertia tail — are told apart by their size (each too
+// small to be a detent): a stream that BEGINS small, and keeps the cadence of
+// a trackpad, is measured in DISTANCE however big its later events grow, so a
+// nudge split into ten events is still one step. Either way a reverse blip at
+// the tail of a flick starts the gesture over and pays nothing.
 
-/** One detent of a wheel, in px — what a mouse notch reports. */
+/** An event this big, on its own, is a whole detent: one step, whatever
+ *  distance it reports. Smaller ones add up (a zoomed page's detent is ~50). */
+export const RAIL_WHEEL_DETENT_PX = 40
+/** Smooth travel that makes one step: what a mouse notch reports. */
 export const RAIL_WHEEL_NOTCH_PX = 100
-/** A gesture's first step lands at this travel: a whole notch steps at once,
- *  a notch split into ten events steps on the sixth. */
+/** A smooth gesture's first step lands at this travel: a whole notch's worth
+ *  split into ten events steps on the sixth. */
 export const RAIL_WHEEL_FIRST_PX = 60
+/** Events closer together than this, in one direction, that follow a SMALL
+ *  event are a stream from a smooth device, however big they grow — they do
+ *  not become detents of their own. */
+export const RAIL_WHEEL_BURST_MS = 50
 /** A pause longer than this starts a new gesture (the same gap
  *  navigation/zoom/wheel-gesture.ts reads a burst by). */
 export const RAIL_WHEEL_GAP_MS = 150
 
-/** The gesture so far: signed travel, the steps it has already paid out, and
- *  when its last event came. */
-export interface RailWheel { travel: number; stepped: number; at: number }
+/** The gesture so far: signed smooth travel, the steps it has already paid
+ *  out, when its last event came, which way it went, and whether it was a
+ *  small (smooth-device) event. */
+export interface RailWheel { travel: number; stepped: number; at: number; dir: number; small: boolean }
 
-export const RAIL_WHEEL_REST: RailWheel = { travel: 0, stepped: 0, at: Number.NEGATIVE_INFINITY }
+export const RAIL_WHEEL_REST: RailWheel = { travel: 0, stepped: 0, at: Number.NEGATIVE_INFINITY, dir: 0, small: false }
 
 /** A wheel event's travel in px: `deltaMode` 0 is px already, 1 counts lines
  *  (three to a notch), 2 counts pages. */
@@ -263,20 +289,29 @@ export const railWheelPx = (delta: number, deltaMode: number = 0): number =>
   delta * (deltaMode === 1 ? RAIL_WHEEL_NOTCH_PX / 3 : deltaMode === 2 ? RAIL_WHEEL_NOTCH_PX * 4 : 1)
 
 /** Fold one wheel event into the gesture. `steps` is signed — positive brings
- *  LATER tiles — and is only what THIS event adds. A pause, or the wheel
- *  turning the other way, starts the gesture over, so a reverse blip pays out
- *  nothing and cannot walk back what the hand just did. */
+ *  LATER tiles — and is only what THIS event adds. */
 export const foldRailWheel = (
   wheel: RailWheel,
   deltaPx: number,
   now: number,
 ): { wheel: RailWheel; steps: number } => {
   if (!Number.isFinite(deltaPx) || deltaPx === 0) return { wheel, steps: 0 }
-  const again = now - wheel.at <= RAIL_WHEEL_GAP_MS && Math.sign(deltaPx) === Math.sign(wheel.travel)
+  const dir = Math.sign(deltaPx)
+  const gap = now - wheel.at
+
+  // A DETENT: big enough to be one, and not the growing tail of a smooth
+  // stream. One step, whatever it says it travelled.
+  const stream = wheel.small && gap < RAIL_WHEEL_BURST_MS && dir === wheel.dir
+  if (Math.abs(deltaPx) >= RAIL_WHEEL_DETENT_PX && !stream) {
+    return { wheel: { travel: 0, stepped: 0, at: now, dir, small: false }, steps: dir }
+  }
+
+  // SMOOTH: distance. A pause, or the wheel turning the other way, starts over.
+  const again = gap <= RAIL_WHEEL_GAP_MS && dir === Math.sign(wheel.travel)
   const travel = (again ? wheel.travel : 0) + deltaPx
   const paid = again ? wheel.stepped : 0
   const due = Math.floor((Math.abs(travel) + (RAIL_WHEEL_NOTCH_PX - RAIL_WHEEL_FIRST_PX)) / RAIL_WHEEL_NOTCH_PX)
-  return { wheel: { travel, stepped: due, at: now }, steps: Math.sign(travel) * (due - paid) }
+  return { wheel: { travel, stepped: due, at: now, dir, small: true }, steps: Math.sign(travel) * (due - paid) }
 }
 
 // ── pan → shift ────────────────────────────────────────────────────────

@@ -9,9 +9,10 @@
 //
 // The tile leads, because every verb here is about it; the rest of the
 // crumbs are the rings taken to get here. Once an option is under the pointer
-// the strip says what it will do to WHICH tiles, and how to confirm it.
+// the strip says, in a sentence, what it will do to WHICH tiles
+// (quick-menu.does.ts), and how to confirm it.
 
-import { I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { doesFor, say } from './quick-menu.does.js'
 import type { QuickMenuSlot } from './quick-menu.types.js'
 
 /** What the flower is doing, as far as the guide is concerned. */
@@ -26,22 +27,17 @@ export type GuideInput = {
   readonly lit: { readonly label: string; readonly slot: QuickMenuSlot | undefined } | null
   /** After a right-click back: the options sleep until the pointer is in the middle. */
   readonly asleep: boolean
+  /** The tile the flower was raised over is already in the picked set. */
+  readonly picked?: boolean
 }
 
 export type Guide = {
   readonly crumbs: readonly string[]
   /** The last crumb is the option under the pointer. */
   readonly litLast: boolean
+  /** What the option under the pointer will do, as a sentence. Empty until one is lit. */
+  readonly does: string
   readonly instruction: string
-}
-
-const get = <T,>(key: string): T | undefined =>
-  (globalThis as { ioc?: { get?: (k: string) => T } }).ioc?.get?.(key)
-
-/** The catalog's wording, falling back to the English given. */
-function say(key: string, fallback: string): string {
-  const translated = get<I18nProvider>(I18N_IOC_KEY)?.t?.(key)
-  return translated && translated !== key ? translated : fallback
 }
 
 /** Whom a tile verb will reach, said short: the tile, or how many. */
@@ -74,21 +70,22 @@ export function guideFor(input: GuideInput): Guide {
   const walked = input.path.length > 0
 
   if (input.asleep) {
-    return { crumbs, litLast: false, instruction: say('quickmenu.guide.wake', 'Move to the middle to wake the options') }
+    return { crumbs, litLast: false, does: '', instruction: say('quickmenu.guide.wake', 'Move to the middle to wake the options') }
   }
   if (!input.lit) {
     return {
       crumbs,
       litLast: false,
+      does: '',
       instruction: `${say('quickmenu.guide.aim', 'Aim at an option')} · ${walked ? back : leave}`,
     }
   }
   const { label, slot } = input.lit
-  // Say what it does to whom, only for a verb that is about tiles.
-  const named = slot?.onTile ? `${label} ${reach(input.subject, input.operands)}`.trim() : label
   return {
-    crumbs: [...crumbs, named],
+    crumbs: [...crumbs, label],
     litLast: true,
+    // What it will do, to which tiles: a verb about tiles names them, a verb about the surface does not.
+    does: slot ? doesFor({ slot, label, subject: input.subject, operands: input.operands, picked: input.picked }) : '',
     instruction: `${confirm(slot)} · ${walked ? back : leave}`,
   }
 }
@@ -105,6 +102,7 @@ const SEPARATOR = ' › '
 export class QuickMenuGuide {
   #root: HTMLElement | null = null
   #crumbs: HTMLElement | null = null
+  #does: HTMLElement | null = null
   #instruction: HTMLElement | null = null
 
   show(guide: Guide, area: { left: number; top: number; right: number }): void {
@@ -116,6 +114,8 @@ export class QuickMenuGuide {
       const last = at === guide.crumbs.length - 1
       crumbs.appendChild(this.#span(crumb, last && guide.litLast ? ACCENT : TEXT_ON))
     })
+    this.#does!.textContent = guide.does
+    this.#does!.style.display = guide.does ? 'block' : 'none'
     this.#instruction!.textContent = guide.instruction
     root.style.left = `${(area.left + area.right) / 2}px`
     root.style.top = `${area.top + 12}px`
@@ -145,11 +145,15 @@ export class QuickMenuGuide {
         'pointer-events:none', 'z-index:2147482999',
       ].join(';')
       const crumbs = document.createElement('div')
+      // The sentence is what the participant came for: the largest line in the strip.
+      const does = document.createElement('div')
+      does.style.cssText = `font-weight:600;font-size:1.1rem;line-height:1.25;color:${TEXT_ON};display:none`
       const instruction = document.createElement('div')
       instruction.style.cssText = `font-weight:500;font-size:.8rem;color:${TEXT_OFF}`
-      root.append(crumbs, instruction)
+      root.append(crumbs, does, instruction)
       this.#root = root
       this.#crumbs = crumbs
+      this.#does = does
       this.#instruction = instruction
     }
     if (!this.#root.isConnected) document.body.appendChild(this.#root)

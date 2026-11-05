@@ -53,6 +53,9 @@ import {
   type WindowSession,
 } from '@hypercomb/core'
 import { hostZone } from './community-hosts.js'
+import { fetchHiveIndex, type HiveIndexResult, type HiveManifest } from './hive-pointer.js'
+import { isReservedRootKey } from './hive-link.js'
+import { publisherKeyHex } from './key-list.client.js'
 import { hostOnlineBlock } from './host-online.js'
 import { trustCode, trustedCodeDomains } from './code-trust.js'
 import { attestPackage, readWitnessed } from './package-attestation.js'
@@ -319,6 +322,52 @@ export const domainRows = (input: {
     .map(({ row }) => row)
 }
 
+/**
+ * HOW MANY BRANCHES A HOST NAMES AS LIVE — the number on a host's Publish link.
+ * Read from the participant's own signed index on that host, the same index
+ * the Publish panel's first step reads, and by the same rule it uses for a
+ * branch being open on a domain: the index names a head for it, and its entry
+ * either lists no doors (it opens on every domain) or lists this one. Pointers
+ * the index carries (`plan:…`, `install:…`) are never branches.
+ */
+export const publishedOn = (manifest: Pick<HiveManifest, 'roots' | 'doors'>, zone: string): number => {
+  let count = 0
+  for (const [key, head] of Object.entries(manifest.roots ?? {})) {
+    if (isReservedRootKey(key) || !SIG_RE.test(String(head ?? '').toLowerCase())) continue
+    const doors = manifest.doors?.[key]
+    if (doors === undefined || doors.includes(zone)) count++
+  }
+  return count
+}
+
+/** What reading a host's index needs: the key a device already holds, and the index. */
+export interface PublishedIo {
+  key(): Promise<string>
+  index(zone: string, pubkey: string): Promise<HiveIndexResult>
+}
+
+const publishedIo: PublishedIo = {
+  // `known`: looking at a host never mints a key for a device that has none.
+  key: () => publisherKeyHex({ known: true }),
+  index: (zone, pubkey) => fetchHiveIndex(zone, pubkey),
+}
+
+/**
+ * The count for one host, or null when it cannot be told: no key here, the
+ * host did not answer, or its index did not verify. A host that answers 404
+ * has no index of yours, which is a plain none published. Null is never read
+ * as zero — an unreachable host is not an empty one.
+ */
+export async function publishedCount(zone: string, io: PublishedIo = publishedIo): Promise<number | null> {
+  try {
+    const pubkey = (await io.key()).trim().toLowerCase()
+    if (!SIG_RE.test(pubkey)) return null
+    const read = await io.index(zone, pubkey)
+    if (read.ok) return publishedOn(read.manifest, zone)
+    return read.reason === 'http' && read.status === 404 ? 0 : null
+  } catch { return null }
+}
+
 /** The parts inside a path that one of its revisions would replace: every
  *  descendant running here whose signature that revision does not carry. */
 export const replacedBeneath = (path: string, running: readonly InstallNode[], revision: readonly InstallNode[]): string[] => {
@@ -550,6 +599,12 @@ export class HostDirectoryElement extends HTMLElement {
   #deskCleanup: (() => void)[] = []
   /** The rail entry the keys just moved to: its button is new after the repaint. */
   #railFocus: string | null = null
+  /** How many branches each host's signed index opens there — null when it
+   *  could not be told. Read once per host per opening of the desk. */
+  #published = new Map<string, number | null>()
+  #publishedAsk = new Set<string>()
+  /** Which opening of the desk this is — a read that outlives its opening is dropped. */
+  #opening = 0
   /** The next open continues where an act left off (a restart, a notice)
    *  instead of collapsing. */
   #resume = false
@@ -744,6 +799,9 @@ export class HostDirectoryElement extends HTMLElement {
   }
 
   #unmount(): void {
+    this.#opening++
+    this.#published.clear()
+    this.#publishedAsk.clear()
     this.#releaseDesk()
     this.#dock?.dispose()
     this.#dock = null
@@ -1118,8 +1176,16 @@ export class HostDirectoryElement extends HTMLElement {
     head.append(make('span', 'hd-grow'))
     // THE ONE LINK TO PUBLISH. This is what comes in; Publish is what goes out,
     // on its own screen. A host is where a branch may be sent, so a host has the
-    // door and this origin, which is no destination, does not.
+    // door and this origin, which is no destination, does not. Beside the door,
+    // how many branches that host names as live now — read from your signed index
+    // there, never from Publish's sweep, which seals and probes every branch.
     if (domain.zone) {
+      const published = make('span', 'hd-published')
+      published.dataset['zone'] = domain.zone
+      this.#refs.set('published', published)
+      this.#paintPublished(published, domain.zone)
+      head.append(published)
+      void this.#askPublished(domain.zone)
       const publish = button('hd-link hd-publish', `${t('hosts.publish', 'Publish')} ›`, t('hosts.publish-tip', 'Open Publish — what goes out to your domains'))
       publish.addEventListener('click', () => this.#openPublish())
       head.append(publish)
@@ -1127,6 +1193,35 @@ export class HostDirectoryElement extends HTMLElement {
     body.append(head)
     if (domain.behind) body.append(make('p', 'hd-note hd-behind', this.#behindText(domain.label)))
     body.append(this.#sectionBody(domain.zone))
+  }
+
+  /** The count beside the Publish door: nothing until it is told, never a zero
+   *  for a host that did not answer. */
+  #paintPublished(span: HTMLElement, zone: string): void {
+    const count = this.#published.get(zone)
+    span.hidden = count === undefined || count === null
+    if (count === undefined || count === null) { span.textContent = ''; return }
+    span.textContent = count > 0
+      ? t('hosts.published-here', '{count} published here', { count })
+      : t('hosts.published-none', 'Nothing published here yet')
+    span.title = t('hosts.published-tip', 'What your signed index on {host} names as live', { host: zone })
+  }
+
+  /** Ask a host once — the count is kept until the desk closes — and paint it
+   *  in place, so a read landing never repaints the list under the pointer. */
+  async #askPublished(zone: string): Promise<void> {
+    if (this.#published.has(zone) || this.#publishedAsk.has(zone)) return
+    const opening = this.#opening
+    this.#publishedAsk.add(zone)
+    const count = await publishedCount(zone)
+    // A desk that closed since this was asked — and may have opened again — has
+    // cleared what it kept. An answer from before that is not this opening's: it
+    // would overwrite a fresh read, or stand in the way of one.
+    if (opening !== this.#opening) return
+    this.#publishedAsk.delete(zone)
+    this.#published.set(zone, count)
+    const span = this.#refs.get('published')
+    if (span && span.dataset['zone'] === zone) this.#paintPublished(span, zone)
   }
 
   /** This desk covers the page, so it closes before Publish opens. */
@@ -1993,6 +2088,7 @@ ${S} .hd-drawer{min-width:0;min-height:0;overflow-y:auto;border-left:1px solid v
 ${S} .hd-pane-head{display:flex;align-items:center;gap:.6em;margin:0 0 .6em;}
 ${S} .hd-pane-title{margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:1.05em;font-weight:600;color:var(--hd-ink);}
 ${S} .hd-publish{font-size:.78em;}
+${S} .hd-published{font-size:.74em;color:var(--hd-ink-quiet);white-space:nowrap;}
 ${S} .hd-dot{width:.55em;height:.55em;border-radius:50%;background:var(--hd-ink-quiet);opacity:.45;}
 ${S} .hd-dot.update{background:var(--hc-window-accent);opacity:1;}
 ${S} .hd-dot.behind{background:var(--hc-status-warn);opacity:1;}

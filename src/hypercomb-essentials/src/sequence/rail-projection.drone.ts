@@ -43,11 +43,11 @@ import {
   accumulateRailPan,
   clampRailShift,
   foldRailWheel,
-  RAIL_STEP_COLUMNS,
   RAIL_WHEEL_REST,
   railPitch,
   railSeedScale,
   railShiftOffset,
+  railStepColumns,
   railWheelPx,
   railWindowOf,
   railWindowSize,
@@ -502,7 +502,7 @@ ${location}`
   #stepPx(): number {
     if (this.#projectedFlat === null || this.#horizontal === null) return 0
     return railPitch(this.#hexGeo, this.#projectedFlat, this.#horizontal).longPitch
-      * RAIL_STEP_COLUMNS * this.#screenScale()
+      * railStepColumns(this.#lanes, this.#projectedFlat, this.#horizontal) * this.#screenScale()
   }
 
   // ── RailWindowApi ───────────────────────────────────────────────────
