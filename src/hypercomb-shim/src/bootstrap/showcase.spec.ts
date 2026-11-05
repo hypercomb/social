@@ -339,14 +339,15 @@ describe('the hyperdex — this domain first and open, then the domains you foll
     await vi.waitFor(() => expect([...bands.querySelectorAll('.dex-row.own .hex-name')].map(name => name.textContent)).toEqual(['camelflage', 'dylan']))
     expect([...bands.querySelectorAll<HTMLElement>('.dex-row')].filter(row => !row.hidden)).toHaveLength(1)
     ;(hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
-    await vi.waitFor(() => expect(rows(bands)).toEqual(['hypercomb.com open:camelflage,dylan', 'jwize.com:']))
+    await vi.waitFor(() => expect(rows(bands)).toEqual(['hypercomb.com open:camelflage,dylan', 'jwize.com:', 'Community:']))
     ;(bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
-    // The open domain is always the first row, and the one it replaced goes below it as a header.
-    expect(rows(bands)).toEqual(['jwize.com open:dylan', 'hypercomb.com:'])
+    // The open domain is always the first row, and the one it replaced goes below it as a header. The community is not a
+    // domain: it is the last row, apart from them, and holds nothing until a tile is brought in.
+    expect(rows(bands)).toEqual(['jwize.com open:dylan', 'hypercomb.com:', 'Community:'])
     // dylan is in this domain's showcase already, and its tile in jwize.com's row says so.
     expect(bands.querySelector('.dex-row:not(.own) .hex.in-showcase .hex-name')?.textContent).toBe('dylan')
     ;(bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
-    expect(rows(bands)).toEqual(['hypercomb.com open:camelflage,dylan', 'jwize.com:'])
+    expect(rows(bands)).toEqual(['hypercomb.com open:camelflage,dylan', 'jwize.com:', 'Community:'])
   })
 
   it('shows a stranger only the showcase: no domains followed, no other rows', async () => {
@@ -466,7 +467,7 @@ describe('following a domain from the page', () => {
     input.value = 'nope.example'
     ;(bands.querySelector('.follow') as HTMLFormElement).dispatchEvent(new Event('submit', { cancelable: true }))
     // Before the host has answered the row is already there.
-    await vi.waitFor(() => expect(bands.querySelectorAll('.dex-row')).toHaveLength(2))
+    await vi.waitFor(() => expect(bands.querySelectorAll('.dex-row')).toHaveLength(3))
     const row = () => bands.querySelectorAll('.dex-row')[0] as HTMLElement
     expect(row().querySelector('.dex-name')?.textContent).toBe('nope.example')
     expect(row().querySelector('.dex-meta')?.textContent).toBe('Checking…')
@@ -515,6 +516,54 @@ describe('following a domain from the page', () => {
     await miss(three, 'first.example')
     three.refresh(Promise.resolve(sites))
     await vi.waitFor(() => expect(names(three)).not.toContain('first.example'))
+  })
+
+  it('gives the search one dynamic button: Follow for a domain nobody follows yet, Go for anything else', async () => {
+    const follow = vi.fn(async (raw: string) => ({ ok: true as const, zone: raw.trim() }))
+    const { bands, hero } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
+      follow, readPeerLedger: async zone => peer(zone),
+    })
+    await vi.waitFor(() => expect(bands.querySelector('.dex-row.own .hex')).not.toBeNull())
+    const search = hero.querySelector('input[type=search]') as HTMLInputElement
+    const button = hero.querySelector('.search-go') as HTMLButtonElement
+    const type = (text: string): void => { search.value = text; search.dispatchEvent(new Event('input')) }
+    expect(button.textContent).toBe('Go')
+    type('cafesociety.buzz')
+    expect(button.textContent).toBe('Follow')
+    // A domain already followed, this one, and plain words are all just Go.
+    for (const text of ['jwize.com', 'hypercomb.com', 'garden']) { type(text); expect(button.textContent).toBe('Go') }
+    // Follow takes the domain, opens its row, and leaves the line clear.
+    type('cafesociety.buzz')
+    button.click()
+    await vi.waitFor(() => expect(follow).toHaveBeenCalledWith('cafesociety.buzz'))
+    await vi.waitFor(() => expect(search.value).toBe(''))
+    expect(button.textContent).toBe('Go')
+    expect(bands.querySelector('.dex-row:not(.own)')).not.toBeNull()
+    // Go on a domain you follow turns to its row, whatever row was open.
+    type('jwize.com')
+    button.click()
+    expect(search.value).toBe('')
+    expect([...bands.querySelectorAll('.dex-row.open .dex-name')].map(name => name.textContent)).toEqual(['jwize.com'])
+  })
+
+  it('answers the keyboard\'s Go on a phone, and leaves Enter alone on a wide screen', async () => {
+    const follow = vi.fn(async (raw: string) => ({ ok: true as const, zone: raw.trim() }))
+    const { bands, hero } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
+      follow, readPeerLedger: async zone => peer(zone),
+    })
+    await vi.waitFor(() => expect(bands.querySelector('.dex-row.own .hex')).not.toBeNull())
+    const search = hero.querySelector('input[type=search]') as HTMLInputElement
+    search.value = 'cafesociety.buzz'
+    search.dispatchEvent(new Event('input'))
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('max-width: 720px') }))
+    try {
+      search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+      await vi.waitFor(() => expect(follow).toHaveBeenCalledWith('cafesociety.buzz'))
+    } finally { vi.unstubAllGlobals() }
   })
 
   it('draws no follow input where nothing can follow', () => {
@@ -1424,7 +1473,17 @@ describe('a tap visits, a hold toggles', () => {
     } finally { vi.useRealTimers() }
   })
 
-  it('managing, a tap under another domain brings it into your community, and a tap in your row promotes it live', async () => {
+  const manageOn = (hero: HTMLElement): void => { (hero.querySelector('.manage-toggle') as HTMLButtonElement).click() }
+  const rowNamed = (bands: HTMLElement, name: string): HTMLElement | undefined =>
+    [...bands.querySelectorAll<HTMLElement>('.dex-row')].find(row => row.querySelector('.dex-name')?.textContent === name)
+  const openRowNamed = async (bands: HTMLElement, name: string): Promise<HTMLElement> => {
+    const row = await vi.waitFor(() => { const found = rowNamed(bands, name); expect(found).toBeDefined(); return found! })
+    if (!row.classList.contains('open')) (row.querySelector('.dex-head') as HTMLButtonElement).click()
+    return rowNamed(bands, name)!
+  }
+  const namesIn = (row: HTMLElement): string[] => [...row.querySelectorAll('.hex-name')].map(name => name.textContent ?? '')
+
+  it('the community is a row of its own: a tap in any domain brings a tile in, a tap there sends it back to its domain', async () => {
     const owner = bridge(a)
     const keepCommunity = vi.fn(async () => true)
     const { hero, bands } = showcase({
@@ -1434,33 +1493,48 @@ describe('a tap visits, a hold toggles', () => {
     })
     document.body.append(hero, bands)
     try {
-      ;(hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
-      await vi.waitFor(() => expect(bands.querySelectorAll('.dex-head').length).toBeGreaterThan(1))
-      ;(bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
+      // Not managing there is no community row: the showcase shows what is live and nothing else.
+      expect(rowNamed(bands, 'Community')).toBeUndefined()
+      manageOn(hero)
+      const community = await vi.waitFor(() => { const row = rowNamed(bands, 'Community'); expect(row).toBeDefined(); return row! })
+      expect(community.querySelector('.dex-remove')).toBeNull()
+      expect(community.querySelector('.dex-meta')?.textContent).toBe('0 tiles')
+      // This domain's own tile: a tap brings it into the community, and it leaves the domain's row.
+      const own = await openRowNamed(bands, 'hypercomb.com')
+      const camel = await tileIn(bands, '.dex-row.own a.hex', 'camelflage')
+      expect(click(camel).defaultPrevented).toBe(true)
+      await vi.waitFor(() => expect(keepCommunity).toHaveBeenCalledTimes(1))
+      expect(namesIn(own)).not.toContain('camelflage')
+      expect(rowNamed(bands, 'Community')!.querySelector('.dex-meta')?.textContent).toBe('1 tile')
+      // Nothing is signed by a tap: the community is only a target.
+      expect(owner.toggle).not.toHaveBeenCalled()
+      // In the community row it is lit; a tap there sends it back — to this domain, the current one.
+      const inCommunity = await openRowNamed(bands, 'Community')
+      expect(namesIn(inCommunity)).toEqual(['camelflage'])
+      const lit = await tileIn(bands, '.dex-row:not(.own) a.hex', 'camelflage')
+      expect(lit.classList.contains('off')).toBe(false)
+      expect(click(lit).defaultPrevented).toBe(true)
+      await vi.waitFor(() => expect(keepCommunity).toHaveBeenCalledTimes(2))
+      await vi.waitFor(() => expect(namesIn(rowNamed(bands, 'Community')!)).toEqual([]))
+      expect(namesIn(await openRowNamed(bands, 'hypercomb.com'))).toContain('camelflage')
+      expect(bands.querySelector('.owner-note')?.textContent).toContain('went back to hypercomb.com')
+      // Another domain's tile takes the same road: in, then back to the domain it came from.
+      const peer = await openRowNamed(bands, 'jwize.com')
       const dylan = await tileIn(bands, '.dex-row:not(.own) a.hex', 'dylan')
       expect(dylan.classList.contains('off')).toBe(true)
-      await vi.waitFor(() => expect(owner.hello).toHaveBeenCalled())
-      await new Promise(resolve => setTimeout(resolve, 0))
-      // In the followed row the tap only picks: it lights up in place and nothing is signed.
-      expect(click(dylan).defaultPrevented).toBe(true)
-      await vi.waitFor(() => expect(keepCommunity).toHaveBeenCalled())
-      expect(dylan.classList.contains('off')).toBe(false)
+      click(dylan)
+      await vi.waitFor(() => expect(rowNamed(bands, 'Community')!.querySelector('.dex-meta')?.textContent).toBe('1 tile'))
+      expect(namesIn(peer)).not.toContain('dylan')
+      expect(namesIn(await openRowNamed(bands, 'Community'))).toEqual(['dylan'])
+      click(await tileIn(bands, '.dex-row:not(.own) a.hex', 'dylan'))
+      await vi.waitFor(() => expect(rowNamed(bands, 'jwize.com')!.querySelector('.dex-meta')?.textContent).toBe('1 tile'))
+      expect(namesIn(await openRowNamed(bands, 'jwize.com'))).toContain('dylan')
+      expect(bands.querySelector('.owner-note')?.textContent).toContain('went back to jwize.com')
       expect(owner.toggle).not.toHaveBeenCalled()
-      // Your row holds it gray until a tap promotes it.
-      ;(bands.querySelector('.dex-row.own .dex-head') as HTMLButtonElement).click()
-      const waiting = await tileIn(bands, '.dex-row.own a.hex', 'dylan')
-      expect(waiting.classList.contains('off')).toBe(true)
-      expect(click(waiting).defaultPrevented).toBe(true)
-      await vi.waitFor(() => expect(owner.toggle).toHaveBeenCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'dylan', on: true }))
-      // A second tap in the followed row lets it go.
-      ;(bands.querySelector('.dex-row:not(.own) .dex-head') as HTMLButtonElement).click()
-      const again = await tileIn(bands, '.dex-row:not(.own) a.hex', 'dylan')
-      click(again)
-      await vi.waitFor(() => expect(again.classList.contains('off')).toBe(true))
     } finally { hero.remove(); bands.remove() }
   })
 
-  it('with no hive answering (a phone), promoting says why instead of doing nothing', async () => {
+  it('keeps the community across a visit, and only ever shows it while managing', async () => {
     const { hero, bands } = showcase({
       self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
       ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => owners(),
@@ -1468,12 +1542,84 @@ describe('a tap visits, a hold toggles', () => {
     })
     document.body.append(hero, bands)
     try {
-      ;(hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
-      const waiting = await tileIn(bands, '.dex-row.own a.hex', 'dylan')
-      expect(waiting.classList.contains('off')).toBe(true)
-      expect(click(waiting).defaultPrevented).toBe(true)
-      await vi.waitFor(() => expect(bands.querySelector('.owner-note')?.textContent).toContain("your hive's key"))
+      await vi.waitFor(() => expect(bands.querySelector('.dex-row.own .hex')).not.toBeNull())
+      expect(bands.querySelector('.dex-row.own')?.textContent).not.toContain('dylan')
+      manageOn(hero)
+      expect(namesIn(await openRowNamed(bands, 'Community'))).toEqual(['dylan'])
+      expect(namesIn(await openRowNamed(bands, 'jwize.com'))).not.toContain('dylan')
     } finally { hero.remove(); bands.remove() }
+  })
+
+  describe('only what is optimized and minimized can be in the showcase', () => {
+    const drawGate = (minimized: (zone: string, head: string) => Promise<boolean>, owner: ReturnType<typeof bridge> | null) => showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => owners(),
+      minimized, ...(owner ? { owner } : {}),
+    })
+    /** Opens the held sheet of a followed domain's tile and presses its one act. */
+    const putIn = async (bands: HTMLElement, hero: HTMLElement): Promise<void> => {
+      manageOn(hero)
+      await openRowNamed(bands, 'jwize.com')
+      const dylan = await tileIn(bands, '.dex-row:not(.own) a.hex', 'dylan')
+      dylan.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+      const act = await vi.waitFor(() => { const found = hero.querySelector<HTMLElement>('.version-act'); expect(found).not.toBeNull(); return found! })
+      expect(act.textContent).toBe('Put it in my showcase')
+      act.click()
+    }
+
+    it('refuses a revision that is not minimized, and says why', async () => {
+      const owner = bridge(a)
+      const minimized = vi.fn(async () => false)
+      const { hero, bands } = drawGate(minimized, owner)
+      document.body.append(hero, bands)
+      try {
+        await vi.waitFor(() => expect(owner.hello).toHaveBeenCalled())
+        await new Promise(resolve => setTimeout(resolve, 0))
+        await putIn(bands, hero)
+        await vi.waitFor(() => expect(bands.querySelector('.owner-note')?.textContent).toContain('not optimized and minimized'))
+        expect(minimized).toHaveBeenCalledWith('jwize.com', expect.stringMatching(/^[a-f0-9]{64}$/))
+        expect(owner.toggle).not.toHaveBeenCalled()
+      } finally { hero.remove(); bands.remove() }
+    })
+
+    it('lets a minimized revision in through the same act', async () => {
+      const owner = bridge(a)
+      const { hero, bands } = drawGate(async () => true, owner)
+      document.body.append(hero, bands)
+      try {
+        await vi.waitFor(() => expect(owner.hello).toHaveBeenCalled())
+        await new Promise(resolve => setTimeout(resolve, 0))
+        await putIn(bands, hero)
+        await vi.waitFor(() => expect(owner.toggle).toHaveBeenCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'dylan', on: true }))
+      } finally { hero.remove(); bands.remove() }
+    })
+
+    it('with no hive answering (a phone), putting one in says why instead of doing nothing', async () => {
+      const { hero, bands } = drawGate(async () => true, null)
+      document.body.append(hero, bands)
+      try {
+        await putIn(bands, hero)
+        await vi.waitFor(() => expect(bands.querySelector('.owner-note')?.textContent).toContain("your hive's key"))
+      } finally { hero.remove(); bands.remove() }
+    })
+
+    it('never gates taking one out', async () => {
+      vi.useFakeTimers()
+      try {
+        const owner = bridge(a)
+        const minimized = vi.fn(async () => false)
+        const { hero, bands } = drawGate(minimized, owner)
+        document.body.append(hero, bands)
+        await vi.advanceTimersByTimeAsync(50)
+        const camel = await tileIn(bands, '.dex-row.own a.hex', 'camelflage')
+        press(camel)
+        vi.advanceTimersByTime(501)
+        await vi.advanceTimersByTimeAsync(10)
+        expect(owner.toggle).toHaveBeenCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'camelflage', on: false })
+        expect(minimized).not.toHaveBeenCalled()
+        hero.remove(); bands.remove()
+      } finally { vi.useRealTimers() }
+    })
   })
 })
 
@@ -1547,7 +1693,7 @@ describe('collapsing the open domain collapses them all to the top', () => {
     ;(handle.bands.querySelectorAll('.dex-head')[0] as HTMLButtonElement).click()   // collapse the open one
     expect(handle.bands.querySelectorAll('.dex-row.open')).toHaveLength(0)
     expect(hosted.classList.contains('none-open')).toBe(true)
-    expect([...handle.bands.querySelectorAll('.dex-row')].filter(row => !(row as HTMLElement).hidden)).toHaveLength(2)
+    expect([...handle.bands.querySelectorAll('.dex-row')].filter(row => !(row as HTMLElement).hidden)).toHaveLength(3)
     ;(handle.bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()   // open the other
     expect(hosted.classList.contains('none-open')).toBe(false)
     expect(handle.bands.querySelector('.dex-row')?.classList.contains('open')).toBe(true)

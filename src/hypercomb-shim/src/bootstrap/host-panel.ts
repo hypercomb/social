@@ -28,6 +28,7 @@ import { allowInvite, captureDeviceInvite, dropInvite, heldInvite } from './devi
 import { deviceOwner, eitherOwner } from './device-owner'
 import { readZoneOwners } from './showcase-record'
 import { branchView } from './branch-view'
+import { readMinimized } from './minimized'
 import { readFromZone, readVerified } from './branch-files'
 import { addOffering, addPublicCreation, clearPendingSelection, listActiveOfferings,
   listActivePublicCreations, listAdoptions, listPendingSelections, stagePendingSelection, stagePendingCreation,
@@ -127,6 +128,21 @@ li { display: flex; align-items: center; gap: .75rem; padding: .55rem .75rem; bo
 .invite-actions button:disabled { opacity: .55; cursor: default; }
 .invite-note { margin-top: .5rem !important; color: var(--md-on-surface-var); font-size: .9rem; }
 .invite-note:empty { display: none; }
+/* FILES: a title, a sentence, a short list of revisions, one box. Opening a revision swaps the list for its files. */
+.files-head { display: flex; align-items: center; gap: .5rem; }
+.files-title { margin: 0; }
+.files-back { display: none; padding: .45rem .8rem; border-radius: var(--hc-radius-control, 2px); font-weight: 600; }
+.files-open.browsing .files-back { display: inline-block; }
+.files-open.browsing .files-lede, .files-open.browsing .files-list, .files-open.browsing .files-sig, .files-open.browsing .files-note { display: none; }
+.files-lede { margin: 0 0 .9rem; color: var(--md-on-surface-var); font-size: 1rem; line-height: 1.45; }
+.files-list { display: grid; gap: .5rem; margin: 0 0 1rem; }
+.files-row { display: flex; flex-direction: column; align-items: flex-start; gap: .2rem; width: 100%; box-sizing: border-box;
+  padding: .8rem 1rem; text-align: left; border-radius: var(--hc-radius-control, 2px); }
+.files-row b { color: var(--md-on-surface-strong); font-size: 1rem; font-weight: 600; overflow-wrap: anywhere; }
+.files-row span { color: var(--md-on-surface-var); font-size: .85rem; line-height: 1.35; overflow-wrap: anywhere; }
+.files-sig input { font-size: 1rem; }
+.files-note { margin: .7rem 0 0; color: var(--md-on-surface-var); font-size: .9rem; line-height: 1.4; }
+.files-note:empty { display: none; }
 .status[data-tone="bad"] { color: var(--hc-status-alert); }
 .status[data-tone="good"] { color: var(--hc-status-ok); }
 .gallery-search { display: block; width: 100%; margin: 0 0 .75rem; padding: 1rem 1.15rem; font-size: 1.02rem; box-shadow: var(--md-elev-1); }
@@ -700,6 +716,8 @@ class HostPanelElement extends HTMLElement {
         unfollow: zone => removeHostZone(zone),
         readPeerLedger,
         onOpenHead: (head, zone) => { this.#openBranch(head, zone) },
+        // ONLY WHAT IS OPTIMIZED AND MINIMIZED CAN BE IN THE SHOWCASE (jwize 2026-11-04).
+        minimized: readMinimized,
         files: filesSection,
       })
       this.#showcaseRefresh = refresh
@@ -1842,17 +1860,71 @@ class HostPanelElement extends HTMLElement {
   /** Any signature on this page, opened as the folders it names. A followed
    *  domain opens the revision it publishes now. */
   #filesOpener(zones: string[]): HTMLElement {
+    // FILES, SIMPLE (jwize 2026-11-04: "janky and confusing … greatly simplified and made readable"): one title, one
+    // sentence, a short list of revisions to look inside — the one loaded here, the newest on each domain — and one
+    // box for any signature. Opening one replaces the list with that revision's files and a Back to the list; the
+    // tools that change a branch wait behind one line inside it.
     const section = document.createElement('section')
     section.className = 'files-open'
+    const head = document.createElement('div')
+    head.className = 'files-head'
+    const back = document.createElement('button')
+    back.type = 'button'
+    back.className = 'files-back'
+    back.textContent = '‹ Back'
+    back.addEventListener('click', () => {
+      section.classList.remove('browsing')
+      section.querySelector('.branch-view')?.remove()
+    })
     const heading = document.createElement('h2')
-    heading.className = 'lbl'
+    heading.className = 'lbl files-title'
     heading.textContent = 'Files'
+    head.append(back, heading)
+    const body = document.createElement('div')
+    body.className = 'files-body'
+    const lede = document.createElement('p')
+    lede.className = 'files-lede'
+    lede.textContent = 'Every revision is a set of files. Choose one to look inside it.'
+    const note = document.createElement('p')
+    note.className = 'files-note'
+    note.setAttribute('role', 'status')
+    const list = document.createElement('div')
+    list.className = 'files-list'
+    const origin = this.#self || zones[0] || ''
+    const row = (name: string, detail: string, press: (detail: HTMLElement) => void): void => {
+      const item = document.createElement('button')
+      item.type = 'button'
+      item.className = 'files-row'
+      const title = document.createElement('b')
+      title.textContent = name
+      const sub = document.createElement('span')
+      sub.textContent = detail
+      item.append(title, sub)
+      item.addEventListener('click', () => { note.textContent = ''; press(sub) })
+      list.append(item)
+    }
+    const loaded = installedPackageSig()
+    if (loaded) row('Loaded here', `${loaded.slice(0, 12)}…`, () => { this.#openBranch(loaded, origin) })
+    for (const zone of [this.#self, ...zones].filter((zone): zone is string => !!zone)) {
+      row(`Newest on ${zone}`, 'The latest revision it publishes', sub => {
+        const was = sub.textContent
+        sub.textContent = 'Looking…'
+        void this.#ask(zone).then(answer => {
+          sub.textContent = was
+          const pkg = answer.packages[0]
+          if (!pkg) { note.textContent = `${zone} has not published a revision yet.`; return }
+          this.#openBranch(pkg.packageSig, pkg.zone, pkg.base)
+        }, () => { sub.textContent = was; note.textContent = `${zone} did not answer.` })
+      })
+    }
     const form = document.createElement('form')
+    form.className = 'files-sig'
     const input = document.createElement('input')
-    input.placeholder = '64-character signature'
+    input.placeholder = 'Or paste a revision signature'
     input.spellcheck = false
     input.autocapitalize = 'off'
-    input.setAttribute('aria-label', 'Signature to open')
+    input.autocomplete = 'off'
+    input.setAttribute('aria-label', 'Revision signature to open')
     const open = document.createElement('button')
     open.type = 'submit'
     open.textContent = 'Open'
@@ -1860,31 +1932,12 @@ class HostPanelElement extends HTMLElement {
     form.addEventListener('submit', event => {
       event.preventDefault()
       const sig = input.value.trim().toLowerCase()
-      if (!/^[a-f0-9]{64}$/.test(sig)) return
-      this.#openBranch(sig, this.#self || zones[0] || '')
+      if (!/^[a-f0-9]{64}$/.test(sig)) { note.textContent = 'A signature is 64 characters: the numbers 0–9 and the letters a–f.'; return }
+      note.textContent = ''
+      this.#openBranch(sig, origin)
     })
-    section.append(heading, form)
-    const loaded = installedPackageSig()
-    if (loaded) {
-      const here = document.createElement('button')
-      here.type = 'button'
-      here.textContent = `Loaded here ${loaded.slice(0, 12)}…`
-      here.addEventListener('click', () => { this.#openBranch(loaded, this.#self || zones[0] || '') })
-      section.append(here)
-    }
-    for (const zone of [this.#self, ...zones].filter((zone): zone is string => !!zone)) {
-      const latest = document.createElement('button')
-      latest.type = 'button'
-      latest.textContent = `Latest on ${zone}`
-      latest.addEventListener('click', () => {
-        void this.#ask(zone).then(answer => {
-          const pkg = answer.packages[0]
-          if (!pkg) return
-          this.#openBranch(pkg.packageSig, pkg.zone, pkg.base)
-        })
-      })
-      section.append(latest)
-    }
+    body.append(lede, list, form, note)
+    section.append(head, body)
     return section
   }
 
@@ -1898,12 +1951,15 @@ class HostPanelElement extends HTMLElement {
       installed: installedPackageSig() ?? undefined,
       read: file => base ? readVerified(base, file) : zone ? readFromZone(zone, file) : Promise.resolve(null),
     })
-    // The showcase keeps the page still: the branch opens in the Files sheet, which scrolls on its own.
+    // The showcase keeps the page still: the branch opens in the Files sheet in place of its list, and the sheet's body
+    // scrolls on its own (never scrollIntoView here: it would drag the still page with it).
     const sheet = this.#showFiles ? this.#root.querySelector('.files-sheet') : null
-    if (sheet && this.#showFiles) {
-      sheet.append(view)
+    const body = sheet?.querySelector('.files-body')
+    if (sheet && body && this.#showFiles) {
+      body.append(view)
+      sheet.classList.add('browsing')
+      body.scrollTop = 0
       this.#showFiles(true)
-      view.scrollIntoView({ block: 'nearest' })
       return
     }
     panel.append(view)

@@ -1,9 +1,9 @@
 // hypercomb-shim/src/bootstrap/community-tiles.ts
 //
-// THE TILES YOU BROUGHT INTO YOUR COMMUNITY (jwize 2026-11-04: "on the community tiles list have it come up as
-// gray. So you can toggle it on and off in place when in manage mode"; "once in our community we can promote it
-// by clicking to go live"). While managing, a tap on a followed domain's tile brings it into this browser's
-// community or lets it go; your own row then holds it gray until a tap promotes it live.
+// THE TILES YOU BROUGHT INTO YOUR COMMUNITY (jwize 2026-11-04: "the community is not a domain just a target for
+// promoting locally domain hosted creations"; "when in manage mode we touch them and they go back to their domain even
+// the current domain"). While managing, a tap on a tile in any domain's row — this one's too — brings it into this
+// browser's community, a row of its own; a tap on it there sends it back to its domain.
 //
 // Kept in this browser, as the domains you follow are: ONE document in the `community:tiles` pool, read and
 // written through the store — never a key, never signed. Going live is the signed act (the showcase record);

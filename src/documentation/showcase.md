@@ -423,3 +423,25 @@ capture. Checked on every hive the live ledger lists: each capture resolves as a
 Pressing the open domain's header collapses it, and then NO row is open, so none takes the free height: every domain stays a plain
 header row and they stack from the top, in order. (It used to leave the first collapsed row at the top and push the next one to the bottom.)
 Opening any header brings it back to the top with its tiles.
+
+### The community is a target, not a domain (jwize 2026-11-04)
+
+While managing, the community is a row of its own, after the domains and apart from them: a place to bring locally domain-hosted
+creations to, never a domain with a name of its own (it has no remove control and is not one of the sets a swipe walks).
+Every tile belongs to a domain's row — this domain's too. A tap on a tile in any domain row brings it into the community; a tap on it
+in the community row sends it back to the domain it came from. That is the whole of turning a community item off. The community
+holds tiles in `community:tiles` (`readCommunity` / `keepCommunity`); a tap signs nothing.
+
+Being in the showcase is a different act, not a tap: a hold on the owner's own tile, or the held sheet's "Put it in my showcase".
+**Only a revision that is optimized and minimized can be put in.** `minimized.ts` asks the domain serving the head: its root layer
+names `derivedFrom`, or a derivation record is a member of `derived:<head>` (`derivations.md`). A revision that is not yet minimized
+is refused with the reason; taking one out is never gated. Nothing asks where the page was given no `minimized` check.
+
+### The phone has one input (jwize 2026-11-04)
+
+The follow bar at the foot is gone on a phone. The header search carries one dynamic button beside it: **Follow** while the line is a
+domain nobody follows yet (`followCandidate`), **Go** otherwise — on a followed domain Go opens its row; on anything else it
+dismisses the keyboard, since the search already filters as you type. The keyboard's Go key does the same, on a phone only. The
+tiles scroll under the dock, and the list's own end padding lets the last tiles rest fully above it. The Files sheet is a title
+and a short list of revisions (loaded here, newest on each domain) with one signature box; opening one shows its files with a Back,
+and the tools that change a branch wait behind one line.

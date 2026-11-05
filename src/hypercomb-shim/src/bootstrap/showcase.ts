@@ -411,6 +411,12 @@ export const gestureStep = (dx: number, dy: number, ms: number): { readonly axis
   return far && down >= 1.4 * Math.abs(dx) ? { axis: 'y', by: dy < 0 ? 1 : -1 } : null
 }
 
+/** THE COMMUNITY IS NOT A DOMAIN (jwize 2026-11-04: "the community is not a domain just a target for promoting locally
+ *  domain hosted creations"): while managing it is a row of its own, kept apart from the domains. Every tile belongs to a
+ *  domain's row; a tap there brings it into the community, and a tap in the community sends it back to its domain — this
+ *  one too. A name no domain can have (a domain has a dot), so it never collides with a row. */
+const COMMUNITY = 'community'
+
 /** How many icons the iPhone dock holds, once the page has more than that. */
 const IPHONE_DOCK = 4
 
@@ -566,6 +572,9 @@ export type ShowcaseOptions = {
   /** The hive beside this page, when this device is its owner's: a tap on a tile puts it in the showcase or takes it out. */
   readonly owner?: OwnerBridge | null
   /** The tiles this browser brought into its community while managing (community-tiles.ts). */
+  /** Whether a revision, as `zone` serves it, is optimized and minimized. Only such a tile can be put in the showcase;
+   *  without it the page cannot tell and gates nothing. */
+  readonly minimized?: (zone: string, head: string) => Promise<boolean>
   readonly readCommunity?: () => Promise<readonly CommunityPick[]>
   readonly keepCommunity?: (picks: readonly CommunityPick[]) => Promise<boolean>
   readonly readPeerLedger?: (zone: string) => Promise<readonly LedgerSite[]>
@@ -625,7 +634,15 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   search.setAttribute('aria-label', 'Search hives, creations and domains')
   search.autocomplete = 'off'
   search.spellcheck = false
-  searchBox.append(iconOf('search'), search)
+  // THE PHONE'S ONE INPUT (jwize 2026-11-04: "get rid of the bottom input and follow button … you just have a header search
+  // and dynamic button go / follow"): on a phone the follow bar at the foot is gone and this button, beside the search,
+  // says Follow when the line is a domain nobody follows yet and Go otherwise. Drawn everywhere, shown by the phone's CSS.
+  const searchGo = el('button', 'search-go')
+  searchGo.type = 'button'
+  searchGo.dataset.act = 'go'
+  searchGo.textContent = 'Go'
+  search.enterKeyHint = 'go'
+  searchBox.append(iconOf('search'), search, searchGo)
   // THE BAR IS AT THE BOTTOM. The magnifier shows the search across the top, or hides it and clears what was
   // typed. Manage opens the management screen: the domains you follow as rows, their tiles grayed until you
   // turn them on, and the follow box. Pressing it again returns to the showcase.
@@ -684,6 +701,14 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   if (files) {
     files.classList.add('files-sheet')
     files.hidden = true
+    // A close in the title row: the bar's own Files button is not the only way out of a sheet that sits above it.
+    const close = el('button', 'files-close')
+    close.type = 'button'
+    close.title = 'Close'
+    close.setAttribute('aria-label', 'Close files')
+    close.append(iconOf('close'))
+    close.addEventListener('click', () => { setFilesOpen(false); filesButton.focus() })
+    files.querySelector('.files-head')?.append(close)
     filesButton.addEventListener('click', () => setFilesOpen(files.hidden))
     files.addEventListener('keydown', event => {
       if (event.key !== 'Escape') return
@@ -852,7 +877,8 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     const label = inside ? 'Take it out of my showcase' : 'Put it in my showcase'
     let act: HTMLElement | null = null
     if (item) {
-      if (options.owner && ownerKey) {
+      // Putting one in is checked first (optimized and minimized), so it goes through the same act whoever holds the key.
+      if ((options.owner && ownerKey) || (!inside && options.minimized)) {
         const button = el('button', 'version-act')
         button.type = 'button'
         button.textContent = label
@@ -896,8 +922,9 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     return lineage && owner ? { pubkey: owner.pubkey, lineage } : null
   }
   const say = (words: string): void => { ownerNote.hidden = false; ownerNote.textContent = words }
-  // ── YOUR COMMUNITY (jwize 2026-11-04): while managing, a tap on a followed domain's tile brings it in (lit) or
-  //    lets it go (gray), in place; in your own row a community tile waits gray until a tap promotes it live ──
+  // ── YOUR COMMUNITY (jwize 2026-11-04): a target, not a domain. While managing, a tap on a tile in any domain's row —
+  //    this one's too — brings it into the community row; a tap on it there sends it back to its domain. Going live in
+  //    the showcase is its own act (a hold, or the sheet), and only for what is optimized and minimized. ──
   let picks: CommunityPick[] = []
   const picked = (entry: Aggregate): boolean => picks.some(pick => pick.key === entry.key)
   let picking = false
@@ -906,19 +933,40 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     if (!options.keepCommunity) { say('This page cannot keep a community.'); return }
     const was = picks
     const on = !picked(entry)
+    // Where it goes back to: the domain it was brought in from.
+    const from = picks.find(pick => pick.key === entry.key)?.zone ?? row
     picks = on ? [...picks, { zone: row, key: entry.key }] : picks.filter(pick => pick.key !== entry.key)
     picking = true
     paint()
     const kept = await options.keepCommunity(picks).catch(() => false)
     picking = false
-    if (!kept) { picks = was; paint(); say(`Could not keep ${entry.title} in your community.`); return }
-    say(on ? `${entry.title} is in your community. Tap it in your row to go live.` : `${entry.title} left your community.`)
+    if (!kept) { picks = was; paint(); say(`Could not ${on ? 'bring' : 'send'} ${entry.title} ${on ? 'into your community' : `back to ${from}`}.`); return }
+    say(on ? `${entry.title} is in your community. Tap it there to send it back to ${row}.` : `${entry.title} went back to ${from}.`)
+  }
+  /** Whether a tile's revision is optimized and minimized — asked of the domain that serves it. True where the page
+   *  cannot ask (nothing was wired to), so it gates nothing it cannot know. */
+  const minimizedFor = async (entry: Aggregate, row: string): Promise<boolean> => {
+    if (!options.minimized) return true
+    const version = entry.versions.find(candidate => candidate.places.some(place => place.zone === row)) ?? entry.versions[0]
+    const zone = version?.places.find(place => place.zone === row)?.zone ?? version?.places[0]?.zone ?? options.self
+    return version ? options.minimized(zone, version.head).catch(() => false) : false
   }
   const tapTile = async (entry: Aggregate, row: string): Promise<void> => {
     if (tapping) return
     const on = !showcased(entry)
     const item = itemOf(entry, row)
     if (!item) { say(`${entry.title} names no lineage to sign, so it cannot go live from here.`); return }
+    // ONLY WHAT IS OPTIMIZED AND MINIMIZED CAN BE IN THE SHOWCASE (jwize 2026-11-04). Taking one out is never gated.
+    if (on && options.minimized) {
+      tapping = true
+      say(`Checking ${entry.title}…`)
+      const ready = await minimizedFor(entry, row)
+      tapping = false
+      if (!ready) {
+        say(`${entry.title} is not optimized and minimized yet, so it cannot be in the showcase. Minify it from its hive, then try again.`)
+        return
+      }
+    }
     const bridge = options.owner
     if (!bridge || !ownerKey) {
       // No hive of yours answers here: hand the switch to the hive that has the key, when the page knows it —
@@ -931,17 +979,12 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
         + `type "keys allow ${options.self}" in your hive and open its link in this browser; or open ${options.self} where your hive runs.`)
       return
     }
-    // A tile taken out stays in your community, gray, in place.
-    if (!picked(entry) && options.keepCommunity) {
-      picks = [...picks, { zone: row, key: entry.key }]
-      void options.keepCommunity(picks).catch(() => false)
-    }
     tapping = true
     ownerNote.hidden = false
-    ownerNote.textContent = on ? `Promoting ${entry.title}…` : `Taking ${entry.title} off your page…`
+    ownerNote.textContent = on ? `Putting ${entry.title} in the showcase…` : `Taking ${entry.title} out of the showcase…`
     const result = await bridge.toggle({ zone: options.self, pubkey: item.pubkey, lineage: item.lineage, on })
     tapping = false
-    ownerNote.textContent = result.ok ? (on ? `${entry.title} is live.` : `${entry.title} is off your page. It stays in your community.`) : `Not changed: ${result.reason}.`
+    ownerNote.textContent = result.ok ? (on ? `${entry.title} is in the showcase.` : `${entry.title} is out of the showcase.`) : `Not changed: ${result.reason}.`
     if (result.ok && result.changed) takeLedger(options.ledger)
   }
   /** Where a tap goes: this row's own place for the name, else its first. */
@@ -1011,8 +1054,7 @@ ${entry.key}`
         if (held) { held = false; event.preventDefault(); event.stopPropagation(); return }
         if (row === options.self && !managing) return
         event.preventDefault()
-        if (row === options.self) void tapTile(made.entry, row)
-        else void pickTile(made.entry, row)
+        void pickTile(made.entry, row)
       })
       tile.addEventListener('contextmenu', event => { event.preventDefault(); stop(); heldOpen = true; openVersions(made.entry, tile, row) })
       tile.addEventListener('keydown', event => {
@@ -1024,8 +1066,8 @@ ${entry.key}`
     }
     view.entry = entry
     const live = showcased(entry)
-    // Gray: under another domain, not in your community; in your own row while managing, not live yet.
-    view.tile.classList.toggle('off', row === options.self ? managing && !live : !live && !picked(entry))
+    // Gray: not in the showcase yet, in any domain's row; the community row is lit — what is in it is in.
+    view.tile.classList.toggle('off', row === COMMUNITY || (row === options.self && !managing) ? false : !live)
     if (view.head !== lead.head) {
       // A new lead version: its own cover and picture, and the old head forgets this box.
       wearers.get(view.head)?.delete(view.art)
@@ -1040,9 +1082,10 @@ ${entry.key}`
     // Somewhere else on the web opens in its own tab; this origin is this site still.
     if (view.tile.origin !== location.origin) { view.tile.target = '_blank'; view.tile.rel = 'noopener' }
     else { view.tile.removeAttribute('target'); view.tile.removeAttribute('rel') }
-    view.tile.title = row !== options.self
-      ? `${entry.title} · ${place.address} — tap to ${picked(entry) ? 'let it go from' : 'bring it into'} your community, hold for its domains`
-      : managing ? `${entry.title} · ${place.address} — tap to ${live ? 'take it off your page' : 'promote it live'}, hold for more`
+    view.tile.title = row === COMMUNITY
+      ? `${entry.title} · ${place.address} — tap to send it back to ${picks.find(pick => pick.key === entry.key)?.zone ?? 'its domain'}, hold for more`
+      : row !== options.self || managing
+        ? `${entry.title} · ${place.address} — tap to bring it into your community, hold for ${row === options.self ? 'more' : 'its domains'}`
         : `${entry.title} · ${place.address} — tap to visit, hold for more`
     view.name.textContent = entry.title
     view.address.textContent = place.address
@@ -1162,11 +1205,11 @@ ${entry.key}`
     toggle.type = 'button'
     toggle.setAttribute('aria-controls', id)
     const name = el('span', 'dex-name')
-    name.textContent = zone
+    name.textContent = zone === COMMUNITY ? 'Community' : zone
     const meta = el('span', 'dex-meta')
     const chevron = el('span', 'dex-chevron')
     chevron.append(iconOf('chevron'))
-    toggle.append(iconOf('globe'), name, meta, chevron)
+    toggle.append(iconOf(zone === COMMUNITY ? 'people' : 'globe'), name, meta, chevron)
     toggle.addEventListener('click', () => {
       dropMissing(zone)
       openRow = openRow === zone ? '' : zone
@@ -1181,7 +1224,7 @@ ${entry.key}`
     section.append(toggle, body)
     // A DOMAIN LEAVES ONLY WHEN IT IS REMOVED (jwize 2026-10-26: "they need to be alive when added and only leave when
     // removed"): a followed domain has a remove control; nothing else — a refresh, a click elsewhere — takes it away.
-    if (!own) {
+    if (!own && zone !== COMMUNITY) {
       const remove = el('button', 'dex-remove')
       remove.type = 'button'
       remove.title = `Remove ${zone}`
@@ -1515,7 +1558,7 @@ ${entry.key}`
     const names = domains ? zoneSets() : ['All', ...communities.map(row => row.name)]
     const keys = domains ? names : ['', ...communities.map(row => communityKey(row.name))]
     const at = Math.max(0, keys.indexOf(domains ? openRow : page))
-    label.textContent = names[at] ?? 'All'
+    label.textContent = domains && openRow === COMMUNITY ? 'Community' : names[at] ?? 'All'
     label.setAttribute('aria-label', `${label.textContent}, group ${at + 1} of ${Math.max(1, names.length)}. Press for the next.`)
     templateNote.hidden = !managing
     templateNote.textContent = managing ? viewLabel(shape) : ''
@@ -1559,13 +1602,20 @@ ${entry.key}`
     // of domains with the open one showing the available; they are below the open item, which is always at the top"). While
     // managing, every domain is a row; the open row shows its tiles and is first, the rest follow below it as headers.
     const everyZone = zoneSets()
-    const order = managing && openRow && everyZone.includes(openRow) ? [openRow, ...everyZone.filter(zone => zone !== openRow)] : everyZone
+    // The community is a row of its own while managing, apart from the domains: a target, never a domain. It sits after
+    // them, where the thumb is, and comes to the top when it is the row that is open.
+    const rowZones = managing ? [...everyZone, COMMUNITY] : everyZone
+    const order = managing && openRow && rowZones.includes(openRow) ? [openRow, ...rowZones.filter(zone => zone !== openRow)] : rowZones
+    // What this domain holds, managing: what is in its showcase and what else it publishes — lit when live, gray when not.
+    const ownHeld = [...new Map([...everything, ...rowItems(all, options.self)].map(entry => [entry.key, entry] as const)).values()].sort(byTitle)
     for (const zone of order) {
       const view = rowView(zone)
       const own = zone === options.self
-      // Managing, your row also holds your community: what is not live yet is drawn gray, waiting to be promoted.
-      const waiting = own && managing ? communityTiles.filter(entry => !everything.includes(entry)) : []
-      const items = own ? (waiting.length ? [...everything, ...waiting].sort(byTitle) : everything) : rowItems(all, zone).slice().sort(byTitle)
+      const isCommunity = zone === COMMUNITY
+      // EVERY TILE BELONGS TO A DOMAIN'S ROW until it is brought into the community; it stays there until a tap sends it
+      // back — to this domain too. The showcase itself (not managing) is what is live, whatever the community holds.
+      const items = isCommunity ? communityTiles.slice().sort(byTitle)
+        : (own ? (managing ? ownHeld : everything) : rowItems(all, zone).slice().sort(byTitle)).filter(entry => !managing || !picked(entry))
       const shown = items.filter(entry => aggregateMatches(entry, terms))
       // The doors wait for the ledger: the row draws once, not the doors and then the hives.
       const doors = own && ledgerRead && !unread ? links.filter(link => linkMatches(link, terms)) : []
@@ -1587,6 +1637,7 @@ ${entry.key}`
       }), ...doors.map(link => linkTile(link))] : [], own ? shape : base)
       view.empty.hidden = !open || (own ? shown.length > 0 && !unread : total > 0)
       view.empty.textContent = temp ? (temp.state === 'checking' ? `Checking ${zone}…` : `${zone} was not found — ${temp.reason}`)
+        : isCommunity ? 'Nothing here yet. Tap a tile in a domain to bring it into your community.'
         : own && (!ledgerRead || unread) ? 'Reading what is published here…'
         : own && signed && (!signed.reached || signed.unreadable) ? 'Could not read what is published here.'
           : own ? 'Nothing is published here yet.' : `Nothing is published on ${zone} yet.`
@@ -1599,16 +1650,21 @@ ${entry.key}`
     bandsHost.classList.toggle('managing', managing)
     // WHEN THE OPEN ROW IS COLLAPSED, EVERY ROW SITS AT THE TOP (jwize 2026-10-26: "if you collapse the row showing data they should
     // all collapse to the top"): with nothing open there is no row to take the free height, so the rows stack from the top.
-    hosted.classList.toggle('none-open', managing && !everyZone.includes(openRow))
+    hosted.classList.toggle('none-open', managing && !rowZones.includes(openRow))
     // The follow box stays at the foot, always (jwize 2026-10-25: "just show the input and follow at the bottom all the time").
     followBar.hidden = !options.follow
     hosted.classList.toggle('swipeable', (managing || communities.length > 0) && !terms.length)
-    nothing.hidden = !terms.length || visible > 0
+    // A domain being checked or not found is a row on the page: the search that named it has not matched nothing.
+    nothing.hidden = !terms.length || visible > 0 || pending.size > 0
     // THE SEARCH IS ONLY FOR SEARCH; the follow box at the foot may suggest what was typed in the search when that
     // is a valid domain nobody follows yet (jwize 2026-10-25: "the follow can suggest the search if it is a
     // valid domain"). What the person typed in the follow box themselves is never replaced.
     const candidate = followCandidate(search.value)
     const suggested = options.follow && candidate && !held.includes(candidate) && !within(candidate, options.self) ? candidate : ''
+    // The phone's button beside the search: Follow while the line is a domain to follow, Go otherwise. Only its words
+    // change — the button itself is never rebuilt, so a press that began on it still lands.
+    const act = suggested ? 'follow' : 'go'
+    if (searchGo.dataset.act !== act) { searchGo.dataset.act = act; searchGo.textContent = act === 'follow' ? 'Follow' : 'Go' }
     if (suggested) {
       if (!followInput.value.trim() || followInput.value === autoFilled) { followInput.value = suggested; autoFilled = suggested }
     } else if (autoFilled && followInput.value === autoFilled) { followInput.value = ''; autoFilled = '' }
@@ -1662,6 +1718,34 @@ ${entry.key}`
     rowViews.get(result.zone)?.section.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
   }
   followBar.addEventListener('submit', event => { event.preventDefault(); void follow(followInput.value) })
+
+  /** The phone's button beside the search. Follow takes the domain the line names; Go settles the search: a domain you
+   *  already follow opens as its row, and the keyboard goes so the results can be seen. */
+  const goOrFollow = async (): Promise<void> => {
+    const asked = followCandidate(search.value)
+    if (searchGo.dataset.act === 'follow') {
+      await follow(search.value)
+      // Followed: the line did its job. A miss keeps the line, so a typo can be mended and asked again.
+      if (asked && held.includes(asked) && followCandidate(search.value) === asked) { search.value = ''; paint() }
+      return
+    }
+    const zone = asked === options.self || held.includes(asked) ? asked : ''
+    if (zone) {
+      search.value = ''
+      openRow = zone
+      if (zone !== options.self && !managing) setManaging(true)
+      else paint()
+    }
+    search.blur()
+  }
+  searchGo.addEventListener('click', () => { void goOrFollow() })
+  // The keyboard's own Go key does the same on a phone. On a wide screen the search is only for searching.
+  const narrow = (): boolean => { try { return matchMedia('(max-width: 720px)').matches } catch { return false } }
+  search.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' || !narrow()) return
+    event.preventDefault()
+    void goOrFollow()
+  })
 
   search.addEventListener('input', () => paint())
   // WHAT IS PUBLISHED NOW: the page is the ledger as read, nothing kept from
@@ -1781,18 +1865,21 @@ export const SHOWCASE_STYLE = `
 .page-dock button[aria-pressed='true'] { background: var(--md-primary); border-color: var(--md-primary); color: var(--md-on-primary); }
 .page-dock button[aria-pressed='true']:hover { color: var(--md-on-primary); filter: brightness(1.06); }
 .page-dock button:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
-/* the Files sheet: above the bar, its own scroll when a branch is open in it; the page beneath never moves */
+/* the Files sheet: above the bar. A fixed title row, and one body that scrolls on its own; the page beneath never moves */
 .files-sheet { position: fixed; z-index: 39; left: 50%; bottom: calc(4rem + env(safe-area-inset-bottom)); transform: translateX(-50%);
-  box-sizing: border-box; width: min(calc(100% - 1rem), 56rem); max-height: calc(100dvh - 9rem); margin: 0; padding: .9rem 1rem 1rem;
-  overflow: auto; overscroll-behavior: contain; border: 1px solid var(--md-outline-variant); border-radius: 1rem;
-  background: color-mix(in srgb, var(--md-surface-c-low) 96%, transparent); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+  box-sizing: border-box; display: flex; flex-direction: column; width: min(calc(100% - 1rem), 36rem); max-height: min(36rem, calc(100dvh - 9rem));
+  margin: 0; padding: 0; overflow: hidden; border: 1px solid var(--md-outline-variant); border-radius: 1rem;
+  background: color-mix(in srgb, var(--md-surface-c-low) 97%, transparent); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
   box-shadow: 0 18px 48px -18px rgb(0 0 0 / .55); }
 .files-sheet[hidden] { display: none; }
-.files-sheet > h2 { margin: 0 0 .6rem; }
-.files-sheet > form { display: flex; gap: .5rem; margin: 0 0 .6rem; }
-.files-sheet > form input { flex: 1; min-width: 0; }
-.files-sheet > button { margin: 0 .4rem .4rem 0; }
-.files-sheet .branch-view { margin-top: .8rem; }
+.files-sheet > .files-head { flex: none; padding: .6rem .6rem .6rem 1rem; border-bottom: 1px solid var(--md-outline-variant); }
+.files-sheet .files-title { flex: 1; font: 600 1.1rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); letter-spacing: normal; text-transform: none;
+  color: var(--md-on-surface-strong); }
+.files-sheet .files-close { display: grid; place-items: center; flex: none; width: 2.5rem; height: 2.5rem; padding: 0; border: 0; background: transparent;
+  color: var(--md-on-surface-var); border-radius: var(--hc-radius-control, 2px); }
+.files-sheet .files-close svg { width: 1.2rem; height: 1.2rem; }
+.files-sheet > .files-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 1rem; }
+.files-sheet .branch-view { margin: 0; padding: 0; border-top: 0; }
 .bands:not(.managing) .dex-row > .dex-head { display: none; }
 /* managing: the open domain is the first row and takes the free height; the others sit below it as plain header rows */
 .bands.managing > .hosted { grid-template-rows: minmax(min-content, 1fr); grid-auto-rows: min-content; align-content: start; }
@@ -2066,36 +2153,43 @@ a.version-visit { color: var(--md-primary); }
   /* ONE SIDE MARGIN, NARROW OR WIDE (jwize 2026-10-26: "when squeezed it has a margin again"): everything sits .5rem from the
      screen edge, the same as the wide page, and the follow bar is in the flow at the foot of a screen-tall panel, so the card
      fills right down to it with no band between. */
-  .card.showcase-page .panel { margin-top: 0; width: 100%; min-width: 0; min-height: 100dvh;
-    padding-bottom: calc(4.1rem + env(safe-area-inset-bottom)); }
+  .card.showcase-page .panel { margin-top: 0; width: 100%; min-width: 0; min-height: 100dvh; padding-bottom: 0; }
   .hero-brand { padding: .8rem .5rem .15rem; }
   .search { padding: .55rem .5rem; }
   .search svg { left: calc(.5rem + .95rem); }
+  /* THE ONE INPUT (jwize 2026-11-04: "get rid of the bottom input and follow button … a header search and dynamic button go /
+     follow"): the follow bar at the foot is gone on a phone. The button beside the search says Follow for a domain nobody
+     follows yet, and Go otherwise. */
+  .follow { display: none; }
+  .search-go { display: block; flex: none; align-self: stretch; margin: 0 0 0 .5rem; padding: 0 1.1rem; min-width: 4.6rem;
+    border: 1px solid var(--md-primary); border-radius: var(--hc-radius-control, 2px); background: transparent; color: var(--md-primary);
+    font: 600 .95rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); cursor: pointer; }
+  .search-go[data-act='follow'] { background: var(--md-primary); color: var(--md-on-primary); }
+  .search-go:disabled { opacity: .6; cursor: default; }
+  .search-go:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
   .pager { margin: 0 0 .5rem; padding: .3rem .5rem; }
   .hosted { gap: 0; }
   .dex-row { border-left: 0; border-right: 0; border-radius: 0; margin-top: -1px; }
   .dex-head { padding: 1rem .5rem; }
   .hosted-nothing, .follow-suggest { margin-left: .5rem; margin-right: .5rem; }
-  /* the phone is a dead-simple hyperdex (jwize 2026-10-25): the rows, with the
-     search above them and the follow input fixed at the bottom where a thumb is
-     — nothing else. The desktop keeps the setup beneath, because it is the
-     dashboard and the hosting. */
-  .follow { position: sticky; z-index: 25; bottom: calc(3.85rem + env(safe-area-inset-bottom)); margin: auto 0 0;
-    padding: .55rem .5rem calc(.55rem + env(safe-area-inset-bottom));
-    background: color-mix(in srgb, var(--md-surface) 94%, transparent); border-top: 1px solid var(--md-outline-variant);
-    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+  /* the phone is a dead-simple hyperdex (jwize 2026-10-25): the rows, with the search above them — nothing else. The desktop
+     keeps the setup beneath, because it is the dashboard and the hosting. */
   .showcase-page details.manage { display: none; }
   .dex-body { padding: .5rem; }
   /* the swipe's ground: a short community must not shrink the place a thumb can turn the page */
   .hosted.swipeable { min-height: 60vh; min-height: 60dvh; align-content: start; }
   /* ONLY THE TILES SCROLL (jwize 2026-11-04: "we are trying not to have anything scroll except for the tiles or the viewport
-     for other sections"): the panel is exactly the screen, the brand and the follow bar hold still at its ends, and the list
-     between them is the one thing a thumb moves. */
+     for other sections"): the panel is exactly the screen, the brand and the search hold still at the top, and the list
+     beneath is the one thing a thumb moves. */
   .card.showcase-page { overflow: hidden; }
   .card.showcase-page .panel { height: 100dvh; min-height: 0; }
   .bands { min-height: 0; }
-  .bands > .hosted, .hosted.swipeable { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-  .follow { position: static; margin: 0; }
+  /* THE TILES RUN UNDER THE ICONS (jwize 2026-11-04: "allow the tiles to scroll up and down even under the icons but make sure
+     they pull up all the way past the last ones so I can see them fully"): the list reaches the foot of the screen, behind the
+     bar, and its own end padding is the bar's height and more, so the last tiles come to rest fully clear of the icons. */
+  .bands > .hosted, .hosted.swipeable { min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+    padding-bottom: calc(4.1rem + env(safe-area-inset-bottom) + 1.25rem); }
+  .page-dock { background: color-mix(in srgb, var(--md-surface) 72%, transparent); }
   .files-sheet { width: calc(100% - 1rem); }
   .hero-brand { gap: .6rem; }
   .hero-mark { width: 1.7rem; height: 1.7rem; }

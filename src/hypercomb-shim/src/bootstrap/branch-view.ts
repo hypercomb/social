@@ -37,6 +37,10 @@ const STYLE = `
 .branch-view .head-lines { margin: .3rem 0; white-space: pre-wrap; }
 .branch-view .mind { margin: .3rem 0; padding-left: 1rem; }
 .branch-view .mind code { display: block; }
+.branch-view .status { margin: 0 0 .6rem; }
+.branch-view .tools { margin: 1rem 0 0; padding: .6rem 0 0; border-top: 1px solid var(--md-outline-variant); }
+.branch-view .tools > summary { margin: 0 0 .4rem; font-weight: 600; }
+.branch-view .tools > div { padding-top: .4rem; }
 `
 
 const short = (sig: string): string => `${sig.slice(0, 12)}…`
@@ -86,12 +90,13 @@ export const branchView = (options: BranchViewOptions): HTMLElement => {
   const style = document.createElement('style')
   style.textContent = STYLE
   const heading = document.createElement('h2')
-  heading.textContent = 'Files'
+  heading.textContent = `Revision ${short(options.rootSig)}`
+  heading.title = options.rootSig
   const note = document.createElement('p')
   note.className = 'note'
   note.textContent = options.installed === options.rootSig
-    ? 'These are the files loaded here. The hive chat organizes tiles. A mission runs on its own subdomain, and what it saves stays in that origin\'s store.'
-    : 'The hive chat organizes tiles. A mission runs on its own subdomain, and what it saves stays in that origin\'s store.'
+    ? 'These are the files loaded here. Untick one to leave it out of a new build.'
+    : 'The files in this revision. Untick one to leave it out of a new build.'
   const status = document.createElement('p')
   status.className = 'status'
   status.setAttribute('role', 'status')
@@ -495,8 +500,14 @@ export const branchView = (options: BranchViewOptions): HTMLElement => {
     })
   })
   actRow.append(mint, minify, publish, mission, load)
+  // The tools that change a branch wait behind one line: looking at the files is the whole of the first screen.
+  const tools = document.createElement('details')
+  tools.className = 'tools'
+  const toolsSummary = document.createElement('summary')
+  toolsSummary.textContent = 'Change, compare and publish'
   controls.append(traitRow, compareRow, actRow)
-  view.append(controls)
+  tools.append(toolsSummary, controls)
+  view.append(tools)
 
   void readBranch(options.rootSig, read).then(branch => {
     current = branch
