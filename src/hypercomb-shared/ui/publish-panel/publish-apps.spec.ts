@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appsOn, groupCoverage, groupPage, hasChanges, inGroup, opensOn, othersOn, pickedAfterPress, pruneSelection, selectedRows, shownAt, type AppRow } from './publish-apps'
+import { appsOn, hasChanges, matchesQuery, opensOn, scopeState, shownAt, wantAfterPress, zonesToMove, type AppRow } from './publish-apps'
 
 const row = (path: string, patch: Partial<AppRow> = {}): AppRow => {
   const segments = path.split('/').filter(Boolean)
@@ -33,11 +33,6 @@ describe('what each domain hosts', () => {
     expect(shownAt(rows[0], 'hypercomb.com')).toBe('meetups.hypercomb.com')
   })
 
-  it('what another device published there is counted apart — named by key, never listed with the rest', () => {
-    expect(othersOn(rows, 'hypercomb.com').map(r => r.key)).toEqual(['elsewhere'])
-    expect(appsOn(rows, 'hypercomb.com').some(r => r.key === 'elsewhere')).toBe(false)
-  })
-
   it('an app at the front page reads as the domain itself — the caller words it', () => {
     const front = row('/card', { urls: { 'hypercomb.com': 'https://hypercomb.com' } })
     expect(shownAt(front, 'hypercomb.com')).toBe('hypercomb.com')
@@ -50,62 +45,55 @@ describe('what each domain hosts', () => {
   })
 })
 
-describe('selecting apps to publish, or to make a group', () => {
-  it('only drift and gone are changes — a row nothing could prove is not', () => {
+describe('what is a change', () => {
+  it('only drift and gone — a row nothing could prove is not', () => {
     expect(['drift', 'gone', 'live', 'unknown', 'cannot-compare', 'comparing'].map(state => hasChanges(row('/a', { state }))))
       .toEqual([true, true, false, false, false, false])
   })
+})
 
-  it('a selection keeps only keys that still have a row, and is the same set when nothing dropped', () => {
-    const rows = [row('/a'), row('/b')]
-    const keys = new Set(['a', 'b'])
-    expect(pruneSelection(rows, keys)).toBe(keys)
-    expect([...pruneSelection([rows[0]], keys)]).toEqual(['a'])
-    expect(selectedRows(rows, new Set(['b', 'gone'])).map(r => r.key)).toEqual(['b'])
+describe('a creation across a set of domains', () => {
+  const on = (...zones: string[]) => (zone: string): boolean => zones.includes(zone)
+  const set = ['hypercomb.com', 'jwize.com', 'revolucionstyle.com']
+
+  it('is on when it is on every domain, off when on none, and mixed when on some', () => {
+    expect(scopeState(set, on(...set))).toBe('on')
+    expect(scopeState(set, on())).toBe('off')
+    expect(scopeState(set, on('jwize.com'))).toBe('mixed')
+    expect(scopeState(set, on('hypercomb.com', 'jwize.com'))).toBe('mixed')
+    // domains outside the set do not count
+    expect(scopeState(['jwize.com'], on('hypercomb.com'))).toBe('off')
   })
 
-  it('a group is made only from apps on one page, named as that page lists them', () => {
-    expect(groupPage([row('/meetups'), row('/hosting')])).toEqual({ segments: [], members: ['meetups', 'hosting'] })
-    expect(groupPage([row('/revolucion/meetup'), row('/revolucion/agenda')])).toEqual({ segments: ['revolucion'], members: ['meetup', 'agenda'] })
-    expect(groupPage([row('/meetups'), row('/revolucion/meetup')])).toBeNull()
-    expect(groupPage([row('/a/x'), row('/b/x')])).toBeNull()
-    expect(groupPage([])).toBeNull()
+  it('a set that holds nothing holds nothing: off', () => {
+    expect(scopeState([], () => true)).toBe('off')
+  })
+
+  it('a switch moves only the domains not already where it is going', () => {
+    expect(zonesToMove(set, on('jwize.com'), true)).toEqual(['hypercomb.com', 'revolucionstyle.com'])
+    expect(zonesToMove(set, on('jwize.com'), false)).toEqual(['jwize.com'])
+    expect(zonesToMove(set, on(...set), true)).toEqual([])
+    expect(zonesToMove(set, on(), false)).toEqual([])
+  })
+
+  it('a press turns an off one on, an on one off, and syncs a mix to on', () => {
+    expect(wantAfterPress('off')).toBe(true)
+    expect(wantAfterPress('on')).toBe(false)
+    expect(wantAfterPress('mixed')).toBe(true)
   })
 })
 
-describe('row select, and the list by group', () => {
-  const keys = ['a', 'b', 'c', 'd']
-  const set = (...k: string[]): ReadonlySet<string> => new Set(k)
-
-  it('a press picks a row or lets it go — the rest stay as they were', () => {
-    expect([...pickedAfterPress(set(), keys, 'b', null, false)]).toEqual(['b'])
-    expect([...pickedAfterPress(set('a', 'b'), keys, 'b', 'a', false)]).toEqual(['a'])
+describe('the search at the top', () => {
+  it('an empty query holds everything; every word must be found, in any order', () => {
+    expect(matchesQuery('', 'meetups')).toBe(true)
+    expect(matchesQuery('   ', 'meetups')).toBe(true)
+    expect(matchesQuery('meet hyper', 'meetups', 'meetups.hypercomb.com')).toBe(true)
+    expect(matchesQuery('hyper meet', 'meetups', 'meetups.hypercomb.com')).toBe(true)
+    expect(matchesQuery('meet jwize', 'meetups', 'meetups.hypercomb.com')).toBe(false)
   })
 
-  it('Shift picks every row from the last one pressed, either way, and never lets one go', () => {
-    expect([...pickedAfterPress(set('a'), keys, 'c', 'a', true)].sort()).toEqual(['a', 'b', 'c'])
-    expect([...pickedAfterPress(set(), keys, 'b', 'd', true)].sort()).toEqual(['b', 'c', 'd'])
-    expect([...pickedAfterPress(set('c'), keys, 'c', 'c', true)]).toEqual(['c'])
-  })
-
-  it('Shift with no anchor in the list is a plain press', () => {
-    expect([...pickedAfterPress(set(), keys, 'b', null, true)]).toEqual(['b'])
-    expect([...pickedAfterPress(set(), keys, 'b', 'gone', true)]).toEqual(['b'])
-  })
-
-  it('a group holds its page’s children by name — nothing deeper, nothing on another page', () => {
-    const members = ['meetup', 'agenda']
-    expect(inGroup(row('/revolucion/meetup'), ['revolucion'], members)).toBe(true)
-    expect(inGroup(row('/revolucion/lounge'), ['revolucion'], members)).toBe(false)
-    expect(inGroup(row('/revolucion/meetup/notes'), ['revolucion'], members)).toBe(false)
-    expect(inGroup(row('/other/meetup'), ['revolucion'], members)).toBe(false)
-    expect(inGroup(row('/meetup'), [], members)).toBe(true)
-  })
-
-  it('the picks are all in a group, some, or none — all means a press takes them out', () => {
-    expect(groupCoverage(['a', 'b'], ['a', 'b', 'c'])).toBe('all')
-    expect(groupCoverage(['a', 'x'], ['a', 'b'])).toBe('some')
-    expect(groupCoverage(['x'], ['a'])).toBe('none')
-    expect(groupCoverage([], ['a'])).toBe('none')
+  it('case and accents do not matter', () => {
+    expect(matchesQuery('REVOLUCION', 'revolución')).toBe(true)
+    expect(matchesQuery('café', 'Cafe Menu')).toBe(true)
   })
 })

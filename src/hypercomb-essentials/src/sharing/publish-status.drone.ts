@@ -353,7 +353,7 @@ export class PublishStatusDrone extends Drone {
   protected override listens: string[] = [
     'publish:view-toggle', 'publish:shown', 'publish:close', 'publish:refresh', 'sync:state',
     'publish:run', 'publish:run-many', 'publish:run-drifted', 'publish:unpublish', 'publish:make-live', 'publish:inspect', 'publish:copy-link',
-    'publish:opens-as', 'publish:set-target', 'publish:door', 'publish:forget',
+    'publish:opens-as', 'publish:set-target', 'publish:door', 'publish:doors', 'publish:forget',
     'history:head-changed', 'share:receipt-revoked', 'behavior:enablement-changed',
     'hosts:render', 'publish:arrival', 'publish:promote', 'publish:participant', 'publish:participant-publish',
     'publish:entrance', 'publish:entrance-preview', 'publish:entrance-skip', ENTRANCE_UPDATE_EFFECT, 'hidden:render',
@@ -514,7 +514,15 @@ export class PublishStatusDrone extends Drone {
     // world sees — a new picture, a new note — republished in one go, after one question that names them.
     this.onEffect('publish:run-drifted', () => { void this.#runDrifted() })
     this.onEffect<{ key?: string; zone?: string; on?: boolean }>('publish:door', (p) => {
-      void this.#door(String(p?.key ?? ''), String(p?.zone ?? ''), p?.on === true)
+      void this.#door(String(p?.key ?? ''), [String(p?.zone ?? '')], p?.on === true)
+    })
+    // MANY DOMAINS AT ONCE (the Publish drilldown's group and ctrl-selection):
+    // one creation on or off across a set of domains in ONE signed index
+    // rewrite — never a door per domain, which would find the row busy from
+    // the first and refuse the rest.
+    this.onEffect<{ key?: string; zones?: unknown; on?: boolean }>('publish:doors', (p) => {
+      const zones = Array.isArray(p?.zones) ? p.zones.map(z => String(z ?? '')) : []
+      void this.#door(String(p?.key ?? ''), zones, p?.on === true)
     })
     this.onEffect<{ key?: string }>('publish:forget', (p) => { void this.#forget(String(p?.key ?? '')) })
     // OWN ADDRESS — give the creation `<label>.<zone>` on one domain, or (no
@@ -1442,16 +1450,16 @@ export class PublishStatusDrone extends Drone {
    *  off everywhere → withdraw; on for a branch the index does not name yet →
    *  publish it (seal, upload, index — the doors ride along from the marks);
    *  anything else → one signed doors rewrite, no seal, no upload. */
-  async #door(key: string, rawZone: string, on: boolean): Promise<void> {
+  async #door(key: string, rawZones: readonly string[], on: boolean): Promise<void> {
     if (this.#waitForBatch()) return
     const row = this.#rows.find(r => r.key === key)
-    const zone = hostZone(rawZone)
-    if (!row || row.segments.length === 0 || !zone || row.busyPhase) return
+    const zones = [...new Set(rawZones.map(hostZone).filter(Boolean))]
+    if (!row || row.segments.length === 0 || zones.length === 0 || row.busyPhase) return
     const everywhere = this.#knownZones()
     const openNow = row.live ? (row.doors ?? everywhere) : []
     const next = on
-      ? [...new Set([...openNow, zone])]
-      : openNow.filter(z => z !== zone)
+      ? [...new Set([...openNow, ...zones])]
+      : openNow.filter(z => !zones.includes(z))
 
     // Paint the switch now; the writes behind it re-state the truth.
     const beforeDoors = row.doors
@@ -1460,7 +1468,7 @@ export class PublishStatusDrone extends Drone {
     await setBranchHosts(row.segments, next)
     // The domain switched off leaves the host marks above, so the write goes
     // through the domains still on — and through its own host too, named here.
-    const left = on ? [] : [zone]
+    const left = on ? [] : zones
 
     if (next.length === 0) { await this.#unpublish(key, left); return }
     if (!row.live) { await this.#run(key); return }

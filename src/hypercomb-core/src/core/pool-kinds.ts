@@ -203,6 +203,8 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   ['facet:minted', 'document'],
   ['substrate:registry', 'document'],
   ['community:offers', 'document'],
+  // The named groups of hosts the Publish window opens as one (community-hosts.ts).
+  ['community:host-groups', 'document'],
   // Navigation and chrome records moved out of localStorage
   // (hypercomb-shared/core/participant-document.ts): per participant, one
   // current record each, replaced whole on every edit.

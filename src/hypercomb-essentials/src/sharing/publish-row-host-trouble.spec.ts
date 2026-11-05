@@ -55,7 +55,7 @@ describe('a publish row names the domain that takes none of its bytes', () => {
   })
 
   it('the panel says it under the row: "<branch>: <host> …"', () => {
-    expect(PANEL_HTML).toMatch(/@if \(troubleKey\(row\)\) \{\s*<p class="pcur-why"[^>]*>\{\{ troubleKey\(row\) \| t: troubleParams\(row\) \}\}<\/p>/)
+    expect(PANEL_HTML).toMatch(/@if \(troubleOn\(row\)\) \{\s*<span class="prow-warn"[^>]*>\{\{ troubleKey\(row\) \| t: troubleParams\(row\) \}\}<\/span>/)
     expect(PANEL_TS).toContain('hostTrouble?: { host: string; why: string } | null')
     expect(PANEL_TS).toContain('`publish.host.${row.hostTrouble.why}`')
     expect(PANEL_TS).toMatch(/branch: row\.segments\[row\.segments\.length - 1\] \?\? row\.path/)

@@ -77,19 +77,13 @@ describe('concealment — the doctrine, not a feature', () => {
     expect(PUBLISH_TS).not.toMatch(/@hypercomb\/essentials/)
   })
 
-  // THE SURFACE. The publish list offers hide and only hide; its delete area is
-  // a fold you open on purpose. (The host directory takes no build to hide.)
-  it('the publish list offers hide and only hide, and deletes only from its fold', () => {
-    for (const html of [PUBLISH_HTML]) {
-      expect(html).toMatch(/hidden:conceal|hide\(pkg\)|hideVersion\(row, v\)/)
-      expect(html).toMatch(/THE DELETE AREA/)
-    }
-    expect(PUBLISH_HTML).toMatch(/\(click\)="hideVersion\(row, v\)"/)
-    expect(PUBLISH_HTML).toMatch(/\(click\)="destroyVersion\(item\)"/)
-    // The live head is never hideable — the row that says what is out there
-    // right now is not a row you can lose.
-    expect(PUBLISH_HTML).toMatch(/@if \(v\.sig !== row\.live\) \{/)
-    expect(PUBLISH_TS).toMatch(/if \(version\.sig === row\.live\) return/)
+  // THE SURFACE. The Publish window is one list of switches (jwize 2026-11-04:
+  // "none of the other stuff"), so it lists no versions and no longer offers
+  // to hide or delete one: hiding and deleting live in the pool and in the host
+  // directory, and nothing in the window reaches either.
+  it('the publish window lists no versions, so it offers neither hide nor delete', () => {
+    expect(PUBLISH_HTML).not.toMatch(/hideVersion|destroyVersion|restoreVersion|THE DELETE AREA/)
+    expect(PUBLISH_TS).not.toMatch(/hidden:conceal|hidden:delete|hidden:reveal/)
   })
 
   it('never promises more than a local forget', () => {

@@ -131,9 +131,11 @@ describe('the host directory — the set, apart from the publishing', () => {
     expect(ensureInstall).toMatch(/stampInstalledPackage\(bundled\.packageSig\)/)
   })
 
-  it('links Publish to the host directory without mixing the two surfaces', () => {
-    expect(HTML).toMatch(/\(click\)="openHosts\(\)"/)
-    expect(TS).toMatch(/openHosts\(\): void[\s\S]{0,180}?EffectBus\.emit\('hosts:open'/)
+  // jwize 2026-11-04: "manage hosts and groups are not needed". The window
+  // opens on its own word and its own rail door; Publish carries no link to it.
+  it('opens on its own, and Publish carries no link to it', () => {
+    expect(HTML).not.toMatch(/openHosts\(\)/)
+    expect(TS).not.toMatch(/openHosts/)
     expect(HOSTS_DRONE).toMatch(/'hosts:open'/)
     expect(EN['publish.action.manage-hosts']).toBe('Manage hosts')
   })
@@ -179,13 +181,13 @@ describe('the host directory — the set, apart from the publishing', () => {
     expect(HOSTS_DRONE).toMatch(/whenReady\?\.\(STORE_KEY, \(\) => \{ void this\.#read\(\) \}\)/)
   })
 
-  it('the layer you are on shows one switch per domain, and the hosts are managed in their own window', () => {
-    expect(HTML).toMatch(/doorOn\(current\(\), zone\)/)
-    expect(HTML).toMatch(/class="pcur-hosts-manage"[^>]*\(click\)="openHosts\(\)"/)
+  it('the drilldown lists the domains, and the hosts are managed in their own window', () => {
+    expect(HTML).toMatch(/@for \(zone of visibleDomains\(\); track zone\)/)
+    expect(TS).toMatch(/readonly domains = computed<string\[\]>\(\(\) =>\s*\[\.\.\.new Set\(\[\.\.\.this\.hosts\(\)/)
+    expect(HTML).not.toMatch(/pcur-hosts-manage/)
   })
 
-  it('renders branch details once, in the properties pane rather than every list row', () => {
-    expect((HTML.match(/class="pcur-hosts-manage"/g) ?? [])).toHaveLength(1)
+  it('renders no branch details in the list at all', () => {
     expect(HTML).not.toMatch(/row\.expanded/)
     expect(HTML).not.toMatch(/class="prow-detail"/)
     expect(TS).not.toMatch(/expanded: boolean/)

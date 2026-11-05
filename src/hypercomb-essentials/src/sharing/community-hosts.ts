@@ -204,6 +204,121 @@ export async function removeCommunityHost(raw: unknown): Promise<boolean> {
   } catch { return false }
 }
 
+// ── named groups of hosts ───────────────────────────────────────────
+//
+// jwize 2026-11-04: the Publish window is a drilldown — the domains you carry,
+// and under them a shorter list of NAMED GROUPS, each a saved set of domains.
+// Open a group and the creations are switched on or off on every domain in it
+// at once; a creation live on only some of them reads as mixed, and Sync makes
+// it one thing or the other. A group is how a ctrl-selection of domains is kept.
+//
+// The groups are ONE CURRENT DOCUMENT in their own pool, `community:host-groups`
+// (a participant's catalog, written through the Store like every document —
+// a name is an edit of it, never a member of the hosts pool). It holds domains
+// and no branch holds it: what a branch publishes to is still the `host:<zone>`
+// marks it wears, and deleting a group leaves every host and every branch as it
+// was.
+
+/** The pool of meaning that holds the one catalog of named host groups. */
+export const HOST_GROUPS_POOL = 'community:host-groups'
+
+/** A name is one short line. */
+export const HOST_GROUP_NAME_MAX = 40
+
+export interface HostGroup {
+  readonly name: string
+  /** The domains in it, as the participant gathered them, each once. */
+  readonly zones: readonly string[]
+}
+
+/** The name as it is kept: one line, single spaces, no longer than a name. */
+export const hostGroupName = (raw: unknown): string =>
+  String(raw ?? '').replace(/\s+/g, ' ').trim().slice(0, HOST_GROUP_NAME_MAX).trim()
+
+/** `Launch week` and `launch  WEEK` are the one group. */
+export const hostGroupKey = (raw: unknown): string => hostGroupName(raw).toLowerCase()
+
+/** A group as it would be kept, or null when it would hold nothing: a name, and
+ *  at least one domain that is a domain. Zones fold the way a host does, once
+ *  each, in the order given. */
+export const normalizeHostGroup = (name: unknown, zones: unknown): HostGroup | null => {
+  const kept = hostGroupName(name)
+  if (!kept || !Array.isArray(zones)) return null
+  const folded = [...new Set(zones.map(hostZone).filter(Boolean))]
+  return folded.length > 0 ? { name: kept, zones: folded } : null
+}
+
+/** The catalog with `group` in it under its name (replacing a group already so
+ *  named, in place), or without the group called `name` when `group` is null. */
+export const withHostGroup = (groups: readonly HostGroup[], name: unknown, group: HostGroup | null): HostGroup[] => {
+  const key = hostGroupKey(name)
+  const rest = groups.filter(g => hostGroupKey(g.name) !== key)
+  if (!group) return rest
+  const at = groups.findIndex(g => hostGroupKey(g.name) === key)
+  return at < 0 ? [...rest, group] : [...rest.slice(0, at), group, ...rest.slice(at)]
+}
+
+type GroupStore = PoolStore & {
+  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string, options?: { keep?: 'versions' | 'current' }) => Promise<string | null>
+  getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
+}
+
+const groupsPool = async (): Promise<{ store: GroupStore; pool: FileSystemDirectoryHandle } | null> => {
+  const store = get<GroupStore>(STORE_KEY)
+  if (!store?.getPool) return null
+  try { await store.initialize?.() } catch { return null }
+  try {
+    const pool = await store.getPool(HOST_GROUPS_POOL)
+    return pool ? { store, pool } : null
+  } catch { return null }
+}
+
+/** Every group you have named, in the order you made them. */
+export async function listHostGroups(): Promise<HostGroup[]> {
+  const held = await groupsPool()
+  if (!held?.store.getPoolDoc) return []
+  try {
+    const bytes = await held.store.getPoolDoc(held.pool)
+    if (!bytes) return []
+    const record = JSON.parse(new TextDecoder().decode(bytes)) as { groups?: unknown }
+    if (!Array.isArray(record?.groups)) return []
+    const seen = new Set<string>()
+    const out: HostGroup[] = []
+    for (const entry of record.groups as { name?: unknown; zones?: unknown }[]) {
+      const group = normalizeHostGroup(entry?.name, entry?.zones)
+      if (!group || seen.has(hostGroupKey(group.name))) continue
+      seen.add(hostGroupKey(group.name))
+      out.push(group)
+    }
+    return out
+  } catch { return [] }
+}
+
+const writeHostGroups = async (groups: readonly HostGroup[]): Promise<boolean> => {
+  const held = await groupsPool()
+  if (!held?.store.putPoolDoc) return false
+  const record = { kind: 'host:groups', groups: groups.map(g => ({ name: g.name, zones: [...g.zones] })) }
+  const bytes = new TextEncoder().encode(JSON.stringify(record)).buffer as ArrayBuffer
+  try { return !!(await held.store.putPoolDoc(held.pool, bytes)) } catch { return false }
+}
+
+/** Name a set of domains. Saving under a name already held replaces that group.
+ *  Returns the group as kept, or null when it would hold nothing (or could not
+ *  be written). */
+export async function saveHostGroup(name: unknown, zones: unknown): Promise<HostGroup | null> {
+  const group = normalizeHostGroup(name, zones)
+  if (!group) return null
+  const next = withHostGroup(await listHostGroups(), group.name, group)
+  return (await writeHostGroups(next)) ? group : null
+}
+
+/** Forget a group. The domains in it, and everything published to them, stay. */
+export async function removeHostGroup(name: unknown): Promise<boolean> {
+  const held = await listHostGroups()
+  const next = withHostGroup(held, name, null)
+  return next.length < held.length && (await writeHostGroups(next))
+}
+
 // ── the zone side: who may publish at a host ────────────────────────
 //
 // documentation/signed-site-bindings.md, Plan A. The directory worker used to

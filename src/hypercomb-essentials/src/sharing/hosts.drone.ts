@@ -34,7 +34,11 @@ import {
   addCommunityHost,
   hostZone,
   listCommunityHosts,
+  listHostGroups,
   removeCommunityHost,
+  removeHostGroup,
+  saveHostGroup,
+  type HostGroup,
 } from './community-hosts.js'
 import { updateScout } from './update-scout.service.js'
 import { ATTESTATION_IOC_KEY } from '@hypercomb/core'
@@ -96,6 +100,8 @@ export interface HostsRenderPayload {
   open: boolean
   /** The hosts you carry, in the pool's own stable order. */
   zones: string[]
+  /** Your named groups of those hosts, in the order you made them. */
+  groups: HostGroup[]
   /** True once a read has completed, so the panel can tell "none yet" from
    *  "not read yet" and never flash an empty-state over a list that is
    *  about to arrive. */
@@ -112,12 +118,14 @@ export class HostsDrone extends Drone {
 
   protected override listens: string[] = [
     'hosts:view-toggle', 'hosts:open', 'hosts:close', 'hosts:refresh', 'hosts:add', 'hosts:remove', 'hosts:own-host', 'packages:open',
+    'hosts:group-save', 'hosts:group-remove',
   ]
   protected override emits: string[] = ['hosts:render', 'activity:log']
 
   #open = false
   #loaded = false
   #zones: string[] = []
+  #groups: HostGroup[] = []
 
   constructor() {
     super()
@@ -208,6 +216,29 @@ export class HostsDrone extends Drone {
         await this.#read()
       })()
     })
+    // NAMED GROUPS OF HOSTS — a saved set of the domains you carry, for the
+    // Publish window to open as one (community-hosts.ts). Saving under a name
+    // already held replaces it; a name or a set that holds nothing says so
+    // rather than writing an empty group. Nothing else moves: the hosts and
+    // everything published to them stay as they were.
+    this.onEffect<{ name?: unknown; zones?: unknown }>('hosts:group-save', (p) => {
+      void (async () => {
+        const group = await saveHostGroup(p?.name, p?.zones)
+        if (!group) {
+          this.emitEffect('activity:log', { message: 'a group needs a name and at least one domain' })
+          return
+        }
+        this.emitEffect('activity:log', { message: `${group.name} holds ${group.zones.length} domain${group.zones.length === 1 ? '' : 's'}` })
+        await this.#read()
+      })()
+    })
+    this.onEffect<{ name?: unknown }>('hosts:group-remove', (p) => {
+      void (async () => {
+        await removeHostGroup(p?.name)
+        await this.#read()
+      })()
+    })
+
     // YOUR OWN HOST — named in the directory, kept as its bare zone; an
     // empty name clears it. Nothing else changes with it: it is where your
     // backup goes, never who you meet.
@@ -263,6 +294,11 @@ export class HostsDrone extends Drone {
       // list rather than claiming you carry nothing.
       this.#zones = this.#zones ?? []
     }
+    try {
+      this.#groups = await listHostGroups()
+    } catch {
+      this.#groups = this.#groups ?? []
+    }
     this.#loaded = true
     this.#emit()
   }
@@ -271,6 +307,7 @@ export class HostsDrone extends Drone {
     const payload: HostsRenderPayload = {
       open: this.#open,
       zones: [...this.#zones],
+      groups: this.#groups.map(g => ({ name: g.name, zones: [...g.zones] })),
       loaded: this.#loaded,
     }
     this.emitEffect('hosts:render', payload)
