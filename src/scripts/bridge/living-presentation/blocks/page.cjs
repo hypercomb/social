@@ -5,10 +5,12 @@
 // scene, and a reader walks them in any order — in by a word, back up by the
 // crumbs. A page is that one scene as one slide, the size of the screen:
 //
-//   crumbs   where you are; every ancestor is a way back
+//   crumbs   where you are; every ancestor is a way back (the one way up)
 //   scene    the eyebrow, the headline, the figure, and the narration under
 //            one hairline with its transport — the tour's stage, exactly
-//   ways     a strip of the words to step into, and the way up
+//   ways     a strip of the words to step into: the next section down
+//   tabs     the section: every tile beside this one, this one lit, the same
+//            row on each of their pages (jwize 2026-11-05)
 //
 // THE STANDARD IS THE TOUR (scripts/presentation): its ink and honey, its two
 // faces, its figures, its voice. A tile one of the tour's scenes explains
@@ -26,7 +28,7 @@
 // the tile as included files, not on the slide.
 //
 // Its natural parts are marked by the word each would fill (`data-part`:
-// crumbs, scene, ways). Extruding a block later is a layout of those words
+// crumbs, scene, ways, tabs). Extruding a block later is a layout of those words
 // and a component for each (the layout word).
 //
 // IN THE HIVE a page is mounted inline (site-view.drone.ts) in a host pinned
@@ -42,7 +44,8 @@
 //              steps: [{ say, voice, lit, name }] }
 //            `beside` is the second panel's HTML (a capture or a try part), or ''
 //   tryPart  'word' | 'signature' | null (its script)
-//   ways     { children: [{ name, note, page }], parent, parentRoute }
+//   ways     { children: [{ name, note, route, page }],
+//              section: [{ name, note, route, page, current }] }
 //   faces    the @font-face rules (by signature)
 //   sprite   the tour's icon sprite
 
@@ -110,7 +113,7 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
   text-transform:uppercase;color:var(--dim);background:none;border:1px solid var(--line);border-radius:var(--r-ctl);padding:5px 10px;cursor:pointer}
 .to-site:hover{color:var(--honey);border-color:var(--honey-deep);background:var(--honey-tint)}
 .to-site .g{color:var(--honey);font-size:13px}
-.page.part .crumbs,.page.part .ways{visibility:hidden}
+.page.part .crumbs,.page.part .ways,.page.part .tabs{visibility:hidden}
 .page.part .to-site{display:inline-flex}
 
 /* ---------- the scene ---------- */
@@ -261,8 +264,22 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .ways a.w .g{color:var(--honey);font-size:12px}
 .ways a.w:hover{border-color:var(--honey-deep);background:var(--honey-tint);color:var(--honey)}
 .ways span.w{color:var(--faint-text);border-style:dashed}
-.ways .up{margin-left:auto;display:inline-flex;align-items:center;gap:.4em;color:var(--faint-text);text-decoration:none;font-size:13px;white-space:nowrap}
-.ways .up:hover{color:var(--honey)}
+/* the section as tabs: the same row on every page of the section, this page
+   lit; a long section scrolls along its own row, never the page */
+.tabs{display:flex;gap:2px;margin-top:clamp(6px,1.4vh,14px);border-top:1px solid var(--line);overflow-x:auto;scrollbar-width:thin;scroll-snap-type:x proximity}
+.ways+.tabs{margin-top:0}
+.tabs .tab{flex:none;display:inline-flex;align-items:center;gap:.45em;padding:11px 14px 10px;scroll-snap-align:start;font-family:var(--mono);font-size:13px;letter-spacing:var(--track-data);
+  text-decoration:none;color:var(--dim);border-top:2px solid transparent;margin-top:-1px;transition:color .15s,border-color .15s,background .15s}
+.tabs .tab .g{font-size:10px;color:var(--faint-text)}
+.tabs a.tab:hover{color:var(--honey);background:var(--honey-tint)}
+.tabs a.tab:hover .g{color:var(--honey)}
+.tabs .tab[aria-current]{color:var(--ink);border-top-color:var(--honey)}
+.tabs .tab[aria-current] .g{color:var(--honey)}
+.tabs .tab.soon{color:var(--faint-text);font-style:italic}
+/* more tabs past an edge: that edge fades */
+.tabs.more-r{mask-image:linear-gradient(to right,#000 calc(100% - 48px),transparent)}
+.tabs.more-l{mask-image:linear-gradient(to left,#000 calc(100% - 48px),transparent)}
+.tabs.more-l.more-r{mask-image:linear-gradient(to right,transparent,#000 48px,#000 calc(100% - 48px),transparent)}
 
 @container (max-width:700px){
   .fz.duo{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1.3fr) minmax(0,1fr)}
@@ -272,7 +289,6 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
   .hexb{width:clamp(76px,24cqi,104px)}
   .hexb .t{font-size:11px}
   .count{display:none}
-  .ways .up{margin-left:0}
   .caption{max-height:36vh}
 }
 @media (prefers-reduced-motion:reduce){
@@ -315,6 +331,11 @@ const SCRIPT = `
   const mode = () => { const e = host ? host.getAttribute('data-hc-site-entry') || '/' : '/'; page.classList.toggle('part', e.split('/').filter(Boolean).length > 1) }
   mode()
   if (host) new MutationObserver(() => { if (gone()) return; mode() }).observe(host, { attributes: true, attributeFilter: ['data-hc-site-entry'] })
+  // the lit tab in view along its row, without moving the page
+  const tabs = page.querySelector('.tabs'), lit = tabs && tabs.querySelector('[aria-current]')
+  if (lit && tabs.scrollWidth > tabs.clientWidth) tabs.scrollLeft = lit.offsetLeft - (tabs.clientWidth - lit.offsetWidth) / 2
+  const edges = () => { if (!tabs) return; const end = tabs.scrollWidth - tabs.clientWidth; tabs.classList.toggle('more-l', tabs.scrollLeft > 2); tabs.classList.toggle('more-r', tabs.scrollLeft < end - 2) }
+  if (tabs) { edges(); tabs.addEventListener('scroll', edges, { passive: true }); addEventListener('resize', () => { if (gone()) return; edges() }, { passive: true }) }
   const toSite = page.querySelector('.to-site')
   if (toSite) toSite.onclick = () => page.dispatchEvent(new CustomEvent('hc-site-widen', { bubbles: true }))
   const KEY = 'hc-scene:' + location.pathname
@@ -568,13 +589,21 @@ const sceneHtml = (sc) => {
   </section>`
 }
 
-const waysHtml = (ways) => !ways || (!ways.children.length && !ways.parent && !(ways.also || []).length) ? '' : `
-  <nav class="ways" data-part="ways" aria-label="Where to go from here">${ways.children.length ? `
+const waysHtml = (ways) => !ways || !ways.children.length ? '' : `
+  <nav class="ways" data-part="ways" aria-label="Step in">
     <span class="lbl mono-label">Step in</span>${ways.children.map(c => c.page
       ? `<a class="w" href="./${esc(c.name)}" title="${esc(c.note)}">${icon('hex')}${esc(c.name)}</a>`
-      : `<span class="w" title="${esc(`${c.note} (its page is coming)`)}">${esc(c.name)}</span>`).join('')}` : ''}${(ways.also || []).map(a => `
-    <a class="up" href="/${esc(a.name)}" title="${esc(a.note)}">${esc(a.name)}${icon('right')}</a>`).join('')}${ways.parent ? `
-    <a class="up" href="/${ways.parentRoute.map(esc).join('/')}">${icon('left')}${esc(ways.parent)}</a>` : ''}
+      : `<span class="w" title="${esc(`${c.note} (its page is coming)`)}">${esc(c.name)}</span>`).join('')}
+  </nav>`
+
+/** The section as tabs: every tile beside this one, this one lit. A section
+ *  of one has no tabs. */
+const tabsHtml = (ways) => !ways || (ways.section || []).length < 2 ? '' : `
+  <nav class="tabs" data-part="tabs" aria-label="This section">${ways.section.map(t => t.current
+    ? `<span class="tab" aria-current="page" title="${esc(t.note)}">${icon('play')}${esc(t.name)}</span>`
+    : t.page
+      ? `<a class="tab" href="/${t.route.map(esc).join('/')}" title="${esc(t.note)}">${icon('play')}${esc(t.name)}</a>`
+      : `<span class="tab soon" title="${esc(`${t.note} (its page is coming)`)}">${esc(t.name)}</span>`).join('')}
   </nav>`
 
 /** One tile's page: its one scene. */
@@ -595,7 +624,7 @@ ${STYLE}
 </head>
 <body>
 ${sprite}
-<main class="page"><div class="top">${crumbsHtml(route)}<button type="button" class="to-site" aria-label="Open the website at this page">${icon('hex')}website</button></div>${sceneHtml(scene)}${waysHtml(ways)}
+<main class="page"><div class="top">${crumbsHtml(route)}<button type="button" class="to-site" aria-label="Open the website at this page">${icon('hex')}website</button></div>${sceneHtml(scene)}${waysHtml(ways)}${tabsHtml(ways)}
 </main>
 <script>${SCRIPT}${tryDef ? `
 ;(() => {
