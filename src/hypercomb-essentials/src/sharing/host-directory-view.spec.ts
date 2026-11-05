@@ -10,7 +10,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import type { InstallNode, InstallRevision } from '@hypercomb/core'
-import { NOTHING_PICKED, codeLines, codeName, filesPicked, pickAll, pickKey, pickMode, publishedCount, publishedOn, stackRows, stillPicked, directoryRows, domainRows, filesOf, hostBehind, isOlder, namedFromVerdict, namedWhenUninstalled, offerableRoots, offeredRevisions, updateProgress, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, type ServedTree } from './host-directory.view'
+import { LIGHT_BRIGHTEST, LIGHT_DIMMEST, LIGHT_UNKNOWN, ageLevel, lightOf, runningStamp, NOTHING_PICKED, codeLines, codeName, filesPicked, pickAll, pickKey, pickMode, publishedCount, publishedOn, stackRows, stillPicked, directoryRows, domainRows, filesOf, hostBehind, isOlder, namedFromVerdict, namedWhenUninstalled, offerableRoots, offeredRevisions, updateProgress, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, type ServedTree } from './host-directory.view'
 import { ATTESTED_PACKAGES_KEY, attestPackage } from './package-attestation'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -242,7 +242,7 @@ describe('the host directory', () => {
     // Escape clears the search first, then the pane over the columns, then the code being
     // read, then the deepest pick; with nothing picked it has nothing and the desk closes.
     const back = VIEW.slice(VIEW.indexOf('#back(): boolean {'), VIEW.indexOf('// ── what is on screen'))
-    const rungs = ["if (this.#query) { this.#query = ''", "if (this.#view !== 'domains')", 'if (this.#files.keys.length)', 'const deepest = this.#cols.map']
+    const rungs = ['if (this.#menu !== null)', "if (this.#query) { this.#query = ''", "if (this.#view !== 'domains')", 'if (this.#files.keys.length)', 'const deepest = this.#cols.map']
     expect(rungs.map(rung => back.indexOf(rung))).toEqual([...rungs.map(rung => back.indexOf(rung))].sort((a, b) => a - b))
     expect(rungs.every(rung => back.includes(rung))).toBe(true)
     expect(back).not.toMatch(/this\.#section/)
@@ -329,7 +329,7 @@ describe('the host directory', () => {
     // dropped — a read still in flight from before a close once overwrote the fresh one.
     expect(VIEW).toMatch(/if \(this\.#published\.has\(zone\) \|\| this\.#publishedAsk\.has\(zone\)\) return/)
     expect(VIEW).toMatch(/if \(opening !== this\.#opening\) return\s*this\.#publishedAsk\.delete\(zone\)\s*this\.#published\.set\(zone, count\)/)
-    expect(VIEW).toMatch(/this\.#opening\+\+\s*this\.#published\.clear\(\)/)
+    expect(VIEW).toMatch(/this\.#opening\+\+[\s\S]{0,320}?this\.#published\.clear\(\)/)
     // The number sits beside the one door, on the pane of a host and never on this origin.
     expect(VIEW).toMatch(/if \(domain\.zone\) \{\s*const published = make\('span', 'hd-published'\)/)
     // A host that did not answer shows no number, not a zero.
@@ -466,6 +466,89 @@ describe('the host directory', () => {
     // Line numbers are drawn by CSS, so copying a file copies the code and not the gutter.
     expect(VIEW).toMatch(/\.hd-code \.cl::before\{content:counter\(l\)/)
     expect(VIEW).toMatch(/user-select:none/)
+  })
+
+  it('lights a package: on and current, on and dim by how old the running version is, or out', () => {
+    // jwize 2026-11-04: "it should be on but dim if there is a newer version and a spectrum
+    // based on how old."
+    const day = 86_400_000
+    const now = Date.parse('2026-11-05T00:00:00Z')
+    expect(lightOf({ on: true, update: false }, undefined, now)).toEqual({ state: 'on', level: 1 })
+    expect(lightOf({ on: false, update: false }, undefined, now)).toEqual({ state: 'off', level: 0 })
+    // A package that is off is out whatever newer version there is.
+    expect(lightOf({ on: false, update: true }, now - day, now)).toEqual({ state: 'off', level: 0 })
+    expect(lightOf({ on: true, update: true }, now, now).state).toBe('behind')
+
+    // The spectrum: lit, never as bright as current, dimmer with every age, never out.
+    const levels = [0, 1, 7, 30, 90, 180].map(days => ageLevel(now - days * day, now))
+    expect(levels[0]).toBeCloseTo(LIGHT_BRIGHTEST)
+    expect(levels[0]).toBeLessThan(1)
+    for (let at = 1; at < levels.length; at++) expect(levels[at]).toBeLessThan(levels[at - 1]!)
+    expect(levels[levels.length - 1]).toBeCloseTo(LIGHT_DIMMEST)
+    expect(LIGHT_DIMMEST).toBeGreaterThan(0)
+    // Past the far end it stays as dim as it gets; a date in the future is as fresh as now.
+    expect(ageLevel(now - 900 * day, now)).toBeCloseTo(LIGHT_DIMMEST)
+    expect(ageLevel(now + 5 * day, now)).toBeCloseTo(LIGHT_BRIGHTEST)
+    // The first days matter more than the months: a week costs more than a week at three months.
+    expect(ageLevel(now - 7 * day, now) - ageLevel(now, now)).toBeLessThan(0)
+    expect(ageLevel(now, now) - ageLevel(now - 7 * day, now)).toBeGreaterThan(ageLevel(now - 90 * day, now) - ageLevel(now - 97 * day, now))
+    // An age that could not be told is the middle of the spectrum, not the fresh end and not out.
+    expect(ageLevel(null, now)).toBe(LIGHT_UNKNOWN)
+    expect(ageLevel(Number.NaN, now)).toBe(LIGHT_UNKNOWN)
+    expect(lightOf({ on: true, update: true }, null, now)).toEqual({ state: 'behind', level: LIGHT_UNKNOWN })
+    expect(lightOf({ on: true, update: true }, undefined, now).level).toBe(LIGHT_UNKNOWN)
+    expect(LIGHT_UNKNOWN).toBeGreaterThan(LIGHT_DIMMEST)
+    expect(LIGHT_UNKNOWN).toBeLessThan(LIGHT_BRIGHTEST)
+  })
+
+  it('reads when the running version first appeared: the earliest date any host gave for that layer', () => {
+    const revision = (layer: string, at: string, sources: { at: string }[] = []): InstallRevision =>
+      ({ layer, at, sources: sources.map(source => ({ root: 'r', zone: 'h.com', at: source.at })) })
+    const revisions = [
+      revision('new', '2026-11-01T00:00:00Z'),
+      revision('mine', '2026-09-10T00:00:00Z', [{ at: '2026-09-08T12:00:00Z' }, { at: '2026-09-12T00:00:00Z' }]),
+      revision('undated', ''),
+    ]
+    expect(runningStamp(revisions, 'mine')).toBe(Date.parse('2026-09-08T12:00:00Z'))
+    expect(runningStamp(revisions, 'new')).toBe(Date.parse('2026-11-01T00:00:00Z'))
+    // No revision names it, or none carries a date: unknown, never zero.
+    expect(runningStamp(revisions, 'other')).toBeNull()
+    expect(runningStamp(revisions, 'undated')).toBeNull()
+    expect(runningStamp([], 'mine')).toBeNull()
+  })
+
+  it('the light tells and the manage menu acts: no switch on the bulb, four things in the menu, closed by Escape or a click elsewhere', () => {
+    // jwize 2026-11-04: "The update brings to newest or you click the manage icon turn it off
+    // or pick revisions and look at code in the finder view."
+    expect(VIEW).not.toMatch(/bulb\.addEventListener\('click'/)
+    expect(VIEW).toMatch(/const bulb = make\('span', `hd-bulb \$\{light\.state\}`\)/)
+    expect(VIEW).toMatch(/bulb\.style\.setProperty\('--hd-age', String\(light\.level\)\)/)
+    expect(VIEW).toMatch(/\.hd-bulb\.behind\{opacity:var\(--hd-age,\.55\);\}/)
+    // The update mark is still the one press that brings a package to the newest.
+    expect(VIEW).toMatch(/update\.addEventListener\('click', \(\) => \{ void this\.#takeUpdate\(row\) \}\)/)
+    // The menu: turn it off or on, update to the newest (only when there is one), revisions, code.
+    const menu = VIEW.slice(VIEW.indexOf('#renderMenu(): void {'), VIEW.indexOf('#lookAtCode(k: number'))
+    expect(menu).toMatch(/void this\.#toggle\(row\)/)
+    expect(menu).toMatch(/if \(row\.update\) \{\s*item\(t\('hosts\.update-newest'/)
+    expect(menu).toMatch(/void this\.#takeUpdate\(row\)/)
+    expect(menu).toMatch(/void this\.#openRevisions\(row\.path\)/)
+    expect(menu).toMatch(/this\.#lookAtCode\(k, row, /)
+    // Looking at the code is the columns: the package is picked, so its files are what opens.
+    const look = VIEW.slice(VIEW.indexOf('#lookAtCode(k: number'))
+    expect(look.slice(0, 320)).toMatch(/this\.#pickPackage\(k, row\.path, 'only', order\)/)
+    // The menu is state, not a node, so a repaint keeps it; Escape closes it first and a click elsewhere
+    // closes it in the capture phase, so the click still reaches what it was for.
+    expect(VIEW).toMatch(/if \(this\.#menu !== null\) \{ this\.#menu = null; this\.#renderBody\(\); return true \}/)
+    expect(VIEW).toMatch(/closest\('\.hd-menu, \.hd-manage'\)\) return\s*this\.#menu = null\s*this\.#renderBody\(\)\s*\}, true\)/)
+    expect(VIEW).toMatch(/this\.#renderDrawer\(drawer\)\s*this\.#renderMenu\(\)/)
+    // A desk that closes keeps no menu.
+    expect(VIEW).toMatch(/this\.#opening\+\+\s*this\.#menu = null/)
+    // The age is read only for a row that is on and behind, two at a time, once each.
+    expect(VIEW).toMatch(/if \(row\.on && row\.update && running\) this\.#queueAge\(row\.path, running\)/)
+    expect(VIEW).toMatch(/while \(this\.#ageActive < 2 && this\.#ageQueue\.length\)/)
+    expect(VIEW).toMatch(/if \(this\.#ages\.has\(key\) \|\| this\.#agesAsk\.has\(key\)\) return/)
+    // The old ↺ icon is gone: revisions are one of the menu's four.
+    expect(VIEW).not.toMatch(/button\('hd-icon', '↺'/)
   })
 
   it('walks the rail with the arrow keys, the pane following, and your own host has its own entry', () => {

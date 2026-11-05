@@ -163,11 +163,34 @@ to it. (This origin is already the union of every host's list, so stacking it
 with others adds nothing.)
 
 **Packages.** Each column lists the parts of whatever the one before picked — the
-union across everything picked, across every stacked host. Rows keep their bulb,
-update mark, revisions icon and how many of your hosts carry the same signature.
+union across everything picked, across every stacked host. A row is its light, its
+name, its marks (update, picked, not here yet, differs), how many of your hosts carry
+the same signature, and its manage icon (below).
 Parts inside a package are the next column; the old drill-down, its breadcrumbs
 and the row that expanded into a description are gone (a row's description is its
 tooltip).
+
+**The light and the manage menu.** *jwize, 2026-11-04:* "it should be on but dim if
+there is a newer version and a spectrum based on how old. The update brings to newest
+or you click the manage icon turn it off or pick revisions and look at code in the
+finder view." The bulb on a row no longer switches anything; it tells:
+
+- **lit** — on, and current;
+- **lit and dim** — on, and a newer version exists. The dimmer the older the version
+  running: from 0.85 for one first seen today to 0.30 at six months and beyond,
+  logarithmic so the first days count for more than the months, and 0.55 when its age
+  could not be told. The age is when the running layer first appeared on a host,
+  read from that path's revisions — only for rows that are on and behind, two at a
+  time, once each, and the row says the date in its tooltip;
+- **outline** — off.
+
+The *update* mark brings the package to the newest. The **manage icon** (⋯) opens a
+menu over the desk beside the row: **Turn off** or **Turn on** (with the reason it
+cannot, as a tooltip — this shell runs from source, a part inside a branch that is off,
+a host that is behind), **Update to the newest** (only when there is one),
+**Pick a revision…** (the drawer) and **Look at the code**, which picks the package so
+its files are the column that opens and puts the focus on the first of them. Escape
+closes the menu before anything else, and so does a click anywhere but the menu.
 
 **Files.** After the deepest picked package, a column lists the code files — the
 bees — those packages declare, each once, at the package that declares it. A file
@@ -195,7 +218,7 @@ still acts on its own row).
 - **Update**: a row the followed publisher moved wears an *update* mark —
   pressing it picks the followed revision of that package alone. *Update all*
   at the top moves the trunk.
-- **Revisions**: each row's ↺ opens that package's revisions in the drawer,
+- **Revisions**: *Pick a revision…* in a row's manage menu opens that package's revisions in the drawer,
   newest first (by when each first appeared on a host), gathered by signature
   from the trunk, the picks' roots, the followed head and each host's recent
   roots — marked *running* and *latest*. Choose one and the app restarts back

@@ -575,6 +575,56 @@ export function stackRows(lists: ReadonlyArray<{ zone: string; rows: readonly Di
   return [...merged.values()].sort((a, b) => Number(b.on) - Number(a.on) || a.path.localeCompare(b.path))
 }
 
+// ── the light on a package ───────────────────────────────────────────────────
+//
+// A package that is ON and has a newer version is not off and not current: it is
+// lit, and dim — the dimmer the older the version running. (jwize, 2026-11-04:
+// "it should be on but dim if there is a newer version and a spectrum based on
+// how old.") The Update brings it to the newest; the manage menu turns it off,
+// picks a revision, or opens its code in the columns.
+
+/** How bright a package shows that is on with a newer version out: the freshest
+ *  of those, the oldest, and one whose age could not be told. */
+export const LIGHT_BRIGHTEST = 0.85
+export const LIGHT_DIMMEST = 0.3
+export const LIGHT_UNKNOWN = 0.55
+/** The age at which a package is as dim as it gets. */
+export const LIGHT_FAR_DAYS = 180
+
+/** The brightness for a running version first seen at `stamp` (ms), `now` being
+ *  ms too. Logarithmic, so the first days matter and the months do not crowd. */
+export const ageLevel = (stamp: number | null, now: number): number => {
+  if (stamp === null || !Number.isFinite(stamp)) return LIGHT_UNKNOWN
+  const days = Math.max(0, (now - stamp) / 86_400_000)
+  const along = Math.min(1, Math.log1p(days) / Math.log1p(LIGHT_FAR_DAYS))
+  return LIGHT_BRIGHTEST - (LIGHT_BRIGHTEST - LIGHT_DIMMEST) * along
+}
+
+export interface Light {
+  /** off · on and current · on with a newer version. */
+  state: 'off' | 'on' | 'behind'
+  /** 0 for off, 1 for current, else the spectrum. */
+  level: number
+}
+
+/** What the bulb says of a row. `stamp` is when the running version first
+ *  appeared, `undefined` while it has not been read. */
+export const lightOf = (row: Pick<DirectoryRow, 'on' | 'update'>, stamp: number | null | undefined, now: number): Light =>
+  !row.on ? { state: 'off', level: 0 }
+    : row.update ? { state: 'behind', level: ageLevel(stamp ?? null, now) }
+      : { state: 'on', level: 1 }
+
+/** When the running layer first appeared on a host: the earliest date any host
+ *  gave for it. null when no revision names it or none carries a date. */
+export const runningStamp = (revisions: readonly InstallRevision[], running: string): number | null => {
+  const mine = revisions.find(revision => revision.layer === running)
+  if (!mine) return null
+  const stamps = [mine.at, ...mine.sources.map(source => source.at)]
+    .map(at => Date.parse(String(at ?? '')))
+    .filter(Number.isFinite)
+  return stamps.length ? Math.min(...stamps) : null
+}
+
 /** A code file a package declares, and the package that declares it. */
 export interface FileRow { sig: string; path: string }
 
@@ -739,6 +789,15 @@ export class HostDirectoryElement extends HTMLElement {
   #heldNot = new Set<string>()
   #codeFull = new Set<string>()
   #codePaint = 0
+  /** The package whose manage menu is open (a path), or null. */
+  #menu: string | null = null
+  /** When the running version of a package first appeared — keyed by path and the
+   *  layer running — for the light's age. null: it could not be told. */
+  #ages = new Map<string, number | null>()
+  #agesAsk = new Set<string>()
+  #ageQueue: string[] = []
+  #ageActive = 0
+  #agePaint = 0
   /** The next open continues where an act left off (a restart, a notice)
    *  instead of collapsing. */
   #resume = false
@@ -901,6 +960,12 @@ export class HostDirectoryElement extends HTMLElement {
     side.setAttribute('aria-label', t('hosts.rail', 'Hosts you carry'))
     side.append(search, hosts, this.#addForm())
     side.addEventListener('keydown', event => this.#railKeys(event))
+    // A click anywhere but the menu and its icon closes the menu, and still reaches what it was for.
+    panel.addEventListener('click', event => {
+      if (this.#menu === null || (event.target as HTMLElement).closest('.hd-menu, .hd-manage')) return
+      this.#menu = null
+      this.#renderBody()
+    }, true)
 
     const main = make('section', 'hd-main')
     const drawer = make('aside', 'hd-drawer')
@@ -934,6 +999,11 @@ export class HostDirectoryElement extends HTMLElement {
 
   #unmount(): void {
     this.#opening++
+    this.#menu = null
+    this.#agesAsk.clear()
+    this.#ageQueue = []
+    this.#ageActive = 0
+    for (const [key, stamp] of this.#ages) if (stamp === null) this.#ages.delete(key)
     this.#published.clear()
     this.#publishedAsk.clear()
     this.#releaseDesk()
@@ -1131,6 +1201,7 @@ export class HostDirectoryElement extends HTMLElement {
    *  then the deepest column's pick. With nothing picked it has nothing, and
    *  closes the desk. */
   #back(): boolean {
+    if (this.#menu !== null) { this.#menu = null; this.#renderBody(); return true }
     if (this.#query) { this.#query = ''; this.#render(); return true }
     if (this.#codeGate) { this.#codeGate = null; this.#renderBody(); return true }
     if (this.#warning) { this.#warning = null; this.#renderBody(); return true }
@@ -1194,6 +1265,7 @@ export class HostDirectoryElement extends HTMLElement {
     else if (under === 'mine') this.#renderMine(body)
     else this.#renderOwn(body)
     this.#renderDrawer(drawer)
+    this.#renderMenu()
     const strip = body.querySelector<HTMLElement>('.hd-cols')
     if (strip) {
       strip.querySelectorAll<HTMLElement>('ul.hd-col').forEach((column, at) => { column.scrollTop = scrolls[at] ?? 0 })
@@ -1809,26 +1881,28 @@ export class HostDirectoryElement extends HTMLElement {
       if (!row.on) li.classList.add('off')
       if (this.#busy === row.path) li.classList.add('busy')
 
-      const bulb = button('hd-bulb', '')
-      bulb.setAttribute('role', 'switch')
-      bulb.setAttribute('aria-checked', String(row.on))
-      // Not here, and no host offers a build it may take it from: a host
-      // that is behind says so, rather than leading into a refusal.
-      const untakeable = !row.held && !this.#carrying(row.path)
-      const label = row.blockedBy
-        ? t('hosts.blocked', 'Turn on {name} first', { name: row.blockedBy })
-        : untakeable && this.#isBehind(this.#scope)
-          ? this.#behindText(this.#scope)
-          : row.on
-            ? t('packages.turn-off', 'Turn off {name}', { name: row.path })
-            : t('packages.turn-on', 'Turn on {name}', { name: row.path })
-      bulb.setAttribute('aria-label', label)
-      bulb.title = label
-      bulb.disabled = !acts || !!this.#busy || !!row.blockedBy || (!row.held && !recursive) || untakeable
+      // THE LIGHT: on and current, on with a newer version (dimmer the older the one
+      // running — the age is read for rows that are on and behind, a few at a time),
+      // or off. It tells; the manage menu acts.
+      const running = this.#selection?.nodes.find(node => node.path === row.path)?.layerSig ?? ''
+      if (row.on && row.update && running) this.#queueAge(row.path, running)
+      const stamp = this.#ages.get(`${row.path}\n${running}`)
+      const light = lightOf(row, stamp, Date.now())
+      const bulb = make('span', `hd-bulb ${light.state}`)
+      bulb.setAttribute('role', 'img')
+      bulb.style.setProperty('--hd-age', String(light.level))
+      const lit = light.state === 'off'
+        ? t('hosts.light.off', '{name} is off', { name: row.path })
+        : light.state === 'on'
+          ? t('hosts.light.on', '{name} is on', { name: row.path })
+          : typeof stamp === 'number'
+            ? t('hosts.light.behind', '{name} is on, and a newer version exists — the one running is from {date}', { name: row.path, date: new Date(stamp).toISOString().slice(0, 10) })
+            : t('hosts.light.behind-unknown', '{name} is on, and a newer version exists', { name: row.path })
+      bulb.setAttribute('aria-label', lit)
+      bulb.title = lit
       const glyph = make('span', 'mat-sym', row.on ? 'lightbulb' : 'lightbulb_outline')
       glyph.setAttribute('aria-hidden', 'true')
       bulb.append(glyph)
-      bulb.addEventListener('click', () => { void this.#toggle(row) })
 
       // The name is the line: clicking it, or the row around it, picks.
       const name = button('hd-name', row.name)
@@ -1850,10 +1924,13 @@ export class HostDirectoryElement extends HTMLElement {
       const count = make('span', 'hd-count', row.count ? String(row.count) : '')
       if (row.count) count.title = t('hosts.carried-by', '{count} of your hosts carry this signature', { count: row.count })
 
-      const revisions = button('hd-icon', '↺', t('hosts.revisions.open', 'Revisions of {name}', { name: row.path }))
-      revisions.disabled = !recursive
-      revisions.tabIndex = -1
-      revisions.addEventListener('click', () => { void this.#openRevisions(row.path) })
+      // The manage icon opens a menu: turn it off or on, update it to the newest,
+      // pick a revision, look at its code in the columns.
+      const manage = button('hd-icon hd-manage', '⋯', t('hosts.manage', 'Manage {name}', { name: row.path }))
+      manage.tabIndex = -1
+      manage.setAttribute('aria-haspopup', 'menu')
+      manage.setAttribute('aria-expanded', String(this.#menu === row.path))
+      manage.addEventListener('click', () => { this.#menu = this.#menu === row.path ? null : row.path; this.#renderBody() })
 
       if (progress) {
         const done = progress.total > 0 && progress.done >= progress.total
@@ -1872,7 +1949,7 @@ export class HostDirectoryElement extends HTMLElement {
         bar.append(fill)
         li.append(bar)
       }
-      li.append(bulb, name, marks, count, revisions)
+      li.append(bulb, name, marks, count, manage)
       // Parts inside it open as the next column when it is picked.
       if (row.children) {
         const opens = make('span', 'hd-opens', '›')
@@ -1889,6 +1966,108 @@ export class HostDirectoryElement extends HTMLElement {
     const box = make('div', 'hd-colbox')
     box.append(this.#colHead(caption), list)
     return box
+  }
+
+  // ── the manage menu, and how old the light says a package is ─────────────
+
+  /** The manage menu of the row named in `#menu`, over the desk. It survives a
+   *  repaint because it is state — a path — and not a node. */
+  #renderMenu(): void {
+    const panel = this.#panel
+    panel?.querySelector(':scope > .hd-menu')?.remove()
+    const path = this.#menu
+    if (!panel || path === null) return
+    const model = this.#columnModel()
+    const k = model.findIndex(column => column.rows.some(row => row.path === path))
+    const row = k >= 0 ? model[k]!.rows.find(candidate => candidate.path === path) : undefined
+    const anchor = this.#refs.get('body')?.querySelector<HTMLElement>(`li[data-key="${CSS.escape(path)}"] .hd-manage`)
+    if (!row || !anchor) { this.#menu = null; return }
+
+    const reach = port()
+    const acts = !!reach && !!this.#selection?.trunk
+    const recursive = !!reach?.recursive
+    const untakeable = !row.held && !this.#carrying(row.path)
+    const blocked = !acts || !!this.#busy || !!row.blockedBy || (!row.held && !recursive) || untakeable
+    // Why it cannot be switched, in the words the old bulb said it in.
+    const reason = row.blockedBy
+      ? t('hosts.blocked', 'Turn on {name} first', { name: row.blockedBy })
+      : untakeable && this.#isBehind(this.#scope)
+        ? this.#behindText(this.#scope)
+        : !acts
+          ? t('hosts.from-source', 'This shell loads its packages from source, so turning them on or off and picking revisions happens on a hive.')
+          : ''
+
+    const menu = make('div', 'hd-menu')
+    menu.setAttribute('role', 'menu')
+    const item = (label: string, go: () => void, off = false, title = '', accent = false): void => {
+      const entry = button(`hd-menu-item${accent ? ' accent' : ''}`, label)
+      entry.setAttribute('role', 'menuitem')
+      entry.disabled = off
+      if (title) entry.title = title
+      entry.addEventListener('click', () => { this.#menu = null; go() })
+      menu.append(entry)
+    }
+    item(row.on
+      ? t('packages.turn-off', 'Turn off {name}', { name: row.path })
+      : t('packages.turn-on', 'Turn on {name}', { name: row.path }), () => { void this.#toggle(row) }, blocked, reason)
+    if (row.update) {
+      item(t('hosts.update-newest', 'Update {name} to the newest', { name: row.path }), () => { void this.#takeUpdate(row) }, !acts || !recursive || !!this.#busy, '', true)
+    }
+    item(t('hosts.revisions.pick', 'Pick a revision…'), () => { void this.#openRevisions(row.path) }, !recursive)
+    item(t('hosts.code.look', 'Look at the code'), () => this.#lookAtCode(k, row, model[k]!.rows.map(candidate => candidate.path)))
+
+    panel.append(menu)
+    const at = anchor.getBoundingClientRect()
+    const host = panel.getBoundingClientRect()
+    const left = Math.max(8, Math.min(host.width - menu.offsetWidth - 8, at.right - host.left - menu.offsetWidth))
+    let top = at.bottom - host.top + 4
+    if (top + menu.offsetHeight > host.height - 8) top = Math.max(8, at.top - host.top - menu.offsetHeight - 4)
+    menu.style.left = `${Math.round(left)}px`
+    menu.style.top = `${Math.round(top)}px`
+  }
+
+  /** The menu's door to the code: pick the package, so its files are the column
+   *  that opens, and put the focus on the first of them. */
+  #lookAtCode(k: number, row: StackRow, order: readonly string[]): void {
+    this.#pickPackage(k, row.path, 'only', order)
+    this.#refs.get('body')?.querySelector<HTMLElement>('ul.hd-files > li')?.focus()
+  }
+
+  /** How old the running version of a package that is on and behind is — read
+   *  from its revisions, two packages at a time, once each. */
+  #queueAge(path: string, running: string): void {
+    const key = `${path}\n${running}`
+    if (this.#ages.has(key) || this.#agesAsk.has(key)) return
+    this.#agesAsk.add(key)
+    this.#ageQueue.push(key)
+    this.#pumpAges()
+  }
+
+  #pumpAges(): void {
+    while (this.#ageActive < 2 && this.#ageQueue.length) {
+      const key = this.#ageQueue.shift()!
+      this.#ageActive++
+      void this.#readAge(key).finally(() => { this.#ageActive--; this.#pumpAges() })
+    }
+  }
+
+  async #readAge(key: string): Promise<void> {
+    const [path = '', running = ''] = key.split('\n')
+    const opening = this.#opening
+    let stamp: number | null = null
+    try {
+      const reach = port()
+      if (reach?.recursive) {
+        const roots = [...new Set([this.#named, this.#next?.root ?? '', ...[...this.#served.values()].map(tree => tree?.root ?? '')])]
+          .filter(root => SIG_RE.test(root) && this.#offerable(root))
+        stamp = runningStamp(await reach.install.revisionsOf(path, this.#sources(), roots), running)
+      }
+    } catch { stamp = null }
+    if (opening !== this.#opening) return
+    this.#agesAsk.delete(key)
+    this.#ages.set(key, stamp)
+    if (this.#agePaint) return
+    this.#agePaint = window.setTimeout(() => { this.#agePaint = 0; if (this.#panel) this.#renderBody() }, 120)
   }
 
   /** The last column: the code files the picked packages declare. */
@@ -2603,9 +2782,16 @@ ${S} .hd-row.updating,${S} .hd-row.updated{background:rgba(var(--acc),0.05);}
 ${S} .hd-progress{position:absolute;left:0;right:0;bottom:0;height:2px;background:rgba(var(--acc),0.12);pointer-events:none;}
 ${S} .hd-progress-fill{display:block;height:100%;background:var(--hc-window-accent);transition:width .2s ease-out;}
 ${S} .hd-row.updated .hd-progress-fill{background:var(--hc-status-ok);}
-${S} .hd-bulb{background:none;border:none;padding:.1em;font-size:1em;line-height:1;color:var(--hc-status-warn);cursor:pointer;}
-${S} .hd-row.off .hd-bulb{color:var(--hd-ink-quiet);}
-${S} .hd-bulb:disabled{cursor:default;opacity:.55;}
+/* THE LIGHT: lit and current, lit and dim — dimmer the older the version running, set by --hd-age — or out. */
+${S} .hd-bulb{display:inline-flex;padding:.1em;font-size:1em;line-height:1;color:var(--hc-status-warn);}
+${S} .hd-bulb.behind{opacity:var(--hd-age,.55);}
+${S} .hd-bulb.off,${S} .hd-row.off .hd-bulb{color:var(--hd-ink-quiet);}
+/* THE MANAGE MENU: over the desk, beside the row it is for. */
+${S} .hd-menu{position:absolute;z-index:5;min-width:13.5rem;display:flex;flex-direction:column;padding:.25em;background:var(--hd-ground);border:1px solid rgba(var(--acc),0.5);border-radius:var(--hc-radius-card,3px);box-shadow:0 8px 24px rgba(0,0,0,0.28);}
+${S} .hd-menu-item{padding:.45em .7em;text-align:left;font:inherit;font-size:.78em;color:var(--hd-ink);background:none;border:none;border-radius:var(--hc-radius-control,2px);cursor:pointer;}
+${S} .hd-menu-item:hover:not(:disabled){background:rgba(var(--acc),0.14);}
+${S} .hd-menu-item:disabled{cursor:default;opacity:.45;}
+${S} .hd-menu-item.accent{color:var(--hc-window-accent);}
 ${S} .hd-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8em;color:var(--hd-ink);background:none;border:none;padding:0;font-family:inherit;text-align:left;cursor:pointer;}
 ${S} .hd-name:hover{text-decoration:underline;}
 ${S} .hd-row.off .hd-name{color:var(--hd-ink-quiet);}
