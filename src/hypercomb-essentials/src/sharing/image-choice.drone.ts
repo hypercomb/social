@@ -52,7 +52,7 @@ import { imageChoiceWriteTargets } from './image-choice-targets.js'
 import { markSeen, unseenNow } from './image-updates.js'
 import { ImageQueue } from './image-queue.js'
 import { readThumbnail, type ThumbnailStore } from '../presentation/tiles/thumbnails.js'
-import { FILL_HEX_R, divideBySheet, fillFrame, readFillSheet, type FillDivision } from '../presentation/tiles/fill-sprite.js'
+import { FILL_HEX_R, divideBySheet, fillFrame, readFillSheet, type FillDivision, type FillOrientation } from '../presentation/tiles/fill-sprite.js'
 
 type Axial = { q: number; r: number }
 
@@ -185,7 +185,7 @@ export class ImageChoiceDrone extends Drone {
       if (geo?.spacing) this.#spacing = geo.spacing
       if (geo?.circumRadiusPx) this.#circumRadius = geo.circumRadiusPx
     })
-    this.onEffect<{ flat?: boolean }>('render:set-orientation', (p) => { this.#flat = !!p?.flat })
+    this.onEffect<{ flat?: boolean }>('render:set-orientation', (p) => { this.#reorient(!!p?.flat) })
 
     this.onEffect<{ label?: string; labels?: readonly string[]; segments?: readonly string[] }>('images:open', (payload) => {
       const segments = payload?.segments ?? []
@@ -485,8 +485,8 @@ export class ImageChoiceDrone extends Drone {
     const store = this.#store() as ThumbnailStore | undefined
     void (async () => {
       const division = store?.getPool
-        // The wall draws pointy-top hexagons, so it reads the pointy sheet of each pair.
-        ? await divideBySheet(store, wanted, 'point').catch(() => ({ sheets: new Map(), singles: wanted }) as FillDivision)
+        // The wall draws in the hive's orientation, so it reads that sheet of each pair.
+        ? await divideBySheet(store, wanted, this.#orientation()).catch(() => ({ sheets: new Map(), singles: wanted }) as FillDivision)
         : { sheets: new Map(), singles: wanted } as FillDivision
       for (const [sheet, members] of division.sheets) {
         void this.#cutSheet(store!, sheet, members).then(missed => {
@@ -517,7 +517,7 @@ export class ImageChoiceDrone extends Drone {
       for (const { sig, slot } of members) {
         this.#inflight.delete(sig)
         if (this.#textures.has(sig)) continue
-        const frame = fillFrame(slot, 'point')
+        const frame = fillFrame(slot, this.#orientation())
         // A slot past the sheet's edge is a record that outran its sheet.
         if (frame.x + frame.width > base.width || frame.y + frame.height > base.height) { missed.push(sig); continue }
         this.#sheetCut.add(sig)
@@ -1119,11 +1119,29 @@ export class ImageChoiceDrone extends Drone {
     return Number.isFinite(total) && total > 0 ? total : 1
   }
 
-  /** Pointy-top hex vertices about (cx, cy). */
+  /** The hive turned flat-top or pointy-top. A frame cut from a sheet is cut
+   *  for one orientation, so those go; an open wall is laid out again in place
+   *  and cuts its frames from the other sheet of each pair. */
+  #reorient(flat: boolean): void {
+    if (flat === this.#flat) return
+    this.#flat = flat
+    for (const sig of [...this.#sheetCut]) this.#drop(sig)
+    if (!this.#layer) return
+    const token = this.#buildToken
+    this.#paintNow(token)
+    this.#loadTextures(token, this.#entries)
+  }
+
+  /** The orientation the hive draws in — the wall's hexagons and the sheet a
+   *  frame is cut from both follow it. */
+  #orientation(): FillOrientation { return this.#flat ? 'flat' : 'point' }
+
+  /** Hex vertices about (cx, cy), pointy-top or flat-top as the hive is. */
   #hexVerts(cx: number, cy: number, radius: number): number[] {
     const verts: number[] = []
+    const start = this.#flat ? 0 : -Math.PI / 2
     for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 3) * i - Math.PI / 2
+      const angle = (Math.PI / 3) * i + start
       verts.push(cx + radius * Math.cos(angle))
       verts.push(cy + radius * Math.sin(angle))
     }
