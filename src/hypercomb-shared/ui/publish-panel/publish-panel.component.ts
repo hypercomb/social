@@ -1037,12 +1037,20 @@ export class PublishPanelComponent implements OnDestroy {
    *  two panels stacked over one another. */
   openHosts(): void {
     this.close()
-    EffectBus.emit('hosts:open', {})
+    // A PRESS, NOT A STATE (doctrine.spec: a command never rides the replay
+    // channel). The panel has rows only once PublishStatusDrone has rendered
+    // them, and HostsDrone loads in the same package, so the listener is there
+    // for the click. The late-load door is `packages:open`, which keeps its
+    // replay (hosts.drone.ts).
+    EffectBus.emitTransient('hosts:open', {})
   }
 
   run(row: PublishRow): void {
     if (row.busyPhase) return
-    EffectBus.emit('publish:run', { key: row.key })
+    // Transient: a publish-status drone that subscribed later (a reload, a
+    // second module copy) must never re-run the last publish. Its listener is
+    // the drone that drew this row.
+    EffectBus.emitTransient('publish:run', { key: row.key })
   }
 
   unpublish(row: PublishRow): void {

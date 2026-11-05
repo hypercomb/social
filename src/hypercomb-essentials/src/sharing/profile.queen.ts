@@ -25,13 +25,19 @@
 // a picture is a URL, and no word in either is another behaviour.
 
 import { QueenBee, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
-import { liveDeps, ownHost, readHost, seedLabel } from './profile-live.js'
+import { liveDeps, ownHost, seedLabel } from './profile-live.js'
+import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
 import {
   parseProfileWord, profileHostUrl, profileMachineRefusal, profileValue, setProfileField, showProfile,
   PROFILE_ABOUT_MAX, PROFILE_NAME_MAX, PROFILE_REASON_TEXT, type ProfileDeps, type ProfileReason, type ProfileReasonParams,
 } from './profile.js'
 
 const NONE = '—'
+
+/** Where a show READS: your host, else the public content host — a profile
+ *  published there before the default went is still read there. A set never
+ *  falls back (ownHost). */
+const readHost = (): string => ownHost() || (PUBLIC_CONTENT_HOSTS[0] ?? '')
 type Say = (key: string, fallback: string, params?: Record<string, string | number>) => string
 
 const ioc = <T>(key: string): T | undefined => window.ioc?.get?.(key) as T | undefined

@@ -133,7 +133,8 @@ describe('the host directory — the set, apart from the publishing', () => {
 
   it('links Publish to the host directory without mixing the two surfaces', () => {
     expect(HTML).toMatch(/\(click\)="openHosts\(\)"/)
-    expect(TS).toMatch(/openHosts\(\): void[\s\S]{0,180}?EffectBus\.emit\('hosts:open'/)
+    // a press, so transient (doctrine: a command never rides the replay channel)
+    expect(TS).toMatch(/openHosts\(\): void[\s\S]{0,600}?EffectBus\.emitTransient\('hosts:open'/)
     expect(HOSTS_DRONE).toMatch(/'hosts:open'/)
     expect(EN['publish.action.manage-hosts']).toBe('Manage hosts')
   })

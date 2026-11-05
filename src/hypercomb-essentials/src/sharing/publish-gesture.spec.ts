@@ -136,6 +136,7 @@ describe('publishing is an act', () => {
       'history/active-genome.service.ts',      // derived cache, local only
       'history/history.service.ts',            // THE EMITTER (layer commits)
       'history/manifest-optimizer.drone.ts',   // derived cache, local only
+      'history/recents-census.drone.ts',       // derived cache, local only (optimize phase)
       'molecule/molecule-index.drone.ts',      // derived cache, local only
       'presentation/tiles/tree-view.drone.ts', // repaint trigger, local only
       'search/search-index.drone.ts',          // derived cache, local only

@@ -8,7 +8,7 @@
 
 import { fetchHiveIndex, putHiveManifest, setHiveRoot } from './hive-pointer.js'
 import { cachedPubkey, readerPubkey } from './head-claim-signer.js'
-import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
+import { fetchWithDeadline } from './bounded-fetch.js'
 import { profileHostUrl, showProfile, PROFILE_NAME_MAX, type ProfileDeps } from './profile.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
@@ -40,10 +40,6 @@ export const ownHost = (): string => {
   catch { return '' }
 }
 
-/** Where a show READS: your host, else the public content host — a profile
- *  published there before the default went is still read there. */
-export const readHost = (): string => ownHost() || (PUBLIC_CONTENT_HOSTS[0] ?? '')
-
 export const seedLabel = (): string | null => {
   try { return localStorage.getItem(USER_LABEL_KEY) } catch { return null }
 }
@@ -70,7 +66,8 @@ export const liveDeps = (): ProfileDeps => {
     readLocal,
     fetchAtom: async (host, sig) => {
       try {
-        const res = await fetch(`${profileHostUrl(host)}/${sig}`, { cache: 'no-store' })
+        // bounded: one hung host must not hold a show or a meeting seat
+        const res = await fetchWithDeadline(`${profileHostUrl(host)}/${sig}`, { cache: 'no-store' })
         // A page (an SPA fallback answering 200) is not a held atom.
         if (!res.ok || (res.headers.get('content-type') ?? '').toLowerCase().includes('text/html')) return null
         return new Uint8Array(await res.arrayBuffer())
@@ -114,10 +111,12 @@ export const liveDeps = (): ProfileDeps => {
 }
 
 /** The name and picture a meeting draws on this person's flower. A profile
- *  name wins; otherwise the name this hive already goes by. Never throws. */
+ *  name wins; otherwise the name this hive already goes by. Never throws.
+ *  It reads the host the participant NAMED and no other (there is no default
+ *  host, jwize 2026-10-11): with none, the flower carries the label. */
 export const ownProfileFace = async (): Promise<{ name: string; picture: string }> => {
   const label = (): string => (seedLabel() ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, PROFILE_NAME_MAX)
-  const host = readHost()
+  const host = ownHost()
   if (!host) return { name: label(), picture: '' }
   try {
     const shown = await showProfile(host, liveDeps(), seedLabel)
