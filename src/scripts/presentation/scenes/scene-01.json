@@ -18,10 +18,6 @@
       "yours"
     ],
     [
-      "yours"
-    ],
-    "*",
-    [
       "theirs"
     ],
     [
@@ -30,11 +26,9 @@
     [
       "yours"
     ],
-    [
-      "yours"
-    ],
+    "*",
     "*",
     "*"
   ],
-  "say": "This is Hypercomb. [pause:1300] A new way to bee. It brings people together, from every walk of life, around the things they make and the places they gather. And it starts with a question: where does your corner of the internet actually live? For most of what we use, the honest answer is: on someone else's computer, behind someone else's login, by someone else's rules. Hypercomb starts somewhere else. Your work lives with you, it leaves only when you share it, and it stays yours. Whenever you see the hive running, it was recorded live. The drawings show how it works, and anything still planned, we call planned. By the end, you will know what Hypercomb is, why it matters, and how to take part."
+  "say": "This is Hypercomb. [pause:1300] A new way to bee. Most of what people make online lives on a platform: behind an account, ranked by a feed, run by someone else's rules. Hypercomb starts from the other end. Your work lives on your own device, and you decide who it reaches. You are free to connect your community directly to the communities you care about most, with no platform in between. Everything you see running here was recorded live. The drawings show how it works, and anything not built yet, we call planned."
 }

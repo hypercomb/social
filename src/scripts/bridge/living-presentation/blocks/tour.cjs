@@ -16,6 +16,7 @@
 const fs = require('fs')
 const path = require('path')
 const T = require('../../../presentation/build.cjs')
+const tree = require('../tree.cjs')
 const { sentencesOf, sentenceTimes } = require('../../../presentation/timing.cjs')
 
 const TOUR = path.dirname(require.resolve('../../../presentation/build.cjs'))
@@ -52,10 +53,12 @@ const SCENES_OF = {
 
 /** The scene a route shows, or null when no scene explains it. One tile, one
  *  scene (jwize 2026-11-03): the hierarchy is the presentation. */
-const sceneAt = (route) => SCENES_OF[route] ?? null
+const sceneAt = (route) => (tree.isWaiting(route) ? null : SCENES_OF[route] ?? null)
 
-/** Every scene is placed exactly once. */
-const placed = () => Object.values(SCENES_OF)
+/** The scenes on promoted tiles, and the scenes whose tiles wait (tree.cjs
+ *  WAITING). Together they are every scene, each once. */
+const placed = () => Object.entries(SCENES_OF).filter(([route]) => !tree.isWaiting(route)).map(([, n]) => n)
+const waitingScenes = () => Object.entries(SCENES_OF).filter(([route]) => tree.isWaiting(route)).map(([, n]) => n)
 
 const sceneOf = (n) => {
   const s = T.scenes.find(x => x.n === n)
@@ -140,4 +143,4 @@ const voiceOf = (say, media) => {
   return file ? media.ref(media.add(file)) : null
 }
 
-module.exports = { SCENES_OF, sceneAt, placed, sceneParts, sprite, fontFaces, voiceOf, T, TOUR }
+module.exports = { SCENES_OF, sceneAt, placed, waitingScenes, sceneParts, sprite, fontFaces, voiceOf, T, TOUR }

@@ -15,15 +15,8 @@
   ],
   "lights": [
     "*",
-    "*",
     [
-      "r0"
-    ],
-    [
-      "r1",
-      "r2"
-    ],
-    [
+      "r0",
       "r1"
     ],
     [
@@ -32,9 +25,10 @@
     [
       "r3"
     ],
+    "*",
     [
       "r3"
     ]
   ],
-  "say": "And you do everything by saying it. The command line speaks plain words. Type a name to make a tile. Type a slash, then say what to do. Say present, and your hive shows as slides. Say website, and its pages show as a site. Nearly every act in Hypercomb has a word, and the rest are getting theirs, so what you do, you can say again, teach to a friend, and remember. The language belongs to its community, too: people translate it into their own tongue and offer it on a host, and any hive that follows that host can take their words in."
+  "say": "You can do almost everything by saying it. The command line reads plain words: type a name to make a tile, or a slash and a word to act. Say website, and a hive's pages show as a site. Because every act is a sentence, you can see what it will touch before it runs, repeat it, and teach it to someone else. The sentence is the program. Communities translate the words into their own languages."
 }

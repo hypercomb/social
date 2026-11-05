@@ -3,7 +3,7 @@
   "name": "ai on your terms",
   "chapter": "why hypercomb",
   "slug": "ai-on-your-terms",
-  "eyebrow": "reason seven",
+  "eyebrow": "ai",
   "headline": "*AI*, on your terms",
   "sub": "",
   "visual": "plate:ai-door",
@@ -16,17 +16,10 @@
       "ask"
     ],
     [
+      "ask"
+    ],
+    [
       "ask",
-      "door"
-    ],
-    [
-      "door",
-      "answer"
-    ],
-    [
-      "door"
-    ],
-    [
       "door"
     ],
     [
@@ -34,5 +27,5 @@
       "answer"
     ]
   ],
-  "say": "Reason seven: A.I., on your terms. Your hive has an assistant of its own, and you choose the model: one in the cloud with your own key, or one that runs on your own machine. It reads what you allow and proposes what to change. In your own hive it acts by the rules you set, and history can take any of it back; anything that would leave your machine waits for your hand. Whatever you keep private stays private, from every model but the one on your own machine. The A.I. does not scrape your life through someone else's cloud. It walks in through a door you open, and its work lands in your hive, with history."
+  "say": "A.I. agents now act for people almost everywhere. In Hypercomb, an agent speaks the same sentences you do, under the same rules. You choose the model: one in the cloud with your own key, or one that runs on your own machine. It reads only what you allow, and proposes what to change. Inside your hive, history can undo anything it does, and anything that would leave your device waits for you to accept it."
 }

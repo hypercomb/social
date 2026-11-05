@@ -238,6 +238,14 @@ const walk = (tile, at, into) => {
 }
 for (const p of plantings) { p.layers = []; walk(p.node, p.route, p.layers); layers.push(...p.layers) }
 
+/** The children of `at` in the whole tree that wait unpromoted (tree.cjs). */
+const waitingUnder = (at) => {
+  const [top, ...rest] = at.split('/')
+  let node = (tree.all || []).find(r => r.name === top)
+  for (const name of rest) node = (node?.children || []).find(c => c.name === name)
+  return (node?.children || []).map(c => c.name).filter(name => tree.isWaiting(`${at}/${name}`))
+}
+
 const sentences = []
 if (!PUBLISH_ONLY) {
   for (const p of plantings) {
@@ -249,8 +257,24 @@ if (!PUBLISH_ONLY) {
     }
     for (const { tile, at } of p.layers) {
       sentences.push(`go /${at}`, `trait ${tile.children.map(c => c.name).join(' ')}`)
-      const old = RETIRE ? retired.markers[at] ?? [] : []
-      if (old.length) sentences.push(`trait ~ ${old.join(' ')}`)
+      // What an earlier planting left, and what now waits unpromoted
+      // (tree.cjs WAITING): each marker forgotten, each tile kept.
+      const old = RETIRE ? [...(retired.markers[at] ?? []), ...waitingUnder(at)] : []
+      if (old.length) sentences.push(`trait ~ ${[...new Set(old)].join(' ')}`)
+    }
+    // A promoted tile whose every child waits is no layer any more; its old
+    // markers are forgotten all the same.
+    if (RETIRE && ALL) {
+      const layered = new Set(p.layers.map(l => l.at))
+      const visit = (node, at) => {
+        for (const c of node.children || []) {
+          const route = `${at}/${c.name}`
+          if (tree.isWaiting(route)) continue
+          if (!layered.has(route) && waitingUnder(route).length) sentences.push(`go /${route}`, `trait ~ ${waitingUnder(route).join(' ')}`)
+          visit(c, route)
+        }
+      }
+      visit(p.node, p.route)
     }
   }
   // Layouts last, once every layer's tiles exist: `layout on` seats the

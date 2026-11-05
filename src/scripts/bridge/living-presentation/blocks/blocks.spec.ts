@@ -57,7 +57,8 @@ describe('every page stands alone', () => {
 
 describe('the tour is placed whole', () => {
   it('places every scene from 1 to 25 exactly once', () => {
-    expect([...tour.placed()].sort((a: number, b: number) => a - b)).toEqual(Array.from({ length: 25 }, (_, i) => i + 1))
+    // on a promoted tile, or waiting with its tile (tree.cjs WAITING)
+    expect([...tour.placed(), ...tour.waitingScenes()].sort((a: number, b: number) => a - b)).toEqual(Array.from({ length: 25 }, (_, i) => i + 1))
   })
 })
 

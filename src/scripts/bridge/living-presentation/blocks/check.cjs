@@ -27,8 +27,10 @@ const problems = []
 const fail = (what) => problems.push(what)
 
 const placed = tour.placed()
+// every scene once: on a promoted tile, or set aside with its waiting tile
+const accounted = [...placed, ...tour.waitingScenes()]
 for (let n = 1; n <= tour.T.scenes.length; n++) {
-  const times = placed.filter(x => x === n).length
+  const times = accounted.filter(x => x === n).length
   if (times !== 1) fail(`scene ${n} is placed on ${times} tiles, not one`)
 }
 

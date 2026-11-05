@@ -287,7 +287,7 @@ module.exports = {
       3: {
         tiles: ['revolucion', 'knowledge', 'room-host', 'scratch-organize', 'play', 'work', 'misc', 'behavior-where-visual'],
         title: 'tiles from a hive in use',
-        say: 'Here is what it looks like. Your work lives on a grid of tiles. A tile can hold anything: a picture, a note, a document, a game, a whole website. Open a tile and you travel into it, and every tile can open into a honeycomb of its own. These tiles come from a hive in use: a cigar journal, a library of knowledge, a room for hosting, each one a honeycomb of its own. Tiles inside tiles, all the way down.',
+        say: 'Here is what it looks like. Your work sits on a grid of tiles. A tile can hold anything: a note, a picture, a document, a game, a whole website. Open a tile and you step inside it, and every tile can hold a grid of its own. These tiles come from a hive in use: a cigar journal, a library of knowledge, a room for hosting. Tiles inside tiles, as deep as you need.',
       },
     },
     code: [{ path: 'hypercomb-core/src/core/life-primitive.ts', from: 'export type LifeLayer = {', lines: 5 }],
@@ -589,14 +589,13 @@ module.exports = {
 
   'road': {
     eyebrow: 'the road',
-    headline: 'Where it is *going*',
+    headline: 'Where it *leads*',
     sub: 'One scene per tile, in the order the tour tells them.',
-    picture: hub('road', ['question', 'creations', 'coming', 'vision', 'computer', 'yours', 'first-day'], 'The road and its seven scenes'),
+    picture: hub('road', ['question', 'creations', 'yours', 'first-day'], 'The road and its four scenes'),
     beats: [
-      { say: 'This is the road: where Hypercomb is going, one scene at a time.', lit: ['road'] },
-      { say: 'It starts with a question: where does your corner of the internet actually live?', lit: lit('road', 'question') },
+      { say: 'This is the road: where Hypercomb leads, and how to begin.', lit: ['road'] },
+      { say: 'It starts with a question: who decides where your work lives, and who it reaches?', lit: lit('road', 'question') },
       { say: 'Then what people already make with it.', lit: lit('road', 'creations') },
-      { say: 'Then what is being built next, what is further out, and the horizon.', lit: lit('road', 'coming', 'vision', 'computer') },
       { say: 'And it ends where you begin: the hive is yours, and your first day.', lit: lit('road', 'yours', 'first-day') },
     ],
     files: ['documentation/living-presentation.md'],
