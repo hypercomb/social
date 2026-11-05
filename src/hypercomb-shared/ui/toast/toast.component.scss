@@ -39,10 +39,14 @@ $types: (
   pointer-events: none;
 }
 
-// The small way into the history: a count in the corner, nothing louder.
+// The history's way in lives under the command line, in the controls bar's
+// seam row beside the shelf and agent buttons. This corner count is only the
+// way in where that row is not on screen: the phone shell, and the narrow or
+// short window the row itself hides at (same query as `.seam-tools`).
 .toast-history-toggle {
+  display: none;
   pointer-events: auto;
-  display: inline-flex;
+  align-items: center;
   align-items: center;
   gap: 0.35rem;
   padding: 0.12rem 0.5rem;
@@ -58,6 +62,9 @@ $types: (
   transition: opacity 120ms ease, color 120ms ease;
 
   &:hover { opacity: 1; color: var(--hc-window-ink-loud); }
+
+  &.shown { display: inline-flex; }
+  @media (max-width: 599px), (max-height: 449px) { display: inline-flex; }
 }
 
 // ── the full view: every message, over the whole screen, on a ground ──

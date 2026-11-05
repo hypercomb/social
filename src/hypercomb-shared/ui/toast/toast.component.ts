@@ -37,6 +37,14 @@ export class ToastComponent implements OnDestroy {
   readonly #state = signal<readonly Toast[]>([])
   readonly #past = signal<readonly ToastRecord[]>([])
   #offEscape: (() => void) | undefined
+  #offOpen: (() => void) | undefined
+  #offMobile: (() => void) | undefined
+
+  /** The phone shell has no seam row under the command line, so the history's
+   *  way in stays in this corner there. Seeded from the stamp on <html>, then
+   *  read from the replayed `mobile:mode` effect — never a media query of ours
+   *  (the narrow-window case is the stylesheet's, matching the seam's own). */
+  readonly mobile = signal(document.documentElement.getAttribute('data-hc-mobile') === 'on')
 
   /** The lines at the corner: the newest few. The rest are in the history. */
   readonly toasts = computed(() => this.#state().slice(0, SHOWN))
@@ -52,6 +60,10 @@ export class ToastComponent implements OnDestroy {
     this.#offEscape = EffectBus.on<{ cmd: string }>('keymap:invoke', p => {
       if (p?.cmd === 'global.escape' && this.viewing()) this.viewing.set(false)
     })
+    // The history's usual way in is the seam row under the command line (the
+    // controls bar owns that button); it asks through the bus.
+    this.#offOpen = EffectBus.on('toast:history-open', () => this.viewing.set(true))
+    this.#offMobile = EffectBus.on<{ active?: boolean }>('mobile:mode', p => this.mobile.set(p?.active === true))
   }
 
   /** A word in the person's language, or the English one where a catalog has none yet. */
@@ -76,6 +88,8 @@ export class ToastComponent implements OnDestroy {
     const read = (): void => {
       this.#state.set((this.#drone?.toasts ?? []) as readonly Toast[])
       this.#past.set((this.#drone?.history ?? []) as readonly ToastRecord[])
+      // Replayed to a late subscriber: the seam button counts from here.
+      EffectBus.emit('toast:history', { count: this.#past().length })
     }
     // A microtask, as fromRuntime does: the update lands after any change
     // detection pass in flight, never inside it (NG0100).
@@ -110,6 +124,10 @@ export class ToastComponent implements OnDestroy {
   ngOnDestroy(): void {
     this.#destroyed = true
     this.#offEscape?.()
+    this.#offOpen?.()
+    this.#offMobile?.()
+    // Nothing here to open any more: the seam button goes with the window.
+    EffectBus.emit('toast:history', { count: 0 })
     this.#release?.()
     this.#drone = undefined
   }

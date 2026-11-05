@@ -136,6 +136,23 @@ $actions-corner: 12rem;
   }
 }
 
+// The message history: the one seam tool that carries a count, so it is as
+// tall and as quiet as its neighbours but only as wide as its number needs —
+// the same box, border, glass and ink (`.seam-btn`), a little side air.
+.history-toggle {
+  min-width: 1.5rem;
+  padding: 0 0.4rem;
+  gap: 0.3rem;
+  justify-content: center;
+
+  svg { width: 0.95rem; height: 0.95rem; display: block; }
+  .history-count {
+    font-family: var(--hc-mono);
+    font-size: 0.62rem;
+    line-height: 1;
+  }
+}
+
 .breadcrumb-top {
   position: fixed;
   // Dock below the header. The static term tracks the header size

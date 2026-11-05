@@ -3,6 +3,7 @@
     @if (hasHistory()) {
       <button
         class="toast-history-toggle"
+        [class.shown]="mobile()"
         type="button"
         (click)="viewing.set(true)"
         [attr.aria-label]="label('toast.history', 'Message history')">

@@ -1436,6 +1436,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  many it holds. Its button stands beside show / hide agents. */
   readonly shelfOpen = signal(true)
   readonly shelfCount = signal(0)
+  /** How many messages the toast window holds, as it last said on
+   *  `toast:history`. Its button stands beside the shelf's, and shows only
+   *  once there is something to read. */
+  readonly historyCount = signal(0)
   readonly showHidden = this.#showHidden.asReadonly()
   readonly voiceActive = signal(false)
   readonly voiceSupported = VoiceInputService.supported()
@@ -1451,6 +1455,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #layoutModeUnsub: (() => void) | null = null
   #beesUnsub: (() => void) | null = null
   #shelfUnsub: (() => void) | null = null
+  #historyUnsub: (() => void) | null = null
   #tagsUnsub: (() => void) | null = null
   #tagFilterUnsub: (() => void) | null = null
   #hoverTagsUnsub: (() => void) | null = null
@@ -1720,6 +1725,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#shelfUnsub = EffectBus.on<{ entries?: readonly unknown[]; folded?: boolean }>('shelf:changed', (payload) => {
       this.shelfCount.set(payload?.entries?.length ?? 0)
       this.shelfOpen.set(!payload?.folded)
+    })
+
+    this.#historyUnsub = EffectBus.on<{ count?: number }>('toast:history', (payload) => {
+      this.historyCount.set(payload?.count ?? 0)
     })
 
     // layout mode is always dense on boot; /swirl re-applies the spiral
@@ -2219,6 +2228,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#controlsHiddenUnsub?.()
     this.#beesUnsub?.()
     this.#shelfUnsub?.()
+    this.#historyUnsub?.()
     this.#seamObserver?.disconnect()
     document.documentElement.style.removeProperty('--hc-seam-right')
     this.#voiceActiveUnsub?.()
@@ -3064,6 +3074,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  must not replay an old press. */
   readonly toggleShelf = (): void => {
     EffectBus.emitTransient('shelf:toggle', {})
+  }
+
+  /** Open the toast window's full message history. Transient: a toast window
+   *  mounted later must not replay an old press. */
+  readonly openHistory = (): void => {
+    EffectBus.emitTransient('toast:history-open', {})
   }
 
   readonly toggleAgents = (): void => {
