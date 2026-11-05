@@ -30,7 +30,7 @@ import { audioConstraints, bitrateOf, frameRateOf, isQuality, videoConstraints, 
 import { acceptedLocalTracks, createSignalQueue, faceOf, feedsFromWire, subscriptionPlan, type Face, type FeedTrack } from './meeting-feeds.js'
 import { followStep, followedBy, isFollowed, leaderOf, meetingAddress, meetingPreimage, originatorOf, pathKey, seatOrder, type Member } from './meeting-seats.js'
 import { isJoinedHere, ownZone, readTabZone } from '../sharing/membership.js'
-import { ownProfileFace } from '../sharing/profile.queen.js'
+import { ownProfileFace } from '../sharing/profile-live.js'
 import { profilePicture } from '../sharing/profile.js'
 import { SESSION_ID, SfuClient, sfuBase } from './sfu-client.js'
 
