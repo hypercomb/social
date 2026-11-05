@@ -65,6 +65,7 @@ import { ADOPT_QUEUE_OWNER, ADOPT_QUEUE_SURFACE, AdoptQueueElement } from './ado
 import { isJoinedHere } from './membership.js'
 import { visualArtifactSigs } from './visual-hosts.js'
 import { reachedSignatures } from './reached-signatures.js'
+import { localizeSealed } from './sealed-adopt.js'
 
 const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
@@ -1298,7 +1299,9 @@ export class SwarmAdoptDrone extends Drone {
             // the tile in the hive now, empty, and let the queue keep trying
             // until it hatches. 'rewound' is not a missing file (the cursor is
             // in history) and must never lay one.
-            if (!landed && res === 'unavailable') { await this.#layEgg(branch); queue.markEgg?.(entry.sig, entry.at) }
+            // 'uninspectable' is the same miss met earlier: inspection (the code check) needs the branch's layers before
+            // the fold can even ask, so a branch no host will serve stops THERE. It is an egg too.
+            if (!landed && (res === 'unavailable' || res === 'uninspectable')) { await this.#layEgg(branch); queue.markEgg?.(entry.sig, entry.at) }
           }
         } catch (err) {
           console.warn('[swarm-adopt] queued adopt threw', { sig: entry.sig.slice(0, 8), err })
@@ -1321,6 +1324,42 @@ export class SwarmAdoptDrone extends Drone {
       clearTimeout(this.#drainTimer)
       this.#drainTimer = setTimeout(() => { void this.#drainAdoptQueue(batch, panelLabel) }, Math.max(wait, 1_000))
     }
+  }
+
+  /** Fetch a branch's layers through the broker and read its root — and when the plain bytes are out of reach, make ONE try
+   *  at a private version sealed to THIS device's key. If the publisher's index names such a version of this very root
+   *  and the key opens it, the whole tree is kept locally under the signatures it was made with, so the adopt that follows
+   *  (inspection, the fold) runs exactly as for any other: the egg hatches into a tile the participant holds outright.
+   *  With no key, or none yet, nothing changes — the miss stays a miss, and the queue asks again. */
+  #reach = async (
+    broker: BrokerLike,
+    history: PlacementHistory,
+    sig: string,
+    domain: string | undefined,
+    opts: { layersOnly?: boolean; silent?: boolean },
+  ) => {
+    let adoptRes = await broker.adopt(sig, opts)
+    let branchLayer = await history.getLayerBySig(sig)
+    if (((adoptRes?.failed ?? 0) > 0 || !branchLayer) && await this.#openSealed(sig, domain)) {
+      adoptRes = await broker.adopt(sig, opts)
+      branchLayer = await history.getLayerBySig(sig)
+    }
+    return { adoptRes, branchLayer }
+  }
+
+  /** Open a private version of the branch rooted at `sig` that its publisher sealed to this device's key, and keep it
+   *  (sealed-adopt.ts). The publisher is the pubkey the queued adopt carries; the hosts are the ones the broker was told
+   *  carry the branch. True only when every atom opened and landed. Never throws — a miss is just an egg that waits. */
+  #openSealed = async (sig: string, domain?: string): Promise<boolean> => {
+    try {
+      const publisher = String(this.#adoptQueue()?.entries?.find(e => e.sig === sig && e.pubkey)?.pubkey ?? '').toLowerCase()
+      const broker = this.#ioc()?.get?.(BROKER_KEY) as BrokerLike | undefined
+      const hosts = [domain, ...(broker?.getKnownDomains?.(sig) ?? [])].map(host => String(host ?? '').trim()).filter(Boolean)
+      if (!publisher || hosts.length === 0) return false
+      const result = await localizeSealed(sig, { hosts, publisher })
+      if (result.ok) EffectBus.emit('activity:log', { message: `the private version of a tile was opened with your key — ${result.atoms} items are yours now`, icon: '🔓' })
+      return result.ok
+    } catch { return false }
   }
 
   /** Lay an EGG: the tile enters the hive now, real and navigable, holding
@@ -1637,8 +1676,7 @@ export class SwarmAdoptDrone extends Drone {
     try {
       if (domain) broker.noteDomainsForSig?.(layerSig, [domain])
       // silent: a pre-consent inspection walk must not switch the view.
-      await broker.adopt(layerSig, { layersOnly: true, silent: true })
-      const root = await history.getLayerBySig(layerSig)
+      const { branchLayer: root } = await this.#reach(broker, history, layerSig, domain, { layersOnly: true, silent: true })
       if (!root) return null
       // Seed the root so an adversarial child→root back-reference can't re-walk it.
       const seen = new Set<string>([String(layerSig).trim().toLowerCase()])
@@ -2236,9 +2274,7 @@ export class SwarmAdoptDrone extends Drone {
       // (memory→OPFS→host write-through), so a content-rich adopt transfers a
       // handful of tiny layers, not its hundreds of images.
       if (domain) broker.noteDomainsForSig?.(sig, [domain])
-      const adoptRes = await broker.adopt(sig, { layersOnly: true })
-
-      const branchLayer = await history.getLayerBySig(sig)
+      const { adoptRes, branchLayer } = await this.#reach(broker, history, sig, domain, { layersOnly: true })
       // DIAGNOSTIC: did the HIVE resolve the branch bytes? broker.adopt fetches
       // local→HTTP(domain)→mesh; failed>0 or resolved=false means the bytes
       // aren't reachable from the hive (publisher offline / domainless / not on

@@ -8,9 +8,10 @@
 //   open:     the index's envelopes, in order → the first with a seal for this key → door secret → key index → any atom
 //             a layer names, opened and CHECKED against the signature it was asked by.
 //
-// The orchestration takes its collaborators as arguments, so every step is held by a spec; `liveSealedDeps` wires them to
-// the running hive (store, host sync, signer), and `publishPrivate` is the whole act for one branch. Nothing here is reached
-// from a switch or a word yet, and `publishPrivate` has not been run against a live host.
+// The orchestration takes its collaborators as arguments, so every step is held by a spec; the `live*` helpers wire them to
+// the running hive (store, host sync, signer), and `publishPrivate` is the whole act for one branch. The `private` word
+// (private.queen.ts) reaches publishing; the adopt reaches opening (sealed-adopt.ts, called from swarm-adopt.drone.ts when
+// a branch's plain bytes are out of reach). `publishPrivate` has not been run against a live host.
 
 import { SignatureService } from '@hypercomb/core'
 import { lineageKey } from '../history/lineage-key.js'
@@ -65,6 +66,8 @@ export async function publishSealed(head: string, members: readonly string[], de
 export type OpenedVersion = {
   readonly head: string
   readonly envelope: string
+  /** Every plaintext signature the version holds, as its key index names them: what a reader who wants the whole version opens. */
+  readonly atoms: readonly string[]
   /** One plaintext atom, by the signature a layer names it with; null when it cannot be opened and verified. */
   readonly read: (plainSig: string) => Promise<Uint8Array | null>
 }
@@ -89,7 +92,7 @@ export async function openSealedVersion(
     if (!doorBytes || (await signBytes(doorBytes)) !== envelope.door) continue
     const keyIndex: KeyIndex | null = await openKeyIndex(doorBytes, secret)
     if (!keyIndex) continue
-    return { head: keyIndex.head, envelope: sig, read: plainSig => openFromIndex(keyIndex, plainSig, fetchBytes) }
+    return { head: keyIndex.head, envelope: sig, atoms: Object.keys(keyIndex.atoms), read: plainSig => openFromIndex(keyIndex, plainSig, fetchBytes) }
   }
   return null
 }
@@ -212,23 +215,44 @@ export async function privateAudience(segments: readonly string[]): Promise<stri
   } catch { return null }
 }
 
-/** The first private version of a branch that THIS device's key can open, or null: the index is read and verified from
- *  `host`, its envelopes are fetched by signature, and the first with a seal for this key opens. */
-export async function openPrivate(host: string, publisher: string, key: string): Promise<OpenedVersion | null> {
-  const nip44 = liveNip44()
-  const signer = get<SignerLike>('@diamondcoreprocessor.com/NostrSigner')
-  const me = String((await signer?.getPublicKeyHex?.().catch(() => null)) ?? '').toLowerCase()
-  if (!nip44 || !/^[0-9a-f]{64}$/.test(me)) return null
-  const read = await fetchHiveIndex(host, publisher)
-  const envelopes = read.ok ? read.manifest.sealed?.[key] : undefined
-  if (!envelopes?.length) return null
+/** Bytes by signature from one host, over http for a loopback name and https for the rest. The caller checks the hash. */
+export const hostFetcher = (host: string) => {
   const bare = host.replace(/^https?:\/\//, '').replace(/\/+$/, '')
   const scheme = /^(localhost|127\.|\[::1\])/.test(bare) ? 'http' : 'https'
-  const fetchBytes = async (sig: string): Promise<Uint8Array | null> => {
+  return async (sig: string): Promise<Uint8Array | null> => {
     try {
       const response = await fetch(`${scheme}://${bare}/${sig}`, { cache: 'no-store' })
       return response.ok ? new Uint8Array(await response.arrayBuffer()) : null
     } catch { return null }
   }
-  return openSealedVersion(envelopes, me, nip44, fetchBytes)
 }
+
+/** The index is read and verified from `host`, `pick` names the envelopes to try from it, and the first with a seal for
+ *  THIS device's key opens. Null for no signer, no index, no envelopes, or none that opens. */
+const openNamed = async (
+  host: string,
+  publisher: string,
+  pick: (manifest: { roots: Record<string, string>; sealed?: Record<string, string[]> }) => readonly string[] | undefined,
+): Promise<OpenedVersion | null> => {
+  const nip44 = liveNip44()
+  const signer = get<SignerLike>('@diamondcoreprocessor.com/NostrSigner')
+  const me = String((await signer?.getPublicKeyHex?.().catch(() => null)) ?? '').toLowerCase()
+  if (!nip44 || !/^[0-9a-f]{64}$/.test(me)) return null
+  const read = await fetchHiveIndex(host, publisher)
+  const envelopes = read.ok ? pick(read.manifest) : undefined
+  if (!envelopes?.length) return null
+  return openSealedVersion(envelopes, me, nip44, hostFetcher(host))
+}
+
+/** The first private version of a branch that THIS device's key can open, or null: the index is read and verified from
+ *  `host`, its envelopes are fetched by signature, and the first with a seal for this key opens. */
+export const openPrivate = (host: string, publisher: string, key: string): Promise<OpenedVersion | null> =>
+  openNamed(host, publisher, manifest => manifest.sealed?.[key])
+
+/** The same, for a reader who holds only the signature of the branch's root (an adopter was offered a signature, not the
+ *  publisher's lineage key): the private versions of whichever branch the index names that root for. */
+export const openPrivateForRoot = (host: string, publisher: string, root: string): Promise<OpenedVersion | null> =>
+  openNamed(host, publisher, manifest => {
+    const key = Object.keys(manifest.roots).find(name => manifest.roots[name] === root && (manifest.sealed?.[name]?.length ?? 0) > 0)
+    return key ? manifest.sealed![key] : undefined
+  })

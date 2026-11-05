@@ -1,6 +1,6 @@
 # Sealed audiences — one branch, a version per key
 
-**Status:** DESIGNED 2026-10-02. **Built 2026-10-26, as pure parts held by specs, not yet reachable from a switch or word:** the envelope (`sharing/sealed-envelope.ts`; NIP-44 seal per member, canonical bytes, parser) and the signer's `nip44Encrypt`/`nip44Decrypt` (extension passthrough, else this device's key, loaded lazily so the boot lane does not grow); the sealed closure (`sealed-closure.ts`: closure by presence, convergent seal of every atom, key index `{head, atoms: {plain sig: {c, k}}}` sealed under the door secret, every opened atom CHECKED against the signature it was asked by); the index (`hive-pointer.ts`: `sealed` is read, carried by EVERY writer through `signedContent`, pruned with its branch's root, omitted when empty so an index with no private versions is byte-identical, and set by `setHiveSealed`); publish and open (`sealed-publish.ts`: `publishSealed`, `openSealedVersion`, and the live acts `publishPrivate` / `openPrivate`). **Not built:** the private-branch switch in Publish and its words, a private version with NO public root (what the root names is still open), the audiences (NIP-51 lists), and wiring the reader into the Store so a page opens a sealed version by itself. `publishPrivate` has not been run against a live host.
+**Status:** DESIGNED 2026-10-02. **Built 2026-10-26, as pure parts held by specs, not yet reachable from a switch or word:** the envelope (`sharing/sealed-envelope.ts`; NIP-44 seal per member, canonical bytes, parser) and the signer's `nip44Encrypt`/`nip44Decrypt` (extension passthrough, else this device's key, loaded lazily so the boot lane does not grow); the sealed closure (`sealed-closure.ts`: closure by presence, convergent seal of every atom, key index `{head, atoms: {plain sig: {c, k}}}` sealed under the door secret, every opened atom CHECKED against the signature it was asked by); the index (`hive-pointer.ts`: `sealed` is read, carried by EVERY writer through `signedContent`, pruned with its branch's root, omitted when empty so an index with no private versions is byte-identical, and set by `setHiveSealed`); publish and open (`sealed-publish.ts`: `publishSealed`, `openSealedVersion`, and the live acts `publishPrivate` / `openPrivate`). **Not built:** the private-branch switch in Publish and its words, a private version with NO public root (what the root names is still open), the audiences (NIP-51 lists), and a read-only visitor's page opening a sealed version by itself (an ADOPT opens one since 2026-11-05 — see "The adopter"). `publishPrivate` has not been run against a live host.
 
 jwize, 2026-10-02: *"We should have keys that also serve alternate content from
 directories that have encrypted content so we can have a different build for
@@ -187,6 +187,34 @@ domain — the publish path signs with the key bound to the domain it writes.
 - [hypercomb-communication-layer.md](hypercomb-communication-layer.md) — notes
   that `infrastructure.md:214` describes a different scheme than the code; this
   design builds on the code
+
+## The adopter (built 2026-11-05)
+
+jwize, 2026-11-05: *"for adopters they show up as eggs in their hive … when they get the key they can see the content … they
+can have the content."* The adopt asks for a branch by the signature it was offered. When no host serves that root in plain
+bytes, the tile waits as an **egg** (`swarm-adopt.drone.ts`, `#layEgg`); the same adopt also tries the sealed version
+(`sealed-adopt.ts`, `localizeSealed`, called from the drone's `#reach`):
+
+1. the adopt carries the publisher's key and the hosts the broker knows;
+2. the signed index names the envelopes for the branch whose **root is that signature**; the first with a seal for this
+   device's key opens (a non-member never reaches a decrypt, so a retry cannot prompt a signer);
+3. **every atom the key index names is opened and checked against its plaintext signature**, and only then are all of them
+   written to the local store under that signature — complete or absent;
+4. the ordinary inspection and fold then find the branch local and run unchanged, so the egg hatches into a tile the
+   participant **holds outright**: the publisher's own tree under the publisher's own signatures. Ciphertext is never kept,
+   and neither the key nor the host is needed again.
+
+With no key yet the egg stays an egg and the queue comes back on its backoff (15 s → 5 min); when the publisher seals the
+door to the adopter's key (a newer envelope, named first), the next retry opens it. Code in a private version meets the same
+consent gate as any adopt: `localizeSealed` runs before inspection, never instead of it.
+
+**Eggs on a branch nobody serves.** The drain laid eggs only for `'unavailable'`, but inspection runs first and returns
+`'uninspectable'` for a branch whose layers cannot be fetched, so such an adopt got no egg. It does now.
+
+**Not built:** the sealed head only opens when it IS the offered root (`publishPrivate`'s default); a private version whose
+head differs from the public root is `other-head` and is not folded. A private branch with **no** public root, and offering
+one to someone who holds no signature of it, are still the open question above. The retry is the backoff, not a nudge when
+a key is granted. Not run against a live host or in the live hive.
 
 ## The word (built 2026-10-26)
 
