@@ -1206,29 +1206,38 @@ describe('a tile — a tap goes to the content, a hold comes up with where else 
     expect(hero.querySelector(':scope > .search')).not.toBeNull()
   })
 
-  it('hides the search until the magnifier is pressed, and keeps Manage in the bar', () => {
+  it('keeps the search always there with the options beside it at the top, and no bar at the foot', () => {
     const { hero, bands } = draw()
     const search = hero.querySelector(':scope > .search') as HTMLElement
-    const dock = hero.querySelector(':scope > .page-dock') as HTMLElement
-    const glass = dock.querySelector('.dock-search') as HTMLButtonElement
-    const manage = dock.querySelector('.manage-toggle') as HTMLButtonElement
-    expect(search.hidden).toBe(true)
-    expect(glass.getAttribute('aria-pressed')).toBe('false')
-    expect(glass.querySelector('svg')).not.toBeNull()
-    expect(manage.getAttribute('aria-label')).toBe('Manage')
-    glass.click()
     expect(search.hidden).toBe(false)
-    expect(glass.getAttribute('aria-pressed')).toBe('true')
+    expect(hero.querySelector('.page-dock, .dock-search')).toBeNull()
+    const manage = search.querySelector('.page-tools .manage-toggle') as HTMLButtonElement
+    expect(manage.getAttribute('aria-label')).toBe('Manage')
     const input = search.querySelector('input') as HTMLInputElement
     input.value = 'dylan'
     input.dispatchEvent(new Event('input'))
-    glass.click()
-    expect(search.hidden).toBe(true)
-    expect(glass.getAttribute('aria-pressed')).toBe('false')
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }))
     expect(input.value).toBe('')
+    expect(search.hidden).toBe(false)
     manage.click()
     expect(manage.getAttribute('aria-pressed')).toBe('true')
     expect(bands.classList.contains('managing')).toBe(true)
+  })
+
+  it('shows Files only while managing, and leaving Manage closes the sheet', () => {
+    const files = document.createElement('section')
+    files.append(Object.assign(document.createElement('div'), { className: 'files-head' }))
+    const { hero } = draw({ files })
+    const button = hero.querySelector('.page-files') as HTMLButtonElement
+    const manage = hero.querySelector('.manage-toggle') as HTMLButtonElement
+    expect(button.hidden).toBe(true)
+    manage.click()
+    expect(button.hidden).toBe(false)
+    button.click()
+    expect(files.hidden).toBe(false)
+    manage.click()
+    expect(button.hidden).toBe(true)
+    expect(files.hidden).toBe(true)
   })
 })
 

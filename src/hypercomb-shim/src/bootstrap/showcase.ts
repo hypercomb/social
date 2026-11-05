@@ -631,9 +631,10 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     join.append(iconOf('hive'), label, iconOf('arrow'))
     brand.append(join)
   }
+  // THE SEARCH IS ALWAYS THERE (jwize 2026-11-05: "you don't need the search it is always there. so just the options so it
+  // should be at the top so you can filter. You are always going somewhere so it is okay on the screen"): one row at the
+  // top — the search, and beside it the options. No bar at the foot.
   const searchBox = el('label', 'search')
-  // The search is not on the page until the magnifier asks for it. Hidden, the top is only the brand.
-  searchBox.hidden = true
   const search = el('input')
   search.type = 'search'
   search.id = 'showcase-search'
@@ -650,30 +651,15 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   searchGo.textContent = 'Go'
   search.enterKeyHint = 'go'
   searchBox.append(iconOf('search'), search, searchGo)
-  // THE BAR IS AT THE BOTTOM. The magnifier shows the search across the top, or hides it and clears what was
-  // typed. Manage opens the management screen: the domains you follow as rows, their tiles grayed until you
-  // turn them on, and the follow box. Pressing it again returns to the showcase.
+  // Manage opens the management screen: the domains you follow as rows, their tiles grayed until you turn them on,
+  // and the follow box. Pressing it again returns to the showcase. Escape in the search clears what was typed.
   let managing = false
-  const dock = el('nav', 'page-dock')
-  dock.setAttribute('aria-label', 'Page')
-  const searchButton = el('button', 'dock-search')
-  searchButton.type = 'button'
-  searchButton.title = 'Search'
-  searchButton.setAttribute('aria-label', 'Search')
-  searchButton.setAttribute('aria-pressed', 'false')
-  searchButton.setAttribute('aria-controls', search.id)
-  searchButton.append(iconOf('search'))
-  const setSearchOpen = (on: boolean): void => {
-    searchBox.hidden = !on
-    searchButton.setAttribute('aria-pressed', String(on))
-    if (on) search.focus()
-    else if (search.value) { search.value = ''; paint() }
-  }
-  searchButton.addEventListener('click', () => setSearchOpen(searchBox.hidden))
+  const tools = el('span', 'page-tools')
   search.addEventListener('keydown', event => {
-    if (event.key !== 'Escape') return
+    if (event.key !== 'Escape' || !search.value) return
     event.preventDefault()
-    setSearchOpen(false)
+    search.value = ''
+    paint()
   })
   const manageButton = el('button', 'manage-toggle')
   manageButton.type = 'button'
@@ -685,15 +671,19 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     managing = on
     dropMissing()
     manageButton.setAttribute('aria-pressed', String(managing))
+    // FILES ARE A MANAGE TOOL (jwize 2026-11-05: "the files are not shown by default … we can have it in manage mode only").
+    filesButton.hidden = !managing || !files
+    if (!managing) setFilesOpen(false)
     if (managing && !openRow) openRow = options.self
     options.onManage?.(managing)
     paint()
   }
   manageButton.addEventListener('click', () => setManaging(!managing))
-  // FILES WAIT AT THE THUMB (jwize 2026-11-04: "we are trying not to have anything scroll except for the tiles"): the
-  // signature box and the latest revisions open as a sheet above the bar, never as a section the page scrolls down to.
+  // FILES (jwize 2026-11-04: "we are trying not to have anything scroll except for the tiles"): the signature box and the
+  // latest revisions open as a sheet, never as a section the page scrolls down to. Its button shows only while managing.
   const files = options.files
-  const filesButton = el('button', 'dock-files')
+  const filesButton = el('button', 'page-files')
+  filesButton.hidden = true
   filesButton.type = 'button'
   filesButton.title = 'Files'
   filesButton.setAttribute('aria-label', 'Files')
@@ -704,11 +694,10 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     files.hidden = !on
     filesButton.setAttribute('aria-pressed', String(on))
   }
-  dock.append(searchButton)
   if (files) {
     files.classList.add('files-sheet')
     files.hidden = true
-    // A close in the title row: the bar's own Files button is not the only way out of a sheet that sits above it.
+    // A close in the title row: the Files button is not the only way out of the sheet.
     const close = el('button', 'files-close')
     close.type = 'button'
     close.title = 'Close'
@@ -723,10 +712,11 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
       setFilesOpen(false)
       filesButton.focus()
     })
-    dock.append(filesButton)
+    tools.append(filesButton)
   }
-  dock.append(manageButton)
-  hero.append(brand, searchBox, dock)
+  tools.append(manageButton)
+  searchBox.append(tools)
+  hero.append(brand, searchBox)
 
   const bandsHost = el('div', 'bands')
 
@@ -1150,10 +1140,18 @@ ${entry.key}`
   let laneFlat = false
   const laneSpace = (comb: HTMLElement): { width: number; height: number } => {
     const viewHeight = globalThis.visualViewport?.height ?? innerHeight
-    const dock = document.querySelector('.page-dock')
-    const floor = dock instanceof HTMLElement && !dock.hidden ? dock.getBoundingClientRect().top : viewHeight
-    const top = comb.getBoundingClientRect().top + (document.scrollingElement?.scrollTop ?? 0)
-    return { width: comb.clientWidth, height: Math.max(220, Math.min(floor, viewHeight) - top - 12) }
+    let top = comb.getBoundingClientRect().top
+    for (let node = comb.parentElement; node; node = node.parentElement) top += node.scrollTop
+    return { width: comb.clientWidth, height: Math.max(220, viewHeight - top - 12) }
+  }
+  /** How far the comb's scrollers can still move: what the page holds under the comb, beyond the screen. */
+  const overflowBelow = (comb: HTMLElement): number => {
+    let most = 0
+    for (let node = comb.parentElement; node; node = node.parentElement) {
+      const scrolls = node === document.scrollingElement || /auto|scroll/.test(getComputedStyle(node).overflowY)
+      if (scrolls) most = Math.max(most, node.scrollHeight - node.clientHeight)
+    }
+    return most
   }
   const drawLanes = (comb: HTMLElement, state: LaneState, dy: number): void => {
     const { layout, tiles, shift } = state
@@ -1261,8 +1259,7 @@ ${entry.key}`
     if (!space.width) return
     // Nothing scrolls but the tiles: whatever the page still holds under the comb comes off its height.
     comb.style.height = `${space.height}px`
-    const page = document.scrollingElement
-    const excess = page ? page.scrollHeight - page.clientHeight : 0
+    const excess = overflowBelow(comb)
     const height = Math.floor(excess > 0 ? Math.max(220, space.height - excess - 1) : space.height)
     const { width } = space
     const layout = laneLayout(width, height, laneFlat)
@@ -2063,29 +2060,26 @@ export const SHOWCASE_STYLE = `
 .search { position: sticky; top: 0; z-index: 25; display: flex; align-items: center; margin: 0; padding: .55rem 0;
   background: color-mix(in srgb, var(--md-surface-c-low) 90%, transparent); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
 .search[hidden] { display: none; }
-.search svg { position: absolute; z-index: 1; left: .95rem; top: 50%; margin-top: -.575rem; width: 1.15rem; height: 1.15rem; color: var(--md-primary); pointer-events: none; }
+.search > svg { position: absolute; z-index: 1; left: .95rem; top: 50%; margin-top: -.575rem; width: 1.15rem; height: 1.15rem; color: var(--md-primary); pointer-events: none; }
 .search input {
   flex: 1; width: 100%; padding: .78rem 1rem .78rem 2.8rem; font: 400 1rem/1.3 var(--md-font-ui, Inter, system-ui, sans-serif);
   color: var(--md-on-surface-strong); border-radius: var(--hc-radius-control, 2px);
   background: var(--md-surface-c-lowest);
   border: 1px solid color-mix(in srgb, var(--md-primary) 32%, var(--md-outline-variant));
 }
-/* the two buttons live at the thumb: the glass asks for the search, Manage opens the management screen */
-.page-dock { position: fixed; z-index: 40; left: 50%; bottom: 0; transform: translateX(-50%); box-sizing: border-box;
-  display: flex; justify-content: center; align-items: center; gap: .55rem; width: min(100%, 100rem); margin: 0;
-  padding: .5rem .75rem calc(.5rem + env(safe-area-inset-bottom));
-  background: color-mix(in srgb, var(--md-surface) 90%, transparent); border-top: 1px solid var(--md-outline-variant);
-  -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); }
-.page-dock button { display: grid; place-items: center; width: 2.75rem; height: 2.75rem; margin: 0; padding: 0; cursor: pointer;
+/* the options sit beside the search, at the top: Files (while managing) and Manage */
+.page-tools { flex: none; display: flex; align-items: center; gap: .45rem; margin-left: .5rem; }
+.page-tools button[hidden] { display: none; }
+.page-tools button { display: grid; place-items: center; width: 2.75rem; height: 2.75rem; margin: 0; padding: 0; cursor: pointer;
   border: 1px solid color-mix(in srgb, var(--md-primary) 32%, var(--md-outline-variant)); border-radius: 999px;
   background: var(--md-surface-c-lowest); color: var(--md-on-surface); }
-.page-dock button svg { width: 1.3rem; height: 1.3rem; }
-.page-dock button:hover { border-color: var(--md-primary); color: var(--md-primary); }
-.page-dock button[aria-pressed='true'] { background: var(--md-primary); border-color: var(--md-primary); color: var(--md-on-primary); }
-.page-dock button[aria-pressed='true']:hover { color: var(--md-on-primary); filter: brightness(1.06); }
-.page-dock button:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+.page-tools button svg { width: 1.3rem; height: 1.3rem; }
+.page-tools button:hover { border-color: var(--md-primary); color: var(--md-primary); }
+.page-tools button[aria-pressed='true'] { background: var(--md-primary); border-color: var(--md-primary); color: var(--md-on-primary); }
+.page-tools button[aria-pressed='true']:hover { color: var(--md-on-primary); filter: brightness(1.06); }
+.page-tools button:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
 /* the Files sheet: above the bar. A fixed title row, and one body that scrolls on its own; the page beneath never moves */
-.files-sheet { position: fixed; z-index: 39; left: 50%; bottom: calc(4rem + env(safe-area-inset-bottom)); transform: translateX(-50%);
+.files-sheet { position: fixed; z-index: 39; left: 50%; bottom: calc(.5rem + env(safe-area-inset-bottom)); transform: translateX(-50%);
   box-sizing: border-box; display: flex; flex-direction: column; width: min(calc(100% - 1rem), 36rem); max-height: min(36rem, calc(100dvh - 9rem));
   margin: 0; padding: 0; overflow: hidden; border: 1px solid var(--md-outline-variant); border-radius: 1rem;
   background: color-mix(in srgb, var(--md-surface-c-low) 97%, transparent); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
@@ -2397,7 +2391,7 @@ a.version-visit { color: var(--md-primary); }
   .card.showcase-page .panel { margin-top: 0; width: 100%; min-width: 0; min-height: 100dvh; padding-bottom: 0; }
   .hero-brand { padding: .8rem .5rem .15rem; }
   .search { padding: .55rem .5rem; }
-  .search svg { left: calc(.5rem + .95rem); }
+  .search > svg { left: calc(.5rem + .95rem); }
   /* THE ONE INPUT (jwize 2026-11-04: "get rid of the bottom input and follow button … a header search and dynamic button go /
      follow"): the follow bar at the foot is gone on a phone. The button beside the search says Follow for a domain nobody
      follows yet, and Go otherwise. */
@@ -2425,12 +2419,10 @@ a.version-visit { color: var(--md-primary); }
   .card.showcase-page { overflow: hidden; }
   .card.showcase-page .panel { height: 100dvh; min-height: 0; }
   .bands { min-height: 0; }
-  /* THE TILES RUN UNDER THE ICONS (jwize 2026-11-04: "allow the tiles to scroll up and down even under the icons but make sure
-     they pull up all the way past the last ones so I can see them fully"): the list reaches the foot of the screen, behind the
-     bar, and its own end padding is the bar's height and more, so the last tiles come to rest fully clear of the icons. */
+  /* THE LIST REACHES THE FOOT OF THE SCREEN: no bar sits there any more (the options are at the top), so its end padding
+     is only the safe area. */
   .bands > .hosted, .hosted.swipeable { min-height: 0; overflow-y: auto; overscroll-behavior: contain;
-    padding-bottom: calc(4.1rem + env(safe-area-inset-bottom) + 1.25rem); }
-  .page-dock { background: color-mix(in srgb, var(--md-surface) 72%, transparent); }
+    padding-bottom: calc(env(safe-area-inset-bottom) + .75rem); }
   .files-sheet { width: calc(100% - 1rem); }
   .hero-brand { gap: .6rem; }
   .hero-mark { width: 1.7rem; height: 1.7rem; }
