@@ -448,10 +448,27 @@ export class MoveDrone extends Drone {
     }
 
     const placements = this.#computePlacements(diff)
-    const reordered = this.#reorderNames(placements)
+    // IN LANES A DRAG ONLY SWAPS: off a tile everything shows where it was, so an
+    // empty slot or the ground around the strip never lights up as a landing.
+    const reordered = this.#reorderNames(this.#swapLands(placements) ? placements : new Map())
     const movedLabels = new Set(this.#movedGroup.keys())
 
     this.emitEffect('move:preview', { names: reordered, movedLabels })
+  }
+
+  /** IN LANES THERE IS NO MOVE, ONLY A SWAP (jwize 2026-11-05). The strip is the
+   *  layer's order read in place, so there is no empty ground to set a tile down
+   *  on: a drag lands only where every dragged tile meets a tile — each trades
+   *  places with the one it lands on — and a drop anywhere else (an empty slot,
+   *  the margin, off the strip) puts the tiles straight back. The free map keeps
+   *  its moves into empty hexes. */
+  #swapLands(placements: ReadonlyMap<string, Axial>): boolean {
+    if (!getLaneScrollAxis()) return true
+    for (const label of this.#movedGroup.keys()) {
+      const to = placements.get(label)
+      if (!to || !this.#occupancy.has(axialKey(to.q, to.r))) return false
+    }
+    return true
   }
 
   setDropIntoActive = (active: boolean): void => {
@@ -506,7 +523,13 @@ export class MoveDrone extends Drone {
       // skip if no movement
       if (diff.q !== 0 || diff.r !== 0) {
         const placements = this.#computePlacements(diff)
-        didCommit = await this.#commitPlacements(placements)
+        if (this.#swapLands(placements)) didCommit = await this.#commitPlacements(placements)
+        else {
+          // Dropped off a tile in lanes: back to its spot at once — the fast
+          // preview path paints every tile home now, before the full render.
+          this.emitEffect('move:preview', { names: this.#reorderNames(new Map()), movedLabels: new Set(this.#movedGroup.keys()) })
+          this.emitEffect('move:preview', null)
+        }
       }
     } catch (err) {
       // Swallow + log so #reset always runs in finally. Leaving
