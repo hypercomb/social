@@ -66,6 +66,7 @@ const pagedRoutes = () => {
   }
   for (const r of tree.roots || [tree]) walk(r, [])
   for (const key of [...Object.keys(content), ...Object.keys(tour.SCENES_OF)]) {
+    if (tree.isWaiting(key)) continue // set aside, ready (tree.cjs WAITING)
     if (!tileAt(key.split('/'))) throw new Error(`${key} has a page but no tile in tree.cjs`)
   }
   return out

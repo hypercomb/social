@@ -31,13 +31,9 @@
       "name"
     ],
     [
-      "name"
-    ],
-    [
       "sign"
-    ],
-    "*"
+    ]
   ],
   "sig": true,
-  "say": "Everything in Hypercomb has one kind of address: a signature, a fingerprint computed from the content itself. The same content gets the same signature, on every machine, in every country, for good. Change one byte, and it is a different thing, with a different signature. So the signature proves the content. The same picture, kept twice, is kept once. And a signature can be passed along as a short string that anyone can check. It does not ask you to trust a company. It lets you check for yourself."
+  "say": "Every piece of content gets its address from the content itself: a signature, computed from its bytes. The same content always gets the same signature, on any machine. Change one byte and the signature changes. So a signature proves what it names: you never have to trust where a file came from, because your own device can check it. And a file used a hundred times is stored once. In technical terms, the signature is the SHA-256 hash of the bytes."
 }

@@ -3,10 +3,10 @@
   "name": "verifiable integrity",
   "chapter": "why hypercomb",
   "slug": "verifiable-integrity",
-  "eyebrow": "reason two",
+  "eyebrow": "integrity",
   "headline": "Integrity you can *verify*",
   "sub": "",
   "visual": "film:integrity",
   "visualData": [],
-  "say": "Reason two: integrity you can check for yourself, instead of trust you are asked to give. When someone shares their work with you, you receive signatures, and your own machine checks every byte as it arrives. Each hive stores the same content once, however many times it is used, and any host that holds it can hand you a copy. Sharing a signature is sharing a proof of exactly what it names."
+  "say": "Everything has its place by its name, and every byte can be checked, so nothing has to be taken on trust. When someone shares work with you, you receive signatures, and your device checks each piece as it arrives. Content used in many places is stored once, and any host that holds it can hand you a copy. A copy from any host is as good as the original, because it proves itself."
 }
