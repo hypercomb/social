@@ -8,6 +8,7 @@ import { publishOwnedProjection } from './derived-projection-cache.js'
 import { resolveLocalResourceReference } from './local-resource-reference.js'
 import { readThumbnail, type ThumbnailStore } from './thumbnails.js'
 import { layoutReport } from './layout-report.js'
+import { wearsHoverTrait, hoverEffectKnown, readHoverEffect, forgetHoverEffects } from './hover-animation.js'
 import { HexImageAtlas } from '../grid/hex-image.atlas.js'
 import { HexSdfTextureShader, FLOWER_BLOOM_DONE } from '../grid/hex-sdf.shader.js'
 import { BLOOM_TOTAL_MS, FLOWER_CLOCK_PERIOD_S, FLOWER_INDEX_BASE, flowerRingKey, flowerSlots, manyHoneyMode, pouredInHoney } from './flower-motion.js'
@@ -1396,8 +1397,44 @@ export class ShowCellDrone extends Drone {
     this.shader.setHoveredIndex(label !== null ? this.#labelToIndex.get(label) ?? -1 : -1)
     this.#setHoverOpaque(label)
     // A dive paints with the same shader and owns the clock itself. On the
-    // page, the border moves only for a tile that has hexagon children.
-    if (!this.#diveActive) this.#setPathwayHover(!!label && this.renderedCells.get(label)?.hasBranch === true)
+    // page, the border moves for a tile that has hexagon children, or that
+    // wears a hover animation (the `hover-animation` trait).
+    if (!this.#diveActive) this.#chooseHoverEffect(label)
+  }
+
+  /** The hovered tile's hover animation (hover-effects.ts): a HOVER_EFFECTS id,
+   *  0 for the tile's own version. Almost every tile is 0 and never reads
+   *  anything: the decoration-kind index says in O(1) whether the tile opened
+   *  any trait, and only one that did is resolved (once, then kept). */
+  #hoverFxId = 0
+  #hoverFxLabel: string | null = null
+
+  #chooseHoverEffect(label: string | null): void {
+    this.#hoverFxLabel = label
+    if (!label) { this.#paintHoverEffect(0); return }
+    const lineage = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')
+    const here = (lineage?.explorerSegments?.() ?? []).map(segment => String(segment ?? '').trim()).filter(Boolean)
+    const segments = [...here, label]
+    if (!wearsHoverTrait(segments)) { this.#paintHoverEffect(0); return }
+    const known = hoverEffectKnown(segments)
+    if (known !== undefined) { this.#paintHoverEffect(known); return }
+    // Not read yet: the tile's own look stands for the frame or two the read
+    // takes, then the pick replaces it if the pointer is still on this tile.
+    this.#paintHoverEffect(0)
+    void readHoverEffect(segments).then(id => {
+      if (id !== 0 && this.#hoverFxLabel === label && !this.#diveActive) this.#paintHoverEffect(id)
+    })
+  }
+
+  #paintHoverEffect(id: number): void {
+    const label = this.#hoverFxLabel
+    if (id !== this.#hoverFxId) {
+      this.#hoverFxId = id
+      this.shader?.setHoverEffect(id)
+      this.#wakeFrame()
+    }
+    const branch = !!label && this.renderedCells.get(label)?.hasBranch === true
+    this.#setPathwayHover(!!label && (branch || id !== 0))
   }
   #substrateFadeStart: number | null = null
   #substrateFadeRaf = 0
@@ -5987,6 +6024,7 @@ export class ShowCellDrone extends Drone {
       : undefined
     this.#applyBandRows()
     this.shader.setHoveredIndex(restoredHoverIndex ?? -1)
+    this.shader.setHoverEffect(this.#hoverFxId)
     // A geometry replacement can hand us a NEW shader; the swap verb is a
     // property of the open window, not of this frame, so re-apply it here or
     // the cut rim vanishes the first time anything re-renders under it.
@@ -6646,6 +6684,8 @@ export class ShowCellDrone extends Drone {
     // icon disappear / reappear at once. Cheap: a render request, no I/O.
     this.onEffect('feature:hidden', () => this.requestRender())
     this.onEffect('feature:restored', () => this.requestRender())
+    // A trait was opened, filled or forgotten: the kept hover animations are suspect.
+    this.onEffect('decorations:changed', () => forgetHoverEffects())
 
     // launcher:reconciled — the shared launch-group mix (agg-mix) replaced its
     // committed children (a group was toggled in/out, or a background scan

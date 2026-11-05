@@ -1,5 +1,6 @@
 // pixi/hex-sdf.shader.ts
 import { Shader, Texture } from 'pixi.js'
+import { HOVER_FX_GLSL } from './hover-effects.js'
 
 type Vec2 = [number, number]
 
@@ -21,6 +22,10 @@ export class HexSdfTextureShader {
       u_flat: { value: 0, type: 'f32' },
       u_pivot: { value: 0, type: 'f32' },
       u_hoveredIndex: { value: -1, type: 'f32' },
+      // What the hovered tile's border does (hover-effects.ts). 0 = the tile's
+      // own version — a pathway breathes, a leaf is outlined — which is every
+      // tile unless it wears the `hover-animation` trait and fills it.
+      u_hoverFx: { value: 0, type: 'f32' },
       // Rows the HOVERED tile's label band must hold — the NAME's row plus one
       // per icon row (2 while the icons fit one row, 3 once they wrap). The
       // band grows only when it has to, so a tile with no icons keeps the
@@ -120,6 +125,13 @@ export class HexSdfTextureShader {
 
   public setHoveredIndex = (index: number): void => {
     this.#ug.uniforms.u_hoveredIndex = index
+    this.#ug.update()
+  }
+
+  /** The hovered tile's border animation: a `HOVER_EFFECTS` id, 0 for its own. */
+  public setHoverEffect = (id: number): void => {
+    if (this.#ug.uniforms.u_hoverFx === id) return
+    this.#ug.uniforms.u_hoverFx = id
     this.#ug.update()
   }
 
@@ -376,6 +388,7 @@ export class HexSdfTextureShader {
     uniform float u_flat;
     uniform float u_pivot;
     uniform float u_hoveredIndex;
+    uniform float u_hoverFx;
     uniform float u_bandRows;
     uniform float u_labelMix;
     uniform float u_glyphs;
@@ -467,7 +480,7 @@ export class HexSdfTextureShader {
       vec2 q = abs(p) - b + r;
       return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
     }
-
+${HOVER_FX_GLSL}
     // ── Space Invader (the classic 11×8 "crab"), two march frames ───────────
     // Each row is a bitmask of its 11 columns (bit c = column c, 0 = leftmost).
     // GLSL ES 1.00 has no integer bit ops, so we test bits with float math:
@@ -1432,25 +1445,13 @@ export class HexSdfTextureShader {
             float swapGhost = 1.0 - smoothstep(0.0, aa * 1.4, abs(d + u_radiusPx * 0.085));
             color.rgb = mix(color.rgb, u_swapColor, swapGhost * 0.6);
           }
-        } else if (vHasBranch > 0.5) {
-          // PATHWAY, on hover only. A tile with hexagon children breathes:
-          // an accent ring, two glints orbiting the rim, a soft bloom. Gentle
-          // on purpose. u_time advances only while such a tile is hovered
-          // (#setPathwayHover), so a page of leaves stays still.
-          float ring = 1.0 - smoothstep(0.0, aa * 1.8, abs(d));
-          float breathe = 0.79 + 0.21 * sin(u_time * 2.1);
-          color.rgb = mix(color.rgb, u_accentColor, ring * 0.80 * breathe);
-          float ang = atan(local.y, local.x);
-          float glint = smoothstep(0.90, 1.0, cos(2.0 * (ang - u_time * 1.3))) * ring;
-          color.rgb += mix(u_accentColor, vec3(1.0), 0.7) * glint * 0.45;
-          float bloom = 1.0 - smoothstep(0.0, aa * 4.5, abs(d + aa * 1.6));
-          color.rgb += u_accentColor * bloom * (0.10 + 0.07 * breathe);
         } else {
-          // LEAF: tight cool-neutral outline — clearly a highlight, but flatter
-          // and uncoloured so it can't be mistaken for the pathway accent glow
-          vec3 leafHover = vec3(0.74, 0.82, 0.94);
-          float leafRing = 1.0 - smoothstep(0.0, aa * 1.15, abs(d));
-          color.rgb = mix(color.rgb, leafHover, leafRing * 0.6);
+          // THE HOVER ANIMATION, an extension point (hover-effects.ts): the
+          // tile's own version unless it wears the trait and fills it. A
+          // pathway breathes and a leaf is outlined, exactly as they always
+          // did; u_time advances only while a hovered tile wants it
+          // (#setPathwayHover), so a page of plain leaves stays still.
+          hfxApply(u_hoverFx, vHasBranch > 0.5, color, d, aa, local);
         }
       }
 
