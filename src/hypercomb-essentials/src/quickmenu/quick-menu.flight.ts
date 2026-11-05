@@ -26,7 +26,7 @@ import type { QuickMenuRegistry } from './quick-menu-registry.service.js'
 import { fireQuickMenuSlot } from './quick-menu.fire.js'
 import { QuickMenuGuide, guideFor } from './quick-menu.guide.js'
 import { listGroups, type ContextGroup } from '../assistant/context-groups.js'
-import { MANY_TILES_MENU, currentOperands, swarmMenu } from './quick-menu.operands.js'
+import { MANY_TILES_MENU, currentOperands, isPicked, swarmMenu } from './quick-menu.operands.js'
 import { shelvesMenu } from './quick-menu.shelves.js'
 import { aimLive } from './quick-menu.tile-menu.js'
 import { NO_SEATS, applyTileSeats, readTileSeats, seatMenu, type TileSeats } from './quick-menu.traits.js'
@@ -328,6 +328,7 @@ export class QuickMenuFlight {
       path: this.#levels.slice(1).map(l => registry.label({ label: l.definition.title, labelKey: l.definition.titleKey })),
       lit: slot ? { label: registry.label(slot), slot } : null,
       asleep: !this.#armed,
+      picked: isPicked(this.#subject),
     })
     const rect = this.#host!.canvas.getBoundingClientRect()
     const area = this.#area()
