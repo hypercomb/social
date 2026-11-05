@@ -26,10 +26,12 @@ import {
   Drone, EffectBus, EXTERNAL_CALL, REMOTE_SUBMIT, canonicalVerbOf, hypercomb, meetingPointKey,
   type ExternalCallRequest, type RemoteSubmitRequest,
 } from '@hypercomb/core'
-import { audioConstraints, bitrateOf, frameRateOf, isQuality, qualityConstraints, videoConstraints, type Quality } from './meeting-quality.js'
-import { showsPicture } from './meeting-picture.js'
+import { audioConstraints, bitrateOf, frameRateOf, isQuality, videoConstraints, type Quality } from './meeting-quality.js'
+import { acceptedLocalTracks, createSignalQueue, faceOf, feedsFromWire, subscriptionPlan, type Face, type FeedTrack } from './meeting-feeds.js'
 import { followStep, followedBy, isFollowed, leaderOf, meetingAddress, meetingPreimage, originatorOf, pathKey, seatOrder, type Member } from './meeting-seats.js'
 import { isJoinedHere, ownZone, readTabZone } from '../sharing/membership.js'
+import { ownProfileFace } from '../sharing/profile.queen.js'
+import { profilePicture } from '../sharing/profile.js'
 import { SESSION_ID, SfuClient, sfuBase } from './sfu-client.js'
 
 type MeshEvt = { relay: string; sig: string; event: any; payload: any }
@@ -45,7 +47,12 @@ type NavigationLike = { goRaw?: (segments: readonly string[]) => void }
 
 export type MeetingState = 'idle' | 'gathering' | 'active' | 'ended'
 
-type Heard = Member & { lastSeenMs: number; rules?: readonly string[]; sfu?: { session: string; tracks: readonly string[] } }
+type Heard = Member & {
+  lastSeenMs: number
+  rules?: readonly string[]
+  sfu?: { session: string; tracks: readonly string[] }
+  face?: Face
+}
 
 
 // The SFU's own address arrives in its answer; Cloudflare's STUN helps the
@@ -54,6 +61,25 @@ type Heard = Member & { lastSeenMs: number; rules?: readonly string[]; sfu?: { s
 const RTC_CONFIG: RTCConfiguration = {
   iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }],
   bundlePolicy: 'max-bundle',
+}
+
+/** The SFU has no trickle path. The description it is given has to already
+ *  carry the candidates, or that direction of media never arrives. */
+const iceSettled = (pc: RTCPeerConnection): Promise<void> => {
+  if (pc.iceGatheringState === 'complete') return Promise.resolve()
+  return new Promise(resolve => {
+    const finish = (): void => {
+      if (pc.iceGatheringState !== 'complete') return
+      clearTimeout(timer)
+      pc.removeEventListener('icegatheringstatechange', finish)
+      resolve()
+    }
+    const timer = setTimeout(() => {
+      pc.removeEventListener('icegatheringstatechange', finish)
+      resolve()
+    }, 2500)
+    pc.addEventListener('icegatheringstatechange', finish)
+  })
 }
 /** How often a session tells the meeting point it is still in use. */
 const VIDEO_BEAT_MS = 30_000
@@ -141,13 +167,18 @@ export class HiveMeetingDrone extends Drone {
   #videoStarting = false
   #videoSaid = false
   #videoBeat: ReturnType<typeof setInterval> | null = null
-  /** What this person publishes: mid and track name. */
-  #published: { mid: string; trackName: string }[] = []
-  /** Whom this person receives, and the mids that carry them. */
-  #subscribed = new Map<string, string[]>()
-  #subTracks = new Map<string, { session: string; names: Set<string> }>()
-  #subscribing = new Set<string>()
+  /** What this person publishes: mid and track name. Video is here only while the camera is shared. */
+  #published: FeedTrack[] = []
+  /** Whom this person receives, and the mid of each track name. */
+  #subTracks = new Map<string, { session: string; byName: Map<string, string> }>()
   #midOwner = new Map<string, string>()
+  /** One SFU mutation at a time, including the offer and answer that follow it. */
+  #signal = createSignalQueue()
+  /** Bumped on leave, so a negotiation still in flight does not apply to the next meeting. */
+  #epoch = 0
+  #cameraBusy = false
+  /** This person's name and picture, said on the heartbeat and drawn on their flower. */
+  #face: Face = { name: '', picture: '' }
   #remoteStreams = new Map<string, MediaStream>()
   #localStream: MediaStream | null = null
   #cameraOn = false
@@ -210,10 +241,14 @@ export class HiveMeetingDrone extends Drone {
       leaderIsYou: !!leader && leader.id === this.#publisherId,
       rules: [...this.#rules()],
       allowed: [...this.#allowed],
-      seats: seatOrder(members).map((m, i) => ({
-        seat: i + 1, id: m.id, you: m.id === this.#publisherId,
-        leads: m.id === leader?.id, originator: m.id === originatorOf(members)?.id,
-      })),
+      seats: seatOrder(members).map((m, i) => {
+        const face = m.id === this.#publisherId ? this.#face : this.#heard.get(m.id)?.face
+        return {
+          seat: i + 1, id: m.id, you: m.id === this.#publisherId,
+          leads: m.id === leader?.id, originator: m.id === originatorOf(members)?.id,
+          name: face?.name ?? '', picture: face?.picture ?? '',
+        }
+      }),
       following: this.#target()?.id ?? '',
     }
     this.#refreshMark()
@@ -228,7 +263,7 @@ export class HiveMeetingDrone extends Drone {
    *  are not. Nothing when there is no meeting. */
   #paintIndicator = (p: {
     here: number; joined: boolean; leaderIsYou: boolean; rules: readonly string[]
-    seats: readonly { seat: number; id: string; you: boolean; leads: boolean; originator: boolean }[]; following: string
+    seats: readonly { seat: number; id: string; you: boolean; leads: boolean; originator: boolean; name?: string }[]; following: string
   }): void => {
     if (!this.#currentSig || (!p.joined && p.here === 0)) {
       EffectBus.emit('indicator:clear', { key: INDICATOR })
@@ -244,7 +279,7 @@ export class HiveMeetingDrone extends Drone {
         ? [
             { text: leadLine },
             ...p.seats.map(s => ({
-              text: `${s.seat} · ${s.you ? 'you' : s.id.slice(0, 6)}${s.leads ? ' · leads' : ''}${s.originator && !s.leads ? ' · started it' : ''}${s.id === p.following ? ' · you follow' : ''}`,
+              text: `${s.seat} · ${s.you ? 'you' : (s.name || s.id.slice(0, 6))}${s.leads ? ' · leads' : ''}${s.originator && !s.leads ? ' · started it' : ''}${s.id === p.following ? ' · you follow' : ''}`,
             })),
             { text: rules || 'no behaviours', detail: 'what this room asks of you' },
             { text: 'meeting follow <seat> · meeting lead <seat>', detail: 'click: copy the link · ×: leave' },
@@ -278,6 +313,7 @@ export class HiveMeetingDrone extends Drone {
       // the others only when they turn it on.
       if (stream instanceof MediaStream) this.#acceptStream(stream)
       else void this.#joinWithDevices()
+      void this.#loadFace()
       this.#setState('active')
       this.#lastAvailPublishMs = 0
       this.#publishAvailability()
@@ -542,6 +578,7 @@ export class HiveMeetingDrone extends Drone {
       ? p.sfu.tracks.map((t: unknown) => String(t ?? '')).filter((t: string) => /^[A-Za-z0-9_.:-]{1,96}$/.test(t)).slice(0, 4)
       : []
     const sfu = sfuSession && sfuTracks.length ? { session: sfuSession, tracks: sfuTracks } : undefined
+    const face = p.face ? faceOf(p.face, profilePicture) : this.#heard.get(id)?.face
     const since = Number(p.since)
     const path = Array.isArray(p.path) ? p.path.map((s: unknown) => String(s ?? '')).filter(Boolean).slice(0, 64) : undefined
     this.#heard.set(id, {
@@ -550,11 +587,12 @@ export class HiveMeetingDrone extends Drone {
       ...(path ? { path } : {}),
       rules: cleanRules(p.rules),
       ...(sfu ? { sfu } : {}),
+      ...(face && (face.name || face.picture) ? { face } : {}),
       lead: typeof p.lead === 'string' ? p.lead : '',
       follows: typeof p.follows === 'string' ? p.follows : '',
       lastSeenMs: Date.now(),
     })
-    if (this.#localAvailable && sfu) void this.#subscribeTo(id)
+    if (this.#localAvailable && sfu && this.#pc) void this.#subscribeTo(id)
     // Someone new: say who we are at once, rather than at our next beat.
     if (isNew && this.#localAvailable) { this.#lastAvailPublishMs = 0; this.#publishAvailability() }
     this.#follow()
@@ -591,6 +629,10 @@ export class HiveMeetingDrone extends Drone {
       lead: this.#lead,
       follows: this.#following,
       ...(this.#sfu && this.#published.length ? { sfu: { session: this.#sfu.sessionId, tracks: this.#published.map(t => t.trackName) } } : {}),
+      ...(this.#face.name || this.#face.picture ? { face: {
+        ...(this.#face.name ? { name: this.#face.name } : {}),
+        ...(this.#face.picture ? { picture: this.#face.picture } : {}),
+      } } : {}),
       ts: now,
     }, [
       ['publisher', this.#publisherId],
@@ -668,11 +710,13 @@ export class HiveMeetingDrone extends Drone {
 
   // ─── the video, through Cloudflare's SFU (sfu-client.ts) ─────────────
   //
-  // One peer connection per person, to the SFU at the meeting point: publish
-  // your camera and microphone once, subscribe to everyone else's. Nobody
-  // connects to anybody else, so nobody learns another person's address.
-  // Video that cannot start (not set up, the month's budget used, a firewall)
-  // is said once; the meeting goes on without it.
+  // One peer connection per person, to the SFU at the meeting point. Voice is
+  // published on join. The camera is published only while it is shared — an
+  // empty video slot is a feed the SFU never carries, so the other side
+  // cannot show it. Every tracks request AND the offer/answer that follows it
+  // run in #signal: a second request while the first exchange is unfinished
+  // is the "3 of 4 feeds" loss (one direction of video never arrives).
+  // Nobody connects to anybody else, so nobody learns another person's address.
 
   async #startVideo(): Promise<void> {
     if (this.#pc || this.#videoStarting || !this.#localAvailable || !this.#localStream || !this.#currentSig) return
@@ -684,56 +728,53 @@ export class HiveMeetingDrone extends Drone {
       if (!base) throw new Error('this swarm meets at no address video can reach')
       const client = new SfuClient({ base, meeting: this.#currentSig, access: readTabZone()?.code ?? '' })
       await client.open()
-      const pc = new RTCPeerConnection(RTC_CONFIG)
-      pc.ontrack = (e: RTCTrackEvent) => {
-        const owner = this.#midOwner.get(e.transceiver?.mid ?? '')
-        if (!owner) return
-        let stream = this.#remoteStreams.get(owner)
-        if (!stream) { stream = new MediaStream(); this.#remoteStreams.set(owner, stream) }
-        stream.addTrack(e.track)
-        this.#emitStreams()
-      }
-      const local: { mid: string; trackName: string }[] = []
-      const transceivers: RTCRtpTransceiver[] = []
-      for (const track of this.#localStream.getAudioTracks()) {
-        transceivers.push(pc.addTransceiver(track, { direction: 'sendonly', streams: [this.#localStream] }))
-      }
-      // The camera's slot is published whether it is shared or not, so
-      // sharing later is a track swapped into a sender, never a
-      // renegotiation. Not shared, the slot carries no frames — the local
-      // preview runs all the same.
-      const camera = this.#localStream.getVideoTracks()[0]
-      transceivers.push(camera && this.#cameraOn
-        ? pc.addTransceiver(camera, { direction: 'sendonly', streams: [this.#localStream] })
-        : pc.addTransceiver('video', { direction: 'sendonly', streams: [this.#localStream] }))
-      const offer = await pc.createOffer()
-      await pc.setLocalDescription(offer)
-      for (const t of transceivers) {
-        const kind = t.sender.track?.kind ?? t.receiver.track.kind
-        if (t.mid) local.push({ mid: t.mid, trackName: `${this.#publisherId}-${kind}` })
-      }
-      const answer = await client.publish(offer.sdp ?? '', local)
-      await pc.setRemoteDescription({ type: 'answer', sdp: answer })
-      if (!this.#localAvailable) { pc.close(); return } // left while it started
-      this.#sfu = client
-      this.#pc = pc
-      this.#published = local
-      // Shared while this was starting: the camera goes into its slot now.
-      if (this.#cameraOn) {
-        const camera = this.#localStream?.getVideoTracks().find(t => t.readyState === 'live')
-        const mid = local.find(p => p.trackName.endsWith('-video'))?.mid
-        const sender = mid ? pc.getTransceivers().find(t => t.mid === mid)?.sender : undefined
-        if (camera && sender && !sender.track) await sender.replaceTrack(camera).catch(() => { /* ignore */ })
-      }
-      this.#tuneSenders()
-      this.#videoBeat = setInterval(() => {
-        void this.#sfu?.beat().catch(() => { /* the next beat tries again */ })
-        void this.#pollSpend()
-      }, VIDEO_BEAT_MS)
-      void this.#pollSpend()
-      this.#lastAvailPublishMs = 0
-      this.#publishAvailability()
-      for (const id of this.#heard.keys()) void this.#subscribeTo(id)
+      if (!this.#localAvailable) return
+      await this.#signal(async () => {
+        const stream = this.#localStream
+        if (!this.#localAvailable || this.#pc || !stream) return
+        const epoch = this.#epoch
+        const pc = new RTCPeerConnection(RTC_CONFIG)
+        // The mid can still be empty when the track event fires. Read the
+        // wire again once the answer has filled it in — reading only the
+        // event is how a feed is lost.
+        pc.ontrack = () => {
+          this.#attachRemote()
+          queueMicrotask(() => this.#attachRemote())
+        }
+        try {
+          const transceivers: RTCRtpTransceiver[] = []
+          for (const track of stream.getAudioTracks()) {
+            if (track.readyState === 'live') transceivers.push(pc.addTransceiver(track, { direction: 'sendonly', streams: [stream] }))
+          }
+          const camera = this.#cameraOn ? stream.getVideoTracks().find(t => t.readyState === 'live') : undefined
+          if (camera) transceivers.push(pc.addTransceiver(camera, { direction: 'sendonly', streams: [stream] }))
+          if (transceivers.length) {
+            const taken = await this.#offerLocal(pc, client, transceivers)
+            if (this.#epoch !== epoch || !this.#localAvailable) { pc.close(); return }
+            for (const transceiver of transceivers) {
+              if (transceiver.mid && !taken.some(ok => ok.mid === transceiver.mid)) {
+                try { transceiver.stop() } catch { /* a refused slot sends nothing */ }
+              }
+            }
+            this.#published = taken
+          }
+          if (this.#epoch !== epoch || !this.#localAvailable) { pc.close(); return }
+          this.#sfu = client
+          this.#pc = pc
+          this.#tuneSenders()
+          this.#videoBeat = setInterval(() => {
+            void this.#signal(() => this.#sfu?.beat() ?? Promise.resolve()).catch(() => undefined)
+            void this.#pollSpend()
+          }, VIDEO_BEAT_MS)
+          void this.#pollSpend()
+          this.#lastAvailPublishMs = 0
+          this.#publishAvailability()
+          for (const id of [...this.#heard.keys()]) await this.#pull(id)
+        } catch (error) {
+          if (this.#pc !== pc) { try { pc.close() } catch { /* not ours yet */ } }
+          throw error
+        }
+      })
     } catch (error) {
       if (!this.#videoSaid) {
         this.#videoSaid = true
@@ -744,6 +785,36 @@ export class HiveMeetingDrone extends Drone {
       }
     } finally {
       this.#videoStarting = false
+    }
+  }
+
+  /** A fresh local offer for these transceivers, and the tracks the SFU took.
+   *  A refusal rolls the local offer back, so the session is not left in
+   *  have-local-offer where the next subscribe would be dropped. */
+  async #offerLocal(pc: RTCPeerConnection, client: SfuClient, transceivers: readonly RTCRtpTransceiver[]): Promise<FeedTrack[]> {
+    const offer = await pc.createOffer()
+    await pc.setLocalDescription(offer)
+    try {
+      await iceSettled(pc)
+      const local: FeedTrack[] = []
+      for (const transceiver of transceivers) {
+        const kind = transceiver.sender.track?.kind
+        if (transceiver.mid && (kind === 'audio' || kind === 'video')) local.push({ mid: transceiver.mid, trackName: `${this.#publisherId}-${kind}` })
+      }
+      if (!local.length) {
+        if (pc.signalingState === 'have-local-offer') {
+          await pc.setLocalDescription({ type: 'rollback' }).catch(() => undefined)
+        }
+        return []
+      }
+      const answer = await client.publish(pc.localDescription?.sdp ?? offer.sdp ?? '', local)
+      await pc.setRemoteDescription({ type: 'answer', sdp: answer.sdp })
+      return acceptedLocalTracks(local, answer.tracks)
+    } catch (error) {
+      if (pc.signalingState === 'have-local-offer') {
+        await pc.setLocalDescription({ type: 'rollback' }).catch(() => undefined)
+      }
+      throw error
     }
   }
 
@@ -774,76 +845,158 @@ export class HiveMeetingDrone extends Drone {
     } catch { /* the next beat asks again */ }
   }
 
-  /** Subscribe to one person's published tracks — each of them once, and
-   *  again on their next heartbeat for any that did not come (a camera slot
-   *  the SFU had nothing on yet). A person who came back with a new session
-   *  is subscribed afresh. */
-  async #subscribeTo(id: string): Promise<void> {
+  /** Subscribe when this side can negotiate. A heartbeat that arrives before
+   *  the peer connection exists is taken at the end of #startVideo. */
+  #subscribeTo = (id: string): void => {
+    if (!this.#pc || !this.#sfu) return
+    void this.#signal(() => this.#pull(id))
+  }
+
+  /** One person's feeds. Runs inside #signal, so it must not queue again.
+   *  A refused track is not remembered, and a track they stopped sending is
+   *  forgotten, so the next heartbeat can ask for it. */
+  async #pull(id: string): Promise<void> {
     const member = this.#heard.get(id)
     const client = this.#sfu
     const pc = this.#pc
-    if (!client || !pc || !member?.sfu || this.#subscribing.has(id)) return
-    let held = this.#subTracks.get(id)
-    if (held && held.session !== member.sfu.session) { this.#dropMember(id); held = undefined }
-    const wanted = member.sfu.tracks.filter(name => !held?.names.has(name))
-    if (!wanted.length) return
-    this.#subscribing.add(id)
+    if (!client || !pc || !member?.sfu) return
+    const epoch = this.#epoch
+    const still = (): boolean => this.#epoch === epoch && this.#pc === pc && this.#sfu === client
+    const held = this.#subTracks.get(id)
+    const plan = subscriptionPlan(member.sfu.session, [...member.sfu.tracks], held)
+    if (plan.reset || plan.drop.length) {
+      const names = plan.reset ? [...(held?.byName.keys() ?? [])] : plan.drop
+      await this.#forget(id, names)
+      if (plan.reset) this.#remoteStreams.delete(id)
+    }
+    if (!plan.want.length || !still()) return
+    const added: string[] = []
     try {
-      const answer = await client.subscribe(member.sfu.session, wanted)
-      const mids = this.#subscribed.get(id) ?? []
-      const names = held?.names ?? new Set<string>()
-      answer.tracks.forEach((t, i) => {
-        if (t.error || !t.mid) return
-        this.#midOwner.set(String(t.mid), id)
-        mids.push(String(t.mid))
-        names.add(String(t.trackName ?? wanted[i] ?? ''))
+      const answer = await client.subscribe(member.sfu.session, plan.want)
+      if (!still()) {
+        const mids = answer.tracks.map(t => t.mid).filter(mid => mid)
+        if (mids.length) await client.close(mids).catch(() => undefined)
+        return
+      }
+      const next = this.#subTracks.get(id) ?? { session: member.sfu.session, byName: new Map<string, string>() }
+      answer.tracks.forEach((track, index) => {
+        if (!track.mid || track.error != null || track.errorCode != null) return
+        const name = track.trackName || plan.want[index] || ''
+        if (!name) return
+        this.#midOwner.set(track.mid, id)
+        next.byName.set(name, track.mid)
+        added.push(name)
       })
-      this.#subscribed.set(id, mids)
-      this.#subTracks.set(id, { session: member.sfu.session, names })
+      if (next.byName.size) this.#subTracks.set(id, next)
+      // Answer even when every track in this batch was refused. Leaving the
+      // offer unanswered makes the next request fail, and that is how the
+      // fourth feed disappears.
       if (answer.offer) {
+        if (pc.signalingState !== 'stable') throw new Error('signaling not stable')
         await pc.setRemoteDescription({ type: 'offer', sdp: answer.offer })
+        if (!still()) return
         const local = await pc.createAnswer()
         await pc.setLocalDescription(local)
-        await client.renegotiate(local.sdp ?? '')
+        await iceSettled(pc)
+        if (!still()) return
+        await client.renegotiate(pc.localDescription?.sdp ?? local.sdp ?? '')
       }
+      if (!still() || !added.length) return
+      this.#attachRemote()
+      queueMicrotask(() => this.#attachRemote())
     } catch {
-      // the next heartbeat tries again, for whatever did not come
-    } finally {
-      this.#subscribing.delete(id)
+      // An offer was applied and not answered: finish it. Anything else is
+      // forgotten, so the next heartbeat subscribes again instead of treating
+      // a feed that never arrived as already held.
+      if (still() && added.length && pc.signalingState === 'have-remote-offer') {
+        try {
+          const local = await pc.createAnswer()
+          await pc.setLocalDescription(local)
+          await iceSettled(pc)
+          await client.renegotiate(pc.localDescription?.sdp ?? local.sdp ?? '')
+          if (still()) { this.#attachRemote(); return }
+        } catch { /* the rollback below closes it */ }
+      }
+      if (added.length) await this.#forget(id, added).catch(() => undefined)
     }
   }
 
-  /** Someone left: stop receiving them. */
+  /** Map every received mid onto its person. Called from the track event and
+   *  again after the answer, because the mid is often empty the first time. */
+  #attachRemote = (): void => {
+    const pc = this.#pc
+    if (!pc) return
+    const wires = pc.getTransceivers().map(transceiver => ({
+      mid: transceiver.mid,
+      track: transceiver.receiver?.track ?? null,
+    }))
+    const feeds = feedsFromWire(wires.map(wire => ({ mid: wire.mid, trackId: wire.track?.id ?? null })), this.#midOwner)
+    let changed = false
+    for (const feed of feeds) {
+      const track = wires.find(wire => wire.track?.id === feed.trackId)?.track
+      if (!track || track.readyState === 'ended') continue
+      let stream = this.#remoteStreams.get(feed.owner)
+      if (!stream) { stream = new MediaStream(); this.#remoteStreams.set(feed.owner, stream); changed = true }
+      if (!stream.getTracks().some(have => have.id === track.id)) { stream.addTrack(track); changed = true }
+    }
+    if (changed) this.#emitStreams()
+  }
+
+  /** Stop receiving these track names. */
+  async #forget(id: string, names: readonly string[]): Promise<void> {
+    const held = this.#subTracks.get(id)
+    if (!held || !names.length) return
+    const mids: string[] = []
+    for (const name of names) {
+      const mid = held.byName.get(name)
+      if (!mid) continue
+      held.byName.delete(name)
+      this.#midOwner.delete(mid)
+      mids.push(mid)
+    }
+    if (!held.byName.size) this.#subTracks.delete(id)
+    const stream = this.#remoteStreams.get(id)
+    if (stream) {
+      for (const mid of mids) {
+        const track = this.#pc?.getTransceivers().find(transceiver => transceiver.mid === mid)?.receiver?.track
+        if (track && stream.getTracks().some(have => have.id === track.id)) stream.removeTrack(track)
+      }
+    }
+    if (mids.length && this.#sfu) await this.#sfu.close(mids).catch(() => undefined)
+    this.#emitStreams()
+  }
+
+  /** Someone left: stop receiving them, after the exchange already in flight. */
   #dropMember(id: string): void {
-    const mids = this.#subscribed.get(id) ?? []
-    this.#subscribed.delete(id)
-    this.#subTracks.delete(id)
-    for (const mid of mids) this.#midOwner.delete(mid)
-    if (mids.length) void this.#sfu?.close(mids).catch(() => { /* gone already */ })
-    if (this.#remoteStreams.delete(id)) this.#emitStreams()
+    void this.#signal(async () => {
+      const names = [...(this.#subTracks.get(id)?.byName.keys() ?? [])]
+      await this.#forget(id, names)
+      if (this.#remoteStreams.delete(id)) this.#emitStreams()
+    })
   }
 
   #endMeeting = (): void => {
+    this.#epoch++
     if (this.#videoBeat) { clearInterval(this.#videoBeat); this.#videoBeat = null }
-    const mids = [...this.#published.map(t => t.mid), ...[...this.#subscribed.values()].flat()]
-    if (this.#sfu && mids.length) void this.#sfu.close(mids).catch(() => { /* the session expires anyway */ })
-    try { this.#pc?.close() } catch { /* ignore */ }
+    const client = this.#sfu
+    const pc = this.#pc
+    const mids = [
+      ...this.#published.map(track => track.mid),
+      ...[...this.#subTracks.values()].flatMap(held => [...held.byName.values()]),
+    ]
+    try { pc?.close() } catch { /* ignore */ }
     this.#pc = null
     this.#sfu = null
     this.#published = []
-    this.#subscribed.clear()
     this.#subTracks.clear()
-    this.#subscribing.clear()
     this.#midOwner.clear()
     this.#remoteStreams.clear()
-
-    // stop local media
     if (this.#localStream) {
       for (const track of this.#localStream.getTracks()) track.stop()
       this.#localStream = null
     }
     this.#cameraOn = false
-
+    if (client && mids.length) void this.#signal(() => client.close(mids).catch(() => undefined))
     this.emitEffect('meeting:streams', { streams: new Map<string, MediaStream>() })
     this.emitEffect('meeting:spend', null)
     this.emitEffect('meeting:local-camera', { on: false })
@@ -868,87 +1021,158 @@ export class HiveMeetingDrone extends Drone {
 
   // ─── camera ──────────────────────────────────────────────────
 
-  /** Accept a pre-acquired MediaStream (from the lobby's user gesture, or
-   *  asked for at join). Its camera stays on as YOUR preview; what the others
-   *  get is the voice until the camera is shared. */
+  /** The name and picture on this person's flower, from their profile. */
+  #loadFace = async (): Promise<void> => {
+    let face: Face = { name: '', picture: '' }
+    try { face = await ownProfileFace() } catch { /* the seat still shows */ }
+    if (face.name === this.#face.name && face.picture === this.#face.picture) return
+    this.#face = face
+    this.#lastPresence = ''
+    this.#lastAvailPublishMs = 0
+    this.#announcePresence()
+    this.#publishAvailability()
+  }
+
+  #sayCamera = (): void => {
+    this.emitEffect('meeting:local-camera', { on: this.#cameraOn })
+    window.dispatchEvent(new CustomEvent('meeting:local-camera', { detail: { on: this.#cameraOn } }))
+    this.#emitStreams()
+  }
+
+  /** Accept a pre-acquired stream. The camera stays off until they click
+   *  their own flower: a preview that was already open is released. */
   #acceptStream = (stream: MediaStream): void => {
     if (this.#localStream && this.#localStream !== stream) {
       for (const track of this.#localStream.getTracks()) track.stop()
     }
+    for (const track of stream.getVideoTracks()) { stream.removeTrack(track); track.stop() }
     this.#localStream = stream
     this.#cameraOn = false
-    const video = videoConstraints(this.#quality)
-    for (const track of stream.getVideoTracks()) void track.applyConstraints(video).catch(() => { /* keep what it has */ })
-    this.emitEffect('meeting:local-camera', { on: false })
-    window.dispatchEvent(new CustomEvent('meeting:local-camera', { detail: { on: false } }))
-    this.#emitStreams()
+    this.#sayCamera()
     void this.#startVideo()
   }
 
-  /** Joining without the lobby: camera and microphone, for the preview and
-   *  the voice. Without a camera, the microphone; without either, nothing —
-   *  you still hear and see the others. */
+  /** Joining without the lobby: the microphone, so the others can hear.
+   *  The camera waits for a click on this person's flower. */
   #joinWithDevices = async (): Promise<void> => {
     let stream: MediaStream
     try {
-      stream = await navigator.mediaDevices.getUserMedia(qualityConstraints(this.#quality))
+      stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints() })
     } catch {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints() })
-      } catch {
-        stream = new MediaStream()
-      }
+      stream = new MediaStream()
     }
     if (!this.#localAvailable) { for (const track of stream.getTracks()) track.stop(); return }
     this.#acceptStream(stream)
   }
 
-  /** Share the camera, or stop sharing it. Off, the video sender sends
-   *  nothing but the camera keeps running for your own preview. On, the
-   *  camera's track goes into the sender — no renegotiation, the SFU keeps
-   *  the same track. */
+  #releaseCamera = (): void => {
+    const stream = this.#localStream
+    if (!stream) return
+    for (const track of stream.getVideoTracks()) { stream.removeTrack(track); track.stop() }
+  }
+
+  #ensureCamera = async (): Promise<MediaStreamTrack | undefined> => {
+    const stream = this.#localStream
+    if (!stream) return undefined
+    const live = stream.getVideoTracks().find(track => track.readyState === 'live')
+    if (live) return live
+    try {
+      const fresh = await navigator.mediaDevices.getUserMedia({ video: videoConstraints(this.#quality) })
+      const track = fresh.getVideoTracks()[0]
+      if (!track || this.#localStream !== stream) { track?.stop(); return undefined }
+      for (const old of stream.getVideoTracks()) { stream.removeTrack(old); old.stop() }
+      stream.addTrack(track)
+      return track
+    } catch (error) {
+      console.warn('[hive-meeting] camera access denied:', error)
+      return undefined
+    }
+  }
+
+  /** Add the camera as its own published track. Inside #signal. */
+  async #publishVideoTrack(track: MediaStreamTrack): Promise<boolean> {
+    const pc = this.#pc
+    const client = this.#sfu
+    const stream = this.#localStream
+    if (!pc || !client || !stream || track.readyState !== 'live') return false
+    const existing = this.#published.find(item => item.trackName.endsWith('-video'))
+    if (existing) {
+      const sender = pc.getTransceivers().find(transceiver => transceiver.mid === existing.mid)?.sender
+      if (sender) await sender.replaceTrack(track).catch(() => undefined)
+      this.#tuneSenders()
+      return true
+    }
+    const transceiver = pc.addTransceiver(track, { direction: 'sendonly', streams: [stream] })
+    try {
+      const taken = await this.#offerLocal(pc, client, [transceiver])
+      const video = taken.find(item => item.trackName.endsWith('-video'))
+      if (!video) { try { transceiver.stop() } catch { /* a refused slot sends nothing */ } return false }
+      this.#published = [...this.#published.filter(item => item.trackName !== video.trackName), video]
+      this.#tuneSenders()
+      return true
+    } catch (error) {
+      try { transceiver.stop() } catch { /* the offer was rolled back */ }
+      throw error
+    }
+  }
+
+  /** Stop sending the camera. The local track is released, so the light goes off. Inside #signal. */
+  async #unpublishVideo(): Promise<void> {
+    const entry = this.#published.find(item => item.trackName.endsWith('-video'))
+    const pc = this.#pc
+    if (entry && pc) {
+      const transceiver = pc.getTransceivers().find(item => item.mid === entry.mid)
+      await transceiver?.sender.replaceTrack(null).catch(() => undefined)
+      try { transceiver?.stop() } catch { /* ignore */ }
+      if (this.#sfu) await this.#sfu.close([entry.mid]).catch(() => undefined)
+      this.#published = this.#published.filter(item => item.mid !== entry.mid)
+    }
+    this.#releaseCamera()
+  }
+
+  /** Share the camera, or stop sharing it. Clicking your flower is this. */
   #toggleCamera = async (): Promise<void> => {
-    // The video sender by the mid it was published under: not shared, its
-    // track is null, so asking the track's kind would find nothing — or the
-    // microphone's sender.
-    const videoMid = this.#published.find(p => p.trackName.endsWith('-video'))?.mid
-    const videoSender = videoMid ? this.#pc?.getTransceivers().find(t => t.mid === videoMid)?.sender : undefined
-    const say = (): void => {
-      this.emitEffect('meeting:local-camera', { on: this.#cameraOn })
-      window.dispatchEvent(new CustomEvent('meeting:local-camera', { detail: { on: this.#cameraOn } }))
-      this.#emitStreams()
-    }
-    if (!this.#localStream) return say() // still joining: the devices are being asked for
-    if (this.#cameraOn) {
-      if (videoSender) await videoSender.replaceTrack(null).catch(() => { /* ignore */ })
-      this.#cameraOn = false
-      return say()
-    }
-    let track = this.#localStream.getVideoTracks().find(t => t.readyState === 'live')
-    if (!track) {
-      try {
-        const fresh = await navigator.mediaDevices.getUserMedia({ video: videoConstraints(this.#quality) })
-        track = fresh.getVideoTracks()[0]
-      } catch (e) {
-        console.warn('[hive-meeting] camera access denied:', e)
-        return say()
+    if (this.#cameraBusy || !this.#localAvailable) return
+    this.#cameraBusy = true
+    try {
+      if (!this.#localStream) return
+      if (this.#cameraOn) {
+        this.#cameraOn = false
+        this.#sayCamera()
+        await this.#signal(() => this.#unpublishVideo())
+      } else {
+        const track = await this.#ensureCamera()
+        if (!track || !this.#localAvailable) return
+        this.#cameraOn = true
+        this.#sayCamera()
+        // 'later': the connection is still starting, and it publishes the
+        // camera itself because #cameraOn is already set. 'no': it refused.
+        let reached: 'yes' | 'no' | 'later'
+        try {
+          reached = await this.#signal(async () => {
+            if (!this.#pc || !this.#sfu) return 'later' as const
+            return await this.#publishVideoTrack(track) ? 'yes' as const : 'no' as const
+          })
+        } catch { reached = 'no' }
+        if (this.#cameraOn && reached === 'no') {
+          EffectBus.emit('activity:log', {
+            message: 'meeting: your camera is on for you, but it did not reach the others. Turn it off and on to try again.',
+            icon: '📷',
+          })
+        }
       }
-      if (!track) return say()
-      for (const old of this.#localStream.getVideoTracks()) this.#localStream.removeTrack(old)
-      this.#localStream.addTrack(track)
+      this.#lastAvailPublishMs = 0
+      this.#publishAvailability()
+    } finally {
+      this.#cameraBusy = false
     }
-    if (videoSender) await videoSender.replaceTrack(track).catch(() => { /* ignore */ })
-    this.#cameraOn = true
-    this.#tuneSenders()
-    say()
   }
 
   /** Every face in seat order: the leader first — the centre hex — then by
-   *  arrival. */
+   *  arrival. Your own camera is among them only while it is on. */
   #emitStreams = (): void => {
     const byId = new Map<string, MediaStream>(this.#remoteStreams)
-    // Your own face shows on YOUR screen whether it is shared or not.
-    if (this.#localStream && showsPicture(this.#localStream)) byId.set(this.#publisherId, this.#localStream)
+    if (this.#cameraOn && this.#localStream) byId.set(this.#publisherId, this.#localStream)
     const streams = new Map<string, MediaStream>()
     for (const member of seatOrder(this.#members())) {
       const stream = byId.get(member.id)

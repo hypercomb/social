@@ -36,7 +36,7 @@ describe('the SFU client', () => {
     ])
     const c = new SfuClient({ base: 'https://h/.well-known/hc-meet/sfu', meeting: MEETING, access: 'code-1', fetchImpl: f.fetchImpl })
     expect(await c.open()).toBe('session-abc-1234')
-    expect(await c.publish('MY-OFFER', [{ mid: '0', trackName: 'me-video' }])).toBe('ANSWER')
+    expect(await c.publish('MY-OFFER', [{ mid: '0', trackName: 'me-video' }])).toEqual({ sdp: 'ANSWER', tracks: [{ mid: '0', trackName: 'me-video' }] })
     const sub = await c.subscribe('session-ann-0000', ['ann-video'])
     expect(sub).toEqual({ offer: 'OFFER', tracks: [{ mid: '2', trackName: 'ann-video' }] })
     await c.renegotiate('MY-ANSWER')

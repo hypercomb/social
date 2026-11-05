@@ -2875,5 +2875,22 @@
   "meeting.lobby-sharp": "तेज़",
   "meeting.icon-start": "मीटिंग शुरू करें",
   "meeting.icon-live": "आपके झुंड में मीटिंग चल रही है: जुड़ें",
-  "meeting.icon-in": "मीटिंग दिखाएँ या छिपाएँ"
+  "meeting.icon-in": "मीटिंग दिखाएँ या छिपाएँ",
+  "meeting.camera-on": "कैमरा चालू करें",
+  "meeting.camera-off": "कैमरा बंद करें",
+  "meeting.hive-hide": "छिपाएँ",
+  "meeting.hive-show": "मीटिंग दिखाएँ",
+  "meeting.hive-camera-hint": "कैमरा चालू करने के लिए अपने फूल पर क्लिक करें।",
+  "meeting.hive": "मीटिंग",
+  "meeting.you": "आप",
+  "meeting.copy-link": "लिंक कॉपी करें",
+  "meeting.share-link": "लिंक साझा करें",
+  "meeting.leave": "छोड़ें",
+  "meeting.full-screen": "पूर्ण स्क्रीन",
+  "meeting.exit-full-screen": "पूर्ण स्क्रीन बंद करें",
+  "meeting.leads": "नेतृत्व",
+  "meeting.hive-alone": "अभी केवल आप हैं। किसी को बुलाने के लिए लिंक कॉपी करें।",
+  "meeting.hive-not-in": "आप मीटिंग में नहीं हैं।",
+  "meeting.spend-left": "जो चले गए उनसे",
+  "meeting.spend-meeting": "इस मीटिंग का वीडियो"
 }

@@ -206,7 +206,7 @@ A simpler design would let any two people with cameras on start talking the mome
 | [meeting-signaling.ts](../hypercomb-essentials/src/meeting/meeting-signaling.ts) | Signal parsing, Nostr tag helpers, peer id generation |
 | [meeting-peer.ts](../hypercomb-essentials/src/meeting/meeting-peer.ts) | `RTCPeerConnection` wrapper — offer, answer, ICE |
 | [meeting-audio.ts](../hypercomb-essentials/src/meeting/meeting-audio.ts) | Slot-positioned spatial audio mixer |
-| [meeting-video.drone.ts](../hypercomb-essentials/src/meeting/meeting-video.drone.ts) | Renders remote/local streams onto the correct ring-1 hex |
+| [meeting-video.drone.ts](../hypercomb-essentials/src/meeting/meeting-video.drone.ts) | Plays each voice once. The picture is the speaker's rectangle and the flower |
 | [meeting-controls.worker.ts](../hypercomb-essentials/src/meeting/meeting-controls.worker.ts) | Camera toggle and availability UI |
 
 ---

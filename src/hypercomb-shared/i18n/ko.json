@@ -2875,5 +2875,22 @@
   "meeting.lobby-sharp": "선명",
   "meeting.icon-start": "회의 시작",
   "meeting.icon-live": "스웜에서 회의가 진행 중입니다: 참여하기",
-  "meeting.icon-in": "회의 보기 또는 숨기기"
+  "meeting.icon-in": "회의 보기 또는 숨기기",
+  "meeting.camera-on": "카메라 켜기",
+  "meeting.camera-off": "카메라 끄기",
+  "meeting.hive-hide": "숨기기",
+  "meeting.hive-show": "회의 보이기",
+  "meeting.hive-camera-hint": "자신의 꽃을 누르면 카메라가 켜집니다.",
+  "meeting.hive": "회의",
+  "meeting.you": "나",
+  "meeting.copy-link": "링크 복사",
+  "meeting.share-link": "링크 공유",
+  "meeting.leave": "나가기",
+  "meeting.full-screen": "전체 화면",
+  "meeting.exit-full-screen": "전체 화면 끝내기",
+  "meeting.leads": "진행",
+  "meeting.hive-alone": "아직 당신뿐입니다. 링크를 복사해 누군가를 부르세요.",
+  "meeting.hive-not-in": "회의에 들어와 있지 않습니다.",
+  "meeting.spend-left": "나간 사람의 분",
+  "meeting.spend-meeting": "이 회의의 영상"
 }
