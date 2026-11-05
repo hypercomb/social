@@ -398,8 +398,8 @@ describe('rail projection — the window over the strip', () => {
     const projections = project.mock.calls.length
 
     expect(rail.shiftBy(1)).toBe(true)
-    // point-top vertical: a step is two rows of three
-    expect(rail.windowOf(dense)![0]).toBe('t6')
+    // point-top vertical: a step is one row of three
+    expect(rail.windowOf(dense)![0]).toBe('t3')
     expect(last('render:grid-changed')).toMatchObject({ active: true, shift: 1 })
     // the slot matrix is untouched by a shift
     expect(project.mock.calls.length).toBe(projections)
@@ -443,9 +443,9 @@ describe('rail projection — the window over the strip', () => {
     ;[swapped[0], swapped[1]] = [swapped[1], swapped[0]]
     const merged = rail.mergeWindowOrder(swapped)!
     expect(merged).toHaveLength(40)
-    expect(merged.slice(0, 6)).toEqual(dense.slice(0, 6))
-    expect(merged[6]).toBe('t7')
-    expect(merged.slice(6 + shown.length)).toEqual(dense.slice(6 + shown.length))
+    expect(merged.slice(0, 3)).toEqual(dense.slice(0, 3))
+    expect(merged[3]).toBe('t4')
+    expect(merged.slice(3 + shown.length)).toEqual(dense.slice(3 + shown.length))
     // not a permutation of the window: refused
     expect(rail.mergeWindowOrder(['nope'])).toBeNull()
   })
@@ -482,8 +482,8 @@ describe('rail projection — the wheel lands one step at a time', () => {
     }
     painted()
     await vi.advanceTimersByTimeAsync(200)
-    // point-top vertical: a step is two rows of three
-    expect(firstOf(rail, dense)).toBe('t6')
+    // point-top vertical: a step is one row of three
+    expect(firstOf(rail, dense)).toBe('t3')
     expect(last('render:grid-changed')).toMatchObject({ active: true, shift: 1 })
   })
 
@@ -493,18 +493,21 @@ describe('rail projection — the wheel lands one step at a time', () => {
     const rail = drone as unknown as Wheeled
     const dense = tiles(60)
     rail.windowOf(dense)
-    rail.wheelBy(300) // three notches in hand
-    expect(firstOf(rail, dense)).toBe('t6')
+    // three detents in hand
+    rail.wheelBy(100)
+    rail.wheelBy(100)
+    rail.wheelBy(100)
+    expect(firstOf(rail, dense)).toBe('t3')
     // not painted yet: the tiles hold still
     await vi.advanceTimersByTimeAsync(40)
-    expect(firstOf(rail, dense)).toBe('t6')
+    expect(firstOf(rail, dense)).toBe('t3')
     // painted — and stood for the minimum — the next step goes
     painted()
     await vi.advanceTimersByTimeAsync(100)
-    expect(firstOf(rail, dense)).toBe('t12')
+    expect(firstOf(rail, dense)).toBe('t6')
     // a render that never comes does not hold the strip forever
     await vi.advanceTimersByTimeAsync(500)
-    expect(firstOf(rail, dense)).toBe('t18')
+    expect(firstOf(rail, dense)).toBe('t9')
   })
 
   it('a partial pass is not a landing', async () => {
@@ -513,10 +516,11 @@ describe('rail projection — the wheel lands one step at a time', () => {
     const rail = drone as unknown as Wheeled
     const dense = tiles(60)
     rail.windowOf(dense)
-    rail.wheelBy(200)
+    rail.wheelBy(100)
+    rail.wheelBy(100)
     EffectBus.emit('render:cell-count', { count: 5, settled: false })
     await vi.advanceTimersByTimeAsync(150)
-    expect(firstOf(rail, dense)).toBe('t6')
+    expect(firstOf(rail, dense)).toBe('t3')
   })
 
   it('turning the wheel back cancels what was owed — it does not walk through it', async () => {
@@ -525,7 +529,9 @@ describe('rail projection — the wheel lands one step at a time', () => {
     const rail = drone as unknown as Wheeled
     const dense = tiles(60)
     rail.windowOf(dense)
-    rail.wheelBy(300) // one step now, two owed
+    rail.wheelBy(100) // one step now, two owed
+    rail.wheelBy(100)
+    rail.wheelBy(100)
     await vi.advanceTimersByTimeAsync(20)
     rail.wheelBy(-100) // the hand turns back
     painted()
@@ -543,10 +549,10 @@ describe('rail projection — the wheel lands one step at a time', () => {
     const rail = drone as unknown as Wheeled
     const dense = tiles(14) // one step past a full window, no more
     rail.windowOf(dense)
-    rail.wheelBy(400)
+    for (let i = 0; i < 4; i++) rail.wheelBy(100)
     painted()
     await vi.advanceTimersByTimeAsync(600)
-    expect(firstOf(rail, dense)).toBe('t6')
+    expect(firstOf(rail, dense)).toBe('t3')
     expect(last('render:grid-changed')).toMatchObject({ shift: 1 })
   })
 
