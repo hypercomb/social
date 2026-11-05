@@ -121,8 +121,8 @@ const GLYPHS = {
   backIcon: 'arrow_back',
   opensIcon: 'chevron_right',
   homeIcon: 'home',
+  originIcon: 'hive',
   hostIcon: 'public',
-  ownHostIcon: 'cloud_upload',
   addIcon: 'add_link',
   searchIcon: 'search',
   bulbIcon: 'lightbulb',
@@ -181,14 +181,14 @@ export const hostHue = (zone: string): number => {
 export const hostInitial = (label: string): string =>
   (label.replace(/^www\./i, '').match(/[a-z0-9]/i)?.[0] ?? '?').toUpperCase()
 
-/** A host's hexagon — this origin wears home, your host the upload cloud, any other
- *  host its letter on its own hue. `state` lights a dot: an update waits, or behind. */
+/** A host's hexagon — your Home Domain wears home, this origin (the hive you are in)
+ *  the hive, any other host its letter on its own hue. `state` lights a dot: an update waits, or behind. */
 const hostBadge = (zone: string, label: string, state: '' | 'update' | 'behind' = '', own = false): HTMLElement => {
   const badge = make('span', state ? `hd-avatar ${state}` : 'hd-avatar')
   badge.setAttribute('aria-hidden', 'true')
   const hex = make('span', 'hd-hex')
-  if (own) { badge.classList.add('own'); hex.append(glyph('ownHostIcon')) }
-  else if (!zone) { badge.classList.add('home'); hex.append(glyph('homeIcon')) }
+  if (own) { badge.classList.add('own'); hex.append(glyph('homeIcon')) }
+  else if (!zone) { badge.classList.add('origin'); hex.append(glyph('originIcon')) }
   else { badge.style.setProperty('--hd-hue', String(hostHue(zone))); hex.textContent = hostInitial(label) }
   badge.append(hex)
   return badge
@@ -1726,10 +1726,10 @@ export class HostDirectoryElement extends HTMLElement {
     }
     const ownOpen = !searching && pane === OWN_PANE
     const own = make('li', `hd-section hd-own-entry${ownOpen ? ' open' : ''}`)
-    const ownButton = button('hd-domain', '', t('hosts.your-host', 'Your host'))
+    const ownButton = button('hd-domain', '', t('hosts.your-host', 'Home Domain'))
     ownButton.dataset['pane'] = OWN_PANE
     if (ownOpen) ownButton.setAttribute('aria-current', 'true')
-    ownButton.append(hostBadge('', '', '', true), make('span', 'hd-domain-name', t('hosts.your-host', 'Your host')))
+    ownButton.append(hostBadge('', '', '', true), make('span', 'hd-domain-name', t('hosts.your-host', 'Home Domain')))
     ownButton.addEventListener('click', () => this.#selectOwn())
     own.append(ownButton)
     list.append(own)
@@ -1840,7 +1840,7 @@ export class HostDirectoryElement extends HTMLElement {
    *  web, where nothing can serve). */
   #renderOwn(body: HTMLElement): void {
     const head = make('div', 'hd-pane-head hd-host-hero')
-    head.append(hostBadge('', '', '', true), make('h2', 'hd-pane-title', t('hosts.your-host', 'Your host')))
+    head.append(hostBadge('', '', '', true), make('h2', 'hd-pane-title', t('hosts.your-host', 'Home Domain')))
     body.append(head)
     body.append(make('p', 'hd-note', t('hosts.own-host-note', 'The domain you serve from: your backup goes there, and the bytes you share are offered from it.')))
     body.append(this.#ownHostForm())
@@ -1862,12 +1862,12 @@ export class HostDirectoryElement extends HTMLElement {
     field.autocomplete = 'off'
     field.spellcheck = false
     try { field.value = zoneOf(localStorage.getItem(OWN_HOST_KEY) ?? '') } catch { field.value = '' }
-    field.placeholder = t('hosts.own-host-placeholder', 'your own host — where your backup goes')
-    field.setAttribute('aria-label', t('hosts.own-host', 'Your own host'))
-    field.title = t('hosts.own-host', 'Your own host')
+    field.placeholder = t('hosts.own-host-placeholder', 'your home domain — where your backup goes')
+    field.setAttribute('aria-label', t('hosts.own-host', 'Home Domain'))
+    field.title = t('hosts.own-host', 'Home Domain')
     const go = make('button', 'hd-quiet', t('hosts.own-host-set', 'Set'))
     go.type = 'submit'
-    const label = make('label', 'hd-own-label', t('hosts.own-host', 'Your own host'))
+    const label = make('label', 'hd-own-label', t('hosts.own-host', 'Home Domain'))
     field.id = 'hd-own-host'
     label.htmlFor = field.id
     own.append(label, field, go)
@@ -2369,12 +2369,14 @@ export class HostDirectoryElement extends HTMLElement {
     own.style.setProperty('--i', String(domains.length))
     let ownZone = ''
     try { ownZone = zoneOf(localStorage.getItem(OWN_HOST_KEY) ?? '') } catch { ownZone = '' }
-    card(own, hostBadge('', '', '', true), t('hosts.your-host', 'Your host'), ownZone)
+    card(own, hostBadge('', '', '', true), t('hosts.your-host', 'Home Domain'), ownZone)
     own.append(make('span', 'hd-marks'), glyph('opensIcon', 'hd-opens'))
     own.addEventListener('click', () => this.#selectOwn())
     list.append(own)
     if (this.#reading && domains.every(domain => !domain.count)) list.append(make('li', 'hd-note hd-reading', t('packages.reading', 'Reading what is served…')))
-    wrap.append(make('h2', 'hd-page-title', t('hosts.rail', 'Hosts you carry')), list, this.#addForm())
+    // The hosts you carry are your network: what comes in. (Community is the showcase's
+    // word — where a creation is promoted — so it is not this side's.)
+    wrap.append(make('h2', 'hd-page-title', t('hosts.network', 'Your Network')), list, this.#addForm())
   }
 
   /** PAGE TWO: what is inside — a host's packages, then the parts of one, with the
@@ -3875,6 +3877,7 @@ ${S} .hd-panel.simple .hd-side{display:none;}
 ${S} .hd-panel.simple .hd-frame,${S} .hd-panel.simple .hd-frame.with-drawer{grid-template-columns:minmax(0,1fr);}
 ${S} .hd-panel.simple .hd-main{padding:0 1.4em 2.6em;}
 ${S} .hd-panel.simple .hd-drawer{position:absolute;inset:0;z-index:2;border-left:none;background:var(--hd-ground);}
+${S} .hd-panel.simple .hd-main > :not(.hd-simple){max-width:48rem;margin-left:auto;margin-right:auto;}
 ${S} .hd-simple{max-width:48rem;margin:0 auto;display:flex;flex-direction:column;gap:.9em;}
 ${S} .hd-simple.wide{max-width:88rem;}
 ${S} .hd-simple > *{max-width:none;}
@@ -4006,7 +4009,7 @@ ${S} .hd-domain:hover{background:var(--hd-wash);}
 ${S} .hd-domain-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;}
 ${S} .hd-chevron{color:var(--hd-ink-quiet);}
 /* ADD A HOST: one field, its glyph, its word. */
-${S} .hd-add{display:flex;align-items:center;gap:.45em;margin:.8em 0 0;padding:.25em .3em .25em .65em;background:var(--hd-raised);border:1px dashed rgba(var(--acc),.38);border-radius:var(--hc-radius-card,3px);transition:border-color .15s,background-color .15s;}
+${S} .hd-add{box-sizing:border-box;display:flex;align-items:center;gap:.45em;margin:.8em 0 0;padding:.25em .3em .25em .65em;background:var(--hd-raised);border:1px dashed rgba(var(--acc),.38);border-radius:var(--hc-radius-card,3px);transition:border-color .15s,background-color .15s;}
 ${S} .hd-add:focus-within{border-style:solid;border-color:rgba(var(--acc),.65);background:var(--hd-ground);}
 ${S} .hd-add-glyph{color:var(--hc-window-accent);}
 ${S} .hd-add-input{flex:1 1 auto;min-width:0;padding:.4em .1em;font:inherit;font-size:.92em;color:var(--hd-ink);background:none;border:none;outline:none;}

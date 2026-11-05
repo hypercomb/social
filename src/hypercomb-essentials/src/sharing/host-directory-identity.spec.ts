@@ -37,11 +37,28 @@ describe('every host its own hexagon', () => {
     expect(hostInitial('—')).toBe('?')
   })
 
-  it('draws the hexagon on the hue by role (relative colour), with this origin and your host as glyphs', () => {
+  it('calls the hosts you carry Your Network — community is the showcase\'s word, not this side\'s', () => {
+    // jwize 11-05: "So call it that Your Community" → "or … Your network on this side" → "Your Network".
+    expect(between('  #hostsPage(', '  /** PAGE TWO')).toMatch(/make\('h2', 'hd-page-title', t\('hosts\.network', 'Your Network'\)\)/)
+  })
+
+  it('draws the hexagon on the hue by role (relative colour), with the Home Domain and this origin as glyphs', () => {
     expect(VIEW).toMatch(/@supports \(color: oklch\(from red l c h\)\)\{\n\$\{S\} \.hd-avatar\{--hd-tint:oklch\(from rgb\(var\(--acc\)\) l c calc\(h \+ var\(--hd-hue,0\)\)\);\}/)
     const badge = between('const hostBadge = ', 'const glyphed = ')
-    expect(badge).toMatch(/if \(own\) \{ badge\.classList\.add\('own'\); hex\.append\(glyph\('ownHostIcon'\)\) \}/)
-    expect(badge).toMatch(/else if \(!zone\) \{ badge\.classList\.add\('home'\); hex\.append\(glyph\('homeIcon'\)\) \}/)
+    // jwize 11-05: "Your Host (Home Domain)" — so home is its glyph; this origin is the hive you are in.
+    expect(badge).toMatch(/if \(own\) \{ badge\.classList\.add\('own'\); hex\.append\(glyph\('homeIcon'\)\) \}/)
+    expect(badge).toMatch(/else if \(!zone\) \{ badge\.classList\.add\('origin'\); hex\.append\(glyph\('originIcon'\)\) \}/)
+  })
+
+  it('names your own host the Home Domain, in every place it is drawn', () => {
+    expect(VIEW).not.toMatch(/'Your host'|'Your own host'/)
+    expect([...VIEW.matchAll(/t\('hosts\.your-host', 'Home Domain'\)/g)].length).toBe(4)
+    expect([...VIEW.matchAll(/t\('hosts\.own-host', 'Home Domain'\)/g)].length).toBe(3)
+  })
+
+  it('centres the drill\'s panes that have no list of their own, as every other page is', () => {
+    // jwize 11-05: "Your Host (Home Domain) is creeping off to the left when it is shown".
+    expect(VIEW).toMatch(/\.hd-panel\.simple \.hd-main > :not\(\.hd-simple\)\{max-width:48rem;margin-left:auto;margin-right:auto;\}/)
   })
 })
 
