@@ -388,6 +388,60 @@ describe('everything on the home page is a tile — the platform\'s doors too', 
   })
 })
 
+describe('a vanilla hive starts with one faux tile (jwize 2026-11-04)', () => {
+  const starter = { label: 'Start here', note: 'how to begin', title: 'Make this hive yours', steps: [
+    { text: 'Open the app.', link: { label: 'Open hypercomb.io', href: 'https://hypercomb.io/' } },
+    { text: 'Publish a branch.' },
+  ] }
+  const draw = (extra = {}) => showcase({
+    self: 'my-hive.example', title: 'my-hive.example', tagline: '', sources: [], starter,
+    ledger: Promise.resolve(parseLedger({ sites: [] })), readShared: async () => ({ offers: [], creations: [] }), ...extra,
+  })
+  const starters = (bands: HTMLElement): number => bands.querySelectorAll('.dex-row.own .hex-starter').length
+
+  it('draws it in an empty row, and a click opens the steps instead of going anywhere', async () => {
+    const { bands, hero } = draw()
+    await vi.waitFor(() => expect(starters(bands)).toBe(1))
+    expect(bands.querySelectorAll('.dex-row.own .hex').length).toBe(1)
+    const tile = bands.querySelector('.hex-starter') as HTMLAnchorElement
+    expect(tile.querySelector('.hex-name')?.textContent).toBe('Start here')
+    expect(tile.target).toBe('')
+    const backdrop = hero.querySelector('.versions-backdrop') as HTMLElement
+    expect(backdrop.hidden).toBe(true)
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+    tile.dispatchEvent(click)
+    expect(click.defaultPrevented).toBe(true)
+    expect(backdrop.hidden).toBe(false)
+    expect(backdrop.querySelector('.versions-title')?.textContent).toBe('Make this hive yours')
+    expect([...backdrop.querySelectorAll('.starter-steps li')].map(item => item.textContent))
+      .toEqual(['Open the app. Open hypercomb.io', 'Publish a branch.'])
+    expect(backdrop.querySelector('a')?.getAttribute('href')).toBe('https://hypercomb.io/')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(backdrop.hidden).toBe(true)
+  })
+
+  it('is a starting point, not furniture: gone while searching, and when a door was staged', async () => {
+    const { bands, hero } = draw()
+    await vi.waitFor(() => expect(starters(bands)).toBe(1))
+    const search = hero.querySelector('input[type=search]') as HTMLInputElement
+    search.value = 'anything'
+    search.dispatchEvent(new Event('input'))
+    expect(starters(bands)).toBe(0)
+    const staged = draw({ links: [{ label: 'Minimal host', href: '/hosts', note: '', icon: 'host' as const }] })
+    await vi.waitFor(() => expect(staged.bands.querySelectorAll('.dex-row.own .hex-link').length).toBe(1))
+    expect(starters(staged.bands)).toBe(0)
+  })
+
+  it('is gone once the row holds something real, and never drawn when none is given', async () => {
+    const full = draw({ self: 'hypercomb.com', ledger: Promise.resolve(parseLedger(LEDGER)) })
+    await vi.waitFor(() => expect(full.bands.querySelectorAll('.dex-row.own .hex').length).toBe(2))
+    expect(starters(full.bands)).toBe(0)
+    const bare = draw({ starter: null })
+    await vi.waitFor(() => expect(bare.bands.querySelector('.dex-row.own .hosted-empty:not([hidden])')?.textContent).toBe('Nothing is published here yet.'))
+    expect(bare.bands.querySelectorAll('.hex').length).toBe(0)
+  })
+})
+
 describe('following a domain from the page', () => {
   const sites = parseLedger(LEDGER)
   const peer = (zone: string) => parseLedger({ sites: [

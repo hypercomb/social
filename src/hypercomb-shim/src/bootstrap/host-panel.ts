@@ -709,9 +709,12 @@ class HostPanelElement extends HTMLElement {
         readCommunity: readCommunityTiles,
         keepCommunity: keepCommunityTiles,
         onManage: on => { manage.hidden = !on },
-        // EVERYTHING ON THE HOME PAGE IS A TILE (jwize 2026-10-25): the staged doors
-        // and the platform's own are tiles in this domain's row, not panels.
-        links: [...door.links, ...door.footer],
+        // EVERYTHING ON THE HOME PAGE IS A TILE (jwize 2026-10-25): the doors this
+        // domain staged are tiles in its row, not panels. The platform's own doors
+        // are staged by hypercomb.com and nowhere else (jwize 2026-11-04): a hive of
+        // your own is vanilla, with one faux starting tile while its row is empty.
+        links: door.links,
+        starter: door.starter,
         follow: raw => this.#follow(raw),
         unfollow: zone => removeHostZone(zone),
         readPeerLedger,

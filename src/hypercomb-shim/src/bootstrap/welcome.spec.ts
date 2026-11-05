@@ -6,7 +6,7 @@
 // field survives its clamp.
 
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_TAGLINE, PLATFORM_LINKS, frontDoorOf, parseWelcome, readWelcome } from './welcome'
+import { DEFAULT_TAGLINE, PLATFORM_LINKS, STARTER, frontDoorOf, parseWelcome, readWelcome } from './welcome'
 
 describe('parseWelcome — the staged file is data', () => {
   it('keeps a path on this origin and a plain web address; drops anything that could become script', () => {
@@ -52,12 +52,22 @@ describe('parseWelcome — the staged file is data', () => {
 })
 
 describe('frontDoorOf — the default experience, and a staged one on top', () => {
-  it('a bare host presents its own name, the platform’s sentence, and every platform door', () => {
+  it('a bare host is vanilla: its own name, the platform’s sentence, no doors as tiles, one faux starting tile', () => {
     const door = frontDoorOf(null, 'my-hive.pages.dev', 'https://my-hive.pages.dev')
     expect(door.title).toBe('my-hive.pages.dev')
     expect(door.tagline).toBe(DEFAULT_TAGLINE)
     expect(door.links).toEqual([])
+    expect(door.starter).toBe(STARTER)
+    // The platform's doors stay the small footer of a task view; the page draws only `links` and `starter`.
     expect(door.footer).toEqual(PLATFORM_LINKS)
+  })
+
+  it('the starting steps point only at plain https pages, and each says something', () => {
+    expect(STARTER.steps.length).toBeGreaterThan(0)
+    for (const step of STARTER.steps) {
+      expect(step.text.length).toBeGreaterThan(0)
+      if (step.link) expect(step.link.href).toMatch(/^https:\/\//)
+    }
   })
 
   it('a card at host.<zone> is the host of the zone, and goes by the zone', () => {
@@ -77,6 +87,8 @@ describe('frontDoorOf — the default experience, and a staged one on top', () =
     expect(door.title).toBe('hypercomb')
     expect(door.tagline).toBe('An open software platform.')
     expect(door.footer.map(link => link.label)).toEqual(['source', 'licensing'])
+    // A host with a front page of its own is not a vanilla hive: no starting tile.
+    expect(door.starter).toBeNull()
   })
 
   it('a staged title or tagline that is empty falls back to the default, field by field', () => {

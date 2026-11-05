@@ -7,9 +7,12 @@
 // card that can only say "add a domain" is a dead end for the visitor who
 // arrived to find out what this is. So every host presents itself, with
 // nothing staged at all: the mark, its own name, one sentence about what a
-// host is, what it publishes, and — in the footer — where the platform
-// explains itself. That is the default experience, the same on a Pages
-// deployment, an Azure app, and a machine running `hypercomb-serve`.
+// host is, what it publishes, and — while it publishes nothing — one faux
+// "Start here" tile that opens the steps. That is the default experience, the
+// same on a Pages deployment, an Azure app, and a machine running
+// `hypercomb-serve`. The platform's own doors (tour, app, hosting, extensions,
+// source, licensing) are NOT part of it: they are hypercomb.com's front page,
+// staged there as links, and a participant's own hive stays vanilla.
 //
 // An origin that is also a website stages `welcome.json` next to the shell
 // and the card reads it: a title and a tagline in place of the defaults, the
@@ -42,6 +45,11 @@ export type Welcome = {
   swarm?: string
 }
 
+/** One line of the starting instructions, and the page it points at, if any. */
+export type StarterStep = { text: string; link?: { label: string; href: string } }
+/** The faux tile a new hive starts with: a name, a hint, and what to do. */
+export type Starter = { label: string; note: string; title: string; steps: readonly StarterStep[] }
+
 /** The card, resolved: what it shows whether or not anything was staged. */
 export type FrontDoor = {
   readonly title: string
@@ -50,8 +58,12 @@ export type FrontDoor = {
   /** The zone's room, drawn first as "Join the swarm" — or ''. */
   readonly swarm: string
   /** Where the platform explains itself, minus any door the staged links
-   *  already open — `/tour/` on hypercomb.com IS the tour. */
+   *  already open — `/tour/` on hypercomb.com IS the tour. Never tiles: it is
+   *  the small footer of a task view, not what a participant's own hive shows. */
   readonly footer: readonly WelcomeLink[]
+  /** The starting point a host with nothing staged offers in place of the
+   *  platform's doors — null once the operator stages a front page of its own. */
+  readonly starter: Starter | null
 }
 
 /** What every host is, until its operator says otherwise. */
@@ -72,6 +84,29 @@ export const PLATFORM_LINKS: readonly WelcomeLink[] = [
   { label: 'source', href: 'https://github.com/hypercomb/social', note: 'AGPL-3.0', icon: 'source' },
   { label: 'licensing', href: 'https://github.com/hypercomb/social/blob/main/src/documentation/licensing.md', note: '', icon: 'docs' },
 ]
+
+/** A VANILLA HIVE STARTS WITH ONE FAUX TILE (jwize 2026-11-04: "the default
+ *  instructional tiles should not be on your own hive … a new participant
+ *  should get a vanilla experience with maybe a faux tile as a starting point;
+ *  if you click it you get some instructions on how to start"). The platform's
+ *  doors — tour, app, hosting, extensions, source, licensing — are hypercomb.com's
+ *  front page, staged there as its own links; a participant's own hive does not
+ *  carry them. This tile is drawn only while the row is empty, and it answers
+ *  with the steps, never a link out. */
+export const STARTER: Starter = {
+  label: 'Start here',
+  note: 'how to make this hive yours',
+  title: 'Make this hive yours',
+  steps: [
+    { text: 'Open the app and make a hive of your own. The tiles you create there are yours, kept on your device.',
+      link: { label: 'Open hypercomb.io', href: APP_HREF } },
+    { text: 'Publish a branch from the app. Turn on Manage here and tap it to put it on this page.' },
+    { text: 'To keep it reachable when your device is off, host it from your device, your own server, or in the cloud.',
+      link: { label: 'Host your hive', href: 'https://host-setup.hypercomb.com/' } },
+    { text: 'New to all this? The tour explains what it is in a few minutes.',
+      link: { label: 'Watch the tour', href: 'https://hypercomb.com/tour/' } },
+  ],
+}
 
 const text = (value: unknown, max: number): string =>
   typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, max) : ''
@@ -185,8 +220,8 @@ const hostNameOf = (hostname: string): string => {
 }
 
 /** The card a host shows: the staged front door where there is one, and the
- *  host's own name, the platform's sentence and the platform's doors where
- *  there is not. Pure, so the default is a fact the suite can pin. */
+ *  host's own name, the platform's sentence and a starting tile where there is
+ *  not. Pure, so the default is a fact the suite can pin. */
 export const frontDoorOf = (welcome: Welcome | null, hostname: string, origin: string): FrontDoor => {
   const links = welcome?.links ?? []
   return {
@@ -195,5 +230,6 @@ export const frontDoorOf = (welcome: Welcome | null, hostname: string, origin: s
     links,
     swarm: welcome?.swarm ?? '',
     footer: PLATFORM_LINKS.filter(door => !links.some(link => sameDoor(link.href, door.href, origin))),
+    starter: links.length === 0 ? STARTER : null,
   }
 }

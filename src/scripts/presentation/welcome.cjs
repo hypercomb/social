@@ -12,7 +12,8 @@
 // to the shell at deploy time and read by the card (hypercomb-shim/src/
 // bootstrap/welcome.ts); the shim itself stays generic and knows nothing about
 // hypercomb.com. Any host may stage its own, and a host with none renders the
-// default front door: its own name, what it publishes, the platform's doors.
+// default front door: its own name, what it publishes, and one faux "Start
+// here" tile — the platform's doors below are hypercomb.com's, not every host's.
 //
 // The directory of doors is the SAME derivation the presentation splash bakes
 // in — hosts.cjs, from the worker's ledger of signed heads — so the two pages
@@ -40,6 +41,11 @@ const compose = (doors) => ({
     { label: 'Open hypercomb.io', href: 'https://hypercomb.io', note: 'the main app — start a hive of your own', icon: 'app' },
     { label: 'Host your hive', href: 'https://host-setup.hypercomb.com/', note: 'on your device, your own server, or in the cloud', icon: 'app' },
     { label: 'Browser extensions', href: '/downloads/#extensions', note: 'Smart Autolinker · No YouTube Shorts', icon: 'extension' },
+    // The platform's own doors are THIS front page's tiles and no other host's
+    // (jwize 2026-11-04): a participant's own hive is vanilla, so source and
+    // licensing — once the shim's built-in footer on every host — are staged here.
+    { label: 'source', href: 'https://github.com/hypercomb/social', note: 'AGPL-3.0', icon: 'source' },
+    { label: 'licensing', href: 'https://github.com/hypercomb/social/blob/main/src/documentation/licensing.md', note: '', icon: 'docs' },
   ],
   doorsLabel: `live on ${hosts.ZONE} · ${doors.length} ${doors.length === 1 ? 'hive' : 'hives'}`,
   doors: doors.map(d => ({ title: d.title, host: d.host })),

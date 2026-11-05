@@ -23,7 +23,7 @@ import { DEFAULT_HOME, homeOrigin, turnOffHref } from './turn-off-link'
 import type { OwnerBridge } from './owner-bridge'
 import { showcaseHref } from './showcase-link'
 import type { CommunityPick } from './community-tiles'
-import type { LinkIcon, WelcomeLink } from './welcome'
+import type { LinkIcon, Starter, WelcomeLink } from './welcome'
 
 const SIG = /^[a-f0-9]{64}$/
 const HOSTNAME = /^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$/
@@ -559,6 +559,9 @@ export type ShowcaseOptions = {
    *  in your home page should be a tile … they have deployed webpages that we
    *  can navigate to"). */
   readonly links?: readonly WelcomeLink[]
+  /** The faux starting tile of a vanilla hive: drawn in this domain's row only
+   *  while the row holds nothing and no doors were staged; a click opens its steps. */
+  readonly starter?: Starter | null
   /** Follow a domain: checked, then kept in this browser's community. */
   /** Stop following a domain: forget it where the browser kept it. True when it is gone. */
   readonly unfollow?: (zone: string) => Promise<boolean>
@@ -1450,6 +1453,54 @@ ${entry.key}`
     const words = `${link.label} ${link.note} ${link.href}`.toLowerCase()
     return terms.every(term => words.includes(term))
   }
+
+  // ── THE FAUX STARTING TILE of a vanilla hive: the same hexagon, drawn only while the row is empty.
+  //    It links nowhere: a click opens the steps in the sheet a held tile uses ──
+  let starterTile: HTMLAnchorElement | null = null
+  const openStarter = (guide: Starter, from: HTMLElement): void => {
+    opener = from
+    const heading = el('h3', 'versions-title')
+    heading.textContent = guide.title
+    const steps = el('ol', 'starter-steps')
+    for (const step of guide.steps) {
+      const item = el('li')
+      item.append(document.createTextNode(step.text))
+      if (step.link) {
+        item.append(document.createTextNode(' '))
+        const link = el('a', 'version-visit')
+        link.href = step.link.href
+        link.target = '_blank'
+        link.rel = 'noopener'
+        link.textContent = step.link.label
+        item.append(link)
+      }
+      steps.append(item)
+    }
+    sheet.replaceChildren(heading, steps)
+    sheet.tabIndex = -1
+    backdrop.hidden = false
+    document.addEventListener('keydown', onKey, true)
+    sheet.focus()
+  }
+  const starterOf = (guide: Starter): HTMLAnchorElement => {
+    if (starterTile) return starterTile
+    const tile = el('a', 'hex hex-link hex-starter')
+    tile.href = '#start'
+    tile.setAttribute('role', 'button')
+    tile.title = `${guide.label} · ${guide.note}`
+    const art = el('span', 'hex-art link-art')
+    art.append(iconOf('hive'))
+    const label = el('span', 'hex-label')
+    const name = el('span', 'hex-name')
+    name.textContent = guide.label
+    const hint = el('span', 'hex-address')
+    hint.textContent = guide.note
+    label.append(name, hint)
+    tile.append(art, label)
+    tile.addEventListener('click', event => { event.preventDefault(); openStarter(guide, tile) })
+    starterTile = tile
+    return tile
+  }
   /** Every publish known now — the ledger's, then each domain's pools — one tile per name. */
   const bands = (): Band[] => {
     const peers = [...peerSites.values()]
@@ -1619,6 +1670,8 @@ ${entry.key}`
       const shown = items.filter(entry => aggregateMatches(entry, terms))
       // The doors wait for the ledger: the row draws once, not the doors and then the hives.
       const doors = own && ledgerRead && !unread ? links.filter(link => linkMatches(link, terms)) : []
+      // The faux starting tile stands in only for a row with nothing in it: no tile, no staged door, no search.
+      const starting = own && ledgerRead && !unread && !!options.starter && !community && links.length === 0 && items.length === 0 && !terms.length
       const total = shown.length + doors.length
       visible += !managing && !own ? 0 : terms.length ? total : 1
       // While a search runs every row holding a match is open; otherwise one is.
@@ -1634,7 +1687,7 @@ ${entry.key}`
         // In another domain's row, a tile already on this domain's page says so.
         tile.classList.toggle('in-showcase', !own && showcased(entry))
         return tile
-      }), ...doors.map(link => linkTile(link))] : [], own ? shape : base)
+      }), ...doors.map(link => linkTile(link)), ...(starting && options.starter ? [starterOf(options.starter)] : [])] : [], own ? shape : base)
       view.empty.hidden = !open || (own ? shown.length > 0 && !unread : total > 0)
       view.empty.textContent = temp ? (temp.state === 'checking' ? `Checking ${zone}…` : `${zone} was not found — ${temp.reason}`)
         : isCommunity ? 'Nothing here yet. Tap a tile in a domain to bring it into your community.'
@@ -2038,6 +2091,13 @@ a.hex { color: inherit; text-decoration: none; cursor: pointer; }
 .link-art > svg { position: relative; z-index: 1; display: block; width: 38%; height: 38%; margin: 20% 31% 0; opacity: .95;
   filter: drop-shadow(0 .3rem .7rem rgb(248 183 58 / .35)); }
 .hex-link:hover .link-art, .hex-link:focus-visible .link-art { color: var(--gold-1); }
+/* the faux starting tile: the same hexagon, quieter than a real one until it is reached for */
+.hex-starter { opacity: .72; transition: background .25s, opacity .25s; }
+.hex-starter:hover, .hex-starter:focus-visible { opacity: 1; }
+.starter-steps { display: grid; gap: .7rem; margin: 0; padding-left: 1.2rem; color: var(--md-on-surface-var); font: 500 .92rem/1.45 var(--md-font-ui, Inter, system-ui, sans-serif); }
+/* the card's generic li is a flex row with a rule above it; a step is a plain numbered line */
+.starter-steps li { display: list-item; padding: 0; border-top: 0; }
+.starter-steps li::marker { color: var(--md-primary); font-weight: 700; }
 .hex-link:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 3px; }
 /* following a domain: a search that found nothing offers it, and the foot always can */
 .follow-suggest { display: flex; margin: 0 0 1.2rem; }
