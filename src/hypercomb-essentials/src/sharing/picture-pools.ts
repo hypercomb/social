@@ -55,13 +55,27 @@ const sigAt = (value: unknown): string => {
   return SIG_RE.test(bare) ? bare : ''
 }
 
+/** A published layer's properties document, read THROUGH the Life Primitive
+ *  hop: a hive writes `{ meta: 1, resource: <sig>, relation: 'properties' }`
+ *  and the properties live at that resource. A bare document is its own
+ *  answer. Followed a few hops at most; null when nothing can be read. */
+export const layerProps = async (layer: Record<string, unknown>, read: ReadJson): Promise<Record<string, unknown> | null> => {
+  let doc = Array.isArray(layer['properties']) ? await readAt(sigAt(layer['properties'][0]), read) : null
+  for (let hop = 0; doc && doc['meta'] === 1 && hop < 4; hop++) {
+    doc = await readAt(sigAt(doc['resource']), read)
+  }
+  return doc
+}
+
+const readAt = async (sig: string, read: ReadJson): Promise<Record<string, unknown> | null> =>
+  sig ? await read(sig) : null
+
 /** The picture a published layer wears, read the way the reader reads it:
- *  layer → its properties document → the image pointers. */
+ *  layer → its properties document (through the hop) → the image pointers. */
 export const layerPicture = async (layerSig: string, read: ReadJson, wears: WearsPicture): Promise<{ name: string; layer: Record<string, unknown> } | null> => {
   const layer = await read(layerSig)
   if (!layer) return null
-  const propsSig = Array.isArray(layer['properties']) ? sigAt(layer['properties'][0]) : ''
-  const props = propsSig ? await read(propsSig) : null
+  const props = await layerProps(layer, read)
   if (!props || !wears(props)) return null
   return { name: String(layer['name'] ?? '').trim(), layer }
 }

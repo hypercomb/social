@@ -48,6 +48,16 @@ describe('picture pools — pictures travel only through hosts', () => {
     })
   })
 
+  it('reads a hive\'s properties THROUGH the Life Primitive envelope, as the hive writes them', async () => {
+    const docs = {
+      [sig(1)]: { name: 'protocol', properties: [sig(10)] },
+      // what a hive actually publishes: an envelope naming the properties
+      [sig(10)]: { meta: 1, resource: sig(11), relation: 'properties' },
+      [sig(11)]: { small: { image: sig(100) }, flat: { small: { image: sig(101) } } },
+    }
+    expect(await pictureRootsOf(sig(1), reader(docs))).toEqual({ [(await picturesKey('protocol'))!]: sig(1) })
+  })
+
   it('the tile nearest the branch root keeps a name worn twice', async () => {
     const docs = {
       [sig(1)]: { name: 'top', children: [sig(2), sig(3)] },
