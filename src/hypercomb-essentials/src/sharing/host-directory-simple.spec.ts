@@ -23,9 +23,15 @@ const between = (from: string, to: string): string => VIEW.slice(VIEW.indexOf(fr
 describe('the simple drill', () => {
   it('is the way the desk opens, and the four panes are one switch away', () => {
     expect(VIEW).toMatch(/#mode: DeskMode = 'simple'/)
-    expect(VIEW).toMatch(/modeButton\.addEventListener\('click', \(\) => this\.#setMode\(this\.#mode === 'simple' \? 'advanced' : 'simple'\)\)/)
-    // The switch names the OTHER way to look.
+    // ONE switch, two segments (jwize 11-05: "need identity … icons"): a segment pressed
+    // is that way, a key press on the switch goes to the other.
+    const mount = between('  #mount(): void {', '  #unmount(): void {')
+    expect(mount).toMatch(/const modeButton = button\('hd-modes', ''\)/)
+    expect(mount).toMatch(/for \(const \[mode, icon\] of \[\['simple', 'simpleIcon'\], \['advanced', 'advancedIcon'\]\] as const\)/)
+    expect(mount).toMatch(/this\.#setMode\(pressed === 'simple' \|\| pressed === 'advanced' \? pressed : this\.#mode === 'simple' \? 'advanced' : 'simple'\)/)
+    // The switch is CALLED the other way to look; the segment in use is lit.
     expect(VIEW).toMatch(/this\.#mode === 'simple' \? t\('hosts\.mode\.advanced', 'Advanced'\) : t\('hosts\.mode\.simple', 'Simple view'\)/)
+    expect(VIEW).toMatch(/segment\.classList\.toggle\('on', segment\.dataset\['mode'\] === this\.#mode\)/)
   })
 
   it('draws the simple page or the four panes — and the four panes are drawn exactly as they were', () => {

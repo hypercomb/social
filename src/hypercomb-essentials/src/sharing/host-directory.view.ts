@@ -56,7 +56,7 @@ import { beeDocsOf, beeWords, normalizeMeta, readBeeMeta, writeBeeMeta, type Bee
 import { codeClass, codeLanguage, codeThemeCss, tokenizeCode, type CodeLanguage, type CodeToken } from './code-theme.js'
 import {
   PANE_LIMITS, clampPane, crumbTrail, deskRecord, deskRecordText, drillPage, drillRows, finishedLast,
-  type DeskMode, type DrillPage, type PaneName,
+  type Crumb, type DeskMode, type DrillPage, type PaneName,
 } from './host-directory.drill.js'
 import { hostZone } from './community-hosts.js'
 import { fetchHiveIndex, type HiveIndexResult, type HiveManifest } from './hive-pointer.js'
@@ -107,6 +107,97 @@ const button = (className: string, text: string, label = ''): HTMLButtonElement 
   const node = make('button', className, text)
   node.type = 'button'
   if (label) { node.setAttribute('aria-label', label); node.title = label }
+  return node
+}
+
+/** THE DESK'S GLYPHS — Material Symbols ligatures, each named once here so the
+ *  font subset carries it (scripts/icon-names.cjs reads every `…Icon: '…'`). */
+const GLYPHS = {
+  deskIcon: 'dns',
+  simpleIcon: 'view_list',
+  advancedIcon: 'view_column',
+  selectIcon: 'checklist',
+  closeIcon: 'close',
+  backIcon: 'arrow_back',
+  opensIcon: 'chevron_right',
+  homeIcon: 'home',
+  hostIcon: 'public',
+  ownHostIcon: 'cloud_upload',
+  addIcon: 'add_link',
+  searchIcon: 'search',
+  bulbIcon: 'lightbulb',
+  manageIcon: 'more_horiz',
+  updateIcon: 'update',
+  updatesIcon: 'cloud_download',
+  creationsIcon: 'collections',
+  visitIcon: 'open_in_new',
+  blockIcon: 'block',
+  resumeIcon: 'play_arrow',
+  removeIcon: 'delete',
+  hiveIcon: 'hive',
+  publishIcon: 'ios_share',
+  publishedIcon: 'public',
+  packagesIcon: 'extension',
+  filesIcon: 'description',
+  codeIcon: 'code',
+  revisionsIcon: 'history',
+  describeIcon: 'edit',
+  moreIcon: 'unfold_more',
+  stackIcon: 'layers',
+  infoIcon: 'info',
+  queenIcon: 'terminal',
+  droneIcon: 'emoji_nature',
+  workerIcon: 'handyman',
+  beeIcon: 'hive',
+  sourceIcon: 'data_object',
+} as const
+type Glyph = keyof typeof GLYPHS
+
+/** A glyph, for the eye only — the words beside it are what is read out. */
+const glyph = (name: Glyph, className = ''): HTMLSpanElement => {
+  const span = make('span', className ? `mat-sym hd-glyph ${className}` : 'mat-sym hd-glyph', GLYPHS[name])
+  span.setAttribute('aria-hidden', 'true')
+  return span
+}
+
+/** The glyph a code file wears, by what the build says it is. */
+export const kindGlyph = (kind: string): Glyph =>
+  kind === 'queen' ? 'queenIcon'
+    : kind === 'drone' ? 'droneIcon'
+      : kind === 'worker' ? 'workerIcon'
+        : kind === 'bee' ? 'beeIcon'
+          : 'sourceIcon'
+
+/** A HOST'S OWN HUE: the accent turned by its name — one of twelve, 30° apart, so
+ *  hosts are told apart at a glance and every theme keeps its weight. Looks only,
+ *  never an identity (FNV-1a over the name; 0 is the accent itself). */
+export const hostHue = (zone: string): number => {
+  let hash = 0x811c9dc5
+  for (const ch of zone) hash = Math.imul(hash ^ ch.charCodeAt(0), 0x01000193) >>> 0
+  return (hash % 12) * 30
+}
+
+/** The letter a host's hexagon carries. */
+export const hostInitial = (label: string): string =>
+  (label.replace(/^www\./i, '').match(/[a-z0-9]/i)?.[0] ?? '?').toUpperCase()
+
+/** A host's hexagon — this origin wears home, your host the upload cloud, any other
+ *  host its letter on its own hue. `state` lights a dot: an update waits, or behind. */
+const hostBadge = (zone: string, label: string, state: '' | 'update' | 'behind' = '', own = false): HTMLElement => {
+  const badge = make('span', state ? `hd-avatar ${state}` : 'hd-avatar')
+  badge.setAttribute('aria-hidden', 'true')
+  const hex = make('span', 'hd-hex')
+  if (own) { badge.classList.add('own'); hex.append(glyph('ownHostIcon')) }
+  else if (!zone) { badge.classList.add('home'); hex.append(glyph('homeIcon')) }
+  else { badge.style.setProperty('--hd-hue', String(hostHue(zone))); hex.textContent = hostInitial(label) }
+  badge.append(hex)
+  return badge
+}
+
+/** A small word with its glyph — the host's acts, the lines under a host's name. */
+const glyphed = (node: HTMLElement, name: Glyph): HTMLElement => {
+  node.classList.add('hd-chip')
+  node.prepend(glyph(name))
   return node
 }
 
@@ -790,6 +881,11 @@ type GateShape = { lock(reason: string): void; unlock(reason: string): void }
 /** The rail's own entry, beside the hosts: where your own host is set. */
 const OWN_PANE = '#own'
 
+/** How a page arrives: on the desk opening, a step in, a step back, or a change of view. */
+type PageEnter = 'open' | 'in' | 'out' | 'swap'
+/** How long an arrival lasts, the stagger of its rows included (ms) — matched by the styles. */
+const ENTER_MS = 600
+
 type Warning = { revision: InstallRevision; replaced: string[]; picksBeneath: string[] }
 
 /** THEIR CODE FROM THEN ON. Replicating a package from another domain means
@@ -882,6 +978,17 @@ export class HostDirectoryElement extends HTMLElement {
   #multi = false
   /** The line the keys last moved to — focused again once the columns are redrawn. */
   #focusKey: string | null = null
+  /** THE MOTION. The page last drawn — what it showed, how deep, how it arrived and
+   *  when — so a step in or back moves and a repaint does not (`#markEnter`). */
+  #shownPage: { key: string; depth: number; mode: DeskMode; enter: PageEnter; at: number } | null = null
+  /** Where each drill page was scrolled when it was left, and where the next draw puts it. */
+  #scrollMemo = new Map<string, number>()
+  #scrollTo: number | null = null
+  #bodyScroll = 0
+  /** When each column, code panel or menu first appeared (`#arriving`); what this draw
+   *  showed, so what is gone arrives again when it comes back. */
+  #entered = new Map<string, number>()
+  #seen = new Set<string>()
   /** Code read by signature (null: asked of the hosts and not found). A signature
    *  is immutable, so what was read outlives an opening of the desk. */
   #code = new Map<string, CodeRead | null>()
@@ -1052,15 +1159,32 @@ export class HostDirectoryElement extends HTMLElement {
     panel.tabIndex = -1
 
     const head = make('header', 'hd-head')
-    head.append(make('span', 'hd-title', t('hosts.title', 'Host directory')), make('span', 'hd-grow'))
-    // ONE SWITCH between the two ways to look: the simple drill, and the four panes.
-    const modeButton = button('hd-link hd-mode', '')
-    modeButton.addEventListener('click', () => this.#setMode(this.#mode === 'simple' ? 'advanced' : 'simple'))
+    // The desk's mark: the hosts glyph the controls bar opens it with, on a hexagon.
+    const mark = make('span', 'hd-deskmark')
+    mark.setAttribute('aria-hidden', 'true')
+    mark.append(glyph('deskIcon'))
+    head.append(mark, make('span', 'hd-title', t('hosts.title', 'Host directory')), make('span', 'hd-grow'))
+    // ONE SWITCH between the two ways to look: the simple drill, and the four panes —
+    // a segment for each, the one in use lit. A segment pressed is that way; a key
+    // press on the switch goes to the other.
+    const modeButton = button('hd-modes', '')
+    for (const [mode, icon] of [['simple', 'simpleIcon'], ['advanced', 'advancedIcon']] as const) {
+      const segment = make('span', 'hd-seg')
+      segment.dataset['mode'] = mode
+      segment.append(glyph(icon), make('span', 'hd-seg-label'))
+      modeButton.append(segment)
+    }
+    modeButton.addEventListener('click', event => {
+      const pressed = (event.target as HTMLElement).closest<HTMLElement>('.hd-seg')?.dataset['mode']
+      this.#setMode(pressed === 'simple' || pressed === 'advanced' ? pressed : this.#mode === 'simple' ? 'advanced' : 'simple')
+    })
     // SELECT is the four panes' own: a toggle that makes every click a Ctrl/Cmd-click.
     const selectButton = button('hd-link hd-select', '')
     selectButton.setAttribute('aria-pressed', 'false')
+    selectButton.append(glyph('selectIcon'), make('span', 'hd-select-label'))
     selectButton.addEventListener('click', () => this.#setMulti(!this.#multi))
-    const close = button('hd-close', '×', t('panel.close', 'close'))
+    const close = button('hd-close', '', t('panel.close', 'close'))
+    close.append(glyph('closeIcon'))
     close.addEventListener('click', () => EffectBus.emit('hosts:close', {}))
     head.append(selectButton, modeButton, close)
 
@@ -1068,6 +1192,7 @@ export class HostDirectoryElement extends HTMLElement {
     // field are built once — a repaint redraws only the list between them, so a
     // read landing never takes the focus from a half-typed domain.
     const search = make('div', 'hd-search')
+    search.append(glyph('searchIcon', 'hd-search-glyph'))
     const input = make('input', 'hd-input')
     input.type = 'search'
     input.addEventListener('input', () => {
@@ -1143,6 +1268,10 @@ export class HostDirectoryElement extends HTMLElement {
     this.#readCode = false
     this.#multi = false
     this.#touched = false
+    // The next opening arrives as an opening: nothing it draws has been seen.
+    this.#shownPage = null
+    this.#entered.clear()
+    this.#scrollMemo.clear()
     this.#published.clear()
     this.#publishedAsk.clear()
     this.#releaseDesk()
@@ -1222,7 +1351,7 @@ export class HostDirectoryElement extends HTMLElement {
     field.setAttribute('aria-label', t('packages.add', 'Add a domain'))
     const go = make('button', 'hd-quiet', t('packages.add-go', 'Add'))
     go.type = 'submit'
-    add.append(field, go)
+    add.append(glyph('addIcon', 'hd-add-glyph'), field, go)
     add.addEventListener('submit', (event) => {
       event.preventDefault()
       const zone = zoneOf(field.value)
@@ -1397,19 +1526,28 @@ export class HostDirectoryElement extends HTMLElement {
     input.setAttribute('aria-label', placeholder)
     const railHead = this.#refs.get('railHead')
     if (railHead) railHead.textContent = t('hosts.pane.hosts', 'Hosts')
-    // The switch names the OTHER way to look.
+    // The switch shows both ways and lights the one in use; what it is called — and
+    // what a key press on it does — is the OTHER way to look.
     const mode = this.#refs.get('mode')
     if (mode) {
-      mode.textContent = this.#mode === 'simple' ? t('hosts.mode.advanced', 'Advanced') : t('hosts.mode.simple', 'Simple view')
+      mode.dataset['mode'] = this.#mode
+      mode.setAttribute('aria-label', this.#mode === 'simple' ? t('hosts.mode.advanced', 'Advanced') : t('hosts.mode.simple', 'Simple view'))
       mode.title = this.#mode === 'simple'
         ? t('hosts.mode.advanced-tip', 'The four panes: hosts, packages, files and code side by side')
         : t('hosts.mode.simple-tip', 'One list at a time — drill in to the code')
+      mode.querySelectorAll<HTMLElement>('.hd-seg').forEach(segment => {
+        const simple = segment.dataset['mode'] === 'simple'
+        segment.classList.toggle('on', segment.dataset['mode'] === this.#mode)
+        const label = segment.querySelector('.hd-seg-label')
+        if (label) label.textContent = simple ? t('hosts.mode.simple-short', 'Simple') : t('hosts.mode.advanced', 'Advanced')
+      })
     }
     // Select is only in the four panes; the drill picks by going in.
     const select = this.#refs.get('select')
     if (select) {
       select.hidden = this.#mode === 'simple'
-      select.textContent = t('hosts.select', 'Select')
+      const word = select.querySelector('.hd-select-label')
+      if (word) word.textContent = t('hosts.select', 'Select')
       select.title = t('hosts.select-tip', 'A click toggles a row in or out of what is picked — as Ctrl/Cmd-click does')
       select.setAttribute('aria-pressed', String(this.#multi))
     }
@@ -1424,6 +1562,8 @@ export class HostDirectoryElement extends HTMLElement {
     // had gone sideways — and a column that is new scrolls into view.
     const scrolls = [...body.querySelectorAll<HTMLElement>('ul.hd-col')].map(column => column.scrollTop)
     const sideways = body.querySelector<HTMLElement>('.hd-cols')?.scrollLeft ?? 0
+    // Read before the page is emptied: an emptied page has nothing to scroll.
+    this.#bodyScroll = body.scrollTop
     const columnsBefore = body.querySelectorAll('.hd-colbox').length
     // A row that holds the focus keeps it through any repaint — a read landing is no reason to lose it.
     const held = body.contains(document.activeElement)
@@ -1443,6 +1583,8 @@ export class HostDirectoryElement extends HTMLElement {
     const simple = this.#mode === 'simple'
     this.#panel?.classList.toggle('simple', simple)
     body.classList.toggle('with-columns', !simple && under === 'domains' && !this.#query.trim())
+    // How this view arrives — the drill decides inside, where it knows how deep it is.
+    if (!simple || under !== 'domains') this.#markEnter(body, `${this.#mode}:${under}:${this.#stack.keys.join(',')}:${this.#query.trim() ? 'search' : ''}`, under === 'domains' ? 0 : 1)
     if (under === 'domains') { if (simple) this.#renderSimple(body); else this.#renderPane(body) }
     else {
       // Without the rail there is no way back from these but this.
@@ -1453,6 +1595,10 @@ export class HostDirectoryElement extends HTMLElement {
     }
     this.#renderDrawer(drawer)
     this.#renderMenu()
+    // What this draw no longer shows arrives again when it comes back.
+    for (const key of [...this.#entered.keys()]) if (!this.#seen.has(key)) this.#entered.delete(key)
+    this.#seen.clear()
+    if (this.#scrollTo !== null) { body.scrollTop = this.#scrollTo; this.#scrollTo = null }
     const strip = body.querySelector<HTMLElement>('.hd-cols')
     if (strip) {
       strip.querySelectorAll<HTMLElement>('ul.hd-col').forEach((column, at) => { column.scrollTop = scrolls[at] ?? 0 })
@@ -1569,9 +1715,7 @@ export class HostDirectoryElement extends HTMLElement {
       const header = button('hd-domain', '', t('hosts.open-domain', 'Open {host}', { host: domain.label }))
       header.dataset['pane'] = domain.zone
       if (open) header.setAttribute('aria-current', 'true')
-      const dot = make('span', `hd-dot${domain.update ? ' update' : domain.behind ? ' behind' : ''}`)
-      dot.setAttribute('aria-hidden', 'true')
-      header.append(dot, make('span', 'hd-domain-name', domain.label))
+      header.append(hostBadge(domain.zone, domain.label, domain.update ? 'update' : domain.behind ? 'behind' : ''), make('span', 'hd-domain-name', domain.label))
       if (domain.update) header.append(make('span', 'hd-mark', t('packages.update-mark', 'update')))
       const count = make('span', 'hd-count', domain.count ? String(domain.count) : '')
       if (domain.count) count.title = t('hosts.package-count', '{count} packages', { count: domain.count })
@@ -1585,15 +1729,13 @@ export class HostDirectoryElement extends HTMLElement {
     const ownButton = button('hd-domain', '', t('hosts.your-host', 'Your host'))
     ownButton.dataset['pane'] = OWN_PANE
     if (ownOpen) ownButton.setAttribute('aria-current', 'true')
-    const ring = make('span', 'hd-dot own')
-    ring.setAttribute('aria-hidden', 'true')
-    ownButton.append(ring, make('span', 'hd-domain-name', t('hosts.your-host', 'Your host')))
+    ownButton.append(hostBadge('', '', '', true), make('span', 'hd-domain-name', t('hosts.your-host', 'Your host')))
     ownButton.addEventListener('click', () => this.#selectOwn())
     own.append(ownButton)
     list.append(own)
     if (this.#reading && domains.every(domain => !domain.count)) {
       const reading = make('li', 'hd-rail-note')
-      reading.append(make('p', 'hd-note', t('packages.reading', 'Reading what is served…')))
+      reading.append(make('p', 'hd-note hd-reading', t('packages.reading', 'Reading what is served…')))
       list.append(reading)
     }
     // The keys moved here: the button they landed on is new, so the focus follows.
@@ -1613,7 +1755,12 @@ export class HostDirectoryElement extends HTMLElement {
     // of them all are the columns, and what the search finds is theirs.
     if (this.#stack.keys.length > 1) {
       const stacked = make('div', 'hd-pane-head')
-      stacked.append(make('h2', 'hd-pane-title', t('hosts.stacked', '{count} hosts stacked', { count: this.#stack.keys.length })))
+      const stackMark = make('span', 'hd-avatar hd-stackmark')
+      stackMark.setAttribute('aria-hidden', 'true')
+      const stackHex = make('span', 'hd-hex')
+      stackHex.append(glyph('stackIcon'))
+      stackMark.append(stackHex)
+      stacked.append(stackMark, make('h2', 'hd-pane-title', t('hosts.stacked', '{count} hosts stacked', { count: this.#stack.keys.length })))
       body.append(stacked, make('p', 'hd-note hd-stack-note', this.#stack.keys.map(zone => domains.find(row => row.zone === zone)?.label ?? zone).join(' · ')))
       body.append(this.#renderColumns())
       return
@@ -1628,8 +1775,8 @@ export class HostDirectoryElement extends HTMLElement {
 
   /** A host's name, whether an update waits there, and the one door to Publish. */
   #hostHead(domain: DomainRow): HTMLElement {
-    const head = make('div', 'hd-pane-head')
-    head.append(make('h2', 'hd-pane-title', domain.label))
+    const head = make('div', 'hd-pane-head hd-host-hero')
+    head.append(hostBadge(domain.zone, domain.label, domain.update ? 'update' : domain.behind ? 'behind' : ''), make('h2', 'hd-pane-title', domain.label))
     if (domain.update) head.append(make('span', 'hd-mark', t('packages.update-mark', 'update')))
     head.append(make('span', 'hd-grow'))
     // THE ONE LINK TO PUBLISH. This is what comes in; Publish is what goes out,
@@ -1644,7 +1791,9 @@ export class HostDirectoryElement extends HTMLElement {
       this.#paintPublished(published, domain.zone)
       head.append(published)
       void this.#askPublished(domain.zone)
-      const publish = button('hd-link hd-publish', `${t('hosts.publish', 'Publish')} ›`, t('hosts.publish-tip', 'Open Publish — what goes out to your domains'))
+      const publish = button('hd-link hd-publish', t('hosts.publish', 'Publish'), t('hosts.publish-tip', 'Open Publish — what goes out to your domains'))
+      publish.prepend(glyph('publishIcon'))
+      publish.append(glyph('opensIcon', 'hd-opens'))
       publish.addEventListener('click', () => this.#openPublish())
       head.append(publish)
     }
@@ -1690,8 +1839,8 @@ export class HostDirectoryElement extends HTMLElement {
    *  for serving your hive from this computer (host-online.ts; not drawn on the
    *  web, where nothing can serve). */
   #renderOwn(body: HTMLElement): void {
-    const head = make('div', 'hd-pane-head')
-    head.append(make('h2', 'hd-pane-title', t('hosts.your-host', 'Your host')))
+    const head = make('div', 'hd-pane-head hd-host-hero')
+    head.append(hostBadge('', '', '', true), make('h2', 'hd-pane-title', t('hosts.your-host', 'Your host')))
     body.append(head)
     body.append(make('p', 'hd-note', t('hosts.own-host-note', 'The domain you serve from: your backup goes there, and the bytes you share are offered from it.')))
     body.append(this.#ownHostForm())
@@ -1787,6 +1936,7 @@ export class HostDirectoryElement extends HTMLElement {
       ? t('hosts.firewall.resume-tip', 'Let this shell connect to {host} again', { host: owned })
       : t('hosts.firewall.block-tip', 'Pause every connection from this shell to {host}', { host: owned }))
     toggle.setAttribute('data-hc-firewall', owned)
+    glyphed(toggle, blocked ? 'resumeIcon' : 'blockIcon')
     toggle.addEventListener('click', () => this.#render())
     return toggle
   }
@@ -1807,14 +1957,14 @@ export class HostDirectoryElement extends HTMLElement {
         this.#render()
         EffectBus.emit('hosts:creations', { zone: this.#scope })
       })
-      addLine(creations)
+      addLine(glyphed(creations, 'creationsIcon'))
       if (hostZone(this.#scope) !== this.#home) {
         const visit = make('a', 'hd-link', t('hosts.visit', 'Visit'))
         visit.href = `https://${this.#scope}/`
         visit.target = '_blank'
         visit.rel = 'noopener'
         visit.title = t('hosts.visit-tip', 'Open {host} in a new tab', { host: this.#scope })
-        addLine(visit)
+        addLine(glyphed(visit, 'visitIcon'))
       }
       // THE FIREWALL SWITCH: a host is open by default; Block pauses every
       // connection to its zone until Resume. Only a shell that runs the
@@ -1830,12 +1980,12 @@ export class HostDirectoryElement extends HTMLElement {
         EffectBus.emit('hosts:remove', { zone })
         this.#render()
       })
-      addLine(remove)
+      addLine(glyphed(remove, 'removeIcon'))
     } else {
       if (this.#mine.length) {
         const mine = button('hd-link', t('hosts.mine.open', 'In your hive ({count})', { count: this.#mine.length }))
         mine.addEventListener('click', () => { this.#view = 'mine'; this.#render() })
-        addLine(mine)
+        addLine(glyphed(mine, 'hiveIcon'))
       }
       // THE FIREWALL: your own zones are open by default and each can be
       // paused here, by a click. Only a shell that runs the outgoing firewall
@@ -1852,11 +2002,12 @@ export class HostDirectoryElement extends HTMLElement {
     if (!zone && (trunk || runsSource()) && this.#next && this.#next.root !== trunk) {
       const bar = make('div', 'hd-updates')
       bar.setAttribute('role', 'status')
+      bar.append(glyph('updatesIcon', 'hd-updates-glyph'))
       // While it moves, the bar is one whole sentence — a done-of-total over the
       // changed files, the same count the rows fill against — and no button.
       const moving = this.#held
       const overall = moving ? updateProgress('', this.#next.nodes, this.#had, moving) : null
-      bar.append(make('span', '', !moving
+      bar.append(make('span', 'hd-updates-text', !moving
         ? t('packages.updates.shared', 'An update is ready')
         : overall?.total
           ? t('hosts.updating', 'Updating — {done} of {total} changed files', { done: overall.done, total: overall.total })
@@ -1873,7 +2024,7 @@ export class HostDirectoryElement extends HTMLElement {
       // hosts that are behind — never a button that would end in a refusal.
       const bar = make('div', 'hd-updates')
       bar.setAttribute('role', 'status')
-      bar.append(make('span', '', t('packages.updates.not-held', 'An update is ready, but none of your hosts has it yet')))
+      bar.append(glyph('updatesIcon', 'hd-updates-glyph'), make('span', '', t('packages.updates.not-held', 'An update is ready, but none of your hosts has it yet')))
       section.append(bar)
       for (const host of this.#zones) {
         if (host !== this.#home && this.#isBehind(host)) section.append(make('p', 'hd-note hd-behind', this.#behindText(host)))
@@ -1950,7 +2101,7 @@ export class HostDirectoryElement extends HTMLElement {
     this.#niceView()
     const model = this.#columnModel()
     if (!model.length) {
-      strip.append(make('p', 'hd-note hd-cols-empty', this.#reading || !this.#loaded
+      strip.append(make('p', this.#reading || !this.#loaded ? 'hd-note hd-cols-empty hd-reading' : 'hd-note hd-cols-empty', this.#reading || !this.#loaded
         ? t('packages.reading', 'Reading what is served…')
         : t('packages.empty', 'Nothing listed here yet.')))
       this.#at = ''
@@ -1960,7 +2111,10 @@ export class HostDirectoryElement extends HTMLElement {
       ? t('hosts.stacked-packages', 'Packages across {count} hosts', { count: this.#stack.keys.length })
       : t('hosts.packages', 'Packages')
     model.forEach(({ rows, picked, parents }, k) => {
-      strip.append(this.#packageColumn(rows, k, picked, k === 0 ? top : parents.join(' · ')))
+      const column = this.#packageColumn(rows, k, picked, k === 0 ? top : parents.join(' · '))
+      // A column opened by a pick arrives from the side it opens on.
+      this.#arriving(`col:${k}:${parents.join(',')}`, column)
+      strip.append(column)
     })
     // The packages' edge: drag it to set how wide the package columns are.
     strip.append(this.#splitter('packages'))
@@ -2056,9 +2210,16 @@ export class HostDirectoryElement extends HTMLElement {
     const page = drillPage({ atHosts: this.#atHosts, reading: this.#readCode, filesPicked: this.#files.keys.length })
     // Words being typed in the editor must not outlive the file they are for.
     if (this.#describing && !this.#files.keys.includes(this.#describing.sig)) this.#describing = null
+    // HOW THE PAGE ARRIVES: a step in slides in from the right, a step back from the left.
+    const trail = this.#trail(page, model, files)
+    const depth = page === 'hosts' ? 0 : page === 'code' ? 2 + model.length : 1 + drillRows(model).level
+    // The page is told by what it is OF — hosts, picks and files by key, never by the
+    // names drawn, which change as the reads land and would make a repaint look new.
+    const keyOf = [page, this.#atHosts ? '' : this.#stack.keys.join(','), model.map(column => column.picked.keys.join('+')).join('/'), page === 'code' ? this.#files.keys.join('+') : '']
+    this.#markEnter(body, `drill:${keyOf.join('|')}`, depth)
     const wrap = make('div', `hd-simple${page === 'code' ? ' wide' : ''}`)
     wrap.addEventListener('keydown', event => this.#simpleKeys(event))
-    wrap.append(this.#simpleHead(page, model, files))
+    wrap.append(this.#simpleHead(page, trail))
     if (this.#error) {
       const err = make('p', 'hd-error', this.#error)
       err.setAttribute('role', 'alert')
@@ -2070,35 +2231,104 @@ export class HostDirectoryElement extends HTMLElement {
     body.append(wrap)
   }
 
-  /** Back, and the trail of where you are. */
-  #simpleHead(page: DrillPage, model: readonly { picked: Picked }[], files: readonly FileLabel[]): HTMLElement {
-    const head = make('div', 'hd-simple-head')
-    if (page !== 'hosts') {
-      const back = button('hd-back', '‹', t('hosts.back', 'Back'))
-      back.addEventListener('click', () => { this.#back() })
-      head.append(back)
-    }
+  /** The trail of where the drill is: the hosts, the host(s) opened, each level of
+   *  packages picked, and the file being read — named by what it is. */
+  #trail(page: DrillPage, model: readonly { picked: Picked }[], files: readonly FileLabel[]): Crumb[] {
     const domains = this.#domains()
     const labelOf = (zone: string): string => domains.find(row => row.zone === zone)?.label ?? zone
-    const trail = crumbTrail({
+    return crumbTrail({
       atHosts: this.#atHosts,
       hosts: this.#stack.keys.map(labelOf),
       picks: model.map(column => column.picked.keys),
       // The file being read is named — by what it is, not by what it hashes to.
       reading: page === 'code' ? this.#files.keys.map(sig => files.find(file => file.sig === sig)?.name ?? sig.slice(0, 12)) : [],
     })
+  }
+
+  /** Back, and the trail of where you are — each crumb behind you is a way back to it. */
+  #simpleHead(page: DrillPage, trail: readonly Crumb[]): HTMLElement {
+    const head = make('div', 'hd-simple-head')
+    if (page !== 'hosts') {
+      const back = button('hd-back', '', t('hosts.back', 'Back'))
+      back.append(glyph('backIcon'))
+      back.addEventListener('click', () => { this.#back() })
+      head.append(back)
+    }
     const nav = make('nav', 'hd-trail')
     nav.setAttribute('aria-label', t('hosts.trail', 'Where you are'))
     trail.forEach((crumb, at) => {
-      if (at) nav.append(make('span', 'hd-trail-sep', '›'))
+      if (at) nav.append(glyph('opensIcon', 'hd-trail-sep'))
       const text = crumb.kind === 'hosts' ? t('hosts.pane.hosts', 'Hosts')
         : crumb.kind === 'host' ? (crumb.one || t('hosts.stacked', '{count} hosts stacked', { count: crumb.count }))
           : crumb.kind === 'package' ? (crumb.one || t('hosts.trail.packages', '{count} packages', { count: crumb.count }))
             : (crumb.one || t('hosts.trail.files', '{count} files', { count: crumb.count }))
-      nav.append(make('span', at === trail.length - 1 ? 'hd-trail-now' : 'hd-trail-step', text))
+      const icon: Glyph = crumb.kind === 'hosts' ? 'deskIcon' : crumb.kind === 'host' ? (crumb.count > 1 ? 'stackIcon' : 'hostIcon') : crumb.kind === 'package' ? 'packagesIcon' : 'codeIcon'
+      if (at === trail.length - 1) {
+        const now = make('span', 'hd-trail-now', text)
+        now.prepend(glyph(icon))
+        now.setAttribute('aria-current', 'page')
+        nav.append(now)
+        return
+      }
+      const step = button('hd-trail-step', text)
+      step.prepend(glyph(icon))
+      step.addEventListener('click', () => this.#backTo(at + 1))
+      nav.append(step)
     })
     head.append(nav, make('span', 'hd-grow'))
     return head
+  }
+
+  /** A crumb pressed: step back, rung by rung, until the trail ends on it. */
+  #backTo(length: number): void {
+    for (let guard = 0; guard < 24; guard++) {
+      const model = this.#atHosts ? [] : this.#columnModel()
+      const page = drillPage({ atHosts: this.#atHosts, reading: this.#readCode, filesPicked: this.#files.keys.length })
+      if (this.#trail(page, model, []).length <= length || !this.#back()) return
+    }
+  }
+
+  /** How the page arrives — a step in from the right, a step back from the left, a
+   *  change of view crossfaded — told by what it shows and how deep it is against the
+   *  page before. A repaint of the same page does not move; one landing while the page
+   *  is still arriving carries the animation on where it was (`--hd-since`). */
+  #markEnter(body: HTMLElement, key: string, depth: number): void {
+    const now = performance.now()
+    const last = this.#shownPage
+    let enter: PageEnter | '' = !last ? 'open'
+      : last.mode !== this.#mode ? 'swap'
+        : last.key !== key ? (depth > last.depth ? 'in' : depth < last.depth ? 'out' : 'swap')
+          : ''
+    let at = now
+    if (!enter && last && now - last.at < ENTER_MS) { enter = last.enter; at = last.at }
+    // A step back finds the list where it was left; a step in starts at its top.
+    if (last && last.key !== key && this.#mode === 'simple') {
+      this.#scrollMemo.set(last.key, this.#bodyScroll)
+      this.#scrollTo = enter === 'out' ? this.#scrollMemo.get(key) ?? 0 : 0
+    }
+    this.#shownPage = enter
+      ? { key, depth, mode: this.#mode, enter, at }
+      : { key, depth, mode: this.#mode, enter: last?.enter ?? 'open', at: last?.at ?? 0 }
+    if (enter) {
+      body.dataset['enter'] = enter
+      body.style.setProperty('--hd-since', `${Math.round(now - at)}ms`)
+    } else {
+      delete body.dataset['enter']
+      body.style.removeProperty('--hd-since')
+    }
+  }
+
+  /** Something that has just appeared — a column, a code panel, the menu — arrives;
+   *  under ENTER_MS a repaint carries its arrival on, past it it is simply there. */
+  #arriving(key: string, node: HTMLElement): void {
+    const now = performance.now()
+    this.#seen.add(key)
+    const at = this.#entered.get(key)
+    if (at === undefined) this.#entered.set(key, now)
+    const since = now - (at ?? now)
+    if (since >= ENTER_MS) return
+    node.classList.add('hd-enter')
+    node.style.setProperty('--hd-since', `${Math.round(since)}ms`)
   }
 
   /** PAGE ONE: the hosts, large — this origin, every host you carry, your own host,
@@ -2108,20 +2338,27 @@ export class HostDirectoryElement extends HTMLElement {
     const list = make('ul', 'hd-col hd-bigrows hd-hosts-list')
     list.setAttribute('role', 'listbox')
     list.setAttribute('aria-label', t('hosts.rail', 'Hosts you carry'))
+    // A host is a card: its hexagon, its name, what it carries — and the way in.
+    const card = (li: HTMLElement, badge: HTMLElement, name: string, about: string): void => {
+      const words = make('span', 'hd-host-words')
+      words.append(make('span', 'hd-host-name', name))
+      if (about) words.append(make('span', 'hd-host-about', about))
+      li.append(badge, words)
+    }
     domains.forEach((domain, at) => {
       const li = make('li', 'hd-row hd-host-row')
       li.dataset['key'] = domain.zone
       li.setAttribute('role', 'option')
       li.setAttribute('aria-selected', 'false')
       li.tabIndex = at === 0 ? 0 : -1
-      const dot = make('span', `hd-dot${domain.update ? ' update' : domain.behind ? ' behind' : ''}`)
-      dot.setAttribute('aria-hidden', 'true')
+      li.style.setProperty('--i', String(at))
+      const state = domain.update ? 'update' : domain.behind ? 'behind' : ''
+      card(li, hostBadge(domain.zone, domain.label, state), domain.label,
+        domain.count ? t('hosts.package-count', '{count} packages', { count: domain.count }) : '')
       const marks = make('span', 'hd-marks')
       if (domain.update) marks.append(make('span', 'hd-mark', t('packages.update-mark', 'update')))
-      const count = make('span', 'hd-count', domain.count ? t('hosts.package-count', '{count} packages', { count: domain.count }) : '')
-      const opens = make('span', 'hd-opens', '›')
-      opens.setAttribute('aria-hidden', 'true')
-      li.append(dot, make('span', 'hd-host-name', domain.label), marks, count, opens)
+      if (domain.behind) li.title = this.#behindText(domain.label)
+      li.append(marks, glyph('opensIcon', 'hd-opens'))
       li.addEventListener('click', () => this.#chooseRow(domain.zone, 'host', -1))
       list.append(li)
     })
@@ -2129,15 +2366,15 @@ export class HostDirectoryElement extends HTMLElement {
     own.dataset['key'] = OWN_PANE
     own.setAttribute('role', 'option')
     own.tabIndex = -1
-    const ring = make('span', 'hd-dot own')
-    ring.setAttribute('aria-hidden', 'true')
-    const ownOpens = make('span', 'hd-opens', '›')
-    ownOpens.setAttribute('aria-hidden', 'true')
-    own.append(ring, make('span', 'hd-host-name', t('hosts.your-host', 'Your host')), make('span', 'hd-marks'), make('span', 'hd-count'), ownOpens)
+    own.style.setProperty('--i', String(domains.length))
+    let ownZone = ''
+    try { ownZone = zoneOf(localStorage.getItem(OWN_HOST_KEY) ?? '') } catch { ownZone = '' }
+    card(own, hostBadge('', '', '', true), t('hosts.your-host', 'Your host'), ownZone)
+    own.append(make('span', 'hd-marks'), glyph('opensIcon', 'hd-opens'))
     own.addEventListener('click', () => this.#selectOwn())
     list.append(own)
-    if (this.#reading && domains.every(domain => !domain.count)) list.append(make('li', 'hd-note', t('packages.reading', 'Reading what is served…')))
-    wrap.append(list, this.#addForm())
+    if (this.#reading && domains.every(domain => !domain.count)) list.append(make('li', 'hd-note hd-reading', t('packages.reading', 'Reading what is served…')))
+    wrap.append(make('h2', 'hd-page-title', t('hosts.rail', 'Hosts you carry')), list, this.#addForm())
   }
 
   /** PAGE TWO: what is inside — a host's packages, then the parts of one, with the
@@ -2155,7 +2392,7 @@ export class HostDirectoryElement extends HTMLElement {
       }
     }
     if (!model.length) {
-      wrap.append(make('p', 'hd-note', this.#reading || !this.#loaded
+      wrap.append(make('p', this.#reading || !this.#loaded ? 'hd-note hd-reading' : 'hd-note', this.#reading || !this.#loaded
         ? t('packages.reading', 'Reading what is served…')
         : t('packages.empty', 'Nothing listed here yet.')))
       return
@@ -2190,7 +2427,8 @@ export class HostDirectoryElement extends HTMLElement {
    *  creations a host serves, what is in your hive). */
   #backRow(): HTMLElement {
     const row = make('div', 'hd-simple-head hd-simple-back')
-    const back = button('hd-back', '‹', t('hosts.back', 'Back'))
+    const back = button('hd-back', '', t('hosts.back', 'Back'))
+    back.append(glyph('backIcon'))
     back.addEventListener('click', () => { this.#back() })
     row.append(back, make('span', 'hd-trail-now', t('hosts.back', 'Back')))
     return row
@@ -2463,9 +2701,10 @@ export class HostDirectoryElement extends HTMLElement {
   }
 
   /** A caption over a column — what it lists. */
-  #colHead(label: string): HTMLElement {
+  #colHead(label: string, icon?: Glyph): HTMLElement {
     const head = make('div', 'hd-colhead', label)
     head.title = label
+    if (icon) head.prepend(glyph(icon))
     return head
   }
 
@@ -2495,9 +2734,10 @@ export class HostDirectoryElement extends HTMLElement {
     const order = shown.map(row => row.path)
     const simple = this.#mode === 'simple'
     const tabbable = picked.keys.find(path => order.includes(path)) ?? order[0]
-    for (const row of shown) {
+    shown.forEach((row, index) => {
       const li = make('li', 'hd-row')
       li.dataset['key'] = row.path
+      li.style.setProperty('--i', String(index))
       li.setAttribute('role', 'option')
       li.setAttribute('aria-selected', String(picked.keys.includes(row.path)))
       li.tabIndex = row.path === tabbable ? 0 : -1
@@ -2528,13 +2768,14 @@ export class HostDirectoryElement extends HTMLElement {
             : t('hosts.light.behind-unknown', '{name} is on, and a newer version exists', { name: row.path })
       bulb.setAttribute('aria-label', lit)
       bulb.title = lit
-      const glyph = make('span', 'mat-sym', row.on ? 'lightbulb' : 'lightbulb_outline')
-      glyph.setAttribute('aria-hidden', 'true')
-      bulb.append(glyph)
+      bulb.append(glyph('bulbIcon', row.on ? 'filled' : ''))
 
       // The name is the line: clicking it, or the row around it, picks.
       const name = button('hd-name', row.name)
       name.tabIndex = -1
+      const words = make('span', 'hd-pkg-words')
+      words.append(name)
+      if (simple && row.description) words.append(make('span', 'hd-pkg-about', row.description))
 
       const marks = make('span', 'hd-marks')
       if (row.update) {
@@ -2554,7 +2795,8 @@ export class HostDirectoryElement extends HTMLElement {
 
       // The manage icon opens a menu: turn it off or on, update it to the newest,
       // pick a revision, look at its code in the columns.
-      const manage = button('hd-icon hd-manage', '⋯', t('hosts.manage', 'Manage {name}', { name: row.path }))
+      const manage = button('hd-icon hd-manage', '', t('hosts.manage', 'Manage {name}', { name: row.path }))
+      manage.append(glyph('manageIcon'))
       manage.tabIndex = -1
       manage.setAttribute('aria-haspopup', 'menu')
       manage.setAttribute('aria-expanded', String(this.#menu === row.path))
@@ -2578,13 +2820,10 @@ export class HostDirectoryElement extends HTMLElement {
         bar.append(fill)
         li.append(bar)
       }
-      li.append(bulb, name, marks, count, manage)
+      li.append(bulb, words, marks, count, manage)
       // Parts inside it open as the next column when it is picked.
-      if (row.children) {
-        const opens = make('span', 'hd-opens', '›')
-        opens.setAttribute('aria-hidden', 'true')
-        li.append(opens)
-      } else li.append(make('span', 'hd-icon-slot'))
+      if (row.children) li.append(glyph('opensIcon', 'hd-opens'))
+      else li.append(make('span', 'hd-icon-slot'))
 
       // The four panes: a check box on every row while Select is on.
       if (!simple && this.#multi) {
@@ -2597,9 +2836,9 @@ export class HostDirectoryElement extends HTMLElement {
         else this.#pickPackage(k, row.path, this.#modeOf(event), order)
       })
       list.append(li)
-    }
+    })
     const box = make('div', 'hd-colbox')
-    box.append(this.#colHead(caption), list)
+    box.append(this.#colHead(caption, 'packagesIcon'), list)
     return box
   }
 
@@ -2634,23 +2873,25 @@ export class HostDirectoryElement extends HTMLElement {
 
     const menu = make('div', 'hd-menu')
     menu.setAttribute('role', 'menu')
-    const item = (label: string, go: () => void, off = false, title = '', accent = false): void => {
+    const item = (icon: Glyph, label: string, go: () => void, off = false, title = '', accent = false): void => {
       const entry = button(`hd-menu-item${accent ? ' accent' : ''}`, label)
+      entry.prepend(glyph(icon))
       entry.setAttribute('role', 'menuitem')
       entry.disabled = off
       if (title) entry.title = title
       entry.addEventListener('click', () => { this.#menu = null; go() })
       menu.append(entry)
     }
-    item(row.on
+    item('bulbIcon', row.on
       ? t('packages.turn-off', 'Turn off {name}', { name: row.path })
       : t('packages.turn-on', 'Turn on {name}', { name: row.path }), () => { void this.#toggle(row) }, blocked, reason)
     if (row.update) {
-      item(t('hosts.update-newest', 'Update {name} to the newest', { name: row.path }), () => { void this.#takeUpdate(row) }, !acts || !recursive || !!this.#busy, '', true)
+      item('updateIcon', t('hosts.update-newest', 'Update {name} to the newest', { name: row.path }), () => { void this.#takeUpdate(row) }, !acts || !recursive || !!this.#busy, '', true)
     }
-    item(t('hosts.revisions.pick', 'Pick a revision…'), () => { void this.#openRevisions(row.path) }, !recursive)
-    item(t('hosts.code.look', 'Look at the code'), () => this.#lookAtCode(k, row, model[k]!.rows.map(candidate => candidate.path)))
+    item('revisionsIcon', t('hosts.revisions.pick', 'Pick a revision…'), () => { void this.#openRevisions(row.path) }, !recursive)
+    item('codeIcon', t('hosts.code.look', 'Look at the code'), () => this.#lookAtCode(k, row, model[k]!.rows.map(candidate => candidate.path)))
 
+    this.#arriving(`menu:${path}`, menu)
     panel.append(menu)
     const at = anchor.getBoundingClientRect()
     const host = panel.getBoundingClientRect()
@@ -2711,7 +2952,7 @@ export class HostDirectoryElement extends HTMLElement {
     if (!files.length) {
       const waiting = make('div', 'hd-colbox hd-filesbox hd-files-empty')
       waiting.append(
-        this.#colHead(t('hosts.files', 'Files')),
+        this.#colHead(t('hosts.files', 'Files'), 'filesIcon'),
         make('p', 'hd-note hd-pane-empty', paths.length
           ? t('hosts.files.none', 'This package declares no code of its own.')
           : t('hosts.files.pick', 'Pick a package to see the code it declares.')),
@@ -2728,7 +2969,7 @@ export class HostDirectoryElement extends HTMLElement {
     const simple = this.#mode === 'simple'
     const picked = simple ? NOTHING_PICKED : this.#files
     const tabbable = picked.keys.find(sig => order.includes(sig)) ?? order[0]
-    for (const file of files) {
+    files.forEach((file, index) => {
       const li = make('li', 'hd-file')
       li.dataset['key'] = file.sig
       li.setAttribute('role', 'option')
@@ -2741,6 +2982,8 @@ export class HostDirectoryElement extends HTMLElement {
       // Its name first; what kind it is, the package that declares it and the start
       // of its signature after — the signature is how it is found, not who it is.
       li.append(make('span', 'hd-file-name', file.name), make('span', 'hd-file-where', fileWhere(file)))
+      li.prepend(glyph(kindGlyph(file.kind), 'hd-kind'))
+      li.style.setProperty('--i', String(index))
       li.title = [file.name, file.description, `${file.path} · ${file.sig}`, yours ? t('hosts.meta.yours', 'Described by you') : '']
         .filter(Boolean).join('\n')
       if (!simple && this.#multi) li.prepend(this.#checkBox(picked.keys.includes(file.sig)))
@@ -2749,9 +2992,11 @@ export class HostDirectoryElement extends HTMLElement {
         else this.#pickFile(file.sig, this.#modeOf(event), order)
       })
       list.append(li)
-    }
+    })
     const box = make('div', 'hd-colbox hd-filesbox')
-    box.append(this.#colHead(caption), list)
+    box.append(this.#colHead(caption, 'filesIcon'), list)
+    // The files of a new pick arrive; the drill's page arrives whole.
+    if (!simple) this.#arriving(`files:${paths.join(',')}`, box)
     return box
   }
 
@@ -2761,7 +3006,7 @@ export class HostDirectoryElement extends HTMLElement {
     const pane = make('section', 'hd-codepane')
     const caption = t('hosts.code', 'Code')
     pane.setAttribute('aria-label', caption)
-    pane.append(this.#colHead(caption))
+    pane.append(this.#colHead(caption, 'codeIcon'))
     if (this.#files.keys.length) pane.append(this.#codeGrid(files))
     else pane.append(make('p', 'hd-note hd-pane-empty', t('hosts.code.pick', 'Pick a file to read its code here.')))
     return pane
@@ -2780,18 +3025,21 @@ export class HostDirectoryElement extends HTMLElement {
       const head = make('header', 'hd-codehead')
       const title = make('span', 'hd-codename', name)
       title.title = sig
+      head.append(glyph(kindGlyph(file?.kind ?? ''), 'hd-kind'))
       // Its logical place first — the kind, where its source says it came from, the
       // package that declares it — and the signature that proves it, last.
       const where = [file?.kind, file?.source, file?.path, sig.slice(0, 8), read ? `${Math.max(1, Math.round(read.size / 1024))} KB` : '']
         .filter(Boolean).join(' · ')
       head.append(title, make('span', 'hd-codewhere', where))
       if (file) {
-        const describe = button('hd-icon hd-describe', '✎', t('hosts.meta.describe', 'Describe {name}', { name }))
+        const describe = button('hd-icon hd-describe', '', t('hosts.meta.describe', 'Describe {name}', { name }))
+        describe.append(glyph('describeIcon'))
         describe.setAttribute('aria-pressed', String(this.#describing?.sig === sig))
         describe.addEventListener('click', () => this.#describe(file))
         head.append(describe)
       }
-      const close = button('hd-icon', '×', t('hosts.code.close', 'Stop reading {name}', { name }))
+      const close = button('hd-icon', '', t('hosts.code.close', 'Stop reading {name}', { name }))
+      close.append(glyph('closeIcon'))
       close.addEventListener('click', () => this.#pickFile(sig, 'toggle', order))
       head.append(close)
       box.append(head)
@@ -2822,10 +3070,13 @@ export class HostDirectoryElement extends HTMLElement {
             ? t('hosts.code.more', 'Show the other {count} lines', { count: more })
             : t('hosts.code.cut', 'Only the start of this file is read'))
           rest.disabled = more <= 0
+          if (more > 0) rest.prepend(glyph('moreIcon'))
           rest.addEventListener('click', () => { this.#codeFull.add(sig); this.#renderBody() })
           box.append(rest)
         }
       }
+      // A panel newly picked in the four panes arrives; the drill's page arrives whole.
+      if (this.#mode === 'advanced') this.#arriving(`code:${sig}`, box)
       matrix.append(box)
     }
     if (this.#files.keys.length > shown.length) {
@@ -3033,7 +3284,8 @@ export class HostDirectoryElement extends HTMLElement {
   #renderRevisions(body: HTMLElement): void {
     const path = this.#revPath
     const head = make('div', 'hd-crumbs')
-    const back = button('hd-back', '‹', t('hosts.revisions.back', 'Back to the list'))
+    const back = button('hd-back', '', t('hosts.revisions.back', 'Back to the list'))
+    back.append(glyph('backIcon'))
     back.addEventListener('click', () => { this.#view = 'domains'; this.#warning = null; this.#render() })
     head.append(back, make('span', 'hd-drill-title', t('hosts.revisions.title', 'Revisions of {name}', { name: path })))
     body.append(head)
@@ -3111,7 +3363,8 @@ export class HostDirectoryElement extends HTMLElement {
   #renderCreations(body: HTMLElement): void {
     const zone = this.#scope
     const head = make('div', 'hd-crumbs')
-    const back = button('hd-back', '‹', t('hosts.revisions.back', 'Back to the list'))
+    const back = button('hd-back', '', t('hosts.revisions.back', 'Back to the list'))
+    back.append(glyph('backIcon'))
     back.addEventListener('click', () => { this.#view = 'domains'; this.#render() })
     head.append(back, make('span', 'hd-drill-title', t('hosts.creations.title', 'Creations on {host}', { host: zone })))
     body.append(head, make('p', 'hd-note', t('hosts.creations.note', 'What people made on this domain. Showing one adds a shaded tile to your hive. Serving it from a domain of your own requires choosing a local route.')))
@@ -3152,7 +3405,8 @@ export class HostDirectoryElement extends HTMLElement {
 
   #renderMine(body: HTMLElement): void {
     const head = make('div', 'hd-crumbs')
-    const back = button('hd-back', '‹', t('hosts.revisions.back', 'Back to the list'))
+    const back = button('hd-back', '', t('hosts.revisions.back', 'Back to the list'))
+    back.append(glyph('backIcon'))
     back.addEventListener('click', () => { this.#view = 'domains'; this.#render() })
     head.append(back, make('span', 'hd-drill-title', t('hosts.mine.open', 'In your hive ({count})', { count: this.#mine.length })))
     body.append(head)
@@ -3508,6 +3762,12 @@ export function installHostDirectoryStyles(): void {
   style.id = STYLE_ID
   const S = HOST_DIRECTORY_SURFACE
   style.textContent = `
+/* THE DESK'S LOOK. A cold, clean desk: one reading face (Source Sans 3 — the app's
+   own face is one Light cut whose bold is faked) with mono kept for what is
+   machine-read (signatures, counts, code); glyphs from the shipped Material
+   subset; every host its own hexagon; colours by role, never named. Motion only
+   where something arrives — a step in or back, a column opened, a panel picked —
+   never on a repaint, and none at all under reduced motion. */
 ${S}{display:block;}
 ${S} [hidden]{display:none!important;}
 ${S} .hd-panel{
@@ -3518,6 +3778,12 @@ ${S} .hd-panel{
   --hd-ink-quiet:var(--hc-window-ink-quiet,currentColor);
   --hd-rule:var(--hc-window-line,rgba(128,128,128,0.18));
   --hd-ground:var(--md-surface,#0d151e);
+  --hd-raised:color-mix(in srgb, rgb(var(--acc)) 3.5%, var(--hd-ground));
+  --hd-wash:rgba(var(--acc),0.07);
+  --hd-wash-strong:rgba(var(--acc),0.14);
+  --hd-face:'Source Sans 3',var(--hc-font,system-ui),sans-serif;
+  --hd-mono:var(--hc-mono,ui-monospace,monospace);
+  --hd-ease:cubic-bezier(.2,.8,.2,1);
   position:fixed;
   top:var(--hc-safe-top,0px);
   left:var(--hc-controls-left,0px)!important;
@@ -3526,19 +3792,40 @@ ${S} .hd-panel{
   width:auto!important;max-width:none!important;transform:none!important;
   z-index:60001;pointer-events:auto;box-sizing:border-box;
   display:flex;flex-direction:column;min-height:0;
-  font-family:var(--hc-mono,system-ui);font-size:calc(1rem * var(--hc-panel-scale,1));
+  font-family:var(--hd-face);font-size:calc(1rem * var(--hc-panel-scale,1));line-height:1.35;
   color:var(--hd-ink);background:var(--hd-ground);outline:none;
 }
+${S} .hd-panel button,${S} .hd-panel input,${S} .hd-panel textarea{font-family:inherit;}
 ${S} .hd-panel button:focus-visible,${S} .hd-panel input:focus-visible{outline:2px solid color-mix(in srgb, rgb(var(--acc)) 72%, white);outline-offset:1px;}
-${S} .hd-head{flex:0 0 auto;display:flex;align-items:center;gap:.4em;padding:.55em .9em;border-bottom:1px solid var(--hd-rule);}
+/* GLYPHS: sized by the words they sit with, never by the page. */
+${S} .hd-glyph{flex:none;font-size:1.2em;line-height:1;vertical-align:-.22em;}
+${S} .hd-glyph.filled{font-variation-settings:'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;}
+
+/* THE HEAD: the desk's mark, its name, the two ways to look, Select, close. */
+${S} .hd-head{flex:0 0 auto;display:flex;align-items:center;gap:.6em;padding:.6em .9em .6em 1em;border-bottom:1px solid var(--hd-rule);background:var(--hd-raised);}
+${S} .hd-deskmark{display:grid;place-items:center;width:1.85em;height:2.1em;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);background:var(--hc-window-accent);color:var(--hc-window-on-accent);}
+${S} .hd-deskmark .hd-glyph{font-size:1.05em;}
 ${S} .hd-grow{flex:1 1 auto;}
-${S} .hd-title{font-size:.9em;letter-spacing:.05em;color:var(--hc-window-accent);}
-${S} .hd-close{background:none;border:none;padding:0 .2em;font:inherit;font-size:1.3em;line-height:1;color:var(--hd-ink-quiet);cursor:pointer;}
-${S} .hd-close:hover{color:var(--hd-ink);}
+${S} .hd-title{font-size:1.02em;font-weight:600;letter-spacing:.01em;color:var(--hd-ink);}
+${S} .hd-close{display:inline-grid;place-items:center;width:2em;height:2em;padding:0;background:none;border:none;border-radius:var(--hc-radius-control,2px);color:var(--hd-ink-quiet);cursor:pointer;transition:background-color .15s,color .15s;}
+${S} .hd-close:hover{color:var(--hd-ink);background:var(--hd-wash-strong);}
+/* ONE SWITCH, two segments, a thumb that slides to the one in use. */
+${S} .hd-modes{position:relative;display:inline-grid;grid-auto-flow:column;grid-auto-columns:1fr;padding:2px;font:inherit;color:inherit;background:var(--hd-wash);border:1px solid var(--hd-rule);border-radius:var(--hc-radius-control,2px);cursor:pointer;}
+${S} .hd-modes::before{content:'';position:absolute;top:2px;bottom:2px;left:2px;width:calc(50% - 2px);background:var(--hd-ground);border-radius:var(--hc-radius-control,2px);box-shadow:0 1px 2px rgba(0,0,0,.14),0 0 0 1px var(--hd-rule);transition:translate .26s var(--hd-ease);}
+${S} .hd-modes[data-mode="advanced"]::before{translate:100% 0;}
+${S} .hd-seg{position:relative;z-index:1;display:inline-flex;align-items:center;justify-content:center;gap:.4em;padding:.32em .8em;font-size:.82em;font-weight:600;color:var(--hd-ink-quiet);white-space:nowrap;transition:color .2s;}
+${S} .hd-seg.on{color:var(--hd-ink);}
+${S} .hd-seg.on .hd-glyph{color:var(--hc-window-accent);}
+${S} .hd-modes:hover .hd-seg:not(.on){color:var(--hd-ink);}
+${S} .hd-select{display:inline-flex;align-items:center;gap:.35em;padding:.3em .65em;font-size:.82em;font-weight:600;color:var(--hd-ink-quiet);background:none;border:1px solid var(--hd-rule);border-radius:var(--hc-radius-control,2px);text-decoration:none;cursor:pointer;transition:background-color .15s,color .15s,border-color .15s;}
+${S} .hd-select:hover{color:var(--hd-ink);background:var(--hd-wash);text-decoration:none;}
+${S} .hd-select[aria-pressed="true"]{color:var(--hc-window-on-accent);background:var(--hc-window-accent);border-color:var(--hc-window-accent);}
+
+/* THE FRAME: the rail, the main pane, the revisions drawer. */
 ${S} .hd-frame{flex:1 1 auto;min-height:0;position:relative;display:grid;grid-template-columns:var(--hd-rail-w,18rem) minmax(0,1fr);}
 ${S} .hd-frame.with-drawer{grid-template-columns:var(--hd-rail-w,18rem) minmax(0,1fr) minmax(18rem,26rem);}
-${S} .hd-side{min-height:0;overflow-y:auto;border-right:1px solid var(--hd-rule);padding:.5em .5em .8em;}
-${S} .hd-main{min-width:0;min-height:0;overflow-y:auto;padding:.9em 1.3em 1.6em;}
+${S} .hd-side{min-height:0;overflow-y:auto;border-right:1px solid var(--hd-rule);padding:.6em .55em .9em;background:var(--hd-raised);}
+${S} .hd-main{min-width:0;min-height:0;overflow-y:auto;padding:1em 1.4em 1.8em;}
 ${S} .hd-main > *{max-width:62rem;}
 /* THE COLUMN BROWSER. A host's pane is its acts on top and the columns under
    them, full width and full height; every other pane keeps the readable column. */
@@ -3555,200 +3842,323 @@ ${S} .hd-colbox{flex:0 1 var(--hd-pkg-w,16rem);width:var(--hd-pkg-w,16rem);min-w
 ${S} .hd-colbox.hd-filesbox{flex-basis:var(--hd-files-w,16rem);width:var(--hd-files-w,16rem);}
 /* THE PANES' EDGES: each is dragged to set the width the participant prefers, which is kept. */
 ${S} .hd-split{position:relative;flex:0 0 0;width:0;z-index:3;cursor:col-resize;outline:none;}
-${S} .hd-split::before{content:'';position:absolute;top:0;bottom:0;left:-4px;width:8px;}
+${S} .hd-split::before{content:'';position:absolute;top:0;bottom:0;left:-3px;width:6px;transition:background-color .15s;}
 ${S} .hd-split:hover::before,${S} .hd-split:focus-visible::before,${S} .hd-split.dragging::before{background:rgba(var(--acc),0.4);}
 ${S} .hd-split-rail{position:absolute;top:0;bottom:0;left:var(--hd-rail-w,18rem);}
 ${S} .hd-panel.simple .hd-split{display:none;}
-${S} .hd-pane-empty{margin:.8em .75em;}
-${S} .hd-rail-head{margin-top:.6em;padding-left:.55em;border-bottom:none;}
+${S} .hd-pane-empty{margin:1em .9em;}
+${S} .hd-rail-head{margin-top:.7em;padding-left:.55em;border-bottom:none;}
+${S} .hd-rail-head::before{content:'dns' / '';margin-right:.45em;font-family:'Material Symbols Outlined';font-feature-settings:'liga';font-size:1.45em;font-weight:400;letter-spacing:normal;text-transform:none;vertical-align:-.3em;color:var(--hc-window-accent);}
 /* A package whose update has landed: dropped to the bottom of the list (the order is the view's), and dimmed. */
 ${S} .hd-row.completed{opacity:.62;}
-${S} .hd-row.completed .hd-name{color:var(--hd-ink-quiet);}
 ${S} .hd-row.completed .hd-name::before{content:'✓ ';color:var(--hc-status-ok);}
 ${S} .hd-row.completed .hd-bulb{color:var(--hc-status-ok);}
+
+/* A HOST'S HEXAGON: its letter on its own hue (the accent, turned by its name). */
+${S} .hd-avatar{--hd-tint:rgb(var(--acc));position:relative;flex:none;display:inline-grid;width:2.34em;height:2.7em;}
+@supports (color: oklch(from red l c h)){
+${S} .hd-avatar{--hd-tint:oklch(from rgb(var(--acc)) l c calc(h + var(--hd-hue,0)));}
+}
+${S} .hd-hex{display:grid;place-items:center;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);font-size:1.05em;font-weight:700;line-height:1;color:var(--hd-tint);background:color-mix(in srgb, var(--hd-tint) 17%, var(--hd-ground));transition:background-color .2s var(--hd-ease);}
+${S} .hd-hex .hd-glyph{font-size:1.15em;vertical-align:0;}
+${S} .hd-avatar.update::after,${S} .hd-avatar.behind::after{content:'';position:absolute;top:.05em;right:-.12em;width:.6em;height:.6em;border-radius:50%;background:var(--hc-window-accent);box-shadow:0 0 0 2px var(--hd-ground);}
+${S} .hd-avatar.behind::after{background:var(--hc-status-warn);}
+${S} .hd-domain .hd-avatar{width:1.56em;height:1.8em;}
+${S} .hd-domain .hd-hex{font-size:.82em;}
+${S} .hd-host-hero .hd-avatar{width:2.9em;height:3.35em;}
+${S} .hd-host-hero .hd-hex{font-size:1.3em;}
+${S} .hd-main.with-columns .hd-host-hero .hd-avatar{width:2.1em;height:2.42em;}
+${S} .hd-main.with-columns .hd-host-hero .hd-hex{font-size:1em;}
+
 /* THE SIMPLE DRILL: no rail, one large list in the middle, a step in at a time. */
 ${S} .hd-panel.simple .hd-side{display:none;}
 ${S} .hd-panel.simple .hd-frame,${S} .hd-panel.simple .hd-frame.with-drawer{grid-template-columns:minmax(0,1fr);}
-${S} .hd-panel.simple .hd-main{padding:1.1em 1.3em 2.4em;}
+${S} .hd-panel.simple .hd-main{padding:0 1.4em 2.6em;}
 ${S} .hd-panel.simple .hd-drawer{position:absolute;inset:0;z-index:2;border-left:none;background:var(--hd-ground);}
-${S} .hd-mode{margin-right:.7em;font-size:.78em;}
-${S} .hd-mode:hover{color:var(--hd-ink);}
-${S} .hd-simple{max-width:46rem;margin:0 auto;display:flex;flex-direction:column;gap:.8em;}
+${S} .hd-simple{max-width:48rem;margin:0 auto;display:flex;flex-direction:column;gap:.9em;}
 ${S} .hd-simple.wide{max-width:88rem;}
 ${S} .hd-simple > *{max-width:none;}
-${S} .hd-simple-head{display:flex;align-items:center;gap:.6em;min-height:2em;}
+/* The trail stays in sight while a long list scrolls under it. */
+${S} .hd-simple-head{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:.6em;min-height:2.3em;padding:.9em 0 .55em;background:linear-gradient(var(--hd-ground) 82%, transparent);}
 ${S} .hd-simple-back{margin-bottom:.5em;}
-${S} .hd-trail{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35em;min-width:0;font-size:.85em;}
-${S} .hd-trail-step{color:var(--hd-ink-quiet);}
-${S} .hd-trail-sep{color:var(--hd-ink-quiet);opacity:.6;}
+${S} .hd-back{display:inline-grid;place-items:center;flex:none;width:2.1em;height:2.1em;padding:0;color:var(--hd-ink-quiet);background:var(--hd-raised);border:1px solid var(--hd-rule);border-radius:var(--hc-radius-control,2px);cursor:pointer;transition:background-color .15s,color .15s,border-color .15s;}
+${S} .hd-back:hover{color:var(--hd-ink);background:var(--hd-wash-strong);border-color:rgba(var(--acc),.4);}
+${S} .hd-back .hd-glyph{font-size:1.15em;transition:translate .18s var(--hd-ease);}
+${S} .hd-back:hover .hd-glyph{translate:-2px 0;}
+${S} .hd-trail{display:flex;flex-wrap:wrap;align-items:center;gap:.15em .1em;min-width:0;font-size:.9em;}
+${S} .hd-trail-step,${S} .hd-trail-now{display:inline-flex;align-items:center;gap:.35em;min-width:0;padding:.28em .5em;border-radius:var(--hc-radius-control,2px);}
+${S} .hd-trail-step{font:inherit;color:var(--hd-ink-quiet);background:none;border:none;cursor:pointer;transition:background-color .15s,color .15s;}
+${S} .hd-trail-step:hover{color:var(--hd-ink);background:var(--hd-wash-strong);}
+${S} .hd-trail-sep{font-size:1.05em;color:var(--hd-ink-quiet);opacity:.5;}
 ${S} .hd-trail-now{color:var(--hd-ink);font-weight:600;}
-${S} .hd-select{margin-right:.7em;padding:.15em .55em;font-size:.78em;border:1px solid transparent;border-radius:var(--hc-radius-control,2px);}
-${S} .hd-select:hover{color:var(--hd-ink);}
-${S} .hd-select[aria-pressed="true"]{color:var(--hc-window-on-accent);background:var(--hc-window-accent);border-color:var(--hc-window-accent);}
-${S} .hd-simple .hd-colbox{flex:none;width:auto;min-width:0;border:1px solid var(--hd-rule);border-radius:var(--hc-radius-card,3px);overflow:hidden;}
+${S} .hd-trail-now .hd-glyph{color:var(--hc-window-accent);}
+${S} .hd-simple .hd-colbox{flex:none;width:auto;min-width:0;border:1px solid var(--hd-rule);border-radius:var(--hc-radius-card,3px);overflow:hidden;background:var(--hd-raised);}
 ${S} .hd-simple .hd-col{overflow:visible;padding:0;}
-${S} .hd-simple .hd-colhead{padding:.5em .95em;font-size:.72em;}
-${S} .hd-simple .hd-col .hd-row{padding:.8em .95em;column-gap:.7em;font-size:1.05em;}
-${S} .hd-simple .hd-row .hd-name{font-size:.92em;}
-${S} .hd-simple .hd-file{padding:.7em .95em;}
-${S} .hd-simple .hd-file-name{font-size:.95em;}
+${S} .hd-simple .hd-colhead{padding:.75em 1em .6em;}
+${S} .hd-simple .hd-col .hd-row{padding:.72em 1em;column-gap:.85em;font-size:1em;}
+${S} .hd-simple .hd-row .hd-name{font-size:1em;font-weight:600;}
+${S} .hd-simple .hd-file{padding:.7em 1em;column-gap:.85em;}
+${S} .hd-simple .hd-file-name{font-size:1em;}
 ${S} .hd-simple .hd-file-where{font-size:.72em;}
-${S} .hd-host-row{grid-template-columns:auto minmax(0,1fr) auto auto auto;cursor:default;user-select:none;}
+${S} .hd-simple .hd-kind{font-size:1.2em;}
+/* The drill reads code on the page itself: the pane is as tall as the code, not a four-pane column. */
+${S} .hd-simple .hd-codepane{flex:none;min-width:0;}
+${S} .hd-simple .hd-codepane > .hd-colhead{display:none;}
+${S} .hd-simple .hd-matrix{overflow:visible;padding:0;}
+${S} .hd-simple .hd-code{max-height:calc(100vh - 15rem);}
+/* PAGE ONE: a card for every host. */
+${S} .hd-simple .hd-hosts-list{display:flex;flex-direction:column;gap:.55em;}
+${S} .hd-simple .hd-col .hd-host-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;column-gap:1em;padding:.85em 1.1em .85em 1em;font-size:1em;cursor:pointer;user-select:none;background:var(--hd-raised);border:1px solid var(--hd-rule);border-radius:var(--hc-radius-card,3px);transition:border-color .18s,box-shadow .18s,background-color .18s;}
+${S} .hd-simple .hd-col .hd-host-row:hover{border-color:rgba(var(--acc),.45);background:color-mix(in srgb, rgb(var(--acc)) 6%, var(--hd-ground));box-shadow:0 2px 12px rgba(0,0,0,.07);}
+${S} .hd-host-row:hover .hd-hex{background:color-mix(in srgb, var(--hd-tint) 26%, var(--hd-ground));}
+${S} .hd-page-title{margin:.15em 0 .05em;font-size:1.6em;font-weight:600;letter-spacing:-.01em;color:var(--hd-ink);}
+${S} .hd-host-words{display:flex;flex-direction:column;gap:.12em;min-width:0;}
+${S} .hd-host-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:1.12em;font-weight:600;color:var(--hd-ink);}
+${S} .hd-host-about{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8em;color:var(--hd-ink-quiet);}
+${S} .hd-simple .hd-hosts-list + .hd-add{margin-top:.6em;}
 ${S} .hd-row.hd-checking{grid-template-columns:auto auto minmax(0,1fr) auto auto auto auto;}
-${S} .hd-file.hd-checking{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:.7em;}
+${S} .hd-file.hd-checking{grid-template-columns:auto auto minmax(0,1fr);}
 ${S} .hd-file.hd-checking .hd-check{grid-row:1 / span 2;align-self:center;}
-${S} .hd-host-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:1.1em;color:var(--hd-ink);}
-${S} .hd-simple .hd-col .hd-host-row{padding:1.05em 1.1em;font-size:1.1em;}
-${S} .hd-check{display:inline-flex;align-items:center;justify-content:center;width:1.15em;height:1.15em;font-size:.8em;line-height:1;color:var(--hc-window-on-accent);border:1.5px solid var(--hd-ink-quiet);border-radius:3px;}
+${S} .hd-check{display:inline-flex;align-items:center;justify-content:center;width:1.15em;height:1.15em;font-size:.8em;line-height:1;color:var(--hc-window-on-accent);border:1.5px solid var(--hd-ink-quiet);border-radius:var(--hc-radius-control,2px);transition:background-color .15s,border-color .15s;}
 ${S} .hd-check.on{background:var(--hc-window-accent);border-color:var(--hc-window-accent);}
-${S} .hd-simple .hd-hosts-list + .hd-add{margin-top:1.1em;}
 ${S} .hd-about{margin:0;}
+
+/* THE PANES' HEADS: what each is, with its glyph. */
 ${S} .hd-codepane{flex:1 0 24rem;min-width:24rem;min-height:0;display:flex;flex-direction:column;}
-${S} .hd-colhead{flex:0 0 auto;padding:.4em .75em;font-size:.68em;letter-spacing:.05em;color:var(--hd-ink-quiet);border-bottom:1px solid rgba(var(--acc),0.08);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-${S} .hd-col{flex:1 1 auto;min-height:0;overflow-y:auto;margin:0;padding:.15em 0;list-style:none;}
+${S} .hd-colhead{flex:0 0 auto;padding:.62em .85em .5em;font-size:.68em;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--hd-ink-quiet);border-bottom:1px solid var(--hd-rule);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+${S} .hd-colhead .hd-glyph{margin-right:.45em;font-size:1.45em;letter-spacing:normal;vertical-align:-.3em;color:var(--hc-window-accent);}
+${S} .hd-col{flex:1 1 auto;min-height:0;overflow-y:auto;margin:0;padding:.2em 0;list-style:none;}
 ${S} .hd-col > li{outline:none;}
-${S} .hd-col .hd-row{padding:.32em .6em;cursor:default;user-select:none;}
-${S} .hd-col .hd-row.picked,${S} .hd-file.picked{background:rgba(var(--acc),0.18);}
+${S} .hd-col .hd-row{padding:.36em .65em;cursor:default;user-select:none;}
+${S} .hd-col .hd-row.picked,${S} .hd-file.picked{background:var(--hd-wash-strong);box-shadow:inset 2px 0 0 var(--hc-window-accent);}
 ${S} .hd-col .hd-row:focus-visible,${S} .hd-file:focus-visible{box-shadow:inset 0 0 0 2px color-mix(in srgb, rgb(var(--acc)) 72%, white);}
-${S} .hd-opens{color:var(--hd-ink-quiet);padding:0 .25em;}
-${S} .hd-file{display:grid;grid-template-columns:minmax(0,1fr);gap:.05em;padding:.38em .75em;border-bottom:1px solid rgba(var(--acc),0.06);cursor:default;user-select:none;}
-${S} .hd-file:hover{background:rgba(var(--acc),0.05);}
-${S} .hd-file-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8em;color:var(--hd-ink);}
-${S} .hd-file-where{font-size:.62em;color:var(--hd-ink-quiet);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+${S} .hd-opens{color:var(--hd-ink-quiet);transition:translate .18s var(--hd-ease),color .18s;}
+${S} li:hover > .hd-opens,${S} .hd-publish:hover .hd-opens{translate:3px 0;color:var(--hc-window-accent);}
+/* FILES: what kind of code each is, its name, and where it is from in mono. */
+${S} .hd-file{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:.65em;row-gap:.08em;align-items:center;padding:.45em .8em;border-bottom:1px solid rgba(var(--acc),0.06);cursor:default;user-select:none;transition:background-color .15s;}
+${S} .hd-file:hover{background:var(--hd-wash);}
+${S} .hd-kind{display:grid;place-items:center;width:1.7em;height:1.7em;font-size:1.05em;vertical-align:0;color:var(--hc-window-accent);background:var(--hd-wash-strong);border-radius:var(--hc-radius-control,2px);}
+${S} .hd-file > .hd-kind{grid-row:1 / span 2;}
+${S} .hd-file-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.88em;font-weight:600;color:var(--hd-ink);}
+${S} .hd-file-where{font-family:var(--hd-mono);font-size:.64em;color:var(--hd-ink-quiet);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 /* THE MATRIX: one panel per picked file, as many across as there is room for. */
-${S} .hd-matrix{flex:1 1 auto;min-height:0;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(22rem,1fr));gap:.6em;padding:.6em;align-content:start;}
+${S} .hd-matrix{flex:1 1 auto;min-height:0;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(22rem,1fr));gap:.7em;padding:.7em;align-content:start;}
 ${S} .hd-file.mine .hd-file-name::after{content:' ✎';font-size:.85em;color:var(--hc-window-accent);}
-${S} .hd-codebox{min-width:0;display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--hd-rule);border-radius:var(--hc-radius-card,3px);}
-${S} .hd-codehead{display:flex;align-items:baseline;gap:.6em;padding:.35em .6em;border-bottom:1px solid var(--hd-rule);}
-${S} .hd-codename{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8em;color:var(--code-plain);}
-${S} .hd-codewhere{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.62em;color:var(--code-gutter);}
+${S} .hd-codebox{min-width:0;display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--hd-rule);border-radius:var(--hc-radius-card,3px);box-shadow:0 1px 3px rgba(0,0,0,.06);}
+${S} .hd-codehead{display:flex;align-items:center;gap:.55em;padding:.45em .5em .45em .6em;border-bottom:1px solid var(--hd-rule);}
+${S} .hd-codehead .hd-kind{width:1.6em;height:1.6em;font-size:.95em;}
+${S} .hd-codename{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.9em;font-weight:600;color:var(--code-plain);}
+${S} .hd-codewhere{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--hd-mono);font-size:.62em;color:var(--code-gutter);}
 ${S} .hd-codebox .hd-icon{color:var(--code-gutter);}
 ${S} .hd-codebox .hd-icon:hover,${S} .hd-codebox .hd-icon[aria-pressed="true"]{color:var(--hc-window-accent);}
 /* THE META LAYER ON A CODE FILE: what it does, in the participant's words when they gave some. */
-${S} .hd-codedesc{margin:0;padding:.4em .7em;font-size:.72em;line-height:1.5;color:var(--code-plain);border-bottom:1px solid var(--hd-rule);}
+${S} .hd-codedesc{margin:0;padding:.5em .75em;font-size:.8em;line-height:1.5;color:var(--code-plain);border-bottom:1px solid var(--hd-rule);}
 ${S} .hd-codedesc.mine{box-shadow:inset 2px 0 0 var(--hc-window-accent);}
-${S} .hd-editor{display:flex;flex-direction:column;gap:.45em;padding:.5em .7em .6em;font-size:.72em;border-bottom:1px solid var(--hd-rule);}
+${S} .hd-editor{display:flex;flex-direction:column;gap:.45em;padding:.55em .75em .65em;font-size:.8em;border-bottom:1px solid var(--hd-rule);}
 ${S} .hd-field{display:flex;flex-direction:column;gap:.15em;}
 ${S} .hd-field-label{font-size:.9em;color:var(--code-gutter);}
-${S} .hd-input{box-sizing:border-box;width:100%;padding:.3em .45em;font:inherit;color:var(--code-plain);background:var(--code-bg);border:1px solid var(--hd-rule);border-radius:var(--hc-radius-control,2px);resize:vertical;}
-${S} .hd-input::placeholder{color:var(--code-comment);}
+${S} .hd-editor .hd-input{color:var(--code-plain);background:var(--code-bg);border-color:var(--hd-rule);resize:vertical;}
+${S} .hd-editor .hd-input::placeholder{color:var(--code-comment);}
 ${S} .hd-panel textarea:focus-visible{outline:2px solid color-mix(in srgb, rgb(var(--acc)) 72%, white);outline-offset:1px;}
 ${S} .hd-editor .hd-note{margin:0;color:var(--code-gutter);}
 ${S} .hd-editor .hd-quiet{color:var(--code-punc);}
 ${S} .hd-editor-actions{display:flex;flex-wrap:wrap;align-items:center;gap:.4em;}
 /* THE CODE THEME: the DCP installer's one syntax map (code-theme.ts), under the panels that show source. */
-${S} .hd-code{margin:0;padding:.4em 0;overflow:auto;max-height:70vh;font-family:var(--hc-code,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);font-variant-ligatures:var(--hc-code-ligatures,none);font-size:.7em;line-height:1.55;counter-reset:l;tab-size:2;}
+${S} .hd-code{margin:0;padding:.45em 0;overflow:auto;max-height:70vh;font-family:var(--hc-code,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);font-variant-ligatures:var(--hc-code-ligatures,none);font-size:.74em;line-height:1.6;counter-reset:l;tab-size:2;}
 ${S} .hd-code .cl{counter-increment:l;white-space:pre;padding-right:1em;}
 ${S} .hd-code .cl:hover{background:var(--code-line);}
 ${S} .hd-code .cl::before{content:counter(l);display:inline-block;width:3.4em;margin-right:1em;text-align:right;color:var(--code-gutter);user-select:none;}
 ${codeThemeCss(S)}
+${S} .hd-codebox > .hd-quiet{align-self:stretch;display:flex;align-items:center;justify-content:center;gap:.35em;padding:.55em;border-top:1px solid var(--hd-rule);border-radius:0;}
 ${S} .hd-stack-note{margin:.2em 0 .5em;}
-${S} .hd-drawer{min-width:0;min-height:0;overflow-y:auto;border-left:1px solid var(--hd-rule);padding:.7em 1em 1.4em;background:color-mix(in srgb, rgb(var(--acc)) 3%, var(--hd-ground));}
-${S} .hd-pane-head{display:flex;align-items:center;gap:.6em;margin:0 0 .6em;}
-${S} .hd-pane-title{margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:1.05em;font-weight:600;color:var(--hd-ink);}
-${S} .hd-publish{font-size:.78em;}
-${S} .hd-published{font-size:.74em;color:var(--hd-ink-quiet);white-space:nowrap;}
-${S} .hd-dot{width:.55em;height:.55em;border-radius:50%;background:var(--hd-ink-quiet);opacity:.45;}
-${S} .hd-dot.update{background:var(--hc-window-accent);opacity:1;}
-${S} .hd-dot.behind{background:var(--hc-status-warn);opacity:1;}
-${S} .hd-dot.own{background:none;border:1px solid var(--hd-ink-quiet);box-sizing:border-box;opacity:.8;}
-${S} .hd-own-entry{margin-top:.4em;border-top:1px solid rgba(var(--acc),0.12);border-bottom:none;padding-top:.3em;}
+${S} .hd-drawer{min-width:0;min-height:0;overflow-y:auto;border-left:1px solid var(--hd-rule);padding:.8em 1em 1.4em;background:var(--hd-raised);}
+
+/* A HOST'S HERO: its hexagon, its name, the count beside the door to Publish. */
+${S} .hd-pane-head{display:flex;align-items:center;gap:.75em;margin:0 0 .7em;}
+${S} .hd-pane-title{margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:1.2em;font-weight:600;letter-spacing:-.005em;color:var(--hd-ink);}
+${S} .hd-simple .hd-host-hero{margin:.2em 0 .1em;}
+${S} .hd-simple .hd-host-hero .hd-pane-title,${S} .hd-panel.simple .hd-host-hero .hd-pane-title{font-size:1.55em;}
+${S} .hd-main.with-columns .hd-host-hero .hd-pane-title{font-size:1.15em;}
+${S} .hd-publish{display:inline-flex;align-items:center;gap:.35em;padding:.38em .45em .38em .7em;font-size:.86em;font-weight:600;color:var(--hc-window-accent);background:none;border:1px solid rgba(var(--acc),.45);border-radius:var(--hc-radius-control,2px);text-decoration:none;transition:background-color .15s,border-color .15s;}
+${S} .hd-publish:hover{background:var(--hd-wash-strong);border-color:var(--hc-window-accent);text-decoration:none;}
+${S} .hd-published{display:inline-flex;align-items:center;gap:.3em;font-size:.82em;color:var(--hd-ink-quiet);white-space:nowrap;}
+${S} .hd-published::before{content:'public' / '';font-family:'Material Symbols Outlined';font-feature-settings:'liga';font-size:1.25em;line-height:1;}
+${S} .hd-stackmark .hd-hex{color:var(--hc-window-accent);}
+${S} .hd-own-entry{margin-top:.5em;border-top:1px solid var(--hd-rule);border-bottom:none;padding-top:.4em;}
 ${S} .hd-rail-note{list-style:none;}
+/* THE RAIL: a mini hexagon for every host; the ones stacked are lit with a bar. */
 ${S} .hd-section{border-bottom:none;}
-${S} .hd-section.open > .hd-domain{color:var(--hc-window-accent);background:rgba(var(--acc),0.09);}
-${S} .hd-section-body{padding:0 0 .55em;}
-${S} .hd-lines{list-style:none;margin:.05em 0 .7em;padding:0;display:flex;flex-wrap:wrap;gap:.25em 1.1em;font-size:.78em;}
+${S} .hd-section.open > .hd-domain{background:var(--hd-wash-strong);box-shadow:inset 2px 0 0 var(--hc-window-accent);}
+${S} .hd-section.open .hd-domain-name{font-weight:600;}
+${S} .hd-section-body{padding:0 0 .6em;}
+/* A HOST'S ACTS: small words with their glyphs. */
+${S} .hd-lines{list-style:none;margin:.1em 0 .85em;padding:0;display:flex;flex-wrap:wrap;gap:.4em;font-size:.84em;}
+${S} .hd-lines .hd-chip{display:inline-flex;align-items:center;gap:.35em;padding:.3em .65em;color:var(--hd-ink-quiet);background:var(--hd-raised);border:1px solid var(--hd-rule);border-radius:var(--hc-radius-control,2px);text-decoration:none;cursor:pointer;transition:background-color .15s,color .15s,border-color .15s;}
+${S} .hd-lines .hd-chip:hover{color:var(--hd-ink);background:var(--hd-wash-strong);border-color:rgba(var(--acc),.4);text-decoration:none;}
+${S} .hd-lines .hd-chip .hd-glyph{font-size:1.15em;color:var(--hc-window-accent);}
 ${S} .hd-match-row{border-bottom:1px solid rgba(var(--acc),0.08);}
-${S} .hd-match{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;column-gap:.5em;width:100%;padding:.45em .2em;font:inherit;font-size:.8em;color:var(--hd-ink);background:none;border:none;text-align:left;cursor:pointer;}
-${S} .hd-match:hover{background:rgba(var(--acc),0.05);}
-${S} .hd-match-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-${S} .hd-match-where{font-size:.85em;color:var(--hd-ink-quiet);}
-${S} .hd-domain{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;column-gap:.6em;width:100%;padding:.5em .55em;border-radius:var(--hc-radius-control,2px);font:inherit;font-size:.82em;color:var(--hd-ink);background:none;border:none;text-align:left;cursor:pointer;}
-${S} .hd-domain:hover{background:rgba(var(--acc),0.05);}
-${S} .hd-domain-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+${S} .hd-match{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;column-gap:.6em;width:100%;padding:.55em .45em;font:inherit;font-size:.9em;color:var(--hd-ink);background:none;border:none;border-radius:var(--hc-radius-control,2px);text-align:left;cursor:pointer;transition:background-color .15s;}
+${S} .hd-match:hover{background:var(--hd-wash);}
+${S} .hd-match-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;}
+${S} .hd-match-where{font-size:.82em;color:var(--hd-ink-quiet);}
+${S} .hd-domain{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;column-gap:.65em;width:100%;padding:.42em .55em;border-radius:var(--hc-radius-control,2px);font:inherit;font-size:.92em;color:var(--hd-ink);background:none;border:none;text-align:left;cursor:pointer;transition:background-color .15s;}
+${S} .hd-domain:hover{background:var(--hd-wash);}
+${S} .hd-domain-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;}
 ${S} .hd-chevron{color:var(--hd-ink-quiet);}
-${S} .hd-add{display:flex;align-items:center;gap:.25em;margin:.7em 0 0;}
-${S} .hd-add-input{flex:1 1 auto;min-width:0;padding:.2em .4em;font:inherit;font-size:.7em;color:var(--hd-ink);background:rgba(var(--acc),0.06);border:1px solid rgba(var(--acc),0.22);border-radius:var(--hc-radius-control,2px);}
-${S} .hd-add-input[aria-invalid="true"]{border-color:var(--hc-status-alert);}
-${S} .hd-own-label{flex:0 0 auto;font-size:.7em;color:var(--hd-ink);opacity:.7;white-space:nowrap;}
-${S} .hd-quiet{padding:.2em .45em;font:inherit;font-size:.7em;color:var(--hd-ink-quiet);background:none;border:1px solid transparent;border-radius:var(--hc-radius-control,2px);cursor:pointer;}
-${S} .hd-quiet:hover{color:var(--hd-ink);background:rgba(var(--acc),0.07);}
+/* ADD A HOST: one field, its glyph, its word. */
+${S} .hd-add{display:flex;align-items:center;gap:.45em;margin:.8em 0 0;padding:.25em .3em .25em .65em;background:var(--hd-raised);border:1px dashed rgba(var(--acc),.38);border-radius:var(--hc-radius-card,3px);transition:border-color .15s,background-color .15s;}
+${S} .hd-add:focus-within{border-style:solid;border-color:rgba(var(--acc),.65);background:var(--hd-ground);}
+${S} .hd-add-glyph{color:var(--hc-window-accent);}
+${S} .hd-add-input{flex:1 1 auto;min-width:0;padding:.4em .1em;font:inherit;font-size:.92em;color:var(--hd-ink);background:none;border:none;outline:none;}
+${S} .hd-panel .hd-add-input:focus-visible{outline:none;}
+${S} .hd-add-input::placeholder{color:var(--hd-ink-quiet);}
+${S} .hd-add:has(.hd-add-input[aria-invalid="true"]){border-color:var(--hc-status-alert);}
+${S} .hd-add-input[aria-invalid="true"]{color:var(--hc-status-alert);}
+${S} .hd-add .hd-quiet{font-weight:600;color:var(--hc-window-accent);}
+${S} .hd-side .hd-add{font-size:.86em;}
+${S} .hd-own-label{flex:0 0 auto;font-size:.82em;color:var(--hd-ink);opacity:.75;white-space:nowrap;}
+${S} .hd-quiet{display:inline-flex;align-items:center;gap:.3em;padding:.32em .6em;font:inherit;font-size:.82em;color:var(--hd-ink-quiet);background:none;border:1px solid transparent;border-radius:var(--hc-radius-control,2px);cursor:pointer;transition:background-color .15s,color .15s;}
+${S} .hd-quiet:hover{color:var(--hd-ink);background:var(--hd-wash-strong);}
 ${S} .hd-quiet:disabled{cursor:default;opacity:.55;}
-${S} .hd-search{padding:.2em .1em .5em;}
-${S} .hd-input{width:100%;box-sizing:border-box;padding:.3em .45em;font:inherit;font-size:.8em;color:var(--hd-ink);background:rgba(var(--acc),0.06);border:1px solid rgba(var(--acc),0.22);border-radius:var(--hc-radius-control,2px);}
+/* THE SEARCH: a field with its glyph inside it. */
+${S} .hd-search{position:relative;padding:.15em .05em .55em;}
+${S} .hd-search-glyph{position:absolute;top:.15em;bottom:.55em;left:.55em;display:flex;align-items:center;font-size:1.15em;color:var(--hd-ink-quiet);pointer-events:none;}
+${S} .hd-search .hd-input{padding-left:2.1em;}
+${S} .hd-input{width:100%;box-sizing:border-box;padding:.45em .6em;font:inherit;font-size:.9em;color:var(--hd-ink);background:var(--hd-ground);border:1px solid var(--hd-rule);border-radius:var(--hc-radius-control,2px);transition:border-color .15s;}
+${S} .hd-input:focus{border-color:rgba(var(--acc),.6);}
 ${S} .hd-link{padding:0;font:inherit;color:var(--hd-ink-quiet);background:none;border:none;text-decoration:none;cursor:pointer;}
 ${S} .hd-link:hover{color:var(--hd-ink);text-decoration:underline;}
-${S} .hd-crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:.25em;margin:.15em 0 .4em;font-size:.74em;}
-${S} .hd-back{padding:0 .35em;font:inherit;font-size:1.2em;line-height:1;color:var(--hd-ink-quiet);background:none;border:none;cursor:pointer;}
-${S} .hd-back:hover,${S} .hd-crumb:hover{color:var(--hd-ink);}
+${S} .hd-crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:.45em;margin:.15em 0 .6em;font-size:.86em;}
 ${S} .hd-crumb{padding:0;font:inherit;color:var(--hd-ink-quiet);background:none;border:none;cursor:pointer;}
+${S} .hd-crumb:hover{color:var(--hd-ink);}
 ${S} .hd-crumb.here{color:var(--hd-ink);}
 ${S} .hd-sep{color:var(--hd-ink-quiet);opacity:.6;}
-${S} .hd-drill-title{color:var(--hd-ink);}
-${S} .hd-updates{display:flex;align-items:center;justify-content:space-between;gap:.5em;margin:.2em 0 .5em;padding:.45em .6em;font-size:.76em;background:rgba(var(--acc),0.1);border:1px solid rgba(var(--acc),0.42);border-radius:var(--hc-radius-card,3px);}
-${S} .hd-primary{padding:.38em .8em;font:inherit;font-size:.95em;font-weight:600;color:var(--hc-window-on-accent);background:var(--hc-window-accent);border:1px solid var(--hc-window-accent);border-radius:var(--hc-radius-control,2px);cursor:pointer;}
+${S} .hd-drill-title{font-weight:600;color:var(--hd-ink);}
+/* AN UPDATE IS READY: a band with its glyph, the act at its end. */
+${S} .hd-updates{display:flex;align-items:center;gap:.7em;margin:.2em 0 .7em;padding:.6em .7em .6em .8em;font-size:.88em;background:rgba(var(--acc),0.08);border:1px solid rgba(var(--acc),0.3);border-left:3px solid var(--hc-window-accent);border-radius:var(--hc-radius-card,3px);}
+${S} .hd-updates > span:not(.hd-glyph){flex:1 1 auto;min-width:0;}
+${S} .hd-updates-glyph{font-size:1.4em;color:var(--hc-window-accent);}
+${S} .hd-primary{padding:.42em .9em;font:inherit;font-size:.95em;font-weight:600;color:var(--hc-window-on-accent);background:var(--hc-window-accent);border:1px solid var(--hc-window-accent);border-radius:var(--hc-radius-control,2px);cursor:pointer;transition:filter .15s,box-shadow .15s;}
+${S} .hd-primary:hover:not(:disabled){filter:brightness(1.08);box-shadow:0 2px 8px rgba(var(--acc),.3);}
 ${S} .hd-primary:disabled{cursor:default;opacity:.55;}
-${S} .hd-error{margin:.1em 0 .4em;font-size:.72em;line-height:1.35;color:var(--hc-status-alert);}
-${S} .hd-note{margin:.5em 0 0;font-size:.72em;line-height:1.45;color:var(--hd-ink-quiet);}
-${S} .hd-online{margin-top:1em;padding-top:.75em;border-top:1px solid rgba(var(--acc),0.12);}
+${S} .hd-error{margin:.1em 0 .4em;font-size:.82em;line-height:1.4;color:var(--hc-status-alert);}
+${S} .hd-note{margin:.5em 0 0;font-size:.82em;line-height:1.5;color:var(--hd-ink-quiet);}
+/* READING: a small ring that turns while the hosts answer. */
+${S} .hd-reading{display:flex;align-items:center;gap:.6em;list-style:none;}
+${S} .hd-reading::before{content:'';flex:none;width:.85em;height:.85em;border-radius:50%;border:2px solid var(--hd-wash-strong);border-top-color:var(--hc-window-accent);animation:hd-spin .8s linear infinite;}
+${S} .hd-online{margin-top:1em;padding-top:.75em;border-top:1px solid var(--hd-rule);}
 ${S} .hd-online-title{margin:0 0 .3em;font-size:inherit;font-weight:600;}
 ${S} .hd-online-steps{margin:.4em 0;padding-left:1.2em;display:flex;flex-direction:column;gap:.5em;}
 ${S} .hd-online-actions{display:flex;gap:.5em;flex-wrap:wrap;}
 ${S} .hd-online-link{color:var(--hc-window-accent);word-break:break-all;}
 ${S} .hd-online-said.ok{color:var(--hc-window-accent);}
 ${S} .hd-list{list-style:none;margin:0;padding:0;}
-${S} .hd-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto auto;column-gap:.4em;align-items:center;padding:.3em .2em;border-bottom:1px solid rgba(var(--acc),0.08);}
-${S} .hd-row:hover{background:rgba(var(--acc),0.04);}
+/* A PACKAGE: its light in a well, its name (and, large, what it is), its marks, its menu. */
+${S} .hd-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto auto;column-gap:.5em;align-items:center;padding:.3em .2em;border-bottom:1px solid rgba(var(--acc),0.07);transition:background-color .15s;}
+${S} .hd-row:hover{background:var(--hd-wash);}
 ${S} .hd-row.busy{cursor:progress;}
 ${S} .hd-row{position:relative;}
 ${S} .hd-row.updating,${S} .hd-row.updated{background:rgba(var(--acc),0.05);}
 ${S} .hd-progress{position:absolute;left:0;right:0;bottom:0;height:2px;background:rgba(var(--acc),0.12);pointer-events:none;}
 ${S} .hd-progress-fill{display:block;height:100%;background:var(--hc-window-accent);transition:width .2s ease-out;}
 ${S} .hd-row.updated .hd-progress-fill{background:var(--hc-status-ok);}
+/* A NARROW COLUMN keeps the name whole: the marks drop under it instead of eating it. */
+${S} .hd-cols .hd-colbox{container-type:inline-size;}
+@container (max-width: 22rem){
+${S} .hd-packages .hd-row{row-gap:.18em;}
+${S} .hd-packages .hd-row > *{grid-row:1 / span 2;}
+${S} .hd-packages .hd-row > .hd-pkg-words{grid-row:1;grid-column:2;}
+${S} .hd-packages .hd-row > .hd-marks{grid-row:2;grid-column:2;}
+${S} .hd-packages .hd-row.hd-checking > .hd-pkg-words,${S} .hd-packages .hd-row.hd-checking > .hd-marks{grid-column:3;}
+${S} .hd-packages .hd-row > .hd-marks:empty{display:none;}
+${S} .hd-packages .hd-row > .hd-progress{grid-row:auto;}
+${S} .hd-packages .hd-mark{font-size:.6em;}
+}
 /* THE LIGHT: lit and current, lit and dim — dimmer the older the version running, set by --hd-age — or out. */
-${S} .hd-bulb{display:inline-flex;padding:.1em;font-size:1em;line-height:1;color:var(--hc-status-warn);}
+${S} .hd-bulb{display:inline-grid;place-items:center;width:1.6em;height:1.6em;font-size:1em;line-height:1;color:var(--hc-status-warn);background:color-mix(in srgb, var(--hc-status-warn) 11%, transparent);border-radius:var(--hc-radius-control,2px);transition:background-color .2s,color .2s;}
+${S} .hd-bulb .hd-glyph{font-size:1.05em;vertical-align:0;}
+${S} .hd-simple .hd-bulb{width:2.2em;height:2.2em;}
+${S} .hd-simple .hd-bulb .hd-glyph{font-size:1.25em;}
 ${S} .hd-bulb.behind{opacity:var(--hd-age,.55);}
-${S} .hd-bulb.off,${S} .hd-row.off .hd-bulb{color:var(--hd-ink-quiet);}
+${S} .hd-bulb.off,${S} .hd-row.off .hd-bulb{color:var(--hd-ink-quiet);background:none;box-shadow:inset 0 0 0 1px var(--hd-rule);}
 /* THE MANAGE MENU: over the desk, beside the row it is for. */
-${S} .hd-menu{position:absolute;z-index:5;min-width:13.5rem;display:flex;flex-direction:column;padding:.25em;background:var(--hd-ground);border:1px solid rgba(var(--acc),0.5);border-radius:var(--hc-radius-card,3px);box-shadow:0 8px 24px rgba(0,0,0,0.28);}
-${S} .hd-menu-item{padding:.45em .7em;text-align:left;font:inherit;font-size:.78em;color:var(--hd-ink);background:none;border:none;border-radius:var(--hc-radius-control,2px);cursor:pointer;}
-${S} .hd-menu-item:hover:not(:disabled){background:rgba(var(--acc),0.14);}
+${S} .hd-menu{position:absolute;z-index:5;min-width:14.5rem;display:flex;flex-direction:column;padding:.3em;background:var(--hd-ground);border:1px solid rgba(var(--acc),0.3);border-radius:var(--hc-radius-floating,4px);box-shadow:0 12px 32px rgba(0,0,0,0.22);}
+${S} .hd-menu-item{display:flex;align-items:center;gap:.6em;padding:.5em .7em;text-align:left;font:inherit;font-size:.86em;color:var(--hd-ink);background:none;border:none;border-radius:var(--hc-radius-control,2px);cursor:pointer;transition:background-color .12s;}
+${S} .hd-menu-item .hd-glyph{color:var(--hd-ink-quiet);}
+${S} .hd-menu-item:hover:not(:disabled){background:var(--hd-wash-strong);}
+${S} .hd-menu-item:hover:not(:disabled) .hd-glyph{color:var(--hc-window-accent);}
 ${S} .hd-menu-item:disabled{cursor:default;opacity:.45;}
-${S} .hd-menu-item.accent{color:var(--hc-window-accent);}
-${S} .hd-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8em;color:var(--hd-ink);background:none;border:none;padding:0;font-family:inherit;text-align:left;cursor:pointer;}
-${S} .hd-name:hover{text-decoration:underline;}
+${S} .hd-menu-item.accent,${S} .hd-menu-item.accent .hd-glyph{color:var(--hc-window-accent);}
+${S} .hd-pkg-words{display:flex;flex-direction:column;gap:.1em;min-width:0;}
+${S} .hd-pkg-about{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8em;color:var(--hd-ink-quiet);}
+${S} .hd-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.9em;font-weight:500;color:var(--hd-ink);background:none;border:none;padding:0;font-family:inherit;text-align:left;cursor:pointer;}
 ${S} .hd-row.off .hd-name{color:var(--hd-ink-quiet);}
-${S} .hd-marks{display:inline-flex;gap:.25em;}
-${S} .hd-mark{padding:.05em .4em;font:inherit;font-size:.62em;letter-spacing:.06em;text-transform:uppercase;color:var(--hc-status-warn);background:none;border:1px solid rgba(var(--acc),0.35);border-radius:var(--hc-radius-control,2px);}
-${S} button.hd-mark{cursor:pointer;}
+${S} .hd-marks{display:inline-flex;gap:.3em;}
+${S} .hd-mark{padding:.16em .5em;font:inherit;font-size:.66em;font-weight:600;letter-spacing:.02em;white-space:nowrap;color:var(--hc-window-accent);background:rgba(var(--acc),.12);border:none;border-radius:var(--hc-radius-control,2px);}
+${S} button.hd-mark{cursor:pointer;transition:background-color .15s;}
+${S} button.hd-mark:hover:not(:disabled){background:rgba(var(--acc),.22);}
 ${S} button.hd-mark:disabled{cursor:default;opacity:.55;}
-${S} .hd-mark.quiet{color:var(--hd-ink-quiet);}
-${S} .hd-count{min-width:1.2em;font-size:.62em;text-align:center;color:var(--hd-ink-quiet);}
-${S} .hd-icon{padding:0 .25em;font:inherit;font-size:.9em;line-height:1;color:var(--hd-ink-quiet);background:none;border:none;cursor:pointer;}
-${S} .hd-icon:hover{color:var(--hd-ink);}
+${S} .hd-mark.quiet{color:var(--hd-ink-quiet);background:color-mix(in srgb, var(--hd-ink-quiet) 11%, transparent);}
+${S} .hd-count{min-width:1.2em;font-family:var(--hd-mono);font-size:.66em;text-align:center;color:var(--hd-ink-quiet);}
+${S} .hd-icon{display:inline-grid;place-items:center;width:1.85em;height:1.85em;padding:0;font:inherit;font-size:.9em;line-height:1;color:var(--hd-ink-quiet);background:none;border:none;border-radius:var(--hc-radius-control,2px);cursor:pointer;transition:background-color .15s,color .15s,opacity .15s;}
+${S} .hd-icon:hover{color:var(--hd-ink);background:var(--hd-wash-strong);}
 ${S} .hd-icon:disabled{cursor:default;opacity:.35;}
-${S} .hd-icon-slot{width:.9em;}
+${S} .hd-icon .hd-glyph{font-size:1.25em;vertical-align:0;}
+${S} .hd-manage{opacity:.6;}
+${S} .hd-row:hover .hd-manage,${S} .hd-manage[aria-expanded="true"],${S} .hd-manage:focus-visible{opacity:1;}
+${S} .hd-icon-slot{width:1.2em;}
 ${S} .hd-detail{grid-column:2 / -1;padding:.15em 0 .3em;}
-${S} .hd-desc{margin:0 0 .2em;font-size:.68em;line-height:1.35;color:var(--hd-ink-quiet);}
-${S} .hd-where{margin:.1em 0;font-size:.66em;line-height:1.35;color:var(--hd-ink-quiet);}
-${S} .hd-rev-name{padding:.7em .2em .2em;font-size:.72em;letter-spacing:.05em;color:var(--hc-window-accent);list-style:none;}
+${S} .hd-desc{margin:0 0 .2em;font-size:.76em;line-height:1.4;color:var(--hd-ink-quiet);}
+${S} .hd-where{margin:.1em 0;font-size:.74em;line-height:1.4;color:var(--hd-ink-quiet);}
+/* REVISIONS: newest first, by name, in the drawer. */
+${S} .hd-rev-name{padding:.8em .2em .25em;font-size:.72em;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--hc-window-accent);list-style:none;}
 ${S} .hd-rev-name ~ .hd-rev{margin-left:.9em;}
 ${S} .hd-rev{border-bottom:1px solid rgba(var(--acc),0.08);}
 ${S} .hd-rev.busy{cursor:progress;}
-${S} .hd-rev-choose{display:flex;align-items:center;gap:.6em;width:100%;padding:.4em .2em;font:inherit;font-size:.74em;color:var(--hd-ink);background:none;border:none;text-align:left;cursor:pointer;}
-${S} .hd-rev-choose:hover:not(:disabled){background:rgba(var(--acc),0.06);}
+${S} .hd-rev-choose{display:flex;align-items:center;gap:.6em;width:100%;padding:.48em .3em;font:inherit;font-size:.84em;color:var(--hd-ink);background:none;border:none;border-radius:var(--hc-radius-control,2px);text-align:left;cursor:pointer;transition:background-color .15s;}
+${S} .hd-rev-choose:hover:not(:disabled){background:var(--hd-wash);}
 ${S} .hd-rev-choose:disabled{cursor:default;}
-${S} .hd-rev-sig{font-variant-numeric:tabular-nums;}
+${S} .hd-rev-sig{font-family:var(--hd-mono);font-size:.9em;font-variant-numeric:tabular-nums;}
 ${S} .hd-rev-at,${S} .hd-rev-hosts{color:var(--hd-ink-quiet);}
 ${S} .hd-rev-hosts{margin-right:auto;}
-${S} .hd-warning{margin:.2em 0 .6em;padding:.5em .6em;font-size:.76em;border:1px solid color-mix(in srgb,var(--hc-status-alert) 55%,transparent);border-radius:var(--hc-radius-card,3px);}
-${S} .hd-warning-title{margin:0 0 .3em;color:var(--hd-ink);}
+${S} .hd-warning{margin:.2em 0 .7em;padding:.6em .7em;font-size:.86em;border:1px solid color-mix(in srgb,var(--hc-status-alert) 55%,transparent);border-left:3px solid var(--hc-status-alert);border-radius:var(--hc-radius-card,3px);}
+${S} .hd-warning-title{margin:0 0 .3em;font-weight:600;color:var(--hd-ink);}
 ${S} .hd-warning-list{margin:0 0 .5em;padding-left:1.1em;color:var(--hd-ink-quiet);}
 ${S} .hd-warning-list .quiet{list-style:none;}
 ${S} .hd-warning-acts{display:flex;align-items:center;gap:.5em;}
-${S} .hd-creation{display:grid;grid-template-columns:minmax(0,1fr) auto auto;column-gap:.5em;align-items:center;padding:.3em .2em;border-bottom:1px solid rgba(var(--acc),0.08);font-size:.78em;}
+${S} .hd-creation{display:grid;grid-template-columns:minmax(0,1fr) auto auto;column-gap:.5em;align-items:center;padding:.4em .2em;border-bottom:1px solid rgba(var(--acc),0.08);font-size:.88em;}
 ${S} .hd-creation-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--hd-ink);text-decoration:none;}
 ${S} a.hd-creation-name:hover{text-decoration:underline;}
+${S} .hd-creation-by{font-size:.85em;color:var(--hd-ink-quiet);}
+
+/* MOTION. The desk rises in when it opens; a page slides in from the side it was
+   reached from (a step in from the right, a step back from the left) or fades
+   when the view changes, its rows following a beat apart; a column opened by a
+   pick, a code panel picked and the manage menu arrive the same way. Only an
+   arrival moves (\`data-enter\`, \`.hd-enter\`, set by the view for ${ENTER_MS}ms), and a
+   repaint during one carries it on where it was (\`--hd-since\`). */
+@keyframes hd-rise{from{opacity:0;translate:0 10px;}}
+@keyframes hd-from-right{from{opacity:0;translate:28px 0;}}
+@keyframes hd-from-left{from{opacity:0;translate:-28px 0;}}
+@keyframes hd-fade{from{opacity:0;}}
+@keyframes hd-row-in{from{opacity:0;translate:0 6px;}}
+@keyframes hd-col-in{from{opacity:0;translate:-14px 0;}}
+@keyframes hd-pop{from{opacity:0;translate:0 -4px;scale:.98;}}
+@keyframes hd-spin{to{rotate:1turn;}}
+${S} .hd-panel > .hd-head{animation:hd-rise .3s var(--hd-ease) both;}
+${S} .hd-panel > .hd-frame{animation:hd-rise .36s var(--hd-ease) .05s both;}
+${S} .hd-main[data-enter] > :not(.hd-simple),${S} .hd-main[data-enter] > .hd-simple > :not(.hd-simple-head){animation-duration:.3s;animation-timing-function:var(--hd-ease);animation-fill-mode:both;animation-delay:calc(0ms - var(--hd-since,0ms));}
+${S} .hd-main[data-enter="in"] > :not(.hd-simple),${S} .hd-main[data-enter="in"] > .hd-simple > :not(.hd-simple-head){animation-name:hd-from-right;}
+${S} .hd-main[data-enter="out"] > :not(.hd-simple),${S} .hd-main[data-enter="out"] > .hd-simple > :not(.hd-simple-head){animation-name:hd-from-left;}
+${S} .hd-main[data-enter="swap"] > :not(.hd-simple),${S} .hd-main[data-enter="swap"] > .hd-simple > :not(.hd-simple-head),${S} .hd-main[data-enter="open"] > :not(.hd-simple),${S} .hd-main[data-enter="open"] > .hd-simple > :not(.hd-simple-head){animation-name:hd-fade;}
+${S} .hd-main[data-enter] .hd-col > li{animation:hd-row-in .3s var(--hd-ease) both;animation-delay:calc(min(var(--i,0), 12) * 16ms - var(--hd-since,0ms));}
+${S} .hd-colbox.hd-enter{animation:hd-col-in .28s var(--hd-ease) both;animation-delay:calc(0ms - var(--hd-since,0ms));}
+${S} .hd-codebox.hd-enter{animation:hd-row-in .3s var(--hd-ease) both;animation-delay:calc(0ms - var(--hd-since,0ms));}
+${S} .hd-menu.hd-enter{animation:hd-pop .16s var(--hd-ease) both;animation-delay:calc(0ms - var(--hd-since,0ms));}
+@media (prefers-reduced-motion: reduce){
+${S} *,${S} *::before,${S} *::after{animation:none!important;transition:none!important;}
+}
+
 /* Three columns need room. Narrower than that the drawer lies over the list
    instead of squeezing it: the list underneath is not touched. */
 @media (max-width:1100px){
@@ -3760,8 +4170,8 @@ ${S} .hd-frame,${S} .hd-frame.with-drawer{grid-template-columns:minmax(0,1fr);gr
 ${S} .hd-split{display:none;}
 ${S} .hd-side{max-height:36vh;border-right:none;border-bottom:1px solid var(--hd-rule);}
 ${S} .hd-drawer{position:absolute;inset:0;z-index:2;border-left:none;background:var(--hd-ground);}
+${S} .hd-seg-label{display:none;}
 }
-${S} .hd-creation-by{font-size:.85em;color:var(--hd-ink-quiet);}
 `
   document.head.appendChild(style)
 }

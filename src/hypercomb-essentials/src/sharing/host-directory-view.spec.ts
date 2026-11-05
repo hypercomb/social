@@ -530,7 +530,7 @@ describe('the host directory', () => {
     // The menu: turn it off or on, update to the newest (only when there is one), revisions, code.
     const menu = VIEW.slice(VIEW.indexOf('#renderMenu(): void {'), VIEW.indexOf('#lookAtCode(k: number'))
     expect(menu).toMatch(/void this\.#toggle\(row\)/)
-    expect(menu).toMatch(/if \(row\.update\) \{\s*item\(t\('hosts\.update-newest'/)
+    expect(menu).toMatch(/if \(row\.update\) \{\s*item\('updateIcon', t\('hosts\.update-newest'/)
     expect(menu).toMatch(/void this\.#takeUpdate\(row\)/)
     expect(menu).toMatch(/void this\.#openRevisions\(row\.path\)/)
     expect(menu).toMatch(/this\.#lookAtCode\(k, row, /)

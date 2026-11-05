@@ -3397,6 +3397,7 @@
   "hosts.code.pick": "ファイルを選ぶと、ここにコードが表示されます。",
   "hosts.mode.advanced": "詳細表示",
   "hosts.mode.simple": "シンプル表示",
+  "hosts.mode.simple-short": "シンプル",
   "hosts.mode.advanced-tip": "4つのペイン:ホスト・パッケージ・ファイル・コードを並べて表示します",
   "hosts.mode.simple-tip": "一度に一つのリスト — コードまで順に掘り下げます",
   "hosts.back": "戻る",

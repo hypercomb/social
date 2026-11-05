@@ -4083,6 +4083,7 @@
   "hosts.code.pick": "Pick a file to read its code here.",
   "hosts.mode.advanced": "Advanced",
   "hosts.mode.simple": "Simple view",
+  "hosts.mode.simple-short": "Simple",
   "hosts.mode.advanced-tip": "The four panes: hosts, packages, files and code side by side",
   "hosts.mode.simple-tip": "One list at a time — drill in to the code",
   "hosts.back": "Back",

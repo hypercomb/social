@@ -112,7 +112,7 @@ describe('the desk wears it', () => {
     expect(fileColumn).toMatch(/t\('hosts\.files\.pick', 'Pick a package to see the code it declares\.'\)/)
     // The code pane is captioned like the others and holds the matrix or the note.
     const codePane = VIEW.slice(VIEW.indexOf('  #codeMatrix(files: readonly FileLabel[])'), VIEW.indexOf('  #codeGrid('))
-    expect(codePane).toMatch(/pane\.append\(this\.#colHead\(caption\)\)/)
+    expect(codePane).toMatch(/pane\.append\(this\.#colHead\(caption, 'codeIcon'\)\)/)
     expect(codePane).toMatch(/if \(this\.#files\.keys\.length\) pane\.append\(this\.#codeGrid\(files\)\)/)
     expect(codePane).toMatch(/t\('hosts\.code\.pick', 'Pick a file to read its code here\.'\)/)
   })
