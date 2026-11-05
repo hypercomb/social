@@ -229,6 +229,24 @@ still acts on its own row).
 - A shell with no installed package (the dev shell imports modules from source)
   lists what your hosts carry and leaves every act to a hive.
 
+## Languages
+
+Every string the desk draws is called with an English fallback, so a key missing
+from a catalog never shows as a raw key — it shows as English to someone who chose
+another language. English is the source and Japanese is the one other catalog kept
+whole, so both carry every key the desk asks for, with the same `{tokens}` (a token
+dropped from a translation shows as a blank, one invented as a literal). The other
+twelve catalogs are brought up to date in their own sweeps and fall back to English
+here. Until 2026-11-04 the whole window was English in Japanese: 66 strings that had
+never been translated, plus the desk's own 32 new ones. A count that needs a
+singular in English has a `.one` and an `.other` (*Show the other line* / *Show the
+other {count} lines*); Japanese has no plural and one plain key carries the number.
+
+Keys the column browser retired — `hosts.walk-in`, `hosts.up`, `hosts.path`,
+`hosts.revisions.open`, `packages.same` — are left in the catalogs, as deprecated
+keys are: the other twelve languages carry them too, and removing them is a separate
+sweep.
+
 ## Downgrades are explicit, and hide rather than delete
 
 Choosing a revision OLDER than the running one, when it would replace newer
@@ -274,3 +292,6 @@ sandbox before you bring them into hypercomb.io."*
   before admission, the sideways check before the picks are written.
 - `essentials/src/sharing/community-hosts-panel.spec.ts` — the pool's one
   writer, creations on demand, no builds and no switch, no orphan strings.
+- `shared/i18n/host-directory-keys-parity.spec.ts` — every string the desk draws is
+  in `en.json` and `ja.json`, translated and not copied, with exactly the tokens the
+  English has, and the English fallback in the code says what the catalog says.

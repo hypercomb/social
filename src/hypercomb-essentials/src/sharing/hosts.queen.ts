@@ -59,7 +59,7 @@ const t = (key: string, fallback: string, params: Record<string, string> = {}): 
 export class HostsQueenBee {
   readonly command = 'hosts'
   readonly description =
-    'Open your host directory — add or remove a host, inspect its packages, and add one to your hive. Publish uses this directory for branch destinations.'
+    'Open your host directory — browse what your hosts carry in columns, stack several to search them together, read the code, and add or remove a host. Publish stays its own window: it is what goes out.'
   readonly descriptionKey = 'slash.hosts'
   readonly examples = [
     { input: '/hosts', result: 'Opens your host directory, or closes it if it is already open' },
