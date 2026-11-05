@@ -12,6 +12,7 @@ this document defines the hypothesis, formalizes the theory, and explores ten hi
 - [signature-node-pattern.md](signature-node-pattern.md) — plug-and-play guide: copy the node template, your feature participates in the algebra
 - [deterministic-computation.md](deterministic-computation.md) — authenticity composition: the composition function `C(s₁, s₂)` implemented
 - [core-processor-architecture.md](core-processor-architecture.md) — the runtime that drives the algebra: `hypercomb.act()` → pulse → synchronize
+- [mathematically-backed-truth-research.md](mathematically-backed-truth-research.md) — the experiments under the algebra's atoms: which hive claims a stranger can recompute, the solidity ladder, and why pool membership needs a seal
 
 ---
 

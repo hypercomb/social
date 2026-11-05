@@ -48,13 +48,18 @@ A6<I1: Share resources, never copy: same content is one signature, stored once, 
 A7<A3,H2: An atom is one-to-many: placing adds an incidence, cut drops one, copy does not exist; none touches bytes. No cut, copy or paste words.
 A8<A4,A7: Appearance belongs to the incidence: a trait group is a signature-addressed properties set worn where the atom is placed; another group is a second incidence.
 A9<A7,H5: The hand is the shelf, a quick tray of signatures always in view atop the screen; the tile's handle sends a reference there, never a cut. Only the drop writes: appearance (add an incidence) or custody (move it), and picks the trait group.
-@7 Derived ~optimize-phase.md
+@7 Truth ~mathematically-backed-truth-research.md
+M1<I1,S3: A claim is mathematically backed when anyone holding its inputs recomputes it and trusts nobody. A directory listing is never such an input; a member's own bytes or a signed canonical atom are.
+M2<P6,A3,M1: Categorization is backed only as a mark inside the member's signed bytes or as a signed canonical enumeration of the set. A pool directory is a replica's memory of one of these, never the proof.
+M3<P1,M1: A federated pool converges only under union. A write that replaces members is local state, never a federated fact.
+M4<N1,P2: Every canonical fold is a fixed point: a spelling spelled again is itself. A fold that moves a spelling moves an address.
+@8 Derived ~optimize-phase.md
 D1<I1: A derived record is a pure derivation of signature-addressed inputs, keyed by the input signature, never by name, path or position. Changed source is a new signature and no record yet: derive on miss, never update.
 D2<D1,P6: Derived records live in derived-cache pools. They are recomputable and wipe-safe, never load-bearing: no layer references one, no read path requires one, a cold path gives identical results. Complete or absent, never partial.
 D3<D2: Litmus: could a cold client rebuild it from layers alone? Yes: derived cache. No: it is state and needs its own pool of meaning.
 D4<D2: Caches are minted only in the optimize phase (idle, after synchronize). Never mint truth there: no layers, markers, lineage writes or gating. synchronize is dispatched only by the processor.
 D5<D2: A summary is a derived record keyed by the signature of what it summarises. If summary and subtree disagree, the subtree is truth.
-@8 Reach ~install-by-replication.md pools-across-hosts.md intake-filter.md no-third-party-requests.md
+@9 Reach ~install-by-replication.md pools-across-hosts.md intake-filter.md no-third-party-requests.md
 T1<I1: Bytes reach a reader by replicate(root), the one verb, from a host. Sharing requires hosting. A relay is a meeting point, not a store.
 T2<T1,S3: Verify at admission, never at runtime. Integrity: every atom hashes to its name. Completeness: a tree runs only when its closure has no holes. Authority: a root advances only on a publisher-signed sentinel. After admission runtime trusts the heap.
 T3<T2: Never activate a package no followed publisher signed, nor one the shell core cannot serve.
@@ -62,18 +67,18 @@ T4<T1: Never push updates. The consumer requests, an icon informs, the human dec
 T5<T1: Three gates, never conflated: selection (whom I take from), intake (what I keep, by marks), activation (what may execute). Publishing and activating are separate choices; holding bytes implies neither.
 T6<T1: Carry the selected closure, not a source build. Verify each signature-named byte before use.
 T7: Nothing served may make a visitor's browser contact a host we do not control: no font, stylesheet, script, image or preconnect from elsewhere.
-@9 Interest ~pheromones.md intake-filter.md
+@10 Interest ~pheromones.md intake-filter.md
 R1<I1: A pheromone is an authored, signed interest-signal deposited on a signature. The author may be a person or an agent that read the content. It travels with the content.
 R2<R1,N1: A pheromone never labels what something is: that is the name's job. A new grouping needs a name, never a pheromone kind.
 R3<R1: Interests are private and never travel. A match surfaces content; no match is no signal, not a block.
-@10 Conduct ~model-mediation-and-the-training-prompt.md anatomy-context-need.md hive-read-fence.md
+@11 Conduct ~model-mediation-and-the-training-prompt.md anatomy-context-need.md hive-read-fence.md
 C1<I2: The hive is your only context, and it is always current. What it returns is the truth. Files on disk, checked-in documents and remembered notes may be stale: do not answer a question about the hive from them.
 C2<C1,I3: Explore and act in natural language: read signatures to learn what the hive holds, and say behaviours as sentences in the hive's own grammar. The vocabulary you were given is everything you may run.
 C3<C2,A6: Pull, do not push: read only what the task needs, expand signatures on demand, within budget. Say when you relied on a summary.
 C4<C2,H2: You propose; the participant runs. Never claim a change before the hive reports it ran. Never invent a behaviour name outside the vocabulary you were given.
 C5<C4: The doctrine changes only by the participant. You may propose a section through the write fence; it waits for them.
 C6<C4: Judge every proposed change against every axiom. A clear break: refuse and cite the id. A doubtful one: wait for the participant.
-@11 Build [code] ~CLAUDE.md
+@12 Build [code] ~CLAUDE.md
 B1<P7: Modules (essentials) import only core, never shared, web or dev. The shell loads modules through IoC at runtime. Core holds primitives; essentials holds features.
 B2<B1: Externalize everything: a feature is a signed, shareable drone module; the shell only bootstraps. Classification, grouping and rendering live on a molecule name, not in code.
 B3<H2: Never wipe or removeEntry user data (root signature files, lineage bags, pools). Verify a change reaches the shell by signature comparison, not by clearing OPFS.
@@ -81,7 +86,7 @@ B4<B1: Doctrine ratchets (doctrine.spec.ts) compare against frozen allowlists: n
 B5<B1: Shell surfaces are registry-fed; never add an hc- tag to app.html. UI text goes through i18n keys.
 B6<B1: Private fields use #name; reactivity is EventTarget plus a change event; ESM only with .js relative imports.
 B7<N6: Documentation lives only in src/documentation. The retired mirror paradigm is not reintroduced.
-@12 Paint [code] ~single-paint.md
+@13 Paint [code] ~single-paint.md
 V1<I1,D1: A cell's pixels are a pure function of its paint key: the signatures it shows, its label, its slot, its state. Same key, same pixels; a slot is never rewritten under an unchanged key. Such a repaint is a defect, not a cost.
 V2<V1: Invalidation names cells, never the page. Wiping the page key is legal only on a location or layout-mode change.
 V3<V2,D4: One render owner: one dirty set, drained once per frame; a full pass is dirty-all and still skips unchanged keys. Nothing writes geometry outside the drain.
