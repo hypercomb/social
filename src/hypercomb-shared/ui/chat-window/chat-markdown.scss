@@ -24,6 +24,7 @@
 // the document.
 
 @use '../toolwindow' as tw;
+@use '../code-theme' as code;
 
 $accent: #7eb6d6;
 
@@ -133,12 +134,15 @@ $accent: #7eb6d6;
 
 // ── fenced code ───────────────────────────────────────────────────────────
 
+// THE CODE THEME — the DCP installer's one syntax map, the same the host desk reads
+// source in (ui/_code-theme.scss). The block carries its own ground and ink rather
+// than the window's, so a code block looks the same in every theme's chat.
 :host ::ng-deep .chat-code {
   margin: 0.2em 0 1em;
   border: 1px solid var(--hc-window-line);
   border-radius: var(--hc-radius-card, 3px);
-  background: rgba(var(--hc-panel-pane), 0.78);
   overflow: hidden;
+  @include code.surface;
 
   pre {
     // The block scrolls itself. Without this a single long line widens the
@@ -157,7 +161,7 @@ $accent: #7eb6d6;
     font-variant-ligatures: var(--hc-code-ligatures);
     font-size: 0.84em;
     line-height: 1.6;
-    color: var(--hc-window-ink-loud);
+    color: var(--code-plain);
     background: none;
     border: none;
     border-radius: 0;
@@ -179,7 +183,7 @@ $accent: #7eb6d6;
     font-family: var(--hc-code, monospace);
     font-size: 0.72em;
     text-transform: lowercase;
-    color: var(--hc-window-ink-quiet);
+    color: var(--code-gutter);
   }
 
   .chat-code-copy {
@@ -187,28 +191,18 @@ $accent: #7eb6d6;
     padding: 0.2em 0.5em;
     font: inherit;
     font-size: 0.72em;
-    color: var(--hc-window-ink-quiet);
+    color: var(--code-gutter);
     background: none;
     border: 0;
     border-radius: var(--hc-radius-control, 2px);
     cursor: pointer;
 
-    &:hover { background: var(--hc-window-tint-strong); color: var(--hc-panel-text); }
+    &:hover { background: var(--code-line); color: var(--code-plain); }
   }
 
-  // highlight.js tokens, in the panel's own palette rather than an imported
-  // theme — the answer should look like it belongs to this window.
-  .hljs-comment, .hljs-quote { color: var(--hc-window-ink-quiet); font-style: italic; }
-  .hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-doctag { color: tw.ink(#c99bf0); }
-  .hljs-string, .hljs-regexp, .hljs-addition { color: tw.ink(#9fd6a0); }
-  .hljs-number, .hljs-symbol, .hljs-bullet { color: tw.ink(#e0b45c); }
-  .hljs-title, .hljs-name, .hljs-section, .hljs-selector-id { color: tw.ink(#7eb6d6); }
-  .hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable { color: tw.ink(#86cdd6); }
-  .hljs-type, .hljs-built_in { color: tw.ink(#d6b98a); }
-  .hljs-meta { color: var(--hc-window-ink-quiet); }
-  .hljs-deletion { color: tw.ink(#e08a8a); }
-  .hljs-emphasis { font-style: italic; }
-  .hljs-strong { font-weight: 600; }
+  // highlight.js's token classes, on the theme's tokens (§1.5) — an answer's code
+  // and a host's source are one surface.
+  @include code.hljs;
 }
 
 // ── tables ────────────────────────────────────────────────────────────────

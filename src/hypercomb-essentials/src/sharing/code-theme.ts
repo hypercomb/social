@@ -279,7 +279,7 @@ ${S} .tk-str{color:var(--code-str);}
 ${S} .tk-num{color:var(--code-num);}
 ${S} .tk-fn{color:var(--code-fn);}
 ${S} .tk-type{color:var(--code-type);}
-${S} .tk-comment{color:var(--code-comment);font-style:italic;}
+${S} .tk-comment{color:var(--code-comment);font-style:normal;}
 ${S} .tk-punc{color:var(--code-punc);}
 ${S} .tk-del{color:var(--code-del);}`
 }

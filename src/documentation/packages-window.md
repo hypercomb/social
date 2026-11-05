@@ -264,6 +264,16 @@ characters) as plain rather than as a thousand spans. It returns tokens, and the
 builds text nodes and classed spans: source is never parsed as markup. The gutter and
 the head wear the palette too, and the line under the pointer takes the active-line tint.
 
+The **chat window's code blocks wear the same map** (jwize, 2026-11-04: "yes, do it"):
+`hypercomb-shared/ui/_code-theme.scss` spells the palette for Sass (`code.surface`
+for the ground, ink and selection, `code.hljs` for highlight.js's token classes onto
+the same `--code-*` tokens), and `chat-markdown.scss` includes both on `.chat-code`
+in place of the palette it kept of its own. A stylesheet cannot import TypeScript and
+shared may not import a module, so the values are written twice and
+`shared/ui/code-theme-parity.spec.ts` is what keeps them one theme: every value of
+`CODE_PALETTE` is in the SCSS, every class of the installer's own map lands on the same
+token, and a comment is not italic on either surface (the installer's map says normal).
+
 Not built: a search inside the code, picking several versions of one file to compare,
 and a bulb or update that acts on the whole pick at once (each still acts on its own
 row).

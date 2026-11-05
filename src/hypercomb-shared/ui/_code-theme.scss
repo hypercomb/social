@@ -1,0 +1,60 @@
+// hypercomb-shared/ui/_code-theme.scss
+//
+// THE CODE THEME for the shell's own surfaces — the DCP installer's one syntax
+// map (documentation/dcp-installer-visual-spec.md §1.2, §1.3, §1.5), so a code block
+// in the chat reads exactly like the source on the host desk. (jwize, 2026-11-04:
+// "full code theme styling like we had in the dcp installer website", and then
+// "yes, do it" for the chat.)
+//
+// The palette's authority is `CODE_PALETTE` in
+// hypercomb-essentials/src/sharing/code-theme.ts, which the desk draws from. A
+// stylesheet cannot import TypeScript and a module may not be imported from shared,
+// so the values are written out here and `code-theme-parity.spec.ts` fails the suite
+// the moment a value or a token rule drifts from either the palette or the spec:
+// there is one theme, and this file is only its spelling for Sass.
+//
+// Each hue is a dark and a light value under `light-dark()`, and the THEME picks
+// between them through `--md-color-scheme` (light on the honey, bloom and sherbet
+// themes, dark on dark) — there is no second dark switch here.
+//
+//   @include code.surface   — the background, the ink, the selection, and the
+//                             `--code-*` tokens everything below reads
+//   @include code.hljs      — highlight.js's token classes onto those tokens
+//                             (§1.5, plus the two class forms highlight.js 11 adds)
+
+@mixin surface {
+  color-scheme: var(--md-color-scheme, dark);
+  --code-bg: light-dark(#fbfcfe, #0d1016);
+  --code-gutter: light-dark(#8b95a6, #6b7488);
+  --code-sel: light-dark(rgba(47, 92, 150, 0.16), rgba(143, 180, 232, 0.20));
+  --code-line: light-dark(rgba(20, 30, 50, 0.035), rgba(190, 205, 230, 0.045));
+  --code-plain: light-dark(#1b232e, #d3dce8);
+  --code-kw: light-dark(#5b46a8, #b3a4ea);
+  --code-str: light-dark(#4f7333, #a8c98a);
+  --code-num: light-dark(#8a6218, #e3c07a);
+  --code-fn: light-dark(#2f5c96, #8fb4e8);
+  --code-type: light-dark(#1e7a70, #6fc9c0);
+  --code-comment: light-dark(#7b8698, #6b7488);
+  --code-punc: light-dark(#4a5468, #a8b2c4);
+  --code-del: light-dark(#b83a2c, #ec7365);
+  background: var(--code-bg);
+  color: var(--code-plain);
+
+  ::selection { background: var(--code-sel); }
+}
+
+@mixin hljs {
+  .hljs-comment, .hljs-quote { color: var(--code-comment); font-style: normal; }
+  .hljs-keyword, .hljs-selector-tag, .hljs-literal,
+  .hljs-section, .hljs-doctag, .hljs-type { color: var(--code-kw); }
+  .hljs-string, .hljs-regexp, .hljs-addition { color: var(--code-str); }
+  .hljs-number, .hljs-symbol, .hljs-bullet { color: var(--code-num); }
+  .hljs-title, .hljs-name, .hljs-selector-id, .hljs-function { color: var(--code-fn); }
+  .hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable,
+  .hljs-class .hljs-title, .hljs-title.class_, .hljs-title.class_.inherited__,
+  .hljs-built_in { color: var(--code-type); }
+  .hljs-punctuation, .hljs-operator, .hljs-meta { color: var(--code-punc); }
+  .hljs-deletion { color: var(--code-del); }
+  .hljs-emphasis { font-style: italic; }
+  .hljs-strong { font-weight: 600; }
+}
