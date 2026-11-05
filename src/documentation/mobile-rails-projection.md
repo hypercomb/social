@@ -364,6 +364,19 @@ every tile stays on screen; the ragged start edge is the only difference.
 Turning the hive while lanes are up re-projects; release touches nothing. The
 lines above that say the rail owns or hands back the orientation are superseded.
 
+## The middle lane fills first (2026-11-05)
+
+Across the strip, each column (or row) takes its tiles from the middle lane
+out: at three lanes, middle, then the leading side, then the trailing side
+(`railLaneOrder`). The strip stays symmetric about its axis, so 19 tiles in
+three lanes read 6-7-6 with the odd tile in the middle lane, and a tile dropped
+in the middle of a part-filled last column stays there instead of being packed
+to its top. Every pairing follows the rule; at two lanes it changes nothing.
+The counts per column, the window and the shift step are unchanged, because
+only the order inside a column moved. The "row-major order" and "filled
+left→right / top→bottom" wording above means the order of the columns along the
+strip, not the order of the lanes inside one.
+
 ## The strip is a window; a pan shifts it (2026-11-04)
 
 Lanes show only the tiles that FIT. `presentation/grid/rail-window.ts` (pure)

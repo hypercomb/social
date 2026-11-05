@@ -14,15 +14,23 @@
 //
 // FEED ORDER. Consecutive slots are neighbours ALONG THE STRIP, so the tile
 // after this one is beside it, never a strip-length away:
-//   portrait (point-top)  — rows of `lanes` across the screen, filled
-//                           left→right, rows stacked top→bottom;
-//   landscape (flat-top)  — columns walked left→right, each filled
-//                           top→bottom, alternating `lanes` / `lanes-1`
+//   portrait (point-top)  — rows of `lanes` across the screen, each filled
+//                           from the middle out, rows stacked top→bottom;
+//   landscape (flat-top)  — columns walked left→right, each filled from
+//                           the middle out, alternating `lanes` / `lanes-1`
 //                           slots so the tucked column nests between its
 //                           neighbours (the 3-2-3 rhythm at three lanes).
 // Slot 0 is the strip's START (top in portrait, left in landscape) and the
 // strip grows in the +long direction only, so the camera's start edge never
 // moves as tiles arrive.
+//
+// THE MIDDLE FILLS FIRST. Across the strip, a column (or row) takes its tiles
+// from the middle lane out — at three lanes: middle, then the leading side,
+// then the trailing side. So the strip stays symmetric about its axis: 19
+// tiles in three lanes read 6-7-6, never 7-6-6 with the odd tile stuck on one
+// edge, and a tile dropped in the middle of a part-filled last column stays
+// there instead of being packed to its top (jwize, 2026-11-05: "it is more
+// about symmetry … the middle should be filled first").
 //
 // Point-top rows are straight and stack with the honeycomb half-shift;
 // flat-top columns are straight and nest the same way. Only those two
@@ -34,6 +42,17 @@ import { clampLanes, LANE_DEFAULT, LANE_MAX, LANE_MIN } from '../../sequence/arr
 export interface RailCoord { q: number; r: number }
 
 export { LANE_DEFAULT as RAIL_DEFAULT, LANE_MAX as RAIL_MAX, LANE_MIN as RAIL_MIN, clampLanes as clampRails }
+
+/** Which lane (0-based across the strip) the `k`-th tile of a column of
+ *  `count` lanes takes: nearest the middle first, and of two equally near the
+ *  leading one first. Three lanes: 1, 0, 2. Two: 0, 1. One: 0. */
+export const railLaneOrder = (k: number, count: number): number => {
+  const m = Math.max(1, Math.floor(count))
+  const centre = (m - 1) / 2
+  const order = Array.from({ length: m }, (_, p) => p)
+    .sort((a, b) => Math.abs(a - centre) - Math.abs(b - centre) || a - b)
+  return order[Math.max(0, Math.floor(k)) % m]
+}
 
 /** Where rail slot `slot` sits. `flatTop` is the hex orientation; `horizontal`
  *  = the strip runs left↔right (it defaults to `flatTop`, the matched pairing
@@ -58,13 +77,13 @@ export const railCoord = (
   if (flatTop && !horizontal) {
     // flat-top screen y ∝ r + q/2: r = depth - floor(q/2) keeps columns straight.
     const depth = Math.floor(i / n)
-    const q = -Math.floor((n - 1) / 2) + (i % n)
+    const q = -Math.floor((n - 1) / 2) + railLaneOrder(i % n, n)
     return { q, r: depth - Math.floor(q / 2) }
   }
   if (!flatTop && horizontal) {
     // point-top screen x ∝ q + r/2: q = depth - floor(r/2) keeps rows straight.
     const depth = Math.floor(i / n)
-    const r = -Math.floor((n - 1) / 2) + (i % n)
+    const r = -Math.floor((n - 1) / 2) + railLaneOrder(i % n, n)
     return { q: depth - Math.floor(r / 2), r }
   }
 
@@ -72,7 +91,7 @@ export const railCoord = (
     // Point-top: row r holds lanes c0..c0+n-1. odd-r offset → axial keeps the
     // rows straight; the half-shift between rows is the honeycomb itself.
     const row = Math.floor(i / n)
-    const lane = i % n
+    const lane = railLaneOrder(i % n, n)
     const c0 = -Math.floor((n - 1) / 2)
     return { q: c0 + lane - Math.floor(row / 2), r: row }
   }
@@ -87,7 +106,7 @@ export const railCoord = (
   const within = i % per
   const tucked = within >= n
   const q = pair * 2 + (tucked ? 1 : 0)
-  const pos = tucked ? within - n : within
+  const pos = tucked ? railLaneOrder(within - n, n - 1) : railLaneOrder(within, n)
   // Flat-top screen y ∝ r + q/2. Full columns centre on the strip's axis;
   // tucked columns land halfway between their neighbours' slots.
   return { q, r: pos - Math.floor(n / 2) - Math.floor(q / 2) }

@@ -117,11 +117,12 @@ describe('rail projection — the phone posture', () => {
     expect(project).toHaveBeenCalledTimes(1)
     const matrix = matrixAt(0)
     expect(matrix.size).toBe(CAPACITY)
-    expect(matrix.get(0)).toEqual({ q: -1, r: 0 })
+    // Slot 0 is the middle rail: the middle fills first (rail-grid.ts).
+    expect(matrix.get(0)).toEqual({ q: 0, r: 0 })
     for (let slot = 0; slot < CAPACITY; slot++) expect(matrix.get(slot)).toEqual(railCoord(slot, 3, false))
-    // Row 0 is three consecutive q's; row 1 starts the next rank down.
+    // Row 0 is three consecutive q's, middle first; row 1 starts the next rank down.
     expect([0, 1, 2].map(s => matrix.get(s)!.r)).toEqual([0, 0, 0])
-    expect(matrix.get(2)!.q - matrix.get(0)!.q).toBe(2)
+    expect([0, 1, 2].map(s => matrix.get(s)!.q)).toEqual([0, -1, 1])
     expect(matrix.get(3)!.r).toBe(1)
 
     expect(drone.active).toBe(true)

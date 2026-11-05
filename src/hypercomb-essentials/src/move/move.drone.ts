@@ -506,8 +506,7 @@ export class MoveDrone extends Drone {
       // skip if no movement
       if (diff.q !== 0 || diff.r !== 0) {
         const placements = this.#computePlacements(diff)
-        await this.#commitPlacements(placements)
-        didCommit = true
+        didCommit = await this.#commitPlacements(placements)
       }
     } catch (err) {
       // Swallow + log so #reset always runs in finally. Leaving
@@ -651,14 +650,8 @@ export class MoveDrone extends Drone {
     // Refuse while the history cursor is rewound (scrub-back is view-only) —
     // BEFORE the animation, so a declined drag never plays a suck-in it will not
     // honour. commitMoveInto guards it again for the doors that reach it directly.
-    const cursor = window.ioc.get<{ state?: { rewound?: boolean } }>('@diamondcoreprocessor.com/HistoryCursorService')
-    if (cursor?.state?.rewound) {
-      const i18nMove = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
-      EffectBus.emit('toast:show', {
-        type: 'info',
-        title: i18nMove?.t('move.rewound.title') ?? 'Viewing history',
-        message: i18nMove?.t('move.rewound.message') ?? "Can’t move while scrubbed back — return to the latest (Restore) to edit.",
-      })
+    if (this.#rewound()) {
+      this.#sayRewound()
       this.cancelMove(source)
       return
     }
@@ -1527,8 +1520,7 @@ export class MoveDrone extends Drone {
 
       if (diff.q !== 0 || diff.r !== 0) {
         const placements = this.#computePlacements(diff)
-        await this.#commitPlacements(placements)
-        didCommit = true
+        didCommit = await this.#commitPlacements(placements)
       }
     } catch (err) {
       console.warn('[move] commitCommandMoveAt failed:', err)
@@ -1574,7 +1566,17 @@ export class MoveDrone extends Drone {
   // history/diff use; the cell:reorder emit is a cache-invalidation signal
   // only — show-cell's handler MUST NOT renumber seats on receipt.
 
-  async #commitPlacements(placements: Map<string, Axial>): Promise<void> {
+  async #commitPlacements(placements: Map<string, Axial>): Promise<boolean> {
+    // VIEWING THE PAST. The committer writes nothing while the history cursor
+    // is rewound, and tells no one — so a drag here showed the tile in its new
+    // place, then let it hop back a second later with nothing saved. Refuse
+    // out loud, the way a drop-into already does.
+    if (this.#rewound()) {
+      this.#sayRewound()
+      this.emitEffect('move:preview', null)
+      return false
+    }
+
     let sparse: readonly string[] = this.#reorderNames(placements)
     let denseOrder = sparse.filter(n => n !== '')
 
@@ -1612,11 +1614,28 @@ export class MoveDrone extends Drone {
     this.emitEffect('cell:reorder', { labels: denseOrder })
     this.emitEffect('move:preview', null)
     this.emitEffect('move:committed', { order: denseOrder })
+    return true
+  }
+
+  /** Is the history cursor scrubbed back? Nothing can be written there. */
+  #rewound(): boolean {
+    const cursor = window.ioc.get<{ state?: { rewound?: boolean } }>('@diamondcoreprocessor.com/HistoryCursorService')
+    return cursor?.state?.rewound === true
+  }
+
+  #sayRewound(): void {
+    const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
+    EffectBus.emit('toast:show', {
+      type: 'info',
+      title: i18n?.t('move.rewound.title') ?? 'Viewing history',
+      message: i18n?.t('move.rewound.message') ?? "Can’t move while scrubbed back — return to the latest (Restore) to edit.",
+    })
   }
 
   /** A whole new order, dense, from a surface that reads the layer as a
    *  strip (the phone's list). Same write as a rail drag's commit. */
   async reorderList(labels: readonly string[]): Promise<void> {
+    if (this.#rewound()) { this.#sayRewound(); return }
     const orderProjection = window.ioc.get<OrderProjection>('@diamondcoreprocessor.com/OrderProjection')
     if (orderProjection) {
       await orderProjection.reorder([...labels])
