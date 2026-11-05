@@ -23,6 +23,10 @@ import { DEFAULT_HOME, homeOrigin, turnOffHref } from './turn-off-link'
 import type { OwnerBridge } from './owner-bridge'
 import { showcaseHref } from './showcase-link'
 import type { CommunityPick } from './community-tiles'
+import {
+  LaneTouch, hostOf as laneHostOf, keepLaneOrientation, laneDrift, laneLayout, laneMaxShift, lanePosition, laneSnap, laneTileAt, onePerHost,
+  readLaneOrientation, type LaneLayout,
+} from './showcase-lanes'
 import type { LinkIcon, Starter, WelcomeLink } from './welcome'
 
 const SIG = /^[a-f0-9]{64}$/
@@ -938,7 +942,14 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     const on = !picked(entry)
     // Where it goes back to: the domain it was brought in from.
     const from = picks.find(pick => pick.key === entry.key)?.zone ?? row
-    picks = on ? [...picks, { zone: row, key: entry.key }] : picks.filter(pick => pick.key !== entry.key)
+    // ONE PER SUBDOMAIN, ON ANY DOMAIN (jwize 2026-11-05; a bare apex counts as one): a tile brought in from a host
+    // that already has one in the community takes that one's place.
+    const known = new Map(bands().flatMap(band => band.open).map(found => [found.key, found] as const))
+    const hostOfPick = (pick: CommunityPick): string => {
+      const found = pick.key === entry.key ? entry : known.get(pick.key)
+      return found ? laneHostOf(placeFor(found, pick.zone).href, pick.zone) : pick.zone
+    }
+    picks = on ? onePerHost(picks, { zone: row, key: entry.key }, hostOfPick) : picks.filter(pick => pick.key !== entry.key)
     picking = true
     paint()
     const kept = await options.keepCommunity(picks).catch(() => false)
@@ -1129,10 +1140,162 @@ ${entry.key}`
     dock.hidden = dockCount === 0
     combTiles.set(comb, tiles)
   }
+  // ── THE PHONE'S LANES (jwize 2026-11-05: "we want the lanes look for the showcase"): the open row's hexagons sit in a
+  //    fixed block of lanes that fills the space between the comb's top and the dock — the landing grid. A drag up or
+  //    down moves the window over the tiles, never the page; the tiles follow a clear drag and snap to whole steps, and
+  //    a confusing touch (a second finger, a drag across or between) puts them straight back in their slots. ──
+  const lanesWanted = (): boolean => { try { return matchMedia('(max-width: 720px)').matches } catch { return false } }
+  type LaneState = { layout: LaneLayout; tiles: readonly HTMLElement[]; shift: number; touch: LaneTouch; drifted: boolean; turn: HTMLButtonElement }
+  const laneStates = new WeakMap<HTMLElement, LaneState>()
+  let laneFlat = false
+  const laneSpace = (comb: HTMLElement): { width: number; height: number } => {
+    const viewHeight = globalThis.visualViewport?.height ?? innerHeight
+    const dock = document.querySelector('.page-dock')
+    const floor = dock instanceof HTMLElement && !dock.hidden ? dock.getBoundingClientRect().top : viewHeight
+    const top = comb.getBoundingClientRect().top + (document.scrollingElement?.scrollTop ?? 0)
+    return { width: comb.clientWidth, height: Math.max(220, Math.min(floor, viewHeight) - top - 12) }
+  }
+  const drawLanes = (comb: HTMLElement, state: LaneState, dy: number): void => {
+    const { layout, tiles, shift } = state
+    const placed: HTMLElement[] = []
+    // The block, plus one step above and below for the tiles a drag slides in.
+    for (let row = -layout.stepRows; row < layout.rows + layout.stepRows; row++) {
+      for (let lane = 0; lane < layout.lanes; lane++) {
+        const index = laneTileAt(layout, shift, lane, row, tiles.length)
+        if (index < 0) continue
+        const tile = tiles[index]!
+        const at = lanePosition(layout, lane, row)
+        tile.style.transform = `translate(${at.x}px, ${at.y + dy}px)`
+        placed.push(tile)
+      }
+    }
+    const kept = [...comb.children].filter(node => node !== state.turn)
+    if (kept.length !== placed.length || kept.some((node, index) => node !== placed[index])) comb.replaceChildren(...placed, state.turn)
+    else if (state.turn.parentElement !== comb) comb.append(state.turn)
+    comb.dataset['more'] = shift < laneMaxShift(layout, tiles.length) ? 'below' : ''
+    comb.dataset['less'] = shift > 0 ? 'above' : ''
+  }
+  /** A step lands: drawn first where the finger left it, then eased into the slots. */
+  const settleLanes = (comb: HTMLElement, state: LaneState, from: number): void => {
+    comb.classList.remove('settling')
+    drawLanes(comb, state, from)
+    if (!from) return
+    void comb.offsetWidth
+    comb.classList.add('settling')
+    drawLanes(comb, state, 0)
+    setTimeout(() => comb.classList.remove('settling'), 240)
+  }
+  const laneState = (comb: HTMLElement): LaneState => {
+    const found = laneStates.get(comb)
+    if (found) return found
+    const turn = el('button', 'lane-turn')
+    turn.type = 'button'
+    turn.addEventListener('click', event => {
+      event.preventDefault()
+      event.stopPropagation()
+      laneFlat = !laneFlat
+      void keepLaneOrientation(laneFlat)
+      paint()
+    })
+    const state: LaneState = { layout: laneLayout(1, 1, laneFlat), tiles: [], shift: 0, touch: new LaneTouch(), drifted: false, turn }
+    laneStates.set(comb, state)
+    const end = (event: PointerEvent): void => {
+      const ended = state.touch.up(event.pointerId)
+      if (!ended) return
+      if (ended.mode !== 'drift') {
+        // A drift that ended locked still swallows its own click, and only that one.
+        if (state.drifted) { settleLanes(comb, state, 0); setTimeout(() => { state.drifted = false }, 0) }
+        return
+      }
+      const max = laneMaxShift(state.layout, state.tiles.length)
+      const drawn = laneDrift(ended.dy, state.layout.stepPx, state.shift, max)
+      const next = laneSnap(ended.dy, state.layout.stepPx, state.shift, max)
+      const from = drawn + (next - state.shift) * state.layout.stepPx
+      state.shift = next
+      settleLanes(comb, state, from)
+      // The click a drift ends with never presses the tile it ended on.
+      setTimeout(() => { state.drifted = false }, 0)
+    }
+    comb.addEventListener('pointerdown', event => {
+      if (event.target instanceof Element && event.target.closest('.lane-turn')) return
+      const mode = state.touch.down(event.pointerId, event.clientX, event.clientY)
+      if (mode === 'locked') settleLanes(comb, state, 0)
+    })
+    comb.addEventListener('pointermove', event => {
+      const was = state.touch.mode
+      const mode = state.touch.move(event.pointerId, event.clientX, event.clientY)
+      if (mode === 'drift') {
+        if (!state.drifted) { state.drifted = true; try { comb.setPointerCapture(event.pointerId) } catch { /* gone already */ } }
+        comb.classList.remove('settling')
+        drawLanes(comb, state, laneDrift(state.touch.dy, state.layout.stepPx, state.shift, laneMaxShift(state.layout, state.tiles.length)))
+      } else if (mode === 'locked' && was === 'drift') settleLanes(comb, state, 0)
+    })
+    comb.addEventListener('pointerup', end)
+    comb.addEventListener('pointercancel', end)
+    comb.addEventListener('click', event => {
+      if (!state.drifted) return
+      state.drifted = false
+      event.preventDefault()
+      event.stopPropagation()
+    }, true)
+    // A wheel or a trackpad at phone width steps the same window, one step a notch.
+    comb.addEventListener('wheel', event => {
+      if (Math.abs(event.deltaY) < 4) return
+      const max = laneMaxShift(state.layout, state.tiles.length)
+      const next = Math.min(max, Math.max(0, state.shift + Math.sign(event.deltaY)))
+      if (next === state.shift) return
+      event.preventDefault()
+      const from = (next - state.shift) * state.layout.stepPx
+      state.shift = next
+      settleLanes(comb, state, from)
+    }, { passive: false })
+    return state
+  }
+  const arrangeLanes = (comb: HTMLElement, tiles: readonly HTMLElement[]): void => {
+    const state = laneState(comb)
+    const sameTiles = state.tiles.length === tiles.length && state.tiles.every((tile, index) => tile === tiles[index])
+    combTiles.set(comb, tiles)
+    comb.dataset['lanes'] = laneFlat ? 'flat' : 'pointy'
+    if (!tiles.length) { comb.style.removeProperty('height'); state.tiles = []; comb.replaceChildren(); return }
+    const space = laneSpace(comb)
+    if (!space.width) return
+    // Nothing scrolls but the tiles: whatever the page still holds under the comb comes off its height.
+    comb.style.height = `${space.height}px`
+    const page = document.scrollingElement
+    const excess = page ? page.scrollHeight - page.clientHeight : 0
+    const height = Math.floor(excess > 0 ? Math.max(220, space.height - excess - 1) : space.height)
+    const { width } = space
+    const layout = laneLayout(width, height, laneFlat)
+    state.layout = layout
+    state.tiles = tiles
+    if (!sameTiles) state.shift = 0
+    state.shift = Math.min(state.shift, laneMaxShift(layout, tiles.length))
+    comb.style.height = `${height}px`
+    comb.style.setProperty('--lw', `${layout.tileWidth}px`)
+    comb.style.setProperty('--lh', `${layout.tileHeight}px`)
+    state.turn.title = laneFlat ? 'Pointy-top tiles' : 'Flat-top tiles'
+    state.turn.setAttribute('aria-label', state.turn.title)
+    state.turn.dataset['flat'] = String(laneFlat)
+    if (!state.turn.firstChild) state.turn.innerHTML = '<svg viewBox="-12 -12 24 24" aria-hidden="true" focusable="false"><polygon points="0,-10 8.66,-5 8.66,5 0,10 -8.66,5 -8.66,-5" fill="none" stroke="currentColor" stroke-width="2"/></svg>'
+    drawLanes(comb, state, 0)
+  }
+  /** Back to the honeycomb rows: what the lanes set on the comb and its tiles is taken off. */
+  const leaveLanes = (comb: HTMLElement): void => {
+    if (!comb.dataset['lanes']) return
+    delete comb.dataset['lanes']
+    delete comb.dataset['more']
+    delete comb.dataset['less']
+    comb.style.removeProperty('height')
+    for (const tile of combTiles.get(comb) ?? []) tile.style.removeProperty('transform')
+    laneStates.get(comb)?.turn.remove()
+    comb.replaceChildren()
+  }
+  void readLaneOrientation().then(flat => { if (flat !== laneFlat) { laneFlat = flat; paint() } })
   const arrange = (comb: HTMLElement, tiles: readonly HTMLElement[], shape: ShowcaseView = combShapes.get(comb) ?? 'hex'): void => {
     // A change of shape starts the comb over: a launcher is the tiles in a plain
     // grid, an iPhone page is a springboard, a list is a column of blocks, tiles are squares, hexagons are rows counted from the width.
     if (combShapes.get(comb) !== shape) {
+      leaveLanes(comb)
       combShapes.set(comb, shape)
       combTiles.delete(comb)
       combWidths.delete(comb)
@@ -1148,6 +1311,9 @@ ${entry.key}`
       combTiles.set(comb, tiles)
       return
     }
+    // ON A PHONE THE HEXAGONS ARE LANES: a fixed block sized to the space, a window that steps (showcase-lanes.ts).
+    if (lanesWanted()) { arrangeLanes(comb, tiles); return }
+    leaveLanes(comb)
     // The same tiles at the same width are already where they belong: moving
     // them would take focus from a tile and restart its picture's fade.
     const width = comb.clientWidth
@@ -1405,7 +1571,7 @@ ${entry.key}`
     swiped = true
     setTimeout(() => { swiped = false }, 0)
     // The square column is its own scroller. Up and down moves the next tile into the frame, and does not turn the set.
-    const tiling = step.axis === 'y' && event.target instanceof Element && !!event.target.closest('.comb[data-shape="tiles"]')
+    const tiling = step.axis === 'y' && event.target instanceof Element && !!event.target.closest('.comb[data-shape="tiles"], .comb[data-lanes]')
     if (managing) {
       if (step.axis === 'x') cycleTemplate(step.by)
       else if (!tiling) cycleSet(step.by)
@@ -2188,6 +2354,21 @@ a.hex:hover > .hex-art::after { opacity: .8; }
 a.hex:focus-visible { outline: none; background: var(--md-primary); }
 a.hex:focus-visible > .hex-art { inset: 4px; }
 .hex-owners[hidden] { display: none; }
+/* THE PHONE'S LANES: slots never move, the tiles are placed in them (showcase-lanes.ts) */
+.comb[data-lanes] { position: relative; display: block; overflow: hidden; touch-action: none; overscroll-behavior: contain; }
+.comb[data-lanes] > .hex { position: absolute; left: 0; top: 0; width: var(--lw); height: var(--lh); will-change: transform; }
+.comb[data-lanes='flat'] { --hex: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); }
+.comb[data-lanes='flat'] .hex-label { top: 54%; left: 14%; right: 14%; }
+.comb[data-lanes].settling > .hex { transition: transform .22s cubic-bezier(.2, 0, 0, 1); }
+.comb[data-lanes]::before, .comb[data-lanes]::after { content: ''; position: absolute; left: 0; right: 0; height: 1.6rem; z-index: 4; pointer-events: none; opacity: 0; transition: opacity .2s; }
+.comb[data-lanes]::before { top: 0; background: linear-gradient(180deg, var(--md-surface), transparent); }
+.comb[data-lanes]::after { bottom: 0; background: linear-gradient(0deg, var(--md-surface), transparent); }
+.comb[data-lanes][data-less='above']::before, .comb[data-lanes][data-more='below']::after { opacity: .9; }
+.lane-turn { position: absolute; right: .25rem; bottom: .25rem; z-index: 5; display: grid; place-items: center; width: 2.25rem; height: 2.25rem; padding: 0;
+  border: 1px solid var(--md-outline-variant); border-radius: 999px; background: color-mix(in srgb, var(--md-surface) 88%, transparent);
+  color: var(--md-on-surface-var); cursor: pointer; }
+.lane-turn svg { width: 1.1rem; height: 1.1rem; transition: transform .25s; }
+.lane-turn[data-flat='true'] svg { transform: rotate(30deg); }
 
 /* a held tile: the domains it is on */
 .versions-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 1rem;
