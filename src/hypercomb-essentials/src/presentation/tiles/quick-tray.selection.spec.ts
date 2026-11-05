@@ -233,6 +233,84 @@ describe('the pictures on the selection rows', () => {
   })
 })
 
+describe('while the select is still in hand', () => {
+  const key = (type: 'keydown' | 'keyup', k = 'Control'): void => { document.dispatchEvent(new KeyboardEvent(type, { key: k })) }
+  const pointer = (type: string, buttons: number): void => {
+    document.dispatchEvent(new MouseEvent(type, { bubbles: true, button: 0, buttons }))
+  }
+  const up = (): boolean => tray.shadowRoot?.querySelector('.shelf.picks') !== null
+
+  it('waits for Ctrl to come up before taking the band', () => {
+    key('keydown')
+    selection.replace(['alpha', 'beta'])
+    flush()
+    expect(up()).toBe(false)
+    expect(labels(tray)).toEqual(['held-one', 'held-two'])
+    key('keyup')
+    expect(up()).toBe(true)
+    expect(labels(tray)).toEqual(['alpha', 'beta'])
+  })
+
+  it('waits for the button to come up on a paint drag', () => {
+    pointer('pointerdown', 1)
+    selection.add('alpha'); selection.add('beta'); selection.add('gamma')
+    flush()
+    expect(up()).toBe(false)
+    pointer('pointerup', 0)
+    expect(up()).toBe(true)
+    expect(labels(tray)).toEqual(['alpha', 'beta', 'gamma'])
+  })
+
+  it('shows the selection as it stood when the hand lifted, not when it pressed', () => {
+    key('keydown')
+    selection.replace(['alpha', 'beta'])
+    flush()
+    selection.add('gamma')
+    flush()
+    key('keyup')
+    expect(labels(tray)).toEqual(['alpha', 'beta', 'gamma'])
+  })
+
+  it('still updates the rows of a band already taken', () => {
+    selection.replace(['alpha', 'beta'])
+    flush()
+    key('keydown')
+    selection.add('gamma')
+    flush()
+    expect(labels(tray)).toEqual(['alpha', 'beta', 'gamma'])
+    key('keyup')
+  })
+
+  it('waits before handing the band back, too', () => {
+    selection.replace(['alpha', 'beta'])
+    flush()
+    key('keydown')
+    selection.remove('beta')
+    flush()
+    expect(up()).toBe(true)
+    key('keyup')
+    expect(up()).toBe(false)
+    expect(labels(tray)).toEqual(['held-one', 'held-two'])
+  })
+
+  it('reads a swallowed release off the next move', () => {
+    pointer('pointerdown', 1)
+    selection.replace(['alpha', 'beta'])
+    flush()
+    expect(up()).toBe(false)
+    pointer('pointermove', 0)
+    expect(up()).toBe(true)
+  })
+
+  it('lets go when the window loses focus', () => {
+    key('keydown')
+    selection.replace(['alpha', 'beta'])
+    flush()
+    window.dispatchEvent(new Event('blur'))
+    expect(up()).toBe(true)
+  })
+})
+
 describe('a selection rebuilt in a burst', () => {
   it('never shows the shelf through the empty set it passes through', () => {
     selection.replace(['alpha', 'beta'])

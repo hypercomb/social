@@ -62,8 +62,16 @@
 // (`images:queue`), the tile being chosen for is lit and the ones done are
 // ticked. The switch between the two is taken on a frame, so a selection
 // rebuilt in a burst never shows the shelf for the instant it is empty.
+//
+// AND IT WAITS FOR THE HAND TO LIFT. Taking or giving back the band moves the
+// canvas (`viewport:inset`), so a switch made while a select is still in
+// progress — the button down on a paint drag, Ctrl held between clicks —
+// shifts the tiles under the pointer and the rest of the gesture lands on the
+// wrong ones (jwize, 2026-11-05). So the band changes hands only once no
+// button and no modifier is down; rows on a band already taken still update
+// at once, because that moves nothing.
 
-import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, POINTER_GESTURE_END, type I18nProvider } from '@hypercomb/core'
 import { listGroups, readGroup, startGroup } from '../../assistant/context-groups.js'
 import { dropEntries, entryKey, takeEntries, type TrayEntry } from './quick-tray.entries.js'
 import { bouquetOf, entriesToMembers, membersToEntries, shelfType, tagSignature } from './quick-tray.ring.js'
@@ -270,6 +278,11 @@ export class QuickTrayElement extends HTMLElement {
   #pickThumbs = new Map<string, string>()
   #selection: SelectionLike | null = null
   #selectionFrame = 0
+  /** A select may be in progress: the primary button is down, or Ctrl/Meta is. */
+  #buttonDown = false
+  #modifierDown = false
+  /** The band should have changed hands, but a select was still in progress. */
+  #switchOwed = false
   #queue: ImageQueue | null = null
   /** The participant chose a number this session, so the saved one no longer speaks. */
   #fillChosen = false
@@ -369,6 +382,7 @@ export class QuickTrayElement extends HTMLElement {
     }))
     window.addEventListener('resize', this.#onResize)
     this.addEventListener('pointerenter', this.#endPeek)
+    this.#watchGesture(true)
     this.#watchSelection()
     this.#render()
     this.#announce()
@@ -380,6 +394,10 @@ export class QuickTrayElement extends HTMLElement {
     for (const off of this.#offs.splice(0)) off()
     window.removeEventListener('resize', this.#onResize)
     this.removeEventListener('pointerenter', this.#endPeek)
+    this.#watchGesture(false)
+    this.#buttonDown = false
+    this.#modifierDown = false
+    this.#switchOwed = false
     this.#selection?.removeEventListener('change', this.#onSelectionChange)
     this.#selection = null
     cancelAnimationFrame(this.#selectionFrame)
@@ -570,6 +588,53 @@ export class QuickTrayElement extends HTMLElement {
     })
   }
 
+  // ── the hand on the select ─────────────────────────────────────────────
+
+  #watchGesture(on: boolean): void {
+    const bind = on ? document.addEventListener.bind(document) : document.removeEventListener.bind(document)
+    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'] as const) bind(type, this.#onPointer as EventListener, true)
+    for (const type of ['keydown', 'keyup'] as const) bind(type, this.#onKey as EventListener, true)
+    const win = on ? window.addEventListener.bind(window) : window.removeEventListener.bind(window)
+    win(POINTER_GESTURE_END, this.#onHandLifted)
+    win('blur', this.#onHandLifted)
+  }
+
+  /** The event is the truth about the button, never a remembered press: a
+   *  release swallowed at window capture still shows as `buttons` without the
+   *  primary bit on the next move. */
+  #onPointer = (e: PointerEvent): void => {
+    const down = e.type === 'pointerdown' ? e.button === 0
+      : e.type === 'pointermove' ? (e.buttons & 1) === 1
+      : false
+    if (down === this.#buttonDown) return
+    this.#buttonDown = down
+    this.#settleHand()
+  }
+
+  #onKey = (e: KeyboardEvent): void => {
+    if (e.key !== 'Control' && e.key !== 'Meta') return
+    const down = e.type === 'keydown'
+    if (down === this.#modifierDown) return
+    this.#modifierDown = down
+    this.#settleHand()
+  }
+
+  #onHandLifted = (): void => {
+    if (!this.#buttonDown && !this.#modifierDown) return
+    this.#buttonDown = false
+    this.#modifierDown = false
+    this.#settleHand()
+  }
+
+  #selecting(): boolean { return this.#buttonDown || this.#modifierDown }
+
+  /** The hand lifted: a band switch that waited happens now. */
+  #settleHand(): void {
+    if (this.#selecting() || !this.#switchOwed) return
+    this.#switchOwed = false
+    this.#commitPicks()
+  }
+
   #commitPicks(): void {
     const next = [...(this.#selection?.selected ?? [])]
     const page = here()
@@ -577,6 +642,9 @@ export class QuickTrayElement extends HTMLElement {
       && page.join('\u0000') === this.#picksPage.join('\u0000')
     if (same) return
     const wasPicking = this.#picking()
+    // The band would change hands mid-select: wait for the hand to lift.
+    if (wasPicking !== next.length >= SELECTION_SHELF_MIN && this.#selecting()) { this.#switchOwed = true; return }
+    this.#switchOwed = false
     this.#picks = next
     this.#picksPage = page
     // A picture whose tile left the selection is let go now, not on unmount.
