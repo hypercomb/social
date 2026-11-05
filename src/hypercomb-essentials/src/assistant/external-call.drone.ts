@@ -43,6 +43,11 @@ const MAX_LINES = 200
 const MAX_LINE = 4000
 // A line the command line never settles is unknown, not a hang.
 const LINE_DEADLINE_MS = 60_000
+// Turns are being written into a conversation (`writing: true`) or have just
+// stopped (`false`). The header's chat icon reads it: pulsing and bright while
+// a run is written, bright until the chat is opened and read. Transient: a
+// state of this run, never replayed to a command line that mounts later.
+const CHAT_ACTIVITY = 'chat:activity'
 
 type Pending = {
   readonly id: string
@@ -230,11 +235,19 @@ export class ExternalCallDrone extends Drone {
     // The ask leaves the command line the moment it is answered: while the
     // run goes on, the participant's own line is theirs again.
     EffectBus.emit(EXTERNAL_ASK, null)
+    // THE CHAT ICON, NOT THE CHAT WINDOW (jwize, 2026-11-04: "make the chat
+    // icon on the top right pulse and be bright when you are adding these to
+    // go to the session, instead of showing chat immediately"). The run is
+    // written into its conversation turn by turn; while that goes on the rail
+    // says so, and what was written waits behind the icon until it is opened.
+    EffectBus.emitTransient(CHAT_ACTIVITY, { from: head.from, writing: true })
     let outcome: ExternalCallOutcome
     try {
       outcome = answer.decision === 'run' ? await this.#run(head) : await this.#decline(head)
     } catch (error) {
       outcome = { kind: 'refused', reason: String((error as Error)?.message ?? error) }
+    } finally {
+      EffectBus.emitTransient(CHAT_ACTIVITY, { from: head.from, writing: false })
     }
     try { head.complete?.(outcome) } catch { /* a caller's own failure is not ours */ }
     this.#busy = false

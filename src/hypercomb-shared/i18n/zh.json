@@ -2875,5 +2875,22 @@
   "meeting.lobby-sharp": "清晰",
   "meeting.icon-start": "开始会议",
   "meeting.icon-live": "你的蜂群中正在开会：加入",
-  "meeting.icon-in": "显示或隐藏会议"
+  "meeting.icon-in": "显示或隐藏会议",
+  "meeting.camera-on": "打开摄像头",
+  "meeting.camera-off": "关闭摄像头",
+  "meeting.hive-hide": "隐藏",
+  "meeting.hive-show": "显示会议",
+  "meeting.hive-camera-hint": "点击你的花即可打开摄像头。",
+  "meeting.hive": "会议",
+  "meeting.you": "你",
+  "meeting.copy-link": "复制链接",
+  "meeting.share-link": "分享链接",
+  "meeting.leave": "离开",
+  "meeting.full-screen": "全屏",
+  "meeting.exit-full-screen": "退出全屏",
+  "meeting.leads": "主持",
+  "meeting.hive-alone": "目前只有你。复制链接以邀请别人。",
+  "meeting.hive-not-in": "你不在会议中。",
+  "meeting.spend-left": "来自已离开的人",
+  "meeting.spend-meeting": "本次会议的视频"
 }

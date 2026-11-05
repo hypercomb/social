@@ -2875,5 +2875,22 @@
   "meeting.lobby-sharp": "حاد",
   "meeting.icon-start": "ابدأ اجتماعًا",
   "meeting.icon-live": "اجتماع جارٍ في سربك: انضم إليه",
-  "meeting.icon-in": "أظهر الاجتماع أو أخفه"
+  "meeting.icon-in": "أظهر الاجتماع أو أخفه",
+  "meeting.camera-on": "تشغيل الكاميرا",
+  "meeting.camera-off": "إيقاف الكاميرا",
+  "meeting.hive-hide": "إخفاء",
+  "meeting.hive-show": "إظهار الاجتماع",
+  "meeting.hive-camera-hint": "انقر زهرتك لتشغيل الكاميرا.",
+  "meeting.hive": "اجتماع",
+  "meeting.you": "أنت",
+  "meeting.copy-link": "نسخ الرابط",
+  "meeting.share-link": "مشاركة الرابط",
+  "meeting.leave": "مغادرة",
+  "meeting.full-screen": "ملء الشاشة",
+  "meeting.exit-full-screen": "إنهاء ملء الشاشة",
+  "meeting.leads": "يقود",
+  "meeting.hive-alone": "أنت وحدك حتى الآن. انسخ الرابط لدعوة أحد.",
+  "meeting.hive-not-in": "لست في الاجتماع.",
+  "meeting.spend-left": "ممن غادروا",
+  "meeting.spend-meeting": "فيديو هذا الاجتماع"
 }

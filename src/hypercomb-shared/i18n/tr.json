@@ -2875,5 +2875,22 @@
   "meeting.lobby-sharp": "Net",
   "meeting.icon-start": "Toplantı başlat",
   "meeting.icon-live": "Sürünüzde bir toplantı var: katılın",
-  "meeting.icon-in": "Toplantıyı göster veya gizle"
+  "meeting.icon-in": "Toplantıyı göster veya gizle",
+  "meeting.camera-on": "Kamerayı aç",
+  "meeting.camera-off": "Kamerayı kapat",
+  "meeting.hive-hide": "gizle",
+  "meeting.hive-show": "Toplantıyı göster",
+  "meeting.hive-camera-hint": "Kamerayı açmak için kendi çiçeğine tıkla.",
+  "meeting.hive": "toplantı",
+  "meeting.you": "sen",
+  "meeting.copy-link": "bağlantıyı kopyala",
+  "meeting.share-link": "bağlantıyı paylaş",
+  "meeting.leave": "ayrıl",
+  "meeting.full-screen": "tam ekran",
+  "meeting.exit-full-screen": "tam ekrandan çık",
+  "meeting.leads": "yönetir",
+  "meeting.hive-alone": "Şimdilik yalnızsın. Birini getirmek için bağlantıyı kopyala.",
+  "meeting.hive-not-in": "Toplantıda değilsin.",
+  "meeting.spend-left": "ayrılanlardan",
+  "meeting.spend-meeting": "Bu toplantının videosu"
 }

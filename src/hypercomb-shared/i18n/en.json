@@ -4148,5 +4148,22 @@
   "quickmenu.generate": "generate",
   "quickmenu.tiles": "Tiles",
   "quickmenu.many-tiles.one": "{count} tile",
-  "quickmenu.many-tiles.other": "{count} tiles"
+  "quickmenu.many-tiles.other": "{count} tiles",
+  "meeting.camera-on": "Turn your camera on",
+  "meeting.camera-off": "Turn your camera off",
+  "meeting.hive-hide": "hide",
+  "meeting.hive-show": "Show the meeting",
+  "meeting.hive-camera-hint": "Click your flower to turn your camera on.",
+  "meeting.hive": "meeting",
+  "meeting.you": "you",
+  "meeting.copy-link": "copy link",
+  "meeting.share-link": "share link",
+  "meeting.leave": "leave",
+  "meeting.full-screen": "full screen",
+  "meeting.exit-full-screen": "exit full screen",
+  "meeting.leads": "leads",
+  "meeting.hive-alone": "Only you so far. Copy the link to bring someone in.",
+  "meeting.hive-not-in": "You are not in the meeting.",
+  "meeting.spend-left": "from people who left",
+  "meeting.spend-meeting": "Video this meeting"
 }

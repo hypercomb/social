@@ -2875,5 +2875,22 @@
   "meeting.lobby-sharp": "Nette",
   "meeting.icon-start": "Démarrer une réunion",
   "meeting.icon-live": "Une réunion a lieu dans votre essaim : la rejoindre",
-  "meeting.icon-in": "Afficher ou masquer la réunion"
+  "meeting.icon-in": "Afficher ou masquer la réunion",
+  "meeting.camera-on": "Allumer la caméra",
+  "meeting.camera-off": "Éteindre la caméra",
+  "meeting.hive-hide": "masquer",
+  "meeting.hive-show": "Afficher la réunion",
+  "meeting.hive-camera-hint": "Cliquez sur votre fleur pour allumer la caméra.",
+  "meeting.hive": "réunion",
+  "meeting.you": "vous",
+  "meeting.copy-link": "copier le lien",
+  "meeting.share-link": "partager le lien",
+  "meeting.leave": "quitter",
+  "meeting.full-screen": "plein écran",
+  "meeting.exit-full-screen": "quitter le plein écran",
+  "meeting.leads": "mène",
+  "meeting.hive-alone": "Vous êtes seul pour l’instant. Copiez le lien pour inviter quelqu’un.",
+  "meeting.hive-not-in": "Vous n’êtes pas dans la réunion.",
+  "meeting.spend-left": "de ceux qui sont partis",
+  "meeting.spend-meeting": "Vidéo de cette réunion"
 }

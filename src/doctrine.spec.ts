@@ -2081,7 +2081,6 @@ describe('doctrine ratchets', () => {
     const { problems, msg } = countRatchet(
       countsMatching(/\bticker\s*[?!]?\.\s*add\s*\(|\bTicker\s*\.\s*shared\s*[?!]?\.\s*add\s*\(/g),
       {
-        'hypercomb-essentials/src/meeting/meeting-video.drone.ts': 1,
         'hypercomb-essentials/src/presentation/avatars/agent-bee.drone.ts': 1,
         'hypercomb-essentials/src/presentation/avatars/avatar-swarm.drone.ts': 1,
         'hypercomb-essentials/src/presentation/screensaver/screensaver.drone.ts': 1,

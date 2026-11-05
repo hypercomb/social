@@ -2875,5 +2875,22 @@
   "meeting.lobby-sharp": "Чёткость",
   "meeting.icon-start": "Начать встречу",
   "meeting.icon-live": "В вашем рое идёт встреча: присоединиться",
-  "meeting.icon-in": "Показать или скрыть встречу"
+  "meeting.icon-in": "Показать или скрыть встречу",
+  "meeting.camera-on": "Включить камеру",
+  "meeting.camera-off": "Выключить камеру",
+  "meeting.hive-hide": "скрыть",
+  "meeting.hive-show": "Показать встречу",
+  "meeting.hive-camera-hint": "Нажмите на свой цветок, чтобы включить камеру.",
+  "meeting.hive": "встреча",
+  "meeting.you": "вы",
+  "meeting.copy-link": "копировать ссылку",
+  "meeting.share-link": "поделиться ссылкой",
+  "meeting.leave": "выйти",
+  "meeting.full-screen": "на весь экран",
+  "meeting.exit-full-screen": "выйти из полного экрана",
+  "meeting.leads": "ведёт",
+  "meeting.hive-alone": "Пока только вы. Скопируйте ссылку, чтобы позвать кого-то.",
+  "meeting.hive-not-in": "Вас нет на встрече.",
+  "meeting.spend-left": "от тех, кто вышел",
+  "meeting.spend-meeting": "Видео этой встречи"
 }
