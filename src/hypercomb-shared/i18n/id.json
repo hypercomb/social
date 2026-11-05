@@ -2875,5 +2875,22 @@
   "meeting.lobby-sharp": "Tajam",
   "meeting.icon-start": "Mulai rapat",
   "meeting.icon-live": "Ada rapat di kawananmu: bergabung",
-  "meeting.icon-in": "Tampilkan atau sembunyikan rapat"
+  "meeting.icon-in": "Tampilkan atau sembunyikan rapat",
+  "meeting.camera-on": "Nyalakan kamera",
+  "meeting.camera-off": "Matikan kamera",
+  "meeting.hive-hide": "sembunyikan",
+  "meeting.hive-show": "Tampilkan rapat",
+  "meeting.hive-camera-hint": "Klik bunga Anda untuk menyalakan kamera.",
+  "meeting.hive": "rapat",
+  "meeting.you": "Anda",
+  "meeting.copy-link": "salin tautan",
+  "meeting.share-link": "bagikan tautan",
+  "meeting.leave": "keluar",
+  "meeting.full-screen": "layar penuh",
+  "meeting.exit-full-screen": "keluar dari layar penuh",
+  "meeting.leads": "memimpin",
+  "meeting.hive-alone": "Baru Anda. Salin tautan untuk mengundang seseorang.",
+  "meeting.hive-not-in": "Anda tidak ada dalam rapat.",
+  "meeting.spend-left": "dari yang sudah pergi",
+  "meeting.spend-meeting": "Video rapat ini"
 }

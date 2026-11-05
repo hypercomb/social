@@ -2875,5 +2875,22 @@
   "meeting.lobby-sharp": "Nitida",
   "meeting.icon-start": "Avvia una riunione",
   "meeting.icon-live": "C'è una riunione nel tuo sciame: partecipa",
-  "meeting.icon-in": "Mostra o nascondi la riunione"
+  "meeting.icon-in": "Mostra o nascondi la riunione",
+  "meeting.camera-on": "Accendi la fotocamera",
+  "meeting.camera-off": "Spegni la fotocamera",
+  "meeting.hive-hide": "nascondi",
+  "meeting.hive-show": "Mostra la riunione",
+  "meeting.hive-camera-hint": "Fai clic sul tuo fiore per accendere la fotocamera.",
+  "meeting.hive": "riunione",
+  "meeting.you": "tu",
+  "meeting.copy-link": "copia link",
+  "meeting.share-link": "condividi link",
+  "meeting.leave": "esci",
+  "meeting.full-screen": "schermo intero",
+  "meeting.exit-full-screen": "esci da schermo intero",
+  "meeting.leads": "guida",
+  "meeting.hive-alone": "Ci sei solo tu. Copia il link per far entrare qualcuno.",
+  "meeting.hive-not-in": "Non sei nella riunione.",
+  "meeting.spend-left": "di chi è uscito",
+  "meeting.spend-meeting": "Video di questa riunione"
 }

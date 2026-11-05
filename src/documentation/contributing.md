@@ -142,6 +142,11 @@ model. they must not be weakened or worked around:
 ### git
 
 - branch from `development`. target PRs to `development`.
+- before opening or updating that pull request, merge the current
+  `origin/development` into the task branch and resolve conflicts there.
+  the pull request must already contain the `development` tip. that keeps
+  the landing squash small and leaves other open pull requests easy to merge.
+- do not merge or push `development`. the owner squash-merges the pull request.
 - commit messages: imperative mood, lowercase start, no period.
   examples: `feat: add panning inertia to PanningDrone`,
   `fix: clean up effect subscriptions on drone disposal`.

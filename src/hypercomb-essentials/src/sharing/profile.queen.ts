@@ -137,6 +137,19 @@ const liveDeps = (): ProfileDeps => {
   }
 }
 
+/** The name and picture a meeting draws on this person's flower. A profile
+ *  name wins; otherwise the name this hive already goes by. Never throws. */
+export const ownProfileFace = async (): Promise<{ name: string; picture: string }> => {
+  const label = (): string => (seedLabel() ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, PROFILE_NAME_MAX)
+  const host = readHost()
+  if (!host) return { name: label(), picture: '' }
+  try {
+    const shown = await showProfile(host, liveDeps(), seedLabel)
+    if (shown.kind === 'shown') return { name: shown.profile.fields.name || label(), picture: shown.profile.fields.picture ?? '' }
+  } catch { /* the label still shows */ }
+  return { name: label(), picture: '' }
+}
+
 export class ProfileQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'profile'

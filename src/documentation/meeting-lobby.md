@@ -22,13 +22,12 @@ meeting camera          share your video, or stop sharing it
 ```
 
 **Video is off by default** (jwize, 2026-11-02: "if we are showing video we
-need it to be off by default"; "even off you need to see your video on your
-screen so you can see it works"). You join sending your voice only. Your
-camera still runs for you: your own hexagon shows your face, marked "only
-you see this", so you can see it works. The others see it once you share
-it — `meeting camera`, or the participants' hive's "share my video". A person
-who has not shared keeps their seat number on everyone else's screen, and
-their voice still plays.
+need it to be off by default"). You join sending your voice only. The camera
+stays off — its light included — until you click your own flower. That flower
+shows your name, and your picture when your profile has one. Hovering it
+shows a camera; once the video is on, hovering shows the off control.
+`meeting camera` does the same. A person who has not shared keeps their name
+and picture on everyone else's flower, and their voice still plays.
 
 The link is copied for you (or, where the browser will not copy without a
 fresh click, shown with a Copy button) — send it to bring someone in. The
@@ -57,16 +56,21 @@ A camera icon sits among the tools at the top right:
 - **coloured**: you are in the meeting; pressing it shows or hides the
   participants' hive.
 
-The participants' hive is a hive of just the people in the meeting: one
+The participants' flower is a hive of just the people in the meeting: one
 hexagon each, the leader in the middle and the others around them in seat
-order, each with their video once it arrives (their seat number until then).
-It opens when you join, sits just below the command line (which stays on top
-and usable), and has share my video, full screen, copy link, share link,
-leave, and back to the hive. Full screen is the whole page, so the command
-line stays on top. There is no screen share, on purpose: following the leader
-IS the shared screen, and it is live — each person's own hive, walked where
-the leader walks (jwize, 2026-11-02: "our screen share instead is totally
-interactive").
+order. It opens when you join, as a dock on the left of the screen, so the
+hive you are following stays visible. Hide folds that dock to an icon on the
+left edge; the meeting icon at the top still shows or hides it entirely.
+Each flower shows the person's name and their picture until their camera is
+on, then their video. The person speaking fills the rest of the screen as a
+rectangle — their picture until their camera is on, then their video, not a
+hexagon. A loud voice takes that screen; otherwise it is the leader, or the
+other person when you yourself are leading. You fill it only when you are
+alone. Full screen sends that rectangle to the whole display. The flower
+also has copy link, share link, and leave. There is no
+screen share, on purpose: following the leader IS the shared screen, and it
+is live — each person's own hive, walked where the leader walks (jwize,
+2026-11-02: "our screen share instead is totally interactive").
 Its videos are muted; the sound plays once, elsewhere.
 
 ## Following
@@ -108,8 +112,14 @@ and each person decides what they let run.
 **Built 2026-11-02** (jwize: "lets go on sfu only"). Each person keeps ONE
 peer connection, to Cloudflare's Realtime SFU, through the meeting point the
 swarm already meets at (`hypercomb-relay/meet-worker/sfu.js`): they publish
-their camera and microphone once and subscribe to everyone else's. Nobody
-connects to anybody else, so **no participant learns another's address** —
+their microphone on joining, and their camera only while it is shared, and
+subscribe to everyone else's. A second tracks request waits until the previous
+offer and answer have finished, and the description that is sent is the one
+after ICE candidates have gathered — otherwise one of the four feeds (two
+people, voice and camera each way) is dropped and only one direction of video
+arrives. An offer the SFU returns is answered even when a track in that batch
+was refused, so the refusal does not stick the session.
+Nobody connects to anybody else, so **no participant learns another's address** —
 only Cloudflare sees it. A 7-person meeting costs each person one upload, not
 six.
 
