@@ -653,6 +653,38 @@ export function filesPicked(nodes: readonly InstallNode[], paths: readonly strin
   return files.sort((a, b) => a.path.localeCompare(b.path) || a.sig.localeCompare(b.sig))
 }
 
+/**
+ * THE DEFAULT VIEW'S PACKAGES: where the desk looks before anyone has picked — a
+ * trail of one path per column, so the four panes (hosts, packages, files, code)
+ * are filled the moment it opens instead of waiting to be asked. The first package,
+ * in the order the first column lists them, that declares code of its own and has no
+ * sub-packages (a package with some opens a column of its own, and the four panes
+ * would be five); failing that, the first that declares code at all; failing that,
+ * the first one found going down the branches in the order they are listed.
+ * Empty when nothing listed declares any (a host still being read, an empty one).
+ */
+export function defaultTrail(
+  listed: (parent: string) => readonly { path: string; children: number }[],
+  declares: (path: string) => boolean,
+): string[] {
+  const own = listed('').filter(row => declares(row.path))
+  const leaf = own.find(row => row.children === 0) ?? own[0]
+  if (leaf) return [leaf.path]
+  const walk = (parent: string, trail: readonly string[], depth: number): string[] | null => {
+    if (depth > 12) return null
+    for (const row of listed(parent)) {
+      const here = [...trail, row.path]
+      if (declares(row.path)) return here
+      if (row.children > 0) {
+        const found = walk(row.path, here, depth + 1)
+        if (found) return found
+      }
+    }
+    return null
+  }
+  return walk('', [], 0) ?? []
+}
+
 /** A file with the words it goes by: its logical name first, its signature last. */
 export interface FileLabel extends FileRow, BeeWords {
   /** The first line of the source, when it is a comment — `@scope/name`, where the file came from. */
@@ -819,6 +851,11 @@ export class HostDirectoryElement extends HTMLElement {
   #cols: Picked[] = []
   /** The code files picked to be read in the matrix. */
   #files: Picked = NOTHING_PICKED
+  /** THE DEFAULT VIEW, owed until someone picks: the packages (a trail of one path
+   *  per column) first, then — once the files are named — the first file, so the
+   *  four panes are full on opening. Any pick of the participant's own cancels it. */
+  #niceCols = true
+  #niceFile = false
   /** The line the keys last moved to — focused again once the columns are redrawn. */
   #focusKey: string | null = null
   /** Code read by signature (null: asked of the hosts and not found). A signature
@@ -1012,7 +1049,9 @@ export class HostDirectoryElement extends HTMLElement {
     const hosts = make('ul', 'hd-list hd-hosts')
     const side = make('nav', 'hd-side')
     side.setAttribute('aria-label', t('hosts.rail', 'Hosts you carry'))
-    side.append(search, hosts, this.#addForm())
+    // The first of the four panes says what it is, as the other three do.
+    const railHead = make('div', 'hd-colhead hd-rail-head', t('hosts.pane.hosts', 'Hosts'))
+    side.append(search, railHead, hosts, this.#addForm())
     side.addEventListener('keydown', event => this.#railKeys(event))
     // A click anywhere but the menu and its icon closes the menu, and still reaches what it was for.
     panel.addEventListener('click', event => {
@@ -1028,7 +1067,7 @@ export class HostDirectoryElement extends HTMLElement {
     frame.append(side, main, drawer)
 
     panel.append(head, frame)
-    this.#refs.set('search', search).set('input', input).set('hosts', hosts).set('side', side)
+    this.#refs.set('search', search).set('input', input).set('hosts', hosts).set('side', side).set('railHead', railHead)
       .set('body', main).set('drawer', drawer).set('frame', frame)
     this.appendChild(panel)
     this.#panel = panel
@@ -1060,6 +1099,9 @@ export class HostDirectoryElement extends HTMLElement {
     for (const [key, stamp] of this.#ages) if (stamp === null) this.#ages.delete(key)
     // A layer that could not be read is asked again next time; one that was read is immutable.
     for (const [layer, docs] of this.#docs) if (!docs.size) this.#docs.delete(layer)
+    // The next opening is a fresh desk, and opens on the default view again.
+    this.#niceCols = true
+    this.#niceFile = false
     this.#describing = null
     this.#published.clear()
     this.#publishedAsk.clear()
@@ -1191,6 +1233,8 @@ export class HostDirectoryElement extends HTMLElement {
     this.#scope = ''
     this.#cols = []
     this.#files = NOTHING_PICKED
+    this.#niceCols = true
+    this.#niceFile = false
     this.#at = ''
     this.#query = ''
     this.#view = 'domains'
@@ -1240,7 +1284,11 @@ export class HostDirectoryElement extends HTMLElement {
     this.#warning = null
     this.#error = ''
     // A different stack is a different list, so the columns start again.
-    if (stack.keys.join('\n') !== before) { this.#cols = []; this.#files = NOTHING_PICKED; this.#at = '' }
+    if (stack.keys.join('\n') !== before) {
+      this.#cols = []; this.#files = NOTHING_PICKED; this.#at = ''
+      // A new list opens on its own good first view, as the desk did.
+      this.#niceCols = true; this.#niceFile = false
+    }
     this.#render()
   }
 
@@ -1264,9 +1312,10 @@ export class HostDirectoryElement extends HTMLElement {
     if (this.#codeGate) { this.#codeGate = null; this.#renderBody(); return true }
     if (this.#warning) { this.#warning = null; this.#renderBody(); return true }
     if (this.#view !== 'domains') { this.#view = 'domains'; this.#render(); return true }
-    if (this.#files.keys.length) { this.#files = NOTHING_PICKED; this.#renderBody(); return true }
+    // Letting go of the default view is the participant's own act: it does not come back.
+    if (this.#files.keys.length) { this.#files = NOTHING_PICKED; this.#stopNice(); this.#renderBody(); return true }
     const deepest = this.#cols.map(column => column.keys.length > 0).lastIndexOf(true)
-    if (deepest >= 0) { this.#cols = this.#cols.slice(0, deepest); this.#renderBody(); return true }
+    if (deepest >= 0) { this.#cols = this.#cols.slice(0, deepest); this.#stopNice(); this.#renderBody(); return true }
     return false
   }
 
@@ -1295,6 +1344,8 @@ export class HostDirectoryElement extends HTMLElement {
     const placeholder = t('hosts.search', 'Search domains and packages')
     input.placeholder = placeholder
     input.setAttribute('aria-label', placeholder)
+    const railHead = this.#refs.get('railHead')
+    if (railHead) railHead.textContent = t('hosts.pane.hosts', 'Hosts')
     if (input.value !== this.#query) input.value = this.#query
     this.#renderBody()
   }
@@ -1630,6 +1681,7 @@ export class HostDirectoryElement extends HTMLElement {
         this.#query = ''
         this.#cols = this.#chainTo(match.path)
         this.#files = NOTHING_PICKED
+        this.#stopNice()
         this.#focusKey = match.path
         this.#view = 'domains'
         this.#render()
@@ -1813,6 +1865,7 @@ export class HostDirectoryElement extends HTMLElement {
   #renderColumns(): HTMLElement {
     const strip = make('div', 'hd-cols')
     strip.addEventListener('keydown', event => this.#colKeys(event))
+    this.#niceView()
     const model = this.#columnModel()
     if (!model.length) {
       strip.append(make('p', 'hd-note hd-cols-empty', this.#reading || !this.#loaded
@@ -1833,19 +1886,27 @@ export class HostDirectoryElement extends HTMLElement {
 
     const { files: held, paths } = this.#pickedFiles(model)
     this.#files = stillPicked(this.#files, held.map(file => file.sig))
+    // Named by what they are: the order below is the one every pick walks.
+    const files = labelFiles(held, {
+      docs: layer => this.#docs.get(layer),
+      meta: sig => this.#meta.get(sig),
+      source: sig => this.#code.get(sig)?.name ?? '',
+    })
+    // The default view's file: the first by name, once the names are in — before that
+    // the order is the signatures', and the first of those is nobody's choice.
+    if (this.#niceFile && files.length && !this.#files.keys.length && files.every(file => this.#docs.has(file.layer))) {
+      this.#niceFile = false
+      this.#files = pickKey(NOTHING_PICKED, files[0]!.sig, 'only', files.map(file => file.sig))
+    }
     if (this.#describing && !this.#files.keys.includes(this.#describing.sig)) this.#describing = null
-    if (held.length) {
-      // Named by what they are: the order below is the one every pick walks.
-      const files = labelFiles(held, {
-        docs: layer => this.#docs.get(layer),
-        meta: sig => this.#meta.get(sig),
-        source: sig => this.#code.get(sig)?.name ?? '',
-      })
-      strip.append(this.#fileColumn(files, paths))
+    // FOUR PANES, always: the hosts in the rail, then packages, files and code. The last
+    // two are drawn before there is anything to put in them, and say what they wait for.
+    strip.append(this.#fileColumn(files, paths))
+    if (files.length) {
       this.#wantCode(files)
       this.#wantWords(files)
-      if (this.#files.keys.length) strip.append(this.#codeMatrix(files))
     }
+    strip.append(this.#codeMatrix(files))
     return strip
   }
 
@@ -1855,13 +1916,47 @@ export class HostDirectoryElement extends HTMLElement {
     this.#cols = [...this.#cols.slice(0, k), pickKey(this.#cols[k] ?? NOTHING_PICKED, path, mode, order)]
     this.#files = NOTHING_PICKED
     this.#focusKey = path
+    this.#stopNice()
     this.#renderBody()
   }
 
   #pickFile(sig: string, mode: PickMode, order: readonly string[]): void {
     this.#files = pickKey(this.#files, sig, mode, order)
     this.#focusKey = sig
+    this.#stopNice()
     this.#renderBody()
+  }
+
+  /** THE DEFAULT VIEW is a courtesy for a desk nobody has touched. A pick of the
+   *  participant's own — or letting one go — ends it for good: the desk never puts
+   *  back what was chosen away. */
+  #stopNice(): void {
+    this.#niceCols = false
+    this.#niceFile = false
+  }
+
+  /**
+   * The four panes are never left waiting to be asked: with nothing picked, the
+   * first package that declares code is picked down its trail (`defaultTrail`) and
+   * its files, then its first file, open the next panes — so a desk opens as a
+   * place, not an empty list. Waits for what it needs (the list, then the files'
+   * names) and gives up quietly once everything is read and nothing declares code.
+   */
+  #niceView(): void {
+    if (!this.#niceCols) return
+    if (this.#cols.some(column => column.keys.length) || this.#files.keys.length) { this.#stopNice(); return }
+    const nodes = this.#treeNodes()
+    const trail = defaultTrail(parent => this.#childRows([parent]), path => filesPicked(nodes, [path]).length > 0)
+    if (!trail.length) {
+      // An empty list is a list still being read — a followed host's tree lands some
+      // seconds after the desk opens — so it is waited for. The default is given up
+      // only when something IS listed, nothing is being read, and none of it declares code.
+      if (!this.#reading && this.#childRows(['']).length) this.#stopNice()
+      return
+    }
+    this.#cols = trail.map(key => ({ keys: [key], anchor: key }))
+    this.#niceCols = false
+    this.#niceFile = true
   }
 
   /** Arrow keys walk a column and the pick follows (shift extends); right opens
@@ -1891,6 +1986,7 @@ export class HostDirectoryElement extends HTMLElement {
     else if (event.key === 'Enter' || event.key === ' ') pick(order[at] ?? '', 'only')
     else if ((event.key === 'a' || event.key === 'A') && (event.ctrlKey || event.metaKey)) {
       event.preventDefault()
+      this.#stopNice()
       if (files) { this.#files = pickAll(this.#files, order); this.#renderBody() }
       else { this.#cols = [...this.#cols.slice(0, k), pickAll(this.#cols[k] ?? NOTHING_PICKED, order)]; this.#files = NOTHING_PICKED; this.#renderBody() }
     } else if (event.key === 'ArrowRight') {
@@ -2148,8 +2244,19 @@ export class HostDirectoryElement extends HTMLElement {
     this.#agePaint = window.setTimeout(() => { this.#agePaint = 0; if (this.#panel) this.#renderBody() }, 120)
   }
 
-  /** The last column: the code files the picked packages declare, by what they are. */
+  /** THE FILES PANE — the third of the four, and always there: the code files the
+   *  picked packages declare, by what they are, or what it waits for. */
   #fileColumn(files: readonly FileLabel[], paths: readonly string[]): HTMLElement {
+    if (!files.length) {
+      const waiting = make('div', 'hd-colbox hd-files-empty')
+      waiting.append(
+        this.#colHead(t('hosts.files', 'Files')),
+        make('p', 'hd-note hd-pane-empty', paths.length
+          ? t('hosts.files.none', 'This package declares no code of its own.')
+          : t('hosts.files.pick', 'Pick a package to see the code it declares.')),
+      )
+      return waiting
+    }
     const list = make('ul', 'hd-col hd-files')
     list.setAttribute('role', 'listbox')
     list.setAttribute('aria-multiselectable', 'true')
@@ -2179,10 +2286,21 @@ export class HostDirectoryElement extends HTMLElement {
     return box
   }
 
-  /** THE MATRIX: every picked file read side by side, one panel each. */
+  /** THE CODE PANE — the fourth of the four, captioned like the rest and always
+   *  there: the matrix when a file is picked, and what it waits for when not. */
   #codeMatrix(files: readonly FileLabel[]): HTMLElement {
+    const pane = make('section', 'hd-codepane')
+    const caption = t('hosts.code', 'Code')
+    pane.setAttribute('aria-label', caption)
+    pane.append(this.#colHead(caption))
+    if (this.#files.keys.length) pane.append(this.#codeGrid(files))
+    else pane.append(make('p', 'hd-note hd-pane-empty', t('hosts.code.pick', 'Pick a file to read its code here.')))
+    return pane
+  }
+
+  /** THE MATRIX: every picked file read side by side, one panel each. */
+  #codeGrid(files: readonly FileLabel[]): HTMLElement {
     const matrix = make('div', 'hd-matrix')
-    matrix.setAttribute('aria-label', t('hosts.code', 'Code'))
     const order = files.map(file => file.sig)
     const shown = this.#files.keys.slice(0, CODE_PANELS)
     for (const sig of shown) {
@@ -2963,7 +3081,11 @@ ${S} .hd-main.with-columns > .hd-cols{flex:1 1 auto;min-height:0;margin:.5em 0 0
 ${S} .hd-main.with-columns > .hd-section-body{max-height:min(11rem,30vh);overflow-y:auto;}
 ${S} .hd-cols{display:flex;align-items:stretch;overflow-x:auto;overflow-y:hidden;border-top:1px solid var(--hd-rule);}
 ${S} .hd-cols-empty{margin:.8em 1.3em;}
-${S} .hd-colbox{flex:0 0 17rem;width:17rem;min-height:0;display:flex;flex-direction:column;border-right:1px solid var(--hd-rule);}
+/* FOUR PANES — hosts (the rail), packages, files, code — fit a 1280px desk without a scroll: the columns give a little before the strip scrolls, and the code takes what is left. */
+${S} .hd-colbox{flex:0 1 16rem;width:16rem;min-width:12.5rem;min-height:0;display:flex;flex-direction:column;border-right:1px solid var(--hd-rule);}
+${S} .hd-pane-empty{margin:.8em .75em;}
+${S} .hd-rail-head{margin-top:.6em;padding-left:.55em;border-bottom:none;}
+${S} .hd-codepane{flex:1 0 24rem;min-width:24rem;min-height:0;display:flex;flex-direction:column;}
 ${S} .hd-colhead{flex:0 0 auto;padding:.4em .75em;font-size:.68em;letter-spacing:.05em;color:var(--hd-ink-quiet);border-bottom:1px solid rgba(var(--acc),0.08);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 ${S} .hd-col{flex:1 1 auto;min-height:0;overflow-y:auto;margin:0;padding:.15em 0;list-style:none;}
 ${S} .hd-col > li{outline:none;}
@@ -2976,7 +3098,7 @@ ${S} .hd-file:hover{background:rgba(var(--acc),0.05);}
 ${S} .hd-file-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8em;color:var(--hd-ink);}
 ${S} .hd-file-where{font-size:.62em;color:var(--hd-ink-quiet);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 /* THE MATRIX: one panel per picked file, as many across as there is room for. */
-${S} .hd-matrix{flex:1 0 26rem;min-width:26rem;min-height:0;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(22rem,1fr));gap:.6em;padding:.6em;align-content:start;}
+${S} .hd-matrix{flex:1 1 auto;min-height:0;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(22rem,1fr));gap:.6em;padding:.6em;align-content:start;}
 ${S} .hd-file.mine .hd-file-name::after{content:' ✎';font-size:.85em;color:var(--hc-window-accent);}
 ${S} .hd-codebox{min-width:0;display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--hd-rule);border-radius:var(--hc-radius-card,3px);}
 ${S} .hd-codehead{display:flex;align-items:baseline;gap:.6em;padding:.35em .6em;border-bottom:1px solid var(--hd-rule);}

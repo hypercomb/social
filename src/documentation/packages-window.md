@@ -148,6 +148,33 @@ The pane under a host's acts is a column browser. The rail is its first column,
 each package level is the next, then the code files, then the matrix. The strip
 scrolls sideways when it runs deeper than fits, and a new column scrolls into view.
 
+**Four panes, always.** *jwize, 2026-11-04:* "split the screen in to four panes and
+show a nice default view." The desk is **Hosts | Packages | Files | Code**, each
+captioned the same way, and **all four are drawn from the first paint** — the Files
+pane and the Code pane are there before there is anything to put in them, and say what
+they wait for (*Pick a package to see the code it declares.* · *This package declares
+no code of its own.* · *Pick a file to read its code here.*), so the screen never
+reshuffles itself around a pick. A package with sub-packages adds its own column inside
+the Packages pane, as it always did. The widths are chosen so the four fit a 1280px
+desk without a sideways scroll — the rail at most 18rem, a column 16rem (giving down to
+12.5rem before the strip scrolls) and the code pane 24rem or whatever is left — and a
+spec adds them up.
+
+**The default view.** A desk nobody has picked in opens on a good first view, not an
+empty list: the first package, in the order the first column lists them, that declares
+code of its own **and has no sub-packages** is picked (a package with some opens a
+column of its own, and four panes would be five; failing that, the first that declares
+code at all, then the first found going down the branches in listed order —
+`defaultTrail`), its files open the Files pane, and **once the files'
+names are in** the first of them by name is picked, so the Code pane is reading a real
+file. It waits for what it needs (the list; then each declaring layer's `docs`, so the
+first is the one the column shows first rather than the first by signature) and gives
+up quietly when everything is read and nothing declares code. It is a courtesy and it
+is the participant's to end: **any pick of their own, and any Escape that lets one go,
+ends it for good** — the desk never puts back what was chosen away. A new opening, a
+different host (or stack of hosts) in the rail, and *back to the start* each get a
+default view of their own; a restart that returns to a path keeps the path.
+
 **Picking is the Finder's, in every column**, the rail included: a click takes one
 line, ctrl/cmd-click adds or takes one away, shift-click extends from where the
 last pick was, ctrl/cmd-A takes the column. Arrow keys walk a column and the pick
@@ -376,5 +403,12 @@ sandbox before you bring them into hypercomb.io."*
   them: the layer's docs and each file's words read as files come in, the editor, what
   is typed surviving a repaint, Escape's rung, and source drawn as text nodes under
   the one palette.
+- `essentials/src/sharing/host-directory-panes.spec.ts` — the default view as data
+  (`defaultTrail`: the first package that declares code, then down the branches in
+  listed order, empty when none, a guard against a tree that never ends) and as shape:
+  the default picked at the top of the columns, the first file chosen only once the
+  names are in, every pick and every letting go ending it, a fresh one for every
+  opening, start and stack, the Files and Code panes always drawn with their
+  placeholders, and the four widths adding up to a 1280px desk.
 - `pool-registry.ts` seeds `meta:bees`, so the doctrine ratchet that every derived pool
   meaning is in the census holds.
