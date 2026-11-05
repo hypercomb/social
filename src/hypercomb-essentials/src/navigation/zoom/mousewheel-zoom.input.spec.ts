@@ -7,6 +7,7 @@
 // lanes", whatever the stepping maths says.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { EffectBus } from '@hypercomb/core'
 import { setLaneViewport } from '../../sequence/lane-viewport-mode.js'
 import { MousewheelZoomInput } from './mousewheel-zoom.input.js'
 
@@ -106,6 +107,34 @@ describe('the wheel in the lanes', () => {
     wheel({ deltaY: -100 })
     expect(rail.wheelBy).not.toHaveBeenCalled()
     expect(zoom.zoomToScale).toHaveBeenCalledTimes(1)
+  })
+
+  it('says what it did with every wheel, so a wheel that moved nothing can be read from outside', () => {
+    const verdict = (): { outcome: string; dy: number; mode: number } | undefined => {
+      let seen: { outcome: string; dy: number; mode: number } | undefined
+      EffectBus.on<{ outcome: string; dy: number; mode: number }>('input:wheel', p => { seen = p })()
+      return seen
+    }
+    setLaneViewport(true)
+    wheel({ deltaY: 100 })
+    expect(verdict()).toMatchObject({ outcome: 'lanes:rail', dy: 100, mode: 0 })
+    rail.active = false
+    wheel({ deltaY: 7, deltaMode: 1 })
+    expect(verdict()).toMatchObject({ outcome: 'lanes:pan', dy: 7, mode: 1 })
+    setLaneViewport(false)
+    wheel({ deltaY: -100 })
+    expect(verdict()).toMatchObject({ outcome: 'zoom', dy: -100 })
+    const panel = document.createElement('div')
+    panel.setAttribute('data-consumes-wheel', '')
+    document.body.appendChild(panel)
+    try {
+      panel.dispatchEvent(new WheelEvent('wheel', {
+        deltaY: 50, clientX: 500, clientY: 300, bubbles: true, cancelable: true, composed: true,
+      }))
+      expect(verdict()).toMatchObject({ outcome: 'owner:div.', dy: 50 })
+    } finally {
+      panel.remove()
+    }
   })
 
   it('a wheel over a UI panel that scrolls is the panel’s, even with the lanes up', () => {

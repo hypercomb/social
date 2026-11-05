@@ -487,6 +487,29 @@ describe('rail projection — the wheel lands one step at a time', () => {
     expect(last('render:grid-changed')).toMatchObject({ active: true, shift: 1 })
   })
 
+  it('traces every wheel as state — the steps it paid and where the window stands — so a wheel that moved nothing says why', async () => {
+    portrait()
+    await beat()
+    const rail = drone as unknown as Wheeled
+    const dense = tiles(60)
+    rail.windowOf(dense)
+    // a small event pays no step: the trace says so, and that there was room
+    rail.wheelBy(10)
+    expect(last('lanes:wheel')).toMatchObject({ px: 10, steps: 0, shift: 0, total: 60, landing: false })
+    // a click pays one, and the window has already moved
+    rail.wheelBy(100)
+    expect(last('lanes:wheel')).toMatchObject({ px: 100, steps: 1, shift: 1, landing: true })
+  })
+
+  it('traces a wheel while the strip is down as inactive', async () => {
+    portrait()
+    await beat()
+    const rail = drone as unknown as Wheeled
+    EffectBus.emit('lanes:off', {})
+    rail.wheelBy(100)
+    expect(last('lanes:wheel')).toMatchObject({ steps: 0, note: 'inactive' })
+  })
+
   it('a click that reports little — a one-line wheel, a dense screen — still moves the window, one step each', async () => {
     portrait()
     await beat()

@@ -147,7 +147,7 @@ export class RailProjectionDrone extends Drone {
     'render:geometry-changed', 'lanes:toggle', 'lanes:set', 'lanes:step', 'lanes:off', 'lanes:on',
   ]
   protected override emits = [
-    'lanes:changed', 'render:grid-changed', 'toast:show',
+    'lanes:changed', 'lanes:wheel', 'render:grid-changed', 'toast:show',
   ]
 
   #bound = false
@@ -576,13 +576,27 @@ ${location}`
    *  Turning the wheel the other way cancels what was still owed, rather than
    *  walking it back. */
   public wheelBy(delta: number, deltaMode: number = 0): void {
-    if (!this.#active) return
-    const { wheel, steps } = foldRailWheel(this.#wheel, railWheelPx(delta, deltaMode), performance.now())
+    if (!this.#active) { this.#traceWheel(delta, 0, 'inactive'); return }
+    const px = railWheelPx(delta, deltaMode)
+    const { wheel, steps } = foldRailWheel(this.#wheel, px, performance.now())
     this.#wheel = wheel
-    if (steps === 0) return
+    if (steps === 0) { this.#traceWheel(px, 0); return }
     if (this.#owed !== 0 && Math.sign(steps) !== Math.sign(this.#owed)) this.#owed = 0
     this.#owed = Math.max(-WHEEL_OWED_MAX, Math.min(WHEEL_OWED_MAX, this.#owed + steps))
     this.#advance()
+    this.#traceWheel(px, steps)
+  }
+
+  /** What a wheel event did to the window, as STATE for the bridge's
+   *  effect-last (nothing listens): the travel it carried, the steps it paid,
+   *  and where the window stands. A wheel that moved nothing says here whether
+   *  it paid no step (a small event), had no room (`total` ≤ `capacity`), or
+   *  was held by a landing that never completed. */
+  #traceWheel(px: number, steps: number, note?: string): void {
+    this.emitEffect('lanes:wheel', {
+      px: Math.round(px), steps, owed: this.#owed, landing: this.#landing, shift: this.#shift,
+      total: this.#total, capacity: this.#capacity, ...(note ? { note } : {}),
+    })
   }
 
   /** Pay one owed step, if none is landing. An end of the strip owes nothing more. */

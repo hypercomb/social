@@ -1,4 +1,5 @@
 // input/zoom/mousewheel-zoom.input.ts
+import { EffectBus } from '@hypercomb/core'
 import type { InputGate } from '../input-gate.service.js'
 import type { InputMode, InputModeStack } from '../input-mode-stack.service.js'
 import { getLaneScrollAxis } from '../../sequence/lane-viewport-mode.js'
@@ -120,8 +121,21 @@ export class MousewheelZoomInput {
     this.enabled = false
   }
 
+  /** THE LAST WHEEL EVENT THIS HANDLER SAW, AND WHAT IT DID WITH IT. A wheel
+   *  that moves nothing is silent — every early return below looks the same
+   *  from outside — so the verdict rides the bus as STATE (`input:wheel`, read
+   *  with the bridge's effect-last, never a command anyone listens for). A
+   *  stale `at` after a scroll says the handler never ran (its mode is not on
+   *  top of the InputModeStack); a fresh one names the line that stopped it. */
+  #noted(event: WheelEvent, outcome: string): void {
+    EffectBus.emit('input:wheel', {
+      outcome, dx: event.deltaX, dy: event.deltaY, mode: event.deltaMode, ctrl: event.ctrlKey,
+      at: Math.round(event.timeStamp),
+    })
+  }
+
   private onWheel = (event: WheelEvent): void => {
-    if (!this.zoom || !this.canvas) return
+    if (!this.zoom || !this.canvas) { this.#noted(event, 'detached'); return }
 
     // Wheel zoom is always-on. UI that needs to take precedence does so
     // structurally — by pushing its own mode onto InputModeStack (which
@@ -141,13 +155,17 @@ export class MousewheelZoomInput {
     // distinguish "over the history viewer overlay" from "over the
     // canvas beneath it". Asked once per gesture: the first event of a
     // burst decides, the rest inherit (wheel-gesture.ts).
-    if (this.#gesture.owner(event, wheelOwner)) return
+    const owner = this.#gesture.owner(event, wheelOwner)
+    if (owner) {
+      this.#noted(event, `owner:${owner.tagName.toLowerCase()}.${String(owner.className ?? '').split(' ')[0]}`)
+      return
+    }
 
     const rect = this.canvas.getBoundingClientRect()
     if (
       event.clientX < rect.left || event.clientX > rect.right ||
       event.clientY < rect.top || event.clientY > rect.bottom
-    ) return
+    ) { this.#noted(event, 'outside-canvas'); return }
 
     // While the input gate is locked (a fixed overlay such as the editor
     // is up), suppress wheel zoom entirely — the canvas underneath must
@@ -156,6 +174,7 @@ export class MousewheelZoomInput {
     // Flash the command-line lock indicator so the user knows why the
     // wheel did nothing.
     if (this.gate?.locked) {
+      this.#noted(event, 'gate-locked')
       this.gate.notifyLockedAttempt()
       return
     }
@@ -173,6 +192,7 @@ export class MousewheelZoomInput {
     if (framed) {
       const along = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
       if (along !== 0) scrollFramedBy(framed, along > 0 ? 1 : -1)
+      this.#noted(event, 'framed')
       event.preventDefault()
       event.stopPropagation()
       return
@@ -191,6 +211,7 @@ export class MousewheelZoomInput {
       if (rail?.active) {
         const notch = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
         if (notch !== 0) rail.wheelBy(notch, event.deltaMode)
+        this.#noted(event, 'lanes:rail')
         event.preventDefault()
         event.stopPropagation()
         return
@@ -202,6 +223,7 @@ export class MousewheelZoomInput {
         ? event.deltaX
         : event.deltaY
       pan?.panBy(laneAxis === 'x' ? { x: -along, y: 0 } : { x: 0, y: -along })
+      this.#noted(event, 'lanes:pan')
       event.preventDefault()
       event.stopPropagation()
       return
@@ -220,6 +242,7 @@ export class MousewheelZoomInput {
       && hoveredStackDepth() > 1
       && rollHoveredStack(event.deltaY > 0 ? 1 : -1)
     ) {
+      this.#noted(event, 'stack-roll')
       event.preventDefault()
       event.stopPropagation()
       return
@@ -241,6 +264,7 @@ export class MousewheelZoomInput {
       }
     }
 
+    this.#noted(event, 'zoom')
     event.preventDefault()
     event.stopPropagation()
   }
