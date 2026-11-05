@@ -119,7 +119,17 @@ input gate, the back gesture):
 - **Hosts are what comes in; Publish is what goes out.** They stay two windows.
   A host's pane has one link, *Publish ›*, which closes the desk and opens
   Publish. This origin is no destination, so it has no link, and the desk holds
-  none of Publish's acts.
+  none of Publish's acts. Beside the link, **how many branches that host names
+  as live**: *2 published here*, or *Nothing published here yet*. It is read
+  from your own signed index on that one host (`publishedCount` in the view) —
+  one verified read when the host's pane first opens, kept until the desk
+  closes — and not from Publish's sweep, which seals and probes every branch.
+  A branch counts when the index names a head for it and its entry lists no
+  doors or lists this host, the rule Publish's rows use; `plan:…` and
+  `install:…` pointers are not branches. A host that did not answer, a device
+  with no key (looking never mints one) and an index that does not verify show
+  **no number** — an unreachable host is not an empty one. A host that answers
+  404 holds no index of yours, which is the plain *nothing*.
 - **Escape** unwinds one level (search, question, warning, drawer, a branch
   walked into) and at the top of a host does what it does everywhere: one press
   puts every window away, and a press at once brings them back. The hosts icon

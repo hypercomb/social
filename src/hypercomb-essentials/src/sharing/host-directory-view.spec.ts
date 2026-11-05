@@ -10,7 +10,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import type { InstallNode, InstallRevision } from '@hypercomb/core'
-import { directoryRows, domainRows, filesOf, hostBehind, isOlder, namedFromVerdict, namedWhenUninstalled, offerableRoots, offeredRevisions, updateProgress, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, type ServedTree } from './host-directory.view'
+import { publishedCount, publishedOn, directoryRows, domainRows, filesOf, hostBehind, isOlder, namedFromVerdict, namedWhenUninstalled, offerableRoots, offeredRevisions, updateProgress, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, type ServedTree } from './host-directory.view'
 import { ATTESTED_PACKAGES_KEY, attestPackage } from './package-attestation'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -258,7 +258,7 @@ describe('the host directory', () => {
     expect(VIEW).toMatch(/isWindowShowing\('publish-panel'\)/)
     expect(VIEW).not.toMatch(/publish:door|publish:run|publish-groups/)
     // Only a host has the door: this origin is no destination.
-    expect(VIEW).toMatch(/if \(domain\.zone\) \{\s*const publish = button\('hd-link hd-publish'/)
+    expect(VIEW).toMatch(/if \(domain\.zone\) \{[\s\S]{0,700}?const publish = button\('hd-link hd-publish'/)
   })
 
   it('revisions open in a drawer beside the list and the list stays where it was', () => {
@@ -279,6 +279,53 @@ describe('the host directory', () => {
     const on = connected.indexOf("EffectBus.on('hosts:view-toggle'")
     expect(connected.indexOf('let live = false')).toBeLessThan(on)
     expect(connected.indexOf('live = true', on)).toBeGreaterThan(on)
+  })
+
+  it('counts what a host signed index opens there — the rule the Publish panel uses, minus the pointers', () => {
+    const head = (n: number): string => String(n).repeat(64).slice(0, 64)
+    const manifest = {
+      roots: { a: head(1), b: head(2), c: head(3), 'plan:a': head(4), 'install:essentials': head(5), d: 'not-a-signature' },
+      doors: { b: ['other.com'], c: ['host.com', 'other.com'] },
+    }
+    // a lists no doors, so it opens everywhere; b opens only on other.com; c lists this host.
+    // Pointers (plan:…, install:…) and a value that is no signature are never branches.
+    expect(publishedOn(manifest, 'host.com')).toBe(2)
+    expect(publishedOn(manifest, 'other.com')).toBe(3)
+    expect(publishedOn({ roots: {} }, 'host.com')).toBe(0)
+    // An entry that lists doors and not this one opens nowhere here — even an empty list.
+    expect(publishedOn({ roots: { a: head(1) }, doors: { a: [] } }, 'host.com')).toBe(0)
+  })
+
+  it('tells the count of a host only when it can, and never reads an unreachable host as an empty one', async () => {
+    const key = 'a'.repeat(64)
+    const manifest = { roots: { a: '1'.repeat(64), b: '2'.repeat(64) }, createdAt: 1, pubkey: key }
+    const index = (result: unknown) => ({ key: async () => key, index: async () => result as never })
+    expect(await publishedCount('host.com', index({ ok: true, manifest }))).toBe(2)
+    // No index of yours there is a plain none published; every other failure is unknown, not zero.
+    expect(await publishedCount('host.com', index({ ok: false, reason: 'http', status: 404 }))).toBe(0)
+    expect(await publishedCount('host.com', index({ ok: false, reason: 'http', status: 502 }))).toBeNull()
+    expect(await publishedCount('host.com', index({ ok: false, reason: 'unreachable' }))).toBeNull()
+    expect(await publishedCount('host.com', index({ ok: false, reason: 'forged' }))).toBeNull()
+    expect(await publishedCount('host.com', { key: async () => key, index: async () => { throw new Error('boom') } })).toBeNull()
+    // A device with no key cannot be asked about one, and the host is never troubled.
+    let asked = 0
+    const keyless = { key: async () => '', index: async () => { asked++; return { ok: true, manifest } as never } }
+    expect(await publishedCount('host.com', keyless)).toBeNull()
+    expect(asked).toBe(0)
+  })
+
+  it('reads the count from the own index of the host — never the Publish sweep, never minting a key, painted in place', () => {
+    expect(VIEW).toMatch(/publisherKeyHex\(\{ known: true \}\)/)
+    expect(VIEW).not.toMatch(/publish-status|publish:refresh|publish:render|publish:peek/)
+    // Asked once per host and kept until the desk closes. An answer that outlives its opening is
+    // dropped — a read still in flight from before a close once overwrote the fresh one.
+    expect(VIEW).toMatch(/if \(this\.#published\.has\(zone\) \|\| this\.#publishedAsk\.has\(zone\)\) return/)
+    expect(VIEW).toMatch(/if \(opening !== this\.#opening\) return\s*this\.#publishedAsk\.delete\(zone\)\s*this\.#published\.set\(zone, count\)/)
+    expect(VIEW).toMatch(/this\.#opening\+\+\s*this\.#published\.clear\(\)/)
+    // The number sits beside the one door, on the pane of a host and never on this origin.
+    expect(VIEW).toMatch(/if \(domain\.zone\) \{\s*const published = make\('span', 'hd-published'\)/)
+    // A host that did not answer shows no number, not a zero.
+    expect(VIEW).toMatch(/span\.hidden = count === undefined \|\| count === null/)
   })
 
   it('walks the rail with the arrow keys, the pane following, and your own host has its own entry', () => {
