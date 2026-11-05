@@ -19,6 +19,7 @@ const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 const { buildBlocks } = require('./build.cjs')
+const { bytesOf } = require('./media.cjs')
 const tour = require('./tour.cjs')
 const { sentencesOf } = require('../../../presentation/timing.cjs')
 
@@ -36,7 +37,7 @@ const routes = new Set(blocks.map(b => b.route.join('/')))
 const sigs = new Set(media.map(m => m.sig))
 
 for (const m of media) {
-  const sig = crypto.createHash('sha256').update(fs.readFileSync(m.path)).digest('hex')
+  const sig = crypto.createHash('sha256').update(bytesOf(m)).digest('hex')
   if (sig !== m.sig) fail(`${m.name}: its bytes are ${sig}, not ${m.sig}`)
 }
 

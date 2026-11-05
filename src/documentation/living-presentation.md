@@ -818,6 +818,27 @@ every page, and its 25 scenes are folded into the tiles they explain:
   `plant.cjs --blocks` serves them on 127.0.0.1 while its console snippet
   stores each one and checks the hive named it the same, before any page is
   dressed.
+- **A voice starts on its head, and is asked for before it is needed.**
+  jwize, 2026-11-05: *"stream the audio so it doesn't have to full load or
+  load a chunk first so it is fast."* Every byte a page plays is verified
+  against its signature first, so one file cannot stream: the hive holds it
+  until its last byte. So a voice longer than about six seconds is also broken
+  apart at its MP3 frames (`blocks/media.cjs`) into a head of about two
+  seconds (12 KB) and parts of about eight. Each part is a medium in its own
+  right, and the parts in order are the voice's bytes exactly. A step names
+  its whole voice (`voice`) and its parts (`parts`). Where the page may play a
+  stream it builds (MediaSource for MP3, and a policy with `media-src blob:`),
+  the player fetches the head, starts it the moment it is verified, and feeds
+  the parts in behind it. Anywhere else it plays the whole voice. Either way
+  the scene's first voice is fetched once the page is on screen and quiet,
+  unless the reader has asked to save data. The next voice is fetched while
+  the current one plays, and a paused voice is kept, so playing on resumes
+  it. Measured at 50 KB/s, with the service worker's hold-until-verified
+  modelled, the root page's first word comes 0.37 s after Listen when
+  streamed, against 4.1 s for the whole voice. Once its voice has been
+  fetched ahead it comes at once. A published site's visitor page allows
+  `media-src 'self' blob:` (`blossom-worker/worker.js`), so it streams once
+  that worker is deployed. Until then it plays whole voices, fetched ahead.
 - **Pictures from a running hive.** A tile may show one picture of the hive
   doing what its page explains (`blocks/captures/`), beside its figure, and
   the narration turns to it as the scene's last beat. `blocks/captures.cjs`
@@ -839,11 +860,25 @@ every page, and its 25 scenes are folded into the tiles they explain:
   out. `blocks/blocks.spec.ts` checks that no page carries a demo-hive clip,
   that every capture and every extracted tile is on a page, and that every
   spoken line has its recorded voice.
+- **Each way said once: crumbs up, tabs across, words in.** jwize,
+  2026-11-05: *"show all the current section videos at the bottom while on
+  each of those pages and then the breadcrumb at the top for childpages. That
+  way you can view the list in each section as tabs."* A page's crumbs, at the
+  top, are its way up. At the bottom, its section is a row of tabs: every
+  tile beside it, itself among them and lit. Each page of the section shows
+  the same row, so the section reads as one list of videos. The protocol and
+  the road are a section of their own. Between the scene and the tabs, *Step
+  in* names the words below the page, and each opens the next section down.
+  No other link says the same thing: the old way up and the link across to
+  the road are gone, because the crumbs and the tabs say them. A section
+  wider than the page scrolls along its own row. The lit tab is brought into
+  view, and an edge with more tabs past it fades.
 - **A part, or the website.** The website belongs to the root (jwize,
   2026-11-04). A tile's page opened on its own is just that part: one slide,
-  no crumbs, no ways, and a website icon. The icon opens the website, rooted at
-  the top tile, on that same page: every slide then shows its crumbs and the
-  words to step into, every link stays in the website, and back steps back
+  no crumbs, no ways, no tabs, and a website icon. The icon opens the website,
+  rooted at the top tile, on that same page: every slide then shows its crumbs,
+  the words to step into and its section's tabs, every link stays in the
+  website, and back steps back
   along the pages read, then out to the layer hosting the page first opened.
   In the hive, tiles walk as hexagons unless something is pinned: a tile's own
   pin (`opens <tile> as website`) opens its part; a pin on a top tile reaches

@@ -1197,6 +1197,18 @@ $bp-phone-max: 599px;
   .mat-sym { transform: translateY(6%); }
 
   &.on .mat-sym { font-variation-settings: 'FILL' 1; }
+
+  // WRITTEN TO, NOT OPENED. An external call writes its run into a
+  // conversation turn by turn; the window stays shut and the icon says so
+  // instead: bright and pulsing while the turns are written, bright and still
+  // once they wait unread. Opening the chat reads them and quiets it. The
+  // same pulse the meeting icon uses, so the rail has one way of breathing.
+  &.writing .mat-sym { color: var(--cmd-accent-command); animation: hc-meeting-pulse 1.2s ease-in-out infinite; }
+  &.unread .mat-sym { color: var(--cmd-accent-command); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-toggle-btn.writing .mat-sym { animation: none; }
 }
 
 // Beehaviors is the doorway to a whole tool window, so its active state needs

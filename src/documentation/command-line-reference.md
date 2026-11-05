@@ -70,7 +70,9 @@ covers the line. Nothing runs until you answer:
   conversation is not opened for you: you watch the hive while the call runs,
   each line's place and verdict show in the activity log
   (`claude-code 12/125: /trait … → ran /trait`), and a toast at the end says
-  how many lines were said and refused.
+  how many lines were said and refused. The chat icon at the top right
+  pulses bright while the run is written, and stays bright until you open
+  the chat.
 - **Esc** declines. Nothing is said; the request and the decline are written
   into a new conversation on this layer, which stays closed.
 

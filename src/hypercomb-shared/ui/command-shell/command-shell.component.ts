@@ -339,6 +339,10 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
    *  control bar's copy is gone, so there is one opener and it sits on the
    *  box the question is typed into. */
   readonly chatPanelOpen = input<boolean>(false)
+  /** What the chat icon says while the window is shut: pulsing and bright
+   *  while turns are written into a conversation ("writing"), bright until
+   *  they are read ("unread"), quiet otherwise. */
+  readonly chatActivity = input<'none' | 'writing' | 'unread'>('none')
   /** How the meeting button shows: quiet with no meeting ("none"), a very
    *  slight pulse while one is live in your swarm and you are not in it
    *  ("live"), coloured while you are in it ("in"). `meetingOpen` lights it

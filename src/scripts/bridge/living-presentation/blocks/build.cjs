@@ -71,19 +71,28 @@ const pagedRoutes = () => {
   return out
 }
 
-/** Where a reader can go from a block: its children by word, each marked by
- *  whether it has a page yet, and its parent. */
+/** Where a reader can go from a block, each way said once (jwize 2026-11-05:
+ *  "show all the current section videos at the bottom while on each of those
+ *  pages and then the breadcrumb at the top for childpages … view the list in
+ *  each section as tabs"):
+ *    up       the crumbs, at the top (page.cjs crumbsHtml)
+ *    section  the tiles beside this one, this one among them, as tabs at the
+ *             bottom: the same row on every page of the section
+ *    children the words to step into, which open the next section down
+ *  A top tile's section is the other top tiles (the protocol and the road; the
+ *  presenter's machinery is not a page). Each is marked by whether it has a
+ *  page yet. */
 const waysOf = (route, paged) => {
   const tile = tileAt(route)
-  const children = (tile?.children || []).map(c => ({
-    name: c.name,
-    note: c.note || '',
-    page: paged.has([...route, c.name].join('/')),
-  }))
-  // A top tile shows the other top tiles a reader can walk to (the values and
-  // the road; the presenter's machinery is not a page).
-  const also = route.length === 1 ? (tree.roots || []).filter(r => r.name !== route[0] && paged.has(r.name)).map(r => ({ name: r.name, note: r.note || '' })) : []
-  return { children, also, parent: route.length > 1 ? route[route.length - 2] : null, parentRoute: route.slice(0, -1) }
+  const marked = (at) => (c) => {
+    const r = [...at, c.name]
+    return { name: c.name, note: c.note || '', route: r, page: paged.has(r.join('/')), current: r.join('/') === route.join('/') }
+  }
+  const children = (tile?.children || []).map(marked(route))
+  const beside = route.length === 1
+    ? (tree.roots || []).filter(r => paged.has(r.name))
+    : (tileAt(route.slice(0, -1))?.children || [])
+  return { children, section: beside.map(marked(route.slice(0, -1))) }
 }
 
 /** A WebP or PNG's pixel size, read from its header. */
@@ -116,6 +125,13 @@ const minutesOf = (steps, media) => {
   return secs ? `${Math.max(1, Math.round(secs / 60))} min` : ''
 }
 
+/** Each voiced step names its voice's parts too (media.cjs): a page that may
+ *  stream plays from the first one, anywhere else from the whole voice. */
+const inParts = (steps, media) => steps.map(s => {
+  const parts = s.voice ? media.partsOf(s.voice) : null
+  return parts ? { ...s, parts } : s
+})
+
 const SCENE_ONLY = ['title', 'lede', 'eyebrow', 'headline', 'sub', 'picture', 'plate', 'beats']
 
 /** A route's one scene: the tour's, or the block's own beats over its plate.
@@ -147,7 +163,7 @@ const sceneFor = (key, block, media) => {
     const unknown = [...new Set(steps.flatMap(st => st.lit || []).filter(id => id !== '*' && !parts.has(id)))]
     if (unknown.length) throw new Error(`${key}: scene ${n}'s lights name ${unknown.join(', ')}, which its figure does not draw`)
     const lights = steps.some(st => Array.isArray(st.lit))
-    return { name: p.name, eyebrow: p.eyebrow, headline: p.headline, figure: p.figure, beside, sub: p.sub, link: p.link, steps, lights, minutes: minutesOf(steps, media) }
+    return { name: p.name, eyebrow: p.eyebrow, headline: p.headline, figure: p.figure, beside, sub: p.sub, link: p.link, steps: inParts(steps, media), lights, minutes: minutesOf(steps, media) }
   }
   for (const k of ['eyebrow', 'headline', 'beats']) if (!has(block, k)) throw new Error(`${key}: a block no scene explains needs its ${k}`)
   const steps = [...block.beats.map(b => ({ say: b.say, voice: tour.voiceOf(b.say, media), lit: b.lit || [] })), ...besideStep]
@@ -159,7 +175,7 @@ const sceneFor = (key, block, media) => {
     beside,
     sub: block.sub ? T.emph(block.sub) : '',
     link: null,
-    steps,
+    steps: inParts(steps, media),
     minutes: minutesOf(steps, media),
   }
 }

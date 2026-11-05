@@ -45,8 +45,12 @@ a toast says a call is waiting. You answer on the command line
   the run and its verdict appear in the activity log as it is said
   (`agent 12/125: /trait simple organized … → ran /trait`), you stay on the
   layers the call is building, and a toast at the end says how many lines
-  were said and how many refused. Open the conversation yourself when you
-  want the record.
+  were said and how many refused. The chat icon at the top right says where
+  the record is going instead: bright and pulsing while the run is written,
+  bright and still once it waits unread, quiet again when you open the chat
+  (jwize, 2026-11-04: "make the chat icon on the top right pulse and be
+  bright when you are adding these … instead of showing chat immediately").
+  Open the conversation yourself when you want the record.
 - **Esc** declines. Nothing is said, and the request and the decline are
   written into a new conversation on this layer.
 
