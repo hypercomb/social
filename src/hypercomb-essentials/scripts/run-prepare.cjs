@@ -18,7 +18,8 @@ if (!tsxCli) {
 
 // The anatomy FIRST: it writes src/assistant/anatomy/anatomy.generated.ts,
 // and prepare.ts must then see that file when it derives the folder index.
-for (const script of ['./scripts/build-anatomy.ts', './scripts/prepare.ts']) {
+// The glossary likewise writes src/assistant/glossary.generated.ts.
+for (const script of ['./scripts/build-anatomy.ts', './scripts/build-glossary.ts', './scripts/prepare.ts']) {
   const result = spawnSync(process.execPath, [tsxCli, script], {
     cwd: packageRoot,
     stdio: 'inherit',
