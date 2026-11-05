@@ -458,3 +458,104 @@ describe('rail projection — the window over the strip', () => {
     expect(rail.windowOf(tiles(5))).toBeNull()
   })
 })
+
+describe('rail projection — the wheel lands one step at a time', () => {
+  const tiles = (n: number): string[] => Array.from({ length: n }, (_, i) => `t${i}`)
+  type Wheeled = {
+    windowOf: (d: string[]) => string[] | null
+    wheelBy: (delta: number, deltaMode?: number) => void
+  }
+  /** The renderer has painted what the window now shows. */
+  const painted = (): void => { EffectBus.emit('render:cell-count', { count: CAPACITY, settled: true }) }
+  const firstOf = (rail: Wheeled, dense: string[]): string => rail.windowOf(dense)![0]
+
+  it('a notch is one step however many events carry it', async () => {
+    portrait()
+    await beat()
+    const rail = drone as unknown as Wheeled
+    const dense = tiles(60)
+    rail.windowOf(dense)
+    // one detent of a high-resolution wheel: ten events of ten px
+    for (let i = 0; i < 10; i++) {
+      rail.wheelBy(10)
+      await vi.advanceTimersByTimeAsync(12)
+    }
+    painted()
+    await vi.advanceTimersByTimeAsync(200)
+    // point-top vertical: a step is two rows of three
+    expect(firstOf(rail, dense)).toBe('t6')
+    expect(last('render:grid-changed')).toMatchObject({ active: true, shift: 1 })
+  })
+
+  it('a step lands before the next begins, and never waits on a render that does not come', async () => {
+    portrait()
+    await beat()
+    const rail = drone as unknown as Wheeled
+    const dense = tiles(60)
+    rail.windowOf(dense)
+    rail.wheelBy(300) // three notches in hand
+    expect(firstOf(rail, dense)).toBe('t6')
+    // not painted yet: the tiles hold still
+    await vi.advanceTimersByTimeAsync(40)
+    expect(firstOf(rail, dense)).toBe('t6')
+    // painted — and stood for the minimum — the next step goes
+    painted()
+    await vi.advanceTimersByTimeAsync(100)
+    expect(firstOf(rail, dense)).toBe('t12')
+    // a render that never comes does not hold the strip forever
+    await vi.advanceTimersByTimeAsync(500)
+    expect(firstOf(rail, dense)).toBe('t18')
+  })
+
+  it('a partial pass is not a landing', async () => {
+    portrait()
+    await beat()
+    const rail = drone as unknown as Wheeled
+    const dense = tiles(60)
+    rail.windowOf(dense)
+    rail.wheelBy(200)
+    EffectBus.emit('render:cell-count', { count: 5, settled: false })
+    await vi.advanceTimersByTimeAsync(150)
+    expect(firstOf(rail, dense)).toBe('t6')
+  })
+
+  it('turning the wheel back cancels what was owed — it does not walk through it', async () => {
+    portrait()
+    await beat()
+    const rail = drone as unknown as Wheeled
+    const dense = tiles(60)
+    rail.windowOf(dense)
+    rail.wheelBy(300) // one step now, two owed
+    await vi.advanceTimersByTimeAsync(20)
+    rail.wheelBy(-100) // the hand turns back
+    painted()
+    await vi.advanceTimersByTimeAsync(100)
+    // one back, nothing more forward: where it began
+    expect(firstOf(rail, dense)).toBe('t0')
+    painted()
+    await vi.advanceTimersByTimeAsync(600)
+    expect(firstOf(rail, dense)).toBe('t0')
+  })
+
+  it('an end of the strip owes nothing more', async () => {
+    portrait()
+    await beat()
+    const rail = drone as unknown as Wheeled
+    const dense = tiles(14) // one step past a full window, no more
+    rail.windowOf(dense)
+    rail.wheelBy(400)
+    painted()
+    await vi.advanceTimersByTimeAsync(600)
+    expect(firstOf(rail, dense)).toBe('t6')
+    expect(last('render:grid-changed')).toMatchObject({ shift: 1 })
+  })
+
+  it('does nothing while the strip is not up', async () => {
+    await beat()
+    EffectBus.emit('lanes:off', {})
+    const rail = drone as unknown as Wheeled
+    rail.wheelBy(300)
+    await vi.advanceTimersByTimeAsync(600)
+    expect(rail.windowOf(tiles(40))).toBeNull()
+  })
+})

@@ -388,3 +388,25 @@ from the scale the fit actually settled on (the rail fit now snaps so that
 scale is known at once); a different answer re-projects and refits once.
 A drag inside a window commits the WHOLE order (`mergeWindowOrder`), never only
 the visible tiles. Nothing here is written, and `/lanes off` returns the spiral.
+
+## The wheel steps by distance, and each step lands (2026-11-04)
+
+A wheel event is not a notch: a plain mouse sends one ~100px event per detent, a
+high-resolution wheel sends ten of ~10px, a trackpad dozens with an inertia
+tail. Stepping once per EVENT made one nudge race through the strip and pin at
+its end, and a reverse blip at the tail of a flick walk it straight back.
+
+`MousewheelZoomInput` now hands the wheel's distance to
+`RailProjectionDrone.wheelBy`, and `foldRailWheel` (`rail-window.ts`, pure)
+turns it into steps: one per notch of travel (`RAIL_WHEEL_NOTCH_PX`), the first
+at `RAIL_WHEEL_FIRST_PX`, so a whole notch steps on the spot and the same notch
+in ten events steps once. A pause (`RAIL_WHEEL_GAP_MS`) or the wheel turning the
+other way starts the gesture over, so a reverse blip pays nothing.
+
+The steps a gesture adds are OWED and paid one at a time: the tiles are locked
+until the renderer reports the last step painted (`render:cell-count` settled)
+and it has stood for `LAND_MIN_MS`; a render that never comes releases it after
+`LAND_MAX_MS`. Turning the wheel back cancels what was still owed rather than
+walking through it, and an end of the strip owes nothing more. Drag and touch
+still go through `panAlong` — their distance is already the hand's.
+

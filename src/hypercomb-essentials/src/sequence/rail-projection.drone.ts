@@ -42,12 +42,16 @@ import { buildRailMatrix } from '../presentation/grid/rail-grid.js'
 import {
   accumulateRailPan,
   clampRailShift,
+  foldRailWheel,
   RAIL_STEP_COLUMNS,
+  RAIL_WHEEL_REST,
   railPitch,
   railSeedScale,
   railShiftOffset,
+  railWheelPx,
   railWindowOf,
   railWindowSize,
+  type RailWheel,
 } from '../presentation/grid/rail-window.js'
 import { DEFAULT_HEX_GEOMETRY, type HexGeometry } from '../presentation/grid/hex-geometry.js'
 import { safeArea } from '../navigation/zoom/safe-area.js'
@@ -70,6 +74,15 @@ const FIT_MS = 80
 const WINDOW_MARGIN_PX = 5
 /** A pan gesture's leftover distance is forgotten after this long idle. */
 const PAN_CARRY_MS = 400
+/** A wheel step LANDS before the next one starts: when the renderer has
+ *  painted it, but never sooner than this after it began (so a fast spin reads
+ *  as steps, not a blur)… */
+const LAND_MIN_MS = 70
+/** …and never later than this, for a render that does not come (a hidden
+ *  tab, a pass that was skipped). */
+const LAND_MAX_MS = 450
+/** Steps a spin may have in hand while one lands. More is inertia, not intent. */
+const WHEEL_OWED_MAX = 4
 
 type AxialLike = {
   project?: (matrix: SlotMatrix | null) => boolean
@@ -108,6 +121,9 @@ export interface RailWindowApi {
   mergeWindowOrder(reordered: readonly string[]): string[] | null
   /** Move the window `steps` steps along the strip. False at an end. */
   shiftBy(steps: number): boolean
+  /** A wheel event, as the browser reports it. A notch is one step however
+   *  many events carry it; each step lands before the next begins. */
+  wheelBy(delta: number, deltaMode?: number): void
   /** Fold a pan distance (screen px along the strip) into steps. Returns the
    *  travel consumed: zero at an end, so a coast knows to stop. */
   panAlong(deltaPx: number): number
@@ -172,6 +188,13 @@ export class RailProjectionDrone extends Drone {
   #windowLocation: string | null = null
   #carry = 0
   #carryAt = 0
+  /** The wheel gesture in progress, and the steps it still owes. */
+  #wheel: RailWheel = RAIL_WHEEL_REST
+  #owed = 0
+  /** A step has moved the window and the renderer has not painted it yet. */
+  #landing = false
+  #steppedAt = 0
+  #landTimer: ReturnType<typeof setTimeout> | null = null
   /** The scale the lane fit actually settled on, for the shape it was
    *  measured in. Until then the capacity comes from the seed. */
   #measured: { key: string; scale: number } | null = null
@@ -199,6 +222,8 @@ export class RailProjectionDrone extends Drone {
     // a new page fits too: a page's own remembered viewport was framed on a
     // desktop map, and the phone reads a strip from its start edge.
     this.onEffect<{ count?: number; settled?: boolean }>('render:cell-count', ({ count, settled }) => {
+      // The tiles of a wheel step are on screen: it has landed.
+      if (settled !== false) this.#rendered()
       // Once the renderer reports the whole layer (`windowOf`), the count it
       // emits here is only the WINDOW's — never the layer's.
       if (typeof count === 'number' && Number.isFinite(count) && (!this.#active || this.#total === null)) this.#count = count
@@ -339,6 +364,9 @@ export class RailProjectionDrone extends Drone {
     this.#total = null
     this.#dense = null
     this.#windowLocation = null
+    this.#owed = 0
+    this.#landing = false
+    this.#clearLand()
     this.#lanes = 0
     this.#horizontal = null
     this.#projectedFlat = null
@@ -487,6 +515,9 @@ ${location}`
       this.#windowLocation = here
       this.#shift = 0
       this.#total = null
+      // What a spin still owed belonged to the page it left.
+      this.#owed = 0
+      this.#wheel = RAIL_WHEEL_REST
     }
     this.#dense = dense
     if (dense.length !== this.#total) {
@@ -536,6 +567,55 @@ ${location}`
     if (this.shiftBy(folded.steps)) return deltaPx
     this.#carry = 0
     return 0
+  }
+
+  /** A wheel event. The gesture is measured in distance (`foldRailWheel`), so a
+   *  notch is one step whether it arrives as one event or ten; the steps it
+   *  adds are owed, and paid ONE AT A TIME — the next waits until the last has
+   *  landed, so the tiles hold still on a spot instead of racing the render.
+   *  Turning the wheel the other way cancels what was still owed, rather than
+   *  walking it back. */
+  public wheelBy(delta: number, deltaMode: number = 0): void {
+    if (!this.#active) return
+    const { wheel, steps } = foldRailWheel(this.#wheel, railWheelPx(delta, deltaMode), performance.now())
+    this.#wheel = wheel
+    if (steps === 0) return
+    if (this.#owed !== 0 && Math.sign(steps) !== Math.sign(this.#owed)) this.#owed = 0
+    this.#owed = Math.max(-WHEEL_OWED_MAX, Math.min(WHEEL_OWED_MAX, this.#owed + steps))
+    this.#advance()
+  }
+
+  /** Pay one owed step, if none is landing. An end of the strip owes nothing more. */
+  #advance(): void {
+    if (this.#landing || this.#owed === 0) return
+    const direction = Math.sign(this.#owed)
+    this.#owed -= direction
+    if (!this.shiftBy(direction)) { this.#owed = 0; return }
+    this.#landing = true
+    this.#steppedAt = performance.now()
+    this.#clearLand()
+    this.#landTimer = setTimeout(() => this.#landed(), LAND_MAX_MS)
+  }
+
+  /** The renderer settled: the step has landed once it has also stood for the
+   *  minimum, and only then does the next owed step begin. */
+  #rendered(): void {
+    if (!this.#landing) return
+    const wait = LAND_MIN_MS - (performance.now() - this.#steppedAt)
+    this.#clearLand()
+    if (wait > 0) this.#landTimer = setTimeout(() => this.#landed(), wait)
+    else this.#landed()
+  }
+
+  #landed(): void {
+    this.#clearLand()
+    this.#landing = false
+    this.#advance()
+  }
+
+  #clearLand(): void {
+    if (this.#landTimer !== null) clearTimeout(this.#landTimer)
+    this.#landTimer = null
   }
 
   /** The slots stay; the tiles in them changed. */

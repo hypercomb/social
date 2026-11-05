@@ -233,6 +233,52 @@ export const railWindowOf = <T>(
   return tiles.slice(from, from + Math.max(0, Math.floor(capacity)))
 }
 
+// ── wheel → steps ──────────────────────────────────────────────────────
+//
+// A WHEEL EVENT IS NOT A NOTCH. A plain mouse sends one event of ~100px per
+// detent, but a high-resolution wheel sends ten of ~10px, and a trackpad
+// sends dozens with an inertia tail. Taking one step per EVENT made a single
+// nudge race through the strip and pin at its end, and a reverse blip at the
+// tail of a flick walk it straight back. So a wheel gesture is measured in
+// DISTANCE: steps = travel ÷ a notch, whatever the event count.
+
+/** One detent of a wheel, in px — what a mouse notch reports. */
+export const RAIL_WHEEL_NOTCH_PX = 100
+/** A gesture's first step lands at this travel: a whole notch steps at once,
+ *  a notch split into ten events steps on the sixth. */
+export const RAIL_WHEEL_FIRST_PX = 60
+/** A pause longer than this starts a new gesture (the same gap
+ *  navigation/zoom/wheel-gesture.ts reads a burst by). */
+export const RAIL_WHEEL_GAP_MS = 150
+
+/** The gesture so far: signed travel, the steps it has already paid out, and
+ *  when its last event came. */
+export interface RailWheel { travel: number; stepped: number; at: number }
+
+export const RAIL_WHEEL_REST: RailWheel = { travel: 0, stepped: 0, at: Number.NEGATIVE_INFINITY }
+
+/** A wheel event's travel in px: `deltaMode` 0 is px already, 1 counts lines
+ *  (three to a notch), 2 counts pages. */
+export const railWheelPx = (delta: number, deltaMode: number = 0): number =>
+  delta * (deltaMode === 1 ? RAIL_WHEEL_NOTCH_PX / 3 : deltaMode === 2 ? RAIL_WHEEL_NOTCH_PX * 4 : 1)
+
+/** Fold one wheel event into the gesture. `steps` is signed — positive brings
+ *  LATER tiles — and is only what THIS event adds. A pause, or the wheel
+ *  turning the other way, starts the gesture over, so a reverse blip pays out
+ *  nothing and cannot walk back what the hand just did. */
+export const foldRailWheel = (
+  wheel: RailWheel,
+  deltaPx: number,
+  now: number,
+): { wheel: RailWheel; steps: number } => {
+  if (!Number.isFinite(deltaPx) || deltaPx === 0) return { wheel, steps: 0 }
+  const again = now - wheel.at <= RAIL_WHEEL_GAP_MS && Math.sign(deltaPx) === Math.sign(wheel.travel)
+  const travel = (again ? wheel.travel : 0) + deltaPx
+  const paid = again ? wheel.stepped : 0
+  const due = Math.floor((Math.abs(travel) + (RAIL_WHEEL_NOTCH_PX - RAIL_WHEEL_FIRST_PX)) / RAIL_WHEEL_NOTCH_PX)
+  return { wheel: { travel, stepped: due, at: now }, steps: Math.sign(travel) * (due - paid) }
+}
+
 // ── pan → shift ────────────────────────────────────────────────────────
 
 /** Fold a pan distance (screen px along the strip, hand direction: positive =

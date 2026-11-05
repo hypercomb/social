@@ -3,6 +3,9 @@ import { railCoord } from './rail-grid.js'
 import {
   accumulateRailPan,
   clampRailShift,
+  foldRailWheel,
+  RAIL_WHEEL_REST,
+  railWheelPx,
   railColumnCount,
   railColumnsThatFit,
   railMaxShift,
@@ -199,5 +202,56 @@ describe('pan → shift accumulator', () => {
   it('ignores a step size that is not usable', () => {
     expect(accumulateRailPan(5, 100, 0)).toEqual({ steps: 0, carry: 5 })
     expect(accumulateRailPan(5, Number.NaN, 100)).toEqual({ steps: 0, carry: 5 })
+  })
+})
+
+describe('a wheel gesture is measured in distance, not in events', () => {
+  /** Total signed steps a run of [deltaPx, at-ms] events pays out. */
+  const steps = (events: ReadonlyArray<readonly [number, number]>): number => {
+    let wheel = RAIL_WHEEL_REST
+    let total = 0
+    for (const [delta, at] of events) {
+      const folded = foldRailWheel(wheel, delta, at)
+      wheel = folded.wheel
+      total += folded.steps
+    }
+    return total
+  }
+
+  it('a plain notch is one step, on the spot — either way', () => {
+    expect(foldRailWheel(RAIL_WHEEL_REST, 100, 0).steps).toBe(1)
+    expect(foldRailWheel(RAIL_WHEEL_REST, -100, 0).steps).toBe(-1)
+  })
+
+  it('a notch split into ten small events is still one step', () => {
+    expect(steps(Array.from({ length: 10 }, (_, i) => [10, i * 12] as const))).toBe(1)
+  })
+
+  it('steps follow the distance travelled, not the number of events that carried it', () => {
+    expect(steps([[300, 0]])).toBe(3)
+    expect(steps([[100, 0], [100, 40], [100, 80]])).toBe(3)
+    expect(steps(Array.from({ length: 30 }, (_, i) => [10, i * 10] as const))).toBe(3)
+  })
+
+  it('a pause starts a new gesture, so every separate notch is a step', () => {
+    expect(steps([[100, 0], [100, 400], [100, 800]])).toBe(3)
+  })
+
+  it('a reverse blip at the tail of a flick pays nothing and walks nothing back', () => {
+    expect(steps([[100, 0], [100, 30], [-8, 60], [-6, 80]])).toBe(2)
+  })
+
+  it('turning the wheel the other way is a gesture of its own, paying its own steps', () => {
+    const forward = foldRailWheel(RAIL_WHEEL_REST, 100, 0)
+    expect(forward.steps).toBe(1)
+    expect(foldRailWheel(forward.wheel, -100, 40).steps).toBe(-1)
+  })
+
+  it('reads a wheel in lines and pages as the px a notch would be, and ignores nothing-events', () => {
+    expect(railWheelPx(120)).toBe(120)
+    expect(railWheelPx(3, 1)).toBeCloseTo(100)
+    expect(railWheelPx(1, 2)).toBe(400)
+    expect(foldRailWheel(RAIL_WHEEL_REST, 0, 0).steps).toBe(0)
+    expect(foldRailWheel(RAIL_WHEEL_REST, Number.NaN, 0).steps).toBe(0)
   })
 })

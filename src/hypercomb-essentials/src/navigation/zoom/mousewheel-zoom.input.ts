@@ -181,13 +181,16 @@ export class MousewheelZoomInput {
     const laneAxis = getLaneScrollAxis()
     if (laneAxis) {
       // One notch, one step of the window along the strip (the camera stays).
-      // Falls through to the pan below only when no window is up.
-      const rail = window.ioc.get<{ readonly active: boolean; shiftBy: (steps: number) => boolean }>(
+      // The wheel hands over its DISTANCE, not its event count: a notch split
+      // into ten events is still one step, and each step lands before the next
+      // (RailProjectionDrone.wheelBy). Falls through to the pan below only when
+      // no window is up.
+      const rail = window.ioc.get<{ readonly active: boolean; wheelBy: (delta: number, deltaMode?: number) => void }>(
         '@diamondcoreprocessor.com/RailProjectionDrone',
       )
       if (rail?.active) {
         const notch = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
-        if (notch !== 0) rail.shiftBy(notch > 0 ? 1 : -1)
+        if (notch !== 0) rail.wheelBy(notch, event.deltaMode)
         event.preventDefault()
         event.stopPropagation()
         return
