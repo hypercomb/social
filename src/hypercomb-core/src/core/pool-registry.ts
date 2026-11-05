@@ -500,6 +500,13 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // so neither can collide with a tile slugged 'context' or 'changes'.
   'context:basket',
   'context:draft',
+  // The META LAYER of a code file in its participant's own words (essentials
+  // sharing/bee-meta.ts; documentation/packages-window.md): one document per file
+  // signature, `{ v:1, name?, description? }`, every saved version kept. It overrides,
+  // field by field, what the build wrote into the layer (`docs.bees`) and changes
+  // nothing else — the personal-annotation carrier of uniform-decoration.md
+  // "Meta resources". TRUTH POOL: a person chose these words; nothing rebuilds them.
+  'meta:bees',
   // The shelf's fold, sticky across boots: one current record, written only
   // when the participant folds or opens it (presentation/tiles/quick-tray.element.ts).
   'shelf:state',

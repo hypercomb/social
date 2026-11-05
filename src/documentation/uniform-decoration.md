@@ -60,6 +60,13 @@ bytes. Envelope marks are AUTHORED classification: merkle-linked, travel
 with sharing, and decorating is an edit (sig ripples up). Personal
 annotation on bytes uses the pool carrier below instead — no graph churn.
 
+First built use of the pool carrier for a meta layer: a **code file's words**
+(2026-11-04). The build publishes what a bee is inside the layer that declares it
+(`docs.bees[<sig>]` — the authored, signed voice); a participant's own name and
+description for it live in the pool `meta:bees`, one document per file signature,
+every version kept, overriding the published words field by field and changing no
+signature. See `packages-window.md` ("What a file is — its meta layer").
+
 ## Two carriers, one read
 
 | carrier | lives | follows edits? | follows duplication? | use for |

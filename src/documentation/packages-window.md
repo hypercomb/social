@@ -194,22 +194,79 @@ closes the menu before anything else, and so does a click anywhere but the menu.
 
 **Files.** After the deepest picked package, a column lists the code files — the
 bees — those packages declare, each once, at the package that declares it. A file
-is named by its first line, which the build writes as a comment
-(`// src/assistant/organize.drone.ts`, `// @scope/name`); until it is read the
-file is its signature.
+is listed by **what it is, not what it hashes to** (jwize, 2026-11-04: "this should
+have the logical locations right not just the signatures?"): its name on the first
+line, and under it the kind, the package that declares it and the start of its
+signature — `drone · assistant · b928e94a`. The column is sorted by that name, and
+the order the column shows is the order a shift-range walks. The name is the file's
+**meta layer** (below); with none of it, the file is named by its first line, which the
+build writes as a comment (`// src/assistant/organize.drone.ts`, `// @scope/name`), and
+only last by its signature.
+
+**What a file is — its meta layer.** The primitive is a word, its signature, its layer
+and a **meta layer**: the small layer that describes a thing rather than holding it,
+versioned like everything else, replaceable without touching the value
+(`living-presentation.md`, `uniform-decoration.md` "Meta resources"). A code file is a
+signature, so who it is — its logical name, what it is for — is its meta layer, and
+it has two voices, the participant's winning:
+
+- **Published** — the build writes what every bee is (class name, kind, description,
+  what it listens to and emits, its command and aliases) into the layer that declares
+  it, `docs.bees[<sig>]` (`build-module.ts`). It sits inside the signed layer: no host
+  can alter it and reading it costs nothing beyond the layer, which the desk reads once
+  per layer (what is held here, else a host — a layer is small and immutable). It is the
+  file's **own** version and is never rewritten.
+- **Yours** — one document per file signature in the pool `meta:bees`
+  (`{ "v": 1, "name"?, "description"? }`, `sharing/bee-meta.ts`). It overrides the
+  published words **field by field** — a name of your own with the published
+  description, or the other way round. A person chose it, so it is written as a human
+  save: **every earlier version is kept**. It lives in this hive and changes nothing
+  else — not the bytes, not the layer that declares them, not one signature. The
+  published words stay the default and are shown as the placeholders, so an empty field
+  reads as "as published". A read never mints the pool (`openPool`), a record of another
+  version or a damaged one is no words at all, and a name is one line and bounded
+  (80 characters, a description 600).
+
+Every code panel has a **✎** beside its close: it opens a small editor in the panel —
+*Name*, *What it does*, *Save*, *Use the published words* (only when you have given
+some; it writes an empty version, so the history stays) and *Cancel*. Enter saves,
+Escape lets go of the field and then closes the editor, and what is typed survives a
+repaint. A file wearing your words shows a ✎ after its name and an accent on its
+description.
+
+Not built: the **authored** version of the same words — an envelope that travels with
+the tile and is offered to the hosts you follow. This is the personal-annotation
+carrier (the sig pool: no graph churn); the travelling one is the other carrier of the
+same doctrine, and a package-level description override is the same shape one level up.
 
 **The matrix.** Pick files and each opens in a panel of its own, side by side, as
-many across as there is room for (six at most, the rest said). A panel shows the
-file's first 300 lines with line numbers drawn by CSS, so copying takes the code and
-not the gutter; *Show the other N lines* opens the rest, and a file over 400 KB
-is read from its start only, and says so. Code is read through the Store: from what
-is held here to name the files, and **from a host only for a file that is picked**
-— a bundle can be a megabyte and nobody asked for it. A signature is immutable, so
-what was read is kept.
+many across as there is room for (six at most, the rest said). A panel's head is the
+file's name and its place — kind, where its first line says it came from, the package
+that declares it, the start of its signature and its size — and under it, what it
+does. It shows the file's first 300 lines with line numbers drawn by CSS, so copying
+takes the code and not the gutter; *Show the other N lines* opens the rest, and a file
+over 400 KB is read from its start only, and says so. Code is read through the Store:
+from what is held here to name the files, and **from a host only for a file that is
+picked** — a bundle can be a megabyte and nobody asked for it. A signature is
+immutable, so what was read is kept.
 
-Not built: syntax colour, a search inside the code, picking several versions of
-one file to compare, and a bulb or update that acts on the whole pick at once (each
-still acts on its own row).
+**The code theme.** Source is read in the DCP installer's one syntax map
+(`dcp-installer-visual-spec.md` §1.5, "one map for viewing and editing"):
+`sharing/code-theme.ts` holds the palette — background, gutter, selection, active line,
+plain ink and the hues for keyword, string, number, function, type, comment and
+punctuation — each as a dark and a light value under `light-dark()`, which the
+**theme's own `--md-color-scheme`** picks between: there is no second dark switch
+here. A small, forgiving tokenizer (JavaScript, JSON, plain; no dependency — highlight.js
+is a lazy import in the shared chat, and a module may import nothing from shared) reads
+each line once, carries what a block comment or a template literal leaves open, never
+throws, gives every line back exactly, and paints a minified line (over 4,000
+characters) as plain rather than as a thousand spans. It returns tokens, and the view
+builds text nodes and classed spans: source is never parsed as markup. The gutter and
+the head wear the palette too, and the line under the pointer takes the active-line tint.
+
+Not built: a search inside the code, picking several versions of one file to compare,
+and a bulb or update that acts on the whole pick at once (each still acts on its own
+row).
 
 - **This origin** — the first rail entry — is every package any of your hosts
   carries, one row per path, on or shaded. **A host** is the same list
@@ -295,3 +352,19 @@ sandbox before you bring them into hypercomb.io."*
 - `shared/i18n/host-directory-keys-parity.spec.ts` — every string the desk draws is
   in `en.json` and `ja.json`, translated and not copied, with exactly the tokens the
   English has, and the English fallback in the code says what the catalog says.
+- `essentials/src/sharing/bee-meta.spec.ts` — the two voices of a file and the
+  participant's winning field by field; the document one per signature, every version
+  kept, an empty version handing the published words back, a read that never mints
+  the pool, and a record of another version or a damaged one read as no words.
+- `essentials/src/sharing/code-theme.spec.ts` — the tokenizer (every line given back
+  exactly, whatever it holds; a regular expression told from a division; block
+  comments and `${ }` templates carried across lines; never throws, fuzzed) and the
+  palette — the DCP installer's values, dark and light, scoped to its surface, no
+  second dark switch, no import.
+- `essentials/src/sharing/host-directory-files.spec.ts` — the files by what they are
+  (named by class and kind, sorted by name, the signature last) and the desk wearing
+  them: the layer's docs and each file's words read as files come in, the editor, what
+  is typed surviving a repaint, Escape's rung, and source drawn as text nodes under
+  the one palette.
+- `pool-registry.ts` seeds `meta:bees`, so the doctrine ratchet that every derived pool
+  meaning is in the census holds.

@@ -52,6 +52,8 @@ import {
   type AttestationVerdict,
   type WindowSession,
 } from '@hypercomb/core'
+import { beeDocsOf, beeWords, normalizeMeta, readBeeMeta, writeBeeMeta, type BeeDoc, type BeeMeta, type BeeWords } from './bee-meta.js'
+import { codeClass, codeLanguage, codeThemeCss, tokenizeCode, type CodeLanguage, type CodeToken } from './code-theme.js'
 import { hostZone } from './community-hosts.js'
 import { fetchHiveIndex, type HiveIndexResult, type HiveManifest } from './hive-pointer.js'
 import { isReservedRootKey } from './hive-link.js'
@@ -625,8 +627,9 @@ export const runningStamp = (revisions: readonly InstallRevision[], running: str
   return stamps.length ? Math.min(...stamps) : null
 }
 
-/** A code file a package declares, and the package that declares it. */
-export interface FileRow { sig: string; path: string }
+/** A code file a package declares, the package that declares it, and the layer of
+ *  that package — which is where the build wrote down what the file is (`docs.bees`). */
+export interface FileRow { sig: string; path: string; layer: string }
 
 /**
  * THE FILES OF WHAT IS PICKED: the bees the picked packages declare, each once
@@ -644,10 +647,41 @@ export function filesPicked(nodes: readonly InstallNode[], paths: readonly strin
       const bare = bareSig(sig)
       if (!SIG_RE.test(bare) || seen.has(bare)) continue
       seen.add(bare)
-      files.push({ sig: bare, path: node.path })
+      files.push({ sig: bare, path: node.path, layer: node.layerSig })
     }
   }
   return files.sort((a, b) => a.path.localeCompare(b.path) || a.sig.localeCompare(b.sig))
+}
+
+/** A file with the words it goes by: its logical name first, its signature last. */
+export interface FileLabel extends FileRow, BeeWords {
+  /** The first line of the source, when it is a comment — `@scope/name`, where the file came from. */
+  source: string
+}
+
+/**
+ * THE FILES BY WHAT THEY ARE, not by what they hash to. Each is named by the two
+ * voices of its meta layer (bee-meta.ts) — the participant's words over what the
+ * layer's own `docs` say — then by where its first line says it came from, and
+ * only last by its signature. Sorted by that name, so a package's files read as a
+ * list of things rather than a list of hashes; the order is the one the column
+ * shows, the one a shift-range walks and the one the matrix keeps.
+ */
+export function labelFiles(
+  files: readonly FileRow[],
+  lookup: {
+    docs(layer: string): ReadonlyMap<string, BeeDoc> | undefined
+    meta(sig: string): BeeMeta | undefined
+    source(sig: string): string
+  },
+): FileLabel[] {
+  return files
+    .map(file => {
+      const source = lookup.source(file.sig)
+      const words = beeWords({ sig: file.sig, meta: lookup.meta(file.sig), doc: lookup.docs(file.layer)?.get(file.sig), fileName: source })
+      return { ...file, ...words, source }
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || a.path.localeCompare(b.path) || a.sig.localeCompare(b.sig))
 }
 
 /** What a code file calls itself: its first line, when that is a comment (the
@@ -656,6 +690,10 @@ export const codeName = (text: string): string => {
   const first = text.slice(0, 400).split('\n', 1)[0]?.trim() ?? ''
   return first.startsWith('//') ? first.replace(/^\/\/+\s*/, '').slice(0, 90) : ''
 }
+
+/** The small line under a file's name: what kind it is, the package that declares it, its signature's start. */
+export const fileWhere = (file: Pick<FileLabel, 'kind' | 'path' | 'sig'>): string =>
+  [file.kind, file.path, file.sig.slice(0, 8)].filter(Boolean).join(' · ')
 
 /** The first `max` lines, and how many more there are. */
 export const codeLines = (text: string, max: number): { lines: string[]; more: number } => {
@@ -690,7 +728,9 @@ type View = 'domains' | 'revisions' | 'creations' | 'mine' | 'own'
 const CODE_KEEP = 400_000
 const CODE_LINES = 300
 const CODE_PANELS = 6
-interface CodeRead { name: string; text: string; size: number; cut: boolean }
+interface CodeRead { name: string; text: string; size: number; cut: boolean; language: CodeLanguage }
+/** The words being written for one file: what is typed, and whether the save is out or failed. */
+interface Describing { sig: string; name: string; description: string; busy: boolean; failed: boolean }
 
 /** The desks' shared doors (keyboard-desk, comfy-desk): the view modes that put
  *  the page behind a full-screen window to sleep, the back gesture, the input gate. */
@@ -789,6 +829,20 @@ export class HostDirectoryElement extends HTMLElement {
   #heldNot = new Set<string>()
   #codeFull = new Set<string>()
   #codePaint = 0
+  /** WHAT EACH FILE IS — the meta layer (bee-meta.ts). What the build wrote down of
+   *  every bee a layer declares (`docs.bees`), read once per layer, which is
+   *  immutable; and the words a participant gave a file instead, from the pool
+   *  `meta:bees` (`{}`: asked, none given). */
+  #docs = new Map<string, ReadonlyMap<string, BeeDoc>>()
+  #docsAsk = new Set<string>()
+  #meta = new Map<string, BeeMeta>()
+  #metaAsk = new Set<string>()
+  #metaQueue: string[] = []
+  #metaActive = 0
+  /** The file whose words are being written, and what is typed so far. */
+  #describing: Describing | null = null
+  /** The tokens of a file's lines, by signature and how many lines are drawn. */
+  #tokens = new Map<string, CodeToken[][]>()
   /** The package whose manage menu is open (a path), or null. */
   #menu: string | null = null
   /** When the running version of a package first appeared — keyed by path and the
@@ -1004,6 +1058,9 @@ export class HostDirectoryElement extends HTMLElement {
     this.#ageQueue = []
     this.#ageActive = 0
     for (const [key, stamp] of this.#ages) if (stamp === null) this.#ages.delete(key)
+    // A layer that could not be read is asked again next time; one that was read is immutable.
+    for (const [layer, docs] of this.#docs) if (!docs.size) this.#docs.delete(layer)
+    this.#describing = null
     this.#published.clear()
     this.#publishedAsk.clear()
     this.#releaseDesk()
@@ -1201,6 +1258,7 @@ export class HostDirectoryElement extends HTMLElement {
    *  then the deepest column's pick. With nothing picked it has nothing, and
    *  closes the desk. */
   #back(): boolean {
+    if (this.#describing) { this.#describing = null; this.#renderBody(); return true }
     if (this.#menu !== null) { this.#menu = null; this.#renderBody(); return true }
     if (this.#query) { this.#query = ''; this.#render(); return true }
     if (this.#codeGate) { this.#codeGate = null; this.#renderBody(); return true }
@@ -1253,6 +1311,11 @@ export class HostDirectoryElement extends HTMLElement {
     const held = body.contains(document.activeElement)
       ? (document.activeElement as HTMLElement).closest<HTMLElement>('li[data-key]')?.dataset['key'] ?? null
       : null
+    // Words being typed keep the field, the caret and the selection through a repaint.
+    const active = document.activeElement
+    const typed = (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) && body.contains(active) && active.dataset['field']
+      ? { field: active.dataset['field'], from: active.selectionStart, to: active.selectionEnd }
+      : null
     this.#renderRail()
     body.replaceChildren()
     if (this.#codeGate) this.#renderCodeGate(body, this.#codeGate)
@@ -1271,6 +1334,13 @@ export class HostDirectoryElement extends HTMLElement {
       strip.querySelectorAll<HTMLElement>('ul.hd-col').forEach((column, at) => { column.scrollTop = scrolls[at] ?? 0 })
       strip.scrollLeft = strip.querySelectorAll('.hd-colbox').length > columnsBefore ? strip.scrollWidth : sideways
       this.#restoreFocus(strip, held)
+    }
+    if (typed) {
+      const again = body.querySelector<HTMLInputElement | HTMLTextAreaElement>(`.hd-editor [data-field="${typed.field}"]`)
+      if (again && !again.disabled) {
+        again.focus({ preventScroll: true })
+        if (typed.from !== null && typed.to !== null) again.setSelectionRange(typed.from, typed.to)
+      }
     }
     // Escape goes by the focus: with it on the body it would put every window away.
     if (document.activeElement === document.body) this.#panel?.focus({ preventScroll: true })
@@ -1761,11 +1831,19 @@ export class HostDirectoryElement extends HTMLElement {
     const last = [...model].reverse().find(column => column.picked.keys.length)
     this.#at = last && last.picked.keys.length === 1 ? last.picked.keys[0]! : ''
 
-    const { files, paths } = this.#pickedFiles(model)
-    this.#files = stillPicked(this.#files, files.map(file => file.sig))
-    if (files.length) {
+    const { files: held, paths } = this.#pickedFiles(model)
+    this.#files = stillPicked(this.#files, held.map(file => file.sig))
+    if (this.#describing && !this.#files.keys.includes(this.#describing.sig)) this.#describing = null
+    if (held.length) {
+      // Named by what they are: the order below is the one every pick walks.
+      const files = labelFiles(held, {
+        docs: layer => this.#docs.get(layer),
+        meta: sig => this.#meta.get(sig),
+        source: sig => this.#code.get(sig)?.name ?? '',
+      })
       strip.append(this.#fileColumn(files, paths))
       this.#wantCode(files)
+      this.#wantWords(files)
       if (this.#files.keys.length) strip.append(this.#codeMatrix(files))
     }
     return strip
@@ -2070,8 +2148,8 @@ export class HostDirectoryElement extends HTMLElement {
     this.#agePaint = window.setTimeout(() => { this.#agePaint = 0; if (this.#panel) this.#renderBody() }, 120)
   }
 
-  /** The last column: the code files the picked packages declare. */
-  #fileColumn(files: readonly FileRow[], paths: readonly string[]): HTMLElement {
+  /** The last column: the code files the picked packages declare, by what they are. */
+  #fileColumn(files: readonly FileLabel[], paths: readonly string[]): HTMLElement {
     const list = make('ul', 'hd-col hd-files')
     list.setAttribute('role', 'listbox')
     list.setAttribute('aria-multiselectable', 'true')
@@ -2080,16 +2158,19 @@ export class HostDirectoryElement extends HTMLElement {
     const order = files.map(file => file.sig)
     const tabbable = this.#files.keys.find(sig => order.includes(sig)) ?? order[0]
     for (const file of files) {
-      const read = this.#code.get(file.sig)
       const li = make('li', 'hd-file')
       li.dataset['key'] = file.sig
       li.setAttribute('role', 'option')
       li.setAttribute('aria-selected', String(this.#files.keys.includes(file.sig)))
       li.tabIndex = file.sig === tabbable ? 0 : -1
       if (this.#files.keys.includes(file.sig)) li.classList.add('picked')
-      const name = read?.name || file.sig.slice(0, 12)
-      li.append(make('span', 'hd-file-name', name), make('span', 'hd-file-where', `${file.path} · ${file.sig.slice(0, 8)}`))
-      li.title = `${name}\n${file.path} · ${file.sig}`
+      const yours = file.yoursName || file.yoursDescription
+      if (yours) li.classList.add('mine')
+      // Its name first; what kind it is, the package that declares it and the start
+      // of its signature after — the signature is how it is found, not who it is.
+      li.append(make('span', 'hd-file-name', file.name), make('span', 'hd-file-where', fileWhere(file)))
+      li.title = [file.name, file.description, `${file.path} · ${file.sig}`, yours ? t('hosts.meta.yours', 'Described by you') : '']
+        .filter(Boolean).join('\n')
       li.addEventListener('click', event => this.#pickFile(file.sig, pickMode(event), order))
       list.append(li)
     }
@@ -2099,7 +2180,7 @@ export class HostDirectoryElement extends HTMLElement {
   }
 
   /** THE MATRIX: every picked file read side by side, one panel each. */
-  #codeMatrix(files: readonly FileRow[]): HTMLElement {
+  #codeMatrix(files: readonly FileLabel[]): HTMLElement {
     const matrix = make('div', 'hd-matrix')
     matrix.setAttribute('aria-label', t('hosts.code', 'Code'))
     const order = files.map(file => file.sig)
@@ -2107,22 +2188,47 @@ export class HostDirectoryElement extends HTMLElement {
     for (const sig of shown) {
       const file = files.find(candidate => candidate.sig === sig)
       const read = this.#code.get(sig)
+      const name = file?.name ?? read?.name ?? sig.slice(0, 12)
       const box = make('article', 'hd-codebox')
       const head = make('header', 'hd-codehead')
-      const title = make('span', 'hd-codename', read?.name || sig.slice(0, 12))
+      const title = make('span', 'hd-codename', name)
       title.title = sig
-      head.append(title, make('span', 'hd-codewhere', `${file?.path ?? ''} · ${sig.slice(0, 8)}${read ? ` · ${Math.max(1, Math.round(read.size / 1024))} KB` : ''}`))
-      const close = button('hd-icon', '×', t('hosts.code.close', 'Stop reading {name}', { name: read?.name || sig.slice(0, 8) }))
+      // Its logical place first — the kind, where its source says it came from, the
+      // package that declares it — and the signature that proves it, last.
+      const where = [file?.kind, file?.source, file?.path, sig.slice(0, 8), read ? `${Math.max(1, Math.round(read.size / 1024))} KB` : '']
+        .filter(Boolean).join(' · ')
+      head.append(title, make('span', 'hd-codewhere', where))
+      if (file) {
+        const describe = button('hd-icon hd-describe', '✎', t('hosts.meta.describe', 'Describe {name}', { name }))
+        describe.setAttribute('aria-pressed', String(this.#describing?.sig === sig))
+        describe.addEventListener('click', () => this.#describe(file))
+        head.append(describe)
+      }
+      const close = button('hd-icon', '×', t('hosts.code.close', 'Stop reading {name}', { name }))
       close.addEventListener('click', () => this.#pickFile(sig, 'toggle', order))
       head.append(close)
       box.append(head)
+      if (file && this.#describing?.sig === sig) box.append(this.#editor(file))
+      else if (file?.description) {
+        const about = make('p', file.yoursDescription ? 'hd-codedesc mine' : 'hd-codedesc', file.description)
+        if (file.yoursDescription) about.title = t('hosts.meta.yours', 'Described by you')
+        box.append(about)
+      }
       if (read === undefined) box.append(make('p', 'hd-note', t('hosts.code.reading', 'Reading…')))
       else if (read === null) box.append(make('p', 'hd-note', t('hosts.code.missing', 'Not held here, and none of your hosts answered with it.')))
       else {
         const full = this.#codeFull.has(sig)
         const { lines, more } = codeLines(read.text, full ? Number.MAX_SAFE_INTEGER : CODE_LINES)
         const pre = make('pre', 'hd-code')
-        for (const text of lines) pre.append(make('div', 'cl', text))
+        pre.dataset['language'] = read.language
+        for (const tokens of this.#tokensOf(sig, read, lines)) {
+          const row = make('div', 'cl')
+          for (const token of tokens) {
+            if (token.kind === 'plain') row.append(document.createTextNode(token.text))
+            else row.append(make('span', codeClass(token.kind), token.text))
+          }
+          pre.append(row)
+        }
         box.append(pre)
         if (more > 0 || read.cut) {
           const rest = button('hd-quiet', more > 0
@@ -2162,7 +2268,7 @@ export class HostDirectoryElement extends HTMLElement {
       if (!blob) { if (remote) this.#code.set(sig, null); else this.#heldNot.add(sig); return }
       const cut = blob.size > CODE_KEEP
       const text = await (cut ? blob.slice(0, CODE_KEEP) : blob).text()
-      this.#code.set(sig, { name: codeName(text), text, size: blob.size, cut })
+      this.#code.set(sig, { name: codeName(text), text, size: blob.size, cut, language: codeLanguage(text) })
       if (this.#code.size > 80) this.#code.delete(this.#code.keys().next().value as string)
     } catch {
       if (remote) this.#code.set(sig, null)
@@ -2176,6 +2282,165 @@ export class HostDirectoryElement extends HTMLElement {
   #codeSoon(): void {
     if (this.#codePaint) return
     this.#codePaint = window.setTimeout(() => { this.#codePaint = 0; if (this.#panel) this.#renderBody() }, 80)
+  }
+
+  /** The lines of a file, as tokens — read once for as many lines as are drawn. */
+  #tokensOf(sig: string, read: CodeRead, lines: readonly string[]): CodeToken[][] {
+    const key = `${sig}:${lines.length}`
+    let rows = this.#tokens.get(key)
+    if (!rows) {
+      rows = tokenizeCode(lines.join('\n'), read.language)
+      this.#tokens.set(key, rows)
+      if (this.#tokens.size > 40) this.#tokens.delete(this.#tokens.keys().next().value as string)
+    }
+    return rows
+  }
+
+  // ── what a file is: its meta layer ───────────────────────────────────────
+
+  /** A file is named by the layer that declares it and by what its participant said
+   *  of it; both are read as the files come in, and the names repaint when they land. */
+  #wantWords(files: readonly FileRow[]): void {
+    for (const layer of new Set(files.map(file => file.layer))) {
+      if (SIG_RE.test(layer) && !this.#docs.has(layer) && !this.#docsAsk.has(layer)) void this.#askDocs(layer)
+    }
+    for (const { sig } of files) {
+      if (this.#meta.has(sig) || this.#metaAsk.has(sig)) continue
+      this.#metaAsk.add(sig)
+      this.#metaQueue.push(sig)
+    }
+    this.#pumpMeta()
+  }
+
+  /** A layer is small JSON and immutable: its `docs.bees` are read once, from what is
+   *  held here or else from a host. A layer nobody has comes back empty — the files
+   *  are then named by their first line, or their signature, as they always were. */
+  async #askDocs(layer: string): Promise<void> {
+    this.#docsAsk.add(layer)
+    try {
+      const store = ioc<{ getResource?(sig: string): Promise<Blob | null>; getResourceLocal?(sig: string): Promise<Blob | null> }>('@hypercomb.social/Store')
+      const blob = (await store?.getResourceLocal?.(layer)) ?? (await store?.getResource?.(layer))
+      this.#docs.set(layer, blob ? beeDocsOf(await blob.text()) : new Map())
+      if (this.#docs.size > 300) this.#docs.delete(this.#docs.keys().next().value as string)
+    } catch {
+      this.#docs.set(layer, new Map())
+    } finally {
+      this.#docsAsk.delete(layer)
+      this.#codeSoon()
+    }
+  }
+
+  /** The participant's words are a document each: a few are read at a time. */
+  #pumpMeta(): void {
+    while (this.#metaActive < 6 && this.#metaQueue.length) {
+      const sig = this.#metaQueue.shift() as string
+      this.#metaActive++
+      void readBeeMeta(sig)
+        // A save made while the read was out is newer than it.
+        .then(meta => { if (!this.#meta.has(sig)) this.#meta.set(sig, meta) })
+        .catch(() => { if (!this.#meta.has(sig)) this.#meta.set(sig, {}) })
+        .finally(() => {
+          this.#metaActive--
+          this.#metaAsk.delete(sig)
+          this.#codeSoon()
+          this.#pumpMeta()
+        })
+    }
+  }
+
+  /** Open the editor on a file, with the words the participant already gave it. */
+  #describe(file: FileLabel): void {
+    if (this.#describing?.sig === file.sig) { this.#describing = null; this.#renderBody(); return }
+    const own = this.#meta.get(file.sig) ?? {}
+    this.#describing = { sig: file.sig, name: own.name ?? '', description: own.description ?? '', busy: false, failed: false }
+    this.#renderBody()
+    this.#refs.get('body')?.querySelector<HTMLElement>('.hd-editor [data-field="name"]')?.focus()
+  }
+
+  /**
+   * THE EDITOR: a name and a description, each over what the file says of itself —
+   * the published words are the placeholders, so an empty field is visibly "as
+   * published". Saving keeps every earlier version; it changes nothing but this
+   * hive's words for the file. Enter saves (a description is one paragraph).
+   */
+  #editor(file: FileLabel): HTMLElement {
+    const draft = this.#describing as Describing
+    const doc = this.#docs.get(file.layer)?.get(file.sig)
+    const published = beeWords({ sig: file.sig, doc, fileName: file.source })
+    const form = make('form', 'hd-editor')
+    form.noValidate = true
+
+    const field = <E extends HTMLInputElement | HTMLTextAreaElement>(control: E, key: 'name' | 'description', label: string, placeholder: string, max: number): HTMLLabelElement => {
+      control.className = 'hd-input'
+      control.value = draft[key]
+      control.placeholder = placeholder
+      control.maxLength = max
+      control.dataset['field'] = key
+      control.disabled = draft.busy
+      control.addEventListener('input', () => { draft[key] = control.value })
+      const wrap = make('label', 'hd-field')
+      wrap.append(make('span', 'hd-field-label', label), control)
+      return wrap
+    }
+    const name = make('input')
+    name.type = 'text'
+    const about = make('textarea')
+    about.rows = 3
+    about.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); form.requestSubmit() }
+    })
+    form.append(
+      field(name, 'name', t('hosts.meta.name', 'Name'), published.name, 80),
+      field(about, 'description', t('hosts.meta.description', 'What it does'), published.description, 600),
+      make('p', 'hd-note', t('hosts.meta.note', 'Kept in this hive, with every earlier version. The file itself, and every signature, stay as published.')),
+    )
+    if (draft.failed) {
+      const failed = make('p', 'hd-error', t('hosts.meta.failed', 'Could not save — nothing was changed.'))
+      failed.setAttribute('role', 'alert')
+      form.append(failed)
+    }
+    const actions = make('div', 'hd-editor-actions')
+    const save = button('hd-primary', t('hosts.meta.save', 'Save'))
+    save.type = 'submit'
+    save.disabled = draft.busy
+    actions.append(save)
+    const own = this.#meta.get(file.sig) ?? {}
+    if (own.name || own.description) {
+      const reset = button('hd-quiet', t('hosts.meta.reset', 'Use the published words'))
+      reset.type = 'button'
+      reset.disabled = draft.busy
+      reset.addEventListener('click', () => void this.#saveWords(file.sig, {}))
+      actions.append(reset)
+    }
+    const cancel = button('hd-quiet', t('hosts.meta.cancel', 'Cancel'))
+    cancel.type = 'button'
+    cancel.addEventListener('click', () => { this.#describing = null; this.#renderBody() })
+    actions.append(cancel)
+    form.append(actions)
+    form.addEventListener('submit', event => {
+      event.preventDefault()
+      void this.#saveWords(file.sig, { name: draft.name, description: draft.description })
+    })
+    return form
+  }
+
+  /** Keep the participant's words for a file — `{}` hands the published ones back. */
+  async #saveWords(sig: string, words: BeeMeta): Promise<void> {
+    const draft = this.#describing
+    if (draft?.sig === sig) {
+      if (draft.busy) return
+      draft.busy = true
+      draft.failed = false
+    }
+    const saved = await writeBeeMeta(sig, words)
+    if (!saved) {
+      if (draft && this.#describing === draft) { draft.busy = false; draft.failed = true; this.#renderBody() }
+      return
+    }
+    this.#meta.set(sig, normalizeMeta(words))
+    if (this.#describing === draft) this.#describing = null
+    this.#focusKey = sig
+    this.#renderBody()
   }
 
   #renderRevisions(body: HTMLElement): void {
@@ -2712,13 +2977,31 @@ ${S} .hd-file-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-spac
 ${S} .hd-file-where{font-size:.62em;color:var(--hd-ink-quiet);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 /* THE MATRIX: one panel per picked file, as many across as there is room for. */
 ${S} .hd-matrix{flex:1 0 26rem;min-width:26rem;min-height:0;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(22rem,1fr));gap:.6em;padding:.6em;align-content:start;}
-${S} .hd-codebox{min-width:0;display:flex;flex-direction:column;border:1px solid var(--hd-rule);border-radius:var(--hc-radius-card,3px);background:color-mix(in srgb, rgb(var(--acc)) 2%, var(--hd-ground));}
+${S} .hd-file.mine .hd-file-name::after{content:' ✎';font-size:.85em;color:var(--hc-window-accent);}
+${S} .hd-codebox{min-width:0;display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--hd-rule);border-radius:var(--hc-radius-card,3px);}
 ${S} .hd-codehead{display:flex;align-items:baseline;gap:.6em;padding:.35em .6em;border-bottom:1px solid var(--hd-rule);}
-${S} .hd-codename{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8em;color:var(--hd-ink);}
-${S} .hd-codewhere{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.62em;color:var(--hd-ink-quiet);}
-${S} .hd-code{margin:0;padding:.4em 0;overflow:auto;max-height:70vh;font-size:.7em;line-height:1.55;counter-reset:l;tab-size:2;}
+${S} .hd-codename{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8em;color:var(--code-plain);}
+${S} .hd-codewhere{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.62em;color:var(--code-gutter);}
+${S} .hd-codebox .hd-icon{color:var(--code-gutter);}
+${S} .hd-codebox .hd-icon:hover,${S} .hd-codebox .hd-icon[aria-pressed="true"]{color:var(--hc-window-accent);}
+/* THE META LAYER ON A CODE FILE: what it does, in the participant's words when they gave some. */
+${S} .hd-codedesc{margin:0;padding:.4em .7em;font-size:.72em;line-height:1.5;color:var(--code-plain);border-bottom:1px solid var(--hd-rule);}
+${S} .hd-codedesc.mine{box-shadow:inset 2px 0 0 var(--hc-window-accent);}
+${S} .hd-editor{display:flex;flex-direction:column;gap:.45em;padding:.5em .7em .6em;font-size:.72em;border-bottom:1px solid var(--hd-rule);}
+${S} .hd-field{display:flex;flex-direction:column;gap:.15em;}
+${S} .hd-field-label{font-size:.9em;color:var(--code-gutter);}
+${S} .hd-input{box-sizing:border-box;width:100%;padding:.3em .45em;font:inherit;color:var(--code-plain);background:var(--code-bg);border:1px solid var(--hd-rule);border-radius:var(--hc-radius-control,2px);resize:vertical;}
+${S} .hd-input::placeholder{color:var(--code-comment);}
+${S} .hd-panel textarea:focus-visible{outline:2px solid color-mix(in srgb, rgb(var(--acc)) 72%, white);outline-offset:1px;}
+${S} .hd-editor .hd-note{margin:0;color:var(--code-gutter);}
+${S} .hd-editor .hd-quiet{color:var(--code-punc);}
+${S} .hd-editor-actions{display:flex;flex-wrap:wrap;align-items:center;gap:.4em;}
+/* THE CODE THEME: the DCP installer's one syntax map (code-theme.ts), under the panels that show source. */
+${S} .hd-code{margin:0;padding:.4em 0;overflow:auto;max-height:70vh;font-family:var(--hc-code,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);font-variant-ligatures:var(--hc-code-ligatures,none);font-size:.7em;line-height:1.55;counter-reset:l;tab-size:2;}
 ${S} .hd-code .cl{counter-increment:l;white-space:pre;padding-right:1em;}
-${S} .hd-code .cl::before{content:counter(l);display:inline-block;width:3.4em;margin-right:1em;text-align:right;color:var(--hd-ink-quiet);opacity:.55;user-select:none;}
+${S} .hd-code .cl:hover{background:var(--code-line);}
+${S} .hd-code .cl::before{content:counter(l);display:inline-block;width:3.4em;margin-right:1em;text-align:right;color:var(--code-gutter);user-select:none;}
+${codeThemeCss(S)}
 ${S} .hd-stack-note{margin:.2em 0 .5em;}
 ${S} .hd-drawer{min-width:0;min-height:0;overflow-y:auto;border-left:1px solid var(--hd-rule);padding:.7em 1em 1.4em;background:color-mix(in srgb, rgb(var(--acc)) 3%, var(--hd-ground));}
 ${S} .hd-pane-head{display:flex;align-items:center;gap:.6em;margin:0 0 .6em;}
