@@ -8,6 +8,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
 import { railCoord } from '../presentation/grid/rail-grid.js'
+import { railSeedScale, railWindowSize } from '../presentation/grid/rail-window.js'
+import { DEFAULT_HEX_GEOMETRY } from '../presentation/grid/hex-geometry.js'
 import { MOBILE_MODE_EFFECT, MOBILE_MODE_IOC_KEY } from '../preferences/mobile-pheromones.js'
 import { LANE_VIEWPORT_EFFECT, setLaneCount } from './lane-viewport-mode.js'
 
@@ -203,7 +205,7 @@ describe('rail projection — the phone posture', () => {
     EffectBus.emit('render:cell-count', { settled: true })
     await vi.advanceTimersByTimeAsync(100)
     expect(zoomToFit).toHaveBeenCalledTimes(1)
-    expect(zoomToFit).toHaveBeenCalledWith(false, 'auto-persist')
+    expect(zoomToFit).toHaveBeenCalledWith(true, 'auto-persist')
 
     // The same page rendering again owes nothing.
     EffectBus.emit('render:cell-count', { settled: true })
@@ -355,5 +357,104 @@ describe('rail projection — the phone posture', () => {
     EffectBus.emit('lanes:off', {})
     expect(last('render:set-orientation')).toEqual({ flat: true })
     expect(localStorage.getItem('hc:hex-orientation')).toBeNull()
+  })
+})
+
+describe('rail projection — the window over the strip', () => {
+  const tiles = (n: number): string[] => Array.from({ length: n }, (_, i) => `t${i}`)
+  const host = (width: number, height: number, scale = 1) => ({
+    renderer: { screen: { width, height } },
+    container: { scale: { x: scale } },
+    app: { stage: { scale: { x: 1 } } },
+  })
+  type Windowed = {
+    windowOf: (d: string[]) => string[] | null
+    shiftBy: (n: number) => boolean
+    panAlong: (px: number) => number
+    mergeWindowOrder: (w: string[]) => string[] | null
+    active: boolean
+  }
+
+  it('projects only the slots that fit the screen, not the whole spiral', async () => {
+    landscape()
+    await beat()
+    EffectBus.emit('render:host-ready', host(844, 390))
+    const matrix = matrixAt(project.mock.calls.length - 1)
+    const expected = railWindowSize(
+      844 - 10, railSeedScale(390 - 10, DEFAULT_HEX_GEOMETRY, 3, false, true), DEFAULT_HEX_GEOMETRY, 3, false, true,
+    ).capacity
+    expect(matrix.size).toBe(Math.min(expected, CAPACITY))
+    expect(matrix.size).toBeGreaterThan(0)
+  })
+
+  it('hands the renderer only the window, and a shift moves the tiles, not the slots', async () => {
+    portrait()
+    await beat()
+    const rail = drone as unknown as Windowed
+    const dense = tiles(40)
+    const first = rail.windowOf(dense)!
+    expect(first.length).toBe(CAPACITY)
+    expect(first[0]).toBe('t0')
+    const projections = project.mock.calls.length
+
+    expect(rail.shiftBy(1)).toBe(true)
+    // point-top vertical: a step is two rows of three
+    expect(rail.windowOf(dense)![0]).toBe('t6')
+    expect(last('render:grid-changed')).toMatchObject({ active: true, shift: 1 })
+    // the slot matrix is untouched by a shift
+    expect(project.mock.calls.length).toBe(projections)
+
+    // never before the first tile, never past the last
+    expect(rail.shiftBy(-5)).toBe(true)
+    expect(rail.windowOf(dense)![0]).toBe('t0')
+    expect(rail.shiftBy(-1)).toBe(false)
+    while (rail.shiftBy(1)) { /* walk to the end */ }
+    expect(rail.windowOf(dense)).toContain('t39')
+  })
+
+  it('folds pan distance into steps and reports zero at an end', async () => {
+    portrait()
+    await beat()
+    EffectBus.emit('render:host-ready', host(390, 844))
+    const rail = drone as unknown as Windowed
+    const dense = tiles(40)
+    rail.windowOf(dense)
+    // a few pixels is not a step: nothing shifts
+    expect(rail.panAlong(-3)).toBe(-3)
+    expect(rail.windowOf(dense)![0]).toBe('t0')
+    // a long pull brings later tiles
+    expect(rail.panAlong(-100000)).toBe(-100000)
+    expect(rail.windowOf(dense)![0]).not.toBe('t0')
+    // pushing back past the strip's start refuses
+    expect(rail.panAlong(100000)).not.toBe(0)
+    expect(rail.windowOf(dense)![0]).toBe('t0')
+    expect(rail.panAlong(100000)).toBe(0)
+  })
+
+  it('merges a dragged window back into the whole order', async () => {
+    portrait()
+    await beat()
+    const rail = drone as unknown as Windowed
+    const dense = tiles(40)
+    rail.windowOf(dense)
+    rail.shiftBy(1)
+    const shown = rail.windowOf(dense)!
+    const swapped = [...shown]
+    ;[swapped[0], swapped[1]] = [swapped[1], swapped[0]]
+    const merged = rail.mergeWindowOrder(swapped)!
+    expect(merged).toHaveLength(40)
+    expect(merged.slice(0, 6)).toEqual(dense.slice(0, 6))
+    expect(merged[6]).toBe('t7')
+    expect(merged.slice(6 + shown.length)).toEqual(dense.slice(6 + shown.length))
+    // not a permutation of the window: refused
+    expect(rail.mergeWindowOrder(['nope'])).toBeNull()
+  })
+
+  it('reads nothing as a window once the lanes are off', async () => {
+    await beat()
+    EffectBus.emit('lanes:off', {})
+    const rail = drone as unknown as Windowed
+    expect(rail.active).toBe(false)
+    expect(rail.windowOf(tiles(5))).toBeNull()
   })
 })

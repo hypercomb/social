@@ -1575,8 +1575,18 @@ export class MoveDrone extends Drone {
   // only — show-cell's handler MUST NOT renumber seats on receipt.
 
   async #commitPlacements(placements: Map<string, Axial>): Promise<void> {
-    const sparse = this.#reorderNames(placements)
-    const denseOrder = sparse.filter(n => n !== '')
+    let sparse: readonly string[] = this.#reorderNames(placements)
+    let denseOrder = sparse.filter(n => n !== '')
+
+    // The rails show only a WINDOW of the strip. What was dragged is the
+    // window; what must be written is the whole order, with the window's
+    // tiles in their new places and everything outside it where it was.
+    if (getLaneScrollAxis()) {
+      const full = window.ioc.get<{ mergeWindowOrder?: (w: readonly string[]) => string[] | null }>(
+        '@diamondcoreprocessor.com/RailProjectionDrone',
+      )?.mergeWindowOrder?.(denseOrder)
+      if (full) { sparse = full; denseOrder = full }
+    }
 
     const orderProjection = window.ioc.get<OrderProjection>('@diamondcoreprocessor.com/OrderProjection')
     if (orderProjection) {

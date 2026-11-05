@@ -3275,6 +3275,14 @@ export class ShowCellDrone extends Drone {
   #railRanks = (names: readonly string[]): string[] | null => {
     if (!getLaneScrollAxis()) return null
     const dense = names.filter(Boolean)
+    // THE STRIP IS READ THROUGH A WINDOW. Only the columns that fit the screen
+    // are handed on: tiles outside it get no cell, no image load, no geometry
+    // — they are not drawn off-screen, they are not drawn. Ranks inside the
+    // window are slot numbers, so the walk below places them unchanged.
+    const win = window.ioc.get<{ windowOf?: (d: readonly string[]) => string[] | null }>(
+      '@diamondcoreprocessor.com/RailProjectionDrone',
+    )?.windowOf?.(dense)
+    if (win) return win
     return dense.length === names.length ? null : dense
   }
 
@@ -8785,9 +8793,19 @@ export class ShowCellDrone extends Drone {
   // TRANSIENTLY unresolvable this pass (layer head cold, bytes not pooled).
   // The caller gates the paint on it: placing a cold tile means painting a
   // tile that HAS a durable slot at a wrong one.
+  /** The highest slot a tile may be ORDERED into. Ordering is the layer's
+   *  whole sparse array and must hold every tile, so while a projection
+   *  answers with only a window of slots (the lanes) it is sized by the
+   *  spiral's capacity, never by the window: the window is a view taken
+   *  AFTER ordering (`#railRanks`), not a limit on it. */
+  #slotCeiling(axial: { count?: number; capacity?: number } | undefined): number {
+    const cap = typeof axial?.capacity === 'number' ? axial.capacity - 1 : 0
+    return Math.max(axial?.count ?? 60, cap)
+  }
+
   async #orderByIndexPinned(dir: FileSystemDirectoryHandle, names: string[], localCellSet: Set<string>, readOnly = false, peerIndices?: Map<string, number>, passSegments?: readonly string[], navPass = false, orderStats?: { coldIndexNames: string[] }): Promise<string[]> {
     const axial = this.resolve<any>('axial')
-    const maxSlot = axial?.count ?? 60
+    const maxSlot = this.#slotCeiling(axial)
     const sparse: string[] = new Array(maxSlot + 1).fill('')
 
     const unindexed: string[] = []
@@ -9196,7 +9214,7 @@ export class ShowCellDrone extends Drone {
     if (!name || !this.#slots.seeded || !this.#segmentsAreCurrent(parentSegments)) return undefined
     const axial = this.resolve<any>('axial')
     if (!axial?.items) return undefined
-    const maxSlot = axial?.count ?? 60
+    const maxSlot = this.#slotCeiling(axial)
     const sparse = [...this.#slots.snapshot().names]
     const placed = sparse.indexOf(name)
     if (placed >= 0) return placed
