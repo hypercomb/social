@@ -3497,7 +3497,11 @@ async function serveVisitorAsset(request, env, { spa = true, door = null, instal
     response = await env.ASSETS.fetch(new Request(url, request))
   }
   const headers = new Headers(response.headers)
-  headers.set('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'")
+  // media-src blob: — a page's voice plays as a stream the page builds from
+  // parts it verified one by one (MediaSource; jwize 2026-11-05: "stream the
+  // audio so it doesn't have to full load"). A blob: URL is minted by the page
+  // itself and names nothing off this origin, the same as img-src blob:.
+  headers.set('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'")
   headers.set('Permissions-Policy', PERMISSIONS_POLICY)
   headers.set('Referrer-Policy', 'no-referrer')
   headers.set('X-Content-Type-Options', 'nosniff')

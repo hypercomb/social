@@ -190,7 +190,8 @@ if (args.includes('--blocks')) {
     const m = bySig.get(String(req.url).slice(1))
     if (req.method !== 'GET' || !m) { res.statusCode = 404; res.end('not one of the pages\' media'); return }
     res.setHeader('Content-Type', m.type)
-    fs.createReadStream(m.path).pipe(res)
+    // a voice part is a slice of its voice's file (blocks/media.cjs)
+    fs.createReadStream(m.path, m.start == null ? {} : { start: m.start, end: m.end - 1 }).pipe(res)
   })
   server.listen(PORT, '127.0.0.1', () => {
     console.log(`Serving the media on ${SERVE} until the snippet has them (Ctrl+C to stop).`)

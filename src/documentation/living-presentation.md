@@ -818,6 +818,27 @@ every page, and its 25 scenes are folded into the tiles they explain:
   `plant.cjs --blocks` serves them on 127.0.0.1 while its console snippet
   stores each one and checks the hive named it the same, before any page is
   dressed.
+- **A voice starts on its head, and is asked for before it is needed.**
+  jwize, 2026-11-05: *"stream the audio so it doesn't have to full load or
+  load a chunk first so it is fast."* Every byte a page plays is verified
+  against its signature first, so one file cannot stream: the hive holds it
+  until its last byte. So a voice longer than about six seconds is also broken
+  apart at its MP3 frames (`blocks/media.cjs`) into a head of about two
+  seconds (12 KB) and parts of about eight. Each part is a medium in its own
+  right, and the parts in order are the voice's bytes exactly. A step names
+  its whole voice (`voice`) and its parts (`parts`). Where the page may play a
+  stream it builds (MediaSource for MP3, and a policy with `media-src blob:`),
+  the player fetches the head, starts it the moment it is verified, and feeds
+  the parts in behind it. Anywhere else it plays the whole voice. Either way
+  the scene's first voice is fetched once the page is on screen and quiet,
+  unless the reader has asked to save data. The next voice is fetched while
+  the current one plays, and a paused voice is kept, so playing on resumes
+  it. Measured at 50 KB/s, with the service worker's hold-until-verified
+  modelled, the root page's first word comes 0.37 s after Listen when
+  streamed, against 4.1 s for the whole voice. Once its voice has been
+  fetched ahead it comes at once. A published site's visitor page allows
+  `media-src 'self' blob:` (`blossom-worker/worker.js`), so it streams once
+  that worker is deployed. Until then it plays whole voices, fetched ahead.
 - **Pictures from a running hive.** A tile may show one picture of the hive
   doing what its page explains (`blocks/captures/`), beside its figure, and
   the narration turns to it as the scene's last beat. `blocks/captures.cjs`

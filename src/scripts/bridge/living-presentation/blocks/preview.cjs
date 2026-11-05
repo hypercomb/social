@@ -9,6 +9,7 @@
 const fs = require('fs')
 const path = require('path')
 const { buildBlocks } = require('./build.cjs')
+const { bytesOf } = require('./media.cjs')
 
 const EXT = { 'audio/mpeg': '.mp3', 'video/mp4': '.mp4', 'font/woff2': '.woff2', 'image/png': '.png', 'image/webp': '.webp', 'image/jpeg': '.jpg', 'image/svg+xml': '.svg' }
 const fileOf = (route) => `${route.join('--')}.html`
@@ -17,7 +18,7 @@ const preview = (out, under = '') => {
   const { blocks, media } = buildBlocks({ under })
   fs.mkdirSync(path.join(out, 'media'), { recursive: true })
   const mediaPath = Object.fromEntries(media.map(m => [m.sig, `media/${m.sig.slice(0, 16)}${EXT[m.type]}`]))
-  for (const m of media) fs.copyFileSync(m.path, path.join(out, mediaPath[m.sig]))
+  for (const m of media) fs.writeFileSync(path.join(out, mediaPath[m.sig]), bytesOf(m))
   for (const b of blocks) {
     const html = b.page
       .replace(/resource:([0-9a-f]{64})/g, (_, sig) => {

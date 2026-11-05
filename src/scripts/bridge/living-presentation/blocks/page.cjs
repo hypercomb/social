@@ -322,10 +322,80 @@ const SCRIPT = `
   let resumeAt = 0
   if (returning) { try { const n = Number(sessionStorage.getItem(KEY)); if (Number.isInteger(n) && n >= 0) resumeAt = n } catch {} }
   const readTime = (say) => Math.max(3.4, say.split(/\\s+/).length / 2.6) * 1000 + 600
+  // A VOICE IS ASKED FOR BEFORE IT IS NEEDED, AND STARTS ON ITS HEAD (jwize
+  // 2026-11-05: "stream the audio so it doesn't have to full load"). Every
+  // byte this page plays is verified against its signature first, so one file
+  // cannot stream: it would be held until its last byte. A voice comes in
+  // parts instead (blocks/media.cjs): a two-second head, then about eight
+  // seconds at a time, each verified on its own, fed in order into one stream.
+  // A page that may not play a stream it builds (no media-src blob:, or no
+  // MediaSource for MP3) plays the whole voice, as before. Either way the
+  // scene's first voice is asked for once the page is on screen and quiet, and
+  // the next voice while this one plays, so pressing Listen starts at once.
+  const keyOf = (s) => s && s.voice ? s.voice : ''
+  const MS = window.MediaSource
+  let streams = false
+  if (MS && MS.isTypeSupported && MS.isTypeSupported('audio/mpeg') && steps.some(s => s.parts)) {
+    try {
+      const probe = new Audio(), ms = new MS(), url = URL.createObjectURL(ms)
+      ms.addEventListener('sourceopen', () => { streams = true; URL.revokeObjectURL(url); probe.removeAttribute('src') }, { once: true })
+      probe.addEventListener('error', () => URL.revokeObjectURL(url), { once: true })
+      probe.src = url
+    } catch {}
+  }
+  const part = (u) => fetch(u).then(r => { if (!r.ok) throw new Error(String(r.status)); return r.arrayBuffer() })
+  const streamOf = (a, parts) => {
+    const ms = new MS(), url = URL.createObjectURL(ms)
+    let over = false
+    a.addEventListener('emptied', () => { over = true }, { once: true })
+    ms.addEventListener('sourceopen', async () => {
+      URL.revokeObjectURL(url)
+      try {
+        const sb = ms.addSourceBuffer('audio/mpeg')
+        sb.mode = 'sequence'
+        // the head alone first, so it is not slowed by the parts behind it
+        const head = part(parts[0])
+        await head
+        const rest = parts.slice(1).map(part)
+        for (const bytes of [head, ...rest]) {
+          const b = await bytes
+          if (over || ms.readyState !== 'open') return
+          await new Promise((done, fail) => { sb.addEventListener('updateend', done, { once: true }); sb.addEventListener('error', fail, { once: true }); sb.appendBuffer(b) })
+        }
+        if (!over && ms.readyState === 'open') ms.endOfStream()
+      } catch { if (!over && ms.readyState === 'open') { try { ms.endOfStream('network') } catch {} } }
+    }, { once: true })
+    a.src = url
+  }
+  const make = (s) => {
+    const a = new Audio()
+    a.preload = 'auto'
+    a.dataset.src = keyOf(s)
+    if (streams && s.parts) streamOf(a, s.parts); else a.src = s.voice
+    return a
+  }
+  const drop = (a) => { a.onended = a.onerror = null; a.pause(); a.removeAttribute('src'); try { a.load() } catch {} }
+  const warm = new Map()
+  const saving = !!(navigator.connection && navigator.connection.saveData)
+  const ready = (s) => {
+    const k = keyOf(s)
+    if (!k || !voiceOn || gone() || (audio && audio.dataset.src === k) || warm.has(k)) return
+    while (warm.size >= 2) { const [old, a] = warm.entries().next().value; warm.delete(old); drop(a) }
+    warm.set(k, make(s))
+  }
+  const take = (s) => { const k = keyOf(s), a = warm.get(k); if (a) { warm.delete(k); return a } return make(s) }
+  const after = (i) => { const k = keyOf(steps[i]); for (let j = i + 1; j < steps.length; j++) if (steps[j].voice && keyOf(steps[j]) !== k) return steps[j]; return null }
   const idle = () => { if (still || playing || gone()) return; for (const v of videos) { v.loop = true; v.play().catch(() => {}) } }
   let watch = 0
   const stopWatch = () => { cancelAnimationFrame(watch); watch = 0 }
-  const quiet = () => { clearTimeout(timer); timer = null; stopWatch(); if (audio) { audio.onended = audio.onerror = null; audio.pause(); audio = null } }
+  // A paused voice is kept, so playing on picks it up where it is.
+  const quiet = () => {
+    clearTimeout(timer); timer = null; stopWatch()
+    if (!audio) return
+    const a = audio; audio = null
+    a.onended = a.onerror = null; a.pause()
+    if (gone()) drop(a); else warm.set(a.dataset.src, a)
+  }
   const show = (i) => {
     at = Math.max(0, Math.min(steps.length - 1, i))
     const s = steps[at]
@@ -340,7 +410,10 @@ const SCRIPT = `
     try { sessionStorage.setItem(KEY, String(at)) } catch {}
   }
   const paint = () => { pp.classList.toggle('playing', playing); pp.setAttribute('aria-label', playing ? 'Pause' : 'Play'); if (started) pp.classList.remove('lead') }
-  const halt = () => { playing = false; quiet(); for (const v of videos) v.pause() }
+  const halt = () => {
+    playing = false; quiet(); for (const v of videos) v.pause()
+    if (gone()) { for (const a of warm.values()) drop(a); warm.clear() }
+  }
   const next = () => { if (gone()) return halt(); if (at < steps.length - 1) { show(at + 1); speak() } else { playing = false; paint(); idle() } }
   // ONE SENTENCE ON SCREEN AT A TIME, like a film's subtitles. A scene's
   // sentences share its one voice: each plays its own stretch of it (from →
@@ -358,12 +431,14 @@ const SCRIPT = `
       if (v.paused) v.play().catch(() => {})
     }
     const hold = () => { timer = setTimeout(next, readTime(s.say)) }
-    if (!(voiceOn && s.voice)) { if (audio) { audio.onended = audio.onerror = null; audio.pause(); audio = null } hold(); return }
+    if (!(voiceOn && s.voice)) { if (audio) { drop(audio); audio = null } hold(); return }
     let a = audio
-    if (!a || a.dataset.src !== s.voice) {
-      if (a) { a.onended = a.onerror = null; a.pause() }
-      a = new Audio(s.voice); a.dataset.src = s.voice; audio = a
+    if (!a || a.dataset.src !== keyOf(s)) {
+      if (a) drop(a)
+      a = take(s); audio = a
     }
+    const coming = after(at)
+    if (coming) ready(coming)
     a.onended = () => { if (audio === a) { audio = null; timer = setTimeout(next, 800) } }
     a.onerror = () => { if (audio === a) { audio = null; hold() } }
     const from = s.from ?? 0
@@ -397,6 +472,16 @@ const SCRIPT = `
   el.addEventListener('focusin', (e) => { if (e.target instanceof HTMLInputElement && playing) play(false) })
   show(returning ? resumeAt : 0)
   el.classList.add('in')
+  // The first voice, once the scene is on screen and the page is quiet.
+  if (voiced && !saving && 'IntersectionObserver' in window) {
+    const seen = new IntersectionObserver((es) => {
+      if (!es.some(e => e.isIntersecting)) return
+      seen.disconnect()
+      const idleThen = window.requestIdleCallback || ((f) => setTimeout(f, 300))
+      idleThen(() => { if (gone() || started) return; const s = steps[at].voice ? steps[at] : after(at); if (s) ready(s) }, { timeout: 1500 })
+    })
+    seen.observe(el)
+  }
   if (!voiced && !still && !returning) setTimeout(() => { if (!gone() && !started) play(true) }, 900)
   else idle()
   // The arrows and space step the scene while the page is on screen; once
@@ -459,7 +544,7 @@ const crumbsHtml = (route) => `
 
 const sceneHtml = (sc) => {
   const voiced = sc.steps.some(s => s.voice)
-  const steps = sc.steps.map(s => ({ say: s.say, voice: s.voice || null, from: s.from ?? null, to: s.to ?? null, lit: s.lit ?? null, beside: !!s.beside }))
+  const steps = sc.steps.map(s => ({ say: s.say, voice: s.voice || null, ...(s.parts ? { parts: s.parts } : {}), from: s.from ?? null, to: s.to ?? null, lit: s.lit ?? null, beside: !!s.beside }))
   return `
   <section class="scene" data-part="scene" aria-label="${esc(sc.name || 'The scene')}">
     <div class="eyebrow">${sc.eyebrow}</div>

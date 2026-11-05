@@ -116,6 +116,13 @@ const minutesOf = (steps, media) => {
   return secs ? `${Math.max(1, Math.round(secs / 60))} min` : ''
 }
 
+/** Each voiced step names its voice's parts too (media.cjs): a page that may
+ *  stream plays from the first one, anywhere else from the whole voice. */
+const inParts = (steps, media) => steps.map(s => {
+  const parts = s.voice ? media.partsOf(s.voice) : null
+  return parts ? { ...s, parts } : s
+})
+
 const SCENE_ONLY = ['title', 'lede', 'eyebrow', 'headline', 'sub', 'picture', 'plate', 'beats']
 
 /** A route's one scene: the tour's, or the block's own beats over its plate.
@@ -147,7 +154,7 @@ const sceneFor = (key, block, media) => {
     const unknown = [...new Set(steps.flatMap(st => st.lit || []).filter(id => id !== '*' && !parts.has(id)))]
     if (unknown.length) throw new Error(`${key}: scene ${n}'s lights name ${unknown.join(', ')}, which its figure does not draw`)
     const lights = steps.some(st => Array.isArray(st.lit))
-    return { name: p.name, eyebrow: p.eyebrow, headline: p.headline, figure: p.figure, beside, sub: p.sub, link: p.link, steps, lights, minutes: minutesOf(steps, media) }
+    return { name: p.name, eyebrow: p.eyebrow, headline: p.headline, figure: p.figure, beside, sub: p.sub, link: p.link, steps: inParts(steps, media), lights, minutes: minutesOf(steps, media) }
   }
   for (const k of ['eyebrow', 'headline', 'beats']) if (!has(block, k)) throw new Error(`${key}: a block no scene explains needs its ${k}`)
   const steps = [...block.beats.map(b => ({ say: b.say, voice: tour.voiceOf(b.say, media), lit: b.lit || [] })), ...besideStep]
@@ -159,7 +166,7 @@ const sceneFor = (key, block, media) => {
     beside,
     sub: block.sub ? T.emph(block.sub) : '',
     link: null,
-    steps,
+    steps: inParts(steps, media),
     minutes: minutesOf(steps, media),
   }
 }
