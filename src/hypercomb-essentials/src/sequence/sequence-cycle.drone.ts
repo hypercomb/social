@@ -93,8 +93,14 @@ const RING_ID_PREFIX = 'ring:'
 /** Layouts kept per location: just the current one. */
 const RING_SIZE = 1
 
-/** How long the arrange gate will wait for a targeted pass to settle. */
-const PAINT_SETTLE_TIMEOUT = 3000
+/** How long the arrange gate will wait for the page the participant is on to
+ *  settle before it stops waiting. This is a net for a pass that DIED, not a
+ *  budget for a slow one, so it must outlast every hold the renderer makes on
+ *  purpose before it paints (show-cell.drone.ts): the arrival gate
+ *  (ARRIVAL_GATE_MS 2500) plus the child-name completeness hold and the index
+ *  completeness hold (#RESOLVE_GATE_HOLD_MS 8000 each). At 3000 it fired
+ *  mid-hold on a cold hive and released the gate over the OUTGOING page's tiles. */
+export const PAINT_SETTLE_TIMEOUT = 20000
 
 /** One slot in the cycle: a built-in generator or a saved palette set. */
 type CycleEntry =
@@ -133,12 +139,19 @@ export class SequenceCycleDrone extends Drone {
   // The gate asks two things, each answered by the newest message alone, so
   // the answer is the same whatever order the replayed effects land in:
   //   · is the snapshot a whole set? (its batch was not an intermediate one)
-  //   · is it of the page being painted? (the newest targeted location)
+  //   · is it of the page the participant is ON? (the live lineage)
   // A re-render of the SAME page — the arrange's own commit, an image, a
   // decoration — must not close it: the tiles on screen are still the whole
   // set. Gating on "newest targeted pass has painted" did close it there, and
   // since some passes end without publishing a final snapshot, arranging went
   // dead after the first press.
+  // "The page" is the lineage, never the newest TARGET. A target is where a
+  // pass was aimed, and a pass can be left behind: the participant steps into
+  // B and back to A before B paints, B's pass is abandoned, and A — already on
+  // screen, unchanged — is skipped by the renderer's unchanged-page fast path,
+  // which publishes neither a target nor a snapshot. The newest target then
+  // names a page nobody is on, and a gate keyed to it stayed shut on a fully
+  // painted page until the watchdog fired.
   #snapshotLocation: string | null = null
   #snapshotWhole = false
   #snapshotPass = 0
@@ -156,8 +169,9 @@ export class SequenceCycleDrone extends Drone {
     if (this.#effectsRegistered) return
     this.#effectsRegistered = true
 
-    // A pass has been targeted. Only a DIFFERENT page means the tiles are
-    // still coming into view.
+    // A pass has been targeted. It is remembered for the gate's fallback and
+    // to arm the watchdog; whether the tiles are still coming into view is
+    // decided by the page the participant is on (#tilesComingIntoView).
     this.onEffect<{ locationKey?: string }>('render:tiles-target', (payload) => {
       const wasOpen = !this.#tilesComingIntoView()
       this.#targetLocation = typeof payload?.locationKey === 'string' ? payload.locationKey : null
@@ -190,10 +204,27 @@ export class SequenceCycleDrone extends Drone {
   // ── cycle ───────────────────────────────────────────────────────────
 
   /** True while the snapshot is partial, or is of a page other than the one
-   *  being painted. */
+   *  the participant is on. */
   #tilesComingIntoView = (): boolean =>
-    !this.#snapshotWhole
-    || (this.#targetLocation !== null && this.#targetLocation !== this.#snapshotLocation)
+    !this.#snapshotWhole || !this.#snapshotIsOfThisPage()
+
+  /** The page the participant is on, in the renderer's spelling ('/a/b'), or
+   *  null when the lineage cannot say. */
+  #pageNow = (): string | null => {
+    const segments = this.resolve<LineageLike>('lineage')?.explorerSegments?.()
+    if (!segments) return null
+    return '/' + segments.map((s) => String(s ?? '').trim()).filter(Boolean).join('/')
+  }
+
+  /** Is the snapshot of the page the participant is on? The lineage answers
+   *  when it can; only if either side is unknown does the newest target stand
+   *  in for it. */
+  #snapshotIsOfThisPage = (): boolean => {
+    const here = this.#pageNow()
+    const there = this.#snapshotLocation
+    if (here !== null && there !== null) return sameLocation(here, there)
+    return this.#targetLocation === null || this.#targetLocation === there
+  }
 
   /** Three shapes arrive on this effect and they mean different things:
    *    `settled: true`  — the pass's FINAL batch; every tile is on screen.
@@ -243,9 +274,10 @@ export class SequenceCycleDrone extends Drone {
 
   /** A pass that never publishes a final snapshot must not disable arranging
    *  for the rest of the session — a silently dead command is a worse fault
-   *  than the glitch this gate exists to prevent. A healthy pass settles in
-   *  well under this window, so the timer firing is itself a bug worth seeing
-   *  in the log. */
+   *  than the glitch this gate exists to prevent. The window outlasts every
+   *  hold the renderer makes on purpose (PAINT_SETTLE_TIMEOUT), so the timer
+   *  firing is itself a bug worth seeing in the log. It releases onto the page
+   *  the participant is on, not onto the last target. */
   #armPaintWatchdog = (): void => {
     this.#clearPaintWatchdog()
     this.#paintWatchdog = setTimeout(() => {
@@ -253,7 +285,7 @@ export class SequenceCycleDrone extends Drone {
       if (!this.#tilesComingIntoView()) return
       console.warn('[sequence-cycle] tile pass never settled — releasing the arrange gate')
       this.#snapshotWhole = true
-      this.#snapshotLocation = this.#targetLocation
+      this.#snapshotLocation = this.#pageNow() ?? this.#targetLocation
     }, PAINT_SETTLE_TIMEOUT)
   }
 
@@ -286,7 +318,12 @@ export class SequenceCycleDrone extends Drone {
     // sees the page tear itself apart, and the index writes that follow are
     // computed against that partial set. Refuse until the pass has settled;
     // the reveal is short and the key can simply be pressed again.
-    if (this.#tilesComingIntoView()) return
+    // The gate can close with no event to announce it (the lineage moved and
+    // the pass has not been targeted yet), so a refused press makes sure the
+    // watchdog is armed, and an accepted one disarms it.
+    const closed = this.#tilesComingIntoView()
+    this.#settleGate(!closed)
+    if (closed) return
 
     const axialSvc = this.resolve<AxialServiceLike>('axial')
     if (!axialSvc?.items?.size) return
@@ -583,6 +620,10 @@ const viewportAspect = (): number | undefined => {
   const w = window.innerWidth, h = window.innerHeight
   return w > 0 && h > 0 ? w / h : undefined
 }
+
+/** The same page, whatever slashes either spelling wears. */
+const sameLocation = (a: string, b: string): boolean =>
+  a.replace(/^\/+|\/+$/g, '') === b.replace(/^\/+|\/+$/g, '')
 
 /** Order-independent identity of a layout. */
 const fingerprint = (placement: ReadonlyMap<string, number>): string =>
