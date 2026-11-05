@@ -22,9 +22,17 @@ export const EDGE_MARGIN = 5.2       // icon CENTRES stay this far from the hex 
 
 /** Centre-to-centre between icon rows (tile-overlay's ICON_ROW_PITCH). */
 const ROW_PITCH = 12
-/** Half the height of a raised name's plate, and the air between it and the
- *  icons' top plates — overlay-local units, hex radius 32. */
-const NAME_PLATE_HALF = 6.6
+/** The raised name's em (overlay-local units, hex radius 32) and its plate's
+ *  vertical padding in that em. The name drone sets the label from these, and
+ *  the plate's height below is derived from them, so the label can be resized
+ *  in ONE place and still sit the same air above the icons. It was 8.4 — a
+ *  half-size caption that read louder than the icons it names (Jaime,
+ *  2026-11-04: "bring the size on the label down"). */
+export const RAISED_NAME_EM = 6.6
+export const RAISED_NAME_PAD_EM = 0.28
+/** Half the height of a raised name's plate (one 1-em line plus its padding),
+ *  and the air between it and the icons' top plates — overlay-local units. */
+const NAME_PLATE_HALF = RAISED_NAME_EM * (1 + RAISED_NAME_PAD_EM * 2) / 2
 const NAME_PLATE_GAP = 1.6
 
 /** Where the hovered tile's NAME rides: just above the top icon row (the icon

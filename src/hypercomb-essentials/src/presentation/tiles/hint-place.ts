@@ -48,14 +48,6 @@ export function otherHintPlace(place: HintPlace): HintPlace {
   return place === 'tile' ? 'top' : 'tile'
 }
 
-/** What the label carries while an icon is under the pointer: the icon's name,
- *  then what it does. */
-export function hintWords(say: Pick<HintSay, 'title' | 'text'>): string {
-  const title = String(say.title ?? '').trim()
-  const text = String(say.text ?? '').trim()
-  return title && text ? `${title} — ${text}` : title || text
-}
-
 type StoreLike = {
   getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
   getPoolDoc?: (pool: FileSystemDirectoryHandle) => Promise<ArrayBuffer | null>

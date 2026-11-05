@@ -41,8 +41,8 @@ import { DEFAULT_HEX_GEOMETRY, type HexGeometry } from '../grid/hex-geometry.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import { TILE_STACK_DEPTHS, type TileStackDepths } from './tile-stack.js'
 import { BLOOM, BLOOM_EASE_CSS, BLOOM_TOTAL_MS, bloomDelayMs, flowerRingKey, flowerSlots, pouredInHoney } from './flower-motion.js'
-import { raisedNameY } from './tile-action-icons.js'
-import { HINT_SAY, hintWords, type HintSay } from './hint-place.js'
+import { RAISED_NAME_EM, RAISED_NAME_PAD_EM, raisedNameY } from './tile-action-icons.js'
+import { HINT_SAY, type HintSay } from './hint-place.js'
 
 type Axial = { q: number; r: number }
 type CellCountPayload = { count: number; labels: string[]; coords: Axial[] }
@@ -106,20 +106,59 @@ const NAME_TRACKING = 0.04
 const MAX_WIDTH_R = 1.55
 /** The hex radius the overlay's local units are measured at. */
 const OVERLAY_R = 32
-/** Em of a raised name, in world px at the overlay's radius: about half the old
- *  top-of-screen caption (1.6rem), which was ~0.55 of a tile's radius — so this
- *  reads as a real label, not a smaller tile name. */
-const RAISED_EM = 8.4
+/** Em of a raised name, in world px at the overlay's radius. It lives with the
+ *  icons it rides above (tile-action-icons.ts), which derive the plate's height
+ *  from it — so the label is resized there, in one place, and keeps its air. */
+const RAISED_EM = RAISED_NAME_EM
 /** …and it may run wider than the tile: it bleeds past the border. */
 const RAISED_MAX_WIDTH_R = 3.4
 /** THE ICON HINT, said in this same label while an icon is under the pointer
- *  (hint-place.ts): a sentence, not a name, so it WRAPS inside this wider bound
- *  and grows UP from the plate's bottom edge — the icons below it never lose
- *  their row. */
-const HINT_MAX_WIDTH_R = 6
-/** Half a raised plate's height in layout px (one 1-em line + .28em padding
- *  above and below): the bottom edge a hint is anchored to. */
-const RAISED_PLATE_HALF_PX = ((1 + 0.28 * 2) / 2) * 40
+ *  (hint-place.ts): a sentence, not a name, so it WRAPS inside this bound and
+ *  grows UP from the plate's bottom edge — the icons below it never lose their
+ *  row. Just over the label's own bound: a compact block about two tiles wide,
+ *  not a strip across the neighbours. */
+const HINT_MAX_WIDTH_R = 3.8
+/** …and it is set at ITS OWN size, never the label's. The label is a name — a
+ *  word or two at RAISED_EM; the hint is a title and a sentence, several times
+ *  the text, so at the label's size it grew into a block bigger than the tile it
+ *  explains (Jaime, 2026-11-04: "way too big … has to be separate size from the
+ *  label only because there is more text"). Smaller than the label and under a
+ *  resting name; tune it here without touching the label. */
+const HINT_EM = 4.8
+/** Half a raised plate's height in layout px (one 1-em line + its padding above
+ *  and below): the bottom edge a hint is anchored to. It is measured at the
+ *  LABEL's size (RAISED_EM) — a hint set smaller re-expresses it in its own
+ *  layout px (see `#placement`) so the bottom edge stays put. */
+const RAISED_PLATE_HALF_PX = ((1 + RAISED_NAME_PAD_EM * 2) / 2) * LAYOUT_PX
+/** THE PLATE, in world px at the overlay's radius: the icon plates' own corner
+ *  cut and hairline (hex-icon-button.ts — CHAMFER 1.5; the line a touch over
+ *  their 0.4 so it survives the label's lighter fill). Set in world px and
+ *  turned into each span's own em below, the label and the hint wear exactly
+ *  the icons' cut at any size, instead of an em-scaled cut that came out twice
+ *  as heavy as the keys it claims to match. */
+const PLATE_CUT = 1.5
+const PLATE_LINE = 0.5
+/** A world length in the em of a span set at `size` world px. */
+const plateEm = (world: number, size: number): string => `${(world / size).toFixed(3)}em`
+/** The plate's outline: top-left and bottom-right corners cut, as the icons'. */
+const platePath = (size: number): string => {
+  const c = plateEm(PLATE_CUT, size)
+  return `polygon(${c} 0,100% 0,100% calc(100% - ${c}),calc(100% - ${c}) 100%,0 100%,0 ${c})`
+}
+/** The plate's hairline as a RING: the outline, then the same outline inset by
+ *  the line, cut out by even-odd. A clip-path on the plate itself cut its inset
+ *  hairline off along the two diagonals and swallowed its drop shadow whole —
+ *  a ring drawn on its own layer keeps the line unbroken all the way round. The
+ *  inner cut sits (√2 − 1)·line further along each edge, so the diagonal line
+ *  is as thick as the straight ones. */
+const plateRing = (size: number): string => {
+  const c = plateEm(PLATE_CUT, size)
+  const h = plateEm(PLATE_LINE, size)
+  const ci = plateEm(PLATE_CUT + PLATE_LINE * (Math.SQRT2 - 1), size)
+  return `polygon(evenodd,${c} 0,100% 0,100% calc(100% - ${c}),calc(100% - ${c}) 100%,0 100%,0 ${c},${c} 0,`
+    + `${ci} ${h},calc(100% - ${h}) ${h},calc(100% - ${h}) calc(100% - ${ci}),calc(100% - ${ci}) calc(100% - ${h}),`
+    + `${h} calc(100% - ${h}),${h} ${ci},${ci} ${h})`
+}
 /** Runs after Pixi's own render (UPDATE_PRIORITY.LOW = −25) so the transform
  *  read is the one that was just drawn, never a frame behind. */
 const TICK_PRIORITY = -26
@@ -186,14 +225,27 @@ const STYLE = `
   font-family:var(--hc-tile-name-font,${FONT_STACK});font-weight:var(--hc-tile-name-weight,${NAME_WEIGHT});
   font-size:${LAYOUT_PX}px;letter-spacing:${NAME_TRACKING}em;color:var(--hc-tile-name-color,#fff)}
 .hc-tile-names-world>span[hidden]{display:none}
-/* The raised name wears the icons' plate (hex-icon-button.ts): dark fill, pale-blue hairline, two chamfered corners (top-left, bottom-right). */
-.hc-tile-names-world>span.hc-raised{padding:.28em .6em;box-sizing:border-box;letter-spacing:.08em;color:#fff;
-  background:rgba(12,12,26,.78);box-shadow:inset 0 0 0 .1em rgba(126,182,214,.45),0 .15em .5em rgba(0,0,0,.35);
-  clip-path:polygon(.45em 0,100% 0,100% calc(100% - .45em),calc(100% - .45em) 100%,0 100%,0 .45em)}
+/* The raised name wears the icons' plate (hex-icon-button.ts): dark fill, pale-blue hairline, two corners cut (top-left, bottom-right).
+   Fill and hairline are two layers under the words (the span's transform makes it their stacking context), and the soft shadow is a
+   filter on the span, so it follows the cut shape instead of being clipped away with it. */
+.hc-tile-names-world>span.hc-raised{padding:${RAISED_NAME_PAD_EM}em .62em;box-sizing:border-box;letter-spacing:.05em;color:#eef2f7;
+  filter:drop-shadow(0 .06em .2em rgba(0,0,0,.5))}
+.hc-tile-names-world>span.hc-raised::before,.hc-tile-names-world>span.hc-raised::after{content:'';position:absolute;inset:0;z-index:-1;pointer-events:none}
+.hc-tile-names-world>span.hc-raised::before{background:rgba(12,12,26,.84);clip-path:${platePath(RAISED_EM)}}
+.hc-tile-names-world>span.hc-raised::after{background:rgba(126,182,214,.5);clip-path:${plateRing(RAISED_EM)}}
 .hc-tile-name-text{min-width:0;overflow:hidden;text-overflow:ellipsis}
-/* The icon hint in the raised label: a sentence, so it wraps (its width is bounded inline) and reads as written, never uppercased. */
-.hc-tile-names .hc-tile-names-world>span.hc-raised.hc-hint{width:max-content;white-space:normal;text-align:center;line-height:1.2;letter-spacing:.04em;text-transform:none}
+/* The icon hint in the raised label: a TITLE, then what it does — two tiers, read left to right like any tooltip. The sentence wraps
+   (its width is bounded inline), reads as written (never uppercased), and sits on a slightly denser fill because it carries more words.
+   The plate's cut and line are re-expressed in the hint's own em, so it wears the same cut as the label and the icons. */
+.hc-tile-names .hc-tile-names-world>span.hc-raised.hc-hint{width:max-content;white-space:normal;text-align:left;line-height:1.3;letter-spacing:.02em;text-transform:none;padding:.42em .72em .48em}
+.hc-tile-names .hc-tile-names-world>span.hc-raised.hc-hint::before{background:rgba(12,12,26,.9);clip-path:${platePath(HINT_EM)}}
+.hc-tile-names .hc-tile-names-world>span.hc-raised.hc-hint::after{clip-path:${plateRing(HINT_EM)}}
 .hc-tile-names .hc-tile-names-world>span.hc-raised.hc-hint .hc-tile-name-text{overflow:visible;text-overflow:clip}
+/* The catalogs keep icon labels lowercase ("to the shelf"); as a heading it is sentence-cased here, in the face, never in the words.
+   The sentence never leaves one word alone on its last line. */
+.hc-hint-title{display:block;color:#fff;font-weight:600}
+.hc-hint-title::first-letter{text-transform:uppercase}
+.hc-hint-text{display:block;margin-top:.18em;color:rgba(214,224,238,.76);text-wrap:pretty}
 .hc-tile-name-holders{flex:none;margin-left:.45em;font-size:.5em;letter-spacing:0;color:var(--hc-tile-name-holders-color,${HOLDERS_INK})}
 .hc-tile-name-holders[hidden]{display:none}
 .hc-tile-names.hc-big-head .hc-tile-names-world>span{letter-spacing:${BIG_HEAD_TRACKING}em;text-transform:uppercase}
@@ -269,8 +321,9 @@ export class TileNameDrone extends Drone {
   #diving = false
   #hovered: string | null = null
   /** The words an icon under the pointer says, for the tile they belong to
-   *  (hint:say). That tile's raised label carries them in place of its name. */
-  #hint: { label: string; words: string } | null = null
+   *  (hint:say): its title, and what it does (may be empty). That tile's raised
+   *  label carries them in place of its name. */
+  #hint: { label: string; title: string; text: string } | null = null
   #bigHead =(() => { try { return localStorage.getItem(BIG_HEAD_KEY) === '1' } catch { return false } })()
   #band: BandRowsPayload = { rows: 1, label: null }
   #last = [NaN, NaN, NaN, NaN, NaN, NaN]
@@ -338,8 +391,12 @@ export class TileNameDrone extends Drone {
     // and no others. An empty `label` takes the words down.
     this.onEffect<HintSay | undefined>(HINT_SAY, (p) => {
       const previous = this.#hint?.label ?? null
-      const words = p?.label ? hintWords(p) : ''
-      this.#hint = p?.label && words ? { label: p.label, words } : null
+      // A description with no title is said as the title: one tier, never an
+      // empty heading over a sentence.
+      const said = String(p?.title ?? '').trim()
+      const more = String(p?.text ?? '').trim()
+      const title = said || more
+      this.#hint = p?.label && title ? { label: p.label, title, text: said ? more : '' } : null
       this.#placeOne(previous)
       this.#placeOne(this.#hint?.label ?? null)
     })
@@ -720,9 +777,26 @@ export class TileNameDrone extends Drone {
     // same raised label says what that icon does in place of the name, and the
     // name is back the moment the pointer leaves it (hint-place.ts). Only a
     // raised label carries it: the words belong to the icons it sits above.
-    const hint = raised && this.#hint?.label === label ? this.#hint.words : null
-    const text = hint ?? sc?.displayNameFor(label) ?? label
-    if (name.textContent !== text) name.textContent = text
+    // Two tiers — the icon's title, then what it does — as two text nodes, never
+    // markup: the words may come from a community translation.
+    const hint = raised && this.#hint?.label === label ? this.#hint : null
+    if (hint) {
+      const title = name.children[0] as HTMLElement | undefined
+      const more = name.children[1] as HTMLElement | undefined
+      if (title?.className !== 'hc-hint-title' || title.textContent !== hint.title
+        || (more?.textContent ?? '') !== hint.text) {
+        const head = document.createElement('span')
+        head.className = 'hc-hint-title'
+        head.textContent = hint.title
+        const body = document.createElement('span')
+        body.className = 'hc-hint-text'
+        body.textContent = hint.text
+        name.replaceChildren(...(hint.text ? [head, body] : [head]))
+      }
+    } else {
+      const text = sc?.displayNameFor(label) ?? label
+      if (name.firstElementChild || name.textContent !== text) name.textContent = text
+    }
 
     // THE HOLDER COUNT — how many participants hold their own version of this
     // tile, you included. Under the pointer only, on one name only, small and
@@ -750,7 +824,7 @@ export class TileNameDrone extends Drone {
     if (span.classList.contains('hc-hint') !== !!hint) span.classList.toggle('hc-hint', !!hint)
     const y = px.y + this.#meshOffset.y + (iconRows > 0 ? raisedNameY(iconRows) * R / OVERLAY_R : 0)
     const { maxWidth, transform } = hint
-      ? this.#placement(x, y, RAISED_EM, HINT_MAX_WIDTH_R, this.#pivot, 'up')
+      ? this.#placement(x, y, HINT_EM, HINT_MAX_WIDTH_R, this.#pivot, 'up')
       : raised
         ? this.#placement(x, y, RAISED_EM, RAISED_MAX_WIDTH_R)
         : this.#placement(x, y)
@@ -789,8 +863,11 @@ export class TileNameDrone extends Drone {
     // the world bound divided back through the scale the span is drawn at.
     const maxWidth = `${(widthR * R) / scale}px`
     const rotate = pivot ? ' rotate(90deg)' : ''
+    // The 'up' anchor is the bottom edge of a one-line plate at the LABEL's
+    // size, in this span's own layout px: scaling by RAISED_EM / em keeps that
+    // edge in the same world place when the words are set smaller than the label.
     const anchor = grow === 'up'
-      ? `translate(0,${RAISED_PLATE_HALF_PX}px) translate(-50%,-100%)`
+      ? `translate(0,${RAISED_PLATE_HALF_PX * (RAISED_EM / em)}px) translate(-50%,-100%)`
       : 'translate(-50%,-50%)'
     const transform = `translate(${x}px,${y}px)${rotate} scale(${scale}) ${anchor}`
     return { maxWidth, transform }

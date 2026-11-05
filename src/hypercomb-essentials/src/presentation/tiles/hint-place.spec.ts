@@ -1,7 +1,7 @@
 // hint-place.spec.ts — where an icon's explanation is said, and how the choice is kept.
 
 import { afterEach, describe, expect, it } from 'vitest'
-import { DEFAULT_HINT_PLACE, hintPlaceOf, hintWords, keepHintPlace, otherHintPlace, recallHintPlace } from './hint-place.js'
+import { DEFAULT_HINT_PLACE, hintPlaceOf, keepHintPlace, otherHintPlace, recallHintPlace } from './hint-place.js'
 
 type Holder = { bytes: ArrayBuffer | null }
 
@@ -46,17 +46,6 @@ describe('the words that name a place', () => {
   it('a bare word flips to the other way', () => {
     expect(otherHintPlace('tile')).toBe('top')
     expect(otherHintPlace('top')).toBe('tile')
-  })
-})
-
-describe('what the label carries', () => {
-  it('the icon\'s name, then what it does', () => {
-    expect(hintWords({ title: 'Copy', text: 'Copies the tile' })).toBe('Copy — Copies the tile')
-  })
-  it('whichever of the two there is, when only one is', () => {
-    expect(hintWords({ title: 'Copy' })).toBe('Copy')
-    expect(hintWords({ title: ' ', text: 'Copies the tile' })).toBe('Copies the tile')
-    expect(hintWords({})).toBe('')
   })
 })
 
