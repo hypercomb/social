@@ -191,7 +191,17 @@ Publish act, never in the background, so a picture is public only because its
 publisher published it. Keyed by the name's signature, not the name, so the
 index carries no free text and the pool address is the molecule address with
 a colon in front. Without a host, the images wall shows only what the live
-swarm is showing. **Built 2026-11-04:** the record is the tile's own published
+swarm is showing.
+
+**One picture per name, per publisher, per host — your best (jwize
+2026-11-04: "we also don't want multiple images per host. That defeats the
+point of only sharing your best").** The entry is one key naming one layer,
+and a publisher's devices share one index under their anchor key, so a
+publish replaces the picture that host offered for the name; it never adds a
+second. Never turn the entry into a list. A publisher who wants a different
+picture seen elsewhere publishes it to a different host.
+
+**Built 2026-11-04:** the record is the tile's own published
 layer (already in the closure on the host), so no new format exists. Publish
 adds one entry per pictured tile of the branch in its one signed index write,
 nearest the branch root first, at most 64 (`sharing/picture-pools.ts`,
