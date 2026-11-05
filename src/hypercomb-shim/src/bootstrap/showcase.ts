@@ -642,15 +642,20 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   search.setAttribute('aria-label', 'Search hives, creations and domains')
   search.autocomplete = 'off'
   search.spellcheck = false
-  // THE PHONE'S ONE INPUT (jwize 2026-11-04: "get rid of the bottom input and follow button … you just have a header search
-  // and dynamic button go / follow"): on a phone the follow bar at the foot is gone and this button, beside the search,
-  // says Follow when the line is a domain nobody follows yet and Go otherwise. Drawn everywhere, shown by the phone's CSS.
-  const searchGo = el('button', 'search-go')
-  searchGo.type = 'button'
-  searchGo.dataset.act = 'go'
-  searchGo.textContent = 'Go'
+  // THE ONE INPUT (jwize 2026-11-04: "get rid of the bottom input and follow button … you just have a header search";
+  // 2026-11-05: "when the domain is a valid domain make the link say add domain and otherwise make it filter … a link to
+  // the right instead of a button to not interfere with the interface … change from follow to add domain" · "so the bottom
+  // input is no longer needed"): the search filters, and while its line is a domain nobody follows yet a quiet link at the
+  // right end of the field offers to add it. There is no follow box at the foot, on any screen.
+  const searchAdd = el('button', 'search-add')
+  searchAdd.type = 'button'
+  searchAdd.textContent = 'Add domain'
+  searchAdd.hidden = true
   search.enterKeyHint = 'go'
-  searchBox.append(iconOf('search'), search, searchGo)
+  // The field and its link are one box, so the link sits inside the field's right end and takes no room beside it.
+  const searchField = el('span', 'search-field')
+  searchField.append(search, searchAdd)
+  searchBox.append(iconOf('search'), searchField)
   // Manage opens the management screen: the domains you follow as rows, their tiles grayed until you turn them on,
   // and the follow box. Pressing it again returns to the showcase. Escape in the search clears what was typed.
   let managing = false
@@ -1472,31 +1477,16 @@ ${entry.key}`
   }
   const peerSites = new Map<string, readonly LedgerSite[]>()
   const peerAsked = new Set<string>()
-  const followBar = el('form', 'follow')
+  // What adding or removing a domain said last — the input that once sat beside it is gone (the search adds now).
   const followNote = el('p', 'follow-note')
   followNote.setAttribute('role', 'status')
-  const followField = el('div', 'follow-field')
-  const followInput = el('input')
-  followInput.type = 'text'
-  followInput.placeholder = 'Follow a domain'
-  followInput.setAttribute('aria-label', 'Follow a domain')
-  followInput.autocomplete = 'off'
-  followInput.spellcheck = false
-  followInput.autocapitalize = 'none'
-  followInput.inputMode = 'url'
-  const followGo = el('button')
-  followGo.type = 'submit'
-  followGo.textContent = 'Follow'
-  followField.append(iconOf('globe'), followInput, followGo)
-  followBar.append(followNote, followField)
-  followBar.hidden = !options.follow
   // THE COMMUNITIES (jwize 2026-10-25: "swiping between your communities"): the
   // pages after All. A tab strip names them and a sideways swipe on the list
   // turns them; the accordion beneath stays the master list.
   const pager = el('div', 'pager')
   pager.setAttribute('aria-label', 'Communities')
   pager.hidden = true
-  bandsHost.append(ownerNote, pager, hosted, nothing, followBar)
+  bandsHost.append(ownerNote, pager, hosted, nothing, followNote)
   /** The shape asked for on the address (`?view=launcher`), or none. */
   const viewAsked: ShowcaseView | undefined = (() => {
     try { return parseView(new URLSearchParams(location.search).get('view')) } catch { return undefined }
@@ -1820,9 +1810,8 @@ ${entry.key}`
     if (pager.hidden) hosted.removeAttribute('aria-labelledby')
     else hosted.setAttribute('aria-labelledby', label.id)
   }
-  /** The domain the search offers to follow now, or ''. */
-  /** What the follow box was last filled with from the search, so only that is ever taken back. */
-  let autoFilled = ''
+  /** The domain the search offers to add now, or ''. */
+  let offered = ''
 
   function paint(): void {
     const terms = searchTerms(search.value)
@@ -1905,23 +1894,16 @@ ${entry.key}`
     // WHEN THE OPEN ROW IS COLLAPSED, EVERY ROW SITS AT THE TOP (jwize 2026-10-26: "if you collapse the row showing data they should
     // all collapse to the top"): with nothing open there is no row to take the free height, so the rows stack from the top.
     hosted.classList.toggle('none-open', managing && !rowZones.includes(openRow))
-    // The follow box stays at the foot, always (jwize 2026-10-25: "just show the input and follow at the bottom all the time").
-    followBar.hidden = !options.follow
     hosted.classList.toggle('swipeable', (managing || communities.length > 0) && !terms.length)
     // A domain being checked or not found is a row on the page: the search that named it has not matched nothing.
     nothing.hidden = !terms.length || visible > 0 || pending.size > 0
-    // THE SEARCH IS ONLY FOR SEARCH; the follow box at the foot may suggest what was typed in the search when that
-    // is a valid domain nobody follows yet (jwize 2026-10-25: "the follow can suggest the search if it is a
-    // valid domain"). What the person typed in the follow box themselves is never replaced.
+    // THE SEARCH FILTERS; while its line is a valid domain nobody follows yet, the link at its right end offers to add it.
+    // The link is never rebuilt, only shown or hidden, so a press that began on it still lands.
     const candidate = followCandidate(search.value)
-    const suggested = options.follow && candidate && !held.includes(candidate) && !within(candidate, options.self) ? candidate : ''
-    // The phone's button beside the search: Follow while the line is a domain to follow, Go otherwise. Only its words
-    // change — the button itself is never rebuilt, so a press that began on it still lands.
-    const act = suggested ? 'follow' : 'go'
-    if (searchGo.dataset.act !== act) { searchGo.dataset.act = act; searchGo.textContent = act === 'follow' ? 'Follow' : 'Go' }
-    if (suggested) {
-      if (!followInput.value.trim() || followInput.value === autoFilled) { followInput.value = suggested; autoFilled = suggested }
-    } else if (autoFilled && followInput.value === autoFilled) { followInput.value = ''; autoFilled = '' }
+    offered = options.follow && candidate && !held.includes(candidate) && !within(candidate, options.self) ? candidate : ''
+    searchAdd.hidden = !offered
+    searchAdd.title = offered ? `Add ${offered}` : ''
+    searchBox.classList.toggle('offers', !!offered)
     const hives = everything.filter(entry => entry.kind === 'hive')
     const creations = everything.length - hives.length
     stats.replaceChildren()
@@ -1934,12 +1916,12 @@ ${entry.key}`
     }
   }
 
-  /** Follow a domain: asked of the host that keeps the list, then drawn as a row, open. */
+  /** Add a domain: asked of the host that keeps the list, then drawn as a row, open. */
   let following = false
   const follow = async (raw: string): Promise<void> => {
     if (!options.follow || following) return
     following = true
-    followGo.disabled = true
+    searchAdd.disabled = true
     followNote.textContent = 'Checking…'
     // The row appears NOW, before the host has been asked, so the person sees what is being looked for.
     const asked = followCandidate(raw)
@@ -1951,8 +1933,8 @@ ${entry.key}`
       if (!managing) setManaging(true)
       else paint()
     }
-    const result = await options.follow(raw).catch(() => ({ ok: false as const, reason: 'Could not follow it.' }))
-    followGo.disabled = false
+    const result = await options.follow(raw).catch(() => ({ ok: false as const, reason: 'Could not add it.' }))
+    searchAdd.disabled = false
     following = false
     if (!result.ok) {
       followNote.textContent = result.reason
@@ -1962,24 +1944,21 @@ ${entry.key}`
     if (asked) pending.delete(asked)
     pending.delete(result.zone)
     if (!held.includes(result.zone)) held.push(result.zone)
-    if (followCandidate(followInput.value) === result.zone || !followInput.value.trim()) followInput.value = ''
-    autoFilled = ''
-    followNote.textContent = `Following ${result.zone}.`
+    followNote.textContent = `Added ${result.zone}.`
     openRow = result.zone
-    // A domain just followed is looked at in the filter: Manage turns on to show it.
+    // A domain just added is looked at in the filter: Manage turns on to show it.
     if (!managing) setManaging(true)
     else paint()
     rowViews.get(result.zone)?.section.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
   }
-  followBar.addEventListener('submit', event => { event.preventDefault(); void follow(followInput.value) })
 
-  /** The phone's button beside the search. Follow takes the domain the line names; Go settles the search: a domain you
-   *  already follow opens as its row, and the keyboard goes so the results can be seen. */
+  /** The search's act. While it offers a domain, adding it; otherwise settling the search: a domain you already follow
+   *  opens as its row, and the keyboard goes so the results can be seen. */
   const goOrFollow = async (): Promise<void> => {
     const asked = followCandidate(search.value)
-    if (searchGo.dataset.act === 'follow') {
+    if (offered) {
       await follow(search.value)
-      // Followed: the line did its job. A miss keeps the line, so a typo can be mended and asked again.
+      // Added: the line did its job. A miss keeps the line, so a typo can be mended and asked again.
       if (asked && held.includes(asked) && followCandidate(search.value) === asked) { search.value = ''; paint() }
       return
     }
@@ -1992,11 +1971,12 @@ ${entry.key}`
     }
     search.blur()
   }
-  searchGo.addEventListener('click', () => { void goOrFollow() })
-  // The keyboard's own Go key does the same on a phone. On a wide screen the search is only for searching.
+  searchAdd.addEventListener('click', () => { void goOrFollow() })
+  // Enter does what the link does while a domain is offered, on any screen. Otherwise the keyboard's own Go key settles the
+  // search on a phone, and on a wide screen the search is only for searching.
   const narrow = (): boolean => { try { return matchMedia('(max-width: 720px)').matches } catch { return false } }
   search.addEventListener('keydown', event => {
-    if (event.key !== 'Enter' || !narrow()) return
+    if (event.key !== 'Enter' || (!offered && !narrow())) return
     event.preventDefault()
     void goOrFollow()
   })
@@ -2105,6 +2085,16 @@ export const SHOWCASE_STYLE = `
   background: var(--md-surface-c-lowest);
   border: 1px solid color-mix(in srgb, var(--md-primary) 32%, var(--md-outline-variant));
 }
+/* ADD DOMAIN: a quiet link inside the field's right end, shown only while the line is a domain nobody follows yet */
+.search-field { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; }
+.search.offers input { padding-right: 7.4rem; }
+.search-add { position: absolute; right: .4rem; top: 50%; transform: translateY(-50%); margin: 0; padding: .35rem .55rem;
+  border: 0; border-radius: var(--hc-radius-control, 2px); background: none; color: var(--md-primary); cursor: pointer;
+  font: 600 .92rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); white-space: nowrap; }
+.search-add[hidden] { display: none; }
+.search-add:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 3px; }
+.search-add:disabled { opacity: .6; cursor: default; }
+.search-add:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 1px; }
 /* the options sit beside the search, at the top: Files (while managing) and Manage */
 .page-tools { flex: none; display: flex; align-items: center; gap: .45rem; margin-left: .5rem; }
 .page-tools button[hidden] { display: none; }
@@ -2168,7 +2158,7 @@ export const SHOWCASE_STYLE = `
 .hosted { position: relative; margin: 0 0 clamp(2rem, 5vh, 3rem); }
 .band-meta { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem;
   font: 500 .66rem/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--md-on-surface-faint); }
-.hosted-empty[hidden], .dex-row[hidden], .hosted-nothing[hidden], .follow-suggest[hidden], .follow[hidden], .follow-note:empty { display: none; }
+.hosted-empty[hidden], .dex-row[hidden], .hosted-nothing[hidden], .follow-suggest[hidden], .follow-note:empty { display: none; }
 /* the communities: a strip of names after All; the list beneath turns with a swipe */
 .pager { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem .75rem; margin: 0 0 .5rem; padding: .3rem 0; }
 .pager[hidden] { display: none; }
@@ -2299,14 +2289,11 @@ a.hex { color: inherit; text-decoration: none; cursor: pointer; }
 .hex-link:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 3px; }
 /* following a domain: a search that found nothing offers it, and the foot always can */
 .follow-suggest { display: flex; margin: 0 0 1.2rem; }
-.follow-suggest button, .follow-field button { flex: none; padding: .68rem 1.1rem; border: 0; border-radius: var(--hc-radius-control, 2px);
+.follow-suggest button { flex: none; padding: .68rem 1.1rem; border: 0; border-radius: var(--hc-radius-control, 2px);
   background: var(--md-primary); color: var(--md-on-primary); font: 600 .92rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); cursor: pointer; }
-.follow-suggest button:hover:not(:disabled), .follow-field button:hover:not(:disabled) { filter: brightness(1.08); }
-.follow-suggest button:disabled, .follow-field button:disabled { opacity: .6; cursor: default; }
-.follow-suggest button:focus-visible, .follow-field button:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
-.follow { display: grid; grid-template-columns: minmax(0, 1fr); gap: .45rem; margin: auto 0 0; padding: .55rem 0;
-  position: sticky; bottom: calc(3.85rem + env(safe-area-inset-bottom)); z-index: 25;
-  background: color-mix(in srgb, var(--md-surface-c-low) 90%, transparent); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.follow-suggest button:hover:not(:disabled) { filter: brightness(1.08); }
+.follow-suggest button:disabled { opacity: .6; cursor: default; }
+.follow-suggest button:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
 /* ANCHORED TO THE BOTTOM (jwize 2026-10-26: "anchor the input and follow to the bottom and expand the div fit to content, aside
    from the same gutter as the top input and the div"): the panel is at least the screen tall and the follow bar is pushed to
    its foot, so a short list leaves the bar at the bottom of the screen and a long one carries it along; the card above
@@ -2319,14 +2306,7 @@ a.hex { color: inherit; text-decoration: none; cursor: pointer; }
    the follow bar, so the dark surface runs unbroken from one to the other and the tiles sit at its top. */
 .bands > .hosted > .dex-row.open { display: flex; flex-direction: column; }
 .bands > .hosted > .dex-row.open > .dex-body { flex: 1 1 auto; }
-.follow-note { margin: 0; color: var(--md-on-surface-var); font-size: .85rem; line-height: 1.4; }
-.follow-field { position: relative; display: flex; align-items: center; gap: .6rem; }
-.follow-field > svg { position: absolute; z-index: 1; left: .95rem; width: 1.1rem; height: 1.1rem; color: var(--md-primary); pointer-events: none; }
-.follow-field input { flex: 1; min-width: 0; padding: .72rem 1rem .72rem 2.7rem; font: 400 1rem/1.3 var(--md-font-ui, Inter, system-ui, sans-serif);
-  color: var(--md-on-surface-strong); border-radius: var(--hc-radius-control, 2px); background: var(--md-surface-c-lowest);
-  border: 1px solid color-mix(in srgb, var(--md-primary) 32%, var(--md-outline-variant)); }
-.follow-field input::placeholder { color: var(--md-on-surface-faint); }
-.follow-field input:focus { outline: 2px solid var(--md-primary); outline-offset: 1px; }
+.follow-note { margin: .6rem 0 0; color: var(--md-on-surface-var); font-size: .85rem; line-height: 1.4; }
 /* the hyperdex: one row per domain, this one first and open */
 .hosted { display: grid; grid-template-columns: minmax(0, 1fr); gap: .5rem; margin: 0 0 clamp(2rem, 5vh, 3rem); }
 .dex-row { min-width: 0; margin: 0; border: 1px solid var(--md-outline-variant); border-radius: var(--hc-radius-card, 3px);
@@ -2432,16 +2412,7 @@ a.version-visit { color: var(--md-primary); }
   .hero-brand { padding: .8rem .5rem .15rem; }
   .search { padding: .55rem .5rem; }
   .search > svg { left: calc(.5rem + .95rem); }
-  /* THE ONE INPUT (jwize 2026-11-04: "get rid of the bottom input and follow button … a header search and dynamic button go /
-     follow"): the follow bar at the foot is gone on a phone. The button beside the search says Follow for a domain nobody
-     follows yet, and Go otherwise. */
-  .follow { display: none; }
-  .search-go { display: block; flex: none; align-self: stretch; margin: 0 0 0 .5rem; padding: 0 1.1rem; min-width: 4.6rem;
-    border: 1px solid var(--md-primary); border-radius: var(--hc-radius-control, 2px); background: transparent; color: var(--md-primary);
-    font: 600 .95rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); cursor: pointer; }
-  .search-go[data-act='follow'] { background: var(--md-primary); color: var(--md-on-primary); }
-  .search-go:disabled { opacity: .6; cursor: default; }
-  .search-go:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+  .follow-note { margin-left: .5rem; margin-right: .5rem; }
   .pager { margin: 0 0 .5rem; padding: .3rem .5rem; }
   .hosted { gap: 0; }
   .dex-row { border-left: 0; border-right: 0; border-radius: 0; margin-top: -1px; }
