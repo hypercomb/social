@@ -55,7 +55,7 @@ import {
 import { beeDocsOf, beeWords, normalizeMeta, readBeeMeta, writeBeeMeta, type BeeDoc, type BeeMeta, type BeeWords } from './bee-meta.js'
 import { codeClass, codeLanguage, codeThemeCss, tokenizeCode, type CodeLanguage, type CodeToken } from './code-theme.js'
 import {
-  PANE_LIMITS, clampPane, crumbTrail, deskRecord, deskRecordText, drillPage, drillRows, finishedLast, isFileKey,
+  PANE_LIMITS, clampPane, crumbTrail, deskRecord, deskRecordText, drillPage, drillRows, finishedLast,
   type DeskMode, type DrillPage, type PaneName,
 } from './host-directory.drill.js'
 import { hostZone } from './community-hosts.js'
@@ -875,12 +875,11 @@ export class HostDirectoryElement extends HTMLElement {
   #panes: Partial<Record<PaneName, number>> = {}
   /** A press or a drag made before the kept record was read wins over it. */
   #touched = false
-  /** SIMPLE: on the hosts list or drilled in; reading the code of the picked files;
-   *  the check boxes on, and what is checked in them. */
+  /** SIMPLE: on the hosts list or drilled in; reading the code of the picked files. */
   #atHosts = true
   #readCode = false
+  /** ADVANCED: SELECT is on — a plain click toggles a row, as a Ctrl/Cmd-click does. */
   #multi = false
-  #chosen: Picked = NOTHING_PICKED
   /** The line the keys last moved to — focused again once the columns are redrawn. */
   #focusKey: string | null = null
   /** Code read by signature (null: asked of the hosts and not found). A signature
@@ -1057,9 +1056,13 @@ export class HostDirectoryElement extends HTMLElement {
     // ONE SWITCH between the two ways to look: the simple drill, and the four panes.
     const modeButton = button('hd-link hd-mode', '')
     modeButton.addEventListener('click', () => this.#setMode(this.#mode === 'simple' ? 'advanced' : 'simple'))
+    // SELECT is the four panes' own: a toggle that makes every click a Ctrl/Cmd-click.
+    const selectButton = button('hd-link hd-select', '')
+    selectButton.setAttribute('aria-pressed', 'false')
+    selectButton.addEventListener('click', () => this.#setMulti(!this.#multi))
     const close = button('hd-close', '×', t('panel.close', 'close'))
     close.addEventListener('click', () => EffectBus.emit('hosts:close', {}))
-    head.append(modeButton, close)
+    head.append(selectButton, modeButton, close)
 
     // THE RAIL: the search, the hosts, and a field to add one. The search and the
     // field are built once — a repaint redraws only the list between them, so a
@@ -1096,7 +1099,7 @@ export class HostDirectoryElement extends HTMLElement {
     frame.append(side, main, drawer, this.#splitter('rail'))
 
     panel.append(head, frame)
-    this.#refs.set('mode', modeButton)
+    this.#refs.set('mode', modeButton).set('select', selectButton)
     this.#refs.set('search', search).set('input', input).set('hosts', hosts).set('side', side).set('railHead', railHead)
       .set('body', main).set('drawer', drawer).set('frame', frame)
     this.appendChild(panel)
@@ -1139,7 +1142,6 @@ export class HostDirectoryElement extends HTMLElement {
     this.#atHosts = true
     this.#readCode = false
     this.#multi = false
-    this.#chosen = NOTHING_PICKED
     this.#touched = false
     this.#published.clear()
     this.#publishedAsk.clear()
@@ -1276,7 +1278,6 @@ export class HostDirectoryElement extends HTMLElement {
     this.#atHosts = true
     this.#readCode = false
     this.#multi = false
-    this.#chosen = NOTHING_PICKED
     this.#at = ''
     this.#query = ''
     this.#view = 'domains'
@@ -1352,8 +1353,8 @@ export class HostDirectoryElement extends HTMLElement {
   #back(): boolean {
     if (this.#describing) { this.#describing = null; this.#renderBody(); return true }
     if (this.#menu !== null) { this.#menu = null; this.#renderBody(); return true }
-    // The check boxes (simple drill) let go first: what was checked is dropped, then the boxes.
-    if (this.#multi) { this.#multi = false; this.#chosen = NOTHING_PICKED; this.#renderBody(); return true }
+    // SELECT (four panes) lets go first: the next click is a plain pick again.
+    if (this.#multi) { this.#setMulti(false); return true }
     if (this.#query) { this.#query = ''; this.#render(); return true }
     if (this.#codeGate) { this.#codeGate = null; this.#renderBody(); return true }
     if (this.#warning) { this.#warning = null; this.#renderBody(); return true }
@@ -1403,6 +1404,14 @@ export class HostDirectoryElement extends HTMLElement {
       mode.title = this.#mode === 'simple'
         ? t('hosts.mode.advanced-tip', 'The four panes: hosts, packages, files and code side by side')
         : t('hosts.mode.simple-tip', 'One list at a time — drill in to the code')
+    }
+    // Select is only in the four panes; the drill picks by going in.
+    const select = this.#refs.get('select')
+    if (select) {
+      select.hidden = this.#mode === 'simple'
+      select.textContent = t('hosts.select', 'Select')
+      select.title = t('hosts.select-tip', 'A click toggles a row in or out of what is picked — as Ctrl/Cmd-click does')
+      select.setAttribute('aria-pressed', String(this.#multi))
     }
     if (input.value !== this.#query) input.value = this.#query
     this.#renderBody()
@@ -1567,7 +1576,7 @@ export class HostDirectoryElement extends HTMLElement {
       const count = make('span', 'hd-count', domain.count ? String(domain.count) : '')
       if (domain.count) count.title = t('hosts.package-count', '{count} packages', { count: domain.count })
       header.append(count)
-      header.addEventListener('click', event => this.#pickHost(domain.zone, pickMode(event), order))
+      header.addEventListener('click', event => this.#pickHost(domain.zone, this.#modeOf(event), order))
       li.append(header)
       list.append(li)
     }
@@ -1985,21 +1994,31 @@ export class HostDirectoryElement extends HTMLElement {
   // It is the same state the four panes read — `#stack`, `#cols`, `#files` — shown
   // one step at a time, so a step in is a pick and a step back is `#back`.
 
-  /** A check box on a row, while Select is on. */
+  /** A check box on a row of the four panes, while Select is on. The drill has none:
+   *  it has no multiple select — that is for the four panes (Ctrl/Cmd-click, or Select). */
   #checkBox(on: boolean): HTMLElement {
     const box = make('span', `hd-check${on ? ' on' : ''}`, on ? '✓' : '')
     box.setAttribute('aria-hidden', 'true')
     return box
   }
 
-  /** A click on a row of the drill: one step in — or, with Select on, check it. */
-  #chooseRow(key: string, kind: 'host' | 'package' | 'file', k: number, order: readonly string[]): void {
-    if (this.#multi) {
-      this.#chosen = pickKey(this.#chosen, key, 'toggle', order)
-      this.#focusKey = key
-      this.#renderBody()
-      return
-    }
+  /** How a click picks in the four panes: the Finder's way (Ctrl/Cmd toggles, Shift
+   *  extends), and with SELECT on a plain click toggles too. */
+  #modeOf(event: MouseEvent): PickMode {
+    const mode = pickMode(event)
+    return this.#multi && mode === 'only' ? 'toggle' : mode
+  }
+
+  /** SELECT, in the four panes: while it is on every click toggles a row in or out of
+   *  what is picked. Ctrl/Cmd-click does the same without it. */
+  #setMulti(on: boolean): void {
+    this.#multi = on
+    this.#refs.get('select')?.setAttribute('aria-pressed', String(on))
+    this.#renderBody()
+  }
+
+  /** A click on a row of the drill: one step in. */
+  #chooseRow(key: string, kind: 'host' | 'package' | 'file', k: number): void {
     this.#stopNice()
     if (kind === 'host') { this.#openHosts([key]); return }
     if (kind === 'package') {
@@ -2027,8 +2046,6 @@ export class HostDirectoryElement extends HTMLElement {
     this.#at = ''
     this.#atHosts = false
     this.#readCode = false
-    this.#multi = false
-    this.#chosen = NOTHING_PICKED
     this.#stopNice()
     this.#render()
   }
@@ -2050,11 +2067,10 @@ export class HostDirectoryElement extends HTMLElement {
     if (page === 'hosts') this.#hostsPage(wrap)
     else if (page === 'packages') this.#packagesPage(wrap, model, files, paths)
     else this.#codePage(wrap, files)
-    this.#selectBar(wrap, page, model)
     body.append(wrap)
   }
 
-  /** Back, the trail of where you are, and the Select switch. */
+  /** Back, and the trail of where you are. */
   #simpleHead(page: DrillPage, model: readonly { picked: Picked }[], files: readonly FileLabel[]): HTMLElement {
     const head = make('div', 'hd-simple-head')
     if (page !== 'hosts') {
@@ -2082,12 +2098,6 @@ export class HostDirectoryElement extends HTMLElement {
       nav.append(make('span', at === trail.length - 1 ? 'hd-trail-now' : 'hd-trail-step', text))
     })
     head.append(nav, make('span', 'hd-grow'))
-    if (page !== 'code') {
-      const select = button('hd-quiet hd-select', t('hosts.select', 'Select'), t('hosts.select-tip', 'Check several rows and open them together'))
-      select.setAttribute('aria-pressed', String(this.#multi))
-      select.addEventListener('click', () => { this.#multi = !this.#multi; this.#chosen = NOTHING_PICKED; this.#renderBody() })
-      head.append(select)
-    }
     return head
   }
 
@@ -2095,19 +2105,15 @@ export class HostDirectoryElement extends HTMLElement {
    *  and the way to add one. */
   #hostsPage(wrap: HTMLElement): void {
     const domains = this.#domains()
-    const order = domains.map(domain => domain.zone)
     const list = make('ul', 'hd-col hd-bigrows hd-hosts-list')
     list.setAttribute('role', 'listbox')
-    list.setAttribute('aria-multiselectable', 'true')
     list.setAttribute('aria-label', t('hosts.rail', 'Hosts you carry'))
     domains.forEach((domain, at) => {
-      const checked = this.#multi && this.#chosen.keys.includes(domain.zone)
-      const li = make('li', `hd-row hd-host-row${checked ? ' picked' : ''}${this.#multi ? ' hd-checking' : ''}`)
+      const li = make('li', 'hd-row hd-host-row')
       li.dataset['key'] = domain.zone
       li.setAttribute('role', 'option')
-      li.setAttribute('aria-selected', String(checked))
+      li.setAttribute('aria-selected', 'false')
       li.tabIndex = at === 0 ? 0 : -1
-      if (this.#multi) li.append(this.#checkBox(checked))
       const dot = make('span', `hd-dot${domain.update ? ' update' : domain.behind ? ' behind' : ''}`)
       dot.setAttribute('aria-hidden', 'true')
       const marks = make('span', 'hd-marks')
@@ -2116,7 +2122,7 @@ export class HostDirectoryElement extends HTMLElement {
       const opens = make('span', 'hd-opens', '›')
       opens.setAttribute('aria-hidden', 'true')
       li.append(dot, make('span', 'hd-host-name', domain.label), marks, count, opens)
-      li.addEventListener('click', () => this.#chooseRow(domain.zone, 'host', -1, order))
+      li.addEventListener('click', () => this.#chooseRow(domain.zone, 'host', -1))
       list.append(li)
     })
     const own = make('li', 'hd-row hd-host-row hd-own-row')
@@ -2128,7 +2134,7 @@ export class HostDirectoryElement extends HTMLElement {
     const ownOpens = make('span', 'hd-opens', '›')
     ownOpens.setAttribute('aria-hidden', 'true')
     own.append(ring, make('span', 'hd-host-name', t('hosts.your-host', 'Your host')), make('span', 'hd-marks'), make('span', 'hd-count'), ownOpens)
-    own.addEventListener('click', () => { this.#multi = false; this.#chosen = NOTHING_PICKED; this.#selectOwn() })
+    own.addEventListener('click', () => this.#selectOwn())
     list.append(own)
     if (this.#reading && domains.every(domain => !domain.count)) list.append(make('li', 'hd-note', t('packages.reading', 'Reading what is served…')))
     wrap.append(list, this.#addForm())
@@ -2160,7 +2166,7 @@ export class HostDirectoryElement extends HTMLElement {
           ? t('hosts.stacked-packages', 'Packages across {count} hosts', { count: this.#stack.keys.length })
           : t('hosts.packages', 'Packages'))
         : (model[level]?.parents ?? []).join(' · ')
-      wrap.append(this.#packageColumn(rows, level, this.#multi ? this.#chosen : NOTHING_PICKED, caption))
+      wrap.append(this.#packageColumn(rows, level, NOTHING_PICKED, caption))
     }
     if (paths.length) {
       wrap.append(this.#fileColumn(files, paths))
@@ -2178,54 +2184,6 @@ export class HostDirectoryElement extends HTMLElement {
       this.#wantWords(files)
     }
     wrap.append(this.#codeMatrix(files))
-  }
-
-  /** With Select on and something checked: what to do with it, together. */
-  #selectBar(wrap: HTMLElement, page: DrillPage, model: readonly { rows: readonly StackRow[]; picked: Picked }[]): void {
-    if (!this.#multi || page === 'code') return
-    const keys = this.#chosen.keys
-    const bar = make('div', 'hd-selectbar')
-    bar.setAttribute('role', 'status')
-    bar.append(make('span', 'hd-selected', t('hosts.select.count', '{count} selected', { count: keys.length })))
-    const act = (label: string, enabled: boolean, go: () => void): void => {
-      const choice = button('hd-primary', label)
-      choice.disabled = !enabled
-      choice.addEventListener('click', go)
-      bar.append(choice)
-    }
-    if (page === 'hosts') {
-      act(t('hosts.select.open', 'Open {count}', { count: keys.length }), keys.length > 0, () => this.#openHosts(keys))
-    } else {
-      const picked = keys.filter(key => !isFileKey(key))
-      const read = keys.filter(isFileKey)
-      const { level } = drillRows(model)
-      if (picked.length || !read.length) {
-        act(t('hosts.select.open', 'Open {count}', { count: picked.length }), picked.length > 0, () => {
-          this.#cols = [...this.#cols.slice(0, level), { keys: picked, anchor: picked[0]! }]
-          this.#files = NOTHING_PICKED
-          this.#endSelect()
-        })
-      }
-      if (read.length) {
-        act(t('hosts.select.read', 'Read {count}', { count: read.length }), true, () => {
-          this.#files = { keys: read, anchor: read[0]! }
-          this.#readCode = true
-          this.#endSelect()
-        })
-      }
-    }
-    const clear = button('hd-quiet', t('hosts.select.clear', 'Clear'))
-    clear.disabled = keys.length === 0
-    clear.addEventListener('click', () => { this.#chosen = NOTHING_PICKED; this.#renderBody() })
-    bar.append(clear)
-    wrap.append(bar)
-  }
-
-  #endSelect(): void {
-    this.#multi = false
-    this.#chosen = NOTHING_PICKED
-    this.#stopNice()
-    this.#renderBody()
   }
 
   /** Where the way back is for the panes the drill has no list of (your host, the
@@ -2262,8 +2220,9 @@ export class HostDirectoryElement extends HTMLElement {
     if (mode === this.#mode) return
     this.#mode = mode
     this.#touched = true
+    // Select belongs to the four panes: it is off in the other way of looking, and off on the way.
     this.#multi = false
-    this.#chosen = NOTHING_PICKED
+    this.#refs.get('select')?.setAttribute('aria-pressed', 'false')
     this.#readCode = false
     this.#menu = null
     if (mode === 'simple') {
@@ -2627,15 +2586,15 @@ export class HostDirectoryElement extends HTMLElement {
         li.append(opens)
       } else li.append(make('span', 'hd-icon-slot'))
 
-      // The simple drill: a check box on every row while Select is on.
-      if (simple && this.#multi) {
+      // The four panes: a check box on every row while Select is on.
+      if (!simple && this.#multi) {
         li.classList.add('hd-checking')
         li.prepend(this.#checkBox(picked.keys.includes(row.path)))
       }
       li.addEventListener('click', event => {
         if ((event.target as HTMLElement).closest('button:not(.hd-name), a')) return
-        if (simple) this.#chooseRow(row.path, 'package', k, order)
-        else this.#pickPackage(k, row.path, pickMode(event), order)
+        if (simple) this.#chooseRow(row.path, 'package', k)
+        else this.#pickPackage(k, row.path, this.#modeOf(event), order)
       })
       list.append(li)
     }
@@ -2765,9 +2724,9 @@ export class HostDirectoryElement extends HTMLElement {
     const caption = t('hosts.files-in', 'Files in {paths}', { paths: paths.join(' · ') })
     list.setAttribute('aria-label', caption)
     const order = files.map(file => file.sig)
-    // The simple drill picks nothing here but what is CHECKED — a file is opened by going in.
+    // The drill picks nothing here: a file is opened by going in. The four panes pick.
     const simple = this.#mode === 'simple'
-    const picked = simple ? (this.#multi ? this.#chosen : NOTHING_PICKED) : this.#files
+    const picked = simple ? NOTHING_PICKED : this.#files
     const tabbable = picked.keys.find(sig => order.includes(sig)) ?? order[0]
     for (const file of files) {
       const li = make('li', 'hd-file')
@@ -2776,7 +2735,7 @@ export class HostDirectoryElement extends HTMLElement {
       li.setAttribute('aria-selected', String(picked.keys.includes(file.sig)))
       li.tabIndex = file.sig === tabbable ? 0 : -1
       if (picked.keys.includes(file.sig)) li.classList.add('picked')
-      if (simple && this.#multi) li.classList.add('hd-checking')
+      if (!simple && this.#multi) li.classList.add('hd-checking')
       const yours = file.yoursName || file.yoursDescription
       if (yours) li.classList.add('mine')
       // Its name first; what kind it is, the package that declares it and the start
@@ -2784,10 +2743,10 @@ export class HostDirectoryElement extends HTMLElement {
       li.append(make('span', 'hd-file-name', file.name), make('span', 'hd-file-where', fileWhere(file)))
       li.title = [file.name, file.description, `${file.path} · ${file.sig}`, yours ? t('hosts.meta.yours', 'Described by you') : '']
         .filter(Boolean).join('\n')
-      if (simple && this.#multi) li.prepend(this.#checkBox(picked.keys.includes(file.sig)))
+      if (!simple && this.#multi) li.prepend(this.#checkBox(picked.keys.includes(file.sig)))
       li.addEventListener('click', event => {
-        if (simple) this.#chooseRow(file.sig, 'file', -1, order)
-        else this.#pickFile(file.sig, pickMode(event), order)
+        if (simple) this.#chooseRow(file.sig, 'file', -1)
+        else this.#pickFile(file.sig, this.#modeOf(event), order)
       })
       list.append(li)
     }
@@ -3623,7 +3582,8 @@ ${S} .hd-trail{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35em;min-wi
 ${S} .hd-trail-step{color:var(--hd-ink-quiet);}
 ${S} .hd-trail-sep{color:var(--hd-ink-quiet);opacity:.6;}
 ${S} .hd-trail-now{color:var(--hd-ink);font-weight:600;}
-${S} .hd-select{font-size:.8em;border-color:var(--hd-rule);}
+${S} .hd-select{margin-right:.7em;padding:.15em .55em;font-size:.78em;border:1px solid transparent;border-radius:var(--hc-radius-control,2px);}
+${S} .hd-select:hover{color:var(--hd-ink);}
 ${S} .hd-select[aria-pressed="true"]{color:var(--hc-window-on-accent);background:var(--hc-window-accent);border-color:var(--hc-window-accent);}
 ${S} .hd-simple .hd-colbox{flex:none;width:auto;min-width:0;border:1px solid var(--hd-rule);border-radius:var(--hc-radius-card,3px);overflow:hidden;}
 ${S} .hd-simple .hd-col{overflow:visible;padding:0;}
@@ -3634,8 +3594,7 @@ ${S} .hd-simple .hd-file{padding:.7em .95em;}
 ${S} .hd-simple .hd-file-name{font-size:.95em;}
 ${S} .hd-simple .hd-file-where{font-size:.72em;}
 ${S} .hd-host-row{grid-template-columns:auto minmax(0,1fr) auto auto auto;cursor:default;user-select:none;}
-${S} .hd-host-row.hd-checking,${S} .hd-row.hd-checking{grid-template-columns:auto auto minmax(0,1fr) auto auto auto auto;}
-${S} .hd-host-row.hd-checking{grid-template-columns:auto auto minmax(0,1fr) auto auto auto;}
+${S} .hd-row.hd-checking{grid-template-columns:auto auto minmax(0,1fr) auto auto auto auto;}
 ${S} .hd-file.hd-checking{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:.7em;}
 ${S} .hd-file.hd-checking .hd-check{grid-row:1 / span 2;align-self:center;}
 ${S} .hd-host-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:1.1em;color:var(--hd-ink);}
@@ -3643,8 +3602,6 @@ ${S} .hd-simple .hd-col .hd-host-row{padding:1.05em 1.1em;font-size:1.1em;}
 ${S} .hd-check{display:inline-flex;align-items:center;justify-content:center;width:1.15em;height:1.15em;font-size:.8em;line-height:1;color:var(--hc-window-on-accent);border:1.5px solid var(--hd-ink-quiet);border-radius:3px;}
 ${S} .hd-check.on{background:var(--hc-window-accent);border-color:var(--hc-window-accent);}
 ${S} .hd-simple .hd-hosts-list + .hd-add{margin-top:1.1em;}
-${S} .hd-selectbar{position:sticky;bottom:0;display:flex;align-items:center;gap:.6em;padding:.6em .8em;background:var(--hd-ground);border:1px solid rgba(var(--acc),0.5);border-radius:var(--hc-radius-card,3px);box-shadow:0 -6px 18px rgba(0,0,0,0.18);}
-${S} .hd-selected{flex:1 1 auto;font-size:.85em;color:var(--hd-ink-quiet);}
 ${S} .hd-about{margin:0;}
 ${S} .hd-codepane{flex:1 0 24rem;min-width:24rem;min-height:0;display:flex;flex-direction:column;}
 ${S} .hd-colhead{flex:0 0 auto;padding:.4em .75em;font-size:.68em;letter-spacing:.05em;color:var(--hd-ink-quiet);border-bottom:1px solid rgba(var(--acc),0.08);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}

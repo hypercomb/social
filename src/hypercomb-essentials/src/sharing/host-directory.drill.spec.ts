@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
-  PANE_LIMITS, clampPane, crumbTrail, deskRecord, deskRecordText, drillPage, drillRows, finishedLast, isFileKey,
+  PANE_LIMITS, clampPane, crumbTrail, deskRecord, deskRecordText, drillPage, drillRows, finishedLast,
 } from './host-directory.drill'
 
 const col = (paths: string[], picked: string[] = []) => ({ rows: paths.map(path => ({ path })), picked: { keys: picked } })
@@ -81,12 +81,6 @@ describe('the trail above a page', () => {
   it('counts when there are several, and stops at the first level nothing is picked in', () => {
     const trail = crumbTrail({ atHosts: false, hosts: ['a.com', 'b.com'], picks: [['x', 'y'], [], ['z']], reading: [] })
     expect(trail.map(crumb => `${crumb.kind}:${crumb.one}:${crumb.count}`)).toEqual(['hosts::0', 'host::2', 'package::2'])
-  })
-
-  it('knows a file from a package by what it is called', () => {
-    expect(isFileKey('a'.repeat(64))).toBe(true)
-    expect(isFileKey('assistant/anatomy')).toBe(false)
-    expect(isFileKey('a'.repeat(63))).toBe(false)
   })
 })
 

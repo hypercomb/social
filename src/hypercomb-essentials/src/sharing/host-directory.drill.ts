@@ -8,13 +8,13 @@
 //
 //   SIMPLE (the default) — one large list in the middle, and a drill: the hosts, then
 //     a host's packages (and the packages inside one), then the files a package
-//     declares, then the code. A click goes one step in; Escape goes one step back. A
-//     Select switch turns every row into a check box, and what is checked is opened
-//     together — several hosts stacked, several packages' parts side by side, several
-//     files read at once. It is the same state the four panes read (`#stack`, `#cols`,
-//     `#files`), shown one step at a time.
+//     declares, then the code. A click goes one step in; Escape goes one step back.
+//     Nothing fancy: it has no multiple select. It is the same state the four panes
+//     read (`#stack`, `#cols`, `#files`), shown one step at a time.
 //   ADVANCED — the four panes: hosts, packages, files, code, each as wide as the
-//     participant drags it.
+//     participant drags it, and the place for selecting several: Ctrl/Cmd-click, or a
+//     Select toggle that makes every click one. (jwize: "no select [in simple], just
+//     advanced there — select can be ctrl click or toggle".)
 //
 // This file is the part that needs no DOM: which page a state is, which list a page
 // shows, the trail of crumbs above it, the one record the desk keeps, and the order
@@ -129,9 +129,6 @@ export function crumbTrail(input: {
   if (input.reading.length) trail.push({ kind: 'file', one: input.reading.length === 1 ? input.reading[0]! : '', count: input.reading.length })
   return trail
 }
-
-/** Whether a checked key is a file (a signature) or a package (a path). */
-export const isFileKey = (key: string): boolean => /^[0-9a-f]{64}$/.test(key)
 
 // ── finished work goes last ──────────────────────────────────────────────────
 

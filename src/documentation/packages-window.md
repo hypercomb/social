@@ -142,8 +142,9 @@ input gate, the back gesture):
 (jwize, 2026-11-05: "we need to up the participant experience — this is advanced mode;
 the other should just be the hosts list large in the middle with a drill down to the
 code. Nothing fancy, the same things but single drill in, maybe the items can be toggled
-as a multiselect." Then: "no I think we need both", "just do a simple version", and "this
-four pane view is beautiful".)
+as a multiselect." Then: "no I think we need both", "just do a simple version", "this
+four pane view is beautiful", and "no select, just advanced there — select can be ctrl
+click or toggle".)
 
 **Simple is how the desk opens.** There is no rail and no strip of columns — one
 large list in the middle and a step in at a time:
@@ -163,14 +164,18 @@ the last stop before the desk closes. It is the same state the four panes read (
 `#cols`, `#files`), shown one step at a time, so nothing a pane could do is out of reach
 and the two views agree about where you are.
 
-**Select** (top right of a list) turns every row into a check box. A click then checks
-instead of going in, and a bar at the foot says what to do with what is checked, together:
-*Open N* stacks the checked hosts into one list, opens the checked packages side by side
-(their parts and their files are one list), and *Read N* reads the checked files at once.
-Escape drops the checks, then the boxes.
+**The drill has no multiple select** — nothing fancy (jwize, 2026-11-05: "no select, just
+advanced there"). Going into several hosts, packages or files at once is the four panes' job.
 
 **Advanced** (top right, beside ×) is the four panes, exactly as they were: hosts in the
-rail, then packages, files and code, side by side. Its switch says *Simple view* to come back.
+rail, then packages, files and code, side by side. Its switch says *Simple view* to come
+back. **Selecting several lives here, two ways** ("select can be ctrl click or toggle"):
+**Ctrl/Cmd-click** toggles a row in or out and **Shift-click** extends, as in the Finder;
+or turn on **Select** (beside the switch, shown only in the four panes), which makes every
+plain click a toggle and puts a check box on the package and file rows. Hosts picked in the
+rail are stacked into one list, packages picked in a column open their parts together, and
+files picked are read side by side in the code pane. Escape lets go of Select first, and
+switching to the drill puts it off.
 
 **Both are remembered.** One current record in the pool `hosts:desk`
 (`{ mode, panes }`, `sharing/host-directory.drill.ts`), written only by a press or a drag —
@@ -469,7 +474,7 @@ sandbox before you bring them into hypercomb.io."*
   list a packages page shows, the trail, the kept record (simple unless advanced, widths
   held inside their limits, the same choices the same bytes), and finished work last.
 - `essentials/src/sharing/host-directory-simple.spec.ts` — the shape the view keeps: simple
-  by default and the four panes one switch away and drawn as before, a click going in and
-  Select only checking, what is checked opened together, Escape's steps in order, the drag
+  by default and the four panes one switch away and drawn as before, a click going in with
+  no select in the drill, Select (and Ctrl/Cmd-click) in the four panes only, Escape's steps in order, the drag
   setting a custom property live and keeping it on release, the record written only by a
   press or a drag and read without minting the pool, and a landed update dropping last.

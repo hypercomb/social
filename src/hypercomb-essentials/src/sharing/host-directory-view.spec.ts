@@ -233,7 +233,8 @@ describe('the host directory', () => {
     expect(pick).toMatch(/let stack = pickKey\(this\.#stack, zone, mode, order\)/)
     expect(pick).toMatch(/if \(!stack\.keys\.length\) stack = \{ keys: \[zone\], anchor: zone \}/)
     expect(pick).toMatch(/this\.#section = stack\.keys\[0\] \?\? ''\s*this\.#scope = this\.#section/)
-    expect(VIEW).toMatch(/header\.addEventListener\('click', event => this\.#pickHost\(domain\.zone, pickMode\(event\), order\)\)/)
+    // The Finder's way (Ctrl/Cmd toggles, Shift extends), and a plain click toggles while Select is on.
+    expect(VIEW).toMatch(/header\.addEventListener\('click', event => this\.#pickHost\(domain\.zone, this\.#modeOf\(event\), order\)\)/)
     expect(VIEW).toMatch(/header\.setAttribute\('aria-current', 'true'\)/)
     expect(VIEW).toMatch(/if \(this\.#query\.trim\(\)\) \{ this\.#renderMatches\(body, domains\); return \}/)
     // A desk opens onto a host: there is always one pane, never a shut list.

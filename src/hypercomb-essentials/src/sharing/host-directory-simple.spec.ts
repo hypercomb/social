@@ -46,24 +46,47 @@ describe('the simple drill', () => {
     expect(render).toMatch(/`hd-simple\$\{page === 'code' \? ' wide' : ''\}`/)
   })
 
-  it('takes a step in on a click, and with Select on only checks the row', () => {
+  it('takes a step in on a click — and has no select: that is for the four panes', () => {
     const choose = between('  #chooseRow(', '  /** Go into these hosts')
-    expect(choose).toMatch(/if \(this\.#multi\) \{\s*this\.#chosen = pickKey\(this\.#chosen, key, 'toggle', order\)/)
     expect(choose).toMatch(/if \(kind === 'host'\) \{ this\.#openHosts\(\[key\]\); return \}/)
     expect(choose).toMatch(/this\.#cols = \[\.\.\.this\.#cols\.slice\(0, k\), \{ keys: \[key\], anchor: key \}\]/)
     expect(choose).toMatch(/this\.#files = \{ keys: \[key\], anchor: key \}\s*this\.#readCode = true/)
+    expect(choose).not.toMatch(/#multi|#chosen/)
     // The rows are the ones the four panes use: the light, the update mark, the manage menu all come with them.
-    expect(VIEW).toMatch(/if \(simple\) this\.#chooseRow\(row\.path, 'package', k, order\)/)
-    expect(VIEW).toMatch(/if \(simple\) this\.#chooseRow\(file\.sig, 'file', -1, order\)/)
-    expect(VIEW).toMatch(/else this\.#pickPackage\(k, row\.path, pickMode\(event\), order\)/)
+    expect(VIEW).toMatch(/if \(simple\) this\.#chooseRow\(row\.path, 'package', k\)/)
+    expect(VIEW).toMatch(/if \(simple\) this\.#chooseRow\(file\.sig, 'file', -1\)/)
+    // Nothing of the old drill select is left: no check boxes on its pages, no bar, no checked set.
+    const drill = between('  // ── the simple drill', '  // ── the way to look')
+    expect(drill).not.toMatch(/#selectBar|#endSelect|#chosen|hd-selectbar|hosts\.select\.(count|open|read|clear)/)
+    expect(VIEW).not.toMatch(/#chosen/)
+    expect(between('  #hostsPage(', '  /** PAGE TWO')).not.toMatch(/#checkBox|#multi/)
   })
 
-  it('opens what is checked together: hosts stacked, packages side by side, files read at once', () => {
-    const bar = between('  #selectBar(', '  #endSelect(): void')
-    expect(bar).toMatch(/this\.#openHosts\(keys\)/)
-    expect(bar).toMatch(/const picked = keys\.filter\(key => !isFileKey\(key\)\)/)
-    expect(bar).toMatch(/this\.#cols = \[\.\.\.this\.#cols\.slice\(0, level\), \{ keys: picked, anchor: picked\[0\]! \}\]/)
-    expect(bar).toMatch(/this\.#files = \{ keys: read, anchor: read\[0\]! \}\s*this\.#readCode = true/)
+  it('selects several in the four panes — Ctrl/Cmd-click as the Finder does, or the Select toggle', () => {
+    // A plain click toggles while Select is on; Ctrl/Cmd and Shift keep their Finder meaning either way.
+    const modeOf = between('  #modeOf(', '  /** SELECT, in the four panes')
+    expect(modeOf).toMatch(/const mode = pickMode\(event\)/)
+    expect(modeOf).toMatch(/return this\.#multi && mode === 'only' \? 'toggle' : mode/)
+    // Every four-pane click goes through it: the rail's hosts, the packages and the files.
+    expect(VIEW).toMatch(/this\.#pickHost\(domain\.zone, this\.#modeOf\(event\), order\)/)
+    expect(VIEW).toMatch(/else this\.#pickPackage\(k, row\.path, this\.#modeOf\(event\), order\)/)
+    expect(VIEW).toMatch(/else this\.#pickFile\(file\.sig, this\.#modeOf\(event\), order\)/)
+    expect(VIEW).not.toMatch(/pickMode\(event\), order\)/)
+    // The toggle sits in the desk's head, only in the four panes, and says whether it is on.
+    expect(VIEW).toMatch(/selectButton\.addEventListener\('click', \(\) => this\.#setMulti\(!this\.#multi\)\)/)
+    expect(VIEW).toMatch(/select\.hidden = this\.#mode === 'simple'/)
+    expect(VIEW).toMatch(/select\.setAttribute\('aria-pressed', String\(this\.#multi\)\)/)
+    // Check boxes appear on the four panes' package and file rows while it is on — and never in the drill.
+    expect(VIEW).toMatch(/if \(!simple && this\.#multi\) \{\s*li\.classList\.add\('hd-checking'\)/)
+    expect(VIEW).toMatch(/if \(!simple && this\.#multi\) li\.prepend\(this\.#checkBox\(/)
+    // It is the four panes' own: switching ways to look puts it off, and Escape lets go of it first.
+    expect(between('  #setMode(', '  /** A pane\'s edge')).toMatch(/this\.#multi = false/)
+    expect(between('  #back(): boolean {', '  // ── what is on screen')).toMatch(/if \(this\.#multi\) \{ this\.#setMulti\(false\); return true \}/)
+  })
+
+  it('opens several hosts only through the four panes: stacked in the rail', () => {
+    // The drill goes into ONE host; stacking several is the rail's, by Ctrl/Cmd-click or Select.
+    expect(between('  #hostsPage(', '  /** PAGE TWO')).toMatch(/this\.#chooseRow\(domain\.zone, 'host', -1\)/)
     expect(VIEW).toMatch(/this\.#stack = \{ keys, anchor: keys\[0\]! \}/)
   })
 
@@ -75,9 +98,9 @@ describe('the simple drill', () => {
     expect([...at].sort((a, b) => a - b)).toEqual(at)
   })
 
-  it('starts at the hosts each opening, and keeps no check from one to the next', () => {
+  it('starts at the hosts each opening, and keeps no Select on from one to the next', () => {
     const unmount = VIEW.slice(VIEW.indexOf('  #unmount(): void {'), VIEW.indexOf('  #unmount(): void {') + 1800)
-    expect(unmount).toMatch(/this\.#atHosts = true\s*this\.#readCode = false\s*this\.#multi = false\s*this\.#chosen = NOTHING_PICKED/)
+    expect(unmount).toMatch(/this\.#atHosts = true\s*this\.#readCode = false\s*this\.#multi = false/)
     // Back where a restart left it: inside the host.
     expect(between('  #toList(', '  /** The picks that lead down a path')).toMatch(/this\.#atHosts = false/)
   })
@@ -158,7 +181,7 @@ describe('finished updates go last', () => {
 
 describe('the strings', () => {
   it('has every new label in English', () => {
-    for (const key of ['hosts.mode.advanced', 'hosts.mode.simple', 'hosts.back', 'hosts.trail', 'hosts.select', 'hosts.select.count', 'hosts.select.open', 'hosts.select.read', 'hosts.select.clear', 'hosts.split']) {
+    for (const key of ['hosts.mode.advanced', 'hosts.mode.simple', 'hosts.back', 'hosts.trail', 'hosts.select', 'hosts.select-tip', 'hosts.split']) {
       expect(EN[key], key).toBeTruthy()
     }
     expect(EN['hosts.trail.files.one']).toBe('One file')
