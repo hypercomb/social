@@ -72,6 +72,14 @@ const DONE_KEPT = 100
  *  (5 min) that an unreachable branch costs nothing to keep owed. */
 const BACKOFF_MS = [15_000, 30_000, 60_000, 120_000, 300_000] as const
 
+/** How long ONE attempt at ONE entry may hold the drain. The drain is serial, so
+ *  an attempt that never returns starves every entry behind it — the screen read
+ *  "fetching now" for two hours with the next two never tried. Every read a
+ *  healthy attempt makes is bounded well inside this (a host probe 8 s, a mesh
+ *  window seconds), so reaching it means something is stuck: the entry backs off
+ *  like any miss and the drain moves on. */
+export const ATTEMPT_MS = 180_000
+
 /** Identity of an owed fold: the branch signature at a placement. The
  *  signature is fixed-width hex, so a plain separator is unambiguous —
  *  deliberately NOT a control byte (a raw NUL in source is invisible to
@@ -102,9 +110,31 @@ export class AdoptQueueService extends EventTarget {
   /** The entry a fetch is in flight for right now (key), or null. */
   #active: string | null = null
   isActive(sig: string, at: readonly string[]): boolean { return this.#active === keyOf(sig, at) }
-  setActive(sig: string | null, at: readonly string[] = []): void {
+  setActive(sig: string | null, at: readonly string[] = [], now = Date.now()): void {
     this.#active = sig ? keyOf(sig, at) : null
+    this.#stage = sig ? { name: 'starting', since: now } : null
     this.dispatchEvent(new CustomEvent('change'))
+  }
+
+  /** Where the attempt in flight is right now, and since when — so a stall names
+   *  its own await. Memory only, never stored. Null when nothing is in flight. */
+  #stage: { name: string; since: number } | null = null
+  get stage(): { name: string; since: number } | null { return this.#stage }
+  setStage(name: string, now = Date.now()): void {
+    if (this.#active === null) return
+    this.#stage = { name, since: now }
+    this.dispatchEvent(new CustomEvent('change'))
+  }
+
+  /** Entries whose last attempt hit the ATTEMPT_MS bound: the stage it was stuck
+   *  in and when. Memory only — a fact about this session; cleared when the entry
+   *  lands or the queue is cleared. */
+  #stalls = new Map<string, { stage: string; at: number }>()
+  noteStall(sig: string, at: readonly string[], stage: string, now = Date.now()): void {
+    this.#stalls.set(keyOf(sig, at), { stage, at: now })
+  }
+  stalledAt(sig: string, at: readonly string[]): { stage: string; at: number } | null {
+    return this.#stalls.get(keyOf(sig, at)) ?? null
   }
 
   /** Is `label` owed at `at`? True from the click until it lands — the adopt
@@ -177,7 +207,8 @@ export class AdoptQueueService extends EventTarget {
   complete(sig: string, at: readonly string[]): void {
     const key = keyOf(sig, at)
     const gone = this.#entries.find(e => keyOf(e.sig, e.at) === key)
-    if (this.#active === key) this.#active = null
+    if (this.#active === key) { this.#active = null; this.#stage = null }
+    this.#stalls.delete(key)
     if (!gone) return
     this.#entries = this.#entries.filter(e => e !== gone)
     this.#done = [{ sig: gone.sig, label: gone.label, at: gone.at, doneAt: Date.now() }, ...this.#done].slice(0, DONE_KEPT)
@@ -200,6 +231,7 @@ export class AdoptQueueService extends EventTarget {
   clear(): void {
     if (this.#entries.length === 0) return
     this.#entries = []
+    this.#stalls.clear()
     this.#flush()
   }
 

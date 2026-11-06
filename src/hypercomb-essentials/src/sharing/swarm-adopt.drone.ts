@@ -60,7 +60,7 @@ import {
 import { setDivergedLabels, clearPeerDivergence } from './peer-divergence.js'
 import { publisherHoldsUnheldBelow } from './branch-difference.js'
 import { allows as intakeAllows } from '../pheromones/intake-filter.js'
-import { _adoptQueue } from './adopt-queue.service.js'
+import { _adoptQueue, ATTEMPT_MS } from './adopt-queue.service.js'
 import { ADOPT_QUEUE_OWNER, ADOPT_QUEUE_SURFACE, AdoptQueueElement } from './adopt-queue.view.js'
 import { isJoinedHere } from './membership.js'
 import { visualArtifactSigs } from './visual-hosts.js'
@@ -169,6 +169,8 @@ interface AdoptQueueLike {
   next: () => { sig: string; label: string; at: string[]; domain?: string; page?: boolean; egg?: boolean } | null
   isQueued?: (label: string, at: readonly string[]) => boolean
   setActive?: (sig: string | null, at?: readonly string[]) => void
+  setStage?: (name: string) => void
+  noteStall?: (sig: string, at: readonly string[], stage: string) => void
   markEgg?: (sig: string, at: readonly string[]) => void
   waitMs: () => number | null
   complete: (sig: string, at: readonly string[]) => void
@@ -299,7 +301,7 @@ export class SwarmAdoptDrone extends Drone {
     'Adopts a peer tile by localizing its branch (ContentBroker) and folding it into the hive layer via the same update({children}) cascade as paste, on explicit user click ONLY — no snapshot bridge, no automatic installer fold.'
 
   protected override listens: string[] = ['tile:action', 'features:download', 'swarm:peers-changed', 'swarm:tile-visited', 'swarm:wand']
-  protected override emits: string[] = ['adopt:started', 'fs:changed', 'tile:saved', 'tile:action', 'features:download:done', 'activity:log', 'features:outcome', 'toast:show', 'swarm:visit-folded', 'adopt:queued']
+  protected override emits: string[] = ['adopt:started', 'fs:changed', 'tile:saved', 'tile:action', 'features:download:done', 'activity:log', 'features:outcome', 'toast:show', 'swarm:visit-folded', 'adopt:queued', 'adopt:stage']
 
   // Latest installer registry projection — cached for the Done-gated fold.
 
@@ -1251,6 +1253,22 @@ export class SwarmAdoptDrone extends Drone {
   #draining = false
   #drainTimer: ReturnType<typeof setTimeout> | undefined
 
+  /** The entry the drain is attempting and where in the attempt it is. A stage
+   *  reported by an attempt the watchdog already gave up on can land on the
+   *  next entry's row — a wrong label for a moment, never a wrong act. */
+  #attempt: { sig: string; label: string; stage: string } | null = null
+
+  /** Say where the attempt in flight is: on the queue (its screen shows it) and
+   *  as the `adopt:stage` effect (the bridge's `effect-last` reads it). A no-op
+   *  outside the drain, so an explicit adopt gesture pays nothing. */
+  #attemptAt = (stage: string): void => {
+    const attempt = this.#attempt
+    if (!attempt) return
+    attempt.stage = stage
+    this.#adoptQueue()?.setStage?.(stage)
+    EffectBus.emit('adopt:stage', { sig: attempt.sig, label: attempt.label, stage, at: Date.now() })
+  }
+
   /** Work the persisted queue from first to last until nothing is owed.
    *  Continuous: an entry that can't land yet backs off and STAYS owed, so
    *  the drain keeps returning to it for as long as it takes. Nothing is ever
@@ -1265,47 +1283,41 @@ export class SwarmAdoptDrone extends Drone {
         if (!entry) break
         const branch = { layerSig: entry.sig, at: entry.at, domain: entry.domain, label: entry.label }
         let landed = false
+        // Set when the watchdog below gives up on this attempt: a turn on the
+        // lane that comes up LATE must not begin, and one that lands after all
+        // still pays the debt.
+        let abandoned = false
         queue.setActive?.(entry.sig, entry.at)
+        this.#attempt = { sig: entry.sig, label: entry.label, stage: '' }
+        this.#attemptAt('lane')
         // Each fold takes its turn on the ONE lane moves and re-seats share
         // (history/operation-queue.service.ts), so a fold and a move never
         // read and write the same page at once.
         const lane = this.#ioc()?.get?.(OPERATION_QUEUE_KEY) as { run?: <T>(task: () => Promise<T>) => Promise<T> } | undefined
         const inTurn = <T>(task: () => Promise<T>): Promise<T> => lane?.run ? lane.run(task) : task()
-        await inTurn(async () => { try {
-          // A tile we already hold is ADDITIVE — add the children the peer
-          // publishes that we lack, never re-home (a shared tile stays one
-          // tile). Anything else folds whole through the normal gates.
-          if (await this.#isHeldHere(entry.at, entry.label)) {
-            if (entry.egg) {
-              // An EGG is held but empty: hatch it. The branch fold combines
-              // (the egg is a subset of the real tile — nothing is lost), and
-              // the debt is paid only when it truly landed.
-              const res = await this.adoptResolvedBranch(branch, { silent: true })
-              landed = res === 'committed' || res === 'exists'
-            } else {
-              await this.#additiveAdoptHeld(branch)
-              landed = true
-            }
-          } else if (entry.page && entry.at.join('/') === this.#currentSegments().join('/')
-            && this.#peerEntryFor(entry.label)) {
-            // The offer is still live where it was asked: fold it as the ONE
-            // page tile it was taken as.
-            landed = await this.#foldPageTile(entry.at, entry.label, this.#peerEntryFor(entry.label)!)
-          } else {
-            const res = await this.adoptResolvedBranch(branch, { silent: true })
-            landed = res === 'committed' || res === 'exists'
-            // 'unavailable' means the bytes aren't reachable from any host we
-            // know — "they didn't find the file". That is the EGG case: put
-            // the tile in the hive now, empty, and let the queue keep trying
-            // until it hatches. 'rewound' is not a missing file (the cursor is
-            // in history) and must never lay one.
-            // 'uninspectable' is the same miss met earlier: inspection (the code check) needs the branch's layers before
-            // the fold can even ask, so a branch no host will serve stops THERE. It is an egg too.
-            if (!landed && (res === 'unavailable' || res === 'uninspectable')) { await this.#layEgg(branch); queue.markEgg?.(entry.sig, entry.at) }
-          }
-        } catch (err) {
-          console.warn('[swarm-adopt] queued adopt threw', { sig: entry.sig.slice(0, 8), err })
-        } })
+        const attempt = inTurn(async () => {
+          if (abandoned) return
+          landed = await this.#tryEntry(entry, branch, queue)
+          if (abandoned && landed) queue.complete(entry.sig, entry.at)
+        })
+        // THE WATCHDOG. The drain is serial, so one attempt that never returns
+        // (a lane another act holds, a read that never settles) would leave every
+        // entry behind it untried — it did, for two hours. Past ATTEMPT_MS the
+        // entry is deferred like any miss and the next one gets its turn; the
+        // stage it was stuck in is kept and said, so the stall names its own await.
+        let watchdog: ReturnType<typeof setTimeout> | undefined
+        const stalled = await Promise.race([
+          attempt.then(() => false, () => false),
+          new Promise<boolean>(resolve => { watchdog = setTimeout(() => resolve(true), ATTEMPT_MS) }),
+        ])
+        clearTimeout(watchdog)
+        if (stalled) {
+          abandoned = true
+          const stage = this.#attempt?.stage || 'starting'
+          console.warn('[swarm-adopt] an adopt attempt stalled — deferred, the queue moves on', { sig: entry.sig.slice(0, 8), label: entry.label, stage, ms: ATTEMPT_MS })
+          queue.noteStall?.(entry.sig, entry.at, stage)
+          EffectBus.emit('adopt:stage', { sig: entry.sig, label: entry.label, stage, stalled: true, at: Date.now() })
+        }
         if (landed) queue.complete(entry.sig, entry.at)
         else queue.defer(entry.sig, entry.at)
       }
@@ -1315,6 +1327,7 @@ export class SwarmAdoptDrone extends Drone {
       if (batch && panelLabel && queue.remainingIn(batch) === 0) this.#openBehaviours(panelLabel)
     } finally {
       this.#draining = false
+      this.#attempt = null
       queue.setActive?.(null)
     }
 
@@ -1323,6 +1336,52 @@ export class SwarmAdoptDrone extends Drone {
     if (wait !== null) {
       clearTimeout(this.#drainTimer)
       this.#drainTimer = setTimeout(() => { void this.#drainAdoptQueue(batch, panelLabel) }, Math.max(wait, 1_000))
+    }
+  }
+
+  /** One attempt at one owed entry, on its turn of the lane. True only when it LANDED (the debt is paid); never throws. */
+  #tryEntry = async (
+    entry: NonNullable<ReturnType<AdoptQueueLike['next']>>,
+    branch: { layerSig: string; at: string[]; domain?: string; label: string },
+    queue: AdoptQueueLike,
+  ): Promise<boolean> => {
+    this.#attemptAt('held-check')
+    try {
+      // A tile we already hold is ADDITIVE — add the children the peer
+      // publishes that we lack, never re-home (a shared tile stays one
+      // tile). Anything else folds whole through the normal gates.
+      if (await this.#isHeldHere(entry.at, entry.label)) {
+        if (entry.egg) {
+          // An EGG is held but empty: hatch it. The branch fold combines
+          // (the egg is a subset of the real tile — nothing is lost), and
+          // the debt is paid only when it truly landed.
+          const res = await this.adoptResolvedBranch(branch, { silent: true })
+          return res === 'committed' || res === 'exists'
+        }
+        await this.#additiveAdoptHeld(branch)
+        return true
+      }
+      if (entry.page && entry.at.join('/') === this.#currentSegments().join('/')
+        && this.#peerEntryFor(entry.label)) {
+        // The offer is still live where it was asked: fold it as the ONE
+        // page tile it was taken as.
+        this.#attemptAt('page-fold')
+        return await this.#foldPageTile(entry.at, entry.label, this.#peerEntryFor(entry.label)!)
+      }
+      const res = await this.adoptResolvedBranch(branch, { silent: true })
+      const landed = res === 'committed' || res === 'exists'
+      // 'unavailable' means the bytes aren't reachable from any host we
+      // know — "they didn't find the file". That is the EGG case: put
+      // the tile in the hive now, empty, and let the queue keep trying
+      // until it hatches. 'rewound' is not a missing file (the cursor is
+      // in history) and must never lay one.
+      // 'uninspectable' is the same miss met earlier: inspection (the code check) needs the branch's layers before
+      // the fold can even ask, so a branch no host will serve stops THERE. It is an egg too.
+      if (!landed && (res === 'unavailable' || res === 'uninspectable')) { this.#attemptAt('egg'); await this.#layEgg(branch); queue.markEgg?.(entry.sig, entry.at) }
+      return landed
+    } catch (err) {
+      console.warn('[swarm-adopt] queued adopt threw', { sig: entry.sig.slice(0, 8), err })
+      return false
     }
   }
 
@@ -1338,9 +1397,13 @@ export class SwarmAdoptDrone extends Drone {
     domain: string | undefined,
     opts: { layersOnly?: boolean; silent?: boolean },
   ) => {
+    this.#attemptAt('reach:broker')
     let adoptRes = await broker.adopt(sig, opts)
+    this.#attemptAt('reach:layer')
     let branchLayer = await history.getLayerBySig(sig)
+    this.#attemptAt('reach:sealed')
     if (((adoptRes?.failed ?? 0) > 0 || !branchLayer) && await this.#openSealed(sig, domain)) {
+      this.#attemptAt('reach:broker')
       adoptRes = await broker.adopt(sig, opts)
       branchLayer = await history.getLayerBySig(sig)
     }
@@ -1451,8 +1514,10 @@ export class SwarmAdoptDrone extends Drone {
     // the receiver never subscribed at the child sig, so without the probe
     // this read was empty unless the user had walked into the tile earlier,
     // and the adopt reported "already has everything" against no evidence.
+    this.#attemptAt('additive:peer-sig')
     const theirSig = await swarm.composeSigForSegments(childLoc).catch(() => '')
     if (theirSig && swarm.primePeerTilesAt && swarm.peerTilesAtSig(theirSig).length === 0) {
+      this.#attemptAt('additive:peer-probe')
       await swarm.primePeerTilesAt(theirSig, { force: true }).catch(() => undefined)
     }
     const theirs = theirSig ? swarm.peerTilesAtSig(theirSig) : []
@@ -1461,8 +1526,10 @@ export class SwarmAdoptDrone extends Drone {
     // reads as empty. coldMiss ⇒ refuse rather than mis-add against partial
     // knowledge (a cold read that dropped a child I hold would re-add it).
     const cursor = ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as { currentLayerSig?: string } | undefined
+    this.#attemptAt('additive:own-layer')
     const parent = await resolveCurrentLayer(history, lineage?.domain, branch.at, cursor?.currentLayerSig).catch(() => null)
     const held = parent ? await childLayerOf(history, parent, branch.label).catch(() => null) : null
+    this.#attemptAt('additive:own-children')
     const { names: myNames, coldMiss } = held
       ? await childNamesOfStrict(history, held.layer).catch(() => ({ names: [] as string[], coldMiss: true }))
       : { names: [] as string[], coldMiss: true }
@@ -1488,6 +1555,7 @@ export class SwarmAdoptDrone extends Drone {
     // dark-cleared the divergence light over missing content).
     let failed = 0
     for (const child of missing) {
+      this.#attemptAt('additive:fold-child')
       const ok = await this.#foldPageTile(childLoc, child.name, child.entry)
       if (!ok) failed++
     }
@@ -1527,6 +1595,7 @@ export class SwarmAdoptDrone extends Drone {
     // The explicit adopt gesture is the participant RE-SUBSCRIBING — clear
     // any revocation on this path before the fold (delete's counterpart).
     clearAdoptTombstone([...branch.at, branch.label])
+    this.#attemptAt('branch:inspect')
     const codeSigs = await this.#branchCodeSigs(branch.layerSig, branch.domain)
     if (codeSigs === null) {
       // Couldn't resolve the branch to inspect it. Never inline-fold content we
@@ -1551,6 +1620,7 @@ export class SwarmAdoptDrone extends Drone {
     // nothing. An unchanged branch still dedups to no new marker (commitLayer
     // byte-dedup), so re-adopting settled content is free. The render-time gate
     // stays the trust surface (a foreign page is reviewed before it mounts).
+    this.#attemptAt('branch:commit')
     const res = await this.#commitBranch(branch.layerSig, branch.at, branch.domain, 'sync')
     if (res === 'committed') {
       // The pull may add/refresh feature decorations without a per-decoration
@@ -1678,6 +1748,7 @@ export class SwarmAdoptDrone extends Drone {
       // silent: a pre-consent inspection walk must not switch the view.
       const { branchLayer: root } = await this.#reach(broker, history, layerSig, domain, { layersOnly: true, silent: true })
       if (!root) return null
+      this.#attemptAt('branch:walk')
       // Seed the root so an adversarial child→root back-reference can't re-walk it.
       const seen = new Set<string>([String(layerSig).trim().toLowerCase()])
       const codeSigs = new Set<string>()

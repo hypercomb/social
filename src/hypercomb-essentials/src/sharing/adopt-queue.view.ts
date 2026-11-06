@@ -28,6 +28,10 @@ interface QueueLike extends EventTarget {
   entries: readonly AdoptQueueEntry[]
   done: readonly AdoptQueueDone[]
   isActive: (sig: string, at: readonly string[]) => boolean
+  /** Where the attempt in flight is, and since when (an older bundle has none). */
+  stage?: { name: string; since: number } | null
+  /** Where this entry's last attempt hit its time bound, and when. */
+  stalledAt?: (sig: string, at: readonly string[]) => { stage: string; at: number } | null
   clear: () => void
 }
 
@@ -203,10 +207,13 @@ export class AdoptQueueElement extends HTMLElement {
     const owedRows = owed.map(e => {
       const state = q.isActive(e.sig, e.at) ? 'fetching' : e.egg ? 'egg' : 'waiting'
       const retryIn = Math.max(0, Math.ceil((e.nextAt - now) / 1000))
-      const what = state === 'fetching' ? 'fetching now'
+      const stage = state === 'fetching' ? q.stage : null
+      const stalled = state === 'fetching' ? null : q.stalledAt?.(e.sig, e.at) ?? null
+      const what = state === 'fetching' ? `fetching now${stage ? ` · ${stage.name} ${ago(now - stage.since)}` : ''}`
         : state === 'egg' ? `egg · waiting for a host · retry in ${retryIn}s`
         : `waiting · try ${e.tries + 1} in ${retryIn}s`
-      const asked = e.addedAt ? ` · asked ${ago(now - e.addedAt)} ago` : ''
+      const asked = (e.addedAt ? ` · asked ${ago(now - e.addedAt)} ago` : '')
+        + (stalled ? ` · stalled in ${stalled.stage} ${ago(now - stalled.at)} ago` : '')
       const live = !!e.pubkey && now - (e.seenAt ?? 0) < LIVE_MS
       const who = !e.pubkey ? ''
         : live ? ` · publisher ${e.pubkey.slice(0, 8)} in the swarm`
