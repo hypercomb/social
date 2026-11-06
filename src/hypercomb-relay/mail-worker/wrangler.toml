@@ -1,0 +1,37 @@
+# The hypercomb.com mail server — documentation/inbound-mail.md. Deployed on hypercomb.com/mail/*.
+name = "hypercomb-mail"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+# More specific than the apex route on pluginthematrix-core, so only /mail/* comes here and the
+# live Worker is untouched.
+routes = [{ pattern = "hypercomb.com/mail/*", zone_name = "hypercomb.com" }]
+
+# A private bucket: create it first with  wrangler r2 bucket create hypercomb-mail
+[[r2_buckets]]
+binding = "MAIL"
+bucket_name = "hypercomb-mail"
+
+# Cloudflare Email Sending. Needs hypercomb.com onboarded for sending first (dashboard: Email Service →
+# Email Sending → Onboard Domain). Which addresses may send is decided by the MAIL_CONFIG secret, not here.
+[[send_email]]
+name = "EMAIL"
+
+# WHO LIVES HERE is not in this file. The addresses, the keys that own them and where copies go are ONE
+# secret, set once per deployment and kept across deploys:
+#
+#   printf '%s' '{"keys":{"you@your.domain":"<hex nostr pubkey>"},"copyTo":{"you@your.domain":"<verified address>"}}' \
+#     | wrangler secret put MAIL_CONFIG
+#
+#   keys    address -> the hex Nostr public key that owns it and can read it. An address whose key is not
+#           64 hex characters is not a mailbox: its mail is copied (if copyTo names it) or bounced.
+#   copyTo  per recipient: who also gets a copy, and catches the message if it cannot be stored. A recipient
+#           not listed gets no copy. Add an address only once Email Routing shows it verified.
+#
+# For a local dev run the same may be plain vars (MAIL_KEYS, COPY_TO, MAIL_NAMES); the secret wins.
+
+[vars]
+# Origins the in-hive reader may call from.
+ALLOWED_ORIGINS = "https://hypercomb.io,http://localhost:4250"
+# Messages one address may send per UTC day: a brake on a leaked key.
+MAX_SEND_PER_DAY = "100"
