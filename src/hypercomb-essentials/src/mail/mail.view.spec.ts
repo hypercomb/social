@@ -1,47 +1,76 @@
 // mail/mail.view.spec.ts — the mail window, with the service replaced so nothing
 // is fetched and no key is touched. What it proves: the window shows what it is
 // given as TEXT, never as markup; a stranger's HTML runs in a frame that can do
-// nothing; a message goes out only on a press, only once; and closing the window
-// drops what it held.
+// nothing; a message goes out only on a press, only once; closing the window
+// drops what it held; every act says what it is doing the moment it is pressed
+// (placeholders before any row opens, rows arriving one by one in their final
+// places); hide comes before delete, and delete takes two acts; and an arrival
+// lights a pill but never opens the window.
 
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
-import { MailElement, MAIL_OPEN, explain } from './mail.view.js'
-import { MailError, type MailService } from './mail.service.js'
-import type { ParsedMail } from './mime.js'
+import { MailElement, MAIL_OPEN, MAIL_UNREAD, UNREAD_INDICATOR, explain } from './mail.view.js'
+import { ALREADY_DONE, ALREADY_SENT, MAIL_LIMITS, MailError, type MailAct, type MailListItem, type MailService } from './mail.service.js'
+import { sizeLabel } from './cue.js'
+import type { SaveMessageInput, SaveMessageResult } from './mail-to-hive.js'
 
 const SIG = 'a'.repeat(64)
 const SIG2 = 'b'.repeat(64)
+const SIG3 = 'c'.repeat(64)
 const ME = 'jaime@hypercomb.com'
 
-const parsed = (over: Partial<ParsedMail> = {}): ParsedMail => ({
-  from: 'Ana <ana@example.org>', to: ME, cc: '', replyTo: '', subject: 'plans', date: 'Thu, 5 Nov 2026',
-  messageId: '<m1@example.org>', inReplyTo: '', references: '', text: 'the plain text', html: '', attachments: [], inlineImages: {}, ...over,
-})
+/**
+ * A received message as the host hands it over: raw bytes, which the window parses itself (and keeps,
+ * for downloads, forwards and Save to hive). Plain text alone, or text + html, plus any files.
+ */
+function mime(over: { text?: string; html?: string; files?: readonly { filename: string; type: string; base64: string }[] } = {}): Uint8Array {
+  const text = over.text ?? 'the plain text'
+  const head = ['From: Ana <ana@example.org>', `To: ${ME}`, 'Subject: plans', 'Date: Thu, 5 Nov 2026', 'Message-ID: <m1@example.org>', 'MIME-Version: 1.0']
+  const plain = ['Content-Type: text/plain; charset=utf-8', '', text]
+  const body = over.html === undefined ? plain
+    : ['Content-Type: multipart/alternative; boundary="a"', '', '--a', ...plain, '--a', 'Content-Type: text/html; charset=utf-8', '', over.html, '--a--']
+  const lines = !over.files?.length ? [...head, ...body]
+    : [...head, 'Content-Type: multipart/mixed; boundary="b"', '', '--b', ...body,
+      ...over.files.flatMap(f => ['--b', `Content-Type: ${f.type}; name="${f.filename}"`, `Content-Disposition: attachment; filename="${f.filename}"`, 'Content-Transfer-Encoding: base64', '', f.base64]),
+      '--b--', '']
+  return new TextEncoder().encode(lines.join('\r\n'))
+}
+
+type Row = Partial<MailListItem> & Pick<MailListItem, 'sig'>
 
 function fakeService(over: Record<string, unknown> = {}) {
-  return {
+  const service = {
     addresses: vi.fn(async () => [ME]),
+    // The window asks for mailboxes (names and all); a spec that overrides `addresses` still steers it.
+    mailboxes: vi.fn(async () => (await service.addresses()).map((address: string) => ({ address, host: 'https://hypercomb.com' }))),
     publicKey: vi.fn(async () => 'f'.repeat(64)),
-    list: vi.fn(async (_address: string, folder: string) => ({
+    list: vi.fn(async (_address: string, folder: string, _cursor?: string | null, _onItem?: unknown) => ({
       items: folder === 'box'
         ? [{ sig: SIG, at: 2, meta: { from: 'ana@example.org', subject: 'plans', at: 2 } }, { sig: SIG2, at: 1, meta: { from: 'bo@example.org', subject: '<img src=x onerror="window.pwned=1">', at: 1 } }]
-        : [{ sig: SIG, at: 3, meta: { to: 'friend@example.org', subject: 'sent one', at: 3 } }],
+        : folder === 'sent' ? [{ sig: SIG, at: 3, meta: { to: 'friend@example.org', subject: 'sent one', at: 3 } }] : [],
       cursor: null,
-    })),
-    read: vi.fn(async () => parsed()),
-    readSent: vi.fn(async () => ({ id: '<o@h>', from: ME, to: ['friend@example.org'], cc: [], bcc: [], subject: 'sent one', text: 'what I wrote', html: '', inReplyTo: null, references: null, at: 3 })),
-    send: vi.fn(async () => ({ messageId: '<o@h>', sig: SIG })),
+    }) as { items: Row[]; cursor: string | null }),
+    readRaw: vi.fn(async (_address: string, _sig: string) => mime()),
+    readSent: vi.fn(async () => ({ id: '<o@h>', from: ME, to: ['friend@example.org'], cc: [], bcc: [], subject: 'sent one', text: 'what I wrote', html: '', inReplyTo: null, references: null, at: 3 }) as Record<string, unknown>),
+    readDraft: vi.fn(async () => ({ to: 'friend@example.org', subject: 'half done', text: 'so far' }) as Record<string, unknown>),
+    send: vi.fn(async (_request: Record<string, unknown>) => ({ messageId: '<o@h>', sig: SIG })),
+    setMarks: vi.fn(async (_a: string, _f: string, _s: string, marks: Record<string, boolean>) => ({ ...marks, at: 9 })),
+    remove: vi.fn(async () => undefined),
+    saveDraft: vi.fn(async (_address: string, _draft: Record<string, unknown>, _replaces?: string | null) => ({ sig: SIG3, replaced: false })),
+    removeDraft: vi.fn(async () => undefined),
     ...over,
   }
+  return service
 }
 
 const settle = async (): Promise<void> => { for (let i = 0; i < 6; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
+const wait = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
 
 let mounted: MailElement | null = null
-async function windowWith(service: ReturnType<typeof fakeService>): Promise<MailElement> {
+async function windowWith(service: ReturnType<typeof fakeService>, setup: (element: MailElement) => void = () => {}): Promise<MailElement> {
   const element = document.createElement('hc-mail') as MailElement
   element.service = service as unknown as MailService
+  setup(element)
   document.body.appendChild(element)
   mounted = element
   element.open()
@@ -49,18 +78,48 @@ async function windowWith(service: ReturnType<typeof fakeService>): Promise<Mail
   return element
 }
 const panel = (): HTMLElement => document.querySelector('.hc-mail') as HTMLElement
-const press = (label: string): void => {
-  const button = Array.from(panel().querySelectorAll('button')).find(b => b.textContent === label)
-  if (!button) throw new Error(`no button "${label}" in: ${Array.from(panel().querySelectorAll('button')).map(b => b.textContent).join(' | ')}`)
-  button.click()
+const buttons = (): HTMLButtonElement[] => Array.from(panel().querySelectorAll('button'))
+const button = (label: string): HTMLButtonElement => {
+  const found = buttons().find(b => b.textContent === label)
+  if (!found) throw new Error(`no button "${label}" in: ${buttons().map(b => b.textContent).join(' | ')}`)
+  return found
 }
+const press = (label: string): void => { button(label).click() }
 const fill = (name: string, value: string): void => {
   const field = panel().querySelector(`[name="${name}"]`) as HTMLInputElement
   field.value = value
 }
+const type = (name: string, value: string): void => {
+  fill(name, value)
+  panel().querySelector(`[name="${name}"]`)!.dispatchEvent(new Event('input', { bubbles: true }))
+}
+const rows = (): HTMLElement[] => Array.from(panel().querySelectorAll<HTMLElement>('.hc-mail-row'))
+const subjects = (): string[] => Array.from(panel().querySelectorAll('.hc-mail-row-subject')).map(s => s.textContent ?? '')
+const cue = (): string => (panel().querySelector('.hc-mail-cue') as HTMLElement).hidden ? '' : panel().querySelector('.hc-mail-cue-text')?.textContent ?? ''
+const said = (): string => panel().querySelector('.hc-mail-said:not([hidden])')?.textContent ?? ''
+const key = (k: string, target: EventTarget = panel()): void => { target.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })) }
+
+/** A promise the spec releases by hand. */
+function gate<T = void>(): { promise: Promise<T>; open: (value: T) => void; fail: (error: unknown) => void } {
+  let open: (value: T) => void = () => {}
+  let fail: (error: unknown) => void = () => {}
+  const promise = new Promise<T>((resolve, reject) => { open = resolve; fail = reject })
+  return { promise, open, fail }
+}
+
+// A real message, so the raw-bytes path (parseMail, attachmentBytes) runs as it does live.
+const RAW = [
+  'From: Ana <ana@example.org>', `To: ${ME}`, 'Subject: plans', 'Message-ID: <m1@example.org>', 'MIME-Version: 1.0',
+  'Content-Type: multipart/mixed; boundary="b"', '',
+  '--b', 'Content-Type: text/plain; charset=utf-8', '', 'the plain text',
+  '--b', 'Content-Type: application/pdf; name="plan.pdf"', 'Content-Disposition: attachment; filename="plan.pdf"', 'Content-Transfer-Encoding: base64', '', 'JVBERi0x',
+  '--b', 'Content-Type: image/png; name="dot.png"', 'Content-Disposition: attachment; filename="dot.png"', 'Content-Transfer-Encoding: base64', '', 'iVBORw0KGgo=',
+  '--b--', '',
+].join('\r\n')
+const rawBytes = (): Uint8Array => new TextEncoder().encode(RAW)
 
 beforeAll(() => { if (!customElements.get('hc-mail')) customElements.define('hc-mail', MailElement) })
-afterEach(() => { mounted?.remove(); mounted = null; document.body.replaceChildren() })
+afterEach(() => { mounted?.remove(); mounted = null; document.body.replaceChildren(); vi.restoreAllMocks() })
 
 describe('opening', () => {
   it('shows the inbox of the address this key owns', async () => {
@@ -100,6 +159,329 @@ describe('opening', () => {
     expect(panel().textContent).toContain('holds no key')
     expect(panel().textContent).toContain('never makes one')
   })
+
+  it('shows names beside addresses: its own mailbox, and who wrote', async () => {
+    await windowWith(fakeService({
+      mailboxes: vi.fn(async () => [{ address: ME, name: 'Jaime', host: 'https://hypercomb.com' }]),
+      list: vi.fn(async () => ({ items: [{ sig: SIG, at: 2, meta: { from: '"Ana Ruiz" <ana@example.org>', subject: '=?utf-8?B?Q2Fmw6k=?=', at: 2 } }], cursor: null })),
+    }))
+    expect(panel().querySelector('.hc-mail-who')?.textContent).toBe(`Jaime <${ME}>`)
+    expect(panel().querySelector('.hc-mail-row-who')?.textContent).toBe('Ana Ruiz <ana@example.org>')
+    expect(subjects()).toEqual(['Café']) // the sealed subject as the sender encoded it, read for a person
+  })
+})
+
+describe('the cue: the window says what it is doing', () => {
+  it('draws placeholders in the same frame as the open, before the host has answered anything', async () => {
+    const boxes = gate<{ address: string; host: string }[]>()
+    const element = document.createElement('hc-mail') as MailElement
+    element.service = fakeService({ mailboxes: vi.fn(() => boxes.promise) }) as unknown as MailService
+    document.body.appendChild(element)
+    mounted = element
+    element.open() // no await: what is on screen now is what the participant sees at once
+    expect(cue()).toBe('Opening your mailbox…')
+    expect(panel().querySelectorAll('.hc-mail-skeleton').length).toBeGreaterThan(0)
+    expect(panel().querySelector('.hc-mail-bar')?.classList.contains('is-indeterminate')).toBe(true)
+    boxes.open([{ address: ME, host: 'https://hypercomb.com' }])
+    await settle()
+    expect(rows()).toHaveLength(2)
+    expect(panel().querySelector('.hc-mail-skeleton')).toBeNull()
+    expect(cue()).toBe('')
+  })
+
+  it('shows a placeholder per row once the page size is known, and fills each in its final place as its metadata opens', async () => {
+    const page = gate<void>()
+    let report: (item: Row, progress: { opened: number; total: number }) => void = () => {}
+    const a = { sig: SIG, at: 3, meta: { from: 'a@x.org', subject: 'newest', at: 3 } }
+    const b = { sig: SIG2, at: 2, meta: { from: 'b@x.org', subject: 'middle', at: 2 } }
+    const c = { sig: SIG3, at: 1, meta: { from: 'c@x.org', subject: 'oldest', at: 1 } }
+    const list = vi.fn(async (_a: string, _f: string, _c: unknown, onItem: typeof report) => {
+      report = onItem
+      await page.promise
+      return { items: [a, b, c], cursor: null }
+    })
+    await windowWith(fakeService({ list }))
+    // The host answered nothing yet: placeholders, no rows.
+    expect(rows()).toHaveLength(0)
+    expect(panel().querySelectorAll('.hc-mail-skeleton')).toHaveLength(3)
+
+    report(c, { opened: 1, total: 3 }) // the rows open in no particular order
+    expect(subjects()).toEqual(['oldest'])
+    expect(panel().querySelectorAll('.hc-mail-skeleton')).toHaveLength(2)
+    expect(cue()).toBe('Opening your mailbox… 1 of 3')
+    expect((panel().querySelector('.hc-mail-bar-fill') as HTMLElement).style.width).toBe('33%')
+    const oldest = rows()[0]!
+
+    report(a, { opened: 2, total: 3 })
+    expect(subjects()).toEqual(['newest', 'oldest'])
+    expect(panel().querySelectorAll('.hc-mail-skeleton')).toHaveLength(1)
+    report(b, { opened: 3, total: 3 })
+    expect(subjects()).toEqual(['newest', 'middle', 'oldest'])
+    expect(panel().querySelector('.hc-mail-skeleton')).toBeNull()
+
+    page.open()
+    await settle()
+    // The finished page lands on what is already there: same order, same elements, nothing moved.
+    expect(subjects()).toEqual(['newest', 'middle', 'oldest'])
+    expect(rows()[2]).toBe(oldest)
+    expect(cue()).toBe('')
+  })
+
+  it('a refresh keeps the rows on screen and its button says so while it runs', async () => {
+    const second = gate<void>()
+    const service = fakeService()
+    const first = service.list.getMockImplementation()!
+    let calls = 0
+    service.list.mockImplementation(async (...args: Parameters<typeof first>) => { if (++calls === 2) await second.promise; return first(...args) })
+    await windowWith(service)
+    press('Refresh')
+    expect(button('Refreshing…').disabled).toBe(true)
+    expect(cue()).toBe('Refreshing…')
+    expect(rows()).toHaveLength(2) // never blanked
+    expect(panel().querySelector('.hc-mail-skeleton')).toBeNull()
+    second.open()
+    await settle()
+    expect(button('Refresh').disabled).toBe(false)
+    expect(cue()).toBe('')
+  })
+
+  it('a message shows what its row knew at once, and the body when it has opened', async () => {
+    const body = gate<Uint8Array>()
+    await windowWith(fakeService({ readRaw: vi.fn(() => body.promise) }))
+    rows()[0]!.click()
+    expect(panel().querySelector('.hc-mail-subject')?.textContent).toBe('plans')
+    expect(panel().querySelector('.hc-mail-meta')?.textContent).toContain('ana@example.org')
+    expect(panel().querySelector('.hc-mail-skeleton-text')).not.toBeNull()
+    expect(cue()).toBe('Opening the message…')
+    body.open(mime())
+    await settle()
+    expect(panel().querySelector('.hc-mail-text')?.textContent).toBe('the plain text')
+    expect(cue()).toBe('')
+  })
+
+  it('Send says it is sending, on the button and on the line', async () => {
+    const out = gate<{ messageId: string; sig: string }>()
+    await windowWith(fakeService({ send: vi.fn(() => out.promise) }))
+    press('Write')
+    fill('to', 'friend@example.org'); fill('subject', 'hi'); fill('text', 'body')
+    ;(panel().querySelector('form') as HTMLFormElement).requestSubmit()
+    expect(button('Sending…').disabled).toBe(true)
+    expect(cue()).toBe('Sending…')
+    out.open({ messageId: '<o@h>', sig: SIG })
+    await settle()
+    expect(said()).toBe('Sent to friend@example.org.')
+  })
+
+  it('Save draft says it is saving, then that the draft was kept', async () => {
+    const kept = gate<{ sig: string; replaced: boolean }>()
+    const service = fakeService({ saveDraft: vi.fn(() => kept.promise) })
+    await windowWith(service)
+    press('Write')
+    fill('to', 'friend@example.org'); fill('text', 'later')
+    press('Save draft')
+    expect(button('Saving draft…').disabled).toBe(true)
+    expect(cue()).toBe('Saving draft…')
+    kept.open({ sig: SIG3, replaced: false })
+    await settle()
+    expect(button('Save draft').disabled).toBe(false)
+    expect(panel().querySelector('.hc-mail-status')?.textContent).toBe('Draft saved')
+    press('Save draft'); await settle()
+    expect(service.saveDraft).toHaveBeenCalledTimes(1) // the same words are not kept twice
+  })
+
+  it('a poll says "Checking for mail…" quietly, under anything the participant pressed', async () => {
+    const service = fakeService()
+    const first = service.list.getMockImplementation()!
+    const polled = gate<void>()
+    let calls = 0
+    service.list.mockImplementation(async (...args: Parameters<typeof first>) => { if (++calls === 2) await polled.promise; return first(...args) })
+    await windowWith(service, element => { element.pollEveryMs = 15 })
+    await wait(40)
+    expect(calls).toBe(2)
+    expect(cue()).toBe('Checking for mail…')
+    expect(panel().querySelector('.hc-mail-cue')?.classList.contains('is-quiet')).toBe(true)
+    expect(rows()).toHaveLength(2)
+    expect(panel().querySelector('.hc-mail-skeleton')).toBeNull()
+    polled.open()
+    await settle()
+    expect(cue()).toBe('')
+  })
+})
+
+describe('tabs, search and conversations', () => {
+  const marked = (over: Record<string, unknown> = {}) => fakeService({
+    list: vi.fn(async (_a: string, folder: string) => ({
+      items: folder === 'box'
+        ? [
+          { sig: SIG, at: 3, meta: { from: 'ana@example.org', subject: 'plans', preview: 'see you thursday', at: 3 }, marks: null },
+          { sig: SIG2, at: 2, meta: { from: 'bo@example.org', subject: 'old news', at: 2 }, marks: { hidden: true, read: true } },
+          { sig: SIG3, at: 1, meta: { from: 'cy@example.org', subject: 'lunch', at: 1 }, marks: { read: true } },
+        ]
+        : folder === 'sent' ? [{ sig: 'd'.repeat(64), at: 4, meta: { to: 'friend@example.org', subject: 'sent one', at: 4 }, marks: { hidden: true } }] : [],
+      cursor: null,
+    })),
+    ...over,
+  })
+
+  it('leaves hidden mail out of the inbox, and shows it shaded under Hidden, from Inbox and Sent', async () => {
+    const service = marked()
+    await windowWith(service)
+    expect(subjects()).toEqual(['plans', 'lunch'])
+    expect(button('Inbox').dataset['count']).toBe('1') // the one never marked read
+    press('Hidden'); await settle()
+    expect(service.list).toHaveBeenCalledWith(ME, 'sent', null, expect.any(Function))
+    expect(subjects()).toEqual(['sent one', 'old news'])
+    expect(rows().every(row => row.classList.contains('is-hidden'))).toBe(true)
+    expect(panel().querySelectorAll('.hc-mail-row-folder')[0]?.textContent).toBe('Sent')
+  })
+
+  it('searches what has opened — who, subject and preview — and Escape clears the search before it closes', async () => {
+    const element = await windowWith(marked())
+    const search = panel().querySelector('.hc-mail-search') as HTMLInputElement
+    search.value = 'thursday'; search.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(subjects()).toEqual(['plans'])
+    search.value = 'cy@'; search.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(subjects()).toEqual(['lunch'])
+    search.value = 'nothing like it'; search.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(rows()).toHaveLength(0)
+    expect(panel().textContent).toContain('Nothing here matches')
+    key('Escape', search)
+    expect(subjects()).toEqual(['plans', 'lunch'])
+    expect(element.isOpen).toBe(true)
+    key('Escape')
+    expect(element.isOpen).toBe(false)
+  })
+
+  it('groups a conversation into one row, newest first, with a count, and opens it on a press', async () => {
+    await windowWith(fakeService({
+      list: vi.fn(async () => ({
+        items: [
+          { sig: SIG, at: 5, meta: { from: 'ana@example.org', subject: 'Re: plans', at: 5, messageId: '<r1@x>', inReplyTo: '<m1@x>', references: ['<m1@x>'] } },
+          { sig: SIG3, at: 3, meta: { from: 'cy@example.org', subject: 'lunch', at: 3, messageId: '<l1@x>' } },
+          { sig: SIG2, at: 1, meta: { from: 'jo@example.org', subject: 'plans', at: 1, messageId: '<m1@x>' } },
+        ],
+        cursor: null,
+      })),
+    }))
+    expect(subjects()).toEqual(['Re: plans', 'lunch'])
+    expect(panel().querySelector('.hc-mail-row-count')?.textContent).toBe('2')
+    rows()[0]!.click()
+    expect(rows()[0]!.getAttribute('aria-expanded')).toBe('true')
+    expect(subjects()).toEqual(['Re: plans', 'Re: plans', 'plans', 'lunch'])
+    expect(panel().querySelectorAll('.hc-mail-row.is-member')).toHaveLength(2)
+    rows()[0]!.click()
+    expect(subjects()).toEqual(['Re: plans', 'lunch'])
+  })
+
+  it('opens a draft from Drafts into the composer, and Discard forgets it', async () => {
+    const service = fakeService({
+      list: vi.fn(async (_a: string, folder: string) => ({
+        items: folder === 'drafts' ? [{ sig: SIG3, at: 4, meta: { to: 'friend@example.org', subject: 'half done', at: 4 }, marks: null }] : [],
+        cursor: null,
+      })),
+    })
+    await windowWith(service)
+    press('Drafts'); await settle()
+    expect(subjects()).toEqual(['half done'])
+    rows()[0]!.click()
+    expect(cue()).toBe('Opening the draft…')
+    await settle()
+    expect(service.readDraft).toHaveBeenCalledWith(ME, SIG3)
+    expect((panel().querySelector('[name="subject"]') as HTMLInputElement).value).toBe('half done')
+    expect((panel().querySelector('[name="text"]') as HTMLTextAreaElement).value).toBe('so far')
+    press('Discard'); await settle()
+    expect(service.removeDraft).toHaveBeenCalledWith(ME, SIG3)
+    expect(said()).toBe('Draft discarded.')
+    expect(service.saveDraft).not.toHaveBeenCalled() // nothing changed, so nothing was kept again
+  })
+})
+
+describe('marks: read, flag, hide first, delete second', () => {
+  it('marks a message read when it is opened, and the row stops saying unread', async () => {
+    const service = fakeService()
+    await windowWith(service)
+    expect(rows()[0]!.classList.contains('is-unread')).toBe(true)
+    rows()[0]!.click(); await settle()
+    expect(service.setMarks).toHaveBeenCalledWith(ME, 'box', SIG, { read: true })
+    press('Back')
+    expect(rows()[0]!.classList.contains('is-unread')).toBe(false)
+  })
+
+  it('flags and unflags from the message', async () => {
+    const service = fakeService()
+    await windowWith(service)
+    rows()[0]!.click(); await settle()
+    press('Flag'); await settle()
+    expect(service.setMarks).toHaveBeenLastCalledWith(ME, 'box', SIG, { flagged: true })
+    press('Unflag'); await settle()
+    expect(service.setMarks).toHaveBeenLastCalledWith(ME, 'box', SIG, { flagged: false })
+  })
+
+  it('hides from the list: the button says so while it runs, and the row moves under Hidden', async () => {
+    const hidden = gate<Record<string, unknown>>()
+    const service = fakeService({ setMarks: vi.fn(() => hidden.promise) })
+    await windowWith(service)
+    const hide = rows()[0]!.querySelector('.hc-mail-row-acts button') as HTMLButtonElement
+    expect(hide.textContent).toBe('Hide')
+    hide.click()
+    const busy = rows()[0]!.querySelector('.hc-mail-row-acts button') as HTMLButtonElement
+    expect(busy.textContent).toBe('Hiding…')
+    expect(busy.disabled).toBe(true)
+    expect(cue()).toBe('Hiding…')
+    expect(service.setMarks).toHaveBeenCalledWith(ME, 'box', SIG, { hidden: true })
+    hidden.open({ hidden: true })
+    await settle()
+    expect(subjects()).toEqual(['<img src=x onerror="window.pwned=1">'])
+    expect(said()).toContain('Hidden')
+  })
+
+  it('takes two acts to delete: Delete waits for "may be deleted", inside Hidden only', async () => {
+    let marks: Record<string, boolean> = { hidden: true }
+    const service = fakeService({
+      list: vi.fn(async (_a: string, folder: string) => ({ items: folder === 'box' ? [{ sig: SIG, at: 1, meta: { from: 'ana@example.org', subject: 'gone soon', at: 1 }, marks }] : [], cursor: null })),
+      setMarks: vi.fn(async (_a: string, _f: string, _s: string, next: Record<string, boolean>) => (marks = { ...marks, ...next })),
+    })
+    await windowWith(service)
+    expect(rows()).toHaveLength(0)
+    press('Hidden'); await settle()
+    const remove = (): HTMLButtonElement => button('Delete')
+    expect(remove().disabled).toBe(true)
+    const toggle = panel().querySelector('.hc-mail-row input[type="checkbox"]') as HTMLInputElement
+    toggle.click(); await settle()
+    expect(service.setMarks).toHaveBeenCalledWith(ME, 'box', SIG, { deletable: true })
+    expect(remove().disabled).toBe(false)
+    expect(service.remove).not.toHaveBeenCalled()
+    remove().click(); await settle()
+    expect(service.remove).toHaveBeenCalledWith(ME, 'box', SIG)
+    expect(rows()).toHaveLength(0)
+    expect(said()).toBe('Deleted. The host keeps it 30 days, then it is gone.')
+    expect(panel().textContent).not.toMatch(/permanent/i)
+  })
+
+  it('says the host’s refusal of a delete in words', async () => {
+    const service = fakeService({
+      list: vi.fn(async (_a: string, folder: string) => ({ items: folder === 'box' ? [{ sig: SIG, at: 1, meta: { subject: 'x', at: 1 }, marks: { hidden: true, deletable: true } }] : [], cursor: null })),
+      remove: vi.fn(async () => { throw new MailError('conflict', 'hide it and mark it deletable first') }),
+    })
+    await windowWith(service)
+    press('Hidden'); await settle()
+    press('Delete'); await settle()
+    expect(said()).toContain('hidden and marked “may be deleted”')
+    expect(rows()).toHaveLength(1)
+  })
+
+  it('un-hides a message back into its folder', async () => {
+    const service = fakeService({
+      list: vi.fn(async (_a: string, folder: string) => ({ items: folder === 'box' ? [{ sig: SIG, at: 1, meta: { subject: 'back again', at: 1 }, marks: { hidden: true } }] : [], cursor: null })),
+    })
+    await windowWith(service)
+    press('Hidden'); await settle()
+    press('Un-hide'); await settle()
+    expect(service.setMarks).toHaveBeenCalledWith(ME, 'box', SIG, { hidden: false, deletable: false })
+    expect(said()).toBe('Back in Inbox.')
+    press('Inbox'); await settle()
+    expect(subjects()).toEqual(['back again'])
+  })
 })
 
 describe('what a stranger wrote is only ever text', () => {
@@ -111,7 +493,7 @@ describe('what a stranger wrote is only ever text', () => {
   })
 
   it('shows plain text in a text node', async () => {
-    await windowWith(fakeService({ read: vi.fn(async () => parsed({ text: '<script>window.pwned=1</script>hello' })) }))
+    await windowWith(fakeService({ readRaw: vi.fn(async () => mime({ text: '<script>window.pwned=1</script>hello' })) }))
     ;(panel().querySelector('.hc-mail-row') as HTMLElement).click()
     await settle()
     expect(panel().querySelector('.hc-mail-text')?.textContent).toBe('<script>window.pwned=1</script>hello')
@@ -120,7 +502,7 @@ describe('what a stranger wrote is only ever text', () => {
 
   it('shows html mail in a script-less sandboxed frame that may load nothing outside, and says what it held back', async () => {
     const html = '<p onclick="x()">hi</p><script>alert(1)</script><img src="https://tracker.example/p.gif">'
-    await windowWith(fakeService({ read: vi.fn(async () => parsed({ html })) }))
+    await windowWith(fakeService({ readRaw: vi.fn(async () => mime({ html })) }))
     ;(panel().querySelector('.hc-mail-row') as HTMLElement).click()
     await settle()
     const frame = panel().querySelector('iframe') as HTMLIFrameElement
@@ -134,7 +516,7 @@ describe('what a stranger wrote is only ever text', () => {
   })
 
   it('lets the reader choose the plain text of an html message', async () => {
-    await windowWith(fakeService({ read: vi.fn(async () => parsed({ html: '<p>hi</p>', text: 'hi' })) }))
+    await windowWith(fakeService({ readRaw: vi.fn(async () => mime({ html: '<p>hi</p>', text: 'hi' })) }))
     ;(panel().querySelector('.hc-mail-row') as HTMLElement).click()
     await settle()
     expect(panel().querySelector('iframe')).not.toBeNull()
@@ -143,12 +525,90 @@ describe('what a stranger wrote is only ever text', () => {
     expect(panel().querySelector('.hc-mail-text')?.textContent).toBe('hi')
   })
 
+  // Was "lists attachments by name without opening them". The name is read from its own span now,
+  // because a Download button stands beside it; still nothing is opened, and no link exists, until it
+  // is pressed ("attachments" below presses it).
   it('lists attachments by name without opening them', async () => {
-    await windowWith(fakeService({ read: vi.fn(async () => parsed({ attachments: [{ filename: 'plan.pdf', type: 'application/pdf', size: 2048 }] })) }))
+    const create = vi.fn(() => 'blob:never')
+    Object.assign(URL, { createObjectURL: create, revokeObjectURL: vi.fn() })
+    await windowWith(fakeService({ readRaw: vi.fn(async () => mime({ files: [{ filename: 'plan.pdf', type: 'application/pdf', base64: btoa('\0'.repeat(2048)) }] })) }))
     ;(panel().querySelector('.hc-mail-row') as HTMLElement).click()
     await settle()
-    expect(panel().querySelector('.hc-mail-attachments')?.textContent).toBe('plan.pdf · application/pdf · 2 KB')
+    expect(panel().querySelector('.hc-mail-attachments .hc-mail-attachment-name')?.textContent).toBe('plan.pdf · application/pdf · 2 KB')
     expect(panel().querySelector('a')).toBeNull()
+    expect(create).not.toHaveBeenCalled()
+  })
+})
+
+describe('attachments', () => {
+  it('downloads one as opaque bytes on a press, lets the URL go, and shows pictures only inside the sandboxed frame', async () => {
+    const made: Blob[] = []
+    const create = vi.fn((blob: Blob) => { made.push(blob); return 'blob:mail/1' })
+    const revoke = vi.fn()
+    Object.assign(URL, { createObjectURL: create, revokeObjectURL: revoke })
+    const clicked: HTMLAnchorElement[] = []
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { clicked.push(this) })
+    await windowWith(fakeService({ readRaw: vi.fn(async () => rawBytes()) }))
+    rows()[0]!.click(); await settle()
+    expect(Array.from(panel().querySelectorAll('.hc-mail-attachment-name')).map(n => n.textContent)).toEqual(['plan.pdf · application/pdf · 1 KB', 'dot.png · image/png · 1 KB'])
+    expect(create).not.toHaveBeenCalled() // nothing opens until it is pressed
+
+    ;(panel().querySelector('.hc-mail-attachments li button') as HTMLButtonElement).click()
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(made[0]!.type).toBe('application/octet-stream')
+    expect(clicked[0]!.download).toBe('plan.pdf')
+    expect(clicked[0]!.isConnected).toBe(false)
+    await settle()
+    expect(revoke).toHaveBeenCalledWith('blob:mail/1')
+
+    const pictures = panel().querySelector('iframe.is-previews') as HTMLIFrameElement
+    expect(pictures.getAttribute('sandbox')).toBe('allow-popups allow-popups-to-escape-sandbox')
+    expect(pictures.srcdoc).toContain("default-src 'none'")
+    expect(pictures.srcdoc).toContain('src="data:image/png;base64,')
+    expect(pictures.srcdoc).not.toMatch(/https?:|dot\.png/)
+  })
+
+  it('downloads what a sent copy carried', async () => {
+    const create = vi.fn((_blob: Blob) => 'blob:mail/2')
+    Object.assign(URL, { createObjectURL: create, revokeObjectURL: vi.fn() })
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    await windowWith(fakeService({
+      readSent: vi.fn(async () => ({ id: null, from: ME, to: ['friend@example.org'], cc: [], bcc: [], subject: 'sent one', text: 'see attached', html: '', inReplyTo: null, references: null, attachments: [{ filename: 'notes.txt', type: 'text/plain', content: 'aGk=' }], at: 3 })),
+    }))
+    press('Sent'); await settle()
+    rows()[0]!.click(); await settle()
+    expect(panel().querySelector('.hc-mail-attachment-name')?.textContent).toBe('notes.txt · text/plain · 1 KB')
+    press('Download')
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(create.mock.calls[0]![0].size).toBe(2) // "hi", out of the copy's base64
+  })
+
+  it('carries picked files into the send, and refuses past the caps in words before anything goes', async () => {
+    const service = fakeService()
+    await windowWith(service)
+    press('Write')
+    const picker = (): HTMLInputElement => panel().querySelector('input[type="file"]') as HTMLInputElement
+    expect(panel().textContent).toContain(`Up to ${MAIL_LIMITS.attachments} files, ${sizeLabel(MAIL_LIMITS.attachmentBytes)} in all.`)
+    const pick = (files: File[]): void => {
+      Object.defineProperty(picker(), 'files', { value: files, configurable: true })
+      picker().dispatchEvent(new Event('change', { bubbles: true }))
+    }
+    pick([new File(['abc'], 'a.txt', { type: 'text/plain' })])
+    await wait(20); await settle()
+    expect(panel().querySelector('.hc-mail-files .hc-mail-attachment-name')?.textContent).toBe('a.txt · 1 KB')
+    pick(Array.from({ length: 10 }, (_, i) => new File(['x'], `f${i}.txt`, { type: 'text/plain' })))
+    await wait(20); await settle()
+    expect(panel().textContent).toContain('f9.txt was not added: a message carries at most 10 files.')
+    expect(panel().querySelectorAll('.hc-mail-files .hc-mail-attachment-name')).toHaveLength(10)
+
+    fill('to', 'friend@example.org'); fill('subject', 'files'); fill('text', 'here')
+    ;(panel().querySelector('form') as HTMLFormElement).requestSubmit()
+    await settle()
+    const sent = service.send.mock.calls[0]![0] as { attachments: { filename: string; type: string; content: Uint8Array }[] }
+    expect(sent.attachments).toHaveLength(10)
+    expect(sent.attachments[0]!.filename).toBe('a.txt')
+    expect(sent.attachments[0]!.type).toBe('text/plain')
+    expect(Array.from(sent.attachments[0]!.content)).toEqual([97, 98, 99])
   })
 })
 
@@ -190,8 +650,8 @@ describe('writing and sending', () => {
 
   it('keeps the draft and says why when a send fails, and sends once even if pressed twice', async () => {
     let release: () => void = () => {}
-    const gate = new Promise<void>(resolve => { release = resolve })
-    const send = vi.fn(async () => { await gate; throw new MailError('limit') })
+    const gated = new Promise<void>(resolve => { release = resolve })
+    const send = vi.fn(async () => { await gated; throw new MailError('limit') })
     await windowWith(fakeService({ send }))
     press('Write')
     fill('to', 'friend@example.org'); fill('subject', 'hi'); fill('text', 'body')
@@ -213,10 +673,10 @@ describe('writing and sending', () => {
     fill('to', 'hypercomb.ui@gmail.com'); fill('cc', 'friend@example.org'); fill('subject', 'hi'); fill('text', 'body')
     ;(panel().querySelector('form') as HTMLFormElement).requestSubmit()
     await settle()
-    const said = panel().querySelector('.hc-mail-said.is-bad')?.textContent ?? ''
-    expect(said).toContain('bounced before')
-    expect(said).toContain('hypercomb.ui@gmail.com, friend@example.org')
-    expect(said).not.toContain('E_RECIPIENT_SUPPRESSED')
+    const refusal = panel().querySelector('.hc-mail-said.is-bad:not([hidden])')?.textContent ?? ''
+    expect(refusal).toContain('bounced before')
+    expect(refusal).toContain('hypercomb.ui@gmail.com, friend@example.org')
+    expect(refusal).not.toContain('E_RECIPIENT_SUPPRESSED')
     expect((panel().querySelector('[name="to"]') as HTMLInputElement).value).toBe('hypercomb.ui@gmail.com')
   })
 
@@ -227,6 +687,331 @@ describe('writing and sending', () => {
     await settle()
     expect(panel().querySelector('.hc-mail-text')?.textContent).toBe('what I wrote')
     expect(Array.from(panel().querySelectorAll('button')).some(b => b.textContent === 'Reply')).toBe(false)
+  })
+
+  it('formats on request, previews in the same script-less frame as it is typed, and sends the html with the text', async () => {
+    const service = fakeService()
+    await windowWith(service)
+    press('Write')
+    const preview = (): HTMLElement => panel().querySelector('.hc-mail-preview') as HTMLElement
+    expect(preview().hidden).toBe(true)
+    ;(panel().querySelector('[name="formatted"]') as HTMLInputElement).click()
+    expect(preview().hidden).toBe(false)
+    type('text', '**hi** <script>x()</script>')
+    await wait(260)
+    const frame = preview().querySelector('iframe') as HTMLIFrameElement
+    expect(frame.getAttribute('sandbox')).toBe('allow-popups allow-popups-to-escape-sandbox')
+    expect(frame.srcdoc).toContain('<strong>hi</strong>')
+    expect(frame.srcdoc).not.toContain('<script>')
+    fill('to', 'friend@example.org'); fill('subject', 'hi')
+    ;(panel().querySelector('form') as HTMLFormElement).requestSubmit()
+    await settle()
+    const sent = service.send.mock.calls[0]![0] as { html?: string; text: string }
+    expect(sent.html).toContain('<strong>hi</strong>')
+    expect(sent.text).toContain('hi')
+    expect(sent.text).not.toContain('**')
+  })
+
+  it('keeps a draft once the typing stops, replacing the one before, and says it was kept', async () => {
+    let n = 0
+    const service = fakeService({ saveDraft: vi.fn(async () => ({ sig: String(++n).repeat(64), replaced: n > 1 })) })
+    await windowWith(service, element => { element.draftSaveMs = 20 })
+    press('Write')
+    fill('to', 'friend@example.org'); fill('subject', 'later')
+    type('text', 'first words')
+    expect(service.saveDraft).not.toHaveBeenCalled()
+    await wait(60)
+    expect(service.saveDraft).toHaveBeenCalledTimes(1)
+    expect(service.saveDraft).toHaveBeenLastCalledWith(ME, expect.objectContaining({ to: 'friend@example.org', subject: 'later', text: 'first words' }), null)
+    expect(panel().querySelector('.hc-mail-status')?.textContent).toBe('Draft saved')
+    type('text', 'more words')
+    await wait(60)
+    expect(service.saveDraft).toHaveBeenLastCalledWith(ME, expect.objectContaining({ text: 'more words' }), '1'.repeat(64))
+  })
+
+  it('keeps the words on the way out: Escape saves the draft at once and steps back', async () => {
+    const service = fakeService()
+    await windowWith(service)
+    press('Write')
+    fill('to', 'friend@example.org')
+    type('text', 'unfinished')
+    key('Escape')
+    expect(panel().querySelector('form')).toBeNull()
+    await settle()
+    expect(service.saveDraft).toHaveBeenCalledTimes(1)
+    expect(service.saveDraft).toHaveBeenCalledWith(ME, expect.objectContaining({ text: 'unfinished' }), null)
+  })
+
+  it('forwards a message with its attachments, read from the raw bytes by index', async () => {
+    const service = fakeService({ readRaw: vi.fn(async () => rawBytes()) })
+    await windowWith(service)
+    rows()[0]!.click(); await settle()
+    press('Forward')
+    expect((panel().querySelector('[name="subject"]') as HTMLInputElement).value).toBe('Fwd: plans')
+    expect(Array.from(panel().querySelectorAll('.hc-mail-files .hc-mail-attachment-name')).map(n => n.textContent)).toEqual(['plan.pdf · 1 KB', 'dot.png · 1 KB'])
+    fill('to', 'friend@example.org')
+    ;(panel().querySelector('form') as HTMLFormElement).requestSubmit()
+    await settle()
+    const sent = service.send.mock.calls[0]![0] as { attachments: { filename: string; type: string; content: Uint8Array }[] }
+    expect(sent.attachments.map(a => a.filename)).toEqual(['plan.pdf', 'dot.png'])
+    expect(new TextDecoder().decode(sent.attachments[0]!.content)).toBe('%PDF-1')
+  })
+
+  it('suggests To and Cc from who wrote and who was written to, and offers every mailbox to send from by name', async () => {
+    await windowWith(fakeService({
+      mailboxes: vi.fn(async () => [{ address: ME, name: 'Jaime', host: 'h' }, { address: 'leanne@hypercomb.com', name: 'Leanne', host: 'h' }]),
+    }))
+    press('Write'); await settle()
+    const known = Array.from(panel().querySelectorAll('datalist option')).map(o => (o as HTMLOptionElement).value)
+    expect(known).toEqual(expect.arrayContaining(['ana@example.org', 'bo@example.org']))
+    expect((panel().querySelector('[name="to"]') as HTMLInputElement).getAttribute('list')).toBe(panel().querySelector('datalist')!.id)
+    const from = Array.from((panel().querySelector('[name="from"]') as HTMLSelectElement).options).map(o => o.textContent)
+    expect(from).toEqual([`Jaime <${ME}>`, 'Leanne <leanne@hypercomb.com>'])
+  })
+})
+
+describe('save to hive', () => {
+  it('is a press that says what it is doing and then what happened, with the privacy sentence beside it', async () => {
+    const done = gate<SaveMessageResult>()
+    const save = vi.fn((_input: SaveMessageInput) => done.promise)
+    await windowWith(fakeService({ readRaw: vi.fn(async () => rawBytes()) }), element => { element.saveToHive = save })
+    rows()[0]!.click(); await settle()
+    expect(panel().querySelector('.hc-mail-privacy')?.textContent).toContain('unsealed')
+    press('Save to hive')
+    expect(button('Saving to hive…').disabled).toBe(true)
+    expect(cue()).toBe('Saving to hive…')
+    const input = save.mock.calls[0]![0]
+    expect(input.sig).toBe(SIG)
+    expect(new TextDecoder().decode(input.raw)).toBe(RAW)
+    expect(input.attachmentBytes(0)).not.toBeNull()
+    done.open({ status: 'saved', placed: [], shared: [], skipped: [], message: 'Saved as the tile “plans”.' })
+    await settle()
+    expect(said()).toBe('Saved as the tile “plans”.')
+    expect(button('Save to hive').disabled).toBe(false)
+  })
+})
+
+describe('what this key may do (Mailbox.can)', () => {
+  const asKey = (can: readonly MailAct[], over: Record<string, unknown> = {}) => fakeService({
+    mailboxes: vi.fn(async () => [{ address: ME, host: 'https://hypercomb.com', can }]),
+    list: vi.fn(async (_a: string, folder: string) => ({
+      items: folder === 'box'
+        ? [{ sig: SIG, at: 2, meta: { from: 'ana@example.org', subject: 'plans', at: 2 }, marks: null }, { sig: SIG2, at: 1, meta: { from: 'bo@example.org', subject: 'hid', at: 1 }, marks: { hidden: true, deletable: true } }]
+        : [],
+      cursor: null,
+    })),
+    ...over,
+  })
+
+  it('shows a read-only key a plain reader: nothing to write, mark, keep or delete, and opening marks nothing', async () => {
+    const service = asKey(['read'])
+    await windowWith(service)
+    expect(buttons().map(b => b.textContent)).not.toContain('Write')
+    expect(buttons().map(b => b.textContent)).not.toContain('Drafts')
+    expect(panel().querySelector('.hc-mail-row-acts')).toBeNull()
+    rows()[0]!.click(); await settle()
+    const labels = buttons().map(b => b.textContent)
+    for (const gone of ['Reply', 'Reply all', 'Forward', 'Flag', 'Hide']) expect(labels).not.toContain(gone)
+    expect(labels).toContain('Back') // the reader still reads
+    expect(service.setMarks).not.toHaveBeenCalled()
+    press('Back')
+    press('Hidden'); await settle()
+    expect(subjects()).toEqual(['hid'])
+    expect(panel().querySelector('.hc-mail-row-acts')).toBeNull()
+    expect(panel().textContent).not.toContain('may be deleted')
+  })
+
+  it('a key that may not keep drafts never saves one, by press or by pause', async () => {
+    const service = asKey(['read', 'send', 'mark'])
+    await windowWith(service, element => { element.draftSaveMs = 10 })
+    press('Write')
+    expect(buttons().map(b => b.textContent)).not.toContain('Save draft')
+    fill('to', 'friend@example.org')
+    type('text', 'not kept')
+    await wait(40)
+    key('Escape')
+    await settle()
+    expect(service.saveDraft).not.toHaveBeenCalled()
+  })
+
+  it('a key that may mark but not delete hides and un-hides, and is never offered Delete', async () => {
+    await windowWith(asKey(['read', 'mark']))
+    expect(rows()[0]!.querySelector('.hc-mail-row-acts button')?.textContent).toBe('Hide')
+    press('Hidden'); await settle()
+    const labels = buttons().map(b => b.textContent)
+    expect(labels).toContain('Un-hide')
+    expect(labels).not.toContain('Delete')
+    expect(panel().querySelector('.hc-mail-row input[type="checkbox"]')).toBeNull()
+  })
+
+  it('a key that may not send from one address is offered only the others in From', async () => {
+    await windowWith(fakeService({
+      mailboxes: vi.fn(async () => [
+        { address: ME, name: 'Jaime', host: 'h', can: ['read', 'send', 'draft'] },
+        { address: 'shared@hypercomb.com', name: 'Shared', host: 'h', can: ['read'] },
+        { address: 'team@hypercomb.com', name: 'Team', host: 'h', can: ['read', 'send'] },
+      ]),
+    }))
+    press('Write')
+    const from = Array.from((panel().querySelector('[name="from"]') as HTMLSelectElement).options).map(o => o.value)
+    expect(from).toEqual([ME, 'team@hypercomb.com'])
+  })
+
+  it('says a refusal by the act it refused, when roles changed after the window asked', async () => {
+    const service = fakeService({ setMarks: vi.fn(async () => { throw new MailError('forbidden', 'mark') }) })
+    await windowWith(service)
+    ;(rows()[0]!.querySelector('.hc-mail-row-acts button') as HTMLButtonElement).click()
+    await settle()
+    expect(said()).toBe(`This key may not mark mail at ${ME} (read, flag or hide). Whoever runs the mail host can give it more.`)
+    expect(subjects()).toHaveLength(2) // nothing moved
+  })
+
+  it('words every refused act, and a delete limit as a delete limit', () => {
+    const said = (act: MailAct): string => explain(new MailError('forbidden', act), act === 'send', [], { address: ME })
+    expect(said('send')).toBe(`This key may not send from ${ME}. Whoever runs the mail host can give it more.`)
+    expect(new Set((['read', 'mark', 'draft', 'delete', 'send'] as const).map(said)).size).toBe(5)
+    expect(explain(new MailError('forbidden', 'fly'), false, [], { address: ME })).toContain('may not do that')
+    expect(explain(new MailError('limit', 'daily delete limit reached'), false, [], { act: 'delete' })).toContain('daily delete limit')
+    expect(explain(new MailError('limit'), true)).toContain('sending limit')
+  })
+})
+
+describe('a request the host has already spent (replays)', () => {
+  it('a send it already took is said as sent: the composer closes, Sent is read again, and nothing offers to send it twice', async () => {
+    const service = fakeService({ send: vi.fn(async () => { throw new MailError('conflict', ALREADY_SENT) }) })
+    await windowWith(service)
+    press('Sent'); await settle()
+    const readsOfSent = (): number => service.list.mock.calls.filter(call => call[1] === 'sent').length
+    const before = readsOfSent()
+    press('Write')
+    fill('to', 'friend@example.org'); fill('subject', 'hi'); fill('text', 'body')
+    ;(panel().querySelector('form') as HTMLFormElement).requestSubmit()
+    await settle()
+    expect(service.send).toHaveBeenCalledTimes(1)
+    expect(said()).toBe('This message was already sent; it is in Sent.')
+    expect(panel().querySelector('form')).toBeNull()
+    expect(readsOfSent()).toBe(before + 1)
+    expect(buttons().map(b => b.textContent)).not.toContain('Try again')
+    expect(panel().querySelector('.hc-mail-said.is-bad:not([hidden])')).toBeNull()
+  })
+
+  it('a mark it already made is not an error: the folder is read again quietly and shows what the host holds', async () => {
+    let hidden = false
+    const service = fakeService({
+      list: vi.fn(async (_a: string, folder: string) => ({ items: folder === 'box' ? [{ sig: SIG, at: 2, meta: { subject: 'plans', at: 2 }, marks: hidden ? { hidden: true } : null }] : [], cursor: null })),
+      setMarks: vi.fn(async () => { hidden = true; throw new MailError('conflict', ALREADY_DONE) }),
+    })
+    await windowWith(service)
+    ;(rows()[0]!.querySelector('.hc-mail-row-acts button') as HTMLButtonElement).click()
+    await settle()
+    expect(said()).toBe('')
+    expect(rows()).toHaveLength(0) // the host had hidden it; the inbox now says so
+  })
+
+  it('a delete it already made drops the row without a word', async () => {
+    const service = fakeService({
+      list: vi.fn(async (_a: string, folder: string) => ({ items: folder === 'box' ? [{ sig: SIG, at: 1, meta: { subject: 'x', at: 1 }, marks: { hidden: true, deletable: true } }] : [], cursor: null })),
+      remove: vi.fn(async () => { throw new MailError('conflict', ALREADY_DONE) }),
+    })
+    await windowWith(service)
+    press('Hidden'); await settle()
+    service.list.mockImplementation(async () => ({ items: [], cursor: null }))
+    press('Delete'); await settle()
+    expect(rows()).toHaveLength(0)
+    expect(said()).toBe('')
+  })
+
+  it('Delete says what it means — the host’s trash for 30 days — and a daily delete limit in its own words', async () => {
+    const service = fakeService({
+      list: vi.fn(async (_a: string, folder: string) => ({ items: folder === 'box' ? [{ sig: SIG, at: 1, meta: { subject: 'x', at: 1 }, marks: { hidden: true, deletable: true } }] : [], cursor: null })),
+      remove: vi.fn(async () => { throw new MailError('limit', 'daily delete limit reached') }),
+    })
+    await windowWith(service)
+    press('Hidden'); await settle()
+    expect(panel().textContent).toContain('the host keeps it 30 days, then it is gone')
+    expect(button('Delete').title).toBe('Removes it from your mailbox. The host keeps it 30 days, then it is gone.')
+    expect(panel().textContent).not.toMatch(/permanent/i)
+    press('Delete'); await settle()
+    expect(said()).toContain('daily delete limit')
+    expect(rows()).toHaveLength(1)
+  })
+})
+
+describe('the unread cue', () => {
+  it('asks nothing while the page is hidden, and an arrival lights the pill but never opens the window', async () => {
+    const service = fakeService()
+    let visible = false
+    const counts: number[] = []
+    const pills: { key: string; label: string }[] = []
+    const offs = [
+      EffectBus.on<{ count: number }>(MAIL_UNREAD, p => counts.push(p.count)),
+      EffectBus.on<{ key: string; label: string }>('indicator:set', p => { if (p.key === UNREAD_INDICATOR) pills.push(p) }),
+    ]
+    try {
+      const element = await windowWith(service, e => { e.pollEveryMs = 10; e.visible = () => visible })
+      key('Escape') // closed: from here on only the poll asks
+      const asked = service.list.mock.calls.length
+      await wait(60)
+      expect(service.list.mock.calls.length).toBe(asked)
+
+      visible = true
+      service.list.mockImplementation(async () => ({ items: [{ sig: SIG, at: 9, meta: null }, { sig: SIG2, at: 8, meta: null }, { sig: SIG3, at: 7, meta: null, marks: { read: true } }], cursor: null }))
+      await wait(60)
+      expect(service.list.mock.calls.length).toBeGreaterThan(asked)
+      expect(counts.at(-1)).toBe(2)
+      expect(pills.at(-1)?.label).toBe('2 unread')
+      expect(element.isOpen).toBe(false)
+      expect(document.querySelector('.hc-mail')).toBeNull()
+
+      EffectBus.emit('indicator:activate', { key: UNREAD_INDICATOR }) // the participant's press on the pill
+      expect(element.isOpen).toBe(true)
+    } finally {
+      for (const off of offs) off()
+    }
+  })
+
+  it('stops asking after two failures in a row', async () => {
+    const service = fakeService()
+    const element = await windowWith(service, e => { e.pollEveryMs = 10 })
+    element.close()
+    service.list.mockImplementation(async () => { throw new MailError('unavailable') })
+    const asked = service.list.mock.calls.length
+    await wait(100)
+    expect(service.list.mock.calls.length).toBe(asked + 2)
+  })
+
+  it('does not open for a pill press made before it was listening', async () => {
+    EffectBus.emit('indicator:activate', { key: UNREAD_INDICATOR })
+    const element = document.createElement('hc-mail') as MailElement
+    element.service = fakeService() as unknown as MailService
+    document.body.appendChild(element)
+    mounted = element
+    await settle()
+    expect(element.isOpen).toBe(false)
+  })
+})
+
+describe('keyboard', () => {
+  it('j and k move between rows, Enter opens the one in focus', async () => {
+    await windowWith(fakeService())
+    key('j')
+    expect(document.activeElement).toBe(rows()[0])
+    key('j')
+    expect(document.activeElement).toBe(rows()[1])
+    key('k')
+    expect(document.activeElement).toBe(rows()[0])
+    key('Enter', rows()[0]!)
+    await settle()
+    expect(panel().querySelector('.hc-mail-text')?.textContent).toBe('the plain text')
+  })
+
+  it('leaves j and k to a field being typed in', async () => {
+    await windowWith(fakeService())
+    const search = panel().querySelector('.hc-mail-search') as HTMLInputElement
+    search.focus()
+    key('j', search)
+    expect(document.activeElement).toBe(search)
+    expect(search.hasAttribute('data-escape-local')).toBe(true)
   })
 })
 
@@ -264,7 +1049,7 @@ describe('leaving', () => {
 
 describe('explain', () => {
   it('has words for every way mail can fail', () => {
-    for (const code of ['no-signer', 'no-key', 'unauthorized', 'not-found', 'limit', 'refused', 'bad-message', 'unavailable'] as const) {
+    for (const code of ['no-signer', 'no-key', 'unauthorized', 'not-found', 'limit', 'refused', 'bad-message', 'unavailable', 'conflict'] as const) {
       expect(explain(new MailError(code, 'why')).length).toBeGreaterThan(10)
     }
     expect(explain(new MailError('unavailable'), true)).toContain('Nothing was sent')

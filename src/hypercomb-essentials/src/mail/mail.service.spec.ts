@@ -13,7 +13,9 @@ import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure
 import worker from '../../../hypercomb-relay/mail-worker/worker.js'
 // @ts-ignore
 import { FakeR2, streamOf } from '../../../hypercomb-relay/mail-test-helpers.js'
-import { MailError, MailService, type MailSigner } from './mail.service.js'
+// @ts-ignore
+import { sealMessageV1 } from '../../../hypercomb-relay/mail-worker/seal.js'
+import { ALREADY_DONE, ALREADY_SENT, MAIL_ACTS, MAIL_LIMITS, MailError, MailService, sentAttachmentBytes, unreadCount, type MailListItem, type MailSigner } from './mail.service.js'
 
 const enc = new TextEncoder()
 const jaime = generateSecretKey()
@@ -50,6 +52,7 @@ function host(extra: Record<string, unknown> = {}) {
     MAIL,
     EMAIL: { send: async (message: unknown) => { sent.push(message); return { messageId: `<out-${sent.length}@hypercomb.com>` } } },
     MAIL_KEYS: JSON.stringify({ [ME]: getPublicKey(jaime), 'leanne@hypercomb.com': getPublicKey(leanne) }),
+    MAIL_NAMES: JSON.stringify({ [ME]: 'Jaime' }),
     ...extra,
   }
   const fetch = async (url: string, init: RequestInit) => worker.fetch(new Request(url, init), env) as Promise<Response>
@@ -105,6 +108,17 @@ describe('reading', () => {
     expect(mail.attachments).toEqual([{ filename: 'plan.pdf', type: 'application/pdf', size: 50 }])
   })
 
+  it('hands over the raw bytes of a received message, which are exactly what was sealed', async () => {
+    const h = host()
+    await h.arrive(MIME)
+    const s = service(h, signerFor(jaime))
+    const [item] = (await s.list(ME, 'box')).items
+    const raw = await s.readRaw(ME, item!.sig)
+    expect(raw).toBeInstanceOf(Uint8Array)
+    expect(new TextDecoder().decode(raw)).toBe(MIME)
+    await expect(service(h, signerFor(leanne)).readRaw(ME, item!.sig)).rejects.toMatchObject({ code: 'unauthorized' })
+  })
+
   it('cannot read another address\'s mail, by list or by signature', async () => {
     const h = host()
     await h.arrive(MIME, 'leanne@hypercomb.com')
@@ -147,7 +161,8 @@ describe('sending', () => {
     const out = await service(h, signerFor(jaime)).send({ from: ME, to: ['friend@example.org'], subject: 'Hello', text: 'A line.' })
     expect(out.messageId).toBe('<out-1@hypercomb.com>')
     expect(out.sig).toMatch(/^[a-f0-9]{64}$/)
-    expect(h.sent).toEqual([{ from: ME, to: ['friend@example.org'], subject: 'Hello', text: 'A line.' }])
+    // The host has a name for the address, so the mail goes out as `Jaime <jaime@hypercomb.com>`.
+    expect(h.sent).toEqual([{ from: { email: ME, name: 'Jaime' }, to: ['friend@example.org'], subject: 'Hello', text: 'A line.' }])
 
     const s = service(h, signerFor(jaime))
     const [item] = (await s.list(ME, 'sent')).items
@@ -217,5 +232,425 @@ describe('the key', () => {
     const down = new MailService({ fetch: async () => { throw new TypeError('network') }, signer: () => signerFor(jaime), extension: () => false })
     await expect(down.addresses()).rejects.toBeInstanceOf(MailError)
     await expect(down.addresses()).rejects.toMatchObject({ code: 'unavailable' })
+  })
+})
+
+const sha256Hex = async (text: string): Promise<string> =>
+  Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(text))), b => b.toString(16).padStart(2, '0')).join('')
+
+describe('who am I, by name', () => {
+  it('answers each mailbox with its name and the host that serves it', async () => {
+    const h = host()
+    expect(await service(h, signerFor(jaime)).mailboxes()).toEqual([{ address: ME, name: 'Jaime', host: 'https://hypercomb.com', can: MAIL_ACTS }])
+    expect(await service(h, signerFor(leanne)).mailboxes()).toEqual([{ address: 'leanne@hypercomb.com', host: 'https://hypercomb.com', can: MAIL_ACTS }])
+  })
+})
+
+describe('the list, as it opens', () => {
+  it('opens v2 metadata with everything the Worker sealed, and carries the version, the wraps and the marks', async () => {
+    const h = host()
+    await h.arrive(MIME)
+    const [item] = (await service(h, signerFor(jaime)).list(ME, 'box')).items
+    expect(item).toMatchObject({ v: 2, marks: null })
+    expect(item!.wraps).toHaveLength(1)
+    expect(item!.wraps![0]!.to).toBe(getPublicKey(jaime))
+    expect(item!.meta).toMatchObject({ from: 'ana@example.org', messageId: '<m1@example.org>', hasAttachments: true, preview: 'see the attachment' })
+  })
+
+  it('reports each row the moment its metadata opens, then answers the page newest first', async () => {
+    const h = host()
+    for (const n of [1, 2, 3]) {
+      await h.arrive(`From: n${n}@example.org\r\nSubject: number ${n}\r\n\r\nhello\r\n`)
+      await new Promise(resolve => setTimeout(resolve, 5))
+    }
+    const heard: { subject?: string; opened: number; total: number }[] = []
+    const page = await service(h, signerFor(jaime)).list(ME, 'box', null, (item, progress) => heard.push({ subject: item.meta?.subject, ...progress }))
+    expect(heard.map(e => e.opened)).toEqual([1, 2, 3])
+    expect(heard.every(e => e.total === 3)).toBe(true)
+    expect(new Set(heard.map(e => e.subject))).toEqual(new Set(['number 1', 'number 2', 'number 3']))
+    expect(page.items.map(i => i.meta?.subject)).toEqual(['number 3', 'number 2', 'number 1'])
+  })
+
+  it('keeps the page when a listener throws', async () => {
+    const h = host()
+    await h.arrive(MIME)
+    const page = await service(h, signerFor(jaime)).list(ME, 'box', null, () => { throw new Error('the window tripped') })
+    expect(page.items).toHaveLength(1)
+  })
+
+  it('still lists and opens a message an older Worker sealed (v1)', async () => {
+    const h = host()
+    const raw = enc.encode('From: old@example.org\r\nSubject: from before\r\n\r\nkept\r\n')
+    const sealed = await sealMessageV1(raw, getPublicKey(jaime), { from: 'old@example.org', subject: 'from before', at: 7 })
+    await h.MAIL.put(`${await sha256Hex(`mail:${ME}`)}/${sealed.sig}`, sealed.envelope, { customMetadata: sealed.customMetadata })
+    await h.arrive(MIME)
+    const s = service(h, signerFor(jaime))
+    const items = (await s.list(ME, 'box')).items
+    const old = items.find(i => i.sig === sealed.sig)!
+    expect(old).toMatchObject({ v: 1, meta: { subject: 'from before', at: 7 } })
+    expect(old.wraps).toBeUndefined()
+    expect(items[0]!.v).toBe(2) // the newer one first
+    expect((await s.read(ME, sealed.sig)).text).toBe('kept')
+  })
+
+  it('refuses bytes that are not the message asked for', async () => {
+    const h = host()
+    await h.arrive(MIME)
+    await h.arrive('From: bo@example.org\r\nSubject: second\r\n\r\nhello\r\n')
+    const [a, b] = (await service(h, signerFor(jaime)).list(ME, 'box')).items
+    const pool = await sha256Hex(`mail:${ME}`)
+    h.MAIL.map.set(`${pool}/${a!.sig}`, h.MAIL.map.get(`${pool}/${b!.sig}`))
+    await expect(service(h, signerFor(jaime)).read(ME, a!.sig)).rejects.toMatchObject({ code: 'bad-message' })
+  })
+})
+
+describe('marks, hiding and forgetting', () => {
+  it('marks a message, and the list carries the marks', async () => {
+    const h = host()
+    await h.arrive(MIME)
+    const s = service(h, signerFor(jaime))
+    const [item] = (await s.list(ME, 'box')).items
+    expect(unreadCount([item!])).toBe(1)
+    const marks = await s.setMarks(ME, 'box', item!.sig, { read: true, flagged: true })
+    expect(marks).toMatchObject({ read: true, flagged: true })
+    expect(typeof marks.at).toBe('number')
+    const [after] = (await s.list(ME, 'box')).items
+    expect(after!.marks).toMatchObject({ read: true, flagged: true })
+    expect(unreadCount([after!])).toBe(0)
+    expect(unreadCount([{ marks: { hidden: true } }, { marks: null }, { marks: { read: false } }])).toBe(2)
+  })
+
+  it('sends only the four marks, and says not-found for a message that is not there', async () => {
+    const h = host()
+    await h.arrive(MIME)
+    const s = service(h, signerFor(jaime))
+    const [item] = (await s.list(ME, 'box')).items
+    const marks = await s.setMarks(ME, 'box', item!.sig, { read: true, ...({ owner: 'me' } as object) })
+    expect(Object.keys(marks).sort()).toEqual(['at', 'read'])
+    await expect(s.setMarks(ME, 'box', 'a'.repeat(64), { read: true })).rejects.toMatchObject({ code: 'not-found' })
+  })
+
+  it('forgets a message only once it is hidden and marked deletable (hide first, delete second)', async () => {
+    const h = host()
+    await h.arrive(MIME)
+    const s = service(h, signerFor(jaime))
+    const heard = vi.fn()
+    s.addEventListener('change', heard)
+    const [item] = (await s.list(ME, 'box')).items
+    await expect(s.remove(ME, 'box', item!.sig)).rejects.toMatchObject({ code: 'conflict' })
+    await s.setMarks(ME, 'box', item!.sig, { hidden: true })
+    await expect(s.remove(ME, 'box', item!.sig)).rejects.toMatchObject({ code: 'conflict' })
+    await s.setMarks(ME, 'box', item!.sig, { deletable: true })
+    await s.remove(ME, 'box', item!.sig)
+    expect((await s.list(ME, 'box')).items).toEqual([])
+    await expect(s.read(ME, item!.sig)).rejects.toMatchObject({ code: 'not-found' })
+    await expect(s.remove(ME, 'box', item!.sig)).rejects.toMatchObject({ code: 'not-found' })
+    expect(heard).toHaveBeenCalled()
+  })
+})
+
+describe('drafts', () => {
+  it('keeps a draft, lists it, reads it back and forgets it', async () => {
+    const h = host()
+    const s = service(h, signerFor(jaime))
+    const { sig, replaced } = await s.saveDraft(ME, { to: ['friend@example.org', 'b@example.org'], subject: 'Half done', text: 'so far' })
+    expect(sig).toMatch(/^[a-f0-9]{64}$/)
+    expect(replaced).toBe(false)
+    const [item] = (await s.list(ME, 'drafts')).items
+    expect(item).toMatchObject({ sig, v: 2, marks: null, meta: { to: 'friend@example.org, b@example.org', subject: 'Half done' } })
+    expect(await s.readDraft(ME, sig)).toEqual({ to: ['friend@example.org', 'b@example.org'], subject: 'Half done', text: 'so far' })
+    await s.removeDraft(ME, sig)
+    expect((await s.list(ME, 'drafts')).items).toEqual([])
+  })
+
+  it('replaces the draft it grew from, and carries attachments as base64', async () => {
+    const h = host()
+    const s = service(h, signerFor(jaime))
+    const first = await s.saveDraft(ME, { subject: 'v1', text: 'a' })
+    const bytes = new Uint8Array([0, 1, 2, 250, 255])
+    const attachments = [{ filename: 'x.bin', type: 'application/octet-stream', content: bytes }]
+    const second = await s.saveDraft(ME, { subject: 'v2', text: 'ab', attachments }, first.sig)
+    expect(second.replaced).toBe(true)
+    expect((await s.list(ME, 'drafts')).items.map(i => i.sig)).toEqual([second.sig])
+    const draft = await s.readDraft(ME, second.sig)
+    expect(Array.from(sentAttachmentBytes(draft.attachments![0]!)!)).toEqual(Array.from(bytes))
+    // The same draft twice is one draft, and replacing itself forgets nothing.
+    expect(await s.saveDraft(ME, { subject: 'v2', text: 'ab', attachments }, second.sig)).toEqual({ sig: second.sig, replaced: false })
+  })
+
+  it('carries no marks: the host refuses them', async () => {
+    const h = host()
+    const s = service(h, signerFor(jaime))
+    const { sig } = await s.saveDraft(ME, { subject: 's' })
+    await expect(s.setMarks(ME, 'drafts', sig, { read: true })).rejects.toMatchObject({ code: 'refused' })
+  })
+
+  it('refuses a draft too large before it is sent', async () => {
+    const h = host()
+    const fetch = vi.fn(h.fetch)
+    const s = new MailService({ fetch, signer: () => signerFor(jaime), extension: () => false })
+    await expect(s.saveDraft(ME, { text: 'x'.repeat(MAIL_LIMITS.draftBytes) })).rejects.toMatchObject({ code: 'refused' })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+})
+
+describe('sending with attachments', () => {
+  it('base64s the attachments for the wire, and the Sent copy keeps them', async () => {
+    const h = host()
+    const s = service(h, signerFor(jaime))
+    const pdf = enc.encode('%PDF-1.4 pretend')
+    const out = await s.send({
+      from: ME, to: ['friend@example.org'], subject: 'Plans', text: 'attached', html: '<p>attached</p>',
+      attachments: [{ filename: 'plan.pdf', type: 'application/pdf', content: pdf }, { filename: 'note.txt', type: 'text/plain', content: btoa('hi') }],
+    })
+    expect(h.sent[0]).toMatchObject({
+      from: { email: ME, name: 'Jaime' },
+      html: '<p>attached</p>',
+      attachments: [
+        { filename: 'plan.pdf', type: 'application/pdf', content: btoa('%PDF-1.4 pretend'), disposition: 'attachment' },
+        { filename: 'note.txt', type: 'text/plain', content: btoa('hi'), disposition: 'attachment' },
+      ],
+    })
+    const [item] = (await s.list(ME, 'sent')).items
+    expect(item!.sig).toBe(out.sig)
+    expect(item!.meta?.hasAttachments).toBe(true)
+    const record = await s.readSent(ME, out.sig!)
+    expect(record.name).toBe('Jaime')
+    expect(record.html).toBe('<p>attached</p>')
+    expect(record.attachments!.map(a => a.filename)).toEqual(['plan.pdf', 'note.txt'])
+    expect(Array.from(sentAttachmentBytes(record.attachments![0]!)!)).toEqual(Array.from(pdf))
+  })
+
+  it('refuses too many or too large attachments before a byte is sent', async () => {
+    const h = host()
+    const fetch = vi.fn(h.fetch)
+    const s = new MailService({ fetch, signer: () => signerFor(jaime), extension: () => false })
+    const one = { filename: 'a', type: 'text/plain', content: btoa('a') }
+    await expect(s.send({ from: ME, to: ['a@example.org'], subject: 's', text: 't', attachments: Array.from({ length: MAIL_LIMITS.attachments + 1 }, () => one) }))
+      .rejects.toMatchObject({ code: 'refused', detail: 'too many attachments' })
+    await expect(s.send({ from: ME, to: ['a@example.org'], subject: 's', text: 't', attachments: [{ filename: 'big', type: 'application/octet-stream', content: new Uint8Array(MAIL_LIMITS.attachmentBytes + 1) }] }))
+      .rejects.toMatchObject({ code: 'refused', detail: 'attachments too large' })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('passes on the host\'s own refusal of an attachment', async () => {
+    const h = host()
+    await expect(service(h, signerFor(jaime)).send({ from: ME, to: ['a@example.org'], subject: 's', text: 't', attachments: [{ filename: 'x', type: 'not a type', content: btoa('x') }] }))
+      .rejects.toMatchObject({ code: 'refused' })
+    expect(h.sent).toEqual([])
+  })
+})
+
+describe('more than one host', () => {
+  const ANA = 'ana@example.org'
+  const SOCIAL = 'jaime@hypercomb.social'
+
+  /** Hosts by origin: a missing or 'down' origin does not answer; 'static' answers every path with its home page. */
+  function hosts(table: Record<string, ReturnType<typeof host> | 'down' | 'static'>) {
+    const asked: string[] = []
+    const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+      const { origin, pathname } = new URL(url)
+      asked.push(`${init.method ?? 'GET'} ${origin}${pathname}`)
+      const entry = table[origin]
+      if (!entry || entry === 'down') throw new TypeError('network')
+      if (entry === 'static') return new Response('<!doctype html><title>home</title>', { status: 200, headers: { 'content-type': 'text/html' } })
+      return entry.fetch(url, init)
+    }
+    return { fetch, asked }
+  }
+  const over = (net: ReturnType<typeof hosts>, list?: string[]) =>
+    new MailService({ fetch: net.fetch, signer: () => signerFor(jaime), extension: () => false }, list)
+
+  it('unions the addresses across hosts and asks each address of the host that claimed it', async () => {
+    const main = host()
+    const other = host({ MAIL_KEYS: JSON.stringify({ [ANA]: getPublicKey(jaime) }), MAIL_NAMES: '{}' })
+    await other.arrive('From: x@example.org\r\nSubject: on the other host\r\n\r\nhi\r\n', ANA)
+    const net = hosts({ 'https://hypercomb.com': main, 'https://mail.example.org': other })
+    const s = over(net, ['https://hypercomb.com', 'mail.example.org'])
+    expect(s.hosts).toEqual(['https://hypercomb.com', 'https://mail.example.org'])
+    expect(await s.mailboxes()).toEqual([
+      { address: ANA, host: 'https://mail.example.org', can: MAIL_ACTS },
+      { address: ME, name: 'Jaime', host: 'https://hypercomb.com', can: MAIL_ACTS },
+    ])
+    expect(await s.addresses()).toEqual([ANA, ME])
+    net.asked.length = 0
+    expect((await s.list(ANA, 'box')).items.map(i => i.meta?.subject)).toEqual(['on the other host'])
+    expect(net.asked).toEqual([`GET https://mail.example.org/mail/box/${encodeURIComponent(ANA)}`])
+  })
+
+  it('leaves out only the addresses of a host that does not answer', async () => {
+    const net = hosts({ 'https://hypercomb.com': host() })
+    expect(await over(net, ['https://down.example.org', 'https://hypercomb.com']).addresses()).toEqual([ME])
+  })
+
+  it('asks an address of its own domain first, then the given hosts, and remembers the one that served it', async () => {
+    const main = host({ MAIL_KEYS: JSON.stringify({ [SOCIAL]: getPublicKey(jaime) }) })
+    await main.arrive('From: x@example.org\r\nSubject: here\r\n\r\nhi\r\n', SOCIAL)
+    const net = hosts({ 'https://hypercomb.com': main, 'https://hypercomb.social': 'static' })
+    const s = over(net)
+    expect((await s.list(SOCIAL, 'box')).items).toHaveLength(1)
+    expect(net.asked.map(a => a.split('/mail')[0])).toEqual(['GET https://hypercomb.social', 'GET https://hypercomb.com'])
+    net.asked.length = 0
+    const [item] = (await s.list(SOCIAL, 'box')).items
+    await s.read(SOCIAL, item!.sig)
+    expect(net.asked).toHaveLength(2)
+    expect(net.asked.every(a => a.includes('https://hypercomb.com/'))).toBe(true)
+  })
+
+  it('passes on the most telling answer when no host serves the address', async () => {
+    await expect(over(hosts({ 'https://hypercomb.com': host(), 'https://nowhere.example': 'down' })).list('who@nowhere.example', 'box'))
+      .rejects.toMatchObject({ code: 'unauthorized' })
+    const dark = over(hosts({}))
+    await expect(dark.list('who@nowhere.example', 'box')).rejects.toMatchObject({ code: 'unavailable' })
+    await expect(dark.addresses()).rejects.toMatchObject({ code: 'unavailable' })
+  })
+
+  it('never sends twice: a send that got no answer is not tried on the next host', async () => {
+    const main = host({ MAIL_KEYS: JSON.stringify({ [SOCIAL]: getPublicKey(jaime) }) })
+    await expect(over(hosts({ 'https://hypercomb.com': main, 'https://hypercomb.social': 'down' })).send({ from: SOCIAL, to: ['a@example.org'], subject: 's', text: 't' }))
+      .rejects.toMatchObject({ code: 'unavailable' })
+    expect(main.sent).toEqual([])
+    // A host that plainly does not know the key lets the next one be asked.
+    const out = await over(hosts({ 'https://hypercomb.com': main, 'https://hypercomb.social': host() })).send({ from: SOCIAL, to: ['a@example.org'], subject: 's', text: 't' })
+    expect(out.sig).toMatch(/^[a-f0-9]{64}$/)
+    expect(main.sent).toHaveLength(1)
+  })
+})
+
+describe('every way it can fail has a name', () => {
+  it('reaches every MailError code', async () => {
+    const h = host()
+    await h.arrive(MIME)
+    const seen = new Set<string>()
+    const code = async (act: Promise<unknown>): Promise<void> => {
+      try { await act } catch (error) { if (error instanceof MailError) seen.add(error.code) }
+    }
+    const s = service(h, signerFor(jaime))
+    const [item] = (await s.list(ME, 'box')).items as MailListItem[]
+    await code(service(h, undefined).addresses())                                         // no-signer
+    await code(service(h, signerFor(null)).addresses())                                   // no-key
+    await code(service(h, signerFor(leanne)).list(ME, 'box'))                             // unauthorized
+    await code(s.read(ME, 'b'.repeat(64)))                                                // not-found
+    await code(s.remove(ME, 'box', item!.sig))                                            // conflict
+    await code(s.send({ from: ME, to: ['nope'], subject: 's', text: 't' }))               // refused
+    await code(service(h, signerFor(jaime, { nip44Decrypt: async () => null })).read(ME, item!.sig)) // bad-message
+    await code(new MailService({ fetch: async () => { throw new TypeError('x') }, signer: () => signerFor(jaime), extension: () => false }).addresses()) // unavailable
+    const capped = service(host({ MAX_SEND_PER_DAY: '1' }), signerFor(jaime))
+    await capped.send({ from: ME, to: ['a@example.org'], subject: 's', text: 't' })
+    await code(capped.send({ from: ME, to: ['a@example.org'], subject: 's', text: 't' })) // limit
+    const reader = generateSecretKey()
+    const roles = host({ MAIL_KEYS: JSON.stringify({ [ME]: [getPublicKey(jaime), { key: getPublicKey(reader), can: ['read'] }] }) })
+    await code(service(roles, signerFor(reader)).send({ from: ME, to: ['a@example.org'], subject: 's', text: 't' })) // forbidden
+    expect([...seen].sort()).toEqual(['bad-message', 'conflict', 'forbidden', 'limit', 'no-key', 'no-signer', 'not-found', 'refused', 'unauthorized', 'unavailable'])
+  })
+})
+
+/** The NIP-98 event a request was signed with. */
+const eventOf = (init: RequestInit): { id: string; tags: string[][] } =>
+  JSON.parse(decodeURIComponent(escape(atob(String((init.headers as Record<string, string>)['authorization']).slice('Nostr '.length)))))
+
+describe('after the security review (R1)', () => {
+  it('puts a fresh nonce in every write, none in a read, so two identical writes in one second both land', async () => {
+    const h = host()
+    await h.arrive(MIME)
+    const seen: { method: string; tags: string[][]; id: string }[] = []
+    const fetch = async (url: string, init: RequestInit) => {
+      const event = eventOf(init)
+      seen.push({ method: init.method ?? 'GET', tags: event.tags, id: event.id })
+      return h.fetch(url, init)
+    }
+    // One clock for all of it: without the nonce the two mark writes would be one event.
+    const s = new MailService({ fetch, signer: () => signerFor(jaime), extension: () => false, now: () => Date.now() - (Date.now() % 1000) })
+    const [item] = (await s.list(ME, 'box')).items
+    await s.setMarks(ME, 'box', item!.sig, { read: true })
+    await s.setMarks(ME, 'box', item!.sig, { read: true })
+    const draft = await s.saveDraft(ME, { subject: 'd' })
+    await s.removeDraft(ME, draft.sig)
+    await s.send({ from: ME, to: ['a@example.org'], subject: 's', text: 't' })
+    const nonce = (tags: string[][]) => tags.find(t => t[0] === 'nonce')?.[1]
+    for (const r of seen) {
+      if (r.method === 'GET') expect(nonce(r.tags)).toBeUndefined()
+      else expect(nonce(r.tags)).toMatch(/^[a-f0-9]{32}$/)
+    }
+    const writes = seen.filter(r => r.method !== 'GET')
+    expect(writes.map(r => r.method)).toEqual(['PUT', 'PUT', 'PUT', 'DELETE', 'POST'])
+    expect(new Set(writes.map(r => r.id)).size).toBe(writes.length)
+    expect(h.sent).toHaveLength(1)
+  })
+
+  it('says a send went already when the host saw that very request before, and sends nothing again', async () => {
+    const h = host()
+    // Something between the hive and the host (a proxy, an extension) sends the same signed request twice.
+    const fetch = async (url: string, init: RequestInit) => {
+      if ((init.method ?? 'GET') !== 'POST') return h.fetch(url, init)
+      await h.fetch(url, init)
+      return h.fetch(url, init)
+    }
+    const s = new MailService({ fetch, signer: () => signerFor(jaime), extension: () => false })
+    const changes: unknown[] = []
+    s.addEventListener('change', event => changes.push((event as CustomEvent).detail))
+    await expect(s.send({ from: ME, to: ['a@example.org'], subject: 's', text: 't' })).rejects.toMatchObject({ code: 'conflict', detail: ALREADY_SENT })
+    expect(h.sent).toHaveLength(1)
+    expect(changes).toEqual([{ sent: true }]) // Sent has the copy: the window refreshes it
+    expect((await service(h, signerFor(jaime)).list(ME, 'sent')).items).toHaveLength(1)
+  })
+
+  it('tells a replayed write apart from "hide it first"', async () => {
+    const h = host()
+    await h.arrive(MIME)
+    const fetch = async (url: string, init: RequestInit) => {
+      if ((init.method ?? 'GET') !== 'PUT') return h.fetch(url, init)
+      await h.fetch(url, init)
+      return h.fetch(url, init)
+    }
+    const s = new MailService({ fetch, signer: () => signerFor(jaime), extension: () => false })
+    const [item] = (await s.list(ME, 'box')).items
+    await expect(s.setMarks(ME, 'box', item!.sig, { read: true })).rejects.toMatchObject({ code: 'conflict', detail: ALREADY_DONE })
+    expect((await s.list(ME, 'box')).items[0]!.marks).toMatchObject({ read: true }) // the first one did land
+    const plain = service(h, signerFor(jaime))
+    const refused = await plain.remove(ME, 'box', item!.sig).catch((error: unknown) => error as MailError)
+    expect(refused).toMatchObject({ code: 'conflict' })
+    expect((refused as MailError).detail).not.toBe(ALREADY_DONE)
+  })
+
+  it('carries what each key may do, and names the act a key with a role was refused', async () => {
+    const reader = generateSecretKey()
+    const h = host({ MAIL_KEYS: JSON.stringify({ [ME]: [getPublicKey(jaime), { key: getPublicKey(reader), can: ['read'] }] }) })
+    await h.arrive(MIME)
+    expect((await service(h, signerFor(jaime)).mailboxes())[0]!.can).toEqual(MAIL_ACTS)
+    const s = service(h, signerFor(reader))
+    expect(await s.mailboxes()).toEqual([{ address: ME, name: 'Jaime', host: 'https://hypercomb.com', can: ['read'] }])
+    // It still reads: every listed key is sealed to.
+    const [item] = (await s.list(ME, 'box')).items
+    expect((await s.read(ME, item!.sig)).text).toBe('see the attachment')
+    await expect(s.setMarks(ME, 'box', item!.sig, { read: true })).rejects.toMatchObject({ code: 'forbidden', detail: 'mark' })
+    await expect(s.saveDraft(ME, { subject: 'd' })).rejects.toMatchObject({ code: 'forbidden', detail: 'draft' })
+    await expect(s.remove(ME, 'box', item!.sig)).rejects.toMatchObject({ code: 'forbidden', detail: 'delete' })
+    await expect(s.send({ from: ME, to: ['a@example.org'], subject: 's', text: 't' })).rejects.toMatchObject({ code: 'forbidden', detail: 'send' })
+    expect(h.sent).toHaveLength(0)
+  })
+
+  it('reads a host from before roles as giving every act', async () => {
+    const fetch = async () => new Response(JSON.stringify({ addresses: [ME] }), { headers: { 'content-type': 'application/json' } })
+    const s = new MailService({ fetch, signer: () => signerFor(jaime), extension: () => false })
+    expect((await s.mailboxes())[0]!.can).toEqual(MAIL_ACTS)
+  })
+
+  it('does not open a list line the host moved onto another message', async () => {
+    const h = host()
+    await h.arrive(MIME)
+    await h.arrive('From: bo@example.org\r\nSubject: second\r\n\r\nhello\r\n')
+    const pool = await sha256Hex(`mail:${ME}`)
+    const [a, b] = (await service(h, signerFor(jaime)).list(ME, 'box')).items
+    const from = (await h.MAIL.get(`${pool}/${a!.sig}`))!
+    const to = (await h.MAIL.get(`${pool}/${b!.sig}`))!
+    await h.MAIL.put(`${pool}/${b!.sig}`, new Uint8Array(await to.arrayBuffer()), { customMetadata: from.customMetadata })
+    const items = (await service(h, signerFor(jaime)).list(ME, 'box')).items
+    expect(items.find(i => i.sig === a!.sig)!.meta).not.toBeNull()
+    expect(items.find(i => i.sig === b!.sig)!.meta).toBeNull()
+  })
+
+  it('keeps the lowered caps', () => {
+    expect(MAIL_LIMITS).toMatchObject({ attachments: 10, attachmentBytes: 6 * 1024 * 1024, recipients: 20, sendBytes: 10 * 1024 * 1024 })
   })
 })
