@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 // quick-tray.selection.spec.ts — the selection shelf, as it is RENDERED. Two
-// or more selected tiles take the shelf's band; the shelf's own rows wait,
-// untouched, and come back when the selection drops below two. Driven by the
-// real SelectionService, so `replace` is the one the drones call.
+// or more selected tiles take the shelf's slot; the shelf's own rows wait,
+// untouched, and come back when the selection drops below two. The selection
+// shelf lays over the canvas and never moves it. Driven by the real
+// SelectionService, so `replace` is the one the drones call.
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
 import { QuickTrayElement, defineQuickTray } from './quick-tray.element'
+import { entryKey } from './quick-tray.entries'
 import { SelectionService } from '../../selection/selection.service'
 
 const SELECTION_KEY = '@diamondcoreprocessor.com/SelectionService'
@@ -119,6 +121,193 @@ describe('the × on a selection row', () => {
     expect(tray.shadowRoot?.querySelector('.shelf.picks')).toBeNull()
     expect(labels(tray)).toEqual(['held-one', 'held-two'])
     expect(tray.shadowRoot?.querySelector('.fold')).not.toBeNull()
+  })
+})
+
+describe('the canvas under the selection shelf', () => {
+  // jsdom lays nothing out, so each strip is given a height of its own: the
+  // held shelf ends at 80, the selection shelf at 50. If the selection shelf
+  // reserved a band, the canvas would be asked for a different size.
+  beforeEach(() => {
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const bottom = this.classList.contains('picks') ? 50 : 80
+      return { bottom, top: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect
+    })
+  })
+  afterEach(() => { vi.restoreAllMocks() })
+
+  /** Every band the shelf asks the canvas for from here on (the replayed last
+   *  value is not a new ask). */
+  const watchBand = (): { sizes: number[]; last: () => number | undefined; stop: () => void } => {
+    const sizes: number[] = []
+    let current: number | undefined
+    const stop = EffectBus.on<{ owner?: string; size?: number }>('viewport:inset', (p) => {
+      if (p?.owner !== 'quick-tray') return
+      current = p.size
+      sizes.push(p.size!)
+    })
+    sizes.length = 0
+    return { sizes, last: () => current, stop }
+  }
+  // A selection lands on a frame, and the band is measured on the next one.
+  const settle = (): void => { flush(); flush() }
+
+  it('leaves the canvas where the shelf put it, however the selection comes and goes', () => {
+    settle()
+    const band = watchBand()
+    expect(band.last()).toBe(86)
+    selection.replace(['alpha', 'beta'])
+    settle()
+    expect(tray.shadowRoot?.querySelector('.shelf.picks')).not.toBeNull()
+    selection.replace([])
+    settle()
+    expect(tray.shadowRoot?.querySelector('.shelf.picks')).toBeNull()
+    expect(band.sizes).toEqual([])
+    band.stop()
+  })
+
+  it('reserves nothing when the shelf is folded', () => {
+    ;(tray.shadowRoot?.querySelector('.fold') as HTMLElement).click()
+    settle()
+    const band = watchBand()
+    expect(band.last()).toBe(0)
+    selection.replace(['alpha', 'beta'])
+    settle()
+    expect(tray.shadowRoot?.querySelector('.shelf.picks')).not.toBeNull()
+    expect(band.sizes).toEqual([])
+    band.stop()
+  })
+
+  it('is not asked for anything when the pair is turned over', () => {
+    settle()
+    selection.replace(['alpha', 'beta'])
+    settle()
+    const band = watchBand()
+    ;(tray.shadowRoot?.querySelector('.swap-btn[data-bring="shelf"]') as HTMLElement).click()
+    settle()
+    expect(tray.shadowRoot?.querySelector('.shelf.picks')).toBeNull()
+    ;(tray.shadowRoot?.querySelector('.swap-btn[data-bring="picks"]') as HTMLElement).click()
+    settle()
+    expect(tray.shadowRoot?.querySelector('.shelf.picks')).not.toBeNull()
+    expect(band.sizes).toEqual([])
+    band.stop()
+  })
+})
+
+describe('the shelf and the selection shelf, one forward at a time', () => {
+  const bring = (which: 'shelf' | 'picks'): void =>
+    (tray.shadowRoot?.querySelector(`.swap-btn[data-bring="${which}"]`) as HTMLElement).click()
+  const lit = (): string[] =>
+    [...(tray.shadowRoot?.querySelectorAll('.swap-btn.on') ?? [])].map(e => (e as HTMLElement).dataset['bring'] ?? '')
+
+  it('has no pair until a selection stands', () => {
+    expect(tray.shadowRoot?.querySelector('.swap')).toBeNull()
+    selection.add('alpha')
+    flush()
+    expect(tray.shadowRoot?.querySelector('.swap')).toBeNull()
+    expect(tray.shadowRoot?.querySelector('.fold')).not.toBeNull()
+  })
+
+  it('brings the selection forward at two, with the pair standing where the fold was', () => {
+    selection.replace(['alpha', 'beta'])
+    flush()
+    expect(tray.shadowRoot?.querySelectorAll('.swap-btn')).toHaveLength(2)
+    expect(lit()).toEqual(['picks'])
+    expect(tray.shadowRoot?.querySelector('.fold')).toBeNull()
+  })
+
+  it('brings the shelf forward on a press, and the selection back on another', () => {
+    selection.replace(['alpha', 'beta'])
+    flush()
+    bring('shelf')
+    expect(tray.shadowRoot?.querySelector('.shelf.picks')).toBeNull()
+    expect(labels(tray)).toEqual(['held-one', 'held-two'])
+    expect(lit()).toEqual(['shelf'])
+    expect(tray.picks).toEqual([])
+    bring('picks')
+    expect(labels(tray)).toEqual(['alpha', 'beta'])
+    expect(lit()).toEqual(['picks'])
+    expect(tray.picks).toEqual(['alpha', 'beta'])
+  })
+
+  it('says what the selection shelf lists only while it is the one forward', () => {
+    let last: { labels: string[]; shown: boolean } | undefined
+    const off = EffectBus.on<{ labels: string[]; shown: boolean }>('selection-shelf:changed', p => { last = p })
+    selection.replace(['alpha', 'beta'])
+    flush()
+    expect(last).toEqual({ labels: ['alpha', 'beta'], shown: true })
+    bring('shelf')
+    expect(last).toEqual({ labels: [], shown: false })
+    bring('picks')
+    expect(last).toEqual({ labels: ['alpha', 'beta'], shown: true })
+    off()
+  })
+
+  it('keeps the shelf forward while the selection is added to or trimmed', () => {
+    selection.replace(['alpha', 'beta'])
+    flush()
+    bring('shelf')
+    selection.replace(['alpha', 'beta', 'gamma'])
+    flush()
+    expect(labels(tray)).toEqual(['held-one', 'held-two'])
+    selection.replace(['alpha', 'beta'])
+    flush()
+    expect(labels(tray)).toEqual(['held-one', 'held-two'])
+  })
+
+  it('brings the selection forward again for a fresh selection', () => {
+    selection.replace(['alpha', 'beta'])
+    flush()
+    bring('shelf')
+    selection.replace(['alpha'])
+    flush()
+    expect(tray.shadowRoot?.querySelector('.swap')).toBeNull()
+    expect(tray.shadowRoot?.querySelector('.fold')).not.toBeNull()
+    selection.replace(['gamma', 'delta'])
+    flush()
+    expect(labels(tray)).toEqual(['gamma', 'delta'])
+    expect(lit()).toEqual(['picks'])
+  })
+
+  it('shows the shelf brought forward though it is folded, so the pair never vanishes', () => {
+    ;(tray.shadowRoot?.querySelector('.fold') as HTMLElement).click()
+    expect(tray.shadowRoot?.querySelector('.shelf')).toBeNull()
+    selection.replace(['alpha', 'beta'])
+    flush()
+    bring('shelf')
+    expect(labels(tray)).toEqual(['held-one', 'held-two'])
+    bring('picks')
+    expect(labels(tray)).toEqual(['alpha', 'beta'])
+    // Below two the fold is the participant's again.
+    selection.replace([])
+    flush()
+    expect(tray.shadowRoot?.querySelector('.shelf')).toBeNull()
+  })
+
+  it('shows the shelf brought forward though it holds nothing', () => {
+    tray.letGo(new Set(tray.entries.map(entryKey)))
+    expect(tray.entries).toHaveLength(0)
+    selection.replace(['alpha', 'beta'])
+    flush()
+    bring('shelf')
+    expect(tray.shadowRoot?.querySelector('.shelf')).not.toBeNull()
+    expect(tray.shadowRoot?.querySelector('.swap')).not.toBeNull()
+  })
+
+  it('marks the shelf icon while the selection is forward and the shelf holds something', () => {
+    selection.replace(['alpha', 'beta'])
+    flush()
+    expect(tray.shadowRoot?.querySelector('.swap-btn[data-bring="shelf"]')?.classList.contains('holding')).toBe(true)
+    bring('shelf')
+    expect(tray.shadowRoot?.querySelector('.swap-btn[data-bring="shelf"]')?.classList.contains('holding')).toBe(false)
+  })
+
+  it('answers the shell\'s shelf button over a selection by bringing the shelf forward, folding nothing', () => {
+    selection.replace(['alpha', 'beta'])
+    flush()
+    EffectBus.emitTransient('shelf:toggle', {})
+    expect(labels(tray)).toEqual(['held-one', 'held-two'])
+    expect(said().folded).toBe(false)
   })
 })
 

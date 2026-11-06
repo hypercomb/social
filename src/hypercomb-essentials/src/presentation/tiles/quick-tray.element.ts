@@ -18,7 +18,8 @@
 // THE SHELF HOLDS ITS OWN BAND. It reserves the top of the canvas
 // (`viewport:inset`, pixi-host shrinks its box and refits), so fitted tiles
 // are framed below it, never under it. Folded, it gives the band back — and
-// so does an empty shelf: holding nothing, it shows nothing.
+// so does an empty shelf: holding nothing, it shows nothing. The selection
+// shelf (below) holds no band of its own.
 //
 // Nothing is written at the take. The shelf holds {label, source page, the sig
 // the page lists it by} — a selection that survives navigation: walk through a
@@ -49,13 +50,20 @@
 // the fold is sticky — one current record in the `shelf:state` pool, read
 // back on boot (a press that lands before the read wins).
 //
-// THE SELECTION SHELF takes the same band while two or more tiles are
+// THE SELECTION SHELF takes the shelf's slot while two or more tiles are
 // selected: it lists what the next act will fall on — the multi-tile quick
 // menu, the image wall in turn — BEFORE anything fires, so a participant sees
 // the set and can trim it (a row's × takes that tile out of the selection,
 // nothing else). It is the shelf's slot, never a second strip: the shelf's
 // rows are kept as they were and come back when the selection drops below
-// two. It has no fold — it is what you are about to act on — and no drag: a
+// two. A fresh selection brings it FORWARD, one strip at a time, and while two
+// or more are selected a pair of icons at the strip's end (the shelf, the
+// selection) says which is forward and brings the other forward on a click
+// (jwize, 2026-11-06: "the selection shelf and the shelf should be togglable
+// … an icon that you can change"). The strip brought forward shows whatever it
+// holds, however the shelf was folded, so the pair never vanishes under the
+// pointer; the shell's shelf button brings the shelf forward too. It has no
+// fold — it is what you are about to act on — and no drag: a
 // selected tile is already on the hive. It never speaks on `shelf:changed`
 // (the controls bar and the chat count what is HELD there); it says what it
 // lists on `selection-shelf:changed`. While the image wall walks the set
@@ -63,13 +71,18 @@
 // ticked. The switch between the two is taken on a frame, so a selection
 // rebuilt in a burst never shows the shelf for the instant it is empty.
 //
-// AND IT WAITS FOR THE HAND TO LIFT. Taking or giving back the band moves the
-// canvas (`viewport:inset`), so a switch made while a select is still in
-// progress — the button down on a paint drag, Ctrl held between clicks —
-// shifts the tiles under the pointer and the rest of the gesture lands on the
-// wrong ones (jwize, 2026-11-05). So the band changes hands only once no
-// button and no modifier is down; rows on a band already taken still update
-// at once, because that moves nothing.
+// IT NEVER MOVES THE CANVAS. The selection shelf lays over the top of the hive
+// and reserves nothing: `viewport:inset` stays at whatever the shelf had
+// reserved before the selection began (a held, unfolded shelf keeps its band; a
+// folded or empty one has none), so selecting and un-selecting never resize or
+// refit the hive (jwize, 2026-11-06: "the selection tray shouldn't affect the
+// container").
+//
+// AND IT WAITS FOR THE HAND TO LIFT. The slot changes hands only once no button
+// and no modifier is down: a strip that lands mid-select — the button down on a
+// paint drag, Ctrl held between clicks — would cover the tiles under the
+// pointer at the top of the hive. (First needed 2026-11-05, when the switch
+// also shifted the canvas.) Rows on a slot already taken still update at once.
 
 import { EffectBus, I18N_IOC_KEY, POINTER_GESTURE_END, type I18nProvider } from '@hypercomb/core'
 import { listGroups, readGroup, startGroup } from '../../assistant/context-groups.js'
@@ -171,7 +184,7 @@ const STYLE = `
   --shelf-right:calc(var(--hc-inset-right,0px) + 0.5rem);}
 :host(.lifting){z-index:2147483600;}
 .shelf{pointer-events:auto;position:absolute;top:var(--shelf-top);left:var(--shelf-left);right:var(--shelf-right);
-  height:2.75rem;box-sizing:border-box;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;
+  height:2.75rem;box-sizing:border-box;display:flex;align-items:center;
   gap:0.75rem;padding:0 0.45rem 0 0.95rem;border-radius:var(--hc-radius-floating,4px);
   background:rgba(var(--hc-panel-pane,12,28,46),0.9);
   backdrop-filter:blur(10px) saturate(1.1);-webkit-backdrop-filter:blur(10px) saturate(1.1);
@@ -185,12 +198,24 @@ const STYLE = `
     repeating-linear-gradient(180deg,var(--cut) 0 7px,transparent 7px 14px);
   background-size:100% 1px,100% 1px,1px 100%,1px 100%;background-position:0 0,0 100%,0 0,100% 0;background-repeat:no-repeat;}
 .shelf.dragging{cursor:grabbing;}
-.legend{position:relative;display:inline-flex;align-items:center;gap:0.45rem;letter-spacing:0.12em;text-transform:uppercase;font-family:var(--hc-mono,system-ui);
+.legend{position:relative;flex:0 0 auto;display:inline-flex;align-items:center;gap:0.45rem;letter-spacing:0.12em;text-transform:uppercase;font-family:var(--hc-mono,system-ui);
   font-size:0.68rem;font-weight:600;color:rgb(var(--shelf));white-space:nowrap;}
+.legend svg{width:1rem;height:1rem;display:block;flex:0 0 auto;}
+.head{position:relative;flex:0 1 auto;min-width:0;display:flex;align-items:center;gap:0.6rem;}
+.field{position:relative;display:inline-flex;align-items:center;gap:0.3rem;min-width:0;color:rgba(var(--shelf),0.9);}
+.field svg{width:0.95rem;height:0.95rem;display:block;flex:0 0 auto;}
+.tools{position:relative;flex:0 0 auto;display:inline-flex;align-items:center;gap:0.15rem;}
+.swap{display:inline-flex;align-items:center;gap:0.1rem;}
+.swap-btn{position:relative;appearance:none;width:1.75rem;height:1.75rem;display:inline-grid;place-items:center;border:0;padding:0;
+  border-radius:var(--hc-radius-control,2px);background:transparent;color:var(--hc-window-ink-plain,currentColor);opacity:0.6;cursor:pointer;}
+.swap-btn:hover,.swap-btn:focus-visible{opacity:1;background:rgba(var(--shelf),0.16);outline:none;}
+.swap-btn.on{opacity:1;color:rgb(var(--shelf));background:rgba(var(--shelf),0.2);box-shadow:inset 0 0 0 1px rgba(var(--shelf),0.55);}
+.swap-btn svg{width:1.05rem;height:1.05rem;display:block;}
+.swap-btn.holding::after{content:'';position:absolute;top:0.2rem;right:0.2rem;width:0.3rem;height:0.3rem;border-radius:50%;background:rgb(var(--shelf));}
 .count{min-width:1.5em;height:1.4em;box-sizing:border-box;display:inline-grid;place-items:center;padding:0 0.35em;
   border-radius:var(--hc-radius-control,2px);background:rgba(var(--shelf),0.16);color:var(--hc-window-ink-loud,currentColor);
   font-variant-numeric:tabular-nums;letter-spacing:0;}
-.rows{position:relative;display:flex;align-items:center;gap:0.3rem;margin:0;padding:0;list-style:none;min-width:0;height:100%;
+.rows{position:relative;flex:1 1 0;display:flex;align-items:center;gap:0.3rem;margin:0;padding:0;list-style:none;min-width:0;height:100%;
   overflow-x:auto;overflow-y:hidden;scrollbar-width:none;
   mask-image:linear-gradient(90deg,#000 calc(100% - 1.5rem),transparent);-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 1.5rem),transparent);}
 .rows::-webkit-scrollbar{display:none;}
@@ -217,7 +242,7 @@ const STYLE = `
 .fill{width:3rem;box-sizing:border-box;background:transparent;color:inherit;border:0;border-bottom:1px solid currentColor;font:inherit;padding:0.1em 0.2em;opacity:0.8;outline:none;}
 .apply{appearance:none;border:1px solid currentColor;border-radius:var(--hc-radius-control,2px);background:none;color:inherit;font:inherit;letter-spacing:0.12em;text-transform:uppercase;cursor:pointer;padding:0 0.6em;}
 .kind{appearance:none;border:0;background:none;color:inherit;font:inherit;letter-spacing:0.12em;text-transform:uppercase;opacity:0.7;cursor:pointer;padding:0 0.4em;}
-.add{min-width:8rem;max-width:14rem;box-sizing:border-box;background:transparent;color:inherit;border:0;border-bottom:1px solid currentColor;opacity:0.85;font:inherit;padding:0.1em 0.3em;outline:none;}
+.add{width:10rem;min-width:3rem;max-width:14rem;box-sizing:border-box;background:transparent;color:inherit;border:0;border-bottom:1px solid currentColor;opacity:0.85;font:inherit;padding:0.1em 0.3em;outline:none;}
 .fold{position:relative;appearance:none;width:1.75rem;height:1.75rem;display:inline-grid;place-items:center;border:0;padding:0;
   border-radius:var(--hc-radius-control,2px);background:transparent;color:var(--hc-window-ink-plain,currentColor);cursor:pointer;}
 .fold:hover,.fold:focus-visible{background:rgba(var(--shelf),0.16);color:var(--hc-window-ink-loud,currentColor);outline:none;}
@@ -225,7 +250,7 @@ const STYLE = `
 @keyframes hc-shelf-taken{from{background:rgba(var(--shelf),0.45);border-color:rgba(var(--shelf),0.9);}}
 .taken{animation:hc-shelf-taken 700ms ease-out;}
 @media (prefers-reduced-motion:reduce){.taken{animation:none;}.row,.remove{transition:none;}}
-@media (max-width:640px){.shelf{gap:0.5rem;padding-left:0.75rem;}.label{max-width:7rem;}.legend .word{display:none;}}
+@media (max-width:640px){.shelf{gap:0.5rem;padding-left:0.75rem;}.label{max-width:7rem;}.legend .word{display:none;}.fill-field,.kind{display:none;}}
 .ghost{position:fixed;z-index:2147483600;pointer-events:none;margin-left:0.8rem;margin-top:-0.9rem;max-width:14rem;
   padding:0.3rem 0.6rem;display:flex;align-items:center;gap:0.4rem;border-radius:var(--hc-radius-floating,4px);
   background:rgba(var(--hc-panel-pane,12,28,46),0.94);box-shadow:0 0 0 1px rgba(var(--shelf),0.55),0 6px 20px rgba(var(--hc-panel-shadow,0,0,0),0.3);
@@ -233,7 +258,7 @@ const STYLE = `
 .ghost .verb{font-family:var(--hc-mono,system-ui);font-size:0.65rem;letter-spacing:0.08em;text-transform:uppercase;color:rgb(var(--shelf));}
 .ghost.custody .verb{color:var(--hc-window-warn,#ffc46b);}
 .ghost .name{overflow:hidden;text-overflow:ellipsis;}
-.shelf.picks{--shelf:var(--pick);grid-template-columns:auto minmax(0,1fr);padding-right:0.95rem;}
+.shelf.picks{--shelf:var(--pick);}
 .shelf.picks::before{--cut:rgba(var(--pick),0.5);}
 .pick{cursor:default;}
 .pick.current{border-color:rgba(var(--pick),0.9);background:rgba(var(--pick),0.2);box-shadow:0 0 0 1px rgba(var(--pick),0.5);}
@@ -243,6 +268,15 @@ const STYLE = `
 
 /** Chevrons drawn inline: an icon font does not reach into a shadow root. */
 const CHEVRON_UP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7.41 15.41 12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>'
+const icon = (d: string, rule = 'nonzero'): string =>
+  `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" fill-rule="${rule}" d="${d}"/></svg>`
+/** The shelf: the same tray the shell's shelf button draws. */
+const SHELF_ICON = icon('M19 3H4.99c-1.11 0-1.98.9-1.98 2L3 19c0 1.1.88 2 1.99 2H19c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 12h-4c0 1.66-1.35 3-3 3s-3-1.34-3-3H4.99V5H19v10zm-3-5h-2V7h-4v3H8l4 4 4-4z')
+/** The selection: a dashed marquee round a tile. */
+const SELECT_ICON = icon('M3 5h2V3c-1.1 0-2 .9-2 2zm0 8h2v-2H3v2zm4 8h2v-2H7v2zM3 9h2V7H3v2zm10-6h-2v2h2V3zm6 0v2h2c0-1.1-.9-2-2-2zM5 21v-2H3c0 1.1.9 2 2 2zm-2-4h2v-2H3v2zM9 3H7v2h2V3zm2 18h2v-2h-2v2zm8-8h2v-2h-2v2zm0 8c1.1 0 2-.9 2-2h-2v2zm0-12h2V7h-2v2zm0 8h2v-2h-2v2zm-4 4h2v-2h-2v2zm0-16h2V3h-2v2zM7 17h10V7H7v10zm2-8h6v6H9V9z')
+/** How many gather before the shelf asks: a hexagon ring, the group it becomes. */
+const GROUP_ICON = icon('M12 2l8.5 5v10L12 22l-8.5-5V7zm0 2.3L5.5 8.15v7.7L12 19.7l6.5-3.85v-7.7z', 'evenodd')
+const ADD_ICON = icon('M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z')
 
 /** Owner of the shelf's reservation on the canvas (viewport:inset). */
 const INSET_OWNER = 'quick-tray'
@@ -266,6 +300,14 @@ export class QuickTrayElement extends HTMLElement {
   #pressed = false
   /** The top band last reserved on the canvas, in px. */
   #reserved = -1
+  /** The band the shelf itself last measured. The selection shelf reserves
+   *  nothing, so while it stands this is what the canvas keeps. */
+  #band = 0
+  /** Which of the pair is forward while two or more are selected. A fresh
+   *  selection brings the selection shelf forward; the participant's press
+   *  on the pair's icons changes it, and it holds until the selection falls
+   *  below two. */
+  #forward: 'shelf' | 'picks' = 'picks'
   #measureFrame = 0
   /** Open only because a take just landed, and not yet hovered. */
   #peeking = false
@@ -358,6 +400,9 @@ export class QuickTrayElement extends HTMLElement {
     // Transient on the sender's side: a shelf that mounts later must not
     // replay an old press and fold itself.
     this.#offs.push(EffectBus.on<{ open?: boolean } | undefined>('shelf:toggle', (p) => {
+      // Over a selection the press asks for the shelf: bring it forward, and
+      // leave the fold as the participant keeps it.
+      if (this.#selected() && this.#forward === 'picks' && p?.open !== false) { this.#bring('shelf'); return }
       if (p?.open === true || (p?.open === undefined && this.#folded)) { this.#opened = true; this.#render() }
       this.#press(typeof p?.open === 'boolean' ? !p.open : !this.#folded)
     }))
@@ -557,7 +602,45 @@ export class QuickTrayElement extends HTMLElement {
 
   // ── the selection shelf ──────────────────────────────────────────────────
 
-  #picking(): boolean { return this.#picks.length >= SELECTION_SHELF_MIN }
+  /** Two or more tiles are selected: the slot is a pair, shelf and selection. */
+  #selected(): boolean { return this.#picks.length >= SELECTION_SHELF_MIN }
+
+  /** The selection shelf is the one forward. */
+  #picking(): boolean { return this.#selected() && this.#forward === 'picks' }
+
+  /** Bring one of the pair forward. Only while a selection stands, and only a
+   *  press does it — a selection rebuilt in a burst never flips the slot. The
+   *  canvas is not asked for anything: a selection holds the band as it was. */
+  #bring(which: 'shelf' | 'picks'): void {
+    if (!this.#selected() || this.#forward === which) return
+    this.#forward = which
+    if (which === 'picks') {
+      // A shelf row in flight has nowhere to land on the other strip.
+      this.#endDrag()
+      for (const label of this.#picks) void this.#loadPickThumb(label, this.#picksPage)
+    }
+    this.#render()
+    this.#announcePicks()
+  }
+
+  /** The pair's two icons: which strip is forward is lit, the other brings
+   *  itself forward on a click. A dot on the shelf's says it holds something
+   *  while the selection is forward — the shell's shelf button says the same. */
+  #swapHtml(): string {
+    const shelf = esc(t('quick-tray.bring-shelf', 'Bring the shelf forward'))
+    const picks = esc(t('quick-tray.bring-picks', 'Bring the selection forward'))
+    const holding = this.#forward === 'picks' && this.#entries.length > 0
+    return `<span class="swap" role="group" aria-label="${esc(t('quick-tray.bring', 'Which shelf is forward'))}">
+        <button class="swap-btn${this.#forward === 'shelf' ? ' on' : ''}${holding ? ' holding' : ''}" type="button" data-bring="shelf" aria-pressed="${this.#forward === 'shelf'}" title="${shelf}" aria-label="${shelf}">${SHELF_ICON}</button>
+        <button class="swap-btn${this.#forward === 'picks' ? ' on' : ''}" type="button" data-bring="picks" aria-pressed="${this.#forward === 'picks'}" title="${picks}" aria-label="${picks}">${SELECT_ICON}</button>
+      </span>`
+  }
+
+  #wireSwap(): void {
+    for (const button of this.#root.querySelectorAll<HTMLButtonElement>('.swap-btn')) {
+      button.addEventListener('click', () => this.#bring(button.dataset['bring'] === 'picks' ? 'picks' : 'shelf'))
+    }
+  }
 
   /** Follow the selection. The service may register after the shelf mounts,
    *  so this waits for it; a shelf taken off the page meanwhile stays off. */
@@ -641,12 +724,16 @@ export class QuickTrayElement extends HTMLElement {
     const same = next.length === this.#picks.length && next.every((label, i) => label === this.#picks[i])
       && page.join('\u0000') === this.#picksPage.join('\u0000')
     if (same) return
+    const wasSelected = this.#selected()
     const wasPicking = this.#picking()
-    // The band would change hands mid-select: wait for the hand to lift.
-    if (wasPicking !== next.length >= SELECTION_SHELF_MIN && this.#selecting()) { this.#switchOwed = true; return }
+    // The slot would change hands mid-select: wait for the hand to lift.
+    if (wasSelected !== next.length >= SELECTION_SHELF_MIN && this.#selecting()) { this.#switchOwed = true; return }
     this.#switchOwed = false
     this.#picks = next
     this.#picksPage = page
+    // A fresh selection brings the selection shelf forward; one that is only
+    // added to or trimmed leaves the pair as the participant set it.
+    if (!wasSelected && this.#selected()) this.#forward = 'picks'
     // A picture whose tile left the selection is let go now, not on unmount.
     const keep = new Set(next.map(label => entryKey({ label, sourceSegments: page })))
     for (const [key, url] of this.#pickThumbs) {
@@ -704,11 +791,12 @@ export class QuickTrayElement extends HTMLElement {
     }).join('')
     const title = esc(t('quick-tray.selected', 'Selected'))
     // No fold: this is the set the next act falls on, and hiding it would hide
-    // what is about to change.
+    // what is about to change. The pair of icons stands where a fold would.
     this.#root.innerHTML = `<style>${STYLE}</style>
       <section class="shelf picks" aria-label="${title}" data-consumes-wheel>
-        <span class="legend"><span class="word">${title}</span><span class="count">${this.#picks.length}</span></span>
+        <span class="legend">${SELECT_ICON}<span class="word">${title}</span><span class="count">${this.#picks.length}</span></span>
         <ul class="rows" aria-label="${title}">${rows}</ul>
+        <span class="tools">${this.#swapHtml()}</span>
       </section>`
     for (const row of this.#root.querySelectorAll<HTMLLIElement>('.pick')) {
       row.addEventListener('keydown', (e) => {
@@ -724,17 +812,21 @@ export class QuickTrayElement extends HTMLElement {
       })
     }
     this.#wireWheel()
+    this.#wireSwap()
     this.#reserve()
   }
 
   // ── paint ────────────────────────────────────────────────────────────────
 
   #render(): void {
-    // Two or more selected: the band is the selection's, whatever the shelf
-    // holds or however it is folded. The shelf's rows wait, untouched.
+    // Two or more selected, the selection shelf forward: it shows whatever the
+    // shelf holds or however it is folded. The shelf's rows wait, untouched.
     if (this.#picking()) { this.#renderPicks(); return }
+    // The shelf brought forward over a selection shows whatever it holds,
+    // folded or empty: the pair of icons that bring the selection back is on it.
+    const paired = this.#selected()
     // Nothing held, nothing shown: an empty shelf is a band with no use.
-    if (this.#folded || (this.#entries.length === 0 && !this.#opened)) {
+    if (!paired && (this.#folded || (this.#entries.length === 0 && !this.#opened))) {
       this.#root.innerHTML = `<style>${STYLE}</style>`
       this.#reserve()
       return
@@ -759,17 +851,21 @@ export class QuickTrayElement extends HTMLElement {
     }).join('')
     const body = `<ul class="rows" aria-label="${esc(t('quick-tray.title', 'Shelf'))}">${rows}</ul>`
     const hide = esc(t('quick-tray.hide', 'Hide the shelf'))
+    const fillTip = esc(t('quick-tray.fill', 'How many gather before the shelf asks to keep them as a group'))
+    const addTip = esc(t('quick-tray.add', 'search or add a tag'))
     this.#root.innerHTML = `<style>${STYLE}</style>
       <section class="shelf${this.#dragging ? ' dragging' : ''}" aria-label="${esc(t('quick-tray.title', 'Shelf'))}" data-consumes-wheel>
-        <span class="legend"><span class="word">${esc(t('quick-tray.title', 'Shelf'))}</span><span class="count">${this.#entries.length}</span></span>
-        ${this.#asking ? `<span class="ask"><span class="ask-word">${esc(t('quick-tray.ask', 'keep these as a group?'))}</span><button class="ask-keep" type="button">${esc(t('quick-tray.ask-keep', 'keep'))}</button><button class="ask-later" type="button">${esc(t('quick-tray.ask-later', 'not yet'))}</button></span>` : ''}
-        <input class="fill" type="number" min="${FILL_MIN}" max="${FILL_MAX}" value="${this.#fill}" title="${esc(t('quick-tray.fill', 'How many gather before the shelf asks to keep them as a group'))}" aria-label="${esc(t('quick-tray.fill', 'How many gather before the shelf asks to keep them as a group'))}">
-        ${bouquetOf(this.#entries).length > 0 ? `<button class="apply" type="button" title="${esc(t('quick-tray.apply', 'Scent the picked tiles with these tags, or hold them for the next tile you click'))}">${esc(t('quick-tray.apply-word', 'apply'))}</button>` : ''}
-        <button class="kind" type="button" title="${esc(t('quick-tray.type', 'Wheel: next shelf · Shift+wheel: kind of shelf'))}">${esc(this.#type)}</button>
-        <input class="add" type="text" list="hc-shelf-tags" spellcheck="false" autocomplete="off" value="${esc(this.#filter)}" placeholder="${esc(t('quick-tray.add', 'search or add a tag'))}" aria-label="${esc(t('quick-tray.add', 'search or add a tag'))}">
-        <datalist id="hc-shelf-tags">${layerTags().map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+        <span class="legend">${SHELF_ICON}<span class="word">${esc(t('quick-tray.title', 'Shelf'))}</span><span class="count">${this.#entries.length}</span></span>
+        <span class="head">
+          ${this.#asking ? `<span class="ask"><span class="ask-word">${esc(t('quick-tray.ask', 'keep these as a group?'))}</span><button class="ask-keep" type="button">${esc(t('quick-tray.ask-keep', 'keep'))}</button><button class="ask-later" type="button">${esc(t('quick-tray.ask-later', 'not yet'))}</button></span>` : ''}
+          <label class="field fill-field" title="${fillTip}">${GROUP_ICON}<input class="fill" type="number" min="${FILL_MIN}" max="${FILL_MAX}" value="${this.#fill}" aria-label="${fillTip}"></label>
+          ${bouquetOf(this.#entries).length > 0 ? `<button class="apply" type="button" title="${esc(t('quick-tray.apply', 'Scent the picked tiles with these tags, or hold them for the next tile you click'))}">${esc(t('quick-tray.apply-word', 'apply'))}</button>` : ''}
+          <button class="kind" type="button" title="${esc(t('quick-tray.type', 'Wheel: next shelf · Shift+wheel: kind of shelf'))}">${esc(this.#type)}</button>
+          <label class="field add-field">${ADD_ICON}<input class="add" type="text" list="hc-shelf-tags" spellcheck="false" autocomplete="off" value="${esc(this.#filter)}" placeholder="${addTip}" aria-label="${addTip}"></label>
+          <datalist id="hc-shelf-tags">${layerTags().map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+        </span>
         ${body}
-        <button class="fold" type="button" aria-expanded="true" title="${hide}" aria-label="${hide}">${CHEVRON_UP}</button>
+        <span class="tools">${paired ? this.#swapHtml() : `<button class="fold" type="button" aria-expanded="true" title="${hide}" aria-label="${hide}">${CHEVRON_UP}</button>`}</span>
       </section>`
     for (const row of this.#root.querySelectorAll<HTMLLIElement>('.row')) {
       row.addEventListener('pointerdown', (e) => this.#onRowPointerDown(e, this.#entries[Number(row.dataset['index'])]))
@@ -799,6 +895,7 @@ export class QuickTrayElement extends HTMLElement {
     }
     this.#wireWheel()
     this.#wireFold()
+    this.#wireSwap()
     this.#wireHead()
     this.#reserve()
   }
@@ -855,14 +952,17 @@ export class QuickTrayElement extends HTMLElement {
   }
 
   /** Hold the band under the shelf on the canvas, measured after layout. A
-   *  folded shelf holds nothing. Both shelves hold it under ONE owner, so the
-   *  hive does not jump when they trade places. */
+   *  folded shelf holds nothing. The selection shelf lays over the canvas and
+   *  holds no band: while it stands, the band stays as the shelf last measured
+   *  it, so the hive does not resize or refit when a selection comes and goes. */
   #reserve(): void {
     cancelAnimationFrame(this.#measureFrame)
     this.#measureFrame = requestAnimationFrame(() => {
-      // A folded shelf paints no band; the selection shelf paints one whatever the fold.
       const shelf = this.#root.querySelector('.shelf')
-      const size = shelf ? Math.round(shelf.getBoundingClientRect().bottom + INSET_GAP) : 0
+      const size = this.#selected()
+        ? this.#band
+        : shelf ? Math.round(shelf.getBoundingClientRect().bottom + INSET_GAP) : 0
+      this.#band = size
       if (size === this.#reserved) return
       this.#reserved = size
       EffectBus.emit('viewport:inset', { owner: INSET_OWNER, side: 'top', size })
