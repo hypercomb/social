@@ -6,13 +6,16 @@
 // crumbs. A page is that one scene as one slide, the size of the screen:
 //
 //   crumbs   where you are; every ancestor is a way back (the one way up)
-//   scene    the eyebrow, the headline, the figure, and the narration under
-//            one hairline with its transport — the tour's stage, exactly
-//   ways     the tile's children, as cards: each opens the next level down
 //   beside   the tiles under the same parent: previous and next, and where
 //            this one stands among them, with the parent one press up
-//            (jwize 2026-11-06: every node is a video, some have children; a
-//            parent is a category you choose into, so no tab row mixes levels)
+//   ways     the tile's children, as a row: each opens the next level down
+//   scene    the eyebrow, the headline, the figure, and the narration under
+//            one hairline with its transport — the tour's stage, exactly
+//
+// The three menus sit ABOVE the video (jwize 2026-11-07: "put the simple and
+// other video menus as the top of the video"). jwize 2026-11-06: every node is
+// a video, some have children; a parent is a category you choose into, so no
+// tab row mixes levels.
 //
 // THE STANDARD IS THE TOUR (scripts/presentation): its ink and honey, its two
 // faces, its figures, its voice. A tile one of the tour's scenes explains
@@ -98,7 +101,15 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
    mounted in the hive. */
 .page{container-type:inline-size;width:min(1180px,100%);margin:0 auto;padding:14px 16px 0;
   height:calc(100vh - var(--hc-site-chrome-bottom,0px));height:calc(100dvh - var(--hc-site-chrome-bottom,0px));min-height:520px;
-  display:grid;grid-template-rows:auto minmax(0,1fr) auto;--measure:780px}
+  display:grid;grid-template-rows:auto auto auto minmax(0,1fr);--measure:780px}
+/* THE MENUS ARE AT THE TOP OF THE VIDEO (jwize 2026-11-07: "put the simple and
+   other video menus as the top of the video"): where you are, the videos
+   beside this one, and the videos inside it, then the video itself. A part
+   missing leaves its row empty, and the video alone takes the spare height. */
+.page>.top{grid-row:1}
+.page>.beside{grid-row:2}
+.page>.ways{grid-row:3}
+.page>.scene{grid-row:4}
 .mono-label{font-family:var(--mono);font-size:12px;line-height:1.3;letter-spacing:var(--track-label);text-transform:uppercase}
 
 /* ---------- where you are ---------- */
@@ -260,22 +271,21 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .voice[aria-pressed="false"] .i-muted{display:block}
 
 /* ---------- inside: the children, each the next level down ---------- */
-.ways{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:8px;padding:12px 0 8px;margin-top:clamp(10px,2vh,20px);border-top:1px solid var(--line)}
-.ways .lbl{grid-column:1/-1;color:var(--honey-deep)}
-.ways a.w,.ways span.w{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:.65em;align-items:center;text-decoration:none;color:var(--ink);
-  border:1px solid var(--line);border-radius:var(--r-card);padding:9px 12px;transition:border-color .15s,background .15s,color .15s}
-.ways .w .g{grid-row:1/3;color:var(--honey);font-size:13px}
-.ways .w b{font:500 13px/1.3 var(--mono);letter-spacing:var(--track-data);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ways .w small{font-size:12px;line-height:1.35;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ways{display:flex;align-items:center;gap:6px;padding:6px 0 8px;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:thin;scroll-snap-type:x proximity}
+.ways .lbl{flex:none;color:var(--honey-deep);margin-right:4px}
+.ways a.w,.ways span.w{flex:none;display:inline-flex;align-items:center;gap:.5em;scroll-snap-align:start;text-decoration:none;color:var(--ink);
+  border:1px solid var(--line);border-radius:var(--r-card);padding:6px 12px;transition:border-color .15s,background .15s,color .15s}
+.ways .w .g{color:var(--honey);font-size:12px}
+.ways .w b{font:500 13px/1.3 var(--mono);letter-spacing:var(--track-data);white-space:nowrap}
+.ways .w small{display:none}
 .ways a.w:hover{border-color:var(--honey-deep);background:var(--honey-tint)}
 .ways a.w:hover b{color:var(--honey)}
 .ways span.w{color:var(--faint-text);border-style:dashed}
-.ways span.w small{color:var(--faint-text)}
 /* beside: previous and next under the same parent, and the parent one press up */
-.beside{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:8px;padding:8px 0 12px;border-top:1px solid var(--line)}
-.ways+.beside{border-top:0;padding-top:4px}
+.beside{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:8px;padding:6px 0 6px}
+.beside+.ways{padding-top:2px}
 .beside .step{display:inline-flex;align-items:center;gap:.6em;min-width:0;max-width:100%;text-decoration:none;color:var(--ink);
-  border:1px solid var(--line);border-radius:var(--r-ctl);padding:7px 12px;transition:border-color .15s,background .15s,color .15s}
+  border:1px solid var(--line);border-radius:var(--r-ctl);padding:5px 12px;transition:border-color .15s,background .15s,color .15s}
 .beside .step.next{justify-self:end;text-align:right}
 .beside .step.off{visibility:hidden}
 .beside .step .g{color:var(--honey);font-size:13px}
@@ -297,10 +307,8 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
   .hexb .t{font-size:11px}
   .count{display:none}
   .beside .step small{display:none}
-  .ways{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:8px 0 6px;margin-top:6px}
-  .ways .w small{display:none}
-  .ways a.w,.ways span.w{padding:8px 10px}
-  .beside .step{padding:7px 9px}
+  .ways a.w,.ways span.w{padding:6px 10px}
+  .beside .step{padding:5px 9px}
   .caption{max-height:36vh}
 }
 @media (prefers-reduced-motion:reduce){
@@ -637,7 +645,7 @@ ${STYLE}
 </head>
 <body>
 ${sprite}
-<main class="page"><div class="top">${crumbsHtml(route)}<button type="button" class="to-site" aria-label="Open the website at this page">${icon('hex')}website</button></div>${sceneHtml(scene)}${waysHtml(ways)}${besideHtml(ways)}
+<main class="page"><div class="top">${crumbsHtml(route)}<button type="button" class="to-site" aria-label="Open the website at this page">${icon('hex')}website</button></div>${besideHtml(ways)}${waysHtml(ways)}${sceneHtml(scene)}
 </main>
 <script>${SCRIPT}${tryDef ? `
 ;(() => {
