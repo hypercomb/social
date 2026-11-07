@@ -68,6 +68,11 @@ const NAMESPACE_SEGMENTS_MAX = 3
 const PACKAGE_SPECIFIER = '@hypercomb/essentials'
 const PLATFORM_EXTERNALS = ['@hypercomb/core', 'pixi.js']
 
+/** Packages that are ALWAYS a shared lazy vendor atom, even with one importer:
+ *  too big to inline into a bee (three is ~690 KB minified), and a lazy
+ *  `import('three')` must resolve through the import map in both shells. */
+const ALWAYS_VENDOR = new Set(['three'])
+
 /** VENDOR ATOMS (atomic-modules-plan.md, "find the overlap before creating
  *  redundancy"). An npm specifier that two or more source files import is built
  *  ONCE, as its own dependency named by that specifier (`// nostr-tools/pure`,
@@ -100,7 +105,7 @@ const VENDOR_PACKAGES: readonly string[] = (() => {
     }
   }
   visit(SRC_ROOT)
-  return [...importers].filter(([, files]) => files.size > 1).map(([pkg]) => pkg).sort()
+  return [...importers].filter(([spec, files]) => files.size > 1 || ALWAYS_VENDOR.has(spec)).map(([pkg]) => pkg).sort()
 })()
 
 /** What every bee, atom and namespace bundle leaves to the import map. */
@@ -1274,6 +1279,8 @@ const main = async (): Promise<void> => {
       target: TARGET,
       sourcemap: false,
       external: UNIT_EXTERNALS.filter(external => external !== pkg),
+      // three is ~1.3 MB unminified and its exports map hides the prebuilt min file, so minify here.
+      minify: pkg === 'three',
     })
     const text = r.outputFiles?.[0]?.text
     if (!text) throw new Error(`no output: vendor ${pkg}`)

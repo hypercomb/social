@@ -52,7 +52,8 @@
   },
   "dependencies": {
     "@hypercomb/core": "^0.1.0",
-    "nostr-tools": "^2.23.1"
+    "nostr-tools": "^2.23.1",
+    "three": "^0.170.0"
   },
   "peerDependencies": {
     "pixi.js": "^8.16.0"
