@@ -23,24 +23,44 @@ export type EditorModePayload = {
   segments?: readonly string[]
 }
 
-/** A changed draft that was thrown away — kept, one at a time and in memory
- *  only, so reopening the same tile can offer it back. Escape, a right-click,
- *  a sweep and a closing sheet all discard; none of them should cost the
- *  participant what they had done. */
+/** A changed draft of a tile the editor is not on — kept in memory only, ONE PER
+ *  TILE, so the participant can edit several tiles, move between them, and
+ *  come back to each as they left it. Escape, a right-click, a sweep and a
+ *  closing sheet also leave drafts here; none of them should cost the
+ *  participant what they had done. Reopening a tile after the desk closed
+ *  offers its draft back; moving to it while the desk is open puts it back.
+ *
+ *  The draft carries what a save needs, so any tile in the pad can be written
+ *  without being opened: the properties it opened with (the diff is taken
+ *  against them), the per-field layer choices, and the picture with its
+ *  framing. */
 export type EditorDraftStash = {
   cell: string
   segments: readonly string[]
   properties: Record<string, unknown>
+  /** The page the tile sat on, for a draft whose `segments` were never set. */
+  page?: readonly string[]
+  /** The properties as the tile opened — the save writes only what differs. */
+  baseline?: Record<string, unknown>
+  choices?: readonly (readonly [EditorField, PropertyChoice])[]
+  layers?: Readonly<Record<EditorField, PropertyLayer>> | null
+  repo?: Readonly<Record<string, unknown>>
+  beforeChoice?: readonly (readonly [EditorField, Record<string, unknown>])[]
   picture: {
     source: Blob
     point: { x: number; y: number; scale: number }
     flat: { x: number; y: number; scale: number }
     linked: boolean
     mode: 'fill' | 'fit'
+    /** A picture other than the tile's own (its large copy is made at save). */
+    changed?: boolean
   } | null
   pictureRemoved: boolean
   at: number
 }
+
+/** What names a draft: the tile and the address it was opened at. */
+export const draftKey = (cell: string, segments: readonly string[]): string => `${cell}\u0000${segments.join('/')}`
 
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value ?? {})) as T
 
@@ -54,7 +74,10 @@ export class TileEditorService extends EventTarget {
   #largeBlob: Blob | null = null
   #saving = false
   #error = ''
-  #stash: EditorDraftStash | null = null
+  // Every tile left with changes, by tile and address — the draft pad. The open
+  // tile is never in it: its draft is the session itself.
+  #drafts = new Map<string, EditorDraftStash>()
+  #resuming = false
   // Where each field's value comes from at an alias, and what the participant
   // chose for it this session (alias-properties.md, step 4). Null layers = the
   // tile is a repo itself (a top-level tile): there is nothing to inherit from.
@@ -180,6 +203,16 @@ export class TileEditorService extends EventTarget {
     this.#emit()
   }
 
+  /** True while the editor is putting a tile's kept draft back on arrival —
+   *  the restore offer is for a draft that is NOT being put back. */
+  get resuming(): boolean { return this.#resuming }
+
+  readonly setResuming = (resuming: boolean): void => {
+    if (resuming === this.#resuming) return
+    this.#resuming = resuming
+    this.#emit()
+  }
+
   readonly setSaving = (saving: boolean): void => {
     if (saving === this.#saving) return
     this.#saving = saving
@@ -302,23 +335,46 @@ export class TileEditorService extends EventTarget {
 
   // ── discarded drafts ───────────────────────────────────────────
 
+  /** Everything of this session a draft needs beyond its properties. */
+  readonly draftExtras = (): Pick<EditorDraftStash, 'baseline' | 'choices' | 'layers' | 'repo' | 'beforeChoice'> => ({
+    baseline: this.baseline,
+    choices: [...this.#choices],
+    layers: this.#layers,
+    repo: clone(this.#repo),
+    beforeChoice: [...this.#beforeChoice].map(([field, saved]) => [field, clone(saved)] as const),
+  })
+
+  /** Keep this tile's draft (replacing the one it already had). */
   readonly stash = (draft: Omit<EditorDraftStash, 'at'>): void => {
-    this.#stash = { ...draft, properties: clone(draft.properties), at: Date.now() }
+    this.#drafts.set(draftKey(draft.cell, draft.segments), { ...draft, properties: clone(draft.properties), at: Date.now() })
+    this.#emit()
   }
 
-  /** The discarded draft for this tile, if there is one. */
-  readonly stashFor = (cell: string, segments: readonly string[]): EditorDraftStash | null => {
-    const held = this.#stash
-    if (!held || held.cell !== cell) return null
-    if (held.segments.join('/') !== segments.join('/')) return null
-    return held
+  /** The draft kept for this tile, if there is one. */
+  readonly stashFor = (cell: string, segments: readonly string[]): EditorDraftStash | null =>
+    this.#drafts.get(draftKey(cell, segments)) ?? null
+
+  /** Let go of a tile's draft — the open tile's when no tile is named. */
+  readonly dropStash = (cell: string = this.#cell, segments: readonly string[] = this.#targetSegments): void => {
+    if (this.#drafts.delete(draftKey(cell, segments))) this.#emit()
   }
 
-  readonly dropStash = (): void => { this.#stash = null }
+  /** Every draft in the pad, oldest first — the tiles that have changes waiting. */
+  get drafts(): readonly EditorDraftStash[] { return [...this.#drafts.values()].sort((a, b) => a.at - b.at) }
 
   /** Put a stashed draft's properties back into the open session. */
   readonly restoreProperties = (properties: Record<string, unknown>): void => {
     this.#properties = clone(properties)
+    this.#emit()
+  }
+
+  /** Put a draft back into the open session: its properties and the choices
+   *  made for its fields, so a save writes what the participant meant. */
+  readonly restoreDraft = (draft: EditorDraftStash): void => {
+    this.#properties = clone(draft.properties)
+    if (draft.choices) this.#choices = new Map(draft.choices)
+    if (draft.beforeChoice) this.#beforeChoice = new Map(draft.beforeChoice.map(([field, saved]) => [field, clone(saved)] as const))
+    if (draft.repo) this.#repo = clone(draft.repo)
     this.#emit()
   }
 

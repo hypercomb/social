@@ -169,16 +169,14 @@ describe('tile editor — the review fixes', () => {
     expect(check.mock.invocationCallOrder[0]).toBeLessThan(saveAndComplete.mock.invocationCallOrder[0])
   })
 
-  // 5 ── the leave prompt ────────────────────────────────────────────────
+  // 5 ── moving on, and the leave prompt a group asks ────────────────────
 
-  it('"don’t save" never writes the typed name; "save and open" does', async () => {
+  it('moving to another tile writes the typed name and asks nothing; a group still asks, and "don’t save" never writes it', async () => {
     await openAlpha()
     type('Harbour')
     EffectBus.emitTransient('editor:switch-request', { label: 'beta' })
     await settle()
-    button('leave-discard').click()
-    await settle()
-    expect(setTitle).not.toHaveBeenCalled()
+    expect(setTitle).toHaveBeenCalledWith(['alpha'], 'Harbour')
     expect(switchTo).toHaveBeenCalledWith('beta', { save: false })
 
     await frames()
@@ -187,13 +185,15 @@ describe('tile editor — the review fixes', () => {
     setTitle.mockClear()
     switchTo.mockClear()
     await openAlpha()
-    type('Harbour')
-    EffectBus.emitTransient('editor:switch-request', { label: 'beta' })
+    service().setGroup(['alpha', 'beta'])
+    service().setBorderColor('#112233')
     await settle()
+    EffectBus.emitTransient('editor:switch-request', { label: 'gamma' })
+    await settle()
+    expect(switchTo).not.toHaveBeenCalled()
     button('leave-save').click()
     await settle()
-    expect(setTitle).toHaveBeenCalledWith(['alpha'], 'Harbour')
-    expect(switchTo).toHaveBeenCalledWith('beta', { save: true })
+    expect(switchTo).toHaveBeenCalledWith('gamma', { save: true })
   })
 
   // 6 ── a plain click on a member collapses the group ───────────────────

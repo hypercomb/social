@@ -156,26 +156,22 @@ describe('tile editor — the name', () => {
     expect(nameInput().value).toBe('Taken')
   })
 
-  it('counts a pending name as a change: switching asks, and "don’t save" drops it', async () => {
+  it('writes a pending name when the editor moves on, without asking — the name has its own door', async () => {
     await openAlpha()
     type('Harbour')
     EffectBus.emitTransient('editor:switch-request', { label: 'beta' })
     await settle()
-    expect(switchTo).not.toHaveBeenCalled()
-    expect(panel().querySelector<HTMLElement>('.te-leave')?.hidden).toBe(false)
-    button('leave-discard').click()
-    await settle()
-    // "don't save" lets go of the typed words: they are NOT written (changed on purpose)
-    expect(setTitle).not.toHaveBeenCalled()
+    expect(panel().querySelector<HTMLElement>('.te-leave')?.hidden).toBe(true)
+    expect(setTitle).toHaveBeenCalledWith(['alpha'], 'Harbour')
     expect(switchTo).toHaveBeenCalledWith('beta', { save: false })
+    // the name was written before the move, never after it
+    expect(setTitle.mock.invocationCallOrder[0]).toBeLessThan(switchTo.mock.invocationCallOrder[0])
   })
 
-  it('does not save and open on a refused name', async () => {
+  it('does not move on while the name is refused, and returns to the field', async () => {
     await openAlpha()
     type('Taken')
     EffectBus.emitTransient('editor:switch-request', { label: 'beta' })
-    await settle()
-    button('leave-save').click()
     await vi.waitFor(() => expect(document.activeElement).toBe(nameInput()))
     expect(switchTo).not.toHaveBeenCalled()
     expect(service().cell).toBe('alpha')

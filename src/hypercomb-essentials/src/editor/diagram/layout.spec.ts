@@ -90,3 +90,53 @@ describe('layoutFor: the decision', () => {
     expect(l.figure.top).toBeGreaterThanOrEqual(40)
   })
 })
+
+describe('layoutFor: the participant\'s size', () => {
+  const sized = (w: number, h: number, scale: number) => at(w, h, 1, { scale })
+
+  it('1 (and no scale at all) is the size the desk has always drawn', () => {
+    for (const [w, h] of [[1920, 1080], [1440, 900], [1024, 768], [900, 700], [390, 844]] as const) {
+      expect(sized(w, h, 1).size).toBe(at(w, h).size)
+      expect(sized(w, h, 1).layout).toBe(at(w, h).layout)
+    }
+  })
+
+  it('smaller draws a smaller stage and never tips a desk with room into narrow', () => {
+    const usual = at(1920, 1080)
+    const small = sized(1920, 1080, 0.5)
+    expect(small.layout).toBe('wide')
+    expect(small.size).toBe(220)
+    expect(small.size).toBeLessThan(usual.size)
+    // still centred
+    expect(small.figure.left).toBe(Math.round((small.viewport.width - small.size) / 2))
+  })
+
+  it('larger draws a larger stage where the desk has room, up to the room it has', () => {
+    const usual = at(1920, 1080)
+    const big = sized(1920, 1080, 1.5)
+    expect(big.size).toBeGreaterThan(usual.size)
+    expect(big.size).toBe(660)
+    // a desk with no room to spare keeps the labels on screen: it cannot grow
+    expect(sized(1024, 768, 1.5).size).toBe(at(1024, 768).size)
+  })
+
+  it('does not change which layout the desk takes', () => {
+    for (const scale of [0.5, 1, 1.5]) {
+      expect(sized(900, 700, scale).layout).toBe('narrow')
+      expect(sized(1440, 900, scale).layout).toBe('wide')
+    }
+  })
+
+  it('moves the narrow stage inside the phone\'s width', () => {
+    const usual = at(390, 844)
+    expect(sized(390, 844, 0.5).size).toBeLessThan(usual.size)
+    expect(sized(390, 844, 0.5).size).toBeGreaterThanOrEqual(140)
+    expect(sized(390, 844, 1.5).size).toBeLessThanOrEqual(390 - 48)
+  })
+
+  it('ignores a scale that is not a number above zero', () => {
+    for (const scale of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(sized(1440, 900, scale).size).toBe(at(1440, 900).size)
+    }
+  })
+})
