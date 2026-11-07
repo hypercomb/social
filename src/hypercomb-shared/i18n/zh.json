@@ -1090,6 +1090,8 @@
   "presence.uploading": "上传中 {done} / {total}",
   "webgl.required": "硬件图形加速已关闭",
   "webgl.howto": "Hypercomb 使用 WebGL 绘制磁贴，但此浏览器正在阻止它。Safari：关闭此站点的锁定模式（设置 → 隐私与安全）。Chrome：开启「可用时使用图形加速」（设置 → 系统）并重新启动。然后刷新此页面。",
+  "webgl.lost": "图形已中断",
+  "webgl.lost.howto": "浏览器收回了此页面的图形上下文，通常是显存不足或图形进程崩溃所致。它一般会在几秒内自行恢复；如果此提示一直存在，请重新加载页面，若仍无效，请重启浏览器。",
   "sync.synchronizing": "同步中…",
   "sync.progress": "同步中 {current}/{total} 个文件",
   "sync.done": "已同步",

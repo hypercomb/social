@@ -1090,6 +1090,8 @@
   "presence.uploading": "caricamento {done} di {total}",
   "webgl.required": "La grafica hardware è disattivata",
   "webgl.howto": "Hypercomb disegna le tessere con WebGL, che questo browser sta bloccando. Safari: disattiva la modalità blocco per questo sito (Impostazioni → Privacy e Sicurezza). Chrome: attiva \"Usa accelerazione grafica quando disponibile\" (Impostazioni → Sistema) e riavvia. Poi ricarica questa pagina.",
+  "webgl.lost": "La grafica è stata interrotta",
+  "webgl.lost.howto": "Il browser ha tolto a questa pagina il contesto grafico, di solito per carenza di memoria grafica o per un processo grafico in crash. Normalmente torna da solo entro pochi secondi; se questo avviso resta, ricarica la pagina e, se non basta, riavvia il browser.",
   "sync.synchronizing": "sincronizzazione in corso…",
   "sync.progress": "sincronizzazione {current}/{total} file",
   "sync.done": "sincronizzato",

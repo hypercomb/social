@@ -1090,6 +1090,8 @@
   "presence.uploading": "yükleniyor {done} / {total}",
   "webgl.required": "Donanım grafikleri kapalı",
   "webgl.howto": "Hypercomb döşemelerini WebGL ile çizer, bu tarayıcı bunu engelliyor. Safari: bu site için Kilit Modunu kapatın (Ayarlar → Gizlilik ve Güvenlik). Chrome: ”Kullanılabilir olduğunda grafik hızlandırmayı kullan”  seçeneğini açın (Ayarlar → Sistem) ve yeniden başlatın. Sonra bu sayfayı yeniden yükleyin.",
+  "webgl.lost": "Grafikler kesintiye uğradı",
+  "webgl.lost.howto": "Tarayıcı bu sayfanın grafik bağlamını geri aldı; genellikle grafik belleği baskısı ya da çöken bir grafik işlemi yüzünden. Normalde birkaç saniye içinde kendiliğinden geri gelir; bu not kalırsa sayfayı yenileyin, yardımcı olmazsa tarayıcıyı yeniden başlatın.",
   "sync.synchronizing": "senkronize ediliyor…",
   "sync.progress": "senkronize ediliyor {current}/{total} dosya",
   "sync.done": "senkronize edildi",

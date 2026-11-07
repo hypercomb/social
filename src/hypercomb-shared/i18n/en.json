@@ -1700,6 +1700,8 @@
   "presence.uploading": "uploading {done} of {total}",
   "webgl.required": "Hardware graphics is turned off",
   "webgl.howto": "Hypercomb draws its tiles with WebGL, which this browser is blocking. Safari: turn off Lockdown Mode for this site (Settings → Privacy & Security). Chrome: turn on \"Use graphics acceleration when available\" (Settings → System) and relaunch. Then reload this page.",
+  "webgl.lost": "Graphics were interrupted",
+  "webgl.lost.howto": "The browser took the graphics context away from this page, usually graphics memory pressure or a crashed graphics process. It normally comes back on its own within a few seconds; if this note stays, reload the page, and if that does not help, restart the browser.",
   "sync.synchronizing": "synchronizing…",
   "sync.progress": "synchronizing {current}/{total} files",
   "sync.done": "synchronized",

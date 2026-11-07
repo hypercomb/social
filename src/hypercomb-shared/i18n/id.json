@@ -1090,6 +1090,8 @@
   "presence.uploading": "mengunggah {done} dari {total}",
   "webgl.required": "Akselerasi grafis perangkat keras dinonaktifkan",
   "webgl.howto": "Hypercomb menggambar ubinnya dengan WebGL, yang diblokir oleh browser ini. Safari: nonaktifkan Mode Penguncian untuk situs ini (Pengaturan → Privasi & Keamanan). Chrome: aktifkan ”Gunakan akselerasi grafis jika tersedia” (Pengaturan → Sistem) dan luncurkan ulang. Kemudian muat ulang halaman ini.",
+  "webgl.lost": "Grafis terputus",
+  "webgl.lost.howto": "Browser mencabut konteks grafis dari halaman ini, biasanya karena tekanan memori grafis atau proses grafis yang mogok. Biasanya pulih sendiri dalam beberapa detik; jika catatan ini tetap ada, muat ulang halaman, dan jika itu tidak membantu, mulai ulang browser.",
   "sync.synchronizing": "menyinkronkan…",
   "sync.progress": "menyinkronkan {current}/{total} file",
   "sync.done": "tersinkronkan",

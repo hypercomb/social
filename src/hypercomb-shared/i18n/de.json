@@ -1090,6 +1090,8 @@
   "presence.uploading": "lädt hoch {done} von {total}",
   "webgl.required": "Hardware-Grafikbeschleunigung ist deaktiviert",
   "webgl.howto": "Hypercomb zeichnet seine Kacheln mit WebGL, das dieser Browser blockiert. Safari: Lockdown-Modus für diese Seite deaktivieren (Einstellungen → Datenschutz & Sicherheit). Chrome: „Grafikbeschleunigung verwenden, wenn verfügbar“ aktivieren (Einstellungen → System) und neu starten. Dann diese Seite neu laden.",
+  "webgl.lost": "Die Grafik wurde unterbrochen",
+  "webgl.lost.howto": "Der Browser hat dieser Seite den Grafikkontext entzogen, meist wegen Grafikspeichermangel oder eines abgestürzten Grafikprozesses. Normalerweise kehrt er innerhalb weniger Sekunden von selbst zurück. Bleibt dieser Hinweis stehen, laden Sie die Seite neu; hilft das nicht, starten Sie den Browser neu.",
   "sync.synchronizing": "synchronisiere…",
   "sync.progress": "synchronisiere {current}/{total} Dateien",
   "sync.done": "synchronisiert",

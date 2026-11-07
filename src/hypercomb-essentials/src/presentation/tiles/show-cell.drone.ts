@@ -827,7 +827,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'render:names-on-hover', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:grid-changed', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'order:changed', 'arrange:preview', 'render:set-gap', 'move:preview', 'overlay:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'presence:claims-changed', 'tags:apply-pending', 'tags:preview', 'group:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:committed', 'cell:added','cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover', 'render:flower', 'tile:preview']
+  protected override listens = ['render:host-ready', 'render:context-restored', 'render:names-on-hover', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:grid-changed', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'order:changed', 'arrange:preview', 'render:set-gap', 'move:preview', 'overlay:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'presence:claims-changed', 'tags:apply-pending', 'tags:preview', 'group:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:committed', 'cell:added','cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover', 'render:flower', 'tile:preview']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:tiles-target', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted', 'thumbnail:wanted', 'landing:pending', 'render:dive-painted', 'render:name-visibility', 'render:level-leaving']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -7405,6 +7405,18 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
+    // THE GPU CONTEXT CAME BACK (pixi-host.worker.ts #wireContextLoss). Pixi
+    // re-created its textures and shaders from their sources, but the two
+    // atlases are render targets drawn into over time and are blank again.
+    // Same renderer, same canvas: rebuild what was DRAWN, then paint. The
+    // rebuild clears the mesh, and a cleared mesh has no page key, so the
+    // next pass runs in full without a page-wide invalidation of its own.
+    this.onEffect<HostReadyPayload>('render:context-restored', (payload) => {
+      this.pixiRenderer = payload.renderer
+      this.rebuildRenderResources(payload.renderer)
+      this.requestRender()
+    })
+
     // listen for orientation change
     this.onEffect<{ flat: boolean }>('render:set-orientation', (payload) => {
       if (this.#flat !== payload.flat) {
@@ -8651,9 +8663,14 @@ export class ShowCellDrone extends Drone {
     this.shader = null
     this.atlas = new HexLabelAtlas(renderer, 128, 16, 16) // 256 slots (match imageAtlas) so >64-tile hives don't wrap & thrash the render cache
     this.attachLabelResolver(this.atlas)
+    this.atlas.setPivot(this.#pivot)
+    if (this.#warmLabels.length) this.atlas.seed(this.#warmLabels)
     this.imageAtlas = new HexImageAtlas(renderer, 256, 16, 16)
     this.#primeEmptyRenderPipeline()
-    this.cellImageCache.clear()
+    // Fresh atlases hold nothing: every label must be baked and every
+    // picture stamped again, so the remembered generations and the per-cell
+    // caches that sit on them are reset the same way the first build does.
+    this.#invalidateAllLabelDerivedState()
     this.atlasRenderer = renderer
   }
 

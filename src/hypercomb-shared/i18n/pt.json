@@ -1090,6 +1090,8 @@
   "presence.uploading": "enviando {done} de {total}",
   "webgl.required": "A aceleração gráfica está desativada",
   "webgl.howto": "Hypercomb desenha seus blocos com WebGL, que este navegador está bloqueando. Safari: desative o Modo de Bloqueio para este site (Ajustes → Privacidade e Segurança). Chrome: ative \"Usar aceleração gráfica quando disponível\" (Configurações → Sistema) e reinicie. Depois recarregue esta página.",
+  "webgl.lost": "Os gráficos foram interrompidos",
+  "webgl.lost.howto": "O navegador retirou o contexto gráfico desta página, normalmente por falta de memória gráfica ou por uma falha no processo gráfico. Costuma voltar sozinho em alguns segundos; se este aviso continuar, recarregue a página e, se não resolver, reinicie o navegador.",
   "sync.synchronizing": "sincronizando…",
   "sync.progress": "sincronizando {current}/{total} arquivos",
   "sync.done": "sincronizado",

@@ -1090,6 +1090,8 @@
   "presence.uploading": "envoi {done} sur {total}",
   "webgl.required": "L'accélération graphique matérielle est désactivée",
   "webgl.howto": "Hypercomb dessine ses tuiles avec WebGL, que ce navigateur bloque. Safari : désactivez le mode Isolement pour ce site (Réglages → Confidentialité et sécurité). Chrome : activez « Utiliser l'accélération graphique lorsqu'elle est disponible » (Paramètres → Système) et relancez. Puis rechargez cette page.",
+  "webgl.lost": "L'affichage a été interrompu",
+  "webgl.lost.howto": "Le navigateur a retiré le contexte graphique de cette page, le plus souvent par manque de mémoire graphique ou après le plantage du processus graphique. Il revient normalement de lui-même en quelques secondes ; si cette note reste affichée, rechargez la page et, si cela ne suffit pas, redémarrez le navigateur.",
   "sync.synchronizing": "synchronisation…",
   "sync.progress": "synchronisation {current}/{total} fichiers",
   "sync.done": "synchronisé",
