@@ -157,6 +157,14 @@ describe('every page says where it goes, once', () => {
       expect(b.page).not.toMatch(/data-part="tabs"/)
       for (const href of [...hrefs(b.page, 'ways'), ...hrefs(b.page, 'beside')]) linkTo(href, b.route, paged)
     })
+    it(`${at}: the menus come first — beside and inside sit above the video`, () => {
+      const scene = b.page.indexOf('data-part="scene"')
+      expect(scene).toBeGreaterThan(-1)
+      for (const part of ['beside', 'ways']) {
+        const at = b.page.indexOf(`data-part="${part}"`)
+        if (at >= 0) expect(at).toBeLessThan(scene)
+      }
+    })
     it(`${at}: inside goes one level down, beside stays under the same parent`, () => {
       for (const href of hrefs(b.page, 'ways')) expect(linkTo(href, b.route, paged).split('/').length).toBe(b.route.length + 1)
       const parent = b.route.slice(0, -1).join('/')
