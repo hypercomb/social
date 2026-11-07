@@ -11,7 +11,7 @@ import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from '../grid/hex-geometry.js'
 import { entryClaimFor, hasDecorationKind, referenceTargetForLabel, tagsForLabel } from '../../commands/decoration-kind-index.js'
 import { peerDivergesAt } from '../../sharing/peer-divergence.js'
 import type { IconRegistryEntry } from './tile-actions.drone.js'
-import { ICON_SPACING, ICON_Y, computeIconPositions, raisedNameY } from './tile-action-icons.js'
+import { ICON_SPACING, ICON_Y, computeIconPositions, iconRowY, raisedNameY } from './tile-action-icons.js'
 import { clickNeedsCoordinateHitTest, resolveTilePress, usesTileCloseUp } from './tile-tap-policy.js'
 import { openTileMenu } from './viewer-walk.js'
 import { isPublishedVisitorShell } from '../../sharing/behavior-enablement.js'
@@ -104,6 +104,9 @@ type OverlayAction = {
   /** PINNED to the label row's left edge, beside the name — outside the
    *  wrapping icon flow (see #layoutIconRow). Placement only. */
   labelRow?: boolean
+  /** The row #layoutIconRow last laid this icon on (0-based; -1 = pinned beside
+   *  the name). The hint hangs right below it. */
+  row?: number
   /** If provided, called to determine per-tile visibility */
   visibleWhen?: OverlayVisibilityFn
   /** If provided, called to compute per-tile tint */
@@ -216,10 +219,6 @@ const DEFAULT_ICON_SIZE = 7     // integer for pixel-perfect rendering
 const MAX_ROW_ICONS = 5
 /** Icon rows the band can hold under the name. */
 const MAX_ICON_ROWS = 2
-/** Centre-to-centre between the two rows — a plate (9.4) plus a margin, not a band row (0.15 × 32 ≈ 4.8,
- *  doubled). The block is centred on ICON_Y, so a single row sits dead centre
- *  and two rows straddle it. */
-const ICON_ROW_PITCH = 12
 /** The hex's horizontal half-extent (√3/2 × 32) — the bound every icon
  *  surface measures against. */
 const HEX_INRADIUS = 27.7
@@ -1692,11 +1691,10 @@ export class TileOverlayDrone extends Drone {
   // ── Icon layout: fill a row, wrap, stop at two ─────────────────────
   // `base` = icons that passed their per-tile visibleWhen (set upstream by
   // #updatePerTileVisibility). Ordered main → feature → danger so `remove`
-  // lands last, then chunked at MAX_ROW_ICONS. The rows are centred as a BLOCK
-  // on ICON_Y — one half-row below the hex centre, because the name owns the
-  // band's top row — so one icon row lands on the band's second row and two
-  // straddle ICON_Y, one per band row. Horizontally every row shares the first
-  // row's left edge (see below), so a wrap reads as one left-aligned block.
+  // lands last, then chunked at MAX_ROW_ICONS. The first row is centred on the
+  // tile (iconRowY(0) is the hex centre line) and wrapped rows grow downward
+  // from it. Horizontally every row shares the first row's left edge (see
+  // below), so a wrap reads as one left-aligned block.
 
   #layoutIconRow(): void {
     const base = this.#actions.filter(a => a.button.visible)
@@ -1754,9 +1752,11 @@ export class TileOverlayDrone extends Drone {
     // above the top icon row (raisedNameY, shared with the name layer), so the
     // pin lands beside it at every band height; with no icon rows the name
     // stays on the hex centre (y = 0).
-    const nameRowY = rows.length === 0 ? 0 : Math.round(raisedNameY(rows.length))
-    pinned.forEach((a, i) =>
-      a.button.position.set(LABEL_ROW_LEFT_X + i * ICON_SPACING, nameRowY))
+    const nameRowY = rows.length === 0 ? 0 : Math.round(raisedNameY())
+    pinned.forEach((a, i) => {
+      a.row = -1
+      a.button.position.set(LABEL_ROW_LEFT_X + i * ICON_SPACING, nameRowY)
+    })
 
     if (rows.length === 0) {
       // No icons: leave the pool where a single row would have left it, so an
@@ -1778,12 +1778,14 @@ export class TileOverlayDrone extends Drone {
       spacing = ICON_ROW_AVAILABLE / (rows[0].length - 1)
     }
     const startX = Math.round(-(rows[0].length - 1) * spacing / 2)
-    const top = ICON_Y - (rows.length - 1) * ICON_ROW_PITCH / 2
-    let lastRowY = top
+    let lastRowY = iconRowY(0)
     rows.forEach((items, r) => {
-      const y = Math.round(top + r * ICON_ROW_PITCH)
+      const y = iconRowY(r)
       lastRowY = y
-      items.forEach((a, j) => a.button.position.set(Math.round(startX + j * spacing), y))
+      items.forEach((a, j) => {
+        a.row = r
+        a.button.position.set(Math.round(startX + j * spacing), y)
+      })
     })
 
     // Where the drawn block ACTUALLY ends — the pool hangs off this.
@@ -2719,7 +2721,7 @@ export class TileOverlayDrone extends Drone {
     const oy = this.#overlay.position.y
     for (const a of this.#actions) {
       if (!a.ctrlClick || !a.button.visible || a.inert) continue
-      if (a.button.containsPoint(local.x - ox - a.button.position.x, local.y - oy - a.button.position.y)) return a
+      if (a.button.hitsPlate(local.x - ox - a.button.position.x, local.y - oy - a.button.position.y)) return a
     }
     return null
   }
@@ -2819,8 +2821,8 @@ export class TileOverlayDrone extends Drone {
   }
 
   /** The icon's explanation is said where the participant chose (`hints`): by
-   *  default ON THE TILE, in the label that carries its name (the name layer
-   *  swaps the words and puts the name back); otherwise at the CAPTION
+   *  default ON THE TILE, on a plate hung right below the icon's own row (the
+   *  name layer places it; the name stays put); otherwise at the CAPTION
    *  (top-centre, under the command line). Either way one quiet place, never a
    *  dropdown drawn over the tiles it explains. */
   #showHint(actionName: string): void {
@@ -2833,7 +2835,7 @@ export class TileOverlayDrone extends Drone {
     const tile = this.#hintPlace === 'tile' ? this.#bandTileLabel() : null
     if (tile) {
       this.#hintOnTile = true
-      EffectBus.emitTransient(HINT_SAY, { label: tile, title, text } satisfies HintSay)
+      EffectBus.emitTransient(HINT_SAY, { label: tile, title, text, row: action.row } satisfies HintSay)
       return
     }
     this.emitEffect('caption:show', { source: HINT_CAPTION_SOURCE, title, text, icon: action.svgMarkup })
@@ -2973,7 +2975,7 @@ export class TileOverlayDrone extends Drone {
         const btn = action.button
         const bx = local.x - ox - btn.position.x
         const by = local.y - oy - btn.position.y
-        if (btn.containsPoint(bx, by)) {
+        if (btn.hitsPlate(bx, by)) {
           // A press on a FEATURE icon may become a pin drag: EntrancePinDrone
           // tracks the pointer from here and, past the threshold, drags the
           // entrance up to the header bar. A plain release stays a click —
@@ -3285,7 +3287,7 @@ export class TileOverlayDrone extends Drone {
         const bx = local.x - ox - btn.position.x
         const by = local.y - oy - btn.position.y
 
-        if (btn.containsPoint(bx, by)) {
+        if (btn.hitsPlate(bx, by)) {
           // Shaded feature (backing bee not yet loaded): swallow the click so it
           // neither runs the action nor falls through to a tile-body press.
           if (action.inert) { this.#clearHint(); return }

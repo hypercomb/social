@@ -12,10 +12,12 @@
 // A press that lands before the read wins.
 //
 //   EffectBus 'hint:place' { place }                — the choice (replayed)
-//   EffectBus 'hint:say'   { label, title?, text? } — the words for the tile
-//                                                     `label` (transient);
-//                                                     `label: null` takes
-//                                                     them down
+//   EffectBus 'hint:say'   { label, title?, text?, row? }
+//                                                   — the words for the tile
+//                                                     `label` (transient),
+//                                                     hung under icon row
+//                                                     `row`; `label: null`
+//                                                     takes them down
 
 export type HintPlace = 'tile' | 'top'
 
@@ -24,7 +26,9 @@ export const HINT_PLACE = 'hint:place'
 /** The explanation for a tile's label while its icon is under the pointer. */
 export const HINT_SAY = 'hint:say'
 
-export type HintSay = { label: string | null; title?: string; text?: string }
+/** `row` is the row of the icon under the pointer (0-based, -1 = pinned beside
+ *  the name): the words hang right below it. */
+export type HintSay = { label: string | null; title?: string; text?: string; row?: number }
 
 /** On the tile, unless the participant asked for the top. */
 export const DEFAULT_HINT_PLACE: HintPlace = 'tile'
