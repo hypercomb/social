@@ -12,8 +12,9 @@
 //
 //   · the session: the docked-panel chrome, the mode claim, the Back gesture,
 //     the keymap hold, the window session (park / unpark), the Escape ladder;
-//   · the header: the STORED reading, the address, the unsaved word, Save and
-//     close, the leave prompt, the notices;
+//   · the header: the STORED reading, the address, the unsaved word, the size
+//     slider, Save (this tile) and Save all (every tile left with changes),
+//     close, the leave prompt a group asks, the notices;
 //   · the TileSessionPort the diagram reads and writes through, built over the
 //     tile session, the picture model and the name's memory (TileTitle);
 //   · the picture's doors: files, drops, the camera, the live preview in the hive.
@@ -41,6 +42,8 @@ import { mobileModeActive, type TileEditorService } from './tile-editor.service.
 import { parseHexColour } from './hex-capture.js'
 import { frameSize, scaleLimits, scaleOfSlider, sliderOf, zoomPercent, zoomToward, type HexOrientation } from './crop-math.js'
 import { installTileEditorStyles } from './tile-editor.styles.js'
+import { applyDraft } from './draft-pad.js'
+import { SCALE_DEFAULT, SCALE_MAX, SCALE_MIN, SCALE_STEP, editorScale, editorSizeRecord, setEditorScale } from './editor-size.js'
 import type { ImageEditorService } from './image-editor.service.js'
 import { pictureHistory } from './picture-history.js'
 import { TileTitle, type TitleDecorations, type TitleStatus } from './tile-title.js'
@@ -87,7 +90,7 @@ const OFFERED: Record<PropertyLayer, readonly PropertyChoice[]> = {
 }
 
 type DroneShape = {
-  saveAndComplete?(): Promise<void>
+  saveAndComplete?(options?: { all?: boolean }): Promise<void>
   cancelEditing?(): void
   switchTo?(label: string, options?: { save?: boolean; parent?: readonly string[] }): Promise<boolean>
   readonly openTile?: { label: string; parent: readonly string[] } | null
@@ -291,7 +294,12 @@ export class TileEditorElement extends HTMLElement {
     this.#images?.addEventListener('change', this.#onImagesChange)
     this.#title.addEventListener('change', this.#onTitleChange)
     window.addEventListener('resize', this.#schedule)
+    // The size record arrives from disk after the first frame: the desk is
+    // redrawn at the participant's size, and the slider follows it.
+    const sizeRecord = editorSizeRecord()
+    sizeRecord.addEventListener('change', this.#onSizeChange)
     this.#cleanup.push(
+      () => sizeRecord.removeEventListener('change', this.#onSizeChange),
       () => this.#service?.removeEventListener('change', this.#onServiceChange),
       () => this.#images?.removeEventListener('change', this.#onImagesChange),
       () => this.#title.removeEventListener('change', this.#onTitleChange),
@@ -353,6 +361,12 @@ export class TileEditorElement extends HTMLElement {
     else if (editing) this.#schedule()
   }
 
+  #onSizeChange = (): void => {
+    const range = this.#ref<HTMLInputElement>('size-range')
+    if (range && document.activeElement !== range) range.value = String(Math.round(editorScale() * 100))
+    this.#schedule()
+  }
+
   #onImagesChange = (): void => {
     if (!this.#panel) return
     this.#scheduleTwins()
@@ -395,7 +409,7 @@ export class TileEditorElement extends HTMLElement {
 
   /** Save: the name first (a refusal keeps the desk open and returns to it), the
    *  link verdict next (a deny can no longer race the save), then the drone. */
-  async #save(): Promise<void> {
+  async #save(all = false): Promise<void> {
     const service = this.#service
     if (!service || service.saving || this.#busy || this.#leaving) return
     this.#busy = true
@@ -404,7 +418,9 @@ export class TileEditorElement extends HTMLElement {
       // A group has no name field: a name left refused there cannot hold Save back.
       if (!service.grouped && this.#title.dirty && (await this.#title.flush()) !== 'ok') { this.#focusName(); return }
       if (!(await this.#settleLink())) return
-      await ioc<DroneShape>(KEYS.drone)?.saveAndComplete?.()
+      const drone = ioc<DroneShape>(KEYS.drone)
+      if (all) await drone?.saveAndComplete?.({ all: true })
+      else await drone?.saveAndComplete?.()
     } finally {
       this.#busy = false
       this.#schedule()
@@ -435,7 +451,11 @@ export class TileEditorElement extends HTMLElement {
     // the group onto that tile: the drone's move lets the selection go.
     if (label === here.label && samePage && !service.grouped) { this.#restoreRail(); return }
     this.#setDrawer(false)
-    if (this.#dirty()) { this.#setLeaving({ label, parent }); return }
+    // A tile with changes is not asked about: the drone keeps its draft in the
+    // pad and puts it back when the editor returns, so the participant can go
+    // through several tiles and save them one at a time or all together. A GROUP's
+    // draft is no one tile's to keep, so leaving it is still asked.
+    if (service.grouped && this.#dirty()) { this.#setLeaving({ label, parent }); return }
     void this.#switchTo(label, false, parent)
   }
 
@@ -458,15 +478,11 @@ export class TileEditorElement extends HTMLElement {
     if (!label || !service || !drone?.switchTo || this.#switchingTo) return
     const from = this.#target
     this.#setLeaving(null)
-    // The name is written the moment it is let go of, and a refusal keeps the
-    // desk where it is — except for "don't save", which drops only the typed text.
-    if (!service.grouped && this.#title.dirty) {
-      if (!save) {
-        // "Don't save" lets go of the typed text; it is never written.
-        this.#title.revert()
-        const input = this.#nameInput
-        if (input) input.value = this.#title.draft
-      } else if ((await this.#title.flush()) !== 'ok') { this.#restoreRail(); this.#focusName(); return }
+    // The name is written the moment it is let go of — moving on lets go of it —
+    // and a refusal keeps the desk where it is. (A name is the tile's own and
+    // is saved by its own door; the pad keeps the rest of the draft.)
+    if (!service.grouped && this.#title.dirty && (await this.#title.flush()) !== 'ok') {
+      this.#restoreRail(); this.#focusName(); return
     }
     if (save && !(await this.#settleLink())) { this.#restoreRail(); return }
     // The preview stays painted — a save's own render replaces it with the same
@@ -492,10 +508,11 @@ export class TileEditorElement extends HTMLElement {
     }
     const hadFocus = leave.contains(document.activeElement)
     leave.hidden = !next
-    for (const name of ['cancel', 'primary']) {
+    for (const name of ['cancel', 'primary', 'separator']) {
       const btn = this.#ref(name)
       if (btn) btn.hidden = !!next
     }
+    this.#schedule()
     if (next) this.#ref<HTMLButtonElement>('leave-save')?.focus({ preventScroll: true })
     else if (hadFocus) this.#panel?.focus({ preventScroll: true })
   }
@@ -787,6 +804,36 @@ export class TileEditorElement extends HTMLElement {
     const state = this.#keep('state', make('span', 'te-state'))
     state.append(make('i', 'te-dot'), make('span', 'te-state-word'))
 
+    // How big the tile under the hands is drawn. The participant's own, kept
+    // between sessions; double-click puts it back to the size the desk draws.
+    const size = this.#keep('size', make('label', 'te-size'))
+    size.title = t('editor.size-hint', 'How large the tile is drawn here. Double-click for the usual size.')
+    const sizeGlyph = glyph('zoom_in')
+    sizeGlyph.classList.add('te-size-glyph')
+    const sizeRange = this.#keep('size-range', make('input', 'te-size-range'))
+    sizeRange.type = 'range'
+    sizeRange.name = 'tile-size'
+    sizeRange.min = String(Math.round(SCALE_MIN * 100))
+    sizeRange.max = String(Math.round(SCALE_MAX * 100))
+    sizeRange.step = String(Math.round(SCALE_STEP * 100))
+    sizeRange.value = String(Math.round(editorScale() * 100))
+    sizeRange.setAttribute('aria-label', t('editor.size', 'tile size'))
+    sizeRange.addEventListener('input', () => { setEditorScale(Number(sizeRange.value) / 100); this.#schedule() })
+    sizeRange.addEventListener('dblclick', () => { setEditorScale(SCALE_DEFAULT); sizeRange.value = String(Math.round(SCALE_DEFAULT * 100)); this.#schedule() })
+    size.append(sizeGlyph, sizeRange)
+
+    // Everything before this is about the tile; what follows writes it.
+    const separator = this.#keep('separator', make('span', 'te-sep'))
+    separator.setAttribute('role', 'separator')
+    separator.setAttribute('aria-orientation', 'vertical')
+
+    // Every tile left with changes, written together (the open one included).
+    const saveAll = this.#keep('save-all', make('button', 'te-btn'))
+    saveAll.type = 'button'
+    saveAll.dataset['action'] = 'save-all'
+    saveAll.hidden = true
+    saveAll.addEventListener('click', () => void this.#save(true))
+
     const save = this.#keep('primary', make('button', 'te-btn te-btn-primary'))
     save.type = 'button'
     save.dataset['action'] = 'save'
@@ -820,7 +867,7 @@ export class TileEditorElement extends HTMLElement {
     const close = this.#keep('cancel', iconButton('close', t('editor.close-hint', 'Close. Your changes are kept as a draft.'), 'cancel'))
     close.classList.add('close')
     close.addEventListener('click', () => this.#cancel())
-    head.append(toggle, reading, address, portal, make('span', 'te-grow'), state, leave, save, close)
+    head.append(toggle, reading, address, portal, make('span', 'te-grow'), state, size, separator, leave, saveAll, save, close)
     return head
   }
 
@@ -995,7 +1042,11 @@ export class TileEditorElement extends HTMLElement {
     const here = this.#openTile()
     const key = `${here.label}|${here.parent.join('/')}`
     if (key !== this.#railKey) { this.#railKey = key; rail.showCurrent(here.label, here.parent) }
-    const marks = service.grouped ? service.group.map(label => [...here.parent, label]) : []
+    // A group marks its tiles; otherwise the tiles left with changes are marked,
+    // so the participant can see where to go back to.
+    const marks = service.grouped
+      ? service.group.map(label => [...here.parent, label])
+      : service.drafts.map(draft => draft.segments.length > 0 ? [...draft.segments] : [...(draft.page ?? here.parent), draft.cell])
     const mark = marks.map(path => path.join('/')).join('\n')
     if (mark !== this.#railMark) { this.#railMark = mark; rail.showSelection(marks) }
   }
@@ -1040,6 +1091,7 @@ export class TileEditorElement extends HTMLElement {
       model: this.#model,
       variant: this.#variant(),
       innerHeight: window.innerHeight,
+      scale: editorScale(),
     })
   }
 
@@ -1187,12 +1239,19 @@ export class TileEditorElement extends HTMLElement {
     if (portal) portal.hidden = grouped || !this.#throughPortal()
 
     const dirty = this.#dirty()
-    const justSaved = !dirty && this.#title.status.state === 'saved' && Date.now() - this.#savedAt < SAVED_MS
+    // Tiles the editor moved away from with changes still waiting.
+    const waiting = service.drafts.length
+    const justSaved = !dirty && waiting === 0 && this.#title.status.state === 'saved' && Date.now() - this.#savedAt < SAVED_MS
     const state = this.#ref('state')
     if (state) {
-      state.dataset['state'] = dirty ? 'dirty' : justSaved ? 'saved' : 'clean'
+      state.dataset['state'] = dirty || waiting > 0 ? 'dirty' : justSaved ? 'saved' : 'clean'
       const word = state.querySelector('.te-state-word')
-      if (word) word.textContent = dirty ? t('editor.unsaved', 'unsaved') : justSaved ? t('editor.saved', 'saved') : ''
+      const pending = waiting + (dirty ? 1 : 0)
+      if (word) {
+        word.textContent = waiting > 0
+          ? t('editor.unsaved-count', '{count} unsaved', { count: pending })
+          : dirty ? t('editor.unsaved', 'unsaved') : justSaved ? t('editor.saved', 'saved') : ''
+      }
     }
     const primary = this.#ref<HTMLButtonElement>('primary')
     if (primary) {
@@ -1203,6 +1262,14 @@ export class TileEditorElement extends HTMLElement {
       primary.disabled = service.saving || this.#busy
       primary.textContent = saving ? t('editor.saving', 'saving…') : dirty ? t('editor.save', 'save') : t('editor.done', 'done')
     }
+    // Save all: only when another tile is waiting. Save writes THIS tile alone.
+    const saveAll = this.#ref<HTMLButtonElement>('save-all')
+    if (saveAll) {
+      saveAll.hidden = waiting === 0 || this.#leaving !== null
+      saveAll.disabled = service.saving || this.#busy
+      saveAll.textContent = t('editor.save-all', 'save all ({count})', { count: waiting + (dirty ? 1 : 0) })
+      saveAll.title = service.drafts.map(draft => draft.cell).concat(dirty ? [service.cell] : []).join(', ')
+    }
     this.#panel?.setAttribute('aria-busy', String(service.saving))
   }
 
@@ -1210,7 +1277,7 @@ export class TileEditorElement extends HTMLElement {
     const service = this.#service
     if (!service) return
     const restore = this.#ref('restore')
-    if (restore) restore.hidden = service.grouped || !service.stashFor(service.cell, service.targetSegments)
+    if (restore) restore.hidden = service.grouped || service.resuming || !service.stashFor(service.cell, service.targetSegments)
     const writes = this.#ref('group-writes')
     if (writes) {
       const set = this.#groupSet()
@@ -1790,20 +1857,7 @@ export class TileEditorElement extends HTMLElement {
     if (!service || !model) return
     const stash = service.stashFor(service.cell, service.targetSegments)
     if (!stash) return
-    service.restoreProperties(stash.properties)
-    if (stash.pictureRemoved) {
-      model.removePicture()
-    } else if (stash.picture) {
-      const picture = stash.picture
-      service.setLargeBlob(picture.source)
-      await model.loadImage(picture.source)
-      model.setLinked(picture.linked)
-      model.setMode(picture.mode)
-      const [first, second] = this.#model.variants.map(v => v.id as HexOrientation)
-      model.setFraming(picture.point, first)
-      if (!picture.linked && second) model.setFraming(picture.flat, second)
-    }
-    service.dropStash()
+    await applyDraft(service, model, stash, this.#model.variants.map(v => v.id as HexOrientation))
     this.#afterGesture()
   }
 

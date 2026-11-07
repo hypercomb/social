@@ -3,11 +3,14 @@ import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { readCellProperties, readTilePropertiesAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, lookupTilePropsSig, readOwnTilePropertiesAt, propertyLayers, editorWrites, ownAfterInherit, groupFormFrom, groupWritesFor } from './tile-properties.js'
 import { referenceEditsRootDefaultForLabel, referenceTargetForLabel, ensureDecorationsIndexed } from '../commands/decoration-kind-index.js'
 import { portalEditTarget } from './portal-edit-target.js'
-import { parseHexColour } from './hex-capture.js'
+import { parseHexColour, decodePicture, captureHexSmall } from './hex-capture.js'
+import { DEFAULT_HEX_SIDE, type Framing, type HexOrientation } from './crop-math.js'
 import { largeImage } from './arm-resource.js'
 import { holdPictures } from '../commands/lightbox-kind.js'
-import { TileEditorService } from './tile-editor.service.js'
+import { TileEditorService, type EditorDraftStash } from './tile-editor.service.js'
 import { ImageEditorService } from './image-editor.service.js'
+import { applyDraft } from './draft-pad.js'
+import type { EditorField, PropertyChoice, PropertyLayer } from './tile-properties.js'
 
 // THE PANEL ARRIVES WITH THE FIRST EDIT, not at boot (atomic-modules-plan.md,
 // "adopt the proper load"): the view, its styles, the crop stage and the tile
@@ -88,6 +91,33 @@ type Selection = {
 /** A tile a save wrote, as `tile:saved` announces it. */
 type SavedTile = { cell: string; segments: readonly string[] }
 
+type OpenOptions = {
+  stash?: boolean
+  carry?: Readonly<Record<string, unknown>>
+  /** Put the tile's kept draft back on arrival — a move with the desk open. */
+  resume?: boolean
+}
+
+const ORIENTATIONS: readonly HexOrientation[] = ['point-top', 'flat-top']
+
+/** One tile's write, whether it is the open session or a draft from the pad:
+ *  what to put on the tile and how to take the picture. */
+type TileWrite = {
+  cell: string
+  /** The page the tile sits on (its address less its own name). */
+  segmentsForSave: readonly string[]
+  props: Record<string, unknown>
+  baseline: Record<string, unknown> | undefined
+  choices: ReadonlyMap<EditorField, PropertyChoice>
+  layers: Readonly<Record<EditorField, PropertyLayer>> | null
+  /** A picture other than the tile's own, or its removal. */
+  pictureChanged: boolean
+  picture:
+    | { removed: true }
+    | { removed?: false; source: Blob; point: Framing; flat: Framing; capture: (orientation: HexOrientation, fill: string | null) => Promise<Blob> }
+    | null
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value)
 
@@ -145,6 +175,10 @@ const sameSegments = (a: readonly string[], b: readonly string[]): boolean =>
 
 const hereSegments = (): readonly string[] =>
   window.ioc.get<LineageLike>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? []
+
+/** Where a draft's tile sits: its own address, else the page it was left on. */
+const draftSegments = (draft: EditorDraftStash): readonly string[] =>
+  draft.segments.length > 0 ? draft.segments : [...(draft.page ?? hereSegments()), draft.cell]
 
 export class TileEditorDrone {
 
@@ -271,16 +305,17 @@ export class TileEditorDrone {
 
   // ── open editor ────────────────────────────────────────────────
 
-  async #openEditing(cell: string, options: { stash?: boolean; carry?: Readonly<Record<string, unknown>> } = {}): Promise<void> {
+  async #openEditing(cell: string, options: OpenOptions = {}): Promise<void> {
     this.#opening++
     try {
       await this.#open(cell, options)
     } finally {
       this.#opening--
+      window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')?.setResuming?.(false)
     }
   }
 
-  async #open(cell: string, options: { stash?: boolean; carry?: Readonly<Record<string, unknown>> }): Promise<void> {
+  async #open(cell: string, options: OpenOptions): Promise<void> {
     const store = window.ioc.get<Store>('@hypercomb.social/Store')
     const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
     if (!store || !service) return
@@ -373,6 +408,9 @@ export class TileEditorDrone {
     if (!(await viewReady)) return
     const imageEditor = window.ioc.get<ImageEditorService>('@diamondcoreprocessor.com/ImageEditorService')
     imageEditor?.reset?.(hiveOrientation())
+    // Told BEFORE the session opens, so the restore offer is never shown for a
+    // draft that is about to be put back (cleared when the open ends).
+    if (options.resume && service.stashFor(targetCell, target.segments)) service.setResuming?.(true)
     service.open(targetCell, properties, largeBlob, target.segments)
     this.#label = cell
     this.#parent = [...appearanceParent]
@@ -393,6 +431,18 @@ export class TileEditorDrone {
         point: (properties as any).large,
         flat: (properties as any).flat?.large,
       })
+    }
+    // Moving from tile to tile with the desk open: a tile left with changes is
+    // put back as it was left (a desk reopened offers it as a restore instead).
+    if (options.resume && imageEditor) {
+      const draft = service.stashFor(targetCell, target.segments)
+      if (draft) {
+        // The tile's own picture lands first; the draft's replaces it.
+        await imageEditor.ready
+        if (service.mode === 'editing' && service.cell === targetCell) {
+          await applyDraft(service, imageEditor, draft, ORIENTATIONS)
+        }
+      }
     }
   }
 
@@ -440,13 +490,36 @@ export class TileEditorDrone {
   // entry, no `tile:saved`. A GROUP writes each of its tiles only the fields
   // given a value (`groupWritesFor`) — never a name, never a picture.
 
-  readonly saveAndComplete = async (): Promise<void> => {
+  //
+  // SAVE ONE, OR SAVE ALL. The desk keeps a draft for every tile the editor was
+  // moved away from (`service.drafts`). A plain save writes the OPEN tile only;
+  // while other tiles still wait it stays open on that tile, saved, so the rest
+  // can be gone through — the last save closes. `all` writes every waiting
+  // tile, then the open one, and closes. A draft is written from what it holds
+  // (`#writeDraft`), without the editor going there.
+
+  readonly saveAndComplete = async (options: { all?: boolean } = {}): Promise<void> => {
     const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
     const imageEditor = window.ioc.get<ImageEditorService>('@diamondcoreprocessor.com/ImageEditorService')
+    // Waiting tiles first: if one cannot be written the open tile is untouched
+    // and still dirty, and a second try only has what is left to do.
+    let waiting: SavedTile[] = []
+    if (options.all && service) {
+      const written = await this.#persistDrafts(service)
+      if (!written) return
+      waiting = written
+      this.#announce(waiting)
+    }
     const outcome = await this.#persist()
     // A failed save keeps the editor open with the draft intact. Cancel is
     // always there, and it always closes.
     if (!outcome) return
+    // Saved, with other tiles still waiting: stay, on this tile as it now is.
+    if (!options.all && outcome.length > 0 && service && (service.drafts?.length ?? 0) > 0) {
+      this.#announce(outcome)
+      await this.#openEditing(this.#label, { stash: false })
+      return
+    }
     service?.close()
     imageEditor?.destroy()
     this.#announce(outcome)
@@ -518,7 +591,7 @@ export class TileEditorDrone {
         }
       } finally { this.#opening-- }
     }
-    await this.#openEditing(label, { stash: !options.save })
+    await this.#openEditing(label, { stash: !options.save, resume: true })
     return service.mode === 'editing' && service.cell !== ''
   }
 
@@ -547,80 +620,31 @@ export class TileEditorDrone {
     const segmentsForSave: readonly string[] = targetSegments.slice(0, -1)
     let saved = false
     let wrote = false
-    // Pictures this save puts on the tile, kept in its collection afterwards.
-    const toHold: string[] = []
 
     try {
       // A picture dropped a moment ago may still be decoding.
       await imageEditor.ready
 
-      const props: Record<string, unknown> = { ...service.properties }
-      const pictureChanged = imageEditor.pictureChanged === true
-
-      if (imageEditor.removed) {
-        props['large'] = undefined
-        props['small'] = undefined
-        props['flat'] = undefined
-      } else if (imageEditor.hasImage && imageEditor.source && typeof imageEditor.capture === 'function') {
-        // Fill behind the picture is only ever the participant's colour, and
-        // the model only applies it to a picture set to Fit.
-        const fill = parseHexColour((props['background'] as { color?: unknown } | undefined)?.color)
-        const pointBlob = await imageEditor.capture('point-top', fill)
-        const flatBlob = await imageEditor.capture('flat-top', fill)
-        // A NEW picture is stored as its large copy, never the raw file
-        // (owner decision D3 — see arm-resource.ts largeImage). The framings
-        // count ORIGINAL pixels, so their scale follows the shrink; the
-        // tile's own picture re-saved as it was keeps its stored bytes.
-        const large = pictureChanged
-          ? await largeImage(imageEditor.source)
-          : { blob: imageEditor.source, ratio: 1 }
-        const largeSig = await store.putResource(large.blob)
-        const pointSig = await store.putResource(pointBlob)
-        const flatSig = await store.putResource(flatBlob)
-        const point = imageEditor.framingFor('point-top')
-        const flat = imageEditor.framingFor('flat-top')
-        const flatProps = isRecord(props['flat']) ? props['flat'] : {}
-        // The picture it replaces is kept too, so a tile that starts with one
-        // picture and gains a second holds both.
-        const previousLarge = ((service as { baseline?: Record<string, unknown> }).baseline?.['large'] as { image?: unknown } | undefined)?.image
-        if (pictureChanged) toHold.push(...(typeof previousLarge === 'string' ? [previousLarge] : []), largeSig)
-        props['large'] = { image: largeSig, x: point.x, y: point.y, scale: point.scale / large.ratio }
-        props['small'] = { image: pointSig }
-        props['flat'] = { ...flatProps, large: { x: flat.x, y: flat.y, scale: flat.scale / large.ratio }, small: { image: flatSig } }
-        // A picture framed by hand is the participant's, whatever marked it
-        // before — the merge earns the participant mark from the picture keys.
-        if (props['substrate'] !== undefined) props['substrate'] = undefined
-      }
-
-      const baseline = (service as { baseline?: Record<string, unknown> }).baseline
-      const choices = service.choices
-      const layers = service.layers
-      const unchanged = !!baseline && !pictureChanged && choices.size === 0 && sameProps(props, baseline)
-      if (!unchanged) {
-        // segmentsForSave was bound at gesture start — never re-read here.
-        if (layers && choices.size > 0 && segmentsForSave.length > 0) {
-          // The participant chose per field (alias-properties.md, step 4).
-          const writes = editorWrites(props, layers, choices)
-          await writeTilePropertiesAt(segmentsForSave, savedCell, writes.shared)
-          if (Object.keys(writes.onlyHere).length > 0) {
-            await writeTilePropertiesAt(segmentsForSave, savedCell, writes.onlyHere, { onlyHere: true })
-          }
-          if (writes.inherit.length > 0) {
-            const own = await readOwnTilePropertiesAt(segmentsForSave, savedCell)
-            await writeTilePropertiesAt(segmentsForSave, savedCell, ownAfterInherit(own, writes.inherit), { onlyHere: true, replace: true })
-          }
-        } else {
-          // Write the DIFF only: the form is a snapshot from when the editor
-          // opened, and writing every key would revert whatever another writer
-          // committed meanwhile. The merge applies these over the fresh head.
-          await writeTilePropertiesAt(segmentsForSave, savedCell, baseline ? diffFromBaseline(props, baseline) : props)
-        }
-        wrote = true
-      }
-      if (toHold.length > 0) {
-        await holdPictures([...segmentsForSave, savedCell], toHold)
-          .catch(err => console.warn('[tile-editor] could not hold the picture', err))
-      }
+      const picture: TileWrite['picture'] = imageEditor.removed
+        ? { removed: true }
+        : imageEditor.hasImage && imageEditor.source && typeof imageEditor.capture === 'function'
+          ? {
+              source: imageEditor.source,
+              point: imageEditor.framingFor('point-top'),
+              flat: imageEditor.framingFor('flat-top'),
+              capture: (orientation, fill) => imageEditor.capture(orientation, fill),
+            }
+          : null
+      wrote = await this.#writeTile(store, {
+        cell: savedCell,
+        segmentsForSave,
+        props: { ...service.properties },
+        baseline: (service as { baseline?: Record<string, unknown> }).baseline,
+        choices: service.choices,
+        layers: service.layers,
+        pictureChanged: imageEditor.pictureChanged === true,
+        picture,
+      })
       saved = true
     } catch (err) {
       console.warn('[tile-editor] save failed', err)
@@ -631,6 +655,151 @@ export class TileEditorDrone {
     }
 
     return saved ? (wrote ? [{ cell: savedCell, segments: segmentsForSave }] : []) : null
+  }
+
+  /** Put one tile's changes on it — the open session's, or a draft's from the
+   *  pad. Throws when a write fails; true when anything was written. */
+  async #writeTile(store: Store, input: TileWrite): Promise<boolean> {
+    const { cell, segmentsForSave, props, baseline, choices, layers, pictureChanged, picture } = input
+    // Pictures this write puts on the tile, kept in its collection afterwards.
+    const toHold: string[] = []
+
+    if (picture && picture.removed === true) {
+      props['large'] = undefined
+      props['small'] = undefined
+      props['flat'] = undefined
+    } else if (picture) {
+      // Fill behind the picture is only ever the participant's colour, and
+      // the model only applies it to a picture set to Fit.
+      const fill = parseHexColour((props['background'] as { color?: unknown } | undefined)?.color)
+      const pointBlob = await picture.capture('point-top', fill)
+      const flatBlob = await picture.capture('flat-top', fill)
+      // A NEW picture is stored as its large copy, never the raw file
+      // (owner decision D3 — see arm-resource.ts largeImage). The framings
+      // count ORIGINAL pixels, so their scale follows the shrink; the
+      // tile's own picture re-saved as it was keeps its stored bytes.
+      const large = pictureChanged
+        ? await largeImage(picture.source)
+        : { blob: picture.source, ratio: 1 }
+      const largeSig = await store.putResource(large.blob)
+      const pointSig = await store.putResource(pointBlob)
+      const flatSig = await store.putResource(flatBlob)
+      const { point, flat } = picture
+      const flatProps = isRecord(props['flat']) ? props['flat'] : {}
+      // The picture it replaces is kept too, so a tile that starts with one
+      // picture and gains a second holds both.
+      const previousLarge = (baseline?.['large'] as { image?: unknown } | undefined)?.image
+      if (pictureChanged) toHold.push(...(typeof previousLarge === 'string' ? [previousLarge] : []), largeSig)
+      props['large'] = { image: largeSig, x: point.x, y: point.y, scale: point.scale / large.ratio }
+      props['small'] = { image: pointSig }
+      props['flat'] = { ...flatProps, large: { x: flat.x, y: flat.y, scale: flat.scale / large.ratio }, small: { image: flatSig } }
+      // A picture framed by hand is the participant's, whatever marked it
+      // before — the merge earns the participant mark from the picture keys.
+      if (props['substrate'] !== undefined) props['substrate'] = undefined
+    }
+
+    let wrote = false
+    const unchanged = !!baseline && !pictureChanged && choices.size === 0 && sameProps(props, baseline)
+    if (!unchanged) {
+      // segmentsForSave was bound at gesture start — never re-read here.
+      if (layers && choices.size > 0 && segmentsForSave.length > 0) {
+        // The participant chose per field (alias-properties.md, step 4).
+        const writes = editorWrites(props, layers, choices)
+        await writeTilePropertiesAt(segmentsForSave, cell, writes.shared)
+        if (Object.keys(writes.onlyHere).length > 0) {
+          await writeTilePropertiesAt(segmentsForSave, cell, writes.onlyHere, { onlyHere: true })
+        }
+        if (writes.inherit.length > 0) {
+          const own = await readOwnTilePropertiesAt(segmentsForSave, cell)
+          await writeTilePropertiesAt(segmentsForSave, cell, ownAfterInherit(own, writes.inherit), { onlyHere: true, replace: true })
+        }
+      } else {
+        // Write the DIFF only: the form is a snapshot from when the editor
+        // opened, and writing every key would revert whatever another writer
+        // committed meanwhile. The merge applies these over the fresh head.
+        await writeTilePropertiesAt(segmentsForSave, cell, baseline ? diffFromBaseline(props, baseline) : props)
+      }
+      wrote = true
+    }
+    if (toHold.length > 0) {
+      await holdPictures([...segmentsForSave, cell], toHold)
+        .catch(err => console.warn('[tile-editor] could not hold the picture', err))
+    }
+    return wrote
+  }
+
+  /** Write every tile waiting in the pad, oldest first, each from its draft —
+   *  the editor does not go there. A draft leaves the pad once it is written
+   *  (or found to change nothing); the first that cannot be written stops the
+   *  rest, keeps itself and everything after it, and says so. Null on that stop. */
+  async #persistDrafts(service: TileEditorService): Promise<SavedTile[] | null> {
+    const store = window.ioc.get<Store>('@hypercomb.social/Store')
+    const drafts = service.drafts ?? []
+    if (drafts.length === 0) return []
+    if (!store || service.mode !== 'editing' || this.#saving) return null
+    this.#saving = true
+    service.setSaving?.(true)
+    const written: SavedTile[] = []
+    try {
+      for (const draft of drafts) {
+        const segments = draftSegments(draft)
+        if (await this.#writeDraft(store, draft)) written.push({ cell: draft.cell, segments: segments.slice(0, -1) })
+        service.dropStash(draft.cell, draft.segments)
+      }
+      return written
+    } catch (err) {
+      console.warn('[tile-editor] draft save failed', err)
+      // The tiles already written are written — say so, then keep the rest.
+      this.#announce(written)
+      service.setError?.(t('editor.save-failed', 'Could not save — your changes are still here.'))
+      return null
+    } finally {
+      this.#saving = false
+      service.setSaving?.(false)
+    }
+  }
+
+  /** One waiting tile, written from its draft: its properties against the ones
+   *  it opened with, its choices, and its picture captured from the original
+   *  with the framing it was left at. */
+  async #writeDraft(store: Store, draft: EditorDraftStash): Promise<boolean> {
+    const imageEditor = window.ioc.get<ImageEditorService>('@diamondcoreprocessor.com/ImageEditorService')
+    const segments = draftSegments(draft)
+    let bitmap: ImageBitmap | null = null
+    try {
+      let picture: TileWrite['picture'] = null
+      if (draft.pictureRemoved) {
+        picture = { removed: true }
+      } else if (draft.picture) {
+        const held = draft.picture
+        const decoded = await decodePicture(held.source)
+        bitmap = decoded
+        const side = imageEditor?.side ?? DEFAULT_HEX_SIDE
+        picture = {
+          source: held.source,
+          point: held.point,
+          flat: held.flat,
+          capture: (orientation, fill) => captureHexSmall(decoded, {
+            orientation,
+            framing: orientation === 'flat-top' ? held.flat : held.point,
+            fill: held.mode === 'fit' ? fill : null,
+            side,
+          }),
+        }
+      }
+      return await this.#writeTile(store, {
+        cell: draft.cell,
+        segmentsForSave: segments.slice(0, -1),
+        props: { ...draft.properties },
+        baseline: draft.baseline,
+        choices: new Map(draft.choices ?? []),
+        layers: draft.layers ?? null,
+        pictureChanged: draft.pictureRemoved || (draft.picture ? draft.picture.changed ?? true : false),
+        picture,
+      })
+    } finally {
+      bitmap?.close()
+    }
   }
 
   /** Write a group: each tile, one after another, only what is new for it.
@@ -707,13 +876,17 @@ export class TileEditorDrone {
     service.stash({
       cell: service.cell,
       segments: [...service.targetSegments],
+      page: [...hereSegments()],
       properties: service.properties,
+      // What a save from the pad needs beyond the form (see EditorDraftStash).
+      ...(service.draftExtras?.() ?? {}),
       picture: source && imageEditor ? {
         source,
         point: imageEditor.framingFor('point-top'),
         flat: imageEditor.framingFor('flat-top'),
         linked: imageEditor.linked,
         mode: imageEditor.mode,
+        changed: imageEditor.pictureChanged === true,
       } : null,
       pictureRemoved: imageEditor?.removed === true,
     })

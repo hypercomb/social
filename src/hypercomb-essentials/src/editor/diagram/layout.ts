@@ -51,6 +51,11 @@ export interface LayoutInput {
   readonly listWidth?: number
   /** Narrow only: the window height the sticky figure is sized from (default: the desk's). */
   readonly innerHeight?: number
+  /** The participant's size for the stage (editor-size.ts): 1 = the size the desk
+   *  has always drawn. It never decides wide or narrow — only how big the stage is
+   *  drawn once that is decided — and a larger one still keeps the labels, the
+   *  toolbar and the tools row on screen. */
+  readonly scale?: number
 }
 
 export interface LayoutOut {
@@ -109,11 +114,17 @@ export function layoutFor(i: LayoutInput): LayoutOut {
   const keep = Math.max(40 * U, HEAD * U, FLOOR_EM * em)
   const byHeight = vph - chrome - 2 * keep
   const wide = Math.round(Math.min(byHeight, byWidth, MAX_STAGE * U))
+  // The size the participant chose is applied AFTER the layout is decided, or a
+  // smaller one would tip a desk that has room into the narrow layout.
+  const scale = i.scale !== undefined && Number.isFinite(i.scale) && i.scale > 0 ? i.scale : 1
   const isWide = wideDesk && wide >= MIN_STAGE * U
 
   if (!isWide) {
     const room = i.innerHeight ?? i.desk.h
-    const size = Math.round(clamp(Math.min(i.rootWidth - 48 * U, room * 0.3), 200 * U, 280 * U))
+    const base = Math.round(clamp(Math.min(i.rootWidth - 48 * U, room * 0.3), 200 * U, 280 * U))
+    // Larger stops at the screen's width (less the gutters); smaller at a tile still readable.
+    const ceiling = Math.max(base, Math.min(i.rootWidth - 48 * U, 400 * U))
+    const size = Math.round(clamp(base * scale, Math.min(base, 140 * U), ceiling))
     return {
       layout: 'narrow', list, size, compact: false, tab, card,
       figure: { left: 0, top: 0 }, unit: U,
@@ -121,7 +132,11 @@ export function layoutFor(i: LayoutInput): LayoutOut {
       extent: unionExtent(i.model, size, i.variant),
     }
   }
-  const size = wide
+  // Room is the limit going up (`byHeight`, `byWidth`); the specimen's cap, scaled,
+  // is the limit going down. At 1 this is exactly `wide`.
+  const size = scale === 1
+    ? wide
+    : Math.round(Math.max(160 * U, Math.min(byHeight, byWidth, MAX_STAGE * U * scale)))
   const left = Math.round((vpw - size) / 2)
   const top = Math.round(Math.max(40 * U, (vph - size - TOOL * U - GAP_TOOL * U) / 2))
   return {

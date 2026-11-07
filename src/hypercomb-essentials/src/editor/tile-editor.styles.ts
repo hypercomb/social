@@ -92,6 +92,16 @@ ${S} .te-state .te-dot{width:0.55em;height:0.55em;box-sizing:border-box;border-r
 ${S} .te-state[data-state="dirty"] .te-dot{background:rgb(var(--acc));box-shadow:none;}
 ${S} .te-state[data-state="clean"] .te-dot{display:none;}
 
+/* How large the tile is drawn: a small slider before the buttons that write it. */
+${S} .te-size{flex:0 0 auto;display:inline-flex;align-items:center;gap:0.3em;color:var(--te-ink-quiet);cursor:pointer;
+  transition:color 150ms ease;}
+${S} .te-size:hover,${S} .te-size:focus-within{color:var(--te-ink);}
+${S} .te-size-glyph{font-size:1.15em;}
+${S} .te-size-range{width:6.5em;height:1.4em;margin:0;padding:0;background:transparent;accent-color:rgb(var(--acc));cursor:pointer;}
+/* The rule between everything about the tile and the buttons that save it. */
+${S} .te-sep{flex:0 0 auto;align-self:center;width:1px;height:1.6em;margin:0 0.4em;
+  background:color-mix(in srgb, var(--te-ink-quiet) 60%, transparent);}
+
 ${S} .te-icon-btn{appearance:none;border:0;margin:0;background:transparent;color:var(--te-ink-quiet);
   display:inline-grid;place-items:center;flex:0 0 auto;width:1.9em;height:1.9em;padding:0;font:inherit;
   border-radius:var(--hc-radius-control,2px);cursor:pointer;transition:color 150ms ease, background-color 150ms ease;}
@@ -207,6 +217,8 @@ ${S} .te-panel button:focus-visible{outline:2px solid var(--te-focus);outline-of
 /* ── NARROW: the same DOM, rearranged ──────────────────────────────────── */
 ${S} .te-panel[data-layout="narrow"] .te-drawer-toggle{display:inline-grid;}
 ${S} .te-panel[data-layout="narrow"] .te-address,${S} .te-panel[data-layout="narrow"] .te-portal{display:none;}
+${S} .te-panel[data-layout="narrow"] .te-size-range{width:4.5em;}
+${S} .te-panel[data-layout="narrow"] .te-size-glyph{display:none;}
 ${S} .te-panel[data-layout="narrow"] .te-list{display:none;position:absolute;left:0;top:0;bottom:0;z-index:5;width:min(18em, 86%);}
 ${S} .te-panel[data-layout="narrow"][data-drawer] .te-list{display:flex;}
 ${S} .te-panel[data-layout="narrow"][data-drawer] .te-scrim{display:block;position:absolute;inset:0;z-index:4;background:rgba(0,0,0,0.45);}
@@ -218,6 +230,7 @@ ${S} .te-panel[data-layout="narrow"] .te-figure{position:sticky;top:0;left:auto;
 @media (pointer: coarse){
   ${S} .te-panel .te-icon-btn,${S} .te-panel .te-chip{min-width:44px;min-height:44px;}
   ${S} .te-panel .te-btn,${S} .te-panel .te-empty-btn{min-height:48px;}
+  ${S} .te-panel .te-size-range{min-height:44px;}
   ${S} .te-panel .te-title{font-size:max(16px, 1em);min-height:44px;}
 }
 ${S} .te-panel[data-layout="narrow"] .te-icon-btn,${S} .te-panel[data-layout="narrow"] .te-chip{min-width:44px;min-height:44px;}
@@ -227,6 +240,7 @@ ${S} .te-panel[data-layout="narrow"] .te-title{font-size:max(16px, 1em);}
 @media (forced-colors: active){
   ${S} .te-btn-primary{background:Highlight;color:HighlightText;forced-color-adjust:none;}
   ${S} .te-leave,${S} .te-note{outline-color:CanvasText;}
+  ${S} .te-sep{background:CanvasText;}
 }
 @media (prefers-reduced-motion: reduce){
   ${S} .te-panel,${S} .te-panel *{transition:none!important;animation:none!important;}

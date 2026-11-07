@@ -227,6 +227,8 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   ['mesh:meet-point', 'document'],
   ['presence:strip', 'document'],
   ['roots:saved', 'document'],
+  // The tile editor's drawn size (essentials editor/editor-size.ts): one number.
+  ['editor:size', 'document'],
   // What participants make, moved out of localStorage the same way
   // (essentials preferences/participant-document.ts).
   ['sequences:palette', 'document'],

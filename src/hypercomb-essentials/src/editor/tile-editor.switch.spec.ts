@@ -1,7 +1,8 @@
 // Moving the docked editor to another tile: a click in the hive beside it
-// arrives as `editor:switch-request`. Clean, the editor just moves — the same
-// window, retargeted, never rebuilt. With unsaved changes the footer asks
-// first, and nothing moves until it is answered.
+// arrives as `editor:switch-request`. The editor just moves — the same window,
+// retargeted, never rebuilt — and a tile left with changes keeps its draft in
+// the pad (tile-editor.pad.spec.ts) instead of asking. A GROUP, whose draft is
+// no one tile's to keep, still asks first, and nothing moves until it is answered.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -98,8 +99,21 @@ describe('tile editor — moving to another tile while docked', () => {
     expect(switchTo).not.toHaveBeenCalled()
   })
 
-  it('asks first when there are unsaved changes, and moves only on an answer', async () => {
+  it('moves on with unsaved changes WITHOUT asking — the drone keeps the draft', async () => {
     service().setLink('https://example.com')
+
+    EffectBus.emitTransient('editor:switch-request', { label: 'gamma' })
+    await settle()
+
+    expect(switchTo).toHaveBeenCalledWith('gamma', { save: false })
+    expect(panel()?.querySelector<HTMLElement>('.te-leave')?.hidden).toBe(true)
+    expect(service().cell).toBe('gamma')
+  })
+
+  it('asks first when a GROUP has changes, and moves only on an answer', async () => {
+    service().setGroup(['alpha', 'beta'])
+    service().setBorderColor('#112233')
+    await settle()
 
     EffectBus.emitTransient('editor:switch-request', { label: 'gamma' })
     await settle()
@@ -124,8 +138,10 @@ describe('tile editor — moving to another tile while docked', () => {
     expect(service().cell).toBe('gamma')
   })
 
-  it('opens without saving on the second choice', async () => {
-    service().setHideText(true)
+  it('a group opens without saving on the second choice', async () => {
+    service().setGroup(['alpha', 'beta'])
+    service().setBorderColor('#112233')
+    await settle()
     EffectBus.emitTransient('editor:switch-request', { label: 'delta' })
     await settle()
     button('leave-discard')?.click()
@@ -133,8 +149,10 @@ describe('tile editor — moving to another tile while docked', () => {
     expect(switchTo).toHaveBeenCalledWith('delta', { save: false })
   })
 
-  it('lets Escape answer "keep editing"', async () => {
-    service().setHideText(true)
+  it('lets Escape answer "keep editing" for a group', async () => {
+    service().setGroup(['alpha', 'beta'])
+    service().setBorderColor('#112233')
+    await settle()
     EffectBus.emitTransient('editor:switch-request', { label: 'delta' })
     await settle()
     const view = services.get('@diamondcoreprocessor.com/TileEditorView') as { dismissInner(): boolean }
@@ -146,10 +164,8 @@ describe('tile editor — moving to another tile while docked', () => {
   it('stays where it is when the move fails, still showing the edit', async () => {
     switchTo.mockImplementationOnce(async () => false)
     service().setHideText(true)
-    EffectBus.emitTransient('editor:switch-request', { label: 'epsilon' })
-    await settle()
     previews.length = 0
-    button('leave-save')?.click()
+    EffectBus.emitTransient('editor:switch-request', { label: 'epsilon' })
     await settle()
     expect(service().cell).toBe('alpha')
     expect(previews.some(p => p.label === 'alpha' && !p.clear)).toBe(true)
