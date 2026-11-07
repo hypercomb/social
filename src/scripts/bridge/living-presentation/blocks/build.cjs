@@ -72,17 +72,16 @@ const pagedRoutes = () => {
   return out
 }
 
-/** Where a reader can go from a block, each way said once (jwize 2026-11-05:
- *  "show all the current section videos at the bottom while on each of those
- *  pages and then the breadcrumb at the top for childpages … view the list in
- *  each section as tabs"):
- *    up       the crumbs, at the top (page.cjs crumbsHtml)
- *    section  the tiles beside this one, this one among them, as tabs at the
- *             bottom: the same row on every page of the section
- *    children the words to step into, which open the next section down
- *  A top tile's section is the other top tiles (the protocol and the road; the
- *  presenter's machinery is not a page). Each is marked by whether it has a
- *  page yet. */
+/** Where a reader can go from a block, each way said once (jwize 2026-11-06:
+ *  "basically all nodes are videos and some have children"; a parent is a
+ *  category you choose into, so there is no one road through the tree):
+ *    up        the crumbs at the top, and the parent named in the beside row
+ *    inside    this tile's children, as cards: each opens the next level down
+ *    beside    the tiles under the same parent: previous and next among those
+ *              that have a page, and where this one stands among them
+ *  A top tile's siblings are the other top tiles (the protocol and the road;
+ *  the presenter's machinery is not a page). A tile with no page yet is shown
+ *  as coming, and is never what previous or next lands on. */
 const waysOf = (route, paged) => {
   const tile = tileAt(route)
   const marked = (at) => (c) => {
@@ -90,10 +89,19 @@ const waysOf = (route, paged) => {
     return { name: c.name, note: c.note || '', route: r, page: paged.has(r.join('/')), current: r.join('/') === route.join('/') }
   }
   const children = (tile?.children || []).map(marked(route))
-  const beside = route.length === 1
+  const siblings = (route.length === 1
     ? (tree.roots || []).filter(r => paged.has(r.name))
-    : (tileAt(route.slice(0, -1))?.children || [])
-  return { children, section: beside.map(marked(route.slice(0, -1))) }
+    : (tileAt(route.slice(0, -1))?.children || [])).map(marked(route.slice(0, -1)))
+  const walkable = siblings.filter(s => s.page)
+  const at = walkable.findIndex(s => s.current)
+  const beside = {
+    at: at + 1,
+    of: walkable.length,
+    parent: route.length > 1 ? { name: route[route.length - 2], route: route.slice(0, -1), page: paged.has(route.slice(0, -1).join('/')) } : null,
+    prev: at > 0 ? walkable[at - 1] : null,
+    next: at >= 0 && at < walkable.length - 1 ? walkable[at + 1] : null,
+  }
+  return { children, section: siblings, beside }
 }
 
 /** A WebP or PNG's pixel size, read from its header. */
