@@ -907,12 +907,14 @@ every page, and its 25 scenes are folded into the tiles they explain:
 - **Each way said once: crumbs up, tabs across, words in.** jwize,
   2026-11-05: *"show all the current section videos at the bottom while on
   each of those pages and then the breadcrumb at the top for childpages. That
-  way you can view the list in each section as tabs."* A page's crumbs, at the
-  top, are its way up. At the bottom, its section is a row of tabs: every
-  tile beside it, itself among them and lit. Each page of the section shows
-  the same row, so the section reads as one list of videos. The protocol and
-  the road are a section of their own. Between the scene and the tabs, *Step
-  in* names the words below the page, and each opens the next section down.
+  way you can view the list in each section as tabs."* Two days later, on the
+  tabs: *"put the simple and other video menus as the top of the video."* A
+  page's crumbs, at the top, are its way up. Directly beneath them, above the
+  video, its section is a row of tabs: every tile beside it, itself among them
+  and lit. Each page of the section shows the same row, so the section reads
+  as one list of videos. The protocol and the road are a section of their
+  own. Below the video, *Step in* names the words below the page, and each
+  opens the next section down.
   No other link says the same thing: the old way up and the link across to
   the road are gone, because the crumbs and the tabs say them. A section
   wider than the page scrolls along its own row. The lit tab is brought into

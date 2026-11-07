@@ -6,11 +6,12 @@
 // crumbs. A page is that one scene as one slide, the size of the screen:
 //
 //   crumbs   where you are; every ancestor is a way back (the one way up)
+//   tabs     the section: every tile beside this one, this one lit, the same
+//            row on each of their pages, at the top of the video (jwize
+//            2026-11-05, moved up 2026-11-07)
 //   scene    the eyebrow, the headline, the figure, and the narration under
 //            one hairline with its transport — the tour's stage, exactly
 //   ways     a strip of the words to step into: the next section down
-//   tabs     the section: every tile beside this one, this one lit, the same
-//            row on each of their pages (jwize 2026-11-05)
 //
 // THE STANDARD IS THE TOUR (scripts/presentation): its ink and honey, its two
 // faces, its figures, its voice. A tile one of the tour's scenes explains
@@ -95,7 +96,13 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
    mounted in the hive. */
 .page{container-type:inline-size;width:min(1180px,100%);margin:0 auto;padding:14px 16px 0;
   height:calc(100vh - var(--hc-site-chrome-bottom,0px));height:calc(100dvh - var(--hc-site-chrome-bottom,0px));min-height:520px;
-  display:grid;grid-template-rows:auto minmax(0,1fr) auto;--measure:780px}
+  display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;--measure:780px}
+/* four rows, each part in its own: a page without tabs or ways leaves its row
+   empty, and the scene alone takes the spare height */
+.page>.top{grid-row:1}
+.page>.tabs{grid-row:2}
+.page>.scene{grid-row:3}
+.page>.ways{grid-row:4}
 .mono-label{font-family:var(--mono);font-size:12px;line-height:1.3;letter-spacing:var(--track-label);text-transform:uppercase}
 
 /* ---------- where you are ---------- */
@@ -264,16 +271,17 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .ways a.w .g{color:var(--honey);font-size:12px}
 .ways a.w:hover{border-color:var(--honey-deep);background:var(--honey-tint);color:var(--honey)}
 .ways span.w{color:var(--faint-text);border-style:dashed}
-/* the section as tabs: the same row on every page of the section, this page
-   lit; a long section scrolls along its own row, never the page */
-.tabs{display:flex;gap:2px;margin-top:clamp(6px,1.4vh,14px);border-top:1px solid var(--line);overflow-x:auto;scrollbar-width:thin;scroll-snap-type:x proximity}
-.ways+.tabs{margin-top:0}
-.tabs .tab{flex:none;display:inline-flex;align-items:center;gap:.45em;padding:11px 14px 10px;scroll-snap-align:start;font-family:var(--mono);font-size:13px;letter-spacing:var(--track-data);
-  text-decoration:none;color:var(--dim);border-top:2px solid transparent;margin-top:-1px;transition:color .15s,border-color .15s,background .15s}
+/* the section as tabs, at the TOP of the video (jwize 2026-11-05, then
+   2026-11-07: "put the simple and other video menus as the top of the
+   video"): the same row on every page of the section, this page lit; a long
+   section scrolls along its own row, never the page */
+.tabs{display:flex;gap:2px;margin-bottom:clamp(4px,1vh,10px);border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:thin;scroll-snap-type:x proximity}
+.tabs .tab{flex:none;display:inline-flex;align-items:center;gap:.45em;padding:10px 14px 11px;scroll-snap-align:start;font-family:var(--mono);font-size:13px;letter-spacing:var(--track-data);
+  text-decoration:none;color:var(--dim);border-bottom:2px solid transparent;margin-bottom:-1px;transition:color .15s,border-color .15s,background .15s}
 .tabs .tab .g{font-size:10px;color:var(--faint-text)}
 .tabs a.tab:hover{color:var(--honey);background:var(--honey-tint)}
 .tabs a.tab:hover .g{color:var(--honey)}
-.tabs .tab[aria-current]{color:var(--ink);border-top-color:var(--honey)}
+.tabs .tab[aria-current]{color:var(--ink);border-bottom-color:var(--honey)}
 .tabs .tab[aria-current] .g{color:var(--honey)}
 .tabs .tab.soon{color:var(--faint-text);font-style:italic}
 /* more tabs past an edge: that edge fades */
@@ -624,7 +632,7 @@ ${STYLE}
 </head>
 <body>
 ${sprite}
-<main class="page"><div class="top">${crumbsHtml(route)}<button type="button" class="to-site" aria-label="Open the website at this page">${icon('hex')}website</button></div>${sceneHtml(scene)}${waysHtml(ways)}${tabsHtml(ways)}
+<main class="page"><div class="top">${crumbsHtml(route)}<button type="button" class="to-site" aria-label="Open the website at this page">${icon('hex')}website</button></div>${tabsHtml(ways)}${sceneHtml(scene)}${waysHtml(ways)}
 </main>
 <script>${SCRIPT}${tryDef ? `
 ;(() => {
