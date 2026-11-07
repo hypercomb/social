@@ -904,27 +904,27 @@ every page, and its 25 scenes are folded into the tiles they explain:
     - accessible: reader, listening, phone, motion.
     - localized: translating, locale.
     - road: coming, vision, computer (scenes 21 to 23).
-- **Each way said once: crumbs up, tabs across, words in.** jwize,
-  2026-11-05: *"show all the current section videos at the bottom while on
-  each of those pages and then the breadcrumb at the top for childpages. That
-  way you can view the list in each section as tabs."* Two days later, on the
-  tabs: *"put the simple and other video menus as the top of the video."* A
-  page's crumbs, at the top, are its way up. Directly beneath them, above the
-  video, its section is a row of tabs: every tile beside it, itself among them
-  and lit. Each page of the section shows the same row, so the section reads
-  as one list of videos. The protocol and the road are a section of their
-  own. Below the video, *Step in* names the words below the page, and each
-  opens the next section down.
-  No other link says the same thing: the old way up and the link across to
-  the road are gone, because the crumbs and the tabs say them. A section
-  wider than the page scrolls along its own row. The lit tab is brought into
-  view, and an edge with more tabs past it fades.
+- **Each way said once, and all of them above the video.** jwize, 2026-11-05,
+  then 2026-11-06 (#110): every node is a video, and a parent is a category you
+  choose into, so no row mixes levels. And on 2026-11-07: *"put the simple and
+  other video menus as the top of the video."* A page says where it goes in
+  three rows, in this order, and then plays:
+  - **crumbs**, the way up: `protocol / simple`.
+  - **beside**, the videos under the same parent: previous, where this one
+    stands (`1 of 6 · in protocol`) and next.
+  - **More details**, the videos inside this one: the tile's children, as a
+    row of cards, each opening the next level down. A leaf has none.
+
+  Each row is left empty when it has nothing to say, and the video alone takes
+  the spare height. Every way lands on a page: inside goes one level down, and
+  beside stays under the same parent (`blocks.spec.ts`). On a phone the cards
+  scroll along their own row.
 - **A part, or the website.** The website belongs to the root (jwize,
   2026-11-04). A tile's page opened on its own is just that part: one slide,
-  no crumbs, no ways, no tabs, and a website icon. The icon opens the website,
-  rooted at the top tile, on that same page: every slide then shows its crumbs,
-  the words to step into and its section's tabs, every link stays in the
-  website, and back steps back
+  no crumbs, no ways, no beside, and a website icon. The icon opens the
+  website, rooted at the top tile, on that same page: every slide then shows
+  its crumbs, the videos beside it and the videos inside it, every link stays
+  in the website, and back steps back
   along the pages read, then out to the layer hosting the page first opened.
   In the hive, tiles walk as hexagons unless something is pinned: a tile's own
   pin (`opens <tile> as website`) opens its part; a pin on a top tile reaches
