@@ -599,8 +599,8 @@ const sceneHtml = (sc) => {
 /** Inside: the tile's children, as cards. Each opens the next level down; a
  *  child with no page yet is shown as coming. A leaf has none. */
 const waysHtml = (ways) => !ways || !ways.children.length ? '' : `
-  <nav class="ways" data-part="ways" aria-label="Inside this">
-    <span class="lbl mono-label">Inside this</span>${ways.children.map(c => c.page
+  <nav class="ways" data-part="ways" aria-label="More details">
+    <span class="lbl mono-label">More details</span>${ways.children.map(c => c.page
       ? `<a class="w" href="./${esc(c.name)}" title="${esc(c.note)}">${icon('play')}<b>${esc(c.name)}</b><small>${esc(c.note)}</small></a>`
       : `<span class="w" title="${esc(`${c.note} (its page is coming)`)}"><b>${esc(c.name)}</b><small>coming</small></span>`).join('')}
   </nav>`
