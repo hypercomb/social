@@ -404,6 +404,10 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // root came from (essentials history/saved-roots.ts — `save as`, `use`).
   // DOCUMENT, per participant, never replicated.
   'roots:saved',
+  // How large this participant draws the tile under their hands in the tile
+  // editor (essentials editor/editor-size.ts): one number, the slider's.
+  // DOCUMENT, per participant, never replicated.
+  'editor:size',
   // What participants make that is theirs alone, moved out of localStorage the
   // same way (essentials preferences/participant-document.ts): saved sequences
   // and patterns, Arkanoid and Solomon levels (Solomon's creations and designer
@@ -813,6 +817,15 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // not seeded: its subject is a signature, and registerPoolMeaning records
   // it at the moment it is addressed.
   'derivation:dialects',
+  // MESSAGES YOU FILL IN (documentation/mail-templates.md). Members are
+  // template artifacts named by their own signature (I1): a template is
+  // audited once, by those bytes, for every message that names it (M1). A SET:
+  // it travels as a published pool, and a reader admits a template by its
+  // signature, never by this membership (P6). Colon-scoped because without
+  // the reservation `mail:template` spells the bare word `mail-template`,
+  // which is also the address of a tile named "mail template". TRUTH POOL —
+  // an author's saved template, never minted from the optimize phase.
+  'mail:template',
 ])
 
 /**

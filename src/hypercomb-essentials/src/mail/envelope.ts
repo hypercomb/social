@@ -212,7 +212,18 @@ export async function openItemMeta(item: SealedMeta, decrypt: Decrypt, ownKey?: 
   return null
 }
 
+// The Worker seals the last three references, oldest first. A host that sends more
+// would make every thread pass over the list cost what it chose; the three nearest
+// the message are the ones that place it in its conversation.
+const MAX_REFERENCES = 3
+
 // Metadata is the host's to write and a JSON object or nothing; an array or a
 // bare value is not a description of a message.
-const asMeta = (value: unknown): MailMeta | null =>
-  value && typeof value === 'object' && !Array.isArray(value) ? value as MailMeta : null
+const asMeta = (value: unknown): MailMeta | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const meta = value as MailMeta & { references?: unknown }
+  if (meta.references === undefined) return meta
+  const { references, ...rest } = meta
+  if (!Array.isArray(references)) return rest
+  return { ...rest, references: references.filter((r): r is string => typeof r === 'string').slice(-MAX_REFERENCES) }
+}

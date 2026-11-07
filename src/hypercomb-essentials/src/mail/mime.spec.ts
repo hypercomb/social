@@ -3,7 +3,7 @@
 // every transfer encoding.
 
 import { describe, expect, it } from 'vitest'
-import { attachmentBytes, htmlToText, MAX_MESSAGE_BYTES, parseMail, previewText } from './mime.js'
+import { attachmentBytes, attachmentsBytes, htmlToText, MAX_MESSAGE_BYTES, parseMail, previewText } from './mime.js'
 
 /** Bytes where each character is one byte, so an 0xE9 really is a Latin-1 é. */
 const raw = (text: string): Uint8Array => Uint8Array.from(text, c => c.charCodeAt(0) & 0xff)
@@ -393,5 +393,115 @@ describe('after the security review (R1)', () => {
     expect(Object.getPrototypeOf(mail.inlineImages)).toBeNull()
     expect(mail.inlineImages['constructor']).toBeUndefined()
     expect(mail.inlineImages['toString']).toBeUndefined()
+  })
+})
+
+describe('attachmentsBytes — many attachments from one walk (R2)', () => {
+  /** A small picture's bytes, different for every index. */
+  const picture = (index: number, size: number): Uint8Array => {
+    const bytes = new Uint8Array(size)
+    for (let i = 0; i < size; i++) bytes[i] = (i * 31 + index * 7) & 0xff
+    return bytes
+  }
+  const asText = (bytes: Uint8Array): string => {
+    let out = ''
+    for (let i = 0; i < bytes.length; i += 0x8000) out += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+    return out
+  }
+  /** Byte for byte, without vitest walking 190 typed arrays element by element. */
+  const same = (a: Uint8Array | null | undefined, b: Uint8Array | null | undefined): boolean =>
+    !!a && !!b && a.length === b.length && a.every((byte, i) => byte === b[i])
+  const COUNT = 190
+  const SIZE = 23 * 1024
+  const pictures = Array.from({ length: COUNT }, (_, i) => picture(i, SIZE))
+  const message = raw(crlf([
+    'From: a@example.com',
+    'Subject: pictures',
+    'Content-Type: multipart/mixed; boundary="B"',
+    '',
+    '--B',
+    'Content-Type: text/plain',
+    '',
+    'All of them.',
+    ...pictures.flatMap((bytes, i) => [
+      '--B',
+      `Content-Type: image/png; name="p${i}.png"`,
+      `Content-Disposition: attachment; filename="p${i}.png"`,
+      'Content-Transfer-Encoding: base64',
+      '',
+      b64(asText(bytes)),
+    ]),
+    '--B--',
+    '',
+  ]))
+
+  it('returns all 190 pictures of a ~6 MB message from one call, well under a second', () => {
+    expect(message.length).toBeGreaterThan(5.5 * 1024 * 1024)
+    expect(message.length).toBeLessThan(6.5 * 1024 * 1024)
+    expect(parseMail(message).attachments.length).toBe(COUNT)
+
+    const started = performance.now()
+    const found = attachmentsBytes(message, pictures.map((_, i) => i))
+    expect(performance.now() - started).toBeLessThan(750)
+
+    expect(found.size).toBe(COUNT)
+    for (let i = 0; i < COUNT; i++) expect(same(found.get(i), pictures[i]), `picture ${i}`).toBe(true)
+    for (const i of [0, 97, 189]) expect(same(found.get(i), attachmentBytes(message, i)), `picture ${i}`).toBe(true)
+  })
+
+  it('answers only the indices that name an attachment', () => {
+    const found = attachmentsBytes(message, [3, 3, 189, 190, -1, 1.5, Number.NaN])
+    expect([...found.keys()].sort((a, b) => a - b)).toEqual([3, 189])
+    expect(attachmentsBytes(message, []).size).toBe(0)
+  })
+
+  it('numbers as parseMail does when inline images come first', () => {
+    const mixed = raw(crlf([
+      'Content-Type: multipart/related; boundary="R"',
+      '',
+      '--R',
+      'Content-Type: text/html',
+      '',
+      '<p><img src="cid:logo"></p>',
+      '--R',
+      'Content-Type: image/png',
+      'Content-ID: <logo>',
+      'Content-Transfer-Encoding: base64',
+      '',
+      b64(asText(picture(900, 64))),
+      '--R',
+      'Content-Type: application/pdf; name="a.pdf"',
+      'Content-Transfer-Encoding: base64',
+      '',
+      b64('first'),
+      '--R',
+      'Content-Type: application/zip; name="b.zip"',
+      'Content-Transfer-Encoding: base64',
+      '',
+      b64('second'),
+      '--R--',
+    ]))
+    expect(parseMail(mixed).attachments.map(a => a.filename)).toEqual(['a.pdf', 'b.zip'])
+    const found = attachmentsBytes(mixed, [0, 1])
+    expect(asText(found.get(0)!)).toBe('first')
+    expect(asText(found.get(1)!)).toBe('second')
+    expect(found.get(1)).toEqual(attachmentBytes(mixed, 1))
+  })
+
+  it('gives an empty Map for malformed input, never a throw', () => {
+    const inputs = [
+      new Uint8Array(0),
+      raw('no headers, no body'),
+      raw(crlf(['Content-Type: multipart/mixed; boundary="X"', '', '--X', 'Content-Type: image/png; name="a.png"', 'Content-Transfer-Encoding: base64', ''])),
+      raw(crlf(['Content-Type: multipart/mixed; boundary=""', '', '--', '--'])),
+      Uint8Array.from({ length: 4096 }, (_, i) => (i * 131) & 0xff),
+    ]
+    for (const input of inputs) {
+      const found = attachmentsBytes(input, [0, 1, 2])
+      expect(found).toBeInstanceOf(Map)
+      for (const bytes of found.values()) expect(bytes).toBeInstanceOf(Uint8Array)
+    }
+    expect(attachmentsBytes(new Uint8Array(0), [0]).size).toBe(0)
+    expect(attachmentsBytes(raw('no headers, no body'), [0]).size).toBe(0)
   })
 })

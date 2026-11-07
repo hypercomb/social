@@ -228,3 +228,22 @@ describe('the list line is bound to its message (R1 #11)', () => {
     await expect(openEnvelope(v1.envelope, signerFor(secret), pub, b.sig)).rejects.toThrow(/signature mismatch/)
   })
 })
+
+describe('the host does not choose how much a row costs (R2 #3)', () => {
+  /** A v1 list line, sealed to `pub` with whatever JSON a host likes. */
+  const v1Line = (pub: string, value: unknown): string => {
+    const ephemeral = generateSecretKey()
+    return `${getPublicKey(ephemeral)}.${nip44.encrypt(JSON.stringify(value), nip44.getConversationKey(ephemeral, pub))}`
+  }
+
+  it('keeps only the last three references, oldest first, and drops a references that is not a list', async () => {
+    const secret = generateSecretKey()
+    const pub = getPublicKey(secret)
+    const references = Array.from({ length: 2000 }, (_, i) => `<r${i}@example.org>`)
+    const meta = await openMetaToken(v1Line(pub, { subject: 's', references }), signerFor(secret))
+    expect(meta).toEqual({ subject: 's', references: ['<r1997@example.org>', '<r1998@example.org>', '<r1999@example.org>'] })
+    expect(await openMetaToken(v1Line(pub, { subject: 's', references: ['<a@x>', 7, null, '<b@x>'] }), signerFor(secret)))
+      .toEqual({ subject: 's', references: ['<a@x>', '<b@x>'] })
+    expect(await openMetaToken(v1Line(pub, { subject: 's', references: '<a@x>'.repeat(5000) }), signerFor(secret))).toEqual({ subject: 's' })
+  })
+})

@@ -16,17 +16,23 @@
 // ── A CONVERSATION IS WHAT ITS MESSAGES NAME ────────────────────────────────
 //
 // Messages are grouped by the ids they carry: their own Message-ID, the one
-// they reply to, and the References they keep (the host keeps the last three).
-// Two messages that name a common id are one conversation, however the chain
-// between them was cut. A conversation keeps the key it was first drawn under
-// (`keep`), so a reply arriving later joins the row that is already on screen
-// rather than replacing it.
+// they reply to, and the References they keep (the host keeps the last three,
+// and so does this file, whatever a host sends). Two messages that name a
+// common id AND say the same subject, once Re:/Fwd: are taken off, are one
+// conversation, however the chain between them was cut. The subject is asked
+// because an id is not a secret: a stranger who has seen (or guessed) your
+// bank's Message-ID could otherwise name it and stand at the top of the bank's
+// conversation as its newest message (R2 #6). Gmail asks the same.
+// A conversation keeps the key it was first drawn under (`keep`), so a reply
+// arriving later joins the row that is already on screen rather than
+// replacing it.
 
 export interface ThreadItem {
   readonly sig: string
   readonly at: number
   readonly meta: {
     readonly at?: number
+    readonly subject?: string
     readonly messageId?: string
     readonly inReplyTo?: string
     readonly references?: readonly string[]
@@ -71,31 +77,87 @@ export function placeNewestFirst<T extends Pick<ThreadItem, 'sig' | 'at' | 'meta
   return out
 }
 
-const ID = /<[^<>\s]{1,200}>/g
-
-const idsOf = (meta: ThreadItem['meta']): string[] => {
-  if (!meta) return []
-  const said = [meta.messageId, meta.inReplyTo, ...(Array.isArray(meta.references) ? meta.references : [])]
-  const out: string[] = []
-  for (const value of said) for (const id of String(value ?? '').match(ID) ?? []) out.push(id.toLowerCase())
+/**
+ * `list` with every row of `arriving` placed where the sorted page will have it, in one pass: the rows
+ * held are kept by signature in a Map, so a row re-reported replaces the one held, and the two sorted
+ * runs are merged. A page of rows arriving one by one costs one merge per drawn frame, not a copy of
+ * the whole list per row (R2 #3: 2,000 rows took 12.9 s that way). Returns a new array; `list` must
+ * already be in this order.
+ */
+export function mergeNewestFirst<T extends Pick<ThreadItem, 'sig' | 'at' | 'meta'>>(list: readonly T[], arriving: Iterable<T>): T[] {
+  const fresh = new Map<string, T>()
+  for (const item of arriving) fresh.set(item.sig, item)
+  if (!fresh.size) return [...list]
+  const held = list.filter(item => !fresh.has(item.sig))
+  const incoming = [...fresh.values()].sort(newestFirst)
+  const out: T[] = []
+  let i = 0
+  let j = 0
+  while (i < held.length && j < incoming.length) out.push(newestFirst(held[i]!, incoming[j]!) <= 0 ? held[i++]! : incoming[j++]!)
+  while (i < held.length) out.push(held[i++]!)
+  while (j < incoming.length) out.push(incoming[j++]!)
   return out
 }
+
+const ID = /<[^<>\s]{1,200}>/g
+/** What the Worker keeps of References (mail-plan.md §3): the last three. A host that sends more is cut here too. */
+export const REFERENCES_KEPT = 3
+
+const firstId = (value: unknown): string[] => {
+  const id = String(value ?? '').match(ID)?.[0]
+  return id ? [id.toLowerCase()] : []
+}
+
+// Read once per metadata object: a list is drawn again and again, and its rows' ids do not change.
+const idsHeld = new WeakMap<object, readonly string[]>()
+
+/**
+ * The ids a row names: its own Message-ID, the one it replies to, and the last three References — never
+ * more, so a host that sends two thousand references per row cannot make every redraw read them all.
+ */
+const idsOf = (meta: ThreadItem['meta']): readonly string[] => {
+  if (!meta) return []
+  const held = idsHeld.get(meta)
+  if (held) return held
+  const references = Array.isArray(meta.references) ? meta.references.slice(-REFERENCES_KEPT) : []
+  const named: string[] = []
+  for (const value of references) for (const id of String(value ?? '').match(ID) ?? []) named.push(id.toLowerCase())
+  const ids = [...firstId(meta.messageId), ...firstId(meta.inReplyTo), ...named.slice(-REFERENCES_KEPT)]
+  idsHeld.set(meta, ids)
+  return ids
+}
+
+const PREFIX = /^(?:(?:re|fwd?)\s*(?:\[\d+\])?\s*:\s*)+/i
+
+/** A subject as a conversation compares it: Re:/Fwd:/Fw: taken off the front, case and spacing aside. */
+export const threadSubject = (subject: unknown): string =>
+  String(subject ?? '').replace(/\s+/g, ' ').trim().replace(PREFIX, '').trim().toLowerCase()
 
 /**
  * The conversations in `items`, newest conversation first. `keep` maps a
  * member's signature to the key its conversation was drawn under before; a
  * conversation takes the key of its oldest member that has one, unless another
- * conversation (newer, or one that split) already took it.
+ * conversation (newer, or one that split) already took it. `subjectOf` reads a
+ * row's subject (the window passes the decoded one; the sealed field otherwise).
  */
-export function threadsOf<T extends ThreadItem>(items: readonly T[], keep?: ReadonlyMap<string, string>): Thread<T>[] {
+export function threadsOf<T extends ThreadItem>(
+  items: readonly T[],
+  keep?: ReadonlyMap<string, string>,
+  subjectOf: (item: T) => string = item => String(item.meta?.subject ?? ''),
+): Thread<T>[] {
   const parent = items.map((_, i) => i)
   const find = (i: number): number => {
     while (parent[i] !== i) { parent[i] = parent[parent[i]!]!; i = parent[i]! }
     return i
   }
+  // An id joins only rows that also say the same subject: the pair is the meeting point.
   const seen = new Map<string, number>()
   items.forEach((item, i) => {
-    for (const id of idsOf(item.meta)) {
+    const ids = idsOf(item.meta)
+    if (!ids.length) return
+    const subject = threadSubject(subjectOf(item))
+    for (const named of ids) {
+      const id = `${named}\n${subject}`
       const other = seen.get(id)
       if (other === undefined) { seen.set(id, i); continue }
       const a = find(i)

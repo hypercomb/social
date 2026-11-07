@@ -1,9 +1,20 @@
 # Mail templates: pools of meaning you fill in
 
-**Status, 2026-11-06.** Step 1 is **built**: the format, the strict reader, fill checking, rendering and the
-message part, all in `hypercomb-essentials/src/mail/template.ts`, with 136 specs in `template.spec.ts`. Steps 2
-to 4 are **design only**. Nothing is wired into the mail window yet, nothing registers, and no script runs
-anywhere. This document goes with `mail-plan.md` section 8.
+**Status, 2026-11-07.** Every section heading says **built** or **design**.
+
+- **Built and specced** (all in `hypercomb-essentials/src/mail/`, none of it wired or registered):
+  - `template.ts`: the format, the strict reader, fill checking, rendering, the message part, and the outline
+    an audit reads. 143 specs in `template.spec.ts`.
+  - `template-pool.ts`: the templates a hive keeps (list, save, take off), and the audit report. 28 specs in
+    `template-pool.spec.ts`.
+  - `template-form.ts`: the form a template asks. 22 jsdom specs in `template-form.spec.ts`.
+  - The pool `mail:template`, seeded in core (`SCOPED_POOL_MEANINGS`, and kind `set` in `pool-kinds.ts`).
+  - The form's words, in both catalogs under `mail.template.*`.
+- **Not wired yet:** the send, the read pane, the composer and the queen's published-pool claim. They are
+  steps 2 and 3, and the exact touch points are below.
+- **Design only:** step 4, activation and the script view. No script runs anywhere.
+
+This document goes with `mail-plan.md` section 8.
 
 jwize, 2026-11-06: *"there should be pools of meaning which are templates, and they can be audited and fill in
 the blanks with variables. This opens up incredibly expressive emails. Trust the community and trust the
@@ -135,6 +146,8 @@ renderTemplate(template: MailTemplate, fill: unknown, deps: RenderDeps): Rendere
 mailPart(templateSig: string, fill: MailFill): { type: 'application/vnd.hypercomb.mail+json', filename, body,
   header: { name: 'X-Hypercomb-Template', value } } | null
 readMailPart(mail: { attachments: { type, size? }[] }, attachmentBytes: (i) => Uint8Array | null): { templateSig, fill } | null
+outlineTemplate(template: MailTemplate): { links: { href: { url } | { hole } | null, text }[],
+  senderLinks: string[], senderPictures: string[], names: string[] } | null   // what an audit reads
 MAIL_TEMPLATE_LIMITS, MAIL_TEMPLATE_KEY, MAIL_FILL_KEY, MAIL_TEMPLATE_PART_TYPE, MAIL_TEMPLATE_HEADER, MAIL_TEMPLATE_PART_FILENAME
 ```
 
@@ -145,8 +158,8 @@ Fill problems read `<hole>: <why>`, with `why` from a fixed vocabulary, so a win
 `required`, `unknown`, `forbidden`, `not-a-value`, `not-text`, `too-long`, `control-characters`, `not-a-link`,
 `not-a-number`, `not-a-date`, `not-a-signature`, `not-a-list`, `too-many`, plus `fill: not-an-object`,
 `too-many-values`, `too-large` and `unreadable`. The two strings a reader may see go through `say`, with keys
-`mail.template.picture` and `mail.template.picture-missing`; English is the fallback. Neither key is in the
-catalogs yet (step 3).
+`mail.template.picture` and `mail.template.picture-missing`; English is the fallback. Both keys are in
+`en.json` and `ja.json`.
 
 ## The refusals (built), each with a reason, never stripped
 
@@ -190,6 +203,13 @@ jpeg, gif or webp, the first bytes agree with that type (so an SVG labelled `ima
 most 2 MB (8 MB per rendering). Anything else becomes words naming the signature, plus an entry in `blocked`.
 Nothing is fetched, and there is no URL anywhere to fetch (T7).
 
+**Every occurrence counts.** The heap holds a picture once, but the html pays for every place it is written, so
+the picture data written into one html is capped at the base64 of 8 MB (`pictureChars`), each occurrence
+counted. The moment the cap would be passed, nothing more is written and the rendering is refused as
+`render: too-large`, so the string never grows (security review R2, finding 4: 150 × `{{@pic}}` over one
+2 MB png was 400 MB of html, rendered as `ok`). One 2 MB picture can therefore appear four times. In `cid` mode
+a picture is one inline part however often it is named, so this cap does not apply there.
+
 ## Audited once, by signature (M1)
 
 Auditing a template means reading its bytes, so the audit is a fact about one signature, and it holds for
@@ -208,20 +228,111 @@ A template with no script needs no audit to be **safe** to show: the reader make
 audit is for whether it is **honest** (a phishing letter can be perfectly well-formed), and, once scripts exist,
 for whether it may **run**.
 
-## How a template travels (design)
+**The mechanical reading (built, `template-pool.ts`).** `auditTemplate(template)` reads the template's outline
+and writes a report for a person to judge:
 
-- **The bytes** are a resource at the content root, `<root>/<sig>` (S2), stored once however many tiles and
-  messages name them (A6).
-- **Membership** is the pool `mail:template`: sig-named members saying "this hive keeps this template", of kind
-  `set` (`pool-kinds.ts`), federated by union (P1, P6, M3). The pool holds membership, never the template's
-  truth.
-- **From hosts you follow, never from a sender** (T1, T7). A host publishes the pool the way it publishes any
+```json
+{ "mail:template-audit": 1, "template": "<sig>", "by": "template-reader", "hosts": ["hypercomb.com"],
+  "findings": [ { "kind": "links-to", "subject": "hypercomb.com" },
+                { "kind": "link-words-name-another-place", "subject": "bank.example/login",
+                  "target": "https://evil.example/login" },
+                { "kind": "sender-chooses-link", "subject": "link" } ] }
+```
+
+The finding kinds, in the order they are listed:
+
+- `links-to`: every host its literal links can send a reader to (for `mailto`, the domain written to).
+- `link-words-name-another-place`: the link's words read as an address and the link goes elsewhere. This
+  includes words that name a place the sender chooses through a url hole, because the template cannot keep
+  that promise.
+- `sender-chooses-link` and `sender-chooses-picture`: url and resource holes, including lists of them.
+- `names-resource`: the template's own pictures.
+- `declares-script`.
+
+The report has no date in it, so one template always gives one report and one signature. `auditBytes` writes
+it canonically. `recordTemplateAudit(store, template)` keeps the report as a resource and returns the brood
+entry, `{ reportSig, summary, by: 'template-reader', recommends: 'unclear' }`. The reading **always recommends
+`unclear`**, even for a template that reaches nothing, because only a person can say a letter is honest.
+Attaching that entry with `attachAudit` waits for step 4: the brood holds bees only today.
+
+## How a template travels
+
+- **The bytes** (built) are a resource at the content root, `<root>/<sig>` (S2), stored once however many tiles
+  and messages name them (A6).
+- **Membership** (built) is the pool `mail:template`, of kind `set` (seeded in `pool-kinds.ts`), federated by
+  union (P1, P6, M3). The pool holds membership, never the template's truth; see the next section.
+- **From hosts you follow, never from a sender** (T1, T7; design). A host publishes the pool the way it publishes any
   pool: one file at `<origin>/<sign('mail:template')>` listing the members
   (`hypercomb-essentials/src/sharing/published-pools.ts`). The probe verifies every member's hash and **holds**
   it as an offer. `/offers` (`offers.queen.ts`, `offers.view.ts`) is the yes, a press on a row (T4). A message
   never makes its reader fetch a template: a reader who does not hold it sees the baked copy.
-- **As a tile** (A1): "save as template" breaks a message apart. The composer's message becomes the template,
-  the spans the participant marks become holes, and the template is one artifact that stands alone.
+- **As a tile** (A1; design): "save as template" breaks a message apart. The composer's message becomes the
+  template, the spans the participant marks become holes, and the template is one artifact that stands alone.
+
+## The templates a hive keeps (built, `template-pool.ts`)
+
+```ts
+MAIL_TEMPLATE_MEANING = 'mail:template'
+listTemplates(store?): Promise<{ entries: ({ sig, ok: true, template } | { sig, ok: false, reason })[],
+  problem?: 'no-store' | 'unreadable' }>
+saveTemplate(store, doc: MailTemplateDocument): Promise<{ ok: true, sig, added } | { ok: false, reason }>
+forgetTemplate(store, sig): Promise<{ ok: true, sig, added: false } | { ok: false, reason }>
+auditTemplate(template) / auditBytes(report) / recordTemplateAudit(store, template)
+```
+
+The store is reached through IoC (`@hypercomb.social/Store`), or passed in. Every call is optional on it, so a
+store without one of them gives an answer and never a throw.
+
+- **One document, and it is the index a host serves.** The pool holds one current document,
+  `{"meaning":"mail:template","members":[sig, …]}`, written by `putPoolDoc`. That is exactly the shape
+  `published-pools.ts` reads (`membersOf`) from `<origin>/<sign('mail:template')>`, so offering the pool later
+  means serving these bytes as they are. Every member is already at `<origin>/<sig>`. There are at most 64
+  members, the most one host may offer per meaning, so the list always publishes whole.
+- **A save keeps the list before it.** No write passes `keep: 'current'`, because a save is the participant's
+  act. Taking a template off the list is **hiding** it: its bytes stay, every message that names it still
+  renders, and the earlier list still names it.
+- **Never a raw write.** A set pool's members were written with a raw `createWritable` everywhere until now. The
+  storage ratchet freezes those per file, so this module uses the store's document writer and nothing else.
+- **Save proves before it writes.** `templateBytes` writes the canonical bytes and `parseTemplate` must read
+  them back. The store must answer with the same signature (S3). Only then does the list gain the member.
+  Saving the same template twice writes nothing. Saves run one at a time, so two at once are both kept.
+- **Complete or not at all.** A list on disk that does not read (a foreign shape, a non-signature member, more
+  than 64), or a pool that holds a document the store could not read, is never rewritten as a shorter list:
+  the save is refused and the list is left as it is.
+- **Listing never mints and never asks a host.** It opens the pool with `openPool` (which never creates) and
+  reads each member with `getResourceLocal`, by its signature, through `parseTemplate(bytes, sig)`. A member
+  that does not read is kept in the answer with its reason: not held, larger than 256 KB (refused before it is
+  read), bytes that do not match their name, or the parse refusal.
+
+## The form a template asks (built, `template-form.ts`)
+
+```ts
+templateForm(template: MailTemplate, say: (key, fallback, params?) => string,
+  options?: { pickResource?(hole): Promise<string | null>, onChange?(): void, initial?: MailFill })
+  → { element: HTMLElement, fill(): MailFill, problems(): { hole: string | null, item?, why, words }[], dispose() }
+```
+
+- **Built from the holes alone**, in the author's order. Each `label` is the question (the hole's name when
+  there is none), and a required hole says so.
+  - `text`: a line up to 200 characters, a box beyond that.
+  - `url`: a link field.
+  - `number` and `date`: their inputs. A date may carry a time, and a day plus a time is sent as the instant
+    it names (`toISOString`), so every reader sees it in their own zone.
+  - `resource`: a signature field, plus a "From the shelf" button when `pickResource` is given (A9). Only a
+    64-hex answer is taken, and an answer that comes after `dispose` writes nothing.
+  - `list`: rows, added up to `max` and removed. Empty rows are not items.
+- **Text only.** Labels are the author's words and reach the page through `textContent`. A spec checks that
+  the source never parses markup and imports nothing but `./template.js`.
+- **The form collects; `validateFill` decides.** `fill()` is what was entered, typed, with empty fields left
+  out. `problems()` asks `validateFill` and puts each problem beside its field: on the row for a list item
+  (counting only filled rows, as `validateFill` does), and under the form for the fill as a whole. Typing
+  clears what was said.
+- **The window's material.** It wears the mail window's own classes (`hc-mail-form`, `hc-mail-field`,
+  `hc-mail-do is-small`, `hc-mail-status is-bad`), so inside the window it has the same 2px shape and colours,
+  and it brings no stylesheet of its own.
+- **Its words** are under `mail.template.*` in `en.json` and `ja.json`: `required`, `time`, `signature`,
+  `pick`, `add-item`, `remove-item`, and `problem.{required, too-long, too-many, control-characters,
+  not-a-link, not-a-number, not-a-date, not-a-signature, too-large, other}`.
 
 ## The three gates, and exactly what "admitted" will mean (design)
 
@@ -260,7 +371,7 @@ under a policy of `default-src 'none'`, with the script itself allowed by its ha
 the reader holds by `postMessage`, and nothing else. No network at all, which is stricter than T7's "only our
 hosts", because animation needs none.
 
-## Steps 2 to 4: where each touches existing files (design)
+## Steps 2 to 4: where each touches existing files (steps 2 and 3 to wire, step 4 design)
 
 **Step 2: send carries the part.**
 
@@ -300,38 +411,114 @@ hosts", because animation needs none.
   map, and passes `sig => map.get(sig) ?? null`. **Gap:** the heap keeps bytes without a type. The type has to
   come from the record that placed the resource (the `files:attachment` record `mail-to-hive.ts` writes, or the
   resource's meta envelope). `renderTemplate` refuses it unless the bytes agree.
-- **The pool**, in the same change:
-  - Add `'mail:template'` to `SCOPED_POOL_MEANINGS` in `hypercomb-core/src/core/pool-registry.ts` (the
-    seed-census ratchet needs it). This also makes `mail` a reserved colon scope. **Without it the store spells
-    the meaning `mail-template`**, a bare word and so the lineage bag of a tile named "mail template". Verified:
-    `spellPoolMeaning('mail:template')` returns `'mail-template'` today. It is a core change, so `build:core`
-    comes before essentials.
-  - Declare the kind: `declarePoolKind('mail:template', 'set')`.
-  - Name the constant `MAIL_TEMPLATE_MEANING` in the step-3 module that first calls `store.getPool` (this module
-    deliberately derives nothing).
-  - **The queen**, not a dependency, claims the published pool with `registerPublishedPool({ meaning:
-    'mail:template', accept })`.
+- **The pool.** The core half is **done**:
+  - `'mail:template'` is in `SCOPED_POOL_MEANINGS` (`hypercomb-core/src/core/pool-registry.ts`), which also
+    makes `mail` a reserved colon scope. Without it the store spelled the meaning `mail-template`, a bare word
+    and so the lineage bag of a tile named "mail template".
+  - It is seeded as kind `set` in `pool-kinds.ts`.
+  - `MAIL_TEMPLATE_MEANING` lives in `template-pool.ts`.
+
+  Still to wire: **the queen**, not a dependency, claims the published pool with `registerPublishedPool({
+  meaning: MAIL_TEMPLATE_MEANING, accept })`. Its kind `set` replicates, so the claim is accepted. The handler
+  holds an offer; it keeps nothing until the participant presses its row in `/offers` (T4).
   - **Gap:** `accept(record, origin)` receives the parsed record, not the verified bytes or their signature. A
     template handler needs both: `parseTemplate` is strict on bytes, and `JSON.parse` has already hidden a
     repeated key. The additive fix is a third argument `{ sig, bytes }` that the existing handlers ignore (H3).
     `MAX_MEMBER_BYTES` there is already 256 KB, the same as a template's cap.
-- **The composer.** "Use a template" lists the members of `mail:template` and shows a form built from `holes`.
-  Each `label` is the question. A `text` hole is a field, a `url` a URL field, a `number` and a `date` their
-  inputs, a `resource` a signature taken from the shelf (A9: the hand is the shelf), and a `list` repeatable
-  rows. Send runs `validateFill`, which shows the problems per hole and refuses a missing required one. Then
-  `renderTemplate(…, { images: 'cid' })` bakes the subject, text and html, and `send` carries them with the
-  part. "Save as template" breaks the message apart (A1): `format.ts`'s html and text become the template's
-  bodies, the spans the participant marks become holes, `templateBytes` writes it, the store keeps it, and the
-  `mail:template` pool gains the member. The new i18n keys (`mail.template.*`) go to the catalogs, and to E.
+- **The composer** (`mail.view.ts`; the pieces are built):
+  - "Use a template" lists `listTemplates()` (its `ok` entries; a refused entry can show its reason).
+  - The chosen template mounts `templateForm(template, say, { pickResource, onChange })` in the compose pane.
+    `pickResource` is the shelf's hand (A9). The shelf's API for "give me a picture's signature" is not
+    settled here.
+  - Send: `form.problems()` must be empty. Then `renderTemplate(template, form.fill(), { trust: 'held', images:
+    'cid', resolveResource })` bakes the subject, text and html, and `send` carries them with
+    `template: { sig, fill: checked fill }`.
+  - The form is `dispose()`d when the composer closes or the template changes.
+  - "Save as template" breaks the message apart (A1). `format.ts`'s html and text become the template's bodies,
+    and the spans the participant marks become holes. Then `saveTemplate(store, doc)`, and optionally
+    `recordTemplateAudit`.
+- **What the read pane trusts until step 4.** `held` when the template is an `ok` entry of `listTemplates()`
+  (the participant kept it), `unknown` otherwise. `renderTemplate`'s `trust` is synchronous, so the view
+  computes this before it renders.
 
-**Step 4: activation and the script view** (the biggest step; design first).
+**Step 4: activation and the script view** (design only; no code yet).
 
-- The gate for `trust`: the template's signature through the brood (`brood.ts`; a template arriving from a host
-  is recorded as a stranger's arrival) and through the attester for the signed `pool:mail:template` index
-  (`package-attestation.ts` reads the same follow record).
-- The script view: a framework-free element contributed through the shell surface registry, running the frame
-  described above. It is a second face of the message, so it is a second view (A5), owned by the mail queen.
-- `renderTemplate` keeps saying `not-run` until that view exists. Turning it on is one line here and one gate.
+jwize, 2026-11-06: *"trust the community and trust the resources so you are able to have even animated scripts
+in emails."* A script therefore runs when, and only when, **the gate admits the template's signature**, and
+never before. Each piece below names the file it touches.
+
+*The gate: `hypercomb-essentials/src/mail/template-gate.ts` (new, a dependency).*
+`templateTrust(sigs): Promise<Map<sig, 'admitted' | 'held' | 'unknown'>>` is computed before a render, because
+`renderTemplate`'s `trust` is synchronous. For one signature:
+
+1. **`unknown`**: `getResourceLocal(sig)` is null, or `parseTemplate(bytes, sig)` refuses.
+2. **`held`**: the bytes read, and the template is an `ok` entry of `listTemplates()`, kept by the participant
+   (saved here, or pressed in `/offers`).
+3. **`admitted`**: held, and also:
+   - **Complete.** `getResourceLocal` holds the `script` and every `resources` signature, and each hashes to its
+     name. The script is UTF-8 text of at most 256 KB.
+   - **Authorized**, by one of the doors below.
+
+   Then the brood has the last word.
+
+*Authority, the attested door: `hypercomb-essentials/src/sharing/package-attestation.ts` (touched).*
+
+- The publish side copies `participant-features.ts:125`. The outbound act (the promote window, "Publish")
+  stamps `setHiveRoot(host, 'pool:mail:template', <sig of the current list document>)`. It is not a typed word:
+  `template` is already a behaviour word.
+- The reader side is a sibling of `attestPackage`: `attestPoolMember('pool:mail:template', templateSig, zones,
+  deps)`. It reuses `readInstallFollow`, `indexHostsFor` and `fetchHiveIndex` unchanged. The followed index's
+  `roots['pool:mail:template']` names a list. The list's bytes must hash to that signature and read as the
+  members document, and the template must be a member.
+- Forged, unreachable and not-named answer exactly as for a package.
+- Witnessing reuses the existing `witness` function with the storage key as a parameter. That file's
+  `localStorage.setItem` count is frozen by the storage ratchet, so no new call site.
+
+*Authority, the hand door, and the last word: `hypercomb-core/src/core/brood.ts` (touched, additive, H3).*
+
+- `BroodRecord.kind` widens from `'bee'` to `'bee' | 'mail-template'`. `holdInBrood(sig, source, name, kind =
+  'bee')` gains the kind.
+- A template arriving from a host is held as a stranger's arrival. One saved here is held as `own`, which the
+  brood rules admit, as they do a participant's own draft bee.
+- `mayRunBee` is already kind-blind; it gains the alias `mayRun` for this caller, and nothing about a bee
+  changes.
+- `attachAudit(sig, (await recordTemplateAudit(store, template)).audit)` attaches the reading, and it can never
+  rule.
+- `acceptIntoHive(sig, warnings)` is the hand. Its two distinct warnings for a template:
+  1. "This template's script will run in its own frame each time you open a message that uses it."
+  2. "It cannot reach the network, your tiles or your key, but it can show anything, including something that
+     misleads."
+- `write()` already holds the brood's one raw write, so no ratchet count moves.
+
+*The script view: `hypercomb-essentials/src/mail/template-live.view.ts` (new) and `mail.queen.ts` (touched).*
+
+- It is a second face of the message (A5): a framework-free custom element `hc-mail-template-live`, owned by
+  the mail queen.
+- The queen contributes it the way `comfy-desk.drone.ts:44` does: `window.ioc.whenReady(
+  '@hypercomb.social/ShellSurfaceRegistry', r => r.add({ name: 'mail-template-live', owner: <view key>,
+  element: 'hc-mail-template-live', order }))`. The element is defined only on its first request, the way the
+  sandbox door's panel is (`sandbox-door.drone.ts:85`).
+- The read pane asks for it with a transient effect (never a replayed one) that carries the template sig and
+  the checked fill. The pane asks only when `renderTemplate` said `live`.
+- The frame:
+  - `<iframe sandbox="allow-scripts">`, never `allow-same-origin`, so it gets an opaque origin with no OPFS, no
+    IoC and no key. No popups: links stay in the static rendering beside it.
+  - `referrerpolicy="no-referrer"`.
+  - `srcdoc` is a fixed document: a CSP `<meta>` of `default-src 'none'; script-src 'sha256-<the script's
+    hash>'; img-src data:; style-src 'unsafe-inline'; connect-src 'none'; font-src 'none'; frame-src 'none';
+    worker-src 'none'; base-uri 'none'; form-action 'none'`, then the script inline.
+- In: one `postMessage` after `load`, `{ kind: 'mail:template:fill', fill, pictures: { sig: dataUrl } }`, with
+  only the pictures the reader holds.
+- Out: only `{ kind: 'mail:template:height', px }` from `event.source === frame.contentWindow`, clamped.
+  Anything else is ignored.
+- The frame is removed when the pane closes.
+- `template.ts`: when `live`, `blocked` stops saying `not-run` for the script and the rendering carries
+  `script: sig`. That is one line and its spec, and it lands with this view and not before.
+- **Unverified, to check before step 4 lands:**
+  - A `srcdoc` frame inherits the shell's own CSP, so the shell's policy must allow the hash-allowed inline
+    script.
+  - Browsers may run a sandboxed frame in the page's own process, so a busy script could freeze the tab. The
+    first release should start the live view on a press and give it a stop.
 
 ## Decisions for jwize
 
@@ -348,12 +535,16 @@ hosts", because animation needs none.
 5. **Outside recipients**: the baked html and the text (with inline `cid:` pictures if Cloudflare carries them),
    or the text only.
 6. **Scripts in the first release**: yes, under the frame above, or not until a second release. Whether a
-   script may ever reach a host (it reaches none in this design).
+   script may ever reach a host (it reaches none in this design). Whether the live view starts by itself once
+   admitted, or on a press with a stop (recommended for the first release, see step 4's unverified items).
+8. **Who may stamp `pool:mail:template`**: only the install publisher the participant already follows (the
+   attester as it is), or any publisher the participant follows for templates (a second follow record).
 7. **Styling**: whether a scrubbed `style` attribute or a fixed set of classes joins the subset. Static templates
    carry no styling in this release, and the expressive layer is meant to be the script view.
 
-## What this step does not do
+## What is not built yet
 
-It runs no script. It fetches nothing and stores nothing. It wires nothing into `mail.view.ts`,
-`mail.service.ts`, the Worker or the pool registry, and it registers no pool, published pool or IoC key. Every
-item under steps 2 to 4 is design until it lands with its own specs.
+No script runs, and nothing here fetches. Nothing is wired into `mail.view.ts`, `mail.service.ts`,
+`mail.queen.ts` or the Worker, and nothing registers a published pool, a shell surface or an IoC key. The
+built modules are dependencies that wait for those wirings (steps 2 and 3, above). Step 4 is design until it
+lands with its own specs.

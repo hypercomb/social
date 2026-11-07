@@ -58,6 +58,8 @@ export const MAIL_TEMPLATE_PART_TYPE = 'application/vnd.hypercomb.mail+json'
 export const MAIL_TEMPLATE_HEADER = 'X-Hypercomb-Template'
 export const MAIL_TEMPLATE_PART_FILENAME = 'hypercomb-template.json'
 
+const PICTURE_BYTES = 8 * 1024 * 1024
+
 export const MAIL_TEMPLATE_LIMITS = Object.freeze({
   /** A template document, in bytes. */
   templateBytes: 256 * 1024,
@@ -84,9 +86,15 @@ export const MAIL_TEMPLATE_LIMITS = Object.freeze({
   partBytes: 96 * 1024,
   /** The rendered html or text, pictures not counted. */
   renderedChars: 1024 * 1024,
-  /** One picture, and all the pictures of one rendering. */
+  /** One picture, and all the pictures of one rendering, each counted once. */
   image: 2 * 1024 * 1024,
-  images: 8 * 1024 * 1024,
+  images: PICTURE_BYTES,
+  /**
+   * Picture data written into one html, EVERY occurrence counted: the base64 of
+   * `images` plus room for the data: prefixes. A picture named twice is written
+   * twice, so the bytes held once are not what the screen pays for.
+   */
+  pictureChars: Math.ceil(PICTURE_BYTES / 3) * 4 + 16 * 1024,
 })
 
 const L = MAIL_TEMPLATE_LIMITS
@@ -874,6 +882,9 @@ class Renderer {
   readonly #pictures = new Map<string, { src: string } | { why: BlockedItem['why'] }>()
   #imageBytes = 0
   #imageChars = 0
+  // Set the moment picture data would pass `pictureChars`; from then on nothing
+  // more is written, so a hostile template stops while the string is still small.
+  #overflow = false
 
   constructor(template: MailTemplate, fill: MailFill, deps: RenderDeps) {
     this.#template = template
@@ -892,6 +903,8 @@ class Renderer {
   get images(): readonly RenderedImage[] { return [...this.#images.values()] }
   /** Characters of picture data in the html, which the size cap does not count. */
   get imageChars(): number { return this.#imageChars }
+  /** Whether the pictures this html names, every occurrence counted, came to more than may be written. */
+  get overflow(): boolean { return this.#overflow }
   block(item: BlockedItem): void { this.#blocked.push(item) }
 
   #say(key: string, fallback: string, params?: Readonly<Record<string, string>>): string {
@@ -955,6 +968,9 @@ class Renderer {
         const sig = value as string
         const picture = where.code ? null : this.#picture(sig)
         if (picture && 'src' in picture) {
+          // Counted per occurrence, not per signature: one 2 MB picture named 150
+          // times is 400 MB of html, whatever the heap holds once.
+          if (this.#overflow || this.#imageChars + picture.src.length > L.pictureChars) { this.#overflow = true; return '' }
           this.#imageChars += picture.src.length
           return `<img src="${escapeHtml(picture.src)}" alt="${escapeHtml(label)}">`
         }
@@ -1046,7 +1062,7 @@ function render(template: MailTemplate, fill: unknown, deps: RenderDeps): Render
   const subject = Array.from(renderer.text(compiled.subject, true).replace(/[\s\u0000-\u001f\u007f]+/g, ' ').trim()).slice(0, L.subject).join('')
   const text = renderer.text(compiled.text, false)
   const html = compiled.html ? renderer.html(compiled.html, 'root', { anchor: false, code: false }) : ''
-  if (text.length > L.renderedChars || html.length - renderer.imageChars > L.renderedChars) return { ok: false, problems: ['render: too-large'] }
+  if (renderer.overflow || text.length > L.renderedChars || html.length - renderer.imageChars > L.renderedChars) return { ok: false, problems: ['render: too-large'] }
 
   // Declared, never run in this step — for every reader alike, so what a reader
   // sees never depends on trust (only `live` does).
@@ -1060,6 +1076,62 @@ function render(template: MailTemplate, fill: unknown, deps: RenderDeps): Render
     blocked: Object.freeze([...renderer.blocked]),
     images: Object.freeze(renderer.images),
   }
+}
+
+// ── what a template reaches, for whoever audits it ──────────────────────────
+
+/** One link of the html: where it goes, and the words it shows. */
+export interface TemplateLink {
+  /** A literal url the template carries, or the url hole whose value the SENDER picks. */
+  readonly href: { readonly url: string } | { readonly hole: string } | null
+  /** The words the link shows, a hole written as {{name}}. */
+  readonly text: string
+}
+
+/** What a template can reach and who chooses it, read from its compiled tree. */
+export interface TemplateOutline {
+  readonly links: readonly TemplateLink[]
+  /** Holes whose value is a link the sender chooses at send: url holes, and lists of them. */
+  readonly senderLinks: readonly string[]
+  /** Holes whose value is a picture the sender chooses: resource holes, and lists of them. */
+  readonly senderPictures: readonly string[]
+  /** Every signature the template itself names: its resources, then its script. */
+  readonly names: readonly string[]
+}
+
+const linkText = (nodes: readonly HtmlNode[]): string =>
+  nodes.map(node => node.k === 'text' ? node.v : node.k === 'hole' ? `{{${node.hole.resource ? '@' : ''}${node.hole.name}}}` : linkText(node.kids)).join('')
+
+/**
+ * The template's reach, for an audit (M1): every link with the words it shows,
+ * which holes let the SENDER choose a link or a picture, and every signature it
+ * names. An honest-looking letter can still point somewhere else, and that is
+ * what a person auditing it needs to see. Null for a template object that does
+ * not compile. Never throws.
+ */
+export function outlineTemplate(template: MailTemplate): TemplateOutline | null {
+  try {
+    const compiled = compiledOf.get(template) ?? compileAgain(template)
+    if (!compiled) return null
+    const links: TemplateLink[] = []
+    const walk = (nodes: readonly HtmlNode[]): void => {
+      for (const node of nodes) {
+        if (node.k !== 'el') continue
+        if (node.tag === 'a') links.push({ href: node.href ? ('url' in node.href ? { url: node.href.url } : { hole: node.href.hole }) : null, text: linkText(node.kids) })
+        walk(node.kids)
+      }
+    }
+    walk(compiled.html ?? [])
+    const holes = Object.entries(template.holes)
+    const chooses = (type: ScalarHoleType): string[] =>
+      holes.filter(([, hole]) => hole.type === type || (hole.type === 'list' && hole.of === type)).map(([name]) => name)
+    return {
+      links,
+      senderLinks: chooses('url'),
+      senderPictures: chooses('resource'),
+      names: [...new Set([...Object.values(template.resources ?? {}), ...(template.script ? [template.script] : [])])],
+    }
+  } catch { return null }
 }
 
 // ── the part a message carries ──────────────────────────────────────────────

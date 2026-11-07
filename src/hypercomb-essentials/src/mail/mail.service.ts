@@ -49,6 +49,26 @@ export const MAIL_LIMITS = Object.freeze({
   draftBytes: 1024 * 1024,
 })
 
+/**
+ * What this client reads of a host's answer, whatever the host sends. The host is not trusted with
+ * the participant's memory or their signer: a page is cut to the rows asked for, an answer is read
+ * through a counter that stops at its cap, and an error says at most a sentence.
+ */
+export const MAIL_READ_CAPS = Object.freeze({
+  /** The largest message the Worker stores (its MAX_STORE_BYTES default). */
+  messageBytes: 10 * 1024 * 1024,
+  /** An envelope is the message plus its header and tag; this is room for the header. */
+  envelopeSlack: 64 * 1024,
+  /** A list page or /mail/me: 100 rows of at most 2 KiB metadata each is a fraction of this. */
+  answerBytes: 2 * 1024 * 1024,
+  /** An error body; 200 characters of it are kept. */
+  errorBytes: 1024,
+  /** The rows one list page asks for. */
+  rows: 100,
+  /** Addresses taken from /mail/me, across every host. */
+  addresses: 50,
+})
+
 /** The owner's marks on a message. Plain on the host: they say read/hidden/flagged, never what the mail says. */
 export interface MailMarks {
   readonly read?: boolean
@@ -273,6 +293,53 @@ const actsOf = (can: Record<string, unknown> | null, address: string): readonly 
 const randomHex = (bytes: number): string =>
   Array.from(crypto.getRandomValues(new Uint8Array(bytes)), b => b.toString(16).padStart(2, '0')).join('')
 
+// A Sent copy or a draft opened here is the host's JSON, and the window draws it as it comes: a
+// `to` that is a string or a `cc` that is null would throw mid-render. So each is given its shape
+// here, as `marksOf` gives the marks theirs: lists of strings, strings, attachments of strings,
+// and anything else left out.
+const str = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined)
+const strs = (value: unknown): string[] =>
+  typeof value === 'string' ? (value ? [value] : []) : Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
+const num = (value: unknown): number | undefined => (typeof value === 'number' && Number.isFinite(value) ? value : undefined)
+const attachmentsOf = (value: unknown): SentAttachment[] =>
+  (Array.isArray(value) ? value : []).flatMap(item => {
+    const a = item as Partial<Record<'filename' | 'type' | 'content', unknown>> | null
+    if (!a || typeof a !== 'object' || typeof a.content !== 'string') return []
+    return [{ filename: str(a.filename) ?? '', type: str(a.type) || 'application/octet-stream', content: a.content }]
+  })
+
+const sentRecordOf = (raw: Record<string, unknown>): SentRecord => ({
+  id: str(raw['id']) ?? null,
+  from: str(raw['from']) ?? '',
+  ...(raw['name'] !== undefined ? { name: str(raw['name']) ?? null } : {}),
+  to: strs(raw['to']),
+  cc: strs(raw['cc']),
+  bcc: strs(raw['bcc']),
+  subject: str(raw['subject']) ?? '',
+  text: str(raw['text']) ?? '',
+  html: str(raw['html']) ?? '',
+  inReplyTo: str(raw['inReplyTo']) ?? null,
+  references: str(raw['references']) ?? null,
+  ...(raw['attachments'] !== undefined ? { attachments: attachmentsOf(raw['attachments']) } : {}),
+  at: num(raw['at']) ?? 0,
+})
+
+const draftOf = (raw: Record<string, unknown>): MailDraft => {
+  const out: Record<string, unknown> = {}
+  // A draft's `to` may be what the participant typed (one string) or a list; either is kept as it was.
+  if (typeof raw['to'] === 'string') out['to'] = raw['to']
+  else if (raw['to'] !== undefined) out['to'] = strs(raw['to'])
+  for (const key of ['cc', 'bcc'] as const) if (raw[key] !== undefined) out[key] = strs(raw[key])
+  for (const key of ['subject', 'text', 'html', 'inReplyTo', 'references'] as const) {
+    const value = str(raw[key])
+    if (value !== undefined) out[key] = value
+  }
+  if (raw['attachments'] !== undefined) out['attachments'] = attachmentsOf(raw['attachments'])
+  const at = num(raw['at'])
+  if (at !== undefined) out['at'] = at
+  return out as MailDraft
+}
+
 /** The origin an address's own domain would serve mail from; null for anything that is not a hostname. */
 const domainOrigin = (address: string): string | null => {
   const domain = address.slice(address.lastIndexOf('@') + 1).toLowerCase()
@@ -283,12 +350,57 @@ const originOf = (host: string): string => {
   try { return new URL(host).origin } catch { return new URL(`https://${host}`).origin }
 }
 
+/**
+ * A body, read through a counter. Past `cap` the read stops and the rest is never pulled: with
+ * `truncate` the first `cap` bytes are the answer, otherwise it is `tooLarge`. A Content-Length
+ * already past the cap stops it before a byte is read.
+ */
+async function readCapped(response: Response, cap: number, tooLarge: MailError | 'truncate'): Promise<Uint8Array> {
+  const declared = Number(response.headers.get('content-length'))
+  if (tooLarge !== 'truncate' && Number.isFinite(declared) && declared > cap) {
+    try { await response.body?.cancel() } catch { /* already closed */ }
+    throw tooLarge
+  }
+  // No stream to count (a hand-made Response in a test, a null body): it is already in memory.
+  if (!response.body) {
+    const all = new Uint8Array(await response.arrayBuffer())
+    if (all.length <= cap) return all
+    if (tooLarge === 'truncate') return all.slice(0, cap)
+    throw tooLarge
+  }
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (total + value.length > cap) {
+        if (tooLarge === 'truncate') chunks.push(value.subarray(0, cap - total))
+        total = cap + 1
+        try { await reader.cancel() } catch { /* the stream is gone either way */ }
+        break
+      }
+      chunks.push(value)
+      total += value.length
+    }
+  } finally {
+    try { reader.releaseLock() } catch { /* cancelled */ }
+  }
+  if (total > cap && tooLarge !== 'truncate') throw tooLarge
+  const out = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0))
+  let at = 0
+  for (const chunk of chunks) { out.set(chunk, at); at += chunk.length }
+  return out
+}
+
 /** What a refusal from the host means to the person, whatever words the host used. */
 async function refusal(response: Response): Promise<MailError> {
   let said = ''
-  try { said = (await response.text()).slice(0, 200) } catch { /* no body */ }
+  try { said = dec.decode(await readCapped(response, MAIL_READ_CAPS.errorBytes, 'truncate')) } catch { /* no body */ }
   let detail = said
-  try { const parsed = JSON.parse(said) as { error?: string }; if (parsed?.error) detail = parsed.error } catch { /* plain text */ }
+  try { const parsed = JSON.parse(said) as { error?: string }; if (typeof parsed?.error === 'string') detail = parsed.error } catch { /* plain text */ }
+  detail = detail.slice(0, 200)
   // 401 text is the same "not authorized" for every stranger on purpose (it must not tell which
   // addresses exist), so nothing is read from it. A 403 that names an act is a key with a role.
   const may = /may not (read|mark|draft|delete|send)\b/i.exec(detail)
@@ -375,14 +487,19 @@ export class MailService extends EventTarget {
   // with no mail, not a broken answer.
   async #json<T>(response: Response): Promise<T> {
     if (!/json/i.test(response.headers.get('content-type') ?? '')) throw new MailError('unavailable', 'not a mail host')
-    try { return await response.json() as T } catch { throw new MailError('unavailable', 'not a mail host') }
+    const bytes = await readCapped(response, MAIL_READ_CAPS.answerBytes, new MailError('unavailable', 'answer too large'))
+    try { return JSON.parse(dec.decode(bytes)) as T } catch { throw new MailError('unavailable', 'not a mail host') }
   }
 
   /** Runs `act` against the host that serves `address`: the one it is known at, else its domain, then the given hosts. */
   async #at<T>(address: string, act: (origin: string) => Promise<T>, passesOn: Partial<Record<MailErrorCode, number>> = PASSES_ON): Promise<T> {
     const known = this.#served.get(address.toLowerCase())
     if (known) return act(known)
-    const candidates = [...new Set([domainOrigin(address), ...this.#hosts].filter((o): o is string => !!o))]
+    // Only the hosts the participant gave are asked. The address's own domain goes first when it is
+    // one of them, but is never contacted on its own: a signed request carries the key and the address,
+    // and gmail.com is not a place the participant chose to tell that to.
+    const own = domainOrigin(address)
+    const candidates = own && this.#hosts.includes(own) ? [own, ...this.#hosts.filter(h => h !== own)] : [...this.#hosts]
     let best: MailError | null = null
     for (const origin of candidates) {
       try {
@@ -425,10 +542,14 @@ export class MailService extends EventTarget {
       if (!('body' in answer) || !answer.body) continue
       const names = answer.body.names && typeof answer.body.names === 'object' ? answer.body.names as Record<string, unknown> : {}
       const can = answer.body.can && typeof answer.body.can === 'object' ? answer.body.can as Record<string, unknown> : null
-      const addresses = Array.isArray(answer.body.addresses) ? answer.body.addresses.filter((a): a is string => typeof a === 'string') : []
+      const addresses = Array.isArray(answer.body.addresses)
+        ? answer.body.addresses.slice(0, MAIL_READ_CAPS.addresses).filter((a): a is string => typeof a === 'string')
+        : []
       for (const address of addresses) {
         const key = address.toLowerCase()
         if (found.has(key)) continue // the first host to claim an address serves it
+        // Every address is listed again on every poll; a host does not get to make that thousands.
+        if (found.size >= MAIL_READ_CAPS.addresses) break
         const name = typeof names[address] === 'string' && names[address] ? names[address] as string : undefined
         found.set(key, { address, host: answer.origin, can: actsOf(can, address), ...(name ? { name } : {}) })
         this.#served.set(key, answer.origin)
@@ -455,12 +576,17 @@ export class MailService extends EventTarget {
     onItem?: (item: MailListItem, progress: ListProgress) => void,
   ): Promise<{ items: MailListItem[]; cursor: string | null }> {
     const held = await this.#held()
-    const query = new URLSearchParams({ limit: '100' })
+    const query = new URLSearchParams({ limit: String(MAIL_READ_CAPS.rows) })
     if (cursor) query.set('cursor', cursor)
     type Row = { sig?: unknown; at?: unknown; v?: unknown; meta?: unknown; wraps?: unknown; marks?: unknown }
     const body = await this.#at(address, async origin =>
       this.#json<{ items?: Row[]; cursor?: string | null }>(await this.#request(held, origin, `${this.#path(folder, address)}?${query}`)))
-    const rows = (Array.isArray(body.items) ? body.items : []).filter(row => SIG.test(String(row?.sig)))
+    // The rows asked for and no more, each once: every row is up to three signer asks (an extension
+    // may prompt for each), so a page of 5,000 or the same row 5,000 times is the host's to keep.
+    const seen = new Set<string>()
+    const rows = (Array.isArray(body.items) ? body.items : [])
+      .filter(row => SIG.test(String(row?.sig)) && !seen.has(String(row.sig)) && !!seen.add(String(row.sig)))
+      .slice(0, MAIL_READ_CAPS.rows)
     const decrypt: Decrypt = (peer, payload) => held.signer.nip44Decrypt(peer, payload)
 
     let opened = 0
@@ -489,8 +615,10 @@ export class MailService extends EventTarget {
     })
     let opened: { sig: string; bytes: Uint8Array }
     try {
-      opened = await openEnvelope(new Uint8Array(await response.arrayBuffer()), (peer, payload) => held.signer.nip44Decrypt(peer, payload), held.pub, sig)
+      const envelope = await readCapped(response, MAIL_READ_CAPS.messageBytes + MAIL_READ_CAPS.envelopeSlack, new MailError('bad-message', 'message too large'))
+      opened = await openEnvelope(envelope, (peer, payload) => held.signer.nip44Decrypt(peer, payload), held.pub, sig)
     } catch (error) {
+      if (error instanceof MailError) throw error
       throw new MailError('bad-message', error instanceof Error ? error.message : '')
     }
     // The bytes asked for, not other bytes the host chose to hand back.
@@ -519,12 +647,12 @@ export class MailService extends EventTarget {
 
   /** A message this participant sent. */
   async readSent(address: string, sig: string): Promise<SentRecord> {
-    return this.#openJson<SentRecord>(address, 'sent', sig)
+    return sentRecordOf(await this.#openJson<Record<string, unknown>>(address, 'sent', sig))
   }
 
   /** A draft, as the window saved it. */
   async readDraft(address: string, sig: string): Promise<MailDraft> {
-    return this.#openJson<MailDraft>(address, 'drafts', sig)
+    return draftOf(await this.#openJson<Record<string, unknown>>(address, 'drafts', sig))
   }
 
   /**

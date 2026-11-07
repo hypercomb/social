@@ -52,13 +52,14 @@ import { contactsIn, knownAddresses, type ContactSeed } from './contacts.js'
 import { DRAFT_SAVE_MS, Debounced, POLL_EVERY_MS, POLL_MAX_ERRORS, Poller, progressShare, sizeLabel } from './cue.js'
 import { formatMessage } from './format.js'
 import { mailFrameDocument, makeMailHtmlSafe } from './mail-html.js'
-import { matchesWords, newestFirst, placeNewestFirst, searchWords, threadsOf, timeOf, type Thread } from './mail-threads.js'
+import { matchesWords, mergeNewestFirst, newestFirst, searchWords, threadsOf, timeOf, type Thread } from './mail-threads.js'
 import type { SaveMessageInput, SaveMessageResult } from './mail-to-hive.js'
 import {
   ALREADY_DONE, ALREADY_SENT, MAIL_ACTS, MAIL_LIMITS, MailError, MailService, sentAttachmentBytes, unreadCount,
-  type Folder, type MailAct, type MailAttachmentInput, type MailDraft, type MailDraftInput, type MailListItem, type Mailbox, type MarkName, type SentRecord,
+  type Folder, type MailAct, type MailAttachmentInput, type MailDraft, type MailDraftInput, type MailListItem, type Mailbox, type MarkName,
+  type SentAttachment, type SentRecord,
 } from './mail.service.js'
-import { attachmentBytes, parseMail, type ParsedMail } from './mime.js'
+import { attachmentBytes, attachmentsBytes, parseMail, type ParsedMail } from './mime.js'
 import { forwardDraft, recipientsIn, replyDraft, replySubject, type Draft } from './reply.js'
 
 export const MAIL_OPEN = 'mail:open'
@@ -83,6 +84,13 @@ const PLACEHOLDER_GUESS = 3
 const PREVIEW_ONE = 2 * 1024 * 1024
 const PREVIEW_ALL = 8 * 1024 * 1024
 const PREVIEW_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
+/** At most this many pictures are shown; the rest are listed with the other files. */
+const PREVIEW_MOST = 12
+/**
+ * Above this many bytes of message, its pictures wait for a press ("Show pictures"): finding them is one
+ * more walk over every byte, and a stranger chooses how many bytes there are (R2 #1).
+ */
+const PREVIEW_ON_PRESS = 2 * 1024 * 1024
 /** The compose preview is redrawn once the typing pauses this long (the frame reloads on each draw). */
 const PREVIEW_DRAW_MS = 200
 const WIRE_TYPE = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/
@@ -122,8 +130,30 @@ const forbidden = (act: string, address: string): string => {
   }
 }
 
+/**
+ * A refusal, in the hive's own words. The reasons are the ones the mail Worker gives
+ * (hypercomb-relay/mail-worker/worker.js) and the ones the service gives before a byte is sent,
+ * plus Cloudflare's codes, which the Worker passes on bare. A reason not on this list is NEVER shown:
+ * the window speaks in the hive's voice, and a host can write anything into its answer — "your key
+ * expired, paste it at …" included (R2 #7). Every such refusal gets the one plain sentence.
+ */
+const refusedWords = (detail: string): string => {
+  const reason = detail.trim()
+  if (/^too many attachments$/i.test(reason)) return t('mail.error.refused.too-many-files', 'The host takes at most {count} files in a message.', { count: MAIL_LIMITS.attachments })
+  if (/^attachments too large$/i.test(reason)) return t('mail.error.refused.files-too-large', 'The host takes at most {size} of files in a message.', { size: sizeLabel(MAIL_LIMITS.attachmentBytes) })
+  if (/^bad attachments?( type| content)?$/i.test(reason) || /^E_ATTACHMENT/.test(reason)) return t('mail.error.refused.bad-file', 'The host would not take one of the files as it is.')
+  if (/^bad recipients$/i.test(reason) || /^E_RECIPIENT/.test(reason)) return t('mail.error.refused.recipients', 'The host would not take these recipients: To and Cc must hold addresses, at most {count} in all.', { count: MAIL_LIMITS.recipients })
+  if (/^bad subject$/i.test(reason)) return t('mail.error.refused.subject', 'The host needs a subject, on one line.')
+  if (/^no body$/i.test(reason)) return t('mail.error.refused.empty', 'The host will not send a message with nothing in it.')
+  if (/^bad (reply-to|in-reply-to|references)$/i.test(reason) || /^E_HEADER/.test(reason)) return t('mail.error.refused.headers', 'The host would not take this message’s reply headers.')
+  if (/^(message|draft) too large$/i.test(reason)) return t('mail.error.refused.too-large', 'This is larger than the host takes.')
+  if (/^E_SENDER/.test(reason)) return t('mail.error.refused.sender', 'Cloudflare will not send from this address yet.')
+  if (/^E_[A-Z_]+$/.test(reason)) return t('mail.error.refused.cloudflare', 'Cloudflare would not send this message as it is.')
+  return t('mail.error.refused', 'The mail host refused this.')
+}
+
 /** What a failure means to the person, in words. */
-export const explain = (error: unknown, sending = false, recipients: readonly string[] = [], context: ExplainContext = {}): string => {
+export const explain =(error: unknown, sending = false, recipients: readonly string[] = [], context: ExplainContext = {}): string => {
   const code = error instanceof MailError ? error.code : 'unavailable'
   const detail = error instanceof MailError ? error.detail : ''
   switch (code) {
@@ -147,7 +177,7 @@ export const explain = (error: unknown, sending = false, recipients: readonly st
       if (detail === 'E_RECIPIENT_SUPPRESSED') {
         return t('mail.error.suppressed', 'Cloudflare will not send to one of these addresses, because it bounced before: {to}. Check To and Cc for a typo.', { to: recipients.join(', ') || '—' })
       }
-      return t('mail.error.refused', 'The message was refused: {detail}', { detail: detail || '—' })
+      return refusedWords(detail)
     case 'bad-message': return t('mail.error.bad-message', 'This message could not be opened with this key.')
     default: return sending
       ? t('mail.error.unavailable-send', 'The mail host did not answer. Nothing was sent.')
@@ -162,8 +192,13 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text?
   return node
 }
 
-const when = (at: number | undefined): string =>
-  at ? new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : ''
+// One formatter for every row: toLocaleString builds a new one per call, and a page has thousands of rows.
+let whenFormat: Intl.DateTimeFormat | null = null
+const when = (at: number | undefined): string => {
+  if (!at) return ''
+  whenFormat ??= new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  try { return whenFormat.format(new Date(at)) } catch { return '' }
+}
 
 const isField = (target: EventTarget | null): boolean =>
   target instanceof HTMLElement && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable)
@@ -201,23 +236,71 @@ const fileBytes = (file: File): Promise<Uint8Array> =>
     })
 
 /**
- * The pictures among a message's attachments, as a frame document of data: images. Only the four
- * picture types, only within the caps, and nothing a stranger wrote enters the markup: the type comes
- * from the fixed set and the bytes are base64.
+ * Which attachments are worth showing as pictures, by index: one of the four picture types, within the
+ * caps by the size the message declares, and no more than PREVIEW_MOST. Chosen BEFORE a byte is read,
+ * so a message of 190 tiny pictures costs what a message of twelve does.
  */
-function previewDocument(files: readonly { type: string; size: number; bytes: () => Uint8Array | null }[]): string | null {
+function pictureCandidates(files: readonly { readonly type: string; readonly size: number }[]): number[] {
+  const picked: number[] = []
+  let total = 0
+  files.forEach((file, index) => {
+    if (picked.length >= PREVIEW_MOST) return
+    if (!PREVIEW_TYPES.has(wireType(file.type)) || !(file.size <= PREVIEW_ONE) || total + file.size > PREVIEW_ALL) return
+    total += file.size
+    picked.push(index)
+  })
+  return picked
+}
+
+/**
+ * The chosen pictures, as a frame document of data: images. The caps are asked again of the bytes
+ * themselves (a declared size is the sender's word), and nothing a stranger wrote enters the markup:
+ * the type comes from the fixed set and the bytes are base64.
+ */
+function previewDocument(files: readonly { readonly type: string; readonly bytes: Uint8Array | null | undefined }[]): string | null {
   let total = 0
   const pictures: string[] = []
   for (const file of files) {
     const type = wireType(file.type)
-    if (!PREVIEW_TYPES.has(type) || file.size > PREVIEW_ONE || total + file.size > PREVIEW_ALL) continue
-    const bytes = file.bytes()
-    if (!bytes || bytes.length > PREVIEW_ONE || total + bytes.length > PREVIEW_ALL) continue
+    const bytes = file.bytes
+    if (pictures.length >= PREVIEW_MOST || !PREVIEW_TYPES.has(type) || !bytes || bytes.length > PREVIEW_ONE || total + bytes.length > PREVIEW_ALL) continue
     total += bytes.length
     pictures.push(`<p><img src="data:${type};base64,${base64Of(bytes)}"></p>`)
   }
   return pictures.length ? mailFrameDocument(pictures.join('')) : null
 }
+
+/** A received message's pictures: the candidates first, then ONE walk of the message for all their bytes. */
+function receivedPreviews(mail: ParsedMail, raw: Uint8Array): string | null {
+  const indices = pictureCandidates(mail.attachments)
+  if (!indices.length) return null
+  const found = attachmentsBytes(raw, indices)
+  return previewDocument(indices.map(index => ({ type: mail.attachments[index]!.type, bytes: found.get(index) })))
+}
+
+/**
+ * The bytes of several attachments, read in ONE walk of the message on the first ask and kept for the
+ * asks after it. Save to hive and a forward ask for every file; one walk per file was R2 #1 again.
+ */
+const oneWalk = (raw: Uint8Array, indices: readonly number[]): ((index: number) => Uint8Array | null) => {
+  let found: Map<number, Uint8Array> | null = null
+  return index => (found ??= attachmentsBytes(raw, indices)).get(index) ?? null
+}
+
+/** A sent copy's pictures: its files are already base64 in the record, so only the chosen ones are decoded. */
+function sentPreviews(files: readonly SentAttachment[]): string | null {
+  const sized = files.map(file => ({ type: file.type, size: base64Size(file.content) }))
+  return previewDocument(pictureCandidates(sized).map(index => ({ type: files[index]!.type, bytes: sentAttachmentBytes(files[index]!) })))
+}
+
+/** A Sent copy's address list as one line, whatever shape the host gave it. */
+const joined = (value: unknown): string =>
+  Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string').join(', ') : typeof value === 'string' ? value : ''
+
+/** A Sent copy's files, only those with the shape a file has: a host can hand back anything. */
+const sentFiles = (record: SentRecord | undefined): SentAttachment[] =>
+  (Array.isArray(record?.attachments) ? record.attachments : []).filter((file): file is SentAttachment =>
+    !!file && typeof file === 'object' && typeof file.content === 'string' && typeof file.type === 'string')
 
 /** What a list row says, decoded once per message for as long as the window is open. */
 interface Readable { readonly from: string; readonly to: string; readonly subject: string; readonly preview: string }
@@ -241,11 +324,18 @@ function readableMeta(meta: MailListItem['meta']): Readable {
   }
 }
 
+/**
+ * A display name that carries an at sign reads as an address, and the sender chose it:
+ * `"boss@corp.example" <evil@attacker.example>` would wear the boss's address as its name (R2 #5).
+ * Such a name is not a name; the address is shown alone. The full-width and small at signs read the same.
+ */
+const namesAnAddress = (name: string): boolean => /[@＠﹫]/.test(name)
+
 /** "Name <address>" for each mailbox in a header field, else the field as it is. */
 const withNames = (field: string): string => {
   const people = contactsIn(field, 'shown')
   if (!people.length) return field.trim()
-  return people.map(p => (p.name ? `${p.name} <${p.address}>` : p.address)).join(', ')
+  return people.map(p => (p.name && !namesAnAddress(p.name) ? `${p.name} <${p.address}>` : p.address)).join(', ')
 }
 
 const mailboxLabel = (box: Pick<Mailbox, 'address' | 'name'>): string => (box.name ? `${box.name} <${box.address}>` : box.address)
@@ -258,7 +348,17 @@ const FOLDERS_OF: Readonly<Record<Tab, readonly Folder[]>> = {
   inbox: ['box'], sent: ['sent'], drafts: ['drafts'], hidden: ['box', 'sent'],
 }
 
-interface Loading { readonly first: boolean; readonly quiet: boolean; total: number | null; opened: number }
+interface Loading {
+  readonly first: boolean
+  readonly quiet: boolean
+  total: number | null
+  opened: number
+  /** Rows opened since the last drawn frame, by signature: drawn together on the next one. */
+  readonly arriving: Map<string, MailListItem>
+  /** What the cue line says while this page opens, and under which cue. */
+  readonly what: string
+  readonly cue: string
+}
 
 interface FolderList {
   items: MailListItem[]
@@ -287,6 +387,8 @@ interface ReadPane {
   raw?: Uint8Array
   sent?: SentRecord
   previews?: string | null
+  /** A large message's pictures, not yet looked for: a press on "Show pictures" reads them. */
+  picturesWait?: boolean
   failed?: string
   asText: boolean
 }
@@ -348,6 +450,8 @@ export class MailElement extends HTMLElement {
   #cues = new Map<string, Cue>()
   #busy = new Set<string>()
   #busyButtons = new Map<string, BusyButton>()
+  /** The redraw waiting for the next frame, if one is (see #drawSoon). */
+  #frame: { readonly cancel: () => void } | null = null
 
   // The painted parts that change in place, so a row arriving never redraws (and unfocuses) the rest.
   #cueEl: HTMLElement | null = null
@@ -431,6 +535,8 @@ export class MailElement extends HTMLElement {
     if (this.#pane.kind === 'compose') this.#leaveCompose(this.#pane, false)
     this.#autosaver().cancel()
     this.#previewer.cancel()
+    this.#frame?.cancel()
+    this.#frame = null
     // The count the window already knows is the cue's starting point; the poll keeps it current.
     const box = this.#lists.get('box')
     if (box?.loaded && this.#address) this.#unreadBy.set(this.#address, unreadCount(box.items))
@@ -536,31 +642,33 @@ export class MailElement extends HTMLElement {
     const more = !!options.more
     // Placeholders only for a page the participant asked for and has nothing of yet: a poll of an empty
     // inbox must not flash three ghost rows every 90 seconds.
-    const loading: Loading = { first: !more && !quiet && !list.items.length, quiet, total: null, opened: 0 }
-    list.loading = loading
-    list.failed = false
+    const first = !more && !quiet && !list.items.length
     const id = `load:${folder}`
     const what = quiet ? t('mail.checking', 'Checking for mail…')
       : more ? t('mail.loading-more', 'Opening older mail…')
-        : loading.first ? t('mail.loading', 'Opening your mailbox…')
+        : first ? t('mail.loading', 'Opening your mailbox…')
           : t('mail.refreshing', 'Refreshing…')
+    const loading: Loading = { first, quiet, total: null, opened: 0, arriving: new Map(), what, cue: id }
+    list.loading = loading
+    list.failed = false
     const current = (): boolean => epoch === this.#epoch && token === list.token
     this.#cueOn(id, what, null, quiet)
     this.#syncList()
     try {
+      // A row is held as it opens and drawn on the next frame with every other row that opened since:
+      // a page of a hundred rows opening one by one is drawn a few times, not a hundred (R2 #3).
       const page = await this.service.list(address, folder, more ? list.cursor : null, (item, progress) => {
         if (!current()) return
         loading.total = progress.total
         loading.opened = progress.opened
-        list.items = placeNewestFirst(list.items, item)
-        this.#cueOn(id, `${what} ${t('mail.cue.count', '{opened} of {total}', { opened: progress.opened, total: progress.total })}`, progressShare(progress), quiet)
-        this.#syncList()
+        loading.arriving.set(item.sig, item)
+        this.#drawSoon()
       })
       if (!current()) return
+      // The page itself holds every row that opened, so what is still waiting for a frame is dropped.
+      loading.arriving.clear()
       if (more || quiet) {
-        let items = list.items
-        for (const item of page.items) items = placeNewestFirst(items, item)
-        list.items = items
+        list.items = mergeNewestFirst(list.items, page.items)
         if (more) list.cursor = page.cursor
       } else {
         // A refresh starts again from the newest page: what the host no longer lists goes.
@@ -571,14 +679,56 @@ export class MailElement extends HTMLElement {
     } catch (error) {
       if (!current()) return
       if (quiet) throw error // the poll counts it; the list on screen is as it was
-      list.failed = !list.items.length
+      list.failed = !list.items.length && !loading.arriving.size
       this.#say(explain(error, false, [], { act: 'read', address }), 'bad')
     } finally {
       if (current()) {
+        // What opened before a failure still stands; then the page is drawn at once, not a frame later.
+        if (loading.arriving.size) list.items = mergeNewestFirst(list.items, loading.arriving.values())
+        loading.arriving.clear()
         list.loading = null
         this.#cueOff(id)
-        this.#syncList()
+        this.#drawNow()
       }
+    }
+  }
+
+  /** One redraw on the next frame, however many rows open before it. */
+  #drawSoon(): void {
+    if (this.#frame) return
+    const draw = (): void => { this.#frame = null; this.#landArrivals(); this.#syncList() }
+    if (typeof requestAnimationFrame === 'function') {
+      const id = requestAnimationFrame(draw)
+      this.#frame = { cancel: () => cancelAnimationFrame(id) }
+    } else {
+      const id = setTimeout(draw, 16)
+      this.#frame = { cancel: () => clearTimeout(id) }
+    }
+  }
+
+  /**
+   * The frame's work, now. A hidden tab draws no frames, so a page that lands always draws here
+   * rather than waiting on one that may never come.
+   */
+  #drawNow(): void {
+    this.#frame?.cancel()
+    this.#frame = null
+    this.#landArrivals()
+    this.#syncList()
+  }
+
+  /** The rows that opened since the last frame, each into its final place; the line says how far it has got. */
+  #landArrivals(): void {
+    for (const list of this.#lists.values()) {
+      const loading = list.loading
+      if (!loading) continue
+      if (loading.arriving.size) {
+        list.items = mergeNewestFirst(list.items, loading.arriving.values())
+        loading.arriving.clear()
+      }
+      if (loading.total === null) continue
+      const progress = { opened: loading.opened, total: loading.total }
+      this.#cueOn(loading.cue, `${loading.what} ${t('mail.cue.count', '{opened} of {total}', progress)}`, progressShare(progress), loading.quiet)
     }
   }
 
@@ -674,7 +824,8 @@ export class MailElement extends HTMLElement {
     if (tab === 'inbox' || tab === 'sent') {
       const folder: Folder = tab === 'inbox' ? 'box' : 'sent'
       const items = this.#list(folder).items.filter(item => !item.marks?.hidden && matches(item))
-      for (const thread of threadsOf(items, this.#threadKeys)) {
+      // Subjects compare decoded: an RFC 2047 "Re:" must meet the plain subject it answers.
+      for (const thread of threadsOf(items, this.#threadKeys, item => this.#readable(item).subject)) {
         if (thread.count === 1) {
           entries.push({ key: `r:${folder}:${thread.newest.sig}`, kind: 'row', folder, item: thread.newest, member: false, hidden: false })
           continue
@@ -711,14 +862,15 @@ export class MailElement extends HTMLElement {
     const entries = this.#entries()
     const wanted = new Set(entries.map(entry => entry.key))
     for (const [key, row] of this.#rowEls) if (!wanted.has(key)) { row.remove(); this.#rowEls.delete(key) }
-    let at = 0
+    // Walked by sibling, not by index: a live `children[i]` is counted again after every insert in some
+    // engines (jsdom among them), which made a long page cost the square of its rows.
+    let here: ChildNode | null = listEl.firstChild
     for (const entry of entries) {
       let row = this.#rowEls.get(entry.key)
       if (!row) { row = el('li'); this.#rowEls.set(entry.key, row) }
       this.#fillRow(entry, row)
-      const here = listEl.children[at] ?? null
-      if (here !== row) listEl.insertBefore(row, here)
-      at++
+      if (row === here) here = here.nextSibling
+      else listEl.insertBefore(row, here)
     }
 
     const folders = FOLDERS_OF[this.#tab]
@@ -1089,22 +1241,24 @@ export class MailElement extends HTMLElement {
         pane.sent = await this.service.readSent(this.#address, item.sig)
         if (!current()) return
         pane.asText = true
-        pane.previews = previewDocument((pane.sent.attachments ?? []).map(file => ({
-          type: file.type, size: base64Size(file.content), bytes: () => sentAttachmentBytes(file),
-        })))
+        pane.previews = sentPreviews(sentFiles(pane.sent))
       } else {
         // One fetch: the raw bytes, read here. Downloads, a forward's files and Save to hive all work
         // from these same bytes, so the message is never fetched twice.
         const raw = await this.service.readRaw(this.#address, item.sig)
-        const mail = parseMail(raw)
         if (!current()) return
+        const mail = parseMail(raw)
         pane.raw = raw
         pane.mail = mail
         pane.asText = !mail.html
-        pane.previews = previewDocument(mail.attachments.map((file, index) => ({ type: file.type, size: file.size, bytes: () => attachmentBytes(raw, index) })))
+        // The pictures cost one more walk of the message. A small one pays it now; a large one waits
+        // for the press, so opening it costs one walk however a stranger filled it.
+        if (raw.length > PREVIEW_ON_PRESS) pane.picturesWait = pictureCandidates(mail.attachments).length > 0
+        else pane.previews = receivedPreviews(mail, raw)
       }
     } catch (error) {
-      if (current()) pane.failed = explain(error, false, [], { act: 'read', address: this.#address })
+      // A MailError is the host's; anything else is a copy this window could not read the shape of.
+      if (current()) pane.failed = error instanceof MailError ? explain(error, false, [], { act: 'read', address: this.#address }) : t('mail.read.broken', 'This message could not be shown.')
     } finally {
       this.#cueOff('open')
     }
@@ -1172,7 +1326,7 @@ export class MailElement extends HTMLElement {
     await this.#act(`hive:${pane.item.sig}`, t('mail.hive.saving', 'Saving to hive…'), async () => {
       let result: SaveMessageResult
       try {
-        result = await this.saveToHive({ mail, raw, sig: pane.item.sig, attachmentBytes: index => attachmentBytes(raw, index) })
+        result = await this.saveToHive({ mail, raw, sig: pane.item.sig, attachmentBytes: oneWalk(raw, mail.attachments.map((_, index) => index)) })
       } catch (error) {
         result = { status: 'failed', placed: [], shared: [], skipped: [], message: t('mail.hive.failed', 'The message could not be saved ({reason}).', { reason: error instanceof Error ? error.message : String(error) }) }
       }
@@ -1215,10 +1369,12 @@ export class MailElement extends HTMLElement {
     const raw = pane.raw
     if (!mail || !raw) return
     const draft = forwardDraft(mail)
-    // Carried by index: each file is read out of the raw bytes only when a send or a draft save needs it.
+    // Carried by index: the files are read out of the raw bytes only when a send or a draft save needs
+    // them, all of them in one walk.
+    const bytesOf = oneWalk(raw, draft.attachments)
     const attached: Attached[] = draft.attachments.map(index => {
       const file = mail.attachments[index]!
-      return { filename: file.filename, type: file.type, size: file.size, content: () => attachmentBytes(raw, index) }
+      return { filename: file.filename, type: file.type, size: file.size, content: () => bytesOf(index) }
     })
     this.#compose(draft, { attached, back: pane })
   }
@@ -1474,7 +1630,7 @@ export class MailElement extends HTMLElement {
     this.#knownEl.replaceChildren(...known.filter(c => !own.has(c.address)).map(contact => {
       const option = el('option')
       option.value = contact.address
-      if (contact.name) option.label = contact.name
+      if (contact.name && !namesAnAddress(contact.name)) option.label = contact.name
       return option
     }))
   }
@@ -1690,7 +1846,21 @@ export class MailElement extends HTMLElement {
     })
   }
 
+  /**
+   * A message, drawn inside a try: a copy in a shape nobody expected (a host can hand back anything)
+   * must leave the way back and a line saying so, never a pane with no Back (R2 #9).
+   */
   #readPane(body: HTMLElement, pane: ReadPane): void {
+    const before = body.childNodes.length
+    try { this.#readParts(body, pane) } catch {
+      while (body.childNodes.length > before) body.lastChild!.remove()
+      const bar = el('div', 'hc-mail-tabs')
+      bar.appendChild(this.#button(t('mail.back', 'Back'), () => this.#backToList()))
+      body.append(bar, el('p', 'hc-mail-said is-bad', t('mail.read.broken', 'This message could not be shown.')))
+    }
+  }
+
+  #readParts(body: HTMLElement, pane: ReadPane): void {
     const bar = el('div', 'hc-mail-tabs')
     bar.appendChild(this.#button(t('mail.back', 'Back'), () => this.#backToList()))
     const readable = this.#readable(pane.item)
@@ -1716,9 +1886,9 @@ export class MailElement extends HTMLElement {
 
     const lines: [string, string][] = pane.mail
       ? [[t('mail.from', 'From'), pane.mail.from], [t('mail.to', 'To'), pane.mail.to], [t('mail.cc', 'Cc'), pane.mail.cc], [t('mail.date', 'Date'), pane.mail.date]]
-      : [[t('mail.from', 'From'), pane.sent!.name ? `${pane.sent!.name} <${pane.sent!.from}>` : pane.sent!.from], [t('mail.to', 'To'), pane.sent!.to.join(', ')], [t('mail.cc', 'Cc'), pane.sent!.cc.join(', ')], [t('mail.date', 'Date'), when(pane.sent!.at)]]
-    const subject = pane.mail?.subject ?? pane.sent!.subject
-    const html = pane.mail?.html ?? pane.sent?.html ?? ''
+      : [[t('mail.from', 'From'), pane.sent!.name ? `${pane.sent!.name} <${pane.sent!.from}>` : String(pane.sent!.from ?? '')], [t('mail.to', 'To'), joined(pane.sent!.to)], [t('mail.cc', 'Cc'), joined(pane.sent!.cc)], [t('mail.date', 'Date'), when(pane.sent!.at)]]
+    const subject = String(pane.mail?.subject ?? pane.sent!.subject ?? '')
+    const html = String(pane.mail?.html ?? pane.sent?.html ?? '')
 
     if (pane.mail && this.#may('send')) {
       const mail = pane.mail
@@ -1768,7 +1938,7 @@ export class MailElement extends HTMLElement {
     const raw = pane.raw
     const files = pane.mail && raw
       ? pane.mail.attachments.map((file, index) => ({ filename: file.filename, type: file.type, size: file.size, bytes: () => attachmentBytes(raw, index) }))
-      : (pane.sent?.attachments ?? []).map(file => ({ filename: file.filename, type: file.type, size: base64Size(file.content), bytes: () => sentAttachmentBytes(file) }))
+      : sentFiles(pane.sent).map(file => ({ filename: String(file.filename ?? ''), type: file.type, size: base64Size(file.content), bytes: () => sentAttachmentBytes(file) }))
     if (!files.length) return
     body.appendChild(el('p', 'hc-mail-quiet', t('mail.files', 'Attachments — nothing opens until you press Download:')))
     const list = el('ul', 'hc-mail-attachments')
@@ -1779,7 +1949,30 @@ export class MailElement extends HTMLElement {
       list.appendChild(row)
     }
     body.appendChild(list)
+    if (pane.picturesWait) {
+      const wait = el('div', 'hc-mail-acts')
+      wait.appendChild(this.#busyButton(`pictures:${pane.item.sig}`, t('mail.previews.show', 'Show pictures'), t('mail.previews.showing', 'Opening the pictures…'), () => { void this.#showPictures(pane) }))
+      wait.appendChild(el('span', 'hc-mail-quiet', t('mail.previews.large', 'This message is large, so its pictures wait for a press.')))
+      body.appendChild(wait)
+    }
     if (pane.previews) body.appendChild(frame(pane.previews, t('mail.previews', 'Pictures in this message'), 'is-previews'))
+  }
+
+  /** A large message's pictures, on the press: the button says so for the frame it takes to read them. */
+  async #showPictures(pane: ReadPane): Promise<void> {
+    const mail = pane.mail
+    const raw = pane.raw
+    if (!mail || !raw || !pane.picturesWait) return
+    await this.#act(`pictures:${pane.item.sig}`, t('mail.previews.showing', 'Opening the pictures…'), async () => {
+      // One turn first, so the pressed button and the line are painted before the walk holds the thread.
+      await new Promise(resolve => setTimeout(resolve, 0))
+      if (this.#pane !== pane) return
+      pane.previews = receivedPreviews(mail, raw)
+      pane.picturesWait = false
+    })
+    if (this.#pane !== pane) return
+    this.#render()
+    if (!pane.previews) this.#say(t('mail.previews.none', 'None of its pictures could be shown.'), 'quiet')
   }
 
   #composePane(body: HTMLElement, pane: ComposePane): void {

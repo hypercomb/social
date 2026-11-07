@@ -9,6 +9,7 @@ import {
   MAIL_TEMPLATE_LIMITS,
   MAIL_TEMPLATE_PART_TYPE,
   mailPart,
+  outlineTemplate,
   parseTemplate,
   readMailPart,
   renderTemplate,
@@ -451,6 +452,38 @@ describe('pictures come only from the reader\'s own heap', () => {
     expect(out.ok && out.blocked).toContainEqual({ kind: 'resource', sig: sigOf('c'), why: 'too-large' })
   })
 
+  // R2 #4: the heap holds one picture once, but the html pays for every
+  // occurrence. 150 × {{@pic}} over a 2 MB png was 400 MB of html, ok: true.
+  describe('a picture named many times is counted every time', () => {
+    const big = new Uint8Array(MAIL_TEMPLATE_LIMITS.image)
+    big.set(PNG)
+    const holding = deps('unknown', { resolveResource: heap({ [sigOf('d')]: { type: 'image/png', bytes: big } }) })
+
+    it('150 × {{@pic}} with a 2 MB picture is too large, and stops before the string grows', async () => {
+      const template = await parsed({ name: 'x', holes: {}, text: 'x', html: `<p>${'{{@pic}}'.repeat(150)}</p>`, resources: { pic: sigOf('d') } })
+      const started = performance.now()
+      expect(renderTemplate(template, {}, holding)).toEqual({ ok: false, problems: ['render: too-large'] })
+      expect(performance.now() - started).toBeLessThan(2000)
+    })
+
+    it('a list of 200 copies of one signature is too large, not a failure', async () => {
+      const template = await parsed({ name: 'x', holes: { pics: { type: 'list', of: 'resource', max: 200 } }, text: 'x', html: '<ul>{{pics}}</ul>' })
+      expect(renderTemplate(template, { pics: Array(200).fill(sigOf('d')) }, holding)).toEqual({ ok: false, problems: ['render: too-large'] })
+    })
+
+    it('a 2 MB picture named four times still renders, every copy written', async () => {
+      const template = await parsed({ name: 'x', holes: {}, text: 'x', html: `<p>${'{{@pic}}'.repeat(4)}</p>`, resources: { pic: sigOf('d') } })
+      const out = renderTemplate(template, {}, holding)
+      expect(out.ok && out.html.split('<img ').length - 1).toBe(4)
+    })
+
+    it('by content id, a picture named many times is one part, so it is not counted again', async () => {
+      const template = await parsed({ name: 'x', holes: {}, text: 'x', html: `<p>${'{{@pic}}'.repeat(150)}</p>`, resources: { pic: sigOf('d') } })
+      const out = renderTemplate(template, {}, { ...holding, images: 'cid' })
+      expect(out.ok && out.images).toEqual([{ sig: sigOf('d'), type: 'image/png', cid: `${sigOf('d')}@hypercomb` }])
+    })
+  })
+
   it('a resolver that throws is a resource not held', async () => {
     const out = renderTemplate(await parsed(THANKS), FILL, deps('unknown', { resolveResource: () => { throw new Error('heap down') } }))
     expect(out.ok && out.blocked).toContainEqual({ kind: 'resource', sig: sigOf('c'), why: 'not-held' })
@@ -477,6 +510,32 @@ describe('pictures come only from the reader\'s own heap', () => {
     }))
     expect(out.ok && out.html).toContain(`«mail.template.picture-missing ${sigOf('c').slice(0, 12)}…»`)
     expect(out.ok && out.text).toContain('«mail.template.picture logo»')
+  })
+})
+
+describe('what a template reaches, for an audit', () => {
+  it('every link with the words it shows, and the holes the sender chooses', async () => {
+    const outline = outlineTemplate(await parsed({ ...THANKS, script: sigOf('e') }))
+    expect(outline?.links).toEqual([
+      { href: { hole: 'link' }, text: 'read more' },
+      { href: { url: 'https://hypercomb.com/' }, text: 'home' },
+    ])
+    expect(outline?.senderLinks).toEqual(['link'])
+    expect(outline?.senderPictures).toEqual(['photo'])
+    expect(outline?.names).toEqual([sigOf('b'), sigOf('e')])
+  })
+
+  it('link words keep their holes as written, and a list of urls is the sender\'s too', async () => {
+    const outline = outlineTemplate(await parsed({
+      name: 'x', holes: { who: { type: 'text' }, links: { type: 'list', of: 'url' } }, text: 'x',
+      html: '<p><a href="https://a.example/"><strong>{{who}}</strong> at a.example</a></p><ul>{{links}}</ul>',
+    }))
+    expect(outline?.links).toEqual([{ href: { url: 'https://a.example/' }, text: '{{who}} at a.example' }])
+    expect(outline?.senderLinks).toEqual(['links'])
+  })
+
+  it('a template object that does not compile has no outline', () => {
+    expect(outlineTemplate({ name: 'x', holes: {}, text: '{{nope}}', sig: sigOf('a') } as MailTemplate)).toBeNull()
   })
 })
 

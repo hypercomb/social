@@ -73,6 +73,10 @@ const KEY_RE = /^[a-f0-9]{64}$/
 const MESSAGE_ID_RE = /^<[^<>\s]{1,200}>$/
 const MIME_TYPE_RE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/
 const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/
+// An inline picture's name, as the html's `cid:` reference spells it (templates step 2). Narrow on purpose:
+// it goes into a MIME header Cloudflare writes, so nothing that could end or bend a header line.
+const CONTENT_ID_RE = /^[A-Za-z0-9._-]{1,64}$/
+const SIG_RE = /^[a-f0-9]{64}$/
 const MARK_FIELDS = ['read', 'hidden', 'flagged', 'deletable']
 
 const enc = new TextEncoder()
@@ -408,6 +412,7 @@ function attachmentsOf(value) {
   if (!Array.isArray(value)) return { refuse: [422, 'bad attachments'] }
   if (value.length > MAX_ATTACHMENTS) return { refuse: [422, 'too many attachments'] }
   const list = []
+  const contentIds = new Set()
   let total = 0
   for (const item of value) {
     if (!item || typeof item !== 'object' || typeof item.content !== 'string') return { refuse: [422, 'bad attachment'] }
@@ -415,9 +420,19 @@ function attachmentsOf(value) {
     if (!MIME_TYPE_RE.test(type)) return { refuse: [422, 'bad attachment type'] }
     const content = item.content.replace(/\s+/g, '')
     if (content.length % 4 !== 0 || !BASE64_RE.test(content)) return { refuse: [422, 'bad attachment content'] }
+    // A content id makes the part an inline picture the html names as `cid:<id>`; two parts with one id
+    // would leave the reader's client to pick, so a repeat is refused rather than guessed at.
+    if (item.contentId !== undefined && (typeof item.contentId !== 'string' || !CONTENT_ID_RE.test(item.contentId) || contentIds.has(item.contentId))) {
+      return { refuse: [422, 'bad content id'] }
+    }
     total += content.length / 4 * 3 - (content.endsWith('==') ? 2 : content.endsWith('=') ? 1 : 0)
     if (total > MAX_ATTACHMENT_BYTES) return { refuse: [413, 'attachments too large'] }
-    list.push({ filename: cleanFilename(item.filename), type, content })
+    const part = { filename: cleanFilename(item.filename), type, content }
+    if (item.contentId !== undefined) {
+      contentIds.add(item.contentId)
+      part.contentId = item.contentId
+    }
+    list.push(part)
   }
   return { list }
 }
@@ -472,6 +487,13 @@ async function send(request, env, respond) {
     if (references.length > 1000 || !references.split(/\s+/).every(id => MESSAGE_ID_RE.test(id))) return respond(422, 'bad references')
     threading['References'] = references
   }
+  // The template a message was filled from (mail-templates.md, step 2). The part among the attachments is
+  // the truth; this header is a hint for filters and other clients, so it rides with the threading headers
+  // and the E_HEADER fallback below drops it while the part still goes.
+  if (body.template !== undefined) {
+    if (typeof body.template !== 'string' || !SIG_RE.test(body.template)) return respond(422, 'bad template')
+    threading['X-Hypercomb-Template'] = body.template
+  }
 
   // The day's cap, counted before the send so a burst cannot all pass. Not atomic: it is a brake on a
   // leaked key, not an accounting system, and Cloudflare's own daily limit stands behind it.
@@ -489,7 +511,14 @@ async function send(request, env, respond) {
   if (bcc.length) message.bcc = bcc
   if (replyTo) message.replyTo = replyTo
   // Cloudflare takes base64 strings as attachment content (and they survive `wrangler dev`, binary does not).
-  if (attachments.list.length) message.attachments = attachments.list.map(a => ({ content: a.content, filename: a.filename, type: a.type, disposition: 'attachment' }))
+  // A part with a content id goes inline: the binding's attachment takes `disposition: 'inline'` and
+  // `contentId` (developers.cloudflare.com/email-service/api/send-emails/workers-api/, checked 2026-11-07),
+  // which is how Gmail and Outlook readers see a template's pictures (they show no `data:` images).
+  if (attachments.list.length) {
+    message.attachments = attachments.list.map(a => a.contentId
+      ? { content: a.content, filename: a.filename, type: a.type, disposition: 'inline', contentId: a.contentId }
+      : { content: a.content, filename: a.filename, type: a.type, disposition: 'attachment' })
+  }
 
   const refuse = error => {
     const code = String(error?.code || 'E_SEND_FAILED')

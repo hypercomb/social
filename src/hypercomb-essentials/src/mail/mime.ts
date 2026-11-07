@@ -23,6 +23,8 @@
 // often than an attachment is opened. When one is wanted, attachmentBytes walks
 // the same raw message again, under the same caps, to the n-th attachment as
 // parseMail numbered it — the raw bytes are the truth, held once, by the window.
+// When many are wanted at once (every picture in a message, a forward, "save
+// all"), attachmentsBytes takes them all from a single walk.
 
 export interface MailAttachment {
   readonly filename: string
@@ -352,13 +354,13 @@ interface Collected {
   inline: Record<string, string>
   inlineBytes: number
   parts: number
-  /** Set when the walk is for one attachment's bytes: text is not decoded, images are not encoded. */
-  want?: number
-  found?: Uint8Array
+  /** Set when the walk is for attachments' bytes: text is not decoded, images are not encoded. */
+  want?: ReadonlySet<number>
+  found?: Map<number, Uint8Array>
 }
 
 function collect(raw: string, depth: number, into: Collected): void {
-  if (into.found || ++into.parts > MAX_PARTS) return
+  if ((into.want && into.found && into.found.size === into.want.size) || ++into.parts > MAX_PARTS) return
   const { head, body } = splitMessage(raw)
   const headers = parseHeaders(head)
   const type = parseValue(headers.get('content-type') ?? 'text/plain; charset=us-ascii')
@@ -389,7 +391,7 @@ function collect(raw: string, depth: number, into: Collected): void {
     into.inlineBytes += size
     return
   }
-  if (seeking && into.attachments.length === into.want) into.found = decodeBody(body, encoding)
+  if (seeking && into.want!.has(into.attachments.length)) into.found!.set(into.attachments.length, decodeBody(body, encoding))
   into.attachments.push({
     filename: filename || (type.main === 'message/rfc822' ? 'message.eml' : 'attachment'),
     type: type.main,
@@ -431,9 +433,23 @@ export function parseMail(bytes: Uint8Array): ParsedMail {
  */
 export function attachmentBytes(raw: Uint8Array, index: number): Uint8Array | null {
   if (!Number.isInteger(index) || index < 0) return null
-  const into: Collected = { texts: [], htmls: [], attachments: [], inline: noPrototype(), inlineBytes: 0, parts: 0, want: index }
-  try { collect(capped(raw), 0, into) } catch { return null }
-  return into.found ?? null
+  return attachmentsBytes(raw, [index]).get(index) ?? null
+}
+
+/**
+ * The decoded bytes of several attachments from ONE walk of the message, keyed by
+ * their index in `parseMail(raw).attachments` — a message of 190 pictures is read
+ * once, not 190 times. An index with no attachment (or not a whole number ≥ 0) is
+ * simply absent; malformed input gives an empty Map. Never throws. Same caps as
+ * parseMail, and the walk stops once every wanted part is found.
+ */
+export function attachmentsBytes(raw: Uint8Array, indices: readonly number[]): Map<number, Uint8Array> {
+  const want = new Set(indices.filter(index => Number.isInteger(index) && index >= 0))
+  const found = new Map<number, Uint8Array>()
+  if (want.size === 0) return found
+  const into: Collected = { texts: [], htmls: [], attachments: [], inline: noPrototype(), inlineBytes: 0, parts: 0, want, found }
+  try { collect(capped(raw), 0, into) } catch { return new Map() }
+  return found
 }
 
 const SIGNATURE = /^--\s*$/

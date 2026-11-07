@@ -83,6 +83,46 @@ describe('knownAddresses — one entry per address', () => {
     ])
   })
 
+  it('never lets a name dress one address up as another (R2 #5, probe H3)', async () => {
+    const known = await knownAddresses([
+      ...contactsIn('boss@corp.example', 'sent'),
+      ...contactsIn('"boss@corp.example" <evil@attacker.example>', 'inbox'),
+      ...contactsIn('Leanne <leanne@hypercomb.com>', 'inbox'),
+    ])
+    expect(known).toEqual([
+      { address: 'leanne@hypercomb.com', name: 'Leanne', source: 'inbox' },
+      { address: 'boss@corp.example', source: 'sent' },
+      { address: 'evil@attacker.example', source: 'inbox' },
+    ])
+    // Typing "boss" finds the real one first.
+    expect(known.filter(c => c.address.includes('boss') || (c.name ?? '').toLowerCase().includes('boss'))[0])
+      .toEqual({ address: 'boss@corp.example', source: 'sent' })
+  })
+
+  it('refuses an address-shaped name however it arrives: typed, on a card, or with a look-alike @', async () => {
+    const known = await knownAddresses([
+      { address: 'evil@attacker.example', name: 'boss@corp.example', source: 'sent' },
+      { address: 'evil2@attacker.example', name: 'boss＠corp.example', source: 'sent' },
+      ...cardContacts([{ name: 'boss@corp.example', email: 'evil3@attacker.example' }]),
+      ...contactsIn('evil4@attacker.example (boss@corp.example)', 'inbox'),
+    ])
+    expect(known.every(c => c.name === undefined)).toBe(true)
+    expect(known.map(c => c.address)).toEqual([
+      'evil2@attacker.example', 'evil3@attacker.example', 'evil4@attacker.example', 'evil@attacker.example',
+    ])
+  })
+
+  it('strips control and direction characters from typed and card names', async () => {
+    const known = await knownAddresses([
+      { address: 'a@x.com', name: 'Ann‮eoj‬\u0007 Smith', source: 'sent' },
+      ...cardContacts([{ name: 'Bo⁦b⁩\nJones', email: 'b@x.com' }]),
+    ])
+    expect(known).toEqual([
+      { address: 'a@x.com', name: 'Anneoj Smith', source: 'sent' },
+      { address: 'b@x.com', name: 'Bob Jones', source: 'contact' },
+    ])
+  })
+
   it('ignores entries that are not addresses, and an empty call is empty', async () => {
     expect(await knownAddresses([{ address: 'nobody', source: 'inbox' }, { address: '', source: 'sent' }])).toEqual([])
     expect(await knownAddresses()).toEqual([])

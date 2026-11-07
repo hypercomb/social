@@ -242,3 +242,4 @@ the baked html or text only; whether a template may carry a script at all in the
 - **A recovery key** per address (a second key in `keys`, kept offline by the owner) — the v2 envelope makes
   it possible; whether and how each owner generates one is theirs.
 - Where "Save to hive" places a message: the current tile (the plan), or a `mail` tile.
+- **The next envelope version (R2 #10):** the signer opens any NIP-44 payload a host hands it as a wrap or v1 meta; nothing leaks today (K must be 32 bytes, meta must be JSON and is only shown), but the domains should be separated — the Worker wraps `"hc-mail-k:" + base64(K)` and the client refuses any plaintext without that label, with v1 meta accepted only for objects older than a cutoff. Deferred: a format change, taken with the next version, not now.

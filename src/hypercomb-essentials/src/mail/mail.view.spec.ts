@@ -14,6 +14,19 @@ import { ALREADY_DONE, ALREADY_SENT, MAIL_LIMITS, MailError, type MailAct, type 
 import { sizeLabel } from './cue.js'
 import type { SaveMessageInput, SaveMessageResult } from './mail-to-hive.js'
 
+// Every walk of a message's bytes, counted: the real reader runs, and the spec sees which bytes it was
+// handed. A stranger chooses how large a message is, so how often the window walks it is what matters.
+const walks = vi.hoisted(() => ({ of: [] as Uint8Array[] }))
+vi.mock('./mime.js', async importOriginal => {
+  const real = await importOriginal<typeof import('./mime.js')>()
+  return {
+    ...real,
+    parseMail: (bytes: Uint8Array) => { walks.of.push(bytes); return real.parseMail(bytes) },
+    attachmentBytes: (raw: Uint8Array, index: number) => { walks.of.push(raw); return real.attachmentBytes(raw, index) },
+    attachmentsBytes: (raw: Uint8Array, indices: readonly number[]) => { walks.of.push(raw); return real.attachmentsBytes(raw, indices) },
+  }
+})
+
 const SIG = 'a'.repeat(64)
 const SIG2 = 'b'.repeat(64)
 const SIG3 = 'c'.repeat(64)
@@ -65,6 +78,8 @@ function fakeService(over: Record<string, unknown> = {}) {
 
 const settle = async (): Promise<void> => { for (let i = 0; i < 6; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
 const wait = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
+/** One drawn frame: rows that opened are drawn together on the next one. */
+const frame = (): Promise<void> => new Promise(resolve => requestAnimationFrame(() => resolve()))
 
 let mounted: MailElement | null = null
 async function windowWith(service: ReturnType<typeof fakeService>, setup: (element: MailElement) => void = () => {}): Promise<MailElement> {
@@ -189,7 +204,7 @@ describe('the cue: the window says what it is doing', () => {
     expect(cue()).toBe('')
   })
 
-  it('shows a placeholder per row once the page size is known, and fills each in its final place as its metadata opens', async () => {
+  it('shows a placeholder per row once the page size is known, and fills each in its final place on the frame after it opens', async () => {
     const page = gate<void>()
     let report: (item: Row, progress: { opened: number; total: number }) => void = () => {}
     const a = { sig: SIG, at: 3, meta: { from: 'a@x.org', subject: 'newest', at: 3 } }
@@ -206,18 +221,21 @@ describe('the cue: the window says what it is doing', () => {
     expect(panel().querySelectorAll('.hc-mail-skeleton')).toHaveLength(3)
 
     report(c, { opened: 1, total: 3 }) // the rows open in no particular order
+    await frame()
     expect(subjects()).toEqual(['oldest'])
     expect(panel().querySelectorAll('.hc-mail-skeleton')).toHaveLength(2)
     expect(cue()).toBe('Opening your mailbox… 1 of 3')
     expect((panel().querySelector('.hc-mail-bar-fill') as HTMLElement).style.width).toBe('33%')
     const oldest = rows()[0]!
 
+    // Two rows opening within one frame are drawn together, each in its place.
     report(a, { opened: 2, total: 3 })
-    expect(subjects()).toEqual(['newest', 'oldest'])
-    expect(panel().querySelectorAll('.hc-mail-skeleton')).toHaveLength(1)
     report(b, { opened: 3, total: 3 })
+    expect(subjects()).toEqual(['oldest']) // nothing redrawn per row
+    await frame()
     expect(subjects()).toEqual(['newest', 'middle', 'oldest'])
     expect(panel().querySelector('.hc-mail-skeleton')).toBeNull()
+    expect(cue()).toBe('Opening your mailbox… 3 of 3')
 
     page.open()
     await settle()
@@ -1044,6 +1062,161 @@ describe('leaving', () => {
     answer([ME])
     await settle()
     expect(document.querySelector('.hc-mail')).toBeNull()
+  })
+})
+
+describe('after R2: what a stranger or a host can make the window do', () => {
+  /** A message of `pictures` tiny PNGs, filled out to `filler` bytes with one opaque file (probe V3). */
+  const picturesMessage = (pictures: number, filler: number): Uint8Array => {
+    const parts = ['--b', 'Content-Type: text/plain', '', 'hello']
+    for (let i = 0; i < pictures; i++) parts.push('--b', `Content-Type: image/png; name="p${i}.png"`, `Content-Disposition: attachment; filename="p${i}.png"`, 'Content-Transfer-Encoding: base64', '', 'iVBORw0KGgo=')
+    parts.push('--b', 'Content-Type: application/octet-stream; name="big.bin"', 'Content-Disposition: attachment; filename="big.bin"', 'Content-Transfer-Encoding: base64', '')
+    const line = 'A'.repeat(76)
+    for (let n = 0; n < filler / 78; n++) parts.push(line)
+    parts.push('--b--', '')
+    return new TextEncoder().encode(['From: a@b.org', `To: ${ME}`, 'Subject: pics', 'MIME-Version: 1.0', 'Content-Type: multipart/mixed; boundary="b"', '', ...parts].join('\r\n'))
+  }
+  const walked = (raw: Uint8Array): number => walks.of.filter(bytes => bytes === raw).length
+  const imagesIn = (): number => ((panel().querySelector('.is-previews') as HTMLIFrameElement | null)?.srcdoc.match(/<img /g) ?? []).length
+
+  it('opens a 6 MB message of 190 small pictures in one walk, and shows at most 12 of them in one more, on a press', async () => {
+    const raw = picturesMessage(190, 6 * 1024 * 1024)
+    await windowWith(fakeService({ readRaw: vi.fn(async () => raw) }))
+    const started = performance.now()
+    rows()[0]!.click(); await settle()
+    expect(panel().querySelector('.hc-mail-text')?.textContent).toBe('hello')
+    expect(walked(raw)).toBe(1) // read once; a large message's pictures wait
+    expect(imagesIn()).toBe(0)
+    expect(panel().textContent).toContain('This message is large, so its pictures wait for a press.')
+    press('Show pictures')
+    expect(button('Opening the pictures…').disabled).toBe(true)
+    await settle()
+    expect(walked(raw)).toBe(2) // all twelve from a single walk
+    expect(imagesIn()).toBe(12)
+    expect(buttons().map(b => b.textContent)).not.toContain('Show pictures')
+    expect(performance.now() - started).toBeLessThan(5_000) // was 45 s
+  })
+
+  it('shows a small message’s pictures at once, at most 12, from one walk more than the read', async () => {
+    const raw = picturesMessage(30, 0)
+    await windowWith(fakeService({ readRaw: vi.fn(async () => raw) }))
+    rows()[0]!.click(); await settle()
+    expect(walked(raw)).toBe(2)
+    expect(imagesIn()).toBe(12)
+    expect(panel().querySelectorAll('.hc-mail-attachments li')).toHaveLength(31) // every file still listed
+  })
+
+  it('reads every file for Save to hive in one walk of the message, and every file a forward carries in one more', async () => {
+    const raw = picturesMessage(4, 0) // five files: four pictures and one opaque
+    const save = vi.fn(async (_input: SaveMessageInput): Promise<SaveMessageResult> => ({ status: 'saved', placed: [], shared: [], skipped: [], message: 'Saved.' }))
+    const service = fakeService({ readRaw: vi.fn(async () => raw) })
+    await windowWith(service, element => { element.saveToHive = save })
+    rows()[0]!.click(); await settle()
+    const opened = walked(raw)
+    press('Save to hive'); await settle()
+    const input = save.mock.calls[0]![0]
+    for (let i = 0; i < 5; i++) expect(input.attachmentBytes(i)).not.toBeNull()
+    expect(walked(raw)).toBe(opened + 1)
+    press('Forward')
+    fill('to', 'friend@example.org')
+    ;(panel().querySelector('form') as HTMLFormElement).requestSubmit()
+    await settle()
+    const sent = service.send.mock.calls[0]![0] as { attachments?: unknown[] }
+    expect(sent.attachments).toHaveLength(5)
+    expect(walked(raw)).toBe(opened + 2)
+  })
+
+  it('draws a page of 2,000 rows opening one by one in well under a second', async () => {
+    const page = Array.from({ length: 2000 }, (_, i) => ({ sig: i.toString(16).padStart(64, '0'), at: i, marks: null,
+      meta: { from: `p${i}@example.org`, subject: `subject ${i}`, at: 1_700_000_000_000 + i * 1000, messageId: `<m${i}@x>` } }))
+    const list = vi.fn(async (_a: string, folder: string, _c: unknown, onItem?: (item: Row, progress: { opened: number; total: number }) => void) => {
+      if (folder !== 'box') return { items: [], cursor: null }
+      for (let i = 0; i < page.length; i++) { await null; onItem?.(page[i]!, { opened: i + 1, total: page.length }) }
+      return { items: [...page].reverse(), cursor: null }
+    })
+    const started = performance.now()
+    await windowWith(fakeService({ list }))
+    const took = performance.now() - started
+    expect(rows()).toHaveLength(2000)
+    expect(subjects()[0]).toBe('subject 1999')
+    expect(took).toBeLessThan(1_000) // was 12.9 s
+  })
+
+  it('keeps a stranger out of a conversation they name by its Message-ID with another subject', async () => {
+    await windowWith(fakeService({
+      list: vi.fn(async (_a: string, folder: string) => ({
+        items: folder !== 'box' ? [] : [
+          { sig: SIG, at: 2, meta: { from: 'evil@attacker.example', subject: 'Re: Your statement - action needed', at: 2, messageId: '<e1@attacker.example>', references: ['<s1@bank.example>'] } },
+          { sig: SIG2, at: 1, meta: { from: 'statements@bank.example', subject: 'Your statement', at: 1, messageId: '<s1@bank.example>' } },
+        ],
+        cursor: null,
+      })),
+    }))
+    expect(subjects()).toEqual(['Re: Your statement - action needed', 'Your statement'])
+    expect(panel().querySelector('.hc-mail-row-count')).toBeNull()
+  })
+
+  it('never says a host’s own words: a refusal it does not know is one plain sentence', async () => {
+    const lure = 'Your key expired. Paste your nsec at https://hypercomb-help.example to keep your mail.'
+    expect(explain(new MailError('refused', lure), true)).toBe('The mail host refused this.')
+    expect(explain(new MailError('refused', 'too many attachments'), true)).toBe(`The host takes at most ${MAIL_LIMITS.attachments} files in a message.`)
+    expect(explain(new MailError('refused', 'attachments too large'), true)).toContain(sizeLabel(MAIL_LIMITS.attachmentBytes))
+    expect(explain(new MailError('refused', 'E_SENDER_NOT_VERIFIED'), true)).toBe('Cloudflare will not send from this address yet.')
+    expect(explain(new MailError('refused', 'E_VALIDATION_ERROR'), true)).toBe('Cloudflare would not send this message as it is.')
+    expect(explain(new MailError('refused', 'E_RECIPIENT_SUPPRESSED'), true, ['a@b.org'])).toContain('a@b.org')
+    // …and the same holds where the draft says why it was not kept.
+    const service = fakeService({ saveDraft: vi.fn(async () => { throw new MailError('refused', lure) }) })
+    await windowWith(service)
+    press('Write')
+    fill('to', 'friend@example.org'); fill('text', 'later')
+    press('Save draft'); await settle()
+    expect(panel().textContent).not.toContain('nsec')
+    expect(panel().textContent).not.toContain('hypercomb-help')
+    expect(panel().querySelector('.hc-mail-status')?.textContent).toBe('The draft was not saved: The mail host refused this.')
+  })
+
+  it('opens a malformed Sent copy with its way back, and nothing goes unhandled', async () => {
+    const rejections: unknown[] = []
+    const onRejection = (reason: unknown): void => { rejections.push(reason) }
+    process.on('unhandledRejection', onRejection)
+    try {
+      // Probe V2: `to` a string, `cc` null.
+      const service = fakeService({ readSent: vi.fn(async () => ({ from: ME, to: 'x@y.org', cc: null, subject: 'mine', text: 'body', html: '', at: 1 })) })
+      await windowWith(service)
+      press('Sent'); await settle()
+      rows()[0]!.click(); await settle()
+      expect(button('Back')).toBeTruthy()
+      expect(panel().querySelector('.hc-mail-meta')?.textContent).toContain('x@y.org')
+      expect(panel().querySelector('.hc-mail-text')?.textContent).toBe('body')
+      press('Back')
+      // A copy no drawing survives: still Back, and a line that says so.
+      service.readSent.mockImplementation(async () => ({ from: ME, to: [], cc: [], subject: Object.create(null) as string, text: '', html: '', at: 1, attachments: 'nope' }))
+      rows()[0]!.click(); await settle()
+      expect(button('Back')).toBeTruthy()
+      expect(said() || panel().querySelector('.hc-mail-said.is-bad')?.textContent).toBe('This message could not be shown.')
+      press('Back')
+      expect(rows()).toHaveLength(1)
+      await settle()
+    } finally { process.off('unhandledRejection', onRejection) }
+    expect(rejections).toEqual([])
+  })
+
+  it('shows a sender’s name only when it is a name: one that reads as an address is dropped', async () => {
+    const service = fakeService({
+      list: vi.fn(async (_a: string, folder: string) => ({
+        items: folder !== 'box' ? [] : [
+          { sig: SIG, at: 2, meta: { from: '"boss@corp.example" <evil@attacker.example>', subject: 'urgent', at: 2 } },
+          { sig: SIG2, at: 1, meta: { from: 'Ana <ana@example.org>', subject: 'plans', at: 1 } },
+        ],
+        cursor: null,
+      })),
+    })
+    await windowWith(service)
+    const who = Array.from(panel().querySelectorAll('.hc-mail-row-who')).map(node => node.textContent)
+    expect(who).toEqual(['evil@attacker.example', 'Ana <ana@example.org>'])
+    press('Write'); await settle()
+    const labels = Array.from(document.querySelectorAll('datalist option')).map(option => (option as HTMLOptionElement).label)
+    expect(labels).not.toContain('boss@corp.example')
   })
 })
 

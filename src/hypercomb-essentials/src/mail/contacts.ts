@@ -30,8 +30,10 @@
 //
 // One entry per address, compared in lowercase (the house's own reading of an
 // address, as reply.ts reads one). The richest name wins: a name of its own
-// over the local part said again over the address said again, then the longer
-// one, then the first seen; the address said again is never shown. The
+// over the local part said again, then the longer one, then the first seen. A
+// name that reads as an address (it carries an @, look-alikes included) is
+// never kept: it would dress one address up as another (R2 #5). Control and
+// direction characters are stripped from every name, whoever typed it. The
 // source travels with the name it came with. Sorted the way a person looks a
 // name up: named entries first by name, then the nameless by address.
 
@@ -65,14 +67,35 @@ const cleanAddress = (raw: string): string => {
   return ADDRESS.test(address) ? address : ''
 }
 
-/** A display name as a header carries it: quotes off, escapes undone, space folded. */
+/** Direction controls: they reorder what is shown, so one string can read as
+ *  another. A header is cleaned of them upstream (mime.ts); a card or a typed
+ *  seed is cleaned here. */
+const BIDI = /[؜‎‏‪-‮⁦-⁩]/g
+const CONTROL = /\p{Cc}/gu
+
+/** A display name as a header carries it: controls and direction marks out,
+ *  quotes off, escapes undone, space folded. */
 const cleanName = (raw: string | undefined): string =>
   String(raw ?? '')
+    .replace(CONTROL, ' ')
+    .replace(BIDI, '')
     .trim()
     .replace(/^"([\s\S]*)"$/, '$1')
     .replace(/\\(.)/g, '$1')
     .replace(/\s+/g, ' ')
     .trim()
+
+/** A NAME THAT READS AS AN ADDRESS IS NEVER A NAME. A stranger writing from
+ *  `"boss@corp.example" <evil@attacker.example>` would otherwise sit in the
+ *  suggestions labelled as the boss, and sort above the real one (R2 #5).
+ *  Read after NFKC, so a fullwidth ＠ or a small ﹫ is an @ too. */
+const readsAsAddress = (name: string): boolean => name.normalize('NFKC').includes('@')
+
+/** The name worth keeping beside an address, or ''. */
+const nameOf = (raw: string | undefined): string => {
+  const name = cleanName(raw)
+  return name && !readsAsAddress(name) ? name : ''
+}
 
 /** Split a header field at commas and semicolons that are not inside quotes,
  *  angle brackets or a comment — `"Doe, Jane" <j@x>` is ONE mailbox. */
@@ -108,14 +131,14 @@ const readMailbox = (text: string): { address: string; name: string } | null => 
   const angled = /^([\s\S]*?)<([^<>]*)>\s*$/.exec(text)
   if (angled) {
     const address = cleanAddress(angled[2])
-    return address ? { address, name: cleanName(angled[1]) } : null
+    return address ? { address, name: nameOf(angled[1]) } : null
   }
   const found = FIND_ADDRESS.exec(text)
   if (!found) return null
   const address = cleanAddress(found[0])
   if (!address) return null
   const commented = /\(([^()]*)\)/.exec(text)
-  return { address, name: cleanName(commented?.[1]) }
+  return { address, name: nameOf(commented?.[1]) }
 }
 
 /** Every mailbox in a header field as read (`From`, `To`, `Cc`, a typed To line). */
@@ -133,7 +156,7 @@ export function contactsIn(field: string, source: string): ContactSeed[] {
 export function cardContacts(cards: readonly ContactCard[], source: string = CONTACT_CARD_SOURCE): ContactSeed[] {
   const out: ContactSeed[] = []
   for (const card of cards ?? []) {
-    const name = cleanName(card?.name)
+    const name = nameOf(card?.name)
     for (const seed of contactsIn(String(card?.email ?? ''), source)) {
       out.push(name ? { address: seed.address, name, source } : seed)
     }
@@ -141,14 +164,13 @@ export function cardContacts(cards: readonly ContactCard[], source: string = CON
   return out
 }
 
-/** How much a name says beyond the address: 0 nothing, 1 the address again,
- *  2 its local part again (Leanne for leanne@ — often a real first name, so it
- *  is shown, but anything more loses to it), 3 a name of its own. */
+/** How much a name says beyond the address: 0 nothing (an address-shaped name
+ *  says nothing, its own address included), 1 its local part again (Leanne for
+ *  leanne@ — often a real first name, so it is shown, but anything more loses
+ *  to it), 2 a name of its own. */
 const richness = (name: string, address: string): number => {
-  if (!name) return 0
-  const said = name.toLowerCase()
-  if (said === address) return 1
-  return said === address.split('@')[0] ? 2 : 3
+  if (!name || readsAsAddress(name)) return 0
+  return name.toLowerCase() === address.split('@')[0] ? 1 : 2
 }
 
 const richer = (candidate: string, held: string, address: string): boolean => {
@@ -181,7 +203,7 @@ export async function knownAddresses(extra: readonly ContactSeed[] = []): Promis
     const box = readMailbox(String(seed?.address ?? '').trim())
     if (!box) continue
     // A name said beside the address and a name inside it compete like any two.
-    const said = cleanName(seed?.name)
+    const said = nameOf(seed?.name)
     const name = said && (!box.name || richer(said, box.name, box.address)) ? said : box.name
     const held = merged.get(box.address)
     if (!held) { merged.set(box.address, { name, source, nameSource: source }); continue }
@@ -189,8 +211,8 @@ export async function knownAddresses(extra: readonly ContactSeed[] = []): Promis
   }
   const out: Contact[] = []
   for (const [address, entry] of merged) {
-    // A name that only repeats the address carries nothing to show.
-    const name = richness(entry.name, address) >= 2 ? entry.name : ''
+    // A name that reads as an address carries nothing to show.
+    const name = richness(entry.name, address) >= 1 ? entry.name : ''
     const source = name ? entry.nameSource : entry.source
     out.push(name ? { address, name, source } : { address, source })
   }
