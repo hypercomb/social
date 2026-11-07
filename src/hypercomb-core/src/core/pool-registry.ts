@@ -404,6 +404,10 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // root came from (essentials history/saved-roots.ts — `save as`, `use`).
   // DOCUMENT, per participant, never replicated.
   'roots:saved',
+  // How large this participant draws the tile under their hands in the tile
+  // editor (essentials editor/editor-size.ts): one number, the slider's.
+  // DOCUMENT, per participant, never replicated.
+  'editor:size',
   // What participants make that is theirs alone, moved out of localStorage the
   // same way (essentials preferences/participant-document.ts): saved sequences
   // and patterns, Arkanoid and Solomon levels (Solomon's creations and designer

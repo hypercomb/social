@@ -145,3 +145,26 @@ describe('no page shows the demo hive', () => {
     expect(media.map((m: { name: string }) => m.name).filter((n: string) => demo.includes(n))).toEqual([])
   })
 })
+
+describe('every page says where it goes, once', () => {
+  const hrefs = (html: string, part: string): string[] => {
+    const nav = new RegExp(`<nav[^>]*data-part="${part}"[^>]*>([\s\S]*?)</nav>`).exec(html)
+    return nav ? [...nav[1].matchAll(/href="([^"]+)"/g)].map(m => m[1]) : []
+  }
+  for (const b of blocks as { route: string[]; page: string }[]) {
+    const at = '/' + b.route.join('/')
+    it(`${at} has no tab row, and every way on it lands on a page`, () => {
+      expect(b.page).not.toMatch(/data-part="tabs"/)
+      for (const href of [...hrefs(b.page, 'ways'), ...hrefs(b.page, 'beside')]) linkTo(href, b.route, paged)
+    })
+    it(`${at}: inside goes one level down, beside stays under the same parent`, () => {
+      for (const href of hrefs(b.page, 'ways')) expect(linkTo(href, b.route, paged).split('/').length).toBe(b.route.length + 1)
+      const parent = b.route.slice(0, -1).join('/')
+      for (const href of hrefs(b.page, 'beside')) {
+        const to = linkTo(href, b.route, paged)
+        // previous and next are siblings; the parent link is the one way up
+        expect(to === parent || to.split('/').slice(0, -1).join('/') === parent).toBe(true)
+      }
+    })
+  }
+})

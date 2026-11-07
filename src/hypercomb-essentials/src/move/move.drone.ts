@@ -537,6 +537,8 @@ export class MoveDrone extends Drone {
       console.warn('[move] commitMoveAt failed:', err)
       this.emitEffect('move:preview', null)
     } finally {
+      // A drop ends the selection — one tile or many, moved or put back.
+      this.#deselect()
       this.#reset(source)
     }
     if (didCommit) void new hypercomb().act()
@@ -562,6 +564,9 @@ export class MoveDrone extends Drone {
       this.#dropIntoLabel = null
       this.#lastHoverAxial = null
       this.#reset(source)
+    } finally {
+      // Same rule as a reorder drop: whatever the drop did, nothing stays selected.
+      this.#deselect()
     }
   }
 
@@ -1638,6 +1643,11 @@ export class MoveDrone extends Drone {
     this.emitEffect('move:preview', null)
     this.emitEffect('move:committed', { order: denseOrder })
     return true
+  }
+
+  /** Drop the selection. Idempotent — the service ignores an empty clear. */
+  #deselect(): void {
+    this.resolve<any>('selection')?.clear?.()
   }
 
   /** Is the history cursor scrubbed back? Nothing can be written there. */
