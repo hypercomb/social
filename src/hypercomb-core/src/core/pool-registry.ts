@@ -310,6 +310,10 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // One current JSON document per participant, replaced whole; never sent.
   // The swarm model for static content: an offer is not an adoption.
   'community:offers',
+  // WHICH WAY THE HEXAGONS POINT on a domain's showcase, kept in this browser
+  // (shim/bootstrap/showcase-lanes.ts): one current document per participant,
+  // replaced whole — a choice they made, truth, never derived.
+  'showcase:orientation',
   // THE CALENDAR (documentation/calendar-events.md): one member per meeting
   // record, named by the record's own signature, at the SAME address on every
   // community host — a calendar is the union of this one address across the
