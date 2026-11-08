@@ -24,6 +24,16 @@
 // never opens the window either: it lights a pill in the header (the house's
 // `indicator:set`), and only a press on that pill opens it.
 //
+// ── THE HOST YOU RUN GIVES ADDRESSES FROM HERE ──────────────────────────────
+//
+// jwize, 2026-11-08: "Mail shouldn't be hardcoded to my address. Instead you
+// should be able make that available." The key that runs a host (the Worker's
+// ADMIN_KEYS) sees a Host button: one pane lists every address on the host with
+// the keys that hold it, and gives an address to a key — this device's, with one
+// press — or takes one back, over the same signed routes. No secret is edited.
+// A key no host knows yet, on a host it runs, is shown the way in from the
+// no-mailbox pane: the bootstrap moment.
+//
 // ── NOTHING IS KEPT HERE ────────────────────────────────────────────────────
 //
 // Messages are opened into memory and shown. This window writes nothing to
@@ -56,7 +66,7 @@ import { matchesWords, mergeNewestFirst, newestFirst, searchWords, threadsOf, ti
 import type { SaveMessageInput, SaveMessageResult } from './mail-to-hive.js'
 import {
   ALREADY_DONE, ALREADY_SENT, MAIL_ACTS, MAIL_LIMITS, MailError, MailService, sentAttachmentBytes, unreadCount,
-  type Folder, type MailAct, type MailAttachmentInput, type MailDraft, type MailDraftInput, type MailListItem, type Mailbox, type MarkName,
+  type Folder, type HostRun, type MailAct, type MailAttachmentInput, type MailDraft, type MailDraftInput, type MailGrant, type MailListItem, type Mailbox, type MarkName,
   type SentAttachment, type SentRecord,
 } from './mail.service.js'
 import { attachmentBytes, attachmentsBytes, parseMail, type ParsedMail } from './mime.js'
@@ -118,6 +128,8 @@ const PREVIEW_MOST = 12
 const PREVIEW_ON_PRESS = 2 * 1024 * 1024
 /** The compose preview is redrawn once the typing pauses this long (the frame reloads on each draw). */
 const PREVIEW_DRAW_MS = 200
+/** A first press on Revoke is forgotten after this long without the second. */
+const REVOKE_ARM_MS = 5_000
 const WIRE_TYPE = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/
 
 const ioc = <T,>(key: string): T | undefined =>
@@ -174,6 +186,12 @@ const refusedWords = (detail: string): string => {
   if (/^(message|draft) too large$/i.test(reason)) return t('mail.error.refused.too-large', 'This is larger than the host takes.')
   if (/^bad template$/i.test(reason)) return t('mail.error.refused.template', 'The template this message was filled from could not be named to the host.')
   if (/^bad content id$/i.test(reason)) return t('mail.error.refused.picture', 'The host would not take one of the template’s pictures as it is.')
+  // The grant routes (the admin contract): the host would not take the record as given.
+  if (/^bad address$/i.test(reason)) return t('mail.host.refused.address', 'The host would not take that address.')
+  if (/^not this host.s zone$/i.test(reason)) return t('mail.host.refused.zone', 'That address is not on a zone this host gives addresses on.')
+  if (/^bad keys$/i.test(reason)) return t('mail.host.refused.keys', 'The host would not take those keys: one to three public keys, 64 hex characters each.')
+  if (/^bad name$/i.test(reason)) return t('mail.host.refused.name', 'The host would not take that name: at most 64 plain characters.')
+  if (/^bad copy address$/i.test(reason)) return t('mail.host.refused.copy', 'The host would not take that copy address.')
   if (/^E_SENDER/.test(reason)) return t('mail.error.refused.sender', 'Cloudflare will not send from this address yet.')
   if (/^E_[A-Z_]+$/.test(reason)) return t('mail.error.refused.cloudflare', 'Cloudflare would not send this message as it is.')
   return t('mail.error.refused', 'The mail host refused this.')
@@ -427,6 +445,19 @@ const withNames = (field: string): string => {
 
 const mailboxLabel = (box: Pick<Mailbox, 'address' | 'name'>): string => (box.name ? `${box.name} <${box.address}>` : box.address)
 
+/** A key shown in a row: its first eight characters; the whole key is its title. */
+const shortKey = (key: string): string => `${key.slice(0, 8)}…`
+/** The name before the @ of an address an operator gives: a dot-atom, as the Worker normalizes it. */
+const LOCAL_PART = /^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*$/
+const ACT_WORDS: Readonly<Record<MailAct, () => string>> = {
+  read: () => t('mail.host.act.read', 'read'),
+  mark: () => t('mail.host.act.mark', 'mark'),
+  draft: () => t('mail.host.act.draft', 'keep drafts'),
+  delete: () => t('mail.host.act.delete', 'delete'),
+  send: () => t('mail.host.act.send', 'send'),
+}
+const actWord = (act: MailAct): string => ACT_WORDS[act]()
+
 type Said = { text: string; tone: 'ok' | 'quiet' | 'bad' }
 type Phase = 'loading' | 'ready' | 'problem' | 'no-mailbox'
 type Tab = 'inbox' | 'sent' | 'drafts' | 'hidden'
@@ -537,7 +568,30 @@ interface ComposePane {
   template?: ComposeTemplate
 }
 
-type Pane = { readonly kind: 'list' } | ReadPane | ComposePane
+/** What one host run answered to GET /mail/grants, or how it failed. */
+interface HostGrants {
+  readonly zones: readonly string[]
+  readonly grants: readonly MailGrant[]
+  readonly failed?: string
+}
+
+/** The Host pane: the addresses on every host this key runs, and the form that gives or changes one. */
+interface HostPane {
+  readonly kind: 'host'
+  readonly back: Pane
+  /** By origin: what the host listed, once it has. */
+  readonly hosts: Map<string, HostGrants>
+  /** A grant being changed (the form is prefilled from it), or null for "Give an address". */
+  editing: { readonly origin: string; readonly grant: MailGrant } | null
+  /** A key for the form's key field on first draw: the bootstrap from the no-mailbox pane. */
+  readonly prefillKey?: string
+  /** Revoke pressed once on this address: the second press within the pause revokes, anything else disarms. */
+  arming: { readonly origin: string; readonly address: string; readonly button: HTMLButtonElement; readonly timer: ReturnType<typeof setTimeout> } | null
+  /** Where each host's rows are drawn, so a list that lands repaints in place and the form keeps what was typed. */
+  readonly rowsEl: Map<string, HTMLElement>
+}
+
+type Pane = { readonly kind: 'list' } | ReadPane | ComposePane | HostPane
 
 type Entry =
   | { readonly key: string; readonly kind: 'skeleton' }
@@ -629,6 +683,8 @@ export class MailElement extends HTMLElement {
   draftSaveMs = DRAFT_SAVE_MS
   /** How often the unread cue asks the host. */
   pollEveryMs = POLL_EVERY_MS
+  /** How long a first press on Revoke waits for the second. */
+  revokeArmMs = REVOKE_ARM_MS
   /** Is anyone looking at the page? A poll asks nothing while this is false. */
   visible: () => boolean = () => typeof document === 'undefined' || document.visibilityState !== 'hidden'
 
@@ -691,6 +747,7 @@ export class MailElement extends HTMLElement {
     this.#epoch++ // an answer still on its way finds nobody waiting
     if (!this.#panel) return
     if (this.#pane.kind === 'compose') this.#leaveCompose(this.#pane, false)
+    if (this.#pane.kind === 'host') this.#disarm(this.#pane)
     this.#autosaver().cancel()
     this.#previewer.cancel()
     this.#frame?.cancel()
@@ -720,9 +777,10 @@ export class MailElement extends HTMLElement {
 
   get isOpen(): boolean { return !!this.#panel }
 
-  /** Unwind ONE level — the composer, then an open message, then a search. False when nothing of the desk's is open. */
+  /** Unwind ONE level — the Host pane, the composer, then an open message, then a search. False when nothing of the desk's is open. */
   dismissInner(): boolean {
     const pane = this.#pane
+    if (pane.kind === 'host') { this.#backFrom(pane); return true }
     if (pane.kind === 'compose' && pane.choosing) { pane.choosing = undefined; this.#render(); return true }
     if (pane.kind === 'compose') { this.#leaveCompose(pane); return true }
     if (pane.kind === 'read') { this.#backToList(); return true }
@@ -2145,6 +2203,345 @@ export class MailElement extends HTMLElement {
     }
   }
 
+  // ── the host you run: granted addresses ─────────────────────────────────
+  //
+  // The key that RUNS a host (it said `admin: true` to /mail/me) gives addresses from here, over the
+  // admin routes, instead of editing the host's secret. One section per host run: its zones, the
+  // addresses given there as rows, and a form that gives or changes one. Every act says what it is
+  // doing (the cue doctrine); Revoke takes two presses, as Delete takes two acts. Nothing a host
+  // answers is ever markup: rows are text nodes drawn from what the service kept.
+
+  /** The hosts this key runs, from the service's last round (a fake in the spec may not say). */
+  #hostsRun(): readonly HostRun[] {
+    try { return (this.service as { hostsRun?: () => readonly HostRun[] }).hostsRun?.() ?? [] } catch { return [] }
+  }
+
+  /** Opens the Host pane over whatever is open; `prefillKey` lands in the form's key field (the bootstrap). */
+  #openHost(prefillKey?: string): void {
+    const run = this.#hostsRun()
+    if (!run.length || this.#pane.kind === 'host') return
+    let back: Pane = this.#pane
+    // Host pressed while writing: the words on screen are kept, as when Write is pressed again.
+    if (this.#pane.kind === 'compose') {
+      back = this.#pane.back.kind === 'compose' || this.#pane.back.kind === 'host' ? { kind: 'list' } : this.#pane.back
+      this.#leaveCompose(this.#pane, false)
+    } else if (this.#pane.kind === 'list') this.#listScroll = this.#listScrollTop()
+    const pane: HostPane = { kind: 'host', back, hosts: new Map(), editing: null, arming: null, rowsEl: new Map(), ...(prefillKey ? { prefillKey } : {}) }
+    this.#pane = pane
+    this.#said = null
+    this.#render()
+    for (const host of run) void this.#loadGrants(pane, host.origin)
+  }
+
+  #backFrom(pane: HostPane): void {
+    this.#disarm(pane)
+    this.#pane = pane.back
+    this.#returning = pane.back.kind === 'list'
+    this.#render()
+  }
+
+  /** Reads what a host lists, under its own cue; the rows repaint in place, so the form keeps what was typed. */
+  async #loadGrants(pane: HostPane, origin: string): Promise<void> {
+    const epoch = this.#epoch
+    await this.#act(`grants:${origin}`, t('mail.host.reading', 'Reading the addresses…'), async () => {
+      let answer: HostGrants
+      try {
+        const got = await this.service.grants(origin)
+        answer = { zones: got.zones, grants: got.grants }
+      } catch (error) {
+        answer = { zones: [], grants: [], failed: explain(error) }
+      }
+      if (epoch !== this.#epoch || this.#pane !== pane) return
+      pane.hosts.set(origin, answer)
+      this.#paintGrants(pane, origin)
+    })
+  }
+
+  #paintGrants(pane: HostPane, origin: string): void {
+    const rows = pane.rowsEl.get(origin)
+    if (!rows?.isConnected) return
+    rows.replaceChildren(...this.#hostRows(pane, origin))
+  }
+
+  /** The Host pane: one section per host this key runs — its zones, the addresses given there, and the form. */
+  #hostPane(body: HTMLElement, pane: HostPane): void {
+    const bar = el('div', 'hc-mail-tabs')
+    bar.appendChild(this.#button(t('mail.back', 'Back'), () => this.#backFrom(pane)))
+    body.appendChild(bar)
+    body.appendChild(el('h2', 'hc-mail-subject', t('mail.host.title', 'Addresses on the hosts you run')))
+    body.appendChild(el('p', 'hc-mail-quiet', t('mail.host.intro', 'An address is given to a key: mail to it is sealed to that key from then on. What already arrived stays as it was.')))
+    // Before the mailbox is known there is no said line across the top: the pane carries its own.
+    if (!this.#saidEl) { this.#saidEl = el('p', 'hc-mail-said'); body.appendChild(this.#saidEl); this.#paintSaid() }
+    // Any press that is not the second press on an armed Revoke disarms it.
+    body.addEventListener('click', event => {
+      if (pane.arming && !(event.target instanceof Node && pane.arming.button.contains(event.target))) this.#disarm(pane)
+    }, true)
+    pane.rowsEl.clear()
+    for (const host of this.#hostsRun()) body.appendChild(this.#hostSection(pane, host))
+  }
+
+  #hostSection(pane: HostPane, host: HostRun): HTMLElement {
+    const section = el('section', 'hc-mail-host')
+    section.appendChild(el('h3', 'hc-mail-host-zones', host.zones.join(', ')))
+    const rows = el('div', 'hc-mail-host-rows')
+    pane.rowsEl.set(host.origin, rows)
+    rows.replaceChildren(...this.#hostRows(pane, host.origin))
+    section.appendChild(rows)
+    section.appendChild(this.#hostForm(pane, host))
+    return section
+  }
+
+  #hostRows(pane: HostPane, origin: string): Node[] {
+    const answer = pane.hosts.get(origin)
+    if (!answer) {
+      // Placeholders until the host has answered: a blank section reads as an empty one.
+      const list = el('ul', 'hc-mail-list')
+      list.setAttribute('aria-hidden', 'true')
+      for (let i = 0; i < 2; i++) { const row = el('li', 'hc-mail-skeleton'); row.append(el('span'), el('span'), el('span')); list.appendChild(row) }
+      return [list]
+    }
+    if (answer.failed) {
+      const acts = el('div', 'hc-mail-acts')
+      acts.appendChild(this.#busyButton(`grants:${origin}`, t('mail.retry', 'Try again'), t('mail.host.reading', 'Reading the addresses…'), () => { void this.#loadGrants(pane, origin) }, 'is-small'))
+      return [el('p', 'hc-mail-said is-bad', answer.failed), acts]
+    }
+    if (!answer.grants.length) return [el('p', 'hc-mail-quiet', t('mail.host.none', 'No address is given on this host yet.'))]
+    const list = el('ul', 'hc-mail-host-list')
+    for (const grant of answer.grants) list.appendChild(this.#hostRow(pane, origin, grant))
+    return [list]
+  }
+
+  /** One address: who holds it (each key as `abcd1234…` with its acts), a `secret` badge for the host's own entries, Change and Revoke on a grant. */
+  #hostRow(pane: HostPane, origin: string, grant: MailGrant): HTMLLIElement {
+    const row = el('li', 'hc-mail-host-row')
+    const who = el('span', 'hc-mail-host-address')
+    who.appendChild(el('span', 'hc-mail-host-who', grant.address))
+    if (grant.name) who.appendChild(el('span', 'hc-mail-host-name', grant.name))
+    if (grant.source === 'secret') {
+      const badge = el('span', 'hc-mail-host-badge', t('mail.host.secret', 'secret'))
+      badge.title = t('mail.host.secret-means', 'Listed in the host’s own configuration; it is changed there, not here.')
+      who.appendChild(badge)
+    }
+    row.appendChild(who)
+    const keys = el('span', 'hc-mail-host-keys')
+    // The host's own configuration may list an address with no valid key: said, so the operator sees it is broken.
+    if (!grant.keys.length) keys.appendChild(el('span', '', t('mail.host.no-key', 'No valid key: the host’s configuration lists this address with none.')))
+    for (const key of grant.keys) {
+      const holder = el('span', 'hc-mail-host-holder')
+      const code = el('code', 'hc-mail-host-key', shortKey(key.key))
+      code.title = key.key
+      holder.append(code, el('span', '', key.can.length === MAIL_ACTS.length ? t('mail.host.all', 'everything') : key.can.map(actWord).join(', ')))
+      keys.appendChild(holder)
+    }
+    row.appendChild(keys)
+    const acts = el('span', 'hc-mail-host-acts')
+    if (grant.source === 'grant') {
+      acts.appendChild(this.#button(t('mail.host.change', 'Change'), () => { this.#disarm(pane); pane.editing = { origin, grant }; this.#render() }, 'is-small'))
+      const revoke = this.#busyButton(`revoke:${grant.address}`, t('mail.host.revoke', 'Revoke'), t('mail.host.revoking', 'Revoking…'), () => { void this.#revoke(pane, origin, grant, revoke) }, 'is-small is-danger')
+      acts.appendChild(revoke)
+    }
+    row.appendChild(acts)
+    return row
+  }
+
+  /** Give an address, or change one: its name and zone, the keys (this device's on a press), a name, the five acts, Save. */
+  #hostForm(pane: HostPane, host: HostRun): HTMLFormElement {
+    const origin = host.origin
+    const editing = pane.editing?.origin === origin ? pane.editing.grant : null
+    const form = el('form', 'hc-mail-host-form')
+    form.noValidate = true
+    form.addEventListener('submit', event => { event.preventDefault(); void this.#saveGrant(pane, host, form) })
+    form.appendChild(el('h4', '', editing ? t('mail.host.changing', 'Changing {address}', { address: editing.address }) : t('mail.host.give', 'Give an address')))
+
+    const field = <T extends HTMLInputElement | HTMLTextAreaElement>(node: T, name: string, label: string, value: string): HTMLLabelElement => {
+      const wrap = el('label', 'hc-mail-field')
+      wrap.appendChild(el('span', '', label))
+      node.name = name
+      node.value = value
+      node.setAttribute('data-escape-local', '')
+      wrap.appendChild(node)
+      return wrap
+    }
+
+    // The address: its name, then @ and the zone — one zone is a suffix, more is a choice.
+    const at = editing ? editing.address.lastIndexOf('@') : -1
+    const address = el('div', 'hc-mail-field')
+    address.appendChild(el('span', '', t('mail.host.local', 'Address')))
+    const line = el('div', 'hc-mail-host-at')
+    const local = el('input')
+    local.name = 'host-local'
+    local.autocomplete = 'off'
+    local.spellcheck = false
+    local.value = editing ? editing.address.slice(0, at) : ''
+    local.setAttribute('aria-label', t('mail.host.local', 'Address'))
+    local.setAttribute('data-escape-local', '')
+    line.append(local, el('span', '', '@'))
+    let zoneSelect: HTMLSelectElement | null = null
+    if (host.zones.length > 1) {
+      zoneSelect = el('select')
+      zoneSelect.name = 'host-zone'
+      zoneSelect.setAttribute('aria-label', t('mail.host.zone', 'Zone'))
+      zoneSelect.setAttribute('data-escape-local', '')
+      for (const name of host.zones) { const option = el('option', '', name); option.value = name; option.selected = !!editing && editing.address.slice(at + 1) === name; zoneSelect.appendChild(option) }
+      line.appendChild(zoneSelect)
+    } else line.appendChild(el('span', 'hc-mail-host-zone', host.zones[0] ?? ''))
+    address.appendChild(line)
+    form.appendChild(address)
+
+    const key = el('textarea', 'hc-mail-host-keyfield')
+    key.rows = 2
+    key.spellcheck = false
+    const nameInput = el('input')
+    const copyInput = el('input')
+    copyInput.autocomplete = 'off'
+    copyInput.spellcheck = false
+    // A grant is the address's WHOLE record (the Worker's reading): a Save over an address the host already
+    // lists — a grant, or an entry of the host's own configuration — replaces its keys, its name and its copy
+    // address with what this form shows. So the moment the typed address matches a listed one, what it has
+    // is put in the form (keys added to any already written; name and copy only where nothing is written),
+    // and a line says so. A secret address is given again this way: that is how a device key joins it.
+    const listed = el('p', 'hc-mail-quiet hc-mail-host-listed')
+    listed.hidden = true
+    let prefilled = ''
+    const matchListed = (): void => {
+      if (editing) return
+      const typed = `${local.value.trim().toLowerCase()}@${host.zones.length > 1 ? zoneSelect?.value ?? '' : host.zones[0] ?? ''}`
+      const found = pane.hosts.get(origin)?.grants.find(g => g.address === typed)
+      listed.hidden = !found
+      if (!found || prefilled === typed) return
+      prefilled = typed
+      listed.textContent = t('mail.host.listed', '{address} is already listed here. Saving replaces its whole record — the keys, the name and the copy address — with what this form shows.', { address: typed })
+      const have = key.value.toLowerCase().split(/[\s,;]+/).filter(Boolean)
+      key.value = [...have, ...found.keys.map(k => k.key).filter(k => !have.includes(k))].slice(0, 3).join('\n')
+      if (!nameInput.value.trim() && found.name) nameInput.value = found.name
+      if (!copyInput.value.trim() && found.copyTo) copyInput.value = found.copyTo
+    }
+    local.addEventListener('input', matchListed)
+    zoneSelect?.addEventListener('change', matchListed)
+    form.appendChild(listed)
+    form.appendChild(field(key, 'host-key', t('mail.host.key', 'Key — one to three public keys, one per line'), editing ? editing.keys.map(k => k.key).join('\n') : pane.prefillKey ?? ''))
+    const mine = el('div', 'hc-mail-acts')
+    mine.appendChild(this.#button(t('mail.host.this-key', 'This device’s key'), () => {
+      void (async () => {
+        const held = (this.#key ?? await this.service.publicKey())?.toLowerCase()
+        if (!held || !form.isConnected) return
+        const have = key.value.toLowerCase().split(/[\s,;]+/).filter(Boolean)
+        if (!have.includes(held)) key.value = [...have, held].join('\n')
+      })()
+    }, 'is-small'))
+    form.appendChild(mine)
+    form.appendChild(field(nameInput, 'host-name', t('mail.host.name', 'Name (optional)'), editing?.name ?? ''))
+    form.appendChild(field(copyInput, 'host-copy', t('mail.host.copy', 'Copy address (optional): the host also delivers this mailbox’s mail there'), editing?.copyTo ?? ''))
+
+    // What the keys may do: every act on by default; a change starts from what its keys share.
+    const can = el('div', 'hc-mail-host-can')
+    can.appendChild(el('span', 'hc-mail-quiet', t('mail.host.can', 'May')))
+    const shared: readonly MailAct[] = editing ? MAIL_ACTS.filter(act => editing.keys.every(k => k.can.includes(act))) : MAIL_ACTS
+    for (const act of MAIL_ACTS) {
+      const check = el('label', 'hc-mail-check')
+      const box = el('input')
+      box.type = 'checkbox'
+      box.name = 'host-can'
+      box.value = act
+      box.checked = shared.includes(act)
+      box.setAttribute('data-escape-local', '')
+      check.append(box, el('span', '', actWord(act)))
+      can.appendChild(check)
+    }
+    form.appendChild(can)
+
+    const acts = el('div', 'hc-mail-acts')
+    acts.appendChild(this.#busyButton(`grant:${origin}`, t('mail.host.save', 'Save'), t('mail.host.saving', 'Saving…'), () => { void this.#saveGrant(pane, host, form) }, 'is-place'))
+    if (editing) acts.appendChild(this.#button(t('mail.host.stop-change', 'Cancel'), () => { pane.editing = null; this.#render() }))
+    form.appendChild(acts)
+    return form
+  }
+
+  async #saveGrant(pane: HostPane, host: HostRun, form: HTMLFormElement): Promise<void> {
+    const origin = host.origin
+    const value = (name: string): string => String((form.elements.namedItem(name) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null)?.value ?? '')
+    const local = value('host-local').trim().toLowerCase()
+    const zone = host.zones.length > 1 ? value('host-zone') : host.zones[0] ?? ''
+    const keys = [...new Set(value('host-key').toLowerCase().split(/[\s,;]+/).filter(Boolean))]
+    const name = value('host-name').trim()
+    const copyTo = value('host-copy').trim()
+    const can = Array.from(form.querySelectorAll<HTMLInputElement>('input[name="host-can"]:checked')).map(box => box.value as MailAct)
+    // Said here, before anything is signed — the same rules the host holds the record to.
+    if (!LOCAL_PART.test(local) || local.length > 64) { this.#say(t('mail.host.need-local', 'Write the address’s name before the @.'), 'bad'); return }
+    if (!keys.length || keys.length > 3 || keys.some(k => !SIG_RE.test(k))) { this.#say(t('mail.host.need-key', 'Give one to three public keys, 64 hex characters each.'), 'bad'); return }
+    if (!can.length) { this.#say(t('mail.host.need-act', 'Tick at least one thing the key may do.'), 'bad'); return }
+    const address = `${local}@${zone}`
+    const epoch = this.#epoch
+    await this.#act(`grant:${origin}`, t('mail.host.giving', 'Giving {address}…', { address }), async () => {
+      let stored: MailGrant
+      try {
+        stored = await this.service.grant(origin, address, { keys: keys.map(k => ({ key: k, can })), ...(name ? { name } : {}), ...(copyTo ? { copyTo } : {}) })
+      } catch (error) {
+        if (epoch !== this.#epoch || this.#pane !== pane) return
+        // The host's cap is for the whole host's grants per day, not a send: its own sentence.
+        if (error instanceof MailError && error.code === 'limit') this.#say(t('mail.host.limit', 'The host’s daily limit of grants was reached. Try again tomorrow.'), 'bad')
+        else this.#say(explain(error), 'bad')
+        return
+      }
+      if (epoch !== this.#epoch || this.#pane !== pane) return
+      // An address given to this very key is a mailbox from now: the desk opens again, so it is there at once.
+      const mine = (this.#key ?? await this.service.publicKey())?.toLowerCase()
+      if (mine && stored.keys.some(k => k.key === mine)) {
+        await this.#start()
+        this.#say(t('mail.host.gave-you', '{address} is yours now.', { address: stored.address }), 'ok')
+        return
+      }
+      pane.editing = null
+      this.#say(t('mail.host.gave', '{address} is given. Mail to it is sealed to the keys you listed from now on.', { address: stored.address }), 'ok')
+      this.#render()
+      void this.#loadGrants(pane, origin)
+    })
+  }
+
+  /** Revoke takes two presses on the same button within a pause; a timer, or any other press, cancels the first. */
+  async #revoke(pane: HostPane, origin: string, grant: MailGrant, button: HTMLButtonElement): Promise<void> {
+    const key = `revoke:${grant.address}`
+    if (pane.arming?.address !== grant.address || pane.arming.origin !== origin) {
+      this.#disarm(pane)
+      const timer = setTimeout(() => this.#disarm(pane), this.revokeArmMs)
+      pane.arming = { origin, address: grant.address, button, timer }
+      const again = t('mail.host.revoke-again', 'Revoke — press again')
+      this.#busyButtons.set(key, { button, idle: again, busy: t('mail.host.revoking', 'Revoking…') })
+      button.textContent = again
+      button.classList.add('is-armed')
+      return
+    }
+    this.#disarm(pane)
+    const epoch = this.#epoch
+    await this.#act(key, t('mail.host.revoking', 'Revoking…'), async () => {
+      try {
+        await this.service.revoke(origin, grant.address)
+        if (epoch !== this.#epoch || this.#pane !== pane) return
+        this.#say(t('mail.host.revoked', '{address} is revoked. What already arrived stays as it is.', { address: grant.address }), 'ok')
+      } catch (error) {
+        if (epoch !== this.#epoch || this.#pane !== pane) return
+        const code = error instanceof MailError ? error.code : null
+        if (code === 'not-found') this.#say(t('mail.host.gone', 'That grant was already gone.'), 'quiet')
+        else if (code === 'conflict') this.#say(t('mail.host.secret-only', '{address} is listed in the host’s own configuration, not given here, so it cannot be revoked from here.', { address: grant.address }), 'bad')
+        else { this.#say(explain(error), 'bad'); return }
+      }
+      if (pane.editing?.grant.address === grant.address) pane.editing = null
+      void this.#loadGrants(pane, origin)
+    })
+  }
+
+  #disarm(pane: HostPane): void {
+    const armed = pane.arming
+    if (!armed) return
+    clearTimeout(armed.timer)
+    pane.arming = null
+    const key = `revoke:${armed.address}`
+    const idle = t('mail.host.revoke', 'Revoke')
+    this.#busyButtons.set(key, { button: armed.button, idle, busy: t('mail.host.revoking', 'Revoking…') })
+    if (!this.#busy.has(key)) armed.button.textContent = idle
+    armed.button.classList.remove('is-armed')
+  }
+
   // ── the drawing ─────────────────────────────────────────────────────────
 
   #forgetPainted(): void {
@@ -2198,6 +2595,8 @@ export class MailElement extends HTMLElement {
         body.appendChild(acts)
         return
       }
+      // The operator giving themself the first address: the Host pane stands where the key box stood.
+      if (this.#pane.kind === 'host') { body.classList.add('is-host'); this.#hostPane(body, this.#pane); return }
       this.#noMailbox(body)
       return
     }
@@ -2216,6 +2615,7 @@ export class MailElement extends HTMLElement {
     const pane = this.#pane
     if (pane.kind === 'compose') this.#composePane(sheet, pane)
     else if (pane.kind === 'read') this.#readPane(sheet, pane)
+    else if (pane.kind === 'host') this.#hostPane(sheet, pane)
     else {
       sheet.classList.add('is-empty')
       sheet.appendChild(el('p', 'hc-mail-quiet hc-mail-empty', t('mail.pick', 'Choose a message, or write one.')))
@@ -2247,6 +2647,7 @@ export class MailElement extends HTMLElement {
         head.appendChild(el('span', 'hc-mail-who', box ? mailboxLabel(box) : this.#address))
       }
       if (this.#may('send')) head.appendChild(this.#button(t('mail.compose', 'Write'), () => this.#compose(undefined, { back: { kind: 'list' } }), 'is-place'))
+      if (this.#hostsRun().length) head.appendChild(this.#button(t('mail.host.button', 'Host'), () => this.#openHost(), 'is-place'))
     }
     const close = el('button', 'hc-mail-close')
     close.type = 'button'
@@ -2273,6 +2674,12 @@ export class MailElement extends HTMLElement {
     body.appendChild(el('p', 'hc-mail-quiet', t('mail.none', 'This device’s key does not own a mailbox on any host you carry yet.')))
     if (this.#hostsAsked.length) body.appendChild(el('p', 'hc-mail-quiet', t('mail.none-asked', 'Asked: {hosts}', { hosts: this.#hostsAsked.map(zoneOf).join(', ') })))
     if (!this.#key) { body.appendChild(el('p', 'hc-mail-said is-bad', explain(new MailError('no-key')))); return }
+    // A host this key runs: no operator to tell — give the key an address from here, prefilled.
+    const run = this.#hostsRun()
+    if (run.length) {
+      body.appendChild(el('p', 'hc-mail-quiet hc-mail-host-run', t('mail.host.you-run', 'You run {zone}: give this key an address.', { zone: run.flatMap(host => host.zones).join(', ') })))
+      body.appendChild(this.#button(t('mail.host.give-me', 'Give this key an address'), () => this.#openHost(this.#key ?? undefined), 'is-place'))
+    }
     body.appendChild(el('p', 'hc-mail-quiet', t('mail.none-key', 'To give it one, tell whoever runs that host to add this key to the address:')))
     body.appendChild(el('code', 'hc-mail-keybox', this.#key))
     const copy = this.#button(t('mail.copy-key', 'Copy key'), () => {
@@ -2878,6 +3285,29 @@ function ensureStyles(): void {
     .hc-mail-template-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; }
     .hc-mail-template-row > input { flex: 1; min-width: 10rem; }
     .hc-mail-keybox { display: block; padding: 0.5rem 0.6rem; border: 1px solid var(--hc-mail-rule); border-radius: 2px; overflow-wrap: anywhere; user-select: all; font-size: 0.8rem; font-family: var(--hc-mail-mono); }
+
+    /* THE HOST PANE: the addresses on a host this key runs, and the form that gives one. */
+    .hc-mail-body.is-host { width: min(100%, 72rem); }
+    .hc-mail-host { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.6rem 0.7rem 0.7rem; border: 1px solid var(--hc-mail-rule); border-radius: 2px; background: var(--hc-mail-raised); }
+    .hc-mail-host-zones { margin: 0; font-size: 1.05rem; font-weight: 600; overflow-wrap: anywhere; }
+    .hc-mail-host-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+    .hc-mail-host-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "address acts" "keys acts"; align-items: center; column-gap: 0.6rem; row-gap: 0.15rem; padding: 0.4rem 0.2rem; border-bottom: 1px solid var(--hc-mail-rule); }
+    .hc-mail-host-address { grid-area: address; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem; min-width: 0; overflow-wrap: anywhere; }
+    .hc-mail-host-name { color: var(--hc-mail-quiet); }
+    .hc-mail-host-badge { flex: none; padding: 0 0.3rem; border: 1px solid var(--hc-mail-rule); border-radius: 2px; font-size: 0.75rem; color: var(--hc-mail-quiet); }
+    .hc-mail-host-keys { grid-area: keys; display: flex; flex-wrap: wrap; gap: 0.2rem 0.9rem; font-size: 0.8rem; color: var(--hc-mail-quiet); }
+    .hc-mail-host-holder { display: inline-flex; align-items: baseline; gap: 0.35rem; }
+    .hc-mail-host-key { font-family: var(--hc-mail-mono); color: var(--hc-mail-ink); }
+    .hc-mail-host-acts { grid-area: acts; display: flex; align-items: center; gap: 0.35rem; }
+    .hc-mail-do.is-armed { background: var(--hc-mail-wash-strong); }
+    .hc-mail-host-form { display: flex; flex-direction: column; gap: 0.4rem; padding-top: 0.3rem; }
+    .hc-mail-host-form h4 { margin: 0.2rem 0 0; font-size: 0.95rem; font-weight: 600; }
+    .hc-mail-host-at { display: flex; align-items: center; gap: 0.3rem; }
+    .hc-mail-host-at > input { flex: 1 1 8rem; min-width: 6rem; background: var(--hc-mail-field); color: inherit; border: 1px solid var(--hc-mail-rule); border-radius: 2px; padding: 0.35rem 0.5rem; font: inherit; }
+    .hc-mail-host-at > select { background: var(--hc-mail-field); color: inherit; border: 1px solid var(--hc-mail-rule); border-radius: 2px; padding: 0.3rem 0.4rem; font: inherit; }
+    .hc-mail-host-zone { color: var(--hc-mail-quiet); }
+    .hc-mail-host-keyfield { resize: vertical; font-family: var(--hc-mail-mono); font-size: 0.85rem; }
+    .hc-mail-host-can { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.8rem; }
   `
   document.head.appendChild(style)
 }

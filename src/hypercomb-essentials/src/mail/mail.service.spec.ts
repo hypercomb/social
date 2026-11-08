@@ -874,3 +874,182 @@ describe('after the second security pass (R2)', () => {
     expect(await s.readDraft(ME, await plant(draft.sig, { to: 'typed, as is' }))).toEqual({ to: 'typed, as is' })
   })
 })
+
+// ── GRANTED ADDRESSES: the hive half of the admin contract ─────────────────────────────────────
+//
+// jwize, 2026-11-08: "Mail shouldn't be hardcoded to my address. Instead you should be able make that
+// available." The key that runs a host (ADMIN_KEYS) gives an address to a key from the desk, over
+// GET/PUT/DELETE /mail/grants — the same signed, single-use requests as every write. First against a
+// recording fake answering the contract's shapes (the request side, pinned whatever the Worker does),
+// then end to end through the real Worker.
+describe('granted addresses (the admin contract)', () => {
+  const ana = generateSecretKey()
+  const ANA = 'ana@hypercomb.com'
+  const ZONES = ['hypercomb.com', 'mail.hypercomb.com']
+
+  /** A host answering the contract's shapes, every call recorded with the signed event behind it. */
+  function recording(over: { admin?: boolean; grants?: Record<string, unknown>; answer?: (method: string, path: string) => Response | null } = {}) {
+    const calls: { method: string; url: string; body: unknown; event: { id: string; tags: string[][] } }[] = []
+    const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } })
+    const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+      const body = init.body ? JSON.parse(new TextDecoder().decode(init.body as Uint8Array)) as Record<string, unknown> : undefined
+      const method = init.method ?? 'GET'
+      calls.push({ method, url, body, event: eventOf(init) })
+      const { pathname } = new URL(url)
+      const forced = over.answer?.(method, pathname)
+      if (forced) return forced
+      if (pathname === '/mail/me') return json(over.admin === false ? { addresses: [], names: {}, can: {}, admin: false } : { addresses: [], names: {}, can: {}, admin: true, zones: ZONES })
+      if (pathname === '/mail/grants') return json({ zones: ZONES, grants: over.grants ?? {} })
+      if (pathname.startsWith('/mail/grants/')) {
+        if (method === 'DELETE') return new Response(null, { status: 204 })
+        const keys = (body!['keys'] as unknown[]).map(k => (typeof k === 'string' ? { key: k, can: MAIL_ACTS } : k))
+        return json({ address: decodeURIComponent(pathname.slice('/mail/grants/'.length)), v: 1, ...body, keys, by: getPublicKey(jaime), at: 1_700_000_000_000 })
+      }
+      return new Response('not found', { status: 404 })
+    }
+    return { fetch, calls }
+  }
+  const over = (net: ReturnType<typeof recording>, signer = signerFor(jaime)) =>
+    new MailService({ fetch: net.fetch, signer: () => signer, extension: () => false }, HOST)
+  const tag = (event: { tags: string[][] }, name: string): string | undefined => event.tags.find(t => t[0] === name)?.[1]
+
+  it('keeps the hosts this key runs from /mail/me; an admin with no mailbox yet is an empty list, not an error', async () => {
+    const s = over(recording())
+    expect(s.hostsRun()).toEqual([])
+    expect(await s.mailboxes()).toEqual([])
+    expect(s.hostsRun()).toEqual([{ origin: HOST, zones: ZONES }])
+    // A host that does not say so is not run by this key — and a host from before the contract says nothing.
+    const plain = over(recording({ admin: false }))
+    await plain.mailboxes()
+    expect(plain.hostsRun()).toEqual([])
+    const old = new MailService({ fetch: async () => new Response(JSON.stringify({ addresses: [ME] }), { headers: { 'content-type': 'application/json' } }), signer: () => signerFor(jaime), extension: () => false }, HOST)
+    await old.mailboxes()
+    expect(old.hostsRun()).toEqual([])
+  })
+
+  it('reads what the host lists through the caps: 50 grants, 3 keys, the five acts, a name of 64, nothing else', async () => {
+    const grants: Record<string, unknown> = {
+      [ANA]: { keys: [{ key: getPublicKey(ana), can: ['read', 'send', 'fly'] }], name: 'A'.repeat(100), copyTo: 'copy@example.org', source: 'grant', by: getPublicKey(jaime), at: 5, extra: 'dropped' },
+      [ME]: { keys: [getPublicKey(jaime), getPublicKey(leanne), getPublicKey(ana), 'f'.repeat(64), 'e'.repeat(64)], source: 'secret' },
+      'leanne@hypercomb.com': { keys: [{ key: getPublicKey(leanne), can: 'read' }, 'not a key', getPublicKey(leanne)], source: 'whatever' },
+      'no keys@hypercomb.com': { keys: [] },
+      'not an address': { keys: [getPublicKey(ana)] },
+      'broken@hypercomb.com': { keys: [], source: 'secret' }, // the host's own entry with no valid key: shown
+      'empty@hypercomb.com': { keys: [], source: 'grant' }, // a grant with no key is nothing
+    }
+    for (let i = 0; i < 60; i++) grants[`u${i}@hypercomb.com`] = { keys: [getPublicKey(ana)], source: 'grant' }
+    const listed = await over(recording({ grants })).grants(HOST)
+    expect(listed.zones).toEqual(ZONES)
+    expect(listed.grants).toHaveLength(MAIL_READ_CAPS.grants)
+    expect(listed.grants.map(g => g.address).slice(0, 4)).toEqual([ANA, 'broken@hypercomb.com', ME, 'leanne@hypercomb.com'])
+    const by = (address: string) => listed.grants.find(g => g.address === address)
+    expect(by(ANA)).toEqual({ address: ANA, keys: [{ key: getPublicKey(ana), can: ['read', 'send'] }], name: 'A'.repeat(64), copyTo: 'copy@example.org', source: 'grant', by: getPublicKey(jaime), at: 5 })
+    expect(by(ME)).toEqual({ address: ME, keys: [getPublicKey(jaime), getPublicKey(leanne), getPublicKey(ana)].map(key => ({ key, can: MAIL_ACTS })), source: 'secret' })
+    expect(by('leanne@hypercomb.com')).toEqual({ address: 'leanne@hypercomb.com', keys: [{ key: getPublicKey(leanne), can: ['read'] }], source: 'grant' })
+    expect(by('broken@hypercomb.com')).toEqual({ address: 'broken@hypercomb.com', keys: [], source: 'secret' })
+    expect(by('empty@hypercomb.com')).toBeUndefined()
+    expect(listed.grants.some(g => g.address.includes(' '))).toBe(false)
+  })
+
+  it('grant() PUTs the record over a signed, single-use request and reads the stored record back; revoke() DELETEs', async () => {
+    const net = recording()
+    const s = over(net)
+    const stored = await s.grant(HOST, ' Ana@Hypercomb.com ', { keys: [{ key: getPublicKey(ana).toUpperCase(), can: ['send', 'read'] }, getPublicKey(leanne), getPublicKey(leanne)], name: ' Ana ' })
+    const put = net.calls.at(-1)!
+    expect(put.method).toBe('PUT')
+    expect(put.url).toBe(`${HOST}/mail/grants/ana%40hypercomb.com`)
+    expect(put.body).toEqual({ keys: [{ key: getPublicKey(ana), can: ['read', 'send'] }, getPublicKey(leanne)], name: 'Ana' })
+    expect(tag(put.event, 'method')).toBe('PUT')
+    expect(tag(put.event, 'u')).toBe(put.url)
+    expect(tag(put.event, 'payload')).toBe(await sha256Hex(JSON.stringify(put.body)))
+    expect(tag(put.event, 'nonce')).toMatch(/^[0-9a-f]{32}$/)
+    // The answer's `v: 1` (and anything else this client does not know) is not carried.
+    expect(stored).toEqual({ address: ANA, keys: [{ key: getPublicKey(ana), can: ['read', 'send'] }, { key: getPublicKey(leanne), can: MAIL_ACTS }], name: 'Ana', source: 'grant', by: getPublicKey(jaime), at: 1_700_000_000_000 })
+    // A copy address goes as a string and only when there is one — never null.
+    await s.grant(HOST, ANA, { keys: [getPublicKey(ana)], copyTo: ' Copy@Example.org ' })
+    expect(net.calls.at(-1)!.body).toEqual({ keys: [getPublicKey(ana)], copyTo: 'copy@example.org' })
+    await s.grant(HOST, ANA, { keys: [getPublicKey(ana)], copyTo: '', name: '' })
+    expect(net.calls.at(-1)!.body).toEqual({ keys: [getPublicKey(ana)] })
+
+    await s.revoke(HOST, 'ANA@hypercomb.com')
+    const del = net.calls.at(-1)!
+    expect(del.method).toBe('DELETE')
+    expect(del.url).toBe(`${HOST}/mail/grants/ana%40hypercomb.com`)
+    expect(del.body).toBeUndefined()
+    expect(tag(del.event, 'nonce')).toMatch(/^[0-9a-f]{32}$/)
+    expect(tag(del.event, 'payload')).toBeUndefined()
+    // a read is not spent and carries no nonce
+    await s.grants(HOST)
+    expect(tag(net.calls.at(-1)!.event, 'nonce')).toBeUndefined()
+  })
+
+  it('refuses a bad key, too many keys or a bad address before a byte is signed, and passes the host\'s refusals on as what they are', async () => {
+    const net = recording({
+      answer: (method, path) => {
+        if (method !== 'PUT') return null
+        if (path.endsWith('zone%40elsewhere.example')) return new Response("not this host's zone", { status: 422 })
+        if (path.endsWith('many%40hypercomb.com')) return new Response(JSON.stringify({ error: 'daily grant limit reached' }), { status: 429, headers: { 'content-type': 'application/json' } })
+        if (path.endsWith('ghost%40hypercomb.com')) return new Response('not authorized', { status: 401 })
+        return null
+      },
+    })
+    const s = over(net)
+    await expect(s.grant(HOST, ANA, { keys: ['nope'] })).rejects.toMatchObject({ code: 'refused', detail: 'bad keys' })
+    await expect(s.grant(HOST, ANA, { keys: [] })).rejects.toMatchObject({ code: 'refused', detail: 'bad keys' })
+    await expect(s.grant(HOST, ANA, { keys: ['a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64), 'd'.repeat(64)] })).rejects.toMatchObject({ code: 'refused', detail: 'bad keys' })
+    await expect(s.grant(HOST, 'not an address', { keys: [getPublicKey(ana)] })).rejects.toMatchObject({ code: 'refused', detail: 'bad address' })
+    await expect(s.grant(HOST, ANA, { keys: [getPublicKey(ana)], copyTo: 'nowhere' })).rejects.toMatchObject({ code: 'refused', detail: 'bad copy address' })
+    await expect(s.revoke(HOST, '@')).rejects.toMatchObject({ code: 'refused', detail: 'bad address' })
+    expect(net.calls).toHaveLength(0) // nothing was signed or sent
+    await expect(s.grant(HOST, 'zone@elsewhere.example', { keys: [getPublicKey(ana)] })).rejects.toMatchObject({ code: 'refused', detail: "not this host's zone" })
+    await expect(s.grant(HOST, 'many@hypercomb.com', { keys: [getPublicKey(ana)] })).rejects.toMatchObject({ code: 'limit', detail: 'daily grant limit reached' })
+    await expect(s.grant(HOST, 'ghost@hypercomb.com', { keys: [getPublicKey(ana)] })).rejects.toMatchObject({ code: 'unauthorized' })
+    expect(net.calls).toHaveLength(3)
+  })
+
+  it('end to end through the real Worker: an admin gives ana an address, her key lists and reads it, a revoke takes it back', async () => {
+    const h = host({ ADMIN_KEYS: getPublicKey(jaime) })
+    const admin = service(h, signerFor(jaime))
+    expect((await admin.mailboxes()).map(box => box.address)).toEqual([ME])
+    expect(admin.hostsRun()).toEqual([{ origin: HOST, zones: ['hypercomb.com'] }])
+    const hers = service(h, signerFor(ana))
+    expect(await hers.mailboxes()).toEqual([])
+    expect(hers.hostsRun()).toEqual([])
+
+    const stored = await admin.grant(HOST, ANA, { keys: [{ key: getPublicKey(ana), can: ['read', 'mark', 'send'] }], name: 'Ana' })
+    expect(stored).toMatchObject({ address: ANA, keys: [{ key: getPublicKey(ana), can: ['read', 'mark', 'send'] }], name: 'Ana', source: 'grant', by: getPublicKey(jaime) })
+    expect(typeof stored.at).toBe('number')
+    expect(await hers.mailboxes()).toEqual([{ address: ANA, name: 'Ana', host: HOST, can: ['read', 'mark', 'send'] }])
+    const listed = await admin.grants(HOST)
+    expect(listed.zones).toEqual(['hypercomb.com'])
+    expect(listed.grants.map(g => [g.address, g.source])).toEqual([[ANA, 'grant'], [ME, 'secret'], ['leanne@hypercomb.com', 'secret']])
+    expect(listed.grants[1]).toMatchObject({ keys: [{ key: getPublicKey(jaime), can: MAIL_ACTS }], name: 'Jaime' })
+
+    // Mail to her is sealed to her key from now on, and she reads it.
+    await h.arrive('From: bo@example.org\r\nSubject: for ana\r\n\r\nhello ana\r\n', ANA)
+    const [item] = (await hers.list(ANA, 'box')).items
+    expect((await hers.read(ANA, item!.sig)).text).toBe('hello ana')
+
+    // A key that is not an admin is told nothing; the host's refusals arrive as refused, with its words.
+    await expect(service(h, signerFor(leanne)).grants(HOST)).rejects.toMatchObject({ code: 'unauthorized' })
+    await expect(admin.grant(HOST, 'x@elsewhere.example', { keys: [getPublicKey(ana)] })).rejects.toMatchObject({ code: 'refused', detail: "not this host's zone" })
+    await expect(admin.grant(HOST, 'y@hypercomb.com', { keys: [getPublicKey(ana)], name: 'N'.repeat(65) })).rejects.toMatchObject({ code: 'refused', detail: 'bad name' })
+
+    // A grant is the address's WHOLE record: given over the host's own entry for jaime, its keys, name and copy
+    // replace the secret's while it stands; revoked, the secret's entry stands again, name and all.
+    await admin.grant(HOST, ME, { keys: [getPublicKey(jaime), getPublicKey(ana)], name: 'Jaime W', copyTo: 'copy@example.org' })
+    expect((await admin.grants(HOST)).grants.find(g => g.address === ME)).toMatchObject({ keys: [{ key: getPublicKey(jaime), can: MAIL_ACTS }, { key: getPublicKey(ana), can: MAIL_ACTS }], name: 'Jaime W', copyTo: 'copy@example.org', source: 'grant' })
+    expect((await hers.mailboxes()).map(box => [box.address, box.name])).toEqual([[ANA, 'Ana'], [ME, 'Jaime W']])
+    await admin.revoke(HOST, ME)
+    expect((await admin.grants(HOST)).grants.find(g => g.address === ME)).toMatchObject({ keys: [{ key: getPublicKey(jaime), can: MAIL_ACTS }], name: 'Jaime', source: 'secret' })
+    expect((await hers.mailboxes()).map(box => box.address)).toEqual([ANA])
+
+    await admin.revoke(HOST, ANA)
+    expect(await hers.mailboxes()).toEqual([])
+    expect((await admin.grants(HOST)).grants.map(g => g.address)).toEqual([ME, 'leanne@hypercomb.com'])
+    await expect(admin.revoke(HOST, ANA)).rejects.toMatchObject({ code: 'not-found' })
+    await expect(admin.revoke(HOST, ME)).rejects.toMatchObject({ code: 'conflict' })
+    // What arrived stays exactly where it was.
+    expect((await h.MAIL.list({ prefix: await sha256Hex(`mail:${ANA}`) })).objects).toHaveLength(1)
+  })
+})

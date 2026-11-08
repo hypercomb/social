@@ -1,10 +1,12 @@
 // The hypercomb.com mail server, as a Cloudflare Worker. It is always up, so mail never waits on a
-// machine being on. Any zone can run the same file: who lives on it is the MAIL_CONFIG secret.
+// machine being on. Any zone can run the same file: who lives on it is the MAIL_CONFIG secret, plus
+// whatever an admin key has GRANTED from the hive since (grants/ in the bucket — no secret edit, no redeploy).
 //
 //   RECEIVE  Email Routing hands each message to email(). It is encrypted to the recipient's keys
 //            (seal.js, envelope v2) and filed in a private R2 bucket. If it cannot be stored, a copy
 //            address catches it; if there is none, the sender is told with a bounce — never lost silently.
-//   WHO      GET    /mail/me                                    { addresses, names } — the signer's own only
+//   WHO      GET    /mail/me                                    { addresses, names, can, admin, zones? } — the signer's own only;
+//                                                               admin = may grant here; zones = the host's zones, said to admins only
 //   READ     GET    /mail/{box,sent,drafts}/<address>[?limit=&cursor=]
 //                                                               { items: [{ sig, at, v, meta, wraps?, marks }], cursor }
 //            GET    /mail/{box,sent,drafts}/<address>/<sig>     the sealed envelope bytes
@@ -18,6 +20,12 @@
 //            A write (POST, PUT, DELETE) spends its event: the same signed request a second time answers 409.
 //            Before the signer is known to own the address every refusal is the same `401 not authorized`,
 //            reached by the same work, so a stranger cannot tell a real address from a ghost.
+//   GRANT    GET    /mail/grants                                { zones, grants: { address: { keys, name?, copyTo?, source, by?, at? } } }
+//            PUT    /mail/grants/<address>                      { keys, name?, copyTo? } → the stored grant; REPLACES the address's grant
+//            DELETE /mail/grants/<address>                      204; the address's mail stays as it is, the secret's entry (if any) stands again
+//            Admin routes: only a key in ADMIN_KEYS ∪ MAIL_CONFIG.admins may ask, and everyone else is told
+//            "not authorized" by the same work. A grant is the address's WHOLE record (keys, name, copy) and wins
+//            over the secret's entry while it exists; nothing that already arrived is touched by a grant or a revoke.
 //
 // The bucket holds, per pool = sha256('mail:<address>' | 'mail-sent:<address>' | 'mail-draft:<address>'):
 //   <pool>/<sig>              the sealed envelope; customMetadata { at, v, wraps, meta } (meta sealed too)
@@ -25,7 +33,9 @@
 //                             the same JSON rides in its customMetadata.marks so a page of marks lists in one call
 //   trash/<pool>/<sig>        a deleted envelope, as it was; trash/marks/<pool>/<sig> its marks + { deletedAt, by }.
 //                             Purged by an R2 lifecycle rule on the trash/ prefix (wrangler.toml says how), never by code.
-//   c/<pool>/<day>            the day's send count;  d/<inbox pool>/<day>  the address's delete count
+//   grants/<address>          who lives here, granted from the hive: PLAIN JSON { v, keys, name?, copyTo?, by, at } — public keys,
+//                             a name, a copy address, nothing sealed; the same JSON in customMetadata.grant so one list reads them all
+//   c/<pool>/<day>            the day's send count;  d/<inbox pool>/<day>  the address's delete count;  g/<day>  the host's grant count
 //   n/<minute>/<event id>     a spent write event, kept a few minutes (past the signature's freshness), then swept
 // The server can read none of the mail. It does see each message in the clear while email() or
 // send() runs: that is inherent to receiving and sending mail at all. It never logs content or keys.
@@ -41,11 +51,15 @@
 //     copyTo         optional { "<address>": "<verified address>" }; per recipient on purpose,
 //                    so one person's mail is never copied to another person's inbox
 //     names          optional { "<address>": "Display Name" } — sent as From: Name <address>
+//     admins         optional [ "<hex>", … ]: keys that may grant addresses here, unioned with ADMIN_KEYS
 //   MAIL_KEYS / COPY_TO / MAIL_NAMES   the same three as plain vars, for a dev run; the secret wins
+//   ADMIN_KEYS       comma-separated hex keys that may grant (a var or a secret, both read as env.ADMIN_KEYS); none means no granting
+//   MAIL_ZONES       comma-separated zones a grant may name besides the request's own hostname; none means the hostname alone
 //   ALLOWED_ORIGINS  comma-separated origins the reader may call from (CORS); none means none
 //   MAX_STORE_BYTES  the largest message stored (default 10 MiB; the Worker holds it in memory)
 //   MAX_SEND_PER_DAY messages one address may send per UTC day (default 100)
 //   MAX_DELETE_PER_DAY messages one address may delete per UTC day (default 200): a brake on a leaked key
+//   MAX_GRANTS_PER_DAY grants the whole host takes per UTC day (default 100): the same brake on a leaked admin key
 
 import { normalizeAddress, poolMeaning } from '../mail-address.js'
 import { MAX_RECIPIENT_KEYS, sealMessage, sha256Hex } from './seal.js'
@@ -58,9 +72,13 @@ import { verifyNip98 } from './nip98.js'
 const DEFAULT_MAX_STORE = 10 * 1024 * 1024
 const DEFAULT_SEND_PER_DAY = 100
 const DEFAULT_DELETE_PER_DAY = 200
+const DEFAULT_GRANTS_PER_DAY = 100
 const MAX_SEND_BODY = 10 * 1024 * 1024 // 6 MiB of attachments is 8 MiB of base64, with room for the text
 const MAX_DRAFT_BODY = 1024 * 1024
 const MAX_MARKS_BODY = 1024
+const MAX_GRANT_BODY = 4096 // three keys, a name and a copy address are a few hundred bytes
+const GRANTS_PREFIX = 'grants/'
+const PEOPLE_CACHE_MS = 10_000 // how long an isolate trusts its last reading of the grants
 const MAX_RECIPIENTS = 20 // Cloudflare takes 50; a person writing mail does not need that many
 const MAX_ATTACHMENTS = 10
 const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024 // decoded, all attachments together
@@ -83,13 +101,13 @@ const enc = new TextEncoder()
 const dec = new TextDecoder()
 
 // WHO LIVES HERE is a per-deployment setting, not code: an operator's addresses, the keys that own them and
-// where copies go sit in ONE secret, MAIL_CONFIG (JSON { keys, copyTo, names }), so they never enter the
+// where copies go sit in ONE secret, MAIL_CONFIG (JSON { keys, copyTo, names, admins }), so they never enter the
 // repository and survive every deploy. The plain vars MAIL_KEYS / COPY_TO / MAIL_NAMES still work for a dev
-// run; the secret wins when both are set.
+// run; the secret wins when both are set. The bucket's grants (below) add to it at runtime.
 const settingsOf = env => {
   try {
     const parsed = JSON.parse(env.MAIL_CONFIG || '')
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return { keys: parsed.keys, copyTo: parsed.copyTo, names: parsed.names }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return { keys: parsed.keys, copyTo: parsed.copyTo, names: parsed.names, admins: parsed.admins }
   } catch { /* no secret, or not JSON: the vars decide */ }
   return { keys: env.MAIL_KEYS, copyTo: env.COPY_TO, names: env.MAIL_NAMES }
 }
@@ -102,7 +120,88 @@ const mapOf = value => {
   } catch { return {} }
 }
 
-const keysOf = env => mapOf(settingsOf(env).keys)
+// Who may grant an address here: ADMIN_KEYS (a var or a secret) and MAIL_CONFIG.admins, hex public keys. None
+// means no granting — every grant route then answers like a ghost. As powerful as editing the secret was.
+const adminsOf = (env, settings) => {
+  const listed = [...String(env.ADMIN_KEYS || '').split(','), ...(Array.isArray(settings.admins) ? settings.admins : [])]
+  return new Set(listed.map(key => String(key ?? '').trim().toLowerCase()).filter(key => KEY_RE.test(key)))
+}
+
+// ── who lives here: the secret plus the grants ───────────────────────────────────────────────────
+
+// A grant is one object per address, grants/<address>, written by an admin from the hive. Its record rides in
+// customMetadata.grant too, so one list reads every grant without a GET each (three keys, a name and a copy
+// address stay well under R2's 2 KB); the body is the fallback for an object whose metadata is missing.
+const grantKey = address => GRANTS_PREFIX + address
+
+const grantOf = value => {
+  try {
+    const record = typeof value === 'string' ? JSON.parse(value) : value
+    return record && typeof record === 'object' && Array.isArray(record.keys) ? record : null
+  } catch { return null }
+}
+
+async function readGrants(bucket) {
+  const grants = {}
+  let cursor
+  for (let page = 0; page < 10; page++) {
+    const list = await bucket.list({ prefix: GRANTS_PREFIX, limit: 1000, cursor, include: ['customMetadata'] })
+    for (const object of list.objects) {
+      const address = object.key.slice(GRANTS_PREFIX.length)
+      if (normalizeAddress(address) !== address) continue
+      let record = grantOf(object.customMetadata?.grant)
+      if (!record) {
+        const body = await bucket.get(object.key)
+        try { record = body ? grantOf(await body.json()) : null } catch { record = null }
+      }
+      if (record) grants[address] = record
+    }
+    if (!list.truncated) break
+    cursor = list.cursor
+  }
+  return grants
+}
+
+// The grants an isolate last read, per bucket binding (so two buckets never share), trusted for at most
+// PEOPLE_CACHE_MS and dropped the moment this isolate writes one — its own grant is seen at once.
+const grantsCache = new WeakMap()
+let warnedGrants = false
+
+// The people of this host, read ONCE per request or receive and handed down: the secret's entries plus the
+// bucket's grants. A grant is the address's whole record (keys, name, copy) while it exists — it is the later
+// act, so it wins; revoked, the secret's entry stands again. A bucket that cannot list leaves the secret alone
+// in charge and says so once; mail is never refused for it.
+async function peopleOf(env) {
+  const settings = settingsOf(env)
+  const bucket = env.MAIL
+  let grants = {}
+  if (bucket) {
+    const cached = grantsCache.get(bucket)
+    if (cached && Date.now() - cached.at < PEOPLE_CACHE_MS) grants = cached.grants
+    else {
+      try {
+        grants = await readGrants(bucket)
+        grantsCache.set(bucket, { at: Date.now(), grants })
+        warnedGrants = false
+      } catch (error) {
+        if (!warnedGrants) {
+          warnedGrants = true
+          console.warn('grants unavailable, the secret alone says who lives here: ' + (error?.message || error))
+        }
+      }
+    }
+  }
+  const secret = { keys: mapOf(settings.keys), copyTo: mapOf(settings.copyTo), names: mapOf(settings.names) }
+  const keys = { ...secret.keys }
+  const copyTo = { ...secret.copyTo }
+  const names = { ...secret.names }
+  for (const [address, grant] of Object.entries(grants)) {
+    keys[address] = grant.keys
+    if (grant.copyTo) copyTo[address] = grant.copyTo; else delete copyTo[address]
+    if (grant.name) names[address] = grant.name; else delete names[address]
+  }
+  return { keys, copyTo, names, grants, secret, admins: adminsOf(env, settings) }
+}
 
 // Said once per address per isolate, so a misconfiguration is visible without filling the log.
 const warnedTooMany = new Set()
@@ -114,10 +213,12 @@ const canOf = item => {
   return new Set(Array.isArray(item.can) ? item.can.filter(act => ACTS.includes(act)) : ['read'])
 }
 
+const actsOf = can => ACTS.filter(act => can.has(act))
+
 // The keys that own an address, as [{ key, can }]: one entry or a list, invalid entries skipped, a key
 // listed twice counted once (its first entry stands), at most three.
-const ownersOf = (env, address) => {
-  const listed = keysOf(env)[address]
+const ownersOf = (people, address) => {
+  const listed = people.keys[address]
   const seen = new Map()
   for (const item of Array.isArray(listed) ? listed : [listed]) {
     const key = String((item && typeof item === 'object' ? item.key : item) ?? '').trim().toLowerCase()
@@ -133,13 +234,13 @@ const ownersOf = (env, address) => {
 
 const keysFor = owners => owners.map(owner => owner.key)
 
-const copyFor = (env, address) => mapOf(settingsOf(env).copyTo)[address] || null
+const copyFor = (people, address) => people.copyTo[address] || null
 
 const clip = (value, max) => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max)
 
 // A display name goes into a From header: no control characters, no quotes or angle brackets to break out of it.
-const nameFor = (env, address) => {
-  const name = clip(String(mapOf(settingsOf(env).names)[address] ?? '').replace(/["<>\\]/g, ''), 64)
+const nameFor = (people, address) => {
+  const name = clip(String(people.names[address] ?? '').replace(/["<>\\]/g, ''), 64)
   return name || null
 }
 
@@ -437,7 +538,7 @@ function attachmentsOf(value) {
   return { list }
 }
 
-async function send(request, env, respond) {
+async function send(request, env, respond, people) {
   if (!env.EMAIL) return respond(503, 'sending is not configured')
 
   // A signature before the body: an unsigned (or badly signed) 10 MiB POST is refused without being read
@@ -450,7 +551,7 @@ async function send(request, env, respond) {
 
   // Who is sending: a key that owns the From address and may send, and nobody else.
   const from = normalizeAddress(body.from)
-  const owners = from ? ownersOf(env, from) : []
+  const owners = from ? ownersOf(people, from) : []
   const sender = owners.find(entry => entry.key === String(signer.pubkey).toLowerCase())
   if (!sender) return respond(...NOT_AUTHORIZED)
   if (signer.payloadTag !== await sha256Hex(raw)) return respond(401, 'auth payload tag mismatch')
@@ -503,7 +604,7 @@ async function send(request, env, respond) {
   const capped = await countToday(env, `c/${sentPool}/${today()}`, cap, 'daily send limit reached')
   if (capped) return respond(...capped)
 
-  const name = nameFor(env, from)
+  const name = nameFor(people, from)
   const message = { from: name ? { email: from, name } : from, to, subject }
   if (text) message.text = text
   if (html) message.html = html
@@ -642,11 +743,124 @@ async function listFolder(url, env, respond, { folder, pool }) {
   return respond(200, JSON.stringify({ items, cursor: page.truncated ? page.cursor : null }), 'application/json')
 }
 
+// ── granting: an operator gives an address to a key, from the hive ───────────────────────────────
+
+// The zones a grant may name: the request's own hostname and MAIL_ZONES. Said to admins only.
+const zonesOf = (url, env) => [...new Set([url.hostname, ...String(env.MAIL_ZONES || '').split(',').map(zone => zone.trim().toLowerCase())].filter(Boolean))]
+
+// The keys of a grant as the secret spells them — "<hex>" or { key, can } — normalized for storing: lowercase,
+// a key listed twice counted once, `can` the full five when none is given, read-only when it is not a list (the
+// secret's rule), refused when it names an act that does not exist. One to three keys, else null.
+function grantKeysOf(value) {
+  if (!Array.isArray(value) || !value.length) return null
+  const seen = new Map()
+  for (const item of value) {
+    const key = String((item && typeof item === 'object' ? item.key : item) ?? '').trim().toLowerCase()
+    if (!KEY_RE.test(key)) return null
+    let can = ACTS
+    if (item && typeof item === 'object' && 'can' in item) {
+      if (!Array.isArray(item.can)) can = ['read']
+      else if (item.can.some(act => !ACTS.includes(act))) return null
+      else can = ACTS.filter(act => item.can.includes(act))
+    }
+    if (!seen.has(key)) seen.set(key, { key, can })
+  }
+  return seen.size > MAX_RECIPIENT_KEYS ? null : [...seen.values()]
+}
+
+// A display name as the From header will carry it (nameFor's cleaning): undefined when none was given, false
+// when it was never a string or what is left of it is longer than 64 characters.
+function grantNameOf(value) {
+  if (value === undefined || value === null || value === '') return undefined
+  if (typeof value !== 'string') return false
+  const name = value.replace(/["<>\\]/g, '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim()
+  return name.length > 64 ? false : (name || undefined)
+}
+
+// Everything the operator sees, by address: the secret's entries (unchangeable here, `source: "secret"`) and
+// the grants, each with its keys as they stand. Public keys and names — nothing sealed is in this answer.
+function listGrants(respond, { people, zones }) {
+  const grants = {}
+  for (const address of Object.keys(people.keys).sort()) {
+    if (normalizeAddress(address) !== address) continue
+    const entry = { keys: ownersOf(people, address).map(owner => ({ key: owner.key, can: actsOf(owner.can) })) }
+    const name = nameFor(people, address)
+    if (name) entry.name = name
+    const copyTo = copyFor(people, address)
+    if (copyTo) entry.copyTo = copyTo
+    const grant = people.grants[address]
+    entry.source = grant ? 'grant' : 'secret'
+    if (grant) { entry.by = grant.by; entry.at = grant.at }
+    grants[address] = entry
+  }
+  return respond(200, JSON.stringify({ zones, grants }), 'application/json')
+}
+
+// A grant REPLACES the address's grant (not a merge) and is stored twice over — the body and customMetadata.grant
+// — so the people list reads it without a GET. The event is spent like every write's; a daily cap for the whole
+// host stands behind the admin key as the send cap stands behind an owner's.
+async function putGrant(request, env, respond, { address, zones, event }) {
+  const read = await bodyFor(request, env, event, MAX_GRANT_BODY)
+  if (read.refuse) return respond(...read.refuse)
+  if (!zones.includes(address.slice(address.indexOf('@') + 1))) return respond(422, 'not this host\'s zone')
+  const keys = grantKeysOf(read.body.keys)
+  if (!keys) return respond(422, 'bad keys')
+  const name = grantNameOf(read.body.name)
+  if (name === false) return respond(422, 'bad name')
+  let copyTo
+  if (read.body.copyTo !== undefined && read.body.copyTo !== null && read.body.copyTo !== '') {
+    copyTo = typeof read.body.copyTo === 'string' ? normalizeAddress(read.body.copyTo) : null
+    if (!copyTo) return respond(422, 'bad copy address')
+  }
+  const cap = Number(env.MAX_GRANTS_PER_DAY) > 0 ? Number(env.MAX_GRANTS_PER_DAY) : DEFAULT_GRANTS_PER_DAY
+  const capped = await countToday(env, `g/${today()}`, cap, 'daily grant limit reached')
+  if (capped) return respond(...capped)
+  const record = { v: 1, keys }
+  if (name) record.name = name
+  if (copyTo) record.copyTo = copyTo
+  record.by = String(event.pubkey).toLowerCase()
+  record.at = Date.now()
+  const json = JSON.stringify(record)
+  try {
+    await env.MAIL.put(grantKey(address), json, { customMetadata: { grant: json } })
+  } catch (error) {
+    console.error('could not store the grant: ' + (error?.message || error))
+    return respond(503, 'mailbox storage unavailable')
+  }
+  grantsCache.delete(env.MAIL)
+  return respond(200, JSON.stringify({ address, ...record }), 'application/json')
+}
+
+// A revoke deletes the grant object and nothing else: what arrived stays sealed to the keys of its time, and the
+// secret's entry, if there is one, stands again. The bucket is asked, not the cache, so a grant another isolate
+// wrote a moment ago is found too.
+async function revokeGrant(env, respond, { address, event, people }) {
+  let present
+  try {
+    present = await env.MAIL.head(grantKey(address))
+  } catch (error) {
+    console.error('could not look up the grant: ' + (error?.message || error))
+    return respond(503, 'mailbox storage unavailable')
+  }
+  if (!present) return respond(...(Object.hasOwn(people.secret.keys, address) ? [409, 'listed in the host\'s configuration, not a grant'] : [404, 'no grant']))
+  const spent = await spend(env, event)
+  if (spent) return respond(...spent)
+  try {
+    await env.MAIL.delete(grantKey(address))
+  } catch (error) {
+    console.error('could not revoke the grant: ' + (error?.message || error))
+    return respond(503, 'mailbox storage unavailable')
+  }
+  grantsCache.delete(env.MAIL)
+  return respond(204, null)
+}
+
 export default {
   async email(message, env) {
+    const people = await peopleOf(env)
     const to = normalizeAddress(message.to)
-    const owners = to ? ownersOf(env, to) : []
-    const copy = to ? copyFor(env, to) : null
+    const owners = to ? ownersOf(people, to) : []
+    const copy = to ? copyFor(people, to) : null
     const limit = Number(env.MAX_STORE_BYTES) > 0 ? Number(env.MAX_STORE_BYTES) : DEFAULT_MAX_STORE
 
     let stored = false
@@ -688,7 +902,9 @@ export default {
     if (request.method === 'OPTIONS') return cors ? new Response(null, { status: 204, headers: cors }) : new Response(null, { status: 403 })
 
     const url = new URL(request.url)
-    if (url.pathname === '/mail/send') return request.method === 'POST' ? send(request, env, respond) : respond(405, 'POST only')
+    // Who lives here, once for this request (the secret's entries and the grants, the latter at most 10 s old).
+    const people = await peopleOf(env)
+    if (url.pathname === '/mail/send') return request.method === 'POST' ? send(request, env, respond, people) : respond(405, 'POST only')
 
     // Which addresses does the signing key own? Any valid signature may ask, and it is told only about its own
     // addresses — never another key's — so a stranger learns nothing.
@@ -699,16 +915,39 @@ export default {
       const signer = String(who.pubkey).toLowerCase()
       const names = {}
       const can = {}
-      for (const address of Object.keys(keysOf(env)).sort()) {
+      for (const address of Object.keys(people.keys).sort()) {
         if (normalizeAddress(address) !== address) continue
-        const mine = ownersOf(env, address).find(entry => entry.key === signer)
+        const mine = ownersOf(people, address).find(entry => entry.key === signer)
         if (!mine) continue
-        can[address] = ACTS.filter(act => mine.can.has(act))
-        const name = nameFor(env, address)
+        can[address] = actsOf(mine.can)
+        const name = nameFor(people, address)
         if (name) names[address] = name
       }
-      // `can` says what this key may do per address, so a reader can leave out what would be refused.
-      return respond(200, JSON.stringify({ addresses: Object.keys(can), names, can }), 'application/json')
+      // `can` says what this key may do per address, so a reader can leave out what would be refused; `admin`
+      // whether it may grant here, and then `zones` what it may grant on — a stranger is told neither.
+      const admin = people.admins.has(signer)
+      const answer = { addresses: Object.keys(can), names, can, admin }
+      if (admin) answer.zones = zonesOf(url, env)
+      return respond(200, JSON.stringify(answer), 'application/json')
+    }
+
+    // Granting (admin routes). The admin list is held the way owners are — authorize() checks the signature in
+    // full first — so a non-admin is told "not authorized" by the same work, whatever the address.
+    const granting = /^\/mail\/grants(?:\/([^/]+))?$/.exec(url.pathname)
+    if (granting) {
+      const [, encoded] = granting
+      const allowed = encoded ? ['PUT', 'DELETE'] : ['GET']
+      if (!allowed.includes(request.method)) return respond(405, `${allowed.join(' or ')} only`)
+      let address = null
+      if (encoded) {
+        try { address = normalizeAddress(decodeURIComponent(encoded)) } catch { /* malformed */ }
+        if (!address) return respond(422, 'bad address')
+      }
+      const auth = await authorize(request, [...people.admins].map(key => ({ key })))
+      if (auth.refuse) return respond(...auth.refuse)
+      const context = { address, zones: zonesOf(url, env), event: auth.event, people }
+      if (!encoded) return listGrants(respond, context)
+      return request.method === 'PUT' ? putGrant(request, env, respond, context) : revokeGrant(env, respond, context)
     }
 
     const match = /^\/mail\/(box|sent|drafts)\/([^/]+)(?:\/([a-f0-9]{64})(\/marks)?)?$/.exec(url.pathname)
@@ -728,7 +967,7 @@ export default {
     // in full before it looks at who owns the address), so the answer never says which addresses exist.
     // Who is asking also comes before anything about the body: a stranger's PUT answered 415 or 413 where
     // a ghost gets 401 would say the same. A PUT is then held to the exact body it carries.
-    const owners = ownersOf(env, address)
+    const owners = ownersOf(people, address)
     const pool = await poolOf(address, folder)
     const act = method === 'GET' ? 'read' : method === 'DELETE' ? 'delete' : marksPath ? 'mark' : 'draft'
     const auth = await authorize(request, owners, act)

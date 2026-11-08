@@ -3,8 +3,9 @@
 // THE MAIL CLIENT'S HANDS. It talks to the mail Worker (hypercomb-relay/
 // mail-worker/, documentation/inbound-mail.md, mail-plan.md §3): which addresses
 // does this key own (and under what names), what is in a box, one message, its
-// marks, forgetting it, drafts, and send. Every request is signed (NIP-98) by
-// the hive's NostrSigner; every message is opened through it.
+// marks, forgetting it, drafts, and send — and, for the key that RUNS a host,
+// the addresses given there (grants). Every request is signed (NIP-98) by the
+// hive's NostrSigner; every message is opened through it.
 //
 // ── THE KEY NEVER ARRIVES HERE ──────────────────────────────────────────────
 //
@@ -70,6 +71,11 @@ export const MAIL_READ_CAPS = Object.freeze({
   rows: 100,
   /** Addresses taken from /mail/me, across every host. */
   addresses: 50,
+  /** Grants read from one host's /mail/grants, and the keys kept per grant (the Worker stores at most 3). */
+  grants: 50,
+  grantKeys: 3,
+  /** Zones a host says it serves. */
+  zones: 16,
 })
 
 /** The owner's marks on a message. Plain on the host: they say read/hidden/flagged, never what the mail says. */
@@ -108,6 +114,41 @@ export interface Mailbox {
   readonly host: string
   /** A host from before roles says nothing, and then every key it knows could do everything: all five. */
   readonly can: readonly MailAct[]
+}
+
+/** A host this key runs: it said `admin: true` to /mail/me, and these are the zones an address may be given on there. */
+export interface HostRun {
+  readonly origin: string
+  readonly zones: readonly string[]
+}
+
+/** One key an address is given to, and what it may do there. */
+export interface GrantKey {
+  readonly key: string
+  readonly can: readonly MailAct[]
+}
+
+/**
+ * An address on a host and who holds it, as the host lists it to the key that runs it (the admin
+ * contract, `GET /mail/grants`). `source: 'secret'` is an entry of the host's own configuration: listed
+ * so the operator sees everything, changed nowhere but there.
+ */
+export interface MailGrant {
+  readonly address: string
+  readonly keys: readonly GrantKey[]
+  readonly name?: string
+  readonly copyTo?: string
+  readonly source: 'grant' | 'secret'
+  /** The admin key that gave it, and when (ms) — on a grant, not on a secret entry. */
+  readonly by?: string
+  readonly at?: number
+}
+
+/** What an operator gives: one to three public keys (bare = every act), a name to send under, a copy address. */
+export interface GrantInput {
+  readonly keys: readonly (string | { readonly key: string; readonly can?: readonly MailAct[] })[]
+  readonly name?: string
+  readonly copyTo?: string
 }
 
 /**
@@ -322,6 +363,60 @@ const actsOf = (can: Record<string, unknown> | null, address: string): readonly 
   return MAIL_ACTS.filter(act => listed.includes(act))
 }
 
+/** The zones a host gives addresses on: hostnames, each once, its own at the least. */
+const zonesOf = (value: unknown, origin: string): string[] => {
+  const zones: string[] = []
+  for (const raw of Array.isArray(value) ? value : []) {
+    const zone = String(raw).trim().toLowerCase()
+    if (HOSTNAME.test(zone) && !zones.includes(zone)) zones.push(zone)
+    if (zones.length >= MAIL_READ_CAPS.zones) break
+  }
+  // A host serves its own hostname at the least (the Worker says `url.hostname` first).
+  if (!zones.length) { try { zones.push(new URL(origin).hostname) } catch { /* the origin is not a URL */ } }
+  return zones
+}
+
+/** An address as the Worker normalizes it: lowercase, one @, a hostname after it. */
+const ADDRESS = /^[^\s@]{1,64}@[^\s@]{1,253}$/
+const addressOf = (value: unknown): string | null => {
+  const address = String(value ?? '').trim().toLowerCase()
+  return ADDRESS.test(address) && HOSTNAME.test(address.slice(address.lastIndexOf('@') + 1)) ? address : null
+}
+
+/**
+ * A grant as the host lists it, read through the caps: 3 keys, the five acts, a name of 64, and nothing else —
+ * a field this client does not know (the Worker's `v`, anything later) is dropped, never carried.
+ */
+const grantOf = (address: string, value: unknown): MailGrant | null => {
+  const at = addressOf(address)
+  if (!at || !value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = value as Record<string, unknown>
+  const keys: GrantKey[] = []
+  for (const item of Array.isArray(raw['keys']) ? raw['keys'] : []) {
+    const key = String((item && typeof item === 'object' ? (item as { key?: unknown }).key : item) ?? '').toLowerCase()
+    if (!SIG.test(key) || keys.some(k => k.key === key)) continue
+    const can = item && typeof item === 'object' && 'can' in (item as object) ? (item as { can?: unknown }).can : undefined
+    keys.push({ key, can: can === undefined ? MAIL_ACTS : Array.isArray(can) ? MAIL_ACTS.filter(act => can.includes(act)) : ['read'] })
+    if (keys.length >= MAIL_READ_CAPS.grantKeys) break
+  }
+  // The host's own configuration may list an address with no valid key: shown, so the operator sees it is
+  // broken (nothing can be done to it here). A grant with no key is not a grant.
+  if (!keys.length && raw['source'] !== 'secret') return null
+  const name = str(raw['name'])?.trim().slice(0, 64)
+  const copyTo = addressOf(raw['copyTo'])
+  const by = str(raw['by'])?.toLowerCase()
+  const when = num(raw['at'])
+  return {
+    address: at,
+    keys,
+    ...(name ? { name } : {}),
+    ...(copyTo ? { copyTo } : {}),
+    source: raw['source'] === 'secret' ? 'secret' : 'grant',
+    ...(by && SIG.test(by) ? { by } : {}),
+    ...(when !== undefined ? { at: when } : {}),
+  }
+}
+
 const randomHex = (bytes: number): string =>
   Array.from(crypto.getRandomValues(new Uint8Array(bytes)), b => b.toString(16).padStart(2, '0')).join('')
 
@@ -469,6 +564,8 @@ export class MailService extends EventTarget {
   // Routing, not mail: the host that answered for an address. Learned from /mail/me, or from the
   // first host that served it.
   readonly #served = new Map<string, string>()
+  /** The hosts that said `admin: true` on the last /mail/me round: where this key may give addresses. */
+  #run: readonly HostRun[] = []
 
   /** `hosts`: the mail hosts to ask (one origin or zone, or a list). None given = the hosts this hive carries. */
   constructor(io: Partial<MailIo> = {}, hosts?: string | readonly string[]) {
@@ -582,7 +679,7 @@ export class MailService extends EventTarget {
     if (!hosts.length) throw new MailError('no-hosts')
     const answers = await Promise.all(hosts.map(async origin => {
       try {
-        const body = await this.#json<{ addresses?: unknown; names?: unknown; can?: unknown }>(await this.#request(held, origin, '/mail/me'))
+        const body = await this.#json<{ addresses?: unknown; names?: unknown; can?: unknown; admin?: unknown; zones?: unknown }>(await this.#request(held, origin, '/mail/me'))
         return { origin, body }
       } catch (error) {
         return { origin, error: error instanceof MailError ? error : new MailError('unavailable') }
@@ -593,8 +690,13 @@ export class MailService extends EventTarget {
       throw errors.find(e => e.code !== 'unavailable') ?? errors[0] ?? new MailError('unavailable')
     }
     const found = new Map<string, Mailbox>()
+    const run: HostRun[] = []
     for (const answer of answers) {
       if (!('body' in answer) || !answer.body) continue
+      // A host that says `admin: true` is one this key runs. It may list no address for the key at all —
+      // the operator before giving themself one — and that is not an error: the window reaches the Host
+      // pane from an empty list.
+      if (answer.body.admin === true) run.push({ origin: answer.origin, zones: zonesOf(answer.body.zones, answer.origin) })
       const names = answer.body.names && typeof answer.body.names === 'object' ? answer.body.names as Record<string, unknown> : {}
       const can = answer.body.can && typeof answer.body.can === 'object' ? answer.body.can as Record<string, unknown> : null
       const addresses = Array.isArray(answer.body.addresses)
@@ -610,7 +712,13 @@ export class MailService extends EventTarget {
         this.#served.set(key, answer.origin)
       }
     }
+    this.#run = run
     return [...found.values()].sort((a, b) => (a.address < b.address ? -1 : a.address > b.address ? 1 : 0))
+  }
+
+  /** The hosts this key runs, from the last `mailboxes()` round: where it may give an address, and on which zones. */
+  hostsRun(): readonly HostRun[] {
+    return this.#run
   }
 
   /** The addresses this key owns. Empty means no host knows this key. */
@@ -766,6 +874,76 @@ export class MailService extends EventTarget {
   /** Forgets a draft. */
   async removeDraft(address: string, sig: string): Promise<void> {
     return this.remove(address, 'drafts', sig)
+  }
+
+  // ── the host you run: granted addresses ─────────────────────────────────
+  //
+  // The operator gives an address to a key from the desk, over the same signed routes, instead of
+  // editing the host's secret. The host is not trusted with the desk's memory: an answer is read
+  // through the caps (at most 50 grants, 3 keys each, the five acts, a name of 64), and a refusal is
+  // the same MailError every other route gives (a 422 is `refused` with the host's reason as detail).
+
+  /** Every address on a host this key runs, with its keys, and the zones the host gives addresses on. */
+  async grants(host: string): Promise<{ zones: string[]; grants: MailGrant[] }> {
+    const held = await this.#held()
+    const origin = originOf(host)
+    const body = await this.#json<{ zones?: unknown; grants?: unknown }>(await this.#request(held, origin, '/mail/grants'))
+    const listed = body.grants && typeof body.grants === 'object' && !Array.isArray(body.grants) ? body.grants as Record<string, unknown> : {}
+    const grants: MailGrant[] = []
+    for (const [address, value] of Object.entries(listed)) {
+      if (grants.length >= MAIL_READ_CAPS.grants) break
+      const grant = grantOf(address, value)
+      if (grant && !grants.some(g => g.address === grant.address)) grants.push(grant)
+    }
+    grants.sort((a, b) => (a.address < b.address ? -1 : a.address > b.address ? 1 : 0))
+    return { zones: zonesOf(body.zones, origin), grants }
+  }
+
+  /**
+   * Gives `address` on `host` to the keys named (one to three; a bare key may do everything, `can` narrows
+   * it), replacing what the address was given before. Answers the record as the host stored it. The host
+   * refuses an address off its zones, a bad key or name, and more than its day's grants (`refused`, `limit`).
+   */
+  async grant(host: string, address: string, input: GrantInput): Promise<MailGrant> {
+    const at = addressOf(address)
+    if (!at) throw new MailError('refused', 'bad address')
+    // Said here, before a byte is signed: the Worker's own rule for the keys.
+    const keys: ({ key: string; can?: readonly MailAct[] })[] = []
+    for (const item of input.keys) {
+      const key = (typeof item === 'string' ? item : item.key).trim().toLowerCase()
+      if (!SIG.test(key)) throw new MailError('refused', 'bad keys')
+      if (keys.some(k => k.key === key)) continue
+      const can = typeof item === 'string' ? undefined : item.can
+      keys.push(can === undefined ? { key } : { key, can: MAIL_ACTS.filter(act => can.includes(act)) })
+    }
+    if (!keys.length || keys.length > MAIL_READ_CAPS.grantKeys) throw new MailError('refused', 'bad keys')
+    const name = input.name?.trim()
+    const copyTo = input.copyTo?.trim() ? addressOf(input.copyTo) : undefined
+    if (copyTo === null) throw new MailError('refused', 'bad copy address')
+    const body = JSON.stringify({
+      keys: keys.map(k => (k.can ? k : k.key)),
+      ...(name ? { name } : {}),
+      ...(copyTo ? { copyTo } : {}),
+    })
+    const held = await this.#held()
+    const origin = originOf(host)
+    const stored = await this.#json<Record<string, unknown>>(await this.#request(held, origin, `/mail/grants/${encodeURIComponent(at)}`, { method: 'PUT', body }))
+    const grant = grantOf(str(stored['address']) ?? at, stored)
+    if (!grant) throw new MailError('unavailable', 'no grant record')
+    this.dispatchEvent(new CustomEvent('change', { detail: { granted: grant.address } }))
+    return grant
+  }
+
+  /**
+   * Takes a grant back. The address's mail stays exactly as it is; the host's own entry for it, if any,
+   * stands again. `not-found` when there is no grant; `conflict` when only the host's configuration lists it.
+   */
+  async revoke(host: string, address: string): Promise<void> {
+    const at = addressOf(address)
+    if (!at) throw new MailError('refused', 'bad address')
+    const held = await this.#held()
+    await this.#request(held, originOf(host), `/mail/grants/${encodeURIComponent(at)}`, { method: 'DELETE' })
+    this.dispatchEvent(new CustomEvent('change', { detail: { revoked: at } }))
   }
 
   /** Send as `request.from`. The host sends it and files a sealed copy (attachments and all) in Sent. */

@@ -277,9 +277,9 @@ test('/mail/me tells a key its own addresses, and a stranger nothing', async () 
 
   const mine = await ask(jaime)
   assert.equal(mine.status, 200)
-  assert.deepEqual(await mine.json(), { addresses: ['also-jaime@hypercomb.com', 'jaime@hypercomb.com'], names: {}, can: { 'also-jaime@hypercomb.com': ALL, 'jaime@hypercomb.com': ALL } })
-  assert.deepEqual(await (await ask(leanne)).json(), { addresses: ['leanne@hypercomb.com'], names: {}, can: { 'leanne@hypercomb.com': ALL } })
-  assert.deepEqual(await (await ask(generateSecretKey())).json(), { addresses: [], names: {}, can: {} })
+  assert.deepEqual(await mine.json(), { addresses: ['also-jaime@hypercomb.com', 'jaime@hypercomb.com'], names: {}, can: { 'also-jaime@hypercomb.com': ALL, 'jaime@hypercomb.com': ALL }, admin: false })
+  assert.deepEqual(await (await ask(leanne)).json(), { addresses: ['leanne@hypercomb.com'], names: {}, can: { 'leanne@hypercomb.com': ALL }, admin: false })
+  assert.deepEqual(await (await ask(generateSecretKey())).json(), { addresses: [], names: {}, can: {}, admin: false })
 })
 
 test('/mail/me needs a signed, fresh request and answers only GET', async () => {
@@ -315,13 +315,13 @@ test('MAIL_CONFIG (one secret) carries the keys and the copies, and wins over th
   assert.deepEqual(msg.log.forwarded, ['me@example.org'])
   const [, entry] = [...MAIL.map.entries()][0]
   assert.deepEqual((await openMessage(entry.bytes, jaime)).bytes, RAW) // sealed to the secret's key, not the var's
-  assert.deepEqual(await (await worker.fetch(request('/mail/me', jaime), env)).json(), { addresses: ['jaime@hypercomb.com'], names: {}, can: { 'jaime@hypercomb.com': ALL } })
-  assert.deepEqual(await (await worker.fetch(request('/mail/me', leanne), env)).json(), { addresses: [], names: {}, can: {} })
+  assert.deepEqual(await (await worker.fetch(request('/mail/me', jaime), env)).json(), { addresses: ['jaime@hypercomb.com'], names: {}, can: { 'jaime@hypercomb.com': ALL }, admin: false })
+  assert.deepEqual(await (await worker.fetch(request('/mail/me', leanne), env)).json(), { addresses: [], names: {}, can: {}, admin: false })
 })
 
 test('a secret that is not JSON leaves the plain vars in charge', async () => {
   const env = { MAIL: new FakeR2(), MAIL_CONFIG: '{not json', MAIL_KEYS: JSON.stringify({ 'jaime@hypercomb.com': getPublicKey(jaime) }) }
-  assert.deepEqual(await (await worker.fetch(request('/mail/me', jaime), env)).json(), { addresses: ['jaime@hypercomb.com'], names: {}, can: { 'jaime@hypercomb.com': ALL } })
+  assert.deepEqual(await (await worker.fetch(request('/mail/me', jaime), env)).json(), { addresses: ['jaime@hypercomb.com'], names: {}, can: { 'jaime@hypercomb.com': ALL }, admin: false })
 })
 
 // ── many keys per address (v2) ──────────────────────────────────────────────
@@ -366,8 +366,8 @@ test('/mail/me answers names for the signer\'s own addresses only, cleaned for a
       names: { 'jaime@hypercomb.com': 'Jaime "jwize" <x>', 'leanne@hypercomb.com': 'Leanne' },
     }),
   })
-  assert.deepEqual(await (await worker.fetch(request('/mail/me', jaime), env)).json(), { addresses: ['jaime@hypercomb.com'], names: { 'jaime@hypercomb.com': 'Jaime jwize x' }, can: { 'jaime@hypercomb.com': ALL } })
-  assert.deepEqual(await (await worker.fetch(request('/mail/me', leanne), env)).json(), { addresses: ['leanne@hypercomb.com'], names: { 'leanne@hypercomb.com': 'Leanne' }, can: { 'leanne@hypercomb.com': ALL } })
+  assert.deepEqual(await (await worker.fetch(request('/mail/me', jaime), env)).json(), { addresses: ['jaime@hypercomb.com'], names: { 'jaime@hypercomb.com': 'Jaime jwize x' }, can: { 'jaime@hypercomb.com': ALL }, admin: false })
+  assert.deepEqual(await (await worker.fetch(request('/mail/me', leanne), env)).json(), { addresses: ['leanne@hypercomb.com'], names: { 'leanne@hypercomb.com': 'Leanne' }, can: { 'leanne@hypercomb.com': ALL }, admin: false })
 })
 
 // ── the sealed meta of a received message ───────────────────────────────────

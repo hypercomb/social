@@ -105,6 +105,23 @@ Everything lives in `hypercomb-relay/mail-worker/` (`worker.js`, `seal.js`, `nip
 
 Each step touches something live and is the host owner's act; none is done by the hive.
 
+**Give addresses from the hive instead of the secret.** Once, name yourself the host's operator: put your own
+hive key (the public key the mail desk shows under **Copy key**) into `ADMIN_KEYS` — `wrangler secret put
+ADMIN_KEYS` with one or more comma-separated hex keys, or `"admins": ["<hex>"]` inside `MAIL_CONFIG` — and
+redeploy. `wrangler.toml` documents `ADMIN_KEYS` and `MAIL_ZONES` commented out on purpose: a `[vars]` entry and a
+secret of the same name collide on deploy. From then on the desk shows **Host**, and every address is given,
+changed and revoked there; nothing is redeployed for it.
+- A grant is kept in the bucket at `grants/<address>`, read by every route within 10 seconds (at once on the
+  isolate that wrote it). It may name only an address on this host's zone, or on one of `MAIL_ZONES`.
+- **A grant is the address's whole record.** Its keys, name and copy address replace the secret's for that
+  address while it exists, and a grant that names no copy means no copy. Revoke it and the secret's entry, if
+  any, stands again. The desk prefills what the host already lists, so giving an address again keeps its name and
+  copy unless you remove them.
+- Nothing that already arrived is touched by a grant or a revoke: mail stays sealed to the keys of its time.
+- At most `MAX_GRANTS_PER_DAY` (100) grant writes a day for the whole host.
+- The secret still works exactly as before, and its entries show in the Host pane marked `secret`, unchangeable
+  there.
+
 ### 2b. A participant
 
 Open the hive and type `mail` (in the bar's command stance: `/mail`, or `/` once and words bare from then on).
@@ -112,8 +129,12 @@ The word opens the desk and does nothing else (`mail.queen.ts`: it reads nothing
 address). The desk asks the hosts you carry — your Home Domain, then Your Network — and nothing else; a hive
 that carries no host is told so and offered Your Network. If this device's key owns no mailbox on any of them
 yet, the desk says so, names the hosts it asked, and shows the key's **public** half with a **Copy key** button;
-send that to whoever runs the host you want mail at, who adds it to your address under `keys`. It is a public key, safe to share; the secret half never leaves the device and
-opening mail never mints one (a device with no key is told so).
+send that to whoever runs the host you want mail at, who gives it an address from their own desk's **Host** pane
+(or, the old way, adds it under `keys` in the host's secret). It is a public key, safe to share; the secret half
+never leaves the device and opening mail never mints one (a device with no key is told so).
+
+**If you run the host yourself**, the desk says "You run {zone}: give this key an address." with one button: it
+opens the Host pane with this device's key already in the form, so your first mailbox needs no secret edit.
 
 The key is the hive's `NostrSigner` device key, kept in this browser profile's storage (or a NIP-07 extension).
 `localStorage` is per origin, so the hive on `hypercomb.io` and a dev hive on `localhost:4250` hold different
@@ -173,7 +194,8 @@ This is `worker.js` as implemented. A phone app or a native client implements ex
 
 **Auth, every route.** `Authorization: Nostr <base64 of a signed event>`: kind 27235, tags `u` = the exact URL
 (query included), `method`, and for a body `payload` = sha256 hex of the exact body bytes. Created within ±60 s
-of the Worker's clock. "The owner" of an address is any key in its `MAIL_CONFIG.keys` entry.
+of the Worker's clock. "The owner" of an address is any key in its grant, or, when it has none, in its
+`MAIL_CONFIG.keys` entry. "An admin" is any key in `ADMIN_KEYS` or `MAIL_CONFIG.admins`.
 
 - **Every write (POST, PUT, DELETE) is single-use.** The Worker records the event id; the same signed request a
   second time answers **409** `this signed request was already used` and does nothing. **Put a random
@@ -186,7 +208,10 @@ of the Worker's clock. "The owner" of an address is any key in its `MAIL_CONFIG.
 
 | route | who | answer |
 |---|---|---|
-| `GET /mail/me` | any valid signature | `{ addresses: [..], names: { address: name }, can: { address: [acts] } }`, only the signer's own |
+| `GET /mail/me` | any valid signature | `{ addresses: [..], names: { address: name }, can: { address: [acts] }, admin: bool, zones?: [..] }`, only the signer's own; `zones` (this host's hostname first, then `MAIL_ZONES`) only when `admin` is true |
+| `GET /mail/grants` | admin | `{ zones, grants: { address: { keys: [{ key, can }], name?, copyTo?, source: "grant" \| "secret", by?, at? } } }`, sorted; a broken secret entry shows `keys: []` |
+| `PUT /mail/grants/<address>` | admin | body `{ keys: ["<hex>" \| { key, can }], name?, copyTo? }`, at most 4 KB; REPLACES the grant; answers `{ address, v: 1, keys, name?, copyTo?, by, at }` |
+| `DELETE /mail/grants/<address>` | admin | 204; 404 `no grant`; 409 `listed in the host's configuration, not a grant` |
 | `GET /mail/{box,sent,drafts}/<address>?limit=&cursor=` | `read` | `{ items, cursor }`; `limit` 1–500, default 100; `cursor` null at the end |
 | `GET /mail/{box,sent,drafts}/<address>/<sig>` | `read` | the sealed envelope bytes (`application/octet-stream`); 404 if absent |
 | `PUT /mail/{box,sent}/<address>/<sig>/marks` | `mark` | body `{ read?, hidden?, flagged?, deletable? }`, booleans only (else 422); answers the merged marks; 404 if absent |
@@ -201,6 +226,15 @@ nosniff`; CORS answers only the origins in `ALLOWED_ORIGINS`, with `GET, POST, P
 **List item:** `{ sig, at, v, meta, wraps?, marks }`. `at` is the arrival time in ms; `v` is 1 or 2; `meta` is a
 sealed string; `wraps` (v2 only) is a parsed array `[{ to, epk, wk }]`; `marks` is an object or `null` (always
 `null` for drafts). Items are in the bucket's key order (by sig), **not by time**: sort by `at` yourself.
+
+**Grants.** A non-admin, signed or not, gets `401 not authorized` on every grant route, by the same work an
+admin's request takes; 405 and `422 bad address` come first because they are public rules. A grant's keys are
+1–3 after dedupe, each 64 hex; `can` absent means all five acts, a `can` that is not a list means `["read"]`, and
+a list naming an act that does not exist is `422 bad keys`. `name` is cleaned like a display name and at most 64
+characters (`422 bad name`); `copyTo` is a string address or absent (`422 bad copy address`); the address must be
+on this host's zone or `MAIL_ZONES` (`422 not this host's zone`). The PUT's event is spent before validation, so
+a replayed refusal is 409. More than `MAX_GRANTS_PER_DAY` grant writes in a UTC day is `429 daily grant limit
+reached`. A revoke asks the bucket itself, never the 10-second cache.
 
 **Marks** are stored plain (they say read/hidden/flagged, not what the mail says), merged over what was there,
 stamped with `at`; the body is at most 1 KiB.
@@ -308,8 +342,19 @@ press on that pill (`indicator:activate`) opens the window; arrival never does. 
 window has been opened once in the page's life and found a mailbox, and never behind a NIP-07 extension (a
 prompt every 90 s would be the window opening itself by another name).
 
-**Keyboard.** `j` and `k` move between rows, Enter opens the focused row, Escape steps back (compose to where it
-came from, saving first; a message to the list; then clears a search; then closes). Names are shown with
+**The Host pane.** When a host you carry answers that your key is its admin, the desk's head shows **Host**. It
+opens on the right: one section per host you run, titled by its zones, listing every address with its name, each
+key as `abcd1234…` (the whole key on hover) with what it may do, and a quiet `secret` badge on the entries the
+host's own configuration holds, which have no buttons. **Give an address** takes the name before the `@`, the zone
+(a choice only when the host has several), one to three public keys (**This device's key** adds yours), a display
+name and the five acts as boxes, all ticked. **Change** fills the form from a grant, and Save replaces it.
+**Revoke** takes two presses: the first arms it for five seconds and any other press disarms it. Every act is busy
+and worded while it runs and says what it came to. Giving an address to this device's key reopens the mailbox
+list at once, so the new address is simply there.
+
+**Keyboard.** `j` and `k` move between rows, Enter opens the focused row, Escape steps back (the Host pane to
+where it came from; compose to where it came from, saving first; a message to the list; then clears a search;
+then closes). Names are shown with
 addresses ("Jaime <jaime@hypercomb.com>"); encoded subjects and senders are decoded for display.
 
 ## 4. Templates
@@ -346,6 +391,12 @@ always `not-run`). Nothing is wired into the window and nothing runs a script an
   of them.** The recovery key should be read-only.
 - **Replays:** an eavesdropper who copies a signed write cannot use it twice; a signed GET can be replayed for the
   60-second window and re-reads the sealed mailbox (ciphertext).
+- **What a host's admin key can and cannot do.** It CAN list every address on the host with its public keys,
+  names and copy addresses; give any address to any key, which means mail arriving after that is sealed to that
+  key too; and revoke a grant, after which the address stops receiving unless the secret lists it. It CANNOT read
+  any message (nothing is sealed to it unless it is listed for that address), change the secret's entries,
+  destroy mail, or send as an address it is not listed for. It is as powerful as editing the secret was: keep it
+  on a device you trust. A second admin key is a second entry in `ADMIN_KEYS`.
 
 ## 6. Leanne's steps
 
@@ -401,7 +452,9 @@ Mail sealed before her key is listed cannot be opened by her, so steps 1–2 com
 ## 8. Decisions that wait for jwize
 
 1. Turn Cloudflare's **Email preview** off (sent bodies readable in the Activity log for about 7 days).
-2. **Deploy the Worker** (the live `jaime@` mail) and **publish the essentials revision**.
+2. **Deploy the Worker** (the live `jaime@` mail) and **publish the essentials revision**. Before the deploy, name
+   yourself the operator: `wrangler secret put ADMIN_KEYS` with your hive key, so the desk's Host pane works on the
+   live host and addresses are given there from then on.
 3. **Roles (R1 #6):** whether each owner key gets only the acts it needs; whether the recovery key is
    `can: ["read"]`; and where each owner generates and keeps one.
 4. **Leanne:** her key (`83814be5…`), her copy address, her first login.

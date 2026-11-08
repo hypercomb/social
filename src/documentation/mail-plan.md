@@ -244,3 +244,16 @@ the baked html or text only; whether a template may carry a script at all in the
   it possible; whether and how each owner generates one is theirs.
 - Where "Save to hive" places a message: the current tile (the plan), or a `mail` tile.
 - **The next envelope version (R2 #10):** the signer opens any NIP-44 payload a host hands it as a wrap or v1 meta; nothing leaks today (K must be 32 bytes, meta must be JSON and is only shown), but the domains should be separated — the Worker wraps `"hc-mail-k:" + base64(K)` and the client refuses any plaintext without that label, with v1 meta accepted only for objects older than a cutoff. Deferred: a format change, taken with the next version, not now.
+
+## 10. Granted addresses — a host makes mail available from the hive (2026-11-08)
+
+jwize: *"Mail shouldn't be hardcoded to my address. Instead you should be able make that available."* Two halves.
+The client names no host (`mail-hosts.ts`: the Home Domain, then Your Network; `no-hosts` with the door to Your
+Network when the hive carries none). And the host's people no longer need the secret: an admin key named once in
+`ADMIN_KEYS` grants, changes and revokes addresses over signed routes (`GET /mail/grants`, `PUT` and `DELETE
+/mail/grants/<address>`), the grants kept in the bucket at `grants/<address>`, and the desk's Host pane is where
+that is done. A grant is the address's whole record and wins over the secret while it exists; nothing already
+received is touched. The contract, the shapes and the refusals: `mail.md` §2a, §2d, §3 and §5.
+
+Next, not built: an INVITATION — a link the operator sends that lets a newcomer claim an address with their own key,
+so the operator never handles a key at all.

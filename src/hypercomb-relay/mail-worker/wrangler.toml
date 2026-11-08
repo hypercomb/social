@@ -35,6 +35,13 @@ name = "EMAIL"
 #
 # For a local dev run the same three may be plain vars (worker.js names them); the secret wins.
 #
+# ADDRESSES GRANTED FROM THE HIVE. An admin key (ADMIN_KEYS below, or "admins": ["<hex>", …] in the secret) may
+# also give an address to a key over the signed route PUT /mail/grants/<address>, from the mail desk — no secret
+# edit, no redeploy. A grant is kept in the bucket (grants/<address>) and is the address's whole record while it
+# exists: it wins over the secret's entry for that address, and revoking it lets the secret's entry stand again.
+# Nothing that already arrived is touched by either. An admin key is as powerful as editing this secret was:
+# keep it on a device you trust, and name a recovery one.
+#
 # THE BUCKET'S LIFECYCLE (set once, on the bucket — not in this file, and not in code a key could reach):
 #   A delete MOVES a message to trash/<pool>/<sig> (and its marks to trash/marks/…); nothing in the Worker
 #   destroys mail. Purge the trash after 30 days with a lifecycle rule on the prefix:
@@ -53,6 +60,17 @@ ALLOWED_ORIGINS = "https://hypercomb.io,http://localhost:4250"
 MAX_SEND_PER_DAY = "100"
 # Messages one address may delete (move to trash) per UTC day: the same brake for a delete.
 MAX_DELETE_PER_DAY = "200"
+# Keys that may GRANT an address from the hive (PUT and DELETE /mail/grants/<address>): comma-separated hex
+# Nostr public keys — the host owner's own hive key (the mail desk's "Copy key") and a recovery one. Public-key
+# material, so a plain var will do; the shipped file names none. Set it per deployment, here or with
+#   wrangler secret put ADMIN_KEYS
+# (left unset here rather than empty, so a secret of that name can be set instead). No key, no granting: every
+# grant route then answers a stranger's "not authorized".
+# ADMIN_KEYS = "<hex>,<hex>"
+# Zones a grant may name besides the request's own hostname, comma-separated. Unset: the hostname alone.
+# MAIL_ZONES = ""
+# Grants the whole host takes per UTC day: the brake on a leaked admin key.
+MAX_GRANTS_PER_DAY = "100"
 # The largest message stored, and (in worker.js) 6 MiB of attachments per send: both held LOW until the
 # largest receive and send are measured under `wrangler dev` against the Worker's 128 MB (R1 #14).
 # Measured in Node: 15 MiB in, 10 MiB attached out came to 171-193 MB. Raise them only after measuring.

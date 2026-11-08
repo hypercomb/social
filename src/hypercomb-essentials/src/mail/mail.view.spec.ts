@@ -10,7 +10,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
 import { MailElement, MAIL_OPEN, MAIL_UNREAD, UNREAD_INDICATOR, explain } from './mail.view.js'
-import { ALREADY_DONE, ALREADY_SENT, MAIL_LIMITS, MailError, type MailAct, type MailListItem, type MailService } from './mail.service.js'
+import { ALREADY_DONE, ALREADY_SENT, MAIL_ACTS, MAIL_LIMITS, MailError, type MailAct, type MailListItem, type MailService } from './mail.service.js'
 import { sizeLabel } from './cue.js'
 import type { SaveMessageInput, SaveMessageResult } from './mail-to-hive.js'
 import { MAIL_TEMPLATE_PART_TYPE, mailPart, type MailTemplateDocument } from './template.js'
@@ -1569,5 +1569,331 @@ describe('templates', () => {
     await settle()
     press('Forward')
     expect(Array.from(panel().querySelectorAll('.hc-mail-files .hc-mail-attachment-name')).map(n => n.textContent!.split(' · ')[0])).toEqual(['plan.pdf'])
+  })
+})
+
+// GRANTED ADDRESSES (the admin contract, the hive half): the key that runs a host gives addresses from
+// the desk — a Host button, one pane, every act under its cue, Revoke in two presses — and a key no host
+// knows yet is shown the way in from the no-mailbox pane.
+describe('the host you run: granted addresses', () => {
+  const KEY_A = '1'.repeat(64)
+  const KEY_B = '2'.repeat(64)
+  const ORIGIN = 'https://hypercomb.com'
+  const RUN = [{ origin: ORIGIN, zones: ['hypercomb.com'] }]
+  const HOSTILE = 'Ana <img src=x onerror="window.pwned=1">'
+  const grantOf = (address: string, keys: { key: string; can: readonly string[] }[], over: Record<string, unknown> = {}) =>
+    ({ address, keys, source: 'grant', by: 'f'.repeat(64), at: 1, ...over })
+  const listed = () => ({
+    zones: ['hypercomb.com'],
+    grants: [
+      grantOf('ana@hypercomb.com', [{ key: KEY_A, can: ['read', 'send'] }], { name: HOSTILE }),
+      grantOf(ME, [{ key: 'f'.repeat(64), can: [...MAIL_ACTS] }], { source: 'secret' }),
+    ],
+  })
+  type HostFake = ReturnType<typeof fakeService> & Record<'hostsRun' | 'grants' | 'grant' | 'revoke', ReturnType<typeof vi.fn>>
+  function hostService(over: Record<string, unknown> = {}): HostFake {
+    return fakeService({
+      hostsRun: vi.fn(() => RUN),
+      grants: vi.fn(async (_origin: string) => listed()),
+      grant: vi.fn(async (_origin: string, address: string, input: { keys: unknown[]; name?: string }) =>
+        ({ address, keys: input.keys, ...(input.name ? { name: input.name } : {}), source: 'grant', by: 'f'.repeat(64), at: 2 })),
+      revoke: vi.fn(async () => undefined),
+      ...over,
+    }) as HostFake
+  }
+  const hostRows = (): HTMLElement[] => Array.from(panel().querySelectorAll<HTMLElement>('.hc-mail-host-row'))
+  const value = (name: string): string => (panel().querySelector(`[name="${name}"]`) as HTMLInputElement).value
+  const heading = (): string => panel().querySelector('.hc-mail-host-form h4')?.textContent ?? ''
+  const checked = (): string[] => Array.from(panel().querySelectorAll<HTMLInputElement>('input[name="host-can"]:checked')).map(b => b.value)
+  const tick = (act: string, on: boolean): void => { panel().querySelector<HTMLInputElement>(`input[name="host-can"][value="${act}"]`)!.checked = on }
+  const labels = (): (string | null)[] => buttons().map(b => b.textContent)
+
+  it('offers Host only to a key that runs a host', async () => {
+    await windowWith(fakeService())
+    expect(labels()).not.toContain('Host')
+  })
+
+  it('puts Host in the head after Write when the service says a host is run', async () => {
+    await windowWith(hostService())
+    expect(labels().indexOf('Host')).toBe(labels().indexOf('Write') + 1)
+  })
+
+  it('the pane lists every address with who holds it, as text; a secret entry wears a badge and offers no Change or Revoke', async () => {
+    const service = hostService()
+    await windowWith(service)
+    press('Host')
+    expect(cue()).toBe('Reading the addresses…')
+    expect(panel().querySelectorAll('.hc-mail-host .hc-mail-skeleton').length).toBeGreaterThan(0)
+    await settle()
+    expect(service.grants).toHaveBeenCalledWith(ORIGIN)
+    expect(cue()).toBe('')
+    expect(panel().classList.contains('is-reading')).toBe(true)
+    expect(panel().querySelector('.hc-mail-host-zones')?.textContent).toBe('hypercomb.com')
+    const [ana, me] = hostRows()
+    expect(ana!.querySelector('.hc-mail-host-who')?.textContent).toBe('ana@hypercomb.com')
+    expect(ana!.querySelector('.hc-mail-host-name')?.textContent).toBe(HOSTILE)
+    expect(panel().querySelector('img')).toBeNull()
+    expect((window as { pwned?: number }).pwned).toBeUndefined()
+    expect(ana!.querySelector('.hc-mail-host-key')?.textContent).toBe('11111111…')
+    expect(ana!.querySelector('.hc-mail-host-key')?.getAttribute('title')).toBe(KEY_A)
+    expect(ana!.querySelector('.hc-mail-host-holder')?.textContent).toBe('11111111…read, send')
+    expect(ana!.querySelector('.hc-mail-host-badge')).toBeNull()
+    expect(Array.from(ana!.querySelectorAll('button')).map(b => b.textContent)).toEqual(['Change', 'Revoke'])
+    expect(me!.querySelector('.hc-mail-host-badge')?.textContent).toBe('secret')
+    expect(me!.querySelector('.hc-mail-host-holder')?.textContent).toBe('ffffffff…everything')
+    expect(me!.querySelectorAll('button')).toHaveLength(0)
+    expect(rows()).toHaveLength(2) // the mailbox's rows stay on the left
+  })
+
+  it('Give an address sends the record as given — the keys, the acts ticked, the zone chosen — and reads the list again', async () => {
+    const service = hostService({ hostsRun: vi.fn(() => [{ origin: ORIGIN, zones: ['hypercomb.com', 'mail.hypercomb.com'] }]) })
+    await windowWith(service)
+    press('Host'); await settle()
+    expect(heading()).toBe('Give an address')
+    expect(checked()).toEqual([...MAIL_ACTS]) // every act on by default
+    fill('host-local', ' Bo ')
+    ;(panel().querySelector('[name="host-zone"]') as HTMLSelectElement).value = 'mail.hypercomb.com'
+    fill('host-key', `${KEY_B}\n${KEY_A}`)
+    fill('host-name', 'Bo')
+    tick('delete', false)
+    tick('send', false)
+    press('Save')
+    expect(button('Saving…').disabled).toBe(true)
+    expect(cue()).toBe('Giving bo@mail.hypercomb.com…')
+    await settle()
+    expect(service.grant).toHaveBeenCalledWith(ORIGIN, 'bo@mail.hypercomb.com', { keys: [{ key: KEY_B, can: ['read', 'mark', 'draft'] }, { key: KEY_A, can: ['read', 'mark', 'draft'] }], name: 'Bo' })
+    expect(service.grants).toHaveBeenCalledTimes(2)
+    expect(said()).toBe('bo@mail.hypercomb.com is given. Mail to it is sealed to the keys you listed from now on.')
+    expect(service.mailboxes).toHaveBeenCalledTimes(1) // not this device's key: the desk stays where it is
+    expect(value('host-local')).toBe('') // the form is fresh for the next one
+  })
+
+  it('a single zone is the suffix, not a choice', async () => {
+    await windowWith(hostService())
+    press('Host'); await settle()
+    expect(panel().querySelector('[name="host-zone"]')).toBeNull()
+    expect(panel().querySelector('.hc-mail-host-zone')?.textContent).toBe('hypercomb.com')
+  })
+
+  it('says what is missing and sends nothing: no name before the @, no key, no act', async () => {
+    const service = hostService()
+    await windowWith(service)
+    press('Host'); await settle()
+    press('Save'); await settle()
+    expect(said()).toBe('Write the address’s name before the @.')
+    fill('host-local', 'bo')
+    fill('host-key', 'not a key')
+    press('Save'); await settle()
+    expect(said()).toBe('Give one to three public keys, 64 hex characters each.')
+    fill('host-key', KEY_B)
+    for (const act of MAIL_ACTS) tick(act, false)
+    press('Save'); await settle()
+    expect(said()).toBe('Tick at least one thing the key may do.')
+    expect(service.grant).not.toHaveBeenCalled()
+  })
+
+  it('"This device’s key" fills the key field; Change prefills the form from the grant, and Save replaces it', async () => {
+    const service = hostService()
+    await windowWith(service)
+    press('Host'); await settle()
+    press('This device’s key'); await settle()
+    expect(value('host-key')).toBe('f'.repeat(64))
+    press('Change'); await settle()
+    expect(heading()).toBe('Changing ana@hypercomb.com')
+    expect(value('host-local')).toBe('ana')
+    expect(value('host-key')).toBe(KEY_A)
+    expect(value('host-name')).toBe(HOSTILE)
+    expect(checked()).toEqual(['read', 'send'])
+    tick('mark', true)
+    press('Save'); await settle()
+    expect(service.grant).toHaveBeenCalledWith(ORIGIN, 'ana@hypercomb.com', { keys: [{ key: KEY_A, can: ['read', 'mark', 'send'] }], name: HOSTILE })
+    expect(heading()).toBe('Give an address') // back to giving
+    press('Change'); await settle()
+    press('Cancel'); await settle()
+    expect(heading()).toBe('Give an address')
+    expect(value('host-local')).toBe('')
+  })
+
+  it('Revoke takes two presses on the same button; a pause or any other press forgets the first', async () => {
+    const service = hostService()
+    await windowWith(service, element => { element.revokeArmMs = 30 })
+    press('Host'); await settle()
+    press('Revoke')
+    expect(service.revoke).not.toHaveBeenCalled()
+    expect(labels()).toContain('Revoke — press again')
+    await wait(45)
+    expect(labels()).toContain('Revoke') // forgotten after the pause
+    expect(labels()).not.toContain('Revoke — press again')
+    press('Revoke')
+    press('This device’s key') // any other press
+    await settle()
+    expect(labels()).not.toContain('Revoke — press again')
+    expect(service.revoke).not.toHaveBeenCalled()
+    press('Revoke')
+    press('Revoke — press again')
+    expect(cue()).toBe('Revoking…')
+    await settle()
+    expect(service.revoke).toHaveBeenCalledTimes(1)
+    expect(service.revoke).toHaveBeenCalledWith(ORIGIN, 'ana@hypercomb.com')
+    expect(said()).toBe('ana@hypercomb.com is revoked. What already arrived stays as it is.')
+    expect(service.grants).toHaveBeenCalledTimes(2)
+  })
+
+  it('an address given to this device’s key is a mailbox at once: the no-mailbox pane shows the way in, and the desk opens again on it', async () => {
+    let given = false
+    const service = hostService({
+      addresses: vi.fn(async () => (given ? [ME] : [])),
+      grant: vi.fn(async (_origin: string, address: string, input: { keys: unknown[] }) => { given = true; return { address, keys: input.keys, source: 'grant' } }),
+    })
+    await windowWith(service)
+    const quiet = Array.from(panel().querySelectorAll('.hc-mail-quiet')).map(p => p.textContent)
+    expect(quiet).toContain('You run hypercomb.com: give this key an address.')
+    expect(panel().querySelector('.hc-mail-keybox')?.textContent).toBe('f'.repeat(64))
+    press('Give this key an address'); await settle()
+    expect(panel().querySelector('.hc-mail-host-form')).not.toBeNull()
+    expect(value('host-key')).toBe('f'.repeat(64)) // prefilled
+    fill('host-local', 'jaime')
+    press('Save'); await settle(); await settle()
+    expect(service.grant).toHaveBeenCalledWith(ORIGIN, ME, { keys: [{ key: 'f'.repeat(64), can: [...MAIL_ACTS] }] })
+    expect(service.mailboxes).toHaveBeenCalledTimes(2) // asked again
+    expect(rows()).toHaveLength(2) // the inbox of the new mailbox
+    expect(said()).toBe('jaime@hypercomb.com is yours now.')
+  })
+
+  it('a key no host knows, on a host it does not run, is told nothing about giving', async () => {
+    await windowWith(fakeService({ addresses: vi.fn(async () => []) }))
+    expect(panel().textContent).not.toContain('give this key an address')
+    expect(labels()).not.toContain('Give this key an address')
+  })
+
+  it('Escape steps out of the pane one rung: back to the list, or back to the message it was opened over', async () => {
+    await windowWith(hostService())
+    press('Host'); await settle()
+    expect(panel().querySelector('.hc-mail-host-form')).not.toBeNull()
+    key('Escape')
+    expect(panel().querySelector('.hc-mail-host-form')).toBeNull()
+    expect(panel().querySelector('.hc-mail-main .hc-mail-empty')).not.toBeNull() // the list, the desk still up
+    rows()[0]!.click(); await settle()
+    expect(panel().querySelector('.hc-mail-text')?.textContent).toBe('the plain text')
+    press('Host'); await settle()
+    expect(panel().querySelector('.hc-mail-text')).toBeNull()
+    key('Escape')
+    expect(panel().querySelector('.hc-mail-text')?.textContent).toBe('the plain text') // back on the message
+    key('Escape')
+    key('Escape')
+    expect(document.querySelector('.hc-mail')).toBeNull()
+  })
+
+  it('a host that will not list is said in its section with Try again; a refusal of a grant comes in the hive’s words', async () => {
+    const service = hostService({
+      grants: vi.fn(async () => { throw new MailError('unavailable') }),
+      grant: vi.fn(async () => { throw new MailError('refused', "not this host's zone") }),
+    })
+    await windowWith(service)
+    press('Host'); await settle()
+    expect(panel().querySelector('.hc-mail-host .hc-mail-said.is-bad')?.textContent).toBe('The mail host did not answer.')
+    press('Try again'); await settle()
+    expect(service.grants).toHaveBeenCalledTimes(2)
+    fill('host-local', 'bo')
+    fill('host-key', KEY_B)
+    press('Save'); await settle()
+    expect(said()).toBe('That address is not on a zone this host gives addresses on.')
+    for (const [reason, words] of [
+      ['bad address', 'The host would not take that address.'],
+      ['bad keys', 'The host would not take those keys: one to three public keys, 64 hex characters each.'],
+      ['bad name', 'The host would not take that name: at most 64 plain characters.'],
+      ['bad copy address', 'The host would not take that copy address.'],
+      ['anything else the host writes', 'The mail host refused this.'],
+    ]) expect(explain(new MailError('refused', reason))).toBe(words)
+  })
+})
+
+// The Worker's reading of the contract (W, "Granted addresses as implemented"): a grant is the address's WHOLE
+// record — its name and copy address replace the host's own — so the desk prefills them from the listing and
+// sends them back; a broken secret entry is shown and nobody acts on it; the grant cap has its own words.
+describe('the host you run: a grant is the whole record', () => {
+  const KEY_B = '2'.repeat(64)
+  const ORIGIN = 'https://hypercomb.com'
+  const grants = () => ({
+    zones: ['hypercomb.com'],
+    grants: [
+      { address: 'ana@hypercomb.com', name: 'Ana', copyTo: 'ana-copy@example.org', keys: [{ key: '1'.repeat(64), can: ['read', 'send'] }], source: 'grant', by: 'f'.repeat(64), at: 1 },
+      { address: 'broken@hypercomb.com', keys: [], source: 'secret' },
+      { address: ME, name: 'Jaime', copyTo: 'me@example.org', keys: [{ key: 'f'.repeat(64), can: [...MAIL_ACTS] }], source: 'secret' },
+    ],
+  })
+  type HostFake = ReturnType<typeof fakeService> & Record<'hostsRun' | 'grants' | 'grant' | 'revoke', ReturnType<typeof vi.fn>>
+  const hostService = (over: Record<string, unknown> = {}): HostFake => fakeService({
+    hostsRun: vi.fn(() => [{ origin: ORIGIN, zones: ['hypercomb.com'] }]),
+    grants: vi.fn(async () => grants()),
+    grant: vi.fn(async (_origin: string, address: string, input: { keys: unknown[]; name?: string; copyTo?: string }) => ({ address, keys: input.keys, source: 'grant' })),
+    revoke: vi.fn(async () => undefined),
+    ...over,
+  }) as HostFake
+  const value = (name: string): string => (panel().querySelector(`[name="${name}"]`) as HTMLInputElement).value
+  const note = (): HTMLElement => panel().querySelector('.hc-mail-host-listed') as HTMLElement
+
+  it('Change prefills the copy address too, and Save sends the name and the copy back', async () => {
+    const service = hostService()
+    await windowWith(service)
+    press('Host'); await settle()
+    press('Change'); await settle()
+    expect(value('host-copy')).toBe('ana-copy@example.org')
+    press('Save'); await settle()
+    expect(service.grant).toHaveBeenCalledWith(ORIGIN, 'ana@hypercomb.com', { keys: [{ key: '1'.repeat(64), can: ['read', 'send'] }], name: 'Ana', copyTo: 'ana-copy@example.org' })
+  })
+
+  it('typing an address the host already lists puts its keys, name and copy in the form and says so; Save sends the whole record back', async () => {
+    let given = false
+    const service = hostService({
+      addresses: vi.fn(async () => (given ? [ME] : [])),
+      grant: vi.fn(async (_origin: string, address: string, input: { keys: unknown[] }) => { given = true; return { address, keys: input.keys, source: 'grant' } }),
+    })
+    await windowWith(service)
+    press('Give this key an address'); await settle()
+    // The device's key was prefilled; a second key is written; then the host's own address is typed.
+    fill('host-key', `${'f'.repeat(64)}\n${KEY_B}`)
+    type('host-local', 'nobody')
+    expect(note().hidden).toBe(true)
+    expect(value('host-name')).toBe('')
+    type('host-local', 'Jaime')
+    expect(note().hidden).toBe(false)
+    expect(note().textContent).toBe('jaime@hypercomb.com is already listed here. Saving replaces its whole record — the keys, the name and the copy address — with what this form shows.')
+    expect(value('host-key')).toBe(`${'f'.repeat(64)}\n${KEY_B}`) // its key was already there; nothing added twice
+    expect(value('host-name')).toBe('Jaime')
+    expect(value('host-copy')).toBe('me@example.org')
+    press('Save'); await settle(); await settle()
+    expect(service.grant).toHaveBeenCalledWith(ORIGIN, ME, { keys: [{ key: 'f'.repeat(64), can: [...MAIL_ACTS] }, { key: KEY_B, can: [...MAIL_ACTS] }], name: 'Jaime', copyTo: 'me@example.org' })
+    expect(said()).toBe('jaime@hypercomb.com is yours now.')
+  })
+
+  it('a listed address typed into an empty form brings its keys; what the operator wrote in name or copy is kept', async () => {
+    const service = hostService()
+    await windowWith(service)
+    press('Host'); await settle()
+    fill('host-name', 'Ana B')
+    type('host-local', 'ana')
+    expect(value('host-key')).toBe('1'.repeat(64))
+    expect(value('host-name')).toBe('Ana B')
+    expect(value('host-copy')).toBe('ana-copy@example.org')
+  })
+
+  it('a secret entry with no valid key is shown, and nobody can act on it', async () => {
+    await windowWith(hostService())
+    press('Host'); await settle()
+    const broken = Array.from(panel().querySelectorAll<HTMLElement>('.hc-mail-host-row')).find(r => r.textContent?.includes('broken@hypercomb.com'))!
+    expect(broken.textContent).toContain('No valid key')
+    expect(broken.querySelector('.hc-mail-host-badge')?.textContent).toBe('secret')
+    expect(broken.querySelectorAll('button')).toHaveLength(0)
+  })
+
+  it('the host’s daily grant cap is said as what it is, not as a sending limit', async () => {
+    const service = hostService({ grant: vi.fn(async () => { throw new MailError('limit', 'daily grant limit reached') }) })
+    await windowWith(service)
+    press('Host'); await settle()
+    fill('host-local', 'bo')
+    fill('host-key', KEY_B)
+    press('Save'); await settle()
+    expect(said()).toBe('The host’s daily limit of grants was reached. Try again tomorrow.')
   })
 })
