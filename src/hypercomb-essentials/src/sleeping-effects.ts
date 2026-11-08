@@ -14,6 +14,7 @@ export type Sleeper = {
 
 export const sleepers: readonly Sleeper[] = [
   { wakesOn: ["expand:layer"], load: () => import('./assistant/expand.drone') },
+  { command: "inspect", description: "Drill into a tile: the behaviours that run it, their source, and every behaviour that source talks to", load: () => import('./assistant/inspect.queen') },
   { wakesOn: ["parts:distribute-visual"], load: () => import('./assistant/visual-distribution.drone') },
   { command: "adopt", description: "Take a peer's tile into your hive — the one tile, or with `branch`, everything under it", load: () => import('./commands/adopt.queen') },
   { command: "arrange", description: "Toggle icon arrangement mode on the tile overlay", load: () => import('./commands/arrange.queen') },
