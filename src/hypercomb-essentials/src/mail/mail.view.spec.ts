@@ -1220,6 +1220,83 @@ describe('after R2: what a stranger or a host can make the window do', () => {
   })
 })
 
+// THE DESK. Mail is a full-screen desk as notes, chat, the hosts and the tile editor are: the rows in a
+// column on the left, what is open on the right, the hive behind it asleep while it is up.
+describe('the mail desk', () => {
+  type Stub = Record<string, unknown>
+  const withIoc = async (stubs: Record<string, Stub>, run: () => Promise<void>): Promise<void> => {
+    const shell = window as unknown as { ioc?: unknown }
+    const before = shell.ioc
+    shell.ioc = { get: (key: string) => stubs[key], whenReady: () => undefined }
+    try { await run() } finally { shell.ioc = before }
+  }
+
+  it('keeps the rows on the left while a message opens on the right, and marks the open row', async () => {
+    await windowWith(fakeService())
+    expect(panel().querySelector('.hc-mail-cols > .hc-mail-side .hc-mail-row')).not.toBeNull()
+    expect(panel().querySelector('.hc-mail-main .hc-mail-empty')).not.toBeNull()
+    expect(panel().classList.contains('is-reading')).toBe(false)
+
+    rows()[0]!.click()
+    await settle()
+    expect(panel().querySelector('.hc-mail-main .hc-mail-text')?.textContent).toBe('the plain text')
+    expect(rows()).toHaveLength(2) // the list did not go anywhere
+    expect(rows()[0]!.classList.contains('is-current')).toBe(true)
+    expect(rows()[1]!.classList.contains('is-current')).toBe(false)
+    expect(panel().classList.contains('is-reading')).toBe(true)
+
+    key('Escape')
+    expect(panel().classList.contains('is-reading')).toBe(false)
+    expect(panel().querySelector('.hc-mail-row.is-current')).toBeNull()
+    expect(panel().querySelector('.hc-mail-main .hc-mail-empty')).not.toBeNull()
+  })
+
+  it('claims the view modes, the input gate, the back gesture and the keymap while it is up, and lets go on close', async () => {
+    const modes: string[] = []
+    const gate: string[] = []
+    let backs = 0
+    const suppressed: string[] = []
+    // The bus replays its last value to a new listener: only what is said from here on counts.
+    let live = false
+    const offs = [
+      EffectBus.on<{ reason: string }>('keymap:suppress', p => { if (live) suppressed.push(`on:${p.reason}`) }),
+      EffectBus.on<{ reason: string }>('keymap:unsuppress', p => { if (live) suppressed.push(`off:${p.reason}`) }),
+    ]
+    live = true
+    try {
+      await withIoc({
+        '@diamondcoreprocessor.com/ModeRegistry': { enter: (m: string) => modes.push(`+${m}`), exit: (m: string) => modes.push(`-${m}`) },
+        '@diamondcoreprocessor.com/InputGate': { lock: (r: string) => gate.push(`lock:${r}`), unlock: (r: string) => gate.push(`unlock:${r}`) },
+        '@diamondcoreprocessor.com/BackGesture': { register: () => () => { backs++ } },
+      }, async () => {
+        const element = await windowWith(fakeService())
+        expect(modes).toEqual(['+view:keeps-controls', '+view:active'])
+        expect(gate).toEqual(['lock:mail-desk'])
+        expect(suppressed).toEqual(['on:mail-desk'])
+        element.close()
+        expect(modes.slice(2)).toEqual(['-view:active', '-view:keeps-controls'])
+        expect(gate).toEqual(['lock:mail-desk', 'unlock:mail-desk'])
+        expect(backs).toBe(1)
+        expect(suppressed).toEqual(['on:mail-desk', 'off:mail-desk'])
+      })
+    } finally { for (const off of offs) off() }
+  })
+
+  it('Escape in a field lets the field go first; in a search with words it clears them; then it unwinds', async () => {
+    await windowWith(fakeService())
+    press('Write'); await settle()
+    const text = panel().querySelector('[name="text"]') as HTMLTextAreaElement
+    text.focus()
+    expect(document.activeElement).toBe(text)
+    key('Escape', text)
+    expect(document.activeElement).not.toBe(text)
+    expect(panel().querySelector('.hc-mail-form')).not.toBeNull() // still writing
+    key('Escape')
+    expect(panel().querySelector('.hc-mail-form')).toBeNull()
+    expect(panel().querySelector('.hc-mail-main .hc-mail-empty')).not.toBeNull()
+  })
+})
+
 describe('explain', () => {
   it('has words for every way mail can fail', () => {
     for (const code of ['no-signer', 'no-key', 'unauthorized', 'not-found', 'limit', 'refused', 'bad-message', 'unavailable', 'conflict'] as const) {

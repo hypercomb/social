@@ -47,7 +47,7 @@
 // ShellSurfaceRegistry over IoC — never a tag in either app.html. The queen
 // registers it; this file only defines it.
 
-import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, attachDockedPanel, type DockedPanel, type I18nProvider, type WindowSession } from '@hypercomb/core'
 import { contactsIn, knownAddresses, type ContactSeed } from './contacts.js'
 import { DRAFT_SAVE_MS, Debounced, POLL_EVERY_MS, POLL_MAX_ERRORS, Poller, progressShare, sizeLabel } from './cue.js'
 import { formatMessage } from './format.js'
@@ -75,8 +75,26 @@ const STYLE_ID = 'hc-mail-style'
 const KNOWN_LIST_ID = 'hc-mail-known'
 const FRAME_SANDBOX = 'allow-popups allow-popups-to-escape-sandbox'
 
+/** The fallbacks for a page with no theme tokens: the steel of the rules, the honey of the accent. */
 const STEEL = '126, 182, 214'
 const ACCENT = '201, 162, 39'
+
+/**
+ * A DESK, as notes, chat, the hosts and the tile editor are: the whole page, the
+ * hive behind it asleep, the control bar kept. Its name in the window session,
+ * the keymap, the input gate and the back gesture.
+ */
+const DESK = 'mail-desk'
+/** The desks' shared doors (comfy-desk, host-directory): the view modes that put
+ *  the page behind a full-screen window to sleep, the back gesture, the input gate. */
+const DESK_KEYS = {
+  modes: '@diamondcoreprocessor.com/ModeRegistry',
+  back: '@diamondcoreprocessor.com/BackGesture',
+  gate: '@diamondcoreprocessor.com/InputGate',
+} as const
+type ModesShape = { enter(mode: string, owner: string): void; exit(mode: string, owner: string): void; releaseOwner?(owner: string): void }
+type BackShape = { register(entry: { owner: string; back: () => void; active?: () => boolean }): () => void }
+type GateShape = { lock(reason: string): void; unlock(reason: string): void }
 
 /** Placeholder rows drawn before the host has said how many rows a page holds. */
 const PLACEHOLDER_GUESS = 3
@@ -194,6 +212,13 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text?
 
 // One formatter for every row: toLocaleString builds a new one per call, and a page has thousands of rows.
 let whenFormat: Intl.DateTimeFormat | null = null
+/** A glyph from the shipped Material subset (`mail`, `close` are in it), sized by the words it sits with. */
+const symbol = (name: string): HTMLSpanElement => {
+  const span = el('span', 'mat-sym hc-mail-glyph', name)
+  span.setAttribute('aria-hidden', 'true')
+  return span
+}
+
 const when = (at: number | undefined): string => {
   if (!at) return ''
   whenFormat ??= new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
@@ -472,6 +497,21 @@ export class MailElement extends HTMLElement {
   #focusKey: string | null = null
   #returning = false
 
+  // The desk: its place in the window session, the modes it holds while it is up, and what lets go with it.
+  #dock: DockedPanel | null = null
+  #modes: ModesShape | null = null
+  #releaseBack: (() => void) | null = null
+  #deskCleanup: (() => void)[] = []
+  /** Put away by the shell (another window opened, Escape's sweep), to come back as it was asked for. */
+  #parked = false
+  readonly #session: WindowSession = {
+    // Nothing decrypted outlives the desk, so a park is a close; the unpark opens and reads again.
+    park: () => { if (!this.#panel) return; this.close(); this.#parked = true },
+    unpark: () => { if (this.#parked) { this.#parked = false; this.open() } },
+    dismiss: () => this.dismissInner(),
+    close: () => this.close(),
+  }
+
   #saver: Debounced | null = null
   #previewer = new Debounced(() => this.#paintPreview(), PREVIEW_DRAW_MS)
   #poller: Poller | null = null
@@ -515,8 +555,9 @@ export class MailElement extends HTMLElement {
   }
 
   open(): void {
+    this.#parked = false
     if (!this.#panel) {
-      const panel = el('aside', 'hc-mail')
+      const panel = el('section', 'hc-mail')
       panel.setAttribute('role', 'dialog')
       panel.setAttribute('aria-label', t('mail.title', 'Mail'))
       panel.tabIndex = -1
@@ -524,6 +565,21 @@ export class MailElement extends HTMLElement {
       panel.addEventListener('keydown', this.#onKey)
       this.appendChild(panel)
       this.#panel = panel
+      // A desk, as the editor, keyboard, comfy and hosts desks are: in the window
+      // session for the window rule and Escape's sweep, but it takes the whole
+      // page and sizes itself (see the styles), so it owns no place in the lane.
+      this.#dock = attachDockedPanel(panel, {
+        id: DESK,
+        dockSide: 'right',
+        dockExclusive: false,
+        ownsSize: false,
+        sizeOwner: { panelWidth: () => 400, setPanelWidth: () => undefined },
+        defaultText: 1,
+        hcSession: this.#session,
+        onClose: () => this.close(),
+      })
+      this.#claimDesk(panel)
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => { if (this.#panel === panel) panel.focus({ preventScroll: true }) })
     }
     this.#paintPill()
     void this.#start()
@@ -541,6 +597,9 @@ export class MailElement extends HTMLElement {
     const box = this.#lists.get('box')
     if (box?.loaded && this.#address) this.#unreadBy.set(this.#address, unreadCount(box.items))
     this.#panel.removeEventListener('keydown', this.#onKey)
+    this.#releaseDesk()
+    this.#dock?.dispose()
+    this.#dock = null
     this.#panel.remove()
     this.#panel = null
     // Everything decrypted goes with the window.
@@ -559,16 +618,90 @@ export class MailElement extends HTMLElement {
 
   get isOpen(): boolean { return !!this.#panel }
 
-  readonly #onKey = (event: KeyboardEvent): void => {
-    if (event.key === 'Escape') {
+  /** Unwind ONE level — the composer, then an open message, then a search. False when nothing of the desk's is open. */
+  dismissInner(): boolean {
+    const pane = this.#pane
+    if (pane.kind === 'compose') { this.#leaveCompose(pane); return true }
+    if (pane.kind === 'read') { this.#backToList(); return true }
+    if (this.#query) { this.#setQuery(''); return true }
+    return false
+  }
+
+  /**
+   * What a full-screen window takes while it is up: the view modes (the page behind sleeps, the controls
+   * stay), the keymap and the input gate, the back gesture — and Escape, which unwinds this desk before
+   * the hive's own keys.
+   */
+  #claimDesk(panel: HTMLElement): void {
+    this.#claimModes(panel)
+    EffectBus.emit('keymap:suppress', { reason: DESK })
+    ioc<GateShape>(DESK_KEYS.gate)?.lock(DESK)
+    this.#releaseBack = ioc<BackShape>(DESK_KEYS.back)?.register({
+      owner: DESK,
+      active: () => this.#panel !== null,
+      back: () => { if (!this.dismissInner()) this.close() },
+    }) ?? null
+
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || event.isComposing || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return
+      // The hive's keymap hears it first and unwinds one rung through the window session (dismiss).
+      // A second unwind from here would take two rungs for one press.
+      if (event.defaultPrevented) return
+      event.preventDefault()
       event.stopPropagation()
-      const pane = this.#pane
-      if (pane.kind === 'compose') { this.#leaveCompose(pane); return }
-      if (pane.kind === 'read') { this.#backToList(); return }
-      if (this.#query) { this.#setQuery(''); return }
-      this.close()
-      return
+      const target = event.target
+      const typing = target instanceof HTMLElement && !!target.closest('input, textarea, select')
+      // A search with words in it clears first; any other field just lets go.
+      if (typing && !(this.#query && target === this.#panel?.querySelector('.hc-mail-search'))) { (target as HTMLElement).blur(); return }
+      if (!this.dismissInner()) this.close()
     }
+    window.addEventListener('keydown', onKeyDown, { capture: true })
+    this.#deskCleanup.push(() => window.removeEventListener('keydown', onKeyDown, { capture: true }))
+    // A field that lets go hands the focus back to the desk, so Escape is heard here.
+    const onFocusOut = (event: FocusEvent): void => {
+      if (event.relatedTarget || typeof requestAnimationFrame !== 'function') return
+      requestAnimationFrame(() => {
+        if (this.#panel === panel && document.activeElement === document.body) panel.focus({ preventScroll: true })
+      })
+    }
+    panel.addEventListener('focusout', onFocusOut)
+    this.#deskCleanup.push(() => panel.removeEventListener('focusout', onFocusOut))
+  }
+
+  /** The view modes: the page behind a full-screen window sleeps and the controls stay.
+   *  The registry may not be up yet, so a late one is claimed when it is. */
+  #claimModes(panel: HTMLElement): void {
+    const claim = (modes: ModesShape): void => {
+      this.#modes = modes
+      modes.enter('view:keeps-controls', DESK)
+      modes.enter('view:active', DESK)
+    }
+    const modes = ioc<ModesShape>(DESK_KEYS.modes)
+    if (modes) { claim(modes); return }
+    ;(window as { ioc?: { whenReady?: (k: string, cb: (v: unknown) => void) => void } }).ioc
+      ?.whenReady?.(DESK_KEYS.modes, value => { if (this.#panel === panel && !this.#modes) claim(value as ModesShape) })
+  }
+
+  #releaseDesk(): void {
+    const attempt = (what: () => void): void => {
+      try { what() } catch (error) { console.warn('[mail] teardown step failed', error) }
+    }
+    const modes = this.#modes
+    this.#modes = null
+    if (modes) attempt(() => {
+      if (modes.releaseOwner) { modes.releaseOwner(DESK); return }
+      modes.exit('view:active', DESK)
+      modes.exit('view:keeps-controls', DESK)
+    })
+    attempt(() => EffectBus.emit('keymap:unsuppress', { reason: DESK }))
+    attempt(() => ioc<GateShape>(DESK_KEYS.gate)?.unlock(DESK))
+    attempt(() => this.#releaseBack?.())
+    this.#releaseBack = null
+    for (const off of this.#deskCleanup.splice(0)) attempt(off)
+  }
+
+  /** The list's keys. Escape belongs to the desk (see #claimDesk) and to the window session. */
+  readonly #onKey = (event: KeyboardEvent): void => {
     if (this.#pane.kind !== 'list' || isField(event.target) || event.ctrlKey || event.metaKey || event.altKey) return
     if (event.key === 'j' || event.key === 'k') {
       event.preventDefault()
@@ -588,6 +721,7 @@ export class MailElement extends HTMLElement {
     this.#phase = 'loading'
     this.#pane = { kind: 'list' }
     this.#said = null
+    this.#listScroll = 0
     this.#lists.clear()
     this.#cueOn('start', t('mail.loading', 'Opening your mailbox…'))
     this.#render()
@@ -740,6 +874,7 @@ export class MailElement extends HTMLElement {
   #chooseTab(tab: Tab): void {
     this.#tab = tab
     this.#said = null
+    this.#listScroll = 0
     this.#render()
     for (const folder of FOLDERS_OF[tab]) {
       const list = this.#list(folder)
@@ -765,6 +900,7 @@ export class MailElement extends HTMLElement {
     this.#expanded.clear()
     this.#pane = { kind: 'list' }
     this.#said = null
+    this.#listScroll = 0
     this.#render()
     for (const folder of FOLDERS_OF[this.#tab]) void this.#loadFolder(folder)
   }
@@ -920,7 +1056,12 @@ export class MailElement extends HTMLElement {
     const shape = entry.kind === 'thread'
       ? [entry.thread.count, entry.thread.unread, entry.thread.flagged, entry.open]
       : [entry.member, entry.hidden]
-    return JSON.stringify([entry.kind, entry.folder, item.sig, timeOf(item), item.marks, this.#readable(item), shape, busy])
+    return JSON.stringify([entry.kind, entry.folder, item.sig, timeOf(item), item.marks, this.#readable(item), shape, busy, this.#isCurrent(item)])
+  }
+
+  /** The row whose message is open beside the list. */
+  #isCurrent(item: MailListItem): boolean {
+    return this.#pane.kind === 'read' && this.#pane.item.sig === item.sig
   }
 
   #fillRow(entry: Entry, row: HTMLLIElement): void {
@@ -951,6 +1092,7 @@ export class MailElement extends HTMLElement {
       entry.kind === 'row' && entry.member ? 'is-member' : '',
       entry.kind === 'row' && entry.hidden ? 'is-hidden' : '',
       entry.kind === 'thread' && entry.open ? 'is-open' : '',
+      this.#isCurrent(item) ? 'is-current' : '',
     ].filter(Boolean).join(' ')
 
     const whoField = folder === 'box' ? readable.from : readable.to
@@ -1230,7 +1372,7 @@ export class MailElement extends HTMLElement {
     const token = ++this.#paneToken
     const epoch = this.#epoch
     const current = (): boolean => token === this.#paneToken && epoch === this.#epoch
-    this.#listScroll = this.#panel?.querySelector('.hc-mail-body')?.scrollTop ?? 0
+    this.#listScroll = this.#listScrollTop()
     const pane: ReadPane = { kind: 'read', folder, tab: this.#tab, item, asText: false }
     this.#pane = pane
     this.#said = null
@@ -1273,7 +1415,7 @@ export class MailElement extends HTMLElement {
   async #openDraft(item: MailListItem): Promise<void> {
     const token = ++this.#paneToken
     const epoch = this.#epoch
-    this.#listScroll = this.#panel?.querySelector('.hc-mail-body')?.scrollTop ?? 0
+    this.#listScroll = this.#listScrollTop()
     const pane: ReadPane = { kind: 'read', folder: 'drafts', tab: this.#tab, item, asText: true }
     this.#pane = pane
     this.#said = null
@@ -1340,6 +1482,7 @@ export class MailElement extends HTMLElement {
   #compose(draft?: Draft, options: { draftSig?: string | null; formatted?: boolean; attached?: Attached[]; note?: string; back?: Pane } = {}): void {
     // Write pressed while writing: the words on screen are kept before a fresh page replaces them.
     if (this.#pane.kind === 'compose') this.#leaveCompose(this.#pane, false)
+    else if (this.#pane.kind === 'list') this.#listScroll = this.#listScrollTop()
     this.#autosaver().cancel()
     const pane: ComposePane = {
       kind: 'compose',
@@ -1710,41 +1853,64 @@ export class MailElement extends HTMLElement {
     this.#busyButtons.clear()
   }
 
+  /**
+   * The desk: the head, the cue and the said line across the top; then the list in a column on the
+   * left and, on the right, the open message, the composer, or a word saying to choose. On a narrow
+   * page only one of the two shows — the list, or what is open (`is-reading`, see the styles).
+   */
   #render(): void {
     const panel = this.#panel
     if (!panel) return
     this.#forgetPainted()
     panel.replaceChildren(this.#head(), this.#cueLine())
     this.#paintCue()
-    const body = el('div', 'hc-mail-body')
-    panel.appendChild(body)
+    panel.classList.toggle('is-reading', this.#phase === 'ready' && this.#pane.kind !== 'list')
 
-    if (this.#phase === 'loading') {
-      // Placeholders from the first frame: a blank pane reads as a broken one.
-      const list = el('ul', 'hc-mail-list')
-      list.setAttribute('aria-hidden', 'true')
-      for (let i = 0; i < PLACEHOLDER_GUESS; i++) { const row = el('li', 'hc-mail-skeleton'); row.append(el('span'), el('span'), el('span')); list.appendChild(row) }
-      body.appendChild(list)
+    if (this.#phase !== 'ready') {
+      const body = el('div', 'hc-mail-body')
+      panel.appendChild(body)
+      if (this.#phase === 'loading') {
+        // Placeholders from the first frame: a blank pane reads as a broken one.
+        const list = el('ul', 'hc-mail-list')
+        list.setAttribute('aria-hidden', 'true')
+        for (let i = 0; i < PLACEHOLDER_GUESS; i++) { const row = el('li', 'hc-mail-skeleton'); row.append(el('span'), el('span'), el('span')); list.appendChild(row) }
+        body.appendChild(list)
+        return
+      }
+      if (this.#phase === 'problem') {
+        body.appendChild(el('p', 'hc-mail-said is-bad', this.#problem))
+        body.appendChild(this.#button(t('mail.retry', 'Try again'), () => { void this.#start() }))
+        return
+      }
+      this.#noMailbox(body)
       return
     }
-    if (this.#phase === 'problem') {
-      body.appendChild(el('p', 'hc-mail-said is-bad', this.#problem))
-      body.appendChild(this.#button(t('mail.retry', 'Try again'), () => { void this.#start() }))
-      return
-    }
-    if (this.#phase === 'no-mailbox') { this.#noMailbox(body); return }
 
     this.#saidEl = el('p', 'hc-mail-said')
-    body.appendChild(this.#saidEl)
+    panel.appendChild(this.#saidEl)
     this.#paintSaid()
+    const cols = el('div', 'hc-mail-cols')
+    const side = el('div', 'hc-mail-side')
+    const main = el('div', 'hc-mail-main')
+    cols.append(side, main)
+    panel.appendChild(cols)
+    this.#listPane(side)
+    const sheet = el('div', 'hc-mail-sheet')
+    main.appendChild(sheet)
     const pane = this.#pane
-    if (pane.kind === 'compose') this.#composePane(body, pane)
-    else if (pane.kind === 'read') this.#readPane(body, pane)
-    else this.#listPane(body)
+    if (pane.kind === 'compose') this.#composePane(sheet, pane)
+    else if (pane.kind === 'read') this.#readPane(sheet, pane)
+    else {
+      sheet.classList.add('is-empty')
+      sheet.appendChild(el('p', 'hc-mail-quiet hc-mail-empty', t('mail.pick', 'Choose a message, or write one.')))
+    }
   }
 
   #head(): HTMLElement {
     const head = el('header', 'hc-mail-head')
+    const mark = el('span', 'hc-mail-deskmark')
+    mark.appendChild(symbol('mail'))
+    head.appendChild(mark)
     head.appendChild(el('span', 'hc-mail-title', t('mail.title', 'Mail')))
 
     if (this.#phase === 'ready') {
@@ -1766,9 +1932,10 @@ export class MailElement extends HTMLElement {
       }
       if (this.#may('send')) head.appendChild(this.#button(t('mail.compose', 'Write'), () => this.#compose(undefined, { back: { kind: 'list' } }), 'is-place'))
     }
-    const close = el('button', 'hc-mail-close', '×')
+    const close = el('button', 'hc-mail-close')
     close.type = 'button'
     close.setAttribute('aria-label', t('panel.close', 'Close'))
+    close.appendChild(symbol('close'))
     close.addEventListener('click', () => this.close())
     head.appendChild(close)
     return head
@@ -1800,7 +1967,8 @@ export class MailElement extends HTMLElement {
     body.appendChild(el('p', 'hc-mail-quiet', t('mail.none-note', 'It is a public key: safe to share. The secret half never leaves this device.')))
   }
 
-  #listPane(body: HTMLElement): void {
+  /** The left column: the tabs and the search above, the rows scrolling under them. */
+  #listPane(side: HTMLElement): void {
     const tabs = el('div', 'hc-mail-tabs')
     const labels: readonly [Tab, string][] = [
       ['inbox', t('mail.inbox', 'Inbox')], ['sent', t('mail.sent-folder', 'Sent')],
@@ -1823,27 +1991,34 @@ export class MailElement extends HTMLElement {
     tabs.appendChild(search)
     this.#refreshEl = this.#button(t('mail.refresh', 'Refresh'), () => this.#refresh())
     tabs.appendChild(this.#refreshEl)
-    body.appendChild(tabs)
+    side.appendChild(tabs)
+    const scroll = el('div', 'hc-mail-scroll')
+    side.appendChild(scroll)
 
-    if (this.#tab === 'hidden' && this.#may('mark') && this.#may('delete')) body.appendChild(el('p', 'hc-mail-quiet', t('mail.hidden-note', 'Hidden messages wait here. Mark one “may be deleted”, then Delete removes it from your mailbox: the host keeps it 30 days, then it is gone.')))
+    if (this.#tab === 'hidden' && this.#may('mark') && this.#may('delete')) scroll.appendChild(el('p', 'hc-mail-quiet', t('mail.hidden-note', 'Hidden messages wait here. Mark one “may be deleted”, then Delete removes it from your mailbox: the host keeps it 30 days, then it is gone.')))
     this.#listEl = el('ul', 'hc-mail-list')
-    body.appendChild(this.#listEl)
+    scroll.appendChild(this.#listEl)
     this.#noticeEl = el('p', 'hc-mail-quiet')
-    body.appendChild(this.#noticeEl)
+    scroll.appendChild(this.#noticeEl)
     this.#moreEl = el('div', 'hc-mail-more')
-    body.appendChild(this.#moreEl)
+    scroll.appendChild(this.#moreEl)
     this.#syncList()
 
-    // Back from a message: the list is where it was, with the row that was opened in focus.
-    if (!this.#returning) return
+    // The list stands where it stood — through a message opening beside it, and back from one with the
+    // row that was opened in focus.
+    const at = this.#listScroll
+    const focusKey = this.#returning ? this.#focusKey : null
     this.#returning = false
-    const scroll = this.#listScroll
-    const focusKey = this.#focusKey
     queueMicrotask(() => {
-      if (!body.isConnected) return
-      body.scrollTop = scroll
+      if (!scroll.isConnected) return
+      scroll.scrollTop = at
       if (focusKey) this.#rowEls.get(focusKey)?.focus({ preventScroll: true })
     })
+  }
+
+  /** Where the rows scroll, while the mailbox is on screen. */
+  #listScrollTop(): number {
+    return this.#panel?.querySelector('.hc-mail-scroll')?.scrollTop ?? 0
   }
 
   /**
@@ -2152,42 +2327,61 @@ function ensureStyles(): void {
   const style = document.createElement('style')
   style.id = STYLE_ID
   style.textContent = `
-    /* The same material as every other tool window — the recipe restated
-       with the SHARED values, since a module cannot @use the stylesheet. */
+    /* A DESK — the whole page, in the theme's own material: the recipe of the other desks
+       (hosts, comfy, keyboard) restated with the SHARED tokens, since a module cannot @use
+       the stylesheet. Colours by role, never named; the fallbacks are for a page with no theme. */
     ${SURFACE} { display: contents; }
     .hc-mail {
+      --acc: var(--hc-chrome-accent, ${ACCENT});
+      --hc-mail-ink: var(--hc-window-ink-loud, #dfe6ee);
+      --hc-mail-quiet: var(--hc-window-ink-quiet, rgba(223, 230, 238, 0.7));
+      --hc-mail-rule: var(--hc-window-line, rgba(${STEEL}, 0.22));
+      --hc-mail-ground: var(--md-surface, #0d151e);
+      --hc-mail-raised: color-mix(in srgb, rgb(var(--acc)) 3.5%, var(--hc-mail-ground));
+      --hc-mail-wash: rgba(var(--acc), 0.07);
+      --hc-mail-wash-strong: rgba(var(--acc), 0.14);
+      --hc-mail-field: rgba(var(--hc-panel-ink, ${STEEL}), 0.06);
+      --hc-mail-focus: color-mix(in srgb, rgb(var(--acc)) 72%, white);
+      --hc-mail-face: 'Source Sans 3', var(--hc-font, system-ui), sans-serif;
+      --hc-mail-mono: var(--hc-mono, ui-monospace, monospace);
       position: fixed;
-      top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor, 0px));
-      right: var(--hc-controls-right, 0px); bottom: 0;
-      width: min(44rem, calc(100vw - 1.5rem)); min-width: 16rem;
-      box-sizing: border-box; display: flex; flex-direction: column;
-      z-index: 100002;
-      background: rgba(13, 15, 21, 0.975);
-      backdrop-filter: blur(14px) saturate(1.04);
-      -webkit-backdrop-filter: blur(14px) saturate(1.04);
-      border: 0; border-left: 1px solid rgba(${STEEL}, 0.38); border-radius: 0;
-      box-shadow: -14px 0 44px rgba(0, 0, 0, 0.46);
-      color: #dfe6ee; font: 0.8125rem/1.45 system-ui, sans-serif;
+      top: var(--hc-safe-top, 0px);
+      left: var(--hc-controls-left, 0px) !important;
+      right: max(var(--hc-inset-right, 0px), var(--hc-controls-right, 0px)) !important;
+      bottom: calc(max(var(--hc-controls-bottom, 0px), var(--hc-safe-bottom, 0px)) + var(--hc-mobile-row-lift, 0px));
+      width: auto !important; max-width: none !important; transform: none !important;
+      z-index: 60001; pointer-events: auto; box-sizing: border-box;
+      display: flex; flex-direction: column; min-height: 0;
+      background: var(--hc-mail-ground); color: var(--hc-mail-ink);
+      font-family: var(--hc-mail-face); font-size: calc(1rem * var(--hc-panel-scale, 1)); line-height: 1.4;
+      outline: none;
     }
     .hc-mail [hidden] { display: none !important; }
-    .hc-mail-head { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.8rem; border-bottom: 1px solid rgba(${STEEL}, 0.22); }
-    .hc-mail-title { font-weight: 600; letter-spacing: 0.02em; }
-    .hc-mail-who, .hc-mail-address { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.8; }
-    .hc-mail-address { background: transparent; color: inherit; border: 1px solid rgba(${STEEL}, 0.3); border-radius: 2px; padding: 0.15rem 0.3rem; }
-    .hc-mail-close { margin-left: auto; background: none; border: 0; color: inherit; font-size: 1.2rem; line-height: 1; cursor: pointer; opacity: 0.7; }
-    .hc-mail-close:hover { opacity: 1; }
+    .hc-mail button, .hc-mail input, .hc-mail textarea, .hc-mail select { font-family: inherit; }
+    .hc-mail button:focus-visible, .hc-mail input:focus-visible, .hc-mail textarea:focus-visible, .hc-mail select:focus-visible { outline: 2px solid var(--hc-mail-focus); outline-offset: 1px; }
+    .hc-mail-glyph { flex: none; font-size: 1.2em; line-height: 1; vertical-align: -0.22em; }
 
-    /* THE CUE: what the window is doing, under the header, with a bar that fills as rows open. */
-    .hc-mail-cue { display: flex; flex-direction: column; gap: 0.25rem; padding: 0.3rem 0.8rem 0.35rem; font-size: 0.75rem; border-bottom: 1px solid rgba(${STEEL}, 0.14); }
+    /* THE HEAD: the desk's mark, its name, whose mail, Write, close. */
+    .hc-mail-head { flex: 0 0 auto; display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.9rem 0.6rem 1rem; border-bottom: 1px solid var(--hc-mail-rule); background: var(--hc-mail-raised); }
+    .hc-mail-deskmark { display: grid; place-items: center; width: 1.85rem; height: 2.1rem; clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); background: rgb(var(--acc)); color: var(--md-on-primary, #fff); }
+    .hc-mail-deskmark .hc-mail-glyph { font-size: 1.05rem; }
+    .hc-mail-title { font-size: 1.02rem; font-weight: 600; letter-spacing: 0.01em; }
+    .hc-mail-who, .hc-mail-address { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--hc-mail-quiet); }
+    .hc-mail-address { background: transparent; border: 1px solid var(--hc-mail-rule); border-radius: 2px; padding: 0.15rem 0.3rem; }
+    .hc-mail-close { display: inline-grid; place-items: center; width: 2rem; height: 2rem; margin-left: auto; padding: 0; background: none; border: 0; border-radius: var(--hc-radius-control, 2px); color: var(--hc-mail-quiet); cursor: pointer; transition: background-color 0.15s, color 0.15s; }
+    .hc-mail-close:hover { color: var(--hc-mail-ink); background: var(--hc-mail-wash-strong); }
+
+    /* THE CUE: what the desk is doing, under the head, with a bar that fills as rows open. */
+    .hc-mail-cue { flex: 0 0 auto; display: flex; flex-direction: column; gap: 0.25rem; padding: 0.3rem 1rem 0.35rem; font-size: 0.8rem; border-bottom: 1px solid var(--hc-mail-rule); }
     .hc-mail-cue-text { opacity: 0.85; }
     .hc-mail-cue.is-quiet .hc-mail-cue-text { opacity: 0.55; }
-    .hc-mail-bar { position: relative; height: 2px; overflow: hidden; background: rgba(${STEEL}, 0.16); }
-    .hc-mail-bar-fill { position: absolute; inset: 0 auto 0 0; width: 0; background: rgb(${ACCENT}); transition: width 0.18s ease-out; }
-    .hc-mail-cue.is-quiet .hc-mail-bar-fill { background: rgba(${STEEL}, 0.7); }
+    .hc-mail-bar { position: relative; height: 2px; overflow: hidden; background: var(--hc-mail-wash-strong); }
+    .hc-mail-bar-fill { position: absolute; inset: 0 auto 0 0; width: 0; background: rgb(var(--acc)); transition: width 0.18s ease-out; }
+    .hc-mail-cue.is-quiet .hc-mail-bar-fill { background: var(--hc-mail-quiet); }
     .hc-mail-bar.is-indeterminate .hc-mail-bar-fill { width: 30%; animation: hc-mail-slide 1.1s ease-in-out infinite; }
     @keyframes hc-mail-slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
-    .hc-mail-skeleton { display: grid; grid-template-columns: minmax(0, 11rem) minmax(0, 1fr) 4rem; gap: 0.6rem; padding: 0.6rem 0.3rem; border-bottom: 1px solid rgba(${STEEL}, 0.1); }
-    .hc-mail-skeleton > span, .hc-mail-skeleton-text > span { display: block; height: 0.6rem; border-radius: 2px; background: rgba(${STEEL}, 0.13); animation: hc-mail-glow 1.4s ease-in-out infinite; }
+    .hc-mail-skeleton { display: grid; grid-template-columns: minmax(0, 8rem) minmax(0, 1fr) 4rem; gap: 0.6rem; padding: 0.6rem 0.4rem; border-bottom: 1px solid var(--hc-mail-rule); }
+    .hc-mail-skeleton > span, .hc-mail-skeleton-text > span { display: block; height: 0.6rem; border-radius: 2px; background: var(--hc-mail-wash-strong); animation: hc-mail-glow 1.4s ease-in-out infinite; }
     .hc-mail-skeleton-text { display: flex; flex-direction: column; gap: 0.5rem; }
     .hc-mail-skeleton-text > span:nth-child(2n) { width: 82%; }
     .hc-mail-skeleton-text > span:last-child { width: 46%; }
@@ -2197,62 +2391,86 @@ function ensureStyles(): void {
       .hc-mail-skeleton > span, .hc-mail-skeleton-text > span { animation: none; }
     }
 
-    .hc-mail-body { flex: 1; min-height: 0; overflow: auto; padding: 0.7rem 0.8rem 1rem; display: flex; flex-direction: column; gap: 0.6rem; }
-    .hc-mail-quiet { margin: 0; opacity: 0.65; }
-    .hc-mail-said { margin: 0; padding: 0.4rem 0.6rem; border-radius: 2px; border: 1px solid rgba(${STEEL}, 0.3); }
+    /* THE SAID LINE: what the last act came to — under the cue, across both columns. */
+    .hc-mail-said { margin: 0; padding: 0.4rem 0.6rem; border-radius: 2px; border: 1px solid var(--hc-mail-rule); }
+    .hc-mail > .hc-mail-said { flex: 0 0 auto; margin: 0.6rem 1rem 0; }
     .hc-mail-said.is-ok { border-color: rgba(120, 200, 140, 0.55); }
     .hc-mail-said.is-bad { border-color: rgba(220, 110, 110, 0.65); }
-    .hc-mail-do { background: rgba(${STEEL}, 0.12); color: inherit; border: 1px solid rgba(${STEEL}, 0.4); border-radius: 2px; padding: 0.25rem 0.65rem; cursor: pointer; font: inherit; }
-    .hc-mail-do:hover:not(:disabled) { background: rgba(${STEEL}, 0.22); }
+
+    /* TWO COLUMNS: the rows on the left; the message, the composer or a word on the right. */
+    .hc-mail-cols { flex: 1 1 auto; display: flex; min-height: 0; }
+    .hc-mail-side { flex: 0 0 clamp(18rem, 32%, 30rem); display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--hc-mail-rule); }
+    .hc-mail-side > .hc-mail-tabs { flex: 0 0 auto; padding: 0.6rem 0.8rem; border-bottom: 1px solid var(--hc-mail-rule); }
+    .hc-mail-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 0.5rem 1rem; display: flex; flex-direction: column; gap: 0.6rem; }
+    .hc-mail-scroll > .hc-mail-quiet { margin: 0.6rem 0.4rem 0; }
+    .hc-mail-main { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+    .hc-mail-sheet { flex: 1 0 auto; display: flex; flex-direction: column; gap: 0.6rem; width: min(100%, 72rem); box-sizing: border-box; padding: 0.9rem 1.4rem 1.4rem; }
+    .hc-mail-sheet.is-empty { width: 100%; justify-content: center; align-items: center; }
+    .hc-mail-empty { font-size: 1.05rem; }
+    /* One column when the page is narrow: the rows, or what is open. */
+    @media (max-width: 56rem) {
+      .hc-mail-side { flex: 1 1 auto; border-right: 0; }
+      .hc-mail.is-reading .hc-mail-side { display: none; }
+      .hc-mail:not(.is-reading) .hc-mail-main { display: none; }
+    }
+    /* Before the mailbox is known: placeholders, a problem, or the key to hand over. */
+    .hc-mail-body { flex: 1 1 auto; min-height: 0; overflow: auto; width: min(100%, 48rem); box-sizing: border-box; padding: 0.9rem 1.4rem 1.4rem; display: flex; flex-direction: column; gap: 0.6rem; }
+    .hc-mail-quiet { margin: 0; color: var(--hc-mail-quiet); }
+
+    .hc-mail-do { background: var(--hc-mail-wash); color: inherit; border: 1px solid var(--hc-mail-rule); border-radius: 2px; padding: 0.25rem 0.65rem; cursor: pointer; font: inherit; }
+    .hc-mail-do:hover:not(:disabled) { background: var(--hc-mail-wash-strong); }
     .hc-mail-do:disabled { opacity: 0.5; cursor: default; }
-    .hc-mail-do.is-place, .hc-mail-do.is-on { border-color: rgba(${ACCENT}, 0.75); color: rgb(${ACCENT}); }
-    .hc-mail-do.is-small { padding: 0.05rem 0.4rem; font-size: 0.75rem; }
+    .hc-mail-do.is-place, .hc-mail-do.is-on { border-color: rgba(var(--acc), 0.75); color: rgb(var(--acc)); }
+    .hc-mail-do.is-small { padding: 0.05rem 0.4rem; font-size: 0.8rem; }
     .hc-mail-do.is-danger:not(:disabled) { border-color: rgba(220, 110, 110, 0.65); }
-    .hc-mail-do[data-count]:not([data-count="0"])::after { content: attr(data-count); margin-left: 0.35rem; color: rgb(${ACCENT}); font-weight: 600; }
+    .hc-mail-do[data-count]:not([data-count="0"])::after { content: attr(data-count); margin-left: 0.35rem; color: rgb(var(--acc)); font-weight: 600; }
     .hc-mail-tabs, .hc-mail-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
-    .hc-mail-search { flex: 1; min-width: 8rem; background: rgba(255, 255, 255, 0.05); color: inherit; border: 1px solid rgba(${STEEL}, 0.3); border-radius: 2px; padding: 0.25rem 0.5rem; font: inherit; }
+    .hc-mail-search { flex: 1; min-width: 8rem; background: var(--hc-mail-field); color: inherit; border: 1px solid var(--hc-mail-rule); border-radius: 2px; padding: 0.25rem 0.5rem; font: inherit; }
     .hc-mail-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-    .hc-mail-row { display: grid; grid-template-columns: minmax(0, 11rem) minmax(0, 1fr) auto auto; align-items: center; gap: 0.6rem; padding: 0.45rem 0.3rem; border-bottom: 1px solid rgba(${STEEL}, 0.14); cursor: pointer; }
-    .hc-mail-row:hover, .hc-mail-row:focus { background: rgba(${STEEL}, 0.1); outline: none; }
-    .hc-mail-row:focus-visible { box-shadow: inset 2px 0 0 rgb(${ACCENT}); }
+    /* A row is two lines, as a mail list is: who and when, then the subject with its preview. */
+    .hc-mail-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "who at" "main acts"; align-items: center; column-gap: 0.6rem; row-gap: 0.1rem; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--hc-mail-rule); cursor: pointer; }
+    .hc-mail-row-who { grid-area: who; }
+    .hc-mail-row:hover, .hc-mail-row:focus { background: var(--hc-mail-wash); outline: none; }
+    .hc-mail-row:focus-visible { box-shadow: inset 2px 0 0 rgb(var(--acc)); }
+    .hc-mail-row.is-current { background: var(--hc-mail-wash-strong); box-shadow: inset 2px 0 0 rgb(var(--acc)); }
     .hc-mail-row > span, .hc-mail-row-main > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .hc-mail-row-main { display: flex; align-items: baseline; gap: 0.4rem; min-width: 0; }
+    .hc-mail-row-main { grid-area: main; display: flex; align-items: baseline; gap: 0.4rem; min-width: 0; }
     .hc-mail-row-subject { flex: 0 1 auto; min-width: 0; }
     .hc-mail-row-preview { flex: 1 1 0; min-width: 0; opacity: 0.5; }
-    .hc-mail-row-count, .hc-mail-row-folder { flex: none; padding: 0 0.3rem; border: 1px solid rgba(${STEEL}, 0.35); border-radius: 2px; font-size: 0.6875rem; opacity: 0.85; }
-    .hc-mail-row-flag { margin-right: 0.3rem; color: rgb(${ACCENT}); }
-    .hc-mail-row-at { opacity: 0.6; font-size: 0.75rem; }
+    .hc-mail-row-count, .hc-mail-row-folder { flex: none; padding: 0 0.3rem; border: 1px solid var(--hc-mail-rule); border-radius: 2px; font-size: 0.75rem; opacity: 0.85; }
+    .hc-mail-row-flag { margin-right: 0.3rem; color: rgb(var(--acc)); }
+    .hc-mail-row-at { grid-area: at; color: var(--hc-mail-quiet); font-size: 0.8rem; }
     .hc-mail-row.is-unread .hc-mail-row-who, .hc-mail-row.is-unread .hc-mail-row-subject { font-weight: 600; }
-    .hc-mail-row.is-member { padding-left: 1.3rem; background: rgba(${STEEL}, 0.04); }
+    .hc-mail-row.is-member { padding-left: 1.3rem; background: rgba(var(--acc), 0.035); }
     .hc-mail-row.is-open { border-bottom-color: transparent; }
     .hc-mail-row.is-hidden > .hc-mail-row-who, .hc-mail-row.is-hidden > .hc-mail-row-main, .hc-mail-row.is-hidden > .hc-mail-row-at { opacity: 0.5; }
-    .hc-mail-row-acts { display: flex; align-items: center; gap: 0.35rem; visibility: hidden; }
+    .hc-mail-row-acts { grid-area: acts; justify-self: end; display: flex; align-items: center; gap: 0.35rem; visibility: hidden; }
     .hc-mail-row:hover .hc-mail-row-acts, .hc-mail-row:focus-within .hc-mail-row-acts, .hc-mail-row.is-hidden .hc-mail-row-acts { visibility: visible; }
-    .hc-mail-check { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.75rem; cursor: pointer; }
-    .hc-mail-subject { margin: 0; font-size: 1rem; }
-    .hc-mail-meta { display: grid; grid-template-columns: auto 1fr; gap: 0.1rem 0.6rem; margin: 0; opacity: 0.85; }
-    .hc-mail-meta dt { opacity: 0.6; } .hc-mail-meta dd { margin: 0; overflow-wrap: anywhere; }
-    .hc-mail-frame { width: 100%; height: 60vh; border: 1px solid rgba(${STEEL}, 0.25); border-radius: 2px; background: #fff; }
-    .hc-mail-frame.is-previews, .hc-mail-frame.is-preview { height: 14rem; }
+    .hc-mail-check { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; cursor: pointer; }
+    .hc-mail-subject { margin: 0; font-size: 1.25rem; font-weight: 600; }
+    .hc-mail-meta { display: grid; grid-template-columns: auto 1fr; gap: 0.1rem 0.6rem; margin: 0; }
+    .hc-mail-meta dt { color: var(--hc-mail-quiet); } .hc-mail-meta dd { margin: 0; overflow-wrap: anywhere; }
+    .hc-mail-frame { flex: 1 1 24rem; width: 100%; min-height: 20rem; border: 1px solid var(--hc-mail-rule); border-radius: 2px; background: #fff; }
+    .hc-mail-frame.is-previews, .hc-mail-frame.is-preview { flex: 0 0 auto; min-height: 0; height: 14rem; }
     .hc-mail-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
-    .hc-mail-attachments { margin: 0; padding-left: 1.1rem; opacity: 0.9; display: flex; flex-direction: column; gap: 0.25rem; }
+    .hc-mail-attachments { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.25rem; }
     .hc-mail-attachments li { display: flex; align-items: center; gap: 0.5rem; }
     .hc-mail-attachment-name { overflow-wrap: anywhere; }
     .hc-mail-keep { align-items: flex-start; }
-    .hc-mail-privacy { flex: 1; min-width: 12rem; font-size: 0.75rem; opacity: 0.6; }
+    .hc-mail-privacy { flex: 1; min-width: 12rem; font-size: 0.8rem; color: var(--hc-mail-quiet); }
     .hc-mail-form { display: flex; flex-direction: column; gap: 0.5rem; }
     .hc-mail-field { display: flex; flex-direction: column; gap: 0.15rem; }
-    .hc-mail-field > span, .hc-mail-pick > span { opacity: 0.6; font-size: 0.75rem; }
-    .hc-mail-field input, .hc-mail-field textarea, .hc-mail-field select { background: rgba(255, 255, 255, 0.05); color: inherit; border: 1px solid rgba(${STEEL}, 0.3); border-radius: 2px; padding: 0.35rem 0.5rem; font: inherit; }
-    .hc-mail-compose-text { resize: vertical; min-height: 10rem; }
+    .hc-mail-field > span, .hc-mail-pick > span { color: var(--hc-mail-quiet); font-size: 0.8rem; }
+    .hc-mail-field input, .hc-mail-field textarea, .hc-mail-field select { background: var(--hc-mail-field); color: inherit; border: 1px solid var(--hc-mail-rule); border-radius: 2px; padding: 0.35rem 0.5rem; font: inherit; }
+    .hc-mail-compose-text { resize: vertical; min-height: 14rem; }
     .hc-mail-preview { display: flex; flex-direction: column; gap: 0.3rem; }
-    .hc-mail-hint { margin: 0; font-size: 0.75rem; opacity: 0.55; font-family: ui-monospace, monospace; }
+    .hc-mail-hint { margin: 0; font-size: 0.8rem; color: var(--hc-mail-quiet); font-family: var(--hc-mail-mono); }
     .hc-mail-files { display: flex; flex-direction: column; gap: 0.3rem; }
     .hc-mail-pick { display: flex; flex-direction: column; gap: 0.15rem; }
     .hc-mail-pick input { font: inherit; color: inherit; }
-    .hc-mail-status { margin: 0; min-height: 1rem; font-size: 0.75rem; opacity: 0.6; }
-    .hc-mail-status.is-bad { opacity: 0.9; color: rgb(230, 140, 140); }
-    .hc-mail-keybox { display: block; padding: 0.5rem 0.6rem; border: 1px solid rgba(${STEEL}, 0.3); border-radius: 2px; overflow-wrap: anywhere; user-select: all; font-size: 0.75rem; }
+    .hc-mail-status { margin: 0; min-height: 1rem; font-size: 0.8rem; color: var(--hc-mail-quiet); }
+    .hc-mail-status.is-bad { color: rgb(230, 140, 140); }
+    .hc-mail-keybox { display: block; padding: 0.5rem 0.6rem; border: 1px solid var(--hc-mail-rule); border-radius: 2px; overflow-wrap: anywhere; user-select: all; font-size: 0.8rem; font-family: var(--hc-mail-mono); }
   `
   document.head.appendChild(style)
 }
