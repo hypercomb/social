@@ -9,6 +9,7 @@ import type { MovementService } from '../../core/movement.service'
 import type { Navigation } from '../../core/navigation'
 import type { ScriptPreloader } from '@hypercomb/runtime/script-preloader'
 import type { CellSuggestionProvider } from '../../core/cell-suggestion.provider'
+import { namesBeyond } from '../../core/ever-made'
 import type { CompletionUtility, CompletionContext } from '@hypercomb/shared/core/completion-utility'
 import { fromRuntime } from '../../core/from-runtime'
 // Folder-based tag persistence retired. TagOp type is local-only now.
@@ -756,6 +757,19 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     get('@hypercomb.social/CellSuggestionProvider') as EventTarget,
     () => this.cellProvider.suggestions()
   )
+  /** Every name this hive ever made, beyond the level — what a name being typed
+   *  completes from (core/ever-made.ts). Its own signal: the level's list keeps
+   *  its identity when only this one moves. */
+  private readonly everNames$ = fromRuntime(
+    get('@hypercomb.social/CellSuggestionProvider') as EventTarget,
+    () => this.cellProvider.everMade()
+  )
+  /** The first typed name is the first reason to want the vocabulary — never
+   *  at boot, where it would be a whole-hive read for nothing. */
+  readonly #wantEverMade = effect(() => {
+    const ctx = this.context()
+    if (ctx.active && ctx.mode === 'action' && ctx.normalized) this.cellProvider.wantEverMade()
+  })
   /** Reactive master tag-name list. Bridged so tag intellisense re-reads the
    *  list the moment the (async) registry load finishes — not only after the
    *  first tag mutation. Loaded on boot in ngAfterViewInit. */
@@ -1760,10 +1774,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return cells.filter(n => n.startsWith(leaf))
     }
 
-    // when in a sub-path (e.g. "abc/"), show only cells at that level
+    // when in a sub-path (e.g. "abc/"), show the cells at that level — then, for
+    // a name being typed, every name this hive ever made (it makes the tile
+    // there just as it would here, so the same word is the same tile).
     if (subPath.length > 0) {
       if (!leaf) return cells
-      return cells.filter(n => n.startsWith(leaf))
+      const here = cells.filter(n => n.startsWith(leaf))
+      return ctx.mode === 'action' ? [...here, ...namesBeyond(leaf, here, this.everNames$())] : here
     }
 
     // at root level: merge cells + actions, deduplicated
@@ -1782,7 +1799,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     if (!ctx.normalized) return merged
 
-    return merged.filter(n => n.startsWith(ctx.normalized))
+    // The level and the verbs first, as ever — then every other name this hive
+    // ever made, on any page or none, so a name already spoken is completed
+    // rather than re-spelled (and a typo of it never becomes a second tile).
+    const matched = merged.filter(n => n.startsWith(ctx.normalized))
+    return ctx.mode === 'action' ? [...matched, ...namesBeyond(ctx.normalized, matched, this.everNames$())] : matched
   })
 
   public readonly showCompletions = computed<boolean>(() => {

@@ -24,9 +24,15 @@
 // calls query(['abc']) and we resolve from the layer for `parentSegments
 // + ['abc']` instead of the current level.
 
-import { levelRoster, type RosterHistory, type RosterRow, type RosterStore } from '@hypercomb/core'
+import { EffectBus, levelRoster, type RosterHistory, type RosterRow, type RosterStore } from '@hypercomb/core'
+import { everMadeNames } from './ever-made'
 import type { Lineage } from './lineage'
 import type { SuggestionProvider } from './suggestion-provider'
+
+/** The recents census reader (essentials history/recents-census.service.ts) —
+ *  named, not imported: shared never imports a module. */
+const RECENTS_CENSUS_KEY = '@diamondcoreprocessor.com/RecentsCensus'
+type CensusLike = { atoms(): Promise<readonly { readonly label?: unknown }[]> }
 
 export class CellSuggestionProvider extends EventTarget implements SuggestionProvider {
 
@@ -58,6 +64,46 @@ export class CellSuggestionProvider extends EventTarget implements SuggestionPro
   public rosterPath(): string { return this.#rowsPath }
   #rowsPath = ''
 
+  // ── every name ever made ────────────────────────────────────────────────
+  //
+  // Beyond the level: the name of every tile this hive made, on any page, and
+  // of tiles since removed from every page. The recents census already holds
+  // exactly that — derived from lineage bags, which are never deleted (H2) —
+  // so this reads it and keeps no list of its own. A derived cache may lag a
+  // commit by one idle pass; it can never be wrong about what was made.
+  //
+  // READ ON DEMAND, never at boot: the census is a whole-hive derivation, and
+  // the first typed letter is the first reason to want it. After that the
+  // census announces each pass (`recents:census-changed`) and this follows.
+
+  #ever: readonly string[] = []
+  #everWanted = false
+
+  /** Every name this hive ever made, newest first — empty until wanted. */
+  public everMade(): readonly string[] { return this.#ever }
+
+  /** The line has something typed: begin knowing the vocabulary. Idempotent.
+   *  A hive whose census is not minted yet is asked for it, once — the same
+   *  ask the recents view makes — and the list fills when it lands. */
+  public wantEverMade = (): void => {
+    if (this.#everWanted) return
+    this.#everWanted = true
+    void this.#readEver().then(() => {
+      if (this.#ever.length === 0) EffectBus.emitTransient('recents:wanted', {})
+    })
+  }
+
+  #readEver = async (): Promise<void> => {
+    const census = get(RECENTS_CENSUS_KEY) as CensusLike | undefined
+    if (!census?.atoms) return
+    let names: readonly string[]
+    try { names = everMadeNames(await census.atoms()) } catch { return }
+    const prev = this.#ever
+    if (prev.length === names.length && prev.every((name, i) => name === names[i])) return
+    this.#ever = names
+    this.dispatchEvent(new CustomEvent('change'))
+  }
+
   public constructor() {
     super()
 
@@ -67,6 +113,9 @@ export class CellSuggestionProvider extends EventTarget implements SuggestionPro
     // refresh when lineage (explorer path) changes
     const lineage = this.lineage
     lineage.addEventListener('change', () => void this.#refresh())
+
+    // the census landed a pass — but only follow it once someone wants it
+    EffectBus.on('recents:census-changed', () => { if (this.#everWanted) void this.#readEver() })
 
     // initial load
     void this.#refresh()
