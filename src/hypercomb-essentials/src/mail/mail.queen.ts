@@ -13,6 +13,7 @@
 // Aliases are the participant's to give.
 
 import { EffectBus, QueenBee } from '@hypercomb/core'
+import { registerPublishedPool } from '../sharing/published-pools.js'
 
 // THE WINDOW ARRIVES WITH ITS OPEN, not at boot (atomic-modules-plan.md, "adopt
 // the proper load"). Its surface registers by TAG at boot — the shell's host
@@ -61,6 +62,27 @@ window.ioc.whenReady('@hypercomb.social/ShellSurfaceRegistry', (registry: { add(
   } catch {
     // duplicate add (hot reload) — the mounted surface is already live
   }
+})
+
+// MAIL TEMPLATES A HOST OFFERS (documentation/mail-templates.md, "How a template
+// travels"). The queen claims the pool, not a dependency: a claim makes every
+// learned host answer for `sign('mail:template')` once a session, and that is
+// this word's to ask. An offer is only HELD by the probe; a press in /offers
+// is what calls `accept`, and only then is the template kept, BY ITS OWN BYTES
+// (another spelling would be another signature). Without the verified bytes it
+// is refused: `record` is JSON.parse's reading, which has already hidden a
+// repeated key. The module that keeps it arrives with the press, so the boot
+// path carries none of it.
+const MAIL_TEMPLATE_POOL = 'mail:template'
+registerPublishedPool({
+  meaning: MAIL_TEMPLATE_POOL,
+  accept: async (_record, _origin, verified) => {
+    if (!verified) return null
+    const { keepTemplate, templateStore } = await import('./template-pool.js')
+    const kept = await keepTemplate(templateStore(), verified.bytes, verified.sig)
+    if (!kept.ok) throw new Error(kept.reason)
+    return kept.sig
+  },
 })
 
 const _mail = new MailQueenBee()

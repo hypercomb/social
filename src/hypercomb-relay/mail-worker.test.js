@@ -2,7 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { generateSecretKey, getPublicKey, finalizeEvent } from 'nostr-tools/pure'
 import worker from './mail-worker/worker.js'
-import { openMessage, openMeta, sha256Hex } from './mail-worker/seal.js'
+import { openMessage, openMeta, sha256Hex, sealMessageV1 } from './mail-worker/seal.js'
+import { FakeR2 } from './mail-test-helpers.js'
+import { poolMeaning } from './mail-address.js'
 
 const enc = new TextEncoder()
 const latin1 = bytes => { let s = ''; for (const b of bytes) s += String.fromCharCode(b); return s }
@@ -10,31 +12,9 @@ const BODY = 'SECRET-BODY-MARKER'
 const SUBJECT = 'SECRET-SUBJECT-MARKER'
 const RAW = enc.encode(`From: sender@example.org\r\nTo: jaime@hypercomb.com\r\nSubject: ${SUBJECT}\r\n\tcontinued\r\n\r\n${BODY}\r\n`)
 
-// An in-memory stand-in for the R2 bucket: head, get, put, and a prefix list with a cursor.
-class FakeR2 {
-  constructor() { this.map = new Map(); this.failPut = false }
-  async head(key) { return this.map.has(key) ? { key } : null }
-  async put(key, value, options = {}) {
-    if (this.failPut) throw new Error('bucket unavailable')
-    this.map.set(key, { bytes: new Uint8Array(value).slice(), customMetadata: { ...(options.customMetadata || {}) } })
-  }
-  async get(key) {
-    const entry = this.map.get(key)
-    return entry ? { key, body: new Blob([entry.bytes]).stream(), customMetadata: entry.customMetadata } : null
-  }
-  async list({ prefix = '', limit = 1000, cursor } = {}) {
-    const keys = [...this.map.keys()].filter(k => k.startsWith(prefix)).sort()
-    const start = cursor ? keys.findIndex(k => k > cursor) : 0
-    const slice = start < 0 ? [] : keys.slice(start, start + limit)
-    const truncated = start >= 0 && start + limit < keys.length
-    return {
-      objects: slice.map(key => ({ key, customMetadata: this.map.get(key).customMetadata })),
-      truncated,
-      cursor: truncated ? slice[slice.length - 1] : undefined,
-    }
-  }
-}
+// The bucket is the shared FakeR2 (mail-test-helpers.js), the same one the browser-side spec drives.
 
+const ALL = ['read', 'mark', 'draft', 'delete', 'send']
 const jaime = generateSecretKey()
 const leanne = generateSecretKey()
 
@@ -89,7 +69,7 @@ test('a message is stored sealed: the bucket holds no plaintext, and the owner o
   const [key, entry] = [...MAIL.map.entries()][0]
   assert.equal(key.split('/')[1], await sha256Hex(RAW))
   assert.deepEqual((await openMessage(entry.bytes, jaime)).bytes, RAW)
-  const meta = openMeta(entry.customMetadata.meta, jaime)
+  const meta = await openMeta(entry.customMetadata, jaime, key.split('/')[1]) // the list line is bound to its sig (R1 #11)
   assert.equal(meta.from, 'sender@example.org')
   assert.equal(meta.to, 'jaime@hypercomb.com')
   assert.equal(meta.subject, `${SUBJECT} continued`)
@@ -114,11 +94,11 @@ test('each recipient gets a copy sealed to their own key, in their own pool', as
   assert.equal(MAIL.map.size, 2)
   const [forJaime, forLeanne] = [...MAIL.map.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, e]) => ({ key, e }))
   assert.notEqual(forJaime.key.split('/')[0], forLeanne.key.split('/')[0])
-  for (const { e } of [forJaime, forLeanne]) {
-    const mine = e.customMetadata.meta
+  for (const { key, e } of [forJaime, forLeanne]) {
+    const mine = { ...e.customMetadata, sig: key.split('/')[1] }
     const secrets = [jaime, leanne]
     const opens = []
-    for (const secret of secrets) { try { openMeta(mine, secret); opens.push(true) } catch { opens.push(false) } }
+    for (const secret of secrets) { try { await openMeta(mine, secret); opens.push(true) } catch { opens.push(false) } }
     assert.equal(opens.filter(Boolean).length, 1, 'exactly one of the two keys opens each')
   }
 })
@@ -219,9 +199,10 @@ test('the owner lists sealed metadata and fetches a sealed message, and opens bo
   const { items, cursor } = await res.json()
   assert.equal(cursor, null)
   assert.equal(items.length, 2)
-  assert.deepEqual(items.map(i => openMeta(i.meta, jaime).subject).sort(), [`${SUBJECT} continued`, 'second'].sort())
+  const metas = await Promise.all(items.map(i => openMeta(i, jaime)))
+  assert.deepEqual(metas.map(m => m.subject).sort(), [`${SUBJECT} continued`, 'second'].sort())
 
-  const first = items.find(i => openMeta(i.meta, jaime).subject.startsWith('SECRET'))
+  const first = items[metas.findIndex(m => m.subject.startsWith('SECRET'))]
   const one = await worker.fetch(request(`/mail/box/jaime%40hypercomb.com/${first.sig}`, jaime), env)
   assert.equal(one.status, 200)
   assert.equal(one.headers.get('x-content-type-options'), 'nosniff')
@@ -296,9 +277,9 @@ test('/mail/me tells a key its own addresses, and a stranger nothing', async () 
 
   const mine = await ask(jaime)
   assert.equal(mine.status, 200)
-  assert.deepEqual(await mine.json(), { addresses: ['also-jaime@hypercomb.com', 'jaime@hypercomb.com'] })
-  assert.deepEqual(await (await ask(leanne)).json(), { addresses: ['leanne@hypercomb.com'] })
-  assert.deepEqual(await (await ask(generateSecretKey())).json(), { addresses: [] })
+  assert.deepEqual(await mine.json(), { addresses: ['also-jaime@hypercomb.com', 'jaime@hypercomb.com'], names: {}, can: { 'also-jaime@hypercomb.com': ALL, 'jaime@hypercomb.com': ALL } })
+  assert.deepEqual(await (await ask(leanne)).json(), { addresses: ['leanne@hypercomb.com'], names: {}, can: { 'leanne@hypercomb.com': ALL } })
+  assert.deepEqual(await (await ask(generateSecretKey())).json(), { addresses: [], names: {}, can: {} })
 })
 
 test('/mail/me needs a signed, fresh request and answers only GET', async () => {
@@ -334,11 +315,147 @@ test('MAIL_CONFIG (one secret) carries the keys and the copies, and wins over th
   assert.deepEqual(msg.log.forwarded, ['me@example.org'])
   const [, entry] = [...MAIL.map.entries()][0]
   assert.deepEqual((await openMessage(entry.bytes, jaime)).bytes, RAW) // sealed to the secret's key, not the var's
-  assert.deepEqual(await (await worker.fetch(request('/mail/me', jaime), env)).json(), { addresses: ['jaime@hypercomb.com'] })
-  assert.deepEqual(await (await worker.fetch(request('/mail/me', leanne), env)).json(), { addresses: [] })
+  assert.deepEqual(await (await worker.fetch(request('/mail/me', jaime), env)).json(), { addresses: ['jaime@hypercomb.com'], names: {}, can: { 'jaime@hypercomb.com': ALL } })
+  assert.deepEqual(await (await worker.fetch(request('/mail/me', leanne), env)).json(), { addresses: [], names: {}, can: {} })
 })
 
 test('a secret that is not JSON leaves the plain vars in charge', async () => {
   const env = { MAIL: new FakeR2(), MAIL_CONFIG: '{not json', MAIL_KEYS: JSON.stringify({ 'jaime@hypercomb.com': getPublicKey(jaime) }) }
-  assert.deepEqual(await (await worker.fetch(request('/mail/me', jaime), env)).json(), { addresses: ['jaime@hypercomb.com'] })
+  assert.deepEqual(await (await worker.fetch(request('/mail/me', jaime), env)).json(), { addresses: ['jaime@hypercomb.com'], names: {}, can: { 'jaime@hypercomb.com': ALL } })
+})
+
+// ── many keys per address (v2) ──────────────────────────────────────────────
+
+const phone = generateSecretKey()
+const recovery = generateSecretKey()
+
+test('an address may list several keys: mail is sealed to each, and each reads it and asks /mail/me', async () => {
+  const { MAIL, env } = setup({ MAIL_KEYS: JSON.stringify({ 'jaime@hypercomb.com': [getPublicKey(jaime), getPublicKey(phone).toUpperCase(), 'not-a-key', getPublicKey(recovery)] }) })
+  await worker.email(message(), env)
+  const [, entry] = [...MAIL.map.entries()][0]
+  assert.equal(JSON.parse(entry.customMetadata.wraps).length, 3, 'the invalid entry is skipped')
+  for (const secret of [jaime, phone, recovery]) {
+    assert.deepEqual((await openMessage(entry.bytes, secret)).bytes, RAW)
+    assert.equal((await worker.fetch(request('/mail/box/jaime%40hypercomb.com', secret), env)).status, 200)
+    assert.deepEqual((await (await worker.fetch(request('/mail/me', secret), env)).json()).addresses, ['jaime@hypercomb.com'])
+  }
+  assert.equal((await worker.fetch(request('/mail/box/jaime%40hypercomb.com', leanne), env)).status, 401)
+})
+
+test('more than three keys: the first three own the address, and the operator is told once', async () => {
+  const keys = [jaime, phone, recovery, leanne].map(getPublicKey)
+  const { MAIL, env } = setup({ MAIL_KEYS: JSON.stringify({ 'many@hypercomb.com': keys }) })
+  const warnings = []
+  const warn = console.warn
+  console.warn = text => warnings.push(String(text))
+  try {
+    await worker.email(message({ to: 'many@hypercomb.com' }), env)
+    await worker.email(message({ to: 'many@hypercomb.com', raw: enc.encode('Subject: two\r\n\r\nb\r\n') }), env)
+  } finally { console.warn = warn }
+  assert.equal(warnings.length, 1)
+  assert.ok(!warnings[0].includes(keys[0]), 'no key is logged')
+  const [, entry] = [...MAIL.map.entries()][0]
+  assert.deepEqual(JSON.parse(entry.customMetadata.wraps).map(w => w.to), keys.slice(0, 3))
+  assert.equal((await worker.fetch(request('/mail/box/many%40hypercomb.com', leanne), env)).status, 401)
+})
+
+test('/mail/me answers names for the signer\'s own addresses only, cleaned for a From header', async () => {
+  const { env } = setup({
+    MAIL_CONFIG: JSON.stringify({
+      keys: { 'jaime@hypercomb.com': getPublicKey(jaime), 'leanne@hypercomb.com': getPublicKey(leanne) },
+      names: { 'jaime@hypercomb.com': 'Jaime "jwize" <x>', 'leanne@hypercomb.com': 'Leanne' },
+    }),
+  })
+  assert.deepEqual(await (await worker.fetch(request('/mail/me', jaime), env)).json(), { addresses: ['jaime@hypercomb.com'], names: { 'jaime@hypercomb.com': 'Jaime jwize x' }, can: { 'jaime@hypercomb.com': ALL } })
+  assert.deepEqual(await (await worker.fetch(request('/mail/me', leanne), env)).json(), { addresses: ['leanne@hypercomb.com'], names: { 'leanne@hypercomb.com': 'Leanne' }, can: { 'leanne@hypercomb.com': ALL } })
+})
+
+// ── the sealed meta of a received message ───────────────────────────────────
+
+const THREADED = enc.encode([
+  'From: Ana <ana@example.org>', 'To: jaime@hypercomb.com', 'Subject: =?utf-8?q?caf=C3=A9?=', 'Date: Fri, 6 Nov 2026 10:00:00 +0000',
+  'Message-ID: <m1@example.org>', 'In-Reply-To: <p0@example.org> <p1@example.org>',
+  'References: <r1@x.org> <r2@x.org>', '\t<r3@x.org> <r4@x.org> not-an-id',
+  'MIME-Version: 1.0', 'Content-Type: multipart/mixed; boundary="outer"', '',
+  'preamble', '--outer', 'Content-Type: multipart/alternative; boundary=inner', '',
+  '--inner', 'Content-Type: text/plain; charset=utf-8', 'Content-Transfer-Encoding: quoted-printable', '',
+  'Hola, caf=C3=A9 con   leche =', 'tomorrow?', '', '--inner', 'Content-Type: text/html', '', '<p>ignored</p>', '--inner--',
+  '--outer', 'Content-Type: application/pdf; name="menu.pdf"', 'Content-Disposition: attachment; filename="menu.pdf"', 'Content-Transfer-Encoding: base64', '',
+  'JVBERi0=', '--outer--', '',
+].join('\r\n'))
+
+test('received meta carries the threading ids, the date, attachments and a decoded preview', async () => {
+  const { MAIL, env } = setup()
+  await worker.email(message({ raw: THREADED }), env)
+  const [key, entry] = [...MAIL.map.entries()][0]
+  const meta = await openMeta(entry.customMetadata, jaime, key.split('/')[1])
+  assert.equal(meta.subject, '=?utf-8?q?caf=C3=A9?=')
+  assert.equal(meta.messageId, '<m1@example.org>')
+  assert.equal(meta.inReplyTo, '<p0@example.org>')
+  assert.deepEqual(meta.references, ['<r2@x.org>', '<r3@x.org>', '<r4@x.org>'])
+  assert.equal(meta.date, 'Fri, 6 Nov 2026 10:00:00 +0000')
+  assert.equal(meta.hasAttachments, true)
+  assert.equal(meta.preview, 'Hola, café con leche tomorrow?')
+  assert.equal(meta.size, THREADED.length)
+  assert.equal(entry.customMetadata.v, '2')
+})
+
+test('a base64 text part previews decoded, cut to 120 characters; a plain message previews its body', async () => {
+  const long = 'ünïcode '.repeat(40)
+  const b64 = btoa(String.fromCharCode(...enc.encode(long))).replace(/.{76}/g, '$&\r\n')
+  const raw = enc.encode(`Subject: b\r\nContent-Type: text/plain; charset="UTF-8"\r\nContent-Transfer-Encoding: base64\r\n\r\n${b64}\r\n`)
+  const { MAIL, env } = setup()
+  await worker.email(message({ raw }), env)
+  await worker.email(message({ raw: RAW }), env)
+  const metas = await Promise.all([...MAIL.map.entries()].map(([k, e]) => openMeta(e.customMetadata, jaime, k.split('/')[1])))
+  const b = metas.find(m => m.subject === 'b')
+  assert.equal(b.preview, long.trim().slice(0, 120))
+  assert.equal(b.hasAttachments, false)
+  const plain = metas.find(m => m.subject !== 'b')
+  assert.equal(plain.preview, BODY)
+  assert.equal(plain.messageId, undefined)
+})
+
+test('the scan stops at 64 KB: a text part beyond it gives no preview', async () => {
+  const filler = 'X-Filler: ' + 'a'.repeat(70 * 1024)
+  const raw = enc.encode(`Subject: far\r\n${filler}\r\nContent-Type: text/plain\r\n\r\nlate body\r\n`)
+  const { MAIL, env } = setup()
+  await worker.email(message({ raw }), env)
+  const [[key, entry]] = [...MAIL.map.entries()]
+  const meta = await openMeta(entry.customMetadata, jaime, key.split('/')[1])
+  assert.equal(meta.subject, 'far')
+  assert.equal(meta.preview, undefined)
+  assert.equal(meta.size, raw.length)
+})
+
+test('a malformed MIME message still files', async () => {
+  const raw = enc.encode('Subject: broken\r\nContent-Type: multipart/mixed\r\n\r\n--nothing\r\n')
+  const { MAIL, env } = setup()
+  const msg = message({ raw })
+  await worker.email(msg, env)
+  assert.equal(MAIL.map.size, 1)
+  assert.deepEqual(msg.log.rejected, [])
+})
+
+// ── v1 objects in the live bucket ───────────────────────────────────────────
+
+test('a v1 object already in the bucket lists as v 1 (no wraps), fetches, and opens', async () => {
+  const { MAIL, env } = setup()
+  const pool = await sha256Hex(enc.encode(poolMeaning('jaime@hypercomb.com')))
+  const old = await sealMessageV1(RAW, getPublicKey(jaime), { subject: 'old', size: RAW.length, at: 7 })
+  await MAIL.put(`${pool}/${old.sig}`, old.envelope, { customMetadata: old.customMetadata })
+  await worker.email(message({ raw: enc.encode('Subject: new\r\n\r\nn\r\n') }), env)
+
+  const { items } = await (await worker.fetch(request('/mail/box/jaime%40hypercomb.com', jaime), env)).json()
+  const v1 = items.find(i => i.sig === old.sig)
+  const v2 = items.find(i => i.sig !== old.sig)
+  assert.equal(v1.v, 1)
+  assert.ok(!('wraps' in v1))
+  assert.equal(v1.marks, null)
+  assert.equal(v2.v, 2)
+  assert.ok(Array.isArray(v2.wraps))
+  assert.equal((await openMeta(v1, jaime)).subject, 'old')
+  assert.equal((await openMeta(v2, jaime)).subject, 'new')
+  const one = await worker.fetch(request(`/mail/box/jaime%40hypercomb.com/${old.sig}`, jaime), env)
+  assert.deepEqual((await openMessage(new Uint8Array(await one.arrayBuffer()), jaime)).bytes, RAW)
 })
