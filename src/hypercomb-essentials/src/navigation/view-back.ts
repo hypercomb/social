@@ -118,6 +118,10 @@ export class ViewBack {
     this.#target.removeEventListener('popstate', this.#onPopState)
     this.#unsubscribe()
     this.#cancelRearm()
+    // A drop still waiting on its microtask must not fire after we are gone:
+    // its pop would land on a trap a successor armed.
+    this.#popping = false
+    this.#carried = null
   }
 
   #onActive = (payload: ModePayload): void => {

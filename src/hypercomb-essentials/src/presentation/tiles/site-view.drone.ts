@@ -27,6 +27,7 @@ import { openExternalLink } from './document-view-links.js'
 import { scopeCellPageCss } from './cell-page-css-scope.js'
 import { hoistPageStylesheets, stylesheetsSettled } from './cell-page-stylesheets.js'
 import { HEXAGONS_SURFACE, sameSiteSegments, siteFlipTarget, siteFloorFor, type SiteSpawn } from './site-return.js'
+import { VIEW_SPAWN_EFFECT, spawnForView } from './view-spawn.js'
 import { SiteTrail } from './site-trail.js'
 import { closeSiteContextMenu, isOnSiteContextMenu, openSiteContextMenu, type SiteMenuItem } from './site-context-menu.js'
 import { browserKeepsMenu, isLongPressMenu } from '../../navigation/browser-menu.js'
@@ -189,6 +190,17 @@ export class SiteViewDrone extends Drone {
    * into website mode) that never had a spawn to remember.
    */
   #spawn: SiteSpawn | null = null
+  /** WHERE THE ICON THAT STEPPED INTO THIS SITE WAS CLICKED FROM (jwize
+   *  2026-11-08: "always where you entered from"). The icon dispatcher walks
+   *  the explorer to the site ROOT before the surface flips, so by the time
+   *  `#captureSiteEntry` reads the lineage the reader already stands on the
+   *  root — a spawn read there sent everyone who entered from a node deeper
+   *  in the tree back to the root. The dispatcher announces the real place
+   *  on `view:spawn` BEFORE it walks; this holds it until the flip. */
+  #steppedInFrom: SiteSpawn | null = null
+  /** The spawn came from a step-in record, not from reading the lineage at
+   *  the flip: an arrival verdict must not rewrite it. */
+  #spawnPinned = false
   /** Explorer path before the most recent move, and the current one. The
    *  pair is what lets an arrival-opened site name the page that spawned it;
    *  only a real change shifts them, so the several 'change' events one
@@ -216,12 +228,17 @@ export class SiteViewDrone extends Drone {
    *  null. While set, the mounted host carries `data-hc-returning`, so the
    *  page's own script can resume where it was (its step, its playback). */
   #returningScroll: number | null = null
-  /** Set for the one exit the back gesture makes at the site's entry: the
-   *  reader goes back OUT, to the layer that hosts the entry tile (its
-   *  parent), not into that tile's own hexagons (jwize 2026-11-04: "when you
-   *  click back on a webpage you just entered … you go to the parent of the
-   *  page you entered"). */
+  /** Set for the one exit the back gesture makes at the site's entry when the
+   *  reader opened a page STANDING ON ITS OWN TILE'S LAYER: back steps OUT to
+   *  the layer hosting that tile (jwize 2026-11-04: "when you click back on a
+   *  webpage you just entered … you go to the parent of the page you
+   *  entered"). Null for every other entry — the exit goes to the spawn. */
   #backOutTo: string[] | null = null
+  /** The cell `#reconcile` last found CONFIRMED page-less (its three page
+   *  slots empty) while the site was up, as a path key — null when the last
+   *  reconcile mounted a page or never ran. Read synchronously by `#back`:
+   *  a node the surface merely came up on is not a page the reader entered. */
+  #pagelessAt: string | null = null
   /** The tile whose page the reader opened, kept when the session widens to
    *  the whole website (#widen): back out of the website still steps out to
    *  the layer hosting the page they first opened. */
@@ -297,6 +314,11 @@ export class SiteViewDrone extends Drone {
       // The subscription's own last-value replay is not a live arrival —
       // ignore it, or a boot replay would rewrite a session's spawn.
       let replay = true
+      this.onEffect(VIEW_SPAWN_EFFECT, (payload) => {
+        if (replay) return
+        const stepped = spawnForView(payload, 'website')
+        if (stepped) this.#steppedInFrom = { mode: stepped.mode, segments: stepped.segments }
+      })
       this.onEffect<{ segments?: readonly string[]; view?: string; held?: boolean; inherited?: boolean }>('view:arrival', (payload) => {
         if (replay) return
         if (payload?.view !== 'website') return
@@ -304,6 +326,8 @@ export class SiteViewDrone extends Drone {
         // once the reader has moved inside the site, an arrival on the entry
         // is the walk back onto it, not the arrival that opened it (#89).
         if (payload.held || this.#movedInSite) return
+        // A stepped-into site already knows where it was entered from.
+        if (this.#spawnPinned) return
         const spawn = this.#spawn
         const entry = this.#siteEntrySegments
         if (!spawn || !entry) return
@@ -448,6 +472,8 @@ export class SiteViewDrone extends Drone {
       const entry = this.#siteEntrySegments
       this.#siteEntrySegments = null
       this.#spawn = null
+      this.#spawnPinned = false
+      this.#pagelessAt = null
       this.#trail.clear()
       this.#movedInSite = false
       this.#trailScroll = []
@@ -485,8 +511,14 @@ export class SiteViewDrone extends Drone {
     const vm = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
       ?.get<{ previous?: string }>('@hypercomb.social/ViewMode')
     // The spawning PLACE starts as "right here"; a `view:arrival` verdict for
-    // this same cell corrects it to the page the reader came from.
-    this.#spawn = { mode: (vm?.previous ?? '').trim(), segments: here }
+    // this same cell corrects it to the page the reader came from. A STEP-IN
+    // (a website icon clicked somewhere in the tree) already said where that
+    // was, before the dispatcher walked the explorer to the root: that record
+    // is the spawn, and nothing corrects it.
+    const stepped = this.#steppedInFrom
+    this.#steppedInFrom = null
+    this.#spawn = stepped ?? { mode: (vm?.previous ?? '').trim(), segments: here }
+    this.#spawnPinned = stepped !== null
     this.#trail.clear()
     this.#movedInSite = false
     this.#trailScroll = []
@@ -526,9 +558,20 @@ export class SiteViewDrone extends Drone {
       void this.#navigate(previous).finally(() => { this.#trailStep = false })
       return
     }
-    // At the entry: out to the layer that hosts the page first opened.
+    // At the entry: out the way in — the SPAWN, like every other exit (jwize
+    // 2026-11-08: "always where you entered from"). ONE exception, jwize's
+    // own (2026-11-04): a page opened while standing on its own tile's layer
+    // — spawn and entry are the same cell, and that cell carries the page —
+    // steps OUT to the layer hosting the tile, "the parent of the page you
+    // entered". A node the site surface merely came up on (toggled on at
+    // /deep/tile, which has no page of its own — `#pagelessAt`) is not a page
+    // the reader entered: back used to send them to /deep, the website's
+    // root, and now returns them to /deep/tile.
     const entry = this.#enteredAt ?? this.#siteEntrySegments
-    this.#backOutTo = entry ? entry.slice(0, -1) : null
+    const spawn = this.#spawn
+    const ownPage = !!spawn && !!entry && sameSiteSegments(spawn.segments, entry)
+      && this.#pagelessAt !== entry.join('/')
+    this.#backOutTo = ownPage && entry ? entry.slice(0, -1) : null
     this.#exitToHive()
   }
 
@@ -734,6 +777,7 @@ export class SiteViewDrone extends Drone {
       cellPageSig = await this.#findContextPage(segments, store)
       if (gen !== this.#gen) return
     }
+    this.#pagelessAt = cellPageSig ? null : segments.join('/')
     if (cellPageSig) {
       // Verification gate. A FOREIGN page — adopted into the hive, or published
       // by a domain that isn't yours — must NOT activate (mount, run its
