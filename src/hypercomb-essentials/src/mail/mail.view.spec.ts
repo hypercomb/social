@@ -13,6 +13,8 @@ import { MailElement, MAIL_OPEN, MAIL_UNREAD, UNREAD_INDICATOR, explain } from '
 import { ALREADY_DONE, ALREADY_SENT, MAIL_LIMITS, MailError, type MailAct, type MailListItem, type MailService } from './mail.service.js'
 import { sizeLabel } from './cue.js'
 import type { SaveMessageInput, SaveMessageResult } from './mail-to-hive.js'
+import { MAIL_TEMPLATE_PART_TYPE, mailPart, type MailTemplateDocument } from './template.js'
+import { listTemplates, saveTemplate, type TemplateStore } from './template-pool.js'
 
 // Every walk of a message's bytes, counted: the real reader runs, and the spec sees which bytes it was
 // handed. A stranger chooses how large a message is, so how often the window walks it is what matters.
@@ -1304,5 +1306,241 @@ describe('explain', () => {
     }
     expect(explain(new MailError('unavailable'), true)).toContain('Nothing was sent')
     expect(explain(new Error('anything else'))).toContain('did not answer')
+  })
+})
+
+// documentation/mail-templates.md, steps 2 and 3: the composer fills a template this hive keeps and sends
+// it baked with its part; a reader that keeps the same template shows the message from its own copy.
+describe('templates', () => {
+  const enc = new TextEncoder()
+  const hex = (bytes: ArrayBuffer): string => Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('')
+  const sha = async (bytes: Uint8Array): Promise<string> => hex(await crypto.subtle.digest('SHA-256', bytes.slice().buffer as ArrayBuffer))
+  const bytesOf = (blob: Blob): Promise<Uint8Array> => new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(reader.error)
+    reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer))
+    reader.readAsArrayBuffer(blob)
+  })
+  const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52])
+
+  /** The hive's store as the templates see it: a heap by signature and the one list document. */
+  function templateHive(over: Partial<TemplateStore> = {}) {
+    const heap = new Map<string, Uint8Array>()
+    let members: string[] | null = null
+    const pool = { name: 'pool', keys: async function* () { if (members) yield 'd'.repeat(64) } }
+    const store: TemplateStore = {
+      getPool: async () => pool,
+      openPool: async () => (members ? pool : null),
+      getPoolDoc: async () => (members ? enc.encode(JSON.stringify({ meaning: 'mail:template', members })).buffer as ArrayBuffer : null),
+      putPoolDoc: async (_pool, bytes) => { members = (JSON.parse(new TextDecoder().decode(bytes)) as { members: string[] }).members; return 'd'.repeat(64) },
+      putResource: async blob => { const bytes = await bytesOf(blob); const sig = await sha(bytes); heap.set(sig, bytes); return sig },
+      getResourceLocal: async sig => {
+        const bytes = heap.get(sig)
+        return bytes ? ({ size: bytes.length, arrayBuffer: async () => bytes.slice().buffer } as unknown as Blob) : null
+      },
+      ...over,
+    }
+    return { store, heap, members: () => members ?? [] }
+  }
+
+  const INVITE = (logo: string): MailTemplateDocument => ({
+    name: 'Tasting night',
+    description: 'An invitation with the room',
+    subject: 'You are invited, {{guest}}',
+    holes: { guest: { type: 'text', required: true, label: 'Who it is for' }, seats: { type: 'number', label: 'Seats left' } },
+    text: 'Dear {{guest}}, {{seats}} seats are left.',
+    html: '<p>Dear <strong>{{guest}}</strong>, {{seats}} seats are left.</p><p>{{@logo}}</p>',
+    resources: { logo },
+  })
+
+  /** A hive that keeps the invitation, its logo held. */
+  async function keeping(over: Partial<TemplateStore> = {}) {
+    const hive = templateHive(over)
+    const logo = await hive.store.putResource!(new Blob([PNG]))
+    const saved = await saveTemplate(hive.store, INVITE(logo))
+    if (!saved.ok) throw new Error(saved.reason)
+    return { ...hive, logo, sig: saved.sig }
+  }
+
+  const holes = (): HTMLElement[] => Array.from(panel().querySelectorAll<HTMLElement>('.hc-mail-template-form > .hc-mail-field'))
+  const holeInput = (n: number): HTMLInputElement => holes()[n]!.querySelector('input, textarea') as HTMLInputElement
+  const typeInto = (input: HTMLInputElement, value: string): void => { input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })) }
+  const preview = (): string => (panel().querySelector('.hc-mail-preview iframe') as HTMLIFrameElement).srcdoc
+  const submit = (): void => (panel().querySelector('form') as HTMLFormElement).requestSubmit()
+
+  it('"Use a template" says what it is doing, lists what this hive keeps, and shows the form instead of the message box', async () => {
+    const hive = await keeping()
+    const reading = gate()
+    const store = { ...hive.store, openPool: async (meaning: string) => { await reading.promise; return hive.store.openPool!(meaning) } }
+    await windowWith(fakeService(), element => { element.templates = () => store })
+    press('Write')
+    press('Use a template')
+    // The same frame as the press: the button says it, the cue says it, placeholders hold the place.
+    expect(buttons().some(b => b.textContent === 'Reading your templates…' && b.disabled)).toBe(true)
+    expect(cue()).toBe('Reading your templates…')
+    expect(panel().querySelector('.hc-mail-template-chooser .hc-mail-skeleton-text')).not.toBeNull()
+    reading.open()
+    await settle()
+    expect(panel().querySelector('.hc-mail-template-chooser')!.textContent).toContain('An invitation with the room')
+    press('Tasting night')
+    expect(panel().querySelector('.hc-mail-template-chooser')).toBeNull()
+    expect(panel().querySelector('[name="text"]')).toBeNull()
+    expect(panel().querySelector('[name="subject"]')).toBeNull() // the template writes its subject
+    expect(holes().map(h => h.querySelector('span')!.textContent)).toEqual(['Who it is for (required)', 'Seats left'])
+    expect(panel().textContent).toContain('Filled from your template “Tasting night”.')
+  })
+
+  it('the preview is the template filled in as it is typed, its picture from this hive', async () => {
+    const hive = await keeping()
+    await windowWith(fakeService(), element => { element.templates = () => hive.store })
+    press('Write'); press('Use a template'); await settle()
+    press('Tasting night'); await settle()
+    typeInto(holeInput(0), '<b>Leanne</b>')
+    await wait(260); await settle()
+    expect(preview()).toContain('Dear <strong>&lt;b&gt;Leanne&lt;/b&gt;</strong>')
+    expect(preview()).toContain('src="data:image/png;base64,')
+    expect(panel().querySelector('.hc-mail-template-subject')!.textContent).toBe('Subject: You are invited, <b>Leanne</b>')
+  })
+
+  it('sends it baked, with the part and the picture inline under its id', async () => {
+    const hive = await keeping()
+    const service = fakeService()
+    await windowWith(service, element => { element.templates = () => hive.store })
+    press('Write')
+    fill('to', 'friend@example.org')
+    press('Use a template'); await settle()
+    press('Tasting night'); await settle()
+    typeInto(holeInput(0), 'Leanne')
+    typeInto(holeInput(1), '6')
+    submit(); await settle()
+    expect(service.send).toHaveBeenCalledTimes(1)
+    const request = service.send.mock.calls[0]![0] as Record<string, unknown>
+    expect(request).toMatchObject({
+      to: ['friend@example.org'], subject: 'You are invited, Leanne', text: 'Dear Leanne, 6 seats are left.',
+      template: { sig: hive.sig, fill: { guest: 'Leanne', seats: 6 } },
+    })
+    expect(request['html']).toContain(`<img src="cid:${hive.logo}" alt="logo">`)
+    expect(request['attachments']).toEqual([{ filename: `${hive.logo.slice(0, 12)}.png`, type: 'image/png', content: PNG, contentId: hive.logo }])
+    expect(panel().textContent).toContain('Sent to friend@example.org.')
+  })
+
+  it('a missing required field is said beside it, and nothing is sent', async () => {
+    const hive = await keeping()
+    const service = fakeService()
+    await windowWith(service, element => { element.templates = () => hive.store })
+    press('Write')
+    fill('to', 'friend@example.org')
+    press('Use a template'); await settle()
+    press('Tasting night'); await settle()
+    submit(); await settle()
+    expect(service.send).not.toHaveBeenCalled()
+    expect(panel().textContent).toContain('The template is not filled in yet')
+    expect(holes()[0]!.querySelector('.hc-mail-status:not([hidden])')!.textContent).toBe('This is needed.')
+  })
+
+  it('the template takes one of the file slots', async () => {
+    const hive = await keeping()
+    await windowWith(fakeService(), element => { element.templates = () => hive.store })
+    press('Write'); press('Use a template'); await settle()
+    press('Tasting night'); await settle()
+    expect(panel().textContent).toContain(`Up to ${MAIL_LIMITS.attachments - 1} files`)
+  })
+
+  it('a hive that keeps none says so; Escape closes the list before it leaves the draft', async () => {
+    const hive = templateHive()
+    await windowWith(fakeService(), element => { element.templates = () => hive.store })
+    press('Write'); press('Use a template'); await settle()
+    expect(panel().textContent).toContain('No templates are kept on this hive yet.')
+    expect(mounted!.dismissInner()).toBe(true)
+    expect(panel().querySelector('.hc-mail-template-chooser')).toBeNull()
+    expect(panel().querySelector('.hc-mail-form')).not.toBeNull() // still writing
+  })
+
+  it('stopping brings the message box back with what it said', async () => {
+    const hive = await keeping()
+    await windowWith(fakeService(), element => { element.templates = () => hive.store })
+    press('Write')
+    type('text', 'my own words')
+    press('Use a template'); await settle()
+    press('Tasting night'); await settle()
+    press('Stop using it')
+    expect((panel().querySelector('[name="text"]') as HTMLTextAreaElement).value).toBe('my own words')
+    expect(panel().querySelector('.hc-mail-template-form')).toBeNull()
+  })
+
+  it('"Save as template" keeps the draft as one, each {{name}} a field, and "Use a template" offers it', async () => {
+    const hive = templateHive()
+    await windowWith(fakeService(), element => { element.templates = () => hive.store })
+    press('Write')
+    fill('subject', 'Hello {{guest}}')
+    type('text', 'Dear {{guest}}, see you at {{place}}.')
+    press('Save as template'); await settle()
+    expect(panel().textContent).toContain('Kept as a template.')
+    const listing = await listTemplates(hive.store)
+    expect(listing.entries).toHaveLength(1)
+    const kept = listing.entries[0]!
+    expect(kept.ok && kept.template).toMatchObject({ name: 'Hello guest', subject: 'Hello {{guest}}', holes: { guest: { type: 'text' }, place: { type: 'text' } } })
+    press('Use a template'); await settle()
+    expect(panel().querySelector('.hc-mail-template-chooser')!.textContent).toContain('Hello guest')
+  })
+
+  it('a draft with nothing written is not made a template', async () => {
+    const hive = templateHive()
+    await windowWith(fakeService(), element => { element.templates = () => hive.store })
+    press('Write')
+    press('Save as template'); await settle()
+    expect(panel().textContent).toContain('Write the message first')
+    expect(hive.members()).toEqual([])
+  })
+
+  /** A received message filled from the invitation: baked text and html, and the part. */
+  const received = async (sig: string, fill: Record<string, string | number>, html = '<p>the sender wrote this</p>') => {
+    const part = mailPart(sig, fill)!
+    return mime({ text: 'baked text', html, files: [{ filename: part.filename, type: MAIL_TEMPLATE_PART_TYPE, base64: btoa(part.body) }, { filename: 'plan.pdf', type: 'application/pdf', base64: 'JVBERi0x' }] })
+  }
+  const messageFrame = (): string => (panel().querySelector('.hc-mail-frame:not(.is-previews):not(.is-preview)') as HTMLIFrameElement).srcdoc
+
+  it('a reader that keeps the template shows the message from its own copy, says so, and can show the sender’s', async () => {
+    const hive = await keeping()
+    const raw = await received(hive.sig, { guest: 'Ana', seats: 2 })
+    await windowWith(fakeService({ readRaw: vi.fn(async () => raw) }), element => { element.templates = () => hive.store })
+    ;(panel().querySelector('.hc-mail-row') as HTMLElement).click()
+    await settle()
+    expect(panel().querySelector('.hc-mail-subject')!.textContent).toBe('You are invited, Ana')
+    expect(messageFrame()).toContain('Dear <strong>Ana</strong>, 2 seats are left.')
+    expect(messageFrame()).toContain('data:image/png;base64,')
+    expect(panel().textContent).toContain('Shown from your template “Tasting night”')
+    // The part is the message's own, never a file.
+    const files = Array.from(panel().querySelectorAll('.hc-mail-attachment-name')).map(n => n.textContent!.split(' · ')[0])
+    expect(files).toEqual(['plan.pdf'])
+    press('Show the sender’s copy')
+    expect(messageFrame()).toContain('the sender wrote this')
+    press('Show from the template')
+    expect(messageFrame()).toContain('Dear <strong>Ana</strong>')
+  })
+
+  it('a template this hive does not keep, or a fill it refuses, shows the sender’s copy exactly as before', async () => {
+    const hive = await keeping()
+    const stranger = 'e'.repeat(64)
+    for (const raw of [await received(stranger, { guest: 'Ana' }), await received(hive.sig, { guest: 'Ana', seats: 'six' }), await received(hive.sig, { seats: 2 })]) {
+      document.body.replaceChildren()
+      await windowWith(fakeService({ readRaw: vi.fn(async () => raw) }), element => { element.templates = () => hive.store })
+      ;(panel().querySelector('.hc-mail-row') as HTMLElement).click()
+      await settle()
+      expect(messageFrame()).toContain('the sender wrote this')
+      expect(panel().textContent).not.toContain('Shown from your template')
+      expect(Array.from(panel().querySelectorAll('.hc-mail-attachment-name')).map(n => n.textContent!.split(' · ')[0])).toEqual(['plan.pdf'])
+      mounted?.remove()
+    }
+  })
+
+  it('a forward never carries the template part on', async () => {
+    const hive = await keeping()
+    const raw = await received(hive.sig, { guest: 'Ana' })
+    await windowWith(fakeService({ readRaw: vi.fn(async () => raw) }), element => { element.templates = () => hive.store })
+    ;(panel().querySelector('.hc-mail-row') as HTMLElement).click()
+    await settle()
+    press('Forward')
+    expect(Array.from(panel().querySelectorAll('.hc-mail-files .hc-mail-attachment-name')).map(n => n.textContent!.split(' · ')[0])).toEqual(['plan.pdf'])
   })
 })

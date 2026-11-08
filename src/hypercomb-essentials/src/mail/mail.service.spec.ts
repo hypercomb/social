@@ -16,6 +16,7 @@ import { FakeR2, streamOf } from '../../../hypercomb-relay/mail-test-helpers.js'
 // @ts-ignore
 import { sealMessageV1 } from '../../../hypercomb-relay/mail-worker/seal.js'
 import { ALREADY_DONE, ALREADY_SENT, MAIL_ACTS, MAIL_LIMITS, MAIL_READ_CAPS, MailError, MailService, sentAttachmentBytes, unreadCount, type MailListItem, type MailSigner } from './mail.service.js'
+import { MAIL_TEMPLATE_PART_TYPE, readMailPart } from './template.js'
 
 const enc = new TextEncoder()
 const jaime = generateSecretKey()
@@ -438,6 +439,76 @@ describe('sending with attachments', () => {
     await expect(service(h, signerFor(jaime)).send({ from: ME, to: ['a@example.org'], subject: 's', text: 't', attachments: [{ filename: 'x', type: 'not a type', content: btoa('x') }] }))
       .rejects.toMatchObject({ code: 'refused' })
     expect(h.sent).toEqual([])
+  })
+})
+
+// documentation/mail-templates.md, step 2: the template travels as a part of its own beside the baked
+// text and html, the host is told its signature, and a picture the html shows goes inline by its id.
+describe('sending a template', () => {
+  const TEMPLATE = 'a'.repeat(64)
+  const PICTURE = 'b'.repeat(64)
+  const fill = { guest: 'Leanne', seats: 6 }
+
+  it('carries the part and the signature, and the Sent copy reads back the same reference', async () => {
+    const h = host()
+    const s = service(h, signerFor(jaime))
+    const out = await s.send({ from: ME, to: ['friend@example.org'], subject: 'Invited', text: 'baked', html: '<p>baked</p>', template: { sig: TEMPLATE, fill } })
+    const message = h.sent[0] as { headers?: Record<string, string>; attachments: { type: string; filename: string; disposition: string }[] }
+    expect(message.headers).toEqual({ 'X-Hypercomb-Template': TEMPLATE })
+    expect(message.attachments).toHaveLength(1)
+    expect(message.attachments[0]).toMatchObject({ type: MAIL_TEMPLATE_PART_TYPE, filename: 'hypercomb-template.json', disposition: 'attachment' })
+    const record = await s.readSent(ME, out.sig!)
+    expect(readMailPart({ attachments: record.attachments! }, i => sentAttachmentBytes(record.attachments![i]!))).toEqual({ templateSig: TEMPLATE, fill })
+  })
+
+  it('the part takes one of the ten slots: ten files and a template is refused before a byte is sent', async () => {
+    const h = host()
+    const fetch = vi.fn(h.fetch)
+    const s = new MailService({ fetch, signer: () => signerFor(jaime), extension: () => false })
+    const one = { filename: 'a', type: 'text/plain', content: btoa('a') }
+    await expect(s.send({ from: ME, to: ['a@example.org'], subject: 's', text: 't', attachments: Array.from({ length: MAIL_LIMITS.attachments }, () => one), template: { sig: TEMPLATE, fill } }))
+      .rejects.toMatchObject({ code: 'refused', detail: 'too many attachments' })
+    expect(fetch).not.toHaveBeenCalled()
+    await s.send({ from: ME, to: ['a@example.org'], subject: 's', text: 't', attachments: Array.from({ length: MAIL_LIMITS.attachments - 1 }, () => one), template: { sig: TEMPLATE, fill } })
+    expect((h.sent[0] as { attachments: unknown[] }).attachments).toHaveLength(MAIL_LIMITS.attachments)
+  })
+
+  it('a picture goes inline under its bare id, the html naming it, and the Sent copy keeps the id', async () => {
+    const h = host()
+    const s = service(h, signerFor(jaime))
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    const out = await s.send({
+      from: ME, to: ['friend@example.org'], subject: 's', text: 't', html: `<p><img src="cid:${PICTURE}" alt="room"></p>`,
+      attachments: [{ filename: 'room.png', type: 'image/png', content: png, contentId: PICTURE }],
+      template: { sig: TEMPLATE, fill },
+    })
+    const [picture, part] = (h.sent[0] as { attachments: Record<string, unknown>[] }).attachments
+    expect(picture).toEqual({ content: btoa(String.fromCharCode(...png)), filename: 'room.png', type: 'image/png', disposition: 'inline', contentId: PICTURE })
+    expect(part).not.toHaveProperty('contentId')
+    const record = await s.readSent(ME, out.sig!)
+    expect(record.attachments![0]!.contentId).toBe(PICTURE)
+    expect(record.attachments![1]).not.toHaveProperty('contentId')
+  })
+
+  it('a bad or repeated content id, or a template that is not a signature, is refused before a byte is sent', async () => {
+    const h = host()
+    const fetch = vi.fn(h.fetch)
+    const s = new MailService({ fetch, signer: () => signerFor(jaime), extension: () => false })
+    const pic = (contentId: string) => ({ filename: 'p.png', type: 'image/png', content: btoa('x'), contentId })
+    for (const attachments of [[pic('<angle>')], [pic('a b')], [pic('')], [pic('x'.repeat(65))], [pic('same'), pic('same')]]) {
+      await expect(s.send({ from: ME, to: ['a@example.org'], subject: 's', text: 't', attachments })).rejects.toMatchObject({ code: 'refused', detail: 'bad content id' })
+    }
+    for (const sig of ['A'.repeat(64), 'a'.repeat(63), 'not a sig']) {
+      await expect(s.send({ from: ME, to: ['a@example.org'], subject: 's', text: 't', template: { sig, fill } })).rejects.toMatchObject({ code: 'refused', detail: 'bad template' })
+    }
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('a message with no template sends exactly as before: no part, no header', async () => {
+    const h = host()
+    await service(h, signerFor(jaime)).send({ from: ME, to: ['a@example.org'], subject: 's', text: 't' })
+    expect(h.sent[0]).not.toHaveProperty('headers')
+    expect(h.sent[0]).not.toHaveProperty('attachments')
   })
 })
 

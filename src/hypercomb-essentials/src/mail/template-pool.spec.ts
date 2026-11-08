@@ -10,9 +10,12 @@ import {
   auditBytes,
   auditTemplate,
   forgetTemplate,
+  heldPicture,
+  keepTemplate,
   listTemplates,
   recordTemplateAudit,
   saveTemplate,
+  templateTrust,
   type TemplateStore,
 } from './template-pool.js'
 
@@ -251,6 +254,72 @@ describe('each member is read back by its signature', () => {
     await hive.store.putPoolDoc?.({}, enc.encode(JSON.stringify({ meaning: MAIL_TEMPLATE_MEANING, members: [sig] })).buffer as ArrayBuffer)
     const [entry] = (await listTemplates(hive.store)).entries
     expect(entry?.ok === false && entry.reason).toMatch(/repeats the key "name"/)
+  })
+})
+
+describe('keeping a template someone else made, by its own bytes', () => {
+  // A host's bytes need not be the canonical spelling; written again canonically they would be another
+  // signature, and every message naming the publisher's would no longer find it.
+  const theirs = enc.encode('{ "mail:template": 1, "name": "Theirs", "holes": {}, "text": "Hello" }')
+
+  it('keeps the bytes as they are, under the signature they were offered under', async () => {
+    const hive = fakeStore()
+    const sig = await sha(theirs)
+    expect(await keepTemplate(hive.store, theirs, sig)).toEqual({ ok: true, sig, added: true })
+    expect(Array.from(hive.heap.get(sig)!)).toEqual(Array.from(theirs))
+    expect(hive.versions.at(-1)).toEqual([sig])
+    expect((await listTemplates(hive.store)).entries[0]).toMatchObject({ sig, ok: true })
+  })
+
+  it('refuses bytes that are not the signature, a repeated key, or a name that is not a signature', async () => {
+    const hive = fakeStore()
+    expect(await keepTemplate(hive.store, theirs, sigOf('a'))).toEqual({ ok: false, reason: 'its bytes do not match the signature they were held under' })
+    const repeated = enc.encode('{"mail:template":1,"name":"a","name":"b","holes":{},"text":"x"}')
+    const out = await keepTemplate(hive.store, repeated, await sha(repeated))
+    expect(!out.ok && out.reason).toMatch(/repeats the key "name"/)
+    expect(await keepTemplate(hive.store, theirs, 'nope')).toEqual({ ok: false, reason: 'not a signature' })
+    expect(hive.heap.size).toBe(0)
+    expect(hive.versions).toHaveLength(0)
+  })
+})
+
+describe('what a reader holds', () => {
+  const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
+  const SVG = enc.encode('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>')
+
+  it('a held picture is named by the type its bytes prove, never by a label', async () => {
+    const hive = fakeStore()
+    const png = await sha(PNG)
+    const svg = await sha(SVG)
+    hive.heap.set(png, PNG)
+    hive.heap.set(svg, SVG)
+    expect(await heldPicture(hive.store, png)).toEqual({ type: 'image/png', bytes: PNG })
+    expect(await heldPicture(hive.store, svg)).toBeNull()
+    expect(await heldPicture(hive.store, sigOf('f'))).toBeNull()
+    expect(await heldPicture(hive.store, 'not a sig')).toBeNull()
+    expect(await heldPicture(undefined, png)).toBeNull()
+  })
+
+  it('a picture over 2 MB is not read at all', async () => {
+    const hive = fakeStore()
+    const big = new Uint8Array(2 * 1024 * 1024 + 1)
+    big.set(PNG)
+    const sig = sigOf('9')
+    hive.heap.set(sig, big)
+    expect(await heldPicture(hive.store, sig)).toBeNull()
+    expect(hive.reads()).toBe(0)
+  })
+
+  it('the gate says held only for a template this hive keeps and can read; admitted is never said yet', async () => {
+    const hive = fakeStore()
+    await saveTemplate(hive.store, NOTE)
+    const kept = await sigFor(NOTE)
+    const other = sigOf('a')
+    expect(await templateTrust(hive.store, [kept, other])).toEqual(new Map([[kept, 'held'], [other, 'unknown']]))
+    hive.heap.clear()
+    expect((await templateTrust(hive.store, [kept])).get(kept)).toBe('unknown')
+    expect((await templateTrust(undefined, [kept])).get(kept)).toBe('unknown')
+    expect(await templateTrust(hive.store, [])).toEqual(new Map())
   })
 })
 

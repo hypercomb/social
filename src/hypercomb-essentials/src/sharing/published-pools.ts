@@ -64,8 +64,13 @@ export type PublishedPoolHandler = {
    * provenance and for any "is this asking for too much?" decision the
    * handler wants to make. Return an id when kept, null when declined —
    * the probe only logs, never decides.
+   *
+   * `verified` is the member as it was proven: the bytes that hashed to `sig`.
+   * A handler that must read the bytes themselves (a mail template refuses a
+   * repeated key, which `JSON.parse` has already hidden in `record`) takes
+   * them here; every other handler ignores it.
    */
-  accept(record: unknown, origin: string): Promise<string | null>
+  accept(record: unknown, origin: string, verified?: { readonly sig: string; readonly bytes: Uint8Array }): Promise<string | null>
 }
 
 const handlers = new Map<string, PublishedPoolHandler>()
@@ -172,8 +177,8 @@ export const membersOf = (parsed: unknown): string[] => {
     .slice(0, MAX_MEMBERS)
 }
 
-/** Fetch one member and prove it is what the index called it. */
-const verifiedMember = async (origin: string, sig: string): Promise<unknown | null> => {
+/** Fetch one member and prove it is what the index called it: the record, and the bytes it was read from. */
+const verifiedMember = async (origin: string, sig: string): Promise<{ record: unknown; bytes: Uint8Array } | null> => {
   let response: Response
   try {
     response = await fetchWithDeadline(`${originUrl(origin)}/${sig}`)
@@ -194,7 +199,8 @@ const verifiedMember = async (origin: string, sig: string): Promise<unknown | nu
     return null
   }
   try {
-    return JSON.parse(new TextDecoder().decode(bytes))
+    const record = JSON.parse(new TextDecoder().decode(bytes)) as unknown
+    return record === null ? null : { record, bytes: new Uint8Array(bytes) }
   } catch { return null }
 }
 
@@ -207,7 +213,7 @@ const asking = new Set<string>()
 /** What a host has DECLARED and this participant has not yet PLACED. Keyed
  *  `origin::meaning`; memory only — an offer is a fact about a host, and the
  *  host will say it again. */
-export type PublishedOffer = { origin: string; meaning: string; sig: string; record: unknown }
+export type PublishedOffer = { origin: string; meaning: string; sig: string; record: unknown; bytes?: Uint8Array }
 const offers = new Map<string, PublishedOffer[]>()
 
 /** The standing offers, all of them or one origin's. */
@@ -239,7 +245,7 @@ export const placeOffers = async (rawOrigin: string, meaning?: string): Promise<
     offers.delete(key)
     for (const offer of list) {
       try {
-        const id = await handler.accept(offer.record, origin)
+        const id = await handler.accept(offer.record, origin, offer.bytes ? { sig: offer.sig, bytes: offer.bytes } : undefined)
         if (id) kept.push(id)
       } catch (err) {
         console.warn(`[published-pools] ${origin} offered a ${offer.meaning} record that was refused:`, err)
@@ -315,8 +321,8 @@ export const probePublishedPool = async (
 
   // The members are read a few at a time; the result keeps the index's order.
   const kept = await mapBounded(members, HOST_CONCURRENCY, async (sig): Promise<PublishedOffer | null> => {
-    const record = await verifiedMember(origin, sig)
-    if (record === null) return null
+    const member = await verifiedMember(origin, sig)
+    if (member === null) return null
     // THE INTAKE GATE. Verification answered "are these the bytes the domain
     // named"; it cannot answer "do I want them". One pass per member, at most
     // MAX_MEMBERS of them per domain per session, so it can afford the awaited
@@ -326,7 +332,7 @@ export const probePublishedPool = async (
     // Allows everything until the participant expresses an interest. An offer
     // the gate refuses is never even shown.
     if (!await intakeAllows({ sig })) return null
-    return { origin, meaning, sig, record }
+    return { origin, meaning, sig, record: member.record, bytes: member.bytes }
   })
   const offered = kept.filter((offer): offer is PublishedOffer => !!offer)
   if (offered.length) {

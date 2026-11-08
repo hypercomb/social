@@ -480,7 +480,7 @@ describe('pictures come only from the reader\'s own heap', () => {
     it('by content id, a picture named many times is one part, so it is not counted again', async () => {
       const template = await parsed({ name: 'x', holes: {}, text: 'x', html: `<p>${'{{@pic}}'.repeat(150)}</p>`, resources: { pic: sigOf('d') } })
       const out = renderTemplate(template, {}, { ...holding, images: 'cid' })
-      expect(out.ok && out.images).toEqual([{ sig: sigOf('d'), type: 'image/png', cid: `${sigOf('d')}@hypercomb` }])
+      expect(out.ok && out.images).toEqual([{ sig: sigOf('d'), type: 'image/png', cid: sigOf('d') }])
     })
   })
 
@@ -496,10 +496,10 @@ describe('pictures come only from the reader\'s own heap', () => {
     }))
     expect(out.ok).toBe(true)
     if (!out.ok) return
-    expect(out.html).toContain(`<img src="cid:${sigOf('c')}@hypercomb" alt="A picture">`)
+    expect(out.html).toContain(`<img src="cid:${sigOf('c')}" alt="A picture">`)
     expect(out.images).toEqual([
-      { sig: sigOf('c'), type: 'image/png', cid: `${sigOf('c')}@hypercomb` },
-      { sig: sigOf('b'), type: 'image/png', cid: `${sigOf('b')}@hypercomb` },
+      { sig: sigOf('c'), type: 'image/png', cid: sigOf('c') },
+      { sig: sigOf('b'), type: 'image/png', cid: sigOf('b') },
     ])
   })
 

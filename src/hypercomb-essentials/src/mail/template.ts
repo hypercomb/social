@@ -866,6 +866,18 @@ const PICTURE_TYPES: Readonly<Record<string, (b: Uint8Array) => boolean>> = {
   'image/webp': b => b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50,
 }
 
+/**
+ * The picture type these bytes PROVE, among the four a template may show, or null.
+ * The heap keeps bytes without a type, so a reader names a held picture by this
+ * and never by a label someone gave it: the same check the renderer makes, so
+ * an SVG (or anything else) is never a picture here, whatever it was called.
+ */
+export function pictureType(bytes: Uint8Array): string | null {
+  if (!isBytes(bytes)) return null
+  for (const [type, looks] of Object.entries(PICTURE_TYPES)) if (looks(bytes)) return type
+  return null
+}
+
 const interpolate = (text: string, params?: Readonly<Record<string, string>>): string =>
   params ? text.replace(/\{(\w+)\}/g, (whole, key: string) => (Object.hasOwn(params, key) ? params[key] as string : whole)) : text
 
@@ -948,7 +960,9 @@ class Renderer {
     else if (held.bytes.length > L.image || this.#imageBytes + held.bytes.length > L.images) found = { why: 'too-large' }
     else {
       this.#imageBytes += held.bytes.length
-      const cid = `${sig}@hypercomb`
+      // The bare id the host carries (`^[A-Za-z0-9._-]{1,64}$`, no `@`): the signature itself, so one
+      // picture is one part however often it is named, and two pictures never share a name.
+      const cid = sig
       this.#images.set(sig, { sig, type, cid })
       found = { src: this.#deps.images === 'cid' ? `cid:${cid}` : `data:${type};base64,${toBase64(held.bytes)}` }
     }

@@ -2,17 +2,21 @@
 
 **Status, 2026-11-07.** Every section heading says **built** or **design**.
 
-- **Built and specced** (all in `hypercomb-essentials/src/mail/`, none of it wired or registered):
-  - `template.ts`: the format, the strict reader, fill checking, rendering, the message part, and the outline
-    an audit reads. 143 specs in `template.spec.ts`.
-  - `template-pool.ts`: the templates a hive keeps (list, save, take off), and the audit report. 28 specs in
-    `template-pool.spec.ts`.
-  - `template-form.ts`: the form a template asks. 22 jsdom specs in `template-form.spec.ts`.
+- **Built and specced** (in `hypercomb-essentials/src/mail/` unless named):
+  - `template.ts`: the format, the strict reader, fill checking, rendering, the message part, the outline an
+    audit reads, and `pictureType`. Specs in `template.spec.ts`.
+  - `template-pool.ts`: the templates a hive keeps (list, save, keep a host's by its own bytes, take off),
+    the pictures a reader holds, the gate as far as it is built (`templateTrust`), and the audit report.
+    Specs in `template-pool.spec.ts`.
+  - `template-form.ts`: the form a template asks. jsdom specs in `template-form.spec.ts`.
   - The pool `mail:template`, seeded in core (`SCOPED_POOL_MEANINGS`, and kind `set` in `pool-kinds.ts`).
-  - The form's words, in both catalogs under `mail.template.*`.
-- **Not wired yet:** the send, the read pane, the composer and the queen's published-pool claim. They are
-  steps 2 and 3, and the exact touch points are below.
-- **Design only:** step 4, activation and the script view. No script runs anywhere.
+  - **Wired (steps 2 and 3):** the send carries the part (`mail.service.ts`); the composer offers "Use a
+    template" and "Save as template", and the read pane shows a message from the reader's own copy of its
+    template (`mail.view.ts`); the queen claims the published pool (`mail.queen.ts`), with the verified bytes
+    handed to it by `sharing/published-pools.ts`. See "Wired: steps 2 and 3" below.
+  - Every word in both catalogs under `mail.template.*` (and two `mail.error.refused.*`).
+- **Design only:** step 4, activation and the script view. No script runs anywhere; `templateTrust` never
+  answers `admitted`.
 
 This document goes with `mail-plan.md` section 8.
 
@@ -371,9 +375,55 @@ under a policy of `default-src 'none'`, with the script itself allowed by its ha
 the reader holds by `postMessage`, and nothing else. No network at all, which is stricter than T7's "only our
 hosts", because animation needs none.
 
-## Steps 2 to 4: where each touches existing files (steps 2 and 3 to wire, step 4 design)
+## Wired: steps 2 and 3 (built)
 
-**Step 2: send carries the part.**
+**What a sender does.** In the composer, "Use a template" reads the templates this hive keeps (from this hive,
+never a host) and lists them, with placeholders while it reads and the button saying so. Choosing one puts
+its form (`template-form.ts`) where the message box was; the box's words are kept and come back with "Stop
+using it". A template that says its subject writes it, so the subject field goes too. The preview is the
+template filled in as it is typed (a twin of the template with nothing required, so what is typed so far
+renders), pictures read from this hive. Send checks the fill (`form.problems()`, each said beside its field),
+renders it with `images: 'cid'`, and sends the baked subject, text and html with `template: { sig, fill }`.
+Each picture the html names goes as an inline attachment whose `contentId` is the picture's own signature
+(a bare id, `^[A-Za-z0-9._-]{1,64}$`, never twice). The part and the pictures take attachment slots, so the
+composer offers nine files with a template. Drafts keep the words of the message box, not the fill.
+
+**What the send does** (`mail.service.ts`): `SendRequest.template?: { sig, fill }`. `mailPart` makes the part,
+which is appended to the attachments before `wireAttachments` counts them (so ten files and a template is
+refused before a byte is sent), and `template: sig` goes in the body; the Worker adds `X-Hypercomb-Template`.
+`MailAttachmentInput.contentId` is checked against the Worker's own rule, and a repeated id is refused here
+first. A Sent copy keeps `contentId` on its part.
+
+**What a reader sees.** Opening a received message reads the part (`readMailPart`). When the template it names
+is one this hive keeps (`templateTrust` says `held`: on its own list, and its bytes read), the message is shown
+from the reader's copy: the template's subject, its rendering in the same sandboxed frame (through
+`makeMailHtmlSafe` again), pictures only from this hive, a line saying it is shown from "your template", and
+"Show the sender's copy" to see what was baked. Pictures it cannot show and a declared script are said in
+words. Otherwise (not kept, unreadable, a fill it refuses) the message shows exactly as before. The part is
+never listed among the files, and a forward never carries it on.
+
+**Decided in this pass:**
+- **A held picture's type** is the one its bytes prove (`pictureType`: png, jpeg, gif or webp by their first
+  bytes), never a label: the heap keeps bytes without a type, and the renderer makes the same check.
+- **Kept means held.** A template whose bytes happen to be in the heap but which this hive never kept is
+  `unknown`, and the reader sees the baked copy (the table below).
+- **A held template shows its own rendering** (decision 4, built as recommended): what is shown is what was
+  kept and audited, so a sender cannot bake one thing and name another.
+
+**"Save as template"** breaks a draft apart (A1): its words are the template's text, its formatting (when on)
+the html (`format.ts` writes only the subset), its subject the subject, and every `{{name}}` written in them
+becomes a field the reader fills, as text. The name is the subject with each hole's name in place of the hole.
+The composer says how under the message box. Other hole types are not offered from a draft yet.
+
+**A host's templates** (`mail.queen.ts`): `registerPublishedPool({ meaning: 'mail:template', accept })`. The
+probe only holds an offer; the press in /offers calls `accept`, which keeps the template by the publisher's
+own bytes (`keepTemplate`: another spelling would be another signature), refused unless they read and hash
+to the offered name. `PublishedPoolHandler.accept` gained the additive third argument `{ sig, bytes }`
+(`sharing/published-pools.ts`, the one `handler.accept(` call), which every other handler ignores.
+
+## Steps 2 to 4: where each touches existing files (2 and 3 built as above, 4 design)
+
+**Step 2: send carries the part.** (built)
 
 - `hypercomb-essentials/src/mail/mail.service.ts`, `send(request)`: `SendRequest` gains
   `template?: { sig: string; fill: MailFill }`. When it is present, `send` calls
@@ -394,7 +444,7 @@ hosts", because animation needs none.
   takes a content id at all. If it does not, outside readers get the picture as an attachment, and the baked
   html says its words instead.
 
-**Step 3: the reader renders.**
+**Step 3: the reader renders.** (built)
 
 - `mime.ts`: nothing required. The part already lands in `ParsedMail.attachments`, typed. Exposing
   `X-Hypercomb-Template` is optional (it is only a hint).
@@ -531,7 +581,8 @@ never before. Each piece below names the file it touches.
 3. **The first trusted publisher set** for `pool:mail:template`: the install publisher, or a separate follow.
 4. **What a held but not admitted template shows**: its own rendering (recommended here: safe by construction,
    and it is the audited bytes, so a sender cannot bake one thing and name another), or the sender's baked html
-   (the plan's wording).
+   (the plan's wording). **Built as recommended, with "Show the sender's copy" one press away; reversing it is
+   one condition in `mail.view.ts` `#fromTemplate`.**
 5. **Outside recipients**: the baked html and the text (with inline `cid:` pictures if Cloudflare carries them),
    or the text only.
 6. **Scripts in the first release**: yes, under the frame above, or not until a second release. Whether a
@@ -544,7 +595,10 @@ never before. Each piece below names the file it touches.
 
 ## What is not built yet
 
-No script runs, and nothing here fetches. Nothing is wired into `mail.view.ts`, `mail.service.ts`,
-`mail.queen.ts` or the Worker, and nothing registers a published pool, a shell surface or an IoC key. The
-built modules are dependencies that wait for those wirings (steps 2 and 3, above). Step 4 is design until it
-lands with its own specs.
+- **Step 4**: the brood and attester doors, `admitted`, and the live view. No script runs, and nothing here
+  fetches.
+- **The shelf as the hand** for a picture field (`pickResource`): its API is not settled, so a picture field
+  takes a pasted signature.
+- **A draft keeps the fill**: it does not yet; a draft keeps the message box's words.
+- **Sent copies** show what was baked, not the template's rendering.
+- **"Save as template"** makes text holes only; other types from a draft are not offered yet.

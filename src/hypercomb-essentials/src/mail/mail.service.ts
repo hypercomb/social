@@ -33,6 +33,7 @@ import { nip98Authorization, nip98Template } from '@hypercomb/core'
 import { fetchWithDeadline, mapBounded } from '../sharing/bounded-fetch.js'
 import { openEnvelope, openItemMeta, type Decrypt, type MailMeta, type MailWrap } from './envelope.js'
 import { parseMail, type ParsedMail } from './mime.js'
+import { mailPart, type MailFill } from './template.js'
 
 export const MAIL_ORIGIN = 'https://hypercomb.com'
 export const SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
@@ -120,6 +121,11 @@ export interface MailAttachmentInput {
   readonly filename: string
   readonly type: string
   readonly content: Uint8Array | string
+  /**
+   * A picture the html shows inline names it `cid:<contentId>`. Bare (no angle brackets: the host
+   * writes the header), `^[A-Za-z0-9._-]{1,64}$`, and never twice in one message.
+   */
+  readonly contentId?: string
 }
 
 /** An attachment as the host keeps it (base64). `sentAttachmentBytes` turns it back into bytes. */
@@ -127,6 +133,8 @@ export interface SentAttachment {
   readonly filename: string
   readonly type: string
   readonly content: string
+  /** Set on a picture that went inline (templates, step 2); absent on every other part. */
+  readonly contentId?: string
 }
 
 /** What the Worker keeps of a message this participant sent (sealed, in their Sent folder). */
@@ -160,6 +168,13 @@ export interface SendRequest {
   readonly inReplyTo?: string
   readonly references?: string
   readonly attachments?: readonly MailAttachmentInput[]
+  /**
+   * The template the message was filled from (documentation/mail-templates.md, step 2): its signature
+   * and the checked fill. The send carries it as a part of its own, beside the text and html the
+   * sender baked, and names it to the host, which adds `X-Hypercomb-Template`. The part takes one of
+   * the attachment slots.
+   */
+  readonly template?: { readonly sig: string; readonly fill: MailFill }
 }
 
 /** A draft as it is kept: the window's own JSON, sealed by the host like a sent copy. */
@@ -258,16 +273,27 @@ export function sentAttachmentBytes(attachment: Pick<SentAttachment, 'content'>)
 export const unreadCount = (items: readonly Pick<MailListItem, 'marks'>[]): number =>
   items.filter(item => !item.marks?.read && !item.marks?.hidden).length
 
+/** The Worker's own rule for an inline picture's name (`CONTENT_ID_RE` there). */
+const CONTENT_ID = /^[A-Za-z0-9._-]{1,64}$/
+
 /** Attachments for the wire: base64, the bytes counted, the caps checked before a byte is sent. */
 function wireAttachments(list: readonly MailAttachmentInput[] | undefined): SentAttachment[] {
   if (!list?.length) return []
   if (list.length > MAIL_LIMITS.attachments) throw new MailError('refused', 'too many attachments')
   let total = 0
+  const ids = new Set<string>()
   return list.map(item => {
+    // The host refuses a bad or repeated id too; said here, nothing is sent first. Two parts with one
+    // id would leave the reader's client to guess which picture the html means.
+    if (item.contentId !== undefined && (typeof item.contentId !== 'string' || !CONTENT_ID.test(item.contentId) || ids.has(item.contentId))) {
+      throw new MailError('refused', 'bad content id')
+    }
     const content = typeof item.content === 'string' ? item.content.replace(/\s+/g, '') : toBase64(item.content)
     total += typeof item.content === 'string' ? base64Bytes(content) : item.content.length
     if (total > MAIL_LIMITS.attachmentBytes) throw new MailError('refused', 'attachments too large')
-    return { filename: item.filename, type: item.type, content }
+    if (item.contentId === undefined) return { filename: item.filename, type: item.type, content }
+    ids.add(item.contentId)
+    return { filename: item.filename, type: item.type, content, contentId: item.contentId }
   })
 }
 
@@ -305,7 +331,11 @@ const attachmentsOf = (value: unknown): SentAttachment[] =>
   (Array.isArray(value) ? value : []).flatMap(item => {
     const a = item as Partial<Record<'filename' | 'type' | 'content', unknown>> | null
     if (!a || typeof a !== 'object' || typeof a.content !== 'string') return []
-    return [{ filename: str(a.filename) ?? '', type: str(a.type) || 'application/octet-stream', content: a.content }]
+    const id = (a as { contentId?: unknown }).contentId
+    return [{
+      filename: str(a.filename) ?? '', type: str(a.type) || 'application/octet-stream', content: a.content,
+      ...(typeof id === 'string' && CONTENT_ID.test(id) ? { contentId: id } : {}),
+    }]
   })
 
 const sentRecordOf = (raw: Record<string, unknown>): SentRecord => ({
@@ -715,7 +745,13 @@ export class MailService extends EventTarget {
 
   /** Send as `request.from`. The host sends it and files a sealed copy (attachments and all) in Sent. */
   async send(request: SendRequest): Promise<{ messageId: string | null; sig: string | null }> {
-    const attachments = wireAttachments(request.attachments)
+    // The template rides as one more attachment, so it is counted against the same ten slots and the
+    // same bytes, and refused by the same rule, before anything is sent.
+    const part = request.template ? mailPart(request.template.sig, request.template.fill) : null
+    if (request.template && !part) throw new MailError('refused', 'bad template')
+    const attachments = wireAttachments(part
+      ? [...(request.attachments ?? []), { filename: part.filename, type: part.type, content: enc.encode(part.body) }]
+      : request.attachments)
     const body = JSON.stringify({
       from: request.from,
       to: request.to,
@@ -728,6 +764,7 @@ export class MailService extends EventTarget {
       ...(request.inReplyTo ? { inReplyTo: request.inReplyTo } : {}),
       ...(request.references ? { references: request.references } : {}),
       ...(attachments.length ? { attachments } : {}),
+      ...(part ? { template: part.header.value } : {}),
     })
     if (enc.encode(body).length > MAIL_LIMITS.sendBytes) throw new MailError('refused', 'message too large')
     const held = await this.#held()

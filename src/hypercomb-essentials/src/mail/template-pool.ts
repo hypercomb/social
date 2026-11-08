@@ -42,10 +42,13 @@ import {
   MAIL_TEMPLATE_LIMITS,
   outlineTemplate,
   parseTemplate,
+  pictureType,
   templateBytes,
+  type HeldResource,
   type MailTemplate,
   type MailTemplateDocument,
   type TemplateLink,
+  type TemplateTrust,
 } from './template.js'
 
 /** The pool's meaning. Its address is `sign('mail:template')`, derived by the store. */
@@ -72,9 +75,11 @@ export interface TemplateStore {
   getResourceLocal?(signature: string): Promise<Blob | null>
 }
 
-const storeFromIoc = (): TemplateStore | undefined => {
+/** The hive's store, through IoC (as mail-to-hive.ts reaches it); undefined where there is none. */
+export const templateStore = (): TemplateStore | undefined => {
   try { return get<TemplateStore>(STORE_KEY) } catch { return undefined }
 }
+const storeFromIoc = templateStore
 
 // ── the list ────────────────────────────────────────────────────────────────
 
@@ -126,7 +131,7 @@ async function readList(store: TemplateStore, pool: object): Promise<string[] | 
 }
 
 /** One member read from this device's heap, by its signature. */
-async function readMember(store: TemplateStore, sig: string): Promise<TemplateEntry> {
+export async function readTemplate(store: TemplateStore, sig: string): Promise<TemplateEntry> {
   let blob: Blob | null = null
   try { blob = await store.getResourceLocal?.(sig) ?? null } catch { blob = null }
   if (!blob) return { sig, ok: false, reason: 'its bytes are not held here' }
@@ -150,7 +155,7 @@ export async function listTemplates(store: TemplateStore | undefined = storeFrom
     const members = await readList(store, pool)
     if (!members) return { entries: [], problem: 'unreadable' }
     const entries: TemplateEntry[] = []
-    for (const sig of members) entries.push(await readMember(store, sig))
+    for (const sig of members) entries.push(await readTemplate(store, sig))
     return { entries }
   } catch { return { entries: [], problem: 'unreadable' } }
 }
@@ -187,6 +192,24 @@ async function changeList(
   return written ? { ok: true, changed: true } : { ok: false, reason: 'the template list could not be written' }
 }
 
+/** The bytes as they are, proven to read, held, and listed. Runs inside a turn. */
+async function keep(store: TemplateStore | undefined, bytes: Uint8Array, expectedSig?: string): Promise<SaveResult> {
+  if (!store?.putResource) return { ok: false, reason: 'the store is not available here' }
+  // Never keep what would not read back: the list shows only what renders.
+  const parsed = await parseTemplate(bytes, expectedSig)
+  if (!parsed.ok) return { ok: false, reason: parsed.reason }
+  const copy = bytes.slice()
+  const written = await store.putResource(new Blob([copy.buffer as ArrayBuffer], { type: 'application/json' })).catch(() => '')
+  // The store signs what it wrote; a different answer is not this template (S3).
+  if (written !== parsed.sig) return { ok: false, reason: 'the store did not keep the bytes it was given' }
+  const listed = await changeList(store, members => {
+    if (members.includes(parsed.sig)) return { members, changed: false }
+    if (members.length >= MAX_KEPT_TEMPLATES) return { refused: `the list already holds ${MAX_KEPT_TEMPLATES} templates` }
+    return { members: [...members, parsed.sig], changed: true }
+  })
+  return listed.ok ? { ok: true, sig: parsed.sig, added: listed.changed } : listed
+}
+
 /**
  * Keep a template: its canonical bytes become a resource (one template, one
  * signature, I1), proven to read before anything is written, and the list
@@ -196,24 +219,70 @@ async function changeList(
 export function saveTemplate(store: TemplateStore | undefined, template: MailTemplateDocument): Promise<SaveResult> {
   return inTurn(async (): Promise<SaveResult> => {
     try {
-      if (!store?.putResource) return { ok: false, reason: 'the store is not available here' }
       let bytes: Uint8Array
       try { bytes = templateBytes(template) } catch { return { ok: false, reason: 'it is not a template' } }
-      // Never keep what would not read back: the list shows only what renders.
-      const parsed = await parseTemplate(bytes)
-      if (!parsed.ok) return { ok: false, reason: parsed.reason }
-      const copy = bytes.slice()
-      const written = await store.putResource(new Blob([copy.buffer as ArrayBuffer], { type: 'application/json' })).catch(() => '')
-      // The store signs what it wrote; a different answer is not this template (S3).
-      if (written !== parsed.sig) return { ok: false, reason: 'the store did not keep the bytes it was given' }
-      const listed = await changeList(store, members => {
-        if (members.includes(parsed.sig)) return { members, changed: false }
-        if (members.length >= MAX_KEPT_TEMPLATES) return { refused: `the list already holds ${MAX_KEPT_TEMPLATES} templates` }
-        return { members: [...members, parsed.sig], changed: true }
-      })
-      return listed.ok ? { ok: true, sig: parsed.sig, added: listed.changed } : listed
+      return await keep(store, bytes)
     } catch { return { ok: false, reason: 'it could not be kept' } }
   })
+}
+
+/**
+ * Keep a template someone else made, BY ITS OWN BYTES: a host's offer, pressed
+ * in /offers. Never written again in canonical form, because another spelling
+ * would be another signature, and every message naming the publisher's would
+ * no longer find it. Refused unless the bytes are the signature they were
+ * offered under (S3) and read as a template. Never throws.
+ */
+export function keepTemplate(store: TemplateStore | undefined, bytes: Uint8Array, sig: string): Promise<SaveResult> {
+  return inTurn(async (): Promise<SaveResult> => {
+    try {
+      if (typeof sig !== 'string' || !SIG.test(sig)) return { ok: false, reason: 'not a signature' }
+      return await keep(store, bytes, sig)
+    } catch { return { ok: false, reason: 'it could not be kept' } }
+  })
+}
+
+// ── what a reader holds ───────────────────────────────────────────────────────
+
+/**
+ * A picture this device already holds, by its signature, or null. Read from
+ * this device only, never a host (T7). The heap keeps bytes without a type, so
+ * the type is the one the bytes PROVE (`pictureType`), never a label: anything
+ * that is not png, jpeg, gif or webp is not a picture, whatever it was called.
+ * Over 2 MB it is not read. Never throws.
+ */
+export async function heldPicture(store: TemplateStore | undefined, sig: string): Promise<HeldResource | null> {
+  try {
+    if (typeof sig !== 'string' || !SIG.test(sig)) return null
+    const blob = await store?.getResourceLocal?.(sig) ?? null
+    if (!blob || blob.size > MAIL_TEMPLATE_LIMITS.image) return null
+    const bytes = new Uint8Array(await blob.arrayBuffer())
+    const type = pictureType(bytes)
+    return type ? { type, bytes } : null
+  } catch { return null }
+}
+
+/**
+ * THE GATE, AS FAR AS IT IS BUILT. `held` for a template this hive keeps (an
+ * `ok` entry of its own list: saved here, or pressed in /offers), `unknown` for
+ * everything else, so a stranger's template is never rendered from bytes nobody
+ * here chose to keep. `admitted` is step 4's (brood and attester,
+ * documentation/mail-templates.md) and is never answered yet, so no script runs.
+ */
+export async function templateTrust(store: TemplateStore | undefined, sigs: readonly string[]): Promise<Map<string, TemplateTrust>> {
+  const out = new Map<string, TemplateTrust>()
+  for (const sig of sigs) out.set(sig, 'unknown')
+  try {
+    if (!sigs.length || !store?.openPool || !store.getPoolDoc) return out
+    const pool = await store.openPool(MAIL_TEMPLATE_MEANING).catch(() => null)
+    if (!pool) return out
+    // The list says who is kept; only the templates asked about are read, never every member.
+    const members = new Set(await readList(store, pool) ?? [])
+    for (const sig of out.keys()) {
+      if (members.has(sig) && (await readTemplate(store, sig)).ok) out.set(sig, 'held')
+    }
+  } catch { /* unknown, every one */ }
+  return out
 }
 
 /**

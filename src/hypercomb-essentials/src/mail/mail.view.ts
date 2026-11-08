@@ -61,6 +61,12 @@ import {
 } from './mail.service.js'
 import { attachmentBytes, attachmentsBytes, parseMail, type ParsedMail } from './mime.js'
 import { forwardDraft, recipientsIn, replyDraft, replySubject, type Draft } from './reply.js'
+import {
+  MAIL_TEMPLATE_PART_TYPE, readMailPart, renderTemplate, validateFill,
+  type BlockedItem, type HeldResource, type MailFill, type MailTemplate, type MailTemplateDocument, type RenderDeps,
+} from './template.js'
+import { templateForm, type TemplateForm } from './template-form.js'
+import { heldPicture, listTemplates, readTemplate, saveTemplate, templateStore, templateTrust, type TemplateEntry, type TemplateStore } from './template-pool.js'
 
 export const MAIL_OPEN = 'mail:open'
 /** An open request older than this is stale — a replayed last value, not a press. */
@@ -165,6 +171,8 @@ const refusedWords = (detail: string): string => {
   if (/^no body$/i.test(reason)) return t('mail.error.refused.empty', 'The host will not send a message with nothing in it.')
   if (/^bad (reply-to|in-reply-to|references)$/i.test(reason) || /^E_HEADER/.test(reason)) return t('mail.error.refused.headers', 'The host would not take this message’s reply headers.')
   if (/^(message|draft) too large$/i.test(reason)) return t('mail.error.refused.too-large', 'This is larger than the host takes.')
+  if (/^bad template$/i.test(reason)) return t('mail.error.refused.template', 'The template this message was filled from could not be named to the host.')
+  if (/^bad content id$/i.test(reason)) return t('mail.error.refused.picture', 'The host would not take one of the template’s pictures as it is.')
   if (/^E_SENDER/.test(reason)) return t('mail.error.refused.sender', 'Cloudflare will not send from this address yet.')
   if (/^E_[A-Z_]+$/.test(reason)) return t('mail.error.refused.cloudflare', 'Cloudflare would not send this message as it is.')
   return t('mail.error.refused', 'The mail host refused this.')
@@ -319,6 +327,55 @@ function sentPreviews(files: readonly SentAttachment[]): string | null {
 }
 
 /** A Sent copy's address list as one line, whatever shape the host gave it. */
+// ── templates (documentation/mail-templates.md, steps 2 and 3) ──────────────
+
+/** The template part rides among the attachments. It is the message's own, never a file to list, preview or forward. */
+const isTemplatePart = (type: unknown): boolean => String(type ?? '').toLowerCase() === MAIL_TEMPLATE_PART_TYPE
+
+/** A template's pictures are read from this hive only, and only this many, this large in all. */
+const TEMPLATE_PICTURES_MOST = 48
+const TEMPLATE_PICTURE_BYTES = 8 * 1024 * 1024
+const SIG_RE = /^[0-9a-f]{64}$/
+/** A hole written into a draft: what "Save as template" makes a field of. */
+const DRAFT_HOLE = /\{\{\s*([a-z][a-z0-9_-]{0,39})\s*\}\}/g
+
+/** Every picture a template and its fill name: the template's own, then the fill's, each once. */
+function picturesNamed(template: MailTemplate, fill: MailFill): string[] {
+  const out = new Set<string>(Object.values(template.resources ?? {}))
+  for (const [name, hole] of Object.entries(template.holes)) {
+    if (hole.type !== 'resource' && !(hole.type === 'list' && hole.of === 'resource')) continue
+    const value = Object.hasOwn(fill, name) ? fill[name] : undefined
+    for (const item of Array.isArray(value) ? value : [value]) if (typeof item === 'string' && SIG_RE.test(item)) out.add(item)
+  }
+  return [...out]
+}
+
+/** Where and how the reader reads: their words, their language, their clock. */
+const readerPlace = (): Pick<RenderDeps, 'say' | 'locale' | 'timeZone'> => {
+  let timeZone = 'UTC'
+  try { timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' } catch { /* UTC */ }
+  const locale = ioc<I18nProvider>(I18N_IOC_KEY)?.locale ?? 'en'
+  return { say: (key, fallback, params) => t(key, fallback, params as Record<string, string> | undefined), locale, timeZone }
+}
+
+const escapeText = (text: string): string =>
+  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+/** A template with no html of its own is shown as its text, a paragraph per blank line. */
+const textAsHtml = (text: string): string =>
+  text.split(/\n{2,}/).map(part => `<p>${escapeText(part).replace(/\n/g, '<br>')}</p>`).join('')
+
+/** The preview's twin of a template: nothing required, so what is typed so far renders while the rest is empty. */
+const looseTwin = (template: MailTemplate): MailTemplate => ({
+  ...template,
+  holes: Object.fromEntries(Object.entries(template.holes).map(([name, hole]) => {
+    const { required: _required, ...rest } = hole
+    return [name, rest]
+  })),
+})
+
+const pictureExtension = (type: string): string => ({ 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' } as Record<string, string>)[type] ?? 'bin'
+
 const joined = (value: unknown): string =>
   Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string').join(', ') : typeof value === 'string' ? value : ''
 
@@ -416,6 +473,37 @@ interface ReadPane {
   picturesWait?: boolean
   failed?: string
   asText: boolean
+  /** The message as THIS hive's copy of its template renders it, when this hive keeps that template. */
+  templated?: TemplatedView
+  /** The sender's baked copy asked for instead. */
+  baked?: boolean
+}
+
+/** A received message rendered from the reader's own copy of its template. */
+interface TemplatedView {
+  readonly sig: string
+  readonly name: string
+  readonly subject: string
+  readonly text: string
+  readonly html: string
+  readonly blocked: readonly BlockedItem[]
+}
+
+/** "Use a template": the templates this hive keeps, while they are read and once they are. */
+type Choosing =
+  | { readonly phase: 'reading' }
+  | { readonly phase: 'ready'; readonly entries: readonly TemplateEntry[]; readonly problem?: 'no-store' | 'unreadable' }
+
+/** The template a draft is filled from: its form, and the pictures read for it. */
+interface ComposeTemplate {
+  readonly sig: string
+  readonly template: MailTemplate
+  /** The same template with nothing required, for the preview. */
+  readonly loose: MailTemplate
+  readonly form: TemplateForm
+  readonly held: Map<string, HeldResource | null>
+  readonly reading: Map<string, Promise<void>>
+  heldBytes: number
 }
 
 interface ComposePane {
@@ -438,6 +526,10 @@ interface ComposePane {
   note?: string
   sending: boolean
   readonly back: Pane
+  /** The list of templates, open under "Use a template". */
+  choosing?: Choosing
+  /** The template this draft is filled from. */
+  template?: ComposeTemplate
 }
 
 type Pane = { readonly kind: 'list' } | ReadPane | ComposePane
@@ -520,6 +612,8 @@ export class MailElement extends HTMLElement {
 
   /** THE SEAM. Replaced in the spec, so no network and no signer are reached there. */
   service: MailService = new MailService()
+  /** Where the templates and their pictures are read from: the hive's store. Replaced in the spec. */
+  templates: () => TemplateStore | undefined = templateStore
   /** The save-to-hive act; loaded on the press so the window's own load stays small. */
   saveToHive: (input: SaveMessageInput) => Promise<SaveMessageResult> =
     async input => (await import('./mail-to-hive.js')).saveMessageToHive(input)
@@ -621,6 +715,7 @@ export class MailElement extends HTMLElement {
   /** Unwind ONE level — the composer, then an open message, then a search. False when nothing of the desk's is open. */
   dismissInner(): boolean {
     const pane = this.#pane
+    if (pane.kind === 'compose' && pane.choosing) { pane.choosing = undefined; this.#render(); return true }
     if (pane.kind === 'compose') { this.#leaveCompose(pane); return true }
     if (pane.kind === 'read') { this.#backToList(); return true }
     if (this.#query) { this.#setQuery(''); return true }
@@ -1397,6 +1492,14 @@ export class MailElement extends HTMLElement {
         // for the press, so opening it costs one walk however a stranger filled it.
         if (raw.length > PREVIEW_ON_PRESS) pane.picturesWait = pictureCandidates(mail.attachments).length > 0
         else pane.previews = receivedPreviews(mail, raw)
+        // A message filled from a template is shown from THIS hive's copy of it, when this hive keeps it;
+        // otherwise, and on any refusal, from the sender's baked copy exactly as before.
+        const ref = readMailPart(mail, index => attachmentBytes(raw, index))
+        if (ref) {
+          const shown = await this.#fromTemplate(ref.templateSig, ref.fill)
+          if (!current()) return
+          if (shown) { pane.templated = shown; pane.asText = !shown.html }
+        }
       }
     } catch (error) {
       // A MailError is the host's; anything else is a copy this window could not read the shape of.
@@ -1512,10 +1615,13 @@ export class MailElement extends HTMLElement {
     const raw = pane.raw
     if (!mail || !raw) return
     const draft = forwardDraft(mail)
+    // The template part is the original message's own: carried on, it would name a template for words
+    // the forward does not say.
+    const indices = draft.attachments.filter(index => !isTemplatePart(mail.attachments[index]?.type))
     // Carried by index: the files are read out of the raw bytes only when a send or a draft save needs
     // them, all of them in one walk.
-    const bytesOf = oneWalk(raw, draft.attachments)
-    const attached: Attached[] = draft.attachments.map(index => {
+    const bytesOf = oneWalk(raw, indices)
+    const attached: Attached[] = indices.map(index => {
       const file = mail.attachments[index]!
       return { filename: file.filename, type: file.type, size: file.size, content: () => bytesOf(index) }
     })
@@ -1526,11 +1632,14 @@ export class MailElement extends HTMLElement {
   #capture(pane: ComposePane): void {
     const form = this.#formEl
     if (!form || this.#pane !== pane) return
-    const value = (name: string): string => (form.elements.namedItem(name) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null)?.value ?? ''
-    pane.draft = { to: value('to'), cc: value('cc'), subject: value('subject'), text: value('text'), inReplyTo: pane.draft.inReplyTo, references: pane.draft.references }
-    const from = value('from')
+    // A field the composer is not showing (the message box while a template is in use) keeps what it said.
+    const value = (name: string, kept: string): string => (form.elements.namedItem(name) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null)?.value ?? kept
+    const d = pane.draft
+    pane.draft = { to: value('to', d.to), cc: value('cc', d.cc), subject: value('subject', d.subject), text: value('text', d.text), inReplyTo: d.inReplyTo, references: d.references }
+    const from = value('from', '')
     if (from) pane.from = from
-    pane.formatted = !!(form.elements.namedItem('formatted') as HTMLInputElement | null)?.checked
+    const formatted = form.elements.namedItem('formatted') as HTMLInputElement | null
+    if (formatted) pane.formatted = formatted.checked
   }
 
   #composeChanged(): void {
@@ -1631,6 +1740,7 @@ export class MailElement extends HTMLElement {
     this.#autosaver().cancel()
     this.#previewer.cancel()
     this.#capture(pane)
+    pane.template?.form.dispose()
     void this.#persistDraft(pane)
     if (!render) return
     this.#pane = pane.back.kind === 'compose' ? { kind: 'list' } : pane.back
@@ -1641,6 +1751,7 @@ export class MailElement extends HTMLElement {
   async #discard(pane: ComposePane): Promise<void> {
     this.#autosaver().cancel()
     this.#previewer.cancel()
+    pane.template?.form.dispose()
     pane.discarded = true
     const sig = pane.draftSig
     const address = pane.savedFrom ?? pane.from
@@ -1663,8 +1774,8 @@ export class MailElement extends HTMLElement {
     try {
       for (const file of files) {
         const name = file.name || 'attachment'
-        if (pane.attached.length >= MAIL_LIMITS.attachments) {
-          refused.push(t('mail.compose.too-many', '{name} was not added: a message carries at most {count} files.', { name, count: MAIL_LIMITS.attachments }))
+        if (pane.attached.length >= this.#fileSlots(pane)) {
+          refused.push(t('mail.compose.too-many', '{name} was not added: a message carries at most {count} files.', { name, count: this.#fileSlots(pane) }))
           continue
         }
         const total = pane.attached.reduce((sum, a) => sum + a.size, 0)
@@ -1704,10 +1815,34 @@ export class MailElement extends HTMLElement {
     const to = recipientsIn(draft.to)
     const cc = recipientsIn(draft.cc)
     if (!to.length) return fail(t('mail.compose.need-to', 'Add at least one address in To.'))
-    if (!draft.subject.trim()) return fail(t('mail.compose.need-subject', 'Add a subject.'))
-    if (!draft.text.trim()) return fail(t('mail.compose.need-body', 'Write something first.'))
+    // A draft filled from a template is baked here: its subject, text and html are the template's, written
+    // from the checked fill, and its pictures go inline under their ids, so a reader with no Hypercomb
+    // still gets the whole message. A reader who keeps the template renders it from their own copy.
+    let baked: { subject: string; text: string; html: string; inline: MailAttachmentInput[]; template: { sig: string; fill: MailFill } } | null = null
+    if (pane.template) {
+      const use = pane.template
+      if (use.form.problems().length) return fail(t('mail.template.fill-first', 'The template is not filled in yet: what each field needs is said beside it.'))
+      const checked = validateFill(use.template, use.form.fill())
+      if (!checked.ok) return fail(t('mail.template.fill-first', 'The template is not filled in yet: what each field needs is said beside it.'))
+      // Taken now, so a second press cannot start a second send while the pictures are read.
+      pane.sending = true
+      await this.#readTemplatePictures(pane, use, checked.fill)
+      if (this.#pane !== pane) return
+      const out = renderTemplate(use.template, checked.fill, { trust: () => 'held', images: 'cid', resolveResource: sig => use.held.get(sig) ?? null, ...readerPlace() })
+      if (!out.ok) return fail(t('mail.template.not-made', 'The template could not be made into a message, so nothing was sent.'))
+      const inline = out.images.flatMap((image): MailAttachmentInput[] => {
+        const held = use.held.get(image.sig)
+        return held ? [{ filename: `${image.sig.slice(0, 12)}.${pictureExtension(image.type)}`, type: image.type, content: held.bytes, contentId: image.cid }] : []
+      })
+      baked = { subject: use.template.subject !== undefined ? out.subject : draft.subject.trim(), text: out.text, html: out.html, inline, template: { sig: use.sig, fill: checked.fill } }
+    }
+    const subject = baked ? baked.subject : draft.subject.trim()
+    if (!subject) return fail(t('mail.compose.need-subject', 'Add a subject.'))
+    if (!(baked ? baked.text : draft.text).trim()) return fail(t('mail.compose.need-body', 'Write something first.'))
     if (to.length + cc.length > MAIL_LIMITS.recipients) return fail(t('mail.compose.need-fewer', 'A message goes to at most {count} people.', { count: MAIL_LIMITS.recipients }))
-    if (pane.attached.length > MAIL_LIMITS.attachments) return fail(t('mail.compose.too-many-send', 'A message carries at most {count} files.', { count: MAIL_LIMITS.attachments }))
+    // The template part and its pictures take slots, as files do.
+    const slots = MAIL_LIMITS.attachments - (baked ? 1 + baked.inline.length : 0)
+    if (pane.attached.length > slots) return fail(t('mail.compose.too-many-send', 'A message carries at most {count} files.', { count: Math.max(0, slots) }))
     const attachments: MailAttachmentInput[] = []
     let total = 0
     for (const file of pane.attached) {
@@ -1716,8 +1851,12 @@ export class MailElement extends HTMLElement {
       total += typeof content === 'string' ? base64Size(content) : content.length
       attachments.push({ filename: file.filename, type: wireType(file.type), content })
     }
+    for (const picture of baked?.inline ?? []) {
+      total += (picture.content as Uint8Array).length
+      attachments.push(picture)
+    }
     if (total > MAIL_LIMITS.attachmentBytes) return fail(t('mail.compose.too-large-send', 'The files come to {total}; a message carries at most {size}.', { total: sizeLabel(total), size: sizeLabel(MAIL_LIMITS.attachmentBytes) }))
-    const body = pane.formatted ? formatMessage(draft.text) : { text: draft.text, html: '' }
+    const body = baked ? { text: baked.text, html: baked.html } : pane.formatted ? formatMessage(draft.text) : { text: draft.text, html: '' }
 
     this.#autosaver().cancel()
     pane.sending = true
@@ -1728,6 +1867,7 @@ export class MailElement extends HTMLElement {
     // Gone out: the draft is done with, the composer closes, and Sent is read again for the copy.
     const sent = (said: string): void => {
       pane.discarded = true
+      pane.template?.form.dispose()
       if (pane.draftSig) void this.#forgetDraft(pane.savedFrom ?? pane.from, pane.draftSig)
       this.#invalidate('sent')
       if (epoch !== this.#epoch) return
@@ -1738,10 +1878,11 @@ export class MailElement extends HTMLElement {
     }
     try {
       await this.service.send({
-        from: pane.from, to, cc, subject: draft.subject.trim(), text: body.text,
+        from: pane.from, to, cc, subject, text: body.text,
         ...(body.html ? { html: body.html } : {}),
         ...(draft.inReplyTo ? { inReplyTo: draft.inReplyTo } : {}), ...(draft.references ? { references: draft.references } : {}),
         ...(attachments.length ? { attachments } : {}),
+        ...(baked ? { template: baked.template } : {}),
       })
       sent(t('mail.sent', 'Sent to {to}.', { to: to.join(', ') }))
     } catch (error) {
@@ -1755,6 +1896,162 @@ export class MailElement extends HTMLElement {
     } finally {
       this.#cueOff('send')
     }
+  }
+
+  // ── templates (documentation/mail-templates.md) ─────────────────────────
+
+  /** How many files the participant may attach: the template part takes one slot of its own. */
+  #fileSlots(pane: ComposePane): number {
+    return MAIL_LIMITS.attachments - (pane.template ? 1 : 0)
+  }
+
+  /** "Use a template": the templates this hive keeps, read from this hive, never a host. */
+  async #chooseTemplate(pane: ComposePane): Promise<void> {
+    if (this.#pane !== pane || pane.choosing?.phase === 'reading') return
+    this.#capture(pane)
+    pane.choosing = { phase: 'reading' }
+    this.#render()
+    const listing = await this.#act('templates', t('mail.template.reading', 'Reading your templates…'), () => listTemplates(this.templates()))
+    if (this.#pane !== pane || !pane.choosing) return
+    pane.choosing = listing
+      ? { phase: 'ready', entries: listing.entries, ...(listing.problem ? { problem: listing.problem } : {}) }
+      : { phase: 'ready', entries: [], problem: 'unreadable' }
+    this.#render()
+  }
+
+  #useTemplate(pane: ComposePane, sig: string, template: MailTemplate): void {
+    if (this.#pane !== pane || pane.sending) return
+    this.#capture(pane)
+    pane.template?.form.dispose()
+    // The form is built from the holes alone; its words are this window's catalog.
+    const form = templateForm(template, (key, fallback, params) => t(key, fallback, params as Record<string, string> | undefined), { onChange: () => this.#previewer.call() })
+    // Escape in a field of the form is the field's, as in every other field of the composer.
+    form.element.setAttribute('data-escape-local', '')
+    pane.template = { sig, template, loose: looseTwin(template), form, held: new Map(), reading: new Map(), heldBytes: 0 }
+    pane.choosing = undefined
+    this.#render()
+  }
+
+  /** Back to the message box: what was written there before is still there. */
+  #stopTemplate(pane: ComposePane): void {
+    if (this.#pane !== pane || pane.sending) return
+    pane.template?.form.dispose()
+    pane.template = undefined
+    this.#render()
+  }
+
+  /** The pictures the template and this fill name, read from this hive once each, at most so many and so much. */
+  async #readTemplatePictures(pane: ComposePane, use: ComposeTemplate, fill: MailFill): Promise<void> {
+    for (const sig of picturesNamed(use.template, fill)) {
+      if (use.held.has(sig)) continue
+      // Past the caps a picture is not read at all: the message names it in words instead.
+      if (use.held.size >= TEMPLATE_PICTURES_MOST || use.heldBytes >= TEMPLATE_PICTURE_BYTES) { use.held.set(sig, null); continue }
+      let reading = use.reading.get(sig)
+      if (!reading) {
+        reading = heldPicture(this.templates(), sig).then(held => {
+          const fits = !!held && use.heldBytes + held.bytes.length <= TEMPLATE_PICTURE_BYTES
+          if (held && fits) use.heldBytes += held.bytes.length
+          use.held.set(sig, fits ? held : null)
+          use.reading.delete(sig)
+        })
+        use.reading.set(sig, reading)
+      }
+      await reading
+    }
+    void pane
+  }
+
+  #paintTemplatePreview(pane: ComposePane, use: ComposeTemplate, preview: HTMLElement): void {
+    preview.hidden = false
+    const fill = use.form.fill()
+    // Pictures not read yet are read, and the preview painted again once they are; every one read once.
+    if (picturesNamed(use.template, fill).some(sig => !use.held.has(sig))) {
+      void this.#readTemplatePictures(pane, use, fill).then(() => { if (this.#pane === pane && pane.template === use) this.#paintPreview() })
+    }
+    const out = renderTemplate(use.loose, fill, { trust: () => 'held', images: 'data', resolveResource: sig => use.held.get(sig) ?? null, ...readerPlace() })
+    const waits = preview.querySelector<HTMLElement>('.hc-mail-template-waits')
+    if (waits) waits.hidden = out.ok
+    if (!out.ok) return
+    const subject = preview.querySelector<HTMLElement>('.hc-mail-template-subject')
+    if (subject) {
+      subject.textContent = out.subject ? t('mail.template.preview-subject', 'Subject: {subject}', { subject: out.subject }) : ''
+      subject.hidden = !out.subject
+    }
+    const shown = preview.querySelector('iframe')
+    if (shown) shown.srcdoc = mailFrameDocument(makeMailHtmlSafe(out.html || textAsHtml(out.text)).html)
+  }
+
+  /**
+   * "Save as template": this draft, broken apart (A1). Its words are the template's text, its formatting
+   * (when on) the html, its subject the subject; every {{name}} written in them becomes a field the reader
+   * fills, as text. The template is kept on this hive (template-pool.ts) and offered by "Use a template".
+   */
+  async #saveAsTemplate(pane: ComposePane): Promise<void> {
+    if (this.#pane !== pane || pane.sending) return
+    this.#capture(pane)
+    const d = pane.draft
+    if (!d.text.trim()) { this.#say(t('mail.template.save-empty', 'Write the message first: the template is made from it.'), 'bad'); return }
+    const subject = d.subject.trim()
+    const names = [...new Set([...`${subject}\n${d.text}`.matchAll(DRAFT_HOLE)].map(m => m[1] as string))]
+    const named = subject.replace(DRAFT_HOLE, (_whole, name: string) => name).trim()
+    const doc: MailTemplateDocument = {
+      name: Array.from(named || t('mail.template.untitled', 'Untitled template')).slice(0, 120).join(''),
+      ...(subject ? { subject } : {}),
+      holes: Object.fromEntries(names.map(name => [name, { type: 'text' as const }])),
+      text: d.text,
+      ...(pane.formatted ? { html: formatMessage(d.text).html } : {}),
+    }
+    const saved = await this.#act('save-template', t('mail.template.saving', 'Keeping it as a template…'), () => saveTemplate(this.templates(), doc))
+    if (this.#pane !== pane || !saved) return
+    // The desk's own line, not the draft's: a draft save landing a moment later must not hide this.
+    if (saved.ok) this.#say(saved.added ? t('mail.template.saved', 'Kept as a template. Use a template offers it now.') : t('mail.template.saved-already', 'This template is already kept.'), 'ok')
+    else this.#say(t('mail.template.save-refused', 'It was not kept as a template: {reason}', { reason: saved.reason }), 'bad')
+  }
+
+  /**
+   * A received message as THIS hive's copy of its template renders it, or null: the template is not kept
+   * here (the gate says `unknown`), it does not read, or the fill is refused. Never a script, never a host.
+   */
+  async #fromTemplate(sig: string, fill: MailFill): Promise<TemplatedView | null> {
+    try {
+      const store = this.templates()
+      const trust = (await templateTrust(store, [sig])).get(sig) ?? 'unknown'
+      if (trust === 'unknown') return null
+      const entry = await readTemplate(store ?? {}, sig)
+      if (!entry.ok) return null
+      const checked = validateFill(entry.template, fill)
+      if (!checked.ok) return null
+      const held = new Map<string, HeldResource | null>()
+      let bytes = 0
+      for (const picture of picturesNamed(entry.template, checked.fill).slice(0, TEMPLATE_PICTURES_MOST)) {
+        if (bytes >= TEMPLATE_PICTURE_BYTES) break
+        const found = await heldPicture(store, picture)
+        if (found && bytes + found.bytes.length <= TEMPLATE_PICTURE_BYTES) { held.set(picture, found); bytes += found.bytes.length }
+      }
+      const out = renderTemplate(entry.template, checked.fill, { trust: () => trust, images: 'data', resolveResource: id => held.get(id) ?? null, ...readerPlace() })
+      if (!out.ok) return null
+      return { sig, name: entry.template.name, subject: out.subject, text: out.text, html: out.html, blocked: out.blocked }
+    } catch { return null }
+  }
+
+  /** Where the message on screen comes from, when it was filled from a template this hive keeps. */
+  #templateNote(body: HTMLElement, pane: ReadPane): void {
+    const shown = pane.templated
+    if (!shown) return
+    const note = el('div', 'hc-mail-acts')
+    note.appendChild(el('span', 'hc-mail-quiet', pane.baked
+      ? t('mail.template.read.baked', 'This is the copy the sender wrote out. It was filled from your template “{name}”.', { name: shown.name })
+      : t('mail.template.read.shown', 'Shown from your template “{name}”: the template you kept, filled in by the sender.', { name: shown.name })))
+    note.appendChild(this.#button(pane.baked ? t('mail.template.read.show-template', 'Show from the template') : t('mail.template.read.show-baked', 'Show the sender’s copy'), () => {
+      pane.baked = !pane.baked
+      pane.asText = !(pane.baked ? pane.mail?.html : shown.html)
+      this.#render()
+    }, 'is-small'))
+    body.appendChild(note)
+    if (pane.baked) return
+    const missing = shown.blocked.filter(item => item.kind === 'resource').length
+    if (missing) body.appendChild(el('p', 'hc-mail-quiet', t('mail.template.read.pictures', '{n} of its pictures cannot be shown here, so their names show instead.', { n: missing })))
+    if (shown.blocked.some(item => item.kind === 'script')) body.appendChild(el('p', 'hc-mail-quiet', t('mail.template.read.script', 'The template names a script. Scripts do not run in this release.')))
   }
 
   /** To/Cc suggestions: everyone this window has seen write, or been written to. Nothing is fetched for them. */
@@ -2062,8 +2359,9 @@ export class MailElement extends HTMLElement {
     const lines: [string, string][] = pane.mail
       ? [[t('mail.from', 'From'), pane.mail.from], [t('mail.to', 'To'), pane.mail.to], [t('mail.cc', 'Cc'), pane.mail.cc], [t('mail.date', 'Date'), pane.mail.date]]
       : [[t('mail.from', 'From'), pane.sent!.name ? `${pane.sent!.name} <${pane.sent!.from}>` : String(pane.sent!.from ?? '')], [t('mail.to', 'To'), joined(pane.sent!.to)], [t('mail.cc', 'Cc'), joined(pane.sent!.cc)], [t('mail.date', 'Date'), when(pane.sent!.at)]]
-    const subject = String(pane.mail?.subject ?? pane.sent!.subject ?? '')
-    const html = String(pane.mail?.html ?? pane.sent?.html ?? '')
+    const templated = pane.templated && !pane.baked ? pane.templated : null
+    const subject = templated?.subject || String(pane.mail?.subject ?? pane.sent!.subject ?? '')
+    const html = templated ? templated.html : String(pane.mail?.html ?? pane.sent?.html ?? '')
 
     if (pane.mail && this.#may('send')) {
       const mail = pane.mail
@@ -2090,13 +2388,14 @@ export class MailElement extends HTMLElement {
       meta.appendChild(el('dd', '', value))
     }
     body.appendChild(meta)
+    this.#templateNote(body, pane)
 
     if (html && !pane.asText) {
       const safe = makeMailHtmlSafe(html, pane.mail?.inlineImages ?? {})
       if (safe.blocked) body.appendChild(el('p', 'hc-mail-quiet', t('mail.blocked', '{n} remote items were not loaded, so nothing outside could see you open this.', { n: safe.blocked })))
       body.appendChild(frame(mailFrameDocument(safe.html), t('mail.message', 'Message')))
     } else {
-      body.appendChild(el('pre', 'hc-mail-text', pane.mail?.text ?? pane.sent!.text))
+      body.appendChild(el('pre', 'hc-mail-text', templated ? templated.text : pane.mail?.text ?? pane.sent!.text))
     }
 
     this.#attachmentsOf(body, pane)
@@ -2112,8 +2411,8 @@ export class MailElement extends HTMLElement {
   #attachmentsOf(body: HTMLElement, pane: ReadPane): void {
     const raw = pane.raw
     const files = pane.mail && raw
-      ? pane.mail.attachments.map((file, index) => ({ filename: file.filename, type: file.type, size: file.size, bytes: () => attachmentBytes(raw, index) }))
-      : sentFiles(pane.sent).map(file => ({ filename: String(file.filename ?? ''), type: file.type, size: base64Size(file.content), bytes: () => sentAttachmentBytes(file) }))
+      ? pane.mail.attachments.map((file, index) => ({ filename: file.filename, type: file.type, size: file.size, bytes: () => attachmentBytes(raw, index) })).filter(file => !isTemplatePart(file.type))
+      : sentFiles(pane.sent).filter(file => !isTemplatePart(file.type)).map(file => ({ filename: String(file.filename ?? ''), type: file.type, size: base64Size(file.content), bytes: () => sentAttachmentBytes(file) }))
     if (!files.length) return
     body.appendChild(el('p', 'hc-mail-quiet', t('mail.files', 'Attachments — nothing opens until you press Download:')))
     const list = el('ul', 'hc-mail-attachments')
@@ -2189,28 +2488,15 @@ export class MailElement extends HTMLElement {
     cc.setAttribute('list', KNOWN_LIST_ID)
     cc.autocomplete = 'off'
     form.appendChild(field(cc, 'cc', t('mail.cc', 'Cc'), pane.draft.cc))
-    form.appendChild(field(el('input'), 'subject', t('mail.subject', 'Subject'), pane.draft.subject))
+    // A template that says its subject writes it; the field comes back when the template goes.
+    if (pane.template?.template.subject === undefined) form.appendChild(field(el('input'), 'subject', t('mail.subject', 'Subject'), pane.draft.subject))
 
-    const formatting = el('label', 'hc-mail-check')
-    const toggle = el('input')
-    toggle.type = 'checkbox'
-    toggle.name = 'formatted'
-    toggle.checked = pane.formatted
-    toggle.disabled = pane.sending
-    toggle.setAttribute('data-escape-local', '')
-    toggle.addEventListener('change', () => { this.#composeChanged(); this.#paintPreview() })
-    formatting.append(toggle, el('span', '', t('mail.compose.formatting', 'Formatting')))
-    form.appendChild(formatting)
-
-    const text = el('textarea', 'hc-mail-compose-text')
-    text.rows = 12
-    form.appendChild(field(text, 'text', t('mail.message', 'Message'), pane.draft.text))
-
-    const preview = el('div', 'hc-mail-preview')
-    preview.appendChild(el('p', 'hc-mail-hint', t('mail.compose.marks', '**bold**  _italic_  `code`  - list  1. list  > quote  # heading  [text](https://…)')))
-    preview.appendChild(frame(mailFrameDocument(''), t('mail.compose.preview', 'Preview'), 'is-preview'))
-    this.#previewEl = preview
-    form.appendChild(preview)
+    this.#templateBlock(form, pane)
+    if (pane.template) {
+      this.#templatePreview(form)
+    } else {
+      this.#messageFields(form, pane, field)
+    }
 
     const files = el('div', 'hc-mail-files')
     this.#attachedEl = files
@@ -2249,10 +2535,104 @@ export class MailElement extends HTMLElement {
     if (pane.draft.subject || pane.draft.to) queueMicrotask(() => (form.elements.namedItem(pane.draft.to ? 'text' : 'to') as HTMLElement | null)?.focus())
   }
 
+  /** "Use a template" and "Save as template", the open list of templates, or the template in use and its form. */
+  #templateBlock(form: HTMLElement, pane: ComposePane): void {
+    const use = pane.template
+    const acts = el('div', 'hc-mail-acts')
+    if (use) {
+      acts.appendChild(el('span', 'hc-mail-quiet', t('mail.template.using', 'Filled from your template “{name}”.', { name: use.template.name })))
+      const stop = this.#button(t('mail.template.stop', 'Stop using it'), () => this.#stopTemplate(pane), 'is-small')
+      stop.disabled = pane.sending
+      acts.appendChild(stop)
+      form.appendChild(acts)
+      if (use.template.description) form.appendChild(el('p', 'hc-mail-quiet', use.template.description))
+      // The same element across redraws, so what was typed into it stays.
+      form.appendChild(use.form.element)
+      return
+    }
+    const choose = this.#busyButton('templates', t('mail.template.use', 'Use a template'), t('mail.template.reading', 'Reading your templates…'), () => { void this.#chooseTemplate(pane) }, 'is-small')
+    if (pane.sending) choose.disabled = true
+    acts.appendChild(choose)
+    const keep = this.#busyButton('save-template', t('mail.template.save', 'Save as template'), t('mail.template.saving', 'Keeping it as a template…'), () => { void this.#saveAsTemplate(pane) }, 'is-small')
+    if (pane.sending) keep.disabled = true
+    acts.appendChild(keep)
+    form.appendChild(acts)
+    if (!pane.choosing) return
+
+    const chooser = el('div', 'hc-mail-template-chooser')
+    if (pane.choosing.phase === 'reading') {
+      // Placeholders at once: the list is read from this hive and comes the moment it is.
+      const lines = el('div', 'hc-mail-skeleton-text')
+      lines.setAttribute('aria-hidden', 'true')
+      for (let i = 0; i < 3; i++) lines.appendChild(el('span'))
+      chooser.appendChild(lines)
+    } else {
+      const { entries, problem } = pane.choosing
+      const kept = entries.filter((entry): entry is Extract<TemplateEntry, { ok: true }> => entry.ok)
+      if (problem === 'no-store') chooser.appendChild(el('p', 'hc-mail-quiet', t('mail.template.no-store', 'The hive is not ready, so no templates can be read here yet.')))
+      else if (problem) chooser.appendChild(el('p', 'hc-mail-said is-bad', t('mail.template.unreadable-list', 'The list of templates on this hive could not be read.')))
+      else if (!kept.length) chooser.appendChild(el('p', 'hc-mail-quiet', t('mail.template.none', 'No templates are kept on this hive yet. Save a draft as one, or take one a host offers in /offers.')))
+      if (kept.length) {
+        const list = el('ul', 'hc-mail-template-list')
+        for (const entry of kept) {
+          const row = el('li')
+          const pick = this.#button(entry.template.name, () => this.#useTemplate(pane, entry.sig, entry.template), 'hc-mail-template-choice')
+          row.appendChild(pick)
+          if (entry.template.description) row.appendChild(el('span', 'hc-mail-quiet', entry.template.description))
+          list.appendChild(row)
+        }
+        chooser.appendChild(list)
+      }
+      const refused = entries.length - kept.length
+      if (refused) chooser.appendChild(el('p', 'hc-mail-quiet', t('mail.template.some-unreadable', '{n} kept templates could not be read, so they are not offered.', { n: refused })))
+    }
+    chooser.appendChild(this.#button(t('mail.template.close', 'Close the list'), () => { pane.choosing = undefined; this.#render() }, 'is-small'))
+    form.appendChild(chooser)
+  }
+
+  /** The preview of a template's message: its subject, and a frame painted as the fields change. */
+  #templatePreview(form: HTMLElement): void {
+    const preview = el('div', 'hc-mail-preview')
+    const subject = el('p', 'hc-mail-quiet hc-mail-template-subject')
+    subject.hidden = true
+    const waits = el('p', 'hc-mail-quiet hc-mail-template-waits', t('mail.template.preview-waits', 'A field above cannot be sent as it is, so the preview waits for it.'))
+    waits.hidden = true
+    preview.append(subject, waits, frame(mailFrameDocument(''), t('mail.compose.preview', 'Preview'), 'is-preview'))
+    this.#previewEl = preview
+    form.appendChild(preview)
+  }
+
+  /** The message box, its formatting switch and its preview: the composer without a template. */
+  #messageFields(form: HTMLElement, pane: ComposePane, field: (node: HTMLTextAreaElement, name: string, label: string, value: string) => HTMLLabelElement): void {
+    const formatting = el('label', 'hc-mail-check')
+    const toggle = el('input')
+    toggle.type = 'checkbox'
+    toggle.name = 'formatted'
+    toggle.checked = pane.formatted
+    toggle.disabled = pane.sending
+    toggle.setAttribute('data-escape-local', '')
+    toggle.addEventListener('change', () => { this.#composeChanged(); this.#paintPreview() })
+    formatting.append(toggle, el('span', '', t('mail.compose.formatting', 'Formatting')))
+    form.appendChild(formatting)
+
+    const text = el('textarea', 'hc-mail-compose-text')
+    text.rows = 12
+    form.appendChild(field(text, 'text', t('mail.message', 'Message'), pane.draft.text))
+    form.appendChild(el('p', 'hc-mail-quiet', t('mail.template.hint', 'Writing a template? Put {mark} where each reader’s words go; Save as template makes each one a field.', { mark: '{{name}}' })))
+
+    const preview = el('div', 'hc-mail-preview')
+    preview.appendChild(el('p', 'hc-mail-hint', t('mail.compose.marks', '**bold**  _italic_  `code`  - list  1. list  > quote  # heading  [text](https://…)')))
+    preview.appendChild(frame(mailFrameDocument(''), t('mail.compose.preview', 'Preview'), 'is-preview'))
+    this.#previewEl = preview
+
+    form.appendChild(preview)
+  }
+
   #paintPreview(): void {
     const pane = this.#pane
     const preview = this.#previewEl
     if (pane.kind !== 'compose' || !preview) return
+    if (pane.template) { this.#paintTemplatePreview(pane, pane.template, preview); return }
     preview.hidden = !pane.formatted
     if (!pane.formatted) return
     const shown = preview.querySelector('iframe')
@@ -2264,7 +2644,7 @@ export class MailElement extends HTMLElement {
     if (!files || this.#pane !== pane) return
     files.replaceChildren()
     const total = pane.attached.reduce((sum, file) => sum + file.size, 0)
-    const caps = t('mail.compose.caps', 'Up to {count} files, {size} in all.', { count: MAIL_LIMITS.attachments, size: sizeLabel(MAIL_LIMITS.attachmentBytes) })
+    const caps = t('mail.compose.caps', 'Up to {count} files, {size} in all.', { count: this.#fileSlots(pane), size: sizeLabel(MAIL_LIMITS.attachmentBytes) })
     if (pane.attached.length) {
       const list = el('ul', 'hc-mail-attachments')
       pane.attached.forEach((file, index) => {
@@ -2285,7 +2665,7 @@ export class MailElement extends HTMLElement {
     const input = el('input')
     input.type = 'file'
     input.multiple = true
-    input.disabled = pane.sending || pane.attached.length >= MAIL_LIMITS.attachments
+    input.disabled = pane.sending || pane.attached.length >= this.#fileSlots(pane)
     input.setAttribute('data-escape-local', '')
     input.addEventListener('change', () => {
       const picked = Array.from(input.files ?? [])
@@ -2470,6 +2850,13 @@ function ensureStyles(): void {
     .hc-mail-pick input { font: inherit; color: inherit; }
     .hc-mail-status { margin: 0; min-height: 1rem; font-size: 0.8rem; color: var(--hc-mail-quiet); }
     .hc-mail-status.is-bad { color: rgb(230, 140, 140); }
+    .hc-mail-template-chooser { display: flex; flex-direction: column; align-items: flex-start; gap: 0.4rem; padding: 0.5rem 0.6rem; border: 1px solid var(--hc-mail-rule); border-radius: 2px; background: var(--hc-mail-raised); }
+    .hc-mail-template-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+    .hc-mail-template-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; }
+    .hc-mail-template-form { padding: 0.5rem 0.6rem; border: 1px solid var(--hc-mail-rule); border-radius: 2px; }
+    .hc-mail-template-rows { display: flex; flex-direction: column; gap: 0.3rem; }
+    .hc-mail-template-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; }
+    .hc-mail-template-row > input { flex: 1; min-width: 10rem; }
     .hc-mail-keybox { display: block; padding: 0.5rem 0.6rem; border: 1px solid var(--hc-mail-rule); border-radius: 2px; overflow-wrap: anywhere; user-select: all; font-size: 0.8rem; font-family: var(--hc-mail-mono); }
   `
   document.head.appendChild(style)
