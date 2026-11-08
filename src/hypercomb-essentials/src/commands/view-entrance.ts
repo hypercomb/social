@@ -26,6 +26,7 @@
 // slot (the one behaviour whose slot the descriptor cannot name), or a record
 // of its `decorationKind`.
 
+import { SITE_VIEW_IOC_KEY } from '@hypercomb/core'
 import type { VisualBeeDescriptor } from './visual-bee-registry.js'
 import { WEBSITE_SLOT } from './website-slot.js'
 
@@ -42,6 +43,8 @@ function nonEmptySigArray(value: unknown): boolean {
   return Array.isArray(value) && value.some(s => typeof s === 'string' && SIG_RE.test(s))
 }
 
+type PageResolver = { resolvePageSig?(segments: readonly string[]): Promise<string | null> }
+
 /** Does the cell at `segments` HOLD this behaviour's content? */
 async function carriesView(
   segments: readonly string[],
@@ -49,6 +52,19 @@ async function carriesView(
   history: HistoryLike,
   store: StoreLike | undefined,
 ): Promise<boolean> {
+  // THE WEBSITE ASKS THE SITE VIEW. A page lives in one of three places (the
+  // `website` slot, a page decoration, the legacy `context` slot) and the
+  // renderer's own lookup is the one question every page surface asks. A
+  // narrower copy here read a section whose page sits in a slot it did not
+  // know as page-less, and the entrance climbed to the existing website
+  // instead of opening the section (jwize 2026-11-08). Falls through to the
+  // probe below when the site view is not up.
+  if (bee.view === 'website') {
+    const resolver = window.ioc?.get<PageResolver>(SITE_VIEW_IOC_KEY)
+    if (typeof resolver?.resolvePageSig === 'function') {
+      try { if (await resolver.resolvePageSig(segments)) return true } catch { /* fall through */ }
+    }
+  }
   let layer: Record<string, unknown> | null
   try {
     layer = await history.currentLayerAt(await history.sign({ explorerSegments: () => segments }))

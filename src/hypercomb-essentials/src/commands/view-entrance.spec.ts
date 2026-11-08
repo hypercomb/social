@@ -60,6 +60,20 @@ describe('resolveViewEntrance', () => {
     expect(await resolveViewEntrance(website, ['site', 'about'])).toEqual(['site', 'about'])
   })
 
+  it('a sub page whose page sits where only the site view looks (the legacy context slot) is still entered as itself', async () => {
+    layers.set('site', { website: [SIG] })
+    layers.set('site/about', { context: [SIG] })
+    // The renderer's own lookup knows all three places a page can live.
+    services.set('@hypercomb.social/SiteView', {
+      resolvePageSig: async (segments: readonly string[]) => (segments.join('/') === 'site/about' || segments.join('/') === 'site' ? SIG : null),
+    })
+    try {
+      expect(await resolveViewEntrance(website, ['site', 'about'])).toEqual(['site', 'about'])
+    } finally {
+      services.delete('@hypercomb.social/SiteView')
+    }
+  })
+
   it('a node-scoped view never climbs', async () => {
     layers.set('site', { website: [SIG] })
     expect(await resolveViewEntrance(postit, ['site', 'note'])).toEqual(['site', 'note'])
