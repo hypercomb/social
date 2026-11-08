@@ -4,7 +4,7 @@
 // destination can be read without standing up a renderer.
 
 import { describe, it, expect } from 'vitest'
-import { HEXAGONS, sameSegments, spawnForView, viewReturnTarget } from './view-spawn.js'
+import { HEXAGONS, sameSegments, spawnForView, viewExitTarget, viewReturnTarget } from './view-spawn.js'
 
 describe('viewReturnTarget', () => {
   it('lands on the page the view was stepped into from, not the entrance', () => {
@@ -66,5 +66,36 @@ describe('sameSegments', () => {
     expect(sameSegments(['a', 'b'], ['a', 'b'])).toBe(true)
     expect(sameSegments(['a', 'b'], ['b', 'a'])).toBe(false)
     expect(sameSegments(['a'], ['a', 'b'])).toBe(false)
+  })
+})
+
+describe('viewExitTarget — coming out surfaces on the layer you entered from', () => {
+  const spawn = { view: 'lift', mode: HEXAGONS, segments: ['family', 'susan'] }
+  const entrance = ['behaviors']
+
+  it('returns to the spawn page when the view did not move the participant', () => {
+    expect(viewExitTarget(spawn, entrance, ['behaviors'], HEXAGONS))
+      .toEqual({ mode: HEXAGONS, segments: ['family', 'susan'] })
+  })
+
+  it('restores the surface that was up when it was not the hexagons', () => {
+    expect(viewExitTarget({ ...spawn, mode: 'square' }, entrance, ['behaviors'], HEXAGONS)?.mode).toBe('square')
+  })
+
+  it('is overridden when the view moved the participant somewhere else', () => {
+    expect(viewExitTarget(spawn, entrance, ['behaviors', 'views'], HEXAGONS)).toBeNull()
+    expect(viewExitTarget(spawn, entrance, ['family', 'susan'], HEXAGONS)).toBeNull()
+  })
+
+  it('does nothing on a flip to another view — a change of face is not a way out', () => {
+    expect(viewExitTarget(spawn, entrance, ['behaviors'], 'website')).toBeNull()
+  })
+
+  it('does nothing when the entrance already was the spawn page', () => {
+    expect(viewExitTarget({ ...spawn, segments: ['behaviors'] }, entrance, ['behaviors'], HEXAGONS)).toBeNull()
+  })
+
+  it('reads an empty next mode as the hexagons', () => {
+    expect(viewExitTarget(spawn, entrance, ['behaviors'], '')?.segments).toEqual(['family', 'susan'])
   })
 })

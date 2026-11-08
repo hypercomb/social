@@ -32,7 +32,12 @@
 //     path (×, Escape, a lineage move). Drop the entry with `history.back()`,
 //     but only while it is still the top of the stack (`history.state.hcView`
 //     is ours) — a foreign entry pushed above it is never popped — and the pop
-//     we issue is recognised and ignored when it lands.
+//     we issue is recognised and ignored when it lands. A REPLACE made during
+//     the close (a view coming back out where it went in: `explorerReplace`,
+//     view-spawn.ts) edits OUR entry, which the pop then discards — so the
+//     address the close chose is carried across the pop and re-replaced onto
+//     the entry underneath. Without this every way back landed on the entrance
+//     (found 2026-11-07 with the lift view).
 //
 // The close-up keeps its own trap (it also SUSPENDS under surfaces it opened
 // and takes the screen back on BACK); while it is open this module stands
@@ -64,6 +69,10 @@ type ModeRegistryLike = {
   isActive?: (mode: string) => boolean
   ownersOf?: (mode: string) => readonly string[]
 }
+type NavigationLike = {
+  segmentsRaw?: () => readonly string[]
+  replaceRaw?: (segments: readonly string[]) => void
+}
 
 /** A closing view tears down on its own schedule (a ViewMode change, then an
  *  async reconcile), so the re-arm waits this long before asking who is still
@@ -88,6 +97,9 @@ export class ViewBack {
   #armed = false
   /** We issued `history.back()` to drop our own entry; ignore its landing. */
   #popping = false
+  /** The address the current entry carried when we issued that back() — a
+   *  close that replaced it chose this place, and the pop must not undo it. */
+  #carried: readonly string[] | null = null
   #rearmTimer: ReturnType<typeof setTimeout> | null = null
   #unsubscribe: () => void
 
@@ -118,13 +130,24 @@ export class ViewBack {
     // stack exactly as we found it, but never pop an entry that is not ours.
     this.#armed = false
     if (!this.#stateIsOurs()) return
+    // The drop waits one microtask: the close that brought us here is one
+    // listener on a ViewMode change among several, and a listener AFTER it
+    // may still replace the address (a way back armed when the view was
+    // stepped into runs after the view's own teardown). Capturing the
+    // address once they have all run is what lets the carry below see it.
     this.#popping = true
-    try { this.#history.back() } catch { this.#popping = false }
+    queueMicrotask(() => {
+      if (!this.#popping) return
+      if (!this.#stateIsOurs()) { this.#popping = false; return }
+      this.#carried = ioc<NavigationLike>('@hypercomb.social/Navigation')?.segmentsRaw?.() ?? null
+      try { this.#history.back() } catch { this.#popping = false; this.#carried = null }
+    })
   }
 
   #onPopState = (): void => {
     if (this.#popping) {
       this.#popping = false
+      this.#carryAddress()
       // A view came up between our back() and its landing, and the pop took
       // the entry just pushed for it. Push it again.
       if (this.#active && this.#armed && !this.#stateIsOurs()) {
@@ -170,6 +193,20 @@ export class ViewBack {
     if (entry) entry.back()
     else if (gesture?.backOutOfView) gesture.backOutOfView(peel)
     else peel()
+  }
+
+  /** Our pop landed on the entry underneath. If the close had replaced the
+   *  address on the entry we just dropped, the place it chose is put back
+   *  onto the one now current — a replace, so the stack stays as found. */
+  #carryAddress = (): void => {
+    const carried = this.#carried
+    this.#carried = null
+    if (!carried) return
+    const nav = ioc<NavigationLike>('@hypercomb.social/Navigation')
+    const now = nav?.segmentsRaw?.()
+    if (!now || !nav?.replaceRaw) return
+    if (now.length === carried.length && now.every((s, i) => s === carried[i])) return
+    try { nav.replaceRaw(carried) } catch { /* nav not ready */ }
   }
 
   #scheduleRearm = (): void => {

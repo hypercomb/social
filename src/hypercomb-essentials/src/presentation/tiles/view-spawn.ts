@@ -69,6 +69,34 @@ export function viewReturnTarget(
   return { mode: spawn.mode || HEXAGONS, segments: spawn.segments }
 }
 
+/**
+ * THE GENERAL RULE (jwize 2026-11-07): coming out of a view surfaces on the
+ * layer you entered from, unless something overrode it. The icon dispatcher
+ * walked the explorer to `entrance` before the surface flipped; this says
+ * what it owes on the way back, read at the moment the mode changes.
+ *
+ *   - `next` is another view, not the hexagons → a change of face, not a way
+ *     out. Nothing to do (the record stays armed for the eventual exit).
+ *   - the explorer no longer stands on `entrance` → the view MOVED the
+ *     participant (a destination chosen inside it). That is the override:
+ *     stay where the view left them.
+ *   - otherwise → back to the surface and page the view was spawned from.
+ *
+ * `null` means "leave the participant where they are".
+ */
+export function viewExitTarget(
+  spawn: ViewSpawn,
+  entrance: readonly string[],
+  current: readonly string[],
+  next: string,
+): { mode: string; segments: readonly string[] } | null {
+  if ((next || HEXAGONS) !== HEXAGONS) return null
+  if (!sameSegments(current, entrance)) return null
+  const target = viewReturnTarget(spawn, current)
+  if (target.mode === HEXAGONS && sameSegments(target.segments, current)) return null
+  return target
+}
+
 /** Is this payload a spawn record for `view`? The receiver's whole gate:
  *  one effect carries every view's step-ins. */
 export function spawnForView(payload: unknown, view: string): ViewSpawn | null {
