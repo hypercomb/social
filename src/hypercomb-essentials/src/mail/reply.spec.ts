@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { ParsedMail } from './mime.js'
-import { quoteText, recipientsIn, replyDraft, replySubject } from './reply.js'
+import { forwardDraft, forwardSubject, quoteText, recipientsIn, replyDraft, replySubject } from './reply.js'
 
 const mail = (over: Partial<ParsedMail> = {}): ParsedMail => ({
   from: 'Ana <ana@example.org>', to: 'jaime@hypercomb.com', cc: '', replyTo: '', subject: 'plans', date: 'Thu, 5 Nov 2026',
@@ -61,5 +61,74 @@ describe('the small helpers', () => {
     expect(recipientsIn('Ana <Ana@Example.org>; bo@example.org, ana@example.org  cy@example.org')).toEqual(['ana@example.org', 'bo@example.org', 'cy@example.org'])
     expect(recipientsIn('')).toEqual([])
     expect(recipientsIn('not an address')).toEqual([])
+  })
+})
+
+describe('forwardDraft', () => {
+  const withFiles = mail({
+    cc: 'bo@example.org',
+    attachments: [{ filename: 'plan.pdf', type: 'application/pdf', size: 10 }, { filename: 'rows.csv', type: 'text/csv', size: 3 }],
+  })
+
+  it('goes to nobody yet, marks the subject once and names no thread', () => {
+    const draft = forwardDraft(withFiles)
+    expect(draft.to).toBe('')
+    expect(draft.cc).toBe('')
+    expect(draft.subject).toBe('Fwd: plans')
+    expect(draft.inReplyTo).toBe('')
+    expect(draft.references).toBe('')
+  })
+
+  it('carries the message below a plain forwarded block', () => {
+    expect(forwardDraft(withFiles).text).toBe(
+      '\n\n---------- Forwarded message ----------\nFrom: Ana <ana@example.org>\nDate: Thu, 5 Nov 2026\nSubject: plans\n'
+      + 'To: jaime@hypercomb.com\nCc: bo@example.org\n\nline one\nline two\n',
+    )
+  })
+
+  it('leaves out a Date or Cc the message did not have', () => {
+    const text = forwardDraft(mail({ date: '' })).text
+    expect(text).not.toContain('Date:')
+    expect(text).not.toContain('Cc:')
+  })
+
+  it('names every attachment to carry by its index, none for a message without any', () => {
+    expect(forwardDraft(withFiles).attachments).toEqual([0, 1])
+    expect(forwardDraft(mail()).attachments).toEqual([])
+  })
+
+  it('puts Fwd: on once, keeping a Fw: the sender already wrote', () => {
+    expect(forwardSubject('plans')).toBe('Fwd: plans')
+    expect(forwardSubject('Fwd: plans')).toBe('Fwd: plans')
+    expect(forwardSubject(' FW: plans ')).toBe('FW: plans')
+    expect(forwardSubject('Re: plans')).toBe('Fwd: Re: plans')
+  })
+})
+
+describe('after the security review (R1)', () => {
+  const quick = (run: () => unknown, ms: number): void => {
+    const started = performance.now()
+    run()
+    expect(performance.now() - started).toBeLessThan(ms)
+  }
+
+  it('#3 reads a 200k-character recipients field or To header in linear time', () => {
+    quick(() => expect(recipientsIn('b'.repeat(2e5))).toEqual([]), 100)
+    quick(() => recipientsIn('@'.repeat(2e5)), 100)
+    quick(() => recipientsIn('a@'.repeat(1e5)), 100)
+    quick(() => replyDraft(mail({ to: 'b'.repeat(2e5), cc: 'c'.repeat(2e5) }), 'jaime@hypercomb.com', true), 100)
+  })
+
+  it('#3 reads only the first 8 KB of a field', () => {
+    const many = Array.from({ length: 2000 }, (_, i) => `p${i}@example.org`).join(', ')
+    const got = recipientsIn(many)
+    expect(got.length).toBeGreaterThan(400)
+    expect(got.length).toBeLessThan(2000)
+    expect(got[0]).toBe('p0@example.org')
+  })
+
+  it('#3 still finds addresses the way it always did', () => {
+    expect(recipientsIn('@@ana@example.org, a@, @b, a@b@c')).toEqual(['ana@example.org', 'a@b@c'])
+    expect(recipientsIn('"Ana, A." <Ana@Example.org>')).toEqual(['ana@example.org'])
   })
 })
