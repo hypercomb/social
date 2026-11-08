@@ -904,26 +904,30 @@ every page, and its 25 scenes are folded into the tiles they explain:
     - accessible: reader, listening, phone, motion.
     - localized: translating, locale.
     - road: coming, vision, computer (scenes 21 to 23).
-- **Each way said once, and all of them above the video.** jwize, 2026-11-05,
-  then 2026-11-06 (#110): every node is a video, and a parent is a category you
-  choose into, so no row mixes levels. And on 2026-11-07: *"put the simple and
-  other video menus as the top of the video."* A page says where it goes in
-  three rows, in this order, and then plays:
-  - **crumbs**, the way up: `protocol / simple`.
-  - **beside**, the videos under the same parent: previous, where this one
-    stands (`1 of 6 · in protocol`) and next.
-  - **More details**, the videos inside this one: the tile's children, as a
-    row of cards, each opening the next level down. A leaf has none.
+- **A tree on the left, the siblings underneath.** jwize, 2026-11-05, then
+  2026-11-06 (#110): every node is a video, and a parent is a category you
+  choose into, so no row mixes levels. Then 2026-11-08: *"a left hand sidebar
+  menu for the tree"*, *"a fullscreen button"*, *"no step in any more, just the
+  balanced centered sibling menu."* A page says where it goes in three places,
+  and then plays:
+  - **the tree**, a sidebar on the left: every walkable tile, nested as the
+    tree nests. The tiles on the way here stay open and this one is lit; a tile
+    with no page yet is shown as coming. On a phone it is a drawer behind a
+    menu button.
+  - **crumbs**, the way up, in the bar over the video: `protocol / simple`,
+    with the fullscreen button beside them. Fullscreen takes the video alone.
+  - **the siblings**, balanced and centred under the video: the tiles under the
+    same parent, this one lit, the parent's name over them in brackets
+    (`(protocol)`). A tile that is the only one there shows nothing.
 
-  Each row is left empty when it has nothing to say, and the video alone takes
-  the spare height. Every way lands on a page: inside goes one level down, and
-  beside stays under the same parent (`blocks.spec.ts`). On a phone the cards
-  scroll along their own row.
+  There is no step-in row and no previous or next: the tree goes down, the
+  siblings go across, and the crumbs go up. Every link lands on a page, the tree
+  reaches every page, and the siblings share one parent (`blocks.spec.ts`).
 - **A part, or the website.** The website belongs to the root (jwize,
   2026-11-04). A tile's page opened on its own is just that part: one slide,
-  no crumbs, no ways, no beside, and a website icon. The icon opens the
+  no crumbs, no tree, no siblings, and a website icon. The icon opens the
   website, rooted at the top tile, on that same page: every slide then shows
-  its crumbs, the videos beside it and the videos inside it, every link stays
+  its crumbs, the tree and the siblings, every link stays
   in the website, and back steps back
   along the pages read, then out to the layer hosting the page first opened.
   In the hive, tiles walk as hexagons unless something is pinned: a tile's own
