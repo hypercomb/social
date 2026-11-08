@@ -20,18 +20,40 @@ name = "EMAIL"
 # WHO LIVES HERE is not in this file. The addresses, the keys that own them and where copies go are ONE
 # secret, set once per deployment and kept across deploys:
 #
-#   printf '%s' '{"keys":{"you@your.domain":"<hex nostr pubkey>"},"copyTo":{"you@your.domain":"<verified address>"}}' \
+#   printf '%s' '{"keys":{"you@your.domain":"<hex nostr pubkey>"},"copyTo":{"you@your.domain":"<verified address>"},"names":{"you@your.domain":"Your Name"}}' \
 #     | wrangler secret put MAIL_CONFIG
 #
-#   keys    address -> the hex Nostr public key that owns it and can read it. An address whose key is not
-#           64 hex characters is not a mailbox: its mail is copied (if copyTo names it) or bounced.
+#   keys    address -> the hex Nostr public key that owns it, or a list of up to 3 (a second device, a
+#           recovery key kept offline). Mail is sealed to every listed key. A key is "<hex>" (it may do
+#           everything) or { "key": "<hex>", "can": ["read"] } — the acts are read, mark, draft, delete
+#           and send; give a recovery key only "read", so it cannot empty the mailbox or send as you.
+#           An address with no valid 64-hex key is not a mailbox: its mail is copied (if copyTo names
+#           it) or bounced. More than 3 keys: the first 3 are used and the log says so once.
 #   copyTo  per recipient: who also gets a copy, and catches the message if it cannot be stored. A recipient
 #           not listed gets no copy. Add an address only once Email Routing shows it verified.
+#   names   optional display name per address: mail goes out as  Your Name <you@your.domain>.
 #
-# For a local dev run the same may be plain vars (MAIL_KEYS, COPY_TO, MAIL_NAMES); the secret wins.
+# For a local dev run the same three may be plain vars (worker.js names them); the secret wins.
+#
+# THE BUCKET'S LIFECYCLE (set once, on the bucket — not in this file, and not in code a key could reach):
+#   A delete MOVES a message to trash/<pool>/<sig> (and its marks to trash/marks/…); nothing in the Worker
+#   destroys mail. Purge the trash after 30 days with a lifecycle rule on the prefix:
+#     wrangler r2 bucket lifecycle add hypercomb-mail purge-trash trash/ --expire-days 30
+#   Until then a mistaken or hostile delete can be undone by copying the object back from trash/.
+#   Spent request records (n/<minute>/<event id>) are swept by the Worker itself after a few minutes;
+#   a second rule on n/ (--expire-days 1) is a harmless belt and braces.
 
 [vars]
-# Origins the in-hive reader may call from.
+# Origins the in-hive reader may call from. http://localhost:4250 stays for now on purpose (decided
+# 2026-11-06): jwize tests in the dev hive there. CORS is not the gate — the signature is — and since a
+# write's signed request can be used only once, a page on that origin cannot replay one (R1 #15).
+# Move it to a dev-only var once the dev hive no longer needs the live host.
 ALLOWED_ORIGINS = "https://hypercomb.io,http://localhost:4250"
 # Messages one address may send per UTC day: a brake on a leaked key.
 MAX_SEND_PER_DAY = "100"
+# Messages one address may delete (move to trash) per UTC day: the same brake for a delete.
+MAX_DELETE_PER_DAY = "200"
+# The largest message stored, and (in worker.js) 6 MiB of attachments per send: both held LOW until the
+# largest receive and send are measured under `wrangler dev` against the Worker's 128 MB (R1 #14).
+# Measured in Node: 15 MiB in, 10 MiB attached out came to 171-193 MB. Raise them only after measuring.
+MAX_STORE_BYTES = "10485760"
