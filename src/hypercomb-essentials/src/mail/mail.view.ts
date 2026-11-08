@@ -61,6 +61,7 @@ import {
 } from './mail.service.js'
 import { attachmentBytes, attachmentsBytes, parseMail, type ParsedMail } from './mime.js'
 import { forwardDraft, recipientsIn, replyDraft, replySubject, type Draft } from './reply.js'
+import type { MailErrorCode } from './mail.service.js'
 import {
   MAIL_TEMPLATE_PART_TYPE, readMailPart, renderTemplate, validateFill,
   type BlockedItem, type HeldResource, type MailFill, type MailTemplate, type MailTemplateDocument, type RenderDeps,
@@ -205,6 +206,7 @@ export const explain =(error: unknown, sending = false, recipients: readonly str
       }
       return refusedWords(detail)
     case 'bad-message': return t('mail.error.bad-message', 'This message could not be opened with this key.')
+    case 'no-hosts': return t('mail.error.no-hosts', 'Mail comes from a host you carry, and this hive carries none yet. Add one to Your Network, or set your Home Domain.')
     default: return sending
       ? t('mail.error.unavailable-send', 'The mail host did not answer. Nothing was sent.')
       : t('mail.error.unavailable', 'The mail host did not answer.')
@@ -220,6 +222,9 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text?
 
 // One formatter for every row: toLocaleString builds a new one per call, and a page has thousands of rows.
 let whenFormat: Intl.DateTimeFormat | null = null
+/** `https://hypercomb.com` → `hypercomb.com`: a host named to the participant, as the hosts desk names it. */
+const zoneOf = (origin: string): string => origin.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').replace(/\/+$/, '')
+
 /** A glyph from the shipped Material subset (`mail`, `close` are in it), sized by the words it sits with. */
 const symbol = (name: string): HTMLSpanElement => {
   const span = el('span', 'mat-sym hc-mail-glyph', name)
@@ -549,6 +554,9 @@ export class MailElement extends HTMLElement {
   #cleanup: (() => void)[] = []
   #phase: Phase = 'loading'
   #problem = ''
+  #problemCode: MailErrorCode | null = null
+  /** The hosts asked for a mailbox (origins), so a key no host knows can say where it asked. */
+  #hostsAsked: readonly string[] = []
   #key: string | null = null
   #boxes: Mailbox[] = []
   #address = ''
@@ -821,6 +829,7 @@ export class MailElement extends HTMLElement {
     this.#cueOn('start', t('mail.loading', 'Opening your mailbox…'))
     this.#render()
     try {
+      this.#hostsAsked = await this.#askedHosts()
       const boxes = await this.service.mailboxes()
       if (epoch !== this.#epoch) return
       this.#cueOff('start')
@@ -843,8 +852,14 @@ export class MailElement extends HTMLElement {
       this.#cueOff('start')
       this.#phase = 'problem'
       this.#problem = explain(error)
+      this.#problemCode = error instanceof MailError ? error.code : null
       this.#render()
     }
+  }
+
+  /** The hosts the service asks now (a fake in the spec may have no list). */
+  async #askedHosts(): Promise<readonly string[]> {
+    try { return (await (this.service as { hostList?: () => Promise<readonly string[]> }).hostList?.()) ?? [] } catch { return [] }
   }
 
   #list(folder: Folder): FolderList {
@@ -2176,7 +2191,11 @@ export class MailElement extends HTMLElement {
       }
       if (this.#phase === 'problem') {
         body.appendChild(el('p', 'hc-mail-said is-bad', this.#problem))
-        body.appendChild(this.#button(t('mail.retry', 'Try again'), () => { void this.#start() }))
+        const acts = el('div', 'hc-mail-acts')
+        // No host to ask: the door to Your Network is the answer, before trying again.
+        if (this.#problemCode === 'no-hosts') acts.appendChild(this.#button(t('mail.open-hosts', 'Open Your Network'), () => EffectBus.emit('hosts:view-toggle', {}), 'is-place'))
+        acts.appendChild(this.#button(t('mail.retry', 'Try again'), () => { void this.#start() }))
+        body.appendChild(acts)
         return
       }
       this.#noMailbox(body)
@@ -2251,9 +2270,10 @@ export class MailElement extends HTMLElement {
   }
 
   #noMailbox(body: HTMLElement): void {
-    body.appendChild(el('p', 'hc-mail-quiet', t('mail.none', 'This device’s key does not own a mailbox on the mail host yet.')))
+    body.appendChild(el('p', 'hc-mail-quiet', t('mail.none', 'This device’s key does not own a mailbox on any host you carry yet.')))
+    if (this.#hostsAsked.length) body.appendChild(el('p', 'hc-mail-quiet', t('mail.none-asked', 'Asked: {hosts}', { hosts: this.#hostsAsked.map(zoneOf).join(', ') })))
     if (!this.#key) { body.appendChild(el('p', 'hc-mail-said is-bad', explain(new MailError('no-key')))); return }
-    body.appendChild(el('p', 'hc-mail-quiet', t('mail.none-key', 'To give it one, tell whoever runs the mail host to add this key to the address:')))
+    body.appendChild(el('p', 'hc-mail-quiet', t('mail.none-key', 'To give it one, tell whoever runs that host to add this key to the address:')))
     body.appendChild(el('code', 'hc-mail-keybox', this.#key))
     const copy = this.#button(t('mail.copy-key', 'Copy key'), () => {
       void (async () => {

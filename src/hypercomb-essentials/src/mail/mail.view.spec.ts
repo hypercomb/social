@@ -1299,9 +1299,36 @@ describe('the mail desk', () => {
   })
 })
 
+// MAIL COMES FROM THE HOSTS YOU CARRY. No host is named in code: a hive with none is told so and
+// shown the door to Your Network; a key no host knows is told which hosts were asked.
+describe('the hosts you carry', () => {
+  it('a hive with no host is told so, with the door to Your Network before Try again', async () => {
+    const toggles: unknown[] = []
+    let live = false
+    const off = EffectBus.on('hosts:view-toggle', p => { if (live) toggles.push(p) })
+    live = true
+    try {
+      await windowWith(fakeService({ hostList: vi.fn(async () => []), mailboxes: vi.fn(async () => { throw new MailError('no-hosts') }) }))
+      expect(panel().querySelector('.hc-mail-said.is-bad')?.textContent).toContain('carries none yet')
+      const labels = buttons().map(b => b.textContent)
+      expect(labels.indexOf('Open Your Network')).toBeLessThan(labels.indexOf('Try again'))
+      press('Open Your Network')
+      expect(toggles).toHaveLength(1)
+    } finally { off() }
+  })
+
+  it('a key no host knows is told which hosts were asked, by zone', async () => {
+    await windowWith(fakeService({ hostList: vi.fn(async () => ['https://hypercomb.com', 'https://mail.example.org']), addresses: vi.fn(async () => []) }))
+    const quiet = Array.from(panel().querySelectorAll('.hc-mail-quiet')).map(p => p.textContent)
+    expect(quiet[0]).toContain('any host you carry')
+    expect(quiet[1]).toBe('Asked: hypercomb.com, mail.example.org')
+    expect(panel().querySelector('.hc-mail-keybox')?.textContent).toBe('f'.repeat(64))
+  })
+})
+
 describe('explain', () => {
   it('has words for every way mail can fail', () => {
-    for (const code of ['no-signer', 'no-key', 'unauthorized', 'not-found', 'limit', 'refused', 'bad-message', 'unavailable', 'conflict'] as const) {
+    for (const code of ['no-signer', 'no-key', 'unauthorized', 'not-found', 'limit', 'refused', 'bad-message', 'unavailable', 'conflict', 'no-hosts'] as const) {
       expect(explain(new MailError(code, 'why')).length).toBeGreaterThan(10)
     }
     expect(explain(new MailError('unavailable'), true)).toContain('Nothing was sent')

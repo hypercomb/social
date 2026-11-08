@@ -37,8 +37,9 @@ on"*, and the one named bug: *"the info shows up late, so we need some cue to se
 | **a developer** | adds a pane or a function as one atom in `src/mail/` (a pure module with a spec) and wires it in the window | this plan's file map; the wire contract below |
 | **another client** (a phone, a native app) | speaks the same wire contract | section 3 |
 
-The client talks to **any mail host**: the default host for an address is its own domain
-(`https://<domain>`), with `hypercomb.com` as the fallback for addresses whose domain serves no `/mail/me`.
+The client talks to **any mail host** and names none in code: it asks the hosts the participant carries (the
+Home Domain, then Your Network — `mail-hosts.ts`), an address of its own domain first when that domain is one of
+them, and nobody at all when the hive carries no host (`no-hosts`, with the door to Your Network).
 
 ## 3. The wire contract (v2) — the Worker and the client implement this exactly
 

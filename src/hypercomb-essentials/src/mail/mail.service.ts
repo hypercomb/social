@@ -21,21 +21,23 @@
 // the act that makes the participant an author, so a key is checked FIRST
 // (knownPublicKeyHex, which never mints) and a device without one is told so.
 //
-// ── ONLY MAIL HOSTS ─────────────────────────────────────────────────────────
+// ── ONLY THE HOSTS YOU CARRY ────────────────────────────────────────────────
 //
-// Any zone may run the Worker, so an address is asked of its own domain first
-// (`https://<domain>`) and of the hosts this service was given after
-// (hypercomb.com by default). `addresses()` asks only the given hosts, and an
-// address it learned stays with the host that claimed it. No other host is
-// contacted (no-third-party-requests.md).
+// No host is named in code. Any zone may run the Worker; the hosts asked are
+// the ones the participant carries (mail-hosts.ts: the Home Domain, then Your
+// Network), or the list a caller hands this service. An address is asked of
+// its own domain first when that domain is one of them, and an address it
+// learned stays with the host that claimed it. No other host is contacted
+// (no-third-party-requests.md), and a hive that carries no host is told so
+// (`no-hosts`) rather than asking anyone.
 
 import { nip98Authorization, nip98Template } from '@hypercomb/core'
 import { fetchWithDeadline, mapBounded } from '../sharing/bounded-fetch.js'
 import { openEnvelope, openItemMeta, type Decrypt, type MailMeta, type MailWrap } from './envelope.js'
+import { mailHostZones } from './mail-hosts.js'
 import { parseMail, type ParsedMail } from './mime.js'
 import { mailPart, type MailFill } from './template.js'
 
-export const MAIL_ORIGIN = 'https://hypercomb.com'
 export const SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
 
 export type Folder = 'box' | 'sent' | 'drafts'
@@ -212,6 +214,7 @@ export type MailErrorCode =
   | 'unavailable'   // the host did not answer (or is not a mail host)
   | 'conflict'      // delete refused: hide it and mark it deletable first; or ALREADY_SENT / ALREADY_DONE
   | 'forbidden'     // the host knows this key at that address, but not for this act (detail: the act)
+  | 'no-hosts'      // this hive carries no host to ask (no Home Domain, nothing in Your Network)
 
 export class MailError extends Error {
   constructor(readonly code: MailErrorCode, readonly detail = '') {
@@ -234,6 +237,8 @@ export interface MailIo {
   /** Is a NIP-07 browser extension answering for the key? (Then asking it is the only way to know it.) */
   readonly extension: () => boolean
   readonly now: () => number
+  /** The hosts to ask when none were given: the ones this hive carries (zones or origins). */
+  readonly hosts: () => Promise<readonly string[]>
 }
 
 const defaultIo = (): MailIo => ({
@@ -241,6 +246,7 @@ const defaultIo = (): MailIo => ({
   signer: () => (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(SIGNER_KEY) as MailSigner | undefined,
   extension: () => !!(window as { nostr?: unknown }).nostr,
   now: () => Date.now(),
+  hosts: mailHostZones,
 })
 
 const enc = new TextEncoder()
@@ -458,21 +464,36 @@ interface Held { readonly signer: MailSigner; readonly pub: string }
 
 export class MailService extends EventTarget {
   readonly #io: MailIo
-  readonly #hosts: readonly string[]
+  /** The hosts a caller handed this service, or null: then the hosts this hive carries are asked. */
+  readonly #given: readonly string[] | null
   // Routing, not mail: the host that answered for an address. Learned from /mail/me, or from the
   // first host that served it.
   readonly #served = new Map<string, string>()
 
-  /** `hosts`: the mail hosts to ask (one origin, or a list), hypercomb.com when none is given. */
-  constructor(io: Partial<MailIo> = {}, hosts: string | readonly string[] = [MAIL_ORIGIN]) {
+  /** `hosts`: the mail hosts to ask (one origin or zone, or a list). None given = the hosts this hive carries. */
+  constructor(io: Partial<MailIo> = {}, hosts?: string | readonly string[]) {
     super()
     this.#io = { ...defaultIo(), ...io }
-    const list = (typeof hosts === 'string' ? [hosts] : hosts).map(originOf)
-    this.#hosts = [...new Set(list.length ? list : [MAIL_ORIGIN])]
+    const list = hosts === undefined ? [] : (typeof hosts === 'string' ? [hosts] : hosts).map(originOf)
+    this.#given = list.length ? [...new Set(list)] : null
   }
 
-  /** The hosts this service asks, in order. */
-  get hosts(): readonly string[] { return this.#hosts }
+  /** The hosts a caller gave, in order; empty when the hive's own hosts are asked instead. */
+  get hosts(): readonly string[] { return this.#given ?? [] }
+
+  /** The hosts asked now, as origins, each once: the given list, else the hosts this hive carries at this moment. */
+  async hostList(): Promise<readonly string[]> {
+    if (this.#given) return this.#given
+    let carried: readonly string[] = []
+    try { carried = await this.#io.hosts() } catch { carried = [] }
+    const origins: string[] = []
+    for (const raw of carried) {
+      let origin: string
+      try { origin = originOf(String(raw)) } catch { continue }
+      if (!origins.includes(origin)) origins.push(origin)
+    }
+    return origins
+  }
 
   /** The signer and its public key, once a key is known to be held. Never mints one. */
   async #held(): Promise<Held> {
@@ -528,8 +549,10 @@ export class MailService extends EventTarget {
     // Only the hosts the participant gave are asked. The address's own domain goes first when it is
     // one of them, but is never contacted on its own: a signed request carries the key and the address,
     // and gmail.com is not a place the participant chose to tell that to.
+    const hosts = await this.hostList()
+    if (!hosts.length) throw new MailError('no-hosts')
     const own = domainOrigin(address)
-    const candidates = own && this.#hosts.includes(own) ? [own, ...this.#hosts.filter(h => h !== own)] : [...this.#hosts]
+    const candidates = own && hosts.includes(own) ? [own, ...hosts.filter(h => h !== own)] : [...hosts]
     let best: MailError | null = null
     for (const origin of candidates) {
       try {
@@ -555,7 +578,9 @@ export class MailService extends EventTarget {
    */
   async mailboxes(): Promise<Mailbox[]> {
     const held = await this.#held()
-    const answers = await Promise.all(this.#hosts.map(async origin => {
+    const hosts = await this.hostList()
+    if (!hosts.length) throw new MailError('no-hosts')
+    const answers = await Promise.all(hosts.map(async origin => {
       try {
         const body = await this.#json<{ addresses?: unknown; names?: unknown; can?: unknown }>(await this.#request(held, origin, '/mail/me'))
         return { origin, body }

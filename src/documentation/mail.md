@@ -39,6 +39,10 @@ What it keeps, one line each (axiom ids from `doctrine.codex`):
   message still opens (H3).
 - **Who lives on a host is a secret, not code.** `MAIL_CONFIG` is set per deployment and survives deploys; the
   repository is public (B1: the module holds the behaviour, the deployment holds the people).
+- **No host is named in code either.** Mail comes from the hosts you carry: your hive asks its Home Domain first,
+  then every host in Your Network (`mail-hosts.ts`), and each that answers `/mail/me` says which of its addresses
+  your key owns. A host makes mail available by running the Worker on its zone and listing your key; a hive that
+  carries no host is told so and shown the door to Your Network, and no one is asked.
 - **One behaviour per feature.** `mail.queen.ts` is the domain's one bee; every other file in `src/mail/` is a
   dependency that exports and never registers (B1, B2).
 - **Text through i18n keys, `#private` fields, EventTarget plus `change`, ESM with `.js` imports** (B5, B6).
@@ -53,10 +57,12 @@ What it keeps, one line each (axiom ids from `doctrine.codex`):
 | **a developer** | add an atom to `src/mail/` and wire it in the window | the file map below |
 | **another client** | speak the wire contract | the contract below |
 
-The client talks to **any mail host**. For an address it has not learned, it asks `https://<the address's
-domain>` first, then the hosts it was given (default `https://hypercomb.com`); a host that does not answer a mail
-path (a static host answering 200 HTML counts as not answering) is skipped, and a send that got no answer is
-never retried on another host, because it may already have gone out (`mail.service.ts`).
+The client talks to **any mail host** and names none in code. The hosts it asks are the ones the hive carries —
+the Home Domain first, then Your Network (`mail-hosts.ts`) — or a list a caller hands the service; for an address
+it has not learned it asks `https://<the address's domain>` first when that domain is one of them. A host that
+does not answer a mail path (a static host answering 200 HTML counts as not answering) is skipped, a hive that
+carries no host asks nobody (`no-hosts`), and a send that got no answer is never retried on another host, because
+it may already have gone out (`mail.service.ts`).
 
 ### 2a. A host
 
@@ -101,10 +107,12 @@ Each step touches something live and is the host owner's act; none is done by th
 
 ### 2b. A participant
 
-Open the hive and type `mail`. The word opens the window and does nothing else (`mail.queen.ts`: it reads
-nothing, sends nothing, takes no address). If this device's key owns no mailbox on the host yet, the window says
-so and shows the key's **public** half with a **Copy key** button; send that to whoever runs the host, who adds
-it to your address under `keys`. It is a public key, safe to share; the secret half never leaves the device and
+Open the hive and type `mail` (in the bar's command stance: `/mail`, or `/` once and words bare from then on).
+The word opens the desk and does nothing else (`mail.queen.ts`: it reads nothing, sends nothing, takes no
+address). The desk asks the hosts you carry — your Home Domain, then Your Network — and nothing else; a hive
+that carries no host is told so and offered Your Network. If this device's key owns no mailbox on any of them
+yet, the desk says so, names the hosts it asked, and shows the key's **public** half with a **Copy key** button;
+send that to whoever runs the host you want mail at, who adds it to your address under `keys`. It is a public key, safe to share; the secret half never leaves the device and
 opening mail never mints one (a device with no key is told so).
 
 The key is the hive's `NostrSigner` device key, kept in this browser profile's storage (or a NIP-07 extension).
