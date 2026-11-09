@@ -790,6 +790,17 @@ test('a pool address on a site door answers the directory branch, never the SPA 
   const hidden = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/${privatePool}/`), env)
   assert.equal(hidden.status, 404)
   assert.equal(await hidden.text(), 'no pool at this address' + String.fromCharCode(10))
+
+  // Asked with `?held`, the same answer is a quiet 204 — nothing printed in a
+  // browser's console — and a listed pool answers as it did without the flag.
+  const quiet = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/${privatePool}/?held`), env)
+  assert.equal(quiet.status, 204)
+  assert.equal(quiet.headers.get('cache-control'), 'no-store')
+  assert.equal(quiet.headers.get('access-control-allow-origin'), '*')
+  assert.equal(await quiet.text(), '')
+  const flagged = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/${pool}/?held`), env)
+  assert.equal(flagged.status, 200)
+  assert.equal(await flagged.text(), '00000000\n00000001\n')
 })
 
 test('the offerings pool projects only open, signed creations on this domain', async () => {

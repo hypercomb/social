@@ -1859,7 +1859,7 @@ function tryServeContent(req, res) {
       // A ROOM POOL is listed to whoever asks its address (swarm-pools.md) —
       // its verified members only. Anything else answers as before.
       const members = roomMembers(dirMatch[1]) ?? picturePublishers(dirMatch[1])
-      if (!members) { respondText(res, 404, 'pool not held'); return true }
+      if (!members) { respondMiss(req, res, 'pool not held'); return true }
       const body = Buffer.from(members.length ? members.join('\n') + '\n' : '', 'utf8')
       res.writeHead(200, {
         'Content-Type': 'text/plain; charset=utf-8', 'Content-Length': String(body.length),

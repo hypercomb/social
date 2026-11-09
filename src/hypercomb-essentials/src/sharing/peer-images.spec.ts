@@ -17,6 +17,7 @@ import {
   previewSigOf,
 } from './peer-images.js'
 import { picturesKey, picturesPoolAddress } from './picture-pools.js'
+import { forgetPoolMisses } from './pool-listing.js'
 
 // Each publisher's own signed index, as the reader fetches it.
 const indexes = new Map<string, Record<string, string>>()
@@ -45,6 +46,7 @@ const stubSwarm = (tiles: Visual[], labels: Record<string, string> = {}): void =
 
 describe('peer image candidates', () => {
   beforeEach(() => {
+    forgetPoolMisses()
     ;(window as unknown as { ioc?: unknown }).ioc = undefined
     vi.unstubAllGlobals()
   })
@@ -192,7 +194,7 @@ describe('peer image candidates', () => {
 
     const found = await meaningPoolImageCandidates('tile')
     expect(fetchMock.mock.calls.map(([url]) => String(url)).sort())
-      .toEqual([`https://one.example/${address}/`, `https://two.example/${address}/`])
+      .toEqual([`https://one.example/${address}/?held`, `https://two.example/${address}/?held`])
     expect(found).toHaveLength(1)
     expect(found[0].previewSig).toBe(POINT)
     expect(found[0].peers.map(peer => peer.pubkey).sort()).toEqual([ANN, BO])
@@ -212,7 +214,7 @@ describe('peer image candidates', () => {
     await meaningPoolImageCandidates('garden', 'choose')
     const asked = fetchMock.mock.calls.map(call => String((call as unknown[])[0]))
     const address = await picturesPoolAddress('garden')
-    expect(asked).toEqual([`https://one.example/${address}/`])
+    expect(asked).toEqual([`https://one.example/${address}/?held`])
   })
 
   it('a scan stays quiet until a host has answered a pool', async () => {

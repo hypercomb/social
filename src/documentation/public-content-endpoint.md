@@ -72,6 +72,18 @@ the hive asks it of every host and reads 204 and 404 as the same miss
 (host-sync.service.ts `#probe`, hive-pointer.ts `fetchHiveIndex`, which also
 remembers an index miss for five minutes).
 
+**A pool's listing is asked the same way.** `GET /<sign(meaning)>/?held`
+answers "no pool at this address" 204 instead of 404, on the worker, relay.js
+and the native host (which answers every miss at or under a signature 204
+when flagged); a listing that exists answers exactly as without the flag.
+Every word, name and record is an address a hive derives and asks of every
+host it follows, so that miss is the common answer: three names over twenty
+hosts was sixty console errors. The hive asks through ONE function,
+`sharing/pool-listing.ts` (`askPoolListing` / `readPoolListing`): it adds the
+flag, asks the same host the same address once at a time, and remembers a
+miss (204, 404 or 410) for five minutes. A new listing read goes through it —
+never a bare `fetch` of `/<pool>/`.
+
 The bucket is **flat from birth** — no legacy typed-dir layout ever lands in
 R2, so unlike relay.js there is no `__x__` fallback probing on reads.
 

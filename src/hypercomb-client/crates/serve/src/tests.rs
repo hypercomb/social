@@ -464,6 +464,14 @@ fn an_unlisted_directory_answers_exactly_like_an_absent_one() {
     assert_eq!(absent.status, 404);
     assert_eq!(body_of(&absent), b"pool not held");
 
+    // Asked with `?held`, the same miss is a quiet 204 with no body — for a
+    // directory and for an atom — and it says no more than the 404 did.
+    for target in [format!("/{}/?held", pool("never:held")), format!("/{SIG_C}?held"), format!("/{journal}/?held")] {
+        let quiet = resolve(&root, &hive, "GET", &target);
+        assert_eq!(quiet.status, 204, "{target}");
+        assert!(body_of(&quiet).is_empty(), "{target}");
+    }
+
     let genome = pool("computed:genome");
     for dir in [journal.as_str(), SIG_C, genome.as_str()] {
         for path in [format!("/{dir}/"), format!("/content/{dir}/")] {

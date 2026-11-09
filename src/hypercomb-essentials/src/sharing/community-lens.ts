@@ -20,6 +20,7 @@
 
 import { lineageKey, moleculeAddress, moleculeKey } from '@hypercomb/core'
 import { isLoopbackHost } from './zone-door.js'
+import { readPoolListing } from './pool-listing.js'
 
 /** Words asked per gesture: N words x M hosts is N x M listings. */
 export const LENS_MAX_WORDS = 8
@@ -66,11 +67,12 @@ export interface LensDeps {
 }
 
 export const liveLensDeps: LensDeps = {
+  // Asked the one quiet way (pool-listing.ts): a word a host does not list is
+  // a quiet answer, remembered, never a console error per host per word.
   list: async (url, signal) => {
-    try {
-      const response = await fetch(url, { cache: 'no-store', signal })
-      return response.ok ? await response.text() : null
-    } catch { return null }
+    const at = url.replace(/\/+$/, '')
+    const cut = at.lastIndexOf('/')
+    return readPoolListing(at.slice(0, cut), at.slice(cut + 1), { signal })
   },
   address: word => moleculeAddress(word),
 }
