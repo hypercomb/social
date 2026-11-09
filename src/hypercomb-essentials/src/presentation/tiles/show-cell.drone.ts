@@ -8125,6 +8125,13 @@ export class ShowCellDrone extends Drone {
    * never be overwritten by the page we just left. */
   #enterDerivedLocation = (locationKey: string): void => {
     if (locationKey === this.#derivedLocationKey) return
+    // A MOVE PREVIEW BELONGS TO THE PAGE IT WAS MADE ON. While one is up it is
+    // the whole page (buildCellsFromAxial), so one left behind by a drag that
+    // ended without clearing it painted the level it came from under every
+    // address walked to afterwards - the same tiles again, none of them held
+    // here, so none with a picture - until a reload. The move drone clears its
+    // own preview; this is the renderer not depending on that.
+    this.moveNames = null
     if (this.#derivedLocationKey) {
       this.#derivedStateByLocation.set(this.#derivedLocationKey, {
         images: new Map(this.cellImageCache),
