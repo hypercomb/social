@@ -138,6 +138,7 @@ describe('publishing is an act', () => {
       'history/manifest-optimizer.drone.ts',   // derived cache, local only
       'history/recents-census.drone.ts',       // derived cache, local only (optimize phase)
       'molecule/molecule-index.drone.ts',      // derived cache, local only
+      'presentation/tiles/lift-view.drone.ts', // repaint trigger, local only
       'presentation/tiles/tree-view.drone.ts', // repaint trigger, local only
       'search/search-index.drone.ts',          // derived cache, local only
       'sharing/folder-sync.service.ts',        // the participant's own folder, /folder-sync opt-in

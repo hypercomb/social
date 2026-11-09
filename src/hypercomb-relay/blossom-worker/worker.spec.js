@@ -1840,6 +1840,12 @@ test('a try- door with no pack key says so, and the visitor installs file by fil
   const pointer = await worker.fetch(new Request(`https://try-fresh-rooms.hypercomb.com/content/${packs}/${root}`), env)
   assert.equal(pointer.status, 404)
   assert.equal(await pointer.text(), 'no pack\n')
+  // Every read route answers a flagged miss the same way (quietMiss): 204, no
+  // body, and what the 404 said in X-Reason.
+  const quiet = await worker.fetch(new Request(`https://try-fresh-rooms.hypercomb.com/content/${packs}/${root}?held`), env)
+  assert.equal(quiet.status, 204)
+  assert.equal(quiet.headers.get('x-reason'), 'no pack')
+  assert.equal(await quiet.text(), '')
 })
 
 test('a try- door names the published change and the host AI review beside the sandbox', async () => {

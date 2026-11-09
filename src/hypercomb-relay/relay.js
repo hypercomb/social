@@ -2064,7 +2064,7 @@ function respondMiss(req, res, msg) {
   const query = String(req.url || '').split('#')[0].split('?')[1] ?? ''
   if (new URLSearchParams(query).has('held')) {
     if (res.headersSent) return
-    res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store', 'X-Reason': msg })
+    res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'X-Reason', 'Cache-Control': 'no-store', 'X-Reason': msg })
     res.end()
     return
   }
@@ -2832,7 +2832,23 @@ function tryLanding(req, res) {
 // trySPA was removed in the full-split refactor. The relay no longer serves
 // installer code under any circumstances. See the landing handler above.
 
+// EVERY MISS ASKED WITH `?held` IS QUIET — the worker's quietMiss, here. The
+// branches that know the flag answer through respondMiss; this covers every
+// other read route, so no branch can be the one that forgot: a flagged GET or
+// HEAD that would leave as a 404 leaves as a 204 (no body — node sends none
+// for a 204 whatever is written after it), never cached.
+function quietMisses(req, res) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return
+  const query = String(req.url || '').split('#')[0].split('?')[1] ?? ''
+  if (!new URLSearchParams(query).has('held')) return
+  const writeHead = res.writeHead.bind(res)
+  res.writeHead = (code, ...rest) => code === 404
+    ? writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'X-Reason', 'Cache-Control': 'no-store', 'X-Reason': 'not held' })
+    : writeHead(code, ...rest)
+}
+
 const server = createServer((req, res) => {
+  quietMisses(req, res)
   // Doors write nothing — refused before any write route can run.
   if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS' && fromSandboxDoor(req)) {
     respondText(res, 403, 'a sandbox door writes nothing — do this from your own hive\n')

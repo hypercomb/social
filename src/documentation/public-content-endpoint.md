@@ -84,6 +84,15 @@ flag, asks the same host the same address once at a time, and remembers a
 miss (204, 404 or 410) for five minutes. A new listing read goes through it —
 never a bare `fetch` of `/<pool>/`.
 
+**No route can forget the flag.** Each host shape also applies the rule once,
+at its outermost answer (worker `quietMiss`, relay.js `quietMisses`, the
+native host's `resolve_with`): any flagged GET or HEAD that would leave as a
+404 leaves as a 204, with what the 404 said in `X-Reason` (exposed to
+cross-origin readers). The readers that try two URL shapes for one atom
+(`readBySig`, `readFromHost`: `/<sig>` and `/content/<sig>`) and the package
+pool walk (`hypercomb-runtime/src/host-packages.ts`, which reads the reason
+to tell "no pool on this host" from "not this base") ask with it.
+
 The bucket is **flat from birth** — no legacy typed-dir layout ever lands in
 R2, so unlike relay.js there is no `__x__` fallback probing on reads.
 

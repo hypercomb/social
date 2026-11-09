@@ -559,7 +559,16 @@ fn resolve_with(
 ) -> Reply {
     let reply = answer(host_shell, door_shell, hive, host, genome, method, target);
     if reply.status == 404 && asks_held(target) {
-        return cors(Reply::new(204)).with("cache-control", "no-store");
+        // What the 404 said, for a reader that tells one miss from another
+        // (the package pool walk): its body, when it had one.
+        let said = match &reply.body {
+            Body::Bytes(bytes) => String::from_utf8_lossy(bytes).lines().next().unwrap_or("").trim().to_string(),
+            _ => String::new(),
+        };
+        return cors(Reply::new(204))
+            .with("cache-control", "no-store")
+            .with("access-control-expose-headers", "X-Reason")
+            .with("x-reason", if said.is_empty() { "not held".to_string() } else { said });
     }
     reply
 }

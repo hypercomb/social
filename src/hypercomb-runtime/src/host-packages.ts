@@ -286,13 +286,18 @@ const walkBases = async (zone: string): Promise<PoolProbe> => {
     let answered = false
     for (const base of bases) {
       let res: Response
-      try { res = await fetch(`${base}/${pool}/`, { cache: 'no-store' }) } catch { continue }
+      // `?held`: a host that knows the flag answers "not here" 204 with its
+      // reason in X-Reason, not a 404 the browser prints. One that does not
+      // know it answers as before, so both spellings are read below.
+      try { res = await fetch(`${base}/${pool}/?held`, { cache: 'no-store' }) } catch { continue }
       answered = true   // any status is an answer; a thrown fetch is not
       // Every host shape that holds a pool answers its directory — the relay
       // by readdir, the edge worker by prefix, a static ship by the listing
       // it writes as index.html. A 404 or a page here is simply not this
       // base; the next is asked.
-      if (res.status === 404 && NO_POOL_ANSWER.test(await bodyOf(res))) {
+      const refusal = res.status === 204 ? (res.headers?.get?.('x-reason') ?? '') : res.status === 404 ? await bodyOf(res) : null
+      if (res.status === 204 && !NO_POOL_ANSWER.test(refusal ?? '')) continue
+      if (refusal !== null && NO_POOL_ANSWER.test(refusal)) {
         // A zone's faces are one store, so the host that said "nothing here"
         // speaks for every base: stop walking, and ask this base first next time.
         settleBase(zone, base)

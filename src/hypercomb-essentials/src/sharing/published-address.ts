@@ -157,8 +157,10 @@ export async function readFromHost(host: string, sig: string, deps: { fetch?: ty
   const get = deps.fetch ?? fetch
   for (const path of [`/${s}`, `/content/${s}`]) {
     try {
-      const res = await get(`${scheme}://${bare}${path}`, { signal: AbortSignal.timeout(TIMEOUT_MS) })
-      if (!res.ok) continue
+      // `?held`: a host that knows the flag answers a miss 204, not a 404
+      // the browser prints — one of these two shapes always misses.
+      const res = await get(`${scheme}://${bare}${path}?held`, { signal: AbortSignal.timeout(TIMEOUT_MS) })
+      if (!res.ok || res.status === 204) continue
       const bytes = await capped(res, MAX_BYTES)
       if (!bytes) return null
       if (await SignatureService.sign(bytes.slice().buffer as ArrayBuffer) === s) return bytes

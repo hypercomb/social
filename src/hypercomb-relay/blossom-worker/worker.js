@@ -6758,8 +6758,26 @@ export default {
       }
       if (card) response = cardDoorUnavailable(request)
     }
-    return untransformed(response)
+    return untransformed(await quietMiss(request, response))
   },
+}
+
+// EVERY MISS ASKED WITH `?held` IS QUIET (2026-11-09: "we really need to make
+// this foolproof"). The signature branch, the signed index and the pool
+// listing each answer their own miss 204 when flagged; this is the same rule
+// for every read route there is or will be — `/content/<sig>`, a pool member,
+// a path nobody thought of — so no branch can be the one that forgot. A
+// flagged GET or HEAD that would leave as a 404 leaves as a 204 with no body,
+// never cached, saying what the 404 said in X-Reason (its first line) and
+// nothing more. Unflagged, nothing changes.
+async function quietMiss(request, response) {
+  if (response?.status !== 404 || (request.method !== 'GET' && request.method !== 'HEAD')) return response
+  if (!new URL(request.url).searchParams.has('held')) return response
+  let said = response.headers.get('x-reason') || ''
+  if (!said && !/^\s*text\/html\b/i.test(response.headers.get('content-type') || '')) {
+    try { said = ((await response.text()).split(/\r?\n/, 1)[0] || '').trim().slice(0, 160) } catch { /* no body */ }
+  }
+  return new Response(null, { status: 204, headers: { ...CORS, 'Cache-Control': 'no-store', 'X-Reason': said.replace(/[^\x20-\x7e]/g, '') || 'not held' } })
 }
 
 // NOTHING REWRITES A PAGE ON ITS WAY OUT. The edge offers to "improve" the

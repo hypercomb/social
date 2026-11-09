@@ -114,9 +114,9 @@ describe('readFromHost — bytes from the card\'s own host, checked against thei
   it('returns bytes whose signature matches, and nothing when it does not', async () => {
     const bytes = new TextEncoder().encode('{"n":"Jaime"}')
     const sig = await SignatureService.sign(bytes.slice().buffer as ArrayBuffer)
-    const right = fakeFetch({ [`https://${HOST}/${sig}`]: '{"n":"Jaime"}' })
+    const right = fakeFetch({ [`https://${HOST}/${sig}?held`]: '{"n":"Jaime"}' })
     expect(new TextDecoder().decode((await readFromHost(HOST, sig, { fetch: right }))!)).toBe('{"n":"Jaime"}')
-    const wrong = fakeFetch({ [`https://${HOST}/${sig}`]: '{"n":"Someone else"}' })
+    const wrong = fakeFetch({ [`https://${HOST}/${sig}?held`]: '{"n":"Someone else"}' })
     expect(await readFromHost(HOST, sig, { fetch: wrong })).toBeNull()
   })
 })

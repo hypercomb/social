@@ -52,7 +52,10 @@ export const readBySig = async (host: string, sig: string): Promise<Uint8Array |
   if (!SIG_RE.test(sig)) return null
   for (const path of [`/content/${sig}`, `/${sig}`]) {
     try {
-      const res = await fetch(`${hostBase(host)}${path}`, { cache: 'force-cache' })
+      // `?held`: a host that knows the flag answers a miss 204, not a 404
+      // the browser prints — one of these two shapes always misses.
+      const res = await fetch(`${hostBase(host)}${path}?held`, { cache: 'force-cache' })
+      if (res.status === 204) continue
       if (!res.ok) continue
       const bytes = new Uint8Array(await res.arrayBuffer())
       if (await SignatureService.sign(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer) === sig) return bytes
