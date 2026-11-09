@@ -101,7 +101,7 @@ const bytesOfBlob = (blob: Blob): Promise<Uint8Array> => new Promise((resolve, r
 // The host: one signed index per key, served back exactly as it was PUT —
 // whichever of its zone roots it is asked through. A relay apex is not it.
 globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-  const url = String(input)
+  const url = String(input).split('?')[0] // a host reads the path; the probe flag (`?held`) does not change it
   requests.push({ url, method: init?.method ?? 'GET' })
   if (!url.endsWith(`/${PUBKEY}`)) return new Response('', { status: 404 })
   if (relays.has(new URL(url).host)) {
@@ -117,7 +117,7 @@ globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
 
 const { lineageKey } = await import('../history/lineage-key.js')
 const { readEntrances, isPoweredEntrance, boundLineage, entranceHost, entranceAddresses } = await import('./zone-door.js')
-const { fetchHiveIndex, putHiveManifest, setHiveRoot, clearHiveRoot, setHostListing } = await import('./hive-pointer.js')
+const { fetchHiveIndex, forgetIndexMisses, putHiveManifest, setHiveRoot, clearHiveRoot, setHostListing } = await import('./hive-pointer.js')
 const { publishBranch, unpublishBranch, setBranchDoors, setBranchAddress, setEntrance, applyEntranceIntent } = await import('./publish-branch.js')
 const { setTextThemeOffering } = await import('./text-theme-offering.js')
 const { HIVE_LINK_VERSION } = await import('./hive-link.js')
@@ -146,6 +146,7 @@ const signedContent = (): Record<string, unknown> => JSON.parse(String(served?.[
 const entrancesNow = (): Record<string, ZoneEntrance> | undefined => signedContent()['entrances'] as Record<string, ZoneEntrance> | undefined
 
 beforeEach(() => {
+  forgetIndexMisses()
   marks = [ZONE]
   served = null
   indexStatus = 200

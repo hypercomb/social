@@ -34,7 +34,7 @@ const file = async (text: string) => {
 
 /** A host that serves what it holds and takes a signed PUT whose body hashes to its URL. */
 const host = (held: Map<string, Uint8Array>, refuse = new Set<string>()) => vi.fn(async (url: string, init?: RequestInit) => {
-  const sig = url.split('/').pop()!
+  const sig = url.split('?')[0].split('/').pop()! // a host reads the path; a query (`?held`) does not change it
   if (init?.method === 'PUT') {
     if (!String((init.headers as Record<string, string>)['Authorization']).startsWith('Nostr ')) return new Response(null, { status: 401 })
     if (refuse.has(sig)) return new Response(null, { status: 403 })

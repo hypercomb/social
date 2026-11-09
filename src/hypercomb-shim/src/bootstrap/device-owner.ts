@@ -57,8 +57,10 @@ export const carryChain = async (zone: string, binding: DeviceBinding, signer: D
 const uploadRecord = async (zone: string, bytes: Uint8Array, sig: string, anchor: string, signer: DeviceSigner): Promise<string | null> => {
   const url = `${zoneOrigin(zone)}/${sig}`
   try {
-    const there = await fetch(url, { method: 'HEAD', cache: 'no-store' })
-    if (there.ok && !(there.headers.get('content-type') ?? '').toLowerCase().includes('text/html')) return null
+    // `?held`: a host that knows the flag answers a miss 204, not a 404 the
+    // console prints as an error — so only a 200 is held.
+    const there = await fetch(`${url}?held`, { method: 'HEAD', cache: 'no-store' })
+    if (there.status === 200 && !(there.headers.get('content-type') ?? '').toLowerCase().includes('text/html')) return null
   } catch { /* the PUT says whether it is reachable */ }
   try {
     const put = await fetch(url, { method: 'PUT', headers: { Authorization: authFor(signer, url, anchor) }, body: bytes.slice().buffer as ArrayBuffer })

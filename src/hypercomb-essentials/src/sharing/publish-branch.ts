@@ -680,7 +680,8 @@ export async function confirmPublished(
   const sync = hostSync ?? get<HostSyncLike>(HOST_SYNC_KEY)
   const deadline = Date.now() + CONFIRM_DEADLINE_MS
   for (;;) {
-    const read = await fetchHiveIndex(host, pubkey)
+    // Fresh: a miss remembered before this publish must not hide the index it just wrote.
+    const read = await fetchHiveIndex(host, pubkey, undefined, { fresh: true })
     if (read.ok && read.manifest.roots[key] === sealed) {
       // The index is caught up. Now the bytes.
       const served = await sync?.probeServed?.(host, sealed)

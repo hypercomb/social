@@ -1585,7 +1585,7 @@ function tryServeHiveIndex(req, res) {
 
   if (req.method === 'GET' || req.method === 'HEAD') {
     const row = newestEvent(pubkey, HIVE_INDEX_KIND)
-    if (!row) { respondText(res, 404, 'no index for this publisher'); return true }
+    if (!row) { respondMiss(req, res, 'no index for this publisher'); return true }
     const body = JSON.stringify({
       kind: row.kind,
       created_at: row.created_at,
@@ -1911,7 +1911,7 @@ function tryServeContent(req, res) {
       // The framework-free bootstrap is signature-named too, but it belongs
       // to the shell payload rather than the writable participant heap.
       if (cfg.shellDir && existsSync(join(cfg.shellDir, sigMatch[1]))) return false
-      respondText(res, 404, 'sig not held', { 'Cache-Control': 'no-store' })
+      respondMiss(req, res, 'sig not held')
       return true
     }
     resolved = hit.path
@@ -2053,6 +2053,22 @@ function respondText(res, code, msg, headers = {}) {
   if (res.headersSent) return  // answered already (a stream error after the answer) — never a throw
   res.writeHead(code, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*', ...headers })
   res.end(msg)
+}
+
+// THE PROBE (2026-11-09, the same flag the worker answers): `?held` asks "do
+// you hold this?". A browser prints every 404 as a red console error, and the
+// hive asks that question of every host it publishes to — so a miss asked
+// with the flag is a quiet 204 with no body, never cached. Without the flag a
+// miss is the 404 it always was.
+function respondMiss(req, res, msg) {
+  const query = String(req.url || '').split('#')[0].split('?')[1] ?? ''
+  if (new URLSearchParams(query).has('held')) {
+    if (res.headersSent) return
+    res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store', 'X-Reason': msg })
+    res.end()
+    return
+  }
+  respondText(res, 404, msg, { 'Cache-Control': 'no-store' })
 }
 
 // ── doors write nothing (documentation/module-sandbox.md) ───────────────────
@@ -2709,7 +2725,7 @@ function tryServeShell(req, res) {
   // signed location have the same rule even though the marker is not hashed.
   const isAddress = urlPath.split('/').filter(Boolean).some(segment => /^[0-9a-f]{64}$/.test(segment))
   if (!held && (isAddress || urlPath.startsWith('/content/'))) {
-    respondText(res, 404, 'not held', { 'Cache-Control': 'no-store' })
+    respondMiss(req, res, 'not held')
     return true
   }
   const file = held ? target : join(root, 'index.html')

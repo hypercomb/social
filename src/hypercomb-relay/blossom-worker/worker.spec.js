@@ -5080,6 +5080,45 @@ test('an origin host serves the heap first and hands only a bare miss to the ori
   })
 })
 
+// THE PROBE (2026-11-09): `?held` asks "do you hold this?" — a miss answers
+// 204 with no body instead of a 404 the browser prints as a red error; a hit
+// answers exactly as without it; without the flag nothing changes.
+test('a held probe answers a miss with 204 and a hit as before, on an origin host and on a plain one', async () => {
+  const { env } = await originFixture()
+  const bytes = 'held for the probe'
+  const held = await sha256Hex(bytes)
+  env.CONTENT.held.set(held, new TextEncoder().encode(bytes))
+  const missing = 'd'.repeat(64)
+  await withUpstream(originPage, async () => {
+    for (const method of ['GET', 'HEAD']) {
+      const miss = await worker.fetch(new Request(`https://hypercomb.com/${missing}?held`, { method }), env)
+      assert.equal(miss.status, 204, `${method}: a miss is a quiet answer`)
+      assert.equal(miss.headers.get('cache-control'), 'no-store')
+      assert.equal(miss.headers.get('access-control-allow-origin'), '*')
+      assert.equal(miss.headers.get('x-reason'), 'not held')
+      assert.equal((await worker.fetch(new Request(`https://hypercomb.com/${missing}`, { method }), env)).status, 404, `${method}: unflagged stays 404`)
+      assert.equal((await worker.fetch(new Request(`https://hypercomb.com/${held}?held`, { method }), env)).status, 200, `${method}: a hit is a hit`)
+    }
+    assert.equal(await (await worker.fetch(new Request(`https://hypercomb.com/${held}?held`), env)).text(), bytes)
+  })
+  const plain = await fixture()
+  const quiet = await worker.fetch(new Request(`https://content.pluginthematrix.com/${missing}?held`, { method: 'HEAD' }), plain.env)
+  assert.equal(quiet.status, 204)
+  assert.equal((await worker.fetch(new Request(`https://content.pluginthematrix.com/${missing}`, { method: 'HEAD' }), plain.env)).status, 404)
+})
+
+test('a held probe of a signed index a key never put here answers 204, and an index that is here answers as before', async () => {
+  const env = { SITE_BINDINGS: '{}', HIVES: kvMap(new Map([[assessor, JSON.stringify(await indexBy(assessorKey, { 'try-fresh-rooms': head }))]])) }
+  const nobody = 'e'.repeat(64)
+  const quiet = await worker.fetch(new Request(`https://content.hypercomb.com/${INDEXES}/${nobody}?held`), env)
+  assert.equal(quiet.status, 204)
+  assert.equal(quiet.headers.get('access-control-allow-origin'), '*')
+  assert.equal((await worker.fetch(new Request(`https://content.hypercomb.com/${INDEXES}/${nobody}`), env)).status, 404)
+  const held = await worker.fetch(new Request(`https://content.hypercomb.com/${INDEXES}/${assessor}?held`), env)
+  assert.equal(held.status, 200)
+  assert.equal((await held.json()).pubkey, assessor)
+})
+
 test('ORIGIN_HOSTS changes nothing on any other host, and only the deploy var makes an origin host', async () => {
   const packages = await sha256Hex('host:packages')
   const hosts = ['https://pluginthematrix.com', 'https://revolucion.pluginthematrix.com', 'https://susan.pluginthematrix.com',

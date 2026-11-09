@@ -401,6 +401,41 @@ test("a pool past the floor is listed only while the operator's signed index dec
   }
 })
 
+// THE PROBE (2026-11-09): `?held` asks "do you hold this?" — a miss is a quiet
+// 204 (a browser prints every 404 as a red console error), a hit answers as
+// before, and without the flag a miss is the 404 it always was.
+test('a held probe: a missing index or atom answers 204, a held one answers as before', { timeout: 20_000 }, async () => {
+  const port = await freePort()
+  const dir = mkdtempSync(join(tmpdir(), 'hypercomb-relay-probe-'))
+  const owner = generateSecretKey()
+  const child = spawn(process.execPath, ['relay.js', '--port', String(port), '--memory', '--content-dir', dir, '--writers', getPublicKey(owner)], { cwd: import.meta.dirname, stdio: 'ignore' })
+  const base = `http://127.0.0.1:${port}`
+  const indexUrl = `${base}/${sha(Buffer.from('hive:indexes', 'utf8'))}/${getPublicKey(owner)}`
+  const atomUrl = `${base}/${'f'.repeat(64)}`
+  try {
+    await waitForRelay(base)
+    for (const url of [indexUrl, atomUrl]) {
+      for (const method of ['GET', 'HEAD']) {
+        const quiet = await fetch(`${url}?held`, { method })
+        assert.equal(quiet.status, 204, `${method} ${url}`)
+        assert.equal(quiet.headers.get('access-control-allow-origin'), '*')
+        assert.equal(quiet.headers.get('cache-control'), 'no-store')
+        assert.equal((await fetch(url, { method })).status, 404, `${method} ${url} unflagged`)
+      }
+    }
+    const evt = finalizeEvent({ kind: 30564, created_at: Math.floor(Date.now() / 1000), tags: [], content: JSON.stringify({ roots: {} }) }, owner)
+    const body = Buffer.from(JSON.stringify(evt))
+    const put = await fetch(indexUrl, { method: 'PUT', body, headers: { Authorization: auth(owner, indexUrl, 'PUT', body), 'Content-Type': 'application/json' } })
+    assert.equal(put.status, 200)
+    const held = await fetch(`${indexUrl}?held`)
+    assert.equal(held.status, 200)
+    assert.equal((await held.json()).pubkey, getPublicKey(owner))
+  } finally {
+    child.kill()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 // ── NIP-05: who each writer is, at this host (documentation/sealed-audiences.md, Names)
 // The relay answers /.well-known/nostr.json from its writers alone, and only
 // at the hostnames its operator declared (--domain). `_` is the writer the

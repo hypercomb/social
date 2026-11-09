@@ -323,8 +323,9 @@ const router = (byHost: Record<string, Host>): FetchMock => vi.fn(async (input: 
   return host.fetch(input, init)
 })
 
+/** The addresses asked, the probe flag (`?held`) set aside. */
 const calls = (host: Host, method: string): string[] =>
-  host.fetch.mock.calls.filter(([, init]) => (init?.method ?? 'GET') === method).map(([url]) => String(url))
+  host.fetch.mock.calls.filter(([, init]) => (init?.method ?? 'GET') === method).map(([url]) => String(url).replace(/\?held$/, ''))
 
 /** The NIP-98 event an Authorization header carries. */
 const authEvent = (init?: RequestInit): { tags: string[][] } => {

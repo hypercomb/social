@@ -523,7 +523,7 @@ describe('the profile word', () => {
       signEvent: async (event: { kind: number; created_at: number; tags: string[][]; content: string }) => finalizeEvent(event, secret),
     })
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input)
+      const url = String(input).split('?')[0] // a host reads the path; the probe flag (`?held`) does not change it
       const method = init?.method ?? 'GET'
       if (url.endsWith(`/${pubkey}`)) {
         if (method === 'PUT') {
