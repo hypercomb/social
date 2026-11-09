@@ -234,7 +234,10 @@ const RETRY_MS = 30_000
 // ladder doubles from 2 s to 60 s with jitter and resets on a success or a
 // reopened mesh socket. A key the relay has not yet seen live (401 not-live —
 // the beacon is a moment behind the upload) is retried at a fixed second, up
-// to five times, before it joins the ladder. A host that refuses (any other
+// to five times, before it joins the ladder — on the relay this tab meets at;
+// any other host gets one more try (the one carrying the signed beacon) and
+// is then refused as "not here", a pause the tab keeps across a reload
+// (#keepNotHere). A host that refuses (any other
 // 401/403/4xx, participants-closed included) is asked again in 10 min; a full
 // one (429/507) after its Retry-After, never sooner than 10 min. A 413 or 409
 // is about ONE entry, never the host: that target is dropped for that sig.
@@ -595,6 +598,7 @@ export class HostSyncService extends EventTarget {
     // retry now" signal. Clears every host's window — worst case a
     // still-broken host costs one extra refusal before re-pausing.
     this.#hostBackoff.clear()
+    this.#forgetNotHere()
     this.#assertedAbsent.clear()
     this.#probedHosts.clear()
     this.#answersPage.clear()
@@ -637,6 +641,7 @@ export class HostSyncService extends EventTarget {
     try { localStorage.setItem(PUBLIC_HOST_KEY, '1') } catch { /* private mode — honor in-session */ }
     // The operator's "retry now" signal for THIS host.
     this.#hostBackoff.delete(this.publicHostDomain())
+    this.#forgetNotHere(this.publicHostDomain())
     this.#assertedAbsent.clear()
     this.#probedHosts.clear()
     this.#answersPage.clear()
@@ -915,7 +920,8 @@ export class HostSyncService extends EventTarget {
       // A node is a write door — the zone root, never a `content.` face.
       const domain = foldContentLabel(String(raw ?? '').trim().toLowerCase())
       if (!isPublishNode(domain)) continue
-      if (this.#hostBackoff.delete(domain)) { this.#putsThrew.delete(domain); this.#receiptEpoch++; kick = true }
+      this.#recallNotHere(domain)
+      if (this.#hostBackoff.delete(domain)) { this.#forgetNotHere(domain); this.#putsThrew.delete(domain); this.#receiptEpoch++; kick = true }
       if (this.#publishNodes.has(domain)) continue
       this.#publishNodes.add(domain)
       kick = true
@@ -1927,6 +1933,7 @@ export class HostSyncService extends EventTarget {
                 continue
               }
               this.#hostBackoff.delete(target.domain) // a success resets the host's ladder
+              this.#forgetNotHere(target.domain)
               settled++
               served = true
               progressed = true
@@ -2110,7 +2117,49 @@ export class HostSyncService extends EventTarget {
     !(target.swarm && target.publicOnly) || target.marker === true || this.#neededBySwarm(sig, target.domain)
 
   /** Is this host taking requests right now? */
-  readonly #hostActive = (domain: string): boolean => Date.now() >= (this.#hostBackoff.get(domain)?.until ?? 0)
+  readonly #hostActive = (domain: string): boolean => {
+    this.#recallNotHere(domain)
+    return Date.now() >= (this.#hostBackoff.get(domain)?.until ?? 0)
+  }
+
+  /** A HOST THAT SAID "NOT HERE" IS REMEMBERED BY THE TAB (2026-11-09: "I
+   *  thought we solved this"). A relay that takes uploads only from keys live
+   *  on its own socket answers every upload from a tab meeting elsewhere 401,
+   *  and the browser prints each one. Its ten-minute pause lived in memory, so
+   *  every reload asked again — and found out again, one red line per try. The
+   *  pause is kept in sessionStorage (this tab, this session; a fact about
+   *  now, never the store's), and a reload inside it starts paused. Every
+   *  "retry now" (enable, enablePublicHost, a publish node named again,
+   *  reDrain) forgets it. */
+  static readonly #NOT_HERE_KEY = 'hc:host-sync:not-here:'
+  readonly #recalledNotHere = new Set<string>()
+
+  readonly #recallNotHere = (domain: string): void => {
+    if (this.#recalledNotHere.has(domain)) return
+    this.#recalledNotHere.add(domain)
+    if (this.#hostBackoff.has(domain)) return
+    try {
+      const kept = JSON.parse(sessionStorage.getItem(HostSyncService.#NOT_HERE_KEY + domain) ?? 'null') as { until?: number; reason?: string } | null
+      const until = Number(kept?.until ?? 0)
+      if (!(until > Date.now())) return
+      this.#hostBackoff.set(domain, { until, streak: 1, notLive: NOT_LIVE_RETRIES + 1, status: 'refused', reason: String(kept?.reason ?? NOT_HERE_REASON) })
+    } catch { /* no session storage, or not ours — ask as before */ }
+  }
+
+  readonly #keepNotHere = (domain: string, until: number, reason: string): void => {
+    try { sessionStorage.setItem(HostSyncService.#NOT_HERE_KEY + domain, JSON.stringify({ until, reason })) } catch { /* memory only */ }
+  }
+
+  /** Forget the kept pause of one host, or of every host. */
+  readonly #forgetNotHere = (domain?: string): void => {
+    try {
+      if (domain) { sessionStorage.removeItem(HostSyncService.#NOT_HERE_KEY + domain); return }
+      for (let i = sessionStorage.length - 1; i >= 0; i--) {
+        const key = sessionStorage.key(i)
+        if (key?.startsWith(HostSyncService.#NOT_HERE_KEY)) sessionStorage.removeItem(key)
+      }
+    } catch { /* nothing kept */ }
+  }
 
   /** Record a host's failure and pause it (the classes: see BACKOFF_BASE_MS).
    *  One wave, one step: sends that were already in flight when a sibling
@@ -2126,7 +2175,15 @@ export class HostSyncService extends EventTarget {
     // retries, and is not the relay this tab meets at, never will — it takes
     // uploads only from keys live on ITS socket (relay.js), and this tab meets
     // elsewhere. A standing answer, not a race with the beacon.
-    const failure: PushFailure = answered.status === 'not-live' && notLive > NOT_LIVE_RETRIES && target.domain !== this.#resolver.relayHost()
+    //
+    // The five one-second retries are for the relay this tab MEETS AT, where
+    // the beacon is a moment behind the upload. Any other host never sees
+    // that beacon: the one thing that can change its answer is the signed
+    // beacon the next upload carries (#nip98, D7), so it gets that one try
+    // and no more — two refused uploads, not six.
+    const meetsHere = target.domain === this.#resolver.relayHost()
+    const tries = meetsHere ? NOT_LIVE_RETRIES : 1
+    const failure: PushFailure = answered.status === 'not-live' && notLive > tries && !meetsHere
       ? { status: 'refused', reason: `${NOT_HERE_REASON} (${answered.reason})`, notHere: true }
       : answered
     const ladder = Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** (streak - 1))
@@ -2134,10 +2191,11 @@ export class HostSyncService extends EventTarget {
     // host's own word: it waits on the ladder, never the refusal's 10 min.
     const wait = failure.status === 'refused' && !failure.threw ? REFUSED_BACKOFF_MS
       : failure.status === 'full' ? Math.max(FULL_MIN_BACKOFF_MS, failure.retryAfterMs ?? 0)
-      : failure.status === 'not-live' && notLive <= NOT_LIVE_RETRIES ? NOT_LIVE_RETRY_MS
+      : failure.status === 'not-live' && notLive <= tries ? NOT_LIVE_RETRY_MS
       : ladder + Math.floor(Math.random() * ladder * 0.25)
     const until = Math.max(now + wait, sameWave ? prev.until : 0)
     this.#hostBackoff.set(target.domain, { until, streak, notLive, status: failure.status, reason: failure.reason, ...(failure.threw ? { threw: true as const } : {}) })
+    if (failure.notHere) this.#keepNotHere(target.domain, until, failure.reason)
     if (answered.status === 'not-live') this.#notLiveHosts.add(target.domain)
     this.#noteSwarmHostFailure(target, failure, streak)
     if (!sameWave || prev.status !== failure.status) {
@@ -2507,6 +2565,7 @@ export class HostSyncService extends EventTarget {
     this.#answersPage.clear()
     this.#putsThrew.clear()
     this.#hostBackoff.clear()
+    this.#forgetNotHere()
     this.#refusedEntries.clear()
     this.#entryRefusal.clear()
     this.#resolver.clearDown()

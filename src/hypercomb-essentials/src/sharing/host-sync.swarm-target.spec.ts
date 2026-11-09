@@ -198,6 +198,7 @@ beforeEach(() => {
   // A participant on hypercomb.io: the runtime seeds the self-domain to the
   // page origin and nothing else — no public host, no backup opt-in.
   localStorage.clear()
+  sessionStorage.clear()   // the tab's kept "not here" pause (host-sync #keepNotHere)
   localStorage.setItem('hc:nostrmesh:self-domain', 'hypercomb.io')
   join(true)
 })

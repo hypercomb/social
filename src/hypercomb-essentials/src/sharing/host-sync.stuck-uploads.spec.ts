@@ -219,6 +219,7 @@ beforeEach(() => {
   })
   registry.set(MESH_KEY, { swarmHost: () => field })
   localStorage.clear()
+  sessionStorage.clear()   // the tab's kept "not here" pause (host-sync #keepNotHere)
   localStorage.setItem('hc:nostrmesh:self-domain', 'hypercomb.io')
   // The meeting socket is open: a host silent now is the host, not the path.
   meshState('open')

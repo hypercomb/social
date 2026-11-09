@@ -214,6 +214,7 @@ beforeEach(() => {
   registry.delete('@hypercomb.social/SecretStore')
   registry.delete('@diamondcoreprocessor.com/SwarmDrone')
   localStorage.clear()
+  sessionStorage.clear()   // the tab's kept "not here" pause (host-sync #keepNotHere)
   localStorage.setItem('hc:nostrmesh:self-domain', 'hypercomb.io')
   meshState('open')
   join(true)
@@ -565,12 +566,40 @@ describe('BCL-7 / TS-5: a host that takes only the people meeting on it', () => 
     for (const t of tiles) void service.markPublic(t.sig, 'layer', false, ['shop'])
     await advanceUntil(() => (service.swarmHostsFor(['shop']).passedOver ?? []).includes('hostb.example'), 250, 120)
     expect(service.swarmHostsFor(['shop'])).toMatchObject({ hosts: ['jwize.com'], source: 'meeting', passedOver: ['hostb.example'] })
-    expect(calls(b, 'PUT').length).toBeLessThanOrEqual(6)
+    // It does not meet here, so the beacon never arrives: one upload, one more
+    // carrying the signed beacon, and it is refused — never the five retries.
+    expect(calls(b, 'PUT').length).toBeLessThanOrEqual(2)
     expect(service.hostTrouble('hostb.example')).toMatchObject({ why: 'refused' })
     expect(service.hostTrouble('hostb.example')!.reason).toMatch(/meeting on it/)
     await advanceUntil(async () => (await queued()).length === 0)
     vi.useRealTimers()
     for (const t of tiles) expect((await service.closureVerdict(t.sig, 'layer', false, ['shop'])).ok).toBe(true)
+  })
+
+  it('a reload inside the pause starts paused: the host that said "not here" is not asked again', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
+    marks = new Map([['shop', ['hostb.example']]])
+    field = 'jwize.com'
+    const b = notLive()
+    vi.stubGlobal('fetch', router({ 'hostb.example': b, 'jwize.com': heap() }))
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const service = await make(['shop'])
+    void service.markPublic((await tile('one')).sig, 'layer', false, ['shop'])
+    await advanceUntil(() => (service.swarmHostsFor(['shop']).passedOver ?? []).includes('hostb.example'), 250, 120)
+    const asked = calls(b, 'PUT').length
+    expect(asked).toBeGreaterThan(0)
+
+    // The same tab, reloaded: a new service over the same session.
+    const reloaded = await make(['shop'])
+    void reloaded.markPublic((await tile('two')).sig, 'layer', false, ['shop'])
+    await vi.advanceTimersByTimeAsync(60_000)
+    await settle()
+    expect(calls(b, 'PUT').length).toBe(asked)
+
+    // "Retry now" forgets it: the host is asked again.
+    reloaded.enable()
+    await advanceUntil(() => calls(b, 'PUT').length > asked, 250, 120)
+    vi.useRealTimers()
   })
 
   it('the host field answering not-live is where this tab meets: retried, never refused as "meeting elsewhere", never passed over', async () => {
