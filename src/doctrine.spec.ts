@@ -2363,3 +2363,45 @@ describe('a read of a host has a deadline', () => {
     ], 'bare fetch of a host URL')
   })
 })
+
+describe('a question a host may answer "no" is asked quietly', () => {
+  it('no fetch of a pool listing outside sharing/pool-listing.ts — the list only shrinks', () => {
+    // jwize 2026-11-09: "I still see these 404 errors all the time ... this
+    // needs to be enforced somehow so that we never reach this state in the
+    // first place." A pool is a directory at `sign(meaning)/`; every word,
+    // name and record is an address a hive derives and asks of EVERY host it
+    // follows, and most hold nothing there. A browser prints each 404 as a
+    // red console line whatever the page does with it — three names over
+    // twenty hosts was sixty errors on a hive working as designed.
+    //
+    // The listing is asked ONE way: `askPoolListing` / `readPoolListing`
+    // (sharing/pool-listing.ts) — with `?held` (a host that knows the flag
+    // answers the miss 204), once at a time, and a miss remembered. A new
+    // `fetch(\`${origin}/${pool}/\`)` anywhere else is a new wall of errors:
+    // call the helper. The one file below owns its own walk (the package
+    // floor, read before essentials exists) and asks with the flag itself.
+    const LISTING = /(?<![\w$.#])fetch\s*\(\s*`[^`]*\$\{[^}`]+\}\/\$\{[^}`]+\}\/(?:\?held)?`/
+    const actual: string[] = []
+    for (const dir of ['hypercomb-essentials/src', 'hypercomb-runtime/src', 'hypercomb-shared', 'hypercomb-shim/src', 'hypercomb-web/src', 'hypercomb-dev/src']) {
+      for (const file of walk(join(ROOT, dir))) {
+        const path = relative(ROOT, file).replace(/\\/g, '/')
+        if (/\.spec\.ts$/.test(path) || path.endsWith('sharing/pool-listing.ts')) continue
+        if (LISTING.test(stripComments(readFileSync(file, 'utf8')))) actual.push(path)
+      }
+    }
+    assertRatchet(actual.sort(), [
+      'hypercomb-runtime/src/host-packages.ts',
+    ], 'fetch of a pool listing')
+  })
+
+  it('every host shape answers a flagged miss 204 at its outermost answer', () => {
+    // The rule lives once per host, where no route can be the one that
+    // forgot (documentation/public-content-endpoint.md, "The held probe").
+    // Removing any of the three brings the errors back for every hive that
+    // follows that host.
+    const read = (p: string): string => readFileSync(join(ROOT, p), 'utf8')
+    expect(read('hypercomb-relay/blossom-worker/worker.js')).toMatch(/return untransformed\(await quietMiss\(request, response\)\)/)
+    expect(read('hypercomb-relay/relay.js')).toMatch(/createServer\(\(req, res\) => \{\s*quietMisses\(req, res\)/)
+    expect(read('hypercomb-client/crates/serve/src/lib.rs')).toMatch(/reply\.status == 404 && asks_held\(target\)/)
+  })
+})
