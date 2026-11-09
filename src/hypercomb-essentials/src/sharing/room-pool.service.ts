@@ -23,6 +23,7 @@ import { EffectBus } from '@hypercomb/core'
 import { isJoinedHere } from './membership.js'
 import { isLoopbackHost } from './zone-door.js'
 import { nip98Header } from './hive-pointer.js'
+import { readPoolListing } from './pool-listing.js'
 import { listingNames, memberTemplate, readMember, roomPoolAddress, standingMembers, type RoomMember } from './room-pool.js'
 
 export const ROOM_POOL_KEY = '@diamondcoreprocessor.com/RoomPool'
@@ -161,11 +162,11 @@ export class RoomPool extends EventTarget {
     if (pool !== this.#poolOfMembers) { this.#members.clear(); this.#poolOfMembers = pool }
     const base = this.#base(host)
     let names: string[] = []
-    try {
-      const res = await fetch(`${base}/${pool}/`, { signal: AbortSignal.timeout(FETCH_MS) })
-      if (!res.ok) return this.standing()
-      names = listingNames(await res.text())
-    } catch { return this.standing() }
+    // Asked the one quiet way (pool-listing.ts). `fresh`: a room's members
+    // change, and it is read right after a write.
+    const listing = await readPoolListing(base, pool, { timeoutMs: FETCH_MS, fresh: true })
+    if (listing === null) return this.standing()
+    names = listingNames(listing)
     let changed = false
     await Promise.all(names.filter(n => !this.#members.has(n)).map(async (name) => {
       try {

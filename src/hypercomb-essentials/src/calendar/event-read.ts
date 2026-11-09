@@ -9,6 +9,7 @@
 // meeting's own host: the list at sign('rsvp:<event>'), each claim checked.
 
 import { hostBase, readBySig } from '../sharing/derivation-attestation.js'
+import { readPoolListing } from '../sharing/pool-listing.js'
 import {
   coming, eventsPoolAddress, listingNames, parseEvent, readRsvp, rsvpPoolAddress, standingRsvps, withoutSuperseded,
   type EventRecord, type Rsvp,
@@ -24,10 +25,7 @@ export interface ListedEvent {
 const LIST_MS = 8_000
 
 const listAt = async (host: string, pool: string): Promise<string[]> => {
-  try {
-    const res = await fetch(`${hostBase(host)}/${pool}/`, { cache: 'no-store', signal: AbortSignal.timeout(LIST_MS) })
-    return res.ok ? listingNames(await res.text()) : []
-  } catch { return [] }
+  return listingNames(await readPoolListing(hostBase(host), pool, { timeoutMs: LIST_MS }) ?? '')
 }
 
 /** Every meeting the hosts list, once each, with the hosts that list it. */

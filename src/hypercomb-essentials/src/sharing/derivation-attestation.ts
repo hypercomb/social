@@ -15,6 +15,7 @@
 
 import { SignatureService, get, registerPoolMeaning } from '@hypercomb/core'
 import { fetchHiveIndex, setHiveRoot } from './hive-pointer.js'
+import { readPoolListing } from './pool-listing.js'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 export const ATTEST_PREFIX = 'attest:'
@@ -99,8 +100,8 @@ export const readAttestations = async (host: string, record: string): Promise<Ar
   let listed: string[] = []
   try {
     const pool = await registerPoolMeaning(`${ATTEST_PREFIX}${record}`)
-    const res = await fetch(`${hostBase(host)}/${pool}/`, { cache: 'no-store' })
-    if (res.ok) listed = (await res.text()).split('\n').map(line => line.trim().toLowerCase()).filter(line => SIG_RE.test(line))
+    const text = await readPoolListing(hostBase(host), pool)
+    if (text !== null) listed = text.split('\n').map(line => line.trim().toLowerCase()).filter(line => SIG_RE.test(line))
   } catch { /* nobody listed */ }
   const out: Array<{ pubkey: string; sig: string; attestation: Attestation }> = []
   for (const pubkey of listed) {

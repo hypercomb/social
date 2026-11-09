@@ -1864,6 +1864,13 @@ async function servePoolListing(request, env, sig) {
   // A NAME'S PICTURE POOL (its publishers' keys, read the same way). So is
   // an EVENT'S RSVP POOL an organizer opened here, empty or not.
   if (!listed && !await isAttestPool(env, sig) && !await isPicturePool(env, sig) && !await isRsvpPool(env, sig)) {
+    // `?held` (2026-11-09): every word, name and record is an address a hive
+    // derives and asks of every host it follows, so "no pool here" is the
+    // common answer — asked with the flag it is a quiet 204, the same flag
+    // and the same meaning as a sig that is not held.
+    if (new URL(request.url).searchParams.has('held')) {
+      return new Response(null, { status: 204, headers: { ...CORS, 'Cache-Control': 'no-store', 'X-Reason': 'no pool at this address' } })
+    }
     return new Response(request.method === 'HEAD' ? null : 'no pool at this address\n', {
       status: 404, headers: { ...headers, 'X-Reason': 'no pool at this address' },
     })
