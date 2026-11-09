@@ -148,30 +148,30 @@ describe('no page shows the demo hive', () => {
 
 describe('every page says where it goes, once', () => {
   const hrefs = (html: string, part: string): string[] => {
-    const nav = new RegExp(`<nav[^>]*data-part="${part}"[^>]*>([\s\S]*?)</nav>`).exec(html)
-    return nav ? [...nav[1].matchAll(/href="([^"]+)"/g)].map(m => m[1]) : []
+    const nav = new RegExp(`<nav[^>]*data-part="${part}"[^>]*>([^]*?)</nav>`).exec(html)
+    return nav ? [...nav[1].matchAll(/<a\b[^>]*\bhref="([^"]+)"/g)].map(m => m[1]) : []
   }
   for (const b of blocks as { route: string[]; page: string }[]) {
     const at = '/' + b.route.join('/')
-    it(`${at} has no tab row, and every way on it lands on a page`, () => {
-      expect(b.page).not.toMatch(/data-part="tabs"/)
-      for (const href of [...hrefs(b.page, 'ways'), ...hrefs(b.page, 'beside')]) linkTo(href, b.route, paged)
+    it(`${at} has no tab row, no step-in row, and every link on it lands on a page`, () => {
+      expect(b.page).not.toMatch(/data-part="(tabs|ways|beside)"/)
+      for (const href of [...hrefs(b.page, 'tree'), ...hrefs(b.page, 'siblings')]) linkTo(href, b.route, paged)
     })
-    it(`${at}: the menus come first — beside and inside sit above the video`, () => {
+    it(`${at}: the tree is on the left and the siblings sit under the video`, () => {
+      const tree = b.page.indexOf('data-part="tree"')
       const scene = b.page.indexOf('data-part="scene"')
-      expect(scene).toBeGreaterThan(-1)
-      for (const part of ['beside', 'ways']) {
-        const at = b.page.indexOf(`data-part="${part}"`)
-        if (at >= 0) expect(at).toBeLessThan(scene)
-      }
+      const sibs = b.page.indexOf('data-part="siblings"')
+      expect(tree).toBeGreaterThan(-1)
+      expect(tree).toBeLessThan(scene)
+      if (sibs >= 0) expect(sibs).toBeGreaterThan(scene)
+      expect(b.page).toMatch(/aria-label="Full screen"/)
     })
-    it(`${at}: inside goes one level down, beside stays under the same parent`, () => {
-      for (const href of hrefs(b.page, 'ways')) expect(linkTo(href, b.route, paged).split('/').length).toBe(b.route.length + 1)
+    it(`${at}: the tree reaches every page, and the siblings share one parent`, () => {
+      const every = new Set(hrefs(b.page, 'tree').map(h => linkTo(h, b.route, paged)))
+      for (const r of paged as Set<string>) expect(every.has(r)).toBe(true)
       const parent = b.route.slice(0, -1).join('/')
-      for (const href of hrefs(b.page, 'beside')) {
-        const to = linkTo(href, b.route, paged)
-        // previous and next are siblings; the parent link is the one way up
-        expect(to === parent || to.split('/').slice(0, -1).join('/') === parent).toBe(true)
+      for (const href of hrefs(b.page, 'siblings')) {
+        expect(linkTo(href, b.route, paged).split('/').slice(0, -1).join('/')).toBe(parent)
       }
     })
   }

@@ -104,6 +104,18 @@ const waysOf = (route, paged) => {
   return { children, section: siblings, beside }
 }
 
+/** THE TREE MENU (jwize 2026-11-08: "a left hand sidebar menu for the tree"):
+ *  every tile that can be walked to, nested as the tree nests, each marked by
+ *  whether it has a page yet. The same on every page; the page marks where it
+ *  stands. A waiting tile is not in tree.cjs's roots, so it is not here. */
+const menuOf = (paged) => {
+  const walk = (node, at) => {
+    const route = [...at, node.name]
+    return { name: node.name, route, page: paged.has(route.join('/')), children: (node.children || []).map(c => walk(c, route)) }
+  }
+  return (tree.roots || []).filter(r => paged.has(r.name)).map(r => walk(r, []))
+}
+
 /** A WebP or PNG's pixel size, read from its header. */
 const sizeOf = (file) => {
   const b = fs.readFileSync(file)
@@ -196,6 +208,7 @@ const buildBlocks = ({ under = '' } = {}) => {
   const sprite = tour.sprite()
   const routes = pagedRoutes()
   const paged = new Set(routes)
+  const menu = menuOf(paged)
   const blocks = routes
     .filter(key => !prefix || key === prefix || key.startsWith(`${prefix}/`))
     .map(key => {
@@ -209,7 +222,7 @@ const buildBlocks = ({ under = '' } = {}) => {
           title: `${scene.name} · Hypercomb`,
           scene,
           tryPart: block.try || null,
-          ways: waysOf(route, paged),
+          ways: { ...waysOf(route, paged), menu },
           faces,
           sprite,
         }),
