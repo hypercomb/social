@@ -153,10 +153,16 @@ describe('a planned arrival that stalls wakes the rest', () => {
       },
     }
     const emit = (effect: string, payload: unknown): void => { last.set(effect, payload); for (const h of [...(subs.get(effect) ?? [])]) h(payload) }
-    let pending: { run: () => void; at: number } | null = null
+    const pending = new Set<{ run: () => void; at: number }>()
     let now = 0
-    const timers = { set: (run: () => void, ms: number) => (pending = { run, at: now + ms }), clear: () => { pending = null } }
-    const advance = (ms: number): void => { now += ms; if (pending && pending.at <= now) { const p = pending; pending = null; p.run() } }
+    const timers = {
+      set: (run: () => void, ms: number) => { const t = { run, at: now + ms }; pending.add(t); return t },
+      clear: (handle: unknown) => { pending.delete(handle as { run: () => void; at: number }) },
+    }
+    const advance = (ms: number): void => {
+      now += ms
+      for (const t of [...pending].sort((a, b) => a.at - b.at)) if (pending.has(t) && t.at <= now) { pending.delete(t); t.run() }
+    }
     const listeners = (): number => [...subs.values()].reduce((n, set) => n + set.size, 0)
     return { bus, emit, timers, advance, listeners }
   }
@@ -181,7 +187,7 @@ describe('a planned arrival that stalls wakes the rest', () => {
 
   it('no verdict within the grace after the planned bees are in wakes everything, once', () => {
     const h = harness(), woke: string[] = []
-    guardArrival(h.bus, r => woke.push(r), 2500, h.timers)
+    guardArrival(h.bus, r => woke.push(r), 2500, h.timers, 20_000)
     h.advance(10_000)
     expect(woke).toEqual([])                   // the grace counts from the bees being in, not from the start
     h.emit('loader:bees-done', { loaded: 3 })
@@ -191,6 +197,31 @@ describe('a planned arrival that stalls wakes the rest', () => {
     expect(woke).toEqual(['stalled'])
     h.emit('view:arrival', { view: '' })
     expect(woke).toEqual(['stalled'])
+    expect(h.listeners()).toBe(0)
+  })
+
+  it('a loader that never says bees-done and a cold layer that never gives a verdict still wake everything, once', () => {
+    // protocol.hypercomb.com / revolucion.hypercomb.com, 2026-11-09: every planned
+    // bee was a boot bee, so nothing loaded in the background, nothing was said,
+    // and the page stayed black.
+    const h = harness(), woke: string[] = []
+    guardArrival(h.bus, r => woke.push(r), 2500, h.timers, 8000)
+    h.advance(7900)
+    expect(woke).toEqual([])
+    h.advance(200)
+    expect(woke).toEqual(['stalled'])
+    h.advance(60_000)
+    expect(woke).toEqual(['stalled'])
+    expect(h.listeners()).toBe(0)
+  })
+
+  it('the backstop lets go once a view opens', () => {
+    const h = harness(), woke: string[] = []
+    guardArrival(h.bus, r => woke.push(r), 2500, h.timers, 8000)
+    h.advance(3000)
+    h.emit('view:arrival', { view: 'website' })
+    h.advance(60_000)
+    expect(woke).toEqual([])
     expect(h.listeners()).toBe(0)
   })
 
