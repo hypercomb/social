@@ -40,12 +40,16 @@ your hive* is for an operator who already runs a host with the `MAIL_CONFIG` sec
 The copy lives in the hive: each tile's notes are its page, one part per note, in the note grammar
 `scripts/bridge/_hosting-site/generate.cjs` documents. `scripts/bridge/_email-site/notes.json` is only the
 first draft the notes grew from. To change a page, change its note in the hive (`unfile` + `file`), then run,
-from `src/`:
+from `src/`, in PowerShell:
 
-```bash
-MSYS_NO_PATHCONV=1 node scripts/bridge/_hosting-site/generate.cjs --root /email --dry
-MSYS_NO_PATHCONV=1 node scripts/bridge/_hosting-site/generate.cjs --root /email
+```powershell
+node scripts/bridge/_hosting-site/generate.cjs --root /email --dry
+node scripts/bridge/_hosting-site/generate.cjs --root /email
 ```
+
+In Git Bash, put `MSYS_NO_PATHCONV=1 ` in front of each, or Git Bash rewrites `/email` into a Windows path.
+PowerShell has no such rewrite and refuses the prefix. With nothing changed in the notes, the run says every tile
+already wears this build and changes nothing.
 
 The generator dresses each changed tile with its page (`website page`), keeps `/email` opening as a website,
 and records the pass as one restorable step (`builds email-pages-<sig>`). Then publish again, which the
