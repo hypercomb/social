@@ -107,7 +107,7 @@
 import { CHILD_SLOTS, EffectBus, NIP98_KIND, SignatureService, SWARM_LIFECYCLE_KIND, registerPoolMeaning, spellPoolMeaning, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
 import { decorationClosureSigs, nestedResourceSigs } from './decoration-closure.js'
 import { isJoinedHere, ownZone } from './membership.js'
-import { foldContentLabel, HOST_DOMAIN_RE, isLoopbackHost, isPublishNode, legacyContentFace } from './zone-door.js'
+import { foldContentLabel, HOST_DOMAIN_RE, isLoopbackHost, isPublishNode, legacyContentFace, siteZoneOf } from './zone-door.js'
 import { swarmHosts, type SwarmHostChoice, type SwarmHostResolver, type SwarmHostSource } from './swarm-hosts.js'
 
 export type HostSyncKind = 'layer' | 'bee' | 'dependency' | 'resource'
@@ -958,8 +958,29 @@ export class HostSyncService extends EventTarget {
       if (!at) specs.push({ domain, self: false, swarm: false, marker: false, relay: false })
       else if (at.swarm) at.marker = true
     }
-    this.#noteTargetSet(specs)
-    return specs
+    const folded = HostSyncService.#foldSites(specs)
+    this.#noteTargetSet(folded)
+    return folded
+  }
+
+  /** A SITE IS NOT A TARGET (zone-door siteZoneOf). A target that sits under
+   *  another target (`protocol.hypercomb.com` beside `hypercomb.com`) is a
+   *  published site on that zone: the worker refuses every write there, at the
+   *  preflight, and serves it from the zone's own store. Its roles join the
+   *  zone's target, which keeps its place in the drain order. */
+  static #foldSites(specs: TargetSpec[]): TargetSpec[] {
+    // The meeting relay's heap is no zone store: it neither folds nor takes a fold.
+    const domains = specs.filter(s => !s.relay).map(s => s.domain)
+    const out: TargetSpec[] = []
+    for (const spec of specs) {
+      const zone = spec.relay ? spec.domain : siteZoneOf(spec.domain, domains)
+      const into = zone === spec.domain ? null : specs.find(s => s.domain === zone && !s.relay) ?? null
+      if (!into) { out.push(spec); continue }
+      into.self ||= spec.self
+      into.swarm ||= spec.swarm
+      into.marker ||= spec.marker
+    }
+    return out
   }
 
   /** The target set the memos were judged against, as a key. */
