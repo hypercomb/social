@@ -47,7 +47,7 @@
 
 import { EffectBus } from '@hypercomb/core'
 import { hostZone, hostsOfBranchKnown } from './community-hosts.js'
-import { foldContentLabel, isLoopbackHost } from './zone-door.js'
+import { foldContentLabel, isLoopbackHost, writeDoorsOf } from './zone-door.js'
 
 /** Where a page's hosts came from. 'pool' and 'relay' are retired tiers
  *  (2026-10-11 — nothing answers them now), kept so an older status payload
@@ -410,8 +410,9 @@ export class SwarmHostResolver extends EventTarget {
   // ── caches ──────────────────────────────────────────────────────────────
 
   /** Raw zones → write doors this page may use: the zone root (never a
-   *  `content.` face), loopback only from loopback, a port kept (every door
-   *  is one the participant named). */
+   *  `content.` face, never a site under another door named here), loopback
+   *  only from loopback, a port kept (every door is one the participant
+   *  named). */
   readonly #usable = (zones: readonly string[]): string[] => {
     const local = this.#deps.originLoopback()
     const out: string[] = []
@@ -424,7 +425,8 @@ export class SwarmHostResolver extends EventTarget {
       if (loopback && !local) continue
       if (!out.includes(door)) out.push(door)
     }
-    return out
+    // A site named beside its zone writes to the zone (zone-door siteZoneOf).
+    return writeDoorsOf(out)
   }
 
   // ── the pass-overs this tab remembers ───────────────────────────────────

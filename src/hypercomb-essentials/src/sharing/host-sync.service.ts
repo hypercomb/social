@@ -107,7 +107,7 @@
 import { CHILD_SLOTS, EffectBus, NIP98_KIND, SignatureService, SWARM_LIFECYCLE_KIND, registerPoolMeaning, spellPoolMeaning, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
 import { decorationClosureSigs, nestedResourceSigs } from './decoration-closure.js'
 import { isJoinedHere, ownZone } from './membership.js'
-import { foldContentLabel, HOST_DOMAIN_RE, isLoopbackHost, isPublishNode, legacyContentFace } from './zone-door.js'
+import { foldContentLabel, HOST_DOMAIN_RE, isLoopbackHost, isPublishNode, legacyContentFace, siteZoneOf } from './zone-door.js'
 import { swarmHosts, type SwarmHostChoice, type SwarmHostResolver, type SwarmHostSource } from './swarm-hosts.js'
 
 export type HostSyncKind = 'layer' | 'bee' | 'dependency' | 'resource'
@@ -790,6 +790,17 @@ export class HostSyncService extends EventTarget {
       if (!this.#publicRoots.has(root)) continue
       for (const segments of pages.values()) add(this.#resolver.hostsFor(segments))
     }
+    // One page may name a site and another its zone: across the whole set a
+    // site folds into its zone too (zone-door siteZoneOf), so nothing reading
+    // the swarm's hosts — the drain, the broker, the status line — asks it.
+    const doors = [...out.keys()]
+    for (const door of doors) {
+      const zone = siteZoneOf(door, doors)
+      const into = zone === door ? undefined : out.get(zone)
+      if (!into) continue
+      for (const source of out.get(door)!) into.add(source)
+      out.delete(door)
+    }
     this.#swarmSourcesMemo = { key, value: out }
     return out
   }
@@ -958,8 +969,29 @@ export class HostSyncService extends EventTarget {
       if (!at) specs.push({ domain, self: false, swarm: false, marker: false, relay: false })
       else if (at.swarm) at.marker = true
     }
-    this.#noteTargetSet(specs)
-    return specs
+    const folded = HostSyncService.#foldSites(specs)
+    this.#noteTargetSet(folded)
+    return folded
+  }
+
+  /** A SITE IS NOT A TARGET (zone-door siteZoneOf). A target that sits under
+   *  another target (`protocol.hypercomb.com` beside `hypercomb.com`) is a
+   *  published site on that zone: the worker refuses every write there, at the
+   *  preflight, and serves it from the zone's own store. Its roles join the
+   *  zone's target, which keeps its place in the drain order. */
+  static #foldSites(specs: TargetSpec[]): TargetSpec[] {
+    // The meeting relay's heap is no zone store: it neither folds nor takes a fold.
+    const domains = specs.filter(s => !s.relay).map(s => s.domain)
+    const out: TargetSpec[] = []
+    for (const spec of specs) {
+      const zone = spec.relay ? spec.domain : siteZoneOf(spec.domain, domains)
+      const into = zone === spec.domain ? null : specs.find(s => s.domain === zone && !s.relay) ?? null
+      if (!into) { out.push(spec); continue }
+      into.self ||= spec.self
+      into.swarm ||= spec.swarm
+      into.marker ||= spec.marker
+    }
+    return out
   }
 
   /** The target set the memos were judged against, as a key. */
@@ -2356,7 +2388,7 @@ export class HostSyncService extends EventTarget {
         // host despite the breaker).
         if (Date.now() < this.#probesPausedUntil) { this.#verifiedOnHost.add(sig); return true }
         const url = `${HostSyncService.#schemeFor(host)}://${host}/${sig}`
-        const res = await HostSyncService.#fetchWithin(url, { method: 'HEAD', cache: 'no-store' })
+        const res = await HostSyncService.#probe(url, { method: 'HEAD', cache: 'no-store' })
         if (await this.#servesSig(res, url, sig)) { this.#probeFailStreak = 0; this.#verifiedOnHost.add(sig); return true }
         // 404 — or a page where bytes should be (an SPA fallback) — is the
         // host ASSERTING the sig is not served: the receipt lied.
@@ -3239,7 +3271,7 @@ export class HostSyncService extends EventTarget {
       await this.#acquireVerifySlot()
       try {
         if (Date.now() < this.#servedPausedUntil) return 'unknown'
-        const res = await HostSyncService.#fetchWithin(`${HostSyncService.#schemeFor(h)}://${h}/${s}`, { method: 'HEAD', cache: 'no-store' })
+        const res = await HostSyncService.#probe(`${HostSyncService.#schemeFor(h)}://${h}/${s}`, { method: 'HEAD', cache: 'no-store' })
         if (res.ok) { this.#servedFailStreak = 0; return 'served' }
         if (res.status === 404) { this.#servedFailStreak = 0; return 'absent' } // host alive and asserting
         this.#noteServedFailure()
@@ -3415,7 +3447,7 @@ export class HostSyncService extends EventTarget {
     const threw = (this.#putsThrew.get(host) ?? 0) + 1
     this.#putsThrew.set(host, threw)
     if (threw < 2) return unreachable
-    try { await HostSyncService.#fetchWithin(url, { method: 'HEAD', cache: 'no-store' }) } catch { return unreachable }
+    try { await HostSyncService.#probe(url, { method: 'HEAD', cache: 'no-store' }) } catch { return unreachable }
     return { status: 'refused', reason: `${host} answers, but lets no upload from this page through`, threw: true }
   }
 
@@ -3482,6 +3514,26 @@ export class HostSyncService extends EventTarget {
     const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS + Math.ceil(sentBytes / 102_400) * TIMEOUT_PER_100KB_MS)
     try { return await fetch(url, { ...init, signal: ctrl.signal }) }
     finally { clearTimeout(timer) }
+  }
+
+  /** THE PROBE — "do you hold this?" asked with `?held` (2026-11-09: "we
+   *  can't afford to ever have any errors popping up"). A browser prints
+   *  every 404 as a red console error, and this question is asked of every
+   *  host before an upload, by the share gate, the receipt audit and publish
+   *  status. A host that knows the flag answers a miss 204 instead; one that
+   *  does not answers 404 as before. Either way the caller sees a 404 for a
+   *  miss, so every reading of the answer below stays as it was. A hit is
+   *  answered exactly as without the flag. */
+  static #probeUrl(url: string): string {
+    return `${url}${url.includes('?') ? '&' : '?'}held`
+  }
+
+  static #asMiss(res: Response): Response {
+    return res.status === 204 ? new Response(null, { status: 404, statusText: 'not held' }) : res
+  }
+
+  static async #probe(url: string, init: RequestInit): Promise<Response> {
+    return HostSyncService.#asMiss(await HostSyncService.#fetchWithin(HostSyncService.#probeUrl(url), init))
   }
 
   /** Record that a target serves a sig. The receipt is a memo of the
@@ -3654,7 +3706,7 @@ export class HostSyncService extends EventTarget {
     try {
       if (Date.now() < health.pausedUntil) return false // re-check after the slot wait (burst)
       const url = `${HostSyncService.#schemeFor(host)}://${host}${this.#pathFor(sig)}`
-      const res = await HostSyncService.#fetchWithin(url, { method: 'HEAD', cache: 'no-store' })
+      const res = await HostSyncService.#probe(url, { method: 'HEAD', cache: 'no-store' })
       this.#answeredHosts.add(host) // whatever it said, the path to it works
       if (res.ok || res.status === 404) health.streak = 0 // the host is alive and ASSERTING
       if (await this.#servesSig(res, url, sig)) {
@@ -3727,7 +3779,7 @@ export class HostSyncService extends EventTarget {
       // The host checked every body against its name when it took it; a page
       // (an SPA fallback answering 200) is not a held file.
       try {
-        const there = await (await HostSyncService.#bounded()).fetchWithDeadline(url, { method: 'HEAD', cache: 'no-store' })
+        const there = HostSyncService.#asMiss(await (await HostSyncService.#bounded()).fetchWithDeadline(HostSyncService.#probeUrl(url), { method: 'HEAD', cache: 'no-store' }))
         if (there.ok && !(there.headers.get('content-type') ?? '').toLowerCase().includes('text/html')) { held++; continue }
       } catch { /* not reachable yet — the PUT below says so */ }
       const bytes = await bytesOf(sig)

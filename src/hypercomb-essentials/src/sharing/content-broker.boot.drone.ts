@@ -1509,7 +1509,11 @@ export class ContentBrokerDrone extends Drone {
       let flatMissed = false
       for (const tryPath of tryPaths) {
         if (cancelled.aborted) return null
-        const url = `${scheme}://${host}${tryPath}`
+        // The flat shape asks `?held` (2026-11-09): a host that knows the flag
+        // answers a miss 204 instead of a 404 the console prints as a red
+        // error; a hit is answered exactly as without it, and a host that
+        // ignores the flag answers as before. A 204 reads as the 404 it means.
+        const url = `${scheme}://${host}${tryPath}${tryPath === flatPath ? '?held' : ''}`
         // Bounded probe: a dead/hung host must cost at most
         // HTTP_PROBE_TIMEOUT_MS, never the browser's connect timeout —
         // callers on the render path await this cascade.
@@ -1526,10 +1530,11 @@ export class ContentBrokerDrone extends Drone {
           // was discarding a free cache tier and re-billing the origin for
           // bytes we had already downloaded. The legacy typed shape keeps
           // `no-store` — it is not guaranteed immutable on static layouts.
-          const res = await fetch(url, {
+          const answered = await fetch(url, {
             cache: tryPath === flatPath ? 'default' : 'no-store',
             signal: probeCtrl.signal,
           })
+          const res = answered.status === 204 ? new Response(null, { status: 404, statusText: 'not held' }) : answered
           sawResponse = true
           if (!res.ok) {
             if (tryPath === flatPath && res.status === 404) flatMissed = true

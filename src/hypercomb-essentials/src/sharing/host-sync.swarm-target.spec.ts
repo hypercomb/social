@@ -312,8 +312,9 @@ const makeHost = (options: HostOptions = {}) => {
 }
 
 type Host = ReturnType<typeof makeHost>
+/** The addresses asked, the probe flag (`?held`) set aside. */
 const calls = (host: Host, method: string): string[] =>
-  host.fetch.mock.calls.filter(([, init]) => (init?.method ?? 'GET') === method).map(([url]) => String(url))
+  host.fetch.mock.calls.filter(([, init]) => (init?.method ?? 'GET') === method).map(([url]) => String(url).replace(/\?held$/, ''))
 
 // ── the target ─────────────────────────────────────────────────────────────
 
@@ -647,7 +648,7 @@ describe('reads try the advertised hosts first, then this tab\'s swarm hosts', (
     // The peer's layer event said where its bytes went.
     broker.noteDomainsForSig(s, ['peer-host.example'])
     expect(Array.from((await broker.fetchBySig(s, 'resource'))!)).toEqual(Array.from(bytes))
-    expect(String(fetch.mock.calls[0]?.[0])).toBe(`https://peer-host.example/${s}`)
+    expect(String(fetch.mock.calls[0]?.[0]).replace(/\?held$/, '')).toBe(`https://peer-host.example/${s}`)
     expect(fetch.mock.calls.some(([url]) => String(url).includes('jwize.com'))).toBe(false)
     expect(fetch.mock.calls.some(([url]) => String(url).includes(location.host))).toBe(false)
     registry.delete(HOST_SYNC_KEY)
@@ -665,7 +666,7 @@ describe('reads try the advertised hosts first, then this tab\'s swarm hosts', (
     const broker = new ContentBrokerDrone()
     broker.noteDomainsForSig(s, ['pointblank.example'])
     expect(Array.from((await broker.fetchBySig(s, 'resource'))!)).toEqual(Array.from(bytes))
-    expect(fetch.mock.calls.map(([url]) => String(url))).toEqual([`https://pointblank.example/${s}`])
+    expect(fetch.mock.calls.map(([url]) => String(url).replace(/\?held$/, ''))).toEqual([`https://pointblank.example/${s}`])
     registry.delete(HOST_SYNC_KEY)
   })
 
@@ -682,7 +683,7 @@ describe('reads try the advertised hosts first, then this tab\'s swarm hosts', (
     const broker = new ContentBrokerDrone()
     broker.noteDomainsForSig(s, ['gone.example'])
     expect(Array.from((await broker.fetchBySig(s, 'resource'))!)).toEqual(Array.from(bytes))
-    const urls = fetch.mock.calls.map(([url]) => String(url))
+    const urls = fetch.mock.calls.map(([url]) => String(url).replace(/\?held$/, ''))
     expect(urls[0]).toBe(`https://gone.example/${s}`)
     expect(urls.indexOf(`https://hypercomb.com/${s}`)).toBeGreaterThan(0)
     registry.delete(HOST_SYNC_KEY)
@@ -699,7 +700,7 @@ describe('reads try the advertised hosts first, then this tab\'s swarm hosts', (
     vi.stubGlobal('fetch', fetch)
     const broker = new ContentBrokerDrone()
     expect(Array.from((await broker.fetchBySig(s, 'resource'))!)).toEqual(Array.from(bytes))
-    expect(String(fetch.mock.calls[0]?.[0])).toBe(`https://hypercomb.com/${s}`)
+    expect(String(fetch.mock.calls[0]?.[0]).replace(/\?held$/, '')).toBe(`https://hypercomb.com/${s}`)
     expect(fetch.mock.calls.some(([url]) => String(url).includes('jwize.com'))).toBe(false)
     registry.delete(HOST_SYNC_KEY)
   })

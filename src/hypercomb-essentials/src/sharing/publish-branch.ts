@@ -50,7 +50,7 @@ import {
 import { isReservedRootKey } from './hive-link.js'
 import {
   ENTRANCES_MAX, ENTRANCE_POWERS, boundLineage, creationUrl, entranceHost, foldContentLabel, isPoweredEntrance, isPublishNode, ownAddressHost,
-  addressHolder, ownAddressRefusal, ownLabelOn, readEntrance, topOpenIn, readEntrances, withOwnAddress, zoneDoor, type ZoneEntrance, type ZoneEntranceFrom,
+  addressHolder, ownAddressRefusal, ownLabelOn, readEntrance, topOpenIn, readEntrances, withOwnAddress, writeDoorsOf, zoneDoor, type ZoneEntrance, type ZoneEntranceFrom,
 } from './zone-door.js'
 import type { ModuleAssessmentRecord } from '../assistant/module-review.js'
 
@@ -262,7 +262,8 @@ export const nodesFor = async (segs: readonly string[], hostSync: HostSyncLike |
     ...(hostSync?.isEnabled?.() && self ? [self] : []),
     ...(hostSync?.isPublicHostEnabled?.() ? [zoneDoor(hostSync.publicHostDomain?.() || '')] : []),
   ]
-  return [...new Set([...branchZones.map(zoneDoor), ...standing])].filter(Boolean)
+  // A site named beside its zone writes to the zone (zone-door siteZoneOf).
+  return writeDoorsOf([...branchZones.map(zoneDoor), ...standing].filter(Boolean))
 }
 
 /** THE DOORS A TURN-OFF READS THE INDEX THROUGH: the branch's nodes, then the
@@ -272,7 +273,7 @@ export const nodesFor = async (segs: readonly string[], hostSync: HostSyncLike |
  *  write was refused as index-unsafe while visitors went on reading the same
  *  verified index there, and a retry could never recover, the mark being gone. */
 export const indexDoors = (nodes: readonly string[], left: readonly string[] | undefined): string[] =>
-  [...new Set([...nodes, ...(left ?? []).map(z => zoneDoor(normalizeHost(z))).filter(door => door && isPublishNode(door))])]
+  writeDoorsOf([...nodes, ...(left ?? []).map(z => zoneDoor(normalizeHost(z))).filter(door => door && isPublishNode(door))])
 
 /** Walk the doors for the index. A verified index at ANY door wins: a door that
  *  answers 404 may simply be one that keeps no index (jwize.com's apex), and
@@ -679,7 +680,8 @@ export async function confirmPublished(
   const sync = hostSync ?? get<HostSyncLike>(HOST_SYNC_KEY)
   const deadline = Date.now() + CONFIRM_DEADLINE_MS
   for (;;) {
-    const read = await fetchHiveIndex(host, pubkey)
+    // Fresh: a miss remembered before this publish must not hide the index it just wrote.
+    const read = await fetchHiveIndex(host, pubkey, undefined, { fresh: true })
     if (read.ok && read.manifest.roots[key] === sealed) {
       // The index is caught up. Now the bytes.
       const served = await sync?.probeServed?.(host, sealed)
@@ -830,7 +832,9 @@ type IndexEdit = (manifest: HiveManifest) =>
  *  are; its next publish reconciles them. Answers the doors it could not reach. */
 async function editLeftDoors(left: readonly string[] | undefined, written: string, pubkey: string, edit: IndexEdit): Promise<string[]> {
   const done = foldContentLabel(written)
-  const doors = [...new Set((left ?? []).map(z => zoneDoor(normalizeHost(z))).filter(Boolean))]
+  // A site under the host just written is served from that host's store —
+  // the edit is already there, and the site itself refuses writes.
+  const doors = writeDoorsOf([done, ...(left ?? []).map(z => zoneDoor(normalizeHost(z))).filter(Boolean)])
     .filter(door => isPublishNode(door) && foldContentLabel(door) !== done)
   const unreached: string[] = []
   for (const door of doors) {
