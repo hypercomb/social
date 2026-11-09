@@ -7,6 +7,7 @@
 import { Component, computed, effect, ElementRef, HostBinding, inject, input, output, signal, ViewChild, type AfterViewInit, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import { ENABLEMENT_CHANGED, isWordSwitchedOff } from '../features-viewer/behavior-enablement'
 import { TextScaleComponent, surfaceScale, stepSurfaceScale } from '../text-scale/text-scale.component'
 import { RailParticipantsComponent } from '../participants/rail-participants.component'
 import { inSwarm } from '../participants/participants-roster'
@@ -349,6 +350,15 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
    *  while the participants' hive shows. */
   readonly meetingState = input<'none' | 'live' | 'in'>('none')
   readonly meetingOpen = input<boolean>(false)
+
+  /** A WORD'S BUTTON LEAVES WITH ITS LIGHT. The chat and meeting buttons are
+   *  doors to their words' desks, and a word switched off in Beehaviors takes
+   *  its door with it (features-viewer/behavior-enablement.ts). Read again on
+   *  every flip. */
+  readonly #lights = signal(0)
+  readonly #offLights = EffectBus.on(ENABLEMENT_CHANGED, () => this.#lights.update(n => n + 1))
+  readonly chatLit = computed(() => { this.#lights(); return !isWordSwitchedOff('chat') })
+  readonly meetingLit = computed(() => { this.#lights(); return !isWordSwitchedOff('meeting') })
   readonly chatLabel = input<string>('chat')
 
   /** The Beehaviors window's open state — lights the toggle that sits
@@ -770,6 +780,7 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.#offLights()
     this.#reflowTeardown?.()
     this.keepMenu()
   }

@@ -104,7 +104,7 @@ async function main() {
       await page.waitForTimeout(4000)
     }
     if (!(await page.locator('.features-scroll.store').count())) {
-      await page.locator('.features-panel .scope-toggle').click()
+      await page.locator('.features-panel .features-tab:nth-of-type(2)').click()
       await page.waitForTimeout(2500)
     }
     await shot('00-pool')

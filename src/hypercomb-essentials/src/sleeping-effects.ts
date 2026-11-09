@@ -18,6 +18,7 @@ export const sleepers: readonly Sleeper[] = [
   { wakesOn: ["parts:distribute-visual"], load: () => import('./assistant/visual-distribution.drone') },
   { command: "adopt", description: "Take a peer's tile into your hive — the one tile, or with `branch`, everything under it", load: () => import('./commands/adopt.queen') },
   { command: "arrange", description: "Toggle icon arrangement mode on the tile overlay", load: () => import('./commands/arrange.queen') },
+  { command: "beehaviors", description: "Open Beehaviors: switch any behaviour, word or desk on or off", load: () => import('./commands/beehaviors.queen') },
   { command: "behavior", description: "Bind a behaviour to the tile it belongs to — it shows there and nowhere else", load: () => import('./commands/behavior.queen') },
   { command: "brood", description: "Automatons this hive is holding but will not run — read them, accept one by hand, or set what gets held", load: () => import('./commands/brood.queen') },
   { command: "builds", description: "Build revisions for this subtree — record the state after a build pass, list them, restore one", load: () => import('./commands/builds.queen') },

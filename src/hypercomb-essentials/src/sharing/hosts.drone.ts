@@ -41,6 +41,7 @@ import {
   type HostGroup,
 } from './community-hosts.js'
 import { updateScout } from './update-scout.service.js'
+import { closeWhenDark, refuseWhileDark } from '../commands/word-enablement.js'
 import { ATTESTATION_IOC_KEY } from '@hypercomb/core'
 import { packageAttestation } from './package-attestation.js'
 
@@ -108,6 +109,9 @@ export interface HostsRenderPayload {
   loaded: boolean
 }
 
+/** The word the desk belongs to (commands/word-enablement.ts). */
+const HOSTS_WORD = 'hosts'
+
 export class HostsDrone extends Drone {
 
   readonly namespace = 'diamondcoreprocessor.com'
@@ -146,7 +150,11 @@ export class HostsDrone extends Drone {
       // panel back. `isWindowShowing` is the panel's own registration in the
       // window session, dropped the moment it stops showing — so parked and
       // closed read alike, which is exactly what the participant means.
-      this.#open = !isWindowShowing('hosts-panel')
+      const opening = !isWindowShowing('hosts-panel')
+      // THE DESK IS PART OF ITS WORD (commands/word-enablement.ts): while
+      // `hosts` is switched off in Beehaviors, no door opens it.
+      if (opening && refuseWhileDark(HOSTS_WORD)) return
+      this.#open = opening
       this.#emit()
       if (this.#open) { this.#loadView(); void this.#read() }
     })
@@ -156,6 +164,7 @@ export class HostsDrone extends Drone {
     // be parked while its drone remains open; toggling from Publish would then
     // close the very directory the participant asked to see.
     this.onEffect('hosts:open', () => {
+      if (refuseWhileDark(HOSTS_WORD)) return
       this.#open = true
       this.#emit()
       this.#loadView()
@@ -175,6 +184,12 @@ export class HostsDrone extends Drone {
     if (reopening()) this.#loadView()
 
     this.onEffect('hosts:close', () => {
+      if (!this.#open) return
+      this.#open = false
+      this.#emit()
+    })
+    // Switched off while open: the desk goes with its word.
+    closeWhenDark(HOSTS_WORD, () => {
       if (!this.#open) return
       this.#open = false
       this.#emit()

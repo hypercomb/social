@@ -25,3 +25,38 @@ describe('seedDarkOnFreshInstall', () => {
     expect(isKindGloballyOff('visual:postit:note')).toBe(false)
   })
 })
+
+// A WORD'S LIGHT, as the shell's own surfaces read it — the chat window, the
+// rail's chat and meeting buttons, the bar's hosts and comfy launchers. They
+// are all the build's, so a word is off exactly when the participant
+// switched it off, which the writer records on the off-list in the same
+// gesture as the on-list.
+import { isWordSwitchedOff, GLOBAL_OFF_KEY } from './behavior-enablement'
+
+describe('isWordSwitchedOff', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    delete document.documentElement.dataset['hypercombMode']
+  })
+
+  it('reads a word lit on a hive that started dark — nothing switched it off', () => {
+    seedDarkOnFreshInstall()
+    expect(isWordSwitchedOff('chat')).toBe(false)
+  })
+
+  it('reads it off once the roster switches it off, and on again once it is lit', () => {
+    seedDarkOnFreshInstall()
+    setKindGlobalOn('word:chat', false)
+    expect(isWordSwitchedOff('chat')).toBe(true)
+    expect(isWordSwitchedOff('/Chat')).toBe(true)
+    expect(isWordSwitchedOff('meeting')).toBe(false)
+    setKindGlobalOn('word:chat', true)
+    expect(isWordSwitchedOff('chat')).toBe(false)
+  })
+
+  it('has no roster to consult on a published visitor shell', () => {
+    localStorage.setItem(GLOBAL_OFF_KEY, JSON.stringify(['word:chat']))
+    document.documentElement.dataset['hypercombMode'] = 'visitor'
+    expect(isWordSwitchedOff('chat')).toBe(false)
+  })
+})

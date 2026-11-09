@@ -144,7 +144,7 @@ async function main() {
     }
 
     // ── POOL SCOPE ──────────────────────────────────────────────────────
-    await page.locator('.features-panel .scope-toggle').click()
+    await page.locator('.features-panel .features-tab:nth-of-type(2)').click()
     await page.waitForTimeout(2500)
     await shot('10-pool')
     rows = await page.evaluate(ROW_SNAP, 'store')

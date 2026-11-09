@@ -165,69 +165,80 @@ $row-pad: 0.72rem;
   }
 }
 
-// ── SCOPE STRIP (under the header) ────────────────────────────────
-// WHAT the local list shows (two kind glyphs, left) and WHERE you read
-// (the scope toggle, right). A kind glyph wears ITS OWN colour lit and
-// nothing at all dim — no box; hover brightens toward ink, never toward
-// the hue, so the one you are about to pick never looks picked already.
-.features-scope {
+// ── TABS + FILTER (under the header) ─────────────────────────────
+// WHERE you read — Here or Everywhere, two tabs named in words — and WHAT
+// the list shows — All, Views or Not views, one choice of three on both
+// tabs. The lit tab carries the accent underline; the lit filter wears its
+// own hue, the accent, or for Views the same blue the view rows stand on,
+// so the filter and the thing filtered read as one.
+.features-tabs {
   display: flex;
-  align-items: center;
-  gap: 0.5em;
-  padding: 0.6rem $gutter 0.25rem;
+  gap: 0.25rem;
+  padding: 0.45rem $gutter 0;
+  border-bottom: 1px solid rgba(var(--hc-panel-ink), 0.08);
 }
 
-.scope-kinds {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 0.3em;
-}
-
-.scope-kind {
-  display: grid;
-  place-items: center;
-  width: 2rem;
-  height: 2rem;
-  padding: 0;
+.features-tab {
+  flex: 1 1 0;
+  margin-bottom: -1px;
+  padding: 0.45rem 0.5rem 0.5rem;
   border: 0;
+  border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--hc-window-ink-quiet);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
   cursor: pointer;
-  transition: color 140ms ease;
-
-  .mat-sym { font-size: 1.05em; line-height: 1; }
-
-  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.6); outline-offset: 2px; }
+  transition: color 140ms ease, border-color 140ms ease;
 
   &:hover { color: var(--hc-window-ink-plain); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.6); outline-offset: -2px; }
 
-  &.behaviors.on { color: rgb(var(--acc)); }
-  &.views.on { color: tw.ink($view-ground); }
+  &.on {
+    color: var(--hc-window-ink-plain);
+    border-bottom-color: rgb(var(--acc));
+  }
 }
 
-// ONE glyph on the far side: the scope toggle. Plain chrome on a layer,
-// lit in the pool — the pool is the state you leave, so it says so.
-.scope-toggle {
-  flex: 0 0 auto;
-  margin-left: auto;   // holds the right gutter with or without the kinds
-  display: grid;
-  place-items: center;
-  width: 2rem;
-  height: 2rem;
-  padding: 0;
-  border: 0;
+.features-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0.55rem $gutter 0.35rem;
+}
+
+.features-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid rgba(var(--hc-panel-ink), 0.1);
+  border-radius: 999px;
   background: transparent;
   color: var(--hc-window-ink-quiet);
+  font: inherit;
+  font-size: 0.72rem;
   cursor: pointer;
-  transition: color 140ms ease;
+  transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
 
-  .mat-sym { font-size: 1.05em; line-height: 1; }
+  .mat-sym { font-size: 0.9rem; line-height: 1; }
 
-  &:hover { color: var(--hc-window-ink-plain); }
+  &:hover { color: var(--hc-window-ink-plain); border-color: rgba(var(--hc-panel-ink), 0.18); }
   &:focus-visible { outline: 1px solid rgba(var(--acc), 0.6); outline-offset: 2px; }
 
-  &.pool { color: rgb(var(--acc)); }
+  &.on {
+    color: rgb(var(--acc));
+    border-color: rgba(var(--acc), 0.45);
+    background: rgba(var(--acc), 0.08);
+  }
+
+  &.on[data-lens='views'] {
+    color: tw.ink($view-ground);
+    border-color: color-mix(in srgb, currentColor 45%, transparent);
+    background: color-mix(in srgb, currentColor 8%, transparent);
+  }
 }
 
 // ── search ────────────────────────────────────────────────────────
@@ -878,6 +889,24 @@ $path-fail: #e08a8a;     // failed terminal
 .features-row:hover .feature-cmd,
 .features-row:focus-within .feature-cmd { opacity: 1; }
 
+// A WORD's row is named by the word as it is typed, so its chip IS the
+// name: shown at rest, and at the size of a name.
+.feature-cmd.word {
+  margin-left: 0;
+  font-size: 0.74rem;
+  opacity: 1;
+}
+
+// A light that cannot go out — the way back to every other one. Lit, quiet,
+// and it says why it does not switch.
+.features-row.fixed { cursor: default; }
+
+.feature-fixed {
+  font-size: 0.6rem;
+  letter-spacing: 0.03em;
+  color: var(--hc-window-ink-quiet);
+}
+
 // A behaviour whose module hasn't arrived. Provenance, not an error —
 // plain quiet words, no box.
 .feature-awaiting {
@@ -1138,7 +1167,8 @@ $path-fail: #e08a8a;     // failed terminal
   }
 
   // The same set of edges moves together — one gutter, narrower.
-  .features-scope,
+  .features-tabs,
+  .features-filter,
   .features-scroll,
   .features-selection,
   .bulk-bar,
@@ -1159,7 +1189,8 @@ $path-fail: #e08a8a;     // failed terminal
   // WHILE THERE IS A DECISION TO MAKE, THE DECISION IS THE PAGE.
   .features-panel.reviewing {
     .features-header,
-    .features-scope,
+    .features-tabs,
+    .features-filter,
     .features-searchbar,
     .features-selection,
     .bulk-bar,

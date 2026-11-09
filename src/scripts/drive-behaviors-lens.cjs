@@ -40,8 +40,9 @@ const SNAP = () => {
   const rows = Array.from(document.querySelectorAll('.features-scroll .features-row'))
   return {
     panel: !!q('.features-panel'),
-    behaviorsLit: !!q('.scope-kind.behaviors.on'),
-    viewsLit: !!q('.scope-kind.views.on'),
+    behaviorsLit: !!q('.features-filter-btn[data-lens="all"].on'),
+    viewsLit: !!q('.features-filter-btn[data-lens="views"].on'),
+    otherLit: !!q('.features-filter-btn[data-lens="other"].on'),
     rows: rows.length,
     views: rows.filter(r => r.classList.contains('view')).length,
     labels: rows.map(r => (r.querySelector('.feature-name')?.textContent ?? '').trim()).slice(0, 60),
@@ -90,7 +91,7 @@ async function main() {
     const viewsInWhole = s.views
 
     // ── VIEWS NARROWS THE SAME LIST ───────────────────────────────────
-    await page.locator('.features-panel .scope-kind.views').click()
+    await page.locator('.features-panel .features-filter-btn[data-lens="views"]').click()
     await page.waitForTimeout(1500)
     await shot('05-views')
     s = await page.evaluate(SNAP)
@@ -101,7 +102,7 @@ async function main() {
     const narrow = s.rows
 
     // ── the lit one is INERT ──────────────────────────────────────────
-    await page.locator('.features-panel .scope-kind.views').click()
+    await page.locator('.features-panel .features-filter-btn[data-lens="views"]').click()
     await page.waitForTimeout(1200)
     s = await page.evaluate(SNAP)
     check('clicking the lit button changes nothing', s.viewsLit && !s.behaviorsLit && s.rows === narrow,
@@ -109,17 +110,26 @@ async function main() {
     check('the list can never go empty', s.rows > 0)
 
     // ── BEEHAVIORS IS THE SUPERSET ────────────────────────────────────
-    await page.locator('.features-panel .scope-kind.behaviors').click()
+    await page.locator('.features-panel .features-filter-btn[data-lens="all"]').click()
     await page.waitForTimeout(1500)
     await shot('10-behaviors')
     s = await page.evaluate(SNAP)
-    check('beehaviors lit', s.behaviorsLit)
+    check('all lit', s.behaviorsLit)
     check('views dark beside it', !s.viewsLit)
-    check('beehaviors is the superset', s.rows === whole && s.rows > narrow, `${s.rows} back from ${narrow}, whole was ${whole}`)
+    check('all is the superset', s.rows === whole && s.rows > narrow, `${s.rows} back from ${narrow}, whole was ${whole}`)
     check('the views are still in it', s.views === narrow && s.views > 0, `views=${s.views}, narrow was ${narrow}`)
 
+    // ── NOT VIEWS IS THE OTHER HALF ───────────────────────────────────
+    await page.locator('.features-panel .features-filter-btn[data-lens="other"]').click()
+    await page.waitForTimeout(1500)
+    await shot('15-not-views')
+    s = await page.evaluate(SNAP)
+    check('not views lit, the others dark', s.otherLit && !s.viewsLit && !s.behaviorsLit)
+    check('no row in it is a view', s.views === 0 && s.rows > 0, `views=${s.views}/${s.rows}`)
+    check('views and not views add up to all', s.rows + narrow === whole, `${s.rows} + ${narrow} vs ${whole}`)
+
     // ── ESCAPE RESTS ON THE WHOLE LIST ────────────────────────────────
-    await page.locator('.features-panel .scope-kind.views').click()
+    await page.locator('.features-panel .features-filter-btn[data-lens="views"]').click()
     await page.waitForTimeout(1200)
     await page.keyboard.press('Escape')
     await page.waitForTimeout(1200)

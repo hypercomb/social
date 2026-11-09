@@ -409,7 +409,10 @@ export function isPublishedVisitorShell(): boolean {
  *  global-off list. One switch, one meaning — what's off for you is off for
  *  the swarm. */
 export function withheldForShare(): string[] {
-  return [...readGlobalOffKinds()]
+  // A WORD travels with nothing (commands/word-enablement.ts): it marks no
+  // tile, so withholding one from a swarm would withhold nothing, and would
+  // only tell every peer which words this participant switched off.
+  return [...readGlobalOffKinds()].filter(kind => !kind.startsWith('word:'))
 }
 
 /** Essentials-side writer for the adopt path ONLY: record the publisher's

@@ -78,6 +78,7 @@ import {
 } from './template.js'
 import { templateForm, type TemplateForm } from './template-form.js'
 import { heldPicture, listTemplates, readTemplate, saveTemplate, templateStore, templateTrust, type TemplateEntry, type TemplateStore } from './template-pool.js'
+import { closeWhenDark, isWordDark, refuseWhileDark } from '../commands/word-enablement.js'
 
 export const MAIL_OPEN = 'mail:open'
 /** An open request older than this is stale — a replayed last value, not a press. */
@@ -102,6 +103,8 @@ const ACCENT = '201, 162, 39'
  * the keymap, the input gate and the back gesture.
  */
 const DESK = 'mail-desk'
+/** The word this desk belongs to: its light is the desk's (commands/word-enablement.ts). */
+const MAIL_WORD = 'mail'
 /** The desks' shared doors (comfy-desk, host-directory): the view modes that put
  *  the page behind a full-screen window to sleep, the back gesture, the input gate. */
 const DESK_KEYS = {
@@ -701,6 +704,15 @@ export class MailElement extends HTMLElement {
       if (live && payload?.key === UNREAD_INDICATOR) this.open()
     }))
     this.#cleanup.push(EffectBus.on('indicator:query', () => { if (live) this.#paintPill() }))
+    // THE DESK IS PART OF ITS WORD (commands/word-enablement.ts). Switched off
+    // in Beehaviors, `mail` takes everything it shows with it: the open desk
+    // closes, the pill leaves and the quiet poll stops asking.
+    this.#cleanup.push(closeWhenDark(MAIL_WORD, () => {
+      this.close()
+      this.#poller?.stop()
+      this.#poller = null
+      this.#paintPill()
+    }))
     live = true
   }
 
@@ -713,6 +725,8 @@ export class MailElement extends HTMLElement {
   }
 
   open(): void {
+    // Every door — the word, the pill, another desk's button — asks first.
+    if (refuseWhileDark(MAIL_WORD)) return
     this.#parked = false
     if (!this.#panel) {
       const panel = el('section', 'hc-mail')
@@ -2157,6 +2171,7 @@ export class MailElement extends HTMLElement {
    */
   #startPoll(): void {
     if (this.#poller || !this.#boxes.length || (window as { nostr?: unknown }).nostr) return
+    if (isWordDark(MAIL_WORD)) return
     this.#poller = new Poller({
       everyMs: this.pollEveryMs,
       maxErrors: POLL_MAX_ERRORS,
@@ -2190,7 +2205,7 @@ export class MailElement extends HTMLElement {
 
   /** The pill shows while the window is shut and something waits; the open window says it itself. */
   #paintPill(): void {
-    if (this.#unread > 0 && !this.isOpen) {
+    if (this.#unread > 0 && !this.isOpen && !isWordDark(MAIL_WORD)) {
       EffectBus.emit('indicator:set', {
         key: UNREAD_INDICATOR,
         icon: 'mail',

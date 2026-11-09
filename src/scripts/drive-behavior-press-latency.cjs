@@ -153,7 +153,7 @@ async function main() {
     console.log(`  ${start?.checked} -> ${end?.checked}  ${flipped ? 'ONE flip (second press swallowed — good)' : 'NO net change (both landed — the "click twice" feel)'}`)
 
     // ── POOL: one press, sampled ──────────────────────────────────────
-    await page.locator('.features-panel .scope-toggle').click()
+    await page.locator('.features-panel .features-tab:nth-of-type(2)').click()
     await page.waitForTimeout(3000)
     const pool = await press(page, 'store', 0)
     report.pool = pool

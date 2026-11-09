@@ -12,6 +12,19 @@ import { UtteranceReader } from './utterance/utterance-reader.js'
 import {
   DEFAULT_HINT_PLACE, HINT_PLACE, HINT_PLACE_WORDS, hintPlaceOf, keepHintPlace, otherHintPlace, type HintPlace,
 } from '../presentation/tiles/hint-place.js'
+import { gameWords, isWordDark, sayWordDark } from './word-enablement.js'
+import { ENABLEMENT_CHANGED } from '../sharing/behavior-enablement.js'
+
+/** One word of the census, as Beehaviors lists it (word-enablement.ts). */
+export type WordCensusEntry = {
+  readonly word: string
+  readonly description: string
+  readonly namespace?: string
+  readonly dark: boolean
+  /** Concealed from the palette on purpose (typed in full). Still a word,
+   *  still switchable — the roster is where words are managed. */
+  readonly hidden: boolean
+}
 
 /** Participant-local lens: whether the prototypes filter is open. Read live
  *  on every presentation so `/prototypes` takes effect on the next keystroke
@@ -39,6 +52,57 @@ export class SlashBehaviourDrone extends EventTarget {
 
   /** Say the census changed for a reason the registry cannot see. */
   invalidate(): void { this.#version++ }
+
+  /** THE DARK SET — the canonical names whose light is out, once per census
+   *  version (a roster flip bumps it, see the foot of this file). A game's
+   *  word is never in it: the game's own row is that word's switch, and its
+   *  queen refuses for itself. */
+  #darkVersion = -1
+  #darkHeld = new Set<string>()
+  #isDark(behaviour: SlashBehaviour): boolean {
+    if (this.#darkVersion !== this.#version) {
+      const games = gameWords()
+      const dark = new Set<string>()
+      for (const provider of this.#ordered()) {
+        for (const held of provider.behaviours) {
+          const word = held.name.toLowerCase().trim()
+          if (!word || games.has(word)) continue
+          if (isWordDark(word, held.namespace)) dark.add(word)
+        }
+      }
+      this.#darkHeld = dark
+      this.#darkVersion = this.#version
+    }
+    return this.#darkHeld.has(behaviour.name.toLowerCase().trim())
+  }
+
+  /** EVERY WORD, for Beehaviors — the primary name of each behaviour once
+   *  (the first provider wins, as it does at the door), dark ones included,
+   *  because the roster is where a dark word comes back. A concealed
+   *  prototype stays concealed here as everywhere; a game's word is the
+   *  game's row and is left to it. */
+  wordCensus(): WordCensusEntry[] {
+    const games = gameWords()
+    const seen = new Set<string>()
+    const out: WordCensusEntry[] = []
+    for (const provider of this.#ordered()) {
+      for (const behaviour of provider.behaviours) {
+        const word = behaviour.name.toLowerCase().trim()
+        if (!word || seen.has(word)) continue
+        seen.add(word)
+        if (games.has(word)) continue
+        if (behaviour.prototype && !prototypesShown()) continue
+        out.push({
+          word,
+          description: this.#localize(behaviour).description,
+          ...(behaviour.namespace ? { namespace: behaviour.namespace } : {}),
+          dark: this.#isDark(behaviour),
+          hidden: behaviour.hidden === true,
+        })
+      }
+    }
+    return out
+  }
 
   #ordered(): readonly SlashBehaviourProvider[] {
     if (!this.#sorted) {
@@ -197,6 +261,11 @@ export class SlashBehaviourDrone extends EventTarget {
    *  are untouched — a prototype is in the global either way. */
   #present(behaviour: SlashBehaviour): SlashBehaviour {
     const localized = this.#localize(behaviour)
+    // A SWITCHED-OFF word presents as hidden, the same seam a concealed
+    // prototype uses: the palette, the autocomplete and the reading of prose
+    // all leave it out. Typed in full it still reaches the door, which says
+    // why it will not run (execute, below).
+    if (this.#isDark(behaviour)) return { ...localized, hidden: true, dark: true }
     if (localized.prototype && !prototypesShown()) return { ...localized, hidden: true }
     return localized
   }
@@ -207,6 +276,8 @@ export class SlashBehaviourDrone extends EventTarget {
     for (const provider of this.#ordered()) {
       for (const behaviour of provider.behaviours) {
         if (this.#names(behaviour).includes(name) && provider.complete) {
+          // Off means off: nothing is offered past a dark word.
+          if (this.#isDark(behaviour)) return []
           return provider.complete(behaviour.name, args)
         }
       }
@@ -220,6 +291,10 @@ export class SlashBehaviourDrone extends EventTarget {
     for (const provider of this.#ordered()) {
       for (const behaviour of provider.behaviours) {
         if (this.#names(behaviour).includes(name)) {
+          // THE DOOR. Every word reaches its behaviour through here, so this
+          // is where a switched-off word refuses — once, out loud, with the
+          // way to its light (word-enablement.ts).
+          if (this.#isDark(behaviour)) { sayWordDark(behaviour.name); return }
           return provider.execute(behaviour.name, args)
         }
       }
@@ -235,6 +310,9 @@ export class SlashBehaviourDrone extends EventTarget {
     for (const provider of this.#ordered()) {
       for (const behaviour of provider.behaviours) {
         if (behaviour.name.toLowerCase().trim() !== name) continue
+        // Asked before the hidden check, which a dark word also answers: a
+        // model's call to a switched-off word is refused out loud, not lost.
+        if (this.#isDark(behaviour)) { sayWordDark(behaviour.name); return }
         const presented = this.#present(behaviour)
         if (presented.hidden === true || presented.prototype === true) continue
         return provider.execute(behaviour.name, args)
@@ -1245,6 +1323,8 @@ const wrapQueen = (queen: ReturnType<typeof isQueen> extends true ? never : any)
     // authoring surface on the queen, every reader downstream — the model
     // census included — reading what the author actually wrote.
     machine: queen.machine,
+    // Whose word it is decides how its light reads (word-enablement.ts).
+    ...(typeof queen.namespace === 'string' && queen.namespace ? { namespace: queen.namespace } : {}),
     // "Everything after my word is mine, verbatim" — asked of the census by
     // the command line (`rawArgs()` above) before it reads the line itself.
     // Present only on a word that said so; every other row is as it was.
@@ -1447,8 +1527,12 @@ window.ioc.onRegister((_key, value) => considerQueen(value))
 // so once here, and the held census is rebuilt on the next read.
 EffectBus.on('aliases:changed', () => _slashBehaviours.invalidate())
 EffectBus.on('locale:changed', () => _slashBehaviours.invalidate())
-window.ioc.onRegister((key) => {
+// A light flipped in Beehaviors changes which words are dark; a game arriving
+// changes which words are a game's and not a word row of their own.
+EffectBus.on(ENABLEMENT_CHANGED, () => _slashBehaviours.invalidate())
+window.ioc.onRegister((key, value) => {
   if (key === '@diamondcoreprocessor.com/ParticipantAliases') _slashBehaviours.invalidate()
+  else if ((value as { genotype?: unknown } | undefined)?.genotype === 'game') _slashBehaviours.invalidate()
 })
 ;(window.ioc as { whenReady?: (key: string, cb: (value: unknown) => void) => void }).whenReady?.(I18N_IOC_KEY, (i18n) => {
   (i18n as Partial<EventTarget>).addEventListener?.('change', () => _slashBehaviours.invalidate())

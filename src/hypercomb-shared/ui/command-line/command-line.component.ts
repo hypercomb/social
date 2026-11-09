@@ -3239,6 +3239,18 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    * an ambiguity or pathway choice was surfaced, a destructive reading armed
    * its second Enter, or the actions executed in word order.
    */
+  /** Does the line start with a word the census knows but Beehaviors has
+   *  switched off? Read off the census row (`dark`, set by the drone's one
+   *  presentation seam) — never decided here. */
+  #leadsWithDarkWord(text: string): boolean {
+    const first = text.trim().replace(/^\/+/, '').split(/\s+/, 1)[0]?.toLowerCase() ?? ''
+    if (!first) return false
+    const drone = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as
+      { entries?(): readonly { name: string; aliases?: readonly string[]; dark?: boolean }[] } | undefined
+    const row = drone?.entries?.().find(entry => entry.name === first || entry.aliases?.includes(first))
+    return row?.dark === true
+  }
+
   #commitUtterance(text: string): boolean {
     // A word that keeps its arguments verbatim (`QueenBee.rawArgs`) is not a
     // sentence. Read as one, `models request … a planner that holds forty
@@ -3265,6 +3277,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
 
     if (!reading.actions.length) {
+      // A WORD SWITCHED OFF in Beehaviors never lights from prose — but typed
+      // as the line's first word it was meant, and "isn't a command" would be
+      // a lie about a word that is only off. The reading lets go of it, and
+      // the slash door refuses it out loud with the way to its light
+      // (essentials commands/word-enablement.ts).
+      if (this.#leadsWithDarkWord(typed)) return false
       // Grammar without a behaviour is inert. It must not fall through to
       // tile creation, offer a creation pathway, or enter command history:
       // none of those are evidence that an action ran.

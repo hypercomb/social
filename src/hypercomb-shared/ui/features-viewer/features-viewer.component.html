@@ -41,57 +41,49 @@
       <button class="features-close" type="button" (click)="close()" [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button>
     </header>
 
-    <!-- KIND, then SCOPE. Two questions, two controls, never one icon
-         cycling through both — and they sit on the two gutters, not
-         huddled together: what you are LOOKING AT on the left where the
-         list it narrows begins, where you are STANDING on the right.
-         LEFT — the KIND, as a CHOICE between two and never a pair of
-         switches: a view IS a beehaviour, so Beehaviors is the whole list
-         and Views is the same list narrowed to the surfaces. Exactly one
-         is ever lit, each in its own kind's hue — the same violet and cool
-         blue the rows wear, so the filter and the thing filtered are
-         recognisably one — and clicking the lit one does nothing, because
-         a superset and its subset have no third combination worth
-         reaching. They belong to the layer scope alone, so the pool never
-         draws them: there is nothing to narrow there — and the row keeps
-         its shape, because the toggle holds the right edge whether or not
-         they are here.
-         RIGHT — the scope toggle: ONE glyph naming WHERE YOU ARE (`layers`
-         on a layer, `storefront` in the pool, the glyph the retired
-         control used), and the title spells the word out beside it so the
-         glyph never has to. -->
-    <div class="features-scope">
-      @if (!isStore()) {
-        <div class="scope-kinds">
-          <button
-            class="scope-kind behaviors"
-            type="button"
-            [class.on]="showBehaviors()"
-            [attr.aria-pressed]="showBehaviors()"
-            (click)="setLens('behaviors')"
-            [attr.title]="'features.filter.behaviors' | t"
-            [attr.aria-label]="'features.filter.behaviors' | t"
-          ><span class="mat-sym" aria-hidden="true">extension</span></button>
-          <button
-            class="scope-kind views"
-            type="button"
-            [class.on]="showViews()"
-            [attr.aria-pressed]="showViews()"
-            (click)="setLens('views')"
-            [attr.title]="'features.filter.views' | t"
-            [attr.aria-label]="'features.filter.views' | t"
-          ><span class="mat-sym" aria-hidden="true">view_quilt</span></button>
-        </div>
-      }
+    <!-- WHERE, then WHAT (jwize, 2026-11-08). Two questions, two controls.
+         The TABS say where you are reading, in words: Here is this layer,
+         what it carries and what it could; Everywhere is every behaviour the
+         app knows, one light each — views, capabilities, games, and every
+         word with the desk it opens. Words, desks and games have no
+         location, so they are only ever under Everywhere. Under the tabs,
+         the FILTER: one choice of three, on both tabs. A view is a
+         beehaviour, so All includes them; Views narrows to the surfaces you
+         can stand in; Not views is everything else. Exactly one is lit, so
+         no combination means an empty list. (This reverses the August call
+         for one list behind a glyph you had to learn.) -->
+    <div class="features-tabs" role="tablist" [attr.aria-label]="'features.tabs' | t">
       <button
-        class="scope-toggle"
+        class="features-tab"
         type="button"
-        [class.pool]="isStore()"
-        [attr.aria-pressed]="isStore()"
-        (click)="toggleScope()"
-        [attr.title]="scopeHintKey() | t"
-        [attr.aria-label]="scopeKey() | t"
-      ><span class="mat-sym" aria-hidden="true">{{ scopeIcon() }}</span></button>
+        role="tab"
+        [class.on]="!isStore()"
+        [attr.aria-selected]="!isStore()"
+        (click)="goHere()"
+        [attr.title]="'features.tab.here.hint' | t"
+      >{{ 'features.tab.here' | t }}</button>
+      <button
+        class="features-tab"
+        type="button"
+        role="tab"
+        [class.on]="isStore()"
+        [attr.aria-selected]="isStore()"
+        (click)="goEverywhere()"
+        [attr.title]="'features.tab.everywhere.hint' | t"
+      >{{ 'features.tab.everywhere' | t }}</button>
+    </div>
+    <div class="features-filter" role="radiogroup" [attr.aria-label]="'features.filter' | t">
+      @for (choice of lenses; track choice.kind) {
+        <button
+          class="features-filter-btn"
+          type="button"
+          role="radio"
+          [attr.data-lens]="choice.kind"
+          [class.on]="lens() === choice.kind"
+          [attr.aria-checked]="lens() === choice.kind"
+          (click)="setLens(choice.kind)"
+        ><span class="mat-sym" aria-hidden="true">{{ choice.icon }}</span>{{ choice.key | t }}</button>
+      }
     </div>
 
     <div class="features-searchbar">
@@ -255,25 +247,40 @@
                 role="switch"
                 tabindex="0"
                 [attr.aria-checked]="row.on"
+                [attr.aria-disabled]="row.fixed ? true : null"
+                [attr.data-category]="row.category"
                 [class.lit]="row.on"
                 [class.off]="!row.on"
+                [class.fixed]="row.fixed"
+                [class.view]="row.isView"
                 (click)="storeToggle(row)"
                 (keydown.enter)="storeToggle(row)"
                 (keydown.space)="storeToggle(row); $event.preventDefault()"
-                [attr.title]="(row.on ? 'features.roster.off.hint' : 'features.roster.on.hint') | t"
+                [attr.title]="(row.fixed ? 'features.roster.fixed.hint' : row.on ? 'features.roster.off.hint' : 'features.roster.on.hint') | t"
               >
                 <span class="feature-icon" aria-hidden="true">
                   <span class="mat-sym">{{ row.icon }}</span>
                 </span>
                 <div class="feature-meta">
-                  <span class="feature-name">
-                    {{ row.label }}
-                    @if (row.slashCommand) {
-                      <code class="feature-cmd">{{ row.slashCommand }}</code>
-                    }
-                  </span>
+                  <!-- A WORD is its own name: the row says it once, as it is
+                       typed, rather than a label beside the same command. -->
+                  @if (row.category === 'word') {
+                    <span class="feature-name"><code class="feature-cmd word">{{ row.slashCommand }}</code></span>
+                  } @else {
+                    <span class="feature-name">
+                      {{ row.label }}
+                      @if (row.slashCommand) {
+                        <code class="feature-cmd">{{ row.slashCommand }}</code>
+                      }
+                    </span>
+                  }
                   @if (row.foreign) {
                     <span class="feature-awaiting">{{ 'features.chip.awaiting' | t: { module: row.module ?? '' } }}</span>
+                  } @else if (row.module) {
+                    <span class="feature-awaiting">{{ 'features.chip.from' | t: { module: row.module } }}</span>
+                  }
+                  @if (row.fixed) {
+                    <span class="feature-fixed">{{ 'features.roster.fixed' | t }}</span>
                   }
                   <!-- BOUND: this behavior belongs to a tile, not to the
                        hive. The pool is the only place every binding is

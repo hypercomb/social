@@ -26,6 +26,7 @@ import { iconEditMode, LONG_PRESS_MS } from '../../core/icon-edit.service'
 import type { RecentPortal, RecentPortalsStore } from '../../core/recent-portals.store'
 import { clearLaneWithUndo } from '../docked-panel/dock-lanes'
 import { isWindowShowing } from '../window-session'
+import { ENABLEMENT_CHANGED, isWordSwitchedOff } from '../features-viewer/behavior-enablement'
 import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
 import type { InstallMonitor } from '@hypercomb/runtime/install-monitor'
@@ -108,6 +109,9 @@ interface ControlItem {
   label: string
   action: string
   visibleWhen: 'always' | 'voiceSupported' | 'public' | 'hasSelection'
+  /** The WORD whose desk this control opens. Switched off in Beehaviors, the
+   *  word takes its launcher off the bar (features-viewer/behavior-enablement.ts). */
+  word?: string
 }
 
 const CONTROL_REGISTRY: readonly ControlItem[] = [
@@ -124,7 +128,7 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // out onto the network — the machines serving what you publish. It is a
   // toggle, not a one-shot: the glyph lights while the directory is up
   // (`hosts:render` announces its own open state, mirrored below).
-  { id: 'hosts',        label: 'hosts.title',           action: 'toggleHosts',        visibleWhen: 'always' },
+  { id: 'hosts',        label: 'hosts.title',           action: 'toggleHosts',        visibleWhen: 'always', word: 'hosts' },
   // NO CHAT ENTRY. This bar is how-you-SEE — fit, zoom, pin, fullscreen,
   // orientation — and talking is not one of those; the assistant sits on the
   // command line beside the box you type into (command-shell's
@@ -166,7 +170,7 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // by default like sequences and publish: the window's own gear is what puts
   // it there. (`hosts` was the third; it has since been promoted onto the rail
   // beside Portals — see its entry up there.)
-  { id: 'comfy',        label: 'comfy.title',           action: 'openComfy',          visibleWhen: 'always' },
+  { id: 'comfy',        label: 'comfy.title',           action: 'openComfy',          visibleWhen: 'always', word: 'comfy' },
   { id: 'aliases',      label: 'aliases.title',         action: 'openAliases',        visibleWhen: 'always' },
   // Selection verbs — the floating vertical selection menu is retired
   // (documentation/selection-tool-windows.md); one-shot verbs live here on the
@@ -555,6 +559,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // Whether the chat window is showing — its `chat:window-state` announcement,
   // so the launcher lights while the default view is up.
   #hasSelection = signal(false)
+  /** Bumped on every Beehaviors flip, so a word's launcher leaves with its light. */
+  readonly #lights = signal(0)
+  #lightsUnsub: (() => void) | null = null
   #textOnly = signal(false)
   #imageOnly = signal(false)
   #layoutPinned = signal(false)
@@ -916,6 +923,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   #isControlVisible(ctrl: ControlItem): boolean {
+    // A launcher for a desk goes with its word — in edit mode too: a switched
+    // off word has no desk to put on the rail.
+    this.#lights()
+    if (ctrl.word && isWordSwitchedOff(ctrl.word)) return false
     // Optional tool-window launchers are slash-first. They do not occupy the
     // normal rail until enabled from inside their window.
     if ((ctrl.id === 'sequences' || ctrl.id === 'publish')
@@ -1545,6 +1556,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // after a retitle, or the previous language after a switch.
     this.#titleTickUnsub = EffectBus.on('title:indexed', () => this.#titleTick.update(n => n + 1))
     this.#localeTickUnsub = EffectBus.on('locale:changed', () => this.#titleTick.update(n => n + 1))
+    this.#lightsUnsub = EffectBus.on(ENABLEMENT_CHANGED, () => this.#lights.update(n => n + 1))
 
     // The location dialog's "start" confirmed (join mode) — flip to public
     // now that the where/secret are set. Idempotent: already public → no-op.
@@ -2183,6 +2195,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#addSheetUnsub?.()
     this.#phoneFaceUnsub?.()
     this.#mobileModeUnsub?.()
+    this.#lightsUnsub?.()
     this.#landscapeQuery?.removeEventListener('change', this.#landscapeHandler)
     this.#headerObserver?.disconnect()
     this.#controlsObserver?.disconnect()

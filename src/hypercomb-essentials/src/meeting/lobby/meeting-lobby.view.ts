@@ -24,8 +24,11 @@ import {
 import { QUALITIES, describeQuality, qualityConstraints, type Devices, type Quality } from '../meeting-quality.js'
 import { deviceLabel, failureOf, levelOf, seatPositions, seatsTaken, type Failure } from './lobby-media.js'
 import { installMeetingLobbyStyles } from './meeting-lobby.styles.js'
+import { closeWhenDark, refuseWhileDark } from '../../commands/word-enablement.js'
 
 const LOBBY = 'meeting-lobby'
+/** The word this desk belongs to: its light is the desk's (commands/word-enablement.ts). */
+const WORD = 'meeting'
 const KEYS = {
   modes: '@diamondcoreprocessor.com/ModeRegistry',
   back: '@diamondcoreprocessor.com/BackGesture',
@@ -113,6 +116,8 @@ export class MeetingLobbyElement extends HTMLElement {
   #modes: ModesShape | null = null
   #releaseBack: (() => void) | null = null
   #openCleanup: (() => void)[] = []
+  /** Releases the desk's hold on its word's light. */
+  #offWord: (() => void) | null = null
 
   #ring!: HTMLElement
   #video!: HTMLVideoElement
@@ -161,15 +166,22 @@ export class MeetingLobbyElement extends HTMLElement {
   connectedCallback(): void {
     installMeetingLobbyStyles()
     facade.current = this
+    // THE DESK IS PART OF ITS WORD (commands/word-enablement.ts): switched
+    // off in Beehaviors, it closes, and a desk put away stays away.
+    this.#offWord = closeWhenDark(WORD, () => { this.#parked = false; this.#close() })
     if (facade.wanted) this.open()
   }
 
   disconnectedCallback(): void {
+    this.#offWord?.()
+    this.#offWord = null
     if (this.#panel) this.#teardown()
     if (facade.current === this) facade.current = null
   }
 
   open(): void {
+    // Every door asks first — the word, a tile's join, a return home.
+    if (!this.#panel && refuseWhileDark(WORD)) { facade.wanted = false; return }
     facade.wanted = true
     if (this.#panel) { this.#address.textContent = facade.cell; return }
     this.#build()

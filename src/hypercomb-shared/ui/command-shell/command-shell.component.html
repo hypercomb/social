@@ -315,6 +315,7 @@
            live in your swarm and you are not in it, coloured when you are.
            A press starts or joins it; in it, the press shows or hides the
            participants' hive (meeting/meeting-hive.drone.ts). -->
+      @if (meetingLit()) {
       <button
         class="rail-btn meeting-toggle-btn"
         [class.on]="meetingOpen()"
@@ -328,7 +329,9 @@
       >
         <span class="mat-sym" aria-hidden="true">videocam</span>
       </button>
+      }
 
+      @if (chatLit()) {
       <button
         class="rail-btn chat-toggle-btn"
         [class.on]="chatPanelOpen()"
@@ -342,6 +345,7 @@
       >
         <span class="mat-sym" aria-hidden="true">chat</span>
       </button>
+      }
 
       <button
         class="rail-btn notes-toggle-btn"
