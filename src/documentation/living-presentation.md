@@ -918,7 +918,11 @@ every page, and its 25 scenes are folded into the tiles they explain:
     with the fullscreen button beside them. Fullscreen takes the video alone.
   - **the siblings**, balanced and centred under the video: the tiles under the
     same parent, this one lit, the parent's name over them in brackets
-    (`(protocol)`). A tile that is the only one there shows nothing.
+    (`(protocol)`). The row stays when you press one of its buttons (jwize,
+    2026-11-09): on a top page it is that tile's own first level (standing on
+    `/protocol` shows simple, organized, collaborative ...), and every page a
+    button leads to shows the same row, with only the lit one moved. A tile that
+    is the only one there shows nothing.
 
   There is no step-in row and no previous or next: the tree goes down, the
   siblings go across, and the crumbs go up. Every link lands on a page, the tree

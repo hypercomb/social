@@ -656,7 +656,7 @@ const treeHtml = (ways, route) => {
 const sibsHtml = (ways, route) => {
   const section = (ways && ways.section) || []
   if (section.length < 2) return ''
-  const parent = route.length > 1 ? route[route.length - 2] : ''
+  const parent = String((ways && ways.sectionOf) || '')
   return `
   <nav class="sibs" data-part="siblings" aria-label="${esc(parent ? `More in ${parent}` : 'Beside this')}">${parent ? `<span class="lbl mono-label">(${esc(parent)})</span>` : ''}${section.map(t => t.current
     ? `<span class="sib" aria-current="page">${icon('play')}${esc(t.name)}</span>`
