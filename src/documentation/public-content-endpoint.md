@@ -93,6 +93,18 @@ cross-origin readers). The readers that try two URL shapes for one atom
 pool walk (`hypercomb-runtime/src/host-packages.ts`, which reads the reason
 to tell "no pool on this host" from "not this base") ask with it.
 
+**A relay says which code it is running.** A fix to a host changes nothing
+until the host runs it, and a relay is a long-lived process: on 2026-11-09
+the one behind jwize.com answered the old way for hours after the fix was
+committed. relay.js takes the signature of its own code at start
+(`hypercomb-relay/code-stamp.js`: the entry file and every local file it
+imports) and says it in its NIP-11 document: `code`, `started_at`, and
+`stale: true` once the files on disk no longer hash to it. `npm run
+relay:check` compares a relay with the disk and fails when it is behind;
+`npm run build:essentials` runs it as a warning every time. Started with
+`--restart-when-stale` under a supervisor that restarts it, the relay leaves
+on its own once the new code has settled and parses.
+
 The bucket is **flat from birth** — no legacy typed-dir layout ever lands in
 R2, so unlike relay.js there is no `__x__` fallback probing on reads.
 

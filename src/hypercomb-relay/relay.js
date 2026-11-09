@@ -39,6 +39,8 @@ import { contentDirectoryIO, HOST_PACKAGES_POOL, PUBLIC_POOL_ADDRESSES, parseRep
 import { ReceiptIndex } from './receipt-index.js'
 import { listedMeanings } from './host-listing.js'
 import { nip05Name, nostrJson } from './nip05-names.js'
+import { codeFiles, codeStamp } from './code-stamp.js'
+import { spawnSync } from 'node:child_process'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -142,6 +144,9 @@ function parseArgs(argv) {
     if (a === '--dev-open-writes') { args.devOpenWrites = true; continue }
     if (a === '--allow-private-sources') { args.allowPrivateSources = true; continue }
     if (a === '--allow-participants') { args.allowParticipants = 'all'; continue }
+    // Under a supervisor that restarts it (a service, a container): leave when
+    // the code on disk has moved on, so the next start runs it (code-stamp.js).
+    if (a === '--restart-when-stale') { args.restartWhenStale = true; continue }
     if (a.startsWith('--allow-participants=')) { args.allowParticipants = a.slice('--allow-participants='.length); continue }
     const next = argv[i + 1]
     if (a === '--port' && next) { args.port = Number(next); i++ }
@@ -1474,6 +1479,50 @@ const relayInfo = {
     participant_uploads: participantMode,
   }
 }
+
+// ── which code is this process running? (code-stamp.js) ─────────────────────
+//
+// A relay runs the code it STARTED from. `code` is that code's signature;
+// `stale` says the files on disk no longer hash to it — a fix was written and
+// this process is not running it. Both are in the NIP-11 document, so anyone
+// (check-running.mjs after every build, an operator's curl) can see a relay
+// that needs a restart instead of finding out from a console full of errors.
+//
+// With --restart-when-stale the relay does the restart itself: it leaves, and
+// its supervisor starts the new code. Only for code that has SETTLED (the
+// same new stamp on two checks, so a save in progress or a checkout mid-way
+// is not run) and that PARSES (`node --check` on every file) — a broken edit
+// never takes a running relay down; it goes on serving the code it has.
+const RELAY_ENTRY = fileURLToPath(import.meta.url)
+const CODE_AT_START = codeStamp(RELAY_ENTRY)
+const STARTED_AT = Math.floor(Date.now() / 1000)
+const CODE_CHECK_MS = Number(process.env.RELAY_CODE_CHECK_MS) || 30_000
+let codeSeen = { at: Date.now(), stamp: CODE_AT_START }
+function codeOnDisk() {
+  if (Date.now() - codeSeen.at >= Math.min(10_000, CODE_CHECK_MS / 2)) {
+    let stamp = codeSeen.stamp
+    try { stamp = codeStamp(RELAY_ENTRY) } catch { /* unreadable right now — as last seen */ }
+    codeSeen = { at: Date.now(), stamp }
+  }
+  return codeSeen.stamp
+}
+const codeParses = () => codeFiles(RELAY_ENTRY).filter(file => /\.[cm]?js$/i.test(file))
+  .every(file => spawnSync(process.execPath, ['--check', file], { stdio: 'ignore' }).status === 0)
+let staleSaid = ''
+let staleSeen = ''
+setInterval(() => {
+  const now = codeOnDisk()
+  if (now === CODE_AT_START) { staleSeen = ''; return }
+  if (staleSaid !== now) {
+    staleSaid = now
+    console.warn(`[relay] the code on disk (${now.slice(0, 12)}) is not the code this process started from (${CODE_AT_START.slice(0, 12)}) — ${cfg.restartWhenStale ? 'restarting once it settles' : 'restart to run it'}`)
+  }
+  if (!cfg.restartWhenStale) return
+  if (staleSeen !== now) { staleSeen = now; return }   // settled = the same stamp twice
+  if (!codeParses()) { console.warn('[relay] the code on disk does not parse — still running the code this process started from'); staleSeen = ''; return }
+  console.warn('[relay] leaving so the supervisor starts the new code')
+  process.exit(0)
+}, CODE_CHECK_MS).unref()
 
 // ── content-host (HTTP file serving) ─────────────────────────────────────────
 //
@@ -2863,7 +2912,7 @@ const server = createServer((req, res) => {
   // NIP-11 relay metadata (Accept: application/nostr+json)
   if (req.headers.accept?.includes('application/nostr+json')) {
     res.writeHead(200, { 'Content-Type': 'application/nostr+json', 'Access-Control-Allow-Origin': '*' })
-    res.end(JSON.stringify(relayInfo))
+    res.end(JSON.stringify({ ...relayInfo, code: CODE_AT_START, started_at: STARTED_AT, stale: codeOnDisk() !== CODE_AT_START }))
     return
   }
 
