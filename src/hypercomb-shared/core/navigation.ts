@@ -278,7 +278,9 @@ export class Navigation extends hypercomb {
     const path = this.#pathOf(clean)
     const hash = window.location.hash ?? ''
 
-    window.history.pushState({ hcRaw: clean }, '', path + hash)
+    // `hcBelow` remembers the address this entry was pushed over, so a later
+    // replace that lands back on it can collapse the pair (see replaceRaw).
+    window.history.pushState({ hcRaw: clean, hcBelow: window.location.pathname }, '', path + hash)
     this.dispatch()
   }
 
@@ -286,8 +288,26 @@ export class Navigation extends hypercomb {
     const clean = segments.map(s => (s ?? '').trim()).filter(Boolean)
     const path = this.#pathOf(clean)
     const hash = window.location.hash ?? ''
+    const state = (window.history.state ?? {}) as { hcView?: unknown; hcBelow?: unknown }
 
-    window.history.replaceState({ hcRaw: clean }, '', path + hash)
+    // COMING BACK OUT WHERE YOU WENT IN costs no entry. A stepped-into view
+    // pushed one entry over the place it was entered from; when its exit
+    // replaces that entry with the very address underneath, the stack holds
+    // the same place twice and the next BACK (parent tile, right button)
+    // lands on it again — a press that does nothing. Collapse the pair by
+    // stepping back onto the entry that is already there.
+    if (typeof state.hcView !== 'string' && state.hcBelow === path) {
+      window.history.back()
+      return
+    }
+
+    // A view's synthetic back-trap entry (`hcView`, view-back.ts) must stay
+    // recognisable as ours across an address replace, or the trap is never
+    // dropped and stays on the stack wearing the page it was replaced with.
+    const next: Record<string, unknown> = { hcRaw: clean }
+    if (typeof state.hcView === 'string') next['hcView'] = state.hcView
+    else if (typeof state.hcBelow === 'string') next['hcBelow'] = state.hcBelow
+    window.history.replaceState(next, '', path + hash)
     this.dispatch()
   }
 
