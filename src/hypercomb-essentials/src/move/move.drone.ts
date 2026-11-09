@@ -294,6 +294,8 @@ export class MoveDrone extends Drone {
       // while a tile is in hand) must be released too, or a swallowed
       // pointerup would freeze them for the rest of the session.
       this.emitEffect('move:drag', { active: false })
+      // And the preview that drag may have left up goes with it.
+      this.emitEffect('move:preview', null)
       this.#anchorAxial = null
       this.#movedGroup.clear()
       this.#occupancy.clear()
@@ -535,8 +537,14 @@ export class MoveDrone extends Drone {
       // Swallow + log so #reset always runs in finally. Leaving
       // #activeSource set is the bug we just fixed; never regress it.
       console.warn('[move] commitMoveAt failed:', err)
-      this.emitEffect('move:preview', null)
     } finally {
+      // THE PREVIEW ENDS WITH THE DRAG. A commit clears it itself, after the
+      // order is written; every other way out — put back on its own slot, a
+      // refusal, a throw — clears it here. A tile lifted and set down where it
+      // was used to leave the preview up with no drag behind it, and the
+      // renderer treats a preview as the whole page: every level walked into
+      // afterwards painted this level's tiles again, as tiles it does not hold.
+      if (!didCommit) this.emitEffect('move:preview', null)
       // A drop ends the selection — one tile or many, moved or put back.
       this.#deselect()
       this.#reset(source)
