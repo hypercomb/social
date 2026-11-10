@@ -2880,6 +2880,8 @@
   "meeting.lobby-cancel": "annuler",
   "meeting.lobby-join": "rejoindre",
   "meeting.lobby-ready": "Caméra prête",
+  "meeting.lobby-no-microphone": "Aucun microphone trouvé. Vous rejoindrez sans le son.",
+  "meeting.no-microphone": "Votre microphone n'est pas activé. Les autres ne peuvent pas vous entendre.",
   "meeting.lobby-hint": "{width}×{height} · {fps} i/s · jusqu’à {mbps} Mbit/s par personne",
   "meeting.lobby-actual": "Envoi en {width}×{height}",
   "meeting.lobby-here": "{here} sur {needed} présents",

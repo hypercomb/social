@@ -2880,6 +2880,8 @@
   "meeting.lobby-cancel": "إلغاء",
   "meeting.lobby-join": "انضمام",
   "meeting.lobby-ready": "الكاميرا جاهزة",
+  "meeting.lobby-no-microphone": "لم يُعثر على ميكروفون. ستنضم بلا صوت.",
+  "meeting.no-microphone": "الميكروفون غير مفعّل. لا يستطيع الآخرون سماعك.",
   "meeting.lobby-hint": "{width}×{height} · {fps} إطارًا/ث · حتى {mbps} ميغابت/ث لكل شخص",
   "meeting.lobby-actual": "جارٍ الإرسال بدقة {width}×{height}",
   "meeting.lobby-here": "{here} من {needed} حاضرون",
