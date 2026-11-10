@@ -22,9 +22,12 @@ const PRIMITIVE_EDGES = [['hypercomb', 'word'], ['hypercomb', 'signature'], ['hy
 const ALL = ['hypercomb', 'word', 'signature', 'layer', 'meta', 'hypercomb-word', 'hypercomb-signature', 'hypercomb-layer', 'hypercomb-meta']
 
 
-/** A tile and its children: the tile above, the children in one or two rows. */
+/** A tile and its children: the tile above, the children in one or two rows.
+ *  In two rows the shorter row sits above, so the lines to the lower row pass
+ *  between the upper hexagons, never through them. */
 const hub = (top, children, label) => {
-  const rows = children.length > 6 ? [children.slice(0, Math.ceil(children.length / 2)), children.slice(Math.ceil(children.length / 2))] : [children]
+  const half = Math.floor(children.length / 2)
+  const rows = children.length > 6 ? [children.slice(0, half), children.slice(half)] : [children]
   const nodes = [{ id: top, label: top, x: 320, y: rows.length > 1 ? 68 : 80, r: 48 }]
   rows.forEach((row, ri) => row.forEach((name, i) => {
     nodes.push({ id: name, label: name, x: Math.round(640 / (row.length + 1) * (i + 1)), y: rows.length > 1 ? 190 + ri * 110 : 260, r: rows.length > 1 ? 32 : 38 })
@@ -590,13 +593,14 @@ module.exports = {
   'road': {
     eyebrow: 'the road',
     headline: 'Where it *leads*',
-    sub: 'One scene per tile, in the order the tour tells them.',
-    picture: hub('road', ['question', 'creations', 'market', 'computer', 'yours', 'first-day'], 'The road and its six tiles'),
+    sub: 'The way ahead, one stop at a time.',
+    picture: hub('road', ['question', 'creations', 'market', 'computer', 'gathering', 'yours', 'first-day'], 'The road and its seven tiles'),
     beats: [
       { say: 'This is the road: where Hypercomb leads, and how to begin.', lit: ['road'] },
       { say: 'It starts with a question: who decides where your work lives, and who it reaches?', lit: lit('road', 'question') },
       { say: 'Then what people already make with it.', lit: lit('road', 'creations') },
       { say: 'Along the way: an open exchange of ideas, and the hive as a computer.', lit: lit('road', 'market', 'computer') },
+      { say: 'There is a gathering too, where you can join a meeting or become a host.', lit: lit('road', 'gathering') },
       { say: 'And it ends where you begin: the hive is yours, and your first day.', lit: lit('road', 'yours', 'first-day') },
     ],
     files: ['documentation/living-presentation.md'],
@@ -604,7 +608,7 @@ module.exports = {
 
   'road/market': {
     eyebrow: 'an exchange of ideas',
-    headline: 'Free, or sealed for those you *choose*',
+    headline: 'Shared freely, or offered as *premium*',
     sub: 'Asking one word across your hosts is built; combining words with and, or and not across them is planned.',
     plate: 'road-market',
     figcap: 'free, sealed, found by word',
@@ -646,8 +650,8 @@ module.exports = {
 
   'road/computer/system': {
     eyebrow: 'in words you know',
-    headline: 'An operating system with no *centre*',
-    sub: 'Each familiar word points at something real in the hive.',
+    headline: 'A shared operating system for *humanity*',
+    sub: 'Each familiar word points at something real in the hive, and it has no centre.',
     plate: 'road-computer-system',
     figcap: 'familiar words, hive words',
     beats: [
@@ -664,6 +668,56 @@ module.exports = {
       { path: 'hypercomb-essentials/src/sharing/update-scout.service.ts', from: '// Demand-driven by doctrine: one check per boot, no push channel, no', lines: 3 },
     ],
     files: ['documentation/presentation-blueprint.md', 'documentation/code-admission.md', 'documentation/install-by-replication.md', 'documentation/every-act-has-a-word.md', 'hypercomb-essentials/src/sharing/update-scout.service.ts'],
+  },
+
+  'road/gathering': {
+    eyebrow: 'get involved',
+    headline: 'An open *door*',
+    sub: 'Nothing here is asked of you.',
+    picture: hub('gathering', ['meeting', 'host'], 'The gathering and its two tiles'),
+    beats: [
+      { say: 'This is an experiment you are welcome in, and this is where you can take part.', lit: ['gathering'] },
+      { say: 'One way in is a meeting: people walk the hive together, one leading and the others following.', lit: lit('gathering', 'meeting') },
+      { say: 'The other is to become a host, so that people can reach your work when you are not online with them.', lit: lit('gathering', 'host') },
+      { say: 'Neither is needed to read, or to take what others have made, and both doors stay open.', lit: lit('gathering', 'meeting', 'host') },
+    ],
+    files: ['documentation/presentation-blueprint.md', 'documentation/meeting-lobby.md', 'documentation/becoming-a-host.md'],
+  },
+
+  'road/gathering/meeting': {
+    eyebrow: 'a meeting',
+    headline: 'Start one, and people *follow*',
+    sub: 'Following the leader is the shared screen. Where a host has no meeting point set up, the meeting goes on with no video between people.',
+    plate: 'road-gathering-meeting',
+    figcap: 'one leads, the others follow',
+    beats: [
+      { say: 'Type meeting, and you start one, or join the one already going.', lit: ['say'] },
+      { say: 'It belongs to your swarm, the group an invite link brings together, and never to a tile.', lit: ['swarm'] },
+      { say: 'You join with your voice only, and your camera stays off until you turn it on.', lit: ['you'] },
+      { say: 'Whoever starts it leads, in the middle, and the others follow them around the hive.', lit: ['leader', 'followers', 'you'] },
+      { say: 'What the leader does arrives as directions, never code, and each person walks them in their own hive.', lit: ['leader', 'path', 'followers', 'you'] },
+      { say: 'The room states the words its leader uses, and each person allows or disallows each one.', lit: ['words'] },
+      { say: 'To bring someone in, send them the link: they open it, join the swarm, and type meeting.', lit: ['link', 'swarm'] },
+    ],
+    files: ['documentation/meeting-lobby.md', 'hypercomb-essentials/src/meeting/meeting.queen.ts', 'hypercomb-essentials/src/meeting/meeting-seats.ts'],
+  },
+
+  'road/gathering/host': {
+    eyebrow: 'becoming a host',
+    headline: 'Your computer can be a *host*',
+    sub: 'Using your own domain signs you in to a free Cloudflare account; the temporary address needs none.',
+    plate: 'road-gathering-host',
+    figcap: 'this computer, an address, a visitor',
+    beats: [
+      { say: 'Anyone can read, and take what others have made, without ever being a host.', lit: ['reader'] },
+      { say: 'A host answers for your work at an address, so other people can reach it when you are not online with them.', lit: ['try', 'domain', 'others'] },
+      { say: 'In the desktop app, your own computer can be the host, serving your hive while the app is open.', lit: ['computer'] },
+      { say: 'Try it now puts your hive at a temporary address in seconds, with no account.', lit: ['computer', 'try'] },
+      { say: 'Or use your own domain, and then check it: the address is fetched the way a visitor would.', lit: ['domain', 'check', 'others'] },
+      { say: 'Every act that puts the hive online asks you first, and says what becomes readable.', lit: ['ask'] },
+      { say: 'Take it offline stops it, and the rest of the path to becoming a host is planned.', lit: ['offline', 'planned'] },
+    ],
+    files: ['documentation/becoming-a-host.md', 'documentation/hosting-from-a-machine.md', 'hypercomb-essentials/src/sharing/host-online.ts'],
   },
 
 
@@ -843,6 +897,99 @@ module.exports = {
     live: [
       { shot: 'an-agents-sentences-in-chat', title: 'an agent’s sentences, on the record', caption: 'A side session asked to add three meetups. Its lines were shown first, a person pressed Enter, and every line is kept.' },
     ],
+  },
+
+  // ── doctrine no scene says: the gates, hiding, the shelf, interests, proof ──
+  // (presentation-blueprint.md, "Coverage: what the presentation still omits")
+
+  'protocol/collaborative/gate': {
+    eyebrow: 'three gates',
+    headline: 'Taking is not *running*',
+    sub: 'Following someone, keeping what arrives, and letting code run are three separate choices.',
+    plate: 'collaborative-gate',
+    figcap: 'three gates, one after another',
+    beats: [
+      { say: 'Three gates stand between someone else\'s work and your hive, and each one asks its own question.', lit: ['theirs', 'selection', 'intake', 'activation', 'yours'] },
+      { say: 'The first is whom you take from: your hive asks only the hosts and people you have chosen, and never everyone.', lit: ['theirs', 'selection'] },
+      { say: 'The second is what you keep: what arrives is judged by the marks it wears, and until you name an interest, everything is kept.', lit: ['intake'] },
+      { say: 'The third is what may run: once your hive is running, a package from another domain becomes your running code only when a publisher you follow has signed for it.', lit: ['activation', 'yours'] },
+      { say: 'A piece you pick by hand from anyone else is held, and it does not run until you accept it yourself.', lit: ['hand'] },
+      { say: 'Keeping something never makes it run, and publishing it is a separate choice again.', lit: ['kept'] },
+      { say: 'The first two gates are built, and the third is partly built: its rule holds when a package is installed, some other paths are still open, and a screen for your own rules is planned.', lit: ['status', 'planned'] },
+    ],
+    files: ['documentation/intake-filter.md', 'documentation/install-by-replication.md', 'documentation/code-admission.md', 'hypercomb-runtime/src/activation-authority.ts'],
+  },
+
+  'protocol/organized/hiding': {
+    eyebrow: 'putting away',
+    headline: 'Hide first, delete *second*',
+    sub: 'Some hidden things can never be deleted: the list they belong to decides that.',
+    plate: 'organized-hiding',
+    figcap: 'a list, its delete area, another host',
+    beats: [
+      { say: 'A list that lets you get rid of something offers one act, and that act is hide.', lit: ['list', 'hide'] },
+      { say: 'Hiding takes it out of the list and changes nothing else, so one press brings it back.', lit: ['hide', 'back'] },
+      { say: 'What you hid collects in a delete area, a fold you open on purpose.', lit: ['area'] },
+      { say: 'Deleting exists only there, and the hive refuses to delete a thing that was not hidden first.', lit: ['area', 'delete'] },
+      { say: 'Delete means this hive forgets it: the same bytes held anywhere else stay valid, and can still be fetched by their signature.', lit: ['delete', 'elsewhere'] },
+      { say: 'Today a host\'s list of builds and a branch\'s published versions work this way, and any list added later must follow the same rule.', lit: ['list', 'area'] },
+      { say: 'The rule binds the builders too: no update and no test may wipe your tiles, your history or your pools.', lit: ['yours'] },
+    ],
+    files: ['documentation/hide-first-delete-second.md', 'hypercomb-essentials/src/concealment/concealment.ts'],
+  },
+
+  'protocol/organized/shelf': {
+    eyebrow: 'placing',
+    headline: 'Placed, never *copied*',
+    sub: 'The words cut, copy and paste were removed. Pasting a picture from your own computer still works.',
+    plate: 'organized-shelf',
+    figcap: 'one tile, two pages, the shelf',
+    beats: [
+      { say: 'A tile is stored once, and a page only lists it, so the same tile can show in many places.', lit: ['atom', 'pages'] },
+      { say: 'So nothing here is copied or cut: placing a tile adds one more place where it shows.', lit: ['atom', 'drop'] },
+      { say: 'The shelf is a strip at the top of the screen that holds the tiles you are carrying.', lit: ['shelf'] },
+      { say: 'Sending a tile to the shelf takes a reference and writes nothing, so the page it came from is untouched.', lit: ['atom', 'take', 'shelf'] },
+      { say: 'Only the drop writes: drop it to show the tile here as well, or hold Shift to move it here.', lit: ['drop'] },
+      { say: 'Recents shows every tile a hive ever made, once each, newest at the centre, with hidden ones shaded and never absent.', lit: ['recents'] },
+      { say: 'The shelf and recents are built, and choosing which look a tile lands with is not built yet.', lit: ['shelf', 'recents', 'pick'] },
+    ],
+    files: ['documentation/recents-and-the-quick-tray.md', 'hypercomb-essentials/src/presentation/tiles/shelf-placement.worker.ts'],
+  },
+
+  'protocol/intelligent/interest': {
+    eyebrow: 'attention',
+    headline: 'A signal, never a *label*',
+    sub: 'The word interest sets what you watch for and what you never want.',
+    plate: 'intelligent-interest',
+    figcap: 'a signal, its authors, a private list',
+    beats: [
+      { say: 'A pheromone is a small signed signal, left on a piece of content, that says this is worth attention.', lit: ['content', 'deposit'] },
+      { say: 'Anyone can leave one: you, another person, or an agent that read the content.', lit: ['authors', 'deposit'] },
+      { say: 'It never says what a thing is: that is the name\'s job, so a new grouping gets a name, never a new kind of signal.', lit: ['name', 'content'] },
+      { say: 'Your interests are a private list of the signals you watch for and the ones you never want, and the list never leaves your hive.', lit: ['interests'] },
+      { say: 'Only a match brings content forward for you, and where nothing matches, nothing is hidden from you.', lit: ['deposit', 'match', 'interests'] },
+      { say: 'Signing, checking and reading these signals in your own hive is built, and until you name an interest, nothing is filtered.', lit: ['deposit', 'interests'] },
+      { say: 'A signal is meant to travel with its content from one hive to another, and that part is planned, not built.', lit: ['travel'] },
+    ],
+    files: ['documentation/pheromones.md', 'documentation/intake-filter.md', 'hypercomb-essentials/src/commands/interest.queen.ts'],
+  },
+
+  'protocol/simple/proof': {
+    eyebrow: 'what counts as proof',
+    headline: 'Recompute it, and trust *nobody*',
+    sub: 'A signature shows what the bytes are and who signed them. It never shows that a claim is true.',
+    plate: 'simple-proof',
+    figcap: 'bytes, a pool, a cache',
+    beats: [
+      { say: 'A signature is worked out from the bytes alone, so anyone holding the bytes can work it out again and trust nobody.', lit: ['bytes', 'sig'] },
+      { say: 'A list of what a folder holds is never proof: a host can list anything, and nothing in a listing is signed.', lit: ['listing'] },
+      { say: 'A pool is where things of one meaning gather, and it holds membership, never truth: the truth stays in the layers.', lit: ['pool', 'layers'] },
+      { say: 'Membership becomes proof in two ways only: a mark inside the member\'s own bytes, or a signed list of the whole set.', lit: ['mark', 'sealed'] },
+      { say: 'Not every pool has that form yet, and where it does not, the listing is only one host\'s memory.', lit: ['pool', 'listing'] },
+      { say: 'Across hosts a pool grows only by adding: each host\'s members are joined, and a host that removes one changes only its own copy.', lit: ['union'] },
+      { say: 'A cache is worked out from signed inputs, so it can be thrown away and rebuilt, and without it the hive gives the same answer, only slower.', lit: ['cache', 'layers'] },
+    ],
+    files: ['documentation/mathematically-backed-truth-research.md', 'documentation/known-location-pools.md', 'documentation/optimize-phase.md'],
   },
 
   'road/yours': {

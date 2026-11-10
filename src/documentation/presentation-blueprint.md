@@ -39,7 +39,83 @@ concise and subject to change if they don't meet the highest standards."
   broken apart, or sent back to waiting, however recently it was made and
   whoever made it. Having been voiced or published does not protect it.
 
+And the same day: "you are looking to make humanity a better place and the
+best way is to be honest, clear, and welcoming providing a great ux and calls
+to action in a not pushy or threatening way." And: "Not to omit any of the
+core behaviors … and its critical doctrine as well as welcoming people in to
+join meetings and become a host (not invasive but somewhere to get
+involved)."
+
+- **Honest.** What is built is shown running. What is not built is called
+  planned. A limit is said where it applies, once, in plain words.
+- **Welcoming.** The reader is a guest. Nothing assumes they know a term,
+  and nothing makes them feel late or behind.
+- **A great experience.** Every page works on a phone, loads without
+  waiting on anyone else's server, and always shows the way up, across and
+  down.
+- **Complete.** The core behaviours and the critical doctrine each have a
+  tile. A coverage table below says which tile carries which.
+
+**Calls to action.** Each page may end with one, and it follows these rules:
+
+- It is an open door: something the reader can do now, said once, at the
+  end. It never interrupts, pops up, counts down, or repeats.
+- It never warns of what happens if they do not act, and it never implies
+  they are missing out.
+- It asks for nothing first: no account, no email, no sign-up.
+- The doors, in order of commitment: try a tile; copy one into your own
+  hive; join a meeting; become a host. `gathering` on the road holds the
+  last two.
+
 The orchestrating session holds every page to this, including its own.
+
+## The theme
+
+jwize, 2026-11-10, on his opening words for this blueprint: "A theme around
+that should be better than making the presentation around what is now."
+
+Read as: the presentation is built around where this is going, in his words,
+and what exists today is the evidence for it. It is not a tour of the present
+state with the purpose added at the end. **This reading is to be confirmed.**
+
+The theme, in his words, lightly trimmed:
+
+1. **An experiment you are welcome in.** What happens when a network connects
+   us at our most important points and passions, so we can work together and
+   build community.
+2. **A shared operating system for humanity.** It does not pay the price of
+   one shared machine, because programs run under each person's own
+   permissions, side by side with the other participants.
+3. **Employ each other's expertise.** Knowledge that is hoarded stunts
+   everyone's growth; shared, it opens opportunities nobody imagined.
+4. **An intelligence that lives and breathes as people take part.** Human
+   touches are the fuel for its movement.
+5. **Yours was always yours.** Today's software harvests our information and
+   sells it back to us as if it had never belonged to us.
+6. **A marketplace of ideas.** Shared freely, or sold as premium.
+7. **An open platform.** It only facilitates, and never pushes ideas on
+   anyone.
+
+How the theme and the standing rules fit together:
+
+- The theme leads every page: the first sentence says which of the seven it
+  serves. The five claims below become its proofs, not its headlines.
+- "Planned" still marks what is not built. A theme line may reach further
+  than the code; the sentence that proves it may not.
+- The six values stay as the way the hive works. The theme is why.
+
+What changes if the reading is confirmed:
+
+- **The road becomes the spine.** It opens on the experiment and the
+  invitation, and each stop names its theme line: `market` (6), `computer`,
+  `machine` and `system` (2), `vision` (3 and 4), `yours` (1 and 7).
+- **`vision` is rewritten and promoted.** Today it lists features. It would
+  carry lines 3 and 4, with agents working across domains called planned.
+- **`question` carries line 5** in his voice.
+- **The three tiles added today take his words** in their headlines: "for
+  humanity" on `system`, "premium" on `market`.
+- `question`, `vision` and `yours` are tour scenes, so rewriting them changes
+  the published tour and their recorded voice.
 
 ## The invitation
 
@@ -230,6 +306,54 @@ is used twice.
 - **The marketplace** is `market`, a new tile on the road after `creations`
   (added 2026-11-10).
 - **The contract** belongs on `creations`, promoted.
+
+## Coverage: what the presentation still omits
+
+Audited 2026-11-10 against `doctrine.codex` and the documented behaviours,
+reading what each tile actually says. Covered well today: signatures and
+recomputing (I1, M1), history (H1 to H3), publishing, the sentence and the
+agent (C3, C4), signed modules (B2), no pushed updates (T4).
+
+**The ten that were central and unsaid, most important first, and what now
+carries each:**
+
+1. **What a host adds** (T1, P1, M2). `hosting` covers it; promoted
+   2026-11-10.
+2. **The name is the address** (N1, N2, M4). `word` covers it; promoted
+   2026-11-10.
+3. **The three gates** (T5, T2, T3): whom I take from, what I keep, what may
+   run. `gate`, added 2026-11-10.
+4. **Hide first, delete second** (H4, B3). `hiding`, added 2026-11-10.
+5. **Atomic artifacts, relations as marks** (A1 to A3, N4). `organization`
+   covers it; promoted 2026-11-10.
+6. **The meta envelope** (L2, L4). `meta` covers it; promoted 2026-11-10.
+7. **Pheromones and private interests** (R1 to R3). One sentence is
+   promoted. `interest`, added 2026-11-10.
+8. **Taking a creation whole or by the piece** (T4, T6). `participant`
+   covers it; promoted 2026-11-10.
+9. **The shelf and recents** (A7, A9, H7): a tile is placed, never copied.
+   `shelf`, added 2026-11-10.
+10. **Truth and what is derived from it** (P6, M1 to M3, D1 to D3): a
+    listing or a cache is never proof. `proof`, added 2026-11-10.
+
+Behaviours with no tile at all: notes, tags, the find stance, recents, mail,
+break-apart and organize, agents drawn as bees, voice input, backgrounds.
+Meetings get their tile with `gathering`. Paint (V1 to V6) is code-only
+doctrine and has no page; whether it needs one is open.
+
+**Promoted pages that say more than is built, to correct:**
+
+- `discovery`: its note says "with and, or and not" as if built; that is
+  design. Its scene shows a whole network one domain to a row, also design.
+- `intelligent`: says a stranger's code never runs until you accept it.
+  Code admission is designed, not built.
+- `accessible`: says a desktop app is on the way; it already serves a hive.
+- `history`: "undo is simply reading an earlier step"; undo moves forward to
+  an older signature (H2).
+- `sentence`: "a slash and a word to act"; commands are typed bare in the
+  command stance.
+- `sealed-audiences.md` and `index.md` still call the sealing word unbuilt;
+  the code has it. The documents are behind, not the `market` tile.
 
 ## The improvement loop
 
