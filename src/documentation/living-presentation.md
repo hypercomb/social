@@ -910,10 +910,18 @@ every page, and its 25 scenes are folded into the tiles they explain:
   menu for the tree"*, *"a fullscreen button"*, *"no step in any more, just the
   balanced centered sibling menu."* A page says where it goes in three places,
   and then plays:
-  - **the tree**, a sidebar on the left: every walkable tile, nested as the
-    tree nests. The tiles on the way here stay open and this one is lit; a tile
-    with no page yet is shown as coming. On a phone it is a drawer behind a
-    menu button.
+  - **the tile list**, a sidebar on the left (jwize, 2026-11-10: *"the ai chat
+    list and keeping them all in sync ... it is a flat drilldown tree"*). It is
+    the hive's one tile list, the one the AI chat shows
+    (`assistant/agent-tiles-rail.ts`): one level at a time, an arrow to go
+    inside a tile, back to climb, search for the level in hand. Inside the hive
+    and on the published site the page mounts that list itself
+    (`AgentTilesRailFactory`), and a press on a tile opens its page. A page
+    opened on its own has no hive, so it draws the same list from its own tree,
+    in the same markup and the same stylesheet: `assistant/tiles-rail.css.ts`
+    is that one sheet, and the page build reads it from there
+    (`blocks.spec.ts` fails a page whose copy differs). On a phone it is a
+    drawer behind a menu button.
   - **crumbs**, the way up, in the bar over the video: `protocol / simple`,
     with the fullscreen button beside them. Fullscreen takes the video alone.
   - **the siblings**, balanced and centred under the video: the tiles under the
@@ -937,8 +945,8 @@ every page, and its 25 scenes are folded into the tiles they explain:
     beneath it has neither the button nor the view.
 
   There is no step-in row and no previous or next: the tree goes down, the
-  siblings go across, and the crumbs go up. Every link lands on a page, the tree
-  reaches every page, and the siblings share one parent (`blocks.spec.ts`).
+  siblings go across, and the crumbs go up. Every link lands on a page, the tile
+  list reaches every page, and the siblings share one parent (`blocks.spec.ts`).
 - **A part, or the website.** The website belongs to the root (jwize,
   2026-11-04). A tile's page opened on its own is just that part: one slide,
   no crumbs, no tree, no siblings, and a website icon. The icon opens the
