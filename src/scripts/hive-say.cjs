@@ -4,7 +4,7 @@
 //                             [--attach [http://127.0.0.1:9222]]
 //                             [--browser msedge|chrome|chromium] [--profile <dir>]
 //                             [--headless] [--chrome <browser path>]
-//                             [--participant]
+//                             [--participant] [--door]
 //
 // Opens the hive in a browser this script drives (Playwright) — Microsoft
 // Edge unless --browser names another — and answers HTTP on this machine
@@ -29,6 +29,15 @@
 // uses (`command:submit`), with no gate: for a hive you drive alone. The
 // reply is then what the hive showed while each sentence ran:
 // { said: [{ text, heard }] }.
+//
+// --door speaks to a try- door, which mounts no command line: neither way
+// above is heard there. Each sentence is said through the machine door
+// (`command-line:remote-submit`) as given, one at a time, judged against the
+// grant that door's origin holds, and nobody is asked: the person who started
+// this is the operator. The reply is each sentence's outcome and what the
+// hive showed: { said: [{ text, outcome, heard }] }. The door's page still
+// may not dial this machine; this browser is what carries the sentence
+// (scripts/hive-say-door.cjs).
 //
 // Because it can reach the participant's own door, this listens on 127.0.0.1
 // only and refuses a request that names a web origin other than localhost:
@@ -66,6 +75,11 @@ const CHROME = valueOf('--chrome', '')
 const SETTLE_MS = Number(valueOf('--settle', '900'))
 // Speak as the participant, ungated, instead of as a call from outside.
 const PARTICIPANT = args.includes('--participant')
+// Speak to a door with no command line, through the machine door.
+const DOOR = args.includes('--door')
+// A behaviour is awaited at a door, so a sentence may take as long as it runs.
+const DOOR_DEADLINE_MS = Number(valueOf('--deadline', '60000'))
+const { sayAtDoor } = require('./hive-say-door.cjs')
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -143,6 +157,16 @@ const callInPage = ({ from, lines }) => new Promise(resolve => {
     return { text: line, heard }
   }
 
+  const sayDoor = async text => {
+    await ready()
+    await page.evaluate(() => { window.__hiveSayHeard.length = 0 })
+    const outcome = await page.evaluate(sayAtDoor, { text: text.trim(), deadlineMs: DOOR_DEADLINE_MS })
+    await sleep(SETTLE_MS)
+    await ready()
+    const heard = await page.evaluate(readHeard).catch(() => [])
+    return { text: text.trim(), outcome, heard }
+  }
+
   const server = http.createServer((req, res) => {
     const reply = (status, body) => {
       res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
@@ -165,6 +189,14 @@ const callInPage = ({ from, lines }) => new Promise(resolve => {
       } catch { reply(400, { error: 'send a sentence as text, or JSON { text } or { sentences }' }); return }
       sentences = sentences.map(s => String(s ?? '').trim()).filter(Boolean)
       if (!sentences.length) { reply(400, { error: 'no sentence to say' }); return }
+      if (DOOR) {
+        queue = queue.then(async () => {
+          const said = []
+          for (const sentence of sentences) said.push(await sayDoor(sentence))
+          reply(200, { said })
+        }).catch(error => reply(500, { error: String(error?.message ?? error) }))
+        return
+      }
       if (!PARTICIPANT) {
         // The hive queues calls itself, and each waits for the participant:
         // nothing here holds one request behind another.
@@ -184,7 +216,7 @@ const callInPage = ({ from, lines }) => new Promise(resolve => {
     })
   })
   server.listen(PORT, '127.0.0.1', () => {
-    console.log(`The hive at ${URL_} is listening on http://127.0.0.1:${PORT}/say${PARTICIPANT ? ', speaking as the participant' : ', every call waiting for your Enter'}`)
+    console.log(`The hive at ${URL_} is listening on http://127.0.0.1:${PORT}/say${DOOR ? ', speaking through the machine door' : PARTICIPANT ? ', speaking as the participant' : ', every call waiting for your Enter'}`)
     console.log(`Try: curl -s -X POST http://127.0.0.1:${PORT}/say --data "read /"`)
   })
 

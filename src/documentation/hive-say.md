@@ -95,6 +95,45 @@ Because the door can reach yours, the HTTP side listens on `127.0.0.1` only,
 and refuses any request that names a web origin other than localhost, so no
 web page can drive it. This is the bridge's rule, kept.
 
+## A door with no command line
+
+A `try-` door carries no interface (jwize, 2026-11-10: "the interface is not
+included in the debugging on subdomains"), so neither way above is heard
+there: a call from outside waits for an Enter on a command line the door does
+not mount, and `--participant` speaks to that same command line. `--door`
+speaks to the door instead:
+
+```
+npm run hive:say -- --door --url https://try-review.jwize.com
+curl -s -X POST http://127.0.0.1:4262/say --data "go /meetings"
+```
+
+Each sentence is said as given, one at a time, through the machine door
+(`command-line:remote-submit`). The door's shell hears it without a command
+line (`hypercomb-shared/ui/command-line/remote-door.headless.ts`). Only a
+behaviour word runs: a sentence the reader matches, or a plain `/word args`
+call. A selection, a sigil, a path, a tag and `tile@view` belong to the command
+line and are refused. Every verb is judged by the same gate as any machine's
+line, against the grant that door's origin holds. A door has nowhere to say
+`grant`, so that is the default: everything except taking things away.
+
+Nobody is asked. The person who started `hive-say` at that door is the
+operator. The reply is each sentence's outcome and what the hive showed:
+
+```json
+{ "said": [{ "text": "go /meetings",
+             "outcome": { "kind": "ran", "actions": [{ "command": "go", "args": "/meetings", "ok": true }] },
+             "heard": [] }] }
+```
+
+The door's own policy is untouched. Its page still may not dial this machine,
+and the bridge broker still refuses it ([module-sandbox.md](module-sandbox.md),
+"Door safety"). The browser `hive-say` drives is what carries the sentence.
+The AI and its keys stay outside the door.
+
+Proven by spec from the page function to the door's listener and back
+(`scripts/hive-say-door.spec.ts`). Not yet run against a live door.
+
 ## Your Edge, or its own hive
 
 **Attach to the Edge you use.** Close every Edge window, start Edge with remote
@@ -130,6 +169,8 @@ publish from it to your domains, allow its key with the keys word.
 --settle <ms>           with --participant, how long each sentence is listened to, default 900
 --headless              no window
 --participant           speak as you, ungated, through command:submit
+--door                  speak to a try- door, through the machine door, asking nobody
+--deadline <ms>         with --door, how long one sentence may run, default 60000
 ```
 
 ## Planting your own hive: use the bridge
