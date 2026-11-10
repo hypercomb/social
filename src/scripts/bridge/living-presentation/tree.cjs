@@ -125,9 +125,16 @@ const road = t('road',
   [
     t('question', 'It starts with a question: who decides where your work lives, and who it reaches? Here, it lives with you, and your community connects directly to the ones it cares about most.', 'Tour scene 1, A new way to bee: the question the protocol answers.'),
     t('creations', 'What people make with it today: cards, websites and games, the language, communities.', 'Tour scene 20, Shown by its creations.'),
+    t('market', 'An open exchange of ideas: publish for free from your own domain, and find by word across the hosts you follow. Sealing a page for the people you choose is built and not yet run on a live host, and nothing here moves money.',
+      'No tour scene: its own plate and beats (blocks/plates/road-market.cjs). Free is built; finding by word, none ranked; sealing built (the `private` word, private.queen.ts), not yet run on a live host; payment outside the hive, no platform cut. Docs: presentation-blueprint.md (The marketplace of ideas), sealed-audiences.md, pools-across-hosts.md, bee-story/the-economy.md.'),
     t('coming', 'In progress: the next things being built.', 'Tour scene 21, What comes next. Everything here is planned or in progress, and says so.'),
     t('vision', 'Further out: where the protocol is headed.', 'Tour scene 22, The vision. Planned.'),
-    t('computer', 'The horizon: the hive as a computer.', 'Tour scene 23, The hive is a computer. Planned.'),
+    t('computer', 'The horizon: the hive as a computer.', 'Tour scene 23, The hive is a computer. Planned.', [
+      t('machine', 'There is no shared machine. A program runs where it is used, in your own browser, and the only thing everyone agrees on is the hash of the bytes.',
+        'No tour scene: its own plate and beats (blocks/plates/road-computer-machine.cjs). The comparison with a blockchain, said exactly, and the honest limit said once: no global ledger. Docs: presentation-blueprint.md (Why this does not pay the shared-machine price), signature-system.md, hosting-from-a-machine.md, collapsed-compute.md.'),
+      t('system', 'The hive in the words of an operating system: files, folders, programs, a command line, installing, updates and a network. Each one points at something real.',
+        'No tour scene: its own plate and beats (blocks/plates/road-computer-system.cjs). The map from familiar words to the hive; the rules screen is planned. Docs: presentation-blueprint.md (The shared system, in the words people already know), code-admission.md, install-by-replication.md, every-act-has-a-word.md.'),
+    ]),
     t('yours', 'The invitation: the hive is yours.', 'Tour scene 24, The hive is yours.'),
     t('first-day', 'Your first day: type help, and everything you can do is laid out for you.', 'Tour scene 25, How to bee.'),
   ])
@@ -145,12 +152,12 @@ const WAITING = [
   'protocol/simple/primitive/word', 'protocol/simple/primitive/layer', 'protocol/simple/primitive/meta',
   'protocol/organized/heart', 'protocol/organized/build', 'protocol/organized/layout',
   'protocol/organized/trait', 'protocol/organized/organization',
-  'protocol/collaborative/trial', 'protocol/collaborative/participant', 'protocol/collaborative/sharing',
-  'protocol/collaborative/discovery', 'protocol/collaborative/hosting', 'protocol/collaborative/tapestry',
+  'protocol/collaborative/trial', 'protocol/collaborative/participant',
+  'protocol/collaborative/hosting', 'protocol/collaborative/tapestry',
   'protocol/intelligent/automaton', 'protocol/intelligent/debugging', 'protocol/intelligent/merging',
   'protocol/accessible/reader', 'protocol/accessible/listening', 'protocol/accessible/phone', 'protocol/accessible/motion',
   'protocol/localized/translating', 'protocol/localized/locale',
-  'road/coming', 'road/vision', 'road/computer',
+  'road/coming', 'road/vision',
 ]
 const waiting = new Set(WAITING)
 

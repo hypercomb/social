@@ -99,7 +99,7 @@ the departure animation is not decoration. it is the moment when effort becomes 
 
 ## what the economy is not
 
-the economy is not a marketplace. there are no buyers and sellers competing on price. there are tiles that need filling and bees willing to fill them.
+the economy is not an auction for work. there are no buyers and sellers competing on price. there are tiles that need filling and bees willing to fill them. ideas are another matter: each maker offers theirs from their own domain, free or sealed for the people they choose, with no platform in between (see [the presentation blueprint](../presentation-blueprint.md), "the marketplace of ideas").
 
 the economy is not speculative. there is no token to trade, no liquidity pool to farm, no governance token granting votes proportional to holdings. stablecoin enters, work happens, stablecoin exits. the value created is the project itself, not a financial instrument derived from it.
 

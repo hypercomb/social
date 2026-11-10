@@ -591,14 +591,79 @@ module.exports = {
     eyebrow: 'the road',
     headline: 'Where it *leads*',
     sub: 'One scene per tile, in the order the tour tells them.',
-    picture: hub('road', ['question', 'creations', 'yours', 'first-day'], 'The road and its four scenes'),
+    picture: hub('road', ['question', 'creations', 'market', 'computer', 'yours', 'first-day'], 'The road and its six tiles'),
     beats: [
       { say: 'This is the road: where Hypercomb leads, and how to begin.', lit: ['road'] },
       { say: 'It starts with a question: who decides where your work lives, and who it reaches?', lit: lit('road', 'question') },
       { say: 'Then what people already make with it.', lit: lit('road', 'creations') },
+      { say: 'Along the way: an open exchange of ideas, and the hive as a computer.', lit: lit('road', 'market', 'computer') },
       { say: 'And it ends where you begin: the hive is yours, and your first day.', lit: lit('road', 'yours', 'first-day') },
     ],
     files: ['documentation/living-presentation.md'],
+  },
+
+  'road/market': {
+    eyebrow: 'an exchange of ideas',
+    headline: 'Free, or sealed for those you *choose*',
+    sub: 'Asking one word across your hosts is built; combining words with and, or and not across them is planned.',
+    plate: 'road-market',
+    figcap: 'free, sealed, found by word',
+    beats: [
+      { say: 'This is an open exchange of ideas, and each maker offers theirs from their own domain.', lit: ['maker'] },
+      { say: 'Publishing for free is built: it puts a creation at your domain\'s root, and anyone who follows you can take it.', lit: ['maker', 'free'] },
+      { say: 'Finding is by word: a word has one address on every host, so asking a word asks every host you follow.', lit: ['word', 'hosts'] },
+      { say: 'Nobody\'s list is ranked above another\'s, and nothing is recommended to you.', lit: ['hosts'] },
+      { say: 'A sealed branch stays closed until a key opens it, and then it is taken like anything else.', lit: ['sealed', 'key'] },
+      { say: 'The word that seals a page to the people you name is built, and it has not yet been run on a live host.', lit: ['maker', 'sealed'] },
+      { say: 'Nothing in the hive moves money and no platform takes a cut, so paying a maker happens outside the hive.', lit: ['money'] },
+    ],
+    code: [
+      { path: 'hypercomb-essentials/src/sharing/sealed-publish.ts', from: '//   publish:  closure of the head', lines: 5 },
+    ],
+    files: ['documentation/presentation-blueprint.md', 'documentation/sealed-audiences.md', 'documentation/pools-across-hosts.md', 'documentation/bee-story/the-economy.md', 'hypercomb-essentials/src/sharing/sealed-publish.ts'],
+  },
+
+  'road/computer/machine': {
+    eyebrow: 'no shared machine',
+    headline: 'A program runs where it is *used*',
+    sub: 'A host holds only what was sent to it, so a version lasts because it is copied.',
+    plate: 'road-computer-machine',
+    figcap: 'one machine, or your own',
+    beats: [
+      { say: 'A blockchain is one machine that everybody runs: every node repeats every program.', lit: ['chain'] },
+      { say: 'And all of them must agree on one order of events before anything counts, which is the cost.', lit: ['chain', 'order'] },
+      { say: 'Here there is no shared machine: a program runs where it is used, in your own browser, under your own permissions.', lit: ['own'] },
+      { say: 'The only thing everyone agrees on is arithmetic: a file is named by the SHA-256 hash of its bytes, and you check it yourself.', lit: ['own', 'hash'] },
+      { say: 'A host serves those bytes and runs nothing for you, so more people do not mean more shared work.', lit: ['host', 'hash'] },
+      { say: 'Each person keeps their own version, and two versions simply exist side by side.', lit: ['own', 'versions'] },
+      { say: 'The honest limit: with nothing agreed globally, there is no global ledger, so the hive cannot say by itself who paid whom.', lit: ['ledger'] },
+    ],
+    code: [
+      { path: 'hypercomb-core/src/core/signature.service.ts', from: '  public static async sign(bytes: ArrayBuffer): Promise<Signature> {', lines: 7 },
+    ],
+    files: ['documentation/presentation-blueprint.md', 'documentation/signature-system.md', 'documentation/hosting-from-a-machine.md', 'documentation/collapsed-compute.md', 'hypercomb-core/src/core/signature.service.ts'],
+  },
+
+  'road/computer/system': {
+    eyebrow: 'in words you know',
+    headline: 'An operating system with no *centre*',
+    sub: 'Each familiar word points at something real in the hive.',
+    plate: 'road-computer-system',
+    figcap: 'familiar words, hive words',
+    beats: [
+      { say: 'Think of the hive as an operating system, where every familiar part points at something real.', lit: ['files', 'folders', 'programs', 'command', 'installing', 'updates', 'network'] },
+      { say: 'Files are atoms: bytes stored once, each named by its own signature.', lit: ['files'] },
+      { say: 'Folders are layers: a word, and the words under it.', lit: ['folders'] },
+      { say: 'Programs are bees: signed modules that a tile turns on.', lit: ['programs'] },
+      { say: 'The command line is plain sentences, the same for people and for agents.', lit: ['command'] },
+      { say: 'Installing is replication from a host you follow, and updates are notices you take or skip.', lit: ['installing', 'updates'] },
+      { say: 'The network is the hosts you chose to follow, and it has no centre.', lit: ['network'] },
+      { say: 'Planned, and not built: a single rules screen for accepting code from another domain.', lit: ['rules'] },
+    ],
+    code: [
+      { path: 'hypercomb-essentials/src/sharing/update-scout.service.ts', from: '// Demand-driven by doctrine: one check per boot, no push channel, no', lines: 3 },
+    ],
+    files: ['documentation/presentation-blueprint.md', 'documentation/code-admission.md', 'documentation/install-by-replication.md', 'documentation/every-act-has-a-word.md', 'hypercomb-essentials/src/sharing/update-scout.service.ts'],
   },
 
 
