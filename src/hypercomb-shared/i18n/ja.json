@@ -3871,6 +3871,8 @@
   "meeting.lobby-cancel": "キャンセル",
   "meeting.lobby-join": "参加",
   "meeting.lobby-ready": "カメラの準備ができました",
+  "meeting.lobby-no-microphone": "マイクが見つかりません。音声なしで参加します。",
+  "meeting.no-microphone": "マイクがオンになっていません。ほかの人にはあなたの声が聞こえません。",
   "meeting.lobby-hint": "{width}×{height} · {fps} fps · 1人あたり最大 {mbps} Mbps",
   "meeting.lobby-actual": "{width}×{height} で送信中",
   "meeting.lobby-here": "{needed}人中{here}人が参加中",

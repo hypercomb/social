@@ -2880,6 +2880,8 @@
   "meeting.lobby-cancel": "iptal",
   "meeting.lobby-join": "katıl",
   "meeting.lobby-ready": "Kamera hazır",
+  "meeting.lobby-no-microphone": "Mikrofon bulunamadı. Sessiz katılacaksınız.",
+  "meeting.no-microphone": "Mikrofonunuz açık değil. Diğerleri sizi duyamıyor.",
   "meeting.lobby-hint": "{width}×{height} · {fps} kare/sn · kişi başı en fazla {mbps} Mbps",
   "meeting.lobby-actual": "{width}×{height} gönderiliyor",
   "meeting.lobby-here": "{needed} kişiden {here} kişi burada",
