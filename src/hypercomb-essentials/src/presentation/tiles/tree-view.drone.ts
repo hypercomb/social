@@ -13,8 +13,11 @@
 // reachable from where you are standing.
 //
 // Working ring by ring is first-class: the ring bar along the top is the
-// column index, clicking a ring focuses it (everything else dims), and the
-// rail then reports and acts on that whole ring at once.
+// column index, clicking a ring quiets the others without hiding them, and
+// the rail then reports and acts on that whole ring at once. A selected
+// block lists the behaviours it wears and the views it can open as, and a
+// view — or the block's own subdomain door, when the host has one — is a
+// way out of the tree into that block.
 //
 // Lifecycle uses an idempotent heartbeat plus lineage and ViewMode
 // listeners, fixed host above the Pixi layer, owner-counted `view:active`
@@ -40,6 +43,8 @@ import {
 } from './view-spawn.js'
 
 import { TREE_VIEW } from './tree-view-target.js'
+import type { BriefBehavior } from './tile-brief.js'
+import type { VisualBeeDescriptor } from '../../commands/visual-bee-registry.js'
 import { isLongPressMenu } from '../../navigation/browser-menu.js'
 
 /** House palette — steel on ink, matching the other full-viewport views.
@@ -53,6 +58,13 @@ const TEXT = '#d8e6ee'
 const DIM = 'rgba(216,230,238,0.55)'
 const FAINT = 'rgba(216,230,238,0.32)'
 const STEEL = 'rgb(126,182,214)'
+/** Names sit in ink. The limb hue stays on the wood, not on the word. */
+const NAME = 'rgba(226,236,228,0.92)'
+/** Night garden — the ink stays, with a moss wash and a far cool light. */
+const CANVAS =
+  'radial-gradient(1100px 720px at 14% 58%, rgba(118,148,108,0.09), transparent 62%),' +
+  'radial-gradient(820px 640px at 86% 12%, rgba(96,132,148,0.06), transparent 58%),' +
+  INK
 
 const TOOLBAR_H = 52
 const RINGBAR_H = 34
@@ -87,6 +99,25 @@ const FIT_CEILING = 1.15
 
 type ViewModeShape = EventTarget & { mode: string; setMode(next: string): void }
 type NavigationShape = { goRaw(segments: readonly string[]): void }
+type RegistryShape = { get?(view: string): VisualBeeDescriptor | undefined }
+
+/** One behaviour or view the selected block wears, ready to list. */
+type OfferRow = {
+  view: string
+  icon: string
+  label: string
+  description: string
+  dormant: boolean
+  opensAs: boolean
+  opensInPlace: boolean
+}
+
+type BlockOffer = {
+  behaviors: readonly OfferRow[]
+  views: readonly OfferRow[]
+  /** The host's implicit subdomain door for this place, or '' when it has none. */
+  door: string
+}
 type I18nShape = { t(key: string, params?: Record<string, string | number>): string }
 type ModeRegistryShape = { enter(mode: string, owner: string): void; exit(mode: string, owner: string): void }
 
@@ -105,7 +136,7 @@ type Mount = {
   zoomLabel: HTMLSpanElement
   crumb: HTMLDivElement
   nodeEls: Map<number, SVGGElement>
-  ribbonEls: Map<number, SVGPathElement>
+  ribbonEls: Map<number, SVGGElement>
   /** Flat hex fills, hidden once a node's picture lands on top. */
   hexFills: Map<number, SVGPathElement>
   iconEls: Map<number, SVGImageElement>
@@ -196,6 +227,10 @@ export class TreeViewDrone extends Drone {
   #iconCache = new TreeIconCache()
   #iconTimer: ReturnType<typeof setTimeout> | null = null
   #iconsLoading = false
+  /** Invalidates an in-flight behaviour read when the selection moves. */
+  #offerSeq = 0
+  /** What a path wears, so a re-paint (zoom, fold) does not flash "reading…". */
+  #offerCache = new Map<string, BlockOffer>()
 
   protected override deps = {
     lineage: '@hypercomb.social/Lineage',
@@ -287,6 +322,7 @@ export class TreeViewDrone extends Drone {
     this.#dataKey = ''
     this.#ceilingHit = false
     this.#noticeDismissed = false
+    this.#offerCache.clear()
     this.#sync()
   }
 
@@ -474,6 +510,7 @@ export class TreeViewDrone extends Drone {
     this.#refreshTimer = setTimeout(() => {
       this.#refreshTimer = null
       this.#dataKey = ''
+      this.#offerCache.clear()
       this.#sync()
     }, 400)
   }
@@ -695,7 +732,7 @@ export class TreeViewDrone extends Drone {
       // while you flip between views. Both vars default to 0px = full screen.
       'position:fixed;top:0;bottom:0;' +
       'left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);' +
-      `z-index:${Z_BASE};overflow:auto;background:${INK};` +
+      `z-index:${Z_BASE};overflow:auto;background:${CANVAS};` +
       `color:${TEXT};font-family:inherit;overscroll-behavior:contain;`,
     )
     host.id = 'hc-tree-view-host'
@@ -1024,7 +1061,7 @@ export class TreeViewDrone extends Drone {
       cell.textContent = ring.depth === 0
         ? this.#t('tree.ring.trunk', 'TRUNK · {n}', { n: ring.count })
         : this.#t('tree.ring.label', 'RING {d} · {n}', { d: ring.depth, n: ring.count })
-      cell.title = this.#t('tree.ring.hint', 'Focus this ring — everything else dims')
+      cell.title = this.#t('tree.ring.hint', 'Quiet the other rings — the nodes stay visible')
       cell.addEventListener('click', () => {
         this.#ringFocus = focused ? null : ring.depth
         this.#selected = null
@@ -1076,7 +1113,7 @@ export class TreeViewDrone extends Drone {
     for (const ring of layout.rings) {
       guides.appendChild(svgEl('line', {
         x1: ring.x, y1: 0, x2: ring.x, y2: layout.height,
-        stroke: this.#ringFocus === ring.depth ? 'rgba(126,182,214,0.16)' : 'rgba(126,182,214,0.05)',
+        stroke: this.#ringFocus === ring.depth ? 'rgba(180,200,176,0.16)' : 'rgba(180,200,176,0.04)',
         'stroke-width': this.#ringFocus === ring.depth ? 2 : 1,
       }))
     }
@@ -1084,14 +1121,22 @@ export class TreeViewDrone extends Drone {
 
     const ribbonLayer = svgEl('g')
     for (const ribbon of layout.ribbons) {
-      const path = svgEl('path', {
+      const group = svgEl('g')
+      group.style.transition = 'opacity 280ms ease'
+      group.appendChild(svgEl('path', {
         d: ribbon.d,
-        fill: limbColor(ribbon.hue, ribbon.depth, 0.72),
+        fill: limbColor(ribbon.hue, ribbon.depth, 0.46),
         stroke: 'none',
-      })
-      path.style.transition = 'opacity 120ms ease'
-      ribbonLayer.appendChild(path)
-      mount.ribbonEls.set(ribbon.to, path)
+      }))
+      group.appendChild(svgEl('path', {
+        d: ribbon.spine,
+        fill: 'none',
+        stroke: limbColor(ribbon.hue, ribbon.depth, 0.5),
+        'stroke-width': 0.75,
+        'stroke-linecap': 'round',
+      }))
+      ribbonLayer.appendChild(group)
+      mount.ribbonEls.set(ribbon.to, group)
     }
     svg.appendChild(ribbonLayer)
 
@@ -1104,7 +1149,7 @@ export class TreeViewDrone extends Drone {
     const mount = this.#mount as Mount
     const group = svgEl('g')
     group.style.cursor = 'pointer'
-    group.style.transition = 'opacity 120ms ease'
+    group.style.transition = 'opacity 280ms ease'
 
     const color = limbColor(node.hue, node.depth)
     const hasChildren = node.childCount > 0
@@ -1124,16 +1169,17 @@ export class TreeViewDrone extends Drone {
     if (called) {
       group.appendChild(svgEl('circle', {
         cx: node.x, cy: node.y, r: markerExtent + 4.5,
-        fill: 'none', stroke: STEEL, 'stroke-width': 1.5,
-        'stroke-dasharray': '2 3', opacity: 0.95,
+        fill: 'none', stroke: 'rgba(190,214,186,0.8)', 'stroke-width': 1,
+        'stroke-dasharray': '2 3', opacity: 0.85,
       }))
     }
 
-    // Selection halo, drawn first so it reads as a glow behind the marker.
+    // A pale ring, not a lamp — the selected node stays findable and the
+    // neighbours stay readable beside it.
     if (this.#selected === node.id) {
       group.appendChild(svgEl('circle', {
-        cx: node.x, cy: node.y, r: markerExtent + 7,
-        fill: 'none', stroke: STEEL, 'stroke-width': 1.5, opacity: 0.9,
+        cx: node.x, cy: node.y, r: markerExtent + 8,
+        fill: 'none', stroke: 'rgba(226,236,228,0.7)', 'stroke-width': 1, opacity: 0.95,
       }))
     }
 
@@ -1148,14 +1194,14 @@ export class TreeViewDrone extends Drone {
       const fill = svgEl('path', {
         d: silhouette,
         fill: node.collapsed ? INK : color,
-        opacity: node.collapsed ? 1 : 0.9,
+        opacity: node.collapsed ? 1 : 0.58,
       })
       group.appendChild(fill)
       mount.hexFills.set(node.id, fill)
       // Outline last so it sits over whichever of fill/picture is showing.
       group.appendChild(svgEl('path', {
         d: silhouette,
-        fill: 'none', stroke: color, 'stroke-width': node.collapsed ? 2 : 1.25,
+        fill: 'none', stroke: color, 'stroke-width': node.collapsed ? 1.5 : 1,
         'stroke-linejoin': 'round',
       }))
       if (isLeaf) {
@@ -1186,7 +1232,7 @@ export class TreeViewDrone extends Drone {
     const label = svgEl('text', {
       x: node.x + markerExtent + (node.walked ? 9 : 18) + (called ? 4 : 0),
       y: node.y + 4,
-      fill: called ? STEEL : (node.depth === 0 ? TEXT : color),
+      fill: called ? STEEL : (node.depth === 0 ? TEXT : NAME),
       'font-size': node.depth === 0 ? 15 : 13,
       'font-weight': called ? 700 : (node.depth === 0 ? 700 : (hasChildren ? 600 : 400)),
       'paint-order': 'stroke',
@@ -1240,8 +1286,9 @@ export class TreeViewDrone extends Drone {
 
   // ── emphasis (hover path / ring focus / filter) ────────────
 
-  /** Ids to keep lit, or null when nothing is dimmed. Ancestors always ride
-   *  along: a highlighted twig with an invisible limb reads as floating. */
+  /** Ids to keep fully lit, or null when nothing is quieted. Ancestors always
+   *  ride along: a highlighted twig with an invisible limb reads as floating.
+   *  Quieting is a wash, never a blackout — a focused branch is still a tree. */
   #emphasis(): Set<number> | null {
     const layout = this.#layout
     if (!layout) return null
@@ -1277,11 +1324,16 @@ export class TreeViewDrone extends Drone {
     const mount = this.#mount
     if (!mount) return
     const lit = this.#emphasis()
+    // A hover is a glance. A ring focus or a filter is a choice. Both leave
+    // the nodes you did not pick readable — names, pictures, and limbs.
+    const glance = this.#hovered !== null && this.#ringFocus === null && !this.#filter.trim()
+    const nodeDim = glance ? '0.78' : '0.62'
+    const ribbonDim = glance ? '0.58' : '0.42'
     for (const [id, el] of mount.nodeEls) {
-      el.style.opacity = !lit || lit.has(id) ? '1' : '0.16'
+      el.style.opacity = !lit || lit.has(id) ? '1' : nodeDim
     }
     for (const [id, el] of mount.ribbonEls) {
-      el.style.opacity = !lit || lit.has(id) ? '1' : '0.08'
+      el.style.opacity = !lit || lit.has(id) ? '1' : ribbonDim
     }
   }
 
@@ -1313,6 +1365,7 @@ export class TreeViewDrone extends Drone {
     if (clamped === this.#rings) return
     this.#rings = clamped
     this.#dataKey = ''
+    this.#offerCache.clear()
     this.#sync()
   }
 
@@ -1472,7 +1525,9 @@ export class TreeViewDrone extends Drone {
     if (!node.walked) stats.push(this.#t('tree.rail.deeper', 'deeper rings not walked'))
     rail.appendChild(this.#field(this.#t('tree.rail.holds', 'Holds'), stats.join(' · ')))
 
-    const actions = div('display:flex;flex-direction:column;gap:8px;margin-top:20px;')
+    this.#mountOfferings(rail, node)
+
+    const actions = div('display:flex;flex-direction:column;gap:8px;margin-top:8px;')
 
     // Calling comes first — it is the point of having a node selected while a
     // fragment is open.
@@ -1514,6 +1569,198 @@ export class TreeViewDrone extends Drone {
       () => void this.#copy(node.sig, this.#t('tree.copied.sig', 'Signature copied')),
     ))
     rail.appendChild(actions)
+  }
+
+  /** Behaviours the block wears, and the views among them that can open it.
+   *  A render behaviour is a view (the door into the block). A navigation
+   *  behaviour, or one the registry does not know, stays in the inventory. */
+  #mountOfferings(rail: HTMLDivElement, node: PlacedNode): void {
+    const host = div('margin-top:6px;')
+    rail.appendChild(host)
+    if (!node.segments) {
+      host.appendChild(div(
+        `font-size:12px;color:${DIM};line-height:1.5;margin-bottom:8px;`,
+        this.#t('tree.rail.noPathOffer', 'Reached by signature — behaviours live on a path.'),
+      ))
+      return
+    }
+    const key = node.segments.join('\u0000')
+    const cached = this.#offerCache.get(key)
+    if (cached) { this.#renderOffer(host, node, cached); return }
+    host.appendChild(div(
+      `font-size:12px;color:${FAINT};margin-bottom:8px;`,
+      this.#t('tree.rail.reading', 'Reading behaviours…'),
+    ))
+    const seq = ++this.#offerSeq
+    const id = node.id
+    void this.#readOffer(node.segments).then(offer => {
+      if (seq !== this.#offerSeq || this.#selected !== id) return
+      this.#offerCache.set(key, offer)
+      const live = this.#layout?.nodes.find(n => n.id === id)
+      if (!live || !this.#mount) return
+      this.#renderOffer(host, live, offer)
+    }).catch(() => {
+      if (seq !== this.#offerSeq) return
+      host.replaceChildren(div(
+        `font-size:12px;color:${DIM};`,
+        this.#t('tree.rail.offerFailed', 'Could not read what this block wears.'),
+      ))
+    })
+  }
+
+  async #readOffer(segments: readonly string[]): Promise<BlockOffer> {
+    const [{ readTileBrief }, { subdomainUrl }] = await Promise.all([
+      import('./tile-brief.js'),
+      import('../../sharing/zone-door.js'),
+    ])
+    const brief = await readTileBrief(segments)
+    const registry = window.ioc?.get<RegistryShape>('@diamondcoreprocessor.com/VisualBeeRegistry')
+    const behaviors: OfferRow[] = []
+    const views: OfferRow[] = []
+    for (const behavior of brief.behaviors) {
+      const bee = registry?.get?.(behavior.view)
+      const row = this.#offerRow(behavior, bee)
+      if (bee && bee.behavior !== 'navigation') views.push(row)
+      else behaviors.push(row)
+    }
+    let door = ''
+    try { door = subdomainUrl(location.host, segments) } catch { door = '' }
+    return { behaviors, views, door }
+  }
+
+  #offerRow(behavior: BriefBehavior, bee: VisualBeeDescriptor | undefined): OfferRow {
+    return {
+      view: behavior.view,
+      icon: behavior.icon,
+      label: behavior.label,
+      description: behavior.description,
+      dormant: behavior.dormant,
+      opensAs: behavior.opensAs,
+      opensInPlace: bee?.opensOnTileClick === true,
+    }
+  }
+
+  #renderOffer(host: HTMLDivElement, node: PlacedNode, offer: BlockOffer): void {
+    host.replaceChildren()
+    host.appendChild(this.#offerList(
+      this.#t('tree.rail.behaviors', 'Behaviours'),
+      offer.behaviors,
+      null,
+    ))
+    host.appendChild(this.#offerList(
+      this.#t('tree.rail.views', 'Views'),
+      offer.views,
+      (row) => { void this.#openView(node, row) },
+    ))
+    if (!offer.door) return
+    const wrap = div('margin:4px 0 12px;')
+    wrap.appendChild(div(
+      `font-size:11px;color:${FAINT};margin-bottom:8px;word-break:break-all;`,
+      offer.door,
+    ))
+    const door = this.#railButton(
+      this.#t('tree.action.openDoor', 'Open at its door'),
+      () => this.#openDoor(offer.door),
+      true,
+    )
+    door.title = offer.door
+    wrap.appendChild(door)
+    host.appendChild(wrap)
+  }
+
+  #offerList(
+    title: string,
+    rows: readonly OfferRow[],
+    open: ((row: OfferRow) => void) | null,
+  ): HTMLDivElement {
+    const section = div('margin-bottom:14px;')
+    section.appendChild(div(
+      `font-size:10px;letter-spacing:0.14em;color:${FAINT};margin-bottom:6px;`,
+      title.toUpperCase(),
+    ))
+    if (rows.length === 0) {
+      section.appendChild(div(
+        `font-size:12px;color:${DIM};line-height:1.5;`,
+        this.#t('tree.rail.noneWorn', 'None worn here.'),
+      ))
+      return section
+    }
+    const list = div('display:flex;flex-direction:column;gap:2px;')
+    for (const row of rows) {
+      const actionable = !!open && !row.dormant
+      const line = div(
+        'display:flex;align-items:center;gap:8px;padding:6px;border-radius:var(--hc-radius-floating, 4px);' +
+        `font-size:12px;color:${row.dormant ? FAINT : DIM};` +
+        (actionable ? 'cursor:pointer;' : ''),
+      )
+      const icon = div(
+        "flex:none;font-family:'Material Symbols Outlined';font-weight:400;font-size:16px;line-height:1;" +
+        "font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 20;",
+        row.icon || 'extension',
+      )
+      const name = div('min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', row.label)
+      line.append(icon, name)
+      if (row.opensAs) {
+        line.appendChild(div(
+          `margin-left:auto;flex:none;font-size:10px;letter-spacing:0.06em;color:${FAINT};`,
+          this.#t('tree.rail.opensAs', 'opens as'),
+        ))
+      } else if (row.dormant) {
+        line.appendChild(div(
+          `margin-left:auto;flex:none;font-size:10px;letter-spacing:0.06em;color:${FAINT};`,
+          this.#t('tree.rail.asleep', 'asleep'),
+        ))
+      }
+      if (row.description) line.title = row.description
+      if (actionable) {
+        line.addEventListener('mouseenter', () => {
+          line.style.background = 'rgba(180,200,170,0.10)'
+          line.style.color = TEXT
+        })
+        line.addEventListener('mouseleave', () => {
+          line.style.background = 'transparent'
+          line.style.color = DIM
+        })
+        line.addEventListener('click', () => open(row))
+      }
+      list.appendChild(line)
+    }
+    section.appendChild(list)
+    return section
+  }
+
+  /** Leave the tree into this block, drawn as `row`'s view. An in-place view
+   *  mounts itself. A render view is walked to its entrance first, the same
+   *  step an icon on the tile takes, then the surface flips. Choosing a
+   *  destination drops the way back into the tree. */
+  async #openView(node: PlacedNode, row: OfferRow): Promise<void> {
+    if (!node.segments || row.dormant || !row.view) return
+    const segments = [...node.segments]
+    if (row.opensInPlace) {
+      // The view flips the surface itself. Leaving onto that view — not the
+      // hexagons — drops the tree's way back inside the mode handler.
+      EffectBus.emit('view:open-for-tile', { view: row.view, segments })
+      return
+    }
+    const bee = window.ioc?.get<RegistryShape>('@diamondcoreprocessor.com/VisualBeeRegistry')?.get?.(row.view)
+    const { resolveViewEntrance } = await import('../../commands/view-entrance.js')
+    const entrance = bee ? await resolveViewEntrance(bee, segments) : segments
+    if (this.#vm()?.mode !== TREE_VIEW || this.#selected !== node.id) return
+    // A destination outranks the way back in. Null it before the flip so an
+    // exit that lands on the hexagons does not restore the tree's origin.
+    this.#spawn = null
+    window.ioc?.get<NavigationShape>('@hypercomb.social/Navigation')?.goRaw([...entrance])
+    this.#vm()?.setMode(row.view)
+  }
+
+  #openDoor(url: string): void {
+    if (!url) return
+    const opened = window.open(url, '_blank', 'noopener,noreferrer')
+    if (opened) return
+    EffectBus.emit('activity:log', {
+      message: this.#t('tree.door.blocked', 'The browser kept the door closed'),
+      icon: '⌥',
+    })
   }
 
   #paintRingRail(rail: HTMLDivElement, layout: TreeLayout): void {

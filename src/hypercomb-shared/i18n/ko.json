@@ -2880,6 +2880,8 @@
   "meeting.lobby-cancel": "취소",
   "meeting.lobby-join": "참여",
   "meeting.lobby-ready": "카메라 준비 완료",
+  "meeting.lobby-no-microphone": "마이크를 찾을 수 없습니다. 소리 없이 참여합니다.",
+  "meeting.no-microphone": "마이크가 켜져 있지 않습니다. 다른 사람들이 당신의 소리를 들을 수 없습니다.",
   "meeting.lobby-hint": "{width}×{height} · {fps} fps · 한 사람당 최대 {mbps} Mbps",
   "meeting.lobby-actual": "{width}×{height}로 전송 중",
   "meeting.lobby-here": "{needed}명 중 {here}명 참석",

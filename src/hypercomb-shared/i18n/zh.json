@@ -2880,6 +2880,8 @@
   "meeting.lobby-cancel": "取消",
   "meeting.lobby-join": "加入",
   "meeting.lobby-ready": "摄像头已就绪",
+  "meeting.lobby-no-microphone": "未找到麦克风。你将以无声方式加入。",
+  "meeting.no-microphone": "你的麦克风未开启。其他人听不到你。",
   "meeting.lobby-hint": "{width}×{height} · {fps} fps · 每人最高 {mbps} Mbps",
   "meeting.lobby-actual": "正在发送 {width}×{height}",
   "meeting.lobby-here": "{needed} 人中已到 {here} 人",

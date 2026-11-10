@@ -85,6 +85,21 @@ const TOKENS = `
   --shadow:0 1px 0 rgba(0,0,0,.04), 0 10px 28px -20px rgba(0,0,0,.25);
 }`
 
+// THE TILE LIST'S ONE STYLESHEET (jwize 2026-11-10: "the ai chat list and keeping
+// them all in sync"). Read from the module the hive's own list uses
+// (assistant/tiles-rail.css.ts) when the page is built, so a page's sidebar
+// cannot look different from the chat window's list.
+const RAIL_CSS = (() => {
+  const fs = require('fs'), path = require('path')
+  const file = path.join(__dirname, '..', '..', '..', '..', 'hypercomb-essentials', 'src', 'assistant', 'tiles-rail.css.ts')
+  // The module is constants and one template string (it promises so in its header),
+  // so it is evaluated as plain JavaScript: no compiler in the page build.
+  const code = fs.readFileSync(file, 'utf8').replace(/^export const /gm, 'const ') + '\nreturn RAIL_CSS'
+  const css = new Function(code)()
+  if (typeof css !== 'string' || !css.includes('.hc-rail-row')) throw new Error('page.cjs: the tile list stylesheet did not load from ' + file)
+  return css
+})()
+
 const STYLE = `
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
@@ -103,7 +118,7 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .page{width:min(1280px,100%);margin:0 auto;padding:14px 16px 0;position:relative;
   height:calc(100vh - var(--hc-site-chrome-bottom,0px));height:calc(100dvh - var(--hc-site-chrome-bottom,0px));min-height:520px;
   display:grid;grid-template-columns:230px minmax(0,1fr);column-gap:22px;--measure:780px}
-.stage{container-type:inline-size;display:grid;grid-template-rows:auto minmax(0,1fr) auto;min-height:0;min-width:0}
+.stage{container-type:inline-size;display:grid;grid-template-rows:auto minmax(0,1fr) auto auto;min-height:0;min-width:0}
 .mono-label{font-family:var(--mono);font-size:12px;line-height:1.3;letter-spacing:var(--track-label);text-transform:uppercase}
 
 /* ---------- where you are ---------- */
@@ -126,7 +141,7 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
   text-transform:uppercase;color:var(--dim);background:none;border:1px solid var(--line);border-radius:var(--r-ctl);padding:5px 10px;cursor:pointer}
 .to-site:hover{color:var(--honey);border-color:var(--honey-deep);background:var(--honey-tint)}
 .to-site .g{color:var(--honey);font-size:13px}
-.page.part .crumbs,.page.part .tree,.page.part .sibs{visibility:hidden}
+.page.part .crumbs,.page.part .tree,.page.part .sibs,.page.part .explore,.page.part .to-explore,.page.part .kids-row{visibility:hidden}
 .page.part .to-site{display:inline-flex}
 
 /* ---------- the scene ---------- */
@@ -270,18 +285,18 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .voice[aria-pressed="false"] .i-muted{display:block}
 
 /* ---------- inside: the children, each the next level down ---------- */
-/* THE TREE MENU: every walkable tile, nested; the ones on the way to this page
-   stay open, and this one is lit. */
-.tree{grid-column:1;min-height:0;overflow-y:auto;scrollbar-width:thin;padding:6px 12px 14px 0;border-right:1px solid var(--line);font-family:var(--mono);font-size:13px}
-.tree .lbl{display:block;color:var(--honey-deep);margin:2px 0 8px}
-.tree ul{list-style:none;margin:0;padding:0}
-.tree ul ul{margin:2px 0 4px 11px;padding-left:9px;border-left:1px solid var(--line)}
-.tree summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:6px}
-.tree summary::-webkit-details-marker{display:none}
-.tree summary::before{content:"";flex:none;width:6px;height:6px;border-right:1.5px solid var(--faint-text);border-bottom:1.5px solid var(--faint-text);transform:rotate(-45deg);transition:transform .15s}
-.tree details[open]>summary::before{transform:rotate(45deg)}
-.tree li.leaf{padding-left:12px}
-.tree a,.tree .soon{display:block;flex:1;min-width:0;padding:4px 8px;border-radius:var(--r-ctl);text-decoration:none;color:var(--dim);
+/* THE TILE LIST on the left: the hive's own list (assistant/agent-tiles-rail.ts),
+   one level at a time. Its stylesheet is the shared one; these lines only give it
+   the page's colours and a column to stand in. */
+.tree{grid-column:1;min-height:0;display:flex;flex-direction:column;border-right:1px solid var(--line);padding-right:10px;
+  --hc-window-ink-quiet:var(--faint-text);--hc-window-ink-loud:var(--ink);--hc-window-ink-plain:var(--dim);--hc-panel-ink:var(--dim);
+  --hc-mono:var(--mono);--hc-radius-control:var(--r-ctl);--hc-radius-card:var(--r-card);
+  --hc-window-accent:var(--honey);--hc-window-accent-quiet:var(--honey-deep);--hc-window-wash:var(--honey-tint);--hc-window-tint:var(--honey-tint);
+  --hc-window-edge:var(--line);--hc-window-edge-firm:var(--line-strong);--hc-deepen:rgba(0,0,0,.18);--hc-status-alert:var(--danger)}
+.tree [data-rail]{display:flex;flex-direction:column;min-height:0;flex:1}
+.tree .hc-rail-list{flex:1;min-height:0;overflow-y:auto;scrollbar-width:thin}
+.tree .mat-sym svg{width:1em;height:1em;display:block}
+.tree a.hc-rail-main{text-decoration:none;color:inherit}
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:var(--track-data);transition:color .15s,background .15s}
 .tree a:hover{color:var(--honey);background:var(--honey-tint)}
 .tree [aria-current]{color:var(--ink);background:var(--honey-tint);box-shadow:inset 2px 0 0 var(--honey)}
@@ -289,6 +304,32 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 /* THE SIBLING MENU, balanced and centred under the video (jwize 2026-11-08:
    "no step in any more just the balanced centered sibling menu"): the tiles
    under the same parent, this one lit; the parent's name stands in brackets. */
+.explore{display:flex;justify-content:flex-end;padding:8px 0 2px}
+.explore a{display:inline-flex;align-items:center;gap:8px;max-width:100%;padding:9px 16px;border-radius:999px;border:1px solid var(--honey);color:var(--honey);background:rgba(217,163,28,.08);
+  font-family:var(--mono);font-size:12.5px;letter-spacing:.04em;text-decoration:none;transition:background .15s,color .15s}
+.explore a b{font-weight:600;color:var(--ink,#fff);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.explore a:hover,.explore a:focus-visible{background:var(--honey);color:#14100a}
+.explore a:hover b,.explore a:focus-visible b{color:#14100a}
+.explore svg{width:14px;height:14px;flex:none}
+.top .to-explore{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--honey);text-decoration:none;padding:6px 10px;border:1px solid transparent;border-radius:6px}
+.top .to-explore:hover{border-color:var(--honey)}
+@media (max-width:900px){.top .to-explore{display:none}}
+.when-kids,.kids,.sibs.kids-row{display:none}
+.page[data-view="children"] .when-video,.page[data-view="children"] .scene,.page[data-view="children"] .sibs[data-part="siblings"]{display:none}
+.page[data-view="children"] .when-kids{display:inline}
+.page[data-view="children"] .kids{display:block}
+.page[data-view="children"] .sibs.kids-row{display:flex}
+.kids{min-height:0;overflow:auto;padding:18px 4px 8px}
+.kids .eyebrow{text-align:center}
+.kids h2{font-weight:300;font-size:clamp(24px,3.6cqi,40px);line-height:1.1;margin:0 0 .9em;text-align:center;letter-spacing:var(--track-display)}
+.kids h2 em{font-style:normal;color:var(--honey)}
+.kidgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,260px));justify-content:center;gap:12px;max-width:var(--measure);margin:0 auto}
+.kid{display:flex;flex-direction:column;gap:6px;padding:14px 16px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.03);color:inherit;text-decoration:none;transition:border-color .15s,background .15s}
+a.kid:hover,a.kid:focus-visible{border-color:var(--honey);background:rgba(217,163,28,.07)}
+.kid h3{margin:0;font-family:var(--mono);font-size:13px;letter-spacing:.06em;font-weight:500;color:var(--ink,#fff);display:flex;align-items:center;gap:8px}
+.kid h3 svg{width:12px;height:12px;color:var(--honey);flex:none}
+.kid p{margin:0;font-size:13px;line-height:1.45;color:var(--muted,#9fb0bd)}
+.kid.soon{opacity:.5}
 .sibs{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px 8px;padding:10px 0 12px;border-top:1px solid var(--line)}
 .sibs .lbl{flex-basis:100%;text-align:center;color:var(--faint-text)}
 .sibs a.sib,.sibs span.sib{display:inline-flex;align-items:center;gap:.5em;text-decoration:none;color:var(--ink);
@@ -338,6 +379,100 @@ const SCRIPT = `
   const el = page.querySelector('.scene')
   const still = matchMedia('(prefers-reduced-motion: reduce)').matches
   const gone = () => !page.isConnected
+  // The hive's tile list, drawn without the hive: the same rows and head as
+  // assistant/agent-tiles-rail.ts, in its own stylesheet, from the page's tree.
+  // It opens where you stand, lists what is inside, and climbs with back.
+  const GLYPHS = {
+    back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>',
+    forward: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/></svg>',
+    search: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>',
+    hive: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M7.5 3.5h9l4.5 8.5-4.5 8.5h-9L3 12z"/></svg>',
+  }
+  const drawTileList = (host, data) => {
+    const el = (tag, cls) => { const n = document.createElement(tag); if (cls) n.className = cls; return n }
+    const glyph = (name) => { const g = el('span', 'mat-sym'); g.setAttribute('aria-hidden', 'true'); g.innerHTML = GLYPHS[name]; return g }
+    const here = (data.here || []).map(String)
+    const kidsAt = (path) => {
+      let level = data.menu || []
+      for (const seg of path) { const n = level.find(x => x.name === seg); if (!n) return []; level = n.children || [] }
+      return level
+    }
+    const trail = [[]]
+    for (let i = 1; i <= here.length; i++) trail.push(here.slice(0, i))
+    let query = ''
+    host.textContent = ''
+    const head = el('div', 'hc-rail-head')
+    const back = el('button', 'hc-rail-back'); back.type = 'button'
+    const title = el('span', 'hc-rail-title')
+    const find = el('div', 'hc-rail-find')
+    const input = document.createElement('input')
+    input.type = 'search'; input.autocomplete = 'off'; input.spellcheck = false
+    input.placeholder = 'Search this level'; input.setAttribute('aria-label', 'Search this level')
+    find.appendChild(input)
+    const toggle = el('button', 'hc-rail-find-toggle'); toggle.type = 'button'
+    toggle.title = 'Search this level'; toggle.setAttribute('aria-label', 'Search this level'); toggle.appendChild(glyph('search'))
+    head.append(back, title, find, toggle)
+    const list = el('div', 'hc-rail-list'); list.setAttribute('role', 'list')
+    host.append(head, list)
+    const setFinding = (on) => {
+      const open = on || !!query
+      head.classList.toggle('finding', open); toggle.setAttribute('aria-pressed', String(open))
+      if (on) input.focus()
+    }
+    const clear = () => { query = ''; input.value = '' }
+    const paint = () => {
+      const path = trail[trail.length - 1]
+      const atRoot = trail.length <= 1
+      title.textContent = path[path.length - 1] || 'hive'
+      title.title = '/' + path.join(' / ')
+      back.disabled = atRoot; back.classList.toggle('root', atRoot)
+      back.replaceChildren(glyph(atRoot ? 'hive' : 'back'))
+      const parent = trail[trail.length - 2]
+      const label = atRoot ? '' : 'Back to ' + ((parent && parent[parent.length - 1]) || 'hive')
+      back.title = label
+      if (label) back.setAttribute('aria-label', label); else back.removeAttribute('aria-label')
+      list.textContent = ''
+      const rows = kidsAt(path).filter(n => !query || n.name.toLowerCase().includes(query))
+      if (!rows.length) {
+        const empty = el('div', 'hc-rail-empty')
+        empty.textContent = query ? 'No tile here by that name.' : 'Nothing inside this tile yet.'
+        list.appendChild(empty); return
+      }
+      const group = el('div', 'hc-rail-group')
+      for (const n of rows) {
+        const at = path.concat([n.name])
+        const isHere = at.join('/') === here.join('/')
+        const wrap = el('div', 'hc-rail-row'); wrap.setAttribute('role', 'listitem')
+        wrap.classList.toggle('current', isHere)
+        const main = el(n.href ? 'a' : 'span', 'hc-rail-main')
+        if (n.href) { main.href = n.href; main.title = 'Open ' + n.name }
+        else { main.title = n.name + ' (its page is coming)'; main.setAttribute('aria-disabled', 'true'); main.style.opacity = '.55' }
+        if (isHere) main.setAttribute('aria-current', 'true')
+        const icon = el('span', 'hc-rail-icon'); icon.textContent = (n.name.trim().charAt(0) || '·').toUpperCase()
+        const name = el('span', 'hc-rail-name'); name.textContent = n.name
+        main.append(icon, name); wrap.appendChild(main)
+        if (n.children && n.children.length) {
+          const walk = el('button', 'hc-rail-walk'); walk.type = 'button'
+          walk.appendChild(glyph('forward'))
+          walk.title = 'Go inside ' + n.name; walk.setAttribute('aria-label', 'Go inside ' + n.name)
+          walk.onclick = (e) => { e.stopPropagation(); e.preventDefault(); trail.push(at); clear(); paint() }
+          wrap.appendChild(walk)
+        }
+        group.appendChild(wrap)
+      }
+      list.appendChild(group)
+    }
+    back.onclick = () => { if (trail.length > 1) { trail.pop(); clear(); paint() } }
+    toggle.onclick = () => setFinding(!head.classList.contains('finding') || !!query)
+    input.oninput = () => { query = input.value.trim().toLowerCase(); paint() }
+    input.onkeydown = (e) => {
+      if (e.key !== 'Escape') return
+      e.preventDefault(); e.stopPropagation()
+      if (query || input.value) { clear(); paint() } else setFinding(false)
+    }
+    input.onblur = () => { if (!input.value.trim()) setFinding(false) }
+    paint()
+  }
   const steps = JSON.parse(el.querySelector('script[type="application/json"]').textContent)
   const fz = el.querySelector('.fz')
   const ticks = [...el.querySelectorAll('.tick')]
@@ -377,8 +512,58 @@ const SCRIPT = `
     menuBtn.onclick = () => drawer(!page.classList.contains('menu-open'))
     treeNav.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('a')) drawer(false) })
   } else if (menuBtn) menuBtn.hidden = true
+  // THE TILE LIST. Inside the hive (and on the published site) the hive's own list is
+  // mounted here, the one the AI chat shows, and a press on a tile opens that tile's page.
+  // A page opened on its own has no hive, so it draws the same list from its own tree:
+  // the same markup, the same stylesheet, one level at a time.
+  const railHost = page.querySelector('[data-rail]')
+  if (railHost) {
+    let railData = null
+    try { railData = JSON.parse(page.querySelector('script[data-rail-tree]').textContent) } catch (e) {}
+    const goTo = (segs) => {
+      const a = document.createElement('a')
+      a.href = '/' + segs.map(encodeURIComponent).join('/')
+      a.hidden = true
+      railHost.appendChild(a); a.click(); a.remove()
+    }
+    let hiveRail = null
+    const hiveIoc = window.ioc
+    if (hiveIoc && typeof hiveIoc.whenReady === 'function') {
+      hiveIoc.whenReady('@diamondcoreprocessor.com/AgentTilesRailFactory', (factory) => {
+        if (hiveRail || gone() || !factory || typeof factory.create !== 'function') return
+        try {
+          const rail = factory.create({ walk: true, chats: false, choose: false, badge: () => 0 })
+          rail.onSubjectChanged = (pick) => { if (pick) goTo(pick.path.concat([pick.name])) }
+          rail.mount(railHost)
+          hiveRail = rail
+          const watch = setInterval(() => { if (gone()) { clearInterval(watch); try { rail.dispose() } catch (e) {} } }, 2000)
+        } catch (e) {}
+      })
+    }
+    if (!hiveRail && railData) drawTileList(railHost, railData)
+  }
   const toSite = page.querySelector('.to-site')
   if (toSite) toSite.onclick = () => page.dispatchEvent(new CustomEvent('hc-site-widen', { bubbles: true }))
+  // THE CHILD VIEW: Explore more switches the stage between the video and the tile's own children.
+  // The voice stops on the way in; #children in the address says which view, so it can be linked to.
+  if (page.querySelector('.kids')) {
+    const setView = (on, keep) => {
+      page.dataset.view = on ? 'children' : 'video'
+      for (const x of page.querySelectorAll('[data-explore]')) x.setAttribute('aria-pressed', String(on))
+      if (on) { try { halt() } catch {} }
+      if (keep) { try { history.replaceState(history.state, '', on ? '#children' : location.pathname + location.search) } catch {} }
+    }
+    page.addEventListener('click', (e) => {
+      const x = e.target.closest && e.target.closest('[data-explore]')
+      if (!x) return
+      e.preventDefault()
+      setView(page.dataset.view !== 'children', true)
+    })
+    const onHash = () => { if (!gone()) setView(location.hash === '#children', false) }
+    window.addEventListener('hashchange', onHash)
+    // after the rest of this script has run, so the playback it stops exists
+    if (location.hash === '#children') queueMicrotask(onHash)
+  }
   const KEY = 'hc-scene:' + location.pathname
   const returning = root instanceof Element && root.hasAttribute('data-hc-returning')
   let resumeAt = 0
@@ -630,24 +815,59 @@ const sceneHtml = (sc) => {
   </section>`
 }
 
-/** THE TREE MENU, on the left: every walkable tile, nested as the tree nests.
- *  The tiles on the way to this page stay open and this one is lit; a tile
- *  with no page yet is shown as coming. */
+/** THE TILE LIST, on the left (jwize 2026-11-10: "the ai chat list ... it is a
+ *  flat drilldown tree"). The same list the AI chat shows: one level at a time,
+ *  an arrow to go inside a tile, back to climb. Inside the hive and on the
+ *  published site the page mounts the hive's own list; a page opened on its own
+ *  draws the same list, in the same markup and stylesheet, from the tree below. */
 const treeHtml = (ways, route) => {
   const menu = ways && ways.menu
   if (!menu || !menu.length) return ''
-  const here = route.join('/')
-  const item = (n) => {
-    const key = n.route.join('/')
-    const label = key === here
-      ? `<a href="/${n.route.map(esc).join('/')}" aria-current="page">${esc(n.name)}</a>`
-      : n.page ? `<a href="/${n.route.map(esc).join('/')}">${esc(n.name)}</a>` : `<span class="soon" title="its page is coming">${esc(n.name)}</span>`
-    if (!n.children.length) return `<li class="leaf">${label}</li>`
-    const open = here === key || here.startsWith(key + '/')
-    return `<li><details${open ? ' open' : ''}><summary>${label}</summary><ul>${n.children.map(item).join('')}</ul></details></li>`
-  }
+  const node = (n) => ({ name: n.name, href: n.page ? '/' + n.route.join('/') : null, children: n.children.map(node) })
+  const data = { here: route, menu: menu.map(node) }
   return `
-  <nav class="tree" data-part="tree" aria-label="All the videos"><span class="lbl mono-label">The tree</span><ul>${menu.map(item).join('')}</ul></nav>`
+  <nav class="tree" data-part="tree" aria-label="The tiles"><div data-rail></div><script type="application/json" data-rail-tree>${JSON.stringify(data).replace(/</g, '\\u003c')}</script></nav>`
+}
+
+/** EXPLORE MORE, bottom right under the video: opens the child view, and in the
+ *  child view goes back to the video. Nothing when no page lies below. */
+const exploreHtml = (ways) => {
+  const e = ways && ways.explore
+  if (!e) return ''
+  return `
+  <div class="explore" data-part="explore"><a href="#children" data-explore aria-pressed="false"><span class="when-video">Explore more about <b>${esc(e.topic)}</b></span><span class="when-kids">Back to the video</span>${icon('play')}</a></div>`
+}
+
+/** The same switch, as a quiet link in the top bar: the backup for the button. */
+const exploreTop = (ways) => {
+  const e = ways && ways.explore
+  return e ? `<a class="to-explore" href="#children" data-explore><span class="when-video">Explore ›</span><span class="when-kids">‹ Video</span></a>` : ''
+}
+
+/** THE CHILD VIEW: the tile's own children as cards, in the order the tree gives. */
+const kidsHtml = (ways) => {
+  const e = ways && ways.explore
+  if (!e) return ''
+  const card = (k) => k.page
+    ? `<a class="kid" href="/${k.route.map(esc).join('/')}"><h3>${icon('play')}${esc(k.name)}</h3>${k.note ? `<p>${esc(k.note)}</p>` : ''}</a>`
+    : `<span class="kid soon" title="its page is coming"><h3>${esc(k.name)}</h3>${k.note ? `<p>${esc(k.note)}</p>` : ''}</span>`
+  return `
+  <section class="kids" data-part="children" aria-label="Inside ${esc(e.topic)}">
+    <div class="eyebrow">Inside</div>
+    <h2>${esc(e.topic)}</h2>
+    <div class="kidgrid">${e.kids.map(card).join('')}</div>
+  </section>`
+}
+
+/** THE CHILD VIEW'S ROW: the same buttons as the siblings row, but the tile's own children. */
+const kidsRowHtml = (ways, route) => {
+  const e = ways && ways.explore
+  if (!e) return ''
+  return `
+  <nav class="sibs kids-row" data-part="children-row" aria-label="Inside ${esc(e.topic)}"><span class="lbl mono-label">(${esc(route[route.length - 1])})</span>${e.kids.map(k => k.page
+    ? `<a class="sib" href="/${k.route.map(esc).join('/')}" title="${esc(k.note)}">${icon('play')}${esc(k.name)}</a>`
+    : `<span class="sib soon" title="${esc(`${k.note} (its page is coming)`)}">${esc(k.name)}</span>`).join('')}
+  </nav>`
 }
 
 /** THE SIBLING MENU, balanced and centred under the video: the tiles under the
@@ -656,7 +876,7 @@ const treeHtml = (ways, route) => {
 const sibsHtml = (ways, route) => {
   const section = (ways && ways.section) || []
   if (section.length < 2) return ''
-  const parent = route.length > 1 ? route[route.length - 2] : ''
+  const parent = String((ways && ways.sectionOf) || '')
   return `
   <nav class="sibs" data-part="siblings" aria-label="${esc(parent ? `More in ${parent}` : 'Beside this')}">${parent ? `<span class="lbl mono-label">(${esc(parent)})</span>` : ''}${section.map(t => t.current
     ? `<span class="sib" aria-current="page">${icon('play')}${esc(t.name)}</span>`
@@ -680,11 +900,12 @@ const render = (parts) => {
 ${faces}
 ${TOKENS}
 ${STYLE}
+${RAIL_CSS}
 </style>
 </head>
 <body>
 ${sprite}
-<main class="page">${treeHtml(ways, route)}<div class="stage"><div class="top"><button type="button" class="ib2 menu-btn" aria-label="Show the tree" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></svg></button>${crumbsHtml(route)}<button type="button" class="ib2 fs" aria-label="Full screen" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg></button><button type="button" class="to-site" aria-label="Open the website at this page">${icon('hex')}website</button></div>${sceneHtml(scene)}${sibsHtml(ways, route)}</div>
+<main class="page">${treeHtml(ways, route)}<div class="stage"><div class="top"><button type="button" class="ib2 menu-btn" aria-label="Show the tree" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></svg></button>${crumbsHtml(route)}${exploreTop(ways)}<button type="button" class="ib2 fs" aria-label="Full screen" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg></button><button type="button" class="to-site" aria-label="Open the website at this page">${icon('hex')}website</button></div>${sceneHtml(scene)}${kidsHtml(ways)}${exploreHtml(ways)}${sibsHtml(ways, route)}${kidsRowHtml(ways, route)}</div>
 </main>
 <script>${SCRIPT}${tryDef ? `
 ;(() => {

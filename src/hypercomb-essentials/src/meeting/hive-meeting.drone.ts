@@ -23,11 +23,12 @@
 // directions, each one allowed.
 
 import {
-  Drone, EffectBus, EXTERNAL_CALL, REMOTE_SUBMIT, canonicalVerbOf, hypercomb, meetingPointKey,
-  type ExternalCallRequest, type RemoteSubmitRequest,
+  Drone, EffectBus, EXTERNAL_CALL, I18N_IOC_KEY, REMOTE_SUBMIT, canonicalVerbOf, hypercomb, meetingPointKey,
+  type ExternalCallRequest, type I18nProvider, type RemoteSubmitRequest,
 } from '@hypercomb/core'
 import { audioConstraints, bitrateOf, frameRateOf, isQuality, videoConstraints, type Quality } from './meeting-quality.js'
 import { acceptedLocalTracks, createSignalQueue, faceOf, feedsFromWire, subscriptionPlan, type Face, type FeedTrack } from './meeting-feeds.js'
+import { liveMicTracks } from './meeting-playback.js'
 import { followStep, followedBy, isFollowed, leaderOf, meetingAddress, meetingPreimage, originatorOf, pathKey, seatOrder, type Member } from './meeting-seats.js'
 import { isJoinedHere, ownZone, readTabZone } from '../sharing/membership.js'
 import { ownProfileFace } from '../sharing/profile-live.js'
@@ -100,6 +101,13 @@ const HERE_ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 2
 
 const verbOf = (text: string): string =>
   canonicalVerbOf(text) || (text.trim().split(/\s+/)[0] ?? '').toLowerCase()
+
+const t = (key: string, fallback: string): string => {
+  try {
+    const text = window.ioc?.get<I18nProvider>(I18N_IOC_KEY)?.t?.(key)
+    return text && text !== key ? text : fallback
+  } catch { return fallback }
+}
 
 const cleanRules = (raw: unknown): string[] =>
   Array.isArray(raw)
@@ -742,9 +750,11 @@ export class HiveMeetingDrone extends Drone {
           queueMicrotask(() => this.#attachRemote())
         }
         try {
+          await this.#ensureMic(stream)
+          if (this.#epoch !== epoch || !this.#localAvailable || this.#localStream !== stream) { pc.close(); return }
           const transceivers: RTCRtpTransceiver[] = []
-          for (const track of stream.getAudioTracks()) {
-            if (track.readyState === 'live') transceivers.push(pc.addTransceiver(track, { direction: 'sendonly', streams: [stream] }))
+          for (const track of liveMicTracks(stream.getAudioTracks())) {
+            transceivers.push(pc.addTransceiver(track, { direction: 'sendonly', streams: [stream] }))
           }
           const camera = this.#cameraOn ? stream.getVideoTracks().find(t => t.readyState === 'live') : undefined
           if (camera) transceivers.push(pc.addTransceiver(camera, { direction: 'sendonly', streams: [stream] }))
@@ -1039,8 +1049,33 @@ export class HiveMeetingDrone extends Drone {
     this.#emitStreams()
   }
 
+  /** One more microphone, at publish time, when the stream we were handed has
+   *  none that is still live. The join goes on either way. Without one, the
+   *  others cannot hear this person, and they are told. */
+  #ensureMic = async (stream: MediaStream): Promise<void> => {
+    if (liveMicTracks(stream.getTracks()).length) return
+    try {
+      const fresh = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints() })
+      const track = liveMicTracks(fresh.getAudioTracks())[0]
+      const left = this.#localStream !== stream || !this.#localAvailable
+      for (const other of fresh.getTracks()) if (other !== track || left) other.stop()
+      if (left) return
+      if (!track) throw new Error('no live microphone')
+      stream.addTrack(track)
+    } catch (error) {
+      if (this.#localStream !== stream || !this.#localAvailable) return
+      console.warn('[hive-meeting] no microphone', error)
+      EffectBus.emit('toast:show', {
+        type: 'warning',
+        title: 'meeting',
+        message: t('meeting.no-microphone', 'Your microphone is not on. The others cannot hear you.'),
+      })
+    }
+  }
+
   /** Accept a pre-acquired stream. The camera stays off until they click
-   *  their own flower: a preview that was already open is released. */
+   *  their own flower: a preview that was already open is released. A preview
+   *  with no live microphone is still accepted; publish tries once more. */
   #acceptStream = (stream: MediaStream): void => {
     if (this.#localStream && this.#localStream !== stream) {
       for (const track of this.#localStream.getTracks()) track.stop()
@@ -1059,6 +1094,7 @@ export class HiveMeetingDrone extends Drone {
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints() })
     } catch {
+      // Publish tries the microphone once more, and says so if it is still missing.
       stream = new MediaStream()
     }
     if (!this.#localAvailable) { for (const track of stream.getTracks()) track.stop(); return }
