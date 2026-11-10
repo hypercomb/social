@@ -146,6 +146,15 @@ describe('no page shows the demo hive', () => {
   })
 })
 
+describe('the tile list is the hive\'s own, in sync', () => {
+  it('every page carries the chat list\'s stylesheet exactly as the shared module defines it', () => {
+    const file = join(__dirname, '..', '..', '..', '..', 'hypercomb-essentials', 'src', 'assistant', 'tiles-rail.css.ts')
+    const css = new Function(readFileSync(file, 'utf8').replace(/^export const /gm, 'const ') + '\nreturn RAIL_CSS')() as string
+    expect(css).toContain('.hc-rail-row')
+    for (const b of blocks as { route: string[]; page: string }[]) expect(b.page.includes(css)).toBe(true)
+  })
+})
+
 describe('every page says where it goes, once', () => {
   /** Where an element wearing data-part="<part>" starts in the markup (the stylesheet names parts too, so look for the tag). */
   const tagAt = (html: string, part: string): number => html.search(new RegExp(`<[a-z]+[^>]*data-part="${part}"`))
@@ -169,7 +178,13 @@ describe('every page says where it goes, once', () => {
       expect(b.page).toMatch(/aria-label="Full screen"/)
     })
     it(`${at}: the tree reaches every page, and the siblings share one parent`, () => {
-      const every = new Set(hrefs(b.page, 'tree').map(h => linkTo(h, b.route, paged)))
+      // the tile list carries the tree as data: every page is in it, and it opens where the page stands
+      const data = JSON.parse(/<script type="application\/json" data-rail-tree>([^]*?)<\/script>/.exec(b.page)![1]) as { here: string[]; menu: { href: string | null; children: unknown[] }[] }
+      expect(data.here).toEqual(b.route)
+      const links: string[] = []
+      const walk = (ns: { href: string | null; children: unknown[] }[]): void => { for (const n of ns) { if (n.href) links.push(n.href); walk(n.children as typeof ns) } }
+      walk(data.menu)
+      const every = new Set(links.map(h => linkTo(h, b.route, paged)))
       for (const r of paged as Set<string>) expect(every.has(r)).toBe(true)
       // On a top page the row is that tile's own first level; below it, the tiles beside this one.
       const parent = b.route.length === 1 ? b.route[0] : b.route.slice(0, -1).join('/')
