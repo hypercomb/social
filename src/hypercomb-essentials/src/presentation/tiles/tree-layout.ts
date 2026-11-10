@@ -53,7 +53,10 @@ export type PlacedNode = TreeNode & {
 export type Ribbon = {
   readonly from: number
   readonly to: number
+  /** Closed tapered fill. */
   readonly d: string
+  /** The centre line the fill is built around — a hairline vein over the wash. */
+  readonly spine: string
   readonly hue: number | null
   readonly depth: number
 }
@@ -90,20 +93,22 @@ export const PAD_Y = 64
 const HUE_ORIGIN = 214
 const HUE_STEP = 137.508
 
-/** Limb colour at a depth — deeper twigs lighten and desaturate, so the
- *  trunk end of a limb reads heaviest. Bark grey when hue is null. */
+/** Limb colour at a depth. A washed botanical hue — deep enough that adjacent
+ *  limbs still separate, quiet enough that a name can sit on it in ink.
+ *  Deeper twigs lighten and lose saturation. Bark when hue is null. */
 export function limbColor(hue: number | null, depth: number, alpha = 1): string {
-  if (hue === null) return alpha === 1 ? 'hsl(210 12% 62%)' : `hsl(210 12% 62% / ${alpha})`
-  const saturation = Math.max(38, 64 - depth * 5)
-  const lightness = Math.min(76, 46 + depth * 6)
+  if (hue === null) return alpha === 1 ? 'hsl(140 8% 58%)' : `hsl(140 8% 58% / ${alpha})`
+  const saturation = Math.max(26, 50 - depth * 4)
+  const lightness = Math.min(64, 44 + depth * 3)
   return `hsl(${hue.toFixed(1)} ${saturation}% ${lightness}%${alpha === 1 ? '' : ` / ${alpha}`})`
 }
 
 /** Ribbon half-thickness for a subtree of `leaves` drawn leaves. Square-root
  *  so a 400-leaf limb is visibly heavier than a 40-leaf one without becoming
- *  a slab; a single leaf resolves to a near-point tip. */
+ *  a slab; a single leaf resolves to a near-point tip. Kept slender — the
+ *  limb is a wash, not a plank. */
 function halfWidth(leaves: number): number {
-  return Math.min(26, 1.6 + Math.sqrt(Math.max(0, leaves - 1)) * 2.4)
+  return Math.min(14, 1.05 + Math.sqrt(Math.max(0, leaves - 1)) * 1.35)
 }
 
 function markerRadius(leaves: number, depth: number): number {
@@ -219,15 +224,14 @@ export function layoutTree(
     if (node.parent < 0) continue
     const parent = byId.get(node.parent)
     if (!parent) continue
+    const tip = node.leaves <= 1 ? 0.45 : halfWidth(node.leaves) * 0.55
     ribbons.push({
       from: parent.id,
       to: node.id,
       hue: node.hue,
       depth: node.depth,
-      d: ribbonPath(
-        parent.x, parent.y, halfWidth(node.leaves),
-        node.x, node.y, node.leaves <= 1 ? 0.9 : halfWidth(node.leaves) * 0.62,
-      ),
+      d: ribbonPath(parent.x, parent.y, halfWidth(node.leaves), node.x, node.y, tip),
+      spine: ribbonSpine(parent.x, parent.y, node.x, node.y),
     })
   }
 
@@ -245,6 +249,14 @@ export function layoutTree(
     width: PAD_X + maxDepth * RING_GAP + RING_GAP,
     height: maxY + PAD_Y * 2,
   }
+}
+
+/** Centre line of a limb — the same control offsets as the ribbon edges, so
+ *  the vein sits in the wash rather than cutting a chord across it. */
+export function ribbonSpine(x0: number, y0: number, x1: number, y1: number): string {
+  const dx = (x1 - x0) * 0.45
+  const f = (n: number): string => (Math.round(n * 100) / 100).toString()
+  return `M${f(x0)},${f(y0)}C${f(x0 + dx)},${f(y0)} ${f(x1 - dx)},${f(y1)} ${f(x1)},${f(y1)}`
 }
 
 /**
