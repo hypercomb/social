@@ -169,9 +169,24 @@ describe('every page says where it goes, once', () => {
     it(`${at}: the tree reaches every page, and the siblings share one parent`, () => {
       const every = new Set(hrefs(b.page, 'tree').map(h => linkTo(h, b.route, paged)))
       for (const r of paged as Set<string>) expect(every.has(r)).toBe(true)
-      const parent = b.route.slice(0, -1).join('/')
+      // On a top page the row is that tile's own first level; below it, the tiles beside this one.
+      const parent = b.route.length === 1 ? b.route[0] : b.route.slice(0, -1).join('/')
       for (const href of hrefs(b.page, 'siblings')) {
         expect(linkTo(href, b.route, paged).split('/').slice(0, -1).join('/')).toBe(parent)
+      }
+    })
+    it(`${at}: the row stays when one of its buttons is pressed`, () => {
+      // The buttons are the same names in the same order on every page a button leads to; only the lit one moves.
+      const names = (page: string): string[] => {
+        const nav = /<nav[^>]*data-part="siblings"[^>]*>([^]*?)<\/nav>/.exec(page)
+        return nav ? [...nav[1].matchAll(/<(?:a|span)\b[^>]*class="sib[^"]*"[^>]*>([^]*?)<\/(?:a|span)>/g)].map(m => m[1].replace(/<[^>]*>/g, '').trim()) : []
+      }
+      const mine = names(b.page)
+      for (const href of hrefs(b.page, 'siblings')) {
+        const to = linkTo(href, b.route, paged)
+        const there = (blocks as { route: string[]; page: string }[]).find(x => x.route.join('/') === to)
+        if (!there || there.route.length === 1) continue
+        expect(names(there.page)).toEqual(mine)
       }
     })
   }
