@@ -116,6 +116,22 @@ const waysOf = (route, paged) => {
   return { children, section: siblings, sectionOf, beside }
 }
 
+/** THE CHILD VIEW (jwize 2026-11-10: "as well as a video they have an html view
+ *  that allows them to present their own children in the siblings list"). The
+ *  bottom row of a video page only chooses WHICH VIDEO; the way into a tile's
+ *  own children is a second view of the same page, opened by the Explore more
+ *  button bottom right: the children as cards, and the bottom row listing them.
+ *  The topic is a plain-language noun authored on the page (`topic`), else the
+ *  tile's name. Nothing when no page lies below the tile. */
+const exploreOf = (route, paged, block) => {
+  const kids = (tileAt(route)?.children || []).map(c => {
+    const r = [...route, c.name]
+    return { name: c.name, note: c.note || '', route: r, page: paged.has(r.join('/')) }
+  })
+  if (!kids.some(k => k.page)) return null
+  return { topic: String((block && block.topic) || route[route.length - 1]), kids }
+}
+
 /** THE TREE MENU (jwize 2026-11-08: "a left hand sidebar menu for the tree"):
  *  every tile that can be walked to, nested as the tree nests, each marked by
  *  whether it has a page yet. The same on every page; the page marks where it
@@ -234,7 +250,7 @@ const buildBlocks = ({ under = '' } = {}) => {
           title: `${scene.name} · Hypercomb`,
           scene,
           tryPart: block.try || null,
-          ways: { ...waysOf(route, paged), menu },
+          ways: { ...waysOf(route, paged), menu, explore: exploreOf(route, paged, block) },
           faces,
           sprite,
         }),
