@@ -40,8 +40,11 @@ import {
 } from '../parts.js'
 import { stripPart } from '../strip/strip.js'
 import { installKeyboardDeskStyles } from './keyboard-desk.styles.js'
+import { closeWhenDark, refuseWhileDark } from '../../commands/word-enablement.js'
 
 const DESK = 'keyboard-desk'
+/** The word this desk belongs to: its light is the desk's (commands/word-enablement.ts). */
+const WORD = 'keyboard'
 const KEYS = {
   keymap: '@diamondcoreprocessor.com/KeyMapService',
   slash: '@diamondcoreprocessor.com/SlashBehaviourDrone',
@@ -120,6 +123,8 @@ export class KeyboardDeskElement extends HTMLElement {
   #modes: ModesShape | null = null
   #releaseBack: (() => void) | null = null
   #openCleanup: (() => void)[] = []
+  /** Releases the desk's hold on its word's light. */
+  #offWord: (() => void) | null = null
 
   #caps = new Map<string, HTMLElement>()
   #callouts: CalloutsHandle | null = null
@@ -163,15 +168,22 @@ export class KeyboardDeskElement extends HTMLElement {
   connectedCallback(): void {
     installKeyboardDeskStyles()
     facade.current = this
+    // THE DESK IS PART OF ITS WORD (commands/word-enablement.ts): switched
+    // off in Beehaviors, it closes, and a desk put away stays away.
+    this.#offWord = closeWhenDark(WORD, () => { this.#parked = false; this.#close() })
     if (facade.wanted) this.open()
   }
 
   disconnectedCallback(): void {
+    this.#offWord?.()
+    this.#offWord = null
     if (this.#panel) this.#teardown()
     if (facade.current === this) facade.current = null
   }
 
   open(): void {
+    // Every door asks first — the word, a binding's press, a return home.
+    if (!this.#panel && refuseWhileDark(WORD)) { facade.wanted = false; return }
     facade.wanted = true
     if (this.#panel) return
     this.#build()

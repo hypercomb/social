@@ -37,6 +37,7 @@ const ownIndex = (entrance: Record<string, unknown>): Record<string, unknown> =>
   signed({ v: 1, roots: { 'jaime-weise': 'a'.repeat(64) }, addresses: { [APP]: 'jaime-weise' }, entrances: { [APP]: entrance } }, OWN_SECRET)
 
 beforeEach(async () => {
+  ;(await import('./hive-pointer.js')).forgetIndexMisses()
   atoms = new Map()
   requests = []
   const record = encode({ kind: CARD_PAGE_KIND, payload: { htmlSig: NEWER_PAGE } })
@@ -50,7 +51,7 @@ beforeEach(async () => {
     [PUB]: signed({ v: 1, roots: { card: head } }, PUB_SECRET),
   }
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input)
+    const url = String(input).split('?')[0] // a host reads the path; the probe flag (`?held`) does not change it
     requests.push({ url, method: init?.method ?? 'GET' })
     const last = url.split('/').pop() ?? ''
     if (indexes[last]) return Response.json(indexes[last])

@@ -78,7 +78,7 @@ beforeAll(async () => {
   indexPath = `/${await registerPoolMeaning('hive:indexes')}/${publisher}`
   for (const [name, behaviour] of Object.entries(BEHAVIOURS)) {
     const server = createServer((req, res) => {
-      const url = req.url ?? ''
+      const url = (req.url ?? '').split('?')[0] // a host reads the path; the probe flag (`?held`) does not change it
       if (url === '/publications.json') {
         if (behaviour.ledger === 'hang') return
         if (behaviour.ledger === 'page') { res.writeHead(200, { 'content-type': 'text/html' }); return void res.end('<!doctype html><html></html>') }

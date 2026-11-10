@@ -377,8 +377,19 @@ export class HexIconButton extends Container {
 
   // ── Hit testing ────────────────────────────────────────────────────
 
+  /** Hover reach. Wider than the plate so neighbouring icons meet and the
+   *  caption does not flicker in the crack between them. */
   containsPoint(localX: number, localY: number): boolean {
     const r = this.#size / 2 + BACKDROP_PAD
+    return localX >= -r && localX <= r && localY >= -r && localY <= r
+  }
+
+  /** The painted plate. Activation uses this, not `containsPoint`: the hover
+   *  pad reaches past the plate, so a click in the crack between two icons was
+   *  opening whichever affordance sat nearest — the scroller, the slides —
+   *  instead of walking into the tile. The plate is what is drawn. */
+  hitsPlate(localX: number, localY: number): boolean {
+    const r = this.#size / 2 + PLATE_PAD
     return localX >= -r && localX <= r && localY >= -r && localY <= r
   }
 

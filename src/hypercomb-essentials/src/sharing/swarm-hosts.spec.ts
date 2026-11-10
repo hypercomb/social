@@ -154,6 +154,12 @@ describe('where a page\'s bytes go', () => {
     expect(bare.hostsFor(['elsewhere'])).toEqual(NONE)
   })
 
+  it('a site named beside its zone is no write door: protocol.hypercomb.com writes to hypercomb.com (2026-11-09)', async () => {
+    const w = world({ marks: new Map([['protocol', ['protocol.hypercomb.com', 'hypercomb.com']]]) })
+    const r = await warmed(w, ['protocol'])
+    expect(r.hostsFor(['protocol'])).toEqual({ hosts: ['hypercomb.com'], source: 'publish', pending: false })
+  })
+
   it('the NEAREST branch wins', async () => {
     const w = world({ marks: new Map([['shop', ['outer.example']], ['shop/shelf', ['inner.example']]]) })
     const r = await warmed(w, ['shop', 'shelf', 'jar'])

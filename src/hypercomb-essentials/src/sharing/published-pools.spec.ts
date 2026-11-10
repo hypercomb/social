@@ -53,7 +53,7 @@ const serve = (host: string, poolSig: string, index: unknown, members: Map<strin
   }))
 }
 
-let accepted: { record: unknown; origin: string }[] = []
+let accepted: { record: unknown; origin: string; verified?: { readonly sig: string; readonly bytes: Uint8Array } }[] = []
 
 beforeEach(() => {
   accepted = []
@@ -61,8 +61,8 @@ beforeEach(() => {
   vi.unstubAllGlobals()
   registerPublishedPool({
     meaning: MEANING,
-    accept: async (record, origin) => {
-      accepted.push({ record, origin })
+    accept: async (record, origin, verified) => {
+      accepted.push({ record, origin, ...(verified ? { verified } : {}) })
       return String((record as { id?: unknown })?.id ?? '')
     },
   })
@@ -102,6 +102,19 @@ describe('probePublishedPool', () => {
     expect(offered.sort()).toEqual([...members.keys()].sort())
     expect(accepted).toEqual([])
     expect(idsOffered('example.com')).toEqual(['one', 'two'])
+  })
+
+  it('hands the handler the very bytes that were verified, and their signature', async () => {
+    // A handler that must read the bytes themselves (a mail template refuses a repeated key, which
+    // JSON.parse hides in the record) gets them; one that ignores the third argument works as before.
+    const { members, poolSig, index } = await domain([{ id: 'one' }])
+    serve('example.com', poolSig, index, members)
+    await probePublishedPool('example.com', MEANING)
+    await placeOffers('example.com', MEANING)
+    const [sig, body] = [...members][0]!
+    expect(accepted[0]!.verified!.sig).toBe(sig)
+    expect(new TextDecoder().decode(accepted[0]!.verified!.bytes)).toBe(body)
+    expect(await SignatureService.sign(accepted[0]!.verified!.bytes.slice().buffer as ArrayBuffer)).toBe(sig)
   })
 
   it('places an offer only on the gesture, and only once', async () => {

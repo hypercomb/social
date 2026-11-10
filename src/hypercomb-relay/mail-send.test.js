@@ -41,13 +41,15 @@ function setup(extra = {}) {
 
 const MESSAGE = { from: 'jaime@hypercomb.com', to: 'friend@example.org', subject: SUBJECT, text: BODY }
 
-// A signed POST: the event names the URL, the method and the sha256 of the exact bytes sent.
+// A signed POST: the event names the URL, the method and the sha256 of the exact bytes sent, and carries
+// a nonce — a write's event is spent once (R1 #5), so two identical sends in one second must still be two
+// events, as the browser side makes them.
 async function post(secret, body, options = {}) {
   const url = `https://hypercomb.com${options.path ?? '/mail/send'}`
   const bytes = enc.encode(typeof body === 'string' ? body : JSON.stringify(body))
   const headers = { 'content-type': options.contentType ?? 'application/json' }
   if (secret) {
-    const tags = [['u', url], ['method', 'POST'], ['payload', options.payload ?? await sha256Hex(bytes)]]
+    const tags = [['u', url], ['method', 'POST'], ['payload', options.payload ?? await sha256Hex(bytes)], ['nonce', crypto.randomUUID()]]
     const event = finalizeEvent({ kind: 27235, created_at: options.now ?? Math.floor(Date.now() / 1000), content: '', tags }, secret)
     headers.authorization = `Nostr ${btoa(JSON.stringify(event))}`
   }
@@ -61,7 +63,7 @@ function get(path, secret) {
   return new Request(url, { headers: { authorization: `Nostr ${btoa(JSON.stringify(event))}` } })
 }
 
-const sealedOnly = MAIL => [...MAIL.map.entries()].filter(([key]) => !key.startsWith('c/'))
+const sealedOnly = MAIL => [...MAIL.map.entries()].filter(([key]) => !/^(c|n|d)\//.test(key))
   .map(([, e]) => latin1(e.bytes) + ' ' + Object.values(e.customMetadata).join(' ')).join(' ')
 
 // ── a send ──────────────────────────────────────────────────────────────────
@@ -83,7 +85,7 @@ test('the owner sends: Cloudflare is called once with exactly the message, and a
   const list = await (await worker.fetch(get('/mail/sent/jaime%40hypercomb.com', jaime), env)).json()
   assert.equal(list.items.length, 1)
   assert.equal(list.items[0].sig, out.sig)
-  const meta = openMeta(list.items[0].meta, jaime)
+  const meta = await openMeta(list.items[0], jaime)
   assert.equal(meta.subject, SUBJECT)
   assert.equal(meta.to, 'friend@example.org')
   assert.equal(meta.id, out.messageId)
@@ -164,7 +166,7 @@ test('a malformed message is refused and Cloudflare is never called', async () =
   await refused('{not json', 400)
   await refused('[1,2]', 400)
   assert.equal((await worker.fetch(await post(jaime, MESSAGE, { contentType: 'text/plain' }), env)).status, 415)
-  const huge = { ...MESSAGE, text: 'x'.repeat(1024 * 1024 + 10) }
+  const huge = { ...MESSAGE, text: 'x'.repeat(16 * 1024 * 1024 + 10) } // the cap is 16 MiB since attachments ride in the body
   assert.equal((await worker.fetch(await post(jaime, huge), env)).status, 413)
   assert.equal(EMAIL.calls.length, 0)
 })
@@ -227,7 +229,7 @@ test('threading headers ride along, and are dropped (not the mail) if Cloudflare
 
 test('the mail went but its Sent copy could not be filed: still a success, with no sig', async () => {
   const { EMAIL, env, MAIL } = setup()
-  MAIL.failPut = key => !key.startsWith('c/')
+  MAIL.failPut = key => !/^(c|n)\//.test(key)
   const res = await quiet(async () => worker.fetch(await post(jaime, MESSAGE), env))
   assert.equal(res.status, 200)
   assert.equal((await res.json()).sig, null)
@@ -247,4 +249,101 @@ test('CORS: a send from the listed origin is answered, and the preflight allows 
 
   const stranger = await worker.fetch(await post(jaime, MESSAGE, { origin: 'https://evil.example' }), env)
   assert.equal(stranger.headers.get('access-control-allow-origin'), null)
+})
+
+// ── attachments ─────────────────────────────────────────────────────────────
+
+const b64 = bytes => { let s = ''; for (const b of bytes) s += String.fromCharCode(b); return btoa(s) }
+const PDF = b64(enc.encode('%PDF-1.4 a small file'))
+
+test('attachments go to Cloudflare as base64 attachments, and the sealed Sent copy keeps them', async () => {
+  const { EMAIL, env } = setup()
+  const res = await worker.fetch(await post(jaime, {
+    ...MESSAGE,
+    attachments: [
+      { filename: '../../etc/pass\\wd.pdf', type: 'Application/PDF', content: PDF.replace(/(.{8})/g, '$1\r\n') },
+      { filename: `${'n'.repeat(200)}.tar.gz`, type: 'application/gzip', content: b64(new Uint8Array([1, 2, 3])) },
+    ],
+  }), env)
+  assert.equal(res.status, 200)
+  const [first, second] = EMAIL.calls[0].attachments
+  assert.deepEqual(first, { content: PDF, filename: '_.._etc_pass_wd.pdf', type: 'application/pdf', disposition: 'attachment' })
+  assert.equal(second.filename.length, 120)
+  assert.ok(second.filename.endsWith('.gz'))
+  assert.ok(!/[\\/]/.test(first.filename + second.filename))
+
+  const { sig } = await res.json()
+  const list = await (await worker.fetch(get('/mail/sent/jaime%40hypercomb.com', jaime), env)).json()
+  const meta = await openMeta(list.items[0], jaime)
+  assert.equal(meta.hasAttachments, true)
+  assert.equal(meta.preview, BODY)
+  const one = await worker.fetch(get(`/mail/sent/jaime%40hypercomb.com/${sig}`, jaime), env)
+  const record = JSON.parse(dec.decode((await openMessage(new Uint8Array(await one.arrayBuffer()), jaime)).bytes))
+  assert.deepEqual(record.attachments.map(a => [a.filename, a.type, a.content]), [[first.filename, 'application/pdf', PDF], [second.filename, 'application/gzip', 'AQID']])
+})
+
+test('a send with no attachments carries none, and its Sent copy says so', async () => {
+  const { EMAIL, env } = setup()
+  const { sig } = await (await worker.fetch(await post(jaime, MESSAGE), env)).json()
+  assert.ok(!('attachments' in EMAIL.calls[0]))
+  const one = await worker.fetch(get(`/mail/sent/jaime%40hypercomb.com/${sig}`, jaime), env)
+  assert.deepEqual(JSON.parse(dec.decode((await openMessage(new Uint8Array(await one.arrayBuffer()), jaime)).bytes)).attachments, [])
+  const list = await (await worker.fetch(get('/mail/sent/jaime%40hypercomb.com', jaime), env)).json()
+  assert.equal((await openMeta(list.items[0], jaime)).hasAttachments, false)
+})
+
+test('attachments over the caps, or malformed, are refused before anything is sent', async () => {
+  const { EMAIL, env } = setup()
+  const one = { filename: 'a.txt', type: 'text/plain', content: b64(enc.encode('hi')) }
+  const refused = async (attachments, status = 422) =>
+    assert.equal((await worker.fetch(await post(jaime, { ...MESSAGE, attachments }), env)).status, status, JSON.stringify(attachments).slice(0, 80))
+  await refused('not a list')
+  await refused(Array.from({ length: 11 }, () => one))
+  await refused([{ ...one, type: 'text' }])
+  await refused([{ ...one, type: 'text/plain; charset=utf-8' }])
+  await refused([{ ...one, content: 'not base64!' }])
+  await refused([{ ...one, content: 'abc' }])
+  await refused([{ ...one, content: 42 }])
+  await refused([null])
+  const sixMiB = 'A'.repeat(8 * 1024 * 1024) // 6 MiB decoded each; 12 MiB together is over the 10 MiB cap
+  await refused([{ ...one, content: sixMiB }, { ...one, content: sixMiB }], 413)
+  assert.equal(EMAIL.calls.length, 0)
+
+  assert.equal((await worker.fetch(await post(jaime, { ...MESSAGE, attachments: Array.from({ length: 10 }, () => one) }), env)).status, 200)
+  assert.equal(EMAIL.calls[0].attachments.length, 10)
+  assert.equal(EMAIL.calls[0].attachments[0].filename, 'a.txt')
+})
+
+test('a nameless attachment is called "attachment"', async () => {
+  const { EMAIL, env } = setup()
+  await worker.fetch(await post(jaime, { ...MESSAGE, attachments: [{ filename: '  ...  ', type: 'text/plain', content: '' }] }), env)
+  assert.equal(EMAIL.calls[0].attachments[0].filename, 'attachment')
+})
+
+// ── names and many owners ───────────────────────────────────────────────────
+
+test('a name in MAIL_CONFIG sends as { email, name }; any owner key may send', async () => {
+  const phone = generateSecretKey()
+  const { EMAIL, env } = setup({
+    env: {
+      MAIL_CONFIG: JSON.stringify({ keys: { 'jaime@hypercomb.com': [getPublicKey(jaime), getPublicKey(phone)] }, names: { 'jaime@hypercomb.com': 'Jaime\r\nBcc: x' } }),
+    },
+  })
+  assert.equal((await worker.fetch(await post(phone, MESSAGE), env)).status, 200)
+  assert.deepEqual(EMAIL.calls[0].from, { email: 'jaime@hypercomb.com', name: 'Jaime  Bcc: x' })
+  assert.equal((await worker.fetch(await post(leanne, MESSAGE), env)).status, 401)
+  const list = await (await worker.fetch(get('/mail/sent/jaime%40hypercomb.com', jaime), env)).json()
+  assert.equal(JSON.parse(list.items[0].wraps ? JSON.stringify(list.items[0].wraps) : '[]').length, 2, 'the Sent copy is sealed to both owners')
+})
+
+test('the Sent meta keeps the thread: messageId, inReplyTo and the last three references', async () => {
+  const { env } = setup()
+  const references = '<a@x> <b@x> <c@x> <d@x>'
+  await worker.fetch(await post(jaime, { ...MESSAGE, inReplyTo: '<d@x>', references }), env)
+  const list = await (await worker.fetch(get('/mail/sent/jaime%40hypercomb.com', jaime), env)).json()
+  const meta = await openMeta(list.items[0], jaime)
+  assert.equal(meta.messageId, '<id-1@hypercomb.com>')
+  assert.equal(meta.id, '<id-1@hypercomb.com>')
+  assert.equal(meta.inReplyTo, '<d@x>')
+  assert.deepEqual(meta.references, ['<b@x>', '<c@x>', '<d@x>'])
 })

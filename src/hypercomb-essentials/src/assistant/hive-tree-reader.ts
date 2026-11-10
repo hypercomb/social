@@ -1397,6 +1397,33 @@ export class HypercombHiveTreeReader {
     return hits.length > CODE_NAMING_MAX ? [] : hits
   }
 
+  /**
+   * EVERY LINE THAT QUOTES A WORD — what `inspect` follows from a tile to its
+   * code, and from one piece of code to the code it talks to: a decoration
+   * kind, an effect name, an IoC key. Unlike `codeNaming` a common word is
+   * not silence: the hits come back to `max`, and `more` says there were
+   * others. Read as bytes, never run.
+   */
+  async codeQuoting(word: string, options: { readonly max?: number; readonly signal?: AbortSignal } = {}): Promise<{ readonly hits: readonly CodeHit[]; readonly more: boolean }> {
+    const needle = String(word ?? '').trim().toLowerCase()
+    if (needle.length < 3 || /['"`]/.test(needle)) return { hits: [], more: false }
+    const max = Math.max(1, Math.min(200, Math.floor(Number(options.max) || CODE_HITS)))
+    const quoted = [`'${needle}'`, `"${needle}"`, `\`${needle}\``]
+    const hits = await this.#searchCode(await this.#codeEntries(), line => quoted.some(form => line.includes(form)), max + 1, options.signal)
+    return { hits: hits.slice(0, max), more: hits.length > max }
+  }
+
+  /** A running module's whole text and its name, by signature — what
+   *  `inspect` opens a section of. Undefined when it is not code held here. */
+  async moduleText(sig: string): Promise<{ readonly name: string; readonly text: string } | undefined> {
+    const clean = String(sig ?? '').toLowerCase()
+    if (!SIG.test(clean)) return undefined
+    const text = await this.#codeText(clean)
+    if (text === undefined) return undefined
+    const entry = (await this.#codeEntries()).find(candidate => candidate.sig === clean)
+    return { name: entry?.name ?? clean.slice(0, 12), text }
+  }
+
   /** Lines, in module order, that pass `test` (given lower-cased), with the
    *  section each sits in and where in that section it starts. */
   async #searchCode(entries: readonly CodeEntry[], test: (line: string) => boolean, max: number, signal?: AbortSignal): Promise<CodeHit[]> {

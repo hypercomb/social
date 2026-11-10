@@ -202,9 +202,11 @@ const makeHost = (options: HostOptions = {}) => {
     }
     if (method === 'HEAD') {
       if (options.headThrows?.()) throw new TypeError('Failed to fetch')
+      // A host that knows `?held` answers a miss 204, never a 404 the
+      // console prints as an error (blossom-worker, 2026-11-09).
       return held.has(sig)
         ? new Response(null, { status: 200, headers: { 'content-type': heldType } })
-        : missing(null)
+        : url.searchParams.has('held') && options.miss !== 'html' ? new Response(null, { status: 204 }) : missing(null)
     }
     const bytes = held.get(sig)
     return bytes
@@ -215,8 +217,10 @@ const makeHost = (options: HostOptions = {}) => {
 
 type Host = ReturnType<typeof makeHost>
 const urlOf = (sig: string): string => `https://${SELF_DOMAIN}/${sig}`
+/** The addresses asked, the probe flag (`?held`) set aside: these tests are
+ *  about WHICH sigs are asked; the flag has its own test below. */
 const calls = (host: Host, method: string): string[] =>
-  host.mock.calls.filter(([, init]) => (init?.method ?? 'GET') === method).map(([url]) => String(url))
+  host.mock.calls.filter(([, init]) => (init?.method ?? 'GET') === method).map(([url]) => String(url).replace(/\?held$/, ''))
 const methods = (host: Host): string[] => host.mock.calls.map(([, init]) => init?.method ?? 'GET')
 
 /** Listen to an effect from now on — EffectBus replays the last value to a new
@@ -272,6 +276,24 @@ describe('the drain asks the host before it sends', () => {
     expect(progress.seen).toEqual([{ done: 0, total: 1 }, { done: 1, total: 1 }])
     progress.off()
     receipt.off()
+  })
+
+  it('(b2) the question is asked with ?held, so a miss is a quiet 204 — read as not held, and the entry is sent', async () => {
+    // 2026-11-09 ("we can't afford to ever have any errors popping up"): a
+    // browser prints every 404 as a red error; the worker answers a `?held`
+    // miss 204 instead, and the hive reads it exactly as the 404 it means.
+    const lacking = await stage('{"name":"asked quietly"}')
+    const held = new Map<string, Uint8Array>()
+    const host = makeHost({ held })
+    vi.stubGlobal('fetch', host)
+
+    await service.drain()
+
+    const heads = host.mock.calls.filter(([, init]) => init?.method === 'HEAD').map(([url]) => String(url))
+    expect(heads).toEqual([`${urlOf(lacking.sig)}?held`])
+    expect(calls(host, 'PUT')).toEqual([urlOf(lacking.sig)])
+    expect(new TextDecoder().decode(held.get(lacking.sig))).toBe('{"name":"asked quietly"}')
+    expect(await receipts()).toEqual([lacking.sig])
   })
 
   it('(c) asks about each entry and sends it in the same breath: one served + one lacking is one PUT, and the line ends 1 of 1', async () => {

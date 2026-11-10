@@ -1,9 +1,6 @@
 @if (visible()) {
   <aside
     class="publish-panel"
-    [class.over-view]="overView()"
-    hcDockInset="right"
-    [hcDockInsetActive]="!overView()"
     hcDockedPanel="publish-panel"
     [hcSession]="session"
     (hcDockedPanelClose)="close()"
@@ -17,6 +14,10 @@
     role="dialog"
     [attr.aria-label]="'publish.title' | t"
   >
+    <!-- THE LEFT SIDEBAR — the tile tree, the same rows as the AI chat's.
+         Built by essentials (agent-tiles-rail.ts) and mounted here. -->
+    <div class="publish-rail" #publishRail [attr.aria-label]="'publish.rail' | t"></div>
+
     <header class="publish-header">
       <!-- PUBLISH / <the tile you are on>: the heading names the one thing the
            list opens on. -->
@@ -163,6 +164,12 @@
           <button class="pdrill-save" type="button" [class.active]="naming()" (click)="naming() ? cancelNaming() : startNaming()">{{ 'publish.drill.save-group' | t }}</button>
         }
       </div>
+      @if (focus(); as at) {
+        <p class="pdrill-zones pfocus">
+          <span>{{ 'publish.rail.under' | t }} <b>{{ at.join(' / ') }}</b></span>
+          <button class="pfocus-clear" type="button" (click)="clearFocus()" [attr.aria-label]="'publish.rail.all' | t" [title]="'publish.rail.all' | t">×</button>
+        </p>
+      }
       @if (scopeZones().length > 1) {
         <p class="pdrill-zones">{{ scopeZones().join(' · ') }}</p>
       }

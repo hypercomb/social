@@ -74,7 +74,7 @@ export class FromQueenBee extends QueenBee {
       return
     }
     const group = await link.resolveRoute(name, here)
-    if (!group) { log(`No group called "${name}" on this page, at the top, or in Portals`, 'warning'); return }
+    if (!group) { log(`No group called "${name}" on this page, at the top, or in Favorites`, 'warning'); return }
     const page = here[here.length - 1]
     const groupName = group[group.length - 1]
     if (off) {

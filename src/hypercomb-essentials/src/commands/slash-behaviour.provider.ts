@@ -55,6 +55,21 @@ export interface SlashBehaviour {
    * participant reads are the same census.
    */
   readonly machine?: MachineGrammar
+  /**
+   * WHOSE WORD — the namespace its queen declares (`QueenBee.namespace`),
+   * carried by the auto-wrap. It decides how the word's light reads
+   * (commands/word-enablement.ts): the build's own words are lit until
+   * switched off, anyone else's are dark until lit. Absent on a hand-written
+   * provider and a queen still asleep, and absent reads as the build's.
+   */
+  readonly namespace?: string
+  /**
+   * SWITCHED OFF in Beehaviors. Set only by the drone's presentation seam,
+   * which presents a dark word as `hidden` too — every listing surface leaves
+   * it out from that one seam, and a surface that wants to say why can read
+   * this. Never declared by a provider.
+   */
+  readonly dark?: boolean
 }
 
 export interface SlashBehaviourMatch {

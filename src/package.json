@@ -118,7 +118,7 @@
     "@types/jasmine": "~3.10.0",
     "@types/node": "^22.5.0",
     "@types/open-graph": "^0.2.2",
-    "@types/three": "^0.157.2",
+    "@types/three": "^0.170.0",
     "@typescript-eslint/eslint-plugin": "^8.41.0",
     "@typescript-eslint/parser": "^8.41.0",
     "babel-plugin-transform-typescript-metadata": "^0.3.2",

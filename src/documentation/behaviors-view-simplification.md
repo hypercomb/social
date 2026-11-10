@@ -348,3 +348,101 @@ and escaping back to the hexagons sticks.
 
 `--engine chrome` is required: headless chromium cannot initialize Pixi's
 shaders and never leaves the splash.
+
+## 2026-11-08 — every word is a behaviour; Here and Everywhere
+
+jwize: *"everything in hypercomb must be a behavior"*, and *"we maybe need a tab
+view then of the local global with views or non views beehaviors"*. Before this,
+the window asked one question, what can a tile carry, so the 191 words of the
+command line had no switch at all: `mail` could not be turned off. Only the four
+games and `behavior` checked the roster before they ran.
+
+### Every word takes a row
+
+The census is the slash drone's providers (`SlashBehaviourDrone.wordCensus()`),
+so every word, including one a community module brings, takes a row with no edit
+anywhere. A word's light is the kind `word:<word>`
+(`hypercomb-essentials/src/commands/word-enablement.ts`). Like a game's kind it
+is never written onto a tile, so it lives under Everywhere only.
+
+What off means:
+
+- **Typed**, the word refuses at the drone's door (`execute`, and
+  `executePublicCanonical` for a model) and says so once: a toast naming the word,
+  with a press that opens Everywhere already searching for it. In command stance
+  the line is read as prose, and a dark word never lights from prose, so the
+  command line hands a line that starts with one to the door instead of calling
+  it "not a command".
+- **Listed**, it presents as hidden through the drone's one presentation seam,
+  so the palette, autocomplete and the reading of prose leave it out, and nothing
+  is completed past it. The model's vocabulary is read from the same census, so a
+  model is not offered it either.
+- **Its desk** goes with it. A desk belongs to the word that opens it: `mail`,
+  `comfy`, `keyboard`, `meeting` and `hosts` in essentials, `chat` in the shell.
+  An open desk closes the moment its light goes out, every other door to it
+  refuses while it is out, and a desk put away does not come back on its own.
+  Mail's unread pill and quiet poll stop too.
+- **Its buttons** leave: the rail's chat and meeting buttons, and the bar's
+  hosts and comfy launchers.
+
+Which words arrive lit (jwize's call, 2026-11-08). A fresh install starts dark,
+and applied to words that would be a hive with no language. So **the build's own
+words read lit until switched off**: a word is dark exactly when it is on the
+off-list, which the shell's writer keeps in the same gesture as the on-list, and
+a word the next build adds simply works. The build's namespaces are
+`diamondcoreprocessor.com`, `revolucionstyle.com` and the shell's
+`hypercomb.social`; a hand-written provider and a queen still asleep carry no
+namespace and count as the build's. **Anyone else's word reads dark until lit**,
+like every foreign kind. One that already worked on a hive before the switch
+existed is lit once, as the `words` cohort, and never on a hive that started
+dark.
+
+**Six words cannot go dark**, because they are the way back: `beehaviors`,
+`behavior`, `help`, `create`, `undo` and `redo`. Their rows show lit, say
+"always on", and do not switch. The list lives beside the switch and nowhere
+else, so no module can declare itself unswitchable.
+
+A game's word is the game's row, never a second one: `/solomon` is the game,
+and its queen already refuses for itself.
+
+Words travel with nothing. The swarm's withheld broadcast leaves them out, and
+published lights never carry one, since no tile wears a word.
+
+`/beehaviors` is the window's word: Everywhere, `here` for Here, or a word to
+open Everywhere searching for it.
+
+Not switched by a word: the tile editor and the notes window, which tile gestures
+open rather than a word, and key presses or tile icons that run a queen directly.
+Those are their own doors.
+
+### Here and Everywhere
+
+The glyph that flipped between this layer and the pool is now two tabs named in
+words. **Here** is this layer: what it carries and what it could. **Everywhere**
+is every behaviour the app knows, one light each. Opened straight onto
+Everywhere, Here opens on the layer you are standing on.
+
+Under the tabs, one filter on both: **All**, **Views**, **Not views**. A view is
+a beehaviour, so All includes them. Exactly one is lit, so no combination means
+an empty list. This reverses the August call for one list behind a glyph you had
+to learn, and the earlier two-position Beehaviors / Views pair: there are now
+three positions, because the participant asked for the half that is not views.
+
+Escape climbs one rung at a time: a review, the manage strip, the search,
+Everywhere back to Here, the filter back to All. `features:lens` accepts `all`
+(or the older `behaviors`), `views`, `other` and `everywhere`.
+`features:roster-open` may carry a `query`, and the roster answer carries it
+back, so the window opens on it whichever of the two hears the request first.
+
+### Verified
+
+- Specs: `word-enablement.spec.ts`, `slash-dark-words.spec.ts`,
+  `show-features.words.spec.ts`, and the shell's `behavior-enablement.spec.ts`.
+- Live on dev-4253: switching `mail` off writes `word:mail` to the off-list,
+  drops it from autocomplete, makes the typed word refuse with the toast, and
+  closes an open mail desk. Switching `chat` off takes the rail's chat button
+  away. The always-on rows refuse to switch, and Views plus Not views add up to
+  All.
+- The Playwright harnesses that drove the old controls now drive the tabs and
+  the filter: `drive-behaviors-lens.cjs` (with a new Not views pass) 18/18,
+  `drive-games-roster.cjs` 15/15, `drive-behaviors-title.cjs` 7/7.

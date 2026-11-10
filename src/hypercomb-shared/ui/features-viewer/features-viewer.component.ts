@@ -118,6 +118,13 @@ interface StoreRow {
   module?: string
   on: boolean
   used?: number
+  /** A VIEW — a surface you can stand in. What the Views / Not views filter
+   *  reads on Everywhere, said once by the drone that builds the rows. */
+  isView?: boolean
+  /** A light that cannot go out — the way back to every other light (the
+   *  roster's own word, help, create, undo, redo). Its row shows lit and
+   *  will not switch. */
+  fixed?: boolean
   /** Present when the behaviour is bound to one or more tiles — the store is
    *  the census, so it is the one surface that names every binding at once.
    *  Absent means it belongs to the whole hive (the default). */
@@ -235,6 +242,9 @@ const ANCHORED_PREF_KEY = 'hc:behaviors-pool-anchored'
 /** Has a roster answer landed this session? See the one-shot re-ask below. */
 let rosterAnswered = false
 
+/** The filter's positions: everything, the views, everything that is not one. */
+type FeaturesLens = 'all' | 'views' | 'other'
+
 @Component({
   selector: 'hc-features-viewer',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -331,47 +341,52 @@ export class FeaturesViewerComponent implements OnDestroy {
 
   readonly mode = signal<'tile' | 'store'>('tile')
 
-  /** THE LENS — which KINDS the LOCAL list shows. TWO positions, mutually
-   *  exclusive, because A VIEW IS A BEEHAVIOUR (Jaime, 2026-08-24): views are
-   *  a SUBSET, not a rival kind, so `behaviors` is the WHOLE list — views
-   *  included, told apart only by the ground the row stands on — and `views`
-   *  narrows it to the surfaces.
+  /** THE FILTER — which KINDS the list shows, on BOTH tabs. A view IS a
+   *  beehaviour (Jaime, 2026-08-24), so `all` is the whole list, views
+   *  included and told apart by the ground their rows stand on; `views`
+   *  narrows it to the surfaces you can stand in; `other` is everything
+   *  that is not one (jwize, 2026-11-08: "views or non views beehaviors").
+   *  Three positions of ONE choice, never independent toggles: exactly one
+   *  is lit, so there is no combination that means an empty list.
    *
-   *  There is no third `all` position: it would be a second name for
-   *  `behaviors`. Two independent toggles over a set and its subset can be
-   *  put into a state that means nothing (both dark = an empty list), and
-   *  needed a rule to climb back out of it; a choice between two cannot.
-   *
-   *  WHERE you are reading — this layer or the pool — is NOT a lens position:
-   *  that is `mode`, and the two are separate controls because they answer
-   *  different questions (Jaime, 2026-08-22). */
-  readonly lens = signal<'behaviors' | 'views'>('behaviors')
+   *  WHERE you are reading — Here or Everywhere — is the other control,
+   *  the tabs (`mode`), because it answers a different question. */
+  readonly lens = signal<FeaturesLens>('all')
 
-  /** The two kind buttons, as the strip draws them — EXACTLY ONE is ever
-   *  lit, so the pair reads as a choice, never as two switches. */
-  readonly showBehaviors = computed(() => this.lens() === 'behaviors')
-  readonly showViews = computed(() => this.lens() === 'views')
+  /** Pick a filter. Clicking the lit one is a no-op: there is nothing to
+   *  un-pick, only another one to pick. */
+  readonly setLens = (kind: FeaturesLens): void => { this.lens.set(kind) }
 
-  /** Pick a kind. Clicking the lit one is a no-op: there is nothing to
-   *  un-pick, only the other one to pick. */
-  readonly setLens = (kind: 'behaviors' | 'views'): void => { this.lens.set(kind) }
+  /** The filter's three positions, in the order the strip draws them. */
+  readonly lenses: readonly { kind: FeaturesLens; key: string; icon: string }[] = [
+    { kind: 'all', key: 'features.filter.all', icon: 'extension' },
+    { kind: 'views', key: 'features.filter.views', icon: 'view_quilt' },
+    { kind: 'other', key: 'features.filter.other', icon: 'widgets' },
+  ]
 
-  /** THE SCOPE. Local = this layer's rows; Global = the pool, every
-   *  beehaviour with one global light each. ONE toggle, two positions —
-   *  the glyph names WHERE YOU ARE (not where the next click goes), and
-   *  the header title spells the word out beside it. */
-  //  `features.where.*`, NOT `features.scope.*` — `features.scope.layer`
-  //  was already taken by the manage strip ("This layer" vs "Everything
-  //  beneath"), and a second key by that name is a SILENT duplicate: JSON
-  //  keeps the last one, so the title would have read the wrong string.
-  readonly scopeKey = computed(() => this.isStore() ? 'features.where.global' : 'features.where.layer')
-  readonly scopeHintKey = computed(() => this.isStore() ? 'features.where.layer.hint' : 'features.where.global.hint')
-  readonly scopeIcon = computed(() => this.isStore() ? 'storefront' : 'layers')
-
-  readonly toggleScope = (): void => {
-    if (this.mode() === 'store') this.closeStore()
-    else this.openStore()
+  /** Does a row pass the filter? One rule, both tabs. */
+  #passesLens(isView: boolean | undefined): boolean {
+    const lens = this.lens()
+    if (lens === 'views') return isView === true
+    if (lens === 'other') return isView !== true
+    return true
   }
+
+  /** THE TABS (jwize, 2026-11-08). HERE is this layer: what it carries and
+   *  what it could. EVERYWHERE is every behaviour the app knows — views,
+   *  capabilities, games, and every word with its desk — one light each.
+   *  Words, desks and games have no location, so they are only ever under
+   *  Everywhere. This reverses the August call for one list with a hidden
+   *  scope button: the two answers are two tabs, named in words. */
+  readonly goHere = (): void => {
+    if (this.mode() !== 'store') return
+    // Opened straight onto Everywhere (a word's refusal, `/beehaviors`), the
+    // window has no layer yet: Here is the one you are standing on, the same
+    // subject the rail switch gives it.
+    if (!this.group()) { this.mode.set('tile'); this.#openAt(this.#currentSegments()); return }
+    this.closeStore()
+  }
+  readonly goEverywhere = (): void => { if (this.mode() !== 'store') this.openStore() }
 
   /** The view this LAYER opens as - '' when it opens as hexagons. One per
    *  layer: choosing a second view is the same gesture as choosing the first,
@@ -404,6 +419,7 @@ export class FeaturesViewerComponent implements OnDestroy {
   readonly storeList = computed<StoreRow[]>(() => {
     const q = this.query().trim().toLowerCase()
     return this.storeRows()
+      .filter(r => this.#passesLens(r.isView))
       .filter(r => this.showAnchored() || !(r.bound?.length))
       .filter(r => !q
         || r.label.toLowerCase().includes(q)
@@ -432,6 +448,8 @@ export class FeaturesViewerComponent implements OnDestroy {
    *  ever asks again from a list row (the review surface handles real code
    *  review when the render gate demands it). */
   readonly storeToggle = (row: StoreRow): void => {
+    // The way back to every other light cannot be put out.
+    if (row.fixed) return
     if (this.#isRepeatPress('pool/' + row.kind)) return
     const next = !row.on
     setKindGlobalOn(row.kind, next)
@@ -664,11 +682,15 @@ export class FeaturesViewerComponent implements OnDestroy {
     }))
     rosterLive = true
     if (rosterAskedEarly && !rosterAnswered) queueMicrotask(() => EffectBus.emit('features:roster-open', {}))
-    this.#cleanups.push(EffectBus.on<{ rows?: StoreRow[] }>('features:roster', (p) => {
+    this.#cleanups.push(EffectBus.on<{ rows?: StoreRow[]; query?: string }>('features:roster', (p) => {
       rosterAnswered = true
       const rows = Array.isArray(p?.rows) ? p!.rows! : []
       this.storeRows.set(rows)
-      this.query.set('')
+      // A door that knows what you came for — a word refusing because it is
+      // off, `/beehaviors <word>` — opens Everywhere already searching for it.
+      this.query.set(typeof p?.query === 'string' ? p.query : '')
+      // Searching for one thing is no time to hide it behind a filter.
+      if (this.query()) this.lens.set('all')
       this.selectedKeys.set(new Set())
       this.mode.set('store')
       if (!this.visible()) {
@@ -693,12 +715,11 @@ export class FeaturesViewerComponent implements OnDestroy {
     // them — the same list, in the one place behaviours live.
     this.#cleanups.push(EffectBus.on<{ lens?: string }>('features:lens', (p) => {
       const want = String(p?.lens ?? '').trim()
-      if (want === 'global') { this.openStore(); return }
-      // `all` is the retired third position — it meant what `behaviors`
-      // means now that views are counted among them, so an older caller
-      // still lands on the whole list.
-      if (want === 'all' || want === 'behaviors') this.lens.set('behaviors')
+      if (want === 'global' || want === 'everywhere') { this.openStore(); return }
+      // `behaviors` is the older name of the whole list.
+      if (want === 'all' || want === 'behaviors') this.lens.set('all')
       else if (want === 'views') this.lens.set('views')
+      else if (want === 'other' || want === 'not-views') this.lens.set('other')
       else return
       if (this.mode() === 'store') this.mode.set('tile')
       this.#openAt(this.#currentSegments())
@@ -1072,9 +1093,8 @@ export class FeaturesViewerComponent implements OnDestroy {
         bound: f.bound, feat: f,
       })
     }
-    // Beehaviours INCLUDE views, so that position filters NOTHING — only the
-    // narrow one has anything to drop.
-    return this.lens() === 'views' ? rows.filter(r => r.isView) : rows
+    // Beehaviours INCLUDE views, so `all` filters nothing.
+    return rows.filter(r => this.#passesLens(r.isView))
   }
 
   /** THE DEFAULT - clicking a VIEW row's own icon.
@@ -1410,8 +1430,7 @@ export class FeaturesViewerComponent implements OnDestroy {
   }
 
   /** One level back per press: a review, a manage strip, the search, then the
-   *  lens back to its resting position (the pool first, then the narrowing
-   *  to views — back to the beehaviours, which are all of them).
+   *  tab back to Here, then the filter back to All.
    *  False = nothing of ours was open, and the shell cascade carries on.
    *  Reached from the session; there is no listener here. */
   dismiss(): boolean {
@@ -1419,7 +1438,7 @@ export class FeaturesViewerComponent implements OnDestroy {
     if (this.managing()) { this.managing.set(''); return true }
     if (this.query()) { this.query.set(''); return true }
     if (this.mode() === 'store') { this.closeStore(); return true }
-    if (this.lens() !== 'behaviors') { this.lens.set('behaviors'); return true }
+    if (this.lens() !== 'all') { this.lens.set('all'); return true }
     return false
   }
 }

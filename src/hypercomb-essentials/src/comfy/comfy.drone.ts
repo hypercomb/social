@@ -19,6 +19,7 @@ import { comfyHost, type ComfyFileRef } from './comfy-host.js'
 import { readyRecipes } from './comfy-recipes.js'
 import { COMFY_SERVICE_KEY, comfyService, type ComfyJob } from './comfy.service.js'
 import { weightRoster } from './comfy-weights.js'
+import { closeWhenDark, isWordDark, refuseWhileDark } from '../commands/word-enablement.js'
 import { listComfyPrompts, saveComfyPrompt, type ComfyPromptDraft, type ComfyPromptSaved } from './comfy-prompts.js'
 import { continuationKeyOfGraph, readComfyDraft, saveComfyDraft, type ComfyDraft } from './comfy-draft.js'
 import { offeredKnobs, readParams, type ComfyParams } from './comfy-workflow.js'
@@ -115,6 +116,9 @@ export interface ComfyWeightRow {
   since?: number
 }
 
+/** The word the desk belongs to (commands/word-enablement.ts). */
+const COMFY_WORD = 'comfy'
+
 export class ComfyDrone extends Drone {
 
   readonly namespace = 'diamondcoreprocessor.com'
@@ -158,19 +162,18 @@ export class ComfyDrone extends Drone {
       const section = String(p?.section ?? '')
       // A word that asked for a section is a request to LOOK at something,
       // never to put the window away — only the bare gesture toggles.
+      // THE DESK IS PART OF ITS WORD (commands/word-enablement.ts): while
+      // `comfy` is switched off in Beehaviors, no door opens it.
+      if (!this.#open && refuseWhileDark(COMFY_WORD)) return
       if (section) { this.#open = true; this.#reveal = section }
       else { this.#open = !this.#open; this.#reveal = '' }
       if (this.#open) void this.#warm()
       this.#emit()
     })
 
-    this.onEffect('comfy:close', () => {
-      if (!this.#open) return
-      this.#open = false
-      this.#releasePictures()
-      this.#browsing = false
-      this.#emit()
-    })
+    this.onEffect('comfy:close', () => this.#shut())
+    // Switched off while open: the desk goes with its word.
+    closeWhenDark(COMFY_WORD, () => this.#shut())
 
     // THE SHELL PUTS WINDOWS AWAY AND BRINGS THEM BACK, and the state it
     // moves is HERE — one window at a time, a cover over the hive, a return
@@ -180,6 +183,9 @@ export class ComfyDrone extends Drone {
     // directions, announced by the panel's session.
     this.onEffect('comfy:reopen', () => {
       if (this.#open) return
+      // A return home is not a gesture: a desk whose word went dark while
+      // it was put away simply stays away.
+      if (isWordDark(COMFY_WORD)) return
       this.#open = true
       void this.#warm()
       this.#emit()
@@ -388,6 +394,15 @@ export class ComfyDrone extends Drone {
   /** The previews are object URLs over files on disk — revoking them costs
    *  the browser nothing and holding them forever is a leak. The FILES are
    *  untouched either way; nothing here was ever a copy. */
+  /** Put the desk away — its own close, a park, or its word going dark. */
+  #shut(): void {
+    if (!this.#open) return
+    this.#open = false
+    this.#releasePictures()
+    this.#browsing = false
+    this.#emit()
+  }
+
   #releasePictures(): void {
     for (const picture of this.#folderPictures) {
       try { URL.revokeObjectURL(picture.url) } catch { /* already gone */ }

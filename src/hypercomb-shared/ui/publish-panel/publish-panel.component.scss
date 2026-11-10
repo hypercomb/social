@@ -36,43 +36,78 @@ $bulb-warm: #ffcd64;
   pointer-events: none;
 }
 
+// FULL SCREEN, beside the control bar and never over it (the same rule as the
+// AI chat window): the bar publishes what it occupies as --hc-controls-left /
+// --hc-controls-right, and the window starts just inboard of it. The tile tree
+// stands down the left, absolutely positioned, so the window's column flow
+// just moves right by its width. `!important` against hcDockedPanel's inline
+// width and lane offset — the directive stays for the text ladder and close,
+// not for geometry.
 .publish-panel {
+  --publish-rail-width: clamp(15rem, 22vw, 20rem);
   pointer-events: auto;
   position: absolute;
-  top: var(--hc-header-anchor);
-  right: 0;
-  bottom: 0;
-  width: 380px;
-  min-width: 300px;
-  max-width: calc(100vw - 1.5rem);
+  inset: 0;
+  left: var(--hc-controls-left, 0px);
+  right: var(--hc-controls-right, 0px) !important;
+  width: auto !important;
+  max-width: none;
+  margin: 0;
   display: flex;
   flex-direction: column;
+  padding-left: var(--publish-rail-width);
   background: rgba(var(--hc-panel-pane), 0.96);
-  border-left: 1px solid rgba(var(--acc), 0.45);
-  box-shadow: -10px 0 40px rgba(var(--hc-panel-shadow), 0.5), 0 0 0 1px rgba(var(--acc), 0.06) inset;
+  box-shadow: 0 18px 60px rgba(var(--hc-panel-shadow), 0.55);
   font-family: var(--hc-mono, system-ui);
   font-size: calc(1rem * var(--hc-panel-scale, 1));
   color: var(--hc-window-ink-loud);
   outline: none;
   @include tw.panel($accent, right);
+  border-radius: 0;
+  border-right: none;
 }
 
-// OVER A VIEW IT IS A POPUP (jwize 2026-10-10). Same place, but it floats on
-// the page rather than docking to the hive's edge: it reserves no edge (the
-// view keeps its width under it — `hcDockInsetActive`), it is rounded on all
-// four corners, and it has a margin on the right (and below, so the bottom
-// corners read) with the floating shell's full border and shadow. MARGINS, not
-// offsets: the docked-panel primitive writes `right` inline for the lane, and
-// a margin moves an absolute box in from wherever that lands. Phones keep
-// their bottom sheet (the not-phone query is the complement of `phone`).
-@media (min-width: $bp-tablet) and (min-height: $bp-phone-short + 1) {
-  .publish-panel.over-view {
-    margin: 0 0.75rem 0.75rem 0;
-    border: 1px solid rgba(var(--acc), 0.38);
-    border-radius: tw.$radius-floating;
-    box-shadow: 0 18px 54px rgba(var(--hc-panel-shadow), 0.55), inset 0 1px rgba(var(--hc-panel-sheen), 0.03);
-    overflow: hidden;
-  }
+// The tile tree — essentials builds its rows; this owns only where it sits.
+.publish-rail {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--publish-rail-width);
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid rgba(var(--acc), 0.18);
+  background: rgba(var(--hc-panel-pane), 0.55);
+  font-family: var(--hc-read, inherit);
+}
+
+// The branch the tree has narrowed the creations to.
+.pfocus {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5em;
+
+  b { font-weight: 600; color: var(--hc-window-ink-loud); }
+}
+
+.pfocus-clear {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: var(--hc-window-ink-quiet);
+  font-size: 1.3em;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2em;
+
+  &:hover { color: rgb(var(--acc)); }
+}
+
+// A phone has no room for a sidebar beside the list — the list alone.
+@media (max-width: 700px) {
+  .publish-panel { padding-left: 0; }
+  .publish-rail { display: none; }
 }
 
 // ── the header ────────────────────────────────────────────

@@ -172,16 +172,16 @@ async function main() {
     // KIND: a choice between two, exactly one lit; Views narrows the same
     // list to the views, Beehaviors (views included) filters nothing.
     const kinds = async () => ({
-      behaviors: await panel.locator('.scope-kind.behaviors.on').count(),
-      views: await panel.locator('.scope-kind.views.on').count(),
+      behaviors: await panel.locator('.features-filter-btn[data-lens="all"].on').count(),
+      views: await panel.locator('.features-filter-btn[data-lens="views"].on').count(),
       rows: await panel.locator('.features-row').count(),
       viewRows: await panel.locator('.features-row.view').count(),
     })
     const asBehaviors = await kinds()
-    await panel.locator('.scope-kind.views').first().click()
+    await panel.locator('.features-filter-btn[data-lens="views"]').first().click()
     await page.waitForTimeout(800)
     const asViews = await kinds()
-    await panel.locator('.scope-kind.behaviors').first().click()
+    await panel.locator('.features-filter-btn[data-lens="all"]').first().click()
     await page.waitForTimeout(800)
     const back = await kinds()
     check('the kind is a choice of two — Views narrows the list to views, Beehaviors filters nothing',
@@ -191,20 +191,20 @@ async function main() {
         && back.rows === asBehaviors.rows,
       `beehaviors ${asBehaviors.rows} rows, views ${asViews.rows}, back ${back.rows}`)
 
-    // SCOPE: one toggle — this layer, or the pool (no kind choice there).
-    await panel.locator('.scope-toggle').first().click()
+    // WHERE: two tabs — Here, or Everywhere — and the filter on both.
+    await panel.locator('.features-tab:nth-of-type(2)').first().click()
     await page.waitForTimeout(1200)
     const inPool = {
-      pressed: await panel.locator('.scope-toggle.pool').count(),
+      pressed: await panel.locator('.features-tab:nth-of-type(2).on').count(),
       store: await panel.locator('.features-scroll.store').count(),
-      kinds: await panel.locator('.scope-kind').count(),
+      kinds: await panel.locator('.features-filter-btn').count(),
     }
     await shot('05-pool')
-    await panel.locator('.scope-toggle').first().click()
+    await panel.locator('.features-tab:nth-of-type(1)').first().click()
     await page.waitForTimeout(1200)
     const backHere = await panel.locator('.features-scroll.store').count()
-    check('the scope toggles between this layer and the pool',
-      inPool.pressed === 1 && inPool.store === 1 && inPool.kinds === 0 && backHere === 0,
+    check('the tabs switch between Here and Everywhere, and the filter is on both',
+      inPool.pressed === 1 && inPool.store === 1 && inPool.kinds === 3 && backHere === 0,
       JSON.stringify({ ...inPool, backHere }))
 
     // ── 6. ARRIVAL — the whole point ───────────────────────────────────

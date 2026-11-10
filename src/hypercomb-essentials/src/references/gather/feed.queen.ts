@@ -70,7 +70,7 @@ export class FeedQueenBee extends QueenBee {
     if (!page) {
       if (off) { log(`${groupName} does not feed "${name}"`); return }
       page = await link.resolveRoute(name, group)
-      if (!page) { log(`No page called "${name}" on this page, at the top, or in Portals`, 'warning'); return }
+      if (!page) { log(`No page called "${name}" on this page, at the top, or in Favorites`, 'warning'); return }
       const outcome = await link.link(page, group)
       if (!outcome.ok) { log(`"${name}" cannot gather from ${groupName}: ${outcome.reason}`, 'warning'); return }
     }

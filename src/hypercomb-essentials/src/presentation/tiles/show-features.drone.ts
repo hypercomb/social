@@ -86,6 +86,10 @@ import {
 } from '../../sharing/behavior-enablement.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
 import { gameCensus, gameKinds, GAME_COHORT } from '../../games/game-enablement.js'
+import {
+  WORD_COHORT, isAlwaysLit, isShippedNamespace, wordKind, wordOfKind,
+} from '../../commands/word-enablement.js'
+import type { WordCensusEntry } from '../../commands/slash-behaviour.drone.js'
 import { writeDropbox } from '../../files/files-attachment.js'
 import { parseAccept } from '../../files/file-types.js'
 import { WEBSITE_SLOT } from '../../commands/website-slot.js'
@@ -590,7 +594,12 @@ export class ShowFeaturesDrone extends Drone {
     // never raises it. This drone owns the census (registry
     // + CAPABILITIES + GAMES + lit/off kinds whose module isn't here — those
     // must stay listed or they could never be flipped again).
-    this.onEffect('features:roster-open', () => { this.#emitRoster() })
+    // A door that knows what it came for (a word refusing because it is off,
+    // `/beehaviors <word>`) carries a search; the answer carries it back, so
+    // the window opens on it whichever of the two hears the request first.
+    this.onEffect<{ query?: string }>('features:roster-open', (p) => {
+      this.#emitRoster(typeof p?.query === 'string' ? p.query.trim() : '')
+    })
 
     // Seed the opt-in on-list once the whole module graph has registered —
     // and again before any roster build, whichever comes first. Idempotent.
@@ -619,6 +628,7 @@ export class ShowFeaturesDrone extends Drone {
         ...bees.map(b => b.decorationKind),
         ...Object.keys(CAPABILITIES),
         ...gameKinds(),
+        ...this.#communityWordKinds(),
         // Bound kinds are ON — binding scopes a behaviour, it never switches
         // it off — so a binding made ahead of its module must stay lit.
         ...Object.keys(allBindings()),
@@ -631,10 +641,28 @@ export class ShowFeaturesDrone extends Drone {
     // hive that started dark. (Runs after the census seed, so on a fresh
     // legacy hive it finds them already lit and only records the cohort.)
     seedCohortOn(GAME_COHORT, gameKinds())
+    // Words, the same lesson: every word ran before it had a switch. The
+    // build's own words need no seed (they are lit until switched off); a
+    // community word that already worked here is lit once, and a hive that
+    // started dark keeps them dark (commands/word-enablement.ts).
+    seedCohortOn(WORD_COHORT, this.#communityWordKinds())
+  }
+
+  /** The words the slash drone knows, for the roster. */
+  #wordCensus(): WordCensusEntry[] {
+    const slash = this.#ioc()?.get<{ wordCensus?: () => WordCensusEntry[] }>(SLASH_BEHAVIOUR_KEY)
+    try { return slash?.wordCensus?.() ?? [] } catch { return [] }
+  }
+
+  /** The kinds of the words that read dark until lit — anyone else's. */
+  #communityWordKinds(): string[] {
+    return this.#wordCensus()
+      .filter(w => !isShippedNamespace(w.namespace) && !isAlwaysLit(w.word))
+      .map(w => wordKind(w.word))
   }
 
   /** Build + emit the global roster. Sync — the census is in-memory. */
-  #emitRoster(): void {
+  #emitRoster(query = ''): void {
     this.#seedEnablement()
     const registry = this.#ioc()?.get<VisualBeeRegistry>(VISUAL_BEE_REGISTRY_KEY)
     const i18n = this.#ioc()?.get<I18nProvider>(I18N_KEY)
@@ -643,6 +671,12 @@ export class ShowFeaturesDrone extends Drone {
       view: string; icon: string; kind: string; label: string; description: string
       category: string; slashCommand?: string; foreign?: boolean; module?: string
       on: boolean; used: number
+      /** A VIEW — a surface you can stand in. The window's Views / Not views
+       *  filter reads this on both tabs, so it is said once, here. */
+      isView: boolean
+      /** A light that cannot go out (word-enablement.ts ALWAYS_LIT_WORDS):
+       *  the way back to every other light. */
+      fixed?: boolean
       /** Where this behaviour BELONGS, when it has been bound. The store is
        *  the one surface that must show every binding at once — it is the
        *  census, and a behaviour that is invisible on every tile but one
@@ -668,6 +702,8 @@ export class ShowFeaturesDrone extends Drone {
         ...(bee.slashCommand ? { slashCommand: bee.slashCommand } : {}),
         on: !isKindGloballyOff(bee.decorationKind),
         used: countLabelsWithKind(bee.decorationKind),
+        // The same rule the Here list uses for its offers.
+        isView: bee.behavior !== 'navigation',
         ...boundOf(bee.decorationKind),
       })
     }
@@ -684,6 +720,7 @@ export class ShowFeaturesDrone extends Drone {
         ...(cap.slashCommand ? { slashCommand: cap.slashCommand } : {}),
         on: !isKindGloballyOff(kind),
         used: countLabelsWithKind(kind),
+        isView: false,
         ...boundOf(kind),
       })
     }
@@ -709,7 +746,35 @@ export class ShowFeaturesDrone extends Drone {
         // zero next to a lit row says "unused" about something that is only
         // ever used by being played.
         used: 0,
+        isView: false,
         ...boundOf(game.kind),
+      })
+    }
+    // WORDS — every word the command line knows (commands/word-enablement.ts).
+    // A word marks no tile, so like a game it lives only here, Everywhere. Its
+    // desk, when it opens one, is part of it: the light that stops the word
+    // closes the desk. Named by the word itself — a word IS its own name —
+    // with the sentence its author wrote. A word no build of ours ships names
+    // its module, the way a foreign kind does.
+    for (const entry of this.#wordCensus()) {
+      const kind = wordKind(entry.word)
+      if (!kind || seen.has(kind)) continue
+      seen.add(kind)
+      const fixed = isAlwaysLit(entry.word)
+      const shipped = isShippedNamespace(entry.namespace)
+      rows.push({
+        view: entry.word,
+        icon: 'terminal',
+        kind,
+        label: entry.word,
+        description: entry.description === entry.word ? '' : entry.description,
+        category: 'word',
+        slashCommand: '/' + entry.word,
+        ...(!shipped && entry.namespace ? { module: entry.namespace } : {}),
+        on: fixed || !entry.dark,
+        used: 0,
+        isView: false,
+        ...(fixed ? { fixed: true } : {}),
       })
     }
     // Kinds nobody here declares but that carry a record — lit or explicitly
@@ -726,6 +791,10 @@ export class ShowFeaturesDrone extends Drone {
       ...Object.keys(allBindings()),
     ])) {
       if (seen.has(kind) || this.#isRetiredKind(kind)) continue
+      // A word's record outlives the word (a module gone, a word renamed):
+      // it is not a behaviour waiting on a module, and offering it would
+      // offer a word nobody can type.
+      if (wordOfKind(kind)) continue
       seen.add(kind)
       const moduleName = moduleFromKind(kind)
       rows.push({
@@ -741,12 +810,15 @@ export class ShowFeaturesDrone extends Drone {
         // binding scopes a behaviour, it never switches it off.
         on: !isKindGloballyOff(kind),
         used: countLabelsWithKind(kind),
+        // Nobody here can say: a view nobody declares is not a surface
+        // anyone can stand in yet.
+        isView: false,
         ...boundOf(kind),
       })
     }
     // Transient for the same reason as `features:open`: the answer belongs to
     // the request just made, never to a panel that mounts afterwards.
-    EffectBus.emitTransient('features:roster', { rows })
+    EffectBus.emitTransient('features:roster', { rows, ...(query ? { query } : {}) })
   }
 
   /** Attach (or detach) an ATTACHABLE view behaviour at `segments` by writing

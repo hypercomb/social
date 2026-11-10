@@ -153,7 +153,7 @@ export class PixiHostWorker extends Worker {
 
   protected override deps = { settings: '@diamondcoreprocessor.com/Settings', axial: '@diamondcoreprocessor.com/AxialService' }
   protected override listens = ['editor:mode', 'viewport:inset']
-  protected override emits = ['render:host-ready', 'render:unsupported']
+  protected override emits = ['render:host-ready', 'render:unsupported', 'render:context-lost', 'render:context-restored']
 
   // ── Toolwindow inset (common dock system) ──
   // Docked panels broadcast how much screen edge they reserve via
@@ -170,18 +170,25 @@ export class PixiHostWorker extends Worker {
    *  Localized when the i18n provider is up; English otherwise. `diag` is
    *  the context-probe summary, shown small so a screenshot of this note
    *  carries the evidence needed to diagnose the machine. */
-  #showWebglRequired(host: HTMLDivElement, diag?: string): void {
+  #showWebglRequired(host: HTMLDivElement, diag?: string, kind: 'required' | 'lost' = 'required'): void {
     const i18n = (window as { ioc?: { get?: (k: string) => unknown } }).ioc
       ?.get?.('@hypercomb.social/I18n') as
       { t: (k: string, p?: Record<string, string | number>) => string } | undefined
-    const title = i18n?.t('webgl.required') ?? 'Hardware graphics is turned off'
-    const body = i18n?.t('webgl.howto')
-      ?? 'Hypercomb draws its tiles with WebGL, which this browser is blocking. '
-      + 'Safari: turn off Lockdown Mode for this site (Settings → Privacy & Security). '
-      + 'Chrome: turn on "Use graphics acceleration when available" (Settings → System) and relaunch. '
-      + 'Then reload this page.'
+    const title = kind === 'lost'
+      ? (i18n?.t('webgl.lost') ?? 'Graphics were interrupted')
+      : (i18n?.t('webgl.required') ?? 'Hardware graphics is turned off')
+    const body = kind === 'lost'
+      ? (i18n?.t('webgl.lost.howto')
+        ?? 'The browser took the graphics context away from this page — usually graphics memory '
+        + 'pressure or a crashed graphics process. It normally comes back on its own within a few '
+        + 'seconds; if this note stays, reload the page, and if that does not help, restart the browser.')
+      : (i18n?.t('webgl.howto')
+        ?? 'Hypercomb draws its tiles with WebGL, which this browser is blocking. '
+        + 'Safari: turn off Lockdown Mode for this site (Settings → Privacy & Security). '
+        + 'Chrome: turn on "Use graphics acceleration when available" (Settings → System) and relaunch. '
+        + 'Then reload this page.')
     const note = document.createElement('div')
-    note.dataset['hypercombPixi'] = 'webgl-required'
+    note.dataset['hypercombPixi'] = kind === 'lost' ? 'webgl-lost' : 'webgl-required'
     note.style.cssText =
       'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;'
       + 'justify-content:center;gap:0.6rem;padding:2rem;text-align:center;'
@@ -201,6 +208,51 @@ export class PixiHostWorker extends Worker {
       note.append(d)
     }
     host.appendChild(note)
+  }
+
+  /** THE CONTEXT CAN BE TAKEN AWAY MID-SESSION. macOS reclaims GPU memory
+   *  under pressure, Safari sheds the WebGL contexts of long-backgrounded
+   *  tabs, and a crashed GPU process takes every context with it. The
+   *  browser fires `webglcontextlost` on the canvas; Pixi's GlContextSystem
+   *  already preventDefaults it (so a restore is allowed) and, on
+   *  `webglcontextrestored`, re-creates its GL textures and shaders from
+   *  their sources. What Pixi cannot bring back is the CONTENT of render
+   *  targets — the label and image atlases are drawn into incrementally and
+   *  come back blank — so the host announces both edges on the bus:
+   *  `render:context-lost` (stop asking for frames) and
+   *  `render:context-restored` (rebuild whatever was drawn, not loaded).
+   *  While the context is away the ticker is stopped, so nothing grinds a
+   *  dead GL; if the browser has not restored within a few seconds the
+   *  participant is told what happened and that a reload is the way back.
+   *  Pixi registered its own listeners at init, before these, so on restore
+   *  its resources exist again by the time drones hear about it. */
+  #wireContextLoss(app: Application, host: HTMLDivElement, gate: RenderGate): void {
+    const canvas = app.canvas as HTMLCanvasElement
+    let noteTimer: ReturnType<typeof setTimeout> | null = null
+    let lostAt = 0
+    const payload = (): HostReadyPayload => ({
+      app, container: this.container, canvas, renderer: app.renderer,
+    })
+    canvas.addEventListener('webglcontextlost', () => {
+      lostAt = performance.now()
+      console.warn('[pixi-host] WebGL context lost — the browser took the GPU context away (memory pressure or a GPU process crash). Waiting for it to come back.')
+      try { app.ticker.stop() } catch { /* already stopped */ }
+      this.emitEffect('render:context-lost', payload())
+      if (noteTimer) clearTimeout(noteTimer)
+      noteTimer = setTimeout(() => {
+        noteTimer = null
+        if (!host.querySelector('[data-hypercomb-pixi="webgl-lost"]')) this.#showWebglRequired(host, undefined, 'lost')
+      }, 4000)
+    }, false)
+    canvas.addEventListener('webglcontextrestored', () => {
+      if (noteTimer) { clearTimeout(noteTimer); noteTimer = null }
+      host.querySelector('[data-hypercomb-pixi="webgl-lost"]')?.remove()
+      const away = lostAt ? `${Math.round(performance.now() - lostAt)}ms` : 'unknown time'
+      console.info(`[pixi-host] WebGL context restored after ${away} — rebuilding drawn resources.`)
+      try { app.ticker.start() } catch { /* already running */ }
+      gate.wake(3)
+      this.emitEffect('render:context-restored', payload())
+    }, false)
   }
 
   // Two INDEPENDENT owners hide the canvas: the tile editor and a full-surface
@@ -404,6 +456,7 @@ export class PixiHostWorker extends Worker {
 
     this.container = new Container()
     app.stage.addChild(this.container)
+    this.#wireContextLoss(app, host, gate)
 
     // -------------------------------------------------
     // center stage (no scaling!) — use window dimensions directly

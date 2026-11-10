@@ -36,6 +36,7 @@ import { publisherKeyHex } from './key-list.client.js'
 import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
 import { listCommunityHosts } from './community-hosts.js'
 import { readFromHost } from './published-address.js'
+import { readPoolListing } from './pool-listing.js'
 import { listPublishRecords } from './publish-heads.js'
 import { isPoweredEntrance, readDoorsOf, zoneDoor } from './zone-door.js'
 import { pageAtHead } from '../commands/card-read.js'
@@ -240,14 +241,6 @@ export type EntranceScentDeps = {
 const SCENTS_READ = 24
 const VERDICTS: readonly EntranceScentVerdict[] = ['accept', 'refuse', 'unclear']
 
-const defaultFetchText = async (url: string): Promise<string | null> => {
-  try {
-    const res = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
-    if (!res.ok || (res.headers.get('content-type') ?? '').includes('text/html')) return null
-    return await res.text()
-  } catch { return null }
-}
-
 /**
  * WHAT THE COMMUNITY SAYS ABOUT A PAGE — read only. The assessors of `page`
  * are the members of sign('assess:<page>') on the host (the worker adds one
@@ -262,13 +255,14 @@ export async function readEntranceScents(
   const h = zoneDoor(host)
   const p = String(page ?? '').toLowerCase()
   if (!h || !SIG_RE.test(p)) return []
-  const fetchText = deps.fetchText ?? defaultFetchText
   const fetchIndex = deps.fetchIndex ?? fetchHiveIndex
   const bytesOf = deps.bytes ?? ((at: string, sig: string) => readFromHost(at, sig))
   const key = `assess:${p}`
   const pool = await SignatureService.sign(new TextEncoder().encode(key).buffer as ArrayBuffer)
   const origin = /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3})(?::\d+)?$/i.test(h) ? `http://${h}` : `https://${h}`
-  const listed = ((await fetchText(`${origin}/${pool}/`)) ?? '').split(/\r?\n/).map(s => s.trim().toLowerCase())
+  // Asked the one quiet way (pool-listing.ts) unless a test brings its own read.
+  const listing = deps.fetchText ? await deps.fetchText(`${origin}/${pool}/`) : await readPoolListing(origin, pool)
+  const listed = (listing ?? '').split(/\r?\n/).map(s => s.trim().toLowerCase())
   const keys = [...new Set([...also.map(k => String(k ?? '').toLowerCase()), ...listed])].filter(k => SIG_RE.test(k)).slice(0, SCENTS_READ)
   const scents: EntranceScent[] = []
   for (const pubkey of keys) {

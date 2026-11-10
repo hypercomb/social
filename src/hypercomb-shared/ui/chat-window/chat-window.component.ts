@@ -169,6 +169,7 @@ import { CHAT_CONTEXT_COMPILER, compileChatContext } from './context-window-comp
 import { executionLineParts } from './execution-line'
 import { withheldMessage, withheldObservations, withoutWithheld } from './withheld-reads'
 import { aiWithheld } from '../../core/ai-withheld.store'
+import { isWordSwitchedOff, sayWordSwitchedOff } from '../features-viewer/behavior-enablement'
 import {
   blockRefusedMessage,
   blockUnwrittenMessage, claimsUnranChange, unranChangeMessage,
@@ -1611,6 +1612,11 @@ const ioc = (): { get(k: string): unknown } | undefined =>
 /** This window's name in the owner-counted `view:active` mode. */
 const SURFACE_OWNER = 'chat-window'
 
+/** THE WORD THIS DESK BELONGS TO. Switched off in Beehaviors, `chat` takes the
+ *  window with it: it does not come back on a reload, no door opens it, and
+ *  an open one closes (features-viewer/behavior-enablement.ts). */
+const CHAT_WORD = 'chat'
+
 /** THE VIEW THAT LEAVES THE BAR ITS EDGE.
  *
  *  `view:active` means "a view is covering the canvas, put the chrome away",
@@ -1685,7 +1691,7 @@ export class ChatWindowComponent implements OnDestroy {
   /** Whether the window was on screen when the page was last left survives a
    *  refresh. A first visit begins with the launcher for everyone; the chat
    *  icon is the door. */
-  readonly visible = signal(rememberedChatVisibility(false))
+  readonly visible = signal(rememberedChatVisibility(false) && !isWordSwitchedOff(CHAT_WORD))
 
   /** A CALL FROM OUTSIDE, ANSWERED WHERE THE PARTICIPANT ALREADY IS. An agent
    *  that asks the hive to say lines waits on the command line; with the chat
@@ -1730,6 +1736,9 @@ export class ChatWindowComponent implements OnDestroy {
    *  not SHOWING, and showing is what a reload brings back. The `view:active`
    *  claim follows `visible` on its own. */
   readonly session = signalSession(this.visible, open => {
+    // A window put away while its word went dark does not come back with
+    // the rest: the return home is not a door.
+    if (open && isWordSwitchedOff(CHAT_WORD)) { queueMicrotask(() => this.close()); return }
     EffectBus.emit('chat:window-state', { open })
     rememberChatVisibility(open)
     // PARKED IS OFF SCREEN: a keymap the wizard or the route was holding is
@@ -5066,6 +5075,10 @@ export class ChatWindowComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on<{ model?: string; prefill?: string; convoId?: string }>(
       'chat:open', payload => { void this.open(payload) }))
     this.#cleanups.push(EffectBus.on('behavior:enablement-changed', () => this.#readFace(this.layerHere())))
+    // Its word switched off while it shows: the desk goes with it.
+    this.#cleanups.push(EffectBus.on('behavior:enablement-changed', () => {
+      if (this.visible() && isWordSwitchedOff(CHAT_WORD)) this.close()
+    }))
 
     // A click on the hive opens that tile's conversation and leaves the
     // reading pane where it is. Going into the tile does the same. Coming
@@ -5949,6 +5962,8 @@ export class ChatWindowComponent implements OnDestroy {
    * reopening a chat window should do.
    */
   async open(payload?: { model?: string; prefill?: string; convoId?: string }): Promise<void> {
+    // Every door asks first — the word, the rail button, `c`, a model word.
+    if (isWordSwitchedOff(CHAT_WORD)) { sayWordSwitchedOff(CHAT_WORD); return }
     this.#refreshAvailability()
     this.#refreshDesignation()
     const prefill = String(payload?.prefill ?? '').trim()

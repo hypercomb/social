@@ -14,10 +14,10 @@ import { EffectBus, QueenBee } from '@hypercomb/core'
 export class ReferencesQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'references'
-  override description = 'Open Portals and References together to see and manage this page\'s links'
+  override description = 'Open Favorites and References together to see and manage this page\'s links'
   override descriptionKey = 'slash.references'
   override examples = [
-    { input: '/references', result: 'Portals opens on the left, References on the right, both about this page' },
+    { input: '/references', result: 'Favorites opens on the left, References on the right, both about this page' },
   ]
 
   /** LOCAL (declarations audit, 2026-10-01): it opens two panels and writes

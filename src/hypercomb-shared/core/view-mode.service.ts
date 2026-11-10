@@ -76,6 +76,9 @@ const TRANSIENT_MODES = new Set<ViewMode>([
   // you swipe between (launcher-view.drone.ts) — so a reload never boots into
   // one with nothing mounted. Missed when it registered (153db8f0d).
   'launcher',
+  // The lift view takes the whole surface — the page lifted into a three.js
+  // deck (lift-view.drone.ts), with no hexagons under it.
+  'lift',
 ])
 
 /** True when `mode` is a full-surface (canvas-covering) view. The shells

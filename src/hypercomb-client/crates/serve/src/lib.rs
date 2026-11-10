@@ -533,7 +533,47 @@ const CACHE_CURRENT: &str = "public, max-age=31536000, immutable";
 /// `immutable` would keep giving it out.
 const CACHE_PROVISIONAL: &str = "private, max-age=600";
 
+/// Does the request carry the `?held` probe flag?
+fn asks_held(target: &str) -> bool {
+    let before_fragment = target.split('#').next().unwrap_or("");
+    before_fragment
+        .split_once('?')
+        .is_some_and(|(_, query)| query.split('&').any(|pair| pair == "held" || pair.starts_with("held=")))
+}
+
+/// THE PROBE (2026-11-09, the flag the relay and the blossom worker answer):
+/// `?held` asks "do you hold this?" of an atom, a directory or one of its
+/// entries. A browser prints every 404 as a red console error, and a hive asks
+/// that question of every host it follows — so a miss asked with the flag is a
+/// quiet 204 with no body, never cached. It says exactly what the 404 said:
+/// nothing about what the store keeps. Without the flag a miss is the 404 it
+/// always was, and a hit is answered the same either way.
 fn resolve_with(
+    host_shell: &Path,
+    door_shell: Option<&Path>,
+    hive: &dyn HiveSource,
+    host: Option<&str>,
+    genome: &dyn Fn() -> genome::Admits,
+    method: &str,
+    target: &str,
+) -> Reply {
+    let reply = answer(host_shell, door_shell, hive, host, genome, method, target);
+    if reply.status == 404 && asks_held(target) {
+        // What the 404 said, for a reader that tells one miss from another
+        // (the package pool walk): its body, when it had one.
+        let said = match &reply.body {
+            Body::Bytes(bytes) => String::from_utf8_lossy(bytes).lines().next().unwrap_or("").trim().to_string(),
+            _ => String::new(),
+        };
+        return cors(Reply::new(204))
+            .with("cache-control", "no-store")
+            .with("access-control-expose-headers", "X-Reason")
+            .with("x-reason", if said.is_empty() { "not held".to_string() } else { said });
+    }
+    reply
+}
+
+fn answer(
     host_shell: &Path,
     door_shell: Option<&Path>,
     hive: &dyn HiveSource,

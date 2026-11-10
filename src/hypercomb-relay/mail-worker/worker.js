@@ -1,56 +1,113 @@
 // The hypercomb.com mail server, as a Cloudflare Worker. It is always up, so mail never waits on a
-// machine being on.
+// machine being on. Any zone can run the same file: who lives on it is the MAIL_CONFIG secret, plus
+// whatever an admin key has GRANTED from the hive since (grants/ in the bucket — no secret edit, no redeploy).
 //
-//   RECEIVE  Email Routing hands each message to email(). It is encrypted to the recipient's key
-//            (seal.js) and filed in a private R2 bucket. If it cannot be stored, a copy address
-//            catches it; if there is none, the sender is told with a bounce — never lost silently.
-//   WHO      GET  /mail/me                        the addresses the signing key owns (only its own)
-//   READ     GET  /mail/box/<address>[/<sig>]    the inbox list / one sealed message
-//            GET  /mail/sent/<address>[/<sig>]   the same for what was sent
-//   SEND     POST /mail/send                      send as an address, through Cloudflare Email Sending
-//            Every route needs a signed request (NIP-98) from the key that owns the address; a send
-//            also commits to its body, so the body cannot be swapped after signing.
+//   RECEIVE  Email Routing hands each message to email(). It is encrypted to the recipient's keys
+//            (seal.js, envelope v2) and filed in a private R2 bucket. If it cannot be stored, a copy
+//            address catches it; if there is none, the sender is told with a bounce — never lost silently.
+//   WHO      GET    /mail/me                                    { addresses, names, can, admin, zones? } — the signer's own only;
+//                                                               admin = may grant here; zones = the host's zones, said to admins only
+//   READ     GET    /mail/{box,sent,drafts}/<address>[?limit=&cursor=]
+//                                                               { items: [{ sig, at, v, meta, wraps?, marks }], cursor }
+//            GET    /mail/{box,sent,drafts}/<address>/<sig>     the sealed envelope bytes
+//   MARK     PUT    /mail/{box,sent}/<address>/<sig>/marks      { read?, hidden?, flagged?, deletable? } → merged marks
+//   FORGET   DELETE /mail/{box,sent,drafts}/<address>/<sig>     204 only when hidden AND deletable (drafts: always); else 409.
+//                                                               The object and its marks MOVE to trash/ — nothing is destroyed here.
+//   DRAFT    PUT    /mail/drafts/<address>                      the draft JSON, sealed → { sig }
+//   SEND     POST   /mail/send                                  send as an address → { messageId, sig }
+//            Every route needs a signed request (NIP-98) from a key that owns the address; a request
+//            with a body also commits to it (the `payload` tag), so the body cannot be swapped after signing.
+//            A write (POST, PUT, DELETE) spends its event: the same signed request a second time answers 409.
+//            Before the signer is known to own the address every refusal is the same `401 not authorized`,
+//            reached by the same work, so a stranger cannot tell a real address from a ghost.
+//   GRANT    GET    /mail/grants                                { zones, grants: { address: { keys, name?, copyTo?, source, by?, at? } } }
+//            PUT    /mail/grants/<address>                      { keys, name?, copyTo? } → the stored grant; REPLACES the address's grant
+//            DELETE /mail/grants/<address>                      204; the address's mail stays as it is, the secret's entry (if any) stands again
+//            Admin routes: only a key in ADMIN_KEYS ∪ MAIL_CONFIG.admins may ask, and everyone else is told
+//            "not authorized" by the same work. A grant is the address's WHOLE record (keys, name, copy) and wins
+//            over the secret's entry while it exists; nothing that already arrived is touched by a grant or a revoke.
 //
-// The bucket holds, per pool = sha256('mail:<address>') or sha256('mail-sent:<address>'):
-//   <pool>/<sig>   the sealed envelope; customMetadata { at, meta } where meta is sealed too.
-//   c/<pool>/<day> the day's send count (a plain number: the only thing here that is not sealed)
+// The bucket holds, per pool = sha256('mail:<address>' | 'mail-sent:<address>' | 'mail-draft:<address>'):
+//   <pool>/<sig>              the sealed envelope; customMetadata { at, v, wraps, meta } (meta sealed too)
+//   marks/<pool>/<sig>        the owner's marks, PLAIN JSON (they say read/hidden/flagged, not what the mail says);
+//                             the same JSON rides in its customMetadata.marks so a page of marks lists in one call
+//   trash/<pool>/<sig>        a deleted envelope, as it was; trash/marks/<pool>/<sig> its marks + { deletedAt, by }.
+//                             Purged by an R2 lifecycle rule on the trash/ prefix (wrangler.toml says how), never by code.
+//   grants/<address>          who lives here, granted from the hive: PLAIN JSON { v, keys, name?, copyTo?, by, at } — public keys,
+//                             a name, a copy address, nothing sealed; the same JSON in customMetadata.grant so one list reads them all
+//   c/<pool>/<day>            the day's send count;  d/<inbox pool>/<day>  the address's delete count;  g/<day>  the host's grant count
+//   n/<minute>/<event id>     a spent write event, kept a few minutes (past the signature's freshness), then swept
 // The server can read none of the mail. It does see each message in the clear while email() or
-// send() runs: that is inherent to receiving and sending mail at all.
+// send() runs: that is inherent to receiving and sending mail at all. It never logs content or keys.
 //
 //   MAIL             R2 bucket binding
 //   EMAIL            the send_email binding (Cloudflare Email Sending); no binding, no sending
 //   MAIL_CONFIG      the one SECRET (wrangler secret put MAIL_CONFIG): JSON { keys, copyTo, names }
-//     keys           { "<address>": "<hex nostr pubkey that owns it>" }; an address with no key
-//                    is not a mailbox here and cannot be sent as
+//     keys           { "<address>": KEY | [KEY, …] }, KEY = "<hex>" or { "key": "<hex>", "can": [ACT, …] } with ACT
+//                    one of read, mark, draft, delete, send. A key with no `can` may do all of them (so a plain
+//                    string is a full owner); a recovery key kept offline is { key, can: ["read"] }. Every listed key
+//                    is sealed to, whatever it may do. At most 3 keys (R2's 2 KB metadata holds three wraps).
+//                    An address with no valid key is not a mailbox here and cannot be sent as.
 //     copyTo         optional { "<address>": "<verified address>" }; per recipient on purpose,
 //                    so one person's mail is never copied to another person's inbox
+//     names          optional { "<address>": "Display Name" } — sent as From: Name <address>
+//     admins         optional [ "<hex>", … ]: keys that may grant addresses here, unioned with ADMIN_KEYS
 //   MAIL_KEYS / COPY_TO / MAIL_NAMES   the same three as plain vars, for a dev run; the secret wins
+//   ADMIN_KEYS       comma-separated hex keys that may grant (a var or a secret, both read as env.ADMIN_KEYS); none means no granting
+//   MAIL_ZONES       comma-separated zones a grant may name besides the request's own hostname; none means the hostname alone
 //   ALLOWED_ORIGINS  comma-separated origins the reader may call from (CORS); none means none
-//   MAX_STORE_BYTES  the largest message stored (default 15 MiB; the Worker holds it in memory)
+//   MAX_STORE_BYTES  the largest message stored (default 10 MiB; the Worker holds it in memory)
 //   MAX_SEND_PER_DAY messages one address may send per UTC day (default 100)
+//   MAX_DELETE_PER_DAY messages one address may delete per UTC day (default 200): a brake on a leaked key
+//   MAX_GRANTS_PER_DAY grants the whole host takes per UTC day (default 100): the same brake on a leaked admin key
 
 import { normalizeAddress, poolMeaning } from '../mail-address.js'
-import { sealMessage, sha256Hex } from './seal.js'
+import { MAX_RECIPIENT_KEYS, sealMessage, sha256Hex } from './seal.js'
 import { verifyNip98 } from './nip98.js'
 
-const DEFAULT_MAX_STORE = 15 * 1024 * 1024
+// The Worker holds a whole message in memory several times over (the bytes, the ciphertext, the framed
+// envelope; on a send also the JSON text and the parsed body), and Workers count ArrayBuffers toward their
+// 128 MB. Measured in Node, 15 MiB in and 10 MiB of attachments out came to 171-193 MB RSS, so the caps stay
+// lower until someone measures the largest receive and send under `wrangler dev` (R1 #14).
+const DEFAULT_MAX_STORE = 10 * 1024 * 1024
 const DEFAULT_SEND_PER_DAY = 100
-const MAX_SEND_BODY = 1024 * 1024
+const DEFAULT_DELETE_PER_DAY = 200
+const DEFAULT_GRANTS_PER_DAY = 100
+const MAX_SEND_BODY = 10 * 1024 * 1024 // 6 MiB of attachments is 8 MiB of base64, with room for the text
+const MAX_DRAFT_BODY = 1024 * 1024
+const MAX_MARKS_BODY = 1024
+const MAX_GRANT_BODY = 4096 // three keys, a name and a copy address are a few hundred bytes
+const GRANTS_PREFIX = 'grants/'
+const PEOPLE_CACHE_MS = 10_000 // how long an isolate trusts its last reading of the grants
 const MAX_RECIPIENTS = 20 // Cloudflare takes 50; a person writing mail does not need that many
+const MAX_ATTACHMENTS = 10
+const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024 // decoded, all attachments together
+const SPENT_MINUTES = 3 // a spent event outlives the ±60 s freshness window, then is swept
+const ACTS = ['read', 'mark', 'draft', 'delete', 'send']
+const SCAN_BYTES = 64 * 1024 // a received message is never parsed past this, whatever its size
+const PREVIEW_SOURCE_BYTES = 4096
+const PREVIEW_CHARS = 120
 const KEY_RE = /^[a-f0-9]{64}$/
 const MESSAGE_ID_RE = /^<[^<>\s]{1,200}>$/
+const MIME_TYPE_RE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/
+const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/
+// An inline picture's name, as the html's `cid:` reference spells it (templates step 2). Narrow on purpose:
+// it goes into a MIME header Cloudflare writes, so nothing that could end or bend a header line.
+const CONTENT_ID_RE = /^[A-Za-z0-9._-]{1,64}$/
+const SIG_RE = /^[a-f0-9]{64}$/
+const MARK_FIELDS = ['read', 'hidden', 'flagged', 'deletable']
 
 const enc = new TextEncoder()
 const dec = new TextDecoder()
 
 // WHO LIVES HERE is a per-deployment setting, not code: an operator's addresses, the keys that own them and
-// where copies go sit in ONE secret, MAIL_CONFIG (JSON { keys, copyTo, names }), so they never enter the
+// where copies go sit in ONE secret, MAIL_CONFIG (JSON { keys, copyTo, names, admins }), so they never enter the
 // repository and survive every deploy. The plain vars MAIL_KEYS / COPY_TO / MAIL_NAMES still work for a dev
-// run; the secret wins when both are set.
+// run; the secret wins when both are set. The bucket's grants (below) add to it at runtime.
 const settingsOf = env => {
   try {
     const parsed = JSON.parse(env.MAIL_CONFIG || '')
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return { keys: parsed.keys, copyTo: parsed.copyTo, names: parsed.names }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return { keys: parsed.keys, copyTo: parsed.copyTo, names: parsed.names, admins: parsed.admins }
   } catch { /* no secret, or not JSON: the vars decide */ }
   return { keys: env.MAIL_KEYS, copyTo: env.COPY_TO, names: env.MAIL_NAMES }
 }
@@ -63,39 +120,344 @@ const mapOf = value => {
   } catch { return {} }
 }
 
-const keysOf = env => mapOf(settingsOf(env).keys)
-
-const ownerOf = (env, address) => {
-  const key = String(keysOf(env)[address] || '').toLowerCase()
-  return KEY_RE.test(key) ? key : null
+// Who may grant an address here: ADMIN_KEYS (a var or a secret) and MAIL_CONFIG.admins, hex public keys. None
+// means no granting — every grant route then answers like a ghost. As powerful as editing the secret was.
+const adminsOf = (env, settings) => {
+  const listed = [...String(env.ADMIN_KEYS || '').split(','), ...(Array.isArray(settings.admins) ? settings.admins : [])]
+  return new Set(listed.map(key => String(key ?? '').trim().toLowerCase()).filter(key => KEY_RE.test(key)))
 }
 
-const copyFor = (env, address) => mapOf(settingsOf(env).copyTo)[address] || null
+// ── who lives here: the secret plus the grants ───────────────────────────────────────────────────
 
-const poolOf = (address, folder) => sha256Hex(enc.encode(poolMeaning(address, folder)))
+// A grant is one object per address, grants/<address>, written by an admin from the hive. Its record rides in
+// customMetadata.grant too, so one list reads every grant without a GET each (three keys, a name and a copy
+// address stay well under R2's 2 KB); the body is the fallback for an object whose metadata is missing.
+const grantKey = address => GRANTS_PREFIX + address
+
+const grantOf = value => {
+  try {
+    const record = typeof value === 'string' ? JSON.parse(value) : value
+    return record && typeof record === 'object' && Array.isArray(record.keys) ? record : null
+  } catch { return null }
+}
+
+async function readGrants(bucket) {
+  const grants = {}
+  let cursor
+  for (let page = 0; page < 10; page++) {
+    const list = await bucket.list({ prefix: GRANTS_PREFIX, limit: 1000, cursor, include: ['customMetadata'] })
+    for (const object of list.objects) {
+      const address = object.key.slice(GRANTS_PREFIX.length)
+      if (normalizeAddress(address) !== address) continue
+      let record = grantOf(object.customMetadata?.grant)
+      if (!record) {
+        const body = await bucket.get(object.key)
+        try { record = body ? grantOf(await body.json()) : null } catch { record = null }
+      }
+      if (record) grants[address] = record
+    }
+    if (!list.truncated) break
+    cursor = list.cursor
+  }
+  return grants
+}
+
+// The grants an isolate last read, per bucket binding (so two buckets never share), trusted for at most
+// PEOPLE_CACHE_MS and dropped the moment this isolate writes one — its own grant is seen at once.
+const grantsCache = new WeakMap()
+let warnedGrants = false
+
+// The people of this host, read ONCE per request or receive and handed down: the secret's entries plus the
+// bucket's grants. A grant is the address's whole record (keys, name, copy) while it exists — it is the later
+// act, so it wins; revoked, the secret's entry stands again. A bucket that cannot list leaves the secret alone
+// in charge and says so once; mail is never refused for it.
+async function peopleOf(env) {
+  const settings = settingsOf(env)
+  const bucket = env.MAIL
+  let grants = {}
+  if (bucket) {
+    const cached = grantsCache.get(bucket)
+    if (cached && Date.now() - cached.at < PEOPLE_CACHE_MS) grants = cached.grants
+    else {
+      try {
+        grants = await readGrants(bucket)
+        grantsCache.set(bucket, { at: Date.now(), grants })
+        warnedGrants = false
+      } catch (error) {
+        if (!warnedGrants) {
+          warnedGrants = true
+          console.warn('grants unavailable, the secret alone says who lives here: ' + (error?.message || error))
+        }
+      }
+    }
+  }
+  const secret = { keys: mapOf(settings.keys), copyTo: mapOf(settings.copyTo), names: mapOf(settings.names) }
+  const keys = { ...secret.keys }
+  const copyTo = { ...secret.copyTo }
+  const names = { ...secret.names }
+  for (const [address, grant] of Object.entries(grants)) {
+    keys[address] = grant.keys
+    if (grant.copyTo) copyTo[address] = grant.copyTo; else delete copyTo[address]
+    if (grant.name) names[address] = grant.name; else delete names[address]
+  }
+  return { keys, copyTo, names, grants, secret, admins: adminsOf(env, settings) }
+}
+
+// Said once per address per isolate, so a misconfiguration is visible without filling the log.
+const warnedTooMany = new Set()
+
+// What one listed key may do. No `can` is everything, so today's plain strings keep every power; a `can`
+// that is not a list is read-only — a typo in the config must not hand out more than was meant.
+const canOf = item => {
+  if (typeof item === 'string' || !item || !('can' in item)) return new Set(ACTS)
+  return new Set(Array.isArray(item.can) ? item.can.filter(act => ACTS.includes(act)) : ['read'])
+}
+
+const actsOf = can => ACTS.filter(act => can.has(act))
+
+// The keys that own an address, as [{ key, can }]: one entry or a list, invalid entries skipped, a key
+// listed twice counted once (its first entry stands), at most three.
+const ownersOf = (people, address) => {
+  const listed = people.keys[address]
+  const seen = new Map()
+  for (const item of Array.isArray(listed) ? listed : [listed]) {
+    const key = String((item && typeof item === 'object' ? item.key : item) ?? '').trim().toLowerCase()
+    if (KEY_RE.test(key) && !seen.has(key)) seen.set(key, { key, can: canOf(item) })
+  }
+  const owners = [...seen.values()]
+  if (owners.length > MAX_RECIPIENT_KEYS && !warnedTooMany.has(address)) {
+    warnedTooMany.add(address)
+    console.warn(`${address} lists ${owners.length} keys; only the first ${MAX_RECIPIENT_KEYS} own it`)
+  }
+  return owners.slice(0, MAX_RECIPIENT_KEYS)
+}
+
+const keysFor = owners => owners.map(owner => owner.key)
+
+const copyFor = (people, address) => people.copyTo[address] || null
 
 const clip = (value, max) => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max)
 
-// The Subject line, unfolded, read straight from the bytes (it may be RFC 2047 encoded; the reader decodes).
-function subjectOf(bytes) {
-  let head = ''
-  const end = Math.min(bytes.length, 16384)
-  for (let i = 0; i < end; i++) head += String.fromCharCode(bytes[i])
-  const stop = head.search(/\r?\n\r?\n/)
-  const block = (stop < 0 ? head : head.slice(0, stop)).replace(/\r?\n[ \t]+/g, ' ')
-  return clip(/^subject:[ \t]*(.*)$/im.exec(block)?.[1] || '', 120)
+// A display name goes into a From header: no control characters, no quotes or angle brackets to break out of it.
+const nameFor = (people, address) => {
+  const name = clip(String(people.names[address] ?? '').replace(/["<>\\]/g, ''), 64)
+  return name || null
 }
 
+const poolOf = (address, folder) => sha256Hex(enc.encode(poolMeaning(address, folder)))
+
+// ── reading a received message, cheaply ──────────────────────────────────────────────────────────
+
+const latin1Of = (bytes, max) => {
+  let s = ''
+  const end = Math.min(bytes.length, max)
+  for (let i = 0; i < end; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, Math.min(end, i + 0x8000)))
+  return s
+}
+
+// A header block → Map of lowercase name → first value, unfolded.
+function headersOf(block) {
+  const map = new Map()
+  for (const line of block.replace(/\r?\n[ \t]+/g, ' ').split(/\r?\n/)) {
+    const colon = line.indexOf(':')
+    if (colon < 1) continue
+    const name = line.slice(0, colon).trim().toLowerCase()
+    if (!map.has(name)) map.set(name, line.slice(colon + 1).trim())
+  }
+  return map
+}
+
+const splitPart = text => {
+  const stop = /\r?\n\r?\n/.exec(text)
+  return stop ? { head: text.slice(0, stop.index), body: text.slice(stop.index + stop[0].length) } : { head: text, body: '' }
+}
+
+const paramOf = (value, name) => {
+  const m = new RegExp(`;\\s*${name}\\*?=\\s*(?:"([^"]*)"|([^;\\s]+))`, 'i').exec(value || '')
+  return m ? (m[1] ?? m[2]) : null
+}
+
+const decodeQuotedPrintable = text => {
+  const soft = text.replace(/=\r?\n/g, '')
+  const bytes = []
+  for (let i = 0; i < soft.length; i++) {
+    if (soft[i] === '=' && /^[0-9a-f]{2}$/i.test(soft.slice(i + 1, i + 3))) { bytes.push(parseInt(soft.slice(i + 1, i + 3), 16)); i += 2 } else bytes.push(soft.charCodeAt(i) & 0xff)
+  }
+  return new Uint8Array(bytes)
+}
+
+const decodeBase64Loose = text => {
+  const clean = text.replace(/[^A-Za-z0-9+/]/g, '')
+  try { return Uint8Array.from(atob(clean.slice(0, clean.length - (clean.length % 4))), c => c.charCodeAt(0)) } catch { return new Uint8Array(0) }
+}
+
+const charsetText = (bytes, charset) => {
+  try { return new TextDecoder(String(charset || 'utf-8').toLowerCase()).decode(bytes) } catch { return dec.decode(bytes) }
+}
+
+const collapse = text => text.replace(/\s+/g, ' ').trim()
+
+// The first text/plain part (not an attachment) gives the preview; any part named or disposed as an
+// attachment sets hasAttachments. Only what lies inside the scanned window is seen, and a part that runs
+// past it previews from what is there — a glance, never a promise.
+function scanParts(headers, body, found, depth = 0) {
+  const type = (headers.get('content-type') || 'text/plain').toLowerCase()
+  const disposition = (headers.get('content-disposition') || '').toLowerCase()
+  if (/^\s*attachment/.test(disposition) || paramOf(disposition, 'filename') || (!type.startsWith('multipart/') && paramOf(type, 'name'))) {
+    found.hasAttachments = true
+    return
+  }
+  if (type.startsWith('multipart/')) {
+    const boundary = paramOf(headers.get('content-type'), 'boundary')
+    if (!boundary || depth > 3) return
+    const pieces = body.split(`--${boundary}`)
+    for (const piece of pieces.slice(1)) {
+      if (piece.startsWith('--')) break
+      const { head, body: inner } = splitPart(piece.replace(/^[ \t]*\r?\n/, ''))
+      scanParts(headersOf(head), inner, found, depth + 1)
+    }
+    return
+  }
+  if (found.preview !== undefined || !type.startsWith('text/plain')) return
+  const source = body.slice(0, PREVIEW_SOURCE_BYTES)
+  const encoding = (headers.get('content-transfer-encoding') || '').toLowerCase().trim()
+  const bytes = encoding === 'quoted-printable' ? decodeQuotedPrintable(source)
+    : encoding === 'base64' ? decodeBase64Loose(source)
+      : Uint8Array.from(source, c => c.charCodeAt(0) & 0xff)
+  const preview = collapse(charsetText(bytes, paramOf(headers.get('content-type'), 'charset'))).slice(0, PREVIEW_CHARS)
+  if (preview) found.preview = preview
+}
+
+const messageIdsIn = value => (String(value || '').match(/<[^<>\s]+>/g) || []).filter(id => MESSAGE_ID_RE.test(id))
+
+// The sealed list metadata of a received message, from its first 64 KB. Subject stays as written
+// (it may be RFC 2047 encoded; the reader decodes).
+function describeReceived(bytes) {
+  const window = latin1Of(bytes, SCAN_BYTES)
+  const { head, body } = splitPart(window)
+  const headers = headersOf(head)
+  const meta = { subject: clip(headers.get('subject') || '', 120) }
+  const messageId = messageIdsIn(headers.get('message-id'))[0]
+  if (messageId) meta.messageId = messageId
+  const inReplyTo = messageIdsIn(headers.get('in-reply-to'))[0]
+  if (inReplyTo) meta.inReplyTo = inReplyTo
+  const references = messageIdsIn(headers.get('references')).slice(-3)
+  if (references.length) meta.references = references
+  const date = clip(headers.get('date') || '', 64)
+  if (date) meta.date = date
+  const found = { hasAttachments: false }
+  try { scanParts(headers, body, found) } catch { /* a malformed message still files; it just has no preview */ }
+  meta.hasAttachments = found.hasAttachments
+  if (found.preview) meta.preview = found.preview
+  return meta
+}
+
+// ── storage ──────────────────────────────────────────────────────────────────────────────────────
+
 // Files one sealed message in a pool, once: a replay never rewrites it, so the first time stands.
-async function file(env, pool, ownerPub, plain, meta) {
+async function file(env, pool, owners, plain, meta) {
   const sig = await sha256Hex(plain)
   const key = `${pool}/${sig}`
   if (await env.MAIL.head(key)) return sig
   const at = Date.now()
-  const { envelope, metaToken } = await sealMessage(plain, ownerPub, { ...meta, size: plain.length, at })
-  await env.MAIL.put(key, envelope, { customMetadata: { at: String(at), meta: metaToken } })
+  const { envelope, customMetadata } = await sealMessage(plain, owners, { ...meta, size: plain.length, at })
+  await env.MAIL.put(key, envelope, { customMetadata })
   return sig
 }
+
+const marksKey = (pool, sig) => `marks/${pool}/${sig}`
+
+async function readMarks(env, pool, sig) {
+  const object = await env.MAIL.get(marksKey(pool, sig))
+  if (!object) return null
+  try { return await object.json() } catch { return null }
+}
+
+// The marks of one page of a list, in as few calls as the page needs: marks sort by sig exactly as the
+// page does, so one list from just before the page's first sig to its last covers it.
+async function marksForPage(env, pool, sigs) {
+  const out = new Map()
+  if (!sigs.length) return out
+  const wanted = new Set(sigs)
+  const sorted = [...sigs].sort()
+  const prefix = `marks/${pool}/`
+  const last = sorted[sorted.length - 1]
+  let options = { prefix, startAfter: prefix + sorted[0].slice(0, 63), limit: 1000, include: ['customMetadata'] }
+  for (let calls = 0; calls < 20; calls++) {
+    const page = await env.MAIL.list(options)
+    let past = false
+    for (const object of page.objects) {
+      const sig = object.key.slice(prefix.length)
+      if (sig > last) { past = true; break }
+      if (!wanted.has(sig)) continue
+      try { out.set(sig, JSON.parse(object.customMetadata?.marks ?? 'null')) } catch { /* unreadable marks are no marks */ }
+    }
+    if (past || !page.truncated) break
+    options = { prefix, cursor: page.cursor, limit: 1000, include: ['customMetadata'] }
+  }
+  return out
+}
+
+// ── who is asking, once ──────────────────────────────────────────────────────────────────────────
+
+const NOT_AUTHORIZED = [401, 'not authorized']
+
+// Every signature is checked in full (any key accepted), and only then held against the owners — so a
+// ghost address (no owners) and a real one do the same work and give the same answer to a stranger. The
+// precise reason (stale, wrong url, …) is kept for a key that IS an owner; everyone else is told only
+// "not authorized". Answers { owner, event } or { refuse }.
+async function authorize(request, owners, act) {
+  const who = await verifyNip98(request, { anyKey: true })
+  const owner = owners.find(entry => entry.key === String(who.pubkey || '').toLowerCase())
+  if (!owner) return { refuse: NOT_AUTHORIZED }
+  if (!who.ok) return { refuse: [401, who.reason] }
+  if (act && !owner.can.has(act)) return { refuse: [403, `this key may not ${act}`] }
+  return { owner, event: who }
+}
+
+// A write's event is spent once: a conditional put under the event's own minute, refused when the key is
+// already there. The same signed request again (a logging proxy, an extension, a page on an allowed origin)
+// answers 409 and does nothing. The minute is the event's created_at, so a replay finds the same key; spent
+// records older than the freshness window are swept on the way out. Answers null, or [status, reason].
+async function spend(env, event) {
+  const minute = Math.floor(Number(event.at) / 60)
+  const key = `n/${String(minute).padStart(10, '0')}/${event.id}`
+  let stored
+  try {
+    stored = await env.MAIL.put(key, '', { onlyIf: new Headers({ 'If-None-Match': '*' }) })
+  } catch (error) {
+    // Cannot remember it, so cannot refuse a replay: nothing is done rather than done twice.
+    console.error('replay record unavailable: ' + (error?.message || error))
+    return [503, 'mailbox storage unavailable']
+  }
+  if (stored === null) return [409, 'this signed request was already used']
+  try {
+    const old = await env.MAIL.list({ prefix: 'n/', limit: 100 })
+    const stale = old.objects.map(o => o.key).filter(k => Number(k.slice(2, 12)) < Math.floor(Date.now() / 60000) - SPENT_MINUTES)
+    if (stale.length) await env.MAIL.delete(stale)
+  } catch { /* a sweep that fails now runs again on the next write */ }
+  return null
+}
+
+// A per-day count, checked before the act so a burst cannot all pass. Not atomic: a brake on a leaked key,
+// not an accounting system. Answers null, or [status, reason]; a bucket that cannot count refuses (fail closed).
+async function countToday(env, key, cap, over) {
+  try {
+    const counter = await env.MAIL.get(key)
+    let used = 0
+    if (counter) { try { used = Number((await counter.json()).n) || 0 } catch { used = 0 } }
+    if (used >= cap) return [429, over]
+    await env.MAIL.put(key, JSON.stringify({ n: used + 1 }))
+    return null
+  } catch (error) {
+    console.error('counter unavailable: ' + (error?.message || error))
+    return [503, 'mailbox storage unavailable']
+  }
+}
+
+const today = () => new Date().toISOString().slice(0, 10)
+
+// ── the HTTP side ────────────────────────────────────────────────────────────────────────────────
 
 function corsFor(request, env) {
   const origin = request.headers.get('Origin')
@@ -105,35 +467,97 @@ function corsFor(request, env) {
   return {
     'Access-Control-Allow-Origin': origin,
     'Vary': 'Origin',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type',
     'Access-Control-Max-Age': '600',
   }
 }
 
+// A JSON body, size-capped before and after reading. Answers { raw } or { refuse: [status, reason] }.
+async function readJsonBody(request, max) {
+  if (!/^application\/json\b/i.test(request.headers.get('content-type') || '')) return { refuse: [415, 'send JSON'] }
+  const declared = Number(request.headers.get('content-length'))
+  if (Number.isFinite(declared) && declared > max) return { refuse: [413, 'message too large'] }
+  const raw = new Uint8Array(await request.arrayBuffer())
+  if (raw.length > max) return { refuse: [413, 'message too large'] }
+  let body
+  try { body = JSON.parse(dec.decode(raw)) } catch { return { refuse: [400, 'bad JSON'] } }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return { refuse: [400, 'bad JSON'] }
+  return { raw, body }
+}
+
 // What Cloudflare's error codes mean to the caller. Only the code is passed on, never a message.
 const sendStatus = code =>
   /^E_(RATE_LIMIT|DAILY_LIMIT)/.test(code) ? 429
-    : /^E_(VALIDATION|FIELD|TOO_MANY|CONTENT|SENDER|RECIPIENT|HEADER)/.test(code) ? 422
+    : /^E_(VALIDATION|FIELD|TOO_MANY|CONTENT|SENDER|RECIPIENT|HEADER|ATTACHMENT)/.test(code) ? 422
       : 502
 
-async function send(request, env, respond) {
+// A filename is a name, never a path: separators become `_`; control characters (C0, DEL, C1) and the
+// bidirectional controls go entirely — `invoice‮fdp.exe` would otherwise show as "invoiceexe.pdf" (R1 #7);
+// a long one keeps its extension.
+const INVISIBLE_RE = /[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g
+function cleanFilename(value) {
+  let name = String(value ?? '').replace(INVISIBLE_RE, '').replace(/[/\\:]/g, '_').replace(/^[.\s]+/, '').trim()
+  if (!name) name = 'attachment'
+  if (name.length > 120) {
+    const dot = name.lastIndexOf('.')
+    const ext = dot > 0 && name.length - dot <= 16 ? name.slice(dot) : ''
+    name = name.slice(0, 120 - ext.length) + ext
+  }
+  return name
+}
+
+// Attachments as the caller sent them, checked: { list } or { refuse: [status, reason] }.
+function attachmentsOf(value) {
+  if (value === undefined) return { list: [] }
+  if (!Array.isArray(value)) return { refuse: [422, 'bad attachments'] }
+  if (value.length > MAX_ATTACHMENTS) return { refuse: [422, 'too many attachments'] }
+  const list = []
+  const contentIds = new Set()
+  let total = 0
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || typeof item.content !== 'string') return { refuse: [422, 'bad attachment'] }
+    const type = String(item.type ?? '').trim().toLowerCase()
+    if (!MIME_TYPE_RE.test(type)) return { refuse: [422, 'bad attachment type'] }
+    const content = item.content.replace(/\s+/g, '')
+    if (content.length % 4 !== 0 || !BASE64_RE.test(content)) return { refuse: [422, 'bad attachment content'] }
+    // A content id makes the part an inline picture the html names as `cid:<id>`; two parts with one id
+    // would leave the reader's client to pick, so a repeat is refused rather than guessed at.
+    if (item.contentId !== undefined && (typeof item.contentId !== 'string' || !CONTENT_ID_RE.test(item.contentId) || contentIds.has(item.contentId))) {
+      return { refuse: [422, 'bad content id'] }
+    }
+    total += content.length / 4 * 3 - (content.endsWith('==') ? 2 : content.endsWith('=') ? 1 : 0)
+    if (total > MAX_ATTACHMENT_BYTES) return { refuse: [413, 'attachments too large'] }
+    const part = { filename: cleanFilename(item.filename), type, content }
+    if (item.contentId !== undefined) {
+      contentIds.add(item.contentId)
+      part.contentId = item.contentId
+    }
+    list.push(part)
+  }
+  return { list }
+}
+
+async function send(request, env, respond, people) {
   if (!env.EMAIL) return respond(503, 'sending is not configured')
-  if (!/^application\/json\b/i.test(request.headers.get('content-type') || '')) return respond(415, 'send JSON')
-  const declared = Number(request.headers.get('content-length'))
-  if (Number.isFinite(declared) && declared > MAX_SEND_BODY) return respond(413, 'message too large')
-  const raw = new Uint8Array(await request.arrayBuffer())
-  if (raw.length > MAX_SEND_BODY) return respond(413, 'message too large')
 
-  let body
-  try { body = JSON.parse(dec.decode(raw)) } catch { return respond(400, 'bad JSON') }
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return respond(400, 'bad JSON')
+  // A signature before the body: an unsigned (or badly signed) 10 MiB POST is refused without being read
+  // (R1 #12). The From address is in the body, so who may send is settled after reading it.
+  const signer = await verifyNip98(request, { anyKey: true })
+  if (!signer.ok) return respond(...NOT_AUTHORIZED)
+  const read = await readJsonBody(request, MAX_SEND_BODY)
+  if (read.refuse) return respond(...read.refuse)
+  const { raw, body } = read
 
-  // Who is sending: the key that owns the From address, and nobody else.
+  // Who is sending: a key that owns the From address and may send, and nobody else.
   const from = normalizeAddress(body.from)
-  const owner = from ? ownerOf(env, from) : null
-  const auth = owner ? await verifyNip98(request, { owner, payload: await sha256Hex(raw) }) : { ok: false, reason: 'not authorized' }
-  if (!auth.ok) return respond(401, auth.reason)
+  const owners = from ? ownersOf(people, from) : []
+  const sender = owners.find(entry => entry.key === String(signer.pubkey).toLowerCase())
+  if (!sender) return respond(...NOT_AUTHORIZED)
+  if (signer.payloadTag !== await sha256Hex(raw)) return respond(401, 'auth payload tag mismatch')
+  if (!sender.can.has('send')) return respond(403, 'this key may not send')
+  const spent = await spend(env, signer)
+  if (spent) return respond(...spent)
 
   const list = value => (value === undefined ? [] : (Array.isArray(value) ? value : [value]).map(normalizeAddress))
   const to = list(body.to)
@@ -151,6 +575,9 @@ async function send(request, env, respond) {
   const replyTo = body.replyTo === undefined ? undefined : normalizeAddress(body.replyTo)
   if (body.replyTo !== undefined && !replyTo) return respond(422, 'bad reply-to')
 
+  const attachments = attachmentsOf(body.attachments)
+  if (attachments.refuse) return respond(...attachments.refuse)
+
   const threading = {}
   if (body.inReplyTo !== undefined) {
     if (!MESSAGE_ID_RE.test(String(body.inReplyTo))) return respond(422, 'bad in-reply-to')
@@ -161,30 +588,38 @@ async function send(request, env, respond) {
     if (references.length > 1000 || !references.split(/\s+/).every(id => MESSAGE_ID_RE.test(id))) return respond(422, 'bad references')
     threading['References'] = references
   }
+  // The template a message was filled from (mail-templates.md, step 2). The part among the attachments is
+  // the truth; this header is a hint for filters and other clients, so it rides with the threading headers
+  // and the E_HEADER fallback below drops it while the part still goes.
+  if (body.template !== undefined) {
+    if (typeof body.template !== 'string' || !SIG_RE.test(body.template)) return respond(422, 'bad template')
+    threading['X-Hypercomb-Template'] = body.template
+  }
 
   // The day's cap, counted before the send so a burst cannot all pass. Not atomic: it is a brake on a
   // leaked key, not an accounting system, and Cloudflare's own daily limit stands behind it.
   const cap = Number(env.MAX_SEND_PER_DAY) > 0 ? Number(env.MAX_SEND_PER_DAY) : DEFAULT_SEND_PER_DAY
   const sentPool = await poolOf(from, 'sent')
-  const counterKey = `c/${sentPool}/${new Date().toISOString().slice(0, 10)}`
-  try {
-    const counter = await env.MAIL.get(counterKey)
-    let used = 0
-    if (counter) { try { used = Number((await counter.json()).n) || 0 } catch { used = 0 } }
-    if (used >= cap) return respond(429, 'daily send limit reached')
-    await env.MAIL.put(counterKey, JSON.stringify({ n: used + 1 }))
-  } catch (error) {
-    // Cannot count, so cannot keep the brake: nothing is sent rather than sent uncounted.
-    console.error('send counter unavailable: ' + (error?.message || error))
-    return respond(503, 'mailbox storage unavailable')
-  }
+  // Cannot count, so cannot keep the brake: nothing is sent rather than sent uncounted.
+  const capped = await countToday(env, `c/${sentPool}/${today()}`, cap, 'daily send limit reached')
+  if (capped) return respond(...capped)
 
-  const message = { from, to, subject }
+  const name = nameFor(people, from)
+  const message = { from: name ? { email: from, name } : from, to, subject }
   if (text) message.text = text
   if (html) message.html = html
   if (cc.length) message.cc = cc
   if (bcc.length) message.bcc = bcc
   if (replyTo) message.replyTo = replyTo
+  // Cloudflare takes base64 strings as attachment content (and they survive `wrangler dev`, binary does not).
+  // A part with a content id goes inline: the binding's attachment takes `disposition: 'inline'` and
+  // `contentId` (developers.cloudflare.com/email-service/api/send-emails/workers-api/, checked 2026-11-07),
+  // which is how Gmail and Outlook readers see a template's pictures (they show no `data:` images).
+  if (attachments.list.length) {
+    message.attachments = attachments.list.map(a => a.contentId
+      ? { content: a.content, filename: a.filename, type: a.type, disposition: 'inline', contentId: a.contentId }
+      : { content: a.content, filename: a.filename, type: a.type, disposition: 'attachment' })
+  }
 
   const refuse = error => {
     const code = String(error?.code || 'E_SEND_FAILED')
@@ -204,36 +639,238 @@ async function send(request, env, respond) {
     }
   }
 
-  // The sender's own sealed copy, in the Sent folder. If it cannot be filed the mail has still gone.
+  // The sender's own sealed copy, in the Sent folder, attachments and all. If it cannot be filed the
+  // mail has still gone.
   const id = result?.messageId ?? null
   let sig = null
   try {
     const record = JSON.stringify({
-      id, from, to, cc, bcc, subject, text, html,
-      inReplyTo: threading['In-Reply-To'] ?? null, references: threading['References'] ?? null, at: Date.now(),
+      id, from, name, to, cc, bcc, subject, text, html,
+      inReplyTo: threading['In-Reply-To'] ?? null, references: threading['References'] ?? null,
+      attachments: attachments.list, at: Date.now(),
     })
-    sig = await file(env, sentPool, owner, enc.encode(record), { to: clip(to.join(', '), 100), subject: clip(subject, 120), id })
+    const meta = { to: clip(to.join(', '), 100), subject: clip(subject, 120), id, hasAttachments: attachments.list.length > 0 }
+    if (id && MESSAGE_ID_RE.test(String(id))) meta.messageId = String(id)
+    if (threading['In-Reply-To']) meta.inReplyTo = threading['In-Reply-To']
+    if (threading['References']) meta.references = threading['References'].split(/\s+/).slice(-3)
+    const preview = collapse(text).slice(0, PREVIEW_CHARS)
+    if (preview) meta.preview = preview
+    sig = await file(env, sentPool, keysFor(owners), enc.encode(record), meta)
   } catch (error) {
     console.error('could not file the sent copy: ' + (error?.message || error))
   }
   return respond(200, JSON.stringify({ messageId: id, sig }), 'application/json')
 }
 
+// The marks route: booleans only, merged over what was there, stamped with when.
+// The body it signed for, not another; then the event is spent, so the same request cannot land twice.
+async function bodyFor(request, env, event, max) {
+  const read = await readJsonBody(request, max)
+  if (read.refuse) return read
+  if (event.payloadTag !== await sha256Hex(read.raw)) return { refuse: [401, 'auth payload tag mismatch'] }
+  const spent = await spend(env, event)
+  return spent ? { refuse: spent } : read
+}
+
+async function putMarks(request, env, respond, { pool, sig, event }) {
+  const read = await bodyFor(request, env, event, MAX_MARKS_BODY)
+  if (read.refuse) return respond(...read.refuse)
+  const fields = Object.entries(read.body)
+  if (fields.some(([key, value]) => !MARK_FIELDS.includes(key) || typeof value !== 'boolean')) return respond(422, 'marks are read, hidden, flagged and deletable, each true or false')
+  if (!(await env.MAIL.head(`${pool}/${sig}`))) return respond(404, 'not found')
+  const merged = { ...((await readMarks(env, pool, sig)) || {}), ...Object.fromEntries(fields), at: Date.now() }
+  const json = JSON.stringify(merged)
+  await env.MAIL.put(marksKey(pool, sig), json, { customMetadata: { marks: json } })
+  return respond(200, json, 'application/json')
+}
+
+// Hide first, delete second (H4): a message goes only once its owner hid it and said it may go.
+// A draft is the owner's own unfinished writing and goes on request.
+//
+// Even then nothing is destroyed here: the envelope and its marks MOVE to trash/, so a leaked or recovery
+// key that hides, marks and deletes everything has emptied the mailbox, not the bucket (R1 #6). Purging trash
+// is an R2 lifecycle rule on the trash/ prefix, set by the operator — not code that a key could reach. A daily
+// cap per address stands behind it, like the send cap.
+async function forget(env, respond, { folder, address, pool, sig, event }) {
+  const object = await env.MAIL.get(`${pool}/${sig}`)
+  if (!object) return respond(404, 'not found')
+  const marks = await readMarks(env, pool, sig)
+  if (folder !== 'drafts' && !(marks?.hidden === true && marks?.deletable === true)) return respond(409, 'hide it and mark it deletable first')
+  const spent = await spend(env, event)
+  if (spent) return respond(...spent)
+  const cap = Number(env.MAX_DELETE_PER_DAY) > 0 ? Number(env.MAX_DELETE_PER_DAY) : DEFAULT_DELETE_PER_DAY
+  const capped = await countToday(env, `d/${await poolOf(address, 'box')}/${today()}`, cap, 'daily delete limit reached')
+  if (capped) return respond(...capped)
+  try {
+    await env.MAIL.put(`trash/${pool}/${sig}`, await object.arrayBuffer(), { customMetadata: object.customMetadata || {} })
+    const record = JSON.stringify({ ...(marks || {}), deletedAt: Date.now(), by: event.pubkey })
+    await env.MAIL.put(`trash/${marksKey(pool, sig)}`, record, { customMetadata: { marks: record } })
+  } catch (error) {
+    // The copy did not land, so the original stays: a delete never loses what it could not keep.
+    console.error('could not move to trash: ' + (error?.message || error))
+    return respond(503, 'mailbox storage unavailable')
+  }
+  await env.MAIL.delete([`${pool}/${sig}`, marksKey(pool, sig)])
+  return respond(204, null)
+}
+
+async function putDraft(request, env, respond, { pool, owners, event }) {
+  const read = await bodyFor(request, env, event, MAX_DRAFT_BODY)
+  if (read.refuse) return respond(...read.refuse)
+  const to = read.body.to === undefined ? '' : (Array.isArray(read.body.to) ? read.body.to.map(String).join(', ') : String(read.body.to))
+  try {
+    const sig = await file(env, pool, keysFor(owners), read.raw, { to: clip(to, 100), subject: clip(read.body.subject, 120) })
+    return respond(200, JSON.stringify({ sig }), 'application/json')
+  } catch (error) {
+    console.error('could not file the draft: ' + (error?.message || error))
+    return respond(503, 'mailbox storage unavailable')
+  }
+}
+
+async function listFolder(url, env, respond, { folder, pool }) {
+  const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit')) || 100))
+  const page = await env.MAIL.list({ prefix: `${pool}/`, limit, cursor: url.searchParams.get('cursor') || undefined, include: ['customMetadata'] })
+  const sigs = page.objects.map(object => object.key.slice(pool.length + 1))
+  const marks = folder === 'drafts' ? new Map() : await marksForPage(env, pool, sigs)
+  const items = page.objects.map((object, i) => {
+    const custom = object.customMetadata || {}
+    const v = Number(custom.v) === 2 ? 2 : 1
+    const item = { sig: sigs[i], at: Number(custom.at) || 0, v, meta: custom.meta || '' }
+    if (v === 2) { try { item.wraps = JSON.parse(custom.wraps) } catch { /* a v2 item without readable wraps cannot open; the client says so */ } }
+    item.marks = marks.get(sigs[i]) ?? null
+    return item
+  })
+  return respond(200, JSON.stringify({ items, cursor: page.truncated ? page.cursor : null }), 'application/json')
+}
+
+// ── granting: an operator gives an address to a key, from the hive ───────────────────────────────
+
+// The zones a grant may name: the request's own hostname and MAIL_ZONES. Said to admins only.
+const zonesOf = (url, env) => [...new Set([url.hostname, ...String(env.MAIL_ZONES || '').split(',').map(zone => zone.trim().toLowerCase())].filter(Boolean))]
+
+// The keys of a grant as the secret spells them — "<hex>" or { key, can } — normalized for storing: lowercase,
+// a key listed twice counted once, `can` the full five when none is given, read-only when it is not a list (the
+// secret's rule), refused when it names an act that does not exist. One to three keys, else null.
+function grantKeysOf(value) {
+  if (!Array.isArray(value) || !value.length) return null
+  const seen = new Map()
+  for (const item of value) {
+    const key = String((item && typeof item === 'object' ? item.key : item) ?? '').trim().toLowerCase()
+    if (!KEY_RE.test(key)) return null
+    let can = ACTS
+    if (item && typeof item === 'object' && 'can' in item) {
+      if (!Array.isArray(item.can)) can = ['read']
+      else if (item.can.some(act => !ACTS.includes(act))) return null
+      else can = ACTS.filter(act => item.can.includes(act))
+    }
+    if (!seen.has(key)) seen.set(key, { key, can })
+  }
+  return seen.size > MAX_RECIPIENT_KEYS ? null : [...seen.values()]
+}
+
+// A display name as the From header will carry it (nameFor's cleaning): undefined when none was given, false
+// when it was never a string or what is left of it is longer than 64 characters.
+function grantNameOf(value) {
+  if (value === undefined || value === null || value === '') return undefined
+  if (typeof value !== 'string') return false
+  const name = value.replace(/["<>\\]/g, '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim()
+  return name.length > 64 ? false : (name || undefined)
+}
+
+// Everything the operator sees, by address: the secret's entries (unchangeable here, `source: "secret"`) and
+// the grants, each with its keys as they stand. Public keys and names — nothing sealed is in this answer.
+function listGrants(respond, { people, zones }) {
+  const grants = {}
+  for (const address of Object.keys(people.keys).sort()) {
+    if (normalizeAddress(address) !== address) continue
+    const entry = { keys: ownersOf(people, address).map(owner => ({ key: owner.key, can: actsOf(owner.can) })) }
+    const name = nameFor(people, address)
+    if (name) entry.name = name
+    const copyTo = copyFor(people, address)
+    if (copyTo) entry.copyTo = copyTo
+    const grant = people.grants[address]
+    entry.source = grant ? 'grant' : 'secret'
+    if (grant) { entry.by = grant.by; entry.at = grant.at }
+    grants[address] = entry
+  }
+  return respond(200, JSON.stringify({ zones, grants }), 'application/json')
+}
+
+// A grant REPLACES the address's grant (not a merge) and is stored twice over — the body and customMetadata.grant
+// — so the people list reads it without a GET. The event is spent like every write's; a daily cap for the whole
+// host stands behind the admin key as the send cap stands behind an owner's.
+async function putGrant(request, env, respond, { address, zones, event }) {
+  const read = await bodyFor(request, env, event, MAX_GRANT_BODY)
+  if (read.refuse) return respond(...read.refuse)
+  if (!zones.includes(address.slice(address.indexOf('@') + 1))) return respond(422, 'not this host\'s zone')
+  const keys = grantKeysOf(read.body.keys)
+  if (!keys) return respond(422, 'bad keys')
+  const name = grantNameOf(read.body.name)
+  if (name === false) return respond(422, 'bad name')
+  let copyTo
+  if (read.body.copyTo !== undefined && read.body.copyTo !== null && read.body.copyTo !== '') {
+    copyTo = typeof read.body.copyTo === 'string' ? normalizeAddress(read.body.copyTo) : null
+    if (!copyTo) return respond(422, 'bad copy address')
+  }
+  const cap = Number(env.MAX_GRANTS_PER_DAY) > 0 ? Number(env.MAX_GRANTS_PER_DAY) : DEFAULT_GRANTS_PER_DAY
+  const capped = await countToday(env, `g/${today()}`, cap, 'daily grant limit reached')
+  if (capped) return respond(...capped)
+  const record = { v: 1, keys }
+  if (name) record.name = name
+  if (copyTo) record.copyTo = copyTo
+  record.by = String(event.pubkey).toLowerCase()
+  record.at = Date.now()
+  const json = JSON.stringify(record)
+  try {
+    await env.MAIL.put(grantKey(address), json, { customMetadata: { grant: json } })
+  } catch (error) {
+    console.error('could not store the grant: ' + (error?.message || error))
+    return respond(503, 'mailbox storage unavailable')
+  }
+  grantsCache.delete(env.MAIL)
+  return respond(200, JSON.stringify({ address, ...record }), 'application/json')
+}
+
+// A revoke deletes the grant object and nothing else: what arrived stays sealed to the keys of its time, and the
+// secret's entry, if there is one, stands again. The bucket is asked, not the cache, so a grant another isolate
+// wrote a moment ago is found too.
+async function revokeGrant(env, respond, { address, event, people }) {
+  let present
+  try {
+    present = await env.MAIL.head(grantKey(address))
+  } catch (error) {
+    console.error('could not look up the grant: ' + (error?.message || error))
+    return respond(503, 'mailbox storage unavailable')
+  }
+  if (!present) return respond(...(Object.hasOwn(people.secret.keys, address) ? [409, 'listed in the host\'s configuration, not a grant'] : [404, 'no grant']))
+  const spent = await spend(env, event)
+  if (spent) return respond(...spent)
+  try {
+    await env.MAIL.delete(grantKey(address))
+  } catch (error) {
+    console.error('could not revoke the grant: ' + (error?.message || error))
+    return respond(503, 'mailbox storage unavailable')
+  }
+  grantsCache.delete(env.MAIL)
+  return respond(204, null)
+}
+
 export default {
   async email(message, env) {
+    const people = await peopleOf(env)
     const to = normalizeAddress(message.to)
-    const owner = to ? ownerOf(env, to) : null
-    const copy = to ? copyFor(env, to) : null
+    const owners = to ? ownersOf(people, to) : []
+    const copy = to ? copyFor(people, to) : null
     const limit = Number(env.MAX_STORE_BYTES) > 0 ? Number(env.MAX_STORE_BYTES) : DEFAULT_MAX_STORE
 
     let stored = false
-    let reason = owner ? 'mailbox temporarily unavailable' : 'no such mailbox'
-    if (owner && Number(message.rawSize) > limit) {
+    let reason = owners.length ? 'mailbox temporarily unavailable' : 'no such mailbox'
+    if (owners.length && Number(message.rawSize) > limit) {
       reason = 'message too large'
-    } else if (owner) {
+    } else if (owners.length) {
       try {
         const plain = new Uint8Array(await new Response(message.raw).arrayBuffer())
-        await file(env, await poolOf(to, 'box'), owner, plain, { from: clip(message.from, 100), to: clip(to, 100), subject: subjectOf(plain) })
+        await file(env, await poolOf(to, 'box'), keysFor(owners), plain, { from: clip(message.from, 100), to: clip(to, 100), ...describeReceived(plain) })
         stored = true
       } catch (error) {
         console.error('could not store mail: ' + (error?.message || error))
@@ -245,6 +882,13 @@ export default {
       try { await message.forward(copy); copied = true } catch (error) { console.error('copy failed: ' + (error?.message || error)) }
     }
 
+    // A storage outage with no copy address is still a reject, though a reject is permanent and the sender
+    // will not retry (R1 #13). Throwing instead would be right only if Email Routing answers a thrown
+    // handler with a temporary (4xx) failure, and Cloudflare's docs do not say so: checked 2026-11-06,
+    // developers.cloudflare.com/email-routing/email-workers/runtime-api/ ("Reject emails with a permanent
+    // SMTP error"), …/email-routing/email-workers/, …/email-routing/limits/ and …/email-routing/postmaster/
+    // — none states what a thrown or failed handler returns. A bounce the sender is told about beats a
+    // silent drop; change this to `throw` once a test on a real zone shows a throw is retried.
     if (!stored && !copied) message.setReject(reason)
   },
 
@@ -258,7 +902,9 @@ export default {
     if (request.method === 'OPTIONS') return cors ? new Response(null, { status: 204, headers: cors }) : new Response(null, { status: 403 })
 
     const url = new URL(request.url)
-    if (url.pathname === '/mail/send') return request.method === 'POST' ? send(request, env, respond) : respond(405, 'POST only')
+    // Who lives here, once for this request (the secret's entries and the grants, the latter at most 10 s old).
+    const people = await peopleOf(env)
+    if (url.pathname === '/mail/send') return request.method === 'POST' ? send(request, env, respond, people) : respond(405, 'POST only')
 
     // Which addresses does the signing key own? Any valid signature may ask, and it is told only about its own
     // addresses — never another key's — so a stranger learns nothing.
@@ -266,40 +912,75 @@ export default {
       if (request.method !== 'GET') return respond(405, 'GET only')
       const who = await verifyNip98(request, { anyKey: true })
       if (!who.ok) return respond(401, who.reason)
-      const mine = Object.entries(keysOf(env))
-        .filter(([address, key]) => normalizeAddress(address) === address && KEY_RE.test(String(key).toLowerCase()) && String(key).toLowerCase() === String(who.pubkey).toLowerCase())
-        .map(([address]) => address)
-        .sort()
-      return respond(200, JSON.stringify({ addresses: mine }), 'application/json')
+      const signer = String(who.pubkey).toLowerCase()
+      const names = {}
+      const can = {}
+      for (const address of Object.keys(people.keys).sort()) {
+        if (normalizeAddress(address) !== address) continue
+        const mine = ownersOf(people, address).find(entry => entry.key === signer)
+        if (!mine) continue
+        can[address] = actsOf(mine.can)
+        const name = nameFor(people, address)
+        if (name) names[address] = name
+      }
+      // `can` says what this key may do per address, so a reader can leave out what would be refused; `admin`
+      // whether it may grant here, and then `zones` what it may grant on — a stranger is told neither.
+      const admin = people.admins.has(signer)
+      const answer = { addresses: Object.keys(can), names, can, admin }
+      if (admin) answer.zones = zonesOf(url, env)
+      return respond(200, JSON.stringify(answer), 'application/json')
     }
 
-    const match = /^\/mail\/(box|sent)\/([^/]+)(?:\/([a-f0-9]{64}))?$/.exec(url.pathname)
+    // Granting (admin routes). The admin list is held the way owners are — authorize() checks the signature in
+    // full first — so a non-admin is told "not authorized" by the same work, whatever the address.
+    const granting = /^\/mail\/grants(?:\/([^/]+))?$/.exec(url.pathname)
+    if (granting) {
+      const [, encoded] = granting
+      const allowed = encoded ? ['PUT', 'DELETE'] : ['GET']
+      if (!allowed.includes(request.method)) return respond(405, `${allowed.join(' or ')} only`)
+      let address = null
+      if (encoded) {
+        try { address = normalizeAddress(decodeURIComponent(encoded)) } catch { /* malformed */ }
+        if (!address) return respond(422, 'bad address')
+      }
+      const auth = await authorize(request, [...people.admins].map(key => ({ key })))
+      if (auth.refuse) return respond(...auth.refuse)
+      const context = { address, zones: zonesOf(url, env), event: auth.event, people }
+      if (!encoded) return listGrants(respond, context)
+      return request.method === 'PUT' ? putGrant(request, env, respond, context) : revokeGrant(env, respond, context)
+    }
+
+    const match = /^\/mail\/(box|sent|drafts)\/([^/]+)(?:\/([a-f0-9]{64})(\/marks)?)?$/.exec(url.pathname)
     if (!match) return respond(404, 'not found')
-    if (request.method !== 'GET') return respond(405, 'GET only')
+    const [, folder, encoded, sig, marksPath] = match
+    const method = request.method
+    const allowed = marksPath ? (folder === 'drafts' ? [] : ['PUT'])
+      : sig ? ['GET', 'DELETE']
+        : folder === 'drafts' ? ['GET', 'PUT'] : ['GET']
+    if (!allowed.includes(method)) return respond(405, allowed.length ? `${allowed.join(' or ')} only` : 'drafts carry no marks')
 
     let address = null
-    try { address = normalizeAddress(decodeURIComponent(match[2])) } catch { /* malformed */ }
+    try { address = normalizeAddress(decodeURIComponent(encoded)) } catch { /* malformed */ }
     if (!address) return respond(422, 'bad address')
 
-    // An unknown mailbox and a wrong key answer alike, so the answer never says which addresses exist.
-    const owner = ownerOf(env, address)
-    const auth = owner ? await verifyNip98(request, { owner }) : { ok: false, reason: 'not authorized' }
-    if (!auth.ok) return respond(401, auth.reason)
+    // An unknown mailbox and a wrong key answer alike, by the same work (authorize() checks every signature
+    // in full before it looks at who owns the address), so the answer never says which addresses exist.
+    // Who is asking also comes before anything about the body: a stranger's PUT answered 415 or 413 where
+    // a ghost gets 401 would say the same. A PUT is then held to the exact body it carries.
+    const owners = ownersOf(people, address)
+    const pool = await poolOf(address, folder)
+    const act = method === 'GET' ? 'read' : method === 'DELETE' ? 'delete' : marksPath ? 'mark' : 'draft'
+    const auth = await authorize(request, owners, act)
+    if (auth.refuse) return respond(...auth.refuse)
+    const context = { folder, address, pool, sig, owners, event: auth.event }
+    if (method === 'PUT') return marksPath ? putMarks(request, env, respond, context) : putDraft(request, env, respond, context)
 
-    const pool = await poolOf(address, match[1] === 'sent' ? 'sent' : 'box')
-    if (match[3]) {
-      const object = await env.MAIL.get(`${pool}/${match[3]}`)
+    if (method === 'DELETE') return forget(env, respond, context)
+    if (sig) {
+      const object = await env.MAIL.get(`${pool}/${sig}`)
       if (!object) return respond(404, 'not found')
       return respond(200, object.body, 'application/octet-stream')
     }
-
-    const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit')) || 100))
-    const page = await env.MAIL.list({ prefix: `${pool}/`, limit, cursor: url.searchParams.get('cursor') || undefined, include: ['customMetadata'] })
-    const items = page.objects.map(object => ({
-      sig: object.key.slice(pool.length + 1),
-      at: Number(object.customMetadata?.at) || 0,
-      meta: object.customMetadata?.meta || '',
-    }))
-    return respond(200, JSON.stringify({ items, cursor: page.truncated ? page.cursor : null }), 'application/json')
+    return listFolder(url, env, respond, context)
   },
 }

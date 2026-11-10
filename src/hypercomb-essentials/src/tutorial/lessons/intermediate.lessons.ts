@@ -184,7 +184,7 @@ INTERMEDIATE_LESSONS.push({
     // The same act at hive scale. Shown, not performed: pressing Move needs a
     // real collection to land in, and making one would reach outside the
     // practice page.
-    // The button's aria-label is `collections-landing.title` ("Portals"). It
+    // The button's aria-label is `collections-landing.title` ("Favorites"). It
     // was `pools.title` until the Organizer → Places → Portals renames, after
     // which `chrome('pools.title')` matched nothing and this whole beat — the
     // hive-scale half of the lesson — was silently skipped.
@@ -194,7 +194,7 @@ INTERMEDIATE_LESSONS.push({
       await stage.ghostClick(pools.left + pools.width / 2, pools.top + pools.height / 2)
       await stage.wait(900)
       await stage.say('into-organizer', 'Anywhere in the hive',
-        'Portals do this across your whole hive. Walk into a collection, pick tiles wherever they are, and it offers both verbs: Add leaves them where they live, Move brings them in. Holding Ctrl while you drag one tile onto another is the same act again, on one page.')
+        'The Favorites window does this across your whole hive. Walk into a collection, pick tiles wherever they are, and it offers both verbs: Add leaves them where they live, Move brings them in. Holding Ctrl while you drag one tile onto another is the same act again, on one page.')
       await stage.ghostClick(pools.left + pools.width / 2, pools.top + pools.height / 2)
       await stage.wait(400)
       stage.highlight(null)

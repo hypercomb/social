@@ -54,6 +54,7 @@ const services = new Map<string, unknown>([
 }
 
 const { EffectBus } = await import('@hypercomb/core')
+const { VIEW_SPAWN_EFFECT } = await import('./view-spawn.js')
 await import('./site-view.drone.js')
 const drone = registered.get('@diamondcoreprocessor.com/SiteViewDrone') as { pulse(g: string): Promise<void> }
 await drone.pulse('')
@@ -94,17 +95,45 @@ describe('back inside a website', () => {
     expect(mode).toBe('website')
   })
 
-  it('leaves the website only from the page it was entered on, out to the layer hosting it', async () => {
+  it('leaves the website only from the page it was entered on, back to where the reader came from', async () => {
     // jwize 2026-11-04: "when you click back on a webpage you just entered you
     // don't go to the same page, you go to the parent of the page you entered".
+    // Walking into /presentation from the root opened it (the arrival verdict
+    // names the page the reader came FROM), so back out of the entry is the root.
     walkTo(['presentation'])
     setMode('website')
+    EffectBus.emit('view:arrival', { segments: ['presentation'], view: 'website' })
     walkTo(['presentation', 'simple'])
     await back()
     expect(mode).toBe('website')
     await back()
     expect(mode).toBe('hexagons')
     expect(segments).toEqual([])
+  })
+
+  it('a site toggled on while standing on a node deeper in its tree leaves back to that node, not the root', async () => {
+    // jwize 2026-11-08: "You are still sending me back to the root of the
+    // website if I entered from a node elsewhere in its tree. Always where
+    // you entered from." Toggled on at /deep/tile — a node with no page of its
+    // own, the site showed the root's — back from the entry used to land on
+    // /deep. With a store the renderer reconciles, finds no page on the
+    // node (every page slot empty) and remembers it as confirmed page-less —
+    // not a page the reader entered.
+    services.set('@hypercomb.social/Store', { hypercombRoot: {}, getResource: async () => null })
+    try {
+      walkTo(['deep', 'tile'])
+      setMode('website')
+      await new Promise(r => setTimeout(r, 0))       // the reconcile that finds no page
+      walkTo(['deep'])                             // the site's own link to its home page
+      await back()
+      expect(mode).toBe('website')
+      expect(segments).toEqual(['deep', 'tile'])
+      await back()
+      expect(mode).toBe('hexagons')
+      expect(segments).toEqual(['deep', 'tile'])
+    } finally {
+      services.set('@hypercomb.social/Store', {})
+    }
   })
 
   it('walks the path, not the tree: a page visited twice comes back twice', async () => {
@@ -152,6 +181,48 @@ describe('back inside a website', () => {
     await back()
     expect(mode).toBe('hexagons')
     expect(segments).toEqual([])
+  })
+
+  it('a site stepped into from a node deeper in its tree leaves back to that node, not the root', async () => {
+    // jwize 2026-11-08: "You are still sending me back to the root of the
+    // website if I entered from a node elsewhere in its tree. Always where
+    // you entered from." The icon dispatcher announces the place BEFORE it
+    // walks the explorer to the site root and flips the surface.
+    walkTo(['presentation', 'simple', 'deep'])
+    EffectBus.emit(VIEW_SPAWN_EFFECT, { view: 'website', mode: 'hexagons', segments: ['presentation', 'simple', 'deep'] })
+    walkTo(['presentation'])                       // the dispatcher's walk to the root
+    setMode('website')
+    walkTo(['presentation', 'about'])
+    await back()
+    expect(mode).toBe('website')
+    await back()                                   // back from the entry page
+    expect(mode).toBe('hexagons')
+    expect(segments).toEqual(['presentation', 'simple', 'deep'])
+  })
+
+  it('the exit button from a stepped-into site also lands where the icon was clicked', async () => {
+    walkTo(['presentation', 'simple', 'deep'])
+    EffectBus.emit(VIEW_SPAWN_EFFECT, { view: 'website', mode: 'hexagons', segments: ['presentation', 'simple', 'deep'] })
+    walkTo(['presentation'])
+    setMode('website')
+    // An arrival verdict on the root (its own default mark) must not rewrite
+    // a step-in spawn to the page before the walk.
+    EffectBus.emit('view:arrival', { segments: ['presentation'], view: 'website' })
+    walkTo(['presentation', 'about'])
+    setMode('hexagons')                            // the exit button / Escape
+    expect(segments).toEqual(['presentation', 'simple', 'deep'])
+  })
+
+  it('a spawn record for another view does not touch the site', async () => {
+    walkTo(['elsewhere'])
+    EffectBus.emit(VIEW_SPAWN_EFFECT, { view: 'tree', mode: 'hexagons', segments: ['elsewhere'] })
+    walkTo(['presentation'])
+    setMode('website')
+    walkTo(['presentation', 'simple'])
+    await back()
+    await back()
+    expect(mode).toBe('hexagons')
+    expect(segments).toEqual([])                   // opened on its own page (cold read): the parent, as on 2026-11-04
   })
 
   it('a new site session starts with nothing to walk back to', async () => {

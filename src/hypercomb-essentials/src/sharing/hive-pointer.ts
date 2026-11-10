@@ -104,6 +104,23 @@ export async function hiveIndexUrl(host: string, pubkey: string): Promise<string
   return `${scheme}://${bare}/${pool}/${pubkey}`
 }
 
+/** NO INDEX HERE, REMEMBERED (2026-11-09: "we can't afford to ever have any
+ *  errors popping up"). A host that keeps no copy of this key's index — the
+ *  home relay at a domain's apex keeps none by design — answered every read
+ *  the same, and the Publish sweep asked it again on every head change, each
+ *  ask a red line in the console. The read now asks `?held`, so a host that
+ *  knows the flag answers that miss with a quiet 204; and the miss, either
+ *  spelling, is remembered for INDEX_ABSENT_QUIET_MS by its address. A read
+ *  that finds an index, or a write that lands one, forgets it at once. The
+ *  write lane's own read and the post-publish check pass `fresh`: they must
+ *  see the host as it is. Pinned on globalThis like the lanes below. */
+const INDEX_ABSENT_QUIET_MS = 5 * 60_000
+const absentIndexes: Map<string, number> =
+  ((globalThis as { __hypercombIndexAbsent?: Map<string, number> }).__hypercombIndexAbsent ??= new Map())
+
+/** Forget every remembered miss — a test world's reset between cases. */
+export const forgetIndexMisses = (): void => { absentIndexes.clear() }
+
 /** Fetch + verify one host's copy of the publisher's hive index, REPORTING
  *  WHY it failed. Never throws.
  *
@@ -112,16 +129,30 @@ export async function hiveIndexUrl(host: string, pubkey: string): Promise<string
  *  index missing every branch it could not see — see publish-branch.ts), and
  *  a status surface must render `forged` loudly while rendering `unreachable`
  *  as silence. */
-export async function fetchHiveIndex(host: string, pubkey: string, signal?: AbortSignal): Promise<HiveIndexResult> {
+export async function fetchHiveIndex(
+  host: string,
+  pubkey: string,
+  signal?: AbortSignal,
+  options: { fresh?: boolean } = {},
+): Promise<HiveIndexResult> {
   const key = String(pubkey ?? '').trim().toLowerCase()
   if (!SIG_RE.test(key)) return { ok: false, reason: 'malformed' }
+  const url = await hiveIndexUrl(host, key)
+  if (!options.fresh && (absentIndexes.get(url) ?? 0) > Date.now()) return { ok: false, reason: 'http', status: 404 }
   let res: Response
   try {
     // A host that never answers is `unreachable` after the deadline — the same
     // quiet "unknown" as a refused connection, never a stalled act.
-    res = await (await bounded()).fetchWithDeadline(await hiveIndexUrl(host, key), { cache: 'no-store' }, { signal })
+    res = await (await bounded()).fetchWithDeadline(`${url}?held`, { cache: 'no-store' }, { signal })
   } catch { return { ok: false, reason: 'unreachable' } }
+  // No index here: a quiet 204 from a host that knows `?held`, a 404 from one
+  // that does not — one answer, remembered for a while (absentIndexes).
+  if (res.status === 204 || res.status === 404) {
+    absentIndexes.set(url, Date.now() + INDEX_ABSENT_QUIET_MS)
+    return { ok: false, reason: 'http', status: 404 }
+  }
   if (!res.ok) return { ok: false, reason: 'http', status: res.status }
+  absentIndexes.delete(url)
 
   let evt: Record<string, unknown>
   // The deadline covers the body too: a host that stalls mid-answer is unreachable, not malformed.
@@ -326,7 +357,7 @@ async function putHiveManifestNow(
   // anchor's. The host must hold the anchor's list first, so it is carried.
   const pubkeyNow = SIG_RE.test(own) ? (await (await keyList()).publisherKeyHex()) || own : ''
   if (SIG_RE.test(pubkeyNow) && pubkeyNow !== own) await (await keyList()).carryKeyChain(host).catch(() => null)
-  const read = SIG_RE.test(pubkeyNow) ? await fetchHiveIndex(host, pubkeyNow).catch(() => null) : null
+  const read = SIG_RE.test(pubkeyNow) ? await fetchHiveIndex(host, pubkeyNow, undefined, { fresh: true }).catch(() => null) : null
   // `['anchor', <anchor>]`, and `['prev', <the index being replaced>]` — so two
   // places publishing at once cannot drop each other's change. Empty when this
   // device is its own anchor, which writes exactly as it always did.
@@ -425,6 +456,7 @@ async function putHiveManifestNow(
       body,
     })
     if (!res.ok) return { ok: false, pubkey, createdAt, reason: `host said ${res.status}: ${res.headers.get('X-Reason') ?? ''}`.trim() }
+    absentIndexes.delete(url)
     return { ok: true, pubkey, createdAt }
   } catch { return { ok: false, pubkey, createdAt, reason: 'host unreachable' } }
 }

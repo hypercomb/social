@@ -83,7 +83,7 @@ async function main() {
     check('the root shows the app word alone', t && t.app && !t.cell && !t.scope && t.seps === 0, t?.text)
 
     // ── THE POOL — attached to no tile ────────────────────────────────
-    await page.locator('.features-panel .scope-toggle').click()
+    await page.locator('.features-panel .features-tab:nth-of-type(2)').click()
     await page.waitForTimeout(2500)
     t = await page.evaluate(TITLE)
     console.log('pool: ' + JSON.stringify(t))
@@ -93,7 +93,7 @@ async function main() {
     await page.screenshot({ path: path.join(out, '10-pool.png') })
 
     // ── A TILE — its own name ─────────────────────────────────────────
-    await page.locator('.features-panel .scope-toggle').click()
+    await page.locator('.features-panel .features-tab:nth-of-type(1)').click()
     await page.waitForTimeout(2000)
     await page.evaluate((t2) => window.ioc?.get?.('@hypercomb.social/Navigation')?.go?.([t2]), TILE)
     await page.waitForTimeout(6000)

@@ -6,13 +6,16 @@
 // crumbs. A page is that one scene as one slide, the size of the screen:
 //
 //   crumbs   where you are; every ancestor is a way back (the one way up)
-//   scene    the eyebrow, the headline, the figure, and the narration under
-//            one hairline with its transport — the tour's stage, exactly
-//   ways     the tile's children, as cards: each opens the next level down
 //   beside   the tiles under the same parent: previous and next, and where
 //            this one stands among them, with the parent one press up
-//            (jwize 2026-11-06: every node is a video, some have children; a
-//            parent is a category you choose into, so no tab row mixes levels)
+//   ways     the tile's children, as a row: each opens the next level down
+//   scene    the eyebrow, the headline, the figure, and the narration under
+//            one hairline with its transport — the tour's stage, exactly
+//
+// The three menus sit ABOVE the video (jwize 2026-11-07: "put the simple and
+// other video menus as the top of the video"). jwize 2026-11-06: every node is
+// a video, some have children; a parent is a category you choose into, so no
+// tab row mixes levels.
 //
 // THE STANDARD IS THE TOUR (scripts/presentation): its ink and honey, its two
 // faces, its figures, its voice. A tile one of the tour's scenes explains
@@ -92,13 +95,15 @@ button{font:inherit;color:inherit}
 [hidden]{display:none!important}
 svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:none}
 
-/* ONE SLIDE: the screen's height (less the hive's exit corner), three rows —
-   crumbs, the scene, the ways. Sizes read from the slide's own width (cqi)
-   and the screen's height (vh), so it is the same slide standing alone or
-   mounted in the hive. */
-.page{container-type:inline-size;width:min(1180px,100%);margin:0 auto;padding:14px 16px 0;
+/* ONE SLIDE: the screen's height (less the hive's exit corner), two columns —
+   the tree menu on the left (jwize 2026-11-08: "a left hand sidebar menu for
+   the tree"), and the stage: crumbs, the video, and the sibling menu under it.
+   The STAGE is the container, so sizes read from the video's own width (cqi),
+   the same slide standing alone or mounted in the hive. */
+.page{width:min(1280px,100%);margin:0 auto;padding:14px 16px 0;position:relative;
   height:calc(100vh - var(--hc-site-chrome-bottom,0px));height:calc(100dvh - var(--hc-site-chrome-bottom,0px));min-height:520px;
-  display:grid;grid-template-rows:auto minmax(0,1fr) auto;--measure:780px}
+  display:grid;grid-template-columns:230px minmax(0,1fr);column-gap:22px;--measure:780px}
+.stage{container-type:inline-size;display:grid;grid-template-rows:auto minmax(0,1fr) auto auto;min-height:0;min-width:0}
 .mono-label{font-family:var(--mono);font-size:12px;line-height:1.3;letter-spacing:var(--track-label);text-transform:uppercase}
 
 /* ---------- where you are ---------- */
@@ -112,11 +117,16 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
    the website — rooted at the top tile — on this same page. */
 .top{display:flex;align-items:center;gap:12px;min-height:20px}
 .top .crumbs{flex:1}
+.top .ib2{display:inline-flex;align-items:center;justify-content:center;width:30px;height:28px;color:var(--dim);background:none;
+  border:1px solid var(--line);border-radius:var(--r-ctl);cursor:pointer;padding:0}
+.top .ib2:hover{color:var(--honey);border-color:var(--honey-deep);background:var(--honey-tint)}
+.top .ib2 svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.top .menu-btn{display:none}
 .to-site{display:none;align-items:center;gap:.45em;margin-left:auto;font-family:var(--mono);font-size:12px;letter-spacing:var(--track-label);
   text-transform:uppercase;color:var(--dim);background:none;border:1px solid var(--line);border-radius:var(--r-ctl);padding:5px 10px;cursor:pointer}
 .to-site:hover{color:var(--honey);border-color:var(--honey-deep);background:var(--honey-tint)}
 .to-site .g{color:var(--honey);font-size:13px}
-.page.part .crumbs,.page.part .ways,.page.part .beside{visibility:hidden}
+.page.part .crumbs,.page.part .tree,.page.part .sibs,.page.part .explore,.page.part .to-explore,.page.part .kids-row{visibility:hidden}
 .page.part .to-site{display:inline-flex}
 
 /* ---------- the scene ---------- */
@@ -260,33 +270,71 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .voice[aria-pressed="false"] .i-muted{display:block}
 
 /* ---------- inside: the children, each the next level down ---------- */
-.ways{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:8px;padding:12px 0 8px;margin-top:clamp(10px,2vh,20px);border-top:1px solid var(--line)}
-.ways .lbl{grid-column:1/-1;color:var(--honey-deep)}
-.ways a.w,.ways span.w{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:.65em;align-items:center;text-decoration:none;color:var(--ink);
-  border:1px solid var(--line);border-radius:var(--r-card);padding:9px 12px;transition:border-color .15s,background .15s,color .15s}
-.ways .w .g{grid-row:1/3;color:var(--honey);font-size:13px}
-.ways .w b{font:500 13px/1.3 var(--mono);letter-spacing:var(--track-data);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ways .w small{font-size:12px;line-height:1.35;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ways a.w:hover{border-color:var(--honey-deep);background:var(--honey-tint)}
-.ways a.w:hover b{color:var(--honey)}
-.ways span.w{color:var(--faint-text);border-style:dashed}
-.ways span.w small{color:var(--faint-text)}
-/* beside: previous and next under the same parent, and the parent one press up */
-.beside{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:8px;padding:8px 0 12px;border-top:1px solid var(--line)}
-.ways+.beside{border-top:0;padding-top:4px}
-.beside .step{display:inline-flex;align-items:center;gap:.6em;min-width:0;max-width:100%;text-decoration:none;color:var(--ink);
-  border:1px solid var(--line);border-radius:var(--r-ctl);padding:7px 12px;transition:border-color .15s,background .15s,color .15s}
-.beside .step.next{justify-self:end;text-align:right}
-.beside .step.off{visibility:hidden}
-.beside .step .g{color:var(--honey);font-size:13px}
-.beside .step span{display:grid;min-width:0}
-.beside .step small{font:12px var(--mono);letter-spacing:var(--track-label);text-transform:uppercase;color:var(--faint-text)}
-.beside .step b{font:500 13px/1.3 var(--mono);letter-spacing:var(--track-data);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.beside a.step:hover{border-color:var(--honey-deep);background:var(--honey-tint)}
-.beside a.step:hover b{color:var(--honey)}
-.beside .pos{font:12px var(--mono);letter-spacing:var(--track-data);color:var(--dim);text-align:center;font-variant-numeric:tabular-nums}
-.beside .pos a{color:var(--ink);text-decoration:underline;text-decoration-color:var(--line-strong);text-underline-offset:3px}
-.beside .pos a:hover{color:var(--honey);text-decoration-color:var(--honey)}
+/* THE TREE MENU: every walkable tile, nested; the ones on the way to this page
+   stay open, and this one is lit. */
+.tree{grid-column:1;min-height:0;overflow-y:auto;scrollbar-width:thin;padding:6px 12px 14px 0;border-right:1px solid var(--line);font-family:var(--mono);font-size:13px}
+.tree .lbl{display:block;color:var(--honey-deep);margin:2px 0 8px}
+.tree ul{list-style:none;margin:0;padding:0}
+.tree ul ul{margin:2px 0 4px 11px;padding-left:9px;border-left:1px solid var(--line)}
+.tree summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:6px}
+.tree summary::-webkit-details-marker{display:none}
+.tree summary::before{content:"";flex:none;width:6px;height:6px;border-right:1.5px solid var(--faint-text);border-bottom:1.5px solid var(--faint-text);transform:rotate(-45deg);transition:transform .15s}
+.tree details[open]>summary::before{transform:rotate(45deg)}
+.tree li.leaf{padding-left:12px}
+.tree a,.tree .soon{display:block;flex:1;min-width:0;padding:4px 8px;border-radius:var(--r-ctl);text-decoration:none;color:var(--dim);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:var(--track-data);transition:color .15s,background .15s}
+.tree a:hover{color:var(--honey);background:var(--honey-tint)}
+.tree [aria-current]{color:var(--ink);background:var(--honey-tint);box-shadow:inset 2px 0 0 var(--honey)}
+.tree .soon{color:var(--faint-text);font-style:italic}
+/* THE SIBLING MENU, balanced and centred under the video (jwize 2026-11-08:
+   "no step in any more just the balanced centered sibling menu"): the tiles
+   under the same parent, this one lit; the parent's name stands in brackets. */
+.explore{display:flex;justify-content:flex-end;padding:8px 0 2px}
+.explore a{display:inline-flex;align-items:center;gap:8px;max-width:100%;padding:9px 16px;border-radius:999px;border:1px solid var(--honey);color:var(--honey);background:rgba(217,163,28,.08);
+  font-family:var(--mono);font-size:12.5px;letter-spacing:.04em;text-decoration:none;transition:background .15s,color .15s}
+.explore a b{font-weight:600;color:var(--ink,#fff);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.explore a:hover,.explore a:focus-visible{background:var(--honey);color:#14100a}
+.explore a:hover b,.explore a:focus-visible b{color:#14100a}
+.explore svg{width:14px;height:14px;flex:none}
+.top .to-explore{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--honey);text-decoration:none;padding:6px 10px;border:1px solid transparent;border-radius:6px}
+.top .to-explore:hover{border-color:var(--honey)}
+@media (max-width:900px){.top .to-explore{display:none}}
+.when-kids,.kids,.sibs.kids-row{display:none}
+.page[data-view="children"] .when-video,.page[data-view="children"] .scene,.page[data-view="children"] .sibs[data-part="siblings"]{display:none}
+.page[data-view="children"] .when-kids{display:inline}
+.page[data-view="children"] .kids{display:block}
+.page[data-view="children"] .sibs.kids-row{display:flex}
+.kids{min-height:0;overflow:auto;padding:18px 4px 8px}
+.kids .eyebrow{text-align:center}
+.kids h2{font-weight:300;font-size:clamp(24px,3.6cqi,40px);line-height:1.1;margin:0 0 .9em;text-align:center;letter-spacing:var(--track-display)}
+.kids h2 em{font-style:normal;color:var(--honey)}
+.kidgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,260px));justify-content:center;gap:12px;max-width:var(--measure);margin:0 auto}
+.kid{display:flex;flex-direction:column;gap:6px;padding:14px 16px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.03);color:inherit;text-decoration:none;transition:border-color .15s,background .15s}
+a.kid:hover,a.kid:focus-visible{border-color:var(--honey);background:rgba(217,163,28,.07)}
+.kid h3{margin:0;font-family:var(--mono);font-size:13px;letter-spacing:.06em;font-weight:500;color:var(--ink,#fff);display:flex;align-items:center;gap:8px}
+.kid h3 svg{width:12px;height:12px;color:var(--honey);flex:none}
+.kid p{margin:0;font-size:13px;line-height:1.45;color:var(--muted,#9fb0bd)}
+.kid.soon{opacity:.5}
+.sibs{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px 8px;padding:10px 0 12px;border-top:1px solid var(--line)}
+.sibs .lbl{flex-basis:100%;text-align:center;color:var(--faint-text)}
+.sibs a.sib,.sibs span.sib{display:inline-flex;align-items:center;gap:.5em;text-decoration:none;color:var(--ink);
+  border:1px solid var(--line);border-radius:var(--r-card);padding:6px 14px;font:500 13px/1.3 var(--mono);letter-spacing:var(--track-data);transition:border-color .15s,background .15s,color .15s}
+.sibs .sib .g{color:var(--honey);font-size:12px}
+.sibs a.sib:hover{border-color:var(--honey-deep);background:var(--honey-tint);color:var(--honey)}
+.sibs [aria-current]{border-color:var(--honey-deep);background:var(--honey-tint);color:var(--honey)}
+.sibs span.soon{color:var(--faint-text);border-style:dashed}
+/* the video alone, fullscreen */
+.scene:fullscreen{background:var(--bg);padding:3vh 4vw;overflow:auto}
+
+/* a phone: one column; the tree is a drawer behind the menu button */
+@media (max-width:760px){
+  .page{grid-template-columns:minmax(0,1fr);padding:12px 12px 0}
+  .top .menu-btn{display:inline-flex}
+  .tree{display:none}
+  .page.menu-open .tree{display:block;position:absolute;z-index:6;top:0;bottom:0;left:0;width:min(290px,84%);padding:48px 14px 16px 14px;
+    background:var(--panel);border-right:1px solid var(--line-strong);box-shadow:var(--shadow)}
+  .page.menu-open .top .menu-btn{position:relative;z-index:7}
+}
 
 @container (max-width:700px){
   .fz.duo{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1.3fr) minmax(0,1fr)}
@@ -296,11 +344,6 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
   .hexb{width:clamp(76px,24cqi,104px)}
   .hexb .t{font-size:11px}
   .count{display:none}
-  .beside .step small{display:none}
-  .ways{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:8px 0 6px;margin-top:6px}
-  .ways .w small{display:none}
-  .ways a.w,.ways span.w{padding:8px 10px}
-  .beside .step{padding:7px 9px}
   .caption{max-height:36vh}
 }
 @media (prefers-reduced-motion:reduce){
@@ -343,8 +386,45 @@ const SCRIPT = `
   const mode = () => { const e = host ? host.getAttribute('data-hc-site-entry') || '/' : '/'; page.classList.toggle('part', e.split('/').filter(Boolean).length > 1) }
   mode()
   if (host) new MutationObserver(() => { if (gone()) return; mode() }).observe(host, { attributes: true, attributeFilter: ['data-hc-site-entry'] })
+  // FULL SCREEN: the video alone. It leaves with Escape, and the button says so.
+  const fs = page.querySelector('.fs')
+  if (fs) {
+    if (!document.fullscreenEnabled || !el.requestFullscreen) fs.hidden = true
+    else {
+      const mark = () => { if (gone()) { document.removeEventListener('fullscreenchange', mark); return } fs.setAttribute('aria-pressed', String(document.fullscreenElement === el)) }
+      document.addEventListener('fullscreenchange', mark)
+      fs.onclick = () => { if (document.fullscreenElement === el) document.exitFullscreen(); else el.requestFullscreen().catch(() => {}) }
+    }
+  }
+  // A PHONE'S TREE is a drawer: the menu button opens it, and choosing a video closes it.
+  const menuBtn = page.querySelector('.menu-btn'), treeNav = page.querySelector('.tree')
+  if (menuBtn && treeNav) {
+    const drawer = (open) => { page.classList.toggle('menu-open', open); menuBtn.setAttribute('aria-expanded', String(open)) }
+    menuBtn.onclick = () => drawer(!page.classList.contains('menu-open'))
+    treeNav.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('a')) drawer(false) })
+  } else if (menuBtn) menuBtn.hidden = true
   const toSite = page.querySelector('.to-site')
   if (toSite) toSite.onclick = () => page.dispatchEvent(new CustomEvent('hc-site-widen', { bubbles: true }))
+  // THE CHILD VIEW: Explore more switches the stage between the video and the tile's own children.
+  // The voice stops on the way in; #children in the address says which view, so it can be linked to.
+  if (page.querySelector('.kids')) {
+    const setView = (on, keep) => {
+      page.dataset.view = on ? 'children' : 'video'
+      for (const x of page.querySelectorAll('[data-explore]')) x.setAttribute('aria-pressed', String(on))
+      if (on) { try { halt() } catch {} }
+      if (keep) { try { history.replaceState(history.state, '', on ? '#children' : location.pathname + location.search) } catch {} }
+    }
+    page.addEventListener('click', (e) => {
+      const x = e.target.closest && e.target.closest('[data-explore]')
+      if (!x) return
+      e.preventDefault()
+      setView(page.dataset.view !== 'children', true)
+    })
+    const onHash = () => { if (!gone()) setView(location.hash === '#children', false) }
+    window.addEventListener('hashchange', onHash)
+    // after the rest of this script has run, so the playback it stops exists
+    if (location.hash === '#children') queueMicrotask(onHash)
+  }
   const KEY = 'hc-scene:' + location.pathname
   const returning = root instanceof Element && root.hasAttribute('data-hc-returning')
   let resumeAt = 0
@@ -596,27 +676,81 @@ const sceneHtml = (sc) => {
   </section>`
 }
 
-/** Inside: the tile's children, as cards. Each opens the next level down; a
- *  child with no page yet is shown as coming. A leaf has none. */
-const waysHtml = (ways) => !ways || !ways.children.length ? '' : `
-  <nav class="ways" data-part="ways" aria-label="More details">
-    <span class="lbl mono-label">More details</span>${ways.children.map(c => c.page
-      ? `<a class="w" href="./${esc(c.name)}" title="${esc(c.note)}">${icon('play')}<b>${esc(c.name)}</b><small>${esc(c.note)}</small></a>`
-      : `<span class="w" title="${esc(`${c.note} (its page is coming)`)}"><b>${esc(c.name)}</b><small>coming</small></span>`).join('')}
-  </nav>`
-
-/** Beside: previous and next under the same parent, with where this one
- *  stands and the parent one press up. Nothing when there is neither. */
-const besideHtml = (ways) => {
-  const b = ways && ways.beside
-  if (!b || (!b.parent && b.of < 2)) return ''
-  const step = (t, dir) => t
-    ? `<a class="step ${dir}" href="/${t.route.map(esc).join('/')}" rel="${dir}" title="${esc(t.note)}">${dir === 'prev' ? icon('left') : ''}<span><small>${dir === 'prev' ? 'Previous' : 'Next'}</small><b>${esc(t.name)}</b></span>${dir === 'next' ? icon('right') : ''}</a>`
-    : '<span class="step off '+dir+'" aria-hidden="true"></span>'
-  const up = b.parent && b.parent.page ? `<a href="/${b.parent.route.map(esc).join('/')}">${esc(b.parent.name)}</a>` : b.parent ? esc(b.parent.name) : ''
-  const where = [b.of > 1 ? `${b.at} of ${b.of}` : '', up ? `in ${up}` : ''].filter(Boolean).join(' · ')
+/** THE TREE MENU, on the left: every walkable tile, nested as the tree nests.
+ *  The tiles on the way to this page stay open and this one is lit; a tile
+ *  with no page yet is shown as coming. */
+const treeHtml = (ways, route) => {
+  const menu = ways && ways.menu
+  if (!menu || !menu.length) return ''
+  const here = route.join('/')
+  const item = (n) => {
+    const key = n.route.join('/')
+    const label = key === here
+      ? `<a href="/${n.route.map(esc).join('/')}" aria-current="page">${esc(n.name)}</a>`
+      : n.page ? `<a href="/${n.route.map(esc).join('/')}">${esc(n.name)}</a>` : `<span class="soon" title="its page is coming">${esc(n.name)}</span>`
+    if (!n.children.length) return `<li class="leaf">${label}</li>`
+    const open = here === key || here.startsWith(key + '/')
+    return `<li><details${open ? ' open' : ''}><summary>${label}</summary><ul>${n.children.map(item).join('')}</ul></details></li>`
+  }
   return `
-  <nav class="beside" data-part="beside" aria-label="Move on">${step(b.prev, 'prev')}<span class="pos">${where}</span>${step(b.next, 'next')}</nav>`
+  <nav class="tree" data-part="tree" aria-label="All the videos"><span class="lbl mono-label">The tree</span><ul>${menu.map(item).join('')}</ul></nav>`
+}
+
+/** EXPLORE MORE, bottom right under the video: opens the child view, and in the
+ *  child view goes back to the video. Nothing when no page lies below. */
+const exploreHtml = (ways) => {
+  const e = ways && ways.explore
+  if (!e) return ''
+  return `
+  <div class="explore" data-part="explore"><a href="#children" data-explore aria-pressed="false"><span class="when-video">Explore more about <b>${esc(e.topic)}</b></span><span class="when-kids">Back to the video</span>${icon('play')}</a></div>`
+}
+
+/** The same switch, as a quiet link in the top bar: the backup for the button. */
+const exploreTop = (ways) => {
+  const e = ways && ways.explore
+  return e ? `<a class="to-explore" href="#children" data-explore><span class="when-video">Explore ›</span><span class="when-kids">‹ Video</span></a>` : ''
+}
+
+/** THE CHILD VIEW: the tile's own children as cards, in the order the tree gives. */
+const kidsHtml = (ways) => {
+  const e = ways && ways.explore
+  if (!e) return ''
+  const card = (k) => k.page
+    ? `<a class="kid" href="/${k.route.map(esc).join('/')}"><h3>${icon('play')}${esc(k.name)}</h3>${k.note ? `<p>${esc(k.note)}</p>` : ''}</a>`
+    : `<span class="kid soon" title="its page is coming"><h3>${esc(k.name)}</h3>${k.note ? `<p>${esc(k.note)}</p>` : ''}</span>`
+  return `
+  <section class="kids" data-part="children" aria-label="Inside ${esc(e.topic)}">
+    <div class="eyebrow">Inside</div>
+    <h2>${esc(e.topic)}</h2>
+    <div class="kidgrid">${e.kids.map(card).join('')}</div>
+  </section>`
+}
+
+/** THE CHILD VIEW'S ROW: the same buttons as the siblings row, but the tile's own children. */
+const kidsRowHtml = (ways, route) => {
+  const e = ways && ways.explore
+  if (!e) return ''
+  return `
+  <nav class="sibs kids-row" data-part="children-row" aria-label="Inside ${esc(e.topic)}"><span class="lbl mono-label">(${esc(route[route.length - 1])})</span>${e.kids.map(k => k.page
+    ? `<a class="sib" href="/${k.route.map(esc).join('/')}" title="${esc(k.note)}">${icon('play')}${esc(k.name)}</a>`
+    : `<span class="sib soon" title="${esc(`${k.note} (its page is coming)`)}">${esc(k.name)}</span>`).join('')}
+  </nav>`
+}
+
+/** THE SIBLING MENU, balanced and centred under the video: the tiles under the
+ *  same parent, this one lit. The parent's name stands over them in brackets.
+ *  Nothing when a tile is the only one there. */
+const sibsHtml = (ways, route) => {
+  const section = (ways && ways.section) || []
+  if (section.length < 2) return ''
+  const parent = String((ways && ways.sectionOf) || '')
+  return `
+  <nav class="sibs" data-part="siblings" aria-label="${esc(parent ? `More in ${parent}` : 'Beside this')}">${parent ? `<span class="lbl mono-label">(${esc(parent)})</span>` : ''}${section.map(t => t.current
+    ? `<span class="sib" aria-current="page">${icon('play')}${esc(t.name)}</span>`
+    : t.page
+      ? `<a class="sib" href="/${t.route.map(esc).join('/')}" title="${esc(t.note)}">${icon('play')}${esc(t.name)}</a>`
+      : `<span class="sib soon" title="${esc(`${t.note} (its page is coming)`)}">${esc(t.name)}</span>`).join('')}
+  </nav>`
 }
 
 /** One tile's page: its one scene. */
@@ -637,7 +771,7 @@ ${STYLE}
 </head>
 <body>
 ${sprite}
-<main class="page"><div class="top">${crumbsHtml(route)}<button type="button" class="to-site" aria-label="Open the website at this page">${icon('hex')}website</button></div>${sceneHtml(scene)}${waysHtml(ways)}${besideHtml(ways)}
+<main class="page">${treeHtml(ways, route)}<div class="stage"><div class="top"><button type="button" class="ib2 menu-btn" aria-label="Show the tree" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></svg></button>${crumbsHtml(route)}${exploreTop(ways)}<button type="button" class="ib2 fs" aria-label="Full screen" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg></button><button type="button" class="to-site" aria-label="Open the website at this page">${icon('hex')}website</button></div>${sceneHtml(scene)}${kidsHtml(ways)}${exploreHtml(ways)}${sibsHtml(ways, route)}${kidsRowHtml(ways, route)}</div>
 </main>
 <script>${SCRIPT}${tryDef ? `
 ;(() => {

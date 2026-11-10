@@ -15,6 +15,7 @@
 
 import { SignatureService, get, registerPoolMeaning } from '@hypercomb/core'
 import { fetchHiveIndex, setHiveRoot } from './hive-pointer.js'
+import { readPoolListing } from './pool-listing.js'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 export const ATTEST_PREFIX = 'attest:'
@@ -51,7 +52,10 @@ export const readBySig = async (host: string, sig: string): Promise<Uint8Array |
   if (!SIG_RE.test(sig)) return null
   for (const path of [`/content/${sig}`, `/${sig}`]) {
     try {
-      const res = await fetch(`${hostBase(host)}${path}`, { cache: 'force-cache' })
+      // `?held`: a host that knows the flag answers a miss 204, not a 404
+      // the browser prints — one of these two shapes always misses.
+      const res = await fetch(`${hostBase(host)}${path}?held`, { cache: 'force-cache' })
+      if (res.status === 204) continue
       if (!res.ok) continue
       const bytes = new Uint8Array(await res.arrayBuffer())
       if (await SignatureService.sign(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer) === sig) return bytes
@@ -99,8 +103,8 @@ export const readAttestations = async (host: string, record: string): Promise<Ar
   let listed: string[] = []
   try {
     const pool = await registerPoolMeaning(`${ATTEST_PREFIX}${record}`)
-    const res = await fetch(`${hostBase(host)}/${pool}/`, { cache: 'no-store' })
-    if (res.ok) listed = (await res.text()).split('\n').map(line => line.trim().toLowerCase()).filter(line => SIG_RE.test(line))
+    const text = await readPoolListing(hostBase(host), pool)
+    if (text !== null) listed = text.split('\n').map(line => line.trim().toLowerCase()).filter(line => SIG_RE.test(line))
   } catch { /* nobody listed */ }
   const out: Array<{ pubkey: string; sig: string; attestation: Attestation }> = []
   for (const pubkey of listed) {

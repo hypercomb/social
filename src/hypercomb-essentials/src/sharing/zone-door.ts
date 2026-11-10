@@ -101,6 +101,38 @@ export const readDoorsOf = (hosts: readonly unknown[]): string[] => {
   return roots
 }
 
+/** A SITE IS NOT A WRITE DOOR (the worker's isZoneRoot: a bound host that
+ *  another bound host contains is a published site, and refuses every write —
+ *  "publish to the root domain", jwize 2026-10-03). Among doors named
+ *  together, one that sits under another (`protocol.hypercomb.com` beside
+ *  `hypercomb.com`) is a site on that zone, served from the zone's own store:
+ *  its writes and reads go to the zone. Answers the zone it folds into, or
+ *  the door itself. Loopback and ported doors are machines of their own and
+ *  never fold. Before this, a site named as a domain was PUT to on every
+ *  publish, refused at the preflight, and the console filled with errors. */
+export const siteZoneOf = (door: unknown, doors: readonly unknown[]): string => {
+  const own = foldContentLabel(door)
+  if (!own || LOOPBACK_RE.test(own) || own.includes(':')) return own
+  let zone = own
+  for (const other of doors ?? []) {
+    const candidate = foldContentLabel(other)
+    if (!candidate || candidate === own || LOOPBACK_RE.test(candidate) || candidate.includes(':')) continue
+    if (own.endsWith('.' + candidate) && candidate.length < zone.length) zone = candidate
+  }
+  return zone
+}
+
+/** Write doors with every site folded into its zone (siteZoneOf), order kept,
+ *  duplicates dropped. */
+export const writeDoorsOf = (doors: readonly unknown[]): string[] => {
+  const out: string[] = []
+  for (const door of doors ?? []) {
+    const zone = siteZoneOf(door, doors)
+    if (zone && !out.includes(zone)) out.push(zone)
+  }
+  return out
+}
+
 /** `https://` for a real zone, `http://` for loopback. */
 export const originOf = (raw: unknown): string => {
   const bare = bareHost(raw)

@@ -9,11 +9,14 @@
 // which mounts a page-less cell — website mode comes up with nothing on it and
 // the home page never shows.
 //
-// The entrance is the OUTERMOST self-or-ancestor that actually carries the
-// view's content — for a website, the site root, whose page IS the home page.
-// Same rule the site-view renderer already uses on the way OUT (`#entranceOf`),
-// applied on the way IN so both ends of the gesture agree on where the site
-// begins.
+// The entrance is THE CELL YOU ENTER FROM when it carries the view's content
+// — a sub page opens as that sub page, the root as the root (jwize
+// 2026-11-08: "You enter in webview from the page you enter and you can
+// navigate around … sub = sub, root = root"). Only a cell that carries
+// nothing of its own climbs, and then to the NEAREST ancestor that does, so
+// the click still lands on a page rather than a page-less dead end. It used
+// to climb to the OUTERMOST carrier in every case — the site root — which
+// turned every sub-page icon into a trip to the home page.
 //
 // Node-scoped behaviours (a deck, a post-it) have no root above them: their
 // content is the cell it was declared on, so the entrance is the cell itself.
@@ -23,6 +26,7 @@
 // slot (the one behaviour whose slot the descriptor cannot name), or a record
 // of its `decorationKind`.
 
+import { SITE_VIEW_IOC_KEY } from '@hypercomb/core'
 import type { VisualBeeDescriptor } from './visual-bee-registry.js'
 import { WEBSITE_SLOT } from './website-slot.js'
 
@@ -39,6 +43,8 @@ function nonEmptySigArray(value: unknown): boolean {
   return Array.isArray(value) && value.some(s => typeof s === 'string' && SIG_RE.test(s))
 }
 
+type PageResolver = { resolvePageSig?(segments: readonly string[]): Promise<string | null> }
+
 /** Does the cell at `segments` HOLD this behaviour's content? */
 async function carriesView(
   segments: readonly string[],
@@ -46,6 +52,19 @@ async function carriesView(
   history: HistoryLike,
   store: StoreLike | undefined,
 ): Promise<boolean> {
+  // THE WEBSITE ASKS THE SITE VIEW. A page lives in one of three places (the
+  // `website` slot, a page decoration, the legacy `context` slot) and the
+  // renderer's own lookup is the one question every page surface asks. A
+  // narrower copy here read a section whose page sits in a slot it did not
+  // know as page-less, and the entrance climbed to the existing website
+  // instead of opening the section (jwize 2026-11-08). Falls through to the
+  // probe below when the site view is not up.
+  if (bee.view === 'website') {
+    const resolver = window.ioc?.get<PageResolver>(SITE_VIEW_IOC_KEY)
+    if (typeof resolver?.resolvePageSig === 'function') {
+      try { if (await resolver.resolvePageSig(segments)) return true } catch { /* fall through */ }
+    }
+  }
   let layer: Record<string, unknown> | null
   try {
     layer = await history.currentLayerAt(await history.sign({ explorerSegments: () => segments }))
@@ -75,12 +94,14 @@ async function carriesView(
 
 /** The cell to navigate to before opening `bee`'s surface at `target`.
  *
- *  Walks STRICT ancestors outermost-first and returns the first that carries
- *  the behaviour — the scope root. Never returns the hive root (`d` starts at
- *  1), and falls back to `target` unchanged when nothing above it carries the
- *  view, when the behaviour is node-scoped, or when the probe can't run. The
- *  fallback is the old behaviour, so a cold history or an unreadable layer
- *  degrades to today rather than to a dead click. */
+ *  `target` itself when it carries the behaviour — the page you enter from is
+ *  the page you enter. Otherwise the NEAREST strict ancestor that carries it,
+ *  walked innermost-first, so a member tile with no page of its own opens on
+ *  the closest page above it. Never returns the hive root (`d` stops at 1),
+ *  and falls back to `target` unchanged when nothing carries the view, when
+ *  the behaviour is node-scoped, or when the probe can't run — a cold history
+ *  or an unreadable layer degrades to opening right here rather than to a
+ *  dead click. */
 export async function resolveViewEntrance(
   bee: VisualBeeDescriptor,
   target: readonly string[],
@@ -91,7 +112,8 @@ export async function resolveViewEntrance(
   if (!history) return target
   const store = ioc?.get<StoreLike>('@hypercomb.social/Store')
 
-  for (let d = 1; d < target.length; d++) {
+  if (await carriesView(target, bee, history, store)) return target
+  for (let d = target.length - 1; d >= 1; d--) {
     const ancestor = target.slice(0, d)
     if (await carriesView(ancestor, bee, history, store)) return ancestor
   }

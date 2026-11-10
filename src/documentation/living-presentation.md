@@ -904,25 +904,47 @@ every page, and its 25 scenes are folded into the tiles they explain:
     - accessible: reader, listening, phone, motion.
     - localized: translating, locale.
     - road: coming, vision, computer (scenes 21 to 23).
-- **Each way said once: crumbs up, tabs across, words in.** jwize,
-  2026-11-05: *"show all the current section videos at the bottom while on
-  each of those pages and then the breadcrumb at the top for childpages. That
-  way you can view the list in each section as tabs."* A page's crumbs, at the
-  top, are its way up. At the bottom, its section is a row of tabs: every
-  tile beside it, itself among them and lit. Each page of the section shows
-  the same row, so the section reads as one list of videos. The protocol and
-  the road are a section of their own. Between the scene and the tabs, *Step
-  in* names the words below the page, and each opens the next section down.
-  No other link says the same thing: the old way up and the link across to
-  the road are gone, because the crumbs and the tabs say them. A section
-  wider than the page scrolls along its own row. The lit tab is brought into
-  view, and an edge with more tabs past it fades.
+- **A tree on the left, the siblings underneath.** jwize, 2026-11-05, then
+  2026-11-06 (#110): every node is a video, and a parent is a category you
+  choose into, so no row mixes levels. Then 2026-11-08: *"a left hand sidebar
+  menu for the tree"*, *"a fullscreen button"*, *"no step in any more, just the
+  balanced centered sibling menu."* A page says where it goes in three places,
+  and then plays:
+  - **the tree**, a sidebar on the left: every walkable tile, nested as the
+    tree nests. The tiles on the way here stay open and this one is lit; a tile
+    with no page yet is shown as coming. On a phone it is a drawer behind a
+    menu button.
+  - **crumbs**, the way up, in the bar over the video: `protocol / simple`,
+    with the fullscreen button beside them. Fullscreen takes the video alone.
+  - **the siblings**, balanced and centred under the video: the tiles under the
+    same parent, this one lit, the parent's name over them in brackets
+    (`(protocol)`). The row stays when you press one of its buttons (jwize,
+    2026-11-09): on a top page it is that tile's own first level (standing on
+    `/protocol` shows simple, organized, collaborative ...), and every page a
+    button leads to shows the same row, with only the lit one moved. A tile that
+    is the only one there shows nothing.
+
+  - **the child view** (jwize, 2026-11-10: *"as well as a video they have an
+    html view that allows them to present their own children in the siblings
+    list"*). The siblings row only chooses WHICH VIDEO. A tile that has pages
+    beneath it has a second view of the same page: **Explore more about
+    <topic>**, bottom right under the video (and a quiet *Explore ›* in the top
+    bar as the backup), switches the stage to the tile's own children as cards,
+    and the bottom row lists those children. The button turns into *Back to the
+    video*. Entering the child view stops the voice; `#children` in the address
+    opens it directly. The topic is a plain-language noun authored on the page
+    (`topic` in `content.cjs`), else the tile's name. A tile with nothing
+    beneath it has neither the button nor the view.
+
+  There is no step-in row and no previous or next: the tree goes down, the
+  siblings go across, and the crumbs go up. Every link lands on a page, the tree
+  reaches every page, and the siblings share one parent (`blocks.spec.ts`).
 - **A part, or the website.** The website belongs to the root (jwize,
   2026-11-04). A tile's page opened on its own is just that part: one slide,
-  no crumbs, no ways, no tabs, and a website icon. The icon opens the website,
-  rooted at the top tile, on that same page: every slide then shows its crumbs,
-  the words to step into and its section's tabs, every link stays in the
-  website, and back steps back
+  no crumbs, no tree, no siblings, and a website icon. The icon opens the
+  website, rooted at the top tile, on that same page: every slide then shows
+  its crumbs, the tree and the siblings, every link stays
+  in the website, and back steps back
   along the pages read, then out to the layer hosting the page first opened.
   In the hive, tiles walk as hexagons unless something is pinned: a tile's own
   pin (`opens <tile> as website`) opens its part; a pin on a top tile reaches

@@ -44,6 +44,7 @@ read (and, with a grant, write) this bucket with zero Hypercomb code.
 | Route | Auth | Checks | Responses |
 |---|---|---|---|
 | `GET/HEAD /<sig>` | none | 64 lowercase hex only | 200/206 (Range per BUD-01), 304 (If-None-Match), 404 plain, 416. `Cache-Control: public, max-age=31536000, immutable`, `ETag: "<sig>"`, Content-Type from R2 metadata else `application/octet-stream` |
+| `GET/HEAD /<sig>?held` | none | as `/<sig>` | a hit answers exactly as `/<sig>`; a miss answers **204** (no body, `Cache-Control: no-store`, `X-Reason: not held`) instead of 404. The same flag on the signed index, `GET /<sign('hive:indexes')>/<pubkey>?held`, answers a missing index 204. relay.js answers both the same way. See *The held probe* below |
 | `PUT /<sig>` | NIP-98 (kind 27235), `Authorization: Nostr <base64-event>` | schnorr sig + event id; `u` tag == full request URL; `method` tag PUT; `created_at` ±60s; `payload` tag verified **when present**; then always `sha256(body) == <sig>` | 201 stored · 200 already held (no rewrite, no quota) · 400 hash mismatch · 401 auth · 403 quota |
 | `PUT /upload` | Blossom BUD-02 (kind 24242) | schnorr sig + event id; `t` tag `upload`; some `x` tag == `sha256(body)`; `expiration` in future; `created_at` not in future | 200 blob descriptor `{url, sha256, size, type, uploaded}` (existing or fresh) · 401 · 403 quota |
 | `HEAD /upload` | Blossom BUD-06 preflight | valid 24242 auth whose `x` tag matches `X-SHA-256`; `X-Content-Length` vs quota; nothing stored, no grant minted | 200 would-accept · 400 malformed headers · 401 · 403 grant missing/expired · 413 over quota. Verdict rides `X-Reason` (HEAD has no body) |
@@ -55,6 +56,42 @@ declared sig — always computed server-side via `crypto.subtle`, never
 trusted) and writer-authorization (schnorr-verified nostr event). Idempotent
 by construction: same sig == same bytes, so an existing object returns 200
 without a rewrite. Bodies are never logged or echoed.
+
+### The held probe (2026-11-09)
+
+A browser prints every non-2xx answer as a red console error, and "do you
+hold this?" is asked of every host on every publish: the drain's pre-upload
+check, the share gate, the receipt audit, publish status, the content
+broker's read on a miss, and every read of a publisher's signed index (a home
+relay at a domain's apex keeps none by design). jwize, 2026-11-09: "we can't
+afford to ever have any errors popping up." So the question has its own
+spelling: `?held` on the address. A miss answers 204; a hit is unchanged. A
+query, not a header, so the probe stays a simple request with no preflight.
+A host that does not know the flag ignores it and answers 404 as before, so
+the hive asks it of every host and reads 204 and 404 as the same miss
+(host-sync.service.ts `#probe`, hive-pointer.ts `fetchHiveIndex`, which also
+remembers an index miss for five minutes).
+
+**A pool's listing is asked the same way.** `GET /<sign(meaning)>/?held`
+answers "no pool at this address" 204 instead of 404, on the worker, relay.js
+and the native host (which answers every miss at or under a signature 204
+when flagged); a listing that exists answers exactly as without the flag.
+Every word, name and record is an address a hive derives and asks of every
+host it follows, so that miss is the common answer: three names over twenty
+hosts was sixty console errors. The hive asks through ONE function,
+`sharing/pool-listing.ts` (`askPoolListing` / `readPoolListing`): it adds the
+flag, asks the same host the same address once at a time, and remembers a
+miss (204, 404 or 410) for five minutes. A new listing read goes through it —
+never a bare `fetch` of `/<pool>/`.
+
+**No route can forget the flag.** Each host shape also applies the rule once,
+at its outermost answer (worker `quietMiss`, relay.js `quietMisses`, the
+native host's `resolve_with`): any flagged GET or HEAD that would leave as a
+404 leaves as a 204, with what the 404 said in `X-Reason` (exposed to
+cross-origin readers). The readers that try two URL shapes for one atom
+(`readBySig`, `readFromHost`: `/<sig>` and `/content/<sig>`) and the package
+pool walk (`hypercomb-runtime/src/host-packages.ts`, which reads the reason
+to tell "no pool on this host" from "not this base") ask with it.
 
 The bucket is **flat from birth** — no legacy typed-dir layout ever lands in
 R2, so unlike relay.js there is no `__x__` fallback probing on reads.

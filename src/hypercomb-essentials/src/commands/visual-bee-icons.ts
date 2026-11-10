@@ -46,7 +46,7 @@ import type { VisualBeeRegistry, VisualBeeDescriptor } from './visual-bee-regist
 import { hasDecorationKind, defaultViewForSegments, defaultViewWithinSegments } from './decoration-kind-index.js'
 import { visualBeeIconSvg } from './visual-bee-icon-svg.js'
 import { resolveViewEntrance } from './view-entrance.js'
-import { VIEW_SPAWN_EFFECT } from '../presentation/tiles/view-spawn.js'
+import { VIEW_SPAWN_EFFECT, HEXAGONS, viewExitTarget, type ViewSpawn } from '../presentation/tiles/view-spawn.js'
 import { VIEW_ENTER_PREFIX, VIEW_OPEN_PREFIX, kindsOf } from '../presentation/tiles/viewer-walk.js'
 import { isBehaviorDormant } from '../sharing/behavior-enablement.js'
 
@@ -446,9 +446,9 @@ function dispatchViewAction(action: string, label: string | undefined): void {
   })
 }
 
-type LineageLike = { explorerSegments?: () => readonly string[] }
+type LineageLike = { explorerSegments?: () => readonly string[]; explorerReplace?: (segments: readonly string[]) => void }
 type NavigationLike = { goRaw?: (segments: readonly string[]) => void }
-type ViewModeLike = { mode?: string; setMode?: (next: string) => void }
+type ViewModeLike = EventTarget & { mode?: string; setMode?: (next: string) => void }
 
 /** Dispatch a click on an ENTER icon: go to the view's ENTRANCE and open the
  *  view there. Mirrors the websites launch group's activation — navigate
@@ -508,9 +508,9 @@ function dispatchEnterAction(action: string, label: string | undefined, prefix: 
   // entrance below is not where the participant was standing — for a
   // branch-scoped behaviour it can be several rings up — so a view that
   // wants to come back out where you came in has to be told now, while
-  // "here" still means here. Receivers gate on `view` (see view-spawn.ts);
-  // a view that ignores it simply closes onto the entrance as before.
-  EffectBus.emit(VIEW_SPAWN_EFFECT, { view: bee.view, mode: (vm.mode ?? '').trim(), segments: here })
+  // "here" still means here. Receivers gate on `view` (see view-spawn.ts).
+  const spawn: ViewSpawn = { view: bee.view, mode: (vm.mode ?? '').trim(), segments: here }
+  EffectBus.emit(VIEW_SPAWN_EFFECT, spawn)
 
   // Async only because the entrance is read from layers; the pair stays
   // ordered (navigate, then flip) so the renderer sees the entrance as its
@@ -518,7 +518,40 @@ function dispatchEnterAction(action: string, label: string | undefined, prefix: 
   void resolveViewEntrance(bee, [...here, label]).then(entrance => {
     nav.goRaw!(entrance)
     vm.setMode!(bee.view)
+    armWayBack(spawn, entrance, vm, lineage)
   })
+}
+
+/** COMING OUT SURFACES ON THE LAYER YOU ENTERED FROM (jwize 2026-11-07) —
+ *  for EVERY stepped-into view, owed by the dispatcher that did the walking,
+ *  not by each renderer. The tree and the website honour their spawn
+ *  themselves; every other view used to close onto its entrance, leaving the
+ *  participant on a page they never chose. The one-shot below reads the
+ *  moment the mode leaves the view: a flip to another view is a change of
+ *  face (stay armed); a hexagons exit while the explorer still stands on the
+ *  entrance goes back to the spawn surface and page; an exit from anywhere
+ *  else means the view moved the participant on purpose — the override — so
+ *  they stay. The surface is restored before the place, the way the tree and
+ *  the site do it, and the place follows with `explorerReplace` so the whole
+ *  reading still costs the one history entry that entered it. A view that
+ *  already restored its own spawn finds the explorer off the entrance and the
+ *  one-shot stands down — the two never fight. */
+function armWayBack(spawn: ViewSpawn, entrance: readonly string[], vm: ViewModeLike, lineage: LineageLike | undefined): void {
+  if (typeof vm.addEventListener !== 'function') return
+  const onChange = (): void => {
+    const next = (vm.mode ?? '').trim()
+    if (next === spawn.view) return
+    if ((next || HEXAGONS) !== HEXAGONS) return   // another face took over; the exit is still to come
+    vm.removeEventListener('change', onChange)
+    const current = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    const target = viewExitTarget(spawn, entrance, current, next)
+    if (!target) return
+    if (target.mode !== HEXAGONS) vm.setMode?.(target.mode)
+    if (current.length === target.segments.length && current.every((s, i) => s === target.segments[i])) return
+    if (typeof lineage?.explorerReplace === 'function') lineage.explorerReplace([...target.segments])
+    else window.ioc.get<NavigationLike>('@hypercomb.social/Navigation')?.goRaw?.([...target.segments])
+  }
+  vm.addEventListener('change', onChange)
 }
 
 /** Dispatch a click on an ASLEEP icon. Entering the view is exactly what it

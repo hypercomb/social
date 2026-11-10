@@ -72,9 +72,11 @@ const rules: Record<Layer, LayerRule> = {
       s === 'pixi.js' ||
       s.startsWith('pixi.js/') ||
       s === 'nostr-tools' ||
-      s.startsWith('nostr-tools/'),
+      s.startsWith('nostr-tools/') ||
+      s === 'three' ||
+      s.startsWith('three/'),
     description:
-      '@hypercomb/essentials may only import @hypercomb/core, pixi.js, nostr-tools',
+      '@hypercomb/essentials may only import @hypercomb/core, pixi.js, nostr-tools, three',
   },
   shared: {
     allowed: (s) =>

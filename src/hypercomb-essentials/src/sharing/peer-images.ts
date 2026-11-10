@@ -21,6 +21,7 @@
 
 import { fetchHiveIndex } from './hive-pointer.js'
 import { layerProps, picturesKey, picturesPoolAddress } from './picture-pools.js'
+import { askPoolListing } from './pool-listing.js'
 
 const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
@@ -131,20 +132,14 @@ export const meaningPoolImageCandidates = async (
   const publishersByHost = new Map<string, string[]>()
   const ask = async (host: string): Promise<void> => {
     if (mode === 'scan' && poolQuiet(host)) return
-    try {
-      const response = await fetch(`${hostUrl(host)}/${address}/`, {
-        cache: 'no-store',
-        signal: AbortSignal.timeout(2_500),
-      })
-      if (!response.ok) {
-        if (response.status === 404 || response.status === 410) notePoolMiss(host)
-        return
-      }
-      const publishers = listedNames(await response.text())
-      poolPublishers.add(host)
-      poolQuietUntil.delete(host)
-      if (publishers.length) publishersByHost.set(host, publishers)
-    } catch { notePoolMiss(host) }
+    // Asked the one quiet way (pool-listing.ts): a host with no pool for this
+    // name says so without a console error, and is not asked again for a while.
+    const said = await askPoolListing(hostUrl(host), address, { timeoutMs: 2_500 })
+    if (said.state !== 'listed') { notePoolMiss(host); return }
+    const publishers = listedNames(said.text)
+    poolPublishers.add(host)
+    poolQuietUntil.delete(host)
+    if (publishers.length) publishersByHost.set(host, publishers)
   }
   await Promise.all(hosts.map(host => mode === 'scan' ? afterPool(host, () => ask(host)) : ask(host)))
 

@@ -1864,6 +1864,13 @@ async function servePoolListing(request, env, sig) {
   // A NAME'S PICTURE POOL (its publishers' keys, read the same way). So is
   // an EVENT'S RSVP POOL an organizer opened here, empty or not.
   if (!listed && !await isAttestPool(env, sig) && !await isPicturePool(env, sig) && !await isRsvpPool(env, sig)) {
+    // `?held` (2026-11-09): every word, name and record is an address a hive
+    // derives and asks of every host it follows, so "no pool here" is the
+    // common answer — asked with the flag it is a quiet 204, the same flag
+    // and the same meaning as a sig that is not held.
+    if (new URL(request.url).searchParams.has('held')) {
+      return new Response(null, { status: 204, headers: { ...CORS, 'Cache-Control': 'no-store', 'X-Reason': 'no pool at this address' } })
+    }
     return new Response(request.method === 'HEAD' ? null : 'no pool at this address\n', {
       status: 404, headers: { ...headers, 'X-Reason': 'no pool at this address' },
     })
@@ -5804,6 +5811,11 @@ async function putHive(request, env, pubkey, ctx) {
 // serving it needs no auth and grants no trust.
 async function getHive(request, env, pubkey) {
   const raw = await heldIndexRaw(env, pubkey)
+  // `?held` (2026-11-09): a miss is a quiet 204, not a 404 the browser prints
+  // as a red error — the same probe flag the signature branch answers.
+  if (raw == null && new URL(request.url).searchParams.has('held')) {
+    return new Response(null, { status: 204, headers: { ...CORS, 'Cache-Control': 'no-store', 'X-Reason': 'no hive index for this key' } })
+  }
   if (raw == null) return text(404, 'no hive index for this key')
   return new Response(raw, {
     status: 200,
@@ -6746,8 +6758,26 @@ export default {
       }
       if (card) response = cardDoorUnavailable(request)
     }
-    return untransformed(response)
+    return untransformed(await quietMiss(request, response))
   },
+}
+
+// EVERY MISS ASKED WITH `?held` IS QUIET (2026-11-09: "we really need to make
+// this foolproof"). The signature branch, the signed index and the pool
+// listing each answer their own miss 204 when flagged; this is the same rule
+// for every read route there is or will be — `/content/<sig>`, a pool member,
+// a path nobody thought of — so no branch can be the one that forgot. A
+// flagged GET or HEAD that would leave as a 404 leaves as a 204 with no body,
+// never cached, saying what the 404 said in X-Reason (its first line) and
+// nothing more. Unflagged, nothing changes.
+async function quietMiss(request, response) {
+  if (response?.status !== 404 || (request.method !== 'GET' && request.method !== 'HEAD')) return response
+  if (!new URL(request.url).searchParams.has('held')) return response
+  let said = response.headers.get('x-reason') || ''
+  if (!said && !/^\s*text\/html\b/i.test(response.headers.get('content-type') || '')) {
+    try { said = ((await response.text()).split(/\r?\n/, 1)[0] || '').trim().slice(0, 160) } catch { /* no body */ }
+  }
+  return new Response(null, { status: 204, headers: { ...CORS, 'Cache-Control': 'no-store', 'X-Reason': said.replace(/[^\x20-\x7e]/g, '') || 'not held' } })
 }
 
 // NOTHING REWRITES A PAGE ON ITS WAY OUT. The edge offers to "improve" the
@@ -7050,6 +7080,19 @@ const router = {
       const isAlias = !!sigMatch[1]
       const named = pathname.length > pathname.indexOf(sigMatch[2]) + 64
       if (method === 'GET' || method === 'HEAD') {
+        // THE PROBE (2026-11-09: "we can't afford to ever have any errors
+        // popping up"). A browser prints every 404 as a red console error,
+        // and "do you hold this?" is asked of every host before an upload, by
+        // the share gate and by publish status — so the answer to a miss was
+        // a wall of errors on every publish. `?held` asks that question: a
+        // hit answers exactly as without it, a miss answers 204 (no body,
+        // never cached). A query flag, not a header, so a probe stays a
+        // simple request with no preflight. Hosts that ignore it answer 404
+        // as before, so a hive may ask it of any host.
+        const probe = requestUrl.searchParams.has('held')
+        const miss = (res) => probe && res.status === 404
+          ? new Response(null, { status: 204, headers: { ...CORS, 'Cache-Control': 'no-store', 'X-Reason': 'not held' } })
+          : res
         // Everything serves from the root — one flat heap, one URL shape.
         // Content-addressed bytes carry no type, so the type comes from the
         // REQUEST: a module import declares itself (Sec-Fetch-Dest: script /
@@ -7082,20 +7125,20 @@ const router = {
         if (heap.status === 404 && !isAlias && !named && servesOrigin(env, requestUrl.hostname)) {
           const held = await fetch(request)
           if (held.ok && !String(held.headers.get('content-type') || '').includes('text/html')) return held
-          return heap
+          return miss(heap)
         }
         // A front-door apex also serves the shim's OWN bytes (its pinned
         // bootstrap, its packages), which live with the card, not in the heap.
         // A claimed apex is one too; only a miss on a host the var does not
         // know asks the claims. A card-door origin never does: the card lives
         // at host.<zone>, and its page there would be other code here.
-        if (heap.status === 404 && (siteBindings(env)[requestUrl.hostname.toLowerCase()]?.frontDoor
+        if (heap.status === 404 && !probe && (siteBindings(env)[requestUrl.hostname.toLowerCase()]?.frontDoor
           || servesHostDoor(env, requestUrl.hostname)
           || await claimedFrontDoor(env, requestUrl.hostname)
           || (await route()).hostDoor) && !await cardDoorAt()) {
           return serveFrontDoor(request, env)
         }
-        return heap
+        return miss(heap)
       }
       if (method === 'PUT' && !isAlias && !named) return putSig(request, env, sigMatch[2])
       return text(405, 'method not allowed')

@@ -119,6 +119,17 @@ export const resolveArrival = (
 
 export const ARRIVAL_GRACE_MS = 2500
 
+// THE BACKSTOP (2026-11-09: protocol.hypercomb.com and revolucion.hypercomb.com
+// stayed black). The grace above only starts when `loader:bees-done` is said,
+// and that is said only when a background load finishes. A plan whose bees are
+// all boot bees, already in, leaves nothing to load: no `bees-done`, no
+// verdict from a layer read that came back cold, and the rest of the package
+// sleeps forever — no renderer, no hexagons. So the guard also counts from its
+// own start: no verdict in ARRIVAL_BACKSTOP_MS wakes everything, whatever the
+// loader did or did not say. A view that opens is still the plan working.
+
+export const ARRIVAL_BACKSTOP_MS = 8000
+
 type BusLike = { on<T>(effect: string, handler: (payload: T) => void): () => void }
 type TimersLike = { set: (run: () => void, ms: number) => unknown; clear: (handle: unknown) => void }
 
@@ -128,14 +139,17 @@ export const guardArrival = (
   wake: (reason: 'hexagons' | 'stalled') => void,
   graceMs = ARRIVAL_GRACE_MS,
   timers: TimersLike = { set: (run, ms) => setTimeout(run, ms), clear: handle => clearTimeout(handle as ReturnType<typeof setTimeout>) },
+  backstopMs = ARRIVAL_BACKSTOP_MS,
 ): (() => void) => {
   let done = false
   let timer: unknown = null
+  let backstop: unknown = null
   const offs: Array<() => void> = []
   const stop = (): void => {
     if (done) return
     done = true
     if (timer !== null) timers.clear(timer)
+    if (backstop !== null) timers.clear(backstop)
     for (const off of offs.splice(0)) off()
   }
   const finish = (reason: 'hexagons' | 'stalled' | null): void => {
@@ -155,6 +169,7 @@ export const guardArrival = (
     if (done || timer !== null) return
     timer = timers.set(() => finish('stalled'), graceMs)
   })
+  if (!done) backstop = timers.set(() => finish('stalled'), backstopMs)
   return stop
 }
 

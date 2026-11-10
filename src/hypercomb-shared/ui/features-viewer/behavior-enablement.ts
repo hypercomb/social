@@ -110,3 +110,48 @@ export function setKindGlobalOn(kind: string, on: boolean): void {
 function write(key: string, list: string[]): void {
   try { localStorage.setItem(key, JSON.stringify(list)) } catch { /* private-browsing */ }
 }
+
+// ── A WORD'S LIGHT, for the shell's own surfaces ─────────────────────────
+//
+// Every word is a behaviour with a light of its own, `word:<word>` (the
+// essentials reader: commands/word-enablement.ts). The build's own words are
+// lit until switched off, and a switch-off is exactly an entry on the
+// off-list, which `setKindGlobalOn` above writes in the same gesture as the
+// on-list. The shell's surfaces that belong to a word — the chat window, the
+// rail's meeting and chat buttons, the bar's hosts and comfy launchers — are
+// all the build's, so this one reading is all they need; agreed with the
+// reader by key, never by import, like everything else in this lens.
+
+export const WORD_KIND_PREFIX = 'word:'
+
+/** True when the participant switched this word off in Beehaviors. Never on
+ *  a published visitor shell, which has no roster to consult. */
+export function isWordSwitchedOff(word: string): boolean {
+  const w = String(word ?? '').trim().toLowerCase().replace(/^\/+/, '')
+  if (!w) return false
+  try { if (document.documentElement.dataset['hypercombMode'] === 'visitor') return false } catch { /* no document */ }
+  return readGlobalOffKinds().includes(WORD_KIND_PREFIX + w)
+}
+
+/** The refusal a word's surface says when asked to open while it is off —
+ *  the same keys and the same press the essentials door uses, so the two
+ *  read as one voice. */
+export function sayWordSwitchedOff(word: string): void {
+  const w = String(word ?? '').trim().toLowerCase().replace(/^\/+/, '')
+  if (!w) return
+  const i18n = (globalThis as { ioc?: { get?: (key: string) => unknown } }).ioc
+    ?.get?.('@hypercomb.social/I18n') as { t?: (key: string, params?: Record<string, string>) => string } | undefined
+  const say = (key: string, fallback: string, params?: Record<string, string>): string => {
+    const said = i18n?.t?.(key, params)
+    return said && said !== key ? said : fallback
+  }
+  EffectBus.emit('toast:show', {
+    type: 'info',
+    title: '/' + w,
+    message: say('words.dark', `"${w}" is switched off. Its light is in Beehaviors, under Everywhere.`, { word: w }),
+    actionLabel: say('words.dark.open', 'Open Beehaviors'),
+    actionEffect: 'features:roster-open',
+    actionPayload: { query: w },
+    duration: 6000,
+  })
+}

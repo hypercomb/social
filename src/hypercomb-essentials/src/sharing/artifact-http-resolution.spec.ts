@@ -80,7 +80,7 @@ describe('typed artifacts over immutable HTTP', () => {
     // One timeout for the host, never a second at another URL layout. (The
     // shipped byte mirrors are asked too since 2026-10-12 — a loopback page
     // resolves where every install does — each once, at its own address.)
-    const asked = fetchMock.mock.calls.map(([url]) => String(url))
+    const asked = fetchMock.mock.calls.map(([url]) => String(url).replace(/\?held$/, ''))
     expect(asked.filter(url => url.includes('offline.example'))).toHaveLength(1)
     expect(new Set(asked).size).toBe(asked.length)
   })
@@ -101,7 +101,7 @@ describe('typed artifacts over immutable HTTP', () => {
     expect(await broker.fetchBySig(sigA, 'resource')).toBeNull()
     const afterFirst = fetchMock.mock.calls.length
     expect(await broker.fetchBySig(sigB, 'resource')).toBeNull()
-    const urls = fetchMock.mock.calls.map(([url]) => String(url))
+    const urls = fetchMock.mock.calls.map(([url]) => String(url).replace(/\?held$/, ''))
     expect(urls.some(url => url.includes('hypercomb.io'))).toBe(false)
     expect(urls.some(url => url.includes('dead.example'))).toBe(true)
     expect(urls.slice(afterFirst).some(url => url.includes('dead.example'))).toBe(false)
@@ -121,7 +121,7 @@ describe('typed artifacts over immutable HTTP', () => {
     const sigE = 'e'.repeat(64)
     expect(await broker.fetchBySig(sigA, 'bee')).toBeNull()
     expect(await broker.fetchBySig(sigB, 'bee')).toBeNull()
-    const first = fetchMock.mock.calls.map(([url]) => String(url))
+    const first = fetchMock.mock.calls.map(([url]) => String(url).replace(/\?held$/, ''))
     const publisher = first.filter(url => url.includes('publisher.example'))
     expect(publisher.length).toBeGreaterThan(0)
     expect(publisher.every(url => url.includes(sigA))).toBe(true)
@@ -135,7 +135,7 @@ describe('typed artifacts over immutable HTTP', () => {
       broker.fetchBySig(left, 'bee'),
       broker.fetchBySig(right, 'bee'),
     ])).toEqual([null, null])
-    const burst = fetchMock.mock.calls.slice(beforeBurst).map(([url]) => String(url))
+    const burst = fetchMock.mock.calls.slice(beforeBurst).map(([url]) => String(url).replace(/\?held$/, ''))
     const burstPublisher = burst.filter(url => url.includes('publisher.example'))
     expect(burstPublisher).toEqual([])
     expect(burst.some(url => url === `https://hypercomb.com/${left}`)).toBe(true)
@@ -143,13 +143,13 @@ describe('typed artifacts over immutable HTTP', () => {
 
     broker.noteDomainsForSig(sigC, ['publisher.example'])
     expect(await broker.fetchBySig(sigC, 'bee')).toBeNull()
-    expect(fetchMock.mock.calls.map(([url]) => String(url)).some(url => url === `https://publisher.example/${sigC}`)).toBe(true)
+    expect(fetchMock.mock.calls.map(([url]) => String(url).replace(/\?held$/, '')).some(url => url === `https://publisher.example/${sigC}`)).toBe(true)
 
     broker.noteDomain('publisher.example')
     expect(await broker.fetchBySig(sigD, 'bee')).toBeNull()
-    expect(fetchMock.mock.calls.map(([url]) => String(url)).some(url => url === `https://publisher.example/${sigD}`)).toBe(true)
+    expect(fetchMock.mock.calls.map(([url]) => String(url).replace(/\?held$/, '')).some(url => url === `https://publisher.example/${sigD}`)).toBe(true)
     expect(await broker.fetchBySig(sigE, 'bee')).toBeNull()
-    expect(fetchMock.mock.calls.map(([url]) => String(url)).some(url => url.includes('publisher.example') && url.includes(sigE))).toBe(false)
+    expect(fetchMock.mock.calls.map(([url]) => String(url).replace(/\?held$/, '')).some(url => url.includes('publisher.example') && url.includes(sigE))).toBe(false)
   })
 
   it('collapses two spellings of one host into one fetch source', () => {
@@ -176,8 +176,9 @@ describe('typed artifacts over immutable HTTP', () => {
     const resolved = await broker.fetchBySig(sig, 'bee')
 
     expect(resolved && [...resolved]).toEqual([...bytes])
+    // The flat read asks `?held`: a miss there is a quiet 204, never a red 404.
     expect(fetchMock).toHaveBeenCalledWith(
-      `https://artifacts.example/${sig}`,
+      `https://artifacts.example/${sig}?held`,
       expect.objectContaining({ cache: 'default' }),
     )
     expect(writeBeeBytes).toHaveBeenCalledWith(sig, expect.any(Uint8Array))

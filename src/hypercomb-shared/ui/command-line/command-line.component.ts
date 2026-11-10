@@ -9,6 +9,7 @@ import type { MovementService } from '../../core/movement.service'
 import type { Navigation } from '../../core/navigation'
 import type { ScriptPreloader } from '@hypercomb/runtime/script-preloader'
 import type { CellSuggestionProvider } from '../../core/cell-suggestion.provider'
+import { namesBeyond } from '../../core/ever-made'
 import type { CompletionUtility, CompletionContext } from '@hypercomb/shared/core/completion-utility'
 import { fromRuntime } from '../../core/from-runtime'
 // Folder-based tag persistence retired. TagOp type is local-only now.
@@ -756,6 +757,19 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     get('@hypercomb.social/CellSuggestionProvider') as EventTarget,
     () => this.cellProvider.suggestions()
   )
+  /** Every name this hive ever made, beyond the level — what a name being typed
+   *  completes from (core/ever-made.ts). Its own signal: the level's list keeps
+   *  its identity when only this one moves. */
+  private readonly everNames$ = fromRuntime(
+    get('@hypercomb.social/CellSuggestionProvider') as EventTarget,
+    () => this.cellProvider.everMade()
+  )
+  /** The first typed name is the first reason to want the vocabulary — never
+   *  at boot, where it would be a whole-hive read for nothing. */
+  readonly #wantEverMade = effect(() => {
+    const ctx = this.context()
+    if (ctx.active && ctx.mode === 'action' && ctx.normalized) this.cellProvider.wantEverMade()
+  })
   /** Reactive master tag-name list. Bridged so tag intellisense re-reads the
    *  list the moment the (async) registry load finishes — not only after the
    *  first tag mutation. Loaded on boot in ngAfterViewInit. */
@@ -1760,10 +1774,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return cells.filter(n => n.startsWith(leaf))
     }
 
-    // when in a sub-path (e.g. "abc/"), show only cells at that level
+    // when in a sub-path (e.g. "abc/"), show the cells at that level — then, for
+    // a name being typed, every name this hive ever made (it makes the tile
+    // there just as it would here, so the same word is the same tile).
     if (subPath.length > 0) {
       if (!leaf) return cells
-      return cells.filter(n => n.startsWith(leaf))
+      const here = cells.filter(n => n.startsWith(leaf))
+      return ctx.mode === 'action' ? [...here, ...namesBeyond(leaf, here, this.everNames$())] : here
     }
 
     // at root level: merge cells + actions, deduplicated
@@ -1782,7 +1799,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     if (!ctx.normalized) return merged
 
-    return merged.filter(n => n.startsWith(ctx.normalized))
+    // The level and the verbs first, as ever — then every other name this hive
+    // ever made, on any page or none, so a name already spoken is completed
+    // rather than re-spelled (and a typo of it never becomes a second tile).
+    const matched = merged.filter(n => n.startsWith(ctx.normalized))
+    return ctx.mode === 'action' ? [...matched, ...namesBeyond(ctx.normalized, matched, this.everNames$())] : matched
   })
 
   public readonly showCompletions = computed<boolean>(() => {
@@ -3218,6 +3239,18 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    * an ambiguity or pathway choice was surfaced, a destructive reading armed
    * its second Enter, or the actions executed in word order.
    */
+  /** Does the line start with a word the census knows but Beehaviors has
+   *  switched off? Read off the census row (`dark`, set by the drone's one
+   *  presentation seam) — never decided here. */
+  #leadsWithDarkWord(text: string): boolean {
+    const first = text.trim().replace(/^\/+/, '').split(/\s+/, 1)[0]?.toLowerCase() ?? ''
+    if (!first) return false
+    const drone = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as
+      { entries?(): readonly { name: string; aliases?: readonly string[]; dark?: boolean }[] } | undefined
+    const row = drone?.entries?.().find(entry => entry.name === first || entry.aliases?.includes(first))
+    return row?.dark === true
+  }
+
   #commitUtterance(text: string): boolean {
     // A word that keeps its arguments verbatim (`QueenBee.rawArgs`) is not a
     // sentence. Read as one, `models request … a planner that holds forty
@@ -3244,6 +3277,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
 
     if (!reading.actions.length) {
+      // A WORD SWITCHED OFF in Beehaviors never lights from prose — but typed
+      // as the line's first word it was meant, and "isn't a command" would be
+      // a lie about a word that is only off. The reading lets go of it, and
+      // the slash door refuses it out loud with the way to its light
+      // (essentials commands/word-enablement.ts).
+      if (this.#leadsWithDarkWord(typed)) return false
       // Grammar without a behaviour is inert. It must not fall through to
       // tile creation, offer a creation pathway, or enter command history:
       // none of those are evidence that an action ran.

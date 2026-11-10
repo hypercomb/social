@@ -15,4 +15,5 @@ export function normalizeAddress(value) {
 }
 
 /** The meaning an address's messages are filed under; the pool is the sha256 of this. */
-export const poolMeaning = (address, folder = 'box') => (folder === 'sent' ? `mail-sent:${address}` : `mail:${address}`)
+export const poolMeaning = (address, folder = 'box') =>
+  folder === 'sent' ? `mail-sent:${address}` : folder === 'drafts' ? `mail-draft:${address}` : `mail:${address}`

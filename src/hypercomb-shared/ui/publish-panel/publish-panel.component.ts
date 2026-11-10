@@ -40,13 +40,11 @@
 // text match) are in publish-apps.ts.
 
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
-import { ChangeDetectionStrategy, Component, computed, effect, signal, type OnDestroy } from '@angular/core'
+import { ChangeDetectionStrategy, Component, computed, effect, signal, viewChild, type ElementRef, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { signalSession } from '../window-session'
-import { isTransientMode } from '../../core/view-mode.service'
 import { appsOn, hasChanges, matchesQuery, scopeState, wantAfterPress, zonesToMove, type ScopeState } from './publish-apps'
 
 // Mirrors of the essentials read-model shapes (shared cannot import
@@ -106,6 +104,28 @@ interface RowWord {
   kind: 'busy' | 'changed' | 'gone'
 }
 
+/** The tile tree — the hive's one tile list, the same rows the AI chat's left
+ *  sidebar draws. It lives in essentials (assistant/agent-tiles-rail.ts) and
+ *  shared must never import essentials, so it arrives structurally through the
+ *  factory it registers in IoC. */
+type RailPickLike = { readonly key: string; readonly path: readonly string[]; readonly name: string }
+type TilesRailLike = {
+  onSubjectChanged: (subject: RailPickLike | null) => void
+  readonly subject: RailPickLike | null
+  mount(host: HTMLElement): void
+  clearSubject(): void
+  dispose(): void
+}
+type TilesRailFactoryLike = {
+  create?: (profile?: {
+    readonly walk?: boolean
+    readonly chats?: boolean
+    readonly choose?: boolean
+    readonly badge?: (row: { readonly name: string; readonly segments: readonly string[] }) => number
+  }) => TilesRailLike
+}
+const RAIL_KEY = '@diamondcoreprocessor.com/AgentTilesRailFactory'
+
 const isMultiPress = (event: Event): boolean => {
   const press = event as MouseEvent | KeyboardEvent
   return press.ctrlKey || press.metaKey
@@ -115,7 +135,7 @@ const isMultiPress = (event: Event): boolean => {
   selector: 'hc-publish-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
   standalone: true,
-  imports: [TranslatePipe, DockInsetDirective, HcDockedPanelDirective],
+  imports: [TranslatePipe, HcDockedPanelDirective],
   templateUrl: './publish-panel.component.html',
   styleUrls: ['./publish-panel.component.scss'],
 })
@@ -171,11 +191,16 @@ export class PublishPanelComponent implements OnDestroy {
   /** The selected-apps run while it runs (`publish:run-many`). */
   readonly batch = signal<{ done: number; total: number; failed: number } | null>(null)
 
-  /** OVER A VIEW IT IS A POPUP (jwize 2026-10-10) — `p` reaches this panel
-   *  from inside a view, and there it floats on the page: it reserves no edge
-   *  (the view keeps its width under it) and the scss rounds all four corners.
-   *  The same question the shells ask for `body.hc-view-covered`. */
-  readonly overView = signal(false)
+  /** THE TILE TREE (left sidebar). Pressing a tile narrows the creations to
+   *  that tile's branch; null = every creation. */
+  readonly railHost = viewChild<ElementRef<HTMLDivElement>>('publishRail')
+  readonly focus = signal<readonly string[] | null>(null)
+  #rail: TilesRailLike | null = null
+
+  clearFocus(): void {
+    this.focus.set(null)
+    this.#rail?.clearSubject()
+  }
 
   #cleanups: (() => void)[] = []
 
@@ -332,8 +357,16 @@ export class PublishPanelComponent implements OnDestroy {
     for (const [key, was] of this.#kept()) if (!found.has(key)) found.set(key, was)
     return [...found.values()]
       .filter(row => matchesQuery(text, this.appName(row)))
+      .filter(row => this.#underFocus(row))
       .sort((a, b) => Number(b.key === this.currentKey()) - Number(a.key === this.currentKey()) || a.path.localeCompare(b.path))
   })
+
+  /** Is this creation the focused tile, or somewhere under it? */
+  #underFocus(row: PublishRow): boolean {
+    const focus = this.focus()
+    if (!focus || focus.length === 0) return true
+    return focus.every((part, at) => row.segments[at] === part)
+  }
 
   /** An app's name in the list — its path, so two tiles with one name under
    *  different pages never read as the same thing twice. */
@@ -588,14 +621,27 @@ export class PublishPanelComponent implements OnDestroy {
     window.addEventListener('keyup', onKeyUp)
     this.#cleanups.push(() => window.removeEventListener('keyup', onKeyUp))
 
-    const viewMode = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
-      ?.get<EventTarget & { mode?: string }>('@hypercomb.social/ViewMode')
-    if (viewMode?.addEventListener) {
-      const onView = (): void => this.overView.set(isTransientMode(viewMode.mode ?? ''))
-      onView()
-      viewMode.addEventListener('change', onView)
-      this.#cleanups.push(() => viewMode.removeEventListener('change', onView))
-    }
+    // The left sidebar. Its host exists only while the window is open, so
+    // this re-fires as the window comes and goes; the rail is made once and
+    // re-mounted. Essentials may register the factory AFTER this window is up
+    // (web loads its bees from OPFS), so a miss waits on the key.
+    effect(() => {
+      const host = this.railHost()?.nativeElement
+      if (!host) return
+      if (this.#rail) { this.#rail.mount(host); return }
+      const registry = (window as { ioc?: { get?(k: string): unknown; whenReady?(k: string, cb: (v: unknown) => void): void } }).ioc
+      const bring = (factory: TilesRailFactoryLike | undefined): void => {
+        if (this.#rail || !factory?.create) return
+        const rail = factory.create({ walk: true, chats: false, choose: false, badge: () => 0 })
+        rail.onSubjectChanged = subject => this.focus.set(subject ? [...subject.path] : null)
+        this.#rail = rail
+        const live = this.railHost()?.nativeElement
+        if (live) rail.mount(live)
+      }
+      const now = registry?.get?.(RAIL_KEY) as TilesRailFactoryLike | undefined
+      if (now) bring(now)
+      else registry?.whenReady?.(RAIL_KEY, value => bring(value as TilesRailFactoryLike))
+    })
 
     // THE GROUPS come from the hosts drone, which owns the domains they name.
     this.#cleanups.push(EffectBus.on<{ groups?: unknown }>('hosts:render', (p) => {
@@ -649,6 +695,8 @@ export class PublishPanelComponent implements OnDestroy {
 
   ngOnDestroy(): void {
     for (const c of this.#cleanups) c()
+    this.#rail?.dispose()
+    this.#rail = null
   }
 
   // ── the intents ───────────────────────────────────────────────────
@@ -666,6 +714,7 @@ export class PublishPanelComponent implements OnDestroy {
     if (this.#kept().size > 0) this.#kept.set(new Map())
     if (this.chosen().size > 0) this.chosen.set(new Set())
     if (this.drill()) this.drill.set(null)
+    if (this.focus()) this.clearFocus()
     this.cancelNaming()
     if (this.query() !== '') this.query.set('')
   }

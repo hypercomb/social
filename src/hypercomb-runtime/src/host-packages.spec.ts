@@ -18,7 +18,8 @@ type Served = Record<string, unknown>
 /** A fetch that answers only the URLs it was given; everything else 404s. */
 const serving = (routes: Served): ReturnType<typeof vi.fn> =>
   vi.fn(async (url: string) => {
-    const body = routes[String(url)]
+    // The walk asks with `?held`; a host answers the same listing either way.
+    const body = routes[String(url).replace(/\?held$/, '')]
     if (body === undefined) return { ok: false, status: 404, headers: new Headers() } as unknown as Response
     return {
       ok: true,
@@ -177,8 +178,8 @@ describe('a zone that publishes nothing — asked quietly', () => {
 
     // One listing per own base: no `00000000`, no content.<zone>.
     expect(asked(fetchMock)).toEqual([
-      expect.stringMatching(/^https:\/\/site\.example\/[0-9a-f]{64}\/$/),
-      expect.stringMatching(/^https:\/\/site\.example\/content\/[0-9a-f]{64}\/$/),
+      expect.stringMatching(/^https:\/\/site\.example\/[0-9a-f]{64}\/\?held$/),
+      expect.stringMatching(/^https:\/\/site\.example\/content\/[0-9a-f]{64}\/\?held$/),
     ])
   })
 
@@ -252,7 +253,7 @@ describe("a host deployed before the empty listing — its final 404", () => {
       ok: false,
       status: 404,
       headers: new Headers(),
-      text: async () => said[String(url)] ?? 'Not Found',
+      text: async () => said[String(url).replace(/\?held$/, '')] ?? 'Not Found',
     }) as unknown as Response)
 
   it("stops at the worker's `no pool at this address`: one request", async () => {
@@ -261,7 +262,7 @@ describe("a host deployed before the empty listing — its final 404", () => {
     vi.stubGlobal('fetch', fetchMock)
 
     expect(await askHostPackages('host.example')).toEqual({ packages: [], answered: true })
-    expect(fetchMock.mock.calls.map(call => String(call[0]))).toEqual([`https://host.example/${pool}/`])
+    expect(fetchMock.mock.calls.map(call => String(call[0]))).toEqual([`https://host.example/${pool}/?held`])
   })
 
   it("reads the live relay's `pool not held` as the same final answer", async () => {
@@ -285,7 +286,7 @@ describe("a host deployed before the empty listing — its final 404", () => {
       vi.advanceTimersByTime(16 * 60_000)
       fetchMock.mockClear()
       expect(await headPackage('host.example')).toBeNull()
-      expect(fetchMock.mock.calls.map(call => String(call[0]))).toEqual([`https://host.example/content/${pool}/`])
+      expect(fetchMock.mock.calls.map(call => String(call[0]))).toEqual([`https://host.example/content/${pool}/?held`])
     } finally { vi.useRealTimers() }
   })
 })

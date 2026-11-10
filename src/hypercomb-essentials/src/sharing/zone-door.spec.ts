@@ -55,6 +55,33 @@ describe('the write door is the zone root', () => {
   })
 })
 
+describe('a site named beside its zone is not a write door (2026-11-09)', () => {
+  // protocol.hypercomb.com was named as a domain of /protocol beside
+  // hypercomb.com; every publish PUT to the site, the worker refused it at the
+  // preflight (published sites are read-only), and the console filled with
+  // errors. The zone serves the site from the same store.
+  it('folds a site into the zone named with it, keeping order and dropping duplicates', () => {
+    expect(zone.writeDoorsOf(['protocol.hypercomb.com', 'hypercomb.com'])).toEqual(['hypercomb.com'])
+    expect(zone.writeDoorsOf(['hypercomb.com', 'protocol.hypercomb.com', 'jwize.com'])).toEqual(['hypercomb.com', 'jwize.com'])
+    expect(zone.writeDoorsOf(['a.b.hypercomb.com', 'b.hypercomb.com', 'hypercomb.com'])).toEqual(['hypercomb.com'])
+  })
+
+  it('a site with no zone beside it stays as named', () => {
+    expect(zone.writeDoorsOf(['protocol.hypercomb.com'])).toEqual(['protocol.hypercomb.com'])
+    expect(zone.siteZoneOf('protocol.hypercomb.com', ['jwize.com'])).toBe('protocol.hypercomb.com')
+  })
+
+  it('only a whole label folds — xhypercomb.com is a zone of its own', () => {
+    expect(zone.writeDoorsOf(['xhypercomb.com', 'hypercomb.com'])).toEqual(['xhypercomb.com', 'hypercomb.com'])
+  })
+
+  it('a content face folds first, and loopback or ported machines never fold', () => {
+    expect(zone.writeDoorsOf(['content.hypercomb.com', 'protocol.hypercomb.com'])).toEqual(['hypercomb.com'])
+    expect(zone.writeDoorsOf(['a.localhost:4291', 'localhost:4291'])).toEqual(['a.localhost:4291', 'localhost:4291'])
+    expect(zone.siteZoneOf('box.example.com', ['example.com:8443'])).toBe('box.example.com')
+  })
+})
+
 describe('reads ask zone roots only — never the retired content face', () => {
   it('folds a content face to its zone and asks nothing else', () => {
     expect(zone.readDoorsOf(['pluginthematrix.com'])).toEqual(['pluginthematrix.com'])
