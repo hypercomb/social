@@ -1,6 +1,6 @@
 // say.cjs — speak one sentence to the hive, the way a participant types it.
 //
-//   node scripts/bridge/say.cjs "<sentence>" [--file <path>]... [--listen <ms>]
+//   node scripts/bridge/say.cjs "<sentence>" [--file <path>]... [--listen <ms>] [--quiet <ms>]
 //
 // The sentence goes to the hive's own command line (the remote door), where
 // the same words a person types run under the same admission rules. Nothing
@@ -17,6 +17,13 @@
 // while the line ran (activity lines and toasts) — which is how a session
 // reads: a word that answers (`opens meetups`) answers here.
 //
+// ANSWERED WHEN THE SENTENCE IS DONE. Said plainly, the reply comes once the
+// line has finished and the hive has been quiet for a moment (--quiet, 300 ms),
+// instead of after a fixed second and a half. --listen is then only the
+// ceiling. A sentence given its own --listen is held for that whole window, as
+// it always was (a publish that keeps speaking); add --quiet to stop it early
+// too, or --quiet 0 to hold the default window.
+//
 // Git Bash rewrites a leading `/` into a Windows path: run with
 // MSYS_NO_PATHCONV=1, or say the word without its slash.
 
@@ -31,15 +38,19 @@ const args = process.argv.slice(2)
 let sentence = ''
 const files = []
 let listen = 1500
+let listenGiven = false
+let quiet
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--file') files.push(args[++i])
-  else if (args[i] === '--listen') listen = Number(args[++i])
+  else if (args[i] === '--listen') { listen = Number(args[++i]); listenGiven = true }
+  else if (args[i] === '--quiet') quiet = Number(args[++i])
   else sentence = sentence ? `${sentence} ${args[i]}` : args[i]
 }
 if (!sentence.trim()) {
-  console.error('usage: say.cjs "<sentence>" [--file <path>]... [--listen <ms>]')
+  console.error('usage: say.cjs "<sentence>" [--file <path>]... [--listen <ms>] [--quiet <ms>]')
   process.exit(2)
 }
+if (quiet === undefined) quiet = listenGiven ? 0 : 300
 
 const riding = files.map(file => {
   const bytes = fs.readFileSync(file)
@@ -62,6 +73,7 @@ const timer = setTimeout(() => { console.error('the hive did not answer'); proce
 ws.on('error', e => { console.error('cannot reach the hive:', e.message); process.exit(1) })
 ws.on('open', () => ws.send(JSON.stringify({
   id, op: 'submit', text: sentence, listen,
+  ...(quiet > 0 ? { quiet } : {}),
   // Who is asking: shown on the command line before anything runs while the
   // bridge carries lines only (documentation/claude-bridge-setup.md).
   from: process.env.HIVE_CALLER || 'say.cjs',
