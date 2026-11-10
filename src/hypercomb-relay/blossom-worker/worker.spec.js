@@ -3781,6 +3781,27 @@ test('with no meeting point bound, a dial at the apex is answered as it always w
   assert.equal(MEET.asked.length, 0, 'a binding with no MEET_HOSTS names no meeting host')
 })
 
+test('the question before the upload: `GET /<sig>?takes` says yes or the upload\'s refusal, in a 200', async () => {
+  const env = { SITE_BINDINGS: '{}', HOST_FRIENDS: pubkey, CONTENT: contentBag() }
+  const sig = await sha256Hex('an atom nobody has sent yet')
+  const ask = `https://pluginthematrix.com/${sig}?takes&held`
+  const friend = await worker.fetch(new Request(ask, { headers: { authorization: await nip98(ask, 'GET') } }), env)
+  assert.equal(friend.status, 200)
+  assert.equal(friend.headers.get('cache-control'), 'no-store')
+  assert.deepEqual(await friend.json(), { takes: true })
+
+  // No token: what the upload would be told — 401 and its reason — as an answer.
+  const nobody = await worker.fetch(new Request(ask), env)
+  assert.equal(nobody.status, 200)
+  const refused = await nobody.json()
+  assert.equal(refused.takes, false)
+  assert.equal(refused.status, 401)
+  assert.ok(refused.reason)
+
+  // Asking stored nothing: the atom is still not held.
+  assert.equal(env.CONTENT.held.has(sig), false)
+})
+
 test('a PUT of an atom the host already holds is a receipt too: `stored <sig>`', async () => {
   const env = { SITE_BINDINGS: '{}', HOST_FRIENDS: pubkey, CONTENT: contentBag() }
   const bytes = 'an atom two participants share'

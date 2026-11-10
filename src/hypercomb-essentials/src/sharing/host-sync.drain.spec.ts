@@ -219,9 +219,12 @@ type Host = ReturnType<typeof makeHost>
 const urlOf = (sig: string): string => `https://${SELF_DOMAIN}/${sig}`
 /** The addresses asked, the probe flag (`?held`) set aside: these tests are
  *  about WHICH sigs are asked; the flag has its own test below. */
+// The question before the upload (`?takes`, host-sync #askTakes) is its own
+// call, never one of the reads and uploads these cases count.
+const asksTakes = (url: unknown): boolean => /[?&]takes\b/.test(String(url))
 const calls = (host: Host, method: string): string[] =>
-  host.mock.calls.filter(([, init]) => (init?.method ?? 'GET') === method).map(([url]) => String(url).replace(/\?held$/, ''))
-const methods = (host: Host): string[] => host.mock.calls.map(([, init]) => init?.method ?? 'GET')
+  host.mock.calls.filter(([url, init]) => (init?.method ?? 'GET') === method && !asksTakes(url)).map(([url]) => String(url).replace(/\?held$/, ''))
+const methods = (host: Host): string[] => host.mock.calls.filter(([url]) => !asksTakes(url)).map(([, init]) => init?.method ?? 'GET')
 
 /** Listen to an effect from now on — EffectBus replays the last value to a new
  *  subscriber, and an earlier case's emission is not this case's evidence. */

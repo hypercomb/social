@@ -325,8 +325,10 @@ const router = (byHost: Record<string, Host>): FetchMock => vi.fn(async (input: 
 })
 
 /** The addresses asked, the probe flag (`?held`) set aside. */
+// The question before the upload (`?takes`, host-sync #askTakes) is its own
+// call, never one of the reads and uploads these cases count.
 const calls = (host: Host, method: string): string[] =>
-  host.fetch.mock.calls.filter(([, init]) => (init?.method ?? 'GET') === method).map(([url]) => String(url).replace(/\?held$/, ''))
+  host.fetch.mock.calls.filter(([url, init]) => (init?.method ?? 'GET') === method && !/[?&]takes\b/.test(String(url))).map(([url]) => String(url).replace(/\?held$/, ''))
 
 /** The NIP-98 event an Authorization header carries. */
 const authEvent = (init?: RequestInit): { tags: string[][] } => {
@@ -576,6 +578,30 @@ describe('BCL-7 / TS-5: a host that takes only the people meeting on it', () => 
     for (const t of tiles) expect((await service.closureVerdict(t.sig, 'layer', false, ['shop'])).ok).toBe(true)
   })
 
+  it('a host that knows the question is asked first: refused there, it is never sent an upload', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
+    marks = new Map([['shop', ['hostb.example']]])
+    field = 'jwize.com'
+    // Answers `?takes` the way relay.js does; everything else is not held.
+    const b: Host = { fetch: vi.fn(async (input: string) => (/[?&]takes\b/.test(String(input))
+      ? new Response(JSON.stringify({ takes: false, status: 401, reason: 'not-live: join a swarm on this relay first' }), { status: 200, headers: { 'content-type': 'application/json' } })
+      : new Response(null, { status: 404 }))) } as unknown as Host
+    vi.stubGlobal('fetch', router({ 'hostb.example': b, 'jwize.com': heap() }))
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const service = await make(['shop'])
+    const t = await tile('one')
+    void service.markPublic(t.sig, 'layer', false, ['shop'])
+    await advanceUntil(() => (service.swarmHostsFor(['shop']).passedOver ?? []).includes('hostb.example'), 250, 120)
+    // Not one byte went to it, and it stands refused in the upload's own words.
+    expect(calls(b, 'PUT')).toEqual([])
+    expect(service.hostTrouble('hostb.example')).toMatchObject({ why: 'refused' })
+    expect(service.hostTrouble('hostb.example')!.reason).toMatch(/meeting on it/)
+    // The room is not stranded: the host field takes it.
+    await advanceUntil(async () => (await queued()).length === 0)
+    vi.useRealTimers()
+    expect((await service.closureVerdict(t.sig, 'layer', false, ['shop'])).ok).toBe(true)
+  })
+
   it('a reload inside the pause starts paused: the host that said "not here" is not asked again', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
     marks = new Map([['shop', ['hostb.example']]])
@@ -597,7 +623,7 @@ describe('BCL-7 / TS-5: a host that takes only the people meeting on it', () => 
     expect(calls(b, 'PUT').length).toBe(asked)
 
     // "Retry now" forgets it: the host is asked again.
-    reloaded.enable()
+    ;(reloaded as unknown as { enable(): void }).enable()
     await advanceUntil(() => calls(b, 'PUT').length > asked, 250, 120)
     vi.useRealTimers()
   })

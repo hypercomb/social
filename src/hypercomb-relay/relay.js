@@ -2104,6 +2104,29 @@ function respondText(res, code, msg, headers = {}) {
   res.end(msg)
 }
 
+// THE QUESTION BEFORE THE UPLOAD (jwize 2026-11-09: "a server is not eligible
+// for serving something and it still tries"). A hive had no way to learn
+// whether a host takes ITS key except to send an upload and read the refusal:
+// real bytes on the wire, a red 401 in the browser's console, and a queue of a
+// thousand atoms waiting on a host that was never going to take them.
+// `GET /<sig>?takes`, signed as the upload would be (NIP-98 over this very
+// URL with method GET, the carried beacon included), asks instead. The answer
+// is always a 200: `{"takes":true}`, or `{"takes":false,"status":<the code
+// the upload would get>,"reason":"<its words>"}` — the same checks, in the
+// same order, as the upload's own (tryWriteContent), up to the point where
+// bytes are read. A host that does not know the flag answers the read it
+// looks like, which tells the hive nothing, and the upload goes as before.
+function asksTakes(req) {
+  const query = String(req.url || '').split('#')[0].split('?')[1] ?? ''
+  return new URLSearchParams(query).has('takes')
+}
+
+function respondTakes(res, answer) {
+  if (res.headersSent) return
+  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' })
+  res.end(JSON.stringify(answer))
+}
+
 // THE PROBE (2026-11-09, the same flag the worker answers): `?held` asks "do
 // you hold this?". A browser prints every 404 as a red console error, and the
 // hive asks that question of every host it publishes to — so a miss asked
@@ -2586,16 +2609,20 @@ function tryWriteRoomMember(req, res) {
 }
 
 function tryWriteContent(req, res) {
-  if (req.method !== 'PUT') return false
+  // `GET /<sig>?takes` — the question before the upload (see respondTakes):
+  // every refusal below is then the ANSWER, said in a 200, and nothing is read.
+  const asks = req.method === 'GET' && asksTakes(req)
+  if (req.method !== 'PUT' && !asks) return false
+  const refuse = (code, msg) => asks ? respondTakes(res, { takes: false, status: code, reason: msg }) : respondText(res, code, msg)
 
   let urlPath
-  try { urlPath = decodeURIComponent((req.url || '').split('?')[0]) } catch { respondText(res, 400, 'bad path'); return true }
-  if (!urlPath || urlPath === '/') { respondText(res, 400, 'no target path'); return true }
+  try { urlPath = decodeURIComponent((req.url || '').split('?')[0]) } catch { refuse(400, 'bad path'); return true }
+  if (!urlPath || urlPath === '/') { refuse(400, 'no target path'); return true }
 
   // traversal defense — identical to the read path
   const resolved = resolve(cfg.contentDir, '.' + urlPath)
   const root = resolve(cfg.contentDir)
-  if (!resolved.startsWith(root + sep) && resolved !== root) { respondText(res, 403, 'target outside content root'); return true }
+  if (!resolved.startsWith(root + sep) && resolved !== root) { refuse(403, 'target outside content root'); return true }
 
   // writes land FLAT. The sig check below pins the BYTES; it says nothing about
   // the PLACE, and `mkdirSync(dirname(resolved), { recursive: true })` let an
@@ -2603,40 +2630,43 @@ function tryWriteContent(req, res) {
   // a pool's, whose members it could then shadow. An atom has one address:
   // `/<sig>`. A second segment is refused before auth is even consulted.
   const segments = urlPath.split('/').filter(Boolean)
-  if (segments.length !== 1) { respondText(res, 400, 'an atom is written at /<sig> — no directory may be chosen'); return true }
+  if (segments.length !== 1) { refuse(400, 'an atom is written at /<sig> — no directory may be chosen'); return true }
 
   // writes must be sig-addressed: basename (minus .js/.json) must be a 64-hex sig
   const base = urlPath.split('/').pop() || ''
   const sig = base.replace(/\.(js|json)$/i, '').toLowerCase()
-  if (!/^[0-9a-f]{64}$/.test(sig)) { respondText(res, 400, 'target is not sig-addressed'); return true }
+  if (!/^[0-9a-f]{64}$/.test(sig)) { refuse(400, 'target is not sig-addressed'); return true }
   // POOL ADDRESSES ARE NOT ATOMS. A pool's address is sign(meaning), and its
   // preimage — the meaning — is public, so a valid PUT of those bytes would
   // occupy the path and permanently prevent the pool. Refused for everyone,
   // before auth: the reserved set is public knowledge, so the answer reveals
   // nothing. (host:packages is reserved on the replication path too.)
   if (RESERVED_ADDRESSES.has(sig) || listedPool(sig)) {
-    respondText(res, 409, sig === HOST_PACKAGES_POOL ? 'target is reserved for the host:packages pool' : 'target is reserved for a pool')
+    refuse(409, sig === HOST_PACKAGES_POOL ? 'target is reserved for the host:packages pool' : 'target is reserved for a pool')
     return true
   }
 
   const auth = verifyWriteAuth(req)
   if (!auth.ok) {
-    if (!auth.denied) { respondText(res, 401, auth.reason); return true }
+    if (!auth.denied) { refuse(401, auth.reason); return true }
     census.putsRefused++
-    if (!participantMode) { respondText(res, 403, 'participants-closed'); return true }
+    if (!participantMode) { refuse(403, 'participants-closed'); return true }
     // Live and beaconed — but only in rooms this host does not take. That is
     // a standing answer, not a race with the beacon: 403, so the client
     // pauses (10 min) instead of retrying every second for good. A live key
     // with no room yet is the race (its PUT beat its beacon): 401 not-live.
     if (participantMode === 'zones' && (auth.roomNotHosted || (isLive(auth.pubkey) && participants.get(auth.pubkey).xs.size > 0))) {
-      respondText(res, 403, 'participants-closed: this room is not hosted here')
+      refuse(403, 'participants-closed: this room is not hosted here')
       return true
     }
-    respondText(res, 401, participantMode === 'zones' && isLive(auth.pubkey)
+    refuse(401, participantMode === 'zones' && isLive(auth.pubkey)
       ? 'not-live: join a room this relay hosts first'
       : 'not-live: join a swarm on this relay first')
     return true
   }
+  // Asked, and nothing above refused: this key's atom would be taken here.
+  // Caps and the hash are about the bytes, which the question does not carry.
+  if (asks) { respondTakes(res, { takes: true }); return true }
   const participant = auth.role === 'participant'
   // A participant's atom lands at the one address its receipt names, /<sig>
   // (a writer's legacy /<sig>.js keeps its own name).
@@ -2898,6 +2928,9 @@ function quietMisses(req, res) {
 
 const server = createServer((req, res) => {
   quietMisses(req, res)
+  // The question before the upload is the upload path's to answer — before
+  // any read route can take it for a read of the atom.
+  if (req.method === 'GET' && asksTakes(req) && !fromSandboxDoor(req)) { tryWriteContent(req, res); return }
   // Doors write nothing — refused before any write route can run.
   if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS' && fromSandboxDoor(req)) {
     respondText(res, 403, 'a sandbox door writes nothing — do this from your own hive\n')

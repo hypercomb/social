@@ -314,8 +314,10 @@ const makeHost = (options: HostOptions = {}) => {
 
 type Host = ReturnType<typeof makeHost>
 /** The addresses asked, the probe flag (`?held`) set aside. */
+// The question before the upload (`?takes`, host-sync #askTakes) is its own
+// call, never one of the reads and uploads these cases count.
 const calls = (host: Host, method: string): string[] =>
-  host.fetch.mock.calls.filter(([, init]) => (init?.method ?? 'GET') === method).map(([url]) => String(url).replace(/\?held$/, ''))
+  host.fetch.mock.calls.filter(([url, init]) => (init?.method ?? 'GET') === method && !/[?&]takes\b/.test(String(url))).map(([url]) => String(url).replace(/\?held$/, ''))
 
 // ── the target ─────────────────────────────────────────────────────────────
 
@@ -587,7 +589,8 @@ describe('the drain is fast and honest', () => {
     await service.markPublic(s, 'resource')
     await service.drain()
     await settle()
-    expect(signedAt).toEqual([Math.floor(relayNow / 1000)])
+    // Two tokens: the question before the upload, and the upload.
+    expect(signedAt).toEqual([Math.floor(relayNow / 1000), Math.floor(relayNow / 1000)])
   })
 })
 

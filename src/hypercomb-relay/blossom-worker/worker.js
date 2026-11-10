@@ -5330,6 +5330,21 @@ async function reachWalk(request, env) {
 
 // PUT /<sig> — hypercomb host-sync shape (NIP-98). The URL names the
 // content; sha256(body) must equal it.
+// THE QUESTION BEFORE THE UPLOAD (2026-11-09, the flag relay.js answers):
+// `GET /<sig>?takes`, signed as the upload would be (NIP-98, method GET, u =
+// this URL), asks "would you take this key's atom?". The answer is always a
+// 200 — `{takes:true}`, or `{takes:false,status,reason}` with the code and
+// words the upload itself would get — so a hive learns a host is not for it
+// without sending bytes or printing an error. Nothing is stored or granted
+// (admit only reads, as BUD-06's preflight does).
+async function takesSig(request, env) {
+  const none = { 'Cache-Control': 'no-store' }
+  const auth = await verifyNip98(request, parseAuthEvent(request), 'GET', env)
+  if (!auth.ok) return json(200, { takes: false, status: 401, reason: auth.reason }, none)
+  const adm = await admit(env, auth.pubkey, 0)
+  return adm.ok ? json(200, { takes: true }, none) : json(200, { takes: false, status: 403, reason: adm.reason }, none)
+}
+
 async function putSig(request, env, sig) {
   const evt = parseAuthEvent(request)
   const auth = await verifyNip98(request, evt, 'PUT', env)
@@ -7089,6 +7104,7 @@ const router = {
         // never cached). A query flag, not a header, so a probe stays a
         // simple request with no preflight. Hosts that ignore it answer 404
         // as before, so a hive may ask it of any host.
+        if (method === 'GET' && !isAlias && !named && requestUrl.searchParams.has('takes')) return takesSig(request, env)
         const probe = requestUrl.searchParams.has('held')
         const miss = (res) => probe && res.status === 404
           ? new Response(null, { status: 204, headers: { ...CORS, 'Cache-Control': 'no-store', 'X-Reason': 'not held' } })

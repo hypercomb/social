@@ -3422,6 +3422,13 @@ export class HostSyncService extends EventTarget {
       return 'local'
     }
 
+    // ASK BEFORE SENDING (#askTakes): a host not yet known to take this key
+    // is asked first, without the bytes. Its refusal is the outcome.
+    if (!this.#takes.has(host)) {
+      const refused = await this.#askTakes(target, url)
+      if (refused) return refused
+    }
+
     let put: Response
     try {
       put = await HostSyncService.#fetchWithin(url, { method: 'PUT', headers: { Authorization: auth }, body: bytes }, bytes.byteLength)
@@ -3439,7 +3446,11 @@ export class HostSyncService extends EventTarget {
       if (put.status === 422) return 'corrupt'
       // Every other refusal is classified once, with the host's own words,
       // for the per-host backoff and the status line.
-      if (!put.ok) return await HostSyncService.#refusal(put)
+      if (!put.ok) {
+        // It took the question and not the upload: its answer moved — ask again.
+        if (put.status === 401 || put.status === 403) this.#takes.delete(host)
+        return await HostSyncService.#refusal(put)
+      }
       // THE SWARM'S HOST ANSWERS FOR ITSELF. The relay hashes the body
       // against the URL before it writes, and says `stored <sig>` only after
       // the write — an answer naming the sig it verified and stored, which is
@@ -3477,6 +3488,52 @@ export class HostSyncService extends EventTarget {
     }
 
     return (await this.#writeReceipt(entry.sig, target)) ? 'ok' : 'local'
+  }
+
+  /** Hosts that said they take this key's uploads this session (#askTakes).
+   *  An upload refused for who sent it (401/403) takes the host out again. */
+  readonly #takes = new Set<string>()
+
+  /** THE QUESTION BEFORE THE UPLOAD (jwize 2026-11-09: "a server is not
+   *  eligible for serving something and it still tries"). The only way to
+   *  learn whether a host takes THIS key was to send it an upload and read the
+   *  refusal: real bytes on the wire, a red 401 in the console, and a queue of
+   *  a thousand atoms waiting on a host that was never going to take them.
+   *
+   *  `GET /<sig>?takes` — signed as the upload would be (NIP-98 over this very
+   *  URL, the carried beacon included) — asks instead, and sends nothing. A
+   *  host that knows the question answers a 200 either way: `{takes:true}`,
+   *  or `{takes:false, status, reason}` carrying the code and words the
+   *  upload would have got; that refusal is classified by the one classifier
+   *  (#refusal), so the backoff, the status line and the kept "not here"
+   *  pause are the upload's own. A host that does not know it answers the
+   *  read it looks like (`&held` keeps that miss quiet), which says nothing —
+   *  and the upload goes, to be answered as it always was. Asked once per
+   *  host — the first upload to a host already goes alone (#pushAlone) — and
+   *  again only after an upload is refused for who sent it.
+   *
+   *  null = send the upload (it takes, or nothing was learned and the upload
+   *  itself will say); a PushFailure = do not. */
+  readonly #askTakes = async (target: SyncTarget, url: string): Promise<PushFailure | null> => {
+    const host = target.domain
+    const ask = `${url}${url.includes('?') ? '&' : '?'}takes&held`
+    const auth = await this.#nip98(ask, 'GET', target.swarm === true, true)
+    if (!auth) return null
+    let res: Response
+    try { res = await HostSyncService.#fetchWithin(ask, { headers: { Authorization: auth }, cache: 'no-store' }) } catch { return null }
+    this.#answeredHosts.add(host)
+    let said = null as { takes?: unknown; status?: unknown; reason?: unknown } | null
+    if (res.status === 200 && (res.headers?.get?.('content-type') ?? '').toLowerCase().includes('json')) {
+      try { said = JSON.parse(await HostSyncService.#within(res.text(), BODY_TIMEOUT_MS)) as typeof said } catch { /* not the question's answer */ }
+    } else {
+      try { void res.body?.cancel().catch(() => void 0) } catch { /* nothing to cancel */ }
+    }
+    if (said?.takes === true) { this.#takes.add(host); return null }
+    if (said?.takes === false) {
+      const status = Number(said.status)
+      return HostSyncService.#refusal(new Response(String(said.reason ?? ''), { status: status >= 400 && status <= 599 ? status : 403 }))
+    }
+    return null
   }
 
   /** A PUT that never got an answer, classified. Our own deadline, or a
@@ -3902,7 +3959,7 @@ export class HostSyncService extends EventTarget {
    *  must not fail the host's freshness window. `swarmUpload`: a PUT of the
    *  room's drain (to a meeting, pool or relay host) — the only request that
    *  may carry this key's {alive} beacon (D7). */
-  readonly #nip98 = async (url: string, method: string, swarmUpload = false): Promise<string | null> => {
+  readonly #nip98 = async (url: string, method: string, swarmUpload = false, asksTakes = false): Promise<string | null> => {
     const signer = this.#getSigner()
     if (!signer?.signEvent) return null
     let nowMs = Date.now()
@@ -3932,7 +3989,7 @@ export class HostSyncService extends EventTarget {
     // names the room's lifecycle address, which a publish node or a package
     // push to someone's domain must never learn — least of all for a pair a
     // tab that is not meeting merely has pre-filled from last week.
-    if (method === 'PUT' && swarmUpload && isJoinedHere()) {
+    if ((method === 'PUT' || asksTakes) && swarmUpload && isJoinedHere()) {
       let host = ''
       try { host = new URL(url).host } catch { host = '' }
       if (host && this.#notLiveHosts.has(host)) {

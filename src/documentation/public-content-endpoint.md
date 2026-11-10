@@ -108,6 +108,36 @@ on its own once the new code has settled and parses.
 The bucket is **flat from birth** — no legacy typed-dir layout ever lands in
 R2, so unlike relay.js there is no `__x__` fallback probing on reads.
 
+### The question before the upload (2026-11-09)
+
+jwize: "a server is not eligible for serving something and it still tries."
+A hive had no way to learn whether a host takes ITS key except to send an
+upload and read the refusal — real bytes on the wire, a red 401 in the
+console, and (on the day) 1,042 atoms queued for a host that was never going
+to take them. So the question has its own spelling:
+
+`GET /<sig>?takes`, signed as the upload would be (NIP-98: method `GET`, `u` =
+this exact URL; the carried `alive` beacon when the host said not-live). The
+answer is **always a 200**, `Cache-Control: no-store`:
+
+- `{"takes":true}` — this key's atom would be taken here;
+- `{"takes":false,"status":<code>,"reason":"<words>"}` — the code and the
+  words the upload itself would get (401 `not-live: …`, 403
+  `participants-closed`, 409 for a reserved address, a missing or bad token).
+
+The host runs the upload's own checks, in the upload's own order, up to the
+point where bytes are read (relay.js `tryWriteContent`; worker `takesSig`,
+whose `admit` only reads). Nothing is stored, granted or charged.
+
+The hive asks once per host, before the first upload to it
+(host-sync.service.ts `#askTakes`; the first upload to a host already goes
+alone), and again only after an upload is refused for who sent it. A refusal
+is classified by the same classifier as an upload's, so the backoff, the
+status line and the kept "not here" pause are unchanged — the host is simply
+never sent the bytes. A host that does not know the flag answers the read it
+looks like (`&held` keeps that miss quiet), which says nothing, and the
+upload goes and is answered as it always was.
+
 ## Quota — the auto-grant guest list
 
 KV namespace `GRANTS`, keyed by pubkey → `{ quotaBytes, usedBytes,

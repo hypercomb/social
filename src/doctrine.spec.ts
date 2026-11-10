@@ -2404,4 +2404,18 @@ describe('a question a host may answer "no" is asked quietly', () => {
     expect(read('hypercomb-relay/relay.js')).toMatch(/createServer\(\(req, res\) => \{\s*quietMisses\(req, res\)/)
     expect(read('hypercomb-client/crates/serve/src/lib.rs')).toMatch(/reply\.status == 404 && asks_held\(target\)/)
   })
+
+  it('an upload is asked for before it is sent, and both writing hosts answer the question', () => {
+    // jwize 2026-11-09: "a server is not eligible for serving something and
+    // it still tries." A host that does not take this key is never sent the
+    // bytes: host sync asks `GET /<sig>?takes` first (#askTakes), and
+    // relay.js and the worker answer it in a 200 with the refusal the upload
+    // would get (documentation/public-content-endpoint.md). Drop the ask, or
+    // either answer, and the first sign is again a red 401 per upload.
+    const read = (p: string): string => readFileSync(join(ROOT, p), 'utf8')
+    const sync = read('hypercomb-essentials/src/sharing/host-sync.service.ts')
+    expect(sync).toMatch(/if \(!this\.#takes\.has\(host\)\) \{\s*const refused = await this\.#askTakes\(target, url\)\s*if \(refused\) return refused/)
+    expect(read('hypercomb-relay/relay.js')).toMatch(/req\.method === 'GET' && asksTakes\(req\) && !fromSandboxDoor\(req\)\) \{ tryWriteContent\(req, res\); return \}/)
+    expect(read('hypercomb-relay/blossom-worker/worker.js')).toMatch(/requestUrl\.searchParams\.has\('takes'\)\) return takesSig\(request, env\)/)
+  })
 })
