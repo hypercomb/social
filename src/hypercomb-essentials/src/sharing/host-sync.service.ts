@@ -2732,8 +2732,16 @@ export class HostSyncService extends EventTarget {
   ): Promise<ClosureVerdict> => {
     const s = String(sig ?? '').trim().toLowerCase()
     if (!SIG_RE.test(s)) return { ok: false, ownerHeld: false }
-    const wanted = new Set(domains.map(d => foldContentLabel(String(d ?? '').trim().toLowerCase())).filter(Boolean))
-    const only = (await this.#targets()).filter(t => wanted.has(t.domain))
+    const targets = await this.#targets()
+    // A named host that is a site on a target's zone is judged on that zone —
+    // the target set folded it there (#foldSites), so asked by its own name it
+    // matched no target and the verdict was "no" for as long as anyone waited.
+    const zones = targets.map(t => t.domain)
+    const wanted = new Set(domains
+      .map(d => foldContentLabel(String(d ?? '').trim().toLowerCase()))
+      .filter(Boolean)
+      .map(d => siteZoneOf(d, zones)))
+    const only = targets.filter(t => wanted.has(t.domain))
     if (only.length === 0) return { ok: false, ownerHeld: false }
     return HostSyncService.#verdictOf(await this.#closureReceipted(s, kind, closure, new Set<string>(), only))
   }

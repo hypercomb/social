@@ -110,6 +110,35 @@ describe('listening stops when the sentence is done', () => {
     expect(ms).toBeGreaterThanOrEqual(450)
   })
 
+  // Nothing ran, so there is nothing to listen for: the caller is told at once
+  // which word to choose, or why it was refused, with or without `quiet`.
+  it('a refusal is answered at once, however long the window', async () => {
+    line = request => {
+      EffectBus.emit('toast:show', { title: 'remove', message: 'needs a person' })
+      request.complete?.({ kind: 'refused', reason: 'remove needs a person' })
+    }
+    const held = await submit({ listen: 3_000 })
+    expect(held.reply.data?.['outcome']).toEqual({ kind: 'refused', reason: 'remove needs a person' })
+    expect(held.reply.data?.['heard']).toEqual([{ kind: 'toast', text: 'remove: needs a person' }])
+    expect(held.ms).toBeLessThan(1_000)
+    const quiet = await submit({ listen: 3_000, quiet: 200 })
+    expect(quiet.ms).toBeLessThan(1_000)
+  })
+
+  it('an ambiguity is answered at once, with its claimants', async () => {
+    line = request => request.complete?.({ kind: 'ambiguous', word: 'show', candidates: ['open', 'reveal'] })
+    const { ms, reply } = await submit({ listen: 3_000, quiet: 200 })
+    expect(reply.data?.['outcome']).toEqual({ kind: 'ambiguous', word: 'show', candidates: ['open', 'reveal'] })
+    expect(ms).toBeLessThan(1_000)
+  })
+
+  it('a finished line is answered as the quiet ends, not a poll later', async () => {
+    line = request => request.complete?.(ran)
+    const { ms } = await submit({ listen: 5_000, quiet: 120 })
+    expect(ms).toBeGreaterThanOrEqual(110)
+    expect(ms).toBeLessThan(400)
+  })
+
   // The activity log is one shared stream. Three managers reading at once each
   // heard the others' answers (2026-10-22), so a sentence takes its turn.
   it('gives each sentence only its own answer when several are said at once', async () => {

@@ -2337,13 +2337,21 @@ export class ClaudeBridgeWorker extends Worker {
     const heard: { kind: 'activity' | 'toast'; text: string; type?: string }[] = []
     const masked = (said: string): string => said.replace(ROUTE_IN_TEXT, route => covered(route) ? '/(withheld)' : route)
     let live = false
+    // Whoever waits for the hive's next word is woken by the word itself.
+    let lastHeardAt = 0
+    let wake: (() => void) | null = null
+    const hear = (entry: { kind: 'activity' | 'toast'; text: string; type?: string }): void => {
+      heard.push(entry)
+      lastHeardAt = Date.now()
+      wake?.()
+    }
     const unhearActivity = EffectBus.on<{ message?: unknown }>('activity:log', (p) => {
-      if (live && typeof p?.message === 'string') heard.push({ kind: 'activity', text: masked(p.message) })
+      if (live && typeof p?.message === 'string') hear({ kind: 'activity', text: masked(p.message) })
     })
     const unhearToast = EffectBus.on<{ message?: unknown; title?: unknown; type?: unknown }>('toast:show', (p) => {
       if (!live) return
       const said = [p?.title, p?.message].filter(x => typeof x === 'string' && x).join(': ')
-      if (said) heard.push({ kind: 'toast', text: masked(said), type: typeof p?.type === 'string' ? p.type : undefined })
+      if (said) hear({ kind: 'toast', text: masked(said), type: typeof p?.type === 'string' ? p.type : undefined })
     })
     live = true
     const startedAt = Date.now()
@@ -2356,18 +2364,36 @@ export class ClaudeBridgeWorker extends Worker {
       // eight, and its lines then leaked into the next submit's window.
       const answer = await this.#submitLine(req, text, quietMs ? Math.max(SUBMIT_DEADLINE_MS, listenMs) : SUBMIT_DEADLINE_MS)
       if (!answer.ok) return answer
+      const kind = (answer.data as { outcome?: { kind?: string } } | undefined)?.outcome?.kind
+      // NOTHING RAN, SO THERE IS NOTHING TO LISTEN FOR. A refusal and an
+      // ambiguity are decided before any behaviour is handed the line, and
+      // what the command line says about them it says while deciding. Held
+      // for the window, the caller learned "say which" a window late: the one
+      // answer it has to act on at once.
+      const nothingRan = kind === 'refused' || kind === 'ambiguous'
+      if (nothingRan) return { ...answer, data: { ...(answer.data as Record<string, unknown>), files: stored, heard } }
       if (quietMs && listenMs > 0) {
         // Done once the line finished (a Tongue line reports it) or the hive
         // has spoken, and has then been quiet for `quiet` ms. A legacy-pipeline
         // line cannot report an end, so silence alone is not an end: until it
         // has said something it is held for the whole window.
-        const ran = (answer.data as { outcome?: { kind?: string } } | undefined)?.outcome?.kind === 'ran'
-        let seen = heard.length
-        let lastAt = Date.now()
-        while (Date.now() < startedAt + listenMs) {
-          await new Promise(resolve => setTimeout(resolve, 50))
-          if (heard.length !== seen) { seen = heard.length; lastAt = Date.now() }
-          if ((ran || seen > 0) && Date.now() - lastAt >= quietMs) break
+        //
+        // WOKEN, NOT POLLED. The wait ends on the exact millisecond the quiet
+        // is over, or on the hive's next word, whichever comes first.
+        const ran = kind === 'ran'
+        const ceiling = startedAt + listenMs
+        let lastAt = Math.max(Date.now(), lastHeardAt)
+        for (;;) {
+          const now = Date.now()
+          if (now >= ceiling) break
+          const ended = ran || heard.length > 0
+          if (ended && now - lastAt >= quietMs) break
+          const until = ended ? Math.min(ceiling, lastAt + quietMs) : ceiling
+          let timer: ReturnType<typeof setTimeout> | undefined
+          await new Promise<void>(resolve => { wake = resolve; timer = setTimeout(resolve, Math.max(0, until - now)) })
+          wake = null
+          if (timer) clearTimeout(timer)
+          if (lastHeardAt > lastAt) lastAt = lastHeardAt
         }
       } else if (listenMs > 0) await new Promise(resolve => setTimeout(resolve, listenMs))
       return { ...answer, data: { ...(answer.data as Record<string, unknown>), files: stored, heard } }

@@ -42,7 +42,8 @@ vi.mock('./hive-pointer.js', () => ({
     return { ok: true, pubkey: PUBKEY, createdAt: 1_700_000_001 }
   },
 }))
-vi.mock('./community-hosts.js', () => ({ hostsOfBranch: async () => marks }))
+let carried: string[] = []
+vi.mock('./community-hosts.js', () => ({ hostsOfBranch: async () => marks, listCommunityHosts: async () => carried }))
 
 ;(window as unknown as { ioc: unknown }).ioc = {
   register: () => void 0,
@@ -86,6 +87,7 @@ beforeEach(() => {
   puts = []
   asked = []
   marks = []
+  carried = []
   standing = 'pluginthematrix.com'
 })
 
@@ -95,6 +97,20 @@ describe('the nodes a branch publishes through are zone roots', () => {
     const nodes = await nodesFor(SEGS, undefined)
     expect(nodes).toEqual(['cafesociety.buzz', 'example.org'])
     expect(nodes.some(n => n.startsWith('content.'))).toBe(false)
+  })
+
+  it('a site named ALONE writes to the zone the participant carries — never to the site, which refuses every write', async () => {
+    // jwize 2026-11-10: /presentation wore presentation.hypercomb.com and
+    // nothing else; the gate asked about the site for two minutes.
+    marks = ['presentation.hypercomb.com']
+    carried = ['hypercomb.com', 'jwize.com']
+    expect(await nodesFor(SEGS, undefined)).toEqual(['hypercomb.com'])
+    // A carried host names no node by itself, and an uncarried zone folds nothing.
+    marks = ['cafesociety.buzz']
+    expect(await nodesFor(SEGS, undefined)).toEqual(['cafesociety.buzz'])
+    marks = ['presentation.hypercomb.com']
+    carried = ['jwize.com']
+    expect(await nodesFor(SEGS, undefined)).toEqual(['presentation.hypercomb.com'])
   })
 
   it('the standing public host stored as content.<zone> before the retirement is read as its zone', async () => {

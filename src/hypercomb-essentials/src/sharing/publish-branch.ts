@@ -50,7 +50,7 @@ import {
 import { isReservedRootKey } from './hive-link.js'
 import {
   ENTRANCES_MAX, ENTRANCE_POWERS, boundLineage, creationUrl, entranceHost, foldContentLabel, isPoweredEntrance, isPublishNode, ownAddressHost,
-  addressHolder, ownAddressRefusal, ownLabelOn, readEntrance, topOpenIn, readEntrances, withOwnAddress, writeDoorsOf, zoneDoor, type ZoneEntrance, type ZoneEntranceFrom,
+  addressHolder, ownAddressRefusal, ownLabelOn, readEntrance, topOpenIn, readEntrances, siteZoneOf, withOwnAddress, writeDoorsOf, zoneDoor, type ZoneEntrance, type ZoneEntranceFrom,
 } from './zone-door.js'
 import type { ModuleAssessmentRecord } from '../assistant/module-review.js'
 
@@ -67,7 +67,7 @@ const liveHeadsOf = (roots: Record<string, string>, doors: Record<string, readon
     .filter(([k, v]) => !isReservedRootKey(k) && SIG_RE.test(String(v ?? '').toLowerCase()) && (doors[k] ?? []).length > 0)
     .map(([, v]) => String(v).toLowerCase()))
 import { lineageKey } from '../history/lineage-key.js'
-import { hostsOfBranch, setBranchHosts } from './community-hosts.js'
+import { hostsOfBranch, listCommunityHosts, setBranchHosts } from './community-hosts.js'
 import { isBranchPublic, setBranchPublic } from '../presentation/tiles/tile-public.js'
 import { knownRoots, latestByLineageKey, listPublishRecords, writePublishRecord, type PublishRecord } from './publish-heads.js'
 import { recordPublishResult } from './publish-results.js'
@@ -262,8 +262,18 @@ export const nodesFor = async (segs: readonly string[], hostSync: HostSyncLike |
     ...(hostSync?.isEnabled?.() && self ? [self] : []),
     ...(hostSync?.isPublicHostEnabled?.() ? [zoneDoor(hostSync.publicHostDomain?.() || '')] : []),
   ]
+  const named = [...branchZones.map(zoneDoor), ...standing].filter(Boolean)
+  // A SITE NAMED ALONE WRITES TO ITS ZONE TOO (jwize 2026-11-10: "it's just
+  // hanging"). /presentation wore `presentation.hypercomb.com` and nothing
+  // else: a site, which refuses every write (405). With no zone named beside
+  // it nothing folded, the bytes went to `hypercomb.com` only because an
+  // earlier publish had named it, and the gate asked about the site for its
+  // whole two minutes. The zone is one of the hosts the participant carries:
+  // a door under a carried host is a site on it.
+  let carried: string[] = []
+  try { carried = (await listCommunityHosts()).map(zoneDoor).filter(Boolean) } catch { /* no pool — only what was named folds */ }
   // A site named beside its zone writes to the zone (zone-door siteZoneOf).
-  return writeDoorsOf([...branchZones.map(zoneDoor), ...standing].filter(Boolean))
+  return writeDoorsOf(named.map(door => siteZoneOf(door, [...named, ...carried])))
 }
 
 /** THE DOORS A TURN-OFF READS THE INDEX THROUGH: the branch's nodes, then the
