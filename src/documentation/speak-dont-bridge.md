@@ -52,6 +52,27 @@ their turn, one at a time, because what a sentence says comes back on one shared
 activity stream and three managers reading at once each heard the others' answers;
 a turn is never waited for longer than 25 s, so a cold find cannot starve a read.
 
+**How fast an answer comes back (2026-11-10).** The reading itself costs about
+3 µs a line against a 136-word census; the time a caller waits is the waiting
+built around it, so that is what is kept short:
+
+- `say.cjs` sends `quiet: 300` on its own when no `--listen` is given, so a
+  plain sentence answers about 0.3 s after it finishes instead of after a flat
+  1.5 s. A sentence given its own `--listen` is still held for that window;
+  `--quiet <ms>` stops it early too, and `--quiet 0` holds the default window.
+- A line that was **refused** or left **ambiguous** is answered at once, with or
+  without `quiet`: nothing ran, so there is nothing to listen for. It used to
+  be held for the whole window, which made "say which" the slowest answer.
+- The quiet wait is woken by the hive's next word and ends on the millisecond
+  the quiet is over. It used to look every 50 ms.
+- A batch from outside (several lines, answered on the command line) writes
+  each verdict into its conversation in order while the next line is already
+  being said. The request is still written before anything runs, and the
+  caller is still answered only once every turn is on disk.
+
+None of this moves a gate: admission, grants, the withheld rule, the
+participant's Enter and the wait for `go` to arrive are where they were.
+
 When the hive tab drops while a line is running (the dev build reloads it), the
 broker answers the waiting caller at once, "the hive tab dropped before it
 answered; ask again", instead of leaving it to its own timer. The read verbs of
