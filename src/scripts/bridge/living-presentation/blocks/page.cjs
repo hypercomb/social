@@ -141,7 +141,7 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
   text-transform:uppercase;color:var(--dim);background:none;border:1px solid var(--line);border-radius:var(--r-ctl);padding:5px 10px;cursor:pointer}
 .to-site:hover{color:var(--honey);border-color:var(--honey-deep);background:var(--honey-tint)}
 .to-site .g{color:var(--honey);font-size:13px}
-.page.part .crumbs,.page.part .tree,.page.part .sibs,.page.part .explore,.page.part .to-explore,.page.part .kids-row{visibility:hidden}
+.page.part .crumbs,.page.part .tree,.page.part .sibs,.page.part .explore,.page.part .to-explore{visibility:hidden}
 .page.part .to-site{display:inline-flex}
 
 /* ---------- the scene ---------- */
@@ -314,22 +314,6 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .top .to-explore{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--honey);text-decoration:none;padding:6px 10px;border:1px solid transparent;border-radius:6px}
 .top .to-explore:hover{border-color:var(--honey)}
 @media (max-width:900px){.top .to-explore{display:none}}
-.when-kids,.kids,.sibs.kids-row{display:none}
-.page[data-view="children"] .when-video,.page[data-view="children"] .scene,.page[data-view="children"] .sibs[data-part="siblings"]{display:none}
-.page[data-view="children"] .when-kids{display:inline}
-.page[data-view="children"] .kids{display:block}
-.page[data-view="children"] .sibs.kids-row{display:flex}
-.kids{min-height:0;overflow:auto;padding:18px 4px 8px}
-.kids .eyebrow{text-align:center}
-.kids h2{font-weight:300;font-size:clamp(24px,3.6cqi,40px);line-height:1.1;margin:0 0 .9em;text-align:center;letter-spacing:var(--track-display)}
-.kids h2 em{font-style:normal;color:var(--honey)}
-.kidgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,260px));justify-content:center;gap:12px;max-width:var(--measure);margin:0 auto}
-.kid{display:flex;flex-direction:column;gap:6px;padding:14px 16px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.03);color:inherit;text-decoration:none;transition:border-color .15s,background .15s}
-a.kid:hover,a.kid:focus-visible{border-color:var(--honey);background:rgba(217,163,28,.07)}
-.kid h3{margin:0;font-family:var(--mono);font-size:13px;letter-spacing:.06em;font-weight:500;color:var(--ink,#fff);display:flex;align-items:center;gap:8px}
-.kid h3 svg{width:12px;height:12px;color:var(--honey);flex:none}
-.kid p{margin:0;font-size:13px;line-height:1.45;color:var(--muted,#9fb0bd)}
-.kid.soon{opacity:.5}
 .sibs{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px 8px;padding:10px 0 12px;border-top:1px solid var(--line)}
 .sibs .lbl{flex-basis:100%;text-align:center;color:var(--faint-text)}
 .sibs a.sib,.sibs span.sib{display:inline-flex;align-items:center;gap:.5em;text-decoration:none;color:var(--ink);
@@ -544,26 +528,6 @@ const SCRIPT = `
   }
   const toSite = page.querySelector('.to-site')
   if (toSite) toSite.onclick = () => page.dispatchEvent(new CustomEvent('hc-site-widen', { bubbles: true }))
-  // THE CHILD VIEW: Explore more switches the stage between the video and the tile's own children.
-  // The voice stops on the way in; #children in the address says which view, so it can be linked to.
-  if (page.querySelector('.kids')) {
-    const setView = (on, keep) => {
-      page.dataset.view = on ? 'children' : 'video'
-      for (const x of page.querySelectorAll('[data-explore]')) x.setAttribute('aria-pressed', String(on))
-      if (on) { try { halt() } catch {} }
-      if (keep) { try { history.replaceState(history.state, '', on ? '#children' : location.pathname + location.search) } catch {} }
-    }
-    page.addEventListener('click', (e) => {
-      const x = e.target.closest && e.target.closest('[data-explore]')
-      if (!x) return
-      e.preventDefault()
-      setView(page.dataset.view !== 'children', true)
-    })
-    const onHash = () => { if (!gone()) setView(location.hash === '#children', false) }
-    window.addEventListener('hashchange', onHash)
-    // after the rest of this script has run, so the playback it stops exists
-    if (location.hash === '#children') queueMicrotask(onHash)
-  }
   const KEY = 'hc-scene:' + location.pathname
   const returning = root instanceof Element && root.hasAttribute('data-hc-returning')
   let resumeAt = 0
@@ -829,45 +793,19 @@ const treeHtml = (ways, route) => {
   <nav class="tree" data-part="tree" aria-label="The tiles"><div data-rail></div><script type="application/json" data-rail-tree>${JSON.stringify(data).replace(/</g, '\\u003c')}</script></nav>`
 }
 
-/** EXPLORE MORE, bottom right under the video: opens the child view, and in the
- *  child view goes back to the video. Nothing when no page lies below. */
+/** EXPLORE MORE, bottom right under the video: the way in, to the first child's
+ *  presentation. Nothing when no page lies below. */
 const exploreHtml = (ways) => {
   const e = ways && ways.explore
   if (!e) return ''
   return `
-  <div class="explore" data-part="explore"><a href="#children" data-explore aria-pressed="false"><span class="when-video">Explore more about <b>${esc(e.topic)}</b></span><span class="when-kids">Back to the video</span>${icon('play')}</a></div>`
+  <div class="explore" data-part="explore"><a href="/${e.to.map(esc).join('/')}">Explore more about <b>${esc(e.topic)}</b>${icon('play')}</a></div>`
 }
 
-/** The same switch, as a quiet link in the top bar: the backup for the button. */
+/** The same way in, as a quiet link in the top bar: the backup for the button. */
 const exploreTop = (ways) => {
   const e = ways && ways.explore
-  return e ? `<a class="to-explore" href="#children" data-explore><span class="when-video">Explore ›</span><span class="when-kids">‹ Video</span></a>` : ''
-}
-
-/** THE CHILD VIEW: the tile's own children as cards, in the order the tree gives. */
-const kidsHtml = (ways) => {
-  const e = ways && ways.explore
-  if (!e) return ''
-  const card = (k) => k.page
-    ? `<a class="kid" href="/${k.route.map(esc).join('/')}"><h3>${icon('play')}${esc(k.name)}</h3>${k.note ? `<p>${esc(k.note)}</p>` : ''}</a>`
-    : `<span class="kid soon" title="its page is coming"><h3>${esc(k.name)}</h3>${k.note ? `<p>${esc(k.note)}</p>` : ''}</span>`
-  return `
-  <section class="kids" data-part="children" aria-label="Inside ${esc(e.topic)}">
-    <div class="eyebrow">Inside</div>
-    <h2>${esc(e.topic)}</h2>
-    <div class="kidgrid">${e.kids.map(card).join('')}</div>
-  </section>`
-}
-
-/** THE CHILD VIEW'S ROW: the same buttons as the siblings row, but the tile's own children. */
-const kidsRowHtml = (ways, route) => {
-  const e = ways && ways.explore
-  if (!e) return ''
-  return `
-  <nav class="sibs kids-row" data-part="children-row" aria-label="Inside ${esc(e.topic)}"><span class="lbl mono-label">(${esc(route[route.length - 1])})</span>${e.kids.map(k => k.page
-    ? `<a class="sib" href="/${k.route.map(esc).join('/')}" title="${esc(k.note)}">${icon('play')}${esc(k.name)}</a>`
-    : `<span class="sib soon" title="${esc(`${k.note} (its page is coming)`)}">${esc(k.name)}</span>`).join('')}
-  </nav>`
+  return e ? `<a class="to-explore" href="/${e.to.map(esc).join('/')}">Explore ›</a>` : ''
 }
 
 /** THE SIBLING MENU, balanced and centred under the video: the tiles under the
@@ -905,7 +843,7 @@ ${RAIL_CSS}
 </head>
 <body>
 ${sprite}
-<main class="page">${treeHtml(ways, route)}<div class="stage"><div class="top"><button type="button" class="ib2 menu-btn" aria-label="Show the tree" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></svg></button>${crumbsHtml(route)}${exploreTop(ways)}<button type="button" class="ib2 fs" aria-label="Full screen" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg></button><button type="button" class="to-site" aria-label="Open the website at this page">${icon('hex')}website</button></div>${sceneHtml(scene)}${kidsHtml(ways)}${exploreHtml(ways)}${sibsHtml(ways, route)}${kidsRowHtml(ways, route)}</div>
+<main class="page">${treeHtml(ways, route)}<div class="stage"><div class="top"><button type="button" class="ib2 menu-btn" aria-label="Show the tree" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></svg></button>${crumbsHtml(route)}${exploreTop(ways)}<button type="button" class="ib2 fs" aria-label="Full screen" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg></button><button type="button" class="to-site" aria-label="Open the website at this page">${icon('hex')}website</button></div>${sceneHtml(scene)}${exploreHtml(ways)}${sibsHtml(ways, route)}</div>
 </main>
 <script>${SCRIPT}${tryDef ? `
 ;(() => {

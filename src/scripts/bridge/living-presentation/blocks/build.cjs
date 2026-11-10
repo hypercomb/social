@@ -116,20 +116,16 @@ const waysOf = (route, paged) => {
   return { children, section: siblings, sectionOf, beside }
 }
 
-/** THE CHILD VIEW (jwize 2026-11-10: "as well as a video they have an html view
- *  that allows them to present their own children in the siblings list"). The
- *  bottom row of a video page only chooses WHICH VIDEO; the way into a tile's
- *  own children is a second view of the same page, opened by the Explore more
- *  button bottom right: the children as cards, and the bottom row listing them.
- *  The topic is a plain-language noun authored on the page (`topic`), else the
- *  tile's name. Nothing when no page lies below the tile. */
+/** EXPLORE MORE (jwize 2026-11-10: "all levels have their children as
+ *  presentations"). The siblings row only changes which video is selected; to
+ *  learn more you go IN: the button opens the first child's presentation, whose
+ *  own row is then that level's tiles. The topic is a plain-language noun
+ *  authored on the page (`topic`), else the tile's name. Nothing when no page
+ *  lies below the tile. */
 const exploreOf = (route, paged, block) => {
-  const kids = (tileAt(route)?.children || []).map(c => {
-    const r = [...route, c.name]
-    return { name: c.name, note: c.note || '', route: r, page: paged.has(r.join('/')) }
-  })
-  if (!kids.some(k => k.page)) return null
-  return { topic: String((block && block.topic) || route[route.length - 1]), kids }
+  const first = (tileAt(route)?.children || []).map(c => [...route, c.name]).find(r => paged.has(r.join('/')))
+  if (!first) return null
+  return { topic: String((block && block.topic) || route[route.length - 1]), to: first }
 }
 
 /** THE TREE MENU (jwize 2026-11-08: "a left hand sidebar menu for the tree"):
