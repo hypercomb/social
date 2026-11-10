@@ -695,7 +695,12 @@ test('published Core hosts reject every mutation before relay routing', async ()
   const options = await worker.fetch(new Request('https://pluginthematrix.pluginthematrix.com/', { method: 'OPTIONS' }), env)
   assert.equal(upload.status, 405)
   assert.equal(hive.status, 405)
-  assert.equal(options.status, 405)
+  // the refusal is readable: CORS rides on it, and it says why
+  assert.equal(hive.headers.get('access-control-allow-origin'), '*')
+  assert.match(hive.headers.get('x-reason') ?? '', /read-only/)
+  // a preflight is not a write: it is answered, so the browser can deliver the refusal above
+  assert.equal(options.status, 204)
+  assert.match(options.headers.get('access-control-allow-methods') ?? '', /PUT/)
   assert.deepEqual(assetRequests, [])
 })
 
