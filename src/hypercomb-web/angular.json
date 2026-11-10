@@ -78,6 +78,27 @@
                 "input": "src/index.visitor.html",
                 "output": "index.html"
               },
+              "assets": [
+                {
+                  "glob": "**/*",
+                  "input": "public",
+                  "ignore": ["content/**"]
+                },
+                {
+                  "glob": "**/*",
+                  "input": "../shared-public"
+                },
+                {
+                  "glob": "**/*",
+                  "input": "../hypercomb-shared/tracks",
+                  "output": "/tracks"
+                },
+                {
+                  "glob": "**/*.md",
+                  "input": "../documentation",
+                  "output": "/documentation"
+                }
+              ],
               "fileReplacements": [
                 {
                   "replace": "../hypercomb-shared/ui/shell-surfaces/shell-surfaces.barrel.ts",

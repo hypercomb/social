@@ -1,5 +1,14 @@
 # Public Content Endpoint — the CDN tier, speaking Blossom over R2
 
+**Writes go to the zone root, and a refusal is readable (2026-11-10).** Every
+site under a zone is read-only: a write there gets `405` with an `X-Reason`
+("published Core hosts are read-only", "the host door is read-only — write at
+the zone root"). The browser's `OPTIONS` preflight is answered on every host,
+so that refusal reaches the hive as a status and a reason, never as a network
+error it can only call "host unreachable". The hive's index write
+(`putHiveManifest`, `sharing/hive-pointer.ts`) carries a write refused that
+way from a site to its zone root once; any other failure stays as it was.
+
 **Status: DEPLOYED 2026-07-09, smoke-tested live.** Code:
 `hypercomb-relay/blossom-worker/` (worker.js + wrangler.toml + package.json).
 Live at **`https://content.jwize.com`** (legacy since 2026-10-03 — writes and
