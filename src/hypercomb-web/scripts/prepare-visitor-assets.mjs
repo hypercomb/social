@@ -15,7 +15,14 @@ const here = dirname(fileURLToPath(import.meta.url))
 const project = join(here, '..')
 const source = join(project, 'dist', 'hypercomb-web', 'browser')
 const output = join(project, 'dist', 'hypercomb-web', 'visitor')
-const sourceContent = join(source, 'content')
+// THE CONTENT HEAP IS READ WHERE IT LIVES. public/content keeps every published
+// revision so the installer can walk them (thousands of folders on a machine
+// that has built for a while), and the website needs only the current package.
+// The visitor build therefore leaves content/ out of Angular's assets
+// (angular.json, configuration "visitor") and this script takes the few
+// entries it needs straight from the source, instead of Angular copying the
+// whole heap into dist for this script to throw most of it away.
+const sourceContent = join(project, 'public', 'content')
 const outputContent = join(output, 'content')
 const SIG_RE = /^[a-f0-9]{64}$/
 
