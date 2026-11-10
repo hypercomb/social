@@ -2880,6 +2880,8 @@
   "meeting.lobby-cancel": "отмена",
   "meeting.lobby-join": "войти",
   "meeting.lobby-ready": "Камера готова",
+  "meeting.lobby-no-microphone": "Микрофон не найден. Вы присоединитесь без звука.",
+  "meeting.no-microphone": "Ваш микрофон не включён. Остальные вас не слышат.",
   "meeting.lobby-hint": "{width}×{height} · {fps} к/с · до {mbps} Мбит/с каждому",
   "meeting.lobby-actual": "Передача {width}×{height}",
   "meeting.lobby-here": "{here} из {needed} на месте",

@@ -4580,6 +4580,8 @@
   "meeting.lobby-cancel": "cancel",
   "meeting.lobby-join": "join",
   "meeting.lobby-ready": "Camera ready",
+  "meeting.lobby-no-microphone": "No microphone found. You will join without sound.",
+  "meeting.no-microphone": "Your microphone is not on. The others cannot hear you.",
   "meeting.lobby-hint": "{width}×{height} · {fps} fps · up to {mbps} Mbps to each person",
   "meeting.lobby-actual": "Sending {width}×{height}",
   "meeting.lobby-here": "{here} of {needed} here",

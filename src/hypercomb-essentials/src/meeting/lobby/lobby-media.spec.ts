@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SEATS, deviceLabel, failureOf, levelOf, seatPositions, seatsTaken } from './lobby-media.js'
+import { SEATS, deviceLabel, failureOf, levelOf, lobbyLiveStatus, seatPositions, seatsTaken } from './lobby-media.js'
 
 describe('why a camera did not open', () => {
   it('names the four things a participant can act on', () => {
@@ -70,5 +70,15 @@ describe('what a device is called', () => {
   it('numbers an unnamed one, as browsers hide names until permission', () => {
     expect(deviceLabel({ label: '' }, 1, 'camera')).toBe('Camera 2')
     expect(deviceLabel({ label: '  ' }, 0, 'microphone')).toBe('Microphone 1')
+  })
+})
+
+describe('the lobby status line once the preview is up', () => {
+  it('stays ready when a microphone is there, and says so when it is not', () => {
+    expect(lobbyLiveStatus(true)).toEqual({ key: 'meeting.lobby-ready', fallback: 'Camera ready' })
+    expect(lobbyLiveStatus(false)).toEqual({
+      key: 'meeting.lobby-no-microphone',
+      fallback: 'No microphone found. You will join without sound.',
+    })
   })
 })
