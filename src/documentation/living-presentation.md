@@ -932,17 +932,16 @@ every page, and its 25 scenes are folded into the tiles they explain:
     button leads to shows the same row, with only the lit one moved. A tile that
     is the only one there shows nothing.
 
-  - **the child view** (jwize, 2026-11-10: *"as well as a video they have an
-    html view that allows them to present their own children in the siblings
-    list"*). The siblings row only chooses WHICH VIDEO. A tile that has pages
-    beneath it has a second view of the same page: **Explore more about
-    <topic>**, bottom right under the video (and a quiet *Explore ›* in the top
-    bar as the backup), switches the stage to the tile's own children as cards,
-    and the bottom row lists those children. The button turns into *Back to the
-    video*. Entering the child view stops the voice; `#children` in the address
-    opens it directly. The topic is a plain-language noun authored on the page
-    (`topic` in `content.cjs`), else the tile's name. A tile with nothing
-    beneath it has neither the button nor the view.
+  - **Explore more** (jwize, 2026-11-10: *"all levels have their children as
+    presentations"*, and *"when you click any sibling menu you only change the
+    selected item and then when you want to learn more you can click in"*). The
+    siblings row only changes which video is selected. A tile that has pages
+    beneath it offers **Explore more about <topic>**, bottom right under the
+    video (and a quiet *Explore ›* in the top bar as the backup): it opens the
+    first child's presentation, whose bottom row is then that level's tiles.
+    The crumbs take you back up. The topic is a plain-language noun authored on
+    the page (`topic` in `content.cjs`), else the tile's name. A tile with
+    nothing beneath it has no button.
 
   There is no step-in row and no previous or next: the tree goes down, the
   siblings go across, and the crumbs go up. Every link lands on a page, the tile
