@@ -17,7 +17,7 @@ This repo is the snapshot of Hypercomb at the moment it became self-sustaining. 
 ## What this repository is not
 
 - **Not actively maintained here.** No PRs will be merged. No issues will be triaged. The canonical repo is intentionally frozen.
-- **Not a collaboration hub.** Collaboration happens in your own forks, in your own modules, and across the signature-addressed module network — not in this repo.
+- **Not a collaboration hub.** Collaboration happens in your own forks, in your own modules, and across the signature-addressed module network — not in this repo. Taking part happens in the hive itself: open one in a browser, make something, and publish it from your own domain.
 - **Not a product.** It is source. What you do with it is up to you.
 
 ---

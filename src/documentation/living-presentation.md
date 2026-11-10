@@ -890,20 +890,23 @@ every page, and its 25 scenes are folded into the tiles they explain:
     brief stay ready. A route promotes again by leaving the list.
   - A scene on a waiting tile waits with it. The checks ask that every scene
     be placed once or waiting (`tour.waitingScenes()`).
-  - **Promoted (21 pages):** protocol; simple, primitive, signature, act;
-    organized, history; collaborative, workbench, domain, publishing;
-    intelligent, sentence, agent; accessible; localized; and on the road:
-    road, question, creations, yours, first-day.
+  - **Promoted (40 pages on 2026-11-10; see
+    [presentation-blueprint.md](presentation-blueprint.md), "Coverage"):**
+    protocol; simple, primitive (with word, signature and meta), act, proof;
+    organized, history, organization, hiding, shelf; collaborative,
+    workbench, domain, publishing, participant, sharing, discovery, hosting,
+    gate; intelligent, sentence, agent, interest; accessible; localized; and
+    on the road:
+    road, question, creations, market, computer (with machine and system),
+    gathering (with meeting and host), yours, first-day.
   - **Waiting:**
-    - simple: opening (and its seven moves); word, layer and meta under the
-      primitive.
-    - organized: heart (scene 14), build, layout, trait, organization.
-    - collaborative: trial, participant, sharing, discovery (scene 16, the
-      Hyperdex), hosting, tapestry.
+    - simple: opening (and its seven moves); layer under the primitive.
+    - organized: heart (scene 14), build, layout, trait.
+    - collaborative: trial, tapestry.
     - intelligent: automaton (scene 9, bees), debugging, merging.
     - accessible: reader, listening, phone, motion.
     - localized: translating, locale.
-    - road: coming, vision, computer (scenes 21 to 23).
+    - road: coming, vision (scenes 21 and 22).
 - **A tree on the left, the siblings underneath.** jwize, 2026-11-05, then
   2026-11-06 (#110): every node is a video, and a parent is a category you
   choose into, so no row mixes levels. Then 2026-11-08: *"a left hand sidebar
