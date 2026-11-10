@@ -36,6 +36,7 @@ const lit = (top, ...names) => [top, ...names, ...names.map(n => `${top}-${n}`)]
 
 module.exports = {
   'protocol/simple/primitive': {
+    topic: 'the pattern',
     live: [
       { shot: 'the-tile-editor', title: 'one tile, opened', caption: 'One tile in its editor: a name, a picture, a border, a link, and its words. Every tile is these same few parts.' },
     ],
@@ -278,11 +279,13 @@ module.exports = {
   // ── the top: the protocol and its six values ──────────────────────
 
   'protocol': {
+    topic: 'the protocol',
     code: [],
     files: ['documentation/living-presentation.md'],
   },
 
   'protocol/simple': {
+    topic: 'tiles',
     figures: {
       3: {
         tiles: ['revolucion', 'knowledge', 'room-host', 'scratch-organize', 'play', 'work', 'misc', 'behavior-where-visual'],
@@ -295,16 +298,19 @@ module.exports = {
   },
 
   'protocol/organized': {
+    topic: 'integrity and history',
     code: [{ path: 'hypercomb-essentials/src/commands/layout.ts', from: 'export function leftOut', lines: 3 }],
     files: ['documentation/history-sigbag-as-root.md', 'documentation/traits.md', 'documentation/layout-templates.md', 'hypercomb-essentials/src/commands/layout.ts'],
   },
 
   'protocol/collaborative': {
+    topic: 'working together',
     code: [],
     files: ['documentation/domain-claim.md', 'documentation/publishing-a-revision.md', 'documentation/pools-across-hosts.md'],
   },
 
   'protocol/intelligent': {
+    topic: 'the language and AI',
     code: [],
     files: ['documentation/every-act-has-a-word.md', 'documentation/speak-dont-bridge.md', 'documentation/agents.md'],
   },
@@ -588,6 +594,7 @@ module.exports = {
 
 
   'road': {
+    topic: 'the road',
     eyebrow: 'the road',
     headline: 'Where it *leads*',
     sub: 'One scene per tile, in the order the tour tells them.',
