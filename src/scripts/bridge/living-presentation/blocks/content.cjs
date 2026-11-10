@@ -681,21 +681,21 @@ module.exports = {
     eyebrow: 'get involved',
     headline: 'An open *door*',
     sub: 'Nothing here is asked of you.',
-    picture: hub('gathering', ['meeting', 'host'], 'The gathering and its two tiles'),
+    picture: hub('gathering', ['meetings', 'host'], 'The gathering and its two tiles'),
     beats: [
       { say: 'This is an experiment you are welcome in, and this is where you can take part.', lit: ['gathering'] },
-      { say: 'One way in is a meeting: people walk the hive together, one leading and the others following.', lit: lit('gathering', 'meeting') },
+      { say: 'One way in is a meeting: people walk the hive together, one leading and the others following.', lit: lit('gathering', 'meetings') },
       { say: 'The other is to become a host, so that people can reach your work when you are not online with them.', lit: lit('gathering', 'host') },
-      { say: 'Neither is needed to read, or to take what others have made, and both doors stay open.', lit: lit('gathering', 'meeting', 'host') },
+      { say: 'Neither is needed to read, or to take what others have made, and both doors stay open.', lit: lit('gathering', 'meetings', 'host') },
     ],
     files: ['documentation/presentation-blueprint.md', 'documentation/meeting-lobby.md', 'documentation/becoming-a-host.md'],
   },
 
-  'road/gathering/meeting': {
+  'road/gathering/meetings': {
     eyebrow: 'a meeting',
     headline: 'Start one, and people *follow*',
     sub: 'Following the leader is the shared screen. Where a host has no meeting point set up, the meeting goes on with no video between people.',
-    plate: 'road-gathering-meeting',
+    plate: 'road-gathering-meetings',
     figcap: 'one leads, the others follow',
     beats: [
       { say: 'Type meeting, and you start one, or join the one already going.', lit: ['say'] },
