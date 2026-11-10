@@ -53,3 +53,9 @@ export const levelOf = (samples: ArrayLike<number>): number => {
 /** What a device is called in the list. Browsers hide labels until permission. */
 export const deviceLabel = (device: { label: string }, index: number, kind: 'camera' | 'microphone'): string =>
   device.label.trim() || `${kind === 'camera' ? 'Camera' : 'Microphone'} ${index + 1}`
+
+/** The status line once the preview is up. Join stays available either way. */
+export const lobbyLiveStatus = (hasMicrophone: boolean): { key: string; fallback: string } =>
+  hasMicrophone
+    ? { key: 'meeting.lobby-ready', fallback: 'Camera ready' }
+    : { key: 'meeting.lobby-no-microphone', fallback: 'No microphone found. You will join without sound.' }

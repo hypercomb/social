@@ -22,7 +22,8 @@ import {
   type WindowSession,
 } from '@hypercomb/core'
 import { QUALITIES, describeQuality, qualityConstraints, type Devices, type Quality } from '../meeting-quality.js'
-import { deviceLabel, failureOf, levelOf, seatPositions, seatsTaken, type Failure } from './lobby-media.js'
+import { deviceLabel, failureOf, levelOf, lobbyLiveStatus, seatPositions, seatsTaken, type Failure } from './lobby-media.js'
+import { liveMicTracks } from '../meeting-playback.js'
 import { installMeetingLobbyStyles } from './meeting-lobby.styles.js'
 import { closeWhenDark, refuseWhileDark } from '../../commands/word-enablement.js'
 
@@ -480,7 +481,8 @@ export class MeetingLobbyElement extends HTMLElement {
       try {
         stream = await media.getUserMedia(wanted)
       } catch (error) {
-        // No microphone is not a reason to refuse the camera: join without sound.
+        // No microphone is not a reason to refuse the camera. Join stays open;
+        // the status line says there will be no sound.
         if ((error as { name?: string } | null)?.name !== 'NotFoundError') throw error
         stream = await media.getUserMedia({ video: wanted.video })
       }
@@ -500,7 +502,7 @@ export class MeetingLobbyElement extends HTMLElement {
     this.#stream = stream
     this.#video.srcObject = stream
     try { void Promise.resolve(this.#video.play()).catch(() => { /* autoplay policy: the next frame plays it */ }) } catch { /* no play() here */ }
-    this.#setState('live')
+    this.#setState('live', liveMicTracks(stream.getTracks()).length === 0)
     this.#watchLevel(stream)
     this.#paintActual(stream)
     void this.#listDevices()
@@ -572,14 +574,15 @@ export class MeetingLobbyElement extends HTMLElement {
 
   // ── what is shown ─────────────────────────────────────────────
 
-  #setState(state: State): void {
+  #setState(state: State, noMicrophone = false): void {
     this.#state = state
     this.#ring.dataset['state'] = state
     const live = state === 'live'
     this.#say.hidden = live
     this.#join.disabled = !live
     if (live) {
-      this.#live.textContent = t('meeting.lobby-ready', 'Camera ready')
+      const line = lobbyLiveStatus(!noMicrophone)
+      this.#live.textContent = t(line.key, line.fallback)
       return
     }
     const saying = SAYINGS[state]
@@ -611,6 +614,11 @@ export class MeetingLobbyElement extends HTMLElement {
 
   /** What the camera actually gave, which can be less than was asked for. */
   #paintActual(stream: MediaStream): void {
+    if (liveMicTracks(stream.getTracks()).length === 0) {
+      const line = lobbyLiveStatus(false)
+      this.#sub.textContent = t(line.key, line.fallback)
+      return
+    }
     const settings = stream.getVideoTracks()[0]?.getSettings()
     this.#sub.textContent = settings?.width && settings?.height
       ? t('meeting.lobby-actual', 'Sending {width}×{height}', { width: settings.width, height: settings.height })

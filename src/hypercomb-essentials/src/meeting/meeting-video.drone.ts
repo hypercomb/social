@@ -8,6 +8,7 @@
 
 import { Drone } from '@hypercomb/core'
 import type { MeetingState } from './hive-meeting.drone.js'
+import { PlaybackRetry, watchAudioTrack } from './meeting-playback.js'
 
 type MeetingStreamPayload = { streams: Map<string, MediaStream> }
 type MeetingStatePayload = { state: MeetingState; threshold: number }
@@ -22,6 +23,14 @@ export class MeetingVideoDrone extends Drone {
   protected override listens = ['meeting:streams', 'meeting:state']
 
   #els = new Map<string, HTMLVideoElement>()
+  /** Comes off with the element. An audio track added later has to call play() again. */
+  #unwatch = new Map<string, () => void>()
+  /** One gesture for every remote element autoplay refused. Own video stays muted. */
+  #sound = new PlaybackRetry(
+    document,
+    () => [...this.#els.values()].filter(video => video.paused),
+    error => console.warn('[meeting-video] remote sound is blocked until a click or a key', error),
+  )
   #effectsRegistered = false
 
   protected override sense = (): boolean => true
@@ -46,6 +55,7 @@ export class MeetingVideoDrone extends Drone {
     for (const id of [...this.#els.keys()]) if (!streams.has(id)) this.#remove(id)
     for (const [id, stream] of streams) {
       let video = this.#els.get(id)
+      const remote = id !== this.#ownId()
       if (!video) {
         video = document.createElement('video')
         video.autoplay = true
@@ -56,24 +66,44 @@ export class MeetingVideoDrone extends Drone {
         document.body.appendChild(video)
         this.#els.set(id, video)
       }
+      this.#watch(id, video, stream, remote)
       if (video.srcObject !== stream) {
         video.srcObject = stream
-        void video.play().catch(() => { /* autoplay policy */ })
+        this.#play(video, remote)
       }
     }
   }
 
+  /** A remote rejection arms the one gesture. Your own element stays muted and is not warned. */
+  #play = (video: HTMLVideoElement, remote: boolean): void => {
+    void video.play().then(() => undefined, (error: unknown) => {
+      if (remote) this.#sound.rejected(error)
+    })
+  }
+
+  #watch = (id: string, video: HTMLVideoElement, stream: MediaStream, remote: boolean): void => {
+    if (this.#unwatch.has(id) && video.srcObject === stream) return
+    this.#unwatch.get(id)?.()
+    this.#unwatch.set(id, watchAudioTrack(stream, () => this.#play(video, remote)))
+  }
+
   #remove = (id: string): void => {
+    this.#unwatch.get(id)?.()
+    this.#unwatch.delete(id)
     const video = this.#els.get(id)
-    if (!video) return
-    video.pause()
-    video.srcObject = null
-    video.remove()
-    this.#els.delete(id)
+    if (video) {
+      video.pause()
+      video.srcObject = null
+      video.remove()
+      this.#els.delete(id)
+    }
+    const own = this.#ownId()
+    if (![...this.#els.entries()].some(([peer, element]) => peer !== own && element.paused)) this.#sound.disarm()
   }
 
   #stopAll = (): void => {
     for (const id of [...this.#els.keys()]) this.#remove(id)
+    this.#sound.disarm()
   }
 
   #ownId = (): string => {
