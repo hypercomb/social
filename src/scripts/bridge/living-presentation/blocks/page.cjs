@@ -122,11 +122,11 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
    "the menu should be hidden but expandable").
    The STAGE is the container, so sizes read from the video's own width (cqi),
    the same slide standing alone or mounted in the hive. */
-.page{width:min(1280px,100%);margin:0 auto;padding:14px 16px 0;position:relative;
+.page{width:min(1280px,100%);margin:0 auto;padding:14px 16px env(safe-area-inset-bottom,0px);position:relative;
   height:calc(100vh - var(--hc-site-chrome-bottom,0px));height:calc(100dvh - var(--hc-site-chrome-bottom,0px));min-height:520px;
   display:grid;grid-template-columns:minmax(0,1fr);--measure:780px}
 .stage{container-type:inline-size;display:grid;grid-template-rows:auto auto minmax(0,1fr);min-height:0;min-width:0}
-.stage>.top{grid-row:1}.stage>.row{grid-row:2}.stage>.scene{grid-row:3}
+.stage>.top{grid-row:1}.stage>.row{grid-row:2}.stage>.scene{grid-row:3}.stage>.next{display:none}
 .mono-label{font-family:var(--mono);font-size:12px;line-height:1.3;letter-spacing:var(--track-label);text-transform:uppercase}
 
 /* ---------- where you are ---------- */
@@ -205,7 +205,7 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
   clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
 
 /* the beats: each part lights as it is said; a panel beside dims until its beat */
-.plate.beats [data-id],.fz.lights [data-id]{opacity:.38;transition:opacity .7s var(--ease)}
+.plate.beats [data-id],.fz.lights [data-id]{opacity:.5;transition:opacity .7s var(--ease)}
 .plate.beats [data-id].lit,.fz.lights [data-id].lit{opacity:1}
 .fz.duo .pane{transition:opacity .5s var(--ease)}
 /* AMBIENCE, kept under the threshold of notice: a warm light behind the picture that breathes once in twelve
@@ -384,7 +384,26 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .page.menu-open .stage{grid-column:2}
 .menu-btn[aria-expanded="true"]{color:var(--honey);border-color:var(--honey-deep)}
 @media (max-width:760px){
-  .page{padding:12px 12px 0}
+  /* A PHONE SCROLLS (jwize 2026-11-11: "the bottom is cut off ... a scroller list like youtube"). The player is the
+     first screen, less a strip, so the list under it shows its first line and the page reads as one that goes on;
+     the controls stay clear of the browser's bars. The list is in the page's own flow: nothing is fixed. */
+  .page{padding:12px 12px max(14px,env(safe-area-inset-bottom,0px));height:auto;min-height:0}
+  .stage{grid-template-rows:auto auto auto auto}
+  .stage>.scene{min-height:calc(100vh - var(--hc-site-chrome-bottom,0px) - 132px);min-height:calc(100svh - var(--hc-site-chrome-bottom,0px) - 132px)}
+  .stage>.next{display:flex;flex-direction:column;gap:2px;grid-row:4;margin:18px 0 0;padding:14px 0 6px;border-top:1px solid var(--line)}
+  .next h2{margin:10px 2px 6px;font-weight:400;color:var(--faint-text)}
+  .next h2:first-child{margin-top:0}
+  .nx{display:flex;align-items:center;gap:12px;min-height:60px;padding:8px 10px;box-sizing:border-box;text-decoration:none;color:var(--ink);
+    border:1px solid transparent;border-radius:var(--r-ctl);transition:background .15s,border-color .15s}
+  a.nx:active,a.nx:hover,a.nx:focus-visible{background:var(--honey-tint);border-color:var(--honey-deep)}
+  .nx-mark{flex:none;width:44px;height:50px;display:grid;place-items:center;color:var(--honey);background:var(--panel);
+    clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
+  .nx-mark .g{width:16px;height:16px}
+  .nx-words{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .nx-words b{font-weight:500;font-size:16px;line-height:1.3}
+  .nx-words small{font-size:13px;line-height:1.4;color:var(--dim);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .nx.soon{color:var(--faint-text)}
+  .nx.soon .nx-mark{background:none;outline:1px dashed var(--line);outline-offset:-6px;clip-path:none}
   .page.menu-open{grid-template-columns:minmax(0,1fr);column-gap:0}
   .page.menu-open .stage{grid-column:1}
   .page.menu-open .tree{position:fixed;z-index:6;inset:0;bottom:var(--hc-site-chrome-bottom,0px);width:auto;padding:52px 14px calc(16px + env(safe-area-inset-bottom,0px));
@@ -1011,6 +1030,26 @@ const exploreHtml = (ways) => {
   return `<span class="more-wrap"><a class="more" data-part="explore" href="/${e.to.map(esc).join('/')}" title="${esc(about)}" aria-label="${esc(about)}">Explore more<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a>${repeats ? '' : `<small>${esc(names.join(' · '))}</small>`}</span>`
 }
 
+/** UP NEXT, under the player on a phone (jwize 2026-11-11: "incorporate a scroller list like youtube instead of
+ *  the tree or in concert"). What lies inside this tile first, then the tiles beside it, a full row each: a mark,
+ *  the name, and the line that says what it is. A tile said twice (a top page's first level is both) is listed
+ *  once. The tree stays behind its button for going anywhere else. Wider than a phone, the row above the video
+ *  already says this, and the list is not drawn. */
+const nextHtml = (ways, route) => {
+  const here = route.join('/')
+  const seen = new Set([here])
+  const take = (list) => (list || []).filter(t => { const k = t.route.join('/'); if (seen.has(k)) return false; seen.add(k); return true })
+  const inside = take(ways && ways.children)
+  const beside = take(ways && ways.section)
+  const rows = (list) => list.map(t => t.page
+    ? `<a class="nx" href="/${t.route.map(esc).join('/')}"><span class="nx-mark">${icon('play')}</span><span class="nx-words"><b>${esc(t.name)}</b>${t.note ? `<small>${esc(t.note)}</small>` : ''}</span></a>`
+    : `<span class="nx soon"><span class="nx-mark"></span><span class="nx-words"><b>${esc(t.name)}</b><small>${esc(t.note ? `${t.note} (its page is coming)` : 'Its page is coming')}</small></span></span>`).join('')
+  const group = (label, list) => list.length ? `<h2 class="mono-label">${esc(label)}</h2>${rows(list)}` : ''
+  const parent = String((ways && ways.sectionOf) || '')
+  const body = group(`Inside ${route[route.length - 1]}`, inside) + group(parent && parent !== route[route.length - 1] ? `More in ${parent}` : 'Beside this', beside)
+  return body ? `<nav class="next" data-part="next" aria-label="Up next">${body}</nav>` : ''
+}
+
 /** THE ROW above the video: the siblings, then Explore more at their right. */
 const rowHtml = (ways, route) => {
   const inner = sibsHtml(ways, route) + exploreHtml(ways)
@@ -1053,7 +1092,7 @@ ${RAIL_CSS}
 </head>
 <body>
 ${sprite}
-<main class="page">${treeHtml(ways, route)}<div class="stage"><div class="top"><button type="button" class="ib2 menu-btn" aria-label="Show the tree" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></svg></button>${crumbsHtml(route)}<button type="button" class="ib2 fs" aria-label="Full screen" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg></button><button type="button" class="to-site" aria-label="Open the website at this page">${icon('hex')}website</button></div>${rowHtml(ways, route)}${sceneHtml(scene)}</div>
+<main class="page">${treeHtml(ways, route)}<div class="stage"><div class="top"><button type="button" class="ib2 menu-btn" aria-label="Show the tree" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></svg></button>${crumbsHtml(route)}<button type="button" class="ib2 fs" aria-label="Full screen" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg></button><button type="button" class="to-site" aria-label="Open the website at this page">${icon('hex')}website</button></div>${rowHtml(ways, route)}${sceneHtml(scene)}${nextHtml(ways, route)}</div>
 </main>
 <script>${SCRIPT}${tryDef ? `
 ;(() => {

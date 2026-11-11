@@ -205,6 +205,24 @@ describe('every page says where it goes, once', () => {
       const explore = /<span class="more-wrap">[^]*?<\/span>/.exec(b.page)?.[0] ?? ''
       if (explore && b.route.length === 1) expect(explore).not.toContain('<small>')
     })
+    it(`${at}: on a phone the page scrolls, with what is next listed under the player`, () => {
+      // jwize 2026-11-11: "the bottom is cut off ... incorporate a scroller list like youtube instead of the
+      // tree or in concert". The list is in the page's flow under the scene; the tree keeps its button.
+      const list = /<nav class="next" data-part="next" aria-label="Up next">([^]*?)<\/nav>/.exec(b.page)?.[1] ?? ''
+      const listed = [...list.matchAll(/<(a|span) class="nx( soon)?"(?: href="\/([^"]+)")?>/g)]
+      // every tile once: this page never lists itself, and none is said twice
+      const hrefs = listed.map(m => m[3]).filter(Boolean)
+      expect(new Set(hrefs).size).toBe(hrefs.length)
+      expect(hrefs).not.toContain(b.route.join('/'))
+      // what the row above the video offers, the list offers too
+      for (const sib of [...b.page.matchAll(/<a class="sib" href="\/([^"]+)"/g)].map(m => m[1])) expect(hrefs).toContain(sib)
+      if (listed.length) expect(list).toMatch(/<h2 class="mono-label">(Inside |More in |Beside this)/)
+      // drawn on a phone only, where the page is as tall as it needs and clears the browser's bars
+      expect(b.page).toContain('.stage>.next{display:none}')
+      expect(b.page).toMatch(/@media \(max-width:760px\)\{[^]*?\.page\{padding:12px 12px max\(14px,env\(safe-area-inset-bottom,0px\)\);height:auto;min-height:0\}/)
+      expect(b.page).toContain('.stage>.next{display:flex;flex-direction:column;')
+      expect(b.page).toMatch(/class="ib2 menu-btn"/)
+    })
     it(`${at}: the tree reaches every page, and the siblings share one parent`, () => {
       // the tile list carries the tree as data: every page is in it, and it opens where the page stands
       const data = JSON.parse(/<script type="application\/json" data-rail-tree>([^]*?)<\/script>/.exec(b.page)![1]) as { here: string[]; menu: { href: string | null; children: unknown[] }[] }
