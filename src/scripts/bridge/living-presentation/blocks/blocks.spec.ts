@@ -176,6 +176,11 @@ describe('every page says where it goes, once', () => {
       expect(tree).toBeLessThan(scene)
       if (sibs >= 0) expect(sibs).toBeLessThan(scene)
       expect(b.page).toMatch(/class="ib2 menu-btn" aria-label="Show the tree" aria-expanded="false"/)
+      // On a phone the tree is the whole screen and the button stays to put it away (jwize 2026-11-11);
+      // wider, it stands in a column of its own and never over the stage.
+      expect(b.page).toContain('.page.menu-open .tree{position:fixed;z-index:6;inset:0;')
+      expect(b.page).toContain('.page.menu-open .top .menu-btn{position:fixed;')
+      expect(b.page).toContain('.page.menu-open{grid-template-columns:230px minmax(0,1fr)')
       expect(b.page).toMatch(/aria-label="Full screen"/)
     })
     it(`${at}: the tree reaches every page, and the siblings share one parent`, () => {

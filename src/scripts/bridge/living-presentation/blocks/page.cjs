@@ -333,8 +333,11 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 
 /* THE TREE IS HIDDEN behind the menu button, at every width. Opened, it takes
    its own column and the stage moves over: it never covers the content
-   (jwize 2026-11-10: "the menu opens up over the content"). A phone has no
-   room for a second column, so there it is a drawer. */
+   (jwize 2026-11-10: "the menu opens up over the content"; 2026-11-11: "on
+   desktop just make sure it doesn't overlap content"). A phone has no room for
+   a second column, so there the tree is the whole screen (jwize 2026-11-11:
+   "on mobile when you bring up the tree menu it is full screen"), and the menu
+   button stays in its corner to put it away. */
 .tree{display:none}
 .page.menu-open{grid-template-columns:230px minmax(0,1fr);column-gap:22px}
 .page.menu-open .tree{display:flex}
@@ -344,9 +347,12 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
   .page{padding:12px 12px 0}
   .page.menu-open{grid-template-columns:minmax(0,1fr);column-gap:0}
   .page.menu-open .stage{grid-column:1}
-  .page.menu-open .tree{position:absolute;z-index:6;top:0;bottom:0;left:0;width:min(290px,84%);padding:48px 14px 16px 14px;
-    background:var(--panel);border-right:1px solid var(--line-strong);box-shadow:var(--shadow)}
-  .page.menu-open .top .menu-btn{position:relative;z-index:7}
+  .page.menu-open .tree{position:fixed;z-index:6;inset:0;bottom:var(--hc-site-chrome-bottom,0px);width:auto;padding:52px 14px calc(16px + env(safe-area-inset-bottom,0px));
+    background:var(--panel);border-right:0}
+  .page.menu-open .top .menu-btn{position:fixed;z-index:7;top:12px;left:12px}
+  /* a finger's row: the name walks in, the arrow opens the page */
+  .page.menu-open .tree .hc-rail-row{min-height:44px}
+  .page.menu-open .tree .hc-rail-walk{min-width:44px;min-height:44px}
 }
 
 @container (max-width:700px){
@@ -397,6 +403,8 @@ const SCRIPT = `
     }
     const trail = [[]]
     for (let i = 1; i <= here.length; i++) trail.push(here.slice(0, i))
+    // A tile that holds nothing opens the list on the level it stands in, never on an empty one.
+    if (trail.length > 1 && !kidsAt(here).length) trail.pop()
     let query = ''
     host.textContent = ''
     const head = el('div', 'hc-rail-head')
@@ -504,14 +512,44 @@ const SCRIPT = `
     }
   }
   // THE TREE opens beside the stage from the menu button and stays until the button is pressed again.
-  // On a phone it is a drawer: choosing a video, or a press beside it, closes it.
+  // On a phone it is the whole screen, and the row's two presses change places (jwize 2026-11-11: "when you click the
+  // arrow icon on the row you go to the presentation at the link, if you click the tree you nav in or arrow back out as
+  // usual"): the name walks inside a tile that holds others, the arrow opens that tile's page. A tile that holds nothing
+  // has no arrow, so its name opens it. Opening a page puts the tree away.
   const menuBtn = page.querySelector('.menu-btn'), treeNav = page.querySelector('.tree')
   if (menuBtn && treeNav) {
     const drawer = (open) => { page.classList.toggle('menu-open', open); menuBtn.setAttribute('aria-expanded', String(open)) }
     menuBtn.onclick = () => drawer(!page.classList.contains('menu-open'))
     const phone = () => window.matchMedia('(max-width:760px)').matches
+    let passing = false
+    const pass = (node) => { passing = true; try { node.click() } finally { passing = false } }
+    treeNav.addEventListener('click', (e) => {
+      if (passing || !phone() || !e.target.closest) return
+      const row = e.target.closest('.hc-rail-row')
+      const walk = row && row.querySelector('.hc-rail-walk'), main = row && row.querySelector('.hc-rail-main')
+      if (!walk || !main) return
+      const onWalk = !!e.target.closest('.hc-rail-walk')
+      if (!onWalk && !e.target.closest('.hc-rail-main')) return
+      e.preventDefault(); e.stopPropagation()
+      if (onWalk) { pass(main); drawer(false) } else pass(walk)
+    }, true)
+    // The words each press carries say what it does on this screen.
+    const relabel = () => {
+      const swap = phone()
+      for (const row of treeNav.querySelectorAll('.hc-rail-row')) {
+        const walk = row.querySelector('.hc-rail-walk'), main = row.querySelector('.hc-rail-main'), name = row.querySelector('.hc-rail-name')
+        if (!walk || !main || !name) continue
+        const inside = 'Go inside ' + name.textContent, open = 'Open ' + name.textContent
+        const say = (node, words) => { if (node.title !== words) node.title = words; if (node.getAttribute('aria-label') !== words) node.setAttribute('aria-label', words) }
+        say(walk, swap ? open : inside)
+        if (swap) say(main, inside); else { if (main.title !== open) main.title = open; main.removeAttribute('aria-label') }
+      }
+    }
+    const watchRows = new MutationObserver(() => { if (gone()) { watchRows.disconnect(); return } relabel() })
+    watchRows.observe(treeNav, { childList: true, subtree: true })
+    const wide = window.matchMedia('(max-width:760px)')
+    if (wide.addEventListener) wide.addEventListener('change', () => { if (!gone()) relabel() })
     treeNav.addEventListener('click', (e) => { if (phone() && e.target.closest && e.target.closest('a')) drawer(false) })
-    page.addEventListener('click', (e) => { if (phone() && page.classList.contains('menu-open') && !(e.target.closest && e.target.closest('.tree,.menu-btn'))) drawer(false) })
   } else if (menuBtn) menuBtn.hidden = true
   // THE TILE LIST. Inside the hive (and on the published site) the hive's own list is
   // mounted here, the one the AI chat shows, and a press on a tile opens that tile's page.

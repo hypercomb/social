@@ -923,8 +923,16 @@ every page, and its 25 scenes are folded into the tiles they explain:
     opened on its own has no hive, so it draws the same list from its own tree,
     in the same markup and the same stylesheet: `assistant/tiles-rail.css.ts`
     is that one sheet, and the page build reads it from there
-    (`blocks.spec.ts` fails a page whose copy differs). On a phone it is a
-    drawer behind a menu button.
+    (`blocks.spec.ts` fails a page whose copy differs). On a phone it is the
+    whole screen, behind the menu button, which stays in its corner to put it
+    away (jwize, 2026-11-11: *"on mobile when you bring up the tree menu it is
+    full screen and when you click the arrow icon on the row you go to the
+    presentation at the link, if you click the tree you nav in or arrow back
+    out as usual"*). There the row's two presses change places: the name walks
+    inside a tile that holds others, and the arrow opens that tile's page. A
+    tile that holds nothing has no arrow, so its name opens it. Wider than a
+    phone the list stands in a column of its own and the stage moves over, so
+    it never covers the content, and the name opens the page as before.
   - **crumbs**, the way up, in the bar over the video: `protocol / simple`,
     with the fullscreen button beside them. Fullscreen takes the video alone.
   - **the siblings**, balanced and centred above the video (under it until
