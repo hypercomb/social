@@ -311,13 +311,15 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 /* EXPLORE MORE is the one button to the right of the row (jwize 2026-11-10:
    "put the explore more as the button to the right of the playlist for the
    current layer this way it is simple"): the way down, into the first child. */
-/* what lies below, small, under the button (jwize 2026-11-10: "it needs details maybe small underneath") */
+/* what lies below, small, under the button (jwize 2026-11-10: "it needs details maybe small underneath");
+   the button wears the lit sibling's colours ("the same color as the active button"), and the
+   names under it are this page's own children, so they change with the lit sibling. */
 .row .more-wrap{display:inline-flex;flex-direction:column;align-items:center;gap:4px;min-width:0}
-.row .more-wrap small{font:400 11px/1.3 var(--sans);color:var(--faint-text);max-width:18em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.row a.more{display:inline-flex;align-items:center;gap:.5em;text-decoration:none;color:var(--honey);white-space:nowrap;
+.row .more-wrap small{font:400 11px/1.3 var(--sans);color:var(--faint-text);max-width:22em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row a.more{display:inline-flex;align-items:center;gap:.5em;text-decoration:none;color:var(--honey);white-space:nowrap;background:var(--honey-tint);
   border:1px solid var(--honey-deep);border-radius:var(--r-card);padding:6px 14px;font:500 13px/1.3 var(--mono);letter-spacing:var(--track-data);transition:border-color .15s,background .15s}
 .row a.more svg{width:13px;height:13px;flex:none;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;transition:transform .15s}
-.row a.more:hover,.row a.more:focus-visible{border-color:var(--honey);background:var(--honey-tint)}
+.row a.more:hover,.row a.more:focus-visible{border-color:var(--honey)}
 .row a.more:hover svg,.row a.more:focus-visible svg{transform:translateX(3px)}
 .row .lbl{flex-basis:100%;text-align:center;color:var(--faint-text)}
 .sibs a.sib,.sibs span.sib{display:inline-flex;align-items:center;gap:.5em;text-decoration:none;color:var(--ink);
@@ -814,7 +816,7 @@ const exploreHtml = (ways) => {
   const e = ways && ways.explore
   if (!e) return ''
   const about = `Explore more about ${e.topic}`
-  return `<span class="more-wrap"><a class="more" data-part="explore" href="/${e.to.map(esc).join('/')}" title="${esc(about)}" aria-label="${esc(about)}">Explore more<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a><small>${esc(e.topic)}</small></span>`
+  return `<span class="more-wrap"><a class="more" data-part="explore" href="/${e.to.map(esc).join('/')}" title="${esc(about)}" aria-label="${esc(about)}">Explore more<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a><small>${esc((e.names && e.names.length ? e.names : [e.topic]).join(' · '))}</small></span>`
 }
 
 /** THE ROW above the video: the siblings, then Explore more at their right. */
