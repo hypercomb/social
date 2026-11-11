@@ -69,6 +69,10 @@ await import('../didyouknow/did-you-know.queen.js')
 await import('../didyouknow/reveal.queen.js')
 await import('../didyouknow/collect.queen.js')
 await import('../navigation/walk.queen.js')
+await import('../sharing/follow.queen.js')
+await import('../sharing/community.queen.js')
+await import('../sharing/offers.queen.js')
+await import('./adopt.queen.js')
 
 type Declared = { reach?: string; scope?: string; refuse?: (args: string) => string | undefined }
 const census = (ioc.get('@diamondcoreprocessor.com/SlashBehaviourDrone') as {
@@ -171,6 +175,15 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
   // grant"). Only the history forms are a machine's; opening a branch's
   // history cannot be taken back, so the ceiling is destructive at the network.
   publish: ['destructive', 'network'],
+  // Judged on arrival (2026-11-11, development by chat — "we follow a domain
+  // get the creation and start making changes seamlessly").
+  follow: ['additive', 'network'],         // adds a domain to the ones read from; `off` is refused,
+                                           // so nothing admitted takes a domain away
+  community: ['additive', 'local'],        // opens a domain's community window; `publish` is refused,
+                                           // so nothing is signed and nothing is switched
+  offers: ['additive', 'local'],           // opens the offers window; placing is a press there
+  adopt: ['additive', 'network'],          // a peer's tile into this hive (the click's own path);
+                                           // `branch` asks the participant with the count
 }
 
 describe('every machine declaration, as audited', () => {
@@ -282,4 +295,32 @@ describe('what the corrections refuse', () => {
     ioc.register('@hypercomb.social/Lineage', undefined)
   })
 
+})
+
+describe('the journey words, as a model may say them (2026-11-11)', () => {
+  const refuseOf = (verb: string) => declared.get(verb)!.refuse ?? (() => undefined)
+
+  it('follow adds a domain; stopping is the participant\'s', () => {
+    const refuse = refuseOf('follow')
+    expect(refuse('')).toBeUndefined()
+    expect(refuse('hypercomb.com')).toBeUndefined()
+    expect(refuse('off hypercomb.com')).toBe('follow off stops reading a domain; only the participant says it')
+    expect(refuse('OFF')).toContain('only the participant says it')
+    expect(refuse('offers.example')).toBeUndefined()
+  })
+
+  it('community opens a named domain; signing it is the participant\'s', () => {
+    const refuse = refuseOf('community')
+    expect(refuse('example.com')).toBeUndefined()
+    expect(refuse('')).toBe('community needs a domain')
+    expect(refuse('Publish')).toContain('only the participant says it')
+  })
+
+  it('adopt needs a tile named', () => {
+    const refuse = refuseOf('adopt')
+    expect(refuse('orchard')).toBeUndefined()
+    expect(refuse('orchard branch')).toBeUndefined()
+    expect(refuse('')).toBe('adopt needs a tile name')
+    expect(refuse('branch')).toBe('adopt needs a tile name')
+  })
 })

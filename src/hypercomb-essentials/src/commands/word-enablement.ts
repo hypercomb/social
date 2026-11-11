@@ -48,7 +48,7 @@
 
 import { get, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import {
-  ENABLEMENT_CHANGED, isKindGloballyOff, isPublishedVisitorShell, readGlobalOffKinds,
+  ENABLEMENT_CHANGED, isKindGloballyOff, isKindSuggested, isPublishedVisitorShell, readGlobalOffKinds,
 } from '../sharing/behavior-enablement.js'
 import { gameCensus } from '../games/game-enablement.js'
 
@@ -133,7 +133,9 @@ export function sayWordDark(word: string): void {
   EffectBus.emit('toast:show', {
     type: 'info',
     title: '/' + w,
-    message: say('words.dark', `"${w}" is switched off. Its light is in Beehaviors, under Everywhere.`, { word: w }),
+    message: isKindSuggested(WORD_KIND_PREFIX + w)
+      ? say('words.suggested', `"${w}" is suggested, and off until you turn it on. Its light is in Beehaviors, under Everywhere.`, { word: w })
+      : say('words.dark', `"${w}" is switched off. Its light is in Beehaviors, under Everywhere.`, { word: w }),
     actionLabel: say('words.dark.open', 'Open Beehaviors'),
     actionEffect: 'features:roster-open',
     actionPayload: { query: w },

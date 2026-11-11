@@ -7,7 +7,7 @@
 import { Component, computed, effect, ElementRef, HostBinding, inject, input, output, signal, ViewChild, type AfterViewInit, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import { ENABLEMENT_CHANGED, isWordSwitchedOff } from '../features-viewer/behavior-enablement'
+import { ENABLEMENT_CHANGED, acceptSuggestedWord, isWordSuggested, isWordSwitchedOff } from '../features-viewer/behavior-enablement'
 import { TextScaleComponent, surfaceScale, stepSurfaceScale } from '../text-scale/text-scale.component'
 import { RailParticipantsComponent } from '../participants/rail-participants.component'
 import { inSwarm } from '../participants/participants-roster'
@@ -358,6 +358,11 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   readonly #lights = signal(0)
   readonly #offLights = EffectBus.on(ENABLEMENT_CHANGED, () => this.#lights.update(n => n + 1))
   readonly chatLit = computed(() => { this.#lights(); return !isWordSwitchedOff('chat') })
+  /** The AI chat is a SUGGESTED behaviour (jwize, 2026-11-11): on a hive
+   *  that has not chosen, its button stays as an offer, and pressing it is
+   *  the participant turning it on. */
+  readonly chatSuggested = computed(() => { this.#lights(); return isWordSuggested('chat') })
+  readonly pressChat = (): void => { acceptSuggestedWord('chat'); this.chatToggle.emit() }
   readonly meetingLit = computed(() => { this.#lights(); return !isWordSwitchedOff('meeting') })
   readonly chatLabel = input<string>('chat')
 

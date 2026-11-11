@@ -30,6 +30,22 @@ export class AdoptQueenBee extends QueenBee {
     { input: '/adopt orchard branch', result: 'Asks how many tiles are under "orchard" and who they come from, then takes them all' },
   ]
 
+  // OFFERED TO A MODEL (jwize, 2026-11-11: development by chat). The tile
+  // comes from a peer, so the call reaches the network and waits for the
+  // participant's Run; `branch` then asks them again, with the count.
+  override machine = {
+    forms: '<tile> | <tile> branch',
+    example: '/adopt orchard',
+    reach: 'additive' as const,
+    scope: 'network' as const,
+    consequence: 'Takes a tile a peer is showing on this page into this hive. With branch the participant is asked first, with how many tiles are under it and who they come from.',
+    refuse: (args: string): string | undefined => {
+      const words = args.trim().split(/\s+/).filter(Boolean)
+      if (!words.length || (words.length === 1 && words[0].toLowerCase() === 'branch')) return 'adopt needs a tile name'
+      return undefined
+    },
+  }
+
   protected async execute(args: string): Promise<void> {
     const words = String(args ?? '').trim().split(/\s+/).filter(Boolean)
     const branch = words.length > 1 && words[words.length - 1].toLowerCase() === 'branch'

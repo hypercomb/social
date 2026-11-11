@@ -46,9 +46,13 @@ describe('/offers — the handle', () => {
     expect(customElements.get('hc-offers')).toBe(OffersElement)
   })
 
-  it('carries NO machine grammar and NO alias', () => {
+  // jwize, 2026-11-11 (development by chat): a model may OPEN the window.
+  // The word still takes no argument, so a model names no host and no
+  // meaning, and placing stays a press in the window.
+  it('offers a model the bare open only, on this machine, and NO alias', () => {
     const queen = new OffersQueenBee()
-    expect(queen.machine).toBeUndefined()
+    expect(queen.machine).toEqual(expect.objectContaining({ forms: '', bare: true, reach: 'additive', scope: 'local' }))
+    expect((queen.machine as { refuse?: unknown }).refuse).toBeUndefined()
     expect(queen.aliases).toEqual([])
     expect(queen.slashComplete('ex')).toEqual([])
   })

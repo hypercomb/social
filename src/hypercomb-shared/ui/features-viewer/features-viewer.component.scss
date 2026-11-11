@@ -907,6 +907,13 @@ $path-fail: #e08a8a;     // failed terminal
   color: var(--hc-window-ink-quiet);
 }
 
+// Off, and on offer — the one dark row that asks to be looked at.
+.feature-suggested {
+  font-size: 0.6rem;
+  letter-spacing: 0.03em;
+  color: var(--hc-window-accent, var(--hc-window-ink));
+}
+
 // A behaviour whose module hasn't arrived. Provenance, not an error —
 // plain quiet words, no box.
 .feature-awaiting {

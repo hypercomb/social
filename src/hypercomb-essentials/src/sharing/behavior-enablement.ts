@@ -68,6 +68,12 @@ export const GLOBAL_OFF_KEY = 'hc:behavior-global-off'
 export const WAKE_KEY = 'hc:behavior-wake'
 export const WITHHELD_ROOTS_KEY = 'hc:withheld-at-roots'
 export const BOUND_KEY = 'hc:behavior-bound'
+/** Kinds that are off and OFFERED (jwize, 2026-11-11: "suggested behaviors,
+ *  so the person who doesn't want ai doesn't get it"). Not a polarity: a
+ *  suggested kind answers off from the lists above like any dark kind. The
+ *  shell writes it (a fresh hive's offers) and spends an entry on the first
+ *  flip of that light; this side only reads. */
+export const SUGGESTED_KEY = 'hc:behavior-suggested'
 
 /** Fired (by the shell writer AND the essentials adopt recorder) after any
  *  enablement write, so caches refresh and surfaces repaint at once. */
@@ -290,6 +296,14 @@ export function isKindGloballyOff(kind: string): boolean {
   const on = readGlobalOnKinds()
   if (on) return !on.has(kind)
   return readGlobalOffKinds().has(kind)
+}
+
+/** True when the kind is on offer: named as a suggestion and still off. */
+export function isKindSuggested(kind: string): boolean {
+  wire()
+  const k = String(kind ?? '').trim()
+  if (!k || !readStringArray(SUGGESTED_KEY).includes(k)) return false
+  return isKindGloballyOff(k) || readGlobalOffKinds().has(k)
 }
 
 /** True when a wake exception at `segments` (or any ancestor — a wake covers

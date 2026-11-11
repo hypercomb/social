@@ -125,6 +125,9 @@ interface StoreRow {
    *  roster's own word, help, create, undo, redo). Its row shows lit and
    *  will not switch. */
   fixed?: boolean
+  /** Off, and on offer: the build (or later a host) suggests it, and it runs
+   *  nothing until this light is lit. */
+  suggested?: boolean
   /** Present when the behaviour is bound to one or more tiles — the store is
    *  the census, so it is the one surface that names every binding at once.
    *  Absent means it belongs to the whole hive (the default). */
@@ -453,7 +456,7 @@ export class FeaturesViewerComponent implements OnDestroy {
     if (this.#isRepeatPress('pool/' + row.kind)) return
     const next = !row.on
     setKindGlobalOn(row.kind, next)
-    this.storeRows.set(this.storeRows().map(r => r.kind === row.kind ? { ...r, on: next } : r))
+    this.storeRows.set(this.storeRows().map(r => r.kind === row.kind ? { ...r, on: next, suggested: false } : r))
   }
 
   /** Open the store (header button; the join selector's shared-behaviors
