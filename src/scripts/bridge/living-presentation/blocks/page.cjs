@@ -110,15 +110,18 @@ button{font:inherit;color:inherit}
 [hidden]{display:none!important}
 svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:none}
 
-/* ONE SLIDE: the screen's height (less the hive's exit corner), two columns —
-   the tree menu on the left (jwize 2026-11-08: "a left hand sidebar menu for
-   the tree"), and the stage: crumbs, the video, and the sibling menu under it.
+/* ONE SLIDE: the screen's height (less the hive's exit corner), one column:
+   the stage, with the crumbs, the sibling menu, then the video (jwize
+   2026-11-10: "the sibling menu ... supposed to be above the video"). The tree
+   menu is a drawer behind the menu button at every width (jwize 2026-11-10:
+   "the menu should be hidden but expandable").
    The STAGE is the container, so sizes read from the video's own width (cqi),
    the same slide standing alone or mounted in the hive. */
 .page{width:min(1280px,100%);margin:0 auto;padding:14px 16px 0;position:relative;
   height:calc(100vh - var(--hc-site-chrome-bottom,0px));height:calc(100dvh - var(--hc-site-chrome-bottom,0px));min-height:520px;
-  display:grid;grid-template-columns:230px minmax(0,1fr);column-gap:22px;--measure:780px}
-.stage{container-type:inline-size;display:grid;grid-template-rows:auto minmax(0,1fr) auto auto;min-height:0;min-width:0}
+  display:grid;grid-template-columns:minmax(0,1fr);--measure:780px}
+.stage{container-type:inline-size;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;min-height:0;min-width:0}
+.stage>.top{grid-row:1}.stage>.sibs{grid-row:2}.stage>.scene{grid-row:3}.stage>.explore{grid-row:4}
 .mono-label{font-family:var(--mono);font-size:12px;line-height:1.3;letter-spacing:var(--track-label);text-transform:uppercase}
 
 /* ---------- where you are ---------- */
@@ -136,7 +139,6 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
   border:1px solid var(--line);border-radius:var(--r-ctl);cursor:pointer;padding:0}
 .top .ib2:hover{color:var(--honey);border-color:var(--honey-deep);background:var(--honey-tint)}
 .top .ib2 svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
-.top .menu-btn{display:none}
 .to-site{display:none;align-items:center;gap:.45em;margin-left:auto;font-family:var(--mono);font-size:12px;letter-spacing:var(--track-label);
   text-transform:uppercase;color:var(--dim);background:none;border:1px solid var(--line);border-radius:var(--r-ctl);padding:5px 10px;cursor:pointer}
 .to-site:hover{color:var(--honey);border-color:var(--honey-deep);background:var(--honey-tint)}
@@ -301,20 +303,25 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .tree a:hover{color:var(--honey);background:var(--honey-tint)}
 .tree [aria-current]{color:var(--ink);background:var(--honey-tint);box-shadow:inset 2px 0 0 var(--honey)}
 .tree .soon{color:var(--faint-text);font-style:italic}
-/* THE SIBLING MENU, balanced and centred under the video (jwize 2026-11-08:
+/* EXPLORE MORE, a quiet text link under the video's right edge: no pill, no
+   fill (jwize 2026-11-10: "the more button is not professional and it is
+   ugly"). The topic is the only bright part; the arrow moves on hover. */
+.explore{display:flex;justify-content:flex-end;padding:10px 2px 12px}
+.explore a{display:inline-flex;align-items:baseline;gap:.45em;max-width:100%;color:var(--dim);
+  font:400 13.5px/1.4 var(--sans);text-decoration:none;transition:color .15s}
+.explore a b{font-weight:500;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  border-bottom:1px solid var(--line-strong);transition:border-color .15s,color .15s}
+.explore a:hover,.explore a:focus-visible{color:var(--ink)}
+.explore a:hover b,.explore a:focus-visible b{color:var(--honey);border-color:var(--honey)}
+.explore svg{width:13px;height:13px;flex:none;align-self:center;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;transition:transform .15s}
+.explore a:hover svg,.explore a:focus-visible svg{transform:translateX(3px);color:var(--honey)}
+/* THE SIBLING MENU, balanced and centred above the video (jwize 2026-11-08:
    "no step in any more just the balanced centered sibling menu"): the tiles
    under the same parent, this one lit; the parent's name stands in brackets. */
-.explore{display:flex;justify-content:flex-end;padding:8px 0 2px}
-.explore a{display:inline-flex;align-items:center;gap:8px;max-width:100%;padding:9px 16px;border-radius:999px;border:1px solid var(--honey);color:var(--honey);background:rgba(217,163,28,.08);
-  font-family:var(--mono);font-size:12.5px;letter-spacing:.04em;text-decoration:none;transition:background .15s,color .15s}
-.explore a b{font-weight:600;color:var(--ink,#fff);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.explore a:hover,.explore a:focus-visible{background:var(--honey);color:#14100a}
-.explore a:hover b,.explore a:focus-visible b{color:#14100a}
-.explore svg{width:14px;height:14px;flex:none}
 .top .to-explore{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--honey);text-decoration:none;padding:6px 10px;border:1px solid transparent;border-radius:6px}
 .top .to-explore:hover{border-color:var(--honey)}
 @media (max-width:900px){.top .to-explore{display:none}}
-.sibs{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px 8px;padding:10px 0 12px;border-top:1px solid var(--line)}
+.sibs{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px 8px;padding:10px 0 12px;margin-bottom:10px;border-bottom:1px solid var(--line)}
 .sibs .lbl{flex-basis:100%;text-align:center;color:var(--faint-text)}
 .sibs a.sib,.sibs span.sib{display:inline-flex;align-items:center;gap:.5em;text-decoration:none;color:var(--ink);
   border:1px solid var(--line);border-radius:var(--r-card);padding:6px 14px;font:500 13px/1.3 var(--mono);letter-spacing:var(--track-data);transition:border-color .15s,background .15s,color .15s}
@@ -325,14 +332,13 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 /* the video alone, fullscreen */
 .scene:fullscreen{background:var(--bg);padding:3vh 4vw;overflow:auto}
 
-/* a phone: one column; the tree is a drawer behind the menu button */
+/* THE TREE IS A DRAWER behind the menu button, at every width. */
+.tree{display:none}
+.page.menu-open .tree{display:flex;position:absolute;z-index:6;top:0;bottom:0;left:0;width:min(290px,84%);padding:48px 14px 16px 14px;
+  background:var(--panel);border-right:1px solid var(--line-strong);box-shadow:var(--shadow)}
+.page.menu-open .top .menu-btn{position:relative;z-index:7}
 @media (max-width:760px){
-  .page{grid-template-columns:minmax(0,1fr);padding:12px 12px 0}
-  .top .menu-btn{display:inline-flex}
-  .tree{display:none}
-  .page.menu-open .tree{display:block;position:absolute;z-index:6;top:0;bottom:0;left:0;width:min(290px,84%);padding:48px 14px 16px 14px;
-    background:var(--panel);border-right:1px solid var(--line-strong);box-shadow:var(--shadow)}
-  .page.menu-open .top .menu-btn{position:relative;z-index:7}
+  .page{padding:12px 12px 0}
 }
 
 @container (max-width:700px){
@@ -489,12 +495,13 @@ const SCRIPT = `
       fs.onclick = () => { if (document.fullscreenElement === el) document.exitFullscreen(); else el.requestFullscreen().catch(() => {}) }
     }
   }
-  // A PHONE'S TREE is a drawer: the menu button opens it, and choosing a video closes it.
+  // THE TREE is a drawer: the menu button opens it; choosing a video, or a press beside it, closes it.
   const menuBtn = page.querySelector('.menu-btn'), treeNav = page.querySelector('.tree')
   if (menuBtn && treeNav) {
     const drawer = (open) => { page.classList.toggle('menu-open', open); menuBtn.setAttribute('aria-expanded', String(open)) }
     menuBtn.onclick = () => drawer(!page.classList.contains('menu-open'))
     treeNav.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('a')) drawer(false) })
+    page.addEventListener('click', (e) => { if (page.classList.contains('menu-open') && !(e.target.closest && e.target.closest('.tree,.menu-btn'))) drawer(false) })
   } else if (menuBtn) menuBtn.hidden = true
   // THE TILE LIST. Inside the hive (and on the published site) the hive's own list is
   // mounted here, the one the AI chat shows, and a press on a tile opens that tile's page.
@@ -793,13 +800,13 @@ const treeHtml = (ways, route) => {
   <nav class="tree" data-part="tree" aria-label="The tiles"><div data-rail></div><script type="application/json" data-rail-tree>${JSON.stringify(data).replace(/</g, '\\u003c')}</script></nav>`
 }
 
-/** EXPLORE MORE, bottom right under the video: the way in, to the first child's
- *  presentation. Nothing when no page lies below. */
+/** EXPLORE MORE, a text link under the video's right edge: the way in, to the
+ *  first child's presentation. Nothing when no page lies below. */
 const exploreHtml = (ways) => {
   const e = ways && ways.explore
   if (!e) return ''
   return `
-  <div class="explore" data-part="explore"><a href="/${e.to.map(esc).join('/')}">Explore more about <b>${esc(e.topic)}</b>${icon('play')}</a></div>`
+  <div class="explore" data-part="explore"><a href="/${e.to.map(esc).join('/')}">Explore more about <b>${esc(e.topic)}</b><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a></div>`
 }
 
 /** The same way in, as a quiet link in the top bar: the backup for the button. */
@@ -808,7 +815,7 @@ const exploreTop = (ways) => {
   return e ? `<a class="to-explore" href="/${e.to.map(esc).join('/')}">Explore ›</a>` : ''
 }
 
-/** THE SIBLING MENU, balanced and centred under the video: the tiles under the
+/** THE SIBLING MENU, balanced and centred above the video: the tiles under the
  *  same parent, this one lit. The parent's name stands over them in brackets.
  *  Nothing when a tile is the only one there. */
 const sibsHtml = (ways, route) => {
@@ -843,7 +850,7 @@ ${RAIL_CSS}
 </head>
 <body>
 ${sprite}
-<main class="page">${treeHtml(ways, route)}<div class="stage"><div class="top"><button type="button" class="ib2 menu-btn" aria-label="Show the tree" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></svg></button>${crumbsHtml(route)}${exploreTop(ways)}<button type="button" class="ib2 fs" aria-label="Full screen" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg></button><button type="button" class="to-site" aria-label="Open the website at this page">${icon('hex')}website</button></div>${sceneHtml(scene)}${exploreHtml(ways)}${sibsHtml(ways, route)}</div>
+<main class="page">${treeHtml(ways, route)}<div class="stage"><div class="top"><button type="button" class="ib2 menu-btn" aria-label="Show the tree" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></svg></button>${crumbsHtml(route)}${exploreTop(ways)}<button type="button" class="ib2 fs" aria-label="Full screen" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg></button><button type="button" class="to-site" aria-label="Open the website at this page">${icon('hex')}website</button></div>${sibsHtml(ways, route)}${sceneHtml(scene)}${exploreHtml(ways)}</div>
 </main>
 <script>${SCRIPT}${tryDef ? `
 ;(() => {
