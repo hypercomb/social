@@ -197,24 +197,51 @@ export const parseOrientation = (raw: unknown): boolean | null => {
   return record && record.kind === ORIENTATION_KIND && typeof record.flat === 'boolean' ? record.flat : null
 }
 
-/** Flat-top when this browser chose it; pointy-top, the hive's default, otherwise. */
-export const readLaneOrientation = async (): Promise<boolean> => {
-  const found = store()
-  if (!found?.getPool) return false
-  try {
-    const dir = await found.getPool(ORIENTATION_POOL)
-    const bytes = dir ? await found.getPoolDoc(dir) : null
-    return bytes ? parseOrientation(JSON.parse(new TextDecoder().decode(bytes))) ?? false : false
-  } catch { return false }
+// THE LOOK THIS BROWSER CHOSE (jwize 2026-11-10: swiping left or right while editing changes the view) rides in the same
+// document as the orientation — how this browser draws the showcase: the look by page ('' is All). Never signed; what a
+// visitor sees is the owners' record.
+const KEPT_VIEWS = ['hex', 'launcher', 'iphone', 'list', 'tiles'] as const
+type KeptView = (typeof KEPT_VIEWS)[number]
+export const parseTriedViews = (raw: unknown): Record<string, KeptView> => {
+  const record = raw as { kind?: unknown; views?: unknown } | null
+  const out: Record<string, KeptView> = {}
+  if (!record || record.kind !== ORIENTATION_KIND || !record.views || typeof record.views !== 'object') return out
+  for (const [key, view] of Object.entries(record.views as Record<string, unknown>).slice(0, 64)) {
+    if (key.length <= 200 && (KEPT_VIEWS as readonly unknown[]).includes(view)) out[key] = view as KeptView
+  }
+  return out
 }
 
-export const keepLaneOrientation = async (flat: boolean): Promise<boolean> => {
+/** The one document, as last read or written here: a write of one half never drops the other. */
+let drawn: { flat: boolean; views: Record<string, KeptView> } | null = null
+const readDrawn = async (): Promise<{ flat: boolean; views: Record<string, KeptView> }> => {
+  if (drawn) return drawn
+  const found = store()
+  let raw: unknown = null
+  try {
+    const dir = found?.getPool ? await found.getPool(ORIENTATION_POOL) : null
+    const bytes = dir ? await found!.getPoolDoc(dir) : null
+    raw = bytes ? JSON.parse(new TextDecoder().decode(bytes)) : null
+  } catch { raw = null }
+  return drawn ??= { flat: parseOrientation(raw) ?? false, views: parseTriedViews(raw) }
+}
+const keepDrawn = async (next: { flat: boolean; views: Record<string, KeptView> }): Promise<boolean> => {
   const found = store()
   if (!found?.getPool) return false
   try {
     const dir = await found.getPool(ORIENTATION_POOL)
     if (!dir) return false
-    const bytes = new TextEncoder().encode(JSON.stringify({ kind: ORIENTATION_KIND, flat })).buffer as ArrayBuffer
+    drawn = next
+    const views = Object.fromEntries(Object.entries(next.views).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+    const bytes = new TextEncoder().encode(JSON.stringify({ kind: ORIENTATION_KIND, flat: next.flat,
+      ...(Object.keys(views).length ? { views } : {}) })).buffer as ArrayBuffer
     return !!(await found.putPoolDoc(dir, bytes, undefined, { keep: 'current' }))
   } catch { return false }
 }
+
+/** Flat-top when this browser chose it; pointy-top, the hive's default, otherwise. */
+export const readLaneOrientation = async (): Promise<boolean> => (await readDrawn()).flat
+export const keepLaneOrientation = async (flat: boolean): Promise<boolean> => keepDrawn({ ...(await readDrawn()), flat })
+export const readTriedViews = async (): Promise<Record<string, KeptView>> => (await readDrawn()).views
+export const keepTriedViews = async (views: Record<string, string>): Promise<boolean> =>
+  keepDrawn({ ...(await readDrawn()), views: parseTriedViews({ kind: ORIENTATION_KIND, views }) })

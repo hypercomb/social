@@ -424,13 +424,27 @@ Pressing the open domain's header collapses it, and then NO row is open, so none
 header row and they stack from the top, in order. (It used to leave the first collapsed row at the top and push the next one to the bottom.)
 Opening any header brings it back to the top with its tiles.
 
-### The community is a target, not a domain (jwize 2026-11-04)
+### Tiles toggle where they sit (jwize 2026-11-10; replaces the community row of 2026-11-04)
 
-While managing, the community is a row of its own, after the domains and apart from them: a place to bring locally domain-hosted
-creations to, never a domain with a name of its own (it has no remove control and is not one of the sets a swipe walks).
-Every tile belongs to a domain's row — this domain's too. A tap on a tile in any domain row brings it into the community; a tap on it
-in the community row sends it back to the domain it came from. That is the whole of turning a community item off. The community
-holds tiles in `community:tiles` (`readCommunity` / `keepCommunity`); a tap signs nothing.
+"You add domains. You go to them and toggle things on or off. Then you are back in your mobile app view and you are just using
+the creations." While editing, every row is a domain and every tile stays in its own domain's row: lit when it is on, gray when
+it is not. A tile is ON when it is published here (the owners' signed showcase) or this browser turned it on. There is no
+community row; the community is the page you come back to — what is published here, and what this browser turned on in any
+domain it added. What this browser turned on is kept in `community:tiles` (`readCommunity` / `keepCommunity`) and signs nothing.
+
+Who can do what:
+
+- **Without the key, on a phone**: a tap is the switch itself, at once, no question. It can turn on or off only this browser's
+  own picks. A tile the domain published says so: only its key can take it off.
+- **With the key** (a hive beside the page, or a phone that took its owner's invite), or on a desktop where the tap can be handed
+  to the hive: a tap asks once, and yes is the signed act — publish or unpublish — so a visitor sees the same community.
+
+### Four looks, swiped sideways while editing (jwize 2026-11-10)
+
+A sideways swipe on the list while editing walks four looks and goes round: hexagons, the launcher (rows of four), the iPhone
+screen, the list of buttons. The square column (`tiles`) is still a view a signed record or `?view=tiles` may name, but the
+swipe does not walk it. The look chosen is kept in this browser (in the `showcase:orientation` document, beside the lane
+orientation), so leaving edit mode and coming back later keeps it. It is never signed: a visitor is shown the owners' record.
 
 Being in the showcase is a different act, not a tap: a hold on the owner's own tile, or the held sheet's "Put it in my showcase".
 **Only a revision that is optimized and minimized can be put in.** `minimized.ts` asks the domain serving the head: its root layer
