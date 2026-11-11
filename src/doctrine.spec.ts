@@ -566,6 +566,36 @@ describe('doctrine ratchets', () => {
     assertRatchet(actual, [], 'shared UI index import')
   })
 
+  it('no Angular outside the shells — core, the modules, the runtime and the shim import none', () => {
+    // jwize, 2026-11-11: "angular can't be in the core", and "anything built
+    // in the debugger (subdomains) should not load angular. This will be our
+    // process to phase out angular."
+    //
+    // A debugger subdomain is served the framework-free shim, which loads
+    // core, the runtime and the modules and nothing else. One Angular import
+    // in any of them is Angular on that page — or a bundle that will not
+    // build. So what moves OUT of the shell (the chat was the first) lands in
+    // a place that cannot quietly bring Angular with it.
+    //
+    // The one entry is a TYPE import (`Type`, for the Angular-shaped half of
+    // a surface registration), erased at build. It is frozen debt: it goes
+    // when the last Angular surface does. Never add a second.
+    const FRAMEWORK_FREE = [
+      'hypercomb-core/src/', 'hypercomb-essentials/src/', 'hypercomb-essentials/scripts/',
+      'hypercomb-runtime/src/', 'hypercomb-shim/src/', 'hypercomb-sdk/src/', 'hypercomb-cli/src/',
+    ]
+    const hits = filesMatching(/(?:from\s*|import\s*\(\s*|import\s+)['"]@angular\//)
+      .filter(file => FRAMEWORK_FREE.some(dir => file.startsWith(dir)))
+    assertRatchet(hits, [
+      'hypercomb-runtime/src/shell-surface-registry.ts',
+    ], 'Angular outside the shells')
+    // And that one stays a type import: nothing of Angular's runs there.
+    const registry = stripComments(readFileSync(join(ROOT, 'hypercomb-runtime', 'src', 'shell-surface-registry.ts'), 'utf8'))
+    for (const line of registry.split('\n').filter(line => /@angular\//.test(line))) {
+      expect(line, 'the runtime may name an Angular TYPE only').toMatch(/^\s*import type /)
+    }
+  })
+
   it('the shell-surface barrel may only shrink — new chrome is an element drone, not a component', () => {
     // THE MIGRATION SCOREBOARD, made mechanical.
     //
@@ -1460,8 +1490,13 @@ describe('doctrine ratchets', () => {
   // needs offering to a model, the fix is a `machine` block on that verb — in
   // the file that implements it, beside the parser that reads its arguments.
   it('the model grammar module names no behaviour', () => {
-    const grammar = readFileSync(
-      join(ROOT, 'hypercomb-shared', 'ui', 'chat-window', 'hypercomb-grammar.ts'), 'utf8')
+    // The parser moved down to core (core/machine-plan.ts, 2026-11-11) and
+    // the shell file became its door; the rule follows the code, and still
+    // holds for the door.
+    const grammar = [
+      join(ROOT, 'hypercomb-core', 'src', 'core', 'machine-plan.ts'),
+      join(ROOT, 'hypercomb-shared', 'ui', 'chat-window', 'hypercomb-grammar.ts'),
+    ].map(file => readFileSync(file, 'utf8')).join('\n')
 
     // The live census: every command word a queen or a manual provider claims.
     const census = new Set<string>()
