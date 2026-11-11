@@ -45,9 +45,16 @@ export const sourceDocuments = (map: SourceMapDocument): readonly { name: string
 
 export class DevSourceCatalog {
   #records: Promise<readonly SourceRecord[]> | null = null
+  #documents: Promise<readonly { name: string; text: string }[]> | null = null
 
   async entries(): Promise<readonly DevSourceEntry[]> {
     return (await this.#load()).map(({ name, sig }) => ({ name, sig }))
+  }
+
+  /** The source files this shell was built from, by name — nothing signed.
+   *  The host directory asks it which packages run here from source. */
+  async names(): Promise<readonly string[]> {
+    return (await this.#loadDocuments()).map(({ name }) => name)
   }
 
   async readSource(sig: string): Promise<{ readonly name: string; readonly text: string; readonly size: number } | null> {
@@ -74,15 +81,8 @@ export class DevSourceCatalog {
   }
 
   async #loadLive(): Promise<readonly SourceRecord[]> {
-    const main = [...document.scripts]
-      .map(script => script.src)
-      .find(src => /\/main(?:-[^/?]+)?\.js(?:[?#]|$)/.test(src))
-    if (!main) return []
     try {
-      const mapUrl = `${main.split('#')[0]!.split('?')[0]!}.map`
-      const response = await fetch(mapUrl, { cache: 'no-store' })
-      if (!response.ok) return []
-      const documents = sourceDocuments(await response.json() as SourceMapDocument)
+      const documents = await this.#loadDocuments()
       return Promise.all(documents.map(async ({ name, text }) => {
         const bytes = new TextEncoder().encode(text)
         const sig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
@@ -91,6 +91,24 @@ export class DevSourceCatalog {
     } catch {
       return []
     }
+  }
+
+  /** The source map, read once for both names and signed records. */
+  #loadDocuments(): Promise<readonly { name: string; text: string }[]> {
+    return this.#documents ??= (async () => {
+      const main = [...document.scripts]
+        .map(script => script.src)
+        .find(src => /\/main(?:-[^/?]+)?\.js(?:[?#]|$)/.test(src))
+      if (!main) return []
+      try {
+        const mapUrl = `${main.split('#')[0]!.split('?')[0]!}.map`
+        const response = await fetch(mapUrl, { cache: 'no-store' })
+        if (!response.ok) return []
+        return sourceDocuments(await response.json() as SourceMapDocument)
+      } catch {
+        return []
+      }
+    })()
   }
 }
 

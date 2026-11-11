@@ -4082,6 +4082,7 @@
   "packages.updates.shared": "An update is ready",
   "packages.update-mark": "update",
   "packages.new": "not here yet",
+  "packages.from-source": "from source",
   "packages.reading": "Reading what is served…",
   "packages.empty": "Nothing listed here yet.",
   "packages.restarting": "packages changed; restarting",

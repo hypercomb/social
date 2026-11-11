@@ -3761,6 +3761,7 @@
   "packages.reading": "提供されている内容を読み込み中…",
   "packages.empty": "まだ何も一覧にありません。",
   "packages.new": "未取得",
+  "packages.from-source": "ソースから",
   "packages.turn-off": "{name} をオフにする",
   "packages.turn-on": "{name} をオンにする",
   "packages.updates.shared": "更新の準備ができました",

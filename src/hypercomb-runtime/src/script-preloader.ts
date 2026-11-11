@@ -541,8 +541,11 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       this.#effectSleeping.delete(sig)
       this.#woken.add(sig)
     }
-    await Promise.allSettled(sigs.map(sig => this.#wakeLoad(sig)))
-    await new hypercomb().act('')
+    await this.foreground(async () => {
+      this.#warmFirst(sigs)
+      await Promise.allSettled(sigs.map(sig => this.#wakeLoad(sig)))
+      await new hypercomb().act('')
+    })
   }
 
   /** Subscribe once per waking effect. Replayed on subscribe: an effect
@@ -695,8 +698,11 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       this.#viewSleeping.delete(sig)
       this.#woken.add(sig)
     }
-    await Promise.allSettled(sigs.map(sig => this.#wakeLoad(sig)))
-    await new hypercomb().act('')
+    await this.foreground(async () => {
+      this.#warmFirst(sigs)
+      await Promise.allSettled(sigs.map(sig => this.#wakeLoad(sig)))
+      await new hypercomb().act('')
+    })
   }
 
   /** Wake the queen who answers `word`; null when none is asleep for it. */
@@ -707,7 +713,10 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     const [sig] = found
     this.#sleeping.delete(sig)
     this.#woken.add(sig)
-    const bee = await this.#wakeLoad(sig)
+    const bee = await this.foreground(async () => {
+      this.#warmFirst([sig])
+      return this.#wakeLoad(sig)
+    })
     EffectBus.emit('loader:sleeping', { words: this.sleepingWords() })
     return bee
   }
@@ -765,10 +774,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     const queue = [...this.#idleHive].filter(sig => !this.#beeCache.has(sig) && !asleep.has(sig) && !this.#failed.has(sig))
     this.#idleHive = new Set()
     if (!queue.length) return
-    const whenIdle: (run: () => void) => void =
-      typeof (globalThis as any).requestIdleCallback === 'function'
-        ? run => (globalThis as any).requestIdleCallback(() => run())
-        : run => { setTimeout(run, ScriptPreloader.#PREHEAT_FALLBACK_MS) }
+    const whenIdle = this.#whenIdle
     const pump = (): void => {
       const batch = queue.splice(0, ScriptPreloader.#IDLE_HIVE_BATCH).filter(sig => !this.#beeCache.has(sig))
       if (!batch.length) { if (queue.length) whenIdle(pump); return }
@@ -897,6 +903,8 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     let next = 0
     const lane = async (): Promise<void> => {
       while (next < ordered.length && !this.#preloadStopped) {
+        await this.#clearOfForeground()
+        if (this.#preloadStopped) return
         const sig = ordered[next++]
         await new Promise<void>(resolve => {
           const link = document.createElement('link')
@@ -955,6 +963,68 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     })()
   }
 
+  // -------------------------------------------------
+  // the view you are in goes first
+  // -------------------------------------------------
+  //
+  // jwize, 2026-11-11: "any list can be expanded warmed up and it is optimized
+  // and it is shown first in any race if you are in the view and its resources
+  // as well." Whatever the participant is in — a view entered, a word said, a
+  // window opened — holds the foreground: its bees and its own resources load
+  // at once, and every background queue (the idle hive, the resource preheat,
+  // the passive preload lanes) waits until it is done, then carries on where it
+  // stopped. Background work only ever fills spare time.
+
+  #foreground = 0
+  readonly #parked: Array<() => void> = []
+  #clear: Array<() => void> = []
+
+  /** Run `work` in the foreground: nothing in the background moves until it
+   *  settles. Windows reach this over IoC (a module never imports the runtime). */
+  public foreground = async <T>(work: () => Promise<T>): Promise<T> => {
+    this.#foreground++
+    try { return await work() } finally {
+      if (--this.#foreground === 0) {
+        const clear = this.#clear
+        this.#clear = []
+        for (const resolve of clear) resolve()
+        const parked = this.#parked.splice(0)
+        for (const run of parked) this.#whenIdle(run)
+      }
+    }
+  }
+
+  /** Resolves once nothing holds the foreground. */
+  #clearOfForeground = (): Promise<void> =>
+    this.#foreground === 0 ? Promise.resolve() : new Promise<void>(resolve => { this.#clear.push(resolve) })
+
+  /** Background work: at idle, and only while nothing holds the foreground. No
+   *  idle callback (older Safari, some workers) — a plain delay still gets it
+   *  off the first-paint path. */
+  #whenIdle = (run: () => void): void => {
+    const go = (): void => { if (this.#foreground > 0) this.#parked.push(run); else run() }
+    if (this.#foreground > 0) { this.#parked.push(run); return }
+    if (typeof (globalThis as any).requestIdleCallback === 'function') (globalThis as any).requestIdleCallback(go)
+    else setTimeout(go, ScriptPreloader.#PREHEAT_FALLBACK_MS)
+  }
+
+  /** Warm the resources of the layers these bees belong to, now and ahead of
+   *  the idle queue — the view's own pictures and data, not the package's. */
+  #warmFirst = (bees: readonly string[]): void => {
+    const wanted = new Set(bees)
+    const mine: string[] = []
+    for (const layer of this.#layerCache.values()) {
+      if (!layer.bees.some(bee => wanted.has(bee))) continue
+      for (const sig of layer.resources) if (!this.#warmed.has(sig)) mine.push(sig)
+    }
+    if (!mine.length) return
+    for (const sig of mine) { this.#warmed.add(sig); this.#preheated.add(sig) }
+    void Promise.allSettled(mine.map(sig => this.store.preheatResource(sig)))
+  }
+
+  /** Resources already warmed in the foreground. */
+  readonly #warmed = new Set<string>()
+
   /** Resources already queued for preheat — the walk repeats across finds,
    *  and re-reading what a previous pass already warmed is pure waste. */
   readonly #preheated = new Set<string>()
@@ -966,16 +1036,11 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     if (!queue.length) return
     for (const sig of queue) this.#preheated.add(sig)
 
-    // No idle callback (older Safari, some workers) — a plain delay still
-    // gets the flood off the first-paint path, which is the whole point.
-    const whenIdle: (run: () => void) => void =
-      typeof (globalThis as any).requestIdleCallback === 'function'
-        ? run => (globalThis as any).requestIdleCallback(() => run())
-        : run => { setTimeout(run, ScriptPreloader.#PREHEAT_FALLBACK_MS) }
+    const whenIdle = this.#whenIdle
 
     const pump = (): void => {
-      const batch = queue.splice(0, ScriptPreloader.#PREHEAT_BATCH)
-      if (!batch.length) return
+      const batch = queue.splice(0, ScriptPreloader.#PREHEAT_BATCH).filter(sig => !this.#warmed.has(sig))
+      if (!batch.length) { if (queue.length) whenIdle(pump); return }
       void Promise.allSettled(batch.map(sig => this.store.preheatResource(sig)))
         .then(() => { if (queue.length) whenIdle(pump) })
     }

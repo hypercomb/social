@@ -419,7 +419,20 @@ row).
   their own), Visit (never drawn on this origin — a second tab on your own hive
   is a second writer on one store), and removing it.
 - A shell with no installed package (the dev shell imports modules from source)
-  lists what your hosts carry and leaves every act to a hive.
+  lists what your hosts carry and leaves every act to a hive. A package whose
+  folder is in the shell's own source reads **on** and wears *from source*
+  instead of *not here yet* (jwize, 2026-11-11: "everything in host for
+  hypercomb.com says not here yet"): it runs whatever a record says, no update
+  is offered for it, and its switch stays greyed with the reason. The shell's
+  source catalog names the folders (`sourcePackagePaths`); a package the source
+  does not carry is still not here.
+- **The list you are in goes first.** Opening the window paints what runs here
+  before any host is asked, and holds the preloader's foreground
+  (`ScriptPreloader.foreground`) until the followed publisher's list has
+  painted: the idle hive, the resource preheat and the passive preload lanes
+  wait, then carry on. Entering a view or saying a word holds it the same way
+  and warms that view's own resources first. The other hosts fill in after, so
+  a slow host never stalls the rest.
 
 ## Languages
 
