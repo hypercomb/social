@@ -270,24 +270,20 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .try code{font:13px var(--mono);word-break:break-all;color:var(--ink)}
 .try code.sig{color:var(--honey)}
 
-/* THE NARRATION IS THE WHOLE TEXT, LAID OVER THE FOOT OF THE PICTURE (jwize 2026-11-11: "the audio should have the full
-   text as an overlay instead that will be much easier to manage"; "sectioned out per sentence to be recorded one sentence
-   at a time"). Every sentence is its own section: the one being said is lit, a press on any of them plays from there, and
-   the button beside the voice puts the words away so the picture stands alone. The line a screen reader hears is kept,
-   unseen, in .caption. */
+/* the narration: a strip under one hairline, the tour's caption, and its transport */
 .dock{width:100%;max-width:var(--measure);margin:0 auto;position:relative}
-/* ONE LINE UNDER THE PICTURE (jwize 2026-11-11: "clean and professional with tasteful ux"). With the words put
-   away the page would say nothing until Listen is pressed, so the sentence being said stands under the picture,
-   one at a time, like a film's subtitle. When the words are laid out it is kept for a screen reader only. */
-.caption{margin:0 auto clamp(8px,1.6vh,16px);min-height:calc(2 * 1.5em);display:grid;place-items:center;text-align:center;
-  font-size:clamp(16px,1.85cqi,21px);line-height:1.5;color:var(--ink);text-wrap:balance}
+.caption{position:relative;margin:clamp(10px,2vh,22px) 0 0;padding:12px 0 0;text-align:left;min-height:calc(2 * 1.5em + 12px);
+  font-size:clamp(16px,1.95cqi,21px);line-height:1.5;color:var(--ink);text-wrap:pretty;max-height:26vh;overflow:auto;overscroll-behavior:contain}
+.caption.more{-webkit-mask-image:linear-gradient(#000 calc(100% - 2.2em),transparent);mask-image:linear-gradient(#000 calc(100% - 2.2em),transparent)}
+.caption::before{content:"";position:sticky;display:block;top:-12px;left:0;right:0;height:1px;margin:-12px 0 11px;background:var(--line)}
+.caption.long{font-size:clamp(14px,1.5cqi,16px);line-height:1.5}
 .caption p{margin:0}
-.caption p.rise{animation:rise .6s var(--ease)}
-/* ONE LINE AT A TIME. A page with a standing line of its own (.sub) shows that until the scene is played or
-   stepped; from then the sentence being said takes its place. Never both, one under the other. */
-.scene:not(.told) .sub~.dock .caption{display:none}
-.scene.told .sub{display:none}
-.dock.words-open .caption{position:absolute;width:1px;height:1px;min-height:0;margin:0;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.caption p.rise{animation:rise .5s var(--ease)}
+/* THE WORDS PANEL IS FOR EDITING ONLY (jwize 2026-11-11: "the narration panel is only for editing. During the
+   presentation the normal narration and text is used under the video"; "sectioned out per sentence to be recorded one
+   sentence at a time"). In the author's own hive a button beside the voice lays the scene's whole text over the foot of
+   the picture, a section a sentence: the one being said is lit, and a press on any plays from there. A visitor, and a
+   page opened on its own, never sees the button or the panel. */
 .says{position:absolute;z-index:3;left:0;right:0;bottom:100%;margin:0 0 8px;padding:8px;list-style:none;text-align:left;
   max-height:min(40vh,21em);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;
   background:color-mix(in srgb,var(--panel) 88%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
@@ -303,6 +299,7 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .say.now{color:var(--ink);border-left-color:var(--honey);background:var(--honey-tint)}
 .ib.words svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round}
 .ib.words[aria-pressed="true"]{color:var(--honey)}
+.ib.words[hidden]{display:none}
 .says.dubbable .say{cursor:cell}
 .say.dubbed::after{content:" \\25CF";font-size:.6em;vertical-align:.3em;color:var(--honey)}
 @keyframes rise{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
@@ -421,6 +418,7 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
   .hexb{width:clamp(76px,24cqi,104px)}
   .hexb .t{font-size:11px}
   .count{display:none}
+  .caption{max-height:36vh}
   .says{max-height:38vh}
 }
 @media (prefers-reduced-motion:reduce){
@@ -750,6 +748,8 @@ const SCRIPT = `
     for (const n of el.querySelectorAll('.plate.beats [data-id], .fz.lights [data-id]')) n.classList.toggle('lit', lit.has('*') || lit.has(n.dataset.id))
     if (fz.classList.contains('duo')) { fz.classList.toggle('aside', !!s.beside); fz.classList.toggle('main', !s.beside && steps.some(x => x.beside)) }
     const p = document.createElement('p'); p.textContent = sayOf(s); if (!still) p.className = 'rise'; line.replaceWith(p); line = p
+    cap.classList.toggle('long', sayOf(s).split(/\\s+/).length > 70); cap.scrollTop = 0
+    requestAnimationFrame(() => cap.classList.toggle('more', cap.scrollHeight - cap.clientHeight > 4))
     says.forEach((b, k) => { b.classList.toggle('done', k < at); b.classList.toggle('now', k === at); if (k === at) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current') })
     // the sentence being said stays in the middle of the words
     if (saysBox && !saysBox.hidden && says[at]) saysBox.scrollTop = says[at].offsetTop - (saysBox.clientHeight - says[at].offsetHeight) / 2
@@ -821,12 +821,12 @@ const SCRIPT = `
     }
   }
   const play = (on) => {
-    if (on) { started = true; el.classList.add('told') }
+    if (on) started = true
     playing = on; paint()
     if (on) { if (at === steps.length - 1 && !timer && !audio) show(0); speak() }
     else { quiet(); for (const v of videos) v.pause() }
   }
-  const go = (i) => { const was = playing; el.classList.add('told'); quiet(); show(i); if (was) speak(); else idle() }
+  const go = (i) => { const was = playing; quiet(); show(i); if (was) speak(); else idle() }
   pp.onclick = () => play(!playing)
   const back = el.querySelector('[data-act=back]'), fwd = el.querySelector('[data-act=next]')
   if (back) back.onclick = () => go(at - 1)
@@ -845,16 +845,17 @@ const SCRIPT = `
       page.dispatchEvent(new CustomEvent('hc-sentence', { bubbles: true, detail: { key: s.key, say: sayOf(s), original: s.say, at, of: steps.length, route: location.pathname } }))
     }
   })
-  // THE PICTURE STANDS ALONE UNTIL THE WORDS ARE ASKED FOR (jwize 2026-11-11: "this is in the way of the
-  // presentation ... make sure hypercomb.com is published so the editor isn't showing by default"). The
-  // words are put away on every page as it is published; this button lays them over the foot of the
-  // picture, and the choice is kept for the visit. Turning the audio editor on in a hive shows them,
-  // since a sentence there is what is pressed to record.
-  if (wordsBtn && saysBox) {
+  // THE WORDS PANEL, FOR EDITING ONLY, and away until asked for (jwize 2026-11-11: "the narration is still up by default.
+  // This is a bug"; "the narration panel is only for editing"): its button shows in the author's hive alone, and the
+  // choice is kept for the visit.
+  cap.addEventListener('scroll', () => cap.classList.toggle('more', cap.scrollHeight - cap.scrollTop - cap.clientHeight > 4), { passive: true })
+  // EDITING is the author's own hive: a hive is here, and it is not a visitor's.
+  const editing = !!window.ioc && document.documentElement.dataset.hypercombMode !== 'visitor'
+  if (wordsBtn && saysBox && editing) {
+    wordsBtn.hidden = false
     const WORDS = 'hc-scene-words'
     const setWords = (on) => {
       saysBox.hidden = !on
-      if (saysBox.parentElement) saysBox.parentElement.classList.toggle('words-open', on)
       wordsBtn.setAttribute('aria-pressed', String(on)); wordsBtn.setAttribute('aria-label', on ? 'Hide the words' : 'Show the words')
       if (on && says[at]) saysBox.scrollTop = says[at].offsetTop - (saysBox.clientHeight - says[at].offsetHeight) / 2
     }
@@ -880,7 +881,6 @@ const SCRIPT = `
   try { const b = bank(); if (b && typeof b.want === 'function') b.want(steps.map(s => s.key)) } catch {}
   // typing in a part to try holds the scene where it is
   el.addEventListener('focusin', (e) => { if (e.target instanceof HTMLInputElement && playing) play(false) })
-  if (returning && resumeAt > 0) el.classList.add('told')
   show(returning ? resumeAt : 0)
   el.classList.add('in')
   // The first voice, once the scene is on screen and the page is quiet.
@@ -975,7 +975,7 @@ const sceneHtml = (sc) => {
         <span class="ticks">${sc.steps.map((s, k) => `<button type="button" class="tick" aria-label="${esc(`${k + 1}: ${s.say.slice(0, 60)}`)}"></button>`).join('')}</span>
         <span class="count">01 / ${String(sc.steps.length).padStart(2, '0')}</span>` : `
         <span class="ticks" aria-hidden="true"></span>`}
-        <button type="button" class="ib words" aria-pressed="false" aria-label="Show the words"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h7"/></svg></button>${voiced ? `
+        <button type="button" class="ib words" hidden aria-pressed="false" aria-label="Show the words"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h7"/></svg></button>${voiced ? `
         <button type="button" class="ib voice" aria-pressed="true" aria-label="Mute the voice">${icon('speaker', 'i-speaker')}${icon('muted', 'i-muted')}</button>` : ''}
       </nav>
     </div>

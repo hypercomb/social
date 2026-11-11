@@ -182,29 +182,22 @@ describe('every page says where it goes, once', () => {
       expect(b.page).toContain('.page.menu-open .top .menu-btn{position:fixed;')
     })
 
-    it(`${at}: the words are the whole text, a section a sentence, put away until their button asks for them`, () => {
+    it(`${at}: the caption is under the video, and the words panel is hidden for editing alone`, () => {
       const steps = JSON.parse(/<script type="application\/json">([^]*?)<\/script>\s*<\/section>/.exec(b.page)![1]) as { say: string }[]
       const says = [...b.page.matchAll(/<li><button type="button" class="say">/g)]
       expect(says.length).toBe(steps.length)
       expect(says.length).toBeGreaterThan(0)
-      // PUT AWAY BY DEFAULT (jwize 2026-11-11: "the editor isn't showing by default"): hidden in the
-      // markup itself, so a published page never flashes them, and shown only when asked for.
       expect(b.page).toContain('<ol class="says" hidden aria-label="The words of this scene, a sentence at a time">')
-      expect(b.page).toContain('class="ib words" aria-pressed="false" aria-label="Show the words"')
-      expect(b.page).toContain("setWords(kept === 'on')")
-      expect(b.page).not.toContain("setWords(kept !== 'off')")
+      expect(b.page).toContain('class="ib words" hidden aria-pressed="false" aria-label="Show the words"')
+      // the normal narration: one sentence under the video, seen
+      expect(b.page).toContain('<div class="caption" aria-live="polite"><p></p></div>')
+      expect(b.page).toContain('.caption{position:relative;margin:clamp(10px,2vh,22px) 0 0;')
+      expect(b.page).toContain("const editing = !!window.ioc && document.documentElement.dataset.hypercombMode !== 'visitor'")
       expect(b.page).toContain('.page.menu-open{grid-template-columns:230px minmax(0,1fr)')
       expect(b.page).toMatch(/aria-label="Full screen"/)
     })
-    it(`${at}: one quiet line under the picture, and motion that asks for nothing`, () => {
+    it(`${at}: a figure that fills its stage, and motion that asks for nothing`, () => {
       // jwize 2026-11-11: "clean and professional with tasteful ux and subtle animations to improve ambience".
-      // With the words put away the sentence being said stands under the picture; laid out, it is a
-      // screen reader's only.
-      expect(b.page).toContain('.dock.words-open .caption{position:absolute;width:1px;height:1px;')
-      expect(b.page).toContain("saysBox.parentElement.classList.toggle('words-open', on)")
-      // Never two lines stacked: a page's standing line until the scene is played or stepped, then the sentence.
-      expect(b.page).toContain('.scene:not(.told) .sub~.dock .caption{display:none}')
-      expect(b.page).toContain('.scene.told .sub{display:none}')
       // The ambience breathes slowly and stops for a reader who asked for less motion.
       expect(b.page).toContain('@keyframes ambient{from{opacity:1}to{opacity:.55}}')
       expect(b.page).toMatch(/prefers-reduced-motion:reduce\)\{[^}]*\}[^@]*\.scene::before\{animation:none!important/)
