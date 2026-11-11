@@ -930,7 +930,8 @@ every page, and its 25 scenes are folded into the tiles they explain:
   - **the siblings**, balanced and centred above the video (under it until
     2026-11-10, when jwize said they are "supposed to be above the video"; the
     same day the tree became a drawer behind the menu button at every width,
-    "hidden but expandable", and Explore more became a plain text link): the tiles under the
+    "hidden but expandable", and Explore more became the one button at the
+    right of this row, "this way it is simple"): the tiles under the
     same parent, this one lit, the parent's name over them in brackets
     (`(protocol)`). The row stays when you press one of its buttons (jwize,
     2026-11-09): on a top page it is that tile's own first level (standing on

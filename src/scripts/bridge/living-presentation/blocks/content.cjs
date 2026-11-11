@@ -318,7 +318,28 @@ module.exports = {
     files: ['documentation/every-act-has-a-word.md', 'documentation/speak-dont-bridge.md', 'documentation/agents.md'],
   },
 
+  // ACCESSIBLE IS ABOUT ACCESSIBILITY (jwize 2026-11-10: "accessible is about
+  // accessibility and we strive to continuously simplify and make the ux
+  // available to as many people as possible and everyone if possible"). Each
+  // way named here is one the pages themselves have (page.cjs: the arrow keys,
+  // prefers-reduced-motion, the one-column phone layout, the voice); what is
+  // not yet tested is said in the last sentence.
   'protocol/accessible': {
+    topic: 'accessibility',
+    eyebrow: 'value five',
+    headline: 'Open to *everyone*',
+    sub: 'As many people as possible, and everyone if we can.',
+    picture: hub('everyone', ['read', 'listen', 'phone', 'keys', 'still', 'simpler'], 'Everyone, and six ways the pages are kept open to them'),
+    beats: [
+      { say: 'Accessible means this is for as many people as possible, and for everyone if we can manage it.', lit: ['everyone'] },
+      { say: 'Reading needs no account: a published presentation opens in any browser.', lit: lit('everyone', 'read') },
+      { say: 'Every page can be listened to, one plain sentence at a time, with the words shown as they are spoken.', lit: lit('everyone', 'listen') },
+      { say: 'It fits a phone, one column at a time.', lit: lit('everyone', 'phone') },
+      { say: 'The arrow keys step through a page, so it works without a mouse.', lit: lit('everyone', 'keys') },
+      { say: 'If you ask your device for less motion, the pictures hold still and nothing is lost.', lit: lit('everyone', 'still') },
+      { say: 'And we keep simplifying: a page that is not clear gets changed.', lit: lit('everyone', 'simpler') },
+      { say: 'This is not finished. These pages have not yet been tested with a screen reader, and that work is ahead.', lit: ['everyone'] },
+    ],
     live: [
       { shot: 'tutorials-beside-the-hive', title: 'lessons beside the hive', caption: 'Forty-five lessons, open beside the hive itself. Each one opens the real thing, and puts it away again.' },
     ],

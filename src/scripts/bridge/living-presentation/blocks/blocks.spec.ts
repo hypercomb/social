@@ -193,11 +193,12 @@ describe('every page says where it goes, once', () => {
         expect(linkTo(href, b.route, paged).split('/').slice(0, -1).join('/')).toBe(parent)
       }
     })
-    it(`${at}: a page with pages below it offers Explore more, bottom right, into its first child's presentation; one without offers nothing`, () => {
+    it(`${at}: a page with pages below it offers Explore more, at the right of the row, into its first child's presentation; one without offers nothing`, () => {
       const below = [...paged as Set<string>].filter(r => r.startsWith(b.route.join('/') + '/') && r.split('/').length === b.route.length + 1)
-      const button = /<div class="explore" data-part="explore"><a href="([^"]+)">Explore more about <b>([^<]+)<\/b>/.exec(b.page)
-      const top = /<a class="to-explore" href="([^"]+)">/.exec(b.page)
-      if (below.length === 0) { expect(button).toBeNull(); expect(top).toBeNull(); return }
+      const button = /<a class="more" data-part="explore" href="([^"]+)" title="Explore more about ([^"]+)"/.exec(b.page)
+      if (below.length === 0) { expect(button).toBeNull(); return }
+      // one way in, and only one
+      expect(b.page.match(/data-part="explore"/g)).toHaveLength(1)
       expect(button).not.toBeNull()
       expect(button![2].trim().length).toBeGreaterThan(2)
       // the way in lands on a child's presentation one level down, whose own row is that level's tiles
@@ -205,12 +206,9 @@ describe('every page says where it goes, once', () => {
       expect(below).toContain(to)
       const there = (blocks as { route: string[]; page: string }[]).find(x => x.route.join('/') === to)!
       for (const href of hrefs(there.page, 'siblings')) expect(linkTo(href, there.route, paged).split('/').slice(0, -1).join('/')).toBe(b.route.join('/'))
-      // the backup in the top bar goes to the same place
-      expect(top).not.toBeNull()
-      expect(linkTo(top![1], b.route, paged)).toBe(to)
       // no card page: the children are presentations, nothing else
       expect(b.page).not.toMatch(/data-part="children"/)
-      expect(tagAt(b.page, 'explore')).toBeGreaterThan(tagAt(b.page, 'scene'))
+      expect(tagAt(b.page, 'explore')).toBeLessThan(tagAt(b.page, 'scene'))
       if (tagAt(b.page, 'siblings') >= 0) expect(tagAt(b.page, 'explore')).toBeGreaterThan(tagAt(b.page, 'siblings'))
     })
     it(`${at}: the row stays when one of its buttons is pressed`, () => {
