@@ -253,15 +253,29 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .try code{font:13px var(--mono);word-break:break-all;color:var(--ink)}
 .try code.sig{color:var(--honey)}
 
-/* the narration: a strip under one hairline, the tour's caption, and its transport */
-.dock{width:100%;max-width:var(--measure);margin:0 auto}
-.caption{position:relative;margin:clamp(10px,2vh,22px) 0 0;padding:12px 0 0;text-align:left;min-height:calc(2 * 1.5em + 12px);
-  font-size:clamp(16px,1.95cqi,21px);line-height:1.5;color:var(--ink);text-wrap:pretty;max-height:26vh;overflow:auto;overscroll-behavior:contain}
-.caption.more{-webkit-mask-image:linear-gradient(#000 calc(100% - 2.2em),transparent);mask-image:linear-gradient(#000 calc(100% - 2.2em),transparent)}
-.caption::before{content:"";position:sticky;display:block;top:-12px;left:0;right:0;height:1px;margin:-12px 0 11px;background:var(--line)}
-.caption.long{font-size:clamp(14px,1.5cqi,16px);line-height:1.5}
+/* THE NARRATION IS THE WHOLE TEXT, LAID OVER THE FOOT OF THE PICTURE (jwize 2026-11-11: "the audio should have the full
+   text as an overlay instead that will be much easier to manage"; "sectioned out per sentence to be recorded one sentence
+   at a time"). Every sentence is its own section: the one being said is lit, a press on any of them plays from there, and
+   the button beside the voice puts the words away so the picture stands alone. The line a screen reader hears is kept,
+   unseen, in .caption. */
+.dock{width:100%;max-width:var(--measure);margin:0 auto;position:relative}
+.caption{position:absolute;width:1px;height:1px;margin:0;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .caption p{margin:0}
-.caption p.rise{animation:rise .5s var(--ease)}
+.says{position:absolute;z-index:3;left:0;right:0;bottom:100%;margin:0 0 8px;padding:8px;list-style:none;text-align:left;
+  max-height:min(40vh,21em);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;
+  background:color-mix(in srgb,var(--panel) 88%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+  border:1px solid var(--line);border-radius:var(--r-card);box-shadow:var(--shadow)}
+.says[hidden]{display:none}
+.says li{margin:0;padding:0}
+.say{display:block;width:100%;margin:0;padding:7px 10px;text-align:left;background:none;border:0;border-left:2px solid transparent;
+  border-radius:0;cursor:pointer;font:inherit;font-size:clamp(14px,1.6cqi,17px);line-height:1.5;color:var(--dim);text-wrap:pretty;
+  transition:color .15s,background .15s}
+.say:hover{color:var(--ink)}
+.say:focus-visible{outline:2px solid var(--honey);outline-offset:-2px}
+.say.done{color:var(--faint-text)}
+.say.now{color:var(--ink);border-left-color:var(--honey);background:var(--honey-tint)}
+.ib.words svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round}
+.ib.words[aria-pressed="true"]{color:var(--honey)}
 @keyframes rise{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 .transport{display:flex;align-items:center;gap:6px;margin:10px 0 0}
 .ib{width:34px;height:34px;display:inline-grid;place-items:center;background:none;border:1px solid transparent;border-radius:var(--r-ctl);
@@ -363,7 +377,7 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
   .hexb{width:clamp(76px,24cqi,104px)}
   .hexb .t{font-size:11px}
   .count{display:none}
-  .caption{max-height:36vh}
+  .says{max-height:38vh}
 }
 @media (prefers-reduced-motion:reduce){
   .scene>*,.caption p.rise,.plate.beats [data-id],.fz.lights [data-id],.fz.duo .pane,.flow,.tick::after{transition:none!important;animation:none!important;transform:none!important}
@@ -487,6 +501,7 @@ const SCRIPT = `
   const voiceBtn = el.querySelector('.voice')
   const cap = el.querySelector('.caption')
   let line = cap.querySelector('p')
+  const saysBox = el.querySelector('.says'), says = [...el.querySelectorAll('.say')], wordsBtn = el.querySelector('.words')
   const voiced = steps.some(s => s.voice)
   const videos = [...el.querySelectorAll('video')]
   let at = -1, playing = false, timer = null, audio = null, voiceOn = true, started = false
@@ -669,8 +684,9 @@ const SCRIPT = `
     for (const n of el.querySelectorAll('.plate.beats [data-id], .fz.lights [data-id]')) n.classList.toggle('lit', lit.has('*') || lit.has(n.dataset.id))
     if (fz.classList.contains('duo')) { fz.classList.toggle('aside', !!s.beside); fz.classList.toggle('main', !s.beside && steps.some(x => x.beside)) }
     const p = document.createElement('p'); p.textContent = s.say; if (!still) p.className = 'rise'; line.replaceWith(p); line = p
-    cap.classList.toggle('long', s.say.split(/\\s+/).length > 70); cap.scrollTop = 0
-    requestAnimationFrame(() => cap.classList.toggle('more', cap.scrollHeight - cap.clientHeight > 4))
+    says.forEach((b, k) => { b.classList.toggle('done', k < at); b.classList.toggle('now', k === at); if (k === at) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current') })
+    // the sentence being said stays in the middle of the words
+    if (saysBox && !saysBox.hidden && says[at]) saysBox.scrollTop = says[at].offsetTop - (saysBox.clientHeight - says[at].offsetHeight) / 2
     ticks.forEach((t, k) => { t.classList.toggle('done', k < at); t.classList.toggle('now', k === at); if (k === at) t.setAttribute('aria-current', 'step'); else t.removeAttribute('aria-current') })
     if (count) count.textContent = String(at + 1).padStart(2, '0') + ' / ' + String(steps.length).padStart(2, '0')
     try { sessionStorage.setItem(KEY, String(at)) } catch {}
@@ -732,9 +748,22 @@ const SCRIPT = `
   if (back) back.onclick = () => go(at - 1)
   if (fwd) fwd.onclick = () => go(at + 1)
   ticks.forEach((t, k) => { t.onclick = () => go(k) })
+  says.forEach((b, k) => { b.onclick = () => go(k) })
+  // THE WORDS ARE OVER THE PICTURE until this button puts them away; the choice is kept for the visit.
+  if (wordsBtn && saysBox) {
+    const WORDS = 'hc-scene-words'
+    const setWords = (on) => {
+      saysBox.hidden = !on
+      wordsBtn.setAttribute('aria-pressed', String(on)); wordsBtn.setAttribute('aria-label', on ? 'Hide the words' : 'Show the words')
+      if (on && says[at]) saysBox.scrollTop = says[at].offsetTop - (saysBox.clientHeight - says[at].offsetHeight) / 2
+    }
+    let kept = null
+    try { kept = sessionStorage.getItem(WORDS) } catch {}
+    setWords(kept !== 'off')
+    wordsBtn.onclick = () => { const on = saysBox.hidden; setWords(on); try { sessionStorage.setItem(WORDS, on ? 'on' : 'off') } catch {} }
+  }
   if (voiceBtn) voiceBtn.onclick = () => { voiceOn = !voiceOn; voiceBtn.setAttribute('aria-pressed', String(voiceOn)); voiceBtn.setAttribute('aria-label', voiceOn ? 'Mute the voice' : 'Unmute the voice'); if (playing) speak() }
   // typing in a part to try holds the scene where it is
-  cap.addEventListener('scroll', () => cap.classList.toggle('more', cap.scrollHeight - cap.scrollTop - cap.clientHeight > 4), { passive: true })
   el.addEventListener('focusin', (e) => { if (e.target instanceof HTMLInputElement && playing) play(false) })
   show(returning ? resumeAt : 0)
   el.classList.add('in')
@@ -820,13 +849,15 @@ const sceneHtml = (sc) => {
     <div class="dock">${sc.link ? `
       <a class="cta" href="${esc(sc.link.href)}" target="_blank" rel="noopener">${esc(sc.link.label)}${icon('external')}</a>` : ''}
       <div class="caption" aria-live="polite"><p></p></div>
+      <ol class="says" aria-label="The words of this scene, a sentence at a time">${sc.steps.map(s => `<li><button type="button" class="say">${esc(s.say)}</button></li>`).join('')}</ol>
       <nav class="transport" aria-label="Play">
         <button type="button" class="ib pp${voiced ? ' lead' : ''}" aria-label="Play">${icon('play', 'i-play')}${icon('pause', 'i-pause')}<span class="lead-text">Listen${sc.minutes ? ` · ${esc(sc.minutes)}` : ''}</span></button>${sc.steps.length > 1 ? `
         <button type="button" class="ib" data-act="back" aria-label="Back">${icon('left')}</button>
         <button type="button" class="ib" data-act="next" aria-label="Next">${icon('right')}</button>
         <span class="ticks">${sc.steps.map((s, k) => `<button type="button" class="tick" aria-label="${esc(`${k + 1}: ${s.say.slice(0, 60)}`)}"></button>`).join('')}</span>
         <span class="count">01 / ${String(sc.steps.length).padStart(2, '0')}</span>` : `
-        <span class="ticks" aria-hidden="true"></span>`}${voiced ? `
+        <span class="ticks" aria-hidden="true"></span>`}
+        <button type="button" class="ib words" aria-pressed="true" aria-label="Hide the words"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h7"/></svg></button>${voiced ? `
         <button type="button" class="ib voice" aria-pressed="true" aria-label="Mute the voice">${icon('speaker', 'i-speaker')}${icon('muted', 'i-muted')}</button>` : ''}
       </nav>
     </div>

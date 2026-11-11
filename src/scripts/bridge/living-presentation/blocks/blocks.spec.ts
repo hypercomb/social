@@ -180,6 +180,15 @@ describe('every page says where it goes, once', () => {
       // wider, it stands in a column of its own and never over the stage.
       expect(b.page).toContain('.page.menu-open .tree{position:fixed;z-index:6;inset:0;')
       expect(b.page).toContain('.page.menu-open .top .menu-btn{position:fixed;')
+    })
+
+    it(`${at}: the words are the whole text, a section a sentence, with a button to put them away`, () => {
+      const steps = JSON.parse(/<script type="application\/json">([^]*?)<\/script>\s*<\/section>/.exec(b.page)![1]) as { say: string }[]
+      const says = [...b.page.matchAll(/<li><button type="button" class="say">/g)]
+      expect(says.length).toBe(steps.length)
+      expect(says.length).toBeGreaterThan(0)
+      expect(b.page).toContain('<ol class="says" aria-label="The words of this scene, a sentence at a time">')
+      expect(b.page).toContain('class="ib words" aria-pressed="true" aria-label="Hide the words"')
       expect(b.page).toContain('.page.menu-open{grid-template-columns:230px minmax(0,1fr)')
       expect(b.page).toMatch(/aria-label="Full screen"/)
     })

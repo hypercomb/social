@@ -971,8 +971,16 @@ every page, and its 25 scenes are folded into the tiles they explain:
   In the hive, tiles walk as hexagons unless something is pinned: a tile's own
   pin (`opens <tile> as website`) opens its part; a pin on a top tile reaches
   every tile under it and opens the whole website there. Scenes play like a
-  film: one sentence on screen at a time, timed to the voice, the figure's
-  part it is about lit.
+  film, timed to the voice, the figure's part it is about lit.
+- **The words are the whole text, over the picture.** jwize, 2026-11-11: *"the
+  audio should have the full text as an overlay instead that will be much
+  easier to manage"*; *"sectioned out per sentence to be recorded one sentence
+  at a time"*. A scene's narration is laid over the foot of its picture, every
+  sentence a section of its own. The sentence being said is lit and kept in
+  the middle; a press on any sentence plays from there. The button beside the
+  voice puts the words away so the picture stands alone, and the choice is
+  kept for the visit. One sentence is one section because one sentence is one
+  recording. A screen reader still hears each sentence as it is said.
 - **Checked.** `blocks/check.cjs` fails on a scene placed twice or said on
   two pages, a page that asks another host for anything, a medium whose bytes
   are not its name, or a link no page answers; `--render` also opens every
