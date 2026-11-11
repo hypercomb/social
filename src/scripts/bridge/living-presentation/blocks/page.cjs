@@ -365,9 +365,20 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
     background:var(--panel);border-right:0}
   .page.menu-open .top .menu-btn{position:fixed;z-index:7;top:12px;left:12px}
   /* THE TABS ARE PART OF THE MENU on a phone (jwize 2026-11-11: "the tabs are only shown as part of the menu on mobile"):
-     nothing stands above the picture but the crumbs; the menu carries the tabs over the tile list. */
+     nothing stands above the picture but the crumbs; the menu carries the tabs under the tile list. */
   .stage>.row{display:none}
-  .tree>.row{flex:none;justify-content:flex-start}
+  /* THE DRILLDOWN FIRST, THEN THIS LAYER'S VIDEOS, A FULL ROW EACH (jwize 2026-11-11: "put the list drilldown above and
+     make each item a full row below for the current layer videos"). */
+  .page.menu-open .tree{overflow-y:auto}
+  .tree [data-rail]{flex:0 0 auto}
+  .tree .hc-rail-list{flex:0 0 auto;overflow:visible}
+  .tree>.row{flex:none;display:flex;flex-direction:column;flex-wrap:nowrap;align-items:stretch;justify-content:flex-start;gap:6px;
+    margin:12px 0 0;padding:12px 0 0;border-top:1px solid var(--line);border-bottom:0}
+  .tree>.row .lbl{align-self:flex-start}
+  .tree>.row .sibs{flex-direction:column;flex-wrap:nowrap;align-items:stretch;gap:6px}
+  .tree>.row .sib,.tree>.row a.more{display:flex;align-items:center;justify-content:flex-start;width:100%;min-height:44px;box-sizing:border-box}
+  .tree>.row .more-wrap{display:flex;align-items:stretch}
+  .tree>.row .more-wrap small{max-width:none}
   /* a finger's row: the name walks in, the arrow opens the page */
   .page.menu-open .tree .hc-rail-row{min-height:44px}
   .page.menu-open .tree .hc-rail-walk{min-width:44px;min-height:44px}
@@ -538,11 +549,11 @@ const SCRIPT = `
   const menuBtn = page.querySelector('.menu-btn'), treeNav = page.querySelector('.tree')
   if (menuBtn && treeNav) {
     const phone = () => window.matchMedia('(max-width:760px)').matches
-    // On a phone the sibling tabs stand in the menu, over the tile list; wider, they stand above the picture.
+    // On a phone the sibling tabs stand in the menu, under the tile list, a full row each; wider, they stand above the picture.
     const tabs = page.querySelector('.stage>.row, .tree>.row'), stage = page.querySelector('.stage'), sceneEl = page.querySelector('.scene')
     const seatTabs = () => {
       if (!tabs || !stage) return
-      if (phone()) { if (tabs.parentNode !== treeNav) treeNav.prepend(tabs) }
+      if (phone()) { if (tabs.parentNode !== treeNav) treeNav.append(tabs) }
       else if (tabs.parentNode !== stage) stage.insertBefore(tabs, sceneEl)
     }
     seatTabs()

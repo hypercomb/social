@@ -931,7 +931,9 @@ every page, and its 25 scenes are folded into the tiles they explain:
     out as usual"*). There the row's two presses change places: the name walks
     inside a tile that holds others, and the arrow opens that tile's page. A
     tile that holds nothing has no arrow, so its name opens it. The sibling tabs
-    are part of that menu on a phone, over the tile list, and never above the
+    are part of that menu on a phone, under the tile list and a full row each
+    (jwize, 2026-11-11: *"put the list drilldown above and make each item a
+    full row below for the current layer videos"*), and never above the
     picture (jwize, 2026-11-11: *"the tabs are only shown as part of the menu
     on mobile"*). Wider than a
     phone the list stands in a column of its own and the stage moves over, so
