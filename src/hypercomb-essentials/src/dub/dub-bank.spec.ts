@@ -173,10 +173,15 @@ describe('point and click to dub', () => {
     // jwize, 2026-11-11: "this is in the way of the presentation ... when a host
     // is editing it should be centered above the viewer".
     expect(DRONE).toContain("above: event.target instanceof Element ? event.target.querySelector('.scene') : null")
-    expect(RECORDER).toContain('if (above) above.before(root)')
-    expect(RECORDER).toContain('.hc-dub{display:flex;justify-content:center;')
+    // Pinned to the top centre, never placed in the page's fixed grid (where it
+    // lands under the scene and squeezes the picture — seen in a real page).
+    expect(RECORDER).toContain('.hc-dub{position:fixed;top:.5rem;left:0;right:0;')
+    expect(RECORDER).not.toMatch(/above\.before\(root\)/)
+    expect(RECORDER).toContain('document.body.append(root)')
+    // It goes when the scene that asked leaves the page.
+    expect(RECORDER).toContain('(ask.above && !ask.above.isConnected)) dismiss()')
     // No backdrop, no modal, and it takes no key that was not pressed inside it.
-    expect(RECORDER).not.toMatch(/aria-modal|inset:0|window\.addEventListener\('keydown'/)
+    expect(RECORDER).not.toMatch(/aria-modal|inset:0|background:rgba\(6,10,15|window\.addEventListener\('keydown'/)
     expect(RECORDER).toContain("root.addEventListener('keydown', keys)")
   })
 

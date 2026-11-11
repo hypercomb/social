@@ -453,7 +453,7 @@ export class DubDrone extends Drone {
       at: Number(detail?.at) || 0,
       of: Number(detail?.of) || 1,
       kept: this.#bank.urlOf(key),
-      // Above the viewer, never over it: the scene of the page that asked.
+      // The scene of the page that asked: the editor leaves when it does.
       above: event.target instanceof Element ? event.target.querySelector('.scene') : null,
       t,
       keep: async (take, seconds, text) => {

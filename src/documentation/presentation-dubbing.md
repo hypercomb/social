@@ -66,8 +66,13 @@ editor is not for publish use and you have to turn it off by default"):
 With it on, a press on a sentence in the scene's words (the list laid over the
 foot of the picture) goes to that sentence, holds the scene and opens the editor **centered above the viewer, never over it** (jwize:
 "this is in the way of the presentation ... when a host is editing it should be
-centered above the viewer"). It sits in the page's flow just before the scene
-and is not a dialog.
+centered above the viewer"). It is a compact strip pinned to the top centre of
+the window, over the page's menus, and is not a dialog. It is pinned and not
+placed in the page because the page is a fixed grid that fills the window:
+anything added to it lands in a new row under the scene and squeezes the
+picture. Turning the editor on shows the scene's words, since a sentence there
+is what is pressed; otherwise the words are put away by default (jwize: "the
+editor isn't showing by default").
 
 - **Record** takes the microphone. A cursor walks the words at reading pace,
   karaoke style; a press on a word, or the arrow keys, moves the cursor.
@@ -108,10 +113,22 @@ the bank, and refused when the bytes are not it. What you remember between
 sessions sits in the same pool: the sentences that are yours (`index`), the
 banks offered (`banks`), and your choice (`choice`).
 
+## What was run
+
+A real built page (`protocol/accessible`) with the real dub bee, bank and
+recorder bundled beside it, an in-memory store standing in for the hive, and a
+synthetic microphone (2026-11-11): words hidden and editor off by default; a
+press with the editor off only moves; `dub on` shows the words and marks them;
+the editor opens at the top with the picture untouched; record, stop, hear,
+keep; the take is stored and the page's player loads it in place of the baked
+voice; edit the words, restore the page's words, put the take down; `dub off`.
+The browser pane runs no animation frames, so the cursor was checked with a
+timer standing in for them.
+
 ## Not verified, and not done
 
-- None of this has been run in a browser: the recorder, the microphone, the
-  editor's place above the scene, an offer to a real host.
+- Not run inside the hive itself, with a real microphone, or against a real
+  host (offer, sync, a bank from a host).
 - The planted pages must be rebuilt and replanted to carry the page hooks, and
   a host must deploy the worker change and list the meaning.
 - A visitor only hears a host's bank if the dub bee is among the bees their

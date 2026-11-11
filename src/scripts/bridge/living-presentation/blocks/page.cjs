@@ -737,9 +737,11 @@ const SCRIPT = `
   }
   // Every sentence in the words says whether it can be recorded here, whether
   // a take plays for it, and reads the words the bank holds for it.
+  let showWords = null
   const markDub = () => {
     const b = bank(), can = !!(b && b.canRecord)
     if (saysBox) saysBox.classList.toggle('dubbable', can)
+    if (can && showWords) showWords()
     says.forEach((n, k) => {
       const said = sayOf(steps[k])
       if (n.textContent !== said) n.textContent = said
@@ -820,7 +822,11 @@ const SCRIPT = `
       page.dispatchEvent(new CustomEvent('hc-sentence', { bubbles: true, detail: { key: s.key, say: sayOf(s), original: s.say, at, of: steps.length, route: location.pathname } }))
     }
   })
-  // THE WORDS ARE OVER THE PICTURE until this button puts them away; the choice is kept for the visit.
+  // THE PICTURE STANDS ALONE UNTIL THE WORDS ARE ASKED FOR (jwize 2026-11-11: "this is in the way of the
+  // presentation ... make sure hypercomb.com is published so the editor isn't showing by default"). The
+  // words are put away on every page as it is published; this button lays them over the foot of the
+  // picture, and the choice is kept for the visit. Turning the audio editor on in a hive shows them,
+  // since a sentence there is what is pressed to record.
   if (wordsBtn && saysBox) {
     const WORDS = 'hc-scene-words'
     const setWords = (on) => {
@@ -830,7 +836,8 @@ const SCRIPT = `
     }
     let kept = null
     try { kept = sessionStorage.getItem(WORDS) } catch {}
-    setWords(kept !== 'off')
+    setWords(kept === 'on')
+    showWords = () => { if (saysBox.hidden) setWords(true) }
     wordsBtn.onclick = () => { const on = saysBox.hidden; setWords(on); try { sessionStorage.setItem(WORDS, on ? 'on' : 'off') } catch {} }
   }
   if (voiceBtn) voiceBtn.onclick = () => { voiceOn = !voiceOn; voiceBtn.setAttribute('aria-pressed', String(voiceOn)); voiceBtn.setAttribute('aria-label', voiceOn ? 'Mute the voice' : 'Unmute the voice'); if (playing) speak() }
@@ -841,6 +848,8 @@ const SCRIPT = `
     for (const [k, a] of [...warm]) if (k.startsWith('dub:')) { warm.delete(k); drop(a) }
     if (audio && !playing) { drop(audio); audio = null }
     if (line && at >= 0) line.textContent = sayOf(steps[at])
+    // A bank that arrived after this page (a bee woken late) is asked now.
+    try { const b = bank(); if (b && typeof b.want === 'function') b.want(steps.map(s => s.key)) } catch {}
     markDub()
   }
   addEventListener('hc-dubs-changed', dubsChanged)
@@ -933,7 +942,7 @@ const sceneHtml = (sc) => {
     <div class="dock">${sc.link ? `
       <a class="cta" href="${esc(sc.link.href)}" target="_blank" rel="noopener">${esc(sc.link.label)}${icon('external')}</a>` : ''}
       <div class="caption" aria-live="polite"><p></p></div>
-      <ol class="says" aria-label="The words of this scene, a sentence at a time">${sc.steps.map(s => `<li><button type="button" class="say">${esc(s.say)}</button></li>`).join('')}</ol>
+      <ol class="says" hidden aria-label="The words of this scene, a sentence at a time">${sc.steps.map(s => `<li><button type="button" class="say">${esc(s.say)}</button></li>`).join('')}</ol>
       <nav class="transport" aria-label="Play">
         <button type="button" class="ib pp${voiced ? ' lead' : ''}" aria-label="Play">${icon('play', 'i-play')}${icon('pause', 'i-pause')}<span class="lead-text">Listen${sc.minutes ? ` · ${esc(sc.minutes)}` : ''}</span></button>${sc.steps.length > 1 ? `
         <button type="button" class="ib" data-act="back" aria-label="Back">${icon('left')}</button>
@@ -941,7 +950,7 @@ const sceneHtml = (sc) => {
         <span class="ticks">${sc.steps.map((s, k) => `<button type="button" class="tick" aria-label="${esc(`${k + 1}: ${s.say.slice(0, 60)}`)}"></button>`).join('')}</span>
         <span class="count">01 / ${String(sc.steps.length).padStart(2, '0')}</span>` : `
         <span class="ticks" aria-hidden="true"></span>`}
-        <button type="button" class="ib words" aria-pressed="true" aria-label="Hide the words"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h7"/></svg></button>${voiced ? `
+        <button type="button" class="ib words" aria-pressed="false" aria-label="Show the words"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h7"/></svg></button>${voiced ? `
         <button type="button" class="ib voice" aria-pressed="true" aria-label="Mute the voice">${icon('speaker', 'i-speaker')}${icon('muted', 'i-muted')}</button>` : ''}
       </nav>
     </div>

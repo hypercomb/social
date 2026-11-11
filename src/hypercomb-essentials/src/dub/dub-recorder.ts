@@ -5,10 +5,12 @@
 // It opens when a sentence is pressed (dub.drone.ts), CENTERED ABOVE THE
 // VIEWER and never over it (jwize, 2026-11-11: "this is in the way of the
 // presentation ... when a host is editing it should be centered above the
-// viewer"): it takes its place in the page's own flow, just before the scene,
-// so the figure and the sentence stay in full view while a take is made. With
-// no scene to sit above it floats at the top of the window. It is not a
-// dialog: the page behind it stays usable. The
+// viewer"): a compact strip pinned to the top centre of the window, over the
+// page's menus, so the figure and the words stay in full view while a take is
+// made. It is pinned and not placed in the page's flow because a presentation
+// page is a fixed grid that fills the window: anything added to it lands in a
+// new row under the scene and squeezes the picture (seen in a real page). It
+// is not a dialog: the page behind it stays usable. The
 // sentence is laid out a word at a time; while a take is being recorded the
 // cursor moves through the words at reading pace, karaoke style, so reading
 // with it gives a take about as long as the scene expects. A press on any word
@@ -30,7 +32,7 @@ export interface DubRecorderAsk {
   readonly of: number
   /** A take already kept for this sentence, to hear before replacing it. */
   readonly kept: string
-  /** The viewer the editor sits above (the page's scene), when there is one. */
+  /** The scene that asked. The editor closes when it leaves the page. */
   readonly above: Element | null
   readonly t: (key: string, fallback: string, params?: Record<string, string | number>) => string
   /** Keep a take, with the words it was read from. */
@@ -43,22 +45,20 @@ export interface DubRecorderAsk {
 
 const STYLE_ID = 'hc-dub-style'
 const STYLE = `
-.hc-dub{display:flex;justify-content:center;margin:0 0 1rem;font:1rem/1.5 system-ui,sans-serif;color:#e8eef3;text-align:left}
-.hc-dub.floating{position:fixed;top:.75rem;left:0;right:0;z-index:2147483000;margin:0;pointer-events:none}
-.hc-dub.floating .hc-dub-card{pointer-events:auto;box-shadow:0 12px 40px rgba(0,0,0,.5)}
-.hc-dub-card{box-sizing:border-box;width:min(46rem,100%);max-height:42vh;overflow:auto;padding:1rem 1.25rem;background:#0d141c;border:1px solid rgba(126,182,214,.35);border-radius:4px}
-.hc-dub-head{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;margin:0 0 .5rem;font-size:.85rem;color:#9fb4c4}
-.hc-dub-words{margin:0 0 .75rem;font-size:1.3rem;line-height:1.5}
+.hc-dub{position:fixed;top:.5rem;left:0;right:0;z-index:2147483000;display:flex;justify-content:center;padding:0 .75rem;pointer-events:none;font:.95rem/1.45 system-ui,sans-serif;color:#e8eef3;text-align:left}
+.hc-dub-card{pointer-events:auto;box-sizing:border-box;width:min(46rem,100%);max-height:38vh;overflow:auto;padding:.7rem 1rem;background:#0d141c;border:1px solid rgba(126,182,214,.35);border-radius:4px;box-shadow:0 12px 40px rgba(0,0,0,.5)}
+.hc-dub-head{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;margin:0 0 .3rem;font-size:.8rem;color:#9fb4c4}
+.hc-dub-words{margin:0 0 .4rem;font-size:1.2rem;line-height:1.45}
 .hc-dub-word{cursor:pointer;border-radius:3px;padding:0 .08em;color:#7d8f9d;transition:color .12s,background .12s}
 .hc-dub-word.said{color:#e8eef3}
 .hc-dub-word.now{color:#0d141c;background:#f2b84b}
 .hc-dub-word:focus-visible{outline:2px solid #7eb6d6;outline-offset:1px}
 .hc-dub-edit{box-sizing:border-box;display:block;width:100%;min-height:4.5rem;margin:0 0 .75rem;padding:.6rem .7rem;font:inherit;font-size:1.25rem;line-height:1.5;color:#e8eef3;background:#070b10;border:1px solid #47617a;border-radius:4px;resize:vertical}
 .hc-dub-edit:focus-visible{outline:2px solid #7eb6d6;outline-offset:1px}
-.hc-dub-state{min-height:1.5em;margin:0 0 .75rem;font-size:.9rem;color:#9fb4c4}
+.hc-dub-state{min-height:1.45em;margin:0 0 .5rem;font-size:.85rem;color:#9fb4c4}
 .hc-dub-state.error{color:#ff9d8a}
-.hc-dub-acts{display:flex;flex-wrap:wrap;gap:.6rem}
-.hc-dub-acts button{font:inherit;padding:.55rem .95rem;border-radius:4px;border:1px solid #47617a;background:#16222e;color:#e8eef3;cursor:pointer}
+.hc-dub-acts{display:flex;flex-wrap:wrap;gap:.45rem}
+.hc-dub-acts button{font:inherit;padding:.35rem .75rem;border-radius:4px;border:1px solid #47617a;background:#16222e;color:#e8eef3;cursor:pointer}
 .hc-dub-acts button:disabled{opacity:.4;cursor:default}
 .hc-dub-acts button[hidden]{display:none}
 .hc-dub-acts button.lead{border-color:#f2b84b;background:#f2b84b;color:#0d141c}
@@ -380,7 +380,7 @@ export const openDubRecorder = (ask: DubRecorderAsk): void => {
   close.addEventListener('click', dismiss)
   root.addEventListener('keydown', keys)
   // The page it sits in went away (another tile, the hive): it goes with it.
-  const watch = new MutationObserver(() => { if (!root.isConnected) dismiss() })
+  const watch = new MutationObserver(() => { if (!root.isConnected || (ask.above && !ask.above.isConnected)) dismiss() })
   open = dismiss
 
   layout(readingSeconds(text))
@@ -389,11 +389,8 @@ export const openDubRecorder = (ask: DubRecorderAsk): void => {
     : t('dub.ready', 'Press Record and read with the cursor. Press a word to start from it.'))
   sync()
   paint(-1)
-  const above = ask.above?.isConnected ? ask.above : null
-  if (above) above.before(root)
-  else { root.classList.add('floating'); document.body.append(root) }
-  watch.observe(above?.parentNode ?? document.body, { childList: true, subtree: !above })
-  try { root.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) } catch { /* older engines */ }
+  document.body.append(root)
+  watch.observe(document.body, { childList: true, subtree: true })
   record.focus({ preventScroll: true })
 }
 
