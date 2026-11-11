@@ -10,13 +10,14 @@
 //
 //   page → { t: 'hello', id }                                hive → { t: 'here', id, pubkey }
 //   page → { t: 'toggle', id, zone, pubkey, lineage, on }    hive → { t: 'done', id, ok, changed?, reason? }
+//   page → { t: 'view', id, zone, view }                     hive → { t: 'done', id, ok, changed?, reason? }
 //
 // MIRRORED: hypercomb-shim/src/bootstrap/owner-bridge.ts speaks this; the shim spec holds them together.
 
 import { EffectBus, requestConfirm } from '@hypercomb/core'
 import { fetchHiveIndex } from './hive-pointer.js'
 import { publisherKeyHex } from './key-list.client.js'
-import { readSignedShowcase, showcases, signShowcase, toggleItem, type Showcase, type ShowcaseItem } from './showcase-record.js'
+import { parseView, readSignedShowcase, setView, showcases, signShowcase, toggleItem, type Showcase, type ShowcaseItem } from './showcase-record.js'
 
 export const SHOWCASE_CHANNEL = 'hc:showcase'
 
@@ -97,6 +98,34 @@ export async function applyToggle(request: ToggleRequest, deps: BridgeDeps = {})
   }, deps)
 }
 
+/** Sign the look a visitor is shown on `zone` (jwize 2026-11-10: "if you have your private key you can publish").
+ *  Hexagons is the absence of a view. A zone with no record yet keeps showing what this key publishes there: the
+ *  record that first names a look names those too. */
+export async function applyView(request: { readonly zone: string; readonly view: string }, deps: BridgeDeps = {}): Promise<ToggleResult> {
+  const zone = String(request.zone ?? '').toLowerCase()
+  const view = parseView(request.view)
+  if (!ZONE.test(zone) || !view) return { ok: false, reason: 'bad request' }
+  const own = String(await (deps.own ?? (() => publisherKeyHex({ known: true })))().catch(() => '') ?? '').toLowerCase()
+  if (!SIG.test(own)) return { ok: false, reason: 'no key on this device' }
+  const next = view === 'hex' ? undefined : view
+  let current: Showcase | null
+  try {
+    current = await (deps.read ?? readSignedShowcase)(zone)
+  } catch {
+    return { ok: false, reason: 'could not read the showcase' }
+  }
+  if (current) return (current.view ?? undefined) === next ? { ok: true, changed: false } : signResult(setView(current, next), deps)
+  if (!next) return { ok: true, changed: false }
+  let open: readonly ShowcaseItem[] | null
+  try {
+    open = await (deps.published ?? doorsOnZone)(zone, own)
+  } catch {
+    return { ok: false, reason: 'could not read what is published here' }
+  }
+  if (!open) return { ok: false, reason: 'could not read what is published here' }
+  return signResult(setView({ zone, items: [...open], domains: [] }, next), deps)
+}
+
 let started = false
 
 /** Answer the page. Idempotent; a hive without BroadcastChannel answers nothing. */
@@ -117,6 +146,11 @@ export function startShowcaseBridge(): void {
       // One at a time: each is a read-merge-sign of the same record.
       lane = lane.then(async () => {
         const result = await applyToggle(message as unknown as ToggleRequest).catch((): ToggleResult => ({ ok: false, reason: 'failed' }))
+        channel.postMessage({ t: 'done', id, ...result })
+      })
+    } else if (message['t'] === 'view') {
+      lane = lane.then(async () => {
+        const result = await applyView(message as unknown as { zone: string; view: string }).catch((): ToggleResult => ({ ok: false, reason: 'failed' }))
         channel.postMessage({ t: 'done', id, ...result })
       })
     }

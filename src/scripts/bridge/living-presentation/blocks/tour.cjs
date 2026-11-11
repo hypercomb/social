@@ -27,7 +27,9 @@ const SCENES_OF = {
   'protocol': 2,
   'road/question': 1,
   'protocol/simple': 3,
-  'protocol/accessible': 4,
+  // "presence is permission" waits with the reader tile: accessible has its own
+  // page about accessibility (jwize 2026-11-10), and no promoted tile is this scene's yet.
+  'protocol/accessible/reader': 4,
   'protocol/simple/primitive/signature': 5,
   'protocol/simple/primitive': 6,
   'protocol/organized/history': 7,

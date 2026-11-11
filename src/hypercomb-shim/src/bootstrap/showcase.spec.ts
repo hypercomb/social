@@ -339,15 +339,14 @@ describe('the hyperdex — this domain first and open, then the domains you foll
     await vi.waitFor(() => expect([...bands.querySelectorAll('.dex-row.own .hex-name')].map(name => name.textContent)).toEqual(['camelflage', 'dylan']))
     expect([...bands.querySelectorAll<HTMLElement>('.dex-row')].filter(row => !row.hidden)).toHaveLength(1)
     ;(hero.querySelector('.manage-toggle') as HTMLButtonElement).click()
-    await vi.waitFor(() => expect(rows(bands)).toEqual(['hypercomb.com open:camelflage,dylan', 'jwize.com:', 'Community:']))
+    await vi.waitFor(() => expect(rows(bands)).toEqual(['hypercomb.com open:camelflage,dylan', 'jwize.com:']))
     ;(bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
-    // The open domain is always the first row, and the one it replaced goes below it as a header. The community is not a
-    // domain: it is the last row, apart from them, and holds nothing until a tile is brought in.
-    expect(rows(bands)).toEqual(['jwize.com open:dylan', 'hypercomb.com:', 'Community:'])
+    // The open domain is always the first row, and the one it replaced goes below it as a header. Every row is a domain.
+    expect(rows(bands)).toEqual(['jwize.com open:dylan', 'hypercomb.com:'])
     // dylan is in this domain's showcase already, and its tile in jwize.com's row says so.
     expect(bands.querySelector('.dex-row:not(.own) .hex.in-showcase .hex-name')?.textContent).toBe('dylan')
     ;(bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()
-    expect(rows(bands)).toEqual(['hypercomb.com open:camelflage,dylan', 'jwize.com:', 'Community:'])
+    expect(rows(bands)).toEqual(['hypercomb.com open:camelflage,dylan', 'jwize.com:'])
   })
 
   it('shows a stranger only the showcase: no domains followed, no other rows', async () => {
@@ -551,7 +550,7 @@ describe('following a domain from the page', () => {
     search.dispatchEvent(new Event('input'))
     ;(hero.querySelector('.search-add') as HTMLButtonElement).click()
     // Before the host has answered the row is already there.
-    await vi.waitFor(() => expect(bands.querySelectorAll('.dex-row')).toHaveLength(3))
+    await vi.waitFor(() => expect(bands.querySelectorAll('.dex-row')).toHaveLength(2))
     const row = () => bands.querySelectorAll('.dex-row')[0] as HTMLElement
     expect(row().querySelector('.dex-name')?.textContent).toBe('nope.example')
     expect(row().querySelector('.dex-meta')?.textContent).toBe('Checking…')
@@ -1540,7 +1539,7 @@ describe('a tap visits, a hold toggles', () => {
   }
   const namesIn = (row: HTMLElement): string[] => [...row.querySelectorAll('.hex-name')].map(name => name.textContent ?? '')
 
-  it('the community feeds from the taps: a tap asks once, yes brings a tile in and puts it live; in the community, yes takes it back out', async () => {
+  it('a tile toggles where it sits: with the key a tap asks once and yes signs it on or off, and it never leaves its row', async () => {
     const owner = bridge(a)
     const keepCommunity = vi.fn(async () => true)
     const { hero, bands } = showcase({
@@ -1558,49 +1557,88 @@ describe('a tap visits, a hold toggles', () => {
     try {
       await vi.waitFor(() => expect(owner.hello).toHaveBeenCalled())
       await new Promise(resolve => setTimeout(resolve, 0))
-      // Not managing there is no community row: the showcase shows what is live and nothing else.
-      expect(rowNamed(bands, 'Community')).toBeUndefined()
       manageOn(hero)
-      const community = await vi.waitFor(() => { const row = rowNamed(bands, 'Community'); expect(row).toBeDefined(); return row! })
-      expect(community.querySelector('.dex-remove')).toBeNull()
-      expect(community.querySelector('.dex-meta')?.textContent).toBe('0 tiles')
+      // Every row is a domain: there is no row a tile is moved into.
+      expect(rowNamed(bands, 'Community')).toBeUndefined()
       // Another domain's tile: a tap only asks. Cancel and nothing happened.
       await openRowNamed(bands, 'jwize.com')
       const dylan = await tileIn(bands, '.dex-row:not(.own) a.hex', 'dylan')
       expect(dylan.classList.contains('off')).toBe(true)
+      expect(dylan.getAttribute('aria-pressed')).toBe('false')
       expect(click(dylan).defaultPrevented).toBe(true)
       expect(sheet.hidden).toBe(false)
       answer('Cancel')
       expect(sheet.hidden).toBe(true)
       expect(keepCommunity).not.toHaveBeenCalled()
       expect(owner.toggle).not.toHaveBeenCalled()
-      // Yes: into the community, and live — the one signed act, through the hive's key.
+      // Yes: on, and published — the one signed act, through the hive's key. It lights where it sits.
       click(dylan)
       answer('Put it in my showcase')
       await vi.waitFor(() => expect(owner.toggle).toHaveBeenCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'dylan', on: true }))
       expect(keepCommunity).toHaveBeenCalledTimes(1)
-      expect(namesIn(rowNamed(bands, 'jwize.com')!)).not.toContain('dylan')
-      expect(namesIn(await openRowNamed(bands, 'Community'))).toEqual(['dylan'])
-      // In the community a tap asks to take it out; yes sends it back to the domain it came from.
-      click(await tileIn(bands, '.dex-row:not(.own) a.hex', 'dylan'))
+      expect(namesIn(rowNamed(bands, 'jwize.com')!)).toContain('dylan')
+      await vi.waitFor(() => expect(dylan.classList.contains('off')).toBe(false))
+      expect(dylan.getAttribute('aria-pressed')).toBe('true')
+      // The same tile again asks to take it out, and it grays in place.
+      click(dylan)
       answer('Take it out of my showcase')
       await vi.waitFor(() => expect(keepCommunity).toHaveBeenCalledTimes(2))
-      await vi.waitFor(() => expect(namesIn(rowNamed(bands, 'Community')!)).toEqual([]))
-      expect(namesIn(await openRowNamed(bands, 'jwize.com'))).toContain('dylan')
-      // A live tile of this domain: yes brings it in (already live, nothing to sign); taking it out signs it off.
+      await vi.waitFor(() => expect(dylan.classList.contains('off')).toBe(true))
+      expect(namesIn(rowNamed(bands, 'jwize.com')!)).toContain('dylan')
+      // A published tile of this domain is on already: the tap asks to take it out, and yes signs it off.
       await openRowNamed(bands, 'hypercomb.com')
       click(await tileIn(bands, '.dex-row.own a.hex', 'camelflage'))
-      answer('Put it in my showcase')
-      await vi.waitFor(() => expect(keepCommunity).toHaveBeenCalledTimes(3))
-      expect(owner.toggle).toHaveBeenCalledTimes(1)
-      await openRowNamed(bands, 'Community')
-      click(await tileIn(bands, '.dex-row:not(.own) a.hex', 'camelflage'))
       answer('Take it out of my showcase')
       await vi.waitFor(() => expect(owner.toggle).toHaveBeenLastCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'camelflage', on: false }))
     } finally { hero.remove(); bands.remove() }
   })
 
-  it('keeps the community across a visit, and only ever shows it while managing', async () => {
+  it('a sideways step walks four looks and comes round, and with the key the look can be shown to visitors', async () => {
+    const view = vi.fn(async () => ({ ok: true as const, changed: false }))
+    const owner = { ...bridge(a), view }
+    const { hero, bands } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => owners(), owner,
+    })
+    document.body.append(hero, bands)
+    const look = (): string => bands.querySelector('.pager-template')?.textContent ?? ''
+    const publish = (): HTMLButtonElement => bands.querySelector('.pager-publish') as HTMLButtonElement
+    const step = (key: string): void => { bands.querySelector('.pager')!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
+    try {
+      await vi.waitFor(() => expect(owner.hello).toHaveBeenCalled())
+      await new Promise(resolve => setTimeout(resolve, 0))
+      manageOn(hero)
+      await vi.waitFor(() => expect(look()).toBe('Hexagons'))
+      // The look a visitor already sees has nothing to publish.
+      expect(publish().hidden).toBe(true)
+      const seen: string[] = []
+      for (let at = 0; at < 4; at++) { step('ArrowRight'); seen.push(look()) }
+      expect(seen).toEqual(['Launcher', 'iPhone', 'List', 'Hexagons'])
+      step('ArrowLeft')
+      expect(look()).toBe('List')
+      expect(publish().hidden).toBe(false)
+      publish().click()
+      await vi.waitFor(() => expect(view).toHaveBeenCalledWith({ zone: 'hypercomb.com', view: 'list' }))
+      await vi.waitFor(() => expect(bands.querySelector('.owner-note')?.textContent).toBe('Visitors now see the List look.'))
+    } finally { hero.remove(); bands.remove() }
+  })
+
+  it('without a key nothing offers to publish the look', async () => {
+    const { hero, bands } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => owners(),
+    })
+    document.body.append(hero, bands)
+    try {
+      await vi.waitFor(() => expect(bands.querySelector('.dex-row.own .hex')).not.toBeNull())
+      manageOn(hero)
+      bands.querySelector('.pager')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
+      expect(bands.querySelector('.pager-template')?.textContent).toBe('Launcher')
+      expect((bands.querySelector('.pager-publish') as HTMLButtonElement).hidden).toBe(true)
+    } finally { hero.remove(); bands.remove() }
+  })
+
+  it('what this browser turned on is kept across a visit: on the page it comes back to, and lit in its own row while editing', async () => {
     const { hero, bands } = showcase({
       self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
       ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => owners(),
@@ -1608,12 +1646,48 @@ describe('a tap visits, a hold toggles', () => {
     })
     document.body.append(hero, bands)
     try {
-      await vi.waitFor(() => expect(bands.querySelector('.dex-row.own .hex')).not.toBeNull())
-      expect(bands.querySelector('.dex-row.own')?.textContent).not.toContain('dylan')
+      await vi.waitFor(() => expect(namesIn(bands.querySelector('.dex-row.own') as HTMLElement)).toContain('dylan'))
       manageOn(hero)
-      expect(namesIn(await openRowNamed(bands, 'Community'))).toEqual(['dylan'])
-      expect(namesIn(await openRowNamed(bands, 'jwize.com'))).not.toContain('dylan')
+      expect(rowNamed(bands, 'Community')).toBeUndefined()
+      const row = await openRowNamed(bands, 'jwize.com')
+      expect(namesIn(row)).toContain('dylan')
+      expect((await tileIn(bands, '.dex-row:not(.own) a.hex', 'dylan')).classList.contains('off')).toBe(false)
     } finally { hero.remove(); bands.remove() }
+  })
+
+  it('on a phone with no key a tap is the switch itself: no question, kept in this browser, and a published tile says whose it is', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: /coarse|max-width: 599px/.test(query), media: query,
+      addEventListener: () => undefined, removeEventListener: () => undefined, addListener: () => undefined, removeListener: () => undefined,
+      onchange: null, dispatchEvent: () => false }))
+    const keepCommunity = vi.fn(async () => true)
+    const { hero, bands } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => owners(),
+      keepCommunity, minimized: async () => true,
+    })
+    document.body.append(hero, bands)
+    const sheet = hero.querySelector('.versions-backdrop') as HTMLElement
+    try {
+      await vi.waitFor(() => expect(bands.querySelector('.dex-row.own .hex')).not.toBeNull())
+      manageOn(hero)
+      await openRowNamed(bands, 'jwize.com')
+      const dylan = await tileIn(bands, '.dex-row:not(.own) a.hex', 'dylan')
+      await vi.waitFor(() => expect(dylan.classList.contains('off')).toBe(true))
+      expect(click(dylan).defaultPrevented).toBe(true)
+      expect(sheet.hidden).toBe(true)
+      await vi.waitFor(() => expect(dylan.classList.contains('off')).toBe(false))
+      expect(keepCommunity).toHaveBeenLastCalledWith([{ zone: 'jwize.com', key: 'hive:dylan' }])
+      await vi.waitFor(() => expect(bands.querySelector('.owner-note')?.textContent).toBe('dylan is on.'))
+      click(dylan)
+      await vi.waitFor(() => expect(dylan.classList.contains('off')).toBe(true))
+      expect(keepCommunity).toHaveBeenLastCalledWith([])
+      // What the domain published is not this browser's to take off.
+      await openRowNamed(bands, 'hypercomb.com')
+      const camelflage = await tileIn(bands, '.dex-row.own a.hex', 'camelflage')
+      click(camelflage)
+      await vi.waitFor(() => expect(bands.querySelector('.owner-note')?.textContent).toBe('camelflage is published on hypercomb.com. Only its key can take it off.'))
+      expect(camelflage.classList.contains('off')).toBe(false)
+    } finally { vi.unstubAllGlobals(); hero.remove(); bands.remove() }
   })
 
   describe('only what is optimized and minimized can be in the showcase', () => {
@@ -1773,7 +1847,7 @@ describe('collapsing the open domain collapses them all to the top', () => {
     ;(handle.bands.querySelectorAll('.dex-head')[0] as HTMLButtonElement).click()   // collapse the open one
     expect(handle.bands.querySelectorAll('.dex-row.open')).toHaveLength(0)
     expect(hosted.classList.contains('none-open')).toBe(true)
-    expect([...handle.bands.querySelectorAll('.dex-row')].filter(row => !(row as HTMLElement).hidden)).toHaveLength(3)
+    expect([...handle.bands.querySelectorAll('.dex-row')].filter(row => !(row as HTMLElement).hidden)).toHaveLength(2)
     ;(handle.bands.querySelectorAll('.dex-head')[1] as HTMLButtonElement).click()   // open the other
     expect(hosted.classList.contains('none-open')).toBe(false)
     expect(handle.bands.querySelector('.dex-row')?.classList.contains('open')).toBe(true)

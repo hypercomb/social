@@ -123,9 +123,11 @@ const waysOf = (route, paged) => {
  *  authored on the page (`topic`), else the tile's name. Nothing when no page
  *  lies below the tile. */
 const exploreOf = (route, paged, block) => {
-  const first = (tileAt(route)?.children || []).map(c => [...route, c.name]).find(r => paged.has(r.join('/')))
+  const below = (tileAt(route)?.children || []).map(c => [...route, c.name]).filter(r => paged.has(r.join('/')))
+  const first = below[0]
   if (!first) return null
-  return { topic: String((block && block.topic) || route[route.length - 1]), to: first }
+  // what lies below, by name: the detail under the button, different on every page
+  return { topic: String((block && block.topic) || route[route.length - 1]), to: first, names: below.map(r => r[r.length - 1]) }
 }
 
 /** THE TREE MENU (jwize 2026-11-08: "a left hand sidebar menu for the tree"):
