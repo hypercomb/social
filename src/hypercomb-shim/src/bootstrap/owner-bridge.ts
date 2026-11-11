@@ -16,18 +16,22 @@
 export const SHOWCASE_CHANNEL = 'hc:showcase'
 
 export type OwnerToggle = { readonly zone: string; readonly pubkey: string; readonly lineage: string; readonly on: boolean }
+/** How the zone's page is drawn for everyone: one of the showcase's views, by name. */
+export type OwnerView = { readonly zone: string; readonly view: string }
 export type OwnerResult = { readonly ok: true; readonly changed: boolean } | { readonly ok: false; readonly reason: string }
 
 export type OwnerBridge = {
   /** The key of the hive beside this page, or '' when there is none (or it did not answer in time). */
   readonly hello: () => Promise<string>
   readonly toggle: (request: OwnerToggle) => Promise<OwnerResult>
+  /** Sign the look a visitor is shown. Absent where the owner cannot (an older hive simply never answers). */
+  readonly view?: (request: OwnerView) => Promise<OwnerResult>
 }
 
 const SIG = /^[0-9a-f]{64}$/
 
 /** The bridge, or null where this browser has no BroadcastChannel. */
-export const ownerBridge = (waitMs = 1500, settleMs = 30_000): OwnerBridge | null => {
+export const ownerBridge = (waitMs = 1500, settleMs = 30_000, viewMs = 10_000): OwnerBridge | null => {
   if (typeof BroadcastChannel === 'undefined') return null
   const channel = new BroadcastChannel(SHOWCASE_CHANNEL)
   let ids = 0
@@ -46,6 +50,8 @@ export const ownerBridge = (waitMs = 1500, settleMs = 30_000): OwnerBridge | nul
   return {
     hello: () => ask({ t: 'hello' }, 'here', waitMs, '', data => (typeof data['pubkey'] === 'string' && SIG.test(data['pubkey']) ? data['pubkey'] : '')),
     toggle: request => ask<OwnerResult>({ t: 'toggle', ...request }, 'done', settleMs, { ok: false, reason: 'the hive did not answer' },
+      data => (data['ok'] === true ? { ok: true, changed: data['changed'] === true } : { ok: false, reason: String(data['reason'] ?? 'refused') })),
+    view: request => ask<OwnerResult>({ t: 'view', ...request }, 'done', viewMs, { ok: false, reason: 'the hive did not answer' },
       data => (data['ok'] === true ? { ok: true, changed: data['changed'] === true } : { ok: false, reason: String(data['reason'] ?? 'refused') })),
   }
 }

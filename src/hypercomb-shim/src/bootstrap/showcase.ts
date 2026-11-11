@@ -18,14 +18,14 @@
 
 import type { HostCreation, HostOffering } from '@hypercomb/core'
 import { pictureOrigins, tilePicture } from './tile-picture'
-import { communityKey, doorsOpen, parseView, stepView, viewLabel, type ShowcaseCommunity, type ShowcaseItem, type ShowcaseView, type ZoneOwners } from './showcase-record'
+import { communityKey, doorsOpen, parseView, viewLabel, type ShowcaseCommunity, type ShowcaseItem, type ShowcaseView, type ZoneOwners } from './showcase-record'
 import { DEFAULT_HOME, homeOrigin, turnOffHref } from './turn-off-link'
 import type { OwnerBridge } from './owner-bridge'
 import { showcaseHref } from './showcase-link'
 import type { CommunityPick } from './community-tiles'
 import {
   LaneTouch, hostOf as laneHostOf, keepLaneOrientation, laneDrift, laneLayout, laneMaxShift, lanePosition, laneSnap, laneTileAt, onePerHost,
-  readLaneOrientation, type LaneLayout,
+  keepTriedViews, readLaneOrientation, readTriedViews, type LaneLayout,
 } from './showcase-lanes'
 import type { LinkIcon, Starter, WelcomeLink } from './welcome'
 
@@ -415,11 +415,16 @@ export const gestureStep = (dx: number, dy: number, ms: number): { readonly axis
   return far && down >= 1.4 * Math.abs(dx) ? { axis: 'y', by: dy < 0 ? 1 : -1 } : null
 }
 
-/** THE COMMUNITY IS NOT A DOMAIN (jwize 2026-11-04: "the community is not a domain just a target for promoting locally
- *  domain hosted creations"): while managing it is a row of its own, kept apart from the domains. Every tile belongs to a
- *  domain's row; a tap there brings it into the community, and a tap in the community sends it back to its domain — this
- *  one too. A name no domain can have (a domain has a dot), so it never collides with a row. */
-const COMMUNITY = 'community'
+/** THE FOUR LOOKS A SIDEWAYS SWIPE WALKS WHILE EDITING (jwize 2026-11-10: "the four different views on the mobile that you
+ *  should be able to activate by swiping left or right while in edit mode … iphone tile launcher a hexagon launcher a
+ *  button list launcher"). The square column scrolls on its own axis and is not one of them; a signed record may still
+ *  name it. */
+const SWIPE_VIEWS: readonly ShowcaseView[] = ['hex', 'launcher', 'iphone', 'list']
+const swipeView = (current: ShowcaseView, by: -1 | 1): ShowcaseView => {
+  const at = SWIPE_VIEWS.indexOf(current)
+  // From a look the swipe does not walk, on is the first and back is the last.
+  return at < 0 ? SWIPE_VIEWS[by > 0 ? 0 : SWIPE_VIEWS.length - 1]! : SWIPE_VIEWS[(at + by + SWIPE_VIEWS.length) % SWIPE_VIEWS.length]!
+}
 
 /** How many icons the iPhone dock holds, once the page has more than that. */
 const IPHONE_DOCK = 4
@@ -679,6 +684,8 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     // FILES ARE A MANAGE TOOL (jwize 2026-11-05: "the files are not shown by default … we can have it in manage mode only").
     filesButton.hidden = !managing || !files
     if (!managing) setFilesOpen(false)
+    // What the last tap said belongs to the editing; the page it comes back to is only the tiles.
+    if (!managing) ownerNote.hidden = true
     if (managing && !openRow) openRow = options.self
     options.onManage?.(managing)
     paint()
@@ -928,9 +935,9 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
    *  says in order to do this to type keys allow hypercomb.com?" — a click hands the switch to the hive, which asks once,
    *  signs and comes back). Never on a phone, where the hive's address serves this same front door. */
   const keyHome = (): unknown => options.home ?? (onPhone() ? undefined : DEFAULT_HOME)
-  // ── YOUR COMMUNITY (jwize 2026-11-04): a target, not a domain. While managing, a tap on a tile in any domain's row —
-  //    this one's too — brings it into the community row; a tap on it there sends it back to its domain. Going live in
-  //    the showcase is its own act (a hold, or the sheet), and only for what is optimized and minimized. ──
+  // ── WHAT THIS BROWSER TURNED ON (jwize 2026-11-04: the community is "a target, not a domain"; 2026-11-10: tiles toggle
+  //    where they sit). The picks are kept in this browser; a picked tile is lit in its domain's row while editing and
+  //    shows on the page otherwise. Publishing is its own, signed act, and only for what is optimized and minimized. ──
   let picks: CommunityPick[] = []
   const picked = (entry: Aggregate): boolean => picks.some(pick => pick.key === entry.key)
   let picking = false
@@ -939,8 +946,6 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     if (!options.keepCommunity) { say('This page cannot keep a community.'); return }
     const was = picks
     const on = !picked(entry)
-    // Where it goes back to: the domain it was brought in from.
-    const from = picks.find(pick => pick.key === entry.key)?.zone ?? row
     // ONE PER SUBDOMAIN, ON ANY DOMAIN (jwize 2026-11-05; a bare apex counts as one): a tile brought in from a host
     // that already has one in the community takes that one's place.
     const known = new Map(bands().flatMap(band => band.open).map(found => [found.key, found] as const))
@@ -953,8 +958,8 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     paint()
     const kept = await options.keepCommunity(picks).catch(() => false)
     picking = false
-    if (!kept) { picks = was; paint(); say(`Could not ${on ? 'bring' : 'send'} ${entry.title} ${on ? 'into your community' : `back to ${from}`}.`); return }
-    say(on ? `${entry.title} is in your community. Tap it there to send it back to ${row}.` : `${entry.title} went back to ${from}.`)
+    if (!kept) { picks = was; paint(); say(`Could not turn ${entry.title} ${on ? 'on' : 'off'}.`); return }
+    say(`${entry.title} is ${on ? 'on' : 'off'}.`)
   }
   /** Whether a tile's revision is optimized and minimized — asked of the domain that serves it. True where the page
    *  cannot ask (nothing was wired to), so it gates nothing it cannot know. */
@@ -1005,19 +1010,30 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   //    needs to be just confirm"). Managing, a tap on a domain's tile asks once; yes brings it into your community and
   //    puts it live in the showcase. A tap on a community tile asks once; yes sends it back and takes it off. The going
   //    live is the same signed act as ever (tapTile): gated on optimized and minimized, signed by your hive's key. ──
+  // ── IN PLACE (jwize 2026-11-10: "you add domains. You go to them and toggle things on or off. Then you are back in
+  //    your mobile app view and you are just using the creations" · "they should have to be published so that the
+  //    visitor can see the community but if you have your private key you can publish unpublish stuff"). A tile is ON
+  //    when it is published here or this browser turned it on; it lights or grays where it sits, in its own domain's
+  //    row. With the key a tap asks once and the yes is the signed act; without one a tap is this browser's own
+  //    switch, at once, and what it turns on shows in the page it comes back to. ──
+  const isOn = (entry: Aggregate): boolean => showcased(entry) || picked(entry)
+  /** Can a tap here end in a signature: a hive or an invited key answers, or (off a phone) the hive can be handed it. */
+  const canSign = (): boolean => (!!options.owner && !!ownerKey) || !onPhone()
   const toggleTile = async (entry: Aggregate, row: string, into: boolean): Promise<void> => {
     if (into) {
       if (!picked(entry)) await pickTile(entry, row)
-      if (!showcased(entry)) await tapTile(entry, row)
+      if (!showcased(entry) && canSign()) await tapTile(entry, row)
       return
     }
-    const from = picks.find(pick => pick.key === entry.key)?.zone ?? options.self
+    const from = picks.find(pick => pick.key === entry.key)?.zone ?? row
     if (picked(entry)) await pickTile(entry, row)
-    if (showcased(entry)) await tapTile(entry, from)
+    if (!showcased(entry)) return
+    if (canSign()) await tapTile(entry, from)
+    else say(`${entry.title} is published on ${options.self}. Only its key can take it off.`)
   }
   const openConfirm = (entry: Aggregate, from: HTMLElement, row: string): void => {
     opener = from
-    const into = row !== COMMUNITY
+    const into = !isOn(entry)
     const heading = el('h3', 'versions-title')
     heading.textContent = entry.title
     const yes = el('button', 'version-act')
@@ -1101,7 +1117,8 @@ ${entry.key}`
         if (held) { held = false; event.preventDefault(); event.stopPropagation(); return }
         if (row === options.self && !managing) return
         event.preventDefault()
-        openConfirm(made.entry, tile, row)
+        if (canSign()) openConfirm(made.entry, tile, row)
+        else void toggleTile(made.entry, row, !isOn(made.entry))
       })
       tile.addEventListener('contextmenu', event => { event.preventDefault(); stop(); heldOpen = true; openVersions(made.entry, tile, row) })
       tile.addEventListener('keydown', event => {
@@ -1114,7 +1131,10 @@ ${entry.key}`
     view.entry = entry
     const live = showcased(entry)
     // Gray: not in the showcase yet, in any domain's row; the community row is lit — what is in it is in.
-    view.tile.classList.toggle('off', row === COMMUNITY || (row === options.self && !managing) ? false : !live)
+    const lit = live || picked(entry)
+    view.tile.classList.toggle('off', row === options.self && !managing ? false : !lit)
+    if (managing) view.tile.setAttribute('aria-pressed', String(lit))
+    else view.tile.removeAttribute('aria-pressed')
     if (view.head !== lead.head) {
       // A new lead version: its own cover and picture, and the old head forgets this box.
       wearers.get(view.head)?.delete(view.art)
@@ -1129,10 +1149,8 @@ ${entry.key}`
     // Somewhere else on the web opens in its own tab; this origin is this site still.
     if (view.tile.origin !== location.origin) { view.tile.target = '_blank'; view.tile.rel = 'noopener' }
     else { view.tile.removeAttribute('target'); view.tile.removeAttribute('rel') }
-    view.tile.title = row === COMMUNITY
-      ? `${entry.title} · ${place.address} — tap to send it back to ${picks.find(pick => pick.key === entry.key)?.zone ?? 'its domain'}, hold for more`
-      : row !== options.self || managing
-        ? `${entry.title} · ${place.address} — tap to bring it into your community, hold for ${row === options.self ? 'more' : 'its domains'}`
+    view.tile.title = row !== options.self || managing
+        ? `${entry.title} · ${place.address} — tap to turn it ${lit ? 'off' : 'on'}, hold for ${row === options.self ? 'more' : 'its domains'}`
         : `${entry.title} · ${place.address} — tap to visit, hold for more`
     view.name.textContent = entry.title
     view.address.textContent = place.address
@@ -1414,11 +1432,11 @@ ${entry.key}`
     toggle.type = 'button'
     toggle.setAttribute('aria-controls', id)
     const name = el('span', 'dex-name')
-    name.textContent = zone === COMMUNITY ? 'Community' : zone
+    name.textContent = zone
     const meta = el('span', 'dex-meta')
     const chevron = el('span', 'dex-chevron')
     chevron.append(iconOf('chevron'))
-    toggle.append(iconOf(zone === COMMUNITY ? 'people' : 'globe'), name, meta, chevron)
+    toggle.append(iconOf('globe'), name, meta, chevron)
     toggle.addEventListener('click', () => {
       dropMissing(zone)
       openRow = openRow === zone ? '' : zone
@@ -1433,7 +1451,7 @@ ${entry.key}`
     section.append(toggle, body)
     // A DOMAIN LEAVES ONLY WHEN IT IS REMOVED (jwize 2026-10-26: "they need to be alive when added and only leave when
     // removed"): a followed domain has a remove control; nothing else — a refresh, a click elsewhere — takes it away.
-    if (!own && zone !== COMMUNITY) {
+    if (!own) {
       const remove = el('button', 'dex-remove')
       remove.type = 'button'
       remove.title = `Remove ${zone}`
@@ -1499,9 +1517,29 @@ ${entry.key}`
   label.id = 'community-label'
   const templateNote = el('span', 'pager-template')
   templateNote.hidden = true
+  // WITH THE KEY, THE LOOK CAN BE EVERYONE'S (jwize 2026-11-10: "if you have your private key you can publish"): a quiet
+  // link beside the look's name, there only while the look tried here is not the one a visitor is shown.
+  const publishLook = el('button', 'pager-publish')
+  publishLook.type = 'button'
+  publishLook.textContent = 'Show visitors this look'
+  publishLook.hidden = true
+  let lookSigning = false
+  publishLook.addEventListener('click', () => {
+    const bridge = options.owner
+    if (lookSigning || !bridge?.view || !ownerKey) return
+    const view = showing()
+    lookSigning = true
+    say(`Publishing the ${viewLabel(view)} look…`)
+    void bridge.view({ zone: options.self, view }).catch(() => ({ ok: false as const, reason: 'failed' })).then(result => {
+      lookSigning = false
+      say(result.ok ? `Visitors now see the ${viewLabel(view)} look.` : `Not changed: ${result.reason}.`)
+      if (result.ok && result.changed) takeLedger(options.ledger)
+      else paint()
+    })
+  })
   const hint = el('p', 'pager-hint')
   hint.hidden = true
-  hint.textContent = 'Sideways changes the template. Up or down changes the set.'
+  hint.textContent = 'Swipe sideways for another look. Tap a tile to turn it on or off.'
   /** The template tried on this visit, by community key ('' is All). It wins over the signed one until the page is left. */
   const tried = new Map<string, ShowcaseView>()
   const namedCommunities = (): ShowcaseCommunity[] =>
@@ -1530,9 +1568,16 @@ ${entry.key}`
     return tried.get(page) ?? community?.view ?? base
   }
   const cycleTemplate = (by: -1 | 1): void => {
-    tried.set(page, stepView(showing(), by))
+    tried.set(page, swipeView(showing(), by))
+    // The look chosen is kept in this browser, so the page comes back as it was left.
+    void keepTriedViews(Object.fromEntries(tried))
     paint()
   }
+  void readTriedViews().then(kept => {
+    let changed = false
+    for (const [key, view] of Object.entries(kept)) if (!tried.has(key)) { tried.set(key, view); changed = true }
+    if (changed) paint()
+  }).catch(() => undefined)
   /** Up or down while managing: the named sets, or the domains you follow when none are named. */
   const cycleSet = (by: -1 | 1): void => {
     if (namedCommunities().length > 0) { turn(by); return }
@@ -1800,12 +1845,13 @@ ${entry.key}`
     const names = domains ? zoneSets() : ['All', ...communities.map(row => row.name)]
     const keys = domains ? names : ['', ...communities.map(row => communityKey(row.name))]
     const at = Math.max(0, keys.indexOf(domains ? openRow : page))
-    label.textContent = domains && openRow === COMMUNITY ? 'Community' : names[at] ?? 'All'
+    label.textContent = names[at] ?? 'All'
     label.setAttribute('aria-label', `${label.textContent}, group ${at + 1} of ${Math.max(1, names.length)}. Press for the next.`)
     templateNote.hidden = !managing
     templateNote.textContent = managing ? viewLabel(shape) : ''
     hint.hidden = !managing
-    if (label.parentElement !== pager) pager.replaceChildren(label, templateNote, hint)
+    publishLook.hidden = !managing || !ownerKey || !options.owner?.view || lookSigning || !!page || shape === (signed?.showcase?.view ?? 'hex')
+    if (label.parentElement !== pager) pager.replaceChildren(label, templateNote, publishLook, hint)
     pager.hidden = !managing && communities.length === 0
     if (pager.hidden) hosted.removeAttribute('aria-labelledby')
     else hosted.setAttribute('aria-labelledby', label.id)
@@ -1824,11 +1870,13 @@ ${entry.key}`
     if (page && !communities.some(community => communityKey(community.name) === page)) page = ''
     const community = communities.find(row => communityKey(row.name) === page)
     // A community only ever filters: its members must already be in the showcase.
-    const everything = unread ? [] : all.flatMap(band => band.tiles).filter(showcased)
-      .filter(entry => !community || covers(entry, community.items, community.domains)).sort(byTitle)
-    /** Your community's tiles, found wherever a row offers them now; a pick no row offers waits unseen. */
+    const published = unread ? [] : all.flatMap(band => band.tiles).filter(showcased)
+      .filter(entry => !community || covers(entry, community.items, community.domains))
+    /** What this browser turned on, found wherever a row offers it now; a pick no row offers waits unseen. */
     const known = new Map(all.flatMap(band => band.open).map(entry => [entry.key, entry] as const))
-    const communityTiles = picks.map(pick => known.get(pick.key)).filter((entry): entry is Aggregate => !!entry)
+    const turnedOn = community || unread ? [] : picks.map(pick => known.get(pick.key)).filter((entry): entry is Aggregate => !!entry)
+    // THE PAGE YOU COME BACK TO: what is published here, and what this browser turned on in any domain it added.
+    const everything = [...new Map([...published, ...turnedOn].map(entry => [entry.key, entry] as const)).values()].sort(byTitle)
     // The platform's doors are the first page's; a community is about what is shared.
     const links = community ? [] : options.links ?? []
     // HOW IT IS DRAWN: a try from this visit, else a community's own view, else All's
@@ -1843,20 +1891,16 @@ ${entry.key}`
     // of domains with the open one showing the available; they are below the open item, which is always at the top"). While
     // managing, every domain is a row; the open row shows its tiles and is first, the rest follow below it as headers.
     const everyZone = zoneSets()
-    // The community is a row of its own while managing, apart from the domains: a target, never a domain. It sits after
-    // them, where the thumb is, and comes to the top when it is the row that is open.
-    const rowZones = managing ? [...everyZone, COMMUNITY] : everyZone
+    const rowZones = everyZone
     const order = managing && openRow && rowZones.includes(openRow) ? [openRow, ...rowZones.filter(zone => zone !== openRow)] : rowZones
     // What this domain holds, managing: what is in its showcase and what else it publishes — lit when live, gray when not.
-    const ownHeld = [...new Map([...everything, ...rowItems(all, options.self)].map(entry => [entry.key, entry] as const)).values()].sort(byTitle)
+    const ownHeld = [...new Map([...published, ...rowItems(all, options.self)].map(entry => [entry.key, entry] as const)).values()].sort(byTitle)
     for (const zone of order) {
       const view = rowView(zone)
       const own = zone === options.self
-      const isCommunity = zone === COMMUNITY
-      // EVERY TILE BELONGS TO A DOMAIN'S ROW until it is brought into the community; it stays there until a tap sends it
-      // back — to this domain too. The showcase itself (not managing) is what is live, whatever the community holds.
-      const items = isCommunity ? communityTiles.slice().sort(byTitle)
-        : (own ? (managing ? ownHeld : everything) : rowItems(all, zone).slice().sort(byTitle)).filter(entry => !managing || !picked(entry))
+      // EVERY TILE STAYS IN ITS DOMAIN'S ROW, lit when it is on and gray when it is not. Editing, this domain's row is
+      // what it holds; otherwise it is the page itself — everything that is on.
+      const items = own ? (managing ? ownHeld : everything) : rowItems(all, zone).slice().sort(byTitle)
       const shown = items.filter(entry => aggregateMatches(entry, terms))
       // The doors wait for the ledger: the row draws once, not the doors and then the hives.
       const doors = own && ledgerRead && !unread ? links.filter(link => linkMatches(link, terms)) : []
@@ -1880,7 +1924,6 @@ ${entry.key}`
       }), ...doors.map(link => linkTile(link)), ...(starting && options.starter ? [starterOf(options.starter)] : [])] : [], own ? shape : base)
       view.empty.hidden = !open || (own ? shown.length > 0 && !unread : total > 0)
       view.empty.textContent = temp ? (temp.state === 'checking' ? `Checking ${zone}…` : `${zone} was not found — ${temp.reason}`)
-        : isCommunity ? 'Nothing here yet. Tap a tile in a domain to bring it into your community.'
         : own && (!ledgerRead || unread) ? 'Reading what is published here…'
         : own && signed && (!signed.reached || signed.unreadable) ? 'Could not read what is published here.'
           : own ? 'Nothing is published here yet.' : `Nothing is published on ${zone} yet.`
@@ -2164,7 +2207,10 @@ export const SHOWCASE_STYLE = `
 .pager[hidden] { display: none; }
 .pager-template { color: var(--md-primary); font: 600 .78rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); }
 .pager-hint { flex-basis: 100%; margin: 0; color: var(--md-on-surface-faint); font-size: .75rem; line-height: 1.35; }
-.pager-template[hidden], .pager-hint[hidden] { display: none; }
+.pager-template[hidden], .pager-hint[hidden], .pager-publish[hidden] { display: none; }
+.pager-publish { margin-left: auto; padding: .2rem 0; border: 0; background: transparent; cursor: pointer; color: var(--md-primary);
+  font: 600 .78rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); text-decoration: underline; text-underline-offset: .2em; }
+.pager-publish:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
 .owner-note { margin: 0 0 .5rem; color: var(--md-on-surface-var); font-size: .85rem; }
 .owner-note[hidden] { display: none; }
 .hex.off { opacity: .35; filter: grayscale(1); }
@@ -2275,9 +2321,8 @@ export const SHOWCASE_STYLE = `
 .hosted-nothing { margin: .4rem 0 1rem; color: var(--md-on-surface-var); }
 /* the platform's doors are tiles: the same hexagon, a glyph for a picture, a link for a click */
 a.hex { color: inherit; text-decoration: none; cursor: pointer; }
-.link-art { display: block; background: radial-gradient(circle at 50% 32%, #4a300c, #140b03 78%); color: var(--gold-2); }
-.link-art > svg { position: relative; z-index: 1; display: block; width: 38%; height: 38%; margin: 20% 31% 0; opacity: .95;
-  filter: drop-shadow(0 .3rem .7rem rgb(248 183 58 / .35)); }
+.link-art { display: block; background: linear-gradient(160deg, #1d2733, #10161e); color: var(--gold-2); }
+.link-art > svg { position: relative; z-index: 1; display: block; width: 38%; height: 38%; margin: 20% 31% 0; opacity: .95; }
 .hex-link:hover .link-art, .hex-link:focus-visible .link-art { color: var(--gold-1); }
 /* the faux starting tile: the same hexagon, quieter than a real one until it is reached for */
 .hex-starter { opacity: .72; transition: background .25s, opacity .25s; }
