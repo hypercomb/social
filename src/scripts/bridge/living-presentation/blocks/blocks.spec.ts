@@ -168,13 +168,14 @@ describe('every page says where it goes, once', () => {
       expect(b.page).not.toMatch(/data-part="(tabs|ways|beside)"/)
       for (const href of [...hrefs(b.page, 'tree'), ...hrefs(b.page, 'siblings')]) linkTo(href, b.route, paged)
     })
-    it(`${at}: the tree is on the left and the siblings sit under the video`, () => {
+    it(`${at}: the tree comes first, behind its button, and the siblings sit above the video`, () => {
       const tree = tagAt(b.page, 'tree')
       const scene = tagAt(b.page, 'scene')
       const sibs = tagAt(b.page, 'siblings')
       expect(tree).toBeGreaterThan(-1)
       expect(tree).toBeLessThan(scene)
-      if (sibs >= 0) expect(sibs).toBeGreaterThan(scene)
+      if (sibs >= 0) expect(sibs).toBeLessThan(scene)
+      expect(b.page).toMatch(/class="ib2 menu-btn" aria-label="Show the tree" aria-expanded="false"/)
       expect(b.page).toMatch(/aria-label="Full screen"/)
     })
     it(`${at}: the tree reaches every page, and the siblings share one parent`, () => {
@@ -210,7 +211,7 @@ describe('every page says where it goes, once', () => {
       // no card page: the children are presentations, nothing else
       expect(b.page).not.toMatch(/data-part="children"/)
       expect(tagAt(b.page, 'explore')).toBeGreaterThan(tagAt(b.page, 'scene'))
-      if (tagAt(b.page, 'siblings') >= 0) expect(tagAt(b.page, 'explore')).toBeLessThan(tagAt(b.page, 'siblings'))
+      if (tagAt(b.page, 'siblings') >= 0) expect(tagAt(b.page, 'explore')).toBeGreaterThan(tagAt(b.page, 'siblings'))
     })
     it(`${at}: the row stays when one of its buttons is pressed`, () => {
       // The buttons are the same names in the same order on every page a button leads to; only the lit one moves.
