@@ -43,7 +43,7 @@ export type Welcome = {
   links: WelcomeLink[]
   /** The zone's room: a sealed swarm link, or '' (absent on a card without one). */
   swarm?: string
-  /** The published hive a phone lands in on this host's front page: an https address, when one is staged. */
+  /** The published hive this host's root shows in place: an https address, when one is staged. */
   presentation?: string
 }
 
@@ -67,7 +67,7 @@ export type FrontDoor = {
   /** The starting point a host with nothing staged offers in place of the
    *  platform's doors — null once the operator stages a front page of its own. */
   readonly starter: Starter | null
-  /** The published hive a phone is shown in place on this front page, or ''. */
+  /** The published hive shown in place as this host's root, or ''. */
   readonly presentation: string
 }
 

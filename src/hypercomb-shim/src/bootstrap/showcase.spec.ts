@@ -1910,7 +1910,7 @@ describe('collapsing the open domain collapses them all to the top', () => {
   })
 })
 
-describe('a phone lands in the staged presentation (jwize 2026-11-11)', () => {
+describe('a staged presentation is the root, on a phone and on a desktop (jwize 2026-11-11)', () => {
   const draw = (extra = {}) => showcase({
     self: 'hypercomb.com', title: 'hypercomb', tagline: 'an open protocol for humanity', sources: [],
     ledger: Promise.resolve(parseLedger({ sites: [] })), readShared: async () => ({ offers: [], creations: [] }), ...extra,
@@ -1942,8 +1942,9 @@ describe('a phone lands in the staged presentation (jwize 2026-11-11)', () => {
     expect(back.hidden).toBe(true)
   })
 
-  it('is the search and the tiles on a desktop, and on a phone whose host stages no presentation', () => {
-    expect(draw({ presentation: 'https://protocol.hypercomb.com/' }).hero.querySelector('.front')).toBeNull()
+  it('is there on a desktop too, and a host that stages no presentation is the search and the tiles', () => {
+    expect(draw({ presentation: 'https://protocol.hypercomb.com/' }).hero.querySelector('.front iframe')?.getAttribute('src')).toBe('https://protocol.hypercomb.com/')
+    expect(draw().hero.querySelector('.front')).toBeNull()
     phone(() => { expect(draw().hero.querySelector('.front')).toBeNull() })
   })
 })

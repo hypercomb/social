@@ -553,7 +553,7 @@ export type ShowcaseOptions = {
   readonly tagline: string
   /** The zone's room (a sealed swarm link), drawn first — or ''. */
   readonly swarm?: string
-  /** The published hive a phone is shown in place of the search and tiles (an https address) — or ''. */
+  /** The published hive shown as this host's root, in place of the search and tiles (an https address) — or ''. */
   readonly presentation?: string
   /** Domains this hive added, shown after the ledger's. */
   readonly sources: readonly string[]
@@ -751,14 +751,14 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   // The Add button is fixed to the foot of the screen wherever it sits in the page; it is kept beside the search it belongs to.
   hero.append(brand, searchBox, searchAdd)
   paintBrand(false)
-  // THE PRESENTATION IS THE PHONE'S FRONT PAGE (jwize 2026-11-11: "for hypercomb.com on the mobile we are going to put
+  // THE PRESENTATION IS THE ROOT, ON EVERY SCREEN (jwize 2026-11-11: "the desktop also has the presentation as the root" · "for hypercomb.com on the mobile we are going to put
   // the protocol presentation. On the front page hypercomb an open protocol for humanity" · "we need to publish
-  // hypercomb.com to load this hive signature"). A host that stages a presentation shows it to a phone in place: its name
+  // hypercomb.com to load this hive signature"). A host that stages a presentation shows it in place: its name
   // and its line across the top, and under them the published hive, framed from its own address. That address always
   // answers with the head its publisher last signed, so a publish there is on this page at once, nothing is copied to
   // this host, and what the hive keeps stays with its own domain. The search and the tiles are one press away, and one
   // press brings the presentation back.
-  if (options.presentation && onPhone()) {
+  if (options.presentation) {
     const front = el('section', 'front')
     front.setAttribute('aria-label', options.title)
     const bar = el('div', 'front-bar')
@@ -2291,7 +2291,7 @@ export const SHOWCASE_STYLE = `
 /* the header's two rows are the page's own: the search sticks flush to the top of the scrolled
    page where the brand was, and the brand comes back when the page is scrolled back to it */
 .hero { display: contents; }
-/* a phone's front page on a host that stages a presentation: its name and line, and the published hive in place */
+/* the root of a host that stages a presentation: its name and line, and the published hive in place */
 .front { position: fixed; inset: 0; height: 100vh; height: 100dvh; z-index: 45; display: flex; flex-direction: column; background: var(--md-surface); }
 .front[hidden] { display: none; }
 .front-bar { flex: none; display: flex; align-items: center; gap: .65rem; padding: calc(.55rem + env(safe-area-inset-top, 0px)) .8rem .55rem;

@@ -35,8 +35,9 @@ const compose = (doors) => ({
   title: 'hypercomb',
   // jwize 2026-11-11: "On the front page hypercomb an open protocol for humanity".
   tagline: 'an open protocol for humanity',
-  // A phone lands in the protocol presentation, shown in place from the published hive (jwize 2026-11-11:
-  // "for hypercomb.com on the mobile we are going to put the protocol presentation").
+  // The root is the protocol presentation, shown in place from the published hive, on every screen (jwize 2026-11-11:
+  // "for hypercomb.com on the mobile we are going to put the protocol presentation" · "the desktop also has the
+  // presentation as the root").
   presentation: 'https://protocol.hypercomb.com/',
   // /hosts remains the operator console. It is not a door on this front page.
   links: [
