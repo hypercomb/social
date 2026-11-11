@@ -73,7 +73,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   // negative cache rides the same key: a bee that failed to load is reported
   // once and not asked for again until the package changes.
   #packageKey: string | null = null
-  #manifest: { layers: string[]; bees: string[] } = { layers: [], bees: [] }
+  #manifest: { layers: string[]; bees: string[]; dependencies: string[] } = { layers: [], bees: [], dependencies: [] }
   #walked: WalkedPackage | null = null
   /** Bee signature → why it did not load (not found, null product, threw). */
   readonly #failed = new Map<string, unknown>()
@@ -248,6 +248,9 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         }
         this.#walked = walked
         this.#package = { classes: walked.classes, bees: new Set(walked.bees) }
+        // A package turned off while the hive runs (recompose) takes its
+        // sleepers with it: what no longer runs must not be woken either.
+        if (layerRoots.length) this.#dropSleepersOutside(new Set(walked.bees))
       }
       const walkMs = performance.now() - tWalk
 
@@ -304,9 +307,11 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
             console.log(`[script-preloader] evicting disabled bee ${sig} (${key ?? '(no iocKey)'})`)
             ;(bee as any)?.markDisposed?.()
             if (typeof key === 'string' && key.length > 0) window.ioc.unregister(key)
+            this.#dismissCompany(sig, bee)
             this.#beeCache.delete(sig)
             this.#bySignature.delete(sig)
             this.#warmedUp.delete(sig)
+            this.#retired.add(sig)
             this.#resourceCount = Math.max(0, this.#resourceCount - 1)
             evicted = true
           }
@@ -370,6 +375,160 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
    *  the first one is emitted; the bus replays that emission to it. */
   readonly #effectSleeping = new Map<string, { wakesOn: readonly string[]; className: string }>()
   readonly #effectWatched = new Set<string>()
+
+  /** Forget every sleeper the selection no longer runs. The dev shell's own
+   *  sleepers (keyed by loader, never by signature) are not the package's. */
+  #dropSleepersOutside = (enabled: ReadonlySet<string>): void => {
+    const gone = (sig: string): boolean => !this.#devLoaders.has(sig) && !enabled.has(sig)
+    let words = false
+    for (const sig of [...this.#sleeping.keys()]) if (gone(sig)) { this.#sleeping.delete(sig); words = true }
+    for (const sig of [...this.#viewSleeping.keys()]) if (gone(sig)) this.#viewSleeping.delete(sig)
+    for (const sig of [...this.#effectSleeping.keys()]) if (gone(sig)) this.#effectSleeping.delete(sig)
+    for (const sig of [...this.#woken]) if (gone(sig)) this.#woken.delete(sig)
+    for (const sig of [...(this.#passive ?? [])]) if (gone(sig)) this.#passive!.delete(sig)
+    for (const sig of [...this.#idleHive]) if (gone(sig)) this.#idleHive.delete(sig)
+    if (words) EffectBus.emit('loader:sleeping', { words: this.sleepingWords() })
+  }
+
+  // -------------------------------------------------
+  // a bee's company — what its module registered beside it
+  // -------------------------------------------------
+  //
+  // THE BEE WIRES (essentials atomic-modules-plan.md): a bee's module registers
+  // its own queen and services at module scope, so switching the bee off while
+  // the hive runs must take them too — or the word of a game that is off still
+  // answers. A module evaluates in one synchronous run, so every registration
+  // made before the next microtask belongs to one module: that run is the
+  // bee's company. Two bees found in one run cannot be told apart (`owners`),
+  // and recompose then leaves the switch to a restart.
+
+  /** One synchronous run of registrations. */
+  #run: { keys: string[]; owners: number } | null = null
+  readonly #runOf = new WeakMap<object, { keys: string[]; owners: number }>()
+  /** Bee signature → the run its instance registered in. */
+  readonly #company = new Map<string, { keys: string[]; owners: number }>()
+  #watching = 0
+  #unwatchRegistrations: (() => void) | null = null
+
+  /** Listen for registrations while at least one bee is being evaluated. */
+  #watchRegistrations = (): (() => void) => {
+    if (this.#watching++ === 0) {
+      try {
+        this.#unwatchRegistrations = window.ioc.onRegister?.((key: string, value: unknown) => {
+          if (!this.#run) {
+            const run = { keys: [] as string[], owners: 0 }
+            this.#run = run
+            queueMicrotask(() => { if (this.#run === run) this.#run = null })
+          }
+          this.#run.keys.push(key)
+          if (value && typeof value === 'object') this.#runOf.set(value, this.#run)
+        }) ?? null
+      } catch { this.#unwatchRegistrations = null }
+    }
+    let done = false
+    return () => {
+      if (done) return
+      done = true
+      if (--this.#watching > 0) return
+      this.#unwatchRegistrations?.()
+      this.#unwatchRegistrations = null
+    }
+  }
+
+  #noteCompany = (signature: string, bee: Bee): void => {
+    const run = this.#runOf.get(bee)
+    if (!run || this.#company.get(signature) === run) return
+    run.owners++
+    this.#company.set(signature, run)
+  }
+
+  /** Dispose and unregister what an evicted bee's module registered beside it. */
+  #dismissCompany = (signature: string, bee: unknown): void => {
+    const run = this.#company.get(signature)
+    this.#company.delete(signature)
+    if (!run || run.owners > 1) return
+    for (const key of run.keys) {
+      const value = window.ioc.get(key) as { markDisposed?: () => void } | undefined
+      if (value === undefined || value === bee) continue
+      // Only what that run registered: a key since taken by another holder stays.
+      if (typeof value !== 'object' || this.#runOf.get(value) !== run) continue
+      try { value.markDisposed?.() } catch { /* best effort */ }
+      window.ioc.unregister(key)
+    }
+  }
+
+  // -------------------------------------------------
+  // recompose — on and off while the hive runs
+  // -------------------------------------------------
+
+  /** Bees evicted in this session, by signature. */
+  readonly #retired = new Set<string>()
+
+  /**
+   * THE SELECTION CHANGED AND THE HIVE KEEPS RUNNING (jwize, 2026-11-10:
+   * "shouldn't we be able to add and remove features in realtime from the
+   * hosts window?"). Turning a package on or off rewrites the activation
+   * record from bytes already held (acquire.ts applyUnits); this makes the
+   * running hive match it without a restart: one processor pass walks the new
+   * record, loads and pulses what came on, and disposes what went off.
+   *
+   * True when the hive now runs the record. False changes NOTHING, and the
+   * caller restarts as it always did. It is false whenever a restart is the
+   * only honest way:
+   *
+   *   • a bee going off is running and declares no `dispose()` — whatever it
+   *     wired by hand (a DOM listener, a timer, a surface) would outlive it.
+   *     `dispose()` is the bee saying it can let go while the hive runs;
+   *   • what its module registered beside it (its queen, its services) cannot
+   *     be told from another bee's (#company) — they would be left behind;
+   *   • the record names different namespace bundles — the import map is
+   *     bound when the page loads;
+   *   • a bee coming back was evicted earlier and is imported by a stable
+   *     address (a door that serves modules): the browser would hand back the
+   *     module it already ran, and nothing would register;
+   *   • the shell runs its bees from source, reads only, or has not walked a
+   *     package yet.
+   */
+  public recompose = async (): Promise<boolean> => {
+    if (this.#registeredBees || !this.#walked) return false
+    if ((globalThis as { __HC_READONLY__?: boolean }).__HC_READONLY__ === true) return false
+    if (this.#finding) await this.#finding.catch(() => undefined)
+
+    let raw = ''
+    try { raw = localStorage.getItem('core-adapter.installed-manifest') ?? '' } catch { return false }
+    const key = `${installedPackageSig() ?? ''}|${raw}`
+    if (key === this.#packageKey) return true
+    const next = ScriptPreloader.#parseManifest(raw)
+    if (!next.layers.length || !next.bees.length) return false
+
+    const bundles = new Set(this.#manifest.dependencies)
+    if (next.dependencies.length !== bundles.size || next.dependencies.some(sig => !bundles.has(sig))) return false
+
+    const walked = await this.#walkLayers(next.layers)
+    const keep = new Set([...next.bees, ...walked.criticalBees])
+    const enabled = new Set(walked.bees.filter(sig => keep.has(sig)))
+    for (const [sig, bee] of this.#beeCache) {
+      if (enabled.has(sig)) continue
+      const leaving = bee as unknown as { markDisposed?: unknown; dispose?: unknown }
+      if (typeof leaving?.markDisposed !== 'function' || typeof leaving?.dispose !== 'function') return false
+      if ((this.#company.get(sig)?.owners ?? 1) > 1) return false
+    }
+    if ((globalThis as { __HC_MODULE_ROOT__?: boolean }).__HC_MODULE_ROOT__ === true
+      && [...enabled].some(sig => this.#retired.has(sig))) return false
+
+    // The processor's pass is the one door: find() reads the new record,
+    // loads what came on (pulsed in this same pass) and evicts what went off.
+    await new hypercomb().act('')
+    return this.#packageKey === key
+  }
+
+  static #parseManifest(raw: string): { layers: string[]; bees: string[]; dependencies: string[] } {
+    const list = (value: unknown): string[] => Array.isArray(value) ? value.filter(Boolean).map(String) : []
+    try {
+      const manifest = raw ? JSON.parse(raw) as Record<string, unknown> : null
+      return { layers: list(manifest?.['layers']), bees: list(manifest?.['bees']), dependencies: list(manifest?.['dependencies']) }
+    } catch { return { layers: [], bees: [], dependencies: [] } }
+  }
 
   /** Every bee asleep, queens, views and effect sleepers — what no load may start. */
   #asleep = (): ReadonlySet<string> => new Set([...this.#sleeping.keys(), ...this.#viewSleeping.keys(), ...this.#effectSleeping.keys()])
@@ -964,7 +1123,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
    *  package key (install pointer + manifest text). A changed key drops the
    *  held walk and the negative cache: the next find walks the new package
    *  and may try again what failed under the old one. */
-  #readManifest(): { layers: string[]; bees: string[] } {
+  #readManifest(): { layers: string[]; bees: string[]; dependencies: string[] } {
     let raw = ''
     try { raw = localStorage.getItem('core-adapter.installed-manifest') ?? '' } catch { raw = '' }
     const key = `${installedPackageSig() ?? ''}|${raw}`
@@ -972,14 +1131,8 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     this.#packageKey = key
     this.#walked = null
     this.#failed.clear()
-    let layers: string[] = []
-    let bees: string[] = []
-    try {
-      const manifest = raw ? JSON.parse(raw) : null
-      layers = Array.isArray(manifest?.layers) ? manifest.layers.filter(Boolean) : []
-      bees = Array.isArray(manifest?.bees) ? manifest.bees.filter(Boolean) : []
-    } catch { /* unreadable manifest: nothing to walk */ }
-    this.#manifest = { layers, bees }
+    // An unreadable manifest is nothing to walk.
+    this.#manifest = ScriptPreloader.#parseManifest(raw)
     return this.#manifest
   }
 
@@ -1266,8 +1419,11 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     tDeps = performance.now() - tDepsStart
 
     const tEvalStart = performance.now()
-    const bee = await this.store.getBee(signature, buffer)
+    const unwatch = this.#watchRegistrations()
+    let bee: Bee | null
+    try { bee = await this.store.getBee(signature, buffer) } finally { unwatch() }
     tEval = performance.now() - tEvalStart
+    if (bee) this.#noteCompany(signature, bee)
     if (!bee) {
       console.warn(`[script-preloader] bee ${signature} returned null from getBee()`)
       return null

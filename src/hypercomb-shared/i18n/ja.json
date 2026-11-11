@@ -3765,6 +3765,8 @@
   "packages.turn-on": "{name} をオンにする",
   "packages.updates.shared": "更新の準備ができました",
   "packages.restarting": "パッケージが変更されました。再起動します",
+  "packages.turned-on": "{name} をオンにしました",
+  "packages.turned-off": "{name} をオフにしました",
   "use-live-relay.too-many": "語が多すぎます: {words} — ルーム、シークレット、ws(s):// サーバーを指定してください",
   "use-live-relay.bad-server": "'{server}' はこのタブが接続できるサーバーではありません",
   "mesh.state.access": "{host} には最新のミーティングリンクが必要です — 新しいリンクをもらってください",
