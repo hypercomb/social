@@ -57,6 +57,11 @@
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
+/** A SENTENCE'S NAME: the SHA-256 of its words, spaces folded. The hive keeps a
+ *  dub under this name (hypercomb-essentials/src/dub/dub-bank.ts spells the
+ *  same fold), so a take recorded on one page plays wherever the sentence is. */
+const sentenceKey = (say) => require('crypto').createHash('sha256').update(String(say ?? '').trim().replace(/\s+/g, ' '), 'utf8').digest('hex')
+
 const icon = (name, cls = '') => `<svg class="g${cls ? ` ${cls}` : ''}" aria-hidden="true"><use href="#i-${name}"/></svg>`
 
 /** The tour's tokens, dark as the tour is. A hive or viewer that says light
@@ -117,11 +122,11 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
    "the menu should be hidden but expandable").
    The STAGE is the container, so sizes read from the video's own width (cqi),
    the same slide standing alone or mounted in the hive. */
-.page{width:min(1280px,100%);margin:0 auto;padding:14px 16px 0;position:relative;
+.page{width:min(1280px,100%);margin:0 auto;padding:14px 16px env(safe-area-inset-bottom,0px);position:relative;
   height:calc(100vh - var(--hc-site-chrome-bottom,0px));height:calc(100dvh - var(--hc-site-chrome-bottom,0px));min-height:520px;
   display:grid;grid-template-columns:minmax(0,1fr);--measure:780px}
 .stage{container-type:inline-size;display:grid;grid-template-rows:auto auto minmax(0,1fr);min-height:0;min-width:0}
-.stage>.top{grid-row:1}.stage>.row{grid-row:2}.stage>.scene{grid-row:3}
+.stage>.top{grid-row:1}.stage>.row{grid-row:2}.stage>.scene{grid-row:3}.stage>.next{display:none}
 .mono-label{font-family:var(--mono);font-size:12px;line-height:1.3;letter-spacing:var(--track-label);text-transform:uppercase}
 
 /* ---------- where you are ---------- */
@@ -200,19 +205,31 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
   clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
 
 /* the beats: each part lights as it is said; a panel beside dims until its beat */
-.plate.beats [data-id],.fz.lights [data-id]{opacity:.38;transition:opacity .5s var(--ease)}
+.plate.beats [data-id],.fz.lights [data-id]{opacity:.5;transition:opacity .7s var(--ease)}
 .plate.beats [data-id].lit,.fz.lights [data-id].lit{opacity:1}
 .fz.duo .pane{transition:opacity .5s var(--ease)}
+/* AMBIENCE, kept under the threshold of notice: a warm light behind the picture that breathes once in twelve
+   seconds, and the lit part's inner line breathing with it. Nothing moves; nothing asks to be looked at. */
+.scene{position:relative;isolation:isolate}
+.scene::before{content:"";position:absolute;z-index:-1;inset:8% -4% 6%;pointer-events:none;
+  background:radial-gradient(46% 42% at 50% 54%,color-mix(in srgb,var(--honey) 10%,transparent),transparent 72%);
+  opacity:0;transition:opacity 1.6s var(--ease)}
+.scene.in::before{opacity:1;animation:ambient 12s ease-in-out 1.6s infinite alternate}
+@keyframes ambient{from{opacity:1}to{opacity:.55}}
+.fz.lights .hexb.lit .hx .in{animation:breathe 5s ease-in-out infinite}
+@keyframes breathe{0%,100%{opacity:.6}50%{opacity:1}}
+.hexb .hx{transition:transform .7s var(--ease)}
+.fz.lights .hexb.lit .hx{transform:translateY(-3px)}
 .fz.duo.aside .pane:first-child,.fz.duo.main .pane:last-child{opacity:.45}
 
-.fig.hexrow{display:flex;flex-wrap:wrap;justify-content:center;gap:clamp(14px,2.4cqi,26px)}
-.hexb{width:clamp(88px,12cqi,128px);display:flex;flex-direction:column;align-items:center;gap:.6em}
+.fig.hexrow{display:flex;flex-wrap:wrap;justify-content:center;gap:clamp(14px,2.6cqi,34px)}
+.hexb{width:clamp(88px,min(13.5cqi,36cqh),200px);display:flex;flex-direction:column;align-items:center;gap:.7em}
 .hexb .hx{position:relative;width:100%;aspect-ratio:.866/1}
 .hexb .hx svg.h{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
 .hexb .hx .o{fill:var(--panel);stroke:var(--line-strong);stroke-width:1;vector-effect:non-scaling-stroke}
 .hexb .hx .in{fill:none;stroke:var(--honey-deep);stroke-width:1;vector-effect:non-scaling-stroke;opacity:.6}
 .hexb .hx svg.g{position:absolute;left:50%;top:50%;width:34%;height:34%;transform:translate(-50%,-50%);color:var(--honey);stroke-width:1.4}
-.hexb .t{font-family:var(--mono);font-size:12px;line-height:1.4;letter-spacing:var(--track-label);padding-inline-start:var(--track-label);
+.hexb .t{font-family:var(--mono);font-size:clamp(12px,1.1cqi,14px);line-height:1.4;letter-spacing:var(--track-label);padding-inline-start:var(--track-label);
   text-transform:uppercase;color:var(--dim);white-space:nowrap}
 
 .fig.stack,.fig.list{display:flex;flex-direction:column;width:min(620px,100cqw);border:1px solid var(--line);border-radius:var(--r-card);
@@ -283,6 +300,8 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .ib.words svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round}
 .ib.words[aria-pressed="true"]{color:var(--honey)}
 .ib.words[hidden]{display:none}
+.says.dubbable .say{cursor:cell}
+.say.dubbed::after{content:" \\25CF";font-size:.6em;vertical-align:.3em;color:var(--honey)}
 @keyframes rise{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 .transport{display:flex;align-items:center;gap:6px;margin:10px 0 0}
 .ib{width:34px;height:34px;display:inline-grid;place-items:center;background:none;border:1px solid transparent;border-radius:var(--r-ctl);
@@ -365,7 +384,26 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .page.menu-open .stage{grid-column:2}
 .menu-btn[aria-expanded="true"]{color:var(--honey);border-color:var(--honey-deep)}
 @media (max-width:760px){
-  .page{padding:12px 12px 0}
+  /* A PHONE SCROLLS (jwize 2026-11-11: "the bottom is cut off ... a scroller list like youtube"). The player is the
+     first screen, less a strip, so the list under it shows its first line and the page reads as one that goes on;
+     the controls stay clear of the browser's bars. The list is in the page's own flow: nothing is fixed. */
+  .page{padding:12px 12px max(14px,env(safe-area-inset-bottom,0px));height:auto;min-height:0}
+  .stage{grid-template-rows:auto auto auto auto}
+  .stage>.scene{min-height:calc(100vh - var(--hc-site-chrome-bottom,0px) - 132px);min-height:calc(100svh - var(--hc-site-chrome-bottom,0px) - 132px)}
+  .stage>.next{display:flex;flex-direction:column;gap:2px;grid-row:4;margin:18px 0 0;padding:14px 0 6px;border-top:1px solid var(--line)}
+  .next h2{margin:10px 2px 6px;font-weight:400;color:var(--faint-text)}
+  .next h2:first-child{margin-top:0}
+  .nx{display:flex;align-items:center;gap:12px;min-height:60px;padding:8px 10px;box-sizing:border-box;text-decoration:none;color:var(--ink);
+    border:1px solid transparent;border-radius:var(--r-ctl);transition:background .15s,border-color .15s}
+  a.nx:active,a.nx:hover,a.nx:focus-visible{background:var(--honey-tint);border-color:var(--honey-deep)}
+  .nx-mark{flex:none;width:44px;height:50px;display:grid;place-items:center;color:var(--honey);background:var(--panel);
+    clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
+  .nx-mark .g{width:16px;height:16px}
+  .nx-words{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .nx-words b{font-weight:500;font-size:16px;line-height:1.3}
+  .nx-words small{font-size:13px;line-height:1.4;color:var(--dim);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .nx.soon{color:var(--faint-text)}
+  .nx.soon .nx-mark{background:none;outline:1px dashed var(--line);outline-offset:-6px;clip-path:none}
   .page.menu-open{grid-template-columns:minmax(0,1fr);column-gap:0}
   .page.menu-open .stage{grid-column:1}
   .page.menu-open .tree{position:fixed;z-index:6;inset:0;bottom:var(--hc-site-chrome-bottom,0px);width:auto;padding:52px 14px calc(16px + env(safe-area-inset-bottom,0px));
@@ -403,7 +441,8 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
   .says{max-height:38vh}
 }
 @media (prefers-reduced-motion:reduce){
-  .scene>*,.caption p.rise,.plate.beats [data-id],.fz.lights [data-id],.fz.duo .pane,.flow,.tick::after{transition:none!important;animation:none!important;transform:none!important}
+  .scene>*,.caption p.rise,.plate.beats [data-id],.fz.lights [data-id],.fz.duo .pane,.flow,.tick::after,.hexb .hx,.hexb .hx .in{transition:none!important;animation:none!important;transform:none!important}
+  .scene::before{animation:none!important;transition:none!important}
   .scene>*{opacity:1}
   .flow{stroke-dashoffset:0!important}
 }`
@@ -644,7 +683,18 @@ const SCRIPT = `
   // MediaSource for MP3) plays the whole voice, as before. Either way the
   // scene's first voice is asked for once the page is on screen and quiet, and
   // the next voice while this one plays, so pressing Listen starts at once.
-  const keyOf = (s) => s && s.voice ? s.voice : ''
+  // A DUB OUTRANKS THE BAKED VOICE (jwize 2026-11-11: "replace the sound bites
+  // per sentence ... people in the community can provide their own"). The hive
+  // holds the soundbank (the DubBank it registers, hypercomb-essentials/src/dub):
+  // asked by the sentence's name, it answers with a take to play, or nothing. A
+  // page on its own has no hive and plays what it was built with.
+  const bank = () => { try { const i = window.ioc, b = i && typeof i.get === 'function' ? i.get('@diamondcoreprocessor.com/DubBank') : null; return b && typeof b.urlOf === 'function' ? b : null } catch { return null } }
+  const dubOf = (s) => { try { const b = bank(); return (b && s && s.key && b.urlOf(s.key)) || '' } catch { return '' } }
+  const keyOf = (s) => dubOf(s) ? 'dub:' + s.key : (s && s.voice ? s.voice : '')
+  // THE WORDS CAN BE EDITED IN PLACE TOO (jwize 2026-11-11: "edit the text
+  // inline"): the bank answers with the sentence's words when they were
+  // changed, and the line shows those in place of the ones it was built with.
+  const sayOf = (s) => { try { const b = bank(); return (b && s && s.key && typeof b.textOf === 'function' && b.textOf(s.key)) || s.say } catch { return s.say } }
   const MS = window.MediaSource
   let streams = false
   if (MS && MS.isTypeSupported && MS.isTypeSupported('audio/mpeg') && steps.some(s => s.parts)) {
@@ -683,7 +733,9 @@ const SCRIPT = `
     const a = new Audio()
     a.preload = 'auto'
     a.dataset.src = keyOf(s)
-    if (streams && s.parts) streamOf(a, s.parts); else a.src = s.voice
+    const dub = dubOf(s)
+    if (dub) a.src = dub
+    else if (streams && s.parts) streamOf(a, s.parts); else a.src = s.voice
     return a
   }
   const drop = (a) => { a.onended = a.onerror = null; a.pause(); a.removeAttribute('src'); try { a.load() } catch {} }
@@ -714,8 +766,8 @@ const SCRIPT = `
     const lit = new Set(s.lit || ['*'])
     for (const n of el.querySelectorAll('.plate.beats [data-id], .fz.lights [data-id]')) n.classList.toggle('lit', lit.has('*') || lit.has(n.dataset.id))
     if (fz.classList.contains('duo')) { fz.classList.toggle('aside', !!s.beside); fz.classList.toggle('main', !s.beside && steps.some(x => x.beside)) }
-    const p = document.createElement('p'); p.textContent = s.say; if (!still) p.className = 'rise'; line.replaceWith(p); line = p
-    cap.classList.toggle('long', s.say.split(/\\s+/).length > 70); cap.scrollTop = 0
+    const p = document.createElement('p'); p.textContent = sayOf(s); if (!still) p.className = 'rise'; line.replaceWith(p); line = p
+    cap.classList.toggle('long', sayOf(s).split(/\\s+/).length > 70); cap.scrollTop = 0
     requestAnimationFrame(() => cap.classList.toggle('more', cap.scrollHeight - cap.clientHeight > 4))
     says.forEach((b, k) => { b.classList.toggle('done', k < at); b.classList.toggle('now', k === at); if (k === at) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current') })
     // the sentence being said stays in the middle of the words
@@ -723,6 +775,21 @@ const SCRIPT = `
     ticks.forEach((t, k) => { t.classList.toggle('done', k < at); t.classList.toggle('now', k === at); if (k === at) t.setAttribute('aria-current', 'step'); else t.removeAttribute('aria-current') })
     if (count) count.textContent = String(at + 1).padStart(2, '0') + ' / ' + String(steps.length).padStart(2, '0')
     try { sessionStorage.setItem(KEY, String(at)) } catch {}
+    markDub()
+  }
+  // Every sentence in the words says whether it can be recorded here, whether
+  // a take plays for it, and reads the words the bank holds for it.
+  let showWords = null
+  const markDub = () => {
+    const b = bank(), can = !!(b && b.canRecord)
+    if (saysBox) saysBox.classList.toggle('dubbable', can)
+    if (can && showWords) showWords()
+    says.forEach((n, k) => {
+      const said = sayOf(steps[k])
+      if (n.textContent !== said) n.textContent = said
+      n.classList.toggle('dubbed', !!dubOf(steps[k]))
+      if (can) n.title = 'Record this sentence'; else n.removeAttribute('title')
+    })
   }
   const paint = () => { pp.classList.toggle('playing', playing); pp.setAttribute('aria-label', playing ? 'Pause' : 'Play'); if (started) pp.classList.remove('lead') }
   const halt = () => {
@@ -745,8 +812,11 @@ const SCRIPT = `
       else if (v.dataset.drawn && s.from != null) { try { v.currentTime = s.from } catch {} }
       if (v.paused) v.play().catch(() => {})
     }
-    const hold = () => { timer = setTimeout(next, readTime(s.say)) }
-    if (!(voiceOn && s.voice)) { if (audio) { drop(audio); audio = null } hold(); return }
+    const hold = () => { timer = setTimeout(next, readTime(sayOf(s))) }
+    // A dubbed sentence is its own take, start to end; the scene's one voice
+    // picks up again at the next sentence's stretch.
+    const dub = dubOf(s)
+    if (!(voiceOn && (s.voice || dub))) { if (audio) { drop(audio); audio = null } hold(); return }
     let a = audio
     if (!a || a.dataset.src !== keyOf(s)) {
       if (a) drop(a)
@@ -756,11 +826,11 @@ const SCRIPT = `
     if (coming) ready(coming)
     a.onended = () => { if (audio === a) { audio = null; timer = setTimeout(next, 800) } }
     a.onerror = () => { if (audio === a) { audio = null; hold() } }
-    const from = s.from ?? 0
+    const from = dub ? 0 : (s.from ?? 0)
     const seek = () => { if (Math.abs(a.currentTime - from) > 0.35) { try { a.currentTime = from } catch {} } }
     if (a.readyState >= 1) seek(); else a.addEventListener('loadedmetadata', seek, { once: true })
     if (a.paused) a.play().catch(() => { if (audio === a) { audio = null; hold() } })
-    if (s.to != null) {
+    if (!dub && s.to != null) {
       const follow = () => {
         if (audio !== a || !playing || gone()) return
         if (a.currentTime >= s.to - 0.03) { if (at < steps.length - 1) { show(at + 1); speak() } else { a.pause(); playing = false; paint(); idle() } return }
@@ -781,7 +851,19 @@ const SCRIPT = `
   if (back) back.onclick = () => go(at - 1)
   if (fwd) fwd.onclick = () => go(at + 1)
   ticks.forEach((t, k) => { t.onclick = () => go(k) })
-  says.forEach((b, k) => { b.onclick = () => go(k) })
+  // A press on a sentence plays from there. POINT AND CLICK TO DUB: with the
+  // audio editor on, the press goes to the sentence, holds the scene, and asks
+  // the hive to record it. With no hive, or the editor off, it only plays.
+  says.forEach((n, k) => {
+    n.onclick = () => {
+      const b = bank()
+      if (!(b && b.canRecord)) { go(k); return }
+      if (playing) play(false)
+      if (k !== at) go(k)
+      const s = steps[at]
+      page.dispatchEvent(new CustomEvent('hc-sentence', { bubbles: true, detail: { key: s.key, say: sayOf(s), original: s.say, at, of: steps.length, route: location.pathname } }))
+    }
+  })
   // THE WORDS PANEL, FOR EDITING ONLY, and away until asked for (jwize 2026-11-11: "the narration is still up by default.
   // This is a bug"; "the narration panel is only for editing"): its button shows in the author's hive alone, and the
   // choice is kept for the visit.
@@ -799,9 +881,23 @@ const SCRIPT = `
     let kept = null
     try { kept = sessionStorage.getItem(WORDS) } catch {}
     setWords(kept === 'on')
+    showWords = () => { if (saysBox.hidden) setWords(true) }
     wordsBtn.onclick = () => { const on = saysBox.hidden; setWords(on); try { sessionStorage.setItem(WORDS, on ? 'on' : 'off') } catch {} }
   }
   if (voiceBtn) voiceBtn.onclick = () => { voiceOn = !voiceOn; voiceBtn.setAttribute('aria-pressed', String(voiceOn)); voiceBtn.setAttribute('aria-label', voiceOn ? 'Mute the voice' : 'Unmute the voice'); if (playing) speak() }
+  // The bank changed (a take kept, a take dropped, a host's bank arrived): let
+  // go of every take held, so the next play asks again.
+  const dubsChanged = () => {
+    if (gone()) { removeEventListener('hc-dubs-changed', dubsChanged); return }
+    for (const [k, a] of [...warm]) if (k.startsWith('dub:')) { warm.delete(k); drop(a) }
+    if (audio && !playing) { drop(audio); audio = null }
+    if (line && at >= 0) line.textContent = sayOf(steps[at])
+    // A bank that arrived after this page (a bee woken late) is asked now.
+    try { const b = bank(); if (b && typeof b.want === 'function') b.want(steps.map(s => s.key)) } catch {}
+    markDub()
+  }
+  addEventListener('hc-dubs-changed', dubsChanged)
+  try { const b = bank(); if (b && typeof b.want === 'function') b.want(steps.map(s => s.key)) } catch {}
   // typing in a part to try holds the scene where it is
   el.addEventListener('focusin', (e) => { if (e.target instanceof HTMLInputElement && playing) play(false) })
   show(returning ? resumeAt : 0)
@@ -878,7 +974,9 @@ const crumbsHtml = (route) => `
 
 const sceneHtml = (sc) => {
   const voiced = sc.steps.some(s => s.voice)
-  const steps = sc.steps.map(s => ({ say: s.say, voice: s.voice || null, ...(s.parts ? { parts: s.parts } : {}), from: s.from ?? null, to: s.to ?? null, lit: s.lit ?? null, beside: !!s.beside }))
+  // `key` names the SENTENCE (sentenceKey): a dub is recorded for a sentence,
+  // not for a page, so one take answers that sentence wherever it is said.
+  const steps = sc.steps.map(s => ({ say: s.say, key: sentenceKey(s.say), voice: s.voice || null, ...(s.parts ? { parts: s.parts } : {}), from: s.from ?? null, to: s.to ?? null, lit: s.lit ?? null, beside: !!s.beside }))
   return `
   <section class="scene" data-part="scene" aria-label="${esc(sc.name || 'The scene')}">
     <div class="eyebrow">${sc.eyebrow}</div>
@@ -924,7 +1022,32 @@ const exploreHtml = (ways) => {
   const e = ways && ways.explore
   if (!e) return ''
   const about = `Explore more about ${e.topic}`
-  return `<span class="more-wrap"><a class="more" data-part="explore" href="/${e.to.map(esc).join('/')}" title="${esc(about)}" aria-label="${esc(about)}">Explore more<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a><small>${esc((e.names && e.names.length ? e.names : [e.topic]).join(' · '))}</small></span>`
+  // The names below are said in the small line — unless the row beside the button already shows exactly
+  // those (a top page: its first level IS its row), where the line would only repeat it, cut off.
+  const names = e.names && e.names.length ? e.names : [e.topic]
+  const shown = new Set(((ways && ways.section) || []).map(x => x.name))
+  const repeats = names.every(n => shown.has(n))
+  return `<span class="more-wrap"><a class="more" data-part="explore" href="/${e.to.map(esc).join('/')}" title="${esc(about)}" aria-label="${esc(about)}">Explore more<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a>${repeats ? '' : `<small>${esc(names.join(' · '))}</small>`}</span>`
+}
+
+/** UP NEXT, under the player on a phone (jwize 2026-11-11: "incorporate a scroller list like youtube instead of
+ *  the tree or in concert"). What lies inside this tile first, then the tiles beside it, a full row each: a mark,
+ *  the name, and the line that says what it is. A tile said twice (a top page's first level is both) is listed
+ *  once. The tree stays behind its button for going anywhere else. Wider than a phone, the row above the video
+ *  already says this, and the list is not drawn. */
+const nextHtml = (ways, route) => {
+  const here = route.join('/')
+  const seen = new Set([here])
+  const take = (list) => (list || []).filter(t => { const k = t.route.join('/'); if (seen.has(k)) return false; seen.add(k); return true })
+  const inside = take(ways && ways.children)
+  const beside = take(ways && ways.section)
+  const rows = (list) => list.map(t => t.page
+    ? `<a class="nx" href="/${t.route.map(esc).join('/')}"><span class="nx-mark">${icon('play')}</span><span class="nx-words"><b>${esc(t.name)}</b>${t.note ? `<small>${esc(t.note)}</small>` : ''}</span></a>`
+    : `<span class="nx soon"><span class="nx-mark"></span><span class="nx-words"><b>${esc(t.name)}</b><small>${esc(t.note ? `${t.note} (its page is coming)` : 'Its page is coming')}</small></span></span>`).join('')
+  const group = (label, list) => list.length ? `<h2 class="mono-label">${esc(label)}</h2>${rows(list)}` : ''
+  const parent = String((ways && ways.sectionOf) || '')
+  const body = group(`Inside ${route[route.length - 1]}`, inside) + group(parent && parent !== route[route.length - 1] ? `More in ${parent}` : 'Beside this', beside)
+  return body ? `<nav class="next" data-part="next" aria-label="Up next">${body}</nav>` : ''
 }
 
 /** THE ROW above the video: the siblings, then Explore more at their right. */
@@ -969,7 +1092,7 @@ ${RAIL_CSS}
 </head>
 <body>
 ${sprite}
-<main class="page">${treeHtml(ways, route)}<div class="stage"><div class="top"><button type="button" class="ib2 menu-btn" aria-label="Show the tree" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></svg></button>${crumbsHtml(route)}<button type="button" class="ib2 fs" aria-label="Full screen" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg></button><button type="button" class="to-site" aria-label="Open the website at this page">${icon('hex')}website</button></div>${rowHtml(ways, route)}${sceneHtml(scene)}</div>
+<main class="page">${treeHtml(ways, route)}<div class="stage"><div class="top"><button type="button" class="ib2 menu-btn" aria-label="Show the tree" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></svg></button>${crumbsHtml(route)}<button type="button" class="ib2 fs" aria-label="Full screen" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg></button><button type="button" class="to-site" aria-label="Open the website at this page">${icon('hex')}website</button></div>${rowHtml(ways, route)}${sceneHtml(scene)}${nextHtml(ways, route)}</div>
 </main>
 <script>${SCRIPT}${tryDef ? `
 ;(() => {

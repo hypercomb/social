@@ -10,7 +10,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import type { InstallNode, InstallRevision } from '@hypercomb/core'
-import { LIGHT_BRIGHTEST, LIGHT_DIMMEST, LIGHT_UNKNOWN, ageLevel, lightOf, runningStamp, NOTHING_PICKED, codeLines, codeName, filesPicked, pickAll, pickKey, pickMode, publishedCount, publishedOn, stackRows, stillPicked, directoryRows, domainRows, filesOf, hostBehind, isOlder, namedFromVerdict, namedWhenUninstalled, offerableRoots, offeredRevisions, updateProgress, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, type ServedTree } from './host-directory.view'
+import { LIGHT_BRIGHTEST, LIGHT_DIMMEST, LIGHT_UNKNOWN, ageLevel, lightOf, runningStamp, NOTHING_PICKED, codeLines, codeName, filesPicked, pickAll, pickKey, pickMode, publishedCount, publishedOn, stackRows, stillPicked, directoryRows, domainRows, filesOf, hostBehind, isOlder, namedFromVerdict, namedWhenUninstalled, offerableRoots, offeredRevisions, updateProgress, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, sourcePackagePaths, type ServedTree } from './host-directory.view'
 import { ATTESTED_PACKAGES_KEY, attestPackage } from './package-attestation'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -47,6 +47,33 @@ const running = [
 ]
 
 describe('the host directory', () => {
+
+  it('a shell that runs its working tree reads its compiled-in packages as on and from source, never "not here yet"', () => {
+    // jwize, 2026-11-11, on the dev shell: "everything in host for hypercomb.com
+    // says not here yet" — while comfy and the rest ran from source.
+    const builtIn = sourcePackagePaths([
+      'hypercomb-essentials/src/comfy/comfy.drone.ts',
+      'hypercomb-essentials/src/games/arkanoid/arkanoid.drone.ts',
+      'hypercomb-essentials/src/side-effects.ts',
+      'hypercomb-shared/ui/x.ts',
+    ])
+    expect([...builtIn].sort()).toEqual(['comfy', 'games', 'games/arkanoid'])
+
+    const next: ServedTree = { root: 'r1', nodes: [node('comfy', 'c1'), node('games', 'g1', ['games/arkanoid']), node('wheel', 'w1')] }
+    const board = rows({ next, builtIn, off: new Set(['comfy']) })
+    const comfy = board.find(row => row.path === 'comfy')!
+    // On whatever the record says (an off written elsewhere does not unload source),
+    // and no update to take: no revision reaches a working tree.
+    expect([comfy.on, comfy.fromSource, comfy.update, comfy.blockedBy]).toEqual([true, true, false, ''])
+    // A package the source does not carry is still honestly not here.
+    const wheel = board.find(row => row.path === 'wheel')!
+    expect([wheel.on, wheel.fromSource, wheel.held]).toEqual([false, false, false])
+    // A hive passes no built-in set, and nothing changes.
+    expect(rows({ next }).every(row => !row.fromSource && !row.on)).toBe(true)
+    // The row says it, and the switch keeps its reason.
+    expect(VIEW).toMatch(/row\.fromSource[\s\S]{0,200}packages\.from-source/)
+    expect(EN['packages.from-source']).toBe('from source')
+  })
 
   it('lists this hive as the union of every host, with a count of the hosts carrying the SAME signature', () => {
     // Jaime 2026-09-13: "a full laundry list of packages available on those
@@ -369,7 +396,7 @@ describe('the host directory', () => {
 
   it('stacks hosts as one list: one line per package, who carries it, and whether they disagree', () => {
     const row = (path: string, layerSig: string, extra: Partial<ReturnType<typeof rows>[number]> = {}) =>
-      ({ path, name: path, description: '', layerSig, on: false, held: false, blockedBy: '', update: false, picked: false, hidden: 0, count: 1, children: 0, ...extra })
+      ({ path, name: path, description: '', layerSig, on: false, held: false, blockedBy: '', update: false, picked: false, hidden: 0, count: 1, children: 0, fromSource: false, ...extra })
     const stacked = stackRows([
       { zone: 'one.com', rows: [row('games', 'g1', { children: 2 }), row('notes', 'n1')] },
       { zone: 'two.com', rows: [row('games', 'g1', { children: 3, count: 2 }), row('themes', 't1')] },

@@ -296,6 +296,22 @@ export interface DirectoryRow {
   /** How many of your hosts carry this same signature at this path. */
   count: number
   children: number
+  /** Compiled into a shell that runs its working tree: on, and not a revision. */
+  fromSource: boolean
+}
+
+/** The package paths a source shell was built from. A package's path is its
+ *  folder under essentials' src (the build names each layer for its folder),
+ *  so every folder holding a source file is a package running here. */
+export const sourcePackagePaths = (names: readonly string[]): Set<string> => {
+  const paths = new Set<string>()
+  const ROOT = 'hypercomb-essentials/src/'
+  for (const name of names) {
+    if (!name.startsWith(ROOT)) continue
+    const parts = name.slice(ROOT.length).split('/').slice(0, -1)
+    for (let depth = 1; depth <= parts.length; depth++) paths.add(parts.slice(0, depth).join('/'))
+  }
+  return paths
 }
 
 /**
@@ -318,6 +334,8 @@ export const directoryRows = (input: {
   off: ReadonlySet<string>
   moved: ReadonlySet<string> | null
   offerable?: (root: string) => boolean
+  /** A source shell's compiled-in packages (sourcePackagePaths); null on a hive. */
+  builtIn?: ReadonlySet<string> | null
 }): DirectoryRow[] => {
   const here = new Map(input.running.map(node => [node.path, node]))
   const nodes = new Map<string, InstallNode>()
@@ -345,21 +363,24 @@ export const directoryRows = (input: {
       const moved = input.moved
         ? input.moved.has(node.path)
         : nextAt.has(node.path) && nextAt.get(node.path) !== here.get(node.path)?.layerSig
+      // Compiled in: it runs whatever the record says, and no revision reaches it.
+      const fromSource = !!input.builtIn?.has(node.path)
       return {
         path: node.path,
         name: node.name,
         description: node.description,
         layerSig: node.layerSig,
-        on: held && !input.off.has(node.path) && !blockedBy,
+        on: fromSource || (held && !input.off.has(node.path) && !blockedBy),
         held,
-        blockedBy,
-        update: !input.scope && moved,
+        blockedBy: fromSource ? '' : blockedBy,
+        update: !input.scope && moved && !fromSource,
         picked: !!input.picks[node.path],
         hidden: input.picks[node.path]?.hides
           ? input.eclipsed.filter(path => path !== node.path && within(path, node.path)).length
           : 0,
         count,
         children: node.children.length,
+        fromSource,
       }
     })
     .sort((a, b) => Number(b.on) - Number(a.on) || a.path.localeCompare(b.path))
@@ -1041,6 +1062,9 @@ export class HostDirectoryElement extends HTMLElement {
   #offerable: (root: string) => boolean = () => true
   #announced = ''
   #moved: Set<string> | null = null
+  /** A source shell's compiled-in packages, read once from its source catalog. */
+  #builtIn: ReadonlySet<string> | null = null
+  #builtInRead: Promise<void> | null = null
   #served = new Map<string, ServedTree | null>()
   #trees = new Map<string, Promise<ServedTree | null>>()
   #heads = new Map<string, Promise<void>>()
@@ -1555,6 +1579,7 @@ export class HostDirectoryElement extends HTMLElement {
       off: port()?.install.offUnits() ?? new Set(),
       moved: this.#moved,
       offerable: this.#offerable,
+      builtIn: this.#builtIn,
     })
   }
 
@@ -2982,7 +3007,11 @@ export class HostDirectoryElement extends HTMLElement {
       }
       if (row.picked) marks.append(make('span', 'hd-mark quiet', t('hosts.picked', 'picked')))
       if (row.hidden) marks.append(make('span', 'hd-mark quiet', t('hosts.hidden-beneath', '{count} newer hidden', { count: row.hidden })))
-      if (!row.held) marks.append(make('span', 'hd-mark quiet', t('packages.new', 'not here yet')))
+      if (row.fromSource) {
+        const source = make('span', 'hd-mark quiet', t('packages.from-source', 'from source'))
+        source.title = t('hosts.from-source', 'This shell loads its packages from source, so turning them on or off and picking revisions happens on a hive.')
+        marks.append(source)
+      } else if (!row.held) marks.append(make('span', 'hd-mark quiet', t('packages.new', 'not here yet')))
       // Stacked hosts that carry different signatures of one package say so.
       if (row.differs) marks.append(make('span', 'hd-mark quiet', t('hosts.differs', 'differs')))
 
@@ -3673,6 +3702,7 @@ export class HostDirectoryElement extends HTMLElement {
         this.#error = t('hosts.not-held', 'what runs here could not be read back, so nothing changed')
         return
       } else if (await this.#live()) {
+        EffectBus.emit('packages:changed', { off: [...install.offUnits()] })
         EffectBus.emit('activity:log', { message: row.on
           ? t('packages.turned-off', '{name} is off', { name: row.path })
           : t('packages.turned-on', '{name} is on', { name: row.path }) })
@@ -3898,19 +3928,29 @@ export class HostDirectoryElement extends HTMLElement {
     this.#reading = true
     this.#renderBody()
     try {
-      this.#selection = await this.#selectionOf(reach)
-      const trunk = this.#selection?.trunk ?? null
-      const named = await this.#namedRoot(trunk)
-      this.#named = named
-      this.#offerable = this.#offerFor(named)
-      if (named && named !== trunk) {
-        const from = this.#channelSources()
-        if (this.#next?.root !== named) this.#next = await this.#tree(named, from)
-        this.#moved = reach.recursive
-          ? new Set(await install.movedPaths(named, from).catch(() => []))
-          : trunk ? new Set(await install.movedUnits(trunk, named, from).catch(() => [])) : null
-      } else { this.#next = null; this.#moved = null }
-      this.#render()
+      // THE LIST YOU ARE IN GOES FIRST (jwize, 2026-11-11: "it is shown first in
+      // any race if you are in the view"). What runs here paints before any host
+      // is asked, and the background loaders wait until the followed
+      // publisher's list has painted too — every other host fills in after.
+      const preloader = ioc<{ foreground?: <T>(work: () => Promise<T>) => Promise<T> }>('@hypercomb.social/ScriptPreloader')
+      const first = async (): Promise<void> => {
+        this.#readBuiltIn()
+        this.#selection = await this.#selectionOf(reach)
+        this.#render()
+        const trunk = this.#selection?.trunk ?? null
+        const named = await this.#namedRoot(trunk)
+        this.#named = named
+        this.#offerable = this.#offerFor(named)
+        if (named && named !== trunk) {
+          const from = this.#channelSources()
+          if (this.#next?.root !== named) this.#next = await this.#tree(named, from)
+          this.#moved = reach.recursive
+            ? new Set(await install.movedPaths(named, from).catch(() => []))
+            : trunk ? new Set(await install.movedUnits(trunk, named, from).catch(() => [])) : null
+        } else { this.#next = null; this.#moved = null }
+        this.#render()
+      }
+      await (preloader?.foreground ? preloader.foreground(first) : first())
       // EVERY host's head, because the list is the union of them — each read
       // once per open and shown as it arrives.
       // An open and its zones landing are two reads a tick apart; they share
@@ -3932,6 +3972,18 @@ export class HostDirectoryElement extends HTMLElement {
       this.#reading = false
       this.#render()
     }
+  }
+
+  /** On a source shell, which packages are compiled in — read in the
+   *  background, once, and painted when it lands. */
+  #readBuiltIn(): void {
+    if (this.#builtInRead || !runsSource()) return
+    const catalog = ioc<{ names?: () => Promise<readonly string[]> }>('@hypercomb.social/DevSourceCatalog')
+    this.#builtInRead = (async () => {
+      const names = await catalog?.names?.().catch(() => []) ?? []
+      this.#builtIn = sourcePackagePaths(names)
+      this.#render()
+    })()
   }
 
   async #selectionOf(reach: Port): Promise<InstallSelection | null> {
