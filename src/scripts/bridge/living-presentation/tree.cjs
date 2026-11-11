@@ -99,7 +99,7 @@ const protocol = t('protocol',
         'No tour scene: its own plate and beats (blocks/plates/intelligent-interest.cjs). Axioms R1, R2, R3. A signed interest signal on a signature, by a person or an agent; never a label (the name\'s job); interests private, a match surfaces, no match is no signal. Built: signing, verifying, minting and local reading of deposits, and the interest word; inert until an interest is named. Not built, said as planned: a deposit travelling with its content across a hive boundary. Docs: pheromones.md, intake-filter.md.'),
       t('merging', 'Planned: when your change meets someone else\'s, the AI drafts the merge, and you choose.', 'Proposed, not built. Incremental update or full upgrade. Docs: module-sandbox.md, using-a-creation.md.'),
     ]),
-    t('accessible', 'Plain words, free and open source, and your work lives on your own device.', 'Value. Relation of its children: shown by.', [
+    t('accessible', 'For as many people as possible, and everyone if we can: read it, listen to it, use it on a phone or with the keys alone. We keep simplifying.', 'Value. Relation of its children: shown by.', [
       t('reader', 'Anyone can read a published presentation. Reading needs no account.', 'Readers load what readers need. Docs: read-only-deployment.md, no-third-party-requests.md.'),
       t('listening', 'Every part is written to be listened to, in plain sentences.', 'Every narration readable aloud. Docs: living-presentation.md.'),
       t('phone', 'It works on a phone, one column at a time.', 'The cube and every scene fit one column. Docs: mobile-one-column.md.'),
