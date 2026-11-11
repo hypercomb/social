@@ -518,11 +518,19 @@ describe('the host directory', () => {
     expect(runningStamp([], 'mine')).toBeNull()
   })
 
-  it('the light tells and the manage menu acts: no switch on the bulb, four things in the menu, closed by Escape or a click elsewhere', () => {
+  it('the light tells and a press on it switches; the manage menu holds the same switch and three more, closed by Escape or a click elsewhere', () => {
     // jwize 2026-11-04: "The update brings to newest or you click the manage icon turn it off
     // or pick revisions and look at code in the finder view."
-    expect(VIEW).not.toMatch(/bulb\.addEventListener\('click'/)
-    expect(VIEW).toMatch(/const bulb = make\('span', `hd-bulb \$\{light\.state\}`\)/)
+    // jwize 2026-11-10: "Yes, bulb switches" — the switch was only in the menu, so the
+    // bulb is the switch again, and still the light.
+    expect(VIEW).toMatch(/const bulb = button\(`hd-bulb \$\{light\.state\}`, ''\)/)
+    expect(VIEW).toMatch(/bulb\.addEventListener\('click', \(\) => \{ void this\.#toggle\(row\) \}\)/)
+    expect(VIEW).toMatch(/bulb\.setAttribute\('aria-pressed', String\(row\.on\)\)/)
+    // One rule decides whether it can be switched, for the bulb and the menu alike.
+    expect(VIEW).toMatch(/bulb\.disabled = switching\.blocked/)
+    expect(VIEW).toMatch(/const \{ blocked, reason \} = this\.#switchable\(row\)/)
+    // A press on the bulb is not a pick of the row.
+    expect(VIEW).toMatch(/closest\('button:not\(\.hd-name\), a'\)\) return/)
     expect(VIEW).toMatch(/bulb\.style\.setProperty\('--hd-age', String\(light\.level\)\)/)
     expect(VIEW).toMatch(/\.hd-bulb\.behind\{opacity:var\(--hd-age,\.55\);\}/)
     // The update mark is still the one press that brings a package to the newest.
@@ -611,6 +619,26 @@ describe('the host directory', () => {
     expect(run).toMatch(/const enabled = manifest\.bees/)
     expect(run).toMatch(/const keep = new Set\(\[\.\.\.enabled, \.\.\.walked\.criticalBees\]\)/)
     expect(run.indexOf('walked.bees.filter(sig => keep.has(sig))')).toBeLessThan(run.indexOf('#loadBeesPrioritized(walked.bees'))
+  })
+
+  it('on and off take effect while the hive runs; the restart is kept for what cannot let go', () => {
+    // jwize 2026-11-10: "shouldn't we be able to add and remove features in
+    // realtime from the hosts window?"
+    const toggle = VIEW.slice(VIEW.indexOf('async #toggle(row: DirectoryRow)'), VIEW.indexOf('async #takeUpdate('))
+    // Held bytes: the record is written, then the running hive is asked to match it.
+    expect(toggle.indexOf('await install.applyUnits()')).toBeLessThan(toggle.indexOf('await this.#live()'))
+    expect(toggle).toMatch(/\} else if \(await this\.#live\(\)\) \{[\s\S]{0,400}?return\s*\}\s*this\.#restart\(\)/)
+    // A package only a host carries is picked in, and that still restarts.
+    expect(toggle.indexOf('await install.pick(')).toBeLessThan(toggle.indexOf('await this.#live()'))
+    // The window reaches the shell over IoC and takes only a plain yes.
+    expect(VIEW).toMatch(/ioc<\{ recompose\?: \(\) => Promise<boolean> \}>\('@hypercomb\.social\/ScriptPreloader'\)/)
+    expect(VIEW).toMatch(/return \(await preloader\?\.recompose\?\.\(\)\) === true \} catch \{ return false \}/)
+    // A bee that declares no dispose() is never half switched off.
+    const recompose = PRELOADER.slice(PRELOADER.indexOf('public recompose = async'), PRELOADER.indexOf('static #parseManifest'))
+    expect(recompose).toMatch(/typeof leaving\?\.dispose !== 'function'\) return false/)
+    expect(recompose.indexOf("!== 'function') return false")).toBeLessThan(recompose.indexOf('await new hypercomb().act('))
+    expect(EN['packages.turned-on']).toBeTruthy()
+    expect(EN['packages.turned-off']).toBeTruthy()
   })
 
   it('the dev shell carries the install port, and nothing acts where no package is installed', () => {

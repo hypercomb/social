@@ -4085,6 +4085,8 @@
   "packages.reading": "Reading what is served…",
   "packages.empty": "Nothing listed here yet.",
   "packages.restarting": "packages changed; restarting",
+  "packages.turned-on": "{name} is on",
+  "packages.turned-off": "{name} is off",
   "packages.add": "Add a domain",
   "packages.add-placeholder": "add a domain",
   "packages.add-go": "Add",

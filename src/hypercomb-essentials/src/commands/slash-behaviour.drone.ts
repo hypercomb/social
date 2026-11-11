@@ -1283,6 +1283,8 @@ _slashBehaviours.retire({ word: 'studio', note: 'the Knowledge Studio view is re
 // name. This lets legacy queens keep their manual provider until migrated.
 
 const autoWrappedCommands = new Set<string>()
+/** Each auto-wrapped queen's provider, so a queen who leaves takes it along. */
+const wrappedQueens = new Map<object, SlashBehaviourProvider>()
 
 const isQueen = (value: unknown): value is {
   command: string
@@ -1489,6 +1491,15 @@ const wrapSleeper = (entry: { command: string; description: string; rawArgs?: bo
 } as SlashBehaviourProvider)
 
 EffectBus.on<{ words?: Array<{ command?: string; description?: string; rawArgs?: boolean }> }>('loader:sleeping', (payload) => {
+  // The list is whole every time. A stand-in it no longer names belongs to a
+  // package turned off while the hive runs (runtime script-preloader.ts
+  // recompose): her word goes with her.
+  const listed = new Set((payload?.words ?? []).map(entry => String(entry?.command ?? '')))
+  for (const [command, standIn] of [...sleepers]) {
+    if (listed.has(command)) continue
+    _slashBehaviours.removeProvider(standIn)
+    sleepers.delete(command)
+  }
   for (const entry of payload?.words ?? []) {
     const command = String(entry?.command ?? '')
     if (!command || sleepers.has(command) || autoWrappedCommands.has(command) || alreadyDeclared(command)) continue
@@ -1511,8 +1522,21 @@ const considerQueen = (value: unknown): void => {
   if (alreadyDeclared(value.command)) return
   autoWrappedCommands.add(value.command)
   deriveCommandRoot(value)
-  _slashBehaviours.addProvider(wrapQueen(value))
+  const provider = wrapQueen(value)
+  wrappedQueens.set(value, provider)
+  _slashBehaviours.addProvider(provider)
 }
+
+// A queen disposed while the hive runs — her package was turned off in the
+// hosts window — takes her word with her; loaded again, she is wrapped again.
+EffectBus.on<{ iocKey?: string }>('bee:disposed', (payload) => {
+  for (const [queen, provider] of [...wrappedQueens]) {
+    if ((queen as { iocKey?: string }).iocKey !== payload?.iocKey || (queen as { state?: string }).state !== 'disposed') continue
+    _slashBehaviours.removeProvider(provider)
+    autoWrappedCommands.delete((queen as { command: string }).command)
+    wrappedQueens.delete(queen)
+  }
+})
 
 // Scan queens that registered before the drone itself was set up.
 for (const key of window.ioc.list()) {
