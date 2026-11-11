@@ -205,19 +205,31 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
   clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
 
 /* the beats: each part lights as it is said; a panel beside dims until its beat */
-.plate.beats [data-id],.fz.lights [data-id]{opacity:.38;transition:opacity .5s var(--ease)}
+.plate.beats [data-id],.fz.lights [data-id]{opacity:.38;transition:opacity .7s var(--ease)}
 .plate.beats [data-id].lit,.fz.lights [data-id].lit{opacity:1}
 .fz.duo .pane{transition:opacity .5s var(--ease)}
+/* AMBIENCE, kept under the threshold of notice: a warm light behind the picture that breathes once in twelve
+   seconds, and the lit part's inner line breathing with it. Nothing moves; nothing asks to be looked at. */
+.scene{position:relative;isolation:isolate}
+.scene::before{content:"";position:absolute;z-index:-1;inset:8% -4% 6%;pointer-events:none;
+  background:radial-gradient(46% 42% at 50% 54%,color-mix(in srgb,var(--honey) 10%,transparent),transparent 72%);
+  opacity:0;transition:opacity 1.6s var(--ease)}
+.scene.in::before{opacity:1;animation:ambient 12s ease-in-out 1.6s infinite alternate}
+@keyframes ambient{from{opacity:1}to{opacity:.55}}
+.fz.lights .hexb.lit .hx .in{animation:breathe 5s ease-in-out infinite}
+@keyframes breathe{0%,100%{opacity:.6}50%{opacity:1}}
+.hexb .hx{transition:transform .7s var(--ease)}
+.fz.lights .hexb.lit .hx{transform:translateY(-3px)}
 .fz.duo.aside .pane:first-child,.fz.duo.main .pane:last-child{opacity:.45}
 
-.fig.hexrow{display:flex;flex-wrap:wrap;justify-content:center;gap:clamp(14px,2.4cqi,26px)}
-.hexb{width:clamp(88px,12cqi,128px);display:flex;flex-direction:column;align-items:center;gap:.6em}
+.fig.hexrow{display:flex;flex-wrap:wrap;justify-content:center;gap:clamp(14px,2.6cqi,34px)}
+.hexb{width:clamp(88px,min(13.5cqi,36cqh),200px);display:flex;flex-direction:column;align-items:center;gap:.7em}
 .hexb .hx{position:relative;width:100%;aspect-ratio:.866/1}
 .hexb .hx svg.h{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
 .hexb .hx .o{fill:var(--panel);stroke:var(--line-strong);stroke-width:1;vector-effect:non-scaling-stroke}
 .hexb .hx .in{fill:none;stroke:var(--honey-deep);stroke-width:1;vector-effect:non-scaling-stroke;opacity:.6}
 .hexb .hx svg.g{position:absolute;left:50%;top:50%;width:34%;height:34%;transform:translate(-50%,-50%);color:var(--honey);stroke-width:1.4}
-.hexb .t{font-family:var(--mono);font-size:12px;line-height:1.4;letter-spacing:var(--track-label);padding-inline-start:var(--track-label);
+.hexb .t{font-family:var(--mono);font-size:clamp(12px,1.1cqi,14px);line-height:1.4;letter-spacing:var(--track-label);padding-inline-start:var(--track-label);
   text-transform:uppercase;color:var(--dim);white-space:nowrap}
 
 .fig.stack,.fig.list{display:flex;flex-direction:column;width:min(620px,100cqw);border:1px solid var(--line);border-radius:var(--r-card);
@@ -264,8 +276,18 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
    the button beside the voice puts the words away so the picture stands alone. The line a screen reader hears is kept,
    unseen, in .caption. */
 .dock{width:100%;max-width:var(--measure);margin:0 auto;position:relative}
-.caption{position:absolute;width:1px;height:1px;margin:0;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+/* ONE LINE UNDER THE PICTURE (jwize 2026-11-11: "clean and professional with tasteful ux"). With the words put
+   away the page would say nothing until Listen is pressed, so the sentence being said stands under the picture,
+   one at a time, like a film's subtitle. When the words are laid out it is kept for a screen reader only. */
+.caption{margin:0 auto clamp(8px,1.6vh,16px);min-height:calc(2 * 1.5em);display:grid;place-items:center;text-align:center;
+  font-size:clamp(16px,1.85cqi,21px);line-height:1.5;color:var(--ink);text-wrap:balance}
 .caption p{margin:0}
+.caption p.rise{animation:rise .6s var(--ease)}
+/* ONE LINE AT A TIME. A page with a standing line of its own (.sub) shows that until the scene is played or
+   stepped; from then the sentence being said takes its place. Never both, one under the other. */
+.scene:not(.told) .sub~.dock .caption{display:none}
+.scene.told .sub{display:none}
+.dock.words-open .caption{position:absolute;width:1px;height:1px;min-height:0;margin:0;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .says{position:absolute;z-index:3;left:0;right:0;bottom:100%;margin:0 0 8px;padding:8px;list-style:none;text-align:left;
   max-height:min(40vh,21em);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;
   background:color-mix(in srgb,var(--panel) 88%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
@@ -402,7 +424,8 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
   .says{max-height:38vh}
 }
 @media (prefers-reduced-motion:reduce){
-  .scene>*,.caption p.rise,.plate.beats [data-id],.fz.lights [data-id],.fz.duo .pane,.flow,.tick::after{transition:none!important;animation:none!important;transform:none!important}
+  .scene>*,.caption p.rise,.plate.beats [data-id],.fz.lights [data-id],.fz.duo .pane,.flow,.tick::after,.hexb .hx,.hexb .hx .in{transition:none!important;animation:none!important;transform:none!important}
+  .scene::before{animation:none!important;transition:none!important}
   .scene>*{opacity:1}
   .flow{stroke-dashoffset:0!important}
 }`
@@ -798,12 +821,12 @@ const SCRIPT = `
     }
   }
   const play = (on) => {
-    if (on) started = true
+    if (on) { started = true; el.classList.add('told') }
     playing = on; paint()
     if (on) { if (at === steps.length - 1 && !timer && !audio) show(0); speak() }
     else { quiet(); for (const v of videos) v.pause() }
   }
-  const go = (i) => { const was = playing; quiet(); show(i); if (was) speak(); else idle() }
+  const go = (i) => { const was = playing; el.classList.add('told'); quiet(); show(i); if (was) speak(); else idle() }
   pp.onclick = () => play(!playing)
   const back = el.querySelector('[data-act=back]'), fwd = el.querySelector('[data-act=next]')
   if (back) back.onclick = () => go(at - 1)
@@ -831,6 +854,7 @@ const SCRIPT = `
     const WORDS = 'hc-scene-words'
     const setWords = (on) => {
       saysBox.hidden = !on
+      if (saysBox.parentElement) saysBox.parentElement.classList.toggle('words-open', on)
       wordsBtn.setAttribute('aria-pressed', String(on)); wordsBtn.setAttribute('aria-label', on ? 'Hide the words' : 'Show the words')
       if (on && says[at]) saysBox.scrollTop = says[at].offsetTop - (saysBox.clientHeight - says[at].offsetHeight) / 2
     }
@@ -856,6 +880,7 @@ const SCRIPT = `
   try { const b = bank(); if (b && typeof b.want === 'function') b.want(steps.map(s => s.key)) } catch {}
   // typing in a part to try holds the scene where it is
   el.addEventListener('focusin', (e) => { if (e.target instanceof HTMLInputElement && playing) play(false) })
+  if (returning && resumeAt > 0) el.classList.add('told')
   show(returning ? resumeAt : 0)
   el.classList.add('in')
   // The first voice, once the scene is on screen and the page is quiet.
@@ -978,7 +1003,12 @@ const exploreHtml = (ways) => {
   const e = ways && ways.explore
   if (!e) return ''
   const about = `Explore more about ${e.topic}`
-  return `<span class="more-wrap"><a class="more" data-part="explore" href="/${e.to.map(esc).join('/')}" title="${esc(about)}" aria-label="${esc(about)}">Explore more<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a><small>${esc((e.names && e.names.length ? e.names : [e.topic]).join(' · '))}</small></span>`
+  // The names below are said in the small line — unless the row beside the button already shows exactly
+  // those (a top page: its first level IS its row), where the line would only repeat it, cut off.
+  const names = e.names && e.names.length ? e.names : [e.topic]
+  const shown = new Set(((ways && ways.section) || []).map(x => x.name))
+  const repeats = names.every(n => shown.has(n))
+  return `<span class="more-wrap"><a class="more" data-part="explore" href="/${e.to.map(esc).join('/')}" title="${esc(about)}" aria-label="${esc(about)}">Explore more<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a>${repeats ? '' : `<small>${esc(names.join(' · '))}</small>`}</span>`
 }
 
 /** THE ROW above the video: the siblings, then Explore more at their right. */

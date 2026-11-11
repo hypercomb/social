@@ -196,6 +196,22 @@ describe('every page says where it goes, once', () => {
       expect(b.page).toContain('.page.menu-open{grid-template-columns:230px minmax(0,1fr)')
       expect(b.page).toMatch(/aria-label="Full screen"/)
     })
+    it(`${at}: one quiet line under the picture, and motion that asks for nothing`, () => {
+      // jwize 2026-11-11: "clean and professional with tasteful ux and subtle animations to improve ambience".
+      // With the words put away the sentence being said stands under the picture; laid out, it is a
+      // screen reader's only.
+      expect(b.page).toContain('.dock.words-open .caption{position:absolute;width:1px;height:1px;')
+      expect(b.page).toContain("saysBox.parentElement.classList.toggle('words-open', on)")
+      // Never two lines stacked: a page's standing line until the scene is played or stepped, then the sentence.
+      expect(b.page).toContain('.scene:not(.told) .sub~.dock .caption{display:none}')
+      expect(b.page).toContain('.scene.told .sub{display:none}')
+      // The ambience breathes slowly and stops for a reader who asked for less motion.
+      expect(b.page).toContain('@keyframes ambient{from{opacity:1}to{opacity:.55}}')
+      expect(b.page).toMatch(/prefers-reduced-motion:reduce\)\{[^}]*\}[^@]*\.scene::before\{animation:none!important/)
+      // Explore more names what lies below only when the row beside it does not already.
+      const explore = /<span class="more-wrap">[^]*?<\/span>/.exec(b.page)?.[0] ?? ''
+      if (explore && b.route.length === 1) expect(explore).not.toContain('<small>')
+    })
     it(`${at}: the tree reaches every page, and the siblings share one parent`, () => {
       // the tile list carries the tree as data: every page is in it, and it opens where the page stands
       const data = JSON.parse(/<script type="application\/json" data-rail-tree>([^]*?)<\/script>/.exec(b.page)![1]) as { here: string[]; menu: { href: string | null; children: unknown[] }[] }
