@@ -80,7 +80,7 @@ describe('frontDoorOf — the default experience, and a staged one on top', () =
       title: 'hypercomb',
       tagline: 'An open software platform.',
       links: [
-        { label: 'Watch the tour', href: '/tour/', note: '' },
+        { label: 'Take the tour', href: 'https://protocol.hypercomb.com', note: '' },
         { label: 'Open hypercomb.io', href: 'https://hypercomb.io', note: '' },
       ],
     }, 'hypercomb.com', 'https://hypercomb.com')

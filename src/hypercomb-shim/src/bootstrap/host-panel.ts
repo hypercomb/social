@@ -714,7 +714,10 @@ class HostPanelElement extends HTMLElement {
         // are staged by hypercomb.com and nowhere else (jwize 2026-11-04): a hive of
         // your own is vanilla, with one faux starting tile while its row is empty.
         links: door.links,
+        // The help tiles — the starting tile and the platform's doors this host did not stage — are off until
+        // this browser turns one on while editing (jwize 2026-11-10).
         starter: door.starter,
+        help: door.footer,
         follow: raw => this.#follow(raw),
         unfollow: zone => removeHostZone(zone),
         readPeerLedger,

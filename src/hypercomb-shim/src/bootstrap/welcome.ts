@@ -58,8 +58,9 @@ export type FrontDoor = {
   /** The zone's room, drawn first as "Join the swarm" — or ''. */
   readonly swarm: string
   /** Where the platform explains itself, minus any door the staged links
-   *  already open — `/tour/` on hypercomb.com IS the tour. Never tiles: it is
-   *  the small footer of a task view, not what a participant's own hive shows. */
+   *  already open — `/tour/` on hypercomb.com IS the tour. The small footer of
+   *  a task view, and the optional help tiles of a hive: off until its own
+   *  browser turns one on while editing, never shown to a visitor by default. */
   readonly footer: readonly WelcomeLink[]
   /** The starting point a host with nothing staged offers in place of the
    *  platform's doors — null once the operator stages a front page of its own. */
@@ -79,7 +80,8 @@ export const APP_HREF = 'https://hypercomb.io/'
  *  Licensing lives under `src/documentation`. The repository root has no
  *  `documentation` folder, and a link there is a 404. */
 export const PLATFORM_LINKS: readonly WelcomeLink[] = [
-  { label: 'the tour', href: 'https://hypercomb.com/tour/', note: 'what this is, in nineteen minutes', icon: 'tour' },
+  // The tour is the protocol hive (jwize 2026-11-10: "the link to the tour should go to the protocol.hypercomb.com hive").
+  { label: 'the tour', href: 'https://protocol.hypercomb.com/', note: 'what this is, and how it works', icon: 'tour' },
   { label: 'hypercomb.io', href: APP_HREF, note: 'the app — start a hive of your own', icon: 'app' },
   { label: 'source', href: 'https://github.com/hypercomb/social', note: 'AGPL-3.0', icon: 'source' },
   { label: 'licensing', href: 'https://github.com/hypercomb/social/blob/main/src/documentation/licensing.md', note: '', icon: 'docs' },
@@ -104,7 +106,7 @@ export const STARTER: Starter = {
     { text: 'To keep it reachable when your device is off, host it from your device, your own server, or in the cloud.',
       link: { label: 'Host your hive', href: 'https://host-setup.hypercomb.com/' } },
     { text: 'New to all this? The tour explains what it is in a few minutes.',
-      link: { label: 'Watch the tour', href: 'https://hypercomb.com/tour/' } },
+      link: { label: 'Take the tour', href: 'https://protocol.hypercomb.com/' } },
   ],
 }
 

@@ -34,6 +34,19 @@ import { isPublishNode } from './zone-door.js'
 
 const HOST_SYNC_KEY = '@diamondcoreprocessor.com/HostSyncService'
 
+/** The hosts a key list is written to: every place this hive publishes to, marked or claimed; else the hosts it
+ *  follows. One answer for the `keys` words and for the page that asks for an invite (showcase-bridge.ts). */
+export async function keyListHosts(): Promise<string[]> {
+  const hostSync = get<Parameters<typeof nodesFor>[1]>(HOST_SYNC_KEY)
+  const marked = await nodesFor([], hostSync).catch(() => [] as string[])
+  const bound = (await listZoneBindings().catch(() => [])).map(binding => binding.zone)
+  const nodes = [...new Set([...marked, ...bound])].filter(isPublishNode)
+  if (nodes.length) return nodes
+  // Nothing is marked or claimed: the hosts this hive follows are the last place to look. A host that is
+  // not yours refuses the list, and that refusal is said in words — better than "no host" for one you named.
+  return (await listCommunityHosts().catch(() => [] as string[])).filter(isPublishNode)
+}
+
 const t = (key: string, fallback: string, params: Record<string, string> = {}): string => {
   const value = get<I18nProvider>(I18N_IOC_KEY)?.t?.(key, params)
   return value && value !== key ? value : fallback.replace(/\{(\w+)\}/g, (_, name: string) => params[name] ?? '')
@@ -155,16 +168,7 @@ export class KeysQueenBee extends QueenBee {
    *  the standing targets, AND the zones this hive holds a binding for — a domain you have claimed is a
    *  place you publish to even when the root itself carries no host mark (jwize 2026-10-25: "but it was
    *  already there"). A followed host (`hosts add`) is tried only when nothing is marked or claimed. */
-  async #hosts(): Promise<string[]> {
-    const hostSync = get<Parameters<typeof nodesFor>[1]>(HOST_SYNC_KEY)
-    const marked = await nodesFor([], hostSync).catch(() => [] as string[])
-    const bound = (await listZoneBindings().catch(() => [])).map(binding => binding.zone)
-    const nodes = [...new Set([...marked, ...bound])].filter(isPublishNode)
-    if (nodes.length) return nodes
-    // Nothing is marked or claimed: the hosts this hive follows are the last place to look. A host that is
-    // not yours refuses the list, and that refusal is said in words — better than "no host" for one you named.
-    return (await listCommunityHosts().catch(() => [] as string[])).filter(isPublishNode)
-  }
+  #hosts(): Promise<string[]> { return keyListHosts() }
 
   async #list(): Promise<void> {
     const hosts = await this.#hosts()

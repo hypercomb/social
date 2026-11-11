@@ -204,5 +204,7 @@ export const eitherOwner = (...owners: readonly (OwnerBridge | null)[]): OwnerBr
     },
     toggle: request => chosen ? chosen.toggle(request) : Promise.resolve({ ok: false, reason: 'no key of yours answers here' }),
     view: request => chosen?.view ? chosen.view(request) : Promise.resolve({ ok: false, reason: 'no key of yours answers here' }),
+    // Only a hive hands out invites; where the one that answered cannot, the page is told so.
+    invite: request => chosen?.invite ? chosen.invite(request) : Promise.resolve({ ok: false, reason: 'only your hive can invite a phone' }),
   }
 }

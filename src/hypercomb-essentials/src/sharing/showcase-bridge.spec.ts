@@ -5,7 +5,7 @@ vi.hoisted(() => {
   ;(globalThis as unknown as { ioc: unknown }).ioc = { register: () => {}, get: () => undefined, whenReady: () => {} }
 })
 
-import { applyToggle, applyView } from './showcase-bridge.js'
+import { applyInvite, applyToggle, applyView } from './showcase-bridge.js'
 import type { Showcase } from './showcase-record.js'
 
 const key = 'a'.repeat(64)
@@ -116,5 +116,29 @@ describe('applyView', () => {
     expect(await applyView({ zone: 'example.com', view: 'list' }, { own: async () => key, read: async () => null, sign: signed, published: async () => null }))
       .toEqual({ ok: false, reason: 'could not read what is published here' })
     expect(signed).not.toHaveBeenCalled()
+  })
+})
+
+describe('applyInvite', () => {
+  const link = 'https://example.com/#invite=host.example/' + 'a'.repeat(64) + '/' + 'b'.repeat(64)
+
+  it('asks for what keys allow makes, to be opened at the zone, and hands back the link, its end and a code', async () => {
+    const allow = vi.fn(async () => ({ ok: true as const, link, anchor: 'a'.repeat(64), until: 1700000600, held: ['host.example'], failed: [] }))
+    const result = await applyInvite({ zone: 'Example.com' }, { hosts: async () => ['host.example'], allow, code: text => `<svg>${text.length}</svg>` })
+    expect(allow).toHaveBeenCalledWith(['host.example'], { where: 'example.com' })
+    expect(result).toEqual({ ok: true, link, until: 1700000600, code: `<svg>${link.length}</svg>` })
+  })
+
+  it('still hands back the link when no code can be drawn', async () => {
+    const allow = async () => ({ ok: true as const, link, anchor: 'a'.repeat(64), until: 1, held: ['host.example'], failed: [] })
+    expect(await applyInvite({ zone: 'example.com' }, { hosts: async () => ['host.example'], allow, code: () => null })).toEqual({ ok: true, link, until: 1 })
+  })
+
+  it('refuses a name that is no zone, and says in words why no invite was made', async () => {
+    const allow = vi.fn(async () => ({ ok: false as const, reason: 'no-host' as const }))
+    expect(await applyInvite({ zone: 'not a zone' }, { hosts: async () => [], allow })).toEqual({ ok: false, reason: 'bad request' })
+    expect(allow).not.toHaveBeenCalled()
+    expect(await applyInvite({ zone: 'example.com' }, { hosts: async () => [], allow })).toEqual({ ok: false, reason: 'this hive publishes to no host yet' })
+    expect(await applyInvite({ zone: 'example.com' }, { hosts: async () => { throw new Error('x') }, allow })).toEqual({ ok: false, reason: 'could not read where this hive publishes' })
   })
 })
