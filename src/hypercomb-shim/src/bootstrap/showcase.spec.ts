@@ -1920,7 +1920,7 @@ describe('a staged presentation is the root, on a phone and on a desktop (jwize 
     try { run() } finally { vi.unstubAllGlobals() }
   }
 
-  it('shows the name, the line and the published hive in place, with the search one press away and one press back', () => {
+  it('shows the name, the line and the published hive in place, and no search button', () => {
     let hero!: HTMLElement
     phone(() => { hero = draw({ presentation: 'https://protocol.hypercomb.com/' }).hero })
     const front = hero.querySelector('.front') as HTMLElement
@@ -1931,15 +1931,9 @@ describe('a staged presentation is the root, on a phone and on a desktop (jwize 
     expect(frame.getAttribute('src')).toBe('https://protocol.hypercomb.com/')
     expect(frame.title).toBe('hypercomb: an open protocol for humanity')
     expect(frame.getAttribute('referrerpolicy')).toBe('no-referrer')
-    const back = hero.querySelector('.front-back') as HTMLButtonElement
-    expect(back.hidden).toBe(true)
-    ;(front.querySelector('.front-search') as HTMLButtonElement).click()
-    expect(front.hidden).toBe(true)
-    expect(back.hidden).toBe(false)
-    expect(back.textContent).toBe('Back to hypercomb')
-    back.click()
-    expect(front.hidden).toBe(false)
-    expect(back.hidden).toBe(true)
+    // NO SEARCH BUTTON (jwize 2026-11-11): the root is the presentation alone.
+    expect(front.querySelector('button')).toBeNull()
+    expect(hero.querySelector('.front-back')).toBeNull()
   })
 
   it('is there on a desktop too, and a host that stages no presentation is the search and the tiles', () => {

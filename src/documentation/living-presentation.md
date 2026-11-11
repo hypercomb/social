@@ -930,7 +930,10 @@ every page, and its 25 scenes are folded into the tiles they explain:
     presentation at the link, if you click the tree you nav in or arrow back
     out as usual"*). There the row's two presses change places: the name walks
     inside a tile that holds others, and the arrow opens that tile's page. A
-    tile that holds nothing has no arrow, so its name opens it. Wider than a
+    tile that holds nothing has no arrow, so its name opens it. The sibling tabs
+    are part of that menu on a phone, over the tile list, and never above the
+    picture (jwize, 2026-11-11: *"the tabs are only shown as part of the menu
+    on mobile"*). Wider than a
     phone the list stands in a column of its own and the stage moves over, so
     it never covers the content, and the name opens the page as before.
   - **crumbs**, the way up, in the bar over the video: `protocol / simple`,

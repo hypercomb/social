@@ -364,6 +364,10 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
   .page.menu-open .tree{position:fixed;z-index:6;inset:0;bottom:var(--hc-site-chrome-bottom,0px);width:auto;padding:52px 14px calc(16px + env(safe-area-inset-bottom,0px));
     background:var(--panel);border-right:0}
   .page.menu-open .top .menu-btn{position:fixed;z-index:7;top:12px;left:12px}
+  /* THE TABS ARE PART OF THE MENU on a phone (jwize 2026-11-11: "the tabs are only shown as part of the menu on mobile"):
+     nothing stands above the picture but the crumbs; the menu carries the tabs over the tile list. */
+  .stage>.row{display:none}
+  .tree>.row{flex:none;justify-content:flex-start}
   /* a finger's row: the name walks in, the arrow opens the page */
   .page.menu-open .tree .hc-rail-row{min-height:44px}
   .page.menu-open .tree .hc-rail-walk{min-width:44px;min-height:44px}
@@ -533,9 +537,17 @@ const SCRIPT = `
   // has no arrow, so its name opens it. Opening a page puts the tree away.
   const menuBtn = page.querySelector('.menu-btn'), treeNav = page.querySelector('.tree')
   if (menuBtn && treeNav) {
-    const drawer = (open) => { page.classList.toggle('menu-open', open); menuBtn.setAttribute('aria-expanded', String(open)) }
-    menuBtn.onclick = () => drawer(!page.classList.contains('menu-open'))
     const phone = () => window.matchMedia('(max-width:760px)').matches
+    // On a phone the sibling tabs stand in the menu, over the tile list; wider, they stand above the picture.
+    const tabs = page.querySelector('.stage>.row, .tree>.row'), stage = page.querySelector('.stage'), sceneEl = page.querySelector('.scene')
+    const seatTabs = () => {
+      if (!tabs || !stage) return
+      if (phone()) { if (tabs.parentNode !== treeNav) treeNav.prepend(tabs) }
+      else if (tabs.parentNode !== stage) stage.insertBefore(tabs, sceneEl)
+    }
+    seatTabs()
+    const drawer = (open) => { seatTabs(); page.classList.toggle('menu-open', open); menuBtn.setAttribute('aria-expanded', String(open)) }
+    menuBtn.onclick = () => drawer(!page.classList.contains('menu-open'))
     let passing = false
     const pass = (node) => { passing = true; try { node.click() } finally { passing = false } }
     treeNav.addEventListener('click', (e) => {
@@ -563,7 +575,7 @@ const SCRIPT = `
     const watchRows = new MutationObserver(() => { if (gone()) { watchRows.disconnect(); return } relabel() })
     watchRows.observe(treeNav, { childList: true, subtree: true })
     const wide = window.matchMedia('(max-width:760px)')
-    if (wide.addEventListener) wide.addEventListener('change', () => { if (!gone()) relabel() })
+    if (wide.addEventListener) wide.addEventListener('change', () => { if (!gone()) { seatTabs(); relabel() } })
     treeNav.addEventListener('click', (e) => { if (phone() && e.target.closest && e.target.closest('a')) drawer(false) })
   } else if (menuBtn) menuBtn.hidden = true
   // THE TILE LIST. Inside the hive (and on the published site) the hive's own list is

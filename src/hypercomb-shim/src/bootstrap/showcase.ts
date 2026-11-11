@@ -756,8 +756,8 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   // hypercomb.com to load this hive signature"). A host that stages a presentation shows it in place: its name
   // and its line across the top, and under them the published hive, framed from its own address. That address always
   // answers with the head its publisher last signed, so a publish there is on this page at once, nothing is copied to
-  // this host, and what the hive keeps stays with its own domain. The search and the tiles are one press away, and one
-  // press brings the presentation back.
+  // this host, and what the hive keeps stays with its own domain. There is no search button on it (jwize 2026-11-11: "no
+  // search button"): the root is the presentation alone, and hypercomb.io is the default host for the rest.
   if (options.presentation) {
     const front = el('section', 'front')
     front.setAttribute('aria-label', options.title)
@@ -771,23 +771,13 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     const frontLine = el('p')
     frontLine.textContent = options.tagline
     frontWords.append(frontName, frontLine)
-    const toSearch = el('button', 'front-search')
-    toSearch.type = 'button'
-    toSearch.textContent = 'Search'
-    bar.append(frontMark, frontWords, toSearch)
+    bar.append(frontMark, frontWords)
     const frame = el('iframe', 'front-frame')
     frame.title = options.tagline ? `${options.title}: ${options.tagline}` : options.title
     frame.setAttribute('allow', 'fullscreen; autoplay')
     frame.setAttribute('referrerpolicy', 'no-referrer')
     frame.src = options.presentation
     front.append(bar, frame)
-    const back = el('button', 'front-back')
-    back.type = 'button'
-    back.textContent = `Back to ${options.title}`
-    back.hidden = true
-    toSearch.addEventListener('click', () => { front.hidden = true; back.hidden = false; search.focus() })
-    back.addEventListener('click', () => { front.hidden = false; back.hidden = true; toSearch.focus() })
-    hero.prepend(back)
     hero.append(front)
   }
 
@@ -2301,12 +2291,6 @@ export const SHOWCASE_STYLE = `
 .front-words { flex: 1 1 auto; min-width: 0; }
 .front-words h1 { margin: 0; color: var(--md-on-surface-strong); font-size: 1.05rem; line-height: 1.2; letter-spacing: 0; }
 .front-words p { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--md-on-surface-var); font-size: .82rem; line-height: 1.3; }
-.front-search, .front-back { box-sizing: border-box; min-height: 2.75rem; padding: 0 1rem; border: 1px solid var(--md-outline); border-radius: .6rem; cursor: pointer;
-  background: var(--md-surface-c-highest); color: var(--md-on-surface-strong); font: 600 .9rem/1 var(--md-font-ui, Inter, system-ui, sans-serif); }
-.front-search { flex: none; }
-.front-search:focus-visible, .front-back:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
-.front-back { display: block; width: 100%; margin: 0 0 .6rem; text-align: left; }
-.front-back[hidden] { display: none; }
 .front-frame { flex: 1 1 auto; min-height: 0; width: 100%; border: 0; background: var(--md-surface-c-lowest); }
 .hero-brand { display: flex; align-items: center; gap: .75rem; min-width: 0; margin: 0 0 .15rem; }
 .hero-mark { flex: none; display: grid; width: 2.1rem; height: 2.1rem; }
