@@ -980,15 +980,18 @@ every page, and its 25 scenes are folded into the tiles they explain:
   used to clear it, and a publish straight after put hexagons on the published
   site in place of the presentation. Scenes play like a
   film, timed to the voice, the figure's part it is about lit.
-- **The words are the whole text, over the picture.** jwize, 2026-11-11: *"the
-  audio should have the full text as an overlay instead that will be much
-  easier to manage"*; *"sectioned out per sentence to be recorded one sentence
-  at a time"*. A scene's narration is laid over the foot of its picture, every
-  sentence a section of its own. The sentence being said is lit and kept in
-  the middle; a press on any sentence plays from there. The button beside the
-  voice puts the words away so the picture stands alone, and the choice is
-  kept for the visit. One sentence is one section because one sentence is one
-  recording. A screen reader still hears each sentence as it is said.
+- **One sentence under the video, and a words panel for editing.** During the
+  presentation the narration is the one sentence being said, under the video,
+  timed to the voice. The whole text, a section a sentence, is an editing tool
+  (jwize, 2026-11-11: *"the audio should have the full text as an overlay"*;
+  *"sectioned out per sentence to be recorded one sentence at a time"*; *"the
+  narration panel is only for editing. During the presentation the normal
+  narration and text is used under the video"*). In the author's own hive a
+  button beside the voice lays that panel over the foot of the picture: the
+  sentence being said is lit, and a press on any sentence plays from there. It
+  is away until asked for, and a visitor, or a page opened on its own, sees
+  neither the button nor the panel. One sentence is one section because one
+  sentence is one recording.
 - **Checked.** `blocks/check.cjs` fails on a scene placed twice or said on
   two pages, a page that asks another host for anything, a medium whose bytes
   are not its name, or a link no page answers; `--render` also opens every

@@ -182,13 +182,17 @@ describe('every page says where it goes, once', () => {
       expect(b.page).toContain('.page.menu-open .top .menu-btn{position:fixed;')
     })
 
-    it(`${at}: the words are the whole text, a section a sentence, with a button to put them away`, () => {
+    it(`${at}: the caption is under the video, and the words panel is hidden for editing alone`, () => {
       const steps = JSON.parse(/<script type="application\/json">([^]*?)<\/script>\s*<\/section>/.exec(b.page)![1]) as { say: string }[]
       const says = [...b.page.matchAll(/<li><button type="button" class="say">/g)]
       expect(says.length).toBe(steps.length)
       expect(says.length).toBeGreaterThan(0)
-      expect(b.page).toContain('<ol class="says" aria-label="The words of this scene, a sentence at a time">')
-      expect(b.page).toContain('class="ib words" aria-pressed="true" aria-label="Hide the words"')
+      expect(b.page).toContain('<ol class="says" hidden aria-label="The words of this scene, a sentence at a time">')
+      expect(b.page).toContain('class="ib words" hidden aria-pressed="false" aria-label="Show the words"')
+      // the normal narration: one sentence under the video, seen
+      expect(b.page).toContain('<div class="caption" aria-live="polite"><p></p></div>')
+      expect(b.page).toContain('.caption{position:relative;margin:clamp(10px,2vh,22px) 0 0;')
+      expect(b.page).toContain("const editing = !!window.ioc && document.documentElement.dataset.hypercombMode !== 'visitor'")
       expect(b.page).toContain('.page.menu-open{grid-template-columns:230px minmax(0,1fr)')
       expect(b.page).toMatch(/aria-label="Full screen"/)
     })

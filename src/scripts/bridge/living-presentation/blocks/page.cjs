@@ -253,14 +253,20 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .try code{font:13px var(--mono);word-break:break-all;color:var(--ink)}
 .try code.sig{color:var(--honey)}
 
-/* THE NARRATION IS THE WHOLE TEXT, LAID OVER THE FOOT OF THE PICTURE (jwize 2026-11-11: "the audio should have the full
-   text as an overlay instead that will be much easier to manage"; "sectioned out per sentence to be recorded one sentence
-   at a time"). Every sentence is its own section: the one being said is lit, a press on any of them plays from there, and
-   the button beside the voice puts the words away so the picture stands alone. The line a screen reader hears is kept,
-   unseen, in .caption. */
+/* the narration: a strip under one hairline, the tour's caption, and its transport */
 .dock{width:100%;max-width:var(--measure);margin:0 auto;position:relative}
-.caption{position:absolute;width:1px;height:1px;margin:0;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.caption{position:relative;margin:clamp(10px,2vh,22px) 0 0;padding:12px 0 0;text-align:left;min-height:calc(2 * 1.5em + 12px);
+  font-size:clamp(16px,1.95cqi,21px);line-height:1.5;color:var(--ink);text-wrap:pretty;max-height:26vh;overflow:auto;overscroll-behavior:contain}
+.caption.more{-webkit-mask-image:linear-gradient(#000 calc(100% - 2.2em),transparent);mask-image:linear-gradient(#000 calc(100% - 2.2em),transparent)}
+.caption::before{content:"";position:sticky;display:block;top:-12px;left:0;right:0;height:1px;margin:-12px 0 11px;background:var(--line)}
+.caption.long{font-size:clamp(14px,1.5cqi,16px);line-height:1.5}
 .caption p{margin:0}
+.caption p.rise{animation:rise .5s var(--ease)}
+/* THE WORDS PANEL IS FOR EDITING ONLY (jwize 2026-11-11: "the narration panel is only for editing. During the
+   presentation the normal narration and text is used under the video"; "sectioned out per sentence to be recorded one
+   sentence at a time"). In the author's own hive a button beside the voice lays the scene's whole text over the foot of
+   the picture, a section a sentence: the one being said is lit, and a press on any plays from there. A visitor, and a
+   page opened on its own, never sees the button or the panel. */
 .says{position:absolute;z-index:3;left:0;right:0;bottom:100%;margin:0 0 8px;padding:8px;list-style:none;text-align:left;
   max-height:min(40vh,21em);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;
   background:color-mix(in srgb,var(--panel) 88%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
@@ -276,6 +282,7 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .say.now{color:var(--ink);border-left-color:var(--honey);background:var(--honey-tint)}
 .ib.words svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round}
 .ib.words[aria-pressed="true"]{color:var(--honey)}
+.ib.words[hidden]{display:none}
 @keyframes rise{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 .transport{display:flex;align-items:center;gap:6px;margin:10px 0 0}
 .ib{width:34px;height:34px;display:inline-grid;place-items:center;background:none;border:1px solid transparent;border-radius:var(--r-ctl);
@@ -392,6 +399,7 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
   .hexb{width:clamp(76px,24cqi,104px)}
   .hexb .t{font-size:11px}
   .count{display:none}
+  .caption{max-height:36vh}
   .says{max-height:38vh}
 }
 @media (prefers-reduced-motion:reduce){
@@ -707,6 +715,8 @@ const SCRIPT = `
     for (const n of el.querySelectorAll('.plate.beats [data-id], .fz.lights [data-id]')) n.classList.toggle('lit', lit.has('*') || lit.has(n.dataset.id))
     if (fz.classList.contains('duo')) { fz.classList.toggle('aside', !!s.beside); fz.classList.toggle('main', !s.beside && steps.some(x => x.beside)) }
     const p = document.createElement('p'); p.textContent = s.say; if (!still) p.className = 'rise'; line.replaceWith(p); line = p
+    cap.classList.toggle('long', s.say.split(/\\s+/).length > 70); cap.scrollTop = 0
+    requestAnimationFrame(() => cap.classList.toggle('more', cap.scrollHeight - cap.clientHeight > 4))
     says.forEach((b, k) => { b.classList.toggle('done', k < at); b.classList.toggle('now', k === at); if (k === at) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current') })
     // the sentence being said stays in the middle of the words
     if (saysBox && !saysBox.hidden && says[at]) saysBox.scrollTop = says[at].offsetTop - (saysBox.clientHeight - says[at].offsetHeight) / 2
@@ -772,8 +782,14 @@ const SCRIPT = `
   if (fwd) fwd.onclick = () => go(at + 1)
   ticks.forEach((t, k) => { t.onclick = () => go(k) })
   says.forEach((b, k) => { b.onclick = () => go(k) })
-  // THE WORDS ARE OVER THE PICTURE until this button puts them away; the choice is kept for the visit.
-  if (wordsBtn && saysBox) {
+  // THE WORDS PANEL, FOR EDITING ONLY, and away until asked for (jwize 2026-11-11: "the narration is still up by default.
+  // This is a bug"; "the narration panel is only for editing"): its button shows in the author's hive alone, and the
+  // choice is kept for the visit.
+  cap.addEventListener('scroll', () => cap.classList.toggle('more', cap.scrollHeight - cap.scrollTop - cap.clientHeight > 4), { passive: true })
+  // EDITING is the author's own hive: a hive is here, and it is not a visitor's.
+  const editing = !!window.ioc && document.documentElement.dataset.hypercombMode !== 'visitor'
+  if (wordsBtn && saysBox && editing) {
+    wordsBtn.hidden = false
     const WORDS = 'hc-scene-words'
     const setWords = (on) => {
       saysBox.hidden = !on
@@ -782,7 +798,7 @@ const SCRIPT = `
     }
     let kept = null
     try { kept = sessionStorage.getItem(WORDS) } catch {}
-    setWords(kept !== 'off')
+    setWords(kept === 'on')
     wordsBtn.onclick = () => { const on = saysBox.hidden; setWords(on); try { sessionStorage.setItem(WORDS, on ? 'on' : 'off') } catch {} }
   }
   if (voiceBtn) voiceBtn.onclick = () => { voiceOn = !voiceOn; voiceBtn.setAttribute('aria-pressed', String(voiceOn)); voiceBtn.setAttribute('aria-label', voiceOn ? 'Mute the voice' : 'Unmute the voice'); if (playing) speak() }
@@ -872,7 +888,7 @@ const sceneHtml = (sc) => {
     <div class="dock">${sc.link ? `
       <a class="cta" href="${esc(sc.link.href)}" target="_blank" rel="noopener">${esc(sc.link.label)}${icon('external')}</a>` : ''}
       <div class="caption" aria-live="polite"><p></p></div>
-      <ol class="says" aria-label="The words of this scene, a sentence at a time">${sc.steps.map(s => `<li><button type="button" class="say">${esc(s.say)}</button></li>`).join('')}</ol>
+      <ol class="says" hidden aria-label="The words of this scene, a sentence at a time">${sc.steps.map(s => `<li><button type="button" class="say">${esc(s.say)}</button></li>`).join('')}</ol>
       <nav class="transport" aria-label="Play">
         <button type="button" class="ib pp${voiced ? ' lead' : ''}" aria-label="Play">${icon('play', 'i-play')}${icon('pause', 'i-pause')}<span class="lead-text">Listen${sc.minutes ? ` · ${esc(sc.minutes)}` : ''}</span></button>${sc.steps.length > 1 ? `
         <button type="button" class="ib" data-act="back" aria-label="Back">${icon('left')}</button>
@@ -880,7 +896,7 @@ const sceneHtml = (sc) => {
         <span class="ticks">${sc.steps.map((s, k) => `<button type="button" class="tick" aria-label="${esc(`${k + 1}: ${s.say.slice(0, 60)}`)}"></button>`).join('')}</span>
         <span class="count">01 / ${String(sc.steps.length).padStart(2, '0')}</span>` : `
         <span class="ticks" aria-hidden="true"></span>`}
-        <button type="button" class="ib words" aria-pressed="true" aria-label="Hide the words"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h7"/></svg></button>${voiced ? `
+        <button type="button" class="ib words" hidden aria-pressed="false" aria-label="Show the words"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h7"/></svg></button>${voiced ? `
         <button type="button" class="ib voice" aria-pressed="true" aria-label="Mute the voice">${icon('speaker', 'i-speaker')}${icon('muted', 'i-muted')}</button>` : ''}
       </nav>
     </div>
