@@ -143,8 +143,14 @@ describe('point and click to dub', () => {
     expect(PAGE).toContain("const keyOf = (s) => dubOf(s) ? 'dub:' + s.key : (s && s.voice ? s.voice : '')")
     expect(PAGE).toContain('const from = dub ? 0 : (s.from ?? 0)')
     expect(PAGE).toContain('if (!dub && s.to != null) {')
-    // A press on the sentence holds the scene and hands the sentence to the hive.
-    expect(PAGE).toMatch(/cap\.addEventListener\('click'[\s\S]{0,400}if \(playing\) play\(false\)[\s\S]{0,200}new CustomEvent\('hc-sentence', \{ bubbles: true/)
+    // A press on a sentence in the words plays from there; with the audio
+    // editor on it goes there, holds the scene, and hands the sentence to the hive.
+    expect(PAGE).toMatch(/says\.forEach\(\(n, k\) => \{\s+n\.onclick = \(\) => \{\s+const b = bank\(\)\s+if \(!\(b && b\.canRecord\)\) \{ go\(k\); return \}\s+if \(playing\) play\(false\)\s+if \(k !== at\) go\(k\)[\s\S]{0,120}new CustomEvent\('hc-sentence', \{ bubbles: true/)
+    // The words list carries the marks and the edited words; the unseen line a
+    // screen reader hears carries them too.
+    expect(PAGE).toContain("if (saysBox) saysBox.classList.toggle('dubbable', can)")
+    expect(PAGE).toContain('if (n.textContent !== said) n.textContent = said')
+    expect(PAGE).toContain('p.textContent = sayOf(s);')
     expect(DRONE).toContain("document.addEventListener('hc-sentence', this.#onSentence)")
     // The page lets go of takes it holds when the bank changes.
     expect(PAGE).toContain("addEventListener('hc-dubs-changed', dubsChanged)")

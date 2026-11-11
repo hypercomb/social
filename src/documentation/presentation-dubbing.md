@@ -63,8 +63,8 @@ editor is not for publish use and you have to turn it off by default"):
   next load; nothing about the switch is stored.
 - It is never on in a visitor's shell. Takes already kept play either way.
 
-With it on, a press on the sentence under a playing presentation holds the
-scene and opens the editor **centered above the viewer, never over it** (jwize:
+With it on, a press on a sentence in the scene's words (the list laid over the
+foot of the picture) goes to that sentence, holds the scene and opens the editor **centered above the viewer, never over it** (jwize:
 "this is in the way of the presentation ... when a host is editing it should be
 centered above the viewer"). It sits in the page's flow just before the scene
 and is not a dialog.

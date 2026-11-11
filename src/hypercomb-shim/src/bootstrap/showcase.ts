@@ -553,6 +553,8 @@ export type ShowcaseOptions = {
   readonly tagline: string
   /** The zone's room (a sealed swarm link), drawn first — or ''. */
   readonly swarm?: string
+  /** The published hive shown as this host's root, in place of the search and tiles (an https address) — or ''. */
+  readonly presentation?: string
   /** Domains this hive added, shown after the ledger's. */
   readonly sources: readonly string[]
   readonly ledger: Promise<readonly LedgerSite[]>
@@ -749,6 +751,35 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   // The Add button is fixed to the foot of the screen wherever it sits in the page; it is kept beside the search it belongs to.
   hero.append(brand, searchBox, searchAdd)
   paintBrand(false)
+  // THE PRESENTATION IS THE ROOT, ON EVERY SCREEN (jwize 2026-11-11: "the desktop also has the presentation as the root" · "for hypercomb.com on the mobile we are going to put
+  // the protocol presentation. On the front page hypercomb an open protocol for humanity" · "we need to publish
+  // hypercomb.com to load this hive signature"). A host that stages a presentation shows it in place: its name
+  // and its line across the top, and under them the published hive, framed from its own address. That address always
+  // answers with the head its publisher last signed, so a publish there is on this page at once, nothing is copied to
+  // this host, and what the hive keeps stays with its own domain. There is no search button on it (jwize 2026-11-11: "no
+  // search button"): the root is the presentation alone, and hypercomb.io is the default host for the rest.
+  if (options.presentation) {
+    const front = el('section', 'front')
+    front.setAttribute('aria-label', options.title)
+    const bar = el('div', 'front-bar')
+    const frontMark = el('span', 'front-mark')
+    // its own ids: the header's mark is hidden on this page, and a gradient inside a hidden mark paints nothing
+    frontMark.innerHTML = GOLD_MARK.split('sc-').join('front-')
+    const frontWords = el('div', 'front-words')
+    const frontName = el('h1')
+    frontName.textContent = options.title
+    const frontLine = el('p')
+    frontLine.textContent = options.tagline
+    frontWords.append(frontName, frontLine)
+    bar.append(frontMark, frontWords)
+    const frame = el('iframe', 'front-frame')
+    frame.title = options.tagline ? `${options.title}: ${options.tagline}` : options.title
+    frame.setAttribute('allow', 'fullscreen; autoplay')
+    frame.setAttribute('referrerpolicy', 'no-referrer')
+    frame.src = options.presentation
+    front.append(bar, frame)
+    hero.append(front)
+  }
 
   const bandsHost = el('div', 'bands')
 
@@ -2250,6 +2281,17 @@ export const SHOWCASE_STYLE = `
 /* the header's two rows are the page's own: the search sticks flush to the top of the scrolled
    page where the brand was, and the brand comes back when the page is scrolled back to it */
 .hero { display: contents; }
+/* the root of a host that stages a presentation: its name and line, and the published hive in place */
+.front { position: fixed; inset: 0; height: 100vh; height: 100dvh; z-index: 45; display: flex; flex-direction: column; background: var(--md-surface); }
+.front[hidden] { display: none; }
+.front-bar { flex: none; display: flex; align-items: center; gap: .65rem; padding: calc(.55rem + env(safe-area-inset-top, 0px)) .8rem .55rem;
+  border-bottom: 1px solid var(--md-outline); }
+.front-mark { flex: none; display: block; width: 1.6rem; height: 1.6rem; }
+.front-mark svg { display: block; width: 100%; height: 100%; }
+.front-words { flex: 1 1 auto; min-width: 0; }
+.front-words h1 { margin: 0; color: var(--md-on-surface-strong); font-size: 1.05rem; line-height: 1.2; letter-spacing: 0; }
+.front-words p { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--md-on-surface-var); font-size: .82rem; line-height: 1.3; }
+.front-frame { flex: 1 1 auto; min-height: 0; width: 100%; border: 0; background: var(--md-surface-c-lowest); }
 .hero-brand { display: flex; align-items: center; gap: .75rem; min-width: 0; margin: 0 0 .15rem; }
 .hero-mark { flex: none; display: grid; width: 2.1rem; height: 2.1rem; }
 .hero-mark svg { width: 100%; height: 100%; }

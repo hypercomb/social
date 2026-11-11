@@ -170,3 +170,19 @@ describe('the room at the top — a card may carry its zone\'s sealed swarm link
   })
 })
 
+describe('a staged presentation (jwize 2026-11-11)', () => {
+  it('is believed only as a whole https address, and is absent from a card that stages none', () => {
+    expect(parseWelcome({ title: 'hypercomb', presentation: 'https://protocol.hypercomb.com/' })?.presentation).toBe('https://protocol.hypercomb.com/')
+    for (const bad of ['http://protocol.hypercomb.com/', '/tour/', '//protocol.hypercomb.com/', 'javascript:alert(1)', 'https://user:pass@protocol.hypercomb.com/', 7]) {
+      expect(parseWelcome({ title: 'hypercomb', presentation: bad })).toEqual({ title: 'hypercomb', tagline: '', links: [], swarm: '' })
+    }
+  })
+
+  it('reaches the front door, and a host with none has none', () => {
+    const staged = frontDoorOf(parseWelcome({ title: 'hypercomb', tagline: 'an open protocol for humanity', presentation: 'https://protocol.hypercomb.com/' }),
+      'hypercomb.com', 'https://hypercomb.com')
+    expect(staged.presentation).toBe('https://protocol.hypercomb.com/')
+    expect(staged.tagline).toBe('an open protocol for humanity')
+    expect(frontDoorOf(null, 'my-hive.example', 'https://my-hive.example').presentation).toBe('')
+  })
+})

@@ -923,8 +923,21 @@ every page, and its 25 scenes are folded into the tiles they explain:
     opened on its own has no hive, so it draws the same list from its own tree,
     in the same markup and the same stylesheet: `assistant/tiles-rail.css.ts`
     is that one sheet, and the page build reads it from there
-    (`blocks.spec.ts` fails a page whose copy differs). On a phone it is a
-    drawer behind a menu button.
+    (`blocks.spec.ts` fails a page whose copy differs). On a phone it is the
+    whole screen, behind the menu button, which stays in its corner to put it
+    away (jwize, 2026-11-11: *"on mobile when you bring up the tree menu it is
+    full screen and when you click the arrow icon on the row you go to the
+    presentation at the link, if you click the tree you nav in or arrow back
+    out as usual"*). There the row's two presses change places: the name walks
+    inside a tile that holds others, and the arrow opens that tile's page. A
+    tile that holds nothing has no arrow, so its name opens it. The sibling tabs
+    are part of that menu on a phone, under the tile list and a full row each
+    (jwize, 2026-11-11: *"put the list drilldown above and make each item a
+    full row below for the current layer videos"*), and never above the
+    picture (jwize, 2026-11-11: *"the tabs are only shown as part of the menu
+    on mobile"*). Wider than a
+    phone the list stands in a column of its own and the stage moves over, so
+    it never covers the content, and the name opens the page as before.
   - **crumbs**, the way up, in the bar over the video: `protocol / simple`,
     with the fullscreen button beside them. Fullscreen takes the video alone.
   - **the siblings**, balanced and centred above the video (under it until
@@ -962,9 +975,20 @@ every page, and its 25 scenes are folded into the tiles they explain:
   along the pages read, then out to the layer hosting the page first opened.
   In the hive, tiles walk as hexagons unless something is pinned: a tile's own
   pin (`opens <tile> as website`) opens its part; a pin on a top tile reaches
-  every tile under it and opens the whole website there. Scenes play like a
-  film: one sentence on screen at a time, timed to the voice, the figure's
-  part it is about lit.
+  every tile under it and opens the whole website there. A replant
+  (`plant.cjs --blocks`) leaves that pin as it finds it (jwize, 2026-11-11): it
+  used to clear it, and a publish straight after put hexagons on the published
+  site in place of the presentation. Scenes play like a
+  film, timed to the voice, the figure's part it is about lit.
+- **The words are the whole text, over the picture.** jwize, 2026-11-11: *"the
+  audio should have the full text as an overlay instead that will be much
+  easier to manage"*; *"sectioned out per sentence to be recorded one sentence
+  at a time"*. A scene's narration is laid over the foot of its picture, every
+  sentence a section of its own. The sentence being said is lit and kept in
+  the middle; a press on any sentence plays from there. The button beside the
+  voice puts the words away so the picture stands alone, and the choice is
+  kept for the visit. One sentence is one section because one sentence is one
+  recording. A screen reader still hears each sentence as it is said.
 - **Checked.** `blocks/check.cjs` fails on a scene placed twice or said on
   two pages, a page that asks another host for anything, a medium whose bytes
   are not its name, or a link no page answers; `--render` also opens every
