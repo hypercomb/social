@@ -985,9 +985,10 @@ every page, and its 25 scenes are folded into the tiles they explain:
   easier to manage"*; *"sectioned out per sentence to be recorded one sentence
   at a time"*. A scene's narration is laid over the foot of its picture, every
   sentence a section of its own. The sentence being said is lit and kept in
-  the middle; a press on any sentence plays from there. The button beside the
-  voice puts the words away so the picture stands alone, and the choice is
-  kept for the visit. One sentence is one section because one sentence is one
+  the middle; a press on any sentence plays from there. The words are away
+  until asked for (jwize, 2026-11-11: *"the narration is still up by default.
+  This is a bug"*): the button beside the voice lays them over the picture and
+  puts them away again, and the choice is kept for the visit. One sentence is one section because one sentence is one
   recording. A screen reader still hears each sentence as it is said.
 - **Checked.** `blocks/check.cjs` fails on a scene placed twice or said on
   two pages, a page that asks another host for anything, a medium whose bytes

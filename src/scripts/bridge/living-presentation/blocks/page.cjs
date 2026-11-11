@@ -256,7 +256,7 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 /* THE NARRATION IS THE WHOLE TEXT, LAID OVER THE FOOT OF THE PICTURE (jwize 2026-11-11: "the audio should have the full
    text as an overlay instead that will be much easier to manage"; "sectioned out per sentence to be recorded one sentence
    at a time"). Every sentence is its own section: the one being said is lit, a press on any of them plays from there, and
-   the button beside the voice puts the words away so the picture stands alone. The line a screen reader hears is kept,
+   the button beside the voice lays the words over the picture and puts them away again; they are away until asked for. The line a screen reader hears is kept,
    unseen, in .caption. */
 .dock{width:100%;max-width:var(--measure);margin:0 auto;position:relative}
 .caption{position:absolute;width:1px;height:1px;margin:0;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
@@ -772,7 +772,8 @@ const SCRIPT = `
   if (fwd) fwd.onclick = () => go(at + 1)
   ticks.forEach((t, k) => { t.onclick = () => go(k) })
   says.forEach((b, k) => { b.onclick = () => go(k) })
-  // THE WORDS ARE OVER THE PICTURE until this button puts them away; the choice is kept for the visit.
+  // THE WORDS ARE AWAY UNTIL ASKED FOR (jwize 2026-11-11: "the narration is still up by default. This is a bug"): the
+  // picture stands alone, this button lays the words over it, and the choice is kept for the visit.
   if (wordsBtn && saysBox) {
     const WORDS = 'hc-scene-words'
     const setWords = (on) => {
@@ -782,7 +783,7 @@ const SCRIPT = `
     }
     let kept = null
     try { kept = sessionStorage.getItem(WORDS) } catch {}
-    setWords(kept !== 'off')
+    setWords(kept === 'on')
     wordsBtn.onclick = () => { const on = saysBox.hidden; setWords(on); try { sessionStorage.setItem(WORDS, on ? 'on' : 'off') } catch {} }
   }
   if (voiceBtn) voiceBtn.onclick = () => { voiceOn = !voiceOn; voiceBtn.setAttribute('aria-pressed', String(voiceOn)); voiceBtn.setAttribute('aria-label', voiceOn ? 'Mute the voice' : 'Unmute the voice'); if (playing) speak() }
@@ -872,7 +873,7 @@ const sceneHtml = (sc) => {
     <div class="dock">${sc.link ? `
       <a class="cta" href="${esc(sc.link.href)}" target="_blank" rel="noopener">${esc(sc.link.label)}${icon('external')}</a>` : ''}
       <div class="caption" aria-live="polite"><p></p></div>
-      <ol class="says" aria-label="The words of this scene, a sentence at a time">${sc.steps.map(s => `<li><button type="button" class="say">${esc(s.say)}</button></li>`).join('')}</ol>
+      <ol class="says" hidden aria-label="The words of this scene, a sentence at a time">${sc.steps.map(s => `<li><button type="button" class="say">${esc(s.say)}</button></li>`).join('')}</ol>
       <nav class="transport" aria-label="Play">
         <button type="button" class="ib pp${voiced ? ' lead' : ''}" aria-label="Play">${icon('play', 'i-play')}${icon('pause', 'i-pause')}<span class="lead-text">Listen${sc.minutes ? ` · ${esc(sc.minutes)}` : ''}</span></button>${sc.steps.length > 1 ? `
         <button type="button" class="ib" data-act="back" aria-label="Back">${icon('left')}</button>
@@ -880,7 +881,7 @@ const sceneHtml = (sc) => {
         <span class="ticks">${sc.steps.map((s, k) => `<button type="button" class="tick" aria-label="${esc(`${k + 1}: ${s.say.slice(0, 60)}`)}"></button>`).join('')}</span>
         <span class="count">01 / ${String(sc.steps.length).padStart(2, '0')}</span>` : `
         <span class="ticks" aria-hidden="true"></span>`}
-        <button type="button" class="ib words" aria-pressed="true" aria-label="Hide the words"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h7"/></svg></button>${voiced ? `
+        <button type="button" class="ib words" aria-pressed="false" aria-label="Show the words"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h7"/></svg></button>${voiced ? `
         <button type="button" class="ib voice" aria-pressed="true" aria-label="Mute the voice">${icon('speaker', 'i-speaker')}${icon('muted', 'i-muted')}</button>` : ''}
       </nav>
     </div>
