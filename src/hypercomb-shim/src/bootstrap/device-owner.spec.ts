@@ -186,6 +186,24 @@ describe('a phone takes its owner\'s invite, then promotes from its own key', ()
     expect((await readZoneOwners(ZONE, [anchor])).showcase?.items).toEqual([{ pubkey: anchor, lineage: 'camelflage' }])
   })
 
+  it('signs the look a visitor is shown, and a page with no record keeps what it publishes', async () => {
+    await zone.publish({ zone: ZONE, items: [{ pubkey: anchor, lineage: 'camelflage' }], domains: [] })
+    await accept()
+    const owner = deviceOwner(ZONE)
+    await owner.hello()
+    expect(await owner.view!({ zone: ZONE, view: 'list' })).toEqual({ ok: true, changed: true })
+    const read = await readZoneOwners(ZONE, [anchor])
+    expect(read.showcase?.view).toBe('list')
+    expect(read.showcase?.items).toEqual([{ pubkey: anchor, lineage: 'camelflage' }])
+    // Asked again, nothing is signed; hexagons takes the view away; a name that is no view is refused.
+    const puts = zone.puts.length
+    expect(await owner.view!({ zone: ZONE, view: 'list' })).toEqual({ ok: true, changed: false })
+    expect(zone.puts.length).toBe(puts)
+    expect(await owner.view!({ zone: ZONE, view: 'cube' })).toEqual({ ok: false, reason: 'bad request' })
+    expect(await owner.view!({ zone: ZONE, view: 'hex' })).toEqual({ ok: true, changed: true })
+    expect((await readZoneOwners(ZONE, [anchor])).showcase?.view).toBeUndefined()
+  })
+
   it('reads again and retries once when the index moved underneath', async () => {
     await zone.publish({ zone: ZONE, items: [], domains: [] })
     await accept()

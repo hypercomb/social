@@ -1593,6 +1593,51 @@ describe('a tap visits, a hold toggles', () => {
     } finally { hero.remove(); bands.remove() }
   })
 
+  it('a sideways step walks four looks and comes round, and with the key the look can be shown to visitors', async () => {
+    const view = vi.fn(async () => ({ ok: true as const, changed: false }))
+    const owner = { ...bridge(a), view }
+    const { hero, bands } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => owners(), owner,
+    })
+    document.body.append(hero, bands)
+    const look = (): string => bands.querySelector('.pager-template')?.textContent ?? ''
+    const publish = (): HTMLButtonElement => bands.querySelector('.pager-publish') as HTMLButtonElement
+    const step = (key: string): void => { bands.querySelector('.pager')!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
+    try {
+      await vi.waitFor(() => expect(owner.hello).toHaveBeenCalled())
+      await new Promise(resolve => setTimeout(resolve, 0))
+      manageOn(hero)
+      await vi.waitFor(() => expect(look()).toBe('Hexagons'))
+      // The look a visitor already sees has nothing to publish.
+      expect(publish().hidden).toBe(true)
+      const seen: string[] = []
+      for (let at = 0; at < 4; at++) { step('ArrowRight'); seen.push(look()) }
+      expect(seen).toEqual(['Launcher', 'iPhone', 'List', 'Hexagons'])
+      step('ArrowLeft')
+      expect(look()).toBe('List')
+      expect(publish().hidden).toBe(false)
+      publish().click()
+      await vi.waitFor(() => expect(view).toHaveBeenCalledWith({ zone: 'hypercomb.com', view: 'list' }))
+      await vi.waitFor(() => expect(bands.querySelector('.owner-note')?.textContent).toBe('Visitors now see the List look.'))
+    } finally { hero.remove(); bands.remove() }
+  })
+
+  it('without a key nothing offers to publish the look', async () => {
+    const { hero, bands } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => owners(),
+    })
+    document.body.append(hero, bands)
+    try {
+      await vi.waitFor(() => expect(bands.querySelector('.dex-row.own .hex')).not.toBeNull())
+      manageOn(hero)
+      bands.querySelector('.pager')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
+      expect(bands.querySelector('.pager-template')?.textContent).toBe('Launcher')
+      expect((bands.querySelector('.pager-publish') as HTMLButtonElement).hidden).toBe(true)
+    } finally { hero.remove(); bands.remove() }
+  })
+
   it('what this browser turned on is kept across a visit: on the page it comes back to, and lit in its own row while editing', async () => {
     const { hero, bands } = showcase({
       self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],

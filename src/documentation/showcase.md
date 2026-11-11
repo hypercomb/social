@@ -444,7 +444,14 @@ Who can do what:
 A sideways swipe on the list while editing walks four looks and goes round: hexagons, the launcher (rows of four), the iPhone
 screen, the list of buttons. The square column (`tiles`) is still a view a signed record or `?view=tiles` may name, but the
 swipe does not walk it. The look chosen is kept in this browser (in the `showcase:orientation` document, beside the lane
-orientation), so leaving edit mode and coming back later keeps it. It is never signed: a visitor is shown the owners' record.
+orientation), so leaving edit mode and coming back later keeps it. Swiping signs nothing: a visitor is shown the owners' record.
+
+With the key, a quiet link beside the look's name — "Show visitors this look" — signs it into that record (`view`), so every
+visitor is shown it. It is there only while the look tried here is not the one already signed. The page asks over the same
+bridge as a toggle (`{ t: 'view', zone, view }`): the hive answers with `applyView` (essentials `showcase-bridge.ts`), a phone
+that took its owner's invite signs it itself (`device-owner.ts`). Hexagons is the absence of a view; a zone with no record yet
+keeps showing what it publishes, because the record that first names a look names those too. A hive older than this never
+answers, and the page says so.
 
 Being in the showcase is a different act, not a tap: a hold on the owner's own tile, or the held sheet's "Put it in my showcase".
 **Only a revision that is optimized and minimized can be put in.** `minimized.ts` asks the domain serving the head: its root layer

@@ -1517,6 +1517,26 @@ ${entry.key}`
   label.id = 'community-label'
   const templateNote = el('span', 'pager-template')
   templateNote.hidden = true
+  // WITH THE KEY, THE LOOK CAN BE EVERYONE'S (jwize 2026-11-10: "if you have your private key you can publish"): a quiet
+  // link beside the look's name, there only while the look tried here is not the one a visitor is shown.
+  const publishLook = el('button', 'pager-publish')
+  publishLook.type = 'button'
+  publishLook.textContent = 'Show visitors this look'
+  publishLook.hidden = true
+  let lookSigning = false
+  publishLook.addEventListener('click', () => {
+    const bridge = options.owner
+    if (lookSigning || !bridge?.view || !ownerKey) return
+    const view = showing()
+    lookSigning = true
+    say(`Publishing the ${viewLabel(view)} look…`)
+    void bridge.view({ zone: options.self, view }).catch(() => ({ ok: false as const, reason: 'failed' })).then(result => {
+      lookSigning = false
+      say(result.ok ? `Visitors now see the ${viewLabel(view)} look.` : `Not changed: ${result.reason}.`)
+      if (result.ok && result.changed) takeLedger(options.ledger)
+      else paint()
+    })
+  })
   const hint = el('p', 'pager-hint')
   hint.hidden = true
   hint.textContent = 'Swipe sideways for another look. Tap a tile to turn it on or off.'
@@ -1830,7 +1850,8 @@ ${entry.key}`
     templateNote.hidden = !managing
     templateNote.textContent = managing ? viewLabel(shape) : ''
     hint.hidden = !managing
-    if (label.parentElement !== pager) pager.replaceChildren(label, templateNote, hint)
+    publishLook.hidden = !managing || !ownerKey || !options.owner?.view || lookSigning || !!page || shape === (signed?.showcase?.view ?? 'hex')
+    if (label.parentElement !== pager) pager.replaceChildren(label, templateNote, publishLook, hint)
     pager.hidden = !managing && communities.length === 0
     if (pager.hidden) hosted.removeAttribute('aria-labelledby')
     else hosted.setAttribute('aria-labelledby', label.id)
@@ -2186,7 +2207,10 @@ export const SHOWCASE_STYLE = `
 .pager[hidden] { display: none; }
 .pager-template { color: var(--md-primary); font: 600 .78rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); }
 .pager-hint { flex-basis: 100%; margin: 0; color: var(--md-on-surface-faint); font-size: .75rem; line-height: 1.35; }
-.pager-template[hidden], .pager-hint[hidden] { display: none; }
+.pager-template[hidden], .pager-hint[hidden], .pager-publish[hidden] { display: none; }
+.pager-publish { margin-left: auto; padding: .2rem 0; border: 0; background: transparent; cursor: pointer; color: var(--md-primary);
+  font: 600 .78rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); text-decoration: underline; text-underline-offset: .2em; }
+.pager-publish:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
 .owner-note { margin: 0 0 .5rem; color: var(--md-on-surface-var); font-size: .85rem; }
 .owner-note[hidden] { display: none; }
 .hex.off { opacity: .35; filter: grayscale(1); }
