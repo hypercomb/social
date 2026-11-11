@@ -975,7 +975,10 @@ every page, and its 25 scenes are folded into the tiles they explain:
   along the pages read, then out to the layer hosting the page first opened.
   In the hive, tiles walk as hexagons unless something is pinned: a tile's own
   pin (`opens <tile> as website`) opens its part; a pin on a top tile reaches
-  every tile under it and opens the whole website there. Scenes play like a
+  every tile under it and opens the whole website there. A replant
+  (`plant.cjs --blocks`) leaves that pin as it finds it (jwize, 2026-11-11): it
+  used to clear it, and a publish straight after put hexagons on the published
+  site in place of the presentation. Scenes play like a
   film, timed to the voice, the figure's part it is about lit.
 - **The words are the whole text, over the picture.** jwize, 2026-11-11: *"the
   audio should have the full text as an overlay instead that will be much
