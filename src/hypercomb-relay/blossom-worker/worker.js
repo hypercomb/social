@@ -3171,7 +3171,11 @@ async function noteTranslators(env, pubkey, evt) {
  *  pool listing names what a client fetches directly, and the pool is a
  *  history that only grows. Served only where the operator lists the
  *  meaning (`hosts list agent:harness`); the write is an empty marker. */
-const SHARED_RECORD_POOLS = new Set(['agent:harness'])
+// `presentation:dubs` (documentation/presentation-dubbing.md): a soundbank —
+// one document per dubber naming a take and any edited words for each sentence
+// of a presentation — offered with `dub offer @host`, so a community can voice
+// a presentation between them.
+const SHARED_RECORD_POOLS = new Set(['agent:harness', 'presentation:dubs'])
 async function noteSharedPools(env, pubkey, evt) {
   let roots = {}
   try { roots = JSON.parse(evt.content)?.roots ?? {} } catch { return }

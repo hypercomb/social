@@ -75,10 +75,45 @@ and is not a dialog.
 - **Edit the words** swaps the line for a text box; saving shows the new words
   on the page at once.
 
-## Not built yet
+## A bank travels like a catalog
 
-- Offering a bank to a host and reading the bank a host carries (the
-  published-pool path the community translations and comfy workflows use), and
-  choosing which host's bank is the default for a visitor.
-- Letting a participant choose between banks for their own experience.
-- The planted pages must be rebuilt and replanted to carry the page hooks.
+A host authors a pool; the community fills it (jwize: "publish to our host
+pools our own dub so that people in the community can provide their own").
+
+| word | does |
+|---|---|
+| `dub offer @host` | Puts your bank on the named host under your key: the bank document, every take it names, and `presentation:dubs` stamped in your signed index. A write always names its host. |
+| `dub sync [@host]` | Reads the banks carried by the host named, the page's own host, the public hosts and your community hosts. Each bank is believed only when its bytes hash to the name the host listed. |
+| `dub banks` | Lists the banks you have and which one plays. |
+| `dub use <name>` | Plays a bank by its name, its host or its signature. `default` goes back to the page's own host; `none` plays only your own takes. |
+
+The host lists every stamped bank at `<origin>/<sign('presentation:dubs')>`
+(the worker's shared-record pools), once its operator lists the meaning:
+`hosts list presentation:dubs`. A domain you learn can also offer banks through
+the published-pool probe; placing the offer brings them in.
+
+## Which bank fills a sentence
+
+1. **Your own record** for the sentence: a take, edited words, or your choice
+   of the original voice.
+2. else **the bank you chose**, where it has the sentence.
+3. else **the default**: a bank offered by the host the page is served from,
+   newest first. Another host's bank is never the default; it plays only when
+   chosen. This is what makes a host's own dub the presentation's soundbank
+   for a visitor.
+4. else what the page was built with.
+
+A take from a bank is fetched by its own signature from the host that offered
+the bank, and refused when the bytes are not it. What you remember between
+sessions sits in the same pool: the sentences that are yours (`index`), the
+banks offered (`banks`), and your choice (`choice`).
+
+## Not verified, and not done
+
+- None of this has been run in a browser: the recorder, the microphone, the
+  editor's place above the scene, an offer to a real host.
+- The planted pages must be rebuilt and replanted to carry the page hooks, and
+  a host must deploy the worker change and list the meaning.
+- A visitor only hears a host's bank if the dub bee is among the bees their
+  shell loads; that has not been checked.
+- There is no window for choosing a bank yet: it is the `dub` words.

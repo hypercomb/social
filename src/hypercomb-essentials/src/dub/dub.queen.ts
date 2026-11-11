@@ -15,6 +15,16 @@ import { QueenBee, EffectBus } from '@hypercomb/core'
  *   dub        toggle the audio editor
  *   dub on     turn it on for this session
  *   dub off    turn it off
+ *
+ * THE BANK IS A POOL OTHERS CAN FILL (jwize: "publish to our host pools our own
+ * dub so that people in the community can provide their own ... later the
+ * participants can change their experiences"):
+ *
+ *   dub offer @host     put your soundbank on a host, under your key
+ *   dub sync [@host]    read the soundbanks the hosts you follow carry
+ *   dub banks           list the soundbanks you have, and which one plays
+ *   dub use <name>      play a bank you have: its name, its host, `default`
+ *                       (the page's own host) or `none` (only your own takes)
  */
 export class DubQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -22,21 +32,30 @@ export class DubQueenBee extends QueenBee {
   readonly command = 'dub'
   override description = 'Turn the audio editor on or off: press a sentence under a presentation to record your own voice for it or edit its words'
   override descriptionKey = 'slash.dub'
-  override options = ['on', 'off']
+  override options = ['on', 'off', 'offer @<host>', 'sync [@<host>]', 'banks', 'use <name|default|none>']
   override examples = [
     { input: '/dub', result: 'Toggles the audio editor' },
     { input: '/dub on', result: 'A press on a sentence opens the recorder' },
+    { input: '/dub offer @example.com', result: 'Your takes and words become a soundbank on example.com' },
+    { input: '/dub use none', result: 'Only your own takes play' },
   ]
 
   override slashComplete(args: string): readonly string[] {
     const q = args.toLowerCase().trim()
-    return ['on', 'off'].filter(option => option.startsWith(q))
+    return ['on', 'off', 'offer', 'sync', 'banks', 'use'].filter(option => option.startsWith(q))
   }
 
   protected async execute(args: string): Promise<void> {
-    const word = args.trim().toLowerCase()
-    if (word && word !== 'on' && word !== 'off') return
-    EffectBus.emit('dub:editing', word ? { on: word === 'on' } : { toggle: true })
+    const parts = args.trim().split(/\s+/).filter(Boolean)
+    const word = (parts[0] ?? '').toLowerCase()
+    const host = parts.find(part => part.startsWith('@'))?.slice(1) ?? ''
+    // The switch is state (replayed to a bee that loads later); the rest are
+    // acts, sent once and never replayed.
+    if (!word || word === 'on' || word === 'off') { EffectBus.emit('dub:editing', word ? { on: word === 'on' } : { toggle: true }); return }
+    if (word === 'offer') { EffectBus.emitTransient('dub:offer', { host }); return }
+    if (word === 'sync') { EffectBus.emitTransient('dub:sync', { host }); return }
+    if (word === 'banks') { EffectBus.emitTransient('dub:banks', {}); return }
+    if (word === 'use') EffectBus.emitTransient('dub:use', { bank: parts.slice(1).join(' ') })
   }
 }
 

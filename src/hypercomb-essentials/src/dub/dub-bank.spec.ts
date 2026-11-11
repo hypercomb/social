@@ -155,12 +155,12 @@ describe('point and click to dub', () => {
     // jwize, 2026-11-11: "the audio editor is not for publish use and you have
     // to turn it off by default".
     expect(DRONE).toContain('  editing = false')
-    expect(DRONE).toMatch(/get canRecord\(\): boolean \{\s+if \(!this\.editing\) return false/)
+    expect(DRONE).toContain('if (!this.editing || visitor()) return false')
     expect(QUEEN).toContain("readonly command = 'dub'")
     expect(QUEEN).toContain("EffectBus.emit('dub:editing', word ? { on: word === 'on' } : { toggle: true })")
     // Session only: nothing about the switch is written anywhere.
     for (const source of [DRONE, QUEEN, RECORDER]) expect(source).not.toMatch(/localStorage|sessionStorage/)
-    expect(DRONE).toMatch(/const next = on && !visitor/)
+    expect(DRONE).toContain('const next = on && !visitor()')
   })
 
   it('the editor sits above the viewer and never over it', () => {
@@ -175,7 +175,7 @@ describe('point and click to dub', () => {
   })
 
   it('a visitor plays and never records; the bee lets go while the hive runs', () => {
-    expect(DRONE).toMatch(/get canRecord\(\): boolean \{[\s\S]{0,200}hypercombMode'\] === 'visitor'\) return false/)
+    expect(DRONE).toMatch(/const visitor = \(\): boolean => \{\s+try \{ return document\.documentElement\.dataset\['hypercombMode'\] === 'visitor' \} catch \{ return true \}/)
     expect(DRONE).toMatch(/dispose\(\): void \{[\s\S]{0,200}removeEventListener\('hc-sentence'/)
     // The recorder arrives with the first press, never at boot.
     expect(DRONE).not.toMatch(/^import .*dub-recorder/m)
