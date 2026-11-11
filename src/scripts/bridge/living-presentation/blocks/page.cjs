@@ -57,6 +57,11 @@
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
+/** A SENTENCE'S NAME: the SHA-256 of its words, spaces folded. The hive keeps a
+ *  dub under this name (hypercomb-essentials/src/dub/dub-bank.ts spells the
+ *  same fold), so a take recorded on one page plays wherever the sentence is. */
+const sentenceKey = (say) => require('crypto').createHash('sha256').update(String(say ?? '').trim().replace(/\s+/g, ' '), 'utf8').digest('hex')
+
 const icon = (name, cls = '') => `<svg class="g${cls ? ` ${cls}` : ''}" aria-hidden="true"><use href="#i-${name}"/></svg>`
 
 /** The tour's tokens, dark as the tour is. A hive or viewer that says light
@@ -261,6 +266,9 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .caption::before{content:"";position:sticky;display:block;top:-12px;left:0;right:0;height:1px;margin:-12px 0 11px;background:var(--line)}
 .caption.long{font-size:clamp(14px,1.5cqi,16px);line-height:1.5}
 .caption p{margin:0}
+.caption.dubbable p{cursor:pointer}
+.caption.dubbable p:hover{text-decoration:underline dotted;text-underline-offset:.28em}
+.caption.dubbed p::after{content:" \\25CF";font-size:.6em;vertical-align:.3em;opacity:.55}
 .caption p.rise{animation:rise .5s var(--ease)}
 @keyframes rise{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 .transport{display:flex;align-items:center;gap:6px;margin:10px 0 0}
@@ -560,7 +568,18 @@ const SCRIPT = `
   // MediaSource for MP3) plays the whole voice, as before. Either way the
   // scene's first voice is asked for once the page is on screen and quiet, and
   // the next voice while this one plays, so pressing Listen starts at once.
-  const keyOf = (s) => s && s.voice ? s.voice : ''
+  // A DUB OUTRANKS THE BAKED VOICE (jwize 2026-11-11: "replace the sound bites
+  // per sentence ... people in the community can provide their own"). The hive
+  // holds the soundbank (the DubBank it registers, hypercomb-essentials/src/dub):
+  // asked by the sentence's name, it answers with a take to play, or nothing. A
+  // page on its own has no hive and plays what it was built with.
+  const bank = () => { try { const i = window.ioc, b = i && typeof i.get === 'function' ? i.get('@diamondcoreprocessor.com/DubBank') : null; return b && typeof b.urlOf === 'function' ? b : null } catch { return null } }
+  const dubOf = (s) => { try { const b = bank(); return (b && s && s.key && b.urlOf(s.key)) || '' } catch { return '' } }
+  const keyOf = (s) => dubOf(s) ? 'dub:' + s.key : (s && s.voice ? s.voice : '')
+  // THE WORDS CAN BE EDITED IN PLACE TOO (jwize 2026-11-11: "edit the text
+  // inline"): the bank answers with the sentence's words when they were
+  // changed, and the line shows those in place of the ones it was built with.
+  const sayOf = (s) => { try { const b = bank(); return (b && s && s.key && typeof b.textOf === 'function' && b.textOf(s.key)) || s.say } catch { return s.say } }
   const MS = window.MediaSource
   let streams = false
   if (MS && MS.isTypeSupported && MS.isTypeSupported('audio/mpeg') && steps.some(s => s.parts)) {
@@ -599,7 +618,9 @@ const SCRIPT = `
     const a = new Audio()
     a.preload = 'auto'
     a.dataset.src = keyOf(s)
-    if (streams && s.parts) streamOf(a, s.parts); else a.src = s.voice
+    const dub = dubOf(s)
+    if (dub) a.src = dub
+    else if (streams && s.parts) streamOf(a, s.parts); else a.src = s.voice
     return a
   }
   const drop = (a) => { a.onended = a.onerror = null; a.pause(); a.removeAttribute('src'); try { a.load() } catch {} }
@@ -630,12 +651,21 @@ const SCRIPT = `
     const lit = new Set(s.lit || ['*'])
     for (const n of el.querySelectorAll('.plate.beats [data-id], .fz.lights [data-id]')) n.classList.toggle('lit', lit.has('*') || lit.has(n.dataset.id))
     if (fz.classList.contains('duo')) { fz.classList.toggle('aside', !!s.beside); fz.classList.toggle('main', !s.beside && steps.some(x => x.beside)) }
-    const p = document.createElement('p'); p.textContent = s.say; if (!still) p.className = 'rise'; line.replaceWith(p); line = p
-    cap.classList.toggle('long', s.say.split(/\\s+/).length > 70); cap.scrollTop = 0
+    const said = sayOf(s)
+    const p = document.createElement('p'); p.textContent = said; if (!still) p.className = 'rise'; line.replaceWith(p); line = p
+    cap.classList.toggle('long', said.split(/\\s+/).length > 70); cap.scrollTop = 0
     requestAnimationFrame(() => cap.classList.toggle('more', cap.scrollHeight - cap.clientHeight > 4))
     ticks.forEach((t, k) => { t.classList.toggle('done', k < at); t.classList.toggle('now', k === at); if (k === at) t.setAttribute('aria-current', 'step'); else t.removeAttribute('aria-current') })
     if (count) count.textContent = String(at + 1).padStart(2, '0') + ' / ' + String(steps.length).padStart(2, '0')
     try { sessionStorage.setItem(KEY, String(at)) } catch {}
+    markDub()
+  }
+  // The sentence says whether it can be recorded here, and whether a take plays.
+  const markDub = () => {
+    const b = bank(), s = steps[at]
+    cap.classList.toggle('dubbable', !!(b && b.canRecord))
+    cap.classList.toggle('dubbed', !!dubOf(s))
+    if (line) { if (b && b.canRecord) line.title = 'Record this sentence'; else line.removeAttribute('title') }
   }
   const paint = () => { pp.classList.toggle('playing', playing); pp.setAttribute('aria-label', playing ? 'Pause' : 'Play'); if (started) pp.classList.remove('lead') }
   const halt = () => {
@@ -658,8 +688,11 @@ const SCRIPT = `
       else if (v.dataset.drawn && s.from != null) { try { v.currentTime = s.from } catch {} }
       if (v.paused) v.play().catch(() => {})
     }
-    const hold = () => { timer = setTimeout(next, readTime(s.say)) }
-    if (!(voiceOn && s.voice)) { if (audio) { drop(audio); audio = null } hold(); return }
+    const hold = () => { timer = setTimeout(next, readTime(sayOf(s))) }
+    // A dubbed sentence is its own take, start to end; the scene's one voice
+    // picks up again at the next sentence's stretch.
+    const dub = dubOf(s)
+    if (!(voiceOn && (s.voice || dub))) { if (audio) { drop(audio); audio = null } hold(); return }
     let a = audio
     if (!a || a.dataset.src !== keyOf(s)) {
       if (a) drop(a)
@@ -669,11 +702,11 @@ const SCRIPT = `
     if (coming) ready(coming)
     a.onended = () => { if (audio === a) { audio = null; timer = setTimeout(next, 800) } }
     a.onerror = () => { if (audio === a) { audio = null; hold() } }
-    const from = s.from ?? 0
+    const from = dub ? 0 : (s.from ?? 0)
     const seek = () => { if (Math.abs(a.currentTime - from) > 0.35) { try { a.currentTime = from } catch {} } }
     if (a.readyState >= 1) seek(); else a.addEventListener('loadedmetadata', seek, { once: true })
     if (a.paused) a.play().catch(() => { if (audio === a) { audio = null; hold() } })
-    if (s.to != null) {
+    if (!dub && s.to != null) {
       const follow = () => {
         if (audio !== a || !playing || gone()) return
         if (a.currentTime >= s.to - 0.03) { if (at < steps.length - 1) { show(at + 1); speak() } else { a.pause(); playing = false; paint(); idle() } return }
@@ -695,6 +728,26 @@ const SCRIPT = `
   if (fwd) fwd.onclick = () => go(at + 1)
   ticks.forEach((t, k) => { t.onclick = () => go(k) })
   if (voiceBtn) voiceBtn.onclick = () => { voiceOn = !voiceOn; voiceBtn.setAttribute('aria-pressed', String(voiceOn)); voiceBtn.setAttribute('aria-label', voiceOn ? 'Mute the voice' : 'Unmute the voice'); if (playing) speak() }
+  // POINT AND CLICK TO DUB: a press on the sentence, playing or not, asks the
+  // hive to record it. The scene holds where it is while the hive takes the
+  // microphone; with no hive, or on a visitor's page, the press does nothing.
+  cap.addEventListener('click', (e) => {
+    const b = bank(), s = steps[at]
+    if (!b || !b.canRecord || !s || !(e.target instanceof Element) || !e.target.closest('p')) return
+    if (playing) play(false)
+    page.dispatchEvent(new CustomEvent('hc-sentence', { bubbles: true, detail: { key: s.key, say: sayOf(s), original: s.say, at, of: steps.length, route: location.pathname } }))
+  })
+  // The bank changed (a take kept, a take dropped, a host's bank arrived): let
+  // go of every take held, so the next play asks again.
+  const dubsChanged = () => {
+    if (gone()) { removeEventListener('hc-dubs-changed', dubsChanged); return }
+    for (const [k, a] of [...warm]) if (k.startsWith('dub:')) { warm.delete(k); drop(a) }
+    if (audio && !playing) { drop(audio); audio = null }
+    if (line && at >= 0) line.textContent = sayOf(steps[at])
+    markDub()
+  }
+  addEventListener('hc-dubs-changed', dubsChanged)
+  try { const b = bank(); if (b && typeof b.want === 'function') b.want(steps.map(s => s.key)) } catch {}
   // typing in a part to try holds the scene where it is
   cap.addEventListener('scroll', () => cap.classList.toggle('more', cap.scrollHeight - cap.scrollTop - cap.clientHeight > 4), { passive: true })
   el.addEventListener('focusin', (e) => { if (e.target instanceof HTMLInputElement && playing) play(false) })
@@ -772,7 +825,9 @@ const crumbsHtml = (route) => `
 
 const sceneHtml = (sc) => {
   const voiced = sc.steps.some(s => s.voice)
-  const steps = sc.steps.map(s => ({ say: s.say, voice: s.voice || null, ...(s.parts ? { parts: s.parts } : {}), from: s.from ?? null, to: s.to ?? null, lit: s.lit ?? null, beside: !!s.beside }))
+  // `key` names the SENTENCE (sentenceKey): a dub is recorded for a sentence,
+  // not for a page, so one take answers that sentence wherever it is said.
+  const steps = sc.steps.map(s => ({ say: s.say, key: sentenceKey(s.say), voice: s.voice || null, ...(s.parts ? { parts: s.parts } : {}), from: s.from ?? null, to: s.to ?? null, lit: s.lit ?? null, beside: !!s.beside }))
   return `
   <section class="scene" data-part="scene" aria-label="${esc(sc.name || 'The scene')}">
     <div class="eyebrow">${sc.eyebrow}</div>
