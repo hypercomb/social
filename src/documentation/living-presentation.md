@@ -927,7 +927,10 @@ every page, and its 25 scenes are folded into the tiles they explain:
     drawer behind a menu button.
   - **crumbs**, the way up, in the bar over the video: `protocol / simple`,
     with the fullscreen button beside them. Fullscreen takes the video alone.
-  - **the siblings**, balanced and centred under the video: the tiles under the
+  - **the siblings**, balanced and centred above the video (under it until
+    2026-11-10, when jwize said they are "supposed to be above the video"; the
+    same day the tree became a drawer behind the menu button at every width,
+    "hidden but expandable", and Explore more became a plain text link): the tiles under the
     same parent, this one lit, the parent's name over them in brackets
     (`(protocol)`). The row stays when you press one of its buttons (jwize,
     2026-11-09): on a top page it is that tile's own first level (standing on
