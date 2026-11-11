@@ -21,18 +21,10 @@
 // inline): pass sigs of resources already pushed to the host and the worker
 // inlines them server-side from its own heap.
 
-//
-// AT A TRY- DOOR the host is the door itself. A door holds no key and signs
-// nothing (documentation/module-sandbox.md, "Door safety"), so there is no
-// host to name and no signer to sign with: the ask goes unsigned to the
-// door's own origin, the one write a door's host takes. Whoever opened the
-// door pays for it, under the door's daily ceiling.
-
 import {
   EffectBus,
   PARTICIPANT_AI_HOST_STORAGE_KEY,
   isParticipantAiHostConfigured,
-  isSandboxDoor,
 } from '@hypercomb/core'
 import { zoneDoor } from '../sharing/zone-door.js'
 
@@ -75,12 +67,11 @@ export class HostAiService extends EventTarget {
 
   /** True only when the participant explicitly supplied an AI host. */
   get configured(): boolean {
-    return isSandboxDoor() || isParticipantAiHostConfigured()
+    return isParticipantAiHostConfigured()
   }
 
-  /** The configured AI host (bare domain). At a door, the door. */
+  /** The configured AI host (bare domain). */
   get host(): string {
-    if (isSandboxDoor()) return globalThis.location.host
     try {
       const raw = zoneDoor(localStorage.getItem(AI_HOST_STORAGE_KEY) ?? '')
       return raw || AI_HOST_DEFAULT
@@ -91,8 +82,6 @@ export class HostAiService extends EventTarget {
 
   /** Set (or clear with '') the AI host. Bare domain, scheme stripped. */
   setHost(domain: string): void {
-    // A door's host is the door: there is nothing to name, and nothing kept.
-    if (isSandboxDoor()) return
     const bare = zoneDoor(domain)
     try {
       if (bare) localStorage.setItem(AI_HOST_STORAGE_KEY, bare)
@@ -124,12 +113,10 @@ export class HostAiService extends EventTarget {
     }
     // Loopback hosts use plain http (same rule as host-sync).
     const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
-    // A door asks the origin it was served from, as it is, and signs nothing.
-    const door = isSandboxDoor()
-    const url = door ? `${globalThis.location.origin}/ai/ask` : `${scheme}://${host}/ai/ask`
+    const url = `${scheme}://${host}/ai/ask`
 
-    const auth = door ? '' : await this.#nip98(url, 'POST')
-    if (!door && !auth) {
+    const auth = await this.#nip98(url, 'POST')
+    if (!auth) {
       const error = 'no Nostr signer available — cannot sign the ask'
       EffectBus.emit('ai:answer', { id, done: true, error } satisfies AskEvent)
       throw new Error(error)
@@ -139,7 +126,7 @@ export class HostAiService extends EventTarget {
     try {
       res = await fetch(url, {
         method: 'POST',
-        headers: { ...(auth ? { Authorization: auth } : {}), 'Content-Type': 'application/json' },
+        headers: { Authorization: auth, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           question: q,
           context: (opts.contextSigs ?? []).slice(0, 8),

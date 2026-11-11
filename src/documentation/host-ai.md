@@ -56,26 +56,6 @@ already carry, so identity is one concept across the whole host surface.
   anti-abuse ceiling, not billing. Anyone else is refused (429): ask from a host
   that binds your key, or run your own.
 
-### A try- door asks its own host, unsigned
-
-A `try-<change>.<zone>` door holds no key and signs nothing
-(`module-sandbox.md`, Door safety), so its chat cannot sign an ask. The host
-takes one write from a door: `POST /ai/ask` **at the door itself**, with an
-`Origin` that is that same door. No `Authorization`.
-
-- **Whoever opened the door pays.** The ask is admitted and metered as the
-  door's publisher, by the rule above: a publisher the host's AI does not
-  answer opens no door to it.
-- **The door has a ceiling of its own**, `AI_DOOR_DAILY_TOKENS` (default
-  20000 a day), kept in `sign('host:ai-meters')` under
-  `sign('ai-door:<host>')`. Spent, the door says to ask from your own hive.
-- **A door nobody opened answers 404.** An ask from another door, from an
-  opaque origin, or of any other host is refused like every other door write.
-
-The limit: `Origin` is not proof. A client that is not a browser can write it,
-so the two meters are the bound, not the header. Set `AI_DOOR_DAILY_TOKENS=0`
-to close door asks on a host.
-
 ### Context is signatures, never inline bytes
 
 `context` holds **content sigs already on the host**. The worker resolves them

@@ -92,7 +92,6 @@ jwize: "your peer hosts become your sandbox and you can scan the signed files by
 - **The door page wears its own policy** (worker `serveSandboxShell`): `connect-src 'self' https: wss: blob: data:` (plus exactly the zone's two http faces on a loopback zone — never a bare `http:`/`ws:`, so the visitor's machine is out of reach), `worker-src 'self' blob:`, `frame-ancestors 'none'`, no forms, no devices, no referrer, COOP, no cookie. Scripts are left alone (the import map and blob: bees).
 - **A door writes nothing.** The content worker and `relay.js` refuse every write whose `Origin` is a door (a `try-` first label) or opaque (`null`: a sandboxed frame or data: worker a door opens) — before any route. A door host runs no worker from the heap (a worker takes its policy from its own script). The limit: a signature coaxed out of an extension can be replayed from elsewhere, so the extension's own prompt stays the last guard.
 - **The shell knows it is at a door** (core `sandbox-door.ts`, the one predicate; a ratchet refuses a local `try-` regex): no LLM key is stored or read there, the signer reads, mints and signs nothing there, `window.nostr` is pinned away before anything loads, the web shell draws a door bar (plain DOM, before bootstrap — at a door every module is the publisher's), and the words that write refuse there and point home.
-- **The one write a door makes (2026-11-10): it asks its own host's AI.** jwize: "we need the interface". With no key, no signer and no bridge, the door's chat had no model. The worker takes an unsigned `POST /ai/ask` at the door itself whose `Origin` is that same door: paid by the door's publisher, under the door's own daily ceiling (`host-ai.md`). Every other write from a door is refused as before, and nothing but the two meters is written.
 - **Proof**: `verify-hive-publish.cjs` 67/67 — the door's CSP, a blocked dial to `ws://localhost:2401`, a refused write, no key kept, no extension signer, the door bar, the refusing word, and the assessment signed from the reader's own hive.
 
 **Doors live on your own host domains (jwize, 2026-09-24):** "we don't need a dedicated domain we use our host domains for testing. we can use any subdomain we like but naturally try.yoursub.domain.com then when deployed will be on yoursub.domain.com". There is no door-only domain and no Public Suffix List entry: a door is a subdomain of the host domain its publisher already uses, named for the site it becomes. What that accepts: a door is same-site with every site on its zone (origins still differ, so storage stays its own), and on the shared worker it takes `/core/*` and its service worker from the deployed visitor assets, so the visitor assets go out with every hypercomb.io deploy.
@@ -104,7 +103,7 @@ jwize: "your peer hosts become your sandbox and you can scan the signed files by
 jwize: "make sure the workflow is very clear what is happening or the participant will be lost". The what-changed panel (`module changes <change>`) opens on four steps, each saying what it touched; the first not yet done is marked as where you stand:
 
 1. **Draft**: written and committed to a trial.
-2. **Trial**: running at `try-<change>.<zone>`, a site of its own with nothing of your hive in it. It opens in a new tab (`noopener`), never in a frame: "we don't need to use iframes".
+2. **Shared**: named in its publisher's signed index on the zone. It runs nowhere until someone takes it. (Until 2026-11-10 this step was **Trial** and linked to the door; see Retiring the door.)
 3. **Reviewed**: how many readings there are (the host's AI, Jev, people), shown below.
 4. **Your choice**: **Take** takes every changed file into your hive, held in the brood until you accept it. The publisher alone is also offered **Promote** (`<change>.<zone>` runs what the trial ran) and **Withdraw**; both are put on the command line as their sentence (`module promote <change> @<zone>`), never said for the participant. At a door the step says to choose from your own hive.
 
@@ -123,6 +122,18 @@ Asked again the same day whether drafts belong on a separate domain, jwize kept 
 Next (jwize, same day): held drafts shown as EGGS on the tile being worked in — only an image and plain properties, no code running, until they hatch on acceptance.
 
 Still owed, from the same conversation: a reviewer that runs the change's tests, a plain-language summary of each change for the participant, reviewers that are deliberately different models, and installing a taken change into the git source.
+
+## Retiring the door (begun 2026-11-10)
+
+jwize: "We can retire 'try' I think because we decided you do changes on the client and then publish when you want to share. try is redundant." A change is made in your own hive, where your tiles, keys and AI already are. Publishing names its root in your signed index; its files are read from the root domain by signature; a follower takes it, held in the brood until accepted, and the host adopts it for live use. Nobody needs a remote place to run it.
+
+What goes is the **door**: the `try-<change>.<zone>` page, its policy, the door bar, the key and signer guards, and the workbench mode. What stays is the **published change**: commit, take, accept, promote, the what-changed panel and the reviews. Signed records keep their `try-` keys, because records already out there use them.
+
+What is given up: trying a change without taking it. Trying is now taking, held until accepted.
+
+- **Step one, done:** the what-changed panel offers no link to a door, and its second step says Shared.
+- **Step two:** the panel and `module take` still read a change from the door's host (`readSandboxDoor`, `doorReader`). Read it from the root instead.
+- **Step three:** remove the door's page and everything that exists only for it. A host answers a door that is asked for until then.
 
 ## Audit a trial from your own hive (built 2026-09-23)
 

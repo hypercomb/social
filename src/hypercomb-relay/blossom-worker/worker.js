@@ -6633,25 +6633,19 @@ async function aiContext(request, env, sigs) {
   return parts.length ? parts.join('\n\n') + '\n\n' : ''
 }
 
-/** The question an ask carries, or the refusal it earns. */
-async function aiQuestion(request) {
-  let body
-  try { body = await request.json() } catch { return { refused: text(400, 'body is not JSON') } }
-  const question = String(body?.question || '').trim()
-  if (!question) return { refused: text(400, 'missing question') }
-  if (question.length > AI_Q_MAX) return { refused: text(413, `question too long (max ${AI_Q_MAX} chars)`) }
-  return { question, sigs: Array.isArray(body?.context) ? body.context : [], wantStream: body?.stream !== false }
-}
-
 async function aiAsk(request, env) {
   if (!env.ANTHROPIC_API_KEY) return text(503, 'AI is not configured on this host (missing ANTHROPIC_API_KEY secret)')
 
   const auth = await verifyNip98(request, parseAuthEvent(request), 'POST', env)
   if (!auth.ok) return text(401, auth.reason)
 
-  const asked = await aiQuestion(request)
-  if (asked.refused) return asked.refused
-  const { question, sigs, wantStream } = asked
+  let body
+  try { body = await request.json() } catch { return text(400, 'body is not JSON') }
+  const question = String(body?.question || '').trim()
+  if (!question) return text(400, 'missing question')
+  if (question.length > AI_Q_MAX) return text(413, `question too long (max ${AI_Q_MAX} chars)`)
+  const sigs = Array.isArray(body?.context) ? body.context : []
+  const wantStream = body?.stream !== false
 
   const p = aiPolicy(env)
   const context = await aiContext(request, env, sigs)
@@ -6659,57 +6653,6 @@ async function aiAsk(request, env) {
   const adm = await aiAdmit(env, auth.pubkey, estimate)
   if (!adm.ok) return text(429, adm.reason)
 
-  return aiRelay(env, p, context, question, wantStream, [adm.meter])
-}
-
-// ── a door's chat asks the door's own host ───────────────────────────────────
-//
-// A try- door holds no key and signs nothing (documentation/module-sandbox.md,
-// "Door safety"), so its chat had no model to ask. The one write a door may
-// make is this: POST /ai/ask AT THE DOOR ITSELF, from the door's own page,
-// unsigned. Whoever opened the door pays — the ask is admitted and metered as
-// the door's publisher, exactly as that key's own asks are — and the door has
-// a daily ceiling of its own, so a visitor can spend no more than that.
-//
-// What this is not: proof of who asked. A page's Origin can be written by any
-// client that is not a browser, so the two meters are the bound, not the
-// header. Nothing is written but the meters; the door still writes no content.
-
-/** Is this a door's page asking the door it was served from? */
-function doorAsksItself(request, url) {
-  if (request.method !== 'POST' || url.pathname !== '/ai/ask') return false
-  if (!SANDBOX_LABEL_RE.test(url.hostname.split('.')[0])) return false
-  try { return new URL(request.headers.get('origin')).host === url.host } catch { return false }
-}
-
-async function aiAskAtDoor(request, env, routed) {
-  const { site, implicit } = routed
-  if (!site || !implicit || !SANDBOX_LABEL_RE.test(site.lineage)) return text(404, 'no trial is open at this door')
-  if (!env.ANTHROPIC_API_KEY) return text(503, 'AI is not configured on this host (missing ANTHROPIC_API_KEY secret)')
-  const found = await sandboxRoot(env, site, '')
-  if (!found) return text(404, 'no trial is open at this door')
-
-  const asked = await aiQuestion(request)
-  if (asked.refused) return asked.refused
-  const { question, sigs, wantStream } = asked
-
-  const p = aiPolicy(env)
-  const context = await aiContext(request, env, sigs)
-  const estimate = Math.ceil((question.length + context.length) / 4) + p.maxTokens
-  const adm = await aiAdmit(env, found.pubkey, estimate)
-  if (!adm.ok) return text(429, adm.reason)
-
-  const ceiling = allowance(env.AI_DOOR_DAILY_TOKENS, 20_000)
-  const member = await poolAddress(`ai-door:${new URL(request.url).hostname.toLowerCase()}`)
-  const day = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-  const row = await readLedger(env, HOST_AI_METERS_MEANING, member, null)
-  const used = row && typeof row === 'object' && row.day === day ? Number(row.used) || 0 : 0
-  if (used + estimate > ceiling) return text(429, 'this door has used its AI allowance for today — ask from your own hive')
-
-  return aiRelay(env, p, context, question, wantStream, [adm.meter, { pubkey: member, day, used, estimate }])
-}
-
-async function aiRelay(env, p, context, question, wantStream, meters) {
   const upstream = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -6732,7 +6675,7 @@ async function aiRelay(env, p, context, question, wantStream, meters) {
     return text(upstream.status === 429 ? 429 : 502, `AI upstream error (${upstream.status})`)
   }
 
-  for (const meter of meters) await aiConsume(env, meter)
+  await aiConsume(env, adm.meter)
 
   if (wantStream) {
     // SSE passthrough — the client parses Anthropic's event shapes directly.
@@ -6954,15 +6897,8 @@ const router = {
     // minted — would write as if the visitor's hive had. Assessing, taking,
     // drafting and committing happen at home, so this sits above every route.
     const fromDoor = fromSandboxDoor(request)
-    // The one exception: a door's page asking the AI of the door it was served
-    // from (aiAskAtDoor). It writes no content, only the meters that bound it.
-    const doorAsk = doorAsksItself(request, requestUrl)
-    if (fromDoor && !doorAsk && method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+    if (fromDoor && method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
       return text(403, 'a sandbox door writes nothing — do this from your own hive')
-    }
-    if (doorAsk) {
-      const routed = await route()
-      return aiAskAtDoor(request, routed.env, routed)
     }
 
     // THE MEETING POINT — ahead of every route, so a dial pays no index read.

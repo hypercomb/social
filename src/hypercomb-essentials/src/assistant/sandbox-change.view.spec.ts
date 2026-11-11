@@ -92,7 +92,9 @@ describe('the what-changed panel', () => {
     // A note is somebody's words: drawn as text, never as markup.
     expect(element.querySelector('.hc-trial img')).toBeNull()
     expect(panelText()).toContain('<img src=x onerror=alert(1)> raises zoom')
-    expect(element.querySelector<HTMLAnchorElement>('.hc-trial-door')?.href).toBe('https://try-zoom.hypercomb.com/')
+    // The door is no longer offered: a change is taken and run at home.
+    expect(element.querySelector('.hc-trial-door')).toBeNull()
+    expect(element.querySelector('.hc-trial a[href^="https://try-"]')).toBeNull()
   })
 
   it('takes one file\'s change into this hive by hand, and points to the brood where it waits', async () => {
@@ -135,21 +137,19 @@ describe('the steps on top — where you stand', () => {
     .map(step => `${step.classList.contains('is-done') ? 'done' : step.classList.contains('is-here') ? 'here' : '-'}|${step.querySelector('.hc-trial-step-title')?.textContent}`)
   const acts = (): string[] => [...element.querySelectorAll('.hc-trial-act')].map(act => act.textContent ?? '')
 
-  it('draft and trial are done, the trial opens in its own tab, and the choice is where you stand', async () => {
+  it('drafted and shared are done, no door is offered, and the choice is where you stand', async () => {
     const site = await trialSite()
     await element.show({ name: 'try-zoom', door: 'https://try-zoom.hypercomb.com', site, at: Date.now() })
-    expect(steps()).toEqual(['done|Draft', 'done|Trial', 'done|Reviewed', 'here|Your choice'])
-    const open = element.querySelector<HTMLAnchorElement>('.hc-trial-step a')!
-    expect(open.href).toBe('https://try-zoom.hypercomb.com/')
-    expect(open.target).toBe('_blank')
-    expect(open.rel).toBe('noopener')
+    expect(steps()).toEqual(['done|Draft', 'done|Shared', 'done|Reviewed', 'here|Your choice'])
+    expect(element.querySelector('.hc-trial-step a')).toBeNull()
+    expect(panelText()).toContain('It runs nowhere until someone takes it.')
     expect(element.querySelector('iframe')).toBeNull()
   })
 
   it('a trial nobody has read stands at Reviewed', async () => {
     const site = { ...await trialSite(), review: undefined, jev: undefined, assessments: [] }
     await element.show({ name: 'try-zoom', door: 'https://try-zoom.hypercomb.com', site, at: Date.now() })
-    expect(steps()).toEqual(['done|Draft', 'done|Trial', 'here|Reviewed', '-|Your choice'])
+    expect(steps()).toEqual(['done|Draft', 'done|Shared', 'here|Reviewed', '-|Your choice'])
     expect(panelText()).toContain('Nobody has read it yet.')
   })
 
