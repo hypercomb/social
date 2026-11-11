@@ -1909,3 +1909,41 @@ describe('collapsing the open domain collapses them all to the top', () => {
     expect(handle.bands.querySelector('.dex-row')?.classList.contains('open')).toBe(true)
   })
 })
+
+describe('a phone lands in the staged presentation (jwize 2026-11-11)', () => {
+  const draw = (extra = {}) => showcase({
+    self: 'hypercomb.com', title: 'hypercomb', tagline: 'an open protocol for humanity', sources: [],
+    ledger: Promise.resolve(parseLedger({ sites: [] })), readShared: async () => ({ offers: [], creations: [] }), ...extra,
+  })
+  const phone = (run: () => void): void => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: /coarse|max-width: 599px/.test(query), media: query, addEventListener() {}, removeEventListener() {} }))
+    try { run() } finally { vi.unstubAllGlobals() }
+  }
+
+  it('shows the name, the line and the published hive in place, with the search one press away and one press back', () => {
+    let hero!: HTMLElement
+    phone(() => { hero = draw({ presentation: 'https://protocol.hypercomb.com/' }).hero })
+    const front = hero.querySelector('.front') as HTMLElement
+    expect(front.hidden).toBe(false)
+    expect(front.querySelector('h1')?.textContent).toBe('hypercomb')
+    expect(front.querySelector('.front-words p')?.textContent).toBe('an open protocol for humanity')
+    const frame = front.querySelector('iframe') as HTMLIFrameElement
+    expect(frame.getAttribute('src')).toBe('https://protocol.hypercomb.com/')
+    expect(frame.title).toBe('hypercomb: an open protocol for humanity')
+    expect(frame.getAttribute('referrerpolicy')).toBe('no-referrer')
+    const back = hero.querySelector('.front-back') as HTMLButtonElement
+    expect(back.hidden).toBe(true)
+    ;(front.querySelector('.front-search') as HTMLButtonElement).click()
+    expect(front.hidden).toBe(true)
+    expect(back.hidden).toBe(false)
+    expect(back.textContent).toBe('Back to hypercomb')
+    back.click()
+    expect(front.hidden).toBe(false)
+    expect(back.hidden).toBe(true)
+  })
+
+  it('is the search and the tiles on a desktop, and on a phone whose host stages no presentation', () => {
+    expect(draw({ presentation: 'https://protocol.hypercomb.com/' }).hero.querySelector('.front')).toBeNull()
+    phone(() => { expect(draw().hero.querySelector('.front')).toBeNull() })
+  })
+})

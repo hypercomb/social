@@ -43,6 +43,8 @@ export type Welcome = {
   links: WelcomeLink[]
   /** The zone's room: a sealed swarm link, or '' (absent on a card without one). */
   swarm?: string
+  /** The published hive a phone lands in on this host's front page: an https address, when one is staged. */
+  presentation?: string
 }
 
 /** One line of the starting instructions, and the page it points at, if any. */
@@ -65,6 +67,8 @@ export type FrontDoor = {
   /** The starting point a host with nothing staged offers in place of the
    *  platform's doors — null once the operator stages a front page of its own. */
   readonly starter: Starter | null
+  /** The published hive a phone is shown in place on this front page, or ''. */
+  readonly presentation: string
 }
 
 /** What every host is, until its operator says otherwise. */
@@ -148,17 +152,29 @@ const linksFrom = (value: unknown): WelcomeLink[] => {
   return links
 }
 
+/** A presentation is shown in a frame, so only a whole https address is believed: never a path, never plain http. */
+const presentationFrom = (value: unknown): string => {
+  const raw = text(value, 2048)
+  if (!raw) return ''
+  try {
+    const url = new URL(raw)
+    return url.protocol === 'https:' && !url.username && !url.password ? url.href : ''
+  } catch { return '' }
+}
+
 /** The staged file, believed only as far as each field survives its clamp.
  *  Null when nothing usable is in it. */
 export const parseWelcome = (raw: unknown): Welcome | null => {
   const record = raw as Record<string, unknown>
   if (!record || typeof record !== 'object' || Array.isArray(record)) return null
 
+  const presentation = presentationFrom(record.presentation)
   const welcome: Welcome = {
     title: text(record.title, 60),
     tagline: text(record.tagline, 400),
     links: linksFrom(record.links),
     swarm: swarmFrom(record.swarm),
+    ...(presentation ? { presentation } : {}),
   }
   const empty = !welcome.title && !welcome.tagline && welcome.links.length === 0 && !welcome.swarm
   return empty ? null : welcome
@@ -233,5 +249,6 @@ export const frontDoorOf = (welcome: Welcome | null, hostname: string, origin: s
     swarm: welcome?.swarm ?? '',
     footer: PLATFORM_LINKS.filter(door => !links.some(link => sameDoor(link.href, door.href, origin))),
     starter: links.length === 0 ? STARTER : null,
+    presentation: welcome?.presentation ?? '',
   }
 }
