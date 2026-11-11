@@ -37,7 +37,8 @@ const compose = (doors) => ({
     + 'kept in your hands, and carried by the people who use it.',
   // /hosts remains the operator console. It is not a door on this front page.
   links: [
-    { label: 'Watch the tour', href: '/tour/', note: '≈ 12 minutes · narrated, with captions', icon: 'tour' },
+    // The tour is the protocol hive (jwize 2026-11-10).
+    { label: 'Take the tour', href: 'https://protocol.hypercomb.com/', note: 'what this is, and how it works', icon: 'tour' },
     { label: 'Open hypercomb.io', href: 'https://hypercomb.io', note: 'the main app — start a hive of your own', icon: 'app' },
     { label: 'Host your hive', href: 'https://host-setup.hypercomb.com/', note: 'on your device, your own server, or in the cloud', icon: 'app' },
     { label: 'Browser extensions', href: '/downloads/#extensions', note: 'Smart Autolinker · No YouTube Shorts', icon: 'extension' },

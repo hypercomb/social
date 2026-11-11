@@ -11,12 +11,14 @@
 //   page → { t: 'hello', id }                                hive → { t: 'here', id, pubkey }
 //   page → { t: 'toggle', id, zone, pubkey, lineage, on }    hive → { t: 'done', id, ok, changed?, reason? }
 //   page → { t: 'view', id, zone, view }                     hive → { t: 'done', id, ok, changed?, reason? }
+//   page → { t: 'invite', id, zone }                         hive → { t: 'invited', id, ok, link?, until?, code?, reason? }
 //
 // MIRRORED: hypercomb-shim/src/bootstrap/owner-bridge.ts speaks this; the shim spec holds them together.
 
 import { EffectBus, requestConfirm } from '@hypercomb/core'
 import { fetchHiveIndex } from './hive-pointer.js'
-import { publisherKeyHex } from './key-list.client.js'
+import { allowAnother, publisherKeyHex, type KeysAllowResult } from './key-list.client.js'
+import { qrSvg } from './qr-code.js'
 import { parseView, readSignedShowcase, setView, showcases, signShowcase, toggleItem, type Showcase, type ShowcaseItem } from './showcase-record.js'
 
 export const SHOWCASE_CHANNEL = 'hc:showcase'
@@ -126,6 +128,40 @@ export async function applyView(request: { readonly zone: string; readonly view:
   return signResult(setView({ zone, items: [...open], domains: [] }, next), deps)
 }
 
+export type InviteResult = { readonly ok: true; readonly link: string; readonly until: number; readonly code?: string } | { readonly ok: false; readonly reason: string }
+export type InviteDeps = {
+  readonly hosts?: () => Promise<readonly string[]>
+  readonly allow?: (hosts: readonly string[], options: { where: string }) => Promise<KeysAllowResult>
+  readonly code?: (link: string) => string | null
+}
+
+const INVITE_REFUSALS: Record<Extract<KeysAllowResult, { ok: false }>['reason'], string> = {
+  'no-signer': 'this hive holds no key',
+  'no-host': 'this hive publishes to no host yet',
+  'not-listed': 'this device is not on your key list',
+  'unreachable': 'your host could not be reached',
+  'refused': 'your host refused the invite',
+}
+
+/** AN INVITE WITH ONE PRESS (jwize 2026-11-10: "we need a very easy way to allow our phone to promote"). What
+ *  `keys allow <zone>` does, asked for by the page beside this hive: an invite written into the owner's key list on
+ *  every host they publish to, and the link that spends it — opened on the phone at `zone` — with the same link as a
+ *  code for its camera. The key never moves; the invite works once and runs out. */
+export async function applyInvite(request: { readonly zone: string }, deps: InviteDeps = {}): Promise<InviteResult> {
+  const zone = String(request.zone ?? '').toLowerCase()
+  if (!ZONE.test(zone)) return { ok: false, reason: 'bad request' }
+  let hosts: readonly string[]
+  try {
+    hosts = await (deps.hosts ?? (async () => (await import('./keys.queen.js')).keyListHosts()))()
+  } catch {
+    return { ok: false, reason: 'could not read where this hive publishes' }
+  }
+  const result = await (deps.allow ?? allowAnother)(hosts, { where: zone })
+  if (!result.ok) return { ok: false, reason: result.detail ? `${INVITE_REFUSALS[result.reason]} (${result.detail})` : INVITE_REFUSALS[result.reason] }
+  const code = (deps.code ?? (link => qrSvg(link, 'Invite to add a device')))(result.link)
+  return { ok: true, link: result.link, until: result.until, ...(code ? { code } : {}) }
+}
+
 let started = false
 
 /** Answer the page. Idempotent; a hive without BroadcastChannel answers nothing. */
@@ -152,6 +188,12 @@ export function startShowcaseBridge(): void {
       lane = lane.then(async () => {
         const result = await applyView(message as unknown as { zone: string; view: string }).catch((): ToggleResult => ({ ok: false, reason: 'failed' }))
         channel.postMessage({ t: 'done', id, ...result })
+      })
+    } else if (message['t'] === 'invite') {
+      // In the same lane: an invite is one more link in the owner's key list.
+      lane = lane.then(async () => {
+        const result = await applyInvite(message as unknown as { zone: string }).catch((): InviteResult => ({ ok: false, reason: 'failed' }))
+        channel.postMessage({ t: 'invited', id, ...result })
       })
     }
   })

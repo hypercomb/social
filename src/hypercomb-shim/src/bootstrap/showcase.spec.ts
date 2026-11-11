@@ -387,7 +387,7 @@ describe('everything on the home page is a tile — the platform\'s doors too', 
   })
 })
 
-describe('a vanilla hive starts with one faux tile (jwize 2026-11-04)', () => {
+describe('the help tiles are optional, and off until turned on (jwize 2026-11-10; the faux tile of 2026-11-04)', () => {
   const starter = { label: 'Start here', note: 'how to begin', title: 'Make this hive yours', steps: [
     { text: 'Open the app.', link: { label: 'Open hypercomb.io', href: 'https://hypercomb.io/' } },
     { text: 'Publish a branch.' },
@@ -398,8 +398,50 @@ describe('a vanilla hive starts with one faux tile (jwize 2026-11-04)', () => {
   })
   const starters = (bands: HTMLElement): number => bands.querySelectorAll('.dex-row.own .hex-starter').length
 
-  it('draws it in an empty row, and a click opens the steps instead of going anywhere', async () => {
-    const { bands, hero } = draw()
+  const help = [{ label: 'the tour', href: 'https://protocol.hypercomb.com/', note: '', icon: 'tour' as const }]
+  const manageOn = (hero: HTMLElement): void => { (hero.querySelector('.manage-toggle') as HTMLButtonElement).click() }
+  const settled = async (bands: HTMLElement): Promise<void> => {
+    await vi.waitFor(() => expect(bands.querySelector('.dex-row.own .hosted-empty:not([hidden])')?.textContent).toBe('Nothing is published here yet.'))
+  }
+
+  it('shows none by default; editing shows each gray, a tap turns it on, and it is kept and drawn as a link afterwards', async () => {
+    let kept: readonly { zone: string; key: string }[] = []
+    const keepCommunity = vi.fn(async (picks: readonly { zone: string; key: string }[]) => { kept = picks; return true })
+    const { bands, hero } = draw({ help, keepCommunity })
+    await settled(bands)
+    expect(bands.querySelectorAll('.dex-row.own .hex').length).toBe(0)
+    manageOn(hero)
+    const tour = bands.querySelector('.dex-row.own .hex-link:not(.hex-starter)') as HTMLAnchorElement
+    const start = bands.querySelector('.dex-row.own .hex-starter') as HTMLAnchorElement
+    expect(tour.querySelector('.hex-name')?.textContent).toBe('the tour')
+    for (const tile of [tour, start]) {
+      expect(tile.classList.contains('off')).toBe(true)
+      expect(tile.getAttribute('aria-pressed')).toBe('false')
+    }
+    // While editing a tap is the switch, never the link.
+    const tap = new MouseEvent('click', { bubbles: true, cancelable: true })
+    tour.dispatchEvent(tap)
+    expect(tap.defaultPrevented).toBe(true)
+    await vi.waitFor(() => expect(tour.classList.contains('off')).toBe(false))
+    expect(kept).toEqual([{ zone: 'help', key: 'help:https://protocol.hypercomb.com/' }])
+    await vi.waitFor(() => expect(bands.querySelector('.owner-note')?.textContent).toBe('the tour is on.'))
+    start.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    await vi.waitFor(() => expect(start.classList.contains('off')).toBe(false))
+    expect((hero.querySelector('.versions-backdrop') as HTMLElement).hidden).toBe(true)
+    // Back on the page: only what was turned on, as links again.
+    manageOn(hero)
+    expect([...bands.querySelectorAll('.dex-row.own .hex .hex-name')].map(name => name.textContent)).toEqual(['the tour', 'Start here'])
+    expect(tour.hasAttribute('aria-pressed')).toBe(false)
+    const visit = new MouseEvent('click', { bubbles: true, cancelable: true })
+    tour.addEventListener('click', event => event.preventDefault(), { once: true })
+    tour.dispatchEvent(visit)
+    // A browser that kept them shows them on its next visit.
+    const again = draw({ help, readCommunity: async () => kept })
+    await vi.waitFor(() => expect(again.bands.querySelectorAll('.dex-row.own .hex').length).toBe(2))
+  })
+
+  it('once turned on, a click on the starting tile opens the steps instead of going anywhere', async () => {
+    const { bands, hero } = draw({ readCommunity: async () => [{ zone: 'help', key: 'help:start' }] })
     await vi.waitFor(() => expect(starters(bands)).toBe(1))
     expect(bands.querySelectorAll('.dex-row.own .hex').length).toBe(1)
     const tile = bands.querySelector('.hex-starter') as HTMLAnchorElement
@@ -420,7 +462,7 @@ describe('a vanilla hive starts with one faux tile (jwize 2026-11-04)', () => {
   })
 
   it('is a starting point, not furniture: gone while searching, and when a door was staged', async () => {
-    const { bands, hero } = draw()
+    const { bands, hero } = draw({ readCommunity: async () => [{ zone: 'help', key: 'help:start' }] })
     await vi.waitFor(() => expect(starters(bands)).toBe(1))
     const search = hero.querySelector('input[type=search]') as HTMLInputElement
     search.value = 'anything'
@@ -474,7 +516,7 @@ describe('following a domain from the page', () => {
     } finally { vi.unstubAllGlobals() }
   })
 
-  it('filters with the search, and offers Add domain at its right end only for a domain nobody follows yet', async () => {
+  it('is one input called Search, and offers to add a domain in a button at the foot only for a domain nobody follows yet', async () => {
     const follow = vi.fn(async (raw: string) => ({ ok: true as const, zone: raw.trim() }))
     const { bands, hero } = showcase({
       self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
@@ -488,12 +530,15 @@ describe('following a domain from the page', () => {
     // THE BOTTOM INPUT IS GONE (jwize 2026-11-05): no follow box, no Go/Follow button — one search and its link.
     expect(bands.querySelector('.follow')).toBeNull()
     expect(hero.querySelector('.search-go')).toBeNull()
-    // The link lives inside the field's own box, so it takes no room beside the search.
-    expect(add.parentElement).toBe(search.parentElement)
+    // ONE INPUT, CALLED SEARCH (jwize 2026-11-10): the button is not in the field; it is the bar at the foot, and it names the domain.
+    expect(search.placeholder).toBe('Search')
+    expect(search.parentElement?.querySelector('button')).toBeNull()
+    expect(add.classList.contains('foot-bar')).toBe(true)
+    expect(add.classList.contains('confirm-bar')).toBe(false)
     expect(add.hidden).toBe(true)
     type('cafesociety.buzz')
     expect(add.hidden).toBe(false)
-    expect(add.textContent).toBe('Add domain')
+    expect(add.textContent).toBe('Add cafesociety.buzz')
     // A domain already followed, this one, and plain words are only filtered.
     for (const text of ['jwize.com', 'hypercomb.com', 'garden']) { type(text); expect(add.hidden).toBe(true) }
     // The link adds the domain, opens its row with what that peer publishes under its own domain, and clears the line.
@@ -1549,15 +1594,17 @@ describe('a tap visits, a hold toggles', () => {
     })
     document.body.append(hero, bands)
     const sheet = hero.querySelector('.versions-backdrop') as HTMLElement
+    const bar = bands.querySelector('.confirm-bar') as HTMLButtonElement
     const answer = (words: string): void => {
-      const button = [...sheet.querySelectorAll<HTMLButtonElement>('button')].find(found => found.textContent === words)
-      expect(button).toBeDefined()
-      button!.click()
+      expect(bar.hidden).toBe(false)
+      expect(bar.textContent).toBe(words)
+      bar.click()
     }
     try {
       await vi.waitFor(() => expect(owner.hello).toHaveBeenCalled())
       await new Promise(resolve => setTimeout(resolve, 0))
       manageOn(hero)
+      expect(bar.hidden).toBe(true)
       // Every row is a domain: there is no row a tile is moved into.
       expect(rowNamed(bands, 'Community')).toBeUndefined()
       // Another domain's tile: a tap only asks. Cancel and nothing happened.
@@ -1566,14 +1613,23 @@ describe('a tap visits, a hold toggles', () => {
       expect(dylan.classList.contains('off')).toBe(true)
       expect(dylan.getAttribute('aria-pressed')).toBe('false')
       expect(click(dylan).defaultPrevented).toBe(true)
-      expect(sheet.hidden).toBe(false)
-      answer('Cancel')
+      // ONE TAP, THEN ONE RED BUTTON ACROSS THE FOOT (jwize 2026-11-10): no sheet opens. Escape puts it away.
       expect(sheet.hidden).toBe(true)
+      expect(bar.hidden).toBe(false)
+      expect(bar.classList.contains('foot-bar')).toBe(true)
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+      expect(bar.hidden).toBe(true)
+      // So does a tap anywhere that is not a tile.
+      click(dylan)
+      expect(bar.hidden).toBe(false)
+      hero.dispatchEvent(new Event('pointerdown', { bubbles: true, composed: true }))
+      expect(bar.hidden).toBe(true)
       expect(keepCommunity).not.toHaveBeenCalled()
       expect(owner.toggle).not.toHaveBeenCalled()
       // Yes: on, and published — the one signed act, through the hive's key. It lights where it sits.
       click(dylan)
-      answer('Put it in my showcase')
+      answer('Put dylan in my showcase')
+      expect(bar.hidden).toBe(true)
       await vi.waitFor(() => expect(owner.toggle).toHaveBeenCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'dylan', on: true }))
       expect(keepCommunity).toHaveBeenCalledTimes(1)
       expect(namesIn(rowNamed(bands, 'jwize.com')!)).toContain('dylan')
@@ -1581,14 +1637,14 @@ describe('a tap visits, a hold toggles', () => {
       expect(dylan.getAttribute('aria-pressed')).toBe('true')
       // The same tile again asks to take it out, and it grays in place.
       click(dylan)
-      answer('Take it out of my showcase')
+      answer('Take dylan out of my showcase')
       await vi.waitFor(() => expect(keepCommunity).toHaveBeenCalledTimes(2))
       await vi.waitFor(() => expect(dylan.classList.contains('off')).toBe(true))
       expect(namesIn(rowNamed(bands, 'jwize.com')!)).toContain('dylan')
       // A published tile of this domain is on already: the tap asks to take it out, and yes signs it off.
       await openRowNamed(bands, 'hypercomb.com')
       click(await tileIn(bands, '.dex-row.own a.hex', 'camelflage'))
-      answer('Take it out of my showcase')
+      answer('Take camelflage out of my showcase')
       await vi.waitFor(() => expect(owner.toggle).toHaveBeenLastCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'camelflage', on: false }))
     } finally { hero.remove(); bands.remove() }
   })

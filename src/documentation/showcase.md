@@ -439,6 +439,32 @@ Who can do what:
 - **With the key** (a hive beside the page, or a phone that took its owner's invite), or on a desktop where the tap can be handed
   to the hive: a tap asks once, and yes is the signed act — publish or unpublish — so a visitor sees the same community.
 
+**One tap, then one red button across the foot (jwize 2026-11-10).** The question is not a sheet over the tiles. The tap marks
+the tile and a red bar across the bottom of the screen says what pressing it signs ("Put dylan in my showcase"). Pressing it
+is the yes. Escape, or a tap anywhere that is not a tile, puts it away with nothing done; a tap on another tile asks about
+that one instead.
+
+### Just a search and the tiles (jwize 2026-11-10)
+
+The page a visitor lands on is one input, called Search, and the tiles. The mark, the name, its sentence and the counts show
+only while editing, where they say which domain is being edited. A room the owner hosts ("Join the swarm") stays, because it
+is a door and not information.
+
+There is no follow box and no link inside the field. While what is typed is a domain nobody follows yet, a button across the
+foot of the screen names it — "Add jwize.com" — the same bar the red confirm uses, without the red. Until the line is a
+domain it is only a search.
+
+### The help tiles are optional (jwize 2026-11-10)
+
+The starting tile and the platform's own doors (the tour, the app, source, licensing) are help. A host that staged a front
+page of its own — hypercomb.com — shows what it staged. Every other host shows none of them by default. While editing they
+sit gray in the domain's own row and a tap turns one on or off; the choice is kept in this browser, in the same
+`community:tiles` document as its other picks, under a key no tile has (`help:<address>`, `help:start`). The tour is the
+protocol hive, `protocol.hypercomb.com`.
+
+A domain whose ledger names no owner has nothing signed to read, so its row says "Nothing is published here yet." and never
+"Could not read what is published here."
+
 ### Four looks, swiped sideways while editing (jwize 2026-11-10)
 
 A sideways swipe on the list while editing walks four looks and goes round: hexagons, the launcher (rows of four), the iPhone

@@ -45,6 +45,18 @@ that do not exist yet.
   - `PUT`s the chain, signed with NIP-98 as itself;
   - forgets the secret and records the anchor in `keys:binding`.
 
+### 1a. Add a phone, with one press (jwize 2026-11-10)
+
+"We need a very easy way to allow our phone to promote." Typing `keys allow <domain>` in the hive is no longer the only
+way to make the invite. On the domain's own page, on the computer, with the hive beside it: turn on Manage and press
+**Add a phone**. The page asks the hive over the owner bridge (`{ t: 'invite', zone }` → `{ t: 'invited', link, until, code }`),
+the hive does what `keys allow <zone>` does (`applyInvite` in essentials `showcase-bridge.ts`, over `allowAnother`), and the
+page shows the link as a code for the phone's camera, with the link to copy beside it. The phone opens it, taps Allow, and
+from then on a tap there publishes. The page holds no QR encoder: the hive draws the code and the page shows it as an image,
+never as markup. Only a hive hands out an invite; a phone that already holds a key cannot invite another.
+
+A phone with no key, editing a domain that has owners, is told this in the line under the look's name.
+
 ### 2. Going live writes the anchor's index from the phone
 
 A tap on a gray community tile in your row does what `signShowcase` does in
