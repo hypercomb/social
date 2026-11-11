@@ -1645,6 +1645,8 @@ const sandboxEnv = async (roots, shellRequests = []) => ({
   HIVES: { get: async (key) => key === pubkey ? JSON.stringify(await signedIndex(roots)) : null },
   CONTENT: contentBag(),
   SANDBOX_SHELL_ORIGIN: 'https://shell.example',
+  // A try- door (the debugger) is served the framework-free shim, never the web shell.
+  DEBUGGER_SHELL_ORIGIN: 'https://debugger.example',
   __shellRequests: shellRequests,
 })
 const hostPackagesPool = async () => hex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('host:packages'))))
@@ -1689,15 +1691,32 @@ test('a try- door with no stamp is nothing here, and the live channel never open
   assert.equal(response.status, 404)
 })
 
-test('a try- door hands every other path to the participant shell', async () => {
+// jwize, 2026-11-11: "anything built in the debugger (subdomains) should not
+// load angular. This will be our process to phase out angular."
+test('a try- door hands every other path to the framework-free shim, never the web shell', async () => {
   const env = await sandboxEnv({ 'install:try-fresh-rooms': 'b'.repeat(64) })
   const seen = []
   const original = globalThis.fetch
-  globalThis.fetch = async (url) => { seen.push(String(url)); return new Response('<!doctype html>shell', { headers: { 'content-type': 'text/html' } }) }
+  globalThis.fetch = async (url) => { seen.push(String(url)); return new Response('<!doctype html><script src="main-TQO2BYYC.js" type="module"></script>', { headers: { 'content-type': 'text/html' } }) }
   try {
     const response = await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/main.js?v=1'), env)
     assert.equal(response.status, 200)
-    assert.deepEqual(seen, ['https://shell.example/main.js?v=1'])
+    // The shim's files are its own, at their own paths: nothing is moved under /shell/.
+    const page = await (await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/'), env)).text()
+    assert.match(page, /src="main-TQO2BYYC\.js"/)
+    assert.doesNotMatch(page, /\/shell\/|data-hypercomb-mode/)
+    await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/shell/x.js'), env)
+    assert.deepEqual(seen, ['https://debugger.example/main.js?v=1', 'https://debugger.example/', 'https://debugger.example/shell/x.js'])
+    // With no origin of its own, the debugger's page is the front door's shim.
+    seen.length = 0
+    await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/pin'), { ...env, DEBUGGER_SHELL_ORIGIN: '', HOST_DOOR_ORIGIN: 'https://door.example/' })
+    assert.deepEqual(seen, ['https://door.example/pin'])
+    // With neither, it says so. It never falls back to the web shell.
+    seen.length = 0
+    const unconfigured = await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/'), { ...env, DEBUGGER_SHELL_ORIGIN: '' })
+    assert.equal(unconfigured.status, 503)
+    assert.equal((await unconfigured.text()).trim(), 'the debugger shell is not configured')
+    assert.deepEqual(seen, [])
   } finally { globalThis.fetch = original }
 })
 
@@ -2168,7 +2187,7 @@ test('a door wears its own policy: never framed, no bare http or ws, no cookie',
   assert.equal(response.headers.get('set-cookie'), null)
   assert.equal(response.headers.get('content-encoding'), null)
   // An unconfigured shell still answers under the door's policy.
-  const unconfigured = await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/'), { ...env, SANDBOX_SHELL_ORIGIN: '' })
+  const unconfigured = await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/'), { ...env, DEBUGGER_SHELL_ORIGIN: '' })
   assert.equal(unconfigured.status, 503)
   assert.match(unconfigured.headers.get('content-security-policy'), /frame-ancestors 'none'/)
 })

@@ -8,7 +8,8 @@
 // shell installs its own `window.ioc` map, and publishService keeps offering
 // until the map holds the key (llm-provider-registry.ts).
 
-import { Drone } from '@hypercomb/core'
+import { Drone, EffectBus } from '@hypercomb/core'
+import { CHAT_SURFACE, CHAT_VIEW_OWNER, angularChatPresent } from './chat-surface.js'
 import { CHAT_THREADS_IOC_KEY, ChatThreads } from './chat-threads.js'
 import { COMPACTION_IOC_KEY, compaction } from './compaction.js'
 import { EXECUTION_QUEUE_IOC_KEY, executionQueue } from './execution-queue.js'
@@ -58,3 +59,33 @@ startHarnessTiles()
 startModelRequestLedger()
 
 window.ioc.register('@diamondcoreprocessor.com/ChatDrone', new ChatDrone())
+
+// THE CHAT'S OWN WINDOW (chat-surface.ts): the bee adds its tag to the
+// shell's surface registry — never a tag in a template — and the element
+// arrives with the first request for it, on a page where the Angular window
+// is not the chat. There the Angular window answers, and nothing loads.
+window.ioc.whenReady?.('@hypercomb.social/ShellSurfaceRegistry', (registry: { add(s: unknown): void }) => {
+  try {
+    registry.add({ name: CHAT_SURFACE, owner: CHAT_VIEW_OWNER, element: CHAT_SURFACE, order: 150 })
+  } catch {
+    // duplicate add (hot reload) — the mounted surface is already live
+  }
+})
+
+let chatView: Promise<void> | null = null
+let listening = false
+const loadChatView = (payload: { prefill?: string; convoId?: string; model?: string }): void => {
+  // A replayed request is an old gesture; once the element is defined it
+  // hears every request itself.
+  if (!listening || customElements.get(CHAT_SURFACE) || angularChatPresent()) return
+  chatView ??= import('./chat.view.js').then(({ ChatElement }) => {
+    ChatElement.pending = payload
+    if (!customElements.get(CHAT_SURFACE)) customElements.define(CHAT_SURFACE, ChatElement)
+  }).catch((error: unknown) => {
+    chatView = null
+    EffectBus.emit('activity:log', { message: `Could not load the chat: ${error instanceof Error ? error.message : String(error)}` })
+  })
+}
+EffectBus.on<{ prefill?: string; convoId?: string; model?: string }>('chat:open', payload => loadChatView(payload ?? {}))
+EffectBus.on('chat:toggle', () => loadChatView({}))
+listening = true

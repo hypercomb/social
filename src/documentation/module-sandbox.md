@@ -133,7 +133,22 @@ What is given up: trying a change without taking it. Trying is now taking, held 
 
 - **Step one, done:** the what-changed panel offers no link to a door, and its second step says Shared.
 - **Step two, done:** a shared change is read from the root domain. The zone's `sign('host:trials')` listing says what it is; `sign('assess:<root>')` is listed at the root (the index write names it in `sign('assess:pools')`, as attestations are) and each assessor's word is read from their own signed index and record; files come from `/<sig>` at the root; `module take` reads the root first. The door is asked only where the root does not answer. Assessments written before this host change are not in `assess:pools`, so the root lists them only once their assessor's index is written again; the door still lists them until then.
-- **Step three:** remove the door's page and everything that exists only for it. A host answers a door that is asked for until then.
+- **Step three, withdrawn 2026-11-11:** the door's page is not removed. It became the debugger, below.
+
+## The subdomain is the debugger, and it loads no Angular (2026-11-11)
+
+jwize: "we single click an editing tile to debug basically, It opens the subdomain and you are debugging. You then have access somehow to suggested tools like ai. Then you adopt by click and now you accept and have ai. You can develop from there." And: "anything built in the debugger (subdomains) should not load angular. This will be our process to phase out angular."
+
+What was retired on 2026-11-10 is offering the door to strangers as a place to try a change. The `try-<change>.<zone>` subdomain itself stays, as the debugger an editing tile opens.
+
+- **The page:** a `try-` subdomain is served the framework-free shim (`hypercomb-shim`), from `DEBUGGER_SHELL_ORIGIN`, else from `HOST_DOOR_ORIGIN` (the shim deployment the front door's card already comes from). With neither set it answers 503. It never falls back to the web shell. The signer is still pinned off before any module runs, and the door's policy headers are unchanged (blossom-worker `serveSandboxShell`).
+- **What that page can do** is exactly what has been moved out of Angular: the shim mounts only surfaces registered as custom elements (`hypercomb-shim/src/surfaces.ts`). Every panel still in `hypercomb-shared/ui` is absent there. That gap is the work list, and closing it is how Angular is phased out.
+- **The chat** is the first surface moved: `hc-chat` (essentials `assistant/chat.view.ts`), wired by the chat's own bee. It keeps a conversation in the chat's threads and streams an answer.
+- **The chat can change the hive.** A model is taught the behaviours the participant granted; a `hypercomb-do` block it writes is parsed whole, waits in the execution queue, and is listed in the chat with Run and Skip; what happened is the model's next message (essentials `assistant/chat-work.ts`). To make that possible the line parser, the plan's reach and lane (`core/machine-plan.ts`) and the lesson and reply messages (`core/work-instruction.ts`) moved from `hypercomb-shared/ui/chat-window` into core; the shell files re-export them. New core exports mean the shell that serves core is deployed before a package that uses them.
+- **The chat cannot yet** read the hive or send hive context, write code, doctrine or files, or put a failed block's pages back. The read fence, the context compiler, Jev and the plan transaction are still in the shell.
+- **Suggested tools:** a suggested behaviour is off and offered once (`hc:behavior-suggested`). The AI chat is the first.
+- **Not Angular-free yet:** the `swarm` door is still served the web shell. The web shell's workbench mode (`data-hypercomb-mode="workbench"`, `workbench-page.ts`, the workbench barrel) is no longer stamped by the worker and is left in place, unused, until it is removed.
+- **Not built yet:** the click on an editing tile that opens its subdomain, and the shim's host console offering the debugger's package and suggested tools on that page.
 
 ## Audit a trial from your own hive (built 2026-09-23)
 
