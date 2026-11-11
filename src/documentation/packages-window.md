@@ -37,7 +37,9 @@ Composing a new package — files off, a folder taken from another signature, a
 trait left open, including an upgrade of the AI package — is minted on the
 host's file view and tried on a mission door
 ([build-debug-isolation.md](build-debug-isolation.md)). This window is where a
-composed root is taken into what runs.
+composed root is taken into what runs. Composing on this desk itself — a target
+pane beside the sources, packages grouped as components, a named package saved
+to your host — is proposed in [package-components.md](package-components.md).
 
 ## What runs: the trunk, and picks over it
 
