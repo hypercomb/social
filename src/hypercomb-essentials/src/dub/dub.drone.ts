@@ -362,7 +362,7 @@ export class DubDrone extends Drone {
   }
 
   /** Let go while the hive runs: the listener, the recorder if it is open. */
-  dispose(): void {
+  override dispose(): void {
     document.removeEventListener('hc-sentence', this.#onSentence)
     window.ioc.unregister?.(DUB_BANK_KEY)
     void import('./dub-recorder.js').then(view => view.closeDubRecorder()).catch(() => undefined)
