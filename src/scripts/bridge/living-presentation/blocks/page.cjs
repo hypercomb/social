@@ -306,17 +306,20 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 /* THE SIBLING MENU, balanced and centred above the video (jwize 2026-11-08:
    "no step in any more just the balanced centered sibling menu"): the tiles
    under the same parent, this one lit; the parent's name stands in brackets. */
-.row{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:center;gap:6px 8px;padding:10px 0 12px;margin-bottom:10px;border-bottom:1px solid var(--line)}
+.row{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:center;gap:6px 8px;padding:10px 0 12px;margin-bottom:10px;border-bottom:1px solid var(--line)}
 .sibs{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px 8px;min-width:0}
 /* EXPLORE MORE is the one button to the right of the row (jwize 2026-11-10:
    "put the explore more as the button to the right of the playlist for the
    current layer this way it is simple"): the way down, into the first child. */
-.row a.more{display:inline-flex;align-items:center;gap:.5em;margin-left:10px;text-decoration:none;color:var(--honey);white-space:nowrap;
+/* what lies below, small, under the button (jwize 2026-11-10: "it needs details maybe small underneath") */
+.row .more-wrap{display:inline-flex;flex-direction:column;align-items:center;gap:4px;min-width:0}
+.row .more-wrap small{font:400 11px/1.3 var(--sans);color:var(--faint-text);max-width:18em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row a.more{display:inline-flex;align-items:center;gap:.5em;text-decoration:none;color:var(--honey);white-space:nowrap;
   border:1px solid var(--honey-deep);border-radius:var(--r-card);padding:6px 14px;font:500 13px/1.3 var(--mono);letter-spacing:var(--track-data);transition:border-color .15s,background .15s}
 .row a.more svg{width:13px;height:13px;flex:none;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;transition:transform .15s}
 .row a.more:hover,.row a.more:focus-visible{border-color:var(--honey);background:var(--honey-tint)}
 .row a.more:hover svg,.row a.more:focus-visible svg{transform:translateX(3px)}
-.sibs .lbl{flex-basis:100%;text-align:center;color:var(--faint-text)}
+.row .lbl{flex-basis:100%;text-align:center;color:var(--faint-text)}
 .sibs a.sib,.sibs span.sib{display:inline-flex;align-items:center;gap:.5em;text-decoration:none;color:var(--ink);
   border:1px solid var(--line);border-radius:var(--r-card);padding:6px 14px;font:500 13px/1.3 var(--mono);letter-spacing:var(--track-data);transition:border-color .15s,background .15s,color .15s}
 .sibs .sib .g{color:var(--honey);font-size:12px}
@@ -326,13 +329,22 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 /* the video alone, fullscreen */
 .scene:fullscreen{background:var(--bg);padding:3vh 4vw;overflow:auto}
 
-/* THE TREE IS A DRAWER behind the menu button, at every width. */
+/* THE TREE IS HIDDEN behind the menu button, at every width. Opened, it takes
+   its own column and the stage moves over: it never covers the content
+   (jwize 2026-11-10: "the menu opens up over the content"). A phone has no
+   room for a second column, so there it is a drawer. */
 .tree{display:none}
-.page.menu-open .tree{display:flex;position:absolute;z-index:6;top:0;bottom:0;left:0;width:min(290px,84%);padding:48px 14px 16px 14px;
-  background:var(--panel);border-right:1px solid var(--line-strong);box-shadow:var(--shadow)}
-.page.menu-open .top .menu-btn{position:relative;z-index:7}
+.page.menu-open{grid-template-columns:230px minmax(0,1fr);column-gap:22px}
+.page.menu-open .tree{display:flex}
+.page.menu-open .stage{grid-column:2}
+.menu-btn[aria-expanded="true"]{color:var(--honey);border-color:var(--honey-deep)}
 @media (max-width:760px){
   .page{padding:12px 12px 0}
+  .page.menu-open{grid-template-columns:minmax(0,1fr);column-gap:0}
+  .page.menu-open .stage{grid-column:1}
+  .page.menu-open .tree{position:absolute;z-index:6;top:0;bottom:0;left:0;width:min(290px,84%);padding:48px 14px 16px 14px;
+    background:var(--panel);border-right:1px solid var(--line-strong);box-shadow:var(--shadow)}
+  .page.menu-open .top .menu-btn{position:relative;z-index:7}
 }
 
 @container (max-width:700px){
@@ -489,13 +501,15 @@ const SCRIPT = `
       fs.onclick = () => { if (document.fullscreenElement === el) document.exitFullscreen(); else el.requestFullscreen().catch(() => {}) }
     }
   }
-  // THE TREE is a drawer: the menu button opens it; choosing a video, or a press beside it, closes it.
+  // THE TREE opens beside the stage from the menu button and stays until the button is pressed again.
+  // On a phone it is a drawer: choosing a video, or a press beside it, closes it.
   const menuBtn = page.querySelector('.menu-btn'), treeNav = page.querySelector('.tree')
   if (menuBtn && treeNav) {
     const drawer = (open) => { page.classList.toggle('menu-open', open); menuBtn.setAttribute('aria-expanded', String(open)) }
     menuBtn.onclick = () => drawer(!page.classList.contains('menu-open'))
-    treeNav.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('a')) drawer(false) })
-    page.addEventListener('click', (e) => { if (page.classList.contains('menu-open') && !(e.target.closest && e.target.closest('.tree,.menu-btn'))) drawer(false) })
+    const phone = () => window.matchMedia('(max-width:760px)').matches
+    treeNav.addEventListener('click', (e) => { if (phone() && e.target.closest && e.target.closest('a')) drawer(false) })
+    page.addEventListener('click', (e) => { if (phone() && page.classList.contains('menu-open') && !(e.target.closest && e.target.closest('.tree,.menu-btn'))) drawer(false) })
   } else if (menuBtn) menuBtn.hidden = true
   // THE TILE LIST. Inside the hive (and on the published site) the hive's own list is
   // mounted here, the one the AI chat shows, and a press on a tile opens that tile's page.
@@ -800,7 +814,7 @@ const exploreHtml = (ways) => {
   const e = ways && ways.explore
   if (!e) return ''
   const about = `Explore more about ${e.topic}`
-  return `<a class="more" data-part="explore" href="/${e.to.map(esc).join('/')}" title="${esc(about)}" aria-label="${esc(about)}">Explore more<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a>`
+  return `<span class="more-wrap"><a class="more" data-part="explore" href="/${e.to.map(esc).join('/')}" title="${esc(about)}" aria-label="${esc(about)}">Explore more<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a><small>${esc(e.topic)}</small></span>`
 }
 
 /** THE ROW above the video: the siblings, then Explore more at their right. */
@@ -818,7 +832,7 @@ const sibsHtml = (ways, route) => {
   if (section.length < 2) return ''
   const parent = String((ways && ways.sectionOf) || '')
   return `
-  <nav class="sibs" data-part="siblings" aria-label="${esc(parent ? `More in ${parent}` : 'Beside this')}">${parent ? `<span class="lbl mono-label">(${esc(parent)})</span>` : ''}${section.map(t => t.current
+  ${parent ? `<span class="lbl mono-label">(${esc(parent)})</span>` : ''}<nav class="sibs" data-part="siblings" aria-label="${esc(parent ? `More in ${parent}` : 'Beside this')}">${section.map(t => t.current
     ? `<span class="sib" aria-current="page">${icon('play')}${esc(t.name)}</span>`
     : t.page
       ? `<a class="sib" href="/${t.route.map(esc).join('/')}" title="${esc(t.note)}">${icon('play')}${esc(t.name)}</a>`
