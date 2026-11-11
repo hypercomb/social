@@ -33,8 +33,12 @@ const OUT = path.join(__dirname, 'dist', 'welcome.json')
 // It is not a door on this front page. The extensions link opens that page.
 const compose = (doors) => ({
   title: 'hypercomb',
-  tagline: 'An open protocol that brings people together. Your work is named by its own content, '
-    + 'kept in your hands, and carried by the people who use it.',
+  // jwize 2026-11-11: "On the front page hypercomb an open protocol for humanity".
+  tagline: 'an open protocol for humanity',
+  // The root is the protocol presentation, shown in place from the published hive, on every screen (jwize 2026-11-11:
+  // "for hypercomb.com on the mobile we are going to put the protocol presentation" · "the desktop also has the
+  // presentation as the root").
+  presentation: 'https://protocol.hypercomb.com/',
   // /hosts remains the operator console. It is not a door on this front page.
   links: [
     // The tour is the protocol hive (jwize 2026-11-10).

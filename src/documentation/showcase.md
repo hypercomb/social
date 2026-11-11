@@ -454,6 +454,24 @@ There is no follow box and no link inside the field. While what is typed is a do
 foot of the screen names it — "Add jwize.com" — the same bar the red confirm uses, without the red. Until the line is a
 domain it is only a search.
 
+### A staged presentation is the root (jwize 2026-11-11)
+
+"For hypercomb.com on the mobile we are going to put the protocol presentation. On the front page hypercomb an open
+protocol for humanity." And: "we need to publish hypercomb.com to load this hive signature." And: "the desktop also has
+the presentation as the root."
+
+A host may stage a presentation: `presentation` in its `welcome.json`, a whole https address and nothing else
+(`welcome.ts` `presentationFrom`). hypercomb.com stages `https://protocol.hypercomb.com/`, with the line "an open protocol
+for humanity". That host's root, on every screen, is its name and its line across the top and, under them, the published
+hive in a frame from its own address. That address answers with the head its publisher last signed, so a publish of
+`/protocol` is on hypercomb.com at once, with no deploy; nothing is copied to the host, and what the hive
+keeps in the browser stays with its own domain. There is no search button on it (jwize 2026-11-11: "no search button"):
+the root is the presentation alone, and hypercomb.io is the default host for the search and the tiles. A host that
+stages no presentation is the search and the tiles as before.
+
+The shim stays generic: it knows no domain, only the field. The same pinned shim runs on a phone at hypercomb.io, which
+serves no `welcome.json`, so that page is unchanged.
+
 ### The help tiles are optional (jwize 2026-11-10)
 
 The starting tile and the platform's own doors (the tour, the app, source, licensing) are help. A host that staged a front

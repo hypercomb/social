@@ -253,15 +253,29 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .try code{font:13px var(--mono);word-break:break-all;color:var(--ink)}
 .try code.sig{color:var(--honey)}
 
-/* the narration: a strip under one hairline, the tour's caption, and its transport */
-.dock{width:100%;max-width:var(--measure);margin:0 auto}
-.caption{position:relative;margin:clamp(10px,2vh,22px) 0 0;padding:12px 0 0;text-align:left;min-height:calc(2 * 1.5em + 12px);
-  font-size:clamp(16px,1.95cqi,21px);line-height:1.5;color:var(--ink);text-wrap:pretty;max-height:26vh;overflow:auto;overscroll-behavior:contain}
-.caption.more{-webkit-mask-image:linear-gradient(#000 calc(100% - 2.2em),transparent);mask-image:linear-gradient(#000 calc(100% - 2.2em),transparent)}
-.caption::before{content:"";position:sticky;display:block;top:-12px;left:0;right:0;height:1px;margin:-12px 0 11px;background:var(--line)}
-.caption.long{font-size:clamp(14px,1.5cqi,16px);line-height:1.5}
+/* THE NARRATION IS THE WHOLE TEXT, LAID OVER THE FOOT OF THE PICTURE (jwize 2026-11-11: "the audio should have the full
+   text as an overlay instead that will be much easier to manage"; "sectioned out per sentence to be recorded one sentence
+   at a time"). Every sentence is its own section: the one being said is lit, a press on any of them plays from there, and
+   the button beside the voice puts the words away so the picture stands alone. The line a screen reader hears is kept,
+   unseen, in .caption. */
+.dock{width:100%;max-width:var(--measure);margin:0 auto;position:relative}
+.caption{position:absolute;width:1px;height:1px;margin:0;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .caption p{margin:0}
-.caption p.rise{animation:rise .5s var(--ease)}
+.says{position:absolute;z-index:3;left:0;right:0;bottom:100%;margin:0 0 8px;padding:8px;list-style:none;text-align:left;
+  max-height:min(40vh,21em);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;
+  background:color-mix(in srgb,var(--panel) 88%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+  border:1px solid var(--line);border-radius:var(--r-card);box-shadow:var(--shadow)}
+.says[hidden]{display:none}
+.says li{margin:0;padding:0}
+.say{display:block;width:100%;margin:0;padding:7px 10px;text-align:left;background:none;border:0;border-left:2px solid transparent;
+  border-radius:0;cursor:pointer;font:inherit;font-size:clamp(14px,1.6cqi,17px);line-height:1.5;color:var(--dim);text-wrap:pretty;
+  transition:color .15s,background .15s}
+.say:hover{color:var(--ink)}
+.say:focus-visible{outline:2px solid var(--honey);outline-offset:-2px}
+.say.done{color:var(--faint-text)}
+.say.now{color:var(--ink);border-left-color:var(--honey);background:var(--honey-tint)}
+.ib.words svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round}
+.ib.words[aria-pressed="true"]{color:var(--honey)}
 @keyframes rise{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 .transport{display:flex;align-items:center;gap:6px;margin:10px 0 0}
 .ib{width:34px;height:34px;display:inline-grid;place-items:center;background:none;border:1px solid transparent;border-radius:var(--r-ctl);
@@ -333,8 +347,11 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 
 /* THE TREE IS HIDDEN behind the menu button, at every width. Opened, it takes
    its own column and the stage moves over: it never covers the content
-   (jwize 2026-11-10: "the menu opens up over the content"). A phone has no
-   room for a second column, so there it is a drawer. */
+   (jwize 2026-11-10: "the menu opens up over the content"; 2026-11-11: "on
+   desktop just make sure it doesn't overlap content"). A phone has no room for
+   a second column, so there the tree is the whole screen (jwize 2026-11-11:
+   "on mobile when you bring up the tree menu it is full screen"), and the menu
+   button stays in its corner to put it away. */
 .tree{display:none}
 .page.menu-open{grid-template-columns:230px minmax(0,1fr);column-gap:22px}
 .page.menu-open .tree{display:flex}
@@ -344,9 +361,27 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
   .page{padding:12px 12px 0}
   .page.menu-open{grid-template-columns:minmax(0,1fr);column-gap:0}
   .page.menu-open .stage{grid-column:1}
-  .page.menu-open .tree{position:absolute;z-index:6;top:0;bottom:0;left:0;width:min(290px,84%);padding:48px 14px 16px 14px;
-    background:var(--panel);border-right:1px solid var(--line-strong);box-shadow:var(--shadow)}
-  .page.menu-open .top .menu-btn{position:relative;z-index:7}
+  .page.menu-open .tree{position:fixed;z-index:6;inset:0;bottom:var(--hc-site-chrome-bottom,0px);width:auto;padding:52px 14px calc(16px + env(safe-area-inset-bottom,0px));
+    background:var(--panel);border-right:0}
+  .page.menu-open .top .menu-btn{position:fixed;z-index:7;top:12px;left:12px}
+  /* THE TABS ARE PART OF THE MENU on a phone (jwize 2026-11-11: "the tabs are only shown as part of the menu on mobile"):
+     nothing stands above the picture but the crumbs; the menu carries the tabs under the tile list. */
+  .stage>.row{display:none}
+  /* THE DRILLDOWN FIRST, THEN THIS LAYER'S VIDEOS, A FULL ROW EACH (jwize 2026-11-11: "put the list drilldown above and
+     make each item a full row below for the current layer videos"). */
+  .page.menu-open .tree{overflow-y:auto}
+  .tree [data-rail]{flex:0 0 auto}
+  .tree .hc-rail-list{flex:0 0 auto;overflow:visible}
+  .tree>.row{flex:none;display:flex;flex-direction:column;flex-wrap:nowrap;align-items:stretch;justify-content:flex-start;gap:6px;
+    margin:12px 0 0;padding:12px 0 0;border-top:1px solid var(--line);border-bottom:0}
+  .tree>.row .lbl{align-self:flex-start}
+  .tree>.row .sibs{flex-direction:column;flex-wrap:nowrap;align-items:stretch;gap:6px}
+  .tree>.row .sib,.tree>.row a.more{display:flex;align-items:center;justify-content:flex-start;width:100%;min-height:44px;box-sizing:border-box}
+  .tree>.row .more-wrap{display:flex;align-items:stretch}
+  .tree>.row .more-wrap small{max-width:none}
+  /* a finger's row: the name walks in, the arrow opens the page */
+  .page.menu-open .tree .hc-rail-row{min-height:44px}
+  .page.menu-open .tree .hc-rail-walk{min-width:44px;min-height:44px}
 }
 
 @container (max-width:700px){
@@ -357,7 +392,7 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
   .hexb{width:clamp(76px,24cqi,104px)}
   .hexb .t{font-size:11px}
   .count{display:none}
-  .caption{max-height:36vh}
+  .says{max-height:38vh}
 }
 @media (prefers-reduced-motion:reduce){
   .scene>*,.caption p.rise,.plate.beats [data-id],.fz.lights [data-id],.fz.duo .pane,.flow,.tick::after{transition:none!important;animation:none!important;transform:none!important}
@@ -397,6 +432,8 @@ const SCRIPT = `
     }
     const trail = [[]]
     for (let i = 1; i <= here.length; i++) trail.push(here.slice(0, i))
+    // A tile that holds nothing opens the list on the level it stands in, never on an empty one.
+    if (trail.length > 1 && !kidsAt(here).length) trail.pop()
     let query = ''
     host.textContent = ''
     const head = el('div', 'hc-rail-head')
@@ -479,6 +516,7 @@ const SCRIPT = `
   const voiceBtn = el.querySelector('.voice')
   const cap = el.querySelector('.caption')
   let line = cap.querySelector('p')
+  const saysBox = el.querySelector('.says'), says = [...el.querySelectorAll('.say')], wordsBtn = el.querySelector('.words')
   const voiced = steps.some(s => s.voice)
   const videos = [...el.querySelectorAll('video')]
   let at = -1, playing = false, timer = null, audio = null, voiceOn = true, started = false
@@ -504,14 +542,52 @@ const SCRIPT = `
     }
   }
   // THE TREE opens beside the stage from the menu button and stays until the button is pressed again.
-  // On a phone it is a drawer: choosing a video, or a press beside it, closes it.
+  // On a phone it is the whole screen, and the row's two presses change places (jwize 2026-11-11: "when you click the
+  // arrow icon on the row you go to the presentation at the link, if you click the tree you nav in or arrow back out as
+  // usual"): the name walks inside a tile that holds others, the arrow opens that tile's page. A tile that holds nothing
+  // has no arrow, so its name opens it. Opening a page puts the tree away.
   const menuBtn = page.querySelector('.menu-btn'), treeNav = page.querySelector('.tree')
   if (menuBtn && treeNav) {
-    const drawer = (open) => { page.classList.toggle('menu-open', open); menuBtn.setAttribute('aria-expanded', String(open)) }
-    menuBtn.onclick = () => drawer(!page.classList.contains('menu-open'))
     const phone = () => window.matchMedia('(max-width:760px)').matches
+    // On a phone the sibling tabs stand in the menu, under the tile list, a full row each; wider, they stand above the picture.
+    const tabs = page.querySelector('.stage>.row, .tree>.row'), stage = page.querySelector('.stage'), sceneEl = page.querySelector('.scene')
+    const seatTabs = () => {
+      if (!tabs || !stage) return
+      if (phone()) { if (tabs.parentNode !== treeNav) treeNav.append(tabs) }
+      else if (tabs.parentNode !== stage) stage.insertBefore(tabs, sceneEl)
+    }
+    seatTabs()
+    const drawer = (open) => { seatTabs(); page.classList.toggle('menu-open', open); menuBtn.setAttribute('aria-expanded', String(open)) }
+    menuBtn.onclick = () => drawer(!page.classList.contains('menu-open'))
+    let passing = false
+    const pass = (node) => { passing = true; try { node.click() } finally { passing = false } }
+    treeNav.addEventListener('click', (e) => {
+      if (passing || !phone() || !e.target.closest) return
+      const row = e.target.closest('.hc-rail-row')
+      const walk = row && row.querySelector('.hc-rail-walk'), main = row && row.querySelector('.hc-rail-main')
+      if (!walk || !main) return
+      const onWalk = !!e.target.closest('.hc-rail-walk')
+      if (!onWalk && !e.target.closest('.hc-rail-main')) return
+      e.preventDefault(); e.stopPropagation()
+      if (onWalk) { pass(main); drawer(false) } else pass(walk)
+    }, true)
+    // The words each press carries say what it does on this screen.
+    const relabel = () => {
+      const swap = phone()
+      for (const row of treeNav.querySelectorAll('.hc-rail-row')) {
+        const walk = row.querySelector('.hc-rail-walk'), main = row.querySelector('.hc-rail-main'), name = row.querySelector('.hc-rail-name')
+        if (!walk || !main || !name) continue
+        const inside = 'Go inside ' + name.textContent, open = 'Open ' + name.textContent
+        const say = (node, words) => { if (node.title !== words) node.title = words; if (node.getAttribute('aria-label') !== words) node.setAttribute('aria-label', words) }
+        say(walk, swap ? open : inside)
+        if (swap) say(main, inside); else { if (main.title !== open) main.title = open; main.removeAttribute('aria-label') }
+      }
+    }
+    const watchRows = new MutationObserver(() => { if (gone()) { watchRows.disconnect(); return } relabel() })
+    watchRows.observe(treeNav, { childList: true, subtree: true })
+    const wide = window.matchMedia('(max-width:760px)')
+    if (wide.addEventListener) wide.addEventListener('change', () => { if (!gone()) { seatTabs(); relabel() } })
     treeNav.addEventListener('click', (e) => { if (phone() && e.target.closest && e.target.closest('a')) drawer(false) })
-    page.addEventListener('click', (e) => { if (phone() && page.classList.contains('menu-open') && !(e.target.closest && e.target.closest('.tree,.menu-btn'))) drawer(false) })
   } else if (menuBtn) menuBtn.hidden = true
   // THE TILE LIST. Inside the hive (and on the published site) the hive's own list is
   // mounted here, the one the AI chat shows, and a press on a tile opens that tile's page.
@@ -631,8 +707,9 @@ const SCRIPT = `
     for (const n of el.querySelectorAll('.plate.beats [data-id], .fz.lights [data-id]')) n.classList.toggle('lit', lit.has('*') || lit.has(n.dataset.id))
     if (fz.classList.contains('duo')) { fz.classList.toggle('aside', !!s.beside); fz.classList.toggle('main', !s.beside && steps.some(x => x.beside)) }
     const p = document.createElement('p'); p.textContent = s.say; if (!still) p.className = 'rise'; line.replaceWith(p); line = p
-    cap.classList.toggle('long', s.say.split(/\\s+/).length > 70); cap.scrollTop = 0
-    requestAnimationFrame(() => cap.classList.toggle('more', cap.scrollHeight - cap.clientHeight > 4))
+    says.forEach((b, k) => { b.classList.toggle('done', k < at); b.classList.toggle('now', k === at); if (k === at) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current') })
+    // the sentence being said stays in the middle of the words
+    if (saysBox && !saysBox.hidden && says[at]) saysBox.scrollTop = says[at].offsetTop - (saysBox.clientHeight - says[at].offsetHeight) / 2
     ticks.forEach((t, k) => { t.classList.toggle('done', k < at); t.classList.toggle('now', k === at); if (k === at) t.setAttribute('aria-current', 'step'); else t.removeAttribute('aria-current') })
     if (count) count.textContent = String(at + 1).padStart(2, '0') + ' / ' + String(steps.length).padStart(2, '0')
     try { sessionStorage.setItem(KEY, String(at)) } catch {}
@@ -694,9 +771,22 @@ const SCRIPT = `
   if (back) back.onclick = () => go(at - 1)
   if (fwd) fwd.onclick = () => go(at + 1)
   ticks.forEach((t, k) => { t.onclick = () => go(k) })
+  says.forEach((b, k) => { b.onclick = () => go(k) })
+  // THE WORDS ARE OVER THE PICTURE until this button puts them away; the choice is kept for the visit.
+  if (wordsBtn && saysBox) {
+    const WORDS = 'hc-scene-words'
+    const setWords = (on) => {
+      saysBox.hidden = !on
+      wordsBtn.setAttribute('aria-pressed', String(on)); wordsBtn.setAttribute('aria-label', on ? 'Hide the words' : 'Show the words')
+      if (on && says[at]) saysBox.scrollTop = says[at].offsetTop - (saysBox.clientHeight - says[at].offsetHeight) / 2
+    }
+    let kept = null
+    try { kept = sessionStorage.getItem(WORDS) } catch {}
+    setWords(kept !== 'off')
+    wordsBtn.onclick = () => { const on = saysBox.hidden; setWords(on); try { sessionStorage.setItem(WORDS, on ? 'on' : 'off') } catch {} }
+  }
   if (voiceBtn) voiceBtn.onclick = () => { voiceOn = !voiceOn; voiceBtn.setAttribute('aria-pressed', String(voiceOn)); voiceBtn.setAttribute('aria-label', voiceOn ? 'Mute the voice' : 'Unmute the voice'); if (playing) speak() }
   // typing in a part to try holds the scene where it is
-  cap.addEventListener('scroll', () => cap.classList.toggle('more', cap.scrollHeight - cap.scrollTop - cap.clientHeight > 4), { passive: true })
   el.addEventListener('focusin', (e) => { if (e.target instanceof HTMLInputElement && playing) play(false) })
   show(returning ? resumeAt : 0)
   el.classList.add('in')
@@ -782,13 +872,15 @@ const sceneHtml = (sc) => {
     <div class="dock">${sc.link ? `
       <a class="cta" href="${esc(sc.link.href)}" target="_blank" rel="noopener">${esc(sc.link.label)}${icon('external')}</a>` : ''}
       <div class="caption" aria-live="polite"><p></p></div>
+      <ol class="says" aria-label="The words of this scene, a sentence at a time">${sc.steps.map(s => `<li><button type="button" class="say">${esc(s.say)}</button></li>`).join('')}</ol>
       <nav class="transport" aria-label="Play">
         <button type="button" class="ib pp${voiced ? ' lead' : ''}" aria-label="Play">${icon('play', 'i-play')}${icon('pause', 'i-pause')}<span class="lead-text">Listen${sc.minutes ? ` · ${esc(sc.minutes)}` : ''}</span></button>${sc.steps.length > 1 ? `
         <button type="button" class="ib" data-act="back" aria-label="Back">${icon('left')}</button>
         <button type="button" class="ib" data-act="next" aria-label="Next">${icon('right')}</button>
         <span class="ticks">${sc.steps.map((s, k) => `<button type="button" class="tick" aria-label="${esc(`${k + 1}: ${s.say.slice(0, 60)}`)}"></button>`).join('')}</span>
         <span class="count">01 / ${String(sc.steps.length).padStart(2, '0')}</span>` : `
-        <span class="ticks" aria-hidden="true"></span>`}${voiced ? `
+        <span class="ticks" aria-hidden="true"></span>`}
+        <button type="button" class="ib words" aria-pressed="true" aria-label="Hide the words"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h7"/></svg></button>${voiced ? `
         <button type="button" class="ib voice" aria-pressed="true" aria-label="Mute the voice">${icon('speaker', 'i-speaker')}${icon('muted', 'i-muted')}</button>` : ''}
       </nav>
     </div>

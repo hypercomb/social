@@ -694,6 +694,7 @@ class HostPanelElement extends HTMLElement {
         self: this.#self || location.host,
         title: door.title,
         tagline: door.tagline,
+        presentation: door.presentation,
         swarm: door.swarm,
         sources: zones,
         ledger: this.#ledger,
