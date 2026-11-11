@@ -3702,6 +3702,7 @@ export class HostDirectoryElement extends HTMLElement {
         this.#error = t('hosts.not-held', 'what runs here could not be read back, so nothing changed')
         return
       } else if (await this.#live()) {
+        EffectBus.emit('packages:changed', { off: [...install.offUnits()] })
         EffectBus.emit('activity:log', { message: row.on
           ? t('packages.turned-off', '{name} is off', { name: row.path })
           : t('packages.turned-on', '{name} is on', { name: row.path }) })

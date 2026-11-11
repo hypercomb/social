@@ -426,6 +426,12 @@ row).
   is offered for it, and its switch stays greyed with the reason. The shell's
   source catalog names the folders (`sourcePackagePaths`); a package the source
   does not carry is still not here.
+- **A launcher goes with its package.** The rail's launchers are shell chrome, so
+  a package turned off used to leave its button behind (jwize, 2026-11-11: "I
+  removed comfy refreshed and still it was showing"). A launcher that names a
+  word is hidden while the off list names a package of that name
+  (`packageIsOff`), only on that positive evidence, and never on a shell that
+  runs from source. A live switch says `packages:changed` so the rail repaints.
 - **The list you are in goes first.** Opening the window paints what runs here
   before any host is asked, and holds the preloader's foreground
   (`ScriptPreloader.foreground`) until the followed publisher's list has

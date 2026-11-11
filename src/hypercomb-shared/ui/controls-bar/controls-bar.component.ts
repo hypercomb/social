@@ -27,6 +27,7 @@ import type { RecentPortal, RecentPortalsStore } from '../../core/recent-portals
 import { clearLaneWithUndo } from '../docked-panel/dock-lanes'
 import { isWindowShowing } from '../window-session'
 import { ENABLEMENT_CHANGED, isWordSwitchedOff } from '../features-viewer/behavior-enablement'
+import { packageIsOff } from './package-off'
 import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
 import type { InstallMonitor } from '@hypercomb/runtime/install-monitor'
@@ -562,6 +563,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Bumped on every Beehaviors flip, so a word's launcher leaves with its light. */
   readonly #lights = signal(0)
   #lightsUnsub: (() => void) | null = null
+  #packagesUnsub: (() => void) | null = null
   #textOnly = signal(false)
   #imageOnly = signal(false)
   #layoutPinned = signal(false)
@@ -927,6 +929,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // off word has no desk to put on the rail.
     this.#lights()
     if (ctrl.word && isWordSwitchedOff(ctrl.word)) return false
+    // ...and with its PACKAGE: a launcher whose package is turned off in the
+    // hosts window has nothing behind it (jwize, 2026-11-11: "I removed comfy
+    // refreshed and still it was showing").
+    if (ctrl.word && packageIsOff(ctrl.word)) return false
     // Optional tool-window launchers are slash-first. They do not occupy the
     // normal rail until enabled from inside their window.
     if ((ctrl.id === 'sequences' || ctrl.id === 'publish')
@@ -1557,6 +1563,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#titleTickUnsub = EffectBus.on('title:indexed', () => this.#titleTick.update(n => n + 1))
     this.#localeTickUnsub = EffectBus.on('locale:changed', () => this.#titleTick.update(n => n + 1))
     this.#lightsUnsub = EffectBus.on(ENABLEMENT_CHANGED, () => this.#lights.update(n => n + 1))
+    this.#packagesUnsub = EffectBus.on('packages:changed', () => this.#lights.update(n => n + 1))
 
     // The location dialog's "start" confirmed (join mode) — flip to public
     // now that the where/secret are set. Idempotent: already public → no-op.
@@ -2196,6 +2203,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#phoneFaceUnsub?.()
     this.#mobileModeUnsub?.()
     this.#lightsUnsub?.()
+    this.#packagesUnsub?.()
     this.#landscapeQuery?.removeEventListener('change', this.#landscapeHandler)
     this.#headerObserver?.disconnect()
     this.#controlsObserver?.disconnect()
