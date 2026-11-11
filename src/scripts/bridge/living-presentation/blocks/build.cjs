@@ -89,7 +89,7 @@ const waysOf = (route, paged) => {
     return { name: c.name, note: c.note || '', route: r, page: paged.has(r.join('/')), current: r.join('/') === route.join('/') }
   }
   const children = (tile?.children || []).map(marked(route))
-  // THE ROW UNDER THE VIDEO STAYS PUT (jwize 2026-11-09: "the siblings show
+  // THE SIBLING ROW STAYS PUT (above the video since 2026-11-10; jwize 2026-11-09: "the siblings show
   // together at the bottom ... the first level, and when you click any of those
   // buttons the buttons stay"). On a page below the top it is the tiles beside
   // this one. On a TOP page it is that tile's own first level, so standing on
