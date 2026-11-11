@@ -132,7 +132,7 @@ What goes is the **door**: the `try-<change>.<zone>` page, its policy, the door 
 What is given up: trying a change without taking it. Trying is now taking, held until accepted.
 
 - **Step one, done:** the what-changed panel offers no link to a door, and its second step says Shared.
-- **Step two:** the panel and `module take` still read a change from the door's host (`readSandboxDoor`, `doorReader`). Read it from the root instead.
+- **Step two, done:** a shared change is read from the root domain. The zone's `sign('host:trials')` listing says what it is; `sign('assess:<root>')` is listed at the root (the index write names it in `sign('assess:pools')`, as attestations are) and each assessor's word is read from their own signed index and record; files come from `/<sig>` at the root; `module take` reads the root first. The door is asked only where the root does not answer. Assessments written before this host change are not in `assess:pools`, so the root lists them only once their assessor's index is written again; the door still lists them until then.
 - **Step three:** remove the door's page and everything that exists only for it. A host answers a door that is asked for until then.
 
 ## Audit a trial from your own hive (built 2026-09-23)

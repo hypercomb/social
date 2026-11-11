@@ -24,7 +24,7 @@
 //
 // A dependency: it registers nothing. The `module` queen drives it.
 
-import { broodRoster, sectionOf, SignatureService, isMetaEnvelope, isSandboxLabel, metaPayloadOf, mintMetaEnvelope } from '@hypercomb/core'
+import { broodRoster, sectionOf, SignatureService, isMetaEnvelope, isSandboxLabel, metaPayloadOf, mintMetaEnvelope, sandboxDoorOf } from '@hypercomb/core'
 import { diffLines, type DiffRow, type LineDiff } from './line-diff.js'
 import { JEV_READING_CHARS, JEV_READING_FILES, JEV_RUBRIC, type JevReadingFile, type JevReadingInput, type JevReadingResult, type JevReadingVerdict, type JevPassInput, type JevPassResult, type JevReadingRule, type JevTrialStanding, JEV_PASS_TRIALS } from './jev-decision.js'
 
@@ -333,6 +333,77 @@ export const isSandboxSite = (value: unknown): value is SandboxSite => {
 const exactBuffer = (bytes: Uint8Array): ArrayBuffer =>
   bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
 
+// ── a shared change is read from the root domain ──────────────────────────
+//
+// jwize, 2026-11-10: "the files should all be served from the root domain that
+// way we can share everything and the get protocol allows us to easily find."
+// The door is being retired (documentation/module-sandbox.md, "Retiring the
+// door"), so what a reader needs of a shared change is asked of the ZONE ROOT:
+// the zone's sign('host:trials') listing says what the change is, and
+// sign('assess:<root>') lists who assessed it. Each assessor's word is read
+// from their own signed index and their record by signature, so nothing the
+// host says about an assessment is taken on trust. The door is asked only
+// when the root does not answer — a host that has not been redeployed.
+
+const signText = (text: string): Promise<string> => SignatureService.sign(exactBuffer(new TextEncoder().encode(text)))
+
+/** The root a door hangs off, or null when `door` is not a try- door's origin. */
+export const rootOfDoor = (door: string): { readonly origin: string; readonly host: string; readonly name: string } | null => {
+  try {
+    const url = new URL(door)
+    const at = sandboxDoorOf(url.hostname)
+    if (!at) return null
+    const host = `${at.zone}${url.port ? `:${url.port}` : ''}`
+    return { origin: `${url.protocol}//${host}`, host, name: at.label }
+  } catch { return null }
+}
+
+/** The hosts a take reads a shared change from: the root first, then its door. */
+export const takeHostsOf = (door: string): string[] => {
+  const root = rootOfDoor(door)
+  return [...new Set([root?.host ?? '', new URL(door).host].filter(Boolean))]
+}
+
+/** An assessor's verified index, as far as a reading needs it. */
+export type AssessorIndex = (host: string, pubkey: string) => Promise<{ readonly roots: Readonly<Record<string, string>>; readonly createdAt: number } | null>
+
+const verifiedIndex: AssessorIndex = async (host, pubkey) => {
+  const read = await (await import('../sharing/hive-pointer.js')).fetchHiveIndex(host, pubkey)
+  return read.ok ? { roots: read.manifest.roots, createdAt: read.manifest.createdAt } : null
+}
+
+/** A shared change as the zone root lists it, or null when the root lists none by that name. */
+export const readSharedChange = async (door: string, index: AssessorIndex = verifiedIndex): Promise<SandboxSite | null> => {
+  const root = rootOfDoor(door)
+  if (!root) return null
+  try {
+    const listed = await fetch(`${root.origin}/${await signText('host:trials')}`, { cache: 'no-store' })
+    const trial = listed.ok ? trialsOf(await listed.json()).find(entry => entry.name === root.name) : undefined
+    if (!trial) return null
+    const read = doorReader(root.origin)
+    const pool = await fetch(`${root.origin}/${await signText(`assess:${trial.package}`)}/`, { cache: 'no-store' }).catch(() => null)
+    const keys = pool?.ok ? (await pool.text()).split(/\r?\n/).map(key => key.trim()).filter(key => SIG_RE.test(key)).slice(0, 50) : []
+    const assessments = (await Promise.all(keys.map(async pubkey => {
+      const signed = await index(root.host, pubkey).catch(() => null)
+      const record = String(signed?.roots[`assess:${trial.package}`] ?? '')
+      if (!signed || !SIG_RE.test(record)) return null
+      const body = await read(record)
+        .then(text => JSON.parse(text ?? 'null') as { kind?: unknown; root?: unknown; verdict?: unknown } | null)
+        .catch(() => null)
+      if (body?.kind !== 'module-assessment' || body.root !== trial.package) return null
+      return { pubkey, record, verdict: VERDICTS.includes(body.verdict as ReviewVerdict) ? body.verdict as ReviewVerdict : 'unclear' as ReviewVerdict, at: signed.createdAt }
+    }))).filter((entry): entry is NonNullable<typeof entry> => entry !== null).sort((a, b) => a.at - b.at)
+    return {
+      sandbox: true, title: trial.name, package: trial.package, pubkey: trial.pubkey,
+      ...(trial.publisher ? { publisher: trial.publisher } : {}),
+      ...(trial.change ? { change: trial.change } : {}),
+      ...(trial.review ? { review: trial.review, ...(trial.reviewVerdict ? { reviewVerdict: trial.reviewVerdict } : {}) } : {}),
+      ...(trial.jev ? { jev: trial.jev, ...(trial.jevVerdict ? { jevVerdict: trial.jevVerdict } : {}) } : {}),
+      assessments,
+    }
+  } catch { return null }
+}
+
 /**
  * WHAT A SANDBOX DOOR IS, read the one way there is (jwize 2026-09-25: only
  * signatures are queried; state lives in pools of meaning). The newest marker
@@ -341,10 +412,15 @@ const exactBuffer = (bytes: Uint8Array): ArrayBuffer =>
  * by signature; who assessed its root are the members of sign('assess:<root>').
  * `door` is the door's origin, '' for the door this hive is on. Null when no
  * sandbox answers.
+ *
+ * Asked from anywhere but the door itself, the ROOT is read first
+ * (readSharedChange); the door answers only where the root does not.
  */
 export const readSandboxDoor = async (door: string): Promise<SandboxSite | null> => {
+  const shared = door ? await readSharedChange(door) : null
+  if (shared) return shared
   const base = door.replace(/\/+$/, '')
-  const sign = (text: string): Promise<string> => SignatureService.sign(exactBuffer(new TextEncoder().encode(text)))
+  const sign = signText
   const names = async (path: string): Promise<string[]> => {
     const res = await fetch(`${base}${path}`, { cache: 'no-store' })
     return res.ok ? (await res.text()).split(/\r?\n/).map(name => name.trim()).filter(Boolean) : []
@@ -537,12 +613,19 @@ export const readTrial = async (site: SandboxSite, read: (sig: string) => Promis
   }
 }
 
-/** Reads a signature from a trial's door, believing only bytes that hash to it. */
-export const doorReader = (door: string) => async (sig: string): Promise<string | null> => {
-  const res = await fetch(`${door.replace(/\/+$/, '')}/${sig}`, { cache: 'force-cache' }).catch(() => null)
-  if (!res?.ok) return null
-  const bytes = await res.arrayBuffer()
-  return (await SignatureService.sign(bytes)) === sig ? new TextDecoder().decode(bytes) : null
+/** Reads a signature for a shared change, believing only bytes that hash to
+ *  it: from the root domain first, then from the trial's door. */
+export const doorReader = (door: string) => {
+  const from = [...new Set([rootOfDoor(door)?.origin ?? '', door.replace(/\/+$/, '')].filter(Boolean))]
+  return async (sig: string): Promise<string | null> => {
+    for (const base of from) {
+      const res = await fetch(`${base}/${sig}`, { cache: 'force-cache' }).catch(() => null)
+      if (!res?.ok) continue
+      const bytes = await res.arrayBuffer()
+      if ((await SignatureService.sign(bytes)) === sig) return new TextDecoder().decode(bytes)
+    }
+    return null
+  }
 }
 
 // ── your own build: take one community change at one path ─────────────────

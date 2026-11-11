@@ -1925,6 +1925,16 @@ test('writing an index that names assess:<root> lists its signer as an assessor 
   // A member of the root's pool, named by the assessor's key — never a KV list.
   assert(CONTENT.held.has(`${await sha256Hex(`assess:${root}`)}/${assessor}`))
   assert.equal(HIVES.values.get(`assessors:${root}`), undefined)
+  // A SHARED CHANGE IS READ FROM THE ROOT, NOT FROM A DOOR: the pool is named
+  // among the assessment pools, so its own address lists its assessors there.
+  const pool = await sha256Hex(`assess:${root}`)
+  assert(CONTENT.held.has(`${await sha256Hex('assess:pools')}/${pool}`))
+  const listing = await worker.fetch(new Request(`https://content.hypercomb.com/${pool}/`), env)
+  assert.equal(listing.status, 200)
+  assert.equal(await listing.text(), `${assessor}
+`)
+  const stranger = await worker.fetch(new Request(`https://content.hypercomb.com/${await sha256Hex('assess:' + 'b'.repeat(64))}/`), env)
+  assert.equal(stranger.status, 404)
 })
 
 test('writing an index that names attest:<record> lists its signer in that derivation\'s attestation pool, at its own address', async () => {

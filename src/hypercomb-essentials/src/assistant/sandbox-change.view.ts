@@ -33,7 +33,7 @@
 
 import { EffectBus, I18N_IOC_KEY, isSandboxDoor, type I18nProvider, registerPoolMeaning } from '@hypercomb/core'
 import type { DiffRow } from './line-diff.js'
-import { countedAssessors, doorReader, readSandboxDoor, readTrial, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, type SandboxSite, type SandboxTrial, type TakeDeps, type TrialReading } from './module-review.js'
+import { countedAssessors, doorReader, readSandboxDoor, readTrial, takeDepsFrom, takeHostsOf, takeTrial, tallyAssessments, trialsOf, type SandboxSite, type SandboxTrial, type TakeDeps, type TrialReading } from './module-review.js'
 
 export const SANDBOX_CHANGE_SURFACE = 'hc-sandbox-change'
 export const SANDBOX_CHANGE_OWNER = '@diamondcoreprocessor.com/SandboxChangeView'
@@ -175,7 +175,7 @@ export class SandboxChangeElement extends HTMLElement {
     }
     this.#taking.set(path, { text: t('module.panel.taking', 'taking…'), held: false })
     this.#render()
-    const outcome = await takeTrial(shown.site.package, [path], [new URL(shown.door).host], deps)
+    const outcome = await takeTrial(shown.site.package, [path], takeHostsOf(shown.door), deps)
     const refused = outcome.refused[0]
     this.#taking.set(path, refused
       ? { text: t('module.panel.nottaken', 'not taken: {reason}', { reason: refused.error }), held: false }

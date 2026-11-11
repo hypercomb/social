@@ -110,7 +110,8 @@ describe('the what-changed panel', () => {
     expect(take.textContent).toBe('take')
     take.click()
     await vi.waitFor(() => expect(element.querySelector('.hc-trial-taken')?.textContent).toBe('taken — it waits in the brood until you accept it'))
-    expect(picked).toEqual(['p|eeee|try-zoom.hypercomb.com|true'])
+    // Read from the root domain first; the door is only a fallback.
+    expect(picked).toEqual(['p|eeee|hypercomb.com,try-zoom.hypercomb.com|true'])
     let opened = false
     const off = EffectBus.on<{ at?: number }>('brood:open', payload => { if (Date.now() - (payload?.at ?? 0) < 1_000) opened = true })
     element.querySelector<HTMLButtonElement>('.hc-trial-take')!.click()
