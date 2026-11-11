@@ -2399,6 +2399,51 @@ test('the AI meter keeps one row per key, in the host:ai-meters pool', async () 
   } finally { globalThis.fetch = original }
 })
 
+// ── a door's chat asks the door's own host ────────────────────────────────
+// A door holds no key and signs nothing, so its one write is an unsigned ask
+// at itself: paid by the publisher who opened it, under the door's own ceiling.
+test('a door asks its own host unsigned: its publisher pays, the door has a ceiling, and nothing else opens', async () => {
+  const METERS = await sha256Hex('host:ai-meters')
+  const door = 'try-fresh-rooms.hypercomb.com'
+  const content = textHeap()
+  const env = { ...(await sandboxEnv({ 'install:try-fresh-rooms': 'b'.repeat(64) })), ANTHROPIC_API_KEY: 'test', CONTENT: content, GRANTS: kvMap() }
+  const ask = (host, origin, extra = env, path = '/ai/ask') => worker.fetch(new Request(`https://${host}${path}`, {
+    method: 'POST', headers: { 'content-type': 'application/json', ...(origin ? { origin } : {}) },
+    body: JSON.stringify({ question: 'what does this trial change?', stream: false }),
+  }), extra)
+  const upstream = []
+  const original = globalThis.fetch
+  globalThis.fetch = async (target) => { upstream.push(String(target)); return new Response(JSON.stringify({ content: [{ type: 'text', text: 'rooms' }] }), { headers: { 'content-type': 'application/json' } }) }
+  try {
+    const answered = await ask(door, `https://${door}`)
+    assert.equal(answered.status, 200)
+    assert.deepEqual(upstream, ['https://api.anthropic.com/v1/messages'])
+    // Both meters moved: the publisher's own, and the door's.
+    const doorRow = JSON.parse(content.objects.get(`${METERS}/${await sha256Hex(`ai-door:${door}`)}`))
+    assert.ok(doorRow.used > 0)
+    assert.equal(JSON.parse(content.objects.get(`${METERS}/${pubkey}`)).used, doorRow.used)
+
+    // Every other write from that door is still refused, and so is an ask
+    // made from another door, from an opaque origin, or of another host.
+    assert.equal((await ask(door, `https://${door}`, env, '/upload')).status, 403)
+    assert.equal(await (await ask(door, 'https://try-other.hypercomb.com')).text(), REFUSED)
+    assert.equal(await (await ask(door, 'null')).text(), REFUSED)
+    assert.equal(await (await ask('hypercomb.com', `https://${door}`)).text(), REFUSED)
+    // A door nobody opened answers nothing.
+    assert.equal((await ask('try-never-opened.hypercomb.com', 'https://try-never-opened.hypercomb.com')).status, 404)
+    assert.equal(upstream.length, 1)
+
+    // The door's ceiling holds whatever its publisher has left.
+    const spent = await ask(door, `https://${door}`, { ...env, AI_DOOR_DAILY_TOKENS: '10' })
+    assert.equal(spent.status, 429)
+    assert.match(await spent.text(), /this door has used its AI allowance/)
+    // A publisher the host's AI does not answer opens no door to it.
+    const closed = await ask(door, `https://${door}`, { ...env, AI_WRITERS: assessor })
+    assert.equal(closed.status, 429)
+    assert.equal(upstream.length, 1)
+  } finally { globalThis.fetch = original }
+})
+
 // ── the landing pack ──────────────────────────────────────────────────────
 // A door serves its head's first view as ONE transfer pack at
 // /<sign('content:packs')>/<head>: small members a short walk below the head,
