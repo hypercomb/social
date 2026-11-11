@@ -28,6 +28,7 @@
 
 import { QueenBee, EffectBus, isReservedPoolWord } from '@hypercomb/core'
 import { savedRoots } from '../history/saved-roots.js'
+import { CREATE_CELLS_IOC_KEY, answerCreateRequest, createCellsService, type CreateCellsAsk } from './create-cells.js'
 
 const BACKSLASH = String.fromCharCode(92)
 
@@ -105,6 +106,12 @@ export class CreateQueenBee extends QueenBee {
     await completed
   }
 }
+
+// THE BEE WIRES (create-cells.ts exports, this registers): the commit as the
+// service the command line calls, and the answer to `command:create-cells`
+// on a page where no command line is mounted.
+window.ioc.register(CREATE_CELLS_IOC_KEY, createCellsService)
+EffectBus.on<CreateCellsAsk>('command:create-cells', answerCreateRequest)
 
 const _create = new CreateQueenBee()
 window.ioc.register('@diamondcoreprocessor.com/CreateQueenBee', _create)

@@ -1,27 +1,7 @@
-import { normalizeCell } from '@hypercomb/core'
+// hypercomb-shared/core/completion-utility.ts
+//
+// MOVED to the runtime package (hypercomb-runtime/src/completion-utility.ts) on 2026-11-11 so the
+// framework-free host has it too. This file is the door the shell and its
+// specs still knock on.
 
-export type CompletionStyle = 'space' | 'dot'
-export type CompletionMode = 'action' | 'marker' | 'filter' | 'slash' | 'delete' | 'remove' | 'select' | 'tag' | 'feature' | 'behaviour-args' | 'find'
-
-export type CompletionContext =
-  | { active: false }
-  | {
-    active: true
-    mode: CompletionMode
-    head: string
-    raw: string
-    normalized: string
-    style: CompletionStyle
-  }
-
-export class CompletionUtility {
-
-  public readonly normalize = (s: string): string => normalizeCell(s)
-
-
-  public readonly render = (s: string, style: CompletionStyle): string =>
-    style === 'dot' ? s.replace(/\s+/g, '.') : s
-
-}
-
-register('@hypercomb.social/CompletionUtility', new CompletionUtility())
+export * from '@hypercomb/runtime/completion-utility'

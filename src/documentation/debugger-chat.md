@@ -6,6 +6,25 @@ jwize, 2026-11-11: "we single click an editing tile to debug basically, It opens
 
 The same day: "anything built in the debugger (subdomains) should not load angular. This will be our process to phase out angular." And: "I would love to see what it is like to do work on the new chat in a subdomain. We can then debug and create revisions on the fly and compare them just like cross domains. We should spec this out to be done minimal and cleanly."
 
+## Revised the same day: one subdomain, and the key decides
+
+jwize, 2026-11-11, on seeing `try-` in the name: "I thought try has been deprecated." Then: "just the subdomain name. If you have the key you get a different experience. If you don't you just have the host and the community. You can follow and add stuff and use it but you can't publish publicly. The private key allows you to adopt and then setup your ai and develop as well."
+
+This replaces three things below. Where the text that follows still says `try-`, a pinned signer, the host's AI, or handing a revision to the opener, read this section instead; those parts are kept as the record of what was run, and are to be rewritten once the open question at the end of this section is answered.
+
+- **The name.** There is no prefix. A tile's subdomain is `<name>.<zone>`. `try-` stays retired; records already signed under `try-` keys keep reading.
+- **One page, two experiences.** Everyone gets the same page, with no Angular.
+  - *Without the key:* the host and the community. You can follow, add things and use them. You cannot publish publicly.
+  - *With the private key:* you can also adopt, set up your AI, and develop.
+- **What that overturns.** The signer is not pinned off for a key holder: publishing from the subdomain is the point. The AI is your own, set up there, not the host's. A revision is published from the subdomain with the key, not handed back to another window.
+- **What it keeps.** The page is the shim. The chat element, its round loop, the create commit as a module, and the order of the remaining steps (read, write a revision, revisions and compare, the Debug button) all stand.
+
+**The key is the one you already publish with.** jwize, asked what "having the key" means on the page: "basically the same key as when you publish from your devices." The shim already answers that question, and nothing new is needed to ask it: a browser that accepted its owner's invite has its own key on the owner's list (`device-invite.ts`, `device-key.ts`, `device-binding.ts`), and a hive open beside the page answers as the owner too (`owner-bridge.ts`). The host card takes either (`eitherOwner` in `host-panel.ts`) and that is what turns its **Manage** side on ("This browser publishes for you now"). So the two experiences are the host card's two states, which exist: no owner, the host and the community; an owner, Manage. Adopting, setting up the AI and developing belong on the Manage side.
+
+What is not yet said, and decides how this is built:
+
+- **What a stranger sees at a name that is a published website.** Today `<name>.<zone>` with a published site answers the read-only website. "The host and the community" may replace that or sit beside it.
+
 This page is that spec. It adds no new mechanism where one exists: the subdomain is the mission door of [build-debug-isolation.md](build-debug-isolation.md), a revision is a signature ([build-revisions.md](build-revisions.md)), and a change comes home through the brood ([module-sandbox.md](module-sandbox.md)).
 
 ## The loop
@@ -52,7 +71,7 @@ Each step is one small change and ends in something a person can see. A step is 
 
 **Step 1 — see it (done 2026-11-11).** The shim built from this branch, served at `try-chat.localhost:4275`, the chat opened by hand. What it showed is the next section. One thing it did not cover: the page was served by the shim's own reference host, not through the worker, so the worker's choice of page for a `try-` name is still proven only by its specs.
 
-**Step 1b — a behaviour runs without the command line.** The run's main finding. `create` hands the tile to `command:create-cells`, and the only listener is the Angular command line, so on a debugger page creating a tile is refused. The commit a create performs moves into a module, and the command line becomes one caller of it. The same check is made for every behaviour a model may say: each either runs on the shim or says plainly that it cannot. *Done when:* the chat makes a tile on the subdomain, and a list names the granted behaviours that still need the shell.
+**Step 1b — a behaviour runs without the command line.** The run's main finding. `create` hands the tile to `command:create-cells`, and the only listener is the Angular command line, so on a debugger page creating a tile is refused. The commit a create performs moves into a module, and the command line becomes one caller of it. The same check is made for every behaviour a model may say: each either runs on the shim or says plainly that it cannot. *Done when:* the chat makes a tile on the subdomain and the tile is on the page, and a list names the granted behaviours that still need the shell. *State:* done for `create` (third run, below). The list of other behaviours is not made.
 
 **Step 2 — the chat is offered and answers.** On a debugger subdomain the host card lists the chat as a suggested tool. One press lights `word:chat` and opens `hc-chat`. Who answers is decision 1. *Done when:* a fresh subdomain, with nothing set up, answers a question after one press.
 
@@ -84,6 +103,32 @@ Three things the run changes:
 - **Nobody can grant anything there.** `grant allow <word>` is typed on the command line, and the debugger page has none. The grant in the run was said through the behaviour door by hand. The chat needs a way to ask for a grant and take a press as the answer, or the command line must exist as an element.
 - **A behaviour is not Angular-free just because it is a module.** Step 1b.
 - **The model's stand-in was the only thing faked.** Everything else ran as built: the census, the grant, the parser, the queue, the behaviour door.
+
+### The second run, the same day — after step 1b's first half
+
+The create commit moved out of the Angular command line into a module (essentials `commands/create-cells.ts`); the command line now calls it, and where no command line is mounted the create word's own bee answers the request. Rebuilt, replicated as a new revision (the host card showed "Loaded here" beside the newer one, then moved to it), and asked again.
+
+| What was tried | What happened |
+|---|---|
+| The same stand-in reply, `/create roadmap` | It ran. The chat showed "Ran: /create roadmap" and the hive told the model so. |
+| Is the tile there? | `/roadmap` reads back as a tile with its own layer signature, and still does after a reload. |
+| Is it on the page? | No. The root page reads "not found", so nothing lists the tile and no hexagon is drawn. |
+
+So a behaviour could make a tile's own record on a debugger page, and nothing listed it.
+
+### The third run — why, and the fix
+
+The guess above (a missing first-run flow) was wrong. The cause was simpler and wider: **the shim had no lineage and no navigation service.** Both lived in `hypercomb-shared/core`, which the shim never loads, so the page had no "where you stand". The layer committer returns without writing when it finds no lineage, and says nothing, so `/create` committed nothing and reported that it ran. The `/roadmap` record seen in the second run was only the empty seed a read mints.
+
+- `lineage.ts`, `navigation.ts` and the two helpers they need (`completion-utility.ts`, `home-root.ts`) moved to `hypercomb-runtime/src`; the shell files re-export them; the shim imports them at boot. None of the four imports Angular.
+- The create commit now refuses, for a caller that must not report a tile nothing committed, when the page has no lineage ("this page does not know where it stands").
+
+| What was tried | What happened |
+|---|---|
+| The same stand-in reply, `/create atlas` | It ran. |
+| Is it on the page? | Yes. The root page lists `atlas`, and its hexagon is drawn beside the chat. |
+
+Step 1b's first half is done: a behaviour makes a tile on the Angular-free page and the tile is there. Its second half, the list of granted behaviours that still need the shell, is not done.
 
 ## Not in this spec
 

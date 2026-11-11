@@ -84,6 +84,13 @@ import '@hypercomb/runtime/script-preloader'
 // while still shipping 2.9 MB of catalogs for the service that never existed.
 // Third self-registering module to be missing here; the pattern is the bug.
 import '@hypercomb/runtime/i18n.service'
+// WHERE YOU STAND. Lineage and navigation were shell services until
+// 2026-11-11, so this host had neither: the layer committer found no lineage
+// and returned without writing, and a tile a behaviour "made" here was never
+// on any page. They are framework-free and live in the runtime package now.
+// Navigation first: lineage reads the address through it.
+import '@hypercomb/runtime/navigation'
+import '@hypercomb/runtime/lineage'
 import { PACKED_STORE_MEANING } from '@hypercomb/runtime/packed-store-engine'
 import { packedStoreBlocksBoot } from '@hypercomb/runtime/packed-store-gate'
 import { initializeRuntime } from '@hypercomb/runtime/runtime-initializer'
