@@ -613,8 +613,8 @@ describe('a behaviour that could not act, at the keyboard', () => {
     expect(slash).toContain('await drone.execute(commandName, args)')
     expect(slash).toContain('this.#behaviourDidNotRun(commandName, error)')
     // The line goes when the command starts, and comes back when it fails.
-    expect(slash.indexOf('this.#beginRun(true)')).toBeGreaterThan(-1)
-    expect(slash.indexOf('this.#beginRun(true)')).toBeLessThan(slash.indexOf('await drone.execute(commandName, args)'))
+    expect(slash.indexOf('this.#beginRun(true, commandName)')).toBeGreaterThan(-1)
+    expect(slash.indexOf('this.#beginRun(true, commandName)')).toBeLessThan(slash.indexOf('await drone.execute(commandName, args)'))
     expect(slash).toContain('this.#restoreLine(typed)')
     const select = component.slice(component.indexOf('readonly #executeSelectCommand = async'), component.indexOf('// per-item bracket operators'))
     expect(select).toContain('try { await slash.execute(op, args) }')

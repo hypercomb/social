@@ -1358,6 +1358,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   onIndicatorActivate(key: string): void {
+    // The working pill, pressed while a publish runs, opens the publish
+    // window (jwize 2026-11-10) — open, never a toggle that could close it.
+    if (key === 'running') {
+      if (this.#runWords.some(word => /^(re)?publish/.test(word))) EffectBus.emit('publish:shown', { open: true })
+      return
+    }
     EffectBus.emit('indicator:activate', { key })
   }
 
@@ -4543,16 +4549,16 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // slow command does not look like nothing happened), and a command that
       // could not act gives the participant their words back to change.
       const typed = this.shell?.value() ?? this.value()
-      this.#beginRun(true)
+      this.#beginRun(true, commandName)
       try {
         await drone.execute(commandName, args)
       } catch (error) {
         this.#behaviourDidNotRun(commandName, error)
-        this.#endRun()
+        this.#endRun(commandName)
         this.#restoreLine(typed)
         return
       }
-      this.#endRun()
+      this.#endRun(commandName)
     }
     this.clear()
   }
@@ -4562,8 +4568,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   /** The command is on its way: the typed text is gone (`clearLine`, when the
    *  caller has not already cleared it), and a working pill says so. */
-  #beginRun(clearLine: boolean): void {
+  #beginRun(clearLine: boolean, word = ''): void {
     this.#runs++
+    if (word) this.#runWords.push(word.toLowerCase())
     if (clearLine) this.#setShellValue('', true)
     // The pill waits a beat, so a command that is done at once never flickers
     // one; a line that went away is not left unexplained for longer than this.
@@ -4581,7 +4588,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   #runPillTimer: ReturnType<typeof setTimeout> | null = null
 
-  #endRun(): void {
+  /** The words of the commands in flight — what a press on the pill opens. */
+  #runWords: string[] = []
+
+  #endRun(word = ''): void {
+    const at = word ? this.#runWords.indexOf(word.toLowerCase()) : -1
+    if (at >= 0) this.#runWords.splice(at, 1)
     this.#runs = Math.max(0, this.#runs - 1)
     if (this.#runs > 0) return
     if (this.#runPillTimer) { clearTimeout(this.#runPillTimer); this.#runPillTimer = null }
@@ -4592,7 +4604,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    *  step keeps it on purpose, `clear` false), the pill shows, and a step that
    *  throws says so. The caller gives the line back. Returns whether it ran. */
   async #answering(typed: string, word: string, work: () => unknown, clear = true): Promise<boolean> {
-    this.#beginRun(clear)
+    this.#beginRun(clear, word)
     try {
       await work()
       return true
@@ -4600,7 +4612,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.#behaviourDidNotRun(word, error)
       return false
     } finally {
-      this.#endRun()
+      this.#endRun(word)
     }
   }
 

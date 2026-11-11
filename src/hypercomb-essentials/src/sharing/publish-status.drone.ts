@@ -755,6 +755,23 @@ export class PublishStatusDrone extends Drone {
       const doors = new Set<string>(readDoor ? [readDoor] : [])
       for (const key of candidates.keys()) { const door = hostFor(key); if (door) doors.add(door) }
 
+      // THE LIST SHOWS BEFORE THE NETWORK ANSWERS (jwize 2026-11-10: "blocking
+      // to show the list while publishing"). Until here everything was read
+      // from this device; from here every door's index is fetched, and a
+      // window opened with nothing to show stayed empty until the slowest
+      // door answered. The names and their domains are known already: they
+      // are painted now, as still comparing, and the sweep fills them in.
+      if (this.#rows.length === 0 && candidates.size > 0) {
+        this.#rows = [...candidates]
+          .map(([key, segments]) => this.#draftRow(key, segments, null, ledger.get(key)))
+          .sort((a, b) => a.path.localeCompare(b.path))
+        this.#payload = {
+          ...this.#payload, open: this.#open, host, zone: this.#zone, pubkey, currentKey,
+          hosts: this.#knownZones(), refreshing: true, rows: this.#rows,
+        }
+        this.#emit()
+      }
+
       // ONE index read per door answers every row behind that door.
       const indexes = new Map<string, {
         state: PublishIndexState; roots: Record<string, string>
