@@ -125,15 +125,20 @@ const render = (registry: ShellSurfaceRegistry): void => {
     if (!live.has(name)) skipped.delete(name)
   }
 
-  // Order pass. Re-appending a node that is already in the right place is a
-  // no-op for the browser, and appendChild MOVES rather than recreates, so
-  // listeners and element state survive. A surface that portaled itself to
+  // Order pass. A node is moved only when it is out of place, the way the
+  // Angular host does it: moving a node takes it out of the document and puts
+  // it back, so its element hears disconnect and connect and its CSS entrance
+  // animations play again — an open consent dialog flickered every time a
+  // late bee registered a surface. A surface that portaled itself to
   // document.body is deliberately left alone.
+  let previous: Node | null = null
   for (const surface of surfaces) {
     const node = surface.element ? mounted.get(surface.name) : undefined
     if (!node) continue
     if (node.parentElement && node.parentElement !== host) continue
-    host.appendChild(node)
+    const wanted: Node | null = previous ? previous.nextSibling : host.firstChild
+    if (node !== wanted) host.insertBefore(node, wanted)
+    previous = node
   }
 }
 

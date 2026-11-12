@@ -637,7 +637,6 @@ describe('doctrine ratchets', () => {
       "camera-capture/camera-capture.component",
       "chat-window/chat-window.component",
       "command-palette/command-palette.component",
-      "confirm-dialog/confirm-dialog.component",
       "contact-card/contact-form.component",
       "contact-card/contact-hover.component",
       "context-window/context-window.component",

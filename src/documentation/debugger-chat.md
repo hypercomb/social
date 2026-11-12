@@ -41,7 +41,7 @@ Each step leaves the chat and the navigation working in both the Angular shells 
 
 | # | Step | What a builder can do on the Angular-free page afterwards |
 |---|---|---|
-| 1 | Confirm dialog as an element | Every act that waits on a yes (publish, remove, prune, keys) can finish. Until this moves, those acts wait forever there. |
+| 1 | Confirm dialog as an element (**done 2026-11-12**: runtime `confirm-dialog.ts`, same tag `hc-confirm-dialog`, mounted by every host on import; the Angular component is deleted. It is the host's, not a package's: a shell is deployed before the packages its participants hold, and a dialog that came with a package would leave a new shell over an older package with nobody to answer a yes) | Every act that waits on a yes (publish, remove, prune, keys) can finish. Until this moves, those acts wait forever there. |
 | 2 | Toasts as an element | See every "saved", "published" and "could not" line. |
 | 3 | Website view and the editor's pencil (three services move to the runtime; website-nav folds into the site view) | Enter the site being built, leave it, and open the tile editor from a tile. |
 | 4 | Edit actions as an element | Undo, redo and the selection verbs by mouse. |

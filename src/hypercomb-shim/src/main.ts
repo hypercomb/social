@@ -91,6 +91,9 @@ import '@hypercomb/runtime/i18n.service'
 // Navigation first: lineage reads the address through it.
 import '@hypercomb/runtime/navigation'
 import '@hypercomb/runtime/lineage'
+// THE CONSENT DIALOG: every act that waits on a yes (publish, remove, prune,
+// keys) asks it. The host's own, as in the Angular shells, framework-free.
+import '@hypercomb/runtime/confirm-dialog'
 import { PACKED_STORE_MEANING } from '@hypercomb/runtime/packed-store-engine'
 import { packedStoreBlocksBoot } from '@hypercomb/runtime/packed-store-gate'
 import { initializeRuntime } from '@hypercomb/runtime/runtime-initializer'
