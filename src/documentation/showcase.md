@@ -516,3 +516,24 @@ dismisses the keyboard, since the search already filters as you type. The keyboa
 tiles scroll under the dock, and the list's own end padding lets the last tiles rest fully above it. The Files sheet is a title
 and a short list of revisions (loaded here, newest on each domain) with one signature box; opening one shows its files with a Back,
 and the tools that change a branch wait behind one line.
+
+## What "public" means
+
+**Public is published and in the community** (jwize, 2026-11-12: "I mean public should be mean published and in the
+community"). Three states, one word each:
+
+| State | What is true |
+|---|---|
+| **private** | only in this hive |
+| **published** | on a host, its root named in your own signed index there; anyone with a signature can read it, but it is not public |
+| **public** | published, and turned on in the showcase you signed for that host (`showcase:<zone>`), by name or by the domain shown in full |
+
+The breadcrumb's first word says it for the place you stand. The branch is that place or the nearest tile above it wearing a
+host mark, keyed `lineageKey(segments)` — the key the publications ledger and the showcase item carry. Any one of its hosts
+having both is enough. It never claims more than it can prove: a cold layer, or an index or showcase that cannot be read, is
+unknown and reads as private, and an answer about a place you just left is dropped the moment you move. It is asked again on
+every move, when a publish finishes, when a showcase is signed (`showcase:signed`), and when the window comes back.
+
+The word used to read the live swarm flag (`meshPublic`); that flag still colours the secure crumb and roots the breadcrumb in a
+swarm, but it no longer says public. Files: `hypercomb-essentials/src/sharing/branch-public.ts` (the rule, with its spec),
+`branch-public.drone.ts` (`branch:public`), `hypercomb-shared/ui/controls-bar/` (the crumb).

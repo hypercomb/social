@@ -118,8 +118,10 @@
 }
 
 <div class="breadcrumb-top" [class.faded]="isMobile()">
-  @if (meshPublic()) {
-    <span class="public-crumb" [style.color]="shieldColor()">{{ 'breadcrumb.public' | t }}</span><span class="sep-crumb">◆</span>
+  <!-- PUBLIC = published AND in the community (jwize 2026-11-12), told by
+       branch-public.drone.ts for the place you stand — not the swarm flag. -->
+  @if (branchPublic()) {
+    <span class="public-crumb">{{ 'breadcrumb.public' | t }}</span><span class="sep-crumb">◆</span>
   } @else {
     <span class="private-crumb">{{ 'breadcrumb.private' | t }}</span><span class="sep-crumb">◆</span>
   }

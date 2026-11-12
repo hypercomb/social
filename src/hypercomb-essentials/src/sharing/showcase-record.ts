@@ -13,7 +13,11 @@
 //
 // Full design: documentation/showcase.md.
 
-import { SignatureService, isReservedPoolWord, moleculeKey } from '@hypercomb/core'
+import { EffectBus, SignatureService, isReservedPoolWord, moleculeKey } from '@hypercomb/core'
+
+/** Said once a showcase is signed: what is public may have changed
+ *  (branch-public.drone.ts asks again). */
+export const SHOWCASE_SIGNED_EFFECT = 'showcase:signed'
 import { ownHiveRoot, setHiveRoot } from './hive-pointer.js'
 
 const get = <T,>(key: string): T | undefined => (window as any).ioc?.get?.(key) as T | undefined
@@ -255,7 +259,9 @@ export async function signShowcase(showcase: Showcase): Promise<{ ok: true; sig:
   const sent = await sync.publishAtoms(showcase.zone, [sig], async wanted => (wanted === sig ? bytes : null))
   if (!sent.ok) return { ok: false, reason: sent.error }
   const stamped = await setHiveRoot(showcase.zone, showcaseKey(showcase.zone), sig)
-  return stamped.ok ? { ok: true, sig } : { ok: false, reason: stamped.reason ?? 'the index refused it' }
+  if (!stamped.ok) return { ok: false, reason: stamped.reason ?? 'the index refused it' }
+  EffectBus.emitTransient(SHOWCASE_SIGNED_EFFECT, { zone: showcase.zone })
+  return { ok: true, sig }
 }
 
 /** Rename a community: the same members under a new name, kept in its place. The new name goes

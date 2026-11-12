@@ -290,6 +290,21 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #titleTick = signal(0)
   #titleTickUnsub: (() => void) | null = null
   #localeTickUnsub: (() => void) | null = null
+  /** What branch-public.drone.ts last said (`branch:public`), and the place it
+   *  was about. Read over the bus: the shell may not import a module. */
+  #branchPublicState = signal<{ key: string; public: boolean | null } | null>(null)
+  #branchPublicUnsub: (() => void) | null = null
+  #placeKey$ = fromRuntime(
+    get('@hypercomb.social/Lineage') as EventTarget,
+    () => [...((get('@hypercomb.social/Lineage') as { explorerSegments?: () => readonly string[] } | undefined)?.explorerSegments?.() ?? [])].map(String).join('\u0000'),
+  )
+  /** PUBLIC = published AND in the community (jwize 2026-11-12). Shown only
+   *  when it was proven, and only for the place you stand now — an answer
+   *  about the place you just left reads as private until the new one lands. */
+  readonly branchPublic = computed(() => {
+    const said = this.#branchPublicState()
+    return !!said && said.public === true && said.key === this.#placeKey$()
+  })
   #room$ = fromRuntime(
     get('@hypercomb.social/RoomStore') as EventTarget,
     () => this.roomStore?.value ?? '',
@@ -1531,6 +1546,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
     // Icon protocol: reflect edit mode (jiggle) + re-resolve glyphs on reskin.
     this.#iconEditUnsub = EffectBus.on<{ on?: boolean }>('icon:edit-mode', ({ on }) => this.iconEditOn.set(!!on))
+    this.#branchPublicUnsub = EffectBus.on<{ key?: unknown; public?: unknown }>('branch:public', (said) => {
+      this.#branchPublicState.set({ key: String(said?.key ?? ''), public: said?.public === true ? true : said?.public === false ? false : null })
+    })
     this.#configureControlUnsub = EffectBus.on<{ id?: string; enabled?: boolean }>(
       'controls:configure',
       ({ id, enabled }) => {
@@ -2268,6 +2286,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     for (const off of this.#meetPointUnsubs.splice(0)) off()
     this.#lockBumpUnsub?.()
     this.#iconEditUnsub?.()
+    this.#branchPublicUnsub?.()
     this.#configureControlUnsub?.()
     this.#pinToggleUnsub?.()
     this.#onDemandUnsub?.()
