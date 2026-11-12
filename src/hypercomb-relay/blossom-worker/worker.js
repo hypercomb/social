@@ -3551,6 +3551,22 @@ function manageCookie(on) {
   return `${MANAGE_COOKIE}=${on ? '1' : ''}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${on ? 31536000 : 0}`
 }
 
+/** What a managed site door's page is told: the site, its title, its primary
+ *  publisher and the head their signed index names for it (or none yet). */
+async function manageRecord(routed, read) {
+  const site = routed.site
+  const publisher = site.publishers?.find(p => p.primary) || site.publishers?.[0]
+  let head = null
+  if (publisher) {
+    try {
+      const index = await read(publisher.pubkey)
+      const named = String(index?.roots?.[site.lineage] || '').toLowerCase()
+      head = SIG_RE.test(named) ? named : null
+    } catch { head = null }
+  }
+  return { lineage: site.lineage, title: site.title || site.lineage, publisher: publisher?.pubkey || null, head }
+}
+
 /** Back to the website: the mark goes, and the shim's service worker with it (it would
  *  otherwise keep answering this origin), then `/`. Script only, nothing else. */
 function serveManageLeave() {
@@ -3572,8 +3588,12 @@ function serveManageLeave() {
 /** The site door's management page: the framework-free shim, as a try- door
  *  serves it, but signing stays the owner's (it is not pinned off) — and on the
  *  trigger path the mark is set. */
-async function serveManagement(request, env, zone, { setMark = false } = {}) {
-  const served = await serveSandboxShell(request, env, zone, { management: true })
+async function serveManagement(request, env, zone, { setMark = false, manage = null } = {}) {
+  // THE PAGE CARRIES WHAT IT MANAGES (hc-manage): the site's name, its title,
+  // its publisher and the head they published, so the card shows at once with
+  // no round trip. Escaped as every page record is (doorScript).
+  // Read only for the page itself: the record is asked when the response is HTML, never for the page's files.
+  const served = await serveSandboxShell(request, env, zone, { management: true, inject: manage ? async () => doorScript(await manage(), 'hc-manage') : '' })
   if (!setMark) return served
   const headers = new Headers(served.headers)
   headers.append('Set-Cookie', manageCookie(true))
@@ -3581,7 +3601,7 @@ async function serveManagement(request, env, zone, { setMark = false } = {}) {
   return new Response(served.body, { status: served.status, headers })
 }
 
-async function serveSandboxShell(request, env, zone, { management = false } = {}) {
+async function serveSandboxShell(request, env, zone, { management = false, inject = '' } = {}) {
   const url = new URL(request.url)
   const debuggerDoor = management || SANDBOX_LABEL_RE.test(url.hostname.split('.')[0])
   const origin = debuggerDoor ? debuggerShellOrigin(env) : String(env.SANDBOX_SHELL_ORIGIN || '').replace(/\/+$/, '')
@@ -3621,7 +3641,13 @@ async function serveSandboxShell(request, env, zone, { management = false } = {}
     // shell's, so the package cannot put window.nostr back. A swarm door
     // signs; it is not pinned. Nor is a site door's management page: there
     // the owner publishes with their own key (debugger-chat.md, "the key").
-    if (management) return new Response(request.method === 'HEAD' ? null : upstream.body, { status: upstream.status, headers })
+    if (management) {
+      const extra = typeof inject === 'function' ? await inject() : inject
+      if (!extra) return new Response(upstream.body, { status: upstream.status, headers })
+      const page = await upstream.text()
+      const head = /<head[^>]*>/i.exec(page)
+      return new Response(head ? page.slice(0, head.index + head[0].length) + extra + page.slice(head.index + head[0].length) : extra + page, { status: upstream.status, headers })
+    }
     if (debuggerDoor) return new Response(pinNostrOff(await upstream.text()), { status: upstream.status, headers })
     const page = (await upstream.text())
       .replace(SHELL_BUNDLE_RE, (_, attr, file) => `${attr}="${SHELL_PREFIX}${file}"`)
@@ -7502,6 +7528,7 @@ const router = {
         // request for the trigger gets the page once and marks nothing.
         return serveManagement(request, env, managed.zone, {
           setMark: isManagePath(pathname) && !managing(request) && deliberateVisit(request),
+          manage: () => manageRecord(managed, pageReader(managed.env)),
         })
       }
     }

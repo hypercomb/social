@@ -125,6 +125,7 @@ import { IMPORT_MAP_STORAGE_KEY, resolveImportMap, sessionBound } from './import
 // bundle is fetched by signature at boot and verified before it runs, so
 // nothing below imports it and the type is the only thing that crosses.
 import { loadBootstrap, type BootstrapHandle } from './bootstrap-loader'
+import { manageRecord } from './bootstrap/manage-record'
 // Locales resolve by signature from the host, never from this bundle.
 import { signatureCatalogs } from './locales'
 
@@ -335,6 +336,14 @@ const boot = async (): Promise<void> => {
   // but remains manageable through the explicit route. The host's own surfaces
   // (the consent dialog) mount with no package at all, so they are not
   // counted: counting them dismissed the front door on every cold host.
+  // A MANAGED SITE DOOR (bootstrap/manage-record.ts) is the owner's card and
+  // chat, not a host console: once a package is live, the console goes, even
+  // on /@hypercomb, which there is the way in rather than the host manager. A
+  // cold one keeps the console, which installs the package itself.
+  if (manageRecord()) {
+    if (live.fromPackage > 0) acquisition.dismiss()
+    return
+  }
   const managerPath = location.pathname.replace(/\/+$/, '')
   const managerRequested = managerPath === '/hosts' || managerPath === '/@hypercomb'
   if (managerRequested || (live.fromPackage === 0 && live.angular === 0)) {

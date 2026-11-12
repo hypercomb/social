@@ -29,6 +29,7 @@ import { deviceOwner, eitherOwner } from './device-owner'
 import { readZoneOwners } from './showcase-record'
 import { branchView } from './branch-view'
 import { readMinimized } from './minimized'
+import { beesOnDisk, MANAGE_LEAVE_HREF, manageRecord, siteDoorZone, type ManageRecord } from './manage-record'
 import { readFromZone, readVerified } from './branch-files'
 import { addOffering, addPublicCreation, clearPendingSelection, listActiveOfferings,
   listActivePublicCreations, listAdoptions, listPendingSelections, stagePendingSelection, stagePendingCreation,
@@ -644,6 +645,16 @@ class HostPanelElement extends HTMLElement {
   async #render(): Promise<void> {
     // An invite in the address is taken out of it at once and held, unspent.
     captureDeviceInvite(location, history)
+    // A MANAGED SITE DOOR (manage-record.ts) is not a host's front door: on the
+    // first visit it installs the host's package and goes straight to the card.
+    const managed = manageRecord()
+    if (managed) {
+      // Cold is what is on disk, never the stamp (beesOnDisk). Warm: the package's
+      // surfaces take the page after the first pulse (main.ts), so nothing is drawn here.
+      if (!(await beesOnDisk())) this.#renderManageSetup(managed)
+      else this.#root.replaceChildren()
+      return
+    }
     // The front door is read once per card, not once per render: adding a
     // domain must not re-ask the origin for a file that cannot have changed.
     // The welcome and the followed domains are asked together. The selection
@@ -2037,6 +2048,47 @@ class HostPanelElement extends HTMLElement {
     return section
   }
 
+  /** The first visit to a managed site door: one line, a meter, and the way
+   *  back — while the host's newest package installs, then the page starts again. */
+  #renderManageSetup(record: ManageRecord): void {
+    const style = document.createElement('style')
+    style.textContent = MANAGE_SETUP_CSS
+    const card = document.createElement('section')
+    card.className = 'manage-setup'
+    const title = document.createElement('h1')
+    title.textContent = `Setting up ${record.title}`
+    const line = document.createElement('p')
+    line.textContent = 'Installing this page once, so your card and the chat can open here.'
+    const status = document.createElement('p')
+    status.className = 'package-status'
+    const take = document.createElement('button')
+    take.type = 'button'
+    take.textContent = 'Install'
+    take.hidden = true
+    const back = document.createElement('a')
+    back.href = MANAGE_LEAVE_HREF
+    back.textContent = 'Back to the site'
+    card.append(title, line, status, take, back)
+    this.#root.replaceChildren(style, card)
+    const install = async (): Promise<void> => {
+      take.hidden = true
+      // The zone root serves the publisher's packages; the site door itself does not.
+      const answer = await this.#ask(siteDoorZone(location.host))
+      const pkg = answer.packages[0]
+      if (!pkg) {
+        status.textContent = answer.answered ? 'This site offers no package yet.' : 'The host did not answer.'
+        take.hidden = false
+        return
+      }
+      const total = new Set([...pkg.layers, ...pkg.bees, ...pkg.dependencies].map(bareSig)).size
+      await this.#replicate(pkg.packageSig, take, card, total, onHeld => installPackage(pkg, [], { onHeld }))
+      // A failed install leaves the button to try again.
+      if (!this.#busy) take.hidden = false
+    }
+    take.addEventListener('click', () => { void install() })
+    void install()
+  }
+
   #sayPackages(message: string, tone: 'neutral' | 'good' | 'bad' = 'neutral'): void {
     const status = this.#root.querySelector('.package-status')
     if (!status) return
@@ -2350,3 +2402,20 @@ export const showHostPanel = (): void => {
 export const hideHostPanel = (): void => {
   document.querySelector(TAG)?.remove()
 }
+
+/** The managed site door's first visit: centred, quiet, the way back always there. */
+const MANAGE_SETUP_CSS = `
+:host { all: initial }
+.manage-setup {
+  box-sizing: border-box; position: fixed; inset: 0; z-index: 2147483100; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 0.75rem; padding: 1.5rem; text-align: center;
+  background: #0b0d10; color: #e8e8ea; font: 15px/1.5 system-ui, sans-serif;
+}
+.manage-setup h1 { margin: 0; font-size: 1.15rem; font-weight: 600; }
+.manage-setup p { margin: 0; max-width: 30rem; color: #b9bcc2; }
+.manage-setup .package-status { min-height: 1.5em; font-size: 0.85rem; }
+.manage-setup .package-status[data-tone='bad'] { color: #f87171; }
+.manage-setup .package-status[data-tone='good'] { color: #34d399; }
+.manage-setup button { padding: 0.4rem 1rem; border-radius: 4px; border: 1px solid #3a3f47; background: #1a1e24; color: #e8e8ea; font: inherit; cursor: pointer; }
+.manage-setup a { color: #c8975a; font-size: 0.85rem; }
+` 
