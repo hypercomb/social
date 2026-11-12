@@ -472,13 +472,15 @@ stages no presentation is the search and the tiles as before.
 The shim stays generic: it knows no domain, only the field. The same pinned shim runs on a phone at hypercomb.io, which
 serves no `welcome.json`, so that page is unchanged.
 
-### The help tiles are optional (jwize 2026-11-10)
+### The platform's doors are hypercomb.com's alone; a bare host shows one phantom (jwize 2026-11-12)
 
-The starting tile and the platform's own doors (the tour, the app, source, licensing) are help. A host that staged a front
-page of its own — hypercomb.com — shows what it staged. Every other host shows none of them by default. While editing they
-sit gray in the domain's own row and a tap turns one on or off; the choice is kept in this browser, in the same
-`community:tiles` document as its other picks, under a key no tile has (`help:<address>`, `help:start`). The tour is the
-protocol hive, `protocol.hypercomb.com`.
+"These should only show on hypercomb.com, not on every host. If anything just put a phantom tile on the left showing where
+the first creation will go." The platform's own doors (the tour, the app, hosting, extensions, source, licensing) are tiles
+only where a host staged them as its front page — hypercomb.com. No other host draws them, not even as optional tiles (the
+switchable help tiles of 2026-11-10 and the "Start here" tile are retired). A host with nothing staged and nothing in its
+row draws one phantom hexagon in the first place of its row: an empty outline that says "your first creation", never a link
+and never a switch. It is gone while a search runs and once the row holds anything. The platform links survive only as the
+small footer of the tile-choosing task view.
 
 A domain whose ledger names no owner has nothing signed to read, so its row says "Nothing is published here yet." and never
 "Could not read what is published here."

@@ -387,98 +387,51 @@ describe('everything on the home page is a tile — the platform\'s doors too', 
   })
 })
 
-describe('the help tiles are optional, and off until turned on (jwize 2026-11-10; the faux tile of 2026-11-04)', () => {
-  const starter = { label: 'Start here', note: 'how to begin', title: 'Make this hive yours', steps: [
-    { text: 'Open the app.', link: { label: 'Open hypercomb.io', href: 'https://hypercomb.io/' } },
-    { text: 'Publish a branch.' },
-  ] }
+describe('a vanilla hive shows one phantom tile where its first creation will go (jwize 2026-11-12)', () => {
   const draw = (extra = {}) => showcase({
-    self: 'my-hive.example', title: 'my-hive.example', tagline: '', sources: [], starter,
+    self: 'my-hive.example', title: 'my-hive.example', tagline: '', sources: [], phantom: true,
     ledger: Promise.resolve(parseLedger({ sites: [] })), readShared: async () => ({ offers: [], creations: [] }), ...extra,
   })
-  const starters = (bands: HTMLElement): number => bands.querySelectorAll('.dex-row.own .hex-starter').length
-
-  const help = [{ label: 'the tour', href: 'https://protocol.hypercomb.com/', note: '', icon: 'tour' as const }]
-  const manageOn = (hero: HTMLElement): void => { (hero.querySelector('.manage-toggle') as HTMLButtonElement).click() }
+  const phantoms = (bands: HTMLElement): number => bands.querySelectorAll('.dex-row.own .hex-phantom').length
   const settled = async (bands: HTMLElement): Promise<void> => {
     await vi.waitFor(() => expect(bands.querySelector('.dex-row.own .hosted-empty:not([hidden])')?.textContent).toBe('Nothing is published here yet.'))
   }
 
-  it('shows none by default; editing shows each gray, a tap turns it on, and it is kept and drawn as a link afterwards', async () => {
-    let kept: readonly { zone: string; key: string }[] = []
-    const keepCommunity = vi.fn(async (picks: readonly { zone: string; key: string }[]) => { kept = picks; return true })
-    const { bands, hero } = draw({ help, keepCommunity })
+  it('draws exactly one tile on an empty row — the phantom, first, and never a link', async () => {
+    const { bands } = draw()
     await settled(bands)
-    expect(bands.querySelectorAll('.dex-row.own .hex').length).toBe(0)
-    manageOn(hero)
-    const tour = bands.querySelector('.dex-row.own .hex-link:not(.hex-starter)') as HTMLAnchorElement
-    const start = bands.querySelector('.dex-row.own .hex-starter') as HTMLAnchorElement
-    expect(tour.querySelector('.hex-name')?.textContent).toBe('the tour')
-    for (const tile of [tour, start]) {
-      expect(tile.classList.contains('off')).toBe(true)
-      expect(tile.getAttribute('aria-pressed')).toBe('false')
-    }
-    // While editing a tap is the switch, never the link.
-    const tap = new MouseEvent('click', { bubbles: true, cancelable: true })
-    tour.dispatchEvent(tap)
-    expect(tap.defaultPrevented).toBe(true)
-    await vi.waitFor(() => expect(tour.classList.contains('off')).toBe(false))
-    expect(kept).toEqual([{ zone: 'help', key: 'help:https://protocol.hypercomb.com/' }])
-    await vi.waitFor(() => expect(bands.querySelector('.owner-note')?.textContent).toBe('the tour is on.'))
-    start.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
-    await vi.waitFor(() => expect(start.classList.contains('off')).toBe(false))
-    expect((hero.querySelector('.versions-backdrop') as HTMLElement).hidden).toBe(true)
-    // Back on the page: only what was turned on, as links again.
-    manageOn(hero)
-    expect([...bands.querySelectorAll('.dex-row.own .hex .hex-name')].map(name => name.textContent)).toEqual(['the tour', 'Start here'])
-    expect(tour.hasAttribute('aria-pressed')).toBe(false)
-    const visit = new MouseEvent('click', { bubbles: true, cancelable: true })
-    tour.addEventListener('click', event => event.preventDefault(), { once: true })
-    tour.dispatchEvent(visit)
-    // A browser that kept them shows them on its next visit.
-    const again = draw({ help, readCommunity: async () => kept })
-    await vi.waitFor(() => expect(again.bands.querySelectorAll('.dex-row.own .hex').length).toBe(2))
+    await vi.waitFor(() => expect(phantoms(bands)).toBe(1))
+    const tiles = [...bands.querySelectorAll('.dex-row.own .hex')]
+    expect(tiles.length).toBe(1)
+    expect(tiles[0].classList.contains('hex-phantom')).toBe(true)
+    expect(tiles[0].tagName).toBe('SPAN')
+    expect(tiles[0].querySelector('a')).toBeNull()
   })
 
-  it('once turned on, a click on the starting tile opens the steps instead of going anywhere', async () => {
-    const { bands, hero } = draw({ readCommunity: async () => [{ zone: 'help', key: 'help:start' }] })
-    await vi.waitFor(() => expect(starters(bands)).toBe(1))
-    expect(bands.querySelectorAll('.dex-row.own .hex').length).toBe(1)
-    const tile = bands.querySelector('.hex-starter') as HTMLAnchorElement
-    expect(tile.querySelector('.hex-name')?.textContent).toBe('Start here')
-    expect(tile.target).toBe('')
-    const backdrop = hero.querySelector('.versions-backdrop') as HTMLElement
-    expect(backdrop.hidden).toBe(true)
-    const click = new MouseEvent('click', { bubbles: true, cancelable: true })
-    tile.dispatchEvent(click)
-    expect(click.defaultPrevented).toBe(true)
-    expect(backdrop.hidden).toBe(false)
-    expect(backdrop.querySelector('.versions-title')?.textContent).toBe('Make this hive yours')
-    expect([...backdrop.querySelectorAll('.starter-steps li')].map(item => item.textContent))
-      .toEqual(['Open the app. Open hypercomb.io', 'Publish a branch.'])
-    expect(backdrop.querySelector('a')?.getAttribute('href')).toBe('https://hypercomb.io/')
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
-    expect(backdrop.hidden).toBe(true)
+  it('draws none of the platform doors on a host that staged none', async () => {
+    const { bands } = draw()
+    await settled(bands)
+    expect(bands.querySelectorAll('.dex-row.own .hex-link').length).toBe(0)
   })
 
-  it('is a starting point, not furniture: gone while searching, and when a door was staged', async () => {
-    const { bands, hero } = draw({ readCommunity: async () => [{ zone: 'help', key: 'help:start' }] })
-    await vi.waitFor(() => expect(starters(bands)).toBe(1))
+  it('is a place, not furniture: gone while searching, and when a door was staged', async () => {
+    const { bands, hero } = draw()
+    await vi.waitFor(() => expect(phantoms(bands)).toBe(1))
     const search = hero.querySelector('input[type=search]') as HTMLInputElement
     search.value = 'anything'
     search.dispatchEvent(new Event('input'))
-    expect(starters(bands)).toBe(0)
+    expect(phantoms(bands)).toBe(0)
     const staged = draw({ links: [{ label: 'Minimal host', href: '/hosts', note: '', icon: 'host' as const }] })
     await vi.waitFor(() => expect(staged.bands.querySelectorAll('.dex-row.own .hex-link').length).toBe(1))
-    expect(starters(staged.bands)).toBe(0)
+    expect(phantoms(staged.bands)).toBe(0)
   })
 
-  it('is gone once the row holds something real, and never drawn when none is given', async () => {
+  it('is gone once the row holds something real, and never drawn when not asked for', async () => {
     const full = draw({ self: 'hypercomb.com', ledger: Promise.resolve(parseLedger(LEDGER)) })
     await vi.waitFor(() => expect(full.bands.querySelectorAll('.dex-row.own .hex').length).toBe(2))
-    expect(starters(full.bands)).toBe(0)
-    const bare = draw({ starter: null })
-    await vi.waitFor(() => expect(bare.bands.querySelector('.dex-row.own .hosted-empty:not([hidden])')?.textContent).toBe('Nothing is published here yet.'))
+    expect(phantoms(full.bands)).toBe(0)
+    const bare = draw({ phantom: false })
+    await settled(bare.bands)
     expect(bare.bands.querySelectorAll('.hex').length).toBe(0)
   })
 })

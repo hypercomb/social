@@ -27,7 +27,7 @@ import {
   LaneTouch, hostOf as laneHostOf, keepLaneOrientation, laneDrift, laneLayout, laneMaxShift, lanePosition, laneSnap, laneTileAt, onePerHost,
   keepTriedViews, readLaneOrientation, readTriedViews, type LaneLayout,
 } from './showcase-lanes'
-import type { LinkIcon, Starter, WelcomeLink } from './welcome'
+import type { LinkIcon, WelcomeLink } from './welcome'
 
 const SIG = /^[a-f0-9]{64}$/
 const HOSTNAME = /^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$/
@@ -570,13 +570,10 @@ export type ShowcaseOptions = {
    *  in your home page should be a tile … they have deployed webpages that we
    *  can navigate to"). */
   readonly links?: readonly WelcomeLink[]
-  /** The faux starting tile of a vanilla hive: drawn in this domain's row only
-   *  while the row holds nothing and no doors were staged; a click opens its steps. */
-  readonly starter?: Starter | null
-  /** THE HELP TILES ARE OPTIONAL (jwize 2026-11-10: "the help tiles should be optional and off by default for non
-   *  hypercomb.com hives"): the platform's own doors a host did not stage itself. Off until this browser turns one on
-   *  while editing; the starting tile is one of them. */
-  readonly help?: readonly WelcomeLink[]
+  /** A vanilla hive's one phantom hexagon (jwize 2026-11-12: "just put a phantom tile on the left showing where the
+   *  first creation will go"): drawn first in this domain's row only while the row holds nothing and no doors were
+   *  staged. Not a link, not a switch — a place. */
+  readonly phantom?: boolean
   /** Follow a domain: checked, then kept in this browser's community. */
   /** Stop following a domain: forget it where the browser kept it. True when it is gone. */
   readonly unfollow?: (zone: string) => Promise<boolean>
@@ -1812,95 +1809,19 @@ ${entry.key}`
     return terms.every(term => words.includes(term))
   }
 
-  // ── THE HELP TILES ARE OPTIONAL, AND OFF UNTIL TURNED ON (jwize 2026-11-10). While editing they sit gray in this
-  //    domain's row and a tap turns one on or off; what is on is kept in this browser beside its other picks, under a
-  //    key no tile has. Outside editing only the ones turned on are drawn, and they are links again. ──
-  const HELP_START = 'help:start'
-  const helpKey = (link: WelcomeLink): string => `help:${link.href}`
-  const helpOn = (key: string): boolean => picks.some(pick => pick.key === key)
-  const toggleHelp = async (key: string, title: string): Promise<void> => {
-    if (picking) return
-    if (!options.keepCommunity) { say('This page cannot keep that choice.'); return }
-    const was = picks
-    const on = !helpOn(key)
-    picks = on ? [...picks, { zone: 'help', key }] : picks.filter(pick => pick.key !== key)
-    picking = true
-    paint()
-    const kept = await options.keepCommunity(picks).catch(() => false)
-    picking = false
-    if (!kept) { picks = was; paint(); say(`Could not turn ${title} ${on ? 'on' : 'off'}.`); return }
-    say(`${title} is ${on ? 'on' : 'off'}.`)
-  }
-  /** A help tile as it is now: gray and a switch while editing, a plain link otherwise. */
-  const asHelp = (tile: HTMLAnchorElement, key: string): HTMLAnchorElement => {
-    const on = helpOn(key)
-    tile.classList.toggle('off', managing && !on)
-    if (managing) tile.setAttribute('aria-pressed', String(on))
-    else tile.removeAttribute('aria-pressed')
-    return tile
-  }
-  const helpTile = (link: WelcomeLink): HTMLAnchorElement => {
-    const tile = linkTile(link)
-    if (!tile.dataset.help) {
-      tile.dataset.help = helpKey(link)
-      tile.addEventListener('click', event => {
-        if (!managing) return
-        event.preventDefault()
-        void toggleHelp(helpKey(link), link.label)
-      })
-    }
-    return asHelp(tile, helpKey(link))
-  }
-
-  // ── THE STARTING TILE of a vanilla hive: the same hexagon, one of the help tiles. It links nowhere: outside editing
-  //    a click opens the steps in the sheet a held tile uses ──
-  let starterTile: HTMLAnchorElement | null = null
-  const openStarter = (guide: Starter, from: HTMLElement): void => {
-    opener = from
-    const heading = el('h3', 'versions-title')
-    heading.textContent = guide.title
-    const steps = el('ol', 'starter-steps')
-    for (const step of guide.steps) {
-      const item = el('li')
-      item.append(document.createTextNode(step.text))
-      if (step.link) {
-        item.append(document.createTextNode(' '))
-        const link = el('a', 'version-visit')
-        link.href = step.link.href
-        link.target = '_blank'
-        link.rel = 'noopener'
-        link.textContent = step.link.label
-        item.append(link)
-      }
-      steps.append(item)
-    }
-    sheet.replaceChildren(heading, steps)
-    sheet.tabIndex = -1
-    backdrop.hidden = false
-    document.addEventListener('keydown', onKey, true)
-    sheet.focus()
-  }
-  const starterOf = (guide: Starter): HTMLAnchorElement => {
-    if (starterTile) return starterTile
-    const tile = el('a', 'hex hex-link hex-starter')
-    tile.href = '#start'
-    tile.setAttribute('role', 'button')
-    tile.title = `${guide.label} · ${guide.note}`
-    const art = el('span', 'hex-art link-art')
-    art.append(iconOf('hive'))
+  // ── THE PHANTOM: where this hive's first creation will go. The same hexagon, empty and quiet, never a link ──
+  let phantomTile: HTMLElement | null = null
+  const phantomOf = (): HTMLElement => {
+    if (phantomTile) return phantomTile
+    const tile = el('span', 'hex hex-phantom')
+    tile.title = 'Your first creation will go here'
+    const art = el('span', 'hex-art phantom-art')
     const label = el('span', 'hex-label')
     const name = el('span', 'hex-name')
-    name.textContent = guide.label
-    const hint = el('span', 'hex-address')
-    hint.textContent = guide.note
-    label.append(name, hint)
+    name.textContent = 'your first creation'
+    label.append(name)
     tile.append(art, label)
-    tile.addEventListener('click', event => {
-      event.preventDefault()
-      if (managing) void toggleHelp(HELP_START, guide.label)
-      else openStarter(guide, tile)
-    })
-    starterTile = tile
+    phantomTile = tile
     return tile
   }
   /** Every publish known now — the ledger's, then each domain's pools — one tile per name. */
@@ -2074,11 +1995,10 @@ ${entry.key}`
       const shown = items.filter(entry => aggregateMatches(entry, terms))
       // The doors wait for the ledger: the row draws once, not the doors and then the hives.
       const doors = own && ledgerRead && !unread ? links.filter(link => linkMatches(link, terms)) : []
-      // The help tiles: every one while editing, so it can be turned on; otherwise only those this browser turned on.
-      const helps = own && ledgerRead && !unread && !community
-        ? (options.help ?? []).filter(link => (managing || helpOn(helpKey(link))) && linkMatches(link, terms)) : []
-      const starting = own && ledgerRead && !unread && !!options.starter && !community && !terms.length && (managing || helpOn(HELP_START))
-      const total = shown.length + doors.length + helps.length
+      // The phantom holds the first place of an empty row, and only there: no doors staged, nothing held, no search.
+      const phantom = own && ledgerRead && !unread && !!options.phantom && !community && !terms.length
+        && items.length === 0 && doors.length === 0
+      const total = shown.length + doors.length
       visible += !managing && !own ? 0 : terms.length ? total : 1
       // While a search runs every row holding a match is open; otherwise one is.
       const open = !managing ? own : openRow === zone
@@ -2088,13 +2008,12 @@ ${entry.key}`
       const temp = pending.get(zone)
       view.meta.textContent = temp ? (temp.state === 'checking' ? 'Checking…' : 'Not found') : count(items.length + (own ? links.length : 0), 'tile', 'tiles')
       view.section.classList.toggle('missing', temp?.state === 'missing')
-      arrange(view.comb, open ? [...shown.map(entry => {
+      arrange(view.comb, open ? [...(phantom ? [phantomOf()] : []), ...shown.map(entry => {
         const tile = tileView(entry, zone)
         // In another domain's row, a tile already on this domain's page says so.
         tile.classList.toggle('in-showcase', !own && showcased(entry))
         return tile
-      }), ...doors.map(link => linkTile(link)), ...helps.map(helpTile),
-      ...(starting && options.starter ? [asHelp(starterOf(options.starter), HELP_START)] : [])] : [], own ? shape : base)
+      }), ...doors.map(link => linkTile(link))] : [], own ? shape : base)
       view.empty.hidden = !open || (own ? shown.length > 0 && !unread : total > 0)
       view.empty.textContent = temp ? (temp.state === 'checking' ? `Checking ${zone}…` : `${zone} was not found — ${temp.reason}`)
         : own && (!ledgerRead || unread) ? 'Reading what is published here…'
@@ -2521,13 +2440,10 @@ a.hex { color: inherit; text-decoration: none; cursor: pointer; }
 .link-art { display: block; background: linear-gradient(160deg, #1d2733, #10161e); color: var(--gold-2); }
 .link-art > svg { position: relative; z-index: 1; display: block; width: 38%; height: 38%; margin: 20% 31% 0; opacity: .95; }
 .hex-link:hover .link-art, .hex-link:focus-visible .link-art { color: var(--gold-1); }
-/* the faux starting tile: the same hexagon, quieter than a real one until it is reached for */
-.hex-starter { opacity: .72; transition: background .25s, opacity .25s; }
-.hex-starter:hover, .hex-starter:focus-visible { opacity: 1; }
-.starter-steps { display: grid; gap: .7rem; margin: 0; padding-left: 1.2rem; color: var(--md-on-surface-var); font: 500 .92rem/1.45 var(--md-font-ui, Inter, system-ui, sans-serif); }
-/* the card's generic li is a flex row with a rule above it; a step is a plain numbered line */
-.starter-steps li { display: list-item; padding: 0; border-top: 0; }
-.starter-steps li::marker { color: var(--md-primary); font-weight: 700; }
+/* the phantom: an empty hexagon, a thin gold edge around nothing, where the first creation will go */
+.hex.hex-phantom { background: color-mix(in srgb, var(--gold-2) 28%, transparent); opacity: .7; cursor: default; }
+.hex-phantom > .phantom-art { inset: 2px; background: #0b1017; }
+.hex-phantom .hex-name { color: var(--md-on-surface-var); font-weight: 500; }
 .hex-link:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 3px; }
 /* following a domain: a search that found nothing offers it, and the foot always can */
 .follow-suggest { display: flex; margin: 0 0 1.2rem; }

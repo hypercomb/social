@@ -7,8 +7,8 @@
 // card that can only say "add a domain" is a dead end for the visitor who
 // arrived to find out what this is. So every host presents itself, with
 // nothing staged at all: the mark, its own name, one sentence about what a
-// host is, what it publishes, and — while it publishes nothing — one faux
-// "Start here" tile that opens the steps. That is the default experience, the
+// host is, what it publishes, and — while it publishes nothing — one phantom
+// hexagon where its first creation will go. That is the default experience, the
 // same on a Pages deployment, an Azure app, and a machine running
 // `hypercomb-serve`. The platform's own doors (tour, app, hosting, extensions,
 // source, licensing) are NOT part of it: they are hypercomb.com's front page,
@@ -47,11 +47,6 @@ export type Welcome = {
   presentation?: string
 }
 
-/** One line of the starting instructions, and the page it points at, if any. */
-export type StarterStep = { text: string; link?: { label: string; href: string } }
-/** The faux tile a new hive starts with: a name, a hint, and what to do. */
-export type Starter = { label: string; note: string; title: string; steps: readonly StarterStep[] }
-
 /** The card, resolved: what it shows whether or not anything was staged. */
 export type FrontDoor = {
   readonly title: string
@@ -60,13 +55,12 @@ export type FrontDoor = {
   /** The zone's room, drawn first as "Join the swarm" — or ''. */
   readonly swarm: string
   /** Where the platform explains itself, minus any door the staged links
-   *  already open — `/tour/` on hypercomb.com IS the tour. The small footer of
-   *  a task view, and the optional help tiles of a hive: off until its own
-   *  browser turns one on while editing, never shown to a visitor by default. */
+   *  already open — `/tour/` on hypercomb.com IS the tour. Only ever the small
+   *  footer of a task view: never tiles on a hive's page. */
   readonly footer: readonly WelcomeLink[]
-  /** The starting point a host with nothing staged offers in place of the
-   *  platform's doors — null once the operator stages a front page of its own. */
-  readonly starter: Starter | null
+  /** A host with nothing staged draws one phantom hexagon where its first
+   *  creation will go — false once the operator stages a front page of its own. */
+  readonly phantom: boolean
   /** The published hive shown in place as this host's root, or ''. */
   readonly presentation: string
 }
@@ -91,28 +85,13 @@ export const PLATFORM_LINKS: readonly WelcomeLink[] = [
   { label: 'licensing', href: 'https://github.com/hypercomb/social/blob/main/src/documentation/licensing.md', note: '', icon: 'docs' },
 ]
 
-/** A VANILLA HIVE STARTS WITH ONE FAUX TILE (jwize 2026-11-04: "the default
- *  instructional tiles should not be on your own hive … a new participant
- *  should get a vanilla experience with maybe a faux tile as a starting point;
- *  if you click it you get some instructions on how to start"). The platform's
- *  doors — tour, app, hosting, extensions, source, licensing — are hypercomb.com's
- *  front page, staged there as its own links; a participant's own hive does not
- *  carry them. This tile is drawn only while the row is empty, and it answers
- *  with the steps, never a link out. */
-export const STARTER: Starter = {
-  label: 'Start here',
-  note: 'how to make this hive yours',
-  title: 'Make this hive yours',
-  steps: [
-    { text: 'Open the app and make a hive of your own. The tiles you create there are yours, kept on your device.',
-      link: { label: 'Open hypercomb.io', href: APP_HREF } },
-    { text: 'Publish a branch from the app. Turn on Manage here and tap it to put it on this page.' },
-    { text: 'To keep it reachable when your device is off, host it from your device, your own server, or in the cloud.',
-      link: { label: 'Host your hive', href: 'https://host-setup.hypercomb.com/' } },
-    { text: 'New to all this? The tour explains what it is in a few minutes.',
-      link: { label: 'Take the tour', href: 'https://protocol.hypercomb.com/' } },
-  ],
-}
+// A VANILLA HIVE (jwize 2026-11-04, sharpened 2026-11-12: "These should only
+// show on hypercomb.com, not on every host. If anything just put a phantom tile
+// on the left showing where the first creation will go"). The platform's doors —
+// tour, app, hosting, extensions, source, licensing — are hypercomb.com's front
+// page, staged there as its own links; no other host draws them as tiles, not
+// even as optional ones. A host with nothing staged and nothing published shows
+// one phantom hexagon in the first place of its row, and nothing else.
 
 const text = (value: unknown, max: number): string =>
   typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, max) : ''
@@ -238,8 +217,8 @@ const hostNameOf = (hostname: string): string => {
 }
 
 /** The card a host shows: the staged front door where there is one, and the
- *  host's own name, the platform's sentence and a starting tile where there is
- *  not. Pure, so the default is a fact the suite can pin. */
+ *  host's own name, the platform's sentence and a phantom first tile where there
+ *  is not. Pure, so the default is a fact the suite can pin. */
 export const frontDoorOf = (welcome: Welcome | null, hostname: string, origin: string): FrontDoor => {
   const links = welcome?.links ?? []
   return {
@@ -248,7 +227,7 @@ export const frontDoorOf = (welcome: Welcome | null, hostname: string, origin: s
     links,
     swarm: welcome?.swarm ?? '',
     footer: PLATFORM_LINKS.filter(door => !links.some(link => sameDoor(link.href, door.href, origin))),
-    starter: links.length === 0 ? STARTER : null,
+    phantom: links.length === 0,
     presentation: welcome?.presentation ?? '',
   }
 }
