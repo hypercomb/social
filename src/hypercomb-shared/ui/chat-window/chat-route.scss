@@ -1175,6 +1175,31 @@ $jx: calc(#{$pad} + #{$square} / 2);
   margin-left: 0.5rem;
 }
 
+// THE ARCHIVE CONFIRM is the archive icon grown into one button: the icon
+// to the left INSIDE it, the words after it, the same height as the icon
+// box it replaces — one control, nothing floating beside it.
+.chat-put-confirm {
+  flex: 0 0 auto;
+  height: 1.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0 0.7rem 0 0.45rem;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(var(--acc), 0.18);
+  color: var(--hc-window-accent);
+  font: inherit;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  cursor: pointer;
+
+  .mat-sym { font-size: 1.0625rem; }
+
+  &:hover,
+  &:focus-visible { background: rgba(var(--acc), 0.3); }
+}
+
 .chat-mast-main {
   flex: 1 1 auto;
   min-width: 0;

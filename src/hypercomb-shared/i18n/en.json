@@ -2736,6 +2736,7 @@
   "chat.archive.section": "Archived ({count})",
   "chat.archive.put": "Archive this conversation",
   "chat.archive.restore": "Bring this conversation back",
+  "chat.archive.confirm": "Yes, archive it",
   "chat.goal.open": "Goals attained — view goals",
   "chat.goal.title": "Goals attained",
   "chat.goal.close": "Close attained goals",

@@ -92,7 +92,7 @@
 // Shell UI — resolves everything through `window.ioc` at call time and never
 // imports essentials.
 
-import { ChangeDetectionStrategy, Component, ElementRef, Injector, afterNextRender, computed, effect, inject, signal, viewChild, type OnDestroy } from '@angular/core'
+import { ChangeDetectionStrategy, Component, ElementRef, Injector, afterNextRender, computed, effect, inject, signal, untracked, viewChild, type OnDestroy } from '@angular/core'
 import { NgTemplateOutlet } from '@angular/common'
 import { DomSanitizer, type SafeHtml } from '@angular/platform-browser'
 import {
@@ -976,7 +976,11 @@ type TilesRailLike = {
   armed?(path: string): boolean
   /** The layer the rail is standing on. The header names this place. */
   here?(): readonly string[]
-  /** The rail walked. The header follows. The hive canvas does not. */
+  /** Stand the rail on a level without announcing it (no onLevelChanged) —
+   *  how a browser BACK / FORWARD moves the rail to the address. */
+  showLevel?(segments: readonly string[]): void
+  /** The rail walked. The header follows, and so does the address bar: each
+   *  level is a real history entry (chat-window `#walkTo`). */
   onLevelChanged?: (segments: readonly string[]) => void
   onSubjectChanged: (subject: RailPickLike | null) => void
   onSelectionChanged: (selection: RailPickLike[]) => void
@@ -1007,6 +1011,8 @@ const parkedOf = (state?: { connected?: boolean; listening?: boolean }): boolean
  *  poll is six seconds apart, plus the two it waits before retrying. */
 const ARRIVAL_GRACE_MS = 9_000
 type NavigationLike = { goRaw?(segments: readonly string[]): void }
+/** What a pushed entry says about the view it was pushed inside (navigation.ts goRaw). */
+type StepState = { hcOver?: unknown; hcOverDepth?: unknown }
 
 /** The optimization pool, over the shared Store — the durable inbox a queued
  *  ask lives in until a Claude session drains it. Withdrawing is removing it. */
@@ -1764,6 +1770,8 @@ export class ChatWindowComponent implements OnDestroy {
   #dismissOne(): boolean {
     // A call from outside is the topmost thing asking: Escape declines it.
     if (this.externalCall()) { this.answerExternal('decline'); return true }
+    // The archive's "sure?" is the smallest thing standing in the masthead.
+    if (this.archiveArmed()) { this.disarmArchive(); return true }
     // A full-bleed picture is the innermost surface standing.
     if (this.viewing()) { this.closePicture(); return true }
     // The flyout is the smallest thing open over the transcript.
@@ -2713,30 +2721,75 @@ export class ChatWindowComponent implements OnDestroy {
   readonly activeArchived = computed(() =>
     !!this.conversations().find(convo => convo.convoId === this.activeId())?.archived)
 
+  /** Is the masthead's archive asking "sure?" — its confirm standing out in
+   *  the right margin? Its own signal, not `armed`: `archive()` clears that
+   *  one, and the row deletes it arms are a different act. */
+  readonly archiveArmed = signal(false)
+
   /** ARCHIVE THE ONE YOU ARE READING. The per-row control in the list acts on
    *  a conversation you are pointing at; this acts on the one in hand, which
    *  is the common case — you finish with a thread while you are in it.
    *
-   *  And then it MOVES ON. This is the one place where staying put would be
-   *  wrong: a press that files the conversation and leaves it on screen looks
-   *  like a press that did nothing. So the window lands on the next live
-   *  thread, or on a fresh chat when that was the last one — the same thing
-   *  deleting does, for the same reason.
+   *  It ASKS ONCE (jwize, 2026-11-12): the first press turns the icon into
+   *  one confirm button — the icon to the left inside it, the words beside
+   *  it. Escape, or focus leaving it, takes it back.
    *
-   *  Bringing one BACK does stay put: you navigated into it deliberately and
-   *  being thrown somewhere else for un-filing it is not what the press asks
-   *  for. */
+   *  Bringing one BACK is still one press: nothing is lost by un-filing, and
+   *  you navigated into it deliberately, so it stays put. */
   async archiveCurrent(): Promise<void> {
     const convoId = this.activeId()
     if (!convoId) return
-    const filing = !this.activeArchived()
-    this.goalOpen.set(false)
-    await this.archive(convoId, filing)
-    if (!filing) return
+    if (this.activeArchived()) {
+      this.archiveArmed.set(false)
+      await this.archive(convoId, false)
+      return
+    }
+    this.archiveArmed.set(true)
+    queueMicrotask(() => this.panel()?.nativeElement
+      .querySelector<HTMLElement>('.chat-put-confirm')?.focus())
+  }
 
-    const next = this.conversations().find(convo => !convo.archived && convo.convoId !== convoId)
-    if (next) { await this.#load(next.convoId); await this.#restoreDraft(); this.#focus() }
+  /** THE CONFIRM: file it, and the window opens a FRESH conversation on the
+   *  same tile at once. Not the next live thread — you finished with this
+   *  subject's thread, not with the subject, and a press that files the
+   *  conversation and leaves it on screen would look like it did nothing.
+   *
+   *  The rail's subject still names the tile after the filing, so its "new
+   *  chat" lists the fresh one under that tile; without a rail (a narrow
+   *  shell) the tile comes from the conversation itself. A free chat stays
+   *  free. The goal card's labelled "archive" lands here directly: it is
+   *  already an explicit act. */
+  async confirmArchive(): Promise<void> {
+    const convoId = this.activeId()
+    this.archiveArmed.set(false)
+    if (!convoId || this.activeArchived()) return
+    this.goalOpen.set(false)
+    const tile = String(this.#threads()?.tilePathOf?.(convoId) ?? '').split('/').filter(Boolean)
+    await this.archive(convoId, true)
+    // THE SAME TILE is the filed conversation's own — not whatever the rail
+    // has in hand (a thread opened from the list leaves the rail holding
+    // nothing, and its "new chat" would start a hive-wide one). The rail's
+    // door is used only when its subject IS that tile, so the fresh thread
+    // is listed under it there.
+    const subject = this.#rail?.subject
+    const held = subject ? [...subject.path, subject.name].join('/') : null
+    if (tile.length && held === tile.join('/') && this.#rail?.newChatOnSubject?.()) {
+      // A subject whose only thread was the one just filed can hand the same
+      // id straight back — that is no fresh conversation, so mint another.
+      if (this.activeId() !== convoId) { this.#focus(); return }
+    }
+    if (tile.length) this.#startAt(tile)
     else this.newChat()
+  }
+
+  /** Take the confirm back without filing anything — Escape (the keyboard
+   *  lands back on the icon) or focus leaving it (the pointer went elsewhere,
+   *  so focus is left where it went). */
+  disarmArchive(refocus = true): void {
+    if (!this.archiveArmed()) return
+    this.archiveArmed.set(false)
+    if (!refocus) return
+    queueMicrotask(() => this.panel()?.nativeElement.querySelector<HTMLElement>('.chat-put')?.focus())
   }
 
   /** Does the loaded essentials build know how to archive? A control that
@@ -4941,6 +4994,21 @@ export class ChatWindowComponent implements OnDestroy {
    *  and one of them left `view:active` owned by a window nobody could see. */
   readonly #surfaceClaim = effect(() => this.#claimSurface(this.visible()))
 
+  /** THE WAY BACK follows what is on screen, like the claim: whatever puts
+   *  the window up (open, unpark, a boot restore) remembers where the hive
+   *  stood, and whatever takes it away (close, Escape's park, a toggle)
+   *  returns the hive there — see `#returnToOrigin`. */
+  #shown = false
+  readonly #wayBack = effect(() => {
+    const shown = this.visible()
+    untracked(() => {
+      if (shown === this.#shown) return
+      this.#shown = shown
+      if (shown) { this.#origin = this.#hiveSegments(); this.#walked = false }
+      else this.#returnToOrigin()
+    })
+  })
+
   /** THE SURFACE IS OWNED, and the owner is counted (ModeRegistry). A full
    *  screen window is a view covering the canvas by any honest reading, and
    *  everything that hides itself for a view — the pixi canvas, the post-it
@@ -5037,7 +5105,7 @@ export class ChatWindowComponent implements OnDestroy {
         // The header names the layer. The rail does not say it a second time.
         this.#rail = factory.create({ title: false })
         this.#rail.onSubjectChanged = subject => { void this.#enterSubject(subject) }
-        this.#rail.onLevelChanged = segments => { this.layerHere.set([...(segments ?? [])]) }
+        this.#rail.onLevelChanged = segments => { this.#walkTo(segments) }
         // Rail picks flow ONTO the shelf as deltas — never a wholesale
         // replace, because the shelf also holds what the hive's takes and the
         // header's drops gathered, and a ctrl-click in the sidebar must not
@@ -6045,6 +6113,7 @@ export class ChatWindowComponent implements OnDestroy {
     rememberChatVisibility(false)
     this.listOpen.set(false)
     this.armed.set('')
+    this.archiveArmed.set(false)
     // A keymap held by the wizard or the route goes with the window.
     this.#releaseQuestionKeys()
     this.#releaseRouteKeys()
@@ -6236,6 +6305,7 @@ export class ChatWindowComponent implements OnDestroy {
   async #load(convoId: string): Promise<void> {
     const threads = this.#threads()
     if (!threads || !convoId) return
+    if (convoId !== this.activeId()) this.archiveArmed.set(false)
     this.activeId.set(convoId)
     this.#rail?.showConversation?.(convoId)
     this.model.set(this.#rememberedModel(convoId))
@@ -6401,6 +6471,7 @@ export class ChatWindowComponent implements OnDestroy {
     this.#endWait()
     this.listOpen.set(false)
     this.armed.set('')
+    this.archiveArmed.set(false)
     this.atBottom.set(true)
     if (focus) this.#focus()
   }
@@ -6408,6 +6479,7 @@ export class ChatWindowComponent implements OnDestroy {
   async pick(convoId: string): Promise<void> {
     this.listOpen.set(false)
     this.armed.set('')
+    this.archiveArmed.set(false)
     await this.#flushDraft()
     this.railSubject.set(null)
     this.#rail?.clearSubject()
@@ -6583,13 +6655,22 @@ export class ChatWindowComponent implements OnDestroy {
     rail.visit(segments)
   }
 
-  /** Going into a tile arms its conversation. Coming back out shows it. */
+  /** Going into a tile arms its conversation. Coming back out shows it.
+   *
+   *  And the RAIL FOLLOWS THE ADDRESS. Its walk is the address bar now, so a
+   *  browser BACK / FORWARD (or an answer's path chip) moves the hive, and
+   *  the rail stands on the same level — announced to nobody, since the
+   *  address already moved. */
   #followHiveLocation(nextPath: string): void {
     const prev = this.#stoodPath.split('/').filter(Boolean)
     const next = nextPath.split('/').filter(Boolean)
     if (nextPath === this.#stoodPath) return
     this.#stoodPath = nextPath
     const rail = this.#rail
+    if (rail?.showLevel && (rail.here?.() ?? []).join('/') !== nextPath) {
+      rail.showLevel(next)
+      this.#noteLayer()
+    }
     if (!rail?.visit || !rail.recall) return
     const move = hiveConversationMove(prev, next)
     if (move.kind === 'enter') { rail.visit(move.segments); return }
@@ -6597,6 +6678,72 @@ export class ChatWindowComponent implements OnDestroy {
       const pick = rail.recall(move.segments)
       if (pick && pick.convoId !== this.activeId()) void this.#enterSubject(pick, false)
     }
+  }
+
+  /** WHERE THE CHAT WAS STARTED FROM — the hive's place when the window came
+   *  up — and whether the rail walked the address away from it since. */
+  #origin: readonly string[] | null = null
+  #walked = false
+
+  /** THE RAIL WALKED, and the walk is NORMAL NAVIGATION (jwize, 2026-11-12):
+   *  each level it steps to is a real entry in the address bar, so BACK and
+   *  FORWARD walk it too. The entry is pushed over the window's back-trap
+   *  (view-back.ts), which tags it a step inside the open view
+   *  (navigation.ts `hcOver`): BACK steps the rail back rather than leaving
+   *  the chat, and leaving the chat unwinds the whole walk at once.
+   *
+   *  `#stoodPath` is set first so the lineage echo of our own push is not
+   *  read as a move: the rail already armed and recalled what it walked. */
+  #walkTo(segments: readonly string[]): void {
+    const next = [...(segments ?? [])].map(part => String(part ?? '').trim()).filter(Boolean)
+    this.layerHere.set(next)
+    const hive = this.#hiveSegments()
+    if (next.join('/') === hive.join('/')) return
+    const navigation = ioc()?.get('@hypercomb.social/Navigation') as NavigationLike | undefined
+    if (!navigation?.goRaw) return
+    this.#stoodPath = next.join('/')
+    this.#walked = true
+    // GOING UP IS BROWSER BACK when the entry underneath IS the parent — a
+    // step this walk pushed (`hcOver`) over the place it came from. A right
+    // click out and the back button are then the same move, and the stack
+    // does not grow a forward entry that leads straight back in. Only going
+    // up past where the walk started pushes.
+    const state = (window.history.state ?? {}) as StepState & { hcBelow?: unknown }
+    const up = next.length === hive.length - 1 && next.every((part, i) => part === hive[i])
+    const address = window.location.pathname.replace(/\/\[[^/]*\]$/, '')
+    const parentAddress = address.slice(0, address.lastIndexOf('/')) || '/'
+    if (up && typeof state.hcOver === 'string' && Number(state.hcOverDepth) > 0
+      && state.hcBelow === parentAddress) {
+      window.history.back()
+      return
+    }
+    navigation.goRaw(next)
+  }
+
+  /** BACK TO TILES MODE LANDS WHERE THE CHAT WAS STARTED FROM. The rail's
+   *  walk moved the address for real; leaving the chat takes the hive back.
+   *
+   *  When the entry in hand is a step the walk pushed over the window's trap
+   *  (`hcOver`), ONE traversal of depth + 1 lands on the entry the chat was
+   *  opened on — the excursion and the trap go together, the stack is as it
+   *  was found, and FORWARD can still redo the walk. Otherwise (no trap was
+   *  up — the close-up owned BACK — or the browser has already stepped back
+   *  onto the trap) the origin is pushed, the way the notes desk returns. */
+  #returnToOrigin(): void {
+    const origin = this.#origin
+    const walked = this.#walked
+    this.#origin = null
+    this.#walked = false
+    if (!origin) return
+    const state = (window.history.state ?? {}) as StepState
+    const depth = Number(state.hcOverDepth)
+    if (typeof state.hcOver === 'string' && depth > 0) {
+      try { window.history.go(-(depth + 1)); return } catch { /* fall through to the push */ }
+    }
+    if (!walked) return
+    if (this.#hiveSegments().join('/') === origin.join('/')) return
+    const navigation = ioc()?.get('@hypercomb.social/Navigation') as NavigationLike | undefined
+    navigation?.goRaw?.(origin)
   }
 
   /** The header names the layer the rail is standing on. The hive canvas

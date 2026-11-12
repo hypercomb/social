@@ -2458,6 +2458,7 @@
   "chat.archive.section": "Arşivlenmiş ({count})",
   "chat.archive.put": "Bu sohbeti arşivle",
   "chat.archive.restore": "Bu sohbeti geri getir",
+  "chat.archive.confirm": "Evet, arşivle",
   "chat.goal.open": "Ulaşılan hedefler — hedefleri gör",
   "chat.goal.title": "Ulaşılan hedefler",
   "chat.goal.close": "Ulaşılan hedefleri kapat",

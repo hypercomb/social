@@ -136,7 +136,7 @@ describe('view-back — the trap', () => {
   it('pushes ONE entry when the first view comes up, and none for a nested one', () => {
     open('site-view', () => close('site-view'))
     expect(history.length).toBe(2)
-    expect(history.state).toEqual({ hcView: 'site-view' })
+    expect(history.state).toMatchObject({ hcView: 'site-view', hcTrap: expect.any(String) })
     expect(viewBack.armed).toBe(true)
 
     open('photo', () => close('photo'))
@@ -212,7 +212,7 @@ describe('view-back — the trap', () => {
     expect(viewBack.armed).toBe(false)
     await settle()
     expect(viewBack.armed).toBe(true)
-    expect(history.state).toEqual({ hcView: 'site-view' })
+    expect(history.state).toMatchObject({ hcView: 'site-view', hcTrap: expect.any(String) })
 
     await history.press()
     expect(owners()).toEqual([])
@@ -302,6 +302,52 @@ describe('view-back — the trap', () => {
     expect(owners()).toEqual(['slides-view'])
     expect(viewBack.armed).toBe(true)
     expect(ours()).toBe(true)
+  })
+
+  // THE CHAT'S RAIL WALK (2026-11-12): a view pushes real places over the
+  // trap (navigation.ts goRaw tags them `hcOver` + this trap's token). BACK
+  // walks those steps with the view still up; only the press that leaves the
+  // trap itself leaves the view.
+  it('a pop onto a step the view pushed, or onto the trap, stays inside the view', async () => {
+    const back = vi.fn(() => close('chat-window'))
+    open('chat-window', back)
+    const trap = (history.state as { hcTrap: string }).hcTrap
+    history.pushState({ hcRaw: ['a'], hcOver: 'chat-window', hcOverDepth: 1, hcOverTrap: trap })
+    history.pushState({ hcRaw: ['a', 'b'], hcOver: 'chat-window', hcOverDepth: 2, hcOverTrap: trap })
+
+    await history.press()                  // /a/b → /a: a step back inside the view
+    expect(back).not.toHaveBeenCalled()
+    expect(viewBack.armed).toBe(true)
+    expect(owners()).toEqual(['chat-window'])
+
+    await history.press()                  // /a → the trap: still inside, still armed
+    expect(back).not.toHaveBeenCalled()
+    expect(viewBack.armed).toBe(true)
+    expect(ours()).toBe(true)
+
+    await history.press()                  // the trap is consumed: the press leaves
+    expect(back).toHaveBeenCalledOnce()
+    expect(owners()).toEqual([])
+    await settle()
+    expect(history.length).toBe(4)         // nothing was pushed over the walk
+  })
+
+  it('a step left by an EARLIER trap is not this one — the press still leaves', async () => {
+    viewBack.dispose()
+    stand([{ hcRaw: ['a'], hcOver: 'chat-window', hcOverDepth: 1, hcOverTrap: 'stale' }])
+    const back = vi.fn(() => close('chat-window'))
+    open('chat-window', back)
+    await history.press()
+    expect(back).toHaveBeenCalledOnce()
+  })
+
+  it('closing on top of a step leaves the walk alone — the view unwinds it itself', () => {
+    open('chat-window', () => close('chat-window'))
+    const trap = (history.state as { hcTrap: string }).hcTrap
+    history.pushState({ hcRaw: ['a'], hcOver: 'chat-window', hcOverDepth: 1, hcOverTrap: trap })
+    close('chat-window')
+    expect(history.backs).toBe(0)
+    expect(viewBack.armed).toBe(false)
   })
 
   it('stops listening once disposed', () => {

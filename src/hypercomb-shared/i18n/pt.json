@@ -2458,6 +2458,7 @@
   "chat.archive.section": "Arquivadas ({count})",
   "chat.archive.put": "Arquivar esta conversa",
   "chat.archive.restore": "Trazer esta conversa de volta",
+  "chat.archive.confirm": "Sim, arquivar",
   "chat.goal.open": "Metas alcançadas — ver metas",
   "chat.goal.title": "Metas alcançadas",
   "chat.goal.close": "Fechar as metas alcançadas",

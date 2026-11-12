@@ -2458,6 +2458,7 @@
   "chat.archive.section": "संग्रहित ({count})",
   "chat.archive.put": "इस बातचीत को संग्रहित करें",
   "chat.archive.restore": "इस बातचीत को वापस लाएँ",
+  "chat.archive.confirm": "हाँ, संग्रहित करें",
   "chat.goal.open": "लक्ष्य पूरे हुए — लक्ष्य देखें",
   "chat.goal.title": "लक्ष्य पूरे हुए",
   "chat.goal.close": "पूरे हुए लक्ष्य बंद करें",

@@ -2458,6 +2458,7 @@
   "chat.archive.section": "مؤرشف ({count})",
   "chat.archive.put": "أرشفة هذه المحادثة",
   "chat.archive.restore": "إعادة هذه المحادثة",
+  "chat.archive.confirm": "نعم، أرشفها",
   "chat.goal.open": "أهداف تحققت — عرض الأهداف",
   "chat.goal.title": "أهداف تحققت",
   "chat.goal.close": "إغلاق الأهداف المتحققة",

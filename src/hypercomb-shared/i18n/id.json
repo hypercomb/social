@@ -2458,6 +2458,7 @@
   "chat.archive.section": "Diarsipkan ({count})",
   "chat.archive.put": "Arsipkan percakapan ini",
   "chat.archive.restore": "Kembalikan percakapan ini",
+  "chat.archive.confirm": "Ya, arsipkan",
   "chat.goal.open": "Tujuan tercapai — lihat tujuan",
   "chat.goal.title": "Tujuan tercapai",
   "chat.goal.close": "Tutup tujuan yang tercapai",

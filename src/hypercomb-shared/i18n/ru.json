@@ -2458,6 +2458,7 @@
   "chat.archive.section": "В архиве ({count})",
   "chat.archive.put": "Убрать этот разговор в архив",
   "chat.archive.restore": "Вернуть этот разговор",
+  "chat.archive.confirm": "Да, в архив",
   "chat.goal.open": "Цели достигнуты — посмотреть цели",
   "chat.goal.title": "Цели достигнуты",
   "chat.goal.close": "Закрыть достигнутые цели",

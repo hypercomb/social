@@ -82,6 +82,8 @@ type NavigationLike = {
 export const REARM_MS = 250
 
 const VIEW_ACTIVE = 'view:active'
+/** Counts traps armed in this page, for their tokens. */
+let trapCount = 0
 const CLOSE_UP_OWNER = 'tile-view'
 
 type Ioc = { get<T>(key: string): T | undefined }
@@ -101,6 +103,8 @@ export class ViewBack {
    *  close that replaced it chose this place, and the pop must not undo it. */
   #carried: readonly string[] | null = null
   #rearmTimer: ReturnType<typeof setTimeout> | null = null
+  /** The live trap's token ('' before the first arm). */
+  #token = ''
   #unsubscribe: () => void
 
   constructor(history: HistoryLike = window.history, target: EventTarget = window) {
@@ -168,6 +172,12 @@ export class ViewBack {
       this.#scheduleRearm()
       return
     }
+    // A STEP BACK INSIDE THE VIEW. The view pushed real places over our
+    // trap (`hcOver`, navigation.ts goRaw — the chat's rail walk), and this
+    // pop only came down one of them: it landed on another step, or on the
+    // trap itself. The trap is still underneath, so the press is the
+    // address bar's, not the way out.
+    if (this.#stateIsOurTrap() || this.#stateIsAStep()) return
     // This pop consumed our entry: the press means "leave the view".
     this.#armed = false
     this.#back()
@@ -178,7 +188,10 @@ export class ViewBack {
     this.#cancelRearm()
     if (this.#armed || this.#closeUpOwnsBack()) return
     try {
-      this.#history.pushState({ hcView: this.#topOwner() }, '')
+      // A token per trap, so a step pushed above it (navigation.ts copies it
+      // as `hcOverTrap`) is known to be THIS trap's, never a stale one's.
+      this.#token = `${Date.now().toString(36)}.${++trapCount}`
+      this.#history.pushState({ hcView: this.#topOwner(), hcTrap: this.#token }, '')
       this.#armed = true
     } catch {
       /* history unavailable — Escape, × and the exit chips remain */
@@ -242,6 +255,18 @@ export class ViewBack {
   #stateIsOurs = (): boolean => {
     const state = this.#history.state as { hcView?: unknown } | null | undefined
     return typeof state?.hcView === 'string'
+  }
+
+  /** Our LIVE trap is the entry on top again — not a stale one left buried. */
+  #stateIsOurTrap = (): boolean => {
+    const state = this.#history.state as { hcTrap?: unknown } | null | undefined
+    return this.#token !== '' && state?.hcTrap === this.#token
+  }
+
+  /** An entry the view pushed ABOVE our live trap while it was up. */
+  #stateIsAStep = (): boolean => {
+    const state = this.#history.state as { hcOverTrap?: unknown } | null | undefined
+    return this.#token !== '' && state?.hcOverTrap === this.#token
   }
 }
 

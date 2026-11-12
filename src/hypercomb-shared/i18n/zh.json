@@ -2458,6 +2458,7 @@
   "chat.archive.section": "已归档 ({count})",
   "chat.archive.put": "归档此对话",
   "chat.archive.restore": "恢复此对话",
+  "chat.archive.confirm": "是，归档",
   "chat.goal.open": "目标已达成 — 查看目标",
   "chat.goal.title": "目标已达成",
   "chat.goal.close": "关闭已达成的目标",

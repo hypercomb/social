@@ -2458,6 +2458,7 @@
   "chat.archive.section": "보관됨 ({count})",
   "chat.archive.put": "이 대화를 보관하기",
   "chat.archive.restore": "이 대화를 다시 가져오기",
+  "chat.archive.confirm": "네, 보관합니다",
   "chat.goal.open": "달성한 목표 — 목표 보기",
   "chat.goal.title": "달성한 목표",
   "chat.goal.close": "달성한 목표 닫기",

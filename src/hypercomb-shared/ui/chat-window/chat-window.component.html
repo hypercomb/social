@@ -392,12 +392,29 @@
               <span class="mat-sym" aria-hidden="true">verified</span>
             </button>
           }
-          <button class="chat-tool chat-put" type="button"
-            (click)="archiveCurrent()"
-            [title]="(activeArchived() ? 'chat.archive.restore' : 'chat.archive.put') | t"
-            [attr.aria-label]="(activeArchived() ? 'chat.archive.restore' : 'chat.archive.put') | t">
-            <span class="mat-sym" aria-hidden="true">{{ activeArchived() ? 'unarchive' : 'archive' }}</span>
-          </button>
+          <!-- PUT AWAY ASKS ONCE (jwize, 2026-11-12). The first press turns
+               the archive icon into ONE confirm: the icon to the left INSIDE
+               it, the words beside it. Pressing the confirm files the thread
+               and the window opens a fresh conversation on the same tile at
+               once; Escape or looking away takes it back. Bringing one back
+               is still one press: nothing is lost by un-filing. -->
+          @if (archiveArmed() && !activeArchived()) {
+            <button class="chat-put-confirm" type="button"
+              (click)="confirmArchive()"
+              (keydown.escape)="disarmArchive(true)"
+              (focusout)="disarmArchive(false)"
+              [title]="'chat.archive.confirm' | t">
+              <span class="mat-sym" aria-hidden="true">archive</span>
+              <span class="chat-put-confirm-label">{{ 'chat.archive.confirm' | t }}</span>
+            </button>
+          } @else {
+            <button class="chat-tool chat-put" type="button"
+              (click)="archiveCurrent()"
+              [title]="(activeArchived() ? 'chat.archive.restore' : 'chat.archive.put') | t"
+              [attr.aria-label]="(activeArchived() ? 'chat.archive.restore' : 'chat.archive.put') | t">
+              <span class="mat-sym" aria-hidden="true">{{ activeArchived() ? 'unarchive' : 'archive' }}</span>
+            </button>
+          }
         </div>
       }
     </div>
@@ -410,7 +427,7 @@
           <button type="button" (click)="toggleGoal()" [attr.aria-label]="'chat.goal.close' | t">×</button>
         </div>
         <p>{{ goal.details }}</p>
-        <button class="chat-goal-archive" type="button" (click)="archiveCurrent()">
+        <button class="chat-goal-archive" type="button" (click)="confirmArchive()">
           <span class="mat-sym" aria-hidden="true">archive</span>
           {{ 'chat.goal.archive' | t }}
         </button>

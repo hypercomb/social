@@ -2275,6 +2275,7 @@
   "chat.archive.section": "アーカイブ済み ({count})",
   "chat.archive.put": "この会話をアーカイブする",
   "chat.archive.restore": "この会話を元に戻す",
+  "chat.archive.confirm": "はい、アーカイブする",
   "chat.goal.open": "達成した目標 — 目標を見る",
   "chat.goal.title": "達成した目標",
   "chat.goal.close": "達成した目標を閉じる",

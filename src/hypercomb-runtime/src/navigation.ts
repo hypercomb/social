@@ -285,7 +285,26 @@ export class Navigation extends hypercomb {
 
     // `hcBelow` remembers the address this entry was pushed over, so a later
     // replace that lands back on it can collapse the pair (see replaceRaw).
-    window.history.pushState({ hcRaw: clean, hcBelow: window.location.pathname }, '', path + hash)
+    const next: Record<string, unknown> = { hcRaw: clean, hcBelow: window.location.pathname }
+    // A STEP INSIDE AN OPEN VIEW. Pushed over a view's back-trap
+    // (`hcView`, view-back.ts) or over a step already pushed there, the
+    // entry says so — `hcOver` names the trap's owner and `hcOverDepth`
+    // counts how far above the trap it sits. The trap then knows a BACK that
+    // lands here is a step back inside the view, not the press that leaves
+    // it, and the view can unwind its whole excursion in one traversal
+    // (the chat's rail walk, 2026-11-12).
+    const below = (window.history.state ?? {}) as {
+      hcView?: unknown; hcTrap?: unknown; hcOver?: unknown; hcOverDepth?: unknown; hcOverTrap?: unknown
+    }
+    const onTrap = typeof below.hcView === 'string'
+    const over = onTrap ? below.hcView : typeof below.hcOver === 'string' ? below.hcOver : null
+    if (over !== null) {
+      next['hcOver'] = over
+      next['hcOverDepth'] = (onTrap ? 0 : Number(below.hcOverDepth) || 0) + 1
+      const trap = onTrap ? below.hcTrap : below.hcOverTrap
+      if (typeof trap === 'string') next['hcOverTrap'] = trap
+    }
+    window.history.pushState(next, '', path + hash)
     this.dispatch()
   }
 
@@ -293,7 +312,9 @@ export class Navigation extends hypercomb {
     const clean = segments.map(s => (s ?? '').trim()).filter(Boolean)
     const path = this.#pathOf(clean)
     const hash = window.location.hash ?? ''
-    const state = (window.history.state ?? {}) as { hcView?: unknown; hcBelow?: unknown }
+    const state = (window.history.state ?? {}) as {
+      hcView?: unknown; hcTrap?: unknown; hcBelow?: unknown; hcOver?: unknown; hcOverDepth?: unknown; hcOverTrap?: unknown
+    }
 
     // COMING BACK OUT WHERE YOU WENT IN costs no entry. A stepped-into view
     // pushed one entry over the place it was entered from; when its exit
@@ -310,8 +331,16 @@ export class Navigation extends hypercomb {
     // recognisable as ours across an address replace, or the trap is never
     // dropped and stays on the stack wearing the page it was replaced with.
     const next: Record<string, unknown> = { hcRaw: clean }
-    if (typeof state.hcView === 'string') next['hcView'] = state.hcView
-    else if (typeof state.hcBelow === 'string') next['hcBelow'] = state.hcBelow
+    if (typeof state.hcView === 'string') {
+      next['hcView'] = state.hcView
+      if (typeof state.hcTrap === 'string') next['hcTrap'] = state.hcTrap
+    } else if (typeof state.hcBelow === 'string') next['hcBelow'] = state.hcBelow
+    // A step inside an open view stays one across a replace (see goRaw).
+    if (typeof state.hcOver === 'string') {
+      next['hcOver'] = state.hcOver
+      next['hcOverDepth'] = state.hcOverDepth
+      if (typeof state.hcOverTrap === 'string') next['hcOverTrap'] = state.hcOverTrap
+    }
     window.history.replaceState(next, '', path + hash)
     this.dispatch()
   }

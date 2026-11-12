@@ -62,3 +62,32 @@ describe('Navigation address spelling', () => {
     expect(new Navigation().segmentsRaw()).toEqual(['Big-Ideas'])
   })
 })
+
+describe('Navigation — a step inside an open view', () => {
+  beforeEach(() => { window.history.replaceState(null, '', '/') })
+
+  it('goRaw over a view trap is a step: owner, depth 1, the trap token', () => {
+    const nav = new Navigation()
+    window.history.pushState({ hcView: 'chat-window', hcTrap: 't1' }, '')
+    nav.goRaw(['a'])
+    expect(window.history.state).toMatchObject({ hcRaw: ['a'], hcOver: 'chat-window', hcOverDepth: 1, hcOverTrap: 't1' })
+    nav.goRaw(['a', 'b'])
+    expect(window.history.state).toMatchObject({ hcOver: 'chat-window', hcOverDepth: 2, hcOverTrap: 't1' })
+  })
+
+  it('a step stays a step across a replace, and the trap stays the trap', () => {
+    const nav = new Navigation()
+    window.history.pushState({ hcView: 'chat-window', hcTrap: 't2' }, '')
+    nav.replaceRaw(['x'])
+    expect(window.history.state).toMatchObject({ hcView: 'chat-window', hcTrap: 't2' })
+    nav.goRaw(['x', 'y'])
+    nav.replaceRaw(['x', 'z'])
+    expect(window.history.state).toMatchObject({ hcRaw: ['x', 'z'], hcOver: 'chat-window', hcOverDepth: 1, hcOverTrap: 't2' })
+  })
+
+  it('a push with no view up carries no step tag', () => {
+    const nav = new Navigation()
+    nav.goRaw(['plain'])
+    expect(window.history.state).not.toHaveProperty('hcOver')
+  })
+})
