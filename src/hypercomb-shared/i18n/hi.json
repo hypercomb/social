@@ -2290,6 +2290,8 @@
   "agent.rail-convos-waiting": "आपका इंतज़ार",
   "agent.rail-convos-active": "खुली",
   "agent.rail-convos-done": "आज पूरी",
+  "agent.rail-convos-show": "बातचीत — {count} आपके जवाब की प्रतीक्षा में",
+  "agent.rail-convos-hide": "टाइलों पर वापस जाएँ",
   "agent.rail-tiles": "यहाँ की टाइलें",
   "agent.rail-age-now": "अभी",
   "agent.rail-age-minutes": "{count} मि",

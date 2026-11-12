@@ -2290,6 +2290,8 @@
   "agent.rail-convos-waiting": "Sizi bekliyor",
   "agent.rail-convos-active": "Açık",
   "agent.rail-convos-done": "Bugün bitenler",
+  "agent.rail-convos-show": "Konuşmalar — {count} tanesi seni bekliyor",
+  "agent.rail-convos-hide": "Döşemelere dön",
   "agent.rail-tiles": "Buradaki döşemeler",
   "agent.rail-age-now": "şimdi",
   "agent.rail-age-minutes": "{count} dk",

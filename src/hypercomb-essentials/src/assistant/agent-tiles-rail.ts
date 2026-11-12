@@ -234,6 +234,7 @@ const walkIcon = 'arrow_forward'
 const backIcon = 'arrow_back'
 const rootIcon = 'hive'
 const findIcon = 'search'
+const convosIcon = 'forum'
 
 /** A glyph as the shell draws one: the ligature in a .mat-sym span. */
 const glyphSpan = (name: string): HTMLSpanElement => {
@@ -301,6 +302,16 @@ export class AgentTilesRail {
   #trail: string[][] = [[]]
   /** Levels already walked — "back" repaints instantly, then refreshes. */
   readonly #levels = new Map<string, RailRow[]>()
+  /** Where each level was scrolled when it was left by drilling in, so
+   *  coming back out lands on the rows you went in from — not the top of a
+   *  long list you would have to scroll down again every trip. */
+  readonly #scrolls = new Map<string, number>()
+  /** The level being returned to and the row it was left through, until a
+   *  render of that level with rows puts the list back where it was. */
+  #returning: { level: string; out: string } | null = null
+  /** The row just come out of — where ← lands the keyboard, so the focus
+   *  does not drag the restored list back to its first row. */
+  #cameOutOf: HTMLElement | null = null
   /** propsSig → object URL (null: looked, no picture to be had). */
   readonly #icons = new Map<string, string | null>()
   /** propsSig being read → the icon elements waiting on it. */
@@ -381,6 +392,14 @@ export class AgentTilesRail {
   #standingsEpoch = 0
   /** Is the conversations list's archive shelf showing? Not persisted. */
   #convosArchiveOpen = false
+  /** Is the list showing the layer's CONVERSATIONS instead of its tiles?
+   *  A tab, not a stack (jwize, 2026-11-12: "too invasive to look at
+   *  together") — the head band's icon switches, and carries the count of
+   *  conversations waiting on you so nothing is missed while it is shut. */
+  #convosTab = false
+  #convosToggle: HTMLButtonElement | null = null
+  /** Where the tiles were scrolled when the conversations tab opened. */
+  #tilesScroll = 0
   /** The conversation the window has open, however it was opened. */
   #openConvo = ''
   #dropBusyWatch: (() => void) | null = null
@@ -527,7 +546,22 @@ export class AgentTilesRail {
     findToggle.append(glyphSpan(findIcon))
     findToggle.addEventListener('click', () => this.#setFinding(!this.#finding || !!this.#query))
     this.#findToggle = findToggle
-    head.append(back, title, find, findToggle)
+    head.append(back, title, find)
+    if (this.#profile.chats) {
+      const convosToggle = document.createElement('button')
+      convosToggle.type = 'button'
+      convosToggle.className = 'hc-rail-convos-toggle'
+      const badge = document.createElement('span')
+      badge.className = 'hc-rail-convos-badge'
+      badge.hidden = true
+      convosToggle.append(glyphSpan(convosIcon), badge)
+      convosToggle.addEventListener('click', () => this.#setConvosTab(!this.#convosTab))
+      this.#convosToggle = convosToggle
+      head.append(convosToggle)
+    } else {
+      this.#convosToggle = null
+    }
+    head.append(findToggle)
     this.#setFinding(!!this.#query)
 
     const list = document.createElement('div')
@@ -798,6 +832,8 @@ export class AgentTilesRail {
    *  reading pane stays put until the way back. */
   #descend(levels: readonly (readonly string[])[]): void {
     if (!this.#profile.walk || !levels.length) return
+    if (this.#list) this.#scrolls.set(pathKey(this.#here()), this.#list.scrollTop)
+    this.#returning = null
     this.#query = ''
     if (this.#find) this.#find.value = ''
     for (const segments of levels) {
@@ -817,6 +853,7 @@ export class AgentTilesRail {
     this.#query = ''
     if (this.#find) this.#find.value = ''
     this.#trail.pop()
+    this.#returning = { level: pathKey(this.#here()), out: pathKey(left) }
     this.onLevelChanged(this.#here())
     const pick = this.recall(left)
     if (pick && pick.convoId !== this.#openConvo) this.onSubjectChanged(pick)
@@ -946,6 +983,12 @@ export class AgentTilesRail {
       this.#back.setAttribute('aria-hidden', atRoot ? 'true' : 'false')
     }
 
+    // A repaint of the level already on screen (the fresh walk landing, a
+    // synchronize, a filter) keeps its place; a different level starts at
+    // the top unless it is the one being returned to.
+    const level = pathKey(path)
+    const kept = list.dataset['level'] === level ? list.scrollTop : 0
+    list.dataset['level'] = level
     list.textContent = ''
     if (direction !== 0) {
       // Restart the slide even when one is mid-flight: none → reflow → set.
@@ -954,13 +997,22 @@ export class AgentTilesRail {
       list.style.animation = `${direction > 0 ? 'hcRailIn' : 'hcRailOut'} 0.18s ease`
     }
 
+    // THE CONVERSATIONS for the layer in hand are a TAB, never stacked over
+    // the tiles: with it open the list is the conversations and nothing else.
+    // A standing search is over tiles, so it shows the tiles.
+    this.#paintConvosToggle()
+    if (this.#profile.chats && this.#convosTab && !this.#query) {
+      list.appendChild(this.#convosSection())
+      this.#returning = null
+      list.scrollTop = kept
+      return
+    }
+
     // THE HIVE ITSELF, first and always. Every tile can hold a conversation
     // and the hive could not — the one place with nothing to hang a global
     // question on. It sits above the level whatever level you are on, so
     // "ask about the whole thing" is never somewhere else. Hidden only while
     // the find box is narrowing the list: it is not one of the matches.
-    // THE CONVERSATIONS for the layer in hand, above the tiles themselves.
-    if (this.#profile.chats && !this.#query && this.#chatList.length) list.appendChild(this.#convosBlock())
     if (this.#profile.chats && !this.#query) list.appendChild(this.#hiveGroup())
 
     if (rows === null) {
@@ -970,6 +1022,7 @@ export class AgentTilesRail {
         skeleton.style.animationDelay = `${i * 0.09}s`
         list.appendChild(skeleton)
       }
+      list.scrollTop = 0
       return
     }
 
@@ -978,6 +1031,7 @@ export class AgentTilesRail {
       empty.className = 'hc-rail-empty'
       empty.textContent = this.#t('agent.rail-empty', 'Nothing inside this tile yet.')
       list.appendChild(empty)
+      this.#settleScroll(list, level, kept)
       this.#landFocus()
       return
     }
@@ -992,6 +1046,7 @@ export class AgentTilesRail {
         ? this.#t('agent.rail-no-match', 'No tile here matches “{query}”.').replace('{query}', this.#query)
         : this.#t('agent.rail-empty', 'Nothing inside this tile yet.')
       list.appendChild(empty)
+      this.#settleScroll(list, level, kept)
       this.#landFocus()
       return
     }
@@ -1181,20 +1236,52 @@ export class AgentTilesRail {
       list.appendChild(group)
     }
 
+    this.#settleScroll(list, level, kept)
     // The rows exist; now say what each one holds.
     this.#paintStatus()
     this.#landFocus()
+  }
+
+  /** Put the list where the reader left it. Coming back out of a tile
+   *  restores the scroll this level had when it was drilled from, then makes
+   *  sure the row you came out of is on screen (centred when there is no
+   *  remembered scroll — a level you started inside was never scrolled). */
+  #settleScroll(list: HTMLElement, level: string, kept: number): void {
+    const returning = this.#returning
+    if (!returning || returning.level !== level) {
+      list.scrollTop = kept
+      return
+    }
+    this.#returning = null
+    const saved = this.#scrolls.get(level)
+    list.scrollTop = saved ?? 0
+    const row = [...list.querySelectorAll<HTMLElement>('.hc-rail-group')]
+      .find(group => group.dataset['key'] === returning.out)
+    if (!row) return
+    this.#cameOutOf = row
+    const frame = list.getBoundingClientRect()
+    const box = row.getBoundingClientRect()
+    if (saved === undefined) {
+      list.scrollTop += (box.top - frame.top) - (list.clientHeight - box.height) / 2
+    } else if (box.top < frame.top) {
+      list.scrollTop += box.top - frame.top
+    } else if (box.bottom > frame.bottom) {
+      list.scrollTop += box.bottom - frame.bottom
+    }
   }
 
   /** After a level change the focus that was on a now-removed row would be
    *  lost to the body. Land on the first tile of the level that arrived, or
    *  on the hive line when that level is empty, so ← still has a row. */
   #landFocus(): void {
+    const out = this.#cameOutOf
+    this.#cameOutOf = null
     if (!this.#focusFirstRow) return
     this.#focusFirstRow = false
     const list = this.#list
     if (!list) return
-    const landed = list.querySelector<HTMLElement>('.hc-rail-group:not(.hc-rail-hive) .hc-rail-main')
+    const landed = (out?.isConnected ? out.querySelector<HTMLElement>('.hc-rail-main') : null)
+      ?? list.querySelector<HTMLElement>('.hc-rail-group:not(.hc-rail-hive) .hc-rail-main')
       ?? list.querySelector<HTMLElement>('.hc-rail-hive .hc-rail-main')
     landed?.focus()
   }
@@ -1515,29 +1602,43 @@ export class AgentTilesRail {
     return this.#t('agent.rail-age-days', '{count}d').replace('{count}', String(Math.floor(hours / 24)))
   }
 
-  /** The conversations list and the heading that hands over to the tiles. */
-  #convosBlock(): HTMLElement {
-    const block = document.createElement('div')
-    block.className = 'hc-rail-convos-block'
-    block.appendChild(this.#convosSection())
-    const tiles = document.createElement('div')
-    tiles.className = 'hc-rail-tiles-head'
-    tiles.textContent = this.#t('agent.rail-tiles', 'Tiles here')
-    block.appendChild(tiles)
-    return block
+  /** Open or shut the conversations tab. The tiles keep their place: the
+   *  scroll they had is put back when the tab shuts. */
+  #setConvosTab(on: boolean): void {
+    if (on === this.#convosTab || !this.#profile.chats) return
+    const list = this.#list
+    if (on && list) this.#tilesScroll = list.scrollTop
+    this.#convosTab = on
+    this.paint()
+    if (list) list.scrollTop = on ? 0 : this.#tilesScroll
   }
 
-  /** THE CONVERSATIONS for the layer in hand, by who they wait on: a question
-   *  out to you, still open, done today — and what was put away, folded shut
-   *  under them. A thread shows while you are on its layer: the layer's own,
-   *  and the tiles sitting on it. Deeper threads appear after you go inside.
-   *  A tile's own fold below still lists that tile's threads. */
-  #convosSection(): HTMLElement {
-    const section = document.createElement('section')
-    section.className = 'hc-rail-convos'
-    const heading = this.#t('agent.rail-convos', 'Conversations')
-    section.setAttribute('aria-label', heading)
+  /** The head band's conversations icon: pressed while the tab is open, and
+   *  wearing how many conversations on this layer wait on you. */
+  #paintConvosToggle(): void {
+    const toggle = this.#convosToggle
+    if (!toggle) return
+    const waiting = this.#convoGroups().groups.waiting.length
+    const badge = toggle.querySelector<HTMLElement>('.hc-rail-convos-badge')
+    if (badge) {
+      badge.textContent = waiting ? String(waiting) : ''
+      badge.hidden = waiting === 0
+    }
+    toggle.classList.toggle('waiting', waiting > 0)
+    toggle.setAttribute('aria-pressed', this.#convosTab ? 'true' : 'false')
+    const label = this.#convosTab
+      ? this.#t('agent.rail-convos-hide', 'Back to the tiles')
+      : waiting
+        ? this.#t('agent.rail-convos-show', 'Conversations — {count} waiting on you').replace('{count}', String(waiting))
+        : this.#t('agent.rail-convos', 'Conversations')
+    toggle.title = label
+    toggle.setAttribute('aria-label', label)
+  }
 
+  /** The layer's conversations by who they wait on, and what was put away.
+   *  A thread shows while you are on its layer: the layer's own, and the
+   *  tiles sitting on it. Done threads older than today drop out. */
+  #convoGroups(): { groups: Record<ConvoGroup, TileConversation[]>; filed: TileConversation[] } {
     const onLayer = (chat: TileConversation): boolean => conversationOnLayer(chat.path, this.#here())
     const live = this.#chatList.filter(chat => !chat.archived && onLayer(chat))
     const filed = this.#chatList.filter(chat => chat.archived && onLayer(chat))
@@ -1548,6 +1649,19 @@ export class AgentTilesRail {
       if (group === 'done' && chat.lastAt < startOfToday) continue
       groups[group].push(chat)
     }
+    return { groups, filed }
+  }
+
+  /** THE CONVERSATIONS for the layer in hand, by who they wait on: a question
+   *  out to you, still open, done today — and what was put away, folded shut
+   *  under them. Deeper threads appear after you go inside. A tile's own fold
+   *  still lists that tile's threads. */
+  #convosSection(): HTMLElement {
+    const section = document.createElement('section')
+    section.className = 'hc-rail-convos'
+    const heading = this.#t('agent.rail-convos', 'Conversations')
+    section.setAttribute('aria-label', heading)
+    const { groups, filed } = this.#convoGroups()
 
     const head = document.createElement('div')
     head.className = 'hc-rail-convos-head'
@@ -1678,18 +1792,18 @@ export class AgentTilesRail {
     this.#enterChat(row, key, chat.convoId)
   }
 
-  /** Redraw the conversations list in place, keeping where it was scrolled. */
+  /** Redraw the conversations in place — the icon's count always, the list
+   *  itself only while its tab is open. */
   #repaintConvos(): void {
+    this.#paintConvosToggle()
     const list = this.#list
-    if (!list || !this.#profile.chats) return
-    const old = [...list.children].find(element => element.classList.contains('hc-rail-convos-block')) as HTMLElement | undefined
-    if (this.#query || !this.#chatList.length) { old?.remove(); return }
-    const scrolled = old?.querySelector<HTMLElement>('.hc-rail-convos')?.scrollTop ?? 0
-    const fresh = this.#convosBlock()
+    if (!list || !this.#profile.chats || !this.#convosTab || this.#query) return
+    const old = [...list.children].find(element => element.classList.contains('hc-rail-convos')) as HTMLElement | undefined
+    const scrolled = list.scrollTop
+    const fresh = this.#convosSection()
     if (old) old.replaceWith(fresh)
     else list.prepend(fresh)
-    const section = fresh.querySelector<HTMLElement>('.hc-rail-convos')
-    if (section) section.scrollTop = scrolled
+    list.scrollTop = scrolled
   }
 
   /** Enter one named conversation on a tile, and remember it as this tile's

@@ -61,9 +61,12 @@ const draftDoc = new TextEncoder().encode(JSON.stringify({
 
 /** A threads pool holding ONE tile conversation: two turns on /diagrams, the
  *  newest of them never seen on this device. */
+/** Flip on to make /diagrams' reply ASK you something — it then waits on you. */
+let diagramsAsks = false
 const turn = (at: number, role: string, text: string) => ({
   async getFile() {
-    return { async text() { return JSON.stringify({ kind: 'chat-turn', convoId: 'chat:tile:/diagrams', role, at, text }) } }
+    const asks = diagramsAsks && role === 'assistant' ? { asks: true } : {}
+    return { async text() { return JSON.stringify({ kind: 'chat-turn', convoId: 'chat:tile:/diagrams', role, at, text, ...asks }) } }
   },
   kind: 'file',
 })
@@ -261,6 +264,12 @@ describe('tiles rail search', () => {
   })
 })
 
+/** The head band's conversations icon: the list's other tab. */
+const pressConvos = async (host: HTMLElement): Promise<void> => {
+  ;(host.querySelector('.hc-rail-convos-toggle') as HTMLButtonElement).click()
+  await settle()
+}
+
 describe('tiles rail gestures — every row is a conversation', () => {
   let host: HTMLElement
   let rail: InstanceType<typeof AgentTilesRail>
@@ -276,10 +285,12 @@ describe('tiles rail gestures — every row is a conversation', () => {
    *  tile's threads and puts the conversation in view, and stays on this
    *  level. A click on the tile itself has already moved to the next layer. */
   const openThread = async (title: string): Promise<void> => {
+    await pressConvos(host)
     const convo = [...host.querySelectorAll('.hc-rail-convo')]
       .find(node => (node.textContent ?? '').includes(title)) as HTMLButtonElement
     convo.click()
     await settle()
+    await pressConvos(host)
   }
 
   beforeEach(async () => {
@@ -313,14 +324,25 @@ describe('tiles rail gestures — every row is a conversation', () => {
     expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
   })
 
-  it('lists this layer’s conversations above the tiles, grouped by who it waits on, the archive folded shut', async () => {
+  it('lists this layer’s conversations on their own tab, grouped by who it waits on, the archive folded shut', async () => {
     const block = (): HTMLElement => host.querySelector('.hc-rail-convos') as HTMLElement
     const convoNames = (): string[] => [...block().querySelectorAll('.hc-rail-convo-name')].map(n => n.textContent ?? '')
+    const toggle = host.querySelector('.hc-rail-convos-toggle') as HTMLButtonElement
 
+    // SHUT by default: the tiles alone, never the conversations stacked
+    // over them. Nothing waits on you here, so the icon wears no count.
+    expect(block()).toBeNull()
+    expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
+    expect(toggle.getAttribute('aria-pressed')).toBe('false')
+    expect((toggle.querySelector('.hc-rail-convos-badge') as HTMLElement).hidden).toBe(true)
+
+    // Open, the list IS the conversations — no tiles under them.
+    await pressConvos(host)
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    expect(names(host)).toEqual([])
     expect([...block().querySelectorAll('.hc-rail-convos-group')].map(n => n.textContent)).toEqual(['Open'])
     expect(convoNames()).toEqual(['what is this'])
     expect(block().querySelector('.hc-rail-convo')?.getAttribute('data-group')).toBe('open')
-    expect(host.querySelector('.hc-rail-tiles-head')).toBeTruthy()
 
     const archived = block().querySelector('.hc-rail-convos-archived') as HTMLButtonElement
     expect(archived.textContent).toBe('Archived (1)')
@@ -332,25 +354,34 @@ describe('tiles rail gestures — every row is a conversation', () => {
     expect(rail.subject?.name).toBe('diagrams')
     expect(rail.subject?.convoId).toBe('chat:tile:/diagrams')
     expect(block().querySelector('.hc-rail-convo.current .hc-rail-convo-name')?.textContent).toBe('what is this')
+
+    // Shutting the tab gives the tiles back.
+    await pressConvos(host)
+    expect(block()).toBeNull()
+    expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
   })
 
   it('a deeper conversation stays out of this layer until you are there', async () => {
     const convoNames = (): string[] =>
       [...host.querySelectorAll('.hc-rail-convo-name')].map(node => node.textContent ?? '')
 
+    await pressConvos(host)
     expect(convoNames()).toEqual(['what is this'])
     expect(convoNames()).not.toContain('down here')
+    await pressConvos(host)
 
     rows()[0].click()
     await settle()
-
     expect(names(host)).toEqual(['inside'])
+
+    // The tab stays open across the walk and follows the layer.
+    await pressConvos(host)
     expect(convoNames()).toEqual(['down here'])
 
     await back()
-
-    expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
     expect(convoNames()).toEqual(['what is this'])
+    await pressConvos(host)
+    expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
   })
 
   it('a click on a leaf moves into it, and coming back puts its conversation in view', async () => {
@@ -391,6 +422,7 @@ describe('tiles rail gestures — every row is a conversation', () => {
     expect(names(host)).toEqual(['inside'])
     expect(rail.subject?.name).toBe('pheromone-workflow')
     expect(entered).toEqual([])
+    await pressConvos(host)
     expect(host.querySelectorAll('.hc-rail-convos-new').length).toBe(1)
     expect(host.querySelector('.hc-rail-convos-new')?.textContent).toBe('+ New conversation')
     expect(host.querySelector('.hc-rail-chat-body')).toBeNull()
@@ -406,7 +438,9 @@ describe('tiles rail gestures — every row is a conversation', () => {
 
     expect(entered).toEqual(['diagrams'])
     expect(rail.subject?.name).toBe('diagrams')
+    await pressConvos(host)
     expect(host.querySelector('.hc-rail-convo.current .hc-rail-convo-name')?.textContent).toBe('what is this')
+    await pressConvos(host)
     // Coming back announces the conversation. It does not unfold the tile.
     expect(host.querySelector('.hc-rail-chats')).toBeFalsy()
   })
@@ -493,6 +527,61 @@ describe('tiles rail gestures — every row is a conversation', () => {
 
     await back()
     expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
+  })
+
+  it('the conversations icon wears how many wait on you, while the tab is shut', async () => {
+    diagramsAsks = true
+    try {
+      const fresh = document.createElement('div')
+      document.body.appendChild(fresh)
+      new AgentTilesRail().mount(fresh)
+      await settle()
+      const toggle = fresh.querySelector('.hc-rail-convos-toggle') as HTMLButtonElement
+      const badge = toggle.querySelector('.hc-rail-convos-badge') as HTMLElement
+      expect(badge.hidden).toBe(false)
+      expect(badge.textContent).toBe('1')
+      expect(toggle.classList.contains('waiting')).toBe(true)
+      expect(toggle.title).toBe('Conversations — 1 waiting on you')
+      // Still shut: the tiles are the list until the icon is pressed.
+      expect(fresh.querySelector('.hc-rail-convos')).toBeNull()
+      await pressConvos(fresh)
+      expect([...fresh.querySelectorAll('.hc-rail-convos-group')].map(n => n.textContent)).toEqual(['Waiting on you'])
+      fresh.remove()
+    } finally {
+      diagramsAsks = false
+    }
+  })
+
+  it('coming back out lands where the list was scrolled, not at the top', async () => {
+    const list = host.querySelector('.hc-rail-list') as HTMLElement
+    let scrolled = 0
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true, get: () => scrolled, set: (v: number) => { scrolled = v },
+    })
+    list.scrollTop = 240
+    rows()[2].click()
+    await settle()
+    expect(rail.here()).toEqual(['ai-videos'])
+    expect(list.scrollTop).toBe(0)
+
+    await back()
+    expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
+    expect(list.scrollTop).toBe(240)
+
+    // A repaint of the same level keeps its place too.
+    rail.refresh()
+    await settle()
+    expect(list.scrollTop).toBe(240)
+  })
+
+  it('← lands the keyboard on the row it came out of', async () => {
+    rows()[2].click()
+    await settle()
+    const hiveLine = host.querySelector('.hc-rail-hive .hc-rail-main') as HTMLElement
+    hiveLine.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true }))
+    await settle()
+    expect(rail.here()).toEqual([])
+    expect(document.activeElement).toBe(rows()[2])
   })
 
   it('the keyboard drills one layer and comes back', async () => {
@@ -664,10 +753,12 @@ describe('tiles rail — the blurb on a conversation', () => {
   /** Unfold /diagrams' conversations from the layer list. A click on the
    *  tile itself moves into that layer. */
   const unfold = async (): Promise<void> => {
+    await pressConvos(host)
     const convo = [...host.querySelectorAll('.hc-rail-convo')]
       .find(node => (node.textContent ?? '').includes('what is this')) as HTMLButtonElement
     convo.click()
     await settle()
+    await pressConvos(host)
   }
 
   const lines = (): string[] =>

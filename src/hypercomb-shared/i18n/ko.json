@@ -2290,6 +2290,8 @@
   "agent.rail-convos-waiting": "내 답변 대기",
   "agent.rail-convos-active": "진행 중",
   "agent.rail-convos-done": "오늘 완료",
+  "agent.rail-convos-show": "대화 — {count}개가 답을 기다립니다",
+  "agent.rail-convos-hide": "타일로 돌아가기",
   "agent.rail-tiles": "여기 타일",
   "agent.rail-age-now": "방금",
   "agent.rail-age-minutes": "{count}분",

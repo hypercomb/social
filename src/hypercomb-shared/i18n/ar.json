@@ -2290,6 +2290,8 @@
   "agent.rail-convos-waiting": "بانتظارك",
   "agent.rail-convos-active": "مفتوحة",
   "agent.rail-convos-done": "أُنجزت اليوم",
+  "agent.rail-convos-show": "المحادثات — {count} بانتظارك",
+  "agent.rail-convos-hide": "العودة إلى البلاطات",
   "agent.rail-tiles": "البلاطات هنا",
   "agent.rail-age-now": "الآن",
   "agent.rail-age-minutes": "{count} د",

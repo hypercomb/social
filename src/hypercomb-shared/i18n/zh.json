@@ -2290,6 +2290,8 @@
   "agent.rail-convos-waiting": "等你回复",
   "agent.rail-convos-active": "进行中",
   "agent.rail-convos-done": "今天完成",
+  "agent.rail-convos-show": "对话 — {count} 个在等你回复",
+  "agent.rail-convos-hide": "返回磁贴",
   "agent.rail-tiles": "此处的磁贴",
   "agent.rail-age-now": "刚刚",
   "agent.rail-age-minutes": "{count} 分钟",

@@ -2290,6 +2290,8 @@
   "agent.rail-convos-waiting": "Vous attendent",
   "agent.rail-convos-active": "Ouvertes",
   "agent.rail-convos-done": "Terminées aujourd’hui",
+  "agent.rail-convos-show": "Conversations — {count} vous attendent",
+  "agent.rail-convos-hide": "Retour aux tuiles",
   "agent.rail-tiles": "Tuiles ici",
   "agent.rail-age-now": "maintenant",
   "agent.rail-age-minutes": "{count} min",

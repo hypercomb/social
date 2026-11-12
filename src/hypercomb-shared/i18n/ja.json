@@ -3301,6 +3301,8 @@
   "agent.rail-convos-waiting": "あなたの返答待ち",
   "agent.rail-convos-active": "進行中",
   "agent.rail-convos-done": "今日完了",
+  "agent.rail-convos-show": "会話 — あなたの返答待ち {count} 件",
+  "agent.rail-convos-hide": "タイルに戻る",
   "agent.rail-tiles": "ここのタイル",
   "agent.rail-age-now": "たった今",
   "agent.rail-age-minutes": "{count}分",

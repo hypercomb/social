@@ -2290,6 +2290,8 @@
   "agent.rail-convos-waiting": "Ждут вас",
   "agent.rail-convos-active": "Открытые",
   "agent.rail-convos-done": "Готово сегодня",
+  "agent.rail-convos-show": "Разговоры — {count} ждут вас",
+  "agent.rail-convos-hide": "Назад к плиткам",
   "agent.rail-tiles": "Плитки здесь",
   "agent.rail-age-now": "сейчас",
   "agent.rail-age-minutes": "{count} мин",

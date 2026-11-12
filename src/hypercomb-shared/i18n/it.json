@@ -2290,6 +2290,8 @@
   "agent.rail-convos-waiting": "Aspettano te",
   "agent.rail-convos-active": "Aperte",
   "agent.rail-convos-done": "Fatte oggi",
+  "agent.rail-convos-show": "Conversazioni — {count} aspettano te",
+  "agent.rail-convos-hide": "Torna alle tessere",
   "agent.rail-tiles": "Tessere qui",
   "agent.rail-age-now": "ora",
   "agent.rail-age-minutes": "{count} min",

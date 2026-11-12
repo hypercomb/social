@@ -2290,6 +2290,8 @@
   "agent.rail-convos-waiting": "Esperándote",
   "agent.rail-convos-active": "Abiertas",
   "agent.rail-convos-done": "Hechas hoy",
+  "agent.rail-convos-show": "Conversaciones — {count} esperan tu respuesta",
+  "agent.rail-convos-hide": "Volver a los mosaicos",
   "agent.rail-tiles": "Mosaicos aquí",
   "agent.rail-age-now": "ahora",
   "agent.rail-age-minutes": "{count} min",

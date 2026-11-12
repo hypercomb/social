@@ -3727,6 +3727,8 @@
   "agent.rail-convos-waiting": "Waiting on you",
   "agent.rail-convos-active": "Open",
   "agent.rail-convos-done": "Done today",
+  "agent.rail-convos-show": "Conversations — {count} waiting on you",
+  "agent.rail-convos-hide": "Back to the tiles",
   "agent.rail-tiles": "Tiles here",
   "agent.rail-age-now": "now",
   "agent.rail-age-minutes": "{count}m",

@@ -2290,6 +2290,8 @@
   "agent.rail-convos-waiting": "Menunggu Anda",
   "agent.rail-convos-active": "Terbuka",
   "agent.rail-convos-done": "Selesai hari ini",
+  "agent.rail-convos-show": "Percakapan — {count} menunggu Anda",
+  "agent.rail-convos-hide": "Kembali ke ubin",
   "agent.rail-tiles": "Ubin di sini",
   "agent.rail-age-now": "sekarang",
   "agent.rail-age-minutes": "{count} mnt",

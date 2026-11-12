@@ -35,15 +35,24 @@ export const RAIL_CSS = `
 .hc-rail-head{display:flex;align-items:center;gap:0.25rem;flex:0 0 auto;
   box-sizing:border-box;height:2.875rem;padding:0 0.5rem;
   border-bottom:1px solid var(--hc-window-edge, rgba(${STEEL},0.28));}
-.hc-rail-back,.hc-rail-find-toggle{display:inline-grid;place-items:center;flex:0 0 auto;
+.hc-rail-back,.hc-rail-find-toggle,.hc-rail-convos-toggle{display:inline-grid;place-items:center;flex:0 0 auto;
   width:1.75rem;height:1.75rem;padding:0;border:0;background:none;cursor:pointer;
   color:var(--hc-window-ink-quiet);border-radius:var(--hc-radius-control, 2px);
   transition:color 0.12s ease,background-color 0.12s ease;}
-.hc-rail-back:hover:not(:disabled),.hc-rail-find-toggle:hover{
+.hc-rail-back:hover:not(:disabled),.hc-rail-find-toggle:hover,.hc-rail-convos-toggle:hover{
   color:var(--hc-window-ink-loud);background:var(--hc-window-tint, rgba(${STEEL},0.06));}
-.hc-rail-find-toggle[aria-pressed='true']{color:var(--hc-window-accent, rgb(${STEEL}));
+.hc-rail-find-toggle[aria-pressed='true'],.hc-rail-convos-toggle[aria-pressed='true']{color:var(--hc-window-accent, rgb(${STEEL}));
   background:var(--hc-window-wash, rgba(${STEEL},0.1));}
 .hc-rail-back.root{cursor:default;color:rgb(${AMBER});}
+/* THE CONVERSATIONS ARE A TAB behind this icon, never stacked over the tiles.
+   It wears the count of conversations waiting on you, in their own colour. */
+.hc-rail-convos-toggle{position:relative;}
+.hc-rail-convos-toggle.waiting{color:color-mix(in srgb, rgba(${CONVO_WAIT},0.95), rgb(var(--hc-panel-ink, 43, 30, 6)) var(--hc-deepen, 0%));}
+.hc-rail-convos-badge{position:absolute;top:0.05rem;right:0;min-width:0.85rem;height:0.85rem;
+  padding:0 0.2rem;border-radius:999px;display:grid;place-items:center;
+  font-family:var(--hc-mono,monospace);font-size:0.55rem;font-weight:700;line-height:1;
+  color:rgb(var(--hc-panel-ink, 20, 14, 24));background:rgba(${CONVO_WAIT},0.95);pointer-events:none;}
+.hc-rail-convos-badge[hidden]{display:none;}
 .hc-rail-back[hidden]{display:none;}
 .hc-rail-head .mat-sym,.hc-rail-list .mat-sym{font-size:1.0625rem;line-height:1;}
 .hc-rail-title{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
@@ -361,11 +370,11 @@ export const RAIL_CSS = `
   font-family:var(--hc-mono,monospace);letter-spacing:0.04em;}
 .hc-rail-archived.on{color:var(--hc-window-accent, rgb(${STEEL}));}
 
-/* THE CONVERSATIONS, across every tile, above the tiles. Grouped by who each
+/* THE CONVERSATIONS on this layer, the list's other tab. Grouped by who each
    one waits on; a row is its name, where it stands and how long since it moved,
-   one line each, so the list scans and never grows under your hand. */
-.hc-rail-convos-block{display:flex;flex-direction:column;}
-.hc-rail-convos{display:flex;flex-direction:column;gap:1px;max-height:45vh;overflow-y:auto;}
+   one line each, so the list scans and never grows under your hand. The list
+   itself scrolls — the tab is the whole list. */
+.hc-rail-convos{display:flex;flex-direction:column;gap:1px;}
 /* THE HEAD IS A BAR, one line that never wraps: the title takes what is left
    and gives way first (ellipsis), the count is a small chip, and the way to
    begin is a bordered button that keeps its own width. It used to be three
@@ -421,9 +430,6 @@ export const RAIL_CSS = `
   cursor:pointer;text-align:left;font-family:var(--hc-mono,monospace);font-size:0.72rem;
   letter-spacing:0.04em;color:var(--hc-window-ink-quiet);}
 .hc-rail-convos-archived.on{color:var(--hc-window-accent, rgb(${STEEL}));}
-.hc-rail-tiles-head{margin:0.35rem 0 0.2rem;padding:0.5rem 0.45rem 0.2rem;
-  border-top:1px solid rgba(${STEEL},0.18);font-family:var(--hc-mono,monospace);
-  font-size:0.64rem;letter-spacing:0.12em;text-transform:uppercase;color:var(--hc-window-ink-quiet);}
 
 /* Same defect, same pass: placeholder text needs 4.5:1, not 2.76:1. */
 .hc-rail-find input::placeholder{color:var(--hc-window-ink-quiet);}

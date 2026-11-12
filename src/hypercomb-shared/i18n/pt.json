@@ -2290,6 +2290,8 @@
   "agent.rail-convos-waiting": "Esperando por você",
   "agent.rail-convos-active": "Abertas",
   "agent.rail-convos-done": "Concluídas hoje",
+  "agent.rail-convos-show": "Conversas — {count} aguardando você",
+  "agent.rail-convos-hide": "Voltar aos blocos",
   "agent.rail-tiles": "Blocos aqui",
   "agent.rail-age-now": "agora",
   "agent.rail-age-minutes": "{count} min",

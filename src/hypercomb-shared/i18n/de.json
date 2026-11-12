@@ -2290,6 +2290,8 @@
   "agent.rail-convos-waiting": "Wartet auf dich",
   "agent.rail-convos-active": "Offen",
   "agent.rail-convos-done": "Heute erledigt",
+  "agent.rail-convos-show": "Unterhaltungen — {count} warten auf dich",
+  "agent.rail-convos-hide": "Zurück zu den Kacheln",
   "agent.rail-tiles": "Kacheln hier",
   "agent.rail-age-now": "jetzt",
   "agent.rail-age-minutes": "{count} Min.",
