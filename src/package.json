@@ -27,6 +27,7 @@
     "bridge:drain": "node scripts/bridge/drain-tick.cjs",
     "bridge:check": "node scripts/bridge/bridge-cli.cjs list",
     "bridge:swarm": "node scripts/bridge/swarm-debug.cjs",
+    "grok": "node scripts/subscription/grok-endpoint.cjs",
     "comfy": "cd /d C:\\ComfyUI && venv\\Scripts\\python.exe main.py --enable-cors-header \"*\"",
     "proposal:preview": "node scripts/bridge/proposal-site/build-preview.cjs",
     "proposal:stamp": "node scripts/bridge/proposal-site/stamp.cjs",

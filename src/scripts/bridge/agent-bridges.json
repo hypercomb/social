@@ -155,11 +155,11 @@
         "-m", "{model}"
       ],
       "models": [
-        { "name": "grok", "id": "grok-4", "tier": "deep" },
-        { "name": "grok-fast", "id": "grok-4-fast", "tier": "fast" }
+        { "name": "grok", "id": "grok-4.7", "tier": "deep" },
+        { "name": "grok-fast", "id": "grok-4.7-build-fast", "tier": "fast" }
       ],
-      "defaultModel": "grok-4",
-      "docsUrl": "https://github.com/superagent-ai/grok-cli"
+      "defaultModel": "grok-4.7",
+      "docsUrl": "https://x.ai"
     },
     {
       "id": "qwen-bridge",

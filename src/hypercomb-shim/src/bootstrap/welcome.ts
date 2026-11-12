@@ -55,8 +55,8 @@ export type FrontDoor = {
   /** The zone's room, drawn first as "Join the swarm" — or ''. */
   readonly swarm: string
   /** Where the platform explains itself, minus any door the staged links
-   *  already open — `/tour/` on hypercomb.com IS the tour. Only ever the small
-   *  footer of a task view: never tiles on a hive's page. */
+   *  already open — `/tour/` on hypercomb.com IS the tour. Buttons at the right
+   *  of the page's header, and the small footer of a task view: never tiles. */
   readonly footer: readonly WelcomeLink[]
   /** A host with nothing staged draws one phantom hexagon where its first
    *  creation will go — false once the operator stages a front page of its own. */

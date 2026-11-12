@@ -170,7 +170,9 @@ const TRANSPORT_LABEL: Record<string, string> = {
 const reachLabel = (provider: LlmProviderDescriptor): string =>
   costOf(provider) === 'local'
     ? 'this machine, no key'
-    : TRANSPORT_LABEL[provider.transport] ?? provider.transport
+    : provider.account && provider.transport === 'browser-http'
+      ? 'your plan, through this machine'
+      : TRANSPORT_LABEL[provider.transport] ?? provider.transport
 
 export class ProvidersWindowView extends EventTarget {
   #panel: HTMLDivElement | null = null

@@ -392,20 +392,21 @@ describe('a vanilla hive shows one phantom tile where its first creation will go
     self: 'my-hive.example', title: 'my-hive.example', tagline: '', sources: [], phantom: true,
     ledger: Promise.resolve(parseLedger({ sites: [] })), readShared: async () => ({ offers: [], creations: [] }), ...extra,
   })
-  const phantoms = (bands: HTMLElement): number => bands.querySelectorAll('.dex-row.own .hex-phantom').length
+  const phantoms = (bands: HTMLElement): number => bands.querySelectorAll('.dex-row.own .phantom-row:not([hidden])').length
   const settled = async (bands: HTMLElement): Promise<void> => {
     await vi.waitFor(() => expect(bands.querySelector('.dex-row.own .hosted-empty:not([hidden])')?.textContent).toBe('Nothing is published here yet.'))
   }
 
-  it('draws exactly one tile on an empty row — the phantom, first, and never a link', async () => {
+  it('draws one quiet row under the empty line on an empty row — no tile, never a link — in the shape of the view', async () => {
     const { bands } = draw()
     await settled(bands)
     await vi.waitFor(() => expect(phantoms(bands)).toBe(1))
-    const tiles = [...bands.querySelectorAll('.dex-row.own .hex')]
-    expect(tiles.length).toBe(1)
-    expect(tiles[0].classList.contains('hex-phantom')).toBe(true)
-    expect(tiles[0].tagName).toBe('SPAN')
-    expect(tiles[0].querySelector('a')).toBeNull()
+    expect(bands.querySelectorAll('.dex-row.own .hex').length).toBe(0)
+    const row = bands.querySelector('.dex-row.own .phantom-row') as HTMLElement
+    expect(row.previousElementSibling?.classList.contains('hosted-empty')).toBe(true)
+    expect(row.querySelector('.phantom-name')?.textContent).toBe('your first creation')
+    expect(row.querySelector('a')).toBeNull()
+    expect(row.dataset['shape']).toBe('hex')
   })
 
   it('draws none of the platform doors on a host that staged none', async () => {
@@ -433,6 +434,40 @@ describe('a vanilla hive shows one phantom tile where its first creation will go
     const bare = draw({ phantom: false })
     await settled(bare.bands)
     expect(bare.bands.querySelectorAll('.hex').length).toBe(0)
+  })
+})
+
+describe('the platform links are buttons at the right of the header, never tiles (jwize 2026-11-12)', () => {
+  const headerLinks = [
+    { label: 'the tour', href: 'https://protocol.hypercomb.com/', note: 'what this is', icon: 'tour' as const },
+    { label: 'source', href: 'https://github.com/hypercomb/social', note: 'AGPL-3.0', icon: 'source' as const },
+  ]
+  const draw = (extra = {}) => showcase({
+    self: 'my-hive.example', title: 'my-hive.example', tagline: '', sources: [], phantom: true, headerLinks,
+    ledger: Promise.resolve(parseLedger({ sites: [] })), readShared: async () => ({ offers: [], creations: [] }), ...extra,
+  })
+
+  it('draws each as a plain link button in the header, opening in its own tab, and none in the list', async () => {
+    const { bands, hero } = draw()
+    await vi.waitFor(() => expect(bands.querySelectorAll('.dex-row.own .phantom-row:not([hidden])').length).toBe(1))
+    const buttons = [...hero.querySelectorAll('.hero-brand .hero-links a.hero-link')] as HTMLAnchorElement[]
+    expect(buttons.map(button => button.textContent)).toEqual(['the tour', 'source'])
+    expect(buttons.map(button => button.getAttribute('href'))).toEqual(['https://protocol.hypercomb.com/', 'https://github.com/hypercomb/social'])
+    for (const button of buttons) {
+      expect(button.target).toBe('_blank')
+      expect(button.classList.contains('hex')).toBe(false)
+    }
+    expect(bands.querySelectorAll('.hex-link').length).toBe(0)
+  })
+
+  it('keeps the brand row up outside editing for them alone, and draws no row when there are none', () => {
+    const { hero } = draw()
+    const brand = hero.querySelector('.hero-brand') as HTMLElement
+    expect(brand.hidden).toBe(false)
+    expect((hero.querySelector('.hero-words') as HTMLElement).hidden).toBe(true)
+    const bare = draw({ headerLinks: [] })
+    expect(bare.hero.querySelector('.hero-links')).toBeNull()
+    expect((bare.hero.querySelector('.hero-brand') as HTMLElement).hidden).toBe(true)
   })
 })
 
@@ -1537,7 +1572,7 @@ describe('a tap visits, a hold toggles', () => {
   }
   const namesIn = (row: HTMLElement): string[] => [...row.querySelectorAll('.hex-name')].map(name => name.textContent ?? '')
 
-  it('a tile toggles where it sits: with the key a tap asks once and yes signs it on or off, and it never leaves its row', async () => {
+  it('a tile toggles where it sits: a host tile is added to your community, your own is signed on or off, and it never leaves its row', async () => {
     const owner = bridge(a)
     const keepCommunity = vi.fn(async () => true)
     const { hero, bands } = showcase({
@@ -1566,7 +1601,7 @@ describe('a tap visits, a hold toggles', () => {
       expect(dylan.classList.contains('off')).toBe(true)
       expect(dylan.getAttribute('aria-pressed')).toBe('false')
       expect(click(dylan).defaultPrevented).toBe(true)
-      // ONE TAP, THEN ONE RED BUTTON ACROSS THE FOOT (jwize 2026-11-10): no sheet opens. Escape puts it away.
+      // ONE TAP, THEN ONE BUTTON ACROSS THE FOOT (jwize 2026-11-10): no sheet opens. Escape puts it away.
       expect(sheet.hidden).toBe(true)
       expect(bar.hidden).toBe(false)
       expect(bar.classList.contains('foot-bar')).toBe(true)
@@ -1579,18 +1614,18 @@ describe('a tap visits, a hold toggles', () => {
       expect(bar.hidden).toBe(true)
       expect(keepCommunity).not.toHaveBeenCalled()
       expect(owner.toggle).not.toHaveBeenCalled()
-      // Yes: on, and published — the one signed act, through the hive's key. It lights where it sits.
+      // Yes: into your community, not your showcase (jwize 2026-11-12) — nothing is signed. It lights where it sits.
       click(dylan)
-      answer('Put dylan in my showcase')
+      answer('Add dylan to my community')
       expect(bar.hidden).toBe(true)
-      await vi.waitFor(() => expect(owner.toggle).toHaveBeenCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'dylan', on: true }))
-      expect(keepCommunity).toHaveBeenCalledTimes(1)
+      await vi.waitFor(() => expect(keepCommunity).toHaveBeenCalledTimes(1))
+      expect(owner.toggle).not.toHaveBeenCalled()
       expect(namesIn(rowNamed(bands, 'jwize.com')!)).toContain('dylan')
       await vi.waitFor(() => expect(dylan.classList.contains('off')).toBe(false))
       expect(dylan.getAttribute('aria-pressed')).toBe('true')
       // The same tile again asks to take it out, and it grays in place.
       click(dylan)
-      answer('Take dylan out of my showcase')
+      answer('Take dylan out of my community')
       await vi.waitFor(() => expect(keepCommunity).toHaveBeenCalledTimes(2))
       await vi.waitFor(() => expect(dylan.classList.contains('off')).toBe(true))
       expect(namesIn(rowNamed(bands, 'jwize.com')!)).toContain('dylan')

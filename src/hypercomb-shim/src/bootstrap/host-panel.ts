@@ -717,6 +717,8 @@ class HostPanelElement extends HTMLElement {
         // creation will go while its row is empty.
         links: door.links,
         phantom: door.phantom,
+        // The platform's links this host did not stage are buttons at the right of the header (jwize 2026-11-12).
+        headerLinks: door.footer,
         follow: raw => this.#follow(raw),
         unfollow: zone => removeHostZone(zone),
         readPeerLedger,

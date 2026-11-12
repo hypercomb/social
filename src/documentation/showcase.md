@@ -472,15 +472,19 @@ stages no presentation is the search and the tiles as before.
 The shim stays generic: it knows no domain, only the field. The same pinned shim runs on a phone at hypercomb.io, which
 serves no `welcome.json`, so that page is unchanged.
 
-### The platform's doors are hypercomb.com's alone; a bare host shows one phantom (jwize 2026-11-12)
+### The platform's doors are hypercomb.com's alone; header buttons and one phantom row elsewhere (jwize 2026-11-12)
 
-"These should only show on hypercomb.com, not on every host. If anything just put a phantom tile on the left showing where
-the first creation will go." The platform's own doors (the tour, the app, hosting, extensions, source, licensing) are tiles
-only where a host staged them as its front page — hypercomb.com. No other host draws them, not even as optional tiles (the
-switchable help tiles of 2026-11-10 and the "Start here" tile are retired). A host with nothing staged and nothing in its
-row draws one phantom hexagon in the first place of its row: an empty outline that says "your first creation", never a link
-and never a switch. It is gone while a search runs and once the row holds anything. The platform links survive only as the
-small footer of the tile-choosing task view.
+"These should only show on hypercomb.com, not on every host." The platform's own doors (the tour, the app, hosting,
+extensions, source, licensing) are tiles only where a host staged them as its front page — hypercomb.com. Every other host
+draws the platform links it did not stage as small buttons at the right end of the header ("instead of the default tile
+links put them in the header to the right as buttons"), the same on a phone as on a desktop; they keep the brand row up
+outside editing on their own. The switchable help tiles of 2026-11-10 and the "Start here" tile are retired.
+
+While the domain's own row holds nothing and no doors were staged, one phantom row sits under "Nothing is published here
+yet.": a small empty icon on the left and "your first creation" beside it, the full width of the row. It is the same row
+in every view; only the icon wears the view's shape — a hexagon in the hexagon view, a rounded square in the launcher,
+iPhone and list views, a square in tiles. It is never a tile in the comb, never a link, and it is gone while a search runs
+and once the row holds anything. An empty row in the iPhone view draws no empty phone screen.
 
 A domain whose ledger names no owner has nothing signed to read, so its row says "Nothing is published here yet." and never
 "Could not read what is published here."

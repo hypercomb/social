@@ -80,6 +80,9 @@ describe('machineLocalEndpoint', () => {
     expect(machineLocalEndpoint(localDescriptor('http://127.0.0.1:1234'))).toBe('http://127.0.0.1:1234')
     expect(machineLocalEndpoint(localDescriptor('http://[::1]:11434'))).toBe('http://[::1]:11434')
     expect(machineLocalEndpoint(localDescriptor('https://api.example.test'))).toBe('')
+    // An openai-family base names its API path; the probe wants the server.
+    expect(machineLocalEndpoint(localDescriptor('http://127.0.0.1:11435/v1'))).toBe('http://127.0.0.1:11435')
+    expect(machineLocalEndpoint(localDescriptor('http://127.0.0.1:11435/v1/chat/completions'))).toBe('http://127.0.0.1:11435')
     // A descriptor that names no endpoint is not a local server by omission.
     expect(machineLocalEndpoint({ ...localDescriptor(), endpoint: undefined })).toBe('')
   })
