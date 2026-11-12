@@ -103,7 +103,7 @@ jwize: "your peer hosts become your sandbox and you can scan the signed files by
 jwize: "make sure the workflow is very clear what is happening or the participant will be lost". The what-changed panel (`module changes <change>`) opens on four steps, each saying what it touched; the first not yet done is marked as where you stand:
 
 1. **Draft**: written and committed to a trial.
-2. **Trial**: running at `try-<change>.<zone>`, a site of its own with nothing of your hive in it. It opens in a new tab (`noopener`), never in a frame: "we don't need to use iframes".
+2. **Shared**: named in its publisher's signed index on the zone. It runs nowhere until someone takes it. (Until 2026-11-10 this step was **Trial** and linked to the door; see Retiring the door.)
 3. **Reviewed**: how many readings there are (the host's AI, Jev, people), shown below.
 4. **Your choice**: **Take** takes every changed file into your hive, held in the brood until you accept it. The publisher alone is also offered **Promote** (`<change>.<zone>` runs what the trial ran) and **Withdraw**; both are put on the command line as their sentence (`module promote <change> @<zone>`), never said for the participant. At a door the step says to choose from your own hive.
 
@@ -122,6 +122,33 @@ Asked again the same day whether drafts belong on a separate domain, jwize kept 
 Next (jwize, same day): held drafts shown as EGGS on the tile being worked in — only an image and plain properties, no code running, until they hatch on acceptance.
 
 Still owed, from the same conversation: a reviewer that runs the change's tests, a plain-language summary of each change for the participant, reviewers that are deliberately different models, and installing a taken change into the git source.
+
+## Retiring the door (begun 2026-11-10)
+
+jwize: "We can retire 'try' I think because we decided you do changes on the client and then publish when you want to share. try is redundant." A change is made in your own hive, where your tiles, keys and AI already are. Publishing names its root in your signed index; its files are read from the root domain by signature; a follower takes it, held in the brood until accepted, and the host adopts it for live use. Nobody needs a remote place to run it.
+
+What goes is the **door**: the `try-<change>.<zone>` page, its policy, the door bar, the key and signer guards, and the workbench mode. What stays is the **published change**: commit, take, accept, promote, the what-changed panel and the reviews. Signed records keep their `try-` keys, because records already out there use them.
+
+What is given up: trying a change without taking it. Trying is now taking, held until accepted.
+
+- **Step one, done:** the what-changed panel offers no link to a door, and its second step says Shared.
+- **Step two, done:** a shared change is read from the root domain. The zone's `sign('host:trials')` listing says what it is; `sign('assess:<root>')` is listed at the root (the index write names it in `sign('assess:pools')`, as attestations are) and each assessor's word is read from their own signed index and record; files come from `/<sig>` at the root; `module take` reads the root first. The door is asked only where the root does not answer. Assessments written before this host change are not in `assess:pools`, so the root lists them only once their assessor's index is written again; the door still lists them until then.
+- **Step three, withdrawn 2026-11-11:** the door's page is not removed. It became the debugger, below.
+
+## The subdomain is the debugger, and it loads no Angular (2026-11-11)
+
+jwize: "we single click an editing tile to debug basically, It opens the subdomain and you are debugging. You then have access somehow to suggested tools like ai. Then you adopt by click and now you accept and have ai. You can develop from there." And: "anything built in the debugger (subdomains) should not load angular. This will be our process to phase out angular."
+
+What was retired on 2026-11-10 is offering the door to strangers as a place to try a change. The `try-<change>.<zone>` subdomain itself stays, as the debugger an editing tile opens.
+
+- **The page:** a `try-` subdomain is served the framework-free shim (`hypercomb-shim`), from `DEBUGGER_SHELL_ORIGIN`, else from `HOST_DOOR_ORIGIN` (the shim deployment the front door's card already comes from). With neither set it answers 503. It never falls back to the web shell. The signer is still pinned off before any module runs, and the door's policy headers are unchanged (blossom-worker `serveSandboxShell`).
+- **What that page can do** is exactly what has been moved out of Angular: the shim mounts only surfaces registered as custom elements (`hypercomb-shim/src/surfaces.ts`). Every panel still in `hypercomb-shared/ui` is absent there. That gap is the work list, and closing it is how Angular is phased out.
+- **The chat** is the first surface moved: `hc-chat` (essentials `assistant/chat.view.ts`), wired by the chat's own bee. It keeps a conversation in the chat's threads and streams an answer.
+- **The chat can change the hive.** A model is taught the behaviours the participant granted; a `hypercomb-do` block it writes is parsed whole, waits in the execution queue, and is listed in the chat with Run and Skip; what happened is the model's next message (essentials `assistant/chat-work.ts`). To make that possible the line parser, the plan's reach and lane (`core/machine-plan.ts`) and the lesson and reply messages (`core/work-instruction.ts`) moved from `hypercomb-shared/ui/chat-window` into core; the shell files re-export them. New core exports mean the shell that serves core is deployed before a package that uses them.
+- **The chat cannot yet** read the hive or send hive context, write code, doctrine or files, or put a failed block's pages back. The read fence, the context compiler, Jev and the plan transaction are still in the shell.
+- **Suggested tools:** a suggested behaviour is off and offered once (`hc:behavior-suggested`). The AI chat is the first.
+- **Not Angular-free yet:** the `swarm` door is still served the web shell. The web shell's workbench mode (`data-hypercomb-mode="workbench"`, `workbench-page.ts`, the workbench barrel) is no longer stamped by the worker and is left in place, unused, until it is removed.
+- **Not built yet:** the click on an editing tile that opens its subdomain, and the shim's host console offering the debugger's package and suggested tools on that page.
 
 ## Audit a trial from your own hive (built 2026-09-23)
 

@@ -16,7 +16,6 @@ export const sleepers: readonly Sleeper[] = [
   { wakesOn: ["expand:layer"], load: () => import('./assistant/expand.drone') },
   { command: "inspect", description: "Drill into a tile: the behaviours that run it, their source, and every behaviour that source talks to", load: () => import('./assistant/inspect.queen') },
   { wakesOn: ["parts:distribute-visual"], load: () => import('./assistant/visual-distribution.drone') },
-  { command: "adopt", description: "Take a peer's tile into your hive — the one tile, or with `branch`, everything under it", load: () => import('./commands/adopt.queen') },
   { command: "arrange", description: "Toggle icon arrangement mode on the tile overlay", load: () => import('./commands/arrange.queen') },
   { command: "beehaviors", description: "Open Beehaviors: switch any behaviour, word or desk on or off", load: () => import('./commands/beehaviors.queen') },
   { command: "behavior", description: "Bind a behaviour to the tile it belongs to — it shows there and nowhere else", load: () => import('./commands/behavior.queen') },

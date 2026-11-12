@@ -55,6 +55,12 @@ export type ShellSurface = {
    * is the only lever over DOM / stacking order. Unset sorts last.
    */
   order?: number
+  /**
+   * The host's own surface (the consent dialog), mounted whatever package is
+   * installed. It says nothing about whether a package is live, so a host
+   * deciding "is this origin cold?" must not count it.
+   */
+  host?: boolean
 }
 
 export class ShellSurfaceRegistry extends EventTarget {

@@ -91,7 +91,7 @@
 import { QueenBee, EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, MODULE_DRAFTS_IOC_KEY, isSandboxDoor, mayRunBee, sandboxDoorOf, type I18nProvider, type InstallProvider, type ModuleDraftsProvider, registerPoolMeaning } from '@hypercomb/core'
 import { clearHiveRoot, ownHiveRoot, setHiveRoot } from '../sharing/hive-pointer.js'
 import { JEV_IOC_KEY, jevDoctrineSections, type JevReadingInput, type JevReadingResult, type JevPassInput, type JevPassResult } from './jev-decision.js'
-import { assessSandbox, changedPaths, countedAssessors, doorReader, jevReadTrial, publishChange, readChange, readSandboxDoor, reviewChange, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, VERDICTS, type ModuleChangeRecord, type ReviewDeps, type ReviewVerdict, type SandboxSite, type SandboxTrial, jevPassZone } from './module-review.js'
+import { assessSandbox, changedPaths, countedAssessors, doorReader, jevReadTrial, publishChange, readChange, readSandboxDoor, reviewChange, takeDepsFrom, takeHostsOf, takeTrial, tallyAssessments, trialsOf, VERDICTS, type ModuleChangeRecord, type ReviewDeps, type ReviewVerdict, type SandboxSite, type SandboxTrial, jevPassZone } from './module-review.js'
 import { INSTALL_CHANNEL_PREFIX, PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
 import { readDoorsOf, zoneDoor } from '../sharing/zone-door.js'
 // A type only: the audit itself is loaded when the word is said.
@@ -499,7 +499,7 @@ export class ModuleQueenBee extends QueenBee {
       const named = PATH_RE.test(words[1] ?? '') ? [words[1]!] : null
       const paths = named ?? (site.change ? changedPaths(await readChange(site.change, { get: doorReader(door) })) : [])
       if (!paths.length) { toast(t('module.takewhat', 'Say which path to take from {name}, like: module take {change} preferences.', { name, change: name.replace(/^try-/, '') }), 'warning'); return }
-      const outcome = await takeTrial(site.package, paths, [new URL(door).host], takeDepsFrom(install))
+      const outcome = await takeTrial(site.package, paths, takeHostsOf(door), takeDepsFrom(install))
       for (const refused of outcome.refused) toast(t('module.nottaken', '{path} was not taken: {reason}', { path: refused.path, reason: refused.error }), 'warning')
       if (!outcome.taken.length) return
       // AN AUDIT SAID BEFORE THE TAKE is worn by what the take now holds, so

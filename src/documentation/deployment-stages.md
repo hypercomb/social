@@ -115,6 +115,30 @@ one list ahead until the next write carries it. `published-pools.ts` (one shared
 only) is NOT the carrier: a shared per-origin file is last-writer-wins across
 tenants and holds no bucket key to verify against.
 
+**R3a — The index lives where its readers read it, and their list is carried
+in (2026-11-12).** A zone's apex and its sites can be different machines:
+`jwize.com` is the home relay on the publisher's machine, while every
+`<name>.jwize.com` is served by the worker whose store is written at
+pluginthematrix.com (both workers share one bucket). A publish of
+`/business-card` through the apex found no index there, started an empty
+one, and signed a 6-entry index the sites never saw. The card's address went
+on serving the old head under the 78-entry index. The same write cut the
+local `live` list from 23 places to one, and dropped `protocol` from
+`published` and `shared`, because every stage write reconciles against the
+index it started from. So, in `publish-branch.ts` and `stage-succession.ts`:
+
+1. The index a stranger gets at the branch's own address (`indexHome`,
+   `readerSiteOf`) decides the home. It is the door that holds that same
+   signed event, or else another host the key published to or the hive
+   carries. A publish adds the home to its nodes before uploading, so the
+   bytes land where readers read. If no host holds what the readers read,
+   the publish stops with `index-split` and writes nothing.
+2. Every stage write carries in the heads the index's own `stage:<word>`
+   claim lists (`claimedStageHeads`) before it reconciles. A list cut by a
+   write from the wrong index gets its members back on the next write.
+3. "Answers at" is said only when the index at the address handed out names
+   the new head (`confirmPublished` with `readAt`).
+
 **R4 — Advance is a forward commit; leaving is an unlink, never a forget.**
 Entering appends a member; leaving mints the next succession without it
 (precedent: `withdrawVocabulary` declares nothing;

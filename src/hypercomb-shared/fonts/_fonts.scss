@@ -1,4 +1,5 @@
 // ── single source of truth for all font declarations ─────
+@use 'font-tokens';
 
 @font-face {
   font-family: 'Source Sans Pro Light';
@@ -92,36 +93,8 @@ $code-latin: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
   unicode-range: $code-latin;
 }
 
-// ── typography tokens ─────────────────────────────────────
-:root {
-  --hc-font: 'Source Sans Pro Light', system-ui, -apple-system,
-    BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+// ── typography tokens: _font-tokens.scss (loaded at the top) ──
 
-  // --hc-mono is the UI mono: sig strings, chips, coordinates, panel labels —
-  // monospace as a SIGNAL, a few characters at a time, at chrome sizes.
-  --hc-mono: ui-monospace, 'Cascadia Code', 'Source Code Pro', 'Fira Code',
-    Menlo, Consolas, 'DejaVu Sans Mono', monospace;
-
-  // --hc-code is the reading mono: whole blocks you actually read, in a narrow
-  // docked panel. Two tokens, not one, because the jobs pull opposite ways —
-  // chrome wants the system font it already has, a code block wants a known
-  // face with a real italic and a measure that fits the panel. Falls through
-  // to --hc-mono, so the chain stays declared in ONE place.
-  --hc-code: 'IBM Plex Mono', var(--hc-mono);
-
-  // Ligatures OFF unless a window asks: in a panel where you read code you did
-  // not write, a `!==` redrawn as one glyph is a place to guess. Tool windows
-  // override this on their own host (hc-docked-panel.directive.ts).
-  --hc-code-ligatures: none;
-
-  // --hc-read is the reading face for PROSE inside tool windows — the other
-  // half of a window's typography. The toolwindow shell sets everything in
-  // --hc-mono, which is right for chrome and wrong for sentences; a reading
-  // surface (the chat's answers, a note body) renders in this instead, and
-  // the docked-panel gear offers a per-window/per-group choice over it
-  // (READ_FONTS in panel-groups.ts). Defaults to the app's own text face.
-  --hc-read: var(--hc-font);
-}
 
 // ── tile names (tile-name.drone.ts) ─────────────────────────────────
 // The names on the hive are REAL TEXT — a DOM layer the browser rasterises at

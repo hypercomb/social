@@ -282,6 +282,9 @@
                   @if (row.fixed) {
                     <span class="feature-fixed">{{ 'features.roster.fixed' | t }}</span>
                   }
+                  @if (row.suggested) {
+                    <span class="feature-suggested">{{ 'features.roster.suggested' | t }}</span>
+                  }
                   <!-- BOUND: this behavior belongs to a tile, not to the
                        hive. The pool is the only place every binding is
                        visible at once — everywhere else the behavior has

@@ -28,6 +28,10 @@ import {
   type ShellSurfaceRegistry,
 } from '../../core'
 import { isWorkbenchMode, WORKBENCH_SURFACE } from '@hypercomb/runtime/workbench-page'
+// THE CONSENT DIALOG IS THE HOST'S OWN (runtime confirm-dialog.ts): framework-
+// free, mounted on import, eagerly — every act that waits on a yes needs it,
+// whatever package is installed, and it is not one of the barrel's panels.
+import '@hypercomb/runtime/confirm-dialog'
 
 // The barrel contains every shell-owned tool window. Loading it synchronously
 // makes unopened authoring panels part of the first-frame bundle. The registry

@@ -204,6 +204,14 @@ export const hostCurrentBranch = async (at?: readonly string[], own: Readonly<Re
               'Your hive index could not be read back ({reason}), so it was left untouched — the bytes are hosted; try again when the host answers.',
               { reason: result.reason ?? 'unreachable' }))
           return false
+        case 'index-split':
+          // Visitors read an index none of the publisher's hosts holds
+          // (indexHome): writing beside it would split the index in two.
+          toast('error', t(i18n, 'host.title', 'Publish branch'),
+            t(i18n, 'host.index-split',
+              'Visitors at {hosts} read a copy of your hive index that none of your hosts holds, so nothing was published and every other branch is untouched. Follow the host that serves {hosts}, then publish again.',
+              { hosts: result.reason ?? '' }))
+          return false
         case 'index-failed':
           toast('error', t(i18n, 'host.title', 'Publish branch'),
             t(i18n, 'host.index-failed', 'The bytes are hosted but the hive index update failed ({reason}) — try again to retry the index.', { reason: result.reason ?? 'unknown' }))

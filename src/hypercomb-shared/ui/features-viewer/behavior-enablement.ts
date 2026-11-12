@@ -36,6 +36,22 @@ export const GLOBAL_OFF_KEY = 'hc:behavior-global-off'
 export const SEEDED_COHORTS_KEY = 'hc:behavior-seeded'
 export const ENABLEMENT_CHANGED = 'behavior:enablement-changed'
 
+// ── SUGGESTED (jwize, 2026-11-11) ────────────────────────────────────────
+//
+// "We can have suggested behaviors so the person who doesn't want ai doesn't
+// get it." A suggested behaviour is OFF, and offered: nothing of it runs until
+// the participant turns it on, and the offer is one press. It is not a third
+// polarity — every reader already answers "off" for it, from the lists above.
+// `hc:behavior-suggested` only says which of the dark kinds are worth
+// offering, and a kind leaves it the moment the participant flips its light
+// either way: a suggestion is made once.
+export const SUGGESTED_KEY = 'hc:behavior-suggested'
+
+/** What a fresh hive is offered. The AI chat is the first: a new hive opens
+ *  without it. A hive that already exists is never touched — its chat stays
+ *  as it was. */
+export const FRESH_HIVE_SUGGESTIONS: readonly string[] = ['word:chat']
+
 function readStringArray(key: string): string[] {
   try {
     const arr = JSON.parse(localStorage.getItem(key) ?? '[]')
@@ -74,7 +90,20 @@ export function seedDarkOnFreshInstall(): boolean {
     localStorage.setItem(GLOBAL_ON_KEY, '[]')
     localStorage.setItem(SEEDED_COHORTS_KEY, JSON.stringify(['*']))
   } catch { return false }
+  // The build's own words read lit until they are on the off-list, so a
+  // suggested word is put there — off, and named as an offer.
+  write(GLOBAL_OFF_KEY, [...new Set([...readGlobalOffKinds(), ...FRESH_HIVE_SUGGESTIONS])])
+  write(SUGGESTED_KEY, [...FRESH_HIVE_SUGGESTIONS])
   return true
+}
+
+/** The kinds on offer: suggested, and still off. */
+export function readSuggestedKinds(): string[] {
+  return readStringArray(SUGGESTED_KEY).filter(kind => isKindGloballyOff(kind) || readGlobalOffKinds().includes(kind))
+}
+
+export function isKindSuggested(kind: string): boolean {
+  return readSuggestedKinds().includes(String(kind ?? '').trim())
 }
 
 export function readGlobalOffKinds(): string[] {
@@ -104,6 +133,9 @@ export function setKindGlobalOn(kind: string, on: boolean): void {
   if (on && wasOff) { changed = true; write(GLOBAL_OFF_KEY, off.filter(x => x !== k)) }
   else if (!on && !wasOff) { changed = true; write(GLOBAL_OFF_KEY, [...off, k]) }
   if (!changed) return
+  // The participant has had their say: the suggestion is spent.
+  const suggested = readStringArray(SUGGESTED_KEY)
+  if (suggested.includes(k)) write(SUGGESTED_KEY, suggested.filter(x => x !== k))
   EffectBus.emit(ENABLEMENT_CHANGED, { kind: k, on })
 }
 
@@ -133,6 +165,22 @@ export function isWordSwitchedOff(word: string): boolean {
   return readGlobalOffKinds().includes(WORD_KIND_PREFIX + w)
 }
 
+const foldWord = (word: string): string => String(word ?? '').trim().toLowerCase().replace(/^\/+/, '')
+
+/** True when this word is off and on offer — its door is still shown, and a
+ *  press of it is the participant turning it on. */
+export function isWordSuggested(word: string): boolean {
+  const w = foldWord(word)
+  return !!w && isWordSwitchedOff(w) && readStringArray(SUGGESTED_KEY).includes(WORD_KIND_PREFIX + w)
+}
+
+/** Take the offer: light the word. True when it was on offer. */
+export function acceptSuggestedWord(word: string): boolean {
+  if (!isWordSuggested(word)) return false
+  setKindGlobalOn(WORD_KIND_PREFIX + foldWord(word), true)
+  return true
+}
+
 /** The refusal a word's surface says when asked to open while it is off —
  *  the same keys and the same press the essentials door uses, so the two
  *  read as one voice. */
@@ -148,7 +196,9 @@ export function sayWordSwitchedOff(word: string): void {
   EffectBus.emit('toast:show', {
     type: 'info',
     title: '/' + w,
-    message: say('words.dark', `"${w}" is switched off. Its light is in Beehaviors, under Everywhere.`, { word: w }),
+    message: isWordSuggested(w)
+      ? say('words.suggested', `"${w}" is suggested, and off until you turn it on. Its light is in Beehaviors, under Everywhere.`, { word: w })
+      : say('words.dark', `"${w}" is switched off. Its light is in Beehaviors, under Everywhere.`, { word: w }),
     actionLabel: say('words.dark.open', 'Open Beehaviors'),
     actionEffect: 'features:roster-open',
     actionPayload: { query: w },

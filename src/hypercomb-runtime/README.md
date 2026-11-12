@@ -18,8 +18,16 @@ sealed-package     the closed boundary an installer may hydrate
 packed-store-*     the packed store and its one-way-door gate
 native-filesystem  Tauri/WebView2 storage override (no-op in a browser)
 shell-surface-registry  what mounts, framework-free
+confirm-dialog     the consent dialog every host carries (see below)
 install-monitor · proximity-registry · sw-domains
 ```
+
+**One exception to "no look": the consent dialog** (`confirm-dialog.ts`). Every
+act that waits on a yes asks it, and a shell is deployed before the packages its
+participants hold, so a dialog that came with a package would leave a new shell
+over an older package with nobody to answer. It is the host's own, as the
+Angular dialog was. It is framework-free and mounts itself on import. The
+Angular surface host imports it, and so does the shim.
 
 **Nothing here may import `hypercomb-shared`.** The dependency runs one way:
 `runtime → @hypercomb/core`. A shell may consume this package; this package may

@@ -1185,6 +1185,11 @@ $bp-phone-max: 599px;
 // a second colour to learn — and says "open" the way a window toggle should:
 // a FILLED bubble. That was the cue it wore on the control bar, and the one
 // thing worth carrying over from there.
+// SUGGESTED: the chat is off and on offer. The button is there, quieter than
+// its neighbours, and a press turns the chat on.
+.chat-toggle-btn.suggested { opacity: 0.45; }
+.chat-toggle-btn.suggested:hover { opacity: 1; }
+
 .chat-toggle-btn {
   // OPTICALLY CENTRED, not geometrically. The speech bubble's tail hangs
   // below the body, so the glyph's BOX is centred while the shape reads high

@@ -80,7 +80,7 @@ import { viewSourceScopeAt } from '../../commands/view-source-scope.js'
 import { featureNeedsReview } from '../../sharing/feature-availability.js'
 import {
   isBehaviorDormant, isKindGloballyOff, readGlobalOffKinds,
-  readGlobalOnKinds, seedGlobalOnKinds, seedCohortOn,
+  readGlobalOnKinds, seedGlobalOnKinds, seedCohortOn, isKindSuggested,
   bindingAt, bindingsFor, isWithdrawnByBinding, allBindings,
   type BehaviorBinding,
 } from '../../sharing/behavior-enablement.js'
@@ -818,7 +818,9 @@ export class ShowFeaturesDrone extends Drone {
     }
     // Transient for the same reason as `features:open`: the answer belongs to
     // the request just made, never to a panel that mounts afterwards.
-    EffectBus.emitTransient('features:roster', { rows, ...(query ? { query } : {}) })
+    // A dark row that is on offer says so (sharing/behavior-enablement.ts).
+    const offered = rows.map(row => !row.on && isKindSuggested(row.kind) ? { ...row, suggested: true } : row)
+    EffectBus.emitTransient('features:roster', { rows: offered, ...(query ? { query } : {}) })
   }
 
   /** Attach (or detach) an ATTACHABLE view behaviour at `segments` by writing

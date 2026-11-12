@@ -58,7 +58,6 @@ import '../portal/portal-overlay.component'
 // standing surface, opened from anywhere: the command line's rail, the word
 // `/annotate`, or the `d` key (markup-overlay.component.ts).
 import '../markup-overlay/markup-overlay.component'
-import '../confirm-dialog/confirm-dialog.component'
 import '../icon-picker/icon-picker.component'
 import '../mesh-modal/mesh-modal.component'
 import '../trust-prompt/trust-prompt.component'

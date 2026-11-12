@@ -46,7 +46,6 @@ import { HOST_LISTING_FLOOR, listedMeanings } from '../host-listing.js'
 import { nostrJson } from '../nip05-names.js'
 import { decodeTransferPack, encodeTransferPack, gunzipBytes, gzipBytes } from '../../hypercomb-runtime/src/transfer-pack.ts'
 import { INSTANCE_HEAD_KEY, INSTANCE_HEAD_PATH, formatInstanceHead, parseInstanceHead } from '../../hypercomb-runtime/src/instance-head.ts'
-import { markWorkbenchPage } from '../../hypercomb-runtime/src/workbench-page.ts'
 import { KEY_LIST_MEANING } from '../../hypercomb-core/src/core/key-list.ts'
 import { keyLists } from './key-lists.js'
 
@@ -1862,8 +1861,9 @@ async function servePoolListing(request, env, sig) {
   // A DERIVATION'S ATTESTATION POOL is listed to whoever asks its address —
   // the attesters' keys; each one's word is read from their own index. So is
   // A NAME'S PICTURE POOL (its publishers' keys, read the same way). So is
-  // an EVENT'S RSVP POOL an organizer opened here, empty or not.
-  if (!listed && !await isAttestPool(env, sig) && !await isPicturePool(env, sig) && !await isRsvpPool(env, sig)) {
+  // an EVENT'S RSVP POOL an organizer opened here, empty or not. So is A
+  // PACKAGE ROOT'S ASSESSMENT POOL (the assessors' keys, read the same way).
+  if (!listed && !await isAttestPool(env, sig) && !await isPicturePool(env, sig) && !await isRsvpPool(env, sig) && !await isAssessPool(env, sig)) {
     // `?held` (2026-11-09): every word, name and record is an address a hive
     // derives and asks of every host it follows, so "no pool here" is the
     // common answer — asked with the flag it is a quiet 204, the same flag
@@ -2560,6 +2560,11 @@ const ASSESS_KEY_RE = /^assess:([0-9a-f]{64})$/
 const ASSESS_VERDICTS = new Set(['accept', 'refuse', 'unclear'])
 const JEV_VERDICTS = new Set(['follows', 'unsure', 'breaks'])
 const ASSESSMENTS_SHOWN = 50
+// A list of the assessment pools this host holds, so the listing route knows
+// one when it is asked its address at the ROOT — as attest:pools does for
+// attestations. A shared change is read from the root domain, not from a door
+// (documentation/module-sandbox.md, "Retiring the door").
+const ASSESS_POOLS_MEANING = 'assess:pools'
 
 async function noteAssessors(env, pubkey, evt) {
   let roots = {}
@@ -2570,7 +2575,14 @@ async function noteAssessors(env, pubkey, evt) {
     // A member of the root's pool, named by the assessor's key. Membership
     // only: what they said is read, and re-verified, from their index.
     await addPoolMember(env, `assess:${root}`, pubkey)
+    await addPoolMember(env, ASSESS_POOLS_MEANING, await poolAddress(`assess:${root}`))
   }
+}
+
+/** Is `sig` the address of a package root's assessment pool this host holds? */
+async function isAssessPool(env, sig) {
+  if (!SIG_RE.test(sig) || !env.CONTENT?.head) return false
+  return !!(await env.CONTENT.head(`${await poolAddress(ASSESS_POOLS_MEANING)}/${sig}`))
 }
 
 // ── derivation attestations (documentation/derivations.md) ───────────────
@@ -3421,17 +3433,32 @@ function pinNostrOff(html) {
   return html.slice(0, at) + pin + html.slice(at)
 }
 
+// A DEBUGGER SUBDOMAIN LOADS NO ANGULAR (jwize, 2026-11-11: "anything built in
+// the debugger (subdomains) should not load angular. This will be our process
+// to phase out angular"). A try- door's page is the framework-free shim — the
+// same static deployment the front door's card comes from (HOST_DOOR_ORIGIN),
+// or DEBUGGER_SHELL_ORIGIN where a machine serves its own. It is never the web
+// shell: with neither configured the door says so, and does not fall back to
+// the Angular page. What a debugger can do is therefore exactly what has been
+// moved out of Angular, and the gap is the work list.
+function debuggerShellOrigin(env) {
+  return String(env.DEBUGGER_SHELL_ORIGIN || env.HOST_DOOR_ORIGIN || '').replace(/\/+$/, '')
+}
+
 async function serveSandboxShell(request, env, zone) {
-  const origin = String(env.SANDBOX_SHELL_ORIGIN || '').replace(/\/+$/, '')
-  const loopback = /^http:\/\/((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3})(:\d{1,5})?$/i.test(origin)
   const url = new URL(request.url)
-  const upstreamPath = url.pathname.startsWith(SHELL_PREFIX) ? '/' + url.pathname.slice(SHELL_PREFIX.length) : url.pathname
+  const debuggerDoor = SANDBOX_LABEL_RE.test(url.hostname.split('.')[0])
+  const origin = debuggerDoor ? debuggerShellOrigin(env) : String(env.SANDBOX_SHELL_ORIGIN || '').replace(/\/+$/, '')
+  const loopback = /^http:\/\/((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3})(:\d{1,5})?$/i.test(origin)
+  // The shim's files are its own, at their own paths; only the web shell's
+  // bundles are moved under /shell/.
+  const upstreamPath = !debuggerDoor && url.pathname.startsWith(SHELL_PREFIX) ? '/' + url.pathname.slice(SHELL_PREFIX.length) : url.pathname
   const upstream = origin.startsWith('https://') || loopback
     ? await fetch(origin + upstreamPath + url.search, {
       method: request.method,
       headers: { accept: request.headers.get('accept') || '*/*' },
     })
-    : text(503, 'the sandbox shell is not configured')
+    : text(503, debuggerDoor ? 'the debugger shell is not configured' : 'the sandbox shell is not configured')
   const headers = new Headers(upstream.headers)
   headers.delete('content-encoding')
   headers.delete('content-length')
@@ -3451,16 +3478,16 @@ async function serveSandboxShell(request, env, zone) {
   headers.set('Cross-Origin-Opener-Policy', 'same-origin')
   headers.set('X-Content-Type-Options', 'nosniff')
   headers.delete('set-cookie')
-  if (url.pathname.startsWith(SHELL_PREFIX) && !SHELL_HASHED_RE.test(upstreamPath)) headers.set('Cache-Control', 'no-cache')
+  if (!debuggerDoor && url.pathname.startsWith(SHELL_PREFIX) && !SHELL_HASHED_RE.test(upstreamPath)) headers.set('Cache-Control', 'no-cache')
   if (request.method !== 'HEAD' && /text\/html/i.test(headers.get('content-type') || '')) {
-    let page = (await upstream.text())
-      .replace(SHELL_BUNDLE_RE, (_, attr, file) => `${attr}="${SHELL_PREFIX}${file}"`)
-      .replace(SHELL_CORE_RE, (_, quote, path) => `${quote}${SHELL_PREFIX}${path}${quote}`)
     // A try- door's package has full page power, and it arrives only after
     // this document. The signer is pinned here, while the page is still the
     // shell's, so the package cannot put window.nostr back. A swarm door
     // signs; it is not pinned.
-    if (SANDBOX_LABEL_RE.test(url.hostname.split('.')[0])) page = pinNostrOff(markWorkbenchPage(page, url.hostname))
+    if (debuggerDoor) return new Response(pinNostrOff(await upstream.text()), { status: upstream.status, headers })
+    const page = (await upstream.text())
+      .replace(SHELL_BUNDLE_RE, (_, attr, file) => `${attr}="${SHELL_PREFIX}${file}"`)
+      .replace(SHELL_CORE_RE, (_, quote, path) => `${quote}${SHELL_PREFIX}${path}${quote}`)
     return new Response(page, { status: upstream.status, headers })
   }
   return new Response(request.method === 'HEAD' ? null : upstream.body, { status: upstream.status, headers })

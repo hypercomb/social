@@ -50,6 +50,21 @@ export class FollowQueenBee extends QueenBee {
   // A domain is the whole argument: its dots are not a walk.
   override rawArgs = true
 
+  // OFFERED TO A MODEL (jwize, 2026-11-11: development by chat). Following
+  // adds a domain to the ones this hive reads from, so it reaches the
+  // network and waits for the participant's Run, with the domain in front of
+  // them. Stopping is taking something away: the participant's.
+  override machine = {
+    forms: '<domain>',
+    example: '/follow hypercomb.com',
+    bare: true,
+    reach: 'additive' as const,
+    scope: 'network' as const,
+    consequence: 'Adds the domain to the ones this hive reads from. Nothing it publishes is taken until the participant turns its updates on. Bare, it says who is followed.',
+    refuse: (args: string): string | undefined =>
+      /^off(\s|$)/i.test(args.trim()) ? 'follow off stops reading a domain; only the participant says it' : undefined,
+  }
+
   /** The domains you follow, as the hosts window last read them. */
   #followed: readonly string[] = []
 

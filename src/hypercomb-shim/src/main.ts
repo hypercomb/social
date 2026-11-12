@@ -84,6 +84,16 @@ import '@hypercomb/runtime/script-preloader'
 // while still shipping 2.9 MB of catalogs for the service that never existed.
 // Third self-registering module to be missing here; the pattern is the bug.
 import '@hypercomb/runtime/i18n.service'
+// WHERE YOU STAND. Lineage and navigation were shell services until
+// 2026-11-11, so this host had neither: the layer committer found no lineage
+// and returned without writing, and a tile a behaviour "made" here was never
+// on any page. They are framework-free and live in the runtime package now.
+// Navigation first: lineage reads the address through it.
+import '@hypercomb/runtime/navigation'
+import '@hypercomb/runtime/lineage'
+// THE CONSENT DIALOG: every act that waits on a yes (publish, remove, prune,
+// keys) asks it. The host's own, as in the Angular shells, framework-free.
+import '@hypercomb/runtime/confirm-dialog'
 import { PACKED_STORE_MEANING } from '@hypercomb/runtime/packed-store-engine'
 import { packedStoreBlocksBoot } from '@hypercomb/runtime/packed-store-gate'
 import { initializeRuntime } from '@hypercomb/runtime/runtime-initializer'
@@ -322,10 +332,12 @@ const boot = async (): Promise<void> => {
   // half-written, or whose OPFS was cleared under a stale installed-marker, is
   // empty in the way that matters however confident the marker is. Anything
   // that reached a surface boots straight past the automatic cold-host prompt,
-  // but remains manageable through the explicit route.
+  // but remains manageable through the explicit route. The host's own surfaces
+  // (the consent dialog) mount with no package at all, so they are not
+  // counted: counting them dismissed the front door on every cold host.
   const managerPath = location.pathname.replace(/\/+$/, '')
   const managerRequested = managerPath === '/hosts' || managerPath === '/@hypercomb'
-  if (managerRequested || (live.mounted === 0 && live.angular === 0)) {
+  if (managerRequested || (live.fromPackage === 0 && live.angular === 0)) {
     console.log(managerRequested
       ? `[shim] ${managerPath} — opening the host console`
       : '[shim] 0 surfaces — no package is live')

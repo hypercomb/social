@@ -33,7 +33,7 @@
 
 import { EffectBus, I18N_IOC_KEY, isSandboxDoor, type I18nProvider, registerPoolMeaning } from '@hypercomb/core'
 import type { DiffRow } from './line-diff.js'
-import { countedAssessors, doorReader, readSandboxDoor, readTrial, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, type SandboxSite, type SandboxTrial, type TakeDeps, type TrialReading } from './module-review.js'
+import { countedAssessors, doorReader, readSandboxDoor, readTrial, takeDepsFrom, takeHostsOf, takeTrial, tallyAssessments, trialsOf, type SandboxSite, type SandboxTrial, type TakeDeps, type TrialReading } from './module-review.js'
 
 export const SANDBOX_CHANGE_SURFACE = 'hc-sandbox-change'
 export const SANDBOX_CHANGE_OWNER = '@diamondcoreprocessor.com/SandboxChangeView'
@@ -175,7 +175,7 @@ export class SandboxChangeElement extends HTMLElement {
     }
     this.#taking.set(path, { text: t('module.panel.taking', 'taking…'), held: false })
     this.#render()
-    const outcome = await takeTrial(shown.site.package, [path], [new URL(shown.door).host], deps)
+    const outcome = await takeTrial(shown.site.package, [path], takeHostsOf(shown.door), deps)
     const refused = outcome.refused[0]
     this.#taking.set(path, refused
       ? { text: t('module.panel.nottaken', 'not taken: {reason}', { reason: refused.error }), held: false }
@@ -229,13 +229,9 @@ export class SandboxChangeElement extends HTMLElement {
     const meta = el('p', 'hc-trial-meta', t('module.panel.by', 'by {publisher}{when} · not promoted', {
       publisher: site.publisher || site.pubkey.slice(0, 12) + '…', when: when ? ` · ${when}` : '',
     }))
-    const door = document.createElement('a')
-    door.className = 'hc-trial-door'
-    door.href = shown.door
-    door.target = '_blank'
-    door.rel = 'noopener'
-    door.textContent = t('module.panel.door', 'open the door')
-    meta.append(' · ', door)
+    // No link to a door. A shared change is taken and run in your own hive
+    // (jwize, 2026-11-10: "try is redundant"); the door's host is still where
+    // this panel reads the change from, by signature.
     body.appendChild(meta)
     body.appendChild(this.#steps(shown, reading))
 
@@ -308,18 +304,11 @@ export class SandboxChangeElement extends HTMLElement {
   #steps(shown: SandboxChangePayload, reading: TrialReading | null): HTMLElement {
     const change = shown.name.replace(/^try-/, '')
     const zone = new URL(zoneOf(shown.door, shown.name)).host
-    const doorHost = new URL(shown.door).host
     const readings = reading ? (reading.review ? 1 : 0) + (reading.jev ? 1 : 0) + reading.people.length : 0
     const taken = [...this.#taking.values()]
     const paths = (reading?.files ?? []).map(file => file.path).filter((path): path is string => !!path)
     const mine = !!this.#me && this.#me === shown.site.pubkey.toLowerCase()
     const atDoor = isSandboxDoor()
-
-    const trial = document.createElement('a')
-    trial.href = shown.door
-    trial.target = '_blank'
-    trial.rel = 'noopener'
-    trial.textContent = t('module.steps.open', 'open it in a new tab')
 
     const acts: HTMLElement[] = []
     if (!atDoor && paths.length && paths.some(path => !this.#taking.has(path))) {
@@ -346,7 +335,7 @@ export class SandboxChangeElement extends HTMLElement {
 
     const steps: { title: string; text: string; done: boolean; extra?: HTMLElement[] }[] = [
       { title: t('module.steps.draft', 'Draft'), text: t('module.steps.drafttext', 'Written and committed to a trial.'), done: true },
-      { title: t('module.steps.trial', 'Trial'), text: t('module.steps.trialtext', 'Running at {door}, a site of its own: nothing of your hive is in it.', { door: doorHost }), done: true, extra: [trial] },
+      { title: t('module.steps.shared', 'Shared'), text: t('module.steps.sharedtext', "Named in its publisher's signed index on {zone}. It runs nowhere until someone takes it.", { zone }), done: true },
       {
         title: t('module.steps.reviewed', 'Reviewed'),
         text: !reading ? t('module.steps.reading', 'Reading the reviews…')
@@ -486,7 +475,6 @@ function ensureStyles(): void {
     .hc-trial-word:hover { color: var(--hc-window-ink-loud, #fff); background: var(--hc-window-tint-strong, rgba(255, 255, 255, 0.075)); }
     .hc-trial-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0.7rem 0.75rem 1.2rem; }
     .hc-trial-meta { margin: 0 0 0.5rem; color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); }
-    .hc-trial-door { color: var(--hc-window-ink-plain, rgba(227, 237, 245, 0.86)); }
     .hc-trial-steps { margin: 0.2rem 0 0.4rem; padding-left: 1.4rem; }
     .hc-trial-step { margin: 0.2rem 0; color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); }
     .hc-trial-step.is-done .hc-trial-step-title::after { content: ' \\2713'; }

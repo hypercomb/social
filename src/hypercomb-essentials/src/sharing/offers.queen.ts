@@ -69,6 +69,17 @@ export class OffersQueenBee extends QueenBee {
     return []
   }
 
+  // OFFERED TO A MODEL (jwize, 2026-11-11: development by chat): it may put
+  // the offers in front of the participant. Placing one is their press.
+  override machine = {
+    forms: '',
+    example: '/offers',
+    bare: true,
+    reach: 'additive' as const,
+    scope: 'local' as const,
+    consequence: 'Opens the offers window. Nothing is placed until the participant presses it there.',
+  }
+
   protected async execute(_args: string): Promise<void> {
     // THE STAMP FOLLOWS THE LOAD. The window takes an open request only while
     // it is fresh, so it is stamped once the view is here — a slow first load

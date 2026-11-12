@@ -341,17 +341,18 @@
       </button>
       }
 
-      @if (chatLit()) {
+      @if (chatLit() || chatSuggested()) {
       <button
         class="rail-btn chat-toggle-btn"
+        [class.suggested]="chatSuggested()"
         [class.on]="chatPanelOpen()"
         [class.writing]="!chatPanelOpen() && chatActivity() === 'writing'"
         [class.unread]="!chatPanelOpen() && chatActivity() === 'unread'"
         type="button"
-        (mousedown)="$event.preventDefault(); chatToggle.emit()"
-        [attr.aria-label]="chatLabel()"
+        (mousedown)="$event.preventDefault(); pressChat()"
+        [attr.aria-label]="chatSuggested() ? ('chat.suggested' | t) : chatLabel()"
         [attr.aria-pressed]="chatPanelOpen()"
-        [title]="chatLabel()"
+        [title]="chatSuggested() ? ('chat.suggested' | t) : chatLabel()"
       >
         <span class="mat-sym" aria-hidden="true">chat</span>
       </button>

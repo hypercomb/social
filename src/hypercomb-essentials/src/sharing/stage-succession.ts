@@ -22,6 +22,7 @@
 // the same bucket, by design.
 import { moleculeAddress, moleculeKey } from '@hypercomb/core'
 import {
+  membersAtHead,
   readSuccessionMembers,
   writeSuccessionHead,
   type FacetReadStore,
@@ -72,6 +73,34 @@ export const readStageHeads = async (word: StageWord, io: StageIo = {}): Promise
   } catch { return [] }
 }
 
+/** THE LIST THE READERS HOLD: the heads a stage claim lists — the claim an
+ *  index's `stage:<word>` pointer names. Read from this hive's own bytes (the
+ *  claim, its list and its envelopes are atoms this author minted), and only
+ *  for a claim this author signed for this word. Empty otherwise. */
+export const claimedStageHeads = async (word: StageWord, claim: string | undefined, io: StageIo = {}): Promise<string[]> => {
+  const pubkey = io.pubkey === undefined ? cachedPubkey() : io.pubkey
+  const store = io.store ?? storeFromIoc()
+  const sig = String(claim ?? '').toLowerCase()
+  if (!pubkey || !store || !SIG_RE.test(sig)) return []
+  try {
+    const raw = (store.getResourceLocal ?? store.getResource).bind(store)
+    const event = JSON.parse(await (await raw(sig))?.text() ?? 'null') as { pubkey?: string; tags?: unknown[] } | null
+    const tag = (name: string): string => String((event?.tags ?? []).find((t): t is string[] => Array.isArray(t) && t[0] === name)?.[1] ?? '').toLowerCase()
+    if (String(event?.pubkey ?? '').toLowerCase() !== pubkey || tag('d') !== await moleculeAddress(word)) return []
+    const head = tag('h')
+    return SIG_RE.test(head) ? (await membersAtHead(store, head)) ?? [] : []
+  } catch { return [] }
+}
+
+/** This hive's list, with the readers' list carried in: a head the index's
+ *  own claim lists stays listed when this hive's list lost it (2026-11-12: a
+ *  publish from an index readers never saw cut `live` from 23 places to one). */
+const currentHeads = async (word: StageWord, claim: string | undefined, io: StageIo): Promise<string[]> => {
+  const current = await readStageHeads(word, io)
+  for (const head of await claimedStageHeads(word, claim, io)) if (!current.includes(head)) current.push(head)
+  return current
+}
+
 const writeStage = async (word: StageWord, members: readonly string[], io: StageIo): Promise<StageWriteResult> => {
   const pubkey = io.pubkey === undefined ? cachedPubkey() : io.pubkey
   if (!pubkey) return { ok: false, reason: 'no identity' }
@@ -108,13 +137,16 @@ export const advanceStage = async (
      *  failed write or a republish left behind never lingers (a list is
      *  reconciled against the index every time it is written). */
     keep?: (head: string) => boolean
+    /** The claim the index's `stage:<word>` pointer names (claimedStageHeads):
+     *  its heads are carried in before `keep` reconciles. */
+    claim?: string
   },
   io: StageIo = {},
 ): Promise<StageWriteResult> => {
   const add = change.add.map(s => String(s ?? '').toLowerCase()).filter(s => SIG_RE.test(s))
   const remove = new Set((change.remove ?? []).map(s => String(s ?? '').toLowerCase()))
   const keep = change.keep ?? (() => true)
-  const current = await readStageHeads(word, io)
+  const current = await currentHeads(word, change.claim, io)
   const next = current.filter(h => !remove.has(h) && !add.includes(h) && keep(h))
   for (const h of add) if (!next.includes(h)) next.push(h)
   return writeStage(word, next, io)
@@ -128,9 +160,10 @@ export const withdrawStage = async (
   remove: readonly string[],
   io: StageIo = {},
   keep: (head: string) => boolean = () => true,
+  claim?: string,
 ): Promise<StageWriteResult> => {
   const gone = new Set(remove.map(s => String(s ?? '').toLowerCase()))
-  const current = await readStageHeads(word, io)
+  const current = await currentHeads(word, claim, io)
   const next = current.filter(h => !gone.has(h) && keep(h))
   return writeStage(word, next, io)
 }
