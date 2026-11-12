@@ -542,8 +542,8 @@ function dropEvent(id) {
 // of them moved — never per request, since parsing every index costs a read per writer.
 let writerIndexMoves = 0
 const movesWriterIndex = (evt) => Number(evt.kind) === HIVE_INDEX_KIND && writers.has(evt.pubkey)
-// Bumped whenever ANY hive index enters or leaves the store, so the picture
-// pools (picturePublishers) are re-read only when an index moved.
+// Bumped whenever ANY hive index enters or leaves the store, so the
+// index-driven pools (indexPoolMembers) are re-read only when an index moved.
 let hiveIndexMoves = 0
 const movesHiveIndex = (evt) => Number(evt.kind) === HIVE_INDEX_KIND
 
@@ -1688,17 +1688,20 @@ function tryServeHiveIndex(req, res) {
   return true
 }
 
-// PICTURES FOR A NAME (documentation/pools-across-hosts.md, "What a host
-// adds"). A tile's name pool is never listed; a publisher names a picture in
-// their OWN signed index as `pictures:<sign(name)>` → the tile's own layer,
-// and this host lists the keys whose held index names it, at
-// sign('pictures:<sign(name)>'). Membership only, as the worker keeps it:
-// each reader re-reads every publisher's own index. Rebuilt from the held
-// indexes when one moves, never per request.
-const PICTURES_KEY_RE = /^pictures:([0-9a-f]{64})$/
-let picturePools = { moves: -1, members: new Map() }
-function picturePublishers(sig) {
-  if (picturePools.moves !== hiveIndexMoves) {
+// INDEX-DRIVEN POOLS: pictures for a name (documentation/pools-across-hosts.md,
+// "What a host adds") and lists for a need (documentation/need-feeds.md). A
+// tile's name pool is never listed; a participant names an entry in their OWN
+// signed index as `<family>:<m>` — `pictures:<sign(name)>` → the tile's own
+// layer, `list:<moleculeAddress(name)>` → a need-list record — and this host
+// lists the keys whose held index names it, at sign('<family>:<m>').
+// Membership only, as the worker keeps it: each reader re-reads every
+// participant's own index. Rebuilt from the held indexes when one moves, never
+// per request. The next family is one word in INDEX_POOL_FAMILIES.
+const INDEX_POOL_FAMILIES = Object.freeze(['pictures', 'list'])
+const INDEX_POOL_KEY_RE = new RegExp(`^(${INDEX_POOL_FAMILIES.join('|')}):([0-9a-f]{64})$`)
+let indexPools = { moves: -1, members: new Map() }
+function indexPoolMembers(sig) {
+  if (indexPools.moves !== hiveIndexMoves) {
     const members = new Map()
     for (const slot of idsByAuthorKind.keys()) {
       const [pubkey, kind] = slot.split('\0')
@@ -1706,17 +1709,18 @@ function picturePublishers(sig) {
       let roots
       try { roots = JSON.parse(newestEvent(pubkey, HIVE_INDEX_KIND)?.content ?? '{}')?.roots ?? {} } catch { continue }
       for (const key of Object.keys(roots)) {
-        const name = PICTURES_KEY_RE.exec(key)?.[1]
-        if (!name) continue
-        const address = sha256Hex(Buffer.from(`pictures:${name}`, 'utf8'))
+        const match = INDEX_POOL_KEY_RE.exec(key)
+        if (!match) continue
+        const [, family, m] = match
+        const address = sha256Hex(Buffer.from(`${family}:${m}`, 'utf8'))
         const keys = members.get(address) ?? new Set()
         keys.add(pubkey)
         members.set(address, keys)
       }
     }
-    picturePools = { moves: hiveIndexMoves, members }
+    indexPools = { moves: hiveIndexMoves, members }
   }
-  const keys = picturePools.members.get(sig)
+  const keys = indexPools.members.get(sig)
   return keys ? [...keys].sort() : null
 }
 
@@ -1907,7 +1911,7 @@ function tryServeContent(req, res) {
     if (!listedPool(dirMatch[1])) {
       // A ROOM POOL is listed to whoever asks its address (swarm-pools.md) —
       // its verified members only. Anything else answers as before.
-      const members = roomMembers(dirMatch[1]) ?? picturePublishers(dirMatch[1])
+      const members = roomMembers(dirMatch[1]) ?? indexPoolMembers(dirMatch[1])
       if (!members) { respondMiss(req, res, 'pool not held'); return true }
       const body = Buffer.from(members.length ? members.join('\n') + '\n' : '', 'utf8')
       res.writeHead(200, {

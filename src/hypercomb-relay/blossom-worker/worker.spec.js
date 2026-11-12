@@ -1999,6 +1999,29 @@ test('writing an index that names pictures:<sign(name)> lists its publisher in t
   assert.equal(molecule.status, 404)
 })
 
+test('writing an index that names list:<sign(name)> lists its offerer in that need\'s list pool, and the name pool stays closed', async () => {
+  const name = 'a'.repeat(64)
+  const CONTENT = contentBag()
+  const env = { SITE_BINDINGS: '{}', HIVES: kvMap(), CONTENT }
+  const url = `https://content.hypercomb.com/${INDEXES}/${assessor}`
+  const body = JSON.stringify(await indexBy(assessorKey, { [`list:${name}`]: 'f'.repeat(64), 'list:not-a-sig': 'e'.repeat(64) }))
+  const response = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', assessorKey) }, body }), env)
+  assert.equal(response.status, 201)
+  const pool = await sha256Hex(`list:${name}`)
+  assert(CONTENT.held.has(`${pool}/${assessor}`), 'a member of the need\'s list pool, named by the offerer\'s key')
+  assert(CONTENT.held.has(`${await sha256Hex('list:pools')}/${pool}`), 'and the pool is named among the list pools')
+  assert(!CONTENT.held.has(`${await sha256Hex('list:pools')}/${await sha256Hex('list:not-a-sig')}`), 'a key that names no molecule address opens no pool')
+  const listing = await worker.fetch(new Request(`https://content.hypercomb.com/${pool}/`), env)
+  assert.equal(listing.status, 200)
+  assert.equal(await listing.text(), `${assessor}\n`)
+  // The name's own pool (the molecule) is never listed.
+  const molecule = await worker.fetch(new Request(`https://content.hypercomb.com/${name}/`), env)
+  assert.equal(molecule.status, 404)
+  // A need nobody offered for is no pool here; asked with ?held it is a quiet 204.
+  const untouched = await worker.fetch(new Request(`https://content.hypercomb.com/${await sha256Hex('list:' + 'b'.repeat(64))}/?held`), env)
+  assert.equal(untouched.status, 204)
+})
+
 test('a try- door lists every signed assessment of its root, and the host AI verdict', async () => {
   const [root, reviewSig, goodRecord] = ['b'.repeat(64), 'd'.repeat(64), 'c'.repeat(64)]
   const HIVES = kvMap(new Map([

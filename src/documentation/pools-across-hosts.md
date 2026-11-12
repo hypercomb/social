@@ -175,7 +175,7 @@ What a host lists, and why each is safe:
 |---|---|---|
 | **the floor** | `host:packages`, `host:offerings`, `community:hosts`, `community:offers` (`hypercomb-relay/host-listing.floor.json`) | the protocol — every host lists them |
 | **declared** | any colon meaning an operator names in their signed index (`listed`) | the host's operator |
-| **index-driven** | a pool whose members are the keys that named an entry in their own signed index — `attest:<record>` today | each participant, one key at a time; the host only gathers who said so |
+| **index-driven** | a pool whose members are the keys that named an entry in their own signed index — `attest:<record>`, `pictures:<sign(name)>`, and `list:<sign(name)>` (`need-feeds.md`) | each participant, one key at a time; the host only gathers who said so |
 | **never** | a tile's name pool (a molecule) and the host's private ledgers | nobody — a 404 says nothing, so a probe learns nothing |
 
 **Pictures travel only through hosts.** A tile's pictures are never offered

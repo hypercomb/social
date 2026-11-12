@@ -1861,9 +1861,10 @@ async function servePoolListing(request, env, sig) {
   // A DERIVATION'S ATTESTATION POOL is listed to whoever asks its address —
   // the attesters' keys; each one's word is read from their own index. So is
   // A NAME'S PICTURE POOL (its publishers' keys, read the same way). So is
+  // A NEED'S LIST POOL (its offerers' keys, read the same way). So is
   // an EVENT'S RSVP POOL an organizer opened here, empty or not. So is A
   // PACKAGE ROOT'S ASSESSMENT POOL (the assessors' keys, read the same way).
-  if (!listed && !await isAttestPool(env, sig) && !await isPicturePool(env, sig) && !await isRsvpPool(env, sig) && !await isAssessPool(env, sig)) {
+  if (!listed && !await isAttestPool(env, sig) && !await isPicturePool(env, sig) && !await isListPool(env, sig) && !await isRsvpPool(env, sig) && !await isAssessPool(env, sig)) {
     // `?held` (2026-11-09): every word, name and record is an address a hive
     // derives and asks of every host it follows, so "no pool here" is the
     // common answer — asked with the flag it is a quiet 204, the same flag
@@ -2645,6 +2646,36 @@ async function notePicturePublishers(env, pubkey, evt) {
 async function isPicturePool(env, sig) {
   if (!SIG_RE.test(sig) || !env.CONTENT?.head) return false
   return !!(await env.CONTENT.head(`${await poolAddress(PICTURES_POOLS_MEANING)}/${sig}`))
+}
+
+// ── lists for a need (documentation/need-feeds.md) ──────────────────────────
+//
+// THE SERVERS FEEDING A NEED (jwize 2026-11-12). A participant offers the values
+// a need can take — a list record put here — and names it in their OWN signed
+// index as `list:<sign(name)>` → the record's signature. The index write keeps
+// one derived list per name — the members of sign('list:<sign(name)>'), each
+// named by the offerer's key — and a list of those lists, sign('list:pools'), so
+// the listing route knows a list pool when it is asked its address. Membership
+// only, exactly as pictures: each reader re-reads the offerer's own index and
+// re-validates the record.
+const LIST_KEY_RE = /^list:([0-9a-f]{64})$/
+const LIST_POOLS_MEANING = 'list:pools'
+
+async function noteListOfferers(env, pubkey, evt) {
+  let roots = {}
+  try { roots = JSON.parse(evt.content)?.roots ?? {} } catch { return }
+  for (const key of Object.keys(roots)) {
+    const name = LIST_KEY_RE.exec(key)?.[1]
+    if (!name) continue
+    await addPoolMember(env, `list:${name}`, pubkey)
+    await addPoolMember(env, LIST_POOLS_MEANING, await poolAddress(`list:${name}`))
+  }
+}
+
+/** Is `sig` the address of a need's list pool this host holds? */
+async function isListPool(env, sig) {
+  if (!SIG_RE.test(sig) || !env.CONTENT?.head) return false
+  return !!(await env.CONTENT.head(`${await poolAddress(LIST_POOLS_MEANING)}/${sig}`))
 }
 
 // ── the calendar (documentation/calendar-events.md) ─────────────────────────
@@ -5835,6 +5866,7 @@ async function putHive(request, env, pubkey, ctx) {
   await noteAssessors(env, pubkey, evt)
   await noteAttesters(env, pubkey, evt)
   await notePicturePublishers(env, pubkey, evt)
+  await noteListOfferers(env, pubkey, evt)
   await noteEvents(env, pubkey, evt)
   await noteFollows(env, pubkey, evt)
   await noteSharedPools(env, pubkey, evt)
