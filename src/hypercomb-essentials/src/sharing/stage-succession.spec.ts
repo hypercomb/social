@@ -178,3 +178,43 @@ describe('the stage lists', () => {
     expect(stage.isStageRootKey('site/blog')).toBe(false)
   })
 })
+
+// 2026-11-11: a publish read an index readers never saw (the home relay's
+// empty one), and its reconcile cut this hive's `live` list from 23 places to
+// the one being published. The index the readers read still pointed at the
+// whole list, so every writer now carries that claim's heads back in before
+// it reconciles against the index.
+describe('the readers\' list is carried in', () => {
+  const H4 = 'a'.repeat(64)
+  const H5 = 'b'.repeat(64)
+
+  it('a list cut by a write from the wrong index gets its members back', async () => {
+    const whole = await stage.advanceStage('live', { add: [H1, H2, H3] }, io())
+    expect(whole.ok).toBe(true)
+    if (!whole.ok) return
+    // The cutting write: the index it read named only H4.
+    await stage.advanceStage('live', { add: [H4], keep: h => h === H4 }, io())
+    expect(await stage.readStageHeads('live', io())).toEqual([H4])
+    expect(await stage.claimedStageHeads('live', whole.claim, io())).toEqual([H1, H2, H3])
+    // The next write, from the index readers read: H4 was never in it.
+    const next = await stage.advanceStage('live', { add: [H5], keep: h => h !== H4, claim: whole.claim }, io())
+    expect(next.ok).toBe(true)
+    expect(await stage.readStageHeads('live', io())).toEqual([H1, H2, H3, H5])
+  })
+
+  it('a withdrawal carries the readers\' list in too', async () => {
+    const whole = await stage.advanceStage('published', { add: [H1, H2] }, io())
+    if (!whole.ok) throw new Error('advance failed')
+    await stage.advanceStage('published', { add: [H3], keep: h => h === H3 }, io())
+    await stage.withdrawStage('published', [H3], io(), () => true, whole.claim)
+    expect(await stage.readStageHeads('published', io())).toEqual([H1, H2])
+  })
+
+  it('takes nothing from a claim for another word, or one not held here', async () => {
+    const shared = await stage.advanceStage('shared', { add: [H1] }, io())
+    if (!shared.ok) throw new Error('advance failed')
+    expect(await stage.claimedStageHeads('live', shared.claim, io())).toEqual([])
+    expect(await stage.claimedStageHeads('live', 'f'.repeat(64), io())).toEqual([])
+    expect(await stage.claimedStageHeads('live', undefined, io())).toEqual([])
+  })
+})

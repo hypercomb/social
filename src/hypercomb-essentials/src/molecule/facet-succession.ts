@@ -358,6 +358,10 @@ export interface FacetReadResult {
 
 /** A verified head's member sigs, in slot order, or null when the atom or an
  *  envelope will not read. */
+/** The members a succession atom lists, by slot — one named head, rather than
+ *  the newest an author bucket holds. Null when any atom is not held here. */
+export const membersAtHead = (store: FacetReadStore, head: string): Promise<string[] | null> => membersOfAtom(store, head)
+
 const membersOfAtom = async (store: FacetReadStore, head: string): Promise<string[] | null> => {
   const raw = (store.getResourceLocal ?? store.getResource).bind(store)
   let atom: Partial<SuccessionAtom>

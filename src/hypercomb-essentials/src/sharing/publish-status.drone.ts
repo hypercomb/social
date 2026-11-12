@@ -113,6 +113,7 @@ const PUBLISH_FAILURE_TEXT: Record<PublishFailure, string> = {
   'no-signer': 'No signing key available — the hive index must be signed.',
   'not-available': 'Still uploading — the index was NOT advanced, so no dead links. It keeps retrying.',
   'index-unsafe': 'Your hive index could not be read back, so it was left untouched — publishing over an index we cannot see would drop every other branch. Try again when the host answers.',
+  'index-split': 'Visitors at {hosts} read a copy of your hive index that none of your hosts holds, so nothing was published and every other branch is untouched. Follow the host that serves {hosts}, then publish again.',
   'index-failed': 'The bytes are hosted but the index update failed. Publish again to retry the index.',
   'bundle-failed': 'The link resource could not be created.',
 }

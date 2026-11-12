@@ -49,7 +49,7 @@ import {
 } from './stage-succession.js'
 import { isReservedRootKey } from './hive-link.js'
 import {
-  ENTRANCES_MAX, ENTRANCE_POWERS, boundLineage, creationUrl, entranceHost, foldContentLabel, isPoweredEntrance, isPublishNode, ownAddressHost,
+  ENTRANCES_MAX, ENTRANCE_POWERS, boundLineage, creationUrl, entranceHost, foldContentLabel, foldDnsLabel, isOwnAddressLabel, isPoweredEntrance, isPublishNode, ownAddressHost,
   addressHolder, ownAddressRefusal, ownLabelOn, readEntrance, topOpenIn, readEntrances, siteZoneOf, withOwnAddress, writeDoorsOf, zoneDoor, type ZoneEntrance, type ZoneEntranceFrom,
 } from './zone-door.js'
 import type { ModuleAssessmentRecord } from '../assistant/module-review.js'
@@ -176,6 +176,7 @@ export type PublishFailure =
   | 'no-signer'       // no key to sign the index with
   | 'not-available'   // closure not served at the deadline — or a node refused it (`refused`) — pointer NOT advanced
   | 'index-unsafe'    // could not verify the existing index — refused to rewrite it
+  | 'index-split'     // visitors at `reason` read an index no host it writes to holds (indexHome)
   | 'index-failed'    // the PUT itself failed
   | 'bundle-failed'   // the link resource could not be minted
 
@@ -285,6 +286,70 @@ export const nodesFor = async (segs: readonly string[], hostSync: HostSyncLike |
 export const indexDoors = (nodes: readonly string[], left: readonly string[] | undefined): string[] =>
   writeDoorsOf([...nodes, ...(left ?? []).map(z => zoneDoor(normalizeHost(z))).filter(door => door && isPublishNode(door))])
 
+/** WHERE THE INDEX'S READERS READ IT, for `indexHome`. `readAt` is an
+ *  address a stranger opens (`business-card.jwize.com`); `elsewhere` is every
+ *  other door this key's index may be held at. */
+export interface IndexReaders {
+  readonly readAt?: string
+  readonly elsewhere?: readonly string[]
+}
+
+/** The address a stranger reads this branch's index at: its own label on the
+ *  first domain among the doors (`business-card.jwize.com`). '' for a
+ *  loopback or ported door, or a name that is no address label. */
+export const readerSiteOf = (segs: readonly string[], doors: readonly string[]): string => {
+  const zone = doors.map(door => foldContentLabel(door)).find(door => door.includes('.') && !door.includes(':') && !LOOPBACK_RE.test(door)) ?? ''
+  const label = foldDnsLabel(segs[0] ?? '')
+  return zone && label && isOwnAddressLabel(label) ? `${label}.${zone}` : ''
+}
+
+/** Every other door this key's index may be held at: the hosts its publish
+ *  ledger wrote it to, then the hosts the participant carries. */
+export async function otherIndexDoors(pubkey: string): Promise<string[]> {
+  const hosts: string[] = []
+  try { for (const entry of await listPublishRecords()) if (entry.record.pubkey === pubkey && entry.record.host) hosts.push(entry.record.host) } catch { /* no ledger — the carried hosts remain */ }
+  try { hosts.push(...await listCommunityHosts()) } catch { /* no pool — the ledger's hosts remain */ }
+  return writeDoorsOf(hosts.map(zoneDoor).filter(isPublishNode))
+}
+
+/** The readers of a branch's index, for every writer of it. */
+const readersOf = async (segs: readonly string[], doors: readonly string[], pubkey: string): Promise<IndexReaders> =>
+  ({ readAt: readerSiteOf(segs, doors), elsewhere: await otherIndexDoors(pubkey) })
+
+/** THE INDEX LIVES WHERE ITS READERS READ IT (2026-11-12). A zone's apex and
+ *  its sites can be different machines: `jwize.com` is the home relay on the
+ *  publisher's machine, while every `<name>.jwize.com` is served by the worker
+ *  whose store is written at pluginthematrix.com. A publish through the apex
+ *  read no index there, started an empty one, and signed a 6-branch index the
+ *  sites never saw: they went on serving the old head under the 78-branch
+ *  index, and the confirmation said the card answered at its address.
+ *
+ *  So the index a stranger gets at `readAt` decides. The door holding that
+ *  same signed event is the home; when none of the doors holds it, the other
+ *  doors are asked, and one that holds it joins the act. When nobody holds
+ *  it, `split` says so and nothing is written. `null` when the readers say
+ *  nothing (no `readAt`, or nothing verified there): the doors decide, as
+ *  before. */
+export async function indexHome(
+  doors: readonly string[],
+  pubkey: string,
+  readers: IndexReaders,
+  fetchIndex: typeof fetchHiveIndex = fetchHiveIndex,
+): Promise<{ host: string; read: Awaited<ReturnType<typeof fetchHiveIndex>> } | { split: string } | null> {
+  const readAt = String(readers.readAt ?? '')
+  if (!readAt) return null
+  const seen = await fetchIndex(readAt, pubkey)
+  if (!seen.ok) return null
+  const same = (read: Awaited<ReturnType<typeof fetchHiveIndex>> | undefined): boolean =>
+    !!read?.ok && read.manifest.eventId === seen.manifest.eventId
+  const ask = async (hosts: readonly string[]) => {
+    const { winner } = await firstBounded(hosts, HOST_CONCURRENCY, (host, signal) => fetchIndex(host, pubkey, signal), same, { hostOf: host => host })
+    return winner ? { host: winner.item, read: winner.result } : null
+  }
+  const found = await ask(doors) ?? await ask((readers.elsewhere ?? []).filter(host => !doors.includes(host)))
+  return found ?? { split: readAt }
+}
+
 /** Walk the doors for the index. A verified index at ANY door wins: a door that
  *  answers 404 may simply be one that keeps no index (jwize.com's apex), and
  *  stopping there refused every door switch on a branch it led, while a first
@@ -298,8 +363,12 @@ export async function resolveIndexDoor(
   doors: readonly string[],
   pubkey: string,
   fetchIndex: typeof fetchHiveIndex = fetchHiveIndex,
-): Promise<{ host: string; read: Awaited<ReturnType<typeof fetchHiveIndex>> }> {
+  readers: IndexReaders = {},
+): Promise<{ host: string; read: Awaited<ReturnType<typeof fetchHiveIndex>>; split?: string }> {
   type Door = { host: string; read: Awaited<ReturnType<typeof fetchHiveIndex>> }
+  const home = await indexHome(doors, pubkey, readers, fetchIndex)
+  if (home && 'split' in home) return { host: '', read: { ok: false, reason: 'unreachable' }, split: home.split }
+  if (home) return home
   // The doors are asked a few at a time, so one that never answers costs its
   // deadline and not the act; a verified index at any of them wins at once.
   const { winner, results } = await firstBounded(
@@ -380,6 +449,14 @@ async function publishBranchNow(
     else unreachable.push(door)
   }
   if (answering.length === 0) return { ok: false, failure: 'no-host', reason: `no node answered (${unreachable.join(', ')})` }
+  // THE INDEX'S HOME TAKES THE BYTES TOO (indexHome). Found before anything
+  // is uploaded: a home that is none of the branch's nodes joins them, so the
+  // closure lands on the store its readers read and the gate waits on it; and
+  // when no host holds what the readers read, nothing goes up at all.
+  const readers = await readersOf(segs, nodes, pubkey)
+  const home = await indexHome(answering, pubkey, readers)
+  if (home && 'split' in home) return { ok: false, failure: 'index-split', reason: home.split }
+  if (home && !answering.includes(home.host)) answering.push(home.host)
   // A device that publishes for an anchor has the host hold the anchor's list
   // before any byte goes up, so its uploads are the anchor's (a no-op otherwise).
   await prepareAnchorHosts(answering)
@@ -479,9 +556,10 @@ async function publishBranchNow(
   // 6. Merge + sign + PUT the index — behind the wipe guard.
   report({ phase: 'indexing' })
   const key = lineageKey(segs)
-  // The nodes that answered, primary first; the first that still answers
-  // carries the write.
-  const { host: indexHost, read } = await resolveIndexDoor(answering, pubkey)
+  // The nodes that answered, primary first; the home its readers read
+  // (indexHome), else the first that still answers, carries the write.
+  const { host: indexHost, read, split } = await resolveIndexDoor(answering, pubkey, fetchHiveIndex, readers)
+  if (split) return { ok: false, failure: 'index-split', reason: split, sealed }
 
   let existing: Record<string, string>
   if (read.ok) {
@@ -539,7 +617,10 @@ async function publishBranchNow(
     const keep = word === STAGE_LIVE ? (h: string) => liveHeads.has(h) : (h: string) => indexed.has(h)
     // The author key is the one this act signs with — never a cache some
     // other gesture may or may not have primed.
-    const advanced = await advanceStage(word, { add: [sealed], keep }, { pubkey })
+    // The readers' list is carried in (claimedStageHeads): the claim the
+    // index this write replaces names.
+    const claim = read.ok ? read.manifest.roots[stageRootKey(word)] : undefined
+    const advanced = await advanceStage(word, { add: [sealed], keep, claim }, { pubkey })
     if (!advanced.ok) { stages[word] = 'refused'; continue }
     stages[word] = advanced.changed ? 'listed' : 'unchanged'
     // The pointer names the SIGNED CLAIM, not the bare list: a stranger GETs
@@ -646,7 +727,11 @@ async function publishBranchNow(
 
   // 9. Confirm: the world must be able to READ what we just wrote.
   report({ phase: 'confirming' })
-  const confirmed = await confirmPublished(indexHost, pubkey, key, sealed, hostSync)
+  // At the address handed out too: "answers at" is said only of an address
+  // whose readers are handed this head.
+  let addressHost = ''
+  try { addressHost = address ? new URL(address).host : '' } catch { /* no address — the index host alone */ }
+  const confirmed = await confirmPublished(indexHost, pubkey, key, sealed, hostSync, addressHost || readers.readAt)
   const status = confirmed && stagesReceipted ? 'confirmed' : 'unconfirmed'
 
   // 10. The running list of results (publish-results.ts): what is open now,
@@ -686,13 +771,19 @@ export async function confirmPublished(
   key: string,
   sealed: string,
   hostSync?: HostSyncLike,
+  /** The address a stranger opens. When given, its readers must be handed
+   *  the head as well: an index written where nobody reads it is not a
+   *  publish (indexHome). An address that holds no index says nothing. */
+  readAt?: string,
 ): Promise<boolean> {
   const sync = hostSync ?? get<HostSyncLike>(HOST_SYNC_KEY)
   const deadline = Date.now() + CONFIRM_DEADLINE_MS
+  const names = (read: Awaited<ReturnType<typeof fetchHiveIndex>>): boolean => read.ok && read.manifest.roots[key] === sealed
   for (;;) {
     // Fresh: a miss remembered before this publish must not hide the index it just wrote.
     const read = await fetchHiveIndex(host, pubkey, undefined, { fresh: true })
-    if (read.ok && read.manifest.roots[key] === sealed) {
+    const seen = readAt && readAt !== host ? await fetchHiveIndex(readAt, pubkey, undefined, { fresh: true }) : null
+    if (names(read) && (!seen?.ok || names(seen))) {
       // The index is caught up. Now the bytes.
       const served = await sync?.probeServed?.(host, sealed)
       // `unknown` (CORS, 5xx, breaker) is not a failure to confirm the index —
@@ -735,7 +826,7 @@ async function unpublishBranchNow(
   // through a domain it is leaving.
   const nodes = indexDoors(await nodesFor(segs, get<HostSyncLike>(HOST_SYNC_KEY)), left)
   if (nodes.length === 0) return { ok: false, failure: 'no-host', reason: 'no node named' }
-  const { host: indexHost, read } = await resolveIndexDoor(nodes, pubkey)
+  const { host: indexHost, read } = await resolveIndexDoor(nodes, pubkey, fetchHiveIndex, await readersOf(segs, nodes, pubkey))
   // The same guard as publishing, for the same reason: a rewrite we cannot
   // base on a verified read is a rewrite that drops everything we cannot see.
   // An index that does not name the key (withdrawn elsewhere, or never
@@ -789,6 +880,7 @@ async function unpublishBranchNow(
     hostSync,
     pubkey,
     word => (word === STAGE_LIVE ? h => liveHeads.has(h) : h => indexed.has(h)),
+    roots,
   ))
 
   const put = await putHiveManifest(indexHost, roots, doors,
@@ -813,11 +905,13 @@ async function withdrawFromStages(
   hostSync: HostSyncLike | undefined,
   pubkey: string,
   keepFor: (word: StageWord) => (head: string) => boolean = () => () => true,
+  /** The index's roots: its `stage:<word>` claims are the readers' lists. */
+  claims: Record<string, string> = {},
 ): Promise<Record<string, string>> {
   const pointers: Record<string, string> = {}
   const gone = heads.filter(h => SIG_RE.test(h))
   for (const word of words) {
-    const next = await withdrawStage(word, gone, { pubkey }, keepFor(word))
+    const next = await withdrawStage(word, gone, { pubkey }, keepFor(word), claims[stageRootKey(word)])
     if (!next.ok || !next.changed || !SIG_RE.test(next.claim)) continue
     pointers[stageRootKey(word)] = next.claim
     for (const sig of [next.claim, next.head, ...next.envelopes]) await hostSync?.markPublic?.(sig, 'resource', true, false)
@@ -913,7 +1007,7 @@ async function setBranchDoorsNow(
   const key = lineageKey(segs)
   const nodes = indexDoors(await nodesFor(segs, get<HostSyncLike>(HOST_SYNC_KEY)), left)
   if (nodes.length === 0) return { ok: false, failure: 'no-host', reason: 'no node named' }
-  const { host: indexHost, read } = await resolveIndexDoor(nodes, pubkey)
+  const { host: indexHost, read } = await resolveIndexDoor(nodes, pubkey, fetchHiveIndex, await readersOf(segs, nodes, pubkey))
   if (!read.ok) return { ok: false, failure: 'index-unsafe', reason: read.reason }
   if (!(key in read.manifest.roots)) return { ok: false, failure: 'no-branch', reason: 'not published yet' }
 
@@ -925,7 +1019,7 @@ async function setBranchDoorsNow(
   const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
   hostSync?.addPublishNodes?.(nodes)
   const liveHeads = liveHeadsOf(roots, doors)
-  const live = await advanceStage(STAGE_LIVE, { add: [head], keep: h => liveHeads.has(h) }, { pubkey })
+  const live = await advanceStage(STAGE_LIVE, { add: [head], keep: h => liveHeads.has(h), claim: roots[stageRootKey(STAGE_LIVE)] }, { pubkey })
   if (live.ok && live.changed && SIG_RE.test(live.claim)) {
     roots[stageRootKey(STAGE_LIVE)] = live.claim
     for (const sig of [live.claim, live.head, ...live.envelopes]) await hostSync?.markPublic?.(sig, 'resource', true, false)
@@ -994,7 +1088,7 @@ async function setBranchAddressNow(
   const key = lineageKey(segs)
   const nodes = await nodesFor(segs, get<HostSyncLike>(HOST_SYNC_KEY))
   if (nodes.length === 0) return { ok: false, failure: 'no-host', reason: 'no node named' }
-  const { host: indexHost, read } = await resolveIndexDoor(nodes, pubkey)
+  const { host: indexHost, read } = await resolveIndexDoor(nodes, pubkey, fetchHiveIndex, await readersOf(segs, nodes, pubkey))
   if (!read.ok) return { ok: false, failure: 'index-unsafe', reason: read.reason }
   if (!(key in read.manifest.roots)) return { ok: false, failure: 'not-published' }
 
@@ -1306,7 +1400,7 @@ async function secureDeleteBranchNow(segments: readonly string[]): Promise<Secur
   // Hide first: a place any domain still shows is not deletable.
   const nodes = await nodesFor(segs, hostSync)
   if (nodes.length === 0) return { ok: false, failure: 'no-host', reason: 'no node named' }
-  const { read } = await resolveIndexDoor(nodes, pubkey)
+  const { read } = await resolveIndexDoor(nodes, pubkey, fetchHiveIndex, await readersOf(segs, nodes, pubkey))
   let roots: Record<string, string> = {}
   if (read.ok) roots = read.manifest.roots
   else if (!(read.reason === 'http' && read.status === 404)) return { ok: false, failure: 'index-unsafe', reason: read.reason }
@@ -1442,7 +1536,7 @@ async function setHiveDoorsNow(
   // Closed everywhere is out of `live`, still in `published`: the index names it.
   const liveHeads = liveHeadsOf(roots, doors)
   Object.assign(roots, await withdrawFromStages([STAGE_LIVE], liveHeads.has(head) ? [] : [head], hostSync, pubkey,
-    () => h => liveHeads.has(h)))
+    () => h => liveHeads.has(h), roots))
   const put = await putHiveManifest(found.host, roots, doors, manifest.createdAt, manifest.signedContent)
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
 
