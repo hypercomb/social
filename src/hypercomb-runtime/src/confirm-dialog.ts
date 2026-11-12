@@ -363,7 +363,7 @@ ${T} .confirm-btn.danger:active { transform: scale(0.97); }
 }
 
 type RegistryLike = {
-  add(surface: { name: string; owner?: string; element?: string; order?: number }): void
+  add(surface: { name: string; owner?: string; element?: string; order?: number; host?: boolean }): void
   all?: () => readonly { name?: string }[]
 }
 
@@ -387,7 +387,9 @@ export function mountConfirmDialog(): void {
   ioc?.whenReady?.<RegistryLike>(REGISTRY_KEY, registry => {
     if (registry.all?.().some(surface => surface?.name === CONFIRM_DIALOG_SURFACE)) return
     // Order 240: where the Angular dialog stood, above the panels it asks for.
-    registry.add({ name: CONFIRM_DIALOG_SURFACE, owner: CONFIRM_DIALOG_OWNER, element: CONFIRM_DIALOG_SURFACE, order: 240 })
+    // `host`: it is mounted with no package at all, so a cold origin must not
+    // read it as a live package (the shim's front door waits on that test).
+    registry.add({ name: CONFIRM_DIALOG_SURFACE, owner: CONFIRM_DIALOG_OWNER, element: CONFIRM_DIALOG_SURFACE, order: 240, host: true })
   })
 }
 

@@ -29,6 +29,10 @@ const mounted = new Map<string, HTMLElement>()
 /** Names whose registration is Angular-shaped, so the shim skipped them. */
 const skipped = new Set<string>()
 
+/** Mounted names that are the host's own (the consent dialog): there with no
+ *  package at all, so they never say a package is live. */
+const hostOwned = new Set<string>()
+
 /** Entries in shared's shell-surfaces barrel, counted AT BUILD TIME and
  *  injected by build.mjs. It cannot be observed at runtime: those surfaces
  *  register themselves by being imported from that barrel, and the shim never
@@ -42,6 +46,9 @@ const barrelEntries: number =
 export interface SurfaceReport {
   /** Custom elements the shim actually mounted. */
   mounted: number
+  /** Of those, the ones a package contributed: `mounted` less the host's own
+   *  surfaces. Zero means no package is live — the cold-host test. */
+  fromPackage: number
   /** Angular-shaped registrations that DID reach the registry and were
    *  skipped. Zero in the shim by construction — a drone contributing an
    *  Angular component would be a bug, not a migration step. */
@@ -56,6 +63,7 @@ export interface SurfaceReport {
 
 export const surfaceReport = (): SurfaceReport => ({
   mounted: mounted.size,
+  fromPackage: [...mounted.keys()].filter(name => !hostOwned.has(name)).length,
   angular: skipped.size,
   angularNames: [...skipped].sort(),
   unreachable: barrelEntries,
@@ -104,6 +112,8 @@ const render = (registry: ShellSurfaceRegistry): void => {
       continue
     }
 
+    if (surface.host) hostOwned.add(surface.name)
+    else hostOwned.delete(surface.name)
     if (mounted.has(surface.name)) continue
 
     // The contributor is responsible for customElements.define — at MODULE
@@ -120,6 +130,7 @@ const render = (registry: ShellSurfaceRegistry): void => {
     if (live.has(name)) continue
     node.remove()
     mounted.delete(name)
+    hostOwned.delete(name)
   }
   for (const name of [...skipped]) {
     if (!live.has(name)) skipped.delete(name)

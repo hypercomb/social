@@ -332,10 +332,12 @@ const boot = async (): Promise<void> => {
   // half-written, or whose OPFS was cleared under a stale installed-marker, is
   // empty in the way that matters however confident the marker is. Anything
   // that reached a surface boots straight past the automatic cold-host prompt,
-  // but remains manageable through the explicit route.
+  // but remains manageable through the explicit route. The host's own surfaces
+  // (the consent dialog) mount with no package at all, so they are not
+  // counted: counting them dismissed the front door on every cold host.
   const managerPath = location.pathname.replace(/\/+$/, '')
   const managerRequested = managerPath === '/hosts' || managerPath === '/@hypercomb'
-  if (managerRequested || (live.mounted === 0 && live.angular === 0)) {
+  if (managerRequested || (live.fromPackage === 0 && live.angular === 0)) {
     console.log(managerRequested
       ? `[shim] ${managerPath} — opening the host console`
       : '[shim] 0 surfaces — no package is live')
