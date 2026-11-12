@@ -1102,8 +1102,8 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     if (canSign()) await tapTile(entry, from)
     else say(`${entry.title} is published on ${options.self}. Only its key can take it off.`)
   }
-  // ONE TAP, THEN ONE RED BUTTON ACROSS THE FOOT (jwize 2026-11-10: "it should be single click to activate with a red
-  // confirm button across the bottom of the phone"). No sheet opens over the tiles: the tap names the tile, the bar says
+  // ONE TAP, THEN ONE BUTTON ACROSS THE FOOT (jwize 2026-11-10: "it should be single click to activate with a red
+  // confirm button across the bottom of the phone"; 2026-11-12: "not red like that" — it wears the page's primary). No sheet opens over the tiles: the tap names the tile, the bar says
   // what pressing it will sign, and a tap anywhere else, or Escape, puts it away with nothing done.
   const confirmBar = el('button', 'foot-bar confirm-bar')
   confirmBar.type = 'button'
@@ -1138,8 +1138,14 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   const openConfirm = (entry: Aggregate, from: HTMLElement, row: string): void => {
     closeConfirm()
     const into = !isOn(entry)
-    confirmBar.textContent = into ? `Put ${entry.title} in my showcase` : `Take ${entry.title} out of my showcase`
-    confirming = () => { void toggleTile(entry, row, into) }
+    // A HOST'S TILE GOES INTO YOUR COMMUNITY, NOT YOUR SHOWCASE (jwize 2026-11-12: "add to my community not put in my
+    // showcase for the host"). Yes in another domain's row is this browser's pick alone — nothing is signed; going live
+    // stays the act on your own domain's tiles.
+    const host = row !== options.self
+    confirmBar.textContent = host
+      ? (into ? `Add ${entry.title} to my community` : `Take ${entry.title} out of my community`)
+      : (into ? `Put ${entry.title} in my showcase` : `Take ${entry.title} out of my showcase`)
+    confirming = () => { void (host && into ? pickTile(entry, row) : toggleTile(entry, row, into)) }
     confirmFrom = from
     from.classList.add('asking')
     confirmBar.hidden = false
@@ -2285,9 +2291,9 @@ export const SHOWCASE_STYLE = `
 .foot-bar:focus-visible { outline: 2px solid var(--md-on-surface-strong); outline-offset: -4px; }
 .search-add { background: var(--md-surface-c-highest); color: var(--md-on-surface-strong); border-top: 1px solid var(--md-outline); }
 .search-add:hover:not(:disabled) { background: var(--md-surface-c-highest); }
-.confirm-bar { z-index: 7; background: #c62828; color: #fff; }
-.confirm-bar:hover:not(:disabled) { background: #c62828; }
-.hex.asking { outline: 2px solid #c62828; outline-offset: 3px; }
+.confirm-bar { z-index: 7; background: var(--md-primary); color: var(--md-on-primary); }
+.confirm-bar:hover:not(:disabled) { background: var(--md-primary); }
+.hex.asking { outline: 2px solid var(--md-primary); outline-offset: 3px; }
 @media (min-width: 720px) { .foot-bar { bottom: 1rem; border-radius: .7rem; } }
 /* the options sit beside the search, at the top: Files (while managing) and Manage */
 .page-tools { flex: none; display: flex; align-items: center; gap: .45rem; margin-left: .5rem; }

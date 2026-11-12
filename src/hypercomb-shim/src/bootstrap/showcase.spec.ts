@@ -1572,7 +1572,7 @@ describe('a tap visits, a hold toggles', () => {
   }
   const namesIn = (row: HTMLElement): string[] => [...row.querySelectorAll('.hex-name')].map(name => name.textContent ?? '')
 
-  it('a tile toggles where it sits: with the key a tap asks once and yes signs it on or off, and it never leaves its row', async () => {
+  it('a tile toggles where it sits: a host tile is added to your community, your own is signed on or off, and it never leaves its row', async () => {
     const owner = bridge(a)
     const keepCommunity = vi.fn(async () => true)
     const { hero, bands } = showcase({
@@ -1601,7 +1601,7 @@ describe('a tap visits, a hold toggles', () => {
       expect(dylan.classList.contains('off')).toBe(true)
       expect(dylan.getAttribute('aria-pressed')).toBe('false')
       expect(click(dylan).defaultPrevented).toBe(true)
-      // ONE TAP, THEN ONE RED BUTTON ACROSS THE FOOT (jwize 2026-11-10): no sheet opens. Escape puts it away.
+      // ONE TAP, THEN ONE BUTTON ACROSS THE FOOT (jwize 2026-11-10): no sheet opens. Escape puts it away.
       expect(sheet.hidden).toBe(true)
       expect(bar.hidden).toBe(false)
       expect(bar.classList.contains('foot-bar')).toBe(true)
@@ -1614,18 +1614,18 @@ describe('a tap visits, a hold toggles', () => {
       expect(bar.hidden).toBe(true)
       expect(keepCommunity).not.toHaveBeenCalled()
       expect(owner.toggle).not.toHaveBeenCalled()
-      // Yes: on, and published — the one signed act, through the hive's key. It lights where it sits.
+      // Yes: into your community, not your showcase (jwize 2026-11-12) — nothing is signed. It lights where it sits.
       click(dylan)
-      answer('Put dylan in my showcase')
+      answer('Add dylan to my community')
       expect(bar.hidden).toBe(true)
-      await vi.waitFor(() => expect(owner.toggle).toHaveBeenCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'dylan', on: true }))
-      expect(keepCommunity).toHaveBeenCalledTimes(1)
+      await vi.waitFor(() => expect(keepCommunity).toHaveBeenCalledTimes(1))
+      expect(owner.toggle).not.toHaveBeenCalled()
       expect(namesIn(rowNamed(bands, 'jwize.com')!)).toContain('dylan')
       await vi.waitFor(() => expect(dylan.classList.contains('off')).toBe(false))
       expect(dylan.getAttribute('aria-pressed')).toBe('true')
       // The same tile again asks to take it out, and it grays in place.
       click(dylan)
-      answer('Take dylan out of my showcase')
+      answer('Take dylan out of my community')
       await vi.waitFor(() => expect(keepCommunity).toHaveBeenCalledTimes(2))
       await vi.waitFor(() => expect(dylan.classList.contains('off')).toBe(true))
       expect(namesIn(rowNamed(bands, 'jwize.com')!)).toContain('dylan')
