@@ -29,6 +29,7 @@
 // a catalog is additive, and the merged record is a document replaced whole.
 
 import { SignatureService, registerPoolMeaning } from '@hypercomb/core'
+import type { HostOfferDeps } from './host-offer.js'
 
 export const I18N_KEY_PREFIX = 'i18n:'
 export const I18N_MISSING_PREFIX = 'i18n-missing:'
@@ -140,12 +141,8 @@ export const mergeCatalogs = (into: CatalogRecord | null, catalog: CatalogRecord
 
 // ── the acts: publish a catalog, publish a missing list ────────────────────
 
-export interface PublishDeps {
-  put(text: string, type: string): Promise<string>
-  publish(host: string, sigs: readonly string[]): Promise<{ ok: true } | { ok: false; error: string }>
-  stamp(host: string, key: string, sig: string): Promise<{ ok: boolean; reason?: string }>
-  now(): number
-}
+/** How a catalog is offered to a host — the one offer shape (host-offer.ts). */
+export type PublishDeps = HostOfferDeps
 
 /** Put the catalog, ship it to the host, and name it in this hive's index as `i18n:<locale>`. */
 export const publishCatalog = async (

@@ -16,16 +16,14 @@
 // this door is handed the finished text.
 
 import { Drone } from '@hypercomb/core'
-import { listDecorations, removeDecorationAndWait, writeDecoration } from '../commands/decoration-manifest.js'
-import { ensureWebsiteBoundAt } from '../commands/website-binding.js'
+import { listDecorations, removeDecorationAndWait } from '../commands/decoration-manifest.js'
 import { FILES_ATTACHMENT_KIND, listAttachments, writeAttachment, type AttachmentPayload } from './files-attachment.js'
 import { extOf } from './file-types.js'
+import { commitPageSig } from './page-commit.js'
 import { rememberTrial, stageTrial, trialLabel, trialOrigin } from './try-page.js'
 
 export const TILE_FILES_IOC_KEY = '@diamondcoreprocessor.com/TileFilesDrone'
 
-const PAGE_KIND = 'visual:website:page'
-const WEBSITE_SLOT = 'website'
 /** Generous for a page or a document; a model cannot usefully write more in one block. */
 export const MAX_TILE_FILE_CHARS = 400_000
 
@@ -61,14 +59,7 @@ type TreeReaderLike = {
     { ok: true; children: readonly { name: string }[] } | { ok: false; code?: string }
   >
 }
-type HistoryLike = {
-  sign(lineage: { explorerSegments: () => readonly string[] }): Promise<string>
-  currentLayerAt(locationSig: string): Promise<Record<string, unknown> | null>
-}
-type CommitterLike = { commitSlotSet?(segments: readonly string[], slot: string, sigs: readonly string[]): Promise<void> }
 type SiteViewLike = { resolvePageSig?(segments: readonly string[]): Promise<string | null> }
-
-const isSig = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)
 
 export class TileFilesDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -135,31 +126,8 @@ export class TileFilesDrone extends Drone {
   async #writePage(segments: readonly string[], htmlSig: string, html: string): Promise<TileFileWrite> {
     const current = await this.resolve<SiteViewLike>('siteView')?.resolvePageSig?.(segments) ?? null
     if (current === htmlSig) return { ok: true, tile: segments, sig: htmlSig, created: false, unchanged: true, ...this.#trial(segments) }
-    // A page kept in the `website` slot wins over a decoration, so it is
-    // written where the renderer will find it.
-    const history = this.resolve<HistoryLike>('history')
-    const layer = history ? await history.currentLayerAt(await history.sign({ explorerSegments: () => segments })).catch(() => null) : null
-    const slot = Array.isArray(layer?.[WEBSITE_SLOT]) ? (layer![WEBSITE_SLOT] as unknown[]).filter(isSig) : []
-    if (slot.length) {
-      const committer = this.resolve<CommitterLike>('committer')
-      if (!committer?.commitSlotSet) return { ok: false, error: 'the layer committer is not available' }
-      await committer.commitSlotSet(segments, WEBSITE_SLOT, [...slot.filter(s => s !== htmlSig), htmlSig])
-      await this.#bind(segments)
-      return { ok: true, tile: segments, sig: htmlSig, created: false, unchanged: false, ...await this.#stage(segments, htmlSig, html) }
-    }
-    // The page decoration keeps what the prior one said about itself (its
-    // label, its icon) and changes only the bytes it points at.
-    const priors = await listDecorations<Record<string, unknown>>({ kind: PAGE_KIND, segments })
-    for (const prior of priors) await removeDecorationAndWait({ sig: prior.sig, segments })
-    const kept = priors[priors.length - 1]?.record.payload ?? {}
-    await writeDecoration({
-      kind: PAGE_KIND,
-      appliesTo: segments,
-      payload: { order: 0, ...kept, htmlSig, createdAt: Date.now() },
-      segments,
-      mark: 'persistent',
-    })
-    await this.#bind(segments)
+    const committed = await commitPageSig(segments, htmlSig)
+    if (!committed.ok) return committed
     return { ok: true, tile: segments, sig: htmlSig, created: !current, unchanged: false, ...await this.#stage(segments, htmlSig, html) }
   }
 
@@ -176,16 +144,6 @@ export class TileFilesDrone extends Drone {
   #trial(segments: readonly string[]): { trial: string } | Record<string, never> {
     const label = trialLabel(segments)
     return label ? { trial: `${trialOrigin(label)}/` } : {}
-  }
-
-  /** A PAGE IS ONLY SEEN WHERE ITS BEHAVIOUR IS AWAKE. A hive that binds the website
-   *  behaviour to the tiles that hold sites reads every other tile as dormant, and the
-   *  view quietly falls back to hexagons: a page a model wrote existed and could not
-   *  be reached (jwize's hive, 2026-10-25). The `/website page` word binds the tile it
-   *  dresses; so does a write. Never load-bearing: a failure here leaves the page
-   *  written. */
-  async #bind(segments: readonly string[]): Promise<void> {
-    try { await ensureWebsiteBoundAt(segments) } catch { /* the page is written; binding is re-derived by the session sweep */ }
   }
 
   async #writeFile(segments: readonly string[], payload: AttachmentPayload): Promise<TileFileWrite> {

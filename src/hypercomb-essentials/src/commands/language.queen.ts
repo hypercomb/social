@@ -34,18 +34,17 @@
 // and `publish` is a word of its own.)
 
 import { QueenBee, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
-import { setHiveRoot } from '../sharing/hive-pointer.js'
+import { hostOfferDeps } from '../sharing/host-offer.js'
 import { PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
 import { zoneDoor } from '../sharing/zone-door.js'
 import { listCommunityHosts } from '../sharing/community-hosts.js'
 import {
   catalogOf, cleanLocale, COMMUNITY_SUBKEY, healFrom, mergeCatalogs, publishCatalog, publishMissing,
-  readCatalog, readTranslationIndex, type CatalogRecord, type HealingProvider, type PublishDeps,
+  readCatalog, readTranslationIndex, type CatalogRecord, type HealingProvider,
 } from '../sharing/community-translations.js'
 
 const LOCALES = ['en', 'ja', 'zh', 'es', 'ar', 'pt', 'fr', 'de', 'ko', 'ru', 'hi', 'id', 'tr', 'it']
 const STORE_KEY = '@hypercomb.social/Store'
-const HOST_SYNC_KEY = '@diamondcoreprocessor.com/HostSyncService'
 /** Catalogs read per host per sync — a curated list, not a dump. */
 const CATALOGS_PER_HOST = 64
 const SAMPLE = 6
@@ -59,10 +58,6 @@ type StoreLike = {
   getPoolDoc?(pool: FileSystemDirectoryHandle | undefined, subKey?: string): Promise<ArrayBuffer | null>
   putPoolDoc?(pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string): Promise<string | null>
 }
-type HostSyncLike = {
-  publishAtoms?(host: string, sigs: readonly string[], bytesOf: (sig: string) => Promise<Uint8Array | null>):
-    Promise<{ ok: true; sent: number; held: number } | { ok: false; error: string }>
-}
 type Say = (key: string, fallback: string, params?: Record<string, string | number>) => string
 
 /** A host as a URL: loopback on http, everything else https. */
@@ -75,25 +70,6 @@ const hostUrl = (host: string): string => {
 
 const provider = (): (I18nProvider & HealingProvider) | undefined => window.ioc?.get?.(I18N_IOC_KEY) as (I18nProvider & HealingProvider) | undefined
 const store = (): StoreLike | undefined => window.ioc?.get?.(STORE_KEY) as StoreLike | undefined
-
-/** What this hive publishes with: its store to put, its host service to ship, its key to stamp. */
-const publishDeps = (host: string): PublishDeps | null => {
-  const s = store()
-  const sync = window.ioc?.get?.(HOST_SYNC_KEY) as HostSyncLike | undefined
-  const putResource = s?.putResource?.bind(s)
-  const publishAtoms = sync?.publishAtoms?.bind(sync)
-  if (!putResource || !publishAtoms) return null
-  const bytesOf = async (sig: string): Promise<Uint8Array | null> => {
-    const blob = await (s?.getResourceLocal?.(sig).catch(() => null) ?? Promise.resolve(null)) ?? await (s?.getResource?.(sig).catch(() => null) ?? Promise.resolve(null))
-    return blob ? new Uint8Array(await blob.arrayBuffer()) : null
-  }
-  return {
-    put: (text, type) => putResource(new Blob([text], { type }), { emit: false }),
-    publish: async (h, sigs) => { const done = await publishAtoms(h, sigs, bytesOf); return done.ok ? { ok: true } : { ok: false, error: done.error } },
-    stamp: (h, key, sig) => setHiveRoot(h, key, sig),
-    now: Date.now,
-  }
-}
 
 /** This hive's own override layer for a locale — what `i18n-override` wrote. */
 const ownOverrides = async (locale: string): Promise<Record<string, string>> => {
@@ -193,7 +169,7 @@ export class LanguageQueenBee extends QueenBee {
       const keys = await ownOverrides(locale)
       if (!Object.keys(keys).length) { toast(t('language.nooverrides', 'Nothing to publish: you have no {locale} translations of your own yet — say i18n-override {locale} <key> <text> first.', { locale }), 'warning'); return }
       if (!host) { toast(t('language.nohost', 'Your {locale} translations were not published: no host is named — say language offer {locale} @<host>.', { locale }), 'warning'); return }
-      const deps = publishDeps(host)
+      const deps = hostOfferDeps()
       if (!deps) { toast(t('language.unpublished', 'Your {locale} translations were not published: {reason}', { locale, reason: 'the store or the host service is not loaded' }), 'warning'); return }
       const done = await publishCatalog(host, locale, 'app', keys, deps)
       if (!done.ok) { toast(t('language.unpublished', 'Your {locale} translations were not published: {reason}', { locale, reason: done.error }), 'warning'); return }
@@ -234,7 +210,7 @@ export class LanguageQueenBee extends QueenBee {
     toast(t('language.missingcount', '{count} keys have no {locale} translation this session: {sample}', { count: keys.length, locale, sample: keys.slice(0, SAMPLE).join(', ') + (keys.length > SAMPLE ? ', …' : '') }))
     // Told only to a host the participant names; with none, the list is shown and kept here.
     if (!host) return
-    const deps = publishDeps(host)
+    const deps = hostOfferDeps()
     if (!deps) { toast(t('language.missingunsent', 'The missing list was not published: {reason}', { reason: 'the store or the host service is not loaded' }), 'warning'); return }
     const sent = await publishMissing(host, locale, keys, deps)
     if (!sent.ok) { toast(t('language.missingunsent', 'The missing list was not published: {reason}', { reason: sent.error }), 'warning'); return }

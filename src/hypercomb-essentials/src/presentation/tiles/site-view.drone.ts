@@ -14,13 +14,24 @@
 // page mounts. No bundle, no manifest, no path-table.
 
 import {
-  Drone, SITE_VIEW_IOC_KEY, RESOURCE_URL_PREFIX, I18N_IOC_KEY, THEME_IOC_KEY,
+  Drone, EffectBus, SITE_VIEW_IOC_KEY, RESOURCE_URL_PREFIX, I18N_IOC_KEY, THEME_IOC_KEY,
   type I18nProvider,
 } from '@hypercomb/core'
 import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { WEBSITE_SLOT } from '../../commands/website-slot.js'
 import { composeDivision, hydrateSeatedParts } from './division-render.js'
-import { mayRunPage } from './page-run-gate.js'
+import { mayRunPage, pagePublisherDomain } from './page-run-gate.js'
+import { SiteTextEditor, authoredOrder, replaceTextInPage, type TextSlot } from './site-text-edit.js'
+import { commitPageSig } from '../../files/page-commit.js'
+import { isForeignContent, isLocallyAuthored } from '../../sharing/feature-availability.js'
+import { markAuthored } from '../../sharing/authored-sigs.js'
+import { dropContribution, pickDeps, readContributions, readPick, signPick, type PageContribution } from '../../sharing/page-contributions.js'
+import { publisherKeyHex } from '../../sharing/key-list.client.js'
+import { isPublishNode } from '../../sharing/zone-door.js'
+import { SiteVersions, mergeContributions } from './site-versions.js'
+import { hostsOfBranch, listCommunityHosts, listZoneBindings } from '../../sharing/community-hosts.js'
+import { hostOfferDeps } from '../../sharing/host-offer.js'
+import { zoneDoor } from '../../sharing/zone-door.js'
 import { isPublishedVisitorShell } from '../../sharing/behavior-enablement.js'
 import { isFeatureHiddenWithin } from '../../sharing/feature-hidden.js'
 import { openExternalLink } from './document-view-links.js'
@@ -39,6 +50,8 @@ type MountState = {
   host: HTMLDivElement
   /** sig of the cell page currently mounted. */
   pageSig: string
+  /** The contribution shown in its place for this reader (site-versions.ts), or null for the page itself. */
+  shownSig: string | null
   /** lineage segments of the cell whose page is mounted. */
   sitePath: readonly string[]
   /** unmount handler — drops style/link/script nodes and listeners. */
@@ -228,6 +241,21 @@ export class SiteViewDrone extends Drone {
    *  null. While set, the mounted host carries `data-hc-returning`, so the
    *  page's own script can resume where it was (its step, its playback). */
   #returningScroll: number | null = null
+  /** Inline text editing (site-text-edit.ts): the mode outlives a mount, since
+   *  every save remounts the page; the editor is the mounted page's own. */
+  #textEditing = false
+  #textEditor: SiteTextEditor | null = null
+  /** The versions of the mounted page (site-versions.ts): which contribution
+   *  this reader chose to see in a page's place, by the page's sig — local,
+   *  never published — and each page's read of its pools, once per session. */
+  #versions: SiteVersions | null = null
+  /** null = this reader chose the published page itself (over any pick). */
+  readonly #shownVersions = new Map<string, PageContribution | null>()
+  readonly #versionReads = new Map<string, Promise<PageContribution[]>>()
+  /** The publisher's pick for each page — what everyone is shown — read once a
+   *  session per page (page-contributions.ts readPick); null = none. */
+  readonly #picks = new Map<string, PageContribution | null>()
+  readonly #pickReads = new Map<string, Promise<PageContribution | null>>()
   /** Set for the one exit the back gesture makes at the site's entry when the
    *  reader opened a page STANDING ON ITS OWN TILE'S LAYER: back steps OUT to
    *  the layer hosting that tile (jwize 2026-11-04: "when you click back on a
@@ -381,6 +409,11 @@ export class SiteViewDrone extends Drone {
         const root = preview?.active ? [...(preview.segments ?? [])].map(s => String(s ?? '').trim()).filter(Boolean) : []
         this.#publishedRoot = root.length ? root : null
         this.#publishedCreation = preview?.active ? preview : null
+        // Whose pick a page shows, and where its versions are, depend on whose
+        // creation this is: read both again.
+        this.#pickReads.clear()
+        this.#picks.clear()
+        this.#versionReads.clear()
         if (this.#siteEntrySegments && this.#publishedRoot) {
           this.#siteEntrySegments = siteFloorFor(this.#siteEntrySegments, this.#publishedRoot)
         }
@@ -480,6 +513,8 @@ export class SiteViewDrone extends Drone {
       this.#returningScroll = null
       this.#enteredAt = null
       this.#widenOnMount = false
+      this.#textEditing = false
+      this.#shownVersions.clear()
       // Leaving the site returns to WHERE IT WAS SPAWNED FROM — the page the
       // reader was on, in the view they were looking at — never the page they
       // happened to browse to inside it, and never the raw hexagons just
@@ -1009,7 +1044,7 @@ export class SiteViewDrone extends Drone {
   ): Promise<void> {
     // Same per-cell page already mounted — just update the sitePath
     // marker so navigate() math stays correct on follow-up clicks.
-    if (this.#mount && this.#mount.pageSig === pageSig) {
+    if (this.#mount && this.#mount.pageSig === pageSig && this.#mount.shownSig === (this.#versionShown(pageSig)?.sig ?? null)) {
       this.#mount.sitePath = [...segments]
       return
     }
@@ -1029,10 +1064,19 @@ export class SiteViewDrone extends Drone {
     // this page instead). Composition never fails: anything it cannot do hands
     // back the authored page untouched, so a part that will not load costs one
     // empty hole rather than the page.
-    const rawHtml = await composeDivision(segments, await blob.text())
+    const baseHtml = await blob.text()
+    // A version this reader chose to see in the page's place: words only, so it
+    // runs exactly what the page runs (site-versions.ts).
+    const shownVersion = this.#versionShown(pageSig)
+    const authored = shownVersion?.html ?? baseHtml
+    const rawHtml = await composeDivision(segments, authored)
     if (gen !== this.#gen) return
 
     const parsed = new DOMParser().parseFromString(rewriteCellPageRefs(rawHtml), 'text/html')
+    // Each element's place in the AUTHORED page, taken before anything moves
+    // a node, so an inline text edit can be traced back to it. Only an
+    // uncomposed page: a composed one is not the bytes this tile holds.
+    const textOrder = rawHtml === authored ? authoredOrder(parsed) : null
     const offersExit = !isPublishedVisitorShell() || pageAsksForExit(parsed)
 
     // The page's linked sheets load BEFORE any of it goes in, the way a document
@@ -1235,8 +1279,13 @@ export class SiteViewDrone extends Drone {
     this.#mount = {
       host,
       pageSig,
+      shownSig: shownVersion?.sig ?? null,
       sitePath: [...segments],
       unmount: () => {
+        this.#textEditor?.dispose()
+        this.#textEditor = null
+        this.#versions?.dispose()
+        this.#versions = null
         host.removeEventListener('click', onAnchorClick, true)
         host.removeEventListener('hc-site-widen', onWiden)
         rootObserver.disconnect()
@@ -1255,6 +1304,261 @@ export class SiteViewDrone extends Drone {
         else document.documentElement.setAttribute('data-theme', prevTheme)
       },
     }
+    const editSig = shownVersion?.sig ?? pageSig
+    if (textOrder && offersExit) void this.#offerTextEditing(host, textOrder, segments, pageSig, editSig, authored)
+    if (rawHtml === authored) {
+      void this.#offerVersions(host, segments, pageSig, baseHtml, editSig)
+      void this.#resolvePick(host, segments, pageSig, baseHtml)
+    }
+  }
+
+  // ── inline text editing ────────────────────────────────────────────────
+
+  /** The pencil beside the exit button, wherever this place holds a key and
+   *  never on the read-only published shell (nothing it writes persists). On a
+   *  page that is yours, Enter saves into the tile. On a page from elsewhere,
+   *  Enter OFFERS the words to its publisher's host as a contribution and the
+   *  page stays as published (documentation/page-contributions.md). */
+  async #offerTextEditing(
+    host: HTMLElement,
+    order: WeakMap<Element, number>,
+    segments: readonly string[],
+    pageSig: string,
+    /** The version being edited: the page itself, or a contribution shown in its
+     *  place — an offer made on a contribution is a contribution to it. */
+    editSig: string,
+    authored: string,
+  ): Promise<void> {
+    if (isPublishedVisitorShell()) return
+    const publisher = pagePublisherDomain(pageSig)
+    const foreign = isForeignContent(segments, publisher) && !isLocallyAuthored(pageSig)
+    const zone = foreign ? zoneDoor(publisher) : ''
+    const signer = window.ioc.get<{ getPublicKeyHex?: () => Promise<string | null> }>('@diamondcoreprocessor.com/NostrSigner')
+    const pubkey = await signer?.getPublicKeyHex?.().catch(() => null)
+    if (!pubkey) return
+    if (this.#mount?.host !== host || !host.isConnected) return
+    this.#textEditor?.dispose()
+    this.#textEditor = new SiteTextEditor({
+      host,
+      order,
+      editing: () => this.#textEditing,
+      setEditing: (on) => { this.#textEditing = on; this.#textEditor?.refresh() },
+      refusal: (slot) => {
+        if (!replaceTextInPage(authored, slot, slot.value)) return this.#t('site-edit.scripted', 'The page\'s own script writes this text, so it cannot be edited here.')
+        if (foreign && !zone) return this.#t('site-edit.no-host', 'This page came from elsewhere and no host for it is known, so there is nowhere to offer an edit.')
+        return null
+      },
+      save: (slot, next) => foreign
+        ? this.#offerText(zone, editSig, authored, slot, next).then(failed => {
+          // The page's versions now include this one: read its pools again.
+          if (!failed && editSig === pageSig) {
+            this.#versionReads.delete(pageSig)
+            void this.#offerVersions(host, segments, pageSig, authored, editSig, true)
+          }
+          return failed
+        })
+        : this.#saveText(host, segments, authored, slot, next),
+      t: (key, fallback) => this.#t(key, fallback),
+      hint: foreign
+        ? this.#t('site-edit.offer-hint', 'Enter offers your words to {host} · Shift+Enter new line · Esc cancels').replace('{host}', zone || '—')
+        : this.#t('site-edit.hint', 'Enter saves · Shift+Enter new line · Esc cancels'),
+    })
+    this.#placeExitOverlay(host)
+  }
+
+  /** The versions button, when anyone has offered a version of this page: the
+   *  page's own host (its publisher's zone, or this door on a published site)
+   *  and every host this hive follows or holds are asked once per session. */
+  /** `fresh`: a contribution was just offered, so a host that said "no pool
+   *  here" a moment ago is asked again (pool-listing.ts remembers misses). */
+  async #offerVersions(host: HTMLElement, segments: readonly string[], pageSig: string, baseHtml: string, shownSig: string, fresh = false): Promise<void> {
+    let read = this.#versionReads.get(pageSig)
+    if (!read) {
+      read = this.#versionHosts(pageSig)
+        .then(hosts => Promise.all(hosts.map(h => readContributions(h, pageSig, baseHtml, undefined, { fresh }).catch(() => [] as PageContribution[]))))
+        .then(mergeContributions)
+        .catch(() => [] as PageContribution[])
+      this.#versionReads.set(pageSig, read)
+    }
+    const contributions = await read
+    if (!contributions.length || this.#mount?.host !== host || !host.isConnected) return
+    const signer = window.ioc.get<{ getPublicKeyHex?: () => Promise<string | null> }>('@diamondcoreprocessor.com/NostrSigner')
+    const me = String((await signer?.getPublicKeyHex?.().catch(() => null)) ?? '').toLowerCase()
+    const holdsKey = await this.#holdsKeyFor(segments, pageSig)
+    if (this.#mount?.host !== host || !host.isConnected) return
+    // Above the exit button when there is one, and above the pencil wherever a
+    // key can edit (never on the published shell).
+    const rem = (this.#exitOverlay ? 3.5 : 0.75) + (isPublishedVisitorShell() ? 0 : 2.75)
+    this.#versions?.dispose()
+    this.#versions = new SiteVersions({
+      base: pageSig,
+      baseHtml,
+      contributions,
+      me,
+      shown: shownSig,
+      show: (contribution) => {
+        // The reader's own choice — the published page included — wins over a pick.
+        this.#shownVersions.set(pageSig, contribution)
+        if (this.#mount?.host === host) this.#returningScroll = host.scrollTop
+        void this.#reconcile()
+      },
+      picked: () => this.#picks.get(pageSig)?.sig ?? null,
+      ...(holdsKey ? { pick: (c: PageContribution | null) => this.#pickForEveryone(host, segments, pageSig, c) } : {}),
+      t: (key, fallback) => this.#t(key, fallback),
+      bottom: `calc(${rem}rem + env(safe-area-inset-bottom, 0px))`,
+    })
+    this.#placeExitOverlay(host)
+  }
+
+  /** The version shown in a page's place: this reader's own choice, else the
+   *  publisher's words-only pick, else none (the page itself). */
+  #versionShown(pageSig: string): PageContribution | null {
+    if (this.#shownVersions.has(pageSig)) return this.#shownVersions.get(pageSig) ?? null
+    const pick = this.#picks.get(pageSig) ?? null
+    return pick?.textOnly ? pick : null
+  }
+
+  /** May this hive pick for everyone? Only for a page that is its own, in a hive
+   *  (the published shell holds no key) — and, when it is viewing a published
+   *  creation, only when that creation is the one this hive publishes for. */
+  #ownsPage(segments: readonly string[], pageSig: string): boolean {
+    if (isPublishedVisitorShell()) return false
+    return !(isForeignContent(segments, pagePublisherDomain(pageSig)) && !isLocallyAuthored(pageSig))
+  }
+
+  async #holdsKeyFor(segments: readonly string[], pageSig: string): Promise<boolean> {
+    if (!this.#ownsPage(segments, pageSig)) return false
+    const creator = String(this.#publishedCreation?.pubkey ?? '').toLowerCase()
+    if (!creator) return true
+    const own = String((await publisherKeyHex().catch(() => '')) ?? '').toLowerCase()
+    return own === creator
+  }
+
+  /** Whose pick a page shows, and where it is read: a published creation names
+   *  its publisher and hosts; in a hive, a page of its own is read from its own
+   *  index on the hosts it publishes to. A page from elsewhere in a hive: none
+   *  known (its publisher's key is not recorded where it was adopted). */
+  async #pickSource(segments: readonly string[], pageSig: string): Promise<{ anchor: string; hosts: string[] } | null> {
+    const creation = this.#publishedCreation
+    const anchor = String(creation?.pubkey ?? '').toLowerCase()
+    if (/^[0-9a-f]{64}$/.test(anchor)) {
+      const hosts = new Set<string>([...(isPublishedVisitorShell() ? [location.host] : []), ...(creation?.hosts ?? [])].map(zoneDoor))
+      hosts.delete('')
+      return hosts.size ? { anchor, hosts: [...hosts] } : null
+    }
+    if (!this.#ownsPage(segments, pageSig)) return null
+    const own = String((await publisherKeyHex().catch(() => '')) ?? '').toLowerCase()
+    if (!/^[0-9a-f]{64}$/.test(own)) return null
+    const hosts = await this.#pickHosts(segments, pageSig)
+    return hosts.length ? { anchor: own, hosts } : null
+  }
+
+  /** Where a page of this hive's own is published: the hosts its branch is
+   *  marked for, this hive's own domain, the zones it holds, and the zone the
+   *  page is attributed to. */
+  async #pickHosts(segments: readonly string[], pageSig: string): Promise<string[]> {
+    const hosts = new Set<string>()
+    for (const h of await hostsOfBranch(segments).catch(() => [] as string[])) hosts.add(zoneDoor(h))
+    let self = ''
+    try { self = localStorage.getItem('hc:nostrmesh:self-domain') ?? '' } catch { /* no storage */ }
+    hosts.add(zoneDoor(self))
+    for (const z of await listZoneBindings().catch(() => [])) hosts.add(zoneDoor(z.zone))
+    hosts.add(zoneDoor(pagePublisherDomain(pageSig)))
+    hosts.delete('')
+    return [...hosts].filter(isPublishNode)
+  }
+
+  /** Read the publisher's pick for the mounted page; when it changes what this
+   *  reader sees, show it. Never before the page itself is up — view first. */
+  async #resolvePick(host: HTMLElement, segments: readonly string[], pageSig: string, baseHtml: string): Promise<void> {
+    let read = this.#pickReads.get(pageSig)
+    if (!read) {
+      read = this.#pickSource(segments, pageSig)
+        .then(source => (source ? readPick(source.hosts, source.anchor, pageSig, baseHtml) : null))
+        .catch(() => null)
+      this.#pickReads.set(pageSig, read)
+    }
+    const pick = await read
+    const before = this.#picks.get(pageSig)?.sig ?? null
+    this.#picks.set(pageSig, pick)
+    if ((pick?.sig ?? null) === before || this.#shownVersions.has(pageSig)) return
+    if (this.#mount?.host !== host || !host.isConnected) return
+    this.#returningScroll = host.scrollTop
+    void this.#reconcile()
+  }
+
+  /** The key holder makes a version what everyone sees (null: the published
+   *  page again), signed into their own index on every host the page is
+   *  published to. Null = done; a string says why not. */
+  async #pickForEveryone(host: HTMLElement, segments: readonly string[], pageSig: string, contribution: PageContribution | null): Promise<string | null> {
+    const hosts = await this.#pickHosts(segments, pageSig)
+    if (!hosts.length) return this.#t('site-versions.no-hosts', 'This page is not published anywhere yet, so there is no one else to show it to.')
+    const deps = pickDeps()
+    if (!deps) return this.#t('site-edit.failed', 'Could not save — try again.')
+    const done = await signPick(hosts, pageSig, contribution, deps)
+    if (!done.ok) return done.error
+    this.#picks.set(pageSig, contribution)
+    this.#pickReads.set(pageSig, Promise.resolve(contribution))
+    this.#shownVersions.delete(pageSig)
+    EffectBus.emit('toast:show', {
+      type: 'success',
+      message: (contribution
+        ? this.#t('site-versions.picked-toast', 'Everyone now sees this version on {hosts}.')
+        : this.#t('site-versions.unpicked-toast', 'Everyone sees the published page again on {hosts}.')).replace('{hosts}', done.hosts.join(', ')),
+    })
+    if (this.#mount?.host === host) this.#returningScroll = host.scrollTop
+    void this.#reconcile()
+    return null
+  }
+
+  /** Where a page's versions are asked: this door on a published site; in a
+   *  hive, the page publisher's zone and every host followed or held. */
+  async #versionHosts(pageSig: string): Promise<string[]> {
+    if (isPublishedVisitorShell()) return [location.host]
+    const hosts = new Set<string>()
+    // A published creation being viewed names the hosts it came from.
+    for (const h of this.#publishedCreation?.hosts ?? []) hosts.add(zoneDoor(h))
+    const publisher = zoneDoor(pagePublisherDomain(pageSig))
+    if (publisher) hosts.add(publisher)
+    for (const h of await listCommunityHosts().catch(() => [] as string[])) hosts.add(zoneDoor(h))
+    for (const z of await listZoneBindings().catch(() => [])) hosts.add(zoneDoor(z.zone))
+    hosts.delete('')
+    return [...hosts]
+  }
+
+  /** Offer the page with one text's words replaced to its publisher's host, as
+   *  a contribution under this hive's key. The page on screen and in the tile
+   *  stays as published. Null = offered; a string says why not. */
+  async #offerText(zone: string, pageSig: string, authored: string, slot: TextSlot, next: string): Promise<string | null> {
+    const html = replaceTextInPage(authored, slot, next)
+    if (!html) return this.#t('site-edit.scripted', 'The page\'s own script writes this text, so it cannot be edited here.')
+    const deps = hostOfferDeps()
+    if (!deps) return this.#t('site-edit.failed', 'Could not save — try again.')
+    const done = await dropContribution(zone, { base: pageSig, baseHtml: authored, html }, deps)
+    if (!done.ok) return done.error
+    EffectBus.emit('toast:show', {
+      type: 'success',
+      message: this.#t('site-edit.offered', 'Offered to {host}. The page stays as published until its key holder picks a version.').replace('{host}', zone),
+    })
+    return null
+  }
+
+  /** Write the page with one text's words replaced, as a new resource the tile
+   *  now points at, then remount it where the reader was. Null = saved; a
+   *  string says why not. */
+  async #saveText(host: HTMLElement, segments: readonly string[], authored: string, slot: TextSlot, next: string): Promise<string | null> {
+    const html = replaceTextInPage(authored, slot, next)
+    if (!html) return this.#t('site-edit.scripted', 'The page\'s own script writes this text, so it cannot be edited here.')
+    const store = this.resolve<{ putResource?: (blob: Blob) => Promise<string> }>('store')
+    if (!store?.putResource) return this.#t('site-edit.failed', 'Could not save — try again.')
+    const sig = await store.putResource(new Blob([html], { type: 'text/html' }))
+    // Your own words: the activation gate never holds this page for review.
+    markAuthored(sig)
+    const committed = await commitPageSig(segments, sig)
+    if (!committed.ok) return committed.error
+    if (this.#mount?.host === host) this.#returningScroll = host.scrollTop
+    void this.#reconcile()
+    return null
   }
 
   // ── raw-DOM exit overlay ───────────────────────────────────────────────
@@ -1335,6 +1639,8 @@ export class SiteViewDrone extends Drone {
     if (!btn) return
     const gutter = host?.isConnected ? Math.max(0, host.offsetWidth - host.clientWidth) : 0
     btn.style.right = `calc(var(--hc-inset-right, 0px) + ${gutter}px + 0.75rem + env(safe-area-inset-right, 0px))`
+    this.#textEditor?.place(btn.style.right)
+    this.#versions?.place(btn.style.right)
   }
 
   /** Exit the website straight back to WHERE IT WAS SPAWNED FROM — no

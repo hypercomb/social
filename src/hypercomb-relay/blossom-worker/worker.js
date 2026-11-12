@@ -1861,10 +1861,11 @@ async function servePoolListing(request, env, sig) {
   // A DERIVATION'S ATTESTATION POOL is listed to whoever asks its address —
   // the attesters' keys; each one's word is read from their own index. So is
   // A NAME'S PICTURE POOL (its publishers' keys, read the same way). So is
+  // A PAGE'S CONTRIBUTION POOL (its contributors' keys, read the same way). So is
   // A NEED'S LIST POOL (its offerers' keys, read the same way). So is
   // an EVENT'S RSVP POOL an organizer opened here, empty or not. So is A
   // PACKAGE ROOT'S ASSESSMENT POOL (the assessors' keys, read the same way).
-  if (!listed && !await isAttestPool(env, sig) && !await isPicturePool(env, sig) && !await isListPool(env, sig) && !await isRsvpPool(env, sig) && !await isAssessPool(env, sig)) {
+  if (!listed && !await isAttestPool(env, sig) && !await isPicturePool(env, sig) && !await isPagePool(env, sig) && !await isListPool(env, sig) && !await isRsvpPool(env, sig) && !await isAssessPool(env, sig)) {
     // `?held` (2026-11-09): every word, name and record is an address a hive
     // derives and asks of every host it follows, so "no pool here" is the
     // common answer — asked with the flag it is a quiet 204, the same flag
@@ -2646,6 +2647,37 @@ async function notePicturePublishers(env, pubkey, evt) {
 async function isPicturePool(env, sig) {
   if (!SIG_RE.test(sig) || !env.CONTENT?.head) return false
   return !!(await env.CONTENT.head(`${await poolAddress(PICTURES_POOLS_MEANING)}/${sig}`))
+}
+
+// ── contributions to a page (documentation/page-contributions.md) ──────────
+//
+// EVERYONE CAN DROP THEIR CONTRIBUTIONS IN POOLS (jwize 2026-11-12). An edit to
+// somebody else's page never changes it: the contributor puts the edited page
+// here and names it in their OWN signed index as `page:<sig of the page they
+// edited>`. The index write keeps one derived list per edited page — the members
+// of sign('page:<base>'), each named by the contributor's key — and a list of
+// those lists, sign('page:pools'), so the listing route knows a page pool when it
+// is asked its address. Membership only, exactly as attestations and pictures:
+// what each contributor offers is read back, and re-verified, from their own
+// index by whoever reads the pool. A key that dropped the entry is not counted.
+const PAGE_KEY_RE = /^page:([0-9a-f]{64})$/
+const PAGE_POOLS_MEANING = 'page:pools'
+
+async function notePageContributors(env, pubkey, evt) {
+  let roots = {}
+  try { roots = JSON.parse(evt.content)?.roots ?? {} } catch { return }
+  for (const key of Object.keys(roots)) {
+    const base = PAGE_KEY_RE.exec(key)?.[1]
+    if (!base) continue
+    await addPoolMember(env, `page:${base}`, pubkey)
+    await addPoolMember(env, PAGE_POOLS_MEANING, await poolAddress(`page:${base}`))
+  }
+}
+
+/** Is `sig` the address of a page's contribution pool this host holds? */
+async function isPagePool(env, sig) {
+  if (!SIG_RE.test(sig) || !env.CONTENT?.head) return false
+  return !!(await env.CONTENT.head(`${await poolAddress(PAGE_POOLS_MEANING)}/${sig}`))
 }
 
 // ── lists for a need (documentation/need-feeds.md) ──────────────────────────
@@ -5866,6 +5898,7 @@ async function putHive(request, env, pubkey, ctx) {
   await noteAssessors(env, pubkey, evt)
   await noteAttesters(env, pubkey, evt)
   await notePicturePublishers(env, pubkey, evt)
+  await notePageContributors(env, pubkey, evt)
   await noteListOfferers(env, pubkey, evt)
   await noteEvents(env, pubkey, evt)
   await noteFollows(env, pubkey, evt)

@@ -1999,6 +1999,26 @@ test('writing an index that names pictures:<sign(name)> lists its publisher in t
   assert.equal(molecule.status, 404)
 })
 
+test('writing an index that names page:<base> lists its contributor in that page\'s contribution pool', async () => {
+  const base = 'a'.repeat(64)
+  const CONTENT = contentBag()
+  const env = { SITE_BINDINGS: '{}', HIVES: kvMap(), CONTENT }
+  const url = `https://content.hypercomb.com/${INDEXES}/${assessor}`
+  const body = JSON.stringify(await indexBy(assessorKey, { [`page:${base}`]: 'f'.repeat(64), 'page:not-a-sig': 'e'.repeat(64) }))
+  const response = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', assessorKey) }, body }), env)
+  assert.equal(response.status, 201)
+  const pool = await sha256Hex(`page:${base}`)
+  assert(CONTENT.held.has(`${pool}/${assessor}`), 'a member of the page\'s contribution pool, named by the contributor\'s key')
+  assert(CONTENT.held.has(`${await sha256Hex('page:pools')}/${pool}`), 'and the pool is named among the page pools')
+  assert(!CONTENT.held.has(`${await sha256Hex('page:pools')}/${await sha256Hex('page:not-a-sig')}`), 'a key that names no page signature opens no pool')
+  const listing = await worker.fetch(new Request(`https://content.hypercomb.com/${pool}/`), env)
+  assert.equal(listing.status, 200)
+  assert.equal(await listing.text(), `${assessor}\n`)
+  // A page nobody contributed to is no pool here.
+  const untouched = await worker.fetch(new Request(`https://content.hypercomb.com/${await sha256Hex('page:' + 'b'.repeat(64))}/`), env)
+  assert.equal(untouched.status, 404)
+})
+
 test('writing an index that names list:<sign(name)> lists its offerer in that need\'s list pool, and the name pool stays closed', async () => {
   const name = 'a'.repeat(64)
   const CONTENT = contentBag()
