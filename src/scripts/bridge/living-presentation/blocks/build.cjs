@@ -89,9 +89,21 @@ const waysOf = (route, paged) => {
     return { name: c.name, note: c.note || '', route: r, page: paged.has(r.join('/')), current: r.join('/') === route.join('/') }
   }
   const children = (tile?.children || []).map(marked(route))
-  const siblings = (route.length === 1
-    ? (tree.roots || []).filter(r => paged.has(r.name))
-    : (tileAt(route.slice(0, -1))?.children || [])).map(marked(route.slice(0, -1)))
+  // THE SIBLING ROW STAYS PUT (above the video since 2026-11-10; jwize 2026-11-09: "the siblings show
+  // together at the bottom ... the first level, and when you click any of those
+  // buttons the buttons stay"). On a page below the top it is the tiles beside
+  // this one. On a TOP page it is that tile's own first level, so standing on
+  // /protocol shows simple, organized, collaborative ... and clicking one of
+  // them keeps the same row, lit on the one you are on. A top tile with nothing
+  // below it falls back to the other top tiles.
+  const first = route.length === 1 ? (tile?.children || []) : []
+  const hasFirst = route.length === 1 && first.some(c => paged.has([...route, c.name].join('/')))
+  const siblings = (hasFirst
+    ? first.map(marked(route))
+    : route.length === 1
+      ? (tree.roots || []).filter(r => paged.has(r.name)).map(marked([]))
+      : (tileAt(route.slice(0, -1))?.children || []).map(marked(route.slice(0, -1))))
+  const sectionOf = hasFirst ? route[0] : route.length > 1 ? route[route.length - 2] : ''
   const walkable = siblings.filter(s => s.page)
   const at = walkable.findIndex(s => s.current)
   const beside = {
@@ -101,7 +113,21 @@ const waysOf = (route, paged) => {
     prev: at > 0 ? walkable[at - 1] : null,
     next: at >= 0 && at < walkable.length - 1 ? walkable[at + 1] : null,
   }
-  return { children, section: siblings, beside }
+  return { children, section: siblings, sectionOf, beside }
+}
+
+/** EXPLORE MORE (jwize 2026-11-10: "all levels have their children as
+ *  presentations"). The siblings row only changes which video is selected; to
+ *  learn more you go IN: the button opens the first child's presentation, whose
+ *  own row is then that level's tiles. The topic is a plain-language noun
+ *  authored on the page (`topic`), else the tile's name. Nothing when no page
+ *  lies below the tile. */
+const exploreOf = (route, paged, block) => {
+  const below = (tileAt(route)?.children || []).map(c => [...route, c.name]).filter(r => paged.has(r.join('/')))
+  const first = below[0]
+  if (!first) return null
+  // what lies below, by name: the detail under the button, different on every page
+  return { topic: String((block && block.topic) || route[route.length - 1]), to: first, names: below.map(r => r[r.length - 1]) }
 }
 
 /** THE TREE MENU (jwize 2026-11-08: "a left hand sidebar menu for the tree"):
@@ -222,7 +248,7 @@ const buildBlocks = ({ under = '' } = {}) => {
           title: `${scene.name} · Hypercomb`,
           scene,
           tryPart: block.try || null,
-          ways: { ...waysOf(route, paged), menu },
+          ways: { ...waysOf(route, paged), menu, explore: exploreOf(route, paged, block) },
           faces,
           sprite,
         }),

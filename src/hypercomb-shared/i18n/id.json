@@ -2893,6 +2893,8 @@
   "meeting.lobby-cancel": "batal",
   "meeting.lobby-join": "gabung",
   "meeting.lobby-ready": "Kamera siap",
+  "meeting.lobby-no-microphone": "Mikrofon tidak ditemukan. Anda akan bergabung tanpa suara.",
+  "meeting.no-microphone": "Mikrofon Anda tidak menyala. Yang lain tidak dapat mendengar Anda.",
   "meeting.lobby-hint": "{width}×{height} · {fps} fps · hingga {mbps} Mbps ke setiap orang",
   "meeting.lobby-actual": "Mengirim {width}×{height}",
   "meeting.lobby-here": "{here} dari {needed} hadir",

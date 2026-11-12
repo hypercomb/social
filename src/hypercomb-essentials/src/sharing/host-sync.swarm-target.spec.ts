@@ -893,6 +893,23 @@ describe('the publish gate asks the nodes it publishes to', () => {
     expect(await service.isClosureAvailableOn(s, 'resource', true, ['not-a-target.example'])).toBe(false)
   })
 
+  it('a site asked about by its own name is judged on the zone its uploads went to', async () => {
+    // The target set folds a site into its zone; asked as the site, the gate
+    // matched no target and a publish waited out its whole deadline.
+    const host = makeHost()
+    vi.stubGlobal('fetch', host.fetch)
+    const service = (await make()) as Service & {
+      addPublishNodes: (d: readonly string[]) => void
+      isClosureAvailableOn: (sig: string, kind: string, closure: boolean, domains: readonly string[]) => Promise<boolean>
+    }
+    service.addPublishNodes(['pluginthematrix.com', 'presentation.pluginthematrix.com'])
+    const s = await resource('{"name":"a site on a zone"}')
+    const unsent = await resource('{"name":"not on the zone yet"}')
+    await writeReceipt(`${s}.${await hostHash('pluginthematrix.com')}`)
+    expect(await service.isClosureAvailableOn(s, 'resource', true, ['presentation.pluginthematrix.com'])).toBe(true)
+    expect(await service.isClosureAvailableOn(unsent, 'resource', true, ['presentation.pluginthematrix.com'])).toBe(false)
+  })
+
   // A page with children never finished publishing to a host on this machine
   // (2026-10-13): `localhost:4291` failed the dotted, port-less shape, so the
   // publish named no node, `markPublic` staged nothing, and the page's freshly

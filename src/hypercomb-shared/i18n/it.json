@@ -2893,6 +2893,8 @@
   "meeting.lobby-cancel": "annulla",
   "meeting.lobby-join": "partecipa",
   "meeting.lobby-ready": "Fotocamera pronta",
+  "meeting.lobby-no-microphone": "Nessun microfono trovato. Entrerai senza audio.",
+  "meeting.no-microphone": "Il tuo microfono non è attivo. Gli altri non possono sentirti.",
   "meeting.lobby-hint": "{width}×{height} · {fps} fps · fino a {mbps} Mbps per ogni persona",
   "meeting.lobby-actual": "Invio in {width}×{height}",
   "meeting.lobby-here": "{here} su {needed} presenti",

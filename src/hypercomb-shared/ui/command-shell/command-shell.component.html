@@ -153,8 +153,18 @@
                 <span class="indicator-icon mat-sym">{{ ind.icon }}</span>
                 <span class="indicator-x">×</span>
               </button>
+            } @else if (ind.key === 'running') {
+              <!-- THE WORKING PILL IS PRESSABLE (jwize 2026-11-10): a press
+                   opens the window of what is running, a publish's above all. -->
+              <button
+                class="indicator-pill info working"
+                type="button"
+                [title]="ind.label"
+                (mousedown)="$event.preventDefault(); activateIndicator(ind.key)">
+                <span class="indicator-icon mat-sym">{{ ind.icon }}</span>
+              </button>
             } @else {
-              <span class="indicator-pill info" [class.working]="ind.key === 'running'" [title]="ind.label">
+              <span class="indicator-pill info" [title]="ind.label">
                 <span class="indicator-icon mat-sym">{{ ind.icon }}</span>
               </span>
             }

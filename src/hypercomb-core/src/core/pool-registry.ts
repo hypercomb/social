@@ -830,6 +830,11 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // which is also the address of a tile named "mail template". TRUTH POOL —
   // an author's saved template, never minted from the optimize phase.
   'mail:template',
+  // A VOICE FOR A SENTENCE (hypercomb-essentials/src/dub/dub-bank.ts): one
+  // current record per sentence of a presentation, keyed by the sentence's own
+  // signature, placing a recorded take and any edited words on it. TRUTH POOL —
+  // a host's own takes, kept by hand, never minted from the optimize phase.
+  'presentation:dubs',
 ])
 
 /**

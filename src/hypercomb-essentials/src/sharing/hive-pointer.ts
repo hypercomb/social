@@ -331,7 +331,27 @@ export async function putHiveManifest(
   previousContent?: Record<string, unknown>,
   options: PutHiveOptions = {},
 ): Promise<PutHiveResult> {
-  return inWriteLane(host, () => putHiveManifestNow(host, roots, doors, replaces, previousContent, options))
+  const first = await inWriteLane(host, () => putHiveManifestNow(host, roots, doors, replaces, previousContent, options))
+  // A SITE IS NOT A WRITE DOOR. The worker takes every write at the zone root
+  // and refuses it on any site under one, with a 405 that says so ("published
+  // Core hosts are read-only" / "the host door is read-only — write at the
+  // zone root"). A caller that still names a site gets its index carried to
+  // the zone root once, instead of a publish that fails at its last step.
+  const zone = first.ok ? '' : zoneRootAfterRefusal(host, first.reason)
+  if (!zone) return first
+  return inWriteLane(zone, () => putHiveManifestNow(zone, roots, doors, replaces, previousContent, options))
+}
+
+/** The zone root a read-only refusal points to: the host less its first label,
+ *  only for a 405 that says the host is read-only, never for a loopback host or
+ *  a bare apex. '' when there is nowhere to carry the write. */
+export function zoneRootAfterRefusal(host: string, reason: string | undefined): string {
+  const said = String(reason ?? '')
+  if (!/^host said 405\b/.test(said) || !/read-only/i.test(said)) return ''
+  const bare = host.replace(/^wss?:\/\//, '').replace(/^https?:\/\//, '').replace(/\/+$/, '').trim().toLowerCase()
+  if (!bare || LOOPBACK_RE.test(bare) || /:\d+$/.test(bare)) return ''
+  const labels = bare.split('.').filter(Boolean)
+  return labels.length >= 3 ? labels.slice(1).join('.') : ''
 }
 
 async function putHiveManifestNow(

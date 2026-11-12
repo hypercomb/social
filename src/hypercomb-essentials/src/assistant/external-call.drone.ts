@@ -273,6 +273,15 @@ export class ExternalCallDrone extends Drone {
     const results: ExternalLineResult[] = []
     const total = call.lines.length
     let done = 0
+    // THE RECORD FOLLOWS THE RUN, IT DOES NOT PACE IT. Each verdict is written
+    // into the conversation in the order the lines were said, one after the
+    // other, while the next line is already being said: a line used to wait
+    // for the turn before it to reach the disk. The request itself was written
+    // before anything ran, and the caller is answered only once every turn is.
+    let written: Promise<unknown> = Promise.resolve()
+    const record = (turn: string): void => {
+      written = written.then(() => deliverTurn(convoId, 'assistant', turn)).catch(() => undefined)
+    }
     // Each line's place in the run and its verdict, said where the hive shows
     // its own acts (the activity log), after the line's own hearing has stopped
     // so the caller never hears it back.
@@ -302,7 +311,7 @@ export class ExternalCallDrone extends Drone {
         const verdict = formatRemoteSubmitOutcome(await walkTo(back))
         const note = `(the hive had moved: walked back to /${callStandsAt.join('/')} before the next line)`
         results.push({ text: back, verdict, heard: [note] })
-        await deliverTurn(convoId, 'assistant', `${back}\n→ ${verdict}\n${note}`)
+        record(`${back}\n→ ${verdict}\n${note}`)
         progress(back, verdict)
       }
       const walking = verbOf(text) === 'go' ? goReported() : null
@@ -323,10 +332,11 @@ export class ExternalCallDrone extends Drone {
       const verdict = formatRemoteSubmitOutcome(outcome)
       const heard = listening.stop()
       results.push(heard.length ? { text, verdict, heard } : { text, verdict })
-      await deliverTurn(convoId, 'assistant', [`${text}\n→ ${verdict}`, ...heard].join('\n'))
+      record([`${text}\n→ ${verdict}`, ...heard].join('\n'))
       done++
       progress(text, verdict)
     }
+    await written
     const refused = results.filter(r => r.verdict.startsWith('refused')).length
     const message = say(refused ? 'external-call.done-refused' : 'external-call.done', { from: call.from, lines: total, refused },
       refused

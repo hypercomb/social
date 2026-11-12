@@ -2893,6 +2893,8 @@
   "meeting.lobby-cancel": "रद्द करें",
   "meeting.lobby-join": "जुड़ें",
   "meeting.lobby-ready": "कैमरा तैयार है",
+  "meeting.lobby-no-microphone": "कोई माइक्रोफ़ोन नहीं मिला। आप बिना आवाज़ के शामिल होंगे।",
+  "meeting.no-microphone": "आपका माइक्रोफ़ोन चालू नहीं है। दूसरे आपको नहीं सुन सकते।",
   "meeting.lobby-hint": "{width}×{height} · {fps} fps · हर व्यक्ति को अधिकतम {mbps} Mbps",
   "meeting.lobby-actual": "{width}×{height} भेजा जा रहा है",
   "meeting.lobby-here": "{needed} में से {here} यहाँ हैं",

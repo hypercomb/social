@@ -27,6 +27,8 @@ const preview = (out, under = '') => {
       })
       .replace(/href="\.\/([^"/]+)"/g, (_, word) => `href="${fileOf([...b.route, word])}"`)
       .replace(/href="\/([^"]+)"/g, (_, at) => `href="${fileOf(at.split('/'))}"`)
+      // the tile list's links ride in its JSON, not in an href attribute
+      .replace(/"href":"\/([^"]+)"/g, (_, at) => `"href":"${fileOf(at.split('/'))}"`)
     fs.writeFileSync(path.join(out, fileOf(b.route)), html)
   }
   return { pages: blocks.map(b => fileOf(b.route)), media: Object.values(mediaPath) }

@@ -3183,7 +3183,11 @@ async function noteTranslators(env, pubkey, evt) {
  *  pool listing names what a client fetches directly, and the pool is a
  *  history that only grows. Served only where the operator lists the
  *  meaning (`hosts list agent:harness`); the write is an empty marker. */
-const SHARED_RECORD_POOLS = new Set(['agent:harness'])
+// `presentation:dubs` (documentation/presentation-dubbing.md): a soundbank —
+// one document per dubber naming a take and any edited words for each sentence
+// of a presentation — offered with `dub offer @host`, so a community can voice
+// a presentation between them.
+const SHARED_RECORD_POOLS = new Set(['agent:harness', 'presentation:dubs'])
 async function noteSharedPools(env, pubkey, evt) {
   let roots = {}
   try { roots = JSON.parse(evt.content)?.roots ?? {} } catch { return }
@@ -6941,7 +6945,12 @@ const router = {
     // or not, bound, claimed or operated — accepts every write the hive makes;
     // content.<zone> keeps accepting for the installs that have not updated.
     // Every site UNDER a zone stays read-only.
-    if (method !== 'GET' && method !== 'HEAD') {
+    //
+    // A PREFLIGHT IS NOT A WRITE. It is answered below on every host, so the
+    // browser sends the write and the hive reads the refusal and its reason
+    // ("host said 405: published Core hosts are read-only") instead of a
+    // network error it can only call "host unreachable".
+    if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
       const routed = await route()
       if (routed.site && !isZoneRoot(routed.env, requestUrl.hostname)) {
         // THE ONE WRITE A SITE DOOR TAKES (documentation/calendar-events.md):

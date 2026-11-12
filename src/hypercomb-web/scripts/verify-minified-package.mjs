@@ -67,7 +67,8 @@ if (host) {
   if (!SIG_RE.test(shippedRoot)) fail(`${host} names no package in its host:packages pool`)
 } else {
   const shipped = positional[0] ?? join(here, '..', 'dist', 'hypercomb-web', 'visitor', 'content')
-  const readable = positional[1] ?? join(here, '..', 'dist', 'hypercomb-web', 'browser', 'content')
+  // the readable inputs live in the content heap itself (prepare-visitor-assets reads them there too)
+  const readable = positional[1] ?? join(here, '..', 'public', 'content')
   const fromDir = (dir) => async (sig) => {
     try { return await checked(sig, new Uint8Array(await readFile(join(dir, sig)))) } catch { return null }
   }

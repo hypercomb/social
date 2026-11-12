@@ -151,15 +151,12 @@ if (args.includes('--blocks')) {
       if (file.ok) files++; else { failed++; console.error(at + ' ' + f.name + ': ' + file.error) }
     }
   }
-  // Every tile OPENS AS HEXAGONS (jwize 2026-11-03: "walk the hive tiles and
-  // just open the website part … it is the entrance point"; "full flexibility
-  // to just walk into and out of tile views"). A reader walks the hexagons and
-  // opens a tile's page from its view icon; that tile is the site's entrance,
-  // a page's word links go deeper inside it, and walking back (a link up, or
-  // the right button) comes out to the hexagons where the reader opened it.
-  // An earlier planting set \`opens <top> as website\`, which cascades to every
-  // tile beneath and made each arrival open a page; this clears it.
-  for (const top of ${JSON.stringify([...new Set(blocks.map(b => b.route[0]))])}) lines.push('go /', 'opens ' + top + ' as hexagons')
+  // HOW A TOP TILE OPENS IS LEFT AS IT IS (jwize 2026-11-11). This used to end by saying
+  // "opens <top> as hexagons" for every top tile, which took the website pin off the published root: a publish
+  // straight after put six hexagons on protocol.hypercomb.com in place of the presentation. The pin is the
+  // participant's own word ("opens protocol as website", said from /), and a replant no longer touches it.
+  // The walk ends at the top, where the command line is in view whatever the tiles open as.
+  lines.push('go /')
   console.log('Files: ' + files + ' written, ' + failed + ' failed.')
   // 3. Dressing each tile with its page is YOUR word, website page <sig>: the
   //    lines wait on the command line, and Enter says them all.

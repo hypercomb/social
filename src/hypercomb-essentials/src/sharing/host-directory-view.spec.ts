@@ -10,7 +10,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import type { InstallNode, InstallRevision } from '@hypercomb/core'
-import { LIGHT_BRIGHTEST, LIGHT_DIMMEST, LIGHT_UNKNOWN, ageLevel, lightOf, runningStamp, NOTHING_PICKED, codeLines, codeName, filesPicked, pickAll, pickKey, pickMode, publishedCount, publishedOn, stackRows, stillPicked, directoryRows, domainRows, filesOf, hostBehind, isOlder, namedFromVerdict, namedWhenUninstalled, offerableRoots, offeredRevisions, updateProgress, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, type ServedTree } from './host-directory.view'
+import { LIGHT_BRIGHTEST, LIGHT_DIMMEST, LIGHT_UNKNOWN, ageLevel, lightOf, runningStamp, NOTHING_PICKED, codeLines, codeName, filesPicked, pickAll, pickKey, pickMode, publishedCount, publishedOn, stackRows, stillPicked, directoryRows, domainRows, filesOf, hostBehind, isOlder, namedFromVerdict, namedWhenUninstalled, offerableRoots, offeredRevisions, updateProgress, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, sourcePackagePaths, type ServedTree } from './host-directory.view'
 import { ATTESTED_PACKAGES_KEY, attestPackage } from './package-attestation'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -47,6 +47,33 @@ const running = [
 ]
 
 describe('the host directory', () => {
+
+  it('a shell that runs its working tree reads its compiled-in packages as on and from source, never "not here yet"', () => {
+    // jwize, 2026-11-11, on the dev shell: "everything in host for hypercomb.com
+    // says not here yet" — while comfy and the rest ran from source.
+    const builtIn = sourcePackagePaths([
+      'hypercomb-essentials/src/comfy/comfy.drone.ts',
+      'hypercomb-essentials/src/games/arkanoid/arkanoid.drone.ts',
+      'hypercomb-essentials/src/side-effects.ts',
+      'hypercomb-shared/ui/x.ts',
+    ])
+    expect([...builtIn].sort()).toEqual(['comfy', 'games', 'games/arkanoid'])
+
+    const next: ServedTree = { root: 'r1', nodes: [node('comfy', 'c1'), node('games', 'g1', ['games/arkanoid']), node('wheel', 'w1')] }
+    const board = rows({ next, builtIn, off: new Set(['comfy']) })
+    const comfy = board.find(row => row.path === 'comfy')!
+    // On whatever the record says (an off written elsewhere does not unload source),
+    // and no update to take: no revision reaches a working tree.
+    expect([comfy.on, comfy.fromSource, comfy.update, comfy.blockedBy]).toEqual([true, true, false, ''])
+    // A package the source does not carry is still honestly not here.
+    const wheel = board.find(row => row.path === 'wheel')!
+    expect([wheel.on, wheel.fromSource, wheel.held]).toEqual([false, false, false])
+    // A hive passes no built-in set, and nothing changes.
+    expect(rows({ next }).every(row => !row.fromSource && !row.on)).toBe(true)
+    // The row says it, and the switch keeps its reason.
+    expect(VIEW).toMatch(/row\.fromSource[\s\S]{0,200}packages\.from-source/)
+    expect(EN['packages.from-source']).toBe('from source')
+  })
 
   it('lists this hive as the union of every host, with a count of the hosts carrying the SAME signature', () => {
     // Jaime 2026-09-13: "a full laundry list of packages available on those
@@ -369,7 +396,7 @@ describe('the host directory', () => {
 
   it('stacks hosts as one list: one line per package, who carries it, and whether they disagree', () => {
     const row = (path: string, layerSig: string, extra: Partial<ReturnType<typeof rows>[number]> = {}) =>
-      ({ path, name: path, description: '', layerSig, on: false, held: false, blockedBy: '', update: false, picked: false, hidden: 0, count: 1, children: 0, ...extra })
+      ({ path, name: path, description: '', layerSig, on: false, held: false, blockedBy: '', update: false, picked: false, hidden: 0, count: 1, children: 0, fromSource: false, ...extra })
     const stacked = stackRows([
       { zone: 'one.com', rows: [row('games', 'g1', { children: 2 }), row('notes', 'n1')] },
       { zone: 'two.com', rows: [row('games', 'g1', { children: 3, count: 2 }), row('themes', 't1')] },
@@ -518,11 +545,19 @@ describe('the host directory', () => {
     expect(runningStamp([], 'mine')).toBeNull()
   })
 
-  it('the light tells and the manage menu acts: no switch on the bulb, four things in the menu, closed by Escape or a click elsewhere', () => {
+  it('the light tells and a press on it switches; the manage menu holds the same switch and three more, closed by Escape or a click elsewhere', () => {
     // jwize 2026-11-04: "The update brings to newest or you click the manage icon turn it off
     // or pick revisions and look at code in the finder view."
-    expect(VIEW).not.toMatch(/bulb\.addEventListener\('click'/)
-    expect(VIEW).toMatch(/const bulb = make\('span', `hd-bulb \$\{light\.state\}`\)/)
+    // jwize 2026-11-10: "Yes, bulb switches" — the switch was only in the menu, so the
+    // bulb is the switch again, and still the light.
+    expect(VIEW).toMatch(/const bulb = button\(`hd-bulb \$\{light\.state\}`, ''\)/)
+    expect(VIEW).toMatch(/bulb\.addEventListener\('click', \(\) => \{ void this\.#toggle\(row\) \}\)/)
+    expect(VIEW).toMatch(/bulb\.setAttribute\('aria-pressed', String\(row\.on\)\)/)
+    // One rule decides whether it can be switched, for the bulb and the menu alike.
+    expect(VIEW).toMatch(/bulb\.disabled = switching\.blocked/)
+    expect(VIEW).toMatch(/const \{ blocked, reason \} = this\.#switchable\(row\)/)
+    // A press on the bulb is not a pick of the row.
+    expect(VIEW).toMatch(/closest\('button:not\(\.hd-name\), a'\)\) return/)
     expect(VIEW).toMatch(/bulb\.style\.setProperty\('--hd-age', String\(light\.level\)\)/)
     expect(VIEW).toMatch(/\.hd-bulb\.behind\{opacity:var\(--hd-age,\.55\);\}/)
     // The update mark is still the one press that brings a package to the newest.
@@ -611,6 +646,26 @@ describe('the host directory', () => {
     expect(run).toMatch(/const enabled = manifest\.bees/)
     expect(run).toMatch(/const keep = new Set\(\[\.\.\.enabled, \.\.\.walked\.criticalBees\]\)/)
     expect(run.indexOf('walked.bees.filter(sig => keep.has(sig))')).toBeLessThan(run.indexOf('#loadBeesPrioritized(walked.bees'))
+  })
+
+  it('on and off take effect while the hive runs; the restart is kept for what cannot let go', () => {
+    // jwize 2026-11-10: "shouldn't we be able to add and remove features in
+    // realtime from the hosts window?"
+    const toggle = VIEW.slice(VIEW.indexOf('async #toggle(row: DirectoryRow)'), VIEW.indexOf('async #takeUpdate('))
+    // Held bytes: the record is written, then the running hive is asked to match it.
+    expect(toggle.indexOf('await install.applyUnits()')).toBeLessThan(toggle.indexOf('await this.#live()'))
+    expect(toggle).toMatch(/\} else if \(await this\.#live\(\)\) \{[\s\S]{0,400}?return\s*\}\s*this\.#restart\(\)/)
+    // A package only a host carries is picked in, and that still restarts.
+    expect(toggle.indexOf('await install.pick(')).toBeLessThan(toggle.indexOf('await this.#live()'))
+    // The window reaches the shell over IoC and takes only a plain yes.
+    expect(VIEW).toMatch(/ioc<\{ recompose\?: \(\) => Promise<boolean> \}>\('@hypercomb\.social\/ScriptPreloader'\)/)
+    expect(VIEW).toMatch(/return \(await preloader\?\.recompose\?\.\(\)\) === true \} catch \{ return false \}/)
+    // A bee that declares no dispose() is never half switched off.
+    const recompose = PRELOADER.slice(PRELOADER.indexOf('public recompose = async'), PRELOADER.indexOf('static #parseManifest'))
+    expect(recompose).toMatch(/typeof leaving\?\.dispose !== 'function'\) return false/)
+    expect(recompose.indexOf("!== 'function') return false")).toBeLessThan(recompose.indexOf('await new hypercomb().act('))
+    expect(EN['packages.turned-on']).toBeTruthy()
+    expect(EN['packages.turned-off']).toBeTruthy()
   })
 
   it('the dev shell carries the install port, and nothing acts where no package is installed', () => {

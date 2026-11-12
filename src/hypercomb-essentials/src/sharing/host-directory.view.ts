@@ -296,6 +296,22 @@ export interface DirectoryRow {
   /** How many of your hosts carry this same signature at this path. */
   count: number
   children: number
+  /** Compiled into a shell that runs its working tree: on, and not a revision. */
+  fromSource: boolean
+}
+
+/** The package paths a source shell was built from. A package's path is its
+ *  folder under essentials' src (the build names each layer for its folder),
+ *  so every folder holding a source file is a package running here. */
+export const sourcePackagePaths = (names: readonly string[]): Set<string> => {
+  const paths = new Set<string>()
+  const ROOT = 'hypercomb-essentials/src/'
+  for (const name of names) {
+    if (!name.startsWith(ROOT)) continue
+    const parts = name.slice(ROOT.length).split('/').slice(0, -1)
+    for (let depth = 1; depth <= parts.length; depth++) paths.add(parts.slice(0, depth).join('/'))
+  }
+  return paths
 }
 
 /**
@@ -318,6 +334,8 @@ export const directoryRows = (input: {
   off: ReadonlySet<string>
   moved: ReadonlySet<string> | null
   offerable?: (root: string) => boolean
+  /** A source shell's compiled-in packages (sourcePackagePaths); null on a hive. */
+  builtIn?: ReadonlySet<string> | null
 }): DirectoryRow[] => {
   const here = new Map(input.running.map(node => [node.path, node]))
   const nodes = new Map<string, InstallNode>()
@@ -345,21 +363,24 @@ export const directoryRows = (input: {
       const moved = input.moved
         ? input.moved.has(node.path)
         : nextAt.has(node.path) && nextAt.get(node.path) !== here.get(node.path)?.layerSig
+      // Compiled in: it runs whatever the record says, and no revision reaches it.
+      const fromSource = !!input.builtIn?.has(node.path)
       return {
         path: node.path,
         name: node.name,
         description: node.description,
         layerSig: node.layerSig,
-        on: held && !input.off.has(node.path) && !blockedBy,
+        on: fromSource || (held && !input.off.has(node.path) && !blockedBy),
         held,
-        blockedBy,
-        update: !input.scope && moved,
+        blockedBy: fromSource ? '' : blockedBy,
+        update: !input.scope && moved && !fromSource,
         picked: !!input.picks[node.path],
         hidden: input.picks[node.path]?.hides
           ? input.eclipsed.filter(path => path !== node.path && within(path, node.path)).length
           : 0,
         count,
         children: node.children.length,
+        fromSource,
       }
     })
     .sort((a, b) => Number(b.on) - Number(a.on) || a.path.localeCompare(b.path))
@@ -1041,6 +1062,9 @@ export class HostDirectoryElement extends HTMLElement {
   #offerable: (root: string) => boolean = () => true
   #announced = ''
   #moved: Set<string> | null = null
+  /** A source shell's compiled-in packages, read once from its source catalog. */
+  #builtIn: ReadonlySet<string> | null = null
+  #builtInRead: Promise<void> | null = null
   #served = new Map<string, ServedTree | null>()
   #trees = new Map<string, Promise<ServedTree | null>>()
   #heads = new Map<string, Promise<void>>()
@@ -1555,6 +1579,7 @@ export class HostDirectoryElement extends HTMLElement {
       off: port()?.install.offUnits() ?? new Set(),
       moved: this.#moved,
       offerable: this.#offerable,
+      builtIn: this.#builtIn,
     })
   }
 
@@ -2938,13 +2963,14 @@ export class HostDirectoryElement extends HTMLElement {
 
       // THE LIGHT: on and current, on with a newer version (dimmer the older the one
       // running — the age is read for rows that are on and behind, a few at a time),
-      // or off. It tells; the manage menu acts.
+      // or off. It tells, and a press on it switches (jwize, 2026-11-10: "Yes, bulb
+      // switches" — until then the switch was only inside the manage menu).
       const running = this.#selection?.nodes.find(node => node.path === row.path)?.layerSig ?? ''
       if (row.on && row.update && running) this.#queueAge(row.path, running)
       const stamp = this.#ages.get(`${row.path}\n${running}`)
       const light = lightOf(row, stamp, Date.now())
-      const bulb = make('span', `hd-bulb ${light.state}`)
-      bulb.setAttribute('role', 'img')
+      const bulb = button(`hd-bulb ${light.state}`, '')
+      bulb.tabIndex = -1
       bulb.style.setProperty('--hd-age', String(light.level))
       const lit = light.state === 'off'
         ? t('hosts.light.off', '{name} is off', { name: row.path })
@@ -2953,8 +2979,16 @@ export class HostDirectoryElement extends HTMLElement {
           : typeof stamp === 'number'
             ? t('hosts.light.behind', '{name} is on, and a newer version exists — the one running is from {date}', { name: row.path, date: new Date(stamp).toISOString().slice(0, 10) })
             : t('hosts.light.behind-unknown', '{name} is on, and a newer version exists', { name: row.path })
-      bulb.setAttribute('aria-label', lit)
-      bulb.title = lit
+      // The same rule the menu's first item follows, and the same reason when it cannot.
+      const switching = this.#switchable(row)
+      const press = row.on
+        ? t('packages.turn-off', 'Turn off {name}', { name: row.path })
+        : t('packages.turn-on', 'Turn on {name}', { name: row.path })
+      bulb.setAttribute('aria-pressed', String(row.on))
+      bulb.setAttribute('aria-label', switching.blocked ? lit : press)
+      bulb.title = [lit, switching.blocked ? switching.reason : press].filter(Boolean).join(' — ')
+      bulb.disabled = switching.blocked
+      bulb.addEventListener('click', () => { void this.#toggle(row) })
       bulb.append(glyph('bulbIcon', row.on ? 'filled' : ''))
 
       // The name is the line: clicking it, or the row around it, picks.
@@ -2973,7 +3007,11 @@ export class HostDirectoryElement extends HTMLElement {
       }
       if (row.picked) marks.append(make('span', 'hd-mark quiet', t('hosts.picked', 'picked')))
       if (row.hidden) marks.append(make('span', 'hd-mark quiet', t('hosts.hidden-beneath', '{count} newer hidden', { count: row.hidden })))
-      if (!row.held) marks.append(make('span', 'hd-mark quiet', t('packages.new', 'not here yet')))
+      if (row.fromSource) {
+        const source = make('span', 'hd-mark quiet', t('packages.from-source', 'from source'))
+        source.title = t('hosts.from-source', 'This shell loads its packages from source, so turning them on or off and picking revisions happens on a hive.')
+        marks.append(source)
+      } else if (!row.held) marks.append(make('span', 'hd-mark quiet', t('packages.new', 'not here yet')))
       // Stacked hosts that carry different signatures of one package say so.
       if (row.differs) marks.append(make('span', 'hd-mark quiet', t('hosts.differs', 'differs')))
 
@@ -3047,16 +3085,7 @@ export class HostDirectoryElement extends HTMLElement {
     const reach = port()
     const acts = !!reach && !!this.#selection?.trunk
     const recursive = !!reach?.recursive
-    const untakeable = !row.held && !this.#carrying(row.path)
-    const blocked = !acts || !!this.#busy || !!row.blockedBy || (!row.held && !recursive) || untakeable
-    // Why it cannot be switched, in the words the old bulb said it in.
-    const reason = row.blockedBy
-      ? t('hosts.blocked', 'Turn on {name} first', { name: row.blockedBy })
-      : untakeable && this.#isBehind(this.#scope)
-        ? this.#behindText(this.#scope)
-        : !acts
-          ? t('hosts.from-source', 'This shell loads its packages from source, so turning them on or off and picking revisions happens on a hive.')
-          : ''
+    const { blocked, reason } = this.#switchable(row)
 
     const menu = make('div', 'hd-menu')
     menu.setAttribute('role', 'menu')
@@ -3087,6 +3116,23 @@ export class HostDirectoryElement extends HTMLElement {
     if (top + menu.offsetHeight > host.height - 8) top = Math.max(8, at.top - host.top - menu.offsetHeight - 4)
     menu.style.left = `${Math.round(left)}px`
     menu.style.top = `${Math.round(top)}px`
+  }
+
+  /** Whether a package can be switched on or off here, and why not when it
+   *  cannot — one rule for the bulb on the row and the menu's first item. */
+  #switchable(row: DirectoryRow): { blocked: boolean; reason: string } {
+    const reach = port()
+    const acts = !!reach && !!this.#selection?.trunk
+    const untakeable = !row.held && !this.#carrying(row.path)
+    const blocked = !acts || !!this.#busy || !!row.blockedBy || (!row.held && !reach?.recursive) || untakeable
+    const reason = row.blockedBy
+      ? t('hosts.blocked', 'Turn on {name} first', { name: row.blockedBy })
+      : untakeable && this.#isBehind(this.#scope)
+        ? this.#behindText(this.#scope)
+        : !acts
+          ? t('hosts.from-source', 'This shell loads its packages from source, so turning them on or off and picking revisions happens on a hive.')
+          : ''
+    return { blocked, reason }
   }
 
   /** The menu's door to the code: pick the package, so its files are the column
@@ -3617,9 +3663,10 @@ export class HostDirectoryElement extends HTMLElement {
 
   // ── the acts ─────────────────────────────────────────────────────────────
 
-  /** Turn a package on or off, by path. Held bytes make this a repoint and a
-   *  restart; a package only a host carries is picked in from that host first,
-   *  through the same gate every install passes. */
+  /** Turn a package on or off, by path. Held bytes make this a repoint that
+   *  the running hive takes at once (#live); a restart is kept for what cannot
+   *  let go while it runs. A package only a host carries is picked in from that
+   *  host first, through the same gate every install passes, and restarts. */
   async #toggle(row: DirectoryRow): Promise<void> {
     const reach = port()
     if (!reach || this.#busy || row.blockedBy) return
@@ -3653,6 +3700,12 @@ export class HostDirectoryElement extends HTMLElement {
       } else if (!(await install.applyUnits())) {
         install.setOffUnits(before)
         this.#error = t('hosts.not-held', 'what runs here could not be read back, so nothing changed')
+        return
+      } else if (await this.#live()) {
+        EffectBus.emit('packages:changed', { off: [...install.offUnits()] })
+        EffectBus.emit('activity:log', { message: row.on
+          ? t('packages.turned-off', '{name} is off', { name: row.path })
+          : t('packages.turned-on', '{name} is on', { name: row.path }) })
         return
       }
       this.#restart()
@@ -3848,6 +3901,17 @@ export class HostDirectoryElement extends HTMLElement {
     })
   }
 
+  /** ON AND OFF WHILE THE HIVE RUNS (jwize, 2026-11-10). The activation record
+   *  is already rewritten; the shell's preloader makes what runs match it —
+   *  what came on loads and is pulsed, what went off is disposed. It answers
+   *  false, having changed nothing, when only a restart is honest (a running
+   *  bee with no `dispose()`, other namespace bundles, a shell from before
+   *  it), and the caller restarts as it always did. */
+  async #live(): Promise<boolean> {
+    const preloader = ioc<{ recompose?: () => Promise<boolean> }>('@hypercomb.social/ScriptPreloader')
+    try { return (await preloader?.recompose?.()) === true } catch { return false }
+  }
+
   #restart(): void {
     this.#restarting = true
     try { sessionStorage.setItem(REOPEN_KEY, JSON.stringify({ scope: this.#scope, at: this.#at })) } catch { /* opens fresh */ }
@@ -3864,19 +3928,29 @@ export class HostDirectoryElement extends HTMLElement {
     this.#reading = true
     this.#renderBody()
     try {
-      this.#selection = await this.#selectionOf(reach)
-      const trunk = this.#selection?.trunk ?? null
-      const named = await this.#namedRoot(trunk)
-      this.#named = named
-      this.#offerable = this.#offerFor(named)
-      if (named && named !== trunk) {
-        const from = this.#channelSources()
-        if (this.#next?.root !== named) this.#next = await this.#tree(named, from)
-        this.#moved = reach.recursive
-          ? new Set(await install.movedPaths(named, from).catch(() => []))
-          : trunk ? new Set(await install.movedUnits(trunk, named, from).catch(() => [])) : null
-      } else { this.#next = null; this.#moved = null }
-      this.#render()
+      // THE LIST YOU ARE IN GOES FIRST (jwize, 2026-11-11: "it is shown first in
+      // any race if you are in the view"). What runs here paints before any host
+      // is asked, and the background loaders wait until the followed
+      // publisher's list has painted too — every other host fills in after.
+      const preloader = ioc<{ foreground?: <T>(work: () => Promise<T>) => Promise<T> }>('@hypercomb.social/ScriptPreloader')
+      const first = async (): Promise<void> => {
+        this.#readBuiltIn()
+        this.#selection = await this.#selectionOf(reach)
+        this.#render()
+        const trunk = this.#selection?.trunk ?? null
+        const named = await this.#namedRoot(trunk)
+        this.#named = named
+        this.#offerable = this.#offerFor(named)
+        if (named && named !== trunk) {
+          const from = this.#channelSources()
+          if (this.#next?.root !== named) this.#next = await this.#tree(named, from)
+          this.#moved = reach.recursive
+            ? new Set(await install.movedPaths(named, from).catch(() => []))
+            : trunk ? new Set(await install.movedUnits(trunk, named, from).catch(() => [])) : null
+        } else { this.#next = null; this.#moved = null }
+        this.#render()
+      }
+      await (preloader?.foreground ? preloader.foreground(first) : first())
       // EVERY host's head, because the list is the union of them — each read
       // once per open and shown as it arrives.
       // An open and its zones landing are two reads a tick apart; they share
@@ -3898,6 +3972,18 @@ export class HostDirectoryElement extends HTMLElement {
       this.#reading = false
       this.#render()
     }
+  }
+
+  /** On a source shell, which packages are compiled in — read in the
+   *  background, once, and painted when it lands. */
+  #readBuiltIn(): void {
+    if (this.#builtInRead || !runsSource()) return
+    const catalog = ioc<{ names?: () => Promise<readonly string[]> }>('@hypercomb.social/DevSourceCatalog')
+    this.#builtInRead = (async () => {
+      const names = await catalog?.names?.().catch(() => []) ?? []
+      this.#builtIn = sourcePackagePaths(names)
+      this.#render()
+    })()
   }
 
   async #selectionOf(reach: Port): Promise<InstallSelection | null> {
@@ -4300,11 +4386,13 @@ ${S} .hd-packages .hd-row > .hd-progress{grid-row:auto;}
 ${S} .hd-packages .hd-mark{font-size:.6em;}
 }
 /* THE LIGHT: lit and current, lit and dim — dimmer the older the version running, set by --hd-age — or out. */
-${S} .hd-bulb{display:inline-grid;place-items:center;width:1.6em;height:1.6em;font-size:1em;line-height:1;color:var(--hc-status-warn);background:color-mix(in srgb, var(--hc-status-warn) 11%, transparent);border-radius:var(--hc-radius-control,2px);transition:background-color .2s,color .2s;}
+${S} .hd-bulb{display:inline-grid;place-items:center;width:1.6em;height:1.6em;padding:0;font:inherit;font-size:1em;line-height:1;border:none;cursor:pointer;color:var(--hc-status-warn);background:color-mix(in srgb, var(--hc-status-warn) 11%, transparent);border-radius:var(--hc-radius-control,2px);transition:background-color .2s,color .2s;}
 ${S} .hd-bulb .hd-glyph{font-size:1.05em;vertical-align:0;}
 ${S} .hd-simple .hd-bulb{width:2.2em;height:2.2em;}
 ${S} .hd-simple .hd-bulb .hd-glyph{font-size:1.25em;}
 ${S} .hd-bulb.behind{opacity:var(--hd-age,.55);}
+${S} .hd-bulb:disabled{cursor:default;}
+${S} .hd-bulb:not(:disabled):hover,${S} .hd-bulb:focus-visible{box-shadow:inset 0 0 0 1px currentColor;opacity:1;}
 ${S} .hd-bulb.off,${S} .hd-row.off .hd-bulb{color:var(--hd-ink-quiet);background:none;box-shadow:inset 0 0 0 1px var(--hd-rule);}
 /* THE MANAGE MENU: over the desk, beside the row it is for. */
 ${S} .hd-menu{position:absolute;z-index:5;min-width:14.5rem;display:flex;flex-direction:column;padding:.3em;background:var(--hd-ground);border:1px solid rgba(var(--acc),0.3);border-radius:var(--hc-radius-floating,4px);box-shadow:0 12px 32px rgba(0,0,0,0.22);}

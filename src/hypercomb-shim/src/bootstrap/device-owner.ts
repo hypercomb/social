@@ -21,9 +21,9 @@ import { SignatureService, nip98Authorization, nip98Template } from '@hypercomb/
 import { readDeviceBinding, type DeviceBinding } from './device-binding'
 import { putKeyChain, readKeyChain } from './device-invite'
 import { deviceSigner, type DeviceSigner } from './device-key'
-import type { OwnerBridge, OwnerResult, OwnerToggle } from './owner-bridge'
+import type { OwnerBridge, OwnerResult, OwnerToggle, OwnerView } from './owner-bridge'
 import {
-  readOwnerIndex, readShowcaseAtom, showcaseBytes, showcaseKey, showcasesItem, toggleShowcaseItem, zoneOrigin,
+  parseView, readOwnerIndex, readShowcaseAtom, showcaseBytes, showcaseKey, showcasesItem, toggleShowcaseItem, zoneOrigin,
   type ShowcaseItem, type ShowcaseRecord,
 } from './showcase-record'
 
@@ -83,11 +83,34 @@ const openOn = (zone: string, anchor: string, content: Record<string, unknown>):
 
 type Attempt = OwnerResult | 'stale'
 
-/** One read-switch-sign of the anchor's showcase on the zone. 'stale' when the host holds a newer index
- *  than the one read: read again. */
-const attempt = async (request: OwnerToggle, anchor: string, signer: DeviceSigner): Promise<Attempt> => {
+/** What a change makes of the record: the next one, or null when it changes nothing. `open` is what the anchor's doors
+ *  publish here — what a zone with no record yet is showing. */
+type Change = (current: ShowcaseRecord | null, open: () => ShowcaseItem[]) => ShowcaseRecord | null
+
+const toggleChange = (request: OwnerToggle): Change => (current, open) => {
   const zone = request.zone
   const item: ShowcaseItem = { pubkey: request.pubkey, lineage: request.lineage }
+  if (current) return showcasesItem(current, item) === request.on ? null : toggleShowcaseItem(current, item)
+  if (request.on) return { zone, items: [item], domains: [] }
+  // No record yet: everything published here is shown. Taking one out records the rest.
+  const shown = open()
+  if (!shown.some(row => row.pubkey === item.pubkey && row.lineage === item.lineage)) return null
+  return { zone, items: shown.filter(row => !(row.pubkey === item.pubkey && row.lineage === item.lineage)), domains: [] }
+}
+
+/** The look everyone is shown. Hexagons is the absence of a view. A zone with no record yet keeps showing what it
+ *  publishes: the record that first names a look names those too. */
+const viewChange = (request: OwnerView): Change => (current, open) => {
+  const view = parseView(request.view)
+  const next = view && view !== 'hex' ? view : undefined
+  if ((current?.view ?? undefined) === next) return null
+  const { view: _gone, ...rest } = current ?? { zone: request.zone, items: open(), domains: [] as string[] }
+  return next ? { ...rest, view: next } : rest
+}
+
+/** One read-change-sign of the anchor's showcase on the zone. 'stale' when the host holds a newer index
+ *  than the one read: read again. */
+const attempt = async (zone: string, change: Change, anchor: string, signer: DeviceSigner): Promise<Attempt> => {
   const read = await readOwnerIndex(zone, anchor)
   if (!read) return { ok: false, reason: `could not read your index on ${zone}` }
   const content: Record<string, unknown> = read === 'missing' ? { v: HIVE_LINK_VERSION, roots: {} } : read.content
@@ -99,18 +122,8 @@ const attempt = async (request: OwnerToggle, anchor: string, signer: DeviceSigne
     current = await readShowcaseAtom(zone, named)
     if (!current) return { ok: false, reason: 'could not read the showcase' }
   }
-  let next: ShowcaseRecord
-  if (current) {
-    if (showcasesItem(current, item) === request.on) return { ok: true, changed: false }
-    next = toggleShowcaseItem(current, item)
-  } else if (request.on) {
-    next = { zone, items: [item], domains: [] }
-  } else {
-    // No record yet: everything published here is shown. Taking one out records the rest.
-    const open = openOn(zone, anchor, content)
-    if (!open.some(row => row.pubkey === item.pubkey && row.lineage === item.lineage)) return { ok: true, changed: false }
-    next = { zone, items: open.filter(row => !(row.pubkey === item.pubkey && row.lineage === item.lineage)), domains: [] }
-  }
+  const next = change(current, () => openOn(zone, anchor, content))
+  if (!next) return { ok: true, changed: false }
   const bytes = showcaseBytes(next)
   const sig = await sha(bytes)
   const refused = await uploadRecord(zone, bytes, sig, anchor, signer)
@@ -153,22 +166,25 @@ export const deviceOwner = (zone: string, deps: DeviceOwnerDeps = {}): OwnerBrid
     return await carryChain(zone, binding, signer) ? { signer, anchor: binding.anchor } : null
   })().catch(() => null)
   let lane: Promise<unknown> = Promise.resolve()
+  // One at a time: each is a read-change-sign of the same record.
+  const act = (valid: boolean, change: Change): Promise<OwnerResult> => {
+    const run = lane.then(async (): Promise<OwnerResult> => {
+      const held = await ensure()
+      if (!held) return { ok: false, reason: 'this browser is not on your key list here' }
+      if (!valid) return { ok: false, reason: 'bad request' }
+      for (let tries = 0; tries < 2; tries++) {
+        const result = await attempt(zone, change, held.anchor, held.signer).catch((): OwnerResult => ({ ok: false, reason: 'failed' }))
+        if (result !== 'stale') return result
+      }
+      return { ok: false, reason: 'your index kept changing underneath; try again' }
+    })
+    lane = run.catch(() => undefined)
+    return run
+  }
   return {
     hello: async () => (await ensure())?.anchor ?? '',
-    toggle: request => {
-      const run = lane.then(async (): Promise<OwnerResult> => {
-        const held = await ensure()
-        if (!held) return { ok: false, reason: 'this browser is not on your key list here' }
-        if (request.zone !== zone || !SIG.test(request.pubkey) || !request.lineage || request.lineage.length > 200) return { ok: false, reason: 'bad request' }
-        for (let tries = 0; tries < 2; tries++) {
-          const result = await attempt(request, held.anchor, held.signer).catch((): OwnerResult => ({ ok: false, reason: 'failed' }))
-          if (result !== 'stale') return result
-        }
-        return { ok: false, reason: 'your index kept changing underneath; try again' }
-      })
-      lane = run.catch(() => undefined)
-      return run
-    },
+    toggle: request => act(request.zone === zone && SIG.test(request.pubkey) && !!request.lineage && request.lineage.length <= 200, toggleChange(request)),
+    view: request => act(request.zone === zone && !!parseView(request.view), viewChange(request)),
   }
 }
 
@@ -187,5 +203,8 @@ export const eitherOwner = (...owners: readonly (OwnerBridge | null)[]): OwnerBr
       return ''
     },
     toggle: request => chosen ? chosen.toggle(request) : Promise.resolve({ ok: false, reason: 'no key of yours answers here' }),
+    view: request => chosen?.view ? chosen.view(request) : Promise.resolve({ ok: false, reason: 'no key of yours answers here' }),
+    // Only a hive hands out invites; where the one that answered cannot, the page is told so.
+    invite: request => chosen?.invite ? chosen.invite(request) : Promise.resolve({ ok: false, reason: 'only your hive can invite a phone' }),
   }
 }

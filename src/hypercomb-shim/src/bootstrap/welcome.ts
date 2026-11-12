@@ -43,6 +43,8 @@ export type Welcome = {
   links: WelcomeLink[]
   /** The zone's room: a sealed swarm link, or '' (absent on a card without one). */
   swarm?: string
+  /** The published hive this host's root shows in place: an https address, when one is staged. */
+  presentation?: string
 }
 
 /** One line of the starting instructions, and the page it points at, if any. */
@@ -58,12 +60,15 @@ export type FrontDoor = {
   /** The zone's room, drawn first as "Join the swarm" — or ''. */
   readonly swarm: string
   /** Where the platform explains itself, minus any door the staged links
-   *  already open — `/tour/` on hypercomb.com IS the tour. Never tiles: it is
-   *  the small footer of a task view, not what a participant's own hive shows. */
+   *  already open — `/tour/` on hypercomb.com IS the tour. The small footer of
+   *  a task view, and the optional help tiles of a hive: off until its own
+   *  browser turns one on while editing, never shown to a visitor by default. */
   readonly footer: readonly WelcomeLink[]
   /** The starting point a host with nothing staged offers in place of the
    *  platform's doors — null once the operator stages a front page of its own. */
   readonly starter: Starter | null
+  /** The published hive shown in place as this host's root, or ''. */
+  readonly presentation: string
 }
 
 /** What every host is, until its operator says otherwise. */
@@ -79,7 +84,8 @@ export const APP_HREF = 'https://hypercomb.io/'
  *  Licensing lives under `src/documentation`. The repository root has no
  *  `documentation` folder, and a link there is a 404. */
 export const PLATFORM_LINKS: readonly WelcomeLink[] = [
-  { label: 'the tour', href: 'https://hypercomb.com/tour/', note: 'what this is, in nineteen minutes', icon: 'tour' },
+  // The tour is the protocol hive (jwize 2026-11-10: "the link to the tour should go to the protocol.hypercomb.com hive").
+  { label: 'the tour', href: 'https://protocol.hypercomb.com/', note: 'what this is, and how it works', icon: 'tour' },
   { label: 'hypercomb.io', href: APP_HREF, note: 'the app — start a hive of your own', icon: 'app' },
   { label: 'source', href: 'https://github.com/hypercomb/social', note: 'AGPL-3.0', icon: 'source' },
   { label: 'licensing', href: 'https://github.com/hypercomb/social/blob/main/src/documentation/licensing.md', note: '', icon: 'docs' },
@@ -104,7 +110,7 @@ export const STARTER: Starter = {
     { text: 'To keep it reachable when your device is off, host it from your device, your own server, or in the cloud.',
       link: { label: 'Host your hive', href: 'https://host-setup.hypercomb.com/' } },
     { text: 'New to all this? The tour explains what it is in a few minutes.',
-      link: { label: 'Watch the tour', href: 'https://hypercomb.com/tour/' } },
+      link: { label: 'Take the tour', href: 'https://protocol.hypercomb.com/' } },
   ],
 }
 
@@ -146,17 +152,29 @@ const linksFrom = (value: unknown): WelcomeLink[] => {
   return links
 }
 
+/** A presentation is shown in a frame, so only a whole https address is believed: never a path, never plain http. */
+const presentationFrom = (value: unknown): string => {
+  const raw = text(value, 2048)
+  if (!raw) return ''
+  try {
+    const url = new URL(raw)
+    return url.protocol === 'https:' && !url.username && !url.password ? url.href : ''
+  } catch { return '' }
+}
+
 /** The staged file, believed only as far as each field survives its clamp.
  *  Null when nothing usable is in it. */
 export const parseWelcome = (raw: unknown): Welcome | null => {
   const record = raw as Record<string, unknown>
   if (!record || typeof record !== 'object' || Array.isArray(record)) return null
 
+  const presentation = presentationFrom(record.presentation)
   const welcome: Welcome = {
     title: text(record.title, 60),
     tagline: text(record.tagline, 400),
     links: linksFrom(record.links),
     swarm: swarmFrom(record.swarm),
+    ...(presentation ? { presentation } : {}),
   }
   const empty = !welcome.title && !welcome.tagline && welcome.links.length === 0 && !welcome.swarm
   return empty ? null : welcome
@@ -231,5 +249,6 @@ export const frontDoorOf = (welcome: Welcome | null, hostname: string, origin: s
     swarm: welcome?.swarm ?? '',
     footer: PLATFORM_LINKS.filter(door => !links.some(link => sameDoor(link.href, door.href, origin))),
     starter: links.length === 0 ? STARTER : null,
+    presentation: welcome?.presentation ?? '',
   }
 }

@@ -18,14 +18,14 @@
 
 import type { HostCreation, HostOffering } from '@hypercomb/core'
 import { pictureOrigins, tilePicture } from './tile-picture'
-import { communityKey, doorsOpen, parseView, stepView, viewLabel, type ShowcaseCommunity, type ShowcaseItem, type ShowcaseView, type ZoneOwners } from './showcase-record'
+import { communityKey, doorsOpen, parseView, viewLabel, type ShowcaseCommunity, type ShowcaseItem, type ShowcaseView, type ZoneOwners } from './showcase-record'
 import { DEFAULT_HOME, homeOrigin, turnOffHref } from './turn-off-link'
 import type { OwnerBridge } from './owner-bridge'
 import { showcaseHref } from './showcase-link'
 import type { CommunityPick } from './community-tiles'
 import {
   LaneTouch, hostOf as laneHostOf, keepLaneOrientation, laneDrift, laneLayout, laneMaxShift, lanePosition, laneSnap, laneTileAt, onePerHost,
-  readLaneOrientation, type LaneLayout,
+  keepTriedViews, readLaneOrientation, readTriedViews, type LaneLayout,
 } from './showcase-lanes'
 import type { LinkIcon, Starter, WelcomeLink } from './welcome'
 
@@ -415,11 +415,16 @@ export const gestureStep = (dx: number, dy: number, ms: number): { readonly axis
   return far && down >= 1.4 * Math.abs(dx) ? { axis: 'y', by: dy < 0 ? 1 : -1 } : null
 }
 
-/** THE COMMUNITY IS NOT A DOMAIN (jwize 2026-11-04: "the community is not a domain just a target for promoting locally
- *  domain hosted creations"): while managing it is a row of its own, kept apart from the domains. Every tile belongs to a
- *  domain's row; a tap there brings it into the community, and a tap in the community sends it back to its domain — this
- *  one too. A name no domain can have (a domain has a dot), so it never collides with a row. */
-const COMMUNITY = 'community'
+/** THE FOUR LOOKS A SIDEWAYS SWIPE WALKS WHILE EDITING (jwize 2026-11-10: "the four different views on the mobile that you
+ *  should be able to activate by swiping left or right while in edit mode … iphone tile launcher a hexagon launcher a
+ *  button list launcher"). The square column scrolls on its own axis and is not one of them; a signed record may still
+ *  name it. */
+const SWIPE_VIEWS: readonly ShowcaseView[] = ['hex', 'launcher', 'iphone', 'list']
+const swipeView = (current: ShowcaseView, by: -1 | 1): ShowcaseView => {
+  const at = SWIPE_VIEWS.indexOf(current)
+  // From a look the swipe does not walk, on is the first and back is the last.
+  return at < 0 ? SWIPE_VIEWS[by > 0 ? 0 : SWIPE_VIEWS.length - 1]! : SWIPE_VIEWS[(at + by + SWIPE_VIEWS.length) % SWIPE_VIEWS.length]!
+}
 
 /** How many icons the iPhone dock holds, once the page has more than that. */
 const IPHONE_DOCK = 4
@@ -548,6 +553,8 @@ export type ShowcaseOptions = {
   readonly tagline: string
   /** The zone's room (a sealed swarm link), drawn first — or ''. */
   readonly swarm?: string
+  /** The published hive shown as this host's root, in place of the search and tiles (an https address) — or ''. */
+  readonly presentation?: string
   /** Domains this hive added, shown after the ledger's. */
   readonly sources: readonly string[]
   readonly ledger: Promise<readonly LedgerSite[]>
@@ -566,6 +573,10 @@ export type ShowcaseOptions = {
   /** The faux starting tile of a vanilla hive: drawn in this domain's row only
    *  while the row holds nothing and no doors were staged; a click opens its steps. */
   readonly starter?: Starter | null
+  /** THE HELP TILES ARE OPTIONAL (jwize 2026-11-10: "the help tiles should be optional and off by default for non
+   *  hypercomb.com hives"): the platform's own doors a host did not stage itself. Off until this browser turns one on
+   *  while editing; the starting tile is one of them. */
+  readonly help?: readonly WelcomeLink[]
   /** Follow a domain: checked, then kept in this browser's community. */
   /** Stop following a domain: forget it where the browser kept it. True when it is gone. */
   readonly unfollow?: (zone: string) => Promise<boolean>
@@ -619,6 +630,13 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   words.append(title, tagline)
   const stats = el('p', 'hero-stats')
   brand.append(mark, words, stats)
+  // JUST A SEARCH AND THE TILES (jwize 2026-11-10: "just a search and the tiles no informational header by default"):
+  // the mark, the name, its sentence and the counts show only while editing, where they say which domain is being
+  // edited. A room, when the owner hosts one, stays: it is a door, not information.
+  const paintBrand = (on: boolean): void => {
+    for (const part of [mark, words, stats]) part.hidden = !on
+    brand.hidden = !on && !options.swarm
+  }
   // THE ROOM FIRST: a front page whose owner hosts a swarm says so before
   // anything else (room host <domain>). The link carries no words a reader
   // could copy down — the room and its secret travel sealed.
@@ -638,8 +656,8 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   const search = el('input')
   search.type = 'search'
   search.id = 'showcase-search'
-  search.placeholder = 'Search hives, creations and domains'
-  search.setAttribute('aria-label', 'Search hives, creations and domains')
+  search.placeholder = 'Search'
+  search.setAttribute('aria-label', 'Search')
   search.autocomplete = 'off'
   search.spellcheck = false
   // THE ONE INPUT (jwize 2026-11-04: "get rid of the bottom input and follow button … you just have a header search";
@@ -647,18 +665,23 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   // the right instead of a button to not interfere with the interface … change from follow to add domain" · "so the bottom
   // input is no longer needed"): the search filters, and while its line is a domain nobody follows yet a quiet link at the
   // right end of the field offers to add it. There is no follow box at the foot, on any screen.
-  const searchAdd = el('button', 'search-add')
+  // ONE INPUT, CALLED SEARCH (jwize 2026-11-10: "no follow a domain anymore we just add a button at the bottom when the
+  // string matches a domain name. That way it is a search until it matches those criteria"): the button is at the foot
+  // of the page and names the domain it adds.
+  const searchAdd = el('button', 'foot-bar search-add')
   searchAdd.type = 'button'
   searchAdd.textContent = 'Add domain'
   searchAdd.hidden = true
   search.enterKeyHint = 'go'
   // The field and its link are one box, so the link sits inside the field's right end and takes no room beside it.
   const searchField = el('span', 'search-field')
-  searchField.append(search, searchAdd)
+  searchField.append(search)
   searchBox.append(iconOf('search'), searchField)
   // Manage opens the management screen: the domains you follow as rows, their tiles grayed until you turn them on,
   // and the follow box. Pressing it again returns to the showcase. Escape in the search clears what was typed.
   let managing = false
+  /** This domain's ledger names no owner: nothing is signed here to read. */
+  let ownerless = false
   const tools = el('span', 'page-tools')
   search.addEventListener('keydown', event => {
     if (event.key !== 'Escape' || !search.value) return
@@ -679,6 +702,10 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     // FILES ARE A MANAGE TOOL (jwize 2026-11-05: "the files are not shown by default … we can have it in manage mode only").
     filesButton.hidden = !managing || !files
     if (!managing) setFilesOpen(false)
+    // What the last tap said belongs to the editing; the page it comes back to is only the tiles.
+    if (!managing) ownerNote.hidden = true
+    if (!managing) closeConfirm()
+    paintBrand(managing)
     if (managing && !openRow) openRow = options.self
     options.onManage?.(managing)
     paint()
@@ -721,7 +748,38 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   }
   tools.append(manageButton)
   searchBox.append(tools)
-  hero.append(brand, searchBox)
+  // The Add button is fixed to the foot of the screen wherever it sits in the page; it is kept beside the search it belongs to.
+  hero.append(brand, searchBox, searchAdd)
+  paintBrand(false)
+  // THE PRESENTATION IS THE ROOT, ON EVERY SCREEN (jwize 2026-11-11: "the desktop also has the presentation as the root" · "for hypercomb.com on the mobile we are going to put
+  // the protocol presentation. On the front page hypercomb an open protocol for humanity" · "we need to publish
+  // hypercomb.com to load this hive signature"). A host that stages a presentation shows it in place: its name
+  // and its line across the top, and under them the published hive, framed from its own address. That address always
+  // answers with the head its publisher last signed, so a publish there is on this page at once, nothing is copied to
+  // this host, and what the hive keeps stays with its own domain. There is no search button on it (jwize 2026-11-11: "no
+  // search button"): the root is the presentation alone, and hypercomb.io is the default host for the rest.
+  if (options.presentation) {
+    const front = el('section', 'front')
+    front.setAttribute('aria-label', options.title)
+    const bar = el('div', 'front-bar')
+    const frontMark = el('span', 'front-mark')
+    // its own ids: the header's mark is hidden on this page, and a gradient inside a hidden mark paints nothing
+    frontMark.innerHTML = GOLD_MARK.split('sc-').join('front-')
+    const frontWords = el('div', 'front-words')
+    const frontName = el('h1')
+    frontName.textContent = options.title
+    const frontLine = el('p')
+    frontLine.textContent = options.tagline
+    frontWords.append(frontName, frontLine)
+    bar.append(frontMark, frontWords)
+    const frame = el('iframe', 'front-frame')
+    frame.title = options.tagline ? `${options.title}: ${options.tagline}` : options.title
+    frame.setAttribute('allow', 'fullscreen; autoplay')
+    frame.setAttribute('referrerpolicy', 'no-referrer')
+    frame.src = options.presentation
+    front.append(bar, frame)
+    hero.append(front)
+  }
 
   const bandsHost = el('div', 'bands')
 
@@ -928,9 +986,9 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
    *  says in order to do this to type keys allow hypercomb.com?" — a click hands the switch to the hive, which asks once,
    *  signs and comes back). Never on a phone, where the hive's address serves this same front door. */
   const keyHome = (): unknown => options.home ?? (onPhone() ? undefined : DEFAULT_HOME)
-  // ── YOUR COMMUNITY (jwize 2026-11-04): a target, not a domain. While managing, a tap on a tile in any domain's row —
-  //    this one's too — brings it into the community row; a tap on it there sends it back to its domain. Going live in
-  //    the showcase is its own act (a hold, or the sheet), and only for what is optimized and minimized. ──
+  // ── WHAT THIS BROWSER TURNED ON (jwize 2026-11-04: the community is "a target, not a domain"; 2026-11-10: tiles toggle
+  //    where they sit). The picks are kept in this browser; a picked tile is lit in its domain's row while editing and
+  //    shows on the page otherwise. Publishing is its own, signed act, and only for what is optimized and minimized. ──
   let picks: CommunityPick[] = []
   const picked = (entry: Aggregate): boolean => picks.some(pick => pick.key === entry.key)
   let picking = false
@@ -939,8 +997,6 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     if (!options.keepCommunity) { say('This page cannot keep a community.'); return }
     const was = picks
     const on = !picked(entry)
-    // Where it goes back to: the domain it was brought in from.
-    const from = picks.find(pick => pick.key === entry.key)?.zone ?? row
     // ONE PER SUBDOMAIN, ON ANY DOMAIN (jwize 2026-11-05; a bare apex counts as one): a tile brought in from a host
     // that already has one in the community takes that one's place.
     const known = new Map(bands().flatMap(band => band.open).map(found => [found.key, found] as const))
@@ -953,8 +1009,8 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     paint()
     const kept = await options.keepCommunity(picks).catch(() => false)
     picking = false
-    if (!kept) { picks = was; paint(); say(`Could not ${on ? 'bring' : 'send'} ${entry.title} ${on ? 'into your community' : `back to ${from}`}.`); return }
-    say(on ? `${entry.title} is in your community. Tap it there to send it back to ${row}.` : `${entry.title} went back to ${from}.`)
+    if (!kept) { picks = was; paint(); say(`Could not turn ${entry.title} ${on ? 'on' : 'off'}.`); return }
+    say(`${entry.title} is ${on ? 'on' : 'off'}.`)
   }
   /** Whether a tile's revision is optimized and minimized — asked of the domain that serves it. True where the page
    *  cannot ask (nothing was wired to), so it gates nothing it cannot know. */
@@ -1005,35 +1061,72 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   //    needs to be just confirm"). Managing, a tap on a domain's tile asks once; yes brings it into your community and
   //    puts it live in the showcase. A tap on a community tile asks once; yes sends it back and takes it off. The going
   //    live is the same signed act as ever (tapTile): gated on optimized and minimized, signed by your hive's key. ──
+  // ── IN PLACE (jwize 2026-11-10: "you add domains. You go to them and toggle things on or off. Then you are back in
+  //    your mobile app view and you are just using the creations" · "they should have to be published so that the
+  //    visitor can see the community but if you have your private key you can publish unpublish stuff"). A tile is ON
+  //    when it is published here or this browser turned it on; it lights or grays where it sits, in its own domain's
+  //    row. With the key a tap asks once and the yes is the signed act; without one a tap is this browser's own
+  //    switch, at once, and what it turns on shows in the page it comes back to. ──
+  const isOn = (entry: Aggregate): boolean => showcased(entry) || picked(entry)
+  /** Can a tap here end in a signature: a hive or an invited key answers, or (off a phone) the hive can be handed it. */
+  const canSign = (): boolean => (!!options.owner && !!ownerKey) || !onPhone()
   const toggleTile = async (entry: Aggregate, row: string, into: boolean): Promise<void> => {
     if (into) {
       if (!picked(entry)) await pickTile(entry, row)
-      if (!showcased(entry)) await tapTile(entry, row)
+      if (!showcased(entry) && canSign()) await tapTile(entry, row)
       return
     }
-    const from = picks.find(pick => pick.key === entry.key)?.zone ?? options.self
+    const from = picks.find(pick => pick.key === entry.key)?.zone ?? row
     if (picked(entry)) await pickTile(entry, row)
-    if (showcased(entry)) await tapTile(entry, from)
+    if (!showcased(entry)) return
+    if (canSign()) await tapTile(entry, from)
+    else say(`${entry.title} is published on ${options.self}. Only its key can take it off.`)
   }
+  // ONE TAP, THEN ONE RED BUTTON ACROSS THE FOOT (jwize 2026-11-10: "it should be single click to activate with a red
+  // confirm button across the bottom of the phone"). No sheet opens over the tiles: the tap names the tile, the bar says
+  // what pressing it will sign, and a tap anywhere else, or Escape, puts it away with nothing done.
+  const confirmBar = el('button', 'foot-bar confirm-bar')
+  confirmBar.type = 'button'
+  confirmBar.hidden = true
+  let confirming: (() => void) | null = null
+  let confirmFrom: HTMLElement | null = null
+  const closeConfirm = (): void => {
+    if (confirmBar.hidden) return
+    confirming = null
+    confirmBar.hidden = true
+    confirmFrom?.classList.remove('asking')
+    confirmFrom = null
+    document.removeEventListener('keydown', onConfirmKey, true)
+    document.removeEventListener('pointerdown', onConfirmAway, true)
+  }
+  const onConfirmKey = (event: KeyboardEvent): void => {
+    if (event.key !== 'Escape') return
+    event.preventDefault()
+    closeConfirm()
+  }
+  const onConfirmAway = (event: Event): void => {
+    const path = event.composedPath()
+    // The bar itself is the answer; another tile asks its own question.
+    if (path.includes(confirmBar) || path.some(node => node instanceof Element && node.classList.contains('hex'))) return
+    closeConfirm()
+  }
+  confirmBar.addEventListener('click', () => {
+    const act = confirming
+    closeConfirm()
+    act?.()
+  })
   const openConfirm = (entry: Aggregate, from: HTMLElement, row: string): void => {
-    opener = from
-    const into = row !== COMMUNITY
-    const heading = el('h3', 'versions-title')
-    heading.textContent = entry.title
-    const yes = el('button', 'version-act')
-    yes.type = 'button'
-    yes.textContent = into ? 'Put it in my showcase' : 'Take it out of my showcase'
-    yes.addEventListener('click', () => { closeVersions(); void toggleTile(entry, row, into) })
-    const no = el('button', 'version-cancel')
-    no.type = 'button'
-    no.textContent = 'Cancel'
-    no.addEventListener('click', () => closeVersions())
-    sheet.replaceChildren(heading, yes, no)
-    sheet.tabIndex = -1
-    backdrop.hidden = false
-    document.addEventListener('keydown', onKey, true)
-    yes.focus()
+    closeConfirm()
+    const into = !isOn(entry)
+    confirmBar.textContent = into ? `Put ${entry.title} in my showcase` : `Take ${entry.title} out of my showcase`
+    confirming = () => { void toggleTile(entry, row, into) }
+    confirmFrom = from
+    from.classList.add('asking')
+    confirmBar.hidden = false
+    document.addEventListener('keydown', onConfirmKey, true)
+    document.addEventListener('pointerdown', onConfirmAway, true)
   }
+  bandsHost.append(confirmBar)
   /** Where a tap goes: this row's own place for the name, else its first. */
   const placeFor = (entry: Aggregate, row: string): Place => {
     for (const version of entry.versions) {
@@ -1101,7 +1194,8 @@ ${entry.key}`
         if (held) { held = false; event.preventDefault(); event.stopPropagation(); return }
         if (row === options.self && !managing) return
         event.preventDefault()
-        openConfirm(made.entry, tile, row)
+        if (canSign()) openConfirm(made.entry, tile, row)
+        else void toggleTile(made.entry, row, !isOn(made.entry))
       })
       tile.addEventListener('contextmenu', event => { event.preventDefault(); stop(); heldOpen = true; openVersions(made.entry, tile, row) })
       tile.addEventListener('keydown', event => {
@@ -1114,7 +1208,10 @@ ${entry.key}`
     view.entry = entry
     const live = showcased(entry)
     // Gray: not in the showcase yet, in any domain's row; the community row is lit — what is in it is in.
-    view.tile.classList.toggle('off', row === COMMUNITY || (row === options.self && !managing) ? false : !live)
+    const lit = live || picked(entry)
+    view.tile.classList.toggle('off', row === options.self && !managing ? false : !lit)
+    if (managing) view.tile.setAttribute('aria-pressed', String(lit))
+    else view.tile.removeAttribute('aria-pressed')
     if (view.head !== lead.head) {
       // A new lead version: its own cover and picture, and the old head forgets this box.
       wearers.get(view.head)?.delete(view.art)
@@ -1129,10 +1226,8 @@ ${entry.key}`
     // Somewhere else on the web opens in its own tab; this origin is this site still.
     if (view.tile.origin !== location.origin) { view.tile.target = '_blank'; view.tile.rel = 'noopener' }
     else { view.tile.removeAttribute('target'); view.tile.removeAttribute('rel') }
-    view.tile.title = row === COMMUNITY
-      ? `${entry.title} · ${place.address} — tap to send it back to ${picks.find(pick => pick.key === entry.key)?.zone ?? 'its domain'}, hold for more`
-      : row !== options.self || managing
-        ? `${entry.title} · ${place.address} — tap to bring it into your community, hold for ${row === options.self ? 'more' : 'its domains'}`
+    view.tile.title = row !== options.self || managing
+        ? `${entry.title} · ${place.address} — tap to turn it ${lit ? 'off' : 'on'}, hold for ${row === options.self ? 'more' : 'its domains'}`
         : `${entry.title} · ${place.address} — tap to visit, hold for more`
     view.name.textContent = entry.title
     view.address.textContent = place.address
@@ -1414,11 +1509,11 @@ ${entry.key}`
     toggle.type = 'button'
     toggle.setAttribute('aria-controls', id)
     const name = el('span', 'dex-name')
-    name.textContent = zone === COMMUNITY ? 'Community' : zone
+    name.textContent = zone
     const meta = el('span', 'dex-meta')
     const chevron = el('span', 'dex-chevron')
     chevron.append(iconOf('chevron'))
-    toggle.append(iconOf(zone === COMMUNITY ? 'people' : 'globe'), name, meta, chevron)
+    toggle.append(iconOf('globe'), name, meta, chevron)
     toggle.addEventListener('click', () => {
       dropMissing(zone)
       openRow = openRow === zone ? '' : zone
@@ -1433,7 +1528,7 @@ ${entry.key}`
     section.append(toggle, body)
     // A DOMAIN LEAVES ONLY WHEN IT IS REMOVED (jwize 2026-10-26: "they need to be alive when added and only leave when
     // removed"): a followed domain has a remove control; nothing else — a refresh, a click elsewhere — takes it away.
-    if (!own && zone !== COMMUNITY) {
+    if (!own) {
       const remove = el('button', 'dex-remove')
       remove.type = 'button'
       remove.title = `Remove ${zone}`
@@ -1499,9 +1594,74 @@ ${entry.key}`
   label.id = 'community-label'
   const templateNote = el('span', 'pager-template')
   templateNote.hidden = true
+  // WITH THE KEY, THE LOOK CAN BE EVERYONE'S (jwize 2026-11-10: "if you have your private key you can publish"): a quiet
+  // link beside the look's name, there only while the look tried here is not the one a visitor is shown.
+  const publishLook = el('button', 'pager-publish')
+  publishLook.type = 'button'
+  publishLook.textContent = 'Show visitors this look'
+  publishLook.hidden = true
+  let lookSigning = false
+  publishLook.addEventListener('click', () => {
+    const bridge = options.owner
+    if (lookSigning || !bridge?.view || !ownerKey) return
+    const view = showing()
+    lookSigning = true
+    say(`Publishing the ${viewLabel(view)} look…`)
+    void bridge.view({ zone: options.self, view }).catch(() => ({ ok: false as const, reason: 'failed' })).then(result => {
+      lookSigning = false
+      say(result.ok ? `Visitors now see the ${viewLabel(view)} look.` : `Not changed: ${result.reason}.`)
+      if (result.ok && result.changed) takeLedger(options.ledger)
+      else paint()
+    })
+  })
+  // ADD A PHONE (jwize 2026-11-10: "we need a very easy way to allow our phone to promote"): with the hive beside this
+  // page, one press asks it for an invite and shows it as a code. The phone's camera opens it, the phone asks once, and
+  // from then on a tap there publishes. The key never moves; the invite works once and runs out.
+  const addPhone = el('button', 'pager-publish pager-phone')
+  addPhone.type = 'button'
+  addPhone.textContent = 'Add a phone'
+  addPhone.hidden = true
+  let inviting = false
+  addPhone.addEventListener('click', () => {
+    const bridge = options.owner
+    if (inviting || !bridge?.invite || !ownerKey) return
+    inviting = true
+    say('Making an invite…')
+    void bridge.invite({ zone: options.self }).catch(() => ({ ok: false as const, reason: 'failed' })).then(result => {
+      inviting = false
+      if (!result.ok) { say(`No invite: ${result.reason}.`); return }
+      ownerNote.hidden = true
+      opener = addPhone
+      const heading = el('h3', 'versions-title')
+      heading.textContent = 'Add a phone'
+      const words = el('p', 'invite-words')
+      const minutes = Math.max(1, Math.round((result.until - Date.now() / 1000) / 60))
+      words.textContent = `Point the phone's camera at this and tap Allow there. It works once, within ${minutes} minute${minutes === 1 ? '' : 's'}. The phone makes its own key; yours never leaves this device.`
+      const parts: HTMLElement[] = [heading]
+      if (result.code) {
+        const code = el('img', 'invite-code')
+        code.alt = 'The invite, as a code for a camera'
+        code.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(result.code)}`
+        parts.push(code)
+      }
+      const copy = el('button', 'version-visit invite-copy')
+      copy.type = 'button'
+      copy.textContent = 'Copy the link instead'
+      copy.addEventListener('click', () => {
+        void navigator.clipboard?.writeText(result.link).then(() => { copy.textContent = 'Link copied' }, () => { copy.textContent = 'Could not copy' })
+      })
+      parts.push(words, copy)
+      sheet.replaceChildren(...parts)
+      sheet.tabIndex = -1
+      backdrop.hidden = false
+      document.addEventListener('keydown', onKey, true)
+      sheet.focus()
+    })
+  })
   const hint = el('p', 'pager-hint')
   hint.hidden = true
-  hint.textContent = 'Sideways changes the template. Up or down changes the set.'
+  const HINT = 'Swipe sideways for another look. Tap a tile to turn it on or off.'
+  hint.textContent = HINT
   /** The template tried on this visit, by community key ('' is All). It wins over the signed one until the page is left. */
   const tried = new Map<string, ShowcaseView>()
   const namedCommunities = (): ShowcaseCommunity[] =>
@@ -1530,9 +1690,16 @@ ${entry.key}`
     return tried.get(page) ?? community?.view ?? base
   }
   const cycleTemplate = (by: -1 | 1): void => {
-    tried.set(page, stepView(showing(), by))
+    tried.set(page, swipeView(showing(), by))
+    // The look chosen is kept in this browser, so the page comes back as it was left.
+    void keepTriedViews(Object.fromEntries(tried))
     paint()
   }
+  void readTriedViews().then(kept => {
+    let changed = false
+    for (const [key, view] of Object.entries(kept)) if (!tried.has(key)) { tried.set(key, view); changed = true }
+    if (changed) paint()
+  }).catch(() => undefined)
   /** Up or down while managing: the named sets, or the domains you follow when none are named. */
   const cycleSet = (by: -1 | 1): void => {
     if (namedCommunities().length > 0) { turn(by); return }
@@ -1645,8 +1812,48 @@ ${entry.key}`
     return terms.every(term => words.includes(term))
   }
 
-  // ── THE FAUX STARTING TILE of a vanilla hive: the same hexagon, drawn only while the row is empty.
-  //    It links nowhere: a click opens the steps in the sheet a held tile uses ──
+  // ── THE HELP TILES ARE OPTIONAL, AND OFF UNTIL TURNED ON (jwize 2026-11-10). While editing they sit gray in this
+  //    domain's row and a tap turns one on or off; what is on is kept in this browser beside its other picks, under a
+  //    key no tile has. Outside editing only the ones turned on are drawn, and they are links again. ──
+  const HELP_START = 'help:start'
+  const helpKey = (link: WelcomeLink): string => `help:${link.href}`
+  const helpOn = (key: string): boolean => picks.some(pick => pick.key === key)
+  const toggleHelp = async (key: string, title: string): Promise<void> => {
+    if (picking) return
+    if (!options.keepCommunity) { say('This page cannot keep that choice.'); return }
+    const was = picks
+    const on = !helpOn(key)
+    picks = on ? [...picks, { zone: 'help', key }] : picks.filter(pick => pick.key !== key)
+    picking = true
+    paint()
+    const kept = await options.keepCommunity(picks).catch(() => false)
+    picking = false
+    if (!kept) { picks = was; paint(); say(`Could not turn ${title} ${on ? 'on' : 'off'}.`); return }
+    say(`${title} is ${on ? 'on' : 'off'}.`)
+  }
+  /** A help tile as it is now: gray and a switch while editing, a plain link otherwise. */
+  const asHelp = (tile: HTMLAnchorElement, key: string): HTMLAnchorElement => {
+    const on = helpOn(key)
+    tile.classList.toggle('off', managing && !on)
+    if (managing) tile.setAttribute('aria-pressed', String(on))
+    else tile.removeAttribute('aria-pressed')
+    return tile
+  }
+  const helpTile = (link: WelcomeLink): HTMLAnchorElement => {
+    const tile = linkTile(link)
+    if (!tile.dataset.help) {
+      tile.dataset.help = helpKey(link)
+      tile.addEventListener('click', event => {
+        if (!managing) return
+        event.preventDefault()
+        void toggleHelp(helpKey(link), link.label)
+      })
+    }
+    return asHelp(tile, helpKey(link))
+  }
+
+  // ── THE STARTING TILE of a vanilla hive: the same hexagon, one of the help tiles. It links nowhere: outside editing
+  //    a click opens the steps in the sheet a held tile uses ──
   let starterTile: HTMLAnchorElement | null = null
   const openStarter = (guide: Starter, from: HTMLElement): void => {
     opener = from
@@ -1688,7 +1895,11 @@ ${entry.key}`
     hint.textContent = guide.note
     label.append(name, hint)
     tile.append(art, label)
-    tile.addEventListener('click', event => { event.preventDefault(); openStarter(guide, tile) })
+    tile.addEventListener('click', event => {
+      event.preventDefault()
+      if (managing) void toggleHelp(HELP_START, guide.label)
+      else openStarter(guide, tile)
+    })
     starterTile = tile
     return tile
   }
@@ -1800,12 +2011,17 @@ ${entry.key}`
     const names = domains ? zoneSets() : ['All', ...communities.map(row => row.name)]
     const keys = domains ? names : ['', ...communities.map(row => communityKey(row.name))]
     const at = Math.max(0, keys.indexOf(domains ? openRow : page))
-    label.textContent = domains && openRow === COMMUNITY ? 'Community' : names[at] ?? 'All'
+    label.textContent = names[at] ?? 'All'
     label.setAttribute('aria-label', `${label.textContent}, group ${at + 1} of ${Math.max(1, names.length)}. Press for the next.`)
     templateNote.hidden = !managing
     templateNote.textContent = managing ? viewLabel(shape) : ''
     hint.hidden = !managing
-    if (label.parentElement !== pager) pager.replaceChildren(label, templateNote, hint)
+    publishLook.hidden = !managing || !ownerKey || !options.owner?.view || lookSigning || !!page || shape === (signed?.showcase?.view ?? 'hex')
+    addPhone.hidden = !managing || !ownerKey || !options.owner?.invite || onPhone()
+    // A phone with no key is told the one thing that gives it one.
+    hint.textContent = managing && onPhone() && !ownerKey && !!options.owner && !ownerless
+      ? `${HINT} To publish from this phone, open ${options.self} on your computer, turn on Manage and press Add a phone.` : HINT
+    if (label.parentElement !== pager) pager.replaceChildren(label, templateNote, publishLook, addPhone, hint)
     pager.hidden = !managing && communities.length === 0
     if (pager.hidden) hosted.removeAttribute('aria-labelledby')
     else hosted.setAttribute('aria-labelledby', label.id)
@@ -1824,11 +2040,13 @@ ${entry.key}`
     if (page && !communities.some(community => communityKey(community.name) === page)) page = ''
     const community = communities.find(row => communityKey(row.name) === page)
     // A community only ever filters: its members must already be in the showcase.
-    const everything = unread ? [] : all.flatMap(band => band.tiles).filter(showcased)
-      .filter(entry => !community || covers(entry, community.items, community.domains)).sort(byTitle)
-    /** Your community's tiles, found wherever a row offers them now; a pick no row offers waits unseen. */
+    const published = unread ? [] : all.flatMap(band => band.tiles).filter(showcased)
+      .filter(entry => !community || covers(entry, community.items, community.domains))
+    /** What this browser turned on, found wherever a row offers it now; a pick no row offers waits unseen. */
     const known = new Map(all.flatMap(band => band.open).map(entry => [entry.key, entry] as const))
-    const communityTiles = picks.map(pick => known.get(pick.key)).filter((entry): entry is Aggregate => !!entry)
+    const turnedOn = community || unread ? [] : picks.map(pick => known.get(pick.key)).filter((entry): entry is Aggregate => !!entry)
+    // THE PAGE YOU COME BACK TO: what is published here, and what this browser turned on in any domain it added.
+    const everything = [...new Map([...published, ...turnedOn].map(entry => [entry.key, entry] as const)).values()].sort(byTitle)
     // The platform's doors are the first page's; a community is about what is shared.
     const links = community ? [] : options.links ?? []
     // HOW IT IS DRAWN: a try from this visit, else a community's own view, else All's
@@ -1843,26 +2061,24 @@ ${entry.key}`
     // of domains with the open one showing the available; they are below the open item, which is always at the top"). While
     // managing, every domain is a row; the open row shows its tiles and is first, the rest follow below it as headers.
     const everyZone = zoneSets()
-    // The community is a row of its own while managing, apart from the domains: a target, never a domain. It sits after
-    // them, where the thumb is, and comes to the top when it is the row that is open.
-    const rowZones = managing ? [...everyZone, COMMUNITY] : everyZone
+    const rowZones = everyZone
     const order = managing && openRow && rowZones.includes(openRow) ? [openRow, ...rowZones.filter(zone => zone !== openRow)] : rowZones
     // What this domain holds, managing: what is in its showcase and what else it publishes — lit when live, gray when not.
-    const ownHeld = [...new Map([...everything, ...rowItems(all, options.self)].map(entry => [entry.key, entry] as const)).values()].sort(byTitle)
+    const ownHeld = [...new Map([...published, ...rowItems(all, options.self)].map(entry => [entry.key, entry] as const)).values()].sort(byTitle)
     for (const zone of order) {
       const view = rowView(zone)
       const own = zone === options.self
-      const isCommunity = zone === COMMUNITY
-      // EVERY TILE BELONGS TO A DOMAIN'S ROW until it is brought into the community; it stays there until a tap sends it
-      // back — to this domain too. The showcase itself (not managing) is what is live, whatever the community holds.
-      const items = isCommunity ? communityTiles.slice().sort(byTitle)
-        : (own ? (managing ? ownHeld : everything) : rowItems(all, zone).slice().sort(byTitle)).filter(entry => !managing || !picked(entry))
+      // EVERY TILE STAYS IN ITS DOMAIN'S ROW, lit when it is on and gray when it is not. Editing, this domain's row is
+      // what it holds; otherwise it is the page itself — everything that is on.
+      const items = own ? (managing ? ownHeld : everything) : rowItems(all, zone).slice().sort(byTitle)
       const shown = items.filter(entry => aggregateMatches(entry, terms))
       // The doors wait for the ledger: the row draws once, not the doors and then the hives.
       const doors = own && ledgerRead && !unread ? links.filter(link => linkMatches(link, terms)) : []
-      // The faux starting tile stands in only for a row with nothing in it: no tile, no staged door, no search.
-      const starting = own && ledgerRead && !unread && !!options.starter && !community && links.length === 0 && items.length === 0 && !terms.length
-      const total = shown.length + doors.length
+      // The help tiles: every one while editing, so it can be turned on; otherwise only those this browser turned on.
+      const helps = own && ledgerRead && !unread && !community
+        ? (options.help ?? []).filter(link => (managing || helpOn(helpKey(link))) && linkMatches(link, terms)) : []
+      const starting = own && ledgerRead && !unread && !!options.starter && !community && !terms.length && (managing || helpOn(HELP_START))
+      const total = shown.length + doors.length + helps.length
       visible += !managing && !own ? 0 : terms.length ? total : 1
       // While a search runs every row holding a match is open; otherwise one is.
       const open = !managing ? own : openRow === zone
@@ -1877,12 +2093,12 @@ ${entry.key}`
         // In another domain's row, a tile already on this domain's page says so.
         tile.classList.toggle('in-showcase', !own && showcased(entry))
         return tile
-      }), ...doors.map(link => linkTile(link)), ...(starting && options.starter ? [starterOf(options.starter)] : [])] : [], own ? shape : base)
+      }), ...doors.map(link => linkTile(link)), ...helps.map(helpTile),
+      ...(starting && options.starter ? [asHelp(starterOf(options.starter), HELP_START)] : [])] : [], own ? shape : base)
       view.empty.hidden = !open || (own ? shown.length > 0 && !unread : total > 0)
       view.empty.textContent = temp ? (temp.state === 'checking' ? `Checking ${zone}…` : `${zone} was not found — ${temp.reason}`)
-        : isCommunity ? 'Nothing here yet. Tap a tile in a domain to bring it into your community.'
         : own && (!ledgerRead || unread) ? 'Reading what is published here…'
-        : own && signed && (!signed.reached || signed.unreadable) ? 'Could not read what is published here.'
+        : own && signed && !ownerless && (!signed.reached || signed.unreadable) ? 'Could not read what is published here.'
           : own ? 'Nothing is published here yet.' : `Nothing is published on ${zone} yet.`
       rows.push(view.section)
     }
@@ -1902,8 +2118,7 @@ ${entry.key}`
     const candidate = followCandidate(search.value)
     offered = options.follow && candidate && !held.includes(candidate) && !within(candidate, options.self) ? candidate : ''
     searchAdd.hidden = !offered
-    searchAdd.title = offered ? `Add ${offered}` : ''
-    searchBox.classList.toggle('offers', !!offered)
+    if (offered) searchAdd.textContent = `Add ${offered}`
     const hives = everything.filter(entry => entry.kind === 'hive')
     const creations = everything.length - hives.length
     stats.replaceChildren()
@@ -1996,6 +2211,8 @@ ${entry.key}`
       // The owners of this domain are the keys its own root names. Until their
       // record is read the list waits rather than show what it may not.
       const owners = found.find(site => site.hosts[0] === options.self)?.owners ?? []
+      // A domain whose ledger names no owner has nothing signed to read: that is nothing published, not a failed read.
+      ownerless = owners.length === 0
       const owned = options.readOwners?.(options.self, owners)
       if (owned) {
         void owned.catch((): ZoneOwners | null => null).then(found => {
@@ -2064,6 +2281,17 @@ export const SHOWCASE_STYLE = `
 /* the header's two rows are the page's own: the search sticks flush to the top of the scrolled
    page where the brand was, and the brand comes back when the page is scrolled back to it */
 .hero { display: contents; }
+/* the root of a host that stages a presentation: its name and line, and the published hive in place */
+.front { position: fixed; inset: 0; height: 100vh; height: 100dvh; z-index: 45; display: flex; flex-direction: column; background: var(--md-surface); }
+.front[hidden] { display: none; }
+.front-bar { flex: none; display: flex; align-items: center; gap: .65rem; padding: calc(.55rem + env(safe-area-inset-top, 0px)) .8rem .55rem;
+  border-bottom: 1px solid var(--md-outline); }
+.front-mark { flex: none; display: block; width: 1.6rem; height: 1.6rem; }
+.front-mark svg { display: block; width: 100%; height: 100%; }
+.front-words { flex: 1 1 auto; min-width: 0; }
+.front-words h1 { margin: 0; color: var(--md-on-surface-strong); font-size: 1.05rem; line-height: 1.2; letter-spacing: 0; }
+.front-words p { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--md-on-surface-var); font-size: .82rem; line-height: 1.3; }
+.front-frame { flex: 1 1 auto; min-height: 0; width: 100%; border: 0; background: var(--md-surface-c-lowest); }
 .hero-brand { display: flex; align-items: center; gap: .75rem; min-width: 0; margin: 0 0 .15rem; }
 .hero-mark { flex: none; display: grid; width: 2.1rem; height: 2.1rem; }
 .hero-mark svg { width: 100%; height: 100%; }
@@ -2087,14 +2315,26 @@ export const SHOWCASE_STYLE = `
 }
 /* ADD DOMAIN: a quiet link inside the field's right end, shown only while the line is a domain nobody follows yet */
 .search-field { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; }
-.search.offers input { padding-right: 7.4rem; }
-.search-add { position: absolute; right: .4rem; top: 50%; transform: translateY(-50%); margin: 0; padding: .35rem .55rem;
-  border: 0; border-radius: var(--hc-radius-control, 2px); background: none; color: var(--md-primary); cursor: pointer;
-  font: 600 .92rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); white-space: nowrap; }
-.search-add[hidden] { display: none; }
-.search-add:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 3px; }
-.search-add:disabled { opacity: .6; cursor: default; }
-.search-add:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 1px; }
+.hero-brand[hidden], .hero-brand > [hidden] { display: none; }
+.invite-code { display: block; width: min(16rem, 70vw); height: auto; margin: 0 auto .8rem; border-radius: 4px; background: #fff; }
+.invite-words { margin: 0 0 .8rem; color: var(--md-on-surface-var); font: 500 .92rem/1.45 var(--md-font-ui, Inter, system-ui, sans-serif); }
+.pager-phone { margin-left: .9rem; }
+.pager-publish:not([hidden]) ~ .pager-phone { margin-left: .9rem; }
+/* the foot of the page: the one act the last tap or the search offers, across the bottom of a phone */
+.foot-bar { position: fixed; left: 50%; bottom: 0; z-index: 6; transform: translateX(-50%); box-sizing: border-box; width: min(100vw, 34rem);
+  margin: 0; padding: 1.05rem 1.2rem calc(1.05rem + env(safe-area-inset-bottom, 0px)); border: 0; border-radius: 0; cursor: pointer;
+  font: 700 1rem/1.25 var(--md-font-ui, Inter, system-ui, sans-serif); text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  box-shadow: 0 -.4rem 1.6rem rgb(0 0 0 / .35); }
+.foot-bar[hidden] { display: none; }
+.foot-bar:hover:not(:disabled) { transform: translateX(-50%); filter: brightness(1.08); }
+.foot-bar:disabled { opacity: .6; cursor: default; }
+.foot-bar:focus-visible { outline: 2px solid var(--md-on-surface-strong); outline-offset: -4px; }
+.search-add { background: var(--md-surface-c-highest); color: var(--md-on-surface-strong); border-top: 1px solid var(--md-outline); }
+.search-add:hover:not(:disabled) { background: var(--md-surface-c-highest); }
+.confirm-bar { z-index: 7; background: #c62828; color: #fff; }
+.confirm-bar:hover:not(:disabled) { background: #c62828; }
+.hex.asking { outline: 2px solid #c62828; outline-offset: 3px; }
+@media (min-width: 720px) { .foot-bar { bottom: 1rem; border-radius: .7rem; } }
 /* the options sit beside the search, at the top: Files (while managing) and Manage */
 .page-tools { flex: none; display: flex; align-items: center; gap: .45rem; margin-left: .5rem; }
 .page-tools button[hidden] { display: none; }
@@ -2164,7 +2404,10 @@ export const SHOWCASE_STYLE = `
 .pager[hidden] { display: none; }
 .pager-template { color: var(--md-primary); font: 600 .78rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); }
 .pager-hint { flex-basis: 100%; margin: 0; color: var(--md-on-surface-faint); font-size: .75rem; line-height: 1.35; }
-.pager-template[hidden], .pager-hint[hidden] { display: none; }
+.pager-template[hidden], .pager-hint[hidden], .pager-publish[hidden] { display: none; }
+.pager-publish { margin-left: auto; padding: .2rem 0; border: 0; background: transparent; cursor: pointer; color: var(--md-primary);
+  font: 600 .78rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); text-decoration: underline; text-underline-offset: .2em; }
+.pager-publish:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
 .owner-note { margin: 0 0 .5rem; color: var(--md-on-surface-var); font-size: .85rem; }
 .owner-note[hidden] { display: none; }
 .hex.off { opacity: .35; filter: grayscale(1); }
@@ -2275,9 +2518,8 @@ export const SHOWCASE_STYLE = `
 .hosted-nothing { margin: .4rem 0 1rem; color: var(--md-on-surface-var); }
 /* the platform's doors are tiles: the same hexagon, a glyph for a picture, a link for a click */
 a.hex { color: inherit; text-decoration: none; cursor: pointer; }
-.link-art { display: block; background: radial-gradient(circle at 50% 32%, #4a300c, #140b03 78%); color: var(--gold-2); }
-.link-art > svg { position: relative; z-index: 1; display: block; width: 38%; height: 38%; margin: 20% 31% 0; opacity: .95;
-  filter: drop-shadow(0 .3rem .7rem rgb(248 183 58 / .35)); }
+.link-art { display: block; background: linear-gradient(160deg, #1d2733, #10161e); color: var(--gold-2); }
+.link-art > svg { position: relative; z-index: 1; display: block; width: 38%; height: 38%; margin: 20% 31% 0; opacity: .95; }
 .hex-link:hover .link-art, .hex-link:focus-visible .link-art { color: var(--gold-1); }
 /* the faux starting tile: the same hexagon, quieter than a real one until it is reached for */
 .hex-starter { opacity: .72; transition: background .25s, opacity .25s; }

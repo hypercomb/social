@@ -890,39 +890,82 @@ every page, and its 25 scenes are folded into the tiles they explain:
     brief stay ready. A route promotes again by leaving the list.
   - A scene on a waiting tile waits with it. The checks ask that every scene
     be placed once or waiting (`tour.waitingScenes()`).
-  - **Promoted (21 pages):** protocol; simple, primitive, signature, act;
-    organized, history; collaborative, workbench, domain, publishing;
-    intelligent, sentence, agent; accessible; localized; and on the road:
-    road, question, creations, yours, first-day.
+  - **Promoted (40 pages on 2026-11-10; see
+    [presentation-blueprint.md](presentation-blueprint.md), "Coverage"):**
+    protocol; simple, primitive (with word, signature and meta), act, proof;
+    organized, history, organization, hiding, shelf; collaborative,
+    workbench, domain, publishing, participant, sharing, discovery, hosting,
+    gate; intelligent, sentence, agent, interest; accessible; localized; and
+    on the road:
+    road, question, creations, market, computer (with machine and system),
+    gathering (with meeting and host), yours, first-day.
   - **Waiting:**
-    - simple: opening (and its seven moves); word, layer and meta under the
-      primitive.
-    - organized: heart (scene 14), build, layout, trait, organization.
-    - collaborative: trial, participant, sharing, discovery (scene 16, the
-      Hyperdex), hosting, tapestry.
+    - simple: opening (and its seven moves); layer under the primitive.
+    - organized: heart (scene 14), build, layout, trait.
+    - collaborative: trial, tapestry.
     - intelligent: automaton (scene 9, bees), debugging, merging.
     - accessible: reader, listening, phone, motion.
     - localized: translating, locale.
-    - road: coming, vision, computer (scenes 21 to 23).
+    - road: coming, vision (scenes 21 and 22).
 - **A tree on the left, the siblings underneath.** jwize, 2026-11-05, then
   2026-11-06 (#110): every node is a video, and a parent is a category you
   choose into, so no row mixes levels. Then 2026-11-08: *"a left hand sidebar
   menu for the tree"*, *"a fullscreen button"*, *"no step in any more, just the
   balanced centered sibling menu."* A page says where it goes in three places,
   and then plays:
-  - **the tree**, a sidebar on the left: every walkable tile, nested as the
-    tree nests. The tiles on the way here stay open and this one is lit; a tile
-    with no page yet is shown as coming. On a phone it is a drawer behind a
-    menu button.
+  - **the tile list**, a sidebar on the left (jwize, 2026-11-10: *"the ai chat
+    list and keeping them all in sync ... it is a flat drilldown tree"*). It is
+    the hive's one tile list, the one the AI chat shows
+    (`assistant/agent-tiles-rail.ts`): one level at a time, an arrow to go
+    inside a tile, back to climb, search for the level in hand. Inside the hive
+    and on the published site the page mounts that list itself
+    (`AgentTilesRailFactory`), and a press on a tile opens its page. A page
+    opened on its own has no hive, so it draws the same list from its own tree,
+    in the same markup and the same stylesheet: `assistant/tiles-rail.css.ts`
+    is that one sheet, and the page build reads it from there
+    (`blocks.spec.ts` fails a page whose copy differs). On a phone it is the
+    whole screen, behind the menu button, which stays in its corner to put it
+    away (jwize, 2026-11-11: *"on mobile when you bring up the tree menu it is
+    full screen and when you click the arrow icon on the row you go to the
+    presentation at the link, if you click the tree you nav in or arrow back
+    out as usual"*). There the row's two presses change places: the name walks
+    inside a tile that holds others, and the arrow opens that tile's page. A
+    tile that holds nothing has no arrow, so its name opens it. The sibling tabs
+    are part of that menu on a phone, under the tile list and a full row each
+    (jwize, 2026-11-11: *"put the list drilldown above and make each item a
+    full row below for the current layer videos"*), and never above the
+    picture (jwize, 2026-11-11: *"the tabs are only shown as part of the menu
+    on mobile"*). Wider than a
+    phone the list stands in a column of its own and the stage moves over, so
+    it never covers the content, and the name opens the page as before.
   - **crumbs**, the way up, in the bar over the video: `protocol / simple`,
     with the fullscreen button beside them. Fullscreen takes the video alone.
-  - **the siblings**, balanced and centred under the video: the tiles under the
+  - **the siblings**, balanced and centred above the video (under it until
+    2026-11-10, when jwize said they are "supposed to be above the video"; the
+    same day the tree became a drawer behind the menu button at every width,
+    "hidden but expandable", and Explore more became the one button at the
+    right of this row, "this way it is simple"): the tiles under the
     same parent, this one lit, the parent's name over them in brackets
-    (`(protocol)`). A tile that is the only one there shows nothing.
+    (`(protocol)`). The row stays when you press one of its buttons (jwize,
+    2026-11-09): on a top page it is that tile's own first level (standing on
+    `/protocol` shows simple, organized, collaborative ...), and every page a
+    button leads to shows the same row, with only the lit one moved. A tile that
+    is the only one there shows nothing.
+
+  - **Explore more** (jwize, 2026-11-10: *"all levels have their children as
+    presentations"*, and *"when you click any sibling menu you only change the
+    selected item and then when you want to learn more you can click in"*). The
+    siblings row only changes which video is selected. A tile that has pages
+    beneath it offers **Explore more about <topic>**, bottom right under the
+    video (and a quiet *Explore ›* in the top bar as the backup): it opens the
+    first child's presentation, whose bottom row is then that level's tiles.
+    The crumbs take you back up. The topic is a plain-language noun authored on
+    the page (`topic` in `content.cjs`), else the tile's name. A tile with
+    nothing beneath it has no button.
 
   There is no step-in row and no previous or next: the tree goes down, the
-  siblings go across, and the crumbs go up. Every link lands on a page, the tree
-  reaches every page, and the siblings share one parent (`blocks.spec.ts`).
+  siblings go across, and the crumbs go up. Every link lands on a page, the tile
+  list reaches every page, and the siblings share one parent (`blocks.spec.ts`).
 - **A part, or the website.** The website belongs to the root (jwize,
   2026-11-04). A tile's page opened on its own is just that part: one slide,
   no crumbs, no tree, no siblings, and a website icon. The icon opens the
@@ -932,9 +975,23 @@ every page, and its 25 scenes are folded into the tiles they explain:
   along the pages read, then out to the layer hosting the page first opened.
   In the hive, tiles walk as hexagons unless something is pinned: a tile's own
   pin (`opens <tile> as website`) opens its part; a pin on a top tile reaches
-  every tile under it and opens the whole website there. Scenes play like a
-  film: one sentence on screen at a time, timed to the voice, the figure's
-  part it is about lit.
+  every tile under it and opens the whole website there. A replant
+  (`plant.cjs --blocks`) leaves that pin as it finds it (jwize, 2026-11-11): it
+  used to clear it, and a publish straight after put hexagons on the published
+  site in place of the presentation. Scenes play like a
+  film, timed to the voice, the figure's part it is about lit.
+- **One sentence under the video, and a words panel for editing.** During the
+  presentation the narration is the one sentence being said, under the video,
+  timed to the voice. The whole text, a section a sentence, is an editing tool
+  (jwize, 2026-11-11: *"the audio should have the full text as an overlay"*;
+  *"sectioned out per sentence to be recorded one sentence at a time"*; *"the
+  narration panel is only for editing. During the presentation the normal
+  narration and text is used under the video"*). In the author's own hive a
+  button beside the voice lays that panel over the foot of the picture: the
+  sentence being said is lit, and a press on any sentence plays from there. It
+  is away until asked for, and a visitor, or a page opened on its own, sees
+  neither the button nor the panel. One sentence is one section because one
+  sentence is one recording.
 - **Checked.** `blocks/check.cjs` fails on a scene placed twice or said on
   two pages, a page that asks another host for anything, a medium whose bytes
   are not its name, or a link no page answers; `--render` also opens every

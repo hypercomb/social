@@ -818,6 +818,11 @@ $bp-phone-max: 599px;
 
 // A command is running: its pill turns, so a line that has gone from the bar
 // reads as on its way rather than lost.
+.indicator-pill.info.working {
+  cursor: pointer;
+  pointer-events: auto;
+}
+
 .indicator-pill.info.working .indicator-icon {
   color: var(--cmd-accent-command);
   animation: indicator-working 0.9s linear infinite;

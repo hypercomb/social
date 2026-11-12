@@ -146,7 +146,18 @@ describe('no page shows the demo hive', () => {
   })
 })
 
+describe('the tile list is the hive\'s own, in sync', () => {
+  it('every page carries the chat list\'s stylesheet exactly as the shared module defines it', () => {
+    const file = join(__dirname, '..', '..', '..', '..', 'hypercomb-essentials', 'src', 'assistant', 'tiles-rail.css.ts')
+    const css = new Function(readFileSync(file, 'utf8').replace(/^export const /gm, 'const ') + '\nreturn RAIL_CSS')() as string
+    expect(css).toContain('.hc-rail-row')
+    for (const b of blocks as { route: string[]; page: string }[]) expect(b.page.includes(css)).toBe(true)
+  })
+})
+
 describe('every page says where it goes, once', () => {
+  /** Where an element wearing data-part="<part>" starts in the markup (the stylesheet names parts too, so look for the tag). */
+  const tagAt = (html: string, part: string): number => html.search(new RegExp(`<[a-z]+[^>]*data-part="${part}"`))
   const hrefs = (html: string, part: string): string[] => {
     const nav = new RegExp(`<nav[^>]*data-part="${part}"[^>]*>([^]*?)</nav>`).exec(html)
     return nav ? [...nav[1].matchAll(/<a\b[^>]*\bhref="([^"]+)"/g)].map(m => m[1]) : []
@@ -157,21 +168,106 @@ describe('every page says where it goes, once', () => {
       expect(b.page).not.toMatch(/data-part="(tabs|ways|beside)"/)
       for (const href of [...hrefs(b.page, 'tree'), ...hrefs(b.page, 'siblings')]) linkTo(href, b.route, paged)
     })
-    it(`${at}: the tree is on the left and the siblings sit under the video`, () => {
-      const tree = b.page.indexOf('data-part="tree"')
-      const scene = b.page.indexOf('data-part="scene"')
-      const sibs = b.page.indexOf('data-part="siblings"')
+    it(`${at}: the tree comes first, behind its button, and the siblings sit above the video`, () => {
+      const tree = tagAt(b.page, 'tree')
+      const scene = tagAt(b.page, 'scene')
+      const sibs = tagAt(b.page, 'siblings')
       expect(tree).toBeGreaterThan(-1)
       expect(tree).toBeLessThan(scene)
-      if (sibs >= 0) expect(sibs).toBeGreaterThan(scene)
+      if (sibs >= 0) expect(sibs).toBeLessThan(scene)
+      expect(b.page).toMatch(/class="ib2 menu-btn" aria-label="Show the tree" aria-expanded="false"/)
+      // On a phone the tree is the whole screen and the button stays to put it away (jwize 2026-11-11);
+      // wider, it stands in a column of its own and never over the stage.
+      expect(b.page).toContain('.page.menu-open .tree{position:fixed;z-index:6;inset:0;')
+      expect(b.page).toContain('.page.menu-open .top .menu-btn{position:fixed;')
+    })
+
+    it(`${at}: the caption is under the video, and the words panel is hidden for editing alone`, () => {
+      const steps = JSON.parse(/<script type="application\/json">([^]*?)<\/script>\s*<\/section>/.exec(b.page)![1]) as { say: string }[]
+      const says = [...b.page.matchAll(/<li><button type="button" class="say">/g)]
+      expect(says.length).toBe(steps.length)
+      expect(says.length).toBeGreaterThan(0)
+      expect(b.page).toContain('<ol class="says" hidden aria-label="The words of this scene, a sentence at a time">')
+      expect(b.page).toContain('class="ib words" hidden aria-pressed="false" aria-label="Show the words"')
+      // the normal narration: one sentence under the video, seen
+      expect(b.page).toContain('<div class="caption" aria-live="polite"><p></p></div>')
+      expect(b.page).toContain('.caption{position:relative;margin:clamp(10px,2vh,22px) 0 0;')
+      expect(b.page).toContain("const editing = !!window.ioc && document.documentElement.dataset.hypercombMode !== 'visitor'")
+      expect(b.page).toContain('.page.menu-open{grid-template-columns:230px minmax(0,1fr)')
       expect(b.page).toMatch(/aria-label="Full screen"/)
     })
+    it(`${at}: a figure that fills its stage, and motion that asks for nothing`, () => {
+      // jwize 2026-11-11: "clean and professional with tasteful ux and subtle animations to improve ambience".
+      // The ambience breathes slowly and stops for a reader who asked for less motion.
+      expect(b.page).toContain('@keyframes ambient{from{opacity:1}to{opacity:.55}}')
+      expect(b.page).toMatch(/prefers-reduced-motion:reduce\)\{[^}]*\}[^@]*\.scene::before\{animation:none!important/)
+      // Explore more names what lies below only when the row beside it does not already.
+      const explore = /<span class="more-wrap">[^]*?<\/span>/.exec(b.page)?.[0] ?? ''
+      if (explore && b.route.length === 1) expect(explore).not.toContain('<small>')
+    })
+    it(`${at}: on a phone the page scrolls, with what is next listed under the player`, () => {
+      // jwize 2026-11-11: "the bottom is cut off ... incorporate a scroller list like youtube instead of the
+      // tree or in concert". The list is in the page's flow under the scene; the tree keeps its button.
+      const list = /<nav class="next" data-part="next" aria-label="Up next">([^]*?)<\/nav>/.exec(b.page)?.[1] ?? ''
+      const listed = [...list.matchAll(/<(a|span) class="nx( soon)?"(?: href="\/([^"]+)")?>/g)]
+      // every tile once: this page never lists itself, and none is said twice
+      const hrefs = listed.map(m => m[3]).filter(Boolean)
+      expect(new Set(hrefs).size).toBe(hrefs.length)
+      expect(hrefs).not.toContain(b.route.join('/'))
+      // what the row above the video offers, the list offers too
+      for (const sib of [...b.page.matchAll(/<a class="sib" href="\/([^"]+)"/g)].map(m => m[1])) expect(hrefs).toContain(sib)
+      if (listed.length) expect(list).toMatch(/<h2 class="mono-label">(Inside |More in |Beside this)/)
+      // drawn on a phone only, where the page is as tall as it needs and clears the browser's bars
+      expect(b.page).toContain('.stage>.next{display:none}')
+      expect(b.page).toMatch(/@media \(max-width:760px\)\{[^]*?\.page\{padding:12px 12px max\(14px,env\(safe-area-inset-bottom,0px\)\);height:auto;min-height:0\}/)
+      expect(b.page).toContain('.stage>.next{display:flex;flex-direction:column;')
+      expect(b.page).toMatch(/class="ib2 menu-btn"/)
+    })
     it(`${at}: the tree reaches every page, and the siblings share one parent`, () => {
-      const every = new Set(hrefs(b.page, 'tree').map(h => linkTo(h, b.route, paged)))
+      // the tile list carries the tree as data: every page is in it, and it opens where the page stands
+      const data = JSON.parse(/<script type="application\/json" data-rail-tree>([^]*?)<\/script>/.exec(b.page)![1]) as { here: string[]; menu: { href: string | null; children: unknown[] }[] }
+      expect(data.here).toEqual(b.route)
+      const links: string[] = []
+      const walk = (ns: { href: string | null; children: unknown[] }[]): void => { for (const n of ns) { if (n.href) links.push(n.href); walk(n.children as typeof ns) } }
+      walk(data.menu)
+      const every = new Set(links.map(h => linkTo(h, b.route, paged)))
       for (const r of paged as Set<string>) expect(every.has(r)).toBe(true)
-      const parent = b.route.slice(0, -1).join('/')
+      // On a top page the row is that tile's own first level; below it, the tiles beside this one.
+      const parent = b.route.length === 1 ? b.route[0] : b.route.slice(0, -1).join('/')
       for (const href of hrefs(b.page, 'siblings')) {
         expect(linkTo(href, b.route, paged).split('/').slice(0, -1).join('/')).toBe(parent)
+      }
+    })
+    it(`${at}: a page with pages below it offers Explore more, at the right of the row, into its first child's presentation; one without offers nothing`, () => {
+      const below = [...paged as Set<string>].filter(r => r.startsWith(b.route.join('/') + '/') && r.split('/').length === b.route.length + 1)
+      const button = /<a class="more" data-part="explore" href="([^"]+)" title="Explore more about ([^"]+)"/.exec(b.page)
+      if (below.length === 0) { expect(button).toBeNull(); return }
+      // one way in, and only one
+      expect(b.page.match(/data-part="explore"/g)).toHaveLength(1)
+      expect(button).not.toBeNull()
+      expect(button![2].trim().length).toBeGreaterThan(2)
+      // the way in lands on a child's presentation one level down, whose own row is that level's tiles
+      const to = linkTo(button![1], b.route, paged)
+      expect(below).toContain(to)
+      const there = (blocks as { route: string[]; page: string }[]).find(x => x.route.join('/') === to)!
+      for (const href of hrefs(there.page, 'siblings')) expect(linkTo(href, there.route, paged).split('/').slice(0, -1).join('/')).toBe(b.route.join('/'))
+      // no card page: the children are presentations, nothing else
+      expect(b.page).not.toMatch(/data-part="children"/)
+      expect(tagAt(b.page, 'explore')).toBeLessThan(tagAt(b.page, 'scene'))
+      if (tagAt(b.page, 'siblings') >= 0) expect(tagAt(b.page, 'explore')).toBeGreaterThan(tagAt(b.page, 'siblings'))
+    })
+    it(`${at}: the row stays when one of its buttons is pressed`, () => {
+      // The buttons are the same names in the same order on every page a button leads to; only the lit one moves.
+      const names = (page: string): string[] => {
+        const nav = /<nav[^>]*data-part="siblings"[^>]*>([^]*?)<\/nav>/.exec(page)
+        return nav ? [...nav[1].matchAll(/<(?:a|span)\b[^>]*class="sib[^"]*"[^>]*>([^]*?)<\/(?:a|span)>/g)].map(m => m[1].replace(/<[^>]*>/g, '').trim()) : []
+      }
+      const mine = names(b.page)
+      for (const href of hrefs(b.page, 'siblings')) {
+        const to = linkTo(href, b.route, paged)
+        const there = (blocks as { route: string[]; page: string }[]).find(x => x.route.join('/') === to)
+        if (!there || there.route.length === 1) continue
+        expect(names(there.page)).toEqual(mine)
       }
     })
   }

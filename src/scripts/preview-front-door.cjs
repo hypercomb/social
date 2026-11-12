@@ -101,6 +101,17 @@ const demoFor = async (zone, view) => {
     sign()
     return true
   }
+  /** The stand-in hive's other act: the look a visitor is shown. Hexagons is the absence of a view. */
+  state.setView = view => {
+    const record = JSON.parse(state.atom.toString())
+    const next = view && view !== 'hex' ? view : undefined
+    if (record.view === next) return false
+    if (next) record.view = next; else delete record.view
+    state.atom = Buffer.from(JSON.stringify(record))
+    state.atomSig = sha(state.atom)
+    sign()
+    return true
+  }
   return state
 }
 
@@ -128,6 +139,7 @@ const types = {
   // --owner: a stand-in for the hive beside the page, over the same channel the real one answers on.
   if (demo && flag('owner')) {
     await context.exposeBinding('__hcDemoToggle', (_source, request) => demo.toggle(String(request.lineage), request.on === true))
+    await context.exposeBinding('__hcDemoView', (_source, view) => demo.setView(String(view)))
     await context.addInitScript(key => {
       const channel = new BroadcastChannel('hc:showcase')
       channel.onmessage = async event => {
@@ -135,6 +147,9 @@ const types = {
         if (message.t === 'hello') channel.postMessage({ t: 'here', id: message.id, pubkey: key })
         else if (message.t === 'toggle') {
           const changed = await window.__hcDemoToggle({ lineage: message.lineage, on: message.on })
+          channel.postMessage({ t: 'done', id: message.id, ok: true, changed })
+        } else if (message.t === 'view') {
+          const changed = await window.__hcDemoView(message.view)
           channel.postMessage({ t: 'done', id: message.id, ok: true, changed })
         }
       }

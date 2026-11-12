@@ -424,13 +424,78 @@ Pressing the open domain's header collapses it, and then NO row is open, so none
 header row and they stack from the top, in order. (It used to leave the first collapsed row at the top and push the next one to the bottom.)
 Opening any header brings it back to the top with its tiles.
 
-### The community is a target, not a domain (jwize 2026-11-04)
+### Tiles toggle where they sit (jwize 2026-11-10; replaces the community row of 2026-11-04)
 
-While managing, the community is a row of its own, after the domains and apart from them: a place to bring locally domain-hosted
-creations to, never a domain with a name of its own (it has no remove control and is not one of the sets a swipe walks).
-Every tile belongs to a domain's row — this domain's too. A tap on a tile in any domain row brings it into the community; a tap on it
-in the community row sends it back to the domain it came from. That is the whole of turning a community item off. The community
-holds tiles in `community:tiles` (`readCommunity` / `keepCommunity`); a tap signs nothing.
+"You add domains. You go to them and toggle things on or off. Then you are back in your mobile app view and you are just using
+the creations." While editing, every row is a domain and every tile stays in its own domain's row: lit when it is on, gray when
+it is not. A tile is ON when it is published here (the owners' signed showcase) or this browser turned it on. There is no
+community row; the community is the page you come back to — what is published here, and what this browser turned on in any
+domain it added. What this browser turned on is kept in `community:tiles` (`readCommunity` / `keepCommunity`) and signs nothing.
+
+Who can do what:
+
+- **Without the key, on a phone**: a tap is the switch itself, at once, no question. It can turn on or off only this browser's
+  own picks. A tile the domain published says so: only its key can take it off.
+- **With the key** (a hive beside the page, or a phone that took its owner's invite), or on a desktop where the tap can be handed
+  to the hive: a tap asks once, and yes is the signed act — publish or unpublish — so a visitor sees the same community.
+
+**One tap, then one red button across the foot (jwize 2026-11-10).** The question is not a sheet over the tiles. The tap marks
+the tile and a red bar across the bottom of the screen says what pressing it signs ("Put dylan in my showcase"). Pressing it
+is the yes. Escape, or a tap anywhere that is not a tile, puts it away with nothing done; a tap on another tile asks about
+that one instead.
+
+### Just a search and the tiles (jwize 2026-11-10)
+
+The page a visitor lands on is one input, called Search, and the tiles. The mark, the name, its sentence and the counts show
+only while editing, where they say which domain is being edited. A room the owner hosts ("Join the swarm") stays, because it
+is a door and not information.
+
+There is no follow box and no link inside the field. While what is typed is a domain nobody follows yet, a button across the
+foot of the screen names it — "Add jwize.com" — the same bar the red confirm uses, without the red. Until the line is a
+domain it is only a search.
+
+### A staged presentation is the root (jwize 2026-11-11)
+
+"For hypercomb.com on the mobile we are going to put the protocol presentation. On the front page hypercomb an open
+protocol for humanity." And: "we need to publish hypercomb.com to load this hive signature." And: "the desktop also has
+the presentation as the root."
+
+A host may stage a presentation: `presentation` in its `welcome.json`, a whole https address and nothing else
+(`welcome.ts` `presentationFrom`). hypercomb.com stages `https://protocol.hypercomb.com/`, with the line "an open protocol
+for humanity". That host's root, on every screen, is its name and its line across the top and, under them, the published
+hive in a frame from its own address. That address answers with the head its publisher last signed, so a publish of
+`/protocol` is on hypercomb.com at once, with no deploy; nothing is copied to the host, and what the hive
+keeps in the browser stays with its own domain. There is no search button on it (jwize 2026-11-11: "no search button"):
+the root is the presentation alone, and hypercomb.io is the default host for the search and the tiles. A host that
+stages no presentation is the search and the tiles as before.
+
+The shim stays generic: it knows no domain, only the field. The same pinned shim runs on a phone at hypercomb.io, which
+serves no `welcome.json`, so that page is unchanged.
+
+### The help tiles are optional (jwize 2026-11-10)
+
+The starting tile and the platform's own doors (the tour, the app, source, licensing) are help. A host that staged a front
+page of its own — hypercomb.com — shows what it staged. Every other host shows none of them by default. While editing they
+sit gray in the domain's own row and a tap turns one on or off; the choice is kept in this browser, in the same
+`community:tiles` document as its other picks, under a key no tile has (`help:<address>`, `help:start`). The tour is the
+protocol hive, `protocol.hypercomb.com`.
+
+A domain whose ledger names no owner has nothing signed to read, so its row says "Nothing is published here yet." and never
+"Could not read what is published here."
+
+### Four looks, swiped sideways while editing (jwize 2026-11-10)
+
+A sideways swipe on the list while editing walks four looks and goes round: hexagons, the launcher (rows of four), the iPhone
+screen, the list of buttons. The square column (`tiles`) is still a view a signed record or `?view=tiles` may name, but the
+swipe does not walk it. The look chosen is kept in this browser (in the `showcase:orientation` document, beside the lane
+orientation), so leaving edit mode and coming back later keeps it. Swiping signs nothing: a visitor is shown the owners' record.
+
+With the key, a quiet link beside the look's name — "Show visitors this look" — signs it into that record (`view`), so every
+visitor is shown it. It is there only while the look tried here is not the one already signed. The page asks over the same
+bridge as a toggle (`{ t: 'view', zone, view }`): the hive answers with `applyView` (essentials `showcase-bridge.ts`), a phone
+that took its owner's invite signs it itself (`device-owner.ts`). Hexagons is the absence of a view; a zone with no record yet
+keeps showing what it publishes, because the record that first names a look names those too. A hive older than this never
+answers, and the page says so.
 
 Being in the showcase is a different act, not a tap: a hold on the owner's own tile, or the held sheet's "Put it in my showcase".
 **Only a revision that is optimized and minimized can be put in.** `minimized.ts` asks the domain serving the head: its root layer

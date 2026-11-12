@@ -37,7 +37,9 @@ Composing a new package — files off, a folder taken from another signature, a
 trait left open, including an upgrade of the AI package — is minted on the
 host's file view and tried on a mission door
 ([build-debug-isolation.md](build-debug-isolation.md)). This window is where a
-composed root is taken into what runs.
+composed root is taken into what runs. Composing on this desk itself — a target
+pane beside the sources, packages grouped as components, a named package saved
+to your host — is proposed in [package-components.md](package-components.md).
 
 ## What runs: the trunk, and picks over it
 
@@ -87,9 +89,46 @@ pick puts the trunk's layer back.
 `hc:install:off-units` holds the PATHS that are off. A path off takes everything
 beneath it; a leaf off leaves its parent on (`enabledBees`). Layers and bytes
 stay held, so turning something on or off is `applyUnits()` — the selection
-composed from held bytes and the activation record written again, then a
-restart. No host asked, no byte fetched. A part inside a branch that is off
-names that branch: turn it on first.
+composed from held bytes and the activation record written again. No host
+asked, no byte fetched. A part inside a branch that is off names that branch:
+turn it on first.
+
+**On and off take effect while the hive runs** (*2026-11-10*, jwize: "shouldn't
+we be able to add and remove features in realtime from the hosts window?").
+Once the record is written the window asks the shell's preloader to
+`recompose()` (`hypercomb-runtime/src/script-preloader.ts`): one processor pass
+walks the new record, loads and pulses what came on, and disposes what went off
+— out of the registry, its bus subscriptions cut, its word gone from the
+command line. What a bee's module registered beside it (its queen, its
+services — the bee wires) goes with it: the preloader keeps each module's own
+run of registrations as the bee's *company*, and a company it cannot tell from
+another bee's leaves the switch to a restart. A queen asleep goes with her
+package and comes back asleep. The
+activity log says *games is on* / *games is off*, and the list repaints where
+it stands.
+
+Live is not yet instant. Measured on a web shell with a 45-package trunk
+(2026-11-10): the switch itself — the processor pass — takes about 5 ms; the
+wait is `applyUnits()` composing the selection from held bytes, about 5 s, plus
+about 4 s more the first time a selection is seen, while its minified
+registration is derived (`reminify.ts`). The row stays busy for that long.
+
+A restart is kept wherever it is the only honest way, and `recompose()` answers
+false there having changed nothing:
+
+- **a running bee with no `dispose()`** is going off. `markDisposed()` cuts
+  what went through the bus; a DOM listener, a timer or a surface wired by hand
+  would outlive the bee, and "off" would be half true. `dispose()` is the bee
+  saying it can let go while the hive runs — give a bee one and its package
+  switches off live. A bee that never loaded (asleep, passive) has nothing to
+  let go of;
+- **the record names other namespace bundles** — the import map is bound when
+  the page loads;
+- **a package only a host carries** is picked in (`pick`), and a **revision**
+  or **Update all** changes which code runs at a path: still a restart;
+- a shell from before `recompose`, a read-only reader, and a door that serves
+  modules by a stable address when a bee evicted earlier would come back (the
+  browser hands back the module it already ran).
 
 ## The window
 
@@ -258,7 +297,10 @@ tooltip).
 **The light and the manage menu.** *jwize, 2026-11-04:* "it should be on but dim if
 there is a newer version and a spectrum based on how old. The update brings to newest
 or you click the manage icon turn it off or pick revisions and look at code in the
-finder view." The bulb on a row no longer switches anything; it tells:
+finder view." The bulb on a row tells — and, since *2026-11-10* (jwize: "Yes,
+bulb switches"), a press on it is the on/off switch again, the same act as the
+menu's first item under the same rule (`#switchable`): disabled, with the reason
+as its tooltip, wherever the menu's item is. What it tells:
 
 - **lit** — on, and current;
 - **lit and dim** — on, and a newer version exists. The dimmer the older the version
@@ -379,7 +421,26 @@ row).
   their own), Visit (never drawn on this origin — a second tab on your own hive
   is a second writer on one store), and removing it.
 - A shell with no installed package (the dev shell imports modules from source)
-  lists what your hosts carry and leaves every act to a hive.
+  lists what your hosts carry and leaves every act to a hive. A package whose
+  folder is in the shell's own source reads **on** and wears *from source*
+  instead of *not here yet* (jwize, 2026-11-11: "everything in host for
+  hypercomb.com says not here yet"): it runs whatever a record says, no update
+  is offered for it, and its switch stays greyed with the reason. The shell's
+  source catalog names the folders (`sourcePackagePaths`); a package the source
+  does not carry is still not here.
+- **A launcher goes with its package.** The rail's launchers are shell chrome, so
+  a package turned off used to leave its button behind (jwize, 2026-11-11: "I
+  removed comfy refreshed and still it was showing"). A launcher that names a
+  word is hidden while the off list names a package of that name
+  (`packageIsOff`), only on that positive evidence, and never on a shell that
+  runs from source. A live switch says `packages:changed` so the rail repaints.
+- **The list you are in goes first.** Opening the window paints what runs here
+  before any host is asked, and holds the preloader's foreground
+  (`ScriptPreloader.foreground`) until the followed publisher's list has
+  painted: the idle hive, the resource preheat and the passive preload lanes
+  wait, then carry on. Entering a view or saying a word holds it the same way
+  and warms that view's own resources first. The other hosts fill in after, so
+  a slow host never stalls the rest.
 
 ## Languages
 
@@ -434,6 +495,10 @@ sandbox before you bring them into hypercomb.io."*
 
 ## Ratchets
 
+- `runtime/src/script-preloader.recompose.spec.ts` — on and off while the hive
+  runs: what goes off is disposed and unregistered, what comes on is pulsed in
+  the same pass, a sleeping queen goes with her package, and every case that
+  needs the restart answers false with nothing moved.
 - `runtime/src/package-tree.spec.ts` — paths at every depth, a pick replacing
   one branch, a package joining under its parent, hiding and un-hiding, off by
   path, namespace ownership, the sideways check, revision order, the records.
