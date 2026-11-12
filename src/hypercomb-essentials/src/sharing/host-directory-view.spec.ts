@@ -10,7 +10,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import type { InstallNode, InstallRevision } from '@hypercomb/core'
-import { LIGHT_BRIGHTEST, LIGHT_DIMMEST, LIGHT_UNKNOWN, ageLevel, lightOf, runningStamp, NOTHING_PICKED, codeLines, codeName, filesPicked, pickAll, pickKey, pickMode, publishedCount, publishedOn, stackRows, stillPicked, directoryRows, domainRows, filesOf, hostBehind, isOlder, namedFromVerdict, namedWhenUninstalled, offerableRoots, offeredRevisions, updateProgress, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, sourcePackagePaths, type ServedTree } from './host-directory.view'
+import { LIGHT_BRIGHTEST, LIGHT_DIMMEST, LIGHT_UNKNOWN, ageLevel, lightOf, runningStamp, NOTHING_PICKED, codeLines, codeName, filesPicked, pickAll, pickKey, pickMode, publishedCount, publishedOn, stackRows, stillPicked, directoryRows, domainRows, filesOf, hostBehind, isOlder, namedFromVerdict, namedWhenUninstalled, offerableRoots, offeredRevisions, updateProgress, updatingSentence, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, sourcePackagePaths, type ServedTree } from './host-directory.view'
 import { ATTESTED_PACKAGES_KEY, attestPackage } from './package-attestation'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -138,6 +138,30 @@ describe('the host directory', () => {
     // One whole sentence over the changed files — never "931 files in".
     expect(updateProgress('', next, had, new Set(['nb']))).toEqual({ done: 1, total: 3 })
     expect(EN['hosts.updating']).toBe('Updating — {done} of {total} changed files')
+  })
+
+  it('once the files are in, the bar says what is being done and that a restart is coming', () => {
+    // jwize 2026-11-12: "It is very confusing during an update if something is
+    // happening or not after all files are downloaded."
+    expect(updatingSentence('', { done: 1, total: 3 })).toBe('Updating — 1 of 3 changed files')
+    expect(updatingSentence('', { done: 0, total: 0 })).toBe('Updating…')
+    // A shell from before the phases: a full counter still says it is finishing.
+    expect(updatingSentence('', { done: 3, total: 3 })).toBe(EN['hosts.updating-finishing'])
+    expect(updatingSentence('checking', { done: 3, total: 3 })).toBe(EN['hosts.updating-checking'])
+    expect(updatingSentence('applying', { done: 3, total: 3 })).toBe(EN['hosts.updating-applying'])
+    expect(updatingSentence('restarting', null)).toBe(EN['hosts.updating-restarting'])
+    for (const key of ['finishing', 'checking', 'applying', 'restarting']) expect(EN[`hosts.updating-${key}`]).toMatch(/restart|checking/)
+    // The window hears the runtime's phases and says restarting before the reload.
+    expect(VIEW).toMatch(/onPhase: phase => \{ this\.#phase = phase; this\.#renderBody\(\) \}/)
+    expect(VIEW).toMatch(/if \(updating\) \{ this\.#phase = 'restarting'; this\.#renderBody\(\) \}/)
+    // The bar stays for the whole update — a re-read after activation records
+    // the new root as running and used to take it away — and the restart is
+    // announced, given time to be read, and said again on the other side.
+    expect(VIEW).toMatch(/this\.#next && \(this\.#held \|\| this\.#next\.root !== trunk\)/)
+    expect(VIEW).toMatch(/\} else if \(!this\.#held\) \{ this\.#next = null; this\.#moved = null \}/)
+    expect(VIEW).toMatch(/setTimeout\(\(\) => location\.reload\(\), updating \? 1500 : 400\)/)
+    expect(VIEW).toMatch(/if \(where\.updated === true\) \{\s+this\.#justUpdated = true/)
+    expect(EN['hosts.updated']).toBe('Update finished — you are running the new version')
   })
 
   it('an older revision is placed by the list, names the newer parts it replaces, and is taken from the trunk first', () => {

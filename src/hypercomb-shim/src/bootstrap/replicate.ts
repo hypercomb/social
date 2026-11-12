@@ -22,4 +22,5 @@ export {
   selfBases,
   type HostPackage,
   type InstallOutcome,
+  type InstallPhase,
 } from '@hypercomb/runtime/acquire'

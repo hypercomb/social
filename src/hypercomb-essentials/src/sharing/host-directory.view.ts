@@ -526,6 +526,23 @@ export const updateProgress = (
   return { done, total }
 }
 
+/** THE UPDATE BAR'S ONE SENTENCE. A full counter that says nothing reads as a
+ *  hang (jwize, 2026-11-12), so once the files are in the bar says what is
+ *  being done and that a restart is coming. A shell from before `onPhase`
+ *  never names a phase; a full counter still says it is finishing. */
+export const updatingSentence = (
+  phase: '' | 'checking' | 'applying' | 'restarting',
+  overall: { done: number; total: number } | null,
+): string => {
+  if (phase === 'restarting') return t('hosts.updating-restarting', 'The update is in — restarting the hive now')
+  if (phase === 'applying') return t('hosts.updating-applying', 'Putting the update in place — the hive restarts in a moment')
+  if (phase === 'checking') return t('hosts.updating-checking', 'Every file is here — checking the update before it runs')
+  if (overall?.total && overall.done >= overall.total) return t('hosts.updating-finishing', 'Finishing the update — the hive restarts when it is ready')
+  return overall?.total
+    ? t('hosts.updating', 'Updating — {done} of {total} changed files', { done: overall.done, total: overall.total })
+    : t('hosts.updating-short', 'Updating…')
+}
+
 /** Is a revision older than the one running? Only when both are listed —
  *  a revision is never called older than something the list cannot place. */
 export const isOlder = (revisions: readonly InstallRevision[], chosen: string, running: string): boolean => {
@@ -1086,6 +1103,12 @@ export class HostDirectoryElement extends HTMLElement {
   #held: Set<string> | null = null
   /** What already ran here when Update all was pressed — never counted as the update. */
   #had: ReadonlySet<string> = new Set()
+  /** What Update all is doing once the files are in — the runtime says
+   *  `checking`, then `applying`; the window says `restarting`. Empty while
+   *  files still arrive. */
+  #phase: '' | 'checking' | 'applying' | 'restarting' = ''
+  /** The restart that opened this window was an update — said once, in the bar's place. */
+  #justUpdated = false
   #heldPaint = 0
 
   /** The domain this app runs on: never offered a Visit — a second tab on
@@ -1163,8 +1186,12 @@ export class HostDirectoryElement extends HTMLElement {
       const raw = sessionStorage.getItem(REOPEN_KEY)
       if (raw) {
         sessionStorage.removeItem(REOPEN_KEY)
-        const where = JSON.parse(raw) as { scope?: unknown; at?: unknown }
+        const where = JSON.parse(raw) as { scope?: unknown; at?: unknown; updated?: unknown }
         this.#toList(zoneOf(where.scope), typeof where.at === 'string' ? where.at : '')
+        if (where.updated === true) {
+          this.#justUpdated = true
+          EffectBus.emit('activity:log', { message: t('hosts.updated', 'Update finished — you are running the new version') })
+        }
         this.#resume = true
         queueMicrotask(() => EffectBus.emit('hosts:open', {}))
       }
@@ -1315,6 +1342,7 @@ export class HostDirectoryElement extends HTMLElement {
   }
 
   #unmount(): void {
+    this.#justUpdated = false
     this.#opening++
     this.#menu = null
     this.#agesAsk.clear()
@@ -2076,7 +2104,11 @@ export class HostDirectoryElement extends HTMLElement {
     // EVERYTHING THE FOLLOWED PUBLISHER MOVED, in one act — this origin only.
     // It is a source shell's one act too: it follows the channel, so taking the
     // revision records it while the code it runs stays its working tree.
-    if (!zone && (trunk || runsSource()) && this.#next && this.#next.root !== trunk) {
+    // While Update all runs the bar stays, whatever a re-read decides: the
+    // activation records the new root as running BEFORE the restart, and a
+    // read in that gap used to take the bar away — a silent window that then
+    // reset itself (jwize, 2026-11-12).
+    if (!zone && (trunk || runsSource()) && this.#next && (this.#held || this.#next.root !== trunk)) {
       const bar = make('div', 'hd-updates')
       bar.setAttribute('role', 'status')
       bar.append(glyph('updatesIcon', 'hd-updates-glyph'))
@@ -2086,9 +2118,7 @@ export class HostDirectoryElement extends HTMLElement {
       const overall = moving ? updateProgress('', this.#next.nodes, this.#had, moving) : null
       bar.append(make('span', 'hd-updates-text', !moving
         ? t('packages.updates.shared', 'An update is ready')
-        : overall?.total
-          ? t('hosts.updating', 'Updating — {done} of {total} changed files', { done: overall.done, total: overall.total })
-          : t('hosts.updating-short', 'Updating…')))
+        : updatingSentence(this.#phase, overall)))
       if (!moving) {
         const take = button('hd-primary', t('hosts.update-all', 'Update all'))
         take.disabled = !!this.#busy
@@ -2106,6 +2136,12 @@ export class HostDirectoryElement extends HTMLElement {
       for (const host of this.#zones) {
         if (host !== this.#home && this.#isBehind(host)) section.append(make('p', 'hd-note hd-behind', this.#behindText(host)))
       }
+    } else if (!zone && this.#justUpdated) {
+      // The restart an update ends in, said on the other side of it.
+      const bar = make('div', 'hd-updates hd-updated')
+      bar.setAttribute('role', 'status')
+      bar.append(glyph('updatesIcon', 'hd-updates-glyph'), make('span', 'hd-updates-text', t('hosts.updated', 'Update finished — you are running the new version')))
+      section.append(bar)
     }
     if (reach && !trunk) {
       section.append(make('p', 'hd-note', t('hosts.from-source', 'This shell loads its packages from source, so turning them on or off and picking revisions happens on a hive.')))
@@ -3761,13 +3797,14 @@ export class HostDirectoryElement extends HTMLElement {
           held.add(bare)
           this.#paintHeld()
         },
+        onPhase: phase => { this.#phase = phase; this.#renderBody() },
       })
       if (!outcome.ok) { this.#error = outcome.error ?? 'package incomplete'; return }
       this.#restart()
     } catch (error) {
       this.#error = error instanceof Error ? error.message : 'update could not be applied'
     } finally {
-      if (!this.#restarting) { this.#busy = ''; this.#held = null; this.#renderBody() }
+      if (!this.#restarting) { this.#busy = ''; this.#held = null; this.#phase = ''; this.#renderBody() }
     }
   }
 
@@ -3914,9 +3951,14 @@ export class HostDirectoryElement extends HTMLElement {
 
   #restart(): void {
     this.#restarting = true
-    try { sessionStorage.setItem(REOPEN_KEY, JSON.stringify({ scope: this.#scope, at: this.#at })) } catch { /* opens fresh */ }
-    EffectBus.emit('activity:log', { message: t('packages.restarting', 'packages changed; restarting') })
-    setTimeout(() => location.reload(), 400)
+    const updating = !!this.#held
+    if (updating) { this.#phase = 'restarting'; this.#renderBody() }
+    try { sessionStorage.setItem(REOPEN_KEY, JSON.stringify({ scope: this.#scope, at: this.#at, updated: updating })) } catch { /* opens fresh */ }
+    EffectBus.emit('activity:log', { message: updating
+      ? t('hosts.updating-restarting', 'The update is in — restarting the hive now')
+      : t('packages.restarting', 'packages changed; restarting') })
+    // An update's restart is long enough to read that it is coming.
+    setTimeout(() => location.reload(), updating ? 1500 : 400)
   }
 
   // ── what is served ───────────────────────────────────────────────────────
@@ -3947,7 +3989,7 @@ export class HostDirectoryElement extends HTMLElement {
           this.#moved = reach.recursive
             ? new Set(await install.movedPaths(named, from).catch(() => []))
             : trunk ? new Set(await install.movedUnits(trunk, named, from).catch(() => [])) : null
-        } else { this.#next = null; this.#moved = null }
+        } else if (!this.#held) { this.#next = null; this.#moved = null }
         this.#render()
       }
       await (preloader?.foreground ? preloader.foreground(first) : first())
@@ -4347,6 +4389,7 @@ ${S} .hd-sep{color:var(--hd-ink-quiet);opacity:.6;}
 ${S} .hd-drill-title{font-weight:600;color:var(--hd-ink);}
 /* AN UPDATE IS READY: a band with its glyph, the act at its end. */
 ${S} .hd-updates{display:flex;align-items:center;gap:.7em;margin:.2em 0 .7em;padding:.6em .7em .6em .8em;font-size:.88em;background:rgba(var(--acc),0.08);border:1px solid rgba(var(--acc),0.3);border-left:3px solid var(--hc-window-accent);border-radius:var(--hc-radius-card,3px);}
+${S} .hd-updates.hd-updated{border-left-color:var(--hc-status-ok);}
 ${S} .hd-updates > span:not(.hd-glyph){flex:1 1 auto;min-width:0;}
 ${S} .hd-updates-glyph{font-size:1.4em;color:var(--hc-window-accent);}
 ${S} .hd-primary{padding:.42em .9em;font:inherit;font-size:.95em;font-weight:600;color:var(--hc-window-on-accent);background:var(--hc-window-accent);border:1px solid var(--hc-window-accent);border-radius:var(--hc-radius-control,2px);cursor:pointer;transition:filter .15s,box-shadow .15s;}

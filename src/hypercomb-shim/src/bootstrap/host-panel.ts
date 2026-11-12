@@ -18,7 +18,7 @@ import { addHostZone, hostZone, listHostZones, removeHostZone } from './hosts'
 import { keepCommunityTiles, readCommunityTiles } from './community-tiles'
 import { hostRouteName } from '@hypercomb/runtime/host-activation'
 import { askHostPackages } from '@hypercomb/runtime/host-packages'
-import { acquire, installPackage, installedPackageSig, type HostPackage, type InstallOutcome } from './replicate'
+import { acquire, installPackage, installedPackageSig, type HostPackage, type InstallOutcome, type InstallPhase } from './replicate'
 import { frontDoorOf, readWelcome, type FrontDoor, type Welcome, type WelcomeLink } from './welcome'
 import { pictureOrigins, tilePicture } from './tile-picture'
 import { SHOWCASE_STYLE, doorOrigin, matchesDomain, readLedger, readPeerLedger, rootZones, searchTerms, showcase,
@@ -388,7 +388,7 @@ const bareSig = (sig: string): string => sig.trim().toLowerCase().replace(/\.(?:
 
 /** One replication moving, as a bar and a count. With no known total the bar
  *  says only that files are arriving; it never claims an end it cannot see. */
-const replicationMeter = (label: string): { element: HTMLElement; paint(done: number, total: number): void } => {
+const replicationMeter = (label: string): { element: HTMLElement; paint(done: number, total: number): void; say(text: string): void } => {
   const element = document.createElement('div')
   element.className = 'replication indeterminate'
   element.setAttribute('role', 'progressbar')
@@ -420,7 +420,10 @@ const replicationMeter = (label: string): { element: HTMLElement; paint(done: nu
       count.textContent = `${done} file${done === 1 ? '' : 's'} held`
     }
   }
-  return { element, paint }
+  // Once every file is held the count has nothing left to say, and a full bar
+  // that says nothing reads as a hang — the line says what is happening now.
+  const say = (text: string): void => { count.textContent = text }
+  return { element, paint, say }
 }
 
 type Answer = { packages: HostPackage[]; answered: boolean }
@@ -2197,7 +2200,7 @@ class HostPanelElement extends HTMLElement {
     // (admission derives the real inventory) moves as a count.
     const total = new Set([...pkg.layers, ...pkg.bees, ...pkg.dependencies].map(bareSig)).size
     take.addEventListener('click', () => {
-      void this.#replicate(pkg.packageSig, take, row, total, onHeld => installPackage(pkg, [], { onHeld }))
+      void this.#replicate(pkg.packageSig, take, row, total, (onHeld, onPhase) => installPackage(pkg, [], { onHeld, onPhase }))
     })
     row.append(label, take, open)
     return row
@@ -2216,7 +2219,7 @@ class HostPanelElement extends HTMLElement {
       return
     }
     const form = button.closest('form') ?? button
-    await this.#replicate(sig, button, form as HTMLElement, 0, onHeld => acquire(sig, zones, { onHeld }))
+    await this.#replicate(sig, button, form as HTMLElement, 0, (onHeld, onPhase) => acquire(sig, zones, { onHeld, onPhase }))
   }
 
   async #replicate(
@@ -2224,7 +2227,7 @@ class HostPanelElement extends HTMLElement {
     button: HTMLButtonElement,
     at: HTMLElement,
     total: number,
-    run: (onHeld: (sig: string) => void) => Promise<InstallOutcome>,
+    run: (onHeld: (sig: string) => void, onPhase: (phase: InstallPhase) => void) => Promise<InstallOutcome>,
   ): Promise<void> {
     if (this.#busy) return
     this.#busy = true
@@ -2246,6 +2249,12 @@ class HostPanelElement extends HTMLElement {
       held.add(bareSig(file))
       if (!painting) painting = window.setTimeout(paint, 100)
     }
+    const onPhase = (phase: InstallPhase): void => {
+      window.clearTimeout(painting)
+      painting = 0
+      paint()
+      meter.say(phase === 'checking' ? 'Every file is held — checking the package…' : 'Putting the package in place…')
+    }
     const restore = (message: string): void => {
       window.clearTimeout(painting)
       this.#busy = false
@@ -2256,7 +2265,7 @@ class HostPanelElement extends HTMLElement {
     }
 
     let outcome: InstallOutcome
-    try { outcome = await run(onHeld) }
+    try { outcome = await run(onHeld, onPhase) }
     catch (error) {
       restore(error instanceof Error ? error.message : 'Replication failed.')
       return
@@ -2270,7 +2279,8 @@ class HostPanelElement extends HTMLElement {
     window.clearTimeout(painting)
     const count = outcome.fetched + outcome.present
     meter.paint(count, Math.max(total, count))
-    this.#sayPackages(`Held ${count} atoms (${outcome.fetched} fetched). Starting…`, 'good')
+    meter.say('Ready — restarting into it now…')
+    this.#sayPackages(`Held ${count} atoms (${outcome.fetched} fetched). Restarting…`, 'good')
     console.log('[shim] replication complete', outcome)
     // A reload, and only here. The import map has to be live BEFORE the first
     // module script evaluates, and the bees that just landed are exactly those

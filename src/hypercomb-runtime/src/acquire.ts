@@ -112,10 +112,17 @@ export type InstallOutcome = {
   released?: string[]
 }
 
+export type InstallPhase = 'checking' | 'applying'
+
 export type InstallOptions = {
   floor?: boolean
   takeAll?: boolean
   onHeld?: (sig: string) => void
+  /** Told what the install is doing once the bytes are in, so a window never
+   *  sits on a full counter saying nothing: `checking` — every file is held
+   *  and the package is being checked against this shell; `applying` — it
+   *  passed and is being made what runs here. A restart follows the caller. */
+  onPhase?: (phase: InstallPhase) => void
   /** Asked once every module is held and verified, before anything runs: a
    *  sentence refuses the package (nothing activates, the bytes stay). */
   refuse?: (modules: readonly string[], read: (sig: string) => Promise<Uint8Array | null>) => Promise<string | null>
@@ -709,6 +716,9 @@ export const installPackage = async (
     }
   }
 
+  const phase = (step: InstallPhase): void => { try { opts.onPhase?.(step) } catch { /* the window's problem, not the install's */ } }
+  phase('checking')
+
   // THE CALLER'S LAST WORD. Every module is held and verified and nothing has
   // run. A caller that must not land on these bytes (the floor, moving a
   // package for its meeting point, 2026-10-11) refuses here — complete-or-
@@ -743,6 +753,7 @@ export const installPackage = async (
       packageSig: pkg.packageSig,
       how: 'package install',
     })
+    phase('applying')
     const selection = await applySelection(pkg.packageSig, held.held, picks)
     if (!selection.ok) return fail(selection.error)
     return { ok: true, packageSig: pkg.packageSig, fetched: held.fetched, present: held.present, holes: [], refused: [], packed: modules.served(), ...(released.length ? { released } : {}) }
@@ -768,6 +779,8 @@ export const installPackage = async (
     inventory.dependencies,
     readFrom([store.bees, store.dependencies], sig => [`${sig}.js`, sig]),
   )
+
+  phase('applying')
 
   // The bags. Each is a sig-named dir INSIDE the pool whose entries carry the
   // alias→sig pairs the import map is assembled from — legitimate structure,
@@ -1384,7 +1397,11 @@ const installProvider: InstallProvider = {
   // offers. Decided here, not by the window, so an installed window from any
   // older package gets it the moment the shell ships.
   acquire: async (root, zones, options) => {
-    const outcome = await acquire(root, zones, { takeAll: true, ...(options?.onHeld ? { onHeld: options.onHeld } : {}) })
+    const outcome = await acquire(root, zones, {
+      takeAll: true,
+      ...(options?.onHeld ? { onHeld: options.onHeld } : {}),
+      ...(options?.onPhase ? { onPhase: options.onPhase } : {}),
+    })
     return {
       ok: outcome.ok, fetched: outcome.fetched, present: outcome.present,
       ...(outcome.error ? { error: outcome.error } : {}),

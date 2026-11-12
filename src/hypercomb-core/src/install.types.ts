@@ -139,8 +139,11 @@ export interface InstallProvider {
    *  past is released, except a confirmed downgrade or a trial taken by hand.
    *  `onHeld` is told each file's signature the moment it is held here — read
    *  back or fetched — so the window can show the update moving; a shell from
-   *  before it simply never calls it. */
-  acquire(root: string, zones: readonly string[], options?: { onHeld?: (sig: string) => void }): Promise<InstallOutcomeInfo>
+   *  before it simply never calls it. `onPhase` says what follows the last
+   *  file — `checking` it against this shell, then `applying` it — so the
+   *  window is never a full counter saying nothing; an older shell never
+   *  calls it either. */
+  acquire(root: string, zones: readonly string[], options?: { onHeld?: (sig: string) => void; onPhase?: (phase: 'checking' | 'applying') => void }): Promise<InstallOutcomeInfo>
   /** Re-write the activation record from what is held — the repoint a toggle
    *  needs. False when the held selection does not resolve. */
   applyUnits(): Promise<boolean>

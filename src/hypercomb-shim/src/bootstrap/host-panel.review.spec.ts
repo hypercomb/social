@@ -355,10 +355,12 @@ it('replicates a host package with a bar that fills as its files are held', asyn
     at: '2026-09-25T00:00:00Z', generation: null, layers: [sig('b')], bees: [`${sig('c')}.js`], dependencies: [sig('d')] }
   effects.ask.mockResolvedValue({ packages: [pkg], answered: true })
   let finish: (outcome: unknown) => void = () => {}
+  let phase: (phase: string) => void = () => {}
   effects.install.mockImplementation(async (...args: unknown[]) => {
-    const { onHeld } = args[2] as { onHeld: (sig: string) => void }
+    const { onHeld, onPhase } = args[2] as { onHeld: (sig: string) => void; onPhase: (phase: string) => void }
     onHeld(sig('b'))
     onHeld(`${sig('c')}.js`)
+    phase = onPhase
     return new Promise(resolve => { finish = resolve })
   })
 
@@ -380,6 +382,10 @@ it('replicates a host package with a bar that fills as its files are held', asyn
   expect(bar.textContent).toContain('2 of 3 files held')
   expect(effects.install).toHaveBeenCalledOnce()
   expect(take.textContent).toBe('Replicating…')
+
+  // Every file held: the line says what happens now, not a silent full bar.
+  phase('checking')
+  expect(bar.textContent).toContain('checking the package')
 
   // Incomplete: nothing is marked installed, the bar goes, the button returns.
   finish({ ok: false, packageSig: sig('a'), fetched: 2, present: 0, holes: [sig('d')], refused: [], error: 'package incomplete' })
