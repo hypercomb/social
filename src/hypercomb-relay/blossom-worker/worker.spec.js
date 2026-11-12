@@ -1725,6 +1725,132 @@ test('a try- door hands every other path to the framework-free shim, never the w
   } finally { globalThis.fetch = original }
 })
 
+// ── management on a site door (jwize, 2026-11-12) ─────────────────────────
+// "just have a keyboard shortcut or some url trigger to set up the key and then
+// once set up the root serves correctly" / "'@hypercomb' could do that ... to
+// reflect management". The site is the site for everyone; `/@hypercomb` marks
+// the browser that asked, and from then on its pages are the framework-free shim.
+const withShim = async (run) => {
+  const seen = []
+  const original = globalThis.fetch
+  globalThis.fetch = async (url) => {
+    seen.push(String(url))
+    const path = new URL(String(url)).pathname
+    return path === '/pin' || /^\/[0-9a-f]{64}$/.test(path)
+      ? new Response('bootstrap bytes', { headers: { 'content-type': 'text/javascript' } })
+      : new Response('<!doctype html><title>shim</title>', { headers: { 'content-type': 'text/html' } })
+  }
+  try { return await run(seen) } finally { globalThis.fetch = original }
+}
+const marked = (url, init = {}) => new Request(url, { ...init, headers: { cookie: 'other=1; __Host-hc-manage=1', ...(init.headers ?? {}) } })
+const typed = (url) => new Request(url, { headers: { 'sec-fetch-dest': 'document', 'sec-fetch-site': 'none' } })
+
+test('a site door serves its website to a visitor, and /@hypercomb marks the browser and serves the shim', async () => {
+  const { env, assetRequests } = await fixture()
+  env.DEBUGGER_SHELL_ORIGIN = 'https://debugger.example'
+  await withShim(async (seen) => {
+    // A visitor: the website, and the shim is never asked.
+    const site = await worker.fetch(new Request('https://revolucion.pluginthematrix.com/'), env)
+    assert.equal(await site.text(), 'visitor engine')
+    assert.equal(site.headers.get('set-cookie'), null)
+    assert.deepEqual(seen, [])
+    // The trigger: the shim's management page, and the mark set, first-party and unreadable by script.
+    const trigger = await worker.fetch(typed('https://revolucion.pluginthematrix.com/@hypercomb'), env)
+    assert.equal(trigger.status, 200)
+    assert.match(await trigger.text(), /<title>shim<\/title>/)
+    assert.deepEqual(seen, ['https://debugger.example/@hypercomb'])
+    const cookie = trigger.headers.get('set-cookie') ?? ''
+    assert.match(cookie, /^__Host-hc-manage=1;/)
+    assert.match(cookie, /HttpOnly/)
+    assert.match(cookie, /Secure/)
+    assert.match(cookie, /SameSite=Lax/)
+    // Signing stays the owner's: the management page is not pinned off.
+    assert.equal(pages(assetRequests).length, 1)
+  })
+})
+
+test('a marked browser gets the shim at the root and for the shim\'s own files, its bootstrap included', async () => {
+  const { env } = await fixture()
+  env.DEBUGGER_SHELL_ORIGIN = 'https://debugger.example'
+  await withShim(async (seen) => {
+    const root = await worker.fetch(marked('https://revolucion.pluginthematrix.com/'), env)
+    assert.match(await root.text(), /<title>shim<\/title>/)
+    assert.doesNotMatch(await (await worker.fetch(marked('https://revolucion.pluginthematrix.com/@hypercomb'), env)).text(), /Object\.defineProperty\(window,"nostr"/)
+    await worker.fetch(marked('https://revolucion.pluginthematrix.com/main.js'), env)
+    await worker.fetch(marked('https://revolucion.pluginthematrix.com/pin'), env)
+    // The pinned bootstrap is a bare signature the heap does not hold: it comes from the shim's deployment.
+    const pin = 'c'.repeat(64)
+    const bootstrap = await worker.fetch(marked(`https://revolucion.pluginthematrix.com/${pin}`), env)
+    assert.equal(await bootstrap.text(), 'bootstrap bytes')
+    assert.deepEqual(seen, [
+      'https://debugger.example/', 'https://debugger.example/@hypercomb', 'https://debugger.example/main.js',
+      'https://debugger.example/pin', `https://debugger.example/${pin}`,
+    ])
+    // An already-marked browser is not marked again.
+    assert.equal((await worker.fetch(marked('https://revolucion.pluginthematrix.com/@hypercomb'), env)).headers.get('set-cookie'), null)
+  })
+})
+
+test('the leave route takes the mark and the shim\'s service worker away', async () => {
+  const { env } = await fixture()
+  env.DEBUGGER_SHELL_ORIGIN = 'https://debugger.example'
+  await withShim(async (seen) => {
+    const leave = await worker.fetch(marked('https://revolucion.pluginthematrix.com/@hypercomb/leave'), env)
+    assert.equal(leave.status, 200)
+    assert.match(leave.headers.get('set-cookie') ?? '', /^__Host-hc-manage=;.*Max-Age=0/)
+    const page = await leave.text()
+    assert.match(page, /serviceWorker\.getRegistrations/)
+    assert.match(page, /location\.replace\("\/"\)/)
+    assert.match(leave.headers.get('content-security-policy') ?? '', /default-src 'none'/)
+    assert.deepEqual(seen, [])
+  })
+})
+
+test('management never opens on a zone root, nor answers /content/ files differently', async () => {
+  const { env } = await fixture()
+  env.DEBUGGER_SHELL_ORIGIN = 'https://debugger.example'
+  await withShim(async (seen) => {
+    // The apex is the zone root: its pages are its own, marked or not.
+    const apex = await worker.fetch(marked('https://pluginthematrix.com/'), env)
+    assert.equal(await apex.text(), 'visitor engine')
+    const trigger = await worker.fetch(typed('https://pluginthematrix.com/@hypercomb'), env)
+    assert.equal(trigger.headers.get('set-cookie'), null)
+    // A /content/ file on a managed site door is the same file for everyone.
+    await worker.fetch(marked('https://revolucion.pluginthematrix.com/content/file.json'), env)
+    assert.deepEqual(seen, [])
+  })
+})
+
+test('only a visit the owner made marks the browser: never a link from elsewhere, an image, or a zone-wide cookie', async () => {
+  const { env } = await fixture()
+  env.DEBUGGER_SHELL_ORIGIN = 'https://debugger.example'
+  await withShim(async () => {
+    const asked = (headers) => worker.fetch(new Request('https://revolucion.pluginthematrix.com/@hypercomb', { headers }), env)
+    // A link from another site, an image from a sibling, a script's fetch: the page at most, never the mark.
+    assert.equal((await asked({ 'sec-fetch-dest': 'document', 'sec-fetch-site': 'cross-site' })).headers.get('set-cookie'), null)
+    assert.equal((await asked({ 'sec-fetch-dest': 'image', 'sec-fetch-site': 'same-site' })).headers.get('set-cookie'), null)
+    assert.equal((await asked({ 'sec-fetch-dest': 'empty', 'sec-fetch-site': 'same-origin' })).headers.get('set-cookie'), null)
+    assert.equal((await asked({})).headers.get('set-cookie'), null)
+    // Followed from this same site, or with the trailing slash: marked.
+    assert.match((await asked({ 'sec-fetch-dest': 'document', 'sec-fetch-site': 'same-origin' })).headers.get('set-cookie') ?? '', /^__Host-hc-manage=1;/)
+    assert.match((await worker.fetch(typed('https://revolucion.pluginthematrix.com/@hypercomb/'), env)).headers.get('set-cookie') ?? '', /^__Host-hc-manage=1;/)
+    // A plain hc-manage cookie (one a sibling could lay zone-wide) counts for nothing.
+    const plain = await worker.fetch(new Request('https://revolucion.pluginthematrix.com/', { headers: { cookie: 'hc-manage=1' } }), env)
+    assert.equal(await plain.text(), 'visitor engine')
+  })
+})
+
+test('management opens only on a site published here, never on a made-up name under the zone', async () => {
+  const { env } = await fixture()
+  env.DEBUGGER_SHELL_ORIGIN = 'https://debugger.example'
+  await withShim(async (seen) => {
+    const made = await worker.fetch(typed('https://account-recovery.pluginthematrix.com/@hypercomb'), env)
+    assert.equal(made.headers.get('set-cookie'), null)
+    assert.notEqual(made.status, 200)
+    assert.deepEqual(seen, [])
+  })
+})
+
 // ── the swarm door (documentation/swarm-pools.md, step four) ──────────────
 // swarm.<zone> is the host's one room door: the participant shell, pinned to
 // the package the zone's publisher signed as `install:swarm` — never the live
