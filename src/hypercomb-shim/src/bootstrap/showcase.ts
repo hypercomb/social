@@ -574,6 +574,10 @@ export type ShowcaseOptions = {
    *  first creation will go"): drawn first in this domain's row only while the row holds nothing and no doors were
    *  staged. Not a link, not a switch — a place. */
   readonly phantom?: boolean
+  /** THE PLATFORM'S LINKS ARE BUTTONS IN THE HEADER (jwize 2026-11-12: "instead of the default tile links put them in
+   *  the header to the right as buttons"): the tour, the app, source, licensing — whichever this host did not stage
+   *  as tiles of its own — drawn at the right end of the brand row, never in the list. */
+  readonly headerLinks?: readonly WelcomeLink[]
   /** Follow a domain: checked, then kept in this browser's community. */
   /** Stop following a domain: forget it where the browser kept it. True when it is gone. */
   readonly unfollow?: (zone: string) => Promise<boolean>
@@ -627,12 +631,31 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   words.append(title, tagline)
   const stats = el('p', 'hero-stats')
   brand.append(mark, words, stats)
+  const headerLinks = options.headerLinks ?? []
+  if (headerLinks.length > 0) {
+    const nav = el('nav', 'hero-links')
+    nav.setAttribute('aria-label', 'About hypercomb')
+    for (const link of headerLinks) {
+      const button = el('a', 'hero-link')
+      button.href = link.href
+      // Somewhere else on the web opens in its own tab; this origin is this site still.
+      if (button.origin !== location.origin) { button.target = '_blank'; button.rel = 'noopener' }
+      button.title = link.note ? `${link.label} · ${link.note}` : link.label
+      button.setAttribute('aria-label', link.label)
+      const label = el('span')
+      label.textContent = link.label
+      button.append(iconOf(link.icon ?? 'link'), label)
+      nav.append(button)
+    }
+    brand.append(nav)
+  }
   // JUST A SEARCH AND THE TILES (jwize 2026-11-10: "just a search and the tiles no informational header by default"):
   // the mark, the name, its sentence and the counts show only while editing, where they say which domain is being
   // edited. A room, when the owner hosts one, stays: it is a door, not information.
   const paintBrand = (on: boolean): void => {
     for (const part of [mark, words, stats]) part.hidden = !on
-    brand.hidden = !on && !options.swarm
+    // The header's links are doors too: they keep the row up, alone at its right end, outside editing.
+    brand.hidden = !on && !options.swarm && headerLinks.length === 0
   }
   // THE ROOM FIRST: a front page whose owner hosts a swarm says so before
   // anything else (room host <domain>). The link carries no words a reader
@@ -1263,6 +1286,8 @@ ${entry.key}`
     placeFlat(grid, tiles.slice(dockCount))
     placeFlat(dock, tiles.slice(0, dockCount))
     dock.hidden = dockCount === 0
+    // An empty row draws no empty phone: the line above it and the phantom say what is (not) here.
+    ;(spring as HTMLElement).hidden = tiles.length === 0
     combTiles.set(comb, tiles)
   }
   // ── THE PHONE'S LANES (jwize 2026-11-05: "we want the lanes look for the showcase"): the open row's hexagons sit in a
@@ -1809,21 +1834,16 @@ ${entry.key}`
     return terms.every(term => words.includes(term))
   }
 
-  // ── THE PHANTOM: where this hive's first creation will go. The same hexagon, empty and quiet, never a link ──
-  let phantomTile: HTMLElement | null = null
-  const phantomOf = (): HTMLElement => {
-    if (phantomTile) return phantomTile
-    const tile = el('span', 'hex hex-phantom')
-    tile.title = 'Your first creation will go here'
-    const art = el('span', 'hex-art phantom-art')
-    const label = el('span', 'hex-label')
-    const name = el('span', 'hex-name')
-    name.textContent = 'your first creation'
-    label.append(name)
-    tile.append(art, label)
-    phantomTile = tile
-    return tile
-  }
+  // ── THE PHANTOM: where this hive's first creation will go. One quiet row under the empty line, the same in every
+  //    view (jwize 2026-11-12: "you can use a hexagon for the hexagon view but the same size and icon to the left. The
+  //    full row can be the row"): a small empty icon in the shape the offerings wear in this view, and its words.
+  //    Never a tile in the comb, never a link. ──
+  const phantomRow = el('div', 'phantom-row')
+  phantomRow.title = 'Your first creation will go here'
+  phantomRow.hidden = true
+  const phantomName = el('span', 'phantom-name')
+  phantomName.textContent = 'your first creation'
+  phantomRow.append(el('span', 'phantom-icon'), phantomName)
   /** Every publish known now — the ledger's, then each domain's pools — one tile per name. */
   const bands = (): Band[] => {
     const peers = [...peerSites.values()]
@@ -2008,7 +2028,12 @@ ${entry.key}`
       const temp = pending.get(zone)
       view.meta.textContent = temp ? (temp.state === 'checking' ? 'Checking…' : 'Not found') : count(items.length + (own ? links.length : 0), 'tile', 'tiles')
       view.section.classList.toggle('missing', temp?.state === 'missing')
-      arrange(view.comb, open ? [...(phantom ? [phantomOf()] : []), ...shown.map(entry => {
+      if (own) {
+        phantomRow.hidden = !(open && phantom)
+        phantomRow.dataset['shape'] = shape
+        if (phantomRow.previousElementSibling !== view.empty) view.empty.after(phantomRow)
+      }
+      arrange(view.comb, open ? [...shown.map(entry => {
         const tile = tileView(entry, zone)
         // In another domain's row, a tile already on this domain's page says so.
         tile.classList.toggle('in-showcase', !own && showcased(entry))
@@ -2192,6 +2217,16 @@ export const SHOWCASE_STYLE = `
   box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--md-primary) 70%, transparent); }
 .hero-swarm:hover, .hero-swarm:focus-visible { filter: brightness(1.06); }
 .hero-swarm svg { width: 1.05rem; height: 1.05rem; }
+/* the platform's links: small outlined buttons at the right end of the brand row */
+.hero-links { flex: 0 1 auto; min-width: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .4rem; margin-left: auto; }
+.hero-link { display: inline-flex; align-items: center; gap: .4rem; padding: .35rem .7rem; border-radius: var(--hc-radius-control, 2px);
+  border: 1px solid color-mix(in srgb, var(--gold-2) 38%, var(--md-outline-variant)); color: var(--md-on-surface-var);
+  font: 500 .8rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); text-decoration: none; white-space: nowrap;
+  transition: color .2s, border-color .2s, background .2s; }
+.hero-link svg { flex: none; width: .95rem; height: .95rem; color: var(--gold-2); }
+.hero-link:hover, .hero-link:focus-visible { color: var(--md-on-surface-strong); border-color: var(--gold-2);
+  background: color-mix(in srgb, var(--gold-2) 10%, transparent); }
+.hero-link:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
 /* the header: a small brand row, then the search across the full width. The
    brand takes at most 2.5 times the search's height, margins and all (jwize
    2026-10-24) — lean, never cramped. */
@@ -2440,10 +2475,18 @@ a.hex { color: inherit; text-decoration: none; cursor: pointer; }
 .link-art { display: block; background: linear-gradient(160deg, #1d2733, #10161e); color: var(--gold-2); }
 .link-art > svg { position: relative; z-index: 1; display: block; width: 38%; height: 38%; margin: 20% 31% 0; opacity: .95; }
 .hex-link:hover .link-art, .hex-link:focus-visible .link-art { color: var(--gold-1); }
-/* the phantom: an empty hexagon, a thin gold edge around nothing, where the first creation will go */
-.hex.hex-phantom { background: color-mix(in srgb, var(--gold-2) 28%, transparent); opacity: .7; cursor: default; }
-.hex-phantom > .phantom-art { inset: 2px; background: #0b1017; }
-.hex-phantom .hex-name { color: var(--md-on-surface-var); font-weight: 500; }
+/* the phantom: one quiet row, a small empty icon in the view's shape and its words */
+.phantom-row { display: flex; align-items: center; gap: .75rem; min-height: 3.4rem; margin: .5rem 0 0; padding: .45rem .75rem; box-sizing: border-box;
+  border: 1px dashed var(--md-outline-variant); border-radius: var(--hc-radius-card, 3px); color: var(--md-on-surface-var);
+  font: 500 1rem/1.3 var(--md-font-ui, Inter, system-ui, sans-serif); opacity: .8; }
+.phantom-row[hidden] { display: none; }
+.comb[data-shape='iphone'] .spring[hidden] { display: none; }
+.phantom-icon { flex: none; box-sizing: border-box; width: 2.6rem; height: 2.6rem; border: 1px dashed color-mix(in srgb, var(--gold-2) 55%, transparent); border-radius: 22%; }
+.phantom-row[data-shape='tiles'] .phantom-icon { border-radius: 0; }
+/* a clipped hexagon cannot wear a border: a thin gold hexagon with a dark one inside it */
+.phantom-row[data-shape='hex'] .phantom-icon { position: relative; width: 2.6rem; height: calc(2.6rem * 1.1547); border: 0; border-radius: 0;
+  clip-path: var(--hex); background: color-mix(in srgb, var(--gold-2) 45%, transparent); }
+.phantom-row[data-shape='hex'] .phantom-icon::after { content: ''; position: absolute; inset: 1px; clip-path: var(--hex); background: #0b1017; }
 .hex-link:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 3px; }
 /* following a domain: a search that found nothing offers it, and the foot always can */
 .follow-suggest { display: flex; margin: 0 0 1.2rem; }
@@ -2598,6 +2641,7 @@ a.version-visit { color: var(--md-primary); }
   .hero h1 { font-size: 1.2rem; }
   /* the sentence goes on a phone: the name, the count and the search are the header */
   .hero-tagline { display: none; }
+  /* the header's links are the same buttons on a phone as on a desktop (jwize 2026-11-12: "make them the same") */
   .mini { width: 1.8rem; height: calc(1.8rem * 1.1547); margin-left: -.55rem; }
   .comb { --s: 6.1rem; --g: .18rem; }
   .comb[data-shape='launcher'] { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.1rem .7rem; }
