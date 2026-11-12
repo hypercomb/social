@@ -3508,9 +3508,82 @@ function debuggerShellOrigin(env) {
   return String(env.DEBUGGER_SHELL_ORIGIN || env.HOST_DOOR_ORIGIN || '').replace(/\/+$/, '')
 }
 
-async function serveSandboxShell(request, env, zone) {
+// MANAGEMENT ON A SITE'S OWN ADDRESS (jwize, 2026-11-12: "just have a keyboard
+// shortcut or some url trigger to set up the key and then once set up the root
+// serves correctly", "'@hypercomb' could do that ... to reflect management",
+// "the key is enough"). A site door — <name>.<zone> — serves the read-only
+// website to everyone. Its owner opens `/@hypercomb` there once: this worker
+// marks that browser (a first-party cookie, `hc-manage`, set only by that
+// deliberate visit), and from then on every page path on that site door — `/`
+// included — is the framework-free shim for that browser, where the owner's
+// key (device key or the hive beside it) opens Manage, the chat and the tiles.
+// The mark only chooses which page is served; it grants nothing. Without the
+// key the shim is the host and the community. `/@hypercomb/leave` takes the
+// mark and the shim's service worker away, and the site is the site again.
+// Visitors are never marked, so nothing changes for them.
+// __Host-: a browser refuses it with a Domain attribute or from a non-secure
+// origin, so no sibling subdomain can lay a zone-wide copy that leave cannot clear.
+const MANAGE_COOKIE = '__Host-hc-manage'
+const MANAGE_PATH = '/@hypercomb'
+const MANAGE_LEAVE_PATH = '/@hypercomb/leave'
+const MANAGE_MARK_RE = /(?:^|;\s*)__Host-hc-manage=1(?:\s*;|$)/
+
+/** The trigger, with or without its trailing slash, as the shim reads it. */
+const isManagePath = (pathname) => pathname === MANAGE_PATH || pathname === MANAGE_PATH + '/'
+const isLeavePath = (pathname) => pathname === MANAGE_LEAVE_PATH || pathname === MANAGE_LEAVE_PATH + '/'
+
+/** A visit the owner made on purpose: a top-level page load they typed, or
+ *  followed from this same site. A link from elsewhere, a redirect, an image or
+ *  a script's request is never one, so nothing but the owner sets the mark. */
+function deliberateVisit(request) {
+  const dest = String(request.headers.get('sec-fetch-dest') || '').toLowerCase()
+  const site = String(request.headers.get('sec-fetch-site') || '').toLowerCase()
+  return dest === 'document' && (site === 'none' || site === 'same-origin')
+}
+
+/** This browser asked for management on this site door. */
+function managing(request) {
+  return MANAGE_MARK_RE.test(request.headers.get('cookie') || '')
+}
+
+/** The mark, set (a year) or taken away. HttpOnly: no page script reads it; only this worker does. */
+function manageCookie(on) {
+  return `${MANAGE_COOKIE}=${on ? '1' : ''}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${on ? 31536000 : 0}`
+}
+
+/** Back to the website: the mark goes, and the shim's service worker with it (it would
+ *  otherwise keep answering this origin), then `/`. Script only, nothing else. */
+function serveManageLeave() {
+  const page = '<!doctype html><meta charset="utf-8"><title>Back to the site</title>'
+    + '<script>(async function(){try{var r=await navigator.serviceWorker.getRegistrations();await Promise.all(r.map(function(x){return x.unregister()}))}catch(e){}location.replace("/")})()</script>'
+  return new Response(page, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Set-Cookie': manageCookie(false),
+      'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+      'Referrer-Policy': 'no-referrer',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  })
+}
+
+/** The site door's management page: the framework-free shim, as a try- door
+ *  serves it, but signing stays the owner's (it is not pinned off) — and on the
+ *  trigger path the mark is set. */
+async function serveManagement(request, env, zone, { setMark = false } = {}) {
+  const served = await serveSandboxShell(request, env, zone, { management: true })
+  if (!setMark) return served
+  const headers = new Headers(served.headers)
+  headers.append('Set-Cookie', manageCookie(true))
+  headers.set('Cache-Control', 'no-store')
+  return new Response(served.body, { status: served.status, headers })
+}
+
+async function serveSandboxShell(request, env, zone, { management = false } = {}) {
   const url = new URL(request.url)
-  const debuggerDoor = SANDBOX_LABEL_RE.test(url.hostname.split('.')[0])
+  const debuggerDoor = management || SANDBOX_LABEL_RE.test(url.hostname.split('.')[0])
   const origin = debuggerDoor ? debuggerShellOrigin(env) : String(env.SANDBOX_SHELL_ORIGIN || '').replace(/\/+$/, '')
   const loopback = /^http:\/\/((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3})(:\d{1,5})?$/i.test(origin)
   // The shim's files are its own, at their own paths; only the web shell's
@@ -3546,7 +3619,9 @@ async function serveSandboxShell(request, env, zone) {
     // A try- door's package has full page power, and it arrives only after
     // this document. The signer is pinned here, while the page is still the
     // shell's, so the package cannot put window.nostr back. A swarm door
-    // signs; it is not pinned.
+    // signs; it is not pinned. Nor is a site door's management page: there
+    // the owner publishes with their own key (debugger-chat.md, "the key").
+    if (management) return new Response(request.method === 'HEAD' ? null : upstream.body, { status: upstream.status, headers })
     if (debuggerDoor) return new Response(pinNostrOff(await upstream.text()), { status: upstream.status, headers })
     const page = (await upstream.text())
       .replace(SHELL_BUNDLE_RE, (_, attr, file) => `${attr}="${SHELL_PREFIX}${file}"`)
@@ -6988,6 +7063,24 @@ const router = {
     }
     scope.cardDoorAt = cardDoorAt
 
+    // A SITE DOOR MANAGEMENT MAY OPEN ON (serveManagement): a published site
+    // under a zone — never an apex, a front door, the host door, a try- door or
+    // the swarm door, which all have pages of their own.
+    const managedSiteDoor = async () => {
+      const routed = await route()
+      const site = routed.site
+      if (!site || routed.apex || routed.hostDoor || site.frontDoor) return null
+      if (isZoneRoot(routed.env, requestUrl.hostname)) return null
+      if (routed.implicit && (SANDBOX_LABEL_RE.test(site.lineage) || site.lineage === SWARM_DOOR_LABEL)) return null
+      // NOTHING BUT THE CARD RUNS ON A CARD-DOOR ORIGIN: what a visitor keeps
+      // there (their Hyperdex) is the card page's alone, so no shim opens on it.
+      if (await cardDoorAt()) return null
+      // Only a site published here: a made-up name under the zone stays nothing.
+      const opened = await siteOpen(routed.env, site, pageReader(routed.env), requestUrl.hostname, true)
+      if (!opened.open) return null
+      return routed
+    }
+
     // DOORS WRITE NOTHING, at any host this worker serves. A signed request
     // from a door — the visitor's own key through NIP-07, or one the package
     // minted — would write as if the visitor's hive had. Assessing, taking,
@@ -7255,6 +7348,15 @@ const router = {
           || (await route()).hostDoor) && !await cardDoorAt()) {
           return serveFrontDoor(request, env)
         }
+        // A site door being managed in this browser runs the shim, whose own
+        // bytes (its pinned bootstrap) live with its deployment, not the heap.
+        if (heap.status === 404 && !probe && !isAlias && !named && managing(request) && method === 'GET') {
+          const managed = await managedSiteDoor()
+          if (managed) {
+            const shell = await serveManagement(request, env, managed.zone)
+            if (shell.ok && !String(shell.headers.get('content-type') || '').includes('text/html')) return shell
+          }
+        }
         return miss(heap)
       }
       if (method === 'PUT' && !isAlias && !named) return putSig(request, env, sigMatch[2])
@@ -7385,6 +7487,23 @@ const router = {
     // door, so a link to /hosts or /@hypercomb still reaches the card.
     if (routed.apex && (pathname === '/hosts' || pathname === '/@hypercomb') && (method === 'GET' || method === 'HEAD')) {
       return new Response(null, { status: 302, headers: { Location: `${requestUrl.protocol}//${HOST_DOOR_LABEL}.${requestUrl.hostname}${pathname}${requestUrl.search}`, ...CORS } })
+    }
+
+    // MANAGEMENT ON A SITE DOOR (serveManagement): `/@hypercomb` marks this
+    // browser and serves the shim; while marked, every page path here is the
+    // shim; `/@hypercomb/leave` takes the mark away. /content/ files and the
+    // machine endpoints above are the same for everyone.
+    if ((method === 'GET' || method === 'HEAD') && !pathname.startsWith('/content/')
+      && (isManagePath(pathname) || isLeavePath(pathname) || managing(request))) {
+      const managed = await managedSiteDoor()
+      if (managed) {
+        if (isLeavePath(pathname)) return serveManageLeave()
+        // The mark is set only by a visit the owner made on purpose; any other
+        // request for the trigger gets the page once and marks nothing.
+        return serveManagement(request, env, managed.zone, {
+          setMark: isManagePath(pathname) && !managing(request) && deliberateVisit(request),
+        })
+      }
     }
 
     // A CARD DOOR (the app address, above): `/` is its card and every other
