@@ -133,6 +133,10 @@ export type CostClass =
 export const costOf = (provider: LlmProviderDescriptor): CostClass => {
   if (provider.transport === 'peer-swarm') return 'peer'
   if (provider.transport === 'agent-bridge') return 'bridge'
+  // A SUBSCRIPTION SERVED ON THIS MACHINE (a keyless loopback endpoint that
+  // names its account) is reached like a local model, but the prompt goes to
+  // the vendor on a plan already paid — the bridge's bill, not "local".
+  if (provider.requiresKey === false && provider.account) return 'bridge'
   return provider.requiresKey === false ? 'local' : 'keyed'
 }
 
@@ -453,7 +457,7 @@ export const explainChoice = (need: ModelNeed = {}): string => {
   const cost = costOf(chosen)
   const why = cost === 'local' ? 'runs on this machine'
     : cost === 'peer' ? 'offered by another participant'
-    : cost === 'bridge' ? 'a bridged session, which can read the hive'
+    : cost === 'bridge' ? (chosen.readsHive ? 'a bridged session, which can read the hive' : `your ${chosen.account ?? 'subscription'}`)
     : 'the key you configured'
   return `${chosen.label} — ${why}; ${plan}${headroom}`
 }

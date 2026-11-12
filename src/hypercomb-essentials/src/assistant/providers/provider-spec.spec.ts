@@ -183,3 +183,32 @@ describe('agent-bridge specs', () => {
     expect(descriptor.vendor).toBe('google')
   })
 })
+
+describe('a subscription served on this machine', () => {
+  const subscription = (over: Record<string, unknown> = {}): Record<string, unknown> => base({
+    id: 'grok-subscription',
+    label: 'Grok (subscription)',
+    vendor: 'xai',
+    endpoint: 'http://127.0.0.1:11435/v1',
+    requiresKey: false,
+    account: 'Grok subscription (grok.com)',
+    models: [{ name: 'grok', id: 'grok-4.7', tier: 'deep' }],
+    defaultModel: 'grok-4.7',
+    ...over,
+  })
+
+  it('carries its account into the descriptor and sends no key', () => {
+    const descriptor = compileProviderSpec(parseProviderSpec(subscription()) as LlmProviderSpec)
+    expect(descriptor.account).toBe('Grok subscription (grok.com)')
+    expect(descriptor.requiresKey).toBe(false)
+    const http = descriptor.toRequest(REQUEST)
+    expect(http.url).toBe('http://127.0.0.1:11435/v1/chat/completions')
+    expect((http.init.headers as Record<string, string>)['Authorization']).toBeUndefined()
+  })
+
+  it('refuses an account off this machine, behind a key, or on a bridge', () => {
+    expect(() => parseProviderSpec(subscription({ endpoint: 'https://grok.example/v1' }))).toThrow(/account/)
+    expect(() => parseProviderSpec(subscription({ requiresKey: true }))).toThrow(/account/)
+    expect(() => parseProviderSpec(bridgeSpec({ account: 'Gemini plan' }))).toThrow(/account/)
+  })
+})

@@ -80,6 +80,14 @@ export type LlmProviderSpec = {
   readonly docsUrl: string
   readonly keyPattern?: string
   readonly requiresKey?: boolean
+  /** The plan a keyless LOOPBACK endpoint answers through ("Grok subscription
+   *  (grok.com)") — a subscription CLI served on this machine
+   *  (scripts/subscription/grok-endpoint.cjs). It is what moves the row from
+   *  "this machine, nothing leaves" to "a bill already signed": the prompt
+   *  goes to the vendor, so calling it local would be a lie. Refused anywhere
+   *  else — a remote endpoint claiming your subscription is not on your
+   *  machine to vouch for. */
+  readonly account?: string
   /** Only an agent-bridge may claim it — the registry's honesty badge. */
   readonly readsHive?: boolean
   /** peer-swarm only: the pubkey of the participant whose machine runs it.
@@ -114,6 +122,12 @@ const isAcceptableEndpoint = (url: string): boolean => {
     if (parsed.protocol !== 'http:') return false
     return ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
   } catch { return false }
+}
+
+/** Is this endpoint this machine itself? */
+const isLoopbackEndpoint = (url: string): boolean => {
+  try { return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(url).hostname) }
+  catch { return false }
 }
 
 /**
@@ -194,6 +208,14 @@ export const parseProviderSpec = (json: unknown): LlmProviderSpec => {
     fail(`spec "${id}" may not claim readsHive — only an agent-bridge reads the hive`)
   }
 
+  const account = cleanString(raw['account'])
+  if (account) {
+    if (account.length > 80) fail(`spec "${id}" account must be a short phrase`)
+    if (addressless || raw['requiresKey'] !== false || !isLoopbackEndpoint(endpoint)) {
+      fail(`spec "${id}" may name an account only as a keyless endpoint on this machine`)
+    }
+  }
+
   const auth = raw['auth'] as LlmAuthStyle | undefined
   if (auth !== undefined) {
     if (addressless) fail(`spec "${id}" is a ${shape} and takes no auth`)
@@ -217,6 +239,7 @@ export const parseProviderSpec = (json: unknown): LlmProviderSpec => {
     docsUrl,
     ...(keyPattern ? { keyPattern } : {}),
     ...(addressless || raw['requiresKey'] === false ? { requiresKey: false } : {}),
+    ...(account ? { account } : {}),
     ...(bridge ? { readsHive: true } : {}),
   }
 }
@@ -279,6 +302,7 @@ const compileSpec = (spec: LlmProviderSpec): LlmProviderDescriptor => {
     docsUrl: spec.docsUrl,
     ...(spec.keyPattern ? { keyPattern: new RegExp(spec.keyPattern) } : {}),
     ...(bridge || peer || spec.requiresKey === false ? { requiresKey: false } : {}),
+    ...(spec.account ? { account: spec.account } : {}),
     ...(bridge ? { readsHive: true } : {}),
     ...(peer && spec.peer ? { peer: spec.peer } : {}),
   }

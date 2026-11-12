@@ -75,6 +75,11 @@ describe('costOf', () => {
     expect(costOf(BRIDGE)).toBe('bridge')
     expect(costOf(KEYED)).toBe('keyed')
   })
+
+  it('a subscription served on this machine is a bill already signed, not local', () => {
+    const plan = descriptor({ id: 'grok-subscription', vendor: 'xai', requiresKey: false, account: 'Grok subscription' })
+    expect(costOf(plan)).toBe('bridge')
+  })
 })
 
 describe('choosing without a pin', () => {

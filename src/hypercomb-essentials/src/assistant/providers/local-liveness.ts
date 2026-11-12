@@ -177,7 +177,13 @@ export const machineLocalEndpoint = (provider: LlmProviderDescriptor): string =>
   if (!raw) return ''
   try {
     const url = new URL(raw)
-    return LOOPBACK.test(url.hostname) ? raw.replace(/\/+$/, '') : ''
+    // The SERVER, not the API path: an openai-family spec names its base the
+    // conventional way (`…:11434/v1`, sometimes `…/v1/chat/completions`), and
+    // the probe appends `/v1/models` itself — kept, it asked `/v1/v1/models`
+    // and read a running server as one that refused the page.
+    return LOOPBACK.test(url.hostname)
+      ? raw.replace(/\/+$/, '').replace(/\/chat\/completions$/, '').replace(/\/v1$/, '')
+      : ''
   } catch { return '' }
 }
 
