@@ -574,6 +574,39 @@ describe('tiles rail gestures — every row is a conversation', () => {
     expect(list.scrollTop).toBe(240)
   })
 
+  it('a browser BACK (showLevel onto a level walked through) lands where the list was scrolled', async () => {
+    const list = host.querySelector('.hc-rail-list') as HTMLElement
+    let scrolled = 0
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true, get: () => scrolled, set: (v: number) => { scrolled = v },
+    })
+    let moved = 0
+    rail.onLevelChanged = () => { moved++ }
+    list.scrollTop = 180
+    rows()[0].click()
+    await settle()
+    expect(rail.here()).toEqual(['pheromone-workflow'])
+    moved = 0
+
+    // BACK: the address moved first, the list follows and announces nothing.
+    rail.showLevel([])
+    await settle()
+    expect(rail.here()).toEqual([])
+    expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
+    expect(list.scrollTop).toBe(180)
+    expect(moved).toBe(0)
+
+    // FORWARD steps back in — and the trail still has the way out.
+    list.scrollTop = 120
+    rail.showLevel(['pheromone-workflow'])
+    await settle()
+    expect(names(host)).toEqual(['inside'])
+    expect(list.scrollTop).toBe(0)
+    await back()
+    expect(rail.here()).toEqual([])
+    expect(list.scrollTop).toBe(120)
+  })
+
   it('← lands the keyboard on the row it came out of', async () => {
     rows()[2].click()
     await settle()

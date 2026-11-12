@@ -661,9 +661,34 @@ export class AgentTilesRail {
   showLevel(segments: readonly string[]): void {
     const path = [...segments].map(s => String(s ?? '')).filter(Boolean)
     this.#seeded = true
-    if (pathKey(path) === pathKey(this.#here())) { this.refresh(); return }
+    const here = this.#here()
+    const key = pathKey(path)
+    if (key === pathKey(here)) { this.refresh(); return }
     this.#query = ''
     if (this.#find) this.#find.value = ''
+
+    // A BROWSER BACK onto a level this list walked through steps OUT along
+    // the trail, the way the list's own back does: the level comes back
+    // scrolled where it was left, with the row it was left through in view.
+    // Nothing is announced — the address already moved.
+    const at = this.#trail.findIndex(level => pathKey(level) === key)
+    if (at >= 0 && path.length < here.length && pathKey(here.slice(0, path.length)) === key) {
+      this.#trail.length = at + 1
+      this.#returning = { level: key, out: pathKey(here.slice(0, path.length + 1)) }
+      void this.#load(-1)
+      return
+    }
+    // A FORWARD one level inside the level in hand steps IN, remembering
+    // where this level was scrolled for the way back.
+    if (path.length === here.length + 1 && pathKey(path.slice(0, -1)) === pathKey(here)) {
+      if (this.#list) this.#scrolls.set(pathKey(here), this.#list.scrollTop)
+      this.#returning = null
+      this.#trail.push(path)
+      void this.#load(1)
+      return
+    }
+
+    this.#returning = null
     this.#trail = [[]]
     for (let i = 1; i <= path.length; i++) this.#trail.push(path.slice(0, i))
     void this.#load(0)
