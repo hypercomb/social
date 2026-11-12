@@ -3864,6 +3864,8 @@
   "chat.header.view": "Open the {name} view",
   "chat.header.behavior": "Behavior on this layer: {name}",
   "chat.lite.empty": "設定したAIに質問してください。許可したビヘイビアでハイブを変更できますが、まだハイブを読むことはできません。",
+  "chat.lite.noai": "このページにはまだAIが設定されていません。始めるにはプロバイダーかキーを追加してください。",
+  "chat.lite.setup": "AIを設定",
   "chat.lite.stop": "停止",
   "chat.lite.ran": "実行しました:",
   "chat.lite.skipped": "スキップしました。何も変わっていません:",

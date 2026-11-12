@@ -2808,6 +2808,8 @@
   "chat.placeholder": "Ask anything.",
   "chat.send": "Send",
   "chat.lite.empty": "Ask the AI you have set up. It can change your hive with the behaviours you granted it; it cannot read your hive yet.",
+  "chat.lite.noai": "No AI is set up on this page yet. Add a provider or a key to start.",
+  "chat.lite.setup": "Set up AI",
   "chat.lite.stop": "Stop",
   "chat.lite.ran": "Ran:",
   "chat.lite.skipped": "Skipped, nothing changed:",

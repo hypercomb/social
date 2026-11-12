@@ -27,6 +27,59 @@ What is not yet said, and decides how this is built:
 
 This page is that spec. It adds no new mechanism where one exists: the subdomain is the mission door of [build-debug-isolation.md](build-debug-isolation.md), a revision is a signature ([build-revisions.md](build-revisions.md)), and a change comes home through the brood ([module-sandbox.md](module-sandbox.md)).
 
+## The same chat and the same tile navigation, with no Angular (2026-11-11)
+
+jwize, the same day: "It is the same chat." "It is the minimal (meaning no angular)." "The idea is you have the same chat and tile nav so you can create and update the website or application."
+
+So the page at a subdomain has the hypercomb.io chat and the hypercomb.io tile navigation, the same code with no Angular under it. "Minimal" means no Angular, never fewer features. Nothing is reimplemented beside the Angular version: each piece is ported, and the same change deletes the Angular copy. The cut-down chat written earlier that day (essentials `assistant/chat.view.ts`, `chat-work.ts`) duplicates parts of the Angular chat and is absorbed or deleted by the port, never grown.
+
+Two read-only maps were made of what has to move (236 parts of the chat window; the command line, controls bar, edit actions, publish panel, dialogs and the canvas). What already works on the Angular-free page: the canvas draws tiles, a click goes into a tile, right-click or Shift+click goes back out, pan, zoom and touch work. Everything else a builder uses is still Angular.
+
+### The port, in order
+
+Each step leaves the chat and the navigation working in both the Angular shells and the Angular-free page, and deletes the Angular code it replaces.
+
+| # | Step | What a builder can do on the Angular-free page afterwards |
+|---|---|---|
+| 1 | Confirm dialog as an element | Every act that waits on a yes (publish, remove, prune, keys) can finish. Until this moves, those acts wait forever there. |
+| 2 | Toasts as an element | See every "saved", "published" and "could not" line. |
+| 3 | Website view and the editor's pencil (three services move to the runtime; website-nav folds into the site view) | Enter the site being built, leave it, and open the tile editor from a tile. |
+| 4 | Edit actions as an element | Undo, redo and the selection verbs by mouse. |
+| 5 | The chat's pure logic moves down: the read grammar, withheld reads, context compiler, effort, plan transaction, owed step, execution line | Nothing visible yet; the chat logic is now reachable without Angular. |
+| 6 | The host tier and its run registry move to the chat bee | Absorbs the cut-down chat's host fallback. |
+| 7 | One work loop for both chats: the Angular chat's provider round (reads, changes, writes) becomes one module both use | The debugger chat reads the hive and acts like the hypercomb.io chat. Deletes `chat-work.ts`. |
+| 8 | The rest of the chat engine (send, tiers, waits, stop, recovery, conversations, drafts, models, place, the workflow state) moves to a controller | One engine; the Angular window only draws it. |
+| 9 | The chat's regions become elements one at a time: execution column, picture viewer, composer, references, transcript, workflow column, header, conversation list, setup | Each region looks and behaves as at hypercomb.io. |
+| 10 | The frame ports; one chat element in both shells | `chat-window.component.ts` is deleted. `chat.view.ts` is gone. |
+| 11 | The shared stores the command line and controls read move to the runtime | Tags, names and interests complete and persist there. |
+| 12 | The command shell, then the command line, as elements | Type a name to make a tile, say any word (including `grant`), find with `?`, complete. |
+| 13 | Publish panel as an element | Publish the site from the page. |
+| 14 | The controls bar in four parts: viewport policy, breadcrumb and back, the tag strip, then the rail and phone bands | The whole hypercomb.io rail. The Angular controls bar is deleted. |
+| 15 | Files viewer, icon picker | The last tools a site uses. |
+
+Steps 1 to 4 are small and unblock the most. Steps 7 and 12 are the largest single changes. Steps 5 to 10 and 11 to 15 can be worked in either order after step 4.
+
+### Open questions for jwize
+
+1. Reactivity in the ported code: the house pattern (an EventTarget that says "change" and an explicit render), or a small reactive cell in core?
+2. The chat sizes its text in em so it follows the panel text-size ladder; the rule is rem, never em. Keep em inside the chat's reading surface, or write every size as `calc(N rem × panel scale)`?
+3. Code highlighting: carry highlight.js into the Angular-free page, or use the hive's own highlighter (`sharing/code-theme.ts`) so there is one?
+4. The trial handoff code in the chat (try- labels) predates the retirement of try: delete it in the port?
+5. Swarm and sharing (the mesh header) on the debugger page: wanted, and when?
+6. The controls bar is 6,200 lines: may it leave in the four parts above, the Angular bar losing a region each time?
+
+## The entrance (jwize, 2026-11-11)
+
+"Remember the entrance is I have a host. I follow another host, then I allow an app and open it at its subdomain and now I enable ai chat and start development."
+
+1. You have a host.
+2. You follow another host.
+3. You allow an app.
+4. You open it at its subdomain.
+5. You enable the AI chat, and start developing.
+
+The loop below is what happens after step 5. Steps 1 to 4 are the host card's own acts (follow a domain, allow a package, open it); this spec does not rebuild them.
+
 ## The loop
 
 1. In the tile editor, press **Debug** on a tile. Its subdomain opens: `try-<tile>.<zone>`.
@@ -129,6 +182,14 @@ The guess above (a missing first-run flow) was wrong. The cause was simpler and 
 | Is it on the page? | Yes. The root page lists `atlas`, and its hexagon is drawn beside the chat. |
 
 Step 1b's first half is done: a behaviour makes a tile on the Angular-free page and the tile is there. Its second half, the list of granted behaviours that still need the shell, is not done.
+
+### Setting up an AI there (2026-11-11, "let's just get it working on desktop first")
+
+The providers console was already framework-free (essentials `assistant/providers-window.view.ts`) and opens on the debugger page; nothing led to it. Now, when nobody can answer — no provider the router can call and no host named — the chat says "No AI is set up on this page yet" and offers **Set up AI**, which opens the console. The offer leaves once a provider can answer. On `try-chat.localhost` the console opened over the chat with its three tabs (Subscription, API with OpenRouter, Swarm). A real answer still needs a provider set up on that origin: a key pasted by the participant, a bridged CLI session, or a local model. No answer from a real model has been seen there yet.
+
+The page then had no way to open the chat at all: no command line, no rail. The chat now brings its own **Chat** button, bottom right, on any page where no Angular chat is registered and the chat word is lit. Checked on a fresh `studio.localhost:4275` by clicks only: Replicate on the host card, then Chat, Set up AI, the API tab, the OpenRouter row, and the key field is there. One trap on the way: the bee asked for the element from above the function's declaration, and `whenReady` answers at once when the registry is already up, so it threw and was swallowed.
+
+**Still no way to grant** a behaviour on that page, so a model there can answer but not act until it can.
 
 ## Not in this spec
 

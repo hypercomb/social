@@ -2871,6 +2871,8 @@
   "chat.header.behavior": "Behavior on this layer: {name}",
   "chat.suggested": "La chat IA è suggerita ed è spenta. Premi per accenderla.",
   "chat.lite.empty": "Chiedi all’IA che hai configurato. Può modificare il tuo alveare con i comportamenti che le hai concesso; non può ancora leggere il tuo alveare.",
+  "chat.lite.noai": "Su questa pagina non è ancora configurata nessuna IA. Aggiungi un fornitore o una chiave per iniziare.",
+  "chat.lite.setup": "Configura IA",
   "chat.lite.stop": "Ferma",
   "chat.lite.ran": "Eseguito:",
   "chat.lite.skipped": "Saltato, nulla è cambiato:",

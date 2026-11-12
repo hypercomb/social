@@ -2871,6 +2871,8 @@
   "chat.header.behavior": "Behavior on this layer: {name}",
   "chat.suggested": "AI 聊天是推荐项，目前已关闭。点击即可开启。",
   "chat.lite.empty": "向你设置的 AI 提问。它可以用你授予的行为更改你的蜂巢；目前还不能读取你的蜂巢。",
+  "chat.lite.noai": "此页面尚未设置 AI。添加一个提供方或密钥即可开始。",
+  "chat.lite.setup": "设置 AI",
   "chat.lite.stop": "停止",
   "chat.lite.ran": "已运行：",
   "chat.lite.skipped": "已跳过，没有任何更改：",

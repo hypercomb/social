@@ -2871,6 +2871,8 @@
   "chat.header.behavior": "Behavior on this layer: {name}",
   "chat.suggested": "Le chat IA est suggéré et désactivé. Appuyez pour l’activer.",
   "chat.lite.empty": "Interrogez l’IA que vous avez configurée. Elle peut modifier votre ruche avec les comportements que vous lui avez accordés ; elle ne peut pas encore lire votre ruche.",
+  "chat.lite.noai": "Aucune IA n’est encore configurée sur cette page. Ajoutez un fournisseur ou une clé pour commencer.",
+  "chat.lite.setup": "Configurer l’IA",
   "chat.lite.stop": "Arrêter",
   "chat.lite.ran": "Exécuté :",
   "chat.lite.skipped": "Ignoré, rien n’a changé :",

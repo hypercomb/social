@@ -18,10 +18,11 @@
 // stays closed (chat-surface.ts).
 
 import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
-import { refuseWhileDark, closeWhenDark } from '../commands/word-enablement.js'
+import { refuseWhileDark, closeWhenDark, isWordDark } from '../commands/word-enablement.js'
+import { ENABLEMENT_CHANGED } from '../sharing/behavior-enablement.js'
 import { CHAT_SURFACE, angularChatPresent } from './chat-surface.js'
 import { appendTurn, newConvoId, readTurns, type ChatTurn } from './chat-thread.js'
-import { streamRoutedModel, type LlmCall } from './llm-dispatch.js'
+import { llmRouter, streamRoutedModel, type LlmCall } from './llm-dispatch.js'
 import { HOST_AI_IOC_KEY } from './host-ai.service.js'
 import { executionQueue } from './execution-queue.js'
 import { chatCanChange, runChatWork, type ChatWorkChunk, type ChatWorkDeps, type ChatWorkEvent, type ChatWorkQueue } from './chat-work.js'
@@ -55,12 +56,24 @@ export type ChatModel = {
   place(): string
   /** The host's own AI, for a participant with no provider of their own. */
   host(): { readonly configured: boolean; ask(question: string, opts?: { signal?: AbortSignal }): AsyncIterable<string> } | undefined
+  /** True when somebody can answer here: a provider the router can call, or
+   *  the host the participant named. False on a page with no AI set up — a
+   *  debugger subdomain is its own origin, so keys set up elsewhere are not
+   *  here. */
+  canAnswer(): boolean
+  /** Open the providers console — through its own word, whose door loads the
+   *  console on its first press. */
+  setUp(): void
   readTurns(convoId: string): Promise<readonly Pick<ChatTurn, 'role' | 'text'>[]>
   appendTurn(convoId: string, role: 'user' | 'assistant', text: string): Promise<boolean>
   newConvoId(): string
 }
 
-type SlashLike = { entries?: () => readonly HypercombBehaviour[]; executePublicCanonical?: (name: string, args: string) => Promise<void> | void }
+type SlashLike = {
+  entries?: () => readonly HypercombBehaviour[]
+  execute?: (name: string, args: string) => Promise<void> | void
+  executePublicCanonical?: (name: string, args: string) => Promise<void> | void
+}
 const iocGet = <T>(key: string): T | undefined =>
   (window as { ioc?: { get?: (key: string) => unknown } }).ioc?.get?.(key) as T | undefined
 const slash = (): SlashLike | undefined => iocGet<SlashLike>('@diamondcoreprocessor.com/SlashBehaviourDrone')
@@ -77,6 +90,11 @@ const shippedModel: ChatModel = {
   place: () => (iocGet<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? [])
     .map(segment => String(segment ?? '')).filter(Boolean).join('/'),
   host: () => (window as { ioc?: { get?: (key: string) => unknown } }).ioc?.get?.(HOST_AI_IOC_KEY) as ReturnType<ChatModel['host']>,
+  setUp: () => { void slash()?.execute?.('providers', '') },
+  canAnswer: () => {
+    try { if (llmRouter.ready()) return true } catch { /* no provider registry yet */ }
+    return !!shippedModel.host()?.configured
+  },
   readTurns,
   appendTurn,
   newConvoId,
@@ -109,6 +127,7 @@ export class ChatElement extends HTMLElement {
   model: ChatModel = shippedModel
 
   #cleanup: Array<() => void> = []
+  #launcher: HTMLButtonElement | null = null
   #panel: HTMLElement | null = null
   #list: HTMLElement | null = null
   #input: HTMLTextAreaElement | null = null
@@ -130,6 +149,11 @@ export class ChatElement extends HTMLElement {
     // acted on — except the one request the bee handed over, below.
     let listening = false
     const redraw = (): void => this.#render()
+    // A provider set up, switched or removed changes whether anyone can answer.
+    this.#cleanup.push(
+      EffectBus.on('providers:state', redraw),
+      EffectBus.on('llm:policy-changed', redraw),
+    )
     const queue = this.model.queue
     queue?.addEventListener('change', redraw)
     this.#cleanup.push(
@@ -140,9 +164,39 @@ export class ChatElement extends HTMLElement {
       closeWhenDark(CHAT_WORD, () => this.close()),
     )
     listening = true
+    // THE CHAT BUTTON follows whatever could change whether it belongs here:
+    // the chat word's light, and the shell's surfaces arriving (an Angular
+    // chat registered after this element is the chat, and this one steps back).
+    const relaunch = (): void => this.#renderLauncher()
+    const surfaces = (window as { ioc?: { get?: (key: string) => unknown } }).ioc
+      ?.get?.('@hypercomb.social/ShellSurfaceRegistry') as EventTarget | undefined
+    surfaces?.addEventListener?.('change', relaunch)
+    this.#cleanup.push(
+      () => surfaces?.removeEventListener?.('change', relaunch),
+      EffectBus.on(ENABLEMENT_CHANGED, relaunch),
+      () => { this.#launcher?.remove(); this.#launcher = null },
+    )
+    this.#renderLauncher()
     const pending = ChatElement.pending
     ChatElement.pending = null
     if (pending) void this.open(pending)
+  }
+
+  /** ONE PRESS TO THE CHAT, on a page that has no other door to it — the
+   *  framework-free host has no command line and no rail. Shown while the
+   *  chat is closed, its word is lit, and no Angular chat is the chat here. */
+  #renderLauncher(): void {
+    const wanted = !this.#panel && !angularChatPresent() && !isWordDark(CHAT_WORD)
+    if (!wanted) { this.#launcher?.remove(); this.#launcher = null; return }
+    if (this.#launcher) return
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'hc-chat-launch'
+    button.textContent = t('chat.title', 'Chat')
+    button.title = t('chat.title', 'Chat')
+    button.addEventListener('click', () => { void this.open({}) })
+    this.appendChild(button)
+    this.#launcher = button
   }
 
   disconnectedCallback(): void {
@@ -166,6 +220,7 @@ export class ChatElement extends HTMLElement {
       this.#turns = (await this.model.readTurns(next)).map(turn => ({ role: turn.role, text: turn.text }))
     }
     this.#mount()
+    this.#renderLauncher()
     this.#render()
     if (prefill) await this.send(prefill)
     else this.#input?.focus({ preventScroll: true })
@@ -177,6 +232,7 @@ export class ChatElement extends HTMLElement {
     this.#panel.removeEventListener('keydown', this.#onKey)
     this.#panel.remove()
     this.#panel = this.#list = this.#input = this.#sendButton = null
+    this.#renderLauncher()
   }
 
   /** Stop the answer being written. What has arrived is kept. */
@@ -358,7 +414,12 @@ export class ChatElement extends HTMLElement {
       element.textContent = text
       rows.push(element)
     }
-    if (!this.#turns.length && !this.#live) row('empty', t('chat.lite.empty', 'Ask the AI you have set up. It can change your hive with the behaviours you granted it; it cannot read your hive yet.'))
+    const canAnswer = this.#canAnswer()
+    if (!this.#turns.length && !this.#live) {
+      row('empty', canAnswer
+        ? t('chat.lite.empty', 'Ask the AI you have set up. It can change your hive with the behaviours you granted it; it cannot read your hive yet.')
+        : t('chat.lite.noai', 'No AI is set up on this page yet. Add a provider or a key to start.'))
+    }
     for (const turn of this.#turns) row(turn.role, turn.text)
     if (this.#live) {
       for (const part of this.#live.parts) row(part.kind === 'said' ? 'assistant' : `work is-${part.kind}`, part.text)
@@ -367,6 +428,9 @@ export class ChatElement extends HTMLElement {
       for (const request of waiting) rows.push(this.#waitingRow(request))
     }
     if (this.#note) row('note', this.#note)
+    // THE WAY TO AN ANSWER, offered where it is missing: the providers
+    // console is framework-free, so it opens on any page this chat opens on.
+    if (!canAnswer && !this.#live) rows.push(this.#setupRow())
     list.replaceChildren(...rows)
     list.scrollTop = list.scrollHeight
     if (this.#sendButton) {
@@ -374,6 +438,22 @@ export class ChatElement extends HTMLElement {
       this.#sendButton.textContent = busy ? t('chat.lite.stop', 'Stop') : t('chat.send', 'Send')
       this.#sendButton.classList.toggle('is-stop', busy)
     }
+  }
+
+  #canAnswer(): boolean {
+    try { return this.model.canAnswer() } catch { return false }
+  }
+
+  #setupRow(): HTMLElement {
+    const box = document.createElement('div')
+    box.className = 'hc-chat-setup'
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'hc-chat-run-act is-run hc-chat-setup-act'
+    button.textContent = t('chat.lite.setup', 'Set up AI')
+    button.addEventListener('click', () => { this.model.setUp() })
+    box.append(button)
+    return box
   }
 
   /** This conversation's blocks that wait for a hand. */
@@ -477,7 +557,18 @@ function ensureStyles(): void {
     }
     .hc-chat-run-label { color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); font-size: 0.9em; }
     .hc-chat-run-lines { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; color: var(--hc-window-ink-loud, #eef2f5); }
-    .hc-chat-run-acts { display: flex; gap: 0.5rem; }
+    .hc-chat-run-acts, .hc-chat-setup { display: flex; gap: 0.5rem; }
+    .hc-chat-launch {
+      position: fixed; right: 1rem; bottom: 1rem; z-index: 100001;
+      height: 2.5rem; padding: 0 1.1rem; cursor: pointer;
+      font: 600 calc(0.875rem * var(--hc-panel-scale, 1)) var(--hc-mono, system-ui); letter-spacing: 0.04em;
+      background: rgba(var(--hc-panel-pane, 12, 19, 27), 0.975);
+      color: var(--hc-window-ink-loud, #eef2f5);
+      border: 1px solid var(--hc-window-line-firm, rgba(227, 237, 245, 0.26));
+      border-radius: var(--hc-radius-control, 2px);
+      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.36);
+    }
+    .hc-chat-launch:hover { background: var(--hc-window-tint-strong, rgba(255, 255, 255, 0.075)); }
     .hc-chat-run-act {
       height: 1.875rem; padding: 0 0.75rem; cursor: pointer; font: inherit;
       background: none; color: var(--hc-window-ink-plain, rgba(227, 237, 245, 0.86));

@@ -31,10 +31,13 @@ let element: InstanceType<typeof ChatElement>
 let stored: Record<string, { role: string; text: string }[]>
 let asked: { messages: readonly { role: string; content: string }[] }[]
 let minted: number
+let setUps = 0
 
 const model = (over: Partial<Model> = {}): Model => ({
   stream: async function* (call) { asked.push(call as never); yield { text: 'Hel' }; yield { text: 'lo.' } },
   host: () => undefined,
+  canAnswer: () => true,
+  setUp: () => { setUps++ },
   behaviours: () => [],
   place: () => '',
   readTurns: async convoId => (stored[convoId] ?? []) as never,
@@ -287,5 +290,71 @@ describe('the Run list', () => {
     expect(fresh.querySelector('.hc-chat img')).toBeNull()
     fresh.stop()
     fresh.remove()
+  })
+})
+
+// A debugger subdomain is its own origin: no key set up elsewhere is there.
+// The chat says so and offers the way to an answer.
+describe('when nobody can answer here', () => {
+  it('says no AI is set up, and offers Set up AI, which opens the providers console', async () => {
+    element.model = model({ canAnswer: () => false })
+    await element.open({})
+    expect(turns()).toEqual(['is-empty|No AI is set up on this page yet. Add a provider or a key to start.'])
+    setUps = 0
+    expect(element.querySelector('.hc-chat-setup-act')?.textContent).toBe('Set up AI')
+    element.querySelector<HTMLButtonElement>('.hc-chat-setup-act')!.click()
+    expect(setUps).toBe(1)
+  })
+
+  it('keeps the offer beside the reason after a question nobody could answer', async () => {
+    element.model = model({ canAnswer: () => false, stream: async function* () { throw new Error('no AI provider is set up yet') } })
+    await element.open({})
+    await element.send('hello')
+    expect(turns()).toEqual(['is-user|hello', 'is-note|no AI provider is set up yet'])
+    expect(element.querySelector('.hc-chat-setup-act')).not.toBeNull()
+  })
+
+  it('takes the offer away once somebody can answer', async () => {
+    let ready = false
+    element.model = model({ canAnswer: () => ready })
+    await element.open({})
+    expect(element.querySelector('.hc-chat-setup-act')).not.toBeNull()
+    ready = true
+    EffectBus.emit('providers:state', { open: false })
+    expect(element.querySelector('.hc-chat-setup-act')).toBeNull()
+    expect(turns()[0]).toContain('Ask the AI you have set up')
+  })
+})
+
+// The framework-free host has no command line and no rail: the chat brings its
+// own one-press door (jwize, 2026-11-11: "let's just get it working on desktop first").
+describe('the Chat button', () => {
+  const launcher = (): HTMLButtonElement | null => element.querySelector<HTMLButtonElement>('.hc-chat-launch')
+
+  it('is there while the chat is closed, opens it, and comes back when it closes', async () => {
+    expect(launcher()?.textContent).toBe('Chat')
+    launcher()!.click()
+    await vi.waitFor(() => expect(element.isOpen).toBe(true))
+    expect(launcher()).toBeNull()
+    element.close()
+    expect(launcher()).not.toBeNull()
+  })
+
+  it('is not offered where the Angular window is the chat', async () => {
+    element.remove()
+    surfaces.push({ name: ANGULAR_CHAT_SURFACE })
+    element = document.createElement(CHAT_SURFACE) as InstanceType<typeof ChatElement>
+    element.model = model()
+    document.body.appendChild(element)
+    expect(launcher()).toBeNull()
+  })
+
+  it('leaves while the chat word is switched off', () => {
+    localStorage.setItem('hc:behavior-global-off', JSON.stringify(['word:chat']))
+    EffectBus.emit('behavior:enablement-changed', {})
+    expect(launcher()).toBeNull()
+    localStorage.setItem('hc:behavior-global-off', '[]')
+    EffectBus.emit('behavior:enablement-changed', {})
+    expect(launcher()).not.toBeNull()
   })
 })

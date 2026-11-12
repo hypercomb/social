@@ -2871,6 +2871,8 @@
   "chat.header.behavior": "Behavior on this layer: {name}",
   "chat.suggested": "Obrolan AI disarankan dan sedang mati. Tekan untuk menyalakannya.",
   "chat.lite.empty": "Tanyakan pada AI yang sudah Anda siapkan. AI dapat mengubah hive Anda dengan perilaku yang Anda izinkan; AI belum dapat membaca hive Anda.",
+  "chat.lite.noai": "Belum ada AI yang disiapkan di halaman ini. Tambahkan penyedia atau kunci untuk mulai.",
+  "chat.lite.setup": "Siapkan AI",
   "chat.lite.stop": "Hentikan",
   "chat.lite.ran": "Dijalankan:",
   "chat.lite.skipped": "Dilewati, tidak ada yang berubah:",

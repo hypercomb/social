@@ -2871,6 +2871,8 @@
   "chat.header.behavior": "Behavior on this layer: {name}",
   "chat.suggested": "Yapay zekâ sohbeti önerilir ve kapalıdır. Açmak için basın.",
   "chat.lite.empty": "Kurduğunuz yapay zekâya sorun. İzin verdiğiniz davranışlarla kovanınızı değiştirebilir; kovanınızı henüz okuyamaz.",
+  "chat.lite.noai": "Bu sayfada henüz yapay zekâ kurulmadı. Başlamak için bir sağlayıcı ya da anahtar ekleyin.",
+  "chat.lite.setup": "Yapay zekâyı kur",
   "chat.lite.stop": "Durdur",
   "chat.lite.ran": "Çalıştırıldı:",
   "chat.lite.skipped": "Atlandı, hiçbir şey değişmedi:",

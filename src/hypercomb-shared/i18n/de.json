@@ -2871,6 +2871,8 @@
   "chat.header.behavior": "Behavior on this layer: {name}",
   "chat.suggested": "Der KI-Chat ist vorgeschlagen und ausgeschaltet. Drücken, um ihn einzuschalten.",
   "chat.lite.empty": "Frag die KI, die du eingerichtet hast. Sie kann deinen Hive mit den Verhalten ändern, die du ihr gewährt hast; lesen kann sie deinen Hive noch nicht.",
+  "chat.lite.noai": "Auf dieser Seite ist noch keine KI eingerichtet. Füge einen Anbieter oder einen Schlüssel hinzu.",
+  "chat.lite.setup": "KI einrichten",
   "chat.lite.stop": "Stopp",
   "chat.lite.ran": "Ausgeführt:",
   "chat.lite.skipped": "Übersprungen, nichts geändert:",

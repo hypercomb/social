@@ -74,12 +74,12 @@ window.ioc.whenReady?.('@hypercomb.social/ShellSurfaceRegistry', (registry: { ad
 
 let chatView: Promise<void> | null = null
 let listening = false
-const loadChatView = (payload: { prefill?: string; convoId?: string; model?: string }): void => {
+const loadChatView = (payload: { prefill?: string; convoId?: string; model?: string } | null): void => {
   // A replayed request is an old gesture; once the element is defined it
-  // hears every request itself.
-  if (!listening || customElements.get(CHAT_SURFACE) || angularChatPresent()) return
+  // hears every request itself. `null` defines it with no request to take.
+  if ((payload && !listening) || customElements.get(CHAT_SURFACE) || angularChatPresent()) return
   chatView ??= import('./chat.view.js').then(({ ChatElement }) => {
-    ChatElement.pending = payload
+    if (payload) ChatElement.pending = payload
     if (!customElements.get(CHAT_SURFACE)) customElements.define(CHAT_SURFACE, ChatElement)
   }).catch((error: unknown) => {
     chatView = null
@@ -89,3 +89,13 @@ const loadChatView = (payload: { prefill?: string; convoId?: string; model?: str
 EffectBus.on<{ prefill?: string; convoId?: string; model?: string }>('chat:open', payload => loadChatView(payload ?? {}))
 EffectBus.on('chat:toggle', () => loadChatView({}))
 listening = true
+
+// ON A PAGE WITH NO ANGULAR CHAT the element is the only way in, and it
+// carries its own Chat button — so it is defined now rather than on a first
+// request nobody on that page has a way to make (jwize, 2026-11-11: "let's
+// just get it working on desktop first"). Asked here, below `loadChatView`:
+// `whenReady` answers at once when the registry is already up, and a call
+// from above the declaration threw and was swallowed.
+window.ioc.whenReady?.('@hypercomb.social/ShellSurfaceRegistry', () => {
+  if (!angularChatPresent()) loadChatView(null)
+})

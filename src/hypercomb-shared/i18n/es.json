@@ -2871,6 +2871,8 @@
   "chat.header.behavior": "Behavior on this layer: {name}",
   "chat.suggested": "El chat de IA está sugerido y apagado. Pulsa para encenderlo.",
   "chat.lite.empty": "Pregunta a la IA que has configurado. Puede cambiar tu colmena con los comportamientos que le concediste; todavía no puede leer tu colmena.",
+  "chat.lite.noai": "Todavía no hay ninguna IA configurada en esta página. Añade un proveedor o una clave para empezar.",
+  "chat.lite.setup": "Configurar IA",
   "chat.lite.stop": "Detener",
   "chat.lite.ran": "Ejecutado:",
   "chat.lite.skipped": "Omitido, nada cambió:",
