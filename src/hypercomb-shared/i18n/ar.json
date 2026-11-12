@@ -502,6 +502,8 @@
   "notes.markPalette": "العلامات",
   "notes.addMark": "إضافة أيقونة",
   "notes.editMarks": "تحرير العلامات",
+  "notes.hostLinks": "روابط الاستضافة",
+  "notes.hostLinksHint": "عرض أسماء الإبداعات المستضافة في الملاحظات كروابط",
   "notes.markDone": "تم",
   "notes.markMeaning": "ما معناها…",
   "notes.markHeading": "عنوان",

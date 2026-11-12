@@ -502,6 +502,8 @@
   "notes.markPalette": "İşaretler",
   "notes.addMark": "Simge ekle",
   "notes.editMarks": "İşaretleri düzenle",
+  "notes.hostLinks": "Barındırma bağlantıları",
+  "notes.hostLinksHint": "Notlardaki barındırılan eserlerin adlarını bağlantı olarak göster",
   "notes.markDone": "Tamam",
   "notes.markMeaning": "ne anlama geliyor…",
   "notes.markHeading": "Başlık",

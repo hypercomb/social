@@ -502,6 +502,8 @@
   "notes.markPalette": "标记",
   "notes.addMark": "添加图标",
   "notes.editMarks": "编辑标记",
+  "notes.hostLinks": "托管链接",
+  "notes.hostLinksHint": "将笔记中托管作品的名称显示为链接",
   "notes.markDone": "完成",
   "notes.markMeaning": "它的含义…",
   "notes.markHeading": "标题",

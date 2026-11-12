@@ -502,6 +502,8 @@
   "notes.markPalette": "마크",
   "notes.addMark": "아이콘 추가",
   "notes.editMarks": "마크 편집",
+  "notes.hostLinks": "호스트 링크",
+  "notes.hostLinksHint": "노트 속 호스팅된 작품 이름을 링크로 표시",
   "notes.markDone": "완료",
   "notes.markMeaning": "의미…",
   "notes.markHeading": "제목",

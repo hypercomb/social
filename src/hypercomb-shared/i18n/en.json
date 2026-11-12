@@ -802,6 +802,8 @@
   "notes.markPalette": "Marks",
   "notes.addMark": "Add an icon",
   "notes.editMarks": "Edit marks",
+  "notes.hostLinks": "Host links",
+  "notes.hostLinksHint": "Show names of hosted creations in notes as links",
   "notes.markDone": "Done",
   "notes.markMeaning": "what it means…",
   "notes.markHeading": "Heading",

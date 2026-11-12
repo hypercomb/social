@@ -21,9 +21,37 @@
   background: rgba(var(--hc-panel-ink), 0.02);
   border-radius: 0;
   user-select: none;
-  cursor: grab;
-  touch-action: none;
-  &:active { cursor: grabbing; }
+  // The one header carries the tabs and the mark rail beside the title, so
+  // it grows instead of clipping: a narrow window wraps the row.
+  height: auto;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+}
+
+// The actions as one unit, pushed to the right edge of whichever line they
+// land on. The header mixin sizes buttons inside `[class*='actions']`.
+.cv2-dragbar-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: auto;
+}
+
+// The tile's picture, tiny, when the categories column (which carries the
+// full plate) is not showing.
+.cv2-dragbar-hex {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 20px;
+  display: inline-grid;
+  place-items: center;
+  overflow: hidden;
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  background: color-mix(in srgb, var(--md-secondary) 16%, rgba(255, 255, 255, 0.04));
+  font-size: scaled(0.6rem);
+
+  img { width: 100%; height: 100%; object-fit: cover; display: block; }
 }
 
 .cv2-dragbar-title {
@@ -88,23 +116,24 @@
 .cv2-dragbar-spacer { flex: 1; }
 
 // ── writing tabs ─────────────────────────────────────
-// The window's two tabs (notes | lists), directly under the dragbar. Cold
-// steel like every hairline; the active tab earns an underline, not a glow.
+// The window's two tabs (notes | lists), inline in the header beside the
+// title. Cold steel like every hairline; the active tab earns an underline,
+// not a glow.
 .cv2-tabs {
   flex: 0 0 auto;
   display: flex;
   align-items: stretch;
+  align-self: stretch;
   gap: 0.15rem;
-  padding: 0 0.35rem;
-  border-bottom: 1px solid rgba($steel, 0.25);
-  background: rgba(var(--hc-panel-ink), 0.015);
 }
 
 .cv2-tab {
   appearance: none;
   border: 0;
   background: none;
-  padding: 0.32rem 0.7rem 0.28rem;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0.6rem;
   margin: 0;
   font-family: var(--hc-mono, monospace);
   font-size: scaled(0.78rem);
@@ -174,3 +203,12 @@
 
 .cv2-toolbar-spacer { flex: 1; }
 
+// A name in a note that is a creation hosted now (the header's link toggle).
+// No underline — it wears its domain's colour, as on a hosted page.
+.cv2-host-link {
+  text-decoration: none;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover { text-decoration: underline; text-underline-offset: 2px; }
+}

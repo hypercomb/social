@@ -51,8 +51,13 @@
        role="list" [attr.aria-label]="'notes.strip.aria' | t"
        (pointerenter)="onNotesEnter()" (pointerleave)="onNotesLeave()">
 
-    <!-- Toolwindow header — title left, actions right. A header, nothing
-         more: there is no other place to drag the desk to. -->
+    <!-- ONE HEADER. Title, the notes|lists tabs, the mark rail and the
+         window's actions share a single row — they used to be three stacked
+         bands (title, tabs, marks) over a fourth (the identity plate), which
+         left the notes starting a third of the way down the desk. The plate
+         now lives at the top of the categories column; where that column is
+         absent the tile's picture rides here, tiny, in place of the mark.
+         A narrow window lets the row wrap rather than clip. -->
     <div class="cv2-dragbar">
       <!-- WHICH tile, and — on the lists tab — WHICH LIST, right of it.
            A list's name belongs with the window's identity, not stacked on
@@ -60,7 +65,15 @@
            nothing but the list. Click it to rename, the same in-place
            gesture the lines use. -->
       <span class="cv2-dragbar-title">
-        @if (treeMode() && cell()) {
+        @if (cell() && !catOpen() && !treeMode()) {
+          <span class="cv2-dragbar-hex" aria-hidden="true">
+            @if (plateImage(); as url) {
+              <img [src]="url" alt="" />
+            } @else {
+              {{ plateInitial() }}
+            }
+          </span>
+        } @else if (treeMode() && cell()) {
           <span class="cv2-tilehead-mark" aria-hidden="true">{{ plateInitial() }}</span>
         } @else if (!treeMode()) {
           <span class="hex-mark" aria-hidden="true"></span>
@@ -90,7 +103,82 @@
           }
         }
       </span>
-      <span class="cv2-dragbar-spacer"></span>
+
+      <!-- The writing window's two tabs — plain NOTES (prose and the
+           question/answer conversation) and LISTS (the hierarchical
+           list-notes). Same editor, same navigator, same form on both — only
+           which roots show differs (see visibleNotes). -->
+      <div class="cv2-tabs" role="tablist" [attr.aria-label]="'writing.title' | t">
+        <button type="button" class="cv2-tab" role="tab"
+                [class.is-active]="tab() === 'notes'"
+                [attr.aria-selected]="tab() === 'notes'"
+                (click)="setTab('notes')">{{ 'writing.tab.notes' | t }}</button>
+        <button type="button" class="cv2-tab" role="tab"
+                [class.is-active]="tab() === 'lists'"
+                [attr.aria-selected]="tab() === 'lists'"
+                (click)="setTab('lists')">{{ 'writing.tab.lists' | t }}</button>
+      </div>
+
+      <!-- ── Mark rail — part of the HEADER, not of either pane ──────
+           The participant's own icons live with the window, not with one
+           of its halves: the same icon has to be droppable on a LINE of a
+           list and on a NOTE in the pane, so it sits across the top of both
+           and reaches either one. Clicking marks what is being written;
+           DRAGGING one onto a row, a line or the open note marks THAT one
+           (drop the icon it already carries to clear it). The meaning's ROLE
+           decides how every row carrying it renders. "+" opens the shared
+           Material chooser; "tune" opens the palette editor as a band
+           under this header. -->
+      @if (cell() && !paletteEditing() && !treeMode()) {
+        <div class="cv2-rail-marks" role="group" [attr.aria-label]="'notes.markRail' | t">
+          @for (g of markGroups(); track g.kind) {
+            <div class="cv2-rail-kind" [class.is-note]="g.kind === 'note'">
+              @if (showKindLabels()) {
+                <span class="cv2-rail-kind-label" aria-hidden="true">
+                  {{ (g.kind === 'point' ? 'notes.kindPoints' : 'notes.kindNotes') | t }}
+                </span>
+              }
+              @for (m of g.marks; track m.icon) {
+                <button type="button" class="cv2-rail-mark"
+                        [class.is-active]="draftMark() === m.icon"
+                        [class.is-heading]="m.role === 'heading'"
+                        [class.is-prose]="m.role === 'prose'"
+                        [class.is-dragging]="markDragIcon() === m.icon"
+                        (pointerdown)="onMarkPointerDown(m.icon, $event)"
+                        (click)="pickMark(m.icon)"
+                        [attr.aria-pressed]="draftMark() === m.icon"
+                        [title]="markLabel(m.icon) + ' — ' + ('notes.markDragHint' | t)">
+                  <span class="mat-sym">{{ m.icon }}</span>
+                </button>
+              }
+            </div>
+          }
+          <button type="button" class="cv2-rail-btn" (click)="addMarkIcon()"
+                  [attr.aria-label]="'notes.addMark' | t" [title]="'notes.addMark' | t">
+            <span class="mat-sym">add</span>
+          </button>
+        </div>
+      }
+
+      <!-- The window's actions, one group held to the right edge: when the
+           row wraps they wrap together, so close stays the far-edge landmark. -->
+      <span class="cv2-dragbar-actions">
+      <!-- Host links: names of creations hosted now become links in every
+           note, as they do in a hosted website's copy. -->
+      <button type="button" class="cv2-mini-btn" [class.is-on]="hostLinks()"
+              (click)="toggleHostLinks()"
+              [attr.aria-pressed]="hostLinks()"
+              [attr.aria-label]="'notes.hostLinks' | t" [title]="'notes.hostLinksHint' | t">
+        <span class="mat-sym">link</span>
+      </button>
+      @if (cell() && !treeMode()) {
+        <button type="button" class="cv2-mini-btn" [class.is-on]="paletteEditing()"
+                (click)="togglePaletteEdit()"
+                [attr.aria-pressed]="paletteEditing()"
+                [attr.aria-label]="'notes.editMarks' | t" [title]="'notes.editMarks' | t">
+          <span class="mat-sym">tune</span>
+        </button>
+      }
       <!-- Open the READER on this tile. The strip is for authoring — a dense
            tree you edit in place; the reader is for reading one note at a
            time, big, with the hierarchy around it. Only offered when a tile
@@ -109,6 +197,7 @@
       }
       <button type="button" class="cv2-mini-btn cv2-close" (click)="hide()"
               [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button>
+      </span>
     </div>
 
     @if (treeMode() && cell()) {
@@ -197,73 +286,11 @@
       }
     }
 
-    <!-- The writing window's two tabs — plain NOTES (prose and the
-         question/answer conversation) and LISTS (the hierarchical list-notes:
-         roots carrying a heading/list mark, or any note tree). Same editor,
-         same navigator, same form on both — only which roots show differs
-         (see visibleNotes). One window, one rail icon. -->
-    <div class="cv2-tabs" role="tablist" [attr.aria-label]="'writing.title' | t">
-      <button type="button" class="cv2-tab" role="tab"
-              [class.is-active]="tab() === 'notes'"
-              [attr.aria-selected]="tab() === 'notes'"
-              (click)="setTab('notes')">{{ 'writing.tab.notes' | t }}</button>
-      <button type="button" class="cv2-tab" role="tab"
-              [class.is-active]="tab() === 'lists'"
-              [attr.aria-selected]="tab() === 'lists'"
-              (click)="setTab('lists')">{{ 'writing.tab.lists' | t }}</button>
-    </div>
-
-    <!-- ── Mark rail — part of the HEADER, not of either pane ──────
-         The participant's own icons live with the window, not with one
-         of its halves: the same icon has to be droppable on a LINE of a
-         list and on a NOTE in the pane, so it sits across the top of both
-         and reaches either one. Clicking marks what is being written;
-         DRAGGING one onto a row, a line or the open note marks THAT one
-         (drop the icon it already carries to clear it). The meaning's ROLE
-         decides how every row carrying it renders, so re-roling an icon
-         restyles the whole tree. "+" opens the shared Material chooser;
-         "tune" flips to the palette editor. -->
-    @if (cell()) {
-    <div class="cv2-rail" [class.is-editing]="paletteEditing()">
-      @if (!paletteEditing()) {
-        <!-- Grouped by KIND: points (the constrained roles) then notes
-             (prose). The labels only appear once both kinds are in the
-             palette — with one kind the rail is the flat icon strip it
-             has always been. -->
-        <div class="cv2-rail-marks" role="group" [attr.aria-label]="'notes.markRail' | t">
-          @for (g of markGroups(); track g.kind) {
-            <div class="cv2-rail-kind" [class.is-note]="g.kind === 'note'">
-              @if (showKindLabels()) {
-                <span class="cv2-rail-kind-label" aria-hidden="true">
-                  {{ (g.kind === 'point' ? 'notes.kindPoints' : 'notes.kindNotes') | t }}
-                </span>
-              }
-              @for (m of g.marks; track m.icon) {
-                <button type="button" class="cv2-rail-mark"
-                        [class.is-active]="draftMark() === m.icon"
-                        [class.is-heading]="m.role === 'heading'"
-                        [class.is-prose]="m.role === 'prose'"
-                        [class.is-dragging]="markDragIcon() === m.icon"
-                        (pointerdown)="onMarkPointerDown(m.icon, $event)"
-                        (click)="pickMark(m.icon)"
-                        [attr.aria-pressed]="draftMark() === m.icon"
-                        [title]="markLabel(m.icon) + ' — ' + ('notes.markDragHint' | t)">
-                  <span class="mat-sym">{{ m.icon }}</span>
-                </button>
-              }
-            </div>
-          }
-          <button type="button" class="cv2-rail-btn" (click)="addMarkIcon()"
-                  [attr.aria-label]="'notes.addMark' | t" [title]="'notes.addMark' | t">
-            <span class="mat-sym">add</span>
-          </button>
-        </div>
-        <span class="cv2-rail-spacer"></span>
-        <button type="button" class="cv2-rail-btn" (click)="togglePaletteEdit()"
-                [attr.aria-label]="'notes.editMarks' | t" [title]="'notes.editMarks' | t">
-          <span class="mat-sym">tune</span>
-        </button>
-      } @else {
+    <!-- The palette editor — opened by "tune" in the header, it drops in as
+         a band under it, since naming and re-roling marks needs room the
+         header row does not have. -->
+    @if (cell() && paletteEditing()) {
+    <div class="cv2-rail is-editing">
         <div class="cv2-rail-editor">
           <div class="cv2-rail-editor-head">
             <span>{{ 'notes.markPalette' | t }}</span>
@@ -304,9 +331,15 @@
             <span>{{ 'notes.addMark' | t }}</span>
           </button>
         </div>
-      }
     </div>
     }
+
+    <!-- A note's text, linked. With the header's link toggle on, every name of
+         a creation hosted now is a link in its domain's colour (the module's
+         rule, read as runs — see hostRuns); otherwise, and while the runs are
+         read, the plain text. One line on purpose: the text is pre-wrap, so
+         template whitespace would show. -->
+    <ng-template #linkedTpl let-text="text">@if (hostRuns(text); as runs) {@for (run of runs; track $index) {@if (run.href) {<a class="cv2-host-link" [href]="run.href" target="_blank" rel="noopener" [style.color]="run.colour" [class.is-cross]="run.cross" [title]="run.title" (click)="followHostLink(run, $event)">{{ run.text }}</a>} @else {<span>{{ run.text }}</span>}}} @else {<span>{{ text }}</span>}</ng-template>
 
     <!-- Embedded note form — the single authoring surface, defined ONCE at
          the panel's top level so both columns can outlet it (an @if block's
@@ -381,52 +414,6 @@
          the canvas or picked from the list). Without one, the list alone
          shows so the user can find and pick a tile. -->
     @if (cell()) {
-      <!-- ── Identity plate ───────────────────────────────────────
-           WHICH tile these notes are on, said visually. The tile's own
-           hexagon (the picture the canvas paints, resolved through the
-           props → small.image hop) sits beside its name, where it lives,
-           and what it holds. Wide panels get the large hexagon and the
-           full detail column; narrow ones collapse to a single line so
-           the dock loses no room for the list itself. -->
-      <section class="cv2-plate" [class.is-wide]="plateWide()">
-        <div class="cv2-plate-hex" aria-hidden="true">
-          @if (plateImage(); as url) {
-            <img class="cv2-plate-img" [src]="url" alt="" />
-          } @else {
-            <span class="cv2-plate-initial">{{ plateInitial() }}</span>
-          }
-        </div>
-        <div class="cv2-plate-meta">
-          <div class="cv2-plate-name" [title]="cell()">{{ cell() }}</div>
-          @if (plateWide() && platePath().length > 0) {
-            <div class="cv2-plate-path" [title]="platePath().join(' / ')">
-              @for (seg of platePath(); track $index) {
-                <span class="cv2-plate-seg">{{ seg }}</span>
-              }
-            </div>
-          }
-          <div class="cv2-plate-stats">
-            <span class="cv2-plate-stat">
-              <span class="dot n"></span>{{ 'notes.plateNotes' | t: { count: plateCounts().notes } }}
-            </span>
-            @if (plateCounts().questions > 0) {
-              <span class="cv2-plate-stat is-q">
-                <span class="dot q"></span>{{ 'notes.plateQuestions' | t: { count: plateCounts().questions } }}
-              </span>
-            }
-            @if (plateCounts().answers > 0) {
-              <span class="cv2-plate-stat is-a">
-                <span class="dot a"></span>{{ 'notes.plateAnswers' | t: { count: plateCounts().answers } }}
-              </span>
-            }
-            @if (plateCounts().children > 0) {
-              <span class="cv2-plate-stat">
-                <span class="cv2-plate-stat-hex" aria-hidden="true"></span>{{ 'notes.plateChildren' | t: { count: plateCounts().children } }}
-              </span>
-            }
-          </div>
-        </div>
-      </section>
 
 
       <!-- Narrow screens: the EDITOR lives here in the column, because there
@@ -538,7 +525,7 @@
             } @else {
               <span class="hc-shape-glyph cv2-note-shape" aria-hidden="true"></span>
             }
-            <p class="cv2-note-text">{{ noteDisplayText(note) }}</p>
+            <p class="cv2-note-text"><ng-container *ngTemplateOutlet="linkedTpl; context: { text: noteDisplayText(note) }"></ng-container></p>
             <!-- In the swarm: who brought a note, how many hold it, and a
                  Take on someone else's root. -->
             @if (isPeerRoot(note.id) || heldCount(note.id) > 0) {
@@ -640,6 +627,53 @@
       <div class="cv2-ledger" [class.has-cats]="catOpen()">
       @if (catOpen()) {
         <nav class="cv2-cats thin-scroll" [attr.aria-label]="'notes.cats.aria' | t">
+          <!-- ── Identity plate ───────────────────────────────────────
+               WHICH tile these notes are on, said visually: the tile's own
+               hexagon (the picture the canvas paints, resolved through the
+               props → small.image hop), its name, where it lives and what it
+               holds. It heads the categories column rather than the desk, so
+               the notes and the reading pane run right up to the header.
+               Without the column the picture rides in the header instead. -->
+          <section class="cv2-plate is-column">
+            <div class="cv2-plate-hex" aria-hidden="true">
+              @if (plateImage(); as url) {
+                <img class="cv2-plate-img" [src]="url" alt="" />
+              } @else {
+                <span class="cv2-plate-initial">{{ plateInitial() }}</span>
+              }
+            </div>
+            <div class="cv2-plate-meta">
+              <div class="cv2-plate-name" [title]="cell()">{{ cell() }}</div>
+              @if (platePath().length > 0) {
+                <div class="cv2-plate-path" [title]="platePath().join(' / ')">
+                  @for (seg of platePath(); track $index) {
+                    <span class="cv2-plate-seg">{{ seg }}</span>
+                  }
+                </div>
+              }
+              <div class="cv2-plate-stats">
+                <span class="cv2-plate-stat">
+                  <span class="dot n"></span>{{ 'notes.plateNotes' | t: { count: plateCounts().notes } }}
+                </span>
+                @if (plateCounts().questions > 0) {
+                  <span class="cv2-plate-stat is-q">
+                    <span class="dot q"></span>{{ 'notes.plateQuestions' | t: { count: plateCounts().questions } }}
+                  </span>
+                }
+                @if (plateCounts().answers > 0) {
+                  <span class="cv2-plate-stat is-a">
+                    <span class="dot a"></span>{{ 'notes.plateAnswers' | t: { count: plateCounts().answers } }}
+                  </span>
+                }
+                @if (plateCounts().children > 0) {
+                  <span class="cv2-plate-stat">
+                    <span class="cv2-plate-stat-hex" aria-hidden="true"></span>{{ 'notes.plateChildren' | t: { count: plateCounts().children } }}
+                  </span>
+                }
+              </div>
+            </div>
+          </section>
+
           <div class="cv2-cats-head">
             <span class="cv2-cats-title">{{ 'notes.cats.title' | t }}</span>
             <span class="cv2-cats-tools">
@@ -1067,7 +1101,7 @@
               </div>
             }
 
-            <p class="cv2-reading-text">{{ noteDisplayText(row.note) }}</p>
+            <p class="cv2-reading-text"><ng-container *ngTemplateOutlet="linkedTpl; context: { text: noteDisplayText(row.note) }"></ng-container></p>
 
             <!-- Pheromones ON THIS NOTE. Dropped here from the panel;
                  each chip's × takes it back off. -->

@@ -26,20 +26,20 @@
     // Three header bands, then the columns. The tabs and the rail used to
     // be auto-placed, which dropped them into an implicit row BELOW the
     // navigator; naming every band's row is what keeps the header a header.
-    // Three header bands, the columns, then the composer along the foot.
-    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+    // ONE header (title, tabs and marks share it), the palette editor's
+    // band when it is open, the columns, then the composer along the foot.
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
   }
-  // Every header band spans all three columns; the resize grips are
-  // absolutely positioned (and hidden in fullscreen), so they need none.
+  // The header and the palette band span all three columns; the resize
+  // grips are absolutely positioned, so they need none.
   :host .cv2-dragbar { grid-column: 1 / -1; grid-row: 1; }
-  :host .cv2-tabs { grid-column: 1 / -1; grid-row: 2; }
-  :host .cv2-rail { grid-column: 1 / -1; grid-row: 3; }
+  :host .cv2-rail { grid-column: 1 / -1; grid-row: 2; }
 
   :host .cv2-main {
     display: flex;
     flex-direction: column;
     grid-column: 2;
-    grid-row: 4;
+    grid-row: 3;
     min-width: 0;
     min-height: 0;
     overflow: hidden;
@@ -47,31 +47,17 @@
 
   // The composer runs the width of the desk, under every column: one line
   // for the whole surface, wherever you were reading when you thought of it.
-  :host .cv2-composer { grid-column: 1 / -1; grid-row: 5; }
+  :host .cv2-composer { grid-column: 1 / -1; grid-row: 4; }
 
   :host .cv2-tilelist {
     grid-column: 1;
-    grid-row: 4;
+    grid-row: 3;
     min-width: 0;
     border-top: none;
     border-right: 1px solid color-mix(in srgb, var(--md-on-surface) 10%, transparent);
   }
 
   // (The tile list is a plain row list everywhere now — see .cv2-tilecloud.)
-
-  // Fullscreen is the one place with room to spare: the identity plate takes
-  // the masthead treatment — a big hexagon the user can read across the room,
-  // with the tile's details set beside it.
-  :host .cv2-plate.is-wide {
-    gap: 1.1rem;
-    padding: 1rem 1.2rem;
-
-    .cv2-plate-hex { width: 96px; height: 110px; }
-    .cv2-plate-initial { font-size: scaled(2.6rem); }
-    .cv2-plate-name { font-size: scaled(1.35rem); }
-    .cv2-plate-path { font-size: scaled(0.72rem); }
-    .cv2-plate-stats { font-size: scaled(0.78rem); gap: 0.35rem 0.8rem; }
-  }
 
   // ── The reading pane — the desk scale of the shared pane (see the
   //    reading-pane mixin above; the docked window is the same pane,
@@ -90,7 +76,7 @@
       $ed-font: scaled(1.02rem)
     );
     grid-column: 3;
-    grid-row: 4;
+    grid-row: 3;
     border-left: 1px solid color-mix(in srgb, var(--md-on-surface) 10%, transparent);
   }
 

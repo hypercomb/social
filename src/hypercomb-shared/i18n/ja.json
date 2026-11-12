@@ -611,6 +611,8 @@
   "notes.markPalette": "マーク",
   "notes.addMark": "アイコンを追加",
   "notes.editMarks": "マークを編集",
+  "notes.hostLinks": "ホストリンク",
+  "notes.hostLinksHint": "ノート内のホスト中の作品名をリンクとして表示",
   "notes.markDone": "完了",
   "notes.markMeaning": "意味を入力…",
   "notes.markHeading": "見出し",

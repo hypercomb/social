@@ -502,6 +502,8 @@
   "notes.markPalette": "Marken",
   "notes.addMark": "Symbol hinzufügen",
   "notes.editMarks": "Marken bearbeiten",
+  "notes.hostLinks": "Host-Links",
+  "notes.hostLinksHint": "Namen gehosteter Werke in Notizen als Links zeigen",
   "notes.markDone": "Fertig",
   "notes.markMeaning": "was es bedeutet…",
   "notes.markHeading": "Überschrift",

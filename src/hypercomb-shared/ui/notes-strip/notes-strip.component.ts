@@ -43,11 +43,6 @@ const MARK_PICK_ID = 'notes:mark-palette'
 // O(1) — the identity plate never triggers a cold tree walk to find a picture.
 const SIG_RE = /^[0-9a-f]{64}$/i
 
-// Panel width (px) at which the identity plate earns its large form: the
-// hexagon grows and the tile's details sit beside it. Below it the plate stays
-// a single compact line — a narrow dock has no room for a picture.
-const PLATE_WIDE_AT = 400
-
 // Hover-list dwell (ms). Long enough that sweeping the pointer across the tile
 // navigator doesn't strobe cards, short enough to feel like a peek.
 const HOVER_OPEN_DELAY = 180
@@ -279,6 +274,19 @@ type NavigationLike = {
   goRaw?: (segments: readonly string[]) => void
 }
 
+/** One run of a note's text as the domain-link rule reads it — plain text,
+ *  or the name of a creation hosted now (essentials DomainLinksDrone
+ *  `linkRuns`, structural so shared never imports a module). */
+type HostLinkRun = {
+  readonly text: string
+  readonly href?: string
+  readonly colour?: string
+  readonly title?: string
+  readonly cross?: boolean
+  readonly segments?: readonly string[]
+}
+type DomainLinkerLike = { linkRuns?: (text: string, segments?: readonly string[]) => Promise<HostLinkRun[]> }
+
 /** Structural type for the InputModeStack lookup — avoids a build-time
  *  import from essentials (shared must never import from modules).
  *  Resolved at runtime via window.ioc, falls through cleanly if the
@@ -439,6 +447,72 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     if (next === this.face()) return
     this.face.set(next)
     try { localStorage.setItem(NOTES_STRIP_FACE_KEY, next) } catch { /* ignore */ }
+  }
+
+  // ── Host links ─────────────────────────────────────────────
+  // The header's link toggle reads every note the way a hosted website page
+  // reads its copy (documentation/domain-links.md): each name of a creation
+  // hosted now becomes a link to it, in its domain's colour. The rule is the
+  // module's — this window only renders the runs it hands back, so the
+  // framework's own text nodes are never rewritten. Off by default.
+  // Runs are read for the note's own TILE (a name for the tile itself stays
+  // text, and the tile's zone decides which door a shared name opens), so the
+  // cache is keyed by tile and text. It is dropped whenever the doors can
+  // have changed: a publish result, a move, or switching the toggle back on
+  // (which also retries a read that found no doors yet).
+  readonly hostLinks = signal<boolean>(false)
+  readonly #hostRuns = signal<ReadonlyMap<string, readonly HostLinkRun[]>>(new Map())
+  #hostRunsAsked = new Set<string>()
+  /** Bumped by every drop: a read that began before it lands nowhere. */
+  #hostRunsGen = 0
+
+  toggleHostLinks(): void {
+    const on = !this.hostLinks()
+    if (on) this.#dropHostRuns()
+    this.hostLinks.set(on)
+  }
+
+  #dropHostRuns(): void {
+    this.#hostRunsGen++
+    this.#hostRunsAsked = new Set()
+    this.#hostRuns.set(new Map())
+  }
+
+  /** The runs of `text`, or null while the toggle is off or they are still
+   *  being read (the plain text shows meanwhile). */
+  hostRuns(text: string): readonly HostLinkRun[] | null {
+    if (!this.hostLinks()) return null
+    const cell = this.cell()
+    const segments = cell ? [...this.#here(), cell] : this.#here()
+    const key = `${segments.join('/')}\u0000${text}`
+    const runs = this.#hostRuns().get(key)
+    if (runs) return runs.length > 1 || runs[0]?.href ? runs : null
+    if (!this.#hostRunsAsked.has(key)) {
+      this.#hostRunsAsked.add(key)
+      queueMicrotask(() => void this.#readHostRuns(key, text, segments))
+    }
+    return null
+  }
+
+  async #readHostRuns(key: string, text: string, segments: readonly string[]): Promise<void> {
+    const gen = this.#hostRunsGen
+    const linker = get<DomainLinkerLike>('@diamondcoreprocessor.com/DomainLinksDrone')
+    const runs = await linker?.linkRuns?.(text, segments).catch(() => null) ?? null
+    if (gen !== this.#hostRunsGen) return
+    // No linker yet, or a failed read: not an answer — the next render asks again.
+    if (!runs) { this.#hostRunsAsked.delete(key); return }
+    this.#hostRuns.update(m => new Map(m).set(key, runs))
+  }
+
+  /** One of our own creations moves inside the hive; any other host is an
+   *  ordinary web link. Either way the row underneath does not take the click. */
+  followHostLink(run: HostLinkRun, e: MouseEvent): void {
+    e.stopPropagation()
+    if (!run.segments || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return
+    const navigation = get<NavigationLike>('@hypercomb.social/Navigation')
+    if (!navigation?.goRaw) return
+    e.preventDefault()
+    navigation.goRaw(run.segments)
   }
 
   /** What the gear shows under "This window". A thunk, read at paint time, so
@@ -2963,29 +3037,8 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
   // A panel of notes with nothing but a name at the top reads as anonymous —
   // the user has to remember which tile the list belongs to. The plate answers
   // it visually: the tile's own hexagon (its picture, the same bytes the canvas
-  // paints), its name, where it sits, and what it holds. Below PLATE_WIDE_AT
-  // it collapses to one compact line so a narrow dock loses no list space.
-
-  /** Live panel width. Fed by the panel's ResizeObserver, and ALSO measured
-   *  directly at every moment the width can change by hand (edge drag,
-   *  fullscreen toggle, viewport resize) — the observer is the general case,
-   *  but it only delivers while the document is rendering, so the plate must
-   *  not depend on it exclusively. Seeded from the panel's own box. */
-  readonly #panelWidth = signal<number>(500)
-
-  /** Measure the panel now and publish it. Cheap (one layout read) and safe to
-   *  call from any of the width-changing paths. */
-  #measurePanel(): void {
-    const el = this.panel()?.nativeElement
-    if (!el) return
-    const w = Math.round(el.getBoundingClientRect().width)
-    if (w > 0 && w !== this.#panelWidth()) this.#panelWidth.set(w)
-  }
-
-  /** Does the plate get its large form? Panel width is the honest measure —
-   *  the strip can be a 260px rail on a 4K screen or a full-screen sheet on a
-   *  laptop, and it's the PANEL the plate has to fit inside. */
-  readonly plateWide = computed<boolean>(() => this.#panelWidth() >= PLATE_WIDE_AT)
+  // paints), its name, where it sits, and what it holds. It heads the
+  // categories column; without that column the header carries the picture.
 
   /** Where the active tile sits, as the explorer reads it. Empty at the root
    *  (the plate simply drops the line). */
@@ -3381,6 +3434,7 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
         const next = pathOf()
         if (next === path) return
         path = next
+        this.#dropHostRuns()
         this.#warmed.set(new Set())
         this.#notesByCell.set(new Map())
         this.#qaByCell.set(new Map())
@@ -3421,6 +3475,9 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     // says WHICH tiles survived it (including tiles a flattening filter drew
     // in from pages below). Both are last-value-replayed, so a panel opened
     // after the filter was set still lands on the filtered list.
+    // A creation published or taken down changes which names are doors: read
+    // every note again (essentials PUBLISH_RESULT_EFFECT).
+    this.#cleanups.push(EffectBus.on('publish:result', () => this.#dropHostRuns()))
     this.#cleanups.push(EffectBus.on<{ labels?: readonly string[] }>('render:cell-count', (p) => {
       this.#renderedCellLabels.set(Array.isArray(p?.labels) ? [...p!.labels!] : [])
     }))
@@ -3431,11 +3488,9 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
       this.#searchFilterActive.set(!!(p?.keyword ?? '').trim())
     }))
 
-    // A viewport resize moves the panel's own box (max-width, and fullscreen
-    // where it IS the viewport) — re-measure so the plate's form follows, and
-    // drop any open hover card, whose viewport anchor is now stale.
+    // A viewport resize drops any open hover card, whose viewport anchor is
+    // now stale.
     const onViewportResize = (): void => {
-      this.#measurePanel()
       if (this.hoverCell()) { this.#clearHoverTimers(); this.hoverCell.set(null) }
     }
     window.addEventListener('resize', onViewportResize)
@@ -3967,9 +4022,6 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     this.#resizeObserver?.disconnect()
     this.#observingEl = el!
     this.#applyStoredDimensions(el!)
-    // Seed the width before the first observer callback so the plate's first
-    // paint is measured, not guessed.
-    this.#measurePanel()
     this.#observePanelResize(el!)
   }
 
@@ -3991,12 +4043,6 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
   #observePanelResize(el: HTMLElement): void {
     let savePending = false
     this.#resizeObserver = new ResizeObserver((entries) => {
-      // Width tracking runs BEFORE every persistence guard below: the identity
-      // plate has to follow the panel even while dimensions are being applied
-      // and while fullscreen (where the panel is widest and the plate matters
-      // most, but nothing may be written to the user's stored size).
-      const last = entries[entries.length - 1]
-      if (last) this.#panelWidth.set(Math.round(last.contentRect.width))
       if (this.#applyingDimensions) return
       if (savePending) return
       savePending = true

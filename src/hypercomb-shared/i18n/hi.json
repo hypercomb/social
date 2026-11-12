@@ -502,6 +502,8 @@
   "notes.markPalette": "चिह्न",
   "notes.addMark": "आइकन जोड़ें",
   "notes.editMarks": "चिह्न संपादित करें",
+  "notes.hostLinks": "होस्ट लिंक",
+  "notes.hostLinksHint": "नोट्स में होस्ट की गई रचनाओं के नाम लिंक के रूप में दिखाएँ",
   "notes.markDone": "पूर्ण",
   "notes.markMeaning": "इसका मतलब क्या है…",
   "notes.markHeading": "शीर्षक",

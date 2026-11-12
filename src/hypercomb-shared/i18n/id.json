@@ -502,6 +502,8 @@
   "notes.markPalette": "Tanda",
   "notes.addMark": "Tambah ikon",
   "notes.editMarks": "Edit tanda",
+  "notes.hostLinks": "Tautan host",
+  "notes.hostLinksHint": "Tampilkan nama kreasi yang di-host di catatan sebagai tautan",
   "notes.markDone": "Selesai",
   "notes.markMeaning": "artinya apa…",
   "notes.markHeading": "Judul",

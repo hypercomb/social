@@ -502,6 +502,8 @@
   "notes.markPalette": "Метки",
   "notes.addMark": "Добавить значок",
   "notes.editMarks": "Редактировать метки",
+  "notes.hostLinks": "Ссылки на хосты",
+  "notes.hostLinksHint": "Показывать имена размещённых работ в заметках как ссылки",
   "notes.markDone": "Готово",
   "notes.markMeaning": "что она означает…",
   "notes.markHeading": "Заголовок",

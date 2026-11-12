@@ -502,6 +502,8 @@
   "notes.markPalette": "Marcas",
   "notes.addMark": "Añadir un icono",
   "notes.editMarks": "Editar marcas",
+  "notes.hostLinks": "Enlaces de host",
+  "notes.hostLinksHint": "Mostrar como enlaces los nombres de creaciones alojadas en las notas",
   "notes.markDone": "Listo",
   "notes.markMeaning": "qué significa…",
   "notes.markHeading": "Título",

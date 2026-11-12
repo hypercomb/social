@@ -15,10 +15,8 @@
 // ── Identity plate ───────────────────────────────────────
 // The panel's answer to "which tile am I writing on". A hexagon carrying the
 // tile's own picture (the same bytes the canvas paints) sits beside its name,
-// its place in the tree, and what it holds. Two forms share one block: narrow
-// is a single compact line, `.is-wide` grows the hexagon and opens the detail
-// column. The switch is driven by PANEL width in the component, not a media
-// query — the strip can be a thin rail on a huge screen.
+// its place in the tree, and what it holds. It heads the categories column
+// (`.is-column`); where that column is absent the header carries the picture.
 .cv2-plate {
   display: flex;
   align-items: center;
@@ -132,16 +130,20 @@
   clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
 }
 
-// Wide form — the panel has room, so the hexagon becomes the anchor of the
-// masthead and the details spread out beside it.
-.cv2-plate.is-wide {
-  gap: 0.85rem;
-  padding: 0.75rem 0.85rem;
+// Column form — the plate heads the categories column, so it is sized to
+// that column: a small hexagon beside the name, the path and counts wrapping
+// under it. It no longer spans the desk, so the notes start at the header.
+.cv2-plate.is-column {
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.2rem 0.15rem 0.6rem;
+  margin-bottom: 0.4rem;
+  background: none;
 
-  .cv2-plate-hex { width: 62px; height: 71px; }
-  .cv2-plate-initial { font-size: scaled(1.7rem); }
-  .cv2-plate-name { font-size: scaled(1.05rem); }
-  .cv2-plate-stats { font-size: scaled(0.72rem); }
+  .cv2-plate-hex { width: 44px; height: 50px; }
+  .cv2-plate-initial { font-size: scaled(1.2rem); }
+  .cv2-plate-name { font-size: scaled(0.92rem); }
+  .cv2-plate-seg { max-width: 8rem; }
 }
 
 // ── Tile hover card (navigator peek) ─────────────────────

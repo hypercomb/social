@@ -50,6 +50,18 @@ type LineageLike = { explorerSegments?: () => readonly string[] }
 type NavigationLike = { goRaw?: (segments: readonly string[]) => void }
 type PageFacts = { pageZone?: string; selfAddress?: string; from?: { lineageKey: string; zone: string } }
 
+/** One run of copy read by `linkRuns`: plain text, or a name that is a door. */
+export type LinkRun = {
+  readonly text: string
+  readonly href?: string
+  readonly zone?: string
+  readonly colour?: string
+  readonly title?: string
+  readonly cross?: boolean
+  /** Set when the door is one of our own creations: where it is in the hive. */
+  readonly segments?: readonly string[]
+}
+
 export class DomainLinksDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'sharing'
@@ -339,9 +351,9 @@ export class DomainLinksDrone extends Drone {
 
   /** Which zone the page is on and which address is its own — so a link
    *  elsewhere is marked cross-domain and a page never links to itself. */
-  async #page(): Promise<PageFacts> {
+  async #page(on?: readonly string[]): Promise<PageFacts> {
     if (this.#own.size > 0) {
-      const segs = (get<LineageLike>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? []).map(String)
+      const segs = (on ?? get<LineageLike>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? []).map(String)
       const key = lineageKey(segs)
       const self = this.#own.get(key)
       const hosts = segs.length ? await hostsOfBranchKnown(segs, true).catch(() => null) : null
@@ -370,6 +382,41 @@ export class DomainLinksDrone extends Drone {
     // only on an exact match, so a deeper page (or /index.html) would link
     // its own creation to itself.
     return { pageZone, selfAddress: self?.address ?? selfAddress, ...(self ? { from: { lineageKey: self.lineageKey, zone: self.zone } } : {}) }
+  }
+
+  /** THE SAME RULE OVER A STRING (jwize, 2026-11-12) — for copy a surface
+   *  renders itself, such as a note, which must not have its DOM rewritten
+   *  under the framework that owns it. The text comes back as runs: plain
+   *  text, and every name of a door open now as a link run carrying what a
+   *  link made on a hosted page carries — its address, the colour of its
+   *  domain, whether it crosses zones — plus the segments of one of OUR OWN
+   *  creations, so the caller can move inside the hive instead of leaving.
+   *  `segments` names the tile the copy is ON (default: where the explorer
+   *  stands), so its own name stays text and its zone picks the door.
+   *  One plain run when nothing is named or no door is open. */
+  public linkRuns = async (text: string, segments?: readonly string[]): Promise<LinkRun[]> => {
+    const plain: LinkRun[] = [{ text }]
+    if (!text.trim() || typeof document === 'undefined') return plain
+    const entries = await this.#table()
+    if (entries.length === 0) return plain
+    const page = await this.#page(segments)
+    const box = document.createElement('div')
+    box.textContent = text
+    if (linkify(box, entries, page) === 0) return plain
+    return Array.from(box.childNodes, (n): LinkRun => {
+      if (!(n instanceof HTMLAnchorElement)) return { text: n.textContent ?? '' }
+      const lineage = n.getAttribute('data-lineage') ?? ''
+      const own = this.#own.get(lineage)
+      return {
+        text: n.textContent ?? '',
+        href: n.href,
+        zone: n.getAttribute('data-domain') ?? '',
+        colour: n.style.color,
+        title: n.title,
+        cross: n.hasAttribute('data-cross'),
+        ...(own ? { segments: own.segments } : {}),
+      }
+    })
   }
 
   /** Our own creation, in our own hive: move inside, no reload. A click with
