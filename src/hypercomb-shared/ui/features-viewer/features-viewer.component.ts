@@ -1209,8 +1209,30 @@ export class FeaturesViewerComponent implements OnDestroy {
       void this.toggleWebsite(group, feat)
       return
     }
-    if (feat.origin === 'cascade') return
+    // An inherited row FLIPS AT ITS ORIGIN (the contract above): the record
+    // lives on the ancestor it flows from, so that is where the off lands.
+    // It used to return here, which left a lit row that did nothing at all
+    // when pressed.
+    if (feat.origin === 'cascade') { this.removeAtOrigin(group, feat); return }
     this.removeHere(group, feat)
+  }
+
+  /** Switch an INHERITED row off where it flows from — the ancestor named by
+   *  `originSegments` (absent = the hive root). The panel stays on this
+   *  layer: the drone removes at `at` but answers and refreshes `segments`. */
+  removeAtOrigin(group: FeatureGroup, feat: FeatureRow): void {
+    if (feat.origin !== 'cascade') return
+    const key = this.rowKey(group, feat)
+    if (this.pending().has(key)) return
+    this.pending.update(map => new Map(map).set(key, false))
+    this.#clearNote(key)
+    EffectBus.emit('features:remove', {
+      cell: group.cell,
+      segments: [...group.segments],
+      kind: feat.kind,
+      at: [...(feat.originSegments ?? [])],
+    })
+    this.#armRowLeash(key)
   }
 
   /** Is this row live here? Suppression is the legacy drain; a WEBSITE row is

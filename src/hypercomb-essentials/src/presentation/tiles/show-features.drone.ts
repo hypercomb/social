@@ -529,12 +529,18 @@ export class ShowFeaturesDrone extends Drone {
     // decorations ARE the applied behaviors — so removing the tile's records
     // of the kind is the whole off. Answers with `features:outcome` and
     // refreshes the group so the row leaves "on this tile".
-    this.onEffect<{ cell?: string; segments?: string[]; kind?: string; silent?: boolean }>('features:remove', (p) => {
+    //
+    // `at` is an INHERITED row's origin — the ancestor whose record flows down
+    // to this layer. The record is removed THERE (an inherited row flips at
+    // its origin), while the answer and the refresh stay with `segments`, the
+    // layer the participant is standing on. Empty `at` = the hive root.
+    this.onEffect<{ cell?: string; segments?: string[]; kind?: string; silent?: boolean; at?: string[] }>('features:remove', (p) => {
       const segments = Array.isArray(p?.segments) ? p!.segments!.map(s => String(s ?? '').trim()).filter(Boolean) : []
       const kind = String(p?.kind ?? '')
       const cell = String(p?.cell ?? '').trim()
       if (!kind || (segments.length === 0 && !cell)) return
-      void this.#removeAt(segments, kind, cell, p?.silent === true)
+      const at = Array.isArray(p?.at) ? p!.at!.map(s => String(s ?? '').trim()).filter(Boolean) : undefined
+      void this.#removeAt(segments, kind, cell, p?.silent === true, at)
     })
 
     // The DEFAULT toggle — clicking a view row's ICON in the panel, or
@@ -923,19 +929,23 @@ export class ShowFeaturesDrone extends Drone {
   /** REMOVE every decoration of `kind` at `segments` — the panel row's ×.
    *  Committed (not just queued) before the refresh so the row is gone when
    *  the group re-reads. A kind with no records here (slot-backed content)
-   *  is refused loudly rather than silently un-removed. */
-  async #removeAt(segments: readonly string[], kind: string, cellLabel = '', silent = false): Promise<void> {
+   *  is refused loudly rather than silently un-removed. With `at`, the records
+   *  are removed at that ancestor instead — an inherited row's origin — and
+   *  `segments` stays the layer that asked, for the answer and the refresh. */
+  async #removeAt(segments: readonly string[], kind: string, cellLabel = '', silent = false, at?: readonly string[]): Promise<void> {
     const label = segments[segments.length - 1] ?? cellLabel
+    const where = at ?? segments
+    const whereLabel = at ? (at[at.length - 1] ?? 'the hive') : label
     try {
-      const existing = await listDecorations({ kind, segments: [...segments] })
+      const existing = await listDecorations({ kind, segments: [...where] })
       if (existing.length === 0) {
         this.emitEffect('features:outcome', { cell: label, kind, ok: false, message: `"${kind}" has no record here to remove — use its own command` })
         return
       }
       for (const e of existing) {
-        await removeDecorationAndWait({ sig: e.sig, segments: [...segments] })
+        await removeDecorationAndWait({ sig: e.sig, segments: [...where] })
       }
-      this.emitEffect('activity:log', { message: `${kind} off "${label}"`, icon: '○' })
+      this.emitEffect('activity:log', { message: `${kind} off "${whereLabel}"`, icon: '○' })
       this.emitEffect('features:outcome', { cell: label, kind, ok: true, message: '' })
       if (label && !silent) await this.#open(label, segments, true)   // refresh the panel group in place
     } catch (err) {
