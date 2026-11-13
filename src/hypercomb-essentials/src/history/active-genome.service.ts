@@ -2,9 +2,11 @@
 
 import { EffectBus } from '@hypercomb/core'
 import {
+  ActiveGenomeMemo,
   collectActiveGenome,
   formatGenomeBytes,
   type ActiveGenomeContent,
+  type ActiveGenomeHeadSource,
   type ActiveGenomeRecord,
   type ActiveGenomeSource,
 } from './active-genome.js'
@@ -33,6 +35,9 @@ const QUEUE_SUBKEY = 'active-genome-queue'
 const PASSIVE_QUEUE_KEY = 'hc:active-genome:pending'
 const SIG_RE = /^[0-9a-f]{64}$/
 const INDICATOR_KEY = 'genome-weight'
+/** How long a remembered head is trusted without a signal. */
+const HEAD_TTL_MS = 10 * 60_000
+const HEAD_MEMO_CAP = 100_000
 
 type Directory = FileSystemDirectoryHandle | undefined
 type HistoryLike = {
@@ -41,6 +46,8 @@ type HistoryLike = {
   getLayerBySig(sig: string): Promise<{ name?: string; [slot: string]: unknown } | null>
   headLayer(lineage: string): Promise<{ filename: string; layerSig: string } | null>
   readMarker(lineage: string, filename: string): Promise<{ bytes: ArrayBuffer; layerSig: string } | null>
+  /** The head in one read; `undefined` = cannot say, use headLayer. */
+  headMarker?(lineage: string): Promise<{ filename: string; layerSig: string; bytes: ArrayBuffer } | null | undefined>
 }
 type StoreLike = {
   getLayerPoolBytes(sig: string): Promise<Uint8Array | null>
@@ -93,17 +100,33 @@ export class ActiveGenomeService {
   #hydrated = false
   #queueWrites: Promise<void> = Promise.resolve()
   #pendingQueueSig: string | null = null
+  /** What the census has read by signature, kept between runs (see
+   *  ActiveGenomeMemo): an unchanged location costs no store read. */
+  readonly #memo = new ActiveGenomeMemo()
+  /** Each location's head as last read, forgotten the moment that lineage's
+   *  head moves or a marker is written into its bag — the one thing a
+   *  signature cannot vouch for. A head also expires after HEAD_TTL_MS, a
+   *  backstop for any write that reached the bag without either signal. */
+  readonly #heads = new Map<string, { head: ActiveGenomeHeadSource | null; at: number }>()
 
   constructor() {
-    EffectBus.on<{ to?: unknown; from?: unknown }>('history:head-changed',
-      p => this.invalidate(this.#signature(p?.to) ?? this.#signature(p?.from)))
-    EffectBus.on<{ bytes?: ArrayBuffer }>('history:marker-wrote',
-      p => this.invalidate(this.#markerSignature(p?.bytes)))
+    EffectBus.on<{ lineageSig?: unknown; to?: unknown; from?: unknown }>('history:head-changed', p => {
+      this.#forgetHead(p?.lineageSig)
+      this.invalidate(this.#signature(p?.to) ?? this.#signature(p?.from))
+    })
+    EffectBus.on<{ lineageSig?: unknown; bytes?: ArrayBuffer }>('history:marker-wrote', p => {
+      this.#forgetHead(p?.lineageSig)
+      this.invalidate(this.#markerSignature(p?.bytes))
+    })
     EffectBus.on<{ sig?: unknown }>('content:wrote',
       p => this.invalidate(this.#signature(p?.sig)))
     EffectBus.on('navigation:guard-start', () => this.#foregroundStarted())
     EffectBus.on('navigation:guard-end', () => this.#foregroundSettled())
     this.#publishState()
+  }
+
+  #forgetHead(lineage: unknown): void {
+    if (typeof lineage === 'string') this.#heads.delete(lineage)
   }
 
   get record(): ActiveGenomeRecord | null { return this.#record }
@@ -196,7 +219,7 @@ export class ActiveGenomeService {
     const source = this.#source(history, store)
     for (let attempt = 0; attempt < 3; attempt++) {
       let result
-      try { result = await collectActiveGenome(source) } catch (error) {
+      try { result = await collectActiveGenome(source, this.#memo) } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
           this.#passiveIntent = true
           this.#schedule()
@@ -233,6 +256,20 @@ export class ActiveGenomeService {
     return this.#record
   }
 
+  /** A location's head, read-only. `headMarker` names it from the store's
+   *  index in one read; `headLayer` (every marker in the bag) is the
+   *  fallback for a history without it. */
+  async #readHead(history: HistoryLike, lineage: string): Promise<ActiveGenomeHeadSource | null> {
+    const quick = await history.headMarker?.(lineage)
+    if (quick !== undefined) {
+      return quick ? { marker: quick.filename, layer: quick.layerSig, bytes: quick.bytes.byteLength } : null
+    }
+    const head = await history.headLayer(lineage)
+    if (!head) return null
+    const marker = await history.readMarker(lineage, head.filename)
+    return marker ? { marker: head.filename, layer: marker.layerSig, bytes: marker.bytes.byteLength } : null
+  }
+
   #source(history: HistoryLike, store: StoreLike): ActiveGenomeSource {
     const background = async <T>(operation: () => Promise<T>): Promise<T> => {
       if (this.#foregroundActive) throw new DOMException('foreground work resumed', 'AbortError')
@@ -263,14 +300,12 @@ export class ActiveGenomeService {
         return bytes && value ? { bytes: bytes.byteLength, value } : null
       },
       head: async lineage => {
-        const head = await background(() => history.headLayer(lineage))
-        if (!head) return null
-        const marker = await background(() => history.readMarker(lineage, head.filename))
-        return marker ? {
-          marker: head.filename,
-          layer: marker.layerSig,
-          bytes: marker.bytes.byteLength,
-        } : null
+        const known = this.#heads.get(lineage)
+        if (known && Date.now() - known.at < HEAD_TTL_MS) return known.head
+        const head = await background(() => this.#readHead(history, lineage))
+        if (this.#heads.size >= HEAD_MEMO_CAP) this.#heads.clear()
+        this.#heads.set(lineage, { head, at: Date.now() })
+        return head
       },
       resource: async signature => {
         const blob = await background(() => store.getResourceLocal(signature))

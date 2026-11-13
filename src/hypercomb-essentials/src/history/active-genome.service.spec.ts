@@ -225,3 +225,58 @@ describe('passive active-genome queue', () => {
     expect(service.dirty).toBe(true)
   })
 })
+
+describe('the census remembers heads until that lineage moves', () => {
+  // 2026-11-12: every run re-read every location's head — headLayer lists and
+  // reads every marker in the bag — on an 11,600-bag hive, every armed pass.
+  const setup = (extra: Record<string, unknown> = {}) => {
+    const store = new MemoryComputedStore()
+    const live = { ...history(), ...extra }
+    const readMarker = vi.spyOn(live, 'readMarker')
+    registrations.set('@hypercomb.social/Store', store)
+    registrations.set('@diamondcoreprocessor.com/HistoryService', live)
+    const service = new ActiveGenomeService()
+    registrations.set(ACTIVE_GENOME_KEY, service)
+    return { service, readMarker, live }
+  }
+
+  it('reads a location head once, and again only after a marker lands in its bag', async () => {
+    const { service, readMarker } = setup()
+    service.invalidate(trigger)
+    await service.refresh()
+    expect(readMarker).toHaveBeenCalledTimes(1)
+
+    service.invalidate(trigger)
+    await service.refresh()
+    expect(readMarker).toHaveBeenCalledTimes(1)
+
+    EffectBus.emit('history:marker-wrote', { lineageSig: lineage })
+    service.invalidate(trigger)
+    await service.refresh()
+    expect(readMarker).toHaveBeenCalledTimes(2)
+  })
+
+  it('forgets a head when history says it moved', async () => {
+    const { service, readMarker } = setup()
+    service.invalidate(trigger)
+    await service.refresh()
+    EffectBus.emit('history:head-changed', { lineageSig: lineage, from: root, to: root, epoch: 2 })
+    service.invalidate(trigger)
+    await service.refresh()
+    expect(readMarker).toHaveBeenCalledTimes(2)
+  })
+
+  it('asks for the head in one read when history can name it', async () => {
+    const headMarker = vi.fn(async () => ({
+      filename: '00000000',
+      layerSig: root,
+      bytes: markerBytes.buffer.slice(markerBytes.byteOffset, markerBytes.byteOffset + markerBytes.byteLength) as ArrayBuffer,
+    }))
+    const { service, readMarker } = setup({ headMarker })
+    service.invalidate(trigger)
+    const record = await service.refresh()
+    expect(headMarker).toHaveBeenCalledTimes(1)
+    expect(readMarker).not.toHaveBeenCalled()
+    expect(record?.heads[0]).toMatchObject({ marker: '00000000', layer: root })
+  })
+})

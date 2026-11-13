@@ -102,12 +102,69 @@ const sig = (value: unknown): string | null => {
   return SIG_RE.test(text) ? text : null
 }
 
+/** One kind of thing a census reaches, and where it is stored. */
+type Found = { kind: ActiveGenomeObjectKind; sig: string; bytes: number }
+type Lost = { kind: ActiveGenomeObjectKind; sig: string }
+
+/** What one layer or resource adds to the census by itself: the objects it
+ *  reaches and the ones it names that are not here. */
+type Contribution = { objects: Found[]; missing: Lost[] }
+
+/** A location's own share of the census, with its children named so a
+ *  replay can walk on without reading the layer again. */
+type GenomeNode = Contribution & { children: Array<{ sig: string; name: string }> }
+
+/**
+ * WHAT A CENSUS REMEMBERS BETWEEN RUNS (2026-11-12).
+ *
+ * The census used to read the whole hive on every run — every layer, every
+ * child layer again just for its name, every resource, every head — about
+ * 35,000 store calls on an 11,600-bag hive, and it ran again on every armed
+ * optimize pass. Everything it reads by SIGNATURE is immutable, so it is
+ * kept here by signature and never read twice:
+ *
+ *   layers / resources  the bytes and parsed value of a content sig
+ *   contributions       what a resource's JSON reaches, expanded
+ *   pools               a bee's or dependency's size
+ *   nodes               a location's own share, keyed `lineage|layerSig`
+ *   lineages            the address of a path
+ *
+ * Only what was FOUND is kept, and a node or expansion only when it names
+ * nothing missing (complete-or-absent): a bee or resource that is absent now
+ * may arrive later. Heads are NOT kept here — a head moves without the
+ * layer above it changing, so the caller's `head` must answer for that.
+ * Pure derivation of sig-addressed inputs, never load-bearing: drop the
+ * memo and the next census reads everything again and gets the same answer.
+ */
+export class ActiveGenomeMemo {
+  readonly layers = new Map<string, ActiveGenomeLayer>()
+  readonly resources = new Map<string, ActiveGenomeContent>()
+  readonly contributions = new Map<string, Contribution>()
+  readonly pools = new Map<string, number>()
+  readonly nodes = new Map<string, GenomeNode>()
+  readonly lineages = new Map<string, string>()
+  readonly #cap: number
+
+  constructor(cap = 100_000) { this.#cap = Math.max(1, cap) }
+
+  /** Remember, dropping the whole map rather than growing past the cap. */
+  keep<V>(map: Map<string, V>, key: string, value: V): void {
+    if (map.size >= this.#cap && !map.has(key)) map.clear()
+    map.set(key, value)
+  }
+}
+
 /**
  * Collect one optimistic snapshot. Callers discard and retry when `stable`
  * is false: a head moved while the closure was being read.
+ *
+ * With a `memo`, a census reads only what it has not seen: unchanged
+ * locations replay their remembered share, so a run after a small edit
+ * reads the moved heads and the new layers, not the hive.
  */
 export async function collectActiveGenome(
   source: ActiveGenomeSource,
+  memo: ActiveGenomeMemo = new ActiveGenomeMemo(),
 ): Promise<ActiveGenomeCollection> {
   const epoch = source.epoch()
   const root = sig(await source.root())
@@ -117,17 +174,19 @@ export async function collectActiveGenome(
   const missing = new Map<string, ActiveGenomeMissing>()
   const heads: ActiveGenomeHead[] = []
   const walkedLocations = new Set<string>()
-  const expandedResources = new Set<string>()
+
+  // Layers and resources share the flat content root and therefore dedupe
+  // physically. Bees and dependencies live in distinct meaning pools.
+  const storageOf = (kind: ActiveGenomeObjectKind, signature: string): string =>
+    (kind === 'layer' || kind === 'resource') ? `root:${signature}` : `${kind}:${signature}`
 
   const addMissing = (kind: ActiveGenomeObjectKind, signature: string): void => {
-    const storage = (kind === 'layer' || kind === 'resource') ? `root:${signature}` : `${kind}:${signature}`
+    const storage = storageOf(kind, signature)
     if (!missing.has(storage)) missing.set(storage, { kind, sig: signature })
   }
 
   const addObject = (kind: ActiveGenomeObjectKind, signature: string, bytes: number): void => {
-    // Layers and resources share the flat content root and therefore dedupe
-    // physically. Bees and dependencies live in distinct meaning pools.
-    const storage = (kind === 'layer' || kind === 'resource') ? `root:${signature}` : `${kind}:${signature}`
+    const storage = storageOf(kind, signature)
     const prior = objects.get(storage)
     if (!prior || (prior.kind === 'resource' && kind === 'layer')) {
       objects.set(storage, { kind, sig: signature, bytes })
@@ -135,35 +194,47 @@ export async function collectActiveGenome(
     missing.delete(storage)
   }
 
-  const visitBee = async (raw: unknown): Promise<void> => {
-    const signature = sig(raw)
-    if (!signature) return
-    const bytes = await source.beeBytes(signature)
-    if (bytes === null) addMissing('bee', signature)
-    else addObject('bee', signature, bytes)
+  /** Fold a remembered or freshly read share into this census. */
+  const apply = (share: Contribution): void => {
+    for (const found of share.objects) addObject(found.kind, found.sig, found.bytes)
+    for (const lost of share.missing) addMissing(lost.kind, lost.sig)
   }
 
-  const visitDependency = async (raw: unknown): Promise<void> => {
-    const signature = sig(raw)
-    if (!signature) return
-    const bytes = await source.dependencyBytes(signature)
-    if (bytes === null) addMissing('dependency', signature)
-    else addObject('dependency', signature, bytes)
+  const layerOf = async (signature: string): Promise<ActiveGenomeLayer | null> => {
+    const known = memo.layers.get(signature)
+    if (known) return known
+    const layer = await source.layer(signature)
+    if (layer) memo.keep(memo.layers, signature, layer)
+    return layer
   }
 
-  let visitResource: (raw: unknown) => Promise<void>
+  const poolBytes = async (kind: 'bee' | 'dependency', signature: string): Promise<number | null> => {
+    const key = `${kind}:${signature}`
+    const known = memo.pools.get(key)
+    if (known !== undefined) return known
+    const bytes = kind === 'bee' ? await source.beeBytes(signature) : await source.dependencyBytes(signature)
+    if (bytes !== null) memo.keep(memo.pools, key, bytes)
+    return bytes
+  }
 
-  const expandValue = async (value: unknown, key = ''): Promise<void> => {
+  const lineageOf = async (path: readonly string[]): Promise<string> => {
+    const key = JSON.stringify(path)
+    const known = memo.lineages.get(key)
+    if (known) return known
+    const lineage = await source.lineage(path)
+    memo.keep(memo.lineages, key, lineage)
+    return lineage
+  }
+
+  /** A resource and everything its JSON reaches — immutable, so a complete
+   *  expansion is remembered by its signature. `seen` breaks cycles. */
+  let expandResource: (signature: string, seen: Set<string>) => Promise<Contribution>
+
+  /** Everything a value reaches: bees, dependencies, and resources expanded
+   *  through their own JSON. */
+  const expandValue = async (value: unknown, key: string, into: Contribution, seen: Set<string>): Promise<void> => {
     if (Array.isArray(value)) {
-      if (key === 'bees') {
-        for (const item of value) await visitBee(item)
-        return
-      }
-      if (key === 'dependencies') {
-        for (const item of value) await visitDependency(item)
-        return
-      }
-      for (const item of value) await expandValue(item, key)
+      for (const item of value) await expandValue(item, key, into, seen)
       return
     }
     if (value && typeof value === 'object') {
@@ -172,32 +243,79 @@ export async function collectActiveGenome(
         // AT something — usually the past. The genome is the current state
         // only, and it is what replication and hosts are allowed to send.
         if (isReferentField(childKey)) continue
-        await expandValue(child, childKey)
+        await expandValue(child, childKey, into, seen)
       }
       return
     }
-    if (key === 'bees') await visitBee(value)
-    else if (key === 'dependencies') await visitDependency(value)
-    else await visitResource(value)
-  }
-
-  visitResource = async (raw: unknown): Promise<void> => {
-    const signature = sig(raw)
-    if (!signature || expandedResources.has(signature)) return
-    expandedResources.add(signature)
-    const content = await source.resource(signature)
-    if (!content) {
-      addMissing('resource', signature)
+    const signature = sig(value)
+    if (!signature) return
+    if (key === 'bees' || key === 'dependencies') {
+      const kind = key === 'bees' ? 'bee' : 'dependency'
+      const bytes = await poolBytes(kind, signature)
+      if (bytes === null) into.missing.push({ kind, sig: signature })
+      else into.objects.push({ kind, sig: signature, bytes })
       return
     }
-    addObject('resource', signature, content.bytes)
-    if (content.value !== undefined) await expandValue(content.value)
+    const share = await expandResource(signature, seen)
+    into.objects.push(...share.objects)
+    into.missing.push(...share.missing)
+  }
+
+  expandResource = async (signature: string, seen: Set<string>): Promise<Contribution> => {
+    const known = memo.contributions.get(signature)
+    if (known) return known
+    if (seen.has(signature)) return { objects: [], missing: [] }
+    seen.add(signature)
+    const share: Contribution = { objects: [], missing: [] }
+    let content = memo.resources.get(signature) ?? null
+    if (!content) {
+      content = await source.resource(signature)
+      if (content) memo.keep(memo.resources, signature, content)
+    }
+    if (!content) {
+      share.missing.push({ kind: 'resource', sig: signature })
+      return share
+    }
+    share.objects.push({ kind: 'resource', sig: signature, bytes: content.bytes })
+    if (content.value !== undefined) await expandValue(content.value, '', share, seen)
+    if (share.missing.length === 0) memo.keep(memo.contributions, signature, share)
+    return share
+  }
+
+  /** A location's own share, read from its layer. */
+  const readNode = async (signature: string): Promise<GenomeNode> => {
+    const node: GenomeNode = { objects: [], missing: [], children: [] }
+    const layer = await layerOf(signature)
+    if (!layer) {
+      node.missing.push({ kind: 'layer', sig: signature })
+      return node
+    }
+    node.objects.push({ kind: 'layer', sig: signature, bytes: layer.bytes })
+    for (const [key, value] of Object.entries(layer.value)) {
+      if (key === 'name' || isReferentField(key)) continue
+      if (CHILD_SLOT_SET.has(key) && Array.isArray(value)) {
+        for (const childRaw of value) {
+          const childSig = sig(childRaw)
+          if (!childSig) continue
+          const child = await layerOf(childSig)
+          const name = String(child?.value?.name ?? '').trim()
+          if (!name) {
+            node.missing.push({ kind: 'layer', sig: childSig })
+            continue
+          }
+          node.children.push({ sig: childSig, name })
+        }
+        continue
+      }
+      await expandValue(value, key, node, new Set())
+    }
+    return node
   }
 
   const visitLayer = async (raw: unknown, path: readonly string[]): Promise<void> => {
     const carriedSignature = sig(raw)
     if (!carriedSignature) return
-    const lineage = await source.lineage(path)
+    const lineage = await lineageOf(path)
     const head = await source.head(lineage)
     // A parent may carry an older child generation under leaf-only history.
     // The active genome follows the location's latest real marker when one
@@ -214,31 +332,13 @@ export async function collectActiveGenome(
       bytes: head?.bytes ?? 0,
     })
 
-    const layer = await source.layer(signature)
-    if (!layer) {
-      addMissing('layer', signature)
-      return
+    let node = memo.nodes.get(locationKey)
+    if (!node) {
+      node = await readNode(signature)
+      if (node.missing.length === 0) memo.keep(memo.nodes, locationKey, node)
     }
-    addObject('layer', signature, layer.bytes)
-
-    for (const [key, value] of Object.entries(layer.value)) {
-      if (key === 'name' || isReferentField(key)) continue
-      if (CHILD_SLOT_SET.has(key) && Array.isArray(value)) {
-        for (const childRaw of value) {
-          const childSig = sig(childRaw)
-          if (!childSig) continue
-          const child = await source.layer(childSig)
-          const name = String(child?.value?.name ?? '').trim()
-          if (!name) {
-            addMissing('layer', childSig)
-            continue
-          }
-          await visitLayer(childSig, [...path, name])
-        }
-        continue
-      }
-      await expandValue(value, key)
-    }
+    apply(node)
+    for (const child of node.children) await visitLayer(child.sig, [...path, child.name])
   }
 
   await visitLayer(root, [])

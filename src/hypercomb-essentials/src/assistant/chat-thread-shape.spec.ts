@@ -319,6 +319,31 @@ describe('chat-thread — turns are contentSig manifests; legacy stays readable'
     expect(store.resourceReads - before).toBe(4)
   })
 
+  it('a second walk reads no turn it has already read — only markers and new turns', async () => {
+    // 2026-11-12: the orchestrator's stall pass re-read every turn of every
+    // conversation every 30s. A turn file is named by the hash of its bytes,
+    // so its parse is kept; markers are rewritten in place and always re-read.
+    await mod.appendTurn('chat:walked', 'user', 'walk me once')
+    await mod.appendTurn('chat:walked', 'assistant', 'walked')
+    await mod.writeOwed('chat:walked', { state: 'waiting', why: 'question', left: 'your yes' })
+    await mod.listConversationsWithLatest()
+
+    pool.counter!.reads = 0
+    const again = (await mod.listConversationsWithLatest()).conversations.find(c => c.convoId === 'chat:walked')
+    expect(again?.owed).toMatchObject({ state: 'waiting' })
+    // The owed marker only: both turns come from the kept parse.
+    expect(pool.counter!.reads).toBe(1)
+
+    await mod.appendTurn('chat:walked', 'user', 'one more')
+    await mod.writeOwed('chat:walked', null)
+    pool.counter!.reads = 0
+    const after = (await mod.listConversationsWithLatest()).conversations.find(c => c.convoId === 'chat:walked')
+    expect(after?.turnCount).toBe(3)
+    expect(after?.owed).toBeUndefined()
+    // The new turn only — the marker is gone, the old turns are kept.
+    expect(pool.counter!.reads).toBe(1)
+  })
+
   it('groups a conversation by who it waits on', async () => {
     const { conversationGroup } = await import('./chat-threads.js')
     const settled = { name: 'n', stands: 's', open: 0, total: 3, upTo: 4 }

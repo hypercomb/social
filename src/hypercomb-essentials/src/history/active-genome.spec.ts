@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  ActiveGenomeMemo,
   collectActiveGenome,
   type ActiveGenomeSource,
 } from './active-genome.js'
@@ -178,5 +179,87 @@ describe('active genome', () => {
     expect(held.has(oldChild)).toBe(false)
     expect(held.has(oldList)).toBe(false)
     expect(record?.complete).toBe(true)
+  })
+})
+
+describe('active genome: a census remembers what it read by signature', () => {
+  // 2026-11-12: every run re-read the whole hive (~35,000 store calls on an
+  // 11,600-bag hive) and it ran again on every armed optimize pass.
+  const build = () => {
+    const root = s('a')
+    const left = s('b')
+    const right = s('c')
+    const props = s('d')
+    const image = s('e')
+    const bee = s('f')
+    const layers = new Map<string, { bytes: number; value: Record<string, unknown> }>([
+      [root, { bytes: 100, value: { name: '/', children: [left, right], bees: [bee] } }],
+      [left, { bytes: 50, value: { name: 'left', properties: [props] } }],
+      [right, { bytes: 60, value: { name: 'right' } }],
+    ])
+    const resources = new Map([
+      [props, { bytes: 40, value: { small: { image } } }],
+      [image, { bytes: 900 }],
+    ])
+    const heads = new Map<string, { marker: string; layer: string; bytes: number }>([
+      ['', { marker: '00000001', layer: root, bytes: 70 }],
+      ['left', { marker: '00000000', layer: left, bytes: 70 }],
+      ['right', { marker: '00000000', layer: right, bytes: 70 }],
+    ])
+    const reads = { layer: 0, resource: 0, bee: 0, head: 0 }
+    let beePresent = true
+    const source: ActiveGenomeSource = {
+      epoch: () => 1,
+      root: async () => heads.get('')!.layer,
+      lineage: async path => `lineage:${path.join('/')}`,
+      layer: async signature => { reads.layer++; return layers.get(signature) ?? null },
+      head: async lineage => { reads.head++; return heads.get(lineage.replace('lineage:', '')) ?? null },
+      resource: async signature => { reads.resource++; return resources.get(signature) ?? null },
+      beeBytes: async signature => { reads.bee++; return beePresent && signature === bee ? 200 : null },
+      dependencyBytes: async () => null,
+    }
+    const reset = () => { reads.layer = 0; reads.resource = 0; reads.bee = 0; reads.head = 0 }
+    return { source, reads, reset, layers, heads, setBee: (present: boolean) => { beePresent = present }, s: { root, left, right } }
+  }
+
+  it('reads no content at all when nothing changed, and answers the same', async () => {
+    const hive = build()
+    const memo = new ActiveGenomeMemo()
+    const first = await collectActiveGenome(hive.source, memo)
+    hive.reset()
+    const second = await collectActiveGenome(hive.source, memo)
+    expect(second.record).toEqual(first.record)
+    expect(hive.reads).toMatchObject({ layer: 0, resource: 0, bee: 0 })
+    // Heads are the caller's to vouch for: still asked, one per location.
+    expect(hive.reads.head).toBe(3)
+  })
+
+  it('after a head moves, reads only the moved location\'s new layer', async () => {
+    const hive = build()
+    const memo = new ActiveGenomeMemo()
+    await collectActiveGenome(hive.source, memo)
+    const moved = s('9')
+    hive.layers.set(moved, { bytes: 65, value: { name: 'right', notes: [] } })
+    hive.heads.set('right', { marker: '00000001', layer: moved, bytes: 70 })
+    hive.reset()
+    const fresh = await collectActiveGenome(hive.source, new ActiveGenomeMemo())
+    hive.reset()
+    const { record } = await collectActiveGenome(hive.source, memo)
+    expect(hive.reads.layer).toBe(1)
+    expect(hive.reads.resource).toBe(0)
+    expect(record).toEqual(fresh.record)
+    expect(record?.objects.some(object => object.sig === moved)).toBe(true)
+  })
+
+  it('never remembers something missing — it is found the moment it arrives', async () => {
+    const hive = build()
+    const memo = new ActiveGenomeMemo()
+    hive.setBee(false)
+    const before = await collectActiveGenome(hive.source, memo)
+    expect(before.record?.complete).toBe(false)
+    hive.setBee(true)
+    const after = await collectActiveGenome(hive.source, memo)
+    expect(after.record?.complete).toBe(true)
+    expect(after.record?.objects.some(object => object.kind === 'bee')).toBe(true)
   })
 })

@@ -833,6 +833,12 @@ export const appendTurn = async (
  *  a bucket carries the same convoId. The walk used to read every file of every
  *  machine bucket (`keywords:…` chatter can dwarf the human threads) and throw
  *  the lot away after; with the probe, a machine bucket costs one read. */
+/** Parsed turn records by file name — the name is the hash of the bytes, so
+ *  an entry can never go stale; only its absence from a bucket matters, and
+ *  the bucket's own listing says that. */
+const parsedTurns = new Map<string, RawTurn & { kind?: string }>()
+const PARSED_TURN_CAP = 50_000
+
 const readBucketRaw = async (
   bucket: FileSystemDirectoryHandle,
   humanOnly = false,
@@ -847,8 +853,23 @@ const readBucketRaw = async (
   for await (const [entryName, handle] of entries) {
     if (handle.kind !== 'file') continue
     try {
-      const file = await (handle as FileSystemFileHandle).getFile()
-      const turn = JSON.parse(await file.text()) as RawTurn & { kind?: string }
+      const known = parsedTurns.get(entryName)
+      let turn: RawTurn & { kind?: string }
+      if (known) turn = known
+      else {
+        const file = await (handle as FileSystemFileHandle).getFile()
+        turn = JSON.parse(await file.text()) as RawTurn & { kind?: string }
+        // A TURN NEVER CHANGES UNDER ITS NAME: the file is named by the hash
+        // of its bytes, so the parse is kept by that name and every later
+        // walk — the conversation list, the orchestrator's stall pass every
+        // 30s — reads only turns it has not seen (2026-11-12: each pass
+        // re-read every turn of every conversation). Markers are rewritten
+        // under constant names and are never kept here.
+        if (turn?.kind === 'chat-turn' && SIG64.test(entryName)) {
+          if (parsedTurns.size >= PARSED_TURN_CAP) parsedTurns.clear()
+          parsedTurns.set(entryName, turn)
+        }
+      }
       // The archive marker rides in the same directory as the turns, so the
       // walk that was already reading every file learns the flag for free —
       // no second pass, no second read per thread.
