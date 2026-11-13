@@ -160,6 +160,24 @@ describe('view-back — the trap', () => {
     expect(history.index).toBe(0)
   })
 
+  it('a view whose way out is the page before it (a managed site door’s card) leaves in ONE press', async () => {
+    // The card covers the canvas and holds view:active, so its Back is trapped
+    // like any view's; its registered, exact way out steps back once more —
+    // the press reaches the page the owner came from, never a no-op peel.
+    viewBack.dispose()
+    stand([{ page: 'before' }, { page: 'manage' }])
+    gesture.register({ owner: 'site-manage', exact: true, back: () => history.back() })
+    modes.enter('view:active', 'site-manage')
+    expect(history.index).toBe(2)          // the trap over the management page
+
+    await history.press()
+    await flush()
+    expect(setMode).not.toHaveBeenCalled()
+    expect(navigationBack).not.toHaveBeenCalled()
+    expect(history.backs).toBe(2)          // the press, then the card's way out
+    expect(history.state).toEqual({ page: 'before' })
+  })
+
   it('peels a view that never registered (slides, the scroller) to hexagons', async () => {
     setMode.mockImplementation((mode: string) => { if (mode === 'hexagons') close('slides-view') })
     open('slides-view')
