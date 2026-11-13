@@ -1837,6 +1837,13 @@ test('only a visit the owner made marks the browser: never a link from elsewhere
     assert.equal((await asked({ 'sec-fetch-dest': 'image', 'sec-fetch-site': 'same-site' })).headers.get('set-cookie'), null)
     assert.equal((await asked({ 'sec-fetch-dest': 'empty', 'sec-fetch-site': 'same-origin' })).headers.get('set-cookie'), null)
     assert.equal((await asked({})).headers.get('set-cookie'), null)
+    // What such a visit gets is one link back to the trigger — never the
+    // management page, whose own files are the website's for an unmarked browser.
+    const stray = await asked({ 'sec-fetch-dest': 'document', 'sec-fetch-site': 'cross-site' })
+    const strayPage = await stray.text()
+    assert.match(strayPage, /<a class="go" href="\/@hypercomb">/)
+    assert.doesNotMatch(strayPage, /hc-manage/)
+    assert.match(stray.headers.get('content-security-policy') ?? '', /frame-ancestors 'none'/)
     // Followed from this same site, or with the trailing slash: marked.
     assert.match((await asked({ 'sec-fetch-dest': 'document', 'sec-fetch-site': 'same-origin' })).headers.get('set-cookie') ?? '', /^__Host-hc-manage=1;/)
     assert.match((await worker.fetch(typed('https://revolucion.pluginthematrix.com/@hypercomb/'), env)).headers.get('set-cookie') ?? '', /^__Host-hc-manage=1;/)

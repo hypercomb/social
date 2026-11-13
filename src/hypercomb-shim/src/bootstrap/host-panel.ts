@@ -649,9 +649,12 @@ class HostPanelElement extends HTMLElement {
     // first visit it installs the host's package and goes straight to the card.
     const managed = manageRecord()
     if (managed) {
-      // Cold is what is on disk, never the stamp (beesOnDisk). Warm: the package's
-      // surfaces take the page after the first pulse (main.ts), so nothing is drawn here.
-      if (!(await beesOnDisk())) this.#renderManageSetup(managed)
+      // Warm takes both: bees on disk (a visitor's look writes the stamp from a
+      // hive that lived only in memory) AND a package stamped as installed (an
+      // install that stopped partway leaves bees and no stamp — only a finished
+      // one stamps). Anything less is cold, and setup offers Install again.
+      // Warm: the package's surfaces take the page after the first pulse (main.ts).
+      if (!installedPackageSig() || !(await beesOnDisk())) this.#renderManageSetup(managed)
       else this.#root.replaceChildren()
       return
     }
@@ -2081,7 +2084,9 @@ class HostPanelElement extends HTMLElement {
         return
       }
       const total = new Set([...pkg.layers, ...pkg.bees, ...pkg.dependencies].map(bareSig)).size
-      await this.#replicate(pkg.packageSig, take, card, total, onHeld => installPackage(pkg, [], { onHeld }))
+      // The page runs as its zone: the zone's package is its own (runsAs).
+      const self = siteDoorZone(location.host)
+      await this.#replicate(pkg.packageSig, take, card, total, (onHeld, onPhase) => installPackage(pkg, [], { onHeld, onPhase, self }))
       // A failed install leaves the button to try again.
       if (!this.#busy) take.hidden = false
     }
