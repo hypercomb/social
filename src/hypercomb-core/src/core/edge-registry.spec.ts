@@ -39,6 +39,13 @@ describe('edge registry', () => {
     expect(isEdgeField('seal')).toBe(false)
   })
 
+  // A fingerprint of an outside source (the bubble campaign's game files) is
+  // compared, never fetched — no host holds those bytes.
+  it('treats a source fingerprint `sourceSha256` as a referent, never an edge', () => {
+    expect(isReferentField('sourceSha256')).toBe(true)
+    expect(isEdgeField('sourceSha256')).toBe(false)
+  })
+
   it('never harvests `prev` into a closure', () => {
     expect(edgeSigsOf({ children: [sigA], prev: sigB })).toEqual([sigA])
   })

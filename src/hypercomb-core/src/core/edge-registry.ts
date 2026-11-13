@@ -96,6 +96,11 @@ export const EDGE_FIELDS: readonly string[] = Object.freeze([
  *     onto hosts (layer-pattern-audit.md rule 6: only the genome leaves;
  *     history never does — jwize 2026-10-18: "only the head identifier is
  *     exposed").
+ *   - `sourceSha256` — the FINGERPRINT of an outside source a record was
+ *     derived from (the bubble campaign's original game files,
+ *     games/bubble/tile-surface.ts). It is compared, never fetched: no host
+ *     holds those bytes, and the genome census counted the bubble branch as
+ *     missing a resource that was never meant to exist (2026-11-12).
  *
  * May grow as new referent fields are minted — adding here is how a new
  * pointer field opts out of every precise walker at once.
@@ -106,6 +111,7 @@ export const REFERENT_FIELDS: readonly string[] = Object.freeze([
   'prev',
   'pubkey',
   'seal',
+  'sourceSha256',
 ])
 
 const edgeSet: ReadonlySet<string> = new Set(EDGE_FIELDS)

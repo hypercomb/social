@@ -61,7 +61,7 @@ pub(crate) const CHILD_SLOTS: &[&str] = &["cells", "layers", "children"];
 
 /// Sig-shaped fields that point AT something and are never carried —
 /// `REFERENT_FIELDS` in `hypercomb-core/src/core/edge-registry.ts`.
-pub(crate) const REFERENT_FIELDS: &[&str] = &["groupSig", "targetSig", "prev", "pubkey", "seal"];
+pub(crate) const REFERENT_FIELDS: &[&str] = &["groupSig", "targetSig", "prev", "pubkey", "seal", "sourceSha256"];
 
 /// The home page's molecule — `HOME_MOLECULE_NAME` in core
 /// (`molecule-address.ts`): the root location's bag is `sign('root-entries')`.
