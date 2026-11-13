@@ -835,6 +835,13 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // signature, placing a recorded take and any edited words on it. TRUTH POOL —
   // a host's own takes, kept by hand, never minted from the optimize phase.
   'presentation:dubs',
+  // WHICH PUBLISHED HEAD A MANAGED SITE'S REPLICA CAME FROM (hypercomb-
+  // essentials/src/sharing/site-replica.ts): one current record per site
+  // lineage, `{ published, local }` — the head the owner's card was taken
+  // from and the local layer that taking left — so a newer publish is taken
+  // only while the replica holds no local edits. Participant-local intent,
+  // written by the software (`keep: 'current'`), never replicated.
+  'sites:replicas',
 ])
 
 /**

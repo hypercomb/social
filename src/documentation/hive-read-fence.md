@@ -328,3 +328,42 @@ written as privacy limits and had become work limits.
   routed at the deep tier, and once a conversation has read code every
   message in it is — a short "okay find it" no longer drops the work to the
   lightest model. A model named in the chat still wins.
+
+## On a managed site door: nothing fenced, and the card is a target (2026-11-13)
+
+jwize: "The whole idea is we are upgrading something that we replicated."
+"The ai should be able to do anything it likes." A managed site door
+(`<name>.<zone>` served to the owner's marked browser, carrying
+`<script id="hc-manage">`) holds a replica of the owner's published card, and
+the owner is the one at the keyboard. The runtime chat reads that record
+itself (`hypercomb-runtime/src/chat-window/core/managed-page.ts`, mirrored
+from the shim's `manage-record.ts`) and changes four things there, and only
+there:
+
+- **The owner's full grant.** The chat's grammar door
+  (`hypercomb-grammar.ts`) hands core the page's grant: on a managed page
+  `{ reach: 'destructive', scope: 'network' }` with no roster, so every verb a
+  behaviour offers to models is taught and runs, and a write is never refused
+  for want of a grant. That page has no command line, so `/grant allow` could
+  never have reached its roster. Every other page reads the participant's own
+  grant, live, exactly as before. There a write needs only the Execution
+  column (`canEdit`), every model reads freely, and no word is switched off
+  (`isWordSwitchedOff`; a fresh origin starts with the chat dark).
+- **The lesson is the replica's.** `managedRule` replaces the SANDBOX line:
+  the page holds a replica of `/<lineage>`; change anything it takes to make
+  it better (the page, the card's details and theme, its code); a change
+  shows on the card at once; the owner's Publish sends the upgrade home. The
+  file lesson drops the trial sentences, a page change needs only the page
+  read this turn (no `code trialOrigin`), and the receipt says the change
+  shows on the card. `TileFilesDrone` stages and remembers no trial there.
+- **The card is a write target.** `card /<tile>` writes the card's details
+  and `card /<tile> theme` its theme. Each is one JSON object, at most 64 KB,
+  stored as a resource. The tile's `card:data` record is then replaced to name
+  it (`dataSig` / `themeSig`), keeping its picture and everything else it says
+  (`essentials files/card-commit.ts`, the card's twin of `page-commit.ts`).
+  SEARCH/REPLACE edits work against the JSON as it is now. A theme needs
+  details first. The block is read only on a managed page; elsewhere a `card`
+  header is refused exactly as before.
+- **Still shown, never refused.** Each block still waits in the Execution
+  column under the owner's policy, and a line that leaves the machine still
+  waits for a hand. The chat never signs: Publish is the owner's button.

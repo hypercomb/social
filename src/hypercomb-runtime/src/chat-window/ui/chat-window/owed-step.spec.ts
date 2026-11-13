@@ -220,4 +220,14 @@ describe('a page change that was only read', () => {
     expect(pageChangeStillOwed('What does the page say?', 'Tidy Bench.', true, false, false)).toBeNull()
     expect(pageChangeStillOwed(ask, 'Here are the signatures.', false, false, false)).toBeNull()
   })
+
+  // A managed site door has no builds: the page and the card change where
+  // they are, and an ask about the card is an ask about the page.
+  it('on a managed site door, asks for the change itself — never a next build — and counts the card', () => {
+    const owed = pageChangeStillOwed(ask, 'Here are the signatures.', true, false, false, true)
+    expect(owed).toContain('Write the change on this same tile now: the page, or the card.')
+    expect(owed).not.toContain('build')
+    expect(pageChangeStillOwed('Update my card details', 'Read it.', true, false, false, true)).toContain('the card')
+    expect(pageChangeStillOwed('Update my card details', 'Read it.', true, false, false)).toBeNull()
+  })
 })

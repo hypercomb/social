@@ -15,12 +15,18 @@
 import { LEGACY_DIRECTORIES } from '@hypercomb/core'
 
 const SIG_RE = /^[0-9a-f]{64}$/
+// A bare host name (a machine's `localhost:<port>` included), never a URL.
+const HOST_RE = /^(?:[a-z0-9-]+\.)*[a-z0-9-]+(?::\d{1,5})?$/
 
 export type ManageRecord = {
   readonly lineage: string
   readonly title: string
   readonly publisher: string | null
   readonly head: string | null
+  /** The zone root this page's publish writes to (worker.js writeFaceFor): the
+   *  site door itself is read-only. A hint — managed-publish.ts checks the host
+   *  serves the index this site reads before it writes there. */
+  readonly writes: string | null
 }
 
 /** The leave route: the mark and the service worker go, and the address is the website again. */
@@ -54,9 +60,33 @@ export async function beesOnDisk(): Promise<boolean> {
   }
 }
 
+/** ONLY THE WORKER'S RECORD COUNTS: `<script type="application/json"
+ *  id="hc-manage">` directly in <head>, as the worker injects it. Anything else
+ *  with that id is planted markup, not a record. For the live document the
+ *  answer is taken once (at boot) and kept, so markup planted later changes
+ *  nothing — the publish reads `writes` and `publisher` from here. */
+function workerRecordText(doc: Document): string | null {
+  const el = doc.getElementById('hc-manage')
+  if (!el || el.tagName !== 'SCRIPT' || String((el as HTMLScriptElement).type ?? '').toLowerCase() !== 'application/json') return null
+  if (!doc.head || el.parentElement !== doc.head) return null
+  return el.textContent
+}
+let booted: { readonly record: ManageRecord | null } | undefined
+
 export function manageRecord(doc: Document = document): ManageRecord | null {
+  if (doc === globalThis.document) {
+    if (!booted) booted = { record: parseManageRecord(doc) }
+    return booted.record
+  }
+  return parseManageRecord(doc)
+}
+
+/** For specs only: read the live document anew. */
+export function forgetManageRecordForTests(): void { booted = undefined }
+
+function parseManageRecord(doc: Document): ManageRecord | null {
   try {
-    const raw = doc.getElementById('hc-manage')?.textContent
+    const raw = workerRecordText(doc)
     if (!raw) return null
     const value = JSON.parse(raw) as Record<string, unknown>
     const lineage = typeof value['lineage'] === 'string' ? value['lineage'].slice(0, 200) : ''
@@ -64,7 +94,9 @@ export function manageRecord(doc: Document = document): ManageRecord | null {
     const title = typeof value['title'] === 'string' && value['title'] ? value['title'].slice(0, 200) : lineage
     const publisher = typeof value['publisher'] === 'string' && SIG_RE.test(value['publisher']) ? value['publisher'] : null
     const head = typeof value['head'] === 'string' && SIG_RE.test(value['head']) ? value['head'] : null
-    return { lineage, title, publisher, head }
+    const named = typeof value['writes'] === 'string' ? value['writes'].trim().toLowerCase() : ''
+    const writes = named.length <= 253 && HOST_RE.test(named) ? named : null
+    return { lineage, title, publisher, head, writes }
   } catch {
     return null
   }

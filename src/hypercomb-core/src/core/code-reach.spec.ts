@@ -15,6 +15,16 @@ describe('what code reaches', () => {
     expect(reachesOf('atob(payload)')).toEqual(['disguise'])
   })
 
+  it('counts the hive’s own ways out to the community as the network: a draft that reaches them is held', () => {
+    // jwize, 2026-11-13: "AI can't publish on the community but it can make changes".
+    expect(reachesOf('get("@hypercomb.social/ManagedPublish").publishRoot("business-card", sig)')).toEqual(['network'])
+    expect(reachesOf('swarm.publishHide(tile)')).toEqual(['network'])
+    expect(reachesOf('const signer = deviceSigner(false)')).toEqual(['network'])
+    expect(newReaches('const a = 1', 'const a = 1; port.publishRoot(x, y)')).toEqual(['network'])
+    // Ordinary edits stay unflagged.
+    expect(reachesOf('card.title = "Technical Visionary"; render(card)')).toEqual([])
+  })
+
   it('reads comments too: a comment trick is not a way past it', () => {
     expect(reachesOf('// fetch(everything)')).toEqual(['network'])
   })

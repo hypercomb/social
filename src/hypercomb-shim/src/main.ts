@@ -128,6 +128,7 @@ import { IMPORT_MAP_STORAGE_KEY, resolveImportMap, sessionBound } from './import
 // nothing below imports it and the type is the only thing that crosses.
 import { loadBootstrap, type BootstrapHandle } from './bootstrap-loader'
 import { manageRecord } from './bootstrap/manage-record'
+import { standAtManagedSite, type UrlBaseNavigation } from './bootstrap/manage-base'
 // Locales resolve by signature from the host, never from this bundle.
 import { signatureCatalogs } from './locales'
 
@@ -251,6 +252,13 @@ const boot = async (): Promise<void> => {
 
   await attachImportMap()
   ;(window as any).__hcBoot('import map attached')
+
+  // A MANAGED SITE DOOR STANDS AT ITS SITE (bootstrap/manage-base.ts): the
+  // page's Lineage is [lineage], the site's own tile, never "@hypercomb" — set
+  // before any bee reads where it stands, as a site door's URL base always is.
+  if (standAtManagedSite(manageRecord(), window.ioc?.get<UrlBaseNavigation>('@hypercomb.social/Navigation'))) {
+    ;(window as any).__hcBoot('managed site door: standing at its site')
+  }
 
   // ACQUISITION, BY SIGNATURE. Loaded after the map because the bundle imports
   // `@hypercomb/core` as a bare specifier — the map's core entry is

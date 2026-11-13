@@ -1,5 +1,6 @@
 // A new install starts DARK — the whole point of the opt-in model.
 import { describe, it, expect, beforeEach } from 'vitest'
+import { forgetManagedPageForTests } from '../../core/managed-page'
 import { seedDarkOnFreshInstall, hasGlobalOnList, isKindGloballyOff, setKindGlobalOn, GLOBAL_ON_KEY } from './behavior-enablement'
 
 describe('seedDarkOnFreshInstall', () => {
@@ -58,6 +59,27 @@ describe('isWordSwitchedOff', () => {
     localStorage.setItem(GLOBAL_OFF_KEY, JSON.stringify(['word:chat']))
     document.documentElement.dataset['hypercombMode'] = 'visitor'
     expect(isWordSwitchedOff('chat')).toBe(false)
+  })
+
+  // A MANAGED SITE DOOR (core/managed-page.ts) is a fresh origin — a fresh
+  // hive starts with the chat dark and on offer — and has no Beehaviors to
+  // light it with. There the chat is the point, and every word is the owner's.
+  it('switches nothing off on a managed site door', () => {
+    seedDarkOnFreshInstall()
+    setKindGlobalOn('word:chat', false)
+    const script = document.createElement('script')
+    script.id = 'hc-manage'
+    script.type = 'application/json'
+    script.textContent = JSON.stringify({ lineage: 'business-card' })
+    document.head.appendChild(script)
+    forgetManagedPageForTests()
+    try {
+      expect(isWordSwitchedOff('chat')).toBe(false)
+    } finally {
+      script.remove()
+      forgetManagedPageForTests()
+    }
+    expect(isWordSwitchedOff('chat')).toBe(true)
   })
 })
 

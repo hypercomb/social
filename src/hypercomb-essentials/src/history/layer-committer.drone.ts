@@ -891,10 +891,13 @@ export class LayerCommitter {
   public importTree = (
     updates: { segments: readonly string[]; layer: { name?: string } & { [slot: string]: unknown } }[],
     nameSlots: ReadonlySet<string> = new Set(['children']),
-    /** `replace` is the ONE deliberate overwrite: a MOVE lands a tile over a
-     *  stale head the participant already put away (gather). Every other caller
-     *  COMBINES. Nothing is lost either way — the replaced head stays one
-     *  marker back — but only a move may ask for it. */
+    /** `replace` is a DELIBERATE overwrite, asked for in exactly two places:
+     *  a MOVE lands a tile over a stale head the participant already put away
+     *  (gather); and a managed site door takes a NEWER PUBLISH over a replica
+     *  that holds no edits of its own (jwize, 2026-11-13: "take the newer
+     *  one"; essentials sharing/site-replica.ts takePublished). Every other
+     *  caller COMBINES. Nothing is lost either way — the replaced head stays
+     *  one marker back. */
     opts: { replace?: boolean } = {},
   ): Promise<void> => this.#machine.enqueue(() => this.#importTree(updates, nameSlots, opts.replace === true))
 

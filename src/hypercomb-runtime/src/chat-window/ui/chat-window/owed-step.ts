@@ -258,14 +258,20 @@ export const pageChangeStillOwed = (
   read: boolean,
   wrotePage: boolean,
   skipped: boolean,
+  /** On a managed site door (core/managed-page.ts) there are no builds: the
+   *  page and the card are changed where they are. */
+  managed = false,
 ): string | null => {
   if (!read || wrotePage || skipped) return null
   const ask = String(message ?? '')
   const asksChange = /\b(write|change|update|add|added|revise|revision)s?\b/i.test(ask)
   const aboutPage = /\b(page|pages|trial|build|builds|revision|revisions|html|website)\b/i.test(ask) || /\btry-/.test(ask)
+    || (managed && /\b(card|cards|theme|details)\b/i.test(ask))
   if (!asksChange || !aboutPage) return null
   if (turnEnding(prose)?.kind === 'waiting') return null
-  return 'The page was read and not written. Write the next build on this same tile now. Do not read the same signatures again.'
+  return managed
+    ? 'The page was read and not written. Write the change on this same tile now: the page, or the card. Do not read the same signatures again.'
+    : 'The page was read and not written. Write the next build on this same tile now. Do not read the same signatures again.'
 }
 
 /** What the record becomes after a leg ends, and the line the conversation
