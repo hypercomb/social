@@ -120,7 +120,7 @@ import {
 // module"; runtime module-drafts.ts).
 import { applySectionEdits, draftModule } from '../../../module-drafts'
 import { installedPackageSig } from '../../../installed-package'
-import { doctrineFailedMessage, doctrineRanMessage, fileFailedMessage, fileRanMessage, pageChangeUnready, parseWriteBlock, readsAskedIn, routesNamedIn, sandboxRule, tileFileLabel, unreadAskedMessage, unreadClaimMessage, writeFailedMessage, writeRanMessage, writeSkippedMessage, type TileFileWriteRequest } from './hypercomb-work-fence'
+import { doctrineFailedMessage, doctrineRanMessage, fileFailedMessage, fileRanMessage, managedRule, pageChangeUnready, parseWriteBlock, readsAskedIn, routesNamedIn, sandboxRule, tileFileLabel, unreadAskedMessage, unreadClaimMessage, writeFailedMessage, writeRanMessage, writeSkippedMessage, type TileFileWriteRequest } from './hypercomb-work-fence'
 import { signalSession } from '../window-session'
 import { highlightBlocks } from './chat-highlight'
 import { resolveEntryImageUrl } from '../shelf-thumbs'
@@ -165,6 +165,7 @@ import { CHAT_CONTEXT_COMPILER, compileChatContext } from './context-window-comp
 import { executionLineParts } from './execution-line'
 import { withheldMessage, withheldObservations, withoutWithheld } from './withheld-reads'
 import { aiWithheld } from '../../core/ai-withheld.store'
+import { managedPage } from '../../core/managed-page'
 import { isWordSwitchedOff, sayWordSwitchedOff } from '../features-viewer/behavior-enablement'
 import {
   blockRefusedMessage,
@@ -1240,7 +1241,7 @@ type AnatomyDoctrineLike = {
 }
 /** files/tile-files.drone.ts — a tile's page and text files, as the write door uses them. */
 const TILE_FILES_IOC_KEY = '@diamondcoreprocessor.com/TileFilesDrone'
-type TileFileTarget = { route: readonly string[]; kind: 'page' | 'file'; name?: string }
+type TileFileTarget = { route: readonly string[]; kind: 'page' | 'file' | 'card'; name?: string; part?: 'details' | 'theme' }
 type TileFilesLike = {
   read(target: TileFileTarget): Promise<{ ok: true; text: string | null } | { ok: false; error: string }>
   write(target: TileFileTarget, text: string): Promise<
@@ -7330,17 +7331,24 @@ export class ChatWindow {
     // an essentials build without the queue leaves the model answer-only.
     const canChange = !!queue && !!slash?.executePublicCanonical && callableBehaviours(behaviourEntries).length > 0
     const canRead = !!queue && !!treeReader?.readTree && !!treeReader?.validateSnapshots
+    // A MANAGED SITE DOOR (core/managed-page.ts): the page holds a replica of
+    // its owner's card and the owner is the one here. Nothing is fenced — the
+    // grammar door already works under the owner's full grant there — and a
+    // write needs only somewhere to wait, never a census verb granted first.
+    // Everywhere else a write waits on changes being allowed, as it always has.
+    const managed = managedPage()
+    const canEdit = managed ? !!queue : canChange
     // WRITING CODE needs an installed package to draft onto — the dev shell
     // imports modules directly and has none — and the same door changes take.
-    const canWrite = canChange && canRead && !!installedPackageSig()
+    const canWrite = canEdit && canRead && !!installedPackageSig()
     // WRITING DOCTRINE needs only changes allowed and the anatomy's doctrine
     // to be a hive artifact here (essentials anatomy/doctrine.ts).
     const anatomyDoctrine = (ioc()?.get(ANATOMY_IOC_KEY) as { doctrine?: AnatomyDoctrineLike } | undefined)?.doctrine
-    const canWriteDoctrine = canChange && !!anatomyDoctrine?.write
+    const canWriteDoctrine = canEdit && !!anatomyDoctrine?.write
     // WRITING FILES needs changes allowed and the tile-files door
     // (essentials files/tile-files.drone.ts): a tile's page and text files.
     const tileFiles = ioc()?.get(TILE_FILES_IOC_KEY) as TileFilesLike | undefined
-    const canWriteFiles = canChange && !!tileFiles?.write && !!tileFiles.read
+    const canWriteFiles = canEdit && !!tileFiles?.write && !!tileFiles.read
     const namedProvider = namedModel ? router?.providerIdForModel?.(namedModel) : undefined
     const localEndpoint = router?.providerMachineEndpoint?.('local')
     const localReadyAndTrusted = router?.providerIsMachineLocal?.('local') === true
@@ -7357,8 +7365,10 @@ export class ChatWindow {
       canRead || canChange, namedModel, namedProvider, localReadyAndTrusted,
       { granted: hiveAccess?.granted?.() ?? [], designated: router?.designatedProviderId?.(need) },
     )
+    // On a managed site door every model reads freely: the hive there holds
+    // the owner's published replica, and the owner asked it to be worked on.
     const readsFreely = (providerId: string | undefined): boolean => !!providerId
-      && ((providerId === 'local' && localReadyAndTrusted) || (hiveAccess?.granted?.() ?? []).includes(providerId))
+      && (!!managed || (providerId === 'local' && localReadyAndTrusted) || (hiveAccess?.granted?.() ?? []).includes(providerId))
     const route = trustedProviderId
       ? { providerId: trustedProviderId, model: namedModel, preferModel, need }
       : { model: namedModel, preferModel, need }
@@ -7479,8 +7489,9 @@ export class ChatWindow {
         canWrite,
         canWriteDoctrine,
         canWriteFiles,
+        ...(managed ? { managed: { lineage: managed.lineage, title: managed.title } } : {}),
       }),
-      canWriteFiles ? sandboxRule(undefined, grammarContext.page) : '',
+      managed ? managedRule({ lineage: managed.lineage, title: managed.title }) : canWriteFiles ? sandboxRule(undefined, grammarContext.page) : '',
       !(canRead || canChange)
         ? ''
         : readsFreely(providerId)
@@ -8244,11 +8255,14 @@ export class ChatWindow {
         if (refusedWrite) throw new WorkRefused(refusedWrite)
         const label = tileFileLabel(parsed)
         const grammar = `write ${label}`
-        const target: TileFileTarget = { route: parsed.route, kind: parsed.target, ...(parsed.name ? { name: parsed.name } : {}) }
+        const target: TileFileTarget = {
+          route: parsed.route, kind: parsed.target, ...(parsed.name ? { name: parsed.name } : {}), ...(parsed.part ? { part: parsed.part } : {}),
+        }
         if (parsed.target === 'page') {
           const current = await tileFiles.read(target).catch(() => null)
           if (current && current.ok && current.text) {
-            const why = pageChangeUnready(parsed.route, [...(component.#readSignatures.get(convoId)?.values() ?? [])])
+            const reads = [...(component.#readSignatures.get(convoId)?.values() ?? [])]
+            const why = managed ? pageChangeUnready(parsed.route, reads, { managed: true }) : pageChangeUnready(parsed.route, reads)
             if (why) throw new WorkRefused(why)
           }
         }
@@ -8289,7 +8303,10 @@ export class ChatWindow {
         queue.settle(entry.id, 'ran')
         lastRun = 'ran'
         EffectBus.emit('toast:show', { type: 'success', message: outcome.unchanged ? `${label} unchanged` : `${label} ${outcome.created ? 'created' : 'updated'}` })
-        return fileRanMessage({ label, sig: outcome.sig, created: outcome.created, unchanged: outcome.unchanged, trial: outcome.trial, vector: outcome.vector }, message)
+        return fileRanMessage({
+          label, sig: outcome.sig, created: outcome.created, unchanged: outcome.unchanged, trial: outcome.trial, vector: outcome.vector,
+          ...(managed ? { managed: true } : {}),
+        }, message)
       }
 
       // THE PARTICIPANT SPEAKS THE HIVE'S LANGUAGE. A table question offers
@@ -8559,8 +8576,9 @@ export class ChatWindow {
           })
           const pageLeft = handed ? undefined : pageChangeStillOwed(
             message, work.prose, readRounds > 0,
-            ran.some(line => line.startsWith('write page /')),
+            ran.some(line => line.startsWith('write page /') || line.startsWith('write card /')),
             `${lastRun}` === 'skipped',
+            !!managed,
           )
           const left = handed || pageLeft
           // WHAT THIS LEG LEAVES OWED goes to the conversation's own record

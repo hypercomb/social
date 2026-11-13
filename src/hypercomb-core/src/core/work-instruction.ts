@@ -68,19 +68,37 @@ export type DoctrineWriteRequest = {
 }
 
 /** A file on a tile (essentials files/tile-files.drone.ts): the tile's
- *  website page, or a text file attached to it by name. */
+ *  website page, a text file attached to it by name, or — on a managed site
+ *  door — the tile's business card: its details or its theme, each a JSON
+ *  object the `card:data` record names. */
 export type TileFileWriteRequest = {
-  readonly target: 'page' | 'file'
+  readonly target: 'page' | 'file' | 'card'
   readonly route: readonly string[]
   /** The file's name — for `file` only. */
   readonly name?: string
+  /** Which of the card's JSON — for `card` only: its details (dataSig) or
+   *  its theme (themeSig). */
+  readonly part?: CardPart
   readonly body: string
   readonly edits?: readonly { readonly find: string; readonly replace: string }[]
 }
 
-/** How a tile file is named in receipts: `page /a/b` or `/a/b/name.ext`. */
-export const tileFileLabel = (request: Pick<TileFileWriteRequest, 'target' | 'route' | 'name'>): string =>
-  request.target === 'page' ? `page /${request.route.join('/')}` : `/${[...request.route, request.name ?? ''].join('/')}`
+/** The two JSON documents a card's `card:data` record names. */
+export type CardPart = 'details' | 'theme'
+
+/** How a tile file is named in receipts: `page /a/b`, `/a/b/name.ext`, or
+ *  `card /a/b` and `card /a/b theme`. */
+export const tileFileLabel = (request: Pick<TileFileWriteRequest, 'target' | 'route' | 'name' | 'part'>): string =>
+  request.target === 'page' ? `page /${request.route.join('/')}`
+    : request.target === 'card' ? `card /${request.route.join('/')}${request.part === 'theme' ? ' theme' : ''}`
+      : `/${[...request.route, request.name ?? ''].join('/')}`
+
+/** What the write block may name on this page. A card is written only where
+ *  the page says so (a managed site door); everywhere else the block reads
+ *  exactly as it always has. */
+export type WriteBlockOptions = {
+  readonly card?: boolean
+}
 
 /** The block's header as the model wrote it — the line Jev judges, verbatim,
  *  so the source boundary finds it in the model's own message. */
@@ -90,9 +108,11 @@ export const writeHeaderOf = (lines: readonly string[]): string =>
 /** The write block's header and body, or why it is not one. The header is
  *  the first non-empty line: the module's signature and the section path, or
  *  `doctrine <heading>` for a rule of the hive's own doctrine. */
-export const parseWriteBlock = (lines: readonly string[]): WriteRequest | DoctrineWriteRequest | TileFileWriteRequest | { readonly error: string } => {
+export const parseWriteBlock = (lines: readonly string[], options: WriteBlockOptions = {}): WriteRequest | DoctrineWriteRequest | TileFileWriteRequest | { readonly error: string } => {
   const first = lines.findIndex(line => line.trim().length > 0)
-  const usage = '<module signature> <src/path.ts>, page /<tile>, file /<tile> <name.ext>, or doctrine <heading>,'
+  const usage = options.card
+    ? '<module signature> <src/path.ts>, page /<tile>, file /<tile> <name.ext>, card /<tile> [theme], or doctrine <heading>,'
+    : '<module signature> <src/path.ts>, page /<tile>, file /<tile> <name.ext>, or doctrine <heading>,'
   if (first < 0) return { error: `a ${WRITE_FENCE_LANG} block must be closed, and must start with ${usage} on its first line` }
   const body = lines.slice(first + 1).join('\n')
   const module = /^\s*`?\/?(?:write\s+)?([0-9a-f]{64})\s+(src\/[A-Za-z0-9_.@/-]{1,200})`?\s*$/i.exec(lines[first])
@@ -121,6 +141,23 @@ export const parseWriteBlock = (lines: readonly string[]): WriteRequest | Doctri
       target: page ? 'page' : 'file',
       route,
       ...(file ? { name: file[2] } : {}),
+      body,
+      ...(edits ? { edits } : {}),
+    }
+  }
+  // A CARD ON A TILE: its details, or its theme — each a JSON object the
+  // tile's card:data record names (essentials commands/card-wear.ts).
+  const card = options.card ? /^\s*`?\/?(?:write\s+)?card\s+(\/[^\s`]*)(?:\s+(details|theme))?`?\s*$/i.exec(lines[first]) : null
+  if (card) {
+    const route = card[1].split('/').map(part => part.trim()).filter(Boolean)
+    if (!route.length) return { error: 'name the tile the card is on: a route such as /business-card, not the hive root' }
+    if (!body.trim()) return { error: 'the write block has no body: the card would be empty' }
+    const edits = parseEdits(lines.slice(first + 1))
+    if (edits && 'error' in edits) return { error: edits.error }
+    return {
+      target: 'card',
+      route,
+      part: card[2]?.toLowerCase() === 'theme' ? 'theme' : 'details',
       body,
       ...(edits ? { edits } : {}),
     }
@@ -170,7 +207,22 @@ export type WorkPowers = {
   /** A tile's page and text files can be written: changes allowed and the
    *  tile-files door is loaded here (essentials files/tile-files.drone.ts). */
   readonly canWriteFiles?: boolean
+  /** This page is a managed site door: it holds a replica of the owner's
+   *  published site, and the work is upgrading it (managedRule). The file
+   *  lesson then speaks of that replica and its card, never of trials. */
+  readonly managed?: ManagedSite
 }
+
+/** The site a managed site door holds a replica of: its lineage (the tile
+ *  the card lives at) and its title. */
+export type ManagedSite = {
+  readonly lineage: string
+  readonly title?: string
+}
+
+/** The route a managed site's card is written at, `/business-card`. */
+const managedRoute = (site: ManagedSite): string =>
+  `/${String(site.lineage ?? '').split('/').map(part => part.trim()).filter(Boolean).join('/')}`
 
 /** How to work in rounds, in words every model can follow. */
 export const workInstruction = (powers: WorkPowers): string => {
@@ -191,7 +243,11 @@ export const workInstruction = (powers: WorkPowers): string => {
       'read <signature> also opens whatever else a signature names: a note, an attachment, a module\'s code. Long text comes a page at a time; read <signature> <next> continues from the "next" the last page gave',
       'A module\'s first page lists its "sections" — the source files bundled into it, by path. read <signature> <src/path.ts> opens one section alone, which is how to read one file of a large module',
       'code · code <words> — the code running in this hive: every module and dependency whose name holds the words, with the signature that opens it, AND "hits": every line of code that holds the words — a function, a message, a tile\'s name — each with its module signature, its section and "at"',
-      'FINDING CODE. Search for what the code does or names: `code useDoor`, `code labyrinth-view`, `code solomon-maze-v1`. A hit opens exactly where it is with `read <signature> <section> <at>`. The code behind a tile is found by its name: `read /path` also lists, under "code", the running code that names the tile. A signature you found earlier stays listed under ALREADY READ, so open it again rather than searching again. Do not try `read code core`, `read /code`, or `read /core`. Reading code never runs it and never grants permission to change it. A question about what this hive does now, or where a page is tried, is not answered from a receipt: this turn, `code` the words and `read` the hit, then answer from that. The SANDBOX line is the address. The code is how it is computed.',
+      'FINDING CODE. Search for what the code does or names: `code useDoor`, `code labyrinth-view`, `code solomon-maze-v1`. A hit opens exactly where it is with `read <signature> <section> <at>`. The code behind a tile is found by its name: `read /path` also lists, under "code", the running code that names the tile. A signature you found earlier stays listed under ALREADY READ, so open it again rather than searching again. Do not try `read code core`, `read /code`, or `read /core`. Reading code never runs it and never grants permission to change it. ' + (powers.managed
+        // A managed site door has no trial and no SANDBOX line: a change is
+        // seen on the card on that page (managedRule).
+        ? 'A question about what this hive does now is not answered from a receipt: this turn, `code` the words and `read` the hit, then answer from that.'
+        : 'A question about what this hive does now, or where a page is tried, is not answered from a receipt: this turn, `code` the words and `read` the hit, then answer from that. The SANDBOX line is the address. The code is how it is computed.'),
       'find <word> · find <word> /path — tiles under the current page, or under that path, whose name contains the word',
       powers.readsRunFreely
         ? 'Reads run straight away, as many as the work needs: read whole modules, follow every lead, and do not stop to ask whether to keep reading.'
@@ -216,7 +272,15 @@ export const workInstruction = (powers: WorkPowers): string => {
       `WRITING DOCTRINE — the rules under "# Doctrine" in the anatomy are the hive's own, and the participant can change them. To change one, or add one, reply with ONE block whose info string is \`${WRITE_FENCE_LANG}\`. Its first line is \`doctrine <heading>\` — the heading exactly as it follows ### — and every line after it is the section's complete new text, without the heading. A heading the doctrine does not have adds a section. The participant always reviews a doctrine change before it runs, and it applies from the next message. Only propose one when the participant asks to change a rule.`,
     ].join('\n'))
   }
-  if (powers.canWriteFiles) {
+  if (powers.canWriteFiles && powers.managed) {
+    const route = managedRoute(powers.managed)
+    parts.push([
+      `WRITING FILES — a tile can hold a website page and text files. To create one or change one, reply with ONE block whose info string is \`${WRITE_FENCE_LANG}\`. Its first line is \`page /<route>\` for the tile's website page (a whole HTML document), or \`file /<route> <name.ext>\` for a text file attached to that tile (.md, .txt, .html, .css, .json, .csv and other text). The route is the tile's path from the hive root; the card this page holds is ${route}. The tile must already exist: make it first with a change block. Every line after the first is the file's complete new text. To change part of a file that already exists, write edits instead, in the same \`<<<<<<< SEARCH\` / \`=======\` / \`>>>>>>> REPLACE\` form, each SEARCH copied exactly from the file as it is now. To see a file as it is now, read the tile: its decorations list records by signature; a visual:website:page record's htmlSig is the page and a files:attachment record's sig is the file, and read <signature> opens either. A change to a page that already exists is refused until this turn has read that page. An earlier receipt is not the page. The text it replaces stays in the tile's history, one undo away. A change shows on the card at once: there is no trial and no other address to try it at.`,
+    ].join('\n'))
+    parts.push([
+      `WRITING THE CARD — a business card is two records on its tile: the page every card wears (visual:website:page, whose htmlSig is the page) and the tile's own card (card:data, whose dataSig is the card's details and whose themeSig, when it has one, is its theme; artSig is its picture). The details and the theme are each one JSON object. To change the details — a name, a title, a line, the ways to reach someone, any field the page reads — reply with ONE \`${WRITE_FENCE_LANG}\` block whose first line is \`card /<route>\`; to change the theme, \`card /<route> theme\`. The card here is \`card ${route}\`. Every line after the first is the complete new JSON object, or SEARCH/REPLACE edits against it as it is now. Read it first: read ${route} lists the card:data record by signature, read <that signature> shows its dataSig and themeSig, and read <dataSig> or read <themeSig> opens the JSON as it is now. Keep the keys the page reads, and every field the change does not touch. The new JSON is stored as a resource and the card:data record is replaced to name it; its picture and everything else the record says stay. A theme needs details: on a tile with no card yet, write \`card /<route>\` first. To change how the card is laid out or drawn, write its page.`,
+    ].join('\n'))
+  } else if (powers.canWriteFiles) {
     parts.push([
       `WRITING FILES — a tile can hold a website page and text files. To create one or change one, reply with ONE block whose info string is \`${WRITE_FENCE_LANG}\`. Its first line is \`page /<route>\` for the tile's website page (a whole HTML document), or \`file /<route> <name.ext>\` for a text file attached to that tile (.md, .txt, .html, .css, .json, .csv and other text). The route is the tile's path from the hive root, and the tile must already exist: make it first with a change block. Every line after the first is the file's complete new text. To change part of a file that already exists, write edits instead, in the same \`<<<<<<< SEARCH\` / \`=======\` / \`>>>>>>> REPLACE\` form, each SEARCH copied exactly from the file as it is now. To see a file as it is now, read the tile: its decorations list records by signature; a visual:website:page record's htmlSig is the page and a files:attachment record's sig is the file, and read <signature> opens either. A change to a page that already exists is refused until this turn has read that page and looked the code up (code trialOrigin). An earlier receipt is neither the page nor the code. The participant reviews the block in Execution before it runs, and the text it replaces stays in the tile's history. A WEBSITE, asked for in ordinary words: make the tile with a change block, then write its page. The page is stored as a resource and tried at try-<tile>.<this host>. The SANDBOX line of the current message names that address. An address in an earlier receipt is not it. It does not run in this hive. Do not publish it, do not grant anything, and do not write a script that calls this hive, its bridge, or localhost. Tell the participant the sandbox address of the tile they named, and the version vector the receipt gives, and stop. Do not name a different tile. Once you have read the page, write it. Do not read the same signatures again. Versions stand down the side as major.minor.patch, and the builds of a line sit across it. Walk the differences, then write the improved page on this same tile. A person brings it into localhost, or into their own domain, from the trial card. You cannot.`,
     ].join('\n'))
@@ -305,13 +369,18 @@ const fenceLangOf = (kind: WorkKind): string =>
 
 /** A change to a page that already exists, before this turn has read that page
  *  and looked up the code. Null when the write may be offered. */
-export const pageChangeUnready = (route: readonly string[], reads: readonly string[]): string | null => {
+export const pageChangeUnready = (route: readonly string[], reads: readonly string[], options: { readonly managed?: boolean } = {}): string | null => {
   const path = route.map(part => String(part).trim()).filter(Boolean).join('/')
   if (!path) return null
   const lines = reads.map(grammar => grammar.trim().toLowerCase())
   const sawCode = lines.some(line => /^\/?code(\s|$)/.test(line))
   const needle = `/${path}`.toLowerCase()
   const sawPage = lines.some(line => line.includes(needle))
+  // ON A MANAGED SITE DOOR there is no trial to look up: the page is changed
+  // where it is, so reading it is all a change needs first.
+  if (options.managed) {
+    return sawPage ? null : `This page already exists. Before changing it, read it this turn: read ${needle}. An earlier receipt is not the page.`
+  }
   if (sawCode && sawPage) return null
   const missing = [sawPage ? '' : `read ${needle}`, sawCode ? '' : 'code trialOrigin'].filter(Boolean)
   return `This page already exists. Before changing the trial, look it up this turn: ${missing.join(' and ')}. Read the page as it is now, and look up the code. An earlier receipt is neither.`
@@ -514,6 +583,23 @@ export const writeFailedMessage = (reason: string, request: string): string =>
 
 const FILE_ECHO_MAX = 48_000
 
+/**
+ * THE SITE THIS PAGE HOLDS — the managed site door's line, in place of the
+ * SANDBOX line (jwize, 2026-11-13: "The whole idea is we are upgrading
+ * something that we replicated", "The ai should be able to do anything it
+ * likes"). The owner opened their own site's door; the page holds a replica
+ * of what they published, and the work is making it better.
+ */
+export const managedRule = (site: ManagedSite): string => {
+  const route = managedRoute(site)
+  const title = String(site.title ?? '').trim()
+  return [
+    `THIS PAGE — computed for this message. It holds a replica of ${route}${title && title !== route.slice(1) ? ` ("${title}")` : ''}, the site its owner published, and the participant here is that owner. The work is upgrading it: change anything it takes to make it better — the page, the card's details and theme, its code.`,
+    'Nothing on this page is fenced: every behaviour, every tile and every module in this page\'s hive is yours to change, and each block still shows in the owner\'s Execution window as it runs.',
+    `A change shows on the card at once. There is no trial and no try- address: the card on this page is where it is seen. The owner's Publish sends the upgrade home to ${route}; publishing is their button, never a block you write.`,
+  ].join(' ')
+}
+
 /** The sandbox address for this message. Computed from the hive the participant
  *  is on and the tile this conversation is about. A receipt in the history is
  *  not asked. */
@@ -534,11 +620,13 @@ export const sandboxRule = (here?: string, route?: string): string => {
   ].filter(Boolean).join(' ')
 }
 
-export const fileRanMessage = (file: { label: string; sig: string; created: boolean; unchanged: boolean; trial?: string; vector?: string }, request: string): string => {
+export const fileRanMessage = (file: { label: string; sig: string; created: boolean; unchanged: boolean; trial?: string; vector?: string; managed?: boolean }, request: string): string => {
   const vector = file.vector ? ` This write is ${file.vector} on that lineup. Say the SANDBOX line and this vector. Do not name a different tile.` : ''
-  const trial = file.trial
-    ? ` It does not run in this hive. It is a resource. Where it is tried is the SANDBOX line of the current message, not an address in this receipt or an earlier one. A person brings it home from the trial card. You cannot. Do not publish it, and do not write a script that calls this hive.${vector}`
-    : ''
+  const trial = file.managed
+    ? ' It shows on the card on this page now. The owner\'s Publish sends it home.'
+    : file.trial
+      ? ` It does not run in this hive. It is a resource. Where it is tried is the SANDBOX line of the current message, not an address in this receipt or an earlier one. A person brings it home from the trial card. You cannot. Do not publish it, and do not write a script that calls this hive.${vector}`
+      : ''
   return file.unchanged
     ? `The participant ran your ${WRITE_FENCE_LANG} block. ${file.label} already held exactly that text, so nothing changed.${trial} Continue, or answer.${carry(request)}`
     : `The participant ran your ${WRITE_FENCE_LANG} block. ${file.label} was ${file.created ? 'created' : 'replaced'}; its bytes are ${file.sig}, which read ${file.sig} opens. The text it replaced is kept in the tile's history, one undo away. Do not write it again unless something is wrong with it.${trial}\n\nContinue, or answer.${carry(request)}`

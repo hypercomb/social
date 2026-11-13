@@ -1,7 +1,7 @@
 // files/tile-files.drone.ts
 //
 // A TILE'S FILES, READ AND WRITTEN AS TEXT — the door a model's
-// `hypercomb-write` block uses to make a file (hypercomb-work-fence.ts). Two
+// `hypercomb-write` block uses to make a file (hypercomb-work-fence.ts). Three
 // kinds of file live on a tile:
 //
 //   page — the tile's website page. The bytes are a resource. A page written
@@ -9,6 +9,13 @@
 //          view does not mount it in this hive.
 //   file — an attachment by name: a `files:attachment` decoration whose
 //          payload points at the bytes (files-attachment.ts).
+//   card — the tile's business card: its details or its theme, each a JSON
+//          object its `card:data` record names (card-commit.ts).
+//
+// ON A MANAGED SITE DOOR (the page carries <script id="hc-manage">) the hive
+// holds a replica of its owner's card and a change is made where it is: a
+// page written there is no trial — it is not staged anywhere, and the receipt
+// names no try- address, because none exists. The card frame shows it at once.
 //
 // Text only, on a tile that exists. A write never deletes: the bytes it
 // replaces stay at the content root and the tile's history still reaches
@@ -20,6 +27,7 @@ import { listDecorations, removeDecorationAndWait } from '../commands/decoration
 import { FILES_ATTACHMENT_KIND, listAttachments, writeAttachment, type AttachmentPayload } from './files-attachment.js'
 import { extOf } from './file-types.js'
 import { commitPageSig } from './page-commit.js'
+import { CARD_FIELD, cardJsonRefusal, cardRecordAt, commitCardSig, type CardPart } from './card-commit.js'
 import { rememberTrial, stageTrial, trialLabel, trialOrigin } from './try-page.js'
 
 export const TILE_FILES_IOC_KEY = '@diamondcoreprocessor.com/TileFilesDrone'
@@ -37,10 +45,31 @@ const TEXT_TYPES: Readonly<Record<string, string>> = {
 
 export type TileFileTarget = {
   readonly route: readonly string[]
-  readonly kind: 'page' | 'file'
-  /** The attachment's file name — required for `file`, unused for `page`. */
+  readonly kind: 'page' | 'file' | 'card'
+  /** The attachment's file name — required for `file`, unused otherwise. */
   readonly name?: string
+  /** Which of the card's JSON — for `card` only; its details when unsaid. */
+  readonly part?: CardPart
 }
+
+/** True on a managed site door's page: the worker put a record naming the
+ *  site it manages in it. MIRRORED from sharing/site-manage.view.ts
+ *  siteManageRecord, which this door does not import (that module is the
+ *  card's view, loaded only on such a page). */
+export function onManagedSiteDoor(doc: Pick<Document, 'getElementById'> | undefined = globalThis.document): boolean {
+  try {
+    const raw = doc?.getElementById('hc-manage')?.textContent
+    if (!raw) return false
+    const value = JSON.parse(raw) as Record<string, unknown>
+    return !!value && typeof value['lineage'] === 'string' && value['lineage'].trim().length > 0
+  } catch {
+    return false
+  }
+}
+
+const partOf = (target: TileFileTarget): CardPart => target.part === 'theme' ? 'theme' : 'details'
+const whatOf = (target: TileFileTarget): string =>
+  target.kind === 'page' ? 'page' : target.kind === 'card' ? `card's ${partOf(target)}` : `file ${target.name}`
 
 export type TileFileRead =
   | { readonly ok: true; readonly tile: readonly string[]; readonly text: string | null; readonly sig?: string }
@@ -91,10 +120,12 @@ export class TileFilesDrone extends Drone {
     if (!store?.getResource) return { ok: false, error: 'the store is not available' }
     const sig = target.kind === 'page'
       ? await this.resolve<SiteViewLike>('siteView')?.resolvePageSig?.(tile.segments) ?? null
-      : (await this.#attachment(tile.segments, target.name ?? ''))?.payload.sig ?? null
+      : target.kind === 'card'
+        ? await this.#cardSig(tile.segments, partOf(target))
+        : (await this.#attachment(tile.segments, target.name ?? ''))?.payload.sig ?? null
     if (!sig) return { ok: true, tile: tile.segments, text: null }
     const blob = await store.getResource(sig).catch(() => null)
-    if (!blob) return { ok: false, error: `the ${target.kind === 'page' ? 'page' : `file ${target.name}`} is named but its bytes are not on this device` }
+    if (!blob) return { ok: false, error: `the ${whatOf(target)} is named but its bytes are not on this device` }
     return { ok: true, tile: tile.segments, text: await blob.text(), sig }
   }
 
@@ -109,9 +140,13 @@ export class TileFilesDrone extends Drone {
     if (typeof text !== 'string' || !text.trim()) return { ok: false, error: 'the file would be empty' }
     if (text.length > MAX_TILE_FILE_CHARS) return { ok: false, error: `the file is over ${MAX_TILE_FILE_CHARS} characters` }
     const name = String(target.name ?? '').trim()
-    const type = target.kind === 'page' ? 'text/html' : this.typeOf(name)
+    const type = target.kind === 'page' ? 'text/html' : target.kind === 'card' ? 'application/json' : this.typeOf(name)
     if (target.kind === 'file' && !name) return { ok: false, error: 'a file needs a name' }
     if (!type) return { ok: false, error: `${name} is not a text file; write one of: ${Object.keys(TEXT_TYPES).map(e => `.${e}`).join(' ')}` }
+    if (target.kind === 'card') {
+      const refused = cardJsonRefusal(text)
+      if (refused) return { ok: false, error: refused }
+    }
     const tile = await this.#tile(target.route)
     if ('error' in tile) return tile
     const store = this.resolve<StoreLike>('store')
@@ -120,7 +155,23 @@ export class TileFilesDrone extends Drone {
     const sig = await store.putResource(blob)
     return target.kind === 'page'
       ? this.#writePage(tile.segments, sig, text)
-      : this.#writeFile(tile.segments, { name, mime: type, size: blob.size, sig })
+      : target.kind === 'card'
+        ? this.#writeCard(tile.segments, partOf(target), sig)
+        : this.#writeFile(tile.segments, { name, mime: type, size: blob.size, sig })
+  }
+
+  /** The card's details or theme, by the signature its record names. */
+  async #cardSig(segments: readonly string[], part: CardPart): Promise<string | null> {
+    const value = (await cardRecordAt(segments))?.payload[CARD_FIELD[part]]
+    return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value) ? value : null
+  }
+
+  async #writeCard(segments: readonly string[], part: CardPart, sig: string): Promise<TileFileWrite> {
+    const current = await this.#cardSig(segments, part)
+    if (current === sig) return { ok: true, tile: segments, sig, created: false, unchanged: true }
+    const committed = await commitCardSig(segments, part, sig)
+    if (!committed.ok) return committed
+    return { ok: true, tile: segments, sig, created: !current, unchanged: false }
   }
 
   async #writePage(segments: readonly string[], htmlSig: string, html: string): Promise<TileFileWrite> {
@@ -134,6 +185,7 @@ export class TileFilesDrone extends Drone {
   /** The page is already a resource. Mark it as a trial and hand the same
    *  bytes to the sandbox host. A host that is down does not fail the write. */
   async #stage(segments: readonly string[], htmlSig: string, html: string): Promise<{ trial: string; vector?: string } | Record<string, never>> {
+    if (onManagedSiteDoor()) return {}
     const label = trialLabel(segments)
     if (!label) return {}
     rememberTrial(htmlSig, label)
@@ -142,6 +194,7 @@ export class TileFilesDrone extends Drone {
   }
 
   #trial(segments: readonly string[]): { trial: string } | Record<string, never> {
+    if (onManagedSiteDoor()) return {}
     const label = trialLabel(segments)
     return label ? { trial: `${trialOrigin(label)}/` } : {}
   }
