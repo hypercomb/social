@@ -13,7 +13,7 @@ import { allowInvite, dropInvite } from './device-invite'
 import { readDeviceBinding } from './device-binding'
 import { deviceSigner } from './device-key'
 import { closureChildren, MANAGED_PUBLISH_KEY, managedPublish, planClosure, registerManagedPublish, type ClosureKind } from './managed-publish'
-import type { ManageRecord } from './manage-record'
+import { forgetManageRecordForTests, type ManageRecord } from './manage-record'
 import { decorationClosureSigs, nestedResourceSigs } from '../../../hypercomb-essentials/src/sharing/decoration-closure'
 
 const WRITES = 'pluginthematrix.example'
@@ -226,6 +226,18 @@ describe('a managed site door publishes one root with its own listed key', () =>
     expect(place.puts.filter(p => p.startsWith('atom:') || p === 'index')).toEqual([])
   })
 
+  it('publishes only by the owner’s own tap: with no live gesture it refuses and asks nothing of any host', async () => {
+    // jwize: "AI can't publish on the community but it can make changes" — code
+    // the AI wrote can reach this service through ioc, but it carries no gesture.
+    place.publish(content())
+    await accept()
+    place.fetcher.mockClear()                       // the key's own setup asked the host; the publish must not
+    const noHand = managedPublish({ record: () => record(), siteDoor: () => SITE, pause: async () => {}, hand: () => false })
+    const result = await noHand.publishRoot('business-card', 'd'.repeat(64))
+    expect(result).toEqual({ ok: false, error: 'publishing takes your own tap' })
+    expect(place.fetcher).not.toHaveBeenCalled()
+  })
+
   it('says how to get a key when this browser holds none, and asks nothing of any host', async () => {
     place.publish(content())
     const result = await publisher().publishRoot('business-card', 'd'.repeat(64))
@@ -287,6 +299,7 @@ describe('a managed site door publishes one root with its own listed key', () =>
   it('is lent through ioc on a managed page only', () => {
     const registered = new Map<string, unknown>()
     ;(window as unknown as { ioc: unknown }).ioc = { get: (key: string) => registered.get(key), register: (key: string, value: unknown) => registered.set(key, value) }
+    forgetManageRecordForTests()
     registerManagedPublish()
     expect(registered.has(MANAGED_PUBLISH_KEY)).toBe(false)
     const script = document.createElement('script')
@@ -294,10 +307,11 @@ describe('a managed site door publishes one root with its own listed key', () =>
     script.type = 'application/json'
     script.textContent = JSON.stringify(record())
     document.head.append(script)
+    forgetManageRecordForTests()          // the live page is read once; a spec reads it anew
     try {
       registerManagedPublish()
       expect(typeof (registered.get(MANAGED_PUBLISH_KEY) as { publishRoot?: unknown })?.publishRoot).toBe('function')
-    } finally { script.remove() }
+    } finally { script.remove(); forgetManageRecordForTests() }
   })
 })
 

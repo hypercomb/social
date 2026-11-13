@@ -1711,6 +1711,7 @@
   "site-manage.publish": "Publicar",
   "site-manage.publishing": "Publicando…",
   "site-manage.published": "Tu tarjeta está publicada.",
+  "site-manage.published-catching-up": "Publicado. El sitio lo mostrará en un momento.",
   "site-manage.publish-failed": "La publicación no se completó. {reason}",
   "site-manage.publish-confirm.title": "¿Publicar tu tarjeta?",
   "site-manage.publish-confirm.message": "Tus cambios en {title} quedan visibles para todos los que visiten el sitio.",

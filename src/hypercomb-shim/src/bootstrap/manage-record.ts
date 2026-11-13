@@ -60,9 +60,33 @@ export async function beesOnDisk(): Promise<boolean> {
   }
 }
 
+/** ONLY THE WORKER'S RECORD COUNTS: `<script type="application/json"
+ *  id="hc-manage">` directly in <head>, as the worker injects it. Anything else
+ *  with that id is planted markup, not a record. For the live document the
+ *  answer is taken once (at boot) and kept, so markup planted later changes
+ *  nothing — the publish reads `writes` and `publisher` from here. */
+function workerRecordText(doc: Document): string | null {
+  const el = doc.getElementById('hc-manage')
+  if (!el || el.tagName !== 'SCRIPT' || String((el as HTMLScriptElement).type ?? '').toLowerCase() !== 'application/json') return null
+  if (!doc.head || el.parentElement !== doc.head) return null
+  return el.textContent
+}
+let booted: { readonly record: ManageRecord | null } | undefined
+
 export function manageRecord(doc: Document = document): ManageRecord | null {
+  if (doc === globalThis.document) {
+    if (!booted) booted = { record: parseManageRecord(doc) }
+    return booted.record
+  }
+  return parseManageRecord(doc)
+}
+
+/** For specs only: read the live document anew. */
+export function forgetManageRecordForTests(): void { booted = undefined }
+
+function parseManageRecord(doc: Document): ManageRecord | null {
   try {
-    const raw = doc.getElementById('hc-manage')?.textContent
+    const raw = workerRecordText(doc)
     if (!raw) return null
     const value = JSON.parse(raw) as Record<string, unknown>
     const lineage = typeof value['lineage'] === 'string' ? value['lineage'].slice(0, 200) : ''

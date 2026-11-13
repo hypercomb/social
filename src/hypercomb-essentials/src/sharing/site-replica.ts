@@ -29,6 +29,7 @@
 // every function here takes them as arguments so a spec hands in its own.
 
 import { tileConvoId } from '../assistant/chat-thread.js'
+import { flattenLayerTree, type PlacementHistory } from '../history/layer-placement.js'
 
 export const SITE_REPLICA_POOL = 'sites:replicas'
 /** SwarmAdopt's own receipt: adopted-root path → the publisher head folded
@@ -47,6 +48,7 @@ export const CHAT_THREADS_KEY = '@diamondcoreprocessor.com/ChatThreads'
  *  origin's own listed key. Absent until that port is installed. */
 export const MANAGED_PUBLISH_KEY = '@hypercomb.social/ManagedPublish'
 const CURSOR_KEY = '@diamondcoreprocessor.com/HistoryCursorService'
+export const COMMITTER_KEY = '@diamondcoreprocessor.com/LayerCommitter'
 
 export type ReplicaLayer = { readonly name?: string; readonly [slot: string]: unknown }
 
@@ -57,6 +59,15 @@ export type HistoryLike = {
   headMarkerOf?(locationSig: string): string | null
   latestMarkerSigFor?(locationSig: string, name: string): Promise<string>
   commitLayer(locationSig: string, layer: ReplicaLayer, base?: { marker?: string | null }): Promise<string>
+  getLayerBySig?(sig: string): Promise<ReplicaLayer | null>
+}
+export type CommitterLike = {
+  importTree(
+    updates: { segments: readonly string[]; layer: { name?: string } & { [slot: string]: unknown } }[],
+    nameSlots?: ReadonlySet<string>,
+    opts?: { replace?: boolean },
+  ): Promise<void>
+  settled?(): Promise<void>
 }
 export type AdoptStatus = 'committed' | 'exists' | 'rewound' | 'unavailable' | 'declined' | 'uninspectable'
 export type AdoptLike = {
@@ -72,6 +83,8 @@ export type BrokerLike = {
 export type StoreLike = {
   getResource(sig: string): Promise<Blob | null>
   getPool?(meaning: string): Promise<FileSystemDirectoryHandle | null>
+  /** The pool without creating it (a reader never makes a directory). */
+  openPool?(meaning: string): Promise<FileSystemDirectoryHandle | null>
   getPoolDoc?(pool: FileSystemDirectoryHandle | undefined, subKey?: string): Promise<ArrayBuffer | null>
   putPoolDoc?(pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string, options?: { keep?: 'versions' | 'current' }): Promise<string | null>
 }
@@ -84,6 +97,7 @@ export type ReplicaServices = {
   readonly store: StoreLike
   readonly adopt?: AdoptLike
   readonly broker?: BrokerLike
+  readonly committer?: CommitterLike
 }
 
 /** What the page record says (site-manage.view.ts siteManageRecord). */
@@ -98,16 +112,29 @@ export type ReplicaReceipt = {
   /** The local layer signature that taking it left; null when unknown. */
   readonly local: string | null
   /** Heads this replica has moved on from, newest last. A page that still
-   *  names one of them is lagging behind a publish, never offering a newer
-   *  card: taking it would undo that publish. */
+   *  names one of them SOON AFTER is lagging behind a publish (taking it would
+   *  undo that publish); long after, it is a real re-publish of that head. */
   readonly past: readonly string[]
+  /** When the receipt was written (ms) — bounds how long `past` means "lagging". */
+  readonly at: number
 }
 
 /** How many heads a receipt remembers moving on from. */
 const PAST_KEPT = 32
+/** How long a head the replica moved past still reads as the page record
+ *  lagging behind (the worker's edge cache holds an index for seconds; a
+ *  reload comes within minutes). After this, the same head named again is a
+ *  real re-publish of it, and is followed. */
+export const LAG_WINDOW_MS = 10 * 60 * 1000
 
-/** Where the site stands in this hive: the tile at /<lineage>. */
-export const replicaRoute = (lineage: string): string[] => [String(lineage ?? '').trim()].filter(Boolean)
+/** Where the site stands in this hive: the tile at /<lineage>, one segment per
+ *  name — a nested site (`revolucion/meetup`) is the tile meetup under
+ *  revolucion, exactly as the worker's index names it (index.roots[lineage]). */
+export const replicaRoute = (lineage: string): string[] =>
+  String(lineage ?? '').split('/').map(segment => segment.trim()).filter(Boolean)
+
+/** The tile's own name: the last segment of its route. */
+const leafOf = (lineage: string): string => replicaRoute(lineage).at(-1) ?? ''
 
 /** The card tile's own conversation — the chat opens on the card. */
 export const replicaConvoId = (lineage: string, threads?: { tileConvoId?(segments: readonly string[]): string }): string => {
@@ -145,7 +172,8 @@ const encode = (value: unknown): ArrayBuffer => {
 
 export async function readReceipt(store: StoreLike, lineage: string): Promise<ReplicaReceipt | null> {
   try {
-    const pool = await store.getPool?.(SITE_REPLICA_POOL)
+    // A reader opens, never creates: a page that never replicates leaves no directory.
+    const pool = store.openPool ? await store.openPool(SITE_REPLICA_POOL) : await store.getPool?.(SITE_REPLICA_POOL)
     const bytes = pool ? await store.getPoolDoc?.(pool, lineage) : null
     if (!bytes) return null
     const value = JSON.parse(new TextDecoder().decode(bytes)) as Partial<ReplicaReceipt>
@@ -153,7 +181,8 @@ export async function readReceipt(store: StoreLike, lineage: string): Promise<Re
     if (typeof value.published !== 'string' || !SIG_RE.test(value.published)) return null
     const local = typeof value.local === 'string' && SIG_RE.test(value.local) ? value.local : null
     const past = Array.isArray(value.past) ? value.past.filter((s): s is string => typeof s === 'string' && SIG_RE.test(s)).slice(-PAST_KEPT) : []
-    return { kind: 'site:replica', v: 1, lineage, published: value.published, local, past }
+    const at = typeof value.at === 'number' && Number.isFinite(value.at) ? value.at : 0
+    return { kind: 'site:replica', v: 1, lineage, published: value.published, local, past, at }
   } catch { return null }
 }
 
@@ -170,7 +199,7 @@ export async function writeReceipt(
   const moved = [...(prior?.past ?? []), prior?.published, ...left]
     .filter((s): s is string => typeof s === 'string' && SIG_RE.test(s) && s !== published)
   const past = [...new Set(moved.reverse())].reverse().slice(-PAST_KEPT)
-  const receipt: ReplicaReceipt = { kind: 'site:replica', v: 1, lineage, published, local, past }
+  const receipt: ReplicaReceipt = { kind: 'site:replica', v: 1, lineage, published, local, past, at: Date.now() }
   try {
     const pool = await store.getPool?.(SITE_REPLICA_POOL)
     if (!pool || !store.putPoolDoc) return null
@@ -192,6 +221,8 @@ const safeStorage = (): Storage | null => { try { return localStorage } catch { 
 
 export type ReplicaState = {
   readonly loc: string
+  /** The head marker the state was read at — a take is guarded on it. */
+  readonly marker: string | null
   /** The replica's layer, or null while the location holds nothing. */
   readonly layer: ReplicaLayer | null
   /** The replica's current head layer signature, or null while it holds nothing. */
@@ -211,22 +242,24 @@ export async function readState(services: ReplicaServices, site: ReplicaSite, lo
   let layer: ReplicaLayer | null = null
   try { layer = await services.history.currentLayerAt(where) } catch { layer = null }
   if (isHusk(layer)) layer = null
+  const marker = services.history.headMarkerOf?.(where) ?? null
   let sig: string | null = null
   if (layer) {
     sig = services.history.warmHeadSigFor?.(where) ?? null
-    if (!sig) { try { sig = (await services.history.latestMarkerSigFor?.(where, site.lineage)) || null } catch { sig = null } }
+    if (!sig) { try { sig = (await services.history.latestMarkerSigFor?.(where, leafOf(site.lineage))) || null } catch { sig = null } }
   }
   const receipt = await readReceipt(services.store, site.lineage)
   const newer = !!site.head && !!layer && !lagging(receipt, site.head) && (!receipt || receipt.published !== site.head)
   const edited = !!layer && (!receipt || !receipt.local || receipt.local !== sig)
   const unpublished = !!layer && !!sig && sig !== site.head && edited
-  return { loc: where, layer, sig, receipt, newer, edited, unpublished }
+  return { loc: where, marker, layer, sig, receipt, newer, edited, unpublished }
 }
 
-/** The page names a head this replica already moved past (a publish the page
- *  record has not caught up with yet). */
-export const lagging = (receipt: ReplicaReceipt | null, head: string | null): boolean =>
-  !!receipt && !!head && receipt.published !== head && receipt.past.includes(head)
+/** The page names a head this replica moved past MOMENTS AGO (a publish the
+ *  page record has not caught up with yet). Long after, the same head named
+ *  again is a real re-publish of it — never ignored forever. */
+export const lagging = (receipt: ReplicaReceipt | null, head: string | null, now: number = Date.now()): boolean =>
+  !!receipt && !!head && receipt.published !== head && receipt.past.includes(head) && now - receipt.at < LAG_WINDOW_MS
 
 /** The sources a site's bytes are asked from: the door itself, then the
  *  update sources (its zone and the followed hosts). */
@@ -252,8 +285,11 @@ export async function replicate(
   if (!adopt) return { kind: 'refused', status: 'no-adopt', pending: false }
   let status: AdoptStatus
   try {
+    // A nested site lands under its parent route, named by its last segment —
+    // the same place the worker's index and the publish name it.
+    const route = replicaRoute(site.lineage)
     status = await adopt.adoptResolvedBranch(
-      { layerSig: site.head, at: [], domain: where.zone, label: site.lineage },
+      { layerSig: site.head, at: route.slice(0, -1), domain: where.zone, label: route.at(-1) ?? site.lineage },
       { silent: true },
     )
   } catch {
@@ -278,16 +314,20 @@ function holdClosure(broker: BrokerLike | undefined, head: string): void {
 
 export type TakeOutcome = { readonly ok: true; readonly sig: string; readonly receipt: ReplicaReceipt | null } | { readonly ok: false; readonly error: string }
 
-/** Replace the replica with the published head: commit the published layer at
- *  the location, guarded on the head this was read from (another tab's newer
- *  marker refuses the write instead of being dropped). The old layer stays one
- *  step back in history. */
+/** Replace the replica with the published head — the whole tree, the card and
+ *  every page under it, re-homed at the site's route the way the first adopt
+ *  placed it (flattenLayerTree) and committed in one queued step with the
+ *  committer's deliberate `replace` (jwize, 2026-11-13: take the newer one;
+ *  the replaced heads stay one marker back). `expected` is the head marker the
+ *  decision was made on: an edit that landed since (the AI's, another tab's)
+ *  refuses the take, and the owner is offered the choice instead. */
 export async function takePublished(
   services: ReplicaServices,
   site: ReplicaSite & { head: string },
   where: { host: string; sources: readonly string[] },
+  expected?: { marker: string | null } | null,
 ): Promise<TakeOutcome> {
-  const { history, store, broker } = services
+  const { history, store, broker, committer } = services
   broker?.noteDomainsForSig?.(site.head, sourcesFor(where.host, where.sources))
   let layer: ReplicaLayer | null = null
   try {
@@ -295,14 +335,24 @@ export async function takePublished(
     layer = blob ? JSON.parse(new TextDecoder().decode(new Uint8Array(await blob.arrayBuffer()))) as ReplicaLayer : null
   } catch { layer = null }
   if (!layer || typeof layer !== 'object' || Array.isArray(layer)) return { ok: false, error: 'cold' }
+  const route = replicaRoute(site.lineage)
   const loc = await replicaLocation(history, site.lineage)
-  // Read the head first, so the guard below names the marker this replace
-  // was decided on.
-  try { await history.currentLayerAt(loc) } catch { /* the guard still holds */ }
+  try { await history.currentLayerAt(loc) } catch { /* the guard below still holds */ }
   const marker = history.headMarkerOf?.(loc) ?? null
+  if (expected && expected.marker !== marker) return { ok: false, error: 'edited' }
   let sig: string
   try {
-    sig = await history.commitLayer(loc, { ...layer, name: layer.name ?? site.lineage }, { marker })
+    if (committer && history.getLayerBySig) {
+      const tree = await flattenLayerTree(history as unknown as PlacementHistory, { ...layer, name: leafOf(site.lineage) }, route)
+      await committer.importTree(tree, undefined, { replace: true })
+      await committer.settled?.()
+      try { await history.currentLayerAt(loc) } catch { /* read below */ }
+      sig = history.warmHeadSigFor?.(loc) ?? (await history.latestMarkerSigFor?.(loc, leafOf(site.lineage))) ?? ''
+      if (!SIG_RE.test(sig)) return { ok: false, error: 'the newer card did not land' }
+    } else {
+      // No committer on this page: the card's own layer, guarded on its marker.
+      sig = await history.commitLayer(loc, { ...layer, name: leafOf(site.lineage) }, { marker })
+    }
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error ?? '') }
   }
@@ -349,7 +399,9 @@ export async function reconcile(
   }
   if (receipt.published === head || lagging(receipt, head)) return { kind: 'current' }
   if (receipt.local && receipt.local === state.sig) {
-    const taken = await takePublished(services, { ...site, head }, where)
+    const taken = await takePublished(services, { ...site, head }, where, { marker: state.marker })
+    // An edit landed while the newer card was fetched: never over it; the owner chooses.
+    if (!taken.ok && taken.error === 'edited') return { kind: 'choice' }
     return taken.ok ? { kind: 'taken' } : { kind: 'take-failed', error: taken.error }
   }
   return { kind: 'choice' }

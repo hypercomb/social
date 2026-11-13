@@ -231,6 +231,15 @@ export type ManagedPublishDeps = {
   /** This site door's host, where readers read and the result is read back. */
   readonly siteDoor?: () => string
   readonly pause?: (ms: number) => Promise<void>
+  /** Is a person's gesture live right now? (navigator.userActivation) */
+  readonly hand?: () => boolean
+}
+
+/** A live user gesture, as the browser reports it. A browser without the API
+ *  (none current) is not refused: the bar's confirm dialog still stands. */
+const ownersHand = (): boolean => {
+  const activation = (globalThis.navigator as { userActivation?: { isActive: boolean } } | undefined)?.userActivation
+  return activation ? activation.isActive : true
 }
 
 const short = (key: string): string => `${key.slice(0, 8)}…`
@@ -246,8 +255,16 @@ export const managedPublish = (deps: ManagedPublishDeps = {}): ManagedPublish =>
   const local = deps.local ?? storeBytes
   const siteDoorOf = deps.siteDoor ?? (() => location.host.toLowerCase())
   const pause = deps.pause ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)))
+  const handOf = deps.hand ?? ownersHand
 
   const run = async (lineage: string, layerSig: string): Promise<ManagedPublishResult> => {
+    // THE OWNER'S HAND, NEVER THE MODEL'S (jwize, 2026-11-13: "AI can't publish
+    // on the community but it can make changes"). On this page the AI may write
+    // and run code, and code can reach this service through ioc — so the
+    // service itself asks for a live user gesture: the owner's tap (the bar's
+    // Publish, then the consent dialog's yes) carries one; code running on its
+    // own does not.
+    if (!handOf()) return { ok: false, error: 'publishing takes your own tap' }
     const head = String(layerSig ?? '').trim().toLowerCase()
     if (!SIG.test(head)) return { ok: false, error: 'that is not a layer signature' }
     const segments = String(lineage ?? '').split('/').map(s => s.trim()).filter(Boolean)

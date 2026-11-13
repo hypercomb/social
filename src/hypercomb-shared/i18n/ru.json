@@ -1711,6 +1711,7 @@
   "site-manage.publish": "Опубликовать",
   "site-manage.publishing": "Публикация…",
   "site-manage.published": "Ваша карточка опубликована.",
+  "site-manage.published-catching-up": "Опубликовано. Сайт покажет это через мгновение.",
   "site-manage.publish-failed": "Публикация не завершена. {reason}",
   "site-manage.publish-confirm.title": "Опубликовать карточку?",
   "site-manage.publish-confirm.message": "Ваши изменения в {title} увидят все посетители сайта.",

@@ -1711,6 +1711,7 @@
   "site-manage.publish": "Publier",
   "site-manage.publishing": "Publication…",
   "site-manage.published": "Ta carte est en ligne.",
+  "site-manage.published-catching-up": "Publié. Le site l’affichera dans un instant.",
   "site-manage.publish-failed": "La publication n’a pas abouti. {reason}",
   "site-manage.publish-confirm.title": "Publier ta carte ?",
   "site-manage.publish-confirm.message": "Tes modifications de {title} seront visibles par tous les visiteurs du site.",

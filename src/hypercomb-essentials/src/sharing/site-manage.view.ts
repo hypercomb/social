@@ -38,10 +38,11 @@ import { FRAME_MAX_ONE, versionFrame, type FrameReader, type FrameLayer } from '
 // Whom builds follow here — the same record the scout read the offer from (the
 // Packages window reads it the same way: host-directory.view.ts #follow).
 import { readInstallFollow } from './update-scout.service.js'
+import { managedRecordText } from './managed-record.js'
 import {
-  BROKER_KEY, CHAT_THREADS_KEY, HISTORY_KEY, LINEAGE_KEY, MANAGED_PUBLISH_KEY, STORE_KEY, SWARM_ADOPT_KEY,
+  BROKER_KEY, CHAT_THREADS_KEY, COMMITTER_KEY, HISTORY_KEY, LINEAGE_KEY, MANAGED_PUBLISH_KEY, STORE_KEY, SWARM_ADOPT_KEY,
   notePublished, readState, reconcile, replicaConvoId, replicaLocation, takePublished, writeReceipt,
-  type AdoptLike, type BrokerLike, type HistoryLike, type ManagedPublishLike, type ReplicaServices,
+  type AdoptLike, type BrokerLike, type CommitterLike, type HistoryLike, type ManagedPublishLike, type ReplicaServices,
   type ReplicaSite, type ReplicaState, type StoreLike as ReplicaStoreLike,
 } from './site-replica.js'
 
@@ -56,7 +57,8 @@ export type SiteManageRecord = { readonly lineage: string; readonly title: strin
 /** The record the worker put in the page, or null on any other page. */
 export function siteManageRecord(doc: Document = document): SiteManageRecord | null {
   try {
-    const raw = doc.getElementById('hc-manage')?.textContent
+    // Only the worker's record counts (managed-record.ts).
+    const raw = managedRecordText(doc)
     if (!raw) return null
     const value = JSON.parse(raw) as Record<string, unknown>
     const lineage = typeof value['lineage'] === 'string' ? value['lineage'].slice(0, 200) : ''
@@ -124,6 +126,8 @@ function whenServices(): Promise<ReplicaServices> {
       store: store as ReplicaStoreLike,
       adopt: adopt as AdoptLike,
       broker: broker as BrokerLike,
+      // Read when a take needs it (the whole tree in one queued step), never waited on.
+      get committer() { return ioc()?.get?.<CommitterLike>(COMMITTER_KEY) },
     }))
 }
 
@@ -354,11 +358,17 @@ export class SiteManageElement extends ElementBase {
       result = { ok: false, error: error instanceof Error ? error.message : '' }
     }
     this.#busy = ''
-    if (result.ok) {
-      const live = typeof result.head === 'string' && /^[0-9a-f]{64}$/.test(result.head) ? result.head : sig
+    // Written but not yet shown: the index on the write host already names the
+    // head (the port returns it); only the site door's view lags. That IS a
+    // publish — recorded as one, so a reload never takes the old card back.
+    const written = typeof result.head === 'string' && /^[0-9a-f]{64}$/.test(result.head)
+    if (result.ok || written) {
+      const live = written ? result.head! : sig
       if (before) await notePublished(services.store, before, live, sig)
       this.#liveHead = live
-      this.#flash(t('site-manage.published', 'Your card is live.'))
+      this.#flash(result.ok
+        ? t('site-manage.published', 'Your card is live.')
+        : t('site-manage.published-catching-up', 'Published. The site will show it in a moment.'))
     } else {
       this.#flash(t('site-manage.publish-failed', 'The publish did not complete. {reason}', { reason: result.error ?? '' }).trim())
     }

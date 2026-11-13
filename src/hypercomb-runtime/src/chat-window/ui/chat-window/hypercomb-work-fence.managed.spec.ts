@@ -9,6 +9,7 @@
 // change the card itself — its details and its theme — not only the page.
 
 import { afterEach, describe, expect, it } from 'vitest'
+import { forgetManagedPageForTests } from '../../core/managed-page'
 import {
   fileRanMessage, managedRule, pageChangeUnready, parseWriteBlock, sandboxRule, tileFileLabel, workInstruction,
 } from './hypercomb-work-fence'
@@ -19,9 +20,10 @@ const mark = (): void => {
   script.type = 'application/json'
   script.textContent = JSON.stringify({ lineage: 'business-card', title: 'Business card' })
   document.head.appendChild(script)
+  forgetManagedPageForTests()
 }
 
-afterEach(() => { document.getElementById('hc-manage')?.remove() })
+afterEach(() => { document.getElementById('hc-manage')?.remove(); forgetManagedPageForTests() })
 
 const base = { canRead: true, readsRunFreely: true, readsPerBlock: 2, canChange: true, vocabulary: '/x', canWriteFiles: true }
 const site = { lineage: 'business-card', title: 'Business card' }

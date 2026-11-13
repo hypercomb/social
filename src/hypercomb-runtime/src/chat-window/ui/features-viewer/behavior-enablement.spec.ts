@@ -1,5 +1,6 @@
 // A new install starts DARK — the whole point of the opt-in model.
 import { describe, it, expect, beforeEach } from 'vitest'
+import { forgetManagedPageForTests } from '../../core/managed-page'
 import { seedDarkOnFreshInstall, hasGlobalOnList, isKindGloballyOff, setKindGlobalOn, GLOBAL_ON_KEY } from './behavior-enablement'
 
 describe('seedDarkOnFreshInstall', () => {
@@ -71,10 +72,12 @@ describe('isWordSwitchedOff', () => {
     script.type = 'application/json'
     script.textContent = JSON.stringify({ lineage: 'business-card' })
     document.head.appendChild(script)
+    forgetManagedPageForTests()
     try {
       expect(isWordSwitchedOff('chat')).toBe(false)
     } finally {
       script.remove()
+      forgetManagedPageForTests()
     }
     expect(isWordSwitchedOff('chat')).toBe(true)
   })

@@ -3059,6 +3059,7 @@
   "site-manage.publish": "Publish",
   "site-manage.publishing": "Publishing…",
   "site-manage.published": "Your card is live.",
+  "site-manage.published-catching-up": "Published. The site will show it in a moment.",
   "site-manage.publish-failed": "The publish did not complete. {reason}",
   "site-manage.publish-confirm.title": "Publish your card?",
   "site-manage.publish-confirm.message": "Your changes to {title} go live for everyone who visits the site.",

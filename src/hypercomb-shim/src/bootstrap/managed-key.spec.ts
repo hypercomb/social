@@ -82,6 +82,12 @@ describe('the managed page\'s own key', () => {
     expect(card.textContent).toContain('open the link it gives you here')
   })
 
+  it('never offers an invite to another publisher’s list', async () => {
+    const stranger = 'c'.repeat(64)
+    const state = await managedKeyState(record(), { siteDoor: () => SITE, invite: () => ({ host: WRITES, anchor: stranger, secret: 'f'.repeat(64) }) as never })
+    expect(state.state).not.toBe('invited')
+  })
+
   it('offers the invite the page was opened with, and Allow puts this browser\'s key on the list', async () => {
     opened(Math.floor(Date.now() / 1000) + 600)
     const state = await managedKeyState(record(), { siteDoor: () => SITE })

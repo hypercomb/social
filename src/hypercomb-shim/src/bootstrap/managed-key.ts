@@ -69,7 +69,9 @@ export const managedKeyState = async (record: ManageRecord, deps: ManagedKeyDeps
   const on = await listed(record, publisher, siteDoor, deps)
   if (on) return { state: 'listed' }
   const invite = (deps.invite ?? heldInvite)()
-  if (invite) return { state: 'invited', invite }
+  // Only an invite to THIS site's publisher's list is offered: a link from
+  // anywhere else (another key's invite) would bind this page to a stranger.
+  if (invite && String((invite as { anchor?: unknown }).anchor ?? '').toLowerCase() === publisher.toLowerCase()) return { state: 'invited', invite }
   // Not one host could be asked: say nothing rather than send the owner to do what may be done already.
   return on === null ? { state: 'quiet' } : { state: 'unlisted' }
 }

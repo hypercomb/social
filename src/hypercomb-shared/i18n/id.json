@@ -1711,6 +1711,7 @@
   "site-manage.publish": "Terbitkan",
   "site-manage.publishing": "Menerbitkan…",
   "site-manage.published": "Kartu Anda sudah tayang.",
+  "site-manage.published-catching-up": "Diterbitkan. Situs akan menampilkannya sebentar lagi.",
   "site-manage.publish-failed": "Penerbitan tidak selesai. {reason}",
   "site-manage.publish-confirm.title": "Terbitkan kartu Anda?",
   "site-manage.publish-confirm.message": "Perubahan Anda pada {title} akan tayang bagi semua pengunjung situs.",

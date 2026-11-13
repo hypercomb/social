@@ -8,6 +8,8 @@
 //
 // The view is loaded only on such a page, so no other page pays for it.
 
+import { managedRecordText } from './managed-record.js'
+
 const SURFACE = 'hc-site-manage'
 const OWNER = '@diamondcoreprocessor.com/SiteManageView'
 const REGISTRY_KEY = '@hypercomb.social/ShellSurfaceRegistry'
@@ -26,7 +28,8 @@ export class SiteManageDrone {
 
   /** Mount the card on a managed site door's page; anywhere else, nothing. */
   start(doc: Document = document): void {
-    if (this.#managing || typeof window === 'undefined' || !doc.getElementById('hc-manage')) return
+    // Only the worker's record counts (managed-record.ts): planted markup mounts nothing.
+    if (this.#managing || typeof window === 'undefined' || !managedRecordText(doc)) return
     this.#managing = true
     void import('./site-manage.view.js').then(({ SiteManageElement }) => {
       if (!customElements.get(SURFACE)) customElements.define(SURFACE, SiteManageElement)

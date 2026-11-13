@@ -1711,6 +1711,7 @@
   "site-manage.publish": "Pubblica",
   "site-manage.publishing": "Pubblicazione…",
   "site-manage.published": "La tua carta è online.",
+  "site-manage.published-catching-up": "Pubblicato. Il sito lo mostrerà tra un attimo.",
   "site-manage.publish-failed": "La pubblicazione non è stata completata. {reason}",
   "site-manage.publish-confirm.title": "Pubblicare la tua carta?",
   "site-manage.publish-confirm.message": "Le tue modifiche a {title} saranno visibili a chiunque visiti il sito.",

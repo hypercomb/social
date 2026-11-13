@@ -20,7 +20,7 @@ const KEYS = [
   'site-manage.update', 'site-manage.updating', 'site-manage.update-failed',
   'site-manage.refused', 'site-manage.take-failed', 'site-manage.newer', 'site-manage.use-newer',
   'site-manage.taking', 'site-manage.unpublished', 'site-manage.publish', 'site-manage.publishing',
-  'site-manage.published', 'site-manage.publish-failed', 'site-manage.publish-confirm.title',
+  'site-manage.published', 'site-manage.published-catching-up', 'site-manage.publish-failed', 'site-manage.publish-confirm.title',
   'site-manage.publish-confirm.message', 'site-manage.publish-confirm.cancel',
 ]
 

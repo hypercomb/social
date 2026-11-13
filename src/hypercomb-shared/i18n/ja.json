@@ -2588,6 +2588,7 @@
   "site-manage.publish": "公開",
   "site-manage.publishing": "公開中…",
   "site-manage.published": "カードは公開されました。",
+  "site-manage.published-catching-up": "公開しました。まもなくサイトに表示されます。",
   "site-manage.publish-failed": "公開は完了しませんでした。{reason}",
   "site-manage.publish-confirm.title": "カードを公開しますか？",
   "site-manage.publish-confirm.message": "{title} への変更が、サイトを訪れるすべての人に公開されます。",

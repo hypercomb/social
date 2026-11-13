@@ -1711,6 +1711,7 @@
   "site-manage.publish": "Yayımla",
   "site-manage.publishing": "Yayımlanıyor…",
   "site-manage.published": "Kartınız yayında.",
+  "site-manage.published-catching-up": "Yayınlandı. Site birazdan gösterecek.",
   "site-manage.publish-failed": "Yayımlama tamamlanmadı. {reason}",
   "site-manage.publish-confirm.title": "Kartınız yayımlansın mı?",
   "site-manage.publish-confirm.message": "{title} üzerindeki değişiklikleriniz siteyi ziyaret eden herkes için yayına girer.",

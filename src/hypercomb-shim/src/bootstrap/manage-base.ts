@@ -29,10 +29,17 @@ const decode = (s: string): string => { try { return decodeURIComponent(s) } cat
 export function managedPath(pathname: string, lineage: string): string {
   const parts = String(pathname || '/').split('/').filter(Boolean)
   if (parts[0] && decode(parts[0]).trim().toLowerCase() === MANAGE_SEGMENT) parts.shift()
-  const own = String(lineage || '').trim().toLowerCase()
-  if (own && parts[0] && decode(parts[0]).trim().toLowerCase() === own) parts.shift()
+  // A leading copy of the site's own route (every segment of it) is dropped.
+  const own = siteSegments(lineage).map(segment => segment.toLowerCase())
+  if (own.length && own.every((segment, i) => parts[i] !== undefined && decode(parts[i]!).trim().toLowerCase() === segment)) parts.splice(0, own.length)
   return '/' + parts.join('/')
 }
+
+/** The site's route, one segment per name: `revolucion/meetup` stands at
+ *  ['revolucion', 'meetup'] — as the worker's index names it and the replica
+ *  holds it, never as one segment. */
+export const siteSegments = (lineage: string): string[] =>
+  String(lineage || '').split('/').map(segment => segment.trim()).filter(Boolean)
 
 /** Point the page's Lineage at [lineage]. Returns the base it set, or null on
  *  a page that is not a managed site door (or has no navigation yet). */
@@ -42,8 +49,8 @@ export function standAtManagedSite(
   win: Pick<Window, 'location' | 'history' | 'dispatchEvent'> = window,
 ): readonly string[] | null {
   const lineage = String(record?.lineage ?? '').trim()
-  if (!lineage || typeof navigation?.setUrlBase !== 'function') return null
-  const base = [lineage]
+  const base = siteSegments(lineage)
+  if (!base.length || typeof navigation?.setUrlBase !== 'function') return null
   navigation.setUrlBase(base)
   const { pathname, search, hash } = win.location
   const next = managedPath(pathname, lineage)

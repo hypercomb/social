@@ -43,6 +43,15 @@ describe('standAtManagedSite — before the bees mount', () => {
     }
   })
 
+  it('stands a nested site at every segment of its route, as the worker’s index names it', () => {
+    window.history.replaceState(null, '', '/@hypercomb')
+    const set: Array<readonly string[]> = []
+    const base = standAtManagedSite({ lineage: 'revolucion/meetup' }, { setUrlBase: s => { set.push([...s]) } })
+    expect(base).toEqual(['revolucion', 'meetup'])
+    expect(set).toEqual([['revolucion', 'meetup']])
+    expect(managedPath('/revolucion/meetup/agenda', 'revolucion/meetup')).toBe('/agenda')
+  })
+
   it('does nothing on a page that is not a managed site door', () => {
     window.history.replaceState(null, '', '/@hypercomb')
     const set: unknown[] = []

@@ -9,6 +9,7 @@
 // exactly as core does.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { forgetManagedPageForTests } from '../../core/managed-page'
 import { MACHINE_GRANT_KEY, MACHINE_ROSTER_KEY } from '@hypercomb/core'
 import {
   callableBehaviours, hypercombPlanLeaves, hypercombPlanReach, hypercombVocabulary, hypercombWriteRefusal, parseHypercombGrammars,
@@ -28,10 +29,11 @@ const mark = (): void => {
   script.type = 'application/json'
   script.textContent = JSON.stringify({ lineage: 'business-card', title: 'Business card' })
   document.head.appendChild(script)
+  forgetManagedPageForTests()
 }
 
 beforeEach(() => { localStorage.clear() })
-afterEach(() => { document.getElementById('hc-manage')?.remove(); localStorage.clear() })
+afterEach(() => { document.getElementById('hc-manage')?.remove(); forgetManagedPageForTests(); localStorage.clear() })
 
 describe('every other page', () => {
   it('is unchanged: a fresh hive grants a model no verb until the participant grants it', () => {
@@ -57,25 +59,29 @@ describe('every other page', () => {
 describe('a managed site door', () => {
   beforeEach(mark)
 
-  it('offers every verb a behaviour offers to models, with no roster and no grant asked — destructive ones too', () => {
-    expect(callableBehaviours(entries).map(entry => entry.name)).toEqual(['create', 'hide', 'remove'])
+  it('offers every verb that changes the replica, with no roster and no grant asked — destructive ones too — and none that leaves it', () => {
+    // jwize: "AI can't publish on the community but it can make changes" — /hide is a signed mesh event (network).
+    expect(callableBehaviours(entries).map(entry => entry.name)).toEqual(['create', 'remove'])
     const taught = hypercombVocabulary(entries)
     expect(taught).toContain('/create <name>')
     expect(taught).toContain('/remove <tile>')
   })
 
   it('runs a model\'s lines that no one granted, and weighs them as they are', () => {
-    const plan = parseHypercombGrammars(['/create roadmap', '/hide drafts', '/remove old'], entries)
-    expect(plan.actions.map(action => action.command)).toEqual(['create', 'hide', 'remove'])
+    const plan = parseHypercombGrammars(['/create roadmap', '/remove old'], entries)
+    expect(plan.actions.map(action => action.command)).toEqual(['create', 'remove'])
     expect(hypercombPlanReach(plan, entries)).toBe('destructive')
-    // A line that leaves the machine is still shown to the owner as leaving.
-    expect(hypercombPlanLeaves(plan, entries)).toEqual(['/hide drafts'])
+    expect(hypercombPlanLeaves(plan, entries)).toEqual([])
+  })
+
+  it('refuses a line that would leave the replica for the community', () => {
+    expect(() => parseHypercombGrammars(['/hide drafts'], entries)).toThrow(/reaches the network/)
   })
 
   it('never refuses a write, whatever this browser\'s stored ceiling says', () => {
     localStorage.setItem(MACHINE_GRANT_KEY, 'none/local')
     expect(hypercombWriteRefusal()).toBeUndefined()
-    expect(callableBehaviours(entries).map(entry => entry.name)).toEqual(['create', 'hide', 'remove'])
+    expect(callableBehaviours(entries).map(entry => entry.name)).toEqual(['create', 'remove'])
   })
 
   it('still refuses what is no behaviour at all: a concealed verb, or a word with no machine form', () => {

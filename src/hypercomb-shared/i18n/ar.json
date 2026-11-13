@@ -1711,6 +1711,7 @@
   "site-manage.publish": "نشر",
   "site-manage.publishing": "جارٍ النشر…",
   "site-manage.published": "بطاقتك منشورة الآن.",
+  "site-manage.published-catching-up": "تم النشر. سيظهر في الموقع بعد لحظة.",
   "site-manage.publish-failed": "لم يكتمل النشر. {reason}",
   "site-manage.publish-confirm.title": "هل تنشر بطاقتك؟",
   "site-manage.publish-confirm.message": "ستظهر تغييراتك على {title} لكل من يزور الموقع.",

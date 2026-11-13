@@ -23,6 +23,7 @@
 // this door is handed the finished text.
 
 import { Drone } from '@hypercomb/core'
+import { managedRecordText } from '../sharing/managed-record.js'
 import { listDecorations, removeDecorationAndWait } from '../commands/decoration-manifest.js'
 import { FILES_ATTACHMENT_KIND, listAttachments, writeAttachment, type AttachmentPayload } from './files-attachment.js'
 import { extOf } from './file-types.js'
@@ -56,9 +57,10 @@ export type TileFileTarget = {
  *  site it manages in it. MIRRORED from sharing/site-manage.view.ts
  *  siteManageRecord, which this door does not import (that module is the
  *  card's view, loaded only on such a page). */
-export function onManagedSiteDoor(doc: Pick<Document, 'getElementById'> | undefined = globalThis.document): boolean {
+export function onManagedSiteDoor(doc: Document | undefined = globalThis.document): boolean {
   try {
-    const raw = doc?.getElementById('hc-manage')?.textContent
+    // Only the worker's record counts (sharing/managed-record.ts).
+    const raw = managedRecordText(doc)
     if (!raw) return false
     const value = JSON.parse(raw) as Record<string, unknown>
     return !!value && typeof value['lineage'] === 'string' && value['lineage'].trim().length > 0

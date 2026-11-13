@@ -1711,6 +1711,7 @@
   "site-manage.publish": "发布",
   "site-manage.publishing": "正在发布…",
   "site-manage.published": "你的名片已上线。",
+  "site-manage.published-catching-up": "已发布。网站稍后就会显示。",
   "site-manage.publish-failed": "发布未完成。{reason}",
   "site-manage.publish-confirm.title": "发布你的名片？",
   "site-manage.publish-confirm.message": "你对 {title} 的更改将对所有访问该网站的人可见。",
