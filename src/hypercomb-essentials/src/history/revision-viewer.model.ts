@@ -287,6 +287,93 @@ export function frameDocument(pageHtml: string, data: FrameData, hosting: FrameH
   return /^\s*<!doctype/i.test(out) ? out : `<!doctype html>${out}`
 }
 
+// ── one version, read and framed ─────────────────────────────────────
+//
+// Shared by the revision viewer (any version) and a managed site door's card
+// (the published head): read a layer's page and records through `read`, and
+// build the document it runs in. One builder, so the card on a site door and a
+// version in the viewer can never run differently.
+
+/** One file travels into a frame only up to this size, and one version's bytes only up to the total. */
+export const FRAME_MAX_ONE = 4 * 1024 * 1024
+export const FRAME_MAX_TOTAL = 16 * 1024 * 1024
+/** At most this many named signatures are read for one version's records (and as many pictures). */
+export const FRAME_MAX_CARRIED = 64
+
+/** How a version's bytes are read: `localOnly` asks only this device, never a host. */
+export type FrameReader = {
+  bytes(sig: string, localOnly?: boolean): Promise<Uint8Array | null>
+  /** The last read of this signature (any source) found nothing: it may simply not be here yet. */
+  missing(sig: string): boolean
+}
+
+export type VersionFrame = {
+  readonly page: string | null
+  readonly doc: string | null
+  /** cold: something it needs is not here yet (worth a retry); no-page: the version shows no page */
+  readonly problem: 'cold' | 'no-page' | null
+  /** The page is known for sure (no record it needed was missing). */
+  readonly settled: boolean
+}
+
+const jsonOf = (bytes: Uint8Array | null): Record<string, unknown> | null => {
+  if (!bytes) return null
+  try { return JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown> } catch { return null }
+}
+
+/** The page a layer shows, and whether a record it needed was missing. */
+export async function pageOfLayer(layer: LayerLike, read: FrameReader): Promise<{ page: string | null; missed: boolean }> {
+  let missed = false
+  const readJson = async (sig: string): Promise<Record<string, unknown> | null> => {
+    const record = jsonOf(await read.bytes(sig))
+    if (!record && read.missing(sig)) missed = true
+    return record
+  }
+  const readHead = async (sig: string): Promise<string | null> => {
+    const bytes = await read.bytes(sig, true)
+    return bytes ? new TextDecoder().decode(bytes.subarray(0, 512)) : null
+  }
+  const page = await pageSigOf(layer, readJson, readHead).catch(() => null)
+  return { page, missed: !page && missed }
+}
+
+/** Everything one version's frame needs, read through `read`, and the document it runs in. */
+export async function versionFrame(layer: LayerLike, segments: readonly string[], read: FrameReader): Promise<VersionFrame> {
+  const { page, missed } = await pageOfLayer(layer, read)
+  if (!page) return { page: null, doc: null, problem: missed ? 'cold' : 'no-page', settled: !missed }
+  const html = await read.bytes(page)
+  if (!html) return { page, doc: null, problem: 'cold', settled: true }
+  const text = new TextDecoder().decode(html)
+
+  // The bytes the page may read through its tile: every decoration record
+  // (under the signature in the slot, envelope or bare) and what each declares.
+  const resources: Record<string, string> = {}
+  let total = 0, carried = 0
+  const carry = async (sig: string, localOnly: boolean): Promise<void> => {
+    if (sig === page || sig in resources || carried >= FRAME_MAX_CARRIED) return
+    carried++
+    const bytes = await read.bytes(sig, localOnly)
+    if (!bytes || bytes.length > FRAME_MAX_ONE || total + bytes.length > FRAME_MAX_TOTAL) return
+    total += bytes.length
+    resources[sig] = toBase64(bytes)
+  }
+  for (const sig of sigsIn(layer['decorations'])) {
+    await carry(sig, false)
+    const record = jsonOf(await read.bytes(sig))
+    // A group mark names a referent with no bytes behind it.
+    if (!record || record['kind'] === 'group') continue
+    for (const named of carriedSigsOf(record)) await carry(named, true)
+  }
+  // The pictures the page embeds by signature, inlined (the frame reaches no network).
+  const pictures: Record<string, string> = {}
+  for (const sig of pictureSigsOf(text).slice(0, FRAME_MAX_CARRIED)) {
+    const bytes = await read.bytes(sig, true)
+    if (bytes && bytes.length <= FRAME_MAX_ONE && total + bytes.length <= FRAME_MAX_TOTAL) { total += bytes.length; pictures[sig] = pictureUrl(bytes) }
+  }
+  const doc = frameDocument(text, { segments, layer, resources }, { pageSig: page, pictures })
+  return { page, doc, problem: null, settled: true }
+}
+
 /** The signatures of the pictures a page embeds, as the website view resolves them. */
 export const pictureSigsOf = (pageHtml: string): string[] => extractPageRefSigs(pageHtml)
 

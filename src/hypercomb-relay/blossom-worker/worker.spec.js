@@ -1757,7 +1757,13 @@ test('a site door serves its website to a visitor, and /@hypercomb marks the bro
     // The trigger: the shim's management page, and the mark set, first-party and unreadable by script.
     const trigger = await worker.fetch(typed('https://revolucion.pluginthematrix.com/@hypercomb'), env)
     assert.equal(trigger.status, 200)
-    assert.match(await trigger.text(), /<title>shim<\/title>/)
+    const page = await trigger.text()
+    assert.match(page, /<title>shim<\/title>/)
+    // The page carries what it manages: the site, its publisher and the head they published.
+    const record = JSON.parse(/<script id="hc-manage" type="application\/json">([^<]*)<\/script>/.exec(page)[1])
+    assert.equal(record.lineage, 'revolucion')
+    assert.equal(record.publisher, pubkey)
+    assert.equal(record.head, head)
     assert.deepEqual(seen, ['https://debugger.example/@hypercomb'])
     const cookie = trigger.headers.get('set-cookie') ?? ''
     assert.match(cookie, /^__Host-hc-manage=1;/)

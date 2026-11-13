@@ -24,21 +24,14 @@
 
 import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import {
-  carriedSigsOf, changedAt, frameDocument, judge, leftBetween, NARROWING_START, nextToLook, pageSigOf, pictureSigsOf,
-  pictureUrl, runsOf, toBase64,
-  type LayerLike, type Narrowing, type PageRun, type Version,
+  changedAt, FRAME_MAX_ONE, judge, leftBetween, NARROWING_START, nextToLook, pageOfLayer, runsOf, versionFrame,
+  type FrameReader, type LayerLike, type Narrowing, type PageRun, type Version,
 } from './revision-viewer.model.js'
 
 export const REVISION_VIEWER_SURFACE = 'hc-revision-viewer'
 export const REVISION_VIEWER_OWNER = '@diamondcoreprocessor.com/RevisionViewer'
 const STYLE_ID = 'hc-revision-viewer-style'
 
-const SIG_RE = /^[0-9a-f]{64}$/
-/** One file travels into a frame only up to this size, and one version's bytes only up to the total. */
-const MAX_ONE = 4 * 1024 * 1024
-const MAX_TOTAL = 16 * 1024 * 1024
-/** At most this many named signatures are read for one version's records. */
-const MAX_CARRIED = 64
 /** Bytes kept across versions (records are immutable, so a read serves every version). */
 const MAX_KEPT_BYTES = 64 * 1024 * 1024
 /** Built frames kept, so flipping back and forth does not read the hive again. */
@@ -293,7 +286,7 @@ export class RevisionViewerElement extends ElementBase {
     const s = store()
     const blob = await (localOnly && s?.getResourceResolvedLocal ? s.getResourceResolvedLocal(sig) : s?.getResource(sig))?.catch(() => null)
     if (!blob) { this.#missing.add(asked); return null }
-    if (blob.size > MAX_ONE) return null
+    if (blob.size > FRAME_MAX_ONE) return null
     const bytes = new Uint8Array(await blob.arrayBuffer())
     this.#bytes.set(sig, bytes)
     this.#keptBytes += bytes.length
@@ -305,69 +298,28 @@ export class RevisionViewerElement extends ElementBase {
     return bytes
   }
 
-  async #json(sig: string): Promise<Record<string, unknown> | null> {
-    const bytes = await this.#bytesOf(sig)
-    if (!bytes) return null
-    try { return JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown> } catch { return null }
+  /** How the shared frame builder reads this viewer's bytes. */
+  readonly #reader: FrameReader = {
+    bytes: (sig, localOnly) => this.#bytesOf(sig, localOnly),
+    missing: sig => this.#missing.has('any:' + sig),
   }
 
   /** The page a version shows, and whether a record it needed was missing (then it may simply not be here yet). */
-  async #pageOf(layer: LayerLike): Promise<{ page: string | null; missed: boolean }> {
-    let missed = false
-    const readJson = async (sig: string): Promise<Record<string, unknown> | null> => {
-      const record = await this.#json(sig)
-      if (!record && this.#missing.has('any:' + sig)) missed = true
-      return record
-    }
-    const readHead = async (sig: string): Promise<string | null> => {
-      const bytes = await this.#bytesOf(sig, true)
-      return bytes ? new TextDecoder().decode(bytes.subarray(0, 512)) : null
-    }
-    const page = await pageSigOf(layer, readJson, readHead).catch(() => null)
-    return { page, missed: !page && missed }
+  #pageOf(layer: LayerLike): Promise<{ page: string | null; missed: boolean }> {
+    return pageOfLayer(layer, this.#reader)
   }
 
-  /** Everything one version's frame needs, read from the hive once and kept. */
+  /** Everything one version's frame needs, read from the hive once and kept (revision-viewer.model.ts versionFrame). */
   async #frameOf(version: Version): Promise<Built> {
     const kept = this.#frames.get(version.layerSig)
     if (kept) return kept
     const layer = await history()?.getLayerBySig(version.layerSig).catch(() => null)
     if (!layer) return { page: null, doc: null, problem: 'cold' }
-    const { page, missed } = await this.#pageOf(layer)
-    if (!missed) this.#pages.set(version.index, page)
-    if (!page) return missed ? { page: null, doc: null, problem: 'cold' } : this.#keep(version.layerSig, { page: null, doc: null, problem: 'no-page' })
-    const html = await this.#bytesOf(page)
-    if (!html) return { page, doc: null, problem: 'cold' }
-    const text = new TextDecoder().decode(html)
-
-    // The bytes the page may read through its tile: every decoration record
-    // (under the signature in the slot, envelope or bare) and what each declares.
-    const resources: Record<string, string> = {}
-    let total = 0, carried = 0
-    const carry = async (sig: string, localOnly: boolean): Promise<void> => {
-      if (sig === page || sig in resources || carried >= MAX_CARRIED) return
-      carried++
-      const bytes = await this.#bytesOf(sig, localOnly)
-      if (!bytes || total + bytes.length > MAX_TOTAL) return
-      total += bytes.length
-      resources[sig] = toBase64(bytes)
-    }
-    const slot = Array.isArray(layer['decorations']) ? (layer['decorations'] as unknown[]).map(s => String(s ?? '').toLowerCase()).filter(s => SIG_RE.test(s)) : []
-    for (const sig of slot) {
-      await carry(sig, false)
-      const record = await this.#json(sig)
-      // A group mark names a referent with no bytes behind it.
-      if (!record || record['kind'] === 'group') continue
-      for (const named of carriedSigsOf(record)) await carry(named, true)
-    }
-    // The pictures the page embeds by signature, inlined (the frame reaches no network).
-    const pictures: Record<string, string> = {}
-    for (const sig of pictureSigsOf(text).slice(0, MAX_CARRIED)) {
-      const bytes = await this.#bytesOf(sig, true)
-      if (bytes && total + bytes.length <= MAX_TOTAL) { total += bytes.length; pictures[sig] = pictureUrl(bytes) }
-    }
-    const doc = frameDocument(text, { segments: this.#segments, layer, resources }, { pageSig: page, pictures })
-    return this.#keep(version.layerSig, { page, doc, problem: null })
+    const framed = await versionFrame(layer, this.#segments, this.#reader)
+    if (framed.settled) this.#pages.set(version.index, framed.page)
+    const built: Built = { page: framed.page, doc: framed.doc, problem: framed.problem }
+    // Only an answer that will not change is kept: a cold one is asked again.
+    return framed.problem === 'cold' ? built : this.#keep(version.layerSig, built)
   }
 
   #keep(layerSig: string, built: Built): Built {
