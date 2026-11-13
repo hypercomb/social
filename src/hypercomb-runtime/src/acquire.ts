@@ -126,6 +126,22 @@ export type InstallOptions = {
   /** Asked once every module is held and verified, before anything runs: a
    *  sentence refuses the package (nothing activates, the bytes stay). */
   refuse?: (modules: readonly string[], read: (sig: string) => Promise<Uint8Array | null>) => Promise<string | null>
+  /** The zone this page runs as, when that is not its own host: a managed site
+   *  door (`business-card.jwize.com`, opened through /@hypercomb) runs as the
+   *  zone it hangs off (`jwize.com`), whose worker serves that page only on its
+   *  own site door — so that zone's package is this page's own. Honoured only
+   *  for a zone this host sits under ({@link runsAs}); anything else is ignored. */
+  self?: string
+}
+
+/** Who this page is to the activation gate: its own host, or — only when the
+ *  host sits under it — the zone a managed site door was opened for. */
+export const runsAs = (host: string, zone?: string): string => {
+  const own = String(host || '').toLowerCase()
+  const asked = String(zone || '').toLowerCase().replace(/^\.+|\.+$/g, '')
+  if (!asked || !asked.includes('.')) return own
+  const bare = own.replace(/:\d{1,5}$/, '')
+  return bare.endsWith(`.${asked}`) ? asked : own
 }
 
 /** This origin's content bases — a byte source only through {@link originAmong}. */
@@ -601,7 +617,7 @@ export const installPackage = async (
   const authority = await activationAuthority({
     packageSig: pkg.packageSig,
     zone: pkg.zone,
-    self: location.host,
+    self: runsAs(location.host, opts.self),
     installed: installedPackageSig(),
     zones: alsoFrom,
     attester: registeredAttester(),

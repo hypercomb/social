@@ -3585,6 +3585,30 @@ function serveManageLeave() {
   })
 }
 
+/** The trigger opened by anything but the owner's own visit — a link from
+ *  another site, a script, a tool driving the browser. Serving the management
+ *  page there would be a page that cannot start: unmarked, its own files are
+ *  the website's. So it is one link instead, back to the trigger; following it
+ *  is a visit from this same site, which is what marks. Never framed. */
+function serveManageConfirm() {
+  const page = '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+    + '<title>Manage this site</title>'
+    + '<style>body{margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;'
+    + 'background:#0b0d12;color:#e6e8ee;font:16px/1.5 system-ui,sans-serif}a{color:inherit}'
+    + '.go{padding:8px 16px;border:1px solid #3a3f4b;border-radius:4px;background:#161a22;text-decoration:none}</style>'
+    + '<a class="go" href="/@hypercomb">Manage this site in this browser</a><a href="/">Back to the site</a>'
+  return new Response(page, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+      'Referrer-Policy': 'no-referrer',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  })
+}
+
 /** The site door's management page: the framework-free shim, as a try- door
  *  serves it, but signing stays the owner's (it is not pinned off) — and on the
  *  trigger path the mark is set. */
@@ -7525,9 +7549,12 @@ const router = {
       if (managed) {
         if (isLeavePath(pathname)) return serveManageLeave()
         // The mark is set only by a visit the owner made on purpose; any other
-        // request for the trigger gets the page once and marks nothing.
+        // request for the trigger, unmarked, gets one link back to it
+        // (serveManageConfirm) and marks nothing.
+        const marking = isManagePath(pathname) && !managing(request)
+        if (marking && !deliberateVisit(request)) return serveManageConfirm()
         return serveManagement(request, env, managed.zone, {
-          setMark: isManagePath(pathname) && !managing(request) && deliberateVisit(request),
+          setMark: marking,
           manage: () => manageRecord(managed, pageReader(managed.env)),
         })
       }
