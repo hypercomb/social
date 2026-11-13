@@ -219,6 +219,37 @@ thumbnail or hex sheet pair is a derivation record under `derived:<picture>`,
 found through a host the same way, so a hive that joins late is handed shots
 someone already cut instead of cutting them again.
 
+## A model asks a pool
+
+**Built 2026-11-13 (jwize: "if we use the pools it should be easy to do. We
+just have to query the root pool").** Every read the hive's AI had walked the
+hive's own tiles (`tree`, `read`, `list`, `find`, `code`). What the community
+publishes was never there, so on a page whose own hive is empty (a card's site
+door) every read answered `not-found` and the model reported that nothing
+exists. The read it lacked is the pool rule itself:
+
+```
+pool <meaning>          sign(meaning), asked of each host in community:hosts
+pool host:publications  the creations those hosts have published
+pool <meaning> <from>   the next page of a long one-file index
+```
+
+- **The model names a meaning, never a host.** The hosts asked are the ones
+  the participant carries; carrying none, the public content host is read, as
+  `discover` does. A bare word is refused: a tile's name pool is never listed.
+- **Both shapes at the one address.** `/<address>/` (asked with `?held`) is a
+  set, whose members come back as signatures that `read <signature>` opens;
+  `/<address>` is a one-file index, returned as the host sent it, a page at a
+  time. The answer says what each host said: listed, document, absent, silent.
+- **Read only.** Nothing is written, nothing is kept, and the meaning is not
+  registered as a pool of this hive.
+- **Someone else's words.** A change that follows a pool read is held for the
+  participant's hand, as after any read of a peer's content.
+
+Code: `assistant/hive-pool-read.ts` (the read), `hypercomb-observation.ts`
+(the `pool` verb and its receipt), core `work-instruction.ts` (what the model
+is taught).
+
 ## Not this
 
 - No named file at the root as the discovery surface — no `<family>.json`,

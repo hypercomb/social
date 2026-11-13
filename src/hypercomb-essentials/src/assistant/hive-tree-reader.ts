@@ -17,6 +17,7 @@ import { CHILD_SLOTS, childSigsOfLayer, sectionIndex, sectionOf } from '@hyperco
 import type { CurrentLayerRef, LayerContent } from '../history/history.service.js'
 import { isPeerContentAt } from '../sharing/adopted-roots.js'
 import { MAX_RECORD_DEPTH } from '../search/hive-search.js'
+import { readPool, type HypercombPoolRead } from './hive-pool-read.js'
 
 export const HIVE_TREE_READER_IOC_KEY = '@diamondcoreprocessor.com/HypercombHiveTreeReader'
 
@@ -1341,6 +1342,20 @@ export class HypercombHiveTreeReader {
       if (options.signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) throw error
       return { ok: false, root, code: 'incomplete-read' }
     }
+  }
+
+  /**
+   * A POOL OF MEANING, ASKED OF THE HOSTS — `/pool <meaning>`. The one read
+   * that leaves this hive: what the community publishes is in pools at the
+   * root of the hosts the participant follows, never in the tile tree
+   * (hive-pool-read.ts). Live every time: a fact about the network is never
+   * kept here.
+   */
+  readPool(
+    meaning: string,
+    options: { readonly from?: number; readonly maxBytes?: number; readonly signal?: AbortSignal } = {},
+  ): Promise<HypercombPoolRead> {
+    return readPool(meaning, options)
   }
 
   /**

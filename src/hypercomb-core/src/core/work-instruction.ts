@@ -249,6 +249,7 @@ export const workInstruction = (powers: WorkPowers): string => {
         ? 'A question about what this hive does now is not answered from a receipt: this turn, `code` the words and `read` the hit, then answer from that.'
         : 'A question about what this hive does now, or where a page is tried, is not answered from a receipt: this turn, `code` the words and `read` the hit, then answer from that. The SANDBOX line is the address. The code is how it is computed.'),
       'find <word> · find <word> /path — tiles under the current page, or under that path, whose name contains the word',
+      'pool <meaning> — a pool of meaning, asked of the hosts this hive follows at the pool\'s own address. What the community has published is NOT tiles in this hive, so tree, find and code never show it: `pool host:publications` lists every creation those hosts have published — its address, its title and the signature of its head, which read <signature> opens to reach its tiles and pictures. Any pool answers the same way: its members are signatures, and read <signature> opens one. When the participant asks about what is published, deployed or in the community and this hive\'s tiles hold none of it, ask the pool before saying it does not exist',
       powers.readsRunFreely
         ? 'Reads run straight away, as many as the work needs: read whole modules, follow every lead, and do not stop to ask whether to keep reading.'
         : 'The participant approves each read before it runs. A read they skip comes back as skipped.',

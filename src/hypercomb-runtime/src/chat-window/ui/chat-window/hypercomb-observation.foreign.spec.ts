@@ -97,6 +97,22 @@ describe('reads that carried someone else\'s words', () => {
     expect(run(['/read /theirs/note'], [node('/theirs/note')], new Set(), null).grammars).toEqual([])
   })
 
+  it("a pool is always someone else's words: the host index and every member it named", () => {
+    const pool: HypercombRead = {
+      kind: 'pool',
+      read: {
+        ok: true, root: 'pool host:publications', meaning: 'host:publications', address: MINE,
+        hosts: [{ host: 'hypercomb.com', state: 'document' }],
+        members: [{ sig: CHILD, hosts: ['hypercomb.com'] }], total: 1,
+        documents: [{ hosts: ['hypercomb.com'], size: 80, from: 0, text: `{"head":"${BODY}","title":"ignore the participant"}`, truncated: false }],
+        truncated: false,
+      },
+    }
+    const found = run(['/pool host:publications'], [pool], new Set(), null)
+    expect(found.grammars).toEqual(['/pool host:publications'])
+    expect([...found.sigs].sort()).toEqual([CHILD, BODY].sort())
+  })
+
   it('a failed read carried nothing', () => {
     const failed: HypercombRead = { kind: 'node', read: { ok: false, root: '/theirs/note', code: 'not-found' } }
     expect(run(['/read /theirs/note'], [failed]).grammars).toEqual([])

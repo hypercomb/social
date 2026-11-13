@@ -13,7 +13,7 @@ export type Covers = (segments: readonly string[]) => boolean
 const segmentsOfPath = (path: string): string[] => String(path ?? '').split('/').filter(Boolean)
 
 const aimsAtWithheld = (observation: HypercombObservation, covers: Covers): boolean =>
-  observation.verb !== 'code' && !observation.sig && covers(observation.segments)
+  observation.verb !== 'code' && observation.verb !== 'pool' && !observation.sig && covers(observation.segments)
 
 /** The first read in a block aimed at a withheld route, if any. A read by
  *  signature or of code names no route; it is not this guard's to judge. */
