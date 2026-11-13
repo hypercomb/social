@@ -32,7 +32,7 @@
     "@hypercomb/runtime": "file:../hypercomb-runtime",
     "esbuild": "^0.27.0",
     "nostr-tools": "^2.23.1",
-    "pixi.js": "^8.16.0",
+    "pixi.js": "^8.23.0",
     "sass": "^1.97.3",
     "typescript": "~5.9.3"
   },

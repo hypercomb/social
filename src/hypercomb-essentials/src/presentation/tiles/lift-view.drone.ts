@@ -22,7 +22,7 @@
 // the rewind window's Save), `adoptResolvedBranch` for a participant's tile
 // (as the adopt gesture). And never while the hive is showing the past.
 //
-// three.js is loaded only here, on mount (`await import('three')`), so no
+// Pixi's 3D is loaded only here, on mount (`await import('@pixi/3d')`), so no
 // other lane ever pays for it; the renderer is made only after a WebGL probe
 // (lift-scene.ts), and a hive without WebGL gets a notice, not a blank page.
 // Tile names are DOM text over the scene, never canvas text.
@@ -266,18 +266,23 @@ export class LiftViewDrone extends Drone {
       this.#setActive(true)
     }
     if (!this.#scene && !this.#sceneFailed) {
-      let three: typeof import('three')
+      let pixi3d: typeof import('@pixi/3d')
       try {
-        three = await import('three')
+        pixi3d = await import('@pixi/3d')
       } catch (error) {
-        console.warn('[lift-view] three could not be loaded:', error)
+        console.warn('[lift-view] @pixi/3d could not be loaded:', error)
         if (gen !== this.#gen) return
         this.#sceneFailed = true
         this.#notice(this.#t('lift.webgl', 'The lift view needs WebGL, and this browser has none to give.'), true)
         return
       }
       if (gen !== this.#gen || !this.#mount) return
-      const made = LiftScene.create(three, this.#mount.stage)
+      const made = await LiftScene.create(pixi3d, this.#mount.stage)
+      // The view may have been left, or reopened, while the renderer was made.
+      if (gen !== this.#gen || !this.#mount) {
+        if (made.ok) made.scene.dispose()
+        return
+      }
       if (!made.ok) {
         this.#sceneFailed = true
         this.#notice(this.#t('lift.webgl', 'The lift view needs WebGL, and this browser has none to give.'), true)

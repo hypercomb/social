@@ -52,11 +52,11 @@
   },
   "dependencies": {
     "@hypercomb/core": "^0.1.0",
-    "nostr-tools": "^2.23.1",
-    "three": "^0.170.0"
+    "@pixi/3d": "0.1.0",
+    "nostr-tools": "^2.23.1"
   },
   "peerDependencies": {
-    "pixi.js": "^8.16.0"
+    "pixi.js": "^8.23.0"
   },
   "devDependencies": {
     "tsup": "^8.5.1",

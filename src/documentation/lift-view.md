@@ -95,14 +95,34 @@ Escape leaves and writes nothing.
 
 ## The guards
 
-- **three loads lazily.** The drone runs `await import('three')` on mount and
-  nowhere else, and `lift-scene.ts` takes the module as a constructor argument.
-  No other lane pays for it. The drone sleeps (`readonly renders = ['lift']`)
-  until the mode enters `lift`, and the queen never asks for it by key.
-- **WebGL is probed first.** `LiftScene.create` asks the canvas for a `webgl2`
-  context (or `webgl` on a three older than r163) before it makes a renderer.
-  A hive without one gets the notice "needs WebGL" and the way out, not a blank
-  page. No renderer is ever made at module scope or in a constructor.
+- **Pixi's 3D loads lazily.** The renderer is `@pixi/3d` (three.js is retired
+  here). The drone runs `await import('@pixi/3d')` on mount and nowhere else,
+  and `lift-scene.ts` takes the module as an argument. No other lane pays for
+  it. The drone sleeps (`readonly renders = ['lift']`) until the mode enters
+  `lift`, and the queen never asks for it by key.
+- **The scene has a Pixi application of its own.** `@pixi/3d` joins a renderer
+  when the renderer is MADE: it registers a backend loader that Pixi runs in
+  `autoDetectRenderer`. The hive's renderer exists long before the lift view
+  opens, so a lazily loaded `@pixi/3d` cannot draw on the hive's stage. Putting
+  3D on that stage means loading the package before `PixiHostWorker` makes its
+  application, which is a boot-lane cost and a separate decision.
+- **A Pixi that may not eval is bridged.** The web shell and the hosts run the
+  `pixi.js/unsafe-eval` build, whose polyfill keeps one function per uniform
+  parser, found by index. `@pixi/3d` 0.1.0 brings four parsers as code strings
+  only, and without their functions the first 3D draw throws
+  `functionMap[i] is not a function`. `pixi3d-no-eval.ts` supplies the four
+  functions; both vendor builds export the polyfill's tables for it
+  (`hypercomb-web/scripts/build-pixi-vendor.ts`,
+  `hypercomb-shim/scripts/build-vendor.mjs`). A parser the bridge does not know
+  makes the scene decline to draw, and `pixi3d-no-eval.spec.ts` fails first.
+- **No third-party request.** `@pixi/3d` names Google's CDN for the Draco
+  decoder. The vendor step in `build-module.ts` rewrites both URLs to
+  `/vendor/draco/` and counts them, as the Pixi vendor does for its
+  transcoders. Nothing loads a Draco model today.
+- **WebGL is probed first.** `LiftScene.create` asks a canvas for a `webgl2`
+  context before it makes the application: Pixi's 3D has no WebGL1 path. A hive
+  without one gets the notice "needs WebGL" and the way out, not a blank page.
+  No renderer is ever made at module scope or in a constructor.
 - **Render on demand.** A frame is drawn only when something changed or is
   animating, never while the tab is hidden. Flip and tilt motion honour
   `prefers-reduced-motion`.

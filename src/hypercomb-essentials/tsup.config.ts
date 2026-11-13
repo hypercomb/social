@@ -19,5 +19,5 @@ export default defineConfig({
   splitting: false,
   clean: true,
   outDir: 'dist-lib',
-  external: ['@hypercomb/core', 'nostr-tools', 'pixi.js', 'three'],
+  external: ['@hypercomb/core', 'nostr-tools', 'pixi.js', '@pixi/3d'],
 })

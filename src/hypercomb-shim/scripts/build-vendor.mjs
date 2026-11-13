@@ -45,13 +45,29 @@ const pixiFile = resolve(vendorOut, 'pixi.runtime.js')
 rmSync(vendorOut, { recursive: true, force: true })
 mkdirSync(vendorOut, { recursive: true })
 
+// The no-eval polyfill keeps one FUNCTION per uniform parser, found by the
+// parser's index, in two tables private to pixi. `@pixi/3d` brings parsers of
+// its own as code strings only, so the tables are exported here for essentials
+// to finish (hypercomb-essentials/src/presentation/tiles/pixi3d-no-eval.ts —
+// the two export names are that file's NO_EVAL_*_TABLE constants).
+const pixiPackage = [resolve(shim, 'node_modules', 'pixi.js'), resolve(shim, '..', 'node_modules', 'pixi.js')].find(existsSync)
+if (!pixiPackage) throw new Error('[shim-vendor] pixi.js is not installed')
+const inPixi = (rel) => resolve(pixiPackage, rel).split('\\').join('/')
+const pixiVendorEntry = [
+  "import 'pixi.js/unsafe-eval'",
+  "export * from 'pixi.js'",
+  `export { uniformParserFunctions as __noEvalUniformParserFunctions } from '${inPixi('lib/unsafe-eval/uniforms/uniformSyncFunctions.mjs')}'`,
+  `export { uboParserFunctions as __noEvalUboParserFunctions } from '${inPixi('lib/unsafe-eval/ubo/uboSyncFunctions.mjs')}'`,
+  '',
+].join('\n')
+
 await build({
   // `pixi.js/unsafe-eval` swaps the new-Function uniform-sync for a static
   // parser, so the renderer constructs under a CSP with no 'unsafe-eval' —
   // published hosts serve exactly that CSP, and without this import
   // PixiHostWorker dies at Application.init.
   stdin: {
-    contents: "import 'pixi.js/unsafe-eval'\nexport * from 'pixi.js'\n",
+    contents: pixiVendorEntry,
     resolveDir: shim,
     sourcefile: 'pixi-vendor-entry.js',
     loader: 'js',

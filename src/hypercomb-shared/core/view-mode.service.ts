@@ -76,8 +76,8 @@ const TRANSIENT_MODES = new Set<ViewMode>([
   // you swipe between (launcher-view.drone.ts) — so a reload never boots into
   // one with nothing mounted. Missed when it registered (153db8f0d).
   'launcher',
-  // The lift view takes the whole surface — the page lifted into a three.js
-  // deck (lift-view.drone.ts), with no hexagons under it.
+  // The lift view takes the whole surface — the page lifted into a 3D deck
+  // drawn by Pixi's own 3D (lift-view.drone.ts), with no hexagons under it.
   'lift',
   // Explore takes the whole surface — the place you stand as its tile list
   // beside what the servers hold for it (sharing/need-feeds.queen.ts), on the

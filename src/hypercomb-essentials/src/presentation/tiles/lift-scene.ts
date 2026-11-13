@@ -10,11 +10,15 @@
 // where on screen does this tile stand (`project`) — the second is what lets
 // the tile NAMES stay DOM text over the scene.
 //
-// The `three` module namespace is handed in, never imported: the drone loads
-// it lazily on mount (`await import('three')`), so no other lane ever pays
-// for it, and this module is readable without WebGL. Likewise the renderer is
-// only ever made in `LiftScene.create`, after a WebGL probe — never at module
-// scope, never in a constructor.
+// The renderer is Pixi's own 3D (`@pixi/3d`), on a Pixi application this view
+// owns. The `@pixi/3d` module namespace is handed in, never imported: the
+// drone loads it lazily on mount (`await import('@pixi/3d')`), so no other
+// lane ever pays for it. That is also why the scene has an application of its
+// own and does not sit on the hive's stage: `@pixi/3d` joins a renderer when
+// the renderer is MADE (it registers a backend loader Pixi runs in
+// `autoDetectRenderer`), and the hive's renderer exists long before this view
+// is opened. The application is only ever made in `LiftScene.create`, after a
+// WebGL probe — never at module scope, never in a constructor.
 //
 // The page reads as the 2D page first: every prism sits at its tile's true
 // grid centre at its true size (the same axial → pixel numbers show-cell
@@ -22,10 +26,13 @@
 // tilts so the stack behind it shows. Render on demand: a frame is drawn only
 // when something changed or is animating, and never while the tab is hidden.
 
-import type * as T from 'three'
+import * as PIXI from 'pixi.js'
+import { Application, ImageSource, Matrix, Texture } from 'pixi.js'
+import type * as P from '@pixi/3d'
 import { coverFit, hexCorners, hexUv, type DeckMark } from './lift-deck.js'
+import { bridgeNoEvalPixi } from './pixi3d-no-eval.js'
 
-type Three = typeof import('three')
+type Pixi3D = typeof import('@pixi/3d')
 
 /** One tile as the scene draws it. `x`/`y` are the hive's pixel centre
  *  (y down, as on the canvas). */
@@ -85,22 +92,22 @@ const TILT_MAX = (80 * Math.PI) / 180
 const FLIP_MS = 250
 const TILT_MS = 400
 const FOV = 40
+const HALF_FOV_TAN = Math.tan((FOV * Math.PI) / 360)
 
 type TileMesh = {
   readonly name: string
-  readonly group: T.Group
-  readonly body: T.Mesh
+  readonly group: P.Container3D
   /** The top and bottom caps, in the mark colour. */
-  readonly bodyMat: T.MeshStandardMaterial
+  readonly caps: P.Mesh3D
+  readonly capMat: P.Material3D
   /** The side walls: the mark colour lifted toward white. */
-  readonly wallMat: T.MeshStandardMaterial
-  readonly edge: T.LineSegments
-  readonly edgeMat: T.LineBasicMaterial
-  readonly face: T.Mesh
-  readonly faceMat: T.MeshBasicMaterial
-  readonly halo: T.Mesh
-  readonly haloMat: T.MeshBasicMaterial
-  texture: T.Texture | null
+  readonly walls: P.Mesh3D
+  readonly wallMat: P.Material3D
+  readonly edgeMat: P.FlatMaterial
+  readonly face: P.Mesh3D
+  readonly faceMat: P.FlatMaterial
+  readonly haloMat: P.FlatMaterial
+  texture: Texture | null
   pictureToken: number
   mark: DeckMark
   staged: boolean
@@ -108,10 +115,11 @@ type TileMesh = {
 }
 
 type LayerMesh = {
-  readonly group: T.Group
+  readonly group: P.Container3D
   readonly tiles: Map<string, TileMesh>
-  readonly ghostMat: T.LineBasicMaterial
+  readonly ghostMat: P.FlatMaterial
   opacity: number
+  z: number
 }
 
 type Tween = { from: number; to: number; start: number; duration: number }
@@ -122,23 +130,30 @@ const reducedMotion = (): boolean => {
   try { return matchMedia('(prefers-reduced-motion: reduce)').matches } catch { return false }
 }
 
+/** Assign only on change: every material setter uploads. */
+const setAlpha = (material: P.BaseMaterial3D, alpha: number): void => {
+  if (material.alpha !== alpha) material.alpha = alpha
+}
+
 export class LiftScene {
-  readonly #three: Three
+  readonly #lib: Pixi3D
   readonly #host: HTMLElement
+  readonly #app: Application
   readonly #canvas: HTMLCanvasElement
-  readonly #renderer: T.WebGLRenderer
-  readonly #scene: T.Scene
-  readonly #camera: T.PerspectiveCamera
-  readonly #raycaster: T.Raycaster
-  readonly #loader: T.TextureLoader
+  readonly #view: P.View3D
+  /** Everything the deck draws. `view.root` also holds the camera and the
+   *  lights, so it is never cleared — this is. */
+  readonly #content: P.Container3D
 
   #layers: LayerMesh[] = []
-  #geometries: T.BufferGeometry[] = []
+  #geometries: P.Geometry3D[] = []
+  /** The tile a struck node belongs to. */
+  readonly #owner = new Map<P.Container3D, ScenePick>()
   #radius = 32
   #flat = false
   #thickness = 6
 
-  #target: T.Vector3
+  #target = { x: 0, y: 0, z: 0 }
   #distance = 1000
   #fitDistance = 1000
   #tilt = 0
@@ -164,49 +179,74 @@ export class LiftScene {
   /** Called after every drawn frame — the drone places the DOM names here. */
   onFrame: (() => void) | null = null
 
-  /** Probe WebGL, then make the renderer. Nothing GPU-side exists before
+  /** Probe WebGL, then make the application. Nothing GPU-side exists before
    *  this is called, and a failed probe makes nothing at all. */
-  static create(three: Three, host: HTMLElement): SceneCreate {
-    const canvas = document.createElement('canvas')
-    const attributes = { alpha: true, antialias: true, premultipliedAlpha: true }
-    // three r163+ draws with WebGL2 only; older builds still accept WebGL1.
-    const revision = Number.parseInt(String((three as { REVISION?: string }).REVISION ?? '0'), 10)
-    let context: WebGLRenderingContext | WebGL2RenderingContext | null = null
-    try {
-      context = (canvas.getContext('webgl2', attributes) as WebGL2RenderingContext | null)
-        ?? (revision >= 163 ? null : canvas.getContext('webgl', attributes) as WebGLRenderingContext | null)
-    } catch { context = null }
-    if (!context) return { ok: false, reason: 'webgl' }
-    let renderer: T.WebGLRenderer
-    try {
-      renderer = new three.WebGLRenderer({ canvas, context: context as WebGLRenderingContext, alpha: true, antialias: true })
-    } catch {
+  static async create(lib: Pixi3D, host: HTMLElement): Promise<SceneCreate> {
+    // Pixi's 3D draws with WebGL2 (or WebGPU); there is no WebGL1 path.
+    let probe: WebGL2RenderingContext | null = null
+    try { probe = document.createElement('canvas').getContext('webgl2') } catch { probe = null }
+    if (!probe) return { ok: false, reason: 'webgl' }
+    // A Pixi that may not eval needs the 3D package's uniform parsers as
+    // functions before the first draw (pixi3d-no-eval.ts). One it does not
+    // know means a frame would throw: decline instead.
+    if (bridgeNoEvalPixi(PIXI) === 'unknown-parser') {
+      console.warn('[lift-scene] this Pixi cannot eval, and @pixi/3d brought a uniform parser the bridge does not know')
       return { ok: false, reason: 'renderer' }
     }
-    return { ok: true, scene: new LiftScene(three, host, canvas, renderer) }
+    try { probe.getExtension('WEBGL_lose_context')?.loseContext() } catch { /* not supported */ }
+
+    const app = new Application()
+    try {
+      await app.init({
+        preference: 'webgl',
+        width: Math.max(1, host.clientWidth),
+        height: Math.max(1, host.clientHeight),
+        resolution: Math.min(2, window.devicePixelRatio || 1),
+        autoDensity: true,
+        antialias: true,
+        backgroundAlpha: 0,
+        // Render on demand: this scene draws its own frames.
+        autoStart: false,
+        sharedTicker: false,
+      })
+    } catch (error) {
+      console.warn('[lift-scene] the renderer could not be made:', error)
+      try { app.destroy(true) } catch { /* never initialised */ }
+      return { ok: false, reason: 'renderer' }
+    }
+    try {
+      return { ok: true, scene: new LiftScene(lib, host, app) }
+    } catch (error) {
+      console.warn('[lift-scene] the 3D view could not be made:', error)
+      try { app.destroy(true, { children: true }) } catch { /* already gone */ }
+      return { ok: false, reason: 'renderer' }
+    }
   }
 
-  constructor(three: Three, host: HTMLElement, canvas: HTMLCanvasElement, renderer: T.WebGLRenderer) {
-    this.#three = three
+  constructor(lib: Pixi3D, host: HTMLElement, app: Application) {
+    this.#lib = lib
     this.#host = host
-    this.#canvas = canvas
-    this.#renderer = renderer
-    renderer.setClearColor(0x000000, 0)
-    renderer.setScissorTest(false)
-    canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;'
-    host.appendChild(canvas)
+    this.#app = app
+    this.#canvas = app.canvas
+    this.#canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;'
+    host.appendChild(this.#canvas)
 
-    this.#scene = new three.Scene()
-    this.#camera = new three.PerspectiveCamera(FOV, 1, 1, 10000)
-    this.#raycaster = new three.Raycaster()
-    this.#loader = new three.TextureLoader()
-    this.#target = new three.Vector3()
+    // A hemisphere fill is not divided by pi here, and a direct light is.
+    this.#view = new lib.View3D({
+      autoResize: true,
+      environment: { skyColor: 0xe6f6ff, groundColor: 0x3a2a4a, intensity: 0.8 / Math.PI },
+    })
+    app.stage.addChild(this.#view)
+    this.#view.camera.fov = FOV
+    this.#view.camera.near = 1
+    this.#view.camera.far = 10000
 
-    this.#scene.add(new three.AmbientLight(0xffffff, 0.9))
-    this.#scene.add(new three.HemisphereLight(0xe6f6ff, 0x3a2a4a, 0.8))
-    const sun = new three.DirectionalLight(0xffffff, 1.0)
-    sun.position.set(0.45, 0.8, 1.2)
-    this.#scene.add(sun)
+    this.#view.root.addChild(new lib.AmbientLight({ color: 0xffffff, intensity: 0.9 }))
+    const sun = new lib.DirectionalLight({ color: 0xffffff, intensity: 1.0, position: { x: 0.45, y: 0.8, z: 1.2 } })
+    sun.lookAt({ x: 0, y: 0, z: 0 })   // a light shines down its own -Z: aim it at the page
+    this.#view.root.addChild(sun)
+    this.#content = new lib.Container3D()
+    this.#view.root.addChild(this.#content)
 
     document.addEventListener('visibilitychange', this.#onVisibility)
     window.addEventListener('resize', this.#onWindowResize)
@@ -224,38 +264,41 @@ export class LiftScene {
    *  (`setPicture`) — they arrive asynchronously, the shape does not wait. */
   setDeck(deck: SceneDeck): void {
     this.#clearMeshes()
-    const three = this.#three
+    const lib = this.#lib
     this.#radius = deck.radius > 0 ? deck.radius : 32
     this.#flat = deck.flat
     const r = this.#radius
     this.#thickness = r * 0.18
 
-    const body = new three.CylinderGeometry(r, r, this.#thickness, 6, 1)
-    body.rotateX(Math.PI / 2)                 // prism axis along the camera's depth
-    if (this.#flat) body.rotateZ(Math.PI / 6) // a corner right, an edge on top
-    const face = this.#hexShape(r)
-    face.translate(0, 0, this.#thickness / 2 + r * 0.01)
-    const halo = this.#hexShape(r * 1.14)
-    halo.translate(0, 0, -this.#thickness / 2 - r * 0.02)
-    const edges = new three.EdgesGeometry(body)
-    this.#geometries = [body, face, halo, edges]
+    const shapes = {
+      caps: this.#capsGeometry(r),
+      walls: this.#wallsGeometry(r),
+      face: this.#hexGeometry(r, true),
+      halo: this.#hexGeometry(r * 1.14, false),
+      edges: this.#edgesGeometry(r),
+    }
+    this.#geometries = Object.values(shapes)
 
     this.#layers = deck.layers.map((layer, layerIndex) => {
-      const group = new three.Group()
+      const group = new lib.Container3D()
       const tiles = new Map<string, TileMesh>()
       for (const tile of layer.tiles) {
-        const tileMesh = this.#tile(tile, layerIndex, body, face, halo, edges)
-        group.add(tileMesh.group)
+        const tileMesh = this.#tile(tile, layerIndex, shapes)
+        group.addChild(tileMesh.group)
         tiles.set(tile.name, tileMesh)
       }
-      const ghostMat = new three.LineBasicMaterial({ color: GHOST_COLOUR, transparent: true, opacity: 0.28, depthWrite: false })
+      const ghostMat = new lib.FlatMaterial({ baseColor: GHOST_COLOUR, alphaMode: 'blend', alpha: 0.28 })
       for (const ghost of layer.ghosts) {
-        const line = new three.LineSegments(edges, ghostMat)
-        line.position.set(ghost.x, -ghost.y, 0)
-        group.add(line)
+        const line = new lib.Mesh3D({
+          geometry: shapes.edges, material: ghostMat,
+          position: { x: ghost.x, y: -ghost.y, z: 0 },
+          castShadow: false, receiveShadow: false,
+        })
+        line.eventMode = 'none'
+        group.addChild(line)
       }
-      this.#scene.add(group)
-      return { group, tiles, ghostMat, opacity: 1 }
+      this.#content.addChild(group)
+      return { group, tiles, ghostMat, opacity: 1, z: 0 }
     })
     this.#flip = Math.min(this.#flip, Math.max(0, this.#layers.length - 1))
     this.#flipTarget = Math.min(this.#flipTarget, Math.max(0, this.#layers.length - 1))
@@ -270,37 +313,36 @@ export class LiftScene {
   /** The tile's picture (an object URL the caller owns), or null to clear it.
    *  The hex capture lands across the top face exactly as the 2D grid draws
    *  it — its framing is already baked into its pixels. */
-  setPicture(layerIndex: number, name: string, url: string | null): Promise<boolean> {
+  async setPicture(layerIndex: number, name: string, url: string | null): Promise<boolean> {
     const tile = this.#layers[layerIndex]?.tiles.get(name)
-    if (!tile) return Promise.resolve(false)
+    if (!tile) return false
     const token = ++tile.pictureToken
     if (!url) {
       this.#dropTexture(tile)
       this.#request()
-      return Promise.resolve(true)
+      return true
     }
-    return new Promise<boolean>(resolve => this.#loader.load(url, texture => {
-      if (this.#disposed || tile.pictureToken !== token || this.#layers[layerIndex]?.tiles.get(name) !== tile) {
-        texture.dispose()
-        resolve(true)   // superseded, not failed
-        return
-      }
-      const three = this.#three as Three & { SRGBColorSpace?: string }
-      if (three.SRGBColorSpace && 'colorSpace' in texture) {
-        (texture as { colorSpace: string }).colorSpace = three.SRGBColorSpace
-      }
-      const image = texture.image as { width?: number; height?: number } | undefined
-      const fit = coverFit((image?.width ?? 0) / (image?.height || 1), this.#radius, this.#flat)
-      texture.repeat.set(fit.repeat.u, fit.repeat.v)
-      texture.offset.set(fit.offset.u, fit.offset.v)
-      this.#dropTexture(tile)
-      tile.texture = texture
-      tile.faceMat.map = texture
-      tile.faceMat.needsUpdate = true
-      tile.face.visible = true
-      this.#request()
-      resolve(true)
-    }, undefined, () => resolve(false)))   // undecodable: the caller tries the next candidate
+    let bitmap: ImageBitmap
+    try {
+      bitmap = await createImageBitmap(await (await fetch(url)).blob())
+    } catch {
+      return false   // undecodable: the caller tries the next candidate
+    }
+    if (this.#disposed || tile.pictureToken !== token || this.#layers[layerIndex]?.tiles.get(name) !== tile) {
+      bitmap.close()
+      return true   // superseded, not failed
+    }
+    const texture = new Texture({ source: new ImageSource({ resource: bitmap }) })
+    // Images upload top row first, and the hex box's v runs up: the transform
+    // carries the cover-fit and the flip in one matrix.
+    const fit = coverFit(bitmap.width / (bitmap.height || 1), this.#radius, this.#flat)
+    this.#dropTexture(tile)
+    tile.texture = texture
+    tile.faceMat.textures['baseColor'] = texture
+    tile.faceMat.uvTransform = new Matrix(fit.repeat.u, 0, 0, -fit.repeat.v, fit.offset.u, 1 - fit.offset.v)
+    tile.face.visible = true
+    this.#request()
+    return true
   }
 
   /** Recolour one tile — a staged part wears the accent. */
@@ -354,33 +396,36 @@ export class LiftScene {
 
   /** Centre on the front layer and fit it to the viewport. */
   fit(): void {
-    const three = this.#three
-    const box = new three.Box2()
     const front = this.#layers[0]?.tiles.size
       ? [...this.#layers[0]!.tiles.values()]
       : this.#layers.flatMap(l => [...l.tiles.values()])
-    for (const tile of front) box.expandByPoint(new three.Vector2(tile.group.position.x, tile.group.position.y))
     const r = this.#radius
-    if (box.isEmpty()) box.set(new three.Vector2(-r, -r), new three.Vector2(r, r))
-    const width = box.max.x - box.min.x + r * 2.4
-    const height = box.max.y - box.min.y + r * 2.4
-    this.#target.set((box.min.x + box.max.x) / 2, (box.min.y + box.max.y) / 2, 0)
-    const half = Math.tan((FOV * Math.PI) / 360)
-    const aspect = this.#camera.aspect || 1
-    this.#fitDistance = Math.max(height / 2 / half, width / 2 / (half * aspect), r * 4)
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    for (const tile of front) {
+      const { x, y } = tile.group.position
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x)
+      minY = Math.min(minY, y); maxY = Math.max(maxY, y)
+    }
+    if (!front.length) { minX = -r; minY = -r; maxX = r; maxY = r }
+    const width = maxX - minX + r * 2.4
+    const height = maxY - minY + r * 2.4
+    this.#target = { x: (minX + maxX) / 2, y: (minY + maxY) / 2, z: 0 }
+    const aspect = this.#width / this.#height || 1
+    this.#fitDistance = Math.max(height / 2 / HALF_FOV_TAN, width / 2 / (HALF_FOV_TAN * aspect), r * 4)
     this.#distance = this.#fitDistance
     this.#request()
   }
 
   /** Move the page under the pointer by a screen delta (px). */
   pan(dx: number, dy: number): void {
-    const height = this.#height
-    const perPx = (2 * this.#distance * Math.tan((FOV * Math.PI) / 360)) / height
-    const three = this.#three
-    this.#camera.updateMatrixWorld()
-    const right = new three.Vector3().setFromMatrixColumn(this.#camera.matrixWorld, 0)
-    const up = new three.Vector3().setFromMatrixColumn(this.#camera.matrixWorld, 1)
-    this.#target.addScaledVector(right, -dx * perPx).addScaledVector(up, dy * perPx)
+    const perPx = (2 * this.#distance * HALF_FOV_TAN) / this.#height
+    const { right, up } = this.#basis()
+    const t = this.#target
+    this.#target = {
+      x: t.x - right.x * dx * perPx + up.x * dy * perPx,
+      y: t.y - right.y * dx * perPx + up.y * dy * perPx,
+      z: t.z - right.z * dx * perPx + up.z * dy * perPx,
+    }
     this.#userMoved = true
     this.#request()
   }
@@ -391,7 +436,11 @@ export class LiftScene {
     const next = Math.min(this.#fitDistance * 6, Math.max(this.#radius * 2.5, this.#distance * factor))
     const applied = next / this.#distance
     const point = this.#planePoint(clientX, clientY)
-    if (point) this.#target.lerp(point, 1 - applied)
+    if (point) {
+      const k = 1 - applied
+      const t = this.#target
+      this.#target = { x: t.x + (point.x - t.x) * k, y: t.y + (point.y - t.y) * k, z: t.z + (point.z - t.z) * k }
+    }
     this.#distance = next
     this.#userMoved = true
     this.#request()
@@ -417,19 +466,15 @@ export class LiftScene {
   /** The tile under a client point, frontmost first; null over empty space.
    *  A layer dealt off (or faded nearly out) is not pickable. */
   pick(clientX: number, clientY: number): ScenePick | null {
-    const ndc = this.#ndc(clientX, clientY)
-    if (!ndc) return null
-    this.#raycaster.setFromCamera(ndc, this.#camera)
-    const bodies: T.Object3D[] = []
-    this.#layers.forEach(layer => {
-      if (!layer.group.visible || layer.opacity < 0.08) return
-      for (const tile of layer.tiles.values()) bodies.push(tile.body)
-    })
-    const hit = this.#raycaster.intersectObjects(bodies, false)[0]
-    const data = hit?.object.userData as { layerIndex?: number; name?: string } | undefined
-    return data && typeof data.layerIndex === 'number' && typeof data.name === 'string'
-      ? { layerIndex: data.layerIndex, name: data.name }
-      : null
+    const point = this.#local(clientX, clientY)
+    if (!point) return null
+    let node: P.Container3D | null = this.#view.raycast(point)?.target ?? null
+    while (node) {
+      const pick = this.#owner.get(node)
+      if (pick) return pick
+      node = node.parent
+    }
+    return null
   }
 
   /** Where a tile's top face stands on screen, relative to the host. */
@@ -437,23 +482,21 @@ export class LiftScene {
     const layer = this.#layers[layerIndex]
     const tile = layer?.tiles.get(name)
     if (!layer || !tile) return null
-    const point = new this.#three.Vector3(0, 0, this.#thickness / 2)
-    tile.group.localToWorld(point)
-    point.project(this.#camera)
+    // No node in the deck is turned, so a tile's world place is a plain sum.
+    const { x, y, z } = tile.group.position
+    const at = this.#view.worldToScreen({ x, y, z: layer.z + z + this.#thickness / 2 })
+    if (!at) return { x: 0, y: 0, visible: false }   // behind the camera
     const width = this.#width
     const height = this.#height
-    const x = (point.x + 1) / 2 * width
-    const y = (1 - point.y) / 2 * height
     const visible = layer.group.visible && layer.opacity > 0.08
-      && point.z > -1 && point.z < 1 && x >= -40 && y >= -20 && x <= width + 40 && y <= height + 20
-    return { x, y, visible }
+      && at.x >= -40 && at.y >= -20 && at.x <= width + 40 && at.y <= height + 20
+    return { x: at.x, y: at.y, visible }
   }
 
   /** On-screen size of one circumradius at the front plane, px — the names
    *  scale with the page the way the 2D labels do. */
   radiusOnScreen(): number {
-    const height = this.#height
-    return (this.#radius * height) / (2 * this.#distance * Math.tan((FOV * Math.PI) / 360))
+    return (this.#radius * this.#height) / (2 * this.#distance * HALF_FOV_TAN)
   }
 
   // ── lifecycle ────────────────────────────────────────────────────────
@@ -470,11 +513,8 @@ export class LiftScene {
     this.#width = width
     this.#height = height
     this.#pixelRatio = ratio
-    this.#renderer.setPixelRatio(ratio)
-    this.#renderer.setSize(width, height, false)
-    this.#renderer.setViewport(0, 0, width, height)
-    this.#camera.aspect = width / height
-    this.#camera.updateProjectionMatrix()
+    // The view follows the renderer (`autoResize`), and its camera the view.
+    this.#app.renderer.resize(width, height, ratio)
     if (!this.#userMoved && this.#layers.length) this.fit()
     this.#canvas.dataset['renderSize'] = `${width}x${height}@${ratio}`
     this.#draw(performance.now())
@@ -482,8 +522,8 @@ export class LiftScene {
 
   /** The renderer's own idea of its size (CSS px) and pixel ratio. */
   get renderSize(): { width: number; height: number; pixelRatio: number } {
-    const size = this.#renderer.getSize(new this.#three.Vector2())
-    return { width: size.x, height: size.y, pixelRatio: this.#renderer.getPixelRatio() }
+    const { width, height } = this.#app.renderer.screen
+    return { width, height, pixelRatio: this.#app.renderer.resolution }
   }
 
   dispose(): void {
@@ -496,60 +536,161 @@ export class LiftScene {
     this.#observer?.disconnect()
     this.#clearMeshes()
     this.onFrame = null
-    try { this.#renderer.dispose() } catch { /* already gone */ }
-    try { this.#renderer.forceContextLoss() } catch { /* not supported */ }
+    // The canvas and the context go with the application. Pixi's global
+    // pools are the hive's too, so they are left alone.
+    try { this.#app.destroy(true, { children: true }) } catch { /* already gone */ }
     this.#canvas.remove()
   }
 
   // ── internals ────────────────────────────────────────────────────────
 
-  /** A hexagon face whose UVs map the hex box onto the unit square — the box
-   *  the hive's hex capture is taken at. */
-  #hexShape(radius: number): T.ShapeGeometry {
-    const three = this.#three
+  /** A flat hexagon in the XY plane facing +Z. With `mapped`, its UVs lay the
+   *  hex box onto the unit square — the box the hive's hex capture is taken
+   *  at. */
+  #hexGeometry(radius: number, mapped: boolean): P.Geometry3D {
     const corners = hexCorners(radius, this.#flat)
-    const shape = new three.Shape()
-    corners.forEach((c, i) => (i === 0 ? shape.moveTo(c.x, c.y) : shape.lineTo(c.x, c.y)))
-    shape.closePath()
-    const geometry = new three.ShapeGeometry(shape)
-    const position = geometry.getAttribute('position')
-    const uv: number[] = []
-    for (let i = 0; i < position.count; i++) {
-      const { u, v } = hexUv(position.getX(i), position.getY(i), radius, this.#flat)
-      uv.push(u, v)
+    const positions = [0, 0, 0]
+    const normals = [0, 0, 1]
+    const uvs = mapped ? [0.5, 0.5] : null
+    const indices: number[] = []
+    corners.forEach((c, k) => {
+      positions.push(c.x, c.y, 0)
+      normals.push(0, 0, 1)
+      if (uvs) { const { u, v } = hexUv(c.x, c.y, radius, this.#flat); uvs.push(u, v) }
+      indices.push(0, 1 + k, 1 + ((k + 1) % 6))
+    })
+    return new this.#lib.Geometry3D({
+      positions: new Float32Array(positions),
+      normals: new Float32Array(normals),
+      ...(uvs ? { uvs: new Float32Array(uvs) } : {}),
+      indices: new Uint16Array(indices),
+    })
+  }
+
+  /** The prism's two caps: the far one first, so it is drawn under the near
+   *  one. */
+  #capsGeometry(radius: number): P.Geometry3D {
+    const corners = hexCorners(radius, this.#flat)
+    const half = this.#thickness / 2
+    const positions: number[] = []
+    const normals: number[] = []
+    const indices: number[] = []
+    for (const side of [-1, 1]) {
+      const base = positions.length / 3
+      positions.push(0, 0, side * half)
+      normals.push(0, 0, side)
+      for (const c of corners) { positions.push(c.x, c.y, side * half); normals.push(0, 0, side) }
+      for (let k = 0; k < 6; k++) {
+        const a = base + 1 + k
+        const b = base + 1 + ((k + 1) % 6)
+        // Counter-clockwise seen from outside: the near cap as wound, the far one reversed.
+        if (side > 0) indices.push(base, a, b)
+        else indices.push(base, b, a)
+      }
     }
-    geometry.setAttribute('uv', new three.Float32BufferAttribute(uv, 2))
-    return geometry
+    return new this.#lib.Geometry3D({
+      positions: new Float32Array(positions),
+      normals: new Float32Array(normals),
+      indices: new Uint16Array(indices),
+    })
+  }
+
+  /** The prism's six side walls, each with its own outward normal. */
+  #wallsGeometry(radius: number): P.Geometry3D {
+    const corners = hexCorners(radius, this.#flat)
+    const half = this.#thickness / 2
+    const positions: number[] = []
+    const normals: number[] = []
+    const indices: number[] = []
+    for (let k = 0; k < 6; k++) {
+      const a = corners[k]!
+      const b = corners[(k + 1) % 6]!
+      const length = Math.hypot(b.x - a.x, b.y - a.y) || 1
+      const nx = (b.y - a.y) / length
+      const ny = -(b.x - a.x) / length
+      const base = positions.length / 3
+      positions.push(a.x, a.y, -half, b.x, b.y, -half, b.x, b.y, half, a.x, a.y, half)
+      for (let i = 0; i < 4; i++) normals.push(nx, ny, 0)
+      indices.push(base, base + 1, base + 2, base, base + 2, base + 3)
+    }
+    return new this.#lib.Geometry3D({
+      positions: new Float32Array(positions),
+      normals: new Float32Array(normals),
+      indices: new Uint16Array(indices),
+    })
+  }
+
+  /** The prism's rim as line segments: both caps' outlines and the six
+   *  uprights between them. */
+  #edgesGeometry(radius: number): P.Geometry3D {
+    const corners = hexCorners(radius, this.#flat)
+    const half = this.#thickness / 2
+    const positions: number[] = []
+    for (let k = 0; k < 6; k++) {
+      const a = corners[k]!
+      const b = corners[(k + 1) % 6]!
+      positions.push(a.x, a.y, half, b.x, b.y, half)
+      positions.push(a.x, a.y, -half, b.x, b.y, -half)
+      positions.push(a.x, a.y, -half, a.x, a.y, half)
+    }
+    return new this.#lib.Geometry3D({ positions: new Float32Array(positions), topology: 'line-list' })
   }
 
   #tile(
     tile: SceneTile, layerIndex: number,
-    body: T.BufferGeometry, face: T.BufferGeometry, halo: T.BufferGeometry, edges: T.BufferGeometry,
+    shapes: { caps: P.Geometry3D; walls: P.Geometry3D; face: P.Geometry3D; halo: P.Geometry3D; edges: P.Geometry3D },
   ): TileMesh {
-    const three = this.#three
-    const group = new three.Group()
-    group.position.set(tile.x, -tile.y, 0)
-    const lit = { roughness: 0.45, metalness: 0.05, transparent: true, opacity: FRONT_OPACITY }
-    const bodyMat = new three.MeshStandardMaterial({ ...lit, emissiveIntensity: FRONT_EMISSIVE })
-    const wallMat = new three.MeshStandardMaterial({ ...lit, emissiveIntensity: FRONT_EMISSIVE })
-    // CylinderGeometry groups: 0 = the side walls, 1 = top cap, 2 = bottom cap.
-    const bodyMesh = new three.Mesh(body, [wallMat, bodyMat, bodyMat])
-    bodyMesh.userData = { layerIndex, name: tile.name }
-    const edgeMat = new three.LineBasicMaterial({ transparent: true, opacity: EDGE_OPACITY, depthWrite: false })
-    const edgeLine = new three.LineSegments(edges, edgeMat)
-    // The picture is a photo, not a tinted surface: unlit, not tone-mapped,
-    // full strength. The mark colour lives only in the walls, rim and glow.
-    const faceMat = new three.MeshBasicMaterial({ transparent: true, opacity: 1, side: three.DoubleSide, toneMapped: false })
-    const faceMesh = new three.Mesh(face, faceMat)
-    faceMesh.visible = false
-    const haloMat = new three.MeshBasicMaterial({
-      transparent: true, opacity: 0.28, blending: three.AdditiveBlending, depthWrite: false, toneMapped: false,
+    const lib = this.#lib
+    const r = this.#radius
+    const half = this.#thickness / 2
+    const group = new lib.Container3D({ position: { x: tile.x, y: -tile.y, z: 0 } })
+    // The whole tile answers a pick; its parts are tested and hand the hit up.
+    group.eventMode = 'static'
+    this.#owner.set(group, { layerIndex, name: tile.name })
+    const unshadowed = { castShadow: false, receiveShadow: false }
+
+    const lit = (): P.Material3D => {
+      const material = new lib.Material3D({
+        roughness: 0.45, metallic: 0.05, alphaMode: 'blend', alpha: FRONT_OPACITY,
+        emissive: { color: 0xffffff, strength: FRONT_EMISSIVE },
+      })
+      // A see-through prism still hides what is behind it in its own layer.
+      material.state.depthMask = true
+      return material
+    }
+    const capMat = lit()
+    const wallMat = lit()
+    const walls = new lib.Mesh3D({ geometry: shapes.walls, material: wallMat, ...unshadowed })
+    const caps = new lib.Mesh3D({ geometry: shapes.caps, material: capMat, ...unshadowed })
+    walls.hitVolume = 'geometry'
+    caps.hitVolume = 'geometry'
+
+    const edgeMat = new lib.FlatMaterial({ alphaMode: 'blend', alpha: EDGE_OPACITY })
+    const edge = new lib.Mesh3D({ geometry: shapes.edges, material: edgeMat, ...unshadowed })
+    edge.eventMode = 'none'
+
+    // The picture is a photo, not a tinted surface: unlit, full strength. The
+    // mark colour lives only in the walls, rim and glow.
+    const faceMat = new lib.FlatMaterial({ alphaMode: 'blend', alpha: 1, doubleSided: true })
+    const face = new lib.Mesh3D({
+      geometry: shapes.face, material: faceMat, visible: false,
+      position: { x: 0, y: 0, z: half + r * 0.01 }, ...unshadowed,
     })
-    const haloMesh = new three.Mesh(halo, haloMat)
-    group.add(haloMesh, bodyMesh, edgeLine, faceMesh)
+    face.hitVolume = 'geometry'
+
+    const haloMat = new lib.FlatMaterial({ alphaMode: 'blend', alpha: 0.28 })
+    haloMat.state.blendMode = 'add'
+    const halo = new lib.Mesh3D({
+      geometry: shapes.halo, material: haloMat,
+      position: { x: 0, y: 0, z: -half - r * 0.02 }, ...unshadowed,
+    })
+    halo.eventMode = 'none'
+
+    // Blended meshes draw far to near: the glow, the prism and its rim, then
+    // the picture on top.
+    group.addChild(halo, walls, caps, edge, face)
     const made: TileMesh = {
-      name: tile.name, group, body: bodyMesh, bodyMat, wallMat, edge: edgeLine, edgeMat,
-      face: faceMesh, faceMat, halo: haloMesh, haloMat,
+      name: tile.name, group, caps, capMat, walls, wallMat, edgeMat, face, faceMat, haloMat,
       texture: null, pictureToken: 0, mark: tile.mark, staged: tile.staged === true, hovered: false,
     }
     this.#paintTile(made)
@@ -559,41 +700,55 @@ export class LiftScene {
   /** Colour from the mark (or the staged accent). Glow strength belongs to
    *  the layer and is applied per frame in #applyDeck. */
   #paintTile(tile: TileMesh): void {
-    const three = this.#three
     const colour = tile.staged ? STAGED_COLOUR : MARK_COLOUR[tile.mark]
-    tile.bodyMat.color.setHex(colour)
-    tile.bodyMat.emissive.setHex(colour)
-    tile.wallMat.color.setHex(colour).lerp(new three.Color(0xffffff), WALL_LIGHTEN)
-    tile.wallMat.emissive.setHex(colour)
-    tile.edgeMat.color.setHex(colour)
-    tile.haloMat.color.setHex(colour)
+    tile.capMat.baseColor = colour
+    if (tile.capMat.emissive) tile.capMat.emissive.color = colour
+    tile.wallMat.baseColor = this.#towardWhite(colour, WALL_LIGHTEN)
+    if (tile.wallMat.emissive) tile.wallMat.emissive.color = colour
+    tile.edgeMat.baseColor = colour
+    tile.haloMat.baseColor = colour
     tile.group.position.z = tile.hovered ? this.#thickness * 0.8 : 0
   }
 
+  /** Mix a colour toward white in linear light, the way the lit surface
+   *  itself is shaded. */
+  #towardWhite(colour: number, amount: number): number {
+    const { srgbToLinear, linearToSrgb } = this.#lib
+    const channel = (shift: number): number => {
+      const linear = srgbToLinear(((colour >> shift) & 0xff) / 255)
+      return Math.round(Math.min(1, Math.max(0, linearToSrgb(linear + (1 - linear) * amount))) * 255)
+    }
+    return (channel(16) << 16) | (channel(8) << 8) | channel(0)
+  }
+
   #dropTexture(tile: TileMesh): void {
-    if (tile.texture) tile.texture.dispose()
-    tile.texture = null
-    tile.faceMat.map = null
-    tile.faceMat.needsUpdate = true
     tile.face.visible = false
+    if (!tile.texture) return
+    tile.faceMat.textures['baseColor'] = Texture.WHITE
+    const bitmap = tile.texture.source.resource as ImageBitmap | undefined
+    tile.texture.destroy(true)
+    try { bitmap?.close?.() } catch { /* already closed */ }
+    tile.texture = null
   }
 
   #clearMeshes(): void {
     for (const layer of this.#layers) {
+      for (const tile of layer.tiles.values()) this.#dropTexture(tile)
+      // Nodes only: the shapes are shared and the materials are destroyed below.
+      layer.group.destroy({ children: true })
       for (const tile of layer.tiles.values()) {
-        tile.texture?.dispose()
-        tile.bodyMat.dispose()
-        tile.wallMat.dispose()
-        tile.edgeMat.dispose()
-        tile.faceMat.dispose()
-        tile.haloMat.dispose()
+        tile.capMat.destroy()
+        tile.wallMat.destroy()
+        tile.edgeMat.destroy()
+        tile.faceMat.destroy()
+        tile.haloMat.destroy()
       }
-      layer.ghostMat.dispose()
-      this.#scene.remove(layer.group)
+      layer.ghostMat.destroy()
     }
-    for (const geometry of this.#geometries) geometry.dispose()
+    for (const geometry of this.#geometries) geometry.destroy(true)
     this.#geometries = []
     this.#layers = []
+    this.#owner.clear()
   }
 
   /** Depth and opacity per layer from the (animated) flip position. A layer
@@ -623,46 +778,66 @@ export class LiftScene {
         glow = FRONT_EMISSIVE
       }
       layer.opacity = opacity
+      layer.z = z
       layer.group.position.z = z
       layer.group.visible = opacity > 0.01
+      // A layer dealt off, or faded nearly out, is skipped by a pick with
+      // everything under it.
+      layer.group.eventMode = opacity < 0.08 ? 'none' : 'passive'
       // The picture stays full strength at the front and thins with its
       // prism behind it. It is never tinted.
       const faceOpacity = depth >= 0 ? Math.min(1, opacity / FRONT_OPACITY) : presence
       const haloOpacity = (depth >= 0 && depth < 1 ? 0.28 - 0.12 * depth : 0.16) * presence
       for (const tile of layer.tiles.values()) {
         const tileGlow = glow + (tile.hovered ? 0.3 : 0) + (tile.staged ? 0.1 : 0)
-        tile.bodyMat.opacity = opacity
-        tile.wallMat.opacity = opacity
-        tile.bodyMat.emissiveIntensity = tileGlow
-        tile.wallMat.emissiveIntensity = tileGlow
-        tile.edgeMat.opacity = EDGE_OPACITY * presence
-        tile.faceMat.opacity = faceOpacity
-        tile.haloMat.opacity = haloOpacity
-        // Back to front: deeper layers draw first, and inside a tile the
-        // halo, then the prism and its rim, then its picture.
-        tile.halo.renderOrder = -index * 4
-        tile.body.renderOrder = -index * 4 + 1
-        tile.edge.renderOrder = -index * 4 + 2
-        tile.face.renderOrder = -index * 4 + 3
+        setAlpha(tile.capMat, opacity)
+        setAlpha(tile.wallMat, opacity)
+        if (tile.capMat.emissive && tile.capMat.emissive.strength !== tileGlow) tile.capMat.emissive.strength = tileGlow
+        if (tile.wallMat.emissive && tile.wallMat.emissive.strength !== tileGlow) tile.wallMat.emissive.strength = tileGlow
+        setAlpha(tile.edgeMat, EDGE_OPACITY * presence)
+        setAlpha(tile.faceMat, faceOpacity)
+        setAlpha(tile.haloMat, haloOpacity)
       }
-      layer.ghostMat.opacity = 0.32 * Math.max(0.35, presence)
+      setAlpha(layer.ghostMat, 0.32 * Math.max(0.35, presence))
     })
   }
 
-  #updateCamera(): void {
+  /** Where the camera stands, relative to what it looks at. */
+  #offset(): { x: number; y: number; z: number } {
     const d = this.#distance
-    const offset = new this.#three.Vector3(
-      d * Math.sin(this.#tilt) * Math.sin(this.#azimuth),
-      -d * Math.sin(this.#tilt) * Math.cos(this.#azimuth),
-      d * Math.cos(this.#tilt),
-    )
-    this.#camera.position.copy(this.#target).add(offset)
-    this.#camera.up.set(0, 1, 0)
-    this.#camera.lookAt(this.#target)
+    return {
+      x: d * Math.sin(this.#tilt) * Math.sin(this.#azimuth),
+      y: -d * Math.sin(this.#tilt) * Math.cos(this.#azimuth),
+      z: d * Math.cos(this.#tilt),
+    }
+  }
+
+  /** The camera's right and up, in the world: +Y is up, and the tilt stops
+   *  short of looking along it. */
+  #basis(): { right: { x: number; y: number; z: number }; up: { x: number; y: number; z: number } } {
+    const o = this.#offset()
+    const d = Math.hypot(o.x, o.y, o.z) || 1
+    const back = { x: o.x / d, y: o.y / d, z: o.z / d }
+    // right = normalise(cross(+Y, back)); up = cross(back, right)
+    const rl = Math.hypot(back.z, back.x) || 1
+    const right = { x: back.z / rl, y: 0, z: -back.x / rl }
+    const up = {
+      x: back.y * right.z - back.z * right.y,
+      y: back.z * right.x - back.x * right.z,
+      z: back.x * right.y - back.y * right.x,
+    }
+    return { right, up }
+  }
+
+  #updateCamera(): void {
+    const camera = this.#view.camera
+    const o = this.#offset()
+    const t = this.#target
+    camera.position.set(t.x + o.x, t.y + o.y, t.z + o.z)
+    camera.lookAt(t, { x: 0, y: 1, z: 0 })
     const depth = this.#radius * LAYER_GAP * (this.#layers.length + 2)
-    this.#camera.near = Math.max(0.5, d * 0.02)
-    this.#camera.far = d * 4 + depth * 2
-    this.#camera.updateProjectionMatrix()
+    camera.near = Math.max(0.5, this.#distance * 0.02)
+    camera.far = this.#distance * 4 + depth * 2
   }
 
   /** Advance the tweens; true while anything is still moving. */
@@ -705,7 +880,7 @@ export class LiftScene {
     const moving = this.#step(now)
     this.#applyDeck()
     this.#updateCamera()
-    this.#renderer.render(this.#scene, this.#camera)
+    this.#app.render()
     try { this.onFrame?.() } catch (error) { console.error('[lift-scene] frame listener threw:', error) }
     if (moving) this.#request()
   }
@@ -716,24 +891,24 @@ export class LiftScene {
     if (!document.hidden) this.#request()
   }
 
-  #ndc(clientX: number, clientY: number): T.Vector2 | null {
+  /** A client point in the canvas's own CSS pixels — the space the view's
+   *  picking and projection speak. */
+  #local(clientX: number, clientY: number): { x: number; y: number } | null {
     const rect = this.#canvas.getBoundingClientRect()
     if (rect.width <= 0 || rect.height <= 0) return null
-    return new this.#three.Vector2(
-      ((clientX - rect.left) / rect.width) * 2 - 1,
-      -((clientY - rect.top) / rect.height) * 2 + 1,
-    )
+    return {
+      x: ((clientX - rect.left) / rect.width) * this.#width,
+      y: ((clientY - rect.top) / rect.height) * this.#height,
+    }
   }
 
   /** The point under the pointer on the front plane (z = 0). */
-  #planePoint(clientX: number, clientY: number): T.Vector3 | null {
-    const ndc = this.#ndc(clientX, clientY)
-    if (!ndc) return null
+  #planePoint(clientX: number, clientY: number): { x: number; y: number; z: number } | null {
+    const point = this.#local(clientX, clientY)
+    if (!point) return null
     this.#updateCamera()
-    this.#camera.updateMatrixWorld()
-    this.#raycaster.setFromCamera(ndc, this.#camera)
-    const plane = new this.#three.Plane(new this.#three.Vector3(0, 0, 1), 0)
-    const out = new this.#three.Vector3()
-    return this.#raycaster.ray.intersectPlane(plane, out)
+    const lib = this.#lib
+    const hit = this.#view.screenToWorld(point, new lib.Plane(new lib.Vector3(0, 0, 1), 0))
+    return hit ? { x: hit.x, y: hit.y, z: hit.z } : null
   }
 }

@@ -69,9 +69,20 @@ const PACKAGE_SPECIFIER = '@hypercomb/essentials'
 const PLATFORM_EXTERNALS = ['@hypercomb/core', 'pixi.js']
 
 /** Packages that are ALWAYS a shared lazy vendor atom, even with one importer:
- *  too big to inline into a bee (three is ~690 KB minified), and a lazy
- *  `import('three')` must resolve through the import map in both shells. */
-const ALWAYS_VENDOR = new Set(['three'])
+ *  too big to inline into a bee (Pixi's 3D is ~500 KB minified), and a lazy
+ *  `import('@pixi/3d')` must resolve through the import map in both shells. */
+const ALWAYS_VENDOR = new Set(['@pixi/3d'])
+
+/** `@pixi/3d` names Google's CDN for the Draco decoder and would fetch it the
+ *  first time a Draco-compressed model is loaded — a third-party request from
+ *  inside our own bundle (documentation/no-third-party-requests.md). Nothing
+ *  loads such a model today, so this is latent; rewriting the URLs local means
+ *  that if one ever IS loaded it fails visibly here instead of quietly
+ *  reaching out. Counted, so a package change fails the build rather than
+ *  silently restoring the CDN. */
+const DRACO_CDN = 'https://www.gstatic.com/draco/versioned/decoders/1.5.7/'
+const DRACO_LOCAL = '/vendor/draco/'
+const DRACO_CDN_URLS = 2
 
 /** VENDOR ATOMS (atomic-modules-plan.md, "find the overlap before creating
  *  redundancy"). An npm specifier that two or more source files import is built
@@ -1279,11 +1290,18 @@ const main = async (): Promise<void> => {
       target: TARGET,
       sourcemap: false,
       external: UNIT_EXTERNALS.filter(external => external !== pkg),
-      // three is ~1.3 MB unminified and its exports map hides the prebuilt min file, so minify here.
-      minify: pkg === 'three',
+      // Pixi's 3D is ~1.3 MB unminified and its exports map hides the prebuilt min file, so minify here.
+      minify: pkg === '@pixi/3d',
     })
-    const text = r.outputFiles?.[0]?.text
+    let text = r.outputFiles?.[0]?.text
     if (!text) throw new Error(`no output: vendor ${pkg}`)
+    if (pkg === '@pixi/3d') {
+      const hits = text.split(DRACO_CDN).length - 1
+      if (hits !== DRACO_CDN_URLS) {
+        throw new Error(`[build-module] expected exactly ${DRACO_CDN_URLS} Draco CDN URLs to localise in ${pkg}, found ${hits} — the package changed; re-check the decoder wiring`)
+      }
+      text = text.replaceAll(DRACO_CDN, DRACO_LOCAL)
+    }
     const bytes = textToBytes(`// ${pkg}\n${LAZY_MARKER_LINE}\n${text}`)
     const sig = await SignatureService.sign(toArrayBuffer(bytes))
     dependencyBytes.set(sig, bytes)

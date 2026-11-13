@@ -3,7 +3,7 @@
 
 import { build } from 'esbuild'
 import { resolve } from 'path'
-import { rmSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, rmSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 
 (async () => {
   const OUT_DIR = resolve('public/vendor')
@@ -13,13 +13,30 @@ import { rmSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
   rmSync(OUT_DIR, { recursive: true, force: true })
   mkdirSync(OUT_DIR, { recursive: true })
 
+  // The no-eval polyfill keeps one FUNCTION per uniform parser, found by the
+  // parser's index, in two tables private to pixi. `@pixi/3d` brings parsers
+  // of its own as code strings only, so the tables are exported here for
+  // essentials to finish (hypercomb-essentials/src/presentation/tiles/
+  // pixi3d-no-eval.ts — the two export names are that file's
+  // NO_EVAL_*_TABLE constants).
+  const pixiPackage = [resolve('node_modules/pixi.js'), resolve('../node_modules/pixi.js')].find(dir => existsSync(dir))
+  if (!pixiPackage) throw new Error('[pixi-vendor] pixi.js is not installed')
+  const inPixi = (rel: string): string => resolve(pixiPackage, rel).split('\\').join('/')
+  const entry = [
+    "import 'pixi.js/unsafe-eval'",
+    "export * from 'pixi.js'",
+    `export { uniformParserFunctions as __noEvalUniformParserFunctions } from '${inPixi('lib/unsafe-eval/uniforms/uniformSyncFunctions.mjs')}'`,
+    `export { uboParserFunctions as __noEvalUboParserFunctions } from '${inPixi('lib/unsafe-eval/ubo/uboSyncFunctions.mjs')}'`,
+    '',
+  ].join('\n')
+
   await build({
     // `pixi.js/unsafe-eval` swaps the new-Function uniform-sync for a static
     // parser, so the renderer constructs under a CSP with no 'unsafe-eval' —
     // the published visitor hosts (worker.js serveVisitorAsset) serve exactly
     // that CSP, and without this import PixiHostWorker dies at Application.init.
     stdin: {
-      contents: "import 'pixi.js/unsafe-eval'\nexport * from 'pixi.js'\n",
+      contents: entry,
       resolveDir: process.cwd(),
       sourcefile: 'pixi-vendor-entry.js',
       loader: 'js',
