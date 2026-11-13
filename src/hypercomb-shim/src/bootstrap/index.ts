@@ -27,6 +27,7 @@
 // possible boot.
 
 import { hideHostPanel, showHostPanel } from './host-panel'
+import { registerManagedPublish } from './managed-publish'
 
 export type BootstrapContext = {
   /** Why the shim loaded us: 'cold' when nothing mounted, 'warm' otherwise.
@@ -52,6 +53,11 @@ export type Acquisition = {
  * ever writes to the heap is a person clicking a package.
  */
 export const boot = (_context: BootstrapContext = {}): Acquisition => {
+  // A MANAGED SITE DOOR publishes one root with its own listed key
+  // (managed-publish.ts). Lent here, before the first pulse, so the bees that
+  // draw the card find it; it lives in this bundle because the key, the invite
+  // and the index signing do — main.js carries no signer at all.
+  registerManagedPublish()
   return { prompt: showHostPanel, dismiss: hideHostPanel }
 }
 

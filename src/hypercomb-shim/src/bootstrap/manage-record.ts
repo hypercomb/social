@@ -15,12 +15,18 @@
 import { LEGACY_DIRECTORIES } from '@hypercomb/core'
 
 const SIG_RE = /^[0-9a-f]{64}$/
+// A bare host name (a machine's `localhost:<port>` included), never a URL.
+const HOST_RE = /^(?:[a-z0-9-]+\.)*[a-z0-9-]+(?::\d{1,5})?$/
 
 export type ManageRecord = {
   readonly lineage: string
   readonly title: string
   readonly publisher: string | null
   readonly head: string | null
+  /** The zone root this page's publish writes to (worker.js writeFaceFor): the
+   *  site door itself is read-only. A hint — managed-publish.ts checks the host
+   *  serves the index this site reads before it writes there. */
+  readonly writes: string | null
 }
 
 /** The leave route: the mark and the service worker go, and the address is the website again. */
@@ -64,7 +70,9 @@ export function manageRecord(doc: Document = document): ManageRecord | null {
     const title = typeof value['title'] === 'string' && value['title'] ? value['title'].slice(0, 200) : lineage
     const publisher = typeof value['publisher'] === 'string' && SIG_RE.test(value['publisher']) ? value['publisher'] : null
     const head = typeof value['head'] === 'string' && SIG_RE.test(value['head']) ? value['head'] : null
-    return { lineage, title, publisher, head }
+    const named = typeof value['writes'] === 'string' ? value['writes'].trim().toLowerCase() : ''
+    const writes = named.length <= 253 && HOST_RE.test(named) ? named : null
+    return { lineage, title, publisher, head, writes }
   } catch {
     return null
   }
