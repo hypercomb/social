@@ -3013,5 +3013,7 @@
   "need.offer-empty": "Нечего предлагать: под «{name}» нет плиток — скажите need offer a, b, c.",
   "need.offer-failed": "Список для «{name}» не предложен: {reason}",
   "need.via-offer": "предложено списком",
-  "need.via-tile": "из опубликованной плитки"
+  "need.via-tile": "из опубликованной плитки",
+  "need.empty-stack": "{count} без ничего",
+  "need.promote-elsewhere": "Перейдите к «{name}», чтобы добавить туда значения."
 }

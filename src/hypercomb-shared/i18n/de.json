@@ -3013,5 +3013,7 @@
   "need.offer-empty": "Nichts anzubieten: Unter „{name}“ liegen keine Kacheln — sag need offer a, b, c.",
   "need.offer-failed": "Die Liste für „{name}“ wurde nicht angeboten: {reason}",
   "need.via-offer": "als Liste angeboten",
-  "need.via-tile": "aus einer veröffentlichten Kachel"
+  "need.via-tile": "aus einer veröffentlichten Kachel",
+  "need.empty-stack": "{count} ohne etwas",
+  "need.promote-elsewhere": "Geh zu „{name}“, um seine Werte dort hinzuzufügen."
 }

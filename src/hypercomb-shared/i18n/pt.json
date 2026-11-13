@@ -3013,5 +3013,7 @@
   "need.offer-empty": "Nada a oferecer: \"{name}\" não tem blocos abaixo — diga need offer a, b, c.",
   "need.offer-failed": "A lista para \"{name}\" não foi oferecida: {reason}",
   "need.via-offer": "oferecido como lista",
-  "need.via-tile": "de um bloco publicado"
+  "need.via-tile": "de um bloco publicado",
+  "need.empty-stack": "{count} sem nada",
+  "need.promote-elsewhere": "Vá até \"{name}\" para adicionar os valores lá."
 }

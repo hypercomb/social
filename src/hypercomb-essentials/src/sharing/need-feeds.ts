@@ -28,6 +28,8 @@
 // Pure apart from `liveFeedDeps`: the reads are handed in, so the walk is
 // tested without a network.
 
+import { SignatureService } from '@hypercomb/core'
+import { fetchWithDeadline } from './bounded-fetch.js'
 import { fetchHiveIndex } from './hive-pointer.js'
 import { needListKey, needListOf, needListPoolAddress } from './need-lists.js'
 import { picturesKey, picturesPoolAddress } from './picture-pools.js'
@@ -70,7 +72,9 @@ export interface FeedDeps {
   listing(host: string, address: string, options?: FeedOptions): Promise<PoolListing>
   /** The roots of a publisher's own signed index on a host, or null. */
   roots(host: string, pubkey: string, options?: FeedOptions): Promise<Readonly<Record<string, unknown>> | null>
-  readJson(sig: string): Promise<Record<string, unknown> | null>
+  /** A JSON resource by signature. `host` is the host that listed the word
+   *  it hangs from — where its bytes are sure to be when nothing else has them. */
+  readJson(sig: string, host?: string): Promise<Record<string, unknown> | null>
   now(): number
 }
 
@@ -178,6 +182,7 @@ export async function feedNeed(
     if (!said.some(s => s.state === 'listed')) return report(said.some(s => s.state === 'silent') ? 'silent' : 'empty')
     // One index read per publisher, however many pools list them.
     const indexes = new Map<string, Promise<Readonly<Record<string, unknown>> | null>>()
+    const readHere = (sig: string) => deps.readJson(sig, host)
     const rootsOf = (pubkey: string) => {
       let read = indexes.get(pubkey)
       if (!read) { read = deps.roots(host, pubkey, fresh).catch(() => null); indexes.set(pubkey, read) }
@@ -196,8 +201,8 @@ export async function feedNeed(
         const sig = sigOf((await rootsOf(pubkey))?.[pool.key])
         if (!sig) return
         const texts = pool.via === 'offer'
-          ? await offeredValuesOf(sig, molecule, deps.readJson)
-          : await childNamesOf(sig, deps.readJson)
+          ? await offeredValuesOf(sig, molecule, readHere)
+          : await childNamesOf(sig, readHere)
         slots[j] = texts.map(text => ({ text, by: pubkey, via: pool.via }))
       } catch { /* one unreadable publisher — skip only them */ }
     })
@@ -222,7 +227,9 @@ export interface NeedValue {
   readonly vias: readonly FeedVia[]
 }
 
-export const foldValue = (text: string): string => text.trim().replace(/\s+/g, ' ').toLowerCase()
+/** Case, spacing, and the hyphens and underscores a tile name folds its spaces
+ *  into (`lemon tart` is the tile `lemon-tart`) are not part of a value. */
+export const foldValue = (text: string): string => text.trim().replace(/[\s_-]+/g, ' ').trim().toLowerCase()
 
 /** The list below the row: every answered value, most-fed first, then A–Z. */
 export const mergeFeeds = (feeds: readonly Feed[]): NeedValue[] => {
@@ -262,11 +269,25 @@ export const liveFeedDeps = (): FeedDeps => ({
     const index = await fetchHiveIndex(host, pubkey, undefined, { fresh: !!options?.fresh })
     return index.ok ? (index.manifest.roots ?? null) as Readonly<Record<string, unknown>> | null : null
   },
-  readJson: async (sig) => {
+  readJson: async (sig, host) => {
     const store = ioc('@hypercomb.social/Store') as { getResource?: (s: string) => Promise<Blob | null> } | undefined
-    const blob = await store?.getResource?.(sig)
-    if (!blob) return null
-    try { return JSON.parse(await blob.text()) as Record<string, unknown> } catch { return null }
+    let text: string | null = null
+    const blob = await store?.getResource?.(sig).catch(() => null)
+    if (blob) text = await blob.text()
+    // The store asks the hosts IT knows. The host that listed the word holds
+    // its bytes (an offer publishes them there before it stamps the index),
+    // so ask that host too — believed only when the bytes hash to the name.
+    if (text === null && host) {
+      try {
+        const response = await fetchWithDeadline(`${hostUrl(host)}/${sig}`, { cache: 'force-cache' }, { timeoutMs: 6_000 })
+        if (response.ok) {
+          const bytes = await response.arrayBuffer()
+          if ((await SignatureService.sign(bytes)) === sig) text = new TextDecoder().decode(bytes)
+        }
+      } catch { /* unreachable: the word stays unread */ }
+    }
+    if (text === null) return null
+    try { return JSON.parse(text) as Record<string, unknown> } catch { return null }
   },
   now: () => performance.now(),
 })

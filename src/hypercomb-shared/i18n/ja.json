@@ -4115,5 +4115,7 @@
   "need.offer-empty": "提供するものがありません:「{name}」の下にタイルがありません — need offer a, b, c と言ってください。",
   "need.offer-failed": "「{name}」のリストは提供されませんでした: {reason}",
   "need.via-offer": "リストとして提供",
-  "need.via-tile": "公開されたタイルから"
+  "need.via-tile": "公開されたタイルから",
+  "need.empty-stack": "何もない {count} 台",
+  "need.promote-elsewhere": "「{name}」に移動すると、そこに値を追加できます。"
 }

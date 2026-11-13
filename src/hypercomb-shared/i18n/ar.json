@@ -3013,5 +3013,7 @@
   "need.offer-empty": "لا شيء لعرضه: لا توجد بلاطات تحت \"{name}\" — قل need offer a, b, c.",
   "need.offer-failed": "لم تُعرض قائمة \"{name}\": {reason}",
   "need.via-offer": "معروضة كقائمة",
-  "need.via-tile": "من بلاطة منشورة"
+  "need.via-tile": "من بلاطة منشورة",
+  "need.empty-stack": "{count} بلا شيء",
+  "need.promote-elsewhere": "انتقل إلى \"{name}\" لإضافة قيمه هناك."
 }

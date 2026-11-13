@@ -159,6 +159,9 @@ export class NeedQueenBee extends QueenBee {
 
   #mount: Mount | null = null
   #name = ''
+  /** Where `+` adds: '' = the tile you stand on, a name = that child of it,
+   *  null = the need is not on this page. */
+  #target: string | null = ''
   #feeds = new Map<string, Feed>()
   #order: string[] = []
   #promoted = new Set<string>()
@@ -186,6 +189,15 @@ export class NeedQueenBee extends QueenBee {
       EffectBus.emit('toast:show', { type: 'tip', message: this.#t('need.no-hosts', 'No servers to ask yet — add one in the host directory (hosts).') })
       return
     }
+    // WHERE `+` ADDS: under the need itself. Asked bare, the need is the tile
+    // you stand on; asked by name, it is the tile you stand on when that is
+    // its name, else the tile of that name on this page. A need that is
+    // neither has nowhere to add to here — `+` says so instead of filling
+    // the page you stand on.
+    const here = standing[standing.length - 1] ?? ''
+    this.#target = !said || foldValue(here) === foldValue(name)
+      ? ''
+      : (await childNamesHere(standing).catch(() => [] as string[])).find(child => foldValue(child) === foldValue(name)) ?? null
     this.#promoted.clear()
     this.#feeds.clear()
     this.#order = hosts
@@ -368,11 +380,17 @@ export class NeedQueenBee extends QueenBee {
     this.#drawLines()
   }
 
+  /** The row: one hexagon per server that is feeding the need or still being
+   *  asked, and ONE stack of three hexagons for every server that brought
+   *  nothing (jwize 2026-11-12: "don't show the servers instead a graphic of
+   *  three hexagons stacked representing all the empty ones"). */
   #renderRow(feeds: readonly Feed[]): void {
     const row = this.#mount!.row
     row.replaceChildren()
-    feeds.forEach((feed, i) => {
-      const hue = HUES[i % HUES.length]
+    const feeding = feeds.filter(feed => feed.state === 'asking' || (feed.state === 'answered' && feed.values.length > 0))
+    const empty = feeds.filter(feed => !feeding.includes(feed))
+    feeding.forEach(feed => {
+      const hue = HUES[this.#order.indexOf(feed.host) % HUES.length]
       const tile = el('div',
         `flex:none;width:${HEX_W}px;height:${HEX_H}px;clip-path:polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%);` +
         `display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;text-align:center;padding:0 16px;box-sizing:border-box;` +
@@ -387,6 +405,36 @@ export class NeedQueenBee extends QueenBee {
       tile.addEventListener('mouseleave', () => { this.#hover = {}; this.#highlight() })
       row.appendChild(tile)
     })
+    if (empty.length) row.appendChild(this.#emptyStack(empty))
+  }
+
+  /** One hexagon the size of the others, with an inline — a second edge just
+   *  inside its own — that says "more than one behind this" (jwize: "the same
+   *  sized item with an inline not outline"). The count is in the middle;
+   *  which servers, and what each said, is in the tooltip. */
+  #emptyStack(empty: readonly Feed[]): HTMLElement {
+    const stack = el('div',
+      `flex:none;position:relative;width:${HEX_W}px;height:${HEX_H}px;cursor:default;transition:opacity .15s;` +
+      'clip-path:polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%);background:rgba(126,182,214,0.06);')
+    stack.dataset['stack'] = ''
+    stack.title = empty.map(feed => `${feed.host} — ${this.#status(feed)}`).join('\n')
+    const cx = HEX_W / 2
+    const cy = HEX_H / 2
+    const corners: readonly (readonly [number, number])[] = [[0.25, 0], [0.75, 0], [1, 0.5], [0.75, 1], [0.25, 1], [0, 0.5]]
+    const inset = 0.84
+    const points = corners
+      .map(([fx, fy]) => `${(cx + (fx * HEX_W - cx) * inset).toFixed(1)},${(cy + (fy * HEX_H - cy) * inset).toFixed(1)}`)
+      .join(' ')
+    const svg = svgEl('svg', { width: HEX_W, height: HEX_H, viewBox: `0 0 ${HEX_W} ${HEX_H}` })
+    svg.style.cssText = 'position:absolute;inset:0;pointer-events:none;'
+    svg.appendChild(svgEl('polygon', { points, fill: 'none', stroke: 'rgba(126,182,214,0.32)', 'stroke-width': 1 }))
+    stack.appendChild(svg)
+    const label = el('div',
+      'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:0 22px;box-sizing:border-box;' +
+      `font-size:0.6875rem;color:${DIM};line-height:1.35;`,
+      this.#say('need.empty-stack', '{count} with nothing', { count: empty.length }))
+    stack.appendChild(label)
+    return stack
   }
 
   #status(feed: Feed): string {
@@ -445,27 +493,28 @@ export class NeedQueenBee extends QueenBee {
     const endY = listBox.top - origin.top
     const endX = listBox.left - origin.left + listBox.width / 2
     mount.svg.replaceChildren()
-    for (const tile of Array.from(mount.row.children) as HTMLElement[]) {
+    const tiles = Array.from(mount.row.children) as HTMLElement[]
+    tiles.forEach((tile, at) => {
       const host = tile.dataset['host'] ?? ''
+      const isStack = tile.dataset['stack'] !== undefined
       const feed = this.#feeds.get(host)
-      const state = feed?.state ?? 'asking'
+      const state = isStack ? 'empty' : feed?.state ?? 'asking'
       const box = tile.getBoundingClientRect()
       const x = box.left - origin.left + box.width / 2
       const y = box.bottom - origin.top
       // Spread the landings across the list's head so the lines arrive apart.
-      const i = this.#order.indexOf(host)
-      const n = Math.max(1, this.#order.length)
-      const landX = endX + (n > 1 ? ((i / (n - 1)) - 0.5) * Math.min(listBox.width * 0.6, n * 28) : 0)
+      const n = Math.max(1, tiles.length)
+      const landX = endX + (n > 1 ? ((at / (n - 1)) - 0.5) * Math.min(listBox.width * 0.6, n * 28) : 0)
       const mid = (y + endY) / 2
       const d = `M ${x} ${y} C ${x} ${mid}, ${landX} ${mid}, ${landX} ${endY}`
-      const hue = HUES[i % HUES.length]
-      const live = state === 'asking' || (state === 'answered' && (feed?.values.length ?? 0) > 0)
+      const hue = HUES[Math.max(0, this.#order.indexOf(host)) % HUES.length]
+      const live = !isStack && (state === 'asking' || (state === 'answered' && (feed?.values.length ?? 0) > 0))
       const g = svgEl('g')
       g.dataset['host'] = host
       g.appendChild(svgEl('path', { d, class: 'base', fill: 'none', stroke: live ? hue : 'rgba(216,230,238,0.25)', 'stroke-width': 1.25, opacity: live ? 0.22 : 0.35, ...(live ? {} : { 'stroke-dasharray': '2 6' }) }))
       if (live) g.appendChild(svgEl('path', { d, class: `flow ${state}`, fill: 'none', stroke: hue, 'stroke-width': 2, 'stroke-linecap': 'round', opacity: 0.75 }))
       mount.svg.appendChild(g)
-    }
+    })
     this.#highlight()
   }
 
@@ -502,9 +551,15 @@ export class NeedQueenBee extends QueenBee {
     const text = value.text.trim()
     const savedRoots = ioc<{ isSaved?: (name: string) => boolean }>('@diamondcoreprocessor.com/SavedRoots')
     if (!text || text.includes('/') || isReservedPoolWord(text) || savedRoots?.isSaved?.(text)) { failed(); return }
+    if (this.#target === null) {
+      EffectBus.emit('toast:show', { type: 'tip', message: this.#say('need.promote-elsewhere', 'Walk to "{name}" to add its values there.', { name: this.#name }) })
+      return
+    }
     this.#promoted.add(fold)
     this.#render()
-    const made = await createTile(text).catch(() => false)
+    // Under the need: the tile you stand on, or its child of the need's name
+    // (`recipes/soup` — the create commit makes the one missing level only).
+    const made = await createTile(this.#target ? `${this.#target}/${text}` : text).catch(() => false)
     if (!made) {
       this.#promoted.delete(fold)
       this.#render()

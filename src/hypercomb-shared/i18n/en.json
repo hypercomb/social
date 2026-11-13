@@ -4816,5 +4816,7 @@
   "need.offer-empty": "Nothing to offer: \"{name}\" has no tiles under it — say need offer a, b, c.",
   "need.offer-failed": "The list for \"{name}\" was not offered: {reason}",
   "need.via-offer": "offered as a list",
-  "need.via-tile": "from a published tile"
+  "need.via-tile": "from a published tile",
+  "need.empty-stack": "{count} with nothing",
+  "need.promote-elsewhere": "Walk to \"{name}\" to add its values there."
 }

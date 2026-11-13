@@ -3013,5 +3013,7 @@
   "need.offer-empty": "Nada que ofrecer: \"{name}\" no tiene mosaicos debajo; di need offer a, b, c.",
   "need.offer-failed": "La lista para \"{name}\" no se ofreció: {reason}",
   "need.via-offer": "ofrecido como lista",
-  "need.via-tile": "de un mosaico publicado"
+  "need.via-tile": "de un mosaico publicado",
+  "need.empty-stack": "{count} sin nada",
+  "need.promote-elsewhere": "Ve a \"{name}\" para añadir allí sus valores."
 }

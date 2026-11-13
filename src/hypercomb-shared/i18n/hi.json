@@ -3013,5 +3013,7 @@
   "need.offer-empty": "पेश करने को कुछ नहीं: \"{name}\" के नीचे कोई टाइल नहीं — कहें need offer a, b, c.",
   "need.offer-failed": "\"{name}\" की सूची पेश नहीं हुई: {reason}",
   "need.via-offer": "सूची के रूप में पेश किया गया",
-  "need.via-tile": "एक प्रकाशित टाइल से"
+  "need.via-tile": "एक प्रकाशित टाइल से",
+  "need.empty-stack": "{count} के पास कुछ नहीं",
+  "need.promote-elsewhere": "\"{name}\" पर जाएँ ताकि उसके मान वहाँ जोड़े जा सकें।"
 }

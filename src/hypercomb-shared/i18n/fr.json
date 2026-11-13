@@ -3013,5 +3013,7 @@
   "need.offer-empty": "Rien à proposer : « {name} » n’a aucune tuile en dessous — dites need offer a, b, c.",
   "need.offer-failed": "La liste pour « {name} » n’a pas été proposée : {reason}",
   "need.via-offer": "proposé en liste",
-  "need.via-tile": "d’une tuile publiée"
+  "need.via-tile": "d’une tuile publiée",
+  "need.empty-stack": "{count} sans rien",
+  "need.promote-elsewhere": "Allez sur « {name} » pour y ajouter ses valeurs."
 }

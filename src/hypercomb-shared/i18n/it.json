@@ -3013,5 +3013,7 @@
   "need.offer-empty": "Niente da offrire: \"{name}\" non ha tessere sotto; di’ need offer a, b, c.",
   "need.offer-failed": "L’elenco per \"{name}\" non è stato offerto: {reason}",
   "need.via-offer": "offerto come elenco",
-  "need.via-tile": "da una tessera pubblicata"
+  "need.via-tile": "da una tessera pubblicata",
+  "need.empty-stack": "{count} senza nulla",
+  "need.promote-elsewhere": "Vai su \"{name}\" per aggiungere lì i suoi valori."
 }

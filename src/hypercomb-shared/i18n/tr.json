@@ -3013,5 +3013,7 @@
   "need.offer-empty": "Sunacak bir şey yok: \"{name}\" altında karo yok — need offer a, b, c de.",
   "need.offer-failed": "\"{name}\" listesi sunulmadı: {reason}",
   "need.via-offer": "liste olarak sunuldu",
-  "need.via-tile": "yayımlanmış bir karodan"
+  "need.via-tile": "yayımlanmış bir karodan",
+  "need.empty-stack": "{count} boş",
+  "need.promote-elsewhere": "Değerlerini eklemek için \"{name}\" karosuna git."
 }

@@ -3013,5 +3013,7 @@
   "need.offer-empty": "没有可提供的：“{name}”下面没有磁贴——请说 need offer a, b, c。",
   "need.offer-failed": "“{name}”的列表未能提供：{reason}",
   "need.via-offer": "以列表提供",
-  "need.via-tile": "来自已发布的磁贴"
+  "need.via-tile": "来自已发布的磁贴",
+  "need.empty-stack": "{count} 个无内容",
+  "need.promote-elsewhere": "前往“{name}”以在那里添加它的值。"
 }

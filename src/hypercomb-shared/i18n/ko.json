@@ -3013,5 +3013,7 @@
   "need.offer-empty": "제공할 것이 없습니다: \"{name}\" 아래에 타일이 없습니다 — need offer a, b, c 라고 말하세요.",
   "need.offer-failed": "\"{name}\"의 목록이 제공되지 않았습니다: {reason}",
   "need.via-offer": "목록으로 제공됨",
-  "need.via-tile": "게시된 타일에서"
+  "need.via-tile": "게시된 타일에서",
+  "need.empty-stack": "아무것도 없는 {count}곳",
+  "need.promote-elsewhere": "\"{name}\"(으)로 이동하면 그곳에 값을 추가할 수 있습니다."
 }

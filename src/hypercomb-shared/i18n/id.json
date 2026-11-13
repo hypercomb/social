@@ -3013,5 +3013,7 @@
   "need.offer-empty": "Tidak ada yang ditawarkan: \"{name}\" tidak punya ubin di bawahnya — ucapkan need offer a, b, c.",
   "need.offer-failed": "Daftar untuk \"{name}\" tidak ditawarkan: {reason}",
   "need.via-offer": "ditawarkan sebagai daftar",
-  "need.via-tile": "dari ubin yang diterbitkan"
+  "need.via-tile": "dari ubin yang diterbitkan",
+  "need.empty-stack": "{count} tanpa apa pun",
+  "need.promote-elsewhere": "Pergi ke \"{name}\" untuk menambahkan nilainya di sana."
 }
