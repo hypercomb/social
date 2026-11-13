@@ -1,4 +1,4 @@
-// hypercomb-shared/ui/chat-window/chat-archive-and-rail-walk.spec.ts
+// hypercomb-runtime/src/chat-window/ui/chat-window/chat-archive-and-rail-walk.spec.ts
 //
 // Two asks of jwize's, 2026-11-12, pinned where they live:
 //
@@ -16,9 +16,11 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-const template = readFileSync(join(__dirname, 'chat-window.component.html'), 'utf8')
-const source = readFileSync(join(__dirname, 'chat-window.component.ts'), 'utf8')
-const routeStyles = readFileSync(join(__dirname, 'chat-route.scss'), 'utf8')
+// The chat window runs without Angular (hypercomb-runtime/src/chat-window.ts):
+// its template, its class and its compiled sheet are read where they live now.
+import { CHAT_WINDOW_CSS as routeStyles } from '../../chat-window.styles'
+const template = readFileSync(join(__dirname, '../../chat-window.template.ts'), 'utf8')
+const source = readFileSync(join(__dirname, 'chat-window.ts'), 'utf8').replace(/\r\n/g, '\n')
 
 /** The body of a class member, from its signature to the next member. */
 const member = (signature: string): string => {
@@ -28,30 +30,30 @@ const member = (signature: string): string => {
   return source.slice(at, next > 0 ? next : undefined)
 }
 
-/** A top-level scss rule's body. */
+/** A top-level rule's body, as compiled and scoped. */
 const rule = (selector: string): string => {
-  const at = routeStyles.indexOf(`${selector} {`)
+  const at = routeStyles.indexOf(`${selector}[_ngcontent-hc-chat] {`)
   expect(at, selector).toBeGreaterThan(0)
   return routeStyles.slice(at, routeStyles.indexOf('\n}', at))
 }
 
 describe('the masthead archive', () => {
   it('shows its confirm only while armed, in place of the icon, never for one already put away', () => {
-    const confirm = template.indexOf('class="chat-put-confirm"')
+    const confirm = template.indexOf('class: "chat-put-confirm"')
     expect(confirm).toBeGreaterThan(0)
-    const gate = template.lastIndexOf('@if (', confirm)
-    expect(template.slice(gate, confirm)).toContain('@if (archiveArmed() && !activeArchived()) {')
-    const icon = template.indexOf('class="chat-tool chat-put"', confirm)
+    const gate = template.lastIndexOf('when([', confirm)
+    expect(template.slice(gate, confirm)).toContain('[() => (c.archiveArmed() && !c.activeArchived()), () => [')
+    const icon = template.indexOf('class: "chat-tool chat-put"', confirm)
     expect(icon).toBeGreaterThan(confirm)
-    expect(template.slice(confirm, icon)).toContain('} @else {')
+    expect(template.slice(confirm, icon)).toContain('], () => [')
   })
 
   it('is ONE button: the icon to the left inside it, then its words', () => {
-    const confirm = template.indexOf('class="chat-put-confirm"')
-    const button = template.slice(confirm, template.indexOf('</button>', confirm))
-    expect(button).toContain('(click)="confirmArchive()"')
-    const glyph = button.indexOf('>archive</span>')
-    const words = button.indexOf("'chat.archive.confirm' | t }}")
+    const confirm = template.indexOf('class: "chat-put-confirm"')
+    const button = template.slice(confirm, template.indexOf(']],', confirm))
+    expect(button).toContain('on("click", (event: any) => c.confirmArchive())')
+    const glyph = button.indexOf('text("archive")')
+    const words = button.indexOf('txt(() => str(t("chat.archive.confirm")))')
     expect(glyph).toBeGreaterThan(0)
     expect(words).toBeGreaterThan(glyph)
     const body = rule('.chat-put-confirm')

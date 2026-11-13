@@ -242,7 +242,7 @@ describe('doctrine ratchets', () => {
       'hypercomb-essentials/src/tutorial/tutorial.queen.ts',
       'hypercomb-essentials/src/workflow/workflow.queen.ts',
       'hypercomb-essentials/src/world-models/world-models.queen.ts',
-      'hypercomb-shared/ui/chat-window/chat-window.component.ts',
+      'hypercomb-runtime/src/chat-window/ui/chat-window/chat-window.ts',
       'hypercomb-shared/ui/command-line/command-line.component.ts',
       'hypercomb-shared/ui/context-window/context-window.component.ts',
       'hypercomb-shared/ui/controls-bar/controls-bar.component.ts',
@@ -623,7 +623,10 @@ describe('doctrine ratchets', () => {
     // the scoreboard on every shim build; this makes the count a test.
     const barrel = readFileSync(
       join(ROOT, 'hypercomb-shared/ui/shell-surfaces/shell-surfaces.barrel.ts'), 'utf8')
-    const entries = [...barrel.matchAll(/^import '([^']+)'/gm)]
+    // Relative imports only: those are Angular components still owed a port. A
+    // line importing a runtime element (`@hypercomb/runtime/...`) is a surface
+    // that already runs without Angular in both shells — the ratchet's goal.
+    const entries = [...barrel.matchAll(/^import '(\.[^']+)'/gm)]
       .map(m => m[1].replace(/^\.\.\//, ''))
       .sort()
     assertRatchet(entries, [
@@ -635,7 +638,6 @@ describe('doctrine ratchets', () => {
       "aliases-panel/aliases-panel.component",
       "backgrounds-window/backgrounds-window.component",
       "camera-capture/camera-capture.component",
-      "chat-window/chat-window.component",
       "command-palette/command-palette.component",
       "contact-card/contact-form.component",
       "contact-card/contact-hover.component",
@@ -1494,7 +1496,7 @@ describe('doctrine ratchets', () => {
     // holds for the door.
     const grammar = [
       join(ROOT, 'hypercomb-core', 'src', 'core', 'machine-plan.ts'),
-      join(ROOT, 'hypercomb-shared', 'ui', 'chat-window', 'hypercomb-grammar.ts'),
+      join(ROOT, 'hypercomb-runtime', 'src', 'chat-window', 'ui', 'chat-window', 'hypercomb-grammar.ts'),
     ].map(file => readFileSync(file, 'utf8')).join('\n')
 
     // The live census: every command word a queen or a manual provider claims.

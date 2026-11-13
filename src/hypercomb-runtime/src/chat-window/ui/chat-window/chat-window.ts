@@ -92,9 +92,8 @@
 // Shell UI — resolves everything through `window.ioc` at call time and never
 // imports essentials.
 
-import { ChangeDetectionStrategy, Component, ElementRef, Injector, afterNextRender, computed, effect, inject, signal, untracked, viewChild, type OnDestroy } from '@angular/core'
-import { NgTemplateOutlet } from '@angular/common'
-import { DomSanitizer, type SafeHtml } from '@angular/platform-browser'
+import { afterNextRender, computed, effect, signal, untracked } from '../../../lite-signals'
+import { trustHtml, type ElementRefLike, type TrustedHtml } from '../../../lite-template'
 import {
   CLAUDE_BRIDGE_ENABLED_STORAGE_KEY,
   EffectBus,
@@ -116,15 +115,12 @@ import {
   EXTERNAL_ASK, EXTERNAL_ANSWER, type ExternalAsk, type ExternalAnswer,
   type AgentStepRegistry, type FrontDecisionLike, type HandoverStep, type VerifyDecisionLike, type WorkMessage,
 } from '@hypercomb/core'
-import { TranslatePipe } from '../../core/i18n.pipe'
-import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 // THE SOURCE LIVES IN THE HIVE: a model writes a module section back and the
 // hive runs it here as a draft (documentation/hive-read-fence.md, "Writing a
 // module"; runtime module-drafts.ts).
-import { applySectionEdits, draftModule } from '@hypercomb/runtime/module-drafts'
-import { installedPackageSig } from '@hypercomb/runtime/installed-package'
+import { applySectionEdits, draftModule } from '../../../module-drafts'
+import { installedPackageSig } from '../../../installed-package'
 import { doctrineFailedMessage, doctrineRanMessage, fileFailedMessage, fileRanMessage, pageChangeUnready, parseWriteBlock, readsAskedIn, routesNamedIn, sandboxRule, tileFileLabel, unreadAskedMessage, unreadClaimMessage, writeFailedMessage, writeRanMessage, writeSkippedMessage, type TileFileWriteRequest } from './hypercomb-work-fence'
-import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { signalSession } from '../window-session'
 import { highlightBlocks } from './chat-highlight'
 import { resolveEntryImageUrl } from '../shelf-thumbs'
@@ -1660,28 +1656,7 @@ const conversationOnLayer = (path: string, here: readonly string[]): boolean => 
   return parent === layer
 }
 
-@Component({
-  selector: 'hc-chat-window',
-  changeDetection: ChangeDetectionStrategy.OnPush,
-  standalone: true,
-  imports: [NgTemplateOutlet, TranslatePipe, HcDockedPanelDirective],
-  templateUrl: './chat-window.component.html',
-  // TWO SHEETS, in source order. Angular's `anyComponentStyle` budget is
-  // measured per compiled stylesheet and one output is emitted per `styleUrls`
-  // entry — so splitting is the only thing that lowers the number a `@use`'d
-  // partial cannot. The markdown sheet is last because it styles the message
-  // bodies the first sheet lays out.
-  // Four sheets, not one: Angular's component style budget is per-sheet, and
-  // the header tool buttons and the picture viewer are self-contained and
-  // read better apart.
-  // A fifth for the route and the question wizard (chat-route.scss): the
-  // main sheet is at the budget, and the pipe is its own vocabulary.
-  styleUrls: [
-    './chat-window.component.scss', './chat-markdown.scss',
-    './chat-peek.scss', './chat-look.scss', './chat-route.scss',
-  ],
-})
-export class ChatWindowComponent implements OnDestroy {
+export class ChatWindow {
 
   /** A direct/keyed/local provider can answer ordinary chat even when no
    * host or hive-reading bridge is configured. */
@@ -2869,11 +2844,11 @@ export class ChatWindowComponent implements OnDestroy {
     return 5
   })
 
-  readonly input = viewChild<ElementRef<HTMLTextAreaElement>>('input')
-  readonly scroller = viewChild<ElementRef<HTMLElement>>('scroller')
-  readonly chatRail = viewChild<ElementRef<HTMLDivElement>>('chatRail')
-  readonly lookLayer = viewChild<ElementRef<HTMLElement>>('lookLayer')
-  readonly panel = viewChild<ElementRef<HTMLElement>>('panel')
+  readonly input = signal<ElementRefLike<HTMLTextAreaElement> | undefined>(undefined)
+  readonly scroller = signal<ElementRefLike<HTMLElement> | undefined>(undefined)
+  readonly chatRail = signal<ElementRefLike<HTMLDivElement> | undefined>(undefined)
+  readonly lookLayer = signal<ElementRefLike<HTMLElement> | undefined>(undefined)
+  readonly panel = signal<ElementRefLike<HTMLElement> | undefined>(undefined)
 
   readonly railWidth = signal(readRailWidth())
   /** The workflow sidebar's width once dragged (px), else 0 — the stylesheet's
@@ -2953,16 +2928,15 @@ export class ChatWindowComponent implements OnDestroy {
   // at all because the sanitizer strips the `data-` attributes the hive-path
   // chips and code-copy buttons are addressed by.
 
-  readonly #sanitizer = inject(DomSanitizer)
 
   /** text → rendered HTML. Bounded; keyed by content, so an identical turn
    *  reaching two threads is parsed once. */
-  readonly #rendered = new Map<string, SafeHtml>()
+  readonly #rendered = new Map<string, TrustedHtml>()
 
-  #markdown(text: string): SafeHtml {
+  #markdown(text: string): TrustedHtml {
     const hit = this.#rendered.get(text)
     if (hit) return hit
-    const html = this.#sanitizer.bypassSecurityTrustHtml(renderChatMarkdown(text, this.#markdownOptions))
+    const html = trustHtml(renderChatMarkdown(text, this.#markdownOptions))
     if (this.#rendered.size >= RENDER_CACHE_MAX) {
       // Oldest first — Map preserves insertion order, and the oldest turn in a
       // long thread is the one furthest from the screen.
@@ -3314,12 +3288,11 @@ export class ChatWindowComponent implements OnDestroy {
   // essentials reads; it writes nothing and never shows a message.
 
   /** The tree viewport and the summary pane, while they are on screen. */
-  readonly routeSide = viewChild<ElementRef<HTMLElement>>('routeSide')
-  readonly routeSummary = viewChild<ElementRef<HTMLElement>>('routeSummary')
+  readonly routeSide = signal<ElementRefLike<HTMLElement> | undefined>(undefined)
+  readonly routeSummary = signal<ElementRefLike<HTMLElement> | undefined>(undefined)
 
   /** For the after-render hooks: a fold's anchor and a card not drawn yet —
    *  never an animation frame, which a hidden tab is never served. */
-  readonly #injector = inject(Injector)
 
   /** PRESENCE: any open conversation with a turn in it, when there is room
    *  beside the thread (the rail's own query — below 701 px the settled lines
@@ -4168,7 +4141,7 @@ export class ChatWindowComponent implements OnDestroy {
     const all = new Map(this.#routeFolds())
     all.set(convoId, held)
     this.#routeFolds.set(all)
-    afterNextRender(land, { injector: this.#injector })
+    afterNextRender(land)
   }
 
   onRouteBranchKey(event: KeyboardEvent, nodeId: string): void {
@@ -4638,7 +4611,7 @@ export class ChatWindowComponent implements OnDestroy {
       }
       this.#routeExpect = next
       side.scrollTo({ top: next.top, left: next.left, behavior: 'auto' })
-    }, { injector: this.#injector })
+    })
   }
 
   #routeIsBeneath(key: string, ancestor: string): boolean {
@@ -4711,7 +4684,7 @@ export class ChatWindowComponent implements OnDestroy {
       this.selectRouteItem(item, 'key')
       return true
     }
-    if (!land()) afterNextRender(() => { land() }, { injector: this.#injector })
+    if (!land()) afterNextRender(() => { land() })
   }
 
   /** THE KEYMAP HOLD. The hive's keymap runs on `window` in the capture phase,
@@ -4848,7 +4821,7 @@ export class ChatWindowComponent implements OnDestroy {
    *  every chunk is a new string, and caching them would be a leak with a
    *  hit rate of zero. */
   readonly streamHtml = computed(() =>
-    this.#sanitizer.bypassSecurityTrustHtml(renderChatMarkdown(this.streaming(), this.#markdownOptions)))
+    trustHtml(renderChatMarkdown(this.streaming(), this.#markdownOptions)))
 
   // ── waiting honesty ─────────────────────────────────────────────────────
 
@@ -9415,11 +9388,3 @@ export class ChatWindowComponent implements OnDestroy {
 
 }
 
-// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
-// app.html tag (see shell-surface-registry.ts).
-registerShellSurface({
-  name: 'hc-chat-window',
-  owner: '@hypercomb.shared/ChatWindowComponent',
-  component: ChatWindowComponent,
-  order: 113,
-})
