@@ -413,13 +413,20 @@ class NativeSigDirectory {
   /** A sub-bucket. Always available with `create`, and reported absent without
    *  it unless a member already lives under that prefix — matching OPFS. */
   async getDirectoryHandle(name: string, options?: { create?: boolean }): Promise<NativeSigDirectory> {
+    const prefix = `${this.#key(name)}/`
     if (!options?.create) {
-      const entries = await this.#entries()
-      if (!entries.some(e => e.name === name && e.directory)) {
+      // Exists iff a member lives under it. Asked WITH the prefix, so the
+      // store answers with that sub-bucket's members (usually none) instead
+      // of the whole directory — a self-clean asks this of every bag, once
+      // per boot (2026-11-12). A backend that ignores the prefix sends the
+      // lot, and the same test still holds.
+      const payload = { sig: this.name, prefix }
+      const members = (await this.bridge.invoke('raw_dir_entries', payload)) as RawEntry[]
+      if (!members.some(e => e.name.startsWith(prefix) && e.name.length > prefix.length)) {
         throw notFound(name, `sub-bucket of ${this.name.slice(0, 12)}…`)
       }
     }
-    return new NativeSigDirectory(this.name, this.bridge, `${this.#key(name)}/`)
+    return new NativeSigDirectory(this.name, this.bridge, prefix)
   }
 
   async removeEntry(name: string, options?: { recursive?: boolean }): Promise<void> {
@@ -623,6 +630,13 @@ export class NativeRootDirectory {
         if (!present) throw notFound(name, 'root content')
       }
     }
+    return this.#handle(name, served)
+  }
+
+  /** A content handle. `served` is bytes already read (reused for the
+   *  handle's life — content is immutable), `null` never reaches here, and
+   *  `'unavailable'` means read on first `getFile()`. */
+  #handle(name: string, served: Uint8Array | null | 'unavailable'): NativeFileHandle {
     return new NativeFileHandle(
       name,
       async () => {
@@ -712,11 +726,18 @@ export class NativeRootDirectory {
     for (const entry of await this.#entries()) yield entry.name
   }
 
+  // A LISTED FILE EXISTS BY CONSTRUCTION (2026-11-12). Iteration used to
+  // hand out each file through `getFileHandle`, whose existence proof is a
+  // `content_has` round trip in a browser — one per content file, 86,000 on a
+  // real hive, every time anything walked the root (a self-clean that only
+  // wanted the directories paid all of them). The listing just said the file
+  // is there; its handle reads lazily, exactly as a sub-directory's do.
+
   async *values(): AsyncGenerator<NativeFileHandle | NativeSigDirectory> {
     for (const entry of await this.#entries()) {
       yield entry.directory
         ? new NativeSigDirectory(entry.name, this.bridge)
-        : await this.getFileHandle(entry.name)
+        : this.#handle(entry.name, 'unavailable')
     }
   }
 
@@ -726,7 +747,7 @@ export class NativeRootDirectory {
         entry.name,
         entry.directory
           ? new NativeSigDirectory(entry.name, this.bridge)
-          : await this.getFileHandle(entry.name),
+          : this.#handle(entry.name, 'unavailable'),
       ]
     }
   }

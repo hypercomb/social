@@ -150,6 +150,37 @@ describe('the retired push pool is collected, never trusted', () => {
     expect(pushPool.files.has(`${SHORT}.layer`)).toBe(true)
   })
 
+  it('reclaims a zero-byte entry beside its canonical copy, and keeps one with none', async () => {
+    // 2026-11-12: a torn queue write left 11,271 empty entries on a real hive,
+    // each beside a full canonical copy; the size match kept them all forever.
+    root.put(HELD, body('the real bytes'))
+    pushPool.put(`${HELD}.layer`, new Uint8Array(0))
+    pushPool.put(`${ORPHAN}.resource`, new Uint8Array(0))
+
+    const report = await collect()
+
+    expect(report.reclaimed).toBe(1)
+    expect(pushPool.files.has(`${HELD}.layer`)).toBe(false)
+    // Unconfirmed is kept, however empty: the collector removes only what
+    // it has confirmed is already home.
+    expect(report.kept).toBe(1)
+    expect(pushPool.files.has(`${ORPHAN}.resource`)).toBe(true)
+    expect(root.files.has(HELD)).toBe(true)
+  })
+
+  it('reclaims the swap file of an unfinished write only once the canonical copy is home', async () => {
+    root.put(HELD, body('the real bytes'))
+    pushPool.put(`${HELD}.layer.crswap`, body('the real'))
+    pushPool.put(`${ORPHAN}.resource.crswap`, body('half of the only copy'))
+
+    const report = await collect()
+
+    expect(pushPool.files.has(`${HELD}.layer.crswap`)).toBe(false)
+    expect(pushPool.files.has(`${ORPHAN}.resource.crswap`)).toBe(true)
+    expect(report.kept).toBe(1)
+    expect(root.dirs.has(pushAddress)).toBe(true)
+  })
+
   it('finds a bee in the bees pool, not at the root', async () => {
     const bees = await root.getDirectoryHandle(await sha256Hex('bees'), { create: true })
     bees.put(`${BEE}.js`, body('export const x = 1'))

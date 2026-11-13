@@ -75,6 +75,11 @@ const SIG_RE = /^[a-f0-9]{64}$/
 /** `{sig}.{kind}` — the queue entry name shape. Character class, not an
  *  escape, so the pattern reads the same in every quoting context. */
 const ENTRY_RE = /^([a-f0-9]{64})[.](layer|bee|dependency|resource)$/
+/** The browser's swap file for a write to a queue entry that never finished
+ *  (`createWritable` stages into `<name>.crswap`). */
+const SWAP_RE = /^([a-f0-9]{64})[.](layer|bee|dependency|resource)[.]crswap$/
+/** `holdsAt` size meaning "a canonical copy of any length above zero". */
+const ANY_SIZE = -1
 
 type RetiredKind = 'layer' | 'bee' | 'dependency' | 'resource'
 
@@ -144,7 +149,7 @@ const holdsAt = async (
   for (const name of names) {
     try {
       const file = await (await dir.getFileHandle(name, { create: false })).getFile()
-      if (file.size === size) return true
+      if (size === ANY_SIZE ? file.size > 0 : file.size === size) return true
     } catch { /* not under this name */ }
   }
   return false
@@ -195,11 +200,22 @@ const collectQueueDir = async (
   if (!found) return false
   let emptied = found.onlyFiles
   for (const name of found.names) {
-    const match = name.match(ENTRY_RE)
+    // A queue entry, or the swap file of a write to one that never finished
+    // (the browser stages `createWritable` into `<name>.crswap`).
+    const match = name.match(ENTRY_RE) ?? name.match(SWAP_RE)
     if (!match) { emptied = false; continue }   // not ours — leave it
     try {
-      const file = await (await dir.getFileHandle(name, { create: false })).getFile()
-      if (!(await canonicalHolds(root, match[1], match[2] as RetiredKind, file.size))) {
+      const swap = name.endsWith('.crswap')
+      const size = swap ? 0 : (await (await dir.getFileHandle(name, { create: false })).getFile()).size
+      // WHAT CONFIRMS IT. A full copy needs a canonical entry of the same
+      // length. An EMPTY entry or a swap file needs only a canonical entry at
+      // all (2026-11-12): a torn queue write left 11,271 zero-byte entries on
+      // a real hive beside full canonical copies, the length match refused
+      // every one, and the collector re-checked them all on every boot. With
+      // the canonical copy home they hold nothing that is not already there;
+      // without it they are KEPT, like anything else unconfirmed.
+      const want = swap || size === 0 ? ANY_SIZE : size
+      if (!(await canonicalHolds(root, match[1], match[2] as RetiredKind, want))) {
         // The only copy of these bytes, or a copy we cannot vouch for.
         report.kept++
         emptied = false
@@ -207,7 +223,7 @@ const collectQueueDir = async (
       }
       await dir.removeEntry(name)
       report.reclaimed++
-      report.reclaimedBytes += file.size
+      report.reclaimedBytes += size
     } catch { emptied = false /* unreadable — a later pass retries */ }
   }
   return emptied
