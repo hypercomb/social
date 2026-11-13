@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { SignatureService, registerPoolMeaning } from '@hypercomb/core'
-import { contributionKey, dropContribution, pickKey, readContributions, readPick, signPick, type ContributionReadDeps, type PageContribution, type PickDeps } from './page-contributions.js'
+import { contributionKey, dropContribution, pagePickKey, readContributions, readPick, signPick, type ContributionReadDeps, type PageContribution, type PickDeps } from './page-contributions.js'
 import type { HostOfferDeps } from './host-offer.js'
 
 // AN EDIT TO SOMEBODY ELSE'S PAGE IS OFFERED, NEVER APPLIED (documentation/
@@ -141,7 +141,7 @@ describe('readPick', () => {
     const wordsSig = await sigOf(words)
     const { deps } = await setup({
       'old.example': { roots: {}, createdAt: 100 },
-      'new.example': { roots: { [pickKey(BASE_SIG)]: wordsSig }, createdAt: 200 },
+      'new.example': { roots: { [pagePickKey(BASE_SIG)]: wordsSig }, createdAt: 200 },
     })
     const pick = await readPick(['old.example', 'new.example'], OWNER, BASE_SIG, BASE, deps)
     expect(pick).toMatchObject({ pubkey: OWNER, sig: wordsSig, textOnly: true, host: 'new.example', at: 200 })
@@ -152,14 +152,14 @@ describe('readPick', () => {
     const words = BASE.replace('<h1>Hello</h1>', '<h1>Welcome</h1>')
     const wordsSig = await sigOf(words)
     const { deps } = await setup({
-      'old.example': { roots: { [pickKey(BASE_SIG)]: wordsSig }, createdAt: 100 },
+      'old.example': { roots: { [pagePickKey(BASE_SIG)]: wordsSig }, createdAt: 100 },
       'new.example': { roots: {}, createdAt: 200 },
     })
     expect(await readPick(['old.example', 'new.example'], OWNER, BASE_SIG, BASE, deps)).toBeNull()
   })
 
   it('believes no pick whose bytes do not hash to its name, and none without an owner', async () => {
-    const { deps } = await setup({ 'h.example': { roots: { [pickKey(BASE_SIG)]: '9'.repeat(64) }, createdAt: 1 } })
+    const { deps } = await setup({ 'h.example': { roots: { [pagePickKey(BASE_SIG)]: '9'.repeat(64) }, createdAt: 1 } })
     expect(await readPick(['h.example'], OWNER, BASE_SIG, BASE, deps)).toBeNull()
     expect(await readPick(['h.example'], 'nobody', BASE_SIG, BASE, deps)).toBeNull()
   })
@@ -178,14 +178,14 @@ describe('signPick', () => {
     const deps = fake()
     expect(await signPick(['a.example', 'b.example'], BASE_SIG, PICK, deps)).toEqual({ ok: true, hosts: ['a.example', 'b.example'] })
     expect(deps.publish).toHaveBeenCalledWith('a.example', [NEW_SIG])
-    expect(deps.stamp).toHaveBeenCalledWith('b.example', pickKey(BASE_SIG), NEW_SIG)
+    expect(deps.stamp).toHaveBeenCalledWith('b.example', pagePickKey(BASE_SIG), NEW_SIG)
     expect(deps.clear).not.toHaveBeenCalled()
   })
 
   it('with no pick, takes it away so the published page shows again', async () => {
     const deps = fake()
     expect(await signPick(['a.example'], BASE_SIG, null, deps)).toEqual({ ok: true, hosts: ['a.example'] })
-    expect(deps.clear).toHaveBeenCalledWith('a.example', pickKey(BASE_SIG))
+    expect(deps.clear).toHaveBeenCalledWith('a.example', pagePickKey(BASE_SIG))
     expect(deps.stamp).not.toHaveBeenCalled()
   })
 

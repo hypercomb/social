@@ -25,7 +25,7 @@
 import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import {
   changedAt, FRAME_MAX_ONE, judge, leftBetween, NARROWING_START, nextToLook, pageOfLayer, runsOf, versionFrame,
-  type FrameReader, type LayerLike, type Narrowing, type PageRun, type Version,
+  type FrameReader, type FrameLayer, type Narrowing, type PageRun, type Version,
 } from './revision-viewer.model.js'
 
 export const REVISION_VIEWER_SURFACE = 'hc-revision-viewer'
@@ -42,7 +42,7 @@ const RELIST_MS = 300
 type HistoryLike = {
   sign(lineage: { explorerSegments: () => readonly string[] }): Promise<string>
   listLayers(locationSig: string): Promise<Array<{ layerSig: string; at: number; index: number }>>
-  getLayerBySig(layerSig: string): Promise<LayerLike | null>
+  getLayerBySig(layerSig: string): Promise<FrameLayer | null>
 }
 type StoreLike = {
   getResource(sig: string): Promise<Blob | null>
@@ -305,7 +305,7 @@ export class RevisionViewerElement extends ElementBase {
   }
 
   /** The page a version shows, and whether a record it needed was missing (then it may simply not be here yet). */
-  #pageOf(layer: LayerLike): Promise<{ page: string | null; missed: boolean }> {
+  #pageOf(layer: FrameLayer): Promise<{ page: string | null; missed: boolean }> {
     return pageOfLayer(layer, this.#reader)
   }
 
