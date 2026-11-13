@@ -367,6 +367,11 @@ export class ViewBee extends Worker {
    *  the site and only when a move follows, so this very arrival consumes it. */
   #holdOnce = false
   holdSurfaceOnce = (): void => { this.#holdOnce = true }
+  /** Take back a hold that no arrival spent. A view that arms the hold AHEAD
+   *  of the next arrival (explore: the browser's back is read before it could
+   *  arm one at the press) calls this when it closes, so the hold never
+   *  carries into an unrelated arrival elsewhere. */
+  releaseSurfaceHold = (): void => { this.#holdOnce = false }
 
   isArrivalSurface = (): boolean => {
     if (!this.#autoOpenedView) return false

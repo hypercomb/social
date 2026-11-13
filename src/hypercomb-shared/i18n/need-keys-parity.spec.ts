@@ -15,7 +15,7 @@ const KEYS = [
   'need.fed-by', 'need.added', 'need.promote', 'need.promote-failed', 'need.promoted',
   'need.offer', 'need.offer-title', 'need.offer-done', 'need.offer-root', 'need.offer-nohost',
   'need.offer-empty', 'need.offer-failed', 'need.via-offer', 'need.via-tile', 'need.empty-stack', 'need.promote-root', 'need.adds-to', 'need.adds-to-root',
-  'need.pane-servers', 'need.pane-here', 'need.pane-here-root', 'need.pane-drop', 'need.here', 'need.grouping', 'need.group-other',
+  'need.pane-servers', 'need.here', 'need.search', 'need.rail-click', 'need.rail-find', 'view.explore', 'view.explore.description', 'need.grouping', 'need.group-other',
 ]
 
 const catalogs = readdirSync(DIR).filter(f => f.endsWith('.json'))

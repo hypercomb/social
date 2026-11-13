@@ -3023,10 +3023,12 @@
   "need.adds-to": "+ \"{place}\" içine ekler",
   "need.adds-to-root": "+ kovanının köküne ekler",
   "need.pane-servers": "Sunuculardan",
-  "need.pane-here": "\"{place}\" içinde",
-  "need.pane-here-root": "Kovanının kökünde",
-  "need.pane-drop": "Eklemek için bir değeri buraya sürükle",
   "need.here": "burada",
   "need.grouping": "gruplanıyor…",
-  "need.group-other": "Diğer"
+  "need.group-other": "Diğer",
+  "need.search": "Bir ad keşfet",
+  "need.rail-click": "Bu karoyu aç",
+  "need.rail-find": "Karo bul",
+  "view.explore": "Keşfet",
+  "view.explore.description": "Bu yer bir liste olarak, her sunucunun onun için tuttuklarının yanında. Eklemek için bir değeri sürükle."
 }

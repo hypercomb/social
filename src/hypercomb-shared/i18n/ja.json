@@ -4125,10 +4125,12 @@
   "need.adds-to": "+ で「{place}」に追加します",
   "need.adds-to-root": "+ でハイブのルートに追加します",
   "need.pane-servers": "サーバーから",
-  "need.pane-here": "「{place}」内",
-  "need.pane-here-root": "ハイブのルート",
-  "need.pane-drop": "ここに値をドラッグして追加",
   "need.here": "ここ",
   "need.grouping": "グループ化中…",
-  "need.group-other": "その他"
+  "need.group-other": "その他",
+  "need.search": "名前を探索",
+  "need.rail-click": "このタイルを開く",
+  "need.rail-find": "タイルを探す",
+  "view.explore": "探索",
+  "view.explore.description": "この場所を一覧で、各サーバーが持つ内容と並べて表示。値をドラッグして追加できます。"
 }

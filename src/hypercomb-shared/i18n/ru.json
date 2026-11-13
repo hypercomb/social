@@ -3023,10 +3023,12 @@
   "need.adds-to": "+ добавляет в «{place}»",
   "need.adds-to-root": "+ добавляет в корень вашего улья",
   "need.pane-servers": "С серверов",
-  "need.pane-here": "В «{place}»",
-  "need.pane-here-root": "В корне вашего улья",
-  "need.pane-drop": "Перетащите значение сюда, чтобы добавить",
   "need.here": "здесь",
   "need.grouping": "группирую…",
-  "need.group-other": "Другое"
+  "need.group-other": "Другое",
+  "need.search": "Исследовать имя",
+  "need.rail-click": "Открыть эту плитку",
+  "need.rail-find": "Найти плитку",
+  "view.explore": "Обзор",
+  "view.explore.description": "Это место списком рядом с тем, что есть для него у каждого сервера. Перетащите значение, чтобы добавить."
 }

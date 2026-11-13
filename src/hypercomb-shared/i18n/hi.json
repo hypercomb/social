@@ -3023,10 +3023,12 @@
   "need.adds-to": "+ \"{place}\" में जोड़ता है",
   "need.adds-to-root": "+ आपकी हाइव के मूल में जोड़ता है",
   "need.pane-servers": "सर्वरों से",
-  "need.pane-here": "\"{place}\" में",
-  "need.pane-here-root": "आपके हाइव की जड़ में",
-  "need.pane-drop": "जोड़ने के लिए कोई मान यहाँ खींचें",
   "need.here": "यहाँ",
   "need.grouping": "समूह बना रहे हैं…",
-  "need.group-other": "अन्य"
+  "need.group-other": "अन्य",
+  "need.search": "कोई नाम खोजें",
+  "need.rail-click": "यह टाइल खोलें",
+  "need.rail-find": "टाइल खोजें",
+  "view.explore": "खोजें",
+  "view.explore.description": "यह जगह एक सूची के रूप में, हर सर्वर के पास इसके लिए जो है उसके साथ। जोड़ने के लिए कोई मान खींचें।"
 }

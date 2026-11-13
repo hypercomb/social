@@ -79,6 +79,10 @@ const TRANSIENT_MODES = new Set<ViewMode>([
   // The lift view takes the whole surface — the page lifted into a three.js
   // deck (lift-view.drone.ts), with no hexagons under it.
   'lift',
+  // Explore takes the whole surface — the place you stand as its tile list
+  // beside what the servers hold for it (sharing/need-feeds.queen.ts), on the
+  // same location and tiles as the grid.
+  'explore',
 ])
 
 /** True when `mode` is a full-surface (canvas-covering) view. The shells
