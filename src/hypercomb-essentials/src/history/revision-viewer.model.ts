@@ -38,7 +38,7 @@ const WEBSITE_SLOT = 'website'
 /** One version of a tile: its marker's position, its layer, and when it was written. */
 export type Version = { readonly index: number; readonly layerSig: string; readonly at: number | null }
 
-export type LayerLike = { readonly name?: string; readonly [slot: string]: unknown }
+export type FrameLayer = { readonly name?: string; readonly [slot: string]: unknown }
 
 const sigsIn = (slot: unknown): string[] =>
   Array.isArray(slot) ? slot.map(s => String(s ?? '').toLowerCase()).filter(s => SIG_RE.test(s)) : []
@@ -54,7 +54,7 @@ const HTML_HEAD_RE = /^\s*(?:\ufeff)?(<!doctype|<html|<svg|<\?xml)/i
  * first characters of a resource for the legacy test.
  */
 export async function pageSigOf(
-  layer: LayerLike | null,
+  layer: FrameLayer | null,
   readJson: (sig: string) => Promise<Record<string, unknown> | null>,
   readHead?: (sig: string) => Promise<string | null>,
   kind: string = WEBSITE_PAGE_KIND,
@@ -165,7 +165,7 @@ export function leftBetween(state: Narrowing): number | null {
 /** What a version's frame is handed: where the tile is, its layer, and every byte the page may read. */
 export type FrameData = {
   readonly segments: readonly string[]
-  readonly layer: LayerLike
+  readonly layer: FrameLayer
   /** signature -> base64 bytes; an envelope signature maps to the bytes it names */
   readonly resources: Readonly<Record<string, string>>
 }
@@ -322,7 +322,7 @@ const jsonOf = (bytes: Uint8Array | null): Record<string, unknown> | null => {
 }
 
 /** The page a layer shows, and whether a record it needed was missing. */
-export async function pageOfLayer(layer: LayerLike, read: FrameReader): Promise<{ page: string | null; missed: boolean }> {
+export async function pageOfLayer(layer: FrameLayer, read: FrameReader): Promise<{ page: string | null; missed: boolean }> {
   let missed = false
   const readJson = async (sig: string): Promise<Record<string, unknown> | null> => {
     const record = jsonOf(await read.bytes(sig))
@@ -338,7 +338,7 @@ export async function pageOfLayer(layer: LayerLike, read: FrameReader): Promise<
 }
 
 /** Everything one version's frame needs, read through `read`, and the document it runs in. */
-export async function versionFrame(layer: LayerLike, segments: readonly string[], read: FrameReader): Promise<VersionFrame> {
+export async function versionFrame(layer: FrameLayer, segments: readonly string[], read: FrameReader): Promise<VersionFrame> {
   const { page, missed } = await pageOfLayer(layer, read)
   if (!page) return { page: null, doc: null, problem: missed ? 'cold' : 'no-page', settled: !missed }
   const html = await read.bytes(page)

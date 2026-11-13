@@ -23,7 +23,7 @@
 // (a module may not import the shim). Every field is untrusted page text.
 
 import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
-import { FRAME_MAX_ONE, versionFrame, type FrameReader, type LayerLike } from '../history/revision-viewer.model.js'
+import { FRAME_MAX_ONE, versionFrame, type FrameReader, type FrameLayer } from '../history/revision-viewer.model.js'
 
 export const SITE_MANAGE_SURFACE = 'hc-site-manage'
 export const SITE_MANAGE_OWNER = '@diamondcoreprocessor.com/SiteManageView'
@@ -107,8 +107,8 @@ export class SiteManageElement extends ElementBase {
     if (!record.head) { this.#say(t('site-manage.nothing', 'Nothing is published here yet.')); return }
     this.#say(t('site-manage.loading', 'Loading your card…'))
     const layerBytes = await this.#bytesOf(record.head)
-    let layer: LayerLike | null = null
-    try { layer = layerBytes ? JSON.parse(new TextDecoder().decode(layerBytes)) as LayerLike : null } catch { layer = null }
+    let layer: FrameLayer | null = null
+    try { layer = layerBytes ? JSON.parse(new TextDecoder().decode(layerBytes)) as FrameLayer : null } catch { layer = null }
     if (ticket !== this.#ticket) return
     if (!layer) { this.#say(t('site-manage.cold', 'Your card is not on this device yet.'), true); return }
     const framed = await versionFrame(layer, [record.lineage], this.#reader).catch(() => null)

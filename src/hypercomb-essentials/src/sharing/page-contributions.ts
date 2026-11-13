@@ -162,7 +162,7 @@ export const readContributions = async (
 export const PAGE_PICK_PREFIX = 'pick:'
 
 /** The index key a page's pick is named under. */
-export const pickKey = (base: string): string => `${PAGE_PICK_PREFIX}${base}`
+export const pagePickKey = (base: string): string => `${PAGE_PICK_PREFIX}${base}`
 
 /** The publisher's pick for the page `base`, read from the newest copy of
  *  their index the hosts hold; null when there is none (or it was cleared, or
@@ -177,7 +177,7 @@ export const readPick = async (
   const read = await Promise.all([...new Set(hosts.filter(Boolean))].map(async host => ({ host, index: await deps.index(host, owner).catch(() => null) })))
   const newest = read.filter(r => r.index).sort((a, b) => b.index!.createdAt - a.index!.createdAt)[0]
   if (!newest?.index) return null
-  const sig = String(newest.index.roots?.[pickKey(page)] ?? '').toLowerCase()
+  const sig = String(newest.index.roots?.[pagePickKey(page)] ?? '').toLowerCase()
   if (!HEX64.test(sig) || sig === page) return null
   const bytes = await deps.bytes(newest.host, sig)
   if (!bytes || (await SignatureService.sign(bytes.slice().buffer as ArrayBuffer)) !== sig) return null
@@ -205,7 +205,7 @@ export const signPick = async (
   if (!HEX64.test(page)) return { ok: false, error: 'the page has no signature' }
   const targets = [...new Set(hosts.filter(Boolean))]
   if (!targets.length) return { ok: false, error: 'this page is not published anywhere yet' }
-  const key = pickKey(page)
+  const key = pagePickKey(page)
   const done: string[] = []
   const errors: string[] = []
   for (const host of targets) {
