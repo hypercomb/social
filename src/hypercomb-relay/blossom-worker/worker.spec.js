@@ -1853,6 +1853,50 @@ test('only a visit the owner made marks the browser: never a link from elsewhere
   })
 })
 
+// WHERE THE MANAGED PAGE PUBLISHES (manageRecord.writes; jwize 2026-11-13: "we
+// are upgrading something that we replicated"). The site door stays read-only;
+// the record names the zone root whose store this deployment writes.
+const managedRecordAt = async (env, url) => {
+  const page = await (await worker.fetch(typed(url), env)).text()
+  const found = /<script id="hc-manage" type="application\/json">([^<]*)<\/script>/.exec(page)
+  return found ? JSON.parse(found[1]) : null
+}
+
+test('a managed site door names its own zone root as the place its publish writes', async () => {
+  const { env } = await fixture()
+  env.DEBUGGER_SHELL_ORIGIN = 'https://debugger.example'
+  await withShim(async () => {
+    const record = await managedRecordAt(env, 'https://revolucion.pluginthematrix.com/@hypercomb')
+    assert.equal(record.writes, 'pluginthematrix.com')
+    // A marked browser's write at the site door is refused as every write there is: the door stays read-only.
+    const put = await worker.fetch(marked(`https://revolucion.pluginthematrix.com/${INDEXES}/${pubkey}`, { method: 'PUT', body: '{}' }), env)
+    assert.equal(put.status, 405)
+    assert.match(put.headers.get('x-reason') ?? '', /read-only/)
+    const atom = await worker.fetch(marked(`https://revolucion.pluginthematrix.com/${'e'.repeat(64)}`, { method: 'PUT', body: 'x' }), env)
+    assert.equal(atom.status, 405)
+  })
+})
+
+test('a site under a zone whose apex this deployment is not routed for writes at a zone root that is', async () => {
+  // jwize.com's apex is his relay; *.jwize.com reads this deployment's store,
+  // whose write face is pluginthematrix.com (wrangler.pluginthematrix.toml).
+  const bindings = { ...ONE_ZONE, 'jwize.example': { title: 'jwize', lineage: 'jwize.example', routed: false,
+    publishers: [{ pubkey, label: 'Jaime', primary: true }] } }
+  const event = await signedIndex({ pluginthematrix: head, revolucion: head, 'business-card': head },
+    undefined, { 'business-card': ['jwize.example'] })
+  const { env } = await fixture(event, bindings)
+  env.DEBUGGER_SHELL_ORIGIN = 'https://debugger.example'
+  await withShim(async () => {
+    const record = await managedRecordAt(env, 'https://business-card.jwize.example/@hypercomb')
+    assert.equal(record.lineage, 'business-card')
+    assert.equal(record.head, head)
+    assert.equal(record.writes, 'pluginthematrix.com')
+    // An apex routed here for its writes (ORIGIN_HOSTS) is its sites' own write face.
+    const origin = await managedRecordAt({ ...env, ORIGIN_HOSTS: 'jwize.example' }, 'https://business-card.jwize.example/@hypercomb')
+    assert.equal(origin.writes, 'jwize.example')
+  })
+})
+
 test('management opens only on a site published here, never on a made-up name under the zone', async () => {
   const { env } = await fixture()
   env.DEBUGGER_SHELL_ORIGIN = 'https://debugger.example'
