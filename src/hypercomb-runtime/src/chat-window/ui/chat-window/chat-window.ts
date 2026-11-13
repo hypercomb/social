@@ -5423,7 +5423,9 @@ export class ChatWindow {
     this.#armIdeaDrift()
   }
 
-  ngOnDestroy(): void {
+  // Was `ngOnDestroy` under Angular. Renamed: the web shell's Angular compiler also
+  // compiles the runtime, and refuses an undecorated class with a lifecycle-hook name (NG2007).
+  destroy(): void {
     // A leaked enter() strands `view:active` on forever — the canvas and the
     // stickies would never come back.
     this.#claimSurface(false)

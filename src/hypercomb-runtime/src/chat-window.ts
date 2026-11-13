@@ -55,7 +55,7 @@ export class ChatWindowElement extends ElementBase {
     // is still a removal a microtask later destroys the window.
     queueMicrotask(() => {
       if (this.isConnected || !this.#owner) return
-      try { this.#chat?.ngOnDestroy() } catch (error) { console.error(error) }
+      try { this.#chat?.destroy() } catch (error) { console.error(error) }
       this.#owner.dispose()
       this.#owner = null
       this.#view = null
