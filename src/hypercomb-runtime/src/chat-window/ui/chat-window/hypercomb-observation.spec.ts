@@ -610,3 +610,66 @@ describe('a tile read with children not on this device', () => {
     expect(out).toContain('unresolvedNote')
   })
 })
+
+// jwize 2026-11-13: on a card's site door every read answered not-found, and a
+// model asked for the community's published hives had nowhere to look. What the
+// community publishes is in pools on the hosts, never in the tile tree.
+describe('/pool: a pool of meaning on the hosts this hive follows', () => {
+  const address = 'a'.repeat(64)
+  const head = 'b'.repeat(64)
+  const ledger = JSON.stringify({ sites: [{ url: 'https://card.example/', title: 'Card', publishers: [{ head }] }] })
+  const poolReader = (): HypercombTreeReader => ({
+    readTree: vi.fn(async () => ({ ok: false as const, root: '/', code: 'not-found' as const })),
+    validateSnapshots: vi.fn(async () => true),
+    readPool: vi.fn(async (meaning: string) => ({
+      ok: true as const, root: `pool ${meaning}`, meaning, address,
+      hosts: [{ host: 'hypercomb.com', state: 'document' as const }],
+      members: [], total: 0,
+      documents: [{ hosts: ['hypercomb.com'], size: ledger.length, from: 0, text: ledger, truncated: false }],
+      truncated: false,
+    })),
+  })
+
+  it('takes a colon meaning and never a route, a host or a bare word', () => {
+    expect(parseHypercombObservationGrammars(['/pool host:publications', '/pool host:publications 8000'], ['card']).observations).toEqual([
+      { grammar: '/pool host:publications', verb: 'pool', segments: [], query: 'host:publications' },
+      { grammar: '/pool host:publications 8000', verb: 'pool', segments: [], query: 'host:publications', from: 8000 },
+    ])
+    for (const line of ['/pool', '/pool deployments', '/pool /card', '/pool https://evil.example', '/pool Host:Publications']) {
+      expect(() => parseHypercombObservationGrammars([line], [])).toThrow(/pool meaning with a colon/)
+    }
+  })
+
+  it('answers with the host index beside an empty hive, and says what it is', async () => {
+    const reader = poolReader()
+    const receipt = await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars(['/tree /', '/pool host:publications'], []), reader)
+    const [tree, pool] = (JSON.parse(formatHypercombObservationReceipt(receipt)) as { observations: Record<string, unknown>[] }).observations
+    expect(tree).toMatchObject({ error: 'not-found' })
+    expect(pool).toMatchObject({
+      grammar: '/pool host:publications', root: 'pool host:publications', address,
+      hosts: [{ host: 'hypercomb.com', state: 'document' }],
+      documents: [{ hosts: ['hypercomb.com'], from: 0, text: ledger }], truncated: false,
+    })
+    expect(String(pool['note'])).toContain('read <head> opens')
+    expect(reader.readPool).toHaveBeenCalledWith('host:publications', expect.objectContaining({ from: 0 }))
+    // A pool has no live head in this hive: nothing to revalidate.
+    expect(receipt.snapshots).toEqual([])
+  })
+
+  it('is an answer, not a refused block, on a reader that only knows its own tiles', async () => {
+    const { readPool: _none, ...old } = poolReader()
+    const receipt = await executeHypercombObservationPlan(parseHypercombObservationGrammars(['/pool host:publications'], []), old)
+    expect(formatHypercombObservationReceipt(receipt)).toContain('"error":"unavailable"')
+  })
+
+  it('turns back a reader that answers with a host it could not have asked', async () => {
+    const reader = poolReader()
+    reader.readPool = vi.fn(async (meaning: string) => ({
+      ok: true as const, root: `pool ${meaning}`, meaning, address,
+      hosts: [{ host: 'evil.example/?q=secret', state: 'silent' as const }], members: [], total: 0, documents: [], truncated: false,
+    }))
+    await expect(executeHypercombObservationPlan(parseHypercombObservationGrammars(['/pool host:publications'], []), reader))
+      .rejects.toThrow(/malformed pool host/)
+  })
+})

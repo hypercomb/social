@@ -7804,6 +7804,8 @@ export class ChatWindow {
         // by, so "read here" allowed on one page never covers another.
         const keys = plan.observations.map(observation => observation.verb === 'code'
           ? `code ${observation.query ?? ''}`.trim()
+          : observation.verb === 'pool'
+            ? `pool ${observation.query ?? ''}${observation.from ? ` ${observation.from}` : ''}`
           : observation.sig
             ? `${observation.verb} ${observation.sig}${observation.from ? ` ${observation.from}` : ''}`
             : observation.query !== undefined
