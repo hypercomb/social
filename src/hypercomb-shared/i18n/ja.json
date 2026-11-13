@@ -4125,5 +4125,7 @@
   "need.pane-here": "「{place}」内",
   "need.pane-here-root": "ハイブのルート",
   "need.pane-drop": "ここに値をドラッグして追加",
-  "need.here": "ここ"
+  "need.here": "ここ",
+  "need.grouping": "グループ化中…",
+  "need.group-other": "その他"
 }

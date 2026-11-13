@@ -3023,5 +3023,7 @@
   "need.pane-here": "В «{place}»",
   "need.pane-here-root": "В корне вашего улья",
   "need.pane-drop": "Перетащите значение сюда, чтобы добавить",
-  "need.here": "здесь"
+  "need.here": "здесь",
+  "need.grouping": "группирую…",
+  "need.group-other": "Другое"
 }

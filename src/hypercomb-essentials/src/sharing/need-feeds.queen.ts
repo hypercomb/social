@@ -27,6 +27,7 @@
 import { EffectBus, I18N_IOC_KEY, QueenBee, isReservedPoolWord, type I18nProvider } from '@hypercomb/core'
 import { feedNeed, foldValue, liveFeedDeps, mergeFeeds, type Feed, type NeedValue } from './need-feeds.js'
 import { contributeHere, standingSegments } from './contribute.js'
+import { GROUP_MIN_VALUES, groupKey, groupValues, liveGroupDeps, type ValueGroup } from './explore-groups.js'
 import { childNamesAt, createTile } from '../commands/trait-read.js'
 import { isLongPressMenu } from '../navigation/browser-menu.js'
 
@@ -92,6 +93,8 @@ type Mount = {
   /** The right pane: the tiles of the layer you stand in, and the drop target. */
   mine: HTMLDivElement
   mineHead: HTMLDivElement
+  /** The left pane's heading: where "grouping…" shows while the AI answers. */
+  listHead: HTMLDivElement
 }
 
 /** The drag payload a value carries from the servers' pane to yours. */
@@ -130,6 +133,14 @@ export class ExploreQueenBee extends QueenBee {
   #openedAt = ''
   /** The names of the tiles in the layer you stand in — the right pane. */
   #here: string[] = []
+  /** Named AI groups for the current list (explore-groups.ts), null = flat. */
+  #groups: ValueGroup[] | null = null
+  /** The list the groups (or the ask under way) are for. */
+  #groupKey = ''
+  #grouping = false
+  /** The one open group — an accordion, closed until a header is pressed. */
+  #openGroup: string | null = null
+  #groupDeps = liveGroupDeps()
 
   protected async execute(args: string): Promise<void> {
     const said = args.trim()
@@ -240,7 +251,8 @@ export class ExploreQueenBee extends QueenBee {
     const panes = el('div', 'position:relative;display:flex;flex-wrap:wrap;gap:16px;max-width:980px;margin:120px auto 0;align-items:flex-start;')
     const left = el('div', 'flex:1 1 340px;min-width:0;')
     const list = el('div', `position:relative;border:1px solid ${BORDER};border-radius:var(--hc-radius-card,3px);background:rgba(126,182,214,0.04);`)
-    left.append(el('div', paneHead, this.#t('need.pane-servers', 'From the servers')), list)
+    const listHead = el('div', paneHead, this.#t('need.pane-servers', 'From the servers'))
+    left.append(listHead, list)
     const right = el('div', 'flex:1 1 260px;min-width:0;')
     const mineHead = el('div', paneHead)
     const mine = el('div',
@@ -258,9 +270,13 @@ export class ExploreQueenBee extends QueenBee {
     })
     row.addEventListener('scroll', () => this.#drawLines())
     document.body.appendChild(host)
-    this.#mount = { host, summary, row, svg, list, stage, mine, mineHead }
+    this.#mount = { host, summary, row, svg, list, stage, mine, mineHead, listHead }
     this.#openedAt = standingSegments().join('\u0000')
     this.#here = []
+    this.#groups = null
+    this.#groupKey = ''
+    this.#grouping = false
+    this.#openGroup = null
     void this.#refreshHere()
     // The hive underneath cannot be seen, so none of its keys may act on it:
     // the keymap is HELD (stronger than suppressed — Escape's cascade and
@@ -310,6 +326,7 @@ export class ExploreQueenBee extends QueenBee {
     mount.summary.textContent = this.#say('need.summary', '{answered} of {hosts} servers answered · {values} values',
       { answered, hosts: feeds.length, values: values.length })
     this.#renderRow(feeds)
+    this.#askGroups(feeds, values)
     this.#renderValues(values)
     this.#renderHere()
     // Drawn now, not on a frame: measuring forces the layout, and a hidden
@@ -394,43 +411,114 @@ export class ExploreQueenBee extends QueenBee {
         asking ? this.#t('need.waiting', 'Waiting for the servers…') : this.#t('need.nothing', 'No server brought anything for this need.')))
       return
     }
-    for (const value of values) {
-      const line = el('div', `display:flex;align-items:center;gap:10px;padding:8px 12px;border-top:1px solid rgba(126,182,214,0.08);transition:opacity .15s;`)
-      line.dataset['fold'] = foldValue(value.text)
-      line.title = value.vias
-        .map(via => via === 'offer' ? this.#t('need.via-offer', 'offered as a list') : this.#t('need.via-tile', 'from a published tile'))
-        .join(' · ')
-      const dots = el('div', 'display:flex;gap:3px;flex:none;')
-      for (const h of value.hosts) {
-        dots.appendChild(el('span', `width:7px;height:7px;border-radius:50%;background:${HUES[this.#order.indexOf(h) % HUES.length]};`))
+    const pane = this.#mount!.listHead
+    pane.textContent = this.#t('need.pane-servers', 'From the servers') + (this.#grouping ? ' · ' + this.#t('need.grouping', 'grouping…') : '')
+    if (this.#groups) {
+      const byFold = new Map(values.map(value => [foldValue(value.text), value]))
+      // NEVER HIDDEN: a value no group holds — past the grouping cap, or one
+      // that arrived after the groups were made — is drawn under Other.
+      const other = this.#t('need.group-other', 'Other')
+      const grouped = new Set(this.#groups.flatMap(group => group.values.map(foldValue)))
+      const loose = values.filter(value => !grouped.has(foldValue(value.text))).map(value => value.text)
+      const drawn: ValueGroup[] = loose.length
+        ? (this.#groups.some(group => foldValue(group.name) === foldValue(other))
+            ? this.#groups.map(group => foldValue(group.name) === foldValue(other) ? { name: group.name, values: [...group.values, ...loose] } : group)
+            : [...this.#groups, { name: other, values: loose }])
+        : this.#groups
+      for (const group of drawn) {
+        const members = group.values.map(text => byFold.get(foldValue(text))).filter((v): v is NeedValue => !!v)
+        if (!members.length) continue
+        const open = this.#openGroup === group.name
+        const head = el('button',
+          `display:flex;align-items:center;gap:8px;width:100%;padding:9px 12px;background:none;border:0;border-top:1px solid rgba(126,182,214,0.08);` +
+          `color:${TEXT};font:inherit;font-weight:600;text-align:left;cursor:pointer;`)
+        head.append(el('span', `flex:none;width:10px;color:${STEEL};`, open ? '▾' : '▸'),
+          el('span', 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', group.name),
+          el('span', `flex:none;font-size:0.6875rem;font-weight:400;color:${DIM};`, String(members.length)))
+        // One open at a time (the accordion standard): opening one closes the last.
+        head.addEventListener('click', () => { this.#openGroup = open ? null : group.name; this.#render() })
+        list.appendChild(head)
+        if (open) for (const value of members) list.appendChild(this.#valueRow(value, here, true))
       }
-      const text = el('div', 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', value.text)
-      const count = el('div', `flex:none;font-size:0.6875rem;color:${DIM};`,
-        this.#say('need.fed-by', '{count} fed', { count: value.by.length }))
-      const fold = foldValue(value.text)
-      const isHere = here.has(fold)
-      const done = isHere || this.#promoted.has(fold)
-      const promote = el('button',
-        `flex:none;background:none;border:1px solid ${BORDER};color:${done ? DIM : STEEL};border-radius:var(--hc-radius-control,2px);padding:2px 9px;font:inherit;cursor:${done ? 'default' : 'pointer'};`,
-        isHere ? this.#t('need.here', 'here') : done ? this.#t('need.added', 'added') : '+')
-      // Drag it into your layer (the right pane). A value already here stays put.
-      if (!done) {
-        line.draggable = true
-        line.style.cursor = 'grab'
-        line.addEventListener('dragstart', (event) => {
-          event.dataTransfer?.setData(DRAG_TYPE, value.text)
-          event.dataTransfer?.setData('text/plain', value.text)
-          if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
-        })
-      }
-      promote.title = this.#place().tip
-      promote.disabled = done
-      promote.addEventListener('click', () => void this.#promote(value))
-      line.append(dots, text, count, promote)
-      line.addEventListener('mouseenter', () => { this.#hover = { value }; this.#highlight() })
-      line.addEventListener('mouseleave', () => { this.#hover = {}; this.#highlight() })
-      list.appendChild(line)
+      return
     }
+    for (const value of values) list.appendChild(this.#valueRow(value, here, false))
+  }
+
+  /** One value's row: its servers' dots, its text, who fed it, and its +. */
+  #valueRow(value: NeedValue, here: ReadonlySet<string>, inGroup: boolean): HTMLElement {
+    const line = el('div', `display:flex;align-items:center;gap:10px;padding:8px 12px 8px ${inGroup ? 30 : 12}px;border-top:1px solid rgba(126,182,214,0.08);transition:opacity .15s;`)
+    line.dataset['fold'] = foldValue(value.text)
+    line.title = value.vias
+      .map(via => via === 'offer' ? this.#t('need.via-offer', 'offered as a list') : this.#t('need.via-tile', 'from a published tile'))
+      .join(' · ')
+    const dots = el('div', 'display:flex;gap:3px;flex:none;')
+    for (const h of value.hosts) {
+      dots.appendChild(el('span', `width:7px;height:7px;border-radius:50%;background:${HUES[this.#order.indexOf(h) % HUES.length]};`))
+    }
+    const text = el('div', 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', value.text)
+    const count = el('div', `flex:none;font-size:0.6875rem;color:${DIM};`,
+      this.#say('need.fed-by', '{count} fed', { count: value.by.length }))
+    const fold = foldValue(value.text)
+    const isHere = here.has(fold)
+    const done = isHere || this.#promoted.has(fold)
+    const promote = el('button',
+      `flex:none;background:none;border:1px solid ${BORDER};color:${done ? DIM : STEEL};border-radius:var(--hc-radius-control,2px);padding:2px 9px;font:inherit;cursor:${done ? 'default' : 'pointer'};`,
+      isHere ? this.#t('need.here', 'here') : done ? this.#t('need.added', 'added') : '+')
+    // Drag it into your layer (the right pane). A value already here stays put.
+    if (!done) {
+      line.draggable = true
+      line.style.cursor = 'grab'
+      line.addEventListener('dragstart', (event) => {
+        event.dataTransfer?.setData(DRAG_TYPE, value.text)
+        event.dataTransfer?.setData('text/plain', value.text)
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
+      })
+    }
+    promote.title = this.#place().tip
+    promote.disabled = done
+    promote.addEventListener('click', () => void this.#promote(value))
+    line.append(dots, text, count, promote)
+    line.addEventListener('mouseenter', () => { this.#hover = { value }; this.#highlight() })
+    line.addEventListener('mouseleave', () => { this.#hover = {}; this.#highlight() })
+    return line
+  }
+
+  /**
+   * Ask the attached AI to group the list, once the servers have answered and
+   * only when the list is long enough (explore-groups.ts). The answer lands in
+   * a re-render; a newer list makes an older answer moot.
+   */
+  #askGroups(feeds: readonly Feed[], values: readonly NeedValue[]): void {
+    // A list that has shrunk below grouping is drawn flat again: groups made
+    // for a longer list must not keep drawing over it.
+    if (values.length < GROUP_MIN_VALUES) {
+      this.#groups = null
+      this.#groupKey = ''
+      this.#grouping = false
+      this.#openGroup = null
+      return
+    }
+    // While servers are still answering, the groups stay; a value that arrives
+    // meanwhile is drawn under Other (#renderValues), never hidden.
+    if (feeds.some(feed => feed.state === 'asking')) return
+    const texts = values.map(value => value.text)
+    const key = groupKey(this.#name, texts)
+    if (key === this.#groupKey) return
+    this.#groupKey = key
+    this.#groups = null
+    this.#openGroup = null
+    // A new list: whatever was in flight for the old one no longer counts.
+    this.#grouping = false
+    if (!this.#groupDeps.available()) return
+    this.#grouping = true
+    const mount = this.#mount
+    void groupValues(this.#name, texts, this.#groupDeps, this.#t('need.group-other', 'Other')).then(groups => {
+      if (mount !== this.#mount || key !== this.#groupKey) return
+      this.#groups = groups
+      this.#grouping = false
+      this.#render()
+    })
   }
 
   /** The right pane: the tiles in the layer you stand in, newest added last. */

@@ -3023,5 +3023,7 @@
   "need.pane-here": "在“{place}”中",
   "need.pane-here-root": "在你的蜂巢根部",
   "need.pane-drop": "把值拖到这里来添加",
-  "need.here": "这里"
+  "need.here": "这里",
+  "need.grouping": "分组中…",
+  "need.group-other": "其他"
 }

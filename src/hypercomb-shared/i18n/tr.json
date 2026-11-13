@@ -3023,5 +3023,7 @@
   "need.pane-here": "\"{place}\" içinde",
   "need.pane-here-root": "Kovanının kökünde",
   "need.pane-drop": "Eklemek için bir değeri buraya sürükle",
-  "need.here": "burada"
+  "need.here": "burada",
+  "need.grouping": "gruplanıyor…",
+  "need.group-other": "Diğer"
 }

@@ -3023,5 +3023,7 @@
   "need.pane-here": "في \"{place}\"",
   "need.pane-here-root": "في جذر خليتك",
   "need.pane-drop": "اسحب قيمة إلى هنا لإضافتها",
-  "need.here": "هنا"
+  "need.here": "هنا",
+  "need.grouping": "جارٍ التجميع…",
+  "need.group-other": "أخرى"
 }

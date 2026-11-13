@@ -3023,5 +3023,7 @@
   "need.pane-here": "\"{place}\" में",
   "need.pane-here-root": "आपके हाइव की जड़ में",
   "need.pane-drop": "जोड़ने के लिए कोई मान यहाँ खींचें",
-  "need.here": "यहाँ"
+  "need.here": "यहाँ",
+  "need.grouping": "समूह बना रहे हैं…",
+  "need.group-other": "अन्य"
 }

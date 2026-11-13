@@ -3023,5 +3023,7 @@
   "need.pane-here": "Di \"{place}\"",
   "need.pane-here-root": "Di akar hive Anda",
   "need.pane-drop": "Seret nilai ke sini untuk menambahkannya",
-  "need.here": "di sini"
+  "need.here": "di sini",
+  "need.grouping": "mengelompokkan…",
+  "need.group-other": "Lainnya"
 }

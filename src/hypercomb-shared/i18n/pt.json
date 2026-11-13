@@ -3023,5 +3023,7 @@
   "need.pane-here": "Em \"{place}\"",
   "need.pane-here-root": "Na raiz do seu hive",
   "need.pane-drop": "Arraste um valor aqui para adicioná-lo",
-  "need.here": "aqui"
+  "need.here": "aqui",
+  "need.grouping": "agrupando…",
+  "need.group-other": "Outros"
 }

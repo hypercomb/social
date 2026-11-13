@@ -3023,5 +3023,7 @@
   "need.pane-here": "\"{place}\" 안",
   "need.pane-here-root": "하이브 루트",
   "need.pane-drop": "값을 여기로 끌어 추가하세요",
-  "need.here": "여기"
+  "need.here": "여기",
+  "need.grouping": "묶는 중…",
+  "need.group-other": "기타"
 }

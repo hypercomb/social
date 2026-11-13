@@ -4826,5 +4826,7 @@
   "need.pane-here": "In \"{place}\"",
   "need.pane-here-root": "In your hive's root",
   "need.pane-drop": "Drag a value here to add it",
-  "need.here": "here"
+  "need.here": "here",
+  "need.grouping": "grouping…",
+  "need.group-other": "Other"
 }
