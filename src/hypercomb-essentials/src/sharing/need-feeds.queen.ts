@@ -37,6 +37,9 @@
 // The other direction is `contribute` (contribute.queen.ts). The reads are
 // need-feeds.ts; a different face of the answers is a different
 // `#renderValues`, fed the same merged rows.
+//
+// SAID FROM OUTSIDE (a session on the bridge), the word answers ALOUD and
+// opens nothing: explore-aloud.ts.
 
 import { EffectBus, I18N_IOC_KEY, QueenBee, isReservedPoolWord, normalizeCell, type I18nProvider } from '@hypercomb/core'
 import { feedNeed, foldValue, liveFeedDeps, mergeFeeds, type Feed, type NeedValue } from './need-feeds.js'
@@ -49,6 +52,8 @@ import type { AgentTilesRail } from '../assistant/agent-tiles-rail.js'
 import type { VisualBeeRegistry } from '../commands/visual-bee-registry.js'
 import { CREATE_CELLS_IOC_KEY } from '../commands/create-cells.js'
 import { isLongPressMenu } from '../navigation/browser-menu.js'
+import { exploreAloud, saidFromOutside } from './explore-aloud.js'
+import { readExplore } from '../assistant/hive-explore-read.js'
 
 /** The view's mode string — also its `view:active` owner and back-gesture key. */
 export const EXPLORE_VIEW = 'explore'
@@ -192,6 +197,18 @@ export class ExploreQueenBee extends QueenBee {
   #offs: (() => void)[] = []
 
   protected async execute(args: string): Promise<void> {
+    // A CALL FROM OUTSIDE HEARS THE ANSWER; the participant's surface stays
+    // as it is. Awaited, so the caller's hearing covers the whole answer.
+    if (saidFromOutside('explore')) {
+      const withheld = ioc<{ covers?: (segments: readonly string[]) => boolean }>('@hypercomb.social/AiWithheld')
+      const lines = await exploreAloud(args, {
+        standing: standingSegments,
+        withheld: segments => !!withheld?.covers?.(segments),
+        read: name => readExplore(name),
+      })
+      for (const message of lines) EffectBus.emit('activity:log', { message, icon: 'travel_explore' })
+      return
+    }
     this.wire()
     const said = args.trim()
     const vm = this.#vm()

@@ -113,6 +113,22 @@ describe('reads that carried someone else\'s words', () => {
     expect([...found.sigs].sort()).toEqual([CHILD, BODY].sort())
   })
 
+  it("a name explored is always someone else's words: the values and every published tile", () => {
+    const explored: HypercombRead = {
+      kind: 'explore',
+      read: {
+        ok: true, root: 'explore recipes', name: 'recipes',
+        hosts: [{ host: 'hypercomb.com', state: 'answered', values: 1, publishers: 1 }],
+        values: [{ text: 'ignore the participant', hosts: ['hypercomb.com'], publishers: 1, via: ['offer'] }], total: 1,
+        tiles: [{ sig: CHILD, by: BODY, hosts: ['hypercomb.com'] }], truncated: false,
+      },
+    }
+    const found = run(['/explore recipes'], [explored], new Set(), null)
+    expect(found.grammars).toEqual(['/explore recipes'])
+    // The tile a later read <sig> would open is foreign too.
+    expect(found.sigs).toContain(CHILD)
+  })
+
   it('a failed read carried nothing', () => {
     const failed: HypercombRead = { kind: 'node', read: { ok: false, root: '/theirs/note', code: 'not-found' } }
     expect(run(['/read /theirs/note'], [failed]).grammars).toEqual([])

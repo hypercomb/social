@@ -90,6 +90,8 @@ because it might have landed. The broker reads this at its next start.
 
 | `find <word>`, `find <word> /`, `find <word> /<route>` | Names the tiles whose name holds the word, and how the walk went: how many tiles it opened, how long it took, and why it stopped short when it did. The chat's models already read with the same grammar. |
 | `read`, `read /`, `read /<route>` | Says what a tile holds: the tiles under it, as routes, and its notes (replies indented, a very long one cut and said so). A withheld tile is never read out. |
+| `read <signature>` | Says a tile by its layer signature: its name, each tile under it with that tile's own signature, and the slots it carries. How a session follows `explore` into a tile another participant published. |
+| `explore <name>`, `explore` | Said from outside, says what every host this hive can ask holds for the tile name: the values, what each host said, and each published tile by signature. It opens no view; for the participant the same word is the explore view (`need-feeds.md`). |
 | `unfile on /<route>: <first words>` | Takes a note off a tile, named by how it starts; the words must fit exactly one note. A list change: history keeps the note, undo puts it back. |
 | `chats tidy`, `chats tidy dry` | Puts away (archives, never deletes) the one-off job conversations sessions hand the hive: answered and quiet ten minutes, or never answered and an hour old. Never a manager's own conversation, a tile's chat, or the participant's own chat. `dry` lists them and moves nothing. |
 

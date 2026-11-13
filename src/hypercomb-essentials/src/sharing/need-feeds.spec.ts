@@ -98,6 +98,12 @@ describe('need feeds — the servers feeding a need', () => {
     expect(feeds['four.test']!.values).toEqual([{ text: 'Pie', by: CAROL, via: 'offer' }])
   })
 
+  it('names each published tile it read by signature; a contributed list is not a tile', async () => {
+    const feeds = byHost(await feedNeed('recipes', () => {}, await world()))
+    expect(feeds['one.test']!.tiles).toEqual([{ sig: sig(1), by: ALICE }, { sig: sig(2), by: BOB }])
+    expect(feeds['four.test']!.tiles).toBeUndefined()
+  })
+
   it('reads each publisher\'s values from their own index, never the listing', async () => {
     const one = byHost(await feedNeed('recipes', () => {}, await world()))['one.test']!
     expect(one.values).toEqual([

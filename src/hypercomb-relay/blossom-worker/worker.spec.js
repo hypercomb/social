@@ -5373,6 +5373,64 @@ test('a held probe of a signed index a key never put here answers 204, and an in
   assert.equal((await held.json()).pubkey, assessor)
 })
 
+// A POOL AT ITS ADDRESS (2026-11-13). The origin's site answers a path it does
+// not hold with its page, so every `/<pool>/` at the zone root read as "does
+// not answer" — though the keys were in this heap, written by the index writes
+// this same host takes. The worker now answers a pool here as on any door; the
+// package pool alone stays the origin's (the test above), and the origin's
+// page is never a listing.
+test('an origin host answers a pool at its address from the heap, leaves an unlisted one to the origin, and never answers with its page', async () => {
+  const { env } = await originFixture()
+  const one = new TextEncoder().encode('1')
+  const name = 'a'.repeat(64)
+  const list = await sha256Hex(`list:${name}`)
+  const pictures = await sha256Hex(`pictures:${name}`)
+  // What an index write that names list:<name> and pictures:<name> leaves here.
+  env.CONTENT.held.set(`${list}/${assessor}`, one)
+  env.CONTENT.held.set(`${await sha256Hex('list:pools')}/${list}`, one)
+  env.CONTENT.held.set(`${pictures}/${assessor}`, one)
+  env.CONTENT.held.set(`${await sha256Hex('pictures:pools')}/${pictures}`, one)
+  const nobody = await sha256Hex(`list:${'b'.repeat(64)}`)
+  const theirs = 'c'.repeat(64)   // a listing the origin serves itself
+  const upstream = (url) => new URL(url).pathname === `/${theirs}/`
+    ? new Response('00000000\n', { headers: { 'content-type': 'text/plain' } })
+    : originPage(url)
+  await withUpstream(upstream, async (asked) => {
+    for (const pool of [list, pictures]) {
+      for (const query of ['', '?held']) {
+        const listing = await worker.fetch(new Request(`https://hypercomb.com/${pool}/${query}`), env)
+        assert.equal(listing.status, 200, `${pool}${query}`)
+        assert.match(listing.headers.get('content-type'), /^text\/plain/)
+        assert.equal(listing.headers.get('cache-control'), 'no-store')
+        assert.equal(listing.headers.get('access-control-allow-origin'), '*')
+        assert.equal(await listing.text(), `${assessor}\n`)
+      }
+      assert.equal((await worker.fetch(new Request(`https://hypercomb.com/${pool}/`, { method: 'HEAD' }), env)).status, 200)
+    }
+    // A floor pool with nothing in it is an empty listing, as on every door.
+    const floor = await worker.fetch(new Request(`https://hypercomb.com/${await sha256Hex('community:hosts')}/`), env)
+    assert.equal(floor.status, 200)
+    assert.equal(await floor.text(), '')
+    assert.deepEqual(asked, [], 'a pool the worker lists never reaches the origin')
+
+    // No pool here: the origin is asked, and its page is not a listing.
+    const quiet = await worker.fetch(new Request(`https://hypercomb.com/${nobody}/?held`), env)
+    assert.equal(quiet.status, 204)
+    assert.equal(quiet.headers.get('x-reason'), 'no pool at this address')
+    const loud = await worker.fetch(new Request(`https://hypercomb.com/${nobody}/`), env)
+    assert.equal(loud.status, 404)
+    assert.doesNotMatch(await loud.text(), /origin/)
+    // The name's own pool (the molecule) is never listed here either.
+    assert.equal((await worker.fetch(new Request(`https://hypercomb.com/${name}/`), env)).status, 404)
+
+    // A listing the origin holds itself is still the origin's.
+    const own = await worker.fetch(new Request(`https://hypercomb.com/${theirs}/`), env)
+    assert.equal(own.status, 200)
+    assert.equal(await own.text(), '00000000\n')
+    assert.deepEqual(asked.map(({ url }) => new URL(url).pathname), [`/${nobody}/`, `/${nobody}/`, `/${name}/`, `/${theirs}/`])
+  })
+})
+
 test('ORIGIN_HOSTS changes nothing on any other host, and only the deploy var makes an origin host', async () => {
   const packages = await sha256Hex('host:packages')
   const hosts = ['https://pluginthematrix.com', 'https://revolucion.pluginthematrix.com', 'https://susan.pluginthematrix.com',

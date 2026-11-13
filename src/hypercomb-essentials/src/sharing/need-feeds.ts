@@ -65,6 +65,15 @@ export interface Feed {
   readonly publishers: number
   /** Milliseconds from the ask to this report. */
   readonly ms: number
+  /** The published tiles of that name this host led to: each publisher's own
+   *  layer, by signature — the way in to their tile, not only its child names. */
+  readonly tiles?: readonly FeedTile[]
+}
+
+export interface FeedTile {
+  readonly sig: string
+  /** The publisher whose index named it. */
+  readonly by: string
 }
 
 export interface FeedDeps {
@@ -169,8 +178,8 @@ export async function feedNeed(
 
   const ask = async (host: string): Promise<Feed> => {
     const started = deps.now()
-    const report = (state: FeedState, values: FeedValue[] = [], publishers = 0): Feed => {
-      const feed: Feed = { host, state, values, publishers, ms: Math.max(0, deps.now() - started) }
+    const report = (state: FeedState, values: FeedValue[] = [], publishers = 0, tiles: FeedTile[] = []): Feed => {
+      const feed: Feed = { host, state, values, publishers, ms: Math.max(0, deps.now() - started), ...(tiles.length ? { tiles } : {}) }
       onFeed(feed)
       return feed
     }
@@ -195,11 +204,13 @@ export async function feedNeed(
       ? listedKeys((said[i] as { text: string }).text).map(pubkey => ({ pool, pubkey }))
       : [])
     const slots: FeedValue[][] = jobs.map(() => [])
+    const tileSlots: (FeedTile | null)[] = jobs.map(() => null)
     const work = eachLimited(jobs, READS_AT_ONCE, async ({ pool, pubkey }, j) => {
       try {
         // Their own word, from their own signed index — never the listing's.
         const sig = sigOf((await rootsOf(pubkey))?.[pool.key])
         if (!sig) return
+        if (pool.via === 'tile') tileSlots[j] = { sig, by: pubkey }
         const texts = pool.via === 'offer'
           ? await offeredValuesOf(sig, molecule, readHere)
           : await childNamesOf(sig, readHere)
@@ -212,7 +223,7 @@ export async function feedNeed(
       new Promise<void>(resolve => { timer = setTimeout(resolve, options.deadlineMs ?? HOST_DEADLINE_MS) }),
     ])
     if (timer !== undefined) clearTimeout(timer)
-    return report('answered', slots.flat(), indexes.size)
+    return report('answered', slots.flat(), indexes.size, tileSlots.filter((tile): tile is FeedTile => tile !== null))
   }
   return Promise.all(hosts.map(ask))
 }

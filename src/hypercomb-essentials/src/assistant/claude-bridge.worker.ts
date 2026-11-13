@@ -531,6 +531,14 @@ export class ClaudeBridgeWorker extends Worker {
   #quietDepth = 0
   #quietClose: ReturnType<typeof setTimeout> | null = null
 
+  /** The line a session is saying through an OPENED bridge right now, or
+   *  null. The twin of ExternalCallDrone.saying, for the door that says a
+   *  line without the participant's Enter: a word with a face of its own
+   *  (`explore` is a view) asks it and answers aloud instead
+   *  (sharing/explore-aloud.ts). */
+  #saying: string | null = null
+  get saying(): string | null { return this.#saying }
+
   /** Mutating ops in the CURRENT window. The badge shows this, not the
    *  renderer's held-paint count: paints coalesce, writes don't, and the
    *  number a person reads has to mean what it says. Reset when a window
@@ -2362,7 +2370,11 @@ export class ClaudeBridgeWorker extends Worker {
       // the line may take that long: a word that takes thirty seconds (a cold
       // walk, a slow tidy) used to be answered "did not answer in time" at
       // eight, and its lines then leaked into the next submit's window.
-      const answer = await this.#submitLine(req, text, quietMs ? Math.max(SUBMIT_DEADLINE_MS, listenMs) : SUBMIT_DEADLINE_MS)
+      this.#saying = text
+      let answer: BridgeResponse
+      try {
+        answer = await this.#submitLine(req, text, quietMs ? Math.max(SUBMIT_DEADLINE_MS, listenMs) : SUBMIT_DEADLINE_MS)
+      } finally { this.#saying = null }
       if (!answer.ok) return answer
       const kind = (answer.data as { outcome?: { kind?: string } } | undefined)?.outcome?.kind
       // NOTHING RAN, SO THERE IS NOTHING TO LISTEN FOR. A refusal and an

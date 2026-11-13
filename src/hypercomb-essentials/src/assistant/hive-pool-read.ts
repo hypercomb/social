@@ -20,10 +20,11 @@
 //                    host has published, is one.
 //
 // ANCHOR-FIRST, NEVER ENUMERATED. The model names a meaning it already holds;
-// there is no "list your pools". Only the hosts the participant carries are
-// asked (`community:hosts`; carrying none, the public content host, as
-// `discover` does) — a model never names a host, so a read can never be aimed
-// at a stranger. What goes out is a signature and nothing else.
+// there is no "list your pools". Only the hosts this hive can already ask are
+// asked (sharing/network-hosts.ts: the ones the participant carries and the
+// ones its content broker fetches from; with none, the public content host,
+// as `discover` does) — a model never names a host, so a read can never be
+// aimed at a stranger. What goes out is a signature and nothing else.
 //
 // READ ONLY, NOTHING KEPT. No pool is minted, nothing is written to the
 // store, and the meaning is NOT registered as a pool address: a word a model
@@ -32,9 +33,8 @@
 
 import { SignatureService } from '@hypercomb/core'
 import { fetchWithDeadline, mapBounded, HOST_CONCURRENCY } from '../sharing/bounded-fetch.js'
-import { listCommunityHosts } from '../sharing/community-hosts.js'
 import { lensOrigin, listingMembers } from '../sharing/community-lens.js'
-import { PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
+import { networkHosts } from '../sharing/network-hosts.js'
 import { askPoolListing } from '../sharing/pool-listing.js'
 
 /** A pool a model may ask for: a colon meaning, lower case, no spaces. A bare
@@ -88,10 +88,8 @@ export interface PoolReadDeps {
 }
 
 export const livePoolReadDeps: PoolReadDeps = {
-  hosts: async () => {
-    const carried = await listCommunityHosts().catch(() => [] as string[])
-    return carried.length ? carried : [...PUBLIC_CONTENT_HOSTS]
-  },
+  // Every host this hive can ask — the same list `explore` asks.
+  hosts: networkHosts,
   address: meaning => SignatureService.sign(new TextEncoder().encode(meaning).buffer as ArrayBuffer),
   // The one quiet way (sharing/pool-listing.ts): a host with no pool here says
   // so without a console error, and is not asked again for a while.

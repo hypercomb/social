@@ -234,9 +234,14 @@ pool host:publications  the creations those hosts have published
 pool <meaning> <from>   the next page of a long one-file index
 ```
 
-- **The model names a meaning, never a host.** The hosts asked are the ones
-  the participant carries; carrying none, the public content host is read, as
-  `discover` does. A bare word is refused: a tile's name pool is never listed.
+- **The model names a meaning, never a host.** The hosts asked are every host
+  the hive can ask (2026-11-13, `sharing/network-hosts.ts`: the ones the
+  participant carries and the ones its content broker fetches from); with
+  none, the public content host is read, as `discover` does. A bare word is
+  refused: a tile's name pool is never listed.
+- **A name is asked with `explore`, not `pool`.** The pools behind a tile name
+  (`list:`, `pictures:`) list publisher keys, which `read` cannot open;
+  `explore <name>` walks them (`need-feeds.md`, "A model explores a name").
 - **Both shapes at the one address.** `/<address>/` (asked with `?held`) is a
   set, whose members come back as signatures that `read <signature>` opens;
   `/<address>` is a one-file index, returned as the host sent it, a page at a
@@ -249,6 +254,58 @@ pool <meaning> <from>   the next page of a long one-file index
 Code: `assistant/hive-pool-read.ts` (the read), `hypercomb-observation.ts`
 (the `pool` verb and its receipt), core `work-instruction.ts` (what the model
 is taught).
+
+## The apex answers a pool at its address
+
+**Found and fixed in the worker 2026-11-13; live once the worker is deployed.**
+
+`hypercomb.com` is the only public content host a fresh hive knows
+(`PUBLIC_CONTENT_HOSTS`, and the fallback of `sharing/network-hosts.ts`).
+Asked for any pool, `GET https://hypercomb.com/<sign(meaning)>/` answered
+`200 text/html`: the site's own page. A reader takes a page for "no answer"
+(`sharing/pool-listing.ts`), so `pool`, `explore`, the explore view, the
+picture chooser and the calendar all heard nothing from the apex. A relay
+answers the same request properly (`jwize.com`: a listing, or 204 asked with
+`?held`).
+
+**Why.** The apex is an *origin host* (`ORIGIN_HOSTS`,
+`hypercomb-relay/blossom-worker/worker.js` `servesOrigin`). Its site stays on
+its own origin and the worker is the zone root's write face: it answers the
+writes, the heap (`/<sig>`), the signed index and the machine JSON, and hands
+every other read to the origin. `/<pool>/` was one of those other reads, on
+purpose, for one pool: the package pool `sign('host:packages')` lives on the
+origin under `/content/`, and an empty listing from the worker at the root
+would stop an install's walk before it reached it. The rule was written for
+every pool, so the keys an index write leaves in the worker's heap
+(`pictures:<sign(name)>`, `list:<sign(name)>`, `page:<base>`, `attest:`,
+an event's list, an operator's declared pools) could be written at the apex
+and never read back there.
+
+**The fix** (`originPoolListing`): on an origin host the worker answers a pool
+at its address as it does on every other door. Two things stay as they were:
+
+- the package pool is the origin's, untouched, so the install's walk is the
+  same request for request;
+- a pool the worker does not list is still the origin's to answer when it has
+  a listing of its own. Its page is not a listing: that is the site answering
+  a path it does not hold, and the reader hears "no pool at this address"
+  (204 asked with `?held`, 404 without) instead of silence.
+
+| `GET https://hypercomb.com/...` | Before | After |
+|---|---|---|
+| `/<sign('host:packages')>/` | the origin | the origin (unchanged) |
+| `/<pool the worker lists>/` | the site's page | the listing, `text/plain`, `no-store` |
+| `/<any other 64-hex>/` | the site's page | 204 with `?held`, else 404 |
+| `/content/...`, `/<sig>`, `/hive/<key>` | as today | as today |
+
+Covered by `worker.spec.js` ("an origin host answers a pool at its address
+from the heap..."); the suite's older test that the package pool and every
+page still reach the origin unchanged passes as it was.
+
+**To go live** the main worker is deployed by its operator, from
+`hypercomb-relay/blossom-worker`: `npm run deploy:pluginthematrix`. Then
+`curl -i "https://hypercomb.com/<64 hex>/?held"` answers 204 with
+`X-Reason: no pool at this address`, not a page. Nothing in a hive changes.
 
 ## Not this
 

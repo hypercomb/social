@@ -18,9 +18,12 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 // Where the participant stands; a test moves it to wander off mid-call.
 const place = vi.hoisted(() => ({ at: ['presentation'] as string[] }))
 
+// What the drone registers, so a test can ask it which line it is saying.
+const registered = vi.hoisted(() => ({} as Record<string, unknown>))
+
 vi.hoisted(() => {
   ;(window as unknown as { ioc: unknown }).ioc = {
-    register: () => { /* noop */ },
+    register: (key: string, value: unknown) => { registered[key] = value },
     get: (key: string) => key === '@hypercomb.social/Lineage'
       ? { explorerSegments: () => place.at }
       : undefined,
@@ -44,6 +47,10 @@ import './external-call.drone.js'
 const flush = () => new Promise(resolve => setTimeout(resolve, 0))
 
 let said: string[] = []
+/** What the drone named as the line being said, each time one was said. */
+let sayingWhenSaid: (string | null | undefined)[] = []
+const drone = (): { saying?: string | null } =>
+  registered['@diamondcoreprocessor.com/ExternalCallDrone'] as { saying?: string | null }
 let opened: string[] = []
 let writing: boolean[] = []
 let shown: (ExternalAsk | null)[] = []
@@ -54,6 +61,7 @@ beforeEach(() => {
   place.at = ['presentation']
   turns.length = 0
   said = []
+  sayingWhenSaid = []
   opened = []
   writing = []
   shown = []
@@ -63,6 +71,7 @@ beforeEach(() => {
 
 EffectBus.on<RemoteSubmitRequest>(REMOTE_SUBMIT, ({ text, accept, complete }) => {
   said.push(text)
+  sayingWhenSaid.push(drone()?.saying)
   accept?.()
   // The participant clicks away while this line runs.
   if (text === '/create while-you-wander') place.at = ['elsewhere']
@@ -96,6 +105,16 @@ const call = (from: string, lines: string[]) => {
 const lastAsk = (): ExternalAsk | null => shown[shown.length - 1] ?? null
 
 describe('external calls', () => {
+  it('names the line it is saying while it is said, and nothing before or after', async () => {
+    expect(drone().saying).toBeNull()
+    call('claude-code', ['explore recipes', '/create word'])
+    expect(drone().saying).toBeNull()
+    EffectBus.emitTransient(EXTERNAL_ANSWER, { id: lastAsk()!.id, decision: 'run' })
+    await flush(); await flush()
+    expect(sayingWhenSaid).toEqual(['explore recipes', '/create word'])
+    expect(drone().saying).toBeNull()
+  })
+
   it('waits for the participant, then runs through the machine door and records the run', async () => {
     const c = call('claude-code', ['/create word', '/remove word'])
     expect(c.taken()).toBe(true)

@@ -59,13 +59,16 @@ module.exports = {
     rewrite: path => path.replace(/^\/anthropic/, ''),
     bypass: trialFirst(),
   },
-  '/claude-bridge-health': {
-    target: 'http://localhost:2401',
-    bypass: trialFirst(bridgeHealth(2401)),
-  },
+  // The test port FIRST: a path is matched by prefix, in this order, so
+  // `/claude-bridge-health` listed first answered for the 2411 path too and
+  // an isolated test stack never saw its own broker.
   '/claude-bridge-health-2411': {
     target: 'http://localhost:2411',
     bypass: trialFirst(bridgeHealth(2411)),
+  },
+  '/claude-bridge-health': {
+    target: 'http://localhost:2401',
+    bypass: trialFirst(bridgeHealth(2401)),
   },
   // Last, so the paths above still match first. Every other request on a
   // try- name that has a page is the page. Everything else is the hive.

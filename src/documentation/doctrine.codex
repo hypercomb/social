@@ -67,6 +67,7 @@ T4<T1: Never push updates. The consumer requests, an icon informs, the human dec
 T5<T1: Three gates, never conflated: selection (whom I take from), intake (what I keep, by marks), activation (what may execute). Publishing and activating are separate choices; holding bytes implies neither.
 T6<T1: Carry the selected closure, not a source build. Verify each signature-named byte before use.
 T7: Nothing served may make a visitor's browser contact a host we do not control: no font, stylesheet, script, image or preconnect from elsewhere.
+T8<T1: Every hive reads the network; only what it publishes or offers is read.
 @10 Interest ~pheromones.md intake-filter.md
 R1<I1: A pheromone is an authored, signed interest-signal deposited on a signature. The author may be a person or an agent that read the content. It travels with the content.
 R2<R1,N1: A pheromone never labels what something is: that is the name's job. A new grouping needs a name, never a pheromone kind.

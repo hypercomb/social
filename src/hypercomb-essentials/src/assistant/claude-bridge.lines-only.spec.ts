@@ -59,6 +59,11 @@ let socket: FakeSocket
 let asked = 0
 const calls: ExternalCallRequest[] = []
 const direct: string[] = []
+/** What the worker named as the line being said, each time one reached the
+ *  command line directly. */
+const sayingWhenSaid: (string | null | undefined)[] = []
+const bridgeWorker = (): { saying?: string | null } =>
+  services.get('@diamondcoreprocessor.com/ClaudeBridgeWorker') as { saying?: string | null }
 
 const send = (request: Record<string, unknown>): string => {
   const id = `lines-${++asked}`
@@ -77,7 +82,12 @@ beforeAll(async () => {
   const worker = services.get('@diamondcoreprocessor.com/ClaudeBridgeWorker') as { pulse(grammar: string): Promise<void> }
   // The queue the external-call drone keeps, faked: take the call, hold it.
   EffectBus.on<ExternalCallRequest>(EXTERNAL_CALL, call => { call.accept?.(); calls.push(call) })
-  EffectBus.on<RemoteSubmitRequest>(REMOTE_SUBMIT, request => { request.accept?.(); direct.push(request.text) })
+  EffectBus.on<RemoteSubmitRequest>(REMOTE_SUBMIT, request => {
+    request.accept?.()
+    direct.push(request.text)
+    sayingWhenSaid.push(bridgeWorker().saying)
+    request.complete?.({ kind: 'ran', actions: [] })
+  })
   await worker.pulse('')
   await vi.waitFor(() => expect(FakeSocket.made).toHaveLength(1))
   socket = FakeSocket.made[0]!
@@ -86,7 +96,7 @@ beforeAll(async () => {
 
 describe('the bridge carries lines only', () => {
   it('refuses every other op and says how to say it', async () => {
-    for (const op of ['list', 'put-resource', 'bag-set', 'stamp', 'chat-reply', 'swarm-debug', 'update']) {
+    for (const op of ['list', 'put-resource', 'bag-set', 'stamp', 'chat-reply', 'swarm-debug', 'update', 'explore']) {
       const res = await reply(send({ op, text: 'x' }))
       expect(res.ok).toBe(false)
       expect(res.error).toContain(`"${op}" is shut off`)
@@ -140,6 +150,20 @@ describe('the bridge carries lines only', () => {
       expect(direct).toEqual([])
       calls[2]!.complete?.({ kind: 'declined', convoId: 'c' })
       expect((await reply(id)).ok).toBe(true)
+    } finally {
+      localStorage.removeItem('hc:bridge:open')
+    }
+  })
+
+  it('names the line an opened bridge is saying while it is said, and nothing after', async () => {
+    expect(bridgeWorker().saying).toBeNull()
+    localStorage.setItem('hc:bridge:open', 'all')
+    try {
+      const res = await reply(send({ op: 'submit', text: 'explore recipes', listen: 0 }))
+      expect(res.ok).toBe(true)
+      expect(direct).toEqual(['explore recipes'])
+      expect(sayingWhenSaid).toEqual(['explore recipes'])
+      expect(bridgeWorker().saying).toBeNull()
     } finally {
       localStorage.removeItem('hc:bridge:open')
     }

@@ -103,6 +103,14 @@ describe('withheld tiles at the read step', () => {
     expect(withoutWithheld(kept, covers).results[0]).toBe(kept.results[0])
   })
 
+  it('never sends a withheld page\'s name to the hosts for a model, and leaves a typed name alone', () => {
+    const here = parseHypercombObservationGrammars(['/explore'], ['susan', 'family-support'])
+    expect(withheldObservation(here.observations, covers)?.grammar).toBe('/explore')
+    // A name the model typed names no route of this hive.
+    const typed = parseHypercombObservationGrammars(['/explore recipes'], ['susan'])
+    expect(withheldObservation(typed.observations, () => true)).toBeUndefined()
+  })
+
   it('tells the model not to look for another way in', () => {
     expect(withheldMessage('/read /susan')).toContain('another way in')
   })

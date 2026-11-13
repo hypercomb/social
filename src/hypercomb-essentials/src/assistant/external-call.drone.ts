@@ -174,6 +174,7 @@ export class ExternalCallDrone extends Drone {
   #queue: Pending[] = []
   #busy = false
   #count = 0
+  #saying: string | null = null
 
   protected override sense = () => true
   protected override heartbeat = async (): Promise<void> => { this.#bind() }
@@ -185,6 +186,11 @@ export class ExternalCallDrone extends Drone {
 
   /** How many calls wait, the one shown included. */
   get waiting(): number { return this.#queue.length }
+
+  /** The line of a call from outside being said right now, or null. A word
+   *  with a face of its own for the participant (`explore` is a view) asks
+   *  this to answer aloud instead, where the caller hears it. */
+  get saying(): string | null { return this.#saying }
 
   #bind(): void {
     if (this.#bound) return
@@ -320,7 +326,9 @@ export class ExternalCallDrone extends Drone {
       // Heard for this line only, so nothing the participant does between
       // lines reaches the caller.
       const listening = hearing()
-      const outcome = await sayLine(text)
+      this.#saying = text
+      let outcome: RemoteSubmitOutcome
+      try { outcome = await sayLine(text) } finally { this.#saying = null }
       if (walking) {
         if (outcome.kind === 'refused' || outcome.kind === 'ambiguous') walking.stop()
         await walking.done

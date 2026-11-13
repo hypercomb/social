@@ -2023,10 +2023,13 @@ function servesHostDoor(env, hostname) {
 // and this worker becomes the zone root's WRITE FACE. On a host named here the
 // worker answers every write, the reads that give back what the hive writes
 // (the heap, the signed index) and the machine JSON nobody else serves, and
-// hands every other read to that origin unchanged. A pool listing `/<pool>/` is
-// the origin's on purpose: the package pool is there, and an empty listing here
-// would stop the install's walk before it ever asked /content/. (The package
-// under /content/ is the heap's first once it holds it — originHostRead.)
+// hands every other read to that origin unchanged. THE PACKAGE POOL's listing
+// `/<sign('host:packages')>/` is the origin's on purpose: the package pool is
+// there, and an empty listing here would stop the install's walk before it
+// ever asked /content/. (The package under /content/ is the heap's first once
+// it holds it — originHostRead.) Every OTHER pool is answered at its address
+// like on any door (originPoolListing): what the hive writes here, it reads
+// back here.
 // The hand-off is fetch(request), which reaches the origin only from a ZONE
 // ROUTE — on a custom domain this worker IS the origin and would call itself —
 // so the list is the deploy var alone, never a binding or a signed record.
@@ -2035,6 +2038,31 @@ const ORIGIN_OWNED_BY_WORKER = /^\/(?:(?:@resource\/)?[0-9a-f]{64}(?:\/[^/]+)?|h
 function servesOrigin(env, hostname) {
   return String(env.ORIGIN_HOSTS || '').split(/[\s,]+/)
     .some(host => host && host.toLowerCase() === String(hostname || '').toLowerCase())
+}
+
+// A POOL AT ITS ADDRESS, ON AN ORIGIN HOST (2026-11-13). Every `/<pool>/` used
+// to go to the origin, whose site answers a path it does not hold with its
+// page — so the zone root, the one host a fresh hive knows, read as "does not
+// answer" for every pool of meaning: a declared one, a name's picture and
+// list pools, a page's contributions, an event's list. The keys were written
+// to this heap by the index writes this same host took, and could not be read
+// back at the address every hive derives.
+//
+// So the worker answers a pool here as it does on every other door, with two
+// things kept as they were:
+//   · the package pool stays the origin's, untouched (null: the caller hands
+//     the request on exactly as before);
+//   · a pool the worker does not list is still the origin's to answer, if it
+//     has a listing of its own there. Its PAGE is not one: that is the site
+//     answering a path it does not hold, and it stays "no pool at this
+//     address" — 204 asked with `?held`, 404 without.
+async function originPoolListing(request, env, sig) {
+  if (sig === await poolAddress(HOST_PACKAGES_MEANING)) return null
+  const mine = await servePoolListing(request, env, sig)
+  if (mine.status === 200) return mine
+  const theirs = await fetch(request)
+  if (theirs.ok && !String(theirs.headers.get('content-type') || '').includes('text/html')) return theirs
+  return mine
 }
 
 // AN ORIGIN HOST'S PACKAGE, FROM THE HEAP (jwize 2026-10-11: "make each
@@ -7180,6 +7208,11 @@ const router = {
     // package the heap holds (originHostRead), read from the var as deployed.
     if ((method === 'GET' || method === 'HEAD') && servesOrigin(env, requestUrl.hostname)
       && !ORIGIN_OWNED_BY_WORKER.test(pathname)) {
+      // A pool at its address is the worker's here too, all but the package
+      // pool (originPoolListing).
+      const pool = pathname.match(/^\/([0-9a-f]{64})\/$/)
+      const listing = pool ? await originPoolListing(request, env, pool[1]) : null
+      if (listing) return listing
       return (await originHostRead(request, deployed, requestUrl, ctx?.waitUntil ? (work) => ctx.waitUntil(work) : undefined)) ?? fetch(request)
     }
 

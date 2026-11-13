@@ -1156,7 +1156,7 @@
   "didyouknow.collected": "collected {taken} ideas onto this page's did-you-know tile",
   "slash.find": "Find tiles whose name holds a word: here and below, / for the whole hive, /<route> under a route; /find <word> /",
   "slash.chats": "Put away finished job conversations: chats tidy, or chats tidy dry to see them first; /chats tidy",
-  "slash.read": "Say what a tile holds: its tiles and its notes — here, / for the root, or /<route>; /read /<route>",
+  "slash.read": "Say what a tile holds: its tiles and its notes — here, / for the root, /<route>, or a signature; /read /<route>",
   "slash.glossary": "Answer a Hypercomb term at once from its glossary tile, or lay the glossary out as tiles; /glossary <term>",
   "slash.inspect": "Drill into a tile: the behaviours that run it, their source, and every behaviour that source talks to; /inspect [tile]",
   "inspect.title": "Inspect",

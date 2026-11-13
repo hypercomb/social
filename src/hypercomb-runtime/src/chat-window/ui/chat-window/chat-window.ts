@@ -7808,6 +7808,8 @@ export class ChatWindow {
           ? `code ${observation.query ?? ''}`.trim()
           : observation.verb === 'pool'
             ? `pool ${observation.query ?? ''}${observation.from ? ` ${observation.from}` : ''}`
+          : observation.verb === 'explore'
+            ? `explore ${observation.query ?? ''}`
           : observation.sig
             ? `${observation.verb} ${observation.sig}${observation.from ? ` ${observation.from}` : ''}`
             : observation.query !== undefined

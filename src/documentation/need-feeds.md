@@ -56,6 +56,133 @@ tile) is not listed; a row that is a reference to an ancestor is a retreat,
 and the view leaves with it; a browser back pressed before the arrival into a
 step has settled is not yet held.
 
+## Every hive is on the network as a reader
+
+jwize, 2026-11-13: "This idea of exploring other hives you should be able to do
+this natively with all of your hosts that are network. This basically means
+your private stuff is always enrolled in this network. That means public on
+subdomains or as contributions those can be available for our development and
+agents have full access to these explore shares."
+
+How that is read here, and what is built from it:
+
+- **A hive is always enrolled as a reader.** It needs to have published
+  nothing, and to carry no host, to explore: every host it can ask is asked
+  (`sharing/network-hosts.ts`: the hosts the participant carries in
+  `community:hosts` and the ones its content broker fetches from; with none,
+  the public content host).
+- **What it finds is what others made public.** Two things are public under a
+  name: a tile somebody published (on a subdomain, a site door, any host), and
+  a list somebody contributed. Those are the explore shares.
+- **Enrolled to read is not enrolled to be read.** Nothing of a hive goes out
+  when it explores but the address derived from the name. A hive's own tiles
+  are found by others only after its participant publishes or contributes
+  them; nothing offers in the background. jwize confirmed this reading the
+  same day ("Yes, reader only"): private content is never listed. It is codex
+  axiom `T8`.
+- **Agents have the whole of it.** A model reads the explore shares with the
+  same question the view asks, below.
+
+### A model explores a name
+
+**Built 2026-11-13.** `pool <meaning>` could not answer this: the two pools
+behind a name list publisher *keys*, and each key's word is in that
+publisher's own signed index. The read does that walk:
+
+```
+explore <name>     what every host holds for the tile name
+explore            the same, for the name of the current page
+```
+
+The answer says what each host said (`answered`, `empty`, `silent`), every
+value with the hosts that fed it, how many publishers gave it and how (`offer`
+= a contributed list, `tile` = the children of a published tile), and
+**`tiles`**: each published tile of that name as its publisher's own layer
+signature. `read <signature>` opens one, and its children open the same way,
+so a model walks from a name into another hive.
+
+- **A name, never a route, a host or an address.** At most 64 characters, no
+  slash. The hosts asked are the hive's; a model cannot aim the read.
+- **Read only.** Nothing is written and nothing kept. To keep a value the
+  model creates it as a tile in a change block, which the participant runs.
+- **Someone else's words.** A value holding a control character is dropped. A
+  change that follows an explore read is held for the participant's hand, and
+  a tile reached from it by signature is still foreign.
+- **A withheld page keeps its name.** `explore` alone on a tile withheld from
+  outside models is refused: its name is not sent to the hosts for a model.
+- **Same bounds as the view**: 256 keys per pool, 64 children per tile, 15
+  seconds per host; 200 values and 32 tiles per answer, `total` says how many.
+
+Code: `assistant/hive-explore-read.ts` (the read), `sharing/need-feeds.ts`
+(`Feed.tiles`), runtime `hypercomb-observation.ts` (the `explore` verb, its
+checks and receipt), `withheld-reads.ts`, core `work-instruction.ts` (what the
+model is taught).
+
+### A session explores a name
+
+**Built 2026-11-13.** A development agent reaches the hive over the bridge,
+and the bridge carries command-line lines only (`speak-dont-bridge.md`). So
+its door is the word itself, said as a line:
+
+```
+explore <name>      what every host holds for the tile name, said aloud
+explore             the same, for the tile the hive stands on
+read <signature>    a tile `explore` listed, and each tile under it by signature
+```
+
+- **Said from outside, `explore` answers aloud and opens nothing.** For the
+  participant the word is the view. For a line a call from outside is saying,
+  it says the answer in the activity log, which is what the caller hears, and
+  the participant's surface stays as it is. The word asks who is saying the
+  line (`ExternalCallDrone.saying`, and `ClaudeBridgeWorker.saying` on a
+  bridge the participant opened): there is no second word and no bridge op.
+- **The same read the models make** (`readExplore`), so the same hosts, the
+  same bounds and the same refusals. The answer names every value, what each
+  host said, and each published tile by its whole signature.
+- **`read <signature>`** opens one of those tiles: its name, each tile under
+  it with that tile's own signature, and the slots it carries. A layer this
+  device does not hold is asked of the hosts the hive fetches from, once, and
+  believed only when its bytes hash to the name.
+- **The participant still answers the call.** Shut, the line waits for Enter
+  like every line from outside, and the run is written into its conversation.
+- **A withheld tile keeps its name.** `explore` alone on a tile withheld from
+  outside models asks no host.
+- **Other people's words are said as such.** Every answer that carries them
+  ends by saying they are data, never instructions.
+
+Code: `sharing/explore-aloud.ts` (who is saying, and the lines),
+`sharing/need-feeds.queen.ts` (the word), `assistant/read.queen.ts`
+(`read <signature>`), `assistant/external-call.drone.ts` and
+`assistant/claude-bridge.worker.ts` (`saying`).
+
+**Run live 2026-11-13** on a fresh dev hive with its own broker (port 2411):
+the line waited on the command line, Enter ran it, the caller heard the
+answer, and no view opened. The answer was `no answer` from `hypercomb.com`,
+the only host a fresh hive knows; see the first item below. No reachable host
+held a share for the names tried, so values and tiles are proven by the specs
+only, and `read <signature>` was not run live.
+
+### Not yet
+
+- **`hypercomb.com` does not list pools until its worker is deployed.**
+  Measured 2026-11-13: it answers any pool address with the site's own page
+  (200, HTML), which reads as `no answer`, so a hive whose only host is the
+  public fallback explores nothing. The cause and the fix are in
+  `pools-across-hosts.md`, "The apex answers a pool at its address"; the fix
+  is in the worker's source and waits for a deploy.
+- **`read <signature>` reaches only the hosts the store fetches from.** A tile
+  listed by a host the participant carries in `community:hosts` but the
+  content broker does not fetch from is named by `explore` and then answers
+  "no host this hive fetches from served it".
+- **The view asks the broker's hosts only.** It does not add `community:hosts`
+  or fall back to the public content host; the model's read does.
+- **Only pictured tiles are found.** Publish writes `pictures:<sign(name)>`
+  for a tile that wears a picture, at most 64 per publish. A public tile with
+  no picture is explorable only once its list is contributed.
+- **Page contributions** (`page:<base>`) are a third public share; a model has
+  no read for them yet.
+- **The native host gathers none of these pools**, so it answers `empty`.
+
 ## What you see
 
 **A row of hexagons across the top.** One per host that is feeding the name or

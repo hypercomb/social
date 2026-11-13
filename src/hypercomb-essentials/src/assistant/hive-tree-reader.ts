@@ -17,6 +17,7 @@ import { CHILD_SLOTS, childSigsOfLayer, sectionIndex, sectionOf } from '@hyperco
 import type { CurrentLayerRef, LayerContent } from '../history/history.service.js'
 import { isPeerContentAt } from '../sharing/adopted-roots.js'
 import { MAX_RECORD_DEPTH } from '../search/hive-search.js'
+import { readExplore, type HypercombExploreRead } from './hive-explore-read.js'
 import { readPool, type HypercombPoolRead } from './hive-pool-read.js'
 
 export const HIVE_TREE_READER_IOC_KEY = '@diamondcoreprocessor.com/HypercombHiveTreeReader'
@@ -1356,6 +1357,19 @@ export class HypercombHiveTreeReader {
     options: { readonly from?: number; readonly maxBytes?: number; readonly signal?: AbortSignal } = {},
   ): Promise<HypercombPoolRead> {
     return readPool(meaning, options)
+  }
+
+  /**
+   * A NAME, EXPLORED ACROSS THE HOSTS — `/explore <name>`. What other hives
+   * made public under a tile name: the lists contributed for it and the tiles
+   * published as it (hive-explore-read.ts). Leaves this hive as a question
+   * only; live every time, nothing kept.
+   */
+  readExplore(
+    name: string,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<HypercombExploreRead> {
+    return readExplore(name, options)
   }
 
   /**

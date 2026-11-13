@@ -231,7 +231,8 @@ HOST_DOOR_ORIGIN = "https://hypercomb-host.pages.dev"
 SANDBOX_SHELL_ORIGIN = "https://hypercomb.io"
 # ORIGIN HOSTS — a zone root reached by a ZONE ROUTE over its own proxied origin
 # record, whose site stays on that origin: the worker answers the writes, the
-# heap, the signed index and the machine JSON, and passes every other read
+# heap, the signed index, the machine JSON and every pool at its address but
+# the package pool (worker.js originPoolListing), and passes every other read
 # through unchanged (worker.js servesOrigin). Never a custom-domain host: there
 # the worker IS the origin, and the pass-through would call itself.
 ORIGIN_HOSTS = "hypercomb.com"
