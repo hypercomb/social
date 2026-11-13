@@ -3023,10 +3023,12 @@
   "need.adds-to": "+ menambahkan ke \"{place}\"",
   "need.adds-to-root": "+ menambahkan ke akar hive-mu",
   "need.pane-servers": "Dari server",
-  "need.pane-here": "Di \"{place}\"",
-  "need.pane-here-root": "Di akar hive Anda",
-  "need.pane-drop": "Seret nilai ke sini untuk menambahkannya",
   "need.here": "di sini",
   "need.grouping": "mengelompokkan…",
-  "need.group-other": "Lainnya"
+  "need.group-other": "Lainnya",
+  "need.search": "Jelajahi sebuah nama",
+  "need.rail-click": "Buka ubin ini",
+  "need.rail-find": "Cari ubin",
+  "view.explore": "Jelajahi",
+  "view.explore.description": "Tempat ini sebagai daftar, di samping apa yang dimiliki setiap server untuknya. Seret nilai untuk menambahkannya."
 }

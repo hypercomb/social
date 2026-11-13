@@ -3023,10 +3023,12 @@
   "need.adds-to": "+ añade a \"{place}\"",
   "need.adds-to-root": "+ añade a la raíz de tu hive",
   "need.pane-servers": "De los servidores",
-  "need.pane-here": "En \"{place}\"",
-  "need.pane-here-root": "En la raíz de tu hive",
-  "need.pane-drop": "Arrastra un valor aquí para añadirlo",
   "need.here": "aquí",
   "need.grouping": "agrupando…",
-  "need.group-other": "Otros"
+  "need.group-other": "Otros",
+  "need.search": "Explorar un nombre",
+  "need.rail-click": "Abrir este mosaico",
+  "need.rail-find": "Buscar un mosaico",
+  "view.explore": "Explorar",
+  "view.explore.description": "Este lugar como lista, junto a lo que cada servidor tiene para él. Arrastra un valor para añadirlo."
 }

@@ -3023,10 +3023,12 @@
   "need.adds-to": "+ 添加到“{place}”",
   "need.adds-to-root": "+ 添加到你的蜂巢根部",
   "need.pane-servers": "来自服务器",
-  "need.pane-here": "在“{place}”中",
-  "need.pane-here-root": "在你的蜂巢根部",
-  "need.pane-drop": "把值拖到这里来添加",
   "need.here": "这里",
   "need.grouping": "分组中…",
-  "need.group-other": "其他"
+  "need.group-other": "其他",
+  "need.search": "探索一个名称",
+  "need.rail-click": "打开这个磁贴",
+  "need.rail-find": "查找磁贴",
+  "view.explore": "探索",
+  "view.explore.description": "把这里显示为列表，旁边是每台服务器为它保存的内容。拖入一个值即可添加。"
 }

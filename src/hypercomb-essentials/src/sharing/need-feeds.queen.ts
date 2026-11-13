@@ -1,35 +1,60 @@
 // sharing/need-feeds.queen.ts
 //
-// `explore` — see what the servers hold for a name, and pull what you want
-// (jwize 2026-11-12: "let's make it explore recipes instead of need";
-// "create a new folder called favorite recipes and then call explore recipes
-// and find them and pull them").
+// `explore` — a VIEW of the hive: what the servers hold for the tile you stand
+// on, beside that tile's own list, and a way to pull values in.
 //
-// A row of hexagons across the top, one per server feeding the name or still
-// being asked, and one hexagon for every server that brought nothing. From each
-// a line runs down into ONE list: every value the servers brought, folded,
-// most-fed first. A thin flow moves along a line while its server is asked and
-// keeps moving, slower, once it has brought something. Hover a value and the
-// lines that fed it light; hover a server and its values light.
+// ONE ENGINE (jwize 2026-11-12, "THIS is critical"): "its data source is the
+// same as the hexagon grid but it renders differently. That way you can just
+// add the view you need and the engine is the same from the tiles and address
+// and all." So this is a view mode like tree or square-tile-view, not an
+// overlay with a world of its own:
 //
-// `+` adds a value as a tile WHERE YOU ARE — the header says where that is —
-// through the same create commit `create <name>` runs. `explore` alone asks
-// for the tile you stand on; `explore recipes` asks for recipes from anywhere.
-// Escape, the close button, a right-click, or walking elsewhere leaves.
+//   · WHERE you are is the hive's one location (Lineage / the address bar).
+//     The view follows it; it never keeps a location of its own and never
+//     closes because the location moved.
+//   · THE TILE LIST on the left is the hive's one tile list (the tiles rail
+//     the chat mounts), driven by the real location the way the chat drives
+//     it: a row walked into moves the address, and every move of the address
+//     moves the rail. It lists only the tiles the grid itself is showing
+//     (page-cells.ts — the grid's own settled answer).
+//   · BACK IS THE MAIN PAGE'S BACK: right-click, the view's back button and
+//     the browser's back all step back through the places walked inside the
+//     view (the steps the address pushed over the view's back trap), and the
+//     view holds its surface for that step. Only at the level the view was
+//     opened on does back leave the view, for the hexagons ("right button
+//     click returns to the main page which is a bug unless it has undone to
+//     the first rank before the view was shown").
 //
-// The other direction is `contribute` (contribute.queen.ts): a list for the
-// tile you stand on, on a host, under your own key. The view's contribute
-// button does the same when the name explored is the tile you stand on.
+// THE SERVERS' SIDE: a row of hexagons, one per server feeding the name or
+// still being asked, one for every server that brought nothing; from each a
+// line runs into ONE list of every value they brought (named groups when an AI
+// is attached, explore-groups.ts). The name is the tile you stand on, followed
+// as you walk; type another in the search box (or say `explore <name>`) and
+// that name stays while you walk, until the box is cleared. `+`, or dragging a
+// value onto the tile list, adds it where you stand — the place the grid and
+// the list both show.
 //
-// The reads are need-feeds.ts. The list is the first view of the answers; a
-// different view is a different `#renderValues`, fed the same merged rows.
+// The other direction is `contribute` (contribute.queen.ts). The reads are
+// need-feeds.ts; a different face of the answers is a different
+// `#renderValues`, fed the same merged rows.
 
-import { EffectBus, I18N_IOC_KEY, QueenBee, isReservedPoolWord, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, QueenBee, isReservedPoolWord, normalizeCell, type I18nProvider } from '@hypercomb/core'
 import { feedNeed, foldValue, liveFeedDeps, mergeFeeds, type Feed, type NeedValue } from './need-feeds.js'
 import { contributeHere, standingSegments } from './contribute.js'
 import { GROUP_MIN_VALUES, groupKey, groupValues, liveGroupDeps, type ValueGroup } from './explore-groups.js'
-import { childNamesAt, createTile } from '../commands/trait-read.js'
+import { ENABLEMENT_CHANGED, readGlobalOnKinds, seedCohortOn } from './behavior-enablement.js'
+import { childNamesAt } from '../commands/trait-read.js'
+import { onPageCellsChanged, pageCellsAt } from '../presentation/tiles/page-cells.js'
+import type { AgentTilesRail } from '../assistant/agent-tiles-rail.js'
+import type { VisualBeeRegistry } from '../commands/visual-bee-registry.js'
+import { CREATE_CELLS_IOC_KEY } from '../commands/create-cells.js'
 import { isLongPressMenu } from '../navigation/browser-menu.js'
+
+/** The view's mode string — also its `view:active` owner and back-gesture key. */
+export const EXPLORE_VIEW = 'explore'
+/** The view's roster identity. A kind nobody has seen is dark; lit once below. */
+export const EXPLORE_KIND = 'visual:explore:view'
+const EXPLORE_COHORT = 'explore-view'
 
 const INK = '#0b0f14'
 const BORDER = 'rgba(126,182,214,0.20)'
@@ -38,15 +63,20 @@ const DIM = 'rgba(216,230,238,0.55)'
 const STEEL = 'rgb(126,182,214)'
 /** One hue per host, in row order — the only colour on the surface. */
 const HUES = ['#7eb6d6', '#d99a4e', '#6fbf94', '#c58bd6', '#d6c36f', '#cf6f5e', '#6fc7c7', '#a3a8d6']
-/** Level with the postit view: above the canvas (59989) and its riders — the
- *  layer list a phone opens onto and the activity log (59990), the banners
- *  (59991) — and below edit-actions (59995), the bars (59999) and the header. */
+/** Level with the postit view: above the canvas (59989) and its riders, below
+ *  edit-actions (59995), the bars (59999) and the header. */
 const Z_BASE = 59992
 const HEX_W = 112
 const HEX_H = 98
 const STYLE_ID = 'hc-need-feeds-style'
 
 type LineageLike = EventTarget & { explorerSegments?: () => readonly string[] }
+type ViewModeShape = EventTarget & { mode: string; setMode(next: string): void }
+type ModeRegistryShape = { enter(mode: string, owner: string): void; exit(mode: string, owner: string): void }
+type BackGestureShape = { register(entry: { owner: string; back: () => void; exact?: boolean }): () => void }
+type NavigationShape = { goRaw?(segments: readonly string[]): void }
+/** What the address bar's history entries carry (hypercomb-runtime navigation.ts). */
+type StepState = { hcOver?: unknown; hcOverDepth?: unknown; hcView?: unknown; hcBelow?: unknown }
 
 /** The keymap reason this view holds while it is up. */
 const KEYMAP_REASON = 'need-feeds'
@@ -83,6 +113,9 @@ const ensureStyle = (): void => {
   document.head.appendChild(style)
 }
 
+const samePath = (a: readonly string[], b: readonly string[]): boolean =>
+  a.length === b.length && a.every((part, i) => part === b[i])
+
 type Mount = {
   host: HTMLDivElement
   summary: HTMLDivElement
@@ -90,14 +123,17 @@ type Mount = {
   svg: SVGSVGElement
   list: HTMLDivElement
   stage: HTMLDivElement
-  /** The right pane: the tiles of the layer you stand in, and the drop target. */
-  mine: HTMLDivElement
-  mineHead: HTMLDivElement
-  /** The left pane's heading: where "grouping…" shows while the AI answers. */
+  /** The servers' list heading: where "grouping…" shows while the AI answers. */
   listHead: HTMLDivElement
+  /** The left column: the tiles rail and the line that says where a value goes. */
+  aside: HTMLDivElement
+  dropHint: HTMLDivElement
+  /** The explored name, editable. */
+  search: HTMLInputElement
+  offer: HTMLButtonElement
 }
 
-/** The drag payload a value carries from the servers' pane to yours. */
+/** The drag payload a value carries from the servers' list to the tile list. */
 const DRAG_TYPE = 'application/x-hc-explore-value'
 
 export class ExploreQueenBee extends QueenBee {
@@ -109,8 +145,8 @@ export class ExploreQueenBee extends QueenBee {
   override rawArgs = true
   override options = ['', '<name>']
   override examples = [
-    { input: 'explore', result: 'Every server you can ask, feeding one list of what they hold for this tile' },
-    { input: 'explore recipes', result: 'What the servers hold for recipes; + adds a value where you are — try it inside favorite recipes' },
+    { input: 'explore', result: 'The tile you stand on, as a view: its tiles beside what every server holds for it' },
+    { input: 'explore recipes', result: 'What the servers hold for recipes, wherever you walk; + adds a value where you stand' },
   ]
   override machine = {
     forms: 'explore | explore <name>',
@@ -122,17 +158,20 @@ export class ExploreQueenBee extends QueenBee {
   }
 
   #mount: Mount | null = null
+  /** The name typed (`explore <name>` or the search box); null = the tile you stand on. */
+  #pinned: string | null = null
   #name = ''
   #feeds = new Map<string, Feed>()
   #order: string[] = []
   #promoted = new Set<string>()
   #run = 0
   #hover: { host?: string; value?: NeedValue } = {}
-  /** Where the participant stood when the view opened; a value is added
-   *  there, so walking elsewhere closes the view rather than add somewhere else. */
-  #openedAt = ''
-  /** The names of the tiles in the layer you stand in — the right pane. */
+  /** The location last drawn, so a `change` that moved nothing moves nothing. */
+  #placeKey = ''
+  /** The names of the tiles where you stand — the "here" marks. */
   #here: string[] = []
+  /** The hive's one tile list (assistant/agent-tiles-rail.ts), on the left. */
+  #rail: AgentTilesRail | null = null
   /** Named AI groups for the current list (explore-groups.ts), null = flat. */
   #groups: ValueGroup[] | null = null
   /** The list the groups (or the ask under way) are for. */
@@ -141,36 +180,69 @@ export class ExploreQueenBee extends QueenBee {
   /** The one open group — an accordion, closed until a header is pressed. */
   #openGroup: string | null = null
   #groupDeps = liveGroupDeps()
+  #wired = false
+  /** THIS SESSION'S STEPS are the entries pushed over the back trap that was
+   *  live when the view opened — its token (view-back.ts `hcTrap`), and the
+   *  depth already walked over it then (opened over another view's step).
+   *  An entry is a step of this view only when it carries that token and is
+   *  deeper — never by an owner's name, which a stale entry or another view's
+   *  trap can carry too. */
+  #trapToken: string | null = null
+  #baseDepth = 0
+  #offs: (() => void)[] = []
 
   protected async execute(args: string): Promise<void> {
+    this.wire()
     const said = args.trim()
-    const standing = standingSegments()
-    const name = said || standing[standing.length - 1] || ''
-    if (!name) {
+    const vm = this.#vm()
+    if (!said && !standingSegments().length) {
       EffectBus.emit('toast:show', { type: 'tip', message: this.#t('need.stand', 'Stand on a tile first, or name one: explore recipes.') })
       return
     }
-    const hosts = [...new Set(liveFeedDeps().hosts())]
-    if (!hosts.length) {
+    if (!liveFeedDeps().hosts().length) {
       EffectBus.emit('toast:show', { type: 'tip', message: this.#t('need.no-hosts', 'No servers to ask yet — add one in the host directory (hosts).') })
       return
     }
-    this.#promoted.clear()
-    this.#feeds.clear()
-    this.#order = hosts
-    this.#open(name)
-    this.#feed(false)
+    this.#pinned = said || null
+    if (this.#mount) { this.#explore(said); return }
+    vm?.setMode(EXPLORE_VIEW)
+    this.#sync()
   }
 
-  /** Ask every host for the open view's name. `fresh` asks past a remembered
+  /** Mount when the mode turns explore, take down when it turns anything else —
+   *  however it was turned (the word, the view's icon, `view:toggle`). */
+  wire(): void {
+    if (this.#wired) return
+    const vm = this.#vm()
+    if (!vm) return
+    this.#wired = true
+    vm.addEventListener('change', () => this.#sync())
+  }
+
+  #vm(): ViewModeShape | undefined { return ioc<ViewModeShape>('@hypercomb.social/ViewMode') }
+
+  #sync(): void {
+    const on = this.#vm()?.mode === EXPLORE_VIEW
+    if (on && !this.#mount) this.#mountView()
+    else if (!on && this.#mount) this.#unmount()
+  }
+
+  /** The name explored: the one typed, else the tile you stand on. */
+  #nameHere(): string {
+    const standing = standingSegments()
+    return this.#pinned ?? standing[standing.length - 1] ?? ''
+  }
+
+  /** Ask every host for the explored name. `fresh` asks past a remembered
    *  miss — the participant's own contribution just landed a pool. */
   #feed(fresh: boolean): void {
     const deps = liveFeedDeps()
     const hosts = [...new Set(deps.hosts())]
     const run = ++this.#run
     this.#feeds.clear()
-    this.#order = hosts
+    this.#order = this.#name ? hosts : []
     this.#render()
+    if (!this.#name) return
     void feedNeed(this.#name, feed => {
       if (run !== this.#run || !this.#mount) return
       this.#feeds.set(feed.host, feed)
@@ -178,7 +250,7 @@ export class ExploreQueenBee extends QueenBee {
     }, { ...deps, hosts: () => hosts }, { fresh })
   }
 
-  /** Where `+` adds: the tile you stand on, said in words. */
+  /** Where `+` adds — where you stand — said in words. */
   #place(): { text: string; tip: string } {
     const standing = standingSegments()
     const place = standing[standing.length - 1] ?? ''
@@ -187,11 +259,9 @@ export class ExploreQueenBee extends QueenBee {
       : { text: this.#t('need.adds-to-root', "+ adds to your hive's root"), tip: this.#t('need.promote-root', "Add to your hive's root") }
   }
 
-  // ── shell ───────────────────────────────────────────────────────────
+  // ── the view ────────────────────────────────────────────────────────
 
-  #open(name: string): void {
-    this.#close()
-    this.#name = name
+  #mountView(): void {
     ensureStyle()
     const host = el('div',
       `position:fixed;top:0;bottom:0;left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);z-index:${Z_BASE};` +
@@ -199,25 +269,34 @@ export class ExploreQueenBee extends QueenBee {
     host.id = 'hc-need-feeds'
     host.setAttribute('data-consumes-wheel', '')
 
-    // The shell's header and rail stay above every view (z 60000), so the
-    // bar sits under the header in the page, never pinned behind it.
-    // It wraps: at phone width the summary and the buttons drop to a second
-    // line rather than push the page sideways.
+    // THE SHELL'S ICON COLUMN sits above every view on the left (z 60000);
+    // the view starts past it, measured, so a phone without it loses nothing.
+    const column = document.querySelector('.controls-pill.column') as HTMLElement | null
+    const gutter = Math.max(16, Math.round(column?.getBoundingClientRect().right ?? 0) + 10)
+    const button = `background:none;border:1px solid ${BORDER};border-radius:var(--hc-radius-control,2px);padding:4px 10px;cursor:pointer;font:inherit;`
+    // The shell's header stays above every view (z 60000), so the bar sits
+    // under it in the page. It wraps at phone width instead of scrolling.
     const bar = el('div',
-      `display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;max-width:880px;margin:64px auto 0;padding:0 18px 12px;` +
+      `display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin:64px 16px 0 ${gutter}px;padding:0 2px 12px;` +
       `border-bottom:1px solid ${BORDER};box-sizing:border-box;`)
     const brand = el('div', `font-size:0.8125rem;font-weight:700;letter-spacing:0.14em;color:${STEEL};flex:none;`, this.#t('need.brand', 'EXPLORE'))
-    const title = el('div', 'flex:1 1 120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', name)
+    // THE NAME IS A SEARCH BOX: Enter explores what is typed; an empty box
+    // goes back to the tile you stand on.
+    const search = el('input',
+      `flex:1 1 180px;min-width:0;max-width:420px;background:rgba(126,182,214,0.06);border:1px solid ${BORDER};` +
+      `border-radius:var(--hc-radius-control,2px);color:${TEXT};font:inherit;padding:5px 10px;`)
+    search.type = 'search'
+    search.placeholder = this.#t('need.search', 'Explore a name')
+    search.setAttribute('aria-label', this.#t('need.search', 'Explore a name'))
+    search.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return
+      event.preventDefault()
+      this.#explore(search.value)
+    })
     const summary = el('div', `color:${DIM};flex:0 1 auto;min-width:0;font-size:0.75rem;`)
-    const close = el('button',
-      `background:none;border:1px solid ${BORDER};color:${TEXT};border-radius:var(--hc-radius-control,2px);padding:4px 10px;cursor:pointer;font:inherit;`,
-      this.#t('need.close', 'hexagons'))
-    close.addEventListener('click', () => this.#close())
     // The participant's own click contributes their list (contribute.ts), then
     // the hosts are asked again past any remembered miss, so it shows at once.
-    const offer = el('button',
-      `background:none;border:1px solid ${BORDER};color:${STEEL};border-radius:var(--hc-radius-control,2px);padding:4px 10px;cursor:pointer;font:inherit;`,
-      this.#t('need.offer', 'contribute'))
+    const offer = el('button', button + `color:${STEEL};`, this.#t('need.offer', 'contribute'))
     offer.title = this.#t('need.offer-title', 'Contribute the names of the tiles under the one you stand on, as a list on your host')
     offer.addEventListener('click', async () => {
       offer.disabled = true
@@ -225,95 +304,315 @@ export class ExploreQueenBee extends QueenBee {
         if (await contributeHere('') && this.#mount?.host === host) this.#feed(true)
       } finally { offer.disabled = false }
     })
-    // A contribution is for the tile you STAND on, so the button is only there
-    // when that is the name explored — `explore <other name>` shows none.
-    const standing = standingSegments()
-    offer.style.display = foldValue(standing[standing.length - 1] ?? '') === foldValue(name) ? '' : 'none'
-    // WHERE `+` ADDS, said plainly (jwize: "the inserted should go where ever
-    // you are but it should be more clear"): its own line under the bar.
-    const place = el('div', `flex:1 1 100%;font-size:0.75rem;color:${STEEL};`, this.#place().text)
-    bar.append(brand, title, summary, offer, close, place)
+    const close = el('button', button + `color:${TEXT};`, this.#t('need.close', 'hexagons'))
+    close.addEventListener('click', () => this.#leave())
+    bar.append(brand, search, summary, offer, close)
 
+    // THE BODY: the tile list on the left, the servers and their list beside it.
+    const body = el('div', `display:flex;flex-wrap:wrap;align-items:flex-start;gap:16px;padding:14px 16px 48px ${gutter}px;`)
+    const aside = el('div',
+      `flex:0 0 300px;max-width:100%;position:sticky;top:12px;display:flex;flex-direction:column;` +
+      `max-height:calc(100vh - 150px);min-height:240px;border:1px solid ${BORDER};border-radius:var(--hc-radius-card,3px);` +
+      `background:rgba(126,182,214,0.03);transition:background .12s,border-color .12s;overflow:hidden;` +
+      // The rail draws with the shell's window tokens, made for a light
+      // surface and resolved at the page root; this column is dark, so each
+      // token it reads is given its dark-surface value here.
+      '--hc-panel-ink:216,230,238;--hc-window-ink-loud:rgba(216,230,238,0.96);--hc-window-ink-plain:rgba(216,230,238,0.82);' +
+      '--hc-window-ink-quiet:rgba(216,230,238,0.62);--hc-window-accent:rgb(126,182,214);--hc-window-accent-quiet:rgba(126,182,214,0.62);' +
+      '--hc-window-wash:rgba(126,182,214,0.08);--hc-window-tint:rgba(126,182,214,0.05);' +
+      '--hc-window-edge:rgba(126,182,214,0.18);--hc-window-edge-firm:rgba(126,182,214,0.30);')
+    const railHost = el('div', 'flex:1;min-height:0;overflow:auto;')
+    const dropHint = el('div', `flex:none;padding:8px 12px;font-size:0.75rem;color:${STEEL};border-top:1px solid ${BORDER};`)
+    aside.append(railHost, dropHint)
+    const main = el('div', 'flex:1 1 420px;min-width:0;')
     // The stage holds the row, the lines and the list; the lines are one SVG
     // laid over the whole stage, measured from the tiles and the list.
-    const stage = el('div', 'position:relative;padding:36px 16px 48px;')
+    const stage = el('div', 'position:relative;padding:12px 0 0;')
     const svg = svgEl('svg')
     svg.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible;'
     // `safe center`: when the hosts overflow the width, the row starts at its
     // left edge and scrolls, instead of spilling the first hosts out of reach.
     const row = el('div', 'position:relative;display:flex;justify-content:safe center;flex-wrap:nowrap;gap:14px;overflow-x:auto;padding:4px 4px 8px;')
-    // THE SPLIT PANE (jwize 2026-11-12: "there should be split pane where we can
-    // move the recipes from the aggregated into our recipes by drag and drop
-    // into our current layer"): what the servers brought on the left, the layer
-    // you stand in on the right. Drag a value across — or press its + — and it
-    // becomes a tile here. At phone width the panes stack.
-    const paneHead = `font-size:0.75rem;letter-spacing:0.06em;color:${DIM};padding:0 2px 6px;`
-    const panes = el('div', 'position:relative;display:flex;flex-wrap:wrap;gap:16px;max-width:980px;margin:120px auto 0;align-items:flex-start;')
-    const left = el('div', 'flex:1 1 340px;min-width:0;')
+    const listHead = el('div', `position:relative;font-size:0.75rem;letter-spacing:0.06em;color:${DIM};padding:0 2px 6px;margin-top:96px;`,
+      this.#t('need.pane-servers', 'From the servers'))
     const list = el('div', `position:relative;border:1px solid ${BORDER};border-radius:var(--hc-radius-card,3px);background:rgba(126,182,214,0.04);`)
-    const listHead = el('div', paneHead, this.#t('need.pane-servers', 'From the servers'))
-    left.append(listHead, list)
-    const right = el('div', 'flex:1 1 260px;min-width:0;')
-    const mineHead = el('div', paneHead)
-    const mine = el('div',
-      `min-height:140px;border:1px dashed ${BORDER};border-radius:var(--hc-radius-card,3px);background:rgba(126,182,214,0.02);transition:background .12s,border-color .12s;`)
-    right.append(mineHead, mine)
-    panes.append(left, right)
-    this.#wireDrop(right, mine)
-    stage.append(svg, row, panes)
-    host.append(bar, stage)
-
-    host.addEventListener('contextmenu', e => {
-      if (isLongPressMenu(e)) return
-      e.preventDefault()
-      this.#close()
-    })
+    stage.append(svg, row, listHead, list)
+    main.append(stage)
+    body.append(aside, main)
+    host.append(bar, body)
+    this.#wireDrop(aside)
+    // ONE BACK OVER THE TILE LIST TOO: the rail's own right-click climbs its
+    // trail (structural up, even past the level the view opened on). Taken
+    // here first, so right-click means the same back everywhere in the view.
+    aside.addEventListener('contextmenu', (event) => {
+      if (isLongPressMenu(event) || event.ctrlKey || event.metaKey) return
+      if ((event.target as HTMLElement | null)?.closest?.('input, textarea')) return
+      event.preventDefault()
+      event.stopPropagation()
+      this.#back()
+    }, true)
     row.addEventListener('scroll', () => this.#drawLines())
     document.body.appendChild(host)
-    this.#mount = { host, summary, row, svg, list, stage, mine, mineHead, listHead }
-    this.#openedAt = standingSegments().join('\u0000')
+
+    this.#mount = { host, summary, row, svg, list, stage, listHead, aside, dropHint, search, offer }
+    this.#placeKey = standingSegments().join('\u0000')
+    this.#name = this.#nameHere()
+    search.value = this.#name
     this.#here = []
+    this.#promoted.clear()
     this.#groups = null
     this.#groupKey = ''
     this.#grouping = false
     this.#openGroup = null
-    void this.#refreshHere()
+
+    // THE VIEW IS UP: it is `view:active`, which arms the browser-back trap
+    // (view-back.ts) and routes right-click here (back-gesture.service.ts).
+    ioc<ModeRegistryShape>('@diamondcoreprocessor.com/ModeRegistry')?.enter('view:active', EXPLORE_VIEW)
+    // The trap is in hand now (view-back pushes it as view:active opens, or
+    // another view's is still up): remember whose steps are this session's.
+    this.#readTrap()
+    const backOff = ioc<BackGestureShape>('@diamondcoreprocessor.com/BackGesture')
+      ?.register({ owner: EXPLORE_VIEW, back: () => this.#back(), exact: true })
+    if (backOff) this.#offs.push(backOff)
     // The hive underneath cannot be seen, so none of its keys may act on it:
-    // the keymap is HELD (stronger than suppressed — Escape's cascade and
-    // Delete's remove included) and this view's own Escape closes it.
+    // the keymap is HELD and this view's own Escape leaves it.
     EffectBus.emitTransient('keymap:hold', { reason: KEYMAP_REASON })
+    const lineage = ioc<LineageLike>('@hypercomb.social/Lineage')
+    lineage?.addEventListener?.('change', this.#onLocation)
     window.addEventListener('keydown', this.#onKey, true)
     window.addEventListener('resize', this.#onResize)
-    ioc<LineageLike>('@hypercomb.social/Lineage')?.addEventListener?.('change', this.#onMoved)
+    window.addEventListener('synchronize', this.#onCommitted)
+    this.#offs.push(() => {
+      lineage?.removeEventListener?.('change', this.#onLocation)
+      window.removeEventListener('keydown', this.#onKey, true)
+      window.removeEventListener('resize', this.#onResize)
+      window.removeEventListener('synchronize', this.#onCommitted)
+    })
+    // Each ARRIVAL settled by the view bee (view.bee.ts `view:arrival`) is
+    // where the next back's hold is armed — after the arrival into a step has
+    // spent the last one, never before (#armHold).
+    this.#offs.push(EffectBus.on('view:arrival', () => this.#armHold()))
+    // The grid's answer changed (a filter, a tile hidden, added or removed):
+    // the tile list shows exactly what the grid shows, so it is drawn again.
+    this.#offs.push(onPageCellsChanged(() => { this.#rail?.refresh(); void this.#refreshHere() }))
+
+    this.#mountRail(railHost)
+    void this.#refreshHere()
+    this.#feed(false)
+  }
+
+  #unmount(): void {
+    const mount = this.#mount
+    if (!mount) return
+    this.#run++
+    try { this.#rail?.dispose() } catch { /* already gone */ }
+    this.#rail = null
+    for (const off of this.#offs.splice(0)) { try { off() } catch { /* released */ } }
+    ioc<ModeRegistryShape>('@diamondcoreprocessor.com/ModeRegistry')?.exit('view:active', EXPLORE_VIEW)
+    EffectBus.emitTransient('keymap:release', { reason: KEYMAP_REASON })
+    // A hold armed ahead and never spent must not reach an unrelated arrival.
+    ioc<{ releaseSurfaceHold?: () => void }>('@diamondcoreprocessor.com/ViewBee')?.releaseSurfaceHold?.()
+    // The next opening by icon, toggle or panel follows the tile you stand on.
+    this.#pinned = null
+    this.#trapToken = null
+    this.#baseDepth = 0
+    mount.host.remove()
+    this.#mount = null
+    this.#hover = {}
+  }
+
+  /** Leave the view: the surface goes back to the hexagons, where you stand. */
+  #leave(): void { this.#vm()?.setMode('hexagons') }
+
+  /** Keep the view up across the next arrival: a step back to an ancestor
+   *  would otherwise release it (view.bee.ts RETREAT; site-view does the same). */
+  #hold(): void {
+    ioc<{ holdSurfaceOnce?: () => void }>('@diamondcoreprocessor.com/ViewBee')?.holdSurfaceOnce?.()
+  }
+
+  /**
+   * THE ONE BACK — right-click and the view's back both come here, and the
+   * browser's back reaches it too (view-back.ts, when its trap is spent). A
+   * step walked inside the view is walked back; at the level the view was
+   * opened on, back leaves the view.
+   */
+  #back(): void {
+    const state = (window.history.state ?? null) as StepState | null
+    if (this.#isStep(state)) {
+      this.#hold()
+      window.history.back()
+      return
+    }
+    this.#leave()
+  }
+
+  /** ARMED AHEAD, NOT AT THE BACK: the hive's own popstate handler reads the
+   *  hold before any listener here could set it, so once an arrival on a step
+   *  walked inside the view has settled, the NEXT arrival is held in advance —
+   *  whether it comes from right-click, the back button or the browser. At the
+   *  level the view was opened on nothing is armed, so the next back leaves.
+   *  A hold left over when the view closes is spent by view-back's own drop
+   *  of its trap. */
+  #armHold(): void {
+    const state = window.history.state as StepState | null
+    if (this.#isStep(state)) this.#hold()
+  }
+
+  /** Read the trap the view opened over: its own (view-back's, pushed as the
+   *  view became active) or the one already up under another view's step. */
+  #readTrap(): void {
+    const state = (window.history.state ?? null) as (StepState & { hcTrap?: unknown; hcOverTrap?: unknown }) | null
+    if (typeof state?.hcTrap === 'string') { this.#trapToken = state.hcTrap; this.#baseDepth = 0; return }
+    if (typeof state?.hcOverTrap === 'string') { this.#trapToken = state.hcOverTrap; this.#baseDepth = Number(state.hcOverDepth) || 0; return }
+    this.#trapToken = null
+    this.#baseDepth = 0
+  }
+
+  /** Is this entry a step walked inside THIS session of the view? */
+  #isStep(state: StepState | null | undefined): boolean {
+    // Not read yet: only the TRAP itself may name the token — reading it off a
+    // step would take that step's depth as the floor.
+    if (!this.#trapToken && typeof (window.history.state as { hcTrap?: unknown } | null)?.hcTrap === 'string') this.#readTrap()
+    const token = (state as { hcOverTrap?: unknown } | null | undefined)?.hcOverTrap
+    return !!this.#trapToken && token === this.#trapToken && Number(state?.hcOverDepth) > this.#baseDepth
+  }
+
+  /** The rail walked: move the real address, the way the chat walks it. Going
+   *  up onto the entry this walk pushed from is browser back, so right-click
+   *  out and the back button are one move and leave no forward entry. */
+  #walkTo(segments: readonly string[]): void {
+    const next = [...segments].map(part => String(part ?? '').trim()).filter(Boolean)
+    const here = standingSegments()
+    if (samePath(next, here)) return
+    // ONE STEP IN is the grid's own enter (tile-overlay #navigateInto): the same
+    // readiness gates, references and flattened tiles as a press on a hexagon.
+    if (next.length === here.length + 1 && samePath(next.slice(0, -1), here)) {
+      EffectBus.emit('tile:enter-request', { label: next[next.length - 1] })
+      // The grid may decline the press (a claimed tile opens instead, a
+      // filtered branch, an adopt first): the rail already stepped in, so it
+      // is put back where you actually stand.
+      setTimeout(() => {
+        if (this.#mount && samePath(standingSegments(), here)) this.#rail?.showLevel(here)
+      }, 1200)
+      return
+    }
+    const up = next.length < here.length && next.every((part, i) => part === here[i])
+    if (up) {
+      const state = (window.history.state ?? {}) as StepState
+      const address = window.location.pathname.replace(/\/\[[^/]*\]$/, '')
+      const parentAddress = address.slice(0, address.lastIndexOf('/')) || '/'
+      if (next.length === here.length - 1 && this.#isStep(state)
+        && state.hcBelow === parentAddress) {
+        window.history.back()
+        return
+      }
+      this.#hold()
+    }
+    ioc<NavigationShape>('@hypercomb.social/Navigation')?.goRaw?.(next)
+  }
+
+  /** The location moved (a rail walk, a back, the browser). The view follows:
+   *  the rail shows the new level, and an unpinned name follows the tile. */
+  readonly #onLocation = (): void => {
+    const mount = this.#mount
+    if (!mount) return
+    const standing = standingSegments()
+    const key = standing.join('\u0000')
+    if (key === this.#placeKey) return
+    this.#placeKey = key
+    this.#rail?.showLevel(standing)
+    this.#promoted.clear()
+    if (this.#pinned === null) {
+      const name = this.#nameHere()
+      if (foldValue(name) !== foldValue(this.#name)) {
+        this.#name = name
+        mount.search.value = name
+        this.#resetGroups()
+        this.#feed(false)
+      }
+    }
+    void this.#refreshHere()
     this.#render()
   }
 
-  #close(): void {
-    if (!this.#mount) return
-    this.#run++
-    this.#mount.host.remove()
-    this.#mount = null
-    this.#hover = {}
-    EffectBus.emitTransient('keymap:release', { reason: KEYMAP_REASON })
-    window.removeEventListener('keydown', this.#onKey, true)
-    window.removeEventListener('resize', this.#onResize)
-    ioc<LineageLike>('@hypercomb.social/Lineage')?.removeEventListener?.('change', this.#onMoved)
+  /** The tiles rail, as the chat mounts it, FOLLOWING the real location: its
+   *  walk moves the address (#walkTo) and the address moves it (#onLocation).
+   *  It lists only what the grid shows. Loaded with the view, never at boot. */
+  #mountRail(railHost: HTMLElement): void {
+    const mount = this.#mount
+    void import('../assistant/agent-tiles-rail.js').then(({ AgentTilesRail }) => {
+      if (!mount || mount !== this.#mount) return
+      const rail = new AgentTilesRail({
+        walk: true,
+        chats: false,
+        choose: false,
+        title: true,
+        clickLabel: this.#t('need.rail-click', 'Open this tile'),
+        findLabel: this.#t('need.rail-find', 'Find a tile'),
+        // The grid's own answer for that level (page-cells.ts): a tile the
+        // grid has filtered or hidden is not listed. Before the grid has
+        // painted a level, the walk's rows stand.
+        admits: (row) => {
+          const page = pageCellsAt(row.segments.slice(0, -1))
+          return !page || page.cells.some(cell => cell.label === row.name)
+        },
+      })
+      rail.onLevelChanged = (segments) => this.#walkTo(segments)
+      // A row pressed is a tile clicked: it ENTERS that tile, the way a press
+      // on the grid does (the rail, without chats, only names it).
+      rail.onSubjectChanged = (pick) => { if (pick) this.#walkTo([...pick.path, pick.name]) }
+      rail.mount(railHost)
+      this.#rail = rail
+    }).catch(() => { /* no rail: the servers' side still works */ })
+  }
+
+  /** Explore a name in place — the search box's Enter, or `explore <name>`
+   *  while the view is up. An empty name goes back to the tile you stand on. */
+  #explore(raw: string): void {
+    const mount = this.#mount
+    if (!mount) return
+    const typed = raw.trim()
+    this.#pinned = typed || null
+    const name = this.#nameHere()
+    mount.search.value = name
+    if (foldValue(name) === foldValue(this.#name)) return
+    this.#name = name
+    this.#promoted.clear()
+    this.#resetGroups()
+    this.#feed(false)
+  }
+
+  #resetGroups(): void {
+    this.#groups = null
+    this.#groupKey = ''
+    this.#grouping = false
+    this.#openGroup = null
   }
 
   #onKey = (event: KeyboardEvent): void => {
     if (event.key !== 'Escape' || !this.#mount) return
+    // A field with an Escape of its own (the rail's find box clears its query
+    // first) keeps it — so this stands aside before taking the key.
+    if ((event.target as HTMLElement | null)?.closest?.('[data-escape-local]')) return
     event.preventDefault()
     event.stopImmediatePropagation()
-    this.#close()
-  }
-
-  /** The lineage also says `change` when a page merely finishes loading, so
-   *  only a real move — a different place — closes the view. */
-  #onMoved = (): void => {
-    if (this.#mount && standingSegments().join('\u0000') !== this.#openedAt) this.#close()
+    // Escape in another field (the search box) lets go of the field first;
+    // the next Escape leaves the view.
+    const field = (event.target as HTMLElement | null)?.closest?.('input, textarea') as HTMLInputElement | null
+    if (field && this.#mount.host.contains(field)) { field.blur(); return }
+    this.#leave()
   }
 
   #onResize = (): void => this.#drawLines()
+
+  /** A commit landed (the processor's one `synchronize`): a value just added
+   *  may be here now, so the "here" marks are read again. */
+  #onCommitted = (): void => {
+    // The hive moved under the list: the rail re-reads its level (its own
+    // contract — the surface calls refresh on `synchronize`).
+    this.#rail?.refresh()
+    void this.#refreshHere()
+  }
 
   // ── render ──────────────────────────────────────────────────────────
 
@@ -328,7 +627,11 @@ export class ExploreQueenBee extends QueenBee {
     this.#renderRow(feeds)
     this.#askGroups(feeds, values)
     this.#renderValues(values)
-    this.#renderHere()
+    mount.dropHint.textContent = this.#place().text
+    // A contribution is for the tile you STAND on, so the button is there only
+    // when that is the name explored.
+    const standing = standingSegments()
+    mount.offer.style.display = foldValue(standing[standing.length - 1] ?? '') === foldValue(this.#name) ? '' : 'none'
     // Drawn now, not on a frame: measuring forces the layout, and a hidden
     // tab never runs a frame.
     this.#drawLines()
@@ -405,6 +708,11 @@ export class ExploreQueenBee extends QueenBee {
     const list = this.#mount!.list
     list.replaceChildren()
     const here = new Set(this.#here.map(foldValue))
+    if (!this.#name) {
+      list.appendChild(el('div', 'padding:18px;text-align:center;color:' + DIM + ';',
+        this.#t('need.stand', 'Stand on a tile first, or name one: explore recipes.')))
+      return
+    }
     if (!values.length) {
       const asking = this.#order.some(host => (this.#feeds.get(host)?.state ?? 'asking') === 'asking')
       list.appendChild(el('div', `padding:18px;text-align:center;color:${DIM};`,
@@ -521,43 +829,23 @@ export class ExploreQueenBee extends QueenBee {
     })
   }
 
-  /** The right pane: the tiles in the layer you stand in, newest added last. */
-  #renderHere(): void {
-    const mount = this.#mount
-    if (!mount) return
-    const standing = standingSegments()
-    const place = standing[standing.length - 1] ?? ''
-    mount.mineHead.textContent = place
-      ? this.#say('need.pane-here', 'In "{place}"', { place })
-      : this.#t('need.pane-here-root', "In your hive's root")
-    mount.mine.replaceChildren()
-    if (!this.#here.length) {
-      mount.mine.appendChild(el('div', `padding:24px 14px;text-align:center;color:${DIM};font-size:0.8125rem;`,
-        this.#t('need.pane-drop', 'Drag a value here to add it')))
-      return
-    }
-    for (const name of this.#here) {
-      mount.mine.appendChild(el('div',
-        'padding:8px 12px;border-top:1px solid rgba(126,182,214,0.08);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', name))
-    }
-  }
-
-  /** Read the layer you stand in again (on open, and after a value lands). */
+  /** Read the tiles where you stand again (on open, on a move, after a value lands). */
   async #refreshHere(): Promise<void> {
-    // The same open view, still: a closed or re-opened one drops this answer.
+    // The same open view and the same place, still: a newer answer wins.
     const mount = this.#mount
-    const names = await childNamesAt(standingSegments()).catch(() => [] as string[])
-    if (!mount || mount !== this.#mount) return
+    const place = standingSegments()
+    const names = await childNamesAt(place).catch(() => [] as string[])
+    if (!mount || mount !== this.#mount || !samePath(place, standingSegments())) return
     this.#here = names
     this.#render()
   }
 
-  /** The right pane takes a dragged value; it lights while one is over it. */
-  #wireDrop(zone: HTMLElement, mine: HTMLElement): void {
+  /** The rail column takes a dragged value; it lights while one is over it. */
+  #wireDrop(zone: HTMLElement): void {
     const carries = (event: DragEvent): boolean => !!event.dataTransfer && [...event.dataTransfer.types].includes(DRAG_TYPE)
     const light = (on: boolean): void => {
-      mine.style.background = on ? 'rgba(126,182,214,0.10)' : 'rgba(126,182,214,0.02)'
-      mine.style.borderColor = on ? STEEL : BORDER
+      zone.style.background = on ? 'rgba(126,182,214,0.10)' : 'rgba(126,182,214,0.03)'
+      zone.style.borderColor = on ? STEEL : BORDER
     }
     zone.addEventListener('dragover', (event) => {
       if (!carries(event)) return
@@ -571,6 +859,7 @@ export class ExploreQueenBee extends QueenBee {
     zone.addEventListener('drop', (event) => {
       if (!carries(event)) return
       event.preventDefault()
+      event.stopPropagation()
       light(false)
       const value = this.#valueOf(event.dataTransfer?.getData(DRAG_TYPE) ?? '')
       if (value) void this.#promote(value)
@@ -654,8 +943,14 @@ export class ExploreQueenBee extends QueenBee {
     if (!text || text.includes('/') || isReservedPoolWord(text) || savedRoots?.isSaved?.(text)) { failed(); return }
     this.#promoted.add(fold)
     this.#render()
-    // Where you are — the header says where that is.
-    const made = await createTile(text).catch(() => false)
+    // WHERE YOU STAND — the place the grid and the tile list both show —
+    // through THE create commit (commands/create-cells.ts): the one every
+    // `create <name>` takes, with its landing rules (a holder's group, a
+    // doorway's target) and its reserved and saved-word gates.
+    const cell = normalizeCell(text)
+    const creator = ioc<{ create?: (request: { parts: readonly string[]; requireCommitter?: boolean }) => Promise<{ made: boolean }> }>(CREATE_CELLS_IOC_KEY)
+    const made = !!cell && !!creator?.create
+      && (await creator.create({ parts: [cell], requireCommitter: true }).catch(() => ({ made: false }))).made
     if (!made) {
       this.#promoted.delete(fold)
       this.#render()
@@ -679,3 +974,34 @@ export class ExploreQueenBee extends QueenBee {
 
 const _explore = new ExploreQueenBee()
 window.ioc.register('@ExploreQueenBee', _explore)
+
+// FOLLOW THE MODE FROM THE START, so the view mounts however explore is
+// turned on — its word, its icon, `view:toggle` — not only from the word.
+;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc
+  ?.whenReady?.('@hypercomb.social/ViewMode', () => _explore.wire())
+
+/** A kind nobody has seen is globally off, and `setMode(explore)` would snap
+ *  straight back to hexagons. Light it once, after the on-list exists, and
+ *  never on a hive that opened dark (behavior-enablement.ts seedCohortOn). */
+const lightExploreOnce = (): void => {
+  if (!readGlobalOnKinds()) return
+  seedCohortOn(EXPLORE_COHORT, [EXPLORE_KIND])
+}
+lightExploreOnce()
+EffectBus.on(ENABLEMENT_CHANGED, lightExploreOnce)
+
+;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<VisualBeeRegistry>(
+  '@diamondcoreprocessor.com/VisualBeeRegistry',
+  registry => registry.register({
+    view: EXPLORE_VIEW,
+    slashCommand: '/explore',
+    iconName: 'travel_explore',
+    toggleIcon: 'travel_explore',
+    behavior: 'render',
+    decorationKind: EXPLORE_KIND,
+    labelKey: 'view.explore',
+    descriptionKey: 'view.explore.description',
+    queenKey: '@ExploreQueenBee',
+    pheromones: ['platform:mobile', 'platform:desktop'],
+  }),
+)

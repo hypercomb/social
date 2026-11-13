@@ -3023,10 +3023,12 @@
   "need.adds-to": "+ يضيف إلى \"{place}\"",
   "need.adds-to-root": "+ يضيف إلى جذر خليتك",
   "need.pane-servers": "من الخوادم",
-  "need.pane-here": "في \"{place}\"",
-  "need.pane-here-root": "في جذر خليتك",
-  "need.pane-drop": "اسحب قيمة إلى هنا لإضافتها",
   "need.here": "هنا",
   "need.grouping": "جارٍ التجميع…",
-  "need.group-other": "أخرى"
+  "need.group-other": "أخرى",
+  "need.search": "استكشف اسمًا",
+  "need.rail-click": "افتح هذه البلاطة",
+  "need.rail-find": "ابحث عن بلاطة",
+  "view.explore": "استكشاف",
+  "view.explore.description": "هذا المكان كقائمة، بجانب ما يحمله كل خادم له. اسحب قيمة لإضافتها."
 }

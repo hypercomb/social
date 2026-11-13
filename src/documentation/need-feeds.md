@@ -18,6 +18,44 @@ place, which host brought which value and how fast. It is a diagnostic first:
 it tells you who is feeding what, and who is not. It is also where you pick a
 value and keep it.
 
+## A view on the hive's one engine
+
+jwize, 2026-11-12: "its data source is the same as the hexagon grid but it
+renders differently. That way you can just add the view you need and the
+engine is the same from the tiles and address and all. This is critical."
+
+`explore` is a **view mode** (`explore`, registered in the VisualBeeRegistry,
+listed in `TRANSIENT_MODES`, lit once by its cohort), not an overlay:
+
+- **The location is the hive's.** The view follows Lineage and the address
+  bar; it never keeps a location of its own and never closes because the
+  location moved.
+- **The tile list on the left is the hive's one tile list** — the tiles rail
+  the chat mounts — following the real location: pressing a row enters that
+  tile through the grid's own enter (`tile:enter-request`, as a hexagon press),
+  every location change moves the rail (`showLevel`), and it lists only what
+  the grid shows (page-cells). A commit (`synchronize`) refreshes it.
+- **Back is the main page's back.** Right-click (anywhere in the view, the tile
+  list included), the shell's back button and the browser's back all step back
+  through the places walked inside the view; only at the level the view was
+  opened on does back leave it, for the hexagons. A step of this session is an
+  entry pushed over the back trap that was live when the view opened (its
+  `hcTrap` token, deeper than the depth walked then) — never recognised by an
+  owner's name, which stale entries and other views' traps carry too.
+- **Why the hold is armed ahead.** Walking back to an ancestor normally drops
+  any view (view.bee.ts RETREAT). The hive's popstate handler reads the
+  surface hold before a listener here could set it, so the hold is armed after
+  each arrival on a step (`view:arrival`), and released when the view closes
+  (`ViewBee.releaseSurfaceHold`), so it never reaches an unrelated arrival.
+- **`+` and drops** go through the create commit (`commands/create-cells.ts`)
+  where you stand, with its landing rules and word gates.
+
+Known limits: the rail can only narrow its own walk to what the grid shows, so
+a grid cell that is not a local child (a flattened filter match, a peer-only
+tile) is not listed; a row that is a reference to an ancestor is a retreat,
+and the view leaves with it; a browser back pressed before the arrival into a
+step has settled is not yet held.
+
 ## What you see
 
 **A row of hexagons across the top.** One per host that is feeding the name or

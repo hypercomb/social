@@ -3023,10 +3023,12 @@
   "need.adds-to": "+로 \"{place}\"에 추가합니다",
   "need.adds-to-root": "+로 하이브 루트에 추가합니다",
   "need.pane-servers": "서버에서",
-  "need.pane-here": "\"{place}\" 안",
-  "need.pane-here-root": "하이브 루트",
-  "need.pane-drop": "값을 여기로 끌어 추가하세요",
   "need.here": "여기",
   "need.grouping": "묶는 중…",
-  "need.group-other": "기타"
+  "need.group-other": "기타",
+  "need.search": "이름 탐색",
+  "need.rail-click": "이 타일 열기",
+  "need.rail-find": "타일 찾기",
+  "view.explore": "탐색",
+  "view.explore.description": "이 장소를 목록으로, 각 서버가 가진 것과 나란히 보여 줍니다. 값을 끌어 추가하세요."
 }

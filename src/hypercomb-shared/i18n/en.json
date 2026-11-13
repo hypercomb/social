@@ -4826,10 +4826,12 @@
   "need.adds-to": "+ adds to \"{place}\"",
   "need.adds-to-root": "+ adds to your hive's root",
   "need.pane-servers": "From the servers",
-  "need.pane-here": "In \"{place}\"",
-  "need.pane-here-root": "In your hive's root",
-  "need.pane-drop": "Drag a value here to add it",
   "need.here": "here",
   "need.grouping": "grouping…",
-  "need.group-other": "Other"
+  "need.group-other": "Other",
+  "need.search": "Explore a name",
+  "need.rail-click": "Open this tile",
+  "need.rail-find": "Find a tile",
+  "view.explore": "Explore",
+  "view.explore.description": "This place as a list, beside what every server holds for it. Drag a value in to add it."
 }
