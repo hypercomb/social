@@ -94,6 +94,8 @@ import '@hypercomb/runtime/lineage'
 // THE CONSENT DIALOG: every act that waits on a yes (publish, remove, prune,
 // keys) asks it. The host's own, as in the Angular shells, framework-free.
 import '@hypercomb/runtime/confirm-dialog'
+// The chat window, the same one the Angular shells mount (runtime chat-window.ts).
+import '@hypercomb/runtime/chat-window'
 import { PACKED_STORE_MEANING } from '@hypercomb/runtime/packed-store-engine'
 import { packedStoreBlocksBoot } from '@hypercomb/runtime/packed-store-gate'
 import { initializeRuntime } from '@hypercomb/runtime/runtime-initializer'

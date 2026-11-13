@@ -18,7 +18,11 @@ import { join } from 'node:path'
 const SRC = join(__dirname, '..', '..')
 const read = (...parts: string[]): string => readFileSync(join(SRC, ...parts), 'utf8')
 const SCSS = read('hypercomb-shared', 'ui', '_code-theme.scss')
-const CHAT = read('hypercomb-shared', 'ui', 'chat-window', 'chat-markdown.scss')
+// The chat window runs without Angular now (hypercomb-runtime/src/chat-window.ts); its
+// stylesheet is its compiled, scoped sheet — read as text, like every file here.
+const CHAT_SOURCE = read('hypercomb-runtime', 'src', 'chat-window', 'chat-window.styles.ts')
+const CHAT_AT = CHAT_SOURCE.indexOf('export const CHAT_WINDOW_CSS = ') + 'export const CHAT_WINDOW_CSS = '.length
+const CHAT = JSON.parse(CHAT_SOURCE.slice(CHAT_AT, CHAT_SOURCE.indexOf('\n', CHAT_AT))) as string
 const DESK = read('hypercomb-essentials', 'src', 'sharing', 'code-theme.ts')
 const SPEC = read('documentation', 'dcp-installer-visual-spec.md')
 
@@ -94,15 +98,20 @@ describe('the one code theme', () => {
   })
 
   it('has the chat\'s code blocks wear it, with no palette of their own left', () => {
-    expect(CHAT).toMatch(/@use '\.\.\/code-theme' as code;/)
-    expect(CHAT).toMatch(/@include code\.surface;/)
-    expect(CHAT).toMatch(/@include code\.hljs;/)
-    // The block's own ink, gutter and hover come from the theme, not the window's ink.
+    // The theme's own highlight map, class by class, as the theme writes it…
+    const theme = [...tokenRules(SCSS, 'code')].filter(([selector]) => /^\.hljs-[\w-]+$/.test(selector))
+    expect(theme.length).toBeGreaterThanOrEqual(10)
+    // …lands on the same token in the chat's sheet (compiled and scoped, so matched by class).
+    const chat = [...tokenRules(CHAT, 'code')]
+    for (const [cls, token] of theme) {
+      const worn = chat.filter(([selector]) => new RegExp(`\\${cls}(?![\\w-])`).test(selector)).map(([, t]) => t)
+      expect(worn, `${cls} in the chat`).toContain(token)
+    }
+    // The block's own ink and gutter come from the theme, not the window's ink.
     expect(CHAT).toMatch(/color: var\(--code-plain\);/)
     expect(CHAT).toMatch(/color: var\(--code-gutter\);/)
-    const block = CHAT.slice(CHAT.indexOf(':host ::ng-deep .chat-code {'), CHAT.indexOf('// ── tables'))
-    expect(block).not.toMatch(/\.hljs-/)
-    expect(block).not.toMatch(/tw\.ink\(#/)
-    expect(block).not.toMatch(/var\(--hc-window-ink-(loud|quiet)\)/)
+    for (const rule of CHAT.matchAll(/([^{}]*\.chat-code\b[^{}]*)\{([^}]*)\}/g)) {
+      expect(rule[2], rule[1]).not.toMatch(/var\(--hc-window-ink-(loud|quiet)\)/)
+    }
   })
 })

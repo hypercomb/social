@@ -493,8 +493,9 @@ const followPlace = (page, path) => page.evaluate((path) => {
     chip.remove()
     return { via: 'chip' }
   }
+  // The chat window runs without Angular now: its element hands out the chat itself.
   const host = document.querySelector('hc-chat-window')
-  const cmp = host && globalThis.ng?.getComponent?.(host)
+  const cmp = host?.chat ?? (host && globalThis.ng?.getComponent?.(host))
   if (!cmp?.goPath) return { fail: 'no thread and no component to ask' }
   cmp.goPath(path)
   return { via: 'component' }

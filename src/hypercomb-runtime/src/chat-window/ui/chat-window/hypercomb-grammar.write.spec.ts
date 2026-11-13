@@ -43,7 +43,7 @@ describe('a write, judged by the grant', () => {
 describe('the chat window', () => {
   // Line endings normalised: a Windows checkout (core.autocrlf) has CRLF, and
   // the door bodies below are cut at an LF-spelled closing brace.
-  const source = readFileSync(join(process.cwd(), 'hypercomb-shared', 'ui', 'chat-window', 'chat-window.component.ts'), 'utf8').replace(/\r\n/g, '\n')
+  const source = readFileSync(join(process.cwd(), 'hypercomb-runtime', 'src', 'chat-window', 'ui', 'chat-window', 'chat-window.ts'), 'utf8').replace(/\r\n/g, '\n')
 
   it('a trusted conversation never releases a row marked for review', () => {
     const release = source.slice(source.indexOf('#releaseTrusted(): void {'), source.indexOf('#releaseTrusted(): void {') + 500)
