@@ -4,22 +4,23 @@ import { join } from 'node:path'
 
 // THE SERVERS FEEDING A NEED SPEAK EVERY LANGUAGE.
 //
-// The `need` word (hypercomb-essentials/src/sharing/need-feeds.queen.ts) draws
+// The `explore` and `contribute` words (sharing/need-feeds.queen.ts, contribute.queen.ts) draw
 // the hosts as a row feeding one list. A key missing from a catalog falls
 // through to the English. Narrow on purpose, like the site edit parity spec.
 
 const DIR = __dirname
 const KEYS = [
-  'slash.need', 'need.brand', 'need.close', 'need.stand', 'need.no-hosts', 'need.summary',
+  'slash.explore', 'slash.contribute', 'need.brand', 'need.close', 'need.stand', 'need.no-hosts', 'need.summary',
   'need.asking', 'need.empty', 'need.silent', 'need.answered', 'need.waiting', 'need.nothing',
   'need.fed-by', 'need.added', 'need.promote', 'need.promote-failed', 'need.promoted',
   'need.offer', 'need.offer-title', 'need.offer-done', 'need.offer-root', 'need.offer-nohost',
-  'need.offer-empty', 'need.offer-failed', 'need.via-offer', 'need.via-tile', 'need.empty-stack', 'need.promote-elsewhere',
+  'need.offer-empty', 'need.offer-failed', 'need.via-offer', 'need.via-tile', 'need.empty-stack', 'need.promote-root', 'need.adds-to', 'need.adds-to-root',
+  'need.pane-servers', 'need.pane-here', 'need.pane-here-root', 'need.pane-drop', 'need.here',
 ]
 
 const catalogs = readdirSync(DIR).filter(f => f.endsWith('.json'))
 
-describe('need feeds — catalog parity', () => {
+describe('explore and contribute — catalog parity', () => {
   it('finds every catalog', () => {
     expect(catalogs.length).toBeGreaterThanOrEqual(14)
   })

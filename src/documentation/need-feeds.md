@@ -1,4 +1,4 @@
-# The servers feeding a need
+# Explore and contribute — the servers feeding a name
 
 **Status: built 2026-11-12 (uncommitted at time of writing).** The view, both
 sources, the offer word and the host side of `list:` (worker and relay).
@@ -8,6 +8,9 @@ jwize, 2026-11-12:
 - "it is to show you the servers feeding a need"
 - "a row of tiles horizontal feeding the list below"
 - "This is more like a diagnostic view but don't complicate"
+- "let's make it explore recipes instead of need and contribute recipes or whatever"
+- "create a new folder called favorite recipes and then call explore recipes and find them and pull them"
+- "the inserted should go where ever you are but it should be more clear"
 
 The tile you stand on is the **need**. Every host you can ask is a **feeder**.
 The view asks each one what it holds for the need's name and shows, in one
@@ -17,10 +20,13 @@ value and keep it.
 
 ## What you see
 
-**A row of hexagons across the top.** One per host this hive can ask (the
-broker's known content hosts), in a fixed order, each with its own hue. Under
-the host's name, its state: `asking…`, `N · ms`, `holds nothing`, or
-`no answer`.
+**A row of hexagons across the top.** One per host that is feeding the name or
+still being asked (from the broker's known content hosts), each with its own
+hue, its state under its name: `asking…` or `N · ms`. Every host that brought
+nothing — `holds nothing`, `no answer`, or a listing with nothing readable —
+folds into ONE hexagon of the same size, drawn with an inline (a second edge
+just inside its own) and the count in the middle; its tooltip names each host
+and what it said.
 
 **Lines running down into one list.** From the foot of each hexagon a curve
 runs to the head of the list. A thin flow moves along it while the host is
@@ -34,9 +40,12 @@ that fed it and a count of the publishers who said it.
 **Hover lights the path.** Hover a value and the lines and hexagons that fed it
 light while the rest dim. Hover a hexagon and its values light.
 
-**`+` promotes.** A value's `+` makes it a child tile of the tile you stand on,
-through the same create commit `create <name>` runs. Nothing is written until
-you promote. Escape, the close button, or a right-click leaves, and so does
+**`+` adds where you are.** A value's `+` makes it a tile in the tile you
+stand on, through the same create commit `create <name>` runs, and the header
+says where in its own line (`+ adds to "favorite recipes"`, or your hive's
+root); each `+` carries the same words as its tooltip. So the way to gather is:
+make `favorite recipes`, stand in it, `explore recipes`, and pull the values
+you want. Nothing is written until you press `+`. Escape, the close button, or a right-click leaves, and so does
 walking to another tile: a promote lands where the view was opened, never
 somewhere you walked to since.
 
@@ -48,21 +57,21 @@ name (it holds a `/`, or is a reserved or saved word) is refused at the `+`.
 
 | Say | What happens |
 |---|---|
-| `need` | the view, for the tile you stand on |
-| `need <name>` | the view, asked for another name; a promoted value still lands where you stand |
-| `need offer` | offer the child names of the tile you stand on, under its name, to a host |
-| `need offer v1, v2, ...` | offer those values instead |
-| `need offer ... @host` | offer to that host |
+| `explore` | the view, for the name of the tile you stand on |
+| `explore <name>` | the view, for that name, from anywhere; `+` still adds where you are |
+| `contribute` | contribute the child names of the tile you stand on, as a list for its name, to a host |
+| `contribute v1, v2, ...` | contribute those values instead |
+| `contribute ... @host` | contribute to that host |
 
-The view also carries an **offer mine** button, which runs the same act as
-`need offer` with no values, then asks the hosts again. It is shown only when
-the view's name is the tile you stand on — `need <other name>` has no offer
-button, since an offer is always for where you stand.
+The view also carries a **contribute** button, which runs the same act as
+`contribute` with no values, then asks the hosts again. It is shown only when
+the name explored is the tile you stand on — `explore <other name>` has no
+button, since a contribution is always for where you stand.
 
-**The words after `need` are its own** (`rawArgs`): values and an
+**The words after either word are its own** (`rawArgs`): values and an
 `@host:port` are never read as tags or as further behaviour words.
 
-**The offer is your own act.** Only the typed word or a button you click
+**A contribution is your own act.** Only the typed word or a button you click
 publishes. Nothing offers in the background.
 
 **The name is where you stand.** It is the last segment of the tile you stand
@@ -73,7 +82,7 @@ names of the children of the tile you stand on.
 
 **The host.** `@host` when you say one (folded the way the zone door folds a
 host). Otherwise the first host of the branch you stand on. With neither, the
-word refuses and tells you to say `need offer @<host>`.
+word refuses and tells you to say `contribute @<host>`.
 
 The act is the one host offer every word shares (`host-offer.ts`): put the
 record, publish it to the host, then stamp `list:<sign(name)>` → the record's
@@ -93,7 +102,7 @@ Each host is asked two pools for the need's name, in parallel:
 (`pictureRootsOf` in `picture-pools.ts`, at most 64 per publish, nearest the
 branch root first). A published `recipes` with no picture is not listed there,
 and a host carrying only that reads `holds nothing` for `recipes`. Its
-children feed the list once somebody offers them (`need offer`).
+children feed the list once somebody contributes them (`contribute`).
 
 `sign(name)` is the molecule address of the name (`moleculeAddress`, 64
 lowercase hex), so an index carries no free text and the same name finds the
@@ -183,8 +192,10 @@ working: the row shows which origin is the content host.
 - `hypercomb-essentials/src/sharing/need-feeds.ts`: the reads. Asks every host
   both pools, reads each publisher's own index, validates records, merges the
   list. Pure apart from `liveFeedDeps`.
-- `hypercomb-essentials/src/sharing/need-feeds.queen.ts`: the `need` word, the
-  view (row, lines, list, hover, promote) and `need offer`.
+- `hypercomb-essentials/src/sharing/need-feeds.queen.ts`: the `explore` word and
+  the view (row, lines, list, hover, `+`).
+- `hypercomb-essentials/src/sharing/contribute.ts`, `contribute.queen.ts`: the
+  `contribute` act and word.
 - `hypercomb-essentials/src/sharing/need-lists.ts`: the need-list record — its
   key (`needListKey`), pool address, validation (`needListOf`) and the offer
   (`offerNeedList`).

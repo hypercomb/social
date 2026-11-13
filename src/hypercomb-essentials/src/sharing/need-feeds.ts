@@ -13,13 +13,13 @@
 // WHAT A HOST HOLDS FOR A NAME — two pools, asked of each host at once:
 //
 //   · `list:<m>` (need-lists.ts) — the participants who OFFERED a list for the
-//     name (`need offer`): their index names a list record, and its values are
+//     name (`contribute`): their index names a list record, and its values are
 //     the values (`via: 'offer'`);
 //   · `pictures:<m>` (picture-pools.ts) — the publishers whose Publish named a
 //     tile of that name in their index. The Publish act writes that entry only
 //     for a tile that WEARS A PICTURE (pictureRootsOf, at most 64 per publish,
 //     nearest the root first), so an unpictured published tile is not here:
-//     its children reach the list only when someone offers them (`need offer`).
+//     its children reach the list only when someone contributes them (`contribute`).
 //     The values are the names of the children of THEIR tile (`via: 'tile'`).
 //
 // Either way a publisher's word is read from their OWN signed index, never
