@@ -13,6 +13,7 @@ const DIR = __dirname
 const KEYS = [
   'site-manage.managing', 'site-manage.chat', 'site-manage.back', 'site-manage.loading',
   'site-manage.cold', 'site-manage.nothing', 'site-manage.retry',
+  'site-manage.update', 'site-manage.updating', 'site-manage.update-failed',
 ]
 
 const catalogs = readdirSync(DIR).filter(f => f.endsWith('.json'))
@@ -30,6 +31,7 @@ describe('site manage — catalog parity', () => {
         expect(json[key]?.trim(), `${file} has an empty ${key}`).not.toBe('')
       }
       expect(json['site-manage.managing'], `${file} lost {title}`).toContain('{title}')
+      expect(json['site-manage.update-failed'], `${file} lost {reason}`).toContain('{reason}')
     })
   }
 })

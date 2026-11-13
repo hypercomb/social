@@ -22,8 +22,11 @@
 // MIRRORED: hypercomb-shim/src/bootstrap/manage-record.ts reads the same record
 // (a module may not import the shim). Every field is untrusted page text.
 
-import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, type I18nProvider, type InstallProvider } from '@hypercomb/core'
 import { FRAME_MAX_ONE, versionFrame, type FrameReader, type FrameLayer } from '../history/revision-viewer.model.js'
+// Whom builds follow here — the same record the scout read the offer from (the
+// Packages window reads it the same way: host-directory.view.ts #follow).
+import { readInstallFollow } from './update-scout.service.js'
 
 export const SITE_MANAGE_SURFACE = 'hc-site-manage'
 export const SITE_MANAGE_OWNER = '@diamondcoreprocessor.com/SiteManageView'
@@ -60,6 +63,31 @@ const store = (): StoreLike | undefined => ioc()?.get?.<StoreLike>('@hypercomb.s
 const modes = (): ModesLike | undefined => ioc()?.get?.<ModesLike>('@diamondcoreprocessor.com/ModeRegistry')
 type GestureLike = { register(entry: { owner: string; exact?: boolean; back: () => void }): () => void }
 const gesture = (): GestureLike | undefined => ioc()?.get?.<GestureLike>('@diamondcoreprocessor.com/BackGesture')
+const install = (): Pick<InstallProvider, 'installedSig' | 'acquire'> | undefined =>
+  ioc()?.get?.<Pick<InstallProvider, 'installedSig' | 'acquire'>>(INSTALL_IOC_KEY)
+
+/** The zone a site door hangs off (`business-card.jwize.com` → `jwize.com`):
+ *  the address that serves its publisher's packages. MIRRORED from the shim's
+ *  manage-record.ts siteDoorZone (a module may not import the shim). */
+export function managedSiteZone(host: string): string {
+  const bare = String(host || '').toLowerCase().replace(/:\d+$/, '')
+  const labels = bare.split('.').filter(Boolean)
+  return labels.length >= 3 ? labels.slice(1).join('.') : bare
+}
+
+/** Where an offered update's bytes are asked for: the site's zone, then the
+ *  hosts the follow record names (where the scout read the offer). */
+export function updateSources(host: string, storage: Pick<Storage, 'getItem'> | null = safeStorage()): string[] {
+  let followed: readonly string[] = []
+  try { followed = storage ? readInstallFollow(storage)?.hosts ?? [] : [] } catch { followed = [] }
+  return [...new Set([managedSiteZone(host), ...followed].filter(Boolean))]
+}
+const safeStorage = (): Storage | null => { try { return localStorage } catch { return null } }
+
+/** How the page starts again on the package it just took. A seam, so a test can watch it. */
+export const restartPage = { run: (): void => { location.reload() } }
+/** How long an update failure is said over the card before its own note returns. */
+const UPDATE_FAILED_MS = 8000
 
 const t = (key: string, fallback: string, params?: Record<string, string | number>): string => {
   try {
@@ -85,6 +113,14 @@ export class SiteManageElement extends ElementBase {
   #title: HTMLSpanElement | null = null
   #chat: HTMLButtonElement | null = null
   #back: HTMLAnchorElement | null = null
+  #update: HTMLButtonElement | null = null
+  /** The package the publisher's channel names now, when it is not what runs here. */
+  #offer: string | null = null
+  #updating = false
+  #offUpdate: (() => void) | null = null
+  /** What the note says for the card itself, so a passing update failure gives it back. */
+  #cardNote: { text: string; retry: boolean } = { text: '', retry: false }
+  #failTimer = 0
 
   // Every byte the card names is read from its host, never "this device only":
   // the revision viewer asks local-only because its hive already holds the
@@ -104,12 +140,59 @@ export class SiteManageElement extends ElementBase {
     if (!this.#record) { this.replaceChildren(); return }
     this.#build()
     this.#cover(true)
+    // THE PUBLISHER'S NEWER BUILD, OFFERED HERE (jwize, 2026-11-12: "Yes, add
+    // it"). The update scout asks once per boot whether the signed channel has
+    // moved past what runs here and says so on `update:available` (replayed to
+    // a late listener). The hive's own update pill lives in chrome this page
+    // does not show, so the bar carries the offer; the owner decides.
+    this.#offUpdate ??= EffectBus.on<{ available?: boolean; packageSig?: unknown; source?: unknown }>('update:available', payload => {
+      const sig = String(payload?.packageSig ?? '').toLowerCase()
+      const fresh = payload?.available === true && payload.source === 'channel' && SIG_RE.test(sig) && sig !== install()?.installedSig()
+      this.#offer = fresh ? sig : null
+      this.#label()
+    })
     void this.#show()
   }
 
   disconnectedCallback(): void {
     this.#ticket++
     this.#cover(false)
+    clearTimeout(this.#failTimer)
+    this.#offUpdate?.()
+    this.#offUpdate = null
+  }
+
+  /** Take the offered package — exactly that signature, admitted by the gate
+   *  the way every install is (the attester the installed package carries
+   *  vouches for its publisher) — then start again on it. Its bytes come from
+   *  the site's zone and from the hosts the offer was read from (the follow
+   *  record's), as the Packages window takes an update: the zone may not carry
+   *  the channel's newest root yet. */
+  async #adopt(): Promise<void> {
+    const sig = this.#offer
+    const port = install()
+    if (!sig || !port || this.#updating) return
+    this.#updating = true
+    this.#label()
+    let failed = ''
+    try {
+      const outcome = await port.acquire(sig, updateSources(location.host))
+      if (outcome.ok) { restartPage.run(); return }
+      failed = outcome.error ?? ''
+    } catch (error) {
+      failed = error instanceof Error ? error.message : ''
+    }
+    this.#updating = false
+    this.#label()
+    // Said over the card for a moment, then the card's own note comes back —
+    // its Try again included — unless the card has said something newer since.
+    const said = t('site-manage.update-failed', 'The update did not complete. {reason}', { reason: failed }).trim()
+    const card = this.#cardNote
+    this.#paint(said, card.retry)
+    clearTimeout(this.#failTimer)
+    this.#failTimer = window.setTimeout(() => {
+      if (this.#cardNote === card) this.#paint(card.text, card.retry)
+    }, UPDATE_FAILED_MS)
   }
 
   // THE CARD COVERS THE CANVAS, as a takeover view does: it holds `view:active`
@@ -206,7 +289,12 @@ export class SiteManageElement extends ElementBase {
     const back = this.#back = document.createElement('a')
     back.className = 'sm-btn'
     back.href = LEAVE_HREF
-    bar.append(title, chat, back)
+    const update = this.#update = document.createElement('button')
+    update.type = 'button'
+    update.className = 'sm-btn sm-update'
+    update.hidden = true
+    update.addEventListener('click', () => { void this.#adopt() })
+    bar.append(title, update, chat, back)
 
     const note = this.#note = document.createElement('div')
     note.className = 'sm-note'
@@ -232,10 +320,21 @@ export class SiteManageElement extends ElementBase {
     if (this.#chat) this.#chat.textContent = t('site-manage.chat', 'Chat')
     if (this.#back) this.#back.textContent = t('site-manage.back', 'Back to the site')
     if (this.#retry) this.#retry.textContent = t('site-manage.retry', 'Try again')
+    if (this.#update) {
+      this.#update.hidden = !this.#offer
+      this.#update.disabled = this.#updating
+      this.#update.textContent = this.#updating ? t('site-manage.updating', 'Updating…') : t('site-manage.update', 'Update')
+    }
     this.#frame?.setAttribute('title', record?.title ?? '')
   }
 
+  /** The card's own state, said in the note. */
   #say(text: string, offerRetry = false): void {
+    this.#cardNote = { text, retry: offerRetry }
+    this.#paint(text, offerRetry)
+  }
+
+  #paint(text: string, offerRetry: boolean): void {
     if (!this.#note) return
     ;(this.#note.firstChild as HTMLElement).textContent = text
     this.#note.hidden = !text
@@ -267,6 +366,8 @@ ${T} .sm-btn {
 }
 ${T} .sm-btn:hover { background: rgba(255, 255, 255, 0.14); }
 ${T} .sm-chat { border-color: rgba(200, 151, 90, 0.6); }
+${T} .sm-update { border-color: rgba(120, 200, 140, 0.7); color: #bfe8c8; }
+${T} .sm-btn:disabled { opacity: 0.6; cursor: progress; }
 ${T} .sm-note {
   position: fixed; left: 50%; top: 3.2rem; transform: translateX(-50%); z-index: 99991; display: flex; align-items: center;
   gap: 0.6rem; padding: 0.45rem 0.8rem; border-radius: 4px; background: rgba(0, 0, 0, 0.78); color: #ddd;
