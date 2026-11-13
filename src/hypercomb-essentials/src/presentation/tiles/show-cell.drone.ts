@@ -2545,7 +2545,12 @@ export class ShowCellDrone extends Drone {
         try {
           do {
             this.renderQueued = false
-            await this.renderFromSynchronize()
+            // A pass that throws must not take the passes queued behind it
+            // down with it. The store's watchdog fails a read that will never
+            // be answered (packed-bridge.ts), and that rejection lands here:
+            // the next queued pass paints where the participant now stands.
+            try { await this.renderFromSynchronize() }
+            catch (error) { console.warn('[show-cell] a render pass failed; the next one runs', error) }
           } while (this.renderQueued)
         } finally {
           this.rendering = false

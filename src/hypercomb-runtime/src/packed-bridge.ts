@@ -21,17 +21,62 @@ import { PACK_MAGIC, PACK_POINTER_FILENAME, packFilename } from './packed-store-
 interface PendingCall {
   resolve: (value: unknown) => void
   reject: (error: unknown) => void
+  cmd: string
 }
 
-/** RPC over the dedicated worker. One instance per shell. */
+/** How long the worker may stay silent while calls wait on it. A healthy
+ *  worker answers each read in about a millisecond, even with a backlog of
+ *  thousands, so silence this long means it will not answer at all. */
+export const PACKED_SILENCE_MS = 10_000
+/** The same, while a command that is SUPPOSED to take long is in flight: the
+ *  open parses the whole pack, a drain or compaction rewrites it. */
+export const PACKED_LONG_SILENCE_MS = 60_000
+const LONG_COMMANDS = new Set(['pack_open', 'pack_drain', 'pack_compact', 'pack_collect'])
+const WATCH_EVERY_MS = 1_000
+const REOPEN_ATTEMPTS = 5
+
+/** What the bridge needs to stand a stuck worker back up. */
+export interface PackedRestart {
+  spawn: () => Worker
+  config: PackedStoreConfig
+}
+
+/** RPC over the dedicated worker. One instance per shell.
+ *
+ *  THE WATCHDOG (2026-11-12). The worker went silent in the middle of a boot
+ *  warm-up of ~110k reads, and OPFS for the whole origin went with it; every
+ *  read stayed pending for good, the renderer awaited one of them, and the
+ *  hive never painted again until a reload. A reload recovers because it
+ *  kills the worker. So does this: when calls are waiting and the worker has
+ *  said nothing for PACKED_SILENCE_MS, the worker is terminated (its
+ *  SyncAccessHandle goes with it, exactly as when a tab closes), every
+ *  waiting call is rejected so its caller moves on, and a fresh worker
+ *  reopens the pack. Appends are CRC-framed, so a record torn by the
+ *  terminate is a torn tail the open already skips. */
 export class PackedBridge implements NativeBridge {
   #worker: Worker
   #nextId = 1
   readonly #pending = new Map<number, PendingCall>()
+  readonly #restart: PackedRestart | null
+  /** When the worker last answered anything (or was last spawned). */
+  #lastHeard = Date.now()
+  #watch: ReturnType<typeof setInterval> | null = null
+  #restarts = 0
+  #terminated = false
 
-  constructor(worker: Worker) {
+  constructor(worker: Worker, restart: PackedRestart | null = null) {
     this.#worker = worker
-    this.#worker.addEventListener('message', (event: MessageEvent) => {
+    this.#restart = restart
+    this.#attach(worker)
+  }
+
+  /** How many times the watchdog has stood the worker back up. */
+  get restarts(): number { return this.#restarts }
+
+  #attach(worker: Worker): void {
+    worker.addEventListener('message', (event: MessageEvent) => {
+      if (worker !== this.#worker) return   // a terminated worker's late word
+      this.#lastHeard = Date.now()
       const { id, ok, result, error } = event.data as {
         id: number
         ok: boolean
@@ -44,6 +89,72 @@ export class PackedBridge implements NativeBridge {
       if (ok) pending.resolve(result)
       else pending.reject(Object.assign(new Error(error?.message ?? 'packed store error'), { kind: error?.kind }))
     })
+  }
+
+  #arm(): void {
+    if (this.#watch !== null || this.#terminated) return
+    this.#watch = setInterval(this.#check, WATCH_EVERY_MS)
+  }
+
+  /** One watchdog tick; the interval calls it. */
+  readonly #check = (): void => {
+    if (this.#pending.size === 0) {
+      if (this.#watch !== null) { clearInterval(this.#watch); this.#watch = null }
+      return
+    }
+    let long = false
+    for (const call of this.#pending.values()) if (LONG_COMMANDS.has(call.cmd)) { long = true; break }
+    const silent = Date.now() - this.#lastHeard
+    if (silent < (long ? PACKED_LONG_SILENCE_MS : PACKED_SILENCE_MS)) return
+    this.#recover(silent)
+  }
+
+  /** Run one watchdog tick now. */
+  checkNow = (): void => { this.#check() }
+
+  #recover(silentMs: number): void {
+    const waiting = this.#pending.size
+    console.warn(`[packed-store] the worker said nothing for ${Math.round(silentMs / 1000)}s with ${waiting} call(s) waiting — restarting it`)
+    this.#worker.terminate()
+    this.#failPending('packed store worker restarted — it stopped answering', 'Restarted')
+    if (!this.#restart) {
+      // Nothing to reopen with: callers are released, later calls fail fast.
+      this.#terminated = true
+      if (this.#watch !== null) { clearInterval(this.#watch); this.#watch = null }
+      return
+    }
+    this.#restarts++
+    this.#reopen(1)
+  }
+
+  /** Spawn a worker and open the pack in it. The open goes first; the worker
+   *  handles messages in order and every later command awaits the open, so
+   *  calls made meanwhile just queue behind it. The old worker's lock is not
+   *  promised to be gone the instant it is terminated, so a refused open is
+   *  tried again, a little later each time. */
+  #reopen(attempt: number): void {
+    const restart = this.#restart
+    if (!restart || this.#terminated) return
+    const worker = restart.spawn()
+    this.#worker = worker
+    this.#lastHeard = Date.now()
+    this.#attach(worker)
+    void this.invoke('pack_open', restart.config).catch(error => {
+      if (this.#worker !== worker || this.#terminated) return
+      if (attempt >= REOPEN_ATTEMPTS) {
+        console.warn('[packed-store] the restarted worker could not open the pack — reload to recover', error)
+        return
+      }
+      worker.terminate()
+      this.#failPending('packed store worker reopening', 'Restarted')
+      setTimeout(() => this.#reopen(attempt + 1), attempt * 500)
+    })
+  }
+
+  #failPending(message: string, kind: string): void {
+    const calls = [...this.#pending.values()]
+    this.#pending.clear()
+    for (const call of calls) call.reject(Object.assign(new Error(message), { kind }))
   }
 
   invoke = (
@@ -66,17 +177,24 @@ export class PackedBridge implements NativeBridge {
       transfer.push(payload)
     }
     return new Promise((resolve, reject) => {
-      this.#pending.set(id, { resolve, reject })
+      if (this.#terminated) {
+        reject(Object.assign(new Error('packed store bridge terminated'), { kind: 'Terminated' }))
+        return
+      }
+      // Silence is measured from the moment something starts waiting, not
+      // from an idle stretch before it.
+      if (this.#pending.size === 0) this.#lastHeard = Date.now()
+      this.#pending.set(id, { resolve, reject, cmd: command })
+      this.#arm()
       this.#worker.postMessage({ id, cmd: command, payload: body, headers: options?.headers }, transfer)
     })
   }
 
   terminate(): void {
+    this.#terminated = true
+    if (this.#watch !== null) { clearInterval(this.#watch); this.#watch = null }
     this.#worker.terminate()
-    for (const pending of this.#pending.values()) {
-      pending.reject(new Error('packed store bridge terminated'))
-    }
-    this.#pending.clear()
+    this.#failPending('packed store bridge terminated', 'Terminated')
   }
 }
 
@@ -189,8 +307,8 @@ export const packedRoot = async (config: PackedStoreConfig): Promise<PackedBoot 
   }
   let bridge: PackedBridge | null = null
   try {
-    const worker = new Worker(new URL('./packed-store.worker', import.meta.url), { type: 'module' })
-    const openedBridge = new PackedBridge(worker)
+    const spawn = (): Worker => new Worker(new URL('./packed-store.worker', import.meta.url), { type: 'module' })
+    const openedBridge = new PackedBridge(spawn(), { spawn, config })
     bridge = openedBridge
     const info = (await openedBridge.invoke('pack_open', config)) as PackedBoot['info']
     bootedBridge = openedBridge
