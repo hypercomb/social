@@ -6,12 +6,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const sig = (ch: string): string => ch.repeat(64)
-const hive = vi.hoisted(() => ({ bytes: new Map<string, string>() }))
+const hive = vi.hoisted(() => ({ bytes: new Map<string, string>(), modes: [] as string[], backs: [] as Array<() => void> }))
 
 vi.hoisted(() => {
   const services: Record<string, unknown> = {
     '@hypercomb.social/Store': {
+      // The site door's hive is empty: every byte is the host's, nothing is on this device.
       getResource: async (s: string) => (hive.bytes.has(s) ? new (globalThis as unknown as { NodeBlob: typeof Blob }).NodeBlob([hive.bytes.get(s)!]) : null),
+      getResourceResolvedLocal: async () => null,
+    },
+    '@diamondcoreprocessor.com/ModeRegistry': {
+      enter: (mode: string, owner: string) => { hive.modes.push(`enter ${mode} ${owner}`) },
+      exit: (mode: string, owner: string) => { hive.modes.push(`exit ${mode} ${owner}`) },
+    },
+    '@diamondcoreprocessor.com/BackGesture': {
+      register: (entry: { owner: string; exact?: boolean; back: () => void }) => {
+        hive.modes.push(`back ${entry.owner} exact=${entry.exact === true}`)
+        hive.backs.push(entry.back)
+        return () => { hive.modes.push(`unback ${entry.owner}`) }
+      },
     },
   }
   ;(window as unknown as { ioc: unknown }).ioc = {
@@ -25,7 +38,7 @@ vi.hoisted(() => {
 ;(globalThis as unknown as { NodeBlob: unknown }).NodeBlob = (await import('node:buffer')).Blob
 
 const { EffectBus } = await import('@hypercomb/core')
-const { SiteManageElement, SITE_MANAGE_SURFACE, siteManageRecord } = await import('./site-manage.view.js')
+const { SiteManageElement, SITE_MANAGE_OWNER, SITE_MANAGE_SURFACE, siteManageRecord } = await import('./site-manage.view.js')
 if (!customElements.get(SITE_MANAGE_SURFACE)) customElements.define(SITE_MANAGE_SURFACE, SiteManageElement)
 
 const HEAD = sig('1'), PAGE_RECORD = sig('2'), CARD_RECORD = sig('3'), CARD_DATA = sig('4'), PAGE = sig('a')
@@ -68,6 +81,35 @@ describe('the managed site door’s card', () => {
     expect(siteManageRecord()).toEqual({ lineage: 'business-card', title: 'business-card', head: HEAD })
     script.textContent = JSON.stringify({ lineage: 'b', head: 'not a signature' })
     expect(siteManageRecord()).toEqual({ lineage: 'b', title: 'b', head: null })
+  })
+
+  it('carries the card’s own data from the host when nothing is on this device', async () => {
+    // A cold site door: the card:data record names its data, and only the host
+    // holds it. Read local-only, it never arrived and the page showed its list.
+    script = record({ lineage: 'business-card', title: 'business-card', head: HEAD })
+    await mount()
+    const frame = element.querySelector('iframe.sm-frame') as HTMLIFrameElement
+    expect(frame.srcdoc).toContain(btoa(JSON.stringify({ n: 'Jaime' })))
+  })
+
+  it('covers the canvas while it is shown, and says Back leaves the page', async () => {
+    hive.modes.length = 0
+    hive.backs.length = 0
+    script = record({ lineage: 'business-card', title: 'business-card', head: HEAD })
+    await mount()
+    // The way out is registered before the claim, so no Back press finds one without the other.
+    expect(hive.modes).toEqual([`back ${SITE_MANAGE_OWNER} exact=true`, `enter view:active ${SITE_MANAGE_OWNER}`])
+    // Back: one step through the browser's history — the page the owner came from.
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => { /* no traversal in a test */ })
+    try { hive.backs[0]!(); expect(back).toHaveBeenCalledOnce() } finally { back.mockRestore() }
+    element.remove()
+    expect(hive.modes.slice(-2)).toEqual([`exit view:active ${SITE_MANAGE_OWNER}`, `unback ${SITE_MANAGE_OWNER}`])
+  })
+
+  it('claims nothing on a page that carries no record', async () => {
+    hive.modes.length = 0
+    await mount()
+    expect(hive.modes).toEqual([])
   })
 
   it('runs the published head’s card in a scripts-only frame, hosted, with its own card data', async () => {

@@ -53,9 +53,13 @@ type StoreLike = {
   getResource(sig: string): Promise<Blob | null>
   getResourceResolvedLocal?(sig: string): Promise<Blob | null>
 }
-type Ioc = { get?: <T>(key: string) => T | undefined }
+type Ioc = { get?: <T>(key: string) => T | undefined; whenReady?: (key: string, cb: () => void) => void }
+type ModesLike = { enter(mode: string, owner: string): void; exit(mode: string, owner: string): void }
 const ioc = (): Ioc | undefined => (window as { ioc?: Ioc }).ioc
 const store = (): StoreLike | undefined => ioc()?.get?.<StoreLike>('@hypercomb.social/Store')
+const modes = (): ModesLike | undefined => ioc()?.get?.<ModesLike>('@diamondcoreprocessor.com/ModeRegistry')
+type GestureLike = { register(entry: { owner: string; exact?: boolean; back: () => void }): () => void }
+const gesture = (): GestureLike | undefined => ioc()?.get?.<GestureLike>('@diamondcoreprocessor.com/BackGesture')
 
 const t = (key: string, fallback: string, params?: Record<string, string | number>): string => {
   try {
@@ -82,21 +86,61 @@ export class SiteManageElement extends ElementBase {
   #chat: HTMLButtonElement | null = null
   #back: HTMLAnchorElement | null = null
 
+  // Every byte the card names is read from its host, never "this device only":
+  // the revision viewer asks local-only because its hive already holds the
+  // tile, but a managed site door's hive is empty — read local-only, the card's
+  // own data never arrived and the page fell back to its list. versionFrame
+  // bounds what is carried (FRAME_MAX_CARRIED), so this is no fetch storm.
   readonly #reader: FrameReader = {
-    bytes: (sig, localOnly) => this.#bytesOf(sig, localOnly),
+    bytes: sig => this.#bytesOf(sig),
     missing: sig => this.#missing.has('any:' + sig),
   }
+  #covering = false
+  #offBack: (() => void) | null = null
 
   connectedCallback(): void {
     ensureStyles()
     this.#record = siteManageRecord()
     if (!this.#record) { this.replaceChildren(); return }
     this.#build()
+    this.#cover(true)
     void this.#show()
   }
 
   disconnectedCallback(): void {
     this.#ticket++
+    this.#cover(false)
+  }
+
+  // THE CARD COVERS THE CANVAS, as a takeover view does: it holds `view:active`
+  // in the owner-counted ModeRegistry, so the hive's own surfaces stand aside —
+  // the empty-layer prompt ("No tiles yet"), the command line and the controls —
+  // and only the card, its bar and the chat are here.
+  //
+  // A view that holds `view:active` owns the Back press too (navigation/
+  // view-back.ts traps it while any view is up), so the card says what Back
+  // means here: leave the page, as it did before it covered anything — one
+  // step back through the browser's history. `exact`: the hive's lineage under
+  // the card is not the way out.
+  #cover(on: boolean): void {
+    if (this.#covering === on) return
+    this.#covering = on
+    if (on) {
+      const claim = (): void => { if (this.#covering) modes()?.enter('view:active', SITE_MANAGE_OWNER) }
+      const owns = (): void => {
+        if (!this.#covering || this.#offBack) return
+        this.#offBack = gesture()?.register({ owner: SITE_MANAGE_OWNER, exact: true, back: () => { history.back() } }) ?? null
+      }
+      // The way out first, so no Back press can find the claim without it.
+      owns()
+      if (!this.#offBack) ioc()?.whenReady?.('@diamondcoreprocessor.com/BackGesture', owns)
+      claim()
+      if (!modes()) ioc()?.whenReady?.('@diamondcoreprocessor.com/ModeRegistry', claim)
+      return
+    }
+    modes()?.exit('view:active', SITE_MANAGE_OWNER)
+    this.#offBack?.()
+    this.#offBack = null
   }
 
   /** Read the published head and run its card. */
