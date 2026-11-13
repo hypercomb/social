@@ -59,6 +59,25 @@ describe('isWordSwitchedOff', () => {
     document.documentElement.dataset['hypercombMode'] = 'visitor'
     expect(isWordSwitchedOff('chat')).toBe(false)
   })
+
+  // A MANAGED SITE DOOR (core/managed-page.ts) is a fresh origin — a fresh
+  // hive starts with the chat dark and on offer — and has no Beehaviors to
+  // light it with. There the chat is the point, and every word is the owner's.
+  it('switches nothing off on a managed site door', () => {
+    seedDarkOnFreshInstall()
+    setKindGlobalOn('word:chat', false)
+    const script = document.createElement('script')
+    script.id = 'hc-manage'
+    script.type = 'application/json'
+    script.textContent = JSON.stringify({ lineage: 'business-card' })
+    document.head.appendChild(script)
+    try {
+      expect(isWordSwitchedOff('chat')).toBe(false)
+    } finally {
+      script.remove()
+    }
+    expect(isWordSwitchedOff('chat')).toBe(true)
+  })
 })
 
 // SUGGESTED (jwize, 2026-11-11): "we can have suggested behaviors so the

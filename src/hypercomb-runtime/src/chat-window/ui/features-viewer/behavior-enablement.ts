@@ -27,6 +27,7 @@
 //     so it was removed (2026-09-01) rather than carried as dead surface.
 
 import { EffectBus } from '@hypercomb/core'
+import { managedPage } from '../../core/managed-page'
 
 export const GLOBAL_ON_KEY = 'hc:behavior-global-on'
 export const GLOBAL_OFF_KEY = 'hc:behavior-global-off'
@@ -157,11 +158,14 @@ function write(key: string, list: string[]): void {
 export const WORD_KIND_PREFIX = 'word:'
 
 /** True when the participant switched this word off in Beehaviors. Never on
- *  a published visitor shell, which has no roster to consult. */
+ *  a published visitor shell, which has no roster to consult — nor on a
+ *  managed site door (core/managed-page.ts), which has no Beehaviors to turn
+ *  a word back on with, and where every behaviour is the owner's. */
 export function isWordSwitchedOff(word: string): boolean {
   const w = String(word ?? '').trim().toLowerCase().replace(/^\/+/, '')
   if (!w) return false
   try { if (document.documentElement.dataset['hypercombMode'] === 'visitor') return false } catch { /* no document */ }
+  if (managedPage()) return false
   return readGlobalOffKinds().includes(WORD_KIND_PREFIX + w)
 }
 
