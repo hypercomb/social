@@ -129,6 +129,8 @@ export const PACK_POINTER_FILENAME = 'current'
  */
 export const COMPACT_GARBAGE_RATIO = 0.35
 export const COMPACT_MIN_GARBAGE_BYTES = 1024 * 1024
+/** How much a bulk copy stages before writing it out in one call. */
+export const STAGE_BYTES = 4 * 1024 * 1024
 
 const enum Kind {
   Content = 1,
@@ -235,6 +237,12 @@ export class PackedStoreEngine {
 
   #end = 0
   #garbageBytes = 0
+  /** Records staged for one large write, while a bulk copy runs (compaction).
+   *  `null` = the normal path: every append is written and flushed alone. */
+  #staged: Uint8Array[] | null = null
+  #stagedBytes = 0
+  /** File offset of the first staged record. */
+  #stagedAt = 0
 
   private constructor(private readonly file: SyncFile) {}
 
@@ -383,15 +391,35 @@ export class PackedStoreEngine {
     const body = record.subarray(4, 4 + bodyLen)
     view.setUint32(4 + bodyLen, crc32(body), true)
 
-    // If a previous session tore its tail, the parse stopped at #end —
-    // truncate the torn bytes exactly once, then append.
-    if (this.file.getSize() > this.#end) this.file.truncate(this.#end)
-    this.file.write(this.#end, record)
-    this.file.flush()
+    if (this.#staged) {
+      // A bulk copy: no torn tail to trim (the target was truncated to the
+      // magic), no flush per record — the records go out in large writes.
+      if (this.#staged.length === 0) this.#stagedAt = this.#end
+      this.#staged.push(record)
+      this.#stagedBytes += record.length
+      if (this.#stagedBytes >= STAGE_BYTES) this.#writeStaged()
+    } else {
+      // If a previous session tore its tail, the parse stopped at #end —
+      // truncate the torn bytes exactly once, then append.
+      if (this.file.getSize() > this.#end) this.file.truncate(this.#end)
+      this.file.write(this.#end, record)
+      this.file.flush()
+    }
 
     const valueAt = this.#end + 4 + 3 + key.length
     this.#end += record.length
     this.#apply(kind, key, { offset: valueAt, length: value.length }, value)
+  }
+
+  /** Write every staged record in one call. */
+  #writeStaged(): void {
+    if (!this.#staged || this.#staged.length === 0) return
+    const chunk = new Uint8Array(this.#stagedBytes)
+    let at = 0
+    for (const record of this.#staged) { chunk.set(record, at); at += record.length }
+    this.file.write(this.#stagedAt, chunk)
+    this.#staged = []
+    this.#stagedBytes = 0
   }
 
   #read(ref: ValueRef): Uint8Array {
@@ -628,6 +656,13 @@ export class PackedStoreEngine {
     target.flush()
     const fresh = new PackedStoreEngine(target)
     fresh.#end = PACK_MAGIC.length
+    // ONE FLUSH, NOT ONE PER RECORD (2026-11-12). Through the ordinary
+    // append every copied record was its own write AND its own flush — about
+    // half a million fsyncs for a 988 MB pack, so the compaction that every
+    // boot's drain started held the worker for many minutes and the hive sat
+    // dead. The image is invisible until the pointer flips, so it needs no
+    // per-record durability: stage, write in large chunks, flush once.
+    fresh.#staged = []
     for (const [sig, ref] of this.#content) {
       fresh.#append(Kind.Content, hexToBytes(sig), this.#read(ref))
     }
@@ -643,6 +678,9 @@ export class PackedStoreEngine {
         fresh.#append(Kind.Pool, fresh.#poolKey(pool, name), this.#read(ref))
       }
     }
+    fresh.#writeStaged()
+    fresh.#staged = null
+    target.flush()
     return fresh
   }
 }

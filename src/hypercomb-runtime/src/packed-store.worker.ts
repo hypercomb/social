@@ -52,6 +52,7 @@ import {
   PackedStoreEngine,
   bytesToHex,
   isSigName,
+  markerFilename,
   markerIndexOf,
   type PackedEntry,
   type SyncFile,
@@ -70,6 +71,10 @@ interface CommandPayload {
   sig?: string
   name?: string
   limit?: number
+  /** pack_drain: may a drain that settles compact? Default true. */
+  compact?: boolean
+  /** raw_dir_entries: only the members under this sub-bucket prefix. */
+  prefix?: string
   /** `pool_get` addresses a pool by its MEANING, not its signature — the
    *  service worker knows `bees`, not sign('bees'). */
   meaning?: string
@@ -257,8 +262,9 @@ class PackedHost {
     ) as SyncCapableFileHandle
     const nextHandle = await nextFile.createSyncAccessHandle()
     let after = before
+    let compacted: PackedStoreEngine
     try {
-      const compacted = this.#engine.compactInto(new OpfsSyncFile(nextHandle))
+      compacted = this.#engine.compactInto(new OpfsSyncFile(nextHandle))
       after = compacted.stats().fileSize
       nextHandle.flush()
     } catch (error) {
@@ -278,7 +284,9 @@ class PackedHost {
     this.#handle.close()
     this.#handle = nextHandle
     this.#generation = next
-    this.#engine = PackedStoreEngine.open(new OpfsSyncFile(this.#handle))
+    // The compacted engine already indexes exactly this file — re-parsing
+    // it would read the whole new pack a second time for nothing.
+    this.#engine = compacted
     await this.#packDir.removeEntry(previous).catch(() => undefined)
     return { compacted: true, before, after }
   }
@@ -291,21 +299,58 @@ class PackedHost {
   // flat-layout fallback (read-only — writes NEVER target the old layout)
   // -----------------------------------------------------------------
 
+  // ABSENCE IS ASKED ONCE (2026-11-12). Every pack miss and every listing
+  // used to ask the REAL OPFS root whether a flat copy still existed — a
+  // getDirectoryHandle per legacy parent, per call, nearly all of them
+  // throwing NotFound. At the boot warm-up's ~3,700 calls a second that was
+  // thousands of real OPFS requests a second, and OPFS for the whole origin
+  // stopped answering (a fresh worker could not list a directory). The flat
+  // layout only ever DRAINS — writes never target it — so "no flat copy
+  // here" stays true for the life of this worker and is remembered. A loose
+  // blob is the one flat thing still written, by contentPut in this worker
+  // (the single writer), which forgets the miss it is about to fill.
+  readonly #noFlatDir = new Set<string>()
+  readonly #noLoose = new Set<string>()
+  readonly #noLegacyContent = new Set<string>()
+  /** Legacy dirs resolved once: the handle, or null when absent for good. */
+  readonly #legacyDirs = new Map<string, FileSystemDirectoryHandle | null>()
+  static readonly #ABSENCE_CAP = 200_000
+
+  #remember(set: Set<string>, sig: string): void {
+    if (set.size >= PackedHost.#ABSENCE_CAP) set.clear()
+    set.add(sig)
+  }
+
+  async #legacyDir(name: string): Promise<FileSystemDirectoryHandle | null> {
+    if (this.#legacyDirs.has(name)) return this.#legacyDirs.get(name) ?? null
+    let dir: FileSystemDirectoryHandle | null = null
+    try { dir = await this.#root.getDirectoryHandle(name) } catch { /* drained, or never existed */ }
+    this.#legacyDirs.set(name, dir)
+    return dir
+  }
+
   async #looseFile(sig: string): Promise<File | null> {
+    if (this.#noLoose.has(sig)) return null
     try {
       const handle = await this.#root.getFileHandle(sig)
       return await handle.getFile()
-    } catch { return null }
+    } catch {
+      this.#remember(this.#noLoose, sig)
+      return null
+    }
   }
 
   async #legacyContentFile(sig: string): Promise<File | null> {
+    if (this.#noLegacyContent.has(sig)) return null
     for (const dirName of this.#config.legacyContentDirs) {
+      const dir = await this.#legacyDir(dirName)
+      if (!dir) continue
       try {
-        const dir = await this.#root.getDirectoryHandle(dirName)
         const handle = await dir.getFileHandle(sig)
         return await handle.getFile()
       } catch { /* next source */ }
     }
+    this.#remember(this.#noLegacyContent, sig)
     return null
   }
 
@@ -314,16 +359,33 @@ class PackedHost {
    *  root can no longer surface by name (non-sig names report absent), so
    *  its bag joins the fallback chain here until the drain absorbs it. */
   async #flatDirs(sig: string): Promise<FileSystemDirectoryHandle[]> {
-    if (sig === this.#packPoolSig) return []
+    if (sig === this.#packPoolSig || this.#noFlatDir.has(sig)) return []
     const out: FileSystemDirectoryHandle[] = []
     try { out.push(await this.#root.getDirectoryHandle(sig)) } catch { /* drained */ }
     for (const parentName of this.#config.legacyBagParents) {
-      try {
-        const parent = await this.#root.getDirectoryHandle(parentName)
-        out.push(await parent.getDirectoryHandle(sig))
-      } catch { /* drained */ }
+      const parent = await this.#legacyDir(parentName)
+      if (!parent) continue
+      try { out.push(await parent.getDirectoryHandle(sig)) } catch { /* drained */ }
     }
+    if (out.length === 0) this.#remember(this.#noFlatDir, sig)
     return out
+  }
+
+  /** The bag's newest marker, named and read, without listing the bag: the
+   *  pack's index knows its maximum, and an undrained flat copy (rare, and
+   *  asked once thanks to the absence memo) may hold a higher one. */
+  async dirHead(sig: string): Promise<{ name: string; bytes: Uint8Array } | null> {
+    const packed = this.#engine.head(sig)
+    let best = packed ? { name: markerFilename(packed.index), bytes: packed.bytes as Uint8Array | null } : null
+    for (const flat of await this.#flatDirs(sig)) {
+      for await (const [name, handle] of flat as unknown as AsyncIterable<[string, FileSystemHandle]>) {
+        if (handle.kind !== 'file' || markerIndexOf(name) === null) continue
+        if (!best || name > best.name) best = { name, bytes: null }
+      }
+    }
+    if (!best) return null
+    if (best.bytes) return { name: best.name, bytes: best.bytes }
+    return { name: best.name, bytes: await this.dirGet(sig, best.name) }
   }
 
   // -----------------------------------------------------------------
@@ -360,6 +422,7 @@ class PackedHost {
     }
     const existing = await this.#looseFile(sig)
     if (existing && existing.size === bytes.length) return sig
+    this.#noLoose.delete(sig)   // about to exist — the remembered miss is over
     const handle = await this.#root.getFileHandle(sig, { create: true })
     const writable = await handle.createWritable()
     await writable.write(bytes as unknown as BufferSource)
@@ -743,6 +806,15 @@ const handle = async (request: BridgeRequest): Promise<{ result: unknown; transf
       host.dirPut(sig, name, new Uint8Array(payload as ArrayBuffer))
       return { result: null, transfer: [] }
     }
+    case 'dir_head': {
+      // The newest marker of a bag, named and read, in one round trip and
+      // with no listing — what every head read used to pay a full bag
+      // enumeration for (HistoryService.latestMarkerSigFor).
+      const head = await host.dirHead(p.sig!)
+      if (!head) return { result: null, transfer: [] }
+      const buffer = toTransferable(head.bytes)
+      return { result: { name: head.name, bytes: buffer }, transfer: [buffer] }
+    }
     case 'raw_dir_remove':
       return { result: await host.dirRemove(p.sig!, p.name!), transfer: [] }
     case 'pool_get': {
@@ -756,8 +828,16 @@ const handle = async (request: BridgeRequest): Promise<{ result: unknown; transf
       const buffer = toTransferable(bytes)
       return { result: buffer, transfer: [buffer] }
     }
-    case 'raw_dir_entries':
-      return { result: await host.dirEntries(p.sig!), transfer: [] }
+    case 'raw_dir_entries': {
+      // A sub-bucket asks for ITS members only. Filtered here, before the
+      // copy across the worker boundary: one conversation's bucket used to
+      // receive every member of the whole threads pool and throw nearly all
+      // of it away (2026-11-12). A name in a flat undrained dir never starts
+      // with a prefix, exactly as the facade's own filter treats it.
+      const entries = await host.dirEntries(p.sig!)
+      const prefix = p.prefix
+      return { result: prefix ? entries.filter(e => e.name.startsWith(prefix)) : entries, transfer: [] }
+    }
     case 'raw_root_entries':
       return { result: await host.rootEntries(), transfer: [] }
     case 'raw_remove':
@@ -778,9 +858,13 @@ const handle = async (request: BridgeRequest): Promise<{ result: unknown; transf
       // Compaction is checked when the drain settles, not per chunk: the
       // drain is the one bulk writer, and rewriting mid-drain would be
       // wasted work.
-      const compaction = drained.done ? await host.compact() : { compacted: false }
+      const compaction = drained.done && p.compact !== false ? await host.compact() : { compacted: false }
       return { result: { ...drained, compaction }, transfer: [] }
     }
+    case 'pack_maybe_compact':
+      // Compact only if enough of the file is superseded — the store asks
+      // this while the tab is hidden, never during a visible boot.
+      return { result: await host.compact(false), transfer: [] }
     case 'pack_compact':
       return { result: await host.compact(true), transfer: [] }
     case 'pack_collect':

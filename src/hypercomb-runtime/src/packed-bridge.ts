@@ -31,7 +31,13 @@ export const PACKED_SILENCE_MS = 10_000
 /** The same, while a command that is SUPPOSED to take long is in flight: the
  *  open parses the whole pack, a drain or compaction rewrites it. */
 export const PACKED_LONG_SILENCE_MS = 60_000
-const LONG_COMMANDS = new Set(['pack_open', 'pack_drain', 'pack_compact', 'pack_collect'])
+/** A compaction rewrites the whole pack in one synchronous call — on a
+ *  ~1 GB hive that is legitimately minutes. Killing it part way leaves the
+ *  garbage in place, so the next attempt would start over and be killed
+ *  again: it gets far longer before the watchdog decides it is stuck. */
+export const PACKED_COMPACT_SILENCE_MS = 300_000
+const LONG_COMMANDS = new Set(['pack_open', 'pack_drain', 'pack_collect'])
+const COMPACT_COMMANDS = new Set(['pack_compact', 'pack_maybe_compact'])
 const WATCH_EVERY_MS = 1_000
 const REOPEN_ATTEMPTS = 5
 
@@ -102,10 +108,13 @@ export class PackedBridge implements NativeBridge {
       if (this.#watch !== null) { clearInterval(this.#watch); this.#watch = null }
       return
     }
-    let long = false
-    for (const call of this.#pending.values()) if (LONG_COMMANDS.has(call.cmd)) { long = true; break }
+    let allowance = PACKED_SILENCE_MS
+    for (const call of this.#pending.values()) {
+      if (COMPACT_COMMANDS.has(call.cmd)) { allowance = PACKED_COMPACT_SILENCE_MS; break }
+      if (LONG_COMMANDS.has(call.cmd)) allowance = PACKED_LONG_SILENCE_MS
+    }
     const silent = Date.now() - this.#lastHeard
-    if (silent < (long ? PACKED_LONG_SILENCE_MS : PACKED_SILENCE_MS)) return
+    if (silent < allowance) return
     this.#recover(silent)
   }
 

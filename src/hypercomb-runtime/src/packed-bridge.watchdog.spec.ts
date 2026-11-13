@@ -2,7 +2,7 @@
 // calls wait on it is terminated, every waiting call is released, and a fresh
 // worker reopens the pack (packed-bridge.ts, 2026-11-12).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { PACKED_LONG_SILENCE_MS, PACKED_SILENCE_MS, PackedBridge } from './packed-bridge'
+import { PACKED_COMPACT_SILENCE_MS, PACKED_LONG_SILENCE_MS, PACKED_SILENCE_MS, PackedBridge } from './packed-bridge'
 
 type Sent = { id: number; cmd: string }
 
@@ -92,11 +92,24 @@ describe('PackedBridge watchdog', () => {
 
   it('gives a command meant to take long the longer allowance', () => {
     const bridge = new PackedBridge(spawn(), { spawn, config })
-    void bridge.invoke('pack_compact').catch(() => {})
+    void bridge.invoke('pack_drain', { limit: 200 }).catch(() => {})
     vi.advanceTimersByTime(PACKED_SILENCE_MS * 3)
     expect(workers[0].terminated).toBe(false)
     vi.advanceTimersByTime(PACKED_LONG_SILENCE_MS)
     expect(workers[0].terminated).toBe(true)
+  })
+
+  it('never kills a compaction at the long allowance — a killed one would only start over', () => {
+    for (const cmd of ['pack_compact', 'pack_maybe_compact']) {
+      workers = []
+      const bridge = new PackedBridge(spawn(), { spawn, config })
+      void bridge.invoke(cmd).catch(() => {})
+      vi.advanceTimersByTime(PACKED_LONG_SILENCE_MS * 2)
+      expect(workers[0].terminated).toBe(false)
+      vi.advanceTimersByTime(PACKED_COMPACT_SILENCE_MS)
+      expect(workers[0].terminated).toBe(true)
+      bridge.terminate()
+    }
   })
 
   it('tries the open again when the old lock is still held, then serves', async () => {

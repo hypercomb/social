@@ -91,6 +91,78 @@ describe('native filesystem facade: lookups must not list', () => {
 // PRUNE'S DESTROY (jwize 2026-10-18: "make it really destroy"). This store
 // never deletes on an ordinary removeEntry — removing a tile appends a layer —
 // so prune says `destroy`, and only then does a real delete cross the bridge.
+describe('native filesystem facade: a bag names its head without listing', () => {
+  const headBridge = (head: { name: string; bytes: string } | null | 'unknown') => {
+    const calls: string[] = []
+    const bridge: NativeBridge = {
+      invoke: async command => {
+        calls.push(command)
+        if (command === 'dir_head') {
+          if (head === 'unknown') throw new Error('unknown packed-store command: dir_head')
+          return head ? { name: head.name, bytes: new TextEncoder().encode(head.bytes).buffer } : null
+        }
+        throw new Error(`unexpected command ${command}`)
+      },
+    }
+    return { bridge, calls }
+  }
+
+  it('answers the newest marker and its bytes in one round trip', async () => {
+    const { bridge, calls } = headBridge({ name: '00000251', bytes: '{"layer":"x"}' })
+    const bag = await new NativeRootDirectory(bridge).getDirectoryHandle(SIG)
+    const head = await bag.latestMarker()
+    expect(head?.name).toBe('00000251')
+    expect(new TextDecoder().decode(head?.bytes)).toBe('{"layer":"x"}')
+    expect(calls).toEqual(['dir_head'])
+  })
+
+  it('says null for a bag with no marker', async () => {
+    const { bridge } = headBridge(null)
+    const bag = await new NativeRootDirectory(bridge).getDirectoryHandle(SIG)
+    await expect(bag.latestMarker()).resolves.toBeNull()
+  })
+
+  it('says undefined when the backend has no head command, and stops asking', async () => {
+    const { bridge, calls } = headBridge('unknown')
+    const bag = await new NativeRootDirectory(bridge).getDirectoryHandle(SIG)
+    await expect(bag.latestMarker()).resolves.toBeUndefined()
+    await expect(bag.latestMarker()).resolves.toBeUndefined()
+    expect(calls).toEqual(['dir_head'])
+  })
+
+  it('never answers for a sub-bucket, which holds pool members, not markers', async () => {
+    const { bridge, calls } = headBridge({ name: '00000001', bytes: '' })
+    const bag = await new NativeRootDirectory(bridge).getDirectoryHandle(SIG)
+    const sub = await bag.getDirectoryHandle('locale', { create: true })
+    await expect(sub.latestMarker()).resolves.toBeUndefined()
+    expect(calls).toEqual([])
+  })
+})
+
+describe('native filesystem facade: a sub-bucket asks for its own members', () => {
+  it('sends its prefix, and still filters when the backend ignores it', async () => {
+    const payloads: unknown[] = []
+    const bridge: NativeBridge = {
+      invoke: async (command, payload) => {
+        payloads.push(payload)
+        if (command !== 'raw_dir_entries') throw new Error(`unexpected command ${command}`)
+        // A backend that does not know `prefix` answers the whole pool.
+        return [
+          { name: 'mine/turn-1', directory: false },
+          { name: 'other/turn-9', directory: false },
+          { name: 'top-level', directory: false },
+        ]
+      },
+    }
+    const pool = await new NativeRootDirectory(bridge).getDirectoryHandle(SIG)
+    const bucket = await pool.getDirectoryHandle('mine', { create: true })
+    const names: string[] = []
+    for await (const [name] of bucket.entries()) names.push(name)
+    expect(names).toEqual(['turn-1'])
+    expect(payloads).toEqual([{ sig: SIG, prefix: 'mine/' }])
+  })
+})
+
 describe('native filesystem facade: only prune destroys', () => {
   const recording = () => {
     const calls: { command: string; payload: unknown }[] = []

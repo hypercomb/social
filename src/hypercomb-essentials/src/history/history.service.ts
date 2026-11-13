@@ -1451,10 +1451,20 @@ export class HistoryService {
 
     let latestName = ''
     if (bag) {
-      for await (const [entryName, handle] of (bag as any).entries()) {
-        if (handle.kind !== 'file') continue
-        if (!HistoryService.#MARKER_RE.test(entryName)) continue
-        if (entryName > latestName) latestName = entryName
+      // The packed store names the head from its index in one round trip;
+      // listing every marker to find the highest was the bulk of the boot
+      // warm-up's store traffic (2026-11-12). `undefined` = this backend
+      // cannot say, so walk as before.
+      const head = await (bag as { latestMarker?: () => Promise<{ name: string } | null | undefined> })
+        .latestMarker?.()
+      if (head !== undefined) {
+        if (head && HistoryService.#MARKER_RE.test(head.name)) latestName = head.name
+      } else {
+        for await (const [entryName, handle] of (bag as any).entries()) {
+          if (handle.kind !== 'file') continue
+          if (!HistoryService.#MARKER_RE.test(entryName)) continue
+          if (entryName > latestName) latestName = entryName
+        }
       }
     }
 
@@ -1566,6 +1576,38 @@ export class HistoryService {
     const all = await this.listLayers(locationSig)
     if (all.length === 0) return null
     return all[all.length - 1]
+  }
+
+  /**
+   * The head marker in ONE read, for a reader that needs only the head — the
+   * genome census, once per location per run (2026-11-12). `headLayer` goes
+   * through `listLayers`, which on a cold bag reads EVERY marker in it to
+   * return the last; the packed store names the newest marker from its index
+   * instead (`latestMarker`, the worker's `dir_head`).
+   *
+   * Read-only: it never materializes an empty marker and never migrates a
+   * legacy one. `undefined` = it cannot answer the way `headLayer` would —
+   * a warm list (headLayer is free then), a store with no `latestMarker`, or
+   * a newest marker that is not a canonical pointer record (listLayers would
+   * skip it, so let it) — and the caller falls back to headLayer.
+   */
+  public readonly headMarker = async (
+    locationSig: string,
+  ): Promise<{ filename: string; layerSig: string; bytes: ArrayBuffer } | null | undefined> => {
+    if (this.#layerListCache.has(locationSig)) return undefined
+    let bag: FileSystemDirectoryHandle
+    try { bag = await this.bagForRead(locationSig) } catch { return null }
+    const latest = (bag as { latestMarker?: () => Promise<{ name: string; bytes: Uint8Array } | null | undefined> }).latestMarker
+    if (!latest) return undefined
+    const head = await latest.call(bag)
+    if (head === undefined) return undefined
+    if (head === null) return null
+    if (!HistoryService.#MARKER_RE.test(head.name)) return undefined
+    const bytes = head.bytes.slice().buffer as ArrayBuffer
+    if (HistoryService.#SIG_RE.test(new TextDecoder().decode(bytes).trim())) return undefined
+    const { layerSig, isPointer } = await extractLayerSigFromMarker(bytes)
+    if (!isPointer || !HistoryService.#SIG_RE.test(layerSig)) return undefined
+    return { filename: head.name, layerSig, bytes }
   }
 
   /**

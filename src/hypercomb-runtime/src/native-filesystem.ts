@@ -436,6 +436,30 @@ class NativeSigDirectory {
     }
   }
 
+  /**
+   * THE HEAD WITHOUT THE LISTING (2026-11-12). A bag's current layer is its
+   * highest marker, and finding it used to list every marker in the bag —
+   * `raw_dir_entries`, an O(markers) array copied across the worker
+   * boundary — on every head read. The packed store's index already knows
+   * the maximum, so it answers in one round trip with the bytes.
+   *
+   * `null` = the bag has no marker. `undefined` = this backend cannot say
+   * (a host without `dir_head`, or a sub-bucket): walk the entries instead.
+   */
+  async latestMarker(): Promise<{ name: string; bytes: Uint8Array } | null | undefined> {
+    if (this.prefix || this.#noHead) return undefined
+    try {
+      const head = await this.bridge.invoke('dir_head', { sig: this.name }) as { name: string; bytes: ArrayBuffer } | null
+      return head ? { name: head.name, bytes: new Uint8Array(head.bytes) } : null
+    } catch (error) {
+      // An unknown command never becomes known: stop asking this handle.
+      if (/unknown packed-store command|unknown command/i.test(String((error as Error)?.message ?? ''))) this.#noHead = true
+      return undefined
+    }
+  }
+
+  #noHead = false
+
   async isSameEntry(other: unknown): Promise<boolean> {
     return (
       other instanceof NativeSigDirectory &&
@@ -444,8 +468,12 @@ class NativeSigDirectory {
     )
   }
 
+  /** The members at and under this prefix. The prefix rides along so a
+   *  backend that understands it sends only this sub-bucket's members; one
+   *  that ignores it sends them all, and `#entries` filters as it always has. */
   async #rawEntries(): Promise<RawEntry[]> {
-    return (await this.bridge.invoke('raw_dir_entries', { sig: this.name })) as RawEntry[]
+    const payload = this.prefix ? { sig: this.name, prefix: this.prefix } : { sig: this.name }
+    return (await this.bridge.invoke('raw_dir_entries', payload)) as RawEntry[]
   }
 
   /** Entries at THIS level: direct members as files, deeper members collapsed

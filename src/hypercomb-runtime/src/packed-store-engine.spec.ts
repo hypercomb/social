@@ -221,6 +221,60 @@ describe('packed store: durability', () => {
   })
 })
 
+describe('packed store: compaction is one flush, not one per record', () => {
+  // 2026-11-12: through the ordinary append every copied record was its own
+  // write and its own flush — ~half a million fsyncs for a 988 MB hive, and
+  // every boot's drain started it, holding the worker for minutes.
+  class CountingFile extends MemorySyncFile {
+    flushes = 0
+    writes = 0
+    override flush(): void { this.flushes++; super.flush() }
+    override write(offset: number, data: Uint8Array): void { this.writes++; super.write(offset, data) }
+  }
+
+  const populated = (): PackedStoreEngine => {
+    const engine = PackedStoreEngine.open(new MemorySyncFile())
+    for (let i = 0; i < 300; i++) engine.putContent(address(1000 + i), bytes(`content-${i}`))
+    for (let i = 0; i < 40; i++) engine.putMarkerAt(address(7), i, bytes(`marker-${i}`), 1_700_000_000_000 + i)
+    for (let i = 0; i < 200; i++) engine.putPool(address(9), `member-${i}`, bytes(`value-${i}`))
+    engine.putPool(address(9), 'member-0', bytes('superseded'))
+    return engine
+  }
+
+  it('flushes the new image a fixed number of times, whatever its size', () => {
+    const target = new CountingFile()
+    populated().compactInto(target)
+    // The magic stamp's flush and the final one — never one per record.
+    expect(target.flushes).toBeLessThanOrEqual(2)
+    expect(target.writes).toBeLessThan(10)
+  })
+
+  it('writes an image that reopens to exactly the live records', () => {
+    const target = new MemorySyncFile()
+    const compacted = populated().compactInto(target)
+    const reopened = PackedStoreEngine.open(target)
+    for (const engine of [compacted, reopened]) {
+      expect(text(engine.getContent(address(1000)))).toBe('content-0')
+      expect(text(engine.getContent(address(1299)))).toBe('content-299')
+      expect(engine.head(address(7))?.index).toBe(39)
+      expect(engine.markerTime(address(7), 3)).toBe(1_700_000_000_003)
+      expect(text(engine.getPool(address(9), 'member-0'))).toBe('superseded')
+      expect(text(engine.getPool(address(9), 'member-199'))).toBe('value-199')
+      expect(engine.stats().poolMembers).toBe(200)
+      expect(engine.stats().garbageBytes).toBe(0)
+    }
+  })
+
+  it('writes ordinary appends one record and one flush at a time again afterwards', () => {
+    const target = new CountingFile()
+    const compacted = populated().compactInto(target)
+    const flushes = target.flushes
+    compacted.putContent(address(5000), bytes('after'))
+    expect(target.flushes).toBe(flushes + 1)
+    expect(text(PackedStoreEngine.open(target).getContent(address(5000)))).toBe('after')
+  })
+})
+
 describe('packed store: pool members are the garbage source', () => {
   // Content is signature-addressed and never rewritten. A POOL MEMBER is
   // addressed by NAME, so reinstalling a bee bundle writes a new value under

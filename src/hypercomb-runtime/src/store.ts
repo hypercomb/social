@@ -1038,13 +1038,18 @@ export class Store extends EventTarget {
     try {
       let total = 0
       for (;;) {
-        const chunk = await bridge.invoke('pack_drain', { limit: 200 }) as
+        // `compact: false` — a drain that settles must NOT start the
+        // compaction here: on a visible tab it holds the one worker every
+        // read waits on for the length of a whole-pack rewrite (see
+        // #armHiddenCompaction).
+        const chunk = await bridge.invoke('pack_drain', { limit: 200, compact: false }) as
           { moved: number; done: boolean; failed: number }
         total += chunk.moved
         // A chunk that moved nothing but still hit its budget is all
         // failures — stop making the same non-progress; next boot retries.
         if (chunk.moved === 0 && chunk.failed > 0) chunk.done = true
         if (chunk.done) {
+          this.#armHiddenCompaction(bridge)
           if (total) console.log(`[packed-store] drain complete — ${total} records packed`)
           if (chunk.failed) {
             console.warn(`[packed-store] ${chunk.failed} records could not be verified and were LEFT IN PLACE`)
@@ -1057,6 +1062,42 @@ export class Store extends EventTarget {
       console.warn('[packed-store] drain interrupted — will resume next boot', err)
     }
   }
+
+  /**
+   * COMPACTION WAITS FOR A HIDDEN TAB (2026-11-12).
+   *
+   * Compaction rewrites the whole pack in one synchronous worker call, and
+   * every read in the tab queues behind it. It used to run whenever a drain
+   * settled — on every boot, in front of the participant: a 988 MB pack at a
+   * 0.377 garbage ratio crossed the 0.35 line, so each boot started a rewrite
+   * that held the worker for minutes, navigation froze, and a reload threw the
+   * half-written image away to start again next boot.
+   *
+   * Now the store asks only while the tab is hidden, when nobody is waiting
+   * on the worker. `pack_maybe_compact` compacts only if enough of the file
+   * is superseded, so asking on every hide costs one cheap check; one ask is
+   * in flight at a time.
+   */
+  #armHiddenCompaction = (bridge: { invoke: (cmd: string, payload?: unknown) => Promise<unknown> }): void => {
+    if (this.#compactionArmed || typeof document === 'undefined') return
+    this.#compactionArmed = true
+    let running = false
+    const ask = (): void => {
+      if (running || document.visibilityState !== 'hidden') return
+      running = true
+      void bridge.invoke('pack_maybe_compact')
+        .then(result => {
+          const r = result as { compacted?: boolean; before?: number; after?: number } | null
+          if (r?.compacted) console.log(`[packed-store] compacted while hidden — ${r.before} → ${r.after} bytes`)
+        })
+        .catch(error => console.warn('[packed-store] hidden compaction did not finish — the next hide retries', error))
+        .finally(() => { running = false })
+    }
+    document.addEventListener('visibilitychange', ask)
+    ask()
+  }
+
+  #compactionArmed = false
 
   /**
    * The pause between drain chunks.
