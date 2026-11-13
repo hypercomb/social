@@ -263,3 +263,54 @@ describe('active genome: a census remembers what it read by signature', () => {
     expect(after.record?.objects.some(object => object.kind === 'bee')).toBe(true)
   })
 })
+
+describe('active genome: identities are never missing content', () => {
+  // 2026-11-12: all 12 "missing" objects on a real hive were identities —
+  // group signatures, creation ids, and a source fingerprint.
+  it('counts what a decoration declares, not every hex string inside it', async () => {
+    const root = s('a')
+    const groupMeta = s('b')
+    const groupDecoration = s('c')
+    const creationDecoration = s('d')
+    const pageDecoration = s('e')
+    const html = s('f')
+    const groupIdentity = s('1')
+    const creationId = s('2')
+    const bubbleSource = s('3')
+    const layers = new Map([[root, {
+      bytes: 100,
+      value: {
+        name: '/',
+        decorations: [groupMeta, creationDecoration, pageDecoration],
+        bubbleCampaign: { version: 1, sourceSha256: bubbleSource },
+      },
+    }]])
+    const resources = new Map<string, { bytes: number; value?: unknown }>([
+      [groupMeta, { bytes: 30, value: { meta: 1, resource: groupDecoration, relation: 'decorations' } }],
+      [groupDecoration, { bytes: 40, value: { kind: 'group', payload: { sig: groupIdentity }, refs: [groupIdentity] } }],
+      [creationDecoration, { bytes: 40, value: { kind: 'creation', payload: { id: creationId } } }],
+      [pageDecoration, { bytes: 40, value: { kind: 'visual:website:page', payload: { htmlSig: html } } }],
+      [html, { bytes: 500 }],
+    ])
+    const source: ActiveGenomeSource = {
+      epoch: () => 1,
+      root: async () => root,
+      lineage: async path => `lineage:${path.join('/')}`,
+      layer: async signature => layers.get(signature) ?? null,
+      head: async () => ({ marker: '00000000', layer: root, bytes: 10 }),
+      resource: async signature => resources.get(signature) ?? null,
+      beeBytes: async () => null,
+      dependencyBytes: async () => null,
+    }
+
+    const { record } = await collectActiveGenome(source)
+
+    expect(record?.missing).toEqual([])
+    expect(record?.complete).toBe(true)
+    const sigs = new Set(record?.objects.map(object => object.sig))
+    // The records themselves and what they declare travel...
+    for (const held of [root, groupMeta, groupDecoration, creationDecoration, pageDecoration, html]) expect(sigs.has(held)).toBe(true)
+    // ...identities never do.
+    for (const identity of [groupIdentity, creationId, bubbleSource]) expect(sigs.has(identity)).toBe(false)
+  })
+})

@@ -6,6 +6,7 @@
 // sign('computed') meaning pool.
 
 import { CHILD_SLOTS, isReferentField } from '@hypercomb/core'
+import { decorationClosureSigs, nestedResourceSigs } from '../sharing/decoration-closure.js'
 
 export const ACTIVE_GENOME_VERSION = 1 as const
 
@@ -277,7 +278,37 @@ export async function collectActiveGenome(
       return share
     }
     share.objects.push({ kind: 'resource', sig: signature, bytes: content.bytes })
-    if (content.value !== undefined) await expandValue(content.value, '', share, seen)
+    const value = content.value
+    if (value !== undefined) {
+      // A RECORD WITH A KIND DECLARES ITS OWN CLOSURE (2026-11-12). The census
+      // used to scan every resource for 64-hex strings, so a `group`
+      // decoration's group signature and a `creation` decoration's id — pure
+      // identities, no bytes behind them anywhere — were counted as missing
+      // content: 11 of the 12 "missing" objects on a real hive, which kept the
+      // census incomplete and re-arming forever. It now asks what the closure
+      // walker asks (sharing/decoration-closure.ts), so the census counts
+      // exactly what replication would carry: a decoration's own `refs` /
+      // bouquet / page body (group and creation carry nothing), a signed
+      // event nothing, a succession its members; a plain data resource is
+      // still walked here, where `bees` and `dependencies` keep their pools.
+      const record = value && typeof value === 'object' && !Array.isArray(value)
+        ? value as { kind?: unknown; succession?: unknown }
+        : null
+      const kind = record?.kind
+      if (typeof kind === 'string' || typeof kind === 'number' || record?.succession === 1) {
+        const bytes = new TextEncoder().encode(JSON.stringify(value))
+        const reached = typeof kind === 'string'
+          ? await decorationClosureSigs(bytes, async () => null)
+          : nestedResourceSigs(bytes)
+        for (const reachedSig of reached) {
+          const inner = await expandResource(reachedSig, seen)
+          share.objects.push(...inner.objects)
+          share.missing.push(...inner.missing)
+        }
+      } else {
+        await expandValue(value, '', share, seen)
+      }
+    }
     if (share.missing.length === 0) memo.keep(memo.contributions, signature, share)
     return share
   }
