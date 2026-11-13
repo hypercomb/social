@@ -885,7 +885,7 @@ describe('an answer that claims a change nothing ran', () => {
   })
 
   it('the loop asks it only when nothing ran this turn, once per message', () => {
-    const loop = readFileSync(join(process.cwd(), 'hypercomb-shared', 'ui', 'chat-window', 'chat-window.component.ts'), 'utf8')
+    const loop = readFileSync(join(process.cwd(), 'hypercomb-runtime', 'src', 'chat-window', 'ui', 'chat-window', 'chat-window.ts'), 'utf8')
     expect(loop).toContain('if (!work.request && !lastRound && !unranSaid && ran.length === 0 && claimsUnranChange(roundText, message)) {')
     expect(loop).toContain("content: unranChangeMessage(message) }")
   })

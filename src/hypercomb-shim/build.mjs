@@ -207,7 +207,9 @@ if (!pure) {
     // startsWith does not mind.
     const NEWLINE = `
 `
-    barrelEntries = barrel.split(NEWLINE).filter(line => line.startsWith('import ')).length
+    // Relative imports only (Angular components still owed a port); a runtime
+    // element imported by the barrel already runs here.
+    barrelEntries = barrel.split(NEWLINE).filter(line => line.startsWith("import '.")).length
   } catch {
     console.warn('[shim] shell-surfaces barrel not found — reporting 0 unreachable surfaces')
   }

@@ -26,7 +26,7 @@ import '../notes-viewer/notes-viewer.component'
 import '../files-viewer/files-viewer.component'
 import '../context-window/context-window.component'
 import '../references-window/references-window.component'
-import '../chat-window/chat-window.component'
+import '@hypercomb/runtime/chat-window'
 import '../features-viewer/features-viewer.component'
 // The guided tours, as a roster you can read before you fly one. It replaced
 // the rail bee's Ctrl+click flyout — see tutorials-window.component.ts.

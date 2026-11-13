@@ -1,4 +1,4 @@
-// hypercomb-shared/ui/chat-window/chat-delete-hide-first.spec.ts
+// hypercomb-runtime/src/chat-window/ui/chat-window/chat-delete-hide-first.spec.ts
 //
 // HIDE FIRST, DELETE SECOND (documentation/hide-first-delete-second.md). A
 // conversation's Delete removes its whole thread; archiving is the hide. So
@@ -9,15 +9,16 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-const template = readFileSync(join(__dirname, 'chat-window.component.html'), 'utf8')
+// The chat window's template, where it lives now that it runs without Angular.
+const template = readFileSync(join(__dirname, '../../chat-window.template.ts'), 'utf8')
 
 describe('chat Delete', () => {
   it('is offered only behind the hide', () => {
-    const del = template.indexOf('class="chat-list-del"')
+    const del = template.indexOf('class: "chat-list-del"')
     expect(del).toBeGreaterThan(0)
-    const gate = template.lastIndexOf('@if (', del)
+    const gate = template.lastIndexOf('when([', del)
     expect(template.slice(gate, del)).toContain(
-      '@if (conversation.archived || !canArchive() || !conversation.turnCount) {',
+      '[() => ((ctx()["$implicit"].archived || !c.canArchive()) || !ctx()["$implicit"].turnCount), () => [',
     )
   })
 })

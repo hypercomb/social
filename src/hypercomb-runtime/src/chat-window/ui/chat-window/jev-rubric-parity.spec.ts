@@ -14,7 +14,7 @@ import { JEV_RUBRIC } from './hypercomb-jev'
 
 describe('the Jev rubric version', () => {
   it('is the same in the shell that stamps receipts and the module that replays them', () => {
-    const source = readFileSync(join(__dirname, '../../../hypercomb-essentials/src/assistant/jev-decision.ts'), 'utf8')
+    const source = readFileSync(join(__dirname, '../../../../../hypercomb-essentials/src/assistant/jev-decision.ts'), 'utf8')
     const declared = /export const JEV_RUBRIC = (\d+)/.exec(source)?.[1]
     expect(Number(declared)).toBe(JEV_RUBRIC)
   })
