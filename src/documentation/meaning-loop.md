@@ -97,7 +97,7 @@ jwize.com:website      this branch is meant to be a website
 jwize.com:deck         … a slide deck
 jwize.com:game         … a game
 jwize.com:tutor        … a study deck
-jwize.com:3d           … a three.js space (e.g. the cigar lounge)
+jwize.com:3d           … a 3D space (e.g. the cigar lounge, drawn by Pixi's own 3D)
 jwize.com:hold         negation/pause — do NOT propose work here
 ```
 

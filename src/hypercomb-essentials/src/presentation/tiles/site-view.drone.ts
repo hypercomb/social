@@ -45,6 +45,7 @@ import { browserKeepsMenu, isLongPressMenu } from '../../navigation/browser-menu
 import type { BackGesture } from '../../navigation/back-gesture.service.js'
 import { myHiveOrigin, visitorDoorHref } from '../../sharing/visitor-door.view.js'
 import { listTrialVersions, pageHome, releaseTrial, stageTrial, trialBase, trialOf, trialOrigin, trialVersionLabel } from '../../files/try-page.js'
+import { PIXI3D_LENDER_KEY, Pixi3DLender } from './pixi3d-lender.js'
 
 type MountState = {
   host: HTMLDivElement
@@ -2083,3 +2084,9 @@ function rewriteCellPageRefs(text: string): string {
 
 const _siteView = new SiteViewDrone()
 window.ioc.register('@diamondcoreprocessor.com/SiteViewDrone', _siteView)
+
+// A page's own scripts may ask the hive for its Pixi and `@pixi/3d` rather
+// than carry their own (the cigar lounge does: scripts/lounge3d/bundle-lounge.ts).
+// This frame runs those scripts and is always awake, so it is the one that
+// lends — and the room's tile frame (lounge-view.drone.ts) borrows the same.
+window.ioc.register(PIXI3D_LENDER_KEY, new Pixi3DLender())

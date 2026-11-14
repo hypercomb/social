@@ -21,6 +21,7 @@
 import WebSocket from 'ws'
 import { hiveChildren } from './lib/hive-children.mjs'
 import { EARN_OF, EARN_RULES, EMBERS_JS, HOUSE_ITEMS, OCHE_NOTE, SALE_ITEMS, STORE_ITEMS } from './lounge3d/store-items.js'
+import { bundleLounge } from './lounge3d/bundle-lounge.js'
 
 const BRIDGE_PORT = 2401
 const TIMEOUT = 60_000
@@ -3905,37 +3906,15 @@ function buildPages(
 }
 
 // ─── the 3D lounge bundle ────────────────────────────────────────────
-// scripts/lounge3d/lounge-3d.ts (three.js) → one minified IIFE. Stored as its
-// OWN sig-addressed resource and referenced from the page with
-// `resource:<sig>/lounge-3d.js` — the `.js` tail is what makes the service
-// worker serve it as application/javascript. Keeping it out of the page HTML
-// means page-copy edits don't re-upload half a megabyte, and the bundle
-// dedupes by signature across every rebuild.
-
-async function bundleLounge(): Promise<string> {
-  const esbuild = await import('esbuild')
-  const { existsSync } = await import('node:fs')
-  const path = await import('node:path')
-  // Run from the monorepo root (`tsx scripts/…`) or from scripts/ — resolve
-  // both without depending on import.meta (this file runs as CJS under tsx).
-  const entry = ['scripts/lounge3d/lounge-3d.ts', 'lounge3d/lounge-3d.ts']
-    .map(p => path.resolve(process.cwd(), p))
-    .find(existsSync)
-  if (!entry) throw new Error('lounge-3d.ts not found — run from the monorepo root (src/)')
-  const out = await esbuild.build({
-    entryPoints: [entry],
-    bundle: true,
-    format: 'iife',
-    minify: true,
-    target: 'es2020',
-    platform: 'browser',
-    write: false,
-    legalComments: 'none',
-  })
-  const text = out.outputFiles?.[0]?.text
-  if (!text) throw new Error('lounge bundle produced no output')
-  return text
-}
+// scripts/lounge3d/lounge-3d.ts (Pixi's own 3D, `@pixi/3d`) → one minified
+// classic script, built by lounge3d/bundle-lounge.ts. It borrows the page's
+// Pixi and `@pixi/3d` (the hive's lender, else the host's import map), so it
+// is about 100 KB: the room's own code. Stored as its OWN sig-addressed
+// resource and referenced from the page with `resource:<sig>/lounge-3d.js` —
+// the `.js` tail is what makes the service worker serve it as
+// application/javascript. Keeping it out of the page HTML means page-copy
+// edits don't re-upload the bundle, and the bundle dedupes by signature
+// across every rebuild.
 
 // ─── main ────────────────────────────────────────────────────────────
 
@@ -3954,8 +3933,9 @@ async function main(): Promise<void> {
     const placeholder = 'data:image/svg+xml,' + encodeURIComponent(
       '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><rect width="200" height="200" fill="#2a1c26"/><polygon points="100,38 154,69 154,131 100,162 46,131 46,69" fill="none" stroke="#c8975a" stroke-width="3"/><circle cx="100" cy="100" r="14" fill="#b3542f"/></svg>')
     // Preview has no OPFS to resolve `resource:` from, so the 3D bundle is
-    // inlined here instead of referenced by signature.
-    const loungeScript = `<script>${await bundleLounge()}</script>`
+    // inlined here instead of referenced by signature — and no hive to lend
+    // it a Pixi, so it is the build that carries its own.
+    const loungeScript = `<script>${await bundleLounge({ pixi: 'own' })}</script>`
     for (const p of buildPages('PREVIEW', fakeArt, loungeScript)) {
       let html = p.html.replace('<link rel="stylesheet" href="resource:PREVIEW/chrome.css">', `<style>${CHROME_CSS}</style>`)
       html = html.split(`resource:${fakeSig}/art.png`).join(placeholder)

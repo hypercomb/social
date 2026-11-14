@@ -1,4 +1,6 @@
-// The Cigar Lounge — a three.js room for /revolucion/lounge.
+// The Cigar Lounge — a room drawn by Pixi's own 3D (`@pixi/3d`) for
+// /revolucion/lounge. It was a three.js room until 2026-11-13; three.js is
+// retired here (documentation/lift-view.md, "The guards", has the reasons).
 //
 // Bundled by intel-build-revolucion-site.ts (esbuild → IIFE) and stored as a
 // sig-addressed hive resource; the page loads it with
@@ -20,10 +22,37 @@
 // dropping its nodes, and an orphaned animation loop would otherwise keep a
 // WebGL context alive behind the hive's own canvas.
 
-import * as THREE from 'three'
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
-import { Reflector } from 'three/addons/objects/Reflector.js'
+// THE HIVE'S OWN PIXI. The bundle the hive stores carries no Pixi: the page
+// lends it the one it already has (bundle-lounge.ts, `pixi: 'lent'`), so the
+// imports below become reads on the page's modules. Only the --preview pages
+// carry their own (`pixi: 'own'`).
+//
+// THE NO-EVAL PIXI. The page this room lands in serves a content security
+// policy with no 'unsafe-eval' (every published host does), so its Pixi is
+// the `unsafe-eval` build — a static uniform-sync in place of `new Function`
+// — with two private tables that keep one function per uniform parser.
+// `@pixi/3d` pushes four parsers as code strings only; the bridge the lift
+// view uses (pixi3d-no-eval.ts) gives them their functions before the first
+// draw. The imports name the tables by Pixi's own file paths, which its
+// export map does not list: carrying its own Pixi, the bundler resolves them
+// to those files; lent one, to the tables the vendored Pixi exports (and to
+// nothing, on a Pixi that evals — the bridge then has no work).
+import 'pixi.js/unsafe-eval'
+import { uniformParserFunctions } from 'pixi.js/lib/unsafe-eval/uniforms/uniformSyncFunctions.mjs'
+import { uboParserFunctions } from 'pixi.js/lib/unsafe-eval/ubo/uboSyncFunctions.mjs'
+import {
+  Application, CanvasSource, ImageSource, Matrix, Point, RenderTexture, Texture, uniformParsers,
+} from 'pixi.js'
+import {
+  CapsuleGeometry, ConeGeometry, Container3D, CubeGeometry, CylinderGeometry, FlatMaterial,
+  Geometry3D, Material3D, Matrix4, Mesh3D, MeshPass, ParticleContainer3D, Plane, PlaneGeometry,
+  PointLight, Quaternion, SpotLight, Vector3, View3D, Camera3D,
+  type PointData3D, type ShaderBit,
+} from '@pixi/3d'
+import { OrbitCamera, PortalMaterial, portalExitClipPlane } from '@pixi/3d/extras'
+import {
+  bridgeNoEvalParsers, type UboSyncFunction, type UniformParserLike, type UniformSyncFunction,
+} from '../../hypercomb-essentials/src/presentation/tiles/pixi3d-no-eval.js'
 import {
   DART_NUMS, DART_RINGS, bedCentre, checkout, parseShot, pickShot, resolveThrow,
   scoreDart, type DartHit,
@@ -89,27 +118,60 @@ const HALF_W = ROOM.w / 2
 const HALF_D = ROOM.d / 2
 
 // ─── canvas texture helpers ───────────────────────────────────────────────
+//
+// A canvas becomes a Pixi texture with mipmaps (three made them for every
+// texture; Pixi makes none unless asked, and tiled or distant canvases
+// shimmer without them). Base colour textures always decode as sRGB here, so
+// there is no colour space to set. Pixi uploads an image top row first and
+// three flipped it, so every textured plane is built with `flipV` (plane()).
+
+/** How often a tiled texture repeats. Pixi keeps repeat on the MATERIAL
+ *  (`uvTransform`), not the texture, so std() reads it from here. */
+const REPEAT = new WeakMap<Texture, readonly [number, number]>()
 
 function paint(
   w: number,
   h: number,
   draw: (ctx: CanvasRenderingContext2D, w: number, h: number) => void,
-): THREE.CanvasTexture {
+  mipmaps = true,
+): Texture {
   const cv = document.createElement('canvas')
   cv.width = w
   cv.height = h
   const ctx = cv.getContext('2d')
   if (ctx) draw(ctx, w, h)
-  const t = new THREE.CanvasTexture(cv)
-  t.colorSpace = THREE.SRGBColorSpace
-  t.anisotropy = 8
+  return canvasTexture(cv, mipmaps)
+}
+
+function canvasTexture(cv: HTMLCanvasElement, mipmaps: boolean): Texture {
+  const source = new CanvasSource({ resource: cv, autoGenerateMipmaps: mipmaps })
+  source.style.maxAnisotropy = mipmaps ? 8 : 1
+  source.style.update()
+  return new Texture({ source })
+}
+
+function tiled(t: Texture, rx: number, ry: number): Texture {
+  t.source.style.addressMode = 'repeat'
+  t.source.style.update()
+  REPEAT.set(t, [rx, ry])
   return t
 }
 
-function tiled(t: THREE.CanvasTexture, rx: number, ry: number): THREE.CanvasTexture {
-  t.wrapS = t.wrapT = THREE.RepeatWrapping
-  t.repeat.set(rx, ry)
-  return t
+/** The hive's own tile art, loaded through an image element: the URLs are
+ *  `resource:` paths with no extension for a loader to sniff. */
+function loadImageTexture(url: string): Promise<Texture> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.decoding = 'async'
+    img.onload = () => {
+      const source = new ImageSource({ resource: img, autoGenerateMipmaps: true })
+      source.style.maxAnisotropy = 8
+      source.style.update()
+      resolve(new Texture({ source }))
+    }
+    img.onerror = () => reject(new Error('art did not load: ' + url))
+    img.src = url
+  })
 }
 
 /** Deterministic value noise — the room looks the same on every visit. */
@@ -136,7 +198,7 @@ function grain(ctx: CanvasRenderingContext2D, w: number, h: number, amount: numb
 
 // ─── surface textures ─────────────────────────────────────────────────────
 
-const floorTexture = (): THREE.CanvasTexture =>
+const floorTexture = (): Texture =>
   tiled(
     paint(512, 512, (ctx, w, h) => {
       const r = rng(21)
@@ -169,7 +231,7 @@ const floorTexture = (): THREE.CanvasTexture =>
     4,
   )
 
-const wallTexture = (): THREE.CanvasTexture =>
+const wallTexture = (): Texture =>
   tiled(
     paint(256, 256, (ctx, w, h) => {
       ctx.fillStyle = '#241b2c'
@@ -192,7 +254,7 @@ const wallTexture = (): THREE.CanvasTexture =>
     2,
   )
 
-const rugTexture = (): THREE.CanvasTexture =>
+const rugTexture = (): Texture =>
   paint(512, 384, (ctx, w, h) => {
     ctx.fillStyle = '#5b1f21'
     ctx.fillRect(0, 0, w, h)
@@ -251,7 +313,7 @@ const rugTexture = (): THREE.CanvasTexture =>
     grain(ctx, w, h, 16, 5)
   })
 
-const leatherTexture = (): THREE.CanvasTexture =>
+const leatherTexture = (): Texture =>
   tiled(
     paint(256, 256, (ctx, w, h) => {
       ctx.fillStyle = '#63402e'
@@ -271,7 +333,7 @@ const leatherTexture = (): THREE.CanvasTexture =>
     2,
   )
 
-const skyTexture = (): THREE.CanvasTexture =>
+const skyTexture = (): Texture =>
   paint(512, 512, (ctx, w, h) => {
     const g = ctx.createLinearGradient(0, 0, 0, h)
     g.addColorStop(0, '#0a1024')
@@ -322,7 +384,7 @@ const skyTexture = (): THREE.CanvasTexture =>
     }
   })
 
-const softDot = (): THREE.CanvasTexture =>
+const softDot = (): Texture =>
   paint(64, 64, (ctx, w, h) => {
     const g = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2)
     g.addColorStop(0, 'rgba(255,255,255,1)')
@@ -332,7 +394,7 @@ const softDot = (): THREE.CanvasTexture =>
     ctx.fillRect(0, 0, w, h)
   })
 
-const flameTexture = (): THREE.CanvasTexture =>
+const flameTexture = (): Texture =>
   paint(128, 256, (ctx, w, h) => {
     // a defined tongue of flame — hot core, thin cool edge, hard falloff at
     // the tip so five of these read as fire and not as one soft blob
@@ -634,19 +696,311 @@ const dartboardFace: ArtPainter = (ctx, w, h) => {
   ctx.beginPath(); ctx.arc(cx, cy, R * 0.985, 0, Math.PI * 2); ctx.stroke()
 }
 
+// ─── geometry ─────────────────────────────────────────────────────────────
+//
+// The room was written against three's primitives, and the helpers below
+// keep three's argument order so the furniture code reads as it always did.
+// Where Pixi has the primitive it is used (cylinder, cone, capsule, cube,
+// plane); the rest — the rounded box, circle, ring, a sphere cut by angle
+// ranges, an arc of torus in the XY plane — Pixi has no equivalent for, so
+// they are generated here, ports of three's own builders with Pixi's UV rule
+// (v runs DOWN the image, because Pixi does not flip an upload).
+//
+// One geometry per shape, shared by every mesh that asks for the same one:
+// meshes that share geometry and material draw in one instanced call.
+
+const GEO = new Map<string, Geometry3D>()
+const shape = (key: string, make: () => Geometry3D): Geometry3D => {
+  let g = GEO.get(key)
+  if (!g) { g = make(); GEO.set(key, g) }
+  return g
+}
+
+type GeoArrays = { positions: number[]; normals: number[]; uvs: number[]; indices: number[] }
+const finish = (a: GeoArrays): Geometry3D => new Geometry3D({
+  positions: new Float32Array(a.positions),
+  normals: new Float32Array(a.normals),
+  uvs: new Float32Array(a.uvs),
+  indices: a.positions.length / 3 > 65535 ? new Uint32Array(a.indices) : new Uint16Array(a.indices),
+})
+
+/** PlaneGeometry in XY facing +Z, image upright (three's flipY). */
+const plane = (w: number, h: number): Geometry3D =>
+  shape(`plane|${w}|${h}`, () => new PlaneGeometry({ width: w, height: h, flipV: true }))
+
+const cube = (w: number, h: number, d: number): Geometry3D =>
+  shape(`cube|${w}|${h}|${d}`, () => new CubeGeometry({ width: w, height: h, depth: d }))
+
+/** three's CylinderGeometry(radiusTop, radiusBottom, height, radialSegments,
+ *  heightSegments, openEnded). */
+const cylinder = (rt: number, rb: number, h: number, seg = 32, _hs = 1, openEnded = false): Geometry3D =>
+  shape(`cyl|${rt}|${rb}|${h}|${seg}|${openEnded}`, () => new CylinderGeometry({
+    radiusTop: rt, radiusBottom: rb, height: h, radialSegments: seg, openEnded,
+  }))
+
+const cone = (r: number, h: number, seg = 32): Geometry3D =>
+  shape(`cone|${r}|${h}|${seg}`, () => new ConeGeometry({ radius: r, height: h, radialSegments: seg }))
+
+/** three's CapsuleGeometry(radius, length, capSegments, radialSegments):
+ *  three's `length` leaves the caps out, Pixi's `height` counts them. */
+const capsule = (r: number, length: number, _cap = 4, seg = 8): Geometry3D =>
+  shape(`capsule|${r}|${length}|${seg}`, () => new CapsuleGeometry({ radius: r, height: length + 2 * r, radialSegments: seg }))
+
+/** three's SphereGeometry, angle ranges and all. */
+const sphere = (
+  radius: number, widthSegments = 32, heightSegments = 16,
+  phiStart = 0, phiLength = Math.PI * 2, thetaStart = 0, thetaLength = Math.PI,
+): Geometry3D => shape(
+  `sphere|${radius}|${widthSegments}|${heightSegments}|${phiStart}|${phiLength}|${thetaStart}|${thetaLength}`,
+  () => {
+    const thetaEnd = Math.min(thetaStart + thetaLength, Math.PI)
+    const a: GeoArrays = { positions: [], normals: [], uvs: [], indices: [] }
+    const grid: number[][] = []
+    let index = 0
+    for (let iy = 0; iy <= heightSegments; iy++) {
+      const row: number[] = []
+      const v = iy / heightSegments
+      let uOffset = 0
+      if (iy === 0 && thetaStart === 0) uOffset = 0.5 / widthSegments
+      else if (iy === heightSegments && thetaEnd === Math.PI) uOffset = -0.5 / widthSegments
+      for (let ix = 0; ix <= widthSegments; ix++) {
+        const u = ix / widthSegments
+        const x = -radius * Math.cos(phiStart + u * phiLength) * Math.sin(thetaStart + v * thetaLength)
+        const y = radius * Math.cos(thetaStart + v * thetaLength)
+        const z = radius * Math.sin(phiStart + u * phiLength) * Math.sin(thetaStart + v * thetaLength)
+        a.positions.push(x, y, z)
+        const l = Math.hypot(x, y, z) || 1
+        a.normals.push(x / l, y / l, z / l)
+        a.uvs.push(u + uOffset, v)
+        row.push(index++)
+      }
+      grid.push(row)
+    }
+    for (let iy = 0; iy < heightSegments; iy++) {
+      for (let ix = 0; ix < widthSegments; ix++) {
+        const p = grid[iy][ix + 1], b = grid[iy][ix], c = grid[iy + 1][ix], d = grid[iy + 1][ix + 1]
+        if (iy !== 0 || thetaStart > 0) a.indices.push(p, b, d)
+        if (iy !== heightSegments - 1 || thetaEnd < Math.PI) a.indices.push(b, c, d)
+      }
+    }
+    return finish(a)
+  },
+)
+
+/** three's TorusGeometry: in the XY plane, the arc swept from +X toward +Y
+ *  (Pixi's lies in XZ, and every rotation below was written for three's). */
+const torus = (radius: number, tube: number, radialSegments = 12, tubularSegments = 48, arc = Math.PI * 2): Geometry3D =>
+  shape(`torus|${radius}|${tube}|${radialSegments}|${tubularSegments}|${arc}`, () => {
+    const a: GeoArrays = { positions: [], normals: [], uvs: [], indices: [] }
+    for (let j = 0; j <= radialSegments; j++) {
+      for (let i = 0; i <= tubularSegments; i++) {
+        const u = (i / tubularSegments) * arc
+        const v = (j / radialSegments) * Math.PI * 2
+        const x = (radius + tube * Math.cos(v)) * Math.cos(u)
+        const y = (radius + tube * Math.cos(v)) * Math.sin(u)
+        const z = tube * Math.sin(v)
+        a.positions.push(x, y, z)
+        const nx = x - radius * Math.cos(u), ny = y - radius * Math.sin(u), nz = z
+        const l = Math.hypot(nx, ny, nz) || 1
+        a.normals.push(nx / l, ny / l, nz / l)
+        a.uvs.push(i / tubularSegments, 1 - j / radialSegments)
+      }
+    }
+    for (let j = 1; j <= radialSegments; j++) {
+      for (let i = 1; i <= tubularSegments; i++) {
+        const p = (tubularSegments + 1) * j + i - 1
+        const b = (tubularSegments + 1) * (j - 1) + i - 1
+        const c = (tubularSegments + 1) * (j - 1) + i
+        const d = (tubularSegments + 1) * j + i
+        a.indices.push(p, b, d, b, c, d)
+      }
+    }
+    return finish(a)
+  })
+
+/** three's CircleGeometry: a fan in XY facing +Z, image upright. */
+const circle = (radius: number, segments = 32): Geometry3D =>
+  shape(`circle|${radius}|${segments}`, () => {
+    const a: GeoArrays = { positions: [0, 0, 0], normals: [0, 0, 1], uvs: [0.5, 0.5], indices: [] }
+    for (let s = 0; s <= segments; s++) {
+      const t = (s / segments) * Math.PI * 2
+      const x = radius * Math.cos(t), y = radius * Math.sin(t)
+      a.positions.push(x, y, 0)
+      a.normals.push(0, 0, 1)
+      a.uvs.push((x / radius + 1) / 2, (1 - y / radius) / 2)
+    }
+    for (let i = 1; i <= segments; i++) a.indices.push(i, i + 1, 0)
+    return finish(a)
+  })
+
+/** three's RingGeometry(innerRadius, outerRadius, thetaSegments). */
+const ringGeo = (inner: number, outer: number, thetaSegments = 32): Geometry3D =>
+  shape(`ring|${inner}|${outer}|${thetaSegments}`, () => {
+    const a: GeoArrays = { positions: [], normals: [], uvs: [], indices: [] }
+    for (const r of [inner, outer]) {
+      for (let i = 0; i <= thetaSegments; i++) {
+        const t = (i / thetaSegments) * Math.PI * 2
+        const x = r * Math.cos(t), y = r * Math.sin(t)
+        a.positions.push(x, y, 0)
+        a.normals.push(0, 0, 1)
+        a.uvs.push((x / outer + 1) / 2, (1 - y / outer) / 2)
+      }
+    }
+    for (let i = 0; i < thetaSegments; i++) {
+      const p = i, b = i + thetaSegments + 1, c = i + thetaSegments + 2, d = i + 1
+      a.indices.push(p, b, d, b, c, d)
+    }
+    return finish(a)
+  })
+
+/**
+ * A box with rounded edges and corners (three's RoundedBoxGeometry, which
+ * Pixi does not have). Each face is a grid whose outer rows sit in the
+ * rounding band; every grid point is pushed out from the inner box (the box
+ * shrunk by the radius) to the radius, and that push IS its normal. A point
+ * in the flat middle of a face moves nowhere, a point on an edge lands on a
+ * quarter cylinder, a point in a corner on a sphere — and two faces meeting
+ * at an edge produce the same vertices there, so the seam closes.
+ */
+function roundedBoxGeometry(w: number, h: number, d: number, seg: number, r: number): Geometry3D {
+  const E = [w / 2, h / 2, d / 2]
+  // [normal, u, v] with u × v = normal, so the grid winds counter-clockwise seen from outside.
+  const faces: ReadonlyArray<readonly [readonly number[], readonly number[], readonly number[]]> = [
+    [[1, 0, 0], [0, 0, -1], [0, 1, 0]], [[-1, 0, 0], [0, 0, 1], [0, 1, 0]],
+    [[0, 1, 0], [1, 0, 0], [0, 0, -1]], [[0, -1, 0], [1, 0, 0], [0, 0, 1]],
+    [[0, 0, 1], [1, 0, 0], [0, 1, 0]], [[0, 0, -1], [-1, 0, 0], [0, 1, 0]],
+  ]
+  const half = (axis: readonly number[]): number =>
+    Math.abs(axis[0]) * E[0] + Math.abs(axis[1]) * E[1] + Math.abs(axis[2]) * E[2]
+  const coords = (e: number): number[] => {
+    const out: number[] = []
+    for (let k = 0; k <= seg; k++) out.push(-e + (r * k) / seg)
+    for (let k = 0; k <= seg; k++) out.push(e - r + (r * k) / seg)
+    return out
+  }
+  const a: GeoArrays = { positions: [], normals: [], uvs: [], indices: [] }
+  for (const [n, u, v] of faces) {
+    const en = half(n), eu = half(u), ev = half(v)
+    const cu = coords(eu), cv = coords(ev)
+    const base = a.positions.length / 3
+    for (let j = 0; j < cv.length; j++) {
+      for (let i = 0; i < cu.length; i++) {
+        const p = [0, 1, 2].map(k => n[k] * en + u[k] * cu[i] + v[k] * cv[j])
+        const inner = p.map((c, k) => Math.max(-(E[k] - r), Math.min(E[k] - r, c)))
+        let dx = p[0] - inner[0], dy = p[1] - inner[1], dz = p[2] - inner[2]
+        const len = Math.hypot(dx, dy, dz)
+        if (len < 1e-9) { dx = n[0]; dy = n[1]; dz = n[2] } else { dx /= len; dy /= len; dz /= len }
+        a.positions.push(inner[0] + dx * r, inner[1] + dy * r, inner[2] + dz * r)
+        a.normals.push(dx, dy, dz)
+        a.uvs.push((cu[i] + eu) / (2 * eu), 1 - (cv[j] + ev) / (2 * ev))
+      }
+    }
+    const nu = cu.length
+    for (let j = 0; j < cv.length - 1; j++) {
+      for (let i = 0; i < nu - 1; i++) {
+        const p = base + j * nu + i
+        a.indices.push(p, p + 1, p + nu + 1, p, p + nu + 1, p + nu)
+      }
+    }
+  }
+  return finish(a)
+}
+
+// ─── materials ────────────────────────────────────────────────────────────
+//
+// The room's materials were written as three parameter objects; std() and
+// basic() take the same words and build Pixi's materials from them, so the
+// furniture code did not have to be rewritten word by word.
+
+const DOUBLE = 'double'
+const FRONT = 'front'
+const ADD = 'add'
+type Side = typeof DOUBLE | typeof FRONT
+type AnyMaterial = Material3D | FlatMaterial | PortalMaterial
+
+interface StdParams {
+  color?: number
+  map?: Texture
+  roughness?: number
+  metalness?: number
+  emissive?: number
+  emissiveIntensity?: number
+  transparent?: boolean
+  opacity?: number
+  side?: Side
+}
+
+/** MeshStandardMaterial → Material3D. Emissive is an opt-in group here (built
+ *  without it, `material.emissive` does not exist), `transparent` is
+ *  `alphaMode: 'blend'`, and a texture's repeat becomes the material's
+ *  `uvTransform`. */
+const std = (p: StdParams): Material3D => {
+  const repeat = p.map ? REPEAT.get(p.map) : undefined
+  return new Material3D({
+    baseColor: p.color ?? 0xffffff,
+    roughness: p.roughness ?? 1,
+    metallic: p.metalness ?? 0,
+    alphaMode: p.transparent ? 'blend' : 'opaque',
+    alpha: p.opacity ?? 1,
+    doubleSided: p.side === DOUBLE,
+    ...(p.map ? { baseColorTexture: p.map } : {}),
+    ...(repeat ? { uvTransform: new Matrix().scale(repeat[0], repeat[1]) } : {}),
+    ...(p.emissive !== undefined ? { emissive: { color: p.emissive, strength: p.emissiveIntensity ?? 1 } } : {}),
+  })
+}
+
+interface BasicParams {
+  color?: number
+  map?: Texture
+  transparent?: boolean
+  opacity?: number
+  blending?: typeof ADD
+  depthWrite?: boolean
+  depthTest?: boolean
+  side?: Side
+}
+
+/** MeshBasicMaterial → FlatMaterial (unlit). Additive is `'blend'` plus the
+ *  state's `'add'` blend mode; state is set AFTER alphaMode, whose setter
+ *  writes the depth mask. */
+const basic = (p: BasicParams): FlatMaterial => {
+  const m = new FlatMaterial({
+    baseColor: p.color ?? 0xffffff,
+    alphaMode: p.transparent ? 'blend' : 'opaque',
+    alpha: p.opacity ?? 1,
+    doubleSided: p.side === DOUBLE,
+    ...(p.map ? { baseColorTexture: p.map } : {}),
+  })
+  if (p.blending === ADD) m.state.blendMode = 'add'
+  if (p.depthTest === false) m.state.depthTest = false
+  return m
+}
+
+/** three's PointLight(color, intensity, distance): `distance` is Pixi's
+ *  `range`, and Pixi's decay is always 2, which is what the room used. */
+const point = (color: number, intensity: number, range: number, _decay = 2): PointLight =>
+  new PointLight({ color, intensity, range })
+
+/** Linear → sRGB, for the one colour the room writes in linear light. */
+const toSrgb = (c: number): number => Math.pow(Math.max(0, Math.min(1, c)), 1 / 2.2)
+
 // ─── small builders ───────────────────────────────────────────────────────
 
-const std = (params: THREE.MeshStandardMaterialParameters): THREE.MeshStandardMaterial =>
-  new THREE.MeshStandardMaterial(params)
+/** three's `new Mesh(geometry, material)`. Pixi's meshes cast and receive
+ *  shadows by default and three's did neither: receiving is left on (it is
+ *  only more correct), casting is off unless the room asks for it. */
+const mk = (geometry: Geometry3D, material: AnyMaterial): Mesh3D =>
+  new Mesh3D({ geometry, material, castShadow: false })
 
 function box(
   w: number, h: number, d: number,
-  mat: THREE.Material, x = 0, y = 0, z = 0, radius = 0.012,
-): THREE.Mesh {
-  const g = radius > 0
-    ? new RoundedBoxGeometry(w, h, d, 2, Math.min(radius, Math.min(w, h, d) / 2.05))
-    : new THREE.BoxGeometry(w, h, d)
-  const m = new THREE.Mesh(g, mat)
+  mat: AnyMaterial, x = 0, y = 0, z = 0, radius = 0.012,
+): Mesh3D {
+  const r = radius > 0 ? Math.min(radius, Math.min(w, h, d) / 2.05) : 0
+  const g = r > 0
+    ? shape(`rbox|${w}|${h}|${d}|${r}`, () => roundedBoxGeometry(w, h, d, 2, r))
+    : cube(w, h, d)
+  const m = mk(g, mat)
   m.position.set(x, y, z)
   m.castShadow = true
   m.receiveShadow = true
@@ -655,9 +1009,9 @@ function box(
 
 function cyl(
   rt: number, rb: number, h: number, seg: number,
-  mat: THREE.Material, x = 0, y = 0, z = 0,
-): THREE.Mesh {
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), mat)
+  mat: AnyMaterial, x = 0, y = 0, z = 0,
+): Mesh3D {
+  const m = mk(cylinder(rt, rb, h, seg), mat)
   m.position.set(x, y, z)
   m.castShadow = true
   m.receiveShadow = true
@@ -666,22 +1020,42 @@ function cyl(
 
 // ─── the room ─────────────────────────────────────────────────────────────
 
+/** What a pickable node answers a click with. */
+export interface Pick {
+  /** The id the page receives on `lounge3d:pick`. */
+  pick?: string
+  /** The dartboard face: a press here is a throw. */
+  dart?: true
+  /** A camera preset to fly to. */
+  view?: string
+}
+
+/** The hemisphere fill, kept by reference: the view reads it every frame, so
+ *  the oche dims it by writing `intensity`. Pixi does not divide a
+ *  hemisphere by π and three did, so three's 1.15 is 1.15 / π here. */
+export interface Hemisphere { skyColor: number; groundColor: number; intensity: number }
+
 export interface Room {
-  scene: THREE.Scene
-  slots: Map<string, THREE.Object3D[]>
-  /** Meshes that answer a click, each carrying `userData.pick` — the id the
-   *  page receives on `lounge3d:pick`. */
-  pickables: THREE.Object3D[]
-  attachCamera: (c: THREE.Camera) => void
+  /** Everything in the room hangs from here; the roar shakes THIS, not the
+   *  camera, which the orbit owns. */
+  world: Container3D
+  hemisphere: Hemisphere
+  slots: Map<string, Container3D[]>
+  /** Nodes that answer a click. Each is `eventMode: 'static'`, so the view's
+   *  raycast sees them, and nothing else is ray-tested. */
+  picks: Map<Container3D, Pick>
+  /** The two looking glasses. boot() gives each a camera, a feed and the
+   *  material that shows it (mirrorRig). */
+  mirrors: Mesh3D[]
   tick: (t: number, dt: number) => void
-  /** THE OCHE. A press on the board face (marked `userData.dart`) starts an
+  /** THE OCHE. A press on the board face (picked `{ dart: true }`) starts an
    *  aim, a drag re-points it, and the release throws — see the throw block in
    *  buildRoom for why it is a hold and not a click. `beginAim` returns false
    *  when it is not your throw, and the press falls through to orbiting the
    *  room. */
   darts: {
-    beginAim: (worldPoint: THREE.Vector3) => boolean
-    moveAim: (worldPoint: THREE.Vector3) => void
+    beginAim: (worldPoint: PointData3D) => boolean
+    moveAim: (worldPoint: PointData3D) => void
     release: () => { label: string; points: number; mult: number } | null
     cancel: () => void
     /** The camera has moved to a preset: at the oche the room dims for the
@@ -698,17 +1072,20 @@ export interface Room {
 }
 
 function buildRoom(art: Record<string, string | undefined>): Room {
-  const scene = new THREE.Scene()
-  scene.background = new THREE.Color(0x0d0912)
-  scene.fog = new THREE.Fog(0x140f1a, 9, 24)
+  // The background colour and the fog are the VIEW's in Pixi (boot()).
+  const scene = new Container3D({ label: 'lounge' })
 
-  const disposables: Array<{ dispose: () => void }> = []
-  const track = <T extends { dispose: () => void }>(x: T): T => {
-    disposables.push(x)
-    return x
+  // Geometry, materials and textures are collected off the scene graph when
+  // the room goes (dispose); track() only marks where three disposed by hand.
+  const track = <T>(x: T): T => x
+  const picks = new Map<Container3D, Pick>()
+  const pickable = <T extends Container3D>(node: T, pick: Pick): T => {
+    node.eventMode = 'static'
+    picks.set(node, pick)
+    return node
   }
-  const slots = new Map<string, THREE.Object3D[]>()
-  const slot = (id: string, obj: THREE.Object3D): THREE.Object3D => {
+  const slots = new Map<string, Container3D[]>()
+  const slot = (id: string, obj: Container3D): Container3D => {
     const list = slots.get(id)
     if (list) list.push(obj)
     else slots.set(id, [obj])
@@ -728,21 +1105,21 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   const clothMat = std({ color: 0x3a2a3c, roughness: 0.95 })
 
   // ── shell ──────────────────────────────────────────────────────────────
-  const shell = new THREE.Group()
-  scene.add(shell)
+  const shell = new Container3D()
+  scene.addChild(shell)
 
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM.w, ROOM.d), woodMat)
+  const floor = mk(plane(ROOM.w, ROOM.d), woodMat)
   floor.rotation.x = -Math.PI / 2
   floor.receiveShadow = true
-  shell.add(floor)
+  shell.addChild(floor)
 
-  const wallMat = std({ map: track(wallTexture()), roughness: 0.95, side: THREE.FrontSide })
-  const mkWall = (w: number, x: number, z: number, ry: number): THREE.Mesh => {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, ROOM.h), wallMat)
+  const wallMat = std({ map: track(wallTexture()), roughness: 0.95, side: FRONT })
+  const mkWall = (w: number, x: number, z: number, ry: number): Mesh3D => {
+    const m = mk(plane(w, ROOM.h), wallMat)
     m.position.set(x, ROOM.h / 2, z)
     m.rotation.y = ry
     m.receiveShadow = true
-    shell.add(m)
+    shell.addChild(m)
     return m
   }
   mkWall(ROOM.w, 0, -HALF_D, 0)
@@ -751,19 +1128,19 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   // back-of-camera wall, so an orbit past the doorway still reads as a room
   mkWall(ROOM.w, 0, HALF_D, Math.PI)
 
-  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(ROOM.w, ROOM.d), std({ color: C.ceiling, roughness: 1 }))
+  const ceiling = mk(plane(ROOM.w, ROOM.d), std({ color: C.ceiling, roughness: 1 }))
   ceiling.rotation.x = Math.PI / 2
   ceiling.position.y = ROOM.h
-  shell.add(ceiling)
+  shell.addChild(ceiling)
 
   // beams, baseboard, chair rail
   for (let i = -2; i <= 2; i++) {
-    shell.add(box(ROOM.w, 0.16, 0.22, darkWood, 0, ROOM.h - 0.08, i * 1.7))
+    shell.addChild(box(ROOM.w, 0.16, 0.22, darkWood, 0, ROOM.h - 0.08, i * 1.7))
   }
   const trim = (w: number, d: number, x: number, z: number, ry: number, y: number, h: number) => {
     const m = box(w, h, d, trimWood, x, y, z)
     m.rotation.y = ry
-    shell.add(m)
+    shell.addChild(m)
   }
   trim(ROOM.w, 0.08, 0, -HALF_D + 0.04, 0, 0.09, 0.18)
   trim(ROOM.d, 0.08, -HALF_W + 0.04, 0, Math.PI / 2, 0.09, 0.18)
@@ -778,109 +1155,122 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   // These three are the room's general light, and the oche dims them: when a
   // match is on, the lounge gives the board its attention the way a room
   // actually does — everything else goes quiet and a little darker.
-  const hemi = new THREE.HemisphereLight(0x6a5878, 0x2a1c22, 1.15)
-  scene.add(hemi)
-  const roomFill = new THREE.PointLight(0xe0b578, 13, 20, 2)
+  const hemi: Hemisphere = { skyColor: 0x6a5878, groundColor: 0x2a1c22, intensity: 1.15 / Math.PI }
+  const roomFill = point(0xe0b578, 13, 20, 2)
   roomFill.position.set(0, ROOM.h - 0.5, 1.2)
-  scene.add(roomFill)
+  scene.addChild(roomFill)
 
   // brass chandelier over the seating
-  const chandelier = new THREE.Group()
+  const chandelier = new Container3D()
   chandelier.position.set(0, ROOM.h - 0.02, 0.9)
-  scene.add(chandelier)
-  chandelier.add(cyl(0.03, 0.03, 0.45, 8, brassMat, 0, -0.22, 0))
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.022, 8, 28), brassMat)
+  scene.addChild(chandelier)
+  chandelier.addChild(cyl(0.03, 0.03, 0.45, 8, brassMat, 0, -0.22, 0))
+  const ring = mk(torus(0.42, 0.022, 8, 28), brassMat)
   ring.rotation.x = Math.PI / 2
   ring.position.y = -0.45
-  chandelier.add(ring)
+  chandelier.addChild(ring)
   const bulbMat = std({ color: 0xf6e2b8, emissive: 0xffc98a, emissiveIntensity: 2.2, roughness: 0.6 })
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2
     const arm = cyl(0.012, 0.012, 0.16, 6, brassMat, Math.cos(a) * 0.42, -0.38, Math.sin(a) * 0.42)
-    chandelier.add(arm)
+    chandelier.addChild(arm)
     const shade = cyl(0.05, 0.075, 0.11, 12, std({
       color: 0xe8cfa0, emissive: 0xffbe72, emissiveIntensity: 0.7,
-      roughness: 0.9, side: THREE.DoubleSide, transparent: true, opacity: 0.92,
+      roughness: 0.9, side: DOUBLE, transparent: true, opacity: 0.92,
     }), Math.cos(a) * 0.42, -0.3, Math.sin(a) * 0.42)
-    chandelier.add(shade)
-    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 8), bulbMat)
+    chandelier.addChild(shade)
+    const bulb = mk(sphere(0.022, 8, 8), bulbMat)
     bulb.position.set(Math.cos(a) * 0.42, -0.36, Math.sin(a) * 0.42)
-    chandelier.add(bulb)
+    chandelier.addChild(bulb)
   }
-  const chandelierLight = new THREE.PointLight(0xffc98a, 16, 12, 2)
+  const chandelierLight = point(0xffc98a, 16, 12, 2)
   chandelierLight.position.set(0, -0.42, 0)
-  chandelier.add(chandelierLight)
+  chandelier.addChild(chandelierLight)
 
   // ── rug ────────────────────────────────────────────────────────────────
-  const rug = new THREE.Mesh(new THREE.PlaneGeometry(5.6, 4), std({ map: track(rugTexture()), roughness: 1 }))
+  const rug = mk(plane(5.6, 4), std({ map: track(rugTexture()), roughness: 1 }))
   rug.rotation.x = -Math.PI / 2
   rug.position.set(0, 0.012, 0.6)
   rug.receiveShadow = true
-  scene.add(slot('slot-rug', rug))
+  scene.addChild(slot('slot-rug', rug))
 
   // ── fireplace (back wall, centre) ──────────────────────────────────────
-  const hearth = new THREE.Group()
+  const hearth = new Container3D()
   hearth.position.set(0, 0, -HALF_D + 0.02)
-  scene.add(hearth)
+  scene.addChild(hearth)
   // A chimney breast built AROUND a real opening — jambs, lintel, firebox —
   // so the fire sits in a recess instead of glowing on a flat slab.
   const OPEN_W = 1.7
   const OPEN_H = 1.45
   const BREAST_D = 0.34
   const jambW = (3.4 - OPEN_W) / 2
-  hearth.add(box(jambW, OPEN_H, BREAST_D, stoneMat, -(OPEN_W + jambW) / 2, OPEN_H / 2, BREAST_D / 2))
-  hearth.add(box(jambW, OPEN_H, BREAST_D, stoneMat, (OPEN_W + jambW) / 2, OPEN_H / 2, BREAST_D / 2))
-  hearth.add(box(3.4, ROOM.h - OPEN_H, BREAST_D, stoneMat, 0, (OPEN_H + ROOM.h) / 2, BREAST_D / 2))
+  hearth.addChild(box(jambW, OPEN_H, BREAST_D, stoneMat, -(OPEN_W + jambW) / 2, OPEN_H / 2, BREAST_D / 2))
+  hearth.addChild(box(jambW, OPEN_H, BREAST_D, stoneMat, (OPEN_W + jambW) / 2, OPEN_H / 2, BREAST_D / 2))
+  hearth.addChild(box(3.4, ROOM.h - OPEN_H, BREAST_D, stoneMat, 0, (OPEN_H + ROOM.h) / 2, BREAST_D / 2))
   const soot = std({ color: 0x0b0710, roughness: 1 })
-  hearth.add(box(OPEN_W, OPEN_H, 0.05, soot, 0, OPEN_H / 2, 0.06)) // firebox back
-  hearth.add(box(0.06, OPEN_H, BREAST_D, soot, -OPEN_W / 2 + 0.03, OPEN_H / 2, BREAST_D / 2))
-  hearth.add(box(0.06, OPEN_H, BREAST_D, soot, OPEN_W / 2 - 0.03, OPEN_H / 2, BREAST_D / 2))
-  hearth.add(box(OPEN_W, 0.06, BREAST_D, soot, 0, OPEN_H - 0.03, BREAST_D / 2))
-  hearth.add(box(3.9, 0.15, 0.66, trimWood, 0, OPEN_H + 0.14, 0.3)) // mantel shelf
-  hearth.add(box(3.5, 0.1, 0.95, stoneMat, 0, 0.05, 0.62)) // hearthstone
+  hearth.addChild(box(OPEN_W, OPEN_H, 0.05, soot, 0, OPEN_H / 2, 0.06)) // firebox back
+  hearth.addChild(box(0.06, OPEN_H, BREAST_D, soot, -OPEN_W / 2 + 0.03, OPEN_H / 2, BREAST_D / 2))
+  hearth.addChild(box(0.06, OPEN_H, BREAST_D, soot, OPEN_W / 2 - 0.03, OPEN_H / 2, BREAST_D / 2))
+  hearth.addChild(box(OPEN_W, 0.06, BREAST_D, soot, 0, OPEN_H - 0.03, BREAST_D / 2))
+  hearth.addChild(box(3.9, 0.15, 0.66, trimWood, 0, OPEN_H + 0.14, 0.3)) // mantel shelf
+  hearth.addChild(box(3.5, 0.1, 0.95, stoneMat, 0, 0.05, 0.62)) // hearthstone
   // a fire iron and a log basket on the hearth
-  hearth.add(cyl(0.02, 0.02, 0.7, 8, brassMat, -1.4, 0.38, 0.5))
+  hearth.addChild(cyl(0.02, 0.02, 0.7, 8, brassMat, -1.4, 0.38, 0.5))
   const basket = cyl(0.26, 0.22, 0.26, 14, std({ color: 0x2a2230, roughness: 0.7, metalness: 0.4 }), 1.42, 0.22, 0.55)
-  hearth.add(basket)
+  hearth.addChild(basket)
   for (let i = 0; i < 3; i++) {
     const l = cyl(0.055, 0.055, 0.44, 8, std({ color: 0x4a3020, roughness: 1 }), 1.42 + (i - 1) * 0.09, 0.36 + (i % 2) * 0.05, 0.55)
     l.rotation.z = Math.PI / 2
     l.rotation.y = i * 0.2
-    hearth.add(l)
+    hearth.addChild(l)
   }
 
   // fire: logs, billboard flames, ember points, flicker light
-  const fire = new THREE.Group()
+  const fire = new Container3D()
   fire.position.set(0, 0.14, -HALF_D + 0.55)
-  scene.add(slot('slot-fire', fire))
+  scene.addChild(slot('slot-fire', fire))
   const logMat = std({ color: 0x2a1a10, roughness: 1 })
   for (const [x, y, z, rz] of [[-0.28, 0.08, 0, 0.22], [0.24, 0.08, 0.08, -0.3], [0, 0.2, -0.05, 0.08]]) {
     const log = cyl(0.09, 0.09, 0.9, 8, logMat, x, y, z)
     log.rotation.z = Math.PI / 2 + rz
-    fire.add(log)
+    fire.addChild(log)
   }
   const flameMap = track(flameTexture())
   // One material per flame — the tick animates opacity individually, and a
   // shared material would let the last write win for all five.
-  const flames: Array<{ mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; phase: number }> = []
+  const flames: Array<{ mesh: Mesh3D; mat: FlatMaterial; phase: number }> = []
   for (let i = 0; i < 5; i++) {
-    const mat = new THREE.MeshBasicMaterial({
-      map: flameMap, transparent: true, blending: THREE.AdditiveBlending,
+    const mat = basic({
+      map: flameMap, transparent: true, blending: ADD,
       depthWrite: false, opacity: 0.9,
     })
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.7), mat)
+    const mesh = mk(plane(0.42, 0.7), mat)
     mesh.position.set((i - 2) * 0.16, 0.34 + (i % 2) * 0.08, ((i % 3) - 1) * 0.05)
-    fire.add(mesh)
+    // Turned to the camera on the Y axis only, so a flame never tips over —
+    // Pixi does this per draw, where three needed a lookAt every frame.
+    mesh.billboardMode = 'cylindrical'
+    fire.addChild(mesh)
     flames.push({ mesh, mat, phase: i * 1.31 })
   }
-  const fireLight = new THREE.PointLight(0xff9a4a, 22, 11, 2)
+  // THE FIRE'S LIGHT. Pixi's point lights cast no shadow (only spot and
+  // directional lights do), and the fire throwing the chairs' shadows across
+  // the rug is half of what makes the room. So the light is a wide spot
+  // facing out of the hearth into the room, casting, and a small point light
+  // beside it keeps the firebox and the mantel lit the way the old point
+  // light did. Both flicker together (tick).
+  const fireLight = new SpotLight({
+    color: 0xff9a4a, intensity: 22, range: 11, coneAngle: 78, penumbra: 1, castShadow: true,
+  })
   fireLight.position.set(0, 0.7, 0.2)
-  fireLight.castShadow = true
-  fireLight.shadow.mapSize.set(1024, 1024)
-  fireLight.shadow.bias = -0.0015
-  fire.add(fireLight)
+  fire.addChild(fireLight)
+  fireLight.lookAt({ x: 0, y: 0.35, z: 2.6 })
+  const fireGlow = point(0xff9a4a, 5, 3)
+  fireGlow.position.set(0, 0.7, 0.1)
+  fire.addChild(fireGlow)
 
-  const emberGeo = new THREE.BufferGeometry()
+  // Embers: hand-written particles, sized as three's attenuated points were
+  // (a three point `size` at this field of view is `size × tan(fov / 2)`
+  // world units across).
   const EMBERS = 40
   const emberPos = new Float32Array(EMBERS * 3)
   const emberVel = new Float32Array(EMBERS)
@@ -891,34 +1281,27 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     emberPos[i * 3 + 2] = (er() - 0.5) * 0.2
     emberVel[i] = 0.25 + er() * 0.5
   }
-  emberGeo.setAttribute('position', new THREE.BufferAttribute(emberPos, 3))
-  const embers = new THREE.Points(
-    emberGeo,
-    new THREE.PointsMaterial({
-      size: 0.05, map: track(softDot()), color: 0xf2c47e,
-      transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
-    }),
-  )
-  fire.add(embers)
+  const embers = new ParticleContainer3D({
+    texture: track(softDot()), capacity: EMBERS, blendMode: 'add', space: 'local',
+  })
+  fire.addChild(embers)
 
   // ── wall art: the hive's own tile imagery, then painted prints ─────────
-  const frames = new THREE.Group()
-  scene.add(slot('slot-frames', frames))
+  const frames = new Container3D()
+  scene.addChild(slot('slot-frames', frames))
 
   const artUrls = ['lounge', 'cigars', 'journal', 'flavor-wheel', 'humidor', 'community']
     .map(k => art[k])
     .filter((u): u is string => typeof u === 'string' && u.length > 0)
 
-  const loader = new THREE.TextureLoader()
   let painterIdx = 0
-  const nextPainted = (w: number, h: number): THREE.Texture => {
+  const nextPainted = (w: number, h: number): Texture => {
     const painter = ART_PAINTERS[painterIdx % ART_PAINTERS.length]
     painterIdx++
     return track(paint(Math.round(w * 320), Math.round(h * 320), painter))
   }
 
   let urlIdx = 0
-  const pickables: THREE.Object3D[] = []
   /** A framed picture: gilt frame, cream mat, canvas, and a brass picture light.
    *  `pin` forces a specific painted print (and makes the canvas clickable —
    *  the page opens the matching panel from `lounge3d:pick`). */
@@ -927,78 +1310,68 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     preferHiveArt: boolean,
     pin?: { painter: ArtPainter; pick: string },
   ): void => {
-    const g = new THREE.Group()
+    const g = new Container3D()
     g.position.set(x, y, z)
     g.rotation.y = ry
-    frames.add(g)
+    frames.addChild(g)
 
     const canvasMat = std({ color: 0xf0e6d6, roughness: 0.85 })
-    const canvas = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.16, h - 0.16), canvasMat)
+    const canvas = mk(plane(w - 0.16, h - 0.16), canvasMat)
     canvas.position.z = 0.031
-    g.add(canvas)
+    g.addChild(canvas)
 
+    // Hang a picture on the canvas. Material setters upload by themselves:
+    // there is no needsUpdate.
+    const hang = (t: Texture): void => {
+      canvasMat.textures.baseColor = t
+      canvasMat.baseColor = 0xffffff
+    }
     const hiveUrl = pin ? undefined : (preferHiveArt ? artUrls[urlIdx++] : undefined)
     if (pin) {
-      canvasMat.map = track(paint(Math.round(w * 320), Math.round(h * 320), pin.painter))
-      canvasMat.color.set(0xffffff)
-      canvasMat.needsUpdate = true
-      canvas.userData.pick = pin.pick
-      pickables.push(canvas)
+      hang(track(paint(Math.round(w * 320), Math.round(h * 320), pin.painter)))
+      pickable(canvas, { pick: pin.pick })
     } else if (hiveUrl) {
-      loader.load(
-        hiveUrl,
-        t => {
-          t.colorSpace = THREE.SRGBColorSpace
-          canvasMat.map = track(t)
-          canvasMat.color.set(0xffffff)
-          canvasMat.needsUpdate = true
-        },
-        undefined,
-        () => {
-          canvasMat.map = nextPainted(w, h)
-          canvasMat.color.set(0xffffff)
-          canvasMat.needsUpdate = true
-        },
+      loadImageTexture(hiveUrl).then(
+        t => hang(track(t)),
+        () => hang(nextPainted(w, h)),
       )
     } else {
-      canvasMat.map = nextPainted(w, h)
-      canvasMat.color.set(0xffffff)
-      canvasMat.needsUpdate = true
+      hang(nextPainted(w, h))
     }
 
     // gilt frame — four moulding bars around the canvas
     const bar = 0.08
     const frameMat = std({ color: C.brass, roughness: 0.42, metalness: 0.6 })
-    g.add(box(w, bar, 0.07, frameMat, 0, h / 2 - bar / 2, 0.02))
-    g.add(box(w, bar, 0.07, frameMat, 0, -h / 2 + bar / 2, 0.02))
-    g.add(box(bar, h - bar * 2, 0.07, frameMat, -w / 2 + bar / 2, 0, 0.02))
-    g.add(box(bar, h - bar * 2, 0.07, frameMat, w / 2 - bar / 2, 0, 0.02))
-    g.add(box(w - 0.14, h - 0.14, 0.02, std({ color: 0x0e0a12, roughness: 1 }), 0, 0, 0.01))
+    g.addChild(box(w, bar, 0.07, frameMat, 0, h / 2 - bar / 2, 0.02))
+    g.addChild(box(w, bar, 0.07, frameMat, 0, -h / 2 + bar / 2, 0.02))
+    g.addChild(box(bar, h - bar * 2, 0.07, frameMat, -w / 2 + bar / 2, 0, 0.02))
+    g.addChild(box(bar, h - bar * 2, 0.07, frameMat, w / 2 - bar / 2, 0, 0.02))
+    g.addChild(box(w - 0.14, h - 0.14, 0.02, std({ color: 0x0e0a12, roughness: 1 }), 0, 0, 0.01))
 
     // picture light
     const arm = cyl(0.012, 0.012, 0.16, 6, brassMat, 0, h / 2 + 0.06, 0.07)
     arm.rotation.x = Math.PI / 2
-    g.add(arm)
+    g.addChild(arm)
     const hood = cyl(0.045, 0.055, 0.22, 10, brassGlow, 0, h / 2 + 0.11, 0.15)
     hood.rotation.z = Math.PI / 2
-    g.add(hood)
-    const spot = new THREE.PointLight(0xffd9a0, 2.2, 2.4, 2)
+    g.addChild(hood)
+    const spot = point(0xffd9a0, 2.2, 2.4, 2)
     spot.position.set(0, h / 2 - 0.02, 0.28)
-    g.add(spot)
+    g.addChild(spot)
 
     // a clickable print gets a brighter light and a warm halo, so the room
     // says "this one opens" without a label
     if (pin) {
       spot.intensity = 3.6
-      const halo = new THREE.Mesh(
-        new THREE.PlaneGeometry(w + 0.5, h + 0.5),
-        new THREE.MeshBasicMaterial({
+      const halo = mk(
+        plane(w + 0.5, h + 0.5),
+        basic({
           map: track(softDot()), color: 0xe0b578, transparent: true,
-          opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false,
+          opacity: 0.22, blending: ADD, depthWrite: false,
         }),
       )
       halo.position.z = -0.006
-      g.add(halo)
+      g.addChild(halo)
     }
   }
 
@@ -1019,21 +1392,21 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     { painter: artWheel, pick: 'flavor-wheel' })
 
   // ── dartboard (left wall, past the wingback) — click the board to throw ──
-  const dartsGroup = new THREE.Group()
+  const dartsGroup = new Container3D()
   dartsGroup.position.set(-HALF_W + 0.1, 1.72, 1.0)
   dartsGroup.rotation.y = Math.PI / 2
-  scene.add(slot('slot-darts', dartsGroup))
+  scene.addChild(slot('slot-darts', dartsGroup))
 
   // cabinet: back panel + two open doors, pub style
-  dartsGroup.add(box(0.8, 0.88, 0.035, darkWood, 0, 0, 0))
-  dartsGroup.add(box(0.4, 0.86, 0.02, darkWood, -0.6, 0, 0.006))
-  dartsGroup.add(box(0.4, 0.86, 0.02, darkWood, 0.6, 0, 0.006))
+  dartsGroup.addChild(box(0.8, 0.88, 0.035, darkWood, 0, 0, 0))
+  dartsGroup.addChild(box(0.4, 0.86, 0.02, darkWood, -0.6, 0, 0.006))
+  dartsGroup.addChild(box(0.4, 0.86, 0.02, darkWood, 0.6, 0, 0.006))
   // chalk scoreboard on the left door — redrawn per throw
   const chalkCv = document.createElement('canvas')
   chalkCv.width = 260
   chalkCv.height = 520
-  const chalkTex = track(new THREE.CanvasTexture(chalkCv))
-  chalkTex.colorSpace = THREE.SRGBColorSpace
+  // Redrawn on every throw and fade, read up close: no mipmaps to rebuild.
+  const chalkTex = track(canvasTexture(chalkCv, false))
   /** The two seats at the oche. The Colonel is the house — he has been on that
    *  board every night for thirty years and throws like it. */
   type Seat = { name: string; score: number; legs: number }
@@ -1243,15 +1616,15 @@ function buildRoom(art: Record<string, string | undefined>): Room {
       `matches ${record.won}–${record.lost}` + (record.best ? ` · best leg ${record.best} darts` : ''),
       w / 2, 512,
     )
-    chalkTex.needsUpdate = true
+    chalkTex.source.update()
   }
   drawChalk()
-  const chalkPlane = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.34, 0.68),
+  const chalkPlane = mk(
+    plane(0.34, 0.68),
     std({ map: chalkTex, roughness: 0.95 }),
   )
   chalkPlane.position.set(-0.6, 0, 0.018)
-  dartsGroup.add(chalkPlane)
+  dartsGroup.addChild(chalkPlane)
   // spare darts on the right door
   const spareTex = track(paint(220, 440, (ctx, w, h) => {
     ctx.fillStyle = '#2a1d18'
@@ -1273,38 +1646,39 @@ function buildRoom(art: Record<string, string | undefined>): Room {
       ctx.fill()
     }
   }))
-  const sparePlane = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.34, 0.68),
+  const sparePlane = mk(
+    plane(0.34, 0.68),
     std({ map: spareTex, roughness: 0.9 }),
   )
   sparePlane.position.set(0.6, 0, 0.018)
-  dartsGroup.add(sparePlane)
+  dartsGroup.addChild(sparePlane)
   // the board: sisal backing + painted face
   const boardBack = cyl(0.27, 0.27, 0.05, 48, std({ color: 0x1a1218, roughness: 0.95 }), 0, 0, 0.043)
   boardBack.rotation.x = Math.PI / 2
-  dartsGroup.add(boardBack)
-  const boardFace = new THREE.Mesh(
-    new THREE.CircleGeometry(0.27, 64),
+  dartsGroup.addChild(boardBack)
+  const boardFace = mk(
+    circle(0.27, 64),
     std({ map: track(paint(640, 640, dartboardFace)), roughness: 0.85 }),
   )
   boardFace.position.z = 0.069
-  boardFace.userData.dart = true
-  pickables.push(boardFace)
-  dartsGroup.add(boardFace)
+  // Picked against its own triangles: a bounding-box hit would let the
+  // square's corners count as the board.
+  pickable(boardFace, { dart: true }).hitVolume = 'geometry'
+  dartsGroup.addChild(boardFace)
   // warm halo + its own picture light: the room says "this one plays"
-  const dartHaloMat = track(new THREE.MeshBasicMaterial({
+  const dartHaloMat = track(basic({
     map: track(softDot()), color: 0xe0b578, transparent: true,
-    opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false,
+    opacity: 0.2, blending: ADD, depthWrite: false,
   }))
-  const dartHalo = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.5), dartHaloMat)
+  const dartHalo = mk(plane(1.5, 1.5), dartHaloMat)
   dartHalo.position.z = -0.02
-  dartsGroup.add(dartHalo)
+  dartsGroup.addChild(dartHalo)
   const dartHood = cyl(0.045, 0.055, 0.22, 10, brassGlow, 0, 0.56, 0.13)
   dartHood.rotation.z = Math.PI / 2
-  dartsGroup.add(dartHood)
-  const dartSpot = new THREE.PointLight(0xffd9a0, 3.2, 2.6, 2)
+  dartsGroup.addChild(dartHood)
+  const dartSpot = point(0xffd9a0, 3.2, 2.6, 2)
   dartSpot.position.set(0, 0.5, 0.3)
-  dartsGroup.add(dartSpot)
+  dartsGroup.addChild(dartSpot)
 
   // ── THE CROWD ──────────────────────────────────────────────────────────
   //
@@ -1316,8 +1690,8 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   // They are silhouettes on purpose — dark cloth, a head, one arm and a glass,
   // lit by the board's own picture light. Faces would make them characters,
   // and they are not characters, they are the ROOM.
-  const crowdGroup = new THREE.Group()
-  scene.add(slot('slot-darts', crowdGroup))
+  const crowdGroup = new Container3D()
+  scene.addChild(slot('slot-darts', crowdGroup))
   /** Where they stand, in the order they arrive.
    *
    *  The first four are up by the board and out to the sides, INSIDE what the
@@ -1344,9 +1718,9 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     transparent: true, opacity: 0.55,
   })
   type Regular = {
-    g: THREE.Group
+    g: Container3D
     /** The glass hand, on a shoulder pivot, so the room can raise it. */
-    arm: THREE.Group
+    arm: Container3D
     base: [number, number]
     phase: number
     tall: number
@@ -1354,40 +1728,40 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     p: number
   }
   const crowd: Regular[] = CROWD_SPOTS.map(([x, z], i) => {
-    const g = new THREE.Group()
+    const g = new Container3D()
     g.position.set(x, 0, z)
     // square to the board, whichever side of the lane they are on
     g.rotation.y = Math.atan2(-HALF_W + 0.1 - x, 1.0 - z)
     const cloth = crowdCloth[i % crowdCloth.length]
     const legs = cyl(0.13, 0.17, 0.86, 8, cloth, 0, 0.43, 0)
-    g.add(legs)
+    g.addChild(legs)
     const coat = cyl(0.185, 0.15, 0.64, 10, cloth, 0, 1.16, 0)
-    g.add(coat)
-    const shoulders = new THREE.Mesh(new THREE.SphereGeometry(0.19, 10, 8), cloth)
+    g.addChild(coat)
+    const shoulders = mk(sphere(0.19, 10, 8), cloth)
     shoulders.scale.set(1, 0.42, 0.78)
     shoulders.position.y = 1.47
-    g.add(shoulders)
+    g.addChild(shoulders)
     // the far arm, hanging. Without it the silhouette is a bollard with a hat.
     const idle = cyl(0.042, 0.036, 0.44, 6, cloth, -0.185, 1.2, 0.02)
     idle.rotation.z = 0.07
-    g.add(idle)
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.105, 10, 8), crowdSkin)
+    g.addChild(idle)
+    const head = mk(sphere(0.105, 10, 8), crowdSkin)
     head.position.set(0, 1.62, 0.01)
-    g.add(head)
+    g.addChild(head)
     if (i % 3 === 0) {
-      g.add(cyl(0.16, 0.16, 0.012, 12, cloth, 0, 1.7, 0.01))
-      g.add(cyl(0.1, 0.11, 0.09, 12, cloth, 0, 1.75, 0.01))
+      g.addChild(cyl(0.16, 0.16, 0.012, 12, cloth, 0, 1.7, 0.01))
+      g.addChild(cyl(0.1, 0.11, 0.09, 12, cloth, 0, 1.75, 0.01))
     }
-    const arm = new THREE.Group()
+    const arm = new Container3D()
     arm.position.set(0.185, 1.42, 0.03)
     arm.rotation.x = -0.12
-    arm.add(cyl(0.045, 0.04, 0.42, 6, cloth, 0, -0.21, 0))
-    arm.add(cyl(0.038, 0.032, 0.075, 10, crowdGlass, 0, -0.46, 0.02))
-    g.add(arm)
+    arm.addChild(cyl(0.045, 0.04, 0.42, 6, cloth, 0, -0.21, 0))
+    arm.addChild(cyl(0.038, 0.032, 0.075, 10, crowdGlass, 0, -0.46, 0.02))
+    g.addChild(arm)
     // Only the legs cast: twelve figures' worth of shadow casters on the
     // chandelier is a frame budget spent on shapes nobody looks at.
-    g.traverse(o => { if (o !== legs) (o as THREE.Mesh).castShadow = false })
-    crowdGroup.add(g)
+    g.traverse(o => { if (o !== legs && o instanceof Mesh3D) o.castShadow = false })
+    crowdGroup.addChild(g)
     return { g, arm, base: [x, z], phase: i * 1.73, tall: 0.94 + ((i * 37) % 13) / 100, p: 0 }
   })
 
@@ -1401,14 +1775,14 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   // It is the only bonus in the house that is about accuracy rather than
   // arithmetic, and it is the one that makes the lounge itself part of the
   // game: the smoke comes from the room, not from the board.
-  const smokeMat = track(new THREE.MeshBasicMaterial({
+  const smokeMat = track(basic({
     color: 0xcfc4b4, transparent: true, opacity: 0,
-    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    blending: ADD, depthWrite: false, side: DOUBLE,
   }))
-  const smokeMesh = new THREE.Mesh(track(new THREE.TorusGeometry(SMOKE_RING.r, 0.0055, 8, 44)), smokeMat)
+  const smokeMesh = mk(track(torus(SMOKE_RING.r, 0.0055, 8, 44)), smokeMat)
   smokeMesh.visible = false
   smokeMesh.position.z = 0.098
-  dartsGroup.add(smokeMesh)
+  dartsGroup.addChild(smokeMesh)
   /** The live ring: where it started, where it is going, and how old it is. */
   let smokeRing: { x: number; y: number; from: number; t: number } | null = null
   let smokeWait = 7
@@ -1425,16 +1799,16 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   // ── THE POPS ───────────────────────────────────────────────────────────
   // Brass light off the sisal when the room reacts. Restraint: a soft dot that
   // grows and goes, no sparks, no confetti — this is a lounge.
-  const popMat = track(new THREE.MeshBasicMaterial({
+  const popMat = track(basic({
     map: track(softDot()), color: 0xffd9a0, transparent: true, opacity: 0,
-    blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
+    blending: ADD, depthWrite: false, depthTest: false,
   }))
-  const popGeo = track(new THREE.PlaneGeometry(1, 1))
+  const popGeo = track(plane(1, 1))
   const pops = Array.from({ length: 5 }, () => {
-    const m = new THREE.Mesh(popGeo, popMat.clone())
+    const m = mk(popGeo, popMat.clone())
     m.visible = false
     m.position.z = 0.076
-    dartsGroup.add(m)
+    dartsGroup.addChild(m)
     return { m, t: 0, size: 0.3 }
   })
   const popAt = (x: number, y: number, size: number): void => {
@@ -1464,40 +1838,40 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   }
 
   // thrown darts — shared geometry, three on the board at most
-  const stuck = new THREE.Group()
-  dartsGroup.add(stuck)
-  const dartNeedleGeo = track(new THREE.CylinderGeometry(0.0022, 0.0022, 0.045, 6))
-  const dartBarrelGeo = track(new THREE.CylinderGeometry(0.0055, 0.0045, 0.038, 8))
-  const dartShaftGeo = track(new THREE.CylinderGeometry(0.0032, 0.0032, 0.034, 6))
-  const dartFlightGeo = track(new THREE.PlaneGeometry(0.026, 0.034))
+  const stuck = new Container3D()
+  dartsGroup.addChild(stuck)
+  const dartNeedleGeo = track(cylinder(0.0022, 0.0022, 0.045, 6))
+  const dartBarrelGeo = track(cylinder(0.0055, 0.0045, 0.038, 8))
+  const dartShaftGeo = track(cylinder(0.0032, 0.0032, 0.034, 6))
+  const dartFlightGeo = track(plane(0.026, 0.034))
   const dartShaftMat = std({ color: C.ember, roughness: 0.5 })
-  const dartFlightMat = std({ color: C.cream, roughness: 0.8, side: THREE.DoubleSide })
+  const dartFlightMat = std({ color: C.cream, roughness: 0.8, side: DOUBLE })
   /** One dart, built where it is told. Shared by the flight and the landing —
    *  the thing you watch fly IS the thing that ends up in the board. */
-  const buildDart = (seed: number): THREE.Group => {
-    const d = new THREE.Group()
+  const buildDart = (seed: number): Container3D => {
+    const d = new Container3D()
     d.rotation.set(Math.sin(seed * 7) * 0.07, Math.cos(seed * 3) * 0.07, 0)
-    const needle = new THREE.Mesh(dartNeedleGeo, brassMat)
+    const needle = mk(dartNeedleGeo, brassMat)
     needle.rotation.x = Math.PI / 2
     needle.position.z = 0.012
-    d.add(needle)
-    const barrel = new THREE.Mesh(dartBarrelGeo, brassMat)
+    d.addChild(needle)
+    const barrel = mk(dartBarrelGeo, brassMat)
     barrel.rotation.x = Math.PI / 2
     barrel.position.z = 0.052
-    d.add(barrel)
-    const shaft = new THREE.Mesh(dartShaftGeo, dartShaftMat)
+    d.addChild(barrel)
+    const shaft = mk(dartShaftGeo, dartShaftMat)
     shaft.rotation.x = Math.PI / 2
     shaft.position.z = 0.088
-    d.add(shaft)
-    const f1 = new THREE.Mesh(dartFlightGeo, dartFlightMat)
+    d.addChild(shaft)
+    const f1 = mk(dartFlightGeo, dartFlightMat)
     f1.rotation.x = Math.PI / 2
     f1.position.z = 0.108
-    d.add(f1)
-    const f2 = new THREE.Mesh(dartFlightGeo, dartFlightMat)
+    d.addChild(f1)
+    const f2 = mk(dartFlightGeo, dartFlightMat)
     f2.rotation.x = Math.PI / 2
     f2.rotation.y = Math.PI / 2
     f2.position.z = 0.108
-    d.add(f2)
+    d.addChild(f2)
     return d
   }
 
@@ -1553,35 +1927,35 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   // The reticle: a ring at the current wobble radius and the bead riding it.
   // Additive and depth-free so they read as light on the board rather than
   // stickers on it.
-  const aimGroup = new THREE.Group()
+  const aimGroup = new Container3D()
   aimGroup.position.z = 0.0715
   aimGroup.visible = false
-  dartsGroup.add(aimGroup)
-  const aimRingGeo = track(new THREE.RingGeometry(0.94, 1, 56))
-  const aimRingMat = new THREE.MeshBasicMaterial({
+  dartsGroup.addChild(aimGroup)
+  const aimRingGeo = track(ringGeo(0.94, 1, 56))
+  const aimRingMat = basic({
     color: 0xe0b578, transparent: true, opacity: 0.5,
-    blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
+    blending: ADD, depthWrite: false, depthTest: false,
   })
-  const aimRing = new THREE.Mesh(aimRingGeo, track(aimRingMat))
-  aimGroup.add(aimRing)
-  const aimCrossMat = track(new THREE.MeshBasicMaterial({
+  const aimRing = mk(aimRingGeo, track(aimRingMat))
+  aimGroup.addChild(aimRing)
+  const aimCrossMat = track(basic({
     color: 0xe8dcc4, transparent: true, opacity: 0.35,
-    blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
+    blending: ADD, depthWrite: false, depthTest: false,
   }))
-  const aimCross = new THREE.Mesh(track(new THREE.CircleGeometry(0.0035, 12)), aimCrossMat)
-  aimGroup.add(aimCross)
-  const beadMat = new THREE.MeshBasicMaterial({
+  const aimCross = mk(track(circle(0.0035, 12)), aimCrossMat)
+  aimGroup.addChild(aimCross)
+  const beadMat = basic({
     color: 0xffd9a0, transparent: true, opacity: 0.95,
-    blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
+    blending: ADD, depthWrite: false, depthTest: false,
   })
-  const bead = new THREE.Mesh(track(new THREE.CircleGeometry(0.007, 14)), track(beadMat))
-  aimGroup.add(bead)
+  const bead = mk(track(circle(0.007, 14)), track(beadMat))
+  aimGroup.addChild(bead)
 
   /** The throw in progress: where you pointed, and how long you have held. */
   let aim: { x: number; y: number; held: number } | null = null
   /** Darts in the air. */
   type Flight = {
-    g: THREE.Group; from: THREE.Vector3; to: THREE.Vector3; t: number; hit: DartHit
+    g: Container3D; from: Vector3; to: Vector3; t: number; hit: DartHit
     /** Where it landed, board-local — the side bets need the sisal, not the score. */
     at: { x: number; y: number }
   }
@@ -1597,16 +1971,16 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   const FLIGHT_DUR = 0.26
   /** Where a dart is released from, in board-local space: down and to the
    *  right of the board, out toward the oche. */
-  const LAUNCH = new THREE.Vector3(0.22, -0.34, 1.15)
+  const LAUNCH = new Vector3(0.22, -0.34, 1.15)
 
   /** Send a dart to a landing point and score it when it arrives. */
   const launch = (x: number, y: number): void => {
     const hit = scoreDart(x, y)
     const g = buildDart(flights.length + turnDarts.length + x * 31)
-    const to = new THREE.Vector3(x, y, 0.069)
-    g.position.copy(LAUNCH)
-    stuck.add(g)
-    flights.push({ g, from: LAUNCH.clone(), to, t: 0, hit, at: { x, y } })
+    const to = new Vector3(x, y, 0.069)
+    g.position.copyFrom(LAUNCH)
+    stuck.addChild(g)
+    flights.push({ g, from: new Vector3().copyFrom(LAUNCH), to, t: 0, hit, at: { x, y } })
     sinceThrow = 0
   }
 
@@ -1714,7 +2088,7 @@ function buildRoom(art: Record<string, string | undefined>): Room {
       addTally(hit)
       // THROUGH THE SMOKE — the ring is scored where it was when the dart
       // arrived, and a threaded ring is spent: the room does not blow two.
-      if (smokeRing && smokeMat.opacity > 0.12) {
+      if (smokeRing && smokeMat.alpha > 0.12) {
         const sc = smokeCall(Math.hypot(at.x - smokeRing.x, at.y - smokeRing.y))
         if (sc) {
           reactTo(sc, true, sideBet === sc.id)
@@ -1772,7 +2146,8 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     if (houseThrowing) after(0.75, () => houseDart())
   }
 
-  const clearBoard = (): void => { stuck.clear() }
+  // The darts share geometry and materials, so only the nodes go.
+  const clearBoard = (): void => { for (const d of stuck.removeChildren()) d.destroy({ children: true }) }
 
   const nextTurn = (): void => {
     turnSeat = turnSeat === 0 ? 1 : 0
@@ -1852,17 +2227,17 @@ function buildRoom(art: Record<string, string | undefined>): Room {
 
   /** The board's whole input surface. Returns false when it is not your throw
    *  — the press then falls through to the room's ordinary orbit. */
-  const beginAim = (world: THREE.Vector3): boolean => {
+  const beginAim = (world: PointData3D): boolean => {
     if (houseThrowing || flights.length > 0 || turnSeat !== 0) return false
-    const p = dartsGroup.worldToLocal(world.clone())
+    const p = dartsGroup.toLocal(world)
     aim = { x: p.x, y: p.y, held: 0 }
     aimGroup.visible = true
     return true
   }
 
-  const moveAim = (world: THREE.Vector3): void => {
+  const moveAim = (world: PointData3D): void => {
     if (!aim) return
-    const p = dartsGroup.worldToLocal(world.clone())
+    const p = dartsGroup.toLocal(world)
     // Re-aiming is free; the breath is not. Moving your point does not buy you
     // a fresh window, which is what stops "hold forever, slide onto the bull".
     aim.x = p.x
@@ -1915,10 +2290,10 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     const atOche = viewIsDarts || !!aim || flights.length > 0 || sinceThrow < 22
     oche += ((atOche ? 1 : 0) - oche) * Math.min(1, dt * 2.4)
     chandelierLight.intensity = 16 - oche * 7.5
-    hemi.intensity = 1.15 - oche * 0.42
+    hemi.intensity = (1.15 - oche * 0.42) / Math.PI
     roomFill.intensity = 13 - oche * 5.5
     dartSpot.intensity = 3.2 + oche * 2.6
-    dartHaloMat.opacity = 0.2 + oche * 0.2
+    dartHaloMat.alpha = 0.2 + oche * 0.2
 
     // ── THE ROAR ───────────────────────────────────────────────────────
     // Trauma, spent down. The shake moves the ROOM rather than the camera:
@@ -1963,10 +2338,10 @@ function buildRoom(art: Record<string, string | undefined>): Room {
       } else {
         smokeRing.x = smokeRing.from + age * SMOKE_RING.drift
         const fade = Math.min(1, smokeRing.t / 0.9) * Math.min(1, (SMOKE_RING.life - smokeRing.t) / 1.3)
-        smokeMat.opacity = 0.34 * fade
+        smokeMat.alpha = 0.34 * fade
         smokeMesh.position.set(smokeRing.x, smokeRing.y + Math.sin(smokeRing.t * 0.8) * 0.006, 0.098)
         // smoke widens and thins as it goes, and turns over slowly
-        smokeMesh.scale.setScalar(1 + age * 0.3)
+        smokeMesh.scale.set(1 + age * 0.3)
         smokeMesh.rotation.z = smokeRing.t * 0.35
       }
     } else if (oche > 0.5 && !houseThrowing && !aim) {
@@ -1975,7 +2350,7 @@ function buildRoom(art: Record<string, string | undefined>): Room {
         const spot = smokeSpot()
         const from = spot.x - SMOKE_RING.drift / 2
         smokeRing = { x: from, y: spot.y, from, t: 0 }
-        smokeMat.opacity = 0
+        smokeMat.alpha = 0
         smokeMesh.visible = true
       }
     }
@@ -1985,10 +2360,10 @@ function buildRoom(art: Record<string, string | undefined>): Room {
       if (q.t <= 0) continue
       q.t -= dt * 2.4
       const e = 1 - Math.max(0, q.t)
-      const mat = q.m.material as THREE.MeshBasicMaterial
-      q.m.scale.setScalar(0.02 + e * q.size)
-      mat.opacity = Math.max(0, 1 - e) * 0.8
-      if (q.t <= 0) { q.m.visible = false; mat.opacity = 0 }
+      const mat = q.m.material as FlatMaterial
+      q.m.scale.set(0.02 + e * q.size)
+      mat.alpha = Math.max(0, 1 - e) * 0.8
+      if (q.t <= 0) { q.m.visible = false; mat.alpha = 0 }
     }
 
     if (aim) {
@@ -1996,29 +2371,34 @@ function buildRoom(art: Record<string, string | undefined>): Room {
       const b = beadAt(aim.held)
       aimGroup.position.x = aim.x
       aimGroup.position.y = aim.y
-      aimRing.scale.setScalar(Math.max(b.r, 0.0001))
+      aimRing.scale.set(Math.max(b.r, 0.0001))
       bead.position.set(b.x, b.y, 0)
       // THE TELL: the ring brightens as it closes. The whole skill is reading
       // this one value, so it is the one thing on the board that changes
       // colour — tight is warm and near-white, loose is a dim amber.
       const tight = 1 - Math.min(1, (b.r - AIM_MIN) / (AIM_MAX - AIM_MIN))
-      aimRingMat.opacity = 0.32 + tight * 0.6
-      aimRingMat.color.setRGB(1, 0.72 + tight * 0.26, 0.42 + tight * 0.5)
-      beadMat.opacity = 0.6 + tight * 0.4
+      aimRingMat.alpha = 0.32 + tight * 0.6
+      // three's setRGB took linear light; Pixi's colours are sRGB.
+      aimRingMat.baseColor = [1, toSrgb(0.72 + tight * 0.26), toSrgb(0.42 + tight * 0.5)]
+      beadMat.alpha = 0.6 + tight * 0.4
     }
 
     for (let i = flights.length - 1; i >= 0; i--) {
       const f = flights[i]
       f.t += dt / FLIGHT_DUR
       if (f.t >= 1) {
-        f.g.position.copy(f.to)
+        f.g.position.copyFrom(f.to)
         f.g.rotation.set(Math.sin(f.to.x * 31) * 0.07, Math.cos(f.to.y * 23) * 0.07, 0)
         flights.splice(i, 1)
         applyHit(f.hit, f.at)
         continue
       }
       const e = f.t
-      f.g.position.lerpVectors(f.from, f.to, e)
+      f.g.position.set(
+        f.from.x + (f.to.x - f.from.x) * e,
+        f.from.y + (f.to.y - f.from.y) * e,
+        f.from.z + (f.to.z - f.from.z) * e,
+      )
       // A dart is thrown UP and drops in. Without the arc it reads as a laser.
       f.g.position.y += Math.sin(e * Math.PI) * 0.055
       f.g.rotation.z = (1 - e) * 0.5
@@ -2037,7 +2417,7 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     darts: turnDarts.map(d => d.label),
     fans, mult: crowdMultiplier(fans), tally, sideBet,
     ring: smokeRing
-      ? { x: +smokeRing.x.toFixed(4), y: +smokeRing.y.toFixed(4), lit: +smokeMat.opacity.toFixed(3) }
+      ? { x: +smokeRing.x.toFixed(4), y: +smokeRing.y.toFixed(4), lit: +smokeMat.alpha.toFixed(3) }
       : null,
     shout: banner?.shout ?? '', note: chalkNote, record: { ...record },
     oche: +oche.toFixed(2), crowdUp: crowd.filter(c => c.g.visible).length,
@@ -2054,74 +2434,74 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   }
 
   // ── window (right wall) ────────────────────────────────────────────────
-  const windowGroup = new THREE.Group()
+  const windowGroup = new Container3D()
   windowGroup.position.set(HALF_W - 0.04, 1.85, 1.1)
   windowGroup.rotation.y = -Math.PI / 2
-  scene.add(slot('slot-window', windowGroup))
-  const night = new THREE.Mesh(
-    new THREE.PlaneGeometry(2.1, 1.7),
-    new THREE.MeshBasicMaterial({ map: track(skyTexture()) }),
+  scene.addChild(slot('slot-window', windowGroup))
+  const night = mk(
+    plane(2.1, 1.7),
+    basic({ map: track(skyTexture()) }),
   )
   night.position.z = -0.02
-  windowGroup.add(night)
+  windowGroup.addChild(night)
   const mull = std({ color: C.wood, roughness: 0.6 })
-  windowGroup.add(box(2.34, 0.12, 0.14, mull, 0, 0.91, 0.02))
-  windowGroup.add(box(2.34, 0.12, 0.14, mull, 0, -0.91, 0.02))
-  windowGroup.add(box(0.12, 1.94, 0.14, mull, -1.11, 0, 0.02))
-  windowGroup.add(box(0.12, 1.94, 0.14, mull, 1.11, 0, 0.02))
-  windowGroup.add(box(0.07, 1.7, 0.1, mull, 0, 0, 0.02))
-  windowGroup.add(box(2.1, 0.07, 0.1, mull, 0, 0, 0.02))
+  windowGroup.addChild(box(2.34, 0.12, 0.14, mull, 0, 0.91, 0.02))
+  windowGroup.addChild(box(2.34, 0.12, 0.14, mull, 0, -0.91, 0.02))
+  windowGroup.addChild(box(0.12, 1.94, 0.14, mull, -1.11, 0, 0.02))
+  windowGroup.addChild(box(0.12, 1.94, 0.14, mull, 1.11, 0, 0.02))
+  windowGroup.addChild(box(0.07, 1.7, 0.1, mull, 0, 0, 0.02))
+  windowGroup.addChild(box(2.1, 0.07, 0.1, mull, 0, 0, 0.02))
   const curtain = std({ color: 0x3a1c26, roughness: 1 })
-  windowGroup.add(box(0.42, 2.3, 0.1, curtain, -1.42, -0.1, 0.06))
-  windowGroup.add(box(0.42, 2.3, 0.1, curtain, 1.42, -0.1, 0.06))
-  const moon = new THREE.PointLight(0x8fa8d8, 3.2, 8, 2)
+  windowGroup.addChild(box(0.42, 2.3, 0.1, curtain, -1.42, -0.1, 0.06))
+  windowGroup.addChild(box(0.42, 2.3, 0.1, curtain, 1.42, -0.1, 0.06))
+  const moon = point(0x8fa8d8, 3.2, 8, 2)
   moon.position.set(0, 0.4, 0.6)
-  windowGroup.add(moon)
+  windowGroup.addChild(moon)
 
   // ── seating: two wingbacks + a settee-ish ottoman ──────────────────────
-  const chairs = new THREE.Group()
-  scene.add(slot('slot-chairs', chairs))
+  const chairs = new Container3D()
+  scene.addChild(slot('slot-chairs', chairs))
 
-  const wingback = (x: number, z: number, ry: number): THREE.Group => {
-    const g = new THREE.Group()
+  const wingback = (x: number, z: number, ry: number): Container3D => {
+    const g = new Container3D()
     g.position.set(x, 0, z)
     g.rotation.y = ry
     // frame
-    g.add(box(0.86, 0.16, 0.86, leatherMat, 0, 0.44, 0))
-    const cushion = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.62, 4, 10), leatherMat)
+    g.addChild(box(0.86, 0.16, 0.86, leatherMat, 0, 0.44, 0))
+    const cushion = mk(capsule(0.09, 0.62, 4, 10), leatherMat)
     cushion.rotation.z = Math.PI / 2
     cushion.position.set(0, 0.56, 0.02)
     cushion.castShadow = true
-    g.add(cushion)
+    g.addChild(cushion)
     // back + wings
     const back = box(0.86, 1.05, 0.16, leatherMat, 0, 1.0, -0.36, 0.06)
     back.rotation.x = -0.08
-    g.add(back)
+    g.addChild(back)
     for (const s of [-1, 1]) {
       const wing = box(0.16, 0.66, 0.34, leatherMat, s * 0.35, 1.18, -0.2, 0.05)
       wing.rotation.y = s * 0.12
-      g.add(wing)
+      g.addChild(wing)
       const arm = box(0.16, 0.5, 0.8, leatherMat, s * 0.35, 0.62, 0.02, 0.06)
-      g.add(arm)
-      const roll = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.62, 4, 8), leatherDeep)
+      g.addChild(arm)
+      const roll = mk(capsule(0.09, 0.62, 4, 8), leatherDeep)
       roll.rotation.x = Math.PI / 2
       roll.position.set(s * 0.35, 0.88, 0.02)
       roll.castShadow = true
-      g.add(roll)
+      g.addChild(roll)
     }
     // brass tacks along the wings
     for (let i = 0; i < 8; i++) {
       for (const s of [-1, 1]) {
-        const tack = new THREE.Mesh(new THREE.SphereGeometry(0.014, 6, 6), brassMat)
+        const tack = mk(sphere(0.014, 6, 6), brassMat)
         tack.position.set(s * 0.44, 0.92 + i * 0.075, -0.16)
-        g.add(tack)
+        g.addChild(tack)
       }
     }
     // legs
     for (const [lx, lz] of [[-0.34, 0.34], [0.34, 0.34], [-0.34, -0.34], [0.34, -0.34]]) {
-      g.add(cyl(0.035, 0.045, 0.36, 8, darkWood, lx, 0.18, lz))
+      g.addChild(cyl(0.035, 0.045, 0.36, 8, darkWood, lx, 0.18, lz))
     }
-    chairs.add(g)
+    chairs.addChild(g)
     return g
   }
   wingback(-1.5, 1.15, 0.42)
@@ -2130,137 +2510,140 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   // a throw folded over the right chair's arm
   const throwCloth = box(0.22, 0.05, 0.62, std({ color: 0x7a4133, roughness: 1 }), 1.79, 0.92, 1.3, 0.02)
   throwCloth.rotation.set(0, -0.42, 0)
-  chairs.add(throwCloth)
+  chairs.addChild(throwCloth)
   const throwFall = box(0.2, 0.34, 0.1, std({ color: 0x7a4133, roughness: 1 }), 1.9, 0.75, 1.02, 0.02)
   throwFall.rotation.set(0, -0.42, 0)
-  chairs.add(throwFall)
+  chairs.addChild(throwFall)
 
   const ottoman = box(0.8, 0.34, 0.6, leatherMat, 0, 0.2, 1.75, 0.07)
-  chairs.add(ottoman)
+  chairs.addChild(ottoman)
   for (const [lx, lz] of [[-0.3, 1.53], [0.3, 1.53], [-0.3, 1.97], [0.3, 1.97]]) {
-    chairs.add(cyl(0.03, 0.03, 0.06, 6, brassMat, lx, 0.03, lz))
+    chairs.addChild(cyl(0.03, 0.03, 0.06, 6, brassMat, lx, 0.03, lz))
   }
 
   // ── side table + the accessories that live on it ───────────────────────
-  const tables = new THREE.Group()
-  scene.add(slot('slot-tables', tables))
+  const tables = new Container3D()
+  scene.addChild(slot('slot-tables', tables))
 
-  const sideTable = (x: number, z: number): THREE.Group => {
-    const g = new THREE.Group()
+  const sideTable = (x: number, z: number): Container3D => {
+    const g = new Container3D()
     g.position.set(x, 0, z)
     const top = cyl(0.34, 0.34, 0.05, 24, trimWood, 0, 0.58, 0)
-    g.add(top)
-    g.add(cyl(0.05, 0.07, 0.53, 10, darkWood, 0, 0.31, 0))
-    g.add(cyl(0.2, 0.24, 0.05, 16, darkWood, 0, 0.05, 0))
-    g.add(cyl(0.35, 0.35, 0.012, 24, brassMat, 0, 0.607, 0))
-    tables.add(g)
+    g.addChild(top)
+    g.addChild(cyl(0.05, 0.07, 0.53, 10, darkWood, 0, 0.31, 0))
+    g.addChild(cyl(0.2, 0.24, 0.05, 16, darkWood, 0, 0.05, 0))
+    g.addChild(cyl(0.35, 0.35, 0.012, 24, brassMat, 0, 0.607, 0))
+    tables.addChild(g)
     return g
   }
   const tableL = sideTable(-2.35, 1.0)
   const tableR = sideTable(2.35, 1.0)
 
   // low table in front of the fire
-  const lowTable = new THREE.Group()
+  const lowTable = new Container3D()
   lowTable.position.set(0, 0, 0.55)
-  tables.add(lowTable)
-  lowTable.add(box(1.5, 0.07, 0.8, trimWood, 0, 0.42, 0, 0.02))
-  lowTable.add(box(1.36, 0.04, 0.66, std({ color: 0x1a1220, roughness: 0.25, metalness: 0.1 }), 0, 0.455, 0, 0.01))
+  tables.addChild(lowTable)
+  lowTable.addChild(box(1.5, 0.07, 0.8, trimWood, 0, 0.42, 0, 0.02))
+  lowTable.addChild(box(1.36, 0.04, 0.66, std({ color: 0x1a1220, roughness: 0.25, metalness: 0.1 }), 0, 0.455, 0, 0.01))
   for (const [lx, lz] of [[-0.62, 0.3], [0.62, 0.3], [-0.62, -0.3], [0.62, -0.3]]) {
-    lowTable.add(cyl(0.03, 0.04, 0.4, 8, darkWood, lx, 0.2, lz))
+    lowTable.addChild(cyl(0.03, 0.04, 0.4, 8, darkWood, lx, 0.2, lz))
   }
-  lowTable.add(box(1.3, 0.03, 0.6, darkWood, 0, 0.14, 0, 0.01)) // lower shelf
+  lowTable.addChild(box(1.3, 0.03, 0.6, darkWood, 0, 0.14, 0, 0.01)) // lower shelf
   // books on the shelf
   for (let i = 0; i < 3; i++) {
-    lowTable.add(box(0.34, 0.045, 0.24, std({ color: [0x5b1f21, 0x2c3d52, 0x3a2a1c][i], roughness: 0.9 }), -0.3 + i * 0.02, 0.18 + i * 0.05, 0.02 + i * 0.03, 0.006))
+    lowTable.addChild(box(0.34, 0.045, 0.24, std({ color: [0x5b1f21, 0x2c3d52, 0x3a2a1c][i], roughness: 0.9 }), -0.3 + i * 0.02, 0.18 + i * 0.05, 0.02 + i * 0.03, 0.006))
   }
 
   // ── cigar accessories ──────────────────────────────────────────────────
-  const accessories = new THREE.Group()
-  scene.add(slot('slot-accessories', accessories))
+  const accessories = new Container3D()
+  scene.addChild(slot('slot-accessories', accessories))
 
   const cigarBody = std({ color: 0x6b4326, roughness: 0.85 })
   const cigarBand = std({ color: C.brass, roughness: 0.4, metalness: 0.5 })
 
+  /** The lit cigar's coal and its glow, which the tick breathes. */
+  let litCoal: Material3D | null = null
+  let litGlow: PointLight | null = null
   /** A cigar: rolled body, gold band, and a lit cap when `lit`. */
-  const cigar = (len: number, lit: boolean): THREE.Group => {
-    const g = new THREE.Group()
+  const cigar = (len: number, lit: boolean): Container3D => {
+    const g = new Container3D()
     const body = cyl(0.017, 0.02, len, 12, cigarBody, 0, 0, 0)
     body.rotation.z = Math.PI / 2
-    g.add(body)
+    g.addChild(body)
     const band = cyl(0.0205, 0.0205, 0.035, 12, cigarBand, -len * 0.32, 0, 0)
     band.rotation.z = Math.PI / 2
-    g.add(band)
+    g.addChild(band)
     if (lit) {
       const ash = cyl(0.017, 0.017, 0.06, 10, std({ color: 0xb8b0a4, roughness: 1 }), len * 0.5, 0, 0)
       ash.rotation.z = Math.PI / 2
-      g.add(ash)
-      const coal = cyl(0.016, 0.016, 0.012, 10, std({ color: C.ember, emissive: 0xff5a1e, emissiveIntensity: 2.4, roughness: 1 }), len * 0.53, 0, 0)
+      g.addChild(ash)
+      const coalMat = std({ color: C.ember, emissive: 0xff5a1e, emissiveIntensity: 2.4, roughness: 1 })
+      const coal = cyl(0.016, 0.016, 0.012, 10, coalMat, len * 0.53, 0, 0)
       coal.rotation.z = Math.PI / 2
-      g.add(coal)
-      g.userData.coal = coal
-      const glow = new THREE.PointLight(0xff6a28, 0.9, 0.7, 2)
+      g.addChild(coal)
+      litCoal = coalMat
+      const glow = point(0xff6a28, 0.9, 0.7, 2)
       glow.position.set(len * 0.55, 0, 0)
-      g.add(glow)
-      g.userData.glow = glow
+      g.addChild(glow)
+      litGlow = glow
     }
     return g
   }
 
   // ashtray on the low table, with a cigar resting in it
-  const ashtray = new THREE.Group()
+  const ashtray = new Container3D()
   ashtray.position.set(0.3, 0.475, 0.55)
-  accessories.add(ashtray)
+  accessories.addChild(ashtray)
   const ashMat = std({ color: 0x14101a, roughness: 0.2, metalness: 0.1 })
-  ashtray.add(cyl(0.15, 0.13, 0.045, 24, ashMat, 0, 0.022, 0))
+  ashtray.addChild(cyl(0.15, 0.13, 0.045, 24, ashMat, 0, 0.022, 0))
   const bowl = cyl(0.115, 0.1, 0.03, 24, std({ color: 0x0a0810, roughness: 0.35 }), 0, 0.048, 0)
-  ashtray.add(bowl)
+  ashtray.addChild(bowl)
   for (let i = 0; i < 4; i++) {
     const notch = box(0.05, 0.02, 0.035, ashMat, Math.cos((i / 4) * Math.PI * 2) * 0.14, 0.05, Math.sin((i / 4) * Math.PI * 2) * 0.14)
     notch.rotation.y = -(i / 4) * Math.PI * 2
-    ashtray.add(notch)
+    ashtray.addChild(notch)
   }
   const restingCigar = cigar(0.22, true)
   restingCigar.position.set(0.06, 0.075, 0.09)
   restingCigar.rotation.y = -0.7
   restingCigar.rotation.z = 0.07
-  ashtray.add(restingCigar)
+  ashtray.addChild(restingCigar)
   slot('slot-smoke', restingCigar) // the ember + smoke ride with "a cigar going"
 
   // cutter, lighter, matchbook, and a leather cigar case on the low table
-  const cutter = new THREE.Group()
+  const cutter = new Container3D()
   cutter.position.set(-0.42, 0.49, 0.66)
   cutter.rotation.y = 0.4
-  accessories.add(cutter)
+  accessories.addChild(cutter)
   const steel = std({ color: 0xbfc4c8, roughness: 0.24, metalness: 0.92 })
-  cutter.add(box(0.13, 0.012, 0.075, steel, 0, 0, 0, 0.006))
-  const cutterRing = new THREE.Mesh(new THREE.TorusGeometry(0.026, 0.006, 8, 20), steel)
+  cutter.addChild(box(0.13, 0.012, 0.075, steel, 0, 0, 0, 0.006))
+  const cutterRing = mk(torus(0.026, 0.006, 8, 20), steel)
   cutterRing.rotation.x = Math.PI / 2
   cutterRing.position.set(0, 0.007, 0)
-  cutter.add(cutterRing)
+  cutter.addChild(cutterRing)
 
   const lighter = box(0.05, 0.075, 0.026, std({ color: 0x8a6a3a, roughness: 0.3, metalness: 0.8 }), -0.16, 0.495, 0.72, 0.008)
   lighter.rotation.y = -0.3
-  accessories.add(lighter)
-  accessories.add(box(0.05, 0.008, 0.032, brassMat, -0.16, 0.535, 0.72, 0.004))
+  accessories.addChild(lighter)
+  accessories.addChild(box(0.05, 0.008, 0.032, brassMat, -0.16, 0.535, 0.72, 0.004))
 
   const matchbook = box(0.07, 0.012, 0.05, std({ color: C.ember, roughness: 0.9 }), 0.56, 0.462, 0.72, 0.004)
   matchbook.rotation.y = 0.9
-  accessories.add(matchbook)
+  accessories.addChild(matchbook)
 
   const cigarCase = box(0.2, 0.055, 0.09, std({ color: 0x3b2118, roughness: 0.7 }), -0.55, 0.48, 0.4, 0.014)
   cigarCase.rotation.y = -0.25
-  accessories.add(cigarCase)
-  accessories.add(box(0.2, 0.008, 0.09, brassMat, -0.55, 0.512, 0.4, 0.004))
+  accessories.addChild(cigarCase)
+  accessories.addChild(box(0.2, 0.008, 0.09, brassMat, -0.55, 0.512, 0.4, 0.004))
 
   // a fresh cigar + cutter on the right side table
   const readyCigar = cigar(0.2, false)
   readyCigar.position.set(2.3, 0.62, 1.02)
   readyCigar.rotation.y = 0.6
-  accessories.add(readyCigar)
+  accessories.addChild(readyCigar)
 
   // smoke drifting off the lit cigar
   const SMOKE = 60
-  const smokeGeo = new THREE.BufferGeometry()
   const smokePos = new Float32Array(SMOKE * 3)
   const smokeSeed = new Float32Array(SMOKE)
   const sr = rng(88)
@@ -2270,118 +2653,113 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     smokePos[i * 3 + 2] = 0
     smokeSeed[i] = sr() * 6.28
   }
-  smokeGeo.setAttribute('position', new THREE.BufferAttribute(smokePos, 3))
-  const smoke = new THREE.Points(
-    smokeGeo,
-    new THREE.PointsMaterial({
-      size: 0.08, map: track(softDot()), color: 0xcbbfae,
-      transparent: true, opacity: 0.13, depthWrite: false,
-    }),
-  )
+  const smoke = new ParticleContainer3D({
+    texture: track(softDot()), capacity: SMOKE, blendMode: 'normal', space: 'local',
+  })
   smoke.position.set(0.5, 0.56, 0.62)
-  scene.add(slot('slot-smoke', smoke))
+  scene.addChild(slot('slot-smoke', smoke))
 
   // ── whiskey: decanter + two glasses ────────────────────────────────────
-  const bar = new THREE.Group()
-  scene.add(slot('slot-whiskey', bar))
-  const decanter = new THREE.Group()
+  const bar = new Container3D()
+  scene.addChild(slot('slot-whiskey', bar))
+  const decanter = new Container3D()
   decanter.position.set(-0.5, 0.46, 0.42)
-  bar.add(decanter)
-  decanter.add(cyl(0.075, 0.09, 0.17, 16, glassMat, 0, 0.085, 0))
-  decanter.add(cyl(0.072, 0.086, 0.1, 16, whiskeyMat, 0, 0.052, 0))
-  decanter.add(cyl(0.032, 0.055, 0.06, 12, glassMat, 0, 0.2, 0))
-  const stopper = new THREE.Mesh(new THREE.SphereGeometry(0.042, 12, 10), glassMat)
+  bar.addChild(decanter)
+  decanter.addChild(cyl(0.075, 0.09, 0.17, 16, glassMat, 0, 0.085, 0))
+  decanter.addChild(cyl(0.072, 0.086, 0.1, 16, whiskeyMat, 0, 0.052, 0))
+  decanter.addChild(cyl(0.032, 0.055, 0.06, 12, glassMat, 0, 0.2, 0))
+  const stopper = mk(sphere(0.042, 12, 10), glassMat)
   stopper.position.y = 0.255
-  decanter.add(stopper)
+  decanter.addChild(stopper)
 
-  const tumbler = (x: number, y: number, z: number): THREE.Group => {
-    const g = new THREE.Group()
+  const tumbler = (x: number, y: number, z: number): Container3D => {
+    const g = new Container3D()
     g.position.set(x, y, z)
-    g.add(cyl(0.048, 0.042, 0.1, 16, glassMat, 0, 0.05, 0))
-    g.add(cyl(0.045, 0.04, 0.045, 16, whiskeyMat, 0, 0.025, 0))
-    g.add(cyl(0.044, 0.044, 0.012, 16, std({ color: 0x1a1220, roughness: 0.1 }), 0, 0.006, 0))
-    bar.add(g)
+    g.addChild(cyl(0.048, 0.042, 0.1, 16, glassMat, 0, 0.05, 0))
+    g.addChild(cyl(0.045, 0.04, 0.045, 16, whiskeyMat, 0, 0.025, 0))
+    g.addChild(cyl(0.044, 0.044, 0.012, 16, std({ color: 0x1a1220, roughness: 0.1 }), 0, 0.006, 0))
+    bar.addChild(g)
     return g
   }
   tumbler(-2.3, 0.605, 1.06)
   tumbler(0.66, 0.455, 0.36)
 
   // ── humidor cabinet (right wall) + an open humidor on the low table ────
-  const humidor = new THREE.Group()
-  scene.add(slot('slot-humidor', humidor))
-  const cab = new THREE.Group()
+  const humidor = new Container3D()
+  scene.addChild(slot('slot-humidor', humidor))
+  const cab = new Container3D()
   cab.position.set(HALF_W - 0.35, 0, -1.6)
   cab.rotation.y = -Math.PI / 2
-  humidor.add(cab)
+  humidor.addChild(cab)
   // carcass as an open case, so the glass doors show the cigars behind them
-  cab.add(box(1.5, 0.14, 0.55, darkWood, 0, 0.07, 0, 0.016)) // base
-  cab.add(box(1.5, 0.1, 0.55, darkWood, 0, 1.17, 0, 0.016)) // top rail
-  cab.add(box(1.58, 0.06, 0.62, trimWood, 0, 1.25, 0, 0.015)) // cornice
-  cab.add(box(0.09, 1.15, 0.55, darkWood, -0.7, 0.62, 0, 0.014))
-  cab.add(box(0.09, 1.15, 0.55, darkWood, 0.7, 0.62, 0, 0.014))
-  cab.add(box(1.5, 1.15, 0.05, std({ color: 0x2a1a12, roughness: 0.8 }), 0, 0.62, -0.26, 0.01))
-  cab.add(box(1.44, 0.04, 0.5, trimWood, 0, 0.62, 0, 0.01)) // interior shelf
+  cab.addChild(box(1.5, 0.14, 0.55, darkWood, 0, 0.07, 0, 0.016)) // base
+  cab.addChild(box(1.5, 0.1, 0.55, darkWood, 0, 1.17, 0, 0.016)) // top rail
+  cab.addChild(box(1.58, 0.06, 0.62, trimWood, 0, 1.25, 0, 0.015)) // cornice
+  cab.addChild(box(0.09, 1.15, 0.55, darkWood, -0.7, 0.62, 0, 0.014))
+  cab.addChild(box(0.09, 1.15, 0.55, darkWood, 0.7, 0.62, 0, 0.014))
+  cab.addChild(box(1.5, 1.15, 0.05, std({ color: 0x2a1a12, roughness: 0.8 }), 0, 0.62, -0.26, 0.01))
+  cab.addChild(box(1.44, 0.04, 0.5, trimWood, 0, 0.62, 0, 0.01)) // interior shelf
   // cigars on both interior shelves
   for (const y of [0.28, 0.83]) {
     for (let i = 0; i < 9; i++) {
       const c = cyl(0.016, 0.016, 0.34, 8, cigarBody, -0.6 + i * 0.15, y, -0.02)
       c.rotation.x = Math.PI / 2
-      cab.add(c)
+      cab.addChild(c)
     }
   }
-  const cabGlow = new THREE.PointLight(0xffc078, 2.6, 2.2, 2)
+  const cabGlow = point(0xffc078, 2.6, 2.2, 2)
   cabGlow.position.set(0, 1.05, -0.05)
-  cab.add(cabGlow)
+  cab.addChild(cabGlow)
   // glass doors: a slim frame around a pane, hung in front of the interior
   for (const s of [-1, 1]) {
     const doorMat = std({ color: 0x2a1a12, roughness: 0.5 })
     const bar = 0.06
-    cab.add(box(0.68, bar, 0.05, doorMat, s * 0.35, 1.09, 0.27, 0.008))
-    cab.add(box(0.68, bar, 0.05, doorMat, s * 0.35, 0.17, 0.27, 0.008))
-    cab.add(box(bar, 0.92, 0.05, doorMat, s * 0.35 - 0.31, 0.63, 0.27, 0.008))
-    cab.add(box(bar, 0.92, 0.05, doorMat, s * 0.35 + 0.31, 0.63, 0.27, 0.008))
-    const pane = new THREE.Mesh(new THREE.PlaneGeometry(0.58, 0.86), glassMat)
+    cab.addChild(box(0.68, bar, 0.05, doorMat, s * 0.35, 1.09, 0.27, 0.008))
+    cab.addChild(box(0.68, bar, 0.05, doorMat, s * 0.35, 0.17, 0.27, 0.008))
+    cab.addChild(box(bar, 0.92, 0.05, doorMat, s * 0.35 - 0.31, 0.63, 0.27, 0.008))
+    cab.addChild(box(bar, 0.92, 0.05, doorMat, s * 0.35 + 0.31, 0.63, 0.27, 0.008))
+    const pane = mk(plane(0.58, 0.86), glassMat)
     pane.position.set(s * 0.35, 0.63, 0.272)
-    cab.add(pane)
-    cab.add(cyl(0.011, 0.011, 0.1, 8, brassMat, s * 0.05, 0.63, 0.29))
+    cab.addChild(pane)
+    cab.addChild(cyl(0.011, 0.011, 0.1, 8, brassMat, s * 0.05, 0.63, 0.29))
   }
   // hygrometer, on the interior back panel
   const hygro = cyl(0.055, 0.055, 0.02, 20, brassMat, 0.52, 1.0, -0.22)
   hygro.rotation.x = Math.PI / 2
-  cab.add(hygro)
+  cab.addChild(hygro)
 
   // open humidor box on the low table
-  const openBox = new THREE.Group()
+  const openBox = new Container3D()
   openBox.position.set(-0.05, 0.455, 0.3)
   openBox.rotation.y = 0.18
-  humidor.add(openBox)
-  openBox.add(box(0.42, 0.1, 0.26, std({ color: 0x4a2f1c, roughness: 0.45 }), 0, 0.05, 0, 0.012))
-  openBox.add(box(0.38, 0.06, 0.22, std({ color: 0x2a1a12, roughness: 0.8 }), 0, 0.075, 0, 0.008))
+  humidor.addChild(openBox)
+  openBox.addChild(box(0.42, 0.1, 0.26, std({ color: 0x4a2f1c, roughness: 0.45 }), 0, 0.05, 0, 0.012))
+  openBox.addChild(box(0.38, 0.06, 0.22, std({ color: 0x2a1a12, roughness: 0.8 }), 0, 0.075, 0, 0.008))
   const lid = box(0.42, 0.04, 0.26, std({ color: 0x4a2f1c, roughness: 0.45 }), 0, 0.16, -0.16, 0.012)
   lid.rotation.x = -1.15
-  openBox.add(lid)
+  openBox.addChild(lid)
   for (let i = 0; i < 5; i++) {
     const c = cyl(0.017, 0.017, 0.22, 10, cigarBody, -0.14 + i * 0.07, 0.1, 0)
     c.rotation.x = Math.PI / 2
-    openBox.add(c)
+    openBox.addChild(c)
   }
 
   // ── bookshelf + keepsakes (left wall, by the fire) ─────────────────────
-  const shelf = new THREE.Group()
+  const shelf = new Container3D()
   shelf.position.set(-HALF_W + 0.3, 0, -3.0)
   shelf.rotation.y = Math.PI / 2
-  scene.add(slot('slot-shelf', shelf))
+  scene.addChild(slot('slot-shelf', shelf))
   // An open case: back panel, two sides, top and bottom. A solid carcass
   // would swallow the books that make it worth having.
-  shelf.add(box(1.9, 2.3, 0.06, darkWood, 0, 1.15, -0.18, 0.01))
-  shelf.add(box(0.08, 2.3, 0.42, darkWood, -0.91, 1.15, 0, 0.012))
-  shelf.add(box(0.08, 2.3, 0.42, darkWood, 0.91, 1.15, 0, 0.012))
-  shelf.add(box(1.9, 0.1, 0.44, trimWood, 0, 2.3, 0, 0.014))
-  shelf.add(box(1.9, 0.12, 0.44, darkWood, 0, 0.06, 0, 0.014))
+  shelf.addChild(box(1.9, 2.3, 0.06, darkWood, 0, 1.15, -0.18, 0.01))
+  shelf.addChild(box(0.08, 2.3, 0.42, darkWood, -0.91, 1.15, 0, 0.012))
+  shelf.addChild(box(0.08, 2.3, 0.42, darkWood, 0.91, 1.15, 0, 0.012))
+  shelf.addChild(box(1.9, 0.1, 0.44, trimWood, 0, 2.3, 0, 0.014))
+  shelf.addChild(box(1.9, 0.12, 0.44, darkWood, 0, 0.06, 0, 0.014))
   const shelfR = rng(55)
   for (let level = 0; level < 4; level++) {
     const y = 0.34 + level * 0.55
-    shelf.add(box(1.8, 0.05, 0.38, trimWood, 0, y, 0.02))
+    shelf.addChild(box(1.8, 0.05, 0.38, trimWood, 0, y, 0.02))
     let x = -0.82
     while (x < 0.78) {
       const bw = 0.035 + shelfR() * 0.045
@@ -2390,22 +2768,22 @@ function buildRoom(art: Record<string, string | undefined>): Room {
       const color = shade < 0.3 ? 0x5b1f21 : shade < 0.55 ? 0x2c3d52 : shade < 0.78 ? 0x3a2a1c : 0x25402e
       const b = box(bw, bh, 0.26, std({ color, roughness: 0.9 }), x + bw / 2, y + 0.025 + bh / 2, 0.02, 0.004)
       if (shelfR() > 0.86) b.rotation.z = 0.22
-      shelf.add(b)
+      shelf.addChild(b)
       x += bw + 0.006
     }
   }
   // trophies on the top shelf — what the journal earns you
   const trophy = (x: number, s: number): void => {
-    const g = new THREE.Group()
+    const g = new Container3D()
     g.position.set(x, 2.28, 0.02)
-    g.scale.setScalar(s)
-    g.add(cyl(0.06, 0.075, 0.04, 12, darkWood, 0, 0.02, 0))
-    g.add(cyl(0.02, 0.02, 0.07, 10, brassMat, 0, 0.075, 0))
-    const cup = new THREE.Mesh(new THREE.SphereGeometry(0.055, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), brassMat)
+    g.scale.set(s)
+    g.addChild(cyl(0.06, 0.075, 0.04, 12, darkWood, 0, 0.02, 0))
+    g.addChild(cyl(0.02, 0.02, 0.07, 10, brassMat, 0, 0.075, 0))
+    const cup = mk(sphere(0.055, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), brassMat)
     cup.rotation.x = Math.PI
     cup.position.y = 0.14
-    g.add(cup)
-    shelf.add(g)
+    g.addChild(cup)
+    shelf.addChild(g)
   }
   trophy(-0.55, 1)
   trophy(-0.2, 0.8)
@@ -2414,10 +2792,10 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   const clock = cyl(0.19, 0.19, 0.07, 20, trimWood, 0, 1.86, -HALF_D + 0.33)
   clock.rotation.x = Math.PI / 2
   slot('slot-shelf', clock)
-  scene.add(clock)
-  const clockFace = new THREE.Mesh(
-    new THREE.CircleGeometry(0.155, 24),
-    new THREE.MeshBasicMaterial({
+  scene.addChild(clock)
+  const clockFace = mk(
+    circle(0.155, 24),
+    basic({
       map: track(paint(128, 128, (ctx, w, h) => {
         ctx.fillStyle = '#f0e6d6'
         ctx.beginPath()
@@ -2443,113 +2821,119 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     }),
   )
   clockFace.position.set(0, 1.86, -HALF_D + 0.375)
-  scene.add(slot('slot-shelf', clockFace))
+  scene.addChild(slot('slot-shelf', clockFace))
   for (const s of [-1, 1]) {
-    const stick = new THREE.Group()
+    const stick = new Container3D()
     stick.position.set(s * 1.35, 1.7, -HALF_D + 0.35)
-    scene.add(slot('slot-shelf', stick))
-    stick.add(cyl(0.05, 0.06, 0.03, 12, brassMat, 0, 0.015, 0))
-    stick.add(cyl(0.016, 0.016, 0.16, 10, brassMat, 0, 0.11, 0))
-    stick.add(cyl(0.024, 0.024, 0.12, 10, std({ color: 0xf0e6d6, roughness: 0.9 }), 0, 0.25, 0))
-    const wick = new THREE.Mesh(
-      new THREE.SphereGeometry(0.016, 8, 8),
-      new THREE.MeshBasicMaterial({ color: 0xffd08a, transparent: true, opacity: 0.9 }),
+    scene.addChild(slot('slot-shelf', stick))
+    stick.addChild(cyl(0.05, 0.06, 0.03, 12, brassMat, 0, 0.015, 0))
+    stick.addChild(cyl(0.016, 0.016, 0.16, 10, brassMat, 0, 0.11, 0))
+    stick.addChild(cyl(0.024, 0.024, 0.12, 10, std({ color: 0xf0e6d6, roughness: 0.9 }), 0, 0.25, 0))
+    const wick = mk(
+      sphere(0.016, 8, 8),
+      basic({ color: 0xffd08a, transparent: true, opacity: 0.9 }),
     )
     wick.position.y = 0.325
     wick.scale.y = 1.9
-    stick.add(wick)
-    const cl = new THREE.PointLight(0xffb060, 0.9, 1.6, 2)
+    stick.addChild(wick)
+    const cl = point(0xffb060, 0.9, 1.6, 2)
     cl.position.y = 0.34
-    stick.add(cl)
+    stick.addChild(cl)
   }
 
   // ── floor lamp ─────────────────────────────────────────────────────────
-  const lamp = new THREE.Group()
+  const lamp = new Container3D()
   lamp.position.set(-2.75, 0, 0.35)
-  scene.add(slot('slot-lamp', lamp))
-  lamp.add(cyl(0.2, 0.24, 0.04, 20, darkWood, 0, 0.02, 0))
-  lamp.add(cyl(0.028, 0.028, 1.55, 12, brassMat, 0, 0.8, 0))
+  scene.addChild(slot('slot-lamp', lamp))
+  lamp.addChild(cyl(0.2, 0.24, 0.04, 20, darkWood, 0, 0.02, 0))
+  lamp.addChild(cyl(0.028, 0.028, 1.55, 12, brassMat, 0, 0.8, 0))
   const shadeMat = std({
     color: 0xe8cfa0, emissive: 0xffbe72, emissiveIntensity: 0.9,
-    roughness: 0.9, side: THREE.DoubleSide, transparent: true, opacity: 0.94,
+    roughness: 0.9, side: DOUBLE, transparent: true, opacity: 0.94,
   })
-  lamp.add(cyl(0.2, 0.31, 0.34, 24, shadeMat, 0, 1.7, 0))
-  const lampLight = new THREE.PointLight(0xffc98a, 14, 7.5, 2)
+  lamp.addChild(cyl(0.2, 0.31, 0.34, 24, shadeMat, 0, 1.7, 0))
+  // The lamp's light, split as the fire's is: a downward spot that casts
+  // (Pixi's point lights cannot), and a weaker point light for the spill up
+  // through the shade and out to the sides.
+  const lampLight = new SpotLight({
+    color: 0xffc98a, intensity: 12, range: 7.5, coneAngle: 72, penumbra: 1, castShadow: true,
+  })
   lampLight.position.set(0, 1.62, 0)
-  lampLight.castShadow = true
-  lampLight.shadow.mapSize.set(1024, 1024)
-  lampLight.shadow.bias = -0.002
-  lamp.add(lampLight)
+  lamp.addChild(lampLight)
+  lampLight.lookAt({ x: -2.75, y: 0, z: 0.55 })
+  const lampSpill = point(0xffc98a, 5, 6)
+  lampSpill.position.set(0, 1.66, 0)
+  lamp.addChild(lampSpill)
 
   // ── record console + spinning record ───────────────────────────────────
-  const records = new THREE.Group()
+  const records = new Container3D()
   records.position.set(-HALF_W + 0.32, 0, 2.6)
   records.rotation.y = Math.PI / 2
-  scene.add(slot('slot-records', records))
-  records.add(box(1.7, 0.62, 0.5, trimWood, 0, 0.62, 0, 0.02))
+  scene.addChild(slot('slot-records', records))
+  records.addChild(box(1.7, 0.62, 0.5, trimWood, 0, 0.62, 0, 0.02))
   for (const [lx, lz] of [[-0.72, 0.18], [0.72, 0.18], [-0.72, -0.18], [0.72, -0.18]]) {
-    records.add(cyl(0.025, 0.03, 0.32, 8, darkWood, lx, 0.16, lz))
+    records.addChild(cyl(0.025, 0.03, 0.32, 8, darkWood, lx, 0.16, lz))
   }
-  records.add(box(1.62, 0.03, 0.44, std({ color: 0x14101a, roughness: 0.3 }), 0, 0.94, 0, 0.008))
+  records.addChild(box(1.62, 0.03, 0.44, std({ color: 0x14101a, roughness: 0.3 }), 0, 0.94, 0, 0.008))
   const platter = cyl(0.21, 0.21, 0.02, 32, std({ color: 0x2a2230, roughness: 0.5, metalness: 0.3 }), -0.36, 0.96, 0)
-  records.add(platter)
+  records.addChild(platter)
   const disc = cyl(0.2, 0.2, 0.008, 40, std({ color: 0x0a0810, roughness: 0.35 }), -0.36, 0.972, 0)
-  records.add(disc)
+  records.addChild(disc)
   const label = cyl(0.07, 0.07, 0.009, 24, std({ color: C.ember, roughness: 0.8 }), -0.36, 0.974, 0)
-  records.add(label)
+  records.addChild(label)
   const tonearm = cyl(0.008, 0.008, 0.3, 8, brassMat, -0.12, 1.0, -0.06)
   tonearm.rotation.set(0, 0.55, Math.PI / 2)
-  records.add(tonearm)
-  records.add(cyl(0.03, 0.035, 0.03, 12, brassMat, 0.0, 0.99, -0.14))
+  records.addChild(tonearm)
+  records.addChild(cyl(0.03, 0.035, 0.03, 12, brassMat, 0.0, 0.99, -0.14))
   // sleeves leaning in the console
   for (let i = 0; i < 6; i++) {
     const sleeve = box(0.02, 0.4, 0.4, std({ color: [0x5b1f21, 0x2c3d52, 0x3a2a1c, 0x25402e, 0x4a2b21, 0x2a2230][i], roughness: 0.9 }), 0.35 + i * 0.03, 0.5, 0, 0.004)
     sleeve.rotation.z = 0.08
-    records.add(sleeve)
+    records.addChild(sleeve)
   }
 
   // ── plant ──────────────────────────────────────────────────────────────
-  const plant = new THREE.Group()
+  const plant = new Container3D()
   plant.position.set(HALF_W - 0.75, 0, 3.1)
-  scene.add(slot('slot-plant', plant))
-  plant.add(cyl(0.22, 0.16, 0.34, 16, std({ color: 0x6b4326, roughness: 0.9 }), 0, 0.17, 0))
-  plant.add(cyl(0.235, 0.235, 0.04, 16, std({ color: 0x8a5a34, roughness: 0.9 }), 0, 0.35, 0))
-  const leafMat = std({ color: C.green, roughness: 0.85, side: THREE.DoubleSide })
+  scene.addChild(slot('slot-plant', plant))
+  plant.addChild(cyl(0.22, 0.16, 0.34, 16, std({ color: 0x6b4326, roughness: 0.9 }), 0, 0.17, 0))
+  plant.addChild(cyl(0.235, 0.235, 0.04, 16, std({ color: 0x8a5a34, roughness: 0.9 }), 0, 0.35, 0))
+  const leafMat = std({ color: C.green, roughness: 0.85, side: DOUBLE })
   const pr = rng(19)
   for (let i = 0; i < 14; i++) {
-    const leaf = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.52), leafMat)
+    const leaf = mk(plane(0.16, 0.52), leafMat)
     const a = (i / 14) * Math.PI * 2
     const lean = 0.4 + pr() * 0.5
     leaf.position.set(Math.cos(a) * 0.18 * lean, 0.62 + pr() * 0.4, Math.sin(a) * 0.18 * lean)
     leaf.rotation.set(lean * 0.7, -a, Math.sin(a) * lean * 0.5)
     leaf.castShadow = true
-    plant.add(leaf)
+    plant.addChild(leaf)
   }
 
   // ── the lounge cat, asleep on the rug ──────────────────────────────────
-  const cat = new THREE.Group()
+  const cat = new Container3D()
   cat.position.set(0.55, 0.03, 1.65)
   cat.rotation.y = -0.5
-  scene.add(slot('slot-cat', cat))
+  scene.addChild(slot('slot-cat', cat))
   const furMat = std({ color: 0x3d3138, roughness: 1 })
-  const bodyC = new THREE.Mesh(new THREE.SphereGeometry(0.17, 16, 12), furMat)
+  const bodyC = mk(sphere(0.17, 16, 12), furMat)
   bodyC.scale.set(1.5, 0.75, 1)
   bodyC.position.y = 0.12
   bodyC.castShadow = true
-  cat.add(bodyC)
-  const headC = new THREE.Mesh(new THREE.SphereGeometry(0.1, 14, 12), furMat)
+  cat.addChild(bodyC)
+  const headC = mk(sphere(0.1, 14, 12), furMat)
   headC.position.set(-0.2, 0.15, 0.04)
   headC.castShadow = true
-  cat.add(headC)
+  cat.addChild(headC)
   for (const s of [-1, 1]) {
-    const ear = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.06, 4), furMat)
+    const ear = mk(cone(0.035, 0.06, 4), furMat)
     ear.position.set(-0.21, 0.23, 0.04 + s * 0.055)
-    cat.add(ear)
+    cat.addChild(ear)
   }
-  const tail = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.022, 8, 20, Math.PI * 1.4), furMat)
+  const tail = mk(torus(0.13, 0.022, 8, 20, Math.PI * 1.4), furMat)
   tail.position.set(0.2, 0.08, 0.06)
   tail.rotation.set(Math.PI / 2, 0, 0.6)
-  cat.add(tail)
+  cat.addChild(tail)
 
   // ── EL MERCADO — the props you buy with Embers ─────────────────────────
   // Each one is a slot like any other, so Decorate drives it with the same
@@ -2558,57 +2942,57 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   // the room can never drift apart.
 
   // the drinks cart — brass trolley, bottles, ice bucket
-  const cart = new THREE.Group()
+  const cart = new Container3D()
   // placed inside the arc the camera presets actually frame — a bought thing
   // you have to go looking for is a bought thing nobody sees
   cart.position.set(-3.3, 0, 0.75)
   cart.rotation.y = 0.42
-  scene.add(slot(SLOT.cart, cart))
+  scene.addChild(slot(SLOT.cart, cart))
   const cartMetal = std({ color: C.brass, roughness: 0.34, metalness: 0.8 })
   for (const [cx, cz] of [[-0.3, -0.16], [0.3, -0.16], [-0.3, 0.16], [0.3, 0.16]]) {
-    cart.add(cyl(0.02, 0.02, 0.72, 10, cartMetal, cx, 0.36, cz))
+    cart.addChild(cyl(0.02, 0.02, 0.72, 10, cartMetal, cx, 0.36, cz))
     const wheel = cyl(0.045, 0.045, 0.022, 14, std({ color: 0x1a1218, roughness: 0.8 }), cx, 0.045, cz)
     wheel.rotation.z = Math.PI / 2
-    cart.add(wheel)
+    cart.addChild(wheel)
   }
-  cart.add(box(0.72, 0.022, 0.42, trimWood, 0, 0.34, 0, 0.006))
-  cart.add(box(0.72, 0.022, 0.42, trimWood, 0, 0.72, 0, 0.006))
-  for (const s of [-1, 1]) cart.add(cyl(0.014, 0.014, 0.4, 8, cartMetal, s * 0.38, 0.86, 0))
+  cart.addChild(box(0.72, 0.022, 0.42, trimWood, 0, 0.34, 0, 0.006))
+  cart.addChild(box(0.72, 0.022, 0.42, trimWood, 0, 0.72, 0, 0.006))
+  for (const s of [-1, 1]) cart.addChild(cyl(0.014, 0.014, 0.4, 8, cartMetal, s * 0.38, 0.86, 0))
   const pushBar = cyl(0.014, 0.014, 0.79, 8, cartMetal, 0, 1.06, 0)
   pushBar.rotation.z = Math.PI / 2
-  cart.add(pushBar)
+  cart.addChild(pushBar)
   const bottle = (x: number, z: number, h: number, tint: number): void => {
-    cart.add(cyl(0.038, 0.042, h, 14, glassMat, x, 0.73 + h / 2, z))
-    cart.add(cyl(0.036, 0.04, h * 0.62, 14, std({ color: tint, roughness: 0.2, transparent: true, opacity: 0.9 }), x, 0.73 + h * 0.31, z))
-    cart.add(cyl(0.014, 0.018, 0.09, 10, glassMat, x, 0.73 + h + 0.045, z))
+    cart.addChild(cyl(0.038, 0.042, h, 14, glassMat, x, 0.73 + h / 2, z))
+    cart.addChild(cyl(0.036, 0.04, h * 0.62, 14, std({ color: tint, roughness: 0.2, transparent: true, opacity: 0.9 }), x, 0.73 + h * 0.31, z))
+    cart.addChild(cyl(0.014, 0.018, 0.09, 10, glassMat, x, 0.73 + h + 0.045, z))
   }
   bottle(-0.2, -0.06, 0.26, 0x8a4a1e)
   bottle(-0.05, 0.05, 0.3, 0x5c2f14)
   bottle(0.1, -0.04, 0.24, 0xc27a2c)
   const bucket = cyl(0.1, 0.085, 0.13, 18, cartMetal, 0.26, 0.795, 0.06)
-  cart.add(bucket)
+  cart.addChild(bucket)
   for (let i = 0; i < 5; i++) {
     const ice = box(0.035, 0.035, 0.035, glassMat, 0.26 + (i % 3 - 1) * 0.035, 0.855, 0.06 + (i % 2 - 0.5) * 0.045, 0.004)
     ice.rotation.set(i, i * 0.7, i * 0.3)
-    cart.add(ice)
+    cart.addChild(ice)
   }
-  cart.add(cyl(0.045, 0.04, 0.09, 16, glassMat, -0.24, 0.385, 0.1))
-  cart.add(cyl(0.045, 0.04, 0.09, 16, glassMat, -0.12, 0.385, 0.14))
+  cart.addChild(cyl(0.045, 0.04, 0.09, 16, glassMat, -0.24, 0.385, 0.1))
+  cart.addChild(cyl(0.045, 0.04, 0.09, 16, glassMat, -0.12, 0.385, 0.14))
 
   // the chess table — a game left mid-attack
-  const chess = new THREE.Group()
+  const chess = new Container3D()
   chess.position.set(-2.95, 0, -2.3)
   chess.rotation.y = 0.55
-  scene.add(slot(SLOT.chess, chess))
-  chess.add(cyl(0.07, 0.11, 0.56, 12, darkWood, 0, 0.28, 0))
-  chess.add(cyl(0.28, 0.32, 0.04, 20, darkWood, 0, 0.03, 0))
-  chess.add(box(0.62, 0.05, 0.62, trimWood, 0, 0.585, 0, 0.008))
+  scene.addChild(slot(SLOT.chess, chess))
+  chess.addChild(cyl(0.07, 0.11, 0.56, 12, darkWood, 0, 0.28, 0))
+  chess.addChild(cyl(0.28, 0.32, 0.04, 20, darkWood, 0, 0.03, 0))
+  chess.addChild(box(0.62, 0.05, 0.62, trimWood, 0, 0.585, 0, 0.008))
   const lightSq = std({ color: 0xd9c39a, roughness: 0.5 })
   const darkSq = std({ color: 0x2a1a16, roughness: 0.5 })
   const SQ = 0.062
   for (let r = 0; r < 8; r++) {
     for (let c = 0; c < 8; c++) {
-      chess.add(box(SQ, 0.008, SQ, (r + c) % 2 ? darkSq : lightSq,
+      chess.addChild(box(SQ, 0.008, SQ, (r + c) % 2 ? darkSq : lightSq,
         (c - 3.5) * SQ, 0.614, (r - 3.5) * SQ, 0))
     }
   }
@@ -2624,47 +3008,47 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   ]
   for (const [r, c, h, white] of MEN) {
     const mat = white ? paleMan : darkMan
-    const man = new THREE.Group()
+    const man = new Container3D()
     man.position.set((c - 3.5) * SQ, 0.618, (r - 3.5) * SQ)
-    chess.add(man)
-    man.add(cyl(0.017, 0.022, 0.012, 10, mat, 0, 0.006, 0))
-    man.add(cyl(0.009, 0.015, h, 10, mat, 0, 0.012 + h / 2, 0))
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.014, 10, 8), mat)
+    chess.addChild(man)
+    man.addChild(cyl(0.017, 0.022, 0.012, 10, mat, 0, 0.006, 0))
+    man.addChild(cyl(0.009, 0.015, h, 10, mat, 0, 0.012 + h / 2, 0))
+    const cap = mk(sphere(0.014, 10, 8), mat)
     cap.position.y = 0.014 + h
-    man.add(cap)
+    man.addChild(cap)
   }
   // two taken men resting on the rail, and the stools
-  chess.add(cyl(0.015, 0.02, 0.05, 10, darkMan, 0.26, 0.635, 0.24))
-  chess.add(cyl(0.015, 0.02, 0.05, 10, paleMan, 0.26, 0.635, 0.16))
+  chess.addChild(cyl(0.015, 0.02, 0.05, 10, darkMan, 0.26, 0.635, 0.24))
+  chess.addChild(cyl(0.015, 0.02, 0.05, 10, paleMan, 0.26, 0.635, 0.16))
   for (const s of [-1, 1]) {
-    const stool = new THREE.Group()
+    const stool = new Container3D()
     stool.position.set(s * 0.62, 0, s * 0.12)
-    chess.add(stool)
-    stool.add(cyl(0.16, 0.16, 0.06, 16, leatherMat, 0, 0.44, 0))
+    chess.addChild(stool)
+    stool.addChild(cyl(0.16, 0.16, 0.06, 16, leatherMat, 0, 0.44, 0))
     for (let i = 0; i < 3; i++) {
       const leg = cyl(0.014, 0.018, 0.42, 8, darkWood,
         Math.cos((i / 3) * Math.PI * 2) * 0.1, 0.21, Math.sin((i / 3) * Math.PI * 2) * 0.1)
       leg.rotation.set(Math.sin((i / 3) * Math.PI * 2) * 0.09, 0, -Math.cos((i / 3) * Math.PI * 2) * 0.09)
-      stool.add(leg)
+      stool.addChild(leg)
     }
   }
 
   // the globe bar — a meridian sphere that opens at the equator
-  const globe = new THREE.Group()
+  const globe = new Container3D()
   globe.position.set(3.45, 0, 1.45)
   globe.rotation.y = -0.55
-  scene.add(slot(SLOT.globe, globe))
+  scene.addChild(slot(SLOT.globe, globe))
   for (let i = 0; i < 3; i++) {
     const leg = cyl(0.018, 0.026, 0.66, 8, darkWood,
       Math.cos((i / 3) * Math.PI * 2) * 0.16, 0.33, Math.sin((i / 3) * Math.PI * 2) * 0.16)
     leg.rotation.set(Math.sin((i / 3) * Math.PI * 2) * 0.2, 0, -Math.cos((i / 3) * Math.PI * 2) * 0.2)
-    globe.add(leg)
+    globe.addChild(leg)
   }
-  globe.add(cyl(0.19, 0.19, 0.02, 18, darkWood, 0, 0.66, 0))
-  const meridian = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.014, 8, 28), brassMat)
+  globe.addChild(cyl(0.19, 0.19, 0.02, 18, darkWood, 0, 0.66, 0))
+  const meridian = mk(torus(0.28, 0.014, 8, 28), brassMat)
   meridian.position.y = 0.94
   meridian.rotation.y = Math.PI / 2
-  globe.add(meridian)
+  globe.addChild(meridian)
   // lower half: the bowl, with bottles standing in it. The continents are
   // PAINTED — patches of sphere geometry floating at the lid's radius read as
   // loose crescents, not as land.
@@ -2696,115 +3080,116 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     grain(ctx, w, h, 12, 5)
   }))
   const sphereMat = std({ map: globeTex, roughness: 0.72, metalness: 0.06 })
-  const bowlG = new THREE.Mesh(new THREE.SphereGeometry(0.26, 24, 14, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), sphereMat)
+  const bowlG = mk(sphere(0.26, 24, 14, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), sphereMat)
   bowlG.position.y = 0.94
   bowlG.castShadow = true
-  globe.add(bowlG)
-  globe.add(cyl(0.255, 0.255, 0.012, 24, std({ color: C.leatherDark, roughness: 0.9 }), 0, 0.945, 0))
+  globe.addChild(bowlG)
+  globe.addChild(cyl(0.255, 0.255, 0.012, 24, std({ color: C.leatherDark, roughness: 0.9 }), 0, 0.945, 0))
   for (const [bx, bz, bh] of [[-0.09, 0.03, 0.2], [0.02, -0.07, 0.24], [0.09, 0.05, 0.18]] as const) {
-    globe.add(cyl(0.032, 0.036, bh, 12, glassMat, bx, 0.95 + bh / 2, bz))
-    globe.add(cyl(0.03, 0.034, bh * 0.6, 12, whiskeyMat, bx, 0.95 + bh * 0.3, bz))
+    globe.addChild(cyl(0.032, 0.036, bh, 12, glassMat, bx, 0.95 + bh / 2, bz))
+    globe.addChild(cyl(0.03, 0.034, bh * 0.6, 12, whiskeyMat, bx, 0.95 + bh * 0.3, bz))
   }
   // upper half: the lid, hinged open and tipped back
   // hinged at the BACK OF THE RIM and tipped only a little: swing it wide and
   // the dome reads as a crescent floating free of the globe
-  const globeLid = new THREE.Group()
+  const globeLid = new Container3D()
   globeLid.position.set(0, 0.95, -0.26)
   globeLid.rotation.x = -0.62
-  globe.add(globeLid)
-  const lidG = new THREE.Mesh(new THREE.SphereGeometry(0.26, 24, 14, 0, Math.PI * 2, 0, Math.PI / 2), sphereMat)
+  globe.addChild(globeLid)
+  const lidG = mk(sphere(0.26, 24, 14, 0, Math.PI * 2, 0, Math.PI / 2), sphereMat)
   lidG.position.z = 0.26
   lidG.castShadow = true
-  globeLid.add(lidG)
+  globeLid.addChild(lidG)
   // a brass catch on the rim, so the open lid reads as hinged and not adrift
   const catchPin = cyl(0.012, 0.012, 0.05, 8, brassMat, 0, 0.02, 0.26)
   catchPin.rotation.z = Math.PI / 2
-  globeLid.add(catchPin)
+  globeLid.addChild(catchPin)
 
   // the victrola — brass horn, wound by hand
-  const victrola = new THREE.Group()
+  const victrola = new Container3D()
   victrola.position.set(2.95, 0, -3.15)
   victrola.rotation.y = -0.5
-  scene.add(slot(SLOT.victrola, victrola))
-  victrola.add(box(0.52, 0.46, 0.46, trimWood, 0, 0.66, 0, 0.02))
+  scene.addChild(slot(SLOT.victrola, victrola))
+  victrola.addChild(box(0.52, 0.46, 0.46, trimWood, 0, 0.66, 0, 0.02))
   for (const [lx, lz] of [[-0.2, -0.17], [0.2, -0.17], [-0.2, 0.17], [0.2, 0.17]]) {
-    victrola.add(cyl(0.022, 0.028, 0.44, 8, darkWood, lx, 0.22, lz))
+    victrola.addChild(cyl(0.022, 0.028, 0.44, 8, darkWood, lx, 0.22, lz))
   }
-  victrola.add(box(0.56, 0.03, 0.5, darkWood, 0, 0.9, 0, 0.008))
+  victrola.addChild(box(0.56, 0.03, 0.5, darkWood, 0, 0.9, 0, 0.008))
   const vplatter = cyl(0.15, 0.15, 0.016, 28, std({ color: 0x1d1620, roughness: 0.45, metalness: 0.25 }), 0, 0.924, 0)
-  victrola.add(vplatter)
-  victrola.add(cyl(0.145, 0.145, 0.006, 32, std({ color: 0x0a0810, roughness: 0.35 }), 0, 0.935, 0))
-  victrola.add(cyl(0.05, 0.05, 0.007, 20, std({ color: C.ember, roughness: 0.8 }), 0, 0.938, 0))
+  victrola.addChild(vplatter)
+  victrola.addChild(cyl(0.145, 0.145, 0.006, 32, std({ color: 0x0a0810, roughness: 0.35 }), 0, 0.935, 0))
+  victrola.addChild(cyl(0.05, 0.05, 0.007, 20, std({ color: C.ember, roughness: 0.8 }), 0, 0.938, 0))
   // the horn — a cone opening away from the wall, on a curved brass neck
-  const horn = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.05, 0.5, 22, 1, true), std({
-    color: C.brassBright, roughness: 0.26, metalness: 0.88, side: THREE.DoubleSide,
+  const horn = mk(cylinder(0.34, 0.05, 0.5, 22, 1, true), std({
+    color: C.brassBright, roughness: 0.26, metalness: 0.88, side: DOUBLE,
   }))
   horn.position.set(0, 1.32, 0.14)
   horn.rotation.set(-0.95, 0, 0)
   horn.castShadow = true
-  victrola.add(horn)
-  const neck = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.018, 8, 18, Math.PI * 0.8), brassMat)
+  victrola.addChild(horn)
+  const neck = mk(torus(0.16, 0.018, 8, 18, Math.PI * 0.8), brassMat)
   neck.position.set(0, 1.03, -0.02)
   neck.rotation.set(Math.PI / 2, 0, -0.4)
-  victrola.add(neck)
-  victrola.add(cyl(0.012, 0.012, 0.16, 8, brassMat, 0.2, 1.0, 0.02))
+  victrola.addChild(neck)
+  victrola.addChild(cyl(0.012, 0.012, 0.16, 8, brassMat, 0.2, 1.0, 0.02))
   // the crank
-  const crank = new THREE.Group()
+  const crank = new Container3D()
   crank.position.set(0.29, 0.7, 0.1)
-  victrola.add(crank)
+  victrola.addChild(crank)
   const crankArm = cyl(0.01, 0.01, 0.14, 8, brassMat, 0, 0, 0)
   crankArm.rotation.z = Math.PI / 2
-  crank.add(crankArm)
-  crank.add(cyl(0.012, 0.012, 0.06, 8, darkWood, 0.07, -0.03, 0))
+  crank.addChild(crankArm)
+  crank.addChild(cyl(0.012, 0.012, 0.06, 8, darkWood, 0.07, -0.03, 0))
   // a stack of shellac by its feet
   for (let i = 0; i < 4; i++) {
-    victrola.add(box(0.3, 0.012, 0.3, std({ color: [0x3a2a1c, 0x25402e, 0x4a2b21, 0x2c3d52][i], roughness: 0.9 }),
+    victrola.addChild(box(0.3, 0.012, 0.3, std({ color: [0x3a2a1c, 0x25402e, 0x4a2b21, 0x2c3d52][i], roughness: 0.9 }),
       0.42, 0.02 + i * 0.014, 0.28, 0.004))
   }
 
   // the band wall — every band you kept, pinned behind glass (back wall,
   // right of the chimney breast)
-  const bands = new THREE.Group()
+  const bands = new Container3D()
   bands.position.set(4.05, 1.78, -HALF_D + 0.07)
-  scene.add(slot(SLOT.bands, bands))
-  bands.add(box(1.15, 1.45, 0.06, trimWood, 0, 0, -0.02, 0.01))
-  bands.add(box(1.0, 1.3, 0.02, std({ color: 0x120d14, roughness: 0.95 }), 0, 0, 0.015, 0))
+  scene.addChild(slot(SLOT.bands, bands))
+  bands.addChild(box(1.15, 1.45, 0.06, trimWood, 0, 0, -0.02, 0.01))
+  bands.addChild(box(1.0, 1.3, 0.02, std({ color: 0x120d14, roughness: 0.95 }), 0, 0, 0.015, 0))
   const br = rng(731)
   const BAND_COLORS = [0xc8975a, 0xb3542f, 0x8a1f24, 0x2c3d52, 0x25402e, 0xe0b578, 0x6b4326]
   for (let row = 0; row < 5; row++) {
     for (let col = 0; col < 4; col++) {
-      const bandG = new THREE.Group()
+      const bandG = new Container3D()
       bandG.position.set((col - 1.5) * 0.23, (2 - row) * 0.25 + (br() - 0.5) * 0.02, 0.028)
       bandG.rotation.z = (br() - 0.5) * 0.12
-      bands.add(bandG)
+      bands.addChild(bandG)
       const face = BAND_COLORS[Math.floor(br() * BAND_COLORS.length)]
-      bandG.add(box(0.17, 0.075, 0.008, std({ color: face, roughness: 0.55, metalness: 0.25 }), 0, 0, 0, 0.004))
-      bandG.add(box(0.17, 0.012, 0.009, std({ color: C.brassBright, roughness: 0.3, metalness: 0.7 }), 0, 0.028, 0.001, 0))
-      bandG.add(box(0.17, 0.012, 0.009, std({ color: C.brassBright, roughness: 0.3, metalness: 0.7 }), 0, -0.028, 0.001, 0))
+      bandG.addChild(box(0.17, 0.075, 0.008, std({ color: face, roughness: 0.55, metalness: 0.25 }), 0, 0, 0, 0.004))
+      bandG.addChild(box(0.17, 0.012, 0.009, std({ color: C.brassBright, roughness: 0.3, metalness: 0.7 }), 0, 0.028, 0.001, 0))
+      bandG.addChild(box(0.17, 0.012, 0.009, std({ color: C.brassBright, roughness: 0.3, metalness: 0.7 }), 0, -0.028, 0.001, 0))
       const seal = cyl(0.018, 0.018, 0.006, 12, std({ color: C.cream, roughness: 0.8 }), 0, 0, 0.006)
       seal.rotation.x = Math.PI / 2
-      bandG.add(seal)
+      bandG.addChild(seal)
     }
   }
   // glass over the whole thing, and a picture light above
-  bands.add(box(1.0, 1.3, 0.006, glassMat, 0, 0, 0.045, 0))
-  // light + target are CHILDREN of the frame group, so both are in its local
-  // space — world coordinates here would throw the beam across the room
-  const bandLight = new THREE.SpotLight(0xffd9a0, 6, 3.2, 0.7, 0.6, 2)
+  bands.addChild(box(1.0, 1.3, 0.006, glassMat, 0, 0, 0.045, 0))
+  // The light is a CHILD of the frame group, so it sits in the group's local
+  // space. It has no target in Pixi: it shines down its own −Z, aimed once
+  // with lookAt at a WORLD point — the group-local (0, −0.2, 0) taken out to
+  // world space. three's 0.7 rad cone is 40° here (Pixi counts degrees).
+  const bandLight = new SpotLight({ color: 0xffd9a0, intensity: 6, range: 3.2, coneAngle: (0.7 * 180) / Math.PI, penumbra: 0.6 })
   bandLight.position.set(0, 0.94, 0.5)
-  bandLight.target.position.set(0, -0.2, 0)
-  bands.add(bandLight)
-  bands.add(bandLight.target)
-  bands.add(cyl(0.035, 0.035, 0.3, 10, brassMat, 0, 0.92, 0.42))
+  bands.addChild(bandLight)
+  bandLight.lookAt(bands.toGlobal({ x: 0, y: -0.2, z: 0 }))
+  bands.addChild(cyl(0.035, 0.035, 0.3, 10, brassMat, 0, 0.92, 0.42))
 
   // ── the doorway back to the hive (front wall) ──────────────────────────
-  const doorway = new THREE.Group()
+  const doorway = new Container3D()
   doorway.position.set(3.1, 0, HALF_D - 0.06)
   doorway.rotation.y = Math.PI
-  scene.add(doorway)
-  doorway.add(box(1.3, 2.3, 0.1, darkWood, 0, 1.15, 0, 0.02))
-  doorway.add(box(1.1, 2.1, 0.06, std({ color: 0x0a0810, roughness: 1 }), 0, 1.06, 0.04, 0.01))
-  doorway.add(box(1.44, 0.1, 0.14, trimWood, 0, 2.34, 0.02))
+  scene.addChild(doorway)
+  doorway.addChild(box(1.3, 2.3, 0.1, darkWood, 0, 1.15, 0, 0.02))
+  doorway.addChild(box(1.1, 2.1, 0.06, std({ color: 0x0a0810, roughness: 1 }), 0, 1.06, 0.04, 0.01))
+  doorway.addChild(box(1.44, 0.1, 0.14, trimWood, 0, 2.34, 0.02))
 
   // ── inception ──────────────────────────────────────────────────────────
   // Two devices, one idea: the room contains itself.
@@ -2813,46 +3198,37 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   //    wall facing it. Each renders the real scene, and each reflection
   //    contains the other mirror showing LAST frame's reflection — so the
   //    corridor deepens one level per frame until it fades into the fog.
-  //    A shared lock keeps the two Reflectors from recursing inside a single
-  //    frame (stock three.js Reflectors would re-enter each other forever).
+  //    Each glass is a camera drawing into a texture (boot's mirrorRig); a
+  //    camera draws once a frame, so the two cannot recurse inside one.
   // 2. THE MINIATURE — a hand-carved model of this room on a pedestal by the
   //    window: fireplace, wingbacks, rug, dartboard chip, mantel glass — and
   //    on its tiny table, the model again, and again, three levels down.
   //    Click it to put your eye at the little doorway. The miniature also
   //    hangs in both mirrors, all the way down the corridor.
 
-  const mirrors = new THREE.Group()
-  scene.add(slot('slot-mirrors', mirrors))
-  let mirrorLock = false
+  const mirrors = new Container3D()
+  scene.addChild(slot('slot-mirrors', mirrors))
+  const mirrorQuads: Mesh3D[] = []
   const lookingGlass = (w: number, h: number, x: number, y: number, z: number, ry: number): void => {
-    const g = new THREE.Group()
+    const g = new Container3D()
     g.position.set(x, y, z)
     g.rotation.y = ry
-    mirrors.add(g)
-    const m = new Reflector(new THREE.PlaneGeometry(w - 0.16, h - 0.16), {
-      clipBias: 0.003,
-      textureWidth: 640,
-      textureHeight: 448,
-      color: 0xa89890, // smoked glass — each level of the corridor dims a little
-    })
+    mirrors.addChild(g)
+    // The glass itself. Until boot gives it its feed it is dark smoked glass;
+    // a plain PlaneGeometry (no flipV) because the feed is sampled at screen
+    // position, not by UV.
+    const m = mk(new PlaneGeometry({ width: w - 0.16, height: h - 0.16 }), basic({ color: 0x0e0a12 }))
     m.position.z = 0.031
-    const orig = m.onBeforeRender.bind(m)
-    m.onBeforeRender = (renderer, sc, cam, geo, mat, grp): void => {
-      if (mirrorLock) return // the other mirror keeps last frame's image
-      mirrorLock = true
-      orig(renderer, sc, cam, geo, mat, grp)
-      mirrorLock = false
-    }
-    track({ dispose: () => m.dispose() })
-    g.add(m)
+    mirrorQuads.push(m)
+    g.addChild(m)
     // the same gilt moulding the framed prints wear
     const bar = 0.08
     const frameMat = std({ color: C.brass, roughness: 0.42, metalness: 0.6 })
-    g.add(box(w, bar, 0.07, frameMat, 0, h / 2 - bar / 2, 0.02))
-    g.add(box(w, bar, 0.07, frameMat, 0, -h / 2 + bar / 2, 0.02))
-    g.add(box(bar, h - bar * 2, 0.07, frameMat, -w / 2 + bar / 2, 0, 0.02))
-    g.add(box(bar, h - bar * 2, 0.07, frameMat, w / 2 - bar / 2, 0, 0.02))
-    g.add(box(w - 0.14, h - 0.14, 0.02, std({ color: 0x0e0a12, roughness: 1 }), 0, 0, 0.01))
+    g.addChild(box(w, bar, 0.07, frameMat, 0, h / 2 - bar / 2, 0.02))
+    g.addChild(box(w, bar, 0.07, frameMat, 0, -h / 2 + bar / 2, 0.02))
+    g.addChild(box(bar, h - bar * 2, 0.07, frameMat, -w / 2 + bar / 2, 0, 0.02))
+    g.addChild(box(bar, h - bar * 2, 0.07, frameMat, w / 2 - bar / 2, 0, 0.02))
+    g.addChild(box(w - 0.14, h - 0.14, 0.02, std({ color: 0x0e0a12, roughness: 1 }), 0, 0, 0.01))
   }
   // over the mantel, on the chimney breast — where the print used to hang
   lookingGlass(1.5, 1.05, 0, 2.42, -HALF_D + 0.42, 0)
@@ -2868,74 +3244,72 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   const miniRug = std({ color: 0x4a2330, roughness: 0.95 })
   const miniCream = std({ color: C.cream, roughness: 0.85 })
   const miniGlass = std({ color: 0xc8ccd4, roughness: 0.08, metalness: 0.9 })
-  const buildMini = (level: number): THREE.Group => {
-    const g = new THREE.Group()
-    g.add(box(0.5, 0.02, 0.42, darkWood, 0, 0.01, 0))       // plinth
-    g.add(box(0.46, 0.008, 0.38, miniFloor, 0, 0.024, 0))   // floor
-    g.add(box(0.46, 0.24, 0.01, miniWall, 0, 0.148, -0.185))// back wall
-    g.add(box(0.01, 0.24, 0.38, miniWall, -0.225, 0.148, 0))
-    g.add(box(0.01, 0.24, 0.38, miniWall, 0.225, 0.148, 0))
-    g.add(box(0.11, 0.13, 0.024, miniStone, 0, 0.093, -0.172)) // chimney breast
-    g.add(box(0.055, 0.045, 0.012, miniEmber, 0, 0.05, -0.166)) // the fire
-    g.add(box(0.13, 0.012, 0.03, trimWood, 0, 0.128, -0.164))   // mantel shelf
-    g.add(box(0.07, 0.05, 0.006, brassMat, 0, 0.185, -0.176))   // tiny looking glass
-    g.add(box(0.06, 0.04, 0.004, miniGlass, 0, 0.185, -0.171))
-    g.add(box(0.15, 0.004, 0.1, miniRug, 0, 0.028, 0.01))       // rug
+  const buildMini = (level: number): Container3D => {
+    const g = new Container3D()
+    g.addChild(box(0.5, 0.02, 0.42, darkWood, 0, 0.01, 0))       // plinth
+    g.addChild(box(0.46, 0.008, 0.38, miniFloor, 0, 0.024, 0))   // floor
+    g.addChild(box(0.46, 0.24, 0.01, miniWall, 0, 0.148, -0.185))// back wall
+    g.addChild(box(0.01, 0.24, 0.38, miniWall, -0.225, 0.148, 0))
+    g.addChild(box(0.01, 0.24, 0.38, miniWall, 0.225, 0.148, 0))
+    g.addChild(box(0.11, 0.13, 0.024, miniStone, 0, 0.093, -0.172)) // chimney breast
+    g.addChild(box(0.055, 0.045, 0.012, miniEmber, 0, 0.05, -0.166)) // the fire
+    g.addChild(box(0.13, 0.012, 0.03, trimWood, 0, 0.128, -0.164))   // mantel shelf
+    g.addChild(box(0.07, 0.05, 0.006, brassMat, 0, 0.185, -0.176))   // tiny looking glass
+    g.addChild(box(0.06, 0.04, 0.004, miniGlass, 0, 0.185, -0.171))
+    g.addChild(box(0.15, 0.004, 0.1, miniRug, 0, 0.028, 0.01))       // rug
     for (const sx of [-1, 1]) {                                  // two wingbacks
-      const ch = new THREE.Group()
+      const ch = new Container3D()
       ch.position.set(sx * 0.075, 0.026, 0.03)
       ch.rotation.y = -sx * 0.5
-      ch.add(box(0.05, 0.022, 0.045, miniLeather, 0, 0.011, 0))
-      ch.add(box(0.05, 0.06, 0.012, miniLeather, 0, 0.04, 0.026))
-      ch.add(box(0.012, 0.03, 0.04, miniLeather, -0.026, 0.032, 0.004))
-      ch.add(box(0.012, 0.03, 0.04, miniLeather, 0.026, 0.032, 0.004))
-      g.add(ch)
+      ch.addChild(box(0.05, 0.022, 0.045, miniLeather, 0, 0.011, 0))
+      ch.addChild(box(0.05, 0.06, 0.012, miniLeather, 0, 0.04, 0.026))
+      ch.addChild(box(0.012, 0.03, 0.04, miniLeather, -0.026, 0.032, 0.004))
+      ch.addChild(box(0.012, 0.03, 0.04, miniLeather, 0.026, 0.032, 0.004))
+      g.addChild(ch)
     }
     const chip = cyl(0.016, 0.016, 0.008, 12, miniCream, -0.217, 0.16, 0.07) // dartboard chip
     chip.rotation.z = Math.PI / 2
-    g.add(chip)
+    g.addChild(chip)
     const chipEye = cyl(0.0055, 0.0055, 0.01, 8, miniEmber, -0.216, 0.16, 0.07)
     chipEye.rotation.z = Math.PI / 2
-    g.add(chipEye)
-    g.add(box(0.09, 0.008, 0.07, trimWood, 0.13, 0.062, 0.1))    // the low table…
-    g.add(box(0.01, 0.05, 0.01, darkWood, 0.13, 0.032, 0.1))
+    g.addChild(chipEye)
+    g.addChild(box(0.09, 0.008, 0.07, trimWood, 0.13, 0.062, 0.1))    // the low table…
+    g.addChild(box(0.01, 0.05, 0.01, darkWood, 0.13, 0.032, 0.1))
     if (level < 3) {                                             // …and on it, the room again
       const child = buildMini(level + 1)
-      child.scale.setScalar(0.14)
+      child.scale.set(0.14)
       child.position.set(0.13, 0.066, 0.1)
-      g.add(child)
+      g.addChild(child)
     }
     return g
   }
-  const pedestal = new THREE.Group()
+  const pedestal = new Container3D()
   pedestal.position.set(4.35, 0, 2.15)
-  scene.add(slot('slot-miniature', pedestal))
-  pedestal.add(cyl(0.1, 0.13, 0.86, 12, darkWood, 0, 0.43, 0))
-  pedestal.add(cyl(0.24, 0.24, 0.03, 24, trimWood, 0, 0.875, 0))
+  scene.addChild(slot('slot-miniature', pedestal))
+  pedestal.addChild(cyl(0.1, 0.13, 0.86, 12, darkWood, 0, 0.43, 0))
+  pedestal.addChild(cyl(0.24, 0.24, 0.03, 24, trimWood, 0, 0.875, 0))
   const mini = buildMini(1)
-  mini.scale.setScalar(0.75)
+  mini.scale.set(0.75)
   mini.rotation.y = -2.1
   mini.position.y = 0.89
-  pedestal.add(mini)
-  const miniLight = new THREE.PointLight(0xffd9a0, 1.6, 1.8, 2)
+  pedestal.addChild(mini)
+  const miniLight = point(0xffd9a0, 1.6, 1.8, 2)
   miniLight.position.set(0, 1.5, 0.3)
-  pedestal.add(miniLight)
-  // an invisible dome over the model: click it and the camera dives in
-  const miniPick = new THREE.Mesh(
-    new THREE.SphereGeometry(0.34, 12, 8),
-    std({ visible: false }),
+  pedestal.addChild(miniLight)
+  // An invisible dome over the model: click it and the camera dives in.
+  // Pixi's raycast skips hidden nodes, so the dome is drawn — blended at
+  // zero alpha, writing no depth, casting nothing.
+  const miniPick = mk(
+    sphere(0.34, 12, 8),
+    std({ transparent: true, opacity: 0 }),
   )
   miniPick.position.set(0, 1.05, 0)
-  miniPick.userData.view = 'miniature'
-  pickables.push(miniPick)
-  pedestal.add(miniPick)
+  pickable(miniPick, { view: 'miniature' })
+  pedestal.addChild(miniPick)
 
   // ─── per-frame ─────────────────────────────────────────────────────────
-  const smokeAttr = smokeGeo.getAttribute('position') as THREE.BufferAttribute
-  const emberAttr = emberGeo.getAttribute('position') as THREE.BufferAttribute
-  const camPos = new THREE.Vector3()
-  const flamePos = new THREE.Vector3()
-  let cameraRef: THREE.Camera | null = null
+  // A three point `size` at this field of view, in world units across.
+  const POINT_SIZE = Math.tan((52 / 2) * (Math.PI / 180))
 
   const tick = (t: number, dt: number): void => {
     // the oche: the aim bead breathes, darts fly, the Colonel takes his turn
@@ -2944,69 +3318,75 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     const flick = 0.82 + Math.sin(t * 11.3) * 0.06 + Math.sin(t * 4.1) * 0.07 + Math.sin(t * 23.7) * 0.03
     // the fire jumps when the room does — roomFlare is the roar, spent down
     fireLight.intensity = 22 * flick * (1 + roomFlare * 0.5)
-    if (cameraRef) cameraRef.getWorldPosition(camPos)
+    fireGlow.intensity = 5 * flick * (1 + roomFlare * 0.5)
     for (const { mesh, mat, phase } of flames) {
       mesh.scale.set(0.85 + Math.sin(t * 5.5 + phase) * 0.12, 0.86 + Math.sin(t * 7.1 + phase) * 0.18, 1)
-      mat.opacity = 0.72 + Math.sin(t * 9 + phase) * 0.2
-      if (cameraRef) {
-        // billboard on Y only, so the flame never tips over
-        mesh.getWorldPosition(flamePos)
-        mesh.lookAt(camPos.x, flamePos.y, camPos.z)
-      }
+      mat.alpha = 0.72 + Math.sin(t * 9 + phase) * 0.2
     }
     // embers rise and recycle
     for (let i = 0; i < EMBERS; i++) {
-      let y = emberAttr.getY(i) + emberVel[i] * dt
+      let y = emberPos[i * 3 + 1] + emberVel[i] * dt
       if (y > 1.4) {
         y = 0
-        emberAttr.setX(i, (Math.sin(i * 12.9 + t) * 0.4))
+        emberPos[i * 3] = Math.sin(i * 12.9 + t) * 0.4
       }
-      emberAttr.setY(i, y)
-      emberAttr.setZ(i, Math.sin(t * 1.4 + i) * 0.08)
+      emberPos[i * 3 + 1] = y
+      emberPos[i * 3 + 2] = Math.sin(t * 1.4 + i) * 0.08
+      embers.setParticleAt(i, emberPos[i * 3], y, emberPos[i * 3 + 2], 0.05 * POINT_SIZE, 0, 0xf2c47e, 1)
     }
-    emberAttr.needsUpdate = true
+    embers.upload()
 
     // cigar smoke: a slow, widening column
     for (let i = 0; i < SMOKE; i++) {
-      let y = smokeAttr.getY(i) + dt * 0.16
+      let y = smokePos[i * 3 + 1] + dt * 0.16
       if (y > 1.7) y = 0
-      smokeAttr.setY(i, y)
+      smokePos[i * 3 + 1] = y
       const s = smokeSeed[i]
       const spread = 0.02 + y * 0.13
-      smokeAttr.setX(i, Math.sin(t * 0.5 + s + y * 2.2) * spread)
-      smokeAttr.setZ(i, Math.cos(t * 0.42 + s * 1.7 + y * 1.9) * spread)
+      smokePos[i * 3] = Math.sin(t * 0.5 + s + y * 2.2) * spread
+      smokePos[i * 3 + 2] = Math.cos(t * 0.42 + s * 1.7 + y * 1.9) * spread
+      smoke.setParticleAt(i, smokePos[i * 3], y, smokePos[i * 3 + 2], 0.08 * POINT_SIZE, 0, 0xcbbfae, 0.13)
     }
-    smokeAttr.needsUpdate = true
+    smoke.upload()
 
     // the lit coal breathes
-    const coal = restingCigar.userData.coal as THREE.Mesh | undefined
-    if (coal) {
-      const mat = coal.material as THREE.MeshStandardMaterial
-      mat.emissiveIntensity = 1.8 + Math.sin(t * 1.7) * 0.9
-    }
-    const glow = restingCigar.userData.glow as THREE.PointLight | undefined
-    if (glow) glow.intensity = 0.7 + Math.sin(t * 1.7) * 0.35
+    if (litCoal?.emissive) litCoal.emissive.strength = 1.8 + Math.sin(t * 1.7) * 0.9
+    if (litGlow) litGlow.intensity = 0.7 + Math.sin(t * 1.7) * 0.35
 
     // the record turns
     disc.rotation.y += dt * 3.5
     label.rotation.y = disc.rotation.y
   }
 
+  /** Free what the room made: every mesh's geometry, material and the
+   *  textures it shows, each once (meshes share them), then the nodes. */
   const dispose = (): void => {
-    for (const d of disposables) d.dispose()
+    const geometries = new Set<Geometry3D>()
+    const materials = new Set<AnyMaterial>()
+    const textures = new Set<Texture>()
     scene.traverse(o => {
-      const mesh = o as THREE.Mesh
-      if (mesh.geometry) mesh.geometry.dispose()
-      const mat = mesh.material
-      if (Array.isArray(mat)) mat.forEach(m => m.dispose())
-      else if (mat) (mat as THREE.Material).dispose()
+      if (o instanceof ParticleContainer3D) return
+      if (!(o instanceof Mesh3D)) return
+      if (o.geometry) geometries.add(o.geometry)
+      const mat = o.material as AnyMaterial | null
+      if (!mat) return
+      materials.add(mat)
+      const slots = mat.textures as unknown as Record<string, Texture | undefined>
+      for (const key of ['baseColor', 'emissive']) {
+        const t = slots[key]
+        if (t && t !== Texture.WHITE && t !== Texture.EMPTY) textures.add(t)
+      }
     })
+    for (const g of GEO.values()) geometries.add(g)
+    GEO.clear()
+    const quietly = (fn: () => void): void => { try { fn() } catch { /* already gone */ } }
+    for (const m of materials) quietly(() => m.destroy())
+    for (const g of geometries) quietly(() => g.destroy(true))
+    for (const t of textures) quietly(() => t.destroy(true))
   }
 
-  // The camera is attached after construction so the flames can billboard.
   return {
-    scene, slots, pickables,
-    attachCamera: c => { cameraRef = c },
+    world: scene, hemisphere: hemi, slots, picks, mirrors: mirrorQuads,
     tick, dispose,
     darts: {
       beginAim, moveAim, release: releaseAim, cancel: cancelAim,
@@ -3041,56 +3421,249 @@ const VIEWS: Record<string, { pos: [number, number, number]; target: [number, nu
   bands: { pos: [3.5, 1.85, -1.9], target: [4.05, 1.78, -4.4] },
 }
 
+// ─── the looking glasses ───────────────────────────────────────────────────
+//
+// A planar mirror, Pixi's way: a camera reflected through the glass draws the
+// room into a texture, cut at the glass by its clipping plane (so the
+// chimney breast behind it is left out), and the glass shows that texture at
+// each fragment's own screen position (PortalMaterial — "a planar mirror's
+// feed works too"), so the reflection holds still as you move.
+//
+// One twist. A true reflection turns the camera inside out (a negative
+// determinant), and Pixi culls faces by winding with no notion of a mirrored
+// camera — every surface would show its back. So the mirror camera is the
+// reflection TURNED AROUND its own vertical axis, a proper rotation, which
+// draws the reflection flipped left to right; the glass undoes the flip by
+// reading the feed at (1 − u, v). That is the whole of mirrorFlipBit: it
+// runs after PortalMaterial's own sampling and replaces it. The names it uses
+// (portalScreenUV, samplePortal, portalTint, decodeFrame) are @pixi/3d
+// 0.1.0's portal shader; lounge-3d.spec.ts holds them to the shipped bundle.
+
+/** The feed is drawn at this fraction of the view's size: the corridor is
+ *  smoked glass in the fog, not a window, and each glass is a whole extra
+ *  render of the room every frame. */
+const MIRROR_SCALE = 0.5
+
+const mirrorFlipBit: ShaderBit = {
+  name: 'loungeMirrorFlip',
+  gpu: {
+    fragment: {
+      material: /* wgsl */ `{
+    let mirrorUv = portalScreenUV(input.vPosition);
+    let mirrorFeed = samplePortal(vec2<f32>(1.0 - mirrorUv.x, mirrorUv.y));
+    albedo = decodeFrame(mirrorFeed.rgb) * portalTint.rgb;
+  }`,
+    },
+  },
+  gl: {
+    fragment: {
+      material: /* glsl */ `{
+    vec2 mirrorUv = portalScreenUV(vPosition);
+    vec4 mirrorFeed = samplePortal(vec2(1.0 - mirrorUv.x, mirrorUv.y));
+    albedo = decodeFrame(mirrorFeed.rgb) * portalTint.rgb;
+  }`,
+    },
+  },
+}
+
+interface MirrorRig {
+  quad: Mesh3D
+  camera: Camera3D
+  feed: RenderTexture
+  passes: MeshPass[]
+  clip: Plane
+  live: boolean
+}
+
+const scratch = {
+  reflect: new Matrix4(),
+  turn: new Matrix4().makeScale(-1, 1, 1),
+  glass: new Matrix4(),
+  eye: new Matrix4(),
+  out: new Matrix4(),
+  position: new Vector3(),
+  scale: new Vector3(),
+  quaternion: new Quaternion(),
+}
+
+/** Pose a glass's camera for this frame, and say whether it is worth drawing
+ *  (the viewer stands in front of it). */
+function poseMirror(rig: MirrorRig, eye: Camera3D): boolean {
+  const s = scratch
+  const glass = rig.quad.getGlobalTransform(s.glass)
+  const e = glass.elements
+  // The glass's +Z, the side it shows, and a point on it.
+  let nx = e[8], ny = e[9], nz = e[10]
+  const nl = Math.hypot(nx, ny, nz) || 1
+  nx /= nl; ny /= nl; nz /= nl
+  const px = e[12], py = e[13], pz = e[14]
+  const view = eye.getGlobalTransform(s.eye)
+  const v = view.elements
+  if ((v[12] - px) * nx + (v[13] - py) * ny + (v[14] - pz) * nz <= 0) return false
+  // Reflection through the plane: x' = (I − 2nnᵀ)x + 2(p·n)n.
+  const d2 = 2 * (px * nx + py * ny + pz * nz)
+  s.reflect.set(
+    1 - 2 * nx * nx, -2 * nx * ny, -2 * nx * nz, d2 * nx,
+    -2 * nx * ny, 1 - 2 * ny * ny, -2 * ny * nz, d2 * ny,
+    -2 * nx * nz, -2 * ny * nz, 1 - 2 * nz * nz, d2 * nz,
+    0, 0, 0, 1,
+  )
+  // reflected eye, turned about its own vertical axis: a rotation again
+  s.out.multiplyMatrices(s.reflect, view).multiply(s.turn)
+  s.out.decompose(s.position, s.quaternion, s.scale)
+  rig.camera.position.copyFrom(s.position)
+  rig.camera.quaternion.copyFrom(s.quaternion)
+  rig.camera.fov = eye.fov
+  rig.camera.near = eye.near
+  rig.camera.far = eye.far
+  rig.camera.clippingPlane = portalExitClipPlane(glass, s.out, rig.clip, 0.003)
+  return true
+}
+
 // ─── boot ─────────────────────────────────────────────────────────────────
 
-function boot(): boolean {
+/** The bridge for THIS bundle's Pixi, which is the no-eval build. */
+function bridgeNoEval(): boolean {
+  const result = bridgeNoEvalParsers(
+    uniformParsers as unknown as UniformParserLike[],
+    uniformParserFunctions as unknown as UniformSyncFunction[],
+    uboParserFunctions as unknown as UboSyncFunction[],
+  )
+  if (result === 'unknown-parser') {
+    console.warn('[lounge3d] @pixi/3d brought a uniform parser the no-eval bridge does not know; not drawing')
+    return false
+  }
+  return true
+}
+
+async function boot(): Promise<boolean> {
   const cfg: LoungeConfig = window.REV_LOUNGE ?? {}
   const host = document.querySelector<HTMLElement>(cfg.mount ?? '#lounge3d')
   if (!host) return false
 
-  let renderer: THREE.WebGLRenderer
+  // Pixi's 3D draws with WebGL2; there is no WebGL1 path. Probe first, so a
+  // browser without it gets the drawn room, not a broken canvas.
+  let probe: WebGL2RenderingContext | null = null
+  try { probe = document.createElement('canvas').getContext('webgl2') } catch { probe = null }
+  if (!probe) return false
+  try { probe.getExtension('WEBGL_lose_context')?.loseContext() } catch { /* not supported */ }
+  if (!bridgeNoEval()) return false
+
+  const app = new Application()
   try {
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'default' })
-  } catch {
+    await app.init({
+      preference: 'webgl',
+      width: Math.max(1, host.clientWidth || 960),
+      height: Math.max(1, host.clientHeight || 560),
+      resolution: Math.min(window.devicePixelRatio || 1, 1.75),
+      autoDensity: true,
+      antialias: true,
+      // Never tone-mapped, behind the view: three's scene.background.
+      backgroundColor: 0x0d0912,
+      // This room draws its own frames (the loop below), as three's did.
+      autoStart: false,
+      sharedTicker: false,
+    })
+  } catch (err) {
+    console.warn('[lounge3d] the renderer could not be made', err)
+    try { app.destroy(true) } catch { /* never initialised */ }
     return false
   }
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75))
-  renderer.shadowMap.enabled = true
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap
-  renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = 1.22
-  const canvas = renderer.domElement
+  const canvas = app.canvas
   canvas.style.cssText = 'display:block;width:100%;height:100%;touch-action:none;cursor:grab'
   host.appendChild(canvas)
 
   const room = buildRoom(cfg.art ?? {})
-  const camera = new THREE.PerspectiveCamera(52, 16 / 10, 0.1, 60)
-  room.attachCamera(camera)
+  const view = new View3D({
+    autoResize: true,
+    toneMapping: 'aces',
+    exposure: 1.22,
+    shadowQuality: 'medium',
+    // three's PCFSoftShadowMap; 'pcf-high' is the softer nine-tap filter
+    shadowFilter: 'pcf-high',
+    environment: room.hemisphere,
+    fog: { type: 'linear', color: 0x140f1a, near: 9, far: 24 },
+  })
+  app.stage.addChild(view)
+  view.root.addChild(room.world)
+  const camera = view.camera
+  camera.fov = 52
+  camera.near = 0.1
+  camera.far = 60
   camera.position.set(...VIEWS.room.pos)
 
-  const controls = new OrbitControls(camera, canvas)
-  controls.target.set(...VIEWS.room.target)
-  controls.enableDamping = true
-  controls.dampingFactor = 0.06
-  controls.enablePan = false
-  // Wheel zoom would eat the page's scroll — the site host IS the scroll
-  // surface. Dolly stays on pinch and the in-page view buttons.
-  controls.enableZoom = false
-  controls.minDistance = 1.2
-  controls.maxDistance = 9
-  controls.minPolarAngle = 0.55
-  controls.maxPolarAngle = Math.PI / 2 - 0.02
-  controls.rotateSpeed = 0.55
-  controls.update()
+  const orbit = new OrbitCamera({
+    view,
+    target: { x: VIEWS.room.target[0], y: VIEWS.room.target[1], z: VIEWS.room.target[2] },
+    enableDamping: true,
+    dampingFactor: 0.06,
+    enablePan: false,
+    // Wheel zoom would eat the page's scroll — the site host IS the scroll
+    // surface. (Pixi registers its wheel listener passive, and the orbit
+    // returns early with zoom off, so the page still scrolls.)
+    enableZoom: false,
+    minDistance: 1.2,
+    maxDistance: 9,
+    minPolarAngle: 0.55,
+    maxPolarAngle: Math.PI / 2 - 0.02,
+    rotateSpeed: 0.55,
+    // A right-click is the hive's way back (back-gesture.service.ts); the
+    // room must not swallow it, and the right button does nothing here.
+    preventContextMenu: false,
+    mouseButtons: { right: 'none', middle: 'none' },
+    // stepped from frame(), where three called controls.update()
+    autoUpdate: false,
+  })
+  orbit.update()
+
+  // ── the looking glasses: a camera, a feed and a material each ──
+  const feedSize = (): [number, number] => [
+    Math.max(2, Math.round(app.screen.width * MIRROR_SCALE)),
+    Math.max(2, Math.round(app.screen.height * MIRROR_SCALE)),
+  ]
+  const rigs: MirrorRig[] = room.mirrors.map(quad => {
+    const [fw, fh] = feedSize()
+    const feed = RenderTexture.create({ width: fw, height: fh, antialias: true })
+    const mirrorCamera = new Camera3D({ renderTexture: feed })
+    view.root.addChild(mirrorCamera)
+    const placeholder = quad.material
+    // three's smoked glass was 0xa89890 over the reflection. The feed already
+    // carries the view's exposure and the glass applies it again, so the tint
+    // gives that back: 0xa89890 with its LINEAR value divided by 1.22.
+    quad.material = new PortalMaterial({ texture: feed, baseColor: 0x998b84, extraBits: [mirrorFlipBit] })
+    try { placeholder?.destroy() } catch { /* shared nowhere */ }
+    return {
+      quad, camera: mirrorCamera, feed, clip: new Plane(), live: true,
+      passes: [
+        new MeshPass({ name: 'opaque', camera: mirrorCamera }),
+        new MeshPass({ name: 'transparent', camera: mirrorCamera, sort: 'distance' }),
+      ],
+    }
+  })
+  view.passes = rigs.flatMap(r => r.passes)
+  const updateMirrors = (): void => {
+    for (const rig of rigs) {
+      const live = rig.quad.visible && rig.quad.parent?.visible !== false && poseMirror(rig, camera)
+      // A glass seen from behind or switched off keeps its last picture and
+      // costs nothing. `enabled` rebuilds the graph, so it is only written
+      // when it changes.
+      if (live !== rig.live) {
+        rig.live = live
+        for (const pass of rig.passes) pass.enabled = live
+      }
+    }
+  }
+
   // ── picking: a click (never a drag) on a marked print opens its panel ──
-  const ray = new THREE.Raycaster()
-  const ndc = new THREE.Vector2()
-  const hitAt = (e: PointerEvent): THREE.Intersection | null => {
-    const r = canvas.getBoundingClientRect()
-    ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1)
-    ray.setFromCamera(ndc, camera)
-    const hits = ray.intersectObjects(room.pickables, false)
-    return hits[0] ?? null
+  // The view ray-tests only the nodes the room made pickable. Positions are
+  // the view's logical pixels, mapped from the pointer by Pixi itself.
+  const pt = new Point()
+  const hitAt = (e: PointerEvent): { pick: Pick; point: Vector3 } | null => {
+    app.renderer.events.mapPositionToPoint(pt, e.clientX, e.clientY)
+    const hit = view.raycast(pt)
+    if (!hit) return null
+    const pick = room.picks.get(hit.target)
+    return pick ? { pick, point: new Vector3().copyFrom(hit.point) } : null
   }
   let press: { x: number; y: number; t: number } | null = null
   let hovering = false
@@ -3098,24 +3671,28 @@ function boot(): boolean {
    *  a press on the board IS a throw, and a drag during it is re-aiming, not
    *  turning the room around. Nothing else on the canvas changes. */
   let aiming = false
-  canvas.addEventListener('pointerdown', e => {
+  // On the HOST, in the capture phase: this runs before Pixi's own listener
+  // on the canvas, so a press that becomes a throw never reaches the orbit.
+  const onDown = (e: PointerEvent): void => {
     const hit = hitAt(e)
-    if (hit?.object.userData.dart && room.darts.beginAim(hit.point)) {
+    if (hit?.pick.dart && room.darts.beginAim(hit.point)) {
       aiming = true
-      controls.enabled = false
+      orbit.enabled = false
       canvas.style.cursor = 'crosshair'
-      canvas.setPointerCapture?.(e.pointerId)
+      e.stopPropagation()
+      host.setPointerCapture?.(e.pointerId)
       return
     }
     canvas.style.cursor = 'grabbing'
     press = { x: e.clientX, y: e.clientY, t: Date.now() }
-  })
-  canvas.addEventListener('pointermove', e => {
+  }
+  host.addEventListener('pointerdown', onDown, true)
+  const onMove = (e: PointerEvent): void => {
     if (aiming) {
       // Re-point mid-throw. Off the board face the aim simply HOLDS where it
       // was — sliding onto the cabinet must not fling the dart at the ceiling.
       const hit = hitAt(e)
-      if (hit?.object.userData.dart) room.darts.moveAim(hit.point)
+      if (hit?.pick.dart) room.darts.moveAim(hit.point)
       return
     }
     if (press) return
@@ -3124,11 +3701,12 @@ function boot(): boolean {
       hovering = over
       canvas.style.cursor = over ? 'pointer' : 'grab'
     }
-  })
-  window.addEventListener('pointerup', e => {
+  }
+  host.addEventListener('pointermove', onMove)
+  const onUp = (e: PointerEvent): void => {
     if (aiming) {
       aiming = false
-      controls.enabled = true
+      orbit.enabled = true
       canvas.style.cursor = hovering ? 'pointer' : 'grab'
       const scored = room.darts.release()
       if (scored) host.dispatchEvent(new CustomEvent('lounge3d:dart', { detail: scored, bubbles: true }))
@@ -3140,23 +3718,24 @@ function boot(): boolean {
     const quick = Date.now() - press.t < 400
     press = null
     if (moved > 6 || !quick || e.target !== canvas) return
-    const hit = hitAt(e as PointerEvent)
+    const hit = hitAt(e)
     if (!hit) return
-    const pick = hit.object.userData.pick
-    if (typeof pick === 'string') {
-      host.dispatchEvent(new CustomEvent('lounge3d:pick', { detail: { id: pick }, bubbles: true }))
-    } else if (typeof hit.object.userData.view === 'string') {
-      view(hit.object.userData.view) // the miniature: click it and dive in
+    if (typeof hit.pick.pick === 'string') {
+      host.dispatchEvent(new CustomEvent('lounge3d:pick', { detail: { id: hit.pick.pick }, bubbles: true }))
+    } else if (typeof hit.pick.view === 'string') {
+      view_(hit.pick.view) // the miniature: click it and dive in
     }
-  })
+  }
+  window.addEventListener('pointerup', onUp)
   // A throw the browser takes away (a tab switch, a gesture claimed by the OS)
   // is no throw at all — it must not fire a dart on the way out.
-  window.addEventListener('pointercancel', () => {
+  const onCancel = (): void => {
     if (!aiming) return
     aiming = false
-    controls.enabled = true
+    orbit.enabled = true
     room.darts.cancel()
-  })
+  }
+  window.addEventListener('pointercancel', onCancel)
 
   // Vertical FOV, clamped so a very wide stage (the walk-in fills the screen)
   // can't blow the horizontal FOV out to a fisheye.
@@ -3165,88 +3744,106 @@ function boot(): boolean {
   const resize = (): void => {
     const w = host.clientWidth || 960
     const h = host.clientHeight || Math.round(w * 0.58)
-    renderer.setSize(w, h, false)
-    camera.aspect = w / h
-    const capped = (2 * Math.atan(Math.tan(HFOV_MAX / 2) / camera.aspect) * 180) / Math.PI
+    app.renderer.resize(w, h)
+    const aspect = w / h
+    const capped = (2 * Math.atan(Math.tan(HFOV_MAX / 2) / aspect) * 180) / Math.PI
     camera.fov = Math.min(FOV_V, capped)
-    camera.updateProjectionMatrix()
+    const [fw, fh] = feedSize()
+    for (const rig of rigs) rig.feed.resize(fw, fh)
   }
   resize()
   const ro = new ResizeObserver(resize)
   ro.observe(host)
 
-  // camera tween for the preset views
-  let tween: { from: THREE.Vector3; to: THREE.Vector3; fromT: THREE.Vector3; toT: THREE.Vector3; t: number } | null = null
-  const view = (name: string): void => {
+  // camera tween for the preset views — the orbit re-reads the camera's
+  // position every update, as three's did, so a tween just moves both ends
+  type Tween = { from: Vector3; to: Vector3; fromT: Vector3; toT: Vector3; t: number }
+  let tween: Tween | null = null
+  const view_ = (name: string): void => {
     const v = VIEWS[name]
     if (!v) return
     room.darts.view(name)
     tween = {
-      from: camera.position.clone(),
-      to: new THREE.Vector3(...v.pos),
-      fromT: controls.target.clone(),
-      toT: new THREE.Vector3(...v.target),
+      from: new Vector3().copyFrom(camera.position),
+      to: new Vector3(...v.pos),
+      fromT: new Vector3().copyFrom(orbit.target),
+      toT: new Vector3(...v.target),
       t: 0,
     }
   }
+  const lerp = (out: { set: (x: number, y: number, z: number) => unknown }, a: Vector3, b: Vector3, e: number): void => {
+    out.set(a.x + (b.x - a.x) * e, a.y + (b.y - a.y) * e, a.z + (b.z - a.z) * e)
+  }
 
-  const clock = new THREE.Clock()
+  let last = performance.now()
+  let elapsed = 0
   let onScreen = true
   const io = new IntersectionObserver(entries => { onScreen = entries[0]?.isIntersecting ?? true }, { threshold: 0.02 })
   io.observe(host)
   // Swallow the elapsed gap so the room doesn't lurch when the tab comes back.
-  const onVisibility = (): void => { clock.getDelta() }
+  const onVisibility = (): void => { last = performance.now() }
   document.addEventListener('visibilitychange', onVisibility)
 
   let disposed = false
+  let raf = 0
   const dispose = (): void => {
     if (disposed) return
     disposed = true
-    renderer.setAnimationLoop(null)
+    cancelAnimationFrame(raf)
     ro.disconnect()
     io.disconnect()
     document.removeEventListener('visibilitychange', onVisibility)
-    controls.dispose()
+    host.removeEventListener('pointerdown', onDown, true)
+    host.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onCancel)
+    try { orbit.destroy() } catch { /* already gone */ }
     room.dispose()
-    renderer.dispose()
+    for (const rig of rigs) { try { rig.feed.destroy(true) } catch { /* already gone */ } }
+    try { app.destroy(true, { children: true }) } catch { /* already gone */ }
     canvas.remove()
     if (window.RevLounge3D) delete window.RevLounge3D
   }
 
   const frame = (dt: number): void => {
-    const t = clock.elapsedTime
+    elapsed += dt
+    const t = elapsed
     if (tween) {
       tween.t = Math.min(1, tween.t + dt * 1.5)
       const e = 1 - Math.pow(1 - tween.t, 3)
-      camera.position.lerpVectors(tween.from, tween.to, e)
-      controls.target.lerpVectors(tween.fromT, tween.toT, e)
+      lerp(camera.position, tween.from, tween.to, e)
+      lerp(orbit.target, tween.fromT, tween.toT, e)
       if (tween.t >= 1) tween = null
     }
     room.tick(t, dt)
-    controls.update()
-    renderer.render(room.scene, camera)
+    orbit.update()
+    updateMirrors()
+    app.render()
   }
 
-  renderer.setAnimationLoop(() => {
+  const loop = (now: number): void => {
     // SiteViewDrone unmounts by dropping the page's nodes; without this the
     // loop would outlive the page and hold a live GL context.
     if (!canvas.isConnected) { dispose(); return }
-    const dt = Math.min(clock.getDelta(), 0.05)
+    raf = requestAnimationFrame(loop)
+    const dt = Math.min((now - last) / 1000, 0.05)
+    last = now
     if (!onScreen || document.hidden) return
     frame(dt)
-  })
+  }
+  raf = requestAnimationFrame(loop)
 
   window.RevLounge3D = {
     setSlot: (id, on) => {
       const objs = room.slots.get(id)
       if (objs) for (const o of objs) o.visible = on
     },
-    view,
+    view: view_,
     frame: () => frame(1 / 60),
     oche: { state: room.darts.state, throwAt: room.darts.throwAt },
     pose: () => ({
-      pos: camera.position.toArray().map(n => +n.toFixed(2)),
-      target: controls.target.toArray().map(n => +n.toFixed(2)),
+      pos: [camera.position.x, camera.position.y, camera.position.z].map(n => +n.toFixed(2)),
+      target: [orbit.target.x, orbit.target.y, orbit.target.z].map(n => +n.toFixed(2)),
     }),
     ready: Promise.resolve(true),
   }
@@ -3258,13 +3855,13 @@ function boot(): boolean {
 // Passive start: never on the critical path. If WebGL is unavailable or the
 // room throws, reveal the page's SVG fallback instead.
 function start(): void {
-  let ok = false
-  try {
-    ok = boot()
-  } catch (err) {
-    console.warn('[lounge3d] scene failed, falling back to the drawn room', err)
-  }
-  if (!ok) revealFallback()
+  boot().then(
+    ok => { if (!ok) revealFallback() },
+    err => {
+      console.warn('[lounge3d] scene failed, falling back to the drawn room', err)
+      revealFallback()
+    },
+  )
 }
 
 function revealFallback(): void {

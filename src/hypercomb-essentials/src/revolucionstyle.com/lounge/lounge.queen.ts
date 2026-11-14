@@ -5,7 +5,7 @@
 // no page, no route. Mark the cell's `view:default` with it and walking in
 // IS walking in.
 //
-// NOT `attachable`: the content is a three.js bundle that has to be built and
+// NOT `attachable`: the content is a 3D bundle that has to be built and
 // stored before there is anything to open, so `name@lounge` cannot install
 // one out of thin air the way `name@slides` can. `/lounge here <bundleSig>`
 // is the hand-authoring path; the Revolución site build writes the record

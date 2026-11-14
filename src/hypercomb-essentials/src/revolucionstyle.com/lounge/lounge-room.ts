@@ -1,7 +1,8 @@
 // THE ROOM — one logical piece, however it is framed.
 //
 // A lounge is not a page about a lounge. It is a sig-addressed bundle that
-// paints a three.js room into whatever element it is given, plus the art it
+// paints a 3D room (Pixi's own 3D, `@pixi/3d`, since 2026-11-13; three.js
+// before that) into whatever element it is given, plus the art it
 // hangs on the walls. That whole thing is ONE artifact, and this module is
 // the only code that knows how to bring it up:
 //
@@ -155,7 +156,7 @@ export interface MountedRoom {
  * The caller owns `host` — its size, its position, its chrome. This function
  * owns everything from the stage inwards. That line is the whole point: a
  * frame can put the room in a viewport or in a column without either frame
- * knowing anything about three.js, and the room cannot know or care which
+ * knowing anything about the renderer, and the room cannot know or care which
  * frame it is in.
  *
  * PASSIVE, as the bundle is by doctrine: it boots on idle, pauses when the
