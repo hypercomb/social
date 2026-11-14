@@ -524,7 +524,14 @@
     var past = events.filter(function (e) { return e.record.date < t; }).sort(function (a, b) { return key(a) > key(b) ? -1 : 1; });
     return up.concat(past);
   }
+  // HOW MANY CAME IS NOT SAID YET (jwize, 2026-11-13: "remove the number of
+  // people who came until we get people"). A meeting behind us shows no count
+  // and never says nobody came; the names it really kept still show. A meeting
+  // still to come keeps its count. Set this true to bring the number back.
+  var SHOW_CAME = false;
+  var cameUnsaid = function (ev) { return !SHOW_CAME && !!ev && ev.record.date < today(); };
   function countOf(ev, pastWord) {
+    if (cameUnsaid(ev)) return '';
     if (!state.coming[ev.sig] || !joinable(ev)) return state.coming[ev.sig] ? 'at ' + ev.record.host : '…';
     var rows = state.coming[ev.sig].filter(isComing);
     return rows.length + (ev.record.date < today() ? (pastWord || ' came') : ' coming');
@@ -567,7 +574,9 @@
     list.textContent = '';
     var rows = ev ? (state.coming[ev.sig] || []).filter(isComing) : [];
     var here = rows.filter(function (r) { return r.going === 'here'; }).length;
-    count.textContent = rows.length ? '(' + rows.length + (here ? ' · ' + here + ' here now' : '') + ')' : '';
+    count.textContent = rows.length && !cameUnsaid(ev) ? '(' + rows.length + (here ? ' · ' + here + ' here now' : '') + ')' : '';
+    // A meeting behind us with no names says nothing at all, not "nobody".
+    $('[data-who]').style.display = cameUnsaid(ev) && !rows.length ? 'none' : '';
     $('[data-who-title]').textContent = ev && ev.record.date < today() ? 'Who came' : "Who's coming";
     rows.forEach(function (r) {
       var li = document.createElement('li');
@@ -795,7 +804,7 @@
     rows.forEach(function (m) {
       list.appendChild(personRow(m, m.organizer ? 'organizer' : 'coming'));
     });
-    none.hidden = rows.length > 0;
+    none.hidden = rows.length > 0 || cameUnsaid(ev);
   }
   function render() { renderMeeting(); renderRows(); renderPeople(); renderDoors(); }
   function select(ev) {
