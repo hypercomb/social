@@ -208,19 +208,22 @@ brand"; "there should be a way on the groups to change launcher renderings").
   is, and All is drawn as **hexagons**, the brand's default. An explicit `hex`
   on a community beats an inherited `launcher`, `iphone`, `list`, or `tiles`.
 - `hex` is the comb of hexagons. `launcher` is the traditional launcher: the
-  same tiles in rows of four, rounded icons with the name beneath, the same
-  owner counts, check marks and links. `iphone` is the iPhone launcher: those
-  same tiles as icons in four columns on a phone-shaped screen, the name under
-  each one. Once the page has more than four, the first four sit in the dock
-  and the rest in the grid above it. `list` is a column of blocks: the picture
+  same tiles as rounded icons with the name beneath, the same owner counts,
+  check marks and links. A phone shows them four across; a wider page wraps
+  them, as many across as the width holds, the block centred. `iphone` is the
+  iPhone launcher: those same tiles as icons on a device screen, the name under
+  each one — four columns on a phone-shaped screen, and on a page 900px or
+  wider a tablet's screen, six across. Once the page has more than four, the
+  first four sit in the dock and the rest in the grid above it. `list` is a column of blocks: the picture
   at the left, the name and address beside it. A block on your own page is a
   link, and a tap opens it. A block under another domain is on or off — on
   wears the check, off is gray — and a tap switches it, the same as the other
-  shapes. `tiles` is one column of squares, and the column is a scroller: the
-  frame is square, each square fills it, the picture goes to every edge, and a
-  flick lands on the next square. The name and address sit on the picture. Up
-  and down in that column moves the next square into the frame. It does not
-  turn the set.
+  shapes. `tiles` is squares with the picture to every edge and the name and
+  address on the picture. On a phone it is one column, and the column is a
+  scroller: the frame is square, each square fills it, and a flick lands on the
+  next square; up and down in that column moves the next square into the
+  frame and does not turn the set. Wider than a phone the squares wrap across
+  the row and the page scrolls.
 - The names walk in that order — `hex`, then `launcher`, then `iphone`, then
   `list`, then `tiles`, then back to `hex`. A new idea is another name in that list, drawn
   by both readers (the hive that writes the record and the front door that
@@ -524,9 +527,28 @@ and once the row holds anything. An empty row in the iPhone view draws no empty 
 A domain whose ledger names no owner has nothing signed to read, so its row says "Nothing is published here yet." and never
 "Could not read what is published here."
 
+### Every look uses the page it is on (jwize 2026-11-13)
+
+*"The iphone tiles still have to get arranged and wrap currently they are holding 4 rows and are all the way to the left
+taking a small portion of the screen on desktop. All design views except for the nice list need a user experience overview
+and improvements."*
+
+What each look did on a 1157px page, and what it does now:
+
+| Look | Before | Now |
+|---|---|---|
+| `launcher` | four 6rem columns pinned to the left: 39% of the row | wraps to the width (nine across there), the block centred; a phone keeps four across |
+| `iphone` | a 26rem phone screen in the middle: 35% of the row | on a page 900px or wider, a tablet's screen (46rem, six across, the dock its four icons wide); a phone keeps the phone |
+| `tiles` | one 30rem square, the rest behind a scroller with no bar and nothing pointing at it | wider than a phone the squares wrap, edge to edge, and the page scrolls; a phone keeps the snapping column |
+| `hex` | fills the row edge to edge | unchanged |
+| `list` | fills the row | unchanged |
+
+Nothing about the tiles, their order or the signed record changes: a look is a stylesheet over the same tiles
+(`SHOWCASE_STYLE`, `hypercomb-shim/src/bootstrap/showcase.ts`), and `showcase.spec.ts` pins the wide rules and the phone's.
+
 ### Four looks, swiped sideways while editing (jwize 2026-11-10)
 
-A sideways swipe on the list while editing walks four looks and goes round: hexagons, the launcher (rows of four), the iPhone
+A sideways swipe on the list while editing walks four looks and goes round: hexagons, the launcher (rounded icons), the iPhone
 screen, the list of buttons. The square column (`tiles`) is still a view a signed record or `?view=tiles` may name, but the
 swipe does not walk it. The look chosen is kept in this browser (in the `showcase:orientation` document, beside the lane
 orientation), so leaving edit mode and coming back later keeps it. Swiping signs nothing: a visitor is shown the owners' record.

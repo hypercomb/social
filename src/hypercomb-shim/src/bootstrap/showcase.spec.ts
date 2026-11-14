@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { KEY_LIST_MEANING, firstKeyList, keyListTemplate, nextKeyList } from '@hypercomb/core'
 import { parseShowcase, readZoneOwners, type ShowcaseRecord, type ZoneOwners } from './showcase-record'
 import { aggregate, aggregateMatches, bandZones, coverOf, followCandidate, ledgerPublishes, ownersLabel, parseLedger,
-  gestureStep, pageFlip, readPeerLedger, sharedPublishes, showcase } from './showcase'
+  gestureStep, pageFlip, readPeerLedger, sharedPublishes, showcase, SHOWCASE_STYLE } from './showcase'
 import { parseWelcome } from './welcome'
 
 // Pictures are asked of real doors; here every hive wears its cover.
@@ -1928,5 +1928,47 @@ describe('a staged presentation is the root, on a phone and on a desktop (jwize 
     expect(draw({ presentation: 'https://protocol.hypercomb.com/' }).hero.querySelector('.front iframe')?.getAttribute('src')).toBe('https://protocol.hypercomb.com/')
     expect(draw().hero.querySelector('.front')).toBeNull()
     phone(() => { expect(draw().hero.querySelector('.front')).toBeNull() })
+  })
+})
+
+// EVERY LOOK USES THE PAGE IT IS ON (jwize 2026-11-13: "the iphone tiles still have to get arranged and wrap … holding 4
+// rows and all the way to the left taking a small portion of the screen on desktop"). The looks are styles over the same
+// tiles, so the stylesheet is what is pinned: a wide page wraps, and a phone keeps the phone's shape.
+describe('the looks on a wide page', () => {
+  const rule = (selector: string, from = 0): string => {
+    const at = SHOWCASE_STYLE.indexOf(`${selector} {`, from)
+    return at < 0 ? '' : SHOWCASE_STYLE.slice(at, SHOWCASE_STYLE.indexOf('}', at) + 1)
+  }
+  const phoneAt = SHOWCASE_STYLE.lastIndexOf('@media (max-width: 720px)')
+
+  it('the launcher wraps to the width and is centred, never four columns pinned to the left', () => {
+    const launcher = rule(".comb[data-shape='launcher']")
+    expect(launcher).toContain('grid-template-columns: repeat(auto-fit, var(--icon))')
+    expect(launcher).toContain('justify-content: center')
+    expect(launcher).not.toContain('repeat(4')
+    expect(launcher).not.toContain('justify-content: start')
+  })
+
+  it('a phone keeps its four across, said after the wide rule so it wins there', () => {
+    expect(phoneAt).toBeGreaterThan(SHOWCASE_STYLE.indexOf(".comb[data-shape='launcher'] {"))
+    expect(rule(".comb[data-shape='launcher']", phoneAt)).toContain('grid-template-columns: repeat(4, minmax(0, 1fr))')
+  })
+
+  it('the phone screen is a tablet on a wide page: six across, and the dock its four icons wide', () => {
+    const wide = SHOWCASE_STYLE.indexOf('@media (min-width: 900px)')
+    expect(wide).toBeGreaterThan(0)
+    expect(rule(".comb[data-shape='iphone'] .spring-grid", wide)).toContain('repeat(6, minmax(0, 1fr))')
+    expect(rule(".comb[data-shape='iphone'] .spring-dock", wide)).toContain('repeat(4, 5.6rem)')
+    // The phone's own four columns are still the rule everywhere else.
+    expect(rule(".comb[data-shape='iphone'] .spring-grid, .comb[data-shape='iphone'] .spring-dock")).toContain('repeat(4, minmax(0, 1fr))')
+  })
+
+  it('the squares wrap wider than a phone, and stay one snapping column on it', () => {
+    const wide = SHOWCASE_STYLE.indexOf('@media (min-width: 721px)')
+    expect(wide).toBeGreaterThan(0)
+    const wrapped = rule(".comb[data-shape='tiles']", wide)
+    expect(wrapped).toContain('grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr))')
+    expect(wrapped).toContain('scroll-snap-type: none')
+    expect(rule(".comb[data-shape='tiles']")).toContain('scroll-snap-type: y mandatory')
   })
 })

@@ -2404,8 +2404,11 @@ export const SHOWCASE_STYLE = `
   font: 600 1rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); }
 .pager-label:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
 .hosted { touch-action: pan-y pinch-zoom; }
-/* THE LAUNCHER (jwize 2026-10-25): the same tiles — the same pictures, names, badges and links — in the traditional rows of four. The hexagon stays the brand's default. */
-.comb[data-shape='launcher'] { --icon: 6rem; display: grid; grid-template-columns: repeat(4, minmax(0, var(--icon))); justify-content: start; gap: 1.3rem 1.1rem; }
+/* THE LAUNCHER (jwize 2026-10-25): the same tiles — the same pictures, names, badges and links — as rows of rounded icons. The hexagon stays the brand's default.
+   IT WRAPS TO THE PAGE (jwize 2026-11-13: "the iphone tiles still have to get arranged and wrap … holding 4 rows and all the way to the left taking a small
+   portion of the screen on desktop"): as many icons across as the width holds, the block centred, the next row starting under the first icon. A phone keeps
+   its four across (the 720px block below). An icon stays its own size, so the badges on its corner stay on its corner. */
+.comb[data-shape='launcher'] { --icon: 6rem; display: grid; grid-template-columns: repeat(auto-fit, var(--icon)); justify-content: center; gap: 1.6rem 1.5rem; }
 .comb[data-shape='launcher'] .hex { width: 100%; height: auto; display: grid; justify-items: center; align-content: start; gap: .45rem;
   clip-path: none; background: none; transition: none; }
 .comb[data-shape='launcher'] .hex > .hex-art { position: relative; inset: auto; width: 100%; aspect-ratio: 1; clip-path: none; border-radius: 22%;
@@ -2453,6 +2456,16 @@ export const SHOWCASE_STYLE = `
 .comb[data-shape='iphone'] .hex:hover > .hex-art { transform: translateY(-2px); }
 .comb[data-shape='iphone'] a.hex:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
 .comb[data-shape='iphone'] a.hex:focus-visible > .hex-art { inset: auto; }
+/* ON A WIDE PAGE THE SCREEN IS A TABLET'S (jwize 2026-11-13: every look but the list needs to use the desktop): six across on a wider
+   screen, the dock its four icons wide and centred the way a tablet's is. The same tiles in the same order; a phone keeps the phone. */
+@media (min-width: 900px) {
+  .comb[data-shape='iphone'] .spring { width: min(100%, 46rem); min-height: 30rem; padding: 1.7rem 1.6rem .8rem; border-radius: 2.1rem; }
+  .comb[data-shape='iphone'] .spring-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1.6rem .7rem; }
+  .comb[data-shape='iphone'] .spring-dock { align-self: center; grid-template-columns: repeat(4, 5.6rem); gap: 0 .9rem; padding: .75rem 1.1rem .6rem; }
+  .comb[data-shape='iphone'] .hex > .hex-art { max-width: 4.8rem; }
+  .comb[data-shape='iphone'] .hex-name { font-size: .74rem; }
+  .comb[data-shape='iphone'] .hex-owners, .comb[data-shape='iphone'] .hex.in-showcase::after { left: calc(50% + min(2.4rem, 50%) - .85rem); }
+}
 /* THE LIST: the same tiles as blocks down the page. One in your own showcase is a link.
    One under another domain is on (a check) or off (gray), and a tap switches it. */
 .comb[data-shape='list'] { display: flex; flex-direction: column; gap: .4rem; min-width: 0; max-width: 100%; }
@@ -2504,6 +2517,15 @@ export const SHOWCASE_STYLE = `
 .comb[data-shape='tiles'] a.hex:hover, .comb[data-shape='tiles'] a.hex:focus-visible { background: none; }
 .comb[data-shape='tiles'] a.hex:focus-visible { outline: 2px solid #fff; outline-offset: -3px; }
 .comb[data-shape='tiles'] a.hex:focus-visible > .hex-art { inset: 0; }
+/* WIDER THAN A PHONE, THE SQUARES WRAP (jwize 2026-11-13): one square in the middle of a desktop hid every tile but the first behind a
+   scroller nothing pointed at. The same squares now fill the row, edge to edge, and the page scrolls; the snapping column stays the phone's. */
+@media (min-width: 721px) {
+  .comb[data-shape='tiles'] { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: .75rem; align-self: stretch;
+    width: 100%; aspect-ratio: auto; margin-inline: 0; overflow: visible; scroll-snap-type: none; touch-action: auto; background: none;
+    border-radius: 0; box-shadow: none; }
+  .comb[data-shape='tiles'] .hex { overflow: hidden; border-radius: var(--hc-radius-card, 3px); scroll-snap-align: none;
+    box-shadow: 0 .9rem 2rem -1.3rem rgb(8 10 16 / .65), inset 0 0 0 1px rgb(255 255 255 / .08); }
+}
 .hosted-nothing { margin: .4rem 0 1rem; color: var(--md-on-surface-var); }
 /* the platform's doors are tiles: the same hexagon, a glyph for a picture, a link for a click */
 a.hex { color: inherit; text-decoration: none; cursor: pointer; }
