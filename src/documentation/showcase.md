@@ -269,8 +269,33 @@ right, the current group's label (tap, swipe or arrow keys turn it; in Manage it
 tile with the ones off grayed (a tap switches it for the group; leaving Manage hides them), new group,
 the template per group (hexagons, the row launcher, the iPhone launcher, the list, the square column), delete, undo/redo (`community.draft.ts`) and **Publish**
 (`community publish`), which asks first and signs `showcase:<zone>`. **Still owed:** the draft is
-in-window undo only, not yet the hive's own history slot, so closing the window drops the undo trail; and the
-candidates are this key's lineages on the zone, not yet the followed domains' tiles.
+in-window undo only, not yet the hive's own history slot, so closing the window drops the undo trail. The
+candidates are this key's lineages on the zone and, since 2026-11-13, what is on in the domains you follow (below).
+
+### A publish has three stages (jwize 2026-11-13)
+
+"There should be a three stage publish." In the hive:
+
+1. **Replicate.** You have a host and you follow somebody (`follow <domain>`, the host directory).
+2. **The domain.** Open that domain in the host directory and its creations are on or off (`community:offer` /
+   `community:withdraw`, kept in the `community:offers` document). On is this hive's own switch and signs nothing.
+3. **The community.** In `community <domain>`, Manage shows what is on in a domain as a grayed tile beside your own
+   lineages. A click promotes it into the draft, and Publish signs it. A click on one that is on takes it back out:
+   it is then in the domain and not in the community, and it stays grayed in the window until the window closes.
+
+**Nothing complicated: the root domain is strictly on and off** (jwize, 2026-11-13: "You shouldn't manage your
+revision on the root domain. This is strictly on and off. The revisions should be available in the development mode
+on a subdomain"). On a root domain the host directory switches a package on or off and brings it to the newest; it
+offers no revision to pick. On a subdomain (`<name>.<zone>`) the manage menu keeps "Pick a revision…"
+(`picksRevisions` in `host-directory.view.ts`). The three stages above carry no revision choice at all.
+
+One tile is one instance, a publisher's lineage (`community-candidates.ts`). The same name on two domains under two
+keys is two tiles, each saying its domain, and you click the one you mean. One instance served by several domains is
+one tile naming them all, because a showcase item is `{ pubkey, lineage }` and carries no host.
+
+**Still owed:** the offers document keeps one creation per name, so a second instance of a name is known only for
+domains looked into this session; the front door's Manage still turns a followed domain's tile on in one step; and
+whether a visitor's page draws a promoted creation that this host's ledger does not list has not been checked.
 
 ### The tap on the page, for the owner (jwize 2026-10-25)
 

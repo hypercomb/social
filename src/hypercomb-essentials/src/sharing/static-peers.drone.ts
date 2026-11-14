@@ -32,6 +32,7 @@ import {
 } from './static-peers.js'
 import { STATIC_FOLLOWS_KEY } from './hive-link.js'
 import { nameService } from './names.service.js'
+import type { OfferedInstance } from './community-candidates.js'
 import type { TileEntry, TileSource, LocationContext } from '../presentation/tiles/tile-source.types.js'
 
 export const STATIC_PEERS_KEY = '@diamondcoreprocessor.com/StaticPeersDrone'
@@ -236,6 +237,25 @@ export class StaticPeersDrone extends Drone {
   /** Every offer, for the community page's toggles. */
   public readonly offers = (): readonly StaticOffer[] => [...this.#offers.values()]
   public readonly isOffered = (name: string): boolean => this.#offers.has(String(name ?? '').trim())
+
+  /** WHAT IS ON IN A DOMAIN, AS THE COMMUNITY WINDOW WANTS IT (jwize 2026-11-13,
+   *  the three stage publish: replicate, the domain, the community). Each offer
+   *  is an instance — a publisher's lineage and where it is served. A domain
+   *  looked into this session that serves the same name under another key or
+   *  lineage is another instance, so the window can show both and the
+   *  participant clicks the one they mean. */
+  public readonly offeredInstances = (): readonly OfferedInstance[] => {
+    const out: OfferedInstance[] = [...this.#offers.values()]
+      .map(o => ({ name: o.name, pubkey: o.pubkey, lineage: o.lineageKey, hosts: [...o.hosts] }))
+    for (const held of this.#creations.values()) {
+      for (const row of held.rows) {
+        if (row.offer && this.#offers.has(row.name)) {
+          out.push({ name: row.name, pubkey: row.offer.pubkey, lineage: row.offer.lineageKey, hosts: [row.host] })
+        }
+      }
+    }
+    return out
+  }
 
   // ── what a domain serves, and what you have taken from it ────────────
   //

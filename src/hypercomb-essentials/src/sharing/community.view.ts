@@ -6,8 +6,14 @@
 // tile is switched on or off for that group with one tap; the ones off are grayed. Leaving Manage hides
 // them. Undo and redo are kept while the window is open. Signing is a deliberate act of its own
 // (`community publish`): a switch only edits the draft, never what visitors see.
+//
+// THE THIRD STAGE OF A PUBLISH (jwize 2026-11-13): replicate (follow a host), the domain (a creation is
+// on or off in that domain's list), the community. What is on in a domain stands here grayed while
+// managing; a click promotes it, and a click on one that is on takes it back out — in the domain, not in
+// the community. The same name on different domains is one tile each, saying its domain.
 
 import { EffectBus, requestConfirm } from '@hypercomb/core'
+import { communityCandidates, type CommunityCandidate, type OfferedInstance } from './community-candidates.js'
 import { CommunityDraft } from './community.draft.js'
 import { publisherKeyHex } from './key-list.client.js'
 import {
@@ -18,6 +24,15 @@ import {
 
 const STYLE_ID = 'hc-community-window-styles'
 const SIG = /^[0-9a-f]{64}$/
+/** static-peers.drone.ts holds what is on in each domain; named by key, never imported (it registers itself). */
+const STATIC_PEERS_KEY = '@diamondcoreprocessor.com/StaticPeersDrone'
+
+/** What is on in the domains you follow — step two of the publish, read where it is kept. */
+const onInDomains = (): readonly OfferedInstance[] => {
+  const peers = (window as { ioc?: { get?: (key: string) => unknown } }).ioc?.get?.(STATIC_PEERS_KEY) as
+    { offeredInstances?: () => readonly OfferedInstance[] } | undefined
+  try { return peers?.offeredInstances?.() ?? [] } catch { return [] }
+}
 
 const say = (message: string, type = 'info'): void => { EffectBus.emit('toast:show', { type, message }) }
 
@@ -66,7 +81,12 @@ const same = (a: ShowcaseItem, b: ShowcaseItem): boolean => a.pubkey === b.pubke
 export class CommunityView extends EventTarget {
   #window: HTMLDivElement | null = null
   #draft: CommunityDraft | null = null
-  #options: ShowcaseItem[] = []
+  /** This key's lineages on the zone, read once when the window opens. */
+  #own: ShowcaseItem[] = []
+  /** What the record named when the window opened: a tile taken out stays, grayed, until the window closes. */
+  #named: ShowcaseItem[] = []
+  /** Every tile the window can draw: your own, what is on in a domain, what the record names. */
+  #options: CommunityCandidate[] = []
   #page = '' // '' is All
   #managing = false
   #query = ''
@@ -75,6 +95,8 @@ export class CommunityView extends EventTarget {
     super()
     EffectBus.on<{ zone?: string }>('community:open', payload => { void this.open(payload?.zone) })
     EffectBus.on('community:publish', () => { void this.publish() })
+    // A creation turned on or off in a domain while this window is open arrives, or leaves, at once.
+    EffectBus.on('community:offers-render', () => { if (this.#window) this.#renderTiles() })
   }
 
   async open(zone?: string): Promise<void> {
@@ -87,7 +109,8 @@ export class CommunityView extends EventTarget {
       say('The community could not be read.', 'warning'); return undefined
     })])
     if (signed === undefined) return
-    this.#options = options
+    this.#own = options
+    this.#named = [...(signed?.items ?? [])]
     this.#draft = new CommunityDraft(signed ?? { zone: target, items: [], domains: [] })
     this.#page = ''
     this.#managing = false
@@ -287,22 +310,33 @@ export class CommunityView extends EventTarget {
     const tiles = this.#window?.querySelector('.hc-community-tiles')
     if (!tiles || !this.#draft) return
     tiles.replaceChildren()
+    this.#options = communityCandidates(this.#own, onInDomains(), [...this.#named, ...this.#draft.current.items])
     const query = this.#query.trim().toLowerCase()
     let shown = 0
     for (const item of this.#options) {
-      if (query && !item.lineage.toLowerCase().includes(query)) continue
+      const where = item.hosts.join(', ')
+      if (query && !`${item.lineage} ${where}`.toLowerCase().includes(query)) continue
       const on = this.#inGroup(item)
       // Viewing shows what is on; managing shows everything, the ones off grayed.
       if (!on && !this.#managing) continue
-      const tile = this.#el('button', on ? 'hc-community-tile' : 'hc-community-tile off', item.lineage)
+      const tile = this.#el('button', on ? 'hc-community-tile' : 'hc-community-tile off')
       tile.type = 'button'
+      // The word, and under it the domain it is on: what tells two of the same name apart.
+      tile.append(this.#el('span', 'hc-community-tile-name', item.hosts.length ? item.name : item.lineage))
+      if (where) tile.append(this.#el('span', 'hc-community-tile-host', where))
+      tile.title = where
+        ? (on ? `${item.name} from ${where} is in your community. Press to take it out; it stays on in its domain.`
+          : `${item.name} is on in ${where}. Press to promote it to your community.`)
+        : item.lineage
       tile.setAttribute('aria-pressed', String(on))
       if (this.#managing) tile.addEventListener('click', () => this.#toggle(item))
       else tile.disabled = true
       tiles.append(tile)
       shown++
     }
-    if (!shown) tiles.append(this.#el('p', 'hc-community-empty', this.#managing ? 'Nothing published here yet.' : 'Nothing is on for this group. Use Manage to turn tiles on.'))
+    if (!shown) tiles.append(this.#el('p', 'hc-community-empty', this.#managing
+      ? 'Nothing to promote yet. Turn a creation on in a domain you follow, or publish one here.'
+      : 'Nothing is on for this group. Use Manage to turn tiles on.'))
   }
 
   #ensureStyles(): void {
@@ -324,6 +358,8 @@ export class CommunityView extends EventTarget {
 .hc-community-label{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
 .hc-community-name{border:0!important;background:none!important;font-size:1.05rem;font-weight:600;padding:0!important}
 .hc-community-tiles{flex:1;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr));gap:.5rem;align-content:start}
+.hc-community-tile{display:flex;flex-direction:column;align-items:flex-start;gap:.1rem;text-align:left}
+.hc-community-tile-host{font-size:.72rem;color:#9babb6;overflow-wrap:anywhere}
 .hc-community-tile.off{opacity:.35;filter:grayscale(1)}
 .hc-community-empty{grid-column:1/-1;color:#9babb6;font-size:.85rem}
 .hc-community-tools{display:flex;gap:.5rem;justify-content:flex-end}

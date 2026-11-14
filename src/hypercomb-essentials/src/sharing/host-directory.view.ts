@@ -204,6 +204,25 @@ const glyphed = (node: HTMLElement, name: Glyph): HTMLElement => {
 
 const zoneOf = (raw: unknown): string => hostZone(raw)
 
+/**
+ * REVISIONS BELONG TO DEVELOPMENT, ON A SUBDOMAIN (jwize 2026-11-13: "there
+ * should be nothing complicated here. You shouldn't manage your revision on the
+ * root domain. This is strictly on and off. The revisions should be available
+ * in the development mode on a subdomain").
+ *
+ * True only for a page on a name below a zone (`meetups.hypercomb.com`,
+ * `card.localhost:4275`). A root domain, a bare loopback and an address are
+ * the place a package is switched on or off and brought to the newest, and
+ * nothing else. Two labels are read as a root, so a name under a two-part
+ * suffix (`example.co.uk`) reads as a subdomain and keeps the picker.
+ */
+export const picksRevisions = (host: unknown): boolean => {
+  const name = String(host ?? '').trim().toLowerCase().replace(/:\d{1,5}$/, '').replace(/\.+$/, '')
+  if (!name || /^\d+(?:\.\d+){3}$/.test(name) || name.includes('[')) return false
+  const labels = name.split('.').filter(Boolean)
+  return labels.at(-1) === 'localhost' ? labels.length > 1 : labels.length > 2
+}
+
 /** A module is named `<sig>.js` in one record and `<sig>` in another. */
 const bareSig = (sig: string): string => sig.trim().toLowerCase().replace(/.(?:js|json)$/, '')
 
@@ -1114,6 +1133,8 @@ export class HostDirectoryElement extends HTMLElement {
   /** The domain this app runs on: never offered a Visit — a second tab on
    *  your own hive is a second writer on one store. */
   readonly #home = hostZone(location.host)
+  /** Whether this page picks revisions at all: only on a subdomain (picksRevisions). */
+  readonly #revisionsHere = picksRevisions(location.host)
 
   readonly #session: WindowSession = {
     park: () => this.#unmount(),
@@ -3055,7 +3076,7 @@ export class HostDirectoryElement extends HTMLElement {
       if (row.count) count.title = t('hosts.carried-by', '{count} of your hosts carry this signature', { count: row.count })
 
       // The manage icon opens a menu: turn it off or on, update it to the newest,
-      // pick a revision, look at its code in the columns.
+      // look at its code in the columns — and, on a subdomain only, pick a revision.
       const manage = button('hd-icon hd-manage', '', t('hosts.manage', 'Manage {name}', { name: row.path }))
       manage.append(glyph('manageIcon'))
       manage.tabIndex = -1
@@ -3140,7 +3161,8 @@ export class HostDirectoryElement extends HTMLElement {
     if (row.update) {
       item('updateIcon', t('hosts.update-newest', 'Update {name} to the newest', { name: row.path }), () => { void this.#takeUpdate(row) }, !acts || !recursive || !!this.#busy, '', true)
     }
-    item('revisionsIcon', t('hosts.revisions.pick', 'Pick a revision…'), () => { void this.#openRevisions(row.path) }, !recursive)
+    // On a root domain a package is on or off; its revisions are picked on a subdomain.
+    if (this.#revisionsHere) item('revisionsIcon', t('hosts.revisions.pick', 'Pick a revision…'), () => { void this.#openRevisions(row.path) }, !recursive)
     item('codeIcon', t('hosts.code.look', 'Look at the code'), () => this.#lookAtCode(k, row, model[k]!.rows.map(candidate => candidate.path)))
 
     this.#arriving(`menu:${path}`, menu)
@@ -3830,7 +3852,7 @@ export class HostDirectoryElement extends HTMLElement {
 
   async #openRevisions(path: string): Promise<void> {
     const reach = port()
-    if (!reach?.recursive) return
+    if (!reach?.recursive || !this.#revisionsHere) return
     this.#view = 'revisions'
     this.#revPath = path
     this.#revisions = null

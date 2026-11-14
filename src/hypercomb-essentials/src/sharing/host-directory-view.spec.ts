@@ -10,7 +10,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import type { InstallNode, InstallRevision } from '@hypercomb/core'
-import { LIGHT_BRIGHTEST, LIGHT_DIMMEST, LIGHT_UNKNOWN, ageLevel, lightOf, runningStamp, NOTHING_PICKED, codeLines, codeName, filesPicked, pickAll, pickKey, pickMode, publishedCount, publishedOn, stackRows, stillPicked, directoryRows, domainRows, filesOf, hostBehind, isOlder, namedFromVerdict, namedWhenUninstalled, offerableRoots, offeredRevisions, updateProgress, updatingSentence, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, sourcePackagePaths, type ServedTree } from './host-directory.view'
+import { LIGHT_BRIGHTEST, LIGHT_DIMMEST, LIGHT_UNKNOWN, ageLevel, lightOf, runningStamp, NOTHING_PICKED, codeLines, codeName, filesPicked, pickAll, pickKey, pickMode, publishedCount, publishedOn, stackRows, stillPicked, directoryRows, domainRows, filesOf, hostBehind, isOlder, namedFromVerdict, namedWhenUninstalled, offerableRoots, offeredRevisions, picksRevisions, updateProgress, updatingSentence, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, sourcePackagePaths, type ServedTree } from './host-directory.view'
 import { ATTESTED_PACKAGES_KEY, attestPackage } from './package-attestation'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -619,6 +619,24 @@ describe('the host directory', () => {
     expect(VIEW).toMatch(/this\.#railFocus = next\.dataset\['pane'\] \?\? ''/)
     expect(VIEW).toMatch(/const OWN_PANE = '#own'/)
     expect(VIEW).toMatch(/#renderOwn\(body: HTMLElement\): void/)
+  })
+
+  it('a root domain is strictly on and off: revisions are picked only on a subdomain', () => {
+    // jwize 2026-11-13: "You shouldn't manage your revision on the root domain. This is strictly on and off.
+    // The revisions should be available in the development mode on a subdomain."
+    for (const root of ['hypercomb.io', 'hypercomb.com', 'jwize.com:443', 'localhost', 'localhost:4250', '127.0.0.1:4250', '']) {
+      expect(picksRevisions(root), root).toBe(false)
+    }
+    for (const below of ['meetups.hypercomb.com', 'card.jwize.com', 'card.localhost:4275', 'a.b.hypercomb.io']) {
+      expect(picksRevisions(below), below).toBe(true)
+    }
+    const menu = VIEW.slice(VIEW.indexOf('#renderMenu(): void {'), VIEW.indexOf('#lookAtCode(k: number'))
+    expect(menu).toMatch(/if \(this\.#revisionsHere\) item\('revisionsIcon'/)
+    // The switch and the update are never gated on it.
+    expect(menu).not.toMatch(/#revisionsHere.*#(toggle|takeUpdate)/)
+    expect(VIEW).toMatch(/readonly #revisionsHere = picksRevisions\(location\.host\)/)
+    const open = VIEW.slice(VIEW.indexOf('async #openRevisions('))
+    expect(open.slice(0, 200)).toMatch(/if \(!reach\?\.recursive \|\| !this\.#revisionsHere\) return/)
   })
 
   it('revisions are a drill-down that returns to the list, and a change reopens it where it was chosen', () => {
