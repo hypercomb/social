@@ -458,7 +458,12 @@ describe('opening what a signature names', () => {
   // carries the platform's own source as knowledge atoms (scripts/knowledge-atoms.ts); this holds that the
   // reads a model already has reach them, with nothing new in the reader.
   it('finds and opens the platform’s own source, as written, through the reads a model already has', async () => {
-    const { knowledgeAtomText } = await import('../../scripts/knowledge-atoms')
+    // The build script lives beside `src/`, outside this project's rootDir: named by a value, so the
+    // type check does not pull it in.
+    const buildScript = '../../scripts/knowledge-atoms'
+    const { knowledgeAtomText } = await import(/* @vite-ignore */ buildScript) as {
+      knowledgeAtomText: (alias: string, lazyLine: string, about: string, sources: readonly { path: string; text: string }[]) => string
+    }
     const atom = knowledgeAtomText('@hypercomb/source/core', '// lazy — an atom', 'the source of hypercomb-core as written', [
       { path: 'src/hypercomb-core/core/ioc.ts', text: ['/** One registry, asked by key. */', 'export type Registry = Map<string, unknown>',
         'export const lookup = (key: string) => registry.get(key)', ''].join('\n') },
@@ -493,6 +498,47 @@ describe('opening what a signature names', () => {
     } finally {
       if (before === undefined) delete aliases.__hypercombAliasMap
       else aliases.__hypercombAliasMap = before
+    }
+  })
+
+  // jwize, 2026-11-13: "explore across domains including shared community creations". A pool read listed the
+  // community's offerings and `read <signature>` then said not-found for every one: such a member is a record
+  // kept inside the pool, answered at `/<pool>/<member>` only. The reader now asks there, and reads the record
+  // only when it hashes to its name.
+  it('opens a pool member a pool read listed, from the host that listed it, verified by its name', async () => {
+    const { SignatureService } = await import('@hypercomb/core')
+    const { forgetPoolMembers, readPool } = await import('./hive-pool-read.js')
+    const record = new TextEncoder().encode(JSON.stringify({ kind: 'host:offering', title: 'Host your hive', lineage: 'hosting' }))
+    const member = await SignatureService.sign(record.buffer.slice(record.byteOffset, record.byteOffset + record.byteLength) as ArrayBuffer)
+    const address = sig(21)
+    forgetPoolMembers()
+    await readPool('host:offerings', {}, {
+      hosts: async () => ['offers.example'], address: async () => address,
+      listing: async () => `${member}\n`, document: async () => null,
+    })
+    const asked: string[] = []
+    const realFetch = globalThis.fetch
+    globalThis.fetch = (async (url: unknown) => {
+      asked.push(String(url))
+      return String(url) === `https://offers.example/${address}/${member}`
+        ? new Response(record, { status: 200, headers: { 'content-type': 'application/json; charset=utf-8' } })
+        : new Response('not found', { status: 404 })
+    }) as typeof fetch
+    try {
+      const reader = readerWith({
+        getResource: vi.fn(async () => null), getBeeBytes: vi.fn(async () => null), getDependencyBytes: vi.fn(async () => null),
+      })
+      const read = await reader.readBytesBySig(member)
+      expect(read).toMatchObject({ ok: true, sig: member, of: 'resource', type: 'application/json', size: record.byteLength })
+      expect(read.ok && read.text).toContain('Host your hive')
+      expect(asked).toEqual([`https://offers.example/${address}/${member}`])
+      // A signature no pool read listed is still not-found, and no host is asked for it.
+      asked.length = 0
+      expect(await reader.readBytesBySig(sig(22))).toEqual({ ok: false, root: sig(22), code: 'not-found' })
+      expect(asked).toEqual([])
+    } finally {
+      globalThis.fetch = realFetch
+      forgetPoolMembers()
     }
   })
 })

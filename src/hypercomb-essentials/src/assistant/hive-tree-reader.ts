@@ -18,7 +18,7 @@ import type { CurrentLayerRef, LayerContent } from '../history/history.service.j
 import { isPeerContentAt } from '../sharing/adopted-roots.js'
 import { MAX_RECORD_DEPTH } from '../search/hive-search.js'
 import { readExplore, type HypercombExploreRead } from './hive-explore-read.js'
-import { readPool, type HypercombPoolRead } from './hive-pool-read.js'
+import { readPool, readPoolMember, type HypercombPoolRead } from './hive-pool-read.js'
 
 export const HIVE_TREE_READER_IOC_KEY = '@diamondcoreprocessor.com/HypercombHiveTreeReader'
 
@@ -261,6 +261,10 @@ export type HypercombBytesRead =
     readonly text?: string
     readonly truncated: boolean
     readonly next?: number
+    /** The one source file this page is of, when a section was asked for. */
+    readonly section?: string
+    /** Every source file a module holds, on the first page of a whole read. */
+    readonly sections?: readonly { readonly path: string; readonly lines: number }[]
   }
   | { readonly ok: false; readonly root: string; readonly code: 'not-found' | 'incomplete-read' | 'unavailable' }
 
@@ -1313,9 +1317,19 @@ export class HypercombHiveTreeReader {
       if (!bytes) {
         of = 'resource'
         const blob = await store.getResource(sig).catch(() => null)
-        if (!blob) return { ok: false, root, code: 'not-found' }
-        type = blob.type
-        bytes = await blobBytes(blob)
+        if (blob) {
+          type = blob.type
+          bytes = await blobBytes(blob)
+        } else {
+          // A POOL'S MEMBER, KEPT INSIDE THE POOL (hive-pool-read.ts): a
+          // signature a `pool` read listed and no store or host root holds is
+          // asked of the hosts that listed it, at the pool's own address, and
+          // read only when it hashes to its name. Nothing is written here.
+          const member = await readPoolMember(sig, options.signal).catch(() => null)
+          if (!member) return { ok: false, root, code: 'not-found' }
+          type = member.type
+          bytes = member.bytes
+        }
       }
       if (options.signal?.aborted) throw stopped()
       const whole = textOf(bytes)

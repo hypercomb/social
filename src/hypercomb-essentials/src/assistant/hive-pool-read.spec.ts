@@ -2,7 +2,7 @@
 // address every host carries it at. It names a meaning, never a host.
 
 import { describe, expect, it, vi } from 'vitest'
-import { readPool, type PoolReadDeps } from './hive-pool-read.js'
+import { forgetPoolMembers, poolMemberSource, readPool, readPoolMember, type PoolReadDeps } from './hive-pool-read.js'
 
 const ADDRESS = 'a'.repeat(64)
 const MEMBER = 'b'.repeat(64)
@@ -74,5 +74,54 @@ describe('a pool of meaning, asked of the hosts', () => {
   it('says so when the hive follows no hosts', async () => {
     expect(await readPool('host:publications', {}, deps({ hosts: async () => [] })))
       .toEqual({ ok: false, root: 'pool host:publications', code: 'no-hosts' })
+  })
+})
+
+// A member that is a record kept inside the pool is answered at
+// `/<pool>/<member>` and nowhere else: the listing is what says where.
+describe('a listed member can be opened', () => {
+  const RECORD = new TextEncoder().encode(JSON.stringify({ kind: 'host:offering', title: 'Host your hive' }))
+  const hashOf = async (bytes: Uint8Array): Promise<string> => bytes === RECORD ? MEMBER : OTHER
+  const listed = (): Promise<unknown> => {
+    forgetPoolMembers()
+    return readPool('host:offerings', {}, deps({
+      listing: async origin => origin.includes('a.example') ? `${MEMBER}\n` : 'absent',
+    }))
+  }
+
+  it('remembers which pool and hosts listed a member, and nothing it was not told', async () => {
+    await listed()
+    expect(poolMemberSource(MEMBER)).toEqual({ address: ADDRESS, hosts: ['a.example'] })
+    expect(poolMemberSource(OTHER)).toBeUndefined()
+  })
+
+  it('asks a listing host at the pool\'s own address and reads what hashes to the name', async () => {
+    await listed()
+    const member = vi.fn(async () => ({ bytes: RECORD, type: 'application/json' }))
+    const read = await readPoolMember(MEMBER, undefined, { member, sign: hashOf })
+    expect(member).toHaveBeenCalledWith('https://a.example', ADDRESS, MEMBER, undefined)
+    expect(read).toEqual({ bytes: RECORD, type: 'application/json' })
+  })
+
+  it('refuses bytes that do not hash to the name: a host cannot put its words under a listed signature', async () => {
+    await listed()
+    const forged = new TextEncoder().encode('{"title":"not what was listed"}')
+    expect(await readPoolMember(MEMBER, undefined, { member: async () => ({ bytes: forged, type: 'application/json' }), sign: hashOf })).toBeNull()
+  })
+
+  it('never asks any host for a signature no pool read listed', async () => {
+    await listed()
+    const member = vi.fn(async () => ({ bytes: RECORD, type: '' }))
+    expect(await readPoolMember(OTHER, undefined, { member, sign: hashOf })).toBeNull()
+    expect(member).not.toHaveBeenCalled()
+  })
+
+  it('goes on to the next listing host when one is silent, and is null when none answers', async () => {
+    forgetPoolMembers()
+    await readPool('host:offerings', {}, deps({ listing: async () => `${MEMBER}\n` }))
+    const member = vi.fn(async (origin: string) => origin.includes('a.example') ? null : { bytes: RECORD, type: '' })
+    expect(await readPoolMember(MEMBER, undefined, { member, sign: hashOf })).toEqual({ bytes: RECORD, type: '' })
+    expect(member).toHaveBeenCalledTimes(2)
+    expect(await readPoolMember(MEMBER, undefined, { member: async () => null, sign: hashOf })).toBeNull()
   })
 })

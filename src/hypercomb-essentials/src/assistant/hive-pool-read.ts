@@ -29,7 +29,8 @@
 // READ ONLY, NOTHING KEPT. No pool is minted, nothing is written to the
 // store, and the meaning is NOT registered as a pool address: a word a model
 // tried is not a pool this hive holds. A host that is down or answers a page
-// is a gap, said as one.
+// is a gap, said as one. (Which pool and hosts listed a member is remembered
+// in memory for the session, so the member can be opened: see below.)
 
 import { SignatureService } from '@hypercomb/core'
 import { fetchWithDeadline, mapBounded, HOST_CONCURRENCY } from '../sharing/bounded-fetch.js'
@@ -108,6 +109,91 @@ export const livePoolReadDeps: PoolReadDeps = {
   },
 }
 
+// ── A LISTED MEMBER CAN BE OPENED ────────────────────────────────────────────
+//
+// A set's listing gives entry names, and the lesson tells a model that a later
+// `read <signature>` opens one. That held for a member whose bytes are content
+// at a host's root. It did not hold for a member that is a RECORD KEPT INSIDE
+// THE POOL: a host answers it at `/<pool>/<member>` and nowhere else, so every
+// offering the community shares (`host:offerings`) was listed and then read as
+// not-found (found on a managed site door, 2026-11-14).
+//
+// The listing is the missing half: it says which pool, on which hosts, named
+// the member. That is remembered for the session, in memory only, and the
+// reader asks there when a signature is nowhere else. A member's name is the
+// hash of its record, so what a host answers is VERIFIED before it is read —
+// a host cannot put its own words under a signature another host listed.
+
+/** A member record larger than this is not read. */
+export const MAX_MEMBER_BYTES = 256_000
+/** Members whose listing is remembered; the oldest go first. */
+const MEMBER_SOURCES_CAP = 4_000
+
+type MemberSource = { readonly address: string; readonly hosts: readonly string[] }
+const memberSources = new Map<string, MemberSource>()
+
+const noteMembers = (address: string, members: readonly { readonly sig: string; readonly hosts: readonly string[] }[]): void => {
+  for (const member of members) {
+    memberSources.delete(member.sig)
+    memberSources.set(member.sig, { address, hosts: [...member.hosts] })
+  }
+  while (memberSources.size > MEMBER_SOURCES_CAP) {
+    const oldest = memberSources.keys().next().value as string | undefined
+    if (oldest === undefined) break
+    memberSources.delete(oldest)
+  }
+}
+
+/** Where a pool read listed this signature, if one did this session. */
+export const poolMemberSource = (sig: string): MemberSource | undefined => memberSources.get(String(sig ?? '').toLowerCase())
+
+/** Forget every remembered listing (a test starts clean). */
+export const forgetPoolMembers = (): void => { memberSources.clear() }
+
+export interface PoolMemberDeps {
+  /** One member's bytes from one host's pool, with the type the host gave; null for anything that is not them. */
+  member(origin: string, address: string, sig: string, signal?: AbortSignal): Promise<{ bytes: Uint8Array; type: string } | null>
+  /** sha256 of bytes, as hex. */
+  sign(bytes: Uint8Array): Promise<string>
+}
+
+export const livePoolMemberDeps: PoolMemberDeps = {
+  member: async (origin, address, sig, signal) => {
+    try {
+      const response = await fetchWithDeadline(`${origin}/${address}/${sig}`, { cache: 'no-store' }, { timeoutMs: HOST_TIMEOUT_MS, ...(signal ? { signal } : {}) })
+      if (!response.ok || response.status === 204) return null
+      const bytes = new Uint8Array(await response.arrayBuffer())
+      if (!bytes.byteLength || bytes.byteLength > MAX_MEMBER_BYTES) return null
+      const type = String(response.headers?.get?.('content-type') ?? '').split(';')[0]!.trim().toLowerCase()
+      return { bytes, type: /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(type) ? type : '' }
+    } catch { return null }
+  },
+  sign: bytes => SignatureService.sign(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer),
+}
+
+/**
+ * A pool member's record, from a host that listed it. Null when no pool read
+ * listed the signature this session, when no listing host answers, or when
+ * what a host answers does not hash to the name. Nothing is written.
+ */
+export const readPoolMember = async (
+  raw: string,
+  signal?: AbortSignal,
+  deps: PoolMemberDeps = livePoolMemberDeps,
+): Promise<{ bytes: Uint8Array; type: string } | null> => {
+  const sig = String(raw ?? '').toLowerCase()
+  const source = memberSources.get(sig)
+  if (!source) return null
+  for (const host of source.hosts) {
+    if (signal?.aborted) return null
+    const answered = await deps.member(lensOrigin(host), source.address, sig, signal).catch(() => null)
+    if (!answered || !answered.bytes.byteLength || answered.bytes.byteLength > MAX_MEMBER_BYTES) continue
+    if ((await deps.sign(answered.bytes).catch(() => '')) !== sig) continue
+    return answered
+  }
+  return null
+}
+
 const rootOf = (meaning: string): string => `pool ${meaning}`
 
 /** Ask every followed host for one pool and merge what they say. Never throws
@@ -164,6 +250,9 @@ export const readPool = async (
     const more = end < text.length
     return { hosts: carriers, size: text.length, from, text: page, truncated: more, ...(more ? { next: end } : {}) }
   })
+  // Every member, named or past the page: a model may read one it was told
+  // of in an earlier page, and the listing is what says where it lives.
+  noteMembers(address, members)
   return {
     ok: true, root, meaning, address,
     hosts: answers.map(answer => ({ host: answer.host, state: answer.state })),
