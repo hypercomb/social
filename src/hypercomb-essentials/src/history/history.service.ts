@@ -1343,7 +1343,84 @@ export class HistoryService {
    * so callers that look it up by sig hit warm without re-reading the
    * file.
    */
-  readonly #ensureEmptyMarker = async (
+  readonly #ensureEmptyMarker = (
+    bag: FileSystemDirectoryHandle,
+    name: string,
+    locationSig?: string,
+  ): Promise<void> => {
+    // ONE PLANT PER BAG AT A TIME. The marker file exists, empty, from the
+    // moment the first plant creates it until its bytes are closed. A second
+    // first-read of the same bag used to see "it exists", return at once and
+    // read those zero bytes as the bag's head (see #settledMarkerBytes): the
+    // second caller now waits for the plant that is under way.
+    if (!locationSig) return this.#plantEmptyMarker(bag, name, locationSig)
+    const under = this.#plantsUnderWay.get(locationSig)
+    if (under) return under
+    const plant = this.#plantEmptyMarker(bag, name, locationSig)
+      .finally(() => { this.#plantsUnderWay.delete(locationSig) })
+    this.#plantsUnderWay.set(locationSig, plant)
+    return plant
+  }
+  readonly #plantsUnderWay = new Map<string, Promise<void>>()
+
+  /** How long a marker that reads as zero bytes is waited on, in steps. */
+  static readonly #MARKER_SETTLE_MS = [4, 8, 16, 32, 64, 128, 256]
+
+  /**
+   * A MARKER'S BYTES, ONCE THEY ARE THERE. A marker file is created empty and
+   * filled when its writer closes (core `writeLayerMarker`), so a reader in
+   * that window — another call in this tab, another tab — reads zero bytes.
+   * Zero bytes are not a marker: a pointer record and a legacy layer are both
+   * JSON. Read as a legacy layer they hash to the signature of nothing, which
+   * no store can hold (it is also the root lineage bag's address), and the
+   * commit that asked linked that signature into the parent as the tile:
+   * a child nobody can ever read, which then blocked every write that
+   * re-lists its siblings. Wait for the write; if the file stays empty the
+   * write was interrupted and the read REFUSES rather than invent a head.
+   */
+  readonly #settledMarkerBytes = async (
+    handle: FileSystemFileHandle,
+    lineageSig: string,
+    markerName: string,
+  ): Promise<ArrayBuffer> => {
+    let bytes = await (await handle.getFile()).arrayBuffer()
+    for (const wait of HistoryService.#MARKER_SETTLE_MS) {
+      if (bytes.byteLength > 0) return bytes
+      await new Promise<void>(resolve => setTimeout(resolve, wait))
+      bytes = await (await handle.getFile()).arrayBuffer()
+    }
+    if (bytes.byteLength > 0) return bytes
+    throw new Error(`[history] marker ${markerName} of ${lineageSig.slice(0, 8)} is empty — its write did not finish; nothing was read from it`)
+  }
+
+  static #zeroBytesSig: Promise<string> | null = null
+  /** The signature of zero bytes. Derived, never written down. */
+  static readonly #signatureOfNothing = (): Promise<string> =>
+    (HistoryService.#zeroBytesSig ??= SignatureService.sign(new ArrayBuffer(0)))
+
+  /**
+   * IS THIS CHILD REFERENCE DEAD — a reference that names the signature of
+   * zero bytes, directly or through its envelope? A layer is a JSON document,
+   * so nothing anywhere can answer that signature with a layer: the reference
+   * is not cold (bytes that have not arrived), it is unresolvable for good.
+   * The race above wrote such references before it was closed; a strict
+   * reader asks this before it calls an unreadable child a cold miss, so one
+   * dead reference no longer freezes the page it sits on. The reference is
+   * never removed here, and the tile it should have named is untouched in
+   * its own bag.
+   */
+  public readonly isDeadLayerReference = async (sig: string): Promise<boolean> => {
+    const reference = String(sig ?? '').toLowerCase()
+    if (!HistoryService.#SIG_RE.test(reference)) return false
+    const nothing = await HistoryService.#signatureOfNothing()
+    if (reference === nothing) return true
+    if (!this.#metaLayerTarget.has(reference)) {
+      try { await this.#resolveLayerLocal(reference) } catch { return false }
+    }
+    return this.#metaLayerTarget.get(reference) === nothing
+  }
+
+  readonly #plantEmptyMarker = async (
     bag: FileSystemDirectoryHandle,
     name: string,
     locationSig?: string,
@@ -1508,8 +1585,9 @@ export class HistoryService {
     }
 
     const handle = await bag!.getFileHandle(latestName, { create: false })
-    const file = await handle.getFile()
-    const bytes = await file.arrayBuffer()
+    // THE SIG HANDED TO A PARENT IS THE HASH OF BYTES THAT EXIST: a marker
+    // still being written is waited on, never read as an empty layer.
+    const bytes = await this.#settledMarkerBytes(handle, lineageSig, latestName)
     // Extract layer sig — handles both modern pointer records and
     // legacy markers (where bytes ARE the layer JSON).
     const { layerSig, isPointer } = await extractLayerSigFromMarker(bytes)
