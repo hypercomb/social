@@ -22,6 +22,7 @@ import { communityKey, doorsOpen, parseView, viewLabel, type ShowcaseCommunity, 
 import { DEFAULT_HOME, homeOrigin, turnOffHref } from './turn-off-link'
 import type { OwnerBridge } from './owner-bridge'
 import { showcaseHref } from './showcase-link'
+import { offerCopy } from './copy-text'
 import type { CommunityPick } from './community-tiles'
 import {
   LaneTouch, hostOf as laneHostOf, keepLaneOrientation, laneDrift, laneLayout, laneMaxShift, lanePosition, laneSnap, laneTileAt, onePerHost,
@@ -1669,13 +1670,18 @@ ${entry.key}`
         code.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(result.code)}`
         parts.push(code)
       }
+      // THE LINK IS COPIED AS IT ARRIVES (jwize 2026-11-14), the way typing `keys allow` in the hive copies it: the
+      // code is for a phone in the room, the link is for another browser on this machine. A browser that will not
+      // copy without a press leaves the button, which copies when pressed.
       const copy = el('button', 'version-visit invite-copy')
       copy.type = 'button'
-      copy.textContent = 'Copy the link instead'
-      copy.addEventListener('click', () => {
-        void navigator.clipboard?.writeText(result.link).then(() => { copy.textContent = 'Link copied' }, () => { copy.textContent = 'Could not copy' })
+      const copied = el('p', 'invite-words invite-copied')
+      copied.setAttribute('role', 'status')
+      const offer = offerCopy(copy, result.link, { idle: 'Copy the link instead', done: 'Link copied' }, done => {
+        copied.textContent = done ? 'The link is copied. To allow another browser on this machine, open it there.' : ''
       })
-      parts.push(words, copy)
+      void offer.now()
+      parts.push(words, copy, copied)
       sheet.replaceChildren(...parts)
       sheet.tabIndex = -1
       backdrop.hidden = false
@@ -2289,6 +2295,8 @@ export const SHOWCASE_STYLE = `
 .hero-brand[hidden], .hero-brand > [hidden] { display: none; }
 .invite-code { display: block; width: min(16rem, 70vw); height: auto; margin: 0 auto .8rem; border-radius: 4px; background: #fff; }
 .invite-words { margin: 0 0 .8rem; color: var(--md-on-surface-var); font: 500 .92rem/1.45 var(--md-font-ui, Inter, system-ui, sans-serif); }
+.invite-copied { margin: .6rem 0 0; }
+.invite-copied:empty { display: none; }
 .pager-phone { margin-left: .9rem; }
 .pager-publish:not([hidden]) ~ .pager-phone { margin-left: .9rem; }
 /* the foot of the page: the one act the last tap or the search offers, across the bottom of a phone */
