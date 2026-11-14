@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -432,6 +432,67 @@ test('a held probe: a missing index or atom answers 204, a held one answers as b
     assert.equal((await held.json()).pubkey, getPublicKey(owner))
   } finally {
     child.kill()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// A CONTRIBUTION OUTLIVES A RESTART (2026-11-14). jwize.com's relay held every
+// signed index in memory only, so a restart un-shared a `recipes` contribution
+// whose record was still on disk. The index is kept at
+// <content-dir>/<sign('hive:indexes')>/<pubkey> and read back at start; a
+// newer index replaces it, which is how a share is withdrawn.
+test('a held index and the list it names survive a restart; a newer index replaces it; a forged file is not served', { timeout: 30_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hypercomb-relay-held-'))
+  const owner = generateSecretKey()
+  const pubkey = getPublicKey(owner)
+  const indexes = sha(Buffer.from('hive:indexes', 'utf8'))
+  const record = 'b'.repeat(64)
+  const listKey = `list:${sha(Buffer.from('recipes', 'utf8'))}`
+  const listPool = sha(Buffer.from(listKey, 'utf8'))
+  const start = async () => {
+    const port = await freePort()
+    const child = spawn(process.execPath, ['relay.js', '--port', String(port), '--memory', '--content-dir', dir], { cwd: import.meta.dirname, stdio: 'ignore' })
+    const base = `http://127.0.0.1:${port}`
+    await waitForRelay(base)
+    return { child, base }
+  }
+  const stop = child => new Promise(resolve => { child.once('exit', resolve); child.kill() })
+  const put = async (base, roots, createdAt) => {
+    const url = `${base}/${indexes}/${pubkey}`
+    const evt = finalizeEvent({ kind: 30564, created_at: createdAt, tags: [], content: JSON.stringify({ roots }) }, owner)
+    const body = Buffer.from(JSON.stringify(evt))
+    const res = await fetch(url, { method: 'PUT', body, headers: { Authorization: auth(owner, url, 'PUT', body), 'Content-Type': 'application/json' } })
+    assert.equal(res.status, 200)
+  }
+  const now = Math.floor(Date.now() / 1000)
+  let relay = await start()
+  try {
+    await put(relay.base, { [listKey]: record }, now - 10)
+    assert.equal(await (await fetch(`${relay.base}/${listPool}/?held`)).text(), `${pubkey}\n`)
+    // No staging residue, and the pool directory lists nothing to a stranger.
+    assert.deepEqual(readdirSync(join(dir, indexes)), [pubkey])
+    assert.equal((await fetch(`${relay.base}/${indexes}/?held`)).status, 204)
+
+    await stop(relay.child)
+    relay = await start()
+    const back = await fetch(`${relay.base}/${indexes}/${pubkey}?held`)
+    assert.equal(back.status, 200)
+    assert.equal((await back.json()).created_at, now - 10)
+    assert.equal(await (await fetch(`${relay.base}/${listPool}/?held`)).text(), `${pubkey}\n`)
+
+    // Unshared: the newer index drops the key, and that is what the next start reads.
+    await put(relay.base, {}, now)
+    assert.equal((await fetch(`${relay.base}/${listPool}/?held`)).status, 204)
+    await stop(relay.child)
+    // A file that is not its key's signed index is never served.
+    const stranger = getPublicKey(generateSecretKey())
+    writeFileSync(join(dir, indexes, stranger), readFileSync(join(dir, indexes, pubkey)))
+    relay = await start()
+    assert.equal((await (await fetch(`${relay.base}/${indexes}/${pubkey}?held`)).json()).created_at, now)
+    assert.equal((await fetch(`${relay.base}/${listPool}/?held`)).status, 204)
+    assert.equal((await fetch(`${relay.base}/${indexes}/${stranger}?held`)).status, 204)
+  } finally {
+    relay.child.kill()
     rmSync(dir, { recursive: true, force: true })
   }
 })

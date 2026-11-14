@@ -70,9 +70,13 @@ export const exploreLines = (read: HypercombExploreRead): string[] => {
   const nothing = silent === read.hosts.length ? `no host answered (${asked} asked)`
     : silent ? `nothing found; ${silent} of ${asked} did not answer`
     : `no host holds anything for it (${asked} asked)`
+  // Published tiles with no values is something found: the header says the
+  // tiles, never "nothing found" above a list of them.
+  const tilesOnly = `${count(read.tiles.length, 'published tile')}, no values`
+    + (silent ? `; ${silent} of ${asked} did not answer` : ` (${asked} asked)`)
   const lines = [read.total
     ? `Explore "${read.name}": ${count(read.total, 'value')} from ${answered} of ${asked} — ${shown.join(' · ')}${more > 0 ? ` · and ${more} more` : ''}`
-    : `Explore "${read.name}": ${nothing}`]
+    : `Explore "${read.name}": ${read.tiles.length ? tilesOnly : nothing}`]
   if (read.hosts.length) {
     lines.push('  hosts: ' + read.hosts
       .map(host => `${host.host} ${HOST_SAID[host.state] ?? host.state}${host.state === 'answered' ? ` (${host.values})` : ''}`)

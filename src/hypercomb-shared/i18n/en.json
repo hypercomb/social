@@ -4257,6 +4257,8 @@
   "hosts.update-progress": "Updating {name}",
   "hosts.from-source": "This shell loads its packages from source, so turning them on or off and picking revisions happens on a hive.",
   "hosts.blocked": "Turn on {name} first",
+  "hosts.way-back": "{name} carries the way back ({words}), so it stays on",
+  "hosts.way-back-reading": "Reading what {name} carries…",
   "hosts.picked": "picked",
   "hosts.hidden-beneath": "{count} newer hidden",
   "hosts.hidden-beneath.one": "1 newer hidden",

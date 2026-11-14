@@ -76,6 +76,13 @@ export const ALWAYS_LIT_WORDS: ReadonlySet<string> = new Set([
   'beehaviors', 'behavior', 'help', 'create', 'undo', 'redo',
 ])
 
+/** THE WAY BACK, AS CODE (documentation/beehaviors-and-packages.md). The hosts
+ *  desk refuses to switch off whole a package whose bees answer one of these
+ *  words: with its code gone, nothing is left to turn it back on. The words
+ *  that cannot go dark, and `hosts`, the desk's own word — that one may go
+ *  dark (its light comes back from Beehaviors), but its code must stay. */
+export const PACKAGE_WAY_BACK_WORDS: ReadonlySet<string> = new Set([...ALWAYS_LIT_WORDS, 'hosts'])
+
 const fold = (word: unknown): string => String(word ?? '').trim().toLowerCase().replace(/^\/+/, '')
 
 /** `mail` → `word:mail`. Empty in, empty out. */

@@ -55,7 +55,8 @@ import {
   type AttestationVerdict,
   type WindowSession,
 } from '@hypercomb/core'
-import { beeDocsOf, beeWords, normalizeMeta, readBeeMeta, writeBeeMeta, type BeeDoc, type BeeMeta, type BeeWords } from './bee-meta.js'
+import { PACKAGE_WAY_BACK_WORDS } from '../commands/word-enablement.js'
+import { bareBeeSig, beeDocsOf, beeWords, normalizeMeta, readBeeMeta, writeBeeMeta, type BeeDoc, type BeeMeta, type BeeWords } from './bee-meta.js'
 import { codeClass, codeLanguage, codeThemeCss, tokenizeCode, type CodeLanguage, type CodeToken } from './code-theme.js'
 import {
   PANE_LIMITS, clampPane, crumbTrail, deskRecord, deskRecordText, drillPage, drillRows, finishedLast, resumePath,
@@ -242,6 +243,37 @@ const within = (path: string, ancestor: string): boolean =>
 export const offAbove = (path: string, off: ReadonlySet<string>): string => {
   for (let at = parentOf(path); at; at = parentOf(at)) if (off.has(at)) return at
   return ''
+}
+
+/**
+ * THE WAY BACK (documentation/beehaviors-and-packages.md). The way-back words a
+ * package's bees answer, read from the docs of its own layer and of every layer
+ * beneath it, because a path switched off takes everything under it. `unread`
+ * lists the layers whose docs are not read yet: until they are, nobody can say
+ * the path is safe to switch off.
+ */
+export const wayBackBeneath = (
+  path: string,
+  nodes: readonly InstallNode[],
+  docsOf: (layer: string) => ReadonlyMap<string, BeeDoc> | undefined,
+  words: ReadonlySet<string> = PACKAGE_WAY_BACK_WORDS,
+): { words: string[]; unread: string[] } => {
+  const found = new Set<string>()
+  const unread: string[] = []
+  for (const node of nodes) {
+    if (!path || !within(node.path, path) || node.bees.length === 0) continue
+    const docs = docsOf(node.layerSig)
+    if (!docs) { unread.push(node.layerSig); continue }
+    for (const bee of node.bees) {
+      const doc = docs.get(bareBeeSig(bee))
+      if (!doc) continue
+      for (const word of [doc.command, ...doc.aliases]) {
+        const folded = word.trim().toLowerCase()
+        if (words.has(folded)) found.add(folded)
+      }
+    }
+  }
+  return { words: [...found].sort(), unread }
 }
 
 export type ServedTree = { root: string; nodes: InstallNode[] }
@@ -3379,9 +3411,17 @@ export class HostDirectoryElement extends HTMLElement {
     const reach = port()
     const acts = !!reach && !!this.#selection?.trunk
     const untakeable = !row.held && !this.#carrying(row.path)
+    // The way back stays: a package carrying it never goes off whole, and one
+    // whose docs are still being read waits until they say.
+    const keeps = row.on && row.held && !row.fromSource ? this.#wayBack(row.path) : { words: [], unread: [] }
     const blocked = !acts || !!this.#busy || !!row.blockedBy || (!row.held && !reach?.recursive) || untakeable
+      || keeps.words.length > 0 || keeps.unread.length > 0
     const reason = row.blockedBy
       ? t('hosts.blocked', 'Turn on {name} first', { name: row.blockedBy })
+      : keeps.words.length
+        ? t('hosts.way-back', '{name} carries the way back ({words}), so it stays on', { name: row.path, words: keeps.words.join(', ') })
+      : keeps.unread.length
+        ? t('hosts.way-back-reading', 'Reading what {name} carries…', { name: row.path })
       : untakeable && this.#isBehind(this.#scope)
         ? this.#behindText(this.#scope)
         : !acts
@@ -3922,9 +3962,22 @@ export class HostDirectoryElement extends HTMLElement {
    *  the running hive takes at once (#live); a restart is kept for what cannot
    *  let go while it runs. A package only a host carries is picked in from that
    *  host first, through the same gate every install passes, and restarts. */
+  /** The way back beneath a path, from the docs read so far; each layer not
+   *  read yet is asked for, and the list repaints when it arrives. */
+  #wayBack(path: string): { words: string[]; unread: string[] } {
+    const found = wayBackBeneath(path, this.#selection?.nodes ?? [], layer => this.#docs.get(layer))
+    for (const layer of found.unread) if (!this.#docsAsk.has(layer)) void this.#askDocs(layer)
+    return found
+  }
+
   async #toggle(row: DirectoryRow): Promise<void> {
     const reach = port()
     if (!reach || this.#busy || row.blockedBy) return
+    // The bulb is already disabled; this is the door itself refusing too.
+    if (row.on && row.held && !row.fromSource) {
+      const keeps = this.#wayBack(row.path)
+      if (keeps.words.length || keeps.unread.length) return
+    }
     if (!row.on && !row.held) {
       const tree = this.#carrying(row.path)
       const zones = tree && tree !== this.#next

@@ -27,7 +27,7 @@
 
 import { createServer } from 'node:http'
 import { randomBytes, createHash } from 'node:crypto'
-import { createReadStream, existsSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, rmSync, writeFileSync, promises as fsp } from 'node:fs'
+import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, rmSync, writeFileSync, promises as fsp } from 'node:fs'
 import { basename, dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocketServer } from 'ws'
@@ -486,9 +486,19 @@ const PERMISSIONS_POLICY = [
 // and a participant by replication, never through here. So the relay
 // remembers only what rendezvous needs: replaceable slots (one per
 // publisher + kind + d-tag, the newest wins) and expiring beacons — in
-// process memory, gone on restart, nothing on disk. Every event the swarm
-// publishes is one or the other. Ephemeral kinds (20000–29999) are
-// broadcast to live subscribers and never kept at all.
+// process memory, gone on restart. Every event the swarm publishes is one or
+// the other. Ephemeral kinds (20000–29999) are broadcast to live subscribers
+// and never kept at all.
+//
+// ONE EXCEPTION, AND IT IS THE HOST'S, NOT THE MEETING'S: a publisher's
+// signed index (kind 30564) is also kept on disk, as the member of
+// sign('hive:indexes') named by its key (keepHeldIndex), and read back at
+// start. This process is also a content host, and on a host the index is
+// what makes a share findable: a contribution or a published tile is listed
+// only through it. Held in memory alone, every restart un-shared everything
+// while the shared bytes stayed on disk (jwize.com, 2026-11-13: a `recipes`
+// contribution vanished). jwize, 2026-11-14: a contribution is permanent
+// until it is unshared — a newer index from the same key replaces it.
 
 const events = new Map()  // id → event
 const slots = new Map()   // pubkey\0kind\0d → id of the replaceable event held
@@ -682,7 +692,9 @@ function answerDropped(rec) {
 }
 
 // Returns the NIP-01 verdict: 'stored' | 'duplicate' | 'stale' | 'ephemeral'.
-function insertEvent(evt) {
+// `persist: false` is for an index read back from disk (restoreHeldIndexes),
+// which is already there.
+function insertEvent(evt, { persist = true } = {}) {
   const kind = Number(evt.kind)
   if (isEphemeralKind(kind)) return 'ephemeral'
   if (events.has(evt.id)) return 'duplicate'
@@ -704,7 +716,10 @@ function insertEvent(evt) {
   storeEvent({ id: evt.id, pubkey: evt.pubkey, created_at: Number(evt.created_at), kind, tags: evt.tags, content: evt.content, sig: evt.sig })
   if (kind === BROKER_ANSWER_KIND) answerStored(events.get(evt.id))
   if (movesWriterIndex(evt)) writerIndexMoves++
-  if (movesHiveIndex(evt)) hiveIndexMoves++
+  if (movesHiveIndex(evt)) {
+    hiveIndexMoves++
+    if (persist) keepHeldIndex(events.get(evt.id))
+  }
   return 'stored'
 }
 
@@ -1686,6 +1701,60 @@ function tryServeHiveIndex(req, res) {
     res.end(JSON.stringify({ ok: true, pubkey, created_at: now?.created_at ?? 0 }))
   })
   return true
+}
+
+// ── a held index survives a restart ─────────────────────────────────────────
+//
+// The index this host serves for a key is written to
+// <content-dir>/<sign('hive:indexes')>/<pubkey> whenever it is the one kept
+// (insertEvent: the newest per key; a stale republish never reaches here),
+// the same address the worker holds it at. One file per publisher, replaced
+// whole: a newer index is the only way one changes, and dropping a share from
+// it is how a share is withdrawn. Written beside and renamed over, so a crash
+// leaves the old index or the new one, never half of one. The pool's address
+// is reserved (RESERVED_ADDRESSES), so no atom can take it, and it is no
+// listed pool, so its directory answers "not held" like any other.
+const heldIndexesDir = () => join(resolve(cfg.contentDir), HIVE_INDEXES_POOL)
+
+function keepHeldIndex(rec) {
+  if (!rec || !HEX64.test(String(rec.pubkey))) return
+  const dir = heldIndexesDir()
+  const path = join(dir, rec.pubkey)
+  const part = join(dir, `.part-${rec.pubkey}-${process.pid}`)
+  try {
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+    writeFileSync(part, JSON.stringify({ kind: rec.kind, created_at: rec.created_at, tags: rec.tags, content: rec.content, pubkey: rec.pubkey, id: rec.id, sig: rec.sig }))
+    renameSync(part, path)
+  } catch (error) {
+    // The index is still served from memory; only a restart would lose it.
+    try { rmSync(part, { force: true }) } catch { /* nothing staged */ }
+    console.warn(`[hive] index for ${rec.pubkey.slice(0, 8)}… not kept on disk: ${error?.message || error}`)
+  }
+}
+
+/** Read every held index back into the store, each re-verified as if it had
+ *  just been PUT: the file is named by its key, the event is that key's
+ *  signed index, and the signature holds. Anything else is left on disk and
+ *  not served. Returns how many were restored. */
+function restoreHeldIndexes() {
+  const dir = heldIndexesDir()
+  let names
+  try { names = readdirSync(dir) } catch { return 0 }
+  let restored = 0
+  for (const name of names) {
+    if (!HEX64.test(name)) continue
+    try {
+      const evt = JSON.parse(readFileSync(join(dir, name), 'utf8'))
+      if (Number(evt?.kind) !== HIVE_INDEX_KIND || evt.pubkey !== name || eventShapeError(evt) || !verifyEvent(evt)) {
+        console.warn(`[hive] held index ${name.slice(0, 8)}… does not verify; not served`)
+        continue
+      }
+      if (insertEvent(evt, { persist: false }) === 'stored') restored++
+    } catch (error) {
+      console.warn(`[hive] held index ${name.slice(0, 8)}… unreadable: ${error?.message || error}`)
+    }
+  }
+  return restored
 }
 
 // INDEX-DRIVEN POOLS: pictures for a name (documentation/pools-across-hosts.md,
@@ -3171,11 +3240,12 @@ function shutdown() {
 process.on('SIGINT', shutdown)
 process.on('SIGTERM', shutdown)
 
-// start
+// start — the held indexes are back before the first request is answered
+const restoredIndexes = restoreHeldIndexes()
 server.listen(cfg.port, () => {
   console.log(`hypercomb-relay listening on ws://0.0.0.0:${cfg.port} (WebSocket relay + HTTP content host)`)
   if (authRequired) console.log(`auth required — ${cfg.pubkeys.length} pubkey(s) whitelisted`)
-  console.log('events: memory only — a meeting point, not a store')
+  console.log(`events: memory only — a meeting point, not a store; signed indexes kept on disk (${restoredIndexes} restored)`)
   const contentReady = existsSync(cfg.contentDir)
   console.log(`content-dir: ${cfg.contentDir} ${contentReady ? '(ready)' : '(empty — host will 404 until populated)'}`)
   if (cfg.devOpenWrites) console.log('writes: OPEN (--dev-open-writes — sha256 verify only, NEVER use on a public host)')
