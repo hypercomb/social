@@ -105,6 +105,18 @@ describe('activationAuthority', () => {
       .toEqual({ ok: true, by: 'attested' })
   })
 
+  it('admits a root the shell verified at its root screen — and nothing else by that door', async () => {
+    // No attester is loaded before a package runs; the shell's own check stands in for it.
+    expect(await activationAuthority({ packageSig: SIG, zone: 'friend.example', self: 'hypercomb.io', installed: 'c'.repeat(64), attester: null, override: true }))
+      .toEqual({ ok: true, by: 'override' })
+    // Without the shell's word the same offer is refused, as it always was.
+    expect((await activationAuthority({ packageSig: SIG, zone: 'friend.example', self: 'hypercomb.io', installed: 'c'.repeat(64), attester: null })).ok).toBe(false)
+    expect((await activationAuthority({ packageSig: SIG, zone: 'friend.example', self: 'hypercomb.io', installed: 'c'.repeat(64), attester: null, override: false })).ok).toBe(false)
+    // This origin's own package is still its own, whatever else is said.
+    expect(await activationAuthority({ packageSig: SIG, zone: 'hypercomb.io', self: 'hypercomb.io', installed: null, override: true }))
+      .toEqual({ ok: true, by: 'self' })
+  })
+
   it('names the way forward in every refusal', () => {
     expect(refusalText('no-follow', 'x.example')).toMatch(/visit x\.example/)
     expect(refusalText('forged', 'x.example')).toMatch(/refused/)

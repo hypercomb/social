@@ -130,6 +130,47 @@ false there having changed nothing:
   modules by a stable address when a bee evicted earlier would come back (the
   browser hands back the module it already ran).
 
+**A restart comes back where you were, in the drill too** (*2026-11-13*, jwize:
+"the turn feature on and off is not working in the hosts drilldown"). Switching a
+package off usually restarts (most bees declare no `dispose()`), and the restart
+used to read `#at`, which only the four panes' columns keep. From inside `commands`
+in the simple drill the desk came back on the host's top list, so the part that was
+switched was out of sight and the switch looked as if it had done nothing. The place
+is now read from the picks themselves (`resumePath`, `host-directory.drill.ts`).
+
+## A package of your own
+
+*jwize, 2026-11-13:* "You should be able to create any variety of package here and
+then use it as a host root."
+
+On this origin's pane, where a package runs, the lines under the name carry **Save as
+a package…** (`sharing/host-package.ts`). Two acts, and they stay two:
+
+- **Save.** Switch things on and off, press it, give a name (one lowercase word — it
+  is the install channel, as `publish:revision -- <name>` takes it). What runs here
+  becomes a package of its own: the runtime re-mints the trunk with every path that
+  is off left out and every pick folded in (`ModuleDraftsProvider.commit`), appends
+  the new root to this hive's `host:packages` pool under the name, and makes it the
+  trunk here. The desk then shows the root signature (with *Copy*), what was left
+  out, and anything not folded because its code still waits in the brood. Nothing
+  leaves this hive. The package it was made from stays held; *Update all* or the
+  root screen ([root-override.md](root-override.md)) goes back to it.
+- **Use as the root of <your Home Domain>.** The only press that leaves this hive.
+  Every file of the package is sent to the host (what it already holds is skipped),
+  and only then is your signed pointer `install:<name>` moved to the new root, so
+  nobody is ever pointed at a root the host cannot serve. Nothing is sent while the
+  root carries a module you have not accepted, or when that cannot be told. Each
+  failure says how far it got: nothing sent, the files did not all arrive (no pointer
+  moved), or the host holds every file and the pointer did not move.
+
+It is no revision picker: a root domain stays on and off. The commit port is loaded
+by the web shell at boot (it used to register only when the chat window's chunk
+loaded, so `module commit` and Save answered "not available" until the chat had been
+opened once). `module commit` keeps its own sequence; Save and Use are the desk's.
+
+Not built: the target pane, components, and choosing which host to serve from when
+you have several ([package-components.md](package-components.md)).
+
 ## The window
 
 `<hc-host-directory>` (`hypercomb-essentials/src/sharing/host-directory.view.ts`)
@@ -538,6 +579,10 @@ sandbox before you bring them into hypercomb.io."*
 - `essentials/src/sharing/host-directory.drill.spec.ts` — which page a state is, the
   list a packages page shows, the trail, the kept record (simple unless advanced, widths
   held inside their limits, the same choices the same bytes), and finished work last.
+- `essentials/src/sharing/host-package.spec.ts` — a package name is one lowercase word;
+  Save commits under it and reports what it made; Use checks, sends every file and only
+  then moves `install:<name>`, never moving the pointer when a file did not arrive; and
+  the shape the desk keeps around them (this origin only, the serve on one press only).
 - `essentials/src/sharing/host-directory-simple.spec.ts` — the shape the view keeps: simple
   by default and the four panes one switch away and drawn as before, a click going in with
   no select in the drill, Select (and Ctrl/Cmd-click) in the four panes only, Escape's steps in order, the drag

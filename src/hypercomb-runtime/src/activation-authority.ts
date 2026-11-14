@@ -41,6 +41,15 @@
 //             beside it came from the pool, not from the package — a move cut
 //             short leaves the head's modules there, and an install with no
 //             bag loads them — so the floor is answered before it is asked.
+//   OVERRIDE  the participant named ONE root by its signature on the shell's
+//             own root screen (hypercomb-web root-override.ts), which stands
+//             before any package code has run in the page — the injection
+//             point that saves a corrupted or compromised build (jwize,
+//             2026-11-13). No attester is loaded that early: an attester IS
+//             package code. So the SHELL made the check, with its own schnorr:
+//             the publisher the participant follows signed an index naming
+//             exactly this root. Only the shell sets it, and only after that
+//             check; a root no signed record names is never admitted by it.
 //
 // Everything else is REFUSED, by name, before a single byte is fetched. Fail
 // closed: no attester loaded means no foreign package, never a free pass. The
@@ -53,7 +62,7 @@ import { ATTESTATION_IOC_KEY, type AttestationRefusal, type PackageAttestation }
 import { DEFAULT_HOST_ZONES, hostZone } from './host-zones.js'
 
 export type ActivationVerdict =
-  | { ok: true; by: 'self' | 'genesis' | 'attested' | 'floor' | 'hand' }
+  | { ok: true; by: 'self' | 'genesis' | 'attested' | 'floor' | 'hand' | 'override' }
   | { ok: false; error: string }
 
 export type ActivationQuestion = {
@@ -75,6 +84,10 @@ export type ActivationQuestion = {
   /** One revision at one path, picked by the participant's own hand. Only a
    *  pick sets it; what it admits is held in the brood (the HAND door). */
   byHand?: boolean
+  /** The shell's root screen verified, before any package code ran, that the
+   *  followed publisher signed an index naming this root (the OVERRIDE door).
+   *  Only the shell sets it. */
+  override?: boolean
 }
 
 /** The attester runtime finds through IoC — null when no module has
@@ -100,6 +113,7 @@ const answer = async (q: ActivationQuestion): Promise<ActivationVerdict | { ok: 
   const self = hostZone(q.self)
   if (zone && zone === self) return { ok: true, by: 'self' }
   if (q.floor === true && DEFAULT_HOST_ZONES.includes(zone)) return { ok: true, by: 'floor' }
+  if (q.override === true) return { ok: true, by: 'override' }
 
   const attester = q.attester ?? null
   if (!attester) {

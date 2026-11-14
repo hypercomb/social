@@ -26,6 +26,12 @@ export const shellInstallFollow = (): InstallFollow | null => {
   return readInstallFollow(storage, INSTALL_PUBLISHER)
 }
 
+/** THE DEFAULT: the publisher this shell ships with, whatever the participant's
+ *  record says. The root screen reads it (root-override.ts) — a record in
+ *  browser storage is exactly what a compromised build could have rewritten,
+ *  and "load the default" has to mean the one it could not touch. */
+export const shellDefaultFollow = (): InstallFollow | null => readInstallFollow(null, INSTALL_PUBLISHER)
+
 /** Schnorr-verify one signed index event (NIP-01). Loaded on first use. */
 export const verifyIndexEvent: VerifyIndexEvent = async event => {
   const { verifyEvent } = await import('nostr-tools/pure')

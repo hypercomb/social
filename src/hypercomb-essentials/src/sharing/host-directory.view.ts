@@ -41,25 +41,29 @@ import {
   EffectBus,
   I18N_IOC_KEY,
   INSTALL_IOC_KEY,
+  MODULE_DRAFTS_IOC_KEY,
   attachDockedPanel,
   isWindowShowing,
+  mayRunBee,
   type DockedPanel,
   type I18nProvider,
   type InstallNode,
   type InstallProvider,
   type InstallRevision,
   type InstallSelection,
+  type ModuleDraftsProvider,
   type AttestationVerdict,
   type WindowSession,
 } from '@hypercomb/core'
 import { beeDocsOf, beeWords, normalizeMeta, readBeeMeta, writeBeeMeta, type BeeDoc, type BeeMeta, type BeeWords } from './bee-meta.js'
 import { codeClass, codeLanguage, codeThemeCss, tokenizeCode, type CodeLanguage, type CodeToken } from './code-theme.js'
 import {
-  PANE_LIMITS, clampPane, crumbTrail, deskRecord, deskRecordText, drillPage, drillRows, finishedLast,
+  PANE_LIMITS, clampPane, crumbTrail, deskRecord, deskRecordText, drillPage, drillRows, finishedLast, resumePath,
   type Crumb, type DeskMode, type DrillPage, type PaneName,
 } from './host-directory.drill.js'
 import { hostZone } from './community-hosts.js'
-import { fetchHiveIndex, type HiveIndexResult, type HiveManifest } from './hive-pointer.js'
+import { fetchHiveIndex, setHiveRoot, type HiveIndexResult, type HiveManifest } from './hive-pointer.js'
+import { packageName, savePackage, servePackage, type SavedPackage, type ServeDeps } from './host-package.js'
 import { isReservedRootKey } from './hive-link.js'
 import { publisherKeyHex } from './key-list.client.js'
 import { hostOnlineBlock } from './host-online.js'
@@ -996,6 +1000,13 @@ export class HostDirectoryElement extends HTMLElement {
   #zones: string[] = []
   #loaded = false
 
+  /** SAVE AS A PACKAGE (host-package.ts): whether the name is being asked, what is
+   *  typed, the package just saved, and what the last save or serve said. */
+  #packaging = false
+  #packageName = ''
+  #saved: SavedPackage | null = null
+  #packageNote: { text: string; bad: boolean } | null = null
+
   #scope = ''
   /** The host whose pane is open — `''` is this origin. Always one: a desk
    *  opens onto a host, never onto a shut list. */
@@ -1595,6 +1606,8 @@ export class HostDirectoryElement extends HTMLElement {
   #back(): boolean {
     if (this.#describing) { this.#describing = null; this.#renderBody(); return true }
     if (this.#menu !== null) { this.#menu = null; this.#renderBody(); return true }
+    // The name being asked for a package: Escape lets go of the question, not of what was saved.
+    if (this.#packaging) { this.#packaging = false; this.#packageNote = null; this.#renderBody(); return true }
     // SELECT (four panes) lets go first: the next click is a plain pick again.
     if (this.#multi) { this.#setMulti(false); return true }
     if (this.#query) { this.#query = ''; this.#render(); return true }
@@ -2119,8 +2132,17 @@ export class HostDirectoryElement extends HTMLElement {
       }
       // The firewall — every zone this shell owns, Block or Resume — is its own list,
       // behind the shield in the header (`#renderFirewall`).
+      // WHAT RUNS HERE, SAVED AS A PACKAGE OF ITS OWN — only where a package runs.
+      if (reach && trunk) {
+        const save = button('hd-link hd-package-open', t('hosts.package.open', 'Save as a package…'), t('hosts.package.open-tip', 'Make what runs here — everything on, nothing that is off — a package of its own'))
+        save.setAttribute('aria-expanded', String(this.#packaging))
+        save.disabled = !!this.#busy
+        save.addEventListener('click', () => this.#askPackageName(!this.#packaging))
+        addLine(glyphed(save, 'packagesIcon'))
+      }
     }
     if (lines.childElementCount) section.append(lines)
+    if (!zone && (this.#packaging || this.#saved || this.#packageNote)) section.append(this.#packageBlock())
 
     // EVERYTHING THE FOLLOWED PUBLISHER MOVED, in one act — this origin only.
     // It is a source shell's one act too: it follows the channel, so taking the
@@ -2174,6 +2196,170 @@ export class HostDirectoryElement extends HTMLElement {
     }
 
     return section
+  }
+
+  // ── a package of your own ────────────────────────────────────────────────
+  //
+  // jwize, 2026-11-13: "You should be able to create any variety of package here and
+  // then use it as a host root." Switch things on and off, then SAVE: what runs here
+  // becomes a package under a name (host-package.ts — the runtime's commit). USE AS THE
+  // ROOT is its own press, and the only one that leaves this hive: every file goes to
+  // your Home Domain, and then your signed `install:<name>` names the root there.
+
+  /** Open or shut the question, with the field ready to type in. */
+  #askPackageName(open: boolean): void {
+    this.#packaging = open
+    this.#packageNote = null
+    this.#renderBody()
+    if (open) this.#refs.get('body')?.querySelector<HTMLInputElement>('input[data-field="package-name"]')?.focus()
+  }
+
+  #packageBlock(): HTMLElement {
+    const block = make('div', 'hd-package')
+    const reach = port()
+    if (this.#packaging) {
+      const form = make('form', 'hd-add hd-package-form')
+      const field = make('input', 'hd-add-input')
+      field.type = 'text'
+      field.autocomplete = 'off'
+      field.spellcheck = false
+      field.maxLength = 40
+      field.id = 'hd-package-name'
+      field.dataset['field'] = 'package-name'
+      field.value = this.#packageName
+      field.placeholder = t('hosts.package.placeholder', 'a name, like minimal')
+      const label = make('label', 'hd-own-label', t('hosts.package.name', 'Package name'))
+      label.htmlFor = field.id
+      field.addEventListener('input', () => { this.#packageName = field.value; field.removeAttribute('aria-invalid') })
+      const go = make('button', 'hd-primary', t('hosts.package.save', 'Save'))
+      go.type = 'submit'
+      go.disabled = !!this.#busy
+      const cancel = button('hd-quiet', t('hosts.package.cancel', 'Cancel'))
+      cancel.addEventListener('click', () => this.#askPackageName(false))
+      form.append(label, field, go, cancel)
+      form.addEventListener('submit', event => {
+        event.preventDefault()
+        if (!packageName(field.value)) {
+          this.#packageNote = { text: t('hosts.package.bad-name', 'A package name is one word: letters, digits and dashes, starting with a letter.'), bad: true }
+          this.#renderBody()
+          return
+        }
+        void this.#savePackage()
+      })
+      block.append(form, make('p', 'hd-note', t('hosts.package.note', 'What runs here — everything that is on, nothing that is off — becomes a package of its own, kept in this hive under this name. It becomes what runs here; the package it was made from stays held.')))
+      const off = [...(reach?.install.offUnits() ?? [])].sort()
+      if (off.length) block.append(make('p', 'hd-note', t('hosts.package.leaves-out', 'Left out: {paths}', { paths: off.join(', ') })))
+    }
+    const saved = this.#saved
+    if (saved) {
+      const line = make('p', 'hd-package-saved')
+      line.append(make('span', 'hd-package-said', t('hosts.package.saved', '{name} is saved. Its root:', { name: saved.name })), make('code', 'hd-package-root', saved.root))
+      const copy = button('hd-quiet', t('hosts.package.copy', 'Copy'), t('hosts.package.copy-tip', 'Copy the root signature'))
+      copy.addEventListener('click', () => {
+        void navigator.clipboard?.writeText(saved.root).then(() => { copy.textContent = t('hosts.package.copied', 'Copied') }, () => { /* the signature beside it is selectable */ })
+      })
+      line.append(copy)
+      block.append(line)
+      if (saved.off.length) block.append(make('p', 'hd-note', t('hosts.package.left-out', 'Left out of it: {paths}', { paths: saved.off.join(', ') })))
+      if (saved.held.length) block.append(make('p', 'hd-note', t('hosts.package.held', 'Not folded in, still waiting in the brood: {paths}', { paths: saved.held.join(', ') })))
+      let home = ''
+      try { home = zoneOf(localStorage.getItem(OWN_HOST_KEY) ?? '') } catch { home = '' }
+      const acts = make('div', 'hd-package-acts')
+      if (home) {
+        const serve = button('hd-primary', t('hosts.package.serve', 'Use as the root of {host}', { host: home }), t('hosts.package.serve-tip', 'Send every file of {name} to {host}, then name it there as install:{name} under your key', { name: saved.name, host: home }))
+        serve.disabled = !!this.#busy
+        serve.addEventListener('click', () => { void this.#servePackage(home) })
+        acts.append(serve)
+      } else {
+        acts.append(make('span', 'hd-note', t('hosts.package.no-home', 'Name your Home Domain to use it as the root of that host.')))
+      }
+      const done = button('hd-quiet', t('hosts.package.done', 'Done'))
+      done.addEventListener('click', () => { this.#saved = null; this.#packageNote = null; this.#renderBody() })
+      acts.append(done)
+      block.append(acts)
+    }
+    if (this.#packageNote) {
+      const note = make('p', this.#packageNote.bad ? 'hd-error' : 'hd-note hd-package-ok', this.#packageNote.text)
+      note.setAttribute('role', this.#packageNote.bad ? 'alert' : 'status')
+      block.append(note)
+    }
+    return block
+  }
+
+  /** SAVE: the runtime re-mints what runs here and keeps it under the name. Nothing
+   *  leaves this hive. The record is rewritten, so the running hive is asked to match
+   *  it; when it cannot, it runs the same code until the next restart. */
+  async #savePackage(): Promise<void> {
+    if (this.#busy) return
+    const drafts = ioc<ModuleDraftsProvider>(MODULE_DRAFTS_IOC_KEY)
+    this.#busy = '+package'
+    this.#packageNote = { text: t('hosts.package.saving', 'Saving…'), bad: false }
+    this.#renderBody()
+    try {
+      const outcome = await savePackage(this.#packageName, drafts ? label => drafts.commit(label) : undefined)
+      if (!outcome.ok) {
+        this.#packageNote = { text: outcome.error === 'name'
+          ? t('hosts.package.bad-name', 'A package name is one word: letters, digits and dashes, starting with a letter.')
+          : outcome.error === 'unavailable'
+            ? t('hosts.package.unavailable', 'A package cannot be saved on this shell yet: it has not loaded the tool that makes one.')
+            : t('hosts.package.refused', 'Not saved: {reason}', { reason: outcome.error }), bad: true }
+        return
+      }
+      this.#saved = outcome.saved
+      this.#packaging = false
+      this.#packageName = ''
+      this.#packageNote = null
+      EffectBus.emit('activity:log', { message: t('hosts.package.logged', 'Saved the package {name}', { name: outcome.saved.name }) })
+      await this.#live()
+      EffectBus.emit('packages:changed', { off: [...(port()?.install.offUnits() ?? [])] })
+      void this.#read()
+    } finally {
+      this.#busy = ''
+      this.#renderBody()
+    }
+  }
+
+  /** USE AS THE ROOT: the participant's own press, the only one that leaves this hive. */
+  async #servePackage(host: string): Promise<void> {
+    const saved = this.#saved
+    if (!saved || this.#busy) return
+    const drafts = ioc<ModuleDraftsProvider>(MODULE_DRAFTS_IOC_KEY)
+    const sync = ioc<{ publishAtoms?: ServeDeps['publishAtoms'] }>('@diamondcoreprocessor.com/HostSyncService')
+    const install = port()?.install
+    this.#busy = '+package'
+    this.#packageNote = { text: t('hosts.package.serving', 'Sending {name} to {host}…', { name: saved.name, host }), bad: false }
+    this.#renderBody()
+    try {
+      const outcome = await servePackage(host, saved, {
+        publishAtoms: sync?.publishAtoms ? (zone, sigs, bytesOf) => sync.publishAtoms!(zone, sigs, bytesOf) : undefined,
+        bytesOf: drafts ? sig => drafts.bytesOf(sig) : undefined,
+        stamp: (zone, key, root) => setHiveRoot(zone, key, root),
+        unaccepted: async root => {
+          const modules = await install?.modulesOf?.(root, [host]).catch(() => null)
+          if (!modules) return null
+          const waiting: string[] = []
+          for (const sig of new Set([...modules.bees.map(bee => bee.sig), ...modules.dependencies.map(dependency => dependency.sig)])) {
+            if (!(await mayRunBee(sig))) waiting.push(sig)
+          }
+          return waiting
+        },
+      })
+      this.#packageNote = outcome.ok
+        ? { text: t('hosts.package.served', '{host} now names {name} as {channel}: {sent} files sent, {held} already there.', { host: outcome.host, name: saved.name, channel: outcome.channel, sent: outcome.sent, held: outcome.held }), bad: false }
+        : { text: outcome.error === 'held'
+          ? t('hosts.package.serve-held', 'Not sent: {name} carries {count} modules you have not accepted. Accept them in the brood first.', { name: saved.name, count: outcome.waiting ?? 0 })
+          : outcome.error === 'unread'
+            ? t('hosts.package.serve-unread', 'Not sent: {name} could not be read back here, so it is not known whether you accepted everything in it.', { name: saved.name })
+            : outcome.error === 'unavailable'
+              ? t('hosts.package.serve-unavailable', 'Not sent: the host service is not loaded here.')
+              : outcome.stage === 'pointer'
+                ? t('hosts.package.serve-unstamped', '{host} holds every file, but your pointer did not move: {reason}', { host, reason: outcome.error })
+                : t('hosts.package.serve-failed', 'Not sent: {reason}. Your pointer did not move.', { reason: outcome.error }), bad: true }
+      if (outcome.ok) EffectBus.emit('activity:log', { message: this.#packageNote.text })
+    } finally {
+      this.#busy = ''
+      this.#renderBody()
+    }
   }
 
   /** THE FIREWALL, as its own list (jwize 11-05: "the block can be an alternate list
@@ -3975,7 +4161,10 @@ export class HostDirectoryElement extends HTMLElement {
     this.#restarting = true
     const updating = !!this.#held
     if (updating) { this.#phase = 'restarting'; this.#renderBody() }
-    try { sessionStorage.setItem(REOPEN_KEY, JSON.stringify({ scope: this.#scope, at: this.#at, updated: updating })) } catch { /* opens fresh */ }
+    // The drill never draws the columns, so `#at` (theirs) is stale there: its place is
+    // the picks themselves — a part switched off inside a package comes back inside it.
+    const at = this.#mode === 'simple' ? resumePath(this.#cols.map(column => column.keys)) : this.#at
+    try { sessionStorage.setItem(REOPEN_KEY, JSON.stringify({ scope: this.#scope, at, updated: updating })) } catch { /* opens fresh */ }
     EffectBus.emit('activity:log', { message: updating
       ? t('hosts.updating-restarting', 'The update is in — restarting the hive now')
       : t('packages.restarting', 'packages changed; restarting') })
@@ -4392,6 +4581,12 @@ ${S} .hd-add-input[aria-invalid="true"]{color:var(--hc-status-alert);}
 ${S} .hd-add .hd-quiet{font-weight:600;color:var(--hc-window-accent);}
 ${S} .hd-side .hd-add{font-size:.86em;}
 ${S} .hd-own-label{flex:0 0 auto;font-size:.82em;color:var(--hd-ink);opacity:.75;white-space:nowrap;}
+${S} .hd-package{margin:0 0 .85em;}
+${S} .hd-package .hd-package-form{margin:0 0 .5em;}
+${S} .hd-package-saved{display:flex;flex-wrap:wrap;align-items:center;gap:.5em;margin:.1em 0 .4em;font-size:.88em;}
+${S} .hd-package-root{font-family:var(--hc-font-mono,ui-monospace,monospace);font-size:.86em;overflow-wrap:anywhere;user-select:all;padding:.15em .4em;background:var(--hd-raised);border-radius:var(--hc-radius-card,3px);}
+${S} .hd-package-acts{display:flex;flex-wrap:wrap;align-items:center;gap:.6em;margin:.4em 0;}
+${S} .hd-package-ok{color:var(--hc-window-accent);}
 ${S} .hd-quiet{display:inline-flex;align-items:center;gap:.3em;padding:.32em .6em;font:inherit;font-size:.82em;color:var(--hd-ink-quiet);background:none;border:1px solid transparent;border-radius:var(--hc-radius-control,2px);cursor:pointer;transition:background-color .15s,color .15s;}
 ${S} .hd-quiet:hover{color:var(--hd-ink);background:var(--hd-wash-strong);}
 ${S} .hd-quiet:disabled{cursor:default;opacity:.55;}

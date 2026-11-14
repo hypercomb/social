@@ -117,6 +117,14 @@ export type InstallPhase = 'checking' | 'applying'
 export type InstallOptions = {
   floor?: boolean
   takeAll?: boolean
+  /** The shell's root screen verified a signed record naming this root before
+   *  any package code ran (activation-authority.ts, OVERRIDE). Only the shell
+   *  passes it. */
+  override?: boolean
+  /** Run the root ALONE: every pick laid over the trunk is released (its bytes
+   *  stay held). The root screen passes it — a pick may be the very thing a
+   *  rescue is escaping, and "this root" means this root. */
+  alone?: boolean
   onHeld?: (sig: string) => void
   /** Told what the install is doing once the bytes are in, so a window never
    *  sits on a full counter saying nothing: `checking` — every file is held
@@ -622,6 +630,7 @@ export const installPackage = async (
     zones: alsoFrom,
     attester: registeredAttester(),
     floor: opts.floor === true,
+    override: opts.override === true,
   })
   if (!authority.ok) return fail(authority.error)
 
@@ -753,6 +762,8 @@ export const installPackage = async (
   // this a pick taken months ago kept an old build of that package running
   // forever — its chat organizer, with no rate-limit back-off, among them.
   let picks = readPicks()
+  // The root screen runs a root ALONE: nothing picked rides across (`alone`).
+  if (opts.alone) picks = {}
   let released: string[] = []
   if (opts.takeAll && Object.keys(picks).length) {
     const decided = await releasedByTakeAll(picks, path => layerAt(pkg.packageSig, path, layersIo))
@@ -774,7 +785,7 @@ export const installPackage = async (
     if (!selection.ok) return fail(selection.error)
     return { ok: true, packageSig: pkg.packageSig, fetched: held.fetched, present: held.present, holes: [], refused: [], packed: modules.served(), ...(released.length ? { released } : {}) }
   }
-  const releaseAll = released.length > 0
+  const releaseAll = released.length > 0 || opts.alone === true
 
   // CAN THIS SHELL RUN IT? (core-surface.ts). The modules just admitted name
   // what they import from `@hypercomb/core`; the shell's runtime core is asked
@@ -990,10 +1001,10 @@ export const applySelection = async (
  * else's code, trusted once, and a participant who holds followed code should
  * see it too.
  */
-const arrivalKindOf = (by: 'self' | 'genesis' | 'attested' | 'floor' | 'hand'): ArrivalKind =>
+const arrivalKindOf = (by: 'self' | 'genesis' | 'attested' | 'floor' | 'hand' | 'override'): ArrivalKind =>
   by === 'self' ? 'own' : by === 'hand' ? 'stranger' : 'followed'
 
-const trustedHere = (sig: string): boolean => {
+export const trustedHere = (sig: string): boolean => {
   try {
     const store = new SignatureStore()
     const raw = localStorage.getItem(SIG_STORE_KEY)
@@ -1167,6 +1178,30 @@ export const unpickRevision = async (path: string): Promise<SelectionOutcome> =>
   return applySelection(trunk, [], picks)
 }
 
+/** How many earlier roots the activation record remembers. */
+const PREVIOUS_ROOTS = 5
+
+/**
+ * THE ROOTS THAT RAN HERE BEFORE, newest first — read from the activation
+ * record. The shell's root screen lists them (hypercomb-web root-override.ts):
+ * "what ran before this" is the first thing a rescue reaches for, and nothing
+ * said it. It is a HINT for a list, never authority: whether a root may be
+ * taken is asked of the signature store and the gate, not of this.
+ */
+export const previousRoots = (manifest: unknown): string[] => {
+  const listed = (manifest as { previous?: unknown } | null)?.previous
+  return Array.isArray(listed)
+    ? [...new Set(listed.filter((sig): sig is string => typeof sig === 'string' && SIG_RE.test(sig)))].slice(0, PREVIOUS_ROOTS)
+    : []
+}
+
+/** The record's `previous` for a new activation: the root being left goes
+ *  first, the root being taken is never its own past. Pure. */
+export const nextPreviousRoots = (leaving: string | null, taking: string, earlier: readonly string[]): string[] =>
+  [...new Set([...(leaving && leaving !== taking ? [leaving] : []), ...earlier])]
+    .filter(sig => SIG_RE.test(sig) && sig !== taking)
+    .slice(0, PREVIOUS_ROOTS)
+
 const activate = async (
   packageSig: string,
   inventory: PackageInventory,
@@ -1177,6 +1212,10 @@ const activate = async (
   bees: readonly string[],
 ): Promise<void> => {
   try {
+    // Read BEFORE the stamp moves: the root this activation leaves.
+    const leaving = installedPackageSig()
+    let earlier: string[] = []
+    try { earlier = previousRoots(JSON.parse(localStorage.getItem(INSTALL_MANIFEST_KEY) ?? 'null')) } catch { earlier = [] }
     stampInstalledPackage(packageSig)
     localStorage.setItem(INSTALL_MANIFEST_KEY, JSON.stringify({
       version: 2,
@@ -1184,6 +1223,8 @@ const activate = async (
       bees: [...bees],
       dependencies: inventory.dependencies,
       beeDeps,
+      // The roots that ran here before this one (previousRoots).
+      previous: nextPreviousRoots(leaving, packageSig, earlier),
       // Answerable to the channel the participant follows — the web has no
       // bundled authority, because the origin is the shell, not a host.
       source: 'sentinel',

@@ -253,6 +253,21 @@ describe('the search, pinned at the top of every page of the drill', () => {
   })
 })
 
+describe('a restart from inside the drill', () => {
+  // jwize, 2026-11-13: "the turn feature on and off is not working in the hosts drilldown".
+  // Switching a package off usually restarts the hive (a bee with no dispose()), and the
+  // restart read `#at`, which only the four panes' columns keep: from inside `commands`
+  // the desk came back on the host's top list with the switched part out of sight.
+  it('comes back where the picks were, not where the four panes last drew', () => {
+    const restart = between('  #restart(): void {', '  // ── what is served')
+    expect(restart).toMatch(/const at = this\.#mode === 'simple' \? resumePath\(this\.#cols\.map\(column => column\.keys\)\) : this\.#at/)
+    expect(restart).toMatch(/JSON\.stringify\(\{ scope: this\.#scope, at, updated: updating \}\)/)
+    // And the reopening opens the columns down that path, in the drill too.
+    expect(VIEW).toMatch(/this\.#toList\(zoneOf\(where\.scope\), typeof where\.at === 'string' \? where\.at : ''\)/)
+    expect(between('  #toList(', '  /** The picks that lead down a path')).toMatch(/this\.#cols = this\.#chainTo\(at\)\s*this\.#files = NOTHING_PICKED[\s\S]*this\.#atHosts = false/)
+  })
+})
+
 describe('the firewall, its own list behind the shield', () => {
   // jwize 11-05: "the block can be an alternate list toggled by icon in the header".
   it('opens from the shield in the header and goes back when it is pressed again — only where the shell runs a firewall', () => {

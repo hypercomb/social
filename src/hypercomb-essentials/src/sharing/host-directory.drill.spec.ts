@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
-  PANE_LIMITS, clampPane, crumbTrail, deskRecord, deskRecordText, drillPage, drillRows, finishedLast,
+  PANE_LIMITS, clampPane, crumbTrail, deskRecord, deskRecordText, drillPage, drillRows, finishedLast, resumePath,
 } from './host-directory.drill'
 
 const col = (paths: string[], picked: string[] = []) => ({ rows: paths.map(path => ({ path })), picked: { keys: picked } })
@@ -107,6 +107,22 @@ describe('what the desk keeps', () => {
     expect(text).toBe('{"mode":"advanced","panes":{"rail":21,"files":19.5}}')
     expect(deskRecord(JSON.parse(text))).toEqual({ mode: 'advanced', panes: { rail: 21, files: 19.5 } })
     expect(deskRecordText({ mode: 'simple', panes: {} })).toBe('{"mode":"simple","panes":{}}')
+  })
+})
+
+describe('where a restart puts the desk back', () => {
+  // jwize, 2026-11-13: "the turn feature on and off is not working in the hosts drilldown" —
+  // a part switched off inside a package restarted the hive onto the host's top list.
+  it('is the package the picks lead down to, one level at a time', () => {
+    expect(resumePath([])).toBe('')
+    expect(resumePath([['commands']])).toBe('commands')
+    expect(resumePath([['games'], ['games/arkanoid']])).toBe('games/arkanoid')
+  })
+
+  it('stops at the last level that picks one thing — several picked is no one place', () => {
+    expect(resumePath([['a', 'b']])).toBe('')
+    expect(resumePath([['games'], ['games/arkanoid', 'games/solomon']])).toBe('games')
+    expect(resumePath([['games'], [], ['games/arkanoid/themes']])).toBe('games')
   })
 })
 

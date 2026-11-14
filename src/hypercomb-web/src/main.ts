@@ -116,9 +116,19 @@ import {
 import { postCommunityDomainsToServiceWorker } from '@hypercomb/runtime/sw-domains'
 import { nativeAvailable } from '@hypercomb/runtime/native-filesystem'
 import { watchPackageFloor } from './setup/package-floor'
+import { askRootOverride, rootOverrideGate } from './setup/root-override'
 
 // Ensure side-effect registration
 const _deps = [DependencyLoader]
+
+// THE ROOT SCREEN'S CONSOLE DOOR (setup/root-override.ts): `hypercomb.root()`.
+// Defined here, before bootstrap, so it answers even when the package that
+// should have come up never does — a broken build is exactly when it is
+// needed. The App adds its own words to the same object later and keeps this.
+;(window as unknown as { hypercomb?: Record<string, unknown> }).hypercomb = {
+  ...(window as unknown as { hypercomb?: Record<string, unknown> }).hypercomb,
+  root: askRootOverride,
+}
 
 // A HIVE the entrance chose (`?hive=<sig>`, setup/hive-entrance.ts): the
 // runtime reads it before deciding which bees load.
@@ -306,6 +316,13 @@ const bootstrap = async (): Promise<void> => {
   // not engaging; it renders its own explanation and seals storage.
   if (await packedStoreBlocksBoot(await Store.poolSignature(PACKED_STORE_MEANING))) return
 
+  // THE ROOT SCREEN (setup/root-override.ts) — the injection point that saves
+  // a corrupted or compromised build. Asked for from the console
+  // (`hypercomb.root()`) or the address (`?root`), it stands HERE: after the
+  // one-way door gate, and before ensureInstall, the import map, and every
+  // dependency and bee — so no package code has run on a page it is drawn on.
+  // A take restarts the page; going on without a change falls through.
+  await rootOverrideGate()
 
   // The real 'hypercomb:start-install' handler registers at the END of
   // bootstrap, after Angular is up. An early dispatch — the native shell's

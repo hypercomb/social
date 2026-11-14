@@ -1,6 +1,8 @@
 # Package components — composing an operating experience on the hosts desk
 
-**Status: proposed 2026-11-11 (jwize). Nothing here is built.** It extends
+**Status: proposed 2026-11-11 (jwize). Built so far (2026-11-13): Save as a named
+package and Use as a host's root, on the desk (packages-window.md, "A package of your
+own"). The target pane, the package viewer and components are not built.** It extends
 [packages-window.md](packages-window.md) (the hosts desk) and
 [build-debug-isolation.md](build-debug-isolation.md) (the mint). Where it
 names a rule, the rule is a proposal until this status line says otherwise.
@@ -232,5 +234,5 @@ it inside the desk.
 | Components as named, signed sets of `{ path, layer, root }` | proposed |
 | Following = a pinned snapshot plus an update notice | decided 2026-11-11 (jwize) |
 | Compiling an experience through the mint | the mint is built in the shim; not reachable from the desk |
-| Save as a named member of your host's `host:packages` pool | the pool and its name line are built; Save from the desk is not |
-| Announcing a named package as `install:<name>` | built as `publish:revision`; not reachable from the desk |
+| Save as a named member of your host's `host:packages` pool | built 2026-11-13: *Save as a package…* on this origin's pane (`sharing/host-package.ts`), through the runtime's commit; it does not yet record which components composed it |
+| Announcing a named package as `install:<name>` | built 2026-11-13 as its own press, *Use as the root of <Home Domain>*: every file first, then the signed pointer |

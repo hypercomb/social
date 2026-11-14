@@ -130,6 +130,23 @@ export function crumbTrail(input: {
   return trail
 }
 
+/**
+ * WHERE A RESTART PUTS THE DESK BACK: the package the picks lead down to, one level at
+ * a time, for as long as each level picks one thing. Read from the picks themselves and
+ * not from what the four panes last drew — the drill never draws the columns, so a
+ * package switched off from inside `commands` restarted the hive onto the host's top
+ * list, and the part that was switched was nowhere to be seen (jwize, 2026-11-13: "the
+ * turn feature on and off is not working in the hosts drilldown").
+ */
+export const resumePath = (picks: readonly (readonly string[])[]): string => {
+  let at = ''
+  for (const keys of picks) {
+    if (keys.length !== 1) break
+    at = keys[0]!
+  }
+  return at
+}
+
 // ── finished work goes last ──────────────────────────────────────────────────
 
 /** Rows in the order they were given, except that the finished ones go to the end,

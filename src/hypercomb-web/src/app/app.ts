@@ -3,6 +3,11 @@ import { EffectBus, hypercomb } from '@hypercomb/core'
 import { isWorkbenchMode } from '@hypercomb/runtime/workbench-page'
 import { type BootStatus } from '../setup/ensure-install'
 import { acquire, installedPackageSig, listHostPackages } from '@hypercomb/runtime/acquire'
+import { askRootOverride } from '../setup/root-override'
+// THE COMMIT PORT, FROM BOOT (core MODULE_DRAFTS_IOC_KEY). It used to register only
+// when the chat window's chunk loaded, so `module commit` and the hosts desk's
+// "Save as a package" answered "not available" until the chat had been opened once.
+import '@hypercomb/runtime/module-drafts'
 import { addHostZone, listHostZones } from '@hypercomb/runtime/host-zones'
 import { nativeAvailable } from '@hypercomb/runtime/native-filesystem'
 import { isTransientMode } from '@hypercomb/shared/core/view-mode.service'
@@ -150,6 +155,8 @@ export class App implements AfterViewInit {
       hosts: listHostZones,
       addHost: addHostZone,
       installed: installedPackageSig,
+      // The root screen's console door, kept from main.ts (setup/root-override.ts).
+      root: askRootOverride,
     }
 
     EffectBus.on<BootStatus>('boot:status', (status) => {
