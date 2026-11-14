@@ -8,7 +8,8 @@
 // stays out of its way:
 //
 //   - no key on the list here: the one line the owner runs on their hive,
-//     `keys allow <this site>`, and that the link it gives is opened here;
+//     `keys allow <this site>`, copied with one press, and that the link it
+//     gives is opened here;
 //   - the link opened (an invite held, device-invite.ts): the same Allow the
 //     front door shows — this browser makes its own key, the invite's
 //     throwaway key adds it to the list, and the anchor is bound here. No
@@ -21,6 +22,7 @@
 import { allowInvite, captureDeviceInvite, dropInvite, heldInvite, readKeyChain } from './device-invite'
 import { readDeviceBinding, type DeviceBinding } from './device-binding'
 import { deviceSigner, type DeviceSigner } from './device-key'
+import { copyText, offerCopy } from './copy-text'
 import type { ManageRecord } from './manage-record'
 import type { InviteParts } from '@hypercomb/core'
 
@@ -99,7 +101,12 @@ const STYLE = `
 `
 
 /** The corner card, for one state. Null when there is nothing to say. */
-export const managedKeyCard = (state: ManagedKeyState, siteDoor: string, done: () => void): HTMLElement | null => {
+export const managedKeyCard = (
+  state: ManagedKeyState,
+  siteDoor: string,
+  done: () => void,
+  copyWith: (text: string) => Promise<boolean> = copyText,
+): HTMLElement | null => {
   if (state.state === 'listed' || state.state === 'quiet') return null
   const card = document.createElement('section')
   card.className = 'key'
@@ -120,7 +127,21 @@ export const managedKeyCard = (state: ManagedKeyState, siteDoor: string, done: (
     const command = document.createElement('code')
     command.textContent = `keys allow ${siteDoor}`
     words.append(command, document.createTextNode(', then open the link it gives you here.'))
-    card.append(close, words, note)
+    // ONE PRESS COPIES THE LINE (jwize 2026-11-14). The hive that makes the
+    // link lives at another address, so this page cannot ask it; what it can
+    // do is put the line on the clipboard, ready to paste on the hive.
+    const row = document.createElement('div')
+    row.className = 'row'
+    const copy = document.createElement('button')
+    copy.type = 'button'
+    copy.className = 'primary'
+    offerCopy(copy, command.textContent ?? '', { idle: 'Copy the line', done: 'Copied' }, copied => {
+      note.textContent = copied
+        ? 'Copied. Paste it on your hive\'s command line. The hive copies the link it makes: open that here.'
+        : 'This browser would not copy it. Select the line above instead.'
+    }, copyWith)
+    row.append(copy)
+    card.append(close, words, row, note)
     return card
   }
   const invite = state.invite

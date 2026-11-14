@@ -1494,6 +1494,56 @@ describe('the owner\'s tap — a device whose hive is beside the page puts a til
     expect(() => tile.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))).not.toThrow()
   })
 
+  it('an invite\'s link is copied as it arrives, the way typing keys allow copies it', async () => {
+    const link = 'https://hypercomb.com/#invite=hypercomb.com/' + a + '/secret'
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const owner = { ...bridge(a), invite: vi.fn(async () => ({ ok: true as const, link, until: Math.floor(Date.now() / 1000) + 600 })) }
+    const { hero, bands } = draw(owner)
+    document.body.append(hero, bands)
+    try {
+      await dylanOf(bands)
+      await vi.waitFor(() => expect(owner.hello).toHaveBeenCalled())
+      await new Promise(resolve => setTimeout(resolve, 20))
+      const add = (hero.querySelector('.pager-phone') ?? bands.querySelector('.pager-phone')) as HTMLButtonElement
+      add.click()
+      await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith(link))
+      const copy = document.querySelector('.invite-copy') as HTMLButtonElement
+      await vi.waitFor(() => expect(copy.textContent).toBe('Link copied'))
+      expect(document.querySelector('.invite-copied')?.textContent).toContain('The link is copied')
+    } finally {
+      hero.remove(); bands.remove()
+      Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+    }
+  })
+
+  it('a browser that will not copy without a press keeps the button, and the sheet says nothing false', async () => {
+    const link = 'https://hypercomb.com/#invite=hypercomb.com/' + a + '/secret'
+    const writeText = vi.fn(async () => { throw new DOMException('no', 'NotAllowedError') })
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const owner = { ...bridge(a), invite: vi.fn(async () => ({ ok: true as const, link, until: Math.floor(Date.now() / 1000) + 600 })) }
+    const { hero, bands } = draw(owner)
+    document.body.append(hero, bands)
+    try {
+      await dylanOf(bands)
+      await vi.waitFor(() => expect(owner.hello).toHaveBeenCalled())
+      await new Promise(resolve => setTimeout(resolve, 20))
+      const add = (hero.querySelector('.pager-phone') ?? bands.querySelector('.pager-phone')) as HTMLButtonElement
+      add.click()
+      await vi.waitFor(() => expect(writeText).toHaveBeenCalled())
+      const copy = await vi.waitFor(() => {
+        const found = document.querySelector('.invite-copy') as HTMLButtonElement | null
+        expect(found).not.toBeNull()
+        return found!
+      })
+      expect(copy.textContent).toBe('Copy the link instead')
+      expect(document.querySelector('.invite-copied')?.textContent).toBe('')
+    } finally {
+      hero.remove(); bands.remove()
+      Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+    }
+  })
+
 })
 
 describe('a tap visits, a hold toggles', () => {
