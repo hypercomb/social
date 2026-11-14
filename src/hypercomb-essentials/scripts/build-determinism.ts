@@ -24,6 +24,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
+import { knowledgeAtoms } from './knowledge-atoms.js'
 
 /** Locale-free ordering: UTF-16 code units, identical on every machine. */
 export const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
@@ -77,11 +78,21 @@ export const buildInputsDigest = (projectRoot: string, scriptFiles: readonly str
     .map(f => [relative(projectRoot, f).replace(/\\/g, '/'), existsSync(f) ? fileContentSig(f) : 'absent'] as const)
     .sort(([a], [b]) => byCodeUnit(a, b))
     .map(([rel, sig]) => `${rel}\0${sig}`)
-  return createHash('sha256').update(lines.join('\n'), 'utf8').digest('hex')
+  return createHash('sha256').update([...lines, `knowledge\0${knowledgeDigest(projectRoot)}`].join('\n'), 'utf8').digest('hex')
+}
+
+/** The platform's own source, which the build packs as knowledge atoms
+ *  (knowledge-atoms.ts): core, the shell, the host and the doctrine's
+ *  documents sit beside this project, outside its `src/`, and a change to one
+ *  of them is a different package. `absent` where they are not there to read. */
+const knowledgeDigest = (projectRoot: string): string => {
+  try {
+    return createHash('sha256').update(knowledgeAtoms(join(projectRoot, '..'), '// lazy').map(atom => atom.text).join('\n'), 'utf8').digest('hex')
+  } catch { return 'absent' }
 }
 
 /** The build scripts whose change changes the bytes a build makes. */
-export const BUILD_SCRIPT_FILES = ['build-module.ts', 'passive-queen.ts', 'build-determinism.ts', 'pool-address.ts']
+export const BUILD_SCRIPT_FILES = ['build-module.ts', 'passive-queen.ts', 'build-determinism.ts', 'pool-address.ts', 'knowledge-atoms.ts']
 
 export const buildScriptPaths = (scriptsDir: string): string[] => BUILD_SCRIPT_FILES.map(f => join(scriptsDir, f))
 
