@@ -20,6 +20,19 @@
 //          root — so nobody is ever pointed at a root the host cannot serve.
 //          It is the same order `module commit` and `publish:revision` keep.
 //
+// SERVING OPTIMIZES BY ITSELF (jwize, 2026-11-13: "there is no minify or
+// optimizations choices when you deploy these things are done automatically";
+// "the application that runs in the consumers root domain is optimized but they
+// have access to the code files"). Save already derives the minified copy of the
+// new root (runtime module-drafts.ts, `minified`). Serve sends it beside the
+// readable package and names it `minified:<name>`; the host runs it for the
+// visitors of that name, and only while its root says it was derived from the
+// root `install:<name>` names (blossom-worker sitePackage). `install:<name>`
+// stays the READABLE root: a hive that follows the name drafts modules by their
+// source sections, which minifying strips, and the code files stay on the host.
+// A copy that cannot be read back is left out and the readable package is
+// served as before — never a question, never a refusal.
+//
 // Serving is outward: it is only ever the participant's own press. Nothing
 // goes live that the participant has not accepted (jwize, 2026-10-26: "there
 // is no bot accepting going live in the hive") — a root that still carries
@@ -27,8 +40,13 @@
 //
 // A dependency (atomic-modules-plan.md): it registers nothing.
 
-import type { ModuleCommitOutcome } from '@hypercomb/core'
+import { walkPackage, type ModuleCommitOutcome } from '@hypercomb/core'
 import { installChannelKey } from './hive-link.js'
+
+const SIG_RE = /^[a-f0-9]{64}$/
+
+/** The signed-index key the minified copy of `install:<name>` is named under. */
+export const minifiedChannelKey = (name: string): string => `minified:${name}`
 
 /** A package's name is its install channel: one lowercase word, as
  *  `publish:revision -- <name>` takes it. */
@@ -56,6 +74,8 @@ export type SavedPackage = {
   readonly folded: readonly string[]
   /** Picks NOT folded: their code still waits in the brood. */
   readonly held: readonly string[]
+  /** The minified derivation of `root` Save made, when it could. */
+  readonly minified?: string
 }
 
 export type SaveOutcome = { readonly ok: true; readonly saved: SavedPackage } | { readonly ok: false; readonly error: string }
@@ -83,6 +103,7 @@ export const savePackage = async (
       off: [...outcome.off],
       folded: [...new Set([...outcome.drafts, ...(outcome.taken ?? []).map(pick => pick.path)])].sort(),
       held: [...(outcome.held ?? [])],
+      ...(outcome.minified && SIG_RE.test(outcome.minified) ? { minified: outcome.minified } : {}),
     },
   }
 }
@@ -99,14 +120,33 @@ export type ServeDeps = {
 }
 
 export type ServeOutcome =
-  | { readonly ok: true; readonly host: string; readonly channel: string; readonly sent: number; readonly held: number }
+  /** `minified`: the host also names the minified copy, and runs it for this name's visitors. */
+  | { readonly ok: true; readonly host: string; readonly channel: string; readonly sent: number; readonly held: number; readonly minified: boolean }
   /** `stage` says how far it got: nothing was sent (`check`), the files did
    *  not all arrive and no pointer moved (`files`), or the host holds every
    *  file and the pointer did not move (`pointer`). */
   | { readonly ok: false; readonly stage: 'check' | 'files' | 'pointer'; readonly error: string; readonly waiting?: number }
 
+/** Every file of the minified copy of `readable`: its layers, its modules, and
+ *  its derivation record. Null unless its root names `readable` as what it was
+ *  derived from and every layer of it reads back here. */
+export const minifiedFiles = async (
+  minified: string, readable: string, bytesOf: (sig: string) => Promise<Uint8Array | null>,
+): Promise<string[] | null> => {
+  if (!SIG_RE.test(minified) || minified === readable) return null
+  try {
+    const bytes = await bytesOf(minified)
+    if (!bytes) return null
+    const root = JSON.parse(new TextDecoder().decode(bytes)) as { derivedFrom?: unknown; derivation?: unknown }
+    const derivation = String(root?.derivation ?? '')
+    if (root?.derivedFrom !== readable || !SIG_RE.test(derivation)) return null
+    const walked = await walkPackage(minified, bytesOf)
+    return [...new Set([...walked.layers, ...walked.bees, ...walked.dependencies, derivation])]
+  } catch { return null }
+}
+
 /** SERVE. Files first, all of them; the signed pointer only after. */
-export const servePackage = async (host: string, saved: Pick<SavedPackage, 'name' | 'root' | 'files'>, deps: ServeDeps): Promise<ServeOutcome> => {
+export const servePackage = async (host: string, saved: Pick<SavedPackage, 'name' | 'root' | 'files' | 'minified'>, deps: ServeDeps): Promise<ServeOutcome> => {
   const zone = String(host ?? '').trim()
   const name = packageName(saved.name)
   if (!zone) return { ok: false, stage: 'check', error: 'no-host' }
@@ -117,8 +157,11 @@ export const servePackage = async (host: string, saved: Pick<SavedPackage, 'name
   if (waiting === null) return { ok: false, stage: 'check', error: 'unread' }
   if (waiting.length) return { ok: false, stage: 'check', error: 'held', waiting: waiting.length }
 
+  // The minified copy rides with the readable files: one upload, and nothing named until all of it is there.
+  const optimized = saved.minified ? await minifiedFiles(saved.minified, saved.root, deps.bytesOf) : null
+  const files = [...new Set([...saved.files, ...(optimized ?? [])])]
   let published: Awaited<ReturnType<NonNullable<ServeDeps['publishAtoms']>>>
-  try { published = await deps.publishAtoms(zone, saved.files, deps.bytesOf) } catch (error) {
+  try { published = await deps.publishAtoms(zone, files, deps.bytesOf) } catch (error) {
     return { ok: false, stage: 'files', error: error instanceof Error ? error.message : 'the files could not be sent' }
   }
   if (!published.ok) return { ok: false, stage: 'files', error: published.error }
@@ -129,5 +172,10 @@ export const servePackage = async (host: string, saved: Pick<SavedPackage, 'name
     stamped = { ok: false, reason: error instanceof Error ? error.message : 'refused' }
   }
   if (!stamped.ok) return { ok: false, stage: 'pointer', error: stamped.reason ?? 'refused' }
-  return { ok: true, host: zone, channel, sent: published.sent, held: published.held }
+  // The readable root is served now. Naming the minified copy is the optimization; if it is refused, visitors run the readable one.
+  let minified = false
+  if (optimized && saved.minified) {
+    minified = await deps.stamp(zone, minifiedChannelKey(name), saved.minified).then(done => done.ok, () => false)
+  }
+  return { ok: true, host: zone, channel, sent: published.sent, held: published.held, minified }
 }

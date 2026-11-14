@@ -1578,7 +1578,7 @@ describe('a tap visits, a hold toggles', () => {
     const { hero, bands } = showcase({
       self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
       ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => owners(),
-      owner, keepCommunity, minimized: async () => true,
+      owner, keepCommunity,
     })
     document.body.append(hero, bands)
     const sheet = hero.querySelector('.versions-backdrop') as HTMLElement
@@ -1707,7 +1707,7 @@ describe('a tap visits, a hold toggles', () => {
     const { hero, bands } = showcase({
       self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
       ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => owners(),
-      keepCommunity, minimized: async () => true,
+      keepCommunity,
     })
     document.body.append(hero, bands)
     const sheet = hero.querySelector('.versions-backdrop') as HTMLElement
@@ -1734,11 +1734,11 @@ describe('a tap visits, a hold toggles', () => {
     } finally { vi.unstubAllGlobals(); hero.remove(); bands.remove() }
   })
 
-  describe('only what is optimized and minimized can be in the showcase', () => {
-    const drawGate = (minimized: (zone: string, head: string) => Promise<boolean>, owner: ReturnType<typeof bridge> | null) => showcase({
+  describe('going live asks nobody to minify anything (jwize 2026-11-13)', () => {
+    const drawGate = (owner: ReturnType<typeof bridge> | null) => showcase({
       self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
       ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => owners(),
-      minimized, ...(owner ? { owner } : {}),
+      ...(owner ? { owner } : {}),
     })
     /** Opens the held sheet of a followed domain's tile and presses its one act. */
     const putIn = async (bands: HTMLElement, hero: HTMLElement): Promise<void> => {
@@ -1751,36 +1751,22 @@ describe('a tap visits, a hold toggles', () => {
       act.click()
     }
 
-    it('refuses a revision that is not minimized, and says why', async () => {
+    it('puts it in through the key that signs, which optimizes it, with no minify step', async () => {
       const owner = bridge(a)
-      const minimized = vi.fn(async () => false)
-      const { hero, bands } = drawGate(minimized, owner)
-      document.body.append(hero, bands)
-      try {
-        await vi.waitFor(() => expect(owner.hello).toHaveBeenCalled())
-        await new Promise(resolve => setTimeout(resolve, 0))
-        await putIn(bands, hero)
-        await vi.waitFor(() => expect(bands.querySelector('.owner-note')?.textContent).toContain('not optimized and minimized'))
-        expect(minimized).toHaveBeenCalledWith('jwize.com', expect.stringMatching(/^[a-f0-9]{64}$/))
-        expect(owner.toggle).not.toHaveBeenCalled()
-      } finally { hero.remove(); bands.remove() }
-    })
-
-    it('lets a minimized revision in through the same act', async () => {
-      const owner = bridge(a)
-      const { hero, bands } = drawGate(async () => true, owner)
+      const { hero, bands } = drawGate(owner)
       document.body.append(hero, bands)
       try {
         await vi.waitFor(() => expect(owner.hello).toHaveBeenCalled())
         await new Promise(resolve => setTimeout(resolve, 0))
         await putIn(bands, hero)
         await vi.waitFor(() => expect(owner.toggle).toHaveBeenCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'dylan', on: true }))
+        expect(bands.querySelector('.owner-note')?.textContent ?? '').not.toMatch(/[Mm]inif/)
       } finally { hero.remove(); bands.remove() }
     })
 
     it('with no hive answering on a phone, putting one in says why instead of doing nothing', async () => {
       vi.stubGlobal('matchMedia', (query: string) => ({ matches: /coarse|max-width: 599px/.test(query) }))
-      const { hero, bands } = drawGate(async () => true, null)
+      const { hero, bands } = drawGate(null)
       document.body.append(hero, bands)
       try {
         await putIn(bands, hero)
@@ -1791,7 +1777,7 @@ describe('a tap visits, a hold toggles', () => {
     it('with no hive answering on a desktop, putting one in hands the switch to your hive — no keys allow', async () => {
       const open = vi.fn()
       vi.stubGlobal('open', open)
-      const { hero, bands } = drawGate(async () => true, null)
+      const { hero, bands } = drawGate(null)
       document.body.append(hero, bands)
       try {
         await putIn(bands, hero)
@@ -1804,8 +1790,7 @@ describe('a tap visits, a hold toggles', () => {
       vi.useFakeTimers()
       try {
         const owner = bridge(a)
-        const minimized = vi.fn(async () => false)
-        const { hero, bands } = drawGate(minimized, owner)
+        const { hero, bands } = drawGate(owner)
         document.body.append(hero, bands)
         await vi.advanceTimersByTimeAsync(50)
         const camel = await tileIn(bands, '.dex-row.own a.hex', 'camelflage')
@@ -1813,7 +1798,6 @@ describe('a tap visits, a hold toggles', () => {
         vi.advanceTimersByTime(501)
         await vi.advanceTimersByTimeAsync(10)
         expect(owner.toggle).toHaveBeenCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'camelflage', on: false })
-        expect(minimized).not.toHaveBeenCalled()
         hero.remove(); bands.remove()
       } finally { vi.useRealTimers() }
     })

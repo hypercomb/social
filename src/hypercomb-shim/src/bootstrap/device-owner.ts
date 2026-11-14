@@ -17,7 +17,7 @@
 // read, read fresh right before signing — never a stale copy (hive-pointer.ts says
 // why: a stale copy would sign powers the owner had turned off).
 
-import { SignatureService, nip98Authorization, nip98Template } from '@hypercomb/core'
+import { SignatureService, deriveMinifiedLayer, minifyModuleBody, nip98Authorization, nip98Template, ownedMinifyTool } from '@hypercomb/core'
 import { readDeviceBinding, type DeviceBinding } from './device-binding'
 import { putKeyChain, readKeyChain } from './device-invite'
 import { deviceSigner, type DeviceSigner } from './device-key'
@@ -122,6 +122,66 @@ const openOn = (zone: string, anchor: string, content: Record<string, unknown>):
 
 type Attempt = OwnerResult | 'stale'
 
+/** The index key a branch's promotion is named under. MIRRORED: essentials sharing/promote.ts promotedPointer. */
+export const promotedPointer = (lineage: string): string => `promoted:${lineage}`
+
+/** The promotion record, canonical. MIRRORED: essentials sharing/promote.ts promotionRecord. A phone sends no
+ *  arrival plan (it is read from the hive's own tiles), so it names only the minified derivation. */
+export const promotionRecord = (head: string, derivation: string): string =>
+  JSON.stringify({ v: 1, kind: 'promote', head, arrival: null, derivation })
+
+const promotes = (text: string | null, head: string): boolean => {
+  try {
+    const record = JSON.parse(text ?? '') as { kind?: unknown; head?: unknown; arrival?: unknown; derivation?: unknown }
+    return record?.kind === 'promote' && record.head === head && (record.arrival !== null || record.derivation !== null)
+  } catch { return false }
+}
+
+/** The bytes the zone serves at `sig`, or null. An HTML answer is a page standing in for a miss. */
+const servedBytes = async (zone: string, sig: string): Promise<Uint8Array | null> => {
+  try {
+    const response = await fetch(`${zoneOrigin(zone)}/${sig}`)
+    if (!response.ok || (response.headers.get('content-type') ?? '').toLowerCase().includes('text/html')) return null
+    return new Uint8Array(await response.arrayBuffer())
+  } catch { return null }
+}
+
+/**
+ * GOING LIVE IS THE PROMOTE, FROM A PHONE TOO (jwize 2026-11-13: "from a mobile point of view enter then click
+ * manage, turn on all the stuff. Then it is in community which you then turn on some items (the minification)").
+ * The head the anchor published here is minified from the bytes the zone already serves, the derived files and
+ * the record go up as the anchor's, and the record's signature is returned for the same index write that puts the
+ * tile in the showcase. Null when that head is already promoted. The readable layers stay where they are.
+ */
+export const promoteHere = async (
+  zone: string, lineage: string, roots: Readonly<Record<string, string>>, anchor: string, signer: DeviceSigner,
+): Promise<{ readonly ok: true; readonly record: string | null } | { readonly ok: false; readonly reason: string }> => {
+  const head = String(roots[lineage] ?? '').toLowerCase()
+  if (!SIG.test(head)) return { ok: false, reason: `${lineage} is not published on ${zone} yet` }
+  const named = String(roots[promotedPointer(lineage)] ?? '').toLowerCase()
+  if (SIG.test(named)) {
+    const bytes = await servedBytes(zone, named)
+    if (promotes(bytes ? new TextDecoder().decode(bytes) : null, head)) return { ok: true, record: null }
+  }
+  let tree: Awaited<ReturnType<typeof deriveMinifiedLayer>>
+  try {
+    tree = await deriveMinifiedLayer(head, sig => servedBytes(zone, sig), async body => minifyModuleBody(body), await ownedMinifyTool())
+  } catch (error) {
+    return { ok: false, reason: `${lineage} could not be optimized (${error instanceof Error ? error.message : 'unreadable'})` }
+  }
+  const files = new Map(tree.files)
+  files.set(tree.derivation.sig, tree.derivation.bytes)
+  files.set(tree.membership.dialect, tree.membership.dialectBytes)
+  const recordBytes = new TextEncoder().encode(promotionRecord(head, tree.derivation.sig))
+  const record = await sha(recordBytes)
+  files.set(record, recordBytes)
+  for (const [sig, bytes] of files) {
+    const refused = await uploadAtom(zone, bytes, sig, anchor, signer, `the optimized ${lineage}`, 'held')
+    if (refused) return { ok: false, reason: refused }
+  }
+  return { ok: true, record }
+}
+
 /** What a change makes of the record: the next one, or null when it changes nothing. `open` is what the anchor's doors
  *  publish here — what a zone with no record yet is showing. */
 type Change = (current: ShowcaseRecord | null, open: () => ShowcaseItem[]) => ShowcaseRecord | null
@@ -149,7 +209,7 @@ const viewChange = (request: OwnerView): Change => (current, open) => {
 
 /** One read-change-sign of the anchor's showcase on the zone. 'stale' when the host holds a newer index
  *  than the one read: read again. */
-const attempt = async (zone: string, change: Change, anchor: string, signer: DeviceSigner): Promise<Attempt> => {
+const attempt = async (zone: string, change: Change, anchor: string, signer: DeviceSigner, live?: OwnerToggle): Promise<Attempt> => {
   const read = await readOwnerIndex(zone, anchor)
   if (!read) return { ok: false, reason: `could not read your index on ${zone}` }
   const content: Record<string, unknown> = read === 'missing' ? { v: HIVE_LINK_VERSION, roots: {} } : read.content
@@ -163,13 +223,20 @@ const attempt = async (zone: string, change: Change, anchor: string, signer: Dev
   }
   const next = change(current, () => openOn(zone, anchor, content))
   if (!next) return { ok: true, changed: false }
+  // One of the anchor's own creations going live is optimized first, and named in the same index write.
+  const extra: Record<string, string> = {}
+  if (live?.on && live.pubkey === anchor) {
+    const promoted = await promoteHere(zone, live.lineage, roots, anchor, signer)
+    if (!promoted.ok) return { ok: false, reason: promoted.reason }
+    if (promoted.record) extra[promotedPointer(live.lineage)] = promoted.record
+  }
   const bytes = showcaseBytes(next)
   const sig = await sha(bytes)
   const refused = await uploadAtom(zone, bytes, sig, anchor, signer)
   if (refused) return { ok: false, reason: refused }
 
   const before = read === 'missing' ? null : read.event
-  const put = await putIndex(zone, anchor, signIndex(signer, anchor, before, { ...content, roots: { ...roots, [key]: sig } }), signer)
+  const put = await putIndex(zone, anchor, signIndex(signer, anchor, before, { ...content, roots: { ...roots, ...extra, [key]: sig } }), signer)
   if (put === 'stale') return 'stale'
   if (put) return { ok: false, reason: put }
   return { ok: true, changed: true }
@@ -195,13 +262,13 @@ export const deviceOwner = (zone: string, deps: DeviceOwnerDeps = {}): OwnerBrid
   })().catch(() => null)
   let lane: Promise<unknown> = Promise.resolve()
   // One at a time: each is a read-change-sign of the same record.
-  const act = (valid: boolean, change: Change): Promise<OwnerResult> => {
+  const act = (valid: boolean, change: Change, live?: OwnerToggle): Promise<OwnerResult> => {
     const run = lane.then(async (): Promise<OwnerResult> => {
       const held = await ensure()
       if (!held) return { ok: false, reason: 'this browser is not on your key list here' }
       if (!valid) return { ok: false, reason: 'bad request' }
       for (let tries = 0; tries < 2; tries++) {
-        const result = await attempt(zone, change, held.anchor, held.signer).catch((): OwnerResult => ({ ok: false, reason: 'failed' }))
+        const result = await attempt(zone, change, held.anchor, held.signer, live).catch((): OwnerResult => ({ ok: false, reason: 'failed' }))
         if (result !== 'stale') return result
       }
       return { ok: false, reason: 'your index kept changing underneath; try again' }
@@ -211,7 +278,7 @@ export const deviceOwner = (zone: string, deps: DeviceOwnerDeps = {}): OwnerBrid
   }
   return {
     hello: async () => (await ensure())?.anchor ?? '',
-    toggle: request => act(request.zone === zone && SIG.test(request.pubkey) && !!request.lineage && request.lineage.length <= 200, toggleChange(request)),
+    toggle: request => act(request.zone === zone && SIG.test(request.pubkey) && !!request.lineage && request.lineage.length <= 200, toggleChange(request), request),
     view: request => act(request.zone === zone && !!parseView(request.view), viewChange(request)),
   }
 }

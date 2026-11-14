@@ -606,9 +606,6 @@ export type ShowcaseOptions = {
   /** The hive beside this page, when this device is its owner's: a tap on a tile puts it in the showcase or takes it out. */
   readonly owner?: OwnerBridge | null
   /** The tiles this browser brought into its community while managing (community-tiles.ts). */
-  /** Whether a revision, as `zone` serves it, is optimized and minimized. Only such a tile can be put in the showcase;
-   *  without it the page cannot tell and gates nothing. */
-  readonly minimized?: (zone: string, head: string) => Promise<boolean>
   readonly readCommunity?: () => Promise<readonly CommunityPick[]>
   readonly keepCommunity?: (picks: readonly CommunityPick[]) => Promise<boolean>
   readonly readPeerLedger?: (zone: string) => Promise<readonly LedgerSite[]>
@@ -972,8 +969,8 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     const label = inside ? 'Take it out of my showcase' : 'Put it in my showcase'
     let act: HTMLElement | null = null
     if (item) {
-      // Putting one in is checked first (optimized and minimized), so it goes through the same act whoever holds the key.
-      if ((options.owner && ownerKey) || (!inside && options.minimized)) {
+      // Putting one in always goes through tapTile: it says why on a phone with no key, or hands the switch to your hive.
+      if ((options.owner && ownerKey) || !inside) {
         const button = el('button', 'version-act')
         button.type = 'button'
         button.textContent = label
@@ -1023,7 +1020,7 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   const keyHome = (): unknown => options.home ?? (onPhone() ? undefined : DEFAULT_HOME)
   // ── WHAT THIS BROWSER TURNED ON (jwize 2026-11-04: the community is "a target, not a domain"; 2026-11-10: tiles toggle
   //    where they sit). The picks are kept in this browser; a picked tile is lit in its domain's row while editing and
-  //    shows on the page otherwise. Publishing is its own, signed act, and only for what is optimized and minimized. ──
+  //    shows on the page otherwise. Going live is its own, signed act; the key that signs it optimizes it as it goes. ──
   let picks: CommunityPick[] = []
   const picked = (entry: Aggregate): boolean => picks.some(pick => pick.key === entry.key)
   let picking = false
@@ -1047,30 +1044,15 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     if (!kept) { picks = was; paint(); say(`Could not turn ${entry.title} ${on ? 'on' : 'off'}.`); return }
     say(`${entry.title} is ${on ? 'on' : 'off'}.`)
   }
-  /** Whether a tile's revision is optimized and minimized — asked of the domain that serves it. True where the page
-   *  cannot ask (nothing was wired to), so it gates nothing it cannot know. */
-  const minimizedFor = async (entry: Aggregate, row: string): Promise<boolean> => {
-    if (!options.minimized) return true
-    const version = entry.versions.find(candidate => candidate.places.some(place => place.zone === row)) ?? entry.versions[0]
-    const zone = version?.places.find(place => place.zone === row)?.zone ?? version?.places[0]?.zone ?? options.self
-    return version ? options.minimized(zone, version.head).catch(() => false) : false
-  }
   const tapTile = async (entry: Aggregate, row: string): Promise<void> => {
     if (tapping) return
     const on = !showcased(entry)
     const item = itemOf(entry, row)
     if (!item) { say(`${entry.title} names no lineage to sign, so it cannot go live from here.`); return }
-    // ONLY WHAT IS OPTIMIZED AND MINIMIZED CAN BE IN THE SHOWCASE (jwize 2026-11-04). Taking one out is never gated.
-    if (on && options.minimized) {
-      tapping = true
-      say(`Checking ${entry.title}…`)
-      const ready = await minimizedFor(entry, row)
-      tapping = false
-      if (!ready) {
-        say(`${entry.title} is not optimized and minimized yet, so it cannot be in the showcase. Minify it from its hive, then try again.`)
-        return
-      }
-    }
+    // NOTHING TO MINIFY BY HAND (jwize 2026-11-13: "there is no minify or optimizations choices when you deploy these
+    // things are done automatically"; "toggle from domain, toggle from off items in community to live, no other
+    // interface"). Going live IS the promote: the key that signs it — the hive beside the page, or this phone's own —
+    // optimizes the creation as it puts it in (essentials promote.ts promoteForCommunity; device-owner.ts).
     const bridge = options.owner
     if (!bridge || !ownerKey) {
       // No hive of yours answers here: hand the switch to the hive that has the key, when the page knows it —
@@ -1085,7 +1067,7 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     }
     tapping = true
     ownerNote.hidden = false
-    ownerNote.textContent = on ? `Putting ${entry.title} in the showcase…` : `Taking ${entry.title} out of the showcase…`
+    ownerNote.textContent = on ? `Optimizing ${entry.title} and putting it in the showcase…` : `Taking ${entry.title} out of the showcase…`
     const result = await bridge.toggle({ zone: options.self, pubkey: item.pubkey, lineage: item.lineage, on })
     tapping = false
     ownerNote.textContent = result.ok ? (on ? `${entry.title} is in the showcase.` : `${entry.title} is out of the showcase.`) : `Not changed: ${result.reason}.`
@@ -1095,7 +1077,7 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   //    deployed" / "That simplifies to toggles and confirms" / "remember the community just feeds from the taps" / "it
   //    needs to be just confirm"). Managing, a tap on a domain's tile asks once; yes brings it into your community and
   //    puts it live in the showcase. A tap on a community tile asks once; yes sends it back and takes it off. The going
-  //    live is the same signed act as ever (tapTile): gated on optimized and minimized, signed by your hive's key. ──
+  //    live is the same signed act as ever (tapTile): optimized as it goes, signed by your key. ──
   // ── IN PLACE (jwize 2026-11-10: "you add domains. You go to them and toggle things on or off. Then you are back in
   //    your mobile app view and you are just using the creations" · "they should have to be published so that the
   //    visitor can see the community but if you have your private key you can publish unpublish stuff"). A tile is ON

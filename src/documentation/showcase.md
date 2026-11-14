@@ -296,6 +296,17 @@ candidates are this key's lineages on the zone and, since 2026-11-13, what is on
    lineages. A click promotes it into the draft, and Publish signs it. A click on one that is on takes it back out:
    it is then in the domain and not in the community, and it stays grayed in the window until the window closes.
 
+**Going live is the promote, and it optimizes by itself** (jwize, 2026-11-13: "publish from the host, promote from the
+available published to the community (this would start the minification)"; "toggle from domain, toggle from off items
+in community to live, no other interface"; "there is no minify or optimizations choices when you deploy"). On a phone:
+enter, Manage, turn on what you want from the domains; then in your community turn items on, and that is the go-live.
+Whichever key signs it optimizes one of its own creations first: the hive (`promoteForCommunity` in `promote.ts`, from
+`applyToggle` and the community window's Publish) or a phone holding its owner's key (`promoteHere` in the shim's
+`device-owner.ts`, which minifies from the bytes the zone already serves and names `promoted:<lineage>` in the same
+index write). The readable layers stay on the host beside the minified derivation (`derivedFrom`), so the files are
+always there to read, and the minifier only drops whitespace, so pool meanings and keys survive. Another key's
+creation is its author's to promote. A creation that cannot be optimized does not go live, and the reason is said.
+
 **Nothing complicated: the root domain is strictly on and off** (jwize, 2026-11-13: "You shouldn't manage your
 revision on the root domain. This is strictly on and off. The revisions should be available in the development mode
 on a subdomain"). On a root domain the host directory switches a package on or off and brings it to the newest; it
@@ -307,8 +318,16 @@ keys is two tiles, each saying its domain, and you click the one you mean. One i
 one tile naming them all, because a showcase item is `{ pubkey, lineage }` and carries no host.
 
 **Still owed:** the offers document keeps one creation per name, so a second instance of a name is known only for
-domains looked into this session; the front door's Manage still turns a followed domain's tile on in one step; and
-whether a visitor's page draws a promoted creation that this host's ledger does not list has not been checked.
+domains looked into this session; the front door's Manage still turns a followed domain's tile on in one step; a phone
+sends no arrival plan (it is read from the hive's own tiles); and whether a visitor's page draws a promoted creation that this host's ledger does not list has not been checked.
+
+**What a community tile opens** (jwize 2026-11-13: "going back to the community from any device shows the optimized
+application and points to the development subdomain and therefore its bytes"). The tile opens the creation at its own
+subdomain and shows that address, the place it is developed (`promote.ts` `readyToPromote`). The code that door runs
+comes from the package the host names for it, not from the creation's tiles. So minifying a creation's head on go-live
+does not make its door faster; its arrival plan does. What makes the code light is the package. The hosts desk's Serve
+sends a package's minified copy beside the readable one, as `minified:<name>`, and the host runs that copy for the name
+while it was derived from the root `install:<name>` names (`derivations.md`). The readable files stay on the host.
 
 ### The tap on the page, for the owner (jwize 2026-10-25)
 
@@ -561,9 +580,9 @@ keeps showing what it publishes, because the record that first names a look name
 answers, and the page says so.
 
 Being in the showcase is a different act, not a tap: a hold on the owner's own tile, or the held sheet's "Put it in my showcase".
-**Only a revision that is optimized and minimized can be put in.** `minimized.ts` asks the domain serving the head: its root layer
-names `derivedFrom`, or a derivation record is a member of `derived:<head>` (`derivations.md`). A revision that is not yet minimized
-is refused with the reason; taking one out is never gated. Nothing asks where the page was given no `minimized` check.
+**Only a revision that is optimized and minimized can be put in, and putting it in does the optimizing** (2026-11-13, replacing
+the 11-04 refusal that sent you off to minify it first). The page no longer asks; the key that signs the go-live minifies first
+(see "A publish has three stages"). `minimized.ts` is no longer wired. Taking one out is never gated.
 
 ### The phone has one input (jwize 2026-11-04)
 

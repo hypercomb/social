@@ -347,6 +347,28 @@ test('a name that publishes its own package boots that package, not the shared h
   assert.notEqual(JSON.parse(install[1]).text.split('\n')[0], shared)
 })
 
+test('a name served minified boots the minified copy, only while it was derived from the package install names', async () => {
+  // jwize 2026-11-13: "the application that runs in the consumers root domain is optimized but they have access to the code files".
+  const own = 'ee'.repeat(32)
+  const fresh = 'f1'.repeat(32)
+  const stale = 'f2'.repeat(32)
+  const shell = '<!doctype html><html><head><title>x</title></head><body></body></html>'
+  const booted = async (minified) => {
+    const { env } = await fixture(await signedIndex({ revolucion: head, 'install:revolucion': own, 'minified:revolucion': minified }))
+    await env.CONTENT.put(fresh, new TextEncoder().encode(JSON.stringify({ cells: [], derivedFrom: own, derivation: 'd0'.repeat(32) })))
+    await env.CONTENT.put(stale, new TextEncoder().encode(JSON.stringify({ cells: [], derivedFrom: 'aa'.repeat(32), derivation: 'd0'.repeat(32) })))
+    env.ASSETS.fetch = async () => new Response(shell, { headers: { 'content-type': 'text/html' } })
+    const html = await (await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)).text()
+    const install = /<script id="hc-install" type="application\/json">([^<]*)<\/script>/.exec(html)
+    assert(install, 'the page carries an install pointer')
+    return JSON.parse(install[1]).text.split('\n')[0]
+  }
+  assert.equal(await booted(fresh), fresh)
+  // A copy of an older package, or one this host does not hold, is not run: the readable package is.
+  assert.equal(await booted(stale), own)
+  assert.equal(await booted('f3'.repeat(32)), own)
+})
+
 test('the install index goes out as JSON, so the edge compresses it', async () => {
   const { env } = await fixture()
   const pool = await sha256Hex('install:index')

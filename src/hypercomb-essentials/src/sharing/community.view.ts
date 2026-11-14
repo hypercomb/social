@@ -16,6 +16,7 @@ import { EffectBus, requestConfirm } from '@hypercomb/core'
 import { communityCandidates, type CommunityCandidate, type OfferedInstance } from './community-candidates.js'
 import { CommunityDraft } from './community.draft.js'
 import { publisherKeyHex } from './key-list.client.js'
+import { promoteForCommunity } from './promote.js'
 import {
   addCommunity, communityKey, readSignedShowcase, removeCommunity, renameCommunity, setCommunityView, setView,
   signShowcase, stepView, toggleCommunityItem, toggleItem, viewLabel,
@@ -154,8 +155,18 @@ export class CommunityView extends EventTarget {
       cancelLabel: 'Cancel',
     })
     if (!ok) return
+    // GOING LIVE OPTIMIZES BY ITSELF (jwize 2026-11-13): each of this key's own creations turned on since the window
+    // opened is promoted (minified) before the record names it. Another key's creation is theirs to promote.
+    const own = String(await publisherKeyHex().catch(() => '') ?? '').toLowerCase()
+    const fresh = record.items.filter(item => item.pubkey === own && !this.#named.some(row => same(row, item)))
+    for (const item of fresh) {
+      say(`Optimizing ${item.lineage}…`)
+      const done = await promoteForCommunity(record.zone, item.lineage)
+      if (!done.ok) { say(`Community not published: ${done.reason}`, 'error'); return }
+    }
     const result = await signShowcase(record)
     say(result.ok ? `Community published for ${record.zone}` : `Community not published: ${result.reason}`, result.ok ? 'success' : 'error')
+    if (result.ok) this.#named = [...record.items]
   }
 
   #pages(): string[] { return ['', ...(this.#draft?.current.communities ?? []).map(row => communityKey(row.name))] }

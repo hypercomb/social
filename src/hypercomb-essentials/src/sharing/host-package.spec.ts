@@ -73,8 +73,57 @@ describe('serve', () => {
 
   it('checks, sends every file, and only then moves the signed pointer install:<name>', async () => {
     const { order, deps } = world()
-    expect(await servePackage('jwize.com', saved, deps)).toEqual({ ok: true, host: 'jwize.com', channel: 'install:minimal', sent: 2, held: 1 })
+    expect(await servePackage('jwize.com', saved, deps)).toEqual({ ok: true, host: 'jwize.com', channel: 'install:minimal', sent: 2, held: 1, minified: false })
     expect(order).toEqual(['check', 'files:jwize.com:l1,b1,d1', 'pointer:jwize.com:install:minimal:true'])
+  })
+
+  describe('minified by itself (jwize 2026-11-13: "there is no minify or optimizations choices when you deploy")', () => {
+    const MINIFIED = 'c'.repeat(64)
+    const CHILD = 'e'.repeat(64)
+    const SMALL = 'f'.repeat(64)
+    const DERIVATION = 'd'.repeat(64)
+    const json = (value: unknown) => new TextEncoder().encode(JSON.stringify(value))
+    const heldHere = (root: Record<string, unknown>): ServeDeps['bytesOf'] => async sig =>
+      sig === MINIFIED ? json(root) : sig === CHILD ? json({ name: 'games', bees: [`${SMALL}.js`], cells: [] }) : null
+
+    it('sends the minified copy with the readable files, and names it beside install:<name>', async () => {
+      const keys: string[] = []
+      const { order, deps } = world({
+        bytesOf: heldHere({ cells: [CHILD], derivedFrom: ROOT, derivation: DERIVATION }),
+        stamp: async (host, key, root) => { order.push(`pointer:${host}:${key}:${root.slice(0, 1)}`); keys.push(key); return { ok: true } },
+      })
+      expect(await servePackage('jwize.com', { ...saved, minified: MINIFIED }, deps))
+        .toEqual({ ok: true, host: 'jwize.com', channel: 'install:minimal', sent: 2, held: 1, minified: true })
+      // One upload holds both, and install:<name> still names the READABLE root: a follower drafts from its source.
+      expect(order).toEqual(['check', `files:jwize.com:l1,b1,d1,${MINIFIED},${CHILD},${SMALL},${DERIVATION}`,
+        'pointer:jwize.com:install:minimal:a', 'pointer:jwize.com:minified:minimal:c'])
+      expect(keys).toEqual(['install:minimal', 'minified:minimal'])
+    })
+
+    it('serves the readable package alone when the copy is not of this root or does not read back', async () => {
+      for (const bytesOf of [
+        heldHere({ cells: [CHILD], derivedFrom: 'b'.repeat(64), derivation: DERIVATION }),
+        heldHere({ cells: ['9'.repeat(64)], derivedFrom: ROOT, derivation: DERIVATION }),
+        async () => null,
+      ]) {
+        const { order, deps } = world({ bytesOf })
+        expect(await servePackage('jwize.com', { ...saved, minified: MINIFIED }, deps)).toMatchObject({ ok: true, minified: false })
+        expect(order).toEqual(['check', 'files:jwize.com:l1,b1,d1', 'pointer:jwize.com:install:minimal:true'])
+      }
+    })
+
+    it('is still served when only naming the copy is refused', async () => {
+      const { deps } = world({
+        bytesOf: heldHere({ cells: [], derivedFrom: ROOT, derivation: DERIVATION }),
+        stamp: async (_host, key) => (key.startsWith('minified:') ? { ok: false, reason: 'no' } : { ok: true }),
+      })
+      expect(await servePackage('jwize.com', { ...saved, minified: MINIFIED }, deps)).toMatchObject({ ok: true, minified: false })
+    })
+
+    it('Save keeps the copy the commit made', async () => {
+      const outcome = await savePackage('minimal', async () => committed({ minified: MINIFIED }))
+      expect(outcome.ok && outcome.saved.minified).toBe(MINIFIED)
+    })
   })
 
   it('sends nothing while code in it waits in the brood, or when that cannot be told', async () => {

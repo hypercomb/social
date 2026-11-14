@@ -18,6 +18,7 @@
 import { EffectBus, requestConfirm } from '@hypercomb/core'
 import { fetchHiveIndex } from './hive-pointer.js'
 import { allowAnother, publisherKeyHex, type KeysAllowResult } from './key-list.client.js'
+import { promoteForCommunity, type CommunityPromotion } from './promote.js'
 import { qrSvg } from './qr-code.js'
 import { parseView, readSignedShowcase, setView, showcases, signShowcase, toggleItem, type Showcase, type ShowcaseItem } from './showcase-record.js'
 
@@ -35,6 +36,8 @@ export type BridgeDeps = {
   readonly sign?: typeof signShowcase
   /** Lineages this key publishes on the zone. Null when that list could not be read. */
   readonly published?: (zone: string, pubkey: string) => Promise<readonly ShowcaseItem[] | null>
+  /** Optimize one of this key's creations before it goes live (promote.ts promoteForCommunity). */
+  readonly promote?: (zone: string, lineage: string) => Promise<CommunityPromotion>
 }
 
 /** Lineages whose signed doors name this zone. Null when the index cannot be read.
@@ -78,12 +81,26 @@ export async function applyToggle(request: ToggleRequest, deps: BridgeDeps = {})
   } catch {
     return { ok: false, reason: 'could not read the showcase' }
   }
+  // GOING LIVE IS THE PROMOTE, AND IT OPTIMIZES BY ITSELF (jwize 2026-11-13): one of this key's own creations is
+  // minified before the record names it. Another publisher's creation is theirs to promote; taking one out is never gated.
+  const optimize = async (): Promise<ToggleResult | null> => {
+    if (request.on !== true || pubkey !== own) return null
+    const done = await (deps.promote ?? promoteForCommunity)(zone, lineage)
+      .catch((): CommunityPromotion => ({ ok: false, reason: 'it could not be optimized' }))
+    return done.ok ? null : { ok: false, reason: done.reason }
+  }
   if (current) {
     if (showcases(current, item) === (request.on === true)) return { ok: true, changed: false }
+    const refused = await optimize()
+    if (refused) return refused
     return signResult(toggleItem(current, item), deps)
   }
   // No record yet. Turning one on starts a showcase that names only that creation.
-  if (request.on === true) return signResult(toggleItem({ zone, items: [], domains: [] }, item), deps)
+  if (request.on === true) {
+    const refused = await optimize()
+    if (refused) return refused
+    return signResult(toggleItem({ zone, items: [], domains: [] }, item), deps)
+  }
   // Turning one off records everything still published here. An explicit empty record is left alone above.
   let open: readonly ShowcaseItem[] | null
   try {

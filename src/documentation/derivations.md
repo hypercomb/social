@@ -133,6 +133,8 @@ A changed package registration reminifies that new root into `derived:<that root
 
 Picking a code behavior from the hosts window composes that registration: the trunk, the behavior chosen at its path, and the paths that are off. That composed root is what is reminified into `derived:<that registration>`. The installed package stays the readable trunk.
 
+Serving a package from the hosts desk sends its minified copy too, with no choice (jwize 2026-11-13: "there is no minify or optimizations choices when you deploy"). Save already made it. Serve uploads it beside the readable files and signs it as `minified:<name>` beside `install:<name>`. `install:<name>` stays the readable root, because a hive that follows the name drafts modules by their source sections, which minifying strips. A host runs `minified:<name>` for that name's visitors only while its root's `derivedFrom` is the root `install:<name>` names (blossom-worker `sitePackage`). Otherwise visitors run the readable package. A copy that does not read back is not sent, and the readable package is served alone (`host-package.ts`).
+
 Publish to head names the working build as this origin's instance head. The file is one line, the package, and a second line when that package is a minified derivation. The file signatures of that build stay beside it. Minting, minifying, and a hosts pick leave a published head where it is. This browser answers GET `/head` from that publish. Saving the head file is how a host serves those lines.
 
 ## The first dialect: `minify` (built)

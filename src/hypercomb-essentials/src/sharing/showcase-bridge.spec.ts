@@ -11,17 +11,37 @@ import type { Showcase } from './showcase-record.js'
 const key = 'a'.repeat(64)
 const empty: Showcase = { zone: 'example.com', items: [], domains: [] }
 const request = { zone: 'example.com', pubkey: key, lineage: 'dylan', on: true }
+/** Optimizing has its own case below; elsewhere it always succeeds and touches no network. */
+const promote = async () => ({ ok: true as const, promoted: false })
 
 describe('applyToggle', () => {
   it('puts a creation in, signs the record once, and does nothing when asked again', async () => {
     const sign = vi.fn(async (_record: Showcase) => ({ ok: true as const, sig: 'b'.repeat(64) }))
-    const deps = { own: async () => key, read: async () => empty, sign }
+    const deps = { own: async () => key, read: async () => empty, sign, promote }
     expect(await applyToggle(request, deps)).toEqual({ ok: true, changed: true })
     expect(sign).toHaveBeenCalledTimes(1)
     expect(sign.mock.calls[0]![0].items).toEqual([{ pubkey: key, lineage: 'dylan' }])
     const there: Showcase = { ...empty, items: [{ pubkey: key, lineage: 'dylan' }] }
     expect(await applyToggle(request, { ...deps, read: async () => there })).toEqual({ ok: true, changed: false })
     expect(sign).toHaveBeenCalledTimes(1)
+  })
+
+  it('going live optimizes your own creation first, and one that cannot be optimized does not go live', async () => {
+    // jwize 2026-11-13: "toggle from domain, toggle from off items in community to live, no other interface".
+    const sign = vi.fn(async (_record: Showcase) => ({ ok: true as const, sig: 'b'.repeat(64) }))
+    const optimized = vi.fn(async () => ({ ok: true as const, promoted: true }))
+    expect(await applyToggle(request, { own: async () => key, read: async () => empty, sign, promote: optimized })).toEqual({ ok: true, changed: true })
+    expect(optimized).toHaveBeenCalledWith('example.com', 'dylan')
+    const failed = vi.fn(async () => ({ ok: false as const, reason: 'other is not published on example.com yet' }))
+    expect(await applyToggle({ ...request, lineage: 'other' }, { own: async () => key, read: async () => empty, sign, promote: failed }))
+      .toEqual({ ok: false, reason: 'other is not published on example.com yet' })
+    expect(sign).toHaveBeenCalledTimes(1)
+    // Another key's creation is theirs to promote, and taking one out is never gated.
+    const never = vi.fn(async () => ({ ok: false as const, reason: 'no' }))
+    expect(await applyToggle({ ...request, pubkey: 'c'.repeat(64) }, { own: async () => key, read: async () => empty, sign, promote: never })).toEqual({ ok: true, changed: true })
+    const there: Showcase = { ...empty, items: [{ pubkey: key, lineage: 'dylan' }] }
+    expect(await applyToggle({ ...request, on: false }, { own: async () => key, read: async () => there, sign, promote: never })).toEqual({ ok: true, changed: true })
+    expect(never).not.toHaveBeenCalled()
   })
 
   it('takes it out again', async () => {
@@ -33,7 +53,7 @@ describe('applyToggle', () => {
 
   it('accepts a nested lineage', async () => {
     const sign = vi.fn(async (_record: Showcase) => ({ ok: true as const, sig: 'b'.repeat(64) }))
-    expect(await applyToggle({ ...request, lineage: 'work/meetings' }, { own: async () => key, read: async () => empty, sign })).toEqual({ ok: true, changed: true })
+    expect(await applyToggle({ ...request, lineage: 'work/meetings' }, { own: async () => key, read: async () => empty, sign, promote })).toEqual({ ok: true, changed: true })
     expect(sign.mock.calls[0]![0].items).toEqual([{ pubkey: key, lineage: 'work/meetings' }])
   })
 
@@ -42,7 +62,7 @@ describe('applyToggle', () => {
     expect(await applyToggle(request, { own: async () => '', read: async () => empty, sign })).toEqual({ ok: false, reason: 'no key on this device' })
     expect(await applyToggle({ ...request, lineage: 'bad\nname' }, { own: async () => key, read: async () => empty, sign })).toEqual({ ok: false, reason: 'bad request' })
     expect(await applyToggle({ ...request, zone: 'nope' }, { own: async () => key, read: async () => empty, sign })).toEqual({ ok: false, reason: 'bad request' })
-    expect(await applyToggle(request, { own: async () => key, read: async () => empty, sign })).toEqual({ ok: false, reason: 'host refused' })
+    expect(await applyToggle(request, { own: async () => key, read: async () => empty, sign, promote })).toEqual({ ok: false, reason: 'host refused' })
     expect(sign).toHaveBeenCalledTimes(1)
   })
 

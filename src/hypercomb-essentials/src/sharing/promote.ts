@@ -19,7 +19,7 @@ import {
 } from '@hypercomb/core'
 import { derivedArrival } from './arrival-derive.js'
 import { publishArrivalPlan } from './arrival-plan-publish.js'
-import { setHiveRoot } from './hive-pointer.js'
+import { ownHiveRoot, setHiveRoot } from './hive-pointer.js'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 const STORE_KEY = '@hypercomb.social/Store'
@@ -97,6 +97,39 @@ const bytesOf = async (dir: Reader | undefined, names: readonly string[]): Promi
     try { return new Uint8Array(await (await (await dir.getFileHandle(name)).getFile()).arrayBuffer()) } catch { /* next spelling */ }
   }
   return null
+}
+
+export type CommunityPromotion = { readonly ok: true; readonly promoted: boolean } | { readonly ok: false; readonly reason: string }
+
+/**
+ * TURNING IT LIVE IN YOUR COMMUNITY IS THE PROMOTE (jwize 2026-11-13: "publish
+ * from the host, promote from the available published to the community (this
+ * would start the minification)"; "toggle from domain, toggle from off items in
+ * community to live, no other interface").
+ *
+ * The toggle itself optimizes: the head this key published on `zone` for
+ * `lineage` is minified and its arrival plan sent, exactly as promoteBranch
+ * does, unless a promotion for that very head is already named. Nobody is
+ * asked to minify anything. The readable layers stay on the host beside the
+ * derivation (`derivedFrom`), so the files are always there to read.
+ */
+export async function promoteForCommunity(zone: string, lineage: string, deps: {
+  readonly root?: (host: string, key: string) => Promise<string | null>
+  readonly record?: (host: string, sig: string) => Promise<string | null>
+  readonly promote?: typeof promoteBranch
+} = {}): Promise<CommunityPromotion> {
+  const root = deps.root ?? ((host: string, key: string) => ownHiveRoot(host, key))
+  const head = await root(zone, lineage).catch(() => null)
+  if (!head) return { ok: false, reason: `${lineage} is not published on ${zone} yet` }
+  const pointer = await root(zone, promotedPointer(lineage)).catch(() => null)
+  if (pointer) {
+    const text = await (deps.record ?? readPromotionRecord)(zone, pointer).catch(() => null)
+    if (text && promotesHead(text, head)) return { ok: true, promoted: false }
+  }
+  const segments = lineage.split('/').map(part => part.trim()).filter(Boolean)
+  const result = await (deps.promote ?? promoteBranch)({ host: zone, lineage, segments, head, plan: null })
+    .catch((error: unknown): PromoteResult => ({ ok: false, reason: error instanceof Error ? error.message : 'failed' }))
+  return result.ok ? { ok: true, promoted: true } : { ok: false, reason: result.reason }
 }
 
 /** Promote a published branch: plan + minified derivation to `host`, then the record. */

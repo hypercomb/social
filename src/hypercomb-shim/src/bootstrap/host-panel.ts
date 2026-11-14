@@ -28,7 +28,6 @@ import { allowInvite, captureDeviceInvite, dropInvite, heldInvite } from './devi
 import { deviceOwner, eitherOwner } from './device-owner'
 import { readZoneOwners } from './showcase-record'
 import { branchView } from './branch-view'
-import { readMinimized } from './minimized'
 import { beesOnDisk, MANAGE_LEAVE_HREF, manageRecord, siteDoorZone, type ManageRecord } from './manage-record'
 import { showManagedKey } from './managed-key'
 import { readFromZone, readVerified } from './branch-files'
@@ -746,8 +745,6 @@ class HostPanelElement extends HTMLElement {
         unfollow: zone => removeHostZone(zone),
         readPeerLedger,
         onOpenHead: (head, zone) => { this.#openBranch(head, zone) },
-        // ONLY WHAT IS OPTIMIZED AND MINIMIZED CAN BE IN THE SHOWCASE (jwize 2026-11-04).
-        minimized: readMinimized,
         files: filesSection,
       })
       this.#showcaseRefresh = refresh

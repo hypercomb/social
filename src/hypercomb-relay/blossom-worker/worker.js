@@ -2579,7 +2579,27 @@ async function sitePackage(env, site, read = indexReader(env)) {
   const index = await read(publisher.pubkey)
   const sig = (key) => { const value = String(index?.roots?.[key] || '').toLowerCase(); return SIG_RE.test(value) ? value : null }
   const root = sig(`install:${site.lineage}`)
-  return root ? { root, pack: sig(`pack:${site.lineage}`) } : null
+  if (!root) return null
+  // THE OPTIMIZED COPY RUNS, THE READABLE ONE STAYS (jwize 2026-11-13: "the
+  // application that runs in the consumers root domain is optimized but they
+  // have access to the code files"). The hosts desk's Serve names the minified
+  // derivation as `minified:<name>` beside `install:<name>` (essentials
+  // host-package.ts). Its root must say it was derived from the root
+  // `install:<name>` names now: a copy of an older package is not run. Its
+  // transfer pack is not the readable one's, so none is answered for it.
+  const minified = await minifiedOf(env, sig(`minified:${site.lineage}`), root)
+  return minified ? { root: minified, pack: null, readable: root } : { root, pack: sig(`pack:${site.lineage}`) }
+}
+
+/** `sig` when it is a minified root derived from `readable` and this host holds it; else null. */
+async function minifiedOf(env, sig, readable) {
+  if (!sig || sig === readable || !env?.CONTENT?.get) return null
+  try {
+    const object = await env.CONTENT.get(sig)
+    if (!object?.arrayBuffer) return null
+    const layer = JSON.parse(new TextDecoder().decode(await object.arrayBuffer()))
+    return layer?.derivedFrom === readable && SIG_RE.test(String(layer?.derivation || '')) ? sig : null
+  } catch { return null }
 }
 
 async function serveSandbox(request, env, site, zone) {

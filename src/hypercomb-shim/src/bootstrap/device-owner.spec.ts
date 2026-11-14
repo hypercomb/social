@@ -89,6 +89,11 @@ const host = () => {
     /** The desktop publishes the anchor's index: dylan opens on the zone, with the showcase it names. */
     publish: async (record: ShowcaseRecord | null) => {
       const roots: Record<string, string> = {}
+      // dylan's published head: one readable layer, which going live minifies.
+      const layer = new TextEncoder().encode(JSON.stringify({ name: 'dylan', cells: [] }, null, 2))
+      const head = await sha(layer)
+      atoms.set(head, layer)
+      roots['dylan'] = head
       if (record) {
         const bytes = shimBytes(record)
         const sig = await sha(bytes)
@@ -164,6 +169,12 @@ describe('a phone takes its owner\'s invite, then promotes from its own key', ()
     const before = zone.index!
     expect(await owner.toggle({ zone: ZONE, pubkey: anchor, lineage: 'dylan', on: true })).toEqual({ ok: true, changed: true })
     const after = zone.index!
+    // Going live optimized it (jwize 2026-11-13: "turn on some items (the minification)"): the promotion is named in
+    // the same index write, for the head the index names, with the readable head left where it was.
+    const roots = (JSON.parse(String(after['content'])) as { roots: Record<string, string> }).roots
+    expect(roots['dylan']).toMatch(/^[0-9a-f]{64}$/)
+    const record = JSON.parse(await (await fetch(`https://${ZONE}/${roots['promoted:dylan']}`)).text()) as Record<string, unknown>
+    expect(record).toMatchObject({ v: 1, kind: 'promote', head: roots['dylan'], arrival: null, derivation: expect.stringMatching(/^[0-9a-f]{64}$/) })
     expect(after['pubkey']).not.toBe(anchor)
     expect(after['tags']).toEqual([['anchor', anchor], ['prev', before['id']]])
     // Every other field of the index is carried through.
