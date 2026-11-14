@@ -131,6 +131,9 @@ export type ZoneOwners = {
    *  existed. Present: a head that is not in it is not on the visitor site,
    *  even when a door still names the domain. */
   readonly live?: ReadonlySet<string>
+  /** The zone's own site an owner's index was read from, when the zone itself holds none (readZoneOwners).
+   *  The zone's records live there, so its ledger is the one that names this zone's sites as they are now. */
+  readonly from?: string
 }
 
 /** Does an owner's signed doors open this lineage on this domain, by name?
@@ -306,14 +309,45 @@ export const toggleShowcaseItem = (showcase: ShowcaseRecord, item: ShowcaseItem)
   }
 }
 
+/** How many of a zone's own sites are asked for an index the zone itself does not hold. */
+const SITE_READS_MAX = 3
+
+/** The zone's own sites an index may be read from: names under the zone, never the zone itself and
+ *  never another domain's, the first few, each once. */
+export const zoneSites = (zone: string, hosts: readonly string[]): string[] => {
+  const under = `.${zone.toLowerCase()}`
+  const sites: string[] = []
+  for (const raw of hosts) {
+    const host = String(raw ?? '').toLowerCase()
+    if (!ZONE.test(host) || !host.endsWith(under) || sites.includes(host)) continue
+    sites.push(host)
+    if (sites.length === SITE_READS_MAX) break
+  }
+  return sites
+}
+
 /**
  * What the zone's owners sign now — the primary owner first — read from the
  * zone itself and checked here: each index by its signature, the showcase by
  * its name. The first owner who NAMES a showcase decides it: if that one cannot
  * be read, the next owner's is not a stand-in. Every owner's doors are kept, so
  * the page shows only what they published here.
+ *
+ * THE ZONE'S SITES ANSWER WHERE ITS APEX HOLDS NONE (jwize 2026-11-13: "make
+ * sure our minimal version is able to get information from the subdomain. This
+ * would start from our community"). A zone's apex and its sites can be
+ * different machines: jwize.com is the home relay, which keeps no index by
+ * design, while every <name>.jwize.com is served from the store the index is
+ * written to. A visitor at jwize.com was told "Nothing is published here yet."
+ * So an owner whose index the apex says it does not hold is asked for at the
+ * zone's own sites (`sites`, names under the zone from its ledger), and the
+ * first that answers with an index that verifies is that owner's: its key
+ * list, its showcase and its live list are read from the same address. Nothing
+ * is trusted for where it came from: the index is the owner's by its
+ * signature, the showcase by its name. A site that holds none, or cannot be
+ * read, leaves the owner as it was: one who has signed nothing here.
  */
-export const readZoneOwners = async (zone: string, owners: readonly string[]): Promise<ZoneOwners> => {
+export const readZoneOwners = async (zone: string, owners: readonly string[], sites: readonly string[] = []): Promise<ZoneOwners> => {
   const doors = new Map<string, ReadonlyMap<string, readonly string[]>>()
   let showcase: ShowcaseRecord | null = null
   let live: ReadonlySet<string> | null = null
@@ -326,9 +360,21 @@ export const readZoneOwners = async (zone: string, owners: readonly string[]): P
   let decided = false
   const listed = owners.filter(key => SIG.test(key)).slice(0, 8)
   if (!ZONE.test(zone) && !LOOPBACK.test(zone)) return { showcase, doors, reached: false, unreadable }
-  const origin = zoneOrigin(zone)
+  const elsewhere = zoneSites(zone, sites)
+  let from: string | undefined
   for (const pubkey of listed) {
-    const read = await readOwnerIndex(zone, pubkey)
+    let origin = zoneOrigin(zone)
+    let read = await readOwnerIndex(zone, pubkey)
+    if (read === 'missing') {
+      for (const site of elsewhere) {
+        const there = await readOwnerIndex(site, pubkey)
+        if (!there || there === 'missing') continue
+        read = there
+        origin = zoneOrigin(site)
+        from ??= site
+        break
+      }
+    }
     if (read === 'missing') continue
     if (!read) { failed = true; continue }
     const content = read.content as { roots?: Record<string, unknown>; doors?: Record<string, unknown> }
@@ -354,5 +400,5 @@ export const readZoneOwners = async (zone: string, owners: readonly string[]): P
     }
     if (!showcase) unreadable = true
   }
-  return { showcase, doors, reached: listed.length > 0 && !failed, unreadable, ...(live ? { live } : {}) }
+  return { showcase, doors, reached: listed.length > 0 && !failed, unreadable, ...(live ? { live } : {}), ...(from ? { from } : {}) }
 }

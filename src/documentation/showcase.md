@@ -113,6 +113,16 @@ What you chose for a domain is one record:
   domains it shows in full (`hypercomb-shim/src/bootstrap/showcase-record.ts`).
   The owners whose record counts are the keys the domain's own root names in
   the ledger.
+- **Where a domain's apex holds no index, its own sites answer** (jwize, 2026-11-13: "make sure our minimal
+  version is able to get information from the subdomain. This would start from our community"). An apex and its
+  sites can be different machines: `jwize.com` is a home relay that keeps no index by design, while every
+  `<name>.jwize.com` is served from the store the index is written to, so a visitor at `jwize.com` was told
+  "Nothing is published here yet." An owner whose index the apex says it does not hold is asked for at the first
+  few names under the domain that its ledger lists; the first that answers with an index the owner signed is
+  used, and its key list, showcase and live list are read from the same address. That site's ledger then names
+  the sites under this domain as they are now (the relay's own list carried older heads). Nothing is trusted for
+  where it came from, only names under the domain are asked or taken, an apex that answers is always believed,
+  and an apex that cannot be read stays unknown (`readZoneOwners`, `zoneSites`, `readLedgerAt`).
 - A domain with no record yet shows what its owners **published here**: the
   lineages whose signed doors name this domain, which is Publish's switch for it.
   A lineage with no doors is not shown, even where the worker would open it.
