@@ -82,6 +82,26 @@ describe('the managed page\'s own key', () => {
     expect(card.textContent).toContain('open the link it gives you here')
   })
 
+  it('one press copies that line for the hive, and says what to do with it', async () => {
+    const copy = vi.fn(async () => true)
+    const card = managedKeyCard({ state: 'unlisted' }, SITE, () => {}, copy)!
+    const button = card.querySelector<HTMLButtonElement>('button.primary')!
+    expect(button.textContent).toBe('Copy the line')
+    button.click()
+    await vi.waitFor(() => expect(button.textContent).toBe('Copied'))
+    expect(copy).toHaveBeenCalledWith(`keys allow ${SITE}`)
+    expect(card.querySelector('.note')?.textContent).toContain('Paste it on your hive')
+  })
+
+  it('says so when the browser will not copy, and the line is still there to select', async () => {
+    const card = managedKeyCard({ state: 'unlisted' }, SITE, () => {}, async () => false)!
+    const button = card.querySelector<HTMLButtonElement>('button.primary')!
+    button.click()
+    await vi.waitFor(() => expect(card.querySelector('.note')?.textContent).toContain('would not copy'))
+    expect(button.textContent).toBe('Copy the line')
+    expect(card.querySelector('code')?.textContent).toBe(`keys allow ${SITE}`)
+  })
+
   it('never offers an invite to another publisher’s list', async () => {
     const stranger = 'c'.repeat(64)
     const state = await managedKeyState(record(), { siteDoor: () => SITE, invite: () => ({ host: WRITES, anchor: stranger, secret: 'f'.repeat(64) }) as never })
