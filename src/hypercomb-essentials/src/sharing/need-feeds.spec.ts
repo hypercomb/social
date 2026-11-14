@@ -164,6 +164,22 @@ describe('need feeds — the servers feeding a need', () => {
     expect(indexReads).toBe(256)
   })
 
+  it('asks each zone once, at its root: its sites and its content face are not hosts of their own', async () => {
+    // Run live 2026-11-14: one contribution came back from 16 doors of the same
+    // worker store (protocol.hypercomb.com, susan.pluginthematrix.com, …).
+    const live = await world()
+    const asked: string[] = []
+    const doors: FeedDeps = {
+      ...live,
+      hosts: () => ['protocol.hypercomb.com', 'hypercomb.com', 'content.hypercomb.com', 'susan.hypercomb.com',
+        'arkanoid.pluginthematrix.com', 'pluginthematrix.com', 'jwize.com', 'localhost:7777', 'solo.example.org'],
+      listing: async host => { asked.push(host); return { state: 'absent' } },
+    }
+    const final = await feedNeed('recipes', () => {}, doors)
+    expect(final.map(f => f.host)).toEqual(['hypercomb.com', 'pluginthematrix.com', 'jwize.com', 'localhost:7777', 'solo.example.org'])
+    expect([...new Set(asked)].sort()).toEqual(['hypercomb.com', 'jwize.com', 'localhost:7777', 'pluginthematrix.com', 'solo.example.org'])
+  })
+
   it('a name with no molecule asks nothing and holds nothing', async () => {
     const asked: { fresh?: boolean }[] = []
     const final = await feedNeed('', () => {}, await world(asked))

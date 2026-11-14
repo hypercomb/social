@@ -15,6 +15,7 @@
 
 import { listCommunityHosts } from './community-hosts.js'
 import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
+import { writeDoorsOf } from './zone-door.js'
 
 type BrokerLike = { knownContentHosts?: () => readonly string[] }
 
@@ -29,8 +30,10 @@ export const networkHosts = async (): Promise<string[]> => {
   const carried = await listCommunityHosts().catch(() => [] as string[])
   let known: readonly string[] = []
   try { known = broker()?.knownContentHosts?.() ?? [] } catch { /* no broker in this shell */ }
-  const hosts = [...new Set([...carried, ...known]
+  // One per host: a zone's sites and its `content.` face fold into the zone
+  // (writeDoorsOf), so `pool` asks each store once, at its root.
+  const hosts = writeDoorsOf([...carried, ...known]
     .map(host => String(host ?? '').trim().toLowerCase())
-    .filter(host => host && host.length <= 260 && HOST.test(host)))].sort()
+    .filter(host => host && host.length <= 260 && HOST.test(host))).sort()
   return hosts.length ? hosts : [...PUBLIC_CONTENT_HOSTS]
 }

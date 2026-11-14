@@ -34,6 +34,7 @@ import { fetchHiveIndex } from './hive-pointer.js'
 import { needListKey, needListOf, needListPoolAddress } from './need-lists.js'
 import { picturesKey, picturesPoolAddress } from './picture-pools.js'
 import { askPoolListing, type PoolListing } from './pool-listing.js'
+import { writeDoorsOf } from './zone-door.js'
 
 /** What one feeder said so far. `asking` until it answers; `answered` with
  *  values (possibly none read); `empty` = the host holds nothing for the
@@ -165,7 +166,13 @@ export async function feedNeed(
   deps: FeedDeps,
   options: FeedOptions = {},
 ): Promise<Feed[]> {
-  const hosts = [...new Set(deps.hosts())]
+  // ONE PER HOST (jwize, 2026-11-14: "subdomains should be ignored here — all
+  // files should come from the root"). A site under a zone (`protocol.
+  // hypercomb.com`, `susan.pluginthematrix.com`) and the retired `content.`
+  // face are doors onto the zone's one store: asked as hosts of their own,
+  // the same contribution came back from each, one dot per door. Folded the
+  // way writes fold (writeDoorsOf), so each zone is asked once, at its root.
+  const hosts = writeDoorsOf(deps.hosts())
   const pools: PoolAsk[] = []
   const listKey = await needListKey(name)
   const listAddress = listKey ? await needListPoolAddress(name) : null
