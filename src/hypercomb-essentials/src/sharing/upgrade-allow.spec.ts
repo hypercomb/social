@@ -24,6 +24,27 @@ describe('upgrade allow', () => {
     expect(reload).toHaveBeenCalled()
   })
 
+  it('where the running hive can take it, nothing restarts (jwize 2026-11-13)', async () => {
+    const { takeIfAllowed } = await import('./upgrade-allow.js')
+    const acquire = vi.fn(async () => ({ ok: true }))
+    const reload = vi.fn()
+    const live = vi.fn(async () => true)
+    expect(await takeIfAllowed('e'.repeat(64), [], { storage: storage(true), port: { acquire }, zones: async () => [], reload, live })).toBe('taken')
+    // The record is written first; the running hive is asked after.
+    expect(acquire.mock.invocationCallOrder[0]).toBeLessThan(live.mock.invocationCallOrder[0]!)
+    await new Promise(r => setTimeout(r, 500))
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('a live switch that throws is a restart, never a hive left half changed by silence', async () => {
+    const { takeIfAllowed } = await import('./upgrade-allow.js')
+    const reload = vi.fn()
+    const live = async (): Promise<boolean> => { throw new Error('no preloader') }
+    expect(await takeIfAllowed('f'.repeat(64), [], { storage: storage(true), port: { acquire: async () => ({ ok: true }) }, zones: async () => [], reload, live })).toBe('taken')
+    await new Promise(r => setTimeout(r, 500))
+    expect(reload).toHaveBeenCalled()
+  })
+
   it('never loops on a root that did not stick — one attempt per session', async () => {
     const { takeIfAllowed } = await import('./upgrade-allow.js')
     const acquire = vi.fn(async () => ({ ok: false, error: 'package incomplete' }))

@@ -28,6 +28,18 @@ export const setUpgradeAllowed = (allowed: boolean, storage: Pick<Storage, 'setI
   try { if (allowed) storage.setItem(UPGRADE_ALLOW_KEY, '1'); else storage.removeItem(UPGRADE_ALLOW_KEY) } catch { /* private browsing — asks again */ }
 }
 
+/** THE UPDATE WHILE THE HIVE RUNS (jwize, 2026-11-13: "we should be able
+ *  upgrade and not have to have a refresh"). The record already names the new
+ *  revisions; a shell that says `replaces` makes what runs match it — each
+ *  old revision disposed before its replacement loads. False, having changed
+ *  nothing, wherever only a restart is honest, and from a shell before it. */
+const switchLive = async (): Promise<boolean> => {
+  const preloader = (window as { ioc?: { get?: <T>(k: string) => T | undefined } }).ioc
+    ?.get?.<{ recompose?: () => Promise<boolean>; replaces?: boolean }>('@hypercomb.social/ScriptPreloader')
+  if (preloader?.replaces !== true) return false
+  try { return (await preloader.recompose?.()) === true } catch { return false }
+}
+
 /** One take per announced root per session — a take that did not stick must
  *  not loop; the notice stays and the participant decides. */
 const attempted = new Set<string>()
@@ -41,6 +53,7 @@ export const takeIfAllowed = async (
     port?: InstallPortLike | null
     zones?: () => Promise<string[]>
     reload?: () => void
+    live?: () => Promise<boolean>
   } = {},
 ): Promise<'not-allowed' | 'no-port' | 'already-tried' | 'taken' | 'failed'> => {
   if (!isUpgradeAllowed(deps.storage ?? localStorage)) return 'not-allowed'
@@ -63,6 +76,11 @@ export const takeIfAllowed = async (
   } catch (error) {
     EffectBus.emit('activity:log', { message: i18n()?.t('upgrade.apply-failed', { sig: short, error: error instanceof Error ? error.message : '' }) ?? `the update ${short} could not be taken — it stays offered`, icon: '⬡' })
     return 'failed'
+  }
+  if (await (deps.live ?? switchLive)().catch(() => false)) {
+    EffectBus.emit('packages:changed', {})
+    EffectBus.emit('activity:log', { message: i18n()?.t('upgrade.applied-live', { sig: short }) ?? `updated to ${short} — nothing had to restart`, icon: '⬡' })
+    return 'taken'
   }
   EffectBus.emit('activity:log', { message: i18n()?.t('upgrade.applied', { sig: short }) ?? `updated to ${short} — restarting`, icon: '⬡' })
   setTimeout(() => (deps.reload ?? (() => location.reload()))(), 400)

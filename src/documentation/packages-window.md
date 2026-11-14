@@ -124,11 +124,56 @@ false there having changed nothing:
   let go of;
 - **the record names other namespace bundles** — the import map is bound when
   the page loads;
-- **a package only a host carries** is picked in (`pick`), and a **revision**
-  or **Update all** changes which code runs at a path: still a restart;
 - a shell from before `recompose`, a read-only reader, and a door that serves
   modules by a stable address when a bee evicted earlier would come back (the
   browser hands back the module it already ran).
+
+**An update goes through the same door** (*2026-11-13*, jwize: "we should be
+able upgrade and not have to have a refresh technically speaking … as long as
+the interface disconnects it would be fine"). **Update all**, a **revision**
+picked by hand, a package only a host carries (`pick`) and the allowed upgrade
+(`upgrade-allow.ts`) all write the record and then ask `recompose()` before
+they restart. A record that names a bee's next revision is the same act as a
+switch, with one thing added: **what leaves, leaves first**. A bee's next
+revision registers under the key its last one holds, and registration is
+first-wins, so the pass disposes the old revision and frees its key before
+anything loads (the eviction sits above the loads in `find()`). The activity log
+says *Update finished — nothing had to restart*.
+
+The same refusals hold for an update, and one more:
+
+- **a leaving bee defined an element.** A page never redefines a tag: the next
+  revision's class would be ignored and the old one would keep drawing. The
+  preloader notes the tags each bee's module defines beside its company, and a
+  record that names other layers refuses when such a bee is leaving, or left
+  earlier in the session. The same revision switched off and on again defines
+  the same class and is not refused.
+
+Only a shell that says `replaces` is asked to take another revision; an older
+`recompose()` would load the next revision into a key still held and lose both.
+When it refuses, `refusal` says which reason it was (`holds`, `bundles`,
+`element`, …) and the window says it in a sentence before the reload:
+*Restarting: shared code changed*.
+
+**The interface disconnects by itself.** The bee base lets go of what a bee
+wires through it, the way it always did for `onEffect`: `listen(target, type,
+handler)` for a listener, `every(ms, run)` and `after(ms, run)` for timers,
+`own(release)` for anything else (`hypercomb-core/src/bee.base.ts`).
+`markDisposed()` runs those releases newest first, then the bee's own
+`dispose()`. A bee that wires only through them still declares `dispose()` —
+an empty one — because that is how it says nothing of its is wired by hand;
+the preloader cannot see a raw `addEventListener`.
+
+What a live update does not do yet:
+
+- most updates still restart. Only 55 of 363 bee files declare `dispose()`, a
+  package's 56 dependencies are namespace bundles, and 29 files define an
+  element — any one of those changing is a refusal;
+- a bee that kept a reference to another bee's instance, instead of asking the
+  registry each time, keeps the old revision after it is replaced. Nothing
+  checks for this;
+- bees written against `listen`/`every`/`after`/`own` need a shell whose core
+  has them, so the shell is deployed before a package that uses them.
 
 **A restart comes back where you were, in the drill too** (*2026-11-13*, jwize:
 "the turn feature on and off is not working in the hosts drilldown"). Switching a

@@ -85,7 +85,58 @@ export abstract class Bee {
     EffectBus.emitTransient('bee:disposed', { iocKey: this.iocKey })
     for (const unsub of this._effectSubs) unsub()
     this._effectSubs.length = 0
+    // What the bee holds by hand goes the same way, newest first, so its
+    // interface is disconnected before its own dispose() runs.
+    for (const release of [...this._held].reverse()) { try { release() } catch (error) { console.error(error) } }
+    this._held.clear()
     this.dispose?.()
+  }
+
+  // --------------------------------
+  // what a bee holds by hand (released on dispose)
+  // --------------------------------
+  //
+  // THE INTERFACE DISCONNECTS (jwize 2026-11-13: "we should be able upgrade
+  // and not have to have a refresh … as long as the interface disconnects it
+  // would be fine"). A bee that leaves while the hive runs — switched off, or
+  // replaced by its next revision — must leave nothing answering in its place.
+  // Effects were always let go for it (`onEffect`); a listener or a timer wired
+  // through these is let go the same way, so its `dispose()` has nothing left
+  // to undo.
+
+  /** Releases this bee owns — run once, on dispose. */
+  private _held = new Set<() => void>()
+
+  /** Hold something until this bee is disposed: `release` runs then, once. The
+   *  answer lets go early. A bee already disposed releases at once. */
+  protected own(release: () => void): () => void {
+    if (this._state === BeeState.Disposed) { release(); return () => undefined }
+    this._held.add(release)
+    return () => { if (this._held.delete(release)) release() }
+  }
+
+  /** A listener this bee owns: removed when the bee is disposed. */
+  protected listen(
+    target: EventTarget,
+    type: string,
+    handler: EventListenerOrEventListenerObject,
+    options?: boolean | AddEventListenerOptions,
+  ): () => void {
+    target.addEventListener(type, handler, options)
+    return this.own(() => target.removeEventListener(type, handler, options))
+  }
+
+  /** A repeating timer this bee owns: stopped when the bee is disposed. */
+  protected every(milliseconds: number, run: () => void): () => void {
+    const id = setInterval(run, milliseconds)
+    return this.own(() => clearInterval(id))
+  }
+
+  /** A one-shot timer this bee owns: it never fires on a disposed bee. */
+  protected after(milliseconds: number, run: () => void): () => void {
+    const release = (): void => clearTimeout(id)
+    const id = setTimeout(() => { this._held.delete(release); run() }, milliseconds)
+    return this.own(release)
   }
 
   // --------------------------------

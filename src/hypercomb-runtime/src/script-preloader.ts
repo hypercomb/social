@@ -55,6 +55,21 @@ type WalkedPackage = {
   classes: ReadonlyMap<string, BeeClass>
 }
 
+/** What one module evaluation registered and defined (a bee's company). */
+type ModuleRun = { keys: string[]; owners: number; tags: string[] }
+
+/** Why `recompose()` answered false — the restart's reason, for whoever asks. */
+export type RecomposeRefusal =
+  | ''          // it did not refuse
+  | 'shell'     // bees run from source, a read-only reader, or no package walked yet
+  | 'record'    // the activation record could not be read or names nothing
+  | 'bundles'   // other namespace bundles: the import map is bound at load
+  | 'holds'     // a running bee leaving declares no dispose()
+  | 'company'   // what a leaving bee's module registered cannot be told apart
+  | 'element'   // a leaving bee defined an element the page cannot redefine
+  | 'address'   // a bee coming back is imported by a stable address
+  | 'pass'      // the processor's pass did not land on the new record
+
 export class ScriptPreloader extends EventTarget implements BeeResolver {
 
   // SHA-256 of canonical JSON: [] → 4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
@@ -279,6 +294,41 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       const passive = this.#passive
       const sleeping = this.#asleep()
 
+      // Enforce manifest: dispose and evict bees that are no longer enabled.
+      // This is the trust boundary — if DCP says a bee is off, it must not pulse.
+      // The enabled set changes only with the package key, so a held walk
+      // has nothing to evict.
+      //
+      // WHAT LEAVES, LEAVES FIRST (jwize 2026-11-13: "we should be able
+      // upgrade and not have to have a refresh"). A bee's next revision
+      // registers under the key its last one holds, and registration is
+      // first-wins — loaded before the old one left, the new one would be
+      // turned away and the eviction would then empty the key. So the old
+      // revision is disposed and its key freed before anything loads.
+      if (fresh && walked.bees.length) {
+        const enabledSet = new Set(walked.bees)
+        let evicted = false
+        for (const [sig, bee] of this.#beeCache) {
+          if (!enabledSet.has(sig)) {
+            // Pulse-less UI drones are plain classes — markDisposed and
+            // iocKey may not exist; dispose/unregister best-effort.
+            const key = (bee as any)?.iocKey
+            console.log(`[script-preloader] evicting disabled bee ${sig} (${key ?? '(no iocKey)'})`)
+            ;(bee as any)?.markDisposed?.()
+            if (typeof key === 'string' && key.length > 0) window.ioc.unregister(key)
+            if (this.#company.get(sig)?.tags.length) this.#retiredElements.add(sig)
+            this.#dismissCompany(sig, bee)
+            this.#beeCache.delete(sig)
+            this.#bySignature.delete(sig)
+            this.#warmedUp.delete(sig)
+            this.#retired.add(sig)
+            this.#resourceCount = Math.max(0, this.#resourceCount - 1)
+            evicted = true
+          }
+        }
+        if (evicted) this.#refreshProjection()
+      }
+
       const tBees = performance.now()
       let deferredBeeLoads: DeferredBeeLoads | null = null
       if (walked.bees.length) {
@@ -291,33 +341,6 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       // Warmup hooks (e.g. atlas seeding) — fire and forget. Drones must
       // render correctly without their warmup having completed.
       void this.#runWarmups()
-
-      // Enforce manifest: dispose and evict bees that are no longer enabled.
-      // This is the trust boundary — if DCP says a bee is off, it must not pulse.
-      // The enabled set changes only with the package key, so a held walk
-      // has nothing to evict.
-      if (fresh && walked.bees.length) {
-        const enabledSet = new Set(walked.bees)
-        let evicted = false
-        for (const [sig, bee] of this.#beeCache) {
-          if (!enabledSet.has(sig)) {
-            // Pulse-less UI drones are plain classes — markDisposed and
-            // iocKey may not exist; dispose/unregister best-effort.
-            const key = (bee as any)?.iocKey
-            console.log(`[script-preloader] evicting disabled bee ${sig} (${key ?? '(no iocKey)'})`)
-            ;(bee as any)?.markDisposed?.()
-            if (typeof key === 'string' && key.length > 0) window.ioc.unregister(key)
-            this.#dismissCompany(sig, bee)
-            this.#beeCache.delete(sig)
-            this.#bySignature.delete(sig)
-            this.#warmedUp.delete(sig)
-            this.#retired.add(sig)
-            this.#resourceCount = Math.max(0, this.#resourceCount - 1)
-            evicted = true
-          }
-        }
-        if (evicted) this.#refreshProjection()
-      }
 
       const findMs = performance.now() - tFind
       // Said when something happened: a walk, or loads. A held walk with
@@ -402,28 +425,59 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   // bee's company. Two bees found in one run cannot be told apart (`owners`),
   // and recompose then leaves the switch to a restart.
 
-  /** One synchronous run of registrations. */
-  #run: { keys: string[]; owners: number } | null = null
-  readonly #runOf = new WeakMap<object, { keys: string[]; owners: number }>()
+  /** One synchronous run of registrations, and the element tags it defined. */
+  #run: ModuleRun | null = null
+  readonly #runOf = new WeakMap<object, ModuleRun>()
   /** Bee signature → the run its instance registered in. */
-  readonly #company = new Map<string, { keys: string[]; owners: number }>()
+  readonly #company = new Map<string, ModuleRun>()
   #watching = 0
   #unwatchRegistrations: (() => void) | null = null
+  #unwatchElements: (() => void) | null = null
+
+  /** The run being evaluated now — opened on its first registration or
+   *  element, closed at the next microtask. */
+  #openRun = (): ModuleRun => {
+    if (!this.#run) {
+      const run: ModuleRun = { keys: [], owners: 0, tags: [] }
+      this.#run = run
+      queueMicrotask(() => { if (this.#run === run) this.#run = null })
+    }
+    return this.#run
+  }
+
+  /** A PAGE NEVER REDEFINES AN ELEMENT: a tag stays bound to the first class
+   *  given for it. So the tags a bee's module defines are noted with its
+   *  company — a bee that defined one cannot be replaced by its next revision
+   *  while the hive runs (recompose). Watched only while a bee is evaluated. */
+  #watchElements = (): (() => void) | null => {
+    const registry = (globalThis as { customElements?: CustomElementRegistry }).customElements
+    if (!registry || typeof registry.define !== 'function') return null
+    const define = registry.define
+    const own = Object.prototype.hasOwnProperty.call(registry, 'define')
+    const note = (name: string): void => { this.#openRun().tags.push(String(name)) }
+    const watched = function (this: CustomElementRegistry, name: string, ...rest: unknown[]): void {
+      note(name)
+      return (define as (...args: unknown[]) => void).call(this, name, ...rest)
+    }
+    try { registry.define = watched as CustomElementRegistry['define'] } catch { return null }
+    return () => {
+      if (registry.define !== watched) return
+      if (own) registry.define = define
+      else delete (registry as { define?: unknown }).define
+    }
+  }
 
   /** Listen for registrations while at least one bee is being evaluated. */
   #watchRegistrations = (): (() => void) => {
     if (this.#watching++ === 0) {
       try {
         this.#unwatchRegistrations = window.ioc.onRegister?.((key: string, value: unknown) => {
-          if (!this.#run) {
-            const run = { keys: [] as string[], owners: 0 }
-            this.#run = run
-            queueMicrotask(() => { if (this.#run === run) this.#run = null })
-          }
-          this.#run.keys.push(key)
-          if (value && typeof value === 'object') this.#runOf.set(value, this.#run)
+          const run = this.#openRun()
+          run.keys.push(key)
+          if (value && typeof value === 'object') this.#runOf.set(value, run)
         }) ?? null
       } catch { this.#unwatchRegistrations = null }
+      this.#unwatchElements = this.#watchElements()
     }
     let done = false
     return () => {
@@ -432,6 +486,8 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       if (--this.#watching > 0) return
       this.#unwatchRegistrations?.()
       this.#unwatchRegistrations = null
+      this.#unwatchElements?.()
+      this.#unwatchElements = null
     }
   }
 
@@ -463,6 +519,9 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
 
   /** Bees evicted in this session, by signature. */
   readonly #retired = new Set<string>()
+  /** Of those, the ones whose module defined an element: evaluated again,
+   *  the page would refuse the definition or keep the class it has. */
+  readonly #retiredElements = new Set<string>()
 
   /**
    * THE SELECTION CHANGED AND THE HIVE KEEPS RUNNING (jwize, 2026-11-10:
@@ -488,39 +547,74 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
    *     module it already ran, and nothing would register;
    *   • the shell runs its bees from source, reads only, or has not walked a
    *     package yet.
+   *
+   * THE SAME DOOR TAKES AN UPDATE (jwize, 2026-11-13: "we should be able
+   * upgrade and not have to have a refresh … as long as the interface
+   * disconnects it would be fine"). A record that names a bee's NEXT REVISION
+   * is the same act: the old revision leaves — disposed, its key freed, its
+   * company dismissed — and only then does the new one load (find). The same
+   * refusals hold, and one more: when the record names other layers (other
+   * revisions), a leaving bee that defined an ELEMENT needs the restart,
+   * because a page never redefines a tag — the new revision's class would be
+   * ignored and the old one would keep drawing. `refusal` says which reason
+   * it was, so a restart can say why.
    */
   public recompose = async (): Promise<boolean> => {
-    if (this.#registeredBees || !this.#walked) return false
-    if ((globalThis as { __HC_READONLY__?: boolean }).__HC_READONLY__ === true) return false
+    const refuse = (why: RecomposeRefusal): false => { this.#refusal = why; return false }
+    this.#refusal = ''
+    if (this.#registeredBees || !this.#walked) return refuse('shell')
+    if ((globalThis as { __HC_READONLY__?: boolean }).__HC_READONLY__ === true) return refuse('shell')
     if (this.#finding) await this.#finding.catch(() => undefined)
+    // A bee still being evaluated belongs to the record that asked for it:
+    // let it land before deciding who leaves, or it would land after its
+    // own replacement.
+    if (this.#inFlight.size) await Promise.allSettled([...this.#inFlight.values()])
 
     let raw = ''
-    try { raw = localStorage.getItem('core-adapter.installed-manifest') ?? '' } catch { return false }
+    try { raw = localStorage.getItem('core-adapter.installed-manifest') ?? '' } catch { return refuse('record') }
     const key = `${installedPackageSig() ?? ''}|${raw}`
     if (key === this.#packageKey) return true
     const next = ScriptPreloader.#parseManifest(raw)
-    if (!next.layers.length || !next.bees.length) return false
+    if (!next.layers.length || !next.bees.length) return refuse('record')
 
     const bundles = new Set(this.#manifest.dependencies)
-    if (next.dependencies.length !== bundles.size || next.dependencies.some(sig => !bundles.has(sig))) return false
+    if (next.dependencies.length !== bundles.size || next.dependencies.some(sig => !bundles.has(sig))) return refuse('bundles')
 
     const walked = await this.#walkLayers(next.layers)
     const keep = new Set([...next.bees, ...walked.criticalBees])
     const enabled = new Set(walked.bees.filter(sig => keep.has(sig)))
+    // On and off keep the layers and change only which bees run; other layers
+    // are other revisions. Only then can a tag meet a class that is not the
+    // one the page already bound to it — the same revision coming back on
+    // defines the same class.
+    const layers = new Set(this.#manifest.layers)
+    const revised = next.layers.length !== layers.size || next.layers.some(sig => !layers.has(sig))
     for (const [sig, bee] of this.#beeCache) {
       if (enabled.has(sig)) continue
       const leaving = bee as unknown as { markDisposed?: unknown; dispose?: unknown }
-      if (typeof leaving?.markDisposed !== 'function' || typeof leaving?.dispose !== 'function') return false
-      if ((this.#company.get(sig)?.owners ?? 1) > 1) return false
+      if (typeof leaving?.markDisposed !== 'function' || typeof leaving?.dispose !== 'function') return refuse('holds')
+      if ((this.#company.get(sig)?.owners ?? 1) > 1) return refuse('company')
+      if (revised && this.#company.get(sig)?.tags.length) return refuse('element')
     }
+    // An element defined by a bee switched off earlier is still bound, too.
+    if (revised && this.#retiredElements.size) return refuse('element')
     if ((globalThis as { __HC_MODULE_ROOT__?: boolean }).__HC_MODULE_ROOT__ === true
-      && [...enabled].some(sig => this.#retired.has(sig))) return false
+      && [...enabled].some(sig => this.#retired.has(sig))) return refuse('address')
 
     // The processor's pass is the one door: find() reads the new record,
-    // loads what came on (pulsed in this same pass) and evicts what went off.
+    // disposes what went off, then loads what came on (pulsed in this pass).
     await new hypercomb().act('')
-    return this.#packageKey === key
+    return this.#packageKey === key ? true : refuse('pass')
   }
+
+  /** Why the last `recompose()` answered false — '' when it did not. */
+  public get refusal(): RecomposeRefusal { return this.#refusal }
+  #refusal: RecomposeRefusal = ''
+
+  /** This shell's `recompose()` takes a bee's next revision — it frees the key
+   *  before the replacement loads. A shell from before it would load the new
+   *  revision into a held key and lose both, so an update asks for this first. */
+  public readonly replaces = true
 
   static #parseManifest(raw: string): { layers: string[]; bees: string[]; dependencies: string[] } {
     const list = (value: unknown): string[] => Array.isArray(value) ? value.filter(Boolean).map(String) : []

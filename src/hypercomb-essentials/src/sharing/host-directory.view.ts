@@ -549,6 +549,17 @@ export const updateProgress = (
   return { done, total }
 }
 
+/** WHY THE HIVE RESTARTS (jwize, 2026-11-13: "we should be able upgrade and
+ *  not have to have a refresh"). A change takes effect while the hive runs
+ *  wherever it can; where the preloader refused, its word is said in a
+ *  sentence before the reload. '' for a refusal with nothing worth saying
+ *  (an older shell, a record it could not read). */
+export const restartReason = (refusal: string): string =>
+  refusal === 'holds' ? t('hosts.restart-why.holds', 'Restarting: a running part cannot let go while the hive runs')
+    : refusal === 'bundles' ? t('hosts.restart-why.bundles', 'Restarting: shared code changed')
+    : refusal === 'element' ? t('hosts.restart-why.element', 'Restarting: a window or a view changed')
+    : ''
+
 /** THE UPDATE BAR'S ONE SENTENCE. A full counter that says nothing reads as a
  *  hang (jwize, 2026-11-12), so once the files are in the bar says what is
  *  being done and that a restart is coming. A shell from before `onPhase`
@@ -3926,6 +3937,7 @@ export class HostDirectoryElement extends HTMLElement {
     this.#error = ''
     this.#renderBody()
     const before = new Set(install.offUnits())
+    let taken = false
     try {
       const off = new Set(before)
       if (row.on) off.add(row.path); else off.delete(row.path)
@@ -3941,6 +3953,13 @@ export class HostDirectoryElement extends HTMLElement {
           ? await install.pick(row.path, { layer: node.layerSig, root: tree.root, roots }, this.#sources())
           : { ok: false, error: this.#isBehind(this.#scope) ? this.#behindText(this.#scope) : t('hosts.nothing-to-take', 'none of your hosts carries it') }
         if (!outcome.ok) { install.setOffUnits(before); this.#error = outcome.error ?? 'package incomplete'; return }
+        // A part taken from a host is another revision of the record: the same
+        // door, asked of a shell that frees a key before its replacement loads.
+        if (await this.#live(true)) {
+          EffectBus.emit('activity:log', { message: t('packages.turned-on', '{name} is on', { name: row.path }) })
+          taken = true
+          return
+        }
       } else if (!(await install.applyUnits())) {
         install.setOffUnits(before)
         this.#error = t('hosts.not-held', 'what runs here could not be read back, so nothing changed')
@@ -3958,6 +3977,10 @@ export class HostDirectoryElement extends HTMLElement {
       this.#error = error instanceof Error ? error.message : 'package could not be applied'
     } finally {
       if (!this.#restarting) { this.#busy = ''; this.#renderBody() }
+      if (taken) {
+        EffectBus.emit('packages:changed', { off: [...install.offUnits()] })
+        await this.#read()
+      }
     }
   }
 
@@ -3977,6 +4000,7 @@ export class HostDirectoryElement extends HTMLElement {
     this.#error = ''
     this.#renderBody()
     const held = new Set<string>()
+    let live = false
     try {
       // The bar may still name the root the page opened on. Read what the
       // publisher names now and take that, before a single byte is asked for.
@@ -4008,11 +4032,15 @@ export class HostDirectoryElement extends HTMLElement {
         onPhase: phase => { this.#phase = phase; this.#renderBody() },
       })
       if (!outcome.ok) { this.#error = outcome.error ?? 'package incomplete'; return }
+      // The bytes are held and the record names them. Whatever can change
+      // hands while the hive runs does; the restart is for what cannot.
+      if (await this.#live(true)) { live = true; return }
       this.#restart()
     } catch (error) {
       this.#error = error instanceof Error ? error.message : 'update could not be applied'
     } finally {
       if (!this.#restarting) { this.#busy = ''; this.#held = null; this.#phase = ''; this.#renderBody() }
+      if (live) await this.#revisedLive(true)
     }
   }
 
@@ -4092,15 +4120,18 @@ export class HostDirectoryElement extends HTMLElement {
     this.#busy = revision.layer
     this.#error = ''
     this.#renderBody()
+    let live = false
     try {
       const outcome = await reach.install.pick(path, { layer: revision.layer, root: roots[0] ?? '', roots }, this.#sources(), { hides })
       if (!outcome.ok) { this.#error = outcome.error ?? 'revision could not be taken'; return }
       this.#toList(this.#scope, parentOf(path))
+      if (await this.#live(true)) { live = true; return }
       this.#restart()
     } catch (error) {
       this.#error = error instanceof Error ? error.message : 'revision could not be taken'
     } finally {
       if (!this.#restarting) { this.#busy = ''; this.#renderBody() }
+      if (live) await this.#revisedLive(false)
     }
   }
 
@@ -4152,15 +4183,44 @@ export class HostDirectoryElement extends HTMLElement {
    *  false, having changed nothing, when only a restart is honest (a running
    *  bee with no `dispose()`, other namespace bundles, a shell from before
    *  it), and the caller restarts as it always did. */
-  async #live(): Promise<boolean> {
-    const preloader = ioc<{ recompose?: () => Promise<boolean> }>('@hypercomb.social/ScriptPreloader')
-    try { return (await preloader?.recompose?.()) === true } catch { return false }
+  /** AN UPDATE GOES THROUGH THE SAME DOOR (jwize, 2026-11-13: "we should be
+   *  able upgrade and not have to have a refresh … as long as the interface
+   *  disconnects it would be fine"). `revised` says the record now names other
+   *  revisions: each old one must leave before its replacement loads, which
+   *  only a shell that says `replaces` does — an older one would load the new
+   *  revision into a key still held and lose both, so it is not asked. */
+  async #live(revised = false): Promise<boolean> {
+    const preloader = ioc<{ recompose?: () => Promise<boolean>; replaces?: boolean; refusal?: string }>('@hypercomb.social/ScriptPreloader')
+    this.#why = ''
+    if (revised && preloader?.replaces !== true) return false
+    try {
+      if ((await preloader?.recompose?.()) === true) return true
+      this.#why = String(preloader?.refusal ?? '')
+      return false
+    } catch { return false }
+  }
+
+  /** Why the last live switch was refused (the preloader's word), for the restart to say. */
+  #why = ''
+
+  /** Other revisions are running and nothing restarted: said where the restart
+   *  would have said it. `updated` is the followed publisher's update; a
+   *  revision picked by hand may be an older one, so it says only that it changed. */
+  async #revisedLive(updated: boolean): Promise<void> {
+    if (updated) this.#justUpdated = true
+    EffectBus.emit('packages:changed', { off: [...(port()?.install.offUnits() ?? [])] })
+    EffectBus.emit('activity:log', { message: updated
+      ? t('hosts.updated-live', 'Update finished — nothing had to restart')
+      : t('packages.changed-live', 'packages changed — nothing had to restart') })
+    await this.#read()
   }
 
   #restart(): void {
     this.#restarting = true
     const updating = !!this.#held
     if (updating) { this.#phase = 'restarting'; this.#renderBody() }
+    const why = restartReason(this.#why)
+    if (why) EffectBus.emit('activity:log', { message: why })
     // The drill never draws the columns, so `#at` (theirs) is stale there: its place is
     // the picks themselves — a part switched off inside a package comes back inside it.
     const at = this.#mode === 'simple' ? resumePath(this.#cols.map(column => column.keys)) : this.#at

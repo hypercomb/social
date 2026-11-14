@@ -35,11 +35,20 @@ const TOOL = signature('c')    // wires by hand and declares nothing
 const QUEEN = signature('d')   // asleep until her word
 const BUNDLE = signature('e')  // a namespace bundle
 const OTHER_BUNDLE = signature('f')
+// THE NEXT REVISION (jwize 2026-11-13: "we should be able upgrade and not have to have a refresh"): another root
+// naming the game's and the view's next revisions — other bytes, the same keys.
+const NEXT_ROOT = signature('1')
+const NEXT_GAME = signature('2')
+const VIEW = signature('3')       // lets go, and its module defines an element
+const NEXT_VIEW = signature('4')
 
 const KEYS: Record<string, string> = {
   [GAME]: '@diamondcoreprocessor.com/GameDrone',
   [TOOL]: '@diamondcoreprocessor.com/ToolDrone',
   [QUEEN]: '@diamondcoreprocessor.com/PlayQueenBee',
+  [NEXT_GAME]: '@diamondcoreprocessor.com/GameDrone',
+  [VIEW]: '@diamondcoreprocessor.com/ViewDrone',
+  [NEXT_VIEW]: '@diamondcoreprocessor.com/ViewDrone',
 }
 
 const services = new Map<string, unknown>()
@@ -47,6 +56,9 @@ const listeners = new Set<(key: string, value: unknown) => void>()
 const GAME_QUEEN_KEY = '@diamondcoreprocessor.com/GameQueenBee'
 const GAME_SERVICE_KEY = '@diamondcoreprocessor.com/GameService'
 let currentStore: Record<string, unknown> | null = null
+// A tag is bound for the life of the page, so each run of the suite names its own.
+let viewTag = ''
+let tags = 0
 
 const ioc = {
   register: (key: string, value: unknown) => {
@@ -72,12 +84,19 @@ const fakeStore = () => {
   const rootBytes = new TextEncoder().encode(JSON.stringify({
     name: 'root',
     cells: [],
-    bees: [GAME, TOOL, QUEEN],
+    bees: [GAME, TOOL, QUEEN, VIEW],
+    dependencies: [BUNDLE],
+    docs: { bees: { [QUEEN]: { className: 'PlayQueenBee', command: 'play', description: 'Play', passive: true } } },
+  }))
+  const nextBytes = new TextEncoder().encode(JSON.stringify({
+    name: 'root',
+    cells: [],
+    bees: [NEXT_GAME, TOOL, QUEEN, NEXT_VIEW],
     dependencies: [BUNDLE],
     docs: { bees: { [QUEEN]: { className: 'PlayQueenBee', command: 'play', description: 'Play', passive: true } } },
   }))
   const store = {
-    getLayerBytes: async (sig: string) => sig === ROOT ? rootBytes : null,
+    getLayerBytes: async (sig: string) => sig === ROOT ? rootBytes : sig === NEXT_ROOT ? nextBytes : null,
     bees: {
       getFileHandle: async (name: string) => ({
         getFile: async () => ({ arrayBuffer: async () => new TextEncoder().encode(name).buffer as ArrayBuffer }),
@@ -96,8 +115,10 @@ const fakeStore = () => {
       }
       if (sig !== TOOL) bee['dispose'] = () => undefined
       ioc.register(KEYS[sig]!, bee)
+      // A view's module defines its element, guarded the way the views guard it.
+      if ((sig === VIEW || sig === NEXT_VIEW) && !customElements.get(viewTag)) customElements.define(viewTag, class extends HTMLElement {})
       // THE BEE WIRES: the game's module registers its queen and a service too.
-      if (sig === GAME) {
+      if (sig === GAME || sig === NEXT_GAME) {
         ioc.register(GAME_QUEEN_KEY, { command: 'game', markDisposed: () => { disposed.push('queen') } })
         ioc.register(GAME_SERVICE_KEY, { plays: true })
       }
@@ -108,9 +129,9 @@ const fakeStore = () => {
   return { store, loads, pulses, disposed }
 }
 
-const record = (bees: readonly string[], dependencies: readonly string[] = [BUNDLE]): void => {
-  localStorage.setItem(INSTALLED_KEY, ROOT)
-  localStorage.setItem('core-adapter.installed-manifest', JSON.stringify({ version: 2, layers: [ROOT], bees, dependencies }))
+const record = (bees: readonly string[], dependencies: readonly string[] = [BUNDLE], root = ROOT): void => {
+  localStorage.setItem(INSTALLED_KEY, root)
+  localStorage.setItem('core-adapter.installed-manifest', JSON.stringify({ version: 2, layers: [root], bees, dependencies }))
 }
 
 let ScriptPreloader: typeof import('./script-preloader')['ScriptPreloader']
@@ -130,6 +151,7 @@ beforeEach(() => {
   delete (globalThis as { __HC_MODULE_ROOT__?: unknown }).__HC_MODULE_ROOT__
   currentStore = null
   active = null
+  viewTag = `hc-recompose-view-${++tags}`
 })
 
 const boot = async (bees: readonly string[]) => {
@@ -257,5 +279,94 @@ describe('ScriptPreloader.recompose — on and off while the hive runs', () => {
     currentStore = fakeStore().store
     record([GAME, TOOL])
     expect(await new ScriptPreloader().recompose()).toBe(false)
+  })
+})
+
+describe('ScriptPreloader.recompose — the next revision, while the hive runs', () => {
+  it('the old revision leaves before the new one loads, so the key goes to the new one', async () => {
+    const { preloader, disposed, loads, pulses } = await boot([GAME, TOOL])
+    const old = services.get(KEYS[GAME]!)
+    const oldQueen = services.get(GAME_QUEEN_KEY)
+    expect(preloader.replaces).toBe(true)
+
+    record([NEXT_GAME, TOOL], [BUNDLE], NEXT_ROOT)
+    expect(await preloader.recompose()).toBe(true)
+    await new Promise<void>(resolve => { setTimeout(resolve, 5) })
+
+    // Disposed, with what its module registered beside it — and the bee beside it untouched.
+    expect(disposed).toEqual([GAME, 'queen'])
+    expect(loads).toEqual([GAME, TOOL, NEXT_GAME])
+    // Registration is first-wins: had the new revision loaded first, the key would now be empty.
+    expect(services.get(KEYS[GAME]!)).toBeTruthy()
+    expect(services.get(KEYS[GAME]!)).not.toBe(old)
+    expect(services.get(GAME_QUEEN_KEY)).toBeTruthy()
+    expect(services.get(GAME_QUEEN_KEY)).not.toBe(oldQueen)
+    expect(pulses.get(NEXT_GAME)).toBe(1)
+    expect(preloader.refusal).toBe('')
+  })
+
+  it('a running bee with no dispose() is never half replaced, and the refusal says so', async () => {
+    const { preloader, disposed, loads } = await boot([GAME, TOOL])
+
+    // The next root no longer names the tool the hive runs.
+    record([NEXT_GAME], [BUNDLE], NEXT_ROOT)
+    expect(await preloader.recompose()).toBe(false)
+
+    expect(preloader.refusal).toBe('holds')
+    expect(disposed).toEqual([])
+    expect(loads).toEqual([GAME, TOOL])
+    expect(services.has(KEYS[TOOL]!)).toBe(true)
+  })
+
+  it('other namespace bundles are said as the reason', async () => {
+    const { preloader } = await boot([GAME, TOOL])
+    record([NEXT_GAME, TOOL], [OTHER_BUNDLE], NEXT_ROOT)
+    expect(await preloader.recompose()).toBe(false)
+    expect(preloader.refusal).toBe('bundles')
+  })
+
+  it('a bee that defined an element is not replaced: the page would keep the class it has', async () => {
+    const { preloader, disposed, loads } = await boot([GAME, TOOL, VIEW])
+    expect(customElements.get(viewTag)).toBeTruthy()
+    const old = services.get(KEYS[VIEW]!)
+
+    record([NEXT_GAME, TOOL, NEXT_VIEW], [BUNDLE], NEXT_ROOT)
+    expect(await preloader.recompose()).toBe(false)
+
+    expect(preloader.refusal).toBe('element')
+    expect(disposed).toEqual([])
+    expect(loads).toEqual([GAME, TOOL, VIEW])
+    expect(services.get(KEYS[VIEW]!)).toBe(old)
+  })
+
+  it('the same revision of such a bee still goes off and comes back on', async () => {
+    const { preloader, loads } = await boot([GAME, TOOL, VIEW])
+
+    record([GAME, TOOL])
+    expect(await preloader.recompose()).toBe(true)
+    expect(services.has(KEYS[VIEW]!)).toBe(false)
+    record([GAME, TOOL, VIEW])
+    expect(await preloader.recompose()).toBe(true)
+    await new Promise<void>(resolve => { setTimeout(resolve, 5) })
+    expect(loads).toEqual([GAME, TOOL, VIEW, VIEW])
+    expect(services.has(KEYS[VIEW]!)).toBe(true)
+  })
+
+  it('an element left bound by a bee switched off earlier still needs the restart for a next revision', async () => {
+    const { preloader } = await boot([GAME, TOOL, VIEW])
+    record([GAME, TOOL])
+    expect(await preloader.recompose()).toBe(true)
+
+    record([NEXT_GAME, TOOL, NEXT_VIEW], [BUNDLE], NEXT_ROOT)
+    expect(await preloader.recompose()).toBe(false)
+    expect(preloader.refusal).toBe('element')
+  })
+
+  it('the watch on element definitions is lifted once the loads are done', async () => {
+    const define = customElements.define
+    await boot([GAME, TOOL, VIEW])
+    await new Promise<void>(resolve => { setTimeout(resolve, 5) })
+    expect(customElements.define).toBe(define)
+    expect(Object.prototype.hasOwnProperty.call(customElements, 'define')).toBe(false)
   })
 })

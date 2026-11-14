@@ -10,7 +10,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import type { InstallNode, InstallRevision } from '@hypercomb/core'
-import { LIGHT_BRIGHTEST, LIGHT_DIMMEST, LIGHT_UNKNOWN, ageLevel, lightOf, runningStamp, NOTHING_PICKED, codeLines, codeName, filesPicked, pickAll, pickKey, pickMode, publishedCount, publishedOn, stackRows, stillPicked, directoryRows, domainRows, filesOf, hostBehind, isOlder, namedFromVerdict, namedWhenUninstalled, offerableRoots, offeredRevisions, picksRevisions, updateProgress, updatingSentence, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, sourcePackagePaths, type ServedTree } from './host-directory.view'
+import { LIGHT_BRIGHTEST, LIGHT_DIMMEST, LIGHT_UNKNOWN, ageLevel, lightOf, runningStamp, NOTHING_PICKED, codeLines, codeName, filesPicked, pickAll, pickKey, pickMode, publishedCount, publishedOn, stackRows, stillPicked, directoryRows, domainRows, filesOf, hostBehind, isOlder, namedFromVerdict, namedWhenUninstalled, offerableRoots, offeredRevisions, picksRevisions, updateProgress, updatingSentence, restartReason, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, sourcePackagePaths, type ServedTree } from './host-directory.view'
 import { ATTESTED_PACKAGES_KEY, attestPackage } from './package-attestation'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -28,6 +28,7 @@ const INDICATOR = readFileSync(join(root, 'hypercomb-shared', 'ui', 'upgrade-ind
 const UPGRADE = readFileSync(join(here, '..', 'commands', 'upgrade.queen.ts'), 'utf8')
 const DEV_MAIN = readFileSync(join(root, 'hypercomb-dev', 'src', 'main.ts'), 'utf8')
 const EN = JSON.parse(readFileSync(join(root, 'hypercomb-shared', 'i18n', 'en.json'), 'utf8')) as Record<string, string>
+const JA = JSON.parse(readFileSync(join(root, 'hypercomb-shared', 'i18n', 'ja.json'), 'utf8')) as Record<string, string>
 
 const node = (path: string, layerSig: string, children: string[] = [], description = ''): InstallNode =>
   ({ path, name: path.slice(path.lastIndexOf('/') + 1), layerSig, bees: [], children, description, base: layerSig })
@@ -644,7 +645,8 @@ describe('the host directory', () => {
     expect(VIEW).toMatch(/#openRevisions\(row\.path\)/)
     expect(VIEW).toMatch(/revisionsOf\(path, this\.#sources\(\), roots\)/)
     const pick = VIEW.slice(VIEW.indexOf('async #pick('))
-    expect(pick).toMatch(/this\.#toList\(this\.#scope, parentOf\(path\)\)\s*this\.#restart\(\)/)
+    // Back in the list first — where a live switch leaves the window, and where a restart reopens it.
+    expect(pick).toMatch(/this\.#toList\(this\.#scope, parentOf\(path\)\)\s*if \(await this\.#live\(true\)\) \{ live = true; return \}\s*this\.#restart\(\)/)
     expect(VIEW).toMatch(/sessionStorage\.setItem\(REOPEN_KEY/)
     expect(VIEW).toMatch(/sessionStorage\.removeItem\(REOPEN_KEY\)/)
   })
@@ -697,17 +699,47 @@ describe('the host directory', () => {
     // Held bytes: the record is written, then the running hive is asked to match it.
     expect(toggle.indexOf('await install.applyUnits()')).toBeLessThan(toggle.indexOf('await this.#live()'))
     expect(toggle).toMatch(/\} else if \(await this\.#live\(\)\) \{[\s\S]{0,400}?return\s*\}\s*this\.#restart\(\)/)
-    // A package only a host carries is picked in, and that still restarts.
-    expect(toggle.indexOf('await install.pick(')).toBeLessThan(toggle.indexOf('await this.#live()'))
-    // The window reaches the shell over IoC and takes only a plain yes.
-    expect(VIEW).toMatch(/ioc<\{ recompose\?: \(\) => Promise<boolean> \}>\('@hypercomb\.social\/ScriptPreloader'\)/)
-    expect(VIEW).toMatch(/return \(await preloader\?\.recompose\?\.\(\)\) === true \} catch \{ return false \}/)
+    // A package only a host carries is picked in first, then asked of the same door.
+    expect(toggle.indexOf('await install.pick(')).toBeLessThan(toggle.indexOf('await this.#live(true)'))
+    // The window reaches the shell over IoC: a plain yes, or the word for why not.
+    expect(VIEW).toMatch(/ioc<\{ recompose\?: \(\) => Promise<boolean>; replaces\?: boolean; refusal\?: string \}>\('@hypercomb\.social\/ScriptPreloader'\)/)
+    expect(VIEW).toMatch(/if \(\(await preloader\?\.recompose\?\.\(\)\) === true\) return true/)
     // A bee that declares no dispose() is never half switched off.
     const recompose = PRELOADER.slice(PRELOADER.indexOf('public recompose = async'), PRELOADER.indexOf('static #parseManifest'))
-    expect(recompose).toMatch(/typeof leaving\?\.dispose !== 'function'\) return false/)
-    expect(recompose.indexOf("!== 'function') return false")).toBeLessThan(recompose.indexOf('await new hypercomb().act('))
+    expect(recompose).toMatch(/typeof leaving\?\.dispose !== 'function'\) return refuse\('holds'\)/)
+    expect(recompose.indexOf("return refuse('holds')")).toBeLessThan(recompose.indexOf('await new hypercomb().act('))
     expect(EN['packages.turned-on']).toBeTruthy()
     expect(EN['packages.turned-off']).toBeTruthy()
+  })
+
+  it('an update goes through the same door, and a restart says why it was needed', () => {
+    // jwize 2026-11-13: "we should be able upgrade and not have to have a
+    // refresh … as long as the interface disconnects it would be fine"
+    const update = VIEW.slice(VIEW.indexOf('async #updateAll()'), VIEW.indexOf('async #runningFiles('))
+    // The bytes are held and the record written before the running hive is asked; the restart is what is left.
+    expect(update.indexOf('await reach.install.acquire(')).toBeLessThan(update.indexOf('await this.#live(true)'))
+    expect(update).toMatch(/if \(await this\.#live\(true\)\) \{ live = true; return \}\s*this\.#restart\(\)/)
+    expect(update).toMatch(/if \(live\) await this\.#revisedLive\(true\)/)
+    // A revision picked by hand is the same act, and says only that it changed.
+    const pick = VIEW.slice(VIEW.indexOf('async #pick(path: string'), VIEW.indexOf('#carrying(path: string)'))
+    expect(pick).toMatch(/if \(await this\.#live\(true\)\) \{ live = true; return \}\s*this\.#restart\(\)/)
+    expect(pick).toMatch(/if \(live\) await this\.#revisedLive\(false\)/)
+    // A shell from before `replaces` would load the next revision into a key still held: it is never asked.
+    expect(VIEW).toMatch(/if \(revised && preloader\?\.replaces !== true\) return false/)
+    expect(PRELOADER).toMatch(/public readonly replaces = true/)
+    // What leaves, leaves first: the eviction sits above the loads in the one pass.
+    const run = PRELOADER.slice(PRELOADER.indexOf('const manifest = this.#readManifest()'))
+    expect(run.indexOf('evicting disabled bee')).toBeLessThan(run.indexOf('#loadBeesPrioritized(walked.bees'))
+    // The preloader's word becomes a sentence; a refusal with nothing to say stays quiet.
+    expect(restartReason('holds')).toBe(EN['hosts.restart-why.holds'])
+    expect(restartReason('bundles')).toBe(EN['hosts.restart-why.bundles'])
+    expect(restartReason('element')).toBe(EN['hosts.restart-why.element'])
+    expect(restartReason('shell')).toBe('')
+    expect(restartReason('')).toBe('')
+    for (const key of ['hosts.updated-live', 'packages.changed-live', 'hosts.restart-why.holds', 'hosts.restart-why.bundles', 'hosts.restart-why.element']) {
+      expect(EN[key]).toBeTruthy()
+      expect(JA[key]).toBeTruthy()
+    }
   })
 
   it('the dev shell carries the install port, and nothing acts where no package is installed', () => {
