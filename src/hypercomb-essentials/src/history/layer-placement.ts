@@ -28,6 +28,10 @@ export interface PlacementHistory {
   /** Children manifest for a layer object (HistoryService.childrenManifestFor)
    *  — the cold-name fallback childNamesOfStrict uses before reporting a miss. */
   childrenManifestFor?(layer: PlacementLayer): Promise<Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }> | null>
+  /** Is this child reference one that can never resolve — it names the
+   *  signature of zero bytes (HistoryService.isDeadLayerReference)? A strict
+   *  read asks before it calls an unreadable child a cold miss. */
+  isDeadLayerReference?(sig: string): Promise<boolean>
   /** Merkle fold of a subtree's LIVE location heads into one pool-written
    *  root sig (HistoryService.sealSubtree) — the collection-capture
    *  primitive cut/copy uses. Optional: sealing degrades to the parent's
@@ -139,6 +143,10 @@ export async function childNamesOf(
  *  silently drops the unresolved sibling — that drop is a PERMANENT wipe of a
  *  tile whose bytes merely weren't warm. `coldMiss` lets the caller tell "child
  *  confirmed absent" from "couldn't see the child". */
+const isDeadReference = async (history: PlacementHistory, sig: string): Promise<boolean> => {
+  try { return (await history.isDeadLayerReference?.(sig)) === true } catch { return false }
+}
+
 export async function childNamesOfStrict(
   history: PlacementHistory,
   parent: PlacementLayer | null,
@@ -166,7 +174,14 @@ export async function childNamesOfStrict(
     // Bytes path — manifest absent (or missing this sig): pool-addressed
     // layer read with its own fallback chain.
     const child = await history.getLayerBySig(String(sig))
-    slots.push((typeof child?.name === 'string' && child.name.length > 0) ? child.name : null)
+    if (typeof child?.name === 'string' && child.name.length > 0) { slots.push(child.name); continue }
+    // DEAD IS NOT COLD. A cold child's bytes have not arrived and may; a
+    // dead reference names the signature of zero bytes and never resolves,
+    // anywhere. Calling it cold refused every write on its page for good
+    // (an adopt at the root of a managed site door, 2026-11-14). It gives
+    // no name and is no reason to refuse.
+    if (await isDeadReference(history, String(sig))) continue
+    slots.push(null)
   }
 
   return {
@@ -633,6 +648,9 @@ export async function readChildrenStrict(
       const child = await history.getLayerBySig(String(sig))
       const name = typeof child?.name === 'string' ? child.name : ''
       if (!child || !name) {
+        // A dead reference is not a child that could not be seen (see
+        // childNamesOfStrict): it is left out, and the rest is the whole list.
+        if (await isDeadReference(history, String(sig))) continue
         console.warn(
           `[strict-read] cold miss on child ${String(sig).slice(0, 12)}… of /${segments.join('/')}`
           + ' — refusing to report a partial layer',
