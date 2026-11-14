@@ -239,6 +239,20 @@ button, since a contribution is always for where you stand.
 **A contribution is your own act.** Only the typed word or a button you click
 publishes. Nothing offers in the background.
 
+**A contribution lasts until you withdraw it** (jwize, 2026-11-14: "They should
+be permanent pools of meaning I would guess unless unshared"). A host keeps the
+record and your signed index that names it; a newer index from your key that
+drops the key is the only thing that takes it out. The worker always kept
+indexes in R2. The relay kept them in memory only, so `jwize.com`, whose apex
+is a relay, forgot every index when its service restarted on 2026-11-13 and a
+`recipes` contribution vanished while its record stayed on disk. The relay now
+writes each index to `<content-dir>/<sign('hive:indexes')>/<pubkey>` when it
+is the one kept, and reads them back, re-verified, at start
+(`hypercomb-relay/relay.js`, `keepHeldIndex` / `restoreHeldIndexes`). The rest
+of the relay's events stay in memory: it is still a meeting point, and the
+index is kept because the same process is also a host. A contribution made
+before this landed was not on disk to read back, and is contributed again once.
+
 **The name is where you stand.** It is the last segment of the tile you stand
 on. At the hive root there is no name, and the word refuses with a toast.
 
