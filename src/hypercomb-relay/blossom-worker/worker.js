@@ -3579,9 +3579,37 @@ function manageCookie(on) {
   return `${MANAGE_COOKIE}=${on ? '1' : ''}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${on ? 31536000 : 0}`
 }
 
+/** A zone root this deployment answers: one the edge routes here (a binding
+ *  says nothing, or says `routed`), an ORIGIN_HOSTS apex (routed for its writes
+ *  only), or a zone an operator's record speaks for, which a claim wired. */
+function routedHere(env, host) {
+  const binding = siteBindings(env)[host]
+  return !binding || binding.routed !== false || servesOrigin(env, host)
+}
+
+/** WHERE A SITE DOOR'S WRITES GO (manageRecord.writes; jwize 2026-11-13: "we
+ *  are upgrading something that we replicated"). A site door is read-only
+ *  (above every route, "published Core hosts are read-only"), so a page on it
+ *  that publishes writes at the zone root whose store it reads. Every zone
+ *  root of one deployment writes the one store, so when the site's own zone
+ *  apex is not routed here (jwize.com is his relay; wrangler.pluginthematrix.toml:
+ *  "its writes land on pluginthematrix.com") the write face is the first
+ *  zone root that is. Null when no zone root answers here at all. It is a
+ *  hint, never an authority: the page checks the host serves the very index
+ *  this site reads before it writes anything there. */
+function writeFaceFor(env, hostname) {
+  const host = String(hostname || '').toLowerCase()
+  const roots = [...new Set([...Object.keys(siteBindings(env)), ...siteOperators(env).map(([zone]) => zone)])]
+    .filter(candidate => isZoneRoot(env, candidate))
+  const own = roots.filter(root => withinZone(host, root)).sort((a, b) => b.length - a.length)[0]
+  if (own && routedHere(env, own)) return own
+  return roots.find(root => routedHere(env, root)) || null
+}
+
 /** What a managed site door's page is told: the site, its title, its primary
- *  publisher and the head their signed index names for it (or none yet). */
-async function manageRecord(routed, read) {
+ *  publisher, the head their signed index names for it (or none yet), and the
+ *  zone root its publish writes to (writeFaceFor). */
+async function manageRecord(routed, read, hostname) {
   const site = routed.site
   const publisher = site.publishers?.find(p => p.primary) || site.publishers?.[0]
   let head = null
@@ -3592,7 +3620,10 @@ async function manageRecord(routed, read) {
       head = SIG_RE.test(named) ? named : null
     } catch { head = null }
   }
-  return { lineage: site.lineage, title: site.title || site.lineage, publisher: publisher?.pubkey || null, head }
+  return {
+    lineage: site.lineage, title: site.title || site.lineage, publisher: publisher?.pubkey || null, head,
+    writes: writeFaceFor(routed.env, hostname),
+  }
 }
 
 /** Back to the website: the mark goes, and the shim's service worker with it (it would
@@ -7588,7 +7619,7 @@ const router = {
         if (marking && !deliberateVisit(request)) return serveManageConfirm()
         return serveManagement(request, env, managed.zone, {
           setMark: marking,
-          manage: () => manageRecord(managed, pageReader(managed.env)),
+          manage: () => manageRecord(managed, pageReader(managed.env), requestUrl.hostname),
         })
       }
     }

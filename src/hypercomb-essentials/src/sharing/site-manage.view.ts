@@ -15,6 +15,17 @@
 // what is managed, the Chat, and the way back to the website. The chat opens
 // over the card (it stacks above), so the card stays in view while you talk.
 //
+// THE CARD IS THE PAGE'S OWN TILE (jwize, 2026-11-13: "The whole idea is we
+// are upgrading something that we replicated"). Once the bees are up, the
+// published head comes into this page's hive as the tile at /<lineage> (the
+// visit is the participant action; site-replica.ts), and the frame follows
+// that tile LIVE: every marker written at its location re-runs the card, so
+// what the chat changes shows as it lands. The bar says when the tile holds
+// changes the site does not ("Unpublished changes", with Publish once the
+// page's publish port is installed), and when a newer card was published over
+// an edited one ("Use it" takes it; the edits stay one step back in history).
+// The Chat opens on the card tile's own conversation.
+//
 // A dependency: it exports the element and registers nothing. The bee beside
 // it (site-manage.drone.ts) defines it and adds it to the shell, only on a
 // page that carries the record.
@@ -22,11 +33,18 @@
 // MIRRORED: hypercomb-shim/src/bootstrap/manage-record.ts reads the same record
 // (a module may not import the shim). Every field is untrusted page text.
 
-import { EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, type I18nProvider, type InstallProvider } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, requestConfirm, type I18nProvider, type InstallProvider } from '@hypercomb/core'
 import { FRAME_MAX_ONE, versionFrame, type FrameReader, type FrameLayer } from '../history/revision-viewer.model.js'
 // Whom builds follow here — the same record the scout read the offer from (the
 // Packages window reads it the same way: host-directory.view.ts #follow).
 import { readInstallFollow } from './update-scout.service.js'
+import { managedRecordText } from './managed-record.js'
+import {
+  BROKER_KEY, CHAT_THREADS_KEY, COMMITTER_KEY, HISTORY_KEY, LINEAGE_KEY, MANAGED_PUBLISH_KEY, STORE_KEY, SWARM_ADOPT_KEY,
+  notePublished, readState, reconcile, replicaConvoId, replicaLocation, takePublished, writeReceipt,
+  type AdoptLike, type BrokerLike, type CommitterLike, type HistoryLike, type ManagedPublishLike, type ReplicaServices,
+  type ReplicaSite, type ReplicaState, type StoreLike as ReplicaStoreLike,
+} from './site-replica.js'
 
 export const SITE_MANAGE_SURFACE = 'hc-site-manage'
 export const SITE_MANAGE_OWNER = '@diamondcoreprocessor.com/SiteManageView'
@@ -39,7 +57,8 @@ export type SiteManageRecord = { readonly lineage: string; readonly title: strin
 /** The record the worker put in the page, or null on any other page. */
 export function siteManageRecord(doc: Document = document): SiteManageRecord | null {
   try {
-    const raw = doc.getElementById('hc-manage')?.textContent
+    // Only the worker's record counts (managed-record.ts).
+    const raw = managedRecordText(doc)
     if (!raw) return null
     const value = JSON.parse(raw) as Record<string, unknown>
     const lineage = typeof value['lineage'] === 'string' ? value['lineage'].slice(0, 200) : ''
@@ -88,6 +107,33 @@ const safeStorage = (): Storage | null => { try { return localStorage } catch { 
 export const restartPage = { run: (): void => { location.reload() } }
 /** How long an update failure is said over the card before its own note returns. */
 const UPDATE_FAILED_MS = 8000
+/** How long after a marker lands at the card's location before the card is
+ *  read again: the marker is announced before the head moves (history.service
+ *  emits, then sets the head), and a burst of commits is one re-read — the
+ *  revision viewer's RELIST_MS. */
+export const RELIST_MS = 300
+
+/** The services the replica needs, once each is registered (the bees are up). */
+function whenServices(): Promise<ReplicaServices> {
+  const need = (key: string): Promise<unknown> => new Promise(resolve => {
+    const held = ioc()?.get?.<unknown>(key)
+    if (held) { resolve(held); return }
+    ioc()?.whenReady?.(key, () => resolve(ioc()?.get?.<unknown>(key)))
+  })
+  return Promise.all([need(HISTORY_KEY), need(STORE_KEY), need(SWARM_ADOPT_KEY), need(BROKER_KEY), need(LINEAGE_KEY)])
+    .then(([history, store, adopt, broker]) => ({
+      history: history as HistoryLike,
+      store: store as ReplicaStoreLike,
+      adopt: adopt as AdoptLike,
+      broker: broker as BrokerLike,
+      // Read when a take needs it (the whole tree in one queued step), never waited on.
+      get committer() { return ioc()?.get?.<CommitterLike>(COMMITTER_KEY) },
+    }))
+}
+
+/** Where this door's bytes come from: the door, its zone, the followed hosts. */
+const doorWhere = (): { host: string; zone: string; sources: string[] } =>
+  ({ host: location.host, zone: managedSiteZone(location.host), sources: updateSources(location.host) })
 
 const t = (key: string, fallback: string, params?: Record<string, string | number>): string => {
   try {
@@ -121,6 +167,25 @@ export class SiteManageElement extends ElementBase {
   /** What the note says for the card itself, so a passing update failure gives it back. */
   #cardNote: { text: string; retry: boolean } = { text: '', retry: false }
   #failTimer = 0
+  /** Where the replica stands in the bar: what it holds, and what to do about it. */
+  #status: HTMLSpanElement | null = null
+  #publish: HTMLButtonElement | null = null
+  #useNewer: HTMLButtonElement | null = null
+  /** The replica's services and its location bag, once the bees are up. */
+  #services: ReplicaServices | null = null
+  #loc: string | null = null
+  #state: ReplicaState | null = null
+  /** The head this page published, while the page record still names the old one. */
+  #liveHead: string | null = null
+  /** Why the card could not be brought in, said in the bar until it lands. */
+  #refused = ''
+  /** An adopt that deferred: the tile may still land, and its receipt is owed. */
+  #replicaOwed = false
+  #busy: '' | 'take' | 'publish' = ''
+  /** Bumped on every disconnect, so a continuation of an earlier life stops. */
+  #life = 0
+  #offHistory: Array<() => void> = []
+  #relist = 0
 
   // Every byte the card names is read from its host, never "this device only":
   // the revision viewer asks local-only because its hive already holds the
@@ -152,14 +217,162 @@ export class SiteManageElement extends ElementBase {
       this.#label()
     })
     void this.#show()
+    void this.#begin()
   }
 
   disconnectedCallback(): void {
     this.#ticket++
+    this.#life++
     this.#cover(false)
     clearTimeout(this.#failTimer)
+    clearTimeout(this.#relist)
     this.#offUpdate?.()
     this.#offUpdate = null
+    for (const off of this.#offHistory.splice(0)) off()
+  }
+
+  /** The site as the replica is judged against it: the record's head, or the
+   *  head this page has since published. */
+  #site(): ReplicaSite | null {
+    const record = this.#record
+    return record ? { lineage: record.lineage, head: this.#liveHead ?? record.head } : null
+  }
+
+  /** BRING THE CARD IN, THEN FOLLOW IT. Once the bees are up: the one decision
+   *  of site-replica.ts reconcile (replicate on the first visit, take a newer
+   *  publish over an unedited replica, or leave the choice to the owner), then
+   *  every marker at the card's location re-reads it. */
+  async #begin(): Promise<void> {
+    const life = this.#life
+    const record = this.#record
+    if (!record) return
+    const services = await whenServices()
+    if (life !== this.#life) return
+    this.#services = services
+    let loc: string
+    try { loc = await replicaLocation(services.history, record.lineage) } catch { return }
+    if (life !== this.#life) return
+    this.#loc = loc
+    this.#follow(loc)
+    const site = this.#site()
+    if (!site) return
+    // The adopt says WHY it refused on features:outcome (code it cannot take,
+    // a closure it cannot reach). Listened to only while it runs; the bus's
+    // replay of an older outcome is not this one.
+    let armed = false
+    let heard = ''
+    const offOutcome = EffectBus.on<{ cell?: unknown; ok?: unknown; message?: unknown }>('features:outcome', outcome => {
+      if (!armed || outcome?.ok !== false || outcome.cell !== record.lineage) return
+      heard = typeof outcome.message === 'string' ? outcome.message : ''
+    })
+    armed = true
+    let outcome: Awaited<ReturnType<typeof reconcile>>
+    try { outcome = await reconcile(services, site, doorWhere()) } catch { outcome = { kind: 'refused', status: 'failed', pending: false } } finally { offOutcome() }
+    if (life !== this.#life) return
+    if (outcome.kind === 'refused') {
+      this.#refused = t('site-manage.refused', 'Your card could not be brought onto this device. {reason}', { reason: heard || outcome.status }).trim()
+      this.#replicaOwed = outcome.pending
+    } else if (outcome.kind === 'take-failed') {
+      this.#flash(t('site-manage.take-failed', 'The newer card could not be taken. {reason}', { reason: outcome.error }).trim())
+    }
+    await this.#refresh()
+  }
+
+  /** Re-read the card whenever its location gains a marker — a chat edit, an
+   *  adopt that landed late, another tab's commit. */
+  #follow(loc: string): void {
+    for (const off of this.#offHistory.splice(0)) off()
+    const later = (): void => {
+      clearTimeout(this.#relist)
+      this.#relist = window.setTimeout(() => { void this.#refresh() }, RELIST_MS)
+    }
+    const here = (payload: { lineageSig?: unknown } | null | undefined): void => { if (payload?.lineageSig === loc) later() }
+    this.#offHistory.push(
+      EffectBus.on<{ lineageSig?: unknown }>('history:marker-wrote', here),
+      EffectBus.on<{ lineageSig?: unknown }>('history:head-external', here),
+    )
+  }
+
+  /** Read where the replica stands, say it in the bar, and run the card. */
+  async #refresh(): Promise<void> {
+    const life = this.#life
+    const services = this.#services
+    const loc = this.#loc
+    const site = this.#site()
+    if (services && loc && site) {
+      let state = await readState(services, site, loc).catch(() => null)
+      if (life !== this.#life) return
+      // A deferred adopt that has landed since: the card is here now, and its
+      // receipt is the head it was taken from.
+      if (state?.layer && this.#replicaOwed && site.head) {
+        this.#replicaOwed = false
+        this.#refused = ''
+        await writeReceipt(services.store, site.lineage, site.head, state.sig)
+        state = await readState(services, site, loc).catch(() => state)
+        if (life !== this.#life) return
+      }
+      if (state?.layer) this.#refused = ''
+      this.#state = state
+      this.#label()
+    }
+    await this.#show()
+  }
+
+  /** "Use it": the newer published card replaces the replica; the edits it
+   *  replaces stay one step back in history. */
+  async #takeNewer(): Promise<void> {
+    const services = this.#services
+    const site = this.#site()
+    if (!services || !site?.head || this.#busy) return
+    this.#busy = 'take'
+    this.#label()
+    const taken = await takePublished(services, { ...site, head: site.head }, doorWhere())
+      .catch((error: unknown) => ({ ok: false as const, error: error instanceof Error ? error.message : '' }))
+    this.#busy = ''
+    if (!taken.ok) this.#flash(t('site-manage.take-failed', 'The newer card could not be taken. {reason}', { reason: taken.error }).trim())
+    await this.#refresh()
+  }
+
+  /** PUBLISH: the owner's yes in the consent dialog, then the page's own
+   *  publish port (its listed key) moves the site's root to this replica's head. */
+  async #publishNow(): Promise<void> {
+    const record = this.#record
+    const services = this.#services
+    const sig = this.#state?.sig
+    const port = ioc()?.get?.<ManagedPublishLike>(MANAGED_PUBLISH_KEY)
+    if (!record || !services || !sig || !port || this.#busy) return
+    const yes = await requestConfirm({
+      title: 'site-manage.publish-confirm.title',
+      message: 'site-manage.publish-confirm.message',
+      messageParams: { title: record.title },
+      confirmLabel: 'site-manage.publish',
+      cancelLabel: 'site-manage.publish-confirm.cancel',
+      danger: false,
+    })
+    if (!yes || this.#busy) return
+    const before = this.#site()
+    this.#busy = 'publish'
+    this.#label()
+    let result: { ok: boolean; error?: string; head?: string }
+    try { result = await port.publishRoot(record.lineage, sig) } catch (error) {
+      result = { ok: false, error: error instanceof Error ? error.message : '' }
+    }
+    this.#busy = ''
+    // Written but not yet shown: the index on the write host already names the
+    // head (the port returns it); only the site door's view lags. That IS a
+    // publish — recorded as one, so a reload never takes the old card back.
+    const written = typeof result.head === 'string' && /^[0-9a-f]{64}$/.test(result.head)
+    if (result.ok || written) {
+      const live = written ? result.head! : sig
+      if (before) await notePublished(services.store, before, live, sig)
+      this.#liveHead = live
+      this.#flash(result.ok
+        ? t('site-manage.published', 'Your card is live.')
+        : t('site-manage.published-catching-up', 'Published. The site will show it in a moment.'))
+    } else {
+      this.#flash(t('site-manage.publish-failed', 'The publish did not complete. {reason}', { reason: result.error ?? '' }).trim())
+    }
+    await this.#refresh()
   }
 
   /** Take the offered package — exactly that signature, admitted by the gate
@@ -184,9 +397,12 @@ export class SiteManageElement extends ElementBase {
     }
     this.#updating = false
     this.#label()
-    // Said over the card for a moment, then the card's own note comes back —
-    // its Try again included — unless the card has said something newer since.
-    const said = t('site-manage.update-failed', 'The update did not complete. {reason}', { reason: failed }).trim()
+    this.#flash(t('site-manage.update-failed', 'The update did not complete. {reason}', { reason: failed }).trim())
+  }
+
+  /** Said over the card for a moment, then the card's own note comes back —
+   *  its Try again included — unless the card has said something newer since. */
+  #flash(said: string): void {
     const card = this.#cardNote
     this.#paint(said, card.retry)
     clearTimeout(this.#failTimer)
@@ -226,16 +442,23 @@ export class SiteManageElement extends ElementBase {
     this.#offBack = null
   }
 
-  /** Read the published head and run its card. */
+  /** Run the card: the hive's own tile at /<lineage> once it holds one (so an
+   *  edit shows as it lands), the published head while it does not. */
   async #show(): Promise<void> {
     const record = this.#record
-    if (!record || !this.#frame) return
+    const frame = this.#frame
+    if (!record || !frame) return
     const ticket = ++this.#ticket
-    if (!record.head) { this.#say(t('site-manage.nothing', 'Nothing is published here yet.')); return }
-    this.#say(t('site-manage.loading', 'Loading your card…'))
-    const layerBytes = await this.#bytesOf(record.head)
-    let layer: FrameLayer | null = null
-    try { layer = layerBytes ? JSON.parse(new TextDecoder().decode(layerBytes)) as FrameLayer : null } catch { layer = null }
+    const local = this.#state?.layer ?? null
+    if (!local && !record.head) { this.#say(t('site-manage.nothing', 'Nothing is published here yet.')); return }
+    // A re-run over a card already shown says nothing: the frame stays as it is
+    // until the new one is ready.
+    if (!frame.srcdoc) this.#say(t('site-manage.loading', 'Loading your card…'))
+    let layer: FrameLayer | null = local as FrameLayer | null
+    if (!layer && record.head) {
+      const layerBytes = await this.#bytesOf(record.head)
+      try { layer = layerBytes ? JSON.parse(new TextDecoder().decode(layerBytes)) as FrameLayer : null } catch { layer = null }
+    }
     if (ticket !== this.#ticket) return
     if (!layer) { this.#say(t('site-manage.cold', 'Your card is not on this device yet.'), true); return }
     const framed = await versionFrame(layer, [record.lineage], this.#reader).catch(() => null)
@@ -246,8 +469,10 @@ export class SiteManageElement extends ElementBase {
         : t('site-manage.cold', 'Your card is not on this device yet.'), framed?.problem !== 'no-page')
       return
     }
-    this.#say('')
-    this.#frame.srcdoc = framed.doc
+    // Only a card note that says something is cleared, so a passing flash
+    // (published, a failed update) keeps its moment over a re-run.
+    if (this.#cardNote.text || this.#cardNote.retry) this.#say('')
+    if (frame.srcdoc !== framed.doc) frame.srcdoc = framed.doc
   }
 
   async #bytesOf(sig: string, localOnly = false): Promise<Uint8Array | null> {
@@ -284,8 +509,14 @@ export class SiteManageElement extends ElementBase {
     const chat = this.#chat = document.createElement('button')
     chat.type = 'button'
     chat.className = 'sm-btn sm-chat'
-    // A command, never a state: transient, so it is not replayed to a late listener.
-    chat.addEventListener('click', () => { EffectBus.emitTransient('chat:open', {}) })
+    // A command, never a state: transient, so it is not replayed to a late
+    // listener. It opens on the card tile's own conversation, so the chat's
+    // subject — and every change it makes — is the card.
+    chat.addEventListener('click', () => {
+      const lineage = this.#record?.lineage ?? ''
+      const threads = ioc()?.get?.<{ tileConvoId?(segments: readonly string[]): string }>(CHAT_THREADS_KEY)
+      EffectBus.emitTransient('chat:open', lineage ? { convoId: replicaConvoId(lineage, threads) } : {})
+    })
     const back = this.#back = document.createElement('a')
     back.className = 'sm-btn'
     back.href = LEAVE_HREF
@@ -294,7 +525,21 @@ export class SiteManageElement extends ElementBase {
     update.className = 'sm-btn sm-update'
     update.hidden = true
     update.addEventListener('click', () => { void this.#adopt() })
-    bar.append(title, update, chat, back)
+    const status = this.#status = document.createElement('span')
+    status.className = 'sm-state'
+    status.setAttribute('role', 'status')
+    status.hidden = true
+    const useNewer = this.#useNewer = document.createElement('button')
+    useNewer.type = 'button'
+    useNewer.className = 'sm-btn sm-use-newer'
+    useNewer.hidden = true
+    useNewer.addEventListener('click', () => { void this.#takeNewer() })
+    const publish = this.#publish = document.createElement('button')
+    publish.type = 'button'
+    publish.className = 'sm-btn sm-publish'
+    publish.hidden = true
+    publish.addEventListener('click', () => { void this.#publishNow() })
+    bar.append(title, status, useNewer, publish, update, chat, back)
 
     const note = this.#note = document.createElement('div')
     note.className = 'sm-note'
@@ -311,6 +556,8 @@ export class SiteManageElement extends ElementBase {
     this.#label()
     const words = ioc()?.get?.<EventTarget>(I18N_IOC_KEY)
     words?.addEventListener?.('change', () => this.#label())
+    // The publish port may arrive after the card: Publish shows when it does.
+    if (!ioc()?.get?.(MANAGED_PUBLISH_KEY)) ioc()?.whenReady?.(MANAGED_PUBLISH_KEY, () => this.#label())
   }
 
   /** The bar's words, in the person's language. */
@@ -324,6 +571,27 @@ export class SiteManageElement extends ElementBase {
       this.#update.hidden = !this.#offer
       this.#update.disabled = this.#updating
       this.#update.textContent = this.#updating ? t('site-manage.updating', 'Updating…') : t('site-manage.update', 'Update')
+    }
+    const state = this.#state
+    if (this.#status) {
+      // One line: why the card is not here, else a newer card waiting, else
+      // changes the site does not have yet.
+      const said = this.#refused
+        || (state?.newer ? t('site-manage.newer', 'A newer card is published.') : '')
+        || (state?.unpublished ? t('site-manage.unpublished', 'Unpublished changes') : '')
+      this.#status.textContent = said
+      this.#status.hidden = !said
+    }
+    if (this.#useNewer) {
+      this.#useNewer.hidden = !state?.newer
+      this.#useNewer.disabled = this.#busy !== ''
+      this.#useNewer.textContent = this.#busy === 'take' ? t('site-manage.taking', 'Taking it…') : t('site-manage.use-newer', 'Use it')
+    }
+    if (this.#publish) {
+      const port = ioc()?.get?.<ManagedPublishLike>(MANAGED_PUBLISH_KEY)
+      this.#publish.hidden = !state?.unpublished || typeof port?.publishRoot !== 'function'
+      this.#publish.disabled = this.#busy !== ''
+      this.#publish.textContent = this.#busy === 'publish' ? t('site-manage.publishing', 'Publishing…') : t('site-manage.publish', 'Publish')
     }
     this.#frame?.setAttribute('title', record?.title ?? '')
   }
@@ -367,6 +635,8 @@ ${T} .sm-btn {
 ${T} .sm-btn:hover { background: rgba(255, 255, 255, 0.14); }
 ${T} .sm-chat { border-color: rgba(200, 151, 90, 0.6); }
 ${T} .sm-update { border-color: rgba(120, 200, 140, 0.7); color: #bfe8c8; }
+${T} .sm-publish { border-color: rgba(120, 200, 140, 0.7); color: #bfe8c8; }
+${T} .sm-state { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e3c48f; }
 ${T} .sm-btn:disabled { opacity: 0.6; cursor: progress; }
 ${T} .sm-note {
   position: fixed; left: 50%; top: 3.2rem; transform: translateX(-50%); z-index: 99991; display: flex; align-items: center;

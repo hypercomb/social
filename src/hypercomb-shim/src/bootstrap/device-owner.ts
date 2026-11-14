@@ -53,23 +53,62 @@ export const carryChain = async (zone: string, binding: DeviceBinding, signer: D
   return false
 }
 
-/** Put one record on the zone, unless it already serves it, and read it back. */
-const uploadRecord = async (zone: string, bytes: Uint8Array, sig: string, anchor: string, signer: DeviceSigner): Promise<string | null> => {
-  const url = `${zoneOrigin(zone)}/${sig}`
+/** Does the zone serve the atom `sig`? Null when it could not be asked. `?held`: a host that knows the
+ *  flag answers a miss 204, not a 404 the console prints as an error — so only a 200 is held, and an
+ *  HTML answer is a page standing in for a miss. */
+export const heldOn = async (zone: string, sig: string): Promise<boolean | null> => {
   try {
-    // `?held`: a host that knows the flag answers a miss 204, not a 404 the
-    // console prints as an error — so only a 200 is held.
-    const there = await fetch(`${url}?held`, { method: 'HEAD', cache: 'no-store' })
-    if (there.status === 200 && !(there.headers.get('content-type') ?? '').toLowerCase().includes('text/html')) return null
-  } catch { /* the PUT says whether it is reachable */ }
+    const there = await fetch(`${zoneOrigin(zone)}/${sig}?held`, { method: 'HEAD', cache: 'no-store' })
+    return there.status === 200 && !(there.headers.get('content-type') ?? '').toLowerCase().includes('text/html')
+  } catch { return null }
+}
+
+/** Put one atom on the zone as the anchor's, unless it already serves it, and read it back: its bytes
+ *  hashed ('bytes'), or only that it is held now ('held', for a closure of many, where the host hashed
+ *  the body against its name before it wrote). Null when the zone serves it; else the reason, in words
+ *  that name it `what`. */
+export const uploadAtom = async (
+  zone: string, bytes: Uint8Array, sig: string, anchor: string, signer: DeviceSigner,
+  what = 'the showcase', readBack: 'bytes' | 'held' = 'bytes',
+): Promise<string | null> => {
+  const url = `${zoneOrigin(zone)}/${sig}`
+  // A host that could not be asked is not one that holds it: the PUT says whether it is reachable.
+  if (await heldOn(zone, sig)) return null
   try {
     const put = await fetch(url, { method: 'PUT', headers: { Authorization: authFor(signer, url, anchor) }, body: bytes.slice().buffer as ArrayBuffer })
     if (put.status === 401 || put.status === 403) return `${zone} does not take uploads from this browser's key`
-    if (!put.ok) return `${zone} refused the showcase (HTTP ${put.status})`
+    if (!put.ok) return `${zone} refused ${what} (HTTP ${put.status})`
+    if (readBack === 'held') return await heldOn(zone, sig) ? null : `${zone} took ${what} but does not serve it back`
     const back = await fetch(url, { cache: 'no-store' })
-    if (!back.ok || await sha(new Uint8Array(await back.arrayBuffer())) !== sig) return `${zone} took the showcase but does not serve it back`
+    if (!back.ok || await sha(new Uint8Array(await back.arrayBuffer())) !== sig) return `${zone} took ${what} but does not serve it back`
     return null
   } catch { return `${zone} could not be reached` }
+}
+
+/** The anchor's next index, signed by this browser's key: `content` as given, tagged as the anchor's and
+ *  as following `before` (the index it replaces, read fresh), so the host takes it as the anchor's and two
+ *  places writing at once cannot drop each other's change. Never dated before what it follows. */
+export const signIndex = (
+  signer: DeviceSigner, anchor: string, before: Record<string, unknown> | null, content: Record<string, unknown>,
+): Record<string, unknown> => signer.sign({
+  kind: HIVE_INDEX_KIND,
+  created_at: Math.max(Math.floor(Date.now() / 1000), Number(before?.['created_at'] ?? 0) + 1),
+  tags: [['anchor', anchor], ...(before ? [['prev', String(before['id'] ?? '')]] : [])],
+  content: JSON.stringify({ ...content, v: content['v'] ?? HIVE_LINK_VERSION }),
+})
+
+/** PUT a signed index on the zone. Null when it took it; 'stale' when it holds a newer index than the one
+ *  this followed (read again and sign again); else the reason, in words. */
+export const putIndex = async (zone: string, anchor: string, event: Record<string, unknown>, signer: DeviceSigner): Promise<null | 'stale' | string> => {
+  const indexes = await sha('hive:indexes')
+  const url = `${zoneOrigin(zone)}/${indexes}/${anchor}`
+  const body = JSON.stringify(event)
+  try {
+    const put = await fetch(url, { method: 'PUT', headers: { Authorization: authFor(signer, url, anchor, await sha(body)), 'Content-Type': 'application/json' }, body })
+    if (put.status === 409) return 'stale'
+    if (!put.ok) return `${zone} refused the index (${put.status}${put.headers.get('X-Reason') ? `: ${put.headers.get('X-Reason')}` : ''})`
+  } catch { return `${zone} could not be reached` }
+  return null
 }
 
 /** The lineages the anchor's doors open on this zone. */
@@ -126,24 +165,13 @@ const attempt = async (zone: string, change: Change, anchor: string, signer: Dev
   if (!next) return { ok: true, changed: false }
   const bytes = showcaseBytes(next)
   const sig = await sha(bytes)
-  const refused = await uploadRecord(zone, bytes, sig, anchor, signer)
+  const refused = await uploadAtom(zone, bytes, sig, anchor, signer)
   if (refused) return { ok: false, reason: refused }
 
   const before = read === 'missing' ? null : read.event
-  const event = signer.sign({
-    kind: HIVE_INDEX_KIND,
-    created_at: Math.max(Math.floor(Date.now() / 1000), Number(before?.['created_at'] ?? 0) + 1),
-    tags: [['anchor', anchor], ...(before ? [['prev', String(before['id'] ?? '')]] : [])],
-    content: JSON.stringify({ ...content, v: content['v'] ?? HIVE_LINK_VERSION, roots: { ...roots, [key]: sig } }),
-  })
-  const indexes = await sha('hive:indexes')
-  const url = `${zoneOrigin(zone)}/${indexes}/${anchor}`
-  const body = JSON.stringify(event)
-  try {
-    const put = await fetch(url, { method: 'PUT', headers: { Authorization: authFor(signer, url, anchor, await sha(body)), 'Content-Type': 'application/json' }, body })
-    if (put.status === 409) return 'stale'
-    if (!put.ok) return { ok: false, reason: `${zone} refused the index (${put.status}${put.headers.get('X-Reason') ? `: ${put.headers.get('X-Reason')}` : ''})` }
-  } catch { return { ok: false, reason: `${zone} could not be reached` } }
+  const put = await putIndex(zone, anchor, signIndex(signer, anchor, before, { ...content, roots: { ...roots, [key]: sig } }), signer)
+  if (put === 'stale') return 'stale'
+  if (put) return { ok: false, reason: put }
   return { ok: true, changed: true }
 }
 

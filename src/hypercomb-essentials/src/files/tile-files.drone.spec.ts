@@ -173,3 +173,125 @@ describe('a tile\'s page', () => {
     expect(await files.read({ route: ['Proposal', 'plan'], kind: 'page' })).toEqual({ ok: true, tile: ['Proposal', 'plan'], text: '<p>now</p>', sig })
   })
 })
+
+// THE CARD TARGET (jwize, 2026-11-13: the AI edits the page AND the card's
+// details and theme). A card is a `card:data` record naming its details
+// (dataSig) and theme (themeSig) as JSON resources; a write stores the new
+// JSON and replaces the record, keeping everything else it says.
+describe('a tile\'s card', () => {
+  const DATA = '1'.repeat(64)
+  const THEME = '2'.repeat(64)
+  const ART = '3'.repeat(64)
+  const card = (payload: Record<string, unknown>): void => {
+    fake.decorations.set('Proposal', [{ sig: 'e'.repeat(64), record: { kind: 'card:data', payload } }])
+  }
+
+  it('writes the details as a new card:data dataSig, keeping the theme, the picture and the rest of the record', async () => {
+    card({ dataSig: DATA, themeSig: THEME, artSig: ART, label: 'mine' })
+    const json = '{"name":"Jaime Weise","title":"Builder"}'
+    const done = await new TileFilesDrone().write({ route: ['proposal'], kind: 'card' }, json)
+    expect(done).toMatchObject({ ok: true, tile: ['Proposal'], sig: await sha(json), created: false, unchanged: false })
+    expect(done).not.toHaveProperty('trial')
+    expect(fake.removed).toEqual(['e'.repeat(64)])
+    expect(fake.written).toEqual([{
+      kind: 'card:data', segments: ['Proposal'],
+      payload: { dataSig: await sha(json), themeSig: THEME, artSig: ART, label: 'mine' },
+    }])
+    expect(fake.bytes.get(await sha(json))).toBe(json)
+  })
+
+  it('writes the theme as a new card:data themeSig, keeping the details', async () => {
+    card({ dataSig: DATA })
+    const json = '{"accent":"#f5a623","ground":"#101010"}'
+    const done = await new TileFilesDrone().write({ route: ['Proposal'], kind: 'card', part: 'theme' }, json)
+    expect(done).toMatchObject({ ok: true, created: true, unchanged: false })
+    expect(fake.written).toEqual([{ kind: 'card:data', segments: ['Proposal'], payload: { dataSig: DATA, themeSig: await sha(json) } }])
+  })
+
+  it('makes a card on a tile that has none from its details, but never from a theme alone', async () => {
+    const json = '{"name":"New"}'
+    expect(await new TileFilesDrone().write({ route: ['Proposal'], kind: 'card', part: 'theme' }, '{"accent":"red"}'))
+      .toMatchObject({ ok: false, error: expect.stringContaining('write card /Proposal first') })
+    expect(fake.written).toEqual([])
+    expect(await new TileFilesDrone().write({ route: ['Proposal'], kind: 'card' }, json)).toMatchObject({ ok: true, created: true })
+    expect(fake.written).toEqual([{ kind: 'card:data', segments: ['Proposal'], payload: { dataSig: await sha(json) } }])
+  })
+
+  it('refuses what is not one JSON object, and writes nothing', async () => {
+    card({ dataSig: DATA })
+    const files = new TileFilesDrone()
+    expect(await files.write({ route: ['Proposal'], kind: 'card' }, '{"name": ')).toMatchObject({ ok: false, error: expect.stringContaining('not JSON') })
+    expect(await files.write({ route: ['Proposal'], kind: 'card' }, '["a"]')).toMatchObject({ ok: false, error: expect.stringContaining('one object') })
+    expect(await files.write({ route: ['Proposal'], kind: 'card' }, `{"x":"${'a'.repeat(70_000)}"}`)).toMatchObject({ ok: false, error: expect.stringContaining('at most') })
+    expect(fake.written).toEqual([])
+    expect(fake.removed).toEqual([])
+  })
+
+  it('changes nothing when the card already holds that JSON', async () => {
+    const json = '{"name":"Same"}'
+    card({ dataSig: await sha(json) })
+    expect(await new TileFilesDrone().write({ route: ['Proposal'], kind: 'card' }, json)).toMatchObject({ ok: true, unchanged: true })
+    expect(fake.written).toEqual([])
+  })
+
+  it('reads the details or the theme as they are now, or null when the card names none', async () => {
+    const files = new TileFilesDrone()
+    expect(await files.read({ route: ['Proposal'], kind: 'card' })).toEqual({ ok: true, tile: ['Proposal'], text: null })
+    fake.bytes.set(DATA, '{"name":"Now"}')
+    card({ dataSig: DATA })
+    expect(await files.read({ route: ['Proposal'], kind: 'card' })).toEqual({ ok: true, tile: ['Proposal'], text: '{"name":"Now"}', sig: DATA })
+    expect(await files.read({ route: ['Proposal'], kind: 'card', part: 'theme' })).toEqual({ ok: true, tile: ['Proposal'], text: null })
+    card({ dataSig: DATA, themeSig: THEME })
+    expect(await files.read({ route: ['Proposal'], kind: 'card', part: 'theme' }))
+      .toEqual({ ok: false, error: 'the card\'s theme is named but its bytes are not on this device' })
+  })
+})
+
+// ON A MANAGED SITE DOOR a page is changed where it is: no trial is staged or
+// remembered, and the receipt names no try- address — none exists there.
+const { onManagedSiteDoor } = await import('./tile-files.drone.js')
+const { forgetTrials, trialOf } = await import('./try-page.js')
+
+describe('a page on a managed site door', () => {
+  const mark = (): void => {
+    const script = document.createElement('script')
+    script.id = 'hc-manage'
+    script.type = 'application/json'
+    script.textContent = JSON.stringify({ lineage: 'business-card' })
+    document.head.appendChild(script)
+  }
+
+  beforeEach(() => { forgetTrials(); document.getElementById('hc-manage')?.remove() })
+
+  it('is told by the page record, and by nothing else', () => {
+    expect(onManagedSiteDoor()).toBe(false)
+    mark()
+    expect(onManagedSiteDoor()).toBe(true)
+    document.getElementById('hc-manage')!.textContent = '{"title":"no lineage"}'
+    expect(onManagedSiteDoor()).toBe(false)
+    document.getElementById('hc-manage')?.remove()
+  })
+
+  it('writes the page with no trial staged, remembered or named', async () => {
+    mark()
+    const fetched = vi.spyOn(globalThis, 'fetch')
+    const html = '<h1>Upgraded</h1>'
+    const done = await new TileFilesDrone().write({ route: ['Proposal', 'plan'], kind: 'page' }, html)
+    expect(done).toMatchObject({ ok: true, created: true, unchanged: false })
+    expect(done).not.toHaveProperty('trial')
+    expect(trialOf(await sha(html))).toBeNull()
+    expect(fetched).not.toHaveBeenCalled()
+    fetched.mockRestore()
+    document.getElementById('hc-manage')?.remove()
+  })
+
+  it('still stages and names the trial on every other page', async () => {
+    const fetched = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 404 }))
+    const html = '<h1>Elsewhere</h1>'
+    const done = await new TileFilesDrone().write({ route: ['Proposal', 'plan'], kind: 'page' }, html)
+    expect(done).toMatchObject({ ok: true, trial: expect.stringContaining('try-plan') })
+    expect(trialOf(await sha(html))).toBe('try-plan')
+    expect(fetched).toHaveBeenCalled()
+    fetched.mockRestore()
+  })
+})

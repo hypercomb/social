@@ -42,13 +42,16 @@ describe('manageRecord', () => {
   })
 
   it('reads the site, its title, its publisher and its head', () => {
-    const record = manageRecord(pageWith(JSON.stringify({ lineage: 'business-card', title: 'Card', publisher: sig('b'), head: sig('c') })))
-    expect(record).toEqual({ lineage: 'business-card', title: 'Card', publisher: sig('b'), head: sig('c') })
+    const record = manageRecord(pageWith(JSON.stringify({ lineage: 'business-card', title: 'Card', publisher: sig('b'), head: sig('c'), writes: 'pluginthematrix.com' })))
+    expect(record).toEqual({ lineage: 'business-card', title: 'Card', publisher: sig('b'), head: sig('c'), writes: 'pluginthematrix.com' })
   })
 
   it('keeps no field that is not the shape it should be', () => {
-    const record = manageRecord(pageWith(JSON.stringify({ lineage: 'b', title: 42, publisher: 'nope', head: '<script>' })))
-    expect(record).toEqual({ lineage: 'b', title: 'b', publisher: null, head: null })
+    const record = manageRecord(pageWith(JSON.stringify({ lineage: 'b', title: 42, publisher: 'nope', head: '<script>', writes: 'https://evil.example/x' })))
+    expect(record).toEqual({ lineage: 'b', title: 'b', publisher: null, head: null, writes: null })
+    // Where the publish writes is a bare host name; a machine's own, port and all, is one.
+    expect(manageRecord(pageWith(JSON.stringify({ lineage: 'b', writes: 'LocalHost:4270' })))?.writes).toBe('localhost:4270')
+    expect(manageRecord(pageWith(JSON.stringify({ lineage: 'b' })))?.writes).toBeNull()
   })
 
   it('names the way back to the website', () => {

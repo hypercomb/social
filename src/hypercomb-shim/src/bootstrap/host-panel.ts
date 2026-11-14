@@ -30,6 +30,7 @@ import { readZoneOwners } from './showcase-record'
 import { branchView } from './branch-view'
 import { readMinimized } from './minimized'
 import { beesOnDisk, MANAGE_LEAVE_HREF, manageRecord, siteDoorZone, type ManageRecord } from './manage-record'
+import { showManagedKey } from './managed-key'
 import { readFromZone, readVerified } from './branch-files'
 import { addOffering, addPublicCreation, clearPendingSelection, listActiveOfferings,
   listActivePublicCreations, listAdoptions, listPendingSelections, stagePendingSelection, stagePendingCreation,
@@ -649,6 +650,10 @@ class HostPanelElement extends HTMLElement {
     // first visit it installs the host's package and goes straight to the card.
     const managed = manageRecord()
     if (managed) {
+      // THE PAGE'S OWN KEY (managed-key.ts): the invite this page was opened
+      // with, or the one line that gets one, in a corner of its own — it stays
+      // when this card gives the page to the package's surfaces.
+      void showManagedKey(managed)
       // Warm takes both: bees on disk (a visitor's look writes the stamp from a
       // hive that lived only in memory) AND a package stamped as installed (an
       // install that stopped partway leaves bees and no stamp — only a finished

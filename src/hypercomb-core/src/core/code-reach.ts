@@ -31,8 +31,15 @@ export const CODE_REACH_LABELS: Readonly<Record<CodeReach, string>> = {
   disguise: 'disguised code',
 }
 
+// The network includes the hive's own ways OUT to the community (jwize,
+// 2026-11-13: "AI can't publish on the community but it can make changes"):
+// a drafted module that names the publish port, the signed index or the
+// device's key is held for the owner like any fetch — on a managed site door
+// the model may change anything, but sharing is the owner's tap.
+const COMMUNITY_OUT = /\bManagedPublish\b|\bpublishRoot\b|hive:indexes|keys:binding|\bdeviceSigner\b|\bdevice-key\b|\.publish(?:Hide|Branch|Root|Index)?\s*\(/
+
 const PATTERNS: Readonly<Record<CodeReach, RegExp>> = {
-  network: /\bfetch\s*\(|\bXMLHttpRequest\b|\bWebSocket\b|\bEventSource\b|\bsendBeacon\b|\bRTCPeerConnection\b|\bimportScripts\s*\(|\bnew\s+(?:Shared)?Worker\s*\(/,
+  network: new RegExp(/\bfetch\s*\(|\bXMLHttpRequest\b|\bWebSocket\b|\bEventSource\b|\bsendBeacon\b|\bRTCPeerConnection\b|\bimportScripts\s*\(|\bnew\s+(?:Shared)?Worker\s*\(/.source + '|' + COMMUNITY_OUT.source),
   storage: /\blocalStorage\b|\bsessionStorage\b|\bindexedDB\b|\bnavigator\s*\.\s*storage\b|\bgetDirectory\s*\(|\bcaches\s*\.|\bdocument\s*\.\s*cookie\b|\bremoveEntry\s*\(|\bcreateWritable\s*\(/,
   secrets: /secret|private[_-]?key|\bnsec|api[_-]?key|password|\bcrypto\s*\.\s*subtle\b|\bsignEvent\b|\bfinalizeEvent\b|\bnavigator\s*\.\s*(?:clipboard|credentials)\b/i,
   eval: /\beval\s*\(|\bFunction\s*\(|\bimport\s*\(\s*(?!['"`][^'"`$]*['"`]\s*\))|\bset(?:Timeout|Interval)\s*\(\s*['"`]|\bcreateContextualFragment\b|\bsrcdoc\b/,
