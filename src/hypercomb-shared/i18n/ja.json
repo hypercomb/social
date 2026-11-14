@@ -3828,6 +3828,8 @@
   "hosts.light.behind-unknown": "{name} はオンですが、新しいバージョンがあります",
   "hosts.manage": "{name} を管理",
   "hosts.blocked": "先に {name} をオンにしてください",
+  "hosts.way-back": "{name} には戻り道（{words}）が含まれているため、オンのままです",
+  "hosts.way-back-reading": "{name} の中身を読み取っています…",
   "hosts.update-all": "すべて更新",
   "hosts.update-one": "{name} の更新を取り込む",
   "hosts.update-newest": "{name} を最新に更新",
