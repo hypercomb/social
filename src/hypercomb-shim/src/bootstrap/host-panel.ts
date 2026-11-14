@@ -21,7 +21,7 @@ import { askHostPackages } from '@hypercomb/runtime/host-packages'
 import { acquire, installPackage, installedPackageSig, type HostPackage, type InstallOutcome, type InstallPhase } from './replicate'
 import { frontDoorOf, readWelcome, type FrontDoor, type Welcome, type WelcomeLink } from './welcome'
 import { pictureOrigins, tilePicture } from './tile-picture'
-import { SHOWCASE_STYLE, doorOrigin, matchesDomain, readLedger, readPeerLedger, rootZones, searchTerms, showcase,
+import { SHOWCASE_STYLE, doorOrigin, matchesDomain, readLedger, readLedgerAt, readPeerLedger, rootZones, searchTerms, showcase,
   type LedgerSite } from './showcase'
 import { ownerBridge } from './owner-bridge'
 import { allowInvite, captureDeviceInvite, dropInvite, heldInvite } from './device-invite'
@@ -726,6 +726,7 @@ class HostPanelElement extends HTMLElement {
         readShared: zone => Promise.all([zone === (this.#self || location.host) ? readOfferings(zone).catch(() => []) : Promise.resolve([]),
           readPublicCreations(zone).catch(() => [])]).then(([offers, creations]) => ({ offers, creations })),
         readOwners: readZoneOwners,
+        readLedgerAt,
         // The hive beside this page signs when there is one; else this browser's own key, when it took its
         // owner's invite (device-owner.ts) — a phone, where no hive runs.
         owner: eitherOwner(ownerBridge(), deviceOwner(this.#self || location.host)),
