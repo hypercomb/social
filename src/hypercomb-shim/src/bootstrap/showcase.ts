@@ -451,6 +451,17 @@ export const readPeerLedger = async (zone: string): Promise<LedgerSite[]> => {
   } catch { return [] }
 }
 
+/** The ledger one of this domain's own sites serves. Asked only where the domain itself holds no index and that
+ *  site does (showcase-record.ts readZoneOwners `from`): the home relay at an apex keeps its own, older list. */
+export const readLedgerAt = async (host: string): Promise<LedgerSite[]> => {
+  try {
+    const response = await fetch(`${doorOrigin(host)}/publications.json`, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
+    if (!response.ok || !(response.headers.get('content-type') ?? '').toLowerCase().includes('json')) return []
+    const body = await response.text()
+    return body.length > 1_000_000 ? [] : parseLedger(JSON.parse(body))
+  } catch { return [] }
+}
+
 /** Read the ledger this origin serves, or nothing where it serves none. A host
  *  with an SPA fallback answers 200 with HTML, so the type is checked first. */
 export const readLedger = async (): Promise<LedgerSite[]> => {
@@ -562,8 +573,12 @@ export type ShowcaseOptions = {
   /** The hive this page was opened from, when it was — where an owner's Off is handed. */
   readonly home?: string
   /** What this domain's owners sign — their showcase and their doors
-   *  (showcase-record.ts readZoneOwners) — read after every ledger read. */
-  readonly readOwners?: (zone: string, owners: readonly string[]) => Promise<ZoneOwners>
+   *  (showcase-record.ts readZoneOwners) — read after every ledger read. `sites` is every address the ledger names:
+   *  the read keeps only the ones under this domain, and asks them where the domain itself holds no index. */
+  readonly readOwners?: (zone: string, owners: readonly string[], sites?: readonly string[]) => Promise<ZoneOwners>
+  /** The ledger one of this domain's own sites serves (readLedgerAt), for the owners read's `from`. Only the names
+   *  under this domain are taken from it; every other site, and who the owners are, stay as this domain said. */
+  readonly readLedgerAt?: (host: string) => Promise<readonly LedgerSite[]>
   /** The platform's own doors — the tour, the app, the minimal host, the
    *  downloads, the extensions — drawn as tiles in this domain's row. They are
    *  pages deployed somewhere, reached by a link (jwize 2026-10-25: "everything
@@ -2163,7 +2178,7 @@ ${entry.key}`
       const owners = found.find(site => site.hosts[0] === options.self)?.owners ?? []
       // A domain whose ledger names no owner has nothing signed to read: that is nothing published, not a failed read.
       ownerless = owners.length === 0
-      const owned = options.readOwners?.(options.self, owners)
+      const owned = options.readOwners?.(options.self, owners, found.flatMap(site => site.hosts))
       if (owned) {
         void owned.catch((): ZoneOwners | null => null).then(found => {
           if (read !== reads) return
@@ -2172,6 +2187,20 @@ ${entry.key}`
           if (!found?.reached && signed?.reached) { paint(); return }
           signed = found ?? { showcase: null, doors: new Map(), reached: false, unreadable: false }
           paint()
+          // THE ZONE'S RECORDS LIVE ON ITS SITES (jwize 2026-11-13: "make sure our minimal version is able to get
+          // information from the subdomain"): where the owners' index was read from a site because this domain
+          // holds none, that site's ledger names this domain's sites as they are now — the apex's own list carried
+          // older heads, so a tile whose door was open still did not show. Only names under this domain are taken.
+          const from = found?.from
+          if (!from || !options.readLedgerAt) return
+          void options.readLedgerAt(from).catch((): readonly LedgerSite[] => []).then(theirs => {
+            if (read !== reads) return
+            const under = (site: LedgerSite): boolean => site.hosts.some(host => host !== options.self && matchesDomain(host, options.self))
+            const own = theirs.filter(under)
+            if (!own.length) return
+            sites = [...sites.filter(site => !under(site)), ...own]
+            paint()
+          })
         })
       }
       paint()

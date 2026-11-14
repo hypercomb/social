@@ -452,6 +452,49 @@ describe('opening what a signature names', () => {
     expect(await reader.codeNaming('rooms')).toEqual([])
     expect(await reader.codeNaming('id')).toEqual([])
   })
+
+  // jwize, 2026-11-13: "The ai needs full ability to get at all the information in the core of the
+  // architecture ... If it can't understand how hypercomb works ... then we are not done." The package
+  // carries the platform's own source as knowledge atoms (scripts/knowledge-atoms.ts); this holds that the
+  // reads a model already has reach them, with nothing new in the reader.
+  it('finds and opens the platform’s own source, as written, through the reads a model already has', async () => {
+    const { knowledgeAtomText } = await import('../../scripts/knowledge-atoms')
+    const atom = knowledgeAtomText('@hypercomb/source/core', '// lazy — an atom', 'the source of hypercomb-core as written', [
+      { path: 'src/hypercomb-core/core/ioc.ts', text: ['/** One registry, asked by key. */', 'export type Registry = Map<string, unknown>',
+        'export const lookup = (key: string) => registry.get(key)', ''].join('\n') },
+      { path: 'src/hypercomb-core/core/effect-bus.ts', text: ['// Late subscribers receive the last value.', 'export class EffectBus {}', ''].join('\n') },
+    ])
+    const atomSig = sig(16)
+    const aliases = globalThis as { __hypercombAliasMap?: unknown }
+    const before = aliases.__hypercombAliasMap
+    aliases.__hypercombAliasMap = new Map([['@hypercomb/source/core', atomSig]])
+    try {
+      const reader = readerWith({
+        getResource: vi.fn(async () => null),
+        getBeeBytes: vi.fn(async () => null),
+        getDependencyBytes: vi.fn(async (requested: string) => requested === atomSig ? new TextEncoder().encode(atom) : null),
+      })
+      // `code source` names it, with the signature a read opens.
+      const listed = await reader.listCode('source')
+      expect(listed.ok && listed.entries).toEqual([{ name: '@hypercomb/source/core', sig: atomSig, of: 'dependency' }])
+      // A word finds the line and the file it sits in; a file's own path finds the file.
+      const found = await reader.listCode('late subscribers')
+      expect(found.ok && found.hits?.[0]).toMatchObject({ sig: atomSig, section: 'src/hypercomb-core/core/effect-bus.ts' })
+      const byPath = await reader.listCode('ioc.ts')
+      expect(byPath.ok && byPath.hits?.[0]).toMatchObject({ section: 'src/hypercomb-core/core/ioc.ts', at: 0 })
+      // Opened whole it lists its files; opened by file it is that file alone, types and comments kept.
+      const whole = await reader.readBytesBySig(atomSig)
+      expect(whole.ok && whole.sections?.map(section => section.path)).toEqual(['src/hypercomb-core/core/ioc.ts', 'src/hypercomb-core/core/effect-bus.ts'])
+      const file = await reader.readBytesBySig(atomSig, { section: 'src/hypercomb-core/core/ioc.ts' })
+      expect(file).toMatchObject({ ok: true, of: 'dependency', section: 'src/hypercomb-core/core/ioc.ts' })
+      expect(file.ok && file.text).toContain('export type Registry = Map<string, unknown>')
+      expect(file.ok && file.text).toContain('One registry, asked by key.')
+      expect(file.ok && file.text).not.toContain('EffectBus')
+    } finally {
+      if (before === undefined) delete aliases.__hypercombAliasMap
+      else aliases.__hypercombAliasMap = before
+    }
+  })
 })
 
 describe('signatures are the lookup keys', () => {

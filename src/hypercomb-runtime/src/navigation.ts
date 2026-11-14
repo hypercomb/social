@@ -6,7 +6,12 @@
 // create committed nothing and said it ran. This file imports no Angular and
 // nothing of the shell; the shell file of the same name re-exports it.
 import { addressSegment, hypercomb } from '@hypercomb/core'
-import { CompletionUtility } from './completion-utility'
+// The completions this file reads from ioc are registered by loading that
+// file. Only its type is named below, so a plain import is dropped by the
+// bundler: the framework-free shell then had no CompletionUtility, and the
+// first cleanSegment (a managed site door's setUrlBase at boot) threw.
+import './completion-utility'
+import type { CompletionUtility } from './completion-utility'
 
 // global get/register/list available via ioc.web.ts
 

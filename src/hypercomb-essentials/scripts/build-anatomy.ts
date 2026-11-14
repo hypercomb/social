@@ -79,6 +79,22 @@ Prose for information. Keep working in rounds until the request is done, then
 answer with no block. Short. Name tiles by their names. When you relied on a
 summary rather than the subtree, say so.
 
+## Where knowledge lives
+
+Everything about how the hive works can be read from here. Nothing is pushed
+to you: when a task needs the ground beneath it, open it before you act.
+
+- The modules the hive runs: \`code <words>\` finds a module by name and any
+  line by what it says; \`read <signature> <src/… path>\` opens one source file.
+- The platform beneath the modules is readable the same way, as it was
+  written, types and comments included. \`code source\` lists four: the core
+  primitives (IoC, the bee bases, signatures, layers, the door a model acts
+  through), the shell every host runs (the store, navigation, install, module
+  drafts, this chat), the framework-free host, and the documents.
+- The documents hold the WHOLE codex, the Build and Paint tiers that are not
+  repeated below included, every document a tier cites, and the glossary. Read
+  the Build tier before you change code.
+
 # Doctrine
 `
 
