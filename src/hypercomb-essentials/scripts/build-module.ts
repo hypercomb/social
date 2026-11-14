@@ -21,6 +21,7 @@ import { createHash } from 'node:crypto'
 import { builtinModules } from 'node:module'
 import { TRANSFER_PACKS_MEANING, encodeTransferPack, gzipBytes } from '../../hypercomb-runtime/src/transfer-pack.js'
 import { hostPackagesPool, poolAddress } from './pool-address.js'
+import { knowledgeAtoms } from './knowledge-atoms.js'
 import { buildInputsDigest, buildScriptPaths, byCodeUnit, fileContentSig, inputsMoved, sortedNames, writeBuildStamp } from './build-determinism.js'
 import { effectSleeper, passiveQueen, viewSleeper } from './passive-queen.js'
 import { fileURLToPath } from 'url'
@@ -643,8 +644,8 @@ const BUILD_SCRIPTS_SIG = createHash('sha256')
   .update(readFileSync(join(__dirname, 'passive-queen.ts')))
   .update(readFileSync(join(__dirname, 'build-determinism.ts')))
   .update(readFileSync(join(__dirname, 'pool-address.ts')))
+  .update(readFileSync(join(__dirname, 'knowledge-atoms.ts')))
   .digest('hex')
-const BUILD_SHAPE = `atomized:${[...ATOMIZED_ROOTS].sort().join(',')}|vendor:${VENDOR_PACKAGES.join(',')}|scripts:${BUILD_SCRIPTS_SIG}`
 
 const isAtomizedRelPath = (relPath: string): boolean =>
   ATOMIZED_ROOTS.some(root => relPath === root || relPath.startsWith(`${root}/`))
@@ -659,6 +660,16 @@ const atomSpecifier = (relPath: string): string =>
  *  map, when a bee reaches it. Keep in step with `LAZY_MARKER` in
  *  hypercomb-runtime/src/dependency-loader.ts. */
 const LAZY_MARKER_LINE = '// lazy — an atom: it loads through the import map when something imports it'
+
+/** THE PLATFORM'S OWN SOURCE, READABLE (scripts/knowledge-atoms.ts): core, the
+ *  shell, the host and the doctrine's documents ride the package as lazy
+ *  dependencies nothing imports, so a model reads the ground the modules stand
+ *  on the way it reads the modules (`code`, then `read <signature> <src/…>`).
+ *  They are inputs like any other: a change to one of them is a new package,
+ *  so their signature is part of the build's shape. */
+const KNOWLEDGE_ATOMS = knowledgeAtoms(resolve(PROJECT_ROOT, '..'), LAZY_MARKER_LINE)
+const KNOWLEDGE_SIG = createHash('sha256').update(KNOWLEDGE_ATOMS.map(atom => atom.text).join('\n')).digest('hex')
+const BUILD_SHAPE = `atomized:${[...ATOMIZED_ROOTS].sort().join(',')}|vendor:${VENDOR_PACKAGES.join(',')}|scripts:${BUILD_SCRIPTS_SIG}|knowledge:${KNOWLEDGE_SIG}`
 
 /** The bee files under the atomized roots, filled once discovery has run. */
 const atomizedBees = new Set<string>()
@@ -1309,12 +1320,27 @@ const main = async (): Promise<void> => {
   }
   if (VENDOR_PACKAGES.length) console.log(`[build-module] vendor atoms: ${VENDOR_PACKAGES.join(', ')}`)
 
+  // --- KNOWLEDGE ATOMS: the platform's own source, for reading (KNOWLEDGE_ATOMS).
+  // Dependencies of the root like the vendor atoms, lazy and imported by nothing.
+  // They hold source text, so nothing below may read them as code: the class
+  // index skips them, or every class core declares would point at a comment.
+  const knowledgeSigs = new Set<string>()
+  for (const atom of KNOWLEDGE_ATOMS) {
+    const bytes = textToBytes(atom.text)
+    const sig = await SignatureService.sign(toArrayBuffer(bytes))
+    dependencyBytes.set(sig, bytes)
+    atomAliasBySig.set(sig, atom.alias)
+    knowledgeSigs.add(sig)
+  }
+  console.log(`[build-module] knowledge atoms: ${KNOWLEDGE_ATOMS.map(atom => `${atom.alias.split('/').pop()} ${atom.files} files, ${(atom.text.length / 1024).toFixed(0)} kB`).join(' · ')}`)
+
   const rootDependencies = uniqSorted(Array.from(dependencyBytes.keys()).map(jsFileName))
   const dependencySigs = Array.from(dependencyBytes.keys()).sort(byCodeUnit)
 
   // class-to-dep reverse index: scan each namespace bundle for exported class names
   const classToDepSig = new Map<string, string>()
   for (const [sig, bytes] of dependencyBytes) {
+    if (knowledgeSigs.has(sig)) continue
     const text = new TextDecoder().decode(bytes)
     for (const m of text.matchAll(/(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))/g)) {
       const name = m[1] || m[2]
