@@ -1691,13 +1691,20 @@ async function serveCreationLocation(request, env, host, location, member) {
  *  sigbag is the revision history; offering members are not root history. */
 async function offeredMembers(request, env) {
   const url = new URL(request.url)
-  const scoped = await bindingsEnv(env)
+  const unaddressed = await bindingsEnv(env)
+  const read = indexReader(unaddressed)
+  // A DOOR MAY BE ITS PUBLISHER'S OWN ADDRESS (zonePlaces), which outranks the
+  // label rule: meetups.<zone> signed as `work/meetups` opens on that branch,
+  // not on `meetups`. The offer names the lineage the door really opens on —
+  // the label's lineage has another head, and a reader that checks the door's
+  // marker against the signed index (host-offerings.ts) dropped the row.
+  const addresses = await allAddresses(unaddressed, read)
+  const scoped = withAddresses(unaddressed, addresses)
   // The card at host.<zone> (HOST_DOOR_LABEL) lists what its zone offers —
   // it is where the card lives once the apex opens on a creation.
   const named = resolveSite(scoped, url.hostname)
   const host = named.hostDoor ? named.zone : url.hostname.toLowerCase()
   const bindings = siteBindings(scoped)
-  const read = indexReader(scoped)
   const zones = wildcardZones(bindings)
   const portal = bindings[host]?.frontDoor === true || zones.includes(host)
   const offered = new Map()
@@ -1735,9 +1742,15 @@ async function offeredMembers(request, env) {
         if (resolved.implicit && resolved.site?.lineage === lineage) await add(door, resolved.site)
       }
     }
+    // The zone's own addresses: each is a door its publisher signed onto one
+    // branch, at any depth. The zone root's own address is the apex opening on
+    // a creation, which is the front door and not an offer of its own.
+    for (const [door, site] of addresses) {
+      if (door !== host && withinZone(door, host)) await add(door, site)
+    }
   } else if (!bindings[host]) {
     const resolved = resolveSite(scoped, host)
-    if (resolved.implicit && resolved.site) await add(host, resolved.site)
+    if ((resolved.implicit || resolved.address) && resolved.site) await add(host, resolved.site)
   }
   const publisher = selectedHostPublisher(scoped, host)
   if (publisher) {
@@ -2058,6 +2071,12 @@ function servesOrigin(env, hostname) {
 //     address" — 204 asked with `?held`, 404 without.
 async function originPoolListing(request, env, sig) {
   if (sig === await poolAddress(HOST_PACKAGES_MEANING)) return null
+  // THE OFFERING POOL IS A PROJECTION, never stored keys (offeredMembers): what
+  // the zone's publishers signed open here. The heap's listing of that address
+  // is empty, so the zone root — the one host a hive that references the
+  // domain asks — said it published nothing while every door under it listed
+  // itself. Its members were always the worker's (ORIGIN_OWNED_BY_WORKER).
+  if (sig === await poolAddress(HOST_OFFERINGS_MEANING)) return serveOfferingsPool(request, env)
   const mine = await servePoolListing(request, env, sig)
   if (mine.status === 200) return mine
   const theirs = await fetch(request)

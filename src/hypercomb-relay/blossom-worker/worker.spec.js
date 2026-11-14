@@ -5475,6 +5475,97 @@ test('an origin host answers a pool at its address from the heap, leaves an unli
   })
 })
 
+// THE OFFERING POOL AT THE ZONE ROOT (jwize 2026-11-13: "hypercomb.com has no
+// community items yet. I need to show the published items when I reference").
+// The offering pool is a projection of signed doors, never stored keys, so the
+// heap's listing of its address is empty — and the zone root, the one host a
+// hive asks when it references the domain, said it published nothing while
+// every door under it listed itself.
+test('an origin host lists what is published under it at the offering pool, as every door does', async () => {
+  const { env } = await originFixture()
+  const pool = await sha256Hex('host:offerings')
+  await withUpstream(originPage, async (asked) => {
+    const listing = await worker.fetch(new Request(`https://hypercomb.com/${pool}/`), env)
+    assert.equal(listing.status, 200)
+    assert.match(listing.headers.get('content-type'), /^text\/plain/)
+    assert.equal(listing.headers.get('cache-control'), 'no-store')
+    assert.equal(listing.headers.get('access-control-allow-origin'), '*')
+    const names = (await listing.text()).trim().split('\n')
+    const offers = await Promise.all(names.map(async (name) => {
+      const member = await worker.fetch(new Request(`https://hypercomb.com/${pool}/${name}`), env)
+      assert.equal(member.status, 200, name)
+      const bytes = await member.text()
+      assert.equal(await sha256Hex(bytes), name, 'a member is named by its own bytes')
+      return JSON.parse(bytes)
+    }))
+    assert.deepEqual(offers.map((offer) => `${offer.lineage} ${offer.route}`).sort(), [
+      'pluginthematrix https://pluginthematrix.hypercomb.com/',
+      'revolucion https://revolucion.hypercomb.com/',
+    ])
+    for (const offer of offers) {
+      assert.equal(offer.kind, 'host:offering')
+      assert.equal(offer.pubkey, pubkey)
+      assert.equal(offer.location, await sha256Hex(new URL(offer.route).hostname))
+    }
+    // The same members a door under the zone lists for itself.
+    const atDoor = await worker.fetch(new Request(`https://revolucion.hypercomb.com/${pool}/`), env)
+    assert.equal(atDoor.status, 200)
+    assert.ok(names.includes((await atDoor.text()).trim()))
+    assert.equal((await worker.fetch(new Request(`https://hypercomb.com/${pool}/`, { method: 'HEAD' }), env)).status, 200)
+    assert.deepEqual(asked, [], 'the offering pool never reaches the origin')
+  })
+})
+
+test('an origin host that opens nothing has no offering pool, and its page is never one', async () => {
+  // Signed before doors existed: on a domain that opens only explicit doors, nothing is open.
+  const { env } = await originFixture(await signedIndex({ pluginthematrix: head, revolucion: head }, 1_800_000_000, null))
+  env.SITE_BINDINGS = JSON.stringify({ ...ORIGIN_ZONE, 'hypercomb.com': { ...ORIGIN_ZONE['hypercomb.com'], explicitDoors: true } })
+  const pool = await sha256Hex('host:offerings')
+  await withUpstream(originPage, async (asked) => {
+    const listing = await worker.fetch(new Request(`https://hypercomb.com/${pool}/`), env)
+    assert.equal(listing.status, 404)
+    assert.doesNotMatch(await listing.text(), /origin/)
+    assert.deepEqual(asked, [], 'an empty offering pool is the worker\'s answer too')
+  })
+})
+
+// A DOOR THAT IS ITS PUBLISHER'S OWN ADDRESS opens on the branch the publisher
+// signed there, at any depth — never on the lineage its label would spell. The
+// offer used to name the label's lineage, whose head is another branch's, so a
+// reader checking the door's marker against the signed index dropped the row:
+// hyperdex.hypercomb.com and meetups.hypercomb.com were offered by nobody.
+test('a door at its publisher\'s own address is offered as the branch it opens on', async () => {
+  const nested = 'b'.repeat(64)
+  const event = await signedIndex({ hypercomb: head, meetups: head, 'work/meetups': nested, agenda: head },
+    1_800_000_000, undefined, undefined, { addresses: { 'meetups.hypercomb.com': 'work/meetups' } })
+  const { env } = await originFixture(event)
+  const pool = await sha256Hex('host:offerings')
+  const offersAt = async (host) => {
+    const listing = await worker.fetch(new Request(`https://${host}/${pool}/`), env)
+    assert.equal(listing.status, 200, host)
+    return Promise.all((await listing.text()).trim().split('\n').map(async (name) =>
+      (await worker.fetch(new Request(`https://${host}/${pool}/${name}`), env)).json()))
+  }
+  await withUpstream(originPage, async (asked) => {
+    const atRoot = await offersAt('hypercomb.com')
+    assert.deepEqual(atRoot.map((offer) => `${offer.lineage} ${offer.route}`).sort(), [
+      'agenda https://agenda.hypercomb.com/',
+      'work/meetups https://meetups.hypercomb.com/',
+    ])
+    const meetups = atRoot.find((offer) => offer.route === 'https://meetups.hypercomb.com/')
+    assert.equal(meetups.title, 'meetups')
+    assert.equal(meetups.location, await sha256Hex('meetups.hypercomb.com'))
+    // The door says the same of itself, and what it says is what it serves.
+    assert.deepEqual(await offersAt('meetups.hypercomb.com'), [meetups])
+    assert.equal((await doorMeta('https://meetups.hypercomb.com/', env)).status, 200)
+    const location = await sha256Hex('meetups.hypercomb.com')
+    const markers = (await (await worker.fetch(new Request(`https://meetups.hypercomb.com/content/${location}/`), env)).text()).trim().split('\n')
+    const marker = await (await worker.fetch(new Request(`https://meetups.hypercomb.com/content/${location}/${markers.at(-1)}`), env)).json()
+    assert.equal(marker.layer, nested, 'the door\'s newest marker is the head the offer\'s lineage signs')
+    assert.deepEqual(asked, [])
+  })
+})
+
 test('ORIGIN_HOSTS changes nothing on any other host, and only the deploy var makes an origin host', async () => {
   const packages = await sha256Hex('host:packages')
   const hosts = ['https://pluginthematrix.com', 'https://revolucion.pluginthematrix.com', 'https://susan.pluginthematrix.com',
