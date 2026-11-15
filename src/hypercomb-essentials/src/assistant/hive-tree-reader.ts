@@ -19,6 +19,7 @@ import { isPeerContentAt } from '../sharing/adopted-roots.js'
 import { MAX_RECORD_DEPTH } from '../search/hive-search.js'
 import { readExplore, type HypercombExploreRead } from './hive-explore-read.js'
 import { readPool, readPoolMember, type HypercombPoolRead } from './hive-pool-read.js'
+import { describePage, looksLikePage, pageBlocks, pagePartText } from '../files/page-parts.js'
 
 export const HIVE_TREE_READER_IOC_KEY = '@diamondcoreprocessor.com/HypercombHiveTreeReader'
 
@@ -1341,6 +1342,35 @@ export class HypercombHiveTreeReader {
       // within it; asked for the whole, the first page also names every
       // section, so the next read can be exact.
       const section = options.section ? sectionOf(whole, options.section) : null
+      // A PAGE IS READABLE BY PART (files/page-parts.ts). A website page that
+      // carries its styles, scripts and a whole library inline is too long
+      // for a model to hold: the business card is 998 KB, and three
+      // conversations ended reading it a page at a time (2026-11-15). Asked
+      // for the whole, a page longer than one read answers with its OUTLINE —
+      // each block, its size, the path that opens it — and `src/page/…` opens
+      // that part alone, `from` counting within it. A page that fits in one
+      // read, and any read that carries on from an offset, is its text as before.
+      const isPage = of === 'resource' && !section && looksLikePage(whole)
+      if (isPage && options.section) {
+        const part = pagePartText(whole, options.section)
+        if (part === undefined) return { ok: false, root, code: 'not-found' }
+        const page = part.slice(from, from + maxBytes)
+        const end = from + page.length
+        const more = end < part.length
+        return {
+          ok: true, root, sig, of, type: type || 'text/html', size: bytes.byteLength, from, text: page,
+          truncated: more, ...(more ? { next: end } : {}), section: options.section,
+        }
+      }
+      if (isPage && from === 0 && whole.length > maxBytes && pageBlocks(whole).length) {
+        const outline = describePage(whole, sig)
+        if (outline.text.length <= maxBytes) {
+          return {
+            ok: true, root, sig, of, type: type || 'text/html', size: bytes.byteLength, from: 0, text: outline.text,
+            truncated: false, sections: outline.sections.slice(0, 400),
+          }
+        }
+      }
       if (options.section && !section) return { ok: false, root, code: 'not-found' }
       const text = section ? whole.slice(section.from, section.to) : whole
       const page = text.slice(from, from + maxBytes)
