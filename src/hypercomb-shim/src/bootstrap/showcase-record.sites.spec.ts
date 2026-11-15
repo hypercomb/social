@@ -6,8 +6,8 @@
 // <name>.jwize.com is served from the store the index is written to. A
 // visitor at jwize.com was shown "Nothing is published here yet." These cases
 // hold the read that fixes it, and what it must never do: trust an address
-// outside the zone, take an index that does not verify, or stop believing an
-// apex that does answer.
+// outside the zone, or take an index that does not verify. Since 2026-11-14 a
+// site that answers decides over the apex (the relay serves a stray copy).
 //
 // The last case is LIVE and skipped unless HC_LIVE_ZONE and HC_LIVE_OWNER are
 // set. It only reads:
@@ -99,25 +99,41 @@ describe('readZoneOwners — an apex that holds no index', () => {
     expect(read.showcase).toBeNull()
   })
 
-  it('believes an apex that answers: its sites are not asked', async () => {
+  // 2026-11-14 (jwize: "when I update my community on my phone it doesn't stick"): the relay at the apex now answers
+  // with a stray copy of the index, one root and no showcase, and believing it hid everything signed at the store.
+  it('a site that answers decides over the apex: the relay\'s stray copy is not the visitors\' index', async () => {
     const indexes = await sha('hive:indexes')
     const apex = signedIndex({ v: 1, roots: {}, doors: { dylan: [ZONE] } })
     const other = signedIndex({ v: 1, roots: {}, doors: { 'business-card': [ZONE] } })
-    const asked = world({ [ZONE]: { [`/${indexes}/${owner}`]: apex }, [SITE]: { [`/${indexes}/${owner}`]: other } })
+    world({ [ZONE]: { [`/${indexes}/${owner}`]: apex }, [SITE]: { [`/${indexes}/${owner}`]: other } })
+    const read = await readZoneOwners(ZONE, [owner], [SITE])
+    expect([...read.doors.get(owner)!.keys()]).toEqual(['business-card'])
+    expect(read.from).toBe(SITE)
+  })
+
+  it('believes the apex when no site holds an index', async () => {
+    const indexes = await sha('hive:indexes')
+    const apex = signedIndex({ v: 1, roots: {}, doors: { dylan: [ZONE] } })
+    world({ [ZONE]: { [`/${indexes}/${owner}`]: apex }, [SITE]: {} })
     const read = await readZoneOwners(ZONE, [owner], [SITE])
     expect([...read.doors.get(owner)!.keys()]).toEqual(['dylan'])
     expect(read.from).toBeUndefined()
-    expect(asked.some(line => line.startsWith(SITE))).toBe(false)
   })
 
-  it('an apex that cannot be read is unknown, never answered by a site', async () => {
+  it('an apex that cannot be read is answered by a site whose index verifies', async () => {
     const indexes = await sha('hive:indexes')
     const other = signedIndex({ v: 1, roots: {}, doors: { 'business-card': [ZONE] } })
-    const asked = world({ [SITE]: { [`/${indexes}/${owner}`]: other } })   // the apex is down
+    world({ [SITE]: { [`/${indexes}/${owner}`]: other } })   // the apex is down
+    const read = await readZoneOwners(ZONE, [owner], [SITE])
+    expect(read.reached).toBe(true)
+    expect([...read.doors.get(owner)!.keys()]).toEqual(['business-card'])
+  })
+
+  it('nothing verified and the apex down is unknown', async () => {
+    world({ [SITE]: {} })   // the apex is down, the site holds none
     const read = await readZoneOwners(ZONE, [owner], [SITE])
     expect(read.reached).toBe(false)
     expect(read.doors.size).toBe(0)
-    expect(asked.some(line => line.startsWith(SITE))).toBe(false)
   })
 })
 

@@ -121,8 +121,24 @@ What you chose for a domain is one record:
   few names under the domain that its ledger lists; the first that answers with an index the owner signed is
   used, and its key list, showcase and live list are read from the same address. That site's ledger then names
   the sites under this domain as they are now (the relay's own list carried older heads). Nothing is trusted for
-  where it came from, only names under the domain are asked or taken, an apex that answers is always believed,
-  and an apex that cannot be read stays unknown (`readZoneOwners`, `zoneSites`, `readLedgerAt`).
+  where it came from, only names under the domain are asked or taken, a site that answers decides over the apex (below),
+  and an apex that cannot be read is answered by a site that verifies (`readZoneOwners`, `zoneSites`, `readLedgerAt`).
+- **The sites decide over the apex, and every key signs where they read** (jwize, 2026-11-14: "I need the device that
+  has a key to be able to update a shared community. Then either side if they have the key can add or remove items form
+  the published list"; "the community being published live is now the community list on all visitors"). The relay at
+  `jwize.com` began answering with a stray copy of the index (one root, no doors, no showcase), and believing it hid
+  everything signed at the store, while a phone and the hive each signed `showcase:jwize.com` beside the relay, where
+  the sites never read it (and, before 2026-11-14, where a relay restart dropped it). Now one rule holds on every side:
+  - **Readers** (`readZoneIndex`, shim `showcase-record.ts`) take the first of the zone's own sites that serves an index
+    the owner signed; the apex decides only when no site holds one. An apex that cannot be read is answered by a site
+    that verifies.
+  - **Writers** sign at a host that serves that very signed event: the zone itself when it does, else a host the key
+    writes to (pluginthematrix.com for `*.jwize.com`). The phone finds it among its binding's hosts and the zone roots
+    the ledger lists (`indexHomeFor`, `device-owner.ts`); the hive among the hosts it publishes to (`showcaseHome`,
+    essentials `sharing/showcase-record.ts`, used by `signShowcase` and `readSignedShowcase`). When no such host serves
+    the visitors' index nothing is signed: writing anywhere else would start a second index nobody reads.
+  - Both sides read the index fresh right before they sign; the phone's write also carries `['prev', <id>]`, so the host
+    refuses it when the index moved in between and the phone reads and signs again.
 - A domain with no record yet shows what its owners **published here**: the
   lineages whose signed doors name this domain, which is Publish's switch for it.
   A lineage with no doors is not shown, even where the worker would open it.
@@ -489,6 +505,13 @@ it is not. A tile is ON when it is published here (the owners' signed showcase) 
 community row; the community is the page you come back to — what is published here, and what this browser turned on in any
 domain it added. What this browser turned on is kept in `community:tiles` (`readCommunity` / `keepCommunity`) and signs nothing.
 
+**With the key the community is the published list (jwize 2026-11-14).** When a key of yours answers on the page (the
+hive beside it, or a phone that took its owner's invite), a tile from another domain's row going into your community is
+signed into the list every visitor reads, not kept only in this browser (this replaces the 2026-11-12 "add to my
+community not put in my showcase for the host" for a key holder; without a key it still holds). Picks this browser kept
+before a key answered are offered once in the foot bar, "Publish my community to every visitor (N)"; pressing it signs
+each one, and a tap anywhere else leaves them as they are. The offer is not made once you start choosing tile by tile.
+
 Who can do what:
 
 - **Without the key, on a phone**: a tap is the switch itself, at once, no question. It can turn on or off only this browser's
@@ -534,8 +557,10 @@ serves no `welcome.json`, so that page is unchanged.
 "These should only show on hypercomb.com, not on every host." The platform's own doors (the tour, the app, hosting,
 extensions, source, licensing) are tiles only where a host staged them as its front page — hypercomb.com. Every other host
 draws the platform links it did not stage as small buttons at the right end of the header ("instead of the default tile
-links put them in the header to the right as buttons"), the same on a phone as on a desktop; they keep the brand row up
-outside editing on their own. The switchable help tiles of 2026-11-10 and the "Start here" tile are retired.
+links put them in the header to the right as buttons"); they keep the brand row up outside editing on their own. **Not on a
+phone, and one quiet pill on a desktop** (jwize 2026-11-14: "the buttons shouldn't show on mobile. and the desktop view needs to
+be more slick"): at 720px and narrower they are gone, and so is the row they kept up, so the search sits at the top; wider, they
+are text links inside one rounded, translucent strip, the gold kept to their icons (`.hero-links`, `showcase.ts`). The switchable help tiles of 2026-11-10 and the "Start here" tile are retired.
 
 While the domain's own row holds nothing and no doors were staged, one phantom row sits under "Nothing is published here
 yet.": a small empty icon on the left and "your first creation" beside it, the full width of the row. It is the same row

@@ -256,11 +256,11 @@ export const readOwnerIndex = async (zone: string, owner: string): Promise<{ eve
   return content && typeof content === 'object' && !Array.isArray(content) ? { event, content: content as Record<string, unknown> } : null
 }
 
-/** The record a showcase atom at `sig` on this zone holds, or null when it cannot be fetched, verified
- *  or understood. */
-export const readShowcaseAtom = async (zone: string, sig: string): Promise<ShowcaseRecord | null> => {
+/** The record a showcase atom at `sig` on `host` holds for `zone` (the host itself unless the zone's index
+ *  lives elsewhere), or null when it cannot be fetched, verified or understood. */
+export const readShowcaseAtom = async (host: string, sig: string, zone: string = host): Promise<ShowcaseRecord | null> => {
   if (!SIG.test(sig)) return null
-  const value = await verified(zoneOrigin(zone), sig, 262_144)
+  const value = await verified(zoneOrigin(host), sig, 262_144)
   return value ? parseShowcase(value, zone) : null
 }
 
@@ -327,6 +327,31 @@ export const zoneSites = (zone: string, hosts: readonly string[]): string[] => {
 }
 
 /**
+ * ONE OWNER'S INDEX FOR A ZONE, WHERE ITS READERS READ IT (jwize 2026-11-14: "when I update my community on my
+ * phone it doesn't stick and it doesn't get data from the other side either"). A zone's apex and its sites can be
+ * different machines: jwize.com is the home relay, while every <name>.jwize.com reads the store the index is
+ * published to. The relay also answers with an index of its own, a stray copy a write through it once started
+ * (one root, no doors, no showcase), and believing it hid every showcase signed at the store, while every toggle
+ * signed at the relay was lost to the store's readers (and, before 2026-11-14, to the relay's own restarts).
+ *
+ * So the zone's own sites decide: the first site under the zone that answers with an index the owner signed is
+ * the owner's index here. Only when no site holds one is the apex asked to decide. `at` is the host it was read
+ * from. A writer signs where the same event is served (device-owner.ts indexHomeFor), so readers and writers
+ * meet on one index. 'missing' when every host answers it holds none; null when nothing verified and at least
+ * one host could not be read.
+ */
+export const readZoneIndex = async (
+  zone: string, owner: string, sites: readonly string[] = [],
+): Promise<{ read: { event: Record<string, unknown>; content: Record<string, unknown> }; at: string } | 'missing' | null> => {
+  const elsewhere = zoneSites(zone, sites)
+  const [apex, ...under] = await Promise.all([zone, ...elsewhere].map(host => readOwnerIndex(host, owner).catch(() => null)))
+  for (const [i, there] of under.entries()) if (there && there !== 'missing') return { read: there, at: elsewhere[i]! }
+  if (apex && apex !== 'missing') return { read: apex, at: zone }
+  if (apex === null || under.some(there => there === null)) return null
+  return 'missing'
+}
+
+/**
  * What the zone's owners sign now — the primary owner first — read from the
  * zone itself and checked here: each index by its signature, the showcase by
  * its name. The first owner who NAMES a showcase decides it: if that one cannot
@@ -339,13 +364,12 @@ export const zoneSites = (zone: string, hosts: readonly string[]): string[] => {
  * different machines: jwize.com is the home relay, which keeps no index by
  * design, while every <name>.jwize.com is served from the store the index is
  * written to. A visitor at jwize.com was told "Nothing is published here yet."
- * So an owner whose index the apex says it does not hold is asked for at the
- * zone's own sites (`sites`, names under the zone from its ledger), and the
- * first that answers with an index that verifies is that owner's: its key
- * list, its showcase and its live list are read from the same address. Nothing
- * is trusted for where it came from: the index is the owner's by its
- * signature, the showcase by its name. A site that holds none, or cannot be
- * read, leaves the owner as it was: one who has signed nothing here.
+ * So each owner's index is read where readZoneIndex finds it: the zone's own
+ * sites (`sites`, names under the zone from its ledger) first, the apex only
+ * when no site holds one (2026-11-14: the relay's stray copy hid the store's).
+ * Its key list, its showcase and its live list are read from the same address.
+ * Nothing is trusted for where it came from: the index is the owner's by its
+ * signature, the showcase by its name.
  */
 export const readZoneOwners = async (zone: string, owners: readonly string[], sites: readonly string[] = []): Promise<ZoneOwners> => {
   const doors = new Map<string, ReadonlyMap<string, readonly string[]>>()
@@ -360,23 +384,14 @@ export const readZoneOwners = async (zone: string, owners: readonly string[], si
   let decided = false
   const listed = owners.filter(key => SIG.test(key)).slice(0, 8)
   if (!ZONE.test(zone) && !LOOPBACK.test(zone)) return { showcase, doors, reached: false, unreadable }
-  const elsewhere = zoneSites(zone, sites)
   let from: string | undefined
   for (const pubkey of listed) {
-    let origin = zoneOrigin(zone)
-    let read = await readOwnerIndex(zone, pubkey)
-    if (read === 'missing') {
-      for (const site of elsewhere) {
-        const there = await readOwnerIndex(site, pubkey)
-        if (!there || there === 'missing') continue
-        read = there
-        origin = zoneOrigin(site)
-        from ??= site
-        break
-      }
-    }
-    if (read === 'missing') continue
-    if (!read) { failed = true; continue }
+    const found = await readZoneIndex(zone, pubkey, sites)
+    if (found === 'missing') continue
+    if (!found) { failed = true; continue }
+    const { read } = found
+    const origin = zoneOrigin(found.at)
+    if (found.at !== zone) from ??= found.at
     const content = read.content as { roots?: Record<string, unknown>; doors?: Record<string, unknown> }
     const opened = new Map<string, readonly string[]>()
     for (const [lineage, listed] of Object.entries(content?.doors ?? {})) {

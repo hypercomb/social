@@ -23,7 +23,7 @@ import { putKeyChain, readKeyChain } from './device-invite'
 import { deviceSigner, type DeviceSigner } from './device-key'
 import type { OwnerBridge, OwnerResult, OwnerToggle, OwnerView } from './owner-bridge'
 import {
-  parseView, readOwnerIndex, readShowcaseAtom, showcaseBytes, showcaseKey, showcasesItem, toggleShowcaseItem, zoneOrigin,
+  parseView, readOwnerIndex, readShowcaseAtom, readZoneIndex, showcaseBytes, showcaseKey, showcasesItem, toggleShowcaseItem, zoneOrigin,
   type ShowcaseItem, type ShowcaseRecord,
 } from './showcase-record'
 
@@ -207,18 +207,55 @@ const viewChange = (request: OwnerView): Change => (current, open) => {
   return next ? { ...rest, view: next } : rest
 }
 
-/** One read-change-sign of the anchor's showcase on the zone. 'stale' when the host holds a newer index
- *  than the one read: read again. */
-const attempt = async (zone: string, change: Change, anchor: string, signer: DeviceSigner, live?: OwnerToggle): Promise<Attempt> => {
-  const read = await readOwnerIndex(zone, anchor)
-  if (!read) return { ok: false, reason: `could not read your index on ${zone}` }
+/** The bare domains among a ledger's addresses: zone roots, the only hosts that take writes (a site door is
+ *  read-only). */
+const zoneRoots = (hosts: readonly string[]): string[] =>
+  hosts.map(host => String(host ?? '').toLowerCase()).filter(host => /^[a-z0-9-]+\.[a-z0-9-]+$/.test(host))
+
+/** How many hosts are asked whether they serve the index the zone's readers read. */
+const WRITERS_MAX = 8
+
+/**
+ * WHERE THIS ZONE'S SHOWCASE IS SIGNED (jwize 2026-11-14: "either side if they have the key can add or remove
+ * items from the published list"). The index the zone's readers read (showcase-record.ts readZoneIndex: its
+ * sites first, the apex only when none holds one) decides, and the write goes to a host that serves that very
+ * signed event: the zone itself when it does, else one of `writers` (the hosts the key's binding names, then the
+ * zone roots its ledger lists: pluginthematrix.com for *.jwize.com, whose apex is the owner's own relay). The
+ * hive signs at the same home (essentials sharing/showcase-record.ts showcaseHome), so a phone and a desktop
+ * write one record; this write's `prev` tag makes the host refuse it when the index moved since it was read.
+ *
+ * The zone when no host holds an index yet (the first one is started there); `{ split }` when the readers' index
+ * is served by no host that takes writes (nothing is written then: a write elsewhere would start a second index
+ * the readers never see); null when the readers' index could not be read.
+ */
+export const indexHomeFor = async (
+  zone: string, anchor: string, sites: readonly string[], writers: readonly string[],
+): Promise<string | { split: string } | null> => {
+  const found = await readZoneIndex(zone, anchor, sites)
+  if (found === null) return null
+  if (found === 'missing' || found.at === zone) return zone
+  const id = String(found.read.event['id'] ?? '')
+  const asked = [...new Set([zone, ...writers.map(host => String(host ?? '').toLowerCase())])]
+    .filter(host => host && host !== found.at).slice(0, WRITERS_MAX)
+  for (const host of asked) {
+    const there = await readOwnerIndex(host, anchor).catch(() => null)
+    if (there && there !== 'missing' && String(there.event['id'] ?? '') === id) return host
+  }
+  return { split: found.at }
+}
+
+/** One read-change-sign of the anchor's showcase for the zone, at `home` (indexHomeFor). 'stale' when the host
+ *  holds a newer index than the one read: read again. */
+const attempt = async (home: string, zone: string, change: Change, anchor: string, signer: DeviceSigner, live?: OwnerToggle): Promise<Attempt> => {
+  const read = await readOwnerIndex(home, anchor)
+  if (!read) return { ok: false, reason: `could not read your index on ${home}` }
   const content: Record<string, unknown> = read === 'missing' ? { v: HIVE_LINK_VERSION, roots: {} } : read.content
   const roots = content['roots'] && typeof content['roots'] === 'object' ? content['roots'] as Record<string, string> : {}
   const key = showcaseKey(zone)
   const named = String(roots[key] ?? '').toLowerCase()
   let current: ShowcaseRecord | null = null
   if (SIG.test(named)) {
-    current = await readShowcaseAtom(zone, named)
+    current = await readShowcaseAtom(home, named, zone)
     if (!current) return { ok: false, reason: 'could not read the showcase' }
   }
   const next = change(current, () => openOn(zone, anchor, content))
@@ -226,17 +263,17 @@ const attempt = async (zone: string, change: Change, anchor: string, signer: Dev
   // One of the anchor's own creations going live is optimized first, and named in the same index write.
   const extra: Record<string, string> = {}
   if (live?.on && live.pubkey === anchor) {
-    const promoted = await promoteHere(zone, live.lineage, roots, anchor, signer)
+    const promoted = await promoteHere(home, live.lineage, roots, anchor, signer)
     if (!promoted.ok) return { ok: false, reason: promoted.reason }
     if (promoted.record) extra[promotedPointer(live.lineage)] = promoted.record
   }
   const bytes = showcaseBytes(next)
   const sig = await sha(bytes)
-  const refused = await uploadAtom(zone, bytes, sig, anchor, signer)
+  const refused = await uploadAtom(home, bytes, sig, anchor, signer)
   if (refused) return { ok: false, reason: refused }
 
   const before = read === 'missing' ? null : read.event
-  const put = await putIndex(zone, anchor, signIndex(signer, anchor, before, { ...content, roots: { ...roots, ...extra, [key]: sig } }), signer)
+  const put = await putIndex(home, anchor, signIndex(signer, anchor, before, { ...content, roots: { ...roots, ...extra, [key]: sig } }), signer)
   if (put === 'stale') return 'stale'
   if (put) return { ok: false, reason: put }
   return { ok: true, changed: true }
@@ -245,6 +282,8 @@ const attempt = async (zone: string, change: Change, anchor: string, signer: Dev
 export type DeviceOwnerDeps = {
   readonly signer?: () => DeviceSigner | null
   readonly binding?: () => Promise<DeviceBinding | null>
+  /** Every address the zone's ledger names (its sites, and the zone roots that may take its writes). */
+  readonly sites?: () => Promise<readonly string[]>
 }
 
 /** The bridge answered by this browser's own key, for one zone. Hello answers '' — this browser is a
@@ -252,23 +291,31 @@ export type DeviceOwnerDeps = {
 export const deviceOwner = (zone: string, deps: DeviceOwnerDeps = {}): OwnerBridge => {
   const signerOf = deps.signer ?? (() => deviceSigner(false))
   const bindingOf = deps.binding ?? readDeviceBinding
-  let ready: Promise<{ signer: DeviceSigner; anchor: string } | null> | null = null
+  const sitesOf = deps.sites ?? (async (): Promise<readonly string[]> => [])
+  let ready: Promise<{ signer: DeviceSigner; anchor: string; home: string } | null> | null = null
+  /** Why no key of this browser's answers here, for a toggle that asks anyway. */
+  let why = 'this browser is not on your key list here'
   const ensure = () => ready ??= (async () => {
     const signer = signerOf()
     if (!signer) return null
     const binding = await bindingOf()
     if (!binding) return null
-    return await carryChain(zone, binding, signer) ? { signer, anchor: binding.anchor } : null
+    const sites = await sitesOf().catch((): readonly string[] => [])
+    const home = await indexHomeFor(zone, binding.anchor, sites, [...binding.sources, ...zoneRoots(sites)])
+    if (!home) { why = `could not read your index for ${zone}`; return null }
+    if (typeof home !== 'string') { why = `no host that takes your writes serves the index visitors read at ${home.split}`; return null }
+    if (!await carryChain(home, binding, signer)) { why = `${home} does not hold your key list with this browser on it`; return null }
+    return { signer, anchor: binding.anchor, home }
   })().catch(() => null)
   let lane: Promise<unknown> = Promise.resolve()
   // One at a time: each is a read-change-sign of the same record.
   const act = (valid: boolean, change: Change, live?: OwnerToggle): Promise<OwnerResult> => {
     const run = lane.then(async (): Promise<OwnerResult> => {
       const held = await ensure()
-      if (!held) return { ok: false, reason: 'this browser is not on your key list here' }
+      if (!held) return { ok: false, reason: why }
       if (!valid) return { ok: false, reason: 'bad request' }
       for (let tries = 0; tries < 2; tries++) {
-        const result = await attempt(zone, change, held.anchor, held.signer, live).catch((): OwnerResult => ({ ok: false, reason: 'failed' }))
+        const result = await attempt(held.home, zone, change, held.anchor, held.signer, live).catch((): OwnerResult => ({ ok: false, reason: 'failed' }))
         if (result !== 'stale') return result
       }
       return { ok: false, reason: 'your index kept changing underneath; try again' }

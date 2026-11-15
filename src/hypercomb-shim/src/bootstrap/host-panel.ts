@@ -728,7 +728,11 @@ class HostPanelElement extends HTMLElement {
         readLedgerAt,
         // The hive beside this page signs when there is one; else this browser's own key, when it took its
         // owner's invite (device-owner.ts) — a phone, where no hive runs.
-        owner: eitherOwner(ownerBridge(), deviceOwner(this.#self || location.host)),
+        // It signs where this domain's visitors read the index (device-owner.ts indexHomeFor): the ledger names
+        // the domain's sites and the zone roots that take its writes.
+        owner: eitherOwner(ownerBridge(), deviceOwner(this.#self || location.host, {
+          sites: async () => (await (this.#ledger ?? readLedger())).flatMap(site => site.hosts),
+        })),
         readCommunity: readCommunityTiles,
         keepCommunity: keepCommunityTiles,
         onManage: on => { manage.hidden = !on },

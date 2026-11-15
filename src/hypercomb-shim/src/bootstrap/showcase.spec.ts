@@ -1622,7 +1622,7 @@ describe('a tap visits, a hold toggles', () => {
   }
   const namesIn = (row: HTMLElement): string[] => [...row.querySelectorAll('.hex-name')].map(name => name.textContent ?? '')
 
-  it('a tile toggles where it sits: a host tile is added to your community, your own is signed on or off, and it never leaves its row', async () => {
+  it('a tile toggles where it sits: with the key a host tile added to your community is signed into the list, your own is signed on or off, and it never leaves its row', async () => {
     const owner = bridge(a)
     const keepCommunity = vi.fn(async () => true)
     const { hero, bands } = showcase({
@@ -1664,12 +1664,13 @@ describe('a tap visits, a hold toggles', () => {
       expect(bar.hidden).toBe(true)
       expect(keepCommunity).not.toHaveBeenCalled()
       expect(owner.toggle).not.toHaveBeenCalled()
-      // Yes: into your community, not your showcase (jwize 2026-11-12) — nothing is signed. It lights where it sits.
+      // Yes: into your community, and with the key that is the list every visitor reads (jwize 2026-11-14: "the
+      // community being published live is now the community list on all visitors"). It lights where it sits.
       click(dylan)
       answer('Add dylan to my community')
       expect(bar.hidden).toBe(true)
       await vi.waitFor(() => expect(keepCommunity).toHaveBeenCalledTimes(1))
-      expect(owner.toggle).not.toHaveBeenCalled()
+      await vi.waitFor(() => expect(owner.toggle).toHaveBeenCalledWith(expect.objectContaining({ zone: 'hypercomb.com', lineage: 'dylan', on: true })))
       expect(namesIn(rowNamed(bands, 'jwize.com')!)).toContain('dylan')
       await vi.waitFor(() => expect(dylan.classList.contains('off')).toBe(false))
       expect(dylan.getAttribute('aria-pressed')).toBe('true')

@@ -18,7 +18,10 @@ import { EffectBus, SignatureService, isReservedPoolWord, moleculeKey } from '@h
 /** Said once a showcase is signed: what is public may have changed
  *  (branch-public.drone.ts asks again). */
 export const SHOWCASE_SIGNED_EFFECT = 'showcase:signed'
-import { ownHiveRoot, setHiveRoot } from './hive-pointer.js'
+import { fetchHiveIndex, ownHiveRoot, setHiveRoot } from './hive-pointer.js'
+import { publisherKeyHex } from './key-list.client.js'
+import { listPublishRecords } from './publish-heads.js'
+import { listCommunityHosts } from './community-hosts.js'
 
 const get = <T,>(key: string): T | undefined => (window as any).ioc?.get?.(key) as T | undefined
 
@@ -248,17 +251,77 @@ type HostSyncLike = {
     Promise<{ ok: true } | { ok: false; error: string }>
 }
 
-/** Send the showcase to its domain and name it in the signed index as
+const bareHost = (raw: unknown): string =>
+  String(raw ?? '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')
+
+/** How many of a zone's own sites are asked for the index, and how many writers whether they serve it. */
+const HOME_SITES_MAX = 3
+const HOME_WRITERS_MAX = 8
+
+/** The zone's own sites, from the ledger it serves: names under the zone, the first few. */
+const zoneSitesOf = async (zone: string): Promise<string[]> => {
+  try {
+    const response = await fetch(`https://${zone}/publications.json`, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
+    if (!response.ok || !(response.headers.get('content-type') ?? '').toLowerCase().includes('json')) return []
+    const ledger = await response.json() as { sites?: { host?: unknown; hosts?: { host?: unknown }[] }[] }
+    const under = `.${zone}`
+    const found: string[] = []
+    for (const site of Array.isArray(ledger?.sites) ? ledger.sites : []) {
+      for (const host of [site?.host, ...(Array.isArray(site?.hosts) ? site.hosts.map(row => row?.host) : [])].map(bareHost)) {
+        if (ZONE.test(host) && host.endsWith(under) && !found.includes(host)) found.push(host)
+        if (found.length === HOME_SITES_MAX) return found
+      }
+    }
+    return found
+  } catch { return [] }
+}
+
+/**
+ * WHERE A ZONE'S SHOWCASE IS SIGNED AND READ (jwize 2026-11-14: "I need the device that has a key to be able to
+ * update a shared community ... either side if they have the key can add or remove items"). A zone's apex and its
+ * sites can be different machines: jwize.com is the owner's home relay, while every <name>.jwize.com reads the
+ * store written at pluginthematrix.com. The relay answers with an index of its own (a stray copy), so a showcase
+ * signed at the zone itself landed where the visitors' index never named it, and a phone signing beside it wrote a
+ * different record again.
+ *
+ * The visitors decide (the shim's readZoneIndex reads the same way): when one of the zone's own sites serves this
+ * key's index, the showcase is signed at a host that serves that very event: the zone when it does, else a host
+ * this key publishes to. When no site holds an index the zone itself is the home, as before. Null when the
+ * visitors' index is served by no host this key writes to: nothing is signed then, because writing anywhere else
+ * would start a second index nobody reads.
+ */
+export async function showcaseHome(zone: string): Promise<string | null> {
+  const pubkey = String(await publisherKeyHex().catch(() => '')).toLowerCase()
+  if (!SIG.test(pubkey)) return zone
+  let seen: string | null = null
+  for (const site of await zoneSitesOf(zone)) {
+    const read = await fetchHiveIndex(site, pubkey)
+    if (read.ok) { seen = read.manifest.eventId ?? ''; break }
+  }
+  if (seen === null) return zone
+  const writers: string[] = [zone]
+  try { for (const entry of await listPublishRecords()) if (entry.record.pubkey === pubkey) writers.push(bareHost(entry.record.host)) } catch { /* no ledger */ }
+  try { writers.push(...(await listCommunityHosts()).map(bareHost)) } catch { /* no pool */ }
+  for (const host of [...new Set(writers)].filter(host => ZONE.test(host)).slice(0, HOME_WRITERS_MAX)) {
+    const read = await fetchHiveIndex(host, pubkey)
+    if (read.ok && (read.manifest.eventId ?? '') === seen) return host
+  }
+  return null
+}
+
+/** Send the showcase to where its domain's visitors read it (showcaseHome) and name it in the signed index as
  *  `showcase:<zone>` — what the front door reads. */
 export async function signShowcase(showcase: Showcase): Promise<{ ok: true; sig: string } | { ok: false; reason: string }> {
   if (!ZONE.test(showcase.zone)) return { ok: false, reason: 'not a domain' }
+  const home = await showcaseHome(showcase.zone)
+  if (!home) return { ok: false, reason: `no host you publish to serves the index visitors read for ${showcase.zone}` }
   const bytes = showcaseBytes(showcase)
   const sig = await SignatureService.sign(bytes.slice().buffer as ArrayBuffer)
   const sync = get<HostSyncLike>('@diamondcoreprocessor.com/HostSyncService')
   if (!sync?.publishAtoms) return { ok: false, reason: 'host sync is not available here' }
-  const sent = await sync.publishAtoms(showcase.zone, [sig], async wanted => (wanted === sig ? bytes : null))
+  const sent = await sync.publishAtoms(home, [sig], async wanted => (wanted === sig ? bytes : null))
   if (!sent.ok) return { ok: false, reason: sent.error }
-  const stamped = await setHiveRoot(showcase.zone, showcaseKey(showcase.zone), sig)
+  const stamped = await setHiveRoot(home, showcaseKey(showcase.zone), sig)
   if (!stamped.ok) return { ok: false, reason: stamped.reason ?? 'the index refused it' }
   EffectBus.emitTransient(SHOWCASE_SIGNED_EFFECT, { zone: showcase.zone })
   return { ok: true, sig }
@@ -281,9 +344,11 @@ export const renameCommunity = (showcase: Showcase, key: string, raw: unknown): 
 /** The record this key already signed for the zone. Null when none is signed.
  *  Throws when a named record cannot be read: that is not an empty showcase. */
 export async function readSignedShowcase(zone: string): Promise<Showcase | null> {
-  const sig = await ownHiveRoot(zone, showcaseKey(zone))
+  const home = await showcaseHome(zone)
+  if (!home) throw new Error('could not read the showcase')
+  const sig = await ownHiveRoot(home, showcaseKey(zone))
   if (!sig) return null
-  const response = await fetch(`https://${zone}/${sig}`, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
+  const response = await fetch(`https://${home}/${sig}`, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
   if (!response.ok) throw new Error('could not read the showcase')
   const record = parseShowcase(await response.json(), zone)
   if (!record) throw new Error('could not read the showcase')

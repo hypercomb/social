@@ -665,11 +665,18 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   // JUST A SEARCH AND THE TILES (jwize 2026-11-10: "just a search and the tiles no informational header by default"):
   // the mark, the name, its sentence and the counts show only while editing, where they say which domain is being
   // edited. A room, when the owner hosts one, stays: it is a door, not information.
+  // NOT ON A PHONE (jwize 2026-11-14: "the buttons shouldn't show on mobile"): at the narrow width the header's links are
+  // gone, and with them the row they kept up outside editing.
+  const narrowHeader = ((): MediaQueryList | null => { try { return matchMedia('(max-width: 720px)') } catch { return null } })()
+  let brandOn = false
   const paintBrand = (on: boolean): void => {
+    brandOn = on
     for (const part of [mark, words, stats]) part.hidden = !on
     // The header's links are doors too: they keep the row up, alone at its right end, outside editing.
-    brand.hidden = !on && !options.swarm && headerLinks.length === 0
+    const links = headerLinks.length > 0 && !narrowHeader?.matches
+    brand.hidden = !on && !options.swarm && !links
   }
+  narrowHeader?.addEventListener?.('change', () => paintBrand(brandOn))
   // THE ROOM FIRST: a front page whose owner hosts a swarm says so before
   // anything else (room host <domain>). The link carries no words a reader
   // could copy down — the room and its secret travel sealed.
@@ -1133,8 +1140,12 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     closeConfirm()
     act?.()
   })
+  /** The one-press offer of what this browser kept (offerPicks) is made once, and never once you choose tile by tile. */
+  let picksOffered = false
   const openConfirm = (entry: Aggregate, from: HTMLElement, row: string): void => {
     closeConfirm()
+    // You are choosing tile by tile now: the one-press offer of what this browser kept is not made over it.
+    picksOffered = true
     const into = !isOn(entry)
     // A HOST'S TILE GOES INTO YOUR COMMUNITY, NOT YOUR SHOWCASE (jwize 2026-11-12: "add to my community not put in my
     // showcase for the host"). Yes in another domain's row is this browser's pick alone — nothing is signed; going live
@@ -1143,7 +1154,12 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     confirmBar.textContent = host
       ? (into ? `Add ${entry.title} to my community` : `Take ${entry.title} out of my community`)
       : (into ? `Put ${entry.title} in my showcase` : `Take ${entry.title} out of my showcase`)
-    confirming = () => { void (host && into ? pickTile(entry, row) : toggleTile(entry, row, into)) }
+    // WITH THE KEY THE COMMUNITY IS THE PUBLISHED LIST (jwize 2026-11-14: "the community being published live is now
+    // the community list on all visitors"; "either side if they have the key can add or remove items"). When a key of
+    // yours answers here, a host's tile going into your community is signed into the list every visitor reads; without
+    // one it stays this browser's pick, as above.
+    const signs = !!options.owner && !!ownerKey
+    confirming = () => { void (host && into && !signs ? pickTile(entry, row) : toggleTile(entry, row, into)) }
     confirmFrom = from
     from.classList.add('asking')
     confirmBar.hidden = false
@@ -1151,6 +1167,25 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     document.addEventListener('pointerdown', onConfirmAway, true)
   }
   bandsHost.append(confirmBar)
+  // WHAT THIS BROWSER KEPT GOES LIVE IN ONE PRESS (jwize 2026-11-14: "when I update my community on my phone it doesn't
+  // stick"). Picks made before a key of yours answered here were kept only in this browser. Once one answers and the
+  // owners' record is read, the foot bar offers them once: pressing it signs each into the list every visitor reads;
+  // a tap anywhere else, or Escape, leaves them as they are.
+  function offerPicks(): void {
+    if (picksOffered || !options.owner || !ownerKey || !signed?.reached || signed.unreadable || tapping || picking || !confirmBar.hidden) return
+    const known = new Map(bands().flatMap(band => band.open).map(found => [found.key, found] as const))
+    const waiting = picks.flatMap(pick => {
+      const entry = known.get(pick.key)
+      return entry && !showcased(entry) ? [{ entry, zone: pick.zone }] : []
+    })
+    if (!waiting.length) return
+    picksOffered = true
+    confirmBar.textContent = `Publish my community to every visitor (${waiting.length})`
+    confirming = () => { void (async () => { for (const row of waiting) if (!showcased(row.entry)) await tapTile(row.entry, row.zone) })() }
+    confirmBar.hidden = false
+    document.addEventListener('keydown', onConfirmKey, true)
+    document.addEventListener('pointerdown', onConfirmAway, true)
+  }
   /** Where a tap goes: this row's own place for the name, else its first. */
   const placeFor = (entry: Aggregate, row: string): Place => {
     for (const version of entry.versions) {
@@ -2082,6 +2117,7 @@ ${entry.key}`
       row.append(iconOf(icon), document.createTextNode(count(n, one, many)))
       stats.append(row)
     }
+    offerPicks()
   }
 
   /** Add a domain: asked of the host that keeps the list, then drawn as a row, open. */
@@ -2240,16 +2276,20 @@ export const SHOWCASE_STYLE = `
   box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--md-primary) 70%, transparent); }
 .hero-swarm:hover, .hero-swarm:focus-visible { filter: brightness(1.06); }
 .hero-swarm svg { width: 1.05rem; height: 1.05rem; }
-/* the platform's links: small outlined buttons at the right end of the brand row */
-.hero-links { flex: 0 1 auto; min-width: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .4rem; margin-left: auto; }
-.hero-link { display: inline-flex; align-items: center; gap: .4rem; padding: .35rem .7rem; border-radius: var(--hc-radius-control, 2px);
-  border: 1px solid color-mix(in srgb, var(--gold-2) 38%, var(--md-outline-variant)); color: var(--md-on-surface-var);
-  font: 500 .8rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); text-decoration: none; white-space: nowrap;
-  transition: color .2s, border-color .2s, background .2s; }
-.hero-link svg { flex: none; width: .95rem; height: .95rem; color: var(--gold-2); }
-.hero-link:hover, .hero-link:focus-visible { color: var(--md-on-surface-strong); border-color: var(--gold-2);
-  background: color-mix(in srgb, var(--gold-2) 10%, transparent); }
-.hero-link:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+/* the platform's links (jwize 2026-11-14: "the desktop view needs to be more slick"): one quiet segmented pill at the
+   right end of the brand row, text links inside it, the gold kept to the icons; never on a phone */
+.hero-links { flex: 0 1 auto; min-width: 0; display: flex; flex-wrap: nowrap; align-items: center; gap: .1rem; margin-left: auto;
+  padding: .2rem; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--md-on-surface) 9%, transparent);
+  background: color-mix(in srgb, var(--md-surface-c-lowest) 55%, transparent);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.hero-link { display: inline-flex; align-items: center; gap: .38rem; padding: .32rem .75rem; border-radius: 999px;
+  color: var(--md-on-surface-var); font: 500 .78rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); letter-spacing: .01em;
+  text-decoration: none; white-space: nowrap; transition: color .18s, background .18s; }
+.hero-link svg { flex: none; width: .85rem; height: .85rem; color: var(--gold-2); opacity: .8; transition: opacity .18s; }
+.hero-link:hover, .hero-link:focus-visible { color: var(--md-on-surface-strong); background: color-mix(in srgb, var(--md-on-surface) 8%, transparent); }
+.hero-link:hover svg, .hero-link:focus-visible svg { opacity: 1; }
+.hero-link:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 1px; }
+@media (max-width: 720px) { .hero-links { display: none; } }
 /* the header: a small brand row, then the search across the full width. The
    brand takes at most 2.5 times the search's height, margins and all (jwize
    2026-10-24) — lean, never cramped. */
