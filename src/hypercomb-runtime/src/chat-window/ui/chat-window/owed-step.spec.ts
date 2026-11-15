@@ -217,6 +217,9 @@ describe('a page change that was only read', () => {
     expect(pageChangeStillOwed(ask, 'Done.', true, true, false)).toBeNull()
     expect(pageChangeStillOwed(ask, 'Done.', true, false, true)).toBeNull()
     expect(pageChangeStillOwed(ask, 'I will wait for your go-ahead.', true, false, false)).toBeNull()
+    // A question about the page is answered, never written (the managed card
+    // page, 2026-11-15: "update" and "page" are in the question).
+    expect(pageChangeStillOwed('How does the Update button on this page find out there is a newer package?', 'The scout checks after load.', true, false, false, true)).toBeNull()
     expect(pageChangeStillOwed('What does the page say?', 'Tidy Bench.', true, false, false)).toBeNull()
     expect(pageChangeStillOwed(ask, 'Here are the signatures.', false, false, false)).toBeNull()
   })

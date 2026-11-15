@@ -884,6 +884,23 @@ export function chatWindowTemplate(c: any): Child[] {
                           each(() => c.heldHere(), (__item: any, __i: number) => __item.id, (row: () => any, __index: () => number) => [
                               el("div", { class: "chat-held", role: "group" },
                                 attr("aria-label", () => t("chat.exec.sec")),
+                                // WHY IT WAITS, where the participant is looking: the
+                                // Execution column said it, the thread showed only the
+                                // command and two buttons (the managed card page, 2026-11-15).
+                                when([
+                                  [() => row().leaves, () => [
+                                    el("p", { class: "chat-exec-quiet" },
+                                      txt(() => str(t("chat.exec.leaves"))),
+                                    ),
+                                  ]],
+                                ]),
+                                when([
+                                  [() => row().foreign, () => [
+                                    el("p", { class: "chat-exec-quiet" },
+                                      txt(() => str(t("chat.exec.foreign"))),
+                                    ),
+                                  ]],
+                                ]),
                                 each(() => row().lines, (__item: any, __i: number) => __i, (line: () => any, __index: () => number) => [
                                     el("code", { class: "chat-exec-line" },
                                       attr("title", () => line()),

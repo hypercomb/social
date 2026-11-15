@@ -91,3 +91,30 @@ describe('a reply that ends on a promise', () => {
     expect(turnEnding('   \n\n  ')).toBeUndefined()
   })
 })
+
+// The managed card page, 2026-11-15: four turns of one conversation ended on a
+// promise nothing read, because a model writes a paragraph as ONE line and the
+// promise was looked for only where a line starts.
+describe('a promise inside the line', () => {
+  it('is read a clause at a time', () => {
+    expect(turnEnding("The undo didn't take, so I'll remove the tile directly. remove takes the tile off this page; its content and history survive, and the card returns to how it was."))
+      .toEqual({ kind: 'promise', step: 'remove the tile directly.' })
+    expect(turnEnding("You're right — I claimed changes before the hive reported them. Let me actually do it: read the card's current details this turn, then write."))
+      .toMatchObject({ kind: 'promise' })
+    expect(turnEnding('I need the current page content before I write — a page change is refused unless this turn has read that page, and the earlier receipt is not the page. Let me pull the card and its records now.'))
+      .toEqual({ kind: 'promise', step: 'pull the card and its records now.' })
+  })
+
+  it('reads a step announced as already under way', () => {
+    expect(turnEnding("Reading the card's current records first so I can write the change accurately.")).toMatchObject({ kind: 'promise' })
+    expect(turnEnding("Reading the card's current details again this turn before writing.")).toMatchObject({ kind: 'promise' })
+    // A finished account of reading is not a step under way.
+    expect(turnEnding('Reading the card took two reads; both are in the receipt.')).toBeUndefined()
+  })
+
+  it('still tells a wait on the participant, and a sign-off, from work', () => {
+    expect(turnEnding("The tile is foreign, so I'll wait for your go-ahead before removing it.")).toMatchObject({ kind: 'waiting' })
+    expect(turnEnding("Both notes are filed. I'll be here if you need more.")).toBeUndefined()
+    expect(turnEnding('The card now reads Owner. Let me know if the line should change again.')).toBeUndefined()
+  })
+})
