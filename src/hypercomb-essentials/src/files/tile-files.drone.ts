@@ -12,6 +12,11 @@
 //   card — the tile's business card: its details or its theme, each a JSON
 //          object its `card:data` record names (card-commit.ts).
 //
+// A PAGE IN PARTS (page-parts.ts): once a block of a page has been moved out
+// into a file of its own, the page is rebuilt from its shell and its parts.
+// A write of a part's file, or of the shell, rebuilds the page with it; a
+// write of the whole page is refused and names the files to change instead.
+//
 // ON A MANAGED SITE DOOR (the page carries <script id="hc-manage">) the hive
 // holds a replica of its owner's card and a change is made where it is: a
 // page written there is no trial — it is not staged anywhere, and the receipt
@@ -30,6 +35,7 @@ import { extOf } from './file-types.js'
 import { commitPageSig } from './page-commit.js'
 import { CARD_FIELD, cardJsonRefusal, cardRecordAt, commitCardSig, type CardPart } from './card-commit.js'
 import { rememberTrial, stageTrial, trialLabel, trialOrigin } from './try-page.js'
+import { partFilesOf, planPartRebuild } from './page-parts-commit.js'
 
 export const TILE_FILES_IOC_KEY = '@diamondcoreprocessor.com/TileFilesDrone'
 
@@ -171,6 +177,10 @@ export class TileFilesDrone extends Drone {
 
   async #writePage(segments: readonly string[], htmlSig: string, html: string): Promise<TileFileWrite> {
     const current = await this.resolve<SiteViewLike>('siteView')?.resolvePageSig?.(segments) ?? null
+    const parts = current && current !== htmlSig ? await partFilesOf(segments, current) : null
+    if (parts) {
+      return { ok: false, error: `this page is in parts, so it is not written whole: change one of its files (${parts.join(', ')}) and the hive rebuilds the page. read /${segments.join('/')} lists where each one is` }
+    }
     if (current === htmlSig) return { ok: true, tile: segments, sig: htmlSig, created: false, unchanged: true, ...this.#trial(segments) }
     const committed = await commitPageSig(segments, htmlSig)
     if (!committed.ok) return committed
@@ -200,8 +210,16 @@ export class TileFilesDrone extends Drone {
     if (same.length === 1 && same[0].record.payload.sig === payload.sig) {
       return { ok: true, tile: segments, sig: payload.sig, created: false, unchanged: true }
     }
+    // A PART OF A PAGE, OR ITS SHELL: the page is rebuilt with it, and a text
+    // the page could not be assembled from is refused before it is filed.
+    const rebuild = await planPartRebuild(segments, payload.name, same[same.length - 1]?.record.payload.sig, payload.sig)
+    if (rebuild && !rebuild.ok) return { ok: false, error: `${payload.name} was not written: ${rebuild.error}` }
     for (const prior of same) await removeDecorationAndWait({ sig: prior.sig, segments })
     await writeAttachment(segments, payload)
+    if (rebuild) {
+      const rebuilt = await rebuild.apply()
+      if (!rebuilt.ok) return { ok: false, error: `${payload.name} was written, but the page on /${rebuild.page.join('/')} was not rebuilt: ${rebuilt.error}` }
+    }
     return { ok: true, tile: segments, sig: payload.sig, created: !same.length, unchanged: false }
   }
 

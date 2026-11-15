@@ -348,6 +348,37 @@ describe('opening what a signature names', () => {
     expect(await reader.readBytesBySig(sig(8))).toMatchObject({ ok: false, code: 'not-found' })
   })
 
+  // The business card is a 998 KB page; three conversations ended reading it
+  // a page at a time (2026-11-15).
+  it('answers a page too long for one read with its outline, and opens one part alone', async () => {
+    const library = 'var zp=Object.defineProperty;'.repeat(200)
+    const page = `<!doctype html><html><head><style>.card{color:gold}</style></head><body><main></main><script type="text/plain" id="three-src">${library}</script><script>start()</script></body></html>`
+    const reader = readerWith({ getResource: vi.fn(async (s: string) => (s === sig(9) ? new Blob([page], { type: 'text/html' }) : null)) })
+
+    const whole = await reader.readBytesBySig(sig(9), { maxBytes: 2_000 })
+    expect(whole).toMatchObject({ ok: true, of: 'resource', from: 0, truncated: false })
+    expect(whole.ok && whole.text).toContain('This is its outline, not its text')
+    expect(whole.ok && whole.text).toContain('src/page/script-1.txt — <script type="text/plain" id="three-src">')
+    expect(whole.ok && whole.sections?.map(section => section.path)).toEqual([
+      'src/page/style-1.css', 'src/page/script-1.txt', 'src/page/script-2.js', 'src/page/markup.html',
+    ])
+
+    const part = await reader.readBytesBySig(sig(9), { maxBytes: 2_000, section: 'src/page/script-2.js' })
+    expect(part).toMatchObject({ ok: true, text: 'start()', truncated: false, section: 'src/page/script-2.js' })
+    const long = await reader.readBytesBySig(sig(9), { maxBytes: 2_000, section: 'src/page/script-1.txt' })
+    expect(long).toMatchObject({ ok: true, text: library.slice(0, 2_000), truncated: true, next: 2_000 })
+    const markup = await reader.readBytesBySig(sig(9), { maxBytes: 2_000, section: 'src/page/markup.html' })
+    expect(markup.ok && markup.text).toContain('<script type="text/plain" id="three-src"></script>')
+    expect(await reader.readBytesBySig(sig(9), { maxBytes: 2_000, section: 'src/page/script-7.js' })).toMatchObject({ ok: false, code: 'not-found' })
+
+    // A read that carries on from an offset is the page's own text, as before;
+    // so is a page that fits in one read.
+    expect(await reader.readBytesBySig(sig(9), { from: 100, maxBytes: 2_000 })).toMatchObject({ ok: true, text: page.slice(100, 2_100) })
+    const small = '<!doctype html><html><body><script>a()</script></body></html>'
+    const fits = readerWith({ getResource: vi.fn(async () => new Blob([small], { type: 'text/html' })) })
+    expect(await fits.readBytesBySig(sig(9), { maxBytes: 2_000 })).toMatchObject({ ok: true, text: small })
+  })
+
   it('lists the running code by name, filtered by a word', async () => {
     const reader = readerWith({ getResource: vi.fn(async () => null) }, [
       [PRELOADER, { actions: [{ signature: sig(9), name: 'history-service' }, { signature: sig(10), name: 'layer-committer' }] }],

@@ -74,6 +74,7 @@ await import('../sharing/community.queen.js')
 await import('../sharing/offers.queen.js')
 await import('./adopt.queen.js')
 await import('../assistant/take.queen.js')
+await import('../files/part.queen.js')
 
 type Declared = { reach?: string; scope?: string; refuse?: (args: string) => string | undefined }
 const census = (ioc.get('@diamondcoreprocessor.com/SlashBehaviourDrone') as {
@@ -188,6 +189,11 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
   take: ['additive', 'hive'],              // a published tile found by a read, folded onto a page of this
                                            // hive: hosts are asked for signatures as a read asks, nothing
                                            // is signed or published; a route reaches any page
+  // Judged on arrival (2026-11-15, a page in parts — the 1 MB business card no
+  // model could read or change).
+  part: ['editing', 'hive'],               // one block of a page becomes a file on a child tile and the
+                                           // page's tile keeps a shell; the page's bytes are proven
+                                           // unchanged, nothing is signed or published
 }
 
 describe('every machine declaration, as audited', () => {
