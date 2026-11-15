@@ -164,20 +164,51 @@ describe('need feeds — the servers feeding a need', () => {
     expect(indexReads).toBe(256)
   })
 
-  it('asks each zone once, at its root: its sites and its content face are not hosts of their own', async () => {
-    // Run live 2026-11-14: one contribution came back from 16 doors of the same
-    // worker store (protocol.hypercomb.com, susan.pluginthematrix.com, …).
-    const live = await world()
+  // ONE PER HOST, A SITE ONLY FOR WHAT IT ADDS (jwize, 2026-11-14). Run live
+  // that day: one contribution came back from 16 doors of the same worker
+  // store (protocol.hypercomb.com, susan.pluginthematrix.com, …).
+  const zoned = async (siteHolds: Record<string, string[]>) => {
+    const listKey = (await needListKey('recipes'))!
+    const listAddress = (await needListPoolAddress('recipes'))!
+    const record = (values: string[], n: number) => ({ sig: sig(0x500 + n), doc: { kind: 'need-list', name: 'recipes', values, at: 1 } })
+    const root = record(['soup', 'bread'], 0)
+    const own = Object.fromEntries(Object.entries(siteHolds).map(([host, values], n) => [host, record(values, n + 1)]))
+    const docs: Record<string, Record<string, unknown>> = { [root.sig]: root.doc, ...Object.fromEntries(Object.values(own).map(r => [r.sig, r.doc])) }
+    const heard: Feed[] = []
     const asked: string[] = []
-    const doors: FeedDeps = {
-      ...live,
-      hosts: () => ['protocol.hypercomb.com', 'hypercomb.com', 'content.hypercomb.com', 'susan.hypercomb.com',
-        'arkanoid.pluginthematrix.com', 'pluginthematrix.com', 'jwize.com', 'localhost:7777', 'solo.example.org'],
-      listing: async host => { asked.push(host); return { state: 'absent' } },
+    const deps: FeedDeps = {
+      hosts: () => ['protocol.hypercomb.com', 'hypercomb.com', 'content.hypercomb.com', 'susan.hypercomb.com', 'jwize.com', 'localhost:7777', 'solo.example.org'],
+      listing: async (host, address) => {
+        asked.push(host)
+        return address === listAddress && host.endsWith('hypercomb.com') ? { state: 'listed', text: ALICE } : { state: 'absent' }
+      },
+      // Every door of hypercomb.com answers its root's record unless it holds one of its own.
+      roots: async host => ({ [listKey]: (own[host] ?? root).sig }),
+      readJson: async s => docs[s] ?? null,
+      now: () => 0,
     }
-    const final = await feedNeed('recipes', () => {}, doors)
-    expect(final.map(f => f.host)).toEqual(['hypercomb.com', 'pluginthematrix.com', 'jwize.com', 'localhost:7777', 'solo.example.org'])
-    expect([...new Set(asked)].sort()).toEqual(['hypercomb.com', 'jwize.com', 'localhost:7777', 'pluginthematrix.com', 'solo.example.org'])
+    const final = await feedNeed('recipes', feed => heard.push(feed), deps)
+    return { final, heard, asked }
+  }
+
+  it('asks each zone at its root; a site that holds what its root holds is not a host of its own', async () => {
+    const { final, heard, asked } = await zoned({})
+    expect(final.map(f => f.host)).toEqual(['hypercomb.com', 'jwize.com', 'localhost:7777', 'solo.example.org'])
+    // A site is asked quietly: it never shows, not even while asking.
+    expect(heard.some(f => f.host.endsWith('.hypercomb.com'))).toBe(false)
+    // The content face is the zone itself, never asked as a door of its own.
+    expect(asked).not.toContain('content.hypercomb.com')
+    expect(asked).toContain('protocol.hypercomb.com')
+  })
+
+  it('a site that adds something shows, with only what it adds', async () => {
+    const { final, heard } = await zoned({ 'protocol.hypercomb.com': ['soup', 'pasta'] })
+    const site = final.find(f => f.host === 'protocol.hypercomb.com')!
+    expect(site.state).toBe('answered')
+    expect(site.values.map(v => v.text)).toEqual(['pasta'])
+    expect(heard.filter(f => f.host === 'protocol.hypercomb.com').map(f => f.state)).toEqual(['answered'])
+    expect(final.some(f => f.host === 'susan.hypercomb.com')).toBe(false)
+    expect(mergeFeeds(final).find(v => v.text === 'soup')!.hosts).toEqual(['hypercomb.com'])
   })
 
   it('a name with no molecule asks nothing and holds nothing', async () => {

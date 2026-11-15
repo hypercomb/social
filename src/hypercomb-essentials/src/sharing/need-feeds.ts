@@ -34,7 +34,7 @@ import { fetchHiveIndex } from './hive-pointer.js'
 import { needListKey, needListOf, needListPoolAddress } from './need-lists.js'
 import { picturesKey, picturesPoolAddress } from './picture-pools.js'
 import { askPoolListing, type PoolListing } from './pool-listing.js'
-import { writeDoorsOf } from './zone-door.js'
+import { zonesOf } from './zone-door.js'
 
 /** What one feeder said so far. `asking` until it answers; `answered` with
  *  values (possibly none read); `empty` = the host holds nothing for the
@@ -166,13 +166,13 @@ export async function feedNeed(
   deps: FeedDeps,
   options: FeedOptions = {},
 ): Promise<Feed[]> {
-  // ONE PER HOST (jwize, 2026-11-14: "subdomains should be ignored here — all
-  // files should come from the root"). A site under a zone (`protocol.
-  // hypercomb.com`, `susan.pluginthematrix.com`) and the retired `content.`
-  // face are doors onto the zone's one store: asked as hosts of their own,
-  // the same contribution came back from each, one dot per door. Folded the
-  // way writes fold (writeDoorsOf), so each zone is asked once, at its root.
-  const hosts = writeDoorsOf(deps.hosts())
+  // ONE PER HOST, A SITE ONLY FOR WHAT IT ADDS (zonesOf). A site under a zone
+  // (`protocol.hypercomb.com`, `susan.pluginthematrix.com`) is usually a door
+  // onto the zone's one store: shown as a host of its own, the same
+  // contribution came back from each, one dot per door. Roots are reported as
+  // they answer; a site is asked quietly and reported only once it and its
+  // root have answered, with only what the root lacks — or not at all.
+  const { roots, sites } = zonesOf(deps.hosts())
   const pools: PoolAsk[] = []
   const listKey = await needListKey(name)
   const listAddress = listKey ? await needListPoolAddress(name) : null
@@ -183,11 +183,11 @@ export async function feedNeed(
   const molecule = listKey ? listKey.slice(listKey.indexOf(':') + 1) : ''
   const fresh: FeedOptions = options.fresh ? { fresh: true } : {}
 
-  const ask = async (host: string): Promise<Feed> => {
+  const ask = async (host: string, quiet = false): Promise<Feed> => {
     const started = deps.now()
     const report = (state: FeedState, values: FeedValue[] = [], publishers = 0, tiles: FeedTile[] = []): Feed => {
       const feed: Feed = { host, state, values, publishers, ms: Math.max(0, deps.now() - started), ...(tiles.length ? { tiles } : {}) }
-      onFeed(feed)
+      if (!quiet) onFeed(feed)
       return feed
     }
     report('asking')
@@ -232,7 +232,29 @@ export async function feedNeed(
     if (timer !== undefined) clearTimeout(timer)
     return report('answered', slots.flat(), indexes.size, tileSlots.filter((tile): tile is FeedTile => tile !== null))
   }
-  return Promise.all(hosts.map(ask))
+  const rootAsks = new Map(roots.map(host => [host, ask(host)] as const))
+  const siteAsks = sites.map(async ({ host, root }) => {
+    const [own, under] = await Promise.all([ask(host, true), rootAsks.get(root)!])
+    const added = siteAdds(own, under)
+    if (added) onFeed(added)
+    return added
+  })
+  const [rooted, shown] = await Promise.all([Promise.all(rootAsks.values()), Promise.all(siteAsks)])
+  return [...rooted, ...shown.filter((feed): feed is Feed => feed !== null)]
+}
+
+/** What a site holds that its root does not, as the site's own feed — or
+ *  null when it adds nothing. A value is the same when the same publisher
+ *  gave the same text (folded); a tile is the same by its signature. */
+export const siteAdds = (site: Feed, root: Feed): Feed | null => {
+  if (site.state !== 'answered') return null
+  const held = new Set(root.values.map(value => `${value.by}\u0000${foldValue(value.text)}`))
+  const heldTiles = new Set((root.tiles ?? []).map(tile => tile.sig))
+  const values = site.values.filter(value => !held.has(`${value.by}\u0000${foldValue(value.text)}`))
+  const tiles = (site.tiles ?? []).filter(tile => !heldTiles.has(tile.sig))
+  if (!values.length && !tiles.length) return null
+  const publishers = new Set([...values.map(value => value.by), ...tiles.map(tile => tile.by)]).size
+  return { host: site.host, state: 'answered', values, publishers, ms: site.ms, ...(tiles.length ? { tiles } : {}) }
 }
 
 /** One value as the list shows it: the text once, with every host and

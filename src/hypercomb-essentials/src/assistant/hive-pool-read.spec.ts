@@ -43,6 +43,17 @@ describe('a pool of meaning, asked of the hosts', () => {
     expect(read.documents).toEqual([])
   })
 
+  it('keeps a site under its zone only for the members its zone does not list (2026-11-14)', async () => {
+    const listing = vi.fn(async (origin: string) => origin.includes('extra.') ? `${MEMBER}\n${OTHER}\n` : `${MEMBER}\n`)
+    const read = await readPool('host:offerings', {}, deps({
+      hosts: async () => ['a.example', 'same.a.example', 'extra.a.example', 'content.a.example'],
+      listing,
+    }))
+    if (!read.ok) throw new Error('unreachable')
+    expect(read.hosts).toEqual([{ host: 'a.example', state: 'listed' }, { host: 'extra.a.example', state: 'listed' }])
+    expect(read.members).toEqual([{ sig: MEMBER, hosts: ['a.example'] }, { sig: OTHER, hosts: ['extra.a.example'] }])
+  })
+
   it('tells a host with no pool from a host that did not answer', async () => {
     const read = await readPool('themes:card', {}, deps({
       listing: async origin => origin.includes('a.example') ? 'absent' : null,
