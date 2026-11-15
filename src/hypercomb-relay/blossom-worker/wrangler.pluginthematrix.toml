@@ -258,14 +258,16 @@ ORIGIN_HOSTS = "hypercomb.com"
 # uploads here. First rollout: deploy this code with "1" still in force, read
 # GET /grant from every publishing device (each must say active), list any
 # key it does not cover in HOST_FRIENDS, then deploy "0" to both scripts.
-# OPEN UNTIL IT IS ADOPTED (jwize, 2026-10-12: "let's leave it open until it is
-# adopted"): the guest list stays on. Set "0" to keep bytes for the host's
-# people only (operators, bound publishers, HOST_FRIENDS) — on BOTH scripts.
-AUTO_GRANT = "1"
+# CLOSED (jwize, 2026-11-14: "what stops someone from putting my host in their
+# collection and trying to upload stuff?" → close it). The 2026-10-12 "leave it
+# open until it is adopted" is over: a throwaway key no longer stores here.
+# Keep "0" on BOTH scripts.
+AUTO_GRANT = "0"
 # The friends this host is shared with — 64-hex pubkeys, comma separated
 # (public keys only; never a secret here). A redeploy per friend for now; a
-# self-service signed list comes later.
-HOST_FRIENDS = ""
+# self-service signed list comes later. Today: jwize's own keys, the same
+# three relay.js takes as --writers.
+HOST_FRIENDS = "3b94560cc3066e84ea952904f79ab81846822e7f8ffc95a732458b8d396ec7ae,fd2f10ba0f6046fba70bcb248724a08eb49e0c9515caf8ba7df9758433cf8cee,eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a"
 PEOPLE_QUOTA_BYTES = "1073741824"   # 1 GiB for each of the host's people per GRANT_TTL_DAYS window (a lapsed window refills)
 # The hosts whose WebSocket dials are a meeting point's (the bindings above),
 # on any path. Comma separated; a host must also be routed to this worker, and

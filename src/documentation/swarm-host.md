@@ -325,7 +325,9 @@ given.
   every room address since 2026-10-12 (`swarm-room-identity.md`); a sig
   listed before then names no room any more. `scripts/swarm-preflight.cjs`
   prints the sig for the relay it is pointed at. Listing rooms needs a relay
-  restart for each new room. jwize.com runs the bare form.
+  restart for each new room. jwize.com runs WRITERS ONLY since 2026-11-14
+  (jwize: the bare form let any throwaway key that sent one event store up
+  to 4 GB a day); open it for a meeting with `=<lifecycleSig>`, never bare.
 - "Live" means recently heard. The relay keeps an in-memory map from key to
   the time of its last verified EVENT and the zones it beaconed in. A restart
   empties it, and the reconnect beacon refills it within a second. The swarm
@@ -1425,7 +1427,9 @@ script of its own, no machine under either:
   three things at a meeting host through that host's service binding
   (`MEET_OPEN` or `MEET`): a WebSocket upgrade on any path, the NIP-11 answer
   at `/`, and `/.well-known/hc-meet/*`.
-  The bytes stay on that worker: `PUT /<sig>` → R2, under `AUTO_GRANT`. It now
+  The bytes stay on that worker: `PUT /<sig>` → R2, for the host's own people
+  only (`AUTO_GRANT "0"` since 2026-11-14 — a stranger gets 403 there, beacon
+  or not). It now
   answers `stored <sig>` for an atom it already holds too, so that is a
   receipt (above).
 - **The access code.** A dial carries it as the subprotocol

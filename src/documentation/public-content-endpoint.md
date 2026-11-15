@@ -147,15 +147,16 @@ never sent the bytes. A host that does not know the flag answers the read it
 looks like (`&held` keeps that miss quiet), which says nothing, and the
 upload goes and is answered as it always was.
 
-## Quota — the auto-grant guest list
+## Quota — the grant ledger
 
 KV namespace `GRANTS`, keyed by pubkey → `{ quotaBytes, usedBytes,
 expiresAt }`. Policy via env vars:
 
 | Var | Default | Meaning |
 |---|---|---|
-| `AUTO_GRANT` | `1` | first valid upload from an unknown pubkey mints a grant |
-| `DEFAULT_QUOTA_BYTES` | `104857600` (100 MB) | per auto-granted pubkey |
+| `AUTO_GRANT` | `0` | `1` mints a grant for an unknown pubkey's first valid upload; `0` (both deployed scripts since jwize 2026-11-14) keeps bytes for the host's people only — operators, bound publishers, `HOST_FRIENDS` |
+| `HOST_FRIENDS` | `""` | comma-separated pubkeys the host keeps bytes for at `PEOPLE_QUOTA_BYTES` (1 GiB per window) |
+| `DEFAULT_QUOTA_BYTES` | `104857600` (100 MB) | the guest ceiling: an auto-granted pubkey, or a grant still held by a key the host no longer lists |
 | `GRANT_TTL_DAYS` | `90` | grant lifetime |
 
 - Existing-object PUTs consume nothing (the bytes are already here).
