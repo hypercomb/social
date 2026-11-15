@@ -118,6 +118,41 @@ Code: `assistant/hive-explore-read.ts` (the read), `sharing/need-feeds.ts`
 checks and receipt), `withheld-reads.ts`, core `work-instruction.ts` (what the
 model is taught).
 
+### A model takes what it found
+
+**Built 2026-11-14.** A model could find a creation and read it, and then only
+look. `take` brings it in:
+
+```
+take <signature>               onto the page the participant is on
+take <signature> at /<route>   onto that page (`at /` is the first page)
+```
+
+The signature is one a read gave: a tile's `sig` from `explore`, a
+publication's head from `pool host:publications`, or a child that
+`read <signature>` listed. The tile it names arrives with every tile under it.
+
+- **One fold.** It is `SwarmAdoptDrone.adoptResolvedBranch`, the fold every
+  explicit adopt ends in: the branch is inspected, a tile that carries code is
+  refused whole, a tile of the same name already on the page keeps its own
+  values and gains only what it lacked, and the result is read back before it
+  is called taken.
+- **It stays in the hive.** What goes out is what a read of the same signature
+  sends: a request for it and the layers it names, to the hosts the hive
+  already asks. Nothing is signed and nothing is published. It is declared
+  `additive` at the `hive`, so a managed site door's chat may say it; sharing
+  what was taken is the participant's own act.
+- **The hand is the participant's.** A change that follows a pool or an
+  explore read is held for their Run, on every page. The word draws no dialog
+  and shows no count, so it brings 100 tiles at most; past that it refuses and
+  says to read into the tile and take a part.
+- **A take that did not happen throws**: a route that names no page, a
+  signature no host holds or only partly holds, a signature that names no
+  tile, a hive showing its history, code. The receipt never says ran for
+  nothing.
+
+Code: `assistant/take.queen.ts`.
+
 ### A session explores a name
 
 **Built 2026-11-13.** A development agent reaches the hive over the bridge,
