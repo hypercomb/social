@@ -25,3 +25,16 @@ export function managedRecordText(doc: Document | undefined = typeof document ==
   if (!doc.head || el.parentElement !== doc.head) return null
   return el.textContent
 }
+
+/** Is this page a managed site door: the worker's record, naming the site's
+ *  lineage. One answer for every module that behaves differently there. */
+export function isManagedSiteDoor(doc: Document | undefined = typeof document === 'undefined' ? undefined : document): boolean {
+  try {
+    const raw = managedRecordText(doc)
+    if (!raw) return false
+    const value = JSON.parse(raw) as Record<string, unknown>
+    return !!value && typeof value['lineage'] === 'string' && value['lineage'].trim().length > 0
+  } catch {
+    return false
+  }
+}
