@@ -33,6 +33,7 @@ import { hostsOfBranch, listCommunityHosts, listZoneBindings } from '../../shari
 import { hostOfferDeps } from '../../sharing/host-offer.js'
 import { zoneDoor } from '../../sharing/zone-door.js'
 import { isPublishedVisitorShell } from '../../sharing/behavior-enablement.js'
+import { isManagedSiteDoor } from '../../sharing/managed-record.js'
 import { isFeatureHiddenWithin } from '../../sharing/feature-hidden.js'
 import { openExternalLink } from './document-view-links.js'
 import { scopeCellPageCss } from './cell-page-css-scope.js'
@@ -756,6 +757,25 @@ export class SiteViewDrone extends Drone {
     // an in-flight mount could run foreign scripts AFTER a later reconcile
     // raised the review gate). Latest reconcile wins.
     const gen = ++this.#gen
+
+    // A MANAGED SITE DOOR SHOWS ITS CARD ITSELF (sharing/site-manage.view.ts):
+    // the owner's replica runs in that view's own frame, under its bar. This
+    // surface stands aside there. That page always stands on the site's own
+    // tile (shim manage-base.ts) and has no view mode to say "hexagons", so
+    // once the replica landed there this drone read the tile as a site to
+    // open: an adopted root, so the review gate rose over the owner's own
+    // card, and its button opens a panel that page does not have
+    // (2026-11-14). Nothing is mounted and nothing is gated: there is one card
+    // on that page, and it is the managed view's.
+    if (isManagedSiteDoor()) {
+      this.#removeExitOverlay()
+      this.#removeReviewGate()
+      const wasMounted = this.#mount !== null
+      this.#teardown()
+      this.#restoreHiveChrome(wasMounted)
+      return
+    }
+
     const lineage = this.resolve<any>('lineage')
     const store = this.resolve<any>('store')
     if (!lineage || !store?.hypercombRoot || !store?.getResource) return
@@ -863,7 +883,9 @@ export class SiteViewDrone extends Drone {
 
     // No page on this cell → tear down. Walking up to find an
     // ancestor's bundle is the legacy behavior; with per-cell pages
-    // every cell is responsible for its own surface.
+    // every cell is responsible for its own surface. The review gate stood
+    // over the page of the cell just left; with no page here it goes too.
+    this.#removeReviewGate()
     this.#teardown()
   }
 
