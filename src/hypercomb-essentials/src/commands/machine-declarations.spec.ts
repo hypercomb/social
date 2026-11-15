@@ -73,6 +73,7 @@ await import('../sharing/follow.queen.js')
 await import('../sharing/community.queen.js')
 await import('../sharing/offers.queen.js')
 await import('./adopt.queen.js')
+await import('../assistant/take.queen.js')
 
 type Declared = { reach?: string; scope?: string; refuse?: (args: string) => string | undefined }
 const census = (ioc.get('@diamondcoreprocessor.com/SlashBehaviourDrone') as {
@@ -184,6 +185,9 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
   offers: ['additive', 'local'],           // opens the offers window; placing is a press there
   adopt: ['additive', 'network'],          // a peer's tile into this hive (the click's own path);
                                            // `branch` asks the participant with the count
+  take: ['additive', 'hive'],              // a published tile found by a read, folded onto a page of this
+                                           // hive: hosts are asked for signatures as a read asks, nothing
+                                           // is signed or published; a route reaches any page
 }
 
 describe('every machine declaration, as audited', () => {
