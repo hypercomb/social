@@ -37,6 +37,7 @@ import { fetchWithDeadline, mapBounded, HOST_CONCURRENCY } from '../sharing/boun
 import { lensOrigin, listingMembers } from '../sharing/community-lens.js'
 import { networkHosts } from '../sharing/network-hosts.js'
 import { askPoolListing } from '../sharing/pool-listing.js'
+import { readDoorsOf, zonesOf } from '../sharing/zone-door.js'
 
 /** A pool a model may ask for: a colon meaning, lower case, no spaces. A bare
  *  word is a tile's name pool, which no host lists. */
@@ -213,7 +214,8 @@ export const readPool = async (
   let hosts: string[]
   try {
     address = await deps.address(meaning)
-    hosts = [...new Set((await deps.hosts()).map(host => String(host ?? '').trim().toLowerCase()).filter(Boolean))].sort()
+    // `content.<zone>` is the zone (readDoorsOf); asked once, with the rest.
+    hosts = readDoorsOf((await deps.hosts()).map(host => String(host ?? '').trim().toLowerCase()).filter(Boolean)).sort()
   } catch { return { ok: false, root, code: 'unavailable' } }
   if (!hosts.length) return { ok: false, root, code: 'no-hosts' }
 
@@ -232,7 +234,22 @@ export const readPool = async (
   })
   if (options.signal?.aborted) throw new DOMException('The Hypercomb pool read was stopped', 'AbortError')
 
-  const answers = said.map((answer, at): Said => answer ?? { host: hosts[at]!, state: 'silent' })
+  const asked = said.map((answer, at): Said => answer ?? { host: hosts[at]!, state: 'silent' })
+  // A SITE ONLY FOR WHAT IT ADDS (zone-door.ts zonesOf): a subdomain beside
+  // its zone's root is kept only with the members its root does not list, or
+  // a one-file index its root does not hold; otherwise it is not a host here.
+  const { sites } = zonesOf(hosts)
+  const zoneRootOf = new Map(sites.map(site => [site.host, site.root]))
+  const byHost = new Map(asked.map(answer => [answer.host, answer]))
+  const answers = asked.flatMap((answer): Said[] => {
+    const root = zoneRootOf.get(answer.host)
+    if (!root) return [answer]
+    const under = byHost.get(root)
+    if (answer.text !== undefined) return answer.text === under?.text ? [] : [answer]
+    const held = new Set(under?.members ?? [])
+    const added = (answer.members ?? []).filter(sig => !held.has(sig))
+    return added.length ? [{ host: answer.host, state: 'listed', members: added }] : []
+  })
   const bySig = new Map<string, string[]>()
   const byText = new Map<string, string[]>()
   for (const answer of answers) {

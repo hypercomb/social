@@ -326,6 +326,23 @@ A host's state folds both answers: **answered** if either pool answered a
 listing; otherwise **no answer** if either was silent; otherwise **holds
 nothing**.
 
+**One per host; a subdomain only for what it adds** (jwize, 2026-11-14:
+"subdomains should be ignored here — all files should come from the root";
+"they could override if you add something to the subdomain but shouldn't show
+otherwise"). Each host asked is a zone **root**, or a **site** under a root
+asked beside it (`protocol.hypercomb.com` beside `hypercomb.com`); a
+`content.<zone>` face is the zone, and a host with a port or on loopback is
+always a root (`zonesOf` in `zone-door.ts`). A root is asked and shown as it
+answers. A site is asked quietly and shown only once it and its root have
+answered, with only what the root does not hold (`siteAdds`: the same
+publisher's same value, or the same tile, is not added); a site that adds
+nothing is not shown at all. The worker answers every site of a zone from
+the zone's one store, so its sites never show; before this, one contribution
+came back once per door (22 servers, 16 of them one store). The models'
+`pool` read keeps a site the same way, for the members its root does not
+list. Different domains on one store (`hypercomb.com`, `pluginthematrix.com`)
+are still two hosts: a name alone cannot tell they are one.
+
 **The listing is membership only.** A host's listing says which keys named the
 entry. It is never believed on its own:
 

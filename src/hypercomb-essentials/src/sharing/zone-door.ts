@@ -133,6 +133,29 @@ export const writeDoorsOf = (doors: readonly unknown[]): string[] => {
   return out
 }
 
+/**
+ * ONE PER HOST, A SITE ONLY FOR WHAT IT ADDS — for READS across hosts
+ * (jwize, 2026-11-14: "subdomains should be ignored here — all files should
+ * come from the root"; "they could override if you add something to the
+ * subdomain but shouldn't show otherwise"). Each named host is a zone ROOT,
+ * or a SITE under a root named beside it (siteZoneOf). A root is always asked
+ * and shown. A site is asked too, and shown only with what its root does not
+ * hold; a site holding the same as its root, as every door onto one store
+ * does, is not a host of its own. A site whose root is not named is a root,
+ * and a ported or loopback host is always one. `content.<zone>` is the zone.
+ */
+export const zonesOf = (hosts: readonly unknown[]): { roots: string[]; sites: { host: string; root: string }[] } => {
+  const named = readDoorsOf(hosts)
+  const roots: string[] = []
+  const sites: { host: string; root: string }[] = []
+  for (const host of named) {
+    const root = siteZoneOf(host, named)
+    if (root === host) roots.push(host)
+    else sites.push({ host, root })
+  }
+  return { roots, sites }
+}
+
 /** `https://` for a real zone, `http://` for loopback. */
 export const originOf = (raw: unknown): string => {
   const bare = bareHost(raw)
