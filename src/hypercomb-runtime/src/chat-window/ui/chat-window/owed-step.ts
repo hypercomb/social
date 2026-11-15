@@ -11,7 +11,7 @@
 // The shell may not import essentials, so the record's shape is restated here
 // structurally; the bucket checks every field it reads back.
 
-import { turnEnding } from '@hypercomb/core'
+import { onlyAsks, turnEnding } from '@hypercomb/core'
 
 export type OwedState = 'continue' | 'waiting' | 'paused'
 
@@ -264,6 +264,8 @@ export const pageChangeStillOwed = (
 ): string | null => {
   if (!read || wrotePage || skipped) return null
   const ask = String(message ?? '')
+  // A question about the page is answered, never written (core onlyAsks).
+  if (onlyAsks(ask)) return null
   const asksChange = /\b(write|change|update|add|added|revise|revision)s?\b/i.test(ask)
   const aboutPage = /\b(page|pages|trial|build|builds|revision|revisions|html|website)\b/i.test(ask) || /\btry-/.test(ask)
     || (managed && /\b(card|cards|theme|details)\b/i.test(ask))

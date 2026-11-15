@@ -112,6 +112,7 @@ import {
   type AgentHandoverEvent, type AgentRoundEvent, type AgentSpent, type AgentStageEffect,
   AGENT_STEPS_IOC_KEY, shippedFoldStep, shippedFrontStep, shippedHandoverStep, shippedReceiptStep, shippedRouteStep, shippedStretchStep, shippedVerifyStep,
   isSandboxLabel,
+  turnEnding,
   EXTERNAL_ASK, EXTERNAL_ANSWER, type ExternalAsk, type ExternalAnswer,
   type AgentStepRegistry, type FrontDecisionLike, type HandoverStep, type VerifyDecisionLike, type WorkMessage,
 } from '@hypercomb/core'
@@ -169,7 +170,7 @@ import { managedPage } from '../../core/managed-page'
 import { isWordSwitchedOff, sayWordSwitchedOff } from '../features-viewer/behavior-enablement'
 import {
   blockRefusedMessage,
-  blockUnwrittenMessage, claimsUnranChange, unranChangeMessage,
+  blockUnwrittenMessage, claimsUnranChange, unranChangeMessage, leavesChangeUndone, undoneChangeMessage,
   doFailedMessage,
   type DoRollback,
   JevGone,
@@ -7571,6 +7572,7 @@ export class ChatWindow {
       let unwrittenSaid = false
       let unreadSaid = false
       let unranSaid = false
+      let undoneSaid = false
       let readsCut = false
       // A READ THE PARTICIPANT WROTE OUT (`find arkanoid` in a read block):
       // until something is read, what the model says is not shown. Asked to
@@ -8501,6 +8503,20 @@ export class ChatWindow {
           unranSaid = true
           messages.push({ role: 'assistant', content: roundText }, { role: 'user', content: unranChangeMessage(message) })
           EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'asked again: claimed a change nothing ran' })
+          continue
+        }
+        // TOLD TO CHANGE, AND THE TURN ENDS WITH NOTHING READ AND NOTHING RUN
+        // (core/work-instruction.ts leavesChangeUndone): "Put my role back to
+        // Owner" was answered "Reading the card's details again this turn
+        // before writing." and that was the turn, four times running on the
+        // managed card page (2026-11-15). The net under the promise readers:
+        // once per message, and never over a reply that declines, asks the
+        // participant, or waits on them.
+        if (!work.request && !lastRound && !undoneSaid && canRead && ran.length === 0 && readRounds === 0
+          && leavesChangeUndone(roundText, message) && turnEnding(roundText)?.kind !== 'waiting') {
+          undoneSaid = true
+          messages.push({ role: 'assistant', content: roundText }, { role: 'user', content: undoneChangeMessage(message) })
+          EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'asked again: a change was asked for and nothing was read or run' })
           continue
         }
         // AN ANSWER ABOUT TILES NOTHING READ (hypercomb-work-fence.ts

@@ -43,7 +43,7 @@ export type { WorkBudget } from '@hypercomb/core'
 // moved 2026-11-11 so a chat that is not Angular teaches the same lesson) —
 // re-exported here for the window and the specs that grew up on this module.
 export {
-  MAX_WORK_ROUNDS, tileFileLabel, writeHeaderOf, WorkRefused, isWorkRefusal, identityInstruction, workInstruction, CONTINUE_INSTRUCTION, HANDOFF_INSTRUCTION, readResultMessage, readSkippedMessage, doRanMessage, doSkippedMessage, doFailedMessage, pageChangeUnready, blockRefusedMessage, routesNamedIn, readsAskedIn, unreadClaimMessage, unreadAskedMessage, claimsUnranChange, unranChangeMessage, blockUnwrittenMessage, writeRanMessage, writeSkippedMessage, doctrineRanMessage, doctrineFailedMessage, writeFailedMessage, sandboxRule, managedRule, fileRanMessage, fileFailedMessage, JevGone, HELD_DO_NOTE, transcriptForModel,
+  MAX_WORK_ROUNDS, tileFileLabel, writeHeaderOf, WorkRefused, isWorkRefusal, identityInstruction, workInstruction, CONTINUE_INSTRUCTION, HANDOFF_INSTRUCTION, readResultMessage, readSkippedMessage, doRanMessage, doSkippedMessage, doFailedMessage, pageChangeUnready, blockRefusedMessage, routesNamedIn, readsAskedIn, unreadClaimMessage, unreadAskedMessage, claimsUnranChange, unranChangeMessage, onlyAsks, leavesChangeUndone, undoneChangeMessage, blockUnwrittenMessage, writeRanMessage, writeSkippedMessage, doctrineRanMessage, doctrineFailedMessage, writeFailedMessage, sandboxRule, managedRule, fileRanMessage, fileFailedMessage, JevGone, HELD_DO_NOTE, transcriptForModel,
 } from '@hypercomb/core'
 export type {
   WriteRequest, DoctrineWriteRequest, TileFileWriteRequest, WorkPowers, DoRollback, CardPart, ManagedSite, WriteBlockOptions,

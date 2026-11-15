@@ -357,6 +357,12 @@ const NAMED_IN_MARKUP = /<(?!\s*\/?\s*hypercomb-)[^<>\n]*\b(hypercomb-(?:read|do
  */
 const BARE_COMMAND = /^\s*\/[a-z][a-z-]*\s+\S/
 const BARE_COMMANDS_MIN = 2
+/** ...AND ONE ALONE, AS THE REPLY'S LAST LINE. "The cleanest way is one undo
+ *  step." and then `/undo` on a line of its own, nothing after it: the turn
+ *  ended answered and the tile stayed (the managed card page, 2026-11-15). A
+ *  sentence ABOUT a command carries it inside the sentence; a reply that
+ *  closes on the command itself, argument or none, meant it to run. */
+const CLOSING_COMMAND = /^\s*\/[a-z][a-z-]*(?:\s+\S.*)?$/
 /** A REPLY THAT IS ONLY A READ: `read 33618262568d src/…` and nothing else,
  *  answered and done with nothing read (the same session). The read words
  *  are written without a slash inside their block, so a whole reply of them
@@ -368,15 +374,61 @@ const BARE_READ = /^\s*\/?(?:read|tree|code)\s+\S/
  *  same session; an open item since 09-30). A brief reply whose last line
  *  announces the next step is that step's block, never written. */
 const PROMISE = /^(?:(?:ok(?:ay)?|first|now|next|then)[,:]?\s+)*(?:i(?:'|’)ll|i will|let me|i(?:'|’)m going to|i am going to)\s+(.+)$/i
-const READ_STEP = /\b(?:read|look|check|open|search|find|inspect|examine|review|list)\b/i
+const READ_STEP = /\b(?:read|look|check|open|search|find|inspect|examine|review|list|pull|fetch|verify)(?:ing)?\b|\bexamining\b/i
 const PROMISE_MAX = 400
 
 const promisedIn = (said: readonly string[]): string | undefined => {
   if (!said.length || said.join('\n').length > PROMISE_MAX) return undefined
-  const step = PROMISE.exec(said[said.length - 1])
+  const last = said[said.length - 1]
+  const step = PROMISE.exec(last)?.[1] ?? promisedWithin(said) ?? announcedIn(last)
   if (!step) return undefined
-  return READ_STEP.test(step[1]) ? 'hypercomb-read' : 'hypercomb-do'
+  return READ_STEP.test(step) ? 'hypercomb-read' : 'hypercomb-do'
 }
+
+/** THE PROMISE INSIDE THE LINE (the managed card page, 2026-11-15). Asked to
+ *  take a tile back off, a model answered in one line: "The undo didn't take,
+ *  so I'll remove the tile directly. remove takes the tile off this page." —
+ *  and, asked again, "You're right. Let me actually do it: read the card's
+ *  details this turn, then write." Each ended the turn with nothing read and
+ *  nothing run, four times in one conversation: the openers were only looked
+ *  for at the START of a line, and a model writes a paragraph as one line. A
+ *  line is read here a clause at a time. */
+const CLAUSE_BREAK = /(?<=[.!?;])\s+|(?<=:)\s+(?=(?:i(?:'|’)ll|i will|let me|i(?:'|’)m|i am|we(?:'|’)ll)\b)|\s+[—–]\s+|,\s+(?=(?:so|and|then|but)\s+(?:i|let|we)\b)/i
+const CLAUSE_LEAD = /^(?:so|and|then|but)\s+/i
+const clausesOf = (line: string): string[] =>
+  line.split(CLAUSE_BREAK).map(clause => clause.trim().replace(CLAUSE_LEAD, '')).filter(Boolean)
+
+/** "Reading the card's current records first so I can write the change." The
+ *  step is announced as already under way and nothing was sent (same session):
+ *  a reply that OPENS a clause this way and says first / now / again / before
+ *  is the block never written. */
+const UNDER_WAY = /^(?:re-?)?(?:reading|checking|looking|searching|opening|fetching|pulling|loading|verifying|inspecting|listing|writing|removing|taking|running|applying|updating|changing|restoring|undoing)\b.*\b(?:first|now|again|before|so (?:that )?i can|this turn)\b/i
+
+const stepOfClause = (clause: string): string | undefined => {
+  const said = PROMISE_OPENER.exec(clause) ?? AFTER_OPENER.exec(clause)
+  if (said) return said[1].trim()
+  return UNDER_WAY.test(clause) ? clause : undefined
+}
+
+/** The promised step in a short reply's closing clauses, or undefined. A wait
+ *  on the participant, a sign-off and a line that only introduces are none. */
+const promisedWithin = (said: readonly string[]): string | undefined => {
+  const clauses = said.slice(-ENDING_LINES).flatMap(clausesOf)
+  for (const clause of clauses.slice(-ENDING_CLAUSES).reverse()) {
+    const step = stepOfClause(clause)
+    if (!step) continue
+    if (ASKS_YOU.test(step) || WAITS_ON_YOU.test(clause)) return undefined
+    if (NOT_A_PROMISE.test(step)) continue
+    return step
+  }
+  return undefined
+}
+
+/** "Here it is again as the only action:" and then nothing. A short reply
+ *  with no block whose last line ends on a colon introduced a block it never
+ *  wrote. */
+const announcedIn = (last: string): string | undefined =>
+  /:\s*$/.test(last) ? last : undefined
 
 /** A FENCE OF NOTHING BUT COMMANDS, the fence untagged or called a shell.
  *  Asked to "go ahead and do those moves", a hive model answered with a fenced
@@ -421,7 +473,12 @@ const unwrittenIn = (lines: readonly string[]): string | undefined => {
     }
     if (BARE_COMMAND.test(line)) bare += 1
   }
-  return bare >= BARE_COMMANDS_MIN ? 'hypercomb-do' : undefined
+  if (bare >= BARE_COMMANDS_MIN) return 'hypercomb-do'
+  // Prose, then the command on its own line, outside any fence, with no full
+  // stop: a line that ends as a sentence is a sentence about a command.
+  const closing = said[said.length - 1]
+  return !fence && said.length > 1 && CLOSING_COMMAND.test(closing) && !/[.!?]$/.test(closing) && !FENCE_RE.test(closing)
+    ? 'hypercomb-do' : undefined
 }
 
 // ── A TURN THAT ENDS ON A PROMISE (documentation/conversation-continuity.md) ──
@@ -464,6 +521,9 @@ const WAITS_ON_YOU = new RegExp(
 )
 /** Closing lines read, bottom up, of the last paragraph. */
 const ENDING_LINES = 3
+/** Closing clauses read, bottom up, of those lines: a model writes a whole
+ *  paragraph as one line, and the promise is rarely its first words. */
+const ENDING_CLAUSES = 4
 
 export type TurnEnding =
   | { readonly kind: 'promise'; readonly step: string }
@@ -495,6 +555,17 @@ export const turnEnding = (prose: string): TurnEnding | undefined => {
     // A line that introduces what follows ("Let me summarize:") promises nothing.
     if (NOT_A_PROMISE.test(step) || /:\s*$/.test(step)) continue
     if (WAITS_ON_YOU.test(line)) return { kind: 'waiting', step }
+    return { kind: 'promise', step }
+  }
+  // THE PROMISE INSIDE THE LINE (promisedWithin): the same reading, a clause
+  // at a time, for a paragraph written as one line.
+  const clauses = paragraph.slice(-ENDING_LINES).flatMap(clausesOf)
+  for (const clause of clauses.slice(-ENDING_CLAUSES).reverse()) {
+    const step = stepOfClause(clause)
+    if (!step) continue
+    if (ASKS_YOU.test(step)) return undefined
+    if (NOT_A_PROMISE.test(step) || /:\s*$/.test(step)) continue
+    if (WAITS_ON_YOU.test(clause)) return { kind: 'waiting', step }
     return { kind: 'promise', step }
   }
   return undefined
