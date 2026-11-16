@@ -188,6 +188,37 @@ describe('a phone takes its owner\'s invite, then promotes from its own key', ()
     expect(zone.puts.length).toBe(puts)
   })
 
+  it('stages, then publishes (jwize 2026-11-15): staging changes only the staged list every device reads; publishing makes it the showcase and optimizes what goes live', async () => {
+    await zone.publish({ zone: ZONE, items: [{ pubkey: anchor, lineage: 'camelflage' }], domains: [], view: 'list' })
+    await accept()
+    const owner = deviceOwner(ZONE)
+    expect(await owner.hello()).toBe(anchor)
+    const other = { pubkey: 'b'.repeat(64), lineage: 'games' }
+    // Nothing to publish before anything is staged.
+    expect(await owner.publish!({ zone: ZONE })).toEqual({ ok: true, changed: false })
+    // Stage dylan and another publisher's creation: the staged list starts from what visitors see and grows.
+    expect(await owner.stage!({ zone: ZONE, on: [{ pubkey: anchor, lineage: 'dylan' }, other], off: [] })).toEqual({ ok: true, changed: true })
+    let read = await readZoneOwners(ZONE, [anchor])
+    expect(read.showcase?.items).toEqual([{ pubkey: anchor, lineage: 'camelflage' }])
+    expect(read.staged?.items).toEqual(expect.arrayContaining([{ pubkey: anchor, lineage: 'camelflage' }, { pubkey: anchor, lineage: 'dylan' }, other]))
+    let roots = (JSON.parse(String(zone.index!['content'])) as { roots: Record<string, string> }).roots
+    expect(roots['promoted:dylan']).toBeUndefined()
+    // Send camelflage back out; staging the same thing twice changes nothing.
+    expect(await owner.stage!({ zone: ZONE, on: [], off: [{ pubkey: anchor, lineage: 'camelflage' }] })).toEqual({ ok: true, changed: true })
+    expect(await owner.stage!({ zone: ZONE, on: [other], off: [] })).toEqual({ ok: true, changed: false })
+    // Publish: the showcase is exactly what is staged, its look kept, and the anchor's own creation going live is optimized.
+    expect(await owner.publish!({ zone: ZONE })).toEqual({ ok: true, changed: true })
+    read = await readZoneOwners(ZONE, [anchor])
+    expect(read.showcase?.items).toEqual([other, { pubkey: anchor, lineage: 'dylan' }].sort((x, y) => `${x.pubkey}\n${x.lineage}` < `${y.pubkey}\n${y.lineage}` ? -1 : 1))
+    expect(read.showcase?.view).toBe('list')
+    roots = (JSON.parse(String(zone.index!['content'])) as { roots: Record<string, string> }).roots
+    expect(roots['promoted:dylan']).toMatch(/^[0-9a-f]{64}$/)
+    // Published as staged: a second press signs nothing.
+    const puts = zone.puts.length
+    expect(await owner.publish!({ zone: ZONE })).toEqual({ ok: true, changed: false })
+    expect(zone.puts.length).toBe(puts)
+  })
+
   it('takes a tile off a page that had no record: the rest of what is published stays', async () => {
     await zone.publish(null)
     await accept()

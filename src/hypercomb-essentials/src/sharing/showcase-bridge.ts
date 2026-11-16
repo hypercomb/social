@@ -11,6 +11,8 @@
 //   page → { t: 'hello', id }                                hive → { t: 'here', id, pubkey }
 //   page → { t: 'toggle', id, zone, pubkey, lineage, on }    hive → { t: 'done', id, ok, changed?, reason? }
 //   page → { t: 'view', id, zone, view }                     hive → { t: 'done', id, ok, changed?, reason? }
+//   page → { t: 'stage', id, zone, on: [item], off: [item] } hive → { t: 'done', id, ok, changed?, reason? }
+//   page → { t: 'publish', id, zone }                        hive → { t: 'done', id, ok, changed?, reason? }
 //   page → { t: 'invite', id, zone }                         hive → { t: 'invited', id, ok, link?, until?, code?, reason? }
 //
 // MIRRORED: hypercomb-shim/src/bootstrap/owner-bridge.ts speaks this; the shim spec holds them together.
@@ -20,7 +22,9 @@ import { fetchHiveIndex } from './hive-pointer.js'
 import { allowAnother, publisherKeyHex, type KeysAllowResult } from './key-list.client.js'
 import { promoteForCommunity, type CommunityPromotion } from './promote.js'
 import { qrSvg } from './qr-code.js'
-import { parseView, readSignedShowcase, setView, showcases, signShowcase, toggleItem, type Showcase, type ShowcaseItem } from './showcase-record.js'
+import {
+  parseView, readSignedShowcase, setView, showcases, signShowcase, stagedKey, toggleItem, type Showcase, type ShowcaseItem,
+} from './showcase-record.js'
 
 export const SHOWCASE_CHANNEL = 'hc:showcase'
 
@@ -62,6 +66,101 @@ const signResult = async (record: Showcase, deps: BridgeDeps): Promise<ToggleRes
   return signed.ok ? { ok: true, changed: true } : { ok: false, reason: signed.reason }
 }
 
+/** The key's own creations among `items`, each optimized before it goes live (promote.ts promoteForCommunity). Null
+ *  when all are; else why one is not. Another publisher's creation is theirs to promote. */
+const optimizeOwn = async (zone: string, items: readonly ShowcaseItem[], own: string, deps: BridgeDeps): Promise<ToggleResult | null> => {
+  for (const item of items) {
+    if (item.pubkey !== own) continue
+    const done = await (deps.promote ?? promoteForCommunity)(zone, item.lineage)
+      .catch((): CommunityPromotion => ({ ok: false, reason: `${item.lineage} could not be optimized` }))
+    if (!done.ok) return { ok: false, reason: done.reason }
+  }
+  return null
+}
+
+const sameItem = (a: ShowcaseItem, b: ShowcaseItem): boolean => a.pubkey === b.pubkey && a.lineage === b.lineage
+const sameSet = (a: readonly ShowcaseItem[], b: readonly ShowcaseItem[]): boolean =>
+  a.every(row => b.some(other => sameItem(row, other))) && b.every(row => a.some(other => sameItem(row, other)))
+const LINEAGE_OK = (lineage: unknown): lineage is string =>
+  typeof lineage === 'string' && lineage.length >= 1 && lineage.length <= 200 && !/[\s\x00-\x1f\x7f]/.test(lineage)
+/** The creations a request names, believed only when each names a key and a lineage; null when one does not. */
+const itemsOf = (raw: unknown): ShowcaseItem[] | null => {
+  if (!Array.isArray(raw) || raw.length > 500) return null
+  const items: ShowcaseItem[] = []
+  for (const row of raw) {
+    const pubkey = String((row as ShowcaseItem | null)?.pubkey ?? '').toLowerCase()
+    const lineage = (row as ShowcaseItem | null)?.lineage
+    if (!SIG.test(pubkey) || !LINEAGE_OK(lineage)) return null
+    items.push({ pubkey, lineage })
+  }
+  return items
+}
+
+/** What visitors see on `zone` now: the signed showcase, else what this key's doors publish there. Null when it could
+ *  not be read. */
+const visibleNow = async (zone: string, own: string, deps: BridgeDeps): Promise<{ record: Showcase | null; items: readonly ShowcaseItem[] } | null> => {
+  let record: Showcase | null
+  try { record = await (deps.read ?? readSignedShowcase)(zone) } catch { return null }
+  if (record) return { record, items: record.items }
+  const open = await (deps.published ?? doorsOnZone)(zone, own).catch(() => null)
+  return open ? { record: null, items: open } : null
+}
+
+/**
+ * STAGE (jwize 2026-11-15: "you have unlocked them from their domains and staged them for public access"; "local to
+ * subdomain or other should be stage"). Creations go into, or back out of, the owners' signed staged list for `zone`
+ * (`staged:<zone>`), which every device of theirs reads and writes; what a visitor sees does not change. A zone with
+ * nothing staged yet starts from what its visitors see now. MIRRORED: the shim's device-owner.ts stageChange.
+ */
+export async function applyStage(request: { readonly zone: string; readonly on: unknown; readonly off: unknown }, deps: BridgeDeps = {}): Promise<ToggleResult> {
+  const zone = String(request.zone ?? '').toLowerCase()
+  const on = itemsOf(request.on)
+  const off = itemsOf(request.off)
+  if (!ZONE.test(zone) || !on || !off) return { ok: false, reason: 'bad request' }
+  const own = String(await (deps.own ?? (() => publisherKeyHex({ known: true })))().catch(() => '') ?? '').toLowerCase()
+  if (!SIG.test(own)) return { ok: false, reason: 'no key on this device' }
+  let staged: Showcase | null
+  try { staged = await (deps.read ?? readSignedShowcase)(zone, stagedKey(zone)) } catch { return { ok: false, reason: 'could not read what is staged' } }
+  let base = staged?.items
+  if (!base) {
+    const now = await visibleNow(zone, own, deps)
+    if (!now) return { ok: false, reason: 'could not read what is published here' }
+    base = now.items
+  }
+  const items = [...base.filter(row => !off.some(gone => sameItem(gone, row))), ...on.filter(row => !base!.some(kept => sameItem(kept, row)))]
+  if (sameSet(base, items)) return { ok: true, changed: false }
+  const signed = await (deps.sign ?? signShowcase)({ zone, items, domains: [] }, stagedKey(zone))
+  return signed.ok ? { ok: true, changed: true } : { ok: false, reason: signed.reason }
+}
+
+/**
+ * PUBLISH, THE ONE FINAL ACT (jwize 2026-11-15: "the community items are compiled and made available for all visitors
+ * no matter what computer"). The showcase names exactly what is staged (its look, its domains shown in full and its
+ * communities stay, a community losing what left), and each of this key's creations newly going live is optimized
+ * first. Nothing staged is nothing to publish. MIRRORED: the shim's device-owner.ts publishChange.
+ */
+export async function applyPublish(request: { readonly zone: string }, deps: BridgeDeps = {}): Promise<ToggleResult> {
+  const zone = String(request.zone ?? '').toLowerCase()
+  if (!ZONE.test(zone)) return { ok: false, reason: 'bad request' }
+  const own = String(await (deps.own ?? (() => publisherKeyHex({ known: true })))().catch(() => '') ?? '').toLowerCase()
+  if (!SIG.test(own)) return { ok: false, reason: 'no key on this device' }
+  let staged: Showcase | null
+  try { staged = await (deps.read ?? readSignedShowcase)(zone, stagedKey(zone)) } catch { return { ok: false, reason: 'could not read what is staged' } }
+  if (!staged) return { ok: true, changed: false }
+  const now = await visibleNow(zone, own, deps)
+  if (!now) return { ok: false, reason: 'could not read what is published here' }
+  if (now.record && sameSet(now.items, staged.items)) return { ok: true, changed: false }
+  const refused = await optimizeOwn(zone, staged.items.filter(item => !now.items.some(row => sameItem(row, item))), own, deps)
+  if (refused) return refused
+  const current = now.record ?? { zone, items: [...now.items], domains: [] }
+  const kept = (row: ShowcaseItem): boolean => staged!.items.some(item => sameItem(item, row))
+  return signResult({
+    ...current,
+    items: [...staged.items],
+    ...(current.communities ? { communities: current.communities.map(community => ({ ...community, items: community.items.filter(kept) })) } : {}),
+  }, deps)
+}
+
 /** Put one creation into the showcase of `zone`, or take it out, and sign the result. Idempotent: a creation
  *  already in the state asked for changes nothing and signs nothing. A missing showcase is not an empty
  *  one: taking a creation out writes the doors that name this zone, minus that creation. */
@@ -85,9 +184,7 @@ export async function applyToggle(request: ToggleRequest, deps: BridgeDeps = {})
   // minified before the record names it. Another publisher's creation is theirs to promote; taking one out is never gated.
   const optimize = async (): Promise<ToggleResult | null> => {
     if (request.on !== true || pubkey !== own) return null
-    const done = await (deps.promote ?? promoteForCommunity)(zone, lineage)
-      .catch((): CommunityPromotion => ({ ok: false, reason: 'it could not be optimized' }))
-    return done.ok ? null : { ok: false, reason: done.reason }
+    return optimizeOwn(zone, [item], own, deps)
   }
   if (current) {
     if (showcases(current, item) === (request.on === true)) return { ok: true, changed: false }
@@ -204,6 +301,16 @@ export function startShowcaseBridge(): void {
     } else if (message['t'] === 'view') {
       lane = lane.then(async () => {
         const result = await applyView(message as unknown as { zone: string; view: string }).catch((): ToggleResult => ({ ok: false, reason: 'failed' }))
+        channel.postMessage({ t: 'done', id, ...result })
+      })
+    } else if (message['t'] === 'stage') {
+      lane = lane.then(async () => {
+        const result = await applyStage(message as unknown as { zone: string; on: unknown; off: unknown }).catch((): ToggleResult => ({ ok: false, reason: 'failed' }))
+        channel.postMessage({ t: 'done', id, ...result })
+      })
+    } else if (message['t'] === 'publish') {
+      lane = lane.then(async () => {
+        const result = await applyPublish(message as unknown as { zone: string }).catch((): ToggleResult => ({ ok: false, reason: 'failed' }))
         channel.postMessage({ t: 'done', id, ...result })
       })
     } else if (message['t'] === 'invite') {

@@ -134,6 +134,11 @@ export type ZoneOwners = {
   /** The zone's own site an owner's index was read from, when the zone itself holds none (readZoneOwners).
    *  The zone's records live there, so its ledger is the one that names this zone's sites as they are now. */
   readonly from?: string
+  /** WHAT IS STAGED FOR THE COMMUNITY (jwize 2026-11-15: "you have unlocked them from their domains and staged them for
+   *  public access"): the owners' signed `staged:<zone>` record, the same shape as the showcase, which every device of
+   *  theirs reads and writes. Never drawn for a visitor: publishing makes the showcase from it. Absent when no owner
+   *  signed one, or it could not be read. */
+  readonly staged?: ShowcaseRecord
 }
 
 /** Does an owner's signed doors open this lineage on this domain, by name?
@@ -146,6 +151,17 @@ export const doorsOpen = (owners: ZoneOwners, pubkey: string, lineage: string, z
 
 /** The index key — and the pool's meaning — for one domain's showcase. */
 export const showcaseKey = (zone: string): string => `showcase:${zone}`
+
+/** The index key of what is staged for a domain's community: the showcase as it will be once published.
+ *  MIRRORED: essentials sharing/showcase-record.ts stagedKey. */
+export const stagedKey = (zone: string): string => `staged:${zone}`
+
+/** Do two records name the same creations (order and duplicates aside)? */
+export const sameItems = (a: readonly ShowcaseItem[], b: readonly ShowcaseItem[]): boolean => {
+  const left = new Set(a.map(itemId))
+  const right = new Set(b.map(itemId))
+  return left.size === right.size && [...left].every(id => right.has(id))
+}
 
 /** The index key of the author's live list: the heads a visitor site may show. */
 const LIVE_ROOT = 'stage:live'
@@ -378,6 +394,8 @@ export const readZoneOwners = async (zone: string, owners: readonly string[], si
   let showcase: ShowcaseRecord | null = null
   let live: ReadonlySet<string> | null = null
   let liveRead = false
+  let staged: ShowcaseRecord | null = null
+  let stagedRead = false
   // `failed`: an owner this read could not see — a network error, a bad answer, a signature that
   // does not verify. One such owner makes the whole read unknown, because what they signed may be
   // the very thing that narrows or widens the rest.
@@ -405,6 +423,13 @@ export const readZoneOwners = async (zone: string, owners: readonly string[], si
       const root = String(content?.roots?.[LIVE_ROOT] ?? '').toLowerCase()
       if (SIG.test(root)) live = await readLiveHeads(origin, root, pubkey)
     }
+    const stagedSig = String(content?.roots?.[stagedKey(zone)] ?? '').toLowerCase()
+    if (!stagedRead && SIG.test(stagedSig)) {
+      // The first owner who names a staged list decides it, as the showcase is decided.
+      stagedRead = true
+      const value = await verified(origin, stagedSig, 262_144)
+      staged = value ? parseShowcase(value, zone) : null
+    }
     if (decided) continue
     const sig = String(content?.roots?.[showcaseKey(zone)] ?? '').toLowerCase()
     if (!SIG.test(sig)) continue
@@ -417,5 +442,5 @@ export const readZoneOwners = async (zone: string, owners: readonly string[], si
     }
     if (!showcase) unreadable = true
   }
-  return { showcase, doors, reached: listed.length > 0 && !failed, unreadable, ...(live ? { live } : {}), ...(from ? { from } : {}) }
+  return { showcase, doors, reached: listed.length > 0 && !failed, unreadable, ...(live ? { live } : {}), ...(from ? { from } : {}), ...(staged ? { staged } : {}) }
 }

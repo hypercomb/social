@@ -8,7 +8,7 @@
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { describe, expect, it, vi } from 'vitest'
 import { KEY_LIST_MEANING, firstKeyList, keyListTemplate, nextKeyList } from '@hypercomb/core'
-import { parseShowcase, readZoneOwners, type ShowcaseRecord, type ZoneOwners } from './showcase-record'
+import { parseShowcase, readZoneOwners, type ShowcaseItem, type ShowcaseRecord, type ZoneOwners } from './showcase-record'
 import { aggregate, aggregateMatches, bandZones, coverOf, followCandidate, ledgerPublishes, ownersLabel, parseLedger,
   gestureStep, pageFlip, readPeerLedger, sharedPublishes, showcase, SHOWCASE_STYLE } from './showcase'
 import { parseWelcome } from './welcome'
@@ -1695,6 +1695,81 @@ describe('a tap visits, a hold toggles', () => {
       click(await tileIn(bands, '.dex-row.own a.hex', 'camelflage'))
       answer('Take camelflage out of my showcase')
       await vi.waitFor(() => expect(owner.toggle).toHaveBeenLastCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'camelflage', on: false }))
+    } finally { hero.remove(); bands.remove() }
+  })
+
+  it('stages, then publishes (jwize 2026-11-15): a tap stages at once in the owners\' list, gray in the community, and one press across the foot publishes it', async () => {
+    // What the owners' hosts hold: the stage and the publish change it, as a host would.
+    let held: ZoneOwners = owners()
+    const owner = {
+      ...bridge(a),
+      stage: vi.fn(async (request: { on: readonly ShowcaseItem[] }) => {
+        held = { ...held, staged: { zone: 'hypercomb.com', domains: [], items: [...record.items, ...request.on] } }
+        return { ok: true as const, changed: true }
+      }),
+      publish: vi.fn(async () => {
+        held = { ...held, showcase: { ...record, items: [...held.staged!.items] } }
+        return { ok: true as const, changed: true }
+      }),
+    }
+    const { hero, bands } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => held,
+      owner, keepCommunity: vi.fn(async () => true),
+    })
+    document.body.append(hero, bands)
+    const confirm = bands.querySelector('.confirm-bar') as HTMLButtonElement
+    const publish = bands.querySelector('.publish-bar') as HTMLButtonElement
+    try {
+      await vi.waitFor(() => expect(owner.hello).toHaveBeenCalled())
+      await new Promise(resolve => setTimeout(resolve, 0))
+      manageOn(hero)
+      // Nothing staged differs from what visitors see: no publish yet.
+      expect(publish.hidden).toBe(true)
+      await openRowNamed(bands, 'jwize.com')
+      const dylan = await tileIn(bands, '.dex-row:not(.own) a.hex', 'dylan')
+      expect(dylan.classList.contains('off')).toBe(true)
+      // A tap stages at once: no question asked, nothing a visitor sees signed.
+      expect(click(dylan).defaultPrevented).toBe(true)
+      expect(confirm.hidden).toBe(true)
+      await vi.waitFor(() => expect(owner.stage).toHaveBeenCalledWith({ zone: 'hypercomb.com', on: [{ pubkey: a, lineage: 'dylan' }], off: [] }))
+      expect(owner.toggle).not.toHaveBeenCalled()
+      await vi.waitFor(() => expect(dylan.classList.contains('off')).toBe(false))
+      // In the community it is gray and ringed: staged, not public yet.
+      const own = await openRowNamed(bands, 'hypercomb.com')
+      await vi.waitFor(() => expect(namesIn(own)).toContain('dylan'))
+      const staged = await tileIn(bands, '.dex-row.own a.hex', 'dylan')
+      expect(staged.classList.contains('off')).toBe(true)
+      expect(staged.classList.contains('staged')).toBe(true)
+      expect((await tileIn(bands, '.dex-row.own a.hex', 'camelflage')).classList.contains('off')).toBe(false)
+      // The one press across the foot publishes it.
+      await vi.waitFor(() => expect(publish.hidden).toBe(false))
+      expect(publish.textContent).toBe('Publish my community to every visitor (1 change)')
+      publish.click()
+      await vi.waitFor(() => expect(owner.publish).toHaveBeenCalledWith({ zone: 'hypercomb.com' }))
+      expect(owner.toggle).not.toHaveBeenCalled()
+      await vi.waitFor(() => expect(staged.classList.contains('off')).toBe(false))
+      expect(publish.hidden).toBe(true)
+    } finally { hero.remove(); bands.remove() }
+  })
+
+  it('a device with no key sees what the owners staged elsewhere, gray in the community, and is offered no publish', async () => {
+    const stagedOwners = (): ZoneOwners => ({ ...owners(), staged: { zone: 'hypercomb.com', domains: [], items: [...record.items, { pubkey: a, lineage: 'dylan' }] } })
+    const { hero, bands } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => stagedOwners(),
+    })
+    document.body.append(hero, bands)
+    try {
+      await new Promise(resolve => setTimeout(resolve, 0))
+      manageOn(hero)
+      const own = await openRowNamed(bands, 'hypercomb.com')
+      await vi.waitFor(() => expect(namesIn(own)).toContain('dylan'))
+      expect((await tileIn(bands, '.dex-row.own a.hex', 'dylan')).classList.contains('staged')).toBe(true)
+      expect((bands.querySelector('.publish-bar') as HTMLButtonElement).hidden).toBe(true)
+      // A visitor's page is still only what is published.
+      manageOn(hero)
+      await vi.waitFor(() => expect(namesIn(rowNamed(bands, 'hypercomb.com')!)).toEqual(['camelflage']))
     } finally { hero.remove(); bands.remove() }
   })
 

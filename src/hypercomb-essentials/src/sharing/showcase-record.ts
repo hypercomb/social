@@ -124,6 +124,11 @@ export const parseCommunities = (raw: unknown): ShowcaseCommunity[] => {
  *  one root in a signed index, as `welcome:<zone>` does. */
 export const showcaseKey = (zone: string): string => `showcase:${zone}`
 
+/** The index key of what is staged for a domain's community (jwize 2026-11-15: "local to subdomain or other should be
+ *  stage"): a record of the showcase's own shape, the showcase as it will be once published, the same on every device
+ *  of the owner's. MIRRORED: hypercomb-shim bootstrap/showcase-record.ts stagedKey. */
+export const stagedKey = (zone: string): string => `staged:${zone}`
+
 const itemId = (item: ShowcaseItem): string => `${item.pubkey}\n${item.lineage}`
 
 /** A record, believed only as far as each field survives its check; null when
@@ -310,8 +315,9 @@ export async function showcaseHome(zone: string): Promise<string | null> {
 }
 
 /** Send the showcase to where its domain's visitors read it (showcaseHome) and name it in the signed index as
- *  `showcase:<zone>` — what the front door reads. */
-export async function signShowcase(showcase: Showcase): Promise<{ ok: true; sig: string } | { ok: false; reason: string }> {
+ *  `showcase:<zone>` — what the front door reads. `key` names it elsewhere: `staged:<zone>` (stagedKey) for what is
+ *  staged, which no visitor is shown. */
+export async function signShowcase(showcase: Showcase, key: string = showcaseKey(showcase.zone)): Promise<{ ok: true; sig: string } | { ok: false; reason: string }> {
   if (!ZONE.test(showcase.zone)) return { ok: false, reason: 'not a domain' }
   const home = await showcaseHome(showcase.zone)
   if (!home) return { ok: false, reason: `no host you publish to serves the index visitors read for ${showcase.zone}` }
@@ -321,9 +327,9 @@ export async function signShowcase(showcase: Showcase): Promise<{ ok: true; sig:
   if (!sync?.publishAtoms) return { ok: false, reason: 'host sync is not available here' }
   const sent = await sync.publishAtoms(home, [sig], async wanted => (wanted === sig ? bytes : null))
   if (!sent.ok) return { ok: false, reason: sent.error }
-  const stamped = await setHiveRoot(home, showcaseKey(showcase.zone), sig)
+  const stamped = await setHiveRoot(home, key, sig)
   if (!stamped.ok) return { ok: false, reason: stamped.reason ?? 'the index refused it' }
-  EffectBus.emitTransient(SHOWCASE_SIGNED_EFFECT, { zone: showcase.zone })
+  if (key === showcaseKey(showcase.zone)) EffectBus.emitTransient(SHOWCASE_SIGNED_EFFECT, { zone: showcase.zone })
   return { ok: true, sig }
 }
 
@@ -343,10 +349,10 @@ export const renameCommunity = (showcase: Showcase, key: string, raw: unknown): 
 
 /** The record this key already signed for the zone. Null when none is signed.
  *  Throws when a named record cannot be read: that is not an empty showcase. */
-export async function readSignedShowcase(zone: string): Promise<Showcase | null> {
+export async function readSignedShowcase(zone: string, key: string = showcaseKey(zone)): Promise<Showcase | null> {
   const home = await showcaseHome(zone)
   if (!home) throw new Error('could not read the showcase')
-  const sig = await ownHiveRoot(home, showcaseKey(zone))
+  const sig = await ownHiveRoot(home, key)
   if (!sig) return null
   const response = await fetch(`https://${home}/${sig}`, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
   if (!response.ok) throw new Error('could not read the showcase')

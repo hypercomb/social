@@ -5,7 +5,7 @@ vi.hoisted(() => {
   ;(globalThis as unknown as { ioc: unknown }).ioc = { register: () => {}, get: () => undefined, whenReady: () => {} }
 })
 
-import { applyInvite, applyToggle, applyView } from './showcase-bridge.js'
+import { applyInvite, applyPublish, applyStage, applyToggle, applyView } from './showcase-bridge.js'
 import type { Showcase } from './showcase-record.js'
 
 const key = 'a'.repeat(64)
@@ -97,6 +97,45 @@ describe('applyToggle', () => {
     expect(await applyToggle(request, { own: async () => key, read: async () => { throw new Error('no') }, sign })).toEqual({ ok: false, reason: 'could not read the showcase' })
     expect(await applyToggle({ ...request, on: false }, { own: async () => key, read: async () => null, sign, published: async () => null })).toEqual({ ok: false, reason: 'could not read what is published here' })
     expect(sign).not.toHaveBeenCalled()
+  })
+})
+
+describe('stage, then publish (jwize 2026-11-15)', () => {
+  const other = { pubkey: 'c'.repeat(64), lineage: 'games' }
+  const live: Showcase = { zone: 'example.com', items: [{ pubkey: key, lineage: 'camelflage' }], domains: [], view: 'list' }
+  /** One host's records, by index key, changed by what is signed. */
+  const held = (records: Record<string, Showcase | null>) => ({
+    read: async (zone: string, name = `showcase:${zone}`) => records[name] ?? null,
+    sign: vi.fn(async (record: Showcase, name = `showcase:${record.zone}`) => { records[name] = record; return { ok: true as const, sig: 'b'.repeat(64) } }),
+    records,
+  })
+
+  it('staging signs only the staged list, starting from what visitors see; publishing makes it the showcase and optimizes what goes live', async () => {
+    const host = held({ 'showcase:example.com': live })
+    const promoted = vi.fn(async () => ({ ok: true as const, promoted: true }))
+    const deps = { own: async () => key, read: host.read, sign: host.sign, promote: promoted }
+    expect(await applyPublish({ zone: 'example.com' }, deps)).toEqual({ ok: true, changed: false })
+    expect(await applyStage({ zone: 'example.com', on: [{ pubkey: key, lineage: 'dylan' }, other], off: [{ pubkey: key, lineage: 'camelflage' }] }, deps)).toEqual({ ok: true, changed: true })
+    expect(host.sign).toHaveBeenLastCalledWith({ zone: 'example.com', domains: [], items: [{ pubkey: key, lineage: 'dylan' }, other] }, 'staged:example.com')
+    expect(host.records['showcase:example.com']).toBe(live)
+    expect(promoted).not.toHaveBeenCalled()
+    expect(await applyStage({ zone: 'example.com', on: [other], off: [] }, deps)).toEqual({ ok: true, changed: false })
+    expect(await applyPublish({ zone: 'example.com' }, deps)).toEqual({ ok: true, changed: true })
+    expect(host.records['showcase:example.com']).toEqual({ ...live, items: [{ pubkey: key, lineage: 'dylan' }, other] })
+    // Only this key's own creation going live is optimized.
+    expect(promoted).toHaveBeenCalledTimes(1)
+    expect(promoted).toHaveBeenCalledWith('example.com', 'dylan')
+    expect(await applyPublish({ zone: 'example.com' }, deps)).toEqual({ ok: true, changed: false })
+  })
+
+  it('a creation that cannot be optimized publishes nothing, and a bad request or a missing key is refused', async () => {
+    const host = held({ 'showcase:example.com': live, 'staged:example.com': { zone: 'example.com', domains: [], items: [{ pubkey: key, lineage: 'dylan' }] } })
+    const failed = vi.fn(async () => ({ ok: false as const, reason: 'dylan is not published on example.com yet' }))
+    expect(await applyPublish({ zone: 'example.com' }, { own: async () => key, read: host.read, sign: host.sign, promote: failed }))
+      .toEqual({ ok: false, reason: 'dylan is not published on example.com yet' })
+    expect(host.records['showcase:example.com']).toBe(live)
+    expect(await applyStage({ zone: 'example.com', on: [{ pubkey: 'nope', lineage: 'x' }], off: [] }, { own: async () => key, read: host.read, sign: host.sign })).toEqual({ ok: false, reason: 'bad request' })
+    expect(await applyStage({ zone: 'example.com', on: [], off: [] }, { own: async () => '', read: host.read, sign: host.sign })).toEqual({ ok: false, reason: 'no key on this device' })
   })
 })
 

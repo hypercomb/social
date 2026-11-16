@@ -21,10 +21,10 @@ import { SignatureService, deriveMinifiedLayer, minifyModuleBody, nip98Authoriza
 import { readDeviceBinding, type DeviceBinding } from './device-binding'
 import { putKeyChain, readKeyChain } from './device-invite'
 import { deviceSigner, type DeviceSigner } from './device-key'
-import type { OwnerBridge, OwnerResult, OwnerToggle, OwnerView } from './owner-bridge'
+import type { OwnerBridge, OwnerResult, OwnerStage, OwnerToggle, OwnerView } from './owner-bridge'
 import {
-  parseView, readOwnerIndex, readShowcaseAtom, readZoneIndex, showcaseBytes, showcaseKey, showcasesItem, toggleShowcaseItem, zoneOrigin,
-  type ShowcaseItem, type ShowcaseRecord,
+  parseView, readOwnerIndex, readShowcaseAtom, readZoneIndex, sameItems, showcaseBytes, showcaseKey, showcasesItem, stagedKey, toggleShowcaseItem,
+  zoneOrigin, type ShowcaseItem, type ShowcaseRecord,
 } from './showcase-record'
 
 const SIG = /^[0-9a-f]{64}$/
@@ -182,29 +182,65 @@ export const promoteHere = async (
   return { ok: true, record }
 }
 
-/** What a change makes of the record: the next one, or null when it changes nothing. `open` is what the anchor's doors
- *  publish here — what a zone with no record yet is showing. */
-type Change = (current: ShowcaseRecord | null, open: () => ShowcaseItem[]) => ShowcaseRecord | null
+/** What one read of the anchor's index holds for the zone: the signed showcase and staged list (null when none is
+ *  named), and `open`, what the anchor's doors publish here — what a zone with no showcase yet is showing. */
+type Records = { readonly showcase: ShowcaseRecord | null; readonly staged: ShowcaseRecord | null; readonly open: () => ShowcaseItem[] }
+/** What a change writes: the next showcase and/or staged list (a record left out is left as it is), and the creations
+ *  going live, the anchor's own of which are optimized first. Null when it changes nothing. */
+type Writes = { readonly showcase?: ShowcaseRecord; readonly staged?: ShowcaseRecord; readonly live?: readonly ShowcaseItem[] }
+export type Change = (records: Records) => Writes | null
 
-const toggleChange = (request: OwnerToggle): Change => (current, open) => {
+const sameItem = (a: ShowcaseItem, b: ShowcaseItem): boolean => a.pubkey === b.pubkey && a.lineage === b.lineage
+
+const toggleChange = (request: OwnerToggle): Change => ({ showcase: current, open }) => {
   const zone = request.zone
   const item: ShowcaseItem = { pubkey: request.pubkey, lineage: request.lineage }
-  if (current) return showcasesItem(current, item) === request.on ? null : toggleShowcaseItem(current, item)
-  if (request.on) return { zone, items: [item], domains: [] }
+  const live = request.on ? [item] : []
+  if (current) return showcasesItem(current, item) === request.on ? null : { showcase: toggleShowcaseItem(current, item), live }
+  if (request.on) return { showcase: { zone, items: [item], domains: [] }, live }
   // No record yet: everything published here is shown. Taking one out records the rest.
   const shown = open()
-  if (!shown.some(row => row.pubkey === item.pubkey && row.lineage === item.lineage)) return null
-  return { zone, items: shown.filter(row => !(row.pubkey === item.pubkey && row.lineage === item.lineage)), domains: [] }
+  if (!shown.some(row => sameItem(row, item))) return null
+  return { showcase: { zone, items: shown.filter(row => !sameItem(row, item)), domains: [] } }
 }
 
 /** The look everyone is shown. Hexagons is the absence of a view. A zone with no record yet keeps showing what it
  *  publishes: the record that first names a look names those too. */
-const viewChange = (request: OwnerView): Change => (current, open) => {
+const viewChange = (request: OwnerView): Change => ({ showcase: current, open }) => {
   const view = parseView(request.view)
   const next = view && view !== 'hex' ? view : undefined
   if ((current?.view ?? undefined) === next) return null
   const { view: _gone, ...rest } = current ?? { zone: request.zone, items: open(), domains: [] as string[] }
-  return next ? { ...rest, view: next } : rest
+  return { showcase: next ? { ...rest, view: next } : rest }
+}
+
+/** STAGE (jwize 2026-11-15: "you have unlocked them from their domains and staged them for public access"). The staged
+ *  list changes; the showcase does not. A zone with nothing staged yet starts from what its visitors see now, so the
+ *  first change stages everything already public beside it. */
+export const stageChange = (request: OwnerStage): Change => ({ showcase, staged, open }) => {
+  const base = staged?.items ?? showcase?.items ?? open()
+  const items = [...base.filter(row => !request.off.some(gone => sameItem(gone, row))),
+    ...request.on.filter(row => !base.some(kept => sameItem(kept, row)))]
+  if (sameItems(base, items)) return null
+  return { staged: { zone: request.zone, items: items.map(row => ({ pubkey: row.pubkey, lineage: row.lineage })), domains: [] } }
+}
+
+/** PUBLISH, THE ONE FINAL ACT (jwize 2026-11-15: "the community items are compiled and made available for all visitors
+ *  no matter what computer"). The showcase names exactly what is staged (its look, its domains shown in full and its
+ *  communities stay, a community losing what left), and each creation newly going live is optimized first. */
+export const publishChange = (zone: string): Change => ({ showcase, staged, open }) => {
+  if (!staged) return null
+  const current = showcase ?? { zone, items: open(), domains: [] as string[] }
+  if (showcase && sameItems(showcase.items, staged.items)) return null
+  const kept = (row: ShowcaseItem): boolean => staged.items.some(item => sameItem(item, row))
+  return {
+    showcase: {
+      ...current,
+      items: [...staged.items],
+      ...(current.communities ? { communities: current.communities.map(community => ({ ...community, items: community.items.filter(kept) })) } : {}),
+    },
+    live: staged.items.filter(item => !current.items.some(row => sameItem(row, item))),
+  }
 }
 
 /** The bare domains among a ledger's addresses: zone roots, the only hosts that take writes (a site door is
@@ -244,9 +280,9 @@ export const indexHomeFor = async (
   return { split: found.at }
 }
 
-/** One read-change-sign of the anchor's showcase for the zone, at `home` (indexHomeFor). 'stale' when the host
- *  holds a newer index than the one read: read again. */
-const attempt = async (home: string, zone: string, change: Change, anchor: string, signer: DeviceSigner, live?: OwnerToggle): Promise<Attempt> => {
+/** One read-change-sign of the anchor's showcase and staged list for the zone, at `home` (indexHomeFor). 'stale' when
+ *  the host holds a newer index than the one read: read again. */
+const attempt = async (home: string, zone: string, change: Change, anchor: string, signer: DeviceSigner): Promise<Attempt> => {
   const read = await readOwnerIndex(home, anchor)
   if (!read) return { ok: false, reason: `could not read your index on ${home}` }
   const content: Record<string, unknown> = read === 'missing' ? { v: HIVE_LINK_VERSION, roots: {} } : read.content
@@ -258,26 +294,44 @@ const attempt = async (home: string, zone: string, change: Change, anchor: strin
     current = await readShowcaseAtom(home, named, zone)
     if (!current) return { ok: false, reason: 'could not read the showcase' }
   }
-  const next = change(current, () => openOn(zone, anchor, content))
-  if (!next) return { ok: true, changed: false }
-  // One of the anchor's own creations going live is optimized first, and named in the same index write.
-  const extra: Record<string, string> = {}
-  if (live?.on && live.pubkey === anchor) {
-    const promoted = await promoteHere(home, live.lineage, roots, anchor, signer)
-    if (!promoted.ok) return { ok: false, reason: promoted.reason }
-    if (promoted.record) extra[promotedPointer(live.lineage)] = promoted.record
+  const stagedNamed = String(roots[stagedKey(zone)] ?? '').toLowerCase()
+  let staged: ShowcaseRecord | null = null
+  if (SIG.test(stagedNamed)) {
+    staged = await readShowcaseAtom(home, stagedNamed, zone)
+    if (!staged) return { ok: false, reason: 'could not read what is staged' }
   }
-  const bytes = showcaseBytes(next)
-  const sig = await sha(bytes)
-  const refused = await uploadAtom(home, bytes, sig, anchor, signer)
-  if (refused) return { ok: false, reason: refused }
+  const writes = change({ showcase: current, staged, open: () => openOn(zone, anchor, content) })
+  if (!writes || (!writes.showcase && !writes.staged)) return { ok: true, changed: false }
+  // The anchor's own creations going live are optimized first, and named in the same index write.
+  const extra: Record<string, string> = {}
+  for (const item of writes.live ?? []) {
+    if (item.pubkey !== anchor) continue
+    const promoted = await promoteHere(home, item.lineage, roots, anchor, signer)
+    if (!promoted.ok) return { ok: false, reason: promoted.reason }
+    if (promoted.record) extra[promotedPointer(item.lineage)] = promoted.record
+  }
+  for (const [name, record, what] of [[key, writes.showcase, 'the showcase'], [stagedKey(zone), writes.staged, 'the staged list']] as const) {
+    if (!record) continue
+    const bytes = showcaseBytes(record)
+    const sig = await sha(bytes)
+    const refused = await uploadAtom(home, bytes, sig, anchor, signer, what)
+    if (refused) return { ok: false, reason: refused }
+    extra[name] = sig
+  }
 
   const before = read === 'missing' ? null : read.event
-  const put = await putIndex(home, anchor, signIndex(signer, anchor, before, { ...content, roots: { ...roots, ...extra, [key]: sig } }), signer)
+  const put = await putIndex(home, anchor, signIndex(signer, anchor, before, { ...content, roots: { ...roots, ...extra } }), signer)
   if (put === 'stale') return 'stale'
   if (put) return { ok: false, reason: put }
   return { ok: true, changed: true }
 }
+
+/** Creations a stage request names, believed only when each names a key and a lineage. */
+const validItems = (items: unknown): boolean => Array.isArray(items) && items.length <= 500
+  && items.every(item => {
+    const row = item as Partial<ShowcaseItem> | null
+    return SIG.test(String(row?.pubkey ?? '')) && typeof row?.lineage === 'string' && !!row.lineage && row.lineage.length <= 200
+  })
 
 export type DeviceOwnerDeps = {
   readonly signer?: () => DeviceSigner | null
@@ -309,13 +363,13 @@ export const deviceOwner = (zone: string, deps: DeviceOwnerDeps = {}): OwnerBrid
   })().catch(() => null)
   let lane: Promise<unknown> = Promise.resolve()
   // One at a time: each is a read-change-sign of the same record.
-  const act = (valid: boolean, change: Change, live?: OwnerToggle): Promise<OwnerResult> => {
+  const act = (valid: boolean, change: Change): Promise<OwnerResult> => {
     const run = lane.then(async (): Promise<OwnerResult> => {
       const held = await ensure()
       if (!held) return { ok: false, reason: why }
       if (!valid) return { ok: false, reason: 'bad request' }
       for (let tries = 0; tries < 2; tries++) {
-        const result = await attempt(held.home, zone, change, held.anchor, held.signer, live).catch((): OwnerResult => ({ ok: false, reason: 'failed' }))
+        const result = await attempt(held.home, zone, change, held.anchor, held.signer).catch((): OwnerResult => ({ ok: false, reason: 'failed' }))
         if (result !== 'stale') return result
       }
       return { ok: false, reason: 'your index kept changing underneath; try again' }
@@ -325,8 +379,10 @@ export const deviceOwner = (zone: string, deps: DeviceOwnerDeps = {}): OwnerBrid
   }
   return {
     hello: async () => (await ensure())?.anchor ?? '',
-    toggle: request => act(request.zone === zone && SIG.test(request.pubkey) && !!request.lineage && request.lineage.length <= 200, toggleChange(request), request),
+    toggle: request => act(request.zone === zone && SIG.test(request.pubkey) && !!request.lineage && request.lineage.length <= 200, toggleChange(request)),
     view: request => act(request.zone === zone && !!parseView(request.view), viewChange(request)),
+    stage: request => act(request.zone === zone && validItems(request.on) && validItems(request.off), stageChange(request)),
+    publish: request => act(request.zone === zone, publishChange(zone)),
   }
 }
 
@@ -346,6 +402,8 @@ export const eitherOwner = (...owners: readonly (OwnerBridge | null)[]): OwnerBr
     },
     toggle: request => chosen ? chosen.toggle(request) : Promise.resolve({ ok: false, reason: 'no key of yours answers here' }),
     view: request => chosen?.view ? chosen.view(request) : Promise.resolve({ ok: false, reason: 'no key of yours answers here' }),
+    stage: request => chosen?.stage ? chosen.stage(request) : Promise.resolve({ ok: false, reason: 'no key of yours answers here' }),
+    publish: request => chosen?.publish ? chosen.publish(request) : Promise.resolve({ ok: false, reason: 'no key of yours answers here' }),
     // Only a hive hands out invites; where the one that answered cannot, the page is told so.
     invite: request => chosen?.invite ? chosen.invite(request) : Promise.resolve({ ok: false, reason: 'only your hive can invite a phone' }),
   }

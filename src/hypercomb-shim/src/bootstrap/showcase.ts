@@ -18,7 +18,9 @@
 
 import type { HostCreation, HostOffering } from '@hypercomb/core'
 import { pictureOrigins, tilePicture } from './tile-picture'
-import { communityKey, doorsOpen, parseView, viewLabel, type ShowcaseCommunity, type ShowcaseItem, type ShowcaseView, type ZoneOwners } from './showcase-record'
+import {
+  communityKey, doorsOpen, parseView, sameItems, viewLabel, type ShowcaseCommunity, type ShowcaseItem, type ShowcaseRecord, type ShowcaseView, type ZoneOwners,
+} from './showcase-record'
 import { DEFAULT_HOME, homeOrigin, turnOffHref } from './turn-off-link'
 import type { OwnerBridge } from './owner-bridge'
 import { showcaseHref } from './showcase-link'
@@ -976,7 +978,14 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     const inside = showcased(entry)
     const label = inside ? 'Take it out of my showcase' : 'Put it in my showcase'
     let act: HTMLElement | null = null
-    if (item) {
+    if (item && stages()) {
+      // Where the owners stage, the sheet stages too: publishing stays the one press across the foot.
+      const button = el('button', 'version-act')
+      button.type = 'button'
+      button.textContent = inCommunity(entry) ? 'Take it out of my community' : 'Stage it for my community'
+      button.addEventListener('click', () => { closeVersions(); void stageTile(entry, row) })
+      act = button
+    } else if (item) {
       // Putting one in always goes through tapTile: it says why on a phone with no key, or hands the switch to your hive.
       if ((options.owner && ownerKey) || !inside) {
         const button = el('button', 'version-act')
@@ -1092,7 +1101,101 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   //    when it is published here or this browser turned it on; it lights or grays where it sits, in its own domain's
   //    row. With the key a tap asks once and the yes is the signed act; without one a tap is this browser's own
   //    switch, at once, and what it turns on shows in the page it comes back to. ──
-  const isOn = (entry: Aggregate): boolean => showcased(entry) || picked(entry)
+  const isOn = (entry: Aggregate): boolean => inCommunity(entry)
+  // ── STAGE, THEN PUBLISH (jwize 2026-11-15: "they were gray in their domains -> now they are gray in the community (still
+  //    in manage mode) -> you have unlocked them from there domains and staged them for public access"; "the final stage
+  //    will inherit this term"). Where a key of yours answers and can stage, a tap in any row brings the tile into the
+  //    owners' signed staged list, or sends it back: at once, the same list on every device of theirs, nothing a visitor
+  //    sees changed. One press across the foot then publishes what is staged as the community every visitor reads. ──
+  const stages = (): boolean => !!options.owner?.stage && !!ownerKey
+  /** The staged list is drawn wherever it is signed: a device with no key sees what the owners staged elsewhere (jwize
+   *  2026-11-15: "my desktop only shows its local shares and not the last updated items"); changing it takes a key. */
+  const stagedView = (): boolean => stages() || !!signed?.staged
+  /** The creations a tile is, as a record names them: each claim the ledger verified, and the owners of a claimless version. */
+  const itemsOfEntry = (entry: Aggregate): ShowcaseItem[] => entry.versions.flatMap(version => version.claims.length
+    ? version.claims.map(claim => ({ pubkey: claim.pubkey, lineage: claim.lineage }))
+    : version.lineage ? version.owners.map(owner => ({ pubkey: owner.pubkey, lineage: version.lineage! })) : [])
+  const sameItem = (a: ShowcaseItem, b: ShowcaseItem): boolean => a.pubkey === b.pubkey && a.lineage === b.lineage
+  const names = (items: readonly ShowcaseItem[], entry: Aggregate): boolean => itemsOfEntry(entry).some(item => items.some(row => sameItem(row, item)))
+  /** In the community you are building: staged by the owners, or picked in this browser. With nothing staged yet the
+   *  staged list is what is published. */
+  function inCommunity(entry: Aggregate): boolean {
+    if (picked(entry)) return true
+    const staged = signed?.staged
+    return staged ? names(staged.items, entry) : showcased(entry)
+  }
+  /** What the staged list holds now, as the owners' hosts would start it: their staged list, else what is published. */
+  const stagedItems = (): readonly ShowcaseItem[] => signed?.staged?.items ?? signed?.showcase?.items
+    ?? bands().flatMap(band => band.tiles).filter(showcased).flatMap(itemsOfEntry)
+  /** How many creations publishing would put in or take out; 0 when the community is as staged. */
+  const unpublished = (): number => {
+    const staged = signed?.staged
+    if (!staged || !signed?.reached || signed.unreadable) return 0
+    const live = signed.showcase?.items ?? bands().flatMap(band => band.tiles).filter(showcased).flatMap(itemsOfEntry)
+    if (signed.showcase && sameItems(live, staged.items)) return 0
+    return staged.items.filter(item => !live.some(row => sameItem(row, item))).length
+      + live.filter(row => !staged.items.some(item => sameItem(item, row))).length
+  }
+  let staging = false
+  const stageTile = async (entry: Aggregate, row: string): Promise<void> => {
+    const owner = options.owner
+    if (staging || publishing || !owner?.stage) return
+    if (!signed?.reached || signed.unreadable) { say('What is published here is not read yet. Try again in a moment.'); return }
+    const into = !inCommunity(entry)
+    // A tile only this browser picked goes back out here: the owners' list never named it.
+    if (!into && picked(entry)) await pickTile(entry, row)
+    if (!into && !(signed.staged ? names(signed.staged.items, entry) : showcased(entry))) return
+    const item = itemOf(entry, row)
+    if (into && !item) { say(`${entry.title} names no lineage, so it cannot be staged.`); return }
+    // ONE PER SUBDOMAIN, ON ANY DOMAIN (jwize 2026-11-05; a bare apex counts as one), as a pick is: a tile brought in from
+    // a host that already has one in the community takes that one's place.
+    const hostOfEntry = (found: Aggregate, zone: string): string => laneHostOf(placeFor(found, zone).href, zone)
+    const host = hostOfEntry(entry, row)
+    const replaced = into ? bands().flatMap(band => band.open)
+      .filter((found, index, all) => all.findIndex(other => other.key === found.key) === index)
+      .filter(found => found.key !== entry.key && inCommunity(found) && hostOfEntry(found, found.home) === host) : []
+    const on = into ? [item!] : []
+    const off = into ? replaced.flatMap(itemsOfEntry) : itemsOfEntry(entry)
+    const was = signed
+    const base = stagedItems()
+    const next: ShowcaseRecord = { zone: options.self, domains: [],
+      items: [...base.filter(kept => !off.some(gone => sameItem(gone, kept))), ...on.filter(added => !base.some(kept => sameItem(kept, added)))] }
+    signed = { ...signed, staged: next }
+    staging = true
+    paint()
+    const result = await owner.stage({ zone: options.self, on, off }).catch(() => ({ ok: false as const, reason: 'failed' }))
+    staging = false
+    if (!result.ok) { if (signed?.staged === next) signed = was; paint(); say(`Could not stage ${entry.title}: ${result.reason}.`); return }
+    say(into ? `${entry.title} is staged for your community. Publish to show it to every visitor.` : `${entry.title} is out of your community.`)
+    paint()
+  }
+  // THE ONE FINAL PUBLISH: always across the foot while managing, whenever what is staged differs from what visitors see.
+  const publishBar = el('button', 'foot-bar publish-bar')
+  publishBar.type = 'button'
+  publishBar.hidden = true
+  let publishing = false
+  const paintPublish = (): void => {
+    const changes = managing && stages() ? unpublished() : 0
+    publishBar.hidden = !changes && !publishing
+    publishBar.disabled = publishing || staging
+    publishBar.textContent = publishing ? 'Publishing your community…' : `Publish my community to every visitor (${count(changes, 'change', 'changes')})`
+  }
+  publishBar.addEventListener('click', () => { void publishCommunity() })
+  const publishCommunity = async (): Promise<void> => {
+    const owner = options.owner
+    if (publishing || staging || !owner?.publish || !signed?.staged) return
+    const staged = signed.staged
+    publishing = true
+    paint()
+    const result = await owner.publish({ zone: options.self }).catch(() => ({ ok: false as const, reason: 'failed' }))
+    publishing = false
+    if (!result.ok) { paint(); say(`Not published: ${result.reason}.`); return }
+    // What visitors read now is what was staged; the read that follows confirms it.
+    if (signed?.reached) signed = { ...signed, showcase: { ...(signed.showcase ?? { zone: options.self, domains: [] }), items: [...staged.items] } }
+    say('Your community is published. Every visitor sees it now.')
+    paint()
+    if (result.changed) takeLedger(options.ledger)
+  }
   /** Can a tap here end in a signature: a hive or an invited key answers, or (off a phone) the hive can be handed it. */
   const canSign = (): boolean => (!!options.owner && !!ownerKey) || !onPhone()
   const toggleTile = async (entry: Aggregate, row: string, into: boolean): Promise<void> => {
@@ -1166,14 +1269,35 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     document.addEventListener('keydown', onConfirmKey, true)
     document.addEventListener('pointerdown', onConfirmAway, true)
   }
-  bandsHost.append(confirmBar)
+  bandsHost.append(confirmBar, publishBar)
   // WHAT THIS BROWSER KEPT GOES LIVE IN ONE PRESS (jwize 2026-11-14: "when I update my community on my phone it doesn't
   // stick"). Picks made before a key of yours answered here were kept only in this browser. Once one answers and the
   // owners' record is read, the foot bar offers them once: pressing it signs each into the list every visitor reads;
   // a tap anywhere else, or Escape, leaves them as they are.
   function offerPicks(): void {
-    if (picksOffered || !options.owner || !ownerKey || !signed?.reached || signed.unreadable || tapping || picking || !confirmBar.hidden) return
+    if (picksOffered || !options.owner || !ownerKey || !signed?.reached || signed.unreadable || tapping || picking || staging || !confirmBar.hidden) return
     const known = new Map(bands().flatMap(band => band.open).map(found => [found.key, found] as const))
+    if (stages()) {
+      // Where the owners stage, what this browser kept is offered to their staged list, the same on every device.
+      const waiting = picks.flatMap(pick => {
+        const entry = known.get(pick.key)
+        const item = entry ? itemOf(entry, pick.zone) : null
+        return entry && item && !(signed!.staged ? names(signed!.staged.items, entry) : showcased(entry)) ? [item] : []
+      })
+      if (!waiting.length) return
+      picksOffered = true
+      confirmBar.textContent = `Stage what this browser kept on every device (${waiting.length})`
+      confirming = () => { void (async () => {
+        const result = await options.owner!.stage!({ zone: options.self, on: waiting, off: [] }).catch(() => ({ ok: false as const, reason: 'failed' }))
+        if (!result.ok) { say(`Not staged: ${result.reason}.`); return }
+        say('What this browser kept is staged on every device.')
+        takeLedger(options.ledger)
+      })() }
+      confirmBar.hidden = false
+      document.addEventListener('keydown', onConfirmKey, true)
+      document.addEventListener('pointerdown', onConfirmAway, true)
+      return
+    }
     const waiting = picks.flatMap(pick => {
       const entry = known.get(pick.key)
       return entry && !showcased(entry) ? [{ entry, zone: pick.zone }] : []
@@ -1236,7 +1360,7 @@ ${entry.key}`
           if (!tile.isConnected) return
           held = true
           // In the showcase, on the owner's device, a hold takes the tile out; everywhere else it lists the domains.
-          if (row === options.self && options.owner && ownerKey) void tapTile(made.entry, row)
+          if (row === options.self && options.owner && ownerKey && !stages()) void tapTile(made.entry, row)
           else { heldOpen = true; openVersions(made.entry, tile, row) }
         }, HOLD_MS)
       })
@@ -1253,7 +1377,8 @@ ${entry.key}`
         if (held) { held = false; event.preventDefault(); event.stopPropagation(); return }
         if (row === options.self && !managing) return
         event.preventDefault()
-        if (canSign()) openConfirm(made.entry, tile, row)
+        if (stages()) void stageTile(made.entry, row)
+        else if (canSign()) openConfirm(made.entry, tile, row)
         else void toggleTile(made.entry, row, !isOn(made.entry))
       })
       tile.addEventListener('contextmenu', event => { event.preventDefault(); stop(); heldOpen = true; openVersions(made.entry, tile, row) })
@@ -1267,8 +1392,13 @@ ${entry.key}`
     view.entry = entry
     const live = showcased(entry)
     // Gray: not in the showcase yet, in any domain's row; the community row is lit — what is in it is in.
-    const lit = live || picked(entry)
+    // WHERE THE OWNERS STAGE, the community row while managing is lit only for what visitors see: staged and not yet
+    // published is gray there, and published but sent back is marked as leaving. A domain's row is lit for what is in.
+    const ownStaging = stagedView() && managing && row === options.self
+    const lit = ownStaging ? live && inCommunity(entry) : stagedView() ? inCommunity(entry) : live || picked(entry)
     view.tile.classList.toggle('off', row === options.self && !managing ? false : !lit)
+    view.tile.classList.toggle('staged', ownStaging && !live && inCommunity(entry))
+    view.tile.classList.toggle('leaving', ownStaging && live && !inCommunity(entry))
     if (managing) view.tile.setAttribute('aria-pressed', String(lit))
     else view.tile.removeAttribute('aria-pressed')
     if (view.head !== lead.head) {
@@ -2055,7 +2185,9 @@ ${entry.key}`
     const rowZones = everyZone
     const order = managing && openRow && rowZones.includes(openRow) ? [openRow, ...rowZones.filter(zone => zone !== openRow)] : rowZones
     // What this domain holds, managing: what is in its showcase and what else it publishes — lit when live, gray when not.
-    const ownHeld = [...new Map([...published, ...rowItems(all, options.self)].map(entry => [entry.key, entry] as const)).values()].sort(byTitle)
+    // Where the owners stage, it also holds what is staged from any domain: gray in the community until it is published.
+    const staged = stagedView() && !community && !unread ? [...known.values()].filter(inCommunity) : []
+    const ownHeld = [...new Map([...published, ...rowItems(all, options.self), ...staged].map(entry => [entry.key, entry] as const)).values()].sort(byTitle)
     for (const zone of order) {
       const view = rowView(zone)
       const own = zone === options.self
@@ -2123,6 +2255,7 @@ ${entry.key}`
       row.append(iconOf(icon), document.createTextNode(count(n, one, many)))
       stats.append(row)
     }
+    paintPublish()
     offerPicks()
   }
 
@@ -2358,6 +2491,9 @@ export const SHOWCASE_STYLE = `
 .search-add:hover:not(:disabled) { background: var(--md-surface-c-highest); }
 .confirm-bar { z-index: 7; background: var(--md-primary); color: var(--md-on-primary); }
 .confirm-bar:hover:not(:disabled) { background: var(--md-primary); }
+/* the one final publish: the page's primary, under any question the foot bar asks */
+.publish-bar { z-index: 6; background: var(--md-primary); color: var(--md-on-primary); }
+.publish-bar:hover:not(:disabled) { background: var(--md-primary); }
 .hex.asking { outline: 2px solid var(--md-primary); outline-offset: 3px; }
 @media (min-width: 720px) { .foot-bar { bottom: 1rem; border-radius: .7rem; } }
 /* the options sit beside the search, at the top: Files (while managing) and Manage */
@@ -2436,6 +2572,9 @@ export const SHOWCASE_STYLE = `
 .owner-note { margin: 0 0 .5rem; color: var(--md-on-surface-var); font-size: .85rem; }
 .owner-note[hidden] { display: none; }
 .hex.off { opacity: .35; filter: grayscale(1); }
+/* staged, not yet published: gray in the community, ringed; published but sent back: fading out */
+.hex.off.staged { opacity: .6; outline: 2px dashed var(--md-primary); outline-offset: 2px; }
+.hex.off.leaving { opacity: .25; outline: 2px dashed var(--md-outline); outline-offset: 2px; }
 .pager-label { padding: .2rem 0; border: 0; background: transparent; cursor: pointer; color: var(--md-on-surface-strong);
   font: 600 1rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); }
 .pager-label:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }

@@ -511,9 +511,31 @@ domain it added. What this browser turned on is kept in `community:tiles` (`read
 sign `showcase:<zone>`, an item it names draws for every visitor whether or not the Publish window's live list
 (`stage:live`) names its head: that list is a discovery listing (deployment-stages.md R10), never the resolver. A door
 Publish turned off for this domain still hides it. Without a signed showcase the live list still narrows what a door
-alone shows. The live list is read only when the owner signed it. Still open: a shared, signed *staged* list (gray in
-the community, on every device) and one final *publish* act that turns it into the record; today a key holder's tap
-signs the record directly.
+alone shows. The live list is read only when the owner signed it.
+
+**Stage, then publish (jwize 2026-11-15: "you have unlocked them from their domains and staged them for public access";
+"local to subdomain or other should be stage"; the final step inherits *publish*).** What is staged for a domain's
+community is a signed record of the showcase's own shape, named in the owners' index as `staged:<zone>` (`stagedKey`,
+mirrored in the shim and essentials). It lives beside the showcase at the zone's showcase home, so every device of the
+owners' reads and writes the same list, and a visitor is never drawn it.
+
+- **Stage.** Managing, where a key of yours answers and can stage (`OwnerBridge.stage`: the hive's `applyStage`, a
+  phone's `device-owner.ts stageChange`), a tap in any row brings the tile into the staged list, or sends it back, at
+  once and with no question: nothing a visitor sees changes. A zone with nothing staged yet starts from what its
+  visitors see now. One per subdomain still holds: a tile from a host already in the community takes that one's place.
+- **Drawn.** In the community row (this domain's row, managing) a published tile is lit, a staged one is gray and ringed
+  (`.hex.staged`), and a published one sent back is marked as leaving (`.hex.leaving`); in a domain's row a tile in the
+  community is lit. The staged list is drawn wherever it is signed, so a device with no key sees what was staged elsewhere;
+  changing it takes a key. What a browser kept before a key answered is offered once to the staged list.
+- **Publish.** Whenever what is staged differs from what visitors see, one press across the foot (`.publish-bar`, "Publish
+  my community to every visitor (N changes)") signs `showcase:<zone>` as exactly what is staged — its look, its domains
+  shown in full and its communities kept, a community losing what left — and each of the key's own creations newly going
+  live is optimized first (the hive's `applyPublish` through `promoteForCommunity`, read and promoted at the showcase home;
+  a phone's `publishChange` through `promoteHere`). No bytes are copied: a published item opens its creation where it is
+  hosted, by signature. A creation that cannot be optimized publishes nothing, and says why.
+
+A bridge without `stage` (an older hive, a test double) keeps the earlier behaviour below: a key holder's tap signs the
+record directly.
 
 **With the key the community is the published list (jwize 2026-11-14).** When a key of yours answers on the page (the
 hive beside it, or a phone that took its owner's invite), a tile from another domain's row going into your community is

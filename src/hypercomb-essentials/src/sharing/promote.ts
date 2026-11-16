@@ -20,6 +20,7 @@ import {
 import { derivedArrival } from './arrival-derive.js'
 import { publishArrivalPlan } from './arrival-plan-publish.js'
 import { ownHiveRoot, setHiveRoot } from './hive-pointer.js'
+import { showcaseHome } from './showcase-record.js'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 const STORE_KEY = '@hypercomb.social/Store'
@@ -117,17 +118,23 @@ export async function promoteForCommunity(zone: string, lineage: string, deps: {
   readonly root?: (host: string, key: string) => Promise<string | null>
   readonly record?: (host: string, sig: string) => Promise<string | null>
   readonly promote?: typeof promoteBranch
+  /** Where the zone's visitors read this key's index (showcase-record.ts showcaseHome). */
+  readonly home?: (zone: string) => Promise<string | null>
 } = {}): Promise<CommunityPromotion> {
   const root = deps.root ?? ((host: string, key: string) => ownHiveRoot(host, key))
-  const head = await root(zone, lineage).catch(() => null)
-  if (!head) return { ok: false, reason: `${lineage} is not published on ${zone} yet` }
-  const pointer = await root(zone, promotedPointer(lineage)).catch(() => null)
+  // READ AND PROMOTED WHERE THE VISITORS READ (2026-11-15): jwize.com's apex is the owner's relay, which answers with a
+  // stray index of its own; the head and the promotion live in the index at the zone's showcase home, the store its
+  // sites read. Asked at the bare zone, an own creation going live from the desktop failed as "not published yet".
+  const host = (await (deps.home ?? showcaseHome)(zone).catch(() => null)) ?? zone
+  const head = await root(host, lineage).catch(() => null)
+  if (!head) return { ok: false, reason: `${lineage} is not published on ${host} yet` }
+  const pointer = await root(host, promotedPointer(lineage)).catch(() => null)
   if (pointer) {
-    const text = await (deps.record ?? readPromotionRecord)(zone, pointer).catch(() => null)
+    const text = await (deps.record ?? readPromotionRecord)(host, pointer).catch(() => null)
     if (text && promotesHead(text, head)) return { ok: true, promoted: false }
   }
   const segments = lineage.split('/').map(part => part.trim()).filter(Boolean)
-  const result = await (deps.promote ?? promoteBranch)({ host: zone, lineage, segments, head, plan: null })
+  const result = await (deps.promote ?? promoteBranch)({ host, lineage, segments, head, plan: null })
     .catch((error: unknown): PromoteResult => ({ ok: false, reason: error instanceof Error ? error.message : 'failed' }))
   return result.ok ? { ok: true, promoted: true } : { ok: false, reason: result.reason }
 }
