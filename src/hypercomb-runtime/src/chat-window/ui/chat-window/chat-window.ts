@@ -160,6 +160,7 @@ import {
   parseHypercombObservationGrammars,
   READ_PAGE_CHARS,
   type HypercombTreeReader,
+  type ReadRepeats,
 } from './hypercomb-observation'
 import { contextNeedFor, effortForWork, effortFromJev, effortInThread, isCodeMessage, type MessageEffort } from './message-effort'
 import { CHAT_CONTEXT_COMPILER, compileChatContext } from './context-window-compiler'
@@ -7568,6 +7569,11 @@ export class ChatWindow {
       let rounds = 0
       let readRounds = 0
       let readChars = 0
+      // What this leg has already answered and the model still has in front
+      // of it, by read line: an answer that comes back exactly the same is
+      // sent as one line (hypercomb-observation.ts ReadRepeats). The leg's
+      // own, so a new leg starts empty; emptied when rounds fold away.
+      const seenReads: ReadRepeats['memory'] = new Map()
       let lastRound = false
       let unwrittenSaid = false
       let unreadSaid = false
@@ -7849,6 +7855,9 @@ export class ChatWindow {
             maxNodes: 48,
             maxBytes: perReadBytes,
             signal,
+            // What this leg already answered: a read whose source has not
+            // moved is answered without being read again.
+            repeats: { memory: seenReads, round: rounds + 1 },
           })
           const receipt = withoutWithheld(read, covers)
           // Cut short is judged on the read as it came back: a tree that left
@@ -7859,7 +7868,11 @@ export class ChatWindow {
             const read = result.read as { ok?: boolean; truncated?: boolean; notesTruncated?: boolean }
             return read.ok === true && (read.truncated === true || read.notesTruncated === true)
           })) readsCut = true
-          const content = (contextReceipt ? `${contextReceipt}\n\n` : '') + formatHypercombObservationReceipt(receipt)
+          // Remembered on a copy: an answer that is refused below (too large,
+          // or read while the tree moved) never reaches the model, so it
+          // must not count as one it has.
+          const seenNow: ReadRepeats['memory'] = new Map(seenReads)
+          const content = (contextReceipt ? `${contextReceipt}\n\n` : '') + formatHypercombObservationReceipt(receipt, { memory: seenNow, round: rounds + 1 })
             + (asides.length ? `\n\n${asides.join('\n')}` : '')
           if (content.length > remaining) {
             // A BLOCK LARGER THAN A WHOLE FRESH STRETCH IS NOT HANDED OVER.
@@ -7885,6 +7898,7 @@ export class ChatWindow {
           }
           readRounds++
           turnReads++
+          for (const [line, answered] of seenNow) seenReads.set(line, answered)
           for (const result of receipt.results) {
             if (result.kind !== 'find' || !result.read.ok) continue
             const found = result.read
@@ -8769,6 +8783,8 @@ export class ChatWindow {
           systemTokens: estimateTokens(system), window, reserve: harnessNow.leg.reserveTokens,
         })
         if (folded.folded) {
+          // The folded rounds' answers are no longer in front of the model.
+          seenReads.clear()
           messages.splice(0, messages.length, ...folded.messages as typeof messages)
           stage(AGENT_FOLD, { round: rounds, folded: folded.folded, kept: harnessNow.leg.keepVerbatim })
         }

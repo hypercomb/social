@@ -381,3 +381,54 @@ there:
 - **Still shown, never refused.** Each block still waits in the Execution
   column under the owner's policy, and a line that leaves the machine still
   waits for a hand. The chat never signs: Publish is the owner's button.
+
+## A read answered once is not sent twice (2026-11-15)
+
+*jwize:* "the commands could be collapsed into chunks that could skip
+compute … you could get the data before having to execute anything."
+
+The store already computes once. A read by signature never changes. A tile
+read is kept until the tree moves. A find is built from records keyed by
+layer signature, so a changed tile is a new signature and every untouched
+branch is still a hit.
+
+The chat did not. A model that asked for a read it already had was sent the
+whole answer again, and every later round paid for both copies. Linking six
+creations to a card read `/business-card` six times.
+
+Now a leg remembers the answer it gave to each read line. When the same line
+is asked again and the answer is exactly the same, the model is sent one
+line: the read is unchanged, and the answer is above. Exactly the same is the
+whole test. A tile's signature, its files and every row of a find are inside
+the answer, so an answer that matches is one where nothing it read has
+changed. No date is kept.
+
+- The memory is only as good as the model's view. It is emptied when rounds
+  fold out of the leg, and a new leg starts without one.
+- An answer the hive refused (too large for the leg, or read while the tree
+  moved) is not remembered: the model never saw it.
+- An answer under 400 characters is sent as it is.
+- Only the same read line is matched. The same file opened another way, or
+  from another offset, is another read.
+
+Two more steps on the same memory (2026-11-16, "implement the ideas"):
+
+- **Only what differs.** When the same read line comes back changed in part,
+  the model is sent the difference: `now` holds each changed field as it is
+  now, `added` and `removed` hold the rows of a list that came and went, and
+  `gone` names fields no longer there. Everything not named is as it was
+  given above. A list whose rows were reordered is given whole, and so is
+  any answer whose difference is more than 60% of it. What is remembered is
+  always the whole answer as it is now, so the next change is told against
+  that.
+- **Not read at all.** A read whose source has not moved is answered before
+  anything is executed. Two kinds can be told without reading: bytes opened
+  by signature, which a signature names for good, and a tree or a find,
+  which stand while the heads they saw stand (the reader's own
+  `validateSnapshots`). A tile read is always read again, because its notes
+  change without its layer changing. Code, a pool and a name explored are
+  asked every time. The whole of a block whose reads are all of the first
+  two kinds is answered with no read.
+
+`hypercomb-runtime` `hypercomb-observation.ts` (`ReadRepeats`), used by
+`chat-window.ts`.

@@ -283,6 +283,9 @@ export type HypercombRead =
   | { readonly kind: 'code'; readonly read: HypercombCodeRead }
   | { readonly kind: 'pool'; readonly read: HypercombPoolRead }
   | { readonly kind: 'explore'; readonly read: HypercombExploreRead }
+  /** A read the leg answered in round `round` whose source has not moved:
+   *  nothing was read again (ReadRepeats, below). */
+  | { readonly kind: 'unmoved'; readonly read: { readonly ok: true; readonly root: string; readonly round: number } }
 
 export type HypercombObservationPlan = {
   readonly observations: readonly HypercombObservation[]
@@ -620,6 +623,9 @@ export const executeHypercombObservationPlan = async (
     readonly maxNodes?: number
     readonly maxBytes?: number
     readonly signal?: AbortSignal
+    /** What the leg already answered: a read whose source has not moved is
+     *  not read again (unmovedSince). */
+    readonly repeats?: ReadRepeats
   } = {},
 ): Promise<HypercombObservationReceipt> => {
   const maxDepth = Math.max(0, Math.min(3, Math.floor(options.maxDepth ?? 2)))
@@ -634,6 +640,13 @@ export const executeHypercombObservationPlan = async (
     }
     const { grammar, verb, segments, sig, query, from, section, currentPage } = observation
     const root = verb === 'code' ? 'code' : verb === 'pool' ? `pool ${query ?? ''}` : verb === 'explore' ? `explore ${query ?? ''}` : sig ? sig : segments.length ? `/${segments.join('/')}` : '/'
+    const held = await unmovedSince(observation, options.repeats, reader, options.signal)
+    if (held) {
+      results.push({ grammar, kind: 'unmoved', read: { ok: true, root, round: held.round } })
+      // The heads it stood on are still part of what this turn rests on.
+      if (held.snapshot) snapshots.push(held.snapshot)
+      continue
+    }
     // OPEN WHAT A SIGNATURE NAMES (Jaime, 2026-09-13: "open and review every
     // resource and including the code"): a sig that is no layer is a module,
     // a dependency or a resource, and its bytes come back a page at a time.
@@ -1168,13 +1181,198 @@ const cutNoteOf = (found: Extract<HypercombFindRead, { ok: true }>): Record<stri
  *  (live 2026-10-22: 3 of 9 correct finds flagged, supported .44 to .75). */
 const WHOLE_FIND_NOTE = 'the walk finished, so this is every match under the route: give the routes and stop; do not describe where they sit, do not guess what they are, do not add offers or questions'
 
-/** JSON keeps hostile labels data-shaped. Snapshot handles stay host-private. */
+/**
+ * A READ ANSWERED ONCE IS NOT SENT TWICE (jwize, 2026-11-15: "the commands
+ * could be collapsed into chunks that could skip compute … you could get the
+ * data before having to execute anything").
+ *
+ * The store already computes once: a read by signature never changes, a tile
+ * read is kept until the tree moves, a find is built from records keyed by
+ * layer signature. The chat did not: a model that asked for a read it already
+ * had was sent the whole answer again, and every later round paid for both
+ * copies. Linking six creations to a card read `/business-card` six times.
+ *
+ * So a leg remembers, for each read line, the answer it gave. Asked again,
+ * an answer that is exactly the same goes back as one line pointing at the
+ * one above. Exactly the same is the whole test: the tile's signature, its
+ * files, every row of a find are all inside the answer, so an answer that
+ * matches is one where nothing it read has changed, and no date is kept.
+ *
+ * The memory is the caller's and only as good as the model's view: it is
+ * dropped when rounds fold out of the leg, and a new leg starts without one
+ * (chat-window.ts). Short answers are sent as they are: a pointer saves
+ * nothing on them.
+ *
+ * Two more steps on the same memory (2026-11-16, "implement the ideas"):
+ * an answer that changed in part goes back as only what differs
+ * (differenceOf), and a read whose source has not moved is not read at all
+ * (unmovedSince): the answer is known before anything is executed.
+ */
+export type RememberedRead = {
+  /** The round that last answered this read line. */
+  readonly round: number
+  readonly digest: string
+  /** The answer as the model has it now: what a changed answer is compared with. */
+  readonly answer?: Record<string, unknown>
+  /** The heads a tree or a find stood on, as the reader names them. */
+  readonly snapshot?: string
+}
+
+export type ReadRepeats = {
+  readonly memory: Map<string, RememberedRead>
+  /** The round being answered, counted from 1 within the leg. */
+  readonly round: number
+}
+
+/** Below this many characters an answer is sent again as it is. */
+export const REPEAT_MIN_CHARS = 400
+
+/** Two plain hashes and the length: enough to tell one answer from another
+ *  inside one leg, and nothing leaves the device by it. */
+const digestOf = (text: string): string => {
+  let a = 0x811c9dc5
+  let b = 5381
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+    a = Math.imul(a ^ code, 0x01000193)
+    b = (Math.imul(b, 33) ^ code) | 0
+  }
+  return `${text.length}:${(a >>> 0).toString(36)}:${(b >>> 0).toString(36)}`
+}
+
+/** One read line, as the leg remembers it. */
+const readKeyOf = (grammar: string): string => grammar.trim().split(/\s+/).join(' ')
+
+const roundsAgo = (ago: number): string => ago === 1 ? 'one round' : `${ago} rounds`
+
+/** The one line an unchanged read is answered with. */
+const unchangedLine = (grammar: string, root: unknown, ago: number): Record<string, unknown> => ({
+  grammar,
+  ...(root !== undefined ? { root } : {}),
+  unchanged: true,
+  unchangedNote: `this read was answered ${roundsAgo(ago)} ago and nothing it read has changed since: what you were given above still stands. use it; do not ask again`,
+})
+
+/** A changed answer is sent as its difference only when that is at most this
+ *  share of the whole; past it the whole is plainer and costs little more. */
+const DIFFERENCE_WORTH = 0.6
+
+/**
+ * ONLY WHAT DIFFERS. Between two answers to the same read line: a field that
+ * is the same is left out; a list whose rows only came and went, in the same
+ * order, is its rows added and its rows removed; anything else that changed
+ * is given whole, as it is now. Null when nothing can be left out.
+ */
+const differenceOf = (before: Record<string, unknown>, now: Record<string, unknown>): Record<string, unknown> | null => {
+  if (before['error'] !== undefined || now['error'] !== undefined) return null
+  const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
+  const changed: Record<string, unknown> = {}
+  const added: Record<string, unknown[]> = {}
+  const removed: Record<string, unknown[]> = {}
+  const gone: string[] = []
+  let kept = 0
+  for (const field of new Set([...Object.keys(before), ...Object.keys(now)])) {
+    if (field === 'grammar' || field === 'root') continue
+    const was = before[field]
+    const is = now[field]
+    if (same(was, is)) { kept++; continue }
+    if (is === undefined) { gone.push(field); continue }
+    if (Array.isArray(was) && Array.isArray(is)) {
+      const wasRows = was.map(row => JSON.stringify(row))
+      const isRows = is.map(row => JSON.stringify(row))
+      const wasSet = new Set(wasRows)
+      const isSet = new Set(isRows)
+      // Only when the rows that stayed are in the order they were: a list
+      // that was reordered is given whole.
+      if (wasSet.size === wasRows.length && isSet.size === isRows.length
+        && wasRows.filter(row => isSet.has(row)).join('\n') === isRows.filter(row => wasSet.has(row)).join('\n')) {
+        const came = is.filter((_, index) => !wasSet.has(isRows[index]))
+        const went = was.filter((_, index) => !isSet.has(wasRows[index]))
+        if (came.length) added[field] = came
+        if (went.length) removed[field] = went
+        continue
+      }
+    }
+    changed[field] = is
+  }
+  if (!kept && !Object.keys(added).length && !Object.keys(removed).length) return null
+  return {
+    ...(Object.keys(changed).length ? { now: changed } : {}),
+    ...(Object.keys(added).length ? { added } : {}),
+    ...(Object.keys(removed).length ? { removed } : {}),
+    ...(gone.length ? { gone } : {}),
+  }
+}
+
+/**
+ * A READ WHOSE SOURCE HAS NOT MOVED IS NOT READ AGAIN. Two kinds can be told
+ * without reading: bytes opened by signature, which a signature names for
+ * good, and a tree or a find, which stand while the heads they saw stand
+ * (the reader's own test, `validateSnapshots`). A tile read is always read:
+ * its notes change without its layer changing. Code, a pool and a name
+ * explored are asked every time, since a pool and a name are the network's.
+ */
+const unmovedSince = async (
+  observation: HypercombObservation,
+  repeats: ReadRepeats | undefined,
+  reader: HypercombTreeReader,
+  signal?: AbortSignal,
+): Promise<RememberedRead | null> => {
+  if (!repeats) return null
+  const held = repeats.memory.get(readKeyOf(observation.grammar))
+  if (!held?.answer || held.round >= repeats.round || held.answer['error'] !== undefined) return null
+  if (observation.verb === 'read' && observation.sig) {
+    // Only an answer that WAS bytes: a signature that opened as a tile is a tile read.
+    return held.answer['of'] !== undefined && held.answer['sig'] === observation.sig ? held : null
+  }
+  if ((observation.verb === 'tree' || observation.verb === 'find') && held.snapshot) {
+    try { return await reader.validateSnapshots([held.snapshot], signal) ? held : null } catch (error) {
+      if (signal?.aborted) throw error
+      return null
+    }
+  }
+  return null
+}
+
+const onceOnly = (
+  grammar: string, observation: Record<string, unknown>, repeats: ReadRepeats | undefined, snapshot?: string,
+): Record<string, unknown> => {
+  if (!repeats) return observation
+  const text = JSON.stringify(observation)
+  const key = readKeyOf(grammar)
+  const digest = digestOf(text)
+  const before = repeats.memory.get(key)
+  const again = !!before && before.round < repeats.round && text.length >= REPEAT_MIN_CHARS
+  if (again && before!.digest === digest) return unchangedLine(grammar, observation['root'], repeats.round - before!.round)
+  repeats.memory.set(key, { round: repeats.round, digest, answer: observation, ...(snapshot ? { snapshot } : {}) })
+  if (again && before!.answer) {
+    const difference = differenceOf(before!.answer, observation)
+    if (difference) {
+      const said = {
+        grammar,
+        ...(observation['root'] !== undefined ? { root: observation['root'] } : {}),
+        changed: true,
+        changedNote: `this read was answered ${roundsAgo(repeats.round - before!.round)} ago and part of it has changed. only what differs is here: now is each changed field as it is now, added and removed are the rows that came and went, gone are fields no longer there. everything not named here is as you were given it above`,
+        ...difference,
+      }
+      if (JSON.stringify(said).length <= text.length * DIFFERENCE_WORTH) return said
+    }
+  }
+  return observation
+}
+
+/** JSON keeps hostile labels data-shaped. Snapshot handles stay host-private.
+ *  With `repeats`, a read the leg already answered the same way is one line,
+ *  and one that changed in part is only what differs. */
 export const formatHypercombObservationReceipt = (
   receipt: HypercombObservationReceipt,
+  repeats?: ReadRepeats,
 ): string => JSON.stringify({
   kind: 'hypercomb-tree-observation',
   structureOnly: receipt.results.every(result => result.kind === 'tree'),
-  observations: receipt.results.map(result => {
+  observations: receipt.results.map(result => result.kind === 'unmoved'
+    ? unchangedLine(result.grammar, result.read.root, Math.max(1, (repeats?.round ?? result.read.round + 1) - result.read.round))
+    : onceOnly(result.grammar, ((): Record<string, unknown> => {
     const { grammar, read } = result
     const scope = result.kind === 'find' && result.currentPage
       ? { scopeNote: scopeNoteOf(read.root, grammar, result.read.ok && !result.read.truncated) }
@@ -1294,6 +1492,6 @@ export const formatHypercombObservationReceipt = (
         ? { code: node.code, codeNote: 'running code that names this tile; read <sig> <section> <at> opens it at that line' }
         : {}),
     }
-  }),
+  })(), repeats, (result.kind === 'tree' || result.kind === 'find') && result.read.ok ? result.read.snapshot : undefined)),
 })
 
