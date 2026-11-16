@@ -438,9 +438,13 @@ export const eitherOwner = (...owners: readonly (OwnerBridge | null)[]): OwnerBr
   let chosen: OwnerBridge | null = null
   return {
     hello: async () => {
-      for (const owner of present) {
-        const key = await owner.hello().catch(() => '')
-        if (key) { chosen = owner; return key }
+      // ALL ASKED AT ONCE (jwize 2026-11-16: the confirm "takes a few seconds to show"). A hive that shares no origin
+      // with this page never answers, and asking it first held this browser's own key back by its whole wait; now
+      // that wait and the key's own reads run together. The first in the list that answers with a key still signs.
+      const asked = present.map(owner => owner.hello().catch(() => ''))
+      for (const [at, answer] of asked.entries()) {
+        const key = await answer
+        if (key) { chosen = present[at]!; return key }
       }
       return ''
     },

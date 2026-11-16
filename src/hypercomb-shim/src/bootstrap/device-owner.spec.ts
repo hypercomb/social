@@ -293,6 +293,43 @@ describe('a phone takes its owner\'s invite, then promotes from its own key', ()
     expect(await alone.hello()).toBe(anchor)
     expect(eitherOwner(null, null)).toBeNull()
   })
+
+  it('asks every owner at once: a key of this browser is not held behind a slow hive that answers nothing, and the first with a key still wins (jwize 2026-11-16: the confirm "takes a few seconds to show")', async () => {
+    vi.useFakeTimers()
+    try {
+      const after = (ms: number, key: string) => () => new Promise<string>(resolve => setTimeout(() => resolve(key), ms))
+      const toggle = vi.fn(async () => ({ ok: true as const, changed: false }))
+      // The hive beside the page takes a second to say it has no key; this browser's own reads take a second too.
+      const slowHive = { hello: vi.fn(after(1000, '')), toggle }
+      const phone = { hello: vi.fn(after(1000, anchor)), toggle: vi.fn(async () => ({ ok: true as const, changed: true })) }
+      const either = eitherOwner(slowHive, phone)!
+      let answered: string | undefined
+      void either.hello().then(key => { answered = key })
+      // Both are asked the moment the page asks, not the second after the first has answered.
+      expect(slowHive.hello).toHaveBeenCalledTimes(1)
+      expect(phone.hello).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1000)
+      // One wait, not two in a row.
+      expect(answered).toBe(anchor)
+      await either.toggle({ zone: ZONE, pubkey: anchor, lineage: 'dylan', on: true })
+      expect(phone.toggle).toHaveBeenCalled()
+      expect(toggle).not.toHaveBeenCalled()
+
+      // Both answer with a key: the first in the list signs, even when the second answered sooner.
+      const hive = { hello: vi.fn(after(1000, 'h'.repeat(64))), toggle: vi.fn(async () => ({ ok: true as const, changed: true })) }
+      const quick = { hello: vi.fn(after(10, anchor)), toggle: vi.fn(async () => ({ ok: true as const, changed: false })) }
+      const both = eitherOwner(hive, quick)!
+      let first: string | undefined
+      void both.hello().then(key => { first = key })
+      await vi.advanceTimersByTimeAsync(10)
+      expect(first).toBeUndefined()
+      await vi.advanceTimersByTimeAsync(990)
+      expect(first).toBe('h'.repeat(64))
+      await both.toggle({ zone: ZONE, pubkey: anchor, lineage: 'dylan', on: true })
+      expect(hive.toggle).toHaveBeenCalled()
+      expect(quick.toggle).not.toHaveBeenCalled()
+    } finally { vi.useRealTimers() }
+  })
 })
 
 describe('the record\'s bytes', () => {

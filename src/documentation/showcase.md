@@ -521,9 +521,26 @@ mirrored in the shim and essentials). It lives beside the showcase at the zone's
 owners' reads and writes the same list, and a visitor is never drawn it.
 
 - **Stage.** Managing, where a key of yours answers and can stage (`OwnerBridge.stage`: the hive's `applyStage`, a
-  phone's `device-owner.ts stageChange`), a tap in any row brings the tile into the staged list, or sends it back, at
-  once and with no question: nothing a visitor sees changes. A zone with nothing staged yet starts from what its
-  visitors see now. One per subdomain still holds: a tile from a host already in the community takes that one's place.
+  phone's `device-owner.ts stageChange`), a tap in a followed domain's row, or on a lit tile in the community row,
+  brings the tile into the staged list, or sends it back, at once and with no question: nothing a visitor sees changes.
+  A zone with nothing staged yet starts from what its visitors see now. One per subdomain still holds: a tile from a host
+  already in the community takes that one's place.
+- **A gray tile in the community goes live with one confirm (jwize 2026-11-16: "we also need to be able to see the
+  confirm button. It starts off screen and then takes a few seconds to show. This is when we publish a grayed out item
+  from our community").** Managing, a tap on a tile the community row draws gray (not live) puts "Publish <name> to every
+  visitor" across the foot at once — nothing is read or signed before it shows. Yes stages it where the owners keep a
+  list (so the next Publish keeps it), then signs it live, optimized as it goes (`OwnerBridge.toggle`); a zone with no
+  showcase yet publishes its staged list instead, so the first record keeps what visitors already saw. A tile that went
+  live while the bar was up is left alone, and a press while another change is still being signed says so. Off a phone
+  with no key the hive is handed the switch, which puts it live but does not stage it. Sending a gray tile back out of
+  the staged list is a tap in the row of the domain it came from.
+- **The key is asked for at once.** `eitherOwner.hello` asks the hive beside the page and this browser's own key
+  together (the first in the list that answers with a key still signs), and the page asks again when Manage turns on
+  with no answer yet. The publish bar is never dimmed while a stage is being signed: a press waits for it.
+- **Once per creation (jwize 2026-11-16: "I am seeing two business-card entries").** A followed domain's own ledger names
+  what it serves, so a creation this domain's ledger verified also arrives as that peer's tile. Where this domain's own
+  tile is drawn and names every creation the peer's tile names, only the own tile shows (`oncePerCreation`, applied
+  after the page's filters); a peer's tile naming anything else, and one followed domain against another, are untouched.
 - **Drawn.** In the community row (this domain's row, managing) a published tile is lit, a staged one is gray and ringed
   (`.hex.staged`), and a published one sent back is marked as leaving (`.hex.leaving`); in a domain's row a tile in the
   community is lit. The staged list is drawn wherever it is signed, so a device with no key sees what was staged elsewhere;
@@ -618,6 +635,31 @@ and once the row holds anything. An empty row in the iPhone view draws no empty 
 
 A domain whose ledger names no owner has nothing signed to read, so its row says "Nothing is published here yet." and never
 "Could not read what is published here."
+
+### The hive's Publish window: two acts, stage then publish (jwize 2026-11-16)
+
+"You should have your own domain and the community separate since you are feeding the community from all domains
+including yourself. Then there are only on off no selected … This makes only two things you can do in the app here.
+Add to community through domains and publish live. You stage and then publish in community. And you stage from the
+hypercomb.io or your host. So locally the publishing should now be called staging."
+
+The window (`hypercomb-shared/ui/publish-panel/`, drone `sharing/publish-status.drone.ts`) has two levels at the top:
+
+- **Your community**, apart, on your own domain (the public host you named). Everything switched on in any domain
+  stands in it: gray while it is only staged, lit once it is live in the owners' signed `showcase:<zone>`. A press on
+  a gray one publishes it live (one of your own creations is optimized first, `promoteForCommunity`); a press on a lit
+  one takes it out, gray again and still on in its domains. A name with several versions (several publishers, or the
+  same name on several domains under different keys) opens to its versions; a press on one makes that one live and
+  takes any other live version of the name out in the same write (`sharing/community-switch.ts`). With no host named
+  there is no community yet, and the window says so.
+- **The domains**, yours first. In a domain each creation is on or off, nothing else: on stages it there (sealed,
+  uploaded, its door opened), off takes it off. There are no groups, no Ctrl-selection and no mixed state.
+
+What feeds the community: this hive's creations on in any of its domains, what the domains it follows offer
+(`offeredInstances`), and whatever the showcase already names, so a live one can always be taken out. The front
+door's own staged list (`staged:<zone>`) is updated with the same difference when one is signed, so a phone that
+publishes what is staged does not undo a press made here. Locally the word is *stage* ("Stage changes", "staging");
+*publish* is the community's word alone.
 
 ### Every look uses the page it is on (jwize 2026-11-13)
 
