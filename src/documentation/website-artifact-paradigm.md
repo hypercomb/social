@@ -54,6 +54,10 @@ container artifact.
     frame with holes, not a picture that was cut up. An empty hole is a valid,
     finished state; a filled one seats the part's own visual and the whole reads
     as one image again.
+12. **A part runs alone, and together.** Every part is a building block that
+    works with no whole present. A parent is only ever a TRAIT the child wears
+    or INLINE content of its own, so it never has to run for its children to.
+    See *A parent is a trait or inline*.
 
 ## Why this is the Life Primitive
 
@@ -390,6 +394,61 @@ They compose rather than compete: an arrangement of arity 7 whose slot 3 is
 occupied by a piece marked `hole`. Which is the piece protocol's own sentence —
 *"Creation = pieces + an arrangement. The arrangement is a layer."* — with the
 arrangement now built and the marks still to come.
+
+## A parent is a trait or inline
+
+jwize, 2026-11-15: *"The pieces can run together but they should also be
+building blocks that run alone."* And: *"The parents should be only traits or
+inline and then the placeholders don't need to run necessarily but you should be
+able to visit the hexagons and turn them on or off for debugging and since any
+child relationship can be a trait (this means that the child tile will take care
+of its functionality)."*
+
+This is rules 2, 3 and 11 said from the child's side:
+
+- **Any child relationship can be a trait.** "This belongs under that" is a mark
+  the child wears, never something the parent holds. The child therefore takes
+  care of its own functionality: nothing it needs in order to work lives in the
+  parent.
+- **A parent is a trait or inline.** Seen from a part, a parent is one of two
+  things: the trait that seats the part somewhere, or the parent's own content
+  written straight into it (its frame, its assembled page). There is no third
+  form in which a parent holds or runs its children.
+- **A placeholder need not run.** A parent that is only a place for parts to sit
+  can stay unpublished and unrun forever, and every part still works. This is
+  *Filling is not required* read the other way round: the whole is not required
+  either.
+- **Every part can be visited and switched.** A part is a tile, so it can be
+  walked to in the hexagons and turned on or off there. Debugging a whole is
+  turning its parts off one at a time. **Not built**: no per-part switch exists
+  as of 2026-11-15. Where it lands, its state is not derivable from layers, so
+  it is state with its own pool of meaning, never a derived cache.
+
+### Running alone and running together are two addresses of one head
+
+A tile nested at `/work/meetups` can answer at its own address
+(`meetups.hypercomb.com`) and, when its parent is published, at the path under
+the parent (`work.hypercomb.com/meetups`). The own address is the part running
+alone and is first-class, not an alias to forward. The path is the same part
+running together. Both resolve to the same published head, so they cannot
+drift, and the parent's address is optional: `work` need not be published for
+`meetups` to stand.
+
+"A tile reflects a subdomain" therefore means a tile that stands alone,
+wherever it sits in the tree, not only a top tile.
+
+### The two parent forms behave differently when a part is switched
+
+| Parent form | What it is | Switching a part |
+|---|---|---|
+| **Trait** | parts seated at runtime by the marks they wear | live |
+| **Inline** | the parts' content assembled into the parent at build | takes effect at the next build |
+
+Inline is the optimized, published form of the same composition; the parts and
+their marks stay as tiles either way. Runtime seating is slow on a large hive
+today (finding a page's members walks every tile), which is why the first mined
+site was assembled inline. That is a cost to remove, not a reason to let a
+parent hold its parts.
 
 ## Filing is not membership
 
