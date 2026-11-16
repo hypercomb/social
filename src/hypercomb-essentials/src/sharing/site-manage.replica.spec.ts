@@ -95,7 +95,7 @@ vi.hoisted(() => {
 const { EffectBus } = await import('@hypercomb/core')
 hive.emit = (name, payload) => EffectBus.emit(name, payload)
 const { SiteManageElement, SITE_MANAGE_SURFACE, RELIST_MS } = await import('./site-manage.view.js')
-const { SITE_REPLICA_POOL, isHusk, lagging, writeReceipt, readReceipt } = await import('./site-replica.js')
+const { SITE_REPLICA_POOL, isHusk, lagging, writeReceipt, readReceipt, replicaChatConvoId } = await import('./site-replica.js')
 if (!customElements.get(SITE_MANAGE_SURFACE)) customElements.define(SITE_MANAGE_SURFACE, SiteManageElement)
 
 const HEAD = sig('1'), NEWER = sig('7'), LOC = 'loc:/business-card'
@@ -409,7 +409,48 @@ describe('the chat', () => {
     const asked: unknown[] = []
     const off = EffectBus.on('chat:open', p => asked.push(p))
     ;(element.querySelector('.sm-chat') as HTMLButtonElement).click()
+    await settle()
     off()
     expect(asked).toEqual([{ convoId: 'chat:tile:/business-card' }])
+  })
+
+  // jwize, 2026-11-16: "archive doesn't seem to work on the subdomain ai
+  // chat". It had worked; the Chat button named the card's own conversation
+  // on every press and put the owner straight back into the one they filed.
+  describe('which conversation the Chat button opens', () => {
+    const OWN = 'chat:tile:/business-card'
+    const threads = (rows: { convoId: string; archived?: boolean; lastAt?: number }[]) => ({
+      tileConvoId: (segments: readonly string[]) => `chat:tile:/${segments.join('/')}`,
+      newTileConvoId: (segments: readonly string[]) => `chat:tile:/${segments.join('/')}::fresh`,
+      tilePathOf: (convoId: string) => (/^chat:tile:([^:]*)/.exec(convoId)?.[1] ?? ''),
+      listConversations: async () => rows,
+    })
+
+    it('is the card tile’s own while it is live, or has never been spoken in', async () => {
+      expect(await replicaChatConvoId('business-card', threads([{ convoId: OWN, lastAt: 5 }, { convoId: `${OWN}::a`, lastAt: 9 }]))).toBe(OWN)
+      expect(await replicaChatConvoId('business-card', threads([{ convoId: `${OWN}::a`, lastAt: 9 }]))).toBe(OWN)
+      expect(await replicaChatConvoId('business-card', threads([]))).toBe(OWN)
+    })
+
+    it('is the most recent live conversation on the card once its own was put away', async () => {
+      expect(await replicaChatConvoId('business-card', threads([
+        { convoId: OWN, archived: true, lastAt: 50 },
+        { convoId: `${OWN}::older`, lastAt: 10 },
+        { convoId: `${OWN}::newer`, lastAt: 30 },
+        { convoId: `${OWN}::filed`, archived: true, lastAt: 40 },
+        { convoId: 'chat:tile:/elsewhere::x', lastAt: 99 },
+      ]))).toBe(`${OWN}::newer`)
+    })
+
+    it('is a fresh one on the card when everything on it was put away', async () => {
+      expect(await replicaChatConvoId('business-card', threads([
+        { convoId: OWN, archived: true }, { convoId: 'chat:tile:/elsewhere::x', lastAt: 99 },
+      ]))).toBe(`${OWN}::fresh`)
+    })
+
+    it('is the card tile’s own when the list cannot be read, or there are no threads to ask', async () => {
+      expect(await replicaChatConvoId('business-card', { ...threads([]), listConversations: async () => { throw new Error('unreadable') } })).toBe(OWN)
+      expect(await replicaChatConvoId('business-card')).toBe(OWN)
+    })
   })
 })
