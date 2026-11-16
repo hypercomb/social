@@ -230,7 +230,7 @@ export const workInstruction = (powers: WorkPowers): string => {
     return `WORKING ON THE HIVE. You cannot read or change the hive in this conversation. Answer from the transcript, and say what you would need to see.\n\n${HANDOFF_INSTRUCTION}`
   }
   const parts = [
-    'WORKING ON THE HIVE. You work in rounds and keep going until the participant\'s request is done. When you need to read the hive or change it, end your reply with ONE fenced block and stop there. The result comes back to you as the next message; continue from it. When the work is done, answer in prose with no block.',
+    'WORKING ON THE HIVE. You work in rounds and keep going until the participant\'s request is done. When you need to read the hive or change it, end your reply with ONE fenced block and stop there. The result comes back to you as the next message; continue from it. When the work is done, answer in prose with no block. A reply with no block ENDS the turn: never close a reply by saying what you are about to read or do. Sending the block is how you do it.',
     CONTINUE_INSTRUCTION,
     HANDOFF_INSTRUCTION,
   ]
@@ -558,6 +558,44 @@ export const claimsUnranChange = (answer: string, request: string): boolean =>
 
 export const unranChangeMessage = (request: string): string =>
   `Nothing ran in this turn, so the hive did not change — but your answer says it did. If the change should happen, write it as a ${DO_FENCE_LANG} block and the hive will run it; if it did not happen, say so plainly.${carry(request)}`
+
+/** A QUESTION IS NOT A REQUEST TO CHANGE (the managed card page, 2026-11-15).
+ *  "How does the Update button on this page find out there is a newer
+ *  package?" holds `update` and `page`; answered in full from the source, the
+ *  turn's end still told the model "the page was read and not written, write
+ *  the change now". A message that OPENS as a question asks; "can you …",
+ *  "could you …" and "please" ask for the work itself. */
+const OPENS_ASKING = /^(?:how|what|why|where|when|which|who|whose|is|are|was|were|does|do|did|has|have|should|shall)\b/i
+const ASKS_FOR_WORK = /^(?:can|could|would|will)\s+you\b|\bplease\b/i
+export const onlyAsks = (request: string): boolean => {
+  const said = String(request ?? '').trim()
+  return !!said && !ASKS_FOR_WORK.test(said) && OPENS_ASKING.test(said)
+}
+
+/** ASKED TO CHANGE, AND THE TURN ENDS WITH NOTHING READ AND NOTHING RUN (same
+ *  session). "Put my role back to Owner" was answered "Reading the card's
+ *  details again this turn before writing." and that was the turn: no read,
+ *  no block, four times running. The promise readers (core/work-fence.ts)
+ *  catch the wordings seen so far; this is the net under them, for the next
+ *  wording. It asks only when the request tells the hive to change something
+ *  — the verb where an instruction puts it — and the answer neither declines
+ *  nor asks the participant anything. */
+const TOLD_TO_CHANGE = new RegExp(
+  '(?:^|[.!?;:,]\\s+)'
+  + '(?:(?:please|now|then|actually|ok|okay|and|also|just|so|go ahead and|can you|could you|would you|will you|you should|'
+  + 'i want you to|i need you to|i(?:\'|’)d like you to|let(?:\'|’)s)[,]?\\s+)*'
+  + '(?:make|create|add|put|file|title|rename|tag|hide|move|copy|paste|cut|remove|delete|write|set|change|take|undo|redo|restore|replace)\\b',
+  'i',
+)
+const DECLINES = /\b(?:cannot|can(?:'|’)t|could not|couldn(?:'|’)t|unable|not able|not possible|won(?:'|’)t|will not|refused?|not allowed|not available|no such|does not exist|doesn(?:'|’)t exist|there is no|already)\b/i
+export const leavesChangeUndone = (answer: string, request: string): boolean => {
+  const said = String(answer ?? '').trim()
+  return TOLD_TO_CHANGE.test(String(request ?? '').trim()) && !onlyAsks(request)
+    && !!said && !DECLINES.test(said) && !/\?\s*$/.test(said)
+}
+
+export const undoneChangeMessage = (request: string): string =>
+  `Nothing was read and nothing ran in this turn, so what the participant asked for is not done, and a reply with no block ends the turn. If you mean to do it, send the block now and nothing after it: a ${READ_FENCE_LANG} block to read first, or a ${DO_FENCE_LANG} or ${WRITE_FENCE_LANG} block to change. If it cannot be done, say why plainly. If the participant has to decide something first, ask them.${carry(request)}`
 
 export const blockUnwrittenMessage =(lang: string, request: string): string =>
   `Your reply carried ${lang} work but not as a block the hive can run, so nothing happened. Write it again as a fenced block: a line of three backticks followed by ${lang}, then one line per request, then a line of three backticks. If you were only describing the block and your answer is finished, give the answer again without it.${carry(request)}`

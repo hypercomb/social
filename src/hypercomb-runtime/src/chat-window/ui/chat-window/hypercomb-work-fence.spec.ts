@@ -429,6 +429,20 @@ describe('a block named and not written', () => {
     expect(splitWork(['/games/bubble holds the game.', '/bubble-bobble-dos-v1/round-001 holds a round.'].join('\n')).unwritten).toBeUndefined()
   })
 
+  // The managed card page, 2026-11-15: each of these ended a turn with nothing
+  // read and nothing run.
+  it('reads a promise inside the line, a step under way, a closing command and a dangling colon', () => {
+    expect(splitWork("The undo didn't take, so I'll remove the tile directly. remove takes the tile off this page; its content and history survive, and the card returns to how it was.").unwritten).toBe('hypercomb-do')
+    expect(splitWork("You're right — I claimed changes before the hive reported them. Let me actually do it: read the card's current details this turn, then write.").unwritten).toBe('hypercomb-read')
+    expect(splitWork("Reading the card's current records first so I can write the change accurately.").unwritten).toBe('hypercomb-read')
+    expect(splitWork(["The cleanest way is one undo step — the take was one step in the page's history, so it restores exactly what was there before.", '', '/undo'].join('\n')).unwritten).toBe('hypercomb-do')
+    expect(splitWork(['Removing a tile runs from your Execution window.', 'Here it is again as the only action:'].join('\n')).unwritten).toBe('hypercomb-do')
+    // A wait on the participant, a sign-off and a route are none of these.
+    expect(splitWork("The tile came from someone else, so I'll wait for your go-ahead before removing it.").unwritten).toBeUndefined()
+    expect(splitWork("Both notes are filed. I'll be here if you need more.").unwritten).toBeUndefined()
+    expect(splitWork(['The card is the tile at', '/business-card/style'].join('\n')).unwritten).toBeUndefined()
+  })
+
   it('says nothing for a sentence, inline code, a quoted example, or a reply that carries a real block', () => {
     expect(splitWork('I ask the hive with a hypercomb-read block when I need to look.').unwritten).toBeUndefined()
     expect(splitWork('The tag is `<block info="hypercomb-read">` in that dialect.').unwritten).toBeUndefined()

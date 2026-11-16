@@ -126,6 +126,19 @@ one writer that owns the only `createWritable` and the only `removeEntry` in
   still need to, once … I'll, I'm about to*) and *let me know / if you'd like*
   excluded, and it applies at a leg's end too. First promise: one nudge round.
   Next: `continue/promised`. Third in a row: `waiting/stalled`.
+- **A promise inside the line** (the managed card page, 2026-11-15). A model
+  writes a paragraph as one line, so the opener is rarely a line's first
+  words: *"The undo didn't take, so I'll remove the tile directly."*, *"You're
+  right. Let me actually do it: read the card's details, then write."* The
+  closing lines are read a clause at a time. A step announced as under way
+  (*"Reading the card's records first so I can write the change."*), a command
+  left alone on the reply's last line (`/undo`), and a last line that ends on
+  a colon with no block after it are the same promise.
+- **Told to change, nothing read, nothing run.** The net under the wordings:
+  when the message tells the hive to change something and the turn's first
+  reply has no block, declines nothing and asks nothing, it goes back once
+  (`leavesChangeUndone`). A message that opens as a question is never a
+  request to change, so a question about a page is not pushed to write it.
 - **Loops.** Two legs in a row with no work round, or the same `left` twice →
   `waiting/stalled`. The request budget stays the ceiling, now checked on every
   round (`budgetSpent` from `#spend`, not only through `decide`) →

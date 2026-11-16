@@ -12,8 +12,10 @@
 // tile's history still reaches it, so a replacement is one undo away. Used by
 // a model's write block on a managed site door (tile-files.drone.ts).
 
+import { isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
 import { listDecorations, removeDecorationAndWait, writeDecoration } from '../commands/decoration-manifest.js'
 import { CARD_DATA_KIND } from '../commands/card-wear.js'
+import { collectSigsDeep } from '../sharing/decoration-closure.js'
 
 /** The two JSON documents a card's record names. */
 export type CardPart = 'details' | 'theme'
@@ -54,6 +56,66 @@ export function cardJsonRefusal(text: string): string | null {
   }
 }
 
+/** A card's JSON names at most this many further resources. */
+export const MAX_CARD_NAMED = 48
+
+type LocalStore = { getResourceLocal?(sig: string): Promise<Blob | null> }
+
+/**
+ * THE BYTES A CARD'S JSON NAMES. The record's payload holds one signature for
+ * the details and one for the theme, and a record's references are read from
+ * its payload, so a signature INSIDE that JSON was never followed: the card's
+ * page is framed with the bytes its records declare and nothing else, and a
+ * publish carries the same set. A model linked four creations' pictures into
+ * the card's details by signature and none of them reached the page
+ * (business-card.jwize.com, 2026-11-15).
+ *
+ * So the writer, who knows its own closure, declares it: every signature in
+ * the details and the theme that THIS DEVICE holds as a resource, and, where
+ * one is a pointer to a resource, the resource it points at. Asked of this
+ * device only, never a host: a signature that names no bytes here is an
+ * address or a key, and declaring it would send every reader after bytes
+ * that do not exist.
+ */
+export async function cardNamedSigs(payload: Readonly<Record<string, unknown>>): Promise<string[]> {
+  const store = window.ioc.get<LocalStore>('@hypercomb.social/Store')
+  if (!store?.getResourceLocal) return []
+  const local = async (sig: string): Promise<Blob | null> => store.getResourceLocal!(sig).catch(() => null)
+  const jsonOf = async (blob: Blob | null): Promise<unknown> => {
+    if (!blob || blob.size > MAX_CARD_BYTES) return undefined
+    try { return JSON.parse(await blob.text()) as unknown } catch { return undefined }
+  }
+  const own = new Set(Object.values(CARD_FIELD).map(field => payload[field]).filter(isSig))
+  const named = new Set<string>()
+  for (const sig of own) {
+    for (const candidate of collectSigsDeep(await jsonOf(await local(sig)))) {
+      if (named.size >= MAX_CARD_NAMED) break
+      if (own.has(candidate) || named.has(candidate)) continue
+      const blob = await local(candidate)
+      if (!blob) continue
+      named.add(candidate)
+      // A pointer names the resource it stands for; both travel.
+      const pointer = await jsonOf(blob)
+      const target = isMetaEnvelope(pointer) ? metaPayloadOf(pointer) : null
+      if (target?.kind === 'resource' && !named.has(target.sig) && await local(target.sig)) named.add(target.sig)
+    }
+  }
+  return [...named]
+}
+
+/** Does the card's record already declare everything its JSON names? A card
+ *  written before the writer declared them does not, and neither does one
+ *  whose pictures arrived on this device after it was written: writing the
+ *  same JSON again must still carry them. */
+export async function cardDeclaresItsNames(segments: readonly string[]): Promise<boolean> {
+  const all = await listDecorations<Record<string, unknown>>({ kind: CARD_DATA_KIND, segments })
+  const found = all.find(({ record }) => isSig(record.payload?.['dataSig'])) ?? all[0]
+  if (!found) return true
+  const declared = new Set((found.record.refs ?? []).map(ref => String(ref).toLowerCase()))
+  const payload = found.record.payload && typeof found.record.payload === 'object' ? found.record.payload : {}
+  return (await cardNamedSigs(payload)).every(sig => declared.has(sig))
+}
+
 /** Point the tile at `segments`'s card to `sig` for `part`. */
 export async function commitCardSig(segments: readonly string[], part: CardPart, sig: string): Promise<CardCommit> {
   if (!isSig(sig)) return { ok: false, error: 'the card was not stored' }
@@ -62,13 +124,16 @@ export async function commitCardSig(segments: readonly string[], part: CardPart,
   if (part === 'theme' && !isSig(kept['dataSig'])) {
     return { ok: false, error: `/${segments.join('/')} has no card yet, and a theme needs one: write card /${segments.join('/')} first` }
   }
+  const payload = { ...kept, [CARD_FIELD[part]]: sig }
+  const refs = await cardNamedSigs(payload)
   for (const prior of all) await removeDecorationAndWait({ sig: prior.sig, segments })
   await writeDecoration({
     kind: CARD_DATA_KIND,
     appliesTo: segments,
-    payload: { ...kept, [CARD_FIELD[part]]: sig },
+    payload,
     segments,
     mark: 'persistent',
+    ...(refs.length ? { refs } : {}),
   })
   return { ok: true }
 }

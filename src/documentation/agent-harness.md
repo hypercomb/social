@@ -364,6 +364,28 @@ the turn (`core/stay-awake.ts`) it took three to six. The bridge renderer
 holds the same lock while its socket is open. A stream silent for ninety
 seconds is given up as busy; a blank completion is asked once more.
 
+**Thought is not charged against the answer (2026-11-15).** A model that
+thinks before it answers pays for the thinking out of the same allowance as
+the answer, and a call that names no allowance is sent 4096 tokens. On
+business-card.jwize.com the model spent all 4096 thinking in 14 of 186 asks.
+Each came back with nothing written after 23 to 70 seconds, and the one
+retry asked the same thing with the same allowance and came back blank
+again, so the leg failed and waited out its backoff. Now a model whose usage
+reports thought is asked with 16384 tokens when the caller named no
+allowance; an answer that was all thought teaches that at once, so the retry
+has the room the first ask lacked; a host that refuses the larger allowance
+is asked again plainly and not asked for it again; and a blank that stays
+blank says where the allowance went. A caller's own allowance is never
+changed (`assistant/answer-room.ts`).
+
+Room alone was not enough. Linking six creations to the card took rounds
+that thought for 6000 to 11000 tokens, and some thought for all 16384 and
+wrote nothing, 115 seconds each. The same model, given a small coding
+question and 16384 tokens, thought for all of it twice and failed after 324
+seconds; asked with low reasoning effort it thought for 4769 and answered
+in 41. So the retry after an answer that was all thought is also asked to
+think less: the lowest effort the adapter knows, for that one ask.
+
 **The vocabulary is the ceiling.** Asked to create a tile, the model answered
 that its only change verbs were keyword, accent, copy, paste, undo, redo,
 postit, organism and story: `create`, `title`, `hide` and `file` were asleep,

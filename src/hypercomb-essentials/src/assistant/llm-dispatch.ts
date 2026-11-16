@@ -29,6 +29,7 @@
 
 import { EffectBus, llmKeyStore } from '@hypercomb/core'
 import { llmActivation } from './llm-activation.js'
+import { THINKING_ROOM, allThought, answerRoom, noteThinking, refuseAnswerRoom } from './answer-room.js'
 import {
   localModelServerUp,
   localTierReason,
@@ -562,13 +563,13 @@ async function* streamProvider(
       rememberLocalChoice(provider, request.model)
       result = provider.fromResponse(await response.json(), request)
     }
-    if (result.text || result.toolCalls?.length) {
-      yield {
-        text: result.text,
-        ...(result.toolCalls?.length ? { toolCalls: result.toolCalls } : {}),
-        model: result.model || request.model,
-        usage: attemptUsage(provider, result, request.model),
-      }
+    // Yielded even when nothing was written: the usage of a blank answer is
+    // how the router tells thought that used up the allowance from silence.
+    yield {
+      text: result.text,
+      ...(result.toolCalls?.length ? { toolCalls: result.toolCalls } : {}),
+      model: result.model || request.model,
+      usage: attemptUsage(provider, result, request.model),
     }
     return
   }
@@ -864,6 +865,12 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
   // queue pass after pass. The busy list is shared and never cleared; who
   // may not be sent it is remembered by provider id.
   const ignoreRefusedBy = new Set<string>()
+  // ROOM FOR THE ANSWER (answer-room.ts). A provider whose host refused the
+  // thinking room is asked plainly for the rest of this call.
+  const plainRoom = new Set<string>()
+  // ...AND LESS THOUGHT. A provider whose answer was all thought is asked
+  // again with the lowest reasoning effort its adapter knows.
+  const thinkLess = new Set<string>()
   for (let pass = 0; pass <= ROUTE_RETRY_PASSES; pass++) {
     // How many more passes THIS pass's failures are worth — the least any of
     // them earned, none once one cannot be helped by asking again — the
@@ -898,8 +905,15 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
       let usage: LlmAttemptUsage | undefined
       const startedAt = Date.now()
       let request: LlmRequest
+      let roomy = false
       try {
         request = buildRequest(provider, passCall, { stream: !!provider.fromStreamEvent })
+        const room = plainRoom.has(provider.id) ? undefined : answerRoom(provider.id, request.model, call.maxTokens)
+        if (room !== undefined) {
+          request = { ...request, maxTokens: room }
+          roomy = true
+        }
+        if (thinkLess.has(provider.id)) request = { ...request, effort: 'fast' }
       } catch (error) {
         const model = call.model ?? provider.defaultModel
         safeObserve(call, { phase: 'start', attempt, providerId: provider.id, model, durationMs: 0, outputEmitted: false, category: 'start' })
@@ -938,12 +952,23 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
             model: chunk.model,
           }
         }
+        noteThinking(provider.id, request.model, usage)
         if (!emitted) {
+          // ALL THOUGHT, NO ANSWER. The usage says where the allowance went,
+          // and the model is now known to think: the pass that follows a
+          // blank answer asks with room for the thought (answer-room.ts).
+          const thought = allThought(usage)
+          if (thought) thinkLess.add(provider.id)
+          const spent = thought
+            ? `thought for ${usage?.reasoningTokens} tokens, which used up its answer${roomy ? ` of ${THINKING_ROOM}` : ''}, and `
+            : ''
           throw new LlmDispatchError(
-            `${provider.label} ${EMPTY_ANSWER}`, provider.id,
+            `${provider.label} ${spent}${EMPTY_ANSWER}`, provider.id,
             call.model ?? modelForTier(provider, call.need?.tier ?? 'balanced'),
           )
         }
+        // A plain answer after the room was refused: this host does not take it.
+        if (plainRoom.has(provider.id)) refuseAnswerRoom(provider.id, request.model)
         safeObserve(call, { phase: 'success', attempt, providerId: provider.id, model: answeredModel, durationMs: Date.now() - startedAt, outputEmitted: emitted, category: 'success', ...(usage ? { usage } : {}) })
         return
       } catch (error) {
@@ -952,6 +977,16 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
         if (isAbort(error, call.signal) || emitted) throw error
         if (!ignoreRefusedBy.has(provider.id) && passCall.ignoreUpstreams?.length && ignoredEveryHost(error)) {
           ignoreRefusedBy.add(provider.id)
+          tried -= 1
+          at -= 1
+          continue
+        }
+        // THE HOST REFUSED THE THINKING ROOM. Some hosts cap an answer below
+        // it and say so with a 400. Asked again at once with the allowance
+        // every adapter has always sent; a failure for any other reason
+        // fails that plain ask the same way and is the answer.
+        if (roomy && (status === 400 || status === 422)) {
+          plainRoom.add(provider.id)
           tried -= 1
           at -= 1
           continue

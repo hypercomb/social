@@ -16,9 +16,12 @@
 import { CHILD_SLOTS, childSigsOfLayer, sectionIndex, sectionOf } from '@hypercomb/core'
 import type { CurrentLayerRef, LayerContent } from '../history/history.service.js'
 import { isPeerContentAt } from '../sharing/adopted-roots.js'
+import { managedSiteSegments } from '../sharing/managed-record.js'
 import { MAX_RECORD_DEPTH } from '../search/hive-search.js'
 import { readExplore, type HypercombExploreRead } from './hive-explore-read.js'
 import { readPool, readPoolMember, type HypercombPoolRead } from './hive-pool-read.js'
+import { SHELL_FILE, describePage, looksLikePage, pageBlocks, pagePartText } from '../files/page-parts.js'
+import { listAttachments } from '../files/files-attachment.js'
 
 export const HIVE_TREE_READER_IOC_KEY = '@diamondcoreprocessor.com/HypercombHiveTreeReader'
 
@@ -170,6 +173,14 @@ const DEPENDENCY_LOADER_KEY = '@hypercomb.social/DependencyLoader'
 const MAX_CODE_ENTRIES = 200
 const CONTROL = /[\u0000-\u001f\u007f]/g
 
+/** One file a tile holds: its name, the resource it is, its size in bytes.
+ *  `shell` marks the file a page in parts is assembled from
+ *  (files/page-parts.ts): writing it, or a part's file, rebuilds the page. */
+export type TileFileRow = { readonly name: string; readonly sig: string; readonly size: number; readonly shell?: true }
+
+/** A read lists at most this many of a tile's files. */
+export const MAX_TILE_FILE_ROWS = 60
+
 export type HypercombNodeRead =
   | {
     readonly ok: true
@@ -189,6 +200,10 @@ export type HypercombNodeRead =
     readonly notes?: readonly string[]
     readonly noteCount?: number
     readonly notesTruncated?: boolean
+    /** A route `/read`: the files the tile holds, the newest of each name,
+     *  with the signature that opens it. `filesMore` when the list was cut. */
+    readonly files?: readonly TileFileRow[]
+    readonly filesMore?: number
     /** Absent on a sig-addressed read: immutable content has no live head. */
     readonly snapshot?: string
   }
@@ -296,6 +311,12 @@ const CODE_HITS = 40
 const CODE_HITS_PER_MODULE = 6
 /** A tile name found in more places than this names nothing in particular. */
 const CODE_NAMING_MAX = 8
+/** A site's files a `code` search reads: text by name, each no larger than
+ *  this, on the site's tile and this many of its child tiles. */
+const SITE_FILE_TEXT = /\.(?:m?js|ts|css|html?|json|svg|txt|md)$/i
+const SITE_FILE_BYTES = 2_000_000
+const SITE_TILES = 40
+const SITE_HITS = 24
 
 /** The whole of a Blob as bytes — `arrayBuffer` where the Blob has it, a
  *  FileReader where it does not. */
@@ -1341,6 +1362,35 @@ export class HypercombHiveTreeReader {
       // within it; asked for the whole, the first page also names every
       // section, so the next read can be exact.
       const section = options.section ? sectionOf(whole, options.section) : null
+      // A PAGE IS READABLE BY PART (files/page-parts.ts). A website page that
+      // carries its styles, scripts and a whole library inline is too long
+      // for a model to hold: the business card is 998 KB, and three
+      // conversations ended reading it a page at a time (2026-11-15). Asked
+      // for the whole, a page longer than one read answers with its OUTLINE —
+      // each block, its size, the path that opens it — and `src/page/…` opens
+      // that part alone, `from` counting within it. A page that fits in one
+      // read, and any read that carries on from an offset, is its text as before.
+      const isPage = of === 'resource' && !section && looksLikePage(whole)
+      if (isPage && options.section) {
+        const part = pagePartText(whole, options.section)
+        if (part === undefined) return { ok: false, root, code: 'not-found' }
+        const page = part.slice(from, from + maxBytes)
+        const end = from + page.length
+        const more = end < part.length
+        return {
+          ok: true, root, sig, of, type: type || 'text/html', size: bytes.byteLength, from, text: page,
+          truncated: more, ...(more ? { next: end } : {}), section: options.section,
+        }
+      }
+      if (isPage && from === 0 && whole.length > maxBytes && pageBlocks(whole).length) {
+        const outline = describePage(whole, sig)
+        if (outline.text.length <= maxBytes) {
+          return {
+            ok: true, root, sig, of, type: type || 'text/html', size: bytes.byteLength, from: 0, text: outline.text,
+            truncated: false, sections: outline.sections.slice(0, 400),
+          }
+        }
+      }
       if (options.section && !section) return { ok: false, root, code: 'not-found' }
       const text = section ? whole.slice(section.from, section.to) : whole
       const page = text.slice(from, from + maxBytes)
@@ -1418,11 +1468,83 @@ export class HypercombHiveTreeReader {
     const files = needle ? await this.#searchCode(entries, line => line.startsWith('// src/') && line.includes(needle), CODE_HITS_PER_MODULE, options.signal) : []
     const lines = needle ? await this.#searchCode(entries, line => line.includes(needle), CODE_HITS, options.signal) : []
     const same = (a: CodeHit, b: CodeHit): boolean => a.sig === b.sig && a.section === b.section && a.at === b.at
-    const hits = [...files, ...lines.filter(hit => !files.some(file => same(file, hit)))].slice(0, CODE_HITS)
+    // THE SITE'S OWN FILES COME FIRST, on a managed site door: there the site
+    // is what is being worked on, and its parts are files on its tiles.
+    const site = needle ? await this.#searchSiteFiles(needle, options.signal) : []
+    const hits = [...site, ...files, ...lines.filter(hit => !files.some(file => same(file, hit)))].slice(0, CODE_HITS)
     return {
       ok: true, root, query: needle, entries: matched.slice(0, limit), total: matched.length, truncated: matched.length > limit,
       ...(hits.length ? { hits } : {}),
     }
+  }
+
+  /**
+   * A WORD, FOUND IN THE SITE'S OWN FILES. A page in parts keeps its script
+   * and stylesheet as files on the site's tiles, and `code` searched only the
+   * modules the hive runs. A model looking for one call in a 180 KB script
+   * read it from the top, 10,000 characters a round, each round sending the
+   * whole conversation again: 1.4 million tokens to link six creations to
+   * the card (business-card.jwize.com, 2026-11-15). On a managed site door
+   * the search now reads the newest file of each name on the site's tile and
+   * its child tiles. A hit's `at` is where `read <sig> <at>` opens: the start
+   * of the line, or just before the word on a line too long to be one.
+   * Elsewhere there is no site, and the search is of the running code only.
+   */
+  async #searchSiteFiles(needle: string, signal?: AbortSignal): Promise<CodeHit[]> {
+    const site = managedSiteSegments()
+    const store = this.#store()
+    if (!site || !store?.getResource || needle.length < 3) return []
+    const tiles: (readonly string[])[] = [site]
+    const top = await this.#readNodeRouted(site, { withContent: false, signal }).catch(() => null)
+    if (top?.ok) for (const child of top.children.slice(0, SITE_TILES)) tiles.push([...site, child.name])
+    const hits: CodeHit[] = []
+    for (const segments of tiles) {
+      if (signal?.aborted) throw stopped()
+      const listed = await listAttachments(segments).catch(() => null)
+      if (!listed?.length) continue
+      const newest = new Map<string, { readonly name: string; readonly sig: string }>()
+      for (const { payload } of listed) {
+        const name = typeof payload?.name === 'string' ? payload.name.replace(CONTROL, '').trim() : ''
+        if (!name || name.length > 120 || typeof payload.sig !== 'string' || !SIG.test(payload.sig)) continue
+        newest.delete(name.toLowerCase())
+        if (SITE_FILE_TEXT.test(name) && !(payload.size > SITE_FILE_BYTES)) newest.set(name.toLowerCase(), { name, sig: payload.sig })
+      }
+      for (const file of newest.values()) {
+        const text = await this.#siteFileText(file.sig, store)
+        if (!text) continue
+        const lower = text.toLowerCase()
+        let taken = 0
+        for (let found = lower.indexOf(needle); found >= 0 && taken < CODE_HITS_PER_MODULE; found = lower.indexOf(needle, found + needle.length)) {
+          const lineStart = text.lastIndexOf('\n', found) + 1
+          const lineEnd = text.indexOf('\n', found)
+          const from = Math.max(lineStart, found - 60)
+          hits.push({
+            sig: file.sig,
+            name: `${file.name} on /${segments.join('/')}`.slice(0, 200),
+            at: found - lineStart > 400 ? found - 200 : lineStart,
+            text: text.slice(from, Math.min(lineEnd < 0 ? text.length : lineEnd, from + 200)).replace(CONTROL, ' ').trim(),
+          })
+          taken++
+          if (hits.length >= SITE_HITS) return hits
+        }
+      }
+    }
+    return hits
+  }
+
+  /** A site file's text by signature: immutable, so kept, a few at a time. */
+  readonly #siteFileTexts = new Map<string, Promise<string | undefined>>()
+  #siteFileText(sig: string, store: { getResource(sig: string): Promise<Blob | null> }): Promise<string | undefined> {
+    const hit = this.#siteFileTexts.get(sig)
+    if (hit) return hit
+    const read = (async (): Promise<string | undefined> => {
+      const blob = await store.getResource(sig).catch(() => null)
+      if (!blob || blob.size > SITE_FILE_BYTES) return undefined
+      return textOf(await blobBytes(blob))
+    })()
+    if (this.#siteFileTexts.size >= 32) this.#siteFileTexts.clear()
+    this.#siteFileTexts.set(sig, read)
+    return read
   }
 
   /**
@@ -1664,7 +1786,41 @@ export class HypercombHiveTreeReader {
   ): Promise<HypercombNodeRead> {
     const read = await this.#readNodeRouted(segments, options)
     if (!read.ok || options.withContent === false || !segments.length) return read
-    return this.#withNotes(read, segments, options.maxBytes)
+    const noted = await this.#withNotes(read, segments, options.maxBytes)
+    return noted.ok ? this.#withFiles(noted, segments) : noted
+  }
+
+  /**
+   * A TILE'S FILES, BY NAME. A tile's files are `files:attachment` records
+   * among its decorations, and a read showed them as a count beside a dozen
+   * other records. A model asked to change a card's stylesheet opened twelve
+   * records one at a time to find the file, thirteen rounds for one line
+   * (business-card.jwize.com, 2026-11-15). The newest file of each name is
+   * listed here with the signature that opens it. Like the notes, the list is
+   * asked for on every read: a write block changes it.
+   */
+  async #withFiles(
+    read: Extract<HypercombNodeRead, { ok: true }>,
+    segments: readonly string[],
+  ): Promise<HypercombNodeRead> {
+    const listed = await listAttachments(segments).catch(() => null)
+    if (!listed?.length) return read
+    const newest = new Map<string, TileFileRow>()
+    for (const { payload } of listed) {
+      const name = typeof payload?.name === 'string' ? payload.name.replace(CONTROL, '').trim() : ''
+      if (!name || name.length > 200 || typeof payload.sig !== 'string' || !SIG.test(payload.sig)) continue
+      const size = Number.isInteger(payload.size) && payload.size >= 0 ? payload.size : 0
+      const key = name.toLowerCase()
+      newest.delete(key) // a later record of the same name replaces the earlier
+      newest.set(key, { name, sig: payload.sig, size, ...(name === SHELL_FILE ? { shell: true as const } : {}) })
+    }
+    if (!newest.size) return read
+    const files = [...newest.values()]
+    return {
+      ...read,
+      files: files.slice(0, MAX_TILE_FILE_ROWS),
+      ...(files.length > MAX_TILE_FILE_ROWS ? { filesMore: files.length - MAX_TILE_FILE_ROWS } : {}),
+    }
   }
 
   /**

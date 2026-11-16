@@ -91,6 +91,19 @@ to you: when a task needs the ground beneath it, open it before you act.
   primitives (IoC, the bee bases, signatures, layers, the door a model acts
   through), the shell every host runs (the store, navigation, install, module
   drafts, this chat), the framework-free host, and the documents.
+- A website page too long to read whole answers \`read <signature>\` with its
+  outline: each style and script block, its size, and the \`src/page/…\` path
+  that opens it alone. To change such a page, break it apart: \`/part /<route>
+  <block> <name>\` moves one block into a file of its own on a child tile, the
+  page does not change, and from then on that file is changed with a write
+  block and the hive rebuilds the page. Each part is a trait of the page.
+- \`read /<route>\` lists the files a tile holds, each with the signature that
+  opens it. A tile whose files list \`page.shell.html\` wears a page already in
+  parts: each part is a file on the child tile of its name.
+- On a site's own page, \`code <words>\` also finds the words in the site's
+  files: each hit names the file, its signature and where \`read <signature>
+  <at>\` opens it. Search a long file for the line you need; do not read it
+  from the top.
 - The documents hold the WHOLE codex, the Build and Paint tiers that are not
   repeated below included, every document a tier cites, and the glossary. Read
   the Build tier before you change code.

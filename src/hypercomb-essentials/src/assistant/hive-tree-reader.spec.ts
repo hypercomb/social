@@ -1,4 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
+
+// A tile's files, as the decorations would list them: none unless a case says.
+const attachments = vi.hoisted(() => ({ at: new Map<string, unknown[]>() }))
+vi.mock('../files/files-attachment.js', () => ({
+  listAttachments: async (segments: readonly string[]) => attachments.at.get(segments.join('/')) ?? [],
+}))
+
 import { FIND_WALK_NODES, HypercombHiveTreeReader } from './hive-tree-reader.js'
 import type { CurrentLayerRef, LayerContent } from '../history/history.service.js'
 import { MAX_RECORD_DEPTH } from '../search/hive-search.js'
@@ -346,6 +353,37 @@ describe('opening what a signature names', () => {
     expect(image).toMatchObject({ ok: true, of: 'resource', type: 'image/png', size: 3 })
     expect(image.ok && image.text).toBeUndefined()
     expect(await reader.readBytesBySig(sig(8))).toMatchObject({ ok: false, code: 'not-found' })
+  })
+
+  // The business card is a 998 KB page; three conversations ended reading it
+  // a page at a time (2026-11-15).
+  it('answers a page too long for one read with its outline, and opens one part alone', async () => {
+    const library = 'var zp=Object.defineProperty;'.repeat(200)
+    const page = `<!doctype html><html><head><style>.card{color:gold}</style></head><body><main></main><script type="text/plain" id="three-src">${library}</script><script>start()</script></body></html>`
+    const reader = readerWith({ getResource: vi.fn(async (s: string) => (s === sig(9) ? new Blob([page], { type: 'text/html' }) : null)) })
+
+    const whole = await reader.readBytesBySig(sig(9), { maxBytes: 2_000 })
+    expect(whole).toMatchObject({ ok: true, of: 'resource', from: 0, truncated: false })
+    expect(whole.ok && whole.text).toContain('This is its outline, not its text')
+    expect(whole.ok && whole.text).toContain('src/page/script-1.txt — <script type="text/plain" id="three-src">')
+    expect(whole.ok && whole.sections?.map(section => section.path)).toEqual([
+      'src/page/style-1.css', 'src/page/script-1.txt', 'src/page/script-2.js', 'src/page/markup.html',
+    ])
+
+    const part = await reader.readBytesBySig(sig(9), { maxBytes: 2_000, section: 'src/page/script-2.js' })
+    expect(part).toMatchObject({ ok: true, text: 'start()', truncated: false, section: 'src/page/script-2.js' })
+    const long = await reader.readBytesBySig(sig(9), { maxBytes: 2_000, section: 'src/page/script-1.txt' })
+    expect(long).toMatchObject({ ok: true, text: library.slice(0, 2_000), truncated: true, next: 2_000 })
+    const markup = await reader.readBytesBySig(sig(9), { maxBytes: 2_000, section: 'src/page/markup.html' })
+    expect(markup.ok && markup.text).toContain('<script type="text/plain" id="three-src"></script>')
+    expect(await reader.readBytesBySig(sig(9), { maxBytes: 2_000, section: 'src/page/script-7.js' })).toMatchObject({ ok: false, code: 'not-found' })
+
+    // A read that carries on from an offset is the page's own text, as before;
+    // so is a page that fits in one read.
+    expect(await reader.readBytesBySig(sig(9), { from: 100, maxBytes: 2_000 })).toMatchObject({ ok: true, text: page.slice(100, 2_100) })
+    const small = '<!doctype html><html><body><script>a()</script></body></html>'
+    const fits = readerWith({ getResource: vi.fn(async () => new Blob([small], { type: 'text/html' })) })
+    expect(await fits.readBytesBySig(sig(9), { maxBytes: 2_000 })).toMatchObject({ ok: true, text: small })
   })
 
   it('lists the running code by name, filtered by a word', async () => {
@@ -1024,6 +1062,92 @@ describe('a page history cannot pin to one signature', () => {
     expect(await reader.readNode(['projects'], { maxBytes: 8_000, withContent: true })).toMatchObject({ noteCount: 3 })
     const listed = await reader.readNode(['projects'], { maxBytes: 8_000, withContent: false })
     expect(listed.ok && listed.notes).toBeUndefined()
+  })
+
+  it('lists a tile’s files by name, the newest of each, with the signature that opens it', async () => {
+    // The files of a tile are records among its decorations: a read showed a
+    // count, and a model opened twelve records to find one stylesheet.
+    const fx = fixture()
+    attachments.at.set('projects', [
+      { sig: 'r1', payload: { name: 'style.css', mime: 'text/css', size: 10, sig: sig(900) } },
+      { sig: 'r2', payload: { name: 'page.shell.html', mime: 'text/html', size: 7_007, sig: sig(901) } },
+      { sig: 'r3', payload: { name: 'Style.css', mime: 'text/css', size: 19_029, sig: sig(902) } },
+      { sig: 'r4', payload: { name: 'broken', mime: 'text/plain', size: 1, sig: 'not-a-signature' } },
+    ])
+    try {
+      const read = await fx.reader.readNode(['projects'], { maxBytes: 8_000, withContent: true })
+      expect(read.ok && read.files).toEqual([
+        { name: 'page.shell.html', sig: sig(901), size: 7_007, shell: true },
+        { name: 'Style.css', sig: sig(902), size: 19_029 },
+      ])
+      // Names only on a /list, and a tile with no files says nothing.
+      const listed = await fx.reader.readNode(['projects'], { maxBytes: 8_000, withContent: false })
+      expect(listed.ok && listed.files).toBeUndefined()
+      const none = await fx.reader.readNode(['notes'], { maxBytes: 8_000, withContent: true })
+      expect(none.ok && none.files).toBeUndefined()
+    } finally {
+      attachments.at.clear()
+    }
+  })
+
+  it('finds a word in the site’s own files on a managed site door, and nowhere else', async () => {
+    // A page in parts keeps its script as a file on a tile; `code` searched
+    // only the running modules, and a model read a 180 KB script from the top.
+    const fx = fixture()
+    const script = `const stage = makeStage()\n${'// filler line\n'.repeat(40)}function boot(content) {\n  startCardAnimation(canvas, content, { onLink: openLink })\n}\n`
+    const packed = `var a=1;${'x=x+1;'.repeat(200)}startCardAnimation(c,d);${'y=y+1;'.repeat(50)}`
+    const blobs = new Map<string, Blob>([
+      [sig(910), new Blob([script], { type: 'text/javascript' })],
+      [sig(911), new Blob([packed], { type: 'text/javascript' })],
+      [sig(912), new Blob(['startCardAnimation in a picture name'], { type: 'image/png' })],
+    ])
+    const services = new Map<string, unknown>([
+      [HISTORY, fx.history],
+      [STORE, { getResource: vi.fn(async (s: string) => blobs.get(s) ?? null) }],
+      [COMMITTER, { settled: fx.settled }],
+      [PRELOADER, { actions: [{ signature: sig(9), name: 'history-service' }] }],
+    ])
+    const reader = new HypercombHiveTreeReader(<T>(key: string) => services.get(key) as T | undefined)
+    attachments.at.set('projects', [
+      { sig: 'r0', payload: { name: 'main.js', mime: 'text/javascript', size: 5, sig: sig(909) } },
+      { sig: 'r1', payload: { name: 'main.js', mime: 'text/javascript', size: script.length, sig: sig(910) } },
+      { sig: 'r2', payload: { name: 'art.png', mime: 'image/png', size: 36, sig: sig(912) } },
+    ])
+    attachments.at.set('projects/roadmap', [
+      { sig: 'r3', payload: { name: 'lib.min.js', mime: 'text/javascript', size: packed.length, sig: sig(911) } },
+    ])
+    try {
+      // Not a managed door: the search is of the running code only.
+      const elsewhere = await reader.listCode('startCardAnimation')
+      expect(elsewhere.ok && elsewhere.hits).toBeUndefined()
+
+      const record = document.createElement('script')
+      record.type = 'application/json'
+      record.id = 'hc-manage'
+      record.textContent = JSON.stringify({ lineage: 'projects' })
+      document.head.appendChild(record)
+
+      const found = await reader.listCode('startCardAnimation')
+      const hits = found.ok ? found.hits ?? [] : []
+      // The newest main.js, opened at the start of the line that holds the word.
+      const lineAt = script.indexOf('  startCardAnimation')
+      expect(hits[0]).toEqual({
+        sig: sig(910), name: 'main.js on /projects', at: lineAt,
+        text: 'startCardAnimation(canvas, content, { onLink: openLink })',
+      })
+      // A child tile's file, on a line too long to be one: opened just before the word.
+      const packedAt = packed.indexOf('startCardAnimation')
+      expect(hits[1]).toMatchObject({ sig: sig(911), name: 'lib.min.js on /projects/roadmap', at: packedAt - 200 })
+      expect(hits[1].text.startsWith(packed.slice(packedAt - 60, packedAt))).toBe(true)
+      // The picture is not text, and the older main.js is not the file.
+      expect(hits).toHaveLength(2)
+      // What the hit names is what a read from `at` opens.
+      const opened = await reader.readBytesBySig(sig(910), { from: hits[0].at, maxBytes: 512 })
+      expect(opened.ok && opened.text?.startsWith('  startCardAnimation(')).toBe(true)
+    } finally {
+      document.getElementById('hc-manage')?.remove()
+      attachments.at.clear()
+    }
   })
 
   it('keeps a fallback route and its signature content in memory for the next read', async () => {

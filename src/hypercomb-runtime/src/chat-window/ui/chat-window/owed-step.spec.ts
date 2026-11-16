@@ -1,7 +1,7 @@
 // owed-step.spec.ts — WHAT A LEG'S END LEAVES OWED (documentation/conversation-continuity.md).
 
 import { describe, expect, it } from 'vitest'
-import { OWED_BACKOFF_MS, WORK_QUIET_MS, agentOwnsCue, owedAfter, owedCue, pageChangeStillOwed, workBeaconOf, type OwedLike } from './owed-step'
+import { OWED_BACKOFF_MS, WORK_QUIET_MS, agentOwnsCue, owedAfter, owedCue, pageChangeStillOwed, workBeaconOf, wroteTileFile, type OwedLike } from './owed-step'
 
 const spent = { rounds: 6, tokens: 12_000, legs: 1 }
 const record = (over: Partial<OwedLike> = {}): OwedLike => ({
@@ -205,6 +205,23 @@ describe('the work beacon', () => {
   })
 })
 
+describe('a write that ran on a tile', () => {
+  it('is the page written: the page, the card, and a file, which a part of a page is', () => {
+    expect(wroteTileFile(['write page /business-card'])).toBe(true)
+    expect(wroteTileFile(['write card /business-card theme'])).toBe(true)
+    // The stylesheet of a card in parts (2026-11-15): the write ran, and the
+    // model was told the page was not written.
+    expect(wroteTileFile(['/part /business-card style-1 style', 'write /business-card/style/style.css'])).toBe(true)
+  })
+
+  it('is not a module or doctrine write, a change line, or nothing at all', () => {
+    expect(wroteTileFile(['write 0123456789ab… src/files/part.queen.ts'])).toBe(false)
+    expect(wroteTileFile(['write doctrine Build'])).toBe(false)
+    expect(wroteTileFile(['/part /business-card style-1 style'])).toBe(false)
+    expect(wroteTileFile([])).toBe(false)
+  })
+})
+
 describe('a page change that was only read', () => {
   const ask = 'Compare the checked revisions and write the next build on this same tile.'
 
@@ -217,6 +234,9 @@ describe('a page change that was only read', () => {
     expect(pageChangeStillOwed(ask, 'Done.', true, true, false)).toBeNull()
     expect(pageChangeStillOwed(ask, 'Done.', true, false, true)).toBeNull()
     expect(pageChangeStillOwed(ask, 'I will wait for your go-ahead.', true, false, false)).toBeNull()
+    // A question about the page is answered, never written (the managed card
+    // page, 2026-11-15: "update" and "page" are in the question).
+    expect(pageChangeStillOwed('How does the Update button on this page find out there is a newer package?', 'The scout checks after load.', true, false, false, true)).toBeNull()
     expect(pageChangeStillOwed('What does the page say?', 'Tidy Bench.', true, false, false)).toBeNull()
     expect(pageChangeStillOwed(ask, 'Here are the signatures.', false, false, false)).toBeNull()
   })

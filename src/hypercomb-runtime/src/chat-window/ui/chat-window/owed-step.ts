@@ -11,7 +11,7 @@
 // The shell may not import essentials, so the record's shape is restated here
 // structurally; the bucket checks every field it reads back.
 
-import { turnEnding } from '@hypercomb/core'
+import { onlyAsks, turnEnding } from '@hypercomb/core'
 
 export type OwedState = 'continue' | 'waiting' | 'paused'
 
@@ -248,6 +248,18 @@ export const workBeaconOf = (input: WorkBeaconInput): WorkBeacon | null => {
   }
 }
 
+/** DID A WRITE THAT RAN CHANGE THE TILE'S PAGE. The page and the card, and a
+ *  file: a part of a page in parts is a file on a tile, and the hive rebuilds
+ *  the page when it is written (essentials files/page-parts.ts). Counting
+ *  only `write page` told a model that had just written the stylesheet's file
+ *  "the page was read and not written", and it spent a second leg on work
+ *  that was done (business-card.jwize.com, 2026-11-15). `ran` holds the
+ *  lines as the window recorded them: `write page /…`, `write card /…`, and
+ *  `write /<route>/<file>` for a file. A module or doctrine write names no
+ *  route and is not one. Pure. */
+export const wroteTileFile = (ran: readonly string[]): boolean =>
+  ran.some(line => line.startsWith('write page /') || line.startsWith('write card /') || line.startsWith('write /'))
+
 /** A page change that was only read is not finished. The model stopping
  *  there is the idle breakdown: the next leg writes the page. A wait on the
  *  participant, a write that ran, or a block the participant skipped is left
@@ -264,6 +276,8 @@ export const pageChangeStillOwed = (
 ): string | null => {
   if (!read || wrotePage || skipped) return null
   const ask = String(message ?? '')
+  // A question about the page is answered, never written (core onlyAsks).
+  if (onlyAsks(ask)) return null
   const asksChange = /\b(write|change|update|add|added|revise|revision)s?\b/i.test(ask)
   const aboutPage = /\b(page|pages|trial|build|builds|revision|revisions|html|website)\b/i.test(ask) || /\btry-/.test(ask)
     || (managed && /\b(card|cards|theme|details)\b/i.test(ask))
