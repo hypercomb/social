@@ -703,7 +703,7 @@ const CLIPS = {
       { term: 'pheromone', gloss: 'a signed signal of interest', cam: { x: 2350, y: 250, s: 1.25 } },
       { term: 'replication', gloss: 'work crossing hives, checked', cam: { x: 2740, y: 240, s: 0.56 } },
       { term: 'brood', gloss: 'held, never run, until you accept', cam: { x: 3090, y: 246, s: 1.7 } },
-      { term: 'colony', gloss: 'a domain and its hives; none in charge', cam: { x: 2620, y: 246, s: 0.55 } },
+      { term: 'colony', gloss: 'related communities; none in charge', cam: { x: 2620, y: 246, s: 0.55 } },
     ],
   },
   integrity: {

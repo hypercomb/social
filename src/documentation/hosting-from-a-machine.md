@@ -212,18 +212,24 @@ page's host for everyone, give that page the relay's zone as a publish domain
 
 ### The NSSM line
 
-On jwize's machine the relay is the NSSM service `hypercomb-relay`. Its
-AppParameters gain one flag, and nothing else changes:
+On jwize's machine the relay is the NSSM service `hypercomb-relay`. It runs
+WRITERS ONLY (jwize, 2026-11-14): the bare `--allow-participants` let any
+throwaway key that sent one event store up to 4 GB a day, so it is off. For a
+meeting, its AppParameters gain one flag naming that meeting's room, and
+nothing else changes:
 
 ```powershell
 nssm get hypercomb-relay AppParameters
-nssm set hypercomb-relay AppParameters "C:\Projects\hypercomb\social\src\hypercomb-relay\relay.js --port 7777 --content-dir C:\Projects\hypercomb\social\src\hypercomb-relay\content --writers <the existing writer keys> --allow-participants"
+nssm set hypercomb-relay AppParameters "C:\Projects\hypercomb\social\src\hypercomb-relay\relay.js --port 7777 --content-dir C:\Projects\hypercomb\social\src\hypercomb-relay\content --writers <the existing writer keys> --shell-dir <as it is> --restart-when-stale --allow-participants=<lifecycleSig>"
 ```
 
 - Read the current line first and append the flag. Keep `--port 7777`,
-  `--content-dir`, `--writers` and any `--shell-dir` exactly as they are.
-- `--allow-participants=<lifecycleSig>,...` hosts only the rooms listed. Each
-  new room then needs a restart.
+  `--content-dir`, `--writers`, `--shell-dir` and `--restart-when-stale`
+  exactly as they are.
+- `--allow-participants=<lifecycleSig>,...` hosts only the rooms listed
+  (`scripts/swarm-preflight.cjs --relay wss://jwize.com --room <room> --secret
+  <secret>` prints a room's sig). Each new room needs a restart. Never the
+  bare flag.
 - Restart cleanly with `hypercomb-relay/fix-relay-elevated.ps1`, elevated. It
   kills the wrapper tree, frees port 7777 and starts the service. A bare
   `nssm restart` can leave an orphan listener, and the new instance then dies
@@ -241,8 +247,8 @@ nssm set hypercomb-relay AppParameters "C:\Projects\hypercomb\social\src\hyperco
   Proof: `hive-pointer.spec.ts` runs the relay's own check, and
   `scripts/drive-publish-groups-live.cjs --host localhost:4293` publishes to a
   relay started with `--dev-open-writes`.
-- To roll back, remove the flag and restart. Participants then share names
-  only, and their status line says the host isn't taking uploads.
+- After the meeting, remove the flag and restart. Participants then share
+  names only, and their status line says the host isn't taking uploads.
 
 ### A meeting point behind an access code
 
@@ -279,12 +285,15 @@ node relay.js --new-access-code C:\hypercomb\access-codes    # prints the code O
 curl -s -H "Accept: application/nostr+json" https://jwize.com
 ```
 
-`limitation.participant_uploads` is `"all"` for the bare flag, `"zones"` for a
-room list, and `false` when the flag is off. `max_addresses` (16),
+`limitation.participant_uploads` is `false` when the flag is off (jwize.com's
+standing state), `"zones"` for a room list, and `"all"` for the bare flag
+(never on jwize.com). `max_addresses` (16),
 `restricted_writes` and `access_code` say the address gate and the door are
 in force (swarm-host.md, "Reads name an address"). Then run
-`node scripts/swarm-preflight.cjs` from `src/`. It proves one participant
-upload end to end with a throwaway key.
+`node scripts/swarm-preflight.cjs --relay wss://jwize.com --no-apex` from
+`src/`: with the flag off, a throwaway key is refused (PASS); with a room
+listed, pass that room's `--room`/`--secret` and one participant upload is
+proven end to end.
 
 The machine itself needs Ethernet, no sleep and no shutdown on meeting days:
 see the runbook in [swarm-host.md](swarm-host.md).

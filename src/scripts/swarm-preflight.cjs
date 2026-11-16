@@ -1,14 +1,16 @@
 // scripts/swarm-preflight.cjs — is the meeting point ready to host a meeting?
 //
 // WHERE A MEETING'S BYTES GO (documentation/swarm-host.md, 2026-10-07): each
-// page's publish domains, else the participant's hosts pool — hypercomb.com on
-// a fresh install — and, when neither can take them, the relay they meet at
-// (wss://hypercomb.com means https://hypercomb.com/<sig>) if its card allows
-// participants — the shipped default, the always-online meeting point, always
-// does; a relay.js meeting point only when started with --allow-participants.
-// So this checks both: the relay, and whether the pool's default host takes a
-// fresh key's upload at all (WARN, not FAIL: a pool host
-// that cannot is passed over for the relay). Run this an hour before a
+// page's publish domains, else the participant's hosts pool, else the relay
+// they meet at if its card allows participants — else nowhere: the sharer's
+// device serves its tiles live while it is in the room.
+// CLOSED IS THE STANDING STATE (jwize 2026-11-14): no host keeps a stranger's
+// bytes. The always-online meeting point's byte host (pluginthematrix-core,
+// AUTO_GRANT "0") keeps bytes for its own people only, and a relay.js takes
+// its --writers alone unless a meeting's room is listed
+// (--allow-participants=<lifecycleSig>). So a REFUSED stranger PASSES here,
+// and a host that stores a throwaway key's atom is the WARN: it is open to
+// anyone who adds it. Run this an hour before a
 // meeting, and after every relay restart or stamp. It is live and as light as a
 // check can be: one throwaway key, one throwaway zone (beaconed, then left),
 // one stored 16-byte atom. Every line is PASS / FAIL / SKIP; the exit code is
@@ -30,16 +32,17 @@
 // Checks:
 //   ws        the WebSocket upgrade answers 101
 //   card      the first frame is the hc:host card; the relay's clock is near ours
-//   policy    NIP-11 limitation.participant_uploads allows guests (and agrees with the card)
+//   policy    NIP-11 limitation.participant_uploads: false or "zones" (agreeing with the card);
+//             "all" WARNs — any key that sends one event may store up to 4 GB a day
 //   probe     the liveness probe (limit:0 REQ) answers EOSE at once
 //   scan      a read that names no signature (kinds only, limit 1) is CLOSED restricted:, nothing replayed —
 //             the relay's address gate; an open relay lists every room's events to anyone (FAIL)
 //   unsigned  a PUT without NIP-98 is refused (401)
-//   not-live  a signed PUT from a key the relay has not heard on its socket is refused (401 not-live) —
-//             relay.js only: the always-online meeting point (NIP-11 software hypercomb-relay/meet-worker)
-//             keeps no bytes, and its byte host takes any signed key (AUTO_GRANT), so there it is SKIP
+//   not-live  a signed PUT from a key the host has not heard is refused (401 not-live, or 403 when
+//             participants are closed; at the always-online meeting point, 403 from its byte host)
 //   beacon    a {alive} beacon on the throwaway zone is accepted
-//   store     after the beacon, PUT /<sig> answers 2xx 'stored <sig>' — the receipt
+//   store     after the beacon: a closed host refuses the throwaway key (403, PASS); an open or
+//             zoned one answers 2xx 'stored <sig>' — the receipt — or, zoned, refuses an unlisted zone
 //   serve     the stored atom is served back byte-for-byte (HEAD 200, GET equal)
 //   reserved  a PUT at sign('hive:indexes') is refused (409) — at the always-online meeting point its
 //             byte host (pluginthematrix-core) refuses it before auth or by content address: any 4xx
@@ -49,7 +52,8 @@
 //   apex      the apex's sign('host:packages') head equals the signed install:<channel> root, and the apex serves it
 //   pool-cors the pool host's CORS preflight allows a PUT carrying Authorization from a hive origin   (WARN)
 //   pool-404  the pool host answers a missing sig with 404 — a heap, not a page where bytes should be (WARN)
-//   pool-put  a signed PUT of one 16-byte atom answers 2xx 'stored <sig>' (or is served back)          (WARN)
+//   pool-put  a signed PUT of a fresh key's atom is refused (403): the pool host keeps bytes for its
+//             own people only; one it stores is the WARN (the host is open to anyone)
 'use strict'
 const crypto = require('crypto')
 const path = require('path')
@@ -146,7 +150,10 @@ async function signedInstallRoot() {
       if (r.status !== 200) continue
       let event
       try { event = JSON.parse(r.text) } catch { continue }
-      if (event?.kind !== 30564 || event?.pubkey !== pubkey || !verifyEvent(event)) return { err: `${host} serves an index that is not ${pubkey.slice(0, 12)}…'s` }
+      // Signed by the publisher, or by a key on its list that names it as the
+      // anchor (`['anchor', <pubkey>]` — the worker checks the list on write).
+      const anchored = Array.isArray(event?.tags) && event.tags.some((tag) => tag?.[0] === 'anchor' && tag[1] === pubkey)
+      if (event?.kind !== 30564 || (event?.pubkey !== pubkey && !anchored) || !verifyEvent(event)) return { err: `${host} serves an index that is not ${pubkey.slice(0, 12)}…'s` }
       const root = String(JSON.parse(event.content)?.roots?.[`install:${channel}`] ?? '').toLowerCase()
       if (SIG.test(root)) return { root, host, channel, createdAt: event.created_at }
     }
@@ -172,7 +179,7 @@ async function apexHead() {
 }
 
 ;(async () => {
-  console.log(`swarm preflight — relay ${RELAY} (host ${HTTP})${APEX ? ` · apex ${APEX}` : ''} · throwaway key ${pk.slice(0, 8)}… · zone ${ROOM}\n`)
+  console.log(`swarm preflight — relay ${RELAY} (host ${HTTP})${APEX ? ` · apex ${APEX}` : ''} · throwaway key ${pk.slice(0, 8)}… · zone ${ROOM}${arg('room') ? ` · room sig ${lifecycleSig} (--allow-participants=<this>)` : ''}\n`)
 
   // ws + card
   const sock = await openSocket()
@@ -197,12 +204,17 @@ async function apexHead() {
   try { policy = JSON.parse(info.text)?.limitation?.participant_uploads } catch { policy = undefined }
   try { software = String(JSON.parse(info.text)?.software ?? '') } catch { software = '' }
   // The always-online meeting point is a Durable Object behind a byte host
-  // that takes any signed key's upload (AUTO_GRANT): liveness is not its rule.
+  // that keeps bytes for its own people only (AUTO_GRANT "0"): liveness is
+  // not its rule, and a stranger is refused there with or without a beacon.
   const meetWorker = software === 'hypercomb-relay/meet-worker'
-  if (policy === 'all' || policy === 'zones') {
-    const agrees = !card || card.participants === policy
-    ;(agrees ? pass : fail)('policy', `NIP-11 participant_uploads=${JSON.stringify(policy)}${agrees ? '' : ` but the card says ${JSON.stringify(card.participants)}`}${policy === 'zones' ? ' — only listed rooms upload (pass --room/--secret of one)' : ''}`)
-  } else fail('policy', `NIP-11 participant_uploads=${JSON.stringify(policy)} (HTTP ${info.status}) — guests' tiles stay names-only; start the relay with --allow-participants`)
+  const closed = policy === false || (meetWorker && !policy)
+  if (policy === 'all' || policy === 'zones' || closed) {
+    const agrees = !card || card.participants === policy || (closed && !card.participants)
+    const note = policy === 'zones' ? ' — only listed rooms upload (pass --room/--secret of one)'
+      : closed ? " — writers only: guests' tiles go live from their own devices"
+      : " — any key that sends one event may store; list the meeting's room instead (--allow-participants=<lifecycleSig>)"
+    ;(!agrees ? fail : policy === 'all' ? warn : pass)('policy', `NIP-11 participant_uploads=${JSON.stringify(policy)}${agrees ? '' : ` but the card says ${JSON.stringify(card.participants)}`}${note}`)
+  } else fail('policy', `NIP-11 participant_uploads=${JSON.stringify(policy)} (HTTP ${info.status}) — no limitation readable`)
 
   // probe
   if (sock.ok) {
@@ -232,10 +244,10 @@ async function apexHead() {
   const url = `${HTTP}/${sig}`
   const unsigned = await http('PUT', url, { body: atom })
   ;(unsigned.status === 401 ? pass : fail)('unsigned', `PUT without NIP-98 → ${unsigned.status} ${unsigned.text.slice(0, 60)}`)
-  if (meetWorker) skip('not-live', `${relayUrl.host} is the always-online meeting point: its byte host takes any signed key (AUTO_GRANT) — store/serve below check the upload`)
-  else {
+  {
     const early = await http('PUT', url, { body: atom, headers: { Authorization: nip98(url, 'PUT', atom) } })
-    ;(early.status === 401 && /^not-live/.test(early.text) ? pass : fail)('not-live', `a key the relay has not heard → ${early.status} ${early.text.slice(0, 70)}`)
+    const refused = meetWorker || closed ? early.status === 403 : early.status === 401 && /^not-live/.test(early.text)
+    ;(refused ? pass : fail)('not-live', `a key ${meetWorker ? 'its byte host does not keep' : 'the relay has not heard'} → ${early.status} ${early.text.slice(0, 70)}`)
   }
 
   let beaconOk = false
@@ -251,7 +263,8 @@ async function apexHead() {
     await sleep(200)
     const put = await http('PUT', url, { body: atom, headers: { Authorization: nip98(url, 'PUT', atom) } })
     const receipt = put.status >= 200 && put.status < 300 && put.text.trim() === `stored ${sig}`
-    if (receipt) pass('store', `PUT /${sig.slice(0, 12)}… → ${put.status} 'stored <sig>'`)
+    if (closed) (put.status === 403 ? pass : receipt ? warn : fail)('store', `PUT after the beacon → ${put.status} ${put.text.slice(0, 70)}${put.status === 403 ? ' — a stranger stores nothing' : receipt ? " — a closed host stored a throwaway key's atom" : ''}`)
+    else if (receipt) pass('store', `PUT /${sig.slice(0, 12)}… → ${put.status} 'stored <sig>'`)
     else if (policy === 'zones' && put.status === 401 && !arg('room')) skip('store', `→ ${put.status} ${put.text.slice(0, 60)} (zones policy; the throwaway zone is not listed)`)
     else fail('store', `PUT after the beacon → ${put.status} ${put.text.slice(0, 80)}`)
     if (receipt) {
@@ -316,7 +329,7 @@ async function apexHead() {
       const back = await http('GET', poolUrl)
       stored = back.status === 200 && sha256(back.bytes) === poolSig
     }
-    ;(stored ? pass : warn)('pool-put', `signed PUT of a fresh key's atom → ${put.status} ${put.text.slice(0, 60)}${stored ? '' : ` — fresh installs' tiles fall to the relay${policy === 'all' || policy === 'zones' ? '' : ', which takes nobody: names only'}`}`)
+    ;(stored ? warn : put.status === 403 ? pass : warn)('pool-put', `signed PUT of a fresh key's atom → ${put.status} ${put.text.slice(0, 60)}${stored ? ` — ${POOL_HOST} keeps a stranger's bytes: open to anyone who adds it` : put.status === 403 ? ' — kept for its own people only' : ''}`)
   } else skip('pool-cors', '--no-pool-host')
 
   // leave the throwaway zone politely
@@ -330,6 +343,6 @@ async function apexHead() {
   }
   const failed = results.filter(r => r === 'FAIL').length
   const warned = results.filter(r => r === 'WARN').length
-  console.log(`\n${results.filter(r => r === 'PASS').length} PASS · ${failed} FAIL · ${warned} WARN · ${results.filter(r => r === 'SKIP').length} SKIP — ${failed ? 'NOT READY' : warned ? `ready — but ${POOL_HOST} cannot take uploads, so the relay hosts the meeting` : 'ready to host a meeting'}`)
+  console.log(`\n${results.filter(r => r === 'PASS').length} PASS · ${failed} FAIL · ${warned} WARN · ${results.filter(r => r === 'SKIP').length} SKIP — ${failed ? 'NOT READY' : warned ? 'ready — but read the WARN lines: a host there is open to strangers' : 'ready to host a meeting'}`)
   process.exit(failed ? 1 : 0)
 })().catch((e) => { console.error('[fatal]', e); process.exit(2) })

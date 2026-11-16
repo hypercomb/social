@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { HiveIndexResult } from './hive-pointer.js'
-import { indexHome, readerSiteOf, resolveIndexDoor } from './publish-branch.js'
+import { indexHome, readDoorIndex, readerSiteOf, readerSitesByDoor, resolveIndexDoor } from './publish-branch.js'
 
 const PUBKEY = 'c'.repeat(64)
 const index = (eventId: string, roots: Record<string, string>, createdAt: number): HiveIndexResult =>
@@ -53,6 +53,41 @@ describe('indexHome', () => {
     expect(await indexHome(['a.example'], PUBKEY, { readAt: 'card.a.example' }, at)).toBeNull()
     expect(await resolveIndexDoor(['a.example'], PUBKEY, at, { readAt: 'card.a.example' })).toEqual({ host: 'a.example', read: ABSENT })
     expect(await indexHome(['a.example'], PUBKEY, {}, at)).toBeNull()
+  })
+})
+
+// 2026-11-15: /cafe-society published through jwize.com. The publish landed —
+// every <name>.jwize.com served the index naming it — and the Publish window
+// switched its light back off, because it read the row through the apex, where
+// the relay serves an old one-branch copy.
+describe('readDoorIndex', () => {
+  it('reads a row where a stranger reads it, over the relay copy at the apex', async () => {
+    const at = hosts({ 'jwize.com': STRAY, 'business-card.jwize.com': FULL })
+    expect(await readDoorIndex('jwize.com', 'business-card.jwize.com', PUBKEY, at)).toBe(FULL)
+  })
+
+  it('reads the door itself when the address holds no index, cannot be reached, or there is none', async () => {
+    expect(await readDoorIndex('a.example', 'card.a.example', PUBKEY, hosts({ 'a.example': FULL, 'card.a.example': ABSENT }))).toBe(FULL)
+    expect(await readDoorIndex('a.example', 'card.a.example', PUBKEY, hosts({ 'a.example': FULL }))).toBe(FULL)
+    expect(await readDoorIndex('a.example', undefined, PUBKEY, hosts({ 'a.example': STRAY }))).toBe(STRAY)
+    expect(await readDoorIndex('a.example', 'card.a.example', PUBKEY, hosts({}))).toBe(DOWN)
+  })
+})
+
+describe('readerSitesByDoor', () => {
+  it('names one address per door: the first row behind it that has one', () => {
+    const rows: [string, string[]][] = [
+      ['from-another-device', []],
+      ['cafe-society', ['cafe-society']],
+      ['susan', ['susan']],
+      ['card', ['card']],
+      ['local', ['local']],
+    ]
+    const doorOf = (key: string): string => key === 'card' ? 'hypercomb.com' : key === 'local' ? 'localhost:4291' : 'jwize.com'
+    expect([...readerSitesByDoor(rows, doorOf)]).toEqual([
+      ['jwize.com', 'cafe-society.jwize.com'],
+      ['hypercomb.com', 'card.hypercomb.com'],
+    ])
   })
 })
 

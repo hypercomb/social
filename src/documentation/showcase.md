@@ -46,8 +46,9 @@ recommendation").
 - **You** see your whole **community**: your domains, each opening onto what it
   hosts, where you choose what joins your showcase.
 
-"Community" is the word people read; underneath, a domain is a colony
-([colony = domain](./domain-claim.md)).
+"Community" is the word people read. A **colony** is a group of related
+communities: any source of domains, your own included (jwize, 2026-11-14).
+A domain is not a colony; the level above it is.
 
 ## Your community: domains are tiles (design — not built)
 
@@ -504,6 +505,15 @@ the creations." While editing, every row is a domain and every tile stays in its
 it is not. A tile is ON when it is published here (the owners' signed showcase) or this browser turned it on. There is no
 community row; the community is the page you come back to — what is published here, and what this browser turned on in any
 domain it added. What this browser turned on is kept in `community:tiles` (`readCommunity` / `keepCommunity`) and signs nothing.
+
+**The signed community is the last layer (jwize 2026-11-15: "the community section is the last layer of defense";
+"the community items are compiled and made available for all visitors no matter what computer").** Once the owners
+sign `showcase:<zone>`, an item it names draws for every visitor whether or not the Publish window's live list
+(`stage:live`) names its head: that list is a discovery listing (deployment-stages.md R10), never the resolver. A door
+Publish turned off for this domain still hides it. Without a signed showcase the live list still narrows what a door
+alone shows. The live list is read only when the owner signed it. Still open: a shared, signed *staged* list (gray in
+the community, on every device) and one final *publish* act that turns it into the record; today a key holder's tap
+signs the record directly.
 
 **With the key the community is the published list (jwize 2026-11-14).** When a key of yours answers on the page (the
 hive beside it, or a phone that took its owner's invite), a tile from another domain's row going into your community is

@@ -222,6 +222,14 @@ const _runInitializeRuntime = async (
     const idle = (window as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void }).requestIdleCallback
     if (idle) idle(load, { timeout: 3000 })
     else setTimeout(load, 250)
+    // An install that restarted into this page left its root to be reminified
+    // here (reminify.ts). Well after the first paint, and only when idle: it is
+    // a derivation nothing waits for. Imported on demand — the transpiler is no
+    // part of the boot.
+    const reminify = (): void => {
+      void import('./reminify').then(m => m.reminifyLeftByInstall()).catch(() => { /* derived, never owed */ })
+    }
+    setTimeout(() => { if (idle) idle(reminify, { timeout: 10_000 }); else reminify() }, 8_000)
   }
 
   // Legacy layer-tree materialization removed. Layers are the only source

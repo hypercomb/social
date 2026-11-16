@@ -162,10 +162,12 @@ const verified = async (origin: string, sig: string, limit: number): Promise<unk
 
 /** The heads an author's `stage:live` claim lists, or null when the claim
  *  cannot be read. An empty set is a list that names nothing. */
-const readLiveHeads = async (origin: string, root: string): Promise<ReadonlySet<string> | null> => {
+const readLiveHeads = async (origin: string, root: string, owner: string): Promise<ReadonlySet<string> | null> => {
   if (!SIG.test(root)) return null
-  const claim = await verified(origin, root, 65_536) as { kind?: unknown; tags?: unknown } | null
+  const claim = await verified(origin, root, 65_536) as { kind?: unknown; tags?: unknown; pubkey?: unknown } | null
   if (!claim || Number(claim.kind) !== 30565) return null
+  // The owner's own claim: a list another key signed is not this owner's word, however it came to be named.
+  if (String(claim.pubkey ?? '').toLowerCase() !== owner.toLowerCase()) return null
   try { if (!verifyEvent(claim as never)) return null } catch { return null }
   const tag = (Array.isArray(claim.tags) ? claim.tags : []).find(row => Array.isArray(row) && row[0] === 'h') as unknown[] | undefined
   const head = String(tag?.[1] ?? '').toLowerCase()
@@ -401,7 +403,7 @@ export const readZoneOwners = async (zone: string, owners: readonly string[], si
     if (!liveRead) {
       liveRead = true
       const root = String(content?.roots?.[LIVE_ROOT] ?? '').toLowerCase()
-      if (SIG.test(root)) live = await readLiveHeads(origin, root)
+      if (SIG.test(root)) live = await readLiveHeads(origin, root, pubkey)
     }
     if (decided) continue
     const sig = String(content?.roots?.[showcaseKey(zone)] ?? '').toLowerCase()

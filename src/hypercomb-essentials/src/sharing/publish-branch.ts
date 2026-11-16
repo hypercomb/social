@@ -303,6 +303,46 @@ export const readerSiteOf = (segs: readonly string[], doors: readonly string[]):
   return zone && label && isOwnAddressLabel(label) ? `${label}.${zone}` : ''
 }
 
+/** THE READ SIDE OF `indexHome`: what a door's rows are published as is what a
+ *  stranger reads at an address under it, never what the door itself holds.
+ *  `jwize.com`'s relay serves an old one-branch copy of the index, so the
+ *  Publish window, reading each row through its zone's apex, saw a branch the
+ *  real index names as unpublished and switched its light back off the moment
+ *  the publish that lit it had landed (cafe-society, 2026-11-15).
+ *
+ *  One address per door is enough — every site under a zone is served from one
+ *  store — so this names, for each door, the first row behind it that has an
+ *  address there. A door with no such row (loopback, a ported host, rows
+ *  published from another device) is left out and read as itself. */
+export const readerSitesByDoor = (
+  rows: Iterable<readonly [string, readonly string[]]>,
+  doorOf: (key: string) => string,
+): Map<string, string> => {
+  const sites = new Map<string, string>()
+  for (const [key, segments] of rows) {
+    const door = doorOf(key)
+    if (!door || sites.has(door) || segments.length === 0) continue
+    const site = readerSiteOf(segments, [door])
+    if (site) sites.set(door, site)
+  }
+  return sites
+}
+
+/** The index a door's rows are read from: the one a stranger gets at
+ *  `readerSite` when that verifies, else the door's own. */
+export async function readDoorIndex(
+  door: string,
+  readerSite: string | undefined,
+  pubkey: string,
+  fetchIndex: typeof fetchHiveIndex = fetchHiveIndex,
+): Promise<Awaited<ReturnType<typeof fetchHiveIndex>>> {
+  const [own, seen] = await Promise.all([
+    fetchIndex(door, pubkey),
+    readerSite && readerSite !== door ? fetchIndex(readerSite, pubkey) : Promise.resolve(null),
+  ])
+  return seen?.ok ? seen : own
+}
+
 /** Every other door this key's index may be held at: the hosts its publish
  *  ledger wrote it to, then the hosts the participant carries. */
 export async function otherIndexDoors(pubkey: string): Promise<string[]> {

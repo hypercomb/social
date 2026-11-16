@@ -66,7 +66,7 @@ import { deriveBeeDeps } from './bee-deps.js'
 import { TRANSFER_PACKS_MEANING, decodeTransferPack, gunzipBytes } from './transfer-pack.js'
 import { checkCoreCompatibility, describeCoreMismatch } from './core-surface.js'
 import { aliasOf, bagEntryName, bagSignature, beeEntries, dependencyEntries, orderedEntries } from './bags.js'
-import { reminifyLiveRegistration } from './reminify.js'
+import { reminifyAfterRestart, reminifyLiveRegistration } from './reminify.js'
 // WHICH PARTS OF THE TREE RUN. The trunk with the participant's picks laid
 // over it, minus the paths they turned off (package-tree.ts).
 import { changedUnits, dependencyUnits, packageUnits, readOffUnits, writeOffUnits } from './package-units.js'
@@ -713,17 +713,34 @@ export const installPackage = async (
   // A package mostly missing here comes as one transfer pack (packedFetch).
   const modules = early ?? await packedFetch(pkg.packageSig, [...inventory.dependencies, ...inventory.bees], heldModules, origins, fetchFrom)
 
+  // STORAGE IS ASKED ONCE PER MODULE. A cached door install spent 28 of its
+  // 37 seconds after every file was held, most of it reading the same modules
+  // back (20,000 lookups for 1,400 files, 2026-11-15). So: a module the pools
+  // did not list a moment ago is not looked for before it is fetched, and
+  // every module read or admitted stays in hand for the checks below.
+  const inHand = new Map<string, Uint8Array<ArrayBuffer>>()
+  const moduleIo = (dir: FileSystemDirectoryHandle | undefined, write: ReplicationIo['write']): ReplicationIo => {
+    const held = readFrom([dir], sig => [`${sig}.js`, sig])
+    return {
+      read: async sig => {
+        const bytes = heldModules.has(sig) ? await held(sig) : null
+        if (bytes) inHand.set(sig, bytes)
+        return bytes
+      },
+      fetch: modules.fetch,
+      write: async (sig, bytes) => { await write(sig, bytes); inHand.set(sig, bytes) },
+    }
+  }
+
   const results = await Promise.all([
-    resolveInventory(pkg.packageSig, inventory.dependencies, telling({
-      read: readFrom([store.dependencies], sig => [`${sig}.js`, sig]),
-      fetch: modules.fetch,
-      write: writeTo(store.dependencies, sig => `${sig}.js`, sig => `${depsUrlBase}/${sig}`, 'application/javascript; charset=utf-8'),
-    } satisfies ReplicationIo, opts.onHeld)),
-    resolveInventory(pkg.packageSig, inventory.bees, telling({
-      read: readFrom([store.bees], sig => [`${sig}.js`, sig]),
-      fetch: modules.fetch,
-      write: writeTo(store.bees, sig => `${sig}.js`, sig => `${beesUrlBase}/${sig}.js`, 'application/javascript; charset=utf-8'),
-    } satisfies ReplicationIo, opts.onHeld)),
+    resolveInventory(pkg.packageSig, inventory.dependencies, telling(moduleIo(
+      store.dependencies,
+      writeTo(store.dependencies, sig => `${sig}.js`, sig => `${depsUrlBase}/${sig}`, 'application/javascript; charset=utf-8'),
+    ), opts.onHeld)),
+    resolveInventory(pkg.packageSig, inventory.bees, telling(moduleIo(
+      store.bees,
+      writeTo(store.bees, sig => `${sig}.js`, sig => `${beesUrlBase}/${sig}.js`, 'application/javascript; charset=utf-8'),
+    ), opts.onHeld)),
   ])
 
   const held = merge(pkg.packageSig, [layerResult, ...results])
@@ -748,7 +765,8 @@ export const installPackage = async (
   // run. A caller that must not land on these bytes (the floor, moving a
   // package for its meeting point, 2026-10-11) refuses here — complete-or-
   // absent like every gate below: the bytes stay, nothing activates.
-  const readAtom = readFrom([store.bees, store.dependencies], sig => [`${sig}.js`, sig])
+  const readHeld = readFrom([store.bees, store.dependencies], sig => [`${sig}.js`, sig])
+  const readAtom = async (sig: string): Promise<Uint8Array<ArrayBuffer> | null> => inHand.get(sig) ?? await readHeld(sig)
   const refusal = await opts.refuse?.([...inventory.dependencies, ...inventory.bees], readAtom)
   if (refusal) return fail(refusal)
 
@@ -801,18 +819,14 @@ export const installPackage = async (
   // beeDeps, worked out from the bytes just admitted rather than taken from
   // anything a host said (bee-deps.ts). A HINT: an empty map means every
   // dependency loads eagerly, which is correct and merely heavier at boot.
-  const beeDeps = await deriveBeeDeps(
-    inventory.bees,
-    inventory.dependencies,
-    readFrom([store.bees, store.dependencies], sig => [`${sig}.js`, sig]),
-  )
+  const beeDeps = await deriveBeeDeps(inventory.bees, inventory.dependencies, readAtom)
 
   phase('applying')
 
   // The bags. Each is a sig-named dir INSIDE the pool whose entries carry the
   // alias→sig pairs the import map is assembled from — legitimate structure,
   // not a typed folder.
-  await writeBags(store, inventory)
+  await writeBags(store, inventory, readAtom)
 
   // THE BROOD (core/brood.ts). Bytes are admitted and verified; nothing has
   // been imported. Anything the participant's rules do not clear is held here,
@@ -828,7 +842,11 @@ export const installPackage = async (
   }
 
   await activate(pkg.packageSig, inventory, beeDeps, held.held, await enabledOf(pkg.packageSig, inventory.bees, layersIo))
-  await reminifyLiveRegistration(pkg.packageSig, { picks, off: readOffUnits(), dependencies: inventory.dependencies })
+  // The minified tree of this registration is NOT derived here. It is a
+  // derivation nothing reads to run, it wrote every module a second time while
+  // the participant watched the setup screen, and the caller restarts next —
+  // so the page it restarts into derives it once idle (reminify.ts).
+  reminifyAfterRestart(pkg.packageSig)
   // Every pick was released by Update all: the trunk alone runs now, so the
   // picks record goes — only after the activation it describes is written.
   if (releaseAll) writePicks({})
@@ -1263,7 +1281,12 @@ const activate = async (
  * STRICTLY to the install-owned pools — at the OPFS root the same 64-hex dir
  * shape is a user lineage sigbag.
  */
-const writeBags = async (store: StoreLike, inventory: PackageInventory): Promise<void> => {
+const writeBags = async (
+  store: StoreLike,
+  inventory: PackageInventory,
+  /** Bytes the caller already has in hand; the pool is read when it is absent. */
+  inHand?: (sig: string) => Promise<Uint8Array | null>,
+): Promise<void> => {
   // "Scoped strictly to the install-owned pools" scopes the HANDLE, not the
   // ADDRESS: `store.bees` IS sign('bees'), and sign('bees') IS the molecule of
   // a tile named `bees`. A 64-hex SUBDIRECTORY there is an author bucket as
@@ -1306,7 +1329,7 @@ const writeBags = async (store: StoreLike, inventory: PackageInventory): Promise
     }))
   }
 
-  const readDep = readFrom([store.dependencies], sig => [`${sig}.js`, sig])
+  const readDep = inHand ?? readFrom([store.dependencies], sig => [`${sig}.js`, sig])
   const aliases = new Map<string, string>()
   for (const sig of inventory.dependencies) aliases.set(sig, aliasOf(await readDep(sig)))
 

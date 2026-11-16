@@ -20,6 +20,7 @@ import {
 import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { WEBSITE_SLOT } from '../../commands/website-slot.js'
 import { composeDivision, hydrateSeatedParts } from './division-render.js'
+import { composeTraits } from '../../website/trait-seat.js'
 import { mayRunPage, pagePublisherDomain } from './page-run-gate.js'
 import { SiteTextEditor, authoredOrder, replaceTextInPage, type TextSlot } from './site-text-edit.js'
 import { commitPageSig } from '../../files/page-commit.js'
@@ -1092,7 +1093,10 @@ export class SiteViewDrone extends Drone {
     // runs exactly what the page runs (site-versions.ts).
     const shownVersion = this.#versionShown(pageSig)
     const authored = shownVersion?.html ?? baseHtml
-    const rawHtml = await composeDivision(segments, authored)
+    // Then the traits the page states are filled: a tile that fills one is
+    // seated where the page's own version of it stood (website/trait-seat.ts).
+    // Read from this tile's own marks and children only; unfilled, untouched.
+    const rawHtml = await composeTraits(segments, await composeDivision(segments, authored))
     if (gen !== this.#gen) return
 
     const parsed = new DOMParser().parseFromString(rewriteCellPageRefs(rawHtml), 'text/html')

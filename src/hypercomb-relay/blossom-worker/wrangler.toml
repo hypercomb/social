@@ -60,11 +60,10 @@ HOST_DOOR_HOSTS = "pluginthematrix.io"
 # too, or they upload here at the guest ceiling. It shares the bucket and the ledger with
 # pluginthematrix-core: keep AUTO_GRANT "0" on both, or a key minted here
 # uploads there too.
-# OPEN UNTIL IT IS ADOPTED (jwize, 2026-10-12: "let's leave it open until it is
-# adopted"): the guest list stays on. Set "0" to keep bytes for the host's
-# people only (operators, bound publishers, HOST_FRIENDS) — on BOTH scripts.
-AUTO_GRANT = "1"
-HOST_FRIENDS = ""                   # comma-separated 64-hex pubkeys the host is shared with (public keys only)
+# CLOSED (jwize, 2026-11-14): no stranger's key stores here. Keep "0" on BOTH
+# scripts; HOST_FRIENDS is jwize's own keys (relay.js --writers).
+AUTO_GRANT = "0"
+HOST_FRIENDS = "3b94560cc3066e84ea952904f79ab81846822e7f8ffc95a732458b8d396ec7ae,fd2f10ba0f6046fba70bcb248724a08eb49e0c9515caf8ba7df9758433cf8cee,eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a"   # comma-separated 64-hex pubkeys the host is shared with (public keys only)
 PEOPLE_QUOTA_BYTES = "1073741824"   # 1 GiB for each of the host's people per GRANT_TTL_DAYS window (a lapsed window refills)
 DEFAULT_QUOTA_BYTES = "104857600"   # 100 MB per guest, under AUTO_GRANT "1" only
 GRANT_TTL_DAYS = "90"               # grants lapse; only AUTO_GRANT "1" re-mints them
