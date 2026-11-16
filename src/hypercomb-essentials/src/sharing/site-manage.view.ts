@@ -182,6 +182,12 @@ export class SiteManageElement extends ElementBase {
   /** An adopt that deferred: the tile may still land, and its receipt is owed. */
   #replicaOwed = false
   #busy: '' | 'take' | 'publish' = ''
+  /** Why the last publish from this page did not complete. It stays in the
+   *  bar until the next publish: said only as a passing note it was gone in
+   *  eight seconds, and the owner was left with a site that had not changed
+   *  and nothing saying why (jwize, 2026-11-15: "when I published … it
+   *  wasn't updated"). */
+  #publishFailed = ''
   /** Bumped on every disconnect, so a continuation of an earlier life stops. */
   #life = 0
   #offHistory: Array<() => void> = []
@@ -352,6 +358,7 @@ export class SiteManageElement extends ElementBase {
     if (!yes || this.#busy) return
     const before = this.#site()
     this.#busy = 'publish'
+    this.#publishFailed = ''
     this.#label()
     let result: { ok: boolean; error?: string; head?: string }
     try { result = await port.publishRoot(record.lineage, sig) } catch (error) {
@@ -370,7 +377,10 @@ export class SiteManageElement extends ElementBase {
         ? t('site-manage.published', 'Your card is live.')
         : t('site-manage.published-catching-up', 'Published. The site will show it in a moment.'))
     } else {
-      this.#flash(t('site-manage.publish-failed', 'The publish did not complete. {reason}', { reason: result.error ?? '' }).trim())
+      this.#publishFailed = t('site-manage.publish-failed', 'The publish did not complete. {reason}', { reason: result.error ?? '' }).trim()
+      // Kept where a later look can find it, too.
+      console.warn('[site-manage]', this.#publishFailed)
+      this.#flash(this.#publishFailed)
     }
     await this.#refresh()
   }
@@ -575,10 +585,11 @@ export class SiteManageElement extends ElementBase {
     const state = this.#state
     if (this.#status) {
       // One line: why the card is not here, else a newer card waiting, else
-      // changes the site does not have yet.
+      // changes the site does not have yet — and, when a publish of them did
+      // not complete, why, until the next one.
       const said = this.#refused
         || (state?.newer ? t('site-manage.newer', 'A newer card is published.') : '')
-        || (state?.unpublished ? t('site-manage.unpublished', 'Unpublished changes') : '')
+        || (state?.unpublished ? this.#publishFailed || t('site-manage.unpublished', 'Unpublished changes') : '')
       this.#status.textContent = said
       this.#status.hidden = !said
     }

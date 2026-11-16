@@ -390,7 +390,15 @@ describe('publishing from the card', () => {
     ;(bar('.sm-publish') as HTMLButtonElement).click()
     await settle()
     expect(note()).toBe('The publish did not complete. the key is not listed')
-    expect(bar('.sm-state').textContent).toBe('Unpublished changes')
+    // The reason stays in the bar: the note over the card passes in seconds.
+    expect(bar('.sm-state').textContent).toBe('The publish did not complete. the key is not listed')
+    expect(bar('.sm-publish').hidden).toBe(false)
+    // The next publish starts clean, and one that goes live says nothing of the last.
+    hive.publishResult = { ok: true, head: 'ee'.repeat(32) }
+    ;(bar('.sm-publish') as HTMLButtonElement).click()
+    await settle()
+    expect(note()).toBe('Your card is live.')
+    expect(bar('.sm-state').hidden).toBe(true)
   })
 })
 
