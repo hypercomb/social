@@ -2655,6 +2655,8 @@
   "chat.route.resize": "拖动以加宽工作流 — 双击重置",
   "chat.route.toggle": "显示或隐藏工作流",
   "chat.exec.toggle": "执行 — 模型想要读取和更改的内容",
+  "chat.code.show": "代码 — 此聊天所涉对象的文件、资源和代码",
+  "chat.code.hide": "返回对话",
   "chat.exec.sec": "执行",
   "chat.exec.side": "模型想要读取和更改的内容",
   "chat.exec.mode.manual": "手动",

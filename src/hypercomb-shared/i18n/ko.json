@@ -2655,6 +2655,8 @@
   "chat.route.resize": "드래그하여 작업 흐름을 넓히기 — 더블 클릭으로 초기화",
   "chat.route.toggle": "작업 흐름 표시 또는 숨기기",
   "chat.exec.toggle": "실행 — 모델이 읽고 변경하려는 것",
+  "chat.code.show": "코드 — 이 채팅이 다루는 대상의 파일, 리소스, 코드",
+  "chat.code.hide": "대화로 돌아가기",
   "chat.exec.sec": "실행",
   "chat.exec.side": "모델이 읽고 변경하려는 것",
   "chat.exec.mode.manual": "수동",

@@ -2655,6 +2655,8 @@
   "chat.route.resize": "Ziehen, um den Arbeitsablauf zu verbreitern — Doppelklick setzt zurück",
   "chat.route.toggle": "Arbeitsablauf ein- oder ausblenden",
   "chat.exec.toggle": "Ausführung — was Modelle lesen und ändern möchten",
+  "chat.code.show": "Code — Dateien, Ressourcen und Code dessen, worum es in diesem Chat geht",
+  "chat.code.hide": "Zurück zur Unterhaltung",
   "chat.exec.sec": "Ausführung",
   "chat.exec.side": "Was Modelle lesen und ändern möchten",
   "chat.exec.mode.manual": "Manuell",
