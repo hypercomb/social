@@ -2,7 +2,7 @@
 // records name, what some bytes are shown as, and the chat's code target.
 
 import { describe, expect, it } from 'vitest'
-import { pictureMime, readable, recordResources, shownAs, signaturesIn, sizeWords } from './tile-holds.js'
+import { pictureMime, platformSources, readable, recordResources, shownAs, signaturesIn, sizeWords } from './tile-holds.js'
 import { chatCodeTarget } from './chat-code.js'
 
 const sig = (n: number): string => n.toString(16).padStart(64, '0')
@@ -59,10 +59,28 @@ describe('what some bytes are shown as', () => {
   })
 
   it('finds the signatures a text names, each once', () => {
-    const text = `{"htmlSig":"${sig(1)}","refs":["${sig(2)}","${sig(1)}"]} resource:${sig(3).toUpperCase()}/main.js`
-    expect(signaturesIn(text)).toEqual([sig(1), sig(2), sig(3)])
-    expect(signaturesIn(text, 2)).toEqual([sig(1), sig(2)])
+    // Hashes as hashes look: most of the sixteen digits in each.
+    const [a, b, c] = ['0123456789abcdef', 'fedcba9876543210', '89abcdef01234567'].map(part => part.repeat(4))
+    const text = `{"htmlSig":"${a}","refs":["${b}","${a}"]} resource:${c.toUpperCase()}/main.js`
+    expect(signaturesIn(text)).toEqual([a, b, c])
+    expect(signaturesIn(text, 2)).toEqual([a, b])
     expect(signaturesIn('nothing here')).toEqual([])
+  })
+
+  it('leaves out a run of hex digits that is plainly not a hash', () => {
+    // A page that carries a library inline holds constants like these.
+    const text = `mask=0x${'f'.repeat(64)};zero="${'0'.repeat(64)}";pattern="${'ab'.repeat(32)}";real="${'0123456789abcdef'.repeat(4)}"`
+    expect(signaturesIn(text)).toEqual(['0123456789abcdef'.repeat(4)])
+  })
+
+  it('knows the platform\u2019s own sources from modules that merely have the word in their name', () => {
+    const entries = [
+      { name: '@hypercomb/essentials/commands/view-source-scope', sig: sig(1) },
+      { name: '@hypercomb/essentials/presentation/tiles/tile-source-registry', sig: sig(2) },
+      { name: '@hypercomb/source/core', sig: sig(3) },
+      { name: '@hypercomb/source/shim', sig: sig(4) },
+    ]
+    expect(platformSources(entries).map(entry => entry.name)).toEqual(['@hypercomb/source/core', '@hypercomb/source/shim'])
   })
 
   it('says a size the way a person reads it', () => {

@@ -40,7 +40,7 @@
 import { I18N_IOC_KEY, sectionIndex, type I18nProvider } from '@hypercomb/core'
 import { HIVE_TREE_READER_IOC_KEY, type CodeHit } from './hive-tree-reader.js'
 import { codeLinks, lineAt, quoteUse, tileHandles, type QuoteUse, type TileHandle } from './tile-code.js'
-import { readable, recordResources, shownAs, signaturesIn, sizeWords } from './tile-holds.js'
+import { platformSources, readable, recordResources, shownAs, signaturesIn, sizeWords } from './tile-holds.js'
 import { allBindings, behaviorPath } from '../sharing/behavior-enablement.js'
 
 const STYLE_ID = 'hc-inspect-styles'
@@ -328,7 +328,7 @@ export class InspectWindowView extends EventTarget {
     // used for the behaviour, so you can potentially author upgrades for them
     // as well"): the core, the shell, the host and the documents, as written.
     let sources: readonly { readonly name: string; readonly sig: string }[] = []
-    try { const listed = await reader.listCode?.('source'); sources = listed?.ok ? listed.entries ?? [] : [] } catch { sources = [] }
+    try { const listed = await reader.listCode?.('source'); sources = listed?.ok ? platformSources(listed.entries ?? []) : [] } catch { sources = [] }
     part(this.#t('inspect.part-platform', 'The platform it runs on'),
       sources.slice(0, HELD_ROWS).map(source => this.#row('code', source.name, source.sig.slice(0, 12), () => this.push({ kind: 'section', sig: source.sig, name: source.name }))),
       sources.length - HELD_ROWS)

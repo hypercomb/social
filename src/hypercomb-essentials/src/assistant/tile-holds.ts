@@ -85,18 +85,33 @@ export const readable = (text: string, max = 400_000): string => {
   try { return JSON.stringify(JSON.parse(text), null, 2) } catch { return text }
 }
 
-/** Every signature a text names, each once, in the order met. */
+/** A hash uses most of the sixteen digits; a run with fewer than this many
+ *  different ones is a constant in a script (sixty-four f's), not a name. */
+const SIG_VARIETY = 8
+
+/** Every signature a text names, each once, in the order met. A run of
+ *  sixty-four hex digits that is plainly not a hash is left out: a page that
+ *  carries a library inline listed `ffffffffffff…` among what it names. */
 export const signaturesIn = (text: string, max = 40): string[] => {
   const out: string[] = []
   const seen = new Set<string>()
   for (const match of text.toLowerCase().matchAll(SIG_RUN)) {
     if (seen.has(match[0])) continue
     seen.add(match[0])
+    if (new Set(match[0]).size < SIG_VARIETY) continue
     out.push(match[0])
     if (out.length >= max) break
   }
   return out
 }
+
+/** The platform's own sources among the running code, by name: the core, the
+ *  shell, the host and the documents ship as `@hypercomb/source/<part>`.
+ *  Asked for by the word `source`, the code list also answers with every
+ *  module whose name merely holds that word. */
+export const PLATFORM_SOURCE = '@hypercomb/source/'
+export const platformSources = <T extends { readonly name: string }>(entries: readonly T[]): T[] =>
+  entries.filter(entry => entry.name.startsWith(PLATFORM_SOURCE))
 
 /** A size a person reads: 512 B, 19 KB, 1.3 MB. */
 export const sizeWords = (bytes: number): string => {
