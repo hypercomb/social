@@ -1090,6 +1090,66 @@ describe('a page history cannot pin to one signature', () => {
     }
   })
 
+  it('finds a word in the site’s own files on a managed site door, and nowhere else', async () => {
+    // A page in parts keeps its script as a file on a tile; `code` searched
+    // only the running modules, and a model read a 180 KB script from the top.
+    const fx = fixture()
+    const script = `const stage = makeStage()\n${'// filler line\n'.repeat(40)}function boot(content) {\n  startCardAnimation(canvas, content, { onLink: openLink })\n}\n`
+    const packed = `var a=1;${'x=x+1;'.repeat(200)}startCardAnimation(c,d);${'y=y+1;'.repeat(50)}`
+    const blobs = new Map<string, Blob>([
+      [sig(910), new Blob([script], { type: 'text/javascript' })],
+      [sig(911), new Blob([packed], { type: 'text/javascript' })],
+      [sig(912), new Blob(['startCardAnimation in a picture name'], { type: 'image/png' })],
+    ])
+    const services = new Map<string, unknown>([
+      [HISTORY, fx.history],
+      [STORE, { getResource: vi.fn(async (s: string) => blobs.get(s) ?? null) }],
+      [COMMITTER, { settled: fx.settled }],
+      [PRELOADER, { actions: [{ signature: sig(9), name: 'history-service' }] }],
+    ])
+    const reader = new HypercombHiveTreeReader(<T>(key: string) => services.get(key) as T | undefined)
+    attachments.at.set('projects', [
+      { sig: 'r0', payload: { name: 'main.js', mime: 'text/javascript', size: 5, sig: sig(909) } },
+      { sig: 'r1', payload: { name: 'main.js', mime: 'text/javascript', size: script.length, sig: sig(910) } },
+      { sig: 'r2', payload: { name: 'art.png', mime: 'image/png', size: 36, sig: sig(912) } },
+    ])
+    attachments.at.set('projects/roadmap', [
+      { sig: 'r3', payload: { name: 'lib.min.js', mime: 'text/javascript', size: packed.length, sig: sig(911) } },
+    ])
+    try {
+      // Not a managed door: the search is of the running code only.
+      const elsewhere = await reader.listCode('startCardAnimation')
+      expect(elsewhere.ok && elsewhere.hits).toBeUndefined()
+
+      const record = document.createElement('script')
+      record.type = 'application/json'
+      record.id = 'hc-manage'
+      record.textContent = JSON.stringify({ lineage: 'projects' })
+      document.head.appendChild(record)
+
+      const found = await reader.listCode('startCardAnimation')
+      const hits = found.ok ? found.hits ?? [] : []
+      // The newest main.js, opened at the start of the line that holds the word.
+      const lineAt = script.indexOf('  startCardAnimation')
+      expect(hits[0]).toEqual({
+        sig: sig(910), name: 'main.js on /projects', at: lineAt,
+        text: 'startCardAnimation(canvas, content, { onLink: openLink })',
+      })
+      // A child tile's file, on a line too long to be one: opened just before the word.
+      const packedAt = packed.indexOf('startCardAnimation')
+      expect(hits[1]).toMatchObject({ sig: sig(911), name: 'lib.min.js on /projects/roadmap', at: packedAt - 200 })
+      expect(hits[1].text.startsWith(packed.slice(packedAt - 60, packedAt))).toBe(true)
+      // The picture is not text, and the older main.js is not the file.
+      expect(hits).toHaveLength(2)
+      // What the hit names is what a read from `at` opens.
+      const opened = await reader.readBytesBySig(sig(910), { from: hits[0].at, maxBytes: 512 })
+      expect(opened.ok && opened.text?.startsWith('  startCardAnimation(')).toBe(true)
+    } finally {
+      document.getElementById('hc-manage')?.remove()
+      attachments.at.clear()
+    }
+  })
+
   it('keeps a fallback route and its signature content in memory for the next read', async () => {
     const fx = fixture()
     fx.refs.delete(sig(102))

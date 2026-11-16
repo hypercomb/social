@@ -100,6 +100,15 @@ to add one line to the stylesheet. A write to a part's file counts as the
 page written: the chat used to answer it with "the page was read and not
 written" and spend another leg on finished work.
 
+Finding a line (2026-11-15). A part can be long: the card's own script is
+180 KB. `code <words>` searched only the modules the hive runs, so a model
+looking for one call read the script from the top, 10,000 characters a
+round, and each round sent the whole conversation again. Linking six
+creations to the back of the card took 1.4 million tokens. On a managed site
+door `code <words>` now also searches the site's files: the newest file of
+each name on the site's tile and its child tiles. Each hit names the file,
+its signature, and where `read <signature> <at>` opens it.
+
 ## Where it lives
 
 All of it is in the essentials package:

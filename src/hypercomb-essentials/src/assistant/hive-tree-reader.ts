@@ -16,6 +16,7 @@
 import { CHILD_SLOTS, childSigsOfLayer, sectionIndex, sectionOf } from '@hypercomb/core'
 import type { CurrentLayerRef, LayerContent } from '../history/history.service.js'
 import { isPeerContentAt } from '../sharing/adopted-roots.js'
+import { managedSiteSegments } from '../sharing/managed-record.js'
 import { MAX_RECORD_DEPTH } from '../search/hive-search.js'
 import { readExplore, type HypercombExploreRead } from './hive-explore-read.js'
 import { readPool, readPoolMember, type HypercombPoolRead } from './hive-pool-read.js'
@@ -310,6 +311,12 @@ const CODE_HITS = 40
 const CODE_HITS_PER_MODULE = 6
 /** A tile name found in more places than this names nothing in particular. */
 const CODE_NAMING_MAX = 8
+/** A site's files a `code` search reads: text by name, each no larger than
+ *  this, on the site's tile and this many of its child tiles. */
+const SITE_FILE_TEXT = /\.(?:m?js|ts|css|html?|json|svg|txt|md)$/i
+const SITE_FILE_BYTES = 2_000_000
+const SITE_TILES = 40
+const SITE_HITS = 24
 
 /** The whole of a Blob as bytes — `arrayBuffer` where the Blob has it, a
  *  FileReader where it does not. */
@@ -1461,11 +1468,83 @@ export class HypercombHiveTreeReader {
     const files = needle ? await this.#searchCode(entries, line => line.startsWith('// src/') && line.includes(needle), CODE_HITS_PER_MODULE, options.signal) : []
     const lines = needle ? await this.#searchCode(entries, line => line.includes(needle), CODE_HITS, options.signal) : []
     const same = (a: CodeHit, b: CodeHit): boolean => a.sig === b.sig && a.section === b.section && a.at === b.at
-    const hits = [...files, ...lines.filter(hit => !files.some(file => same(file, hit)))].slice(0, CODE_HITS)
+    // THE SITE'S OWN FILES COME FIRST, on a managed site door: there the site
+    // is what is being worked on, and its parts are files on its tiles.
+    const site = needle ? await this.#searchSiteFiles(needle, options.signal) : []
+    const hits = [...site, ...files, ...lines.filter(hit => !files.some(file => same(file, hit)))].slice(0, CODE_HITS)
     return {
       ok: true, root, query: needle, entries: matched.slice(0, limit), total: matched.length, truncated: matched.length > limit,
       ...(hits.length ? { hits } : {}),
     }
+  }
+
+  /**
+   * A WORD, FOUND IN THE SITE'S OWN FILES. A page in parts keeps its script
+   * and stylesheet as files on the site's tiles, and `code` searched only the
+   * modules the hive runs. A model looking for one call in a 180 KB script
+   * read it from the top, 10,000 characters a round, each round sending the
+   * whole conversation again: 1.4 million tokens to link six creations to
+   * the card (business-card.jwize.com, 2026-11-15). On a managed site door
+   * the search now reads the newest file of each name on the site's tile and
+   * its child tiles. A hit's `at` is where `read <sig> <at>` opens: the start
+   * of the line, or just before the word on a line too long to be one.
+   * Elsewhere there is no site, and the search is of the running code only.
+   */
+  async #searchSiteFiles(needle: string, signal?: AbortSignal): Promise<CodeHit[]> {
+    const site = managedSiteSegments()
+    const store = this.#store()
+    if (!site || !store?.getResource || needle.length < 3) return []
+    const tiles: (readonly string[])[] = [site]
+    const top = await this.#readNodeRouted(site, { withContent: false, signal }).catch(() => null)
+    if (top?.ok) for (const child of top.children.slice(0, SITE_TILES)) tiles.push([...site, child.name])
+    const hits: CodeHit[] = []
+    for (const segments of tiles) {
+      if (signal?.aborted) throw stopped()
+      const listed = await listAttachments(segments).catch(() => null)
+      if (!listed?.length) continue
+      const newest = new Map<string, { readonly name: string; readonly sig: string }>()
+      for (const { payload } of listed) {
+        const name = typeof payload?.name === 'string' ? payload.name.replace(CONTROL, '').trim() : ''
+        if (!name || name.length > 120 || typeof payload.sig !== 'string' || !SIG.test(payload.sig)) continue
+        newest.delete(name.toLowerCase())
+        if (SITE_FILE_TEXT.test(name) && !(payload.size > SITE_FILE_BYTES)) newest.set(name.toLowerCase(), { name, sig: payload.sig })
+      }
+      for (const file of newest.values()) {
+        const text = await this.#siteFileText(file.sig, store)
+        if (!text) continue
+        const lower = text.toLowerCase()
+        let taken = 0
+        for (let found = lower.indexOf(needle); found >= 0 && taken < CODE_HITS_PER_MODULE; found = lower.indexOf(needle, found + needle.length)) {
+          const lineStart = text.lastIndexOf('\n', found) + 1
+          const lineEnd = text.indexOf('\n', found)
+          const from = Math.max(lineStart, found - 60)
+          hits.push({
+            sig: file.sig,
+            name: `${file.name} on /${segments.join('/')}`.slice(0, 200),
+            at: found - lineStart > 400 ? found - 200 : lineStart,
+            text: text.slice(from, Math.min(lineEnd < 0 ? text.length : lineEnd, from + 200)).replace(CONTROL, ' ').trim(),
+          })
+          taken++
+          if (hits.length >= SITE_HITS) return hits
+        }
+      }
+    }
+    return hits
+  }
+
+  /** A site file's text by signature: immutable, so kept, a few at a time. */
+  readonly #siteFileTexts = new Map<string, Promise<string | undefined>>()
+  #siteFileText(sig: string, store: { getResource(sig: string): Promise<Blob | null> }): Promise<string | undefined> {
+    const hit = this.#siteFileTexts.get(sig)
+    if (hit) return hit
+    const read = (async (): Promise<string | undefined> => {
+      const blob = await store.getResource(sig).catch(() => null)
+      if (!blob || blob.size > SITE_FILE_BYTES) return undefined
+      return textOf(await blobBytes(blob))
+    })()
+    if (this.#siteFileTexts.size >= 32) this.#siteFileTexts.clear()
+    this.#siteFileTexts.set(sig, read)
+    return read
   }
 
   /**
