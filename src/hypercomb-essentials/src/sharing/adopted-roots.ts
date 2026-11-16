@@ -18,6 +18,8 @@
 // roots) and break dedup/sharing. So it lives outside history, keyed by the
 // adopted root's segment PATH — a prefix of every descendant location.
 
+import { managedSiteSegments } from './managed-record.js'
+
 const KEY = 'hc:adopted-roots'
 const TOMBSTONE_KEY = 'hc:adopt-tombstones'
 const CARRIED_KEY = 'hc:carried-roots'
@@ -165,12 +167,39 @@ export const unmarkCarriedRoot = (segments: readonly string[]): void => {
   if (kept.length !== roots.length) writePaths(CARRIED_KEY, kept)
 }
 
+// ── the owner's own replica — adopted, and nobody else's ─────────────
+//
+// A managed site door (managed-record.ts) holds a replica of the owner's own
+// creation, and the owner is the one at the keyboard. The replica arrived the
+// way every branch arrives, by a fold, so its tile is recorded as an adopted
+// root — and every read of the owner's own card then counted as a peer's
+// words (jwize's card, 2026-11-15: five changes in a row held "after reading
+// someone else's words"). The record stays, because the swarm still follows
+// the publisher through it. What changes is the answer to WHOSE WORDS: the
+// adopted root that IS the site's own tile is the owner's.
+//
+// Only that root. A branch taken in beneath it afterwards is marked as a root
+// of its own and is still a peer's, and so is a carried root.
+
+const sameRoute = (a: readonly string[], b: readonly string[]): boolean =>
+  a.length === b.length && a.every((segment, i) => segment === b[i])
+
+/** True when `segments` lies in a branch folded in from a PEER: within an
+ *  adopted root that is not the owner's own replica on a managed site door. */
+const isWithinPeerRoot = (segments: readonly string[]): boolean => {
+  if (segments.length === 0) return false
+  const segs = segments.map(s => String(s ?? ''))
+  const own = managedSiteSegments()
+  return readPaths(KEY).some(root => isPrefixOf(root, segs) && !(own && sameRoute(root, own)))
+}
+
 /** WHOSE WORDS A ROUTE HOLDS — true when it lies in a branch folded in from a
- *  peer (an adopted root) or under a peer's tile the participant carried
- *  elsewhere (a carried root). The one question; ask it, never the lists. */
+ *  peer (an adopted root, the owner's own replica aside) or under a peer's
+ *  tile the participant carried elsewhere (a carried root). The one question;
+ *  ask it, never the lists. */
 export const isPeerContentAt = (segments: readonly string[]): boolean => {
   if (segments.length === 0) return false
-  if (isWithinAdoptedRoot(segments)) return true
+  if (isWithinPeerRoot(segments)) return true
   const segs = segments.map(s => String(s ?? ''))
   return readPaths(CARRIED_KEY).some(root => isPrefixOf(root, segs))
 }

@@ -3,7 +3,7 @@
 // The tombstone contract is what keeps deleted tiles DELETED: auto-sync
 // consults isAdoptTombstoned before folding a publisher's copy back in.
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   markAdoptedRoot,
   unmarkAdoptedRoot,
@@ -121,6 +121,61 @@ describe('whose words a route holds', () => {
     expect(isPeerContentAt(['mine', 'their-note', 'inside'])).toBe(true)
     expect(isPeerContentAt(['mine'])).toBe(false)
     expect(isPeerContentAt(['mine', 'my-note'])).toBe(false)
+  })
+
+  describe("on a managed site door, the owner's own replica", () => {
+    // The worker's record, as the worker plants it: a JSON script in <head>.
+    const door = (lineage: string): void => {
+      const record = document.createElement('script')
+      record.type = 'application/json'
+      record.id = 'hc-manage'
+      record.textContent = JSON.stringify({ lineage })
+      document.head.appendChild(record)
+    }
+    afterEach(() => { document.getElementById('hc-manage')?.remove() })
+
+    it('is adopted, and is not a peer: the card and everything on it are the owner’s words', () => {
+      markAdoptedRoot(['business-card'])
+      expect(isPeerContentAt(['business-card'])).toBe(true)
+      door('business-card')
+      expect(isPeerContentAt(['business-card'])).toBe(false)
+      expect(isPeerContentAt(['business-card', 'animation'])).toBe(false)
+      // The record itself stays: the swarm still follows the publisher by it.
+      expect(isWithinAdoptedRoot(['business-card'])).toBe(true)
+    })
+
+    it('a site that lives deeper is its whole route', () => {
+      markAdoptedRoot(['revolucion', 'meetup'])
+      markAdoptedRoot(['revolucion'])
+      door('revolucion/meetup')
+      expect(isPeerContentAt(['revolucion', 'meetup', 'page'])).toBe(true) // /revolucion is still a peer's branch
+      unmarkAdoptedRoot(['revolucion'])
+      markAdoptedRoot(['revolucion', 'meetup'])
+      expect(isPeerContentAt(['revolucion', 'meetup', 'page'])).toBe(false)
+    })
+
+    it('a branch taken in beneath it, a carried tile, and any other branch are still a peer’s', () => {
+      markAdoptedRoot(['business-card'])
+      markAdoptedRoot(['business-card', 'found'])
+      markCarriedRoot(['business-card', 'their-note'])
+      markAdoptedRoot(['theirs'])
+      door('business-card')
+      expect(isPeerContentAt(['business-card', 'found'])).toBe(true)
+      expect(isPeerContentAt(['business-card', 'found', 'inside'])).toBe(true)
+      expect(isPeerContentAt(['business-card', 'their-note'])).toBe(true)
+      expect(isPeerContentAt(['theirs'])).toBe(true)
+      expect(isPeerContentAt(['business-card', 'mine'])).toBe(false)
+    })
+
+    it('markup planted in the page is not the record: the branch stays a peer’s', () => {
+      markAdoptedRoot(['theirs'])
+      const planted = document.createElement('script')
+      planted.type = 'application/json'
+      planted.id = 'hc-manage'
+      planted.textContent = JSON.stringify({ lineage: 'theirs' })
+      document.body.appendChild(planted)
+      expect(isPeerContentAt(['theirs'])).toBe(true)
+    })
   })
 
   it('a carried root drives nothing in the swarm: it is not an adopted root', () => {
