@@ -868,6 +868,9 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
   // ROOM FOR THE ANSWER (answer-room.ts). A provider whose host refused the
   // thinking room is asked plainly for the rest of this call.
   const plainRoom = new Set<string>()
+  // ...AND LESS THOUGHT. A provider whose answer was all thought is asked
+  // again with the lowest reasoning effort its adapter knows.
+  const thinkLess = new Set<string>()
   for (let pass = 0; pass <= ROUTE_RETRY_PASSES; pass++) {
     // How many more passes THIS pass's failures are worth — the least any of
     // them earned, none once one cannot be helped by asking again — the
@@ -910,6 +913,7 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
           request = { ...request, maxTokens: room }
           roomy = true
         }
+        if (thinkLess.has(provider.id)) request = { ...request, effort: 'fast' }
       } catch (error) {
         const model = call.model ?? provider.defaultModel
         safeObserve(call, { phase: 'start', attempt, providerId: provider.id, model, durationMs: 0, outputEmitted: false, category: 'start' })
@@ -953,7 +957,9 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
           // ALL THOUGHT, NO ANSWER. The usage says where the allowance went,
           // and the model is now known to think: the pass that follows a
           // blank answer asks with room for the thought (answer-room.ts).
-          const spent = allThought(usage)
+          const thought = allThought(usage)
+          if (thought) thinkLess.add(provider.id)
+          const spent = thought
             ? `thought for ${usage?.reasoningTokens} tokens, which used up its answer${roomy ? ` of ${THINKING_ROOM}` : ''}, and `
             : ''
           throw new LlmDispatchError(

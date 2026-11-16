@@ -15,6 +15,11 @@
 //     with THINKING_ROOM from then on, when the caller named no allowance.
 //   - An answer that was all thought teaches that at once, so the retry that
 //     already follows a blank answer is asked with the room it lacked.
+//   - That retry is also asked to think less (the lowest reasoning effort the
+//     adapter knows). Room alone was not enough: the same model, given 16384
+//     and a small coding question, thought for all 16384 twice and failed
+//     after 324 seconds; asked with low effort it thought for 4769 and
+//     answered in 41. The ask after that is the model's own effort again.
 //   - A host that refuses the larger allowance is asked again plainly, and a
 //     plain answer after a refusal turns the room off for that model.
 //
