@@ -63,6 +63,25 @@ export const heldOn = async (zone: string, sig: string): Promise<boolean | null>
   } catch { return null }
 }
 
+/** What the browser itself said when a request gave no answer it could read, in brackets. */
+const said = (error: unknown): string => {
+  const words = (error instanceof Error ? error.message : String(error ?? '')).replace(/\s+/g, ' ').trim().slice(0, 120)
+  return words ? ` (${words})` : ''
+}
+
+/** A write that gave no readable answer is sent again, twice, a little later each time: a dropped
+ *  connection and a host that was busy for a moment both pass. A host that ANSWERS is never asked
+ *  again here, whatever it said. */
+const SEND_PAUSES_MS = [1_200, 3_500]
+const send = async (url: string, init: () => RequestInit): Promise<Response> => {
+  for (let attempt = 0; ; attempt++) {
+    try { return await fetch(url, init()) } catch (error) {
+      if (attempt >= SEND_PAUSES_MS.length) throw error
+      await new Promise(resolve => setTimeout(resolve, SEND_PAUSES_MS[attempt]))
+    }
+  }
+}
+
 /** Put one atom on the zone as the anchor's, unless it already serves it, and read it back: its bytes
  *  hashed ('bytes'), or only that it is held now ('held', for a closure of many, where the host hashed
  *  the body against its name before it wrote). Null when the zone serves it; else the reason, in words
@@ -74,15 +93,30 @@ export const uploadAtom = async (
   const url = `${zoneOrigin(zone)}/${sig}`
   // A host that could not be asked is not one that holds it: the PUT says whether it is reachable.
   if (await heldOn(zone, sig)) return null
+  // WHAT FAILED, AND WHAT THE BROWSER SAID. Every failure here used to read
+  // "<zone> could not be reached", with the error thrown away: a publish from
+  // business-card.jwize.com said so of a host that answered every other
+  // request the same minute, and nothing told which step it was (2026-11-15).
+  // Signing is not the network, so it is tried apart from it; the upload is
+  // sent again before it is given up; and the reason names the piece.
+  let authorization: () => string
+  try { const first = authFor(signer, url, anchor); authorization = () => first } catch (error) {
+    return `this browser could not sign the upload of ${what}${said(error)}`
+  }
   try {
-    const put = await fetch(url, { method: 'PUT', headers: { Authorization: authFor(signer, url, anchor) }, body: bytes.slice().buffer as ArrayBuffer })
-    if (put.status === 401 || put.status === 403) return `${zone} does not take uploads from this browser's key`
+    // Signed afresh for each send: the envelope carries the time it was made.
+    let sends = 0
+    const put = await send(url, () => ({ method: 'PUT', headers: { Authorization: sends++ ? authFor(signer, url, anchor) : authorization() }, body: bytes.slice().buffer as ArrayBuffer }))
+    if (put.status === 401 || put.status === 403) {
+      const reason = put.headers.get('X-Reason')
+      return `${zone} does not take uploads from this browser's key${reason ? ` (${reason})` : ''}`
+    }
     if (!put.ok) return `${zone} refused ${what} (HTTP ${put.status})`
     if (readBack === 'held') return await heldOn(zone, sig) ? null : `${zone} took ${what} but does not serve it back`
     const back = await fetch(url, { cache: 'no-store' })
     if (!back.ok || await sha(new Uint8Array(await back.arrayBuffer())) !== sig) return `${zone} took ${what} but does not serve it back`
     return null
-  } catch { return `${zone} could not be reached` }
+  } catch (error) { return `${zone} could not be reached to upload ${what}${said(error)}` }
 }
 
 /** The anchor's next index, signed by this browser's key: `content` as given, tagged as the anchor's and
@@ -103,11 +137,12 @@ export const putIndex = async (zone: string, anchor: string, event: Record<strin
   const indexes = await sha('hive:indexes')
   const url = `${zoneOrigin(zone)}/${indexes}/${anchor}`
   const body = JSON.stringify(event)
+  const payload = await sha(body)
   try {
-    const put = await fetch(url, { method: 'PUT', headers: { Authorization: authFor(signer, url, anchor, await sha(body)), 'Content-Type': 'application/json' }, body })
+    const put = await send(url, () => ({ method: 'PUT', headers: { Authorization: authFor(signer, url, anchor, payload), 'Content-Type': 'application/json' }, body }))
     if (put.status === 409) return 'stale'
     if (!put.ok) return `${zone} refused the index (${put.status}${put.headers.get('X-Reason') ? `: ${put.headers.get('X-Reason')}` : ''})`
-  } catch { return `${zone} could not be reached` }
+  } catch (error) { return `${zone} could not be reached to write the index${said(error)}` }
   return null
 }
 
