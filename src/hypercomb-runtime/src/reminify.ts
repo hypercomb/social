@@ -10,7 +10,9 @@
 // of a package whose record is already in that pool is not walked either.
 
 import { deriveMinifiedLayer, derivedMeaning, minifyModuleBody, ownedMinifyTool, SignatureService } from '@hypercomb/core'
-import { isOff, parentOf } from './package-tree.js'
+import { installedPackageSig } from './installed-package.js'
+import { isOff, parentOf, readPicks } from './package-tree.js'
+import { readOffUnits } from './package-units.js'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
@@ -291,4 +293,34 @@ export const reminifyLiveRegistration = async (
   const io = liveIo()
   if (!io) return null
   return reminifyRegistration(trunk, selection, io)
+}
+
+// AN INSTALL DOES NOT DERIVE WHILE THE PARTICIPANT WAITS. Deriving the tree
+// writes every module a second time (8 of a 37 second door setup, 2026-11-15)
+// and the page restarts straight after. The install leaves the root's name
+// for the tab it restarts into, and the running hive derives it once idle.
+// A handoff, not a record: lost, the derivation is simply made by the next
+// registration change, as before.
+const AFTER_RESTART_KEY = 'hc:reminify:after-restart'
+const ACTIVATION_KEY = 'core-adapter.installed-manifest'
+
+/** Leave `trunk` to be reminified by the page this tab restarts into. */
+export const reminifyAfterRestart = (trunk: string): void => {
+  try { sessionStorage.setItem(AFTER_RESTART_KEY, trunk) } catch { /* no handoff — nothing derived, nothing lost */ }
+}
+
+/** Reminify the root an install left for this tab, if it is the one running. */
+export const reminifyLeftByInstall = async (): Promise<Reminified | null> => {
+  let trunk = ''
+  try {
+    trunk = (sessionStorage.getItem(AFTER_RESTART_KEY) ?? '').trim().toLowerCase()
+    sessionStorage.removeItem(AFTER_RESTART_KEY)
+  } catch { return null }
+  if (!SIG_RE.test(trunk) || trunk !== installedPackageSig()) return null
+  let dependencies: string[] | null = null
+  try {
+    const listed = (JSON.parse(localStorage.getItem(ACTIVATION_KEY) ?? 'null') as { dependencies?: unknown } | null)?.dependencies
+    if (Array.isArray(listed)) dependencies = listed.filter((sig): sig is string => typeof sig === 'string')
+  } catch { dependencies = null }
+  return reminifyLiveRegistration(trunk, { picks: readPicks(), off: readOffUnits(), ...(dependencies ? { dependencies } : {}) })
 }
