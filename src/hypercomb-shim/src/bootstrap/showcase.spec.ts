@@ -1753,6 +1753,29 @@ describe('a tap visits, a hold toggles', () => {
     } finally { hero.remove(); bands.remove() }
   })
 
+  it('a page left open draws what another device saved once it is looked at again (jwize 2026-11-16)', async () => {
+    let held: ZoneOwners = owners()
+    const readOwners = vi.fn(async () => held)
+    const { hero, bands } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners,
+    })
+    document.body.append(hero, bands)
+    const now = vi.spyOn(Date, 'now')
+    try {
+      await vi.waitFor(() => expect(namesIn(bands.querySelector('.dex-row.own') as HTMLElement)).toEqual(['camelflage']))
+      // The phone publishes dylan beside it.
+      held = { ...held, showcase: { ...record, items: [...record.items, { pubkey: a, lineage: 'dylan' }] } }
+      now.mockReturnValue(Date.UTC(2026, 10, 16, 12))
+      window.dispatchEvent(new Event('focus'))
+      await vi.waitFor(() => expect(namesIn(bands.querySelector('.dex-row.own') as HTMLElement)).toEqual(['camelflage', 'dylan']))
+      // Asked again at once, it does not read again.
+      const reads = readOwners.mock.calls.length
+      window.dispatchEvent(new Event('focus'))
+      expect(readOwners.mock.calls.length).toBe(reads)
+    } finally { now.mockRestore(); hero.remove(); bands.remove() }
+  })
+
   it('a device with no key sees what the owners staged elsewhere, gray in the community, and is offered no publish', async () => {
     const stagedOwners = (): ZoneOwners => ({ ...owners(), staged: { zone: 'hypercomb.com', domains: [], items: [...record.items, { pubkey: a, lineage: 'dylan' }] } })
     const { hero, bands } = showcase({
@@ -1818,7 +1841,7 @@ describe('a tap visits, a hold toggles', () => {
     } finally { hero.remove(); bands.remove() }
   })
 
-  it('what this browser turned on is kept across a visit: on the page it comes back to, and lit in its own row while editing', async () => {
+  it('what this browser turned on is kept across a visit, lit in its own row while editing, and never added to the page every device sees (jwize 2026-11-16: "show my showcase as last saved")', async () => {
     const { hero, bands } = showcase({
       self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
       ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => owners(),
@@ -1826,7 +1849,7 @@ describe('a tap visits, a hold toggles', () => {
     })
     document.body.append(hero, bands)
     try {
-      await vi.waitFor(() => expect(namesIn(bands.querySelector('.dex-row.own') as HTMLElement)).toContain('dylan'))
+      await vi.waitFor(() => expect(namesIn(bands.querySelector('.dex-row.own') as HTMLElement)).toEqual(['camelflage']))
       manageOn(hero)
       expect(rowNamed(bands, 'Community')).toBeUndefined()
       const row = await openRowNamed(bands, 'jwize.com')
@@ -1865,7 +1888,7 @@ describe('a tap visits, a hold toggles', () => {
       await openRowNamed(bands, 'hypercomb.com')
       const camelflage = await tileIn(bands, '.dex-row.own a.hex', 'camelflage')
       click(camelflage)
-      await vi.waitFor(() => expect(bands.querySelector('.owner-note')?.textContent).toBe('camelflage is published on hypercomb.com. Only its key can take it off.'))
+      await vi.waitFor(() => expect(bands.querySelector('.owner-note')?.textContent).toContain('camelflage is in the community every visitor sees on hypercomb.com, signed by your key.'))
       expect(camelflage.classList.contains('off')).toBe(false)
     } finally { vi.unstubAllGlobals(); hero.remove(); bands.remove() }
   })

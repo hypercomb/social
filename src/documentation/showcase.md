@@ -537,6 +537,13 @@ owners' reads and writes the same list, and a visitor is never drawn it.
 A bridge without `stage` (an older hive, a test double) keeps the earlier behaviour below: a key holder's tap signs the
 record directly.
 
+**Every device shows the showcase as last saved (jwize 2026-11-16: "when I update the jwize community on my phone it
+should update on my desktop and all other devices should show my showcase as last saved").** The page you come back to
+is what is published here and nothing else: what a browser picked or staged shows only while managing (this supersedes
+2026-11-10, when a browser's own picks were added to its page). A page left open reads the owners' record again when it
+is looked at again (`visibilitychange`, `focus`; at most every five seconds, never over a write of its own), so what
+another device saved shows without a reload.
+
 **With the key the community is the published list (jwize 2026-11-14).** When a key of yours answers on the page (the
 hive beside it, or a phone that took its owner's invite), a tile from another domain's row going into your community is
 signed into the list every visitor reads, not kept only in this browser (this replaces the 2026-11-12 "add to my

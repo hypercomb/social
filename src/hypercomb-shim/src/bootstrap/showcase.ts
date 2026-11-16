@@ -1208,7 +1208,9 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     if (picked(entry)) await pickTile(entry, row)
     if (!showcased(entry)) return
     if (canSign()) await tapTile(entry, from)
-    else say(`${entry.title} is published on ${options.self}. Only its key can take it off.`)
+    // Say where it comes from and the one way out: a browser with no key can only change its own picks.
+    else say(`${entry.title} is in the community every visitor sees on ${options.self}, signed by your key. This browser holds `
+      + 'no key, so it cannot take it out: on a device that has one, turn on Manage, tap it to send it back, then Publish.')
   }
   // ONE TAP, THEN ONE BUTTON ACROSS THE FOOT (jwize 2026-11-10: "it should be single click to activate with a red
   // confirm button across the bottom of the phone"; 2026-11-12: "not red like that" — it wears the page's primary). No sheet opens over the tiles: the tap names the tile, the bar says
@@ -2163,11 +2165,13 @@ ${entry.key}`
     // A community only ever filters: its members must already be in the showcase.
     const published = unread ? [] : all.flatMap(band => band.tiles).filter(showcased)
       .filter(entry => !community || covers(entry, community.items, community.domains))
-    /** What this browser turned on, found wherever a row offers it now; a pick no row offers waits unseen. */
+    /** Every tile a row offers now, by key. */
     const known = new Map(all.flatMap(band => band.open).map(entry => [entry.key, entry] as const))
-    const turnedOn = community || unread ? [] : picks.map(pick => known.get(pick.key)).filter((entry): entry is Aggregate => !!entry)
-    // THE PAGE YOU COME BACK TO: what is published here, and what this browser turned on in any domain it added.
-    const everything = [...new Map([...published, ...turnedOn].map(entry => [entry.key, entry] as const)).values()].sort(byTitle)
+    // THE PAGE YOU COME BACK TO IS THE SHOWCASE AS LAST SAVED (jwize 2026-11-16: "when I update the jwize community on my
+    // phone it should update on my desktop and all other devices should show my showcase as last saved"). Every device
+    // draws what is published here and nothing else: what this browser picked or staged shows only while managing.
+    // (Supersedes 2026-11-10, where a browser's own picks were added to the page it came back to.)
+    const everything = [...published].sort(byTitle)
     // The platform's doors are the first page's; a community is about what is shared.
     const links = community ? [] : options.links ?? []
     // HOW IT IS DRAWN: a try from this visit, else a community's own view, else All's
@@ -2372,6 +2376,16 @@ ${entry.key}`
   takeLedger(options.ledger)
   paint()
   options.owner?.hello().then(key => { if (key) { ownerKey = key; paint() } }).catch(() => undefined)
+  // WHAT ANOTHER DEVICE SAVED SHOWS HERE (jwize 2026-11-16): a page left open reads the owners' record again whenever it
+  // is looked at again (the tab shown, the window focused), at most every few seconds and never over a write of its own.
+  let lastRead = 0
+  const readAgain = (): void => {
+    if (document.visibilityState !== 'visible' || staging || publishing || tapping || Date.now() - lastRead < 5_000) return
+    lastRead = Date.now()
+    takeLedger(options.ledger)
+  }
+  document.addEventListener('visibilitychange', readAgain)
+  window.addEventListener('focus', readAgain)
   options.readCommunity?.().then(found => { if (found.length && !picks.length) { picks = [...found]; paint() } }).catch(() => undefined)
   /** Read again: what is published now replaces what was, and each domain's
    *  pools are asked again. */
