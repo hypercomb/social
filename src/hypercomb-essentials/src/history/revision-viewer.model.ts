@@ -343,18 +343,24 @@ export async function versionFrame(layer: FrameLayer, segments: readonly string[
   if (!page) return { page: null, doc: null, problem: missed ? 'cold' : 'no-page', settled: !missed }
   const html = await read.bytes(page)
   if (!html) return { page, doc: null, problem: 'cold', settled: true }
-  const text = new TextDecoder().decode(html)
+  let total = 0, carried = 0
+  const fits = (bytes: Uint8Array): boolean => {
+    if (bytes.length > FRAME_MAX_ONE || total + bytes.length > FRAME_MAX_TOTAL) return false
+    total += bytes.length
+    return true
+  }
+  // The page's own sheets and scripts first, written into it: the budget goes
+  // to how the page looks before it goes to its pictures.
+  const text = await inlineLinkedCode(new TextDecoder().decode(html), sig => read.bytes(sig), fits)
 
   // The bytes the page may read through its tile: every decoration record
   // (under the signature in the slot, envelope or bare) and what each declares.
   const resources: Record<string, string> = {}
-  let total = 0, carried = 0
   const carry = async (sig: string, localOnly: boolean): Promise<void> => {
     if (sig === page || sig in resources || carried >= FRAME_MAX_CARRIED) return
     carried++
     const bytes = await read.bytes(sig, localOnly)
-    if (!bytes || bytes.length > FRAME_MAX_ONE || total + bytes.length > FRAME_MAX_TOTAL) return
-    total += bytes.length
+    if (!bytes || !fits(bytes)) return
     resources[sig] = toBase64(bytes)
   }
   for (const sig of sigsIn(layer['decorations'])) {
@@ -368,10 +374,70 @@ export async function versionFrame(layer: FrameLayer, segments: readonly string[
   const pictures: Record<string, string> = {}
   for (const sig of pictureSigsOf(text).slice(0, FRAME_MAX_CARRIED)) {
     const bytes = await read.bytes(sig, true)
-    if (bytes && bytes.length <= FRAME_MAX_ONE && total + bytes.length <= FRAME_MAX_TOTAL) { total += bytes.length; pictures[sig] = pictureUrl(bytes) }
+    if (bytes && fits(bytes)) pictures[sig] = pictureUrl(bytes)
   }
   const doc = frameDocument(text, { segments, layer, resources }, { pageSig: page, pictures })
   return { page, doc, problem: null, settled: true }
+}
+
+// ── a page's linked sheets and scripts, written into it ──────────────
+//
+// 2026-11-16: /cafe-society opened unstyled on its managed door. The page links
+// its three style atoms (`<link rel="stylesheet" href="resource:<sig>">`) and
+// runs its modules from `<script src="resource:<sig>">`; the frame's policy
+// runs inline code only and reaches no network, and a link turned into a data:
+// URL is still a link. So each linked sheet becomes a <style> and each script a
+// script of its own text, attributes kept. A link this cannot read, or one past
+// the budget, is left as it was.
+
+const LINKED_SHEET_RE = /<link\b[^>]*>/gi
+const LINKED_SCRIPT_RE = /<script\b([^>]*)>\s*<\/script\s*>/gi
+const RESOURCE_SIG_RE = /resource:([0-9a-f]{64})/i
+const SRC_ATTR_RE = /\s+src\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/i
+
+/** The page with every sheet and script it links by signature written into it. */
+export async function inlineLinkedCode(
+  html: string,
+  bytesOf: (sig: string) => Promise<Uint8Array | null>,
+  fits: (bytes: Uint8Array) => boolean = () => true,
+): Promise<string> {
+  const read = new Map<string, Promise<string | null>>()
+  const textOf = (sig: string): Promise<string | null> => {
+    let kept = read.get(sig)
+    if (!kept) {
+      kept = bytesOf(sig).then(b => b && fits(b) ? new TextDecoder().decode(b) : null, () => null)
+      read.set(sig, kept)
+    }
+    return kept
+  }
+  const swaps: { at: number; length: number; with: Promise<string | null> }[] = []
+  for (const m of html.matchAll(LINKED_SHEET_RE)) {
+    const tag = m[0]
+    if (!/\brel\s*=\s*["']?stylesheet\b/i.test(tag)) continue
+    const href = /\bhref\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/i.exec(tag)?.[1] ?? ''
+    const sig = RESOURCE_SIG_RE.exec(href)?.[1]?.toLowerCase()
+    if (!sig) continue
+    const media = /\bmedia\s*=\s*("[^"]*"|'[^']*')/i.exec(tag)?.[1]
+    swaps.push({ at: m.index!, length: tag.length, with: textOf(sig).then(css => css === null ? null
+      : `<style data-hc-sheet="${sig}"${media ? ` media=${media}` : ''}>${css.replace(/<\/style/gi, '<\\/style')}</style>`) })
+  }
+  for (const m of html.matchAll(LINKED_SCRIPT_RE)) {
+    const attrs = m[1] ?? ''
+    const src = SRC_ATTR_RE.exec(attrs)?.[1] ?? ''
+    const sig = RESOURCE_SIG_RE.exec(src)?.[1]?.toLowerCase()
+    if (!sig) continue
+    const kept = attrs.replace(SRC_ATTR_RE, '')
+    swaps.push({ at: m.index!, length: m[0].length, with: textOf(sig).then(js => js === null ? null
+      : `<script${kept} data-hc-script="${sig}">${js.replace(/<\/script/gi, '<\\/script')}</script>`) })
+  }
+  if (!swaps.length) return html
+  const done = await Promise.all(swaps.map(s => s.with))
+  let out = '', from = 0
+  swaps.map((s, i) => ({ ...s, text: done[i] })).sort((a, b) => a.at - b.at).forEach(s => {
+    out += html.slice(from, s.at) + (s.text ?? html.slice(s.at, s.at + s.length))
+    from = s.at + s.length
+  })
+  return out + html.slice(from)
 }
 
 /** The signatures of the pictures a page embeds, as the website view resolves them. */
