@@ -3,7 +3,10 @@ import {
   executeHypercombObservationPlan,
   formatHypercombObservationReceipt,
   parseHypercombObservationGrammars,
+  REPEAT_MIN_CHARS,
+  type HypercombObservationReceipt,
   type HypercombTreeReader,
+  type ReadRepeats,
 } from './hypercomb-observation.js'
 
 describe('Hypercomb native tree observation grammar', () => {
@@ -780,5 +783,67 @@ describe('/explore: a tile name asked of every host this hive can ask', () => {
       .rejects.toThrow(/malformed explore host/)
     await expect(answer({ tiles: [{ sig: 'short', by: publisher, hosts: [] }] }))
       .rejects.toThrow(/malformed explore tile/)
+  })
+})
+
+// A READ ANSWERED ONCE IS NOT SENT TWICE (jwize, 2026-11-15). The store
+// already computes once; the chat sent a repeated read's whole answer again,
+// and every later round paid for both copies.
+describe('a read the leg already answered', () => {
+  const sigOf = (n: number): string => n.toString(16).padStart(64, '0')
+  const page = (text: string, from = 0): HypercombObservationReceipt => ({
+    results: [{
+      grammar: `read ${sigOf(7)}${from ? ` ${from}` : ''}`, kind: 'bytes',
+      read: { ok: true, root: sigOf(7), sig: sigOf(7), of: 'resource', type: 'text/javascript', size: 9_000, from, text, truncated: false },
+    }],
+    snapshots: [], signatures: [],
+  } as unknown as HypercombObservationReceipt)
+  const only = (text: string): Record<string, unknown> =>
+    (JSON.parse(text) as { observations: Record<string, unknown>[] }).observations[0]
+  const long = 'const stage = makeStage()\n'.repeat(40)
+
+  it('is sent whole the first time and as one line when it comes back exactly the same', () => {
+    const memory: ReadRepeats['memory'] = new Map()
+    const first = formatHypercombObservationReceipt(page(long), { memory, round: 2 })
+    expect(only(first)['text']).toBe(long)
+    const again = formatHypercombObservationReceipt(page(long), { memory, round: 5 })
+    expect(only(again)).toEqual({
+      grammar: `read ${sigOf(7)}`, root: sigOf(7), unchanged: true,
+      unchangedNote: 'this read was answered 3 rounds ago and nothing it read has changed: that answer is above, word for word. use it; do not ask again',
+    })
+    expect(again.length).toBeLessThan(first.length / 3)
+    // The pointer keeps pointing at the round that held the answer.
+    expect(String(only(formatHypercombObservationReceipt(page(long), { memory, round: 6 }))['unchangedNote'])).toContain('4 rounds ago')
+  })
+
+  it('is sent whole again when anything it read has changed, and that answer is the one remembered', () => {
+    const memory: ReadRepeats['memory'] = new Map()
+    formatHypercombObservationReceipt(page(long), { memory, round: 1 })
+    const changed = `${long}// one more line\n`
+    expect(only(formatHypercombObservationReceipt(page(changed), { memory, round: 2 }))['text']).toBe(changed)
+    expect(only(formatHypercombObservationReceipt(page(changed), { memory, round: 3 }))['unchanged']).toBe(true)
+    expect(only(formatHypercombObservationReceipt(page(long), { memory, round: 4 }))['text']).toBe(long)
+  })
+
+  it('tells one read line from another, and sends a short answer as it is', () => {
+    const memory: ReadRepeats['memory'] = new Map()
+    formatHypercombObservationReceipt(page(long), { memory, round: 1 })
+    // The same file from another place is another read.
+    expect(only(formatHypercombObservationReceipt(page(long, 4_000), { memory, round: 2 }))['text']).toBe(long)
+    // A pointer saves nothing on a few characters.
+    formatHypercombObservationReceipt(page('x = 1'), { memory: new Map(memory), round: 3 })
+    const short = new Map<string, { round: number; digest: string }>()
+    formatHypercombObservationReceipt(page('x = 1'), { memory: short, round: 1 })
+    expect(only(formatHypercombObservationReceipt(page('x = 1'), { memory: short, round: 2 }))['text']).toBe('x = 1')
+    expect(REPEAT_MIN_CHARS).toBeGreaterThan(100)
+  })
+
+  it('changes nothing when no memory is given, or once the memory is emptied', () => {
+    expect(only(formatHypercombObservationReceipt(page(long)))['text']).toBe(long)
+    expect(only(formatHypercombObservationReceipt(page(long)))['text']).toBe(long)
+    const memory: ReadRepeats['memory'] = new Map()
+    formatHypercombObservationReceipt(page(long), { memory, round: 1 })
+    memory.clear() // the rounds folded out of the leg
+    expect(only(formatHypercombObservationReceipt(page(long), { memory, round: 2 }))['text']).toBe(long)
   })
 })
