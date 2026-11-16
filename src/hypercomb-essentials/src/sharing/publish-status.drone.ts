@@ -48,7 +48,7 @@ import {
 } from './entrance-scout.service.js'
 import { PUBLIC_CONTENT_HOSTS, isReservedRootKey } from './hive-link.js'
 import { HOST_CONCURRENCY, mapBounded } from './bounded-fetch.js'
-import { fetchHiveIndex, type HiveIndexResult } from './hive-pointer.js'
+import type { HiveIndexResult } from './hive-pointer.js'
 import { publisherKeyHex } from './key-list.client.js'
 import { arrivalPointer, publishArrivalPlan, readArrivalPlan, withdrawArrivalPlan } from './arrival-plan-publish.js'
 import { promoteBranch, promotedPointer, readyToPromote, promotesHead, readPromotionRecord } from './promote.js'
@@ -84,6 +84,8 @@ import { clearDefaultView, defaultViewAt, writeDefaultView } from '../commands/v
 import { visualBeeIconSvg } from '../commands/visual-bee-icon-svg.js'
 import {
   publishBranch,
+  readDoorIndex,
+  readerSitesByDoor,
   secureDeleteBranch,
   setBranchAddress,
   setBranchDoors,
@@ -784,8 +786,11 @@ export class PublishStatusDrone extends Drone {
       // Every door is read, a few at a time: a door that never answers is
       // `unreachable` after its deadline and the rows behind the others still show.
       const doorList = [...doors]
+      // A zone's own sites decide over its apex (readDoorIndex): the row is
+      // what a stranger reads at its address, not what the door holds.
+      const readerSites = readerSitesByDoor(candidates, hostFor)
       const doorReads = await mapBounded(doorList, HOST_CONCURRENCY, async door => ({
-        read: await fetchHiveIndex(door, pubkey),
+        read: await readDoorIndex(door, readerSites.get(door), pubkey),
         // Authentic, but is it the LATEST? Only our own signed stamps —
         // which are recorded per host — can say.
         highWater: await highWaterIndexStamp(door, pubkey),
