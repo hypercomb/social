@@ -26,11 +26,13 @@ const registry = llmProviderRegistry()
 /** A provider whose answers come from `answers` in order (the last repeats),
  *  recording the allowance each ask was sent with. The allowance also rides
  *  in the URL so a fetch stub can refuse it. */
-const thinker = (id: string, answers: readonly Partial<Result>[]): { descriptor: Descriptor; sent: (number | undefined)[] } => {
+const thinker = (id: string, answers: readonly Partial<Result>[]): { descriptor: Descriptor; sent: (number | undefined)[]; efforts: (string | undefined)[] } => {
   const sent: (number | undefined)[] = []
+  const efforts: (string | undefined)[] = []
   let asked = 0
   return {
     sent,
+    efforts,
     descriptor: {
       id,
       label: id,
@@ -42,6 +44,7 @@ const thinker = (id: string, answers: readonly Partial<Result>[]): { descriptor:
       docsUrl: 'https://example.test',
       toRequest: request => {
         sent.push(request.maxTokens)
+        efforts.push(request.effort)
         return { url: `https://${id}.example.test/allowance-${request.maxTokens ?? 'plain'}`, init: { method: 'POST' } }
       },
       fromResponse: () => ({
@@ -100,16 +103,32 @@ describe('room for the answer', () => {
 })
 
 describe('a model that thought its answer away', () => {
-  it('is asked again with room for the thought, and answers', async () => {
-    const { descriptor, sent } = thinker('thinks', [allThoughtAnswer, thoughtfulAnswer('the stylesheet is changed')])
+  it('is asked again with room for the thought and told to think less, and answers', async () => {
+    const { descriptor, sent, efforts } = thinker('thinks', [allThoughtAnswer, thoughtfulAnswer('the stylesheet is changed')])
     registry.register(descriptor)
 
     expect(await ask('thinks')).toBe('the stylesheet is changed')
     expect(sent).toEqual([undefined, THINKING_ROOM])
+    expect(efforts).toEqual([undefined, 'fast'])
 
     // From then on it starts with the room: no blank answer to wait out.
+    // The effort is the model's own again: thinking less was for that retry.
     expect(await ask('thinks')).toBe('the stylesheet is changed')
     expect(sent).toEqual([undefined, THINKING_ROOM, THINKING_ROOM])
+    expect(efforts).toEqual([undefined, 'fast', undefined])
+  })
+
+  it('is told to think less when the room itself was thought away', async () => {
+    const roomThoughtAway: Partial<Result> = {
+      text: '', stopReason: 'length', outputTokens: THINKING_ROOM,
+      usage: { inputTokens: 10, outputTokens: THINKING_ROOM, reasoningTokens: THINKING_ROOM },
+    }
+    const { descriptor, sent, efforts } = thinker('runaway', [thoughtfulAnswer('first'), roomThoughtAway, thoughtfulAnswer('second')])
+    registry.register(descriptor)
+    await ask('runaway')
+    expect(await ask('runaway')).toBe('second')
+    expect(sent).toEqual([undefined, THINKING_ROOM, THINKING_ROOM])
+    expect(efforts).toEqual([undefined, undefined, 'fast'])
   })
 
   it('starts with the room after any answer that reported thought', async () => {

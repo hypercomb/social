@@ -378,6 +378,14 @@ is asked again plainly and not asked for it again; and a blank that stays
 blank says where the allowance went. A caller's own allowance is never
 changed (`assistant/answer-room.ts`).
 
+Room alone was not enough. Linking six creations to the card took rounds
+that thought for 6000 to 11000 tokens, and some thought for all 16384 and
+wrote nothing, 115 seconds each. The same model, given a small coding
+question and 16384 tokens, thought for all of it twice and failed after 324
+seconds; asked with low reasoning effort it thought for 4769 and answered
+in 41. So the retry after an answer that was all thought is also asked to
+think less: the lowest effort the adapter knows, for that one ask.
+
 **The vocabulary is the ceiling.** Asked to create a tile, the model answered
 that its only change verbs were keyword, accent, copy, paste, undo, redo,
 postit, organism and story: `create`, `title`, `hide` and `file` were asleep,
