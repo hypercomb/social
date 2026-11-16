@@ -100,6 +100,10 @@ to you: when a task needs the ground beneath it, open it before you act.
 - \`read /<route>\` lists the files a tile holds, each with the signature that
   opens it. A tile whose files list \`page.shell.html\` wears a page already in
   parts: each part is a file on the child tile of its name.
+- On a site's own page, \`code <words>\` also finds the words in the site's
+  files: each hit names the file, its signature and where \`read <signature>
+  <at>\` opens it. Search a long file for the line you need; do not read it
+  from the top.
 - The documents hold the WHOLE codex, the Build and Paint tiers that are not
   repeated below included, every document a tier cites, and the glossary. Read
   the Build tier before you change code.
