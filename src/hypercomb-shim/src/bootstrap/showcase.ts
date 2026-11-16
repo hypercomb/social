@@ -9,7 +9,7 @@
 // the bottom, beside what a member does to share their own favourite things. A
 // tile opens its details: every version, and every domain each one opens on.
 //
-// A colony is a domain and its hives are its subdomains. Which hives are open
+// A domain's hives are its subdomains. Which hives are open
 // on which domain is the ledger this origin already serves — /publications.json,
 // verified heads only — and a domain's shared creations are its public offering
 // pools, so nothing here names a domain. Each tile wears the picture its own

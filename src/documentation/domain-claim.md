@@ -190,8 +190,8 @@ the apex's own name in DNS.
 ## What the front door shows
 
 The card a visitor sees is a **showcase** (jwize 2026-10-24: "like your tiles
-with the beautiful images showing and they lead to the subdomains"). A colony
-is a domain and its hives are its subdomains, so the page is:
+with the beautiful images showing and they lead to the subdomains"). A
+domain's hives are its subdomains, so the page is:
 
 - **A lean header** (jwize 2026-10-24: "this area needs to be lean"): one
   small brand row (the mark, the domain's name, its sentence on one line, the

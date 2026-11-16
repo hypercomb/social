@@ -46,8 +46,9 @@ recommendation").
 - **You** see your whole **community**: your domains, each opening onto what it
   hosts, where you choose what joins your showcase.
 
-"Community" is the word people read; underneath, a domain is a colony
-([colony = domain](./domain-claim.md)).
+"Community" is the word people read. A **colony** is a group of related
+communities: any source of domains, your own included (jwize, 2026-11-14).
+A domain is not a colony; the level above it is.
 
 ## Your community: domains are tiles (design — not built)
 
