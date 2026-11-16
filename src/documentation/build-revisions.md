@@ -192,6 +192,70 @@ mark or a reference instead.
   of the same primitive and predate it; `build-record` deliberately
   refuses empty segments and points at `/snapshot`.
 
+## Named revisions, and the steps under each name
+
+jwize, 2026-11-16: "We should be able to save named revisions and then
+incremental subitems just like before so a new name just starts a new list
+of updates and if we want to change revisions we would first save the
+current one unless we wanted to discard with confirmations. This way we can
+always put our development away for a bit."
+
+Nothing new is stored. The build records above are read two ways
+(`history/revision-lines.ts`):
+
+- **A name is a line.** The records that share a label are one line of
+  work, and each is a step in it, oldest first. Saving under the name in
+  hand adds a step. Saving under a new name starts a new line, from the
+  same state when nothing changed.
+- **The newest record names the line in hand.** Opening a revision appends
+  a record under its name that repeats the seal it opened (no new seal), so
+  which line is being worked on is read from the slot. It travels with the
+  tile and is undone like any other change; no device keeps a note of it.
+  A record that repeats a seal its line already holds moves the line's
+  date and adds no step.
+
+The three acts:
+
+- **Save** (`saveRevision`): `mintBuildRecord` under the name in hand, or
+  under the name given. A first save needs a name.
+- **Open** (`openRevision`): the tree as it stands is saved first as a step
+  of the line being left (free when nothing changed), then the shared
+  restore walk brings the other one in. A save that fails stops the
+  change. Nothing is asked.
+- **Discard** (`discardChanges`): the newest record is opened again
+  without saving. The caller asks first. The discarded state stays one
+  step back in history, because the walk appends and never deletes.
+
+`appendBuildRecord` in `builds-slot.ts` is the one writer of a record;
+`mintBuildRecord` writes through it. It is what names a state a second
+time and what says a revision was opened.
+
+**Where it is surfaced.** A managed site door's bar
+(`sharing/site-revisions.view.ts`, mounted by `site-manage.view.ts`): one
+button says the line in hand and its step ("red theme · 3", with a mark
+while the card holds changes no step does) and opens the panel that saves,
+opens and discards. `/builds` in a hive reads and writes the same records.
+
+**A conversation belongs to the revision it was held in**
+(`assistant/chat-revisions.ts`; jwize, same day: "there should be the
+ability to read all revisions but only have the ai chats for that
+instance"). Nothing is stamped on a conversation and its id is unchanged.
+The records say which line was in hand at any moment (`lineAt`), and a
+conversation's turns say when it was held: it belongs to the line in hand
+when it began, and to the line in hand when it was last continued. Work
+done before the first save belongs to the first line. On a managed site
+door the chat's rail lists only the conversations of the revision in hand
+for the site's tile and the tiles under it, the Chat button opens one of
+them, and opening another revision while the chat is up moves the chat to
+that revision's conversation. A hive is left alone: its build passes mint
+records under many names, and a new label there is not a participant
+changing what they work on.
+
+Not built: a published site carries the `builds` slot like any other slot,
+so the names travel with a publish and saving a revision counts as an
+unpublished change; a reader on another device holds each revision's root
+layer and not its whole tree.
+
 ## Conformance (audited 2026-07-27, wired same day)
 
 | Producer | R1 | R2a | R3 |
@@ -224,6 +288,12 @@ granularity ever matters, that is a separate decision.
   registration.
 - `hypercomb-essentials/.../history/seal-restore.ts` — `applySealAt`,
   the one restore walk shared by `/restore` and `/builds revert`.
+- `hypercomb-essentials/.../history/revision-lines.ts` — the records as
+  named lines and steps; `saveRevision`, `openRevision`, `discardChanges`.
+- `hypercomb-essentials/.../sharing/site-revisions.view.ts` — the panel on
+  a managed site door's bar.
+- `hypercomb-essentials/.../assistant/chat-revisions.ts` — which revision
+  a conversation belongs to.
 - `hypercomb-essentials/.../commands/builds.queen.ts` — `/builds`
   list · record · restore.
 - `hypercomb-essentials/.../assistant/claude-bridge.worker.ts` —

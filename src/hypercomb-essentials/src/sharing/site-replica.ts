@@ -132,8 +132,11 @@ export type ReplicaThreads = {
   tileConvoId?(segments: readonly string[]): string
   newTileConvoId?(segments: readonly string[]): string
   tilePathOf?(convoId: string): string
-  listConversations?(): Promise<readonly { readonly convoId: string; readonly archived?: boolean; readonly lastAt?: number }[]>
+  listConversations?(): Promise<readonly ReplicaConvo[]>
 }
+
+/** What the door reads of a conversation to choose one. */
+export type ReplicaConvo = { readonly convoId: string; readonly archived?: boolean; readonly lastAt?: number; readonly startedAt?: number }
 
 /** Where the site stands in this hive: the tile at /<lineage>, one segment per
  *  name — a nested site (`revolucion/meetup`) is the tile meetup under
@@ -164,20 +167,30 @@ export const replicaConvoId = (lineage: string, threads?: { tileConvoId?(segment
  * the door opens the card's most recent live conversation, and with none, a
  * fresh one on the card. The filed one stays in the list under Archived.
  * A list that cannot be read opens the card's own, as before.
+ *
+ * A CONVERSATION OF ANOTHER REVISION IS NOT THE ONE IT OPENS EITHER
+ * (assistant/chat-revisions.ts). `inRevision` says whether a conversation
+ * belongs to the revision in hand; one that does not is passed over exactly
+ * as a filed one is, so opening a revision opens its own conversations.
  */
-export const replicaChatConvoId = async (lineage: string, threads?: ReplicaThreads): Promise<string> => {
+export const replicaChatConvoId = async (
+  lineage: string,
+  threads?: ReplicaThreads,
+  inRevision: (convo: ReplicaConvo) => boolean = () => true,
+): Promise<string> => {
   const own = replicaConvoId(lineage, threads)
   if (!threads?.listConversations) return own
-  let listed: readonly { readonly convoId: string; readonly archived?: boolean; readonly lastAt?: number }[]
+  let listed: readonly ReplicaConvo[]
   try { listed = await threads.listConversations() } catch { return own }
-  if (!listed.find(convo => convo.convoId === own)?.archived) return own
+  const ownListed = listed.find(convo => convo.convoId === own)
+  if (!ownListed?.archived && inRevision(ownListed ?? { convoId: own })) return own
   const route = replicaRoute(lineage)
   const at = route.join('/')
   const onCard = (convoId: string): boolean => {
     try { return String(threads.tilePathOf?.(convoId) ?? '').split('/').filter(Boolean).join('/') === at } catch { return false }
   }
   const live = listed
-    .filter(convo => !convo.archived && onCard(convo.convoId))
+    .filter(convo => !convo.archived && onCard(convo.convoId) && inRevision(convo))
     .sort((a, b) => (b.lastAt ?? 0) - (a.lastAt ?? 0))[0]
   if (live) return live.convoId
   try {
