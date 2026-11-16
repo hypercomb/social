@@ -101,6 +101,7 @@ import { isLongPressMenu } from '../navigation/browser-menu.js'
 import { walkTree, type WalkHistory, type WalkStore } from '../presentation/tiles/tree-walk.js'
 import { RAIL_CSS, RAIL_STYLE_ID } from './tiles-rail.css.js'
 import { CHAT_CODE_EFFECT, showChatCode, type ChatCodeAsk } from './chat-code.js'
+import { partByRevision } from './chat-revisions.js'
 import { readThumbnail, type ThumbnailStore } from '../presentation/tiles/thumbnails.js'
 import { tilePictureCandidates } from '../editor/tile-properties.js'
 import type { AgentRegistry } from './agent-registry.service.js'
@@ -337,6 +338,9 @@ export class AgentTilesRail {
   #drafts = new Set<string>()
   /** Every tile conversation, and the per-tile fold the row marks read. */
   #chatList: TileConversation[] = []
+  /** Conversations that belong to another revision of the managed site
+   *  (chat-revisions.ts): not listed, and never the one a row enters. */
+  #otherRevision = new Set<string>()
   /** Conversations a turn has landed in since the last merge, and the timer
    *  that folds them in together. */
   #chatDirty = new Set<string>()
@@ -1846,6 +1850,12 @@ export class AgentTilesRail {
    *  chat so coming back resumes it. */
   #enterChat(row: RailRow, key: string, convoId: string): void {
     const path = tilePath(row.segments)
+    // A conversation of another revision of the site is not entered from a
+    // row (a tile's own, or the one last open on it, may be one): the newest
+    // of this revision's on the tile, else a fresh one.
+    if (this.#otherRevision.has(convoId)) {
+      convoId = this.#chatsFor(path).find(chat => !chat.archived)?.convoId ?? newTileConvoId(row.segments)
+    }
     // ONE FOLD AT A TIME. Entering a conversation shuts every other tile's
     // list: you are in one thread, the rail should show one tile's threads,
     // and a column of half a dozen open folds is a list you have to read
@@ -1986,8 +1996,14 @@ export class AgentTilesRail {
       // the one thing you wanted to watch was the one thing not listed.
       .filter((chat): chat is TileConversation => !!chat && (chat.archived || chat.turns >= 1))
     if (this.#disposed || !fresh.length) return
+    // A conversation continued in this revision is one of its own from now on.
+    const parted = await partByRevision(fresh).catch(() => ({ held: fresh, elsewhere: [] as TileConversation[] }))
+    if (this.#disposed) return
+    for (const chat of parted.held) this.#otherRevision.delete(chat.convoId)
+    for (const chat of parted.elsewhere) this.#otherRevision.add(chat.convoId)
     const byId = new Map(this.#chatList.map(chat => [chat.convoId, chat]))
-    for (const chat of fresh) byId.set(chat.convoId, chat)
+    for (const chat of parted.elsewhere) byId.delete(chat.convoId)
+    for (const chat of parted.held) byId.set(chat.convoId, chat)
     this.#chatList = [...byId.values()].sort((a, b) => b.lastAt - a.lastAt)
     this.#chats = foldTileConversations(this.#chatList)
     this.#paintStatus()
@@ -2024,7 +2040,12 @@ export class AgentTilesRail {
   async #refreshChats(): Promise<void> {
     let chats: TileConversation[] = []
     try { chats = (await listRailConversations()).filter(chat => chat.archived || chat.turns >= 1) } catch { return }
+    // On a managed site door, only the conversations of the revision in hand
+    // (chat-revisions.ts). Every conversation, on any other page.
+    const parted = await partByRevision(chats).catch(() => ({ held: chats, elsewhere: [] as TileConversation[] }))
     if (this.#disposed) return
+    chats = parted.held
+    this.#otherRevision = new Set(parted.elsewhere.map(chat => chat.convoId))
     this.#chatList = chats
     this.#chats = foldTileConversations(chats)
     this.#paintStatus()

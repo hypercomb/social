@@ -448,6 +448,21 @@ describe('the chat', () => {
       ]))).toBe(`${OWN}::fresh`)
     })
 
+    // jwize, 2026-11-16: "only have the ai chats for that instance". A
+    // conversation of another revision is passed over as a filed one is.
+    it('passes over a conversation that belongs to another revision of the card', async () => {
+      const other = new Set([OWN, `${OWN}::red`])
+      const inRevision = (convo: { convoId: string }): boolean => !other.has(convo.convoId)
+      expect(await replicaChatConvoId('business-card', threads([
+        { convoId: OWN, lastAt: 50 }, { convoId: `${OWN}::red`, lastAt: 60 }, { convoId: `${OWN}::blue`, lastAt: 30 },
+      ]), inRevision)).toBe(`${OWN}::blue`)
+      expect(await replicaChatConvoId('business-card', threads([
+        { convoId: OWN, lastAt: 50 }, { convoId: `${OWN}::red`, lastAt: 60 },
+      ]), inRevision)).toBe(`${OWN}::fresh`)
+      // The card's own, never spoken in, is asked about too.
+      expect(await replicaChatConvoId('business-card', threads([]), () => false)).toBe(`${OWN}::fresh`)
+    })
+
     it('is the card tile’s own when the list cannot be read, or there are no threads to ask', async () => {
       expect(await replicaChatConvoId('business-card', { ...threads([]), listConversations: async () => { throw new Error('unreadable') } })).toBe(OWN)
       expect(await replicaChatConvoId('business-card')).toBe(OWN)
