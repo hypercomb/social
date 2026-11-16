@@ -809,7 +809,7 @@ describe('a read the leg already answered', () => {
     const again = formatHypercombObservationReceipt(page(long), { memory, round: 5 })
     expect(only(again)).toEqual({
       grammar: `read ${sigOf(7)}`, root: sigOf(7), unchanged: true,
-      unchangedNote: 'this read was answered 3 rounds ago and nothing it read has changed: that answer is above, word for word. use it; do not ask again',
+      unchangedNote: 'this read was answered 3 rounds ago and nothing it read has changed since: what you were given above still stands. use it; do not ask again',
     })
     expect(again.length).toBeLessThan(first.length / 3)
     // The pointer keeps pointing at the round that held the answer.
