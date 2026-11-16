@@ -230,8 +230,17 @@ copied. Pools list members; marks on the members name their pools.
 | Middle picture | an image for the open area, drawn where the comb would be, inside the borders and clear of the type, the icons and the cube | `card:data` → `artSig` |
 
 Every signature a card names sits in the `card:data` payload, so the record's
-references carry the theme and the picture to every host and adopter. A
-signature inside the card's JSON would never be followed.
+references carry the theme and the picture to every host and adopter.
+
+A signature inside the card's JSON is declared too (2026-11-15). The card's
+page is framed with the bytes its records declare and nothing else, and a
+publish carries the same set. A model linked four creations' pictures into
+the card's details by signature (`backlinks[].img`) and none reached the
+page. Now the writer declares, in the record's `refs`, every signature in the
+details and the theme that this device holds as a resource, and what a
+pointer among them points at. Only this device is asked: a signature with no
+bytes here is an address or a key and is never declared. Writing the same
+JSON again declares what a record written earlier did not.
 
 The starter themes are Honeycomb Edge (the card as it was made), Graphite,
 Graphite Red and Emerald. A card with no theme is Honeycomb Edge exactly: the

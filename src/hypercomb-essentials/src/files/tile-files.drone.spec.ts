@@ -9,12 +9,12 @@ import { Blob as NodeBlob } from 'node:buffer'
 // jsdom's Blob cannot be read back as text; the store reads every file that way.
 ;(globalThis as unknown as { Blob: unknown }).Blob = NodeBlob
 
-type Record_ = { sig: string; record: { kind: string; payload: Record<string, unknown> } }
+type Record_ = { sig: string; record: { kind: string; payload: Record<string, unknown>; refs?: string[] } }
 
 const fake = vi.hoisted(() => ({
   decorations: new Map<string, Record_[]>(),
   removed: [] as string[],
-  written: [] as { kind: string; segments: string[]; payload: Record<string, unknown> }[],
+  written: [] as { kind: string; segments: string[]; payload: Record<string, unknown>; refs?: string[] }[],
   bytes: new Map<string, string>(),
   tree: new Map<string, string[]>(),
   layers: new Map<string, Record<string, unknown>>(),
@@ -45,8 +45,8 @@ vi.mock('../commands/decoration-manifest.js', () => ({
     const key = segments.join('/')
     fake.decorations.set(key, (fake.decorations.get(key) ?? []).filter(d => d.sig !== sig))
   },
-  writeDecoration: async (opts: { kind: string; segments: string[]; payload: Record<string, unknown> }) => {
-    fake.written.push({ kind: opts.kind, segments: [...opts.segments], payload: opts.payload })
+  writeDecoration: async (opts: { kind: string; segments: string[]; payload: Record<string, unknown>; refs?: readonly string[] }) => {
+    fake.written.push({ kind: opts.kind, segments: [...opts.segments], payload: opts.payload, ...(opts.refs ? { refs: [...opts.refs] } : {}) })
     return 'd'.repeat(64)
   },
 }))
@@ -59,6 +59,7 @@ const sha = async (text: string): Promise<string> => {
 fake.services.set('@hypercomb.social/Store', {
   putResource: async (blob: Blob) => { const text = await blob.text(); const sig = await sha(text); fake.bytes.set(sig, text); return sig },
   getResource: async (sig: string) => fake.bytes.has(sig) ? new Blob([fake.bytes.get(sig)!]) : null,
+  getResourceLocal: async (sig: string) => fake.bytes.has(sig) ? new Blob([fake.bytes.get(sig)!]) : null,
 })
 fake.services.set('@diamondcoreprocessor.com/HypercombHiveTreeReader', {
   readNode: async (segments: string[]) => ({ ok: true, children: (fake.tree.get(segments.join('/')) ?? []).map(name => ({ name })) }),
@@ -198,6 +199,47 @@ describe('a tile\'s card', () => {
       payload: { dataSig: await sha(json), themeSig: THEME, artSig: ART, label: 'mine' },
     }])
     expect(fake.bytes.get(await sha(json))).toBe(json)
+  })
+
+  it('declares the pictures the details name, and what a pointer among them points at', async () => {
+    // The page is framed with the bytes the card's record declares. A
+    // signature inside the details JSON was never followed, so four pictures
+    // linked into a card by signature never reached its page.
+    const PICTURE = '4'.repeat(64)
+    const POINTER = '5'.repeat(64)
+    const BEHIND = '6'.repeat(64)
+    const NOT_HERE = '7'.repeat(64)
+    fake.bytes.set(PICTURE, 'picture bytes')
+    fake.bytes.set(POINTER, JSON.stringify({ meta: 1, resource: BEHIND, relation: 'picture' }))
+    fake.bytes.set(BEHIND, 'the picture the pointer stands for')
+    card({ dataSig: DATA, artSig: ART })
+    const json = JSON.stringify({ n: 'Jaime Weise', backlinks: [
+      { t: 'Meetup', u: 'https://meetup.example/', img: PICTURE },
+      { t: 'colony', u: 'https://colony.example/', img: POINTER },
+      { t: 'gone', u: 'https://gone.example/', img: NOT_HERE },
+    ] })
+    expect(await new TileFilesDrone().write({ route: ['Proposal'], kind: 'card' }, json)).toMatchObject({ ok: true })
+    expect(fake.written).toEqual([{
+      kind: 'card:data', segments: ['Proposal'],
+      payload: { dataSig: await sha(json), artSig: ART },
+      // What this device holds, in the order named; never a signature with no bytes here.
+      refs: [PICTURE, POINTER, BEHIND],
+    }])
+  })
+
+  it('writes the same details again when the record does not yet declare what they name', async () => {
+    const PICTURE = '4'.repeat(64)
+    fake.bytes.set(PICTURE, 'picture bytes')
+    const json = JSON.stringify({ n: 'Jaime Weise', backlinks: [{ t: 'Meetup', img: PICTURE }] })
+    fake.bytes.set(await sha(json), json)
+    card({ dataSig: await sha(json) })
+    expect(await new TileFilesDrone().write({ route: ['Proposal'], kind: 'card' }, json)).toMatchObject({ ok: true, unchanged: false })
+    expect(fake.written).toEqual([{ kind: 'card:data', segments: ['Proposal'], payload: { dataSig: await sha(json) }, refs: [PICTURE] }])
+    // Declared now: the same JSON once more changes nothing.
+    fake.decorations.set('Proposal', [{ sig: 'f'.repeat(64), record: { kind: 'card:data', payload: { dataSig: await sha(json) }, refs: [PICTURE] } }])
+    fake.written.length = 0
+    expect(await new TileFilesDrone().write({ route: ['Proposal'], kind: 'card' }, json)).toMatchObject({ ok: true, unchanged: true })
+    expect(fake.written).toEqual([])
   })
 
   it('writes the theme as a new card:data themeSig, keeping the details', async () => {
