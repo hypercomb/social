@@ -551,6 +551,47 @@ describe('LLM context projection substitutes for content on /read only', () => {
     expect(out).toContain('"noteCount":2')
   })
 
+  it('lists the files a tile holds, says how to open and change one, and drops a malformed row', async () => {
+    // A card's stylesheet was a count among its records: thirteen rounds to
+    // find one file (business-card.jwize.com, 2026-11-15).
+    const css = 'c'.repeat(64)
+    const reader = readerFor()
+    const base = reader.readNode as ReturnType<typeof vi.fn>
+    const inner = base.getMockImplementation()!
+    base.mockImplementation(async (segments, options) => ({
+      ...(await inner(segments, options)),
+      files: [{ name: 'style.css', sig: css, size: 19_029 }, { name: 'bad\u0000name', sig: css, size: 1 }, { name: 'no-sig.txt', sig: 'nope', size: 1 }],
+    }))
+    const out = formatHypercombObservationReceipt(await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars(['/read /card/style'], []), reader))
+    expect(out).toContain(`"files":[{"name":"style.css","sig":"${css}","bytes":19029}]`)
+    expect(out).toContain('read <sig> opens one. change one with a write block: file /card/style style.css')
+    expect(out).not.toContain('in parts')
+  })
+
+  it('on the tile whose page is in parts, says the page follows its files', async () => {
+    const shell = 'd'.repeat(64)
+    const reader = readerFor()
+    const base = reader.readNode as ReturnType<typeof vi.fn>
+    const inner = base.getMockImplementation()!
+    base.mockImplementation(async (segments, options) => ({
+      ...(await inner(segments, options)),
+      files: [{ name: 'page.shell.html', sig: shell, size: 7_007, shell: true }], filesMore: 3,
+    }))
+    const out = formatHypercombObservationReceipt(await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars(['/read /card'], []), reader))
+    expect(out).toContain("this tile's page is in parts: page.shell.html is its markup")
+    expect(out).toContain('do not write the page whole, and do not break a block apart again')
+    expect(out).toContain('3 more files are not listed')
+  })
+
+  it('a tile with no files says nothing about files', async () => {
+    const out = formatHypercombObservationReceipt(await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars(['/read /humidor'], []), readerFor()))
+    expect(out).not.toContain('"files"')
+    expect(out).not.toContain('filesNote')
+  })
+
   it('never projects /list, even with a service that would happily project', async () => {
     (window as unknown as { ioc: unknown }).ioc = {
       get: () => ({ project: vi.fn(async () => ({ text: 'should never appear', minted: true })) }),

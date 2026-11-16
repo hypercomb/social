@@ -132,7 +132,7 @@ import { askIdeasOf } from './ask-ideas'
 import { hiveConversationMove } from './hive-conversation'
 import { groupRuns } from './chat-runs'
 import { resourceVersion, versionsIn, type ChatVersion } from './chat-versions'
-import { owedAfter, owedCue, pageChangeStillOwed, workBeaconOf, type LegEnd, type OwedLike, type OwedPatchLike, type WorkBeaconOwed, type WorkBeaconState, type WorkPending } from './owed-step'
+import { owedAfter, owedCue, pageChangeStillOwed, workBeaconOf, wroteTileFile, type LegEnd, type OwedLike, type OwedPatchLike, type WorkBeaconOwed, type WorkBeaconState, type WorkPending } from './owed-step'
 import {
   callableBehaviours,
   hypercombActionProviderId,
@@ -8596,7 +8596,7 @@ export class ChatWindow {
           })
           const pageLeft = handed ? undefined : pageChangeStillOwed(
             message, work.prose, readRounds > 0,
-            ran.some(line => line.startsWith('write page /') || line.startsWith('write card /')),
+            wroteTileFile(ran),
             `${lastRun}` === 'skipped',
             !!managed,
           )

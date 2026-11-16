@@ -19,7 +19,8 @@ import { isPeerContentAt } from '../sharing/adopted-roots.js'
 import { MAX_RECORD_DEPTH } from '../search/hive-search.js'
 import { readExplore, type HypercombExploreRead } from './hive-explore-read.js'
 import { readPool, readPoolMember, type HypercombPoolRead } from './hive-pool-read.js'
-import { describePage, looksLikePage, pageBlocks, pagePartText } from '../files/page-parts.js'
+import { SHELL_FILE, describePage, looksLikePage, pageBlocks, pagePartText } from '../files/page-parts.js'
+import { listAttachments } from '../files/files-attachment.js'
 
 export const HIVE_TREE_READER_IOC_KEY = '@diamondcoreprocessor.com/HypercombHiveTreeReader'
 
@@ -171,6 +172,14 @@ const DEPENDENCY_LOADER_KEY = '@hypercomb.social/DependencyLoader'
 const MAX_CODE_ENTRIES = 200
 const CONTROL = /[\u0000-\u001f\u007f]/g
 
+/** One file a tile holds: its name, the resource it is, its size in bytes.
+ *  `shell` marks the file a page in parts is assembled from
+ *  (files/page-parts.ts): writing it, or a part's file, rebuilds the page. */
+export type TileFileRow = { readonly name: string; readonly sig: string; readonly size: number; readonly shell?: true }
+
+/** A read lists at most this many of a tile's files. */
+export const MAX_TILE_FILE_ROWS = 60
+
 export type HypercombNodeRead =
   | {
     readonly ok: true
@@ -190,6 +199,10 @@ export type HypercombNodeRead =
     readonly notes?: readonly string[]
     readonly noteCount?: number
     readonly notesTruncated?: boolean
+    /** A route `/read`: the files the tile holds, the newest of each name,
+     *  with the signature that opens it. `filesMore` when the list was cut. */
+    readonly files?: readonly TileFileRow[]
+    readonly filesMore?: number
     /** Absent on a sig-addressed read: immutable content has no live head. */
     readonly snapshot?: string
   }
@@ -1694,7 +1707,41 @@ export class HypercombHiveTreeReader {
   ): Promise<HypercombNodeRead> {
     const read = await this.#readNodeRouted(segments, options)
     if (!read.ok || options.withContent === false || !segments.length) return read
-    return this.#withNotes(read, segments, options.maxBytes)
+    const noted = await this.#withNotes(read, segments, options.maxBytes)
+    return noted.ok ? this.#withFiles(noted, segments) : noted
+  }
+
+  /**
+   * A TILE'S FILES, BY NAME. A tile's files are `files:attachment` records
+   * among its decorations, and a read showed them as a count beside a dozen
+   * other records. A model asked to change a card's stylesheet opened twelve
+   * records one at a time to find the file, thirteen rounds for one line
+   * (business-card.jwize.com, 2026-11-15). The newest file of each name is
+   * listed here with the signature that opens it. Like the notes, the list is
+   * asked for on every read: a write block changes it.
+   */
+  async #withFiles(
+    read: Extract<HypercombNodeRead, { ok: true }>,
+    segments: readonly string[],
+  ): Promise<HypercombNodeRead> {
+    const listed = await listAttachments(segments).catch(() => null)
+    if (!listed?.length) return read
+    const newest = new Map<string, TileFileRow>()
+    for (const { payload } of listed) {
+      const name = typeof payload?.name === 'string' ? payload.name.replace(CONTROL, '').trim() : ''
+      if (!name || name.length > 200 || typeof payload.sig !== 'string' || !SIG.test(payload.sig)) continue
+      const size = Number.isInteger(payload.size) && payload.size >= 0 ? payload.size : 0
+      const key = name.toLowerCase()
+      newest.delete(key) // a later record of the same name replaces the earlier
+      newest.set(key, { name, sig: payload.sig, size, ...(name === SHELL_FILE ? { shell: true as const } : {}) })
+    }
+    if (!newest.size) return read
+    const files = [...newest.values()]
+    return {
+      ...read,
+      files: files.slice(0, MAX_TILE_FILE_ROWS),
+      ...(files.length > MAX_TILE_FILE_ROWS ? { filesMore: files.length - MAX_TILE_FILE_ROWS } : {}),
+    }
   }
 
   /**

@@ -208,6 +208,7 @@ export const describePage = (html: string, sig: string): { text: string; section
       'To CHANGE a page this long, break it apart first: a change block with the line',
       '  /part /<route of the tile that wears this page> <block> <name>',
       `for example /part /card ${blocks[blocks.length - 1]?.id ?? 'script-1'} animation. That moves the block into a file of its own on the child tile <name>; the page itself does not change. Then change that file with a write block (file /<route>/<name> <name>.<its extension>, SEARCH/REPLACE edits) and the hive rebuilds the page from its parts. The markup is the file ${SHELL_FILE} on the page's own tile once a block has been moved out.`,
+      `ALREADY IN PARTS? This outline is of the page as served and cannot tell. Read the tile that wears the page: when its files list ${SHELL_FILE}, the blocks have files already, each on the child tile of its name (read that tile for the file and its signature). Change that file; do not break the block apart again.`,
     ].join('\n'),
     sections: [
       ...blocks.map(block => ({ path: pagePartPath(block), lines: lines(block.textStart, block.textEnd) })),

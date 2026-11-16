@@ -46,6 +46,7 @@ describe('the chat window on a managed site door', () => {
   it('hands the card target to the tile-files door with its part, and counts a card write as the page work done', () => {
     expect(source).toContain("type TileFileTarget = { route: readonly string[]; kind: 'page' | 'file' | 'card'; name?: string; part?: 'details' | 'theme' }")
     expect(source).toContain('...(parsed.part ? { part: parsed.part } : {}),')
-    expect(source).toContain("ran.some(line => line.startsWith('write page /') || line.startsWith('write card /')),")
+    // The page, the card and a file: one rule, tested in owed-step.spec.ts.
+    expect(source).toContain('wroteTileFile(ran),')
   })
 })
