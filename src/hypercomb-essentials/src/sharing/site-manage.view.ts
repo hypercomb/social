@@ -661,7 +661,7 @@ export class SiteManageElement extends ElementBase {
       // a revision of before that.
       this.#revisions.hidden = !state?.layer
       this.#revisions.textContent = revisionButtonWords(this.#panel?.state ?? null)
-      this.#revisions.title = t('revisions.title', 'Revisions of this card')
+      this.#revisions.title = t('site-revisions.title', 'Revisions of this card')
     }
     this.#frame?.setAttribute('title', record?.title ?? '')
   }
