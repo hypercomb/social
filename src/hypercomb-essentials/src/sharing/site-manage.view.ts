@@ -41,9 +41,9 @@ import { readInstallFollow } from './update-scout.service.js'
 import { managedRecordText } from './managed-record.js'
 import {
   BROKER_KEY, CHAT_THREADS_KEY, COMMITTER_KEY, HISTORY_KEY, LINEAGE_KEY, MANAGED_PUBLISH_KEY, STORE_KEY, SWARM_ADOPT_KEY,
-  notePublished, readState, reconcile, replicaConvoId, replicaLocation, takePublished, writeReceipt,
+  notePublished, readState, reconcile, replicaChatConvoId, replicaConvoId, replicaLocation, takePublished, writeReceipt,
   type AdoptLike, type BrokerLike, type CommitterLike, type HistoryLike, type ManagedPublishLike, type ReplicaServices,
-  type ReplicaSite, type ReplicaState, type StoreLike as ReplicaStoreLike,
+  type ReplicaSite, type ReplicaState, type ReplicaThreads, type StoreLike as ReplicaStoreLike,
 } from './site-replica.js'
 
 export const SITE_MANAGE_SURFACE = 'hc-site-manage'
@@ -521,11 +521,15 @@ export class SiteManageElement extends ElementBase {
     chat.className = 'sm-btn sm-chat'
     // A command, never a state: transient, so it is not replayed to a late
     // listener. It opens on the card tile's own conversation, so the chat's
-    // subject — and every change it makes — is the card.
+    // subject — and every change it makes — is the card; a conversation the
+    // owner put away is not the one it opens (site-replica replicaChatConvoId).
     chat.addEventListener('click', () => {
       const lineage = this.#record?.lineage ?? ''
-      const threads = ioc()?.get?.<{ tileConvoId?(segments: readonly string[]): string }>(CHAT_THREADS_KEY)
-      EffectBus.emitTransient('chat:open', lineage ? { convoId: replicaConvoId(lineage, threads) } : {})
+      if (!lineage) { EffectBus.emitTransient('chat:open', {}); return }
+      const threads = ioc()?.get?.<ReplicaThreads>(CHAT_THREADS_KEY)
+      void replicaChatConvoId(lineage, threads)
+        .catch(() => replicaConvoId(lineage, threads))
+        .then(convoId => EffectBus.emitTransient('chat:open', { convoId }))
     })
     const back = this.#back = document.createElement('a')
     back.className = 'sm-btn'
