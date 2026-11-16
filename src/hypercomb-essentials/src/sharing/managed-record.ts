@@ -26,6 +26,26 @@ export function managedRecordText(doc: Document | undefined = typeof document ==
   return el.textContent
 }
 
+let siteOf: { readonly raw: string | null; readonly segments: string[] | null } | undefined
+
+/** THE SITE'S OWN TILE on a managed site door, as the route its replica lives
+ *  at — `business-card` → ['business-card'], `revolucion/meetup` →
+ *  ['revolucion', 'meetup'] — or null on every other page. The same split the
+ *  shim uses to point the page at it (manage-base.ts `siteSegments`). */
+export function managedSiteSegments(doc: Document | undefined = typeof document === 'undefined' ? undefined : document): string[] | null {
+  let raw: string | null = null
+  try { raw = managedRecordText(doc) } catch { /* no record */ }
+  if (siteOf && siteOf.raw === raw) return siteOf.segments
+  let segments: string[] | null = null
+  try {
+    const lineage = raw ? (JSON.parse(raw) as Record<string, unknown>)?.['lineage'] : undefined
+    const split = typeof lineage === 'string' ? lineage.split('/').map(segment => segment.trim()).filter(Boolean) : []
+    segments = split.length ? split : null
+  } catch { /* not a record */ }
+  siteOf = { raw, segments }
+  return segments
+}
+
 /** Is this page a managed site door: the worker's record, naming the site's
  *  lineage. One answer for every module that behaves differently there. */
 export function isManagedSiteDoor(doc: Document | undefined = typeof document === 'undefined' ? undefined : document): boolean {

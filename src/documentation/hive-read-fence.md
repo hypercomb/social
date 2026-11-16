@@ -216,6 +216,20 @@ work on Hypercomb via DeepSeek."*
     it surfaces must count as foreign (`readSuccessionMembers` already
     knows each member's author). The machine grant still keeps `/remove`
     and `/cut` from models by default (`grant destructive` raises it).
+  - **The owner's own replica is not a peer's (2026-11-15).** A managed
+    site door holds a replica of the owner's own creation, and it lands by
+    the ordinary adopt (sharing/site-replica.ts), so its tile is an adopted
+    root. Every read of the owner's own card then counted as someone else's
+    words, and every change the chat made to it waited for a hand: on
+    business-card.jwize.com, five in a row. `isPeerContentAt` now leaves out
+    the one adopted root that IS the site's own tile, as the worker's record
+    names it (sharing/managed-record.ts `managedSiteSegments`). Only that
+    root: a branch taken in beneath it is a root of its own, a carried tile
+    is still carried, and a pool or a name explored is still read from the
+    hosts, so a change that follows any of those is held as before. What
+    the replica cannot say is which of its tiles the owner once adopted at
+    home: that record is local to the home hive and does not travel with a
+    published head.
 - **One side, two occupants.** The Execution column and the workflow column
   share the chat's right side, one at a time; a new waiting request brings
   Execution forward. On a phone it covers the thread until put away.
