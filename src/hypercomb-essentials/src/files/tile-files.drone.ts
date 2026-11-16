@@ -33,7 +33,7 @@ import { listDecorations, removeDecorationAndWait } from '../commands/decoration
 import { FILES_ATTACHMENT_KIND, listAttachments, writeAttachment, type AttachmentPayload } from './files-attachment.js'
 import { extOf } from './file-types.js'
 import { commitPageSig } from './page-commit.js'
-import { CARD_FIELD, cardJsonRefusal, cardRecordAt, commitCardSig, type CardPart } from './card-commit.js'
+import { CARD_FIELD, cardDeclaresItsNames, cardJsonRefusal, cardRecordAt, commitCardSig, type CardPart } from './card-commit.js'
 import { rememberTrial, stageTrial, trialLabel, trialOrigin } from './try-page.js'
 import { partFilesOf, planPartRebuild } from './page-parts-commit.js'
 
@@ -169,7 +169,9 @@ export class TileFilesDrone extends Drone {
 
   async #writeCard(segments: readonly string[], part: CardPart, sig: string): Promise<TileFileWrite> {
     const current = await this.#cardSig(segments, part)
-    if (current === sig) return { ok: true, tile: segments, sig, created: false, unchanged: true }
+    // The same JSON changes nothing, unless the record does not yet declare
+    // what that JSON names: then it is written again so those bytes travel.
+    if (current === sig && await cardDeclaresItsNames(segments)) return { ok: true, tile: segments, sig, created: false, unchanged: true }
     const committed = await commitCardSig(segments, part, sig)
     if (!committed.ok) return committed
     return { ok: true, tile: segments, sig, created: !current, unchanged: false }
