@@ -1168,13 +1168,78 @@ const cutNoteOf = (found: Extract<HypercombFindRead, { ok: true }>): Record<stri
  *  (live 2026-10-22: 3 of 9 correct finds flagged, supported .44 to .75). */
 const WHOLE_FIND_NOTE = 'the walk finished, so this is every match under the route: give the routes and stop; do not describe where they sit, do not guess what they are, do not add offers or questions'
 
-/** JSON keeps hostile labels data-shaped. Snapshot handles stay host-private. */
+/**
+ * A READ ANSWERED ONCE IS NOT SENT TWICE (jwize, 2026-11-15: "the commands
+ * could be collapsed into chunks that could skip compute … you could get the
+ * data before having to execute anything").
+ *
+ * The store already computes once: a read by signature never changes, a tile
+ * read is kept until the tree moves, a find is built from records keyed by
+ * layer signature. The chat did not: a model that asked for a read it already
+ * had was sent the whole answer again, and every later round paid for both
+ * copies. Linking six creations to a card read `/business-card` six times.
+ *
+ * So a leg remembers, for each read line, the answer it gave. Asked again,
+ * an answer that is exactly the same goes back as one line pointing at the
+ * one above. Exactly the same is the whole test: the tile's signature, its
+ * files, every row of a find are all inside the answer, so an answer that
+ * matches is one where nothing it read has changed, and no date is kept.
+ *
+ * The memory is the caller's and only as good as the model's view: it is
+ * dropped when rounds fold out of the leg, and a new leg starts without one
+ * (chat-window.ts). Short answers are sent as they are: a pointer saves
+ * nothing on them.
+ */
+export type ReadRepeats = {
+  readonly memory: Map<string, { readonly round: number; readonly digest: string }>
+  /** The round being answered, counted from 1 within the leg. */
+  readonly round: number
+}
+
+/** Below this many characters an answer is sent again as it is. */
+export const REPEAT_MIN_CHARS = 400
+
+/** Two plain hashes and the length: enough to tell one answer from another
+ *  inside one leg, and nothing leaves the device by it. */
+const digestOf = (text: string): string => {
+  let a = 0x811c9dc5
+  let b = 5381
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+    a = Math.imul(a ^ code, 0x01000193)
+    b = (Math.imul(b, 33) ^ code) | 0
+  }
+  return `${text.length}:${(a >>> 0).toString(36)}:${(b >>> 0).toString(36)}`
+}
+
+const onceOnly = (grammar: string, observation: Record<string, unknown>, repeats: ReadRepeats | undefined): Record<string, unknown> => {
+  if (!repeats) return observation
+  const text = JSON.stringify(observation)
+  const key = grammar.trim().split(/\s+/).join(' ')
+  const digest = digestOf(text)
+  const before = repeats.memory.get(key)
+  if (before && before.digest === digest && before.round < repeats.round && text.length >= REPEAT_MIN_CHARS) {
+    const ago = repeats.round - before.round
+    return {
+      grammar,
+      ...(observation['root'] !== undefined ? { root: observation['root'] } : {}),
+      unchanged: true,
+      unchangedNote: `this read was answered ${ago === 1 ? 'one round' : `${ago} rounds`} ago and nothing it read has changed: that answer is above, word for word. use it; do not ask again`,
+    }
+  }
+  repeats.memory.set(key, { round: repeats.round, digest })
+  return observation
+}
+
+/** JSON keeps hostile labels data-shaped. Snapshot handles stay host-private.
+ *  With `repeats`, a read the leg already answered the same way is one line. */
 export const formatHypercombObservationReceipt = (
   receipt: HypercombObservationReceipt,
+  repeats?: ReadRepeats,
 ): string => JSON.stringify({
   kind: 'hypercomb-tree-observation',
   structureOnly: receipt.results.every(result => result.kind === 'tree'),
-  observations: receipt.results.map(result => {
+  observations: receipt.results.map(result => onceOnly(result.grammar, ((): Record<string, unknown> => {
     const { grammar, read } = result
     const scope = result.kind === 'find' && result.currentPage
       ? { scopeNote: scopeNoteOf(read.root, grammar, result.read.ok && !result.read.truncated) }
@@ -1294,6 +1359,6 @@ export const formatHypercombObservationReceipt = (
         ? { code: node.code, codeNote: 'running code that names this tile; read <sig> <section> <at> opens it at that line' }
         : {}),
     }
-  }),
+  })(), repeats)),
 })
 
