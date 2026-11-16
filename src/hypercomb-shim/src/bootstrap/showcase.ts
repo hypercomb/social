@@ -1383,6 +1383,84 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     paint()
     if (result.changed) takeLedger(options.ledger)
   }
+  // A LIVE TILE IN YOUR COMMUNITY COMES OUT WITH ONE CONFIRM, AND OFF ITS DOMAINS WITH IT (jwize 2026-11-16: "you should
+  // be able to toggle them in community (any bound items turn off on the domains). The goal is click on domain
+  // creations, click on community creations you are sharing … are bidirectional"). The community row is a switch both
+  // ways: gray goes live (openPublishOne), live comes out. Out is out of the showcase every visitor reads AND out of
+  // the staged list, so its domains' rows show it off too — nothing is left waiting to come back on the next Publish.
+  const openTakeOut = (entry: Aggregate, from: HTMLElement): void => {
+    closeConfirm()
+    picksOffered = true
+    confirmBar.textContent = `Take ${entry.title} out of my community`
+    confirming = () => { void takeOutOne(entry) }
+    confirmFrom = from
+    from.classList.add('asking')
+    confirmBar.hidden = false
+    document.addEventListener('keydown', onConfirmKey, true)
+    document.addEventListener('pointerdown', onConfirmAway, true)
+  }
+  const takeOutOne = async (entry: Aggregate): Promise<void> => {
+    if (tapping || publishing || staging) { say('A change is still being signed. Try again when it is done.'); return }
+    if (!showcased(entry) && !inCommunity(entry)) { say(`${entry.title} is already out.`); return }
+    // A tile only this browser picked goes back out here: the owners' list never named it.
+    if (picked(entry)) await pickTile(entry, options.self)
+    // Opened only where a key of yours stages (the tap's route): nothing else signs here.
+    const owner = options.owner
+    if (!owner?.stage || !ownerKey) return
+    const current = signed
+    if (!current?.reached || current.unreadable) { say('What is published here is not read yet. Try again in a moment.'); return }
+    const items = itemsOfEntry(entry)
+    const record = current.showcase
+    // Shown because its whole domain is in the community, not as itself: there is no one creation of it to take out.
+    if (record && showcased(entry) && !items.some(item => record.items.some(row => sameItem(row, item)))) {
+      const whole = entry.zones.find(zone => record.domains.includes(zone))
+      if (whole) { say(`${entry.title} is shown because all of ${whole} is in your community. Take ${whole} out to remove it.`); return }
+    }
+    // Out of the staged list first, so its domains' rows show it off and no later Publish brings it back. With no
+    // showcase yet the staged list starts from what visitors see, less this one.
+    const listed = current.staged ?? null
+    if ((listed && names(listed.items, entry)) || !record) {
+      const base = stagedItems()
+      const next: ShowcaseRecord = { zone: options.self, domains: [], ...(listed ?? {}), items: base.filter(kept => !items.some(gone => sameItem(gone, kept))) }
+      signed = { ...current, staged: next }
+      staging = true
+      paint()
+      const sent = owner.stage({ zone: options.self, on: [], off: items }).catch(() => ({ ok: false as const, reason: 'failed' }))
+      stageSent = sent
+      const result = await sent
+      staging = false
+      if (!result.ok) { if (signed?.staged === next) signed = current; paint(); say(`Could not take ${entry.title} out: ${result.reason}.`); return }
+    }
+    // No showcase yet: a take-out toggle would start the first record from one key's doors alone, and every other
+    // publisher's tile would go. Publishing the staged list keeps what visitors saw, less this one.
+    if (!record) { if (owner.publish && signed?.staged) await publishCommunity(); return }
+    // Then out of what every visitor reads: each creation of the tile the showcase names.
+    const live = items.filter(item => record.items.some(row => sameItem(row, item)))
+    if (!live.length) { say(`${entry.title} is out of your community.`); paint(); return }
+    tapping = true
+    say(`Taking ${entry.title} out of your community…`)
+    const gone: ShowcaseItem[] = []
+    let failed = ''
+    let changed = false
+    for (const item of live) {
+      const result = await owner.toggle({ zone: options.self, pubkey: item.pubkey, lineage: item.lineage, on: false })
+        .catch(() => ({ ok: false as const, reason: 'failed' }))
+      if (!result.ok) { failed = result.reason; break }
+      gone.push(item)
+      changed ||= result.changed
+    }
+    tapping = false
+    // What did come out is out, said and drawn, even when a later one failed.
+    const now = signed
+    if (gone.length && now?.reached && now.showcase) {
+      signed = { ...now, showcase: { ...now.showcase, items: now.showcase.items.filter(row => !gone.some(item => sameItem(item, row))) } }
+    }
+    say(failed
+      ? (gone.length ? `${entry.title} is partly out: ${failed}. Publish your community to finish it.` : `Not taken out: ${failed}.`)
+      : `${entry.title} is out of your community — off its domains too.`)
+    paint()
+    if (changed) takeLedger(options.ledger)
+  }
   bandsHost.append(confirmBar, publishBar)
   // WHAT THIS BROWSER KEPT GOES LIVE IN ONE PRESS (jwize 2026-11-14: "when I update my community on my phone it doesn't
   // stick"). Picks made before a key of yours answered here were kept only in this browser. Once one answers and the
@@ -1491,8 +1569,10 @@ ${entry.key}`
         if (held) { held = false; event.preventDefault(); event.stopPropagation(); return }
         if (row === options.self && !managing) return
         event.preventDefault()
-        // Gray in your community: one confirm, and it is live (openPublishOne). Lit or leaving: as before.
-        if (row === options.self && !showcased(made.entry) && canSign()) openPublishOne(made.entry, tile)
+        // YOUR COMMUNITY IS A SWITCH BOTH WAYS, each with one confirm: gray goes live (openPublishOne), live comes out and
+        // off its domains (openTakeOut). A followed domain's row stages and unstages, as before.
+        if (row === options.self && canSign() && !showcased(made.entry)) openPublishOne(made.entry, tile)
+        else if (row === options.self && canSign() && stages()) openTakeOut(made.entry, tile)
         else if (stages()) void stageTile(made.entry, row)
         else if (canSign()) openConfirm(made.entry, tile, row)
         else void toggleTile(made.entry, row, !isOn(made.entry))

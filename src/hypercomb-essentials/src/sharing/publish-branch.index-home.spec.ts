@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { HiveIndexResult } from './hive-pointer.js'
-import { indexHome, readDoorIndex, readerSiteOf, readerSitesByDoor, resolveIndexDoor } from './publish-branch.js'
+import { indexHome, readDoorIndex, readDoorIndexAt, readerSiteOf, readerSitesByDoor, resolveIndexDoor } from './publish-branch.js'
 
 const PUBKEY = 'c'.repeat(64)
 const index = (eventId: string, roots: Record<string, string>, createdAt: number): HiveIndexResult =>
@@ -71,6 +71,12 @@ describe('readDoorIndex', () => {
     expect(await readDoorIndex('a.example', 'card.a.example', PUBKEY, hosts({ 'a.example': FULL }))).toBe(FULL)
     expect(await readDoorIndex('a.example', undefined, PUBKEY, hosts({ 'a.example': STRAY }))).toBe(STRAY)
     expect(await readDoorIndex('a.example', 'card.a.example', PUBKEY, hosts({}))).toBe(DOWN)
+  })
+
+  it('says where it read the index, so what it names is fetched there too (2026-11-16: the relay held no promotions)', async () => {
+    const at = hosts({ 'jwize.com': STRAY, 'business-card.jwize.com': FULL })
+    expect(await readDoorIndexAt('jwize.com', 'business-card.jwize.com', PUBKEY, at)).toEqual({ read: FULL, at: 'business-card.jwize.com' })
+    expect(await readDoorIndexAt('jwize.com', 'business-card.jwize.com', PUBKEY, hosts({ 'jwize.com': STRAY }))).toEqual({ read: STRAY, at: 'jwize.com' })
   })
 })
 

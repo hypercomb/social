@@ -324,6 +324,13 @@ index write). The readable layers stay on the host beside the minified derivatio
 always there to read, and the minifier only drops whitespace, so pool meanings and keys survive. Another key's
 creation is its author's to promote. A creation that cannot be optimized does not go live, and the reason is said.
 
+**A republish optimizes itself too** (2026-11-16). A promotion names the head it was made for, so a creation already
+live that was published again read as not promoted until someone turned it off and on (games and camelflage on
+jwize.com). Now every hive publish (`publishBranch`) is followed, in the background and outside the publish lane, by
+`repromoteInCommunity` (`promote.ts`): each of the branch's domains whose live showcase names it as this key's has the
+new head promoted, one at a time across publishes. Staged items are left to the staged publish, which promotes them;
+a refusal is said in the activity log, and the publish it follows already stands.
+
 **Nothing complicated: the root domain is strictly on and off** (jwize, 2026-11-13: "You shouldn't manage your
 revision on the root domain. This is strictly on and off. The revisions should be available in the development mode
 on a subdomain"). On a root domain the host directory switches a package on or off and brings it to the newest; it
@@ -534,6 +541,11 @@ owners' reads and writes the same list, and a visitor is never drawn it.
   live while the bar was up is left alone, and a press while another change is still being signed says so. Off a phone
   with no key the hive is handed the switch, which puts it live but does not stage it. Sending a gray tile back out of
   the staged list is a tap in the row of the domain it came from.
+- **A live tile in the community comes out with one confirm, off its domains too (jwize 2026-11-16: "you should be
+  able to toggle them in community (any bound items turn off on the domains)").** Managing with a key that stages, a
+  tap on a lit tile in the community row puts "Take <name> out of my community" across the foot at once; yes takes it
+  out of the staged list (so its domains' rows show it off and no later Publish brings it back), then out of the
+  showcase every visitor reads. The community row is a switch both ways.
 - **The key is asked for at once.** `eitherOwner.hello` asks the hive beside the page and this browser's own key
   together (the first in the list that answers with a key still signs), and the page asks again when Manage turns on
   with no answer yet. The publish bar is never dimmed while a stage is being signed: a press waits for it.
@@ -648,7 +660,10 @@ The window (`hypercomb-shared/ui/publish-panel/`, drone `sharing/publish-status.
 - **Your community**, apart, on your own domain (the public host you named). Everything switched on in any domain
   stands in it: gray while it is only staged, lit once it is live in the owners' signed `showcase:<zone>`. A press on
   a gray one publishes it live (one of your own creations is optimized first, `promoteForCommunity`); a press on a lit
-  one takes it out, gray again and still on in its domains. A name with several versions (several publishers, or the
+  one takes it out. The two are one switch both ways (jwize 2026-11-16: "any bound items turn off on the domains …
+  are bidirectional"): one of your own taken out of the community is switched off on every domain it is on, and a
+  creation switched off on the last domain it was on comes out of the community; another publisher's version only
+  leaves the showcase. A name with several versions (several publishers, or the
   same name on several domains under different keys) opens to its versions; a press on one makes that one live and
   takes any other live version of the name out in the same write (`sharing/community-switch.ts`). With no host named
   there is no community yet, and the window says so.

@@ -1926,6 +1926,44 @@ describe('a tap visits, a hold toggles', () => {
     } finally { hero.remove(); bands.remove() }
   })
 
+  it('a live tile in your community comes out with one confirm, out of the staged list and the showcase both (jwize 2026-11-16: "you should be able to toggle them in community (any bound items turn off on the domains)")', async () => {
+    const calls: string[] = []
+    const owner = {
+      ...bridge(a),
+      stage: vi.fn(async (_request: { zone: string; on: readonly ShowcaseItem[]; off: readonly ShowcaseItem[] }) => { calls.push('stage'); return { ok: true as const, changed: true } }),
+      publish: vi.fn(async () => ({ ok: true as const, changed: false })),
+    }
+    // changed: false keeps this fake's unchanging record from being read back over the take-out
+    owner.toggle.mockImplementation(async () => { calls.push('toggle'); return { ok: true as const, changed: false } })
+    const { hero, bands } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
+      readOwners: async () => ({ ...owners(), staged: { zone: 'hypercomb.com', domains: [], items: [...record.items] } }),
+      owner, keepCommunity: vi.fn(async () => true),
+    })
+    document.body.append(hero, bands)
+    const bar = bands.querySelector('.confirm-bar') as HTMLButtonElement
+    try {
+      await vi.waitFor(() => expect(owner.hello).toHaveBeenCalled())
+      await new Promise(resolve => setTimeout(resolve, 0))
+      manageOn(hero)
+      await openRowNamed(bands, 'hypercomb.com')
+      const camelflage = await tileIn(bands, '.dex-row.own a.hex', 'camelflage')
+      expect(camelflage.classList.contains('off')).toBe(false)
+      // At once, across the foot: nothing signed before it shows.
+      click(camelflage)
+      expect(bar.hidden).toBe(false)
+      expect(bar.textContent).toBe('Take camelflage out of my community')
+      expect(calls).toEqual([])
+      bar.click()
+      await vi.waitFor(() => expect(owner.toggle).toHaveBeenCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'camelflage', on: false }))
+      expect(owner.stage).toHaveBeenCalledWith({ zone: 'hypercomb.com', on: [], off: [{ pubkey: a, lineage: 'camelflage' }] })
+      // Out of the staged list first: no later Publish brings it back.
+      expect(calls).toEqual(['stage', 'toggle'])
+      await vi.waitFor(() => expect(camelflage.classList.contains('off')).toBe(true))
+    } finally { hero.remove(); bands.remove() }
+  })
+
   it('a press while a change is still being signed says so, and signs nothing more', async () => {
     const owner = {
       ...bridge(a),
