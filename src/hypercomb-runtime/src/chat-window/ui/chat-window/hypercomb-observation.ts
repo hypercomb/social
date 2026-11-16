@@ -235,6 +235,11 @@ export type HypercombNodeRead =
     readonly notes?: readonly string[]
     readonly noteCount?: number
     readonly notesTruncated?: boolean
+    /** `/read` of a tile by route: the files it holds, the newest of each
+     *  name (essentials hive-tree-reader.ts `#withFiles`). `shell` marks the
+     *  file a page in parts is assembled from. */
+    readonly files?: readonly { readonly name: string; readonly sig: string; readonly size: number; readonly shell?: true }[]
+    readonly filesMore?: number
     /** Children the layer declares whose layers are not on this device —
      *  listed by signature rather than failing the whole read. */
     readonly unresolved?: readonly string[]
@@ -758,8 +763,8 @@ export const foreignReads = (
       carried = { values: result.read.values, tiles: result.read.tiles }
     } else if (result.kind === 'node' && observation.verb === 'read') {
       if (!(observation.sig ? from(observation.sig) : at())) return
-      const { layerSig, children, content, projection, unresolved, slots } = result.read
-      carried = { layerSig, children, content, projection, unresolved, slots }
+      const { layerSig, children, content, projection, unresolved, slots, files } = result.read
+      carried = { layerSig, children, content, projection, unresolved, slots, files }
     } else if (result.kind === 'summary') {
       if (!at()) return
       carried = { layerSig: result.read.layerSig, text: result.read.text }
@@ -1001,7 +1006,50 @@ const safeNode = (read: HypercombNodeRead, expectedRoot: string, maxChildren: nu
     ...(read.snapshot ? { snapshot: read.snapshot } : {}),
     ...(read.code?.length ? { code: safeHits(read.code) } : {}),
     ...safeNotes(read),
+    ...safeFiles(read),
   }
+}
+
+/** A read lists at most this many of a tile's files. */
+const MAX_FILE_ROWS = 60
+
+/** What a model is told beside a tile's files: how to open one, how to change
+ *  one, and, on the tile whose page is in parts, that the page follows its
+ *  files (essentials files/page-parts.ts). Pure. */
+export const filesNoteOf = (
+  route: string,
+  files: readonly { readonly name: string; readonly shell?: true }[],
+  more?: number,
+): string => {
+  const at = SIG.test(route) ? '/<route>' : route.startsWith('/') ? route : `/${route}`
+  const first = files.find(file => !file.shell)?.name ?? files[0]?.name ?? '<name>'
+  const lines = [
+    `the files this tile holds. read <sig> opens one. change one with a write block: file ${at} ${first} (SEARCH/REPLACE edits).`,
+  ]
+  const shell = files.find(file => file.shell)
+  if (shell) {
+    lines.push(`this tile's page is in parts: ${shell.name} is its markup and names each part's file, and each part is a file on the child tile of its name. write the part's file, or ${shell.name}, and the hive rebuilds the page. do not write the page whole, and do not break a block apart again.`)
+  }
+  if (more) lines.push(`${more} more files are not listed.`)
+  return lines.join(' ')
+}
+
+/** A tile's files: a name, the signature that opens it, a size. A malformed
+ *  row is left off, not fatal: the rest of the read is still true. */
+const safeFiles = (read: { readonly files?: unknown; readonly filesMore?: unknown }): {
+  files?: { name: string; sig: string; size: number; shell?: true }[]; filesMore?: number
+} => {
+  if (!Array.isArray(read.files)) return {}
+  const files: { name: string; sig: string; size: number; shell?: true }[] = []
+  for (const row of read.files.slice(0, MAX_FILE_ROWS) as readonly { name?: unknown; sig?: unknown; size?: unknown; shell?: unknown }[]) {
+    if (typeof row?.name !== 'string' || !row.name || row.name.length > 200 || CONTROL_CHARACTER.test(row.name)) continue
+    if (typeof row.sig !== 'string' || !SIG.test(row.sig)) continue
+    const size = typeof row.size === 'number' && Number.isInteger(row.size) && row.size >= 0 ? row.size : 0
+    files.push({ name: row.name, sig: row.sig, size, ...(row.shell === true ? { shell: true as const } : {}) })
+  }
+  if (!files.length) return {}
+  const more = typeof read.filesMore === 'number' && Number.isInteger(read.filesMore) && read.filesMore > 0 ? read.filesMore : 0
+  return { files, ...(more ? { filesMore: more } : {}) }
 }
 
 /** Signature arrays kept beside a projection. A bad slot is left off. */
@@ -1234,6 +1282,12 @@ export const formatHypercombObservationReceipt = (
         ? {
           noteCount: node.noteCount ?? node.notes.length, notes: node.notes,
           ...(node.notesTruncated ? { notesNote: 'the notes were cut at the size limit; noteCount is how many there are' } : {}),
+        }
+        : {}),
+      ...(node.files?.length
+        ? {
+          files: node.files.map(file => ({ name: file.name, sig: file.sig, bytes: file.size })),
+          filesNote: filesNoteOf(node.root, node.files, node.filesMore),
         }
         : {}),
       ...(node.code?.length

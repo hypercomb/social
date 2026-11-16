@@ -97,6 +97,9 @@ to you: when a task needs the ground beneath it, open it before you act.
   <block> <name>\` moves one block into a file of its own on a child tile, the
   page does not change, and from then on that file is changed with a write
   block and the hive rebuilds the page. Each part is a trait of the page.
+- \`read /<route>\` lists the files a tile holds, each with the signature that
+  opens it. A tile whose files list \`page.shell.html\` wears a page already in
+  parts: each part is a file on the child tile of its name.
 - The documents hold the WHOLE codex, the Build and Paint tiers that are not
   repeated below included, every document a tier cites, and the glossary. Read
   the Build tier before you change code.

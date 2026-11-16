@@ -90,6 +90,16 @@ the shell to the new signature, assembles the page and commits it. The
 markup is changed the same way, in `page.shell.html`. A write of the whole
 page is refused while its shell stands, and names the files to change.
 
+Finding a part (2026-11-15). A conversation that did not make the parts has
+to find them. `read /card` lists the files the tile holds, each with the
+signature that opens it; when `page.shell.html` is among them, the read says
+the page is in parts and that each part is a file on the child tile of its
+name. `read /card/style` then lists `style.css`. Before this a tile's files
+were a count among its records, and a fresh conversation took thirteen rounds
+to add one line to the stylesheet. A write to a part's file counts as the
+page written: the chat used to answer it with "the page was read and not
+written" and spend another leg on finished work.
+
 ## Where it lives
 
 All of it is in the essentials package:

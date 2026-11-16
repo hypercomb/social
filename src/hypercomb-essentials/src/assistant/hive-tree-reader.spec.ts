@@ -1,4 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
+
+// A tile's files, as the decorations would list them: none unless a case says.
+const attachments = vi.hoisted(() => ({ at: new Map<string, unknown[]>() }))
+vi.mock('../files/files-attachment.js', () => ({
+  listAttachments: async (segments: readonly string[]) => attachments.at.get(segments.join('/')) ?? [],
+}))
+
 import { FIND_WALK_NODES, HypercombHiveTreeReader } from './hive-tree-reader.js'
 import type { CurrentLayerRef, LayerContent } from '../history/history.service.js'
 import { MAX_RECORD_DEPTH } from '../search/hive-search.js'
@@ -1055,6 +1062,32 @@ describe('a page history cannot pin to one signature', () => {
     expect(await reader.readNode(['projects'], { maxBytes: 8_000, withContent: true })).toMatchObject({ noteCount: 3 })
     const listed = await reader.readNode(['projects'], { maxBytes: 8_000, withContent: false })
     expect(listed.ok && listed.notes).toBeUndefined()
+  })
+
+  it('lists a tile’s files by name, the newest of each, with the signature that opens it', async () => {
+    // The files of a tile are records among its decorations: a read showed a
+    // count, and a model opened twelve records to find one stylesheet.
+    const fx = fixture()
+    attachments.at.set('projects', [
+      { sig: 'r1', payload: { name: 'style.css', mime: 'text/css', size: 10, sig: sig(900) } },
+      { sig: 'r2', payload: { name: 'page.shell.html', mime: 'text/html', size: 7_007, sig: sig(901) } },
+      { sig: 'r3', payload: { name: 'Style.css', mime: 'text/css', size: 19_029, sig: sig(902) } },
+      { sig: 'r4', payload: { name: 'broken', mime: 'text/plain', size: 1, sig: 'not-a-signature' } },
+    ])
+    try {
+      const read = await fx.reader.readNode(['projects'], { maxBytes: 8_000, withContent: true })
+      expect(read.ok && read.files).toEqual([
+        { name: 'page.shell.html', sig: sig(901), size: 7_007, shell: true },
+        { name: 'Style.css', sig: sig(902), size: 19_029 },
+      ])
+      // Names only on a /list, and a tile with no files says nothing.
+      const listed = await fx.reader.readNode(['projects'], { maxBytes: 8_000, withContent: false })
+      expect(listed.ok && listed.files).toBeUndefined()
+      const none = await fx.reader.readNode(['notes'], { maxBytes: 8_000, withContent: true })
+      expect(none.ok && none.files).toBeUndefined()
+    } finally {
+      attachments.at.clear()
+    }
   })
 
   it('keeps a fallback route and its signature content in memory for the next read', async () => {

@@ -1,7 +1,7 @@
 // owed-step.spec.ts — WHAT A LEG'S END LEAVES OWED (documentation/conversation-continuity.md).
 
 import { describe, expect, it } from 'vitest'
-import { OWED_BACKOFF_MS, WORK_QUIET_MS, agentOwnsCue, owedAfter, owedCue, pageChangeStillOwed, workBeaconOf, type OwedLike } from './owed-step'
+import { OWED_BACKOFF_MS, WORK_QUIET_MS, agentOwnsCue, owedAfter, owedCue, pageChangeStillOwed, workBeaconOf, wroteTileFile, type OwedLike } from './owed-step'
 
 const spent = { rounds: 6, tokens: 12_000, legs: 1 }
 const record = (over: Partial<OwedLike> = {}): OwedLike => ({
@@ -202,6 +202,23 @@ describe('the work beacon', () => {
       ...base, waiting: true,
       pending: { kind: 'steps', text: '2 steps still open' },
     })?.state).toBe('live')
+  })
+})
+
+describe('a write that ran on a tile', () => {
+  it('is the page written: the page, the card, and a file, which a part of a page is', () => {
+    expect(wroteTileFile(['write page /business-card'])).toBe(true)
+    expect(wroteTileFile(['write card /business-card theme'])).toBe(true)
+    // The stylesheet of a card in parts (2026-11-15): the write ran, and the
+    // model was told the page was not written.
+    expect(wroteTileFile(['/part /business-card style-1 style', 'write /business-card/style/style.css'])).toBe(true)
+  })
+
+  it('is not a module or doctrine write, a change line, or nothing at all', () => {
+    expect(wroteTileFile(['write 0123456789ab… src/files/part.queen.ts'])).toBe(false)
+    expect(wroteTileFile(['write doctrine Build'])).toBe(false)
+    expect(wroteTileFile(['/part /business-card style-1 style'])).toBe(false)
+    expect(wroteTileFile([])).toBe(false)
   })
 })
 
