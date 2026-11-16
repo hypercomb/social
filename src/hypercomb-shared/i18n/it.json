@@ -2655,6 +2655,8 @@
   "chat.route.resize": "Trascina per allargare il flusso di lavoro — doppio clic per ripristinare",
   "chat.route.toggle": "Mostra o nascondi il flusso di lavoro",
   "chat.exec.toggle": "Esecuzione — cosa i modelli vogliono leggere e cambiare",
+  "chat.code.show": "Codice — i file, le risorse e il codice di ciò di cui parla questa chat",
+  "chat.code.hide": "Torna alla conversazione",
   "chat.exec.sec": "Esecuzione",
   "chat.exec.side": "Cosa i modelli vogliono leggere e cambiare",
   "chat.exec.mode.manual": "Manuale",

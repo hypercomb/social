@@ -100,6 +100,7 @@ import { readBlurbs, type ChatBlurb } from './chat-blurb.js'
 import { isLongPressMenu } from '../navigation/browser-menu.js'
 import { walkTree, type WalkHistory, type WalkStore } from '../presentation/tiles/tree-walk.js'
 import { RAIL_CSS, RAIL_STYLE_ID } from './tiles-rail.css.js'
+import { CHAT_CODE_EFFECT, showChatCode, type ChatCodeAsk } from './chat-code.js'
 import { readThumbnail, type ThumbnailStore } from '../presentation/tiles/thumbnails.js'
 import { tilePictureCandidates } from '../editor/tile-properties.js'
 import type { AgentRegistry } from './agent-registry.service.js'
@@ -386,6 +387,8 @@ export class AgentTilesRail {
    *  exactly as it did before blurbs existed. */
   #blurbs = new Map<string, ChatBlurb>()
   #dropFlowWatch: (() => void) | null = null
+  /** The chat window switching its main pane to the code of its target, or back. */
+  #dropCodeWatch: (() => void) | null = null
   /** What each conversation's organized workflow says, by convoId — read
    *  from the flows pool, never derived here, and never load-bearing. */
   #standings = new Map<string, ConvoStanding>()
@@ -616,6 +619,12 @@ export class AgentTilesRail {
       this.#dropBlurbWatch = EffectBus.on('chat:blurbs-changed', () => { void this.#refreshBlurbs() })
       // A conversation's workflow is written in the background; its row follows.
       this.#dropFlowWatch = EffectBus.on('chat:route-flow-changed', () => { void this.#refreshStandings() })
+      // THE CHAT'S OTHER VIEW (chat-code.ts): the chat window says when its
+      // main pane shows the code of what the conversation is about. Heard
+      // here because the chat's rail is the part of this package that is
+      // always in the window; the view itself arrives with the first switch.
+      this.#dropCodeWatch?.()
+      this.#dropCodeWatch = EffectBus.on<ChatCodeAsk>(CHAT_CODE_EFFECT, ask => { void showChatCode(ask) })
     }
     this.#dropGroupWatch?.()
     this.#dropGroupWatch = EffectBus.on<{ paths?: readonly string[] }>('context:active-set', payload => {
@@ -827,6 +836,8 @@ export class AgentTilesRail {
     this.#dropBlurbWatch = null
     this.#dropFlowWatch?.()
     this.#dropFlowWatch = null
+    this.#dropCodeWatch?.()
+    this.#dropCodeWatch = null
     this.#dropBusyWatch?.()
     this.#dropBusyWatch = null
     this.#dropGroupWatch?.()

@@ -3324,6 +3324,36 @@ export class ChatWindow {
     try { localStorage.setItem(ROUTE_SIDE_WANTED_KEY, next ? 'true' : 'false') } catch { /* private mode */ }
   }
 
+  // ── THE CODE VIEW: the main pane's other view ───────────────────────────
+  //
+  // jwize, 2026-11-16: "the code should be in the main pane as a different
+  // view to the chat, so a different view of the chat's target." The pane
+  // shows the conversation, or the code of the tile the conversation is
+  // about: its inner tiles, files and resources, the code that runs it and
+  // the platform beneath. The view is the package's (essentials
+  // assistant/chat-code.ts, drawn into `.chat-code-host`); this window only
+  // lends the pane and says which tile. Not kept across a reload: looking at
+  // code is something you are doing now.
+  readonly codeOpen = signal(false)
+  toggleCode(): void {
+    this.codeOpen.update(open => !open)
+    this.#sayCode()
+  }
+  /** The tile the conversation in hand is about, as route segments; empty for a free chat. */
+  #codeTarget(): string[] {
+    const convoId = this.activeId()
+    if (!convoId) return []
+    try { return String(this.#threads()?.tilePathOf?.(convoId) ?? '').split('/').filter(Boolean) } catch { return [] }
+  }
+  #sayCode(): void {
+    EffectBus.emit('chat:code', { open: this.codeOpen(), segments: this.#codeTarget() })
+  }
+  /** The code follows the conversation: another thread in hand, another tile's code. */
+  readonly #codeFollows = effect(() => {
+    this.activeId()
+    if (untracked(() => this.codeOpen())) untracked(() => this.#sayCode())
+  })
+
   // ── THE EXECUTION COLUMN (documentation/hive-read-fence.md §3) ──────────
   //
   // What models ask to read and change, waiting for Run or Skip unless the

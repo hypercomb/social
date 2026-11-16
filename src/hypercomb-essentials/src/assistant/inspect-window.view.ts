@@ -19,6 +19,19 @@
 // through every behaviour it touches. Back (or Escape) climbs one step;
 // Escape at the tile closes.
 //
+// WHAT THE TILE HOLDS, TOO (jwize, 2026-11-16: "we should be able to drill
+// down to the files and resources … and see the code for the behaviour on
+// that tile as well"). The tile step opens with the tiles inside it, its
+// files, the resources its records name and the platform's own sources, each
+// pressable: a tile opens as a tile, and a file or a resource opens as what
+// it is — text with line numbers, a picture, or its size (tile-holds.ts).
+//
+// TWO PLACES. Over the hive as a panel (`inspect`), and INSIDE THE CHAT as
+// the main pane's other view ("the code should be in the main pane as a
+// different view to the chat, so a different view of the chat's target"):
+// `mount(host, frame)` draws the same steps into an element the chat window
+// lends, and `unmount()` hands it back.
+//
 // READ ONLY, AND NEVER RUN. Modules are read as bytes by signature through the
 // hive reader (hive-tree-reader.ts) — the same reads `/read <sig> <section>`
 // makes — and code is drawn as text, never as markup. A cold panel: DOM
@@ -27,6 +40,7 @@
 import { I18N_IOC_KEY, sectionIndex, type I18nProvider } from '@hypercomb/core'
 import { HIVE_TREE_READER_IOC_KEY, type CodeHit } from './hive-tree-reader.js'
 import { codeLinks, lineAt, quoteUse, tileHandles, type QuoteUse, type TileHandle } from './tile-code.js'
+import { readable, recordResources, shownAs, signaturesIn, sizeWords } from './tile-holds.js'
 import { allBindings, behaviorPath } from '../sharing/behavior-enablement.js'
 
 const STYLE_ID = 'hc-inspect-styles'
@@ -41,10 +55,20 @@ const HITS_PER_WORD = 120
 const SHOWN_LINES = 4_000
 /** Other files of a module listed beside a section. */
 const SHIPS_WITH = 60
+/** Tiles, files and named resources one tile step lists. */
+const HELD_ROWS = 80
+/** Characters of one resource drawn as text; a longer one says how much more. */
+const RESOURCE_CHARS = 400_000
 
 type Reader = {
   codeQuoting?(word: string, options?: { max?: number }): Promise<{ hits: readonly CodeHit[]; more: boolean }>
   moduleText?(sig: string): Promise<{ name: string; text: string } | undefined>
+  readNode?(segments: readonly string[], options?: { withContent?: boolean }): Promise<{
+    readonly ok: boolean
+    readonly children?: readonly { readonly name: string }[]
+    readonly files?: readonly { readonly name: string; readonly sig: string; readonly size: number }[]
+  }>
+  listCode?(query: string): Promise<{ readonly ok: boolean; readonly entries?: readonly { readonly name: string; readonly sig: string }[] }>
 }
 type HistoryLike = {
   sign?(lineage: { explorerSegments: () => readonly string[] }): Promise<string>
@@ -57,6 +81,8 @@ export type InspectFrame =
   | { readonly kind: 'tile'; readonly segments: readonly string[] }
   | { readonly kind: 'word'; readonly word: string }
   | { readonly kind: 'section'; readonly sig: string; readonly section?: string; readonly at?: number; readonly name?: string }
+  /** A file or a resource by signature: text, a picture, or its size. */
+  | { readonly kind: 'resource'; readonly sig: string; readonly name?: string }
 
 const ioc = <T,>(key: string): T | undefined =>
   (window as unknown as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key) as T | undefined
@@ -75,9 +101,16 @@ export class InspectWindowView extends EventTarget {
   #stack: InspectFrame[] = []
   /** Bumped on every step, so a slow read never draws over a newer one. */
   #turn = 0
+  /** True while it is drawn inside an element another surface lent. */
+  #embedded = false
+  /** Pictures on screen: object URLs, let go when the step changes. */
+  #pictures: string[] = []
 
   #onKey = (event: KeyboardEvent): void => {
     if (event.key !== 'Escape' || !this.#panel) return
+    // Inside another surface, Escape climbs a step and no further: at the
+    // first step the key is that surface's, not this view's.
+    if (this.#embedded && this.#stack.length <= 1) return
     event.stopPropagation()
     event.preventDefault()
     this.back()
@@ -93,10 +126,27 @@ export class InspectWindowView extends EventTarget {
 
   /** Open at a step: a tile, a word, or a module (and file) by signature. */
   open(frame: InspectFrame): void {
+    if (this.#embedded) this.close()
     if (!this.#panel) this.#build()
     this.#stack = [frame]
     void this.#render()
   }
+
+  /** Draw inside `host`, as another surface's own view: no frame of its own,
+   *  no close, and it fills what it was given. */
+  mount(host: HTMLElement, frame: InspectFrame): void {
+    if (this.#panel && (!this.#embedded || this.#panel.parentElement !== host)) this.close()
+    if (!this.#panel) this.#build(host)
+    this.#stack = [frame]
+    void this.#render()
+  }
+
+  /** Hand the lent element back. A panel over the hive is left alone. */
+  unmount(): void {
+    if (this.#embedded) this.close()
+  }
+
+  get isEmbedded(): boolean { return this.#embedded }
 
   /** One step deeper. */
   push(frame: InspectFrame): void {
@@ -106,7 +156,7 @@ export class InspectWindowView extends EventTarget {
 
   /** One step back; past the first, the panel closes. */
   back(): void {
-    if (this.#stack.length <= 1) { this.close(); return }
+    if (this.#stack.length <= 1) { if (!this.#embedded) this.close(); return }
     this.#stack.pop()
     void this.#render()
   }
@@ -118,12 +168,19 @@ export class InspectWindowView extends EventTarget {
     this.#body = null
     this.#crumbs = null
     this.#stack = []
+    this.#embedded = false
+    this.#dropPictures()
     this.#turn++
   }
 
-  #build(): void {
+  #dropPictures(): void {
+    for (const url of this.#pictures.splice(0)) { try { URL.revokeObjectURL(url) } catch { /* already gone */ } }
+  }
+
+  #build(host?: HTMLElement): void {
     this.#ensureStyles()
-    const panel = el('div', 'hc-inspect')
+    this.#embedded = !!host
+    const panel = el('div', host ? 'hc-inspect hc-inspect-embedded' : 'hc-inspect')
     panel.setAttribute('role', 'dialog')
     panel.setAttribute('aria-label', this.#t('inspect.title', 'Inspect'))
     const head = el('div', 'hc-inspect-head')
@@ -136,11 +193,12 @@ export class InspectWindowView extends EventTarget {
     close.type = 'button'
     close.setAttribute('aria-label', this.#t('inspect.close', 'Close'))
     close.addEventListener('click', () => this.close())
-    head.append(back, title, close)
+    head.append(back, title)
+    if (!host) head.append(close)
     const crumbs = el('div', 'hc-inspect-crumbs')
     const body = el('div', 'hc-inspect-body')
     panel.append(head, crumbs, body)
-    document.body.appendChild(panel)
+    ;(host ?? document.body).appendChild(panel)
     this.#panel = panel
     this.#body = body
     this.#crumbs = crumbs
@@ -150,6 +208,7 @@ export class InspectWindowView extends EventTarget {
   #frameLabel(frame: InspectFrame): string {
     if (frame.kind === 'tile') return frame.segments.length ? `/${frame.segments.join('/')}` : this.#t('inspect.hive', 'the hive')
     if (frame.kind === 'word') return `'${frame.word}'`
+    if (frame.kind === 'resource') return frame.name ?? frame.sig.slice(0, 12)
     return frame.section ? frame.section.replace(/^src\//, '') : frame.name ?? frame.sig.slice(0, 12)
   }
 
@@ -177,15 +236,19 @@ export class InspectWindowView extends EventTarget {
     body.replaceChildren(el('div', 'hc-inspect-note', this.#t('inspect.reading', 'Reading the running code…')))
     body.scrollTop = 0
     const reader = ioc<Reader>(HIVE_TREE_READER_IOC_KEY)
-    if (!reader?.codeQuoting || !reader.moduleText) {
+    if (frame.kind !== 'resource' && (!reader?.codeQuoting || !reader.moduleText)) {
       body.replaceChildren(el('div', 'hc-inspect-note', this.#t('inspect.unavailable', 'The hive reader is not loaded yet, so the code cannot be read.')))
       return
     }
     try {
-      const drawn = frame.kind === 'tile' ? await this.#tile(frame.segments, reader)
-        : frame.kind === 'word' ? await this.#word(frame.word, reader)
-          : await this.#section(frame, reader)
-      if (turn !== this.#turn) return
+      const pictures: string[] = []
+      const drawn = frame.kind === 'resource' ? await this.#resource(frame, reader, pictures)
+        : frame.kind === 'tile' ? await this.#tile(frame.segments, reader!)
+          : frame.kind === 'word' ? await this.#word(frame.word, reader!)
+            : await this.#section(frame, reader!)
+      if (turn !== this.#turn) { for (const url of pictures) URL.revokeObjectURL(url); return }
+      this.#dropPictures()
+      this.#pictures.push(...pictures)
       body.replaceChildren(...drawn)
       body.querySelector('.hc-inspect-mark')?.scrollIntoView({ block: 'center' })
     } catch (error) {
@@ -201,16 +264,20 @@ export class InspectWindowView extends EventTarget {
   async #tile(segments: readonly string[], reader: Reader): Promise<Node[]> {
     const name = segments[segments.length - 1] ?? ''
     const layer = await this.#layerAt(segments)
-    const decorationKinds = await this.#decorationKinds(layer)
+    const records = await this.#decorationRecords(layer)
+    const decorationKinds = records.map(record => (record as { kind?: unknown })?.kind).filter((kind): kind is string => typeof kind === 'string' && !!kind)
+    const held = await this.#holds(segments, records, reader)
     const here = behaviorPath(segments)
     const boundKinds = Object.entries(allBindings())
       .filter(([, list]) => list.some(binding => binding.path === here))
       .map(([kind]) => kind)
     const handles = tileHandles({ name, layer, decorationKinds, boundKinds })
-    if (!handles.length) return [el('div', 'hc-inspect-note', this.#t('inspect.nothing', 'This tile carries nothing running code keys on: it is drawn by the grid alone.'))]
+    if (!handles.length) return [...held, el('div', 'hc-inspect-note', this.#t('inspect.nothing', 'This tile carries nothing running code keys on: it is drawn by the grid alone.'))]
 
-    const out: Node[] = [el('div', 'hc-inspect-lead', this.#t('inspect.tile-lead',
-      'The words this tile carries that code keys on, and the running code that quotes each. Press a line to open its file; press a word to see every line.'))]
+    const out: Node[] = [...held]
+    if (held.length) out.push(el('div', 'hc-inspect-part', this.#t('inspect.part-code', 'The code that runs it')))
+    out.push(el('div', 'hc-inspect-lead', this.#t('inspect.tile-lead',
+      'The words this tile carries that code keys on, and the running code that quotes each. Press a line to open its file; press a word to see every line.')))
     let found = 0
     for (const handle of handles) {
       const { hits, more } = await reader.codeQuoting!(handle.word, { max: HITS_PER_HANDLE })
@@ -218,6 +285,123 @@ export class InspectWindowView extends EventTarget {
       out.push(this.#handleBlock(handle, hits, more))
     }
     if (!found) out.push(el('div', 'hc-inspect-note', this.#t('inspect.unclaimed', 'No running code quotes any of these words: nothing beyond the grid runs this tile.')))
+    return out
+  }
+
+  // ── what the tile holds ───────────────────────────────────────────────
+
+  /** The tiles inside, the files, the resources its records name, and the
+   *  platform's sources: each a list of rows that open what they name. */
+  async #holds(segments: readonly string[], records: readonly unknown[], reader: Reader): Promise<Node[]> {
+    const out: Node[] = []
+    const part = (label: string, rows: HTMLElement[], more: number): void => {
+      if (!rows.length) return
+      out.push(el('div', 'hc-inspect-part', label))
+      const list = el('div', 'hc-inspect-files')
+      list.append(...rows)
+      if (more > 0) list.append(el('div', 'hc-inspect-none', this.#t('inspect.more-rows', '{count} more are not listed.', { count: more })))
+      out.push(list)
+    }
+    let node: Awaited<ReturnType<NonNullable<Reader['readNode']>>> | null = null
+    try { node = await reader.readNode?.(segments, { withContent: true }) ?? null } catch { node = null }
+    const children = node?.ok ? node.children ?? [] : []
+    const files = node?.ok ? node.files ?? [] : []
+
+    part(this.#t('inspect.part-tiles', 'Tiles inside'),
+      children.slice(0, HELD_ROWS).map(child => this.#row('folder', child.name, '', () => this.push({ kind: 'tile', segments: [...segments, child.name] }))),
+      children.length - HELD_ROWS)
+
+    part(this.#t('inspect.part-files', 'Files'),
+      files.slice(0, HELD_ROWS).map(file => this.#row('description', file.name, sizeWords(file.size), () => this.push({ kind: 'resource', sig: file.sig, name: file.name }))),
+      files.length - HELD_ROWS)
+
+    const named = records.flatMap(record => {
+      const read = recordResources(record)
+      return read ? read.named.map(resource => ({ kind: read.kind, ...resource })) : []
+    })
+    part(this.#t('inspect.part-resources', 'Resources its records name'),
+      named.slice(0, HELD_ROWS).map(resource => this.#row('data_object', `${resource.kind} · ${resource.label}`, resource.sig.slice(0, 12),
+        () => this.push({ kind: 'resource', sig: resource.sig, name: `${resource.kind} ${resource.label}` }))),
+      named.length - HELD_ROWS)
+
+    // THE PLATFORM BENEATH (jwize, same day: "the framework resources that are
+    // used for the behaviour, so you can potentially author upgrades for them
+    // as well"): the core, the shell, the host and the documents, as written.
+    let sources: readonly { readonly name: string; readonly sig: string }[] = []
+    try { const listed = await reader.listCode?.('source'); sources = listed?.ok ? listed.entries ?? [] : [] } catch { sources = [] }
+    part(this.#t('inspect.part-platform', 'The platform it runs on'),
+      sources.slice(0, HELD_ROWS).map(source => this.#row('code', source.name, source.sig.slice(0, 12), () => this.push({ kind: 'section', sig: source.sig, name: source.name }))),
+      sources.length - HELD_ROWS)
+    return out
+  }
+
+  /** One pressable row: a glyph, a name, and a quiet word at the end. */
+  #row(glyph: string, name: string, tail: string, press: () => void): HTMLElement {
+    const button = el('button', 'hc-inspect-file hc-inspect-row')
+    button.type = 'button'
+    const icon = el('span', 'mat-sym hc-inspect-glyph', glyph)
+    icon.setAttribute('aria-hidden', 'true')
+    button.append(icon, el('span', 'hc-inspect-src', name), el('span', 'hc-inspect-count', tail))
+    button.addEventListener('click', press)
+    return button
+  }
+
+  // ── a file or a resource ──────────────────────────────────────────────
+
+  async #resource(frame: Extract<InspectFrame, { kind: 'resource' }>, reader: Reader | undefined, pictures: string[]): Promise<Node[]> {
+    if (!SIG.test(frame.sig)) return [el('div', 'hc-inspect-note', this.#t('inspect.bad-resource', 'That is not a signature.'))]
+    const store = ioc<StoreLike>('@hypercomb.social/Store')
+    const blob = await store?.getResource?.(frame.sig).catch(() => null) ?? null
+    if (!blob) {
+      // A signature a record names may be code, not a resource: open it as code.
+      if (reader?.moduleText && await reader.moduleText(frame.sig).catch(() => undefined)) {
+        return this.#section({ kind: 'section', sig: frame.sig, ...(frame.name ? { name: frame.name } : {}) }, reader)
+      }
+      return [el('div', 'hc-inspect-note', this.#t('inspect.resource-absent', 'Its bytes are not on this device.'))]
+    }
+    const bytes = new Uint8Array(await blob.arrayBuffer())
+    const out: Node[] = []
+    const meta = el('div', 'hc-inspect-meta')
+    meta.append(
+      el('span', 'hc-inspect-modname', frame.name ?? frame.sig.slice(0, 12)),
+      el('span', 'hc-inspect-sig', sizeWords(bytes.byteLength)),
+      el('span', 'hc-inspect-say', `read ${frame.sig}`),
+    )
+    out.push(meta)
+
+    const shown = shownAs(bytes)
+    if (shown.as === 'picture') {
+      const url = URL.createObjectURL(new Blob([bytes], { type: shown.mime }))
+      pictures.push(url)
+      const picture = el('img', 'hc-inspect-picture')
+      picture.src = url
+      picture.alt = frame.name ?? ''
+      out.push(picture)
+      return out
+    }
+    if (shown.as === 'bytes') {
+      out.push(el('div', 'hc-inspect-note', this.#t('inspect.resource-bytes', 'Not text and not a picture: only its size can be shown.')))
+      return out
+    }
+    // What it names, to follow: a record names a page, a page names its parts.
+    const names = signaturesIn(shown.text).filter(sig => sig !== frame.sig)
+    if (names.length) {
+      const row = el('div', 'hc-inspect-links')
+      row.append(el('span', 'hc-inspect-why', this.#t('inspect.names', 'names')))
+      for (const sig of names) {
+        const button = el('button', 'hc-inspect-word', sig.slice(0, 12))
+        button.type = 'button'
+        button.title = sig
+        button.addEventListener('click', () => this.push({ kind: 'resource', sig }))
+        row.append(button)
+      }
+      out.push(row)
+    }
+    const text = readable(shown.text)
+    out.push(this.#code(text.slice(0, RESOURCE_CHARS), 0))
+    if (text.length > RESOURCE_CHARS) {
+      out.push(el('div', 'hc-inspect-note', this.#t('inspect.more-chars', '{count} more characters: read it with the command above.', { count: text.length - RESOURCE_CHARS })))
+    }
     return out
   }
 
@@ -391,18 +575,18 @@ export class InspectWindowView extends EventTarget {
     return (await history.currentLayerAt(sig).catch(() => null)) ?? null
   }
 
-  async #decorationKinds(layer: Record<string, unknown> | null): Promise<string[]> {
+  /** Every decoration record on the tile, parsed; one that cannot be read is left out. */
+  async #decorationRecords(layer: Record<string, unknown> | null): Promise<unknown[]> {
     const slot = layer?.['decorations']
     const store = ioc<StoreLike>('@hypercomb.social/Store')
     if (!Array.isArray(slot) || !store?.getResource) return []
-    const kinds = await Promise.all(slot.map(String).filter(sig => SIG.test(sig)).map(async sig => {
+    const records = await Promise.all(slot.map(String).filter(sig => SIG.test(sig)).map(async sig => {
       try {
         const blob = await store.getResource!(sig)
-        const kind = blob ? (JSON.parse(await blob.text()) as { kind?: unknown })?.kind : undefined
-        return typeof kind === 'string' ? kind : ''
-      } catch { return '' }
+        return blob ? JSON.parse(await blob.text()) as unknown : null
+      } catch { return null }
     }))
-    return kinds.filter(Boolean)
+    return records.filter(record => record !== null)
   }
 
   #ensureStyles(): void {
@@ -458,8 +642,27 @@ export class InspectWindowView extends EventTarget {
 .hc-inspect-line .hc-inspect-src{overflow:visible;color:rgba(238,244,250,0.86);}
 .hc-inspect-num{flex:0 0 3rem;text-align:right;font-family:var(--hc-mono,monospace);font-size:0.7rem;color:rgba(216,230,238,0.3);user-select:none;}
 .hc-inspect-mark{background:rgba(${AMBER},0.16);}
+.hc-inspect-embedded{position:static;z-index:auto;inset:auto;width:auto;flex:1 1 auto;min-width:0;min-height:0;
+  border:0;border-radius:0;background:none;padding:0.6rem 0.85rem;}
+/* IN THE CHAT'S MAIN PANE (chat-code.ts): the lent element fills the pane and
+   the conversation beside it steps aside while it is on. */
+.chat-code-host{display:none;}
+.chat-code-host.on{display:flex;flex:1 1 auto;min-width:0;min-height:0;}
+.chat-code-host.on ~ .chat-reading{display:none;}
+.hc-inspect-part{margin-top:0.35rem;font-size:0.68rem;letter-spacing:0.08em;text-transform:uppercase;color:rgba(${STEEL},0.85);}
+.hc-inspect-row{grid-template-columns:1.25rem 1fr auto;}
+.hc-inspect-glyph{font-size:1rem;line-height:1;color:rgba(216,230,238,0.5);}
+.hc-inspect-picture{align-self:flex-start;max-width:100%;max-height:60vh;object-fit:contain;
+  border:1px solid rgba(${STEEL},0.15);border-radius:var(--hc-radius-control, 2px);background:rgba(255,255,255,0.03);}
 `
     document.head.appendChild(style)
   }
 }
+
+/** THE VIEW, made on first use and kept. A dependency exports and never
+ *  registers (doctrine: registration is the bee's act), so this is the
+ *  module's own: the word's panel and the chat's code view share it wherever
+ *  one bundle carries them both. */
+let shared: InspectWindowView | null = null
+export const inspectWindow = (): InspectWindowView => (shared ??= new InspectWindowView())
 
