@@ -1090,6 +1090,16 @@ describe('what the owners meant, and what the page does when it cannot tell', ()
     expect(names(bands)).toEqual(['camelflage', 'dylan'])
   })
 
+  it('shows what the signed community names even when the live list does not name its head (jwize 2026-11-15: "the community section is the last layer")', async () => {
+    // The live list names nothing of camelflage or dylan; the record names both, and their doors open here.
+    const record: ShowcaseRecord = { zone: 'hypercomb.com', domains: [], items: [{ pubkey: sig('a'), lineage: 'dylan' }, { pubkey: sig('a'), lineage: 'camelflage' }] }
+    const { bands } = draw(async () => owners({ showcase: record, live: new Set([sig('9')]) }))
+    await vi.waitFor(() => expect(names(bands)).toEqual(['camelflage', 'dylan']))
+    // Without a record the live list still narrows what a door alone would show.
+    const bare = draw(async () => owners({ live: new Set([sig('2')]) }))
+    await vi.waitFor(() => expect(names(bare.bands)).toEqual(['camelflage']))
+  })
+
   it('hides a named item that Publish has turned off for this domain, but not what a shown-in-full domain brings', async () => {
     const record: ShowcaseRecord = { zone: 'hypercomb.com', domains: [], items: [{ pubkey: sig('a'), lineage: 'dylan' }, { pubkey: sig('a'), lineage: 'camelflage' }] }
     const turnedOff = owners({ showcase: record, doors: new Map([[sig('a'), new Map([['camelflage', ['hypercomb.com']], ['dylan', ['jwize.com']]])]]) })

@@ -1946,8 +1946,14 @@ ${entry.key}`
    * publish window should be hidden from your public domain showcase"). A
    * lineage with no doors opens everywhere on the worker, which keeps older
    * versions working, but it was never published here, so it is not shown.
-   * A head the owner's live list does not name is not on the visitor site
-   * either, even when a door still names the domain.
+   * Without a signed showcase, a head the owner's live list does not name is
+   * not on the visitor site either, even when a door still names the domain.
+   *
+   * THE COMMUNITY IS THE LAST LAYER (jwize 2026-11-15: "the community section is the last layer of defense"; "the
+   * community items are compiled and made available for all visitors no matter what computer"). Once the owners sign a
+   * showcase, what it names is what every visitor sees: the live list is the Publish window's own discovery list
+   * (deployment-stages.md R10, never the resolver) and no longer hides an item the record names. A door Publish turned
+   * off for this domain still does.
    */
   const covers = (entry: Aggregate, items: readonly ShowcaseItem[], domains: readonly string[]): boolean =>
     entry.zones.some(zone => domains.includes(zone))
@@ -1962,8 +1968,8 @@ ${entry.key}`
     const record = signed?.showcase
     if (record) {
       if (entry.zones.some(zone => record.domains.includes(zone))) return true
-      // A named item is shown unless Publish has turned it off for this domain.
-      if (entry.versions.some(version => liveHere(version.head) && version.claims.some(claim =>
+      // A named item is shown unless Publish has turned it off for this domain. The live list is not asked: the record decides.
+      if (entry.versions.some(version => version.claims.some(claim =>
         record.items.some(item => item.pubkey === claim.pubkey && item.lineage === claim.lineage)
         && doorsOpen(signed!, claim.pubkey, claim.lineage, options.self) !== false))) return true
       // A followed domain's tile has no claim this ledger verified: the owners' signed record naming its
