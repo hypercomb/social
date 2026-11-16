@@ -317,7 +317,12 @@ export async function showcaseHome(zone: string): Promise<string | null> {
 /** Send the showcase to where its domain's visitors read it (showcaseHome) and name it in the signed index as
  *  `showcase:<zone>` — what the front door reads. `key` names it elsewhere: `staged:<zone>` (stagedKey) for what is
  *  staged, which no visitor is shown. */
-export async function signShowcase(showcase: Showcase, key: string = showcaseKey(showcase.zone)): Promise<{ ok: true; sig: string } | { ok: false; reason: string }> {
+export async function signShowcase(
+  showcase: Showcase, key: string = showcaseKey(showcase.zone),
+  /** The signature the caller read this record at (null: none named). When the index names anything else by the time
+   *  it is written, nothing is signed and the reason is ROOT_MOVED (hive-pointer.ts): read again and apply again. */
+  expect?: string | null,
+): Promise<{ ok: true; sig: string } | { ok: false; reason: string }> {
   if (!ZONE.test(showcase.zone)) return { ok: false, reason: 'not a domain' }
   const home = await showcaseHome(showcase.zone)
   if (!home) return { ok: false, reason: `no host you publish to serves the index visitors read for ${showcase.zone}` }
@@ -327,7 +332,7 @@ export async function signShowcase(showcase: Showcase, key: string = showcaseKey
   if (!sync?.publishAtoms) return { ok: false, reason: 'host sync is not available here' }
   const sent = await sync.publishAtoms(home, [sig], async wanted => (wanted === sig ? bytes : null))
   if (!sent.ok) return { ok: false, reason: sent.error }
-  const stamped = await setHiveRoot(home, key, sig)
+  const stamped = await setHiveRoot(home, key, sig, {}, expect === undefined ? {} : { expect })
   if (!stamped.ok) return { ok: false, reason: stamped.reason ?? 'the index refused it' }
   if (key === showcaseKey(showcase.zone)) EffectBus.emitTransient(SHOWCASE_SIGNED_EFFECT, { zone: showcase.zone })
   return { ok: true, sig }
@@ -350,13 +355,19 @@ export const renameCommunity = (showcase: Showcase, key: string, raw: unknown): 
 /** The record this key already signed for the zone. Null when none is signed.
  *  Throws when a named record cannot be read: that is not an empty showcase. */
 export async function readSignedShowcase(zone: string, key: string = showcaseKey(zone)): Promise<Showcase | null> {
+  return (await readSignedAt(zone, key)).record
+}
+
+/** The record this key signed under `key` for the zone, with the signature the index names it by (null and null when
+ *  none is named) — what a compare-and-swap write expects (signShowcase `expect`). Throws as readSignedShowcase does. */
+export async function readSignedAt(zone: string, key: string = showcaseKey(zone)): Promise<{ sig: string | null; record: Showcase | null }> {
   const home = await showcaseHome(zone)
   if (!home) throw new Error('could not read the showcase')
   const sig = await ownHiveRoot(home, key)
-  if (!sig) return null
+  if (!sig) return { sig: null, record: null }
   const response = await fetch(`https://${home}/${sig}`, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
   if (!response.ok) throw new Error('could not read the showcase')
   const record = parseShowcase(await response.json(), zone)
   if (!record) throw new Error('could not read the showcase')
-  return record
+  return { sig, record }
 }

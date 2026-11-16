@@ -19,7 +19,7 @@
 import type { HostCreation, HostOffering } from '@hypercomb/core'
 import { pictureOrigins, tilePicture } from './tile-picture'
 import {
-  communityKey, doorsOpen, parseView, sameItems, viewLabel, type ShowcaseCommunity, type ShowcaseItem, type ShowcaseRecord, type ShowcaseView, type ZoneOwners,
+  communityKey, doorsClosed, doorsOpen, parseView, sameItems, viewLabel, type ShowcaseCommunity, type ShowcaseItem, type ShowcaseRecord, type ShowcaseView, type ZoneOwners,
 } from './showcase-record'
 import { DEFAULT_HOME, homeOrigin, turnOffHref } from './turn-off-link'
 import type { OwnerBridge } from './owner-bridge'
@@ -2103,7 +2103,7 @@ ${entry.key}`
       // A named item is shown unless Publish has turned it off for this domain. The live list is not asked: the record decides.
       if (entry.versions.some(version => version.claims.some(claim =>
         record.items.some(item => item.pubkey === claim.pubkey && item.lineage === claim.lineage)
-        && doorsOpen(signed!, claim.pubkey, claim.lineage, options.self) !== false))) return true
+        && !doorsClosed(signed!, claim.pubkey, claim.lineage, options.self)))) return true
       // A followed domain's tile has no claim this ledger verified: the owners' signed record naming its
       // publisher and lineage is the choice, so a tile promoted from your community is live.
       return entry.versions.some(version => !version.claims.length && !!version.lineage && version.owners.some(owner =>

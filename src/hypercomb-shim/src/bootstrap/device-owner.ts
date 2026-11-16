@@ -361,6 +361,9 @@ const attempt = async (home: string, zone: string, change: Change, anchor: strin
   return { ok: true, changed: true }
 }
 
+/** How many times a write that lost the race to another device is read and applied again before giving up. */
+const STALE_TRIES = 8
+
 /** Creations a stage request names, believed only when each names a key and a lineage. */
 const validItems = (items: unknown): boolean => Array.isArray(items) && items.length <= 500
   && items.every(item => {
@@ -403,7 +406,13 @@ export const deviceOwner = (zone: string, deps: DeviceOwnerDeps = {}): OwnerBrid
       const held = await ensure()
       if (!held) return { ok: false, reason: why }
       if (!valid) return { ok: false, reason: 'bad request' }
-      for (let tries = 0; tries < 2; tries++) {
+      // OPTIMISTIC, WITH A CHECK (jwize 2026-11-16: "just before updating you check the current head hasn't changed";
+      // "if the other tries it sees the changes and adds the difference to the changes already made"; "so shouldn't ever
+      // fail"). Each attempt reads the index fresh and applies this change (a difference: on, off, publish) to what it
+      // finds; the host refuses a write whose `prev` is not its head, and then it is read and applied again. Another
+      // device of yours writing at that moment only ever costs a retry, a moment later each time.
+      for (let tries = 0; tries < STALE_TRIES; tries++) {
+        if (tries) await new Promise(settle => setTimeout(settle, 150 * tries + Math.floor(Math.random() * 150)))
         const result = await attempt(held.home, zone, change, held.anchor, held.signer).catch((): OwnerResult => ({ ok: false, reason: 'failed' }))
         if (result !== 'stale') return result
       }

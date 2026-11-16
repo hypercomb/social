@@ -7,6 +7,7 @@ vi.hoisted(() => {
 
 import { applyInvite, applyPublish, applyStage, applyToggle, applyView } from './showcase-bridge.js'
 import type { Showcase } from './showcase-record.js'
+import { ROOT_MOVED } from './hive-pointer.js'
 
 const key = 'a'.repeat(64)
 const empty: Showcase = { zone: 'example.com', items: [], domains: [] }
@@ -116,7 +117,7 @@ describe('stage, then publish (jwize 2026-11-15)', () => {
     const deps = { own: async () => key, read: host.read, sign: host.sign, promote: promoted }
     expect(await applyPublish({ zone: 'example.com' }, deps)).toEqual({ ok: true, changed: false })
     expect(await applyStage({ zone: 'example.com', on: [{ pubkey: key, lineage: 'dylan' }, other], off: [{ pubkey: key, lineage: 'camelflage' }] }, deps)).toEqual({ ok: true, changed: true })
-    expect(host.sign).toHaveBeenLastCalledWith({ zone: 'example.com', domains: [], items: [{ pubkey: key, lineage: 'dylan' }, other] }, 'staged:example.com')
+    expect(host.sign).toHaveBeenLastCalledWith({ zone: 'example.com', domains: [], items: [{ pubkey: key, lineage: 'dylan' }, other] }, 'staged:example.com', undefined)
     expect(host.records['showcase:example.com']).toBe(live)
     expect(promoted).not.toHaveBeenCalled()
     expect(await applyStage({ zone: 'example.com', on: [other], off: [] }, deps)).toEqual({ ok: true, changed: false })
@@ -126,6 +127,34 @@ describe('stage, then publish (jwize 2026-11-15)', () => {
     expect(promoted).toHaveBeenCalledTimes(1)
     expect(promoted).toHaveBeenCalledWith('example.com', 'dylan')
     expect(await applyPublish({ zone: 'example.com' }, deps)).toEqual({ ok: true, changed: false })
+  })
+
+  it('another device staging between the read and the write is kept: the write expects what it read, and on a moved root reads and applies again (jwize 2026-11-16)', async () => {
+    // A host that signs only when the root still names what the writer read, as setHiveRoot's expect does.
+    const records: Record<string, { sig: string; record: Showcase } | undefined> = {
+      'staged:example.com': { sig: '1'.repeat(64), record: { zone: 'example.com', domains: [], items: [{ pubkey: key, lineage: 'camelflage' }] } },
+    }
+    let n = 1
+    let interrupt = true
+    const readAt = vi.fn(async (_zone: string, name = 'showcase:example.com') => {
+      const held = records[name]
+      return { sig: held?.sig ?? null, record: held?.record ?? null }
+    })
+    const sign = vi.fn(async (record: Showcase, name = 'showcase:example.com', expect?: string | null) => {
+      // The phone stages games first, after this hive read and before it writes.
+      if (interrupt && name === 'staged:example.com') {
+        interrupt = false
+        const was = records[name]!.record
+        records[name] = { sig: String(++n).repeat(64), record: { ...was, items: [...was.items, other] } }
+      }
+      if (expect !== undefined && (records[name]?.sig ?? null) !== expect) return { ok: false as const, reason: ROOT_MOVED }
+      records[name] = { sig: String(++n).repeat(64), record }
+      return { ok: true as const, sig: records[name]!.sig }
+    })
+    expect(await applyStage({ zone: 'example.com', on: [{ pubkey: key, lineage: 'dylan' }], off: [] }, { own: async () => key, readAt, sign }))
+      .toEqual({ ok: true, changed: true })
+    expect(sign).toHaveBeenCalledTimes(2)
+    expect(records['staged:example.com']!.record.items.map(item => item.lineage).sort()).toEqual(['camelflage', 'dylan', 'games'])
   })
 
   it('a creation that cannot be optimized publishes nothing, and a bad request or a missing key is refused', async () => {

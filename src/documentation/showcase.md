@@ -510,7 +510,8 @@ domain it added. What this browser turned on is kept in `community:tiles` (`read
 "the community items are compiled and made available for all visitors no matter what computer").** Once the owners
 sign `showcase:<zone>`, an item it names draws for every visitor whether or not the Publish window's live list
 (`stage:live`) names its head: that list is a discovery listing (deployment-stages.md R10), never the resolver. A door
-Publish turned off for this domain still hides it. Without a signed showcase the live list still narrows what a door
+Publish turned off for this domain still hides it — only an explicit doors list that leaves this domain out
+(`doorsClosed`); a lineage with no doors at all names no domain to leave out, and shows (jwize 2026-11-16: favorites). Without a signed showcase the live list still narrows what a door
 alone shows. The live list is read only when the owner signed it.
 
 **Stage, then publish (jwize 2026-11-15: "you have unlocked them from their domains and staged them for public access";
@@ -533,6 +534,14 @@ owners' reads and writes the same list, and a visitor is never drawn it.
   live is optimized first (the hive's `applyPublish` through `promoteForCommunity`, read and promoted at the showcase home;
   a phone's `publishChange` through `promoteHere`). No bytes are copied: a published item opens its creation where it is
   hosted, by signature. A creation that cannot be optimized publishes nothing, and says why.
+
+**Optimistic, with a check (jwize 2026-11-16: "just before updating you check the current head hasn't changed and you
+can then update safely"; "it sees the changes and adds the difference … so shouldn't ever fail").** Every stage and
+publish is a difference applied to what it reads, and its write expects what it read. A phone's write names the index it
+replaces (`prev`), and the host refuses it once the head moved. The hive's names the record (`setHiveRoot(…, { expect })`,
+checked again inside the write lane: `PutHiveOptions.expectRoots`, `ROOT_MOVED`). Either way the change is read and
+applied again to what another device saved, up to eight times, a moment later each time; two devices staging at once
+both land.
 
 A bridge without `stage` (an older hive, a test double) keeps the earlier behaviour below: a key holder's tap signs the
 record directly.

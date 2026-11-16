@@ -149,6 +149,14 @@ export const doorsOpen = (owners: ZoneOwners, pubkey: string, lineage: string, z
   return (byLineage.get(lineage) ?? []).some(door => door === zone || zone.endsWith(`.${door}`))
 }
 
+/** Has the owner's Publish window turned this lineage OFF for this domain: its signed doors list domains, and this one is
+ *  not among them? A lineage with no doors at all names no domain to leave out (jwize 2026-11-16: favorites, published
+ *  in the community with no doors, did not show): only an explicit list hides what the community names. */
+export const doorsClosed = (owners: ZoneOwners, pubkey: string, lineage: string, zone: string): boolean => {
+  const listed = owners.doors.get(pubkey)?.get(lineage) ?? []
+  return listed.length > 0 && !listed.some(door => door === zone || zone.endsWith(`.${door}`))
+}
+
 /** The index key — and the pool's meaning — for one domain's showcase. */
 export const showcaseKey = (zone: string): string => `showcase:${zone}`
 

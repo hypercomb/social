@@ -1110,6 +1110,13 @@ describe('what the owners meant, and what the page does when it cannot tell', ()
     await vi.waitFor(() => expect(names(wide.bands)).toEqual(['dylan']))
   })
 
+  it('shows a named item whose lineage lists no doors at all: only a list that leaves this domain out hides it (jwize 2026-11-16: favorites)', async () => {
+    const record: ShowcaseRecord = { zone: 'hypercomb.com', domains: [], items: [{ pubkey: sig('a'), lineage: 'dylan' }, { pubkey: sig('a'), lineage: 'camelflage' }] }
+    // camelflage's doors name this domain; dylan has no doors entry at all.
+    const { bands } = draw(async () => owners({ showcase: record, doors: new Map([[sig('a'), new Map([['camelflage', ['hypercomb.com']]])]]) }))
+    await vi.waitFor(() => expect(names(bands)).toEqual(['camelflage', 'dylan']))
+  })
+
   it('never counts a followed domain\'s ledger as proof: it cannot slip into an owner\'s tile, or earn a Manage switch', async () => {
     const hostile = parseLedger({ sites: [
       // evil.example claims the owner's key and lineage to put its own version under the owner's name.

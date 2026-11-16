@@ -219,6 +219,21 @@ describe('a phone takes its owner\'s invite, then promotes from its own key', ()
     expect(zone.puts.length).toBe(puts)
   })
 
+  it('two places staging at once both land (jwize 2026-11-16: "it sees the changes and adds the difference … so shouldn\'t ever fail")', async () => {
+    await zone.publish({ zone: ZONE, items: [{ pubkey: anchor, lineage: 'camelflage' }], domains: [] })
+    await accept()
+    const phone = deviceOwner(ZONE)
+    const desktop = deviceOwner(ZONE)
+    await Promise.all([phone.hello(), desktop.hello()])
+    const results = await Promise.all([
+      phone.stage!({ zone: ZONE, on: [{ pubkey: anchor, lineage: 'dylan' }], off: [] }),
+      desktop.stage!({ zone: ZONE, on: [{ pubkey: anchor, lineage: 'games' }], off: [{ pubkey: anchor, lineage: 'camelflage' }] }),
+    ])
+    expect(results).toEqual([{ ok: true, changed: true }, { ok: true, changed: true }])
+    const staged = (await readZoneOwners(ZONE, [anchor])).staged?.items ?? []
+    expect([...staged].map(item => item.lineage).sort()).toEqual(['dylan', 'games'])
+  })
+
   it('takes a tile off a page that had no record: the rest of what is published stays', async () => {
     await zone.publish(null)
     await accept()
