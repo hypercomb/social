@@ -411,8 +411,24 @@ changed. No date is kept.
 - Only the same read line is matched. The same file opened another way, or
   from another offset, is another read.
 
-Not built: sending only what differs when an answer has changed, and
-skipping a whole block of reads when the tile above them has not moved.
+Two more steps on the same memory (2026-11-16, "implement the ideas"):
+
+- **Only what differs.** When the same read line comes back changed in part,
+  the model is sent the difference: `now` holds each changed field as it is
+  now, `added` and `removed` hold the rows of a list that came and went, and
+  `gone` names fields no longer there. Everything not named is as it was
+  given above. A list whose rows were reordered is given whole, and so is
+  any answer whose difference is more than 60% of it. What is remembered is
+  always the whole answer as it is now, so the next change is told against
+  that.
+- **Not read at all.** A read whose source has not moved is answered before
+  anything is executed. Two kinds can be told without reading: bytes opened
+  by signature, which a signature names for good, and a tree or a find,
+  which stand while the heads they saw stand (the reader's own
+  `validateSnapshots`). A tile read is always read again, because its notes
+  change without its layer changing. Code, a pool and a name explored are
+  asked every time. The whole of a block whose reads are all of the first
+  two kinds is answered with no read.
 
 `hypercomb-runtime` `hypercomb-observation.ts` (`ReadRepeats`), used by
 `chat-window.ts`.

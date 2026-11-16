@@ -7855,6 +7855,9 @@ export class ChatWindow {
             maxNodes: 48,
             maxBytes: perReadBytes,
             signal,
+            // What this leg already answered: a read whose source has not
+            // moved is answered without being read again.
+            repeats: { memory: seenReads, round: rounds + 1 },
           })
           const receipt = withoutWithheld(read, covers)
           // Cut short is judged on the read as it came back: a tree that left
