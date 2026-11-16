@@ -52,13 +52,13 @@ const when = (at: number): string => {
 /** What the bar's button says: the line in hand and its step, or the
  *  invitation to save a first one. */
 export const revisionButtonWords = (state: RevisionState | null): string => {
-  if (!state?.current) return t('revisions.none', 'Revisions')
+  if (!state?.current) return t('site-revisions.none', 'Revisions')
   const newest = state.records[state.records.length - 1]
   const step = newest ? stepOf(state.lines, newest) : 0
   const words = step > 0
-    ? t('revisions.in-hand', '{name} · {step}', { name: state.current, step })
+    ? t('site-revisions.in-hand', '{name} · {step}', { name: state.current, step })
     : state.current
-  return state.dirty ? t('revisions.in-hand-changed', '{words} •', { words }) : words
+  return state.dirty ? t('site-revisions.in-hand-changed', '{words} •', { words }) : words
 }
 
 export type SiteRevisionsHost = {
@@ -141,14 +141,14 @@ export class SiteRevisionsPanel {
     void this.#run(async () => {
       const outcome = await saveRevision(segments, typed)
       if (!outcome.ok) {
-        return outcome.needsName ? t('revisions.needs-name', 'Give this revision a name.') : t('revisions.failed', 'That did not complete. {reason}', { reason: outcome.error })
+        return outcome.needsName ? t('site-revisions.needs-name', 'Give this revision a name.') : t('site-revisions.failed', 'That did not complete. {reason}', { reason: outcome.error })
       }
       this.#unfolded = ''
       // A new name is a new line: the conversations shown are that line's.
       EffectBus.emit('chat:threads-changed', {})
       return outcome.unchanged
-        ? t('revisions.unchanged', 'Nothing changed since {name} · {step}.', { name: outcome.name, step: outcome.step })
-        : t('revisions.saved', 'Saved {name} · {step}.', { name: outcome.name, step: outcome.step })
+        ? t('site-revisions.unchanged', 'Nothing changed since {name} · {step}.', { name: outcome.name, step: outcome.step })
+        : t('site-revisions.saved', 'Saved {name} · {step}.', { name: outcome.name, step: outcome.step })
     })
   }
 
@@ -157,13 +157,13 @@ export class SiteRevisionsPanel {
     if (!segments?.length) return
     void this.#run(async () => {
       const outcome = await openRevision(segments, record)
-      if (!outcome.ok) return t('revisions.failed', 'That did not complete. {reason}', { reason: outcome.error })
+      if (!outcome.ok) return t('site-revisions.failed', 'That did not complete. {reason}', { reason: outcome.error })
       this.#unfolded = ''
       EffectBus.emit('chat:threads-changed', {})
       this.#host.onOpened()
       return outcome.failed > 0
-        ? t('revisions.opened-partly', 'Opened {name}. {failed} parts of it are not on this device.', { name: outcome.name, failed: outcome.failed })
-        : t('revisions.opened', 'Opened {name}.', { name: outcome.name })
+        ? t('site-revisions.opened-partly', 'Opened {name}. {failed} parts of it are not on this device.', { name: outcome.name, failed: outcome.failed })
+        : t('site-revisions.opened', 'Opened {name}.', { name: outcome.name })
     })
   }
 
@@ -173,17 +173,17 @@ export class SiteRevisionsPanel {
     if (!segments?.length || !state?.current || this.#busy) return
     const yes = await requestConfirm({
       // Said already: a catalog without these words shows the English.
-      title: t('revisions.discard-confirm.title', 'Discard your changes?'),
-      message: t('revisions.discard-confirm.message', 'The card goes back to the last step saved under {name}. What you changed since stays one step back in its history.', { name: state.current }),
-      confirmLabel: t('revisions.discard', 'Discard changes'),
-      cancelLabel: t('revisions.discard-confirm.cancel', 'Keep them'),
+      title: t('site-revisions.discard-confirm.title', 'Discard your changes?'),
+      message: t('site-revisions.discard-confirm.message', 'The card goes back to the last step saved under {name}. What you changed since stays one step back in its history.', { name: state.current }),
+      confirmLabel: t('site-revisions.discard', 'Discard changes'),
+      cancelLabel: t('site-revisions.discard-confirm.cancel', 'Keep them'),
       danger: true,
     })
     if (!yes) return
     void this.#run(async () => {
       const outcome = await discardChanges(segments)
-      if (!outcome.ok) return t('revisions.failed', 'That did not complete. {reason}', { reason: outcome.error })
-      return t('revisions.discarded', 'Back to the last step of {name}.', { name: outcome.name })
+      if (!outcome.ok) return t('site-revisions.failed', 'That did not complete. {reason}', { reason: outcome.error })
+      return t('site-revisions.discarded', 'Back to the last step of {name}.', { name: outcome.name })
     })
   }
 
@@ -202,7 +202,7 @@ export class SiteRevisionsPanel {
     name.maxLength = 80
     name.autocomplete = 'off'
     name.spellcheck = false
-    name.placeholder = t('revisions.name', 'Name this revision')
+    name.placeholder = t('site-revisions.name', 'Name this revision')
     name.setAttribute('aria-label', name.placeholder)
     name.value = kept ?? state?.current ?? ''
     name.disabled = this.#busy
@@ -210,7 +210,7 @@ export class SiteRevisionsPanel {
     save.type = 'submit'
     save.className = 'sm-btn sr-go'
     save.disabled = this.#busy
-    save.textContent = this.#busy ? t('revisions.working', 'Working…') : t('revisions.save', 'Save')
+    save.textContent = this.#busy ? t('site-revisions.working', 'Working…') : t('site-revisions.save', 'Save')
     form.append(name, save)
     element.append(form)
     if (kept !== null) name.focus()
@@ -219,12 +219,12 @@ export class SiteRevisionsPanel {
       const changed = document.createElement('div')
       changed.className = 'sr-changed'
       const words = document.createElement('span')
-      words.textContent = t('revisions.changed', 'Changes not saved to {name} yet.', { name: state.current })
+      words.textContent = t('site-revisions.changed', 'Changes not saved to {name} yet.', { name: state.current })
       const discard = document.createElement('button')
       discard.type = 'button'
       discard.className = 'sr-link'
       discard.disabled = this.#busy
-      discard.textContent = t('revisions.discard', 'Discard changes')
+      discard.textContent = t('site-revisions.discard', 'Discard changes')
       discard.addEventListener('click', () => { void this.#discard() })
       changed.append(words, discard)
       element.append(changed)
@@ -242,7 +242,7 @@ export class SiteRevisionsPanel {
     if (!lines.length) {
       const empty = document.createElement('div')
       empty.className = 'sr-empty'
-      empty.textContent = t('revisions.empty', 'Nothing saved yet. Save names the card as it stands; every save after it is a step under that name.')
+      empty.textContent = t('site-revisions.empty', 'Nothing saved yet. Save names the card as it stands; every save after it is a step under that name.')
       element.append(empty)
       return
     }
@@ -268,8 +268,8 @@ export class SiteRevisionsPanel {
     const count = document.createElement('span')
     count.className = 'sr-line-count'
     count.textContent = line.steps.length === 1
-      ? t('revisions.steps-one', '1 step')
-      : t('revisions.steps-many', '{n} steps', { n: line.steps.length })
+      ? t('site-revisions.steps-one', '1 step')
+      : t('site-revisions.steps-many', '{n} steps', { n: line.steps.length })
     const at = document.createElement('span')
     at.className = 'sr-line-at'
     at.textContent = when(line.at)
@@ -300,8 +300,8 @@ export class SiteRevisionsPanel {
       const mark = document.createElement('span')
       mark.className = 'sr-step-mark'
       mark.textContent = here
-        ? (dirty ? t('revisions.here-changed', 'here, changed') : t('revisions.here', 'here'))
-        : t('revisions.open', 'Open')
+        ? (dirty ? t('site-revisions.here-changed', 'here, changed') : t('site-revisions.here', 'here'))
+        : t('site-revisions.open', 'Open')
       step.append(number, stamp, mark)
       step.addEventListener('click', () => this.#openStep(record))
       steps.append(step)
