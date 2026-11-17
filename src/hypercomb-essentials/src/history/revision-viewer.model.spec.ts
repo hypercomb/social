@@ -124,7 +124,9 @@ describe('frameDocument — the document a version runs in', () => {
     const inHost = [...doc.body.querySelectorAll('script')].map(s => s.textContent)
     expect(inHost).toEqual(['first()', 'second()', 'third()'])
     // Only the viewer's own two stay in <head>: the data and the stand-in.
-    expect([...doc.head.querySelectorAll('script')].map(s => s.id || 'stand-in')).toEqual(['hc-revision-data', 'stand-in'])
+    // The viewer's own: the data, the watch (frame-watch.ts), then the stand-in.
+    expect([...doc.head.querySelectorAll('script')].map(s => s.id || (s.textContent!.includes('hcRevisionAsk') ? 'watch' : 'stand-in')))
+      .toEqual(['hc-revision-data', 'watch', 'stand-in'])
   })
 
   it('hosts a body that has an id of its own too', () => {
@@ -149,8 +151,8 @@ describe('frameDocument — the document a version runs in', () => {
   it('cannot be ended early by what the data says', () => {
     const hostile = { ...data, segments: ['</script><script>alert(1)</script>'] }
     const parsed = parse(frameDocument('<html><head></head><body></body></html>', hostile, hosting))
-    // No script appears beyond the viewer's own two, and the data reads back whole.
-    expect(parsed.querySelectorAll('script')).toHaveLength(2)
+    // No script appears beyond the viewer's own three, and the data reads back whole.
+    expect(parsed.querySelectorAll('script')).toHaveLength(3)
     expect(JSON.parse(parsed.getElementById('hc-revision-data')!.textContent!).segments).toEqual(hostile.segments)
     // In the host's entry mark the same text is an attribute value: inert.
     expect(parsed.body.getAttribute('data-hc-site-entry')).toBe('/' + hostile.segments[0])
@@ -159,7 +161,7 @@ describe('frameDocument — the document a version runs in', () => {
 
   it('runs the stand-in: the page finds its tile, its layer and its bytes through window.ioc', async () => {
     const doc = frameDocument('<html><head></head><body></body></html>', data, hosting)
-    const standIn = doc.match(/<script>(\(function \(\) \{[\s\S]*?\}\)\(\);)<\/script>/)![1]!
+    const standIn = [...doc.matchAll(/<script>(\(function \(\) \{[\s\S]*?\}\)\(\);)<\/script>/g)].map(m => m[1]!).find(text => text.includes('window.ioc'))!
     const json = doc.match(/<script type="application\/json" id="hc-revision-data">([\s\S]*?)<\/script>/)![1]!
     const holder = document.createElement('script')
     holder.type = 'application/json'

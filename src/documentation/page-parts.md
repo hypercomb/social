@@ -134,3 +134,46 @@ All of it is in the essentials package:
 - **Another filler.** A `trait:fill` for a part's word does not yet move the
   shell to that filler.
 - **Putting a block back.**
+
+## What the page did (2026-11-16)
+
+A model that writes one of a site's files could not see the result. It was
+told the file was written and went on; whether the page then threw, drew
+nothing or lost its pictures was found only by a person looking. Linking six
+creations to the back of a card took two such reports from outside before it
+worked.
+
+On a managed site door the site's page runs in a sandboxed frame, and the
+frame now watches itself (`history/frame-watch.ts`). `FRAME_WATCH` runs in
+the frame before any of the page's own code and keeps what goes wrong: an
+uncaught error, a rejected promise nobody caught, a `console.error` or
+`console.warn`, a script or picture that did not load, a request the frame's
+policy refused. It also counts what is drawn into each canvas, because a page
+that makes a canvas and draws nothing is a blank page with no error.
+
+After a file write lands there, the chat window asks for the report
+(`@diamondcoreprocessor.com/SiteRunWatch`, registered by
+`sharing/site-manage.drone.ts`). The site's card waits for the run the write
+causes, gives it a moment to start, asks the frame, and the model is handed
+the answer with the write's own result:
+
+```
+WHAT THE PAGE DID after this write, as the frame that runs it reports …
+The page ran for 1.2 s and reported 1 problem:
+- error: Uncaught TypeError: links is not iterable (line 214:9 of the page)
+It shows this text: “Jaime Weise Ask them to point their camera here”
+Pictures: 5 loaded.
+A 640×480 canvas (webgl2) took 5400 draw calls.
+```
+
+When the card did not run again (it does not carry the file that was
+written), the report says so first: what follows is then the run before the
+write.
+
+The watch reports and nothing else. It changes nothing the page does, reads
+nothing the page did not put on screen or in the console, and answers only
+the window that holds the frame. The report is read as untrusted page data
+(`readFrameReport`): bounded and typed.
+
+Not built: a picture of the page. The model is told what the page says and
+throws, not what it looks like.
