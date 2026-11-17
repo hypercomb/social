@@ -13,12 +13,12 @@
 // Doctrine comes from ONE artifact, documentation/doctrine.codex: tiers ordered
 // base to leaf, one line per axiom, every axiom citing only earlier ones. The
 // build refuses a codex that breaks that order or names a missing document, so
-// there is no second copy that can drift. What this writes is the SEED: at runtime the doctrine is a hive artifact — one
-// resource per section, a record naming them, the `system:doctrine` bag's
-// head naming the record (assistant/anatomy/doctrine.ts). The build's
-// sections become the head only while the participant has not changed the
-// doctrine in the hive. The one authored part here is the working protocol:
-// how a reader reads and proposes.
+// there is no second copy that can drift. What this writes is the BUILD'S COPY:
+// at runtime the doctrine is a hierarchy of tiles in the hive (assistant/
+// anatomy/doctrine-tree.ts), and the build's copy reaches a hive only when the
+// participant lays it out (`doctrine tiles`). Nothing runs on it in place of
+// the hive's. The one authored part here is the working protocol: how a reader
+// reads and proposes.
 
 import { readFileSync, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'

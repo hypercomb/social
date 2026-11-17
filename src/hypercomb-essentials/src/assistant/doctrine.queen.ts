@@ -1,42 +1,38 @@
 // assistant/doctrine.queen.ts
 //
 // THE PARTICIPANT'S DOCTRINE. The rules every model is sent first, and that
-// Jev judges every change against, are a hive artifact (anatomy/doctrine.ts).
-// A model may PROPOSE a section through the write fence, always reviewed; these
-// words are the participant's own and no model can say them — this queen
-// declares no machine grammar on purpose:
+// Jev judges every change against, are a hierarchy of tiles at the hive's root
+// (anatomy/doctrine-tree.ts): the `doctrine` tile, a tile per tier, a tile per
+// rule. A rule changes by editing its tile's note, leaves by removing its
+// tile (a hide lasts only the session), and comes back by the tile's history.
+// A hive gets its doctrine by adopting a host's `doctrine` branch, or by these
+// words:
 //
-//   doctrine              the viewer: choose which rules the anatomy carries
-//   doctrine list         the sections the anatomy carries now, numbered
-//   doctrine tiles        the codex laid out as tiles on this page, to browse
-//   doctrine back         the doctrine the last change replaced, again
-//   doctrine drop <n>     the doctrine without section n
-//   doctrine seed         the doctrine this build ships, as the head
+//   doctrine          open the doctrine page (first in the docs browser):
+//                     what the doctrine tiles hold now, or why there is none
+//   doctrine tiles    lay the build's copy out as the doctrine tiles, at the root
 //
-// Every act is a forward commit: a new record and a new marker in the
-// `system:doctrine` bag. Nothing is removed, and `doctrine back` undoes any
-// of them. A change applies from the next message.
+// These words are the participant's own and no model can say them — this
+// queen declares no machine grammar on purpose. RETIRED 2026-11-16 (tiles
+// only): `doctrine list`, `back`, `drop <n>`, `seed` and the doctrine window.
 
 import { QueenBee, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { ANATOMY_IOC_KEY, type AnatomyLike } from './anatomy/anatomy.service.js'
-import type { DoctrineOutcome } from './anatomy/doctrine.js'
 
 export class DoctrineQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'doctrine'
-  override description = 'See, step back, drop or reseed the rules every model is sent'
+  override description = 'Read the doctrine every model is taught, or lay its tiles out'
   override descriptionKey = 'slash.doctrine'
-  override options = ['list', 'tiles', 'back', 'drop <n>', 'seed']
+  override options = ['tiles']
   override examples = [
-    { input: '/doctrine', result: 'Opens the doctrine viewer: choose which rules every model is sent' },
-    { input: '/doctrine list', result: 'Lists the doctrine sections, numbered' },
-    { input: '/doctrine tiles', result: 'Lays the rules out as tiles on this page, one tile per tier and per rule' },
-    { input: '/doctrine back', result: 'Puts back the doctrine the last change replaced' },
+    { input: '/doctrine', result: 'Opens the doctrine page: every tier and rule the doctrine tiles hold, exactly what every model is taught' },
+    { input: '/doctrine tiles', result: 'Lays the build\'s copy of the doctrine out at the root, one tile per tier and per rule' },
   ]
 
   override slashComplete(args: string): readonly string[] {
     const typed = args.trim().toLowerCase()
-    return ['list', 'tiles', 'back', 'drop ', 'seed'].filter(word => word.startsWith(typed) && word.trim() !== typed)
+    return ['tiles'].filter(word => word.startsWith(typed) && word !== typed)
   }
 
   protected async execute(args: string): Promise<void> {
@@ -48,19 +44,18 @@ export class DoctrineQueenBee extends QueenBee {
     const toast = (message: string, type = 'info'): void => { EffectBus.emit('toast:show', { type, message }) }
     const doctrine = (window.ioc?.get?.(ANATOMY_IOC_KEY) as AnatomyLike | undefined)?.doctrine
     if (!doctrine) { toast(t('doctrine.unavailable', 'The doctrine is not available here.'), 'warning'); return }
-    await doctrine.ready
 
-    const done = (outcome: DoctrineOutcome, success: string): void => {
-      if (!outcome.ok) { toast(outcome.error, 'error'); return }
-      toast(t('doctrine.changed', '{what} The doctrine has {count} sections; it applies from the next message.', { what: success, count: outcome.state.sections.length }), 'success')
-    }
-
-    const [word = '', ...rest] = args.trim().split(/\s+/).filter(Boolean)
-    if (!word) { EffectBus.emit('doctrine:open', {}); return }
-    if (word === 'list') {
-      const listed = doctrine.sections().map(section => `${section.index} ${section.heading || '(no heading)'}`).join(' · ')
-      const pending = doctrine.seedPending() ? ` ${t('doctrine.pending', 'This build ships newer doctrine: say doctrine seed to take it.')}` : ''
-      toast(`${t('doctrine.list', 'Doctrine:')} ${listed}${pending}`)
+    const word = args.trim().toLowerCase()
+    if (!word) {
+      await doctrine.ready
+      const status = doctrine.status()
+      if (status.kind === 'read') toast(t('doctrine.status', 'Every model is taught the doctrine tiles: {tiers} tiers, {rules} rules.', { tiers: status.tiers, rules: status.rules }))
+      else if (status.kind === 'broken') toast(t('doctrine.broken', 'The doctrine tiles do not hold, so no model is taught them: {problems}.', { problems: status.problems.join('; ') }), 'error')
+      else toast(t('doctrine.absent', 'This hive has no doctrine: adopt a host\'s doctrine branch, or say doctrine tiles at the root to lay out the build\'s copy.'), 'warning')
+      // The page, in the docs browser beside the documentation: the doctrine
+      // read, written out (anatomy/doctrine-page.ts). Transient: a surface
+      // that mounts later must not open it again.
+      EffectBus.emitTransient('docs:open', { page: 'doctrine' })
       return
     }
     if (word === 'tiles') {
@@ -70,15 +65,9 @@ export class DoctrineQueenBee extends QueenBee {
       toast(t('doctrine.tiling', 'Laying the doctrine out as tiles…'))
       const outcome = await makeDoctrineTiles(parseCodex(ANATOMY_CODEX))
       if (!outcome.ok) { toast(outcome.error, 'error'); return }
-      toast(t('doctrine.tiled', 'The doctrine is on this page as the tile doctrine: {made} rules added, {kept} already there.', { made: outcome.made, kept: outcome.kept }), 'success')
+      toast(t('doctrine.tiled', 'The doctrine is the tile doctrine: {made} lines added, {kept} already there. It applies from the next message.', { made: outcome.made, kept: outcome.kept }), 'success')
       return
     }
-    if (word === 'back') return done(await doctrine.back(), t('doctrine.backed', 'Stepped back.'))
-    if (word === 'seed') return done(await doctrine.seed(), t('doctrine.seeded', 'Took the build\'s doctrine.'))
-    if (word === 'drop') {
-      const index = Number(rest[0])
-      return done(await doctrine.drop(index), t('doctrine.dropped', 'Dropped section {index}; doctrine back puts it back.', { index: rest[0] ?? '' }))
-    }
-    toast(t('doctrine.usage', '/doctrine takes list, tiles, back, drop <n> or seed; alone it opens the viewer.'), 'warning')
+    toast(t('doctrine.usage', '/doctrine alone opens the doctrine page; /doctrine tiles lays it out.'), 'warning')
   }
 }

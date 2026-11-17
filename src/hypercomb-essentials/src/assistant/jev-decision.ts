@@ -60,7 +60,7 @@ export interface JevRow {
  *  auditDraft), which may hold it too. */
 export const WRITE_REACH: JevReach = 'editing'
 /** A write's header, as the write fence accepts it (hypercomb-work-fence.ts). */
-const WRITE_HEADER = /^\/?(?:write\s+)?(?:[a-f0-9]{64}\s+src\/\S+|doctrine\s+\S.*)$/i
+const WRITE_HEADER = /^\/?(?:write\s+)?[a-f0-9]{64}\s+src\/\S+$/i
 /** A write whose target is the doctrine itself (anatomy/doctrine.ts). */
 export const isDoctrineWrite = (row: { readonly kind: JevRowKind; readonly lines: readonly string[] }): boolean =>
   row.kind === 'write' && /^\/?(?:write\s+)?doctrine\s/i.test(row.lines[0] ?? '')
@@ -236,7 +236,7 @@ export const jevRow = (raw: unknown): JevRow => {
   if (kind === 'answer' ? lines.length : !lines.length) throw new Error(kind === 'answer' ? 'An answer row carries no line' : 'A row needs a line')
   if (kind !== 'do' && lines.length > 1) throw new Error('Only a do row may carry several lines')
   if (lines.length > 6 || lines.join('\n').length > 2_000) throw new Error('A row exceeds its budget')
-  if (kind === 'write' && !WRITE_HEADER.test(lines[0])) throw new Error('A write row carries one line: the write block header, <module signature> <src/path.ts> or doctrine <heading>')
+  if (kind === 'write' && !WRITE_HEADER.test(lines[0])) throw new Error('A write row carries one line: the write block header, <module signature> <src/path.ts>')
   const why = row['why'] === undefined ? undefined : text(row['why'], 200)
   const reach = row['reach']
   // The hive sets the reach from the census; a write always reaches as
