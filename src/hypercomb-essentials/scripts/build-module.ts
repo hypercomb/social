@@ -11,6 +11,11 @@
 //                           named by bag sig, discovered ONLY via the
 //                           manifest's dependenciesBag/beesBag fields
 //   dist/.cache/            build cache — never copied or deployed
+//   dist/.typescript/<sig>  the package's own TypeScript, one text atom per
+//                           top-level source folder (typescript-atoms.ts).
+//                           HOSTED on publish, NEVER installed: it sits in a
+//                           folder that is not a signature so that nothing
+//                           which ships dist's sig-named entries carries it
 // Consumers fetch `<base>/<sig>` flat-first and fall back to the legacy
 // `__layers__/<sig>.json` | `__bees__/<sig>.js` | `__dependencies__/<sig>.js`
 // URL shapes only for OLD deployed content already in the wild; nothing new
@@ -24,6 +29,9 @@ import { hostPackagesPool, poolAddress } from './pool-address.js'
 import { knowledgeAtoms } from './knowledge-atoms.js'
 import { buildInputsDigest, buildScriptPaths, byCodeUnit, fileContentSig, inputsMoved, sortedNames, writeBuildStamp } from './build-determinism.js'
 import { effectSleeper, passiveQueen, viewSleeper } from './passive-queen.js'
+import { isCarriedSource, isEntry, isIndexFile, isKeysFile, isSource, isSpecFile } from './source-filters.js'
+import { TYPESCRIPT_STAGING, carriedFiles, typescriptAtoms, typescriptDigest, typescriptSlotErrors, unresolvedSections } from './typescript-atoms.js'
+import { TYPESCRIPT_SLOT } from '../src/assistant/package-typescript.js'
 import { fileURLToPath } from 'url'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { dirname, extname, join, relative, resolve } from 'path'
@@ -251,6 +259,10 @@ interface BuildCache {
   docsShape?: string
   rootHash: string                            // Merkle root of all unit hashes
   rootLayerSig: string                        // last output root signature
+  /** typescriptDigest of the carried TypeScript when this cache was written.
+   *  Kept out of BUILD_SHAPE: that string is in every unit's input signature,
+   *  so a source edit there would recompile every unit. */
+  typescriptSig?: string
   namespaces: Record<string, UnitCache>
   bees: Record<string, UnitCache>
   /** relPath → atom unit; `imports` = the atom specifiers it statically imports. */
@@ -350,30 +362,6 @@ const walkFiles = (dir: string): string[] => {
   return out
 }
 
-const isSource = (f: string): boolean =>
-  (f.endsWith('.ts') || f.endsWith('.js')) && !f.endsWith('.d.ts')
-
-// exclude test files from artifact pipeline. spec files import vitest;
-// when bundled into a namespace dep and loaded in the browser, vitest
-// throws "failed to find the runner" at the first beforeEach call,
-// crashing every consumer of that namespace. selftest files are NODE
-// harnesses (run via tsx) that execute their whole suite at module load
-// and may call process.exit — bundling the arkanoid selftest into the
-// games/arkanoid namespace dep made the bare `process` throw at import
-// time in the browser and took the whole dependency down (the 2026-07-16
-// "ReferenceError: process is not defined" dependency-loader failure).
-const isSpecFile = (f: string): boolean =>
-  f.endsWith('.spec.ts') || f.endsWith('.spec.js') ||
-  f.endsWith('.test.ts') || f.endsWith('.test.js') ||
-  f.endsWith('selftest.ts') || f.endsWith('selftest.js')
-
-// exclude key-only files from artifact pipeline
-const isKeysFile = (f: string): boolean => {
-  if (f.endsWith('.keys.ts') || f.endsWith('.keys.js') || f.endsWith('-keys.ts') || f.endsWith('-keys.js')) return true
-  const base = f.replace(/\\/g, '/').split('/').pop() ?? ''
-  return base === 'essentials-keys.ts' || base === 'essentials-keys.js'
-}
-
 /** Module-scope registration — the same spellings the doctrine ratchet reads. */
 const SELF_REGISTRATION =
   /\bioc\s*\??\.\s*register\s*(?:\?\.)?\s*(?:<[^>]*>)?\s*\(|registerShellSurface\s*\(|^(?:publishService|registerLlmProvider)\s*\(|\bwhenReady\s*(?:\?\.)?\s*(?:<[\s\S]{0,200}?>)?\s*(?:\?\.)?\s*\([\s\S]{0,400}?\.(?:register|add|addProvider)\s*(?:\?\.)?\s*\(|^register\s*(?:<[^>]*>)?\s*\(|^[\w$.]+(?:\(\))?\s*\??\.\s*register\s*(?:\?\.)?\s*\(/m
@@ -394,14 +382,6 @@ const registersItself = (f: string): boolean => {
 const isBee = (f: string): boolean =>
   f.endsWith('.drone.ts') || f.endsWith('.drone.js') || f.endsWith('.worker.ts') || f.endsWith('.worker.js')
   || (/\.(queen|bee)\.[tj]s$/.test(f) && isAtomizedRelPath(relPosix(SRC_ROOT, f)) && registersItself(f))
-
-const isEntry = (f: string): boolean =>
-  f.endsWith('.entry.ts') || f.endsWith('.entry.js')
-
-const isIndexFile = (f: string): boolean => {
-  const base = f.replace(/\\/g, '/').split('/').pop() ?? ''
-  return base === 'index.ts' || base === 'index.js'
-}
 
 const stripExt = (p: string): string =>
   p.slice(0, -extname(p).length)
@@ -645,6 +625,8 @@ const BUILD_SCRIPTS_SIG = createHash('sha256')
   .update(readFileSync(join(__dirname, 'build-determinism.ts')))
   .update(readFileSync(join(__dirname, 'pool-address.ts')))
   .update(readFileSync(join(__dirname, 'knowledge-atoms.ts')))
+  .update(readFileSync(join(__dirname, 'source-filters.ts')))
+  .update(readFileSync(join(__dirname, 'typescript-atoms.ts')))
   .digest('hex')
 
 const isAtomizedRelPath = (relPath: string): boolean =>
@@ -833,11 +815,12 @@ const buildLayersFromTree = async (
   rootCriticalBees: readonly string[],
   rootBootBees: readonly string[],
   docsByDir: Map<string, Record<string, BeeDocEntry>>,
+  typescriptByRel: ReadonlyMap<string, string>,
   prevLayerCache?: Record<string, LayerCacheEntry>
 ): Promise<string | null> => {
   const layers: string[] = []
   for (const c of node.children) {
-    const childSig = await buildLayersFromTree(c, resourcesByDir, out, rootDependencies, rootCriticalBees, rootBootBees, docsByDir, prevLayerCache)
+    const childSig = await buildLayersFromTree(c, resourcesByDir, out, rootDependencies, rootCriticalBees, rootBootBees, docsByDir, typescriptByRel, prevLayerCache)
     if (childSig) layers.push(childSig)
   }
 
@@ -865,9 +848,14 @@ const buildLayersFromTree = async (
   // prior runs and the cache misses. Without this, a field rename
   // (e.g. `layers` → `cells`) is invisible to the input hash and the
   // cache happily returns the OLD JSON under the OLD sig.
-  const shapeDescriptor = node.rel
+  // The source atom of this layer's folder, when it has one. A layer without
+  // one keeps the descriptor and the parts it always had, so its signature
+  // does not move. The root layer never has one: no atom holds the files
+  // directly in src/.
+  const typescriptSig = node.rel ? typescriptByRel.get(node.rel) ?? '' : ''
+  const shapeDescriptor = (node.rel
     ? 'cells:name:bees:dependencies'
-    : 'cells:name:bees:dependencies:criticalBees:bootBees'
+    : 'cells:name:bees:dependencies:criticalBees:bootBees') + (typescriptSig ? `:${TYPESCRIPT_SLOT}` : '')
 
   const layerInputParts = [
     shapeDescriptor,
@@ -879,6 +867,7 @@ const buildLayersFromTree = async (
     bootBeeSigs.join(':'),
     docsKey,
     folderDocSig,
+    ...(typescriptSig ? [typescriptSig] : []),
   ]
   const layerInputSig = await SignatureService.sign(
     toArrayBuffer(textToBytes(layerInputParts.join('|')))
@@ -919,6 +908,8 @@ const buildLayersFromTree = async (
   // service the runtime or the shell reads before any other bee loads. Named
   // only when there are some, so a package without them is byte-identical.
   if (!node.rel && bootBeeSigs.length) layer.bootBees = bootBeeSigs
+  // Hosted with the package, never installed (typescript-atoms.ts).
+  if (typescriptSig) layer[TYPESCRIPT_SLOT] = typescriptSig
   if (docs) layer.docs = docs
 
   const { sig, json } = await signJson(layer)
@@ -1114,7 +1105,14 @@ const main = async (): Promise<void> => {
     for (const entry of entries) if (!cachedUnit.files[entry]) return true
     return inputsMoved(cachedUnit.files, contentSigOnce)
   }
-  let anyInputChanged = !cache || cache.shape !== BUILD_SHAPE
+  // THE TYPESCRIPT THE PACKAGE HOSTS (typescript-atoms.ts; owner, 2026-11-16:
+  // "Host the package's TypeScript without installing it, fetched only when a
+  // file is opened"). Its digest is asked here because a file of types alone
+  // is bundled by no unit: without it such an edit would skip the build and
+  // leave the old atom named on the layer.
+  const carried = carriedFiles(SRC_ROOT, rel => isCarriedSource(rel, EXCLUDED_DOMAINS))
+  const typescriptSig = typescriptDigest(carried, contentSigOnce)
+  let anyInputChanged = !cache || cache.shape !== BUILD_SHAPE || cache.typescriptSig !== typescriptSig
   if (cache && !anyInputChanged) {
     for (const ns of allNs) {
       const cachedUnit = cache.namespaces[ns]
@@ -1148,7 +1146,7 @@ const main = async (): Promise<void> => {
     const manifestFile = join(DIST_ROOT, MANIFEST_FILE)
 
     // Verify output still exists (not wiped externally)
-    if (existsSync(manifestFile)) {
+    if (existsSync(manifestFile) && existsSync(join(DIST_ROOT, TYPESCRIPT_STAGING))) {
       const elapsed = ((performance.now() - t0) / 1000).toFixed(3)
       console.log(`[build-module] Merkle root unchanged — skipping build entirely`)
       stampBuild(cache.rootLayerSig)
@@ -1544,7 +1542,23 @@ const main = async (): Promise<void> => {
   }
 
   const tree = readDirTree(SRC_ROOT, '')
-  const rootLayerSig = await buildLayersFromTree(tree, resourcesByDir, layers, rootDependencies, criticalBees, uniqSorted(bootBees), docsByDir, cache?.layerCache)
+  // The source atoms: one per top-level folder that yields a layer. The root
+  // layer names none: a file directly in src/ is a barrel prepare.ts rewrites
+  // and the discovery above drops, so it is carried nowhere. They are
+  // kept in maps of their own and never enter dependencyBytes, resourceBytes
+  // or the alias table: a device installs none of them.
+  const layered = new Set([...resourcesByDir].filter(([rel, e]) => rel && (e.bees.length || e.deps.length)).map(([rel]) => rel.split('/')[0]!))
+  const typescriptAtomList = typescriptAtoms(carried, LAZY_MARKER_LINE, layered)
+  const typescriptBytes = new Map<string, Uint8Array>()
+  const typescriptByRel = new Map<string, string>()
+  for (const atom of typescriptAtomList) {
+    const bytes = textToBytes(atom.text)
+    const sig = await SignatureService.sign(toArrayBuffer(bytes))
+    typescriptBytes.set(sig, bytes)
+    typescriptByRel.set(atom.key, sig)
+  }
+
+  const rootLayerSig = await buildLayersFromTree(tree, resourcesByDir, layers, rootDependencies, criticalBees, uniqSorted(bootBees), docsByDir, typescriptByRel, cache?.layerCache)
   // The root node (`node.rel === ''`) always builds a layer — the null
   // early-return in buildLayersFromTree is gated on `node.rel`, so only a
   // non-root empty dir returns null. Assert it here so the rest of the
@@ -1566,6 +1580,16 @@ const main = async (): Promise<void> => {
   for (const [sig, json] of layers) writeSigFile(DIST_ROOT, sig, json)
   for (const [sig, bytes] of dependencyBytes) writeSigFile(DIST_ROOT, sig, bytes)
   for (const [sig, bytes] of resourceBytes) writeSigFile(DIST_ROOT, sig, bytes)
+
+  // The source atoms go to their own folder, never the dist root: the shim
+  // bundle, the native installer, the mirrored feed and the ship all carry
+  // "every signature-named entry of dist", and none of them may carry these.
+  ensureDir(join(DIST_ROOT, TYPESCRIPT_STAGING))
+  for (const [sig, bytes] of typescriptBytes) writeSigFile(join(DIST_ROOT, TYPESCRIPT_STAGING), sig, bytes)
+  {
+    const total = [...typescriptBytes.values()].reduce((sum, bytes) => sum + bytes.byteLength, 0)
+    console.log(`[build-module] TypeScript: ${typescriptBytes.size} source atoms, ${typescriptAtomList.reduce((files, atom) => files + atom.files, 0)} files, ${(total / 1024 / 1024).toFixed(1)} MB → dist/${TYPESCRIPT_STAGING} (hosted on publish, never installed)`)
+  }
 
   // Sigbag emission. A bag is a directory named by its content sig; entries
   // are zero-padded index files (0000, 0001, …) whose contents carry the
@@ -1728,6 +1752,23 @@ const main = async (): Promise<void> => {
       }
     }
 
+    // The TypeScript slots: each names exactly one atom this build wrote, no
+    // atom is unnamed, and none points into what a device installs.
+    errors.push(...typescriptSlotErrors(layers, new Set(typescriptBytes.keys()), new Set([...layers.keys(), ...resourceBytes.keys(), ...dependencyBytes.keys()])))
+    // Every TypeScript section the compiled package shows must be in the atom
+    // a reader is sent to for it, or the code view's button would answer
+    // "no TypeScript for this file" for a file that plainly has some.
+    {
+      const decoder = new TextDecoder()
+      const compiled = function* (): Generator<string> {
+        for (const [sig, bytes] of dependencyBytes) if (!knowledgeSigs.has(sig)) yield decoder.decode(bytes)
+        for (const bytes of resourceBytes.values()) yield decoder.decode(bytes)
+      }
+      const { missing, outside } = unresolvedSections(compiled(), typescriptAtomList, layered, new Set(carried.map(file => file.path)))
+      for (const path of missing) errors.push(`compiled section ${path} has no TypeScript in the source atom its path resolves to`)
+      if (outside.length) console.log(`[build-module] TypeScript: ${outside.length} compiled section(s) are of files the package does not carry (first: ${outside[0]})`)
+    }
+
     if (errors.length) {
       console.error(`[build-module] CLOSURE CHECK FAILED — ${errors.length} dangling reference(s); manifest NOT written:`)
       for (const e of errors.slice(0, 50)) console.error(`  - ${e}`)
@@ -1788,6 +1829,10 @@ const main = async (): Promise<void> => {
     ...dependencyBytes,
     ...resourceBytes,
   ]
+  // A source atom in the pack would be installed by every cold install.
+  for (const [sig] of packMembers) {
+    if (typescriptBytes.has(sig)) throw new Error(`build-module: source atom ${sig.slice(0, 12)} is in the transfer pack; the TypeScript is hosted, never installed`)
+  }
   const packPlain = encodeTransferPack(packMembers)
   const packBytes = await gzipBytes(packPlain)
   const packSig = await SignatureService.sign(toArrayBuffer(packBytes))
@@ -1807,6 +1852,7 @@ const main = async (): Promise<void> => {
     docsShape: DOCS_SHAPE,
     rootHash,
     rootLayerSig,
+    typescriptSig,
     namespaces: newNamespaces,
     bees: newBees,
     atoms: newAtoms,

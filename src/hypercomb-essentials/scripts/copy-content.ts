@@ -28,6 +28,8 @@ import { hostPackagesPool, poolAddress } from './pool-address.js'
 import { entryComplete, healEntry, sweepPartials, writeFileAtomic } from './atomic-copy.js'
 import { LEGACY_BUILD_DIRECTORIES, LEGACY_DIRECTORIES } from '../../hypercomb-core/src/core/legacy-dirs.js'
 import { TRANSFER_PACKS_MEANING } from '../../hypercomb-runtime/src/transfer-pack.js'
+import { TYPESCRIPT_STAGING } from './typescript-atoms.js'
+import { shipTypescript, typescriptShipLines } from './typescript-ship.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -39,7 +41,10 @@ const DIST_ROOT = resolve(__dirname, '..', 'dist')
 // content, all signature-addressed and deduped. Removing "stale" entries (sigs
 // not in the current build) would wipe user/adopted bytes that the build never
 // produced. Additive only; reclaiming space is a separate, deliberate GC phase
-// (mark-sweep over active roots), never a build-time side effect.
+// (mark-sweep over active roots), never a build-time side effect. Such a
+// sweep must also keep the source atoms a published package's layers name
+// (hypercomb-relay/replicate.js packageTypescript): they are hosted here
+// beside the package and are in no package closure.
 // The dev OPFS feed (web public) stays mirrored — it's regenerable.
 // The relay's content dir is the machine's — one per machine, however many
 // checkouts build into it — so a worktree publishes to the same host as the
@@ -176,12 +181,16 @@ const backfillFrom = (sources: string[], name: string, targetDir: string): boole
   return false
 }
 
-const syncTarget = (
+/** Exported, with the dist it reads as a parameter, so a spec can run the
+ *  real copier over a dist of its own (typescript-ship.spec.ts proves it
+ *  takes nothing from dist/.typescript). */
+export const syncTarget = (
   targetDir: string,
   additive: boolean,
   poolOrder: { sig: string; label: string }[],
   keep: Set<string>,
   peers: string[],
+  distRoot: string = DIST_ROOT,
 ): { copied: number; skipped: number; removed: number; drained: number; healed: number; torn: number } => {
   mkdirSync(targetDir, { recursive: true })
 
@@ -197,7 +206,7 @@ const syncTarget = (
   sweepPartials(targetDir)
   let torn = 0
 
-  const srcEntries = new Set(readdirSync(DIST_ROOT).filter(n => SIG_NAME.test(n)))
+  const srcEntries = new Set(readdirSync(distRoot).filter(n => SIG_NAME.test(n)))
   const tgtEntries = new Set(readdirSync(targetDir).filter(n => SIG_NAME.test(n)))
 
   // beeline: entry name IS the signature (file = leaf, directory = bag).
@@ -214,10 +223,10 @@ const syncTarget = (
     // already has it takes the members it lacks rather than skipping the
     // folder the way a finished bag is skipped.
     if (name === TRANSFER_PACKS_POOL && tgtEntries.has(name)) {
-      copied += healEntry(join(DIST_ROOT, name), join(targetDir, name))
+      copied += healEntry(join(distRoot, name), join(targetDir, name))
       continue
     }
-    const srcPath = join(DIST_ROOT, name)
+    const srcPath = join(distRoot, name)
     const tgtPath = join(targetDir, name)
     if (tgtEntries.has(name) && entryComplete(srcPath, tgtPath)) {
       skipped++
@@ -373,6 +382,22 @@ const syncTarget = (
 }
 
 const main = () => {
+  // THE PACKAGE'S TYPESCRIPT, FIRST (typescript-ship.ts; owner, 2026-11-16:
+  // "Host the package's TypeScript without installing it, fetched only when a
+  // file is opened"). Only a publish carries it, and only to the additive
+  // host, so the mirrored dev feed never receives a source atom. It goes
+  // before the pool is read so that the atoms are on this machine's host by
+  // the time any reader can learn of the package that names them. It cannot
+  // throw, and nothing below depends on what it did.
+  if (publishing) {
+    try {
+      const hosts = TARGETS.filter(target => target.additive).map(target => target.dir)
+      for (const line of typescriptShipLines(shipTypescript(join(DIST_ROOT, TYPESCRIPT_STAGING), hosts), hosts)) console.log(line)
+    } catch (error) {
+      console.log(`[copy-content] TypeScript — not copied (${error instanceof Error ? error.message : String(error)}); the package ships as before`)
+    }
+  }
+
   if (!existsSync(DIST_ROOT)) {
     console.error('[copy-content] dist/ not found — run build:module first')
     process.exit(1)
@@ -443,4 +468,11 @@ const main = () => {
   }
 }
 
-main()
+/** Run only as a script: a spec imports syncTarget without shipping anything. */
+const invokedDirectly = (): boolean => {
+  const entry = process.argv[1]
+  if (!entry) return false
+  const [a, b] = [resolve(entry), __filename]
+  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b
+}
+if (invokedDirectly()) main()

@@ -15,8 +15,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
-  PUBLIC_INSTALL_HOST, PUBLIC_INSTALL_HOST_ENV, RETRY_AFTER_MS, localAtoms, publicInstallHost,
-  replicateRevision, replicationOrder, replicationVerdict,
+  PUBLIC_INSTALL_HOST, PUBLIC_INSTALL_HOST_ENV, RETRY_AFTER_MS, TYPESCRIPT_TIMEOUTS, askTimeoutMs, localAtoms, publicInstallHost,
+  replicateRevision, replicateTypescript, replicationOrder, replicationVerdict, typescriptVerdict,
 } from './replicate-public-host.js'
 
 const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text)
@@ -266,5 +266,304 @@ describe('localAtoms', () => {
       expect(Buffer.from((await read(sig))!).toString()).toBe('a layer')
       expect(await read('c'.repeat(64))).toBeNull()
     } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+})
+
+describe('replicateTypescript — the host takes the source atoms the layers name', () => {
+  /** A package whose two folder layers each name a source atom (the root
+   *  names none: a file directly in src/ has no atom); `big` adds two layers
+   *  whose atoms are over a mebibyte. */
+  function aTypedPackage(big = false) {
+    const layers = new Map<string, Uint8Array>()
+    const atoms = new Map<string, Uint8Array>()
+    const put = (into: Map<string, Uint8Array>, text: string): string => { const bytes = utf8(text); const sig = sha(bytes); into.set(sig, bytes); return sig }
+    const childAtom = put(atoms, '// @hypercomb/typescript/child\n// src/child/a.ts\nexport const a = 1\n')
+    const sharingAtom = put(atoms, '// @hypercomb/typescript/sharing\n// src/sharing/b.ts\nexport const b = 1\n')
+    const large = big ? [put(atoms, `// @hypercomb/typescript/large\n${'x'.repeat(1_200_000)}`), put(atoms, `// @hypercomb/typescript/larger\n${'y'.repeat(1_500_000)}`)] : []
+    const cells = [
+      put(layers, JSON.stringify({ name: 'child', cells: [], bees: [], dependencies: [], typescript: childAtom })),
+      put(layers, JSON.stringify({ name: 'sharing', cells: [], bees: [], dependencies: [], typescript: sharingAtom })),
+      ...large.map((atom, at) => put(layers, JSON.stringify({ name: `large${at}`, cells: [], bees: [], dependencies: [], typescript: atom }))),
+    ]
+    const root = put(layers, JSON.stringify({ name: 'essentials', cells, bees: [], dependencies: [] }))
+    return { layers, atoms, root, childAtom, sharingAtom, large }
+  }
+
+  /** The worker's contract for a bare read, faked, with a count of reads in flight. */
+  function aTypedHost(farm: Map<string, Uint8Array>, options: { head?: string; flaky?: Set<string>; lies?: Set<string>; sizes?: Map<string, number> } = {}) {
+    const heap = new Map<string, Uint8Array>()
+    const asked: string[] = []
+    const missedOnce = new Set<string>()
+    let inFlight = 0
+    let largeInFlight = 0
+    let mostLargeInFlight = 0
+    const fetchImpl = async (url: string): Promise<Response> => {
+      asked.push(url)
+      const path = new URL(url).pathname
+      const atom = path.match(/^\/([a-f0-9]{64})$/)
+      if (!atom) {
+        if (path === `/content/${POOL}/`) return new Response('00000000\n')
+        if (path === `/content/${POOL}/00000000`) return new Response(`${options.head ?? STALE}\nessentials`)
+        return new Response('<!doctype html><title>origin</title>', { headers: { 'content-type': 'text/html' } })
+      }
+      const sig = atom[1]!
+      const isLarge = (farm.get(sig)?.byteLength ?? 0) > 1_048_576
+      inFlight++
+      if (isLarge) { largeInFlight++; mostLargeInFlight = Math.max(mostLargeInFlight, largeInFlight, inFlight) }
+      try {
+        await new Promise(done => setTimeout(done, 1))
+        if (options.lies?.has(sig)) return new Response('not these bytes')
+        if (heap.has(sig)) return new Response(heap.get(sig)! as BodyInit)
+        if (options.flaky?.has(sig) && !missedOnce.has(sig)) { missedOnce.add(sig); return new Response('missing', { status: 404 }) }
+        const farmed = farm.get(sig)
+        if (!farmed) return new Response('sig not held\n', { status: 404 })
+        heap.set(sig, farmed)
+        return new Response(farmed as BodyInit, { headers: { 'x-read-through': 'farm' } })
+      } finally {
+        inFlight--
+        if (isLarge) largeInFlight--
+      }
+    }
+    return { heap, asked, fetchImpl, mostLargeInFlight: () => mostLargeInFlight }
+  }
+
+  const run = (pkg: ReturnType<typeof aTypedPackage>, host: ReturnType<typeof aTypedHost>, over: Partial<Parameters<typeof replicateTypescript>[0]> = {}) => {
+    const sleeps: number[] = []
+    const lines: string[] = []
+    return replicateTypescript({
+      root: pkg.root, host: 'hypercomb.com', readLocal: reader(pkg.layers), readHosted: reader(pkg.atoms), fetchImpl: host.fetchImpl,
+      sleep: async ms => { sleeps.push(ms) }, log: line => lines.push(line), ...over,
+    }).then(report => ({ report, sleeps, lines }))
+  }
+
+  it('asks exactly the named atoms, each by its bare signature, and nothing else', async () => {
+    const pkg = aTypedPackage()
+    const host = aTypedHost(pkg.atoms)
+    const { report, sleeps } = await run(pkg, host)
+    expect(host.asked.sort()).toEqual([pkg.childAtom, pkg.sharingAtom].map(sig => `https://hypercomb.com/${sig}`).sort())
+    expect(report).toMatchObject({ named: 2, absentHere: [], held: 0, failed: [], head: null, ok: true })
+    expect(report.copied.sort()).toEqual([pkg.childAtom, pkg.sharingAtom].sort())
+    expect(sleeps).toEqual([])
+    expect(typescriptVerdict(report)).toEqual([
+      expect.stringMatching(/^\[replicate\] TypeScript: hypercomb\.com holds 2 of 2 source atom\(s\) of [0-9a-f]{12}… — 2 copied from its farm \(0\.1 KB\), 0 already held$/),
+    ])
+    // Idempotent: the second run copies nothing.
+    const again = (await run(pkg, host)).report
+    expect(again).toMatchObject({ ok: true, copied: [], held: 2 })
+  })
+
+  it('a root whose layers carry no slot asks the host nothing', async () => {
+    const pkg = aPackage()
+    const host = aTypedHost(new Map())
+    const report = await replicateTypescript({ root: pkg.root, host: 'hypercomb.com', readLocal: reader(pkg.atoms), readHosted: reader(pkg.atoms), fetchImpl: host.fetchImpl, log: () => {} })
+    expect(report).toMatchObject({ named: 0, ok: true })
+    expect(host.asked).toEqual([])
+    expect(typescriptVerdict(report)).toEqual([expect.stringMatching(/names no source atoms$/)])
+  })
+
+  it('an atom this machine\'s host does not hold is reported and never asked for', async () => {
+    const pkg = aTypedPackage()
+    const host = aTypedHost(pkg.atoms)
+    const hosted = new Map(pkg.atoms)
+    hosted.delete(pkg.childAtom)
+    const { report } = await run(pkg, host, { readHosted: reader(hosted) })
+    expect(report.absentHere).toEqual([pkg.childAtom])
+    expect(host.asked).toEqual([`https://hypercomb.com/${pkg.sharingAtom}`])
+    expect(report.ok).toBe(false)
+    const text = typescriptVerdict(report).join('\n')
+    expect(text).toMatch(/TYPESCRIPT NOT HOSTED — hypercomb\.com did not take 1 of 2 source atom\(s\)/)
+    expect(text).toMatch(/1 atom\(s\) are not in this machine's relay content dir — publish again from this checkout/)
+  })
+
+  it('a host on this root that refuses every atom is not waited on: its worker does not take TypeScript yet', async () => {
+    const pkg = aTypedPackage()
+    const host = aTypedHost(new Map())
+    let headReads = 0
+    const { report, sleeps } = await run(pkg, host, { poolHead: async () => { headReads++; return { answered: true, head: pkg.root } } })
+    expect(report.ok).toBe(false)
+    expect(report.failed).toHaveLength(2)
+    expect(sleeps).toEqual([])
+    // The head is what tells a worker without the change from a host that is behind.
+    expect(headReads).toBe(1)
+    expect(report).toMatchObject({ headRead: true, answered: true, head: pkg.root })
+    expect(host.asked).toHaveLength(2)
+    const text = typescriptVerdict(report).join('\n')
+    expect(text).toMatch(/TYPESCRIPT NOT HOSTED — hypercomb\.com did not take 2 of 2 source atom\(s\) of [0-9a-f]{12}… \(first: [0-9a-f]{12}… — HTTP 404\)/)
+    expect(text).toMatch(/The package is published and installs as before/)
+    expect(text).toMatch(/hypercomb\.com announces this root and still refused every atom: its worker does not take TypeScript yet\. Deploy hypercomb-relay\/blossom-worker, then: npm run replicate:revision -- --sig /)
+    expect(text).toContain(pkg.root)
+  })
+
+  it('a host that is behind took none because it is not on this root: the worker is not blamed', async () => {
+    // The publish's confirm found the host behind, and the pass ran anyway.
+    // The farm gives a root's TypeScript only once the host announces it, so
+    // every atom is refused exactly as a worker without the change would.
+    const pkg = aTypedPackage()
+    const host = aTypedHost(new Map(), { head: STALE })
+    const { report, sleeps } = await run(pkg, host, { current: false })
+    expect(sleeps).toEqual([])
+    expect(report).toMatchObject({ ok: false, headRead: true, answered: true, head: STALE, current: false })
+    expect(report.failed).toHaveLength(2)
+    const text = typescriptVerdict(report).join('\n')
+    expect(text).toMatch(/hypercomb\.com is not on this root yet \(its pool offers bbbbbbbbbbbb…\), and its farm gives a root's TypeScript only once it announces that root\. When it does: npm run replicate:revision -- --sig /)
+    expect(text).not.toMatch(/worker|Deploy|superseded/)
+    // The same with nobody having looked first, and with a pool that lists nothing.
+    expect(typescriptVerdict({ ...report, current: undefined }).join('\n')).toMatch(/is not on this root yet \(its pool offers bbbbbbbbbbbb…\)/)
+    const empty = typescriptVerdict({ ...report, head: null }).join('\n')
+    expect(empty).toMatch(/is not on this root yet \(its pool lists no package\)/)
+    expect(empty).not.toMatch(/worker|Deploy/)
+  })
+
+  it('a pool that cannot be read says so, and blames nothing', async () => {
+    const pkg = aTypedPackage()
+    const { report } = await run(pkg, aTypedHost(new Map()), { poolHead: async () => ({ answered: false, head: null }) })
+    expect(report).toMatchObject({ headRead: true, answered: false, head: null })
+    const text = typescriptVerdict(report).join('\n')
+    expect(text).toMatch(/hypercomb\.com's pool could not be read \(offline\?\), so why is not known\. With this machine on: npm run replicate:revision -- --sig /)
+    expect(text).not.toMatch(/worker|Deploy/)
+  })
+
+  it('a pool read that throws or never answers does not hold the pass', async () => {
+    const pkg = aTypedPackage()
+    const thrown = await run(pkg, aTypedHost(new Map()), { poolHead: async () => { throw new Error('dns') } })
+    expect(thrown.report).toMatchObject({ headRead: true, answered: false })
+    expect(thrown.report.error).toBeUndefined()
+    const hung = await run(pkg, aTypedHost(new Map()), { poolHead: () => new Promise(() => {}), askTimeoutMs: () => 20 })
+    expect(hung.report).toMatchObject({ headRead: true, answered: false, head: null })
+  })
+
+  it('some taken and one missed: exactly one wait and one second ask for the miss', async () => {
+    const pkg = aTypedPackage()
+    const host = aTypedHost(pkg.atoms, { flaky: new Set([pkg.childAtom]) })
+    const { report, sleeps } = await run(pkg, host, { poolHead: async () => ({ answered: true, head: pkg.root }) })
+    expect(sleeps).toEqual([RETRY_AFTER_MS])
+    expect(host.asked.filter(url => url.endsWith(pkg.childAtom))).toHaveLength(2)
+    expect(host.asked.filter(url => url.endsWith(pkg.sharingAtom))).toHaveLength(1)
+    expect(report).toMatchObject({ ok: true, failed: [], head: pkg.root })
+  })
+
+  it('a miss that stays a miss says to run it again with this machine on', async () => {
+    const pkg = aTypedPackage()
+    const farm = new Map(pkg.atoms)
+    farm.delete(pkg.childAtom)
+    const { report, sleeps } = await run(pkg, aTypedHost(farm), { poolHead: async () => ({ answered: true, head: pkg.root }) })
+    expect(sleeps).toHaveLength(1)
+    expect(report.failed).toEqual([{ sig: pkg.childAtom, why: 'HTTP 404' }])
+    const text = typescriptVerdict(report).join('\n')
+    expect(text).toMatch(/hypercomb\.com announces this root but could not read the atoms from its farm, this machine's host\. With this machine on: npm run replicate:revision -- --sig /)
+    expect(text).not.toMatch(/worker|Deploy/)
+  })
+
+  it('a host that was on this root and now announces another was superseded: not waited on, and no retry is printed', async () => {
+    const pkg = aTypedPackage()
+    const farm = new Map(pkg.atoms)
+    farm.delete(pkg.childAtom)
+    const host = aTypedHost(farm, { head: STALE })
+    const { report, sleeps } = await run(pkg, host, { current: true })
+    expect(sleeps).toEqual([])
+    expect(report.head).toBe(STALE)
+    expect(report.ok).toBe(false)
+    expect(host.asked.filter(url => url.endsWith(pkg.childAtom))).toHaveLength(1)
+    const text = typescriptVerdict(report).join('\n')
+    expect(text).toMatch(/hypercomb\.com now announces bbbbbbbbbbbb…: this revision was superseded\. The folders both revisions share are held, the rest are hosted with that revision/)
+    expect(text).not.toMatch(/npm run replicate:revision/)
+    expect(text).not.toMatch(/worker|Deploy/)
+  })
+
+  it('every ask carries a clock sized to its atom', async () => {
+    expect(askTimeoutMs(0)).toBe(30_000)
+    // The largest folder, about 4 MB through a home uplink: minutes, not seconds.
+    expect(askTimeoutMs(4 * 1_048_576)).toBeGreaterThanOrEqual(180_000)
+    expect(askTimeoutMs(4 * 1_048_576)).toBeLessThanOrEqual(300_000)
+    const pkg = aTypedPackage(true)
+    const host = aTypedHost(pkg.atoms)
+    const signals: Array<AbortSignal | null | undefined> = []
+    const clocks: number[] = []
+    const { report } = await run(pkg, host, {
+      fetchImpl: (url, init) => { signals.push(init?.signal); return host.fetchImpl(url) },
+      askTimeoutMs: bytes => { clocks.push(bytes); return askTimeoutMs(bytes) },
+    })
+    expect(report).toMatchObject({ ok: true, timedOut: 0, stopped: false })
+    expect(signals).toHaveLength(4)
+    for (const signal of signals) expect(signal).toBeInstanceOf(AbortSignal)
+    expect([...clocks].sort((a, b) => a - b)).toEqual([...pkg.atoms.values()].map(bytes => bytes.byteLength).sort((a, b) => a - b))
+  })
+
+  it('a host whose answers never settle ends the pass after a few timeouts in a row, and the verdict says so', async () => {
+    // A stalled stream used to hold the publish for minutes after PUBLISHED.
+    // This fetch never settles and ignores its signal; only the ask's own
+    // clock can end it. Ten atoms, so some are left when the pass stops.
+    const layers = new Map<string, Uint8Array>()
+    const atoms = new Map<string, Uint8Array>()
+    const put = (into: Map<string, Uint8Array>, text: string): string => { const bytes = utf8(text); const sig = sha(bytes); into.set(sig, bytes); return sig }
+    const cells = Array.from({ length: 10 }, (_, at) => put(layers, JSON.stringify({
+      name: `folder${at}`, cells: [], bees: [], dependencies: [], typescript: put(atoms, `// @hypercomb/typescript/folder${at}\n`),
+    })))
+    const root = put(layers, JSON.stringify({ name: 'essentials', cells, bees: [], dependencies: [] }))
+    const asked: string[] = []
+    const sleeps: number[] = []
+    const started = Date.now()
+    const report = await replicateTypescript({
+      root, host: 'hypercomb.com', readLocal: reader(layers), readHosted: reader(atoms), current: true,
+      fetchImpl: url => { asked.push(url); return new Promise<Response>(() => {}) },
+      askTimeoutMs: () => 25, sleep: async ms => { sleeps.push(ms) }, log: () => {},
+    })
+    expect(Date.now() - started).toBeLessThan(3_000)
+    expect(report).toMatchObject({ ok: false, named: 10, stopped: true, headRead: true, answered: false, copied: [], held: 0 })
+    expect(report.timedOut).toBeGreaterThanOrEqual(TYPESCRIPT_TIMEOUTS)
+    expect(report.failed).toHaveLength(10)
+    const unasked = report.failed.filter(failure => failure.why.startsWith('not asked'))
+    expect(unasked.length).toBeGreaterThan(0)
+    // An atom not asked for made no request; the rest are the atoms and the pool read.
+    const atomAsks = asked.filter(url => /\/[a-f0-9]{64}$/.test(url))
+    expect(atomAsks).toHaveLength(10 - unasked.length)
+    expect(report.failed.filter(failure => /^no answer in \d+ s$/.test(failure.why))).toHaveLength(report.timedOut)
+    // A stalled host is not waited on for the retry either.
+    expect(sleeps).toEqual([])
+    const text = typescriptVerdict(report).join('\n')
+    expect(text).toMatch(new RegExp(`The pass stopped after ${TYPESCRIPT_TIMEOUTS} asks in a row got no answer in time; ${unasked.length} atom\\(s\\) were not asked for`))
+    expect(text).not.toMatch(/worker|Deploy/)
+  })
+
+  it('a timeout between answers does not stop the pass: only a run of them does', async () => {
+    const pkg = aTypedPackage(true)
+    const host = aTypedHost(pkg.atoms)
+    const stalls = new Set([pkg.large[1]!])
+    const { report } = await run(pkg, host, {
+      fetchImpl: url => stalls.has(url.slice(-64)) ? new Promise<Response>(() => {}) : host.fetchImpl(url),
+      askTimeoutMs: () => 40, poolHead: async () => ({ answered: true, head: pkg.root }), retryAfterMs: 0,
+    })
+    expect(report.stopped).toBe(false)
+    expect(report.copied).toHaveLength(3)
+    expect(report.failed.map(failure => failure.sig)).toEqual([pkg.large[1]])
+    expect(typescriptVerdict(report).join('\n')).not.toMatch(/The pass stopped/)
+  })
+
+  it('bytes that do not hash to their name are a failure', async () => {
+    const pkg = aTypedPackage()
+    const host = aTypedHost(pkg.atoms, { lies: new Set([pkg.childAtom]) })
+    const { report } = await run(pkg, host, { poolHead: async () => ({ answered: true, head: pkg.root }) })
+    expect(report.failed).toEqual([{ sig: pkg.childAtom, why: 'bytes that are not its name' }])
+    expect(report.ok).toBe(false)
+  })
+
+  it('atoms over a mebibyte are asked for alone, largest first', async () => {
+    const pkg = aTypedPackage(true)
+    const host = aTypedHost(pkg.atoms)
+    const { report } = await run(pkg, host)
+    expect(report).toMatchObject({ ok: true, named: 4 })
+    expect(host.mostLargeInFlight()).toBe(1)
+    expect(host.asked.slice(0, 2)).toEqual([pkg.large[1], pkg.large[0]].map(sig => `https://hypercomb.com/${sig}`))
+  })
+
+  it('a fault on this machine is a report, never a throw', async () => {
+    const pkg = aTypedPackage()
+    const report = await replicateTypescript({ root: pkg.root, host: 'hypercomb.com', readLocal: async () => { throw new Error('disk gone') }, readHosted: reader(pkg.atoms), fetchImpl: aTypedHost(pkg.atoms).fetchImpl, log: () => {} })
+    expect(report.ok).toBe(true)
+    expect(report.named).toBe(0)
+    const broken = await replicateTypescript({ root: pkg.root, host: 'hypercomb.com', readLocal: reader(pkg.layers), readHosted: async () => { throw new Error('disk gone') }, log: () => {} })
+    expect(broken).toMatchObject({ ok: false, error: 'disk gone' })
+    expect(typescriptVerdict(broken)).toEqual([expect.stringMatching(/TypeScript: not asked of hypercomb\.com \(disk gone\); the package is published and installs as before/)])
+    expect((await replicateTypescript({ root: 'nope', host: 'hypercomb.com' })).ok).toBe(false)
   })
 })

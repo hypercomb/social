@@ -110,13 +110,98 @@ the chat's after that.
 - **Authoring.** This reads. Changing a file is still a write block in the
   chat; changing a module is the module draft path; the platform sources
   cannot be changed from the hive yet.
-- **Real TypeScript for the package's modules.** They are shown as shipped:
-  compiled JavaScript under their source paths. The platform sources are as
-  written.
 - **Links from an answer.** A file or signature named in a chat answer is not
   pressable yet.
 - **Without the rail.** The view is heard by the chat's rail, so a window
   drawn without one does not show it.
+
+### A file's TypeScript, on a press (2026-11-17)
+
+jwize, 2026-11-16: "Host the package's TypeScript without installing it,
+fetched only when a file is opened." 2026-11-17: "Yes, build it."
+
+A package module is shown as shipped: compiled JavaScript under its source
+paths. The TypeScript it was compiled from is hosted with the package and is
+not installed (`knowledge-atoms.md`, "The package's own TypeScript"). On a
+`.ts` file of a package module the section's top row carries a **TypeScript**
+button when the package layer on that file's path names a source atom.
+
+- **Whether to offer it asks no host.** The reader's `typescriptFor(module,
+  section)` reads the selection that runs here and the layers it is made of,
+  all held on the device (`assistant/package-typescript.ts`: the deepest
+  layer on the path that carries a `typescript` slot answers; a picked layer
+  without one answers nothing; there is no atom for the root). No button is
+  drawn where no TypeScript can exist:
+  - a file that is not `.ts`, and a file the atoms never carry: one directly
+    in `src/`, a generated `index.ts`, a keys file, a spec, a declaration, an
+    entry, anything under `types/`. `typescriptCarries` is the device's copy
+    of the name rule the build carries files by
+    (`scripts/source-filters.ts`); `source-filters.spec.ts` holds the two to
+    one answer over every file in the tree;
+  - a module the running selection does not name among its bees and
+    dependencies. Code held from somewhere else can carry a
+    `// src/<folder>/x.ts` header; it is not this package's file;
+  - the platform sources (`@hypercomb/source/…`, already as written), a
+    shell with no installed package, and a package published before its
+    layers carried the slot.
+- **Only the press asks.** `typescriptText(atom, section)` asks for that one
+  atom, the whole folder's TypeScript, as `<base>/<signature>?held`
+  (`assistant/hive-typescript-read.ts`). It asks only the hosts this device
+  already asks for the package (`sharing/update-sources.ts` `packageHosts`):
+  the hosts the participant carries and the ones the install follows; on a
+  managed site door, the door's zone and the followed hosts. Each host is
+  asked at the base its package pool answered on, then bare. What answers is
+  used only when it hashes to the signature. A redirect is an error, so a
+  listed host cannot pass the ask to a host that is not listed. The answer
+  is counted as it arrives and dropped past 32 MB, whatever length the host
+  declared, and one base gets sixty seconds for headers and body together.
+- **A person's press keeps nothing on the device.** The text is held in
+  memory, three atoms at most, so a second file of the same folder makes no
+  request. It is not written to the store, to history or to any pool, and
+  the request stays out of the browser's cache. A reload asks again on the
+  next press.
+- **No other path reaches an atom through the store.** A store read of a
+  signature fetches what the device lacks and writes it there. The reader
+  asks one question first, `typescriptAtom(sig)`: is this a source atom the
+  running package names? Every store read in the reader passes through it
+  (a tile's child pointer, a site file, a model's read), and the code view
+  asks it before opening a signature as a resource; an atom is then answered
+  from memory or not at all. Where no selection can be read (no install
+  port, one without `selection()`, one that throws) nothing can say which
+  signatures are atoms, so text whose first line is an atom's name
+  (`// @hypercomb/typescript/…`) is refused instead of being handed on. In
+  that one case the store has already been asked: the refusal keeps the text
+  out of the answer, it cannot undo the store's own write.
+- **What is drawn.** The file as written, under a line saying which host it
+  was read from and that it is the published text: a change made in this hive
+  (a module draft, a commit) is not in it. The button then reads **As
+  shipped** and puts the compiled code back with no request. Every other step
+  opens as shipped. When no host holds the atom the view says so and draws
+  the compiled code; that answer is not remembered, so the next press asks
+  again.
+- **A model's read is a read like any other, and is not memory only.** A
+  layer's JSON shows its `typescript` signature, so a model can ask
+  `read <signature>`, whole or one file of it. The reader answers that from
+  the same in-memory read, by file like any module, and never through
+  history or the store. What it returns then belongs to that conversation,
+  as any read does (`chat-window.ts`, `hypercomb-observation.ts`):
+  - the text of the file goes into the request and is sent to the model's
+    provider;
+  - the turn keeps the read's line and the atom's signature, not the text,
+    so a later message can open it again by signature;
+  - when the change gate judges a step, what it was shown, the reads
+    included with their text, is written to this device's store by
+    signature so the judgement can be replayed (`hypercomb-jev.ts`
+    `persistJevInput`, `persistJevVerify`).
+
+  So "nothing is kept on the device" is true of a person's press, and not of
+  a file a model read.
+
+Not built: the pressed line is not carried from the compiled text to the
+TypeScript; `.json` and other non-`.ts` sections have no TypeScript; a file
+directly in `src/` has none; a model is not taught to look for the slot; the
+code tree does not list atoms; a signature that is an atom, opened as a
+resource, says where to press and reads nothing.
 
 ## The code as a tree of files (2026-11-16)
 
@@ -151,9 +236,11 @@ Typing in the column's search while the tree is open lists the modules whose
 name holds every word. The reader's `codeIndex()` gives the tree every name
 (`listCode` answers a question and stops at two hundred).
 
-Not built: a package module is the compiled JavaScript of its TypeScript
-source, shown under the module's name; only the platform sources carry their
-real `.ts` files. Nothing can be edited from the tree.
+A package module is the compiled JavaScript of its TypeScript source, shown
+under the module's name; only the platform sources carry their real `.ts`
+files in the tree. A package file's TypeScript is one press away once the
+file is open ("A file's TypeScript, on a press", above). Not built: nothing
+can be edited from the tree.
 
 ## Editing a file on a tile (2026-11-16)
 

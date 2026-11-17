@@ -110,6 +110,45 @@ test('authenticated replication is private, asynchronous, and receipted', { time
   }
 })
 
+test('forget keeps the source atoms a published package names, and lets them go once no package names them', { timeout: 30_000 }, async () => {
+  const port = await freePort()
+  const dir = mkdtempSync(join(tmpdir(), 'hypercomb-relay-typescript-'))
+  const atom = Buffer.from('// @hypercomb/typescript/child\n// lazy\n')
+  const atomSig = sha(atom)
+  const leaf = Buffer.from(JSON.stringify({ name: 'child', cells: [], bees: [], dependencies: [], typescript: atomSig }))
+  const root = Buffer.from(JSON.stringify({ name: 'root', cells: [sha(leaf)], bees: [], dependencies: [] }))
+  for (const bytes of [atom, leaf, root]) writeFileSync(join(dir, sha(bytes)), bytes)
+  const member = join(dir, HOST_PACKAGES_POOL, '00000000')
+  mkdirSync(join(dir, HOST_PACKAGES_POOL), { recursive: true })
+  writeFileSync(member, `${sha(root)}\ndevelopment`)
+
+  const secret = generateSecretKey()
+  const child = spawn(process.execPath, ['relay.js', '--port', String(port), '--memory', '--content-dir', dir, '--writers', getPublicKey(secret)], { cwd: import.meta.dirname, stdio: 'ignore' })
+  const base = `http://127.0.0.1:${port}`
+  const forget = async () => {
+    const url = `${base}/forget`
+    const body = JSON.stringify({ sigs: [atomSig] })
+    const answer = await fetch(url, { method: 'POST', body, headers: { Authorization: auth(secret, url, 'POST', body), 'Content-Type': 'application/json' } })
+    assert.equal(answer.status, 200)
+    return await answer.json()
+  }
+  try {
+    await waitForRelay(base)
+    const held = await forget()
+    assert.deepEqual(held.removed, [])
+    assert.equal(held.kept[atomSig], 'package')
+    assert.equal((await fetch(`${base}/${atomSig}`, { method: 'HEAD' })).status, 200)
+
+    rmSync(member)
+    const gone = await forget()
+    assert.deepEqual(gone.removed, [atomSig])
+    assert.equal((await fetch(`${base}/${atomSig}`, { method: 'HEAD' })).status, 404)
+  } finally {
+    child.kill()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('a replicated package is discoverable and can be pulled and published by another host', { timeout: 30_000 }, async () => {
   const firstPort = await freePort()
   const secondPort = await freePort()

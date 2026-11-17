@@ -36,7 +36,7 @@ import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { PUBLIC_INSTALL_HOST_ENV, publicInstallHost, replicateRevision, replicationVerdict } from './replicate-public-host.js'
+import { PUBLIC_INSTALL_HOST_ENV, publicInstallHost, replicateRevision, replicateTypescript, replicationVerdict, typescriptVerdict } from './replicate-public-host.js'
 import { PUBLISHER_FILES, packageSigFromDist } from './stamp-install-channel.js'
 import { checkBuildStamp } from './build-determinism.js'
 
@@ -90,6 +90,36 @@ export async function confirmOnPublicHost(
 }
 
 /**
+ * LAST, AND NEVER AN EXIT CODE (owner, 2026-11-16: "Host the package's
+ * TypeScript without installing it, fetched only when a file is opened"). The
+ * public host is asked for the source atoms the revision's layers name, and
+ * the publish says what it holds. The revision is already published when this
+ * runs; whatever happens here is a line in the log and nothing else.
+ * `current` is what the confirm just read: whether the host's pool names this
+ * root. A host that is behind gives none of the root's TypeScript, and the
+ * pass must say that, not blame its worker.
+ */
+export async function typescriptToPublicHost(
+  input: { host: string | null; root: string | null; current?: boolean },
+  deps: HostDeps & { typescript?: typeof replicateTypescript } = {},
+): Promise<void> {
+  try {
+    const log = deps.log ?? ((line: string) => console.log(line))
+    if (!input.root) return
+    if (!input.host) {
+      log(`[publish] TypeScript: no public install host took this revision; its TypeScript is hosted on this machine's host only`)
+      return
+    }
+    const report = await (deps.typescript ?? replicateTypescript)({
+      root: input.root, host: input.host, ...(input.current === undefined ? {} : { current: input.current }),
+    })
+    for (const line of typescriptVerdict(report)) log(line)
+  } catch (error) {
+    try { console.log(`[publish] TypeScript: not asked of the public host (${error instanceof Error ? error.message : String(error)})`) } catch { /* nothing to say it with */ }
+  }
+}
+
+/**
  * `--no-build` signs whatever `dist` holds, so dist must PROVE it was built from
  * the sources as they are: the build leaves a stamp (inputs digest + root) and
  * this refuses a dist without one, with a stale one, or whose root is not the
@@ -116,11 +146,12 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
-  const run = (label: string, script: string, scriptArgs: string[] = []): void => {
+  const run = (label: string, script: string, scriptArgs: string[] = [], stopped?: string): void => {
     console.log(`\n[publish] ${label}`)
     const result = spawnSync('npx', ['tsx', `./scripts/${script}`, ...scriptArgs], { cwd: ROOT, stdio: 'inherit', shell: true })
     if (result.status !== 0) {
       console.error(`\n[publish] STOPPED at "${label}" — nothing was announced`)
+      if (stopped) console.error(stopped)
       process.exit(result.status ?? 1)
     }
   }
@@ -148,7 +179,8 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
-  run('announce', 'stamp-install-channel.ts', [name, '--require'])
+  run('announce', 'stamp-install-channel.ts', [name, '--require'],
+    pulled.host && root ? `[publish] the TypeScript of ${root.slice(0, 12)}… reaches the public host once the stamp is paid: npm run replicate:revision` : undefined)
 
   const owed = await confirmOnPublicHost({ host: pulled.host, root, channel })
   console.log(`\n[publish] PUBLISHED under "${name}" — ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`)
@@ -156,6 +188,9 @@ async function main(): Promise<void> {
     console.error(`[publish] the public install host is not current — exit ${owed}; the stamp stands`)
     process.exitCode = owed
   }
+
+  // The package's TypeScript, after everything that decides the outcome.
+  await typescriptToPublicHost({ host: pulled.host, root, current: owed === 0 })
 }
 
 /** Run only as a script — a spec imports the helpers above without publishing. */

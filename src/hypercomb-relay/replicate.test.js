@@ -10,6 +10,7 @@ import {
   appendHostPackage,
   contentDirectoryIO,
   HOST_PACKAGES_POOL,
+  packageTypescript,
   parseReplicationRequest,
   publishReplicatedPackage,
   resolvePackageClosure,
@@ -70,6 +71,84 @@ test('package replication walks declared structure and ignores unrelated signatu
   assert.deepEqual(result.holes, [])
   assert.deepEqual(result.refused, [])
   assert.equal(destination.has(missingButUnrelated), false)
+})
+
+test('the source atoms a package names are found through cells, read locally, and stay out of the closure', async () => {
+  const atomOf = text => { const bytes = Buffer.from(text); return [sig(bytes), bytes] }
+  // The root layer names none (a file directly in src/ has no atom); the
+  // walk is of every layer all the same, so a second folder stands beside it.
+  const [rootAtom, rootAtomBytes] = atomOf('// @hypercomb/typescript/sharing\n')
+  const [childAtom, childAtomBytes] = atomOf('// @hypercomb/typescript/child\n')
+  const [deepAtom] = atomOf('// @hypercomb/typescript/deep\n')
+  const deep = Buffer.from(JSON.stringify({ name: 'deep', cells: [], bees: [], dependencies: [], typescript: deepAtom }))
+  const malformed = Buffer.from(JSON.stringify({ name: 'malformed', cells: [], bees: [], dependencies: [], typescript: `${'c'.repeat(64)}.js` }))
+  const plain = Buffer.from(JSON.stringify({ name: 'plain', cells: [], bees: [], dependencies: [] }))
+  const child = Buffer.from(JSON.stringify({ name: 'child', cells: [sig(deep), sig(malformed), sig(plain)], bees: [], dependencies: [], typescript: childAtom }))
+  const sharing = Buffer.from(JSON.stringify({ name: 'sharing', cells: [], bees: [], dependencies: [], typescript: rootAtom }))
+  const root = Buffer.from(JSON.stringify({ name: 'root', cells: [sig(child), sig(sharing)], bees: [], dependencies: [] }))
+  const rootSig = sig(root)
+  const store = new Map([root, child, sharing, deep, malformed, plain, rootAtomBytes, childAtomBytes].map(bytes => [sig(bytes), bytes]))
+  let fetched = 0
+  const io = {
+    read: async signature => store.get(signature) ?? null,
+    fetch: async () => { fetched++; return null },
+    write: async () => assert.fail('finding source atoms writes nothing'),
+  }
+
+  assert.deepEqual(await packageTypescript(rootSig, io), [rootAtom, childAtom, deepAtom].sort())
+  assert.equal(fetched, 0)
+
+  // A layer that is not here contributes nothing and is never fetched.
+  const partial = new Map(store)
+  partial.delete(sig(deep))
+  assert.deepEqual(await packageTypescript(rootSig, { ...io, read: async signature => partial.get(signature) ?? null }), [rootAtom, childAtom].sort())
+  assert.equal(fetched, 0)
+
+  // The closure a package installs and replicates by is what it was.
+  const closure = await resolvePackageClosure(rootSig, io)
+  assert.deepEqual(new Set(closure.held), new Set([root, child, sharing, deep, malformed, plain].map(sig)))
+  for (const atom of [rootAtom, childAtom, deepAtom]) assert.equal(closure.held.includes(atom), false)
+  assert.deepEqual(closure.holes, [])
+  assert.deepEqual(closure.refused, [])
+})
+
+test('a layer that does not hash to its name names no source atom, and its cells are not walked', async () => {
+  // The content dir is written by more than the ship (client PUTs, adopted
+  // bytes). Bytes filed under a layer's signature that are not that layer
+  // must not get a host to serve, or keep, an atom of their choosing.
+  const atomOf = text => sig(Buffer.from(text))
+  const honestAtom = atomOf('// @hypercomb/typescript/child\n')
+  const plantedAtom = atomOf('// @hypercomb/typescript/planted\n')
+  const hiddenAtom = atomOf('// @hypercomb/typescript/hidden\n')
+  const hidden = Buffer.from(JSON.stringify({ name: 'hidden', cells: [], bees: [], dependencies: [], typescript: hiddenAtom }))
+  const child = Buffer.from(JSON.stringify({ name: 'child', cells: [], bees: [], dependencies: [], typescript: honestAtom }))
+  const forged = Buffer.from(JSON.stringify({ name: 'child', cells: [sig(hidden)], bees: [], dependencies: [], typescript: plantedAtom }))
+  const root = Buffer.from(JSON.stringify({ name: 'root', cells: [sig(child)], bees: [], dependencies: [] }))
+  const honest = new Map([root, child, hidden].map(bytes => [sig(bytes), bytes]))
+  const read = store => async signature => store.get(signature) ?? null
+
+  assert.deepEqual(await packageTypescript(sig(root), { read: read(honest) }), [honestAtom])
+
+  // The forged layer sits where the child should be: a well-formed package
+  // layer, under a name that is not its hash.
+  const tampered = new Map(honest).set(sig(child), forged)
+  assert.notEqual(sig(forged), sig(child))
+  assert.deepEqual(await packageTypescript(sig(root), { read: read(tampered) }), [])
+
+  // A root that is not its own hash names nothing at all.
+  const forgedRoot = Buffer.from(JSON.stringify({ name: 'root', cells: [sig(child)], bees: [], dependencies: [], typescript: plantedAtom }))
+  assert.deepEqual(await packageTypescript(sig(root), { read: read(new Map(honest).set(sig(root), forgedRoot)) }), [])
+})
+
+test('a package whose layers carry no slot, or a root that is no package, names no source atoms', async () => {
+  const child = Buffer.from(JSON.stringify({ name: 'child', cells: [], bees: [], dependencies: [] }))
+  const root = Buffer.from(JSON.stringify({ name: 'root', cells: [sig(child)], bees: [], dependencies: [] }))
+  const store = new Map([[sig(root), root], [sig(child), child]])
+  const io = { read: async signature => store.get(signature) ?? null, fetch: async () => assert.fail('never fetched') }
+  assert.deepEqual(await packageTypescript(sig(root), io), [])
+  assert.deepEqual(await packageTypescript('not a signature', io), [])
+  const opaque = Buffer.from('not a layer')
+  assert.deepEqual(await packageTypescript(sig(opaque), { ...io, read: async () => opaque }), [])
 })
 
 test('package replication refuses an opaque or malformed root as a package', async () => {

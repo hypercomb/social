@@ -68,3 +68,45 @@ signature the first time a model reads one.
 Not done here: a bee's own description is still not returned with a code
 listing, and the rest of `documentation/` (the documents no tier cites) is not
 carried.
+
+## The package's own TypeScript: hosted, not installed (2026-11-17)
+
+jwize, 2026-11-16: "Host the package's TypeScript without installing it,
+fetched only when a file is opened." 2026-11-17: "Yes, build it."
+
+The knowledge atoms above carry the platform's source and are installed. The
+essentials package's own TypeScript (about 1,200 files, 18 MB) is not: it is
+hosted beside the package and read one folder at a time, on a press. A
+person's press keeps it in memory only. A model's read of it is a read like
+any other: the text becomes part of that conversation's request, its
+signature part of the turn, and what the change gate was shown is kept on
+the device (`inspect.md`, "A file's TypeScript, on a press").
+
+- **The record is the package's own layers.** A layer that owns a top-level
+  source folder carries one optional slot, `typescript`: the signature of
+  that folder's source atom. The root layer carries none: the files directly
+  in `src/` are the effect barrels `scripts/prepare.ts` rewrites, the build
+  compiles none of them, and a publish builds without running prepare, so
+  carrying one would let a stale barrel move the package's root. Key order: `name, cells, bees, dependencies, criticalBees?,
+  bootBees?, typescript?, docs?`. There is no index, no pool and no manifest
+  key. A layer without the slot is byte for byte what it was, and every
+  installer reads only cells, bees and dependencies, so an older client
+  installs a package with slots unchanged.
+- **The atom is plain text.** Line 1 is `// @hypercomb/typescript/<folder>`,
+  line 2 the build's lazy marker line, line 3 says
+  it is TypeScript as written and never run, then each file under the same
+  `// src/<path>` header its compiled section carries, in path order. Core's
+  `sectionIndex` and `sectionOf` read it as they read a module. The carried
+  files are the ones the build itself compiles (`scripts/source-filters.ts`):
+  no file directly in `src/`, no `index.ts`, no keys files, no specs. Only a
+  top-level folder that yields a layer has an atom.
+- **Where it lives.** A build writes the atoms to `dist/.typescript/<sig>`,
+  a folder no copier of signature files reads, so they are in no bag, no
+  manifest, no transfer pack, no shim bundle and no mirrored dev feed.
+  `publish:revision` copies them to this machine's host and then asks the
+  public host to take them (`publishing-a-revision.md`). A device asks for
+  one by signature only (`inspect.md`, "A file's TypeScript, on a press").
+- **What it costs.** About 80 bytes on each of 46 layers, inside files a
+  device already downloads. And the root now moves on an edit that changes
+  no compiled byte: a comment or a type changes a folder's atom, so its
+  layer, so the root.

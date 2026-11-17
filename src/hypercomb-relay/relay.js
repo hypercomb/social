@@ -35,7 +35,7 @@ import { verifyEvent } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
 import { requestIp, verifyNip98 } from './http-auth.js'
 import { blockedSourcesReason } from './address-guard.js'
-import { contentDirectoryIO, HOST_PACKAGES_POOL, PUBLIC_POOL_ADDRESSES, parseReplicationRequest, publishReplicatedPackage, resolvePackageClosure, resolveSignatureClosure, resolveSignatureInventory } from './replicate.js'
+import { contentDirectoryIO, HOST_PACKAGES_POOL, PUBLIC_POOL_ADDRESSES, packageTypescript, parseReplicationRequest, publishReplicatedPackage, resolvePackageClosure, resolveSignatureClosure, resolveSignatureInventory } from './replicate.js'
 import { ReceiptIndex } from './receipt-index.js'
 import { listedMeanings } from './host-listing.js'
 import { nip05Name, nostrJson } from './nip05-names.js'
@@ -2528,6 +2528,9 @@ function tryForget(req, res) {
         if (!/^[0-9a-f]{64}$/.test(pkg)) continue
         const closure = await resolvePackageClosure(pkg, localIO)
         for (const sig of closure.held) keep.add(sig)
+        // The TypeScript a package's layers name is hosted here beside it and
+        // is in no closure, so it is kept by name.
+        for (const sig of await packageTypescript(pkg, localIO)) keep.add(sig)
         keep.add(pkg)
       }
     } catch { /* no packages pool — nothing to protect */ }

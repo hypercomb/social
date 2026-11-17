@@ -150,7 +150,12 @@ function packageLayerReferences(bytes) {
   const layers = signatures(record.cells, true)
   const bees = signatures(record.bees)
   const dependencies = signatures(record.dependencies)
-  return layers && bees && dependencies ? { layers, bees, dependencies } : null
+  // The source atom of this layer's folder (hypercomb-essentials
+  // scripts/typescript-atoms.ts). It is hosted with the package and never
+  // installed, so it is no part of the closure, and a malformed one is no
+  // slot at all rather than a reason to refuse the layer.
+  const typescript = typeof record.typescript === 'string' && SIGNATURE_RE.test(record.typescript) ? record.typescript : null
+  return layers && bees && dependencies ? { layers, bees, dependencies, typescript } : null
 }
 
 /** Resolve one signature closure through an injected atom store. */
@@ -232,6 +237,39 @@ export async function resolvePackageClosure(root, io, options = {}) {
     if (!result.refused.includes(signature)) result.refused.push(signature)
   }
   return result
+}
+
+/** The source atoms a package names: the `typescript` slot of every layer
+ * reached from `root` through `cells` (owner, 2026-11-16: "Host the package's
+ * TypeScript without installing it, fetched only when a file is opened").
+ * They are outside `resolvePackageClosure` on purpose, so nothing that
+ * installs or replicates a package carries them; this walk is how a host
+ * finds them to serve and to keep. It reads only what is already here
+ * (`io.read`, never `io.fetch`); a layer that is absent, does not hash to its
+ * name or is not a package layer contributes nothing. Code-unit order. */
+export async function packageTypescript(root, io, options = {}) {
+  if (!SIGNATURE_RE.test(root)) return []
+  const limit = options.limit ?? DEFAULT_REPLICATION_LIMIT
+  const seen = new Set([root])
+  const queue = [root]
+  const atoms = new Set()
+  let walked = 0
+  while (queue.length && walked < limit) {
+    const signature = queue.shift()
+    walked++
+    let bytes = null
+    try { bytes = await io.read(signature) } catch { bytes = null }
+    if (!bytes || sha256(bytes) !== signature) continue
+    const references = packageLayerReferences(bytes)
+    if (!references) continue
+    if (references.typescript) atoms.add(references.typescript)
+    for (const child of references.layers) {
+      if (seen.has(child)) continue
+      seen.add(child)
+      queue.push(child)
+    }
+  }
+  return [...atoms].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
 }
 
 /** Resolve an ActiveGenome record without recursively mining the atoms it
