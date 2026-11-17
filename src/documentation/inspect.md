@@ -174,3 +174,83 @@ write.
 Only a file on a tile can be edited: a resource a record names, a module
 and a platform source are read-only here. Editing code the hive runs is a
 draft and a review, which is the chat's `write` and not this view.
+
+## The tree follows what a tile is composed of (2026-11-16)
+
+jwize, of the code view: "This should be an alternate view to the tile tree
+then the requires attention and then code view where we can look at what the
+ai has created. It follows the hierarchy of composed parts."
+
+The first part of the tree, what the chat is about, no longer lists a tile
+as its tiles and its files. It lists what the tile is composed of, and a
+part that is a tile unfolds into its own parts the same way. One tile's
+records make one level (`assistant/composed-parts.ts`, pure, proven with a
+reader made of maps):
+
+| Row | What is under it | A press opens |
+|---|---|---|
+| Page | the shell and each file the shell names, in shell order; the traits the page states; the resources the page names by signature (at most 64, then how many more) | the page |
+| Card | each resource the card record names, in the record's order | the resource |
+| A trait the page does not state | nothing; it unfolds when a tile fills it | the tile that fills it, or the chosen layer |
+| Also here | the tiles and the files no row above already is | the tile's step, the file |
+
+A page and a card arrive open. A row that unfolds a tile is read when its
+chevron is pressed, and keeps the tile's own button beside it. A row's tail
+says its size, or how it stands:
+
+- **A part of a page in parts** is the file on the tile that holds it, so
+  the pane can edit it and a save rebuilds the page. It is that file only
+  while the file has the signature the shell names; otherwise the row opens
+  the shell's signature, read only.
+- **A shell the page no longer comes from** (the page was written whole
+  since) is set aside under Also here as "older than the page", read only.
+  A shell is in parts when it assembles to exactly the page, or when that
+  cannot be checked because the page or a part is not on this device.
+- **A trait** says filled, chosen version, several offered, the page's own,
+  or empty. The answer is the trait provider's, the one the website view
+  fills a page from. A trait stated inside another one that a tile's page
+  fills is not a row of the page: the drawn page never asks for it. If the
+  tile has that trait it is a row of the tile instead.
+- **No tile unfolds under itself.** Two tiles can each fill a trait of the
+  other. A row that would unfold a tile already open above it keeps the
+  tile's button and has no chevron.
+- **A row whose filler moved** is read again from the tile that fills it
+  now, so a file is never shown on the tile that used to fill the trait.
+- **Tiles and files are cut apart.** A level lists four hundred of each,
+  then says how many are not listed.
+- **A resource not on this device** says so. Only this device is asked:
+  listing what a page names never fetches it from a host.
+
+The view only draws and unfolds (`assistant/code-tree.view.ts`). Every
+answer is asked of the service that owns it
+(`assistant/composed-parts-reader.ts`): the hive tree reader, the website
+view's page resolver, the trait provider, the card record, the store. A
+moment after a write lands, every tile already read is composed again and
+the tree repaints only if one changed. A tile's own layer signature is not
+used to skip that: history is per page, so a file written on a child tile
+commits the child alone.
+
+Not built:
+
+- **Inline blocks of a whole page.** A page that was never broken apart
+  shows whole; its `<style>` and `<script>` blocks are not rows.
+- **Numbered holes and group members.** They are found only by walking the
+  hive (set aside 2026-11-15), so they are not parts here.
+- **What a sheet names.** A stylesheet's own `url(resource:…)` names, and a
+  card's `refs`, are not followed.
+- **A template's shell.** A tile that wears a template's page by reference
+  shows the page whole: no record leads to the template's shell.
+- **A chosen version that is not a tile here.** `fill` keeps the filler's
+  layer signature, not a route. The row unfolds only while a tile directly
+  inside still has that head. A filler chosen from elsewhere in the hive or
+  by signature, or a child changed since it was chosen, is a row that says
+  "chosen version", does not unfold, and opens that layer read only. Its
+  page and files are not rows: a layer is not read by its signature here.
+  For the same reason a trait stated inside such a chosen one is still
+  listed under the page, though the drawn page may not ask for it.
+- **Editing a card.** A card's details and theme are read only here; the
+  pane writes files only.
+- **Caps the tree does not say.** A tile read lists sixty files and a
+  record twenty-four names; past that, rows are missing without a note.
+- **The cost of traits.** A trait with no version of its own searches the
+  hive each time its tile is composed. It has not been measured.
