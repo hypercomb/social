@@ -2631,6 +2631,8 @@
   "site-revisions.here": "現在",
   "site-revisions.here-changed": "現在（変更あり）",
   "site-revisions.open": "開く",
+  "site-revisions.strip": "リビジョン",
+  "site-revisions.strip-none": "まだ保存されていません",
   "slash.revisions": "ウェブサイトのタイルの版を、その上でめくる",
   "revisions.title": "版",
   "revisions.right": "正しく見える",

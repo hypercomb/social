@@ -1,7 +1,7 @@
 // site-revisions.view.spec.ts — the revisions panel on a managed site door's
 // bar: what the bar's button says, and what Save, a step and Discard do.
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const sig = (n: number): string => n.toString(16).padStart(64, '0')
 const record = (label: string, seal: number, at: number) => ({ seal: sig(seal), label, at })
@@ -32,7 +32,8 @@ vi.mock('../history/revision-lines.js', async importOriginal => {
 
 const { EffectBus } = await import('@hypercomb/core')
 const { revisionLines } = await import('../history/revision-lines.js')
-const { SiteRevisionsPanel, revisionButtonWords } = await import('./site-revisions.view.js')
+const strip = await import('./site-revisions.view.js')
+const { SiteRevisionsPanel, revisionButtonWords } = strip
 
 const stateOf = (records: ReturnType<typeof record>[], dirty = false) => ({
   records, lines: revisionLines(records), current: records.length ? records[records.length - 1]!.label : '', dirty,
@@ -164,5 +165,96 @@ describe('the panel', () => {
     await mount()
     panel.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     expect(panel.open).toBe(false)
+  })
+})
+
+// jwize, 2026-11-16: "Yes, add it". The chat fills the screen on a managed
+// site door and covers the bar, so the revision sits at the top of its rail.
+describe('the revision in the chat’s rail', () => {
+  const { mountRevisionStrip } = strip
+  let script: HTMLScriptElement | null = null
+  const managed = (): void => {
+    script = document.createElement('script')
+    script.id = 'hc-manage'
+    script.type = 'application/json'
+    script.textContent = JSON.stringify({ lineage: 'business-card', title: 'business-card', head: null })
+    document.head.appendChild(script)
+  }
+  const rail = (): { host: HTMLElement; list: HTMLElement } => {
+    const host = document.createElement('div')
+    const list = document.createElement('div')
+    list.className = 'hc-rail-list'
+    host.append(list)
+    document.body.replaceChildren(host)
+    return { host, list }
+  }
+  afterEach(() => { script?.remove(); script = null })
+
+  it('adds nothing on a page that is not a managed site door', () => {
+    const { host, list } = rail()
+    expect(mountRevisionStrip(host, list)).toBeNull()
+    expect(host.children).toHaveLength(1)
+  })
+
+  it('names the revision in hand above the list, and opens the same panel there', async () => {
+    managed()
+    acts.state = stateOf(two.slice(0, 2), true)
+    const { host, list } = rail()
+    const drop = mountRevisionStrip(host, list)
+    await settle()
+    expect(host.firstElementChild?.className).toBe('sr-strip')
+    expect(host.lastElementChild).toBe(list)
+    expect(host.querySelector('.sr-strip-words')?.textContent).toBe('red theme · 2 •')
+    const button = host.querySelector<HTMLButtonElement>('.sr-strip-button')!
+    button.click()
+    await settle()
+    expect(button.getAttribute('aria-expanded')).toBe('true')
+    expect(host.querySelector<HTMLInputElement>('.sr-strip .sr-name')?.value).toBe('red theme')
+    expect([...host.querySelectorAll('.sr-strip .sr-line-name')].map(node => node.textContent)).toEqual(['red theme'])
+    drop?.()
+    expect(host.querySelector('.sr-strip')).toBeNull()
+  })
+
+  it('says so while nothing is saved', async () => {
+    managed()
+    const { host, list } = rail()
+    mountRevisionStrip(host, list)
+    await settle()
+    expect(host.querySelector('.sr-strip-words')?.textContent).toBe('not saved yet')
+  })
+
+  it('follows what the bar’s panel reads, and the bar follows it', async () => {
+    managed()
+    acts.state = stateOf(two.slice(0, 2))
+    const said: string[] = []
+    const bar = new SiteRevisionsPanel({ segments: () => ['business-card'], onState: state => said.push(revisionButtonWords(state)), onOpened: () => {} })
+    const { host, list } = rail()
+    mountRevisionStrip(host, list)
+    await settle()
+    expect(host.querySelector('.sr-strip-words')?.textContent).toBe('red theme · 2')
+    // The card changed; the bar's panel reads it.
+    acts.state = stateOf(two.slice(0, 2), true)
+    await bar.refresh()
+    expect(host.querySelector('.sr-strip-words')?.textContent).toBe('red theme · 2 •')
+    expect(said.at(-1)).toBe('red theme · 2 •')
+    bar.dispose()
+  })
+
+  it('moves the chat to the conversation of the revision it opened', async () => {
+    managed()
+    acts.state = stateOf(two)
+    const { host, list } = rail()
+    mountRevisionStrip(host, list)
+    await settle()
+    const asked: unknown[] = []
+    EffectBus.on('chat:open', payload => asked.push(payload))
+    asked.length = 0
+    host.querySelector<HTMLButtonElement>('.sr-strip-button')!.click()
+    await settle()
+    host.querySelectorAll<HTMLButtonElement>('.sr-strip .sr-line-head')[1]!.click()
+    host.querySelector<HTMLButtonElement>('.sr-strip .sr-step')!.click()
+    await settle()
+    expect(acts.opened).toEqual([[['business-card'], 'blue theme']])
+    expect(asked).toEqual([{ convoId: 'chat:tile:/business-card' }])
   })
 })

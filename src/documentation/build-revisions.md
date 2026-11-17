@@ -234,7 +234,12 @@ time and what says a revision was opened.
 (`sharing/site-revisions.view.ts`, mounted by `site-manage.view.ts`): one
 button says the line in hand and its step ("red theme · 3", with a mark
 while the card holds changes no step does) and opens the panel that saves,
-opens and discards. `/builds` in a hive reads and writes the same records.
+opens and discards. The chat fills the screen there and covers the bar, so
+the same button and panel also sit at the top of the chat's rail
+(`mountRevisionStrip`, mounted by `assistant/agent-tiles-rail.ts` only on a
+managed site door); the two panels show one state, said on
+`site-revisions:state` by whichever read it. `/builds` in a hive reads and
+writes the same records.
 
 **A conversation belongs to the revision it was held in**
 (`assistant/chat-revisions.ts`; jwize, same day: "there should be the
