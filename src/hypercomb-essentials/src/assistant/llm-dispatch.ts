@@ -1067,6 +1067,12 @@ export const llmRouter = {
     const provider = registry().providerForModel(model)
     return provider?.models.find(candidate => candidate.id === model || candidate.name === model)?.contextLength
   },
+  /** Can the exact model see a picture sent with a message? Only a published
+   *  `vision` says yes; unknown is no, so a text model is never sent one. */
+  seesPicturesForModel: (model: string): boolean => {
+    const provider = registry().providerForModel(model)
+    return provider?.models.find(candidate => candidate.id === model || candidate.name === model)?.vision === true
+  },
   /** Execution authority depends on where the endpoint really is, never on a
    * provider's friendly id. In particular, changing the built-in `local`
    * host to a LAN or Internet URL must make it answer-only immediately. */

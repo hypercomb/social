@@ -28,6 +28,8 @@ export type OpenRouterCatalogEntry = {
   /** Context window in tokens, as published. */
   readonly contextLength?: number
   readonly decisionOnly?: boolean
+  /** The model takes pictures as input (`architecture.input_modalities`). */
+  readonly vision?: boolean
 }
 
 const CATALOG_URL = 'https://openrouter.ai/api/v1/models'
@@ -53,6 +55,7 @@ type CatalogBody = {
     name?: unknown
     pricing?: { prompt?: unknown; completion?: unknown }
     context_length?: unknown
+    architecture?: { input_modalities?: unknown }
   }[]
 }
 
@@ -86,7 +89,7 @@ export const fetchOpenRouterCatalog = async (): Promise<readonly OpenRouterCatal
       body = { data: [] }
     }
     const entries: OpenRouterCatalogEntry[] = (body.data ?? [])
-      .filter((row): row is { id: string; name?: unknown; pricing?: { prompt?: unknown; completion?: unknown }; context_length?: unknown } =>
+      .filter((row): row is { id: string; name?: unknown; pricing?: { prompt?: unknown; completion?: unknown }; context_length?: unknown; architecture?: { input_modalities?: unknown } } =>
         typeof row?.id === 'string' && row.id.length > 0 && !isOpenRouterBatchModel(row.id))
       .map(row => ({
         id: row.id,
@@ -95,6 +98,7 @@ export const fetchOpenRouterCatalog = async (): Promise<readonly OpenRouterCatal
         promptPrice: typeof row.pricing?.prompt === 'string' ? row.pricing.prompt : undefined,
         completionPrice: typeof row.pricing?.completion === 'string' ? row.pricing.completion : undefined,
         contextLength: typeof row.context_length === 'number' && row.context_length > 0 ? row.context_length : undefined,
+        ...(Array.isArray(row.architecture?.input_modalities) && row.architecture.input_modalities.includes('image') ? { vision: true } : {}),
       }))
       .sort((a, b) => a.id.localeCompare(b.id))
     const jev = await decision

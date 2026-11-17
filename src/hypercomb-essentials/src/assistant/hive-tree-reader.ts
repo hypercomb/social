@@ -20,6 +20,7 @@ import { managedSiteSegments } from '../sharing/managed-record.js'
 import { MAX_RECORD_DEPTH } from '../search/hive-search.js'
 import { readExplore, type HypercombExploreRead } from './hive-explore-read.js'
 import { readPool, readPoolMember, type HypercombPoolRead } from './hive-pool-read.js'
+import { pictureType, readPicture, type HypercombPicture } from './picture-read.js'
 import { SHELL_FILE, describePage, looksLikePage, pageBlocks, pagePartText } from '../files/page-parts.js'
 import { listAttachments } from '../files/files-attachment.js'
 
@@ -280,6 +281,9 @@ export type HypercombBytesRead =
     readonly section?: string
     /** Every source file a module holds, on the first page of a whole read. */
     readonly sections?: readonly { readonly path: string; readonly lines: number }[]
+    /** Bytes that are a picture: its size, a reading in words, and a JPEG a
+     *  model that sees is shown (picture-read.ts). */
+    readonly picture?: HypercombPicture
   }
   | { readonly ok: false; readonly root: string; readonly code: 'not-found' | 'incomplete-read' | 'unavailable' }
 
@@ -1355,7 +1359,11 @@ export class HypercombHiveTreeReader {
       if (options.signal?.aborted) throw stopped()
       const whole = textOf(bytes)
       if (whole === undefined) {
-        return { ok: true, root, sig, of, type: type || 'application/octet-stream', size: bytes.byteLength, from: 0, truncated: false }
+        // A PICTURE IS SEEN, NOT SIZED (picture-read.ts).
+        const picture = await readPicture(bytes, type).catch(() => undefined)
+        if (options.signal?.aborted) throw stopped()
+        const shown = pictureType(bytes, type) || type || 'application/octet-stream'
+        return { ok: true, root, sig, of, type: shown, size: bytes.byteLength, from: 0, truncated: false, ...(picture ? { picture } : {}) }
       }
       // A MODULE IS READABLE BY SOURCE FILE (core module-sections.ts): asked
       // for a section, the page is of that section alone and `from` counts

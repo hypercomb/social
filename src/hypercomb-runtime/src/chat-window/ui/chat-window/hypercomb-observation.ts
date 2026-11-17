@@ -114,8 +114,43 @@ export type HypercombBytesRead =
     /** A module's source sections by path — what `/read <sig> <path>` can
      *  open and a `hypercomb-write` block can replace. On the first page only. */
     readonly sections?: readonly { readonly path: string; readonly lines: number }[]
+    /** Bytes that are a picture (essentials assistant/picture-read.ts): its
+     *  size, a reading in words, and the JPEG a model that sees is shown. The
+     *  JPEG never goes into the receipt's text: the chat attaches it. */
+    readonly picture?: HypercombPicture
   }
   | { readonly ok: false; readonly root: string; readonly code: string }
+
+export type HypercombPicture = {
+  readonly width: number
+  readonly height: number
+  readonly reading: string
+  readonly image?: { readonly mime: 'image/jpeg'; readonly base64: string }
+}
+
+/** A picture's JPEG larger than this, as base64, is refused. */
+const MAX_PICTURE_BASE64 = 1_400_000
+const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/
+
+const safePicture = (raw: unknown): HypercombPicture | undefined => {
+  if (raw === undefined) return undefined
+  const picture = raw as Partial<HypercombPicture> | null
+  const image = picture?.image
+  if (!picture || !Number.isInteger(picture.width) || !Number.isInteger(picture.height)
+    || picture.width! <= 0 || picture.height! <= 0 || picture.width! > 100_000 || picture.height! > 100_000
+    || typeof picture.reading !== 'string' || picture.reading.length > 600 || CONTROL_CHARACTER.test(picture.reading)
+    || (image !== undefined && (image?.mime !== 'image/jpeg' || typeof image.base64 !== 'string'
+      || image.base64.length > MAX_PICTURE_BASE64 || !BASE64.test(image.base64)))) {
+    throw new HypercombObservationError('the hive reader returned a malformed picture')
+  }
+  return { width: picture.width!, height: picture.height!, reading: picture.reading,
+    ...(image ? { image: { mime: 'image/jpeg', base64: image.base64 } } : {}) }
+}
+
+/** The pictures a receipt's reads saw, in the order read: what the chat
+ *  attaches to the message that carries the receipt. */
+export const picturesOf = (receipt: HypercombObservationReceipt): { readonly mime: 'image/jpeg'; readonly base64: string }[] =>
+  receipt.results.flatMap(result => result.kind === 'bytes' && result.read.ok && result.read.picture?.image ? [result.read.picture.image] : [])
 
 /** One line of running code that holds what was searched for: the module
  *  by signature, the source section it sits in, and `at` — where
@@ -847,9 +882,11 @@ const safeBytes = (read: HypercombBytesRead, expectedRoot: string, maxBytes: num
         || !Number.isInteger(entry.lines) || entry.lines < 0)))) {
     throw new HypercombObservationError('the hive reader returned malformed resource data')
   }
+  const picture = read.text === undefined ? safePicture((read as { picture?: unknown }).picture) : undefined
   return {
     ok: true, root: expectedRoot, sig: read.sig, of: read.of, type: read.type, size: read.size, from: read.from,
     ...(read.text !== undefined ? { text: read.text } : {}),
+    ...(picture ? { picture } : {}),
     truncated: read.truncated === true,
     ...(read.next !== undefined ? { next: read.next } : {}),
     ...(read.section !== undefined ? { section: read.section } : {}),
@@ -1367,6 +1404,9 @@ const onceOnly = (
 export const formatHypercombObservationReceipt = (
   receipt: HypercombObservationReceipt,
   repeats?: ReadRepeats,
+  /** 'seen': the model is shown the pictures read (the chat attaches them);
+   *  'words': it can not see, and is given the reading alone. */
+  pictures: 'seen' | 'words' = 'words',
 ): string => JSON.stringify({
   kind: 'hypercomb-tree-observation',
   structureOnly: receipt.results.every(result => result.kind === 'tree'),
@@ -1412,7 +1452,15 @@ export const formatHypercombObservationReceipt = (
       return opened.ok
         ? {
           grammar, root: opened.root, sig: opened.sig, of: opened.of, type: opened.type, size: opened.size, from: opened.from,
-          ...(opened.text !== undefined ? { text: opened.text } : { text: null, note: 'not text; only its type and size can be shown' }),
+          ...(opened.text !== undefined ? { text: opened.text }
+            : opened.picture ? {
+              text: null,
+              picture: { width: opened.picture.width, height: opened.picture.height, reading: opened.picture.reading },
+              note: pictures === 'seen' && opened.picture.image
+                ? 'a picture; it is attached to this message (at most 1024 pixels on its longest side): look at it'
+                : 'a picture; the model answering cannot see pictures, so only its size and this reading of it can be given',
+            }
+            : { text: null, note: 'not text; only its type and size can be shown' }),
           truncated: opened.truncated,
           ...(opened.next !== undefined ? { next: opened.next } : {}),
           ...(opened.section !== undefined ? { section: opened.section } : {}),
