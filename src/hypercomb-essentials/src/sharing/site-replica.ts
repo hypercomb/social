@@ -172,27 +172,36 @@ export const replicaConvoId = (lineage: string, threads?: { tileConvoId?(segment
  * (assistant/chat-revisions.ts). `inRevision` says whether a conversation
  * belongs to the revision in hand; one that does not is passed over exactly
  * as a filed one is, so opening a revision opens its own conversations.
+ * Given only once the card has revisions. With it, the card's own
+ * conversation is opened when it has been spoken in during this revision;
+ * one nobody has spoken in yields to the revision's most recent live
+ * conversation, because opening a revision should bring back the
+ * conversation that built it, not an empty one (seen on
+ * business-card.jwize.com, 2026-11-16).
  */
 export const replicaChatConvoId = async (
   lineage: string,
   threads?: ReplicaThreads,
-  inRevision: (convo: ReplicaConvo) => boolean = () => true,
+  inRevision?: (convo: ReplicaConvo) => boolean,
 ): Promise<string> => {
   const own = replicaConvoId(lineage, threads)
   if (!threads?.listConversations) return own
   let listed: readonly ReplicaConvo[]
   try { listed = await threads.listConversations() } catch { return own }
   const ownListed = listed.find(convo => convo.convoId === own)
-  if (!ownListed?.archived && inRevision(ownListed ?? { convoId: own })) return own
+  const belongs = inRevision ?? (() => true)
+  if (inRevision ? !!ownListed && !ownListed.archived && belongs(ownListed) : !ownListed?.archived) return own
   const route = replicaRoute(lineage)
   const at = route.join('/')
   const onCard = (convoId: string): boolean => {
     try { return String(threads.tilePathOf?.(convoId) ?? '').split('/').filter(Boolean).join('/') === at } catch { return false }
   }
   const live = listed
-    .filter(convo => !convo.archived && onCard(convo.convoId) && inRevision(convo))
+    .filter(convo => !convo.archived && onCard(convo.convoId) && belongs(convo))
     .sort((a, b) => (b.lastAt ?? 0) - (a.lastAt ?? 0))[0]
   if (live) return live.convoId
+  // The card's own, never spoken in: it begins in the revision in hand.
+  if (inRevision && !ownListed) return own
   try {
     const fresh = threads.newTileConvoId?.(route)
     if (typeof fresh === 'string' && fresh) return fresh
