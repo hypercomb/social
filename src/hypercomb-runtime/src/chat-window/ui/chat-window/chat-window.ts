@@ -156,6 +156,7 @@ import {
   executeHypercombObservationPlan,
   foreignReads,
   formatHypercombObservationReceipt,
+  picturesOf,
   MAX_OBSERVATIONS,
   OBSERVATION_VERBS,
   parseHypercombObservationGrammars,
@@ -1133,6 +1134,8 @@ type LlmMessageLike =
     readonly role: 'user' | 'assistant'
     readonly content: string
     readonly toolCalls?: readonly HypercombToolCall[]
+    /** Pictures a read saw, for a model that can see (essentials LlmImagePart). */
+    readonly images?: readonly { readonly mime: string; readonly base64: string }[]
   }
   | { readonly role: 'tool'; readonly content: string; readonly toolCallId: string }
 
@@ -1141,6 +1144,8 @@ type LlmRouterLike = {
   providerIdForModel?(model: string): string | undefined
   /** Published model capacity, when the provider catalog knows it. */
   contextLengthForModel?(model: string): number | undefined
+  /** The model takes pictures with a message; unknown is no. */
+  seesPicturesForModel?(model: string): boolean
   /** The provider the mediator would pick for this need right now — so the
    *  shell can tell whether that pick has been granted hive access. */
   designatedProviderId?(need?: { tier?: string; streaming?: boolean; minContext?: number }): string | undefined
@@ -7808,6 +7813,21 @@ export class ChatWindow {
         EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for you in Execution' })
       }
 
+      // A PICTURE A READ SAW GOES WITH THE ANSWER (hypercomb-observation.ts
+      // picturesOf), to a model that can see: the next message carries it,
+      // and only the newest one does, so pictures are not sent again every
+      // round. A model that cannot see is given the reading in words.
+      let freshPictures: { readonly mime: string; readonly base64: string }[] = []
+      const withPictures = (content: string): LlmMessageLike => {
+        const images = freshPictures
+        freshPictures = []
+        if (!images.length) return { role: 'user', content }
+        for (let i = 0; i < messages.length; i++) {
+          const earlier = messages[i]!
+          if (earlier.role === 'user' && earlier.images?.length) messages[i] = { role: 'user', content: earlier.content }
+        }
+        return { role: 'user', content, images }
+      }
       const runRead = async (lines: readonly string[], providerId: string, model: string): Promise<string> => {
         if (!canRead || !treeReader || !queue) throw new WorkRefused('reading the hive is not available here')
         // CONTEXT LINES run here and now: the model's working set is its own
@@ -7911,7 +7931,8 @@ export class ChatWindow {
           // or read while the tree moved) never reaches the model, so it
           // must not count as one it has.
           const seenNow: ReadRepeats['memory'] = new Map(seenReads)
-          const content = (contextReceipt ? `${contextReceipt}\n\n` : '') + formatHypercombObservationReceipt(receipt, { memory: seenNow, round: rounds + 1 })
+          const sees = !!model && router.seesPicturesForModel?.(model) === true
+          const content = (contextReceipt ? `${contextReceipt}\n\n` : '') + formatHypercombObservationReceipt(receipt, { memory: seenNow, round: rounds + 1 }, sees ? 'seen' : 'words')
             + (asides.length ? `\n\n${asides.join('\n')}` : '')
           if (content.length > remaining) {
             // A BLOCK LARGER THAN A WHOLE FRESH STRETCH IS NOT HANDED OVER.
@@ -7976,6 +7997,7 @@ export class ChatWindow {
           component.#readSignatures.set(convoId, known)
           queue.settle(entry.id, 'ran', `${content.length} characters`)
           lastRun = 'ran'
+          freshPictures = sees ? picturesOf(receipt).slice(0, 4) : []
           return readResultMessage(content, message)
         } catch (error) {
           queue.settle(entry.id, signal?.aborted ? 'skipped' : 'failed', error instanceof Error ? error.message : undefined)
@@ -8628,7 +8650,7 @@ export class ChatWindow {
                 ? blockRefusedMessage('read', (error as Error).message, message)
                 : unreadAskedMessage(askedLines.slice(0, 6), message)
             }
-            messages.push({ role: 'user', content: reply })
+            messages.push(withPictures(reply))
             EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: `ran ${askedLines[0]} itself: the model answered without running it` })
             continue
           }
@@ -8841,7 +8863,7 @@ export class ChatWindow {
           }
         }
         if (work.heldDo) reply = `${HELD_DO_NOTE}\n\n${reply}`
-        messages.push({ role: 'user', content: reply })
+        messages.push(withPictures(reply))
         // THE LEG ENDS WHEN ITS STRETCH IS FULL, NOT AT A COUNT. The window
         // is the model's own; when the rounds no longer fit, the older ones
         // fold into a ledger first, and only a leg that still cannot fit —

@@ -36,7 +36,7 @@ const labelFor = (modelId: string): string => {
 
 /** Price and window from the catalogue, once it has been fetched — what the
  *  mediator's fit tiebreak reads. */
-const metaFor = (modelId: string): { inputPerMillion?: number; outputPerMillion?: number; contextLength?: number } => {
+const metaFor = (modelId: string): { inputPerMillion?: number; outputPerMillion?: number; contextLength?: number; vision?: true } => {
   const entry = cachedOpenRouterCatalog()?.find(e => e.id === modelId)
   if (!entry) return {}
   const perMillion = (raw?: string): number | undefined => {
@@ -49,6 +49,7 @@ const metaFor = (modelId: string): { inputPerMillion?: number; outputPerMillion?
     ...(input !== undefined ? { inputPerMillion: input } : {}),
     ...(output !== undefined ? { outputPerMillion: output } : {}),
     ...(entry.contextLength ? { contextLength: entry.contextLength } : {}),
+    ...(entry.vision ? { vision: true as const } : {}),
   }
 }
 
