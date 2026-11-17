@@ -8376,10 +8376,26 @@ export class ChatWindow {
         queue.settle(entry.id, 'ran')
         lastRun = 'ran'
         EffectBus.emit('toast:show', { type: 'success', message: outcome.unchanged ? `${label} unchanged` : `${label} ${outcome.created ? 'created' : 'updated'}` })
-        return fileRanMessage({
+        const written = fileRanMessage({
           label, sig: outcome.sig, created: outcome.created, unchanged: outcome.unchanged, trial: outcome.trial, vector: outcome.vector,
           ...(managed ? { managed: true } : {}),
         }, message)
+        // WHAT THE PAGE DID. On a managed site door the site's card runs
+        // again when the write lands; the essentials package watches that
+        // run (history/frame-watch.ts) and says what it threw and what it
+        // shows. The model is told with the write's own result: it could
+        // write a script and never learn that the page then failed. An
+        // unchanged write re-runs nothing, and elsewhere there is no card.
+        if (!managed || outcome.unchanged) return written
+        let page: readonly string[] = []
+        try {
+          if (signal?.aborted) return written
+          EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'watching the page run' })
+          page = await (get<{ say?(): Promise<readonly string[]> }>('@diamondcoreprocessor.com/SiteRunWatch')?.say?.() ?? Promise.resolve([]))
+        } catch { page = [] }
+        return page.length
+          ? `${written}\n\nWHAT THE PAGE DID after this write, as the frame that runs it reports (read it before you write again; a problem listed here is yours to fix):\n${page.join('\n')}`
+          : written
       }
 
       // THE PARTICIPANT SPEAKS THE HIVE'S LANGUAGE. A table question offers
