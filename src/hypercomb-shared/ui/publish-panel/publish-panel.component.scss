@@ -1,15 +1,15 @@
 // hypercomb-shared/ui/publish-panel/publish-panel.component.scss
 //
 // Right-docked "Publish" panel — a drilldown. One input and one button at the
-// top; under them the domains (two thirds of the window) with a shorter list of
-// named groups below; and inside a domain or a group, the creations, each a
-// switch. Not a dimming modal — the hive stays visible behind it.
+// top; under them your community, apart, then the domains (yours first); inside
+// a domain the creations, each a switch; inside the community what is staged
+// (gray) and live (lit). Not a dimming modal — the hive stays visible behind it.
 // Cold steel chrome (126,182,214) like every other tool window; colour is spent
 // ONLY where a claim was actually proved:
 //
-//   warm   — the bulb of a creation that is published, and the one amber verb:
-//            a real difference ("changed", Publish changes) or a real wait.
-//            A creation live on only SOME of a set's domains is half-lit.
+//   warm   — the bulb of a creation that is on (staged in a domain, live in the
+//            community), and the one amber verb: a real difference
+//            ("changed", Stage changes) or a real wait.
 //   red    — `gone` (a 404 the host asserted) and the FORGED banner. Nothing
 //            else in this panel is ever allowed to go red.
 //   quiet  — everything nothing was asserted about.
@@ -184,12 +184,6 @@ $bulb-warm: #ffcd64;
     background: var(--hc-window-wash);
   }
 
-  // The input is naming a group: the same field, lit as the thing being made.
-  &.naming {
-    border-color: var(--hc-window-edge-firm);
-    background: var(--hc-window-wash-strong);
-    box-shadow: 0 0 0 3px rgba(var(--acc), 0.12);
-  }
 }
 
 .psearch-icon {
@@ -199,8 +193,7 @@ $bulb-warm: #ffcd64;
   transition: color 140ms ease;
 }
 
-.psearch:focus-within .psearch-icon,
-.psearch.naming .psearch-icon { color: var(--hc-window-accent); }
+.psearch:focus-within .psearch-icon { color: var(--hc-window-accent); }
 
 .psearch-input {
   flex: 1 1 auto;
@@ -235,26 +228,7 @@ $bulb-warm: #ffcd64;
   &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
 }
 
-.psearch-add {
-  flex: 0 0 auto;
-  padding: tw.$button-padding-compact-block tw.$button-padding-compact-inline;
-  border: 0;
-  border-radius: tw.$radius-control;
-  background: var(--hc-window-accent);
-  color: var(--hc-window-on-accent);
-  font: inherit;
-  font-size: 0.7em;
-  font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: filter 120ms ease, opacity 120ms ease;
-
-  &:hover:not(:disabled) { filter: brightness(1.1); }
-  &:focus-visible { outline: 1px solid var(--hc-panel-text); outline-offset: 1px; }
-  &:disabled { opacity: 0.4; cursor: default; }
-}
-
-// PUBLISH CHANGES — quiet when there is nothing to publish, the panel's one
+// STAGE CHANGES — quiet when there is nothing to stage, the panel's one
 // warm verb when there is.
 .pgo {
   width: 100%;
@@ -336,7 +310,7 @@ $bulb-warm: #ffcd64;
   &:hover { background: rgba(var(--acc), 0.06); }
   &:focus-visible { outline: 0; box-shadow: inset 0 0 0 1px var(--hc-window-edge-firm); }
 
-  // Cannot flip right now: publishing, or still comparing.
+  // Cannot flip right now: staging, or still comparing.
   &.locked { cursor: progress; }
   &.busy { opacity: 0.7; }
 }
@@ -369,44 +343,7 @@ $bulb-warm: #ffcd64;
   }
 }
 
-.prow:not(.on):not(.mixed):hover .prow-bulb { color: var(--hc-window-ink-quiet); }
-
-// MIXED - live on some of the set's domains and not the others: half lit, and
-// the row offers Sync instead of a word.
-.prow.mixed .prow-bulb {
-  color: tw.ink(#ffd97a);
-  background: radial-gradient(circle at 50% 42%, rgba($bulb-warm, 0.1), transparent 70%);
-
-  .mat-sym {
-    font-variation-settings: 'FILL' 0, 'wght' 500, 'GRAD' 0, 'opsz' 24;
-    text-shadow: 0 0 8px rgba($bulb-warm, 0.35);
-  }
-}
-
-.prow-mixed { color: tw.ink($amber); }
-
-// SYNC - a mix made one thing or the other. Quiet outlined words.
-.prow-sync {
-  flex: 0 0 auto;
-  display: flex;
-  gap: 0.2em;
-}
-
-.prow-syncbtn {
-  padding: 0.3em 0.55em;
-  border: 1px solid var(--hc-window-edge);
-  border-radius: tw.$radius-control;
-  background: none;
-  color: var(--hc-window-ink-loud);
-  font: inherit;
-  font-size: 0.66em;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
-
-  &:hover { background: var(--hc-window-wash-strong); color: var(--hc-panel-text); border-color: var(--hc-window-edge-firm); }
-  &:focus-visible { outline: 1px solid var(--hc-window-edge-firm); outline-offset: 1px; }
-}
+.prow:not(.on):hover .prow-bulb { color: var(--hc-window-ink-quiet); }
 
 .prow-meta {
   flex: 1 1 auto;
@@ -436,7 +373,7 @@ $bulb-warm: #ffcd64;
 }
 
 // Off, a row recedes; the bulb is what says so.
-.prow:not(.on):not(.mixed) .prow-label { color: var(--hc-window-ink-plain); font-weight: 500; }
+.prow:not(.on) .prow-label { color: var(--hc-window-ink-plain); font-weight: 500; }
 
 // The tile you are standing on — why an unpublished row is on the list at all.
 .prow-tag {
@@ -480,6 +417,7 @@ $bulb-warm: #ffcd64;
 
   &[data-kind='changed'] { color: tw.ink($amber); }
   &[data-kind='gone'] { color: tw.ink($alarm); }
+  &[data-kind='live'] { color: tw.ink(#ffd97a); }
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -498,9 +436,8 @@ $bulb-warm: #ffcd64;
   }
 }
 
-// -- the domains, and under them the groups -----------------
+// -- your community, apart, and under it the domains --------
 
-// Two thirds of the window for the domains, a third for the named groups.
 .plevel {
   flex: 1 1 auto;
   min-height: 0;
@@ -508,19 +445,26 @@ $bulb-warm: #ffcd64;
   flex-direction: column;
 }
 
-.pdomains,
-.pgroupsbox {
+// YOUR COMMUNITY: one door at the top, set apart from the domains that feed it.
+.pcommunity {
+  flex: 0 0 auto;
+  padding: 0.45em 0.55em 0.5em;
+  border-bottom: 1px solid var(--hc-window-edge);
+  background: linear-gradient(180deg, rgba(var(--acc), 0.05), rgba(var(--acc), 0.015));
+}
+
+.pcrow .pdrow-icon { color: var(--hc-window-accent); }
+
+.pcrow-zone {
+  font-weight: 400;
+  color: var(--hc-window-ink-quiet);
+}
+
+.pdomains {
+  flex: 1 1 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
-}
-
-.pdomains { flex: 65 1 0; }
-
-.pgroupsbox {
-  flex: 35 1 0;
-  border-top: 1px solid var(--hc-window-edge);
-  background: linear-gradient(180deg, rgba(var(--hc-panel-ink), 0.03), rgba(var(--hc-panel-ink), 0.012));
 }
 
 .phead {
@@ -553,9 +497,7 @@ $bulb-warm: #ffcd64;
   gap: 0.15em;
 }
 
-.pnote-hint { margin-top: 0.9em; font-size: 0.68em; }
-
-// A domain, or a group: a door into its creations.
+// A domain, or your community: a door into what it holds.
 .pdrow {
   display: flex;
   align-items: center;
@@ -570,11 +512,6 @@ $bulb-warm: #ffcd64;
   &:hover { background: rgba(var(--acc), 0.06); }
   &:focus-visible { outline: 0; box-shadow: inset 0 0 0 1px var(--hc-window-edge-firm); }
 
-  // Held with Ctrl (Cmd) to open together when the key is let go.
-  &.chosen {
-    background: var(--hc-window-wash-strong);
-    box-shadow: inset 2px 0 0 var(--hc-window-accent);
-  }
 }
 
 .pdrow-icon {
@@ -585,7 +522,21 @@ $bulb-warm: #ffcd64;
 }
 
 .pdrow:hover .pdrow-icon,
-.pdrow.chosen .pdrow-icon { color: var(--hc-window-accent); }
+.pdrow.yours .pdrow-icon { color: var(--hc-window-accent); }
+
+// Your own domain says so, in a word beside its name.
+.pdrow-tag {
+  margin-left: 0.6em;
+  padding: 0.05em 0.55em;
+  border: 1px solid var(--hc-window-edge);
+  border-radius: tw.$radius-pill;
+  font-size: 0.66em;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: 0.12em;
+  color: var(--hc-window-accent);
+}
 
 .pdrow-meta {
   flex: 1 1 auto;
@@ -619,30 +570,6 @@ $bulb-warm: #ffcd64;
 }
 
 .pdrow:hover .pdrow-go { color: var(--hc-window-ink-plain); transform: translateX(0.12em); }
-
-.pgrow-remove {
-  flex: 0 0 auto;
-  width: 1.8em;
-  height: 1.8em;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: none;
-  color: var(--hc-window-ink-faint);
-  font-size: 1em;
-  line-height: 1;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 120ms ease, color 120ms ease, background 120ms ease;
-
-  &:hover { color: var(--hc-panel-text); background: rgba(var(--hc-panel-ink), 0.08); }
-  &:focus-visible { opacity: 1; outline: 1px solid var(--hc-window-edge-firm); outline-offset: 1px; }
-}
-
-.pgrow:hover .pgrow-remove,
-.pgrow:focus-within .pgrow-remove { opacity: 1; }
 
 // -- inside: the creations ----------------------------------
 
@@ -684,25 +611,7 @@ $bulb-warm: #ffcd64;
   color: var(--hc-window-ink-loud);
 }
 
-.pdrill-save {
-  flex: 0 0 auto;
-  padding: tw.$button-padding-compact-block tw.$button-padding-compact-inline;
-  border: 1px solid var(--hc-window-edge);
-  border-radius: tw.$radius-control;
-  background: none;
-  color: var(--hc-window-ink-loud);
-  font: inherit;
-  font-size: 0.7em;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
-
-  &:hover { background: var(--hc-window-wash-strong); color: var(--hc-panel-text); }
-  &.active { border-color: var(--hc-window-edge-firm); background: var(--hc-window-wash-strong); }
-  &:focus-visible { outline: 1px solid var(--hc-window-edge-firm); outline-offset: 1px; }
-}
-
-// The domains a set holds, in a line under its name.
+// The tile the list is narrowed to, under the domain's name.
 .pdrill-zones {
   flex: 0 0 auto;
   margin: 0;
@@ -739,10 +648,7 @@ $bulb-warm: #ffcd64;
   .publish-panel .pgo,
   .publish-panel .psearch { min-height: 2.75rem; }
   .publish-panel .prow { min-height: 2.75rem; }
-  .publish-panel .psearch-add,
   .publish-panel .pdrow,
-  .publish-panel .pback,
-  .publish-panel .prow-syncbtn { min-height: 2.75rem; }
-  .publish-panel .psearch-clear,
-  .publish-panel .pgrow-remove { min-width: 2.75rem; min-height: 2.75rem; }
+  .publish-panel .pback { min-height: 2.75rem; }
+  .publish-panel .psearch-clear { min-width: 2.75rem; min-height: 2.75rem; }
 }

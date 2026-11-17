@@ -23,7 +23,7 @@ describe('the chat window on a managed site door', () => {
   it('writes need only the Execution column there — never a census verb granted first', () => {
     expect(source).toContain('const canEdit = managed ? !!queue : canChange')
     expect(source).toContain('const canWrite = canEdit && canRead && !!installedPackageSig()')
-    expect(source).toContain('const canWriteDoctrine = canEdit && !!anatomyDoctrine?.write')
+    expect(source).not.toContain('canWriteDoctrine')
     expect(source).toContain('const canWriteFiles = canEdit && !!tileFiles?.write && !!tileFiles.read')
     // Changes themselves are still the census's, under the page's grant.
     expect(source).toContain('const canChange = !!queue && !!slash?.executePublicCanonical && callableBehaviours(behaviourEntries).length > 0')

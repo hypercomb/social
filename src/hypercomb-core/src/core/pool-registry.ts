@@ -729,7 +729,16 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // record (a resource listing section resources by sig); the highest is the
   // doctrine this hive runs. The seed is the build's; every other marker is
   // the participant's. Written by essentials/assistant/anatomy/doctrine.ts.
+  // RETIRED 2026-11-16 (the doctrine is tiles, §2c): no longer read or
+  // written, kept so a hive that holds the bag keeps it.
   'system:doctrine',
+  // THE DOCTRINE'S CODEX, DERIVED (documentation/anatomy-context-need.md §2d).
+  // One document per `/doctrine` layer signature, `{ source, codexSig }`: the
+  // codex the doctrine tiles at that signature hold, read back. DERIVED-CACHE
+  // POOL — minted only in the optimize phase, wipe-safe, never load-bearing:
+  // a cold read walks the tiles and gets the same codex. Written by
+  // essentials/assistant/anatomy/doctrine-codex.drone.ts.
+  'system:doctrine-codex',
   // TILE SUMMARIES a model wrote, keyed sign(layerSig + anatomySig + modelId)
   // (documentation/anatomy-context-need.md §5). A derived cache — wipe-safe,
   // never load-bearing — but NOT optimize-phase: a model's text is not a

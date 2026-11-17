@@ -99,7 +99,106 @@ code and stays out of the chat). A tier's title is the name Jev reports a rule
 by. The mechanics keep only the working protocol; every definition lives in the
 codex, once. Guarded by `anatomy/codex.spec.ts`.
 
-## 2a. The doctrine is a hive artifact (2026-09-21)
+**The hive is the only source (2026-11-16).** jwize: *"The doctrine needs to
+live in the hive or we are not using the correct pattern … the source of truth
+solely lives on the hive. That way we are never confused. So if the same
+doctrine is out of date or is used before the hive we are not at our goal."* A
+change starts in the hive. So, replacing the seed rules in §2a below:
+
+- **A build never moves the head**, even one a build wrote. A build whose codex
+  moved is only *pending* (`doctrine` says so; `doctrine seed` takes it).
+- **Nothing runs on the build's sections in place of the hive's.** Until the
+  hive's doctrine is read, the anatomy is the mechanics with no doctrine; with
+  no store, or a head that cannot be read, there is no doctrine. The chat
+  (`hypercomb-runtime` chat window) and Jev wait for `doctrine.ready` before
+  reading it, and Jev refuses to read a change when the hive holds none.
+- **Closed the same day by §2c:** the doctrine became tiles, so a hive gets
+  its first doctrine by adopting a host's `doctrine` branch (or the
+  participant lays the build's copy). Still open: the repo codex is not yet an
+  export of the hive.
+
+## 2c. The doctrine is a hierarchy of tiles (2026-11-16)
+
+jwize: *"The doctrine is a hierarchy of tiles like everything else. so it is
+easily done"*, then *"Yes, tiles only"*. This REPLACES the bag of §2a.
+
+- **The tiles.** The hive's root holds a `doctrine` tile; inside it one tile
+  per tier (`doctrine-<tier>`), whose note is the tier's codex header line
+  (`@3 History ~…`); inside each tier one tile per rule, whose note is the
+  rule's codex line (`H2<H1: …`). Read back in order those notes ARE the codex
+  (`anatomy/doctrine-tree.ts`): tiers by their `@n`, rules by their id's
+  number, never by where a tile sits. A tile whose note is no codex line is
+  not doctrine (a tile added to read, a rule being written).
+- **The anatomy is composed from them**: the codex they hold is checked by the
+  build's own rule (`validateCodex`: an axiom cites only what came before) and
+  turned into sections (`codexSections`). A tree that breaks the order carries
+  NO doctrine and says why (`doctrine`); a hive with no doctrine tile carries
+  none. The tiles are read again, lazily, after a commit or a note;
+  the chat and Jev wait for `doctrine.ready`.
+- **Replication is the branch's.** Notes travel with a tile's layer (its
+  `notes` slot), so publishing `/doctrine` to a host and adopting that branch
+  elsewhere carries the doctrine. No doctrine-specific transport exists.
+- **Changing it is changing tiles.** A rule changes by editing its note,
+  leaves by removing its tile (a hide takes it out for the session only: hides
+  do not outlive a refresh), and comes back by the tile's history.
+  A model proposes such a change like any tile change. The participant's words
+  are `doctrine` (what the tiles hold, or why none) and `doctrine tiles` (lay
+  the build's copy out at the root — the tiles are made at the root only).
+- **Retired:** the `system:doctrine` bag and its records (`doctrine back`,
+  `drop <n>`, `seed`, `list`), the doctrine window, and the write fence's
+  `doctrine <heading>` header. Nothing was deleted: a hive that holds the bag
+  keeps it, unread, and `system:doctrine` stays a known pool meaning.
+
+**No size cap (2026-11-16).** A fixed 12,000-character budget on the taught
+tiers was removed on jwize's word: *"as long as we are getting smart results and
+the price doesn't skyrocket lets get the most out of the least without capping
+ourselves."* The price stays flat because the anatomy is byte-stable and cached
+(§7), not because it is small. The one place size still bites is a model whose
+context window is smaller than the anatomy plus the conversation: a local model
+reached through Ollama's OpenAI endpoint runs at Ollama's default context
+length, which this endpoint cannot raise. Watch that, not a character count.
+
+## 2d. The doctrine by its heads: the truth-backed fast path (2026-11-16)
+
+jwize asked whether the truth optimizations fit the doctrine "for rapid
+doctrine communications". They do, but not by one signature. History is
+committed PER PAGE: a change commits only the tile it touched, and a parent's
+stored child signature is a hint that lags (`layer-committer.drone.ts`, "LEAF
+ONLY. No cascade"). The first build assumed a cascade, walked the parents'
+child signatures, met each rule's layer from before its note was added, and
+taught no doctrine at all. What names the doctrine is its tiles' HEADS.
+
+- **Read by route, each tile by its own head.** The walk takes each tile's
+  NAME from its parent and its truth from its own current head, the way the
+  hive tree reader reads every route; notes come from that head layer's own
+  `notes` slot (`anatomy/doctrine-tree.ts`). A note's per-word facet is not
+  read: it can hold other authors' notes and does not travel with the branch,
+  so it is a replica's memory, not the proof (M2). A tree naming a tile this
+  device lacks carries no doctrine, never a partial one.
+- **The name: the head vector.** One line per doctrine tile, its route and its
+  head layer signature, sorted; the signature of those bytes names exactly one
+  codex (M1). Editing one rule's note changes it; nothing else does.
+- **The record.** The optimize phase (`anatomy/doctrine-codex.drone.ts`)
+  mints one document per head vector in `sign('system:doctrine-codex')`:
+  `{ source, codexSig }`, the codex itself a root resource
+  (`anatomy/doctrine-record.ts`). A derived cache under D1–D5: keyed by the
+  input signature so it never goes stale, minted only in the phase, complete
+  or absent, never load-bearing — a miss reads the notes and gets the same
+  codex. Proven in the 4250 hive the same day: the codex resource it minted is
+  byte-identical to `doctrine.codex`.
+- **What it buys.** A doctrine read is one walk of heads (cached per tree epoch
+  by the tree reader) plus one record read, instead of reading every tier's
+  and rule's notes. Two hives that run the same doctrine hold the same
+  `codexSig`, so agreement is one signature compared, and the codex resource
+  is the doctrine's export.
+- **Not built yet:** a host announcing a doctrine's `codexSig` so followers
+  learn of a change by comparing it, and the repo codex written from the
+  record. **Open question:** a published branch must carry each tile's HEAD,
+  not the parent's stale hint, or an adopter receives rules without notes.
+
+## 2a. The doctrine is a hive artifact (2026-09-21) — RETIRED 2026-11-16 by §2c
+
+Kept as history: the bag below is no longer read; the doctrine is tiles (§2c).
 
 jwize: "the real goal is to create only hive artifacts that hold everything."
 The doctrine part of the anatomy was baked at `prepare`; a rule changed only

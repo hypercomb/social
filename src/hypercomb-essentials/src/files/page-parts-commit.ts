@@ -33,7 +33,7 @@
 import { TRAIT_WANT_KIND, get, isReservedPoolWord, sameTraitWord, traitWords, type TraitWant } from '@hypercomb/core'
 import { listDecorations, removeDecorationAndWait, writeDecoration } from '../commands/decoration-manifest.js'
 import { FILES_ATTACHMENT_KIND, listAttachments, writeAttachment, type AttachmentPayload } from './files-attachment.js'
-import { commitPageSig } from './page-commit.js'
+import { commitPageSigFrom } from './page-commit.js'
 import {
   SHELL_FILE, assemblePage, blockIdOf, moveBlockOut, partExtension, partTextRefusal, repinPart, shellParts,
 } from './page-parts.js'
@@ -214,7 +214,10 @@ export async function planPartRebuild(
 
 async function commit(segments: readonly string[], html: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const page = await put(html, 'html')
-  return commitPageSig(segments, page.sig)
+  // Rebuilt from its files, the page is as much this hive's own as the page it
+  // replaces (page-commit.ts commitPageSigFrom).
+  const before = await get<SiteViewLike>('@diamondcoreprocessor.com/SiteViewDrone')?.resolvePageSig?.(segments).catch(() => null) ?? null
+  return commitPageSigFrom(segments, page.sig, before)
 }
 
 /** The files the page `pageSig` on this tile is made of, when its shell still

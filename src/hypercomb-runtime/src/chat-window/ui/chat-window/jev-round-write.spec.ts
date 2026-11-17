@@ -11,7 +11,6 @@ import { parseWriteBlock, splitWork, writeHeaderOf } from './hypercomb-work-fenc
 const SIG = 'c'.repeat(64)
 const SECTION = 'src/games/solomon/labyrinth.ts'
 const block = [`${SIG} ${SECTION}`, 'var rooms = "fresh";', 'export {};']
-const doctrineBlock = ['doctrine The rule', 'Nesting tiles is ordinary use of the hive.']
 const census: RoundCensus = {
   readRead: line => `/${line.replace(/^\//, '')}`,
   readDo: lines => ({ grammars: lines.map(line => `/${line.replace(/^\//, '')}`), reach: 'additive' }),
@@ -39,7 +38,7 @@ describe('a write block in Jev mode', () => {
 
   it('is refused in the block\'s own words when the header is malformed', () => {
     const table = tableFor({ kind: 'write', lines: ['not a header', 'code'] }, true)!
-    expect(() => prepareTable(table, census)).toThrow('block starts with <module signature> <src/path.ts>, page /<tile>, file /<tile> <name.ext>, or doctrine <heading>,')
+    expect(() => prepareTable(table, census)).toThrow('block starts with <module signature> <src/path.ts>, page /<tile>, or file /<tile> <name.ext>,')
   })
 
   it('prepares as an editing row that runs the block, never a grammar', () => {
@@ -77,20 +76,10 @@ describe('a write block in Jev mode', () => {
   })
 })
 
-describe('a doctrine block', () => {
-  it('parses as a doctrine write, and never as an empty one', () => {
-    expect(parseWriteBlock(doctrineBlock)).toEqual({ doctrine: 'The rule', body: 'Nesting tiles is ordinary use of the hive.' })
-    expect(parseWriteBlock(['write doctrine ### The core rule', 'x'])).toEqual({ doctrine: 'The core rule', body: 'x' })
-    expect(parseWriteBlock(['doctrine The rule'])).toHaveProperty('error')
-    expect(parseWriteBlock(['doctrine *bold*', 'x'])).toHaveProperty('error')
-  })
-
-  it('becomes a one-row write table labelled by its heading, running the block', () => {
-    const table = tableFor({ kind: 'write', lines: doctrineBlock }, true)!
-    const [row] = parseTable(table.lines)
-    expect(row).toEqual({ id: 'write', kind: 'write', label: 'The rule', lines: ['doctrine The rule'] })
-    expect(writeLabelOf(doctrineBlock)).toBe('The rule')
-    const prepared = prepareTable(table, census)
-    expect(stepFor(decision({ kind: 'do', row: 'write', review: true }), prepared)).toMatchObject({ kind: 'write', lines: doctrineBlock })
+describe('a doctrine block (retired 2026-11-16: the doctrine is tiles)', () => {
+  it('is no write target: a doctrine header is refused like any unknown header', () => {
+    expect(parseWriteBlock(['doctrine The rule', 'Nesting tiles is ordinary use of the hive.'])).toHaveProperty('error')
+    expect(parseWriteBlock(['write doctrine ### The core rule', 'x'])).toHaveProperty('error')
+    expect(writeLabelOf(['doctrine The rule', 'x'])).toBe('')
   })
 })

@@ -26,14 +26,14 @@ describe('the codex file', () => {
     expect(lines).toHaveLength(parsed)
   })
 
-  it('stays lean: what rides every request is the taught doctrine, builders\' tiers stay behind', () => {
-    // The chat is taught codexSections(tiers) — the `all`-scope tiers. A
-    // `[code]` tier (Build, Paint) is for the agents that change code and never
-    // rides a hive request, so it is not what this budget protects. Measured
-    // on the whole file the budget was already spent at 12,019 before the
-    // Paint tier existed (2026-11-04).
-    expect(codexSections(tiers).join('\n\n').length).toBeLessThan(12_000)
-  })
+  // NO SIZE CAP (jwize, 2026-11-16: "as long as we are getting smart results
+  // and the price doesn't skyrocket lets get the most out of the least without
+  // capping ourselves"). A fixed 12,000-character budget stood here from
+  // 2026-11-01 to 2026-11-16. What keeps the price flat is STABILITY, not size:
+  // the anatomy is the system prompt, sent byte-identical with `cacheSystem`,
+  // so a hosted provider bills it as a cache read after the first call
+  // (anatomy-context-need.md §7). What rides every request is still only the
+  // `all`-scope tiers; the builders' tiers stay behind (tested below).
 })
 
 describe('the validator', () => {

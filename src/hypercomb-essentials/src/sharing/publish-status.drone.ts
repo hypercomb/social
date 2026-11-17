@@ -48,6 +48,7 @@ import {
 } from './entrance-scout.service.js'
 import { PUBLIC_CONTENT_HOSTS, isReservedRootKey } from './hive-link.js'
 import { HOST_CONCURRENCY, mapBounded } from './bounded-fetch.js'
+import { sweepRows } from './publish-sweep.js'
 import type { HiveIndexResult } from './hive-pointer.js'
 import { publisherKeyHex } from './key-list.client.js'
 import { arrivalPointer, publishArrivalPlan, readArrivalPlan, withdrawArrivalPlan } from './arrival-plan-publish.js'
@@ -84,7 +85,7 @@ import { clearDefaultView, defaultViewAt, writeDefaultView } from '../commands/v
 import { visualBeeIconSvg } from '../commands/visual-bee-icon-svg.js'
 import {
   publishBranch,
-  readDoorIndex,
+  readDoorIndexAt,
   readerSitesByDoor,
   secureDeleteBranch,
   setBranchAddress,
@@ -101,6 +102,9 @@ import {
   zoneDoor, type ZoneEntrance,
 } from './zone-door.js'
 import { batchOrder, driftedRows } from './publish-batch.js'
+import { switchInCommunity } from './community-switch.js'
+import { SHOWCASE_SIGNED_EFFECT, readSignedShowcase, showcaseHome, type ShowcaseItem } from './showcase-record.js'
+import type { OfferedInstance } from './community-candidates.js'
 
 /** English fallbacks for every way publishing can stop. Each one names what
  *  happened AND what it means for the participant's existing links — the
@@ -153,6 +157,23 @@ const VERSIONS_SHOWN = 6
 /** Head-change bursts (a commit storm while the panel is open) invalidate
  *  every seal. Coalesce instead of restarting the sweep on each one. */
 const REFRESH_DEBOUNCE_MS = 750
+/** THE PRECOMPUTE'S PACE (optimize-phase.md): with the window closed, the list
+ *  is re-read in the optimize phase — after load, and after whatever made it
+ *  stale — but never oftener than this, because a look reads every door's
+ *  index and probes every live row on the hosts. */
+const PASSIVE_SWEEP_MIN_MS = 120_000
+/** A window opened this soon after a look, with nothing changed since, shows
+ *  that look as it is: no second sweep to prove what was just proved. */
+const OPEN_FRESH_MS = 30_000
+/** The community is read again on a look no oftener than this. */
+const COMMUNITY_LOOK_MS = 5_000
+/** An open window, in view, reads the community again this often. */
+const COMMUNITY_ON_SCREEN_MS = 15_000
+/** A verdict an earlier look left on disk (`writeObservation`) — shown for a
+ *  row this session has not looked at yet, until the sweep reaches it. */
+const PROVISIONAL_VERDICTS: ReadonlySet<string> = new Set([
+  'live', 'drift', 'unpublished', 'pending', 'stale-edge', 'gone', 'unknown', 'cannot-compare',
+])
 /** Status work must never turn into a permanent UI state. Sealing and public
  *  probes are observations, not publish operations; after this deadline the
  *  row settles conservatively and the user can explicitly re-check it. */
@@ -343,6 +364,33 @@ export interface PublishRenderPayload {
   /** PUBLISHING THE SELECTED (`publish:run-many`): how far the run is, while
    *  it runs; null otherwise. Optional: an older drone sends none. */
   batch?: { done: number; total: number; failed: number } | null
+  /** YOUR COMMUNITY (jwize 2026-11-16), apart from the domains that feed it.
+   *  Optional: an older drone sends none. */
+  community?: PublishCommunity
+}
+
+/** One version of a creation on in a domain you follow — another publisher's,
+ *  or one of yours seen there (static-peers.drone.ts offeredInstances). */
+export interface PublishCommunityOffer {
+  name: string
+  pubkey: string
+  lineage: string
+  hosts: string[]
+}
+
+/** The community as the Publish window draws it: what is LIVE (the owners'
+ *  signed showcase for their own domain) and what other domains offer. The
+ *  window adds this key's own creations from its rows — on in a domain is
+ *  staged in the community. */
+export interface PublishCommunity {
+  /** Your own domain — the community's home. '' when no host is named. */
+  zone: string
+  /** How the showcase read went: `none` = nothing signed yet (nothing live). */
+  read: 'ok' | 'none' | 'unreachable' | 'checking'
+  live: { pubkey: string; lineage: string }[]
+  offered: PublishCommunityOffer[]
+  /** `<pubkey>\n<lineage>` of each version going live or out right now. */
+  busy: string[]
 }
 
 export class PublishStatusDrone extends Drone {
@@ -360,7 +408,7 @@ export class PublishStatusDrone extends Drone {
     'history:head-changed', 'share:receipt-revoked', 'behavior:enablement-changed',
     'hosts:render', 'publish:arrival', 'publish:promote', 'publish:participant', 'publish:participant-publish',
     'publish:entrance', 'publish:entrance-preview', 'publish:entrance-skip', ENTRANCE_UPDATE_EFFECT, 'hidden:render',
-    'keymap:invoke',
+    'keymap:invoke', 'publish:community', 'community:offers-render',
   ]
   protected override emits: string[] = ['publish:render', 'toast:show', 'activity:log', 'hidden:refresh', 'confirm:request']
 
@@ -403,6 +451,27 @@ export class PublishStatusDrone extends Drone {
   #debounce: ReturnType<typeof setTimeout> | null = null
   /** Something changed while a sweep was in flight — sweep again after it. */
   #again = false
+  /** The list has fallen behind what is here or out there (a commit, a walk,
+   *  a host) and no look has caught up yet. True until the first look. */
+  #stale = true
+  /** When the last look began; 0 = never. */
+  #sweptAt = 0
+
+  /** YOUR COMMUNITY: what the owners' showcase for their own domain names
+   *  live, as the last look read it. */
+  #showcase: { zone: string; read: PublishCommunity['read']; live: ShowcaseItem[] } = { zone: '', read: 'checking', live: [] }
+  /** Versions going live or out right now, by `<pubkey>\n<lineage>`. */
+  readonly #communityBusy = new Set<string>()
+  /** One community write at a time: each reads, changes and signs one record. */
+  #communityLane: Promise<unknown> = Promise.resolve()
+  /** Moves each time a switch of this window's lands, so a read begun before it never paints over it. */
+  #communityWrites = 0
+  /** When the community was last read again on a look (#lookAgain). */
+  #communityLookedAt = 0
+  /** Each community read takes the next number; only the newest one asked may paint. */
+  #communityReads = 0
+  /** A look that came too soon, put off until it may run. */
+  #communityLookLater: ReturnType<typeof setTimeout> | undefined
   /** The row shown in the properties pane. Gap enumeration is expensive, so
    *  it follows this one subject instead of running for every list row. */
   #inspectedKey = ''
@@ -428,6 +497,18 @@ export class PublishStatusDrone extends Drone {
   constructor() {
     super()
 
+    // WHAT ANOTHER DEVICE SAVED SHOWS HERE (jwize 2026-11-16: "when I turn it off from my phone it doesn't affect my
+    // desktop … They have to be globally In Sync, Last one wins"). The window read the community only on a full look,
+    // so one left open never saw a phone's change. Now it reads it again whenever it is looked at again.
+    if (typeof document !== 'undefined' && typeof window !== 'undefined') {
+      document.addEventListener('visibilitychange', () => this.#lookAgain())
+      window.addEventListener('focus', () => this.#lookAgain())
+      // A window left open and in focus is told nothing when the phone changes the record: it asks every little while.
+      setInterval(() => { if (Date.now() - this.#communityLookedAt >= COMMUNITY_ON_SCREEN_MS - 1_000) this.#lookAgain() }, COMMUNITY_ON_SCREEN_MS)
+    }
+    // This hive signed the community itself (a phone beside it asked through the bridge): what was read is older.
+    this.onEffect(SHOWCASE_SIGNED_EFFECT, () => { this.#communityWrites++; this.#lookAgain(true) })
+
     // A PRESS IS A PRESS NOW, never the echo of one. The bus replays the last
     // toggle to a listener as it subscribes; a drone that loads (or reloads)
     // after some earlier press would open the panel nobody just asked for.
@@ -448,16 +529,21 @@ export class PublishStatusDrone extends Drone {
     // and the panel came back by itself. Parking is not closing — the preview
     // and the inspected row stay, and no `publish:close` sweep runs; coming
     // back re-arms and looks again.
+    //
+    // LEAVING NEVER STOPS THE WORK (jwize 2026-11-16: "when the publish window
+    // closes the updates continue after leaving"). A park or a close only
+    // hides the list: a look already running finishes, a look already owed
+    // still runs, a publish goes on to its end, and the read-model keeps
+    // following the hive — so the window comes back on what is true now.
     this.onEffect<{ open?: boolean }>('publish:shown', (p) => {
       if (p?.open === true) {
         if (this.#open) return
         this.#open = true
         this.#emit()
-        void this.#refresh()
+        this.#lookOnOpen()
         return
       }
       if (!this.#open) return
-      if (this.#debounce) { clearTimeout(this.#debounce); this.#debounce = null }
       this.#open = false
       this.#emit()
     })
@@ -474,7 +560,7 @@ export class PublishStatusDrone extends Drone {
     // A host started or stopped taking a branch's bytes: the rows that
     // publish there say so at once — no sweep, no network (#retrouble).
     this.onEffect('sync:state', () => {
-      if (!this.#open || this.#rows.length === 0) return
+      if (this.#rows.length === 0) return
       if (this.#retrouble()) this.#emit()
     })
 
@@ -503,7 +589,6 @@ export class PublishStatusDrone extends Drone {
 
     this.onEffect<{ zones?: string[] }>('hosts:render', (p) => {
       this.#community = Array.isArray(p?.zones) ? p.zones.map(hostZone).filter(Boolean) : []
-      if (!this.#open) return
       this.#payload = { ...this.#payload, hosts: this.#knownZones() }
       this.#emit()
     })
@@ -528,13 +613,27 @@ export class PublishStatusDrone extends Drone {
       void this.#door(String(p?.key ?? ''), zones, p?.on === true)
     })
     this.onEffect<{ key?: string }>('publish:forget', (p) => { void this.#forget(String(p?.key ?? '')) })
+    // THE COMMUNITY'S ONE ACT: a version live, or out (gray again — still on
+    // in its domains). Picking one of several versions takes the others out.
+    this.onEffect<{ pubkey?: string; lineage?: string; on?: boolean; others?: unknown }>('publish:community', (p) => {
+      const others = Array.isArray(p?.others)
+        ? p.others.map(o => ({ pubkey: String((o as ShowcaseItem)?.pubkey ?? '').toLowerCase(), lineage: String((o as ShowcaseItem)?.lineage ?? '') }))
+        : []
+      void this.#communitySwitch({ pubkey: String(p?.pubkey ?? '').toLowerCase(), lineage: String(p?.lineage ?? '') }, p?.on === true, others)
+    })
+    // What is on in a followed domain changed: the community shows it at once.
+    this.onEffect('community:offers-render', () => { if (this.#rows.length > 0 || this.#open) this.#emit() })
     // OWN ADDRESS — give the creation `<label>.<zone>` on one domain, or (no
     // label) take it back to the root path there.
     this.onEffect<{ key?: string; zone?: string; label?: string | null }>('publish:own-address', (p) => {
       const label = typeof p?.label === 'string' ? p.label.trim().toLowerCase() : ''
       void this.#ownAddress(String(p?.key ?? ''), String(p?.zone ?? ''), label || null)
     })
-    this.onEffect<{ key?: string }>('publish:unpublish', (p) => { void this.#unpublish(String(p?.key ?? '')) })
+    // Withdrawn from every domain this way too, so out of the community with it (the switch both ways).
+    this.onEffect<{ key?: string }>('publish:unpublish', (p) => {
+      const key = String(p?.key ?? '')
+      void this.#unpublish(key).then(done => { if (done) void this.#outOfCommunity(key) })
+    })
     this.onEffect<{ key?: string; sig?: string }>('publish:make-live', (p) => {
       void this.#makeLive(String(p?.key ?? ''), String(p?.sig ?? ''))
     })
@@ -607,14 +706,56 @@ export class PublishStatusDrone extends Drone {
     // Lighting or putting out a behaviour changes what the strip may offer.
     // No sweep is owed for that — only the choices are restated.
     this.onEffect(ENABLEMENT_CHANGED, () => {
-      if (!this.#open) return
       this.#payload = { ...this.#payload, views: this.#viewChoices() }
       this.#emit()
     })
   }
 
-  /** Coalesced re-sweep. A burst of reasons to look again is ONE look. */
+  /** THE PRECOMPUTE (optimize-phase.md). The list is read while nobody is
+   *  looking — after load, and again after whatever made it stale — so the
+   *  window opens on rows that are already there and verifies them passively,
+   *  instead of opening on an empty, locked list and making the participant
+   *  wait out every door. Nothing is minted: the look lives in this drone's
+   *  memory and in the observations it already leaves; the window works the
+   *  same without it, only slower. Not awaited — the look yields between rows
+   *  and must not hold the phase for the bees after it. */
+  public override optimize = async (): Promise<void> => {
+    if (this.#open || !this.#stale || this.#refreshing || this.#debounce) return
+    if (this.#sweptAt > 0 && Date.now() - this.#sweptAt < PASSIVE_SWEEP_MIN_MS) return
+    void this.#refresh()
+  }
+
+  /** The window came up. The list is already on screen; a look runs behind it
+   *  only when one is owed — never a second look over one still running (it
+   *  answers for this open), and never over one just taken with nothing
+   *  changed since. */
+  #lookOnOpen(): void {
+    // The community is read on every open: another device may have changed it since the last look.
+    if (this.#refreshing || (!this.#stale && Date.now() - this.#sweptAt < OPEN_FRESH_MS)) { this.#lookAgain(true); return }
+    void this.#refresh()
+  }
+
+  /** The window was looked at again (its tab shown, the hive focused, or opened): the community is read again, at
+   *  most every few seconds and never over a switch of this window's own still being signed. */
+  #lookAgain(opened = false): void {
+    if (!this.#open || !this.#zone) return
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+    // Too soon, or a switch of this window's own still being signed: put off, never dropped.
+    const wait = this.#communityBusy.size > 0 ? COMMUNITY_LOOK_MS : opened ? 0 : this.#communityLookedAt + COMMUNITY_LOOK_MS - Date.now()
+    if (wait > 0) {
+      if (!this.#communityLookLater) this.#communityLookLater = setTimeout(() => { this.#communityLookLater = undefined; this.#lookAgain() }, wait)
+      return
+    }
+    this.#communityLookedAt = Date.now()
+    void this.#readShowcase()
+  }
+
+  /** Coalesced re-sweep. A burst of reasons to look again is ONE look. With
+   *  the window closed the list is only marked behind: the optimize phase
+   *  catches it up at its own pace (and an open catches it up at once). A look
+   *  already owed when the window closes still runs. */
   #invalidate(): void {
+    this.#stale = true
     if (!this.#open) return
     if (this.#debounce) clearTimeout(this.#debounce)
     this.#debounce = setTimeout(() => { this.#debounce = null; void this.#refresh() }, REFRESH_DEBOUNCE_MS)
@@ -649,7 +790,7 @@ export class PublishStatusDrone extends Drone {
   #toggle(): void {
     this.#open = !isWindowShowing('publish-panel')
     this.#emit()
-    if (this.#open) void this.#refresh()
+    if (this.#open) this.#lookOnOpen()
   }
 
   // ── the sweep ─────────────────────────────────────────────────────────
@@ -661,6 +802,9 @@ export class PublishStatusDrone extends Drone {
     if (this.#refreshing) { this.#again = true; return }
     this.#refreshing = true
     this.#again = false
+    // This look answers for everything that made the list stale until now.
+    this.#stale = false
+    this.#sweptAt = Date.now()
     this.#payload = { ...this.#payload, refreshing: true }
     this.#emit()
     try {
@@ -682,9 +826,13 @@ export class PublishStatusDrone extends Drone {
       // The domains come first: they are listed whether or not a key or a
       // tile is ready, so the panel is never an empty page.
       this.#community = await listCommunityHosts()
-      this.#served = await servedZones(this.#zone)
+      // What the host serves is a NETWORK read: asked now, awaited only after
+      // the list is painted (the last answer stands until it lands).
+      const servedRead = servedZones(this.#zone)
       const pubkey = await publisherKeyHex()
       if (!SIG_RE.test(pubkey)) {
+        // No key yet (the signer may still be waking): the next pass looks again.
+        this.#stale = true
         this.#payload = {
           ...this.#payload, open: this.#open, host, zone: this.#zone, pubkey: '', hosts: this.#knownZones(),
           index: 'checking', refreshing: false, rows: [], collisions: [],
@@ -774,6 +922,7 @@ export class PublishStatusDrone extends Drone {
         }
         this.#emit()
       }
+      this.#served = await servedRead
 
       // ONE index read per door answers every row behind that door.
       const indexes = new Map<string, {
@@ -786,11 +935,13 @@ export class PublishStatusDrone extends Drone {
       // Every door is read, a few at a time: a door that never answers is
       // `unreachable` after its deadline and the rows behind the others still show.
       const doorList = [...doors]
+      /** door → the host its index was read from, where the promotions and plans it names are held. */
+      const atomsAt = new Map<string, string>()
       // A zone's own sites decide over its apex (readDoorIndex): the row is
       // what a stranger reads at its address, not what the door holds.
       const readerSites = readerSitesByDoor(candidates, hostFor)
       const doorReads = await mapBounded(doorList, HOST_CONCURRENCY, async door => ({
-        read: await readDoorIndex(door, readerSites.get(door), pubkey),
+        ...await readDoorIndexAt(door, readerSites.get(door), pubkey),
         // Authentic, but is it the LATEST? Only our own signed stamps —
         // which are recorded per host — can say.
         highWater: await highWaterIndexStamp(door, pubkey),
@@ -811,6 +962,8 @@ export class PublishStatusDrone extends Drone {
           state, roots, doors: doorsMap, addresses, entrances, createdAt,
           stale: read.ok && highWater > 0 && createdAt < highWater,
         })
+        // The atoms this index names are fetched where it was read (readDoorIndexAt).
+        atomsAt.set(door, asked?.at ?? door)
       }
 
       // An index entry we have no record and no local mark for: published
@@ -846,15 +999,35 @@ export class PublishStatusDrone extends Drone {
 
       // Paint what we already know, then fill the local side progressively:
       // sealing is the only expensive step and it must not hold the panel shut.
+      //
+      // VERIFIED PASSIVELY (jwize 2026-11-16): a row the last look proved keeps
+      // that verdict — unlocked, its word shown — until this look reaches it.
+      // Every look used to rebuild every row as `comparing`, so each open
+      // locked the whole list again to re-prove, one row at a time, what was
+      // already known. The row OBJECT is kept as well, so an act running on it
+      // (a publish's progress, a door's busy phase) keeps painting into the
+      // row the window shows.
+      const before = new Map(this.#rows.map(row => [row.key, row]))
       const draft: PublishRow[] = []
       for (const [key, segments] of candidates) {
         const entry = ledger.get(key)
         const live = indexes.get(hostFor(key))?.roots[key] ?? null
-        const row = this.#draftRow(key, segments, live, entry)
-        row.doors = indexes.get(hostFor(key))?.doors[key] ?? null
-        row.versions = versionsByKey.get(key) ?? []
-        this.#addressRow(row, indexes.get(hostFor(key)))
-        this.#entranceRow(row, indexes.get(hostFor(key))?.addresses ?? {}, indexes.get(hostFor(key))?.entrances ?? {})
+        const fresh = this.#draftRow(key, segments, live, entry)
+        fresh.doors = indexes.get(hostFor(key))?.doors[key] ?? null
+        fresh.versions = versionsByKey.get(key) ?? []
+        this.#addressRow(fresh, indexes.get(hostFor(key)))
+        this.#entranceRow(fresh, indexes.get(hostFor(key))?.addresses ?? {}, indexes.get(hostFor(key))?.entrances ?? {})
+        const was = before.get(key)
+        const row = was ? this.#carry(was, fresh) : fresh
+        // Nothing proved about this head this session: the verdict the last
+        // look left on disk for it at this door stands in until this look lands.
+        if (row.state === 'comparing' && row.live) {
+          const seen = await readObservation(row.live, hostFor(key)).catch(() => null)
+          if (seen && PROVISIONAL_VERDICTS.has(seen.verdict)) {
+            row.state = seen.verdict as PublishRowState
+            row.seenAt = seen.at || null
+          }
+        }
         draft.push(row)
       }
       draft.sort((a, b) => a.path.localeCompare(b.path))
@@ -876,54 +1049,52 @@ export class PublishStatusDrone extends Drone {
         entrancePreview: this.#preview, previewed: [...this.#previewed],
       }
       this.#emit()
+      // The community's live list, read alongside the rows: one network read,
+      // painted when it lands, never waited on.
+      void this.#readShowcase()
 
-      // Serial, with a yield between rows. sealSubtree is O(1) while the tree
-      // epoch holds, but after a commit it re-walks live heads across the
+      // A few rows at once, each asking its reads together; every seal waits
+      // its turn in one lane (publish-sweep.ts). sealSubtree is O(1) while the
+      // tree epoch holds, but after a commit it re-walks live heads across the
       // branch — running N of those concurrently is how a status panel becomes
-      // a stall.
+      // a stall. One row at a time and one step at a time, a single slow
+      // answer held every row behind it.
       // The current row is the initial properties-pane subject, so its verdict
       // lands first.
       const sweep = [...this.#rows]
         .sort((a, b) => (b.key === currentKey ? 1 : 0) - (a.key === currentKey ? 1 : 0))
-      for (const row of sweep) {
-        // The branch root's opening face — read, never guessed, from the same
-        // view:default decorator the arrival machinery honours.
-        if (row.segments.length > 0) {
-          row.opensAs = await beforeDeadline(defaultViewAt(row.segments).catch(() => ''), '')
-        }
-        // OPTIMIZE: the published arrival plan, read from its door.
-        const planDoor = this.#hostByKey.get(row.key) ?? readDoor
-        const planSig = indexes.get(planDoor)?.roots[arrivalPointer(row.key)] ?? ''
-        row.plan = planSig ? await beforeDeadline(this.#readPlan(planDoor, planSig), null) : null
-        const promotedSig = indexes.get(planDoor)?.roots[promotedPointer(row.key)] ?? ''
-        row.promoted = promotedSig && row.live
-          ? await beforeDeadline(this.#readPromoted(planDoor, promotedSig, row.live), false)
-          : false
-        const here = row.segments.length > 0 && history?.sealSubtree
-          ? await beforeDeadline(history.sealSubtree(row.segments, undefined, { bypassMissWindow: false }).catch(() => null), null)
-          : null
-        // Everything online about this row happens at ITS door: the probe,
-        // the index verdicts, and the observation it leaves behind.
+      await sweepRows(sweep, async (row, seal) => {
+        // Everything online about this row happens at ITS door: the plan, the
+        // promotion, the probe, the index verdicts, and the observation it
+        // leaves behind. The plan and promotion are fetched where the index was read.
         const door = this.#hostByKey.get(row.key) ?? readDoor
         const ix = indexes.get(door)
-        const served = row.live
-          ? await beforeDeadline(
-              hostSync?.probeServed?.(door, row.live) ?? Promise.resolve('unknown' as const),
-              'unknown' as const,
-            )
-          : 'unknown'
-        // THE ENTRANCES, at each address the row is served at: the page this
-        // tile wears here now, and what the community's scents say about the
-        // page each address runs.
-        if (Object.keys(row.entrances).length > 0) {
-          const wears = row.segments.length > 0 ? await beforeDeadline(this.#wornPage(row.segments), null) : null
-          for (const view of Object.values(row.entrances)) {
-            view.wears = wears
-            if (!view.page) continue
-            const read = await beforeDeadline(readEntranceScents(door, view.page, [pubkey]).catch(() => []), [])
-            view.scents = read.map(s => ({ ...s, own: s.pubkey === pubkey }))
-          }
-        }
+        const atoms = atomsAt.get(door) ?? door
+        const planSig = ix?.roots[arrivalPointer(row.key)] ?? ''
+        const promotedSig = ix?.roots[promotedPointer(row.key)] ?? ''
+        const [opensAs, plan, promoted, here, served] = await Promise.all([
+          // The branch root's opening face — read, never guessed, from the
+          // same view:default decorator the arrival machinery honours.
+          row.segments.length > 0 ? beforeDeadline(defaultViewAt(row.segments).catch(() => ''), '') : Promise.resolve(row.opensAs),
+          // OPTIMIZE: the published arrival plan.
+          planSig ? beforeDeadline(this.#readPlan(atoms, planSig), null) : Promise.resolve(null),
+          promotedSig && row.live ? beforeDeadline(this.#readPromoted(atoms, promotedSig, row.live), false) : Promise.resolve(false),
+          row.segments.length > 0 && history?.sealSubtree
+            // The deadline is the row's, outside the lane: the lane waits for the seal itself, so a seal past its
+            // deadline still keeps the next one from starting beside it.
+            ? beforeDeadline(seal(() => history.sealSubtree(row.segments, undefined, { bypassMissWindow: false }).catch(() => null)), null)
+            : Promise.resolve(null),
+          row.live
+            ? beforeDeadline(hostSync?.probeServed?.(door, row.live) ?? Promise.resolve('unknown' as const), 'unknown' as const)
+            : Promise.resolve('unknown' as const),
+          // THE ENTRANCES, at each address the row is served at: the page
+          // this tile wears here now, and what the community's scents say
+          // about the page each address runs.
+          this.#readEntrances(row, door, pubkey),
+        ])
+        row.opensAs = opensAs
+        row.plan = plan
+        row.promoted = promoted
         const entry = ledger.get(row.key)
         row.here = here
         row.state = publishVerdict({
@@ -939,12 +1110,12 @@ export class PublishStatusDrone extends Drone {
           })
         }
         this.#emit()
-        await new Promise(r => setTimeout(r, 0))
-      }
+      })
 
       this.#payload = { ...this.#payload, refreshing: false, rows: this.#rows }
       this.#emit()
-      if (this.#inspectedKey) void this.#refreshGaps(this.#inspectedKey)
+      // Gaps walk local bytes across a closure — for the pane on screen only.
+      if (this.#open && this.#inspectedKey) void this.#refreshGaps(this.#inspectedKey)
     } finally {
       this.#refreshing = false
       if (this.#payload.refreshing) {
@@ -953,6 +1124,138 @@ export class PublishStatusDrone extends Drone {
       }
       if (this.#again) { this.#again = false; this.#invalidate() }
     }
+  }
+
+  // ── the community ────────────────────────────────────────────────────
+
+  /** What the owners' showcase for their own domain names live. A failed read
+   *  keeps the last answer and says so; nothing signed yet is nothing live. */
+  async #readShowcase(): Promise<void> {
+    const zone = this.#zone
+    if (!zone) {
+      this.#showcase = { zone: '', read: 'none', live: [] }
+      this.#emit()
+      return
+    }
+    if (this.#showcase.zone !== zone) this.#showcase = { zone, read: 'checking', live: [] }
+    const writes = this.#communityWrites
+    const asked = ++this.#communityReads
+    const read = await beforeDeadline(
+      readSignedShowcase(zone).then(record => ({ record }), () => null),
+      null,
+    )
+    // A switch of this window's landed while this read was out: what it signed is newer than what was read.
+    // And only the newest read asked paints: an older one answering late would put back what it saw.
+    if (this.#zone !== zone || this.#communityWrites !== writes || this.#communityReads !== asked) return
+    this.#showcase = read
+      ? { zone, read: read.record ? 'ok' : 'none', live: [...(read.record?.items ?? [])] }
+      : { ...this.#showcase, read: 'unreachable' }
+    this.#emit()
+  }
+
+  /** What is on in the domains you follow, as the static peers drone keeps it. */
+  #offered(): PublishCommunityOffer[] {
+    const peers = get<{ offeredInstances?: () => readonly OfferedInstance[] }>('@diamondcoreprocessor.com/StaticPeersDrone')
+    let offered: readonly OfferedInstance[] = []
+    try { offered = peers?.offeredInstances?.() ?? [] } catch { offered = [] }
+    return offered
+      .filter(o => SIG_RE.test(String(o?.pubkey ?? '').toLowerCase()) && !!o?.lineage)
+      .map(o => ({ name: String(o.name ?? ''), pubkey: String(o.pubkey).toLowerCase(), lineage: String(o.lineage), hosts: [...(o.hosts ?? [])].map(String) }))
+  }
+
+  /** LIVE IN YOUR COMMUNITY, OR OUT (community-switch.ts). The row says busy
+   *  at once; the live list moves when the signed write lands.
+   *
+   *  BIDIRECTIONAL (jwize 2026-11-16: "you should be able to toggle them in
+   *  community (any bound items turn off on the domains). The goal is click on
+   *  domain creations, click on community creations you are sharing … are
+   *  bidirectional"). One of your own creations taken out of the community is
+   *  switched off on every domain it is on too (#offEverywhere); a domain
+   *  turning off the last place it was on takes it out of the community
+   *  (#door → #outOfCommunity). `bound` false is that second path calling
+   *  here, so neither calls the other back. */
+  async #communitySwitch(item: ShowcaseItem, on: boolean, others: ShowcaseItem[], bound = true): Promise<void> {
+    const zone = this.#zone
+    if (!zone) {
+      this.#toast('warning', 'publish.community.no-zone', 'Your community lives on your own domain — name your host first.')
+      return
+    }
+    if (!SIG_RE.test(item.pubkey) || !item.lineage) return
+    const id = `${item.pubkey}\n${item.lineage}`
+    if (bound && this.#communityBusy.has(id)) return
+    const name = item.lineage.split('/').filter(Boolean).pop() ?? item.lineage
+    // Bound to domains here: only one of this hive's own creations, published from here (it has its path).
+    const row = !on && bound && item.pubkey === this.#payload.pubkey ? this.#rows.find(r => r.key === item.lineage) : undefined
+    const binds = !!row?.live && row.segments.length > 0
+    if (binds) {
+      // Nothing half done: the domains must be free to switch before the community is.
+      if (this.#waitForBatch()) return
+      if (row!.busyPhase || this.#inFlight.has(row!.key)) {
+        this.#toast('tip', 'publish.community.busy', `${name} is still being published — try again when it is done.`, { name })
+        return
+      }
+    }
+    // A switch already queued for the same version keeps the busy mark; this one runs after it in the lane.
+    const mine = !this.#communityBusy.has(id)
+    if (mine) { this.#communityBusy.add(id); this.#emit() }
+    let landed: { changed: boolean } | null = null
+    const run = this.#communityLane.then(async () => {
+      try {
+        const result = await switchInCommunity({ zone, item, on, others })
+        if (!result.ok) {
+          this.#toast('error', 'publish.community.failed', `Your community was not changed: ${result.reason}`, { reason: result.reason })
+          return
+        }
+        landed = { changed: result.changed }
+        this.#communityWrites++
+        if (this.#showcase.zone === zone) this.#showcase = { zone, read: 'ok', live: [...result.items] }
+      } catch (error) {
+        console.warn('[publish] the community switch failed:', error)
+        this.#toast('error', 'publish.community.failed', 'Your community was not changed: failed', { reason: 'failed' })
+      } finally {
+        if (mine) { this.#communityBusy.delete(id); this.#emit() }
+      }
+    })
+    this.#communityLane = run.catch(() => undefined)
+    await run
+    const done = landed as { changed: boolean } | null
+    if (!done) return
+    if (on) { if (done.changed) this.#toast('success', 'publish.community.live', `${name} is live in your community.`, { name }); return }
+    if (!binds) { if (done.changed) this.#toast('success', 'publish.community.out', `${name} is out of your community.`, { name }); return }
+    // Out of the community, off its domains — said only once both have landed.
+    if (await this.#offEverywhere(item.lineage)) {
+      this.#toast('success', 'publish.community.out-everywhere', `${name} is out of your community, and off its domains.`, { name })
+    } else {
+      this.#toast('warning', 'publish.community.domains-kept', `${name} is out of your community, but its domains could not be switched off — switch them off in each domain.`, { name })
+    }
+  }
+
+  /** Off every domain a creation of yours is on: one withdrawal from your
+   *  index, written through the domains it was on (its doors, else its host
+   *  marks — never every host you know). True once it has landed. */
+  async #offEverywhere(key: string): Promise<boolean> {
+    const row = this.#rows.find(r => r.key === key)
+    if (!row || !row.live || row.segments.length === 0 || row.busyPhase) return false
+    const left = [...(row.doors ?? this.#zonesFor(key))]
+    const beforeDoors = row.doors
+    row.doors = []
+    this.#paintZones(key, [])
+    await setBranchHosts(row.segments, [])
+    row.busyPhase = 'indexing'
+    this.#emit()
+    const done = await this.#unpublish(key, left)
+    row.busyPhase = null
+    if (!done) { row.doors = beforeDoors; this.#emit(); void this.#refresh() }
+    return done
+  }
+
+  /** A creation of yours withdrawn from every domain: out of your community
+   *  too. Always asked of the signed record (never the copy read last), and
+   *  in the community's own lane, after any switch already queued for it. */
+  async #outOfCommunity(key: string): Promise<void> {
+    const own = this.#payload.pubkey
+    if (!SIG_RE.test(own)) return
+    await this.#communitySwitch({ pubkey: own, lineage: key }, false, [], false)
   }
 
   #draftRow(
@@ -990,6 +1293,44 @@ export class PublishStatusDrone extends Drone {
       entrances: {},
       hostTrouble: this.#troubleFor(this.#zonesFor(key)),
     }
+  }
+
+  /** A row the last look knew, brought up to this look's reading: what the
+   *  index and the ledger say now (head, doors, addresses, entrances, domains)
+   *  replaces what they said, and what was PROVED about it stands while the
+   *  index names the same head — the verdict, the seal it was proved against,
+   *  the plan, the promotion, the gaps. A new head is a new question: it waits
+   *  as `comparing`. What is mid-act (busy phase, owed atoms) and the opening
+   *  face are the row's own and are never touched here. Answers `was`, kept. */
+  #carry(was: PublishRow, fresh: PublishRow): PublishRow {
+    const sameHead = was.live === fresh.live && was.state !== 'comparing'
+    if (sameHead) {
+      for (const [host, view] of Object.entries(fresh.entrances)) {
+        const old = was.entrances[host]
+        if (old && old.page === view.page) { view.wears = old.wears; view.scents = old.scents }
+      }
+    } else {
+      was.state = fresh.state
+      was.here = null
+      was.plan = null
+      was.promoted = false
+      was.gaps = []
+      was.seenAt = null
+    }
+    was.path = fresh.path
+    was.segments = fresh.segments
+    was.live = fresh.live
+    was.publishedAt = fresh.publishedAt
+    was.zones = fresh.zones
+    was.doors = fresh.doors
+    was.versions = fresh.versions
+    was.urls = fresh.urls
+    was.ownLabels = fresh.ownLabels
+    was.link = fresh.link
+    was.defaultLabel = fresh.defaultLabel
+    was.entrances = fresh.entrances
+    was.hostTrouble = fresh.hostTrouble
+    return was
   }
 
   /** WHICH OF A BRANCH'S DOMAINS TAKES NONE OF ITS BYTES, and why — the
@@ -1077,7 +1418,21 @@ export class PublishStatusDrone extends Drone {
         view.offered = offered && offered !== view.page ? offered : null
       }
     }
-    if (this.#open) this.#emit()
+    this.#emit()
+  }
+
+  /** A row's entrances: the page it wears here, and the community's scents
+   *  about each address's page — every address asked at once. */
+  async #readEntrances(row: PublishRow, door: string, pubkey: string): Promise<void> {
+    const views = Object.values(row.entrances)
+    if (views.length === 0) return
+    const wears = row.segments.length > 0 ? await beforeDeadline(this.#wornPage(row.segments), null) : null
+    await Promise.all(views.map(async view => {
+      view.wears = wears
+      if (!view.page) return
+      const read = await beforeDeadline(readEntranceScents(door, view.page, [pubkey]).catch(() => []), [])
+      view.scents = read.map(s => ({ ...s, own: s.pubkey === pubkey }))
+    }))
   }
 
   /** The card page (htmlSig) the tile at `segments` wears here, or null. */
@@ -1186,8 +1541,9 @@ export class PublishStatusDrone extends Drone {
 
   /** Does the promotion `sig` name promote `head`? The record is read once per signature. */
   async #readPromoted(door: string, sig: string, head: string): Promise<boolean> {
-    if (!this.#promotions.has(sig)) this.#promotions.set(sig, await readPromotionRecord(door, sig))
-    const text = this.#promotions.get(sig)
+    // A record that could not be read is asked again next time: only one that was read is kept (a miss once stuck for the session).
+    const text = this.#promotions.get(sig) ?? await readPromotionRecord(door, sig)
+    if (text) this.#promotions.set(sig, text)
     return !!text && promotesHead(text, head)
   }
 
@@ -1199,7 +1555,9 @@ export class PublishStatusDrone extends Drone {
     if (!door) { this.#refuseNoHost(); return }
     row.busyPhase = 'optimize'
     this.#emit()
-    const result = await promoteBranch({ host: door, lineage: key, segments: row.segments, head: row.live, plan: row.plan })
+    // Written where the zone's visitors read its index (showcaseHome): jwize.com's apex is a relay with a stray index.
+    const home = (await showcaseHome(door).catch(() => null)) ?? door
+    const result = await promoteBranch({ host: home, lineage: key, segments: row.segments, head: row.live, plan: row.plan })
     row.busyPhase = null
     if (!result.ok) {
       this.#toast('error', 'publish.promote.failed', `The branch could not be promoted: ${result.reason}`)
@@ -1208,7 +1566,7 @@ export class PublishStatusDrone extends Drone {
     }
     this.#promotions.delete(result.sig)
     row.promoted = true
-    if (result.arrival) row.plan = await this.#readPlan(door, result.arrival)
+    if (result.arrival) row.plan = await this.#readPlan(home, result.arrival)
     this.#emit()
   }
 
@@ -1221,7 +1579,8 @@ export class PublishStatusDrone extends Drone {
     const before = row.plan
     row.busyPhase = 'optimize'
     this.#emit()
-    const result = names.length ? await publishArrivalPlan(door, key, names) : await withdrawArrivalPlan(door, key)
+    const home = (await showcaseHome(door).catch(() => null)) ?? door
+    const result = names.length ? await publishArrivalPlan(home, key, names) : await withdrawArrivalPlan(home, key)
     row.busyPhase = null
     if (!result.ok) {
       row.plan = before
@@ -1229,7 +1588,7 @@ export class PublishStatusDrone extends Drone {
       this.#emit()
       return
     }
-    row.plan = result.sig ? await this.#readPlan(door, result.sig) : null
+    row.plan = result.sig ? await this.#readPlan(home, result.sig) : null
     this.#emit()
   }
 
@@ -1307,7 +1666,7 @@ export class PublishStatusDrone extends Drone {
     // One publish at a time while the selected run is going: both re-sign the
     // same index, and the row being run may be one the batch is about to run.
     if (this.#batch && !batched) {
-      this.#toast('tip', 'publish.batch.busy', 'The picked apps are still publishing — try again when they are done.')
+      this.#toast('tip', 'publish.batch.busy', 'The picked apps are still staging — try again when they are done.')
       return null
     }
     // The same branch twice at once seals two heads and races its own index
@@ -1380,8 +1739,8 @@ export class PublishStatusDrone extends Drone {
       result.status === 'confirmed' ? 'success' : 'info',
       result.status === 'confirmed' ? 'publish.done' : 'publish.done-unconfirmed',
       result.status === 'confirmed'
-        ? 'Published — its host is serving it.'
-        : 'Published — its host has not served it back yet. This row re-checks on its own.')
+        ? 'Staged — its host is serving it. Publish it live from your community.'
+        : 'Staged — its host has not served it back yet. This row re-checks on its own.')
     // THE ACT IS THE TRUTH THE ROW PAINTS NOW (audit 2026-10-23): the index
     // write just landed, so the row says so at once — the republish button
     // goes with it — instead of waiting out a sweep that read its snapshots
@@ -1403,7 +1762,7 @@ export class PublishStatusDrone extends Drone {
    *  one line says how it went; one sweep follows. */
   async #runDrifted(): Promise<void> {
     if (this.#batch || this.#inFlight.size > 0) {
-      this.#toast('tip', 'publish.batch.busy', 'The picked apps are still publishing — try again when they are done.')
+      this.#toast('tip', 'publish.batch.busy', 'The picked apps are still staging — try again when they are done.')
       return
     }
     // Read the world against here, now, and wait for the reading (a sweep already running answers for itself).
@@ -1427,7 +1786,7 @@ export class PublishStatusDrone extends Drone {
 
   async #runMany(keys: readonly string[]): Promise<void> {
     if (this.#batch || this.#inFlight.size > 0) {
-      this.#toast('tip', 'publish.batch.busy', 'The picked apps are still publishing — try again when they are done.')
+      this.#toast('tip', 'publish.batch.busy', 'The picked apps are still staging — try again when they are done.')
       return
     }
     // The plan carries each row's state as it was picked: a sweep mid-run
@@ -1452,8 +1811,8 @@ export class PublishStatusDrone extends Drone {
       this.#emit()
     }
     this.#batch = null
-    if (failed === 0) this.#toast('success', 'publish.batch.done', `Published ${published}.`, { count: published })
-    else this.#toast('error', 'publish.batch.partial', `Published ${published} of ${total} — ${failed} did not publish.`,
+    if (failed === 0) this.#toast('success', 'publish.batch.done', `Staged ${published}.`, { count: published })
+    else this.#toast('error', 'publish.batch.partial', `Staged ${published} of ${total} — ${failed} did not stage.`,
       { done: published, total, failed })
     this.#emit()
     void this.#refresh()
@@ -1464,7 +1823,7 @@ export class PublishStatusDrone extends Drone {
    *  again, open on every domain. Says so, and answers true when it refused. */
   #waitForBatch(): boolean {
     if (!this.#batch) return false
-    this.#toast('tip', 'publish.batch.busy', 'The picked apps are still publishing — try again when they are done.')
+    this.#toast('tip', 'publish.batch.busy', 'The picked apps are still staging — try again when they are done.')
     return true
   }
 
@@ -1473,11 +1832,11 @@ export class PublishStatusDrone extends Drone {
    *  off everywhere → withdraw; on for a branch the index does not name yet →
    *  publish it (seal, upload, index — the doors ride along from the marks);
    *  anything else → one signed doors rewrite, no seal, no upload. */
-  async #door(key: string, rawZones: readonly string[], on: boolean): Promise<void> {
-    if (this.#waitForBatch()) return
+  async #door(key: string, rawZones: readonly string[], on: boolean): Promise<boolean> {
+    if (this.#waitForBatch()) return false
     const row = this.#rows.find(r => r.key === key)
     const zones = [...new Set(rawZones.map(hostZone).filter(Boolean))]
-    if (!row || row.segments.length === 0 || zones.length === 0 || row.busyPhase) return
+    if (!row || row.segments.length === 0 || zones.length === 0 || row.busyPhase) return false
     const everywhere = this.#knownZones()
     const openNow = row.live ? (row.doors ?? everywhere) : []
     const next = on
@@ -1493,8 +1852,17 @@ export class PublishStatusDrone extends Drone {
     // through the domains still on — and through its own host too, named here.
     const left = on ? [] : zones
 
-    if (next.length === 0) { await this.#unpublish(key, left); return }
-    if (!row.live) { await this.#run(key); return }
+    if (next.length === 0) {
+      row.busyPhase = 'indexing'
+      this.#emit()
+      const done = await this.#unpublish(key, left)
+      row.busyPhase = null
+      if (!done) { row.doors = beforeDoors; this.#emit(); void this.#refresh(); return false }
+      // On no domain now, so it feeds the community from nowhere: out of it too (the switch both ways).
+      await this.#outOfCommunity(key)
+      return true
+    }
+    if (!row.live) { await this.#run(key); return true }
 
     row.busyPhase = 'indexing'
     this.#emit()
@@ -1506,6 +1874,7 @@ export class PublishStatusDrone extends Drone {
     } else this.#sayUnreached(result.unreached)
     this.#emit()
     void this.#refresh()
+    return result.ok
   }
 
   /** A domain turned off whose own host did not answer still serves the old
@@ -1741,14 +2110,14 @@ export class PublishStatusDrone extends Drone {
     void this.#refresh()
   }
 
-  async #unpublish(key: string, left: readonly string[] = []): Promise<void> {
-    if (this.#waitForBatch()) return
+  async #unpublish(key: string, left: readonly string[] = []): Promise<boolean> {
+    if (this.#waitForBatch()) return false
     const row = this.#rows.find(r => r.key === key)
-    if (!row || row.segments.length === 0) return
+    if (!row || row.segments.length === 0) return false
     const result = await unpublishBranch(row.segments, left)
     if (!result.ok) {
       this.#toast('error', `publish.failure.${result.failure}`, PUBLISH_FAILURE_TEXT[result.failure])
-      return
+      return false
     }
     this.#sayUnreached(result.unreached)
     // The honest limit, stated every time: this stops the branch being
@@ -1757,6 +2126,7 @@ export class PublishStatusDrone extends Drone {
     this.#toast('info', 'publish.unpublished',
       'Removed from your hive index. The bytes stay hosted and links already shared still resolve — this stops it being advertised and tracked, it does not un-share it.')
     void this.#refresh()
+    return true
   }
 
   /** MAKE AN EARLIER VERSION LIVE — one of this branch's own published heads
@@ -1853,6 +2223,13 @@ export class PublishStatusDrone extends Drone {
       ...this.#payload, open: this.#open, rows: this.#rows,
       entrancePreview: this.#preview, previewed: [...this.#previewed],
       batch: this.#batch ? { ...this.#batch } : null,
+      community: {
+        zone: this.#zone,
+        read: this.#zone ? this.#showcase.read : 'none',
+        live: this.#showcase.zone === this.#zone ? this.#showcase.live.map(item => ({ ...item })) : [],
+        offered: this.#offered(),
+        busy: [...this.#communityBusy],
+      },
     }
     this.emitEffect<PublishRenderPayload>('publish:render', this.#payload)
   }

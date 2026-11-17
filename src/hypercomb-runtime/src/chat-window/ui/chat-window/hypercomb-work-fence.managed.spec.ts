@@ -93,7 +93,7 @@ describe('every other page, unchanged', () => {
 
   it('reads no card target in a write block', () => {
     expect(parseWriteBlock(['card /business-card', '{"name":"Jaime"}'])).toEqual({
-      error: 'a hypercomb-write block starts with <module signature> <src/path.ts>, page /<tile>, file /<tile> <name.ext>, or doctrine <heading>, on its first line; the body follows',
+      error: 'a hypercomb-write block starts with <module signature> <src/path.ts>, page /<tile>, or file /<tile> <name.ext>, on its first line; the body follows',
     })
   })
 })

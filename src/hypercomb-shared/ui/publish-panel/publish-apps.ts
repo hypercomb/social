@@ -1,9 +1,9 @@
 // hypercomb-shared/ui/publish-panel/publish-apps.ts
 //
-// WHAT EACH DOMAIN HOSTS, AND HOW A CREATION STANDS ACROSS A SET OF THEM
-// (jwize 2026-11-04: the Publish window is a drilldown — the domains, then the
-// creations on one domain or on several together; a creation live on only some
-// of them is MIXED, and Sync makes it one state or the other).
+// WHAT EACH DOMAIN HOSTS, AND WHAT FEEDS YOUR COMMUNITY (jwize 2026-11-04: the
+// Publish window is a drilldown; 2026-11-16: a domain is on and off only —
+// on stages a creation there — and the community is apart, fed by every domain,
+// a staged creation gray in it until it is published live).
 //
 // Pure: the Publish panel's rows in, answers out — no Angular, no bus, so a
 // spec reads them without rendering the panel. The rows are the publish
@@ -52,26 +52,98 @@ export const shownAt = (row: AppRow, zone: string): string =>
  *  and `comparing` are never changes — they mean nothing could be proved. */
 export const hasChanges = (row: AppRow): boolean => row.state === 'drift' || row.state === 'gone'
 
-// ── A SET OF DOMAINS (a group, or a ctrl-selection) ─────────────────────
+// ── YOUR COMMUNITY (jwize 2026-11-16: "you should have your own domain and the
+// community separate since you are feeding the community from all domains
+// including yourself … all items go in the community; if there are multiple
+// versions you should be able to drill down into the children and click the one
+// of them") ─────────────────────────────────────────────────────────────────
 
-/** How a creation stands across a set of domains: on every one, on none, or on
- *  some — the mixed state Sync resolves. An empty set holds nothing: off. */
-export type ScopeState = 'on' | 'off' | 'mixed'
-
-export function scopeState(zones: readonly string[], isOn: (zone: string) => boolean): ScopeState {
-  if (zones.length === 0) return 'off'
-  const on = zones.filter(isOn).length
-  return on === 0 ? 'off' : on === zones.length ? 'on' : 'mixed'
+/** One version of a creation: whose it is, which lineage, the domains it is on. */
+export interface CommunityVersion {
+  pubkey: string
+  lineage: string
+  name: string
+  hosts: string[]
+  /** In the owners' signed showcase: what every visitor of the community sees. */
+  live: boolean
+  /** This hive's own creation. */
+  own: boolean
 }
 
-/** The domains a switch to `want` has to move: only those not already there. */
-export const zonesToMove = (zones: readonly string[], isOn: (zone: string) => boolean, want: boolean): string[] =>
-  zones.filter(zone => isOn(zone) !== want)
+/** One name in the community, and every version of it. Live when one of them is;
+ *  otherwise every version is gray — staged, on in a domain and waiting. */
+export interface CommunityEntry {
+  name: string
+  versions: CommunityVersion[]
+  live: boolean
+}
 
-/** What a press on a creation does across a set: off turns it on everywhere, on
- *  turns it off everywhere, and a mix is synced to ON — the state a press on a
- *  half-lit switch asks for. */
-export const wantAfterPress = (state: ScopeState): boolean => state !== 'on'
+type Version = { pubkey: string; lineage: string; name?: string; hosts?: readonly string[] }
+
+/** ONE NAME, HOWEVER IT IS WRITTEN (jwize 2026-11-16: "I am seeing two business-card entries"): a tile's own label
+ *  ("Business Card"), a lineage word ("business-card") and an offer's name are one community entry when they are one
+ *  name: case, accents and separators (spaces, hyphens, underscores) folded — nothing else, so "C++" and "C#" stay two. */
+export const communityNameKey = (name: string): string =>
+  name.normalize('NFKD').replace(/\p{M}+/gu, '').toLowerCase().replace(/[\s_-]+/g, '-').replace(/^-+|-+$/g, '') || name.trim().toLowerCase()
+
+/** The last label of a lineage — the word a creation is known by. */
+export const lineageName = (lineage: string): string =>
+  lineage.split('/').map(part => part.trim()).filter(Boolean).at(-1) ?? lineage
+
+/**
+ * Everything feeding the community, one entry per name: this hive's creations on
+ * in its domains, what the domains it follows offer, and whatever the signed
+ * showcase names that neither knows (so a live one can always be taken out). The
+ * same version from several feeds is one version naming every domain. Entries by
+ * name; inside one, the live version first, then by domain.
+ */
+export function communityEntries(
+  ownKey: string,
+  own: readonly Version[],
+  offered: readonly Version[],
+  live: readonly { pubkey: string; lineage: string }[],
+): CommunityEntry[] {
+  const id = (v: { pubkey: string; lineage: string }): string => `${v.pubkey}\n${v.lineage}`
+  const isLive = new Set(live.map(id))
+  const found = new Map<string, CommunityVersion>()
+  const take = (v: Version): void => {
+    if (!v.pubkey || !v.lineage) return
+    const held = found.get(id(v))
+    const hosts = (v.hosts ?? []).map(h => h.toLowerCase()).filter(Boolean)
+    if (held) { held.hosts = [...new Set([...held.hosts, ...hosts])].sort(); return }
+    found.set(id(v), {
+      pubkey: v.pubkey, lineage: v.lineage, name: (v.name || lineageName(v.lineage)).trim() || v.lineage,
+      hosts: [...new Set(hosts)].sort(), live: isLive.has(id(v)), own: v.pubkey === ownKey,
+    })
+  }
+  for (const v of own) take(v)
+  for (const v of offered) take(v)
+  for (const v of live) take(v)
+  const byName = new Map<string, CommunityVersion[]>()
+  for (const v of found.values()) {
+    const key = communityNameKey(v.name)
+    byName.set(key, [...(byName.get(key) ?? []), v])
+  }
+  return [...byName.values()]
+    .map(versions => {
+      versions.sort((a, b) => Number(b.live) - Number(a.live) || (a.hosts[0] ?? '').localeCompare(b.hosts[0] ?? '') || id(a).localeCompare(id(b)))
+      return { name: versions[0].name, versions, live: versions.some(v => v.live) }
+    })
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** What a press on one version asks the drone: live → out; otherwise live, and
+ *  every other live version of that name out with it — one version of a name is
+ *  live at a time. */
+export function communityPress(entry: CommunityEntry, version: CommunityVersion): {
+  pubkey: string; lineage: string; on: boolean; others: { pubkey: string; lineage: string }[]
+} {
+  const on = !version.live
+  const others = on
+    ? entry.versions.filter(v => v.live && !(v.pubkey === version.pubkey && v.lineage === version.lineage)).map(v => ({ pubkey: v.pubkey, lineage: v.lineage }))
+    : []
+  return { pubkey: version.pubkey, lineage: version.lineage, on, others }
+}
 
 // ── SEARCH (jwize 2026-11-04: "the search at the top, always visible … the same
 // domains and items get filtered on text search") ───────────────────────────

@@ -170,7 +170,29 @@ export type FrameData = {
   readonly layer: FrameLayer
   /** signature -> base64 bytes; an envelope signature maps to the bytes it names */
   readonly resources: Readonly<Record<string, string>>
+  /** A link pressed in the page is handed up to the viewer (`hcFrameLink`) instead of moving the frame —
+   *  the website view, which walks the hive by the page's links. */
+  readonly links?: boolean
+  /** How many frames up the viewer is: 2 when the page sits in a wrapper that refuses its navigations (page-run-gate.ts). */
+  readonly depth?: number
+  /** The hive's own look, stamped on the page's root before any of its scripts run. */
+  readonly theme?: string | null
+  readonly rootClass?: string
+  /** Where the site was entered (the website view's `data-hc-site-entry`), when not at this page. */
+  readonly entry?: readonly string[]
+  /** The page was returned to by the back gesture (`data-hc-returning`). */
+  readonly returning?: boolean
+  /** The viewer's secret for this frame: a link or right button handed up carries it, so a message the
+   *  page's own scripts send is told apart (the stand-in hides it from them). */
+  readonly token?: string
 }
+
+/** Only the options given — an absent one never lands in the frame's data as undefined. */
+const definedOf = (options: PageFrameOptions): PageFrameOptions =>
+  Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined && value !== null && value !== false)) as PageFrameOptions
+
+/** What the website view hands a page's frame beyond its words and bytes. */
+export type PageFrameOptions = Pick<FrameData, 'links' | 'depth' | 'theme' | 'rootClass' | 'entry' | 'returning' | 'token'>
 
 /** How the page is hosted: its own signature, and the pictures it embeds, inlined. */
 export type FrameHosting = {
@@ -189,15 +211,26 @@ export const FRAME_POLICY = [
   "default-src 'none'", "script-src 'unsafe-inline' 'unsafe-eval' blob:", "style-src 'unsafe-inline'",
   'img-src data: blob:', 'font-src data:', 'media-src data: blob:', 'worker-src blob:',
   "connect-src 'none'", "frame-src 'none'", "form-action 'none'", "base-uri 'none'",
+  // Where a browser honours it, no peer connection either (a STUN lookup can carry words out).
+  "webrtc 'block'",
 ].join('; ')
 
 // Runs first in the frame, before any of the page's own scripts. Storage: an
 // opaque origin throws on localStorage, so both storages are page memory (the
 // visitor shell's shim, with nothing kept). ioc: the three services a hosted
 // page reads, answering with this version only. Keys: a frame's keys never
-// reach the viewer, so Escape and Alt+Left/Right are handed up to it.
+// reach the viewer, so Escape and Alt+Left/Right are handed up to it. Links
+// and the right button are handed up only from a real press, with a secret
+// the page's own scripts never see: the stand-in takes it, then removes the
+// data it came in and itself before any of the page's scripts run.
 const STAND_IN = `(function () {
-  var data = JSON.parse(document.getElementById('hc-revision-data').textContent);
+  var holder = document.getElementById('hc-revision-data');
+  var data = JSON.parse(holder.textContent);
+  var token = data.token || '';
+  delete data.token;
+  holder.textContent = '';
+  try { holder.remove(); } catch (e) {}
+  try { if (document.currentScript) document.currentScript.remove(); } catch (e) {}
   function memory() {
     var m = new Map();
     return {
@@ -224,8 +257,11 @@ const STAND_IN = `(function () {
   var services = {
     '@hypercomb.social/Lineage': lineage,
     '@diamondcoreprocessor.com/HistoryService': {
-      sign: function () { return Promise.resolve('revision'); },
-      currentLayerAt: function () { return Promise.resolve(data.layer); }
+      sign: function (at) {
+        var s = at && at.explorerSegments ? at.explorerSegments() : data.segments;
+        return Promise.resolve(String(s.join('/')) === data.segments.join('/') ? 'revision' : 'elsewhere');
+      },
+      currentLayerAt: function (key) { return Promise.resolve(key === 'revision' ? data.layer : null); }
     },
     '@hypercomb.social/Store': {
       getResource: function (sig) { return Promise.resolve(bytes(sig)); },
@@ -239,11 +275,41 @@ const STAND_IN = `(function () {
     register: function () {},
     whenReady: function (key, cb) { if (services[key]) cb(services[key]); }
   };
+  var root = document.documentElement;
+  if (data.theme) root.setAttribute('data-theme', data.theme);
+  if (data.rootClass) root.className = (root.className + ' ' + data.rootClass).trim();
+  if (data.theme || data.rootClass) addEventListener('DOMContentLoaded', function () {
+    if (data.theme) document.body.setAttribute('data-theme', data.theme);
+    if (data.rootClass) document.body.className = (document.body.className + ' ' + data.rootClass).trim();
+  });
+  var viewer = window;
+  for (var up = 0; up < (data.depth || 1); up++) viewer = viewer.parent;
+  function hand(message) { try { viewer.postMessage(message, '*'); } catch (err) {} }
   addEventListener('keydown', function (e) {
-    var hand = e.key === 'Escape' || (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight'));
-    if (!hand) return;
-    try { parent.postMessage({ hcRevisionKey: e.key }, '*'); } catch (err) {}
+    var key = e.key === 'Escape' || (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight'));
+    if (key) hand({ hcRevisionKey: e.key });
   }, true);
+  if (data.links) {
+    addEventListener('click', function (e) {
+      if (!e.isTrusted) return;
+      var at = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+      if (!at) return;
+      var href = at.getAttribute('href') || '';
+      if (!href || href.charAt(0) === '#' || /^(javascript|data|blob):/i.test(href)) return;
+      e.preventDefault();
+      hand({ hcFrameLink: href, hcToken: token });
+    }, true);
+    addEventListener('contextmenu', function (e) {
+      if (!e.isTrusted || e.defaultPrevented) return;
+      var t = e.target;
+      if (t && t.closest && t.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"])')) return;
+      var picked = getSelection && getSelection();
+      if (picked && !picked.isCollapsed && String(picked).trim()) return;
+      e.preventDefault();
+      hand({ hcFrameMenu: { x: e.clientX, y: e.clientY }, hcToken: token });
+    });
+    addEventListener('hc-site-widen', function () { hand({ hcFrameWiden: 1 }); }, true);
+  }
 })();`
 
 /** In-page pictures named by signature, rewritten to the inlined bytes (or left as they were). */
@@ -260,7 +326,7 @@ function inlinePictures(html: string, pictures: Readonly<Record<string, string>>
  */
 export function frameDocument(pageHtml: string, data: FrameData, hosting: FrameHosting): string {
   const html = inlinePictures(String(pageHtml), hosting.pictures)
-  const entry = '/' + data.segments.join('/')
+  const entry = '/' + (data.entry ?? data.segments).join('/')
   const head = `<meta http-equiv="Content-Security-Policy" content="${FRAME_POLICY}"><meta name="referrer" content="no-referrer">`
     + `<script type="application/json" id="hc-revision-data">${scriptSafeJson(data)}</script><script>${FRAME_WATCH}</script><script>${STAND_IN}</script>`
 
@@ -270,6 +336,7 @@ export function frameDocument(pageHtml: string, data: FrameData, hosting: FrameH
     body.id = 'hc-site-view-host'
     body.setAttribute('data-hc-site-entry', entry)
     body.setAttribute('data-hc-cell-page', hosting.pageSig)
+    if (data.returning) body.setAttribute('data-hc-returning', '')
     const scripts = [...doc.head.querySelectorAll('script')]
     for (let i = scripts.length - 1; i >= 0; i--) body.insertBefore(scripts[i]!, body.firstChild)
     const shell = doc.createElement('template')
@@ -279,7 +346,7 @@ export function frameDocument(pageHtml: string, data: FrameData, hosting: FrameH
   }
 
   // No DOM to parse with (a worker, a build): the same marks by text.
-  const marks = `id="hc-site-view-host" data-hc-site-entry="${entry.replace(/"/g, '&quot;')}" data-hc-cell-page="${hosting.pageSig}"`
+  const marks = `id="hc-site-view-host" data-hc-site-entry="${entry.replace(/"/g, '&quot;')}" data-hc-cell-page="${hosting.pageSig}"${data.returning ? ' data-hc-returning=""' : ''}`
   let out = /<body\b[^>]*>/i.test(html)
     ? html.replace(/<body\b([^>]*)>/i, (_whole, attrs: string) => `<body ${marks}${attrs.replace(/\bid\s*=\s*("[^"]*"|'[^']*'|\S+)/i, '')}>`)
     : `<body ${marks}>${html}</body>`
@@ -340,11 +407,28 @@ export async function pageOfLayer(layer: FrameLayer, read: FrameReader): Promise
 }
 
 /** Everything one version's frame needs, read through `read`, and the document it runs in. */
-export async function versionFrame(layer: FrameLayer, segments: readonly string[], read: FrameReader): Promise<VersionFrame> {
+export async function versionFrame(layer: FrameLayer, segments: readonly string[], read: FrameReader, options: PageFrameOptions = {}): Promise<VersionFrame> {
   const { page, missed } = await pageOfLayer(layer, read)
   if (!page) return { page: null, doc: null, problem: missed ? 'cold' : 'no-page', settled: !missed }
   const html = await read.bytes(page)
   if (!html) return { page, doc: null, problem: 'cold', settled: true }
+  return { page, doc: await pageFrame(new TextDecoder().decode(html), page, layer, segments, read, options), problem: null, settled: true }
+}
+
+/**
+ * The document a page runs in when its words are already in hand — the website
+ * view's page from elsewhere, as composed with its seated parts. The same
+ * budget, bytes and policy as a version, so a page from elsewhere runs exactly
+ * as a version of it does: sealed, nothing of the hive in reach.
+ */
+export async function pageFrame(
+  pageHtml: string,
+  page: string,
+  layer: FrameLayer,
+  segments: readonly string[],
+  read: FrameReader,
+  options: PageFrameOptions = {},
+): Promise<string> {
   let total = 0, carried = 0
   const fits = (bytes: Uint8Array): boolean => {
     if (bytes.length > FRAME_MAX_ONE || total + bytes.length > FRAME_MAX_TOTAL) return false
@@ -353,7 +437,7 @@ export async function versionFrame(layer: FrameLayer, segments: readonly string[
   }
   // The page's own sheets and scripts first, written into it: the budget goes
   // to how the page looks before it goes to its pictures.
-  const text = await inlineLinkedCode(new TextDecoder().decode(html), sig => read.bytes(sig), fits)
+  const text = await inlineLinkedCode(pageHtml, sig => read.bytes(sig), fits)
 
   // The bytes the page may read through its tile: every decoration record
   // (under the signature in the slot, envelope or bare) and what each declares.
@@ -365,21 +449,87 @@ export async function versionFrame(layer: FrameLayer, segments: readonly string[
     if (!bytes || !fits(bytes)) return
     resources[sig] = toBase64(bytes)
   }
-  for (const sig of sigsIn(layer['decorations'])) {
-    await carry(sig, false)
-    const record = jsonOf(await read.bytes(sig))
+  // Every read is asked at once, so a page waits on its slowest byte, never on
+  // the sum of them; the budget below is then spent in order.
+  const marks = sigsIn(layer['decorations'])
+  const records = await Promise.all(marks.map(sig => read.bytes(sig).then(jsonOf, () => null)))
+  const named = records.flatMap(record => !record || record['kind'] === 'group' ? [] : carriedSigsOf(record))
+  const pictureSigs = pictureSigsOf(text).slice(0, FRAME_MAX_CARRIED)
+  await Promise.all([...named.map(sig => read.bytes(sig, true)), ...pictureSigs.map(sig => read.bytes(sig, true))].map(p => p.catch(() => null)))
+  for (let i = 0; i < marks.length; i++) {
+    await carry(marks[i]!, false)
+    const record = records[i]
     // A group mark names a referent with no bytes behind it.
     if (!record || record['kind'] === 'group') continue
-    for (const named of carriedSigsOf(record)) await carry(named, true)
+    for (const sig of carriedSigsOf(record)) await carry(sig, true)
   }
   // The pictures the page embeds by signature, inlined (the frame reaches no network).
   const pictures: Record<string, string> = {}
-  for (const sig of pictureSigsOf(text).slice(0, FRAME_MAX_CARRIED)) {
+  for (const sig of pictureSigs) {
     const bytes = await read.bytes(sig, true)
     if (bytes && fits(bytes)) pictures[sig] = pictureUrl(bytes)
   }
-  const doc = frameDocument(text, { segments, layer, resources }, { pageSig: page, pictures })
-  return { page, doc, problem: null, settled: true }
+  return frameDocument(text, { segments, layer, resources, ...definedOf(options) }, { pageSig: page, pictures })
+}
+
+// ── a page's linked sheets and scripts, written into it ──────────────
+//
+// 2026-11-16: /cafe-society opened unstyled on its managed door. The page links
+// its three style atoms (`<link rel="stylesheet" href="resource:<sig>">`) and
+// runs its modules from `<script src="resource:<sig>">`; the frame's policy
+// runs inline code only and reaches no network, and a link turned into a data:
+// URL is still a link. So each linked sheet becomes a <style> and each script a
+// script of its own text, attributes kept. A link this cannot read, or one past
+// the budget, is left as it was.
+
+const LINKED_SHEET_RE = /<link\b[^>]*>/gi
+const LINKED_SCRIPT_RE = /<script\b([^>]*)>\s*<\/script\s*>/gi
+const RESOURCE_SIG_RE = /resource:([0-9a-f]{64})/i
+const SRC_ATTR_RE = /\s+src\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/i
+
+/** The page with every sheet and script it links by signature written into it. */
+export async function inlineLinkedCode(
+  html: string,
+  bytesOf: (sig: string) => Promise<Uint8Array | null>,
+  fits: (bytes: Uint8Array) => boolean = () => true,
+): Promise<string> {
+  const read = new Map<string, Promise<string | null>>()
+  const textOf = (sig: string): Promise<string | null> => {
+    let kept = read.get(sig)
+    if (!kept) {
+      kept = bytesOf(sig).then(b => b && fits(b) ? new TextDecoder().decode(b) : null, () => null)
+      read.set(sig, kept)
+    }
+    return kept
+  }
+  const swaps: { at: number; length: number; with: Promise<string | null> }[] = []
+  for (const m of html.matchAll(LINKED_SHEET_RE)) {
+    const tag = m[0]
+    if (!/\brel\s*=\s*["']?stylesheet\b/i.test(tag)) continue
+    const href = /\bhref\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/i.exec(tag)?.[1] ?? ''
+    const sig = RESOURCE_SIG_RE.exec(href)?.[1]?.toLowerCase()
+    if (!sig) continue
+    const media = /\bmedia\s*=\s*("[^"]*"|'[^']*')/i.exec(tag)?.[1]
+    swaps.push({ at: m.index!, length: tag.length, with: textOf(sig).then(css => css === null ? null
+      : `<style data-hc-sheet="${sig}"${media ? ` media=${media}` : ''}>${css.replace(/<\/style/gi, '<\\/style')}</style>`) })
+  }
+  for (const m of html.matchAll(LINKED_SCRIPT_RE)) {
+    const attrs = m[1] ?? ''
+    const src = SRC_ATTR_RE.exec(attrs)?.[1] ?? ''
+    const sig = RESOURCE_SIG_RE.exec(src)?.[1]?.toLowerCase()
+    if (!sig) continue
+    const kept = attrs.replace(SRC_ATTR_RE, '')
+    swaps.push({ at: m.index!, length: m[0].length, with: textOf(sig).then(js => js === null ? null
+      : `<script${kept} data-hc-script="${sig}">${js.replace(/<\/script/gi, '<\\/script')}</script>`) })
+  }
+  if (!swaps.length) return html
+  const done = await Promise.all(swaps.map(s => s.with))
+  let out = '', from = 0
+  swaps.map((s, i) => ({ ...s, text: done[i] })).sort((a, b) => a.at - b.at).forEach(s => {
+    out += html.slice(from, s.at) + (s.text ?? html.slice(s.at, s.at + s.length))
+    from = s.at + s.length
+  })
+  return out + html.slice(from)
 }
 
 // ── a page's linked sheets and scripts, written into it ──────────────

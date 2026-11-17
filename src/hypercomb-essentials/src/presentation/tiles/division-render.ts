@@ -67,6 +67,8 @@ const SIG = /^[0-9a-f]{64}$/
 export async function composeDivision(
   segments: readonly string[],
   authored: string,
+  /** May a member's page be seated here (website/trait-seat.ts SeatsPart)? Unasked, every one. */
+  seats: (route: readonly string[], pageSig: string) => boolean = () => true,
 ): Promise<string> {
   try {
     if (segments.length === 0 || !authored) return authored
@@ -116,7 +118,7 @@ export async function composeDivision(
     for (const member of members) {
       const index = orderIn(member, wanted)
       if (!Number.isFinite(index) || !container.slots.includes(index)) continue
-      const html = await pageHtml(store, member.segments)
+      const html = await pageHtml(store, member.segments, seats)
       // An absent fill is not skipped silently into a different hole — it just
       // is not added, and `assemble` leaves that hole as the container drew it.
       if (html) fills.push({ index, html })
@@ -136,12 +138,14 @@ export async function composeDivision(
 async function pageHtml(
   store: StoreLike,
   segments: readonly string[],
+  seats: (route: readonly string[], pageSig: string) => boolean,
 ): Promise<string | null> {
   try {
     const siteView = get<PageResolver>(SITE_VIEW_IOC_KEY)
     if (!siteView?.resolvePageSig) return null
     const sig = await siteView.resolvePageSig(segments)
     if (!sig || !SIG.test(sig)) return null
+    if (!seats(segments, sig)) return null
     const blob = await fetchThroughContentHop(sig, s => store.getResource!(s))
     if (!blob || blob.size === 0) return null
     return await blob.text()

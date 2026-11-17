@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appsOn, hasChanges, matchesQuery, opensOn, scopeState, shownAt, wantAfterPress, zonesToMove, type AppRow } from './publish-apps'
+import { appsOn, communityEntries, communityNameKey, communityPress, hasChanges, lineageName, matchesQuery, opensOn, shownAt, type AppRow } from './publish-apps'
 
 const row = (path: string, patch: Partial<AppRow> = {}): AppRow => {
   const segments = path.split('/').filter(Boolean)
@@ -52,34 +52,72 @@ describe('what is a change', () => {
   })
 })
 
-describe('a creation across a set of domains', () => {
-  const on = (...zones: string[]) => (zone: string): boolean => zones.includes(zone)
-  const set = ['hypercomb.com', 'jwize.com', 'revolucionstyle.com']
+describe('your community, fed by every domain (jwize 2026-11-16)', () => {
+  const me = 'a'.repeat(64)
+  const them = 'b'.repeat(64)
 
-  it('is on when it is on every domain, off when on none, and mixed when on some', () => {
-    expect(scopeState(set, on(...set))).toBe('on')
-    expect(scopeState(set, on())).toBe('off')
-    expect(scopeState(set, on('jwize.com'))).toBe('mixed')
-    expect(scopeState(set, on('hypercomb.com', 'jwize.com'))).toBe('mixed')
-    // domains outside the set do not count
-    expect(scopeState(['jwize.com'], on('hypercomb.com'))).toBe('off')
+  it('one entry per name; a version on several domains is one version naming them all', () => {
+    const entries = communityEntries(me,
+      [{ pubkey: me, lineage: 'meetups', hosts: ['jwize.com'] }],
+      [{ pubkey: me, lineage: 'meetups', name: 'meetups', hosts: ['hypercomb.com'] }],
+      [])
+    expect(entries).toHaveLength(1)
+    expect(entries[0].versions).toHaveLength(1)
+    expect(entries[0].versions[0]).toMatchObject({ hosts: ['hypercomb.com', 'jwize.com'], own: true, live: false })
+    expect(entries[0].live).toBe(false)
   })
 
-  it('a set that holds nothing holds nothing: off', () => {
-    expect(scopeState([], () => true)).toBe('off')
+  it('the same name from two publishers is two versions of one entry, to drill into', () => {
+    const entries = communityEntries(me,
+      [{ pubkey: me, lineage: 'games/arkanoid', hosts: ['jwize.com'] }],
+      [{ pubkey: them, lineage: 'arkanoid', name: 'arkanoid', hosts: ['dylan.com'] }],
+      [{ pubkey: them, lineage: 'arkanoid' }])
+    expect(entries).toHaveLength(1)
+    expect(entries[0].name.toLowerCase()).toBe('arkanoid')
+    expect(entries[0].live).toBe(true)
+    // the live one first
+    expect(entries[0].versions.map(v => [v.pubkey === them, v.live, v.own])).toEqual([[true, true, false], [false, false, true]])
   })
 
-  it('a switch moves only the domains not already where it is going', () => {
-    expect(zonesToMove(set, on('jwize.com'), true)).toEqual(['hypercomb.com', 'revolucionstyle.com'])
-    expect(zonesToMove(set, on('jwize.com'), false)).toEqual(['jwize.com'])
-    expect(zonesToMove(set, on(...set), true)).toEqual([])
-    expect(zonesToMove(set, on(), false)).toEqual([])
+  it('a live one nothing else knows is still listed, so it can be taken out', () => {
+    const entries = communityEntries(me, [], [], [{ pubkey: me, lineage: 'old/thing' }])
+    expect(entries.map(e => [e.name, e.live, e.versions[0].hosts])).toEqual([['thing', true, []]])
   })
 
-  it('a press turns an off one on, an on one off, and syncs a mix to on', () => {
-    expect(wantAfterPress('off')).toBe(true)
-    expect(wantAfterPress('on')).toBe(false)
-    expect(wantAfterPress('mixed')).toBe(true)
+  it('entries go by name', () => {
+    const entries = communityEntries(me, [
+      { pubkey: me, lineage: 'zeta', hosts: ['a.com'] },
+      { pubkey: me, lineage: 'alpha', hosts: ['a.com'] },
+    ], [], [])
+    expect(entries.map(e => e.name)).toEqual(['alpha', 'zeta'])
+  })
+
+  it('a press publishes a gray one live and takes the other live versions of the name out; a live one only comes out', () => {
+    const [entry] = communityEntries(me,
+      [{ pubkey: me, lineage: 'games/arkanoid', hosts: ['jwize.com'] }],
+      [{ pubkey: them, lineage: 'arkanoid', hosts: ['dylan.com'] }],
+      [{ pubkey: them, lineage: 'arkanoid' }])
+    const mine = entry.versions.find(v => v.own)!
+    const theirs = entry.versions.find(v => !v.own)!
+    expect(communityPress(entry, mine)).toEqual({ pubkey: me, lineage: 'games/arkanoid', on: true, others: [{ pubkey: them, lineage: 'arkanoid' }] })
+    expect(communityPress(entry, theirs)).toEqual({ pubkey: them, lineage: 'arkanoid', on: false, others: [] })
+  })
+
+  it('one name however it is written: "Business Card" and business-card are one entry, its two versions inside (jwize 2026-11-16: "two business-card entries")', () => {
+    const entries = communityEntries(me,
+      [{ pubkey: me, lineage: 'business-card', name: 'Business Card', hosts: ['jwize.com'] }],
+      [],
+      [{ pubkey: them, lineage: 'business-card' }])
+    expect(entries).toHaveLength(1)
+    expect(entries[0].versions).toHaveLength(2)
+    expect(entries[0].live).toBe(true)
+    expect(entries[0].versions.map(v => [v.pubkey === them, v.live, v.own])).toEqual([[true, true, false], [false, false, true]])
+    expect(communityNameKey('Business Card')).toBe(communityNameKey('business-card'))
+  })
+
+  it('a creation is known by the last label of its lineage', () => {
+    expect(lineageName('work/meetings')).toBe('meetings')
+    expect(lineageName('solo')).toBe('solo')
   })
 })
 

@@ -139,6 +139,83 @@ export async function promoteForCommunity(zone: string, lineage: string, deps: {
   return result.ok ? { ok: true, promoted: true } : { ok: false, reason: result.reason }
 }
 
+/** One re-promote at a time: a batch publish of five live items is five minifications in turn, never at once. */
+let repromoting: Promise<unknown> = Promise.resolve()
+/** The longest one re-promote holds the queue: a host that never answers must not stop every later one. */
+export const REPROMOTE_HOLD_MS = 5 * 60_000
+/** How long a re-promote waits for the zone's visitors to be handed the new head before it gives up and says so. */
+const VISIBLE_TRIES = 8
+const VISIBLE_STEP_MS = 3_000
+
+/** Every zone a creation of this key's can be live in: the branch's own marks, the community's domains, and the
+ *  public host the participant named (the Publish window's community is `showcase:<that host>`, fed from every domain). */
+const communityZones = async (segments: readonly string[]): Promise<string[]> => {
+  const hosts = await import('./community-hosts.js')
+  const ioc = (window as { ioc?: { get?: <T>(key: string) => T | undefined } }).ioc
+  const named = ioc?.get?.<{ publicHostDomain?: () => string }>(HOST_SYNC_KEY)?.publicHostDomain?.() ?? ''
+  const { zoneDoor } = await import('./zone-door.js')
+  return [
+    ...await hosts.hostsOfBranch(segments).catch(() => [] as string[]),
+    ...await hosts.listCommunityHosts().catch(() => [] as string[]),
+    zoneDoor(named),
+  ]
+}
+
+/**
+ * A REPUBLISH OPTIMIZES ITSELF (jwize 2026-11-13: "there is no minify or optimizations choices when you deploy these
+ * things are done automatically"). A promotion names the head it was made for, so publishing a creation that is live
+ * in your community again left it unoptimized there until someone turned it off and on (2026-11-16: games and
+ * camelflage, republished, read as not promoted). After a publish of `head`, every zone whose live showcase names this
+ * key's `lineage` (communityZones) has the new head promoted, exactly as going live does — once that zone's visitors
+ * are handed it: promoted earlier, the old head is read, its promotion matches, and nothing is done. Staged items are
+ * not touched: publishing the staged list promotes them. Never throws; answers what each zone said.
+ */
+export function repromoteInCommunity(lineage: string, segments: readonly string[], head: string, deps: {
+  readonly zones?: (segments: readonly string[]) => Promise<readonly string[]>
+  readonly pubkey?: () => Promise<string>
+  readonly showcase?: (zone: string) => Promise<{ readonly items: readonly { readonly pubkey: string; readonly lineage: string }[] } | null>
+  /** The head the zone's visitors are handed for `lineage` now. */
+  readonly visible?: (zone: string, lineage: string) => Promise<string | null>
+  readonly promote?: (zone: string, lineage: string) => Promise<CommunityPromotion>
+  readonly sleep?: (ms: number) => Promise<void>
+  readonly holdMs?: number
+} = {}): Promise<{ zone: string; result: CommunityPromotion }[]> {
+  const want = String(head ?? '').toLowerCase()
+  const run = repromoting.then(async () => {
+    const done: { zone: string; result: CommunityPromotion }[] = []
+    try {
+      const zonesOf = deps.zones ?? communityZones
+      const keyOf = deps.pubkey ?? (async () => (await import('./key-list.client.js')).publisherKeyHex())
+      const showcaseOf = deps.showcase ?? (async (zone: string) => (await import('./showcase-record.js')).readSignedShowcase(zone))
+      const visibleOf = deps.visible ?? (async (zone: string, key: string) => ownHiveRoot((await showcaseHome(zone).catch(() => null)) ?? zone, key))
+      const sleep = deps.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)))
+      const own = String(await keyOf().catch(() => '')).toLowerCase()
+      if (!SIG_RE.test(own) || !lineage || !SIG_RE.test(want)) return done
+      const zones = [...new Set((await zonesOf(segments).catch(() => [] as string[])).map(zone => String(zone ?? '').trim().toLowerCase()).filter(Boolean))]
+      for (const zone of zones) {
+        const showcase = await showcaseOf(zone).catch(() => null)
+        if (!showcase?.items.some(item => String(item.pubkey).toLowerCase() === own && item.lineage === lineage)) continue
+        let seen = false
+        for (let tries = 0; tries < VISIBLE_TRIES && !seen; tries++) {
+          seen = String(await visibleOf(zone, lineage).catch(() => null) ?? '').toLowerCase() === want
+          if (!seen && tries < VISIBLE_TRIES - 1) await sleep(VISIBLE_STEP_MS * (tries + 1))
+        }
+        const result: CommunityPromotion = !seen
+          ? { ok: false, reason: `${zone} does not hand visitors the new ${lineage} yet` }
+          : await (deps.promote ?? promoteForCommunity)(zone, lineage)
+            .catch((error: unknown): CommunityPromotion => ({ ok: false, reason: error instanceof Error ? error.message : 'failed' }))
+        done.push({ zone, result })
+      }
+    } catch { /* a courtesy after the publish, never a failure of it */ }
+    return done
+  })
+  // The queue moves on when the run ends or its hold runs out, whichever is first: the run itself is not cancelled.
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const held = new Promise<void>(resolve => { timer = setTimeout(resolve, deps.holdMs ?? REPROMOTE_HOLD_MS) })
+  repromoting = Promise.race([run.catch(() => undefined), held]).finally(() => clearTimeout(timer))
+  return run
+}
+
 /** Promote a published branch: plan + minified derivation to `host`, then the record. */
 export async function promoteBranch(args: {
   readonly host: string

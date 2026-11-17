@@ -342,3 +342,56 @@ specifically, and it misleads: the web shell has its own fail-closed activation
 gate in `featureNeedsReview`, with a *better* mechanism than the installer's.
 The problem is not a missing gate. It is two gates that do not know about each
 other.
+
+## 10. Someone else's page never runs as you (jwize 2026-11-16)
+
+> "how do we keep safe from someone's community entry because we are literally
+> letting it in our hive … You are putting yourself and others at risk if you
+> accept unvetted code" … "make sure we aren't vulnerable"
+
+A community entry on a front door is a picture and a link to its publisher's own
+origin: nothing of it runs there. Inside a hive, every page that may run (Gate B)
+used to be mounted in the hive's own document, where its scripts held the hive's
+storage, its signing key (`hc:nostr:secret-key`) and every service in
+`window.ioc`. Gate B decides whether a page may run; it never decides whether it
+may run *as you*. That is now a second question, asked of every surface:
+
+1. **Fail closed, by signature.** A page runs in the hive's document only when
+   this hive authored it (the `sign('authored')` pool, `authored-sigs.ts`) or it
+   is the owner's own replica on a managed site door. Everything else runs
+   sealed, whatever let it run (a review, a trusted domain, an allowed root).
+   Where a tile sits and which domain a host named are device-local and move, so
+   they never make a page yours (`feature-availability.ts` `runsSealed`). On a
+   published visitor shell the publisher's own pages run as their own origin, as
+   any website does.
+2. **What makes a page yours.** This hive wrote it: the bridge, the website and
+   tile-file writers, `/lounge here`, and a page made from one of yours
+   (`page-commit.ts` `commitPageSigFrom`). A page written over someone else's (a
+   section edit keeps their scripts) stays theirs. The grandfathering walk is
+   retired: nothing in a walk can tell a peer's page from your own. An older page
+   of yours that was never marked runs sealed until it is written again.
+3. **Sealed.** The page runs in the frame a version runs in
+   (`revision-viewer.model.ts` `pageFrame`: scripts only, an opaque origin, no
+   network, its bytes handed in beforehand), one frame deeper inside a wrapper
+   whose policy refuses every navigation of it (`page-run-gate.ts`
+   `sealedWrapper`), so it cannot move itself to a URL. The website view, the
+   post-it view and the revision viewer all use it.
+4. **Its words up, never its will.** A link or the right button is handed up
+   only from a real press, carrying a per-frame secret the page's own scripts
+   never see, while the frame holds the focus. A message a page sends by itself
+   walks nothing and opens nothing.
+5. **Nothing of theirs inside yours.** A page of your own seats only your own
+   parts; a part from elsewhere runs the whole page sealed instead.
+6. **Views that cannot seal refuse.** The lounge (its bundle borrows the hive's
+   Pixi) runs only a bundle this hive authored; the room view hands a page that
+   runs sealed back to the hexagons.
+7. **A file opened as a page.** The service worker seals any `/@resource/`
+   document (a tab, a frame, an object) of every type not known to run nothing,
+   unless this hive authored it: a host picks the type of the bytes it serves.
+
+Left open, deliberately: a browser that ignores `webrtc 'block'` lets a sealed
+page open a peer connection, which can signal that it was opened (it holds only
+its own tile's words). The signing key itself still sits in plain localStorage,
+reachable by the hive's own code and by any code the hive's own code admits; a
+key no page can read is the next step. A model asked about someone else's notes
+reads them unmarked as foreign.

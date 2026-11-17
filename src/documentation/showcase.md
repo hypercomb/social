@@ -324,6 +324,17 @@ index write). The readable layers stay on the host beside the minified derivatio
 always there to read, and the minifier only drops whitespace, so pool meanings and keys survive. Another key's
 creation is its author's to promote. A creation that cannot be optimized does not go live, and the reason is said.
 
+**A republish optimizes itself too** (2026-11-16). A promotion names the head it was made for, so a creation already
+live that was published again read as not promoted until someone turned it off and on (games and camelflage on
+jwize.com). Now every hive publish (`publishBranch`) is followed, in the background and outside the publish lane, by
+`repromoteInCommunity` (`promote.ts`). The zones asked are the branch's own marks, the community's domains, and the
+public host the participant named, because the community a creation is live in need not be one of its own domains. In
+each zone whose live showcase names it as this key's, the new head is promoted once that zone's visitors are handed it
+(asked a few times, a little longer each time): promoted any earlier, the old head would be read, its old promotion
+would match, and nothing would be done. One runs at a time across publishes, and one that never ends holds the queue
+for five minutes at most. Staged items are left to the staged publish, which promotes them; a refusal or a head that
+never arrived is said in the activity log, and the publish it follows already stands.
+
 **Nothing complicated: the root domain is strictly on and off** (jwize, 2026-11-13: "You shouldn't manage your
 revision on the root domain. This is strictly on and off. The revisions should be available in the development mode
 on a subdomain"). On a root domain the host directory switches a package on or off and brings it to the newest; it
@@ -510,7 +521,8 @@ domain it added. What this browser turned on is kept in `community:tiles` (`read
 "the community items are compiled and made available for all visitors no matter what computer").** Once the owners
 sign `showcase:<zone>`, an item it names draws for every visitor whether or not the Publish window's live list
 (`stage:live`) names its head: that list is a discovery listing (deployment-stages.md R10), never the resolver. A door
-Publish turned off for this domain still hides it. Without a signed showcase the live list still narrows what a door
+Publish turned off for this domain still hides it — only an explicit doors list that leaves this domain out
+(`doorsClosed`); a lineage with no doors at all names no domain to leave out, and shows (jwize 2026-11-16: favorites). Without a signed showcase the live list still narrows what a door
 alone shows. The live list is read only when the owner signed it.
 
 **Stage, then publish (jwize 2026-11-15: "you have unlocked them from their domains and staged them for public access";
@@ -520,9 +532,31 @@ mirrored in the shim and essentials). It lives beside the showcase at the zone's
 owners' reads and writes the same list, and a visitor is never drawn it.
 
 - **Stage.** Managing, where a key of yours answers and can stage (`OwnerBridge.stage`: the hive's `applyStage`, a
-  phone's `device-owner.ts stageChange`), a tap in any row brings the tile into the staged list, or sends it back, at
-  once and with no question: nothing a visitor sees changes. A zone with nothing staged yet starts from what its
-  visitors see now. One per subdomain still holds: a tile from a host already in the community takes that one's place.
+  phone's `device-owner.ts stageChange`), a tap in a followed domain's row, or on a lit tile in the community row,
+  brings the tile into the staged list, or sends it back, at once and with no question: nothing a visitor sees changes.
+  A zone with nothing staged yet starts from what its visitors see now. One per subdomain still holds: a tile from a host
+  already in the community takes that one's place.
+- **A gray tile in the community goes live with one confirm (jwize 2026-11-16: "we also need to be able to see the
+  confirm button. It starts off screen and then takes a few seconds to show. This is when we publish a grayed out item
+  from our community").** Managing, a tap on a tile the community row draws gray (not live) puts "Publish <name> to every
+  visitor" across the foot at once — nothing is read or signed before it shows. Yes stages it where the owners keep a
+  list (so the next Publish keeps it), then signs it live, optimized as it goes (`OwnerBridge.toggle`); a zone with no
+  showcase yet publishes its staged list instead, so the first record keeps what visitors already saw. A tile that went
+  live while the bar was up is left alone, and a press while another change is still being signed says so. Off a phone
+  with no key the hive is handed the switch, which puts it live but does not stage it. Sending a gray tile back out of
+  the staged list is a tap in the row of the domain it came from.
+- **A live tile in the community comes out with one confirm, off its domains too (jwize 2026-11-16: "you should be
+  able to toggle them in community (any bound items turn off on the domains)").** Managing with a key that stages, a
+  tap on a lit tile in the community row puts "Take <name> out of my community" across the foot at once; yes takes it
+  out of the staged list (so its domains' rows show it off and no later Publish brings it back), then out of the
+  showcase every visitor reads. The community row is a switch both ways.
+- **The key is asked for at once.** `eitherOwner.hello` asks the hive beside the page and this browser's own key
+  together (the first in the list that answers with a key still signs), and the page asks again when Manage turns on
+  with no answer yet. The publish bar is never dimmed while a stage is being signed: a press waits for it.
+- **Once per creation (jwize 2026-11-16: "I am seeing two business-card entries").** A followed domain's own ledger names
+  what it serves, so a creation this domain's ledger verified also arrives as that peer's tile. Where this domain's own
+  tile is drawn and names every creation the peer's tile names, only the own tile shows (`oncePerCreation`, applied
+  after the page's filters); a peer's tile naming anything else, and one followed domain against another, are untouched.
 - **Drawn.** In the community row (this domain's row, managing) a published tile is lit, a staged one is gray and ringed
   (`.hex.staged`), and a published one sent back is marked as leaving (`.hex.leaving`); in a domain's row a tile in the
   community is lit. The staged list is drawn wherever it is signed, so a device with no key sees what was staged elsewhere;
@@ -533,6 +567,14 @@ owners' reads and writes the same list, and a visitor is never drawn it.
   live is optimized first (the hive's `applyPublish` through `promoteForCommunity`, read and promoted at the showcase home;
   a phone's `publishChange` through `promoteHere`). No bytes are copied: a published item opens its creation where it is
   hosted, by signature. A creation that cannot be optimized publishes nothing, and says why.
+
+**Optimistic, with a check (jwize 2026-11-16: "just before updating you check the current head hasn't changed and you
+can then update safely"; "it sees the changes and adds the difference … so shouldn't ever fail").** Every stage and
+publish is a difference applied to what it reads, and its write expects what it read. A phone's write names the index it
+replaces (`prev`), and the host refuses it once the head moved. The hive's names the record (`setHiveRoot(…, { expect })`,
+checked again inside the write lane: `PutHiveOptions.expectRoots`, `ROOT_MOVED`). Either way the change is read and
+applied again to what another device saved, up to eight times, a moment later each time; two devices staging at once
+both land.
 
 A bridge without `stage` (an older hive, a test double) keeps the earlier behaviour below: a key holder's tap signs the
 record directly.
@@ -609,6 +651,66 @@ and once the row holds anything. An empty row in the iPhone view draws no empty 
 
 A domain whose ledger names no owner has nothing signed to read, so its row says "Nothing is published here yet." and never
 "Could not read what is published here."
+
+### The hive's Publish window: two acts, stage then publish (jwize 2026-11-16)
+
+"You should have your own domain and the community separate since you are feeding the community from all domains
+including yourself. Then there are only on off no selected … This makes only two things you can do in the app here.
+Add to community through domains and publish live. You stage and then publish in community. And you stage from the
+hypercomb.io or your host. So locally the publishing should now be called staging."
+
+The window (`hypercomb-shared/ui/publish-panel/`, drone `sharing/publish-status.drone.ts`) has two levels at the top:
+
+- **Your community**, apart, on your own domain (the public host you named). Everything switched on in any domain
+  stands in it: gray while it is only staged, lit once it is live in the owners' signed `showcase:<zone>`. A press on
+  a gray one publishes it live (one of your own creations is optimized first, `promoteForCommunity`); a press on a lit
+  one takes it out. The two are one switch both ways (jwize 2026-11-16: "any bound items turn off on the domains …
+  are bidirectional"): one of your own taken out of the community is switched off on every domain it is on, and a
+  creation switched off on the last domain it was on comes out of the community; another publisher's version only
+  leaves the showcase. A name with several versions (several publishers, or the
+  same name on several domains under different keys) opens to its versions; a press on one makes that one live and
+  takes any other live version of the name out in the same write (`sharing/community-switch.ts`). With no host named
+  there is no community yet, and the window says so.
+- **The domains**, yours first. In a domain each creation is on or off, nothing else: on stages it there (sealed,
+  uploaded, its door opened), off takes it off. There are no groups, no Ctrl-selection and no mixed state.
+
+What feeds the community: this hive's creations on in any of its domains, what the domains it follows offer
+(`offeredInstances`), and whatever the showcase already names, so a live one can always be taken out. The front
+door's own staged list (`staged:<zone>`) is updated with the same difference when one is signed, so a phone that
+publishes what is staged does not undo a press made here. Locally the word is *stage* ("Stage changes", "staging");
+*publish* is the community's word alone.
+
+### One switch on every device, and the last one wins (jwize 2026-11-16)
+
+"When I turn it off from my phone it doesn't affect my desktop. Then when I turn off my desktop it doesn't affect my
+phone. They have to be globally in sync. Last one wins."
+
+What a creation's switch in your community says is one thing on every device: **lit is live**, in the owners' signed
+`showcase:<zone>`, and nothing else. The phone's own row is lit for what is live, as the hive's Publish window is (a
+live creation the staged list lacks, left by the old staging, is live and lit; there is no "leaving" state any more).
+Every switch changes what is live at once, with a compare-and-swap, so the last one to land is what both show:
+
+- **In or out of the community**, on either device, is the live record itself (`switchInCommunity` in the hive's
+  window, `applyToggle` when the phone asks the hive beside it, `openPublishOne` / `takeOutOne` on the phone), signed
+  expecting what was read and applied again to what is there when another device moved it; the staged list follows
+  the same difference.
+- **Off in a domain's row** takes a live creation out of the community at once, on the phone as in the hive, and so
+  does staging a creation that replaces one from the same subdomain.
+- **Publish only adds**: it puts what is staged and not yet live into the showcase and never takes anything out
+  (phone `publishChange`, hive `applyPublish`). A staged list that lacks a live creation (another device put it in
+  since) can therefore never undo that on a later Publish. Coming out is its own act, at once. The one exception is
+  the first record of a domain that has none: it is the staged list itself, which began as what the doors showed, so
+  what was taken out of that before stays out.
+- **A domain with no record yet** shows what its doors publish (`doorsOnZone`, read at the showcase home, never a bare
+  apex that may be the owner's relay). A switch there starts the first record from that: on is those and it, off is
+  those less it (hive `switchInCommunity` and `applyToggle`, phone `toggleChange`), never one creation alone and never
+  a Publish of the whole staged list, which would put whatever else is staged live unasked.
+- **Each device reads again when it is looked at, and while it is on screen**: the phone on a shown tab or a focused
+  window and every fifteen seconds while visible (`readAgain`, with the freshest ledger the host panel fetched); the
+  hive's Publish window likewise, on every open, and when this hive signs the community itself (`#lookAgain`). A look
+  that comes within five seconds of the last, or while one of its own switches is being signed, is put off, never
+  dropped; only the newest read asked may paint, and a read that was out while one of the window's own switches landed
+  is dropped.
 
 ### Every look uses the page it is on (jwize 2026-11-13)
 

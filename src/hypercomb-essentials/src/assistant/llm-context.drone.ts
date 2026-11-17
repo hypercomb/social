@@ -40,7 +40,6 @@ import { HIVE_TREE_READER_IOC_KEY, HypercombHiveTreeReader } from './hive-tree-r
 import { tileContextSeam } from './tile-context.js'
 import { TILE_PICTURES_IOC_KEY, TilePictures } from './tile-pictures.js'
 import { DoctrineQueenBee } from './doctrine.queen.js'
-import { lazyWindow } from './lazy-window.js'
 
 const SIG_RE = /^[0-9a-f]{64}$/i
 
@@ -115,13 +114,3 @@ window.ioc.register('@diamondcoreprocessor.com/LlmContextDrone', new LlmContextD
 // feature's — the doctrine is what every model is sent first — so this bee
 // registers them; doctrine.queen.ts is a dependency and registers nothing.
 window.ioc.register('@diamondcoreprocessor.com/DoctrineQueenBee', new DoctrineQueenBee())
-
-// The doctrine viewer arrives with its first open (lazy-window.ts): nothing
-// needs its code until `/doctrine` asks.
-lazyWindow({
-  effect: 'doctrine:open',
-  place: view => window.ioc.register('@diamondcoreprocessor.com/DoctrineWindowView', view),
-  load: () => import('./doctrine-window.view.js').then(m => m.DoctrineWindowView),
-  what: 'doctrine viewer',
-  tag: 'doctrine',
-})

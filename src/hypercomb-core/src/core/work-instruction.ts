@@ -60,13 +60,6 @@ const parseEdits = (body: readonly string[]): readonly { find: string; replace: 
   return edits
 }
 
-/** A write to the doctrine (essentials anatomy/doctrine.ts): the heading of
- *  the section it replaces or adds, and the section's new text. */
-export type DoctrineWriteRequest = {
-  readonly doctrine: string
-  readonly body: string
-}
-
 /** A file on a tile (essentials files/tile-files.drone.ts): the tile's
  *  website page, a text file attached to it by name, or — on a managed site
  *  door — the tile's business card: its details or its theme, each a JSON
@@ -107,12 +100,13 @@ export const writeHeaderOf = (lines: readonly string[]): string =>
 
 /** The write block's header and body, or why it is not one. The header is
  *  the first non-empty line: the module's signature and the section path, or
- *  `doctrine <heading>` for a rule of the hive's own doctrine. */
-export const parseWriteBlock = (lines: readonly string[], options: WriteBlockOptions = {}): WriteRequest | DoctrineWriteRequest | TileFileWriteRequest | { readonly error: string } => {
+ *  a tile's page, file or card. (The doctrine is no write target: it is tiles,
+ *  changed like any tile — retired 2026-11-16.) */
+export const parseWriteBlock = (lines: readonly string[], options: WriteBlockOptions = {}): WriteRequest | TileFileWriteRequest | { readonly error: string } => {
   const first = lines.findIndex(line => line.trim().length > 0)
   const usage = options.card
-    ? '<module signature> <src/path.ts>, page /<tile>, file /<tile> <name.ext>, card /<tile> [theme], or doctrine <heading>,'
-    : '<module signature> <src/path.ts>, page /<tile>, file /<tile> <name.ext>, or doctrine <heading>,'
+    ? '<module signature> <src/path.ts>, page /<tile>, file /<tile> <name.ext>, or card /<tile> [theme],'
+    : '<module signature> <src/path.ts>, page /<tile>, or file /<tile> <name.ext>,'
   if (first < 0) return { error: `a ${WRITE_FENCE_LANG} block must be closed, and must start with ${usage} on its first line` }
   const body = lines.slice(first + 1).join('\n')
   const module = /^\s*`?\/?(?:write\s+)?([0-9a-f]{64})\s+(src\/[A-Za-z0-9_.@/-]{1,200})`?\s*$/i.exec(lines[first])
@@ -121,11 +115,6 @@ export const parseWriteBlock = (lines: readonly string[], options: WriteBlockOpt
     const edits = parseEdits(lines.slice(first + 1))
     if (edits && 'error' in edits) return { error: edits.error }
     return { beeSig: module[1].toLowerCase(), section: module[2], body, ...(edits ? { edits } : {}) }
-  }
-  const doctrine = /^\s*`?\/?(?:write\s+)?doctrine\s+#*\s*([^`*~\r\n]{1,80}?)`?\s*$/i.exec(lines[first])
-  if (doctrine) {
-    if (!body.trim()) return { error: 'the write block has no body: a doctrine section is dropped by the participant, never emptied' }
-    return { doctrine: doctrine[1].trim(), body }
   }
   // A FILE ON A TILE. The route is a tile's path from the hive root; a page
   // is the tile's website page, a file is a text file attached to it by name.
@@ -201,9 +190,6 @@ export type WorkPowers = {
   /** A module section can be written back and run here as a draft: an
    *  installed package to draft onto, and changes allowed. */
   readonly canWrite?: boolean
-  /** The doctrine can be written: changes allowed and the anatomy's doctrine
-   *  is a hive artifact here (essentials anatomy/doctrine.ts). */
-  readonly canWriteDoctrine?: boolean
   /** A tile's page and text files can be written: changes allowed and the
    *  tile-files door is loaded here (essentials files/tile-files.drone.ts). */
   readonly canWriteFiles?: boolean
@@ -268,11 +254,6 @@ export const workInstruction = (powers: WorkPowers): string => {
     ].join('\n'))
   } else {
     parts.push('You cannot change the hive in this conversation.')
-  }
-  if (powers.canWriteDoctrine) {
-    parts.push([
-      `WRITING DOCTRINE — the rules under "# Doctrine" in the anatomy are the hive's own, and the participant can change them. To change one, or add one, reply with ONE block whose info string is \`${WRITE_FENCE_LANG}\`. Its first line is \`doctrine <heading>\` — the heading exactly as it follows ### — and every line after it is the section's complete new text, without the heading. A heading the doctrine does not have adds a section. The participant always reviews a doctrine change before it runs, and it applies from the next message. Only propose one when the participant asks to change a rule.`,
-    ].join('\n'))
   }
   if (powers.canWriteFiles && powers.managed) {
     const route = managedRoute(powers.managed)
@@ -611,12 +592,6 @@ export const writeRanMessage = (draft: { section: string; beeSig: string; path: 
 
 export const writeSkippedMessage = (section: string, request: string): string =>
   `The participant skipped your ${WRITE_FENCE_LANG} block; ${section} was not written and nothing changed. Do not propose it again unless they ask. Continue, or answer.${carry(request)}`
-
-export const doctrineRanMessage = (heading: string, sections: number, request: string): string =>
-  `The participant ran your ${WRITE_FENCE_LANG} block. The doctrine section "${heading}" is written; the doctrine now has ${sections} sections, and every message from the next one on is sent with it. Do not write it again unless something is wrong with it.\n\nContinue, or answer.${carry(request)}`
-
-export const doctrineFailedMessage = (reason: string, request: string): string =>
-  `Your ${WRITE_FENCE_LANG} block could not change the doctrine: ${reason}. Nothing changed. Continue: correct it, or tell the participant what went wrong.${carry(request)}`
 
 export const writeFailedMessage = (reason: string, request: string): string =>
   `Your ${WRITE_FENCE_LANG} block could not be drafted: ${reason}. Nothing changed. Continue: correct it, or tell the participant what went wrong.${carry(request)}`

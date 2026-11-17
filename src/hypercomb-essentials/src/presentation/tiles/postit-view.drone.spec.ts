@@ -16,6 +16,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
 import { _resetAdoptedRootsCache } from '../../sharing/adopted-roots.js'
+import { markAuthored } from '../../sharing/authored-sigs.js'
 import type { HistoryLike, ViewBack as ViewBackType } from '../../navigation/view-back.js'
 import type { ModeRegistry as ModeRegistryType } from '../../navigation/mode-registry.service.js'
 
@@ -101,6 +102,10 @@ beforeEach(async () => {
   pages.clear()
   pages.set('a'.repeat(64), '<h1>Arkanoid</h1>')
   pages.set('b'.repeat(64), '<h1>Arkanoid II</h1>')
+  // This hive's own pages: authored here, so they run in the page itself
+  // (a page this hive did not author runs sealed — feature-availability.ts runsSealed).
+  localStorage.removeItem('hc:authored-sigs')
+  for (const own of ['a', 'b']) markAuthored(own.repeat(64))
   payload = { version: 1, title: 'Arkanoid', htmlSig: 'a'.repeat(64) }
   modes = new ModeRegistry()
   services.set('@diamondcoreprocessor.com/ModeRegistry', modes)
@@ -184,6 +189,7 @@ describe('the opened post — a change swaps in place', () => {
     expect(post()).toBe(waiting)              // still missing: nothing to rebuild
 
     pages.set('c'.repeat(64), '<h1>Late page</h1>')
+    markAuthored('c'.repeat(64))
     window.dispatchEvent(new Event('synchronize'))
     await settle(500)
     expect(pageText()).toContain('Late page')
@@ -217,8 +223,9 @@ describe('the gate — a page from elsewhere that has not been reviewed renders 
     expect(claims).toEqual([true])                // the surface is held, not blanked
   })
 
-  it('the same page runs where it is your own — no adopted root over it', async () => {
+  it('the same page runs where it is your own — authored here, no adopted root over it', async () => {
     pages.set(FOREIGN, FOREIGN_PAGE)
+    markAuthored(FOREIGN)
     payload = { version: 1, title: 'Foreign', htmlSig: FOREIGN }
     EffectBus.emit('decorations:changed', {})
     await settle(500)
@@ -227,7 +234,10 @@ describe('the gate — a page from elsewhere that has not been reviewed renders 
     expect(post()?.querySelector('.postit-inert')).toBeNull()
   })
 
-  it('a review that lands flips the post from inert to live in place', async () => {
+  // A review lets it run; it never lets it run as you (2026-11-16): someone
+  // else's page runs in a sealed frame of its own origin, never in the hive's
+  // document (page-run-gate.ts pageRunsSealed).
+  it('a review that lands flips the post from inert to live in place — sealed, in a frame of its own', async () => {
     pages.set(FOREIGN, FOREIGN_PAGE)
     localStorage.setItem('hc:adopted-roots', JSON.stringify([['games']]))
     _resetAdoptedRootsCache()
@@ -241,7 +251,11 @@ describe('the gate — a page from elsewhere that has not been reviewed renders 
     window.dispatchEvent(new Event('synchronize'))
     await settle(500)
     expect(post()?.querySelector('.postit-inert')).toBeNull()
-    expect(post()?.querySelector('.postit-page')?.shadowRoot?.textContent).toContain('hello from elsewhere')
+    const frame = post()?.querySelector<HTMLIFrameElement>('.postit-apart iframe')
+    expect(frame?.getAttribute('sandbox')).toBe('allow-scripts')
+    expect(frame?.srcdoc).toContain('hello from elsewhere')
+    expect(post()?.querySelector('.postit-page')?.shadowRoot).toBeFalsy()
+    expect((window as { __postitRan?: boolean }).__postitRan).toBeUndefined()
     localStorage.removeItem('hc:feature-verified')
   })
 })

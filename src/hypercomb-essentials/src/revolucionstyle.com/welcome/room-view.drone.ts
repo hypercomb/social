@@ -18,6 +18,7 @@ import { Drone, EffectBus, RESOURCE_URL_PREFIX } from '@hypercomb/core'
 import { titleForLabel } from '../../commands/decoration-kind-index.js'
 import { defaultViewAt } from '../../commands/view-default.js'
 import { isFeatureHidden } from '../../sharing/feature-hidden.js'
+import { mayRunPage, pageRunsSealed } from '../../presentation/tiles/page-run-gate.js'
 import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { scopeCellPageCss } from '../../presentation/tiles/cell-page-css-scope.js'
 import { hoistPageStylesheets, stylesheetsSettled } from '../../presentation/tiles/cell-page-stylesheets.js'
@@ -146,6 +147,17 @@ export class RoomViewDrone extends Drone {
       this.#targetSegments = null
       this.#teardown()
       this.#vm()?.setMode('hexagons')
+      return
+    }
+    // This view runs a page in the hive's own document. A page that may not
+    // run, or runs only sealed because it is someone else's, belongs to the
+    // website view, which shows it inert or in a sealed frame (page-run-gate.ts);
+    // here it is never run.
+    if (!mayRunPage(segments, pageSig) || pageRunsSealed(segments, pageSig)) {
+      this.#targetSegments = null
+      this.#teardown()
+      this.#vm()?.setMode('hexagons')
+      EffectBus.emit('activity:log', { message: 'This room page is from elsewhere; open it as a website to see it', icon: 'chair' })
       return
     }
     const blob = await store.getResource(pageSig)

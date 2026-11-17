@@ -26,6 +26,7 @@ import {
   ENABLEMENT_CHANGED, readGlobalOnKinds, seedCohortOn,
 } from '../../sharing/behavior-enablement.js'
 import { LOUNGE_KIND, LOUNGE_VIEW, type LoungeRoomPayload } from './lounge-room.js'
+import { markAuthored } from '../../sharing/authored-sigs.js'
 
 const HEXAGONS = 'hexagons'
 const SIG_RE = /^[0-9a-f]{64}$/
@@ -96,6 +97,9 @@ export class LoungeQueenBee extends QueenBee {
       payload,
       mark: 'persistent',
     })
+    // The participant named this bundle to paint their own room: it is theirs
+    // to run in the hive (lounge-view.drone.ts).
+    markAuthored(bundleSig)
     EffectBus.emit('activity:log', { message: 'This cell is a room now', icon: 'chair' })
   }
 

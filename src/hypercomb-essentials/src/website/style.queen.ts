@@ -23,10 +23,10 @@
 // by construction and either may be said first.
 
 import { QueenBee, EffectBus, type MachineGrammar } from '@hypercomb/core'
-import { commitPageSig } from '../files/page-commit.js'
+import { commitPageSigFrom } from '../files/page-commit.js'
 import { inlineCssOf, withSharedStyle } from './page-cut.js'
 import { ATOM_ORDER } from './page-style.js'
-import { pageHtmlAt, putText, routeWords, shareStyle, standingAt } from './page-hive.js'
+import { pageHtmlAt, pageSigAt, putText, routeWords, shareStyle, standingAt } from './page-hive.js'
 
 export class StyleQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -64,7 +64,7 @@ export class StyleQueenBee extends QueenBee {
 
     const shared = await shareStyle(css, [])
     if (!shared.scope) throw new Error(`the style of ${where} could not be lifted. Nothing was changed`)
-    const result = await commitPageSig(at, await putText(withSharedStyle(html, shared.head, shared.scope)))
+    const result = await commitPageSigFrom(at, await putText(withSharedStyle(html, shared.head, shared.scope)), await pageSigAt(at))
     if (!result.ok) throw new Error(`the page could not be written: ${result.error}. Nothing was changed`)
 
     const lifted = ATOM_ORDER.filter(atom => shared.atoms[atom])

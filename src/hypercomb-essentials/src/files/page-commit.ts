@@ -13,6 +13,7 @@
 // by a model's write block (tile-files.drone.ts) and by inline text editing on
 // a website (presentation/tiles/site-text-edit.ts).
 
+import { isAuthored, markAuthored } from '../sharing/authored-sigs.js'
 import { get } from '@hypercomb/core'
 import { listDecorations, removeDecorationAndWait, writeDecoration } from '../commands/decoration-manifest.js'
 import { ensureWebsiteBoundAt } from '../commands/website-binding.js'
@@ -63,4 +64,15 @@ export async function commitPageSig(segments: readonly string[], htmlSig: string
  *  load-bearing: a failure here leaves the page written. */
 async function bind(segments: readonly string[]): Promise<void> {
   try { await ensureWebsiteBoundAt(segments) } catch { /* the page is written; binding is re-derived by the session sweep */ }
+}
+
+/** Point the tile at a page MADE FROM another — a page broken into parts, its
+ *  look lifted into shared sheets. The new page is this hive's own exactly when
+ *  the page it was made from is (authored-sigs.ts): your own page stays yours
+ *  in parts, and a page from elsewhere stays from elsewhere, so it still runs
+ *  sealed (feature-availability.ts runsSealed, 2026-11-16). */
+export async function commitPageSigFrom(segments: readonly string[], htmlSig: string, source: string | null): Promise<PageCommit> {
+  const committed = await commitPageSig(segments, htmlSig)
+  if (committed.ok && source && isAuthored(source)) markAuthored(htmlSig)
+  return committed
 }

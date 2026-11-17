@@ -196,7 +196,11 @@ const reviewDeps = (drafts: ModuleDraftsProvider, sync: HostSyncLike): ReviewDep
 const jevRead = async (host: string, changeSig: string, record: ModuleChangeRecord, deps: ReviewDeps, t: Say, toast: Toast): Promise<void> => {
   const jev = window.ioc?.get?.(JEV_IOC_KEY) as JevLike | undefined
   if (!jev?.reading || !jev.enabled?.()) return
-  const doctrine = jevDoctrineSections((window.ioc?.get?.(ANATOMY_KEY) as { text?: string } | undefined)?.text ?? '')
+  // The hive's doctrine, never the build's: wait until the hive's is read.
+  const anatomy = window.ioc?.get?.(ANATOMY_KEY) as { text?: string; doctrine?: { ready?: Promise<void>; sections?: () => readonly unknown[] } } | undefined
+  await anatomy?.doctrine?.ready
+  const doctrine = jevDoctrineSections(anatomy?.text ?? '')
+  if (!anatomy?.doctrine?.sections?.().length) { toast(t('module.nojev', 'Jev did not read {name}: {reason}.', { name: record.sandbox, reason: 'this hive holds no doctrine to read it against' }), 'warning'); return }
   const read = await jevReadTrial(host, changeSig, record, doctrine, input => jev.reading!(input), deps)
   if (!read.ok) { toast(t('module.nojev', 'Jev did not read {name}: {reason}.', { name: record.sandbox, reason: read.error }), 'warning'); return }
   const worst = read.record.files.reduce((top, file) => file.worst.breaks > top.breaks ? file.worst : top, read.record.files[0]!.worst)

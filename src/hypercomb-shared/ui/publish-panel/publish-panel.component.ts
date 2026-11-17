@@ -1,43 +1,42 @@
 // hypercomb-shared/ui/publish-panel/publish-panel.component.ts
 //
-// Right-docked "Publish" panel — a DRILLDOWN (jwize 2026-11-04):
+// Right-docked "Publish" panel — TWO ACTS, NOTHING ELSE (jwize 2026-11-16: "you
+// should have your own domain and the community separate since you are feeding
+// the community from all domains including yourself. Then there are only on off
+// no selected … This makes only two things you can do in the app here. Add to
+// community through domains and publish live"):
 //
-//   THE DOMAINS — the hosts you carry, about two thirds of the window, and under
-//   them a shorter list of NAMED GROUPS, each a saved set of domains. Press a
-//   domain (or a group) and you are in it.
+//   YOUR COMMUNITY — apart, at the top, on your own domain. Everything switched
+//   on in any domain stands in it: GRAY while it is only staged, LIT once it is
+//   published live (the owners' signed showcase, what every visitor sees). A
+//   press on a gray one publishes it live; a press on a lit one takes it out —
+//   gray again, still on in its domains. A name with several versions (two
+//   domains, two publishers) opens to its versions, and a press on one makes
+//   that one the live one.
 //
-//   MANY AT ONCE — hold Ctrl (⌘) and click several domains; the moment you let
-//   go, their creations open together. A set you want again is saved as a group
-//   from there.
+//   THE DOMAINS — yours first, then every host you carry. Press one and you are
+//   in it: the creations, each a switch, ON or OFF. On STAGES it on that domain
+//   (sealed, uploaded, its door opened) — and it is then gray in the community.
+//   Locally, publishing is staging; publish is the community's word alone.
 //
-//   THE CREATIONS — a list, each one a switch: on = published on the domain (or
-//   on every domain of the set), off = not. Across a set a creation can be MIXED
-//   — live on some of the domains and not the others — and then Sync makes it
-//   all on or all off. That is the whole window.
-//
-// ONE INPUT, always at the top: it searches whatever list is showing, and after
-// "Save as group" it takes the group's name, with a button to add it. And
-// PUBLISH CHANGES under it: every creation on the list that has moved on from
-// what the world is served.
-//
-// The switch is signed (the drone writes the doors into the hive index), and one
-// creation across a set of domains is ONE index write (`publish:doors`).
+// ONE INPUT, always at the top: it searches whatever list is showing. And STAGE
+// CHANGES under it: every staged creation on the list that has moved on from
+// what its domains serve.
 //
 // Shell UI, so it must NOT import essentials. Everything arrives on the
-// `publish:render` payload (the drone owns the read-model and every verdict) and
-// the `hosts:render` payload (the groups), and leaves as intents: publish:doors,
-// publish:run-many, publish:inspect, publish:close, hosts:group-save,
-// hosts:group-remove.
+// `publish:render` payload (the drone owns the read-model, every verdict and the
+// community's live list) and leaves as intents: publish:doors, publish:run-many,
+// publish:community, publish:inspect, publish:close.
 //
 // THE DISCIPLINE THIS SURFACE INHERITS: the drone never claims more than it can
 // prove, and the panel must not undo that in the rendering. `unknown`,
 // `cannot-compare` and `comparing` are QUIET — they are never a change, and the
-// top button says "checking" rather than "nothing to publish" while they run.
+// top button says "checking" rather than "nothing to stage" while they run.
 // `gone` is the only 404-backed absence, and `forged` — a host serving an index
 // that is not ours — is the ONE loud banner in the panel.
 //
-// The pure answers (what a domain hosts, a creation's state across a set, the
-// text match) are in publish-apps.ts.
+// The pure answers (what a domain hosts, the community's entries, the text
+// match) are in publish-apps.ts.
 
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { ChangeDetectionStrategy, Component, computed, effect, signal, viewChild, type ElementRef, type OnDestroy } from '@angular/core'
@@ -45,7 +44,10 @@ import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { signalSession } from '../window-session'
-import { appsOn, hasChanges, matchesQuery, scopeState, wantAfterPress, zonesToMove, type ScopeState } from './publish-apps'
+import {
+  appsOn, communityEntries, communityNameKey, communityPress, hasChanges, lineageName, matchesQuery,
+  type CommunityEntry, type CommunityVersion,
+} from './publish-apps'
 
 // Mirrors of the essentials read-model shapes (shared cannot import
 // essentials): the fields THIS panel reads, identical to PublishRenderPayload
@@ -77,8 +79,19 @@ interface PublishRow {
   hostTrouble?: { host: string; why: string } | null
 }
 
+/** Mirrors PublishCommunity in sharing/publish-status.drone.ts. */
+interface CommunityPayload {
+  zone: string
+  read: 'ok' | 'none' | 'unreachable' | 'checking'
+  live: { pubkey: string; lineage: string }[]
+  offered: { name: string; pubkey: string; lineage: string; hosts: string[] }[]
+  busy: string[]
+}
+
 interface PublishRenderPayload {
   open: boolean
+  /** Your own domain — the public host you named; '' when none. */
+  zone?: string
   /** The hosts this participant actually has — the domains the list shows. */
   hosts: string[]
   /** The row for the CURRENT PAGE — the tile you are standing on. */
@@ -89,14 +102,15 @@ interface PublishRenderPayload {
   rows: PublishRow[]
   /** The selected-apps run while it runs; null otherwise. */
   batch?: { done: number; total: number; failed: number } | null
+  /** Optional: an older drone sends none. */
+  community?: CommunityPayload
 }
 
-/** A named set of domains — mirrors `HostGroup` in sharing/community-hosts.ts. */
-interface HostGroupRow { name: string; zones: string[] }
-
-/** Where the drilldown is: the domains it covers, what it is called, and the
- *  saved group it is, when it is one (its domains then follow the group). */
-interface Drill { zones: string[]; title: string; group: string | null }
+/** Where the drilldown is: one domain, the community, or one name's versions. */
+type Drill =
+  | { kind: 'domain'; zone: string }
+  | { kind: 'showcase' }
+  | { kind: 'versions'; name: string }
 
 /** The word at the right end of a row: what is true of it right now. */
 interface RowWord {
@@ -126,9 +140,12 @@ type TilesRailFactoryLike = {
 }
 const RAIL_KEY = '@diamondcoreprocessor.com/AgentTilesRailFactory'
 
-const isMultiPress = (event: Event): boolean => {
-  const press = event as MouseEvent | KeyboardEvent
-  return press.ctrlKey || press.metaKey
+const NO_COMMUNITY: CommunityPayload = { zone: '', read: 'checking', live: [], offered: [], busy: [] }
+
+const pressKey = (event: KeyboardEvent, act: () => void): void => {
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  event.preventDefault()
+  act()
 }
 
 @Component({
@@ -153,12 +170,9 @@ export class PublishPanelComponent implements OnDestroy {
     this.visible,
     (open) => { EffectBus.emitTransient('publish:shown', { open }) },
     {
-      // One level per press: a group being named, the search, the domains held
-      // for opening, a level of the drilldown — then the window.
+      // One level per press: the search, a level of the drilldown — then the window.
       dismiss: () => {
-        if (this.naming()) { this.cancelNaming(); return true }
         if (this.query() !== '') { this.query.set(''); return true }
-        if (this.chosen().size > 0) { this.chosen.set(new Set()); return true }
         if (this.drill()) { this.back(); return true }
         return false
       },
@@ -169,10 +183,13 @@ export class PublishPanelComponent implements OnDestroy {
   /** THE HOSTS YOU KNOW — the domains the list is made of. A domain is not
    *  typed here; whoever runs a host is a handshake in the host directory. */
   readonly hosts = signal<string[]>([])
+  /** YOUR OWN DOMAIN — the public host you named, and your community's home. */
+  readonly yourZone = signal('')
   readonly pubkey = signal('')
   readonly index = signal<PublishIndexState>('checking')
   readonly refreshing = signal(false)
   readonly rows = signal<PublishRow[]>([])
+  readonly community = signal<CommunityPayload>(NO_COMMUNITY)
 
   /** THE CURRENT PAGE's row — the tile you are standing on. Walking to a tile
    *  selects it, which is why the pane needs no picker of its own. */
@@ -180,13 +197,14 @@ export class PublishPanelComponent implements OnDestroy {
   readonly current = computed<PublishRow | null>(() =>
     this.rows().find(r => r.key === this.currentKey()) ?? null)
 
-  /** Every domain you publish to: the ones you carry, plus any the current
-   *  tile already names — a door that is on must never be missing its row. */
-  readonly domains = computed<string[]>(() =>
-    [...new Set([...this.hosts(), ...(this.current()?.zones ?? [])])].sort())
-
-  /** Your named groups of domains, as the hosts drone renders them. */
-  readonly groups = signal<HostGroupRow[]>([])
+  /** Every domain you stage to — yours first, then the ones you carry, plus any
+   *  the current tile already names: a door that is on must never be missing
+   *  its row. */
+  readonly domains = computed<string[]>(() => {
+    const yours = this.yourZone()
+    const rest = [...new Set([...this.hosts(), ...(this.current()?.zones ?? [])])].filter(z => z && z !== yours).sort()
+    return yours ? [yours, ...rest] : rest
+  })
 
   /** The selected-apps run while it runs (`publish:run-many`). */
   readonly batch = signal<{ done: number; total: number; failed: number } | null>(null)
@@ -208,134 +226,69 @@ export class PublishPanelComponent implements OnDestroy {
 
   /** The text the showing list is searched by. */
   readonly query = signal('')
-  /** A group is being named: the input takes its name instead of searching. */
-  readonly naming = signal(false)
-  readonly groupName = signal('')
-  /** What the input shows — the search, or the group's name while naming. */
-  readonly inputValue = computed(() => this.naming() ? this.groupName() : this.query())
 
   onInput(text: string): void {
-    if (this.naming()) this.groupName.set(text)
-    else this.query.set(text)
-  }
-
-  /** Enter in the input adds the group while one is being named. */
-  onEnter(): void {
-    if (this.naming()) this.addGroup()
+    this.query.set(text)
   }
 
   clearQuery(): void {
     this.query.set('')
   }
 
-  /** While a group is being named the text is its name, not a search. */
-  readonly #text = computed<string>(() => this.naming() ? '' : this.query())
-
-  // ── THE DOMAINS, AND UNDER THEM THE GROUPS ───────────────────────────────
-
-  /** Domains held (Ctrl/⌘-click) to be opened together when the key is let go. */
-  readonly chosen = signal<ReadonlySet<string>>(new Set())
+  // ── THE TOP LEVEL: YOUR COMMUNITY, THEN THE DOMAINS ──────────────────────
 
   /** The domains the search leaves. */
   readonly visibleDomains = computed<string[]>(() => {
-    const text = this.#text()
+    const text = this.query()
     return this.domains().filter(zone => matchesQuery(text, zone))
   })
 
-  /** The groups the search leaves — by name, or by a domain they hold. */
-  readonly visibleGroups = computed<HostGroupRow[]>(() => {
-    const text = this.#text()
-    return this.groups().filter(g => matchesQuery(text, g.name, ...g.zones))
-  })
-
-  /** How many creations a domain hosts. */
+  /** How many creations a domain has staged on it. */
   hostedOn(zone: string): number {
     return appsOn(this.rows(), zone).length
   }
 
-  isChosen(zone: string): boolean {
-    return this.chosen().has(zone)
+  isYours(zone: string): boolean {
+    return zone === this.yourZone()
   }
 
-  /** A domain pressed: Ctrl/⌘ holds it for opening together, a plain press
-   *  opens it on its own. */
-  pressDomain(zone: string, event: Event): void {
-    if (isMultiPress(event)) {
-      const next = new Set(this.chosen())
-      if (next.has(zone)) next.delete(zone)
-      else next.add(zone)
-      this.chosen.set(next)
-      return
-    }
-    this.chosen.set(new Set())
-    this.#open([zone], zone, null)
+  openDomain(zone: string): void {
+    this.#open({ kind: 'domain', zone })
   }
 
   domainKey(zone: string, event: KeyboardEvent): void {
-    if (event.key !== 'Enter' && event.key !== ' ') return
-    event.preventDefault()
-    this.pressDomain(zone, event)
+    pressKey(event, () => this.openDomain(zone))
   }
 
-  /** The held domains, in the order the list shows them. */
-  #openChosen(): void {
-    const held = this.domains().filter(zone => this.chosen().has(zone))
-    this.chosen.set(new Set())
-    if (held.length === 0) return
-    this.#open(held, held.length === 1 ? held[0] : '', null)
+  openCommunity(): void {
+    this.#open({ kind: 'showcase' })
   }
 
-  openGroup(group: HostGroupRow): void {
-    this.chosen.set(new Set())
-    this.#open([...group.zones], group.name, group.name)
-  }
-
-  /** Forget a group. The domains in it, and what is published to them, stay. */
-  removeGroup(group: HostGroupRow, event: Event): void {
-    event.stopPropagation()
-    EffectBus.emit('hosts:group-remove', { name: group.name })
-    if (this.drill()?.group === group.name) this.back()
-  }
-
-  groupKey(group: HostGroupRow, event: KeyboardEvent): void {
-    if (event.key !== 'Enter' && event.key !== ' ') return
-    event.preventDefault()
-    this.openGroup(group)
+  communityKey(event: KeyboardEvent): void {
+    pressKey(event, () => this.openCommunity())
   }
 
   // ── THE DRILLDOWN ──────────────────────────────────────────────────────
 
-  /** Where the drilldown is; null = the list of domains. */
+  /** Where the drilldown is; null = your community and the domains. */
   readonly drill = signal<Drill | null>(null)
 
-  #open(zones: string[], title: string, group: string | null): void {
+  #open(drill: Drill): void {
     this.query.set('')
-    this.cancelNaming()
-    this.drill.set({ zones, title, group })
+    this.drill.set(drill)
   }
 
+  /** One level up: a name's versions go back to the community; anything else
+   *  to the top. */
   back(): void {
-    this.cancelNaming()
     this.query.set('')
-    this.drill.set(null)
+    this.drill.set(this.drill()?.kind === 'versions' ? { kind: 'showcase' } : null)
   }
 
-  /** The domains the drilldown covers: a group's follow the group. */
-  readonly scopeZones = computed<string[]>(() => {
+  /** The domain the drilldown is in; '' outside one. */
+  readonly scopeZone = computed<string>(() => {
     const drill = this.drill()
-    if (!drill) return []
-    if (drill.group) {
-      const held = this.groups().find(g => g.name === drill.group)
-      if (held) return held.zones
-    }
-    return drill.zones
-  })
-
-  /** What the drilldown is called: the domain, the group, or how many domains. */
-  readonly scopeTitle = computed<string>(() => {
-    const drill = this.drill()
-    if (!drill) return ''
-    return drill.title || (this.scopeZones().length === 1 ? this.scopeZones()[0] : '')
+    return drill?.kind === 'domain' ? drill.zone : ''
   })
 
   /** Rows switched OFF from the list stay on it, dimmed, until the window
@@ -344,14 +297,13 @@ export class PublishPanelComponent implements OnDestroy {
    *  Keyed by the row's key; the value is the row as it was. */
   readonly #kept = signal<ReadonlyMap<string, PublishRow>>(new Map())
 
-  /** The creations the drilldown lists: every one this hive can publish — the
-   *  tile you are standing on (so an unpublished one can be switched on) and
-   *  everything already published — switched on or off across the scope. The
-   *  search shortens it to the text. */
+  /** The creations a domain lists: every one this hive can stage — the tile you
+   *  are standing on (so an unstaged one can be switched on) and everything
+   *  already staged — each on or off there. The search shortens it to the text. */
   readonly creations = computed<PublishRow[]>(() => {
-    if (!this.drill()) return []
+    if (this.drill()?.kind !== 'domain') return []
     const rows = this.rows()
-    const text = this.#text()
+    const text = this.query()
     const found = new Map<string, PublishRow>()
     for (const row of rows) if (row.segments.length > 0) found.set(row.key, row)
     for (const [key, was] of this.#kept()) if (!found.has(key)) found.set(key, was)
@@ -404,11 +356,11 @@ export class PublishPanelComponent implements OnDestroy {
     return this.address(row, zone) === zone
   }
 
-  // ── THE SWITCH ─────────────────────────────────────────────────────────
+  // ── THE DOMAIN'S SWITCH: STAGE ON, OR OFF ────────────────────────────────
 
-  /** Is this branch published on this domain? Only while the signed index
-   *  names it — and, when its entry lists doors, only on those. An entry with
-   *  no doors opens everywhere (every index written before doors). */
+  /** Is this branch staged on this domain? Only while the signed index names
+   *  it — and, when its entry lists doors, only on those. An entry with no
+   *  doors opens everywhere (every index written before doors). */
   doorOn(row: PublishRow | null, zone: string): boolean {
     if (!row) return false
     const pressed = this.#pressed().get(`${row.key}\n${zone}`)
@@ -417,18 +369,13 @@ export class PublishPanelComponent implements OnDestroy {
     return row.doors === null || row.doors.includes(zone)
   }
 
-  /** How a creation stands across the drilldown's domains: on, off, or mixed. */
-  stateOf(row: PublishRow): ScopeState {
-    return scopeState(this.scopeZones(), zone => this.doorOn(row, zone))
-  }
-
-  /** How many of the scope's domains a creation is on. */
-  onCount(row: PublishRow): number {
-    return this.scopeZones().filter(zone => this.doorOn(row, zone)).length
+  /** On or off in the domain the drilldown is in. */
+  isOn(row: PublishRow): boolean {
+    return this.doorOn(row, this.scopeZone())
   }
 
   /** Switches shown the moment they are pressed. The first domain is a full
-   *  publish and the last is a withdrawal; the signed index says so only when
+   *  stage and the last is a withdrawal; the signed index says so only when
    *  that lands, so the press answers for the switch until the drone has
    *  finished (see the settle effect) and the real state takes over. */
   readonly #pressed = signal<ReadonlyMap<string, boolean>>(new Map())
@@ -457,46 +404,32 @@ export class PublishPanelComponent implements OnDestroy {
     return !!row && row.segments.length > 0 && !row.busyPhase && row.state !== 'comparing'
   }
 
-  /** A creation pressed: off goes on across the domains, on goes off, and a mix
-   *  is synced to on. */
+  /** A creation pressed in a domain: off is staged on, on is taken off. The
+   *  drone decides what it costs: a signed doors rewrite for a staged branch, a
+   *  full stage for the first domain, a withdrawal for the last. The switch
+   *  answers at once. */
   press(row: PublishRow): void {
-    this.#move(row, wantAfterPress(this.stateOf(row)))
-  }
-
-  rowKey(row: PublishRow, event: KeyboardEvent): void {
-    if (event.key !== 'Enter' && event.key !== ' ') return
-    event.preventDefault()
-    this.press(row)
-  }
-
-  /** SYNC — a mixed creation made one thing or the other, on every domain. */
-  sync(row: PublishRow, on: boolean, event: Event): void {
-    event.stopPropagation()
-    this.#move(row, on)
-  }
-
-  /** Move a creation to `on` across the scope — only the domains not already
-   *  there — as ONE intent. The drone decides what it costs: a signed doors
-   *  rewrite for a published branch, a full publish for the first domain, a
-   *  withdrawal for the last. The switch answers at once. */
-  #move(row: PublishRow, on: boolean): void {
-    if (!this.canSwitch(row)) return
-    const zones = zonesToMove(this.scopeZones(), zone => this.doorOn(row, zone), on)
-    if (zones.length === 0) return
-    for (const zone of zones) this.#press(`${row.key}\n${zone}`, on)
+    const zone = this.scopeZone()
+    if (!zone || !this.canSwitch(row)) return
+    const on = !this.doorOn(row, zone)
+    this.#press(`${row.key}\n${zone}`, on)
     this.#kept.update(m => {
       const next = new Map(m)
       if (on) next.delete(row.key)
       else if (row.key !== this.currentKey()) next.set(row.key, { ...row, live: null, state: 'unpublished' })
       return next
     })
-    EffectBus.emit('publish:doors', { key: row.key, zones, on })
+    EffectBus.emit('publish:doors', { key: row.key, zones: [zone], on })
+  }
+
+  rowKey(row: PublishRow, event: KeyboardEvent): void {
+    pressKey(event, () => this.press(row))
   }
 
   /** What is true of a creation right now, in a word — or null for nothing to say. */
   wordOf(row: PublishRow): RowWord | null {
     if (row.busyPhase) return { key: 'publish.state.pending', kind: 'busy' }
-    if (this.stateOf(row) === 'off') return null
+    if (!this.isOn(row)) return null
     if (row.state === 'drift') return { key: 'publish.apps.changed', kind: 'changed' }
     if (row.state === 'gone') return { key: 'publish.state.gone', kind: 'gone' }
     return null
@@ -516,73 +449,107 @@ export class PublishPanelComponent implements OnDestroy {
   }
 
   /** Said under a creation that is on a domain which takes none of its bytes —
-   *  when that domain is one of the scope's (or the only one there is). */
+   *  when that domain is the one the drilldown is in. */
   troubleOn(row: PublishRow): boolean {
     const trouble = row.hostTrouble
-    if (!trouble) return false
-    const zones = this.scopeZones()
-    return (zones.includes(trouble.host) && this.doorOn(row, trouble.host)) || (this.domains().length === 1 && this.stateOf(row) !== 'off')
+    return !!trouble && trouble.host === this.scopeZone() && this.isOn(row)
   }
 
-  // ── PUBLISH CHANGES ────────────────────────────────────────────────────
+  // ── YOUR COMMUNITY: GRAY IS STAGED, LIT IS LIVE ──────────────────────────
 
-  /** Every row the window is showing, once each: the creations in a drilldown;
-   *  every creation published anywhere (and the tile you stand on) at the top. */
+  /** Everything feeding the community, one entry per name: this hive's
+   *  creations on in any domain (staged), what the domains it follows offer,
+   *  and what the signed showcase names live. */
+  readonly #entries = computed<CommunityEntry[]>(() => {
+    const domains = this.domains()
+    const own = this.rows()
+      .filter(row => row.segments.length > 0)
+      .map(row => ({ pubkey: this.pubkey(), lineage: row.key, name: this.label(row) || lineageName(row.key), hosts: domains.filter(zone => this.doorOn(row, zone)) }))
+      .filter(v => v.hosts.length > 0)
+    const community = this.community()
+    return communityEntries(this.pubkey(), own, community.offered, community.live)
+  })
+
+  /** The entries the search leaves — by name, or by a domain a version is on. */
+  readonly communityList = computed<CommunityEntry[]>(() => {
+    const text = this.query()
+    return this.#entries().filter(entry => matchesQuery(text, entry.name, ...entry.versions.flatMap(v => v.hosts)))
+  })
+
+  /** How many names are live, and how many wait staged. */
+  readonly communityCounts = computed<{ live: number; staged: number }>(() => {
+    const entries = this.#entries()
+    const live = entries.filter(e => e.live).length
+    return { live, staged: entries.length - live }
+  })
+
+  /** The name whose versions are open, with its versions; null elsewhere. */
+  readonly versionsOf = computed<CommunityEntry | null>(() => {
+    const drill = this.drill()
+    if (drill?.kind !== 'versions') return null
+    return this.#entries().find(e => communityNameKey(e.name) === communityNameKey(drill.name)) ?? null
+  })
+
+  isBusy(version: CommunityVersion): boolean {
+    return this.community().busy.includes(`${version.pubkey}\n${version.lineage}`)
+  }
+
+  entryBusy(entry: CommunityEntry): boolean {
+    return entry.versions.some(v => this.isBusy(v))
+  }
+
+  /** A name pressed in the community: one version publishes live or comes out;
+   *  several open to their versions. */
+  pressEntry(entry: CommunityEntry): void {
+    if (entry.versions.length > 1) { this.#open({ kind: 'versions', name: entry.name }); return }
+    this.pressVersion(entry, entry.versions[0])
+  }
+
+  entryKey(entry: CommunityEntry, event: KeyboardEvent): void {
+    pressKey(event, () => this.pressEntry(entry))
+  }
+
+  /** One version pressed: gray → live (the other versions of the name out with
+   *  it), live → out, gray again. The drone signs it; the row says busy until
+   *  the write lands. With no domain of your own named, the drone says so. */
+  pressVersion(entry: CommunityEntry, version: CommunityVersion | undefined): void {
+    if (!version || this.isBusy(version)) return
+    EffectBus.emit('publish:community', communityPress(entry, version))
+  }
+
+  versionKey(entry: CommunityEntry, version: CommunityVersion, event: KeyboardEvent): void {
+    pressKey(event, () => this.pressVersion(entry, version))
+  }
+
+  /** Where a version is on, as a person reads it. */
+  versionWhere(version: CommunityVersion): string {
+    return version.hosts.join(' · ')
+  }
+
+  // ── STAGE CHANGES ──────────────────────────────────────────────────────
+
+  /** Every row the window is showing, once each: the creations in a domain;
+   *  every creation staged anywhere (and the tile you stand on) elsewhere. */
   readonly #listed = computed<PublishRow[]>(() =>
-    this.drill() ? this.creations() : this.rows().filter(row => row.segments.length > 0))
+    this.drill()?.kind === 'domain' ? this.creations() : this.rows().filter(row => row.segments.length > 0))
 
   /** A sweep re-reads every row, and until it reaches one nothing is known
    *  about it — a button must not say there are no changes. */
   readonly checking = computed<boolean>(() =>
     this.refreshing() || this.#listed().some(row => row.state === 'comparing'))
 
-  /** Everything on the list that has moved on from what the world is served —
-   *  not a row already being published by its own press, and in a drilldown only
-   *  what is live on the scope's domains. */
+  /** Everything on the list that has moved on from what its domains serve —
+   *  not a row already being staged by its own press, and in a domain only
+   *  what is on there. */
   readonly changed = computed<PublishRow[]>(() =>
-    this.#listed().filter(row => hasChanges(row) && !row.busyPhase && (!this.drill() || this.stateOf(row) !== 'off')))
+    this.#listed().filter(row => hasChanges(row) && !row.busyPhase && (this.drill()?.kind !== 'domain' || this.isOn(row))))
 
-  /** PUBLISH CHANGES, at the top: every changed creation on the list, one after
+  /** STAGE CHANGES, at the top: every changed creation on the list, one after
    *  another (the drone runs them deepest first). */
-  publishChanges(): void {
+  stageChanges(): void {
     const keys = this.changed().map(row => row.key)
     if (this.batch() || keys.length === 0) return
     EffectBus.emit('publish:run-many', { keys })
-  }
-
-  // ── A GROUP FROM A SET OF DOMAINS ────────────────────────────────────────
-
-  /** A set gathered by ctrl-selection can be kept: two or more domains, not
-   *  already a saved group. */
-  readonly canSaveGroup = computed<boolean>(() => {
-    const drill = this.drill()
-    return !!drill && !drill.group && this.scopeZones().length >= 2
-  })
-
-  /** Save as group pressed: the one input takes the group's name. */
-  startNaming(): void {
-    if (!this.canSaveGroup()) return
-    this.groupName.set('')
-    this.naming.set(true)
-    queueMicrotask(() => document.querySelector<HTMLInputElement>('hc-publish-panel .psearch-input')?.focus())
-  }
-
-  cancelNaming(): void {
-    this.naming.set(false)
-    this.groupName.set('')
-  }
-
-  readonly canAddGroup = computed<boolean>(() => this.naming() && this.groupName().trim() !== '' && this.canSaveGroup())
-
-  /** Add the group: these domains, under the typed name. It then shows in the
-   *  list under the domains, and the drilldown becomes it. */
-  addGroup(): void {
-    if (!this.canAddGroup()) return
-    const name = this.groupName().trim()
-    const zones = [...this.scopeZones()]
-    EffectBus.emit('hosts:group-save', { name, zones })
-    this.drill.set({ zones, title: name, group: name })
-    this.cancelNaming()
   }
 
   // ── the header ────────────────────────────────────────────────────────
@@ -591,8 +558,8 @@ export class PublishPanelComponent implements OnDestroy {
    *  our key is not an outage, it is somebody else's index. */
   readonly forged = computed(() => this.index() === 'forged')
 
-  /** Why the list is empty when it is: no key to sign with, a first read still
-   *  running, or the hive root, which is no tile. */
+  /** Why a domain's list is empty when it is: no key to sign with, a first read
+   *  still running, or the hive root, which is no tile. */
   hereHint(): string {
     if (!this.pubkey()) return 'publish.failure.no-signer'
     if (this.refreshing() && this.rows().length === 0) return 'publish.header.index-checking'
@@ -600,7 +567,7 @@ export class PublishPanelComponent implements OnDestroy {
   }
 
   /** Is the list shorter than it would be? */
-  readonly shortened = computed<boolean>(() => this.#text().trim() !== '')
+  readonly shortened = computed<boolean>(() => this.query().trim() !== '')
 
   constructor() {
     // A press settles when the act it started has ended: seen busy, then idle.
@@ -612,14 +579,6 @@ export class PublishPanelComponent implements OnDestroy {
         else if (this.#pressedBusy.has(press)) this.#release(press)
       }
     })
-
-    // LET GO OF CTRL (⌘) and the domains held open together, right then.
-    const onKeyUp = (event: KeyboardEvent): void => {
-      if (event.key !== 'Control' && event.key !== 'Meta') return
-      if (this.visible() && !this.drill() && this.chosen().size > 0) this.#openChosen()
-    }
-    window.addEventListener('keyup', onKeyUp)
-    this.#cleanups.push(() => window.removeEventListener('keyup', onKeyUp))
 
     // The left sidebar. Its host exists only while the window is open, so
     // this re-fires as the window comes and goes; the rail is made once and
@@ -643,17 +602,10 @@ export class PublishPanelComponent implements OnDestroy {
       else registry?.whenReady?.(RAIL_KEY, value => bring(value as TilesRailFactoryLike))
     })
 
-    // THE GROUPS come from the hosts drone, which owns the domains they name.
-    this.#cleanups.push(EffectBus.on<{ groups?: unknown }>('hosts:render', (p) => {
-      const held = Array.isArray(p?.groups) ? p!.groups as { name?: unknown; zones?: unknown }[] : []
-      this.groups.set(held
-        .map(g => ({ name: String(g?.name ?? ''), zones: Array.isArray(g?.zones) ? g.zones.map(String).filter(Boolean) : [] }))
-        .filter(g => g.name !== '' && g.zones.length > 0))
-    }))
-
     this.#cleanups.push(EffectBus.on<PublishRenderPayload>('publish:render', (p) => {
       if (!p) return
       this.hosts.set(Array.isArray(p.hosts) ? p.hosts.map(String).filter(Boolean) : [])
+      this.yourZone.set(String(p.zone ?? '').toLowerCase())
       this.pubkey.set(String(p.pubkey ?? ''))
       const nextCurrent = String(p.currentKey ?? '')
       // Walking to another tile re-aims the pane.
@@ -662,7 +614,10 @@ export class PublishPanelComponent implements OnDestroy {
       // re-enters this handler. Asking before the key and the visibility were
       // recorded made every re-entry look like a new subject — an endless
       // inspect/render loop that overflowed the stack and killed publishing.
-      const inspect = !!nextCurrent && (nextCurrent !== this.currentKey() || (!this.visible() && p.open === true))
+      // Only while the window shows: the drone keeps the list current with
+      // the window closed (renders carry open:false), and a walk made then is
+      // asked about when the window next opens.
+      const inspect = !!nextCurrent && p.open === true && (nextCurrent !== this.currentKey() || !this.visible())
       this.currentKey.set(nextCurrent)
       this.index.set(this.#normIndex(p.index))
       this.refreshing.set(p.refreshing === true)
@@ -685,6 +640,7 @@ export class PublishPanelComponent implements OnDestroy {
             hostTrouble: row.hostTrouble ? { host: String(row.hostTrouble.host ?? ''), why: String(row.hostTrouble.why ?? '') } : null,
           }))
         : [])
+      this.community.set(this.#normCommunity(p.community))
       this.batch.set(p.batch ? { done: Number(p.batch.done) || 0, total: Number(p.batch.total) || 0, failed: Number(p.batch.failed) || 0 } : null)
       // No sibling is closed here — the lane decides what fits on an edge and
       // parks whatever it displaces. A parked window keeps where it was.
@@ -701,27 +657,42 @@ export class PublishPanelComponent implements OnDestroy {
 
   // ── the intents ───────────────────────────────────────────────────
 
-  /** Closed from its own button: the window forgets where it was — the list of
-   *  domains, nothing held, nothing kept. */
+  /** Closed from its own button: the window forgets where it was — the top
+   *  level, nothing kept, nothing typed. */
   close(): void {
     this.visible.set(false)
     this.#reset()
     EffectBus.emit('publish:close', {})
   }
 
-  /** Back to the list of domains, with nothing held, kept or typed. */
+  /** Back to the top, with nothing kept or typed. */
   #reset(): void {
     if (this.#kept().size > 0) this.#kept.set(new Map())
-    if (this.chosen().size > 0) this.chosen.set(new Set())
     if (this.drill()) this.drill.set(null)
     if (this.focus()) this.clearFocus()
-    this.cancelNaming()
     if (this.query() !== '') this.query.set('')
   }
 
   #normIndex(value: unknown): PublishIndexState {
     const known: PublishIndexState[] = ['ok', 'none', 'unreachable', 'http', 'malformed', 'forged', 'checking']
     return known.includes(value as PublishIndexState) ? value as PublishIndexState : 'checking'
+  }
+
+  /** A field-by-field copy of the community, like the rows. */
+  #normCommunity(raw: CommunityPayload | undefined): CommunityPayload {
+    if (!raw) return NO_COMMUNITY
+    const reads: CommunityPayload['read'][] = ['ok', 'none', 'unreachable', 'checking']
+    const item = (v: { pubkey?: unknown; lineage?: unknown }): { pubkey: string; lineage: string } =>
+      ({ pubkey: String(v?.pubkey ?? '').toLowerCase(), lineage: String(v?.lineage ?? '') })
+    return {
+      zone: String(raw.zone ?? '').toLowerCase(),
+      read: reads.includes(raw.read) ? raw.read : 'checking',
+      live: Array.isArray(raw.live) ? raw.live.map(item).filter(v => v.pubkey && v.lineage) : [],
+      offered: Array.isArray(raw.offered)
+        ? raw.offered.map(o => ({ ...item(o), name: String(o?.name ?? ''), hosts: Array.isArray(o?.hosts) ? o.hosts.map(String) : [] })).filter(v => v.pubkey && v.lineage)
+        : [],
+      busy: Array.isArray(raw.busy) ? raw.busy.map(String) : [],
+    }
   }
 }
 

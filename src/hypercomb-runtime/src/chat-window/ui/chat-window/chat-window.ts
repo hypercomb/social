@@ -122,7 +122,7 @@ import {
 import { applySectionEdits, draftModule } from '../../../module-drafts'
 import { changeLines } from './execution-change'
 import { installedPackageSig } from '../../../installed-package'
-import { doctrineFailedMessage, doctrineRanMessage, fileFailedMessage, fileRanMessage, managedRule, pageChangeUnready, parseWriteBlock, readsAskedIn, routesNamedIn, sandboxRule, tileFileLabel, unreadAskedMessage, unreadClaimMessage, writeFailedMessage, writeRanMessage, writeSkippedMessage, type TileFileWriteRequest } from './hypercomb-work-fence'
+import { fileFailedMessage, fileRanMessage, managedRule, pageChangeUnready, parseWriteBlock, readsAskedIn, routesNamedIn, sandboxRule, tileFileLabel, unreadAskedMessage, unreadClaimMessage, writeFailedMessage, writeRanMessage, writeSkippedMessage, type TileFileWriteRequest } from './hypercomb-work-fence'
 import { signalSession } from '../window-session'
 import { highlightBlocks } from './chat-highlight'
 import { resolveEntryImageUrl } from '../shelf-thumbs'
@@ -1243,10 +1243,6 @@ const HOST_AI_IOC_KEY = '@diamondcoreprocessor.com/HostAi'
 const LLM_ROUTER_IOC_KEY = '@diamondcoreprocessor.com/LlmRouter'
 /** assistant/anatomy/anatomy.service.ts — the static anatomy, over IoC. */
 const ANATOMY_IOC_KEY = '@hypercomb.social/Anatomy'
-/** The anatomy's doctrine (essentials anatomy/doctrine.ts), as the write door uses it. */
-type AnatomyDoctrineLike = {
-  write(heading: string, body: string): Promise<{ ok: true; state: { sections: readonly string[] } } | { ok: false; error: string }>
-}
 /** files/tile-files.drone.ts — a tile's page and text files, as the write door uses them. */
 const TILE_FILES_IOC_KEY = '@diamondcoreprocessor.com/TileFilesDrone'
 type TileFileTarget = { route: readonly string[]; kind: 'page' | 'file' | 'card'; name?: string; part?: 'details' | 'theme' }
@@ -7387,10 +7383,6 @@ export class ChatWindow {
     // WRITING CODE needs an installed package to draft onto — the dev shell
     // imports modules directly and has none — and the same door changes take.
     const canWrite = canEdit && canRead && !!installedPackageSig()
-    // WRITING DOCTRINE needs only changes allowed and the anatomy's doctrine
-    // to be a hive artifact here (essentials anatomy/doctrine.ts).
-    const anatomyDoctrine = (ioc()?.get(ANATOMY_IOC_KEY) as { doctrine?: AnatomyDoctrineLike } | undefined)?.doctrine
-    const canWriteDoctrine = canEdit && !!anatomyDoctrine?.write
     // WRITING FILES needs changes allowed and the tile-files door
     // (essentials files/tile-files.drone.ts): a tile's page and text files.
     const tileFiles = ioc()?.get(TILE_FILES_IOC_KEY) as TileFilesLike | undefined
@@ -7511,7 +7503,12 @@ export class ChatWindow {
     // every call, so it is the part a vendor's prefix cache pays back. Who is
     // answering and what they may do follow it — small, and only they vary.
     // Where the participant is travels only to a provider that reads freely.
-    const anatomyText = (ioc()?.get(ANATOMY_IOC_KEY) as { text?: string } | undefined)?.text ?? ''
+    // The hive's doctrine, never the build's (jwize, 2026-11-16): the anatomy
+    // carries the doctrine tiles as they stand now, so wait for that read
+    // (it reads again only when the hive changed since the last one).
+    const anatomyService = ioc()?.get(ANATOMY_IOC_KEY) as { text?: string; doctrine?: { ready?: Promise<void> } } | undefined
+    await anatomyService?.doctrine?.ready
+    const anatomyText = anatomyService?.text ?? ''
     const vocabulary = canChange ? hypercombVocabulary(behaviourEntries) : ''
     // Taken once per message, so the system text stays byte-stable across
     // the rounds of one answer (a vendor's prompt cache keys on the prefix).
@@ -7533,7 +7530,6 @@ export class ChatWindow {
         canChange,
         vocabulary,
         canWrite,
-        canWriteDoctrine,
         canWriteFiles,
         ...(managed ? { managed: { lineage: managed.lineage, title: managed.title } } : {}),
       }),
@@ -8240,7 +8236,6 @@ export class ChatWindow {
       const runWrite = async (lines: readonly string[], providerId: string, model: string, review = false): Promise<string> => {
         const parsed = parseWriteBlock(lines)
         if ('error' in parsed) throw new WorkRefused(parsed.error)
-        if ('doctrine' in parsed) return runDoctrine(parsed.doctrine, parsed.body, providerId, model)
         if ('target' in parsed) return runTileFile(parsed, providerId, model, review)
         if (!canWrite || !queue) throw new WorkRefused('writing code is not available here: nothing is installed to draft onto')
         // The participant's ceiling answers a write as it answers a line —
@@ -8282,46 +8277,6 @@ export class ChatWindow {
           ? { type: 'warning', message: `Draft of ${parsed.section} held: it newly reaches ${held}. Say brood to read it, brood accept to let it run.` }
           : { type: 'success', message: `Draft of ${parsed.section} applied — reload to run it` })
         return writeRanMessage({ section: parsed.section, beeSig: outcome.beeSig, path: outcome.path, held, created: outcome.created === true }, message)
-      }
-
-      // A DOCTRINE SECTION WRITTEN (essentials anatomy/doctrine.ts). The rules
-      // every model is sent and Jev judges by are the participant's: the block
-      // ALWAYS waits in Execution for their hand, whatever Jev or the policy
-      // says, and runs as a forward commit — the doctrine it replaced is one
-      // `doctrine back` away. It applies from the next message: this turn's
-      // system text stays byte-stable.
-      const runDoctrine = async (heading: string, body: string, providerId: string, model: string): Promise<string> => {
-        if (!canWriteDoctrine || !queue) throw new WorkRefused('the doctrine cannot be written here')
-        const refusedWrite = hypercombWriteRefusal()
-        if (refusedWrite) throw new WorkRefused(refusedWrite)
-        const grammar = `write doctrine ${heading}`
-        EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
-        const entry = queue.request({
-          convoId, providerId, model, kind: 'editing', lines: [grammar], needsGrant: false, signal, forceReview: true,
-          foreign: conversationForeign(),
-        })
-        if (await entry.decision === 'skip') {
-          if (signal?.aborted) throw stopped()
-          lastRun = 'skipped'
-          return writeSkippedMessage(`the doctrine section "${heading}"`, message)
-        }
-        stillHere()
-        const revoked = hypercombWriteRefusal()
-        if (revoked) {
-          queue.settle(entry.id, 'skipped', revoked)
-          throw new WorkRefused(revoked)
-        }
-        const outcome = await anatomyDoctrine!.write(heading, body)
-        if (!outcome.ok) {
-          queue.settle(entry.id, 'failed', outcome.error)
-          lastRun = 'failed'
-          return doctrineFailedMessage(outcome.error, message)
-        }
-        ran.push(grammar)
-        queue.settle(entry.id, 'ran')
-        lastRun = 'ran'
-        EffectBus.emit('toast:show', { type: 'success', message: `Doctrine section "${heading}" written` })
-        return doctrineRanMessage(heading, outcome.state.sections.length, message)
       }
 
       // A FILE ON A TILE WRITTEN (essentials files/tile-files.drone.ts): the

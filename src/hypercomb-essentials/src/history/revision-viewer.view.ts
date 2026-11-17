@@ -23,6 +23,7 @@
 // in its frame; the frame hands Escape and Alt+Left/Right up to the viewer.
 
 import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { sealedPageWindow, sealedWrapper } from '../presentation/tiles/page-run-gate.js'
 import {
   changedAt, FRAME_MAX_ONE, judge, leftBetween, NARROWING_START, nextToLook, pageOfLayer, runsOf, versionFrame,
   type FrameReader, type FrameLayer, type Narrowing, type PageRun, type Version,
@@ -260,7 +261,7 @@ export class RevisionViewerElement extends ElementBase {
     }))
     // The frame's keys, handed up by its stand-in.
     const fromFrame = (event: MessageEvent): void => {
-      if (!this.#open || !this.#frame || event.source !== this.#frame.contentWindow) return
+      if (!this.#open || !this.#frame || !event.source || event.source !== sealedPageWindow(this.#frame)) return
       const key = (event.data as { hcRevisionKey?: unknown } | null)?.hcRevisionKey
       if (key === 'Escape') this.close()
       else if (key === 'ArrowLeft') { this.older(); this.#slider?.focus() }
@@ -315,7 +316,9 @@ export class RevisionViewerElement extends ElementBase {
     if (kept) return kept
     const layer = await history()?.getLayerBySig(version.layerSig).catch(() => null)
     if (!layer) return { page: null, doc: null, problem: 'cold' }
-    const framed = await versionFrame(layer, this.#segments, this.#reader)
+    // Any version may wear someone else's page: each runs one frame deeper in
+    // the wrapper that refuses its navigations (page-run-gate.ts sealedWrapper).
+    const framed = await versionFrame(layer, this.#segments, this.#reader, { depth: 2 })
     if (framed.settled) this.#pages.set(version.index, framed.page)
     const built: Built = { page: framed.page, doc: framed.doc, problem: framed.problem }
     // Only an answer that will not change is kept: a cold one is asked again.
@@ -339,7 +342,7 @@ export class RevisionViewerElement extends ElementBase {
     if (built.problem === 'cold') { this.#say(t('revisions.cold', 'This version is not on this device yet.'), true); this.#frame.srcdoc = ''; return }
     if (built.problem === 'no-page') { this.#say(t('revisions.no-page', 'This version has no page.')); this.#frame.srcdoc = ''; return }
     this.#say('')
-    this.#frame.srcdoc = built.doc ?? ''
+    this.#frame.srcdoc = built.doc ? sealedWrapper(built.doc) : ''
   }
 
   // ── drawing ────────────────────────────────────────────────────────
