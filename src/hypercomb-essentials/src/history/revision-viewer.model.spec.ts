@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  carriedSigsOf, changedAt, FRAME_POLICY, frameDocument, judge, leftBetween, NARROWING_START, nextToLook, pageSigOf,
+  carriedSigsOf, changedAt, FRAME_POLICY, frameDocument, inlineLinkedCode, judge, leftBetween, NARROWING_START, nextToLook, pageSigOf,
   pictureSigsOf, pictureUrl, runsOf, scriptSafeJson, toBase64, WEBSITE_PAGE_KIND,
 } from './revision-viewer.model.js'
 
@@ -184,6 +184,50 @@ describe('frameDocument — the document a version runs in', () => {
       holder.remove()
       ;(window as { ioc?: unknown }).ioc = before
     }
+  })
+})
+
+// 2026-11-16: /cafe-society opened unstyled on its managed door — its three
+// linked style atoms and two module scripts never reached the frame.
+describe('inlineLinkedCode — a page\'s linked sheets and scripts, written into it', () => {
+  const bytes = (text: string): Uint8Array => new TextEncoder().encode(text)
+  const held: Record<string, string> = {
+    [sig('a')]: '.cafe-society{color:red}',
+    [sig('b')]: 'customElements.define("x-y", class extends HTMLElement {})',
+  }
+  const read = async (s: string): Promise<Uint8Array | null> => held[s] === undefined ? null : bytes(held[s]!)
+
+  it('turns a linked sheet into a style and a script into its own text, attributes kept', async () => {
+    const page = `<head><link rel="stylesheet" href="resource:${sig('a')}/cafe-society.css" media="screen"></head>`
+      + `<body><p>hi</p><script type="module" src="resource:${sig('b')}/x.js"></script></body>`
+    const out = await inlineLinkedCode(page, read)
+    expect(out).toContain(`<style data-hc-sheet="${sig('a')}" media="screen">.cafe-society{color:red}</style>`)
+    expect(out).toContain(`<script type="module" data-hc-script="${sig('b')}">customElements.define`)
+    expect(out).not.toContain('<link')
+    expect(out).not.toContain('src=')
+    expect(out).toContain('<p>hi</p>')
+  })
+
+  it('reads a sheet linked twice once', async () => {
+    let reads = 0
+    const link = `<link rel="stylesheet" href="resource:${sig('a')}">`
+    const out = await inlineLinkedCode(link + link, async s => { reads++; return read(s) })
+    expect(reads).toBe(1)
+    expect(out.match(/<style/g)).toHaveLength(2)
+  })
+
+  it('leaves what it cannot read, what is past the budget, and what is not a signature', async () => {
+    const missing = `<link rel="stylesheet" href="resource:${sig('c')}">`
+    const outside = '<link rel="stylesheet" href="https://example.com/a.css"><link rel="icon" href="resource:' + sig('a') + '">'
+    expect(await inlineLinkedCode(missing + outside, read)).toBe(missing + outside)
+    const sheet = `<link rel="stylesheet" href="resource:${sig('a')}">`
+    expect(await inlineLinkedCode(sheet, read, () => false)).toBe(sheet)
+  })
+
+  it('cannot be closed early by its own text', async () => {
+    const out = await inlineLinkedCode(`<script src="resource:${sig('d')}"></script>`,
+      async () => bytes('const s = "</script><b>"'))
+    expect(out).toBe(`<script data-hc-script="${sig('d')}">const s = "<\\/script><b>"</script>`)
   })
 })
 
