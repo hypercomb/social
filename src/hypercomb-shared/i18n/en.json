@@ -3853,6 +3853,8 @@
   "code-tree.tile": "What this tile holds, and the code that runs it",
   "code-tree.tile-empty": "No files or tiles here.",
   "code-tree.more": "{count} more: type in the search to find one.",
+  "code-tree.behaviours": "Behaviours",
+  "code-tree.unnamed": "Unnamed",
   "agent.rail-tiles": "Tiles here",
   "agent.rail-age-now": "now",
   "agent.rail-age-minutes": "{count}m",

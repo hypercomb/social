@@ -78,6 +78,31 @@ describe('the running modules as a tree', () => {
   })
 })
 
+describe('names that are not paths', () => {
+  const mixed = [
+    ...entries,
+    { name: 'Tile Editor', sig: sig(0x21), of: 'bee' as const },
+    { name: 'Action Card', sig: sig(0x22), of: 'bee' as const },
+    { name: 'a1b2c3d4e5f6', sig: sig(0x23), of: 'dependency' as const },
+    { name: sig(0x24), sig: sig(0x24), of: 'bee' as const },
+  ]
+
+  it('gathers the behaviours first and the unnamed last, each in one folder', () => {
+    const tree = moduleTree(mixed)
+    expect(tree.map(node => node.label)).toEqual(['Behaviours', '@hypercomb', 'pixi.js', 'Unnamed'])
+    expect(tree[0]!.children.map(child => child.label)).toEqual(['Action Card', 'Tile Editor'])
+    expect(tree[0]!.children[0]!.opens).toEqual({ kind: 'module', sig: sig(0x22), name: 'Action Card' })
+    // A signature is said by its first twelve digits.
+    expect(tree.at(-1)!.children.map(child => child.label)).toEqual(['000000000000', 'a1b2c3d4e5f6'])
+  })
+
+  it('says the two folders in the words it is given, and makes neither when it would be empty', () => {
+    expect(moduleTree(mixed, { behaviours: 'ビヘイビア', unnamed: '名前なし' }).map(node => node.label))
+      .toEqual(['ビヘイビア', '@hypercomb', 'pixi.js', '名前なし'])
+    expect(moduleTree(entries).map(node => node.label)).toEqual(['@hypercomb', 'pixi.js'])
+  })
+})
+
 describe('the source files one module ships', () => {
   const paths = ['src/core/effect-bus.ts', 'src/core/panels/window-session.ts', 'src/index.ts', 'src/core/ioc.ts']
 

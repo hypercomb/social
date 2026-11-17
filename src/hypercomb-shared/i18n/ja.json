@@ -3427,6 +3427,8 @@
   "code-tree.tile": "このタイルが持つものと、それを動かすコード",
   "code-tree.tile-empty": "ファイルもタイルもありません。",
   "code-tree.more": "あと {count} 件: 検索に入力して探せます。",
+  "code-tree.behaviours": "ビヘイビア",
+  "code-tree.unnamed": "名前なし",
   "agent.rail-tiles": "ここのタイル",
   "agent.rail-age-now": "たった今",
   "agent.rail-age-minutes": "{count}分",

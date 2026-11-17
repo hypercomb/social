@@ -1582,9 +1582,9 @@ export class HypercombHiveTreeReader {
    *  drawn from (code-tree.ts). `listCode` answers a question and stops at
    *  two hundred; a tree with folders missing is not a tree. Names and
    *  signatures only: no module's text is read. */
-  async codeIndex(): Promise<{ readonly name: string; readonly sig: string }[]> {
+  async codeIndex(): Promise<{ readonly name: string; readonly sig: string; readonly of: 'bee' | 'dependency' }[]> {
     return (await this.#codeEntries())
-      .map(entry => ({ name: entry.name, sig: entry.sig }))
+      .map(entry => ({ name: entry.name, sig: entry.sig, of: entry.of }))
       .sort((a, b) => a.name.localeCompare(b.name))
   }
 

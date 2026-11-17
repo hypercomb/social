@@ -23,7 +23,7 @@
 
 import { EffectBus, I18N_IOC_KEY, sectionIndex, type I18nProvider } from '@hypercomb/core'
 import { openChatCode } from './chat-code.js'
-import { findModules, moduleTree, sectionTree, type CodeEntry, type CodeNode, type CodeOpens } from './code-tree.js'
+import { BEHAVIOURS_PATH, UNNAMED_PATH, findModules, moduleTree, sectionTree, type CodeEntry, type CodeNode, type CodeOpens } from './code-tree.js'
 import { HIVE_TREE_READER_IOC_KEY } from './hive-tree-reader.js'
 import type { InspectFrame } from './inspect-window.view.js'
 import { sizeWords } from './tile-holds.js'
@@ -145,9 +145,13 @@ export class CodeTreeView {
       const entries = await reader?.codeIndex?.()
       this.#entries = entries ?? []
       this.#failed = !entries
-      this.#tree = moduleTree(this.#entries)
-      // The top of the running code starts unfolded: one row is not a tree.
-      for (const node of this.#tree) this.#open.add(node.path)
+      this.#tree = moduleTree(this.#entries, {
+        behaviours: this.#t('code-tree.behaviours', 'Behaviours'),
+        unnamed: this.#t('code-tree.unnamed', 'Unnamed'),
+      })
+      // The folders that are paths start unfolded one level: one row is not
+      // a tree. The behaviours (hundreds) and the unnamed stay folded.
+      for (const node of this.#tree) if (node.path !== BEHAVIOURS_PATH && node.path !== UNNAMED_PATH) this.#open.add(node.path)
     } catch { this.#failed = true; this.#entries = [] }
     this.#loading = false
     this.paint()
@@ -244,7 +248,9 @@ export class CodeTreeView {
   async #holdsOf(segments: readonly string[]): Promise<TileHolds> {
     let holds: TileHolds = { tiles: [], files: [] }
     try {
-      const node = await ioc<Reader>(HIVE_TREE_READER_IOC_KEY)?.readNode?.(segments, { withContent: false })
+      // With its content: the files a tile holds are part of what it holds
+      // (the inspect view reads a tile the same way).
+      const node = await ioc<Reader>(HIVE_TREE_READER_IOC_KEY)?.readNode?.(segments, { withContent: true })
       if (node?.ok) {
         // The newest file of each name: a file written twice is one file.
         const files = new Map<string, { name: string; sig: string; size: number }>()
