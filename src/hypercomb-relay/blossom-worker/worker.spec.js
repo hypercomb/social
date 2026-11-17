@@ -6107,6 +6107,22 @@ test('a farm on a binding that installs a channel gives package files only — n
   })
 })
 
+test('a farm also gives the package the publisher names install:debugger, the managed door one, and still nothing else', async () => {
+  const pkg = await packageFixture('essentials-pkg')
+  const debug = await packageFixture('debugger-pkg')
+  const upload = 'another upload on the publisher machine'
+  const uploadSig = await sha256(upload)
+  const { env } = await installingFixture(await signedIndex({ 'install:essentials': pkg.root, 'install:debugger': debug.root }))
+  await withUpstream(await farmMachine({ ...pkg.files, ...debug.files, [uploadSig]: upload }), async () => {
+    for (const sig of [debug.root, debug.dependency]) {
+      assert.equal((await worker.fetch(new Request(`https://hypercomb.com/${sig}`), env)).status, 200, sig)
+      assert.ok(env.CONTENT.held.has(sig), `kept ${sig}`)
+    }
+    assert.notEqual((await worker.fetch(new Request(`https://hypercomb.com/${uploadSig}`), env)).status, 200)
+    assert.ok(!env.CONTENT.held.has(uploadSig), 'kept nothing else')
+  })
+})
+
 /** A package whose layers name, in `typescript`, the atoms that hold their
  *  folders' source as written. `slot` is what the child layer carries there
  *  in place of its own atom's signature. */
