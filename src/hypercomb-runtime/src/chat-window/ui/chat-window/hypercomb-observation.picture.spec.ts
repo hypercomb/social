@@ -45,6 +45,16 @@ describe('a picture read', () => {
     expect(String(observation(formatHypercombObservationReceipt(receipt))['note'])).toContain('cannot see pictures')
   })
 
+  it('gives a model that cannot see the description a model that can wrote', async () => {
+    const receipt = await readOf({ width: 10, height: 10, reading: 'red', image: JPEG })
+    const described = new Map([[target, { text: 'A red square with the word "Go".', model: 'google/gemini-2.5-flash-lite' }]])
+    const words = observation(formatHypercombObservationReceipt(receipt, undefined, 'words', described))
+    expect(words).toMatchObject({ description: 'A red square with the word "Go".', describedBy: 'google/gemini-2.5-flash-lite' })
+    expect(String(words['note'])).toContain('described it')
+    // A model that sees is shown the picture itself, not someone else's words.
+    expect(observation(formatHypercombObservationReceipt(receipt, undefined, 'seen', described))).not.toHaveProperty('description')
+  })
+
   it('is the old answer for bytes that are no picture', async () => {
     const receipt = await readOf(undefined)
     expect(picturesOf(receipt)).toEqual([])
