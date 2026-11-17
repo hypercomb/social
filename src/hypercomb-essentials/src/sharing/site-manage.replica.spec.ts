@@ -459,8 +459,23 @@ describe('the chat', () => {
       expect(await replicaChatConvoId('business-card', threads([
         { convoId: OWN, lastAt: 50 }, { convoId: `${OWN}::red`, lastAt: 60 },
       ]), inRevision)).toBe(`${OWN}::fresh`)
-      // The card's own, never spoken in, is asked about too.
-      expect(await replicaChatConvoId('business-card', threads([]), () => false)).toBe(`${OWN}::fresh`)
+    })
+
+    // Seen on business-card.jwize.com, 2026-11-16: opening a revision whose
+    // card conversation had never been used landed on an empty chat while
+    // the revision's own conversation sat in the list.
+    it('once the card has revisions, an unspoken own conversation yields to the revision’s latest', async () => {
+      const inRevision = (convo: { convoId: string }): boolean => convo.convoId !== `${OWN}::blue`
+      expect(await replicaChatConvoId('business-card', threads([
+        { convoId: `${OWN}::red-old`, lastAt: 10 }, { convoId: `${OWN}::red-new`, lastAt: 40 }, { convoId: `${OWN}::blue`, lastAt: 90 },
+      ]), inRevision)).toBe(`${OWN}::red-new`)
+      // Its own, spoken in during this revision, is still the one opened.
+      expect(await replicaChatConvoId('business-card', threads([
+        { convoId: OWN, lastAt: 5 }, { convoId: `${OWN}::red-new`, lastAt: 40 },
+      ]), inRevision)).toBe(OWN)
+      // Nothing of this revision to open: the card's own, which begins now.
+      expect(await replicaChatConvoId('business-card', threads([{ convoId: `${OWN}::blue`, lastAt: 90 }]), inRevision)).toBe(OWN)
+      expect(await replicaChatConvoId('business-card', threads([]), () => false)).toBe(OWN)
     })
 
     it('is the card tile’s own when the list cannot be read, or there are no threads to ask', async () => {

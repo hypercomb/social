@@ -53,7 +53,8 @@ export async function siteChatConvoId(lineage: string): Promise<string> {
   const threads = ioc()?.get?.<ReplicaThreads>(CHAT_THREADS_KEY)
   try {
     const site = await siteRevisionRecords().catch(() => null)
-    return await replicaChatConvoId(lineage, threads, convo => !site || conversationInLine(site.records, convo))
+    const records = site?.records ?? []
+    return await replicaChatConvoId(lineage, threads, records.length ? convo => conversationInLine(records, convo) : undefined)
   } catch { return replicaConvoId(lineage, threads) }
 }
 
