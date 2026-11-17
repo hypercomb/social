@@ -17,8 +17,17 @@
 
 import { PLATFORM_SOURCE } from './tile-holds.js'
 
-/** A running module by its name and the signature that opens it. */
-export type CodeEntry = { readonly name: string; readonly sig: string }
+/** A running module by its name and the signature that opens it. `of` says
+ *  what the hive runs it as: a behaviour (a bee) or code behaviours import. */
+export type CodeEntry = { readonly name: string; readonly sig: string; readonly of?: 'bee' | 'dependency' }
+
+/** The two folders that are not paths: behaviours go by a spoken name
+ *  (`Action Card`), and some modules carry no name but their signature. */
+export const BEHAVIOURS_PATH = 'group:behaviours'
+export const UNNAMED_PATH = 'group:unnamed'
+export type TreeWords = { readonly behaviours: string; readonly unnamed: string }
+const WORDS: TreeWords = { behaviours: 'Behaviours', unnamed: 'Unnamed' }
+const HEX_NAME = /^[0-9a-f]{12,64}$/i
 
 /** What pressing a file opens. */
 export type CodeOpens =
@@ -90,17 +99,35 @@ const grow = (root: Building, segments: readonly string[]): Building => {
  * Every running module as a tree: each `/` in a name is a folder. A platform
  * source (`@hypercomb/source/core`) is a folder that is filled from the files
  * it ships when it is unfolded.
+ *
+ * Two kinds of name are not paths, and each gets one folder so the tree
+ * stays a tree (seen on business-card.jwize.com, 2026-11-16: some three
+ * hundred behaviours and bare signatures stood loose at the top). The
+ * behaviours, which go by a spoken name, come first; the modules named only
+ * by their signature come last.
  */
-export const moduleTree = (entries: readonly CodeEntry[]): CodeNode[] => {
+export const moduleTree = (entries: readonly CodeEntry[], words: TreeWords = WORDS): CodeNode[] => {
   const root: Building = { label: '', path: '', children: new Map() }
+  const behaviours: CodeNode[] = []
+  const unnamed: CodeNode[] = []
   for (const entry of entries) {
-    const segments = entry.name.split('/').map(segment => segment.trim()).filter(Boolean)
+    const name = entry.name.trim()
+    if (!name) continue
+    const opens: CodeOpens = { kind: 'module', sig: entry.sig, name }
+    if (HEX_NAME.test(name)) { unnamed.push({ label: name.slice(0, 12), path: `${UNNAMED_PATH}/${entry.sig}`, children: [], opens }); continue }
+    if (entry.of === 'bee' && !name.includes('/')) { behaviours.push({ label: name, path: `${BEHAVIOURS_PATH}/${entry.sig}`, children: [], opens }); continue }
+    const segments = name.split('/').map(segment => segment.trim()).filter(Boolean)
     if (!segments.length) continue
     const node = grow(root, segments)
-    if (entry.name.startsWith(PLATFORM_SOURCE)) node.bundle = entry
-    else node.opens = { kind: 'module', sig: entry.sig, name: entry.name }
+    if (name.startsWith(PLATFORM_SOURCE)) node.bundle = entry
+    else node.opens = opens
   }
-  return [...root.children.values()].map(settle).sort(byName)
+  const byLabel = (a: CodeNode, b: CodeNode): number => a.label.localeCompare(b.label)
+  return [
+    ...(behaviours.length ? [{ label: words.behaviours, path: BEHAVIOURS_PATH, children: behaviours.sort(byLabel) }] : []),
+    ...[...root.children.values()].map(settle).sort(byName),
+    ...(unnamed.length ? [{ label: words.unnamed, path: UNNAMED_PATH, children: unnamed.sort(byLabel) }] : []),
+  ]
 }
 
 /**

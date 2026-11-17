@@ -43,9 +43,13 @@ beforeEach(async () => {
       { name: '@hypercomb/essentials/commands/builds.queen', sig: sig(2) },
       { name: '@hypercomb/source/core', sig: sig(5) },
       { name: '@hypercomb/source/shim', sig: sig(6) },
+      { name: 'Action Card', sig: sig(7), of: 'bee' },
+      { name: sig(8), sig: sig(8), of: 'dependency' },
     ],
     moduleText: async (wanted: string) => wanted === sig(5) ? { name: '@hypercomb/source/core', text: CORE } : undefined,
-    readNode: async (segments: readonly string[]) => {
+    readNode: async (segments: readonly string[], options?: { withContent?: boolean }) => {
+      // A tile's files come with its content, never without.
+      if (!options?.withContent) return { ok: true, children: [], files: [] }
       reads.push(segments.join('/'))
       const node = nodes[segments.join('/')]
       return node ? { ok: true, children: node.children.map(name => ({ name })), files: node.files } : { ok: false }
@@ -63,8 +67,16 @@ describe('the code tree', () => {
     // The tile in hand is unfolded: its tiles, then its files, the newest of each name.
     expect(names().slice(0, 4)).toEqual(['business-card', 'back', 'animation.js', 'main.js'])
     expect(row('main.js').querySelector('.hc-code-tail')?.textContent).toBe('20 KB')
-    // The top of the running code is unfolded one level.
-    expect(names().slice(4)).toEqual(['@hypercomb', 'essentials', 'source'])
+    // The behaviours and the unnamed are folders, folded; the folders that
+    // are paths are unfolded one level.
+    expect(names().slice(4)).toEqual(['Behaviours', '@hypercomb', 'essentials', 'source', 'Unnamed'])
+  })
+
+  it('keeps the behaviours in one folder, each opened by its signature', () => {
+    row('Behaviours').click()
+    expect(names()).toContain('Action Card')
+    row('Action Card').click()
+    expect(opened).toEqual([{ kind: 'section', sig: sig(7), name: 'Action Card' }])
   })
 
   it('reads a tile inside only when it is unfolded, and indents what it holds', async () => {
@@ -100,10 +112,10 @@ describe('the code tree', () => {
     row('core').click()
     await settle()
     // The files it ships, as their own folders: core/effect-bus.ts and index.ts.
-    expect(names().slice(-5)).toEqual(['source', 'core', 'core', 'index.ts', 'shim'])
+    expect(names().slice(-6, -1)).toEqual(['source', 'core', 'core', 'index.ts', 'shim'])
     const inner = [...view.element.querySelectorAll<HTMLElement>('.hc-code-row')].filter(node => node.querySelector('.hc-code-name')?.textContent === 'core')[1]!
     inner.click()
-    expect(names().slice(-5)).toEqual(['core', 'core', 'effect-bus.ts', 'index.ts', 'shim'])
+    expect(names().slice(-6, -1)).toEqual(['core', 'core', 'effect-bus.ts', 'index.ts', 'shim'])
     row('effect-bus.ts').click()
     expect(opened).toEqual([{ kind: 'section', sig: sig(5), section: 'src/core/effect-bus.ts' }])
   })
