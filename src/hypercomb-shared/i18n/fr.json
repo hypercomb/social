@@ -2655,6 +2655,8 @@
   "chat.route.resize": "Glisser pour élargir le déroulé — double-clic pour réinitialiser",
   "chat.route.toggle": "Afficher ou masquer le déroulé",
   "chat.exec.toggle": "Exécution — ce que les modèles veulent lire et modifier",
+  "chat.code.show": "Code — les fichiers, ressources et code de ce dont parle cette conversation",
+  "chat.code.hide": "Revenir à la conversation",
   "chat.exec.sec": "Exécution",
   "chat.exec.side": "Ce que les modèles veulent lire et modifier",
   "chat.exec.mode.manual": "Manuel",

@@ -228,6 +228,8 @@ describe('the managed site door’s card', () => {
     const asked: unknown[] = []
     const off = EffectBus.on('chat:open', p => asked.push(p))
     ;(element.querySelector('.sm-chat') as HTMLButtonElement).click()
+    // The door first asks which of the card's conversations are put away.
+    await settle()
     off()
     expect(asked).toHaveLength(1)
   })

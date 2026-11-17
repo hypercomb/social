@@ -100,6 +100,11 @@ import { readBlurbs, type ChatBlurb } from './chat-blurb.js'
 import { isLongPressMenu } from '../navigation/browser-menu.js'
 import { walkTree, type WalkHistory, type WalkStore } from '../presentation/tiles/tree-walk.js'
 import { RAIL_CSS, RAIL_STYLE_ID } from './tiles-rail.css.js'
+import { CHAT_CODE_EFFECT, chatCodeTarget, showChatCode, type ChatCodeAsk } from './chat-code.js'
+import { CodeTreeView } from './code-tree.view.js'
+import { managedSiteSegments } from '../sharing/managed-record.js'
+import { partByRevision } from './chat-revisions.js'
+import { mountRevisionStrip } from '../sharing/site-revisions.view.js'
 import { readThumbnail, type ThumbnailStore } from '../presentation/tiles/thumbnails.js'
 import { tilePictureCandidates } from '../editor/tile-properties.js'
 import type { AgentRegistry } from './agent-registry.service.js'
@@ -235,6 +240,7 @@ const backIcon = 'arrow_back'
 const rootIcon = 'hive'
 const findIcon = 'search'
 const convosIcon = 'forum'
+const codeIcon = 'account_tree'
 
 /** A glyph as the shell draws one: the ligature in a .mat-sym span. */
 const glyphSpan = (name: string): HTMLSpanElement => {
@@ -336,6 +342,9 @@ export class AgentTilesRail {
   #drafts = new Set<string>()
   /** Every tile conversation, and the per-tile fold the row marks read. */
   #chatList: TileConversation[] = []
+  /** Conversations that belong to another revision of the managed site
+   *  (chat-revisions.ts): not listed, and never the one a row enters. */
+  #otherRevision = new Set<string>()
   /** Conversations a turn has landed in since the last merge, and the timer
    *  that folds them in together. */
   #chatDirty = new Set<string>()
@@ -386,6 +395,10 @@ export class AgentTilesRail {
    *  exactly as it did before blurbs existed. */
   #blurbs = new Map<string, ChatBlurb>()
   #dropFlowWatch: (() => void) | null = null
+  /** The chat window switching its main pane to the code of its target, or back. */
+  #dropCodeWatch: (() => void) | null = null
+  /** The revision in hand, above the list, on a managed site door. */
+  #dropRevisions: (() => void) | null = null
   /** What each conversation's organized workflow says, by convoId — read
    *  from the flows pool, never derived here, and never load-bearing. */
   #standings = new Map<string, ConvoStanding>()
@@ -397,6 +410,12 @@ export class AgentTilesRail {
    *  together") — the head band's icon switches, and carries the count of
    *  conversations waiting on you so nothing is missed while it is shut. */
   #convosTab = false
+  /** THE CODE TAB: the third icon. With it open the list is the code as a
+   *  tree of files (code-tree.view.ts), and a file pressed there is read in
+   *  the chat's main pane. One tab at a time: it and the conversations. */
+  #codeTab = false
+  #codeToggle: HTMLButtonElement | null = null
+  #codeTree: CodeTreeView | null = null
   #convosToggle: HTMLButtonElement | null = null
   /** Where the tiles were scrolled when the conversations tab opened. */
   #tilesScroll = 0
@@ -557,9 +576,16 @@ export class AgentTilesRail {
       convosToggle.append(glyphSpan(convosIcon), badge)
       convosToggle.addEventListener('click', () => this.#setConvosTab(!this.#convosTab))
       this.#convosToggle = convosToggle
-      head.append(convosToggle)
+      const codeToggle = document.createElement('button')
+      codeToggle.type = 'button'
+      codeToggle.className = 'hc-rail-code-toggle'
+      codeToggle.append(glyphSpan(codeIcon))
+      codeToggle.addEventListener('click', () => this.#setCodeTab(!this.#codeTab))
+      this.#codeToggle = codeToggle
+      head.append(convosToggle, codeToggle)
     } else {
       this.#convosToggle = null
+      this.#codeToggle = null
     }
     head.append(findToggle)
     this.#setFinding(!!this.#query)
@@ -570,6 +596,11 @@ export class AgentTilesRail {
     this.#list = list
 
     host.append(head, list)
+    // THE REVISION IN HAND, in the chat itself: on a managed site door the
+    // chat covers the bar that names it (sharing/site-revisions.view.ts).
+    // Nothing is added on any other page.
+    this.#dropRevisions?.()
+    this.#dropRevisions = this.#profile.chats ? mountRevisionStrip(host, list) : null
 
     // Open on the level the participant is standing on, with the whole way
     // up already in the trail — back climbs toward the root from move one.
@@ -616,6 +647,12 @@ export class AgentTilesRail {
       this.#dropBlurbWatch = EffectBus.on('chat:blurbs-changed', () => { void this.#refreshBlurbs() })
       // A conversation's workflow is written in the background; its row follows.
       this.#dropFlowWatch = EffectBus.on('chat:route-flow-changed', () => { void this.#refreshStandings() })
+      // THE CHAT'S OTHER VIEW (chat-code.ts): the chat window says when its
+      // main pane shows the code of what the conversation is about. Heard
+      // here because the chat's rail is the part of this package that is
+      // always in the window; the view itself arrives with the first switch.
+      this.#dropCodeWatch?.()
+      this.#dropCodeWatch = EffectBus.on<ChatCodeAsk>(CHAT_CODE_EFFECT, ask => { void showChatCode(ask) })
     }
     this.#dropGroupWatch?.()
     this.#dropGroupWatch = EffectBus.on<{ paths?: readonly string[] }>('context:active-set', payload => {
@@ -827,6 +864,12 @@ export class AgentTilesRail {
     this.#dropBlurbWatch = null
     this.#dropFlowWatch?.()
     this.#dropFlowWatch = null
+    this.#dropCodeWatch?.()
+    this.#dropCodeWatch = null
+    this.#dropRevisions?.()
+    this.#dropRevisions = null
+    this.#codeTree?.dispose()
+    this.#codeTree = null
     this.#dropBusyWatch?.()
     this.#dropBusyWatch = null
     this.#dropGroupWatch?.()
@@ -1026,6 +1069,19 @@ export class AgentTilesRail {
     // the tiles: with it open the list is the conversations and nothing else.
     // A standing search is over tiles, so it shows the tiles.
     this.#paintConvosToggle()
+    this.#paintCodeToggle()
+    // THE CODE is a tab too. A standing search there is over the code's
+    // names, so the tab keeps the list while something is typed.
+    if (this.#profile.chats && this.#codeTab) {
+      const tree = this.#codeTree ??= new CodeTreeView()
+      tree.setTarget(this.#codeTarget())
+      tree.setQuery(this.#query)
+      list.appendChild(tree.element)
+      if (!tree.element.childElementCount) tree.paint()
+      this.#returning = null
+      list.scrollTop = kept
+      return
+    }
     if (this.#profile.chats && this.#convosTab && !this.#query) {
       list.appendChild(this.#convosSection())
       this.#returning = null
@@ -1632,10 +1688,43 @@ export class AgentTilesRail {
   #setConvosTab(on: boolean): void {
     if (on === this.#convosTab || !this.#profile.chats) return
     const list = this.#list
-    if (on && list) this.#tilesScroll = list.scrollTop
+    if (on && list && !this.#codeTab) this.#tilesScroll = list.scrollTop
     this.#convosTab = on
+    if (on) this.#codeTab = false
     this.paint()
     if (list) list.scrollTop = on ? 0 : this.#tilesScroll
+  }
+
+  /** Open or shut the code tab. One tab at a time: opening it shuts the
+   *  conversations, and the tiles keep their place behind both. */
+  #setCodeTab(on: boolean): void {
+    if (on === this.#codeTab || !this.#profile.chats) return
+    const list = this.#list
+    if (on && list && !this.#convosTab) this.#tilesScroll = list.scrollTop
+    this.#codeTab = on
+    if (on) this.#convosTab = false
+    this.paint()
+    if (list) list.scrollTop = on ? 0 : this.#tilesScroll
+  }
+
+  /** The tile the code tree opens on: the one the conversation in hand is
+   *  about, else the managed site, else the level in hand (chat-code.ts). */
+  #codeTarget(): string[] {
+    const subject = this.#subject
+    const about = subject ? [...subject.path, subject.name].map(segment => String(segment ?? '').trim()).filter(Boolean) : []
+    return chatCodeTarget(about, managedSiteSegments(), this.#here())
+  }
+
+  /** The head band's code icon: pressed while its tab is open. */
+  #paintCodeToggle(): void {
+    const toggle = this.#codeToggle
+    if (!toggle) return
+    toggle.setAttribute('aria-pressed', this.#codeTab ? 'true' : 'false')
+    const label = this.#codeTab
+      ? this.#t('agent.rail-code-hide', 'Back to the tiles')
+      : this.#t('agent.rail-code', 'The code, as files')
+    toggle.title = label
+    toggle.setAttribute('aria-label', label)
   }
 
   /** The head band's conversations icon: pressed while the tab is open, and
@@ -1835,6 +1924,12 @@ export class AgentTilesRail {
    *  chat so coming back resumes it. */
   #enterChat(row: RailRow, key: string, convoId: string): void {
     const path = tilePath(row.segments)
+    // A conversation of another revision of the site is not entered from a
+    // row (a tile's own, or the one last open on it, may be one): the newest
+    // of this revision's on the tile, else a fresh one.
+    if (this.#otherRevision.has(convoId)) {
+      convoId = this.#chatsFor(path).find(chat => !chat.archived)?.convoId ?? newTileConvoId(row.segments)
+    }
     // ONE FOLD AT A TIME. Entering a conversation shuts every other tile's
     // list: you are in one thread, the rail should show one tile's threads,
     // and a column of half a dozen open folds is a list you have to read
@@ -1975,8 +2070,14 @@ export class AgentTilesRail {
       // the one thing you wanted to watch was the one thing not listed.
       .filter((chat): chat is TileConversation => !!chat && (chat.archived || chat.turns >= 1))
     if (this.#disposed || !fresh.length) return
+    // A conversation continued in this revision is one of its own from now on.
+    const parted = await partByRevision(fresh).catch(() => ({ held: fresh, elsewhere: [] as TileConversation[] }))
+    if (this.#disposed) return
+    for (const chat of parted.held) this.#otherRevision.delete(chat.convoId)
+    for (const chat of parted.elsewhere) this.#otherRevision.add(chat.convoId)
     const byId = new Map(this.#chatList.map(chat => [chat.convoId, chat]))
-    for (const chat of fresh) byId.set(chat.convoId, chat)
+    for (const chat of parted.elsewhere) byId.delete(chat.convoId)
+    for (const chat of parted.held) byId.set(chat.convoId, chat)
     this.#chatList = [...byId.values()].sort((a, b) => b.lastAt - a.lastAt)
     this.#chats = foldTileConversations(this.#chatList)
     this.#paintStatus()
@@ -2013,7 +2114,12 @@ export class AgentTilesRail {
   async #refreshChats(): Promise<void> {
     let chats: TileConversation[] = []
     try { chats = (await listRailConversations()).filter(chat => chat.archived || chat.turns >= 1) } catch { return }
+    // On a managed site door, only the conversations of the revision in hand
+    // (chat-revisions.ts). Every conversation, on any other page.
+    const parted = await partByRevision(chats).catch(() => ({ held: chats, elsewhere: [] as TileConversation[] }))
     if (this.#disposed) return
+    chats = parted.held
+    this.#otherRevision = new Set(parted.elsewhere.map(chat => chat.convoId))
     this.#chatList = chats
     this.#chats = foldTileConversations(chats)
     this.#paintStatus()

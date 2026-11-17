@@ -2655,6 +2655,8 @@
   "chat.route.resize": "İş akışını genişletmek için sürükleyin — sıfırlamak için çift tıklayın",
   "chat.route.toggle": "İş akışını göster veya gizle",
   "chat.exec.toggle": "Yürütme — modellerin okumak ve değiştirmek istedikleri",
+  "chat.code.show": "Kod — bu sohbetin konusu olan şeyin dosyaları, kaynakları ve kodu",
+  "chat.code.hide": "Sohbete dön",
   "chat.exec.sec": "Yürütme",
   "chat.exec.side": "Modellerin okumak ve değiştirmek istedikleri",
   "chat.exec.mode.manual": "El ile",

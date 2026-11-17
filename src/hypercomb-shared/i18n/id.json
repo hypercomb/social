@@ -2655,6 +2655,8 @@
   "chat.route.resize": "Seret untuk melebarkan alur kerja — klik dua kali untuk mengatur ulang",
   "chat.route.toggle": "Tampilkan atau sembunyikan alur kerja",
   "chat.exec.toggle": "Eksekusi — apa yang ingin dibaca dan diubah model",
+  "chat.code.show": "Kode — berkas, sumber daya, dan kode dari hal yang dibahas obrolan ini",
+  "chat.code.hide": "Kembali ke percakapan",
   "chat.exec.sec": "Eksekusi",
   "chat.exec.side": "Apa yang ingin dibaca dan diubah model",
   "chat.exec.mode.manual": "Manual",

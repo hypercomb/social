@@ -88,8 +88,8 @@ export class InspectQueenBee extends QueenBee {
   /** The panel arrives with the first `inspect`, never at boot. */
   #panel(): Promise<InspectWindowView> {
     if (this.#view) return Promise.resolve(this.#view)
-    return this.#loading ??= import('./inspect-window.view.js').then(({ InspectWindowView }) => {
-      this.#view = new InspectWindowView()
+    return this.#loading ??= import('./inspect-window.view.js').then(({ inspectWindow }) => {
+      this.#view = inspectWindow()
       return this.#view
     }, error => { this.#loading = null; throw error })
   }

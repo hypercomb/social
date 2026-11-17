@@ -1578,6 +1578,16 @@ export class HypercombHiveTreeReader {
     return { hits: hits.slice(0, max), more: hits.length > max }
   }
 
+  /** EVERY RUNNING MODULE BY NAME, all of them: what a tree of the code is
+   *  drawn from (code-tree.ts). `listCode` answers a question and stops at
+   *  two hundred; a tree with folders missing is not a tree. Names and
+   *  signatures only: no module's text is read. */
+  async codeIndex(): Promise<{ readonly name: string; readonly sig: string; readonly of: 'bee' | 'dependency' }[]> {
+    return (await this.#codeEntries())
+      .map(entry => ({ name: entry.name, sig: entry.sig, of: entry.of }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }
+
   /** A running module's whole text and its name, by signature — what
    *  `inspect` opens a section of. Undefined when it is not code held here. */
   async moduleText(sig: string): Promise<{ readonly name: string; readonly text: string } | undefined> {

@@ -127,6 +127,17 @@ const PAST_KEPT = 32
  *  real re-publish of it, and is followed. */
 export const LAG_WINDOW_MS = 10 * 60 * 1000
 
+/** What the door asks of the chat's threads to choose a conversation. */
+export type ReplicaThreads = {
+  tileConvoId?(segments: readonly string[]): string
+  newTileConvoId?(segments: readonly string[]): string
+  tilePathOf?(convoId: string): string
+  listConversations?(): Promise<readonly ReplicaConvo[]>
+}
+
+/** What the door reads of a conversation to choose one. */
+export type ReplicaConvo = { readonly convoId: string; readonly archived?: boolean; readonly lastAt?: number; readonly startedAt?: number }
+
 /** Where the site stands in this hive: the tile at /<lineage>, one segment per
  *  name — a nested site (`revolucion/meetup`) is the tile meetup under
  *  revolucion, exactly as the worker's index names it (index.roots[lineage]). */
@@ -144,6 +155,58 @@ export const replicaConvoId = (lineage: string, threads?: { tileConvoId?(segment
     if (typeof id === 'string' && id) return id
   } catch { /* the derivation below is the same */ }
   return tileConvoId(route)
+}
+
+/**
+ * THE CONVERSATION THE DOOR'S CHAT OPENS. The card tile's own, while it is
+ * live. The door named that one conversation on every press, so an owner who
+ * archived it was put straight back into it by the Chat button, and again
+ * after a reload: the archive had landed and looked as if it had not
+ * (jwize, 2026-11-16: "archive doesn't seem to work on the subdomain ai
+ * chat"). Put away is put away: when the card's own conversation is filed,
+ * the door opens the card's most recent live conversation, and with none, a
+ * fresh one on the card. The filed one stays in the list under Archived.
+ * A list that cannot be read opens the card's own, as before.
+ *
+ * A CONVERSATION OF ANOTHER REVISION IS NOT THE ONE IT OPENS EITHER
+ * (assistant/chat-revisions.ts). `inRevision` says whether a conversation
+ * belongs to the revision in hand; one that does not is passed over exactly
+ * as a filed one is, so opening a revision opens its own conversations.
+ * Given only once the card has revisions. With it, the card's own
+ * conversation is opened when it has been spoken in during this revision;
+ * one nobody has spoken in yields to the revision's most recent live
+ * conversation, because opening a revision should bring back the
+ * conversation that built it, not an empty one (seen on
+ * business-card.jwize.com, 2026-11-16).
+ */
+export const replicaChatConvoId = async (
+  lineage: string,
+  threads?: ReplicaThreads,
+  inRevision?: (convo: ReplicaConvo) => boolean,
+): Promise<string> => {
+  const own = replicaConvoId(lineage, threads)
+  if (!threads?.listConversations) return own
+  let listed: readonly ReplicaConvo[]
+  try { listed = await threads.listConversations() } catch { return own }
+  const ownListed = listed.find(convo => convo.convoId === own)
+  const belongs = inRevision ?? (() => true)
+  if (inRevision ? !!ownListed && !ownListed.archived && belongs(ownListed) : !ownListed?.archived) return own
+  const route = replicaRoute(lineage)
+  const at = route.join('/')
+  const onCard = (convoId: string): boolean => {
+    try { return String(threads.tilePathOf?.(convoId) ?? '').split('/').filter(Boolean).join('/') === at } catch { return false }
+  }
+  const live = listed
+    .filter(convo => !convo.archived && onCard(convo.convoId) && belongs(convo))
+    .sort((a, b) => (b.lastAt ?? 0) - (a.lastAt ?? 0))[0]
+  if (live) return live.convoId
+  // The card's own, never spoken in: it begins in the revision in hand.
+  if (inRevision && !ownListed) return own
+  try {
+    const fresh = threads.newTileConvoId?.(route)
+    if (typeof fresh === 'string' && fresh) return fresh
+  } catch { /* the card's own, below */ }
+  return own
 }
 
 /** The location bag of the site's tile — the same signing every writer uses. */
