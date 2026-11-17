@@ -18,18 +18,44 @@
 //     step of the line being left, so opening another revision never loses
 //     anything and asks nothing.
 //
+// IN THE CHAT TOO (jwize, 2026-11-16: "Yes, add it"). The chat fills the
+// screen on a managed site door and covers the bar, so the revision in hand
+// could be neither seen nor changed while talking. `mountRevisionStrip` puts
+// the same button and the same panel at the top of the chat's rail, the
+// panel opening in the rail's column. Both panels show one state: whichever
+// reads it says so on `site-revisions:state`, and the other follows.
+//
 // The revisions are the tile's build records (history/revision-lines.ts);
 // this file only shows them and calls the three acts. A dependency: it
-// exports the panel and registers nothing. site-manage.view.ts mounts it.
+// exports the panel and registers nothing. site-manage.view.ts mounts it in
+// the bar; the chat's rail (assistant/agent-tiles-rail.ts) mounts the strip.
 
 import { EffectBus, I18N_IOC_KEY, requestConfirm, type I18nProvider } from '@hypercomb/core'
 import type { BuildRecord } from '../history/builds-slot.js'
+import { conversationInLine, siteRevisionRecords } from '../assistant/chat-revisions.js'
+import { managedSiteSegments } from './managed-record.js'
+import { CHAT_THREADS_KEY, replicaChatConvoId, replicaConvoId, type ReplicaThreads } from './site-replica.js'
 import {
   discardChanges, lineKey, openRevision, readRevisions, saveRevision, stepOf,
   type RevisionLine, type RevisionState,
 } from '../history/revision-lines.js'
 
 const STYLE_ID = 'hc-site-revisions-styles'
+
+/** Where the site's revisions stand, said by whichever panel read it last. */
+export const SITE_REVISIONS_STATE = 'site-revisions:state'
+
+/**
+ * THE CONVERSATION THE SITE'S CHAT OPENS: the site tile's, of the revision
+ * in hand (site-replica replicaChatConvoId, assistant/chat-revisions.ts).
+ */
+export async function siteChatConvoId(lineage: string): Promise<string> {
+  const threads = ioc()?.get?.<ReplicaThreads>(CHAT_THREADS_KEY)
+  try {
+    const site = await siteRevisionRecords().catch(() => null)
+    return await replicaChatConvoId(lineage, threads, convo => !site || conversationInLine(site.records, convo))
+  } catch { return replicaConvoId(lineage, threads) }
+}
 
 type IocLike = { get?<T>(key: string): T | undefined }
 const ioc = (): IocLike | undefined => (globalThis as { ioc?: IocLike }).ioc
@@ -82,6 +108,7 @@ export class SiteRevisionsPanel {
   #unfolded = ''
   #name: HTMLInputElement | null = null
   #ticket = 0
+  readonly #offState: () => void
 
   constructor(host: SiteRevisionsHost) {
     ensureStyles()
@@ -94,6 +121,14 @@ export class SiteRevisionsPanel {
       if (event.key !== 'Escape') return
       event.stopPropagation()
       this.close()
+    })
+    // What another panel read (the bar's, the chat's) is this one's state
+    // too. Last, because the bus replays what was said to a late listener.
+    this.#offState = EffectBus.on<RevisionState | null>(SITE_REVISIONS_STATE, state => {
+      if (!state || state === this.#state) return
+      this.#state = state
+      this.#host.onState(state)
+      if (this.open && !this.#busy) this.#paint()
     })
   }
 
@@ -112,6 +147,8 @@ export class SiteRevisionsPanel {
 
   close(): void { this.element.hidden = true }
 
+  dispose(): void { this.#offState() }
+
   /** Re-read where the revisions stand, and say so to the bar. */
   async refresh(): Promise<void> {
     const segments = this.#host.segments()
@@ -121,6 +158,7 @@ export class SiteRevisionsPanel {
     if (ticket !== this.#ticket) return
     this.#state = state
     this.#host.onState(state)
+    if (state) EffectBus.emit(SITE_REVISIONS_STATE, state)
     if (this.open) this.#paint()
   }
 
@@ -202,6 +240,8 @@ export class SiteRevisionsPanel {
     name.maxLength = 80
     name.autocomplete = 'off'
     name.spellcheck = false
+    // Escape here closes the panel, never the window round it.
+    name.setAttribute('data-escape-local', '')
     name.placeholder = t('site-revisions.name', 'Name this revision')
     name.setAttribute('aria-label', name.placeholder)
     name.value = kept ?? state?.current ?? ''
@@ -311,26 +351,89 @@ export class SiteRevisionsPanel {
   }
 }
 
+/**
+ * THE REVISION IN HAND, AT THE TOP OF THE CHAT'S RAIL. Only on a managed site
+ * door (null anywhere else, and nothing is added). The strip is put before
+ * `before` in `host`; the returned function takes it away again.
+ */
+export function mountRevisionStrip(host: HTMLElement, before: Node | null = null): (() => void) | null {
+  const site = managedSiteSegments()
+  if (!site?.length) return null
+  ensureStyles()
+  const strip = document.createElement('div')
+  strip.className = 'sr-strip'
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.className = 'sr-strip-button'
+  button.setAttribute('aria-haspopup', 'dialog')
+  button.setAttribute('aria-expanded', 'false')
+  const label = document.createElement('span')
+  label.className = 'sr-strip-label'
+  const words = document.createElement('span')
+  words.className = 'sr-strip-words'
+  button.append(label, words)
+  const say = (state: RevisionState | null): void => {
+    label.textContent = t('site-revisions.strip', 'Revision')
+    words.textContent = state?.current ? revisionButtonWords(state) : t('site-revisions.strip-none', 'not saved yet')
+    button.title = t('site-revisions.title', 'Revisions of this card')
+  }
+  const panel = new SiteRevisionsPanel({
+    segments: () => site,
+    onState: say,
+    // The chat is up: it moves to the conversation of the revision opened.
+    onOpened: () => { void siteChatConvoId(site.join('/')).then(convoId => EffectBus.emitTransient('chat:open', { convoId })) },
+  })
+  button.addEventListener('click', () => {
+    panel.toggle()
+    button.setAttribute('aria-expanded', String(panel.open))
+  })
+  strip.append(button, panel.element)
+  host.insertBefore(strip, before)
+  say(panel.state)
+  void panel.refresh()
+  return () => { panel.dispose(); strip.remove() }
+}
+
 function ensureStyles(): void {
   if (typeof document === 'undefined' || document.getElementById(STYLE_ID)) return
   const style = document.createElement('style')
   style.id = STYLE_ID
-  const P = 'hc-site-manage .sr-panel'
+  const P = '.sr-panel'
   style.textContent = `
 hc-site-manage .sm-revisions { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sr-panel[hidden], .sr-panel [hidden] { display: none !important; }
 ${P} {
-  position: fixed; top: 2.6rem; right: 0.75rem; z-index: 99992; width: min(24rem, calc(100vw - 1.5rem));
-  max-height: min(70vh, 32rem); overflow: auto; padding: 0.6rem; border-radius: 4px;
+  overflow: auto; padding: 0.6rem; border-radius: 4px;
   background: rgba(10, 12, 16, 0.96); color: #e8e8ea; border: 1px solid rgba(255, 255, 255, 0.14);
-  font: 500 0.78rem/1.45 var(--hc-mono, ui-monospace, monospace); box-shadow: 0 0.6rem 2rem rgba(0, 0, 0, 0.5);
+  font: 500 0.78rem/1.45 var(--hc-mono, ui-monospace, monospace);
 }
+hc-site-manage ${P} {
+  position: fixed; top: 2.6rem; right: 0.75rem; z-index: 99992; width: min(24rem, calc(100vw - 1.5rem));
+  max-height: min(70vh, 32rem); box-shadow: 0 0.6rem 2rem rgba(0, 0, 0, 0.5);
+}
+.sr-strip { flex-shrink: 0; padding: 0.35rem 0.5rem; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+.sr-strip-button {
+  display: flex; align-items: baseline; gap: 0.5rem; width: 100%; padding: 0.3rem 0.4rem; border-radius: 4px;
+  border: 1px solid transparent; background: none; color: #e8e8ea; cursor: pointer; text-align: left;
+  font: 500 0.75rem/1.4 var(--hc-mono, ui-monospace, monospace);
+}
+.sr-strip-button:hover, .sr-strip-button[aria-expanded="true"] { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.12); }
+.sr-strip-label { flex-shrink: 0; color: #a9adb5; }
+.sr-strip-words { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c8975a; }
+.sr-strip ${P} { margin-top: 0.35rem; max-height: 55vh; padding: 0.5rem; font-size: 0.74rem; }
+.sr-strip .sr-line-at { display: none; }
+${P} .sr-go {
+  flex-shrink: 0; padding: 0.25rem 0.7rem; border-radius: 4px; border: 1px solid rgba(200, 151, 90, 0.6);
+  background: rgba(255, 255, 255, 0.06); color: #e8e8ea; font: inherit; cursor: pointer;
+}
+${P} .sr-go:hover { background: rgba(255, 255, 255, 0.14); }
+${P} .sr-go:disabled { opacity: 0.6; cursor: progress; }
 ${P} .sr-save { display: flex; gap: 0.4rem; }
 ${P} .sr-name {
   flex: 1; min-width: 0; padding: 0.3rem 0.5rem; border-radius: 4px; border: 1px solid rgba(255, 255, 255, 0.18);
   background: rgba(255, 255, 255, 0.05); color: inherit; font: inherit;
 }
 ${P} .sr-name:focus { outline: none; border-color: rgba(200, 151, 90, 0.8); }
-${P} .sr-go { border-color: rgba(200, 151, 90, 0.6); }
 ${P} .sr-changed { display: flex; align-items: baseline; gap: 0.5rem; margin-top: 0.5rem; color: #e3c48f; }
 ${P} .sr-changed span { flex: 1; min-width: 0; }
 ${P} .sr-link { flex-shrink: 0; padding: 0; border: 0; background: none; color: #e8a0a0; font: inherit; cursor: pointer; text-decoration: underline; }

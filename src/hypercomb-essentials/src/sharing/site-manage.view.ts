@@ -47,13 +47,12 @@ import { FRAME_MAX_ONE, versionFrame, type FrameReader, type FrameLayer } from '
 // Packages window reads it the same way: host-directory.view.ts #follow).
 import { readInstallFollow } from './update-scout.service.js'
 import { managedRecordText } from './managed-record.js'
-import { conversationInLine, siteRevisionRecords } from '../assistant/chat-revisions.js'
-import { SiteRevisionsPanel, revisionButtonWords } from './site-revisions.view.js'
+import { SiteRevisionsPanel, revisionButtonWords, siteChatConvoId } from './site-revisions.view.js'
 import {
-  BROKER_KEY, CHAT_THREADS_KEY, COMMITTER_KEY, HISTORY_KEY, LINEAGE_KEY, MANAGED_PUBLISH_KEY, STORE_KEY, SWARM_ADOPT_KEY,
-  notePublished, readState, reconcile, replicaChatConvoId, replicaConvoId, replicaLocation, replicaRoute, takePublished, writeReceipt,
+  BROKER_KEY, COMMITTER_KEY, HISTORY_KEY, LINEAGE_KEY, MANAGED_PUBLISH_KEY, STORE_KEY, SWARM_ADOPT_KEY,
+  notePublished, readState, reconcile, replicaLocation, replicaRoute, takePublished, writeReceipt,
   type AdoptLike, type BrokerLike, type CommitterLike, type HistoryLike, type ManagedPublishLike, type ReplicaServices,
-  type ReplicaSite, type ReplicaState, type ReplicaThreads, type StoreLike as ReplicaStoreLike,
+  type ReplicaSite, type ReplicaState, type StoreLike as ReplicaStoreLike,
 } from './site-replica.js'
 
 export const SITE_MANAGE_SURFACE = 'hc-site-manage'
@@ -348,13 +347,8 @@ export class SiteManageElement extends ElementBase {
 
   /** THE CONVERSATION THE CHAT OPENS: the card's, of the revision in hand
    *  (site-replica replicaChatConvoId, assistant/chat-revisions.ts). */
-  async #chatConvo(): Promise<string> {
-    const lineage = this.#record?.lineage ?? ''
-    const threads = ioc()?.get?.<ReplicaThreads>(CHAT_THREADS_KEY)
-    try {
-      const site = await siteRevisionRecords().catch(() => null)
-      return await replicaChatConvoId(lineage, threads, convo => !site || conversationInLine(site.records, convo))
-    } catch { return replicaConvoId(lineage, threads) }
+  #chatConvo(): Promise<string> {
+    return siteChatConvoId(this.#record?.lineage ?? '')
   }
 
   /** "Use it": the newer published card replaces the replica; the edits it

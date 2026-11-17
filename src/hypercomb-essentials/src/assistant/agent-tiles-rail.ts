@@ -102,6 +102,7 @@ import { walkTree, type WalkHistory, type WalkStore } from '../presentation/tile
 import { RAIL_CSS, RAIL_STYLE_ID } from './tiles-rail.css.js'
 import { CHAT_CODE_EFFECT, showChatCode, type ChatCodeAsk } from './chat-code.js'
 import { partByRevision } from './chat-revisions.js'
+import { mountRevisionStrip } from '../sharing/site-revisions.view.js'
 import { readThumbnail, type ThumbnailStore } from '../presentation/tiles/thumbnails.js'
 import { tilePictureCandidates } from '../editor/tile-properties.js'
 import type { AgentRegistry } from './agent-registry.service.js'
@@ -393,6 +394,8 @@ export class AgentTilesRail {
   #dropFlowWatch: (() => void) | null = null
   /** The chat window switching its main pane to the code of its target, or back. */
   #dropCodeWatch: (() => void) | null = null
+  /** The revision in hand, above the list, on a managed site door. */
+  #dropRevisions: (() => void) | null = null
   /** What each conversation's organized workflow says, by convoId — read
    *  from the flows pool, never derived here, and never load-bearing. */
   #standings = new Map<string, ConvoStanding>()
@@ -577,6 +580,11 @@ export class AgentTilesRail {
     this.#list = list
 
     host.append(head, list)
+    // THE REVISION IN HAND, in the chat itself: on a managed site door the
+    // chat covers the bar that names it (sharing/site-revisions.view.ts).
+    // Nothing is added on any other page.
+    this.#dropRevisions?.()
+    this.#dropRevisions = this.#profile.chats ? mountRevisionStrip(host, list) : null
 
     // Open on the level the participant is standing on, with the whole way
     // up already in the trail — back climbs toward the root from move one.
@@ -842,6 +850,8 @@ export class AgentTilesRail {
     this.#dropFlowWatch = null
     this.#dropCodeWatch?.()
     this.#dropCodeWatch = null
+    this.#dropRevisions?.()
+    this.#dropRevisions = null
     this.#dropBusyWatch?.()
     this.#dropBusyWatch = null
     this.#dropGroupWatch?.()

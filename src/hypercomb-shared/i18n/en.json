@@ -3102,6 +3102,8 @@
   "site-revisions.here": "here",
   "site-revisions.here-changed": "here, changed",
   "site-revisions.open": "Open",
+  "site-revisions.strip": "Revision",
+  "site-revisions.strip-none": "not saved yet",
   "slash.revisions": "Flip through a website tile's versions, above it",
   "revisions.title": "Revisions",
   "revisions.right": "Looks right",
