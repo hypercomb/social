@@ -312,7 +312,7 @@ and a receipt listing them line by line.
 
 Execution is one line at a time, abort-checked before and after each.
 `HypercombPlanQueue` is a module-level singleton
-([chat-window.component.ts:419](../hypercomb-shared/ui/chat-window/chat-window.component.ts:419)),
+([chat-window.ts:1449](../hypercomb-runtime/src/chat-window/ui/chat-window/chat-window.ts:1449)),
 so the lane is app-wide: two conversations cannot interleave grammars.
 
 ### Three places the receipt is weaker than it reads
@@ -506,7 +506,7 @@ Two properties carry weight beyond their size:
 ## The round: what actually guards a turn
 
 Getting the tools at all requires **three independent conditions**
-([:3067-3069](../hypercomb-shared/ui/chat-window/chat-window.component.ts:3067)):
+([chat-window.ts:7348-7350](../hypercomb-runtime/src/chat-window/ui/chat-window/chat-window.ts:7348)):
 `providerIsMachineLocal('local')`, a truthy `providerMachineEndpoint('local')`,
 and `router.ready(...)`. `canAct` additionally requires the slash drone to
 expose `executePublicCanonical` *and* the live census to hold at least one
@@ -545,10 +545,8 @@ is down rather than silently degrading to a remote answer-only provider. That
 is the right failure, and it is a failure, not a fallback.
 
 Authority is **re-asserted, not assumed**: `assertNativeAuthority` fires on
-every stream chunk ([:3189](../hypercomb-shared/ui/chat-window/chat-window.component.ts:3189)),
-at the round ([:3235](../hypercomb-shared/ui/chat-window/chat-window.component.ts:3235)),
-and before **every executed line**
-([:3288](../hypercomb-shared/ui/chat-window/chat-window.component.ts:3288)),
+every stream chunk, at the round, and before **every executed line**
+(as audited; `assertNativeAuthority` has since been removed, in e7f52cefd),
 where the guarded executor also re-derives the callable census per line.
 
 **Relative grammar dies when the ground moves.** `hypercombContextKey` pins page

@@ -34,9 +34,13 @@ export const doctrineMarkdown = (status: DoctrinePageStatus, tiers: readonly Cod
   out.push(`> Read from this hive's \`/doctrine\` tiles: ${status.tiers} tiers, ${status.rules} rules. Every model is sent exactly this, and Jev judges every change against it. A rule changes by editing its tile's note.`, '')
   for (const tier of tiers) {
     out.push(`## ${tier.index} · ${text(tier.title)}`, '')
-    if (tier.sources.length) out.push(`Argument: ${tier.sources.map(doc => `\`${doc}\``).join(', ')}`, '')
+    // A link the docs browser opens in place: the documents live under
+    // documentation/, CLAUDE.md one level up (shown as a source, not opened).
+    if (tier.sources.length) out.push(`Argument: ${tier.sources.map(doc => `[\`${doc}\`](${doc === 'CLAUDE.md' ? '../CLAUDE.md' : doc})`).join(', ')}`, '')
     for (const axiom of tier.axioms) {
-      const rests = axiom.needs.length ? ` *(rests on ${axiom.needs.join(', ')})*` : ''
+      // A span, not *emphasis*: a rule's own text may emphasise, and the page
+      // sets what a rule rests on apart by its class.
+      const rests = axiom.needs.length ? ` <span class="rests">rests on ${axiom.needs.join(', ')}</span>` : ''
       out.push(`- **${axiom.id}**${rests} ${text(axiom.rule)}`)
     }
     out.push('')

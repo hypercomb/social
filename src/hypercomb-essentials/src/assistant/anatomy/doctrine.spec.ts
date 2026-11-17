@@ -172,7 +172,7 @@ describe('the doctrine page', () => {
     for (const tier of tiers) expect(page).toContain(`## ${tier.index} · ${tier.title}`)
     for (const axiom of tiers.flatMap(tier => tier.axioms)) expect(page).toContain(`- **${axiom.id}**`)
     const cited = tiers.flatMap(tier => tier.axioms).find(axiom => axiom.needs.length)!
-    expect(page).toContain(`**${cited.id}** *(rests on ${cited.needs.join(', ')})*`)
+    expect(page).toContain(`**${cited.id}** <span class="rests">rests on ${cited.needs.join(', ')}</span>`)
   })
 
   it('escapes a rule\'s own markup, since the browser does not', () => {
