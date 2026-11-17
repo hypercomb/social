@@ -17,7 +17,8 @@
 import { addHostZone, hostZone, listHostZones, removeHostZone } from './hosts'
 import { keepCommunityTiles, readCommunityTiles } from './community-tiles'
 import { hostRouteName } from '@hypercomb/runtime/host-activation'
-import { askHostPackages } from '@hypercomb/runtime/host-packages'
+import { askHostPackages, isDebuggerPackage } from '@hypercomb/runtime/host-packages'
+import { debuggerPackage } from './debugger-package'
 import { acquire, installPackage, installedPackageSig, type HostPackage, type InstallOutcome, type InstallPhase } from './replicate'
 import { frontDoorOf, readWelcome, type FrontDoor, type Welcome, type WelcomeLink } from './welcome'
 import { pictureOrigins, tilePicture } from './tile-picture'
@@ -659,7 +660,10 @@ class HostPanelElement extends HTMLElement {
       // one stamps). Anything less is cold, and setup offers Install again.
       // Warm: the package's surfaces take the page after the first pulse (main.ts).
       if (!installedPackageSig() || !(await beesOnDisk())) this.#renderManageSetup(managed)
-      else this.#root.replaceChildren()
+      else {
+        this.#root.replaceChildren()
+        void this.#followDebugger(managed)
+      }
       return
     }
     // The front door is read once per card, not once per render: adding a
@@ -2060,6 +2064,25 @@ class HostPanelElement extends HTMLElement {
 
   /** The first visit to a managed site door: one line, a meter, and the way
    *  back — while the host's newest package installs, then the page starts again. */
+  /** A WARM DEBUGGER FOLLOWS ITS PACKAGE. When the publisher has since named
+   *  another `debugger` package, it is replicated in the background while the
+   *  page keeps working; the next start runs it. Quiet: nothing to press, and
+   *  nothing said unless it fails. */
+  async #followDebugger(record: ManageRecord): Promise<void> {
+    const pkg = await debuggerPackage(record, siteDoorZone(location.host))
+    if (!pkg || pkg.packageSig === installedPackageSig() || this.#busy) return
+    this.#busy = true
+    try {
+      const outcome = await installPackage(pkg, [], { self: siteDoorZone(location.host) })
+      if (!outcome.ok) console.warn('[shim] the debugger package did not replicate', outcome.error)
+      else console.log(`[shim] debugger package ${pkg.packageSig.slice(0, 12)} is ready — the next start runs it`)
+    } catch (error) {
+      console.warn('[shim] the debugger package did not replicate', error)
+    } finally {
+      this.#busy = false
+    }
+  }
+
   #renderManageSetup(record: ManageRecord): void {
     const style = document.createElement('style')
     style.textContent = MANAGE_SETUP_CSS
@@ -2083,8 +2106,12 @@ class HostPanelElement extends HTMLElement {
     const install = async (): Promise<void> => {
       take.hidden = true
       // The zone root serves the publisher's packages; the site door itself does not.
-      const answer = await this.#ask(siteDoorZone(location.host))
-      const pkg = answer.packages[0]
+      const zone = siteDoorZone(location.host)
+      // The debugger's own package when its publisher keeps one (debugger-package.ts),
+      // else the host's newest that is not the debugger's.
+      const named = await debuggerPackage(record, zone)
+      const answer = named ? { packages: [named], answered: true } : await this.#ask(zone)
+      const pkg = answer.packages.find(row => row === named || !isDebuggerPackage(row))
       if (!pkg) {
         status.textContent = answer.answered ? 'This site offers no package yet.' : 'The host did not answer.'
         take.hidden = false
