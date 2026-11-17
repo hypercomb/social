@@ -21,7 +21,7 @@ describe('a picture read', () => {
   })
 
   it('asks for a JPEG at most PICTURE_SIDE on its longest edge, with the reading', async () => {
-    const context = vi.fn(async () => ({ reading: '1600x900, mostly teal', image: { mime: 'image/jpeg', base64: 'AAAA' }, width: 1600, height: 900 }))
+    const context = vi.fn(async (_blob: Blob, _options?: { side?: number; maxBase64?: number }) => ({ reading: '1600x900, mostly teal', image: { mime: 'image/jpeg', base64: 'AAAA' }, width: 1600, height: 900 }))
     const picture = await readPicture(PNG, '', context)
     expect(context.mock.calls[0]![1]).toMatchObject({ side: PICTURE_SIDE })
     expect(picture).toEqual({ width: 1600, height: 900, reading: '1600x900, mostly teal', image: { mime: 'image/jpeg', base64: 'AAAA' } })
