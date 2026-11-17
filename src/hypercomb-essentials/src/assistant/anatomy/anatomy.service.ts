@@ -278,10 +278,14 @@ if (typeof window !== 'undefined') window.addEventListener('synchronize', change
 EffectBus.on('notes:changed', changed)
 EffectBus.on('history:head-changed', changed)
 EffectBus.on('history:head-external', changed)
+// Only a read that holds is kept. A read that found nothing may have run
+// before the hive could answer (at boot the tree reader registers after this
+// module), so "no doctrine" or "broken" is asked again by the next caller,
+// never remembered until some later change happens to wake it.
 const current = (): Promise<void> => {
   if (stale) {
     stale = false
-    reading = reading.then(readTiles, readTiles)
+    reading = reading.then(readTiles, readTiles).then(() => { if (status.kind !== 'read') stale = true })
   }
   return reading
 }

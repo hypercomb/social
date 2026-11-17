@@ -229,8 +229,10 @@
   &:hover { background: var(--hc-window-tint-strong); }
 }
 
+// The text-size gear sits at the right, beside close.
+hc-text-size { margin-left: auto; }
+
 .close-btn {
-  margin-left: auto;
   background: none;
   border: none;
   color: var(--hc-window-ink-quiet);
@@ -252,10 +254,10 @@
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 24px 32px 48px;
+  padding: 1.75rem 2.5rem 4rem;
   color: var(--hc-window-ink-plain);
-  font-size: 14px;
-  line-height: 1.7;
+  font-size: calc(1rem * var(--hc-panel-scale, 1));
+  line-height: 1.75;
   -webkit-overflow-scrolling: touch;
 
   // single scrollbar for entire content
@@ -268,122 +270,158 @@
   scrollbar-width: thin;
   scrollbar-color: var(--hc-window-line) transparent;
 
-  // typography
-  h1 { font-size: 24px; font-weight: 700; margin: 0 0 16px; color: var(--hc-window-ink-loud); }
-  h2 { font-size: 20px; font-weight: 600; margin: 32px 0 12px; color: var(--hc-window-ink-loud); border-bottom: 1px solid var(--hc-window-line); padding-bottom: 8px; }
-  h3 { font-size: 16px; font-weight: 600; margin: 24px 0 8px; color: var(--hc-window-accent); }
-  h4 { font-size: 14px; font-weight: 600; margin: 20px 0 6px; color: var(--hc-window-accent-quiet); }
-  h5, h6 { font-size: 13px; font-weight: 600; margin: 16px 0 4px; color: var(--hc-window-ink-quiet); }
+  // THE ARTICLE'S TYPOGRAPHY. It is set through ::ng-deep because the page
+  // arrives as [innerHTML]: the elements carry no _ngcontent attribute, so a
+  // scoped selector never reached them and every heading, list and code span
+  // fell back to the browser's defaults. One reading column, sized off the
+  // gear's `--hc-panel-scale` (the root is in rem, everything inside in em, so
+  // one number moves the whole page).
+  ::ng-deep {
+    > * { max-width: 46em; margin-left: auto; margin-right: auto; }
 
-  p { margin: 0 0 12px; }
+    h1 {
+      font-size: 2em; font-weight: 700; line-height: 1.2; letter-spacing: -0.01em;
+      margin: 0.4em auto 0.8em; color: var(--hc-window-ink-loud);
+    }
+    h2 {
+      font-size: 1.45em; font-weight: 650; line-height: 1.3;
+      margin: 2.2em auto 0.7em; padding-bottom: 0.35em;
+      color: var(--hc-window-ink-loud);
+      border-bottom: 1px solid var(--hc-window-line);
+    }
+    h3 { font-size: 1.2em; font-weight: 600; margin: 1.8em auto 0.5em; color: var(--hc-window-accent); }
+    h4 { font-size: 1.05em; font-weight: 600; margin: 1.5em auto 0.4em; color: var(--hc-window-accent-quiet); }
+    h5, h6 { font-size: 0.95em; font-weight: 600; margin: 1.2em auto 0.3em; color: var(--hc-window-ink-quiet); }
 
-  a {
-    color: var(--hc-window-accent-quiet);
-    text-decoration: underline;
-    text-decoration-color: var(--hc-window-edge);
-    text-underline-offset: 2px;
-    transition: color 100ms ease, text-decoration-color 100ms ease;
-    &:hover {
+    p { margin-top: 0; margin-bottom: 0.9em; }
+
+    a {
       color: var(--hc-window-accent);
-      text-decoration-color: var(--hc-window-edge-firm);
+      text-decoration: underline;
+      text-decoration-color: var(--hc-window-edge);
+      text-underline-offset: 0.18em;
+      &:hover { text-decoration-color: var(--hc-window-edge-firm); }
     }
-  }
 
-  strong { color: var(--hc-window-ink-loud); }
-
-  code {
-    padding: 2px 6px;
-    background: var(--hc-window-tint-strong);
-    border: 1px solid var(--hc-window-line);
-    border-radius: 4px;
-    font-size: 12px;
-    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-    color: var(--hc-window-accent-quiet);
-  }
-
-  pre {
-    margin: 12px 0 16px;
-    padding: 16px;
-    background: var(--hc-window-tint-strong);
-    border: 1px solid var(--hc-window-line);
-    border-radius: var(--hc-radius-card);
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-
-    // horizontal scroll only inside code blocks — no vertical double-scroll
-    &::-webkit-scrollbar { height: 3px; }
-    &::-webkit-scrollbar-track { background: transparent; }
-    &::-webkit-scrollbar-thumb {
-      background: var(--hc-window-line);
-      border-radius: 2px;
-    }
+    strong { color: var(--hc-window-ink-loud); font-weight: 650; }
+    em { color: var(--hc-window-ink-quiet); }
 
     code {
-      padding: 0;
-      background: none;
-      border: none;
-      border-radius: 0;
-      font-size: 12px;
+      padding: 0.1em 0.4em;
+      background: var(--hc-window-tint-strong);
+      border: 1px solid var(--hc-window-line);
+      border-radius: 0.3em;
+      font-size: 0.86em;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      color: var(--hc-window-accent-quiet);
+    }
+
+    pre {
+      margin-top: 0.9em; margin-bottom: 1.2em;
+      padding: 1em 1.2em;
+      background: var(--hc-window-tint-strong);
+      border: 1px solid var(--hc-window-line);
+      border-radius: var(--hc-radius-card);
+      overflow-x: auto;
+      line-height: 1.55;
+      &::-webkit-scrollbar { height: 3px; }
+      &::-webkit-scrollbar-track { background: transparent; }
+      &::-webkit-scrollbar-thumb { background: var(--hc-window-line); border-radius: 2px; }
+
+      code {
+        padding: 0; background: none; border: none; border-radius: 0;
+        font-size: 0.86em; color: var(--hc-window-ink-plain);
+        white-space: pre; display: block;
+      }
+    }
+
+    blockquote {
+      margin-top: 1em; margin-bottom: 1.2em;
+      padding: 0.8em 1.1em;
+      border-left: 3px solid var(--hc-window-edge-firm);
+      border-radius: 0 var(--hc-radius-card) var(--hc-radius-card) 0;
+      background: var(--hc-window-wash);
       color: var(--hc-window-ink-plain);
-      white-space: pre;
-      display: block;
+    }
+
+    ul, ol { margin-top: 0.5em; margin-bottom: 1em; padding-left: 1.5em; }
+    li { margin: 0.35em 0; padding-left: 0.2em; }
+    li::marker { color: var(--hc-window-accent-quiet); }
+
+    hr { border: none; border-top: 1px solid var(--hc-window-line); margin: 2em auto; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 0.9em; margin-bottom: 1.2em;
+      font-size: 0.93em;
+    }
+    th {
+      text-align: left; padding: 0.55em 0.8em;
+      background: var(--hc-window-tint);
+      border-bottom: 1px solid var(--hc-window-line);
+      color: var(--hc-window-ink-loud); font-weight: 600; white-space: nowrap;
+    }
+    td {
+      padding: 0.5em 0.8em;
+      border-bottom: 1px solid var(--hc-window-line);
+      color: var(--hc-window-ink-plain);
+      vertical-align: top;
+    }
+    tr:hover td { background: var(--hc-window-tint); }
+
+    del { color: var(--hc-window-ink-quiet); }
+
+    // A link to a source file has nothing to open in the browser: it reads
+    // as code, its path on hover (docs-markdown.ts).
+    code.doc-source { cursor: help; }
+
+    // THE DOCTRINE PAGE. Each rule reads as a row: its id a fixed chip in the
+    // margin, what it rests on a quiet line, then the rule. Tiers are sections
+    // with their number set apart.
+    .doctrine-page {
+      max-width: 46em;
+
+      h2 { margin-top: 2.4em; }
+
+      ul { list-style: none; padding-left: 0; margin-top: 0.8em; }
+
+      li {
+        position: relative;
+        margin: 0;
+        padding: 0.7em 0.9em 0.7em 4.6em;
+        border-bottom: 1px solid var(--hc-window-line);
+        &:last-child { border-bottom: none; }
+        &:hover { background: var(--hc-window-tint); }
+      }
+
+      li > strong:first-child {
+        position: absolute;
+        left: 0.9em; top: 0.75em;
+        min-width: 2.9em;
+        padding: 0.1em 0;
+        text-align: center;
+        font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+        font-size: 0.82em;
+        font-weight: 600;
+        color: var(--hc-window-accent);
+        background: var(--hc-window-wash);
+        border: 1px solid var(--hc-window-edge);
+        border-radius: 0.35em;
+      }
+
+      .rests {
+        display: block;
+        font-style: normal;
+        font-size: 0.8em;
+        letter-spacing: 0.02em;
+        color: var(--hc-window-ink-quiet);
+        margin-bottom: 0.15em;
+      }
+
+      blockquote { font-size: 0.95em; }
     }
   }
-
-  blockquote {
-    margin: 12px 0;
-    padding: 8px 16px;
-    border-left: 3px solid var(--hc-window-edge-firm);
-    background: var(--hc-window-wash);
-    color: var(--hc-window-ink-quiet);
-    font-style: italic;
-  }
-
-  ul, ol {
-    margin: 8px 0 12px;
-    padding-left: 24px;
-  }
-
-  li {
-    margin: 4px 0;
-  }
-
-  hr {
-    border: none;
-    border-top: 1px solid var(--hc-window-line);
-    margin: 24px 0;
-  }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 12px 0 16px;
-    font-size: 13px;
-  }
-
-  th {
-    text-align: left;
-    padding: 8px 12px;
-    background: var(--hc-window-tint);
-    border-bottom: 1px solid var(--hc-window-line);
-    color: var(--hc-window-ink-loud);
-    font-weight: 600;
-    font-size: 12px;
-    white-space: nowrap;
-  }
-
-  td {
-    padding: 6px 12px;
-    border-bottom: 1px solid var(--hc-window-line);
-    color: var(--hc-window-ink-quiet);
-    vertical-align: top;
-  }
-
-  tr:hover td {
-    background: var(--hc-window-tint);
-  }
-
-  del { color: var(--hc-window-ink-quiet); }
 }
 
 .docs-loading {
@@ -540,7 +578,7 @@
   .nav-item { font-size: 14px; }
 
   // ensure tables scroll horizontally on mobile without adding outer scroll
-  .docs-article table {
+  .docs-article ::ng-deep table {
     display: block;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;

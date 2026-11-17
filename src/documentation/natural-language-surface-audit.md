@@ -235,7 +235,7 @@ round (the first pass called the bracket list "unbounded" — overstated).
 **The whole trust decision is that the endpoint's hostname is loopback.** That
 is a fact about where a process runs, not about who wrote it or what it wants.
 `canAct` is unconditionally true whenever the slash drone is registered
-([chat-window.component.ts:3060](../hypercomb-shared/ui/chat-window/chat-window.component.ts:3060)).
+(as audited; `canAct` has since been removed, in e7f52cefd).
 There is no participant opt-in anywhere in this path.
 
 ### `/cut` is the same shape and is not on the list

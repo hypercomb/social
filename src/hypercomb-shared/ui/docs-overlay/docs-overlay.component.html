@@ -47,13 +47,14 @@
       @if (activePage()) {
         <button class="back-btn" (click)="backToIndex()">{{ 'docs.index' | t }}</button>
       }
+      <hc-text-size [window]="textWindow" (scaleChange)="textScale.set($event)" />
       <button class="close-btn" (click)="close()" [attr.aria-label]="'docs.close' | t">&times;</button>
     </div>
 
     @if (loading()) {
       <div class="docs-loading">{{ 'docs.loading' | t }}</div>
     } @else if (renderedHtml()) {
-      <article class="docs-article" [innerHTML]="renderedHtml()"></article>
+      <article class="docs-article" [style.--hc-panel-scale]="textScale()" [innerHTML]="renderedHtml()" (click)="follow($event)"></article>
     } @else {
       <!-- welcome / index view when no doc is selected -->
       <div class="docs-welcome">

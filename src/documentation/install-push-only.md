@@ -171,7 +171,7 @@ DCP gets an explicit "Save Snapshot" action (command palette + button). Prompts 
 
 ### 8.2 Versions List Reframe
 
-The `+N` hidden-versions toggle built for [home.component.ts](../diamond-core-processor/src/app/home/home.component.ts) was introduced as a garbage hider for `promoteBranchToPackage` duplicates. Under push-only, it becomes the legitimate history browser:
+The `+N` hidden-versions toggle built for the installer's `home.component.ts` (since deleted with the installer, in fc3696c3b) was introduced as a garbage hider for `promoteBranchToPackage` duplicates. Under push-only, it becomes the legitimate history browser:
 
 - **Older HEADs on the active branch** — real checkpoints, walkable via Make HEAD.
 - **Tips of other branches** — divergent timelines, switchable via Checkout.
