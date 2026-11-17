@@ -24,7 +24,7 @@
 //   5. prove it: the zone root answers the index, and an unpublished name
 //      answers the honest "nothing published" 404 FROM THE WORKER.
 //
-// Then the domain is a switch in every layer's Publish panel once it is in
+// Then the domain is a switch in every layer's Staging window once it is in
 // your Hosts. The token: CLOUDFLARE_API_TOKEN with Zone:Read + DNS:Edit
 // (wrangler's own login cannot write DNS). Without it, steps that only read
 // still run and the DNS step says what to add by hand.
@@ -232,7 +232,7 @@ if (!served) stop(`${writeFace} does not answer the index yet — DNS may still 
 ok(`${writeFace} answers the index`)
 if (!routed) stop(`${probe}.${domain} is not reaching the worker — check the wildcard record and the route`)
 ok(`${domain} doors reach the worker`)
-console.log(`\n${domain} is connected. Add it in Hosts and it is a switch on every layer's Publish panel.`)
+console.log(`\n${domain} is connected. Add it in Hosts and it is a switch on every layer's Staging window.`)
 }
 
 try { await main() } catch (err) {

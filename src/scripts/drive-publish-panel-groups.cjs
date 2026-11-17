@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // scripts/drive-publish-panel-groups.cjs
 //
-// PUBLISH GROUPS INSIDE THE PUBLISH PANEL — a group publishes from the panel
+// PUBLISH GROUPS INSIDE THE STAGING WINDOW — a group publishes from the panel
 // as it does from the strip, and from inside a view, where the strip is not
 // drawn (publish-groups.md).
 //
 //   1. a layer with a group (made with the `groups` word)
-//   2. `p` opens Publish; its Groups TAB lists the layer's groups
+//   2. `p` opens Staging; its Groups TAB lists the layer's groups
 //   3. a row reads the group's name and Publish (n); pressing Publish runs
 //      the group and reports (a fresh profile has no host — it says why)
 //   4. ROW SELECT: pressing a group's row picks it; Filter goes back to the
@@ -129,7 +129,7 @@ async function main() {
     await pressP()
     await settle(5000, () => page.evaluate(() => !!document.querySelector('.publish-panel')))
     const listed = await settle(6000, async () => (await panelGroups()) !== null)
-    check('`p` opens Publish; its Groups tab is there', listed, JSON.stringify(await panelGroups()))
+    check('`p` opens Staging; its Groups tab is there', listed, JSON.stringify(await panelGroups()))
 
     // 3.
     await page.locator('.publish-panel .ptab').filter({ hasText: 'Groups' }).click()

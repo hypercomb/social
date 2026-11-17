@@ -229,7 +229,7 @@ export interface PublishOptions {
   forceReDrain?: boolean
   onProgress?: (p: PublishProgress) => void
   /** Stage lists to advance in the same act besides `published` —
-   *  `publish here` (the offering act) passes `['shared']`. */
+   *  `stage here` (the offering act) passes `['shared']`. */
   stages?: readonly StageWord[]
   /** MAKE AN EARLIER VERSION LIVE (the Versions list): publish this head as
    *  it is instead of sealing the tile now. Nothing is stamped into the tile

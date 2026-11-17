@@ -4,7 +4,7 @@
 // that publishes or re-signs this hive's index — publish, withdraw, doors, an
 // own address, an entrance, secure delete — runs in this one lane, one after
 // another: the Publish panel's press, its picked apps, a publish group from
-// the strip, the `publish` and `host` words alike.
+// the strip, the `stage` and `host` words alike.
 //
 // Why one lane and not the index write's own (hive-pointer.ts inWriteLane):
 // that lane is per HOST NAME and covers only the final signed write. A

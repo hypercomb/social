@@ -63,7 +63,7 @@ npm run proposal:stamp -- nlnet          # write the tiles and pages
 
 Stamping writes to the hive only. It keeps any children already there, and
 re-running it rewrites only the pages whose bytes changed. Making the site
-public is a separate act: publish the root tile from the Publish panel, or
+public is a separate act: stage the root tile from the Staging window, or
 `npm run publish:content -- nlnet-proposal --r2`.
 
 ## Changing it from the hive

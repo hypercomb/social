@@ -310,7 +310,7 @@ const SELECTION_SHARE: QuickMenuDefinition = {
   title: 'Share',
   contexts: [],
   slots: [
-    { ...cmd('east', 'publish', 'publish'), icon: 'cloud_upload' },
+    { ...cmd('east', 'stage', 'stage'), icon: 'cloud_upload' },
     { ...cmd('southwest', 'keys', 'keys'), icon: 'key' },
     onTile({ ...cmd('west', 'invite', 'invite'), icon: 'person_add' }),
     { ...cmd('northwest', 'follow', 'follow'), icon: 'notifications' },

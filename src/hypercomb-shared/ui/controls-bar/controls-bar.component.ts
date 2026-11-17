@@ -159,8 +159,8 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // of the input) — notes ride along with every page, so their switch lives in
   // the top chrome now, not here.
   { id: 'sequences',    label: 'sequence.library',          action: 'openSequences',    visibleWhen: 'always' },
-  // The publish differential — what the world is serving, next to what has
-  // changed here since. Slash-first (`/publish`), so like `sequences` it stays
+  // The Staging window — what the world is serving, next to what has
+  // changed here since. Slash-first (`/stage`), so like `sequences` it stays
   // off the rail until the participant enables it from inside its own window.
   { id: 'publish',      label: 'controls.publish',      action: 'togglePublish',      visibleWhen: 'always' },
   // TWO WINDOWS THAT DECLARED A LAUNCHER AND HAD NOWHERE TO LAND.

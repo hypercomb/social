@@ -2226,7 +2226,7 @@ export class HostSyncService extends EventTarget {
    *  everything else — #putThrew; or not-live from a host this tab does not
    *  meet at), or is full, the resolver passes it over at once — a publish
    *  domain or the host field alike (D2: the swarm stops waiting on a domain
-   *  that can never take its bytes; `publish here` still needs it). Silence:
+   *  that can never take its bytes; `stage here` still needs it). Silence:
    *  only once nothing at that name has EVER answered, after its third wave
    *  (the `hyperccomb.com` typo — #neverAnswered). Then the next door, or
    *  none (swarm-hosts.ts); the status lines name the host and why. */

@@ -1983,7 +1983,7 @@ export class HostDirectoryElement extends HTMLElement {
       this.#paintPublished(published, domain.zone)
       head.append(published)
       void this.#askPublished(domain.zone)
-      const publish = button('hd-link hd-publish', t('hosts.publish', 'Publish'), t('hosts.publish-tip', 'Open Publish — what goes out to your domains'))
+      const publish = button('hd-link hd-publish', t('hosts.publish', 'Staging'), t('hosts.publish-tip', 'Open Staging — what goes out to your domains'))
       publish.prepend(glyph('publishIcon'))
       publish.append(glyph('opensIcon', 'hd-opens'))
       publish.addEventListener('click', () => this.#openPublish())

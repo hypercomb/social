@@ -15,7 +15,7 @@ domain claim inspiredbyhumans.org
    that they control the domain; nothing else is asked of them.
 3. The hive keeps checking. When Cloudflare sees the nameservers, the domain
    is theirs: its apex is their front door, every `<name>.<domain>` is a place
-   they can switch on in the Publish panel, and nobody else can publish there.
+   they can switch on in the Staging window, and nobody else can stage there.
 
 The key that claims is the key that publishes, so claim from the hive you
 publish from. Keys live per origin.
@@ -164,7 +164,7 @@ host; `@<zone>` is read as that zone's write face — the zone root itself.
 - **active** — the public reading never names the key, so before saying
   "yours" the hive asks again with the signed POST, which answers only the
   holder. Then a toast: the domain is yours. The domain is added to the
-  hive's Hosts (`hosts:add`), so the Publish panel shows it as a switch.
+  hive's Hosts (`hosts:add`), so the Staging window shows it as a switch.
 - **contested** / **refused** — a toast with the reason.
 
 ## Opening the domain on a creation
@@ -172,7 +172,7 @@ host; `@<zone>` is read as that zone's write face — the zone root itself.
 A claimed apex is its host's front door: the card, with the creations
 switched on here. The claimant can instead open the bare domain on one of
 their creations (jwize 2026-10-05, for pointblanksolutions.ca: the domain is
-both the offer and the proof of the hosting). In the Publish panel, on the
+both the offer and the proof of the hosting). In the Staging window, on the
 domain's row, Own address → **Make it the front page of `<domain>`**. That
 signs `addresses["<domain>"] = "<lineage>"` in the index; the label is `@`,
 the apex's own name in DNS.
@@ -290,9 +290,9 @@ and **Off everywhere**.
   and only to a domain the index really opened it on.
 - **Turning off is reversible.** Only `doors[key]` moves: off here takes the
   domain out of the list, off everywhere writes `[]`. The head stays in
-  `roots`, so a domain is turned back on from Publish without publishing
+  `roots`, so a domain is turned back on from Staging without staging
   again. A publish that opens on every domain (its index names no list) is
-  turned off here from Publish, where its domains are chosen; the front door
+  turned off here from Staging, where its domains are chosen; the front door
   offers Off everywhere for it. Unpublishing stays its own act.
 - **One writer per hive.** A hive tab admits one writer, so a hand-off that
   lands while the hive is open in another tab is passed to that tab over a

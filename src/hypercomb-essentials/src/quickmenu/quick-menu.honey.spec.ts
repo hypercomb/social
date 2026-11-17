@@ -434,7 +434,7 @@ const ICON_MAP: Readonly<Record<string, string>> = {
   exit: 'hexagon', next: 'chevron_right', previous: 'chevron_left', first: 'skip_previous',
   last: 'skip_next', done: 'check', select: 'check_circle', all: 'select_all', edit: 'edit',
   organize: 'category', groups: 'hub', find: 'search', go: 'explore', share: 'share',
-  publish: 'cloud_upload', republish: 'sync', keys: 'key', invite: 'person_add',
+  stage: 'cloud_upload', republish: 'sync', keys: 'key', invite: 'person_add',
   follow: 'notifications', hide: 'visibility_off', remove: 'delete', shelf: 'bookmark',
   'to shelf': 'bookmark', back: 'arrow_back', cancel: 'close',
   images: 'photo_library', generate: 'auto_awesome',

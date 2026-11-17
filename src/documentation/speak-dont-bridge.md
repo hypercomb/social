@@ -85,8 +85,8 @@ because it might have landed. The broker reads this at its next start.
 |---|---|
 | `go <tile>`, `go <path>`, `go /<path>`, `go ..`, `go /` | Walks. Refuses a place with no tile. |
 | `website page <sig>` | Dresses the tile you stand on with the page whose HTML is resource `<sig>`, closure declared. |
-| `publish on <domain>` | Names the domain for the tile you stand on, then publishes it (consent asked). |
-| `publish off <domain>` | Takes it off that domain; the last door off withdraws it. |
+| `stage on <domain>` | Names the domain for the tile you stand on, then stages it there (consent asked). |
+| `stage off <domain>` | Takes it off that domain; the last door off withdraws it. |
 
 | `find <word>`, `find <word> /`, `find <word> /<route>` | Names the tiles whose name holds the word, and how the walk went: how many tiles it opened, how long it took, and why it stopped short when it did. The chat's models already read with the same grammar. |
 | `read`, `read /`, `read /<route>` | Says what a tile holds: the tiles under it, as routes, and its notes (replies indented, a very long one cut and said so). A withheld tile is never read out. |
@@ -115,8 +115,8 @@ route — `read /susan`, `file on /susan: …` — is refused before anything ru
   `/from`, `/hive`, `/tutorial` ran on its words. `file` keeps its arguments
   verbatim now (`rawArgs`). Any word that takes free text needs the same.
 - **Two sessions share one tab.** A sentence acts where the hive stands, and
-  another session can move it between two sentences. `publish on` read the
-  tile, then `publish here` read it again and could publish whatever tile the
+  another session can move it between two sentences. `stage on` read the
+  tile, then `stage here` read it again and could stage whatever tile the
   tab had moved to. The tile is now read once and passed through. Until each
   word can name its target, keep `go` and the act back to back and check the
   `heard` lines say where it acted.
@@ -134,7 +134,7 @@ retired by writing its word, then moving its callers to sentences.
 | `note-add` | `file on /<route>: <text>` |
 | `note-delete` | `unfile on /<route>: <first words>` |
 | `note-split` | none yet |
-| `effect-emit publish:*` | `publish on`/`off`, `publish here` |
+| `effect-emit publish:*` | `stage on`/`off`, `stage here` |
 | `stamp` | `title`, `accent`, `keyword` cover parts |
 | `build-record` | `builds` |
 | `remove` | `remove`, a participant's act (refused remotely by design) |

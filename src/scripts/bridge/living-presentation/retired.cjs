@@ -9,8 +9,8 @@
 // `roots` are earlier top tiles: the root was presentation until jwize
 // 2026-11-04 ("the root tile has to change to protocol instead of presentation";
 // "unpublish the presentation and we use the other from now on"). plant.cjs
-// retires each at `/` with `trait ~` and, for every domain it publishes to,
-// withdraws it with `publish /<root> off <domain>`. Its notes below stay as
+// retires each at `/` with `trait ~` and, for every domain it stages on,
+// withdraws it with `stage /<root> off <domain>`. Its notes below stay as
 // the record of that planting; they sit under a retired root now.
 
 module.exports = {

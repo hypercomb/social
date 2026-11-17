@@ -53,7 +53,7 @@ Each step leaves the chat and the navigation working in both the Angular shells 
 | 10 | The frame ports; one chat element in both shells | `chat-window.component.ts` is deleted. `chat.view.ts` is gone. |
 | 11 | The shared stores the command line and controls read move to the runtime | Tags, names and interests complete and persist there. |
 | 12 | The command shell, then the command line, as elements | Type a name to make a tile, say any word (including `grant`), find with `?`, complete. |
-| 13 | Publish panel as an element | Publish the site from the page. |
+| 13 | Staging window as an element | Stage the site from the page. |
 | 14 | The controls bar in four parts: viewport policy, breadcrumb and back, the tag strip, then the rail and phone bands | The whole hypercomb.io rail. The Angular controls bar is deleted. |
 | 15 | Files viewer, icon picker | The last tools a site uses. |
 

@@ -23,14 +23,14 @@ one per group, each in its own colour, with a `+` at the end.
 other — never in parallel, because every publish read-modify-writes the host's
 signed index and two at once can drop each other's entry. The toast says how
 it went, and why when it could not (no host, no signer — the same
-`publish.failure.*` texts the Publish panel uses).
+`publish.failure.*` texts the Staging window uses).
 
 **A group publishes where its page does** (2026-10-13). The page's domains are
-its own switches at the top of the Publish panel. A member that names no host
+its own switches at the top of the Staging window. A member that names no host
 of its own takes them — written as its own host marks (`setBranchHosts`), the
-record every publish reads, so the member's own Publish row then says where it
+record every publish reads, so the member's own Staging row then says where it
 went. With no domain on for the page and no own host standing in, the toast
-says where the switch is ("Turn on a domain for this page in Publish …")
+says where the switch is ("Turn on a domain for this page in Staging …")
 rather than the general "add a host".
 
 **Proven against a real host** (`scripts/drive-publish-groups-live.cjs`, 8
@@ -77,8 +77,9 @@ groups ungroup <group>          take the group off the layer
 
 A group is named by its name in any case; a name with spaces is quoted
 (`groups add "my blog" one, two`); tiles go by comma or by space. The word
-keeps its whole line (`rawArgs`) — `publish` is itself a behaviour word, and
-`groups publish blog` must not also open the Publish panel. `groups on` / `off`
+keeps its whole line (`rawArgs`) — `publish` was itself a behaviour word until
+it became `stage` (2026-11-16), and `groups publish blog` must not also open the
+Staging window. `groups on` / `off`
 emit the panel's own `features:enable` / `features:remove` with `silent: true`
 (the deposit is the answer; the panel stays shut). `groups new` lights the
 strip here if it was not. Unknown groups, tiles and sub-words are said, never
@@ -142,7 +143,7 @@ chat window), a published visitor shell or a dormant behaviour takes it away.
   `scripts/drive-publish-panel-groups.cjs` (5 checks),
   `scripts/drive-publish-groups-live.cjs` (8 checks, against a real host).
 
-## In the Publish panel
+## In the Staging window
 
 The panel's folded **Groups** section lists the layer's groups — icon in its
 colour, name, **Publish (n)** — and publishes one from there, through the same

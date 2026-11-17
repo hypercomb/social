@@ -112,7 +112,7 @@ fn main() -> ExitCode {
     println!("serving {}", serving.addr());
     println!(
         "history {}",
-        if options.head_only { "head only (--head-only)" } else { "public where the hive marks it (publish history on)" },
+        if options.head_only { "head only (--head-only)" } else { "public where the hive marks it (stage history on)" },
     );
     println!("open    {}", serving.lan_url());
     println!("verify  node hypercomb-shim/host/check-host.mjs {}", serving.lan_url());
@@ -139,6 +139,6 @@ hypercomb-serve — serve a hive over HTTP
     --port   default 4270
     --bind   default 0.0.0.0 (every interface); --local is 127.0.0.1
     --head-only  serve every location's head only, even where the hive has
-             turned public history on (`publish history on`); by default a
+             turned public history on (`stage history on`); by default a
              location whose head carries that mark also serves its history
 ";

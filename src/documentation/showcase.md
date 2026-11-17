@@ -141,7 +141,7 @@ What you chose for a domain is one record:
   - Both sides read the index fresh right before they sign; the phone's write also carries `['prev', <id>]`, so the host
     refuses it when the index moved in between and the phone reads and signs again.
 - A domain with no record yet shows what its owners **published here**: the
-  lineages whose signed doors name this domain, which is Publish's switch for it.
+  lineages whose signed doors name this domain, which is Staging's switch for it.
   A lineage with no doors is not shown, even where the worker would open it.
 - A named item is shown unless Publish has turned it off for this domain: the
   owners' signed doors have the last word on every item the record names. A
@@ -272,7 +272,7 @@ name says which template is showing, and how the two swipes are split.
   shown, the non-members grayed out, a click toggling membership) and signing
   the record all live in the hive, with native undo through the `showcase`
   layer slot. The record's writer is built (`addCommunity`, `removeCommunity`,
-  `toggleCommunityItem`, `setView`, `setCommunityView`); the screen is not. The Publish panel's Groups are not
+  `toggleCommunityItem`, `setView`, `setCommunityView`); the screen is not. The Staging window's Groups are not
   reused for membership: a group holds child tiles of one page, and a community
   holds a peer's items too.
 - **Access-gated communities.** Today every community in the record is as public
@@ -431,8 +431,8 @@ generated cover until a picture is set on them in the hive and published (it tra
 
 The honeycomb spans its card **edge to edge**: the tiles are grown just enough that a full row has the outer hexagons' flat
 sides on the comb's own edges, the card's side padding is gone, and the gutter between tiles is `.2rem` (`.12rem` on a phone).
-**`republish`** (`sharing/republish.queen.ts`, the participant's word like every publish form) publishes again every page the
-Publish panel marks `drift` (published, and its head here has moved on, as it does when a picture is set on a tile): it names
+**`republish`** (`sharing/republish.queen.ts`, the participant's word like every `stage` form) publishes again every page the
+Staging window marks `drift` (published, and its head here has moved on, as it does when a picture is set on a tile): it names
 them, asks once, and runs them one after another to the hosts each names, as the panel's selected-apps run does. It never
 publishes anything that was not already published. The pictures on the front door appear as soon as the republish lands.
 
@@ -515,7 +515,7 @@ domain it added. What this browser turned on is kept in `community:tiles` (`read
 
 **The signed community is the last layer (jwize 2026-11-15: "the community section is the last layer of defense";
 "the community items are compiled and made available for all visitors no matter what computer").** Once the owners
-sign `showcase:<zone>`, an item it names draws for every visitor whether or not the Publish window's live list
+sign `showcase:<zone>`, an item it names draws for every visitor whether or not the Staging window's live list
 (`stage:live`) names its head: that list is a discovery listing (deployment-stages.md R10), never the resolver. A door
 Publish turned off for this domain still hides it — only an explicit doors list that leaves this domain out
 (`doorsClosed`); a lineage with no doors at all names no domain to leave out, and shows (jwize 2026-11-16: favorites). Without a signed showcase the live list still narrows what a door
@@ -648,7 +648,7 @@ and once the row holds anything. An empty row in the iPhone view draws no empty 
 A domain whose ledger names no owner has nothing signed to read, so its row says "Nothing is published here yet." and never
 "Could not read what is published here."
 
-### The hive's Publish window: two acts, stage then publish (jwize 2026-11-16)
+### The hive's Staging window: two acts, stage then publish (jwize 2026-11-16)
 
 "You should have your own domain and the community separate since you are feeding the community from all domains
 including yourself. Then there are only on off no selected … This makes only two things you can do in the app here.

@@ -649,7 +649,7 @@ export class PublishStatusDrone extends Drone {
       if (!host || !SIG_RE.test(offered) || this.#entranceUpdates.get(host)?.offered === offered) return
       this.#entranceUpdates.set(host, { offered, at, head: SIG_RE.test(head) ? head : '' })
       for (const row of this.#rows) { const view = row.entrances[host]; if (view) view.offered = offered }
-      this.#toast('info', 'publish.entrance.update', `A newer card page is offered for ${host} — preview it in Publish.`, { host })
+      this.#toast('info', 'publish.entrance.update', `A newer card page is offered for ${host} — preview it in Staging.`, { host })
       this.#emit()
     })
     // What is put away changed (a skip, or Show again): the skipped lists
@@ -738,7 +738,7 @@ export class PublishStatusDrone extends Drone {
     this.#emit()
   }
 
-  /** Open or close the panel — the rail icon, `/publish` and `p` all land here.
+  /** Open or close the panel — the rail icon, `/stage` and `p` all land here.
    *
    *  THE ICON ASKS THE SCREEN, NEVER THE FLAG. A docked panel is PARKED — not
    *  closed — whenever another window opens (window-rule.ts): its DOM goes,
@@ -1860,7 +1860,7 @@ export class PublishStatusDrone extends Drone {
       }
     }
     if (!row.live) {
-      this.#toast('tip', 'publish.own.not-published', 'Publish this place on the domain first, then give it its own address.')
+      this.#toast('tip', 'publish.own.not-published', 'Stage this place on the domain first, then give it its own address.')
       return
     }
     row.busyPhase = 'indexing'
@@ -2054,12 +2054,12 @@ export class PublishStatusDrone extends Drone {
       const key = result.failure === 'still-open' ? 'publish.forget.still-open'
         : result.failure === 'keep-incomplete' ? 'publish.forget.keep-incomplete'
         : 'publish.forget.failed'
-      EffectBus.emit('toast:show', { type: 'error', title: i18n?.t('publish.title') ?? 'Publish', message: i18n?.t(key) ?? 'Nothing was deleted.' })
+      EffectBus.emit('toast:show', { type: 'error', title: i18n?.t('publish.title') ?? 'Staging', message: i18n?.t(key) ?? 'Nothing was deleted.' })
       return
     }
     EffectBus.emit('toast:show', {
       type: 'success',
-      title: i18n?.t('publish.title') ?? 'Publish',
+      title: i18n?.t('publish.title') ?? 'Staging',
       message: i18n?.t('publish.forget.done', { count: result.removed }) ?? `Your hosts forgot ${result.removed} object(s) only this place used.`,
     })
     this.emitEffect('activity:log', { message: `${key}: hosts forgot ${result.removed} of ${result.asked} (${result.hosts.map(h => h.host + (h.error ? ' ' + h.error : '')).join(', ')})` })
@@ -2168,7 +2168,7 @@ export class PublishStatusDrone extends Drone {
     const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
     EffectBus.emit('toast:show', {
       type,
-      title: i18n?.t('publish.title') ?? 'Publish',
+      title: i18n?.t('publish.title') ?? 'Staging',
       message: i18n?.t(messageKey, params) ?? fallback,
     })
   }

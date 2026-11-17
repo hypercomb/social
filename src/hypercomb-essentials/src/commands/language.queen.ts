@@ -31,7 +31,7 @@
 //
 // The three publishing words are the participant's alone. (`offer`, not
 // `publish`: the command line runs every behaviour word on a line in order,
-// and `publish` is a word of its own.)
+// and `publish` was a word of its own until it became `stage`, 2026-11-16.)
 
 import { QueenBee, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { hostOfferDeps } from '../sharing/host-offer.js'

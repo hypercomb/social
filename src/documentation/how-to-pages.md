@@ -19,10 +19,10 @@ howto <word>        the same, then walk to that word's page
 
 It lays one tile, `how`, at the root of the hive. Under it is a tile for every
 word, each wearing its own page, and `how` itself wears the index (every word,
-A to Z, each a link). Then publish it once, the way you publish anything:
+A to Z, each a link). Then stage it once, the way you stage anything:
 
 ```
-publish /how on <domain>
+stage /how on <domain>
 ```
 
 `howto` refuses, and lays nothing, while you are looking at the past or a

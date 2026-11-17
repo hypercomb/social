@@ -1,44 +1,48 @@
 // sharing/publish.queen.ts
 //
-// `/publish` — open the publish differential.
+// `/stage` — open the Staging window (the publish differential).
 //
-// Branch-scoped publication: what the world sees, what changed here, where a
-// branch publishes, and the publish/re-publish/unpublish acts for that row.
+// Putting a creation on a domain (local, a subdomain, any domain) is STAGING;
+// "publish" is kept for the final step only — a staged community tile
+// becoming public to every visitor (jwize, 2026-11-16).
+//
+// Branch-scoped staging: what the world sees, what changed here, where a
+// branch is staged, and the stage/re-stage/unpublish acts for that row.
 // The durable host and package directory stays in `/hosts`; this surface only
 // consumes its destinations.
 //
-//   publish                 toggle the panel
-//   publish here            publish the tile you stand on to the hosts it names
-//   publish on <domain>     switch that domain's door ON for the tile you stand
-//                           on: it names the domain, then publishes (asking
-//                           your consent, as `publish here` does) — the tile's
+//   stage                   toggle the panel
+//   stage here              stage the tile you stand on to the hosts it names
+//   stage on <domain>       switch that domain's door ON for the tile you stand
+//                           on: it names the domain, then stages it (asking
+//                           your consent, as `stage here` does) — the tile's
 //                           name becomes <name>.<domain>
-//   publish on <domain> as <label>
+//   stage on <domain> as <label>
 //                           the same, with its OWN ADDRESS said at the end:
 //                           https://<label>.<domain>. The label is checked
 //                           first, the consent names that address, and the
-//                           address is set once the publish lands (jwize,
+//                           address is set once the staging lands (jwize,
 //                           2026-10-25: "as should just be the modifier at
 //                           the end")
-//   publish off <domain>    switch it OFF; the last door off withdraws the tile
-//   publish as <label> on <domain>
+//   stage off <domain>      switch it OFF; the last door off withdraws the tile
+//   stage as <label> on <domain>
 //                           give the tile its OWN ADDRESS on that domain —
 //                           https://<label>.<domain> instead of <name>.<domain>
 //                           (`@` is the domain itself: its front page). The
-//                           tile must already be published on that domain.
+//                           tile must already be staged on that domain.
 //                           The older spelling of the modifier above.
-//   publish history         say whether this branch publishes its history or
+//   stage history           say whether this branch stages its history or
 //                           its head only (the default) — changes nothing
-//   publish history on      publish its history too: a `publish:history`
-//                           mark on the branch root, then a republish so the
+//   stage history on        stage its history too: a `publish:history`
+//                           mark on the branch root, then a re-stage so the
 //                           host sees the new head
-//   publish history off     back to head only — the mark cleared, republished
+//   stage history off       back to head only — the mark cleared, re-staged
 //
-// Every form but the bare word also takes a ROUTE first — `publish
+// Every form but the bare word also takes a ROUTE first — `stage
 // /revolucion/lounge on hypercomb.com` — so a sentence can NAME the tile
 // instead of standing on it: a session or a manager acts from wherever it
 // is, and the tile is read once, never off a tab that may move meanwhile
-// (host-gesture.ts). `publish /route` alone is `publish here` for that tile.
+// (host-gesture.ts). `stage /route` alone is `stage here` for that tile.
 //
 // `history` is a SUB-WORD here, never a behaviour of its own: the word is
 // rawArgs, so `history` (a live word in commands/history.queen.ts) never runs
@@ -84,41 +88,41 @@ const splitRoute = (text: string): { route: string[] | null; rest: string } => {
 }
 
 export class PublishQueenBee {
-  readonly command = 'publish'
+  readonly command = 'stage'
   /** Everything after the word is kept verbatim: a route (`/a/b`), a domain
    *  and a label are exact, never prose for the reader to fold — the
-   *  Tongue read `publish /revolucion/lounge …` as `revolucion/lounge …`. */
+   *  Tongue read `stage /revolucion/lounge …` as `revolucion/lounge …`. */
   readonly rawArgs = true
   readonly description =
-    'Show what your published hive is serving right now, next to what has changed here since — one row per branch, with publish, re-check and unpublish per row. `publish here` publishes the layer you stand on to its hosts; `publish on <domain>` and `publish off <domain>` switch one domain for it, and the tree answers at its own name, <name>.<domain> (when another tree holds that name you choose which answers); `publish history` says whether it publishes its history or its head only, and `publish history on` / `publish history off` switch that. Say a route first (`publish /a/b on <domain>`) to name the tile instead of standing on it.'
-  readonly descriptionKey = 'slash.publish'
+    'Show what your hive is serving right now, next to what has changed here since — one row per branch, with stage, re-check and unpublish per row. `stage here` stages the layer you stand on to its hosts; `stage on <domain>` and `stage off <domain>` switch one domain for it, and the tree answers at its own name, <name>.<domain> (when another tree holds that name you choose which answers); `stage history` says whether it stages its history or its head only, and `stage history on` / `stage history off` switch that. Say a route first (`stage /a/b on <domain>`) to name the tile instead of standing on it.'
+  readonly descriptionKey = 'slash.stage'
   readonly options = ['here', 'on <domain>', 'off <domain>', 'history [on|off]']
   readonly examples = [
-    { input: '/publish', result: 'Opens the publish panel, or closes it if it is open: what your hive is serving now, beside what has changed here since' },
-    { input: '/publish /room-host on hypercomb.com', result: 'Switches hypercomb.com on for that tile and publishes it there, asking your consent first; its address becomes room-host.hypercomb.com, whatever depth it sits at; if another tree already answers there you choose which one does' },
-    { input: '/publish /room-host off hypercomb.com', result: 'Switches that domain off for the tile; when the last domain goes off, the tile is withdrawn' },
+    { input: '/stage', result: 'Opens the Staging window, or closes it if it is open: what your hive is serving now, beside what has changed here since' },
+    { input: '/stage /room-host on hypercomb.com', result: 'Switches hypercomb.com on for that tile and stages it there, asking your consent first; its address becomes room-host.hypercomb.com, whatever depth it sits at; if another tree already answers there you choose which one does' },
+    { input: '/stage /room-host off hypercomb.com', result: 'Switches that domain off for the tile; when the last domain goes off, the tile is withdrawn' },
   ]
 
   /** A machine may say only the history forms, and only once the participant
-   *  grants it (`grant allow publish`, at the destructive and network rungs).
+   *  grants it (`grant allow stage`, at the destructive and network rungs).
    *  Opening a branch's history is outward and cannot be taken back, so that
-   *  is its ceiling. Every other publish form stays the participant's. */
+   *  is its ceiling. Every other stage form stays the participant's. */
   readonly machine = {
     forms: 'history | history on | history off | /<route> history [on|off]',
-    example: '/publish history',
+    example: '/stage history',
     reach: 'destructive' as const,
     scope: 'network' as const,
     consequence: "history on serves this branch's earlier versions from its hosts; whatever is served may be copied and cannot be taken back",
     refuse: (args: string): string | undefined =>
       /^history(?:\s+(on|off))?$/i.test(splitRoute(String(args ?? '').trim()).rest)
         ? undefined
-        : "only `publish history [on|off]` is a machine's to say; every other publish form is the participant's",
+        : "only `stage history [on|off]` is a machine's to say; every other stage form is the participant's",
   }
 
   async invoke(args: string): Promise<void> {
     const { route, rest } = splitRoute(String(args ?? '').trim())
     const lower = rest.toLowerCase()
-    // `publish here` — publish the layer you stand on to the hosts THIS layer
+    // `stage here` — stage the layer you stand on to the hosts THIS layer
     // names (its host marks, else your standing host), with the `shared`
     // list riding along: the offering act. Joining offers what this served.
     // With a route and nothing else, the same act for that tile.
@@ -134,7 +138,7 @@ export class PublishQueenBee {
     if (lower === 'history' || lower.startsWith('history ')) {
       const turn = lower.match(/^history(?:\s+(on|off))?$/)
       if (!turn) {
-        answer(t('publish-history.usage', 'Say: publish history, publish history on, or publish history off.'), 'warning')
+        answer(t('publish-history.usage', 'Say: stage history, stage history on, or stage history off.'), 'warning')
         return
       }
       await this.#history(route, turn[1] === 'on' ? true : turn[1] === 'off' ? false : null)
@@ -153,8 +157,8 @@ export class PublishQueenBee {
       .map(s => String(s ?? '').trim()).filter(Boolean)
     if (segments.length === 0) {
       const message = route
-        ? 'Say the tile as a route: publish /a/b on <domain>.'
-        : 'Go into the tile you want to publish first — the hive root is not a branch.'
+        ? 'Say the tile as a route: stage /a/b on <domain>.'
+        : 'Go into the tile you want to stage first — the hive root is not a branch.'
       say(message, 'warning')
       throw new Error(message)
     }
@@ -165,12 +169,12 @@ export class PublishQueenBee {
     const segments = this.#segments(route)
     const fail = (message: string): never => { say(message, 'warning'); throw new Error(message) }
     const zone = hostZone(raw)
-    if (!zone) fail(`Say the domain: publish ${on ? 'on' : 'off'} <domain>, for example hypercomb.com.`)
+    if (!zone) fail(`Say the domain: stage ${on ? 'on' : 'off'} <domain>, for example hypercomb.com.`)
     // The address is checked before anything is published, so a bad name
     // never leaves the tile published somewhere it did not ask for.
     if (label !== null) {
-      if (!on) fail('An address goes with on: publish on <domain> as <label>.')
-      if (!label) fail(`Say the name: publish /${segments.join('/')} on ${zone} as <label>, for example as meet-ups — "@" is the domain itself.`)
+      if (!on) fail('An address goes with on: stage on <domain> as <label>.')
+      if (!label) fail(`Say the name: stage /${segments.join('/')} on ${zone} as <label>, for example as meet-ups — "@" is the domain itself.`)
       const refusal = ownAddressRefusal(label)
       if (refusal === 'not-a-label') fail('An address name is letters, digits and hyphens, up to 63 characters, with no hyphen at either end.')
       if (refusal === 'reserved') fail('"content", "host" and names starting with "try-" belong to the host — choose another name.')
@@ -241,7 +245,7 @@ export class PublishQueenBee {
 
   /** PUBLIC HISTORY — `turn` null asks (never changes anything); true / false
    *  writes / clears the `publish:history` mark on the branch root and, when
-   *  the branch is published, republishes it the way `publish here` does so
+   *  the branch is published, re-stages it the way `stage here` does so
    *  the host sees the new head. An unpublished branch keeps the mark for the
    *  next time it is published. */
   async #history(route: readonly string[] | null, turn: boolean | null): Promise<void> {
@@ -249,8 +253,8 @@ export class PublishQueenBee {
     const name = segments[segments.length - 1]
     const isPublic = (await publicHistoryAt(segments)) === true
     const status = (): string => isPublic
-      ? t('publish-history.status-public', '"{name}" publishes its history — its earlier versions are public, not only its head.', { name })
-      : t('publish-history.status-head', '"{name}" publishes its head only — no record of its earlier versions.', { name })
+      ? t('publish-history.status-public', '"{name}" stages its history — its earlier versions are public, not only its head.', { name })
+      : t('publish-history.status-head', '"{name}" stages its head only — no record of its earlier versions.', { name })
 
     if (turn === null || turn === isPublic) { answer(status(), 'tip'); return }
 
@@ -259,14 +263,14 @@ export class PublishQueenBee {
 
     const said = turn
       ? t('publish-history.on', 'History is now public for "{name}". Whatever is served while history is public may be copied or cached elsewhere — turning it off cannot take that back.', { name })
-      : t('publish-history.off', '"{name}" now publishes its head only.', { name })
+      : t('publish-history.off', '"{name}" now stages its head only.', { name })
     const published = (await latestByLineageKey()).has(lineageKey(segments))
     if (!published) {
-      answer(`${said} ${t('publish-history.not-published', 'It is not published yet — this takes effect the next time you publish it.')}`, 'success')
+      answer(`${said} ${t('publish-history.not-published', 'It is not staged yet — this takes effect the next time you stage it.')}`, 'success')
       return
     }
     answer(said, 'success')
-    // The mark changed the head: publish it, as `publish here` does, so the
+    // The mark changed the head: stage it, as `stage here` does, so the
     // host serves (or stops serving) the record from the new root.
     await hostCurrentBranch(segments)
   }
@@ -278,16 +282,16 @@ export class PublishQueenBee {
     const segments = this.#segments(route)
     const fail = (message: string): never => { say(message, 'warning'); throw new Error(message) }
     const path = `/${segments.join('/')}`
-    if (!label) fail(`Say the name: publish as <label> on <domain>, for example publish ${path} as virtual-lounge on hypercomb.com — "@" is the domain itself.`)
+    if (!label) fail(`Say the name: stage as <label> on <domain>, for example stage ${path} as virtual-lounge on hypercomb.com — "@" is the domain itself.`)
     const zone = hostZone(raw)
-    if (!zone) fail(`Say the domain: publish as ${label} on <domain>, for example hypercomb.com.`)
+    if (!zone) fail(`Say the domain: stage as ${label} on <domain>, for example hypercomb.com.`)
     const refusal = ownAddressRefusal(label)
     if (refusal === 'not-a-label') fail('An address name is letters, digits and hyphens, up to 63 characters, with no hyphen at either end.')
     if (refusal === 'reserved') fail('"content", "host" and names starting with "try-" belong to the host — choose another name.')
 
     const name = segments[segments.length - 1]
     const named = await hostsOfBranch(segments)
-    if (!named.includes(zone)) fail(`"${name}" is not on ${zone} — say: publish ${path} on ${zone} first.`)
+    if (!named.includes(zone)) fail(`"${name}" is not on ${zone} — say: stage ${path} on ${zone} first.`)
     const result = await setBranchAddress(segments, zone, label)
     if (result.ok) {
       say(label === APEX_LABEL
@@ -295,7 +299,7 @@ export class PublishQueenBee {
         : `"${name}" answers at https://${result.host}/`, 'success')
       return
     }
-    if (result.failure === 'not-published') fail(`"${name}" is not published on ${zone} yet — say: publish ${path} on ${zone} first.`)
+    if (result.failure === 'not-published') fail(`"${name}" is not staged on ${zone} yet — say: stage ${path} on ${zone} first.`)
     const address = label === APEX_LABEL ? zone : `${label}.${zone}`
     fail(`"${name}" could not take ${address} (${result.failure}${result.reason ? `: ${result.reason}` : ''}).`)
   }
