@@ -1146,6 +1146,8 @@ type LlmRouterLike = {
   contextLengthForModel?(model: string): number | undefined
   /** The model takes pictures with a message; unknown is no. */
   seesPicturesForModel?(model: string): boolean
+  /** A picture described by a model that sees, for one that does not. */
+  describePicture?(sig: string, image: { mime: string; base64: string }, signal?: AbortSignal): Promise<{ text: string; model: string } | undefined>
   /** The provider the mediator would pick for this need right now — so the
    *  shell can tell whether that pick has been granted hive access. */
   designatedProviderId?(need?: { tier?: string; streaming?: boolean; minContext?: number }): string | undefined
@@ -7928,7 +7930,19 @@ export class ChatWindow {
           // must not count as one it has.
           const seenNow: ReadRepeats['memory'] = new Map(seenReads)
           const sees = !!model && router.seesPicturesForModel?.(model) === true
-          const content = (contextReceipt ? `${contextReceipt}\n\n` : '') + formatHypercombObservationReceipt(receipt, { memory: seenNow, round: rounds + 1 }, sees ? 'seen' : 'words')
+          // A MODEL THAT CANNOT SEE IS TOLD WHAT A MODEL THAT CAN SAW (jwize
+          // 2026-11-17), at most four pictures a read, on the participant's key.
+          const described = new Map<string, { text: string; model: string }>()
+          if (!sees && router.describePicture) {
+            const shown = receipt.results.flatMap(result => result.kind === 'bytes' && result.read.ok && result.read.picture?.image
+              ? [{ sig: result.read.sig, image: result.read.picture.image }] : []).slice(0, 4)
+            await Promise.all(shown.map(async ({ sig, image }) => {
+              const said = await router.describePicture!(sig, image, signal).catch(() => undefined)
+              if (said?.text) described.set(sig, said)
+            }))
+            if (signal?.aborted) throw stopped()
+          }
+          const content = (contextReceipt ? `${contextReceipt}\n\n` : '') + formatHypercombObservationReceipt(receipt, { memory: seenNow, round: rounds + 1 }, sees ? 'seen' : 'words', described)
             + (asides.length ? `\n\n${asides.join('\n')}` : '')
           if (content.length > remaining) {
             // A BLOCK LARGER THAN A WHOLE FRESH STRETCH IS NOT HANDED OVER.

@@ -28,18 +28,28 @@ looking.
 A picture is known by its type, or by its first bytes when the store gave none
 (PNG, JPEG, GIF, WebP). SVG is text and is read as text.
 
+## A model that cannot see is told what one that can saw
+
+**Built 2026-11-17 (jwize: "Yes, describe them").** When the conversation's
+model is text-only, each picture a read returns (at most four) is described
+by a model that sees, on the participant's own key
+(`assistant/picture-describe.ts`, router `describePicture`), and the receipt
+carries `description` and `describedBy`. The describing model is one of the
+participant's own lines that sees, else the OpenRouter line's lightest
+built-in model the catalogue says takes pictures (today
+`google/gemini-2.5-flash-lite`). With no such model, the words alone stand. A
+description is remembered by the picture's signature for the session, so
+reading the same picture again costs nothing.
+
 ## Not built yet
 
-- A text-only conversation model (the door's DeepSeek V4 Flash is one) cannot
-  have a picture described by a model that sees: that would spend the
-  participant's key on a model they did not pick, so it waits for their say.
 - Pictures the participant pastes into the chat still reach only the loopback
   bridge.
 - PDF and other documents: no text is extracted yet.
 - Anthropic and Google direct providers drop images; they are folded into
   OpenRouter today, which carries them.
 
-Code: `hypercomb-essentials/src/assistant/picture-read.ts`, `hive-tree-reader.ts`
+Code: `hypercomb-essentials/src/assistant/picture-read.ts`, `picture-describe.ts`, `hive-tree-reader.ts`
 (`readBytesBySig`), `providers/openrouter-catalog.ts` (`vision`),
 `llm-dispatch.ts` (`seesPicturesForModel`); `hypercomb-runtime/src/chat-window/ui/chat-window/hypercomb-observation.ts`
 (`safePicture`, `picturesOf`, the receipt), `chat-window.ts` (`withPictures`).

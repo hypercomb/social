@@ -38,6 +38,8 @@ import {
 } from './providers/local-liveness.js'
 import { chooseProvider, modelForTier, rankProviders, type ModelNeed } from './model-policy.js'
 import { isOpenRouterBatchModel } from './providers/openrouter-catalog.js'
+import { catalogueSees, describePicture, DESCRIBE_PROMPT, type PictureDescription } from './picture-describe.js'
+import { OPENROUTER_PROVIDER } from './providers/openrouter.provider.js'
 import { credentialOwner } from './providers/credential-owner.js'
 import { llmProviderRegistry, type LlmProviderRegistry } from './llm-provider-registry.js'
 import type {
@@ -1073,6 +1075,21 @@ export const llmRouter = {
     const provider = registry().providerForModel(model)
     return provider?.models.find(candidate => candidate.id === model || candidate.name === model)?.vision === true
   },
+  /** A picture described in words by a model that sees, for one that does
+   *  not (picture-describe.ts): the participant's own seeing line, else the
+   *  OpenRouter line's lightest seeing model on their key. Undefined when no
+   *  model can see or the call fails; once per picture signature. */
+  describePicture: (sig: string, image: { mime: string; base64: string }, signal?: AbortSignal): Promise<PictureDescription | undefined> =>
+    describePicture(sig, image, {
+      ready: () => configuredProviders(),
+      hasOpenRouterKey: () => llmKeyStore.has(credentialOwner(OPENROUTER_PROVIDER)),
+      catalogueSees,
+      call: (providerId, model, picture, stop) => callModel({
+        providerId, model, maxTokens: 700, effort: 'fast',
+        messages: [{ role: 'user', content: DESCRIBE_PROMPT, images: [picture] }],
+        ...(stop ? { signal: stop } : {}),
+      }),
+    }, signal),
   /** Execution authority depends on where the endpoint really is, never on a
    * provider's friendly id. In particular, changing the built-in `local`
    * host to a LAN or Internet URL must make it answer-only immediately. */

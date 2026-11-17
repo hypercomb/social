@@ -1407,6 +1407,9 @@ export const formatHypercombObservationReceipt = (
   /** 'seen': the model is shown the pictures read (the chat attaches them);
    *  'words': it can not see, and is given the reading alone. */
   pictures: 'seen' | 'words' = 'words',
+  /** Pictures a model that sees described for one that does not, by the
+   *  picture's signature (essentials assistant/picture-describe.ts). */
+  described?: ReadonlyMap<string, { readonly text: string; readonly model: string }>,
 ): string => JSON.stringify({
   kind: 'hypercomb-tree-observation',
   structureOnly: receipt.results.every(result => result.kind === 'tree'),
@@ -1456,9 +1459,14 @@ export const formatHypercombObservationReceipt = (
             : opened.picture ? {
               text: null,
               picture: { width: opened.picture.width, height: opened.picture.height, reading: opened.picture.reading },
+              ...(pictures === 'words' && described?.get(opened.sig)
+                ? { description: described.get(opened.sig)!.text.slice(0, 1_500), describedBy: described.get(opened.sig)!.model }
+                : {}),
               note: pictures === 'seen' && opened.picture.image
                 ? 'a picture; it is attached to this message (at most 1024 pixels on its longest side): look at it'
-                : 'a picture; the model answering cannot see pictures, so only its size and this reading of it can be given',
+                : pictures === 'words' && described?.get(opened.sig)
+                  ? 'a picture; the model answering cannot see pictures, so a model that can (describedBy) described it: trust the description for what it shows, and the reading for its size'
+                  : 'a picture; the model answering cannot see pictures, so only its size and this reading of it can be given',
             }
             : { text: null, note: 'not text; only its type and size can be shown' }),
           truncated: opened.truncated,
