@@ -72,7 +72,7 @@ describe('every word can be explained', () => {
   it('finds the whole language (so this ratchet can never go quietly empty)', async () => {
     const words = await everyWord()
     expect(words.length).toBeGreaterThan(150)
-    for (const name of ['howto', 'help', 'clear', 'opus', 'create', 'publish']) {
+    for (const name of ['howto', 'help', 'clear', 'opus', 'create', 'stage']) {
       expect(words.some(w => w.name === name), name).toBe(true)
     }
   }, 120_000)

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { firstKeyList, keyListTemplate, nextKeyList, verifyKeyListChain, type SignedKeyList } from '@hypercomb/core'
 import { allowInvite, captureDeviceInvite, heldInvite } from './device-invite'
 import { readDeviceBinding } from './device-binding'
-import { deviceOwner, eitherOwner } from './device-owner'
+import { deviceOwner, eitherOwner, publishChange } from './device-owner'
 import { readZoneOwners, showcaseBytes as shimBytes, type ShowcaseRecord } from './showcase-record'
 import { showcaseBytes as hiveBytes } from '../../../hypercomb-essentials/src/sharing/showcase-record'
 
@@ -188,7 +188,7 @@ describe('a phone takes its owner\'s invite, then promotes from its own key', ()
     expect(zone.puts.length).toBe(puts)
   })
 
-  it('stages, then publishes (jwize 2026-11-15): staging changes only the staged list every device reads; publishing makes it the showcase and optimizes what goes live', async () => {
+  it('stages, then publishes (jwize 2026-11-15): staging changes only the staged list every device reads; publishing puts what is staged live, takes nothing out, and optimizes what goes live', async () => {
     await zone.publish({ zone: ZONE, items: [{ pubkey: anchor, lineage: 'camelflage' }], domains: [], view: 'list' })
     await accept()
     const owner = deviceOwner(ZONE)
@@ -206,10 +206,11 @@ describe('a phone takes its owner\'s invite, then promotes from its own key', ()
     // Send camelflage back out; staging the same thing twice changes nothing.
     expect(await owner.stage!({ zone: ZONE, on: [], off: [{ pubkey: anchor, lineage: 'camelflage' }] })).toEqual({ ok: true, changed: true })
     expect(await owner.stage!({ zone: ZONE, on: [other], off: [] })).toEqual({ ok: true, changed: false })
-    // Publish: the showcase is exactly what is staged, its look kept, and the anchor's own creation going live is optimized.
+    // Publish: what is staged goes live, its look kept, and the anchor's own creation going live is optimized. PUBLISH ONLY
+    // ADDS (jwize 2026-11-16: "Last one wins"): camelflage, staged out, stays live — coming out is its own act, at once.
     expect(await owner.publish!({ zone: ZONE })).toEqual({ ok: true, changed: true })
     read = await readZoneOwners(ZONE, [anchor])
-    expect(read.showcase?.items).toEqual([other, { pubkey: anchor, lineage: 'dylan' }].sort((x, y) => `${x.pubkey}\n${x.lineage}` < `${y.pubkey}\n${y.lineage}` ? -1 : 1))
+    expect(read.showcase?.items).toEqual([other, { pubkey: anchor, lineage: 'camelflage' }, { pubkey: anchor, lineage: 'dylan' }].sort((x, y) => `${x.pubkey}\n${x.lineage}` < `${y.pubkey}\n${y.lineage}` ? -1 : 1))
     expect(read.showcase?.view).toBe('list')
     roots = (JSON.parse(String(zone.index!['content'])) as { roots: Record<string, string> }).roots
     expect(roots['promoted:dylan']).toMatch(/^[0-9a-f]{64}$/)
@@ -217,6 +218,21 @@ describe('a phone takes its owner\'s invite, then promotes from its own key', ()
     const puts = zone.puts.length
     expect(await owner.publish!({ zone: ZONE })).toEqual({ ok: true, changed: false })
     expect(zone.puts.length).toBe(puts)
+  })
+
+  it('two places staging at once both land (jwize 2026-11-16: "it sees the changes and adds the difference … so shouldn\'t ever fail")', async () => {
+    await zone.publish({ zone: ZONE, items: [{ pubkey: anchor, lineage: 'camelflage' }], domains: [] })
+    await accept()
+    const phone = deviceOwner(ZONE)
+    const desktop = deviceOwner(ZONE)
+    await Promise.all([phone.hello(), desktop.hello()])
+    const results = await Promise.all([
+      phone.stage!({ zone: ZONE, on: [{ pubkey: anchor, lineage: 'dylan' }], off: [] }),
+      desktop.stage!({ zone: ZONE, on: [{ pubkey: anchor, lineage: 'games' }], off: [{ pubkey: anchor, lineage: 'camelflage' }] }),
+    ])
+    expect(results).toEqual([{ ok: true, changed: true }, { ok: true, changed: true }])
+    const staged = (await readZoneOwners(ZONE, [anchor])).staged?.items ?? []
+    expect([...staged].map(item => item.lineage).sort()).toEqual(['dylan', 'games'])
   })
 
   it('takes a tile off a page that had no record: the rest of what is published stays', async () => {
@@ -278,6 +294,43 @@ describe('a phone takes its owner\'s invite, then promotes from its own key', ()
     expect(await alone.hello()).toBe(anchor)
     expect(eitherOwner(null, null)).toBeNull()
   })
+
+  it('asks every owner at once: a key of this browser is not held behind a slow hive that answers nothing, and the first with a key still wins (jwize 2026-11-16: the confirm "takes a few seconds to show")', async () => {
+    vi.useFakeTimers()
+    try {
+      const after = (ms: number, key: string) => () => new Promise<string>(resolve => setTimeout(() => resolve(key), ms))
+      const toggle = vi.fn(async () => ({ ok: true as const, changed: false }))
+      // The hive beside the page takes a second to say it has no key; this browser's own reads take a second too.
+      const slowHive = { hello: vi.fn(after(1000, '')), toggle }
+      const phone = { hello: vi.fn(after(1000, anchor)), toggle: vi.fn(async () => ({ ok: true as const, changed: true })) }
+      const either = eitherOwner(slowHive, phone)!
+      let answered: string | undefined
+      void either.hello().then(key => { answered = key })
+      // Both are asked the moment the page asks, not the second after the first has answered.
+      expect(slowHive.hello).toHaveBeenCalledTimes(1)
+      expect(phone.hello).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1000)
+      // One wait, not two in a row.
+      expect(answered).toBe(anchor)
+      await either.toggle({ zone: ZONE, pubkey: anchor, lineage: 'dylan', on: true })
+      expect(phone.toggle).toHaveBeenCalled()
+      expect(toggle).not.toHaveBeenCalled()
+
+      // Both answer with a key: the first in the list signs, even when the second answered sooner.
+      const hive = { hello: vi.fn(after(1000, 'h'.repeat(64))), toggle: vi.fn(async () => ({ ok: true as const, changed: true })) }
+      const quick = { hello: vi.fn(after(10, anchor)), toggle: vi.fn(async () => ({ ok: true as const, changed: false })) }
+      const both = eitherOwner(hive, quick)!
+      let first: string | undefined
+      void both.hello().then(key => { first = key })
+      await vi.advanceTimersByTimeAsync(10)
+      expect(first).toBeUndefined()
+      await vi.advanceTimersByTimeAsync(990)
+      expect(first).toBe('h'.repeat(64))
+      await both.toggle({ zone: ZONE, pubkey: anchor, lineage: 'dylan', on: true })
+      expect(hive.toggle).toHaveBeenCalled()
+      expect(quick.toggle).not.toHaveBeenCalled()
+    } finally { vi.useRealTimers() }
+  })
 })
 
 describe('the record\'s bytes', () => {
@@ -288,5 +341,22 @@ describe('the record\'s bytes', () => {
       communities: [{ name: 'Games', items: [{ pubkey: 'a'.repeat(64), lineage: 'alpha' }], domains: [], view: 'list' }],
     }
     expect(new TextDecoder().decode(shimBytes(record))).toBe(new TextDecoder().decode(hiveBytes(record)))
+  })
+})
+
+describe('publish only adds, and the first record is the staged list (jwize 2026-11-16: "Last one wins")', () => {
+  const me = 'a'.repeat(64)
+  const x = { pubkey: me, lineage: 'x' }
+  const y = { pubkey: me, lineage: 'y' }
+  const z = { pubkey: me, lineage: 'z' }
+  it('with a record, puts what is staged and not live into it and takes nothing out', () => {
+    const change = publishChange('example.com')({ showcase: { zone: 'example.com', items: [x, y], domains: [] }, staged: { zone: 'example.com', items: [y, z], domains: [] }, open: () => [] })
+    expect(change?.showcase?.items).toEqual([x, y, z])
+    expect(change?.live).toEqual([z])
+    expect(publishChange('example.com')({ showcase: { zone: 'example.com', items: [x, y], domains: [] }, staged: { zone: 'example.com', items: [y], domains: [] }, open: () => [] })).toBeNull()
+  })
+  it('without one, starts from the staged list: what was taken out of what the doors showed stays out', () => {
+    const change = publishChange('example.com')({ showcase: null, staged: { zone: 'example.com', items: [y], domains: [] }, open: () => [x, y] })
+    expect(change?.showcase?.items).toEqual([y])
   })
 })

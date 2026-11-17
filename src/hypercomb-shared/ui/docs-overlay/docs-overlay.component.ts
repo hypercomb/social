@@ -26,7 +26,16 @@ interface DocEntry {
   category: string
 }
 
+/** The hive's own doctrine: not a file, the page the anatomy writes from the
+ *  `/doctrine` tiles — exactly what every model is sent. */
+const DOCTRINE_PAGE = 'doctrine'
+const ANATOMY_KEY = '@hypercomb.social/Anatomy'
+type AnatomyLike = { doctrine?: { markdown?(): Promise<string> } }
+
 const DOC_INDEX: DocEntry[] = [
+  // The doctrine, first: read from this hive's tiles, never from a file.
+  { category: 'Doctrine', title: 'Doctrine', file: DOCTRINE_PAGE },
+
   // Architecture & Core Design
   { category: 'Architecture & Core Design', title: 'Architecture Fundamentals', file: 'architecture-fundamentals.md' },
   { category: 'Architecture & Core Design', title: 'Core Processor Architecture', file: 'core-processor-architecture.md' },
@@ -199,6 +208,11 @@ export class DocsOverlayComponent implements OnDestroy {
     }
 
     try {
+      if (file === DOCTRINE_PAGE) {
+        const markdown = await window.ioc?.get<AnatomyLike>(ANATOMY_KEY)?.doctrine?.markdown?.()
+        this.renderedHtml.set(markdown ? renderMarkdown(markdown) : '<p class="doc-error">The doctrine is not available here.</p>')
+        return
+      }
       const response = await fetch(`/documentation/${file}`)
       if (!response.ok) {
         this.renderedHtml.set(`<p class="doc-error">Failed to load: ${file}</p>`)

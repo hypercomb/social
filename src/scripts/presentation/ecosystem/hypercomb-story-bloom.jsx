@@ -342,8 +342,8 @@ function PublishSec({ T, t0, labels }) {
   const proof = MOTION.draw(T, t0 + 6.2, 0.8);
   return (
     <Slot i={5}>
-      <Kicker x={160} y={150} T={T} at={t0 + 0.2} show={labels}>publish · seal, then push the closure</Kicker>
-      <ToolWindow x={1230} y={110} w={640} h={300} T={T} at={t0 + 0.4} icon="M12 3v12M6 9l6-6 6 6M4 17v3h16v-3" title="Publish" crumb="revolucion">
+      <Kicker x={160} y={150} T={T} at={t0 + 0.2} show={labels}>stage · seal, then push the closure</Kicker>
+      <ToolWindow x={1230} y={110} w={640} h={300} T={T} at={t0 + 0.4} icon="M12 3v12M6 9l6-6 6 6M4 17v3h16v-3" title="Staging" crumb="revolucion">
         <div style={{ font: `300 14px ${MONO}`, color: C.n500, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>community:hosts · pick the door</div>
         <Row name="jwize.com" cmd="host:jwize.com" on lit={L > 2.2} T={T} at={t0 + 0.6} desc="primary door" />
         <Row name="hypercomb.com" cmd="host:hypercomb.com" on={false} lit={false} T={T} at={t0 + 0.75} desc="not carried" />
@@ -545,7 +545,7 @@ function CloseSec({ T, t0, total }) {
 }
 
 // ── the shell: header bar + command line, left rail, status line, concentric rings, activity log ──
-const CMDS = { Cell: '/add cell', Hive: '/hive', Pools: '/opfs', Views: '/views', Touch: '/present', Publish: '/publish revolucion', Replicate: '/snapshot before the redesign', Share: '/share', Swarm: '/swarm', Close: '' };
+const CMDS = { Cell: '/add cell', Hive: '/hive', Pools: '/opfs', Views: '/views', Touch: '/present', Publish: '/stage revolucion', Replicate: '/snapshot before the redesign', Share: '/share', Swarm: '/swarm', Close: '' };
 const TOASTS = [
   { sec: 'Pools', dt: 6.6, text: '__bees__/ absorbed into sign(\'bees\') · legacy folder removed' },
   { sec: 'Views', dt: 1.6, text: 'Living Brief turned on for journal' },

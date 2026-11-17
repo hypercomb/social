@@ -1,16 +1,21 @@
 // assistant/doctrine-tiles.ts
 //
-// THE DOCTRINE AS TILES, to read. `doctrine tiles` lays the codex out on the
-// page the participant stands on: a `doctrine` tile, one tile per tier inside
-// it, and one tile per rule inside its tier, the rule's text as its note. It is
-// a way to BROWSE the rules with the hive's own gestures — open one, read it,
-// follow what it rests on — not a second source: what every model is sent is
-// still the doctrine bag, chosen in the viewer.
+// THE DOCTRINE IS TILES (jwize, 2026-11-16: "The doctrine is a hierarchy of
+// tiles like everything else"). `doctrine tiles` lays a codex out at the hive's
+// root: a `doctrine` tile, one tile per tier inside it whose note is the tier's
+// header line, and one tile per rule inside its tier whose note is the rule's
+// codex line. Those notes are what every model is taught from
+// (anatomy/doctrine-tree.ts reads them back into a codex), so each note is the
+// line EXACTLY — the codex can always be rebuilt from the tiles.
+//
+// The codex laid here is the build's copy, and laying it is the participant's
+// word: the other way a hive gets its doctrine is adopting a host's `doctrine`
+// branch, like any branch.
 //
 // A tile's NOTES are read by its word, so every name here is made to be its
 // own: tiers are `doctrine-<tier>` and a rule is named from its own opening
 // words, never a bare common word that another tile of the hive might share.
-// Saying it twice is safe — a tile that stands is left as it is and a rule that
+// Saying it twice is safe — a tile that stands is left as it is and a tile that
 // already carries its note is not noted again.
 
 import { EffectBus } from '@hypercomb/core'
@@ -47,13 +52,12 @@ export const doctrineTilePlan = (tiers: readonly CodexTier[]): DoctrineTileEntry
   const taken = new Set<string>()
   for (const tier of tiers) {
     const tierName = tierTileName(tier)
-    plan.push({ path: [DOCTRINE_TILE, tierName] })
+    plan.push({ path: [DOCTRINE_TILE, tierName], note: tier.line })
     for (const axiom of tier.axioms) {
       const opening = ruleTileName(axiom.rule)
       const name = taken.has(`${tierName}/${opening}`) ? `${opening}-${axiom.id.toLowerCase()}` : opening
       taken.add(`${tierName}/${name}`)
-      const rests = axiom.needs.length ? `\nRests on ${axiom.needs.join(', ')}.` : ''
-      plan.push({ path: [DOCTRINE_TILE, tierName, name], note: `${axiom.id}: ${axiom.rule}${rests}` })
+      plan.push({ path: [DOCTRINE_TILE, tierName, name], note: axiom.line })
     }
   }
   return plan
@@ -68,6 +72,8 @@ const reasonOf = (error: unknown): string => error instanceof Error ? error.mess
 export const makeDoctrineTiles = async (tiers: readonly CodexTier[], deps: DoctrineTileDeps | null = liveDeps()): Promise<DoctrineTilesOutcome> => {
   if (!deps) return { ok: false, error: 'the notes are not loaded' }
   const here = [...deps.segments()]
+  // The doctrine is read at the hive's root, so it is laid there and nowhere else.
+  if (here.length) return { ok: false, error: 'the doctrine lives at the root of the hive: go to the root, then say doctrine tiles again' }
   let made = 0
   let kept = 0
   for (const entry of doctrineTilePlan(tiers)) {
@@ -78,7 +84,7 @@ export const makeDoctrineTiles = async (tiers: readonly CodexTier[], deps: Doctr
     }
     if (entry.note === undefined) continue
     const tile = entry.path[entry.path.length - 1]!
-    const parent = [...here, ...entry.path.slice(0, -1)]
+    const parent = entry.path.slice(0, -1)
     try {
       if ((await deps.notesAt([...parent, tile]).catch(() => [])).length) { kept++; continue }
       await deps.addNote(parent, tile, entry.note)

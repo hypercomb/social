@@ -24,7 +24,7 @@ before it sends (`host-sync.service.ts`), and the availability gate stands on
 both swarm announce surfaces with no escape hatch (`swarm.drone.ts`).
 
 *Amended 2026-10-04 by [swarm-host.md](swarm-host.md):* joining now offers
-the tiles made public while joined, and `publish here` is no longer part of
+the tiles made public while joined, and `stage here` is no longer part of
 swarm sharing. Since 2026-10-07 their bytes go to each page's publish domains,
 else the participant's hosts pool, and to the relay the room meets at only
 when neither can take them and its card allows participants. The `shared` row
@@ -54,13 +54,13 @@ at the gesture, never asserted by a claim.
 
 | stage (word) | role in code | what entering requires | the gesture and its word |
 |---|---|---|---|
-| `shared` | OFFERED — announced to the participants of a zone, who can adopt it | the branch published here (`publish here`) — join writes nothing and offers what your host serves; a zone to stand in | `join` / `leave` — the lock button |
-| `published` | INDEXED — a link a stranger can open: the publisher's signed index names this head, and the link bundle is receipted | the closure hosted; an index door answered; the wipe guard satisfied | `publish` / unpublish — the Publish panel row |
-| `live` | OPENED — a domain's signed door opens on this head: the visitor site | `published`; a host mark on the branch; the door signed | the Publish panel's per-domain switch (`setBranchDoors`) |
+| `shared` | OFFERED — announced to the participants of a zone, who can adopt it | the branch staged here (`stage here`) — join writes nothing and offers what your host serves; a zone to stand in | `join` / `leave` — the lock button |
+| `published` | INDEXED — a link a stranger can open: the publisher's signed index names this head, and the link bundle is receipted | the closure hosted; an index door answered; the wipe guard satisfied | `stage` / unpublish — the Staging window row |
+| `live` | OPENED — a domain's signed door opens on this head: the visitor site | `published`; a host mark on the branch; the door signed | the Staging window's per-domain switch (`setBranchDoors`) |
 
 The stages form a DAG, not a line: `published` needs `hosted`, not `shared`
-(the publish panel publishes without joining), and `join` enters nothing:
-`publish here` enters `published` and `shared` in one act, and joining then
+(the Staging window stages without joining), and `join` enters nothing:
+`stage here` enters `published` and `shared` in one act, and joining then
 offers it. A creation is usually at several stages at once
 and each list keeps it. A location is at a stage when the head its index
 names is a member of that list; "there are updates" is that index head
@@ -169,10 +169,11 @@ gates on it.
 
 **R7 — One control, two directions, no new words.** The lock button is
 `join` (stand in the swarm; the gate offers what your host serves) and, once
-in the swarm, `leave`. Publishing the layer you stand on is its own word,
-`publish here` (jwize, 2026-09-25: "we should just publish here to publish
-the current, check hosts for this layer"). `publish`,
-unpublish and the per-domain door switches stay in the Publish panel, one
+in the swarm, `leave`. Staging the layer you stand on is its own word,
+`stage here` (jwize, 2026-09-25, when the word was still `publish`: "we
+should just publish here to publish the current, check hosts for this
+layer"). `stage`,
+unpublish and the per-domain door switches stay in the Staging window, one
 row per creation, where they already are. No behaviour word is added:
 `open`, `close` and `withdraw` are sub-words of existing behaviours and the
 command line runs every behaviour word on a line. The panel shows each
@@ -232,8 +233,8 @@ name, not a molecule address.
    `leaveBranches` (the swarm's leave) mints the next `shared` list without
    the roots you stood among. (`signHeadClaim`, `head-claim-signer.ts`;
    `advanceStage` / `withdrawStage`, `stage-succession.ts`.)
-2. **`publish here` = the offering act; `join` writes nothing.** `publish
-   here` publishes the layer you stand on to the hosts THIS layer names (its
+2. **`stage here` = the offering act; `join` writes nothing.** `stage
+   here` stages the layer you stand on to the hosts THIS layer names (its
    host marks, else your standing host) — the share-sheet routine
    (`hostCurrentBranch`) with `shared` riding along. Join is the share
    control or the word: the announce walk offers what is available through
@@ -249,7 +250,7 @@ name, not a molecule address.
    essentials service on IoC (`mesh-header` has only a boolean today), and
    keeps a single-press `leave`. The world-review step stays until the
    public subset is shown before the first join.
-5. **The Publish panel reads the lists:** rows = creations with any stage
+5. **The Staging window reads the lists:** rows = creations with any stage
    membership; columns = the head each stage names vs the local head.
 6. **Hosts derive nothing new.** A static host serves the index and the
    atoms; a relay keeps the kind-30565 claim per `(pubkey, molecule)` d-tag.

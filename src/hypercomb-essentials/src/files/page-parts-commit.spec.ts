@@ -33,6 +33,7 @@ vi.mock('../commands/decoration-manifest.js', () => ({
 }))
 vi.mock('./page-commit.js', () => ({
   commitPageSig: async (segments: readonly string[], htmlSig: string) => { pages.set(key(segments), htmlSig); return { ok: true } },
+  commitPageSigFrom: async (segments: readonly string[], htmlSig: string) => { pages.set(key(segments), htmlSig); return { ok: true } },
 }))
 
 // The test Blob has no text(): read it the way a browser of any age can.

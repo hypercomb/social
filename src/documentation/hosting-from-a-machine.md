@@ -386,7 +386,7 @@ Each step is the owner's act; nothing here deploys by itself.
 The Hyperdex needs none of this cutover. It runs at its own address,
 `business-card.jwize.com`, and `*.jwize.com` already reaches the worker, so it
 needs only step 2:
-1. In your hive, on `/jaime-weise`, open Publish and switch `jwize.com` on.
+1. In your hive, on `/jaime-weise`, open Staging and switch `jwize.com` on.
 2. Use the own-address button: type `business-card` and Save.
 3. In the `business-card.jwize.com` Entrances block, preview the card page,
    then Turn on.

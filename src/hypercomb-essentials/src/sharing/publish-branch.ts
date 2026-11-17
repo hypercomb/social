@@ -229,7 +229,7 @@ export interface PublishOptions {
   forceReDrain?: boolean
   onProgress?: (p: PublishProgress) => void
   /** Stage lists to advance in the same act besides `published` —
-   *  `publish here` (the offering act) passes `['shared']`. */
+   *  `stage here` (the offering act) passes `['shared']`. */
   stages?: readonly StageWord[]
   /** MAKE AN EARLIER VERSION LIVE (the Versions list): publish this head as
    *  it is instead of sealing the tile now. Nothing is stamped into the tile
@@ -336,11 +336,23 @@ export async function readDoorIndex(
   pubkey: string,
   fetchIndex: typeof fetchHiveIndex = fetchHiveIndex,
 ): Promise<Awaited<ReturnType<typeof fetchHiveIndex>>> {
+  return (await readDoorIndexAt(door, readerSite, pubkey, fetchIndex)).read
+}
+
+/** readDoorIndex, and the host it was read from (`at`): the reader site when that verified, else the door. The atoms
+ *  the index names (a promotion, an arrival plan) are fetched there too: the door's apex can be another machine that
+ *  never held them (jwize.com's relay answered every promotion 404 on 2026-11-16, so every row read as not optimized). */
+export async function readDoorIndexAt(
+  door: string,
+  readerSite: string | undefined,
+  pubkey: string,
+  fetchIndex: typeof fetchHiveIndex = fetchHiveIndex,
+): Promise<{ read: Awaited<ReturnType<typeof fetchHiveIndex>>; at: string }> {
   const [own, seen] = await Promise.all([
     fetchIndex(door, pubkey),
     readerSite && readerSite !== door ? fetchIndex(readerSite, pubkey) : Promise.resolve(null),
   ])
-  return seen?.ok ? seen : own
+  return seen?.ok && readerSite ? { read: seen, at: readerSite } : { read: own, at: door }
 }
 
 /** Every other door this key's index may be held at: the hosts its publish
@@ -1604,7 +1616,22 @@ async function setHiveDoorsNow(
  *  publish that has to wait says so first (`queued`). */
 export function publishBranch(...args: Parameters<typeof publishBranchNow>): ReturnType<typeof publishBranchNow> {
   const onProgress = args[1]?.onProgress
-  return inPublishLane(() => publishBranchNow(...args), () => onProgress?.({ phase: 'queued' }))
+  return inPublishLane(() => publishBranchNow(...args), () => onProgress?.({ phase: 'queued' })).then(result => {
+    // A REPUBLISH OPTIMIZES ITSELF: a creation live in your community has its new head promoted there, behind the
+    // publish and never holding it (promote.ts repromoteInCommunity). Outside the lane: the index write rebases.
+    if (result.ok) void repromoteAfter(result.lineageKey, args[0], result.sealed)
+    return result
+  })
+}
+
+/** Re-promote a just-published branch where it is live in this key's community; a refusal is said, never thrown. */
+async function repromoteAfter(lineage: string, segments: readonly string[], head: string): Promise<void> {
+  try {
+    const { repromoteInCommunity } = await import('./promote.js')
+    for (const { zone, result } of await repromoteInCommunity(lineage, segments, head)) {
+      if (!result.ok) EffectBus.emit('activity:log', { message: `${lineage} could not be optimized for ${zone}'s community: ${result.reason}` })
+    }
+  } catch { /* the publish already stands */ }
 }
 
 /** Withdraw a branch from the index — in its turn. */

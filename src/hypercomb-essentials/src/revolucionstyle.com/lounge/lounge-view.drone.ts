@@ -17,8 +17,10 @@
 // back to the hexagons instead of holding an empty surface — the same rule
 // every view here follows.
 
-import { Drone } from '@hypercomb/core'
+import { Drone, EffectBus } from '@hypercomb/core'
 import { isFeatureHidden } from '../../sharing/feature-hidden.js'
+import { runsSealed } from '../../sharing/feature-availability.js'
+import { pagePublisherDomain } from '../../presentation/tiles/page-run-gate.js'
 import { titleForLabel } from '../../commands/decoration-kind-index.js'
 import type { BackGesture } from '../../navigation/back-gesture.service.js'
 import {
@@ -143,6 +145,21 @@ export class LoungeViewDrone extends Drone {
       this.#targetSegments = null
       this.#teardown()
       this.#vm()?.setMode(HEXAGONS)
+      return
+    }
+
+    // A ROOM RUNS AS THE HIVE (2026-11-16). Its bundle borrows the hive's own
+    // Pixi through window.ioc, so it cannot run sealed the way a page from
+    // elsewhere does: a room that is not this hive's own does not run at all.
+    // Its own exactly as a page is: by signature, authored here (`/lounge here`
+    // marks the bundle it names) — never by where the tile sits, which a cut and
+    // paste or a new device forgets (feature-availability.ts runsSealed).
+    const bundle = payload.bundleSig
+    if (runsSealed(segments, bundle, pagePublisherDomain(bundle))) {
+      this.#targetSegments = null
+      this.#teardown()
+      this.#vm()?.setMode(HEXAGONS)
+      EffectBus.emit('activity:log', { message: "This room is someone else's code, so it does not run in your hive", icon: 'chair' })
       return
     }
 

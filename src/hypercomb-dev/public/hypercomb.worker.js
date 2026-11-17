@@ -300,7 +300,54 @@ async function handleLayerRequest(request) {
  * embedded-site resources: /@resource/<sig>
  * ------------------------------------- */
 
+// A FILE OPENED AS A PAGE IS SEALED (jwize 2026-11-16: "You are putting
+// yourself and others at risk if you accept unvetted code"). Anything under
+// /@resource/ may be another publisher's bytes — fetched from any host this
+// hive knows — and a page or an SVG opened here would otherwise run as THIS
+// hive: its storage, its signing key, its services. Opened as a document
+// (a tab, a frame, an object), it gets a sandbox with no same-origin, so its
+// scripts still run but in an origin of their own that reaches nothing of the
+// hive. Sealing is the default for EVERY type: a host picks the type of bytes
+// it serves, and any +xml type, or one a browser sniffs, can run script. Only
+// two things are left as they are: a type known to run nothing (a PDF, a
+// picture, a video, plain text — sealing a PDF only blanks it), and a page this
+// hive authored (the sign('authored') pool, authored-sigs.ts), which
+// opens as it always did. Pictures, sheets and scripts a page of the hive
+// itself loads are not documents and are served as before.
+const SEALED_DESTINATIONS = new Set(['document', 'iframe', 'frame', 'embed', 'object'])
+const SEALED_DOCUMENT_POLICY = 'sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads'
+const INERT_DOCUMENT_TYPE = /^\s*(image\/(png|jpeg|gif|webp|avif|bmp|x-icon)|video\/[\w.+-]+|audio\/[\w.+-]+|font\/[\w.+-]+|application\/pdf|text\/plain|text\/css|text\/markdown|application\/javascript|application\/json)\s*(;|$)/i
+const AUTHORED_MEANING = 'authored'
+
+function opensAsDocument(request) {
+  return request.mode === 'navigate' || SEALED_DESTINATIONS.has(request.destination)
+}
+
+async function authoredHere(sig) {
+  try {
+    const root = await self.navigator.storage.getDirectory()
+    const pool = await root.getDirectoryHandle(await sha256Hex(new TextEncoder().encode(AUTHORED_MEANING)), { create: false })
+    await pool.getFileHandle(String(sig).toLowerCase(), { create: false })
+    return true
+  } catch { return false }
+}
+
+async function sealedIfDocument(request, response, authored = authoredHere) {
+  if (!opensAsDocument(request)) return response
+  if (INERT_DOCUMENT_TYPE.test(response.headers.get('content-type') || '')) return response
+  const sig = new URL(request.url).pathname.slice(SITE_RESOURCE_PREFIX.length).split('/')[0] || ''
+  if (await authored(sig)) return response
+  const headers = new Headers(response.headers)
+  headers.set('content-security-policy', SEALED_DOCUMENT_POLICY)
+  headers.set('x-content-type-options', 'nosniff')
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
+}
+
 async function handleSiteResourceRequest(request) {
+  return sealedIfDocument(request, await serveSiteResource(request))
+}
+
+async function serveSiteResource(request) {
   const url = new URL(request.url)
   const rest = url.pathname.slice(SITE_RESOURCE_PREFIX.length)
   // Allow resource URLs like /@resource/<sig> or /@resource/<sig>/extra.png

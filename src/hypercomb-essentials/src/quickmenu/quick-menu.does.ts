@@ -78,7 +78,7 @@ const DOES: Readonly<Record<string, string>> = {
   'select.done': 'Clear the picked tiles and finish picking',
 
   // sharing
-  'publish': 'Show what your hive is serving, and what has changed',
+  'stage': 'Show what your hive is serving, and what has changed',
   'keys': 'See who publishes for you',
   'follow': 'Follow a domain to read what it publishes',
   'republish': 'Publish again every page that has changed',

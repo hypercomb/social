@@ -21,7 +21,7 @@ import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { WEBSITE_SLOT } from '../../commands/website-slot.js'
 import { composeDivision, hydrateSeatedParts } from './division-render.js'
 import { composeTraits } from '../../website/trait-seat.js'
-import { mayRunPage, pagePublisherDomain } from './page-run-gate.js'
+import { SEALED_PAGE_SANDBOX, mayRunPage, pagePublisherDomain, pageRunsSealed, sealedPageDocument, sealedPageWindow, sealedSourceAt } from './page-run-gate.js'
 import { SiteTextEditor, authoredOrder, replaceTextInPage, type TextSlot } from './site-text-edit.js'
 import { commitPageSig } from '../../files/page-commit.js'
 import { isForeignContent, isLocallyAuthored } from '../../sharing/feature-availability.js'
@@ -57,6 +57,14 @@ type MountState = {
   shownSig: string | null
   /** lineage segments of the cell whose page is mounted. */
   sitePath: readonly string[]
+  /** Someone else's page, running in a sealed frame (#mountSealedPage) rather than in the hive's document. */
+  sealed?: boolean
+  /** A sealed page's bytes that were not here when it was built: it is built again once one arrives. */
+  absent?: readonly string[]
+  /** The tile and layer a sealed page was built from (page-run-gate.ts sealedBuiltFrom). */
+  builtFrom?: string
+  /** Build the sealed page again on the next pass, whatever else holds (a widened site). */
+  rebuild?: boolean
   /** unmount handler — drops style/link/script nodes and listeners. */
   unmount: () => void
 }
@@ -878,7 +886,10 @@ export class SiteViewDrone extends Drone {
         return
       }
       this.#removeReviewGate()
-      await this.#mountCellPage(segments, cellPageSig, store, gen)
+      // A page that may run but is someone else's runs SEALED: its own origin,
+      // nothing of this hive in reach (page-run-gate.ts pageRunsSealed).
+      if (pageRunsSealed(segments, cellPageSig)) await this.#mountSealedPage(segments, cellPageSig, store, gen)
+      else await this.#mountCellPage(segments, cellPageSig, store, gen)
       return
     }
 
@@ -1042,6 +1053,159 @@ export class SiteViewDrone extends Drone {
     return null
   }
 
+  /** Mount SOMEONE ELSE'S page in a sealed frame (jwize 2026-11-16: "You are
+   *  putting yourself and others at risk if you accept unvetted code"). A page
+   *  mounted inline runs as this hive: its storage, its signing key, every
+   *  service in window.ioc. So a page that is another's (page-run-gate.ts
+   *  pageRunsSealed) runs in the frame a version runs in (revision-viewer.model.ts
+   *  pageFrame): an opaque origin, its sheets, scripts and pictures written into
+   *  it, no network, and a stand-in that answers what a hosted page reads of its
+   *  tile. Its links and Escape are handed up and read as the hive's own page's.
+   *  Editing its words in place and its versions button wait for the page's own
+   *  origin: nothing reaches into the frame. */
+  async #mountSealedPage(
+    segments: readonly string[],
+    pageSig: string,
+    store: { getResource: (sig: string) => Promise<Blob | null> },
+    gen: number,
+  ): Promise<void> {
+    // A back step's scroll belongs to the page it returns to: taken here so it
+    // can never land on the next page instead.
+    const returning = this.#returningScroll
+    this.#returningScroll = null
+    const shownVersion = this.#versionShown(pageSig)
+    // The frame up already shows this, unless it was built from another tile or
+    // an older layer (a page several tiles wear reads each tile's own words), or
+    // a byte it lacked has since arrived. A byte that never comes never rebuilds it.
+    const mounted = this.#mount
+    if (mounted?.sealed && !mounted.rebuild && mounted.pageSig === pageSig && mounted.shownSig === (shownVersion?.sig ?? null)) {
+      const builtFrom = await sealedSourceAt(segments)
+      const arrived = mounted.absent?.length
+        ? (await Promise.all(mounted.absent.map(sig => store.getResource(sig).catch(() => null)))).some(Boolean)
+        : false
+      if (gen !== this.#gen) return
+      if (this.#mount === mounted && builtFrom === mounted.builtFrom && !arrived) {
+        mounted.sitePath = [...segments]
+        return
+      }
+    }
+    const blob = await store.getResource(pageSig)
+    if (gen !== this.#gen) return
+    if (!blob) { this.#teardown(); return }
+    const baseHtml = await blob.text()
+    const authored = shownVersion?.html ?? baseHtml
+    // Composed exactly as a page of the hive's own is; the parts seated into it
+    // run sealed with it.
+    const rawHtml = await composeTraits(segments, await composeDivision(segments, authored))
+    const root = document.documentElement
+    // This frame's secret: a link or the right button counts only when it
+    // carries it, and the page's own scripts never see it (revision-viewer.model.ts).
+    const token = crypto.randomUUID()
+    const sealed = await sealedPageDocument(segments, pageSig, rawHtml, store, {
+      links: true,
+      token,
+      entry: this.#siteEntrySegments ?? segments,
+      returning: returning !== null,
+      theme: root.getAttribute('data-theme'),
+      rootClass: [root.className, document.body.className].join(' ').trim(),
+    })
+    if (gen !== this.#gen) return
+    if (!sealed) { this.#teardown(); return }
+    const offersExit = !isPublishedVisitorShell() || pageAsksForExit(new DOMParser().parseFromString(rawHtml, 'text/html'))
+
+    this.#teardown()
+    const host = document.createElement('div')
+    host.id = 'hc-site-view-host'
+    host.setAttribute('data-hc-cell-page', pageSig)
+    host.setAttribute('data-hc-sealed', '')
+    host.setAttribute('data-consumes-wheel', '')
+    host.style.cssText =
+      'position:fixed;top:0;bottom:0;' +
+      'left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);' +
+      'z-index:59988;overflow:hidden;'
+    const frame = document.createElement('iframe')
+    // Scripts only, here and in the page one frame down: an opaque origin with
+    // no storage, no parent, no hive, no key, no network, and no way to move
+    // itself anywhere (page-run-gate.ts sealedPageDocument).
+    frame.setAttribute('sandbox', SEALED_PAGE_SANDBOX)
+    frame.setAttribute('referrerpolicy', 'no-referrer')
+    frame.setAttribute('title', segments.at(-1) ?? 'page')
+    frame.style.cssText = 'display:block;width:100%;height:100%;border:0;background:transparent'
+    frame.srcdoc = sealed.srcdoc
+    host.appendChild(frame)
+    document.body.appendChild(host)
+    if (offersExit) this.#ensureExitOverlay()
+    else this.#removeExitOverlay()
+
+    // The page hands up what a page in the hive's document would have done
+    // itself, and only the page itself can: its window is the one message
+    // source heard. A link counts only when the reader pressed it in this
+    // frame: the stand-in hands it up from a real click with the frame's
+    // secret, the frame holds the focus, and the press is still live. A message
+    // the page's own scripts send has no secret, so it can never walk the
+    // hive, or open the web, by itself.
+    const fromFrame = (event: MessageEvent): void => {
+      if (!event.source || event.source !== sealedPageWindow(frame)) return
+      const data = event.data as { hcFrameLink?: unknown; hcRevisionKey?: unknown; hcFrameMenu?: { x?: unknown; y?: unknown }; hcFrameWiden?: unknown; hcToken?: unknown } | null
+      if (!data || typeof data !== 'object') return
+      const pressed = data.hcToken === token
+      const href = typeof data.hcFrameLink === 'string' ? data.hcFrameLink.trim() : ''
+      if (href) {
+        if (!pressed || document.activeElement !== frame) return
+        if (!(navigator as { userActivation?: { isActive?: boolean } }).userActivation?.isActive) return
+        if (href.startsWith(RESOURCE_URL_PREFIX) || /^(resource:|data:|blob:|javascript:|hc-revision-picture:)/i.test(href)) return
+        if (/^(https?:|mailto:|tel:|\/\/)/i.test(href)) { openExternalLink(href.startsWith('//') ? `https:${href}` : href); return }
+        void this.#resolveAndNavigate(href, this.#mount?.sitePath ?? segments)
+        return
+      }
+      if (data.hcFrameMenu && typeof data.hcFrameMenu === 'object' && pressed) {
+        // The right button over the page: the home domain's back step, or the
+        // published site's menu — as over a page of the hive's own.
+        if (!isPublishedVisitorShell()) { this.#back(); return }
+        const box = frame.getBoundingClientRect()
+        const x = box.left + (Number(data.hcFrameMenu.x) || 0)
+        const y = box.top + (Number(data.hcFrameMenu.y) || 0)
+        openSiteContextMenu({ x, y }, this.#menuItems(new MouseEvent('contextmenu', { clientX: x, clientY: y })), this.#t('site-menu.label', 'Page menu'))
+        return
+      }
+      if (data.hcFrameWiden) { void this.#widenSealed(host); return }
+      if (data.hcRevisionKey === 'Escape' && offersExit) this.#exitToHive()
+    }
+    window.addEventListener('message', fromFrame)
+
+    this.#mount = {
+      host,
+      pageSig,
+      shownSig: shownVersion?.sig ?? null,
+      sitePath: [...segments],
+      sealed: true,
+      absent: sealed.absent,
+      builtFrom: sealed.builtFrom,
+      unmount: () => {
+        window.removeEventListener('message', fromFrame)
+        this.#versions?.dispose()
+        this.#versions = null
+      },
+    }
+    if (this.#widenOnMount) { this.#widenOnMount = false; void this.#widenSealed(host) }
+    // Its versions and its publisher's pick sit outside the page, so a page
+    // from elsewhere keeps them. Editing its words in place does not: nothing
+    // reaches into the frame.
+    if (rawHtml === authored) {
+      void this.#offerVersions(host, segments, pageSig, baseHtml, shownVersion?.sig ?? pageSig)
+      void this.#resolvePick(host, segments, pageSig, baseHtml)
+    }
+  }
+
+  /** Widen a sealed page's session to the whole website, then build its frame
+   *  again: the frame read where the site was entered when it was made. */
+  async #widenSealed(host: HTMLElement): Promise<void> {
+    await this.#widen(host)
+    if (this.#mount?.host !== host) return
+    this.#mount.rebuild = true
+    void this.#reconcile()
+  }
+
   /** Mount the per-cell HTML inline in the live document. No iframe,
    *  no shadow DOM. The author's HTML is parsed, its `<style>` blocks
    *  are appended to <head> (tagged with a marker so we can lift them
@@ -1068,7 +1232,7 @@ export class SiteViewDrone extends Drone {
   ): Promise<void> {
     // Same per-cell page already mounted — just update the sitePath
     // marker so navigate() math stays correct on follow-up clicks.
-    if (this.#mount && this.#mount.pageSig === pageSig && this.#mount.shownSig === (this.#versionShown(pageSig)?.sig ?? null)) {
+    if (this.#mount && !this.#mount.sealed && this.#mount.pageSig === pageSig && this.#mount.shownSig === (this.#versionShown(pageSig)?.sig ?? null)) {
       this.#mount.sitePath = [...segments]
       return
     }
@@ -1096,8 +1260,21 @@ export class SiteViewDrone extends Drone {
     // Then the traits the page states are filled: a tile that fills one is
     // seated where the page's own version of it stood (website/trait-seat.ts).
     // Read from this tile's own marks and children only; unfilled, untouched.
-    const rawHtml = await composeTraits(segments, await composeDivision(segments, authored))
+    // Only this hive's own parts go into a page that runs as the hive. Someone
+    // else's part — a member, a trait filler — would run its markup's handlers
+    // in the hive's document; it is left out, and the page's own version of
+    // that hole shows (2026-11-16). Seated into a SEALED page, it runs sealed.
+    // A part that may run but is not this hive's own does not drop out: the
+    // whole page runs sealed instead, and every part shows in it.
+    let sealedPart = false
+    const ownPart = (route: readonly string[], sig: string): boolean => {
+      if (!mayRunPage(route, sig)) return false
+      if (pageRunsSealed(route, sig)) { sealedPart = true; return false }
+      return true
+    }
+    const rawHtml = await composeTraits(segments, await composeDivision(segments, authored, ownPart), ownPart)
     if (gen !== this.#gen) return
+    if (sealedPart) { await this.#mountSealedPage(segments, pageSig, store, gen); return }
 
     const parsed = new DOMParser().parseFromString(rewriteCellPageRefs(rawHtml), 'text/html')
     // Each element's place in the AUTHORED page, taken before anything moves

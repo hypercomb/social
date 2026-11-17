@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
-import { clearHiveRoot, setHostListing, fetchHiveIndex, ownHiveRoot, putHiveManifest, setHiveRoot, type HiveIndexResult, type PutHiveResult } from './hive-pointer.js'
+import { ROOT_MOVED, clearHiveRoot, setHostListing, fetchHiveIndex, ownHiveRoot, putHiveManifest, setHiveRoot, type HiveIndexResult, type PutHiveResult } from './hive-pointer.js'
 import { HIVE_LINK_VERSION } from './hive-link.js'
 
 const PUB = 'a'.repeat(64)
@@ -80,6 +80,19 @@ describe('setHiveRoot', () => {
     } })
     expect((await setHiveRoot(HOST, 'install:essentials', SIG, deps)).ok).toBe(true)
     expect(puts[0].previousContent).toEqual(signedContent)
+  })
+
+  it('with expect, writes only over the root the caller read, and says ROOT_MOVED otherwise (jwize 2026-11-16: "check the current head hasn\'t changed")', async () => {
+    const moved = harness(verified({ 'staged:jwize.com': OTHER }))
+    expect(await setHiveRoot(HOST, 'staged:jwize.com', SIG, moved.deps, { expect: null })).toMatchObject({ ok: false, reason: ROOT_MOVED })
+    expect(moved.puts).toHaveLength(0)
+    const options: unknown[] = []
+    const held = harness(verified({ 'staged:jwize.com': OTHER }))
+    const put = held.deps.putManifest
+    held.deps.putManifest = (async (...args: Parameters<typeof put>) => { options.push(args[5]); return put(...args) }) as typeof put
+    expect((await setHiveRoot(HOST, 'staged:jwize.com', SIG, held.deps, { expect: OTHER })).ok).toBe(true)
+    // The fresh read inside the write lane checks it once more, right before signing.
+    expect(options).toEqual([{ expectRoots: { 'staged:jwize.com': OTHER } }])
   })
 
   it('merges exactly one key into the verified roots — others untouched', async () => {

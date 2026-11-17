@@ -183,7 +183,7 @@ describe('the host directory — the set, apart from the publishing', () => {
 
   it('the drilldown lists the domains, and the hosts are managed in their own window', () => {
     expect(HTML).toMatch(/@for \(zone of visibleDomains\(\); track zone\)/)
-    expect(TS).toMatch(/readonly domains = computed<string\[\]>\(\(\) =>\s*\[\.\.\.new Set\(\[\.\.\.this\.hosts\(\)/)
+    expect(TS).toMatch(/readonly domains = computed<string\[\]>\(\(\) => \{[\s\S]{0,200}?\[\.\.\.new Set\(\[\.\.\.this\.hosts\(\)/)
     expect(HTML).not.toMatch(/pcur-hosts-manage/)
   })
 

@@ -52,7 +52,7 @@ const toast = (type: string, title: string, message: string): void => {
 
 /** WHERE IT GOES, said before the press (jwize, 2026-10-25: "the prompt should
  *  tell you where it is publishing to"). Per domain the branch names: the
- *  address the caller is about to give it (`publish … as <label>`), else the
+ *  address the caller is about to give it (`stage … as <label>`), else the
  *  one its last publish opened at, else the one the host gives it by rule. A
  *  domain with no address a reader could open is said as itself. Empty when
  *  the branch names none, or they cannot be read — the plain message is kept. */
@@ -84,12 +84,12 @@ const destinations = async (segments: readonly string[], own: Readonly<Record<st
 
 /** Publish a branch after the participant's consent. True when it published.
  *  `own` maps a domain to the address the caller will give the branch there
- *  right after (`publish … on <domain> as <label>`), so the consent names it. */
+ *  right after (`stage … on <domain> as <label>`), so the consent names it. */
 export const hostCurrentBranch = async (at?: readonly string[], own: Readonly<Record<string, string>> = {}): Promise<boolean> => {
     const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
     const lineage = get<LineageLike>(LINEAGE_KEY)
 
-    // THE TILE IS READ ONCE. A caller that already read it (`publish on`)
+    // THE TILE IS READ ONCE. A caller that already read it (`stage on`)
     // passes it in: reading the tab again could publish whatever tile the tab
     // moved to meanwhile — measured 2026-10-15, two sessions sharing one tab.
     const segments = (at ?? lineage?.explorerSegments?.() ?? [])
@@ -244,7 +244,7 @@ export const hostCurrentBranch = async (at?: readonly string[], own: Readonly<Re
       result.status === 'confirmed'
         ? doneMsg
         : t(i18n, 'host.done-unconfirmed',
-          'Branch published — its host has not served it back yet. Open /publish to watch it go live. {link}',
+          'Branch published — its host has not served it back yet. Open /stage to watch it go live. {link}',
           { link: linkText }))
 
     // Evidence of a past index wipe (or a publish from another device): our
@@ -253,7 +253,7 @@ export const hostCurrentBranch = async (at?: readonly string[], own: Readonly<Re
     if (result.missingFromIndex.length > 0) {
       toast('info', t(i18n, 'host.title', 'Publish branch'),
         t(i18n, 'host.index-gaps',
-          '{count} branch(es) you published before are missing from your hive index — open /publish to republish them.',
+          '{count} branch(es) you published before are missing from your hive index — open /stage to stage them again.',
           { count: result.missingFromIndex.length }))
     }
 

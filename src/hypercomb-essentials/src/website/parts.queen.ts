@@ -46,7 +46,7 @@ import {
 } from '@hypercomb/core'
 import { writeDecoration } from '../commands/decoration-manifest.js'
 import { traitWantsAt } from '../commands/trait-read.js'
-import { commitPageSig } from '../files/page-commit.js'
+import { commitPageSigFrom } from '../files/page-commit.js'
 import { writeTilePropertiesAt } from '../editor/tile-properties.js'
 import { mintCreationId, stampCreation } from '../assistant/creation.js'
 import { cutPage, partDocument } from './page-cut.js'
@@ -102,6 +102,8 @@ export class PartsQueenBee extends QueenBee {
     if (at.length === 0) throw new Error('parts reads the page a tile wears; walk into the tile first. Nothing was made')
 
     const html = await pageHtmlAt(at)
+    // The page the parts are cut from: they are this hive's own only when it is.
+    const source = await pageSigAt(at)
     if (!html) throw new Error(`${where} wears no page; dress it with website page <signature> first. Nothing was made`)
     // A word the hive keeps for itself cannot be a trait; that part is named by its kind.
     const cut = cutPage(html, word => isReservedPoolWord(word))
@@ -114,7 +116,7 @@ export class PartsQueenBee extends QueenBee {
     // 1. The page states its traits.
     let wrote = 0
     if (cut.unmarked > 0) {
-      const result = await commitPageSig(at, await putText(cut.marked))
+      const result = await commitPageSigFrom(at, await putText(cut.marked), source)
       if (!result.ok) throw new Error(`the page could not be written: ${result.error}. Nothing was made`)
       wrote++
     }
@@ -144,7 +146,7 @@ export class PartsQueenBee extends QueenBee {
       // trait. It is dressed only if it wears no page at all; what it wears is
       // never replaced by the page's own version.
       if (made || !await pageSigAt(segments)) {
-        const result = await commitPageSig(segments, await putText(partDocument(cut, part, style)))
+        const result = await commitPageSigFrom(segments, await putText(partDocument(cut, part, style)), source)
         if (!result.ok) throw new Error(`the tile ${words[index]} could not be dressed: ${result.error}. The parts before it are in place`)
         wrote++
       }

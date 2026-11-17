@@ -21,13 +21,15 @@ export interface CodexTier {
   readonly scope: string
   readonly sources: readonly string[]
   readonly axioms: readonly CodexAxiom[]
+  /** The tier's header line exactly as the codex writes it. */
+  readonly line: string
 }
 
 const TIER = /^@(\d+) (.+?)(?: \[(\w+)\])?(?: ~(.+))?$/
 const AXIOM = /^([A-Z]\d+)(?:<([A-Z]\d+(?:,[A-Z]\d+)*))?: (.+)$/
 
 export const parseCodex = (text: string): CodexTier[] => {
-  const tiers: { index: number; title: string; scope: string; sources: string[]; axioms: CodexAxiom[] }[] = []
+  const tiers: { index: number; title: string; scope: string; sources: string[]; axioms: CodexAxiom[]; line: string }[] = []
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trimEnd()
     if (!line || line.startsWith('HC-CODEX')) continue
@@ -39,6 +41,7 @@ export const parseCodex = (text: string): CodexTier[] => {
         scope: tier[3] ?? 'all',
         sources: (tier[4] ?? '').split(/[\s,]+/).filter(Boolean),
         axioms: [],
+        line,
       })
       continue
     }

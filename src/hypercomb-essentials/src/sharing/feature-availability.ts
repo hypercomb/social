@@ -18,7 +18,7 @@
 // exactly as portal-overlay reads the shared `hc:feature-staging` key.
 
 import { isAuthored } from './authored-sigs.js'
-import { isWithinAdoptedRoot } from './adopted-roots.js'
+import { isOwnReplicaAt, isPeerContentAt, isWithinAdoptedRoot } from './adopted-roots.js'
 
 const VERIFIED_KEY = 'hc:feature-verified'
 const ALLOWED_ROOTS_KEY = 'hc:allowed-roots'
@@ -140,7 +140,45 @@ export function isForeignContent(segments: readonly string[], domain: unknown): 
   // ran foreign code ungated. Tree position stays authoritative: content under
   // an adopted root is foreign regardless of the domain label; your own pages
   // there are rescued per-signature by isLocallyAuthored in featureNeedsReview.
-  return isWithinAdoptedRoot(segments)
+  // A peer's tile carried out of its branch onto your own pages is still the
+  // peer's (a carried root, adopted-roots.ts): moving it never made it yours,
+  // and before 2026-11-16 it ran ungated wherever it landed.
+  return isWithinAdoptedRoot(segments) || isPeerContentAt(segments)
+}
+
+/** RUNS SEALED (jwize 2026-11-16: "You are putting yourself and others at risk
+ *  if you accept unvetted code" … "make sure we aren't vulnerable"). Whatever
+ *  let a page run — a review, a trusted domain, an allowed root — a page this
+ *  hive did not AUTHOR never runs as this hive. It runs in a sealed frame, an
+ *  origin of its own with nothing of the hive in reach (site-view.drone.ts).
+ *
+ *  FAIL CLOSED, by signature. Where a page sits and which domain a host named
+ *  for it are device-local and move: a cut-and-paste drops the adopted-root
+ *  record, a new device has none, an inferred domain arrives late. Authorship
+ *  is kept per signature in the sign('authored') pool, which survives all of
+ *  that. So only an authored page runs in the page itself — and the owner's own
+ *  replica on a managed site door (adopted-roots.ts isOwnReplicaAt). A page of
+ *  yours that was never marked runs sealed: it still shows, it just cannot
+ *  reach the hive.
+ *
+ *  On a published visitor shell the origin IS the publisher's domain and no
+ *  page there is authored on the visitor's device, so the publisher's own pages
+ *  run as their own origin, as any website does; a page from another domain or
+ *  a peer's branch there is sealed. */
+export function runsSealed(segments: readonly string[], sig: unknown, domain: unknown): boolean {
+  if (isLocallyAuthored(sig)) return false
+  if (isOwnReplicaAt(segments)) return false
+  if (onVisitorShell()) {
+    const d = normHost(domain)
+    return (!!d && d !== selfDomain()) || isPeerContentAt(segments)
+  }
+  return true
+}
+
+/** The published read-only visitor shell (behavior-enablement.ts
+ *  isPublishedVisitorShell — read here by its mark, so this module imports nothing shell-side). */
+const onVisitorShell = (): boolean => {
+  try { return document.documentElement.dataset['hypercombMode'] === 'visitor' } catch { return false }
 }
 
 /** The composite the activation gate calls: a feature must be REVIEWED before it

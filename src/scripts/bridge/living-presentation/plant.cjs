@@ -1,6 +1,6 @@
 // Plant ONE layer of the living presentation into the hive, by speaking, and
-// publish it so it can be seen. This is the canonical loop, the same for
-// everyone: one layer, one build revision, one publish.
+// stage it on a domain so it can be seen. This is the canonical loop, the same
+// for everyone: one layer, one build revision, one staging.
 //
 //   node scripts/bridge/living-presentation/plant.cjs [<route>] [--all] [--dry] [--sentences] [--console] [--say [<url>]]
 //                                                     [--tiles-only] [--publish-only]
@@ -21,20 +21,20 @@
 //   2. `file on` a short note on each new tile saying what it is;
 //   3. `builds <name>` on the top tile: the pass sealed as one build revision
 //      (it changes nothing when nothing changed);
-//   4. with --publish, `publish /<top> on <domain>` for each domain named
+//   4. with --publish, `stage /<top> on <domain>` for each domain named
 //      (repeat the flag, or separate domains with commas): the bytes go to the
 //      host and <top>.<domain> opens on the new head, on every domain at once.
 //      With --as <label>, the tile gets its own address instead:
-//      <label>.<domain> (`publish /<top> on <domain> as <label>`), so
+//      <label>.<domain> (`stage /<top> on <domain> as <label>`), so
 //      The top tile is named protocol, so `--publish hypercomb.com` alone is
 //      protocol.hypercomb.com. An earlier root (retired.cjs `roots`) is
-//      withdrawn from each domain first, `publish /<old> off <domain>`.
-//      Publishing is not joining or sharing; the hive asks for consent in the
-//      browser before each publish.
+//      withdrawn from each domain first, `stage /<old> off <domain>`.
+//      Staging is not joining or sharing; the hive asks for consent in the
+//      browser before each stage.
 // The usual order is two runs with a step by hand between them: plant the
 // layer (steps 1 to 3), give the tiles their pictures in the hive, then run
 // again with --publish-only (steps 3 and 4), so the pictures are sealed into
-// the revision that gets published.
+// the revision that gets staged.
 // No bridge is needed: --sentences prints only the sentences, one per line,
 // each with its leading slash, to type into the hive's own command line or
 // hand to the hive's chat. --console prints one snippet to paste into the
@@ -291,13 +291,13 @@ if (!TILES_ONLY && !PUBLISH_ONLY) {
   }
 }
 // Each planted tree is sealed as one build; only the protocol (the tree the
-// route names, or protocol itself) is published. An earlier root is withdrawn
+// route names, or protocol itself) is staged. An earlier root is withdrawn
 // from each domain first, so the one address serves the one presentation.
 const sealed = [...new Set(plantings.map(p => p.route.split('/')[0]))]
 for (const top of sealed) sentences.push(`go /${top}`, `builds ${REVISION}`)
 const publishing = EVERY_ROOT ? tree.name : segments[0]
-if (RETIRE) for (const domain of DOMAINS) for (const old of retired.roots ?? []) if (old !== publishing) sentences.push(`publish /${old} off ${domain}`)
-for (const domain of DOMAINS) sentences.push(`publish /${publishing} on ${domain}${LABEL ? ` as ${LABEL}` : ''}`)
+if (RETIRE) for (const domain of DOMAINS) for (const old of retired.roots ?? []) if (old !== publishing) sentences.push(`stage /${old} off ${domain}`)
+for (const domain of DOMAINS) sentences.push(`stage /${publishing} on ${domain}${LABEL ? ` as ${LABEL}` : ''}`)
 
 // The participant's door reads a line as a behaviour only with its slash.
 const slashed = sentences.map(line => (line.startsWith('/') ? line : `/${line}`))
@@ -333,7 +333,7 @@ if (HTTP_SAY) {
 }
 if (CONSOLE) {
   // Paste into the hive tab's console. Each line goes through the door Enter
-  // uses; a pause lets each commit land before the next line. A publish asks
+  // uses; a pause lets each commit land before the next line. A stage asks
   // for consent in the page, so it is said last.
   console.log(`(async () => {
   const bus = globalThis.__hypercombEffectBus
@@ -344,7 +344,7 @@ if (CONSOLE) {
     bus.emit('command:submit', { text })
     await new Promise(r => setTimeout(r, text.startsWith('/go ') ? 1200 : 900))
   }
-  console.log('Done. If a publish was said, answer its consent in the page.')
+  console.log('Done. If a stage was said, answer its consent in the page.')
 })()`)
   process.exit(0)
 }

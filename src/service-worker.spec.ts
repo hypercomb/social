@@ -159,3 +159,77 @@ describe('sniffTextContentType', () => {
     expect(await (await load()).sniffTextContentType(new Blob([text]))).toBe('')
   })
 })
+
+// A FILE OPENED AS A PAGE IS SEALED (2026-11-16). /@resource/ serves any bytes a
+// host this hive knows holds; opened as a document, a page or an SVG there ran
+// as the hive itself — its storage, its signing key, its services. Opened as a
+// document, a type that can run script now carries a sandbox with no
+// same-origin — unless this hive authored it. A PDF or a picture is never
+// sealed (a sealed PDF is a blank one), and what a page of the hive loads (a
+// picture, a sheet, a script) is served as before.
+describe('a resource opened as a page', () => {
+  type Seal = (request: { mode?: string; destination?: string; url?: string }, response: Response, authored?: (sig: string) => Promise<boolean>) => Promise<Response>
+  const sealing = (worker: string) => {
+    const code = readFileSync(worker, 'utf8')
+    const from = code.indexOf('const SEALED_DESTINATIONS')
+    const to = code.indexOf('async function handleSiteResourceRequest(')
+    expect(from, `harness: no seal in ${worker}`).toBeGreaterThan(-1)
+    return new Function(`const SITE_RESOURCE_PREFIX = '/@resource/'; ${code.slice(from, to)}; return { sealedIfDocument, SEALED_DOCUMENT_POLICY }`)() as {
+      sealedIfDocument: Seal
+      SEALED_DOCUMENT_POLICY: string
+    }
+  }
+  const SIG = 'a'.repeat(64)
+  const url = `https://hive.example/@resource/${SIG}/page.html`
+  const page = (type = 'text/html; charset=utf-8') => new Response('<script>steal()</script>', { headers: { 'content-type': type } })
+  const nobody = async () => false
+
+  it('is sealed in every worker: a tab, a frame, an object — a page or an SVG', async () => {
+    for (const worker of [WEB, DEV, at('./hypercomb-shim/public/hypercomb.worker.js')]) {
+      const { sealedIfDocument, SEALED_DOCUMENT_POLICY } = sealing(worker)
+      expect(SEALED_DOCUMENT_POLICY).toMatch(/^sandbox /)
+      expect(SEALED_DOCUMENT_POLICY).not.toContain('allow-same-origin')
+      expect(SEALED_DOCUMENT_POLICY).not.toContain('allow-top-navigation')
+      expect(SEALED_DOCUMENT_POLICY).not.toContain('escape-sandbox')
+      for (const request of [{ mode: 'navigate', destination: 'document' }, { mode: 'navigate', destination: 'iframe' }, { mode: 'no-cors', destination: 'object' }, { mode: 'no-cors', destination: 'embed' }]) {
+        // Sealing is the default: every type not known to run nothing, a host's odd +xml and a sniffed one included.
+        for (const type of ['text/html; charset=utf-8', 'image/svg+xml', 'application/xhtml+xml', 'application/x-page+xml', 'unknown/unknown', 'application/octet-stream', '']) {
+          const out = await sealedIfDocument({ ...request, url }, page(type), nobody)
+          expect(out.headers.get('content-security-policy'), `${JSON.stringify(request)} ${type}`).toBe(SEALED_DOCUMENT_POLICY)
+          expect(out.headers.get('x-content-type-options')).toBe('nosniff')
+          expect(out.headers.get('content-type') ?? '').toBe(type)
+        }
+      }
+    }
+  })
+
+  it('a page this hive authored opens as it always did', async () => {
+    const { sealedIfDocument } = sealing(WEB)
+    const asked: string[] = []
+    const response = page()
+    expect(await sealedIfDocument({ mode: 'navigate', destination: 'document', url }, response, async sig => { asked.push(sig); return true })).toBe(response)
+    expect(asked).toEqual([SIG])
+  })
+
+  it('a PDF, a picture or a video opened as a page is never sealed: nothing in it runs', async () => {
+    const { sealedIfDocument } = sealing(WEB)
+    for (const type of ['application/pdf', 'image/png', 'video/mp4', 'audio/mpeg', 'text/plain; charset=utf-8', 'text/css', 'application/json']) {
+      const response = page(type)
+      expect(await sealedIfDocument({ mode: 'navigate', destination: 'document', url }, response, nobody), type).toBe(response)
+    }
+  })
+
+  it('a picture, a sheet or a script a page of the hive loads is served as it was', async () => {
+    const { sealedIfDocument } = sealing(WEB)
+    for (const destination of ['image', 'style', 'script', 'font', '']) {
+      const response = page()
+      expect(await sealedIfDocument({ mode: 'no-cors', destination, url }, response, nobody)).toBe(response)
+    }
+  })
+
+  it('every answer of the resource door passes through the seal', () => {
+    for (const worker of [WEB, at('./hypercomb-shim/public/hypercomb.worker.js')]) {
+      expect(readFileSync(worker, 'utf8').replace(/\r\n/g, '\n')).toContain('async function handleSiteResourceRequest(request) {\n  return sealedIfDocument(request, await serveSiteResource(request))\n}')
+    }
+  })
+})

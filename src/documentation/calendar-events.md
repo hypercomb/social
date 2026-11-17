@@ -256,7 +256,7 @@ arrival meetups ViewBee WebsiteQueenBee SiteViewDrone RsvpDrone @hypercomb.com
 3. Visitor: the one admitted write — **done**, `readonly-network.spec.ts`.
 4. Page: join + calendar scroller — **done**.
 5. Live: promote the worker, say `hosts list calendar:events`, the `event`
-   lines, the `arrival`, `website page` and `publish` — **the organizer's acts**.
+   lines, the `arrival`, `website page` and `stage` — **the organizer's acts**.
 6. The relay (`hypercomb-relay/relay.js`, machine hosts) does not yet take
    `event:`/`rsvp:` keys or the stranger's claim — same shape, **open**.
 7. How a hive's `community:hosts` reaches its door's pool, so the pick-up has

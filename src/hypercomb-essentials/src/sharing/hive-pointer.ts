@@ -393,6 +393,16 @@ async function putHiveManifestNow(
   // and says so (`setsEntrances`).
   const fresh = options.setsEntrances ? undefined : entrancesOf(read, replaces)
 
+  // A ROOT THE CALLER COUNTED ON MOVED: nothing is signed; the caller reads again and applies its change to what is there.
+  if (options.expectRoots) {
+    const missing = !!read && !read.ok && read.reason === 'http' && read.status === 404
+    if (!read?.ok && !missing) return { ok: false, pubkey: '', createdAt: 0, reason: ROOT_MOVED }
+    for (const [key, expected] of Object.entries(options.expectRoots)) {
+      const holds = read?.ok ? String(read.manifest.roots[key] ?? '').toLowerCase() || null : null
+      if (holds !== (expected ? expected.toLowerCase() : null)) return { ok: false, pubkey: '', createdAt: 0, reason: ROOT_MOVED }
+    }
+  }
+
   // THE INDEX MOVED ON since the caller read it — re-apply its edits on top.
   if (read?.ok && read.manifest.createdAt > replaces) {
     const rebased = rebaseOnto(read.manifest, { roots, doors, previousContent }, rememberedRead(pubkeyNow, replaces))
@@ -489,7 +499,15 @@ export interface PutHiveOptions {
    *  the index it replaces. Turning a self-followed entrance on records the
    *  stamp of the very write that does it as `from.at`. */
   createdAt?: number
+  /** COMPARE AND SWAP (jwize 2026-11-16: "just before updating you check the current head hasn't changed and you can
+   *  then update safely"): the signature each named root must still hold (null: no such root) in the fresh read this
+   *  write makes right before signing. When one moved, nothing is signed and the write answers ROOT_MOVED, so the
+   *  caller reads again and applies its change to what is there now, instead of the rebase letting its copy win. */
+  expectRoots?: Readonly<Record<string, string | null>>
 }
+
+/** The answer of a write whose expected root moved since the caller read it (PutHiveOptions.expectRoots). */
+export const ROOT_MOVED = 'moved: another place changed this root since it was read'
 
 /** The host answered that it holds NO index for this key (an honest 404):
  *  nothing there can be newer than the caller's copy, so that copy stands. */
@@ -636,7 +654,12 @@ export type SetHiveRootDeps = {
  *    the publisher's other roots;
  *  - a root already at the requested sig no-ops without re-signing
  *    (`reason: 'unchanged'`) — a re-run deploy stamp costs nothing. */
-export async function setHiveRoot(host: string, key: string, sig: string, deps: SetHiveRootDeps = {}): Promise<SetHiveRootResult> {
+export async function setHiveRoot(
+  host: string, key: string, sig: string, deps: SetHiveRootDeps = {},
+  /** `expect`: the signature the caller read this root at (null: none). When it holds anything else now, nothing is
+   *  signed and the answer is ROOT_MOVED (PutHiveOptions.expectRoots). Left out, the root is set whatever it holds. */
+  options: { readonly expect?: string | null } = {},
+): Promise<SetHiveRootResult> {
   const fetchIndex = deps.fetchIndex ?? fetchHiveIndex
   const putManifest = deps.putManifest ?? putHiveManifest
   const publicKey = deps.publicKey ?? (async () => (await keyList()).publisherKeyHex())
@@ -663,9 +686,13 @@ export async function setHiveRoot(host: string, key: string, sig: string, deps: 
   if (existing[cleanKey] === cleanSig) {
     return { ok: true, key: cleanKey, sig: cleanSig, host, pubkey, createdAt: read.ok ? read.manifest.createdAt : 0, reason: 'unchanged' }
   }
+  const expecting = options.expect !== undefined
+  const expected = options.expect ? options.expect.toLowerCase() : null
+  if (expecting && (String(existing[cleanKey] ?? '').toLowerCase() || null) !== expected) return refuse(ROOT_MOVED)
 
-  const put = await putManifest(host, { ...existing, [cleanKey]: cleanSig }, doors,
-    read.ok ? read.manifest.createdAt : 0, read.ok ? read.manifest.signedContent : undefined)
+  const args = [host, { ...existing, [cleanKey]: cleanSig }, doors,
+    read.ok ? read.manifest.createdAt : 0, read.ok ? read.manifest.signedContent : undefined] as const
+  const put = expecting ? await putManifest(...args, { expectRoots: { [cleanKey]: expected } }) : await putManifest(...args)
   if (!put.ok) return refuse(put.reason ?? 'index write failed')
   return { ok: true, key: cleanKey, sig: cleanSig, host, pubkey: put.pubkey, createdAt: put.createdAt }
 }

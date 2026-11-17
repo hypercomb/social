@@ -32,25 +32,21 @@
     }
 
     <!-- THE TOP: the one input, always here — it searches whatever list is
-         showing, and takes a group's name after Save as group — and PUBLISH
-         CHANGES under it. -->
+         showing — and STAGE CHANGES under it. -->
     <div class="ptop">
-      <div class="psearch" [class.naming]="naming()">
-        <span class="mat-sym psearch-icon" aria-hidden="true">{{ naming() ? 'create_new_folder' : 'search' }}</span>
+      <div class="psearch">
+        <span class="mat-sym psearch-icon" aria-hidden="true">search</span>
         <input
           class="psearch-input"
           type="text"
           spellcheck="false"
           autocomplete="off"
-          [value]="inputValue()"
-          [placeholder]="(naming() ? 'publish.search.name-group' : 'publish.search.placeholder') | t"
-          [attr.aria-label]="(naming() ? 'publish.search.name-group' : 'publish.search.placeholder') | t"
+          [value]="query()"
+          [placeholder]="'publish.search.placeholder' | t"
+          [attr.aria-label]="'publish.search.placeholder' | t"
           (input)="onInput($any($event.target).value)"
-          (keydown.enter)="onEnter()"
         />
-        @if (naming()) {
-          <button class="psearch-add" type="button" [disabled]="!canAddGroup()" (click)="addGroup()">{{ 'publish.search.add-group' | t }}</button>
-        } @else if (query() !== '') {
+        @if (query() !== '') {
           <button class="psearch-clear" type="button" (click)="clearQuery()" [attr.aria-label]="'publish.search.clear' | t" [title]="'publish.search.clear' | t">×</button>
         }
       </div>
@@ -61,7 +57,7 @@
         [class.ready]="changed().length > 0 && !batch()"
         [class.busy]="!!batch()"
         [disabled]="!!batch() || changed().length === 0"
-        (click)="publishChanges()"
+        (click)="stageChanges()"
       >
         @if (batch(); as b) {
           {{ 'publish.selection.publishing' | t: { done: b.done, total: b.total } }}
@@ -76,10 +72,32 @@
     </div>
 
     @if (!drill()) {
-      <!-- THE DOMAINS — two thirds of the window — and under them the shorter
-           list of NAMED GROUPS. Press one to go in; hold Ctrl (⌘), click several
-           domains and let go, and they open together. -->
+      <!-- THE TOP LEVEL: YOUR COMMUNITY, apart — fed by every domain, yours
+           included — and under it THE DOMAINS, yours first. -->
       <div class="plevel">
+        <section class="pcommunity" [attr.aria-label]="'publish.community' | t">
+          <div
+            class="pdrow pcrow"
+            role="button"
+            tabindex="0"
+            (click)="openCommunity()"
+            (keydown)="communityKey($event)"
+          >
+            <span class="mat-sym pdrow-icon" aria-hidden="true">diversity_3</span>
+            <span class="pdrow-meta">
+              <span class="pdrow-name">{{ 'publish.community' | t }}@if (community().zone) {<span class="pcrow-zone"> · {{ community().zone }}</span>}</span>
+              <span class="pdrow-sub">
+                @if (!community().zone) {
+                  {{ 'publish.community.no-zone' | t }}
+                } @else {
+                  {{ 'publish.community.count' | t: { live: communityCounts().live, staged: communityCounts().staged } }}
+                }
+              </span>
+            </span>
+            <span class="mat-sym pdrow-go" aria-hidden="true">chevron_right</span>
+          </div>
+        </section>
+
         <section class="pdomains" [attr.aria-label]="'publish.domains' | t">
           <h3 class="phead">{{ 'publish.domains' | t }}</h3>
           <div class="pscroll">
@@ -94,54 +112,15 @@
                   class="pdrow"
                   role="button"
                   tabindex="0"
-                  [class.chosen]="isChosen(zone)"
-                  [attr.aria-pressed]="isChosen(zone)"
-                  (click)="pressDomain(zone, $event)"
+                  [class.yours]="isYours(zone)"
+                  (click)="openDomain(zone)"
                   (keydown)="domainKey(zone, $event)"
                 >
-                  <span class="mat-sym pdrow-icon" aria-hidden="true">{{ isChosen(zone) ? 'check_circle' : 'language' }}</span>
+                  <span class="mat-sym pdrow-icon" aria-hidden="true">{{ isYours(zone) ? 'home' : 'language' }}</span>
                   <span class="pdrow-meta">
-                    <span class="pdrow-name">{{ zone }}</span>
+                    <span class="pdrow-name">{{ zone }}@if (isYours(zone)) {<span class="pdrow-tag">{{ 'publish.domain.yours' | t }}</span>}</span>
                     <span class="pdrow-sub">{{ 'publish.domain.count' | t: { count: hostedOn(zone) } }}</span>
                   </span>
-                  <span class="mat-sym pdrow-go" aria-hidden="true">chevron_right</span>
-                </li>
-              }
-            </ul>
-            @if (domains().length > 1) {
-              <p class="pnote pnote-hint">{{ 'publish.drill.multi-hint' | t }}</p>
-            }
-          </div>
-        </section>
-
-        <section class="pgroupsbox" [attr.aria-label]="'publish.groups' | t">
-          <h3 class="phead">{{ 'publish.groups' | t }}</h3>
-          <div class="pscroll">
-            @if (groups().length === 0) {
-              <p class="pnote">{{ 'publish.drill.no-groups' | t }}</p>
-            }
-            <ul class="pdlist">
-              @for (group of visibleGroups(); track group.name) {
-                <li
-                  class="pdrow pgrow"
-                  role="button"
-                  tabindex="0"
-                  (click)="openGroup(group)"
-                  (keydown)="groupKey(group, $event)"
-                >
-                  <span class="mat-sym pdrow-icon" aria-hidden="true">folder</span>
-                  <span class="pdrow-meta">
-                    <span class="pdrow-name">{{ group.name }}</span>
-                    <span class="pdrow-sub">{{ 'publish.drill.group-domains' | t: { count: group.zones.length } }}</span>
-                  </span>
-                  <button
-                    class="pgrow-remove"
-                    type="button"
-                    [attr.aria-label]="'publish.drill.remove-group' | t: { name: group.name }"
-                    [attr.title]="'publish.drill.remove-group' | t: { name: group.name }"
-                    (click)="removeGroup(group, $event)"
-                    (keydown)="$event.stopPropagation()"
-                  >×</button>
                   <span class="mat-sym pdrow-go" aria-hidden="true">chevron_right</span>
                 </li>
               }
@@ -150,90 +129,161 @@
         </section>
       </div>
     } @else {
-      <!-- INSIDE A DOMAIN, OR A GROUP, OR SEVERAL DOMAINS HELD TOGETHER: the
-           creations, each a switch. On every domain of the set, on none, or
-           MIXED — and a mix is synced one way or the other. -->
       <div class="pdrill-head">
-        <button class="pback" type="button" (click)="back()" [attr.aria-label]="'publish.drill.back' | t" [title]="'publish.drill.back' | t">
+        <button class="pback" type="button" (click)="back()"
+          [attr.aria-label]="(drill()?.kind === 'versions' ? 'publish.community.back' : 'publish.drill.back') | t"
+          [title]="(drill()?.kind === 'versions' ? 'publish.community.back' : 'publish.drill.back') | t">
           <span class="mat-sym" aria-hidden="true">arrow_back</span>
         </button>
         <span class="pdrill-title">
-          @if (scopeTitle()) { {{ scopeTitle() }} } @else { {{ 'publish.drill.group-domains' | t: { count: scopeZones().length } }} }
+          @switch (drill()?.kind) {
+            @case ('domain') { {{ scopeZone() }} }
+            @case ('showcase') { {{ 'publish.community' | t }}@if (community().zone) {<span class="pcrow-zone"> · {{ community().zone }}</span>} }
+            @case ('versions') { {{ versionsOf()?.name ?? '' }} }
+          }
         </span>
-        @if (canSaveGroup()) {
-          <button class="pdrill-save" type="button" [class.active]="naming()" (click)="naming() ? cancelNaming() : startNaming()">{{ 'publish.drill.save-group' | t }}</button>
-        }
       </div>
-      @if (focus(); as at) {
-        <p class="pdrill-zones pfocus">
-          <span>{{ 'publish.rail.under' | t }} <b>{{ at.join(' / ') }}</b></span>
-          <button class="pfocus-clear" type="button" (click)="clearFocus()" [attr.aria-label]="'publish.rail.all' | t" [title]="'publish.rail.all' | t">×</button>
-        </p>
-      }
-      @if (scopeZones().length > 1) {
-        <p class="pdrill-zones">{{ scopeZones().join(' · ') }}</p>
-      }
 
-      <div class="publish-scroll">
-        @if (creations().length === 0) {
-          <p class="pnote">{{ (shortened() ? 'publish.search.none' : hereHint()) | t }}</p>
+      @if (drill()?.kind === 'domain') {
+        @if (focus(); as at) {
+          <p class="pdrill-zones pfocus">
+            <span>{{ 'publish.rail.under' | t }} <b>{{ at.join(' / ') }}</b></span>
+            <button class="pfocus-clear" type="button" (click)="clearFocus()" [attr.aria-label]="'publish.rail.all' | t" [title]="'publish.rail.all' | t">×</button>
+          </p>
         }
-        <ul class="prows" [attr.title]="'publish.apps.row-tip' | t">
-          @for (row of creations(); track row.key) {
-            <li
-              class="prow"
-              role="switch"
-              tabindex="0"
-              [class.on]="stateOf(row) === 'on'"
-              [class.mixed]="stateOf(row) === 'mixed'"
-              [class.busy]="!!row.busyPhase"
-              [class.locked]="!canSwitch(row)"
-              [attr.aria-checked]="stateOf(row) === 'mixed' ? 'mixed' : stateOf(row) === 'on'"
-              [attr.aria-disabled]="!canSwitch(row)"
-              (click)="press(row)"
-              (keydown)="rowKey(row, $event)"
-            >
-              <span class="prow-bulb" aria-hidden="true"><span class="mat-sym">lightbulb</span></span>
-              <span class="prow-meta">
-                <span class="prow-name">
-                  <span class="prow-label">{{ appName(row) }}</span>
-                  @if (row.key === currentKey()) {
-                    <span class="prow-tag">{{ 'publish.apps.this-tile' | t }}</span>
-                  }
-                </span>
-                @if (scopeZones().length === 1) {
-                  @if (address(row, scopeZones()[0]); as at) {
-                    @if (stateOf(row) === 'on' && addressUrl(row, scopeZones()[0])) {
-                      <a class="prow-at" [href]="addressUrl(row, scopeZones()[0])" target="_blank" rel="noopener" (click)="$event.stopPropagation()">{{ isFrontPage(row, scopeZones()[0]) ? ('publish.apps.front-page' | t) : at }} ↗</a>
+
+        <!-- INSIDE A DOMAIN: the creations, each a switch — on stages it here
+             (and it stands gray in the community), off takes it off. -->
+        <div class="publish-scroll">
+          @if (creations().length === 0) {
+            <p class="pnote">{{ (shortened() ? 'publish.search.none' : hereHint()) | t }}</p>
+          }
+          <ul class="prows" [attr.title]="'publish.apps.row-tip' | t">
+            @for (row of creations(); track row.key) {
+              <li
+                class="prow"
+                role="switch"
+                tabindex="0"
+                [class.on]="isOn(row)"
+                [class.busy]="!!row.busyPhase"
+                [class.locked]="!canSwitch(row)"
+                [attr.aria-checked]="isOn(row)"
+                [attr.aria-disabled]="!canSwitch(row)"
+                (click)="press(row)"
+                (keydown)="rowKey(row, $event)"
+              >
+                <span class="prow-bulb" aria-hidden="true"><span class="mat-sym">lightbulb</span></span>
+                <span class="prow-meta">
+                  <span class="prow-name">
+                    <span class="prow-label">{{ appName(row) }}</span>
+                    @if (row.key === currentKey()) {
+                      <span class="prow-tag">{{ 'publish.apps.this-tile' | t }}</span>
+                    }
+                  </span>
+                  @if (address(row, scopeZone()); as at) {
+                    @if (isOn(row) && addressUrl(row, scopeZone())) {
+                      <a class="prow-at" [href]="addressUrl(row, scopeZone())" target="_blank" rel="noopener" (click)="$event.stopPropagation()">{{ isFrontPage(row, scopeZone()) ? ('publish.apps.front-page' | t) : at }} ↗</a>
                     } @else {
-                      <span class="prow-at">{{ isFrontPage(row, scopeZones()[0]) ? ('publish.apps.front-page' | t) : at }}</span>
+                      <span class="prow-at">{{ isFrontPage(row, scopeZone()) ? ('publish.apps.front-page' | t) : at }}</span>
                     }
                   }
-                } @else if (stateOf(row) === 'mixed') {
-                  <span class="prow-at prow-mixed">{{ 'publish.drill.on-some' | t: { on: onCount(row), count: scopeZones().length } }}</span>
-                } @else if (stateOf(row) === 'on') {
-                  <span class="prow-at">{{ 'publish.drill.on-all' | t: { count: scopeZones().length } }}</span>
-                }
-                <!-- A domain this branch publishes to that takes none of its
-                     bytes — named, with why, rather than the row reading as
-                     uploading. -->
-                @if (troubleOn(row)) {
-                  <span class="prow-warn" role="status">{{ troubleKey(row) | t: troubleParams(row) }}</span>
-                }
-              </span>
-              @if (stateOf(row) === 'mixed' && canSwitch(row)) {
-                <!-- A MIX: sync it to one state or the other, on every domain. -->
-                <span class="prow-sync">
-                  <button class="prow-syncbtn" type="button" (click)="sync(row, true, $event)" (keydown)="$event.stopPropagation()">{{ 'publish.drill.sync-on' | t }}</button>
-                  <button class="prow-syncbtn" type="button" (click)="sync(row, false, $event)" (keydown)="$event.stopPropagation()">{{ 'publish.drill.sync-off' | t }}</button>
+                  <!-- A domain this branch stages to that takes none of its
+                       bytes — named, with why, rather than the row reading as
+                       uploading. -->
+                  @if (troubleOn(row)) {
+                    <span class="prow-warn" role="status">{{ troubleKey(row) | t: troubleParams(row) }}</span>
+                  }
                 </span>
-              } @else if (wordOf(row); as word) {
-                <span class="prow-word" [attr.data-kind]="word.kind">{{ word.key | t }}</span>
-              }
-            </li>
+                @if (wordOf(row); as word) {
+                  <span class="prow-word" [attr.data-kind]="word.kind">{{ word.key | t }}</span>
+                }
+              </li>
+            }
+          </ul>
+        </div>
+      } @else if (drill()?.kind === 'showcase') {
+        <!-- YOUR COMMUNITY: gray is staged, lit is live. A press publishes a
+             gray one live, or takes a live one out; a name with several
+             versions opens to them. -->
+        <div class="publish-scroll">
+          @if (!community().zone) {
+            <p class="pnote">{{ 'publish.community.no-zone' | t }}</p>
+          } @else if (community().read === 'unreachable') {
+            <p class="pnote">{{ 'publish.community.unreachable' | t }}</p>
           }
-        </ul>
-      </div>
+          @if (communityList().length === 0) {
+            <p class="pnote">{{ (shortened() ? 'publish.search.none' : 'publish.community.empty') | t }}</p>
+          }
+          <ul class="prows" [attr.title]="'publish.community.row-tip' | t">
+            @for (entry of communityList(); track entry.name) {
+              <li
+                class="prow"
+                [attr.role]="entry.versions.length > 1 ? 'button' : 'switch'"
+                tabindex="0"
+                [class.on]="entry.live"
+                [class.busy]="entryBusy(entry)"
+                [attr.aria-checked]="entry.versions.length > 1 ? null : entry.live"
+                (click)="pressEntry(entry)"
+                (keydown)="entryKey(entry, $event)"
+              >
+                <span class="prow-bulb" aria-hidden="true"><span class="mat-sym">lightbulb</span></span>
+                <span class="prow-meta">
+                  <span class="prow-name"><span class="prow-label">{{ entry.name }}</span></span>
+                  @if (entry.versions.length > 1) {
+                    <span class="prow-at">{{ 'publish.community.versions' | t: { count: entry.versions.length } }}</span>
+                  } @else if (versionWhere(entry.versions[0]); as where) {
+                    <span class="prow-at">{{ where }}</span>
+                  }
+                </span>
+                @if (entryBusy(entry)) {
+                  <span class="prow-word" data-kind="busy">{{ 'publish.community.going' | t }}</span>
+                } @else if (entry.versions.length > 1) {
+                  <span class="mat-sym pdrow-go" aria-hidden="true">chevron_right</span>
+                } @else if (entry.live) {
+                  <span class="prow-word" data-kind="live">{{ 'publish.community.live-word' | t }}</span>
+                }
+              </li>
+            }
+          </ul>
+        </div>
+      } @else if (versionsOf(); as entry) {
+        <!-- ONE NAME, ITS VERSIONS: press the one you mean. It goes live and
+             any other live version of the name comes out. -->
+        <div class="publish-scroll">
+          <ul class="prows" [attr.title]="'publish.community.row-tip' | t">
+            @for (version of entry.versions; track version.pubkey + version.lineage) {
+              <li
+                class="prow"
+                role="switch"
+                tabindex="0"
+                [class.on]="version.live"
+                [class.busy]="isBusy(version)"
+                [attr.aria-checked]="version.live"
+                (click)="pressVersion(entry, version)"
+                (keydown)="versionKey(entry, version, $event)"
+              >
+                <span class="prow-bulb" aria-hidden="true"><span class="mat-sym">lightbulb</span></span>
+                <span class="prow-meta">
+                  <span class="prow-name">
+                    <span class="prow-label">{{ versionWhere(version) || version.lineage }}</span>
+                    @if (!version.own) {
+                      <span class="prow-tag">{{ 'publish.community.other-key' | t }}</span>
+                    }
+                  </span>
+                  <span class="prow-at">{{ version.lineage }}</span>
+                </span>
+                @if (isBusy(version)) {
+                  <span class="prow-word" data-kind="busy">{{ 'publish.community.going' | t }}</span>
+                } @else if (version.live) {
+                  <span class="prow-word" data-kind="live">{{ 'publish.community.live-word' | t }}</span>
+                }
+              </li>
+            }
+          </ul>
+        </div>
+      } @else {
+        <div class="publish-scroll"><p class="pnote">{{ 'publish.community.empty' | t }}</p></div>
+      }
     }
   </aside>
 }

@@ -33,6 +33,7 @@ import { listDecorations, removeDecorationAndWait } from '../commands/decoration
 import { FILES_ATTACHMENT_KIND, listAttachments, writeAttachment, type AttachmentPayload } from './files-attachment.js'
 import { extOf } from './file-types.js'
 import { commitPageSig } from './page-commit.js'
+import { isAuthored, markAuthored } from '../sharing/authored-sigs.js'
 import { CARD_FIELD, cardDeclaresItsNames, cardJsonRefusal, cardRecordAt, commitCardSig, type CardPart } from './card-commit.js'
 import { rememberTrial, stageTrial, trialLabel, trialOrigin } from './try-page.js'
 import { partFilesOf, planPartRebuild } from './page-parts-commit.js'
@@ -186,6 +187,11 @@ export class TileFilesDrone extends Drone {
     if (current === htmlSig) return { ok: true, tile: segments, sig: htmlSig, created: false, unchanged: true, ...this.#trial(segments) }
     const committed = await commitPageSig(segments, htmlSig)
     if (!committed.ok) return committed
+    // A page written as this tile's file is this hive's own words when it
+    // replaces nothing, or a page of the hive's own. Written over someone
+    // else's page — a section edit keeps all of its scripts — it stays from
+    // elsewhere and runs sealed (page-commit.ts commitPageSigFrom, 2026-11-16).
+    if (!current || isAuthored(current)) markAuthored(htmlSig)
     return { ok: true, tile: segments, sig: htmlSig, created: !current, unchanged: false, ...await this.#stage(segments, htmlSig, html) }
   }
 

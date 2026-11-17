@@ -83,6 +83,8 @@ afterEach(() => {
 })
 
 const frame = (): HTMLIFrameElement => viewer.querySelector('iframe.rv-frame') as HTMLIFrameElement
+/** The version's own document: one frame down, inside the wrapper that refuses its navigations (page-run-gate.ts). */
+const inner = (): string => new DOMParser().parseFromString(frame().srcdoc, 'text/html').querySelector('iframe')?.getAttribute('srcdoc') ?? ''
 
 describe('the revision viewer', () => {
   it('opens at the tile’s newest version, its page running in a scripts-only frame', async () => {
@@ -92,10 +94,11 @@ describe('the revision viewer', () => {
     expect(viewer.versions).toHaveLength(10)
     expect(viewer.position).toBe(9)
     expect(frame().getAttribute('sandbox')).toBe('allow-scripts')
-    expect(frame().srcdoc).toContain('new page')
-    expect(frame().srcdoc).toContain('id="hc-site-view-host"')
+    expect(new DOMParser().parseFromString(frame().srcdoc, 'text/html').querySelector('iframe')?.getAttribute('sandbox')).toBe('allow-scripts')
+    expect(inner()).toContain('new page')
+    expect(inner()).toContain('id="hc-site-view-host"')
     // The version's own card travels with it, under the signature the page asks for.
-    expect(frame().srcdoc).toContain(btoa(JSON.stringify({ n: 'Version 9' })))
+    expect(inner()).toContain(btoa(JSON.stringify({ n: 'Version 9' })))
     expect(viewer.querySelector('.rv-position')?.textContent).toContain('Version 10 of 10')
   })
 
@@ -181,8 +184,19 @@ it('keeps focus on the slider, so the arrow keys flip versions and never reach t
     await settle()
     window.dispatchEvent(new MessageEvent('message', { data: { hcRevisionKey: 'Escape' }, source: window }))
     expect(viewer.isOpen).toBe(true)
+    // Not the wrapper: only the version's own window, one frame down, is heard.
     window.dispatchEvent(new MessageEvent('message', { data: { hcRevisionKey: 'Escape' }, source: frame().contentWindow }))
-    expect(viewer.isOpen).toBe(false)
+    expect(viewer.isOpen).toBe(true)
+    // jsdom builds no frame inside a srcdoc, so a real window stands in for the
+    // version's own, set where a browser puts it: the wrapper's first frame.
+    const stand = document.createElement('iframe')
+    document.body.appendChild(stand)
+    const page = stand.contentWindow!
+    Object.defineProperty(frame().contentWindow!, 'frames', { configurable: true, value: [page] })
+    try {
+      window.dispatchEvent(new MessageEvent('message', { data: { hcRevisionKey: 'Escape' }, source: page }))
+      expect(viewer.isOpen).toBe(false)
+    } finally { stand.remove() }
   })
 
   it('names its controls for a screen reader', async () => {

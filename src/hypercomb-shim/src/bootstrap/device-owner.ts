@@ -232,9 +232,10 @@ const toggleChange = (request: OwnerToggle): Change => ({ showcase: current, ope
   const item: ShowcaseItem = { pubkey: request.pubkey, lineage: request.lineage }
   const live = request.on ? [item] : []
   if (current) return showcasesItem(current, item) === request.on ? null : { showcase: toggleShowcaseItem(current, item), live }
-  if (request.on) return { showcase: { zone, items: [item], domains: [] }, live }
-  // No record yet: everything published here is shown. Taking one out records the rest.
+  // No record yet: everything published here is shown. Putting one in records those and it (never only it: every other
+  // tile would leave the page); taking one out records the rest. MIRRORED: the hive's showcase-bridge.ts applyToggle.
   const shown = open()
+  if (request.on) return { showcase: { zone, items: [...shown.filter(row => !sameItem(row, item)), item], domains: [] }, live }
   if (!shown.some(row => sameItem(row, item))) return null
   return { showcase: { zone, items: shown.filter(row => !sameItem(row, item)), domains: [] } }
 }
@@ -261,20 +262,21 @@ export const stageChange = (request: OwnerStage): Change => ({ showcase, staged,
 }
 
 /** PUBLISH, THE ONE FINAL ACT (jwize 2026-11-15: "the community items are compiled and made available for all visitors
- *  no matter what computer"). The showcase names exactly what is staged (its look, its domains shown in full and its
- *  communities stay, a community losing what left), and each creation newly going live is optimized first. */
+ *  no matter what computer"). Every staged creation not yet live goes into the showcase (its look, its domains shown in
+ *  full and its communities stay), and each one newly going live is optimized first. Nothing comes out here. */
 export const publishChange = (zone: string): Change => ({ showcase, staged, open }) => {
   if (!staged) return null
   const current = showcase ?? { zone, items: open(), domains: [] as string[] }
-  if (showcase && sameItems(showcase.items, staged.items)) return null
-  const kept = (row: ShowcaseItem): boolean => staged.items.some(item => sameItem(item, row))
+  // PUBLISH ONLY ADDS (jwize 2026-11-16: "They have to be globally In Sync, Last one wins"). What comes out comes out at
+  // once, on whichever device takes it out; a staged list that lacks a live creation (another device put it live since,
+  // or the old staging left it out) must not take it out again on a later Publish.
+  const adding = staged.items.filter(item => !current.items.some(row => sameItem(row, item)))
+  if (showcase && !adding.length) return null
+  // The FIRST record starts from the staged list itself: it began as what visitors saw (the doors), and what was taken
+  // out of it since must not go live again with the record that starts the showcase.
   return {
-    showcase: {
-      ...current,
-      items: [...staged.items],
-      ...(current.communities ? { communities: current.communities.map(community => ({ ...community, items: community.items.filter(kept) })) } : {}),
-    },
-    live: staged.items.filter(item => !current.items.some(row => sameItem(row, item))),
+    showcase: showcase ? { ...current, items: [...current.items, ...adding] } : { ...current, items: [...staged.items] },
+    live: adding,
   }
 }
 
@@ -361,6 +363,9 @@ const attempt = async (home: string, zone: string, change: Change, anchor: strin
   return { ok: true, changed: true }
 }
 
+/** How many times a write that lost the race to another device is read and applied again before giving up. */
+const STALE_TRIES = 8
+
 /** Creations a stage request names, believed only when each names a key and a lineage. */
 const validItems = (items: unknown): boolean => Array.isArray(items) && items.length <= 500
   && items.every(item => {
@@ -403,7 +408,13 @@ export const deviceOwner = (zone: string, deps: DeviceOwnerDeps = {}): OwnerBrid
       const held = await ensure()
       if (!held) return { ok: false, reason: why }
       if (!valid) return { ok: false, reason: 'bad request' }
-      for (let tries = 0; tries < 2; tries++) {
+      // OPTIMISTIC, WITH A CHECK (jwize 2026-11-16: "just before updating you check the current head hasn't changed";
+      // "if the other tries it sees the changes and adds the difference to the changes already made"; "so shouldn't ever
+      // fail"). Each attempt reads the index fresh and applies this change (a difference: on, off, publish) to what it
+      // finds; the host refuses a write whose `prev` is not its head, and then it is read and applied again. Another
+      // device of yours writing at that moment only ever costs a retry, a moment later each time.
+      for (let tries = 0; tries < STALE_TRIES; tries++) {
+        if (tries) await new Promise(settle => setTimeout(settle, 150 * tries + Math.floor(Math.random() * 150)))
         const result = await attempt(held.home, zone, change, held.anchor, held.signer).catch((): OwnerResult => ({ ok: false, reason: 'failed' }))
         if (result !== 'stale') return result
       }
@@ -429,9 +440,13 @@ export const eitherOwner = (...owners: readonly (OwnerBridge | null)[]): OwnerBr
   let chosen: OwnerBridge | null = null
   return {
     hello: async () => {
-      for (const owner of present) {
-        const key = await owner.hello().catch(() => '')
-        if (key) { chosen = owner; return key }
+      // ALL ASKED AT ONCE (jwize 2026-11-16: the confirm "takes a few seconds to show"). A hive that shares no origin
+      // with this page never answers, and asking it first held this browser's own key back by its whole wait; now
+      // that wait and the key's own reads run together. The first in the list that answers with a key still signs.
+      const asked = present.map(owner => owner.hello().catch(() => ''))
+      for (const [at, answer] of asked.entries()) {
+        const key = await answer
+        if (key) { chosen = present[at]!; return key }
       }
       return ''
     },

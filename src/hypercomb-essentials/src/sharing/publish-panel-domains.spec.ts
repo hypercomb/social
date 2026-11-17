@@ -1,14 +1,16 @@
-// publish-panel-domains.spec.ts — THE PUBLISH WINDOW AS A DRILLDOWN (jwize
-// 2026-11-04: "the list for publishing should be a drilldown. You see the domain
-// and you choose, then you see the creations in a list and you turn them on and
-// off. That is it"; "65 percent of the list is for single domains and then there
-// is a shorter list of named groups below"; "if you hold to click multiple
-// domains, when you release it opens up the creations right then"; "turn them
-// on or off, or sync if there is a mix"). The panel is shell code with no render
-// harness here, so — like the other Publish panel specs — this reads its source
-// and pins the contract between the panel and the drones. The answers
-// themselves are pure and tested in hypercomb-shared/ui/publish-panel/
-// publish-apps.spec.ts and community-host-groups.spec.ts.
+// publish-panel-domains.spec.ts — THE PUBLISH WINDOW: TWO ACTS (jwize
+// 2026-11-16: "you should have your own domain and the community separate since
+// you are feeding the community from all domains including yourself. Then there
+// are only on off no selected for anything you click the item turns on for the
+// domain but is gray in the community. Do this for all domains. Then all items go
+// in the community; if there are multiple versions you should be able to drill
+// down into the children and click the one of them. This makes only two things
+// you can do in the app here. Add to community through domains and publish live
+// … So locally the publishing should now be called staging"). The panel is shell
+// code with no render harness here, so — like the other Publish panel specs —
+// this reads its source and pins the contract between the panel and the drone.
+// The answers themselves are pure and tested in hypercomb-shared/ui/
+// publish-panel/publish-apps.spec.ts and community-switch.spec.ts.
 
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
@@ -17,78 +19,46 @@ const read = (path: string): string => readFileSync(new URL(path, import.meta.ur
 const PANEL = '../../../hypercomb-shared/ui/publish-panel/'
 const HTML = read(`${PANEL}publish-panel.component.html`)
 const TS = read(`${PANEL}publish-panel.component.ts`)
-const SCSS = read(`${PANEL}publish-panel.component.scss`)
 const STATUS = read('./publish-status.drone.ts')
-const HOSTS = read('./hosts.drone.ts')
 const EN = JSON.parse(read('../../../hypercomb-shared/i18n/en.json')) as Record<string, string>
 const JA = JSON.parse(read('../../../hypercomb-shared/i18n/ja.json')) as Record<string, string>
 
-describe('the domains, and under them the named groups', () => {
-  it('two thirds of the window are the domains, a third the groups', () => {
-    expect(HTML).toMatch(/<section class="pdomains"[\s\S]*?<section class="pgroupsbox"/)
-    expect(SCSS).toMatch(/\.pdomains \{ flex: 65 1 0; \}/)
-    expect(SCSS).toMatch(/\.pgroupsbox \{\s*flex: 35 1 0;/)
+describe('the top level: your community apart, then the domains, yours first', () => {
+  it('the community is its own section, ahead of the domains', () => {
+    expect(HTML).toMatch(/<section class="pcommunity"[\s\S]*?\(click\)="openCommunity\(\)"[\s\S]*?<section class="pdomains"/)
   })
 
-  it('a domain row goes in on a press; Ctrl (⌘) holds it instead, for opening together', () => {
-    expect(HTML).toMatch(/class="pdrow"[\s\S]*?\[class\.chosen\]="isChosen\(zone\)"[\s\S]*?\(click\)="pressDomain\(zone, \$event\)"/)
-    expect(TS).toMatch(/pressDomain\(zone: string, event: Event\): void \{\s*if \(isMultiPress\(event\)\) \{/)
-    expect(TS).toMatch(/return press\.ctrlKey \|\| press\.metaKey/)
-    expect(TS).toMatch(/this\.chosen\.set\(new Set\(\)\)\s*this\.#open\(\[zone\], zone, null\)/)
+  it('your own domain leads the list and says so', () => {
+    expect(TS).toMatch(/return yours \? \[yours, \.\.\.rest\] : rest/)
+    expect(TS).toMatch(/this\.yourZone\.set\(String\(p\.zone \?\? ''\)\.toLowerCase\(\)\)/)
+    expect(HTML).toMatch(/@if \(isYours\(zone\)\) \{<span class="pdrow-tag">\{\{ 'publish\.domain\.yours' \| t \}\}/)
   })
 
-  it('lets go of Ctrl (⌘) and the held domains open together, right then', () => {
-    expect(TS).toMatch(/if \(event\.key !== 'Control' && event\.key !== 'Meta'\) return\s*if \(this\.visible\(\) && !this\.drill\(\) && this\.chosen\(\)\.size > 0\) this\.#openChosen\(\)/)
-    expect(TS).toMatch(/window\.addEventListener\('keyup', onKeyUp\)/)
-    expect(TS).toMatch(/window\.removeEventListener\('keyup', onKeyUp\)/)
-    // in the order the list shows them, and the keys are let go of with them
-    expect(TS).toMatch(/const held = this\.domains\(\)\.filter\(zone => this\.chosen\(\)\.has\(zone\)\)\s*this\.chosen\.set\(new Set\(\)\)/)
+  it('nothing is selected: no groups, no Ctrl-held domains, no mixed state, no Sync', () => {
+    for (const gone of ['chosen', 'isMultiPress', 'openGroup', 'hosts:group-save', 'naming(', 'scopeState', 'mixed', 'sync(']) {
+      expect(TS.includes(gone), gone).toBe(false)
+      expect(HTML.includes(gone), gone).toBe(false)
+    }
   })
 
-  it('a group opens the domains it holds; its row can be removed without opening it', () => {
-    expect(HTML).toMatch(/\(click\)="openGroup\(group\)"/)
-    expect(TS).toMatch(/this\.#open\(\[\.\.\.group\.zones\], group\.name, group\.name\)/)
-    expect(HTML).toMatch(/class="pgrow-remove"[\s\S]*?\(click\)="removeGroup\(group, \$event\)"/)
-    expect(TS).toMatch(/event\.stopPropagation\(\)\s*EffectBus\.emit\('hosts:group-remove', \{ name: group\.name \}\)/)
-  })
-
-  it('the groups come from the hosts drone, which owns the domains they name', () => {
-    expect(TS).toMatch(/EffectBus\.on<\{ groups\?: unknown \}>\('hosts:render'/)
-    expect(HOSTS).toMatch(/'hosts:group-save', 'hosts:group-remove',/)
-    expect(HOSTS).toMatch(/groups: this\.#groups\.map\(g => \(\{ name: g\.name, zones: \[\.\.\.g\.zones\] \}\)\)/)
-    expect(HOSTS).toMatch(/await saveHostGroup\(p\?\.name, p\?\.zones\)/)
-    expect(HOSTS).toMatch(/await removeHostGroup\(p\?\.name\)/)
+  it('a domain row opens that one domain', () => {
+    expect(HTML).toMatch(/class="pdrow"[\s\S]*?\(click\)="openDomain\(zone\)"/)
+    expect(TS).toMatch(/openDomain\(zone: string\): void \{\s*this\.#open\(\{ kind: 'domain', zone \}\)/)
   })
 })
 
-describe('inside: the creations, each a switch', () => {
-  it('a creation is a switch that reads on, off or mixed across the domains it covers', () => {
-    expect(HTML).toMatch(/class="prow"[\s\S]*?role="switch"[\s\S]*?\[attr\.aria-checked\]="stateOf\(row\) === 'mixed' \? 'mixed' : stateOf\(row\) === 'on'"[\s\S]*?\(click\)="press\(row\)"/)
-    expect(TS).toMatch(/return scopeState\(this\.scopeZones\(\), zone => this\.doorOn\(row, zone\)\)/)
+describe('in a domain: each creation on or off — on stages it there', () => {
+  it('a creation is a switch, on or off in this one domain', () => {
+    expect(HTML).toMatch(/class="prow"[\s\S]*?role="switch"[\s\S]*?\[attr\.aria-checked\]="isOn\(row\)"[\s\S]*?\(click\)="press\(row\)"/)
+    expect(TS).toMatch(/isOn\(row: PublishRow\): boolean \{\s*return this\.doorOn\(row, this\.scopeZone\(\)\)/)
   })
 
-  it('a press turns it on across the set, off across the set, or syncs a mix to on — as ONE intent that moves only what has to move', () => {
-    expect(TS).toMatch(/this\.#move\(row, wantAfterPress\(this\.stateOf\(row\)\)\)/)
-    expect(TS).toMatch(/const zones = zonesToMove\(this\.scopeZones\(\), zone => this\.doorOn\(row, zone\), on\)\s*if \(zones\.length === 0\) return/)
-    expect(TS).toMatch(/EffectBus\.emit\('publish:doors', \{ key: row\.key, zones, on \}\)/)
-    // no door per domain: the first would leave the row busy and refuse the rest
-    expect(TS).not.toMatch(/for \(const zone of zones\) EffectBus\.emit/)
+  it('a press flips it in that domain alone, as one intent', () => {
+    expect(TS).toMatch(/const on = !this\.doorOn\(row, zone\)/)
+    expect(TS).toMatch(/EffectBus\.emit\('publish:doors', \{ key: row\.key, zones: \[zone\], on \}\)/)
   })
 
-  it('a mixed one offers Sync — on or off, on every domain — and nothing else does', () => {
-    expect(HTML).toMatch(/@if \(stateOf\(row\) === 'mixed' && canSwitch\(row\)\) \{[\s\S]*?class="prow-sync"[\s\S]*?\(click\)="sync\(row, true, \$event\)"[\s\S]*?\(click\)="sync\(row, false, \$event\)"/)
-    expect(TS).toMatch(/sync\(row: PublishRow, on: boolean, event: Event\): void \{\s*event\.stopPropagation\(\)\s*this\.#move\(row, on\)/)
-  })
-
-  it('across several domains a row says how many it is on; on one it says where', () => {
-    expect(HTML).toMatch(/'publish\.drill\.on-some' \| t: \{ on: onCount\(row\), count: scopeZones\(\)\.length \}/)
-    expect(HTML).toMatch(/'publish\.drill\.on-all' \| t: \{ count: scopeZones\(\)\.length \}/)
-    expect(HTML).toMatch(/\[href\]="addressUrl\(row, scopeZones\(\)\[0\]\)"/)
-    expect(HTML).not.toMatch(/'https:\/\/' \+/)
-    expect(TS).toMatch(/row\.path\.replace\(\/\^\\\/\+\/, ''\)/)
-  })
-
-  it('the tile you stand on is listed, so an unpublished one can be switched on', () => {
+  it('the tile you stand on is listed, so an unstaged one can be switched on', () => {
     expect(TS).toMatch(/Number\(b\.key === this\.currentKey\(\)\) - Number\(a\.key === this\.currentKey\(\)\)/)
     expect(HTML).toMatch(/row\.key === currentKey\(\)[\s\S]*?publish\.apps\.this-tile/)
   })
@@ -103,88 +73,114 @@ describe('inside: the creations, each a switch', () => {
     expect(HTML).not.toMatch(/\(dblclick\)/)
   })
 
-  it('the drone moves a creation across a set of domains in ONE signed index rewrite', () => {
+  it('the drone moves a creation in ONE signed index rewrite', () => {
     expect(STATUS).toMatch(/'publish:set-target', 'publish:door', 'publish:doors',/)
-    expect(STATUS).toMatch(/this\.onEffect<\{ key\?: string; zones\?: unknown; on\?: boolean \}>\('publish:doors'/)
-    expect(STATUS).toMatch(/async #door\(key: string, rawZones: readonly string\[\], on: boolean\): Promise<void> \{\s*if \(this\.#waitForBatch\(\)\) return/)
-    expect(STATUS).toMatch(/\? \[\.\.\.new Set\(\[\.\.\.openNow, \.\.\.zones\]\)\]\s*: openNow\.filter\(z => !zones\.includes\(z\)\)/)
-    expect(STATUS).toMatch(/const left = on \? \[\] : zones/)
-    // the one-domain door is the same act with one zone
-    expect(STATUS).toMatch(/this\.#door\(String\(p\?\.key \?\? ''\), \[String\(p\?\.zone \?\? ''\)\], p\?\.on === true\)/)
+    expect(STATUS).toMatch(/async #door\(key: string, rawZones: readonly string\[\], on: boolean\): Promise<boolean> \{\s*if \(this\.#waitForBatch\(\)\) return false/)
   })
 })
 
-describe('the group, saved from a set of domains with the one input', () => {
-  it('a set gathered by ctrl-selection can be kept: two or more domains, not already a group', () => {
-    expect(TS).toMatch(/return !!drill && !drill\.group && this\.scopeZones\(\)\.length >= 2/)
-    expect(HTML).toMatch(/@if \(canSaveGroup\(\)\) \{[\s\S]*?\(click\)="naming\(\) \? cancelNaming\(\) : startNaming\(\)"/)
+describe('in the community: gray is staged, lit is live', () => {
+  it('everything on in any domain feeds it: your rows, what followed domains offer, what the showcase names', () => {
+    expect(TS).toMatch(/hosts: domains\.filter\(zone => this\.doorOn\(row, zone\)\)/)
+    expect(TS).toMatch(/\.filter\(v => v\.hosts\.length > 0\)/)
+    expect(TS).toMatch(/communityEntries\(this\.pubkey\(\), own, community\.offered, community\.live\)/)
+    expect(STATUS).toMatch(/offeredInstances\?: \(\) => readonly OfferedInstance\[\]/)
   })
 
-  it('the one input takes the name, and Add (or Enter) saves it through the hosts drone', () => {
-    expect(TS).toMatch(/readonly inputValue = computed\(\(\) => this\.naming\(\) \? this\.groupName\(\) : this\.query\(\)\)/)
-    expect(TS).toMatch(/onEnter\(\): void \{\s*if \(this\.naming\(\)\) this\.addGroup\(\)\s*\}/)
-    expect(HTML).toMatch(/\(keydown\.enter\)="onEnter\(\)"/)
-    expect(HTML).toMatch(/class="psearch-add"[^>]*\(click\)="addGroup\(\)"/)
-    expect(TS).toMatch(/EffectBus\.emit\('hosts:group-save', \{ name, zones \}\)/)
-    // the text is the name, not a search, while it is being typed; and a nameless group is not added
-    expect(TS).toMatch(/readonly #text = computed<string>\(\(\) => this\.naming\(\) \? '' : this\.query\(\)\)/)
-    expect(TS).toMatch(/this\.naming\(\) && this\.groupName\(\)\.trim\(\) !== '' && this\.canSaveGroup\(\)/)
+  it('an entry is lit when live; a press on one version publishes it live or takes it out', () => {
+    expect(HTML).toMatch(/\[class\.on\]="entry\.live"[\s\S]*?\(click\)="pressEntry\(entry\)"/)
+    expect(TS).toMatch(/EffectBus\.emit\('publish:community', communityPress\(entry, version\)\)/)
   })
 
-  it('a saved group is opened by its name, and its domains follow the group', () => {
-    expect(TS).toMatch(/this\.drill\.set\(\{ zones, title: name, group: name \}\)/)
-    expect(TS).toMatch(/const held = this\.groups\(\)\.find\(g => g\.name === drill\.group\)\s*if \(held\) return held\.zones/)
+  it('a name with several versions opens to them, and a press picks the one', () => {
+    expect(TS).toMatch(/if \(entry\.versions\.length > 1\) \{ this\.#open\(\{ kind: 'versions', name: entry\.name \}\); return \}/)
+    expect(HTML).toMatch(/@for \(version of entry\.versions;[\s\S]*?\(click\)="pressVersion\(entry, version\)"/)
+    // back from the versions is the community, not the top
+    expect(TS).toMatch(/this\.drill\.set\(this\.drill\(\)\?\.kind === 'versions' \? \{ kind: 'showcase' \} : null\)/)
+  })
+
+  it('the drone signs it through community-switch, one write at a time, and says busy meanwhile', () => {
+    expect(STATUS).toMatch(/'publish:community', 'community:offers-render'/)
+    expect(STATUS).toMatch(/const result = await switchInCommunity\(\{ zone, item, on, others \}\)/)
+    expect(STATUS).toMatch(/if \(mine\) \{ this\.#communityBusy\.add\(id\); this\.#emit\(\) \}/)
+    expect(HTML).toMatch(/\[class\.busy\]="entryBusy\(entry\)"/)
+  })
+
+  it('the community lives on your own domain: with none named it says so', () => {
+    expect(STATUS).toMatch(/if \(!zone\) \{\s*this\.#toast\('warning', 'publish\.community\.no-zone'/)
+    expect(HTML).toMatch(/@if \(!community\(\)\.zone\) \{\s*<p class="pnote">\{\{ 'publish\.community\.no-zone' \| t \}\}/)
+  })
+
+  it('both ways (jwize 2026-11-16: "any bound items turn off on the domains … are bidirectional"): yours out of the community is off its domains; off its last domain, out of the community', () => {
+    // out of the community: one of yours, published from here, is bound to its domains — refused while it is busy
+    expect(STATUS).toMatch(/const row = !on && bound && item\.pubkey === this\.#payload\.pubkey \? this\.#rows\.find\(r => r\.key === item\.lineage\) : undefined/)
+    expect(STATUS).toMatch(/if \(row!\.busyPhase \|\| this\.#inFlight\.has\(row!\.key\)\) \{\s*this\.#toast\('tip', 'publish\.community\.busy'/)
+    // and off them, said only once both have landed; the withdrawal goes through its own domains, never every host
+    expect(STATUS).toMatch(/if \(await this\.#offEverywhere\(item\.lineage\)\) \{\s*this\.#toast\('success', 'publish\.community\.out-everywhere'/)
+    expect(STATUS).toMatch(/const left = \[\.\.\.\(row\.doors \?\? this\.#zonesFor\(key\)\)\]/)
+    // off the last domain (or withdrawn by publish:unpublish): out of the community, only once the withdrawal landed
+    expect(STATUS).toMatch(/const done = await this\.#unpublish\(key, left\)\s*row\.busyPhase = null\s*if \(!done\) \{[^\n]*return false \}\s*\/\/[^\n]*\n\s*await this\.#outOfCommunity\(key\)/)
+    expect(STATUS).toMatch(/void this\.#unpublish\(key\)\.then\(done => \{ if \(done\) void this\.#outOfCommunity\(key\) \}\)/)
+    // always asked of the signed record, in the lane, after a switch already queued for it
+    expect(STATUS).toMatch(/async #outOfCommunity\(key: string\): Promise<void> \{\s*const own = this\.#payload\.pubkey\s*if \(!SIG_RE\.test\(own\)\) return\s*await this\.#communitySwitch\(\{ pubkey: own, lineage: key \}, false, \[\], false\)/)
+    expect(EN['publish.community.out-everywhere']).toMatch(/off its domains/)
+  })
+
+  it('the live list is read with the sweep and never waited on', () => {
+    expect(STATUS).toMatch(/void this\.#readShowcase\(\)/)
   })
 })
 
-describe('the top: one input, Publish changes, and one Escape per level', () => {
+describe('the top: one input, Stage changes, and one Escape per level', () => {
   it('the input is always at the top, ahead of every list, and searches whatever is showing', () => {
     expect(HTML.indexOf('class="psearch-input"')).toBeGreaterThan(-1)
     expect(HTML.indexOf('class="psearch-input"')).toBeLessThan(HTML.indexOf('class="plevel"'))
     expect(HTML.indexOf('class="psearch-input"')).toBeLessThan(HTML.indexOf('class="publish-scroll"'))
     expect(TS).toMatch(/matchesQuery\(text, zone\)/)
-    expect(TS).toMatch(/matchesQuery\(text, g\.name, \.\.\.g\.zones\)/)
     expect(TS).toMatch(/\.filter\(row => matchesQuery\(text, this\.appName\(row\)\)\)/)
+    expect(TS).toMatch(/matchesQuery\(text, entry\.name, \.\.\.entry\.versions\.flatMap\(v => v\.hosts\)\)/)
   })
 
-  it('Publish changes is at the top, and says "checking" — not "nothing" — while a sweep re-reads', () => {
+  it('Stage changes is at the top, and says "checking" — not "nothing" — while a sweep re-reads', () => {
     expect(HTML.indexOf('class="pgo"')).toBeLessThan(HTML.indexOf('class="plevel"'))
+    expect(HTML).toMatch(/\(click\)="stageChanges\(\)"/)
     expect(HTML).toMatch(/@else if \(changed\(\)\.length > 0\) \{[\s\S]*?\} @else if \(checking\(\)\) \{[\s\S]*?publish\.selection\.checking[\s\S]*?\} @else \{[\s\S]*?publish\.top\.none/)
     expect(TS).toMatch(/this\.refreshing\(\) \|\| this\.#listed\(\)\.some\(row => row\.state === 'comparing'\)/)
-    // inside a drilldown it publishes what is live on the scope's domains
-    expect(TS).toMatch(/\(!this\.drill\(\) \|\| this\.stateOf\(row\) !== 'off'\)/)
   })
 
-  it('Escape peels one level: the name, the search, the held domains, the drilldown — then the window', () => {
-    expect(TS).toMatch(/if \(this\.naming\(\)\) \{ this\.cancelNaming\(\); return true \}\s*if \(this\.query\(\) !== ''\) \{ this\.query\.set\(''\); return true \}\s*if \(this\.chosen\(\)\.size > 0\) \{ this\.chosen\.set\(new Set\(\)\); return true \}\s*if \(this\.drill\(\)\) \{ this\.back\(\); return true \}\s*return false/)
+  it('locally it is staging: the words say stage, publish is the community\'s', () => {
+    expect(EN['publish.selection.publish']).toMatch(/^Stage changes/)
+    expect(EN['publish.top.none']).toMatch(/stage/)
+    expect(EN['publish.state.pending']).toBe('staging')
+    expect(EN['publish.done']).toMatch(/^Staged/)
+    expect(EN['publish.community.row-tip']).toMatch(/publish it live/)
+  })
+
+  it('Escape peels one level: the search, the drilldown — then the window', () => {
+    expect(TS).toMatch(/if \(this\.query\(\) !== ''\) \{ this\.query\.set\(''\); return true \}\s*if \(this\.drill\(\)\) \{ this\.back\(\); return true \}\s*return false/)
   })
 })
 
-describe('Publish changes: the panel names the changed rows; the drone runs them one at a time, deepest first', () => {
+describe('Stage changes: the panel names the changed rows; the drone runs them one at a time, deepest first', () => {
   it('goes through publish:run-many', () => {
     expect(TS).toMatch(/EffectBus\.emit\('publish:run-many', \{ keys \}\)/)
     expect(STATUS).toMatch(/'publish:run', 'publish:run-many'/)
     expect(STATUS).toMatch(/const plan = batchOrder\(this\.#rows, keys\)\.map\(row => \(\{ key: row\.key, state: row\.state \}\)\)/)
     expect(STATUS).toMatch(/for \(const \{ key, state \} of plan\) \{[\s\S]*?await this\.#run\(key, true, state\)/)
-    // A single publish waits while the picked ones run: both re-sign the index.
     expect(STATUS).toMatch(/if \(this\.#batch && !batched\)/)
-    // So does every other act that writes the index — a withdrawal the batch
-    // has not reached would otherwise be published again.
     for (const act of ['#door', '#ownAddress', '#forget', '#unpublish']) {
-      expect(STATUS, act).toMatch(new RegExp(String.raw`async ${act}\([^)]*\): Promise<void> \{\s*if \(this\.#waitForBatch\(\)\) return`))
+      expect(STATUS, act).toMatch(new RegExp(String.raw`async ${act}\([^)]*\): Promise<(?:void|boolean)> \{\s*if \(this\.#waitForBatch\(\)\) return`))
     }
-    // One that throws counts as not published; the rest still run.
     expect(STATUS).toMatch(/try \{ ok = await this\.#run\(key, true, state\) \}\s*catch/)
-    // A row rebuilt mid-run as 'comparing' keeps the state it was picked in.
     expect(STATUS).toMatch(/const state = row\.state === 'comparing' && planned \? planned : row\.state/)
   })
 })
 
 describe('every word it says is in the catalogs', () => {
   const used = [...new Set([
-    ...[...HTML.matchAll(/'(publish\.(?:domain|domains|drill|apps|selection|search|top|groups|header)[\w.-]*)'/g)].map(m => m[1]),
+    ...[...HTML.matchAll(/'(publish\.[\w.-]+)'/g)].map(m => m[1]),
     ...[...TS.matchAll(/'(publish\.(?:apps|state|here|failure|header)\.[\w.-]+)'/g)].map(m => m[1]),
-    ...[...STATUS.matchAll(/'(publish\.batch\.[\w.-]+)'/g)].map(m => m[1]),
+    ...[...STATUS.matchAll(/'(publish\.(?:batch|community)\.[\w.-]+)'/g)].map(m => m[1]),
   ])]
   const has = (catalog: Record<string, string>, key: string): boolean =>
     key in catalog || `${key}.other` in catalog

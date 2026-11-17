@@ -28,7 +28,7 @@
 //   `hyperccomb.com` typo) must not hold the room's tiles as names for the
 //   whole meeting (jwize 2026-10-10, D2). host-sync says so (markDown) and the
 //   page falls through to the next door, the domain named in `passedOver` so
-//   the status line can say why. A `publish here` is not the swarm: it still
+//   the status line can say why. A `stage here` is not the swarm: it still
 //   needs the domain itself.
 //
 // HOT PATH: `hostsFor` is SYNCHRONOUS and reads caches only. Connect, join,

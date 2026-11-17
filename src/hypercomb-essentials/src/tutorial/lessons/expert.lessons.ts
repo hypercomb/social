@@ -749,8 +749,8 @@ EXPERT_LESSONS.push({
   },
 })
 
-// ── 175 · the publish window ───────────────────────────────────────────
-// The sharing pair completed. `/host` is the GESTURE; `/publish` is the
+// ── 175 · the Staging window ───────────────────────────────────────────
+// The sharing pair completed. `/host` is the GESTURE; `/stage` is the
 // STATE. Strictly read-only here — course rule 2: nothing is ever published
 // from a tutorial, so every row is pointed at and none is pressed.
 
@@ -758,28 +758,28 @@ EXPERT_LESSONS.push({
   id: 'window-publish',
   level: L,
   order: 175,
-  title: 'The publish window',
+  title: 'The Staging window',
   summary: 'What the world is serving right now, beside what has changed on your hive since.',
   pheromones: ['tutorial', 'lesson', 'expert', 'swarm'],
-  teaches: ['publish', 'host'],
-  requires: () => hasBehaviour('publish') && hasWindow('hc-publish-panel'),
+  teaches: ['stage', 'host'],
+  requires: () => hasBehaviour('stage') && hasWindow('hc-publish-panel'),
   async run(stage) {
     await stage.flyToRect(stage.commandInput())
     await stage.say('publish-window', 'The gesture and the state',
-      'Two verbs, deliberately not one. /host is the GESTURE — publish the branch I am standing in, hand me a link. /publish is the STATE: what the world is actually serving right now. Neither does the other’s job, which is what keeps both of them honest.')
+      'Two verbs, deliberately not one. /host is the GESTURE — publish the branch I am standing in, hand me a link. /stage is the STATE: what the world is actually serving right now. Neither does the other’s job, which is what keeps both of them honest.')
     stage.highlight(null)
 
-    await stage.typeAndSubmit('/publish', false)
+    await stage.typeAndSubmit('/stage', false)
     await stage.wait(1700)
 
     await stage.say('publish-window-diff', 'Live, next to here',
-      'One row per branch you have published, and each row is a DIFFERENCE: what is out there, beside what has changed on your hive since. So “is the version I shared still the version I mean?” is something you can look at rather than remember.')
+      'One row per branch you have staged, and each row is a DIFFERENCE: what is out there, beside what has changed on your hive since. So “is the version I shared still the version I mean?” is something you can look at rather than remember.')
 
     await stage.say('publish-window-done', 'Every row is yours to press',
-      'A row can be re-checked, re-published, copied as a link, or taken down again — nothing out there is permanent. I am pressing none of them: what your hive shows the world is only ever your own deliberate act.')
+      'A row can be re-checked, re-staged, copied as a link, or taken down again — nothing out there is permanent. I am pressing none of them: what your hive shows the world is only ever your own deliberate act.')
 
     // Toggle it away with the same verb that opened it.
-    await stage.typeAndSubmit('/publish', false)
+    await stage.typeAndSubmit('/stage', false)
     await stage.wait(700)
   },
 })

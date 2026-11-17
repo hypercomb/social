@@ -271,6 +271,10 @@ export class DomainLinksDrone extends Drone {
     })
     this.#linkedWith = { host, entries, page: made }
     if (entries.length === 0) return
+    // A sealed page's words are in its own frame (site-view.drone.ts
+    // #mountSealedPage): nothing here read them, so nothing is held for it —
+    // an empty record would stand for the page forever.
+    if (host.hasAttribute('data-hc-sealed')) return
 
     // What this page names, read off the links just made against this table,
     // held for the optimize phase (link-incidences.ts). The site view stamps

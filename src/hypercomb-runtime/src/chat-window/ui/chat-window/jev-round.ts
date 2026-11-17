@@ -65,12 +65,12 @@ export interface RoundTable {
 }
 
 /** A write row's label: what the header names — the section path, or the
- *  doctrine heading — cut from the header itself, so the source boundary
- *  finds it verbatim in the worker's message. */
+ *  tile file — cut from the header itself, so the source boundary finds it
+ *  verbatim in the worker's message. */
 export const writeLabelOf = (lines: readonly string[]): string => {
   const parsed = parseWriteBlock(lines)
   if ('error' in parsed) return ''
-  const named = 'doctrine' in parsed ? parsed.doctrine : 'target' in parsed ? tileFileLabel(parsed) : parsed.section
+  const named = 'target' in parsed ? tileFileLabel(parsed) : parsed.section
   return named.length > 70 ? named.slice(-70) : named
 }
 
