@@ -7,9 +7,11 @@
 //
 // Two parts, one under the other:
 //
-//   • WHAT THE CHAT IS ABOUT: the tile the conversation is on, the tiles
-//     inside it, and the files each holds (a page in parts keeps its script
-//     and stylesheet as files on tiles).
+//   • WHAT THE CHAT IS ABOUT: the tile the conversation is on, as what it is
+//     composed of (jwize, 2026-11-16: "It follows the hierarchy of composed
+//     parts"): the tile's page and what the page is made of, its card, its
+//     traits, then what else is here. A part that is a tile unfolds into its
+//     own parts the same way (composed-parts.ts).
 //   • THE RUNNING CODE: every module the hive runs, as folders and files
 //     (code-tree.ts), with the platform's own sources unfolding into the
 //     source files they ship.
@@ -18,12 +20,17 @@
 // openChatCode), where the inspect view draws it with line numbers and what
 // it emits, listens to and registers. The tree only finds; the pane reads.
 //
+// The view only draws and unfolds. What a tile is composed of is decided in
+// composed-parts.ts and read through composed-parts-reader.ts.
+//
 // A dependency: it exports the view and registers nothing. The chat's rail
 // (agent-tiles-rail.ts) holds one and shows it behind its third icon.
 
 import { EffectBus, I18N_IOC_KEY, sectionIndex, type I18nProvider } from '@hypercomb/core'
 import { openChatCode } from './chat-code.js'
 import { BEHAVIOURS_PATH, UNNAMED_PATH, findModules, moduleTree, sectionTree, type CodeEntry, type CodeNode, type CodeOpens } from './code-tree.js'
+import { composedParts, tileKey, type Composition, type PartAt, type PartHow, type PartNode, type PartsReader } from './composed-parts.js'
+import { hiveParts } from './composed-parts-reader.js'
 import { HIVE_TREE_READER_IOC_KEY } from './hive-tree-reader.js'
 import type { InspectFrame } from './inspect-window.view.js'
 import { sizeWords } from './tile-holds.js'
@@ -37,17 +44,29 @@ const REREAD_MS = 400
 type Reader = {
   codeIndex?(): Promise<readonly CodeEntry[]>
   moduleText?(sig: string): Promise<{ readonly name: string; readonly text: string } | undefined>
-  readNode?(segments: readonly string[], options?: { withContent?: boolean }): Promise<{
-    readonly ok: boolean
-    readonly children?: readonly { readonly name: string }[]
-    readonly files?: readonly { readonly name: string; readonly sig: string; readonly size: number }[]
-  }>
 }
 
-type TileHolds = {
-  readonly tiles: readonly string[]
-  readonly files: readonly { readonly name: string; readonly sig: string; readonly size: number }[]
+/** The glyph a part is drawn with, by how it is a part. A `more` row is a
+ *  note and has none. */
+const PART_GLYPH: Readonly<Record<Exclude<PartHow, 'more'>, string>> = {
+  page: 'web', shell: 'description', file: 'description', script: 'code', style: 'palette', picture: 'image',
+  named: 'data_object', field: 'data_object', trait: 'extension', card: 'badge', tile: 'folder',
 }
+
+/** What each word falls back to in English when no catalog answers. */
+const KIND_WORDS: Readonly<Record<string, string>> = { script: 'script', style: 'style sheet', picture: 'picture', named: 'resource' }
+const STATE_WORDS: Readonly<Record<string, string>> = {
+  absent: 'not on this device', filled: 'filled', chosen: 'chosen version', offered: 'several offered',
+  own: 'the page’s own', empty: 'empty', stale: 'older than the page',
+}
+const FIELD_WORDS: Readonly<Record<string, string>> = { dataSig: 'details', themeSig: 'theme', artSig: 'picture' }
+
+const NOTHING: Composition = { parts: [], also: [] }
+
+/** Is a level read from one place the level of another? The tile, and the
+ *  files of it the row above already is. */
+const sameAt = (a: PartAt, b: PartAt): boolean =>
+  JSON.stringify([a.segments, a.claimed ?? []]) === JSON.stringify([b.segments, b.claimed ?? []])
 
 const ioc = <T,>(key: string): T | undefined =>
   (globalThis as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key) as T | undefined
@@ -65,8 +84,6 @@ const glyph = (name: string, className = 'hc-code-glyph'): HTMLSpanElement => {
   return span
 }
 
-const tileKey = (segments: readonly string[]): string => `tile:/${segments.join('/')}`
-
 /** A row's left edge for its depth, in rem, to two places (0.4 + 0.8 a level). */
 const indent = (depth: number, more = 0): number => Math.round((0.4 + depth * 0.8 + more) * 100) / 100
 
@@ -80,17 +97,24 @@ export class CodeTreeView {
   #failed = false
   /** Folders that are unfolded, by path. The tile in hand starts unfolded. */
   readonly #open = new Set<string>()
-  /** What a tile holds, once read. */
-  readonly #tiles = new Map<string, TileHolds | 'reading'>()
+  /** A page or a card arrives open: the ones the participant folded, by key. */
+  readonly #folded = new Set<string>()
+  /** What a tile is composed of, once read: by the tile's key for a tile's
+   *  row; for any other row that unfolds a tile, by the level it is drawn in
+   *  and its own key. One place in the tree is one entry, so two places that
+   *  draw the same row never take turns reading over each other. */
+  readonly #tiles = new Map<string, { readonly at: PartAt; readonly held: Composition } | 'reading'>()
   /** The source files a bundle ships, once read. */
   readonly #bundles = new Map<string, readonly CodeNode[] | 'reading'>()
   /** The row last opened in the main pane. */
   #shown = ''
   #loading = false
   #reread = 0
+  readonly #reader: PartsReader
   readonly #offWrote: () => void
 
-  constructor() {
+  constructor(reader: PartsReader = hiveParts()) {
+    this.#reader = reader
     ensureStyles()
     this.element = el('div', 'hc-code-tree')
     this.element.setAttribute('role', 'tree')
@@ -158,14 +182,21 @@ export class CodeTreeView {
   }
 
   /** Read again every tile already read, and repaint only if one changed.
-   *  What was read stays on screen meanwhile: no row blinks. */
+   *  What was read stays on screen meanwhile: no row blinks.
+   *
+   *  Every one is composed again. A tile's own layer signature cannot say
+   *  nothing changed: history is per page, so a file written on a child tile
+   *  commits the child alone (history/layer-committer.drone.ts), and a page's
+   *  part is a file on a child. */
   async #rereadTiles(): Promise<void> {
     let changed = false
-    for (const [key, held] of [...this.#tiles]) {
-      if (held === 'reading') continue
-      const fresh = await this.#holdsOf(key.slice('tile:/'.length).split('/').filter(Boolean))
-      if (JSON.stringify(fresh) === JSON.stringify(held)) continue
-      this.#tiles.set(key, fresh)
+    for (const [key, entry] of [...this.#tiles]) {
+      if (entry === 'reading') continue
+      const fresh = await this.#compose(entry.at)
+      // Read from another place meanwhile (what fills the row moved): that read stands.
+      if (this.#tiles.get(key) !== entry) continue
+      if (JSON.stringify(fresh) === JSON.stringify(entry.held)) continue
+      this.#tiles.set(key, { at: entry.at, held: fresh })
       changed = true
     }
     if (changed) this.paint()
@@ -190,7 +221,7 @@ export class CodeTreeView {
 
     // What the chat is about.
     root.append(this.#head(this.#t('code-tree.about', 'What this chat is about')))
-    this.#tileRows(root, this.#target, 0)
+    this.#tileRows(root, { segments: this.#target }, 0)
 
     // The running code.
     root.append(this.#head(this.#t('code-tree.running', 'The running code')))
@@ -206,12 +237,27 @@ export class CodeTreeView {
 
   // ── what the chat is about ───────────────────────────────
 
-  #tileRows(into: HTMLElement, segments: readonly string[], depth: number): void {
+  // NO TILE IS UNFOLDED UNDER ITSELF. Two tiles can each fill a trait of the
+  // other from the hive, and a row's key is its tile's, not the path of rows
+  // that led to it, so an inner row is open whenever the outer one is.
+  // `within` is the tiles whose level is being drawn above a row: a row that
+  // would unfold one of them is drawn without its level. That also bounds
+  // how deep the tree draws by the number of tiles on one path.
+
+  #tileRows(into: HTMLElement, at: PartAt, depth: number, within: ReadonlySet<string> = new Set()): void {
+    const segments = at.segments
     const key = tileKey(segments)
     const unfolded = this.#open.has(key)
     const name = segments.length ? segments[segments.length - 1]! : this.#t('code-tree.hive', 'The hive')
     const row = this.#folder(depth, name, unfolded, key, () => this.#toggle(key))
-    // The tile itself: what it holds and the code that runs it.
+    row.append(this.#look(key, segments))
+    into.append(row)
+    if (unfolded) this.#level(into, key, at, depth + 1, new Set([...within, key]))
+  }
+
+  /** The tile itself, from a button on its row: what it holds and the code
+   *  that runs it. Every row that unfolds a tile keeps one. */
+  #look(key: string, segments: readonly string[]): HTMLButtonElement {
     const look = el('button', 'hc-code-look')
     look.type = 'button'
     look.title = this.#t('code-tree.tile', 'What this tile holds, and the code that runs it')
@@ -221,48 +267,109 @@ export class CodeTreeView {
       event.stopPropagation()
       this.#show(key, { kind: 'tile', segments: [...segments] })
     })
-    row.append(look)
-    into.append(row)
-    if (!unfolded) return
-
-    const holds = this.#tiles.get(key)
-    if (!holds) { void this.#readTile(segments); into.append(this.#note(depth + 1, this.#t('code-tree.reading', 'Reading…'))); return }
-    if (holds === 'reading') { into.append(this.#note(depth + 1, this.#t('code-tree.reading', 'Reading…'))); return }
-    if (!holds.tiles.length && !holds.files.length) {
-      into.append(this.#note(depth + 1, this.#t('code-tree.tile-empty', 'No files or tiles here.')))
-      return
-    }
-    for (const tile of holds.tiles.slice(0, FOLDER_ROWS)) this.#tileRows(into, [...segments, tile], depth + 1)
-    for (const file of holds.files.slice(0, FOLDER_ROWS)) {
-      into.append(this.#file(depth + 1, file.name, 'description', `${key}#${file.name}`,
-        { kind: 'resource', sig: file.sig, name: file.name, file: { route: [...segments], name: file.name } }, sizeWords(file.size)))
-    }
+    return look
   }
 
-  async #readTile(segments: readonly string[]): Promise<void> {
-    const key = tileKey(segments)
+  /** One tile's level, under the row that unfolded it: its parts, then what
+   *  else is here. `within` holds this tile and every one above it. */
+  #level(into: HTMLElement, key: string, at: PartAt, depth: number, within: ReadonlySet<string>): void {
+    const kept = this.#tiles.get(key)
+    // A row keeps its key when what fills it moves (a child made with the
+    // trait's name takes over from a tile of the hive). A level read from
+    // another place is not this row's level: it is read again from here, so
+    // a part is never shown, or edited, on the tile that used to fill it.
+    const entry = kept && kept !== 'reading' && !sameAt(kept.at, at) ? undefined : kept
+    if (!entry || entry === 'reading') {
+      if (!entry) void this.#readTile(key, at)
+      into.append(this.#note(depth, this.#t('code-tree.reading', 'Reading…')))
+      return
+    }
+    const { parts, also } = entry.held
+    if (!parts.length && !also.length) {
+      // A tile whose only file is the row above it has nothing else to show.
+      into.append(this.#note(depth, at.claimed
+        ? this.#t('code-tree.only', 'Nothing else here.')
+        : this.#t('code-tree.tile-empty', 'No files or tiles here.')))
+      return
+    }
+    for (const node of parts.slice(0, FOLDER_ROWS)) this.#partRows(into, node, depth, within, key)
+    // Said only beside parts: a tile with no parts is its tiles and files, as before.
+    if (parts.length && also.length) {
+      const sub = el('div', 'hc-code-sub', this.#t('code-tree.also', 'Also here'))
+      sub.style.paddingLeft = `${indent(depth, 1.1)}rem`
+      into.append(sub)
+    }
+    // Tiles and files are cut apart: many tiles never push the files off.
+    const tiles = also.filter(node => node.how === 'tile')
+    const files = also.filter(node => node.how !== 'tile')
+    for (const node of [...tiles.slice(0, FOLDER_ROWS), ...files.slice(0, FOLDER_ROWS)]) this.#partRows(into, node, depth, within, key)
+    const left = Math.max(0, tiles.length - FOLDER_ROWS) + Math.max(0, files.length - FOLDER_ROWS)
+    if (left) into.append(this.#note(depth, this.#t('code-tree.more-parts', '{count} more are not listed.', { count: left })))
+  }
+
+  /** One part's row, and what is under it. `under` is the key of the level
+   *  the row is drawn in. */
+  #partRows(into: HTMLElement, node: PartNode, depth: number, within: ReadonlySet<string>, under: string): void {
+    // A row that would unfold a tile already open above it: drawn, with its
+    // tile button, and without a chevron or a level.
+    const loops = !!node.unfold && within.has(tileKey(node.unfold.segments))
+    if (node.how === 'tile' && node.unfold && !loops) { this.#tileRows(into, node.unfold, depth, within); return }
+    if (node.how === 'more') {
+      into.append(this.#note(depth, this.#t('code-tree.more-parts', '{count} more are not listed.', { count: node.count ?? 0 })))
+      return
+    }
+    // A page and a card arrive open; a part that is a tile is read when unfolded.
+    const unfolds = !!node.children?.length || (!!node.unfold && !loops)
+    const unfolded = node.children?.length ? !this.#folded.has(node.key) : this.#open.has(node.key)
+    const row = this.#row(depth, 'hc-code-file')
+    if (this.#shown === node.key) row.classList.add('shown')
+    if (unfolds) {
+      row.setAttribute('aria-expanded', String(unfolded))
+      // The row itself opens the part in the pane, so the chevron is its own button.
+      const fold = el('button', 'hc-code-chevron hc-code-fold')
+      fold.type = 'button'
+      fold.setAttribute('aria-label', this.#t('code-tree.unfold', 'Unfold'))
+      fold.append(glyph(unfolded ? 'expand_more' : 'chevron_right', 'hc-code-fold-glyph'))
+      fold.addEventListener('click', event => {
+        event.stopPropagation()
+        if (node.children?.length) this.#flip(this.#folded, node.key)
+        else this.#toggle(node.key)
+      })
+      row.append(fold)
+    } else {
+      row.append(el('span', 'hc-code-chevron'))
+    }
+    row.append(glyph(PART_GLYPH[node.how]), el('span', 'hc-code-name', this.#partName(node)))
+    const tail = node.state ? this.#t(`code-tree.state.${node.state}`, STATE_WORDS[node.state] ?? node.state) : sizeWords(node.size ?? -1)
+    if (tail) row.append(el('span', 'hc-code-tail', tail))
+    row.title = node.sig ?? node.label
+    if (node.unfold) row.append(this.#look(node.key, node.unfold.segments))
+    const opens = node.opens
+    if (opens) row.addEventListener('click', () => this.#show(node.key, opens))
+    into.append(row)
+    if (!unfolded) return
+    for (const child of (node.children ?? []).slice(0, FOLDER_ROWS)) this.#partRows(into, child, depth + 1, within, under)
+    if (node.unfold && !loops) this.#level(into, `${under}>>${node.key}`, node.unfold, depth + 1, new Set([...within, tileKey(node.unfold.segments)]))
+  }
+
+  /** The name a part is read by: its own, else its kind's word, with twelve
+   *  digits of its signature for a resource the page names without a name. */
+  #partName(node: PartNode): string {
+    if (node.how === 'field') return this.#t(`code-tree.field.${node.label}`, FIELD_WORDS[node.label] ?? node.label.replace(/Sig$/, ''))
+    if (node.label) return node.label
+    if (node.how === 'page') return this.#t('code-tree.page', 'Page')
+    if (node.how === 'card') return this.#t('code-tree.card', 'Card')
+    return `${this.#t(`code-tree.kind.${node.how}`, KIND_WORDS[node.how] ?? node.how)} · ${(node.sig ?? '').slice(0, 12)}`
+  }
+
+  async #readTile(key: string, at: PartAt): Promise<void> {
     this.#tiles.set(key, 'reading')
-    this.#tiles.set(key, await this.#holdsOf(segments))
+    this.#tiles.set(key, { at, held: await this.#compose(at) })
     this.paint()
   }
 
-  async #holdsOf(segments: readonly string[]): Promise<TileHolds> {
-    let holds: TileHolds = { tiles: [], files: [] }
-    try {
-      // With its content: the files a tile holds are part of what it holds
-      // (the inspect view reads a tile the same way).
-      const node = await ioc<Reader>(HIVE_TREE_READER_IOC_KEY)?.readNode?.(segments, { withContent: true })
-      if (node?.ok) {
-        // The newest file of each name: a file written twice is one file.
-        const files = new Map<string, { name: string; sig: string; size: number }>()
-        for (const file of node.files ?? []) files.set(file.name, file)
-        holds = {
-          tiles: (node.children ?? []).map(child => child.name).sort((a, b) => a.localeCompare(b)),
-          files: [...files.values()].sort((a, b) => a.name.localeCompare(b.name)),
-        }
-      }
-    } catch { /* nothing readable there: an empty folder */ }
-    return holds
+  async #compose(at: PartAt): Promise<Composition> {
+    try { return await composedParts(this.#reader, at) } catch { return NOTHING /* nothing readable there: an empty folder */ }
   }
 
   // ── the running code ─────────────────────────────────────
@@ -314,8 +421,12 @@ export class CodeTreeView {
   // ── rows ─────────────────────────────────────────────────
 
   #toggle(path: string): void {
-    if (this.#open.has(path)) this.#open.delete(path)
-    else this.#open.add(path)
+    this.#flip(this.#open, path)
+  }
+
+  #flip(set: Set<string>, path: string): void {
+    if (set.has(path)) set.delete(path)
+    else set.add(path)
     this.paint()
   }
 
@@ -391,7 +502,8 @@ function ensureStyles(): void {
 .hc-code-look{flex:0 0 auto;display:inline-grid;place-items:center;width:1.4rem;height:1.4rem;padding:0;border:0;background:none;
   color:var(--hc-window-ink-quiet, #8b93a1);cursor:pointer;border-radius:var(--hc-radius-control, 2px);}
 .hc-code-look:hover{color:var(--hc-window-ink-loud, #f1f3f6);background:var(--hc-window-tint, rgba(126,182,214,0.12));}
-.hc-code-note{padding:0.2rem 0.6rem;color:var(--hc-window-ink-quiet, #8b93a1);font-size:0.7rem;}
+.hc-code-note,.hc-code-sub{padding:0.2rem 0.6rem;color:var(--hc-window-ink-quiet, #8b93a1);font-size:0.7rem;}
+.hc-code-fold{border:0;background:none;padding:0;font:inherit;cursor:pointer;}
 `
   document.head.appendChild(style)
 }
