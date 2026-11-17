@@ -75,14 +75,28 @@ type HistoryLike = {
   currentLayerAt?(locationSig: string): Promise<Record<string, unknown> | null>
 }
 type StoreLike = { getResource?(sig: string): Promise<Blob | null> }
+/** The door a file on a tile is written through (files/tile-files.drone.ts). */
+type TileFilesLike = {
+  write?(target: { route: readonly string[]; kind: 'file'; name: string }, text: string): Promise<
+    { ok: true; sig: string; created?: boolean; unchanged?: boolean } | { ok: false; error: string }>
+}
+/** What the site's page did after a write, in plain lines (sharing/site-manage.drone.ts). */
+type RunWatchLike = { say?(): Promise<readonly string[]> }
+const TILE_FILES_KEY = '@diamondcoreprocessor.com/TileFilesDrone'
+const RUN_WATCH_KEY = '@diamondcoreprocessor.com/SiteRunWatch'
 
 /** One step of the drill-down. */
 export type InspectFrame =
   | { readonly kind: 'tile'; readonly segments: readonly string[] }
   | { readonly kind: 'word'; readonly word: string }
   | { readonly kind: 'section'; readonly sig: string; readonly section?: string; readonly at?: number; readonly name?: string }
-  /** A file or a resource by signature: text, a picture, or its size. */
-  | { readonly kind: 'resource'; readonly sig: string; readonly name?: string }
+  /** A file or a resource by signature: text, a picture, or its size. `file`
+   *  says it is a file on a tile, which is what makes it one that can be
+   *  edited here and saved back. */
+  | { readonly kind: 'resource'; readonly sig: string; readonly name?: string; readonly file?: TileFileRef }
+
+/** A file on a tile: the tile's route and the file's name. */
+export type TileFileRef = { readonly route: readonly string[]; readonly name: string }
 
 const ioc = <T,>(key: string): T | undefined =>
   (window as unknown as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key) as T | undefined
@@ -99,6 +113,10 @@ export class InspectWindowView extends EventTarget {
   #body: HTMLDivElement | null = null
   #crumbs: HTMLDivElement | null = null
   #stack: InspectFrame[] = []
+  /** The file being edited, by the signature it was opened at; and what the
+   *  last save said (saved, and what the page then did). */
+  #editing: string | null = null
+  #saved: string[] = []
   /** Bumped on every step, so a slow read never draws over a newer one. */
   #turn = 0
   /** True while it is drawn inside an element another surface lent. */
@@ -129,6 +147,7 @@ export class InspectWindowView extends EventTarget {
     if (this.#embedded) this.close()
     if (!this.#panel) this.#build()
     this.#stack = [frame]
+    this.#leaveEdit()
     void this.#render()
   }
 
@@ -138,6 +157,7 @@ export class InspectWindowView extends EventTarget {
     if (this.#panel && (!this.#embedded || this.#panel.parentElement !== host)) this.close()
     if (!this.#panel) this.#build(host)
     this.#stack = [frame]
+    this.#leaveEdit()
     void this.#render()
   }
 
@@ -148,8 +168,16 @@ export class InspectWindowView extends EventTarget {
 
   get isEmbedded(): boolean { return this.#embedded }
 
+  /** Another step is another file: an edit in hand, and what the last save
+   *  said, belong to the step they were made on. */
+  #leaveEdit(): void {
+    this.#editing = null
+    this.#saved = []
+  }
+
   /** One step deeper. */
   push(frame: InspectFrame): void {
+    this.#leaveEdit()
     this.#stack.push(frame)
     void this.#render()
   }
@@ -157,6 +185,7 @@ export class InspectWindowView extends EventTarget {
   /** One step back; past the first, the panel closes. */
   back(): void {
     if (this.#stack.length <= 1) { if (!this.#embedded) this.close(); return }
+    this.#leaveEdit()
     this.#stack.pop()
     void this.#render()
   }
@@ -312,7 +341,8 @@ export class InspectWindowView extends EventTarget {
       children.length - HELD_ROWS)
 
     part(this.#t('inspect.part-files', 'Files'),
-      files.slice(0, HELD_ROWS).map(file => this.#row('description', file.name, sizeWords(file.size), () => this.push({ kind: 'resource', sig: file.sig, name: file.name }))),
+      files.slice(0, HELD_ROWS).map(file => this.#row('description', file.name, sizeWords(file.size),
+        () => this.push({ kind: 'resource', sig: file.sig, name: file.name, file: { route: [...segments], name: file.name } }))),
       files.length - HELD_ROWS)
 
     const named = records.flatMap(record => {
@@ -397,12 +427,101 @@ export class InspectWindowView extends EventTarget {
       }
       out.push(row)
     }
+    // A FILE ON A TILE CAN BE EDITED HERE (jwize, 2026-11-16: "so you can
+    // potentially author upgrades"). The participant's own hand, so it is
+    // written at once through the same door the chat's writes use, and the
+    // file it replaces stays in the tile's history.
+    const editable = !!frame.file && shown.text.length <= RESOURCE_CHARS && typeof ioc<TileFilesLike>(TILE_FILES_KEY)?.write === 'function'
+    if (editable && this.#editing === frame.sig) {
+      out.push(...this.#editor(frame as Extract<InspectFrame, { kind: 'resource' }> & { file: TileFileRef }, shown.text))
+      return out
+    }
+    if (editable) {
+      const edit = el('button', 'hc-inspect-act', this.#t('inspect.edit', 'Edit'))
+      edit.type = 'button'
+      edit.addEventListener('click', () => { this.#editing = frame.sig; this.#saved = []; void this.#render() })
+      meta.append(edit)
+    }
+    if (this.#saved.length && frame.file) {
+      const saved = el('div', 'hc-inspect-saved')
+      for (const line of this.#saved) saved.append(el('div', undefined, line))
+      out.push(saved)
+    }
     const text = readable(shown.text)
     out.push(this.#code(text.slice(0, RESOURCE_CHARS), 0))
     if (text.length > RESOURCE_CHARS) {
       out.push(el('div', 'hc-inspect-note', this.#t('inspect.more-chars', '{count} more characters: read it with the command above.', { count: text.length - RESOURCE_CHARS })))
     }
     return out
+  }
+
+  /** The file as text to change, with Save and Cancel. The text is the
+   *  file's own, never the indented copy the reading view shows. */
+  #editor(frame: Extract<InspectFrame, { kind: 'resource' }> & { file: TileFileRef }, text: string): Node[] {
+    const area = el('textarea', 'hc-inspect-edit')
+    area.value = text
+    area.spellcheck = false
+    area.setAttribute('aria-label', frame.file.name)
+    // Escape here leaves the edit, never the window round it.
+    area.setAttribute('data-escape-local', '')
+    const said = el('span', 'hc-inspect-edit-said')
+    said.setAttribute('role', 'status')
+    const save = el('button', 'hc-inspect-act hc-inspect-act-go', this.#t('inspect.save', 'Save'))
+    save.type = 'button'
+    const cancel = el('button', 'hc-inspect-act', this.#t('inspect.cancel', 'Cancel'))
+    cancel.type = 'button'
+    const leave = (): void => { this.#editing = null; void this.#render() }
+    cancel.addEventListener('click', leave)
+    area.addEventListener('keydown', event => {
+      if (event.key === 'Escape') { event.stopPropagation(); leave(); return }
+      // Tab is two spaces in a file, not the next button.
+      if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault()
+        const at = area.selectionStart
+        area.setRangeText('  ', at, area.selectionEnd, 'end')
+      }
+      if (event.key === 's' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); save.click() }
+    })
+    save.addEventListener('click', () => {
+      if (save.disabled) return
+      save.disabled = true
+      cancel.disabled = true
+      said.textContent = this.#t('inspect.saving', 'Saving…')
+      void this.#saveFile(frame, area.value).then(error => {
+        if (!error) return
+        save.disabled = false
+        cancel.disabled = false
+        said.textContent = this.#t('inspect.save-failed', 'It was not saved: {error}', { error })
+      })
+    })
+    const acts = el('div', 'hc-inspect-acts')
+    acts.append(save, cancel, said)
+    queueMicrotask(() => area.focus())
+    return [acts, area]
+  }
+
+  /** Write the file back, then show it as saved: its new signature, and on a
+   *  managed site door what the page did when it ran with it. Resolves with
+   *  why it was not saved, or '' when it was. */
+  async #saveFile(frame: Extract<InspectFrame, { kind: 'resource' }> & { file: TileFileRef }, text: string): Promise<string> {
+    const files = ioc<TileFilesLike>(TILE_FILES_KEY)
+    if (typeof files?.write !== 'function') return this.#t('inspect.save-nowhere', 'files cannot be written here')
+    let outcome: Awaited<ReturnType<NonNullable<TileFilesLike['write']>>>
+    try { outcome = await files.write({ route: frame.file.route, kind: 'file', name: frame.file.name }, text) }
+    catch (error) { return error instanceof Error ? error.message : String(error) }
+    if (!outcome.ok) return outcome.error
+    this.#saved = [outcome.unchanged
+      ? this.#t('inspect.saved-same', 'Nothing changed: the file already held exactly this.')
+      : this.#t('inspect.saved', 'Saved {name}.', { name: frame.file.name })]
+    if (!outcome.unchanged) {
+      try { this.#saved.push(...(await ioc<RunWatchLike>(RUN_WATCH_KEY)?.say?.() ?? [])) } catch { /* no card to ask */ }
+    }
+    this.#editing = null
+    // The step now shows the file as it was saved.
+    const top = this.#stack.length - 1
+    if (this.#stack[top] === frame) this.#stack[top] = { ...frame, sig: outcome.sig }
+    void this.#render()
+    return ''
   }
 
   #handleBlock(handle: TileHandle, hits: readonly CodeHit[], more: boolean): HTMLElement {
@@ -627,6 +746,19 @@ export class InspectWindowView extends EventTarget {
 .hc-inspect-word:hover{color:whitesmoke;text-decoration:underline;}
 .hc-inspect-modname{font-weight:600;}
 .hc-inspect-sig,.hc-inspect-say{font-family:var(--hc-mono,monospace);font-size:0.7rem;color:rgba(216,230,238,0.45);}
+.hc-inspect-act{border:1px solid rgba(${STEEL},0.35);background:rgba(${STEEL},0.06);color:inherit;cursor:pointer;
+  padding:0.15rem 0.6rem;border-radius:var(--hc-radius-control, 2px);font-family:var(--hc-mono,monospace);font-size:0.72rem;}
+.hc-inspect-act:hover:not(:disabled){background:rgba(${STEEL},0.16);}
+.hc-inspect-act:disabled{opacity:0.55;cursor:progress;}
+.hc-inspect-act-go{border-color:rgba(${AMBER},0.6);}
+.hc-inspect-acts{display:flex;align-items:center;gap:0.5rem;flex:0 0 auto;}
+.hc-inspect-edit-said{font-family:var(--hc-mono,monospace);font-size:0.72rem;color:rgba(${AMBER},0.9);}
+.hc-inspect-edit{flex:1 1 auto;min-height:24rem;width:100%;box-sizing:border-box;resize:vertical;padding:0.5rem 0.6rem;
+  border:1px solid rgba(${STEEL},0.3);border-radius:var(--hc-radius-control, 2px);background:rgba(255,255,255,0.03);color:inherit;
+  font-family:var(--hc-code, var(--hc-mono, monospace));font-size:0.76rem;line-height:1.45;tab-size:2;white-space:pre;}
+.hc-inspect-edit:focus{outline:none;border-color:rgba(${AMBER},0.7);}
+.hc-inspect-saved{flex:0 0 auto;padding:0.35rem 0.5rem;border-left:2px solid rgba(${AMBER},0.6);
+  font-family:var(--hc-mono,monospace);font-size:0.72rem;line-height:1.5;color:rgba(216,230,238,0.85);}
 .hc-inspect-say{user-select:all;word-break:break-all;}
 .hc-inspect-hit,.hc-inspect-file{display:grid;grid-template-columns:5.5rem minmax(8rem,16rem) 1fr;gap:0.5rem;align-items:baseline;
   margin-left:1rem;padding:0.2rem 0.35rem;border:0;background:none;text-align:left;font:inherit;color:inherit;cursor:pointer;

@@ -89,7 +89,8 @@ describe('the code tree', () => {
 
   it('opens a file of the tile in the main pane, as the resource it is', () => {
     row('main.js').click()
-    expect(opened).toEqual([{ kind: 'resource', sig: sig(22), name: 'main.js' }])
+    // It says which tile's file it is: that is what lets the pane edit it and save it back.
+    expect(opened).toEqual([{ kind: 'resource', sig: sig(22), name: 'main.js', file: { route: ['business-card'], name: 'main.js' } }])
     expect(row('main.js').classList.contains('shown')).toBe(true)
   })
 

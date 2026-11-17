@@ -234,7 +234,8 @@ export class CodeTreeView {
     }
     for (const tile of holds.tiles.slice(0, FOLDER_ROWS)) this.#tileRows(into, [...segments, tile], depth + 1)
     for (const file of holds.files.slice(0, FOLDER_ROWS)) {
-      into.append(this.#file(depth + 1, file.name, 'description', `${key}#${file.name}`, { kind: 'resource', sig: file.sig, name: file.name }, sizeWords(file.size)))
+      into.append(this.#file(depth + 1, file.name, 'description', `${key}#${file.name}`,
+        { kind: 'resource', sig: file.sig, name: file.name, file: { route: [...segments], name: file.name } }, sizeWords(file.size)))
     }
   }
 
