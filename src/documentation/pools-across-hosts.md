@@ -255,6 +255,23 @@ Code: `assistant/hive-pool-read.ts` (the read), `hypercomb-observation.ts`
 (the `pool` verb and its receipt), core `work-instruction.ts` (what the model
 is taught).
 
+### A zone's community is signed, not pooled
+
+**Built 2026-11-16 (subdomain AI step 3, REACH).** `pool showcase:<zone>`
+asked every host for sign('showcase:<zone>') and every host rightly said
+none: a zone's community is a record one of its owners signs under the INDEX
+KEY `showcase:<zone>` in their own signed index (`showcase-record.ts`). When
+no host answers anything at the pool address, the read asks where the front
+door asks (shim `readZoneOwners`): the zone's ledger names its owners
+(primary first); each owner's index is read on the zone's own sites before
+its apex (the home relay keeps a stray copy that names none); the first owner
+who names a showcase decides it; the record is kept only if it hashes to its
+name; every creation it turns on is resolved to the head its owner's index
+names now, given back as a member (`read <head>` opens it) and told to the
+content broker. Only a zone the hive already asks is read (one of its network
+hosts is the zone or a site under it), and only the zone and its own sites
+are asked. Code: `assistant/hive-showcase-read.ts`.
+
 ## The apex answers a pool at its address
 
 **Found and fixed in the worker 2026-11-13; live once the worker is deployed.**

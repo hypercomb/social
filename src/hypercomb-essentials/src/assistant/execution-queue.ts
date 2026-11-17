@@ -48,6 +48,10 @@ export const EXECUTION_QUEUE_IOC_KEY = '@hypercomb.social/ExecutionQueue'
 export type ExecutionKind = 'read' | 'additive' | 'editing' | 'destructive'
 export const EXECUTION_KINDS: readonly ExecutionKind[] = Object.freeze(['read', 'additive', 'editing', 'destructive'])
 
+/** What a change says of itself beside Run: this many lines, each this long. */
+const CHANGE_LINES = 8
+const CHANGE_CHARS = 200
+
 export type ExecutionMode = 'manual' | 'auto' | 'everything'
 export const EXECUTION_MODES: readonly ExecutionMode[] = Object.freeze(['manual', 'auto', 'everything'])
 
@@ -64,6 +68,10 @@ export type ExecutionRequest = {
   readonly kind: ExecutionKind
   /** Canonical grammar, exactly what will run. */
   readonly lines: readonly string[]
+  /** What the change will do, for the eye: a new file, how many lines change
+   *  and where, the first that go and come. Said by whoever asked; shown
+   *  beside Run. Never read to decide anything. */
+  readonly changes?: readonly string[]
   /** A read from a provider not granted the hive. Never runs by policy. */
   readonly needsGrant: boolean
   /** A change that leaves the machine. Never runs by policy. */
@@ -90,6 +98,8 @@ export type ExecutionAsk = {
   readonly model: string
   readonly kind: ExecutionKind
   readonly lines: readonly string[]
+  /** What the change will do, for the eye (ExecutionRequest.changes). */
+  readonly changes?: readonly string[]
   readonly needsGrant: boolean
   /** A change carrying a line that leaves the machine (core MachineScope). */
   readonly leaves?: boolean
@@ -186,6 +196,9 @@ export class ExecutionQueueStore extends EventTarget {
       && keys.every(key => allowed.has(key))
     const leaves = ask.leaves === true
     const foreign = ask.foreign === true
+    // For the eye only, and bounded: a few short lines.
+    const changes = (Array.isArray(ask.changes) ? ask.changes : [])
+      .map(line => String(line ?? '').replace(/[\r\n]+/g, ' ').slice(0, CHANGE_CHARS)).filter(Boolean).slice(0, CHANGE_LINES)
     // While the groups are still being read nothing runs by itself — not even
     // a remembered read; the document's arrival releases what it covers.
     const verdict = this.#permit.decide(ask.kind, factsOf(ask))
@@ -198,6 +211,7 @@ export class ExecutionQueueStore extends EventTarget {
       model: String(ask.model ?? ''),
       kind: ask.kind,
       lines: [...ask.lines],
+      ...(changes.length ? { changes } : {}),
       needsGrant: ask.needsGrant,
       ...(leaves ? { leaves: true } : {}),
       ...(foreign ? { foreign: true } : {}),

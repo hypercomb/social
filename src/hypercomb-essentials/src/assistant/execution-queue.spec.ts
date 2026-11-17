@@ -61,6 +61,24 @@ describe('the execution queue', () => {
     expect(await entry.decision).toBe('skip')
   })
 
+  // What Run will change, said by whoever asked and shown beside the button.
+  it('carries what a change says of itself, bounded, and reads nothing from it', () => {
+    const queue = new ExecutionQueueStore()
+    const long = 'x'.repeat(500)
+    const many = Array.from({ length: 20 }, (_, index) => `line ${index}`)
+    queue.request(ask({ kind: 'editing', lines: ['write /card/main.js'], changes: ['Changes 1 line from line 4 into 1 (310 lines now).', '- teal\nstill one line', long] }))
+    const row = queue.requests()[0]!
+    expect(row.changes?.[0]).toBe('Changes 1 line from line 4 into 1 (310 lines now).')
+    expect(row.changes?.[1]).toBe('- teal still one line')
+    expect(row.changes?.[2]).toHaveLength(200)
+    queue.request(ask({ kind: 'editing', lines: ['write /card/a.js'], changes: many }))
+    expect(queue.requests()[0]!.changes).toHaveLength(8)
+    // Saying nothing leaves the row without the field, and the state is the policy's either way.
+    queue.request(ask({ kind: 'editing', lines: ['write /card/b.js'] }))
+    expect('changes' in queue.requests()[0]!).toBe(false)
+    expect(queue.requests()[0]!.state).toBe(row.state)
+  })
+
   it('a change with neither hold carries neither mark', () => {
     const queue = new ExecutionQueueStore()
     queue.request(ask())

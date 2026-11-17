@@ -43,6 +43,7 @@
 
 import { EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, requestConfirm, type I18nProvider, type InstallProvider } from '@hypercomb/core'
 import { FRAME_MAX_ONE, versionFrame, type FrameReader, type FrameLayer } from '../history/revision-viewer.model.js'
+import { askFrame, type FrameReport } from '../history/frame-watch.js'
 // Whom builds follow here — the same record the scout read the offer from (the
 // Packages window reads it the same way: host-directory.view.ts #follow).
 import { readInstallFollow } from './update-scout.service.js'
@@ -121,6 +122,12 @@ const UPDATE_FAILED_MS = 8000
  *  emits, then sets the head), and a burst of commits is one re-read — the
  *  revision viewer's RELIST_MS. */
 export const RELIST_MS = 300
+/** WHAT THE PAGE DID (history/frame-watch.ts). After a write, how long to
+ *  wait for the card to begin running again (a write that changed nothing
+ *  the card carries never does), and how long a run is given before it is
+ *  asked what it did: long enough for its scripts to start and fail. */
+export const RUN_WAIT_MS = 2500
+export const RUN_SETTLE_MS = 1200
 
 /** The services the replica needs, once each is registered (the bees are up). */
 function whenServices(): Promise<ReplicaServices> {
@@ -219,6 +226,9 @@ export class SiteManageElement extends ElementBase {
   }
   #covering = false
   #offBack: (() => void) | null = null
+  /** How many times the card has started running, and when it last did. */
+  #runs = 0
+  #ranAt = 0
 
   connectedCallback(): void {
     ensureStyles()
@@ -343,6 +353,29 @@ export class SiteManageElement extends ElementBase {
       if (state?.layer) void this.#panel?.refresh()
     }
     await this.#show()
+  }
+
+  /**
+   * WHAT THE CARD'S PAGE DID WHEN IT LAST RAN: the errors it threw and what
+   * it shows (history/frame-watch.ts). Called after a write: the write's
+   * marker re-runs the card a moment later, so this waits for that run to
+   * begin, gives it time to start, and then asks the frame. `reran` is false
+   * when no run began in that time: the card does not carry what was
+   * written, and the report is of the run before it. Null when there is no
+   * card or it does not answer.
+   */
+  async pageReport(waits: { run?: number; settle?: number; answer?: number } = {}): Promise<(FrameReport & { readonly reran: boolean }) | null> {
+    const frame = this.#frame
+    if (!frame?.srcdoc) return null
+    const pause = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
+    const seen = this.#runs
+    const until = Date.now() + (waits.run ?? RUN_WAIT_MS)
+    while (this.#runs === seen && Date.now() < until) await pause(50)
+    const settle = waits.settle ?? RUN_SETTLE_MS
+    while (Date.now() - this.#ranAt < settle) await pause(50)
+    const reran = this.#runs !== seen
+    const report = await askFrame(frame, waits.answer ?? 1500)
+    return report ? { ...report, reran } : null
   }
 
   /** THE CONVERSATION THE CHAT OPENS: the card's, of the revision in hand
@@ -538,6 +571,7 @@ export class SiteManageElement extends ElementBase {
     // the parent or the hive, and (its document says so) no network.
     frame.setAttribute('sandbox', 'allow-scripts')
     frame.setAttribute('referrerpolicy', 'no-referrer')
+    frame.addEventListener('load', () => { this.#runs++; this.#ranAt = Date.now() })
 
     const bar = document.createElement('header')
     bar.className = 'sm-bar'
