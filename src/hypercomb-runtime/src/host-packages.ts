@@ -344,7 +344,39 @@ const findPool = async (zone: string): Promise<FoundPool | null> => (await probe
 export const headPackage = async (zone: string): Promise<HostPackage | null> => {
   const found = await findPool(zone)
   if (!found) return null
-  return rowFrom(zone, found.base, await found.read(found.head), found.head)
+  // The newest member that is not the debugger's: a package named for the
+  // debugger is the framework a managed site door runs, never a door's head.
+  const below = found.indices.filter(i => i <= found.head).sort((a, b) => b - a).slice(0, HEAD_LOOK)
+  for (const index of below.length ? below : [found.head]) {
+    const row = rowFrom(zone, found.base, await found.read(index), index)
+    if (row && !isDebuggerPackage(row)) return row
+  }
+  return null
+}
+
+/**
+ * THE DEBUGGER'S PACKAGE (jwize, 2026-11-17: "the package we start off with
+ * should be slim … we can drill down and create a package and then we can
+ * have that as the framework for the development experience"). A package
+ * made on the Hosts desk and kept under the name `debugger` is what a managed
+ * site door installs instead of the host's whole package. Every other door
+ * passes it by: it is never a head ({@link headPackage}).
+ */
+export const DEBUGGER_PACKAGE = 'debugger'
+
+/** Is this row the debugger's package? Its member label is the name. */
+export const isDebuggerPackage = (row: Pick<HostPackage, 'label'> | null | undefined): boolean =>
+  String(row?.label ?? '').trim().toLowerCase() === DEBUGGER_PACKAGE
+
+/** How far below the head {@link headPackage} looks past debugger members. */
+const HEAD_LOOK = 16
+
+/** The newest member of a zone's pool named for the debugger, or null. */
+export const debuggerPoolPackage = async (zone: string): Promise<HostPackage | null> => {
+  const found = await findPool(zone)
+  if (!found) return null
+  const rows = await rowsFrom(zone, found, { limit: HEAD_LOOK })
+  return rows.find(isDebuggerPackage) ?? null
 }
 
 /** How many rows a picker asks for before someone scrolls. Each is one
