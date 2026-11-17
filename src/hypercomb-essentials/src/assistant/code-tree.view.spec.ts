@@ -42,6 +42,7 @@ beforeEach(async () => {
       { name: '@hypercomb/essentials/assistant/chat-thread', sig: sig(1) },
       { name: '@hypercomb/essentials/commands/builds.queen', sig: sig(2) },
       { name: '@hypercomb/source/core', sig: sig(5) },
+      { name: '@hypercomb/source/shim', sig: sig(6) },
     ],
     moduleText: async (wanted: string) => wanted === sig(5) ? { name: '@hypercomb/source/core', text: CORE } : undefined,
     readNode: async (segments: readonly string[]) => {
@@ -98,7 +99,11 @@ describe('the code tree', () => {
     row('source').click()
     row('core').click()
     await settle()
-    expect(names().slice(-3)).toEqual(['core', 'effect-bus.ts', 'index.ts'])
+    // The files it ships, as their own folders: core/effect-bus.ts and index.ts.
+    expect(names().slice(-5)).toEqual(['source', 'core', 'core', 'index.ts', 'shim'])
+    const inner = [...view.element.querySelectorAll<HTMLElement>('.hc-code-row')].filter(node => node.querySelector('.hc-code-name')?.textContent === 'core')[1]!
+    inner.click()
+    expect(names().slice(-5)).toEqual(['core', 'core', 'effect-bus.ts', 'index.ts', 'shim'])
     row('effect-bus.ts').click()
     expect(opened).toEqual([{ kind: 'section', sig: sig(5), section: 'src/core/effect-bus.ts' }])
   })

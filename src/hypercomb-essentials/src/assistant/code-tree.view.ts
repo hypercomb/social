@@ -67,6 +67,9 @@ const glyph = (name: string, className = 'hc-code-glyph'): HTMLSpanElement => {
 
 const tileKey = (segments: readonly string[]): string => `tile:/${segments.join('/')}`
 
+/** A row's left edge for its depth, in rem, to two places (0.4 + 0.8 a level). */
+const indent = (depth: number, more = 0): number => Math.round((0.4 + depth * 0.8 + more) * 100) / 100
+
 export class CodeTreeView {
   readonly element: HTMLDivElement
   #target: string[] = []
@@ -321,7 +324,7 @@ export class CodeTreeView {
     const row = el('div', `hc-code-row ${className}`)
     row.setAttribute('role', 'treeitem')
     row.tabIndex = 0
-    row.style.paddingLeft = `${0.4 + depth * 0.8}rem`
+    row.style.paddingLeft = `${indent(depth)}rem`
     row.addEventListener('keydown', event => {
       if (event.target !== row || (event.key !== 'Enter' && event.key !== ' ')) return
       event.preventDefault()
@@ -352,7 +355,7 @@ export class CodeTreeView {
 
   #note(depth: number, text: string): HTMLElement {
     const note = el('div', 'hc-code-note', text)
-    note.style.paddingLeft = `${0.4 + depth * 0.8 + 1.1}rem`
+    note.style.paddingLeft = `${indent(depth, 1.1)}rem`
     return note
   }
 }

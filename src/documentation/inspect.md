@@ -117,3 +117,40 @@ the chat's after that.
   pressable yet.
 - **Without the rail.** The view is heard by the chat's rail, so a window
   drawn without one does not show it.
+
+## The code as a tree of files (2026-11-16)
+
+jwize, 2026-11-15: "Let's have a normal tree view with actual typescript
+files." 2026-11-16: "can we please have a third icon at the top of this and
+have the logical code view", then "we can read code in the main window as
+well to explore the structure."
+
+The chat's left column has a third icon beside the conversations and the
+search. With it open the column is a tree, in two parts
+(`assistant/code-tree.view.ts`):
+
+- **What this chat is about.** The tile the conversation is on, the tiles
+  inside it and the files each holds, the newest of each name. A tile is
+  read when it is unfolded. The small button on a tile's row opens the tile
+  itself: what it holds and the code that runs it.
+- **The running code.** Every module the hive runs, as folders and files.
+  Nothing keeps a list: a module's name is already a path
+  (`@hypercomb/essentials/assistant/chat-thread`), and each `/` is a folder
+  (`assistant/code-tree.ts` `moduleTree`). A lone chain of folders reads as
+  one row. A platform source (`@hypercomb/source/core`) is a folder filled,
+  when it is unfolded, from the source files it ships, by the header line
+  each carries (`sectionTree`).
+
+Pressing a file opens it in the chat's main pane (`chat-code.ts`
+`openChatCode`): the tree finds, the pane reads. While the pane shows the
+conversation the window is asked to switch by its own switch, so its state
+and its button stay true. A module that ships one source file opens as that
+file at once.
+
+Typing in the column's search while the tree is open lists the modules whose
+name holds every word. The reader's `codeIndex()` gives the tree every name
+(`listCode` answers a question and stops at two hundred).
+
+Not built: a package module is the compiled JavaScript of its TypeScript
+source, shown under the module's name; only the platform sources carry their
+real `.ts` files. Nothing can be edited from the tree.
