@@ -38,6 +38,7 @@
 // singleton, no Angular, the shape of the doctrine viewer.
 
 import { I18N_IOC_KEY, sectionIndex, type I18nProvider } from '@hypercomb/core'
+import { isTypescriptAtomText } from './package-typescript.js'
 import { HIVE_TREE_READER_IOC_KEY, type CodeHit } from './hive-tree-reader.js'
 import { codeLinks, lineAt, quoteUse, tileHandles, type QuoteUse, type TileHandle } from './tile-code.js'
 import { platformSources, readable, recordResources, shownAs, signaturesIn, sizeWords } from './tile-holds.js'
@@ -69,6 +70,17 @@ type Reader = {
     readonly files?: readonly { readonly name: string; readonly sig: string; readonly size: number }[]
   }>
   listCode?(query: string): Promise<{ readonly ok: boolean; readonly entries?: readonly { readonly name: string; readonly sig: string }[] }>
+  /** The atom holding a section's TypeScript, from layers held here: no
+   *  request. A reader without it, or a package that names none, shows no
+   *  button. */
+  typescriptFor?(moduleSig: string, section: string): Promise<{ readonly atom: string; readonly section: string } | undefined>
+  /** Is this signature a source atom the running package names (`atom`), and
+   *  could the reader tell (`known`)? Asked before any read of a signature
+   *  through the store, which would fetch an atom and write it to the device. */
+  typescriptAtom?(sig: string): Promise<{ readonly atom: boolean; readonly known: boolean }>
+  /** One file's TypeScript. This is the read that asks a host. */
+  typescriptText?(atom: string, section: string, options?: { signal?: AbortSignal }): Promise<
+    { readonly ok: true; readonly text: string; readonly host: string } | { readonly ok: false; readonly code: string }>
 }
 type HistoryLike = {
   sign?(lineage: { explorerSegments: () => readonly string[] }): Promise<string>
@@ -117,6 +129,12 @@ export class InspectWindowView extends EventTarget {
    *  last save said (saved, and what the page then did). */
   #editing: string | null = null
   #saved: string[] = []
+  /** The step whose TypeScript was asked for by a press (owner, 2026-11-16:
+   *  "fetched only when a file is opened"). It is the step itself, not a
+   *  flag, so no other step, however it is reached, can ask a host. */
+  #typescript: InspectFrame | null = null
+  /** The read the step on screen is making; ended when the step changes. */
+  #reading: AbortController | null = null
   /** Bumped on every step, so a slow read never draws over a newer one. */
   #turn = 0
   /** True while it is drawn inside an element another surface lent. */
@@ -173,6 +191,8 @@ export class InspectWindowView extends EventTarget {
   #leaveEdit(): void {
     this.#editing = null
     this.#saved = []
+    // Every new step opens as shipped and asks nothing.
+    this.#typescript = null
   }
 
   /** One step deeper. */
@@ -198,6 +218,9 @@ export class InspectWindowView extends EventTarget {
     this.#crumbs = null
     this.#stack = []
     this.#embedded = false
+    this.#typescript = null
+    this.#reading?.abort()
+    this.#reading = null
     this.#dropPictures()
     this.#turn++
   }
@@ -261,6 +284,9 @@ export class InspectWindowView extends EventTarget {
     const frame = this.#stack[this.#stack.length - 1]
     if (!body || !frame) return
     const turn = ++this.#turn
+    // A read the step before was waiting on is ended, not left to finish.
+    this.#reading?.abort()
+    this.#reading = new AbortController()
     this.#drawCrumbs()
     body.replaceChildren(el('div', 'hc-inspect-note', this.#t('inspect.reading', 'Reading the running code…')))
     body.scrollTop = 0
@@ -380,6 +406,17 @@ export class InspectWindowView extends EventTarget {
 
   async #resource(frame: Extract<InspectFrame, { kind: 'resource' }>, reader: Reader | undefined, pictures: string[]): Promise<Node[]> {
     if (!SIG.test(frame.sig)) return [el('div', 'hc-inspect-note', this.#t('inspect.bad-resource', 'That is not a signature.'))]
+    // THE PACKAGE'S TYPESCRIPT IS NEVER READ THROUGH THE STORE (owner,
+    // 2026-11-16: "Host the package's TypeScript without installing it,
+    // fetched only when a file is opened"). The store fetches a signature it
+    // does not hold and writes what answers to the device. A layer's JSON
+    // shows its `typescript` signature, so a step can arrive here carrying
+    // one; the reader says so, and the step then asks nobody. The TypeScript
+    // is read by the button on a file, into memory.
+    const atomNote = (): Node[] => [el('div', 'hc-inspect-note', this.#t('inspect.typescript-atom',
+      'This is the TypeScript of one folder of the package. It is hosted with the package and not kept on this device: open one of its files in the code and press TypeScript.'))]
+    const named = await reader?.typescriptAtom?.(frame.sig).catch(() => undefined)
+    if (named?.atom) return atomNote()
     const store = ioc<StoreLike>('@hypercomb.social/Store')
     const blob = await store?.getResource?.(frame.sig).catch(() => null) ?? null
     if (!blob) {
@@ -390,6 +427,10 @@ export class InspectWindowView extends EventTarget {
       return [el('div', 'hc-inspect-note', this.#t('inspect.resource-absent', 'Its bytes are not on this device.'))]
     }
     const bytes = new Uint8Array(await blob.arrayBuffer())
+    // Where the reader could not say (no reader, or no selection to read),
+    // an atom is known only by its first line, and is not drawn as a
+    // resource of this hive.
+    if (!named?.known && isTypescriptAtomText(new TextDecoder().decode(bytes.subarray(0, 64)))) return atomNote()
     const out: Node[] = []
     const meta = el('div', 'hc-inspect-meta')
     meta.append(
@@ -596,8 +637,39 @@ export class InspectWindowView extends EventTarget {
       return out
     }
 
-    const text = section ? module.text.slice(section.from, section.to) : module.text
-    const mark = frame.at !== undefined ? lineAt(text, frame.at) : 0
+    let text = section ? module.text.slice(section.from, section.to) : module.text
+    let mark = frame.at !== undefined ? lineAt(text, frame.at) : 0
+
+    // THE FILE'S TYPESCRIPT, ON A PRESS (owner, 2026-11-16: "Host the
+    // package's TypeScript without installing it, fetched only when a file
+    // is opened"). What runs is compiled JavaScript. Where the package's own
+    // layer names the atom holding this file as written, a button offers it.
+    // Knowing that reads layers held here and asks no host; only the press
+    // does. A package that names none, and a reader before this, draw no
+    // button.
+    const source = section ? await reader.typescriptFor?.(frame.sig, section.path).catch(() => undefined) : undefined
+    if (source && reader.typescriptText) {
+      const asked = this.#typescript === frame
+      const toggle = el('button', 'hc-inspect-act', asked ? this.#t('inspect.compiled', 'As shipped') : this.#t('inspect.typescript', 'TypeScript'))
+      toggle.type = 'button'
+      toggle.addEventListener('click', () => { this.#typescript = asked ? null : frame; void this.#render() })
+      meta.append(toggle)
+      if (asked) {
+        const read = await reader.typescriptText(source.atom, source.section, { signal: this.#reading?.signal })
+          .catch(() => ({ ok: false as const, code: 'not-hosted' }))
+        if (read.ok) {
+          text = read.text
+          // An offset into the compiled text is not a place in the TypeScript.
+          mark = 0
+          out.push(el('div', 'hc-inspect-lead', this.#t('inspect.typescript-lead',
+            'TypeScript as published, read from {host}. A change made in this hive is not in it.', { host: read.host })))
+        } else {
+          out.push(el('div', 'hc-inspect-note', read.code === 'not-hosted'
+            ? this.#t('inspect.typescript-not-hosted', 'The TypeScript of this package is not on the hosts this hive reads it from.')
+            : this.#t('inspect.typescript-no-file', 'No TypeScript is hosted for this file.')))
+        }
+      }
+    }
 
     const links = codeLinks(text)
     const linkRow = (label: string, words: readonly string[]): void => {

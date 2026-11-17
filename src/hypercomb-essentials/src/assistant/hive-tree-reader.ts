@@ -13,13 +13,16 @@
 // allowing an action based on what the model saw. No bridge, navigation, view
 // state, content slot, or filesystem surface participates.
 
-import { CHILD_SLOTS, childSigsOfLayer, sectionIndex, sectionOf } from '@hypercomb/core'
+import { CHILD_SLOTS, INSTALL_IOC_KEY, childSigsOfLayer, sectionIndex, sectionOf, type InstallProvider } from '@hypercomb/core'
 import type { CurrentLayerRef, LayerContent } from '../history/history.service.js'
 import { isPeerContentAt } from '../sharing/adopted-roots.js'
 import { managedSiteSegments } from '../sharing/managed-record.js'
 import { MAX_RECORD_DEPTH } from '../search/hive-search.js'
 import { readExplore, type HypercombExploreRead } from './hive-explore-read.js'
 import { readPool, readPoolMember, type HypercombPoolRead } from './hive-pool-read.js'
+import { readTypescriptAtom } from './hive-typescript-read.js'
+import { isTypescriptAtomText, typescriptAtomFor, typescriptCarries, typescriptSlot } from './package-typescript.js'
+import { PLATFORM_SOURCE } from './tile-holds.js'
 import { pictureType, readPicture, type HypercombPicture } from './picture-read.js'
 import { SHELL_FILE, describePage, looksLikePage, pageBlocks, pagePartText } from '../files/page-parts.js'
 import { listAttachments } from '../files/files-attachment.js'
@@ -128,6 +131,10 @@ type CodePreloader = {
   readArtifact?(sig: string): Promise<CodeArtifactRead | null>
 }
 type Lookup = <T>(key: string) => T | undefined
+type TypescriptRead = (sig: string, signal?: AbortSignal) => Promise<{ bytes: Uint8Array; host: string } | null>
+/** Source atoms held at once, in memory. A folder's atom is up to four
+ *  megabytes of text, and a person reads one folder at a time. */
+const TYPESCRIPT_HELD = 3
 
 export type HypercombTreeNode = {
   readonly path: string
@@ -504,12 +511,25 @@ export class HypercombHiveTreeReader {
   readonly #signedCodeInventories = new Map<string, Promise<readonly { name: string; sig: string; of: 'bee' | 'dependency' }[]>>()
   #sequence = 0
 
-  constructor(lookup: Lookup = ((key: string) => window.ioc?.get<unknown>(key)) as Lookup) {
+  /** How one source atom is asked of the package's hosts. A seam, so a test
+   *  reads without a network. */
+  readonly #readTypescript: TypescriptRead
+
+  constructor(
+    lookup: Lookup = ((key: string) => window.ioc?.get<unknown>(key)) as Lookup,
+    readTypescript: TypescriptRead = readTypescriptAtom,
+  ) {
     this.#lookup = lookup
+    this.#readTypescript = readTypescript
   }
 
   #history(): HiveHistory | undefined { return this.#lookup<HiveHistory>(HISTORY_KEY) }
-  #store(): HiveStore | undefined { return this.#lookup<HiveStore>(STORE_KEY) }
+  /** Every read of the store in this file goes through here, so none can
+   *  reach a source atom by signature (#guardedStore). */
+  #store(): HiveStore | undefined {
+    const store = this.#lookup<HiveStore>(STORE_KEY)
+    return store && typeof store === 'object' ? this.#guardedStore(store) : store
+  }
   #committer(): LayerCommitter | undefined { return this.#lookup<LayerCommitter>(COMMITTER_KEY) }
 
   #pruneSnapshots(now = Date.now()): void {
@@ -1003,6 +1023,13 @@ export class HypercombHiveTreeReader {
     const store = this.#store()
     if (!history?.getLayerBySig || !store?.getResource) return { ok: false, root, code: 'unavailable' }
     if (!SIG.test(sig)) return { ok: false, root, code: 'not-found' }
+    // A SOURCE ATOM IS NEVER ASKED FOR AS A LAYER. `getLayerBySig` asks the
+    // hosts for a signature it does not hold and writes what answers to the
+    // store. A signature a package layer names as its TypeScript is hosted,
+    // not installed (owner, 2026-11-16: "Host the package's TypeScript
+    // without installing it"), so it is not a layer here and the read of its
+    // bytes answers instead, from memory.
+    if (await this.#isTypescriptAtom(sig)) return { ok: false, root, code: 'not-found' }
     const maxBytes = Math.max(512, boundedInteger(options.maxBytes, 8_000, MAX_BYTES))
     try {
       if (options.signal?.aborted) throw stopped()
@@ -1339,12 +1366,35 @@ export class HypercombHiveTreeReader {
         of = 'dependency'
         bytes = (await store.getDependencyBytes?.(sig).catch(() => null)) ?? null
       }
+      const named = bytes ? null : await this.typescriptAtom(sig)
+      if (!bytes && named?.atom) {
+        // THE PACKAGE'S TYPESCRIPT STAYS IN MEMORY (owner, 2026-11-16: "Host
+        // the package's TypeScript without installing it"). A layer's JSON
+        // shows its `typescript` signature, so a model can ask for it by
+        // name. `store.getResource` would fetch it and write it to the
+        // store; this read asks the package's hosts, verifies, and keeps
+        // nothing on the device. An atom no host holds is not found, and
+        // the store is still not asked.
+        const held = await this.#typescriptAtom(sig, options.signal)
+        if (!held) return { ok: false, root, code: 'not-found' }
+        of = 'resource'
+        type = 'text/plain'
+        bytes = new TextEncoder().encode(held.text)
+      }
       if (!bytes) {
         of = 'resource'
         const blob = await store.getResource(sig).catch(() => null)
         if (blob) {
           type = blob.type
           bytes = await blobBytes(blob)
+          // WHERE NO SELECTION CAN BE READ, AN ATOM IS KNOWN ONLY BY ITS FIRST
+          // LINE. With no install port to say which signatures the package
+          // names as its TypeScript, the guard above is off and this read
+          // went through the store. Text that opens as a source atom is then
+          // refused, not handed on as a resource of this hive: the
+          // TypeScript is read through the package's hosts, into memory, or
+          // not at all.
+          if (!named?.known && isTypescriptAtomText(new TextDecoder().decode(bytes.subarray(0, 64)))) return { ok: false, root, code: 'not-found' }
         } else {
           // A POOL'S MEMBER, KEPT INSIDE THE POOL (hive-pool-read.ts): a
           // signature a `pool` read listed and no store or host root holds is
@@ -1605,6 +1655,213 @@ export class HypercombHiveTreeReader {
     if (text === undefined) return undefined
     const entry = (await this.#codeEntries()).find(candidate => candidate.sig === clean)
     return { name: entry?.name ?? clean.slice(0, 12), text }
+  }
+
+  // -- THE PACKAGE'S TYPESCRIPT ------------------------------------------------
+  //
+  // Owner, 2026-11-16: "Host the package's TypeScript without installing it,
+  // fetched only when a file is opened". A package layer that owns a source
+  // folder names one text atom holding that folder's TypeScript
+  // (package-typescript.ts). `typescriptFor` says which atom holds a section,
+  // from the layers this device already holds, and asks no host.
+  // `typescriptText` is the one place a host is asked, and only for an atom a
+  // layer here named. What comes back is kept in memory, three atoms at most,
+  // and is never a listed module: `code <word>`, the tile step and the code
+  // tree cannot reach one.
+
+  /** What each layer read so far says: the atom it names, and the modules it
+   *  names (its bees and dependencies). A layer is immutable, so kept. */
+  readonly #typescriptLayers = new Map<string, { readonly slot: string | undefined; readonly modules: readonly string[] }>()
+  /** Every atom signature a layer here has been seen to name. */
+  readonly #typescriptNamed = new Set<string>()
+  /** Atom text by signature, least recently read first. */
+  readonly #typescriptTexts = new Map<string, { readonly text: string; readonly host: string }>()
+  /** The layers of the whole running selection, read for one installed root. */
+  #typescriptCensus: { readonly trunk: string; readonly read: Promise<void> } | null = null
+
+  async #typescriptLayer(layerSig: string): Promise<{ readonly slot: string | undefined; readonly modules: readonly string[] } | undefined> {
+    const kept = this.#typescriptLayers.get(layerSig)
+    if (kept) return kept
+    const bytes = await this.#store()?.getLayerBytes?.(layerSig).catch(() => null)
+    // A layer this device does not hold is not remembered: it may arrive.
+    if (!bytes) return undefined
+    let slot: string | undefined
+    const modules: string[] = []
+    try {
+      const record = JSON.parse(textOf(bytes) ?? 'null') as Record<string, unknown> | null
+      slot = typescriptSlot(record)
+      for (const field of ['bees', 'dependencies']) {
+        const listed = record?.[field]
+        if (!Array.isArray(listed)) continue
+        for (const item of listed) {
+          const named = String((item as { sig?: unknown } | null)?.sig ?? item ?? '').replace(/\.js$/i, '').toLowerCase()
+          if (SIG.test(named)) modules.push(named)
+        }
+      }
+    } catch { slot = undefined }
+    const read = { slot, modules }
+    this.#typescriptLayers.set(layerSig, read)
+    if (slot) this.#typescriptNamed.add(slot)
+    return read
+  }
+
+  #install(): Partial<Pick<InstallProvider, 'selection' | 'installedSig'>> | undefined {
+    return this.#lookup<Partial<Pick<InstallProvider, 'selection' | 'installedSig'>>>(INSTALL_IOC_KEY)
+  }
+
+  /** The selection that runs here, or null when none can be read: no install
+   *  port, a port without `selection`, one that throws, one that answers
+   *  something that is not a selection, or a shell with nothing installed.
+   *  Never throws: every caller treats null as "no atoms named here". */
+  async #typescriptSelection(): Promise<{ readonly trunk: string; readonly nodes: readonly { readonly path: string; readonly layerSig: string; readonly base: string }[] } | null> {
+    try {
+      const install = this.#install()
+      if (typeof install?.selection !== 'function') return null
+      const selection = await install.selection()
+      const trunk = selection?.trunk
+      if (typeof trunk !== 'string' || !SIG.test(trunk) || !Array.isArray(selection.nodes)) return null
+      const nodes = selection.nodes.filter(node => node && typeof node.path === 'string' && typeof node.layerSig === 'string' && SIG.test(node.layerSig))
+      return { trunk, nodes }
+    } catch { return null }
+  }
+
+  /**
+   * The atom that holds a section's TypeScript, when the package that runs
+   * here names one. No request is made. Undefined for a section the atoms
+   * never carry (not a `.ts` file, a file directly in src/, a generated
+   * index, a keys file: package-typescript.ts typescriptCarries), for the
+   * platform's own source atoms (they already are TypeScript), for a module
+   * the running selection does not name among its bees and dependencies (code
+   * held from elsewhere, whatever its section headers say), in a shell with
+   * no installed package, and for a package built before its layers carried
+   * the slot.
+   */
+  async typescriptFor(moduleSig: string, section: string): Promise<{ readonly atom: string; readonly section: string } | undefined> {
+    if (!typescriptCarries(section)) return undefined
+    const clean = String(moduleSig ?? '').toLowerCase()
+    if (!SIG.test(clean)) return undefined
+    const entry = (await this.#codeEntries()).find(candidate => candidate.sig === clean)
+    if (entry?.name.startsWith(PLATFORM_SOURCE)) return undefined
+    const selection = await this.#typescriptSelection()
+    if (!selection) return undefined
+    // The module must be the running package's own. A layer names its bees
+    // and dependencies, so the layers that run here are the whole answer.
+    let named = false
+    for (const layerSig of [selection.trunk, ...selection.nodes.map(node => node.layerSig)]) {
+      if ((await this.#typescriptLayer(layerSig))?.modules.includes(clean)) named = true
+    }
+    if (!named) return undefined
+    const found = typescriptAtomFor(section, selection.nodes, layerSig => this.#typescriptLayers.get(layerSig)?.slot)
+    return found ? { atom: found.atom, section } : undefined
+  }
+
+  /**
+   * One file's TypeScript, from the atom `typescriptFor` named. This is the
+   * read that asks a host. `not-named`: no layer here names that atom, so it
+   * is not asked for. `not-hosted`: none of the package's hosts holds it;
+   * that is not remembered, and the next ask asks again. `no-section`: the
+   * atom has no such file.
+   */
+  async typescriptText(
+    atom: string,
+    section: string,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<{ readonly ok: true; readonly text: string; readonly host: string } | { readonly ok: false; readonly code: 'not-named' | 'not-hosted' | 'no-section' }> {
+    const sig = String(atom ?? '').toLowerCase()
+    if (!this.#typescriptNamed.has(sig)) return { ok: false, code: 'not-named' }
+    const held = await this.#typescriptAtom(sig, options.signal)
+    if (!held) return { ok: false, code: 'not-hosted' }
+    const cut = sectionOf(held.text, section)
+    if (!cut) return { ok: false, code: 'no-section' }
+    // The file as written: its header line is the atom's, not the file's.
+    const headerEnd = held.text.indexOf('\n', cut.from)
+    const from = headerEnd < 0 || headerEnd >= cut.to ? cut.to : headerEnd + 1
+    return { ok: true, text: held.text.slice(from, cut.to), host: held.host }
+  }
+
+  /** An atom's text: from memory, else asked of the package's hosts and
+   *  verified there. Nothing is written to the device. */
+  async #typescriptAtom(sig: string, signal?: AbortSignal): Promise<{ readonly text: string; readonly host: string } | null> {
+    const kept = this.#typescriptTexts.get(sig)
+    if (kept) {
+      this.#typescriptTexts.delete(sig)
+      this.#typescriptTexts.set(sig, kept)
+      return kept
+    }
+    const read = await this.#readTypescript(sig, signal).catch(() => null)
+    const text = read ? textOf(read.bytes) : undefined
+    if (!read || text === undefined) return null
+    const held = { text, host: read.host }
+    this.#typescriptTexts.set(sig, held)
+    while (this.#typescriptTexts.size > TYPESCRIPT_HELD) {
+      const oldest = this.#typescriptTexts.keys().next().value as string | undefined
+      if (oldest === undefined) break
+      this.#typescriptTexts.delete(oldest)
+    }
+    return held
+  }
+
+  /**
+   * IS THIS SIGNATURE A SOURCE ATOM THE RUNNING PACKAGE NAMES? The one
+   * question every path that would read a signature through the store or
+   * history asks first, because those reads fetch what the device does not
+   * hold and write it there, and the package's TypeScript is hosted, never
+   * kept (owner, 2026-11-16: "Host the package's TypeScript without
+   * installing it"). The reads in this file ask it through `#store()`; the
+   * code view asks it here before its own store read.
+   *
+   * `atom`: a layer of the running selection names it. `known`: the
+   * selection could be read, so `atom: false` is an answer. Where it could
+   * not (`known: false`), nothing says what the signature is, and the caller
+   * must not keep text that reads as an atom (isTypescriptAtomText). The
+   * layers of the whole selection are read once per installed root, from
+   * layers held here. Never throws.
+   */
+  async typescriptAtom(sig: string): Promise<{ readonly atom: boolean; readonly known: boolean }> {
+    const clean = String(sig ?? '').toLowerCase()
+    if (this.#typescriptNamed.has(clean)) return { atom: true, known: true }
+    try {
+      const install = this.#install()
+      let installed: string | null = null
+      try { installed = (typeof install?.installedSig === 'function' ? install.installedSig() : null) ?? null } catch { installed = null }
+      if (!installed || this.#typescriptCensus?.trunk !== installed) {
+        const selection = await this.#typescriptSelection()
+        if (!selection) return { atom: false, known: false }
+        const layers = [selection.trunk, ...selection.nodes.map(node => node.layerSig)]
+        const read = (async (): Promise<void> => { for (const layerSig of layers) await this.#typescriptLayer(layerSig) })()
+        this.#typescriptCensus = { trunk: selection.trunk, read }
+      }
+      await this.#typescriptCensus!.read
+      return { atom: this.#typescriptNamed.has(clean), known: true }
+    } catch { return { atom: false, known: false } }
+  }
+
+  async #isTypescriptAtom(sig: string): Promise<boolean> {
+    return (await this.typescriptAtom(sig)).atom
+  }
+
+  /** The store, with its read by signature closed to source atoms. A
+   *  resource read fetches what the device lacks and writes it to the store,
+   *  so an atom's signature reaching one by any path (a child pointer, a
+   *  site file, a model's `read`) would install the TypeScript after all.
+   *  Asked for an atom, the store here holds nothing; every other read, and
+   *  every other method, is the store's own. */
+  readonly #guardedStores = new WeakMap<object, HiveStore>()
+  #guardedStore(store: HiveStore): HiveStore {
+    const kept = this.#guardedStores.get(store)
+    if (kept) return kept
+    const getResource = async (sig: string): Promise<Blob | null> =>
+      (await this.#isTypescriptAtom(String(sig ?? '').toLowerCase())) ? null : store.getResource(sig)
+    const guarded = new Proxy(store, {
+      get: (target, key) => {
+        const value = Reflect.get(target, key, target) as unknown
+        if (key === 'getResource' && typeof value === 'function') return getResource
+        // The store's own methods keep the store as `this` (its private fields).
+        return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value
+      },
+    })
+    this.#guardedStores.set(store, guarded)
+    return guarded
   }
 
   /** Lines, in module order, that pass `test` (given lower-cased), with the

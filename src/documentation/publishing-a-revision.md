@@ -70,6 +70,65 @@ attaches (`scripts/bridge/owed-stamps.cjs`).
    `npm run replicate:revision` with no `--sig` replicates whatever the
    followed publisher signs now.
 
+### The package's TypeScript rides along, and decides nothing (2026-11-17)
+
+jwize, 2026-11-16: "Host the package's TypeScript without installing it,
+fetched only when a file is opened." A build writes one text atom per source
+folder to `dist/.typescript/` and names each on its folder's layer
+(`knowledge-atoms.md`, "The package's own TypeScript"). The atoms are not part
+of the package's closure, so steps 1 to 5 ask for exactly what they asked
+before. A publish adds two things around them, and neither changes the exit
+code or what anybody is offered:
+
+- **The ship's first act**, before the pool is read: the atoms are copied to
+  this machine's host (`scripts/typescript-ship.ts`, only under `--publish`).
+  `[copy-content] TypeScript — 46 source atom(s), 18.4 MB: 46 copied, 0
+  already held → <dir> (before the pool was read)`. A later publish copies
+  only the folders whose text changed. A failure is one line and the package
+  ships as before. A copy in flight is stamped with the time it was made, so
+  another session's ship, sweeping copies abandoned more than ten minutes
+  ago, never takes it for one.
+- **After `PUBLISHED`**, last: the public host is asked for each atom by its
+  bare signature, the ones over a megabyte one at a time, largest first, and
+  every answer is hashed. `[replicate] TypeScript: <host> holds 46 of 46
+  source atom(s) of <root> — N copied from its farm (… MB), M already held`.
+  Each ask has a clock of its own, thirty seconds plus the atom's size at
+  20 KB a second (about four minutes for the largest folder), and three asks
+  in a row that get no answer in time end the pass, so a stalled host cannot
+  hold a publish that has already printed `PUBLISHED`.
+  Anything less prints a **TYPESCRIPT NOT HOSTED** block that says why and
+  gives the retry (`npm run replicate:revision -- --sig <root>`). Whenever an
+  atom is missed the host's pool head is read, because it is what says why:
+  the host's farm gives a root's TypeScript only while the host announces
+  that root. The block then says one of: the host is not on this root yet
+  (the confirm found it behind; the retry works once it is); this revision
+  was superseded (the host was on it and now announces another; no retry);
+  the host announces this root but could not read the atoms from its farm
+  (this machine's host must be on); its pool could not be read; the pass
+  stopped on timeouts. Only a host that announces this root and still
+  refuses every atom is told its worker does not take TypeScript. The package
+  is published and installs either way; only the code view's TypeScript
+  button answers "not on the hosts this hive reads it from" until the host
+  holds the atoms. A device's own press also fills the host: asked bare, the
+  worker reads its farm, so a missed atom arrives while this machine is on.
+
+Other lines: a publish under a name other than the channel says the
+TypeScript is on this machine's host only; a stamp that is not answered adds
+that the TypeScript reaches the public host once the stamp is paid; a build
+from a checkout before this change `names no source atoms`.
+
+**The worker must carry the change first.** The public host's farm gives
+package files only. The worker counts the atoms a package's layers name in
+`typescript` as package files, and gives a stream whose length the farm
+declares time in proportion to its size (a floor of 131,072 bytes a second),
+so a four-megabyte folder is not cut off. That change is merged (#191) and
+has to be the deployed worker BEFORE a build with slots is published. There
+is no probe for it: the first publish's `holds 46 of 46` line is the proof,
+and a later worker deploy from a tree without the change stops the hosting
+without any error, so read that line on the publish after every worker
+deploy. This machine's relay keeps the atoms of a published package through
+`/forget` once it runs the new `relay.js`.
+
 ### The host's side (one worker deploy, by the operator, from a clean copy)
 
 hypercomb.com's apex is routed through `pluginthematrix-core`

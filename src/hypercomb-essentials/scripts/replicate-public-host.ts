@@ -51,6 +51,15 @@
 // 3; inside a publish, a failed pull is "nothing was announced" (exit 1) and
 // only a pool that has not moved after the stamp is exit 3.
 //
+// THE PACKAGE'S TYPESCRIPT GOES LAST, AND OWES NOTHING (owner, 2026-11-16:
+// "Host the package's TypeScript without installing it, fetched only when a
+// file is opened"). The layers of a package name source atoms that are in no
+// closure (hypercomb-relay/replicate.js packageTypescript), so the walk above
+// never asks for them. `replicateTypescript` asks the host for each one by
+// bare signature after the package is settled, and says what the host holds.
+// It is a report of its own: it never touches a ReplicationReport, never
+// changes an exit code, and a host that takes none still has the package.
+//
 // THE HOST IS NAMED ONCE, HERE (PUBLIC_INSTALL_HOST), and the environment can
 // move it: HYPERCOMB_PUBLIC_INSTALL_HOST=<zone>, or empty / `none` to skip the
 // step. hypercomb.com is a public host that may be retired; nothing else in
@@ -175,20 +184,50 @@ export function replicationOrder(root: string, held: readonly string[], bytesOf:
   return [...order.slice(0, -1), ...rest, root]
 }
 
-/** What one atom came back as from the host. */
-type Answer = { sig: string; ok: boolean; copied: boolean; bytes: number; why: string }
+/** The source atoms a root's layers name, by the relay's own walk, from
+ *  bytes already on this machine. */
+const packageTypescript = async (root: string, read: (sig: string) => Promise<Uint8Array | null>): Promise<string[]> => {
+  const relay = await import(pathToFileURL(resolve(ESSENTIALS, '..', 'hypercomb-relay', 'replicate.js')).href) as {
+    packageTypescript(root: string, io: { read(sig: string): Promise<Uint8Array | null> }): Promise<string[]>
+  }
+  return relay.packageTypescript(root, { read })
+}
 
-async function askHost(host: string, sig: string, fetchImpl: Fetch): Promise<Answer> {
+/** What one atom came back as from the host. `timedOut`: the ask's own clock
+ *  ended it, which says the host stalled and nothing about the atom. */
+type Answer = { sig: string; ok: boolean; copied: boolean; bytes: number; why: string; timedOut?: boolean }
+
+/** How long one ask of a source atom may take: a floor for the host to open
+ *  its farm, then the atom's size at 20 KB a second. The largest folder is
+ *  about 4 MB and the farm is a home uplink, so that one gets four minutes;
+ *  a stream that stalls is ended instead of holding the publish. */
+const ASK_FLOOR_MS = 30_000
+const ASK_BYTES_PER_MS = 20
+export const askTimeoutMs = (bytes: number): number => ASK_FLOOR_MS + Math.ceil(Math.max(0, bytes) / ASK_BYTES_PER_MS)
+
+/** Ask the host for one atom. With `timeoutMs` the ask has a clock of its
+ *  own covering the headers and the body; the request carries its signal,
+ *  and the wait is raced against it too, so a fetch that ignores the signal
+ *  still ends. Without it the ask waits as long as the host does, which is
+ *  what the package's own pull has always done. */
+async function askHost(host: string, sig: string, fetchImpl: Fetch, timeoutMs?: number): Promise<Answer> {
+  const clock = timeoutMs === undefined ? null : AbortSignal.timeout(timeoutMs)
+  const expired = new Promise<never>((_resolve, reject) => {
+    clock?.addEventListener('abort', () => reject(new Error('timed out')), { once: true })
+  })
+  // Nothing may be left to reject unheard once the ask has answered.
+  expired.catch(() => undefined)
   try {
-    const res = await fetchImpl(`https://${host}/${sig}`, { cache: 'no-store' })
+    const res = await Promise.race([fetchImpl(`https://${host}/${sig}`, { cache: 'no-store', ...(clock ? { signal: clock } : {}) }), expired])
     if (!res.ok) {
       await res.body?.cancel().catch(() => undefined)
       return { sig, ok: false, copied: false, bytes: 0, why: `HTTP ${res.status}` }
     }
-    const bytes = new Uint8Array(await res.arrayBuffer())
+    const bytes = new Uint8Array(await Promise.race([res.arrayBuffer(), expired]))
     if (sha256(bytes) !== sig) return { sig, ok: false, copied: false, bytes: 0, why: 'bytes that are not its name' }
     return { sig, ok: true, copied: res.headers.get('x-read-through') === 'farm', bytes: bytes.byteLength, why: '' }
   } catch (error) {
+    if (clock?.aborted) return { sig, ok: false, copied: false, bytes: 0, why: `no answer in ${Math.round(timeoutMs! / 1000)} s`, timedOut: true }
     return { sig, ok: false, copied: false, bytes: 0, why: error instanceof Error ? error.message || 'unreachable' : 'unreachable' }
   }
 }
@@ -449,6 +488,198 @@ export function replicationVerdict(report: ReplicationReport, channel = 'essenti
   ]) }
 }
 
+// ── the package's TypeScript ────────────────────────────────────────────────
+
+/** A source atom larger than this is asked for alone: the host streams it
+ *  from its farm, and two such streams would share one uplink. */
+const TYPESCRIPT_SINGLE_BYTES = 1_048_576
+const TYPESCRIPT_CONCURRENCY = 4
+/** This many asks in a row ended by their clock, and the pass stops: the host
+ *  has stalled, and the atoms left would each wait out a clock of their own
+ *  after the publish already printed PUBLISHED. */
+export const TYPESCRIPT_TIMEOUTS = 3
+const NOT_ASKED = 'not asked: the host had stopped answering'
+
+export type TypescriptReport = {
+  host: string
+  root: string
+  /** Source atoms the root's layers name. */
+  named: number
+  /** Named atoms this machine's host does not hold, so the public host was not asked for them. */
+  absentHere: string[]
+  /** Atoms the host read from its farm during this run. */
+  copied: string[]
+  copiedBytes: number
+  /** Atoms the host already held. */
+  held: number
+  failed: { sig: string; why: string }[]
+  /** The host's pool head, read whenever an atom was missed: it is what says
+   *  why. `headRead` is false when nothing was missed; `answered` is false
+   *  when no base of the host gave an HTTP response. */
+  head: string | null
+  headRead: boolean
+  answered: boolean
+  /** What the caller knew before this pass: the host's pool named this root
+   *  (true) or did not (false). Undefined when nobody had looked. */
+  current?: boolean
+  /** Asks ended by their own clock. */
+  timedOut: number
+  /** The pass stopped after TYPESCRIPT_TIMEOUTS timeouts in a row. */
+  stopped: boolean
+  ok: boolean
+  error?: string
+}
+
+/**
+ * Ask the host for every source atom the root's layers name, and say what it
+ * holds. Run after the package itself is settled. Never throws, for a host's
+ * answer or for a fault here, and nothing about the package depends on it.
+ */
+export async function replicateTypescript(
+  options: ReplicateOptions & {
+    /** The bytes the host's farm can read: this machine's relay content dir alone. */
+    readHosted?: (sig: string) => Promise<Uint8Array | null>
+    poolHead?: typeof hostPoolHead
+    /** Whether the host's pool named this root when the package was settled. */
+    current?: boolean
+    /** The clock of one ask, from the atom's size. A seam: a spec cannot wait out half a minute. */
+    askTimeoutMs?: (bytes: number) => number
+  },
+): Promise<TypescriptReport> {
+  const { root, host } = options
+  const report: TypescriptReport = {
+    host, root, named: 0, absentHere: [], copied: [], copiedBytes: 0, held: 0, failed: [],
+    head: null, headRead: false, answered: false, ...(options.current === undefined ? {} : { current: options.current }),
+    timedOut: 0, stopped: false, ok: false,
+  }
+  try {
+    const fetchImpl = options.fetchImpl ?? fetch
+    const sleep = options.sleep ?? ((ms: number) => new Promise<void>(done => setTimeout(done, ms)))
+    const log = options.log ?? ((line: string) => console.log(line))
+    const retryAfter = options.retryAfterMs ?? RETRY_AFTER_MS
+    if (!SIG_RE.test(root)) { report.error = 'the root is not a signature'; return report }
+
+    // 1. What the layers name, from bytes already here. Nothing is fetched.
+    const atoms = await packageTypescript(root, options.readLocal ?? localAtoms(localContentDirs()))
+    report.named = atoms.length
+    if (!atoms.length) { report.ok = true; return report }
+
+    // 2. Only an atom the farm can give is asked for: a miss there is
+    //    remembered by the host for a minute, and proves nothing.
+    const readHosted = options.readHosted ?? localAtoms([localContentDirs()[0]!])
+    const sizes = new Map<string, number>()
+    for (const sig of atoms) {
+      const bytes = await readHosted(sig)
+      if (bytes && sha256(bytes) === sig) sizes.set(sig, bytes.byteLength)
+      else report.absentHere.push(sig)
+    }
+
+    // 3. The large ones alone, largest first; the rest a few at a time. Each
+    //    ask has a clock sized to its atom, and a run of timeouts ends the
+    //    pass: what is left is not asked for.
+    const clockOf = options.askTimeoutMs ?? askTimeoutMs
+    let inARow = 0
+    const askOne = async (sig: string): Promise<Answer> => {
+      if (report.stopped) return { sig, ok: false, copied: false, bytes: 0, why: NOT_ASKED }
+      const answer = await askHost(host, sig, fetchImpl, clockOf(sizes.get(sig) ?? 0))
+      if (answer.timedOut) {
+        report.timedOut++
+        if (++inARow >= TYPESCRIPT_TIMEOUTS) report.stopped = true
+      } else inARow = 0
+      return answer
+    }
+    const ask = async (sigs: readonly string[]): Promise<Answer[]> => {
+      const large = sigs.filter(sig => (sizes.get(sig) ?? 0) > TYPESCRIPT_SINGLE_BYTES)
+        .sort((a, b) => (sizes.get(b)! - sizes.get(a)!) || (a < b ? -1 : 1))
+      const small = sigs.filter(sig => !large.includes(sig))
+      const answers: Answer[] = []
+      for (const sig of large) answers.push(await askOne(sig))
+      answers.push(...await eachLimited(small, TYPESCRIPT_CONCURRENCY, askOne))
+      return answers
+    }
+    let answers = await ask([...sizes.keys()])
+    const tally = (): { taken: number; missed: Answer[] } => ({
+      taken: answers.filter(answer => answer.ok).length,
+      missed: answers.filter(answer => !answer.ok),
+    })
+
+    // 4. Any miss: the host's pool head is read, because it is what says
+    //    why (the host's farm gives a root's TypeScript only while the host
+    //    announces that root). Then one more ask, and only when it can work:
+    //    the host is on this root, it took some, and it has not stalled.
+    const { taken, missed } = tally()
+    if (missed.length) {
+      const read = await within(clockOf(0), (options.poolHead ?? hostPoolHead)(host, fetchImpl), { answered: false, head: null })
+      report.head = read.head
+      report.answered = read.answered
+      report.headRead = true
+      if (read.head === root && taken && !report.stopped) {
+        log(`[replicate] TypeScript: ${missed.length} source atom(s) not taken yet (first: ${short(missed[0]!.sig)} — ${missed[0]!.why}); asking again in ${Math.round(retryAfter / 1000)} s`)
+        await sleep(retryAfter)
+        const again = new Map((await ask(missed.map(answer => answer.sig))).map(answer => [answer.sig, answer]))
+        answers = answers.map(answer => again.get(answer.sig) ?? answer)
+      }
+    }
+    for (const answer of answers) {
+      if (!answer.ok) report.failed.push({ sig: answer.sig, why: answer.why })
+      else if (answer.copied) { report.copied.push(answer.sig); report.copiedBytes += answer.bytes }
+      else report.held++
+    }
+    report.ok = !report.failed.length && !report.absentHere.length
+  } catch (error) {
+    report.ok = false
+    report.error = error instanceof Error ? error.message || String(error) : String(error)
+  }
+  return report
+}
+
+/** `promise`, or `otherwise` once `ms` has passed: a read of a stalled host
+ *  never holds the pass. */
+const within = <T>(ms: number, promise: Promise<T>, otherwise: T): Promise<T> => {
+  const clock = AbortSignal.timeout(ms)
+  return Promise.race([
+    promise.catch(() => otherwise),
+    new Promise<T>(resolve => clock.addEventListener('abort', () => resolve(otherwise), { once: true })),
+  ])
+}
+
+/** Pure: what a TypeScript run means, as the lines a publish prints. */
+export function typescriptVerdict(report: TypescriptReport): string[] {
+  const { host, root } = report
+  if (report.error) return [`[replicate] TypeScript: not asked of ${host} (${report.error}); the package is published and installs as before`]
+  if (!report.named) return [`[replicate] TypeScript: ${short(root)} names no source atoms`]
+  const there = report.copied.length + report.held
+  if (report.ok) {
+    return [`[replicate] TypeScript: ${host} holds ${there} of ${report.named} source atom(s) of ${short(root)} — ${report.copied.length} copied from its farm (${kb(report.copiedBytes)}), ${report.held} already held`]
+  }
+  const first = report.failed[0] ?? { sig: report.absentHere[0]!, why: 'not on this machine\'s host' }
+  const retry = `${REPLICATE_STEP} -- --sig ${root}`
+  // THE TRUE CAUSE, FROM THE HOST'S OWN POOL HEAD. The host's farm gives a
+  // root's TypeScript only while the host announces that root, so a host
+  // that is behind, or has moved on, refuses every atom exactly as a worker
+  // without the change would. Only a host that is on this root and still
+  // refuses them all has a worker that does not take TypeScript.
+  const cause = !report.failed.length ? []
+    : !report.headRead ? [`[replicate]   With this machine on: ${retry}`]
+      : !report.answered ? [`[replicate]   ${host}'s pool could not be read (offline?), so why is not known. With this machine on: ${retry}`]
+        : report.head !== root ? (report.current === true && report.head
+          ? [`[replicate]   ${host} now announces ${short(report.head)}: this revision was superseded. The folders both revisions share are held, the rest are hosted with that revision`]
+          : [`[replicate]   ${host} is not on this root yet (${report.head ? `its pool offers ${short(report.head)}` : 'its pool lists no package'}), and its farm gives a root's TypeScript only once it announces that root. When it does: ${retry}`])
+          : !there && !report.timedOut ? [`[replicate]   ${host} announces this root and still refused every atom: its worker does not take TypeScript yet. Deploy hypercomb-relay/blossom-worker, then: ${retry}`]
+            : [`[replicate]   ${host} announces this root but could not read the atoms from its farm, this machine's host. With this machine on: ${retry}`]
+  const unasked = report.failed.filter(failure => failure.why === NOT_ASKED).length
+  const stalled = report.stopped
+    ? [`[replicate]   The pass stopped after ${TYPESCRIPT_TIMEOUTS} asks in a row got no answer in time; ${unasked} atom(s) were not asked for`]
+    : []
+  return [
+    `[replicate] TYPESCRIPT NOT HOSTED — ${host} did not take ${report.named - there} of ${report.named} source atom(s) of ${short(root)} (first: ${short(first.sig)} — ${first.why})`,
+    `[replicate]   The package is published and installs as before; only "TypeScript" in the code view answers "not hosted" there.`,
+    ...stalled,
+    ...cause,
+    ...(report.absentHere.length ? [`[replicate]   ${report.absentHere.length} atom(s) are not in this machine's relay content dir — publish again from this checkout`] : []),
+  ]
+}
+
 // ── standalone ──────────────────────────────────────────────────────────────
 
 /** Whom builds follow (stamp-install-channel.ts writes it). */
@@ -516,6 +747,11 @@ async function main(): Promise<void> {
   const report = await replicateRevision({ root, host })
   for (const line of replicationVerdict(report, channel).lines) console.log(line)
   if (!report.ok) process.exitCode = 3
+  // The package's TypeScript, once the package is settled. It decides no exit code.
+  if (report.ok) {
+    try { for (const line of typescriptVerdict(await replicateTypescript({ root, host, current: true }))) console.log(line) }
+    catch (error) { console.log(`[replicate] TypeScript: not asked (${error instanceof Error ? error.message : String(error)})`) }
+  }
 }
 
 /** Run only as a script — a spec imports the helpers above without replicating. */

@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { bagSignature } from '../../hypercomb-runtime/src/bags.js'
 import { encodeTransferPack } from '../../hypercomb-runtime/src/transfer-pack.js'
 import {
-  buildInputsDigest, buildScriptPaths, byCodeUnit, checkBuildStamp, fileContentSig, inputsMoved, sortedNames, writeBuildStamp,
+  BUILD_SCRIPT_FILES, buildInputsDigest, buildScriptPaths, byCodeUnit, checkBuildStamp, fileContentSig, inputsMoved, sortedNames, writeBuildStamp,
 } from './build-determinism.js'
 import { bagAddress } from './retention.js'
 
@@ -157,6 +157,21 @@ describe('a publish that skips the build', () => {
     stampNow()
     writeFileSync(buildScriptPaths(scripts)[0]!, '// changed')
     expect(checkBuildStamp(project, dist, ROOT_SIG, scripts).ok).toBe(false)
+  })
+
+  it('the scripts that decide what TypeScript the package hosts are build scripts', () => {
+    expect(BUILD_SCRIPT_FILES).toContain('source-filters.ts')
+    expect(BUILD_SCRIPT_FILES).toContain('typescript-atoms.ts')
+    // …and the real ones exist, so the stamp never hashes an absent path.
+    for (const path of buildScriptPaths(__dirname)) expect(existsSync(path), path).toBe(true)
+  })
+
+  it('is refused once a file of types alone changes — no unit bundles it, but the package hosts its TypeScript', () => {
+    writeFileSync(join(project, 'src', 'x', 'only-types.ts'), 'export type T = string')
+    stampNow()
+    expect(checkBuildStamp(project, dist, ROOT_SIG, scripts)).toEqual({ ok: true })
+    writeFileSync(join(project, 'src', 'x', 'only-types.ts'), 'export type T = number')
+    expect(checkBuildStamp(project, dist, ROOT_SIG, scripts)).toMatchObject({ ok: false, reason: expect.stringContaining('sources have changed') })
   })
 
   it('is refused when dist holds a different root than the build made', () => {

@@ -15,8 +15,8 @@ import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
-import { EXIT_HOST_BEHIND, confirmOnPublicHost, pullToPublicHost } from './publish.js'
-import { PUBLIC_INSTALL_HOST, REPLICATE_STEP, hostPoolHead, type ReplicationReport } from './replicate-public-host.js'
+import { EXIT_HOST_BEHIND, confirmOnPublicHost, pullToPublicHost, typescriptToPublicHost } from './publish.js'
+import { PUBLIC_INSTALL_HOST, REPLICATE_STEP, hostPoolHead, type ReplicationReport, type TypescriptReport } from './replicate-public-host.js'
 
 const SRC = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const SCRIPTS = dirname(fileURLToPath(import.meta.url))
@@ -125,6 +125,68 @@ describe('confirmOnPublicHost — after the stamp', () => {
     const replicate = vi.fn(async () => report())
     expect(await confirmOnPublicHost({ host: null, root: STAMPED, channel: 'essentials' }, { replicate, log: () => {} })).toBe(0)
     expect(replicate).not.toHaveBeenCalled()
+  })
+})
+
+describe('typescriptToPublicHost — last, and never an exit code', () => {
+  const typed = (over: Partial<TypescriptReport> = {}): TypescriptReport => ({
+    host: 'hypercomb.com', root: STAMPED, named: 2, absentHere: [], copied: ['c'.repeat(64)], copiedBytes: 2048, held: 1, failed: [], head: null, headRead: false, answered: false, timedOut: 0, stopped: false, ok: true,
+    ...over,
+  })
+
+  it('asks the host for the revision\'s source atoms and says what it holds', async () => {
+    const typescript = vi.fn(async () => typed())
+    const lines: string[] = []
+    await typescriptToPublicHost({ host: 'hypercomb.com', root: STAMPED, current: true }, { typescript, log: line => lines.push(line) })
+    expect(typescript).toHaveBeenCalledWith({ root: STAMPED, host: 'hypercomb.com', current: true })
+    expect(lines).toEqual(['[replicate] TypeScript: hypercomb.com holds 2 of 2 source atom(s) of aaaaaaaaaaaa… — 1 copied from its farm (2.0 KB), 1 already held'])
+  })
+
+  it('a host that took none, or a step that throws, changes no exit code and throws nothing', async () => {
+    const before = process.exitCode
+    const lines: string[] = []
+    const none = typed({ ok: false, copied: [], copiedBytes: 0, held: 0, failed: [{ sig: 'c'.repeat(64), why: 'HTTP 404' }, { sig: 'd'.repeat(64), why: 'HTTP 404' }] })
+    await expect(typescriptToPublicHost({ host: 'hypercomb.com', root: STAMPED }, { typescript: async () => none, log: line => lines.push(line) })).resolves.toBeUndefined()
+    expect(lines.join('\n')).toMatch(/TYPESCRIPT NOT HOSTED/)
+    await expect(typescriptToPublicHost({ host: 'hypercomb.com', root: STAMPED }, { typescript: async () => { throw new Error('boom') }, log: () => {} })).resolves.toBeUndefined()
+    await expect(typescriptToPublicHost({ host: 'hypercomb.com', root: STAMPED }, { typescript: async () => typed(), log: () => { throw new Error('no console') } })).resolves.toBeUndefined()
+    expect(process.exitCode).toBe(before)
+  })
+
+  it('a host the confirm found behind is told so: the pass says the host is not on this root, not that its worker is missing', async () => {
+    const refused = [{ sig: 'c'.repeat(64), why: 'HTTP 404' }, { sig: 'd'.repeat(64), why: 'HTTP 404' }]
+    const typescript = vi.fn(async (options: { current?: boolean }) => typed({
+      ok: false, copied: [], copiedBytes: 0, held: 0, failed: refused, head: 'b'.repeat(64), headRead: true, answered: true, current: options.current,
+    }))
+    const lines: string[] = []
+    await typescriptToPublicHost({ host: 'hypercomb.com', root: STAMPED, current: false }, { typescript, log: line => lines.push(line) })
+    expect(typescript).toHaveBeenCalledWith({ root: STAMPED, host: 'hypercomb.com', current: false })
+    const text = lines.join('\n')
+    expect(text).toMatch(/hypercomb\.com is not on this root yet \(its pool offers bbbbbbbbbbbb…\)/)
+    expect(text).not.toMatch(/worker|Deploy/)
+    // The publish hands over what its confirm read, and nothing it did not.
+    const publish = readFileSync(resolve(SCRIPTS, 'publish.ts'), 'utf8')
+    expect(publish).toContain('await typescriptToPublicHost({ host: pulled.host, root, current: owed === 0 })')
+  })
+
+  it('asks nothing when no public host took the revision, and says nothing when there is no root', async () => {
+    const typescript = vi.fn(async () => typed())
+    const lines: string[] = []
+    await typescriptToPublicHost({ host: null, root: STAMPED }, { typescript, log: line => lines.push(line) })
+    expect(lines).toEqual([expect.stringMatching(/its TypeScript is hosted on this machine's host only/)])
+    await typescriptToPublicHost({ host: 'hypercomb.com', root: null }, { typescript, log: line => lines.push(line) })
+    expect(lines).toHaveLength(1)
+    expect(typescript).not.toHaveBeenCalled()
+  })
+
+  it('runs after everything that decides the publish\'s outcome', () => {
+    const publish = readFileSync(resolve(SCRIPTS, 'publish.ts'), 'utf8')
+    const main = publish.slice(publish.indexOf('async function main('))
+    const last = main.indexOf('await typescriptToPublicHost(')
+    expect(last).toBeGreaterThan(main.indexOf('process.exitCode = owed'))
+    expect(last).toBeGreaterThan(main.indexOf('PUBLISHED under'))
+    // Nothing after it but the end of main: no exit, no exit code.
+    expect(main.slice(last, main.indexOf('/** Run only as a script'))).not.toMatch(/process\.exit/)
   })
 })
 

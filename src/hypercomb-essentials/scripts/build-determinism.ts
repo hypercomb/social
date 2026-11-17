@@ -92,7 +92,7 @@ const knowledgeDigest = (projectRoot: string): string => {
 }
 
 /** The build scripts whose change changes the bytes a build makes. */
-export const BUILD_SCRIPT_FILES = ['build-module.ts', 'passive-queen.ts', 'build-determinism.ts', 'pool-address.ts', 'knowledge-atoms.ts']
+export const BUILD_SCRIPT_FILES = ['build-module.ts', 'passive-queen.ts', 'build-determinism.ts', 'pool-address.ts', 'knowledge-atoms.ts', 'source-filters.ts', 'typescript-atoms.ts']
 
 export const buildScriptPaths = (scriptsDir: string): string[] => BUILD_SCRIPT_FILES.map(f => join(scriptsDir, f))
 
