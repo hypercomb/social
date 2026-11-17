@@ -154,3 +154,23 @@ name holds every word. The reader's `codeIndex()` gives the tree every name
 Not built: a package module is the compiled JavaScript of its TypeScript
 source, shown under the module's name; only the platform sources carry their
 real `.ts` files. Nothing can be edited from the tree.
+
+## Editing a file on a tile (2026-11-16)
+
+jwize, of the code view: "so you can potentially author upgrades." A file
+on a tile, opened from the tile's Files list or from the code tree, has an
+Edit button. It swaps the reading view for the file's own text (never the
+indented copy JSON is read as), with Save and Cancel; Ctrl+S saves, Escape
+leaves, Tab is two spaces.
+
+Save writes at once through the tile's files door
+(`files/tile-files.drone.ts`), the same door the chat's writes use. It is
+the participant's own hand, so nothing waits in Execution, and the file it
+replaces stays in the tile's history. On a managed site door the view then
+shows what the page did when it ran with the saved file
+(`history/frame-watch.ts`): the same report a model is handed after its own
+write.
+
+Only a file on a tile can be edited: a resource a record names, a module
+and a platform source are read-only here. Editing code the hive runs is a
+draft and a review, which is the chat's `write` and not this view.
