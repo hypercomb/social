@@ -2,7 +2,7 @@
 const { f1, hexPts, hex, LIT, CELL, GHOST, STEEL, marker, markerS, flow, ghost, text, svg, note, beeDef, server, check, device, part } = require('./lib.cjs')
 
 module.exports = () => {
-  return svg('your hive inside the browser on your own device; one explicit gate, publish, lets content out to the hosts you choose', [
+  return svg('your hive inside the browser on your own device; one explicit gate, stage, lets content out to the hosts you choose', [
     `<defs>${marker('pr-ah')}</defs>`,
     part('device', text(275, 50, 'your device', 'd', 18),
     device(40, 62, 470, 250),
@@ -14,7 +14,7 @@ module.exports = () => {
     `<path d="M560,40 V340" stroke="var(--dim)" stroke-width="1" stroke-dasharray="6 7"/>`,
     part('gate', ghost('M305,200 C400,200 460,196 536,196'),
     `<rect x="540" y="176" width="40" height="40" rx="3" fill="var(--bg)" stroke="var(--honey)" stroke-width="2"/>`, hex(560, 196, 12, 'fill="var(--honey-fill)"'),
-    text(560, 246, 'publish', 'k hy', 22)),
+    text(560, 246, 'stage', 'k hy', 22)),
     part('hosts', flow('M580,194 C620,190 650,160 686,130', 'pr-ah'),
     flow('M580,196 C620,196 690,198 742,200', 'pr-ah'),
     flow('M580,198 C620,202 650,240 686,270', 'pr-ah'),

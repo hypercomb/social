@@ -106,7 +106,7 @@ function parseRecord(raw: string | null | undefined): ManagedPage | null {
  * The farthest REACH (destructive included) and no roster — a grant with no
  * `granted` list is one the gate does not ask a roster of (core
  * machine-admission.ts), so every verb a behaviour offers to models is
- * callable — but SCOPE stops at the hive: a verb declared `network` (publish,
+ * callable — but SCOPE stops at the hive: a verb declared `network` (stage,
  * republish, contribute, follow, groups, hide's signed mesh event, adopt, the
  * questions) is neither offered nor admitted. The chat's own writes are
  * declared at the hive (MACHINE_WRITE) and pass. Sharing is the owner's

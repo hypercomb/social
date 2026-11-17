@@ -741,8 +741,8 @@ replant"); the tree lives in `scripts/bridge/living-presentation/tree.cjs`.
   words agree. The earlier root, `presentation`, is retired the way every
   earlier planting is (`retired.cjs` `roots`): `plant.cjs` forgets its marker
   at `/` with `trait ~ presentation`, so the tile stays one trait away with
-  its history, and withdraws it from every domain it publishes to with
-  `publish /presentation off <domain>` before publishing `protocol` there.
+  its history, and withdraws it from every domain it stages on with
+  `stage /presentation off <domain>` before staging `protocol` there.
   Nothing is deleted; the one address serves the one presentation.
 - **No word twice.** A name is one molecule hive-wide, so two tiles named
   `cube` would feed one molecule. The opening's sixth move is `fill` ("the

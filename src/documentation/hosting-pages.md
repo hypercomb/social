@@ -3,7 +3,7 @@
 **The door, 2026-11-04.** jwize: *"change from hosting to
 host-setup.hypercomb.com not host"*. The tile stays `/hosting` (its lineage
 and its history); its address on hypercomb.com is `host-setup`, said with the
-publish's own-address modifier (`publish /hosting as host-setup on
+stage word's own-address modifier (`stage /hosting as host-setup on
 hypercomb.com`), and the worker's exact binding for `host-setup.hypercomb.com`
 carries the title. Every link to the pages says `host-setup.hypercomb.com`.
 
@@ -288,7 +288,7 @@ working.*
 2. ~~Make the three components once; have every page use them.~~ Done
    2026-10-23 (`chrome.css`, `generate.cjs`).
 3. Open the door, in this order: deploy the worker (it carries the title and
-   the plans-pool guard), then `publish /hosting as host-setup on
+   the plans-pool guard), then `stage /hosting as host-setup on
    hypercomb.com` in jwize's hive (it asks him first). Success is `hosting`
    in his signed index with the address `host-setup`, then
    host-setup.hypercomb.com opening the main page titled *Host your hive*.

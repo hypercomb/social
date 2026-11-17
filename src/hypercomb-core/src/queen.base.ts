@@ -15,7 +15,7 @@ export interface QueenUsageExample {
 
 export abstract class QueenBee extends Bee {
 
-  /** The slash behaviour this queen bee responds to (e.g. 'paste', 'export', 'publish') */
+  /** The slash behaviour this queen bee responds to (e.g. 'paste', 'export', 'stage') */
   abstract readonly command: string
 
   /**

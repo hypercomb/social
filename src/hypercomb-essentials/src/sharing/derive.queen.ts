@@ -13,7 +13,7 @@
 //                                        sign what a terminal verification found
 //                                        (verify-minified-package.mjs --host)
 //
-// The host is said the way `publish on <domain>` says it; `@<host>` is read
+// The host is said the way `stage on <domain>` says it; `@<host>` is read
 // too. There is no default host (jwize 2026-10-11): a line that names none
 // reads nothing and signs nothing.
 

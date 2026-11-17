@@ -94,7 +94,7 @@ is easy: a ledger row several screens down is a downgrade with a friendly name.
 ## Where it is in force
 
 - Host directory (`/hosts`) — a host's build ledger.
-- Publish panel — a branch's published versions.
+- Staging window — a branch's published versions.
 
 Anything that grows a "get rid of this" affordance next joins this list rather
 than inventing a second way. Ratchets: `concealment/concealment.spec.ts`,

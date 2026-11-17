@@ -1,6 +1,6 @@
 # Remove from my hosts: secure delete
 
-Everyday visibility is the **domain switch** on a layer's Publish panel: on,
+Everyday visibility is the **domain switch** on a layer's Staging window: on,
 the place is served on that domain; off, it is not. That is the normal act,
 and it deletes nothing.
 

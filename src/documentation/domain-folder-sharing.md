@@ -71,7 +71,7 @@ the heap, unnamed; a name that is later given to someone else starts from its ow
 
 A branch's history is its lineage sigbag: ordered markers, each a pointer to a layer already in the heap. Sharing it is
 copying markers into the root's pools beside the atoms they name, so any host holding the root can show the branch's past and
-a visitor can step back. It is **optional per branch** (`publish history on|off`), because a history carries every earlier
+a visitor can step back. It is **optional per branch** (`stage history on|off`), because a history carries every earlier
 state of what was published.
 
 ## What a subdomain needs

@@ -11,9 +11,9 @@
 //   MSYS_NO_PATHCONV=1 node scripts/bridge/_hosting-site/generate.cjs --root /email --dry
 //   MSYS_NO_PATHCONV=1 node scripts/bridge/_hosting-site/generate.cjs --root /email
 //
-// and publish the creation to its door (the participant presses Allow in the hive):
+// and stage the creation on its door (the participant presses Allow in the hive):
 //
-//   MSYS_NO_PATHCONV=1 node scripts/bridge/say.cjs "publish /email on hypercomb.com"
+//   MSYS_NO_PATHCONV=1 node scripts/bridge/say.cjs "stage /email on hypercomb.com"
 //
 // THE COPY LIVES IN THE HIVE once it is filed (documentation/hosting-pages.md:
 // "The copy lives in the hive, not here"). notes.json beside this file is only

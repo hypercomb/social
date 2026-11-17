@@ -116,7 +116,7 @@ upload is slow.
   leaves every peer's grid when you leave (a signed leave at once; a dead
   tab's slot within about two minutes), exactly like any tile. A peer who
   TOOK it keeps it: its pictures are fetched through the broker at the take,
-  while you are still here. `publish` still needs a host — a publication
+  while you are still here. `stage` still needs a host — what is staged
   must outlive you.
 - **Never retract.** A shared name leaves the room only when you delete it,
   move it away, make it private, leave, or go silent past your 90 s slot.
@@ -144,8 +144,8 @@ upload is slow.
   PUBLISHING still requires hosting.
 - **Join offers what your host serves (2026-09-25)** —
   [deployment-stages.md](deployment-stages.md). Joining now offers every tile
-  you make public while joined. `publish here` is not part of swarm sharing.
-  It stays the act that publishes a creation, and it stays refused at root.
+  you make public while joined. `stage here` is not part of swarm sharing.
+  It stays the act that stages a creation, and it stays refused at root.
 - **"Watching only — set a host in /hosts."** Gone. Watching needs nothing,
   and neither does sharing: with no host your tiles are live from your
   device. A host is what makes them stay after you leave.
@@ -194,7 +194,7 @@ take.
 - While `isJoinedHere()` is true, `HostSyncService` makes every write door
   the offered pages resolve to a target — public-only, flagged `swarm` — plus
   the hive root's own answer (where a root offered with no page, such as a
-  publish or an invite, goes). There is no host pick, no `publish here`, and
+  publish or an invite, goes). There is no host pick, no `stage here`, and
   nothing stored.
 - A swarm host is owed only what a root offered on a page needs **where it is
   shown**: the walk passes the page to `markPublic(sig, kind, closure, page)`,
@@ -1612,7 +1612,7 @@ ceilings above, the next step is sharding the open point by room.
 
 - [resource-offload-relays.md](resource-offload-relays.md) — the availability
   gate and the 2026-09-25 rule this amends
-- [deployment-stages.md](deployment-stages.md) — stages, and `publish here`
+- [deployment-stages.md](deployment-stages.md) — stages, and `stage here`
 - [consent-hosting.md](consent-hosting.md) — hosting outside a meeting
 - [hosting-from-a-machine.md](hosting-from-a-machine.md) — the NSSM line and
   the NIP-11 check

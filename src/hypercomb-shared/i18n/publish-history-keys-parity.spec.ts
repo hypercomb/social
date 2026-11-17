@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 // PUBLIC HISTORY SPEAKS EVERY LANGUAGE.
 //
-// `publish history on` (hypercomb-essentials/src/sharing/publish.queen.ts)
+// `stage history on` (hypercomb-essentials/src/sharing/publish.queen.ts)
 // answers with the one warning a publisher must not miss: whatever is served
 // while history is public may be copied or cached elsewhere, and turning it
 // off cannot take that back. A key missing from a catalog falls through to

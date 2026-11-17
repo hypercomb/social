@@ -170,7 +170,7 @@ async function refresh({ write = true, verify = false } = {}) {
     .some(p => typeof p?.promoted === 'boolean'))
   const eligible = knowsPromotion ? sites.filter(promoted) : sites
   if (!knowsPromotion) console.warn(`  ! ${url} reports no \`promoted\` — listing every published creation (the worker has not shipped it yet)`)
-  else if (!eligible.length) throw new Error(`the ledger at ${url} reports no promoted creation yet — promote one from the Publish window; the committed list is left as it was`)
+  else if (!eligible.length) throw new Error(`the ledger at ${url} reports no promoted creation yet — promote one from the Staging window; the committed list is left as it was`)
   const candidates = reported ? doorsFrom(eligible) : derivedDoorsFrom(eligible)
   if (!reported) console.warn(`  ! ${url} reports no \`hosts\` — deriving and probing (delete derivedDoorsFrom once the worker ships)`)
 

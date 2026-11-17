@@ -2,7 +2,7 @@
 // and a declined one says nothing was published. Consent stays a person's:
 // nothing publishes without `confirmed: true`.
 //
-// 2026-10-23: `publish here` on a tile that opens as its website waited on a
+// 2026-10-23: `publish here` (now `stage here`) on a tile that opens as its website waited on a
 // dialog the site hid, and a decline returned without a word — the session
 // that asked heard nothing for hours.
 

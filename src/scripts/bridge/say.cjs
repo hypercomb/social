@@ -21,7 +21,7 @@
 // line has finished and the hive has been quiet for a moment (--quiet, 300 ms),
 // instead of after a fixed second and a half. --listen is then only the
 // ceiling. A sentence given its own --listen is held for that whole window, as
-// it always was (a publish that keeps speaking); add --quiet to stop it early
+// it always was (a stage that keeps speaking); add --quiet to stop it early
 // too, or --quiet 0 to hold the default window.
 //
 // Git Bash rewrites a leading `/` into a Windows path: run with

@@ -6,8 +6,8 @@
 // Makes /<lineage> and one child tile per page (merge-safe: existing children
 // are kept), then gives each tile its own page: put-resource(html) →
 // decoration-add(visual:website:page, replaceKind). This writes to the hive
-// only. Publishing the site to <lineage>.hypercomb.com is a separate act,
-// from the Publish panel or `npm run publish:content -- <lineage> --r2`.
+// only. Staging the site on <lineage>.hypercomb.com is a separate act,
+// from the Staging window or `npm run publish:content -- <lineage> --r2`.
 
 const WebSocket = require('ws')
 const { renderPage } = require('./engine.cjs')

@@ -18,8 +18,8 @@
 //   groups ungroup <group>          take the group off the layer (undo brings it back)
 //
 // A group is named by its name, in any case; one with spaces is quoted —
-// `groups add "my blog" one, two`. `rawArgs`: `publish` is itself a behaviour
-// word, and the whole line is this word's.
+// `groups add "my blog" one, two`. `rawArgs`: `publish` was itself a behaviour
+// word (now `stage`), and the whole line is this word's.
 //
 // A MODEL MAY SAY IT (jwize 2026-10-13: "the whole idea is that we can
 // publish groups"): `machine` below admits every form but `ungroup`, names
@@ -74,7 +74,7 @@ export class GroupsQueenBee extends QueenBee {
     { input: '/groups publish blog', result: 'Publishes every tile in Blog' },
   ]
 
-  // `publish` is itself a behaviour word — the whole line is this word's.
+  // `publish` was itself a behaviour word (now `stage`) — the whole line is this word's.
   override rawArgs = true
 
   override machine = {

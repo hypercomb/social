@@ -115,7 +115,7 @@ attaching is refused, start Edge with its own profile instead, adding
 launches Edge (`--browser chrome` or `chromium` for another) with the profile
 `.hive-profile` in your home folder unless `--profile` names another. That hive
 stays between runs and is a hive of its own, with its own signing key: to
-publish from it to your domains, allow its key with the keys word.
+stage from it on your domains, allow its key with the keys word.
 `--headless` hides it.
 
 ## Options
