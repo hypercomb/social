@@ -114,7 +114,7 @@ const ledgerOf = (text: string, zone: string): { owners: string[]; sites: string
     for (const host of hosts) if (host !== zone && under(host, zone) && !sites.includes(host)) sites.push(host)
     if (!hosts.includes(zone)) continue
     const publishers = (Array.isArray(site['publishers']) ? site['publishers'] as unknown[] : []).slice(0, 16)
-      .filter((p): p is Record<string, unknown> => !!p && typeof p === 'object' && SIG.test(String(p['pubkey'] ?? '')))
+      .filter((p): p is Record<string, unknown> => !!p && typeof p === 'object' && SIG.test(String((p as Record<string, unknown>)['pubkey'] ?? '')))
       .sort((a, b) => Number(b['primary'] === true) - Number(a['primary'] === true))
     for (const publisher of publishers) {
       const key = String(publisher['pubkey']).toLowerCase()
