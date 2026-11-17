@@ -76,7 +76,7 @@ export function seatFillers(html: string, fillerFor: (word: string) => string | 
 
 /** The page a filler tile wears, by its route when the resolution knows it,
  *  else read off its layer. */
-async function fillerPage(resolution: TraitResolution, sig: string): Promise<string | null> {
+async function fillerPage(resolution: TraitResolution, sig: string, seats: SeatsPart, at: readonly string[]): Promise<string | null> {
   const store = service<StoreLike>('@hypercomb.social/Store')
   if (!store?.getResource) return null
   let pageSig: string | null = null
@@ -96,13 +96,20 @@ async function fillerPage(resolution: TraitResolution, sig: string): Promise<str
     }
   }
   if (!pageSig || !SIG.test(pageSig)) return null
+  if (!seats('route' in resolution && resolution.route.length ? resolution.route : at, pageSig)) return null
   const blob = await fetchThroughContentHop(pageSig, s => store.getResource!(s)).catch(() => null)
   return blob && blob.size > 0 ? blob.text() : null
 }
 
 /** The page worn at `segments`, with each trait it states filled by what the
  *  tile's traits resolve to. Handed back untouched whenever nothing fills. */
-export async function composeTraits(segments: readonly string[], html: string): Promise<string> {
+/** May the page `pageSig`, worn at `route`, be seated into this page? Every
+ *  part a surface seats runs where the page runs: the website view seats only
+ *  its own parts into a page of its own (it runs as the hive), and anything
+ *  into a sealed page (2026-11-16, page-run-gate.ts). Unasked, every part seats. */
+export type SeatsPart = (route: readonly string[], pageSig: string) => boolean
+
+export async function composeTraits(segments: readonly string[], html: string, seats: SeatsPart = () => true): Promise<string> {
   try {
     if (segments.length === 0 || !html || !html.includes(TRAIT_ATTR)) return html
     const traits = service<TraitProvider>(TRAITS_IOC_KEY)
@@ -111,7 +118,7 @@ export async function composeTraits(segments: readonly string[], html: string): 
     for (const resolution of await traits.resolveAt(segments)) {
       const sig = traitFiller(resolution)
       if (!sig) continue
-      const page = await fillerPage(resolution, sig)
+      const page = await fillerPage(resolution, sig, seats, segments)
       if (page) pages.set(moleculeKey(resolution.word), page)
     }
     if (pages.size === 0) return html

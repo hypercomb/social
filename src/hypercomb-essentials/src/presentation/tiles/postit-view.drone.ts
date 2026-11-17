@@ -28,7 +28,7 @@ import { onPageCellsChanged, pageCellsAt } from './page-cells.js'
 import { readTilePropertiesAt, tilePictureCandidates } from '../../editor/tile-properties.js'
 import { resolveLocalResourceReference } from './local-resource-reference.js'
 import { trackScrollGutter } from './scroll-gutter.js'
-import { inertPageText, mayRunPage } from './page-run-gate.js'
+import { SEALED_PAGE_SANDBOX, inertPageText, mayRunPage, pageRunsSealed, sealedPageDocument } from './page-run-gate.js'
 import { POSTIT_KIND, POSTIT_VIEW, POSTIT_SIZE_KEY } from '../../commands/postit-kind.js'
 import type { PostitPayload } from '../../commands/postit.queen.js'
 import type { BackGesture } from '../../navigation/back-gesture.service.js'
@@ -670,6 +670,9 @@ export class PostitViewDrone extends Drone {
     // has not been reviewed here is shown as text, inert — never run, never
     // blank. The site view asks the same question of the same helper.
     const runs = payload?.htmlSig ? mayRunPage(segments, payload.htmlSig) : true
+    // And one that runs but is someone else's runs SEALED, in a frame of its own
+    // origin with nothing of this hive in reach (page-run-gate.ts pageRunsSealed).
+    const apart = !!payload?.htmlSig && runs && page !== null && pageRunsSealed(segments, payload.htmlSig)
     if (gen !== this.#gen || this.#vm()?.mode !== POSTIT_VIEW) return
 
     // A PASS THAT CHANGES NOTHING LEAVES THE POST ALONE. Reconcile runs on
@@ -681,8 +684,14 @@ export class PostitViewDrone extends Drone {
     // loop ran ~15 times a second from the first background pulse on
     // (2026-10-24), restarting the page each turn.
     const shows = [segments.join('\u0000'), payload?.htmlSig ?? '', page === null ? '' : 'arrived', payload?.text ?? '',
-      imageSig ?? '', title, this.#sealedOpen() ? 'sealed' : 'open', runs ? 'runs' : 'inert'].join('\u0001')
+      imageSig ?? '', title, this.#sealedOpen() ? 'sealed' : 'open', runs ? 'runs' : 'inert', apart ? 'apart' : 'here'].join('\u0001')
     if (this.#post?.isConnected && this.#shows === shows) return
+    // The sealed frame's document is read whole before the swap below, which
+    // stays one synchronous step.
+    const apartDoc = apart && store && payload?.htmlSig && page !== null
+      ? await sealedPageDocument(segments, payload.htmlSig, page, store)
+      : null
+    if (gen !== this.#gen || this.#vm()?.mode !== POSTIT_VIEW) return
 
     // From here to the append is one synchronous step, so the post swaps in
     // place and keeps its `view:active` claim: a rebuild is not a close.
@@ -710,6 +719,23 @@ export class PostitViewDrone extends Drone {
       body.textContent = page !== null ? inertPageText(page) : 'This post-it' + String.fromCharCode(39) + 's page has not arrived yet.'
       note.append(heading, notice, body)
       host.append(note)
+    } else if (payload?.htmlSig && apart) {
+      const paper = document.createElement('article')
+      paper.className = 'postit-page postit-apart'
+      if (apartDoc) {
+        const frame = document.createElement('iframe')
+        frame.setAttribute('sandbox', SEALED_PAGE_SANDBOX)
+        frame.setAttribute('referrerpolicy', 'no-referrer')
+        frame.setAttribute('title', title)
+        frame.srcdoc = apartDoc.srcdoc
+        paper.append(frame)
+      } else {
+        const note = document.createElement('p')
+        note.style.cssText = 'padding:2rem;font-family:system-ui'
+        note.textContent = 'This page came from elsewhere and could not be opened apart from your hive, so nothing in it runs.'
+        paper.append(note)
+      }
+      host.append(paper)
     } else if (payload?.htmlSig) {
       const paper = document.createElement('article')
       paper.className = 'postit-page'
@@ -873,6 +899,7 @@ box-shadow:0 .3rem .36rem -.16rem rgba(14,20,26,.55),0 .1rem .14rem rgba(0,0,0,.
 const POST_CSS = `
 .hc-postit-view{position:fixed;top:0;bottom:0;left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);z-index:59992;overflow:auto;background:#101418}
 .postit-page{min-height:100%;background:#fff}
+.postit-apart{display:flex}.postit-apart>iframe{flex:1;display:block;width:100%;min-height:100%;border:0;background:#fff}
 .postit-paper{box-sizing:border-box;width:min(680px,calc(100% - 2rem));margin:8vh auto;padding:3.2rem 3rem 4.4rem;background:linear-gradient(178deg,#fef9c3 0%,#fde68a 100%);color:#3f350c;box-shadow:0 22px 60px rgba(0,0,0,.5),inset 0 -2.5rem 2rem -2rem rgba(120,90,10,.16);transform:rotate(-.6deg);font-family:'Segoe Print','Comic Sans MS',cursive,system-ui}
 .postit-paper h1{margin:0 0 1.2rem;font-size:1.6rem;line-height:1.25}
 .postit-paper p{margin:0;font-size:1.08rem;line-height:1.75;white-space:pre-wrap}

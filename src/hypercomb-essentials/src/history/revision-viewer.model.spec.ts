@@ -172,8 +172,11 @@ describe('frameDocument — the document a version runs in', () => {
       new Function(standIn)()
       const ioc = (window as unknown as { ioc: { get(k: string): any } }).ioc
       expect(ioc.get('@hypercomb.social/Lineage').explorerSegments()).toEqual(['jaime-weise'])
-      const layer = await ioc.get('@diamondcoreprocessor.com/HistoryService').currentLayerAt('anything')
-      expect(layer).toEqual(data.layer)
+      const history = ioc.get('@diamondcoreprocessor.com/HistoryService')
+      // Its own tile answers with the version's layer; any other place with nothing,
+      // never the tile's layer passed off as another's (2026-11-16).
+      expect(await history.currentLayerAt(await history.sign(ioc.get('@hypercomb.social/Lineage')))).toEqual(data.layer)
+      expect(await history.currentLayerAt(await history.sign({ explorerSegments: () => ['jaime-weise', 'child'] }))).toBeNull()
       const blob = await ioc.get('@hypercomb.social/Store').getResource(sig('1'))
       // jsdom's Blob has no text(); a FileReader reads it as a browser would.
       const text = await new Promise<string>(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(blob) })

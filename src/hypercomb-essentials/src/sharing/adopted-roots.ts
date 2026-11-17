@@ -203,3 +203,12 @@ export const isPeerContentAt = (segments: readonly string[]): boolean => {
   const segs = segments.map(s => String(s ?? ''))
   return readPaths(CARRIED_KEY).some(root => isPrefixOf(root, segs))
 }
+
+/** The owner's own replica on a managed site door: within the site's own tile
+ *  and in no branch taken in beneath it. Their words, whoever folded them in. */
+export const isOwnReplicaAt = (segments: readonly string[]): boolean => {
+  if (segments.length === 0) return false
+  const own = managedSiteSegments()
+  if (!own || own.length === 0) return false
+  return isPrefixOf(own, segments.map(s => String(s ?? ''))) && !isPeerContentAt(segments)
+}
