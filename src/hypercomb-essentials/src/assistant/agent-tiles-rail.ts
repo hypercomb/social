@@ -100,7 +100,9 @@ import { readBlurbs, type ChatBlurb } from './chat-blurb.js'
 import { isLongPressMenu } from '../navigation/browser-menu.js'
 import { walkTree, type WalkHistory, type WalkStore } from '../presentation/tiles/tree-walk.js'
 import { RAIL_CSS, RAIL_STYLE_ID } from './tiles-rail.css.js'
-import { CHAT_CODE_EFFECT, showChatCode, type ChatCodeAsk } from './chat-code.js'
+import { CHAT_CODE_EFFECT, chatCodeTarget, showChatCode, type ChatCodeAsk } from './chat-code.js'
+import { CodeTreeView } from './code-tree.view.js'
+import { managedSiteSegments } from '../sharing/managed-record.js'
 import { partByRevision } from './chat-revisions.js'
 import { mountRevisionStrip } from '../sharing/site-revisions.view.js'
 import { readThumbnail, type ThumbnailStore } from '../presentation/tiles/thumbnails.js'
@@ -238,6 +240,7 @@ const backIcon = 'arrow_back'
 const rootIcon = 'hive'
 const findIcon = 'search'
 const convosIcon = 'forum'
+const codeIcon = 'account_tree'
 
 /** A glyph as the shell draws one: the ligature in a .mat-sym span. */
 const glyphSpan = (name: string): HTMLSpanElement => {
@@ -407,6 +410,12 @@ export class AgentTilesRail {
    *  together") — the head band's icon switches, and carries the count of
    *  conversations waiting on you so nothing is missed while it is shut. */
   #convosTab = false
+  /** THE CODE TAB: the third icon. With it open the list is the code as a
+   *  tree of files (code-tree.view.ts), and a file pressed there is read in
+   *  the chat's main pane. One tab at a time: it and the conversations. */
+  #codeTab = false
+  #codeToggle: HTMLButtonElement | null = null
+  #codeTree: CodeTreeView | null = null
   #convosToggle: HTMLButtonElement | null = null
   /** Where the tiles were scrolled when the conversations tab opened. */
   #tilesScroll = 0
@@ -567,9 +576,16 @@ export class AgentTilesRail {
       convosToggle.append(glyphSpan(convosIcon), badge)
       convosToggle.addEventListener('click', () => this.#setConvosTab(!this.#convosTab))
       this.#convosToggle = convosToggle
-      head.append(convosToggle)
+      const codeToggle = document.createElement('button')
+      codeToggle.type = 'button'
+      codeToggle.className = 'hc-rail-code-toggle'
+      codeToggle.append(glyphSpan(codeIcon))
+      codeToggle.addEventListener('click', () => this.#setCodeTab(!this.#codeTab))
+      this.#codeToggle = codeToggle
+      head.append(convosToggle, codeToggle)
     } else {
       this.#convosToggle = null
+      this.#codeToggle = null
     }
     head.append(findToggle)
     this.#setFinding(!!this.#query)
@@ -852,6 +868,8 @@ export class AgentTilesRail {
     this.#dropCodeWatch = null
     this.#dropRevisions?.()
     this.#dropRevisions = null
+    this.#codeTree?.dispose()
+    this.#codeTree = null
     this.#dropBusyWatch?.()
     this.#dropBusyWatch = null
     this.#dropGroupWatch?.()
@@ -1051,6 +1069,19 @@ export class AgentTilesRail {
     // the tiles: with it open the list is the conversations and nothing else.
     // A standing search is over tiles, so it shows the tiles.
     this.#paintConvosToggle()
+    this.#paintCodeToggle()
+    // THE CODE is a tab too. A standing search there is over the code's
+    // names, so the tab keeps the list while something is typed.
+    if (this.#profile.chats && this.#codeTab) {
+      const tree = this.#codeTree ??= new CodeTreeView()
+      tree.setTarget(this.#codeTarget())
+      tree.setQuery(this.#query)
+      list.appendChild(tree.element)
+      if (!tree.element.childElementCount) tree.paint()
+      this.#returning = null
+      list.scrollTop = kept
+      return
+    }
     if (this.#profile.chats && this.#convosTab && !this.#query) {
       list.appendChild(this.#convosSection())
       this.#returning = null
@@ -1657,10 +1688,43 @@ export class AgentTilesRail {
   #setConvosTab(on: boolean): void {
     if (on === this.#convosTab || !this.#profile.chats) return
     const list = this.#list
-    if (on && list) this.#tilesScroll = list.scrollTop
+    if (on && list && !this.#codeTab) this.#tilesScroll = list.scrollTop
     this.#convosTab = on
+    if (on) this.#codeTab = false
     this.paint()
     if (list) list.scrollTop = on ? 0 : this.#tilesScroll
+  }
+
+  /** Open or shut the code tab. One tab at a time: opening it shuts the
+   *  conversations, and the tiles keep their place behind both. */
+  #setCodeTab(on: boolean): void {
+    if (on === this.#codeTab || !this.#profile.chats) return
+    const list = this.#list
+    if (on && list && !this.#convosTab) this.#tilesScroll = list.scrollTop
+    this.#codeTab = on
+    if (on) this.#convosTab = false
+    this.paint()
+    if (list) list.scrollTop = on ? 0 : this.#tilesScroll
+  }
+
+  /** The tile the code tree opens on: the one the conversation in hand is
+   *  about, else the managed site, else the level in hand (chat-code.ts). */
+  #codeTarget(): string[] {
+    const subject = this.#subject
+    const about = subject ? [...subject.path, subject.name].map(segment => String(segment ?? '').trim()).filter(Boolean) : []
+    return chatCodeTarget(about, managedSiteSegments(), this.#here())
+  }
+
+  /** The head band's code icon: pressed while its tab is open. */
+  #paintCodeToggle(): void {
+    const toggle = this.#codeToggle
+    if (!toggle) return
+    toggle.setAttribute('aria-pressed', this.#codeTab ? 'true' : 'false')
+    const label = this.#codeTab
+      ? this.#t('agent.rail-code-hide', 'Back to the tiles')
+      : this.#t('agent.rail-code', 'The code, as files')
+    toggle.title = label
+    toggle.setAttribute('aria-label', label)
   }
 
   /** The head band's conversations icon: pressed while the tab is open, and

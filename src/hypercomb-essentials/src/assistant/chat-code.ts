@@ -16,7 +16,7 @@
 // providers console finds its own host.
 
 import { managedSiteSegments } from '../sharing/managed-record.js'
-import type { InspectWindowView } from './inspect-window.view.js'
+import type { InspectFrame, InspectWindowView } from './inspect-window.view.js'
 
 export const CHAT_CODE_EFFECT = 'chat:code'
 export const CHAT_CODE_HOST = '.chat-code-host'
@@ -41,6 +41,8 @@ export const chatCodeTarget = (
 }
 
 let turn = 0
+/** A step asked for before the pane was the code's: shown when it becomes so. */
+let wanted: InspectFrame | null = null
 
 /** Show the code view in the chat's lent pane, or hand the pane back. */
 export const showChatCode = async (ask: ChatCodeAsk | null | undefined): Promise<void> => {
@@ -55,5 +57,30 @@ export const showChatCode = async (ask: ChatCodeAsk | null | undefined): Promise
     ?.get?.('@hypercomb.social/Lineage') as { explorerSegments?: () => readonly string[] } | undefined
   let here: readonly string[] = []
   try { here = lineage?.explorerSegments?.() ?? [] } catch { here = [] }
-  view.mount(host, { kind: 'tile', segments: chatCodeTarget(ask.segments, managedSiteSegments(), here) })
+  const asked = wanted
+  wanted = null
+  view.mount(host, asked ?? { kind: 'tile', segments: chatCodeTarget(ask.segments, managedSiteSegments(), here) })
+}
+
+/** The chat window's own switch to its code view (chat-window.template.ts). */
+export const CHAT_CODE_TOGGLE = '.chat-code-toggle'
+
+/**
+ * OPEN ONE THING IN THE CHAT'S MAIN PANE: a file, a module, a tile. What the
+ * code tree in the chat's left column calls when a row is pressed
+ * (code-tree.view.ts). While the pane already shows the code it is drawn
+ * there. While it shows the conversation, the window is asked to switch the
+ * way a person asks it, by its own switch, so its state and its button stay
+ * true; the step is kept and shown when the pane arrives. On a surface with
+ * no such pane the inspect panel opens over the hive.
+ */
+export const openChatCode = async (frame: InspectFrame): Promise<void> => {
+  let view: InspectWindowView
+  try { view = (await import('./inspect-window.view.js')).inspectWindow() } catch { return }
+  const host = document.querySelector<HTMLElement>(CHAT_CODE_HOST)
+  if (host?.classList.contains('on')) { ++turn; view.mount(host, frame); return }
+  const toggle = host ? document.querySelector<HTMLElement>(CHAT_CODE_TOGGLE) : null
+  if (!toggle) { view.open(frame); return }
+  wanted = frame
+  toggle.click()
 }
