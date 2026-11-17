@@ -453,7 +453,11 @@ export class InspectWindowView extends EventTarget {
     const module = await reader.moduleText!(frame.sig)
     if (!module) return [el('div', 'hc-inspect-note', this.#t('inspect.not-held', 'That module is not code held here.'))]
     const sections = sectionIndex(module.text)
-    const section = frame.section ? sections.find(entry => entry.path === frame.section) : undefined
+    // A module that ships one source file IS that file: it is read at once,
+    // never listed as a list of one (the code tree opens modules by name).
+    const section = frame.section
+      ? sections.find(entry => entry.path === frame.section)
+      : sections.length === 1 ? sections[0] : undefined
     const out: Node[] = []
 
     const meta = el('div', 'hc-inspect-meta')

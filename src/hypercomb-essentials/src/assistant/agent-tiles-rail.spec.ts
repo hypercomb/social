@@ -307,6 +307,43 @@ describe('tiles rail gestures — every row is a conversation', () => {
     expect(host.querySelector('.hc-rail-walk')).toBeNull()
   })
 
+  // jwize, 2026-11-16: "can we please have a third icon at the top of this
+  // and have the logical code view".
+  it('has a third icon: the code as a tree of files, one tab at a time with the conversations', async () => {
+    const code = host.querySelector('.hc-rail-code-toggle') as HTMLButtonElement
+    const convos = host.querySelector('.hc-rail-convos-toggle') as HTMLButtonElement
+    const icons = [...host.querySelectorAll('.hc-rail-head button .mat-sym')].map(node => node.textContent)
+    expect(icons.slice(-3)).toEqual(['forum', 'account_tree', 'search'])
+    expect(code.getAttribute('aria-pressed')).toBe('false')
+    expect(code.title).toBe('The code, as files')
+
+    code.click()
+    await settle()
+    expect(code.getAttribute('aria-pressed')).toBe('true')
+    expect(code.title).toBe('Back to the tiles')
+    expect(host.querySelector('.hc-rail-list .hc-code-tree')).toBeTruthy()
+    expect(names(host)).toEqual([])
+    expect([...host.querySelectorAll('.hc-code-head')].map(node => node.textContent)).toEqual(['What this chat is about', 'The running code'])
+
+    // The conversations take the list, and the code tab lets go.
+    convos.click()
+    await settle()
+    expect(code.getAttribute('aria-pressed')).toBe('false')
+    expect(convos.getAttribute('aria-pressed')).toBe('true')
+    expect(host.querySelector('.hc-code-tree')).toBeNull()
+    expect(host.querySelector('.hc-rail-convos')).toBeTruthy()
+
+    // And back: the code takes it, then hands the tiles back.
+    code.click()
+    await settle()
+    expect(convos.getAttribute('aria-pressed')).toBe('false')
+    expect(host.querySelector('.hc-rail-convos')).toBeNull()
+    code.click()
+    await settle()
+    expect(host.querySelector('.hc-code-tree')).toBeNull()
+    expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
+  })
+
   it('a click moves into that layer and leaves the reading pane where it was', async () => {
     rows()[0].click()
     await settle()
