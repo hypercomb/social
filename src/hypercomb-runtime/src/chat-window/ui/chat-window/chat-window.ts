@@ -120,6 +120,7 @@ import {
 // hive runs it here as a draft (documentation/hive-read-fence.md, "Writing a
 // module"; runtime module-drafts.ts).
 import { applySectionEdits, draftModule } from '../../../module-drafts'
+import { changeLines } from './execution-change'
 import { installedPackageSig } from '../../../installed-package'
 import { doctrineFailedMessage, doctrineRanMessage, fileFailedMessage, fileRanMessage, managedRule, pageChangeUnready, parseWriteBlock, readsAskedIn, routesNamedIn, sandboxRule, tileFileLabel, unreadAskedMessage, unreadClaimMessage, writeFailedMessage, writeRanMessage, writeSkippedMessage, type TileFileWriteRequest } from './hypercomb-work-fence'
 import { signalSession } from '../window-session'
@@ -1278,6 +1279,8 @@ type ExecutionRequestLike = {
   readonly model: string
   readonly kind: ExecutionKindLike
   readonly lines: readonly string[]
+  /** What the change will do, for the eye (execution-change.ts). */
+  readonly changes?: readonly string[]
   readonly needsGrant: boolean
   /** A change that leaves the machine — waits for a hand, whatever the policy. */
   readonly leaves?: boolean
@@ -1306,6 +1309,8 @@ type ExecutionQueueLike = {
     readonly model: string
     readonly kind: ExecutionKindLike
     readonly lines: readonly string[]
+    /** What the change will do, for the eye; shown beside Run. */
+    readonly changes?: readonly string[]
     /** What each read resolved to; an allowed read is remembered by these. */
     readonly keys?: readonly string[]
     readonly needsGrant: boolean
@@ -2723,7 +2728,11 @@ export class ChatWindow {
       return
     }
     this.archiveArmed.set(true)
-    queueMicrotask(() => this.panel()?.nativeElement
+    // AFTER THE VIEW HAS DRAWN IT. The confirm does not exist until the view
+    // refreshes, and a microtask runs before that: the focus went nowhere,
+    // so Enter did not confirm and Escape did not take it back (seen on the
+    // managed card page, 2026-11-16).
+    afterNextRender(() => this.panel()?.nativeElement
       .querySelector<HTMLElement>('.chat-put-confirm')?.focus())
   }
 
@@ -8317,9 +8326,23 @@ export class ChatWindow {
           }
         }
         if (review) EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
+        // WHAT RUN WILL CHANGE (execution-change.ts): read from the file as
+        // it is now and the text this write would leave. For the eye only;
+        // the write itself is made again against the file when it runs.
+        let changes: string[] = []
+        try {
+          const now = await tileFiles.read(target)
+          if (now.ok) {
+            const made = !parsed.edits ? parsed.body
+              : now.text === null ? null
+                : (edited => 'error' in edited ? null : edited.body)(applySectionEdits(now.text, parsed.edits))
+            if (made !== null) changes = changeLines(now.text, made)
+          }
+        } catch { /* nothing to say; the row shows the command alone */ }
         const entry = queue.request({
           convoId, providerId, model, kind: 'editing', lines: [grammar], needsGrant: false, signal,
           forceReview: review, foreign: conversationForeign(),
+          ...(changes.length ? { changes } : {}),
         })
         if (!review) waitingOn(entry.id)
         if (await entry.decision === 'skip') {

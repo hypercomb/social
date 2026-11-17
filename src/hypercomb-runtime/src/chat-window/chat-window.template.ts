@@ -920,6 +920,14 @@ export function chatWindowTemplate(c: any): Child[] {
                                       txt(() => str(line())),
                                     ),
                                   ]),
+                                // WHAT RUN WILL CHANGE (execution-change.ts): the size of
+                                // the change and where, then the first lines that go and come.
+                                each(() => row().changes ?? [], (__item: any, __i: number) => __i, (change: () => any, __index: () => number) => [
+                                    el("p", { class: "chat-exec-quiet chat-exec-change" },
+                                      attr("title", () => change()),
+                                      txt(() => str(change())),
+                                    ),
+                                  ]),
                                 el("div", { class: "chat-exec-acts" },
                                   el("button", { type: "button", class: "chat-exec-word chat-exec-go" },
                                     on("click", (event: any) => c.decideExec(row().id, "run")),
