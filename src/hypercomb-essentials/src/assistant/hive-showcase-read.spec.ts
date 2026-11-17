@@ -23,7 +23,7 @@ const SHOWCASE = { kind: 'host:showcase', zone: 'example.com', items: [
 const deps = (over: Partial<ShowcaseReadDeps> = {}): ShowcaseReadDeps => ({
   address: async () => LEDGER_AT,
   document: async () => LEDGER,
-  roots: async (host, pubkey) => {
+  roots: async (host, pubkey): Promise<Record<string, string> | null> => {
     // The apex keeps a stray copy that names no showcase; the site holds the real one.
     if (pubkey === OWNER) return host === 'card.example.com' ? { card: HEAD_A, 'showcase:example.com': RECORD } : { card: HEAD_A }
     if (pubkey === FRIEND) return { games: HEAD_B }
