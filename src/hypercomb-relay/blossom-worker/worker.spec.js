@@ -6107,6 +6107,356 @@ test('a farm on a binding that installs a channel gives package files only — n
   })
 })
 
+/** A package whose layers name, in `typescript`, the atoms that hold their
+ *  folders' source as written. `slot` is what the child layer carries there
+ *  in place of its own atom's signature. */
+async function sourcedPackageFixture(tag, slot) {
+  const files = {}
+  const put = async (text) => { const sig = await sha256(text); files[sig] = text; return sig }
+  const source = await put(`// @hypercomb/typescript/${tag}\n// src/${tag}/a.ts\nexport const a: number = 1\n`)
+  const rootSource = await put(`// @hypercomb/typescript/src\n// src/${tag}.ts\nexport const root: string = '${tag}'\n`)
+  const bee = await put(`export const bee = '${tag} sourced bee'`)
+  const dependency = await put(`// @scope/${tag}-sourced\nexport default 1`)
+  const child = await put(JSON.stringify({ name: `${tag}-child`, cells: [], bees: [bee], dependencies: [dependency],
+    typescript: slot === undefined ? source : slot }))
+  const root = await put(JSON.stringify({ name: tag, cells: [{ sig: child }], bees: [], dependencies: [], typescript: rootSource }))
+  return { root, child, bee, dependency, source, rootSource, files }
+}
+
+test('a farm that gives package files also gives the source atoms the package\'s layers name in `typescript` — and still nothing else', async () => {
+  const pkg = await sourcedPackageFixture('sourced')
+  const upload = 'an upload on the publisher machine that no layer names'
+  const uploadSig = await sha256(upload)
+  const { env } = await installingFixture(await signedIndex({ 'install:essentials': pkg.root }))
+  await withUpstream(await farmMachine({ ...pkg.files, [uploadSig]: upload }), async (asked) => {
+    // The root layer's atom and a deeper layer's are both the package's.
+    for (const sig of [pkg.rootSource, pkg.source]) {
+      const res = await worker.fetch(new Request(`https://hypercomb.com/${sig}`), env)
+      assert.equal(res.status, 200)
+      assert.equal(await res.text(), pkg.files[sig])
+      assert.equal(res.headers.get('x-read-through'), 'farm')
+      assert.deepEqual(env.CONTENT.held.get(sig), utf8(pkg.files[sig]), 'kept under its name')
+    }
+    const refused = await worker.fetch(new Request(`https://hypercomb.com/${uploadSig}`), env)
+    assert.notEqual(refused.status, 200)
+    assert.ok(!env.CONTENT.held.has(uploadSig))
+    assert.ok(!asked.some(({ url }) => url === `https://jwize.com/${uploadSig}`), 'the upload itself is never fetched')
+  })
+})
+
+test('a `typescript` slot that is not a signature names nothing: the layer is still a package layer, and nothing more is given', async () => {
+  const upload = 'an upload a malformed slot points at'
+  const uploadSig = await sha256(upload)
+  const slots = ['not a signature', uploadSig.slice(1), `${uploadSig}0`, { sig: uploadSig }, [uploadSig], 7, null]
+  for (const [at, slot] of slots.entries()) {
+    const why = `slot ${JSON.stringify(slot)}`
+    const pkg = await sourcedPackageFixture(`malformed-${at}`, slot)
+    const { env } = await installingFixture(await signedIndex({ 'install:essentials': pkg.root }))
+    await withUpstream(await farmMachine({ ...pkg.files, [uploadSig]: upload }), async (asked) => {
+      // The atom no layer names any more, and what the slot points at, stay refused.
+      for (const sig of [uploadSig, pkg.source]) {
+        assert.notEqual((await worker.fetch(new Request(`https://hypercomb.com/${sig}`), env)).status, 200, why)
+        assert.ok(!env.CONTENT.held.has(sig), why)
+        assert.ok(!asked.some(({ url }) => url === `https://jwize.com/${sig}`), why)
+      }
+      // The layer still walks: its own files, and the root's well-formed slot, are given.
+      for (const sig of [pkg.dependency, pkg.bee, pkg.rootSource]) {
+        assert.equal((await worker.fetch(new Request(`https://hypercomb.com/${sig}`), env)).status, 200, why)
+      }
+    })
+  }
+})
+
+test('a package is whole without its TypeScript: the pool names the root while the source atoms are absent, and the walk never asks for them', async () => {
+  const pool = await sha256Hex('host:packages')
+  const verdicts = await sha256Hex('host:whole-packages')
+  const pkg = await sourcedPackageFixture('unsourced')
+  const { env } = await installingFixture(await signedIndex({ 'install:essentials': pkg.root }, 1_800_000_000))
+  for (const sig of [pkg.root, pkg.child, pkg.bee, pkg.dependency]) env.CONTENT.held.set(sig, utf8(pkg.files[sig]))
+  const read = []
+  for (const way of ['head', 'get']) {
+    const real = env.CONTENT[way]
+    env.CONTENT[way] = async (key) => { read.push(key); return real(key) }
+  }
+  await withUpstream(originPage, async (asked) => {
+    const member = await worker.fetch(new Request(`https://hypercomb.com/content/${pool}/00000000`), env)
+    assert.equal(await member.text(), `${pkg.root}\nessentials`)
+    assert.ok(env.CONTENT.held.has(`${verdicts}/${pkg.root}`), 'the verdict is kept')
+    assert.deepEqual(asked, [])
+    assert.ok(read.includes(pkg.dependency), 'a leaf is headed')
+    for (const sig of [pkg.source, pkg.rootSource]) assert.ok(!read.includes(sig), 'a source atom is not')
+  })
+})
+
+/** A farm reply sent by hand, for a read whose clock the test holds. Its
+ *  headers answer at once, declaring `length` when one is given; its body
+ *  carries only what `send` gives it, ends on `close`, breaks on `reset`, and
+ *  dies with the read's deadline as a fetched body does. A `silent` host
+ *  never answers at all. */
+function handReply({ length, silent = false } = {}) {
+  let wasAsked
+  const reply = { signal: null, asked: new Promise((resolve) => { wasAsked = resolve }) }
+  reply.answer = (init) => {
+    reply.signal = init.signal
+    wasAsked()
+    if (silent) return new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason)))
+    const body = new ReadableStream({ start(controller) {
+      reply.send = (bytes) => controller.enqueue(bytes)
+      reply.close = () => controller.close()
+      reply.reset = () => controller.error(new TypeError('connection reset'))
+      init.signal.addEventListener('abort', () => controller.error(init.signal.reason))
+    } })
+    return new Response(body, length === undefined ? undefined : { headers: { 'content-length': String(length) } })
+  }
+  return reply
+}
+
+/** Run with the farm stood in for and the read's clock held, for as long as
+ *  `run` lasts. A URL the test has put in `replies` gets its hand reply, any
+ *  other what `rest` answers, and every URL asked is recorded. Only
+ *  `setTimeout` is stood in for, so the walk before a read keeps real time;
+ *  `pass(ms)` moves the clock. */
+async function withHeldFarm(t, rest, run) {
+  const asked = []
+  const replies = {}
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (input, init) => {
+    const url = String(input?.url ?? input)
+    asked.push(url)
+    return replies[url] ? replies[url].answer(init) : rest(url)
+  }
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  try {
+    return await run({ replies, asked, pass: (ms) => t.mock.timers.tick(ms) })
+  } finally {
+    t.mock.timers.reset()
+    globalThis.fetch = realFetch
+  }
+}
+
+/** Settles once the worker has asked the farm for `reply`. A worker that
+ *  answers without asking fails the test here: waiting on `asked` alone would
+ *  hang the whole file, with the clock held and nothing to end the wait. */
+const farmAsked = (reply, response) => Promise.race([reply.asked,
+  response.then((res) => { throw new Error(`the farm was never asked: ${res.status}`) })])
+
+/** Lets what was just sent travel through the read, up to its next wait. */
+const travelled = () => new Promise((resolve) => setImmediate(resolve))
+
+test('a farm stream that declares its length has time for its size while its bytes keep coming; a reply that declares none is still cut at the one deadline', async (t) => {
+  // Three seconds' worth at the floor: 300,000 bytes is past two units of 131,072.
+  const big = `// @hypercomb/typescript/sized\n// src/sized/a.ts\n${'x'.repeat(300_000)}`
+  const bigSig = await sha256(big)
+  const pkg = await sourcedPackageFixture('sized', bigSig)
+  pkg.files[bigSig] = big
+  const { env } = await installingFixture(await signedIndex({ 'install:essentials': pkg.root }))
+  await withHeldFarm(t, await farmMachine(pkg.files), async ({ replies, pass }) => {
+    /** Ask for `sig` at a farm whose reply is sent by hand. */
+    const read = async (sig, declared) => {
+      const bytes = utf8(pkg.files[sig])
+      const reply = replies[`https://jwize.com/${sig}`] = handReply(declared ? { length: bytes.byteLength } : {})
+      const response = worker.fetch(new Request(`https://hypercomb.com/${sig}`), env)
+      await farmAsked(reply, response)
+      return { reply, response, bytes }
+    }
+    /** One byte now, then one more after each of `gaps`: a slow stream that
+     *  is still arriving. Answers how many bytes it sent. */
+    const trickle = async ({ reply, bytes }, gaps) => {
+      reply.send(bytes.subarray(0, 1))
+      await travelled()
+      for (const [at, gap] of gaps.entries()) {
+        pass(gap)
+        reply.send(bytes.subarray(at + 1, at + 2))
+        await travelled()
+      }
+      return gaps.length + 1
+    }
+
+    // Under 131,072 bytes: one second more than the ten every read has.
+    const kept = await read(pkg.rootSource, true)
+    const sent = await trickle(kept, [5_000])
+    pass(5_500)
+    assert.equal(kept.reply.signal.aborted, false, 'past ten seconds a stream that is arriving is still read')
+    kept.reply.send(kept.bytes.subarray(sent))
+    kept.reply.close()
+    const res = await kept.response
+    assert.equal(res.status, 200)
+    assert.equal(await res.text(), pkg.files[pkg.rootSource])
+    assert.deepEqual(env.CONTENT.held.get(pkg.rootSource), utf8(pkg.files[pkg.rootSource]))
+
+    // A file of that size never finished: its eleven seconds end it.
+    const small = await read(pkg.bee, true)
+    await trickle(small, [5_000])
+    pass(5_999)
+    assert.equal(small.reply.signal.aborted, false)
+    pass(1)
+    assert.equal(small.reply.signal.aborted, true, 'ten seconds and one for a file under the floor')
+    assert.notEqual((await small.response).status, 200)
+    assert.ok(!env.CONTENT.held.has(pkg.bee))
+
+    // A longer file has longer: thirteen seconds for 300,000 bytes, not eleven.
+    const sized = await read(bigSig, true)
+    await trickle(sized, [5_000, 5_000])
+    pass(2_999)
+    assert.equal(sized.reply.signal.aborted, false, 'a second for each 131,072 bytes, begun or whole')
+    pass(1)
+    assert.equal(sized.reply.signal.aborted, true, 'and no longer than that, however steadily it arrives')
+    assert.notEqual((await sized.response).status, 200)
+    assert.ok(!env.CONTENT.held.has(bigSig))
+
+    // No declared length: the one deadline, and bytes arriving buy nothing.
+    const undeclared = await read(pkg.dependency, false)
+    await trickle(undeclared, [5_000])
+    pass(4_999)
+    assert.equal(undeclared.reply.signal.aborted, false)
+    pass(1)
+    assert.equal(undeclared.reply.signal.aborted, true, 'no declared length, no more than ten seconds')
+    assert.notEqual((await undeclared.response).status, 200)
+    assert.ok(!env.CONTENT.held.has(pkg.dependency))
+  })
+})
+
+test('a declared length is only a claim: a farm stream that stops arriving is ended ten seconds after its last byte, whatever size it said', async (t) => {
+  const big = `// @hypercomb/typescript/stopped\n// src/stopped/a.ts\n${'y'.repeat(300_000)}`
+  const bigSig = await sha256(big)
+  const pkg = await sourcedPackageFixture('stopped', bigSig)
+  pkg.files[bigSig] = big
+  const { env } = await installingFixture(await signedIndex({ 'install:essentials': pkg.root }))
+  await withHeldFarm(t, await farmMachine(pkg.files), async ({ replies, pass }) => {
+    /** Ask for `sig` at a farm that declares `length` and sends by hand. */
+    const read = async (sig, length) => {
+      const reply = replies[`https://jwize.com/${sig}`] = handReply({ length })
+      const response = worker.fetch(new Request(`https://hypercomb.com/${sig}`), env)
+      await farmAsked(reply, response)
+      return { reply, response }
+    }
+
+    // The most a host may claim, 210 seconds' worth, and then not one byte.
+    const silent = await read(pkg.dependency, 26_214_400)
+    await travelled()
+    pass(9_999)
+    assert.equal(silent.reply.signal.aborted, false)
+    pass(1)
+    assert.equal(silent.reply.signal.aborted, true, 'headers and then nothing is a stalled read, as before')
+    assert.notEqual((await silent.response).status, 200)
+    assert.ok(!env.CONTENT.held.has(pkg.dependency))
+
+    // An ordinary bee that stops after its first byte ends at ten seconds too, not eleven.
+    const bee = await read(pkg.bee, utf8(pkg.files[pkg.bee]).byteLength)
+    bee.reply.send(utf8(pkg.files[pkg.bee]).subarray(0, 1))
+    await travelled()
+    pass(9_999)
+    assert.equal(bee.reply.signal.aborted, false)
+    pass(1)
+    assert.equal(bee.reply.signal.aborted, true)
+    assert.notEqual((await bee.response).status, 200)
+    assert.ok(!env.CONTENT.held.has(pkg.bee))
+
+    // Each byte starts the ten seconds again: stopped at two seconds, ended
+    // at twelve, a second before the thirteen its size would have had.
+    const stopped = await read(bigSig, utf8(big).byteLength)
+    stopped.reply.send(utf8(big).subarray(0, 1))
+    await travelled()
+    pass(2_000)
+    stopped.reply.send(utf8(big).subarray(1, 2))
+    await travelled()
+    pass(9_999)
+    assert.equal(stopped.reply.signal.aborted, false, 'ten seconds from the last byte, not from the first')
+    pass(1)
+    assert.equal(stopped.reply.signal.aborted, true)
+    assert.notEqual((await stopped.response).status, 200)
+    assert.ok(!env.CONTENT.held.has(bigSig))
+  })
+})
+
+test('the time a farm stream was given ends with that stream: the next farm host has only what is left of the walk\'s ten seconds', async (t) => {
+  // A package with no `typescript` slot, on a farm of two hosts.
+  const pkg = await packageFixture('two-hosts')
+  const twoHosts = { ...INSTALLING_ZONE, 'hypercomb.com': { ...INSTALLING_ZONE['hypercomb.com'], farm: ['jwize.com', 'second.example'] } }
+  const { env } = await installingFixture(await signedIndex({ 'install:essentials': pkg.root }), twoHosts)
+  await withHeldFarm(t, await farmMachine(pkg.files), async ({ replies, asked, pass }) => {
+    /** Ask for `sig`: the first host declares `length`, the second never answers. */
+    const read = async (sig, length) => {
+      const first = replies[`https://jwize.com/${sig}`] = handReply({ length })
+      const second = replies[`https://second.example/${sig}`] = handReply({ silent: true })
+      const response = worker.fetch(new Request(`https://hypercomb.com/${sig}`), env)
+      await farmAsked(first, response)
+      return { first, second, response }
+    }
+
+    // A miss hidden behind a 200 page that declares its length: the bucket
+    // refuses the bytes at once, and the next host has the walk's ten seconds.
+    const page = utf8('<html>this machine has no such file</html>')
+    const hidden = await read(pkg.childBee, page.byteLength)
+    hidden.first.send(page)
+    hidden.first.close()
+    await farmAsked(hidden.second, hidden.response)
+    pass(9_999)
+    assert.equal(hidden.second.signal.aborted, false)
+    pass(1)
+    assert.equal(hidden.second.signal.aborted, true, 'ten seconds for the walk, not eleven')
+    assert.notEqual((await hidden.response).status, 200)
+    assert.ok(!env.CONTENT.held.has(pkg.childBee))
+
+    // The largest length a host may declare, broken off four seconds in: the
+    // next host has the six seconds the walk has left, not 210.
+    const broken = await read(pkg.dependency, 26_214_400)
+    broken.first.send(utf8('x'))
+    await travelled()
+    pass(4_000)
+    broken.first.reset()
+    await farmAsked(broken.second, broken.response)
+    pass(5_999)
+    assert.equal(broken.second.signal.aborted, false)
+    pass(1)
+    assert.equal(broken.second.signal.aborted, true, 'what was left of the first ten seconds')
+    assert.notEqual((await broken.response).status, 200)
+    assert.ok(!env.CONTENT.held.has(pkg.dependency))
+
+    // A stream that outlives the walk's ten seconds and then breaks leaves
+    // the walk nothing: no later host is asked at all.
+    const outlived = await read(pkg.bee, 26_214_400)
+    for (const gap of [0, 4_000, 4_000, 4_000]) {
+      pass(gap)
+      outlived.first.send(utf8('x'))
+      await travelled()
+    }
+    assert.equal(outlived.first.signal.aborted, false, 'twelve seconds in, the stream is still read')
+    outlived.first.reset()
+    // A walk that went on would wait on a host that never answers: fail, never hang.
+    const ended = await Promise.race([outlived.response,
+      outlived.second.asked.then(() => { throw new Error('the walk went on to the next host') })])
+    assert.notEqual(ended.status, 200)
+    assert.ok(!asked.includes(`https://second.example/${pkg.bee}`), 'the walk was over when the stream broke')
+    assert.ok(!env.CONTENT.held.has(pkg.bee))
+  })
+})
+
+test('on a heap mirror too: after one farm host\'s declared stream fails, a reply that declares no length is cut at the walk\'s ten seconds', async (t) => {
+  const { env } = await fixture(undefined, FARMED)
+  await withHeldFarm(t, () => new Response('missing', { status: 404 }), async ({ replies, pass }) => {
+    for (const [at, length] of [33, 26_214_400].entries()) {
+      const sig = await sha256(`a file asked of two mirrors ${at}`)
+      // The first host declares `length` and sends less; the second declares none and stalls.
+      const first = replies[`https://relay.pluginthematrix.io/${sig}`] = handReply({ length })
+      const second = replies[`https://second.example/${sig}`] = handReply()
+      const response = worker.fetch(new Request(`${APEX}/${sig}`), env)
+      await farmAsked(first, response)
+      first.send(utf8('short'))
+      first.close()
+      await farmAsked(second, response)
+      second.send(utf8('s'))
+      await travelled()
+      pass(9_999)
+      assert.equal(second.signal.aborted, false, `declared ${length}`)
+      pass(1)
+      assert.equal(second.signal.aborted, true, `declared ${length}: the one deadline, not the first host's size`)
+      assert.equal((await response).status, 404)
+      assert.ok(!env.CONTENT.held.has(sig))
+    }
+  })
+})
+
 test('before the stamp, the package the farm last published may be pulled — and the pool moves the moment the index names it', async () => {
   const pool = await sha256Hex('host:packages')
   const older = await packageFixture('older')
