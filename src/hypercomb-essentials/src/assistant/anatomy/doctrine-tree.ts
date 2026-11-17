@@ -138,6 +138,28 @@ export const readDoctrineNotes = async (io: DoctrineTreeIo, walk: DoctrineWalk):
   return fromCodex(ordered.flatMap(tier => [tier.header, ...tier.rules]).join('\n') + '\n')
 }
 
+/** One doctrine tile and the codex line its note holds. */
+export type DoctrineLine = { readonly path: readonly string[]; readonly kind: 'tier' | 'rule'; readonly line: string }
+
+/** The codex line every walked tile holds, WHETHER OR NOT THE WHOLE HOLDS:
+ *  no order check, so a tree that breaks the order still says what it has.
+ *  `doctrine tiles` lays the build's copy against this, by tier number and
+ *  rule id, so saying it again never gives the tree one id twice. Null when a
+ *  tile's notes are not on this device. */
+export const readDoctrineLines = async (io: DoctrineTreeIo, walk: DoctrineWalk): Promise<readonly DoctrineLine[] | null> => {
+  const depth = walk.tiles[0]!.path.length
+  const out: DoctrineLine[] = []
+  for (const tile of walk.tiles) {
+    if (tile.path.length === depth) continue
+    const held = await io.notes(tile.layerSig)
+    if (!held || !held.complete) return null
+    const kind = tile.path.length === depth + 1 ? 'tier' : 'rule'
+    const line = lineIn(held.notes, kind === 'tier' ? TIER_LINE : AXIOM_LINE)
+    if (line) out.push({ path: tile.path, kind, line })
+  }
+  return out
+}
+
 /** Walk and read in one go (no record consulted). */
 export const readDoctrineTree = async (io: DoctrineTreeIo, root: readonly string[] = DOCTRINE_ROOT): Promise<DoctrineTreeRead> => {
   const walk = await walkDoctrine(io, root)

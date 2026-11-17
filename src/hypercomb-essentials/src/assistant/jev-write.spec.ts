@@ -3,7 +3,7 @@
 // every doctrine section; it reaches as editing; Jev never sees the code.
 
 import { describe, expect, it } from 'vitest'
-import { JEV_CHOICE_GATES, JEV_ROW_QUESTIONS, WRITE_REACH, isChangeRow, isDoctrineWrite, jevInput, jevQuestions, jevResult, jevState } from './jev-decision.js'
+import { JEV_CHOICE_GATES, JEV_ROW_QUESTIONS, WRITE_REACH, isChangeRow, jevInput, jevQuestions, jevResult, jevState } from './jev-decision.js'
 import { jevUnseen } from './jev-decision.service.js'
 
 const SIG = 'a'.repeat(64)
@@ -87,6 +87,5 @@ describe('a doctrine write', () => {
       request: 'Loosen the nesting rule', doctrine, evidence: ['Nothing read yet.'],
       rows: [{ id: 'w', kind: 'write', label: 'The rule', lines: ['doctrine The rule'] }, { id: 'a', kind: 'answer', label: 'Answer now' }],
     })).toThrow(/write block header/)
-    expect(isDoctrineWrite(input.rows[0]!)).toBe(false)
   })
 })

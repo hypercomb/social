@@ -151,6 +151,7 @@ import {
   type HypercombFunctionTool,
   type HypercombToolCall,
 } from './hypercomb-grammar'
+import { DOCTRINE_HOLD, inDoctrine, touchesDoctrine } from './doctrine-hold'
 import { PlanTransaction, type PlanHistory } from './hypercomb-plan-transaction'
 import {
   executeHypercombObservationPlan,
@@ -7719,7 +7720,9 @@ export class ChatWindow {
         const base = { request: message, doctrine, evidence: [] as string[], rows }
         const cap = Math.min(JEV_STATE_CHARS, hiveAccess?.budget?.('openrouter') || JEV_STATE_CHARS)
         const seen = (part: string): boolean => messages.some(entry => entry.content.includes(part))
-        const input = { ...base, evidence: fitEvidence(evidence, seen, cap - JSON.stringify(base).length - 512, 1) }
+        // The doctrine is not charged against the evidence: it rides in the
+        // questions, section by section, and is not capped (jev-decision.ts).
+        const input = { ...base, evidence: fitEvidence(evidence, seen, cap - JSON.stringify({ ...base, doctrine: [] }).length - 512, 1) }
         stillHere()
         if (snapshotIds.length && treeReader && !await treeReader.validateSnapshots(snapshotIds, signal)) {
           discardStaleEvidence()
@@ -8160,12 +8163,19 @@ export class ChatWindow {
         // participant chose this very sentence, which is the hand.
         const leaves = !own && hypercombPlanLeaves(plan, behaviourEntries).length > 0
         const foreign = !own && conversationForeign()
-        if (review) EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
+        // THE DOCTRINE IS THE PARTICIPANT'S TO CHANGE (doctrine-hold.ts): a
+        // change at or under /doctrine, or one naming that tile, waits for a
+        // hand whatever the policy and whatever Jev scored. The sentence the
+        // participant chose themself is the hand.
+        const doctrineHeld = !own && touchesDoctrine(readGrammarContext().segments, grammars)
+        const held = review || doctrineHeld
+        if (held) EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
         const entry = queue.request({
           convoId, providerId, model, kind: hypercombPlanReach(plan, behaviourEntries), lines: grammars, needsGrant: false, signal,
-          forceReview: review, leaves, foreign,
+          forceReview: held, leaves, foreign,
+          ...(doctrineHeld ? { changes: [DOCTRINE_HOLD] } : {}),
         })
-        if (!review) waitingOn(entry.id)
+        if (!held) waitingOn(entry.id)
         if (await entry.decision === 'skip') {
           if (signal?.aborted) throw stopped()
           lastRun = 'skipped'
@@ -8194,6 +8204,9 @@ export class ChatWindow {
             }
             const live = new Set(callableBehaviours(slash.entries?.() ?? []).map(entry => entry.name))
             if (!live.has(command)) throw new WorkRefused(`/${command} is no longer available`)
+            // The page is read again as each line runs: a plan that was not
+            // held, and now stands in the doctrine, does not run there.
+            if (!held && !own && inDoctrine(readGrammarContext().segments)) throw new WorkRefused('this page is now the doctrine, where a change waits for the participant\'s review; send it again')
             return slash.executePublicCanonical!(command, args)
           },
         }
@@ -8320,7 +8333,10 @@ export class ChatWindow {
             if (why) throw new WorkRefused(why)
           }
         }
-        if (review) EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
+        // A file on a doctrine tile waits for a hand too (doctrine-hold.ts).
+        const doctrineHeld = inDoctrine(parsed.route)
+        const held = review || doctrineHeld
+        if (held) EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
         // WHAT RUN WILL CHANGE (execution-change.ts): read from the file as
         // it is now and the text this write would leave. For the eye only;
         // the write itself is made again against the file when it runs.
@@ -8336,10 +8352,10 @@ export class ChatWindow {
         } catch { /* nothing to say; the row shows the command alone */ }
         const entry = queue.request({
           convoId, providerId, model, kind: 'editing', lines: [grammar], needsGrant: false, signal,
-          forceReview: review, foreign: conversationForeign(),
-          ...(changes.length ? { changes } : {}),
+          forceReview: held, foreign: conversationForeign(),
+          ...(doctrineHeld ? { changes: [DOCTRINE_HOLD, ...changes].slice(0, 8) } : changes.length ? { changes } : {}),
         })
-        if (!review) waitingOn(entry.id)
+        if (!held) waitingOn(entry.id)
         if (await entry.decision === 'skip') {
           if (signal?.aborted) throw stopped()
           lastRun = 'skipped'

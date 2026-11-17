@@ -36,6 +36,12 @@ describe('the possibility table', () => {
     expect(bad(Array.from({ length: 9 }, (_, i) => ({ id: `r${i}`, kind: 'answer', label: `L${i}` })))).toThrow()
     expect(jevInput({ request: 'r', doctrine: 'd', evidence: 'e', rows: [{ id: 'a', kind: 'do', label: 'x', line: 'y' }] }).rows[0].lines).toEqual(['y'])
   })
+  it('never caps the doctrine: more sections and more text than the old budget still judge', () => {
+    const grown = Array.from({ length: 20 }, (_, i) => `### Tier ${i}\n${'A rule of this tier. '.repeat(60)}`)
+    expect(grown.join('').length).toBeGreaterThan(16_000)
+    expect(jevInput({ request: 'r', doctrine: grown, evidence: 'e', rows: [rows[3]] }).doctrine).toHaveLength(20)
+  })
+
   it('takes doctrine as sections, or as one string for older callers', () => {
     expect(input.doctrine).toEqual(doctrine)
     expect(jevInput({ request: 'r', doctrine: 'Follow the request.', evidence: 'e', rows: [rows[3]] }).doctrine).toEqual(['Follow the request.'])
