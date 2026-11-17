@@ -78,20 +78,15 @@ describe('a write row', () => {
   })
 })
 
+// The doctrine is tiles at the hive's root and nothing else (ec9fa68ec,
+// 2026-11-17): the write block that named a doctrine heading is retired with
+// the bag it wrote to, so a table can no longer carry such a row.
 describe('a doctrine write', () => {
-  const doctrineInput = jevInput({
-    request: 'Loosen the nesting rule', doctrine, evidence: ['Nothing read yet.'],
-    rows: [{ id: 'w', kind: 'write', label: 'The rule', lines: ['doctrine The rule'] }, { id: 'a', kind: 'answer', label: 'Answer now' }],
-  })
-
-  it('is a write row whose header names the doctrine', () => {
-    expect(isDoctrineWrite(doctrineInput.rows[0]!)).toBe(true)
+  it('is no longer a row a table can carry', () => {
+    expect(() => jevInput({
+      request: 'Loosen the nesting rule', doctrine, evidence: ['Nothing read yet.'],
+      rows: [{ id: 'w', kind: 'write', label: 'The rule', lines: ['doctrine The rule'] }, { id: 'a', kind: 'answer', label: 'Answer now' }],
+    })).toThrow(/write block header/)
     expect(isDoctrineWrite(input.rows[0]!)).toBe(false)
-  })
-
-  it('never runs on its own: every gate passing and Jev sure, the participant still reviews it', () => {
-    const result = jevResult(response({ w_grounded: noul(0.1) }), doctrineInput)
-    expect(result.plan).toEqual({ kind: 'do', row: 'w', review: true })
-    expect(result.reason).toContain('it changes the doctrine, so the participant always reviews it')
   })
 })
