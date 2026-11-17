@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { SignatureService } from '@hypercomb/core'
 import {
   PICKS_KEY, changedBeneath, composeDependencies, enabledBees, missingNamespaces, modulesOfWalk, movedPaths, namespaceOf,
-  orderRevisions, ownerOf, readPicks, releasedByTakeAll, walkTree, withAncestors, writePicks, type PackagePick,
+  isDraftRoot, orderRevisions, ownerOf, readPicks, releasedByTakeAll, walkTree, withAncestors, writePicks, type PackagePick,
 } from './package-tree'
 import type { ReplicationIo } from './replication-walker'
 
@@ -253,6 +253,22 @@ describe('the package tree', () => {
     }, async path => newRoot[path] ?? '')
     expect(released).toEqual(['assistant'])
     expect(Object.keys(kept).sort()).toEqual(['extras', 'games', 'games/solomon'])
+  })
+
+  it('keeps a draft the participant has not dropped when they take everything', async () => {
+    const draftRoot = 'd'.repeat(64)
+    const roots: Record<string, Uint8Array<ArrayBuffer>> = {
+      [draftRoot]: new TextEncoder().encode(JSON.stringify({ draft: { of: 'x', path: 'assistant', section: 'src/a.ts' }, dependencies: [] })) as Uint8Array<ArrayBuffer>,
+      ['r'.repeat(64)]: new TextEncoder().encode(JSON.stringify({ bees: [], layers: [] })) as Uint8Array<ArrayBuffer>,
+    }
+    const io = { read: async (sig: string) => roots[sig] ?? null }
+    const { kept, released } = await releasedByTakeAll({
+      assistant: { layer: 'o1'.padEnd(64, '0'), root: draftRoot, hides: false, at: 1 },   // a draft → kept
+      games: { layer: 'o2'.padEnd(64, '0'), root: 'r'.repeat(64), hides: false, at: 1 }, // a package's revision → released
+    }, async () => 'n'.padEnd(64, '0'), pick => isDraftRoot(pick.root, io))
+    expect(released).toEqual(['games'])
+    expect(Object.keys(kept)).toEqual(['assistant'])
+    expect(await isDraftRoot('e'.repeat(64), io)).toBe(false)
   })
 
   it('names the namespaces a module imports that the selection does not run', async () => {

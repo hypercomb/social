@@ -227,16 +227,35 @@ export const layerAt = async (rootSig: string, path: string, io: ReplicationIo):
 export const releasedByTakeAll = async (
   picks: Picks,
   layerOfNewRoot: (path: string) => Promise<string>,
+  /** Is this pick the participant's own draft (module-drafts.ts)? A draft is
+   *  work, not a lagging build: a model wrote it on this page and it waits
+   *  for the participant's hand, so Update all keeps it — the update at that
+   *  path waits behind it until they drop it. */
+  isDraft: (pick: PackagePick) => Promise<boolean> = async () => false,
 ): Promise<{ kept: Picks; released: string[] }> => {
   const kept: Picks = {}
   const released: string[] = []
   for (const [path, pick] of Object.entries(picks)) {
     if (pick.hides || pick.byHand) { kept[path] = pick; continue }
+    if (await isDraft(pick).catch(() => false)) { kept[path] = pick; continue }
     const now = await layerOfNewRoot(path).catch(() => '')
     if (!now) { kept[path] = pick; continue }
     if (now !== pick.layer) released.push(path)
   }
   return { kept, released: released.sort() }
+}
+
+/** Is this root a draft record — `{ draft: {…}, dependencies }`, the root a
+ *  module draft picks (module-drafts.ts) — rather than a publisher's package? */
+export const isDraftRoot = async (root: string, io: Pick<ReplicationIo, 'read'>): Promise<boolean> => {
+  const bytes = await io.read(root).catch(() => null)
+  if (!bytes?.length) return false
+  try {
+    const record = JSON.parse(new TextDecoder().decode(bytes)) as { draft?: unknown }
+    return !!record?.draft && typeof record.draft === 'object'
+  } catch {
+    return false
+  }
 }
 
 /** Is this path off — itself, or any branch above it? */

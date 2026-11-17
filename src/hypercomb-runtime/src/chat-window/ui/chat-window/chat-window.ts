@@ -8283,14 +8283,18 @@ export class ChatWindow {
         ran.push(grammar)
         queue.settle(entry.id, 'ran')
         lastRun = 'ran'
-        // THE DRAFT AUDIT: code that newly reaches something is held in the
-        // brood until the participant accepts it (runtime module-drafts.ts);
-        // JEV's reading of every draft follows on its own (brood.drone.ts).
+        // THE DRAFT AUDIT: every draft is held in the brood until the
+        // participant accepts it (runtime module-drafts.ts admitInBrood), and
+        // code that newly reaches something says what; JEV's reading of every
+        // draft follows on its own (brood.drone.ts). A managed site page has
+        // no command line, so its door is the page's Code to review button.
         const held = outcome.reaches.length ? reachPhrase(outcome.reaches) : ''
+        const onDoor = !!managedPage()
+        const accept = onDoor ? 'Code to review opens it; Accept lets it run.' : 'Say brood to read it, brood accept to let it run.'
         EffectBus.emit('toast:show', held
-          ? { type: 'warning', message: `Draft of ${parsed.section} held: it newly reaches ${held}. Say brood to read it, brood accept to let it run.` }
-          : { type: 'success', message: `Draft of ${parsed.section} applied — reload to run it` })
-        return writeRanMessage({ section: parsed.section, beeSig: outcome.beeSig, path: outcome.path, held, created: outcome.created === true }, message)
+          ? { type: 'warning', message: `Draft of ${parsed.section} held: it newly reaches ${held}. ${accept}` }
+          : { type: 'info', message: `Draft of ${parsed.section} written and held until you accept it. ${accept}` })
+        return writeRanMessage({ section: parsed.section, beeSig: outcome.beeSig, path: outcome.path, held, created: outcome.created === true, managed: onDoor }, message)
       }
 
       // A FILE ON A TILE WRITTEN (essentials files/tile-files.drone.ts): the

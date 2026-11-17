@@ -49,6 +49,7 @@ import { askFrame, type FrameReport } from '../history/frame-watch.js'
 import { managedSiteZone, updateSources } from './update-sources.js'
 import { managedRecordText } from './managed-record.js'
 import { SiteRevisionsPanel, revisionButtonWords, siteChatConvoId } from './site-revisions.view.js'
+import { codeReviewButton } from './site-code-review.js'
 import {
   BROKER_KEY, COMMITTER_KEY, HISTORY_KEY, LINEAGE_KEY, MANAGED_PUBLISH_KEY, STORE_KEY, SWARM_ADOPT_KEY,
   notePublished, readState, reconcile, replicaLocation, replicaRoute, takePublished, writeReceipt,
@@ -613,7 +614,10 @@ export class SiteManageElement extends ElementBase {
     publish.className = 'sm-btn sm-publish'
     publish.hidden = true
     publish.addEventListener('click', () => { void this.#publishNow() })
-    bar.append(title, status, revisions, useNewer, publish, update, chat, back)
+    // The drafts a model wrote here wait for the owner's hand: this opens the
+    // brood, where they are read, accepted or refused (site-code-review.ts).
+    const review = codeReviewButton('sm-btn sm-code-review')
+    bar.append(title, status, revisions, review.element, useNewer, publish, update, chat, back)
 
     const note = this.#note = document.createElement('div')
     note.className = 'sm-note'
@@ -702,6 +706,7 @@ function ensureStyles(): void {
   style.textContent = `
 ${T} { display: contents; }
 ${T} [hidden] { display: none !important; }
+${T} .sm-code-review { color: rgb(201, 162, 39); }
 ${T} .sm-frame { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; z-index: 99990; background: #050505; }
 ${T} .sm-bar {
   position: fixed; top: 0; left: 0; right: 0; z-index: 99991; display: flex; align-items: center; gap: 0.6rem;

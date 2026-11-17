@@ -150,6 +150,15 @@ What was retired on 2026-11-10 is offering the door to strangers as a place to t
 - **Not Angular-free yet:** the `swarm` door is still served the web shell. The web shell's workbench mode (`data-hypercomb-mode="workbench"`, `workbench-page.ts`, the workbench barrel) is no longer stamped by the worker and is left in place, unused, until it is removed.
 - **Not built yet:** the click on an editing tile that opens its subdomain, and the shim's host console offering the debugger's package and suggested tools on that page.
 
+## Building on a managed site page (2026-11-17)
+
+Subdomain AI, step 5. A managed site page (`<name>.<zone>/@hypercomb`) has no command line, so the word `brood` is not a door there. Every draft a model writes from its chat is held (2026-10-26, `admitInBrood`), so the page needs its own way in:
+
+- **Code to review · N** (essentials `sharing/site-code-review.ts`): one button in the card's bar and one in the chat's rail strip (the chat covers the bar). It shows only while a draft of your own waits, unruled, and opens the brood (`brood:open`). Read, Accept and Refuse are the brood's own; the button decides nothing.
+- **The model is told the truth.** `writeRanMessage` (core `work-instruction.ts`) used to say a draft that reached nothing new "runs after the participant reloads", so the model told the owner to reload a page whose code a reload could not change. Now every draft is said to be held, and on a managed page the button is named as the door. The lesson's code paragraph says the same.
+- **Update keeps your drafts.** Update all used to release every pick the new root moved past, a draft among them (see `packages-window.md`).
+- **Not built:** a draft does not travel home. It is a pick in this browser alone; the card's Publish sends tiles, never code. Sending code to a site's visitors is the owner's decision under "foreign code never runs as you", and is still open.
+
 ## Audit a trial from your own hive (built 2026-09-23)
 
 `module audit <change> [@<host>]` — the other half of jwize's sentence: "scan the signed files by signature and audit them using your favorite AI". Trying happens at the publisher's door; auditing happens at home, and runs nothing (essentials `assistant/module-audit.ts`, driven by `module.queen.ts`):

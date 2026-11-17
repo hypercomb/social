@@ -77,7 +77,11 @@ pick puts the trunk's layer back.
   port's `acquire` passes `takeAll`, and `releasedByTakeAll` releases each pick
   the new root moves past, so the new root's layer runs there. Kept: a path the
   new root does not name, a downgrade confirmed with **Take it anyway**
-  (`hides`), and a trial taken by hand (`byHand`). Nothing is deleted — the
+  (`hides`), a trial taken by hand (`byHand`), and your own module draft
+  (a pick whose root is a `{ draft }` record, `isDraftRoot`: a model wrote it
+  on this page and it waits for your hand, so the update at that path waits
+  behind it until you drop it; the 2026-11-13 subdomain audit found that on
+  the card page Update dropped every draft). Nothing is deleted — the
   bytes stay held and the revisions list takes any of them back. Found live: a
   pick taken before `assistant` was split into atoms kept the old chat
   organizer, with no rate-limit back-off, running after every Update all.
