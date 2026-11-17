@@ -4342,15 +4342,22 @@ async function farmMayCopy(env, binding, farm, sig) {
   return false
 }
 
-/** The roots whose packages a farm may give: the signed root, then the
- *  farm's newest published package. */
+/** The channel a managed site door installs (shim debugger-package.ts): the
+ *  package its publisher keeps under the name `debugger`. */
+const DEBUGGER_CHANNEL = 'debugger'
+
+/** The roots whose packages a farm may give: the signed root, the root the
+ *  same index names for the debugger, then the farm's newest published
+ *  package. */
 async function farmPackageRoots(env, binding, farm) {
   const roots = []
   const publisher = binding.publishers?.find((p) => p.primary) || binding.publishers?.[0]
   if (publisher) {
     const index = await verifiedIndex(env, publisher.pubkey).catch(() => null)
-    const signed = String(index?.roots?.[`install:${binding.installs}`] || '').toLowerCase()
-    if (SIG_RE.test(signed)) roots.push(signed)
+    for (const channel of [binding.installs, DEBUGGER_CHANNEL]) {
+      const signed = String(index?.roots?.[`install:${channel}`] || '').toLowerCase()
+      if (SIG_RE.test(signed) && !roots.includes(signed)) roots.push(signed)
+    }
   }
   const head = await farmPoolHead(env, farm)
   if (head && !roots.includes(head)) roots.push(head)
