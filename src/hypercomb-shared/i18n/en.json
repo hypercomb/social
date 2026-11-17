@@ -3115,6 +3115,8 @@
   "site-revisions.here": "here",
   "site-revisions.here-changed": "here, changed",
   "site-revisions.open": "Open",
+  "site-code-review.button": "Code to review · {waiting}",
+  "site-code-review.title": "Drafts a model wrote here wait for you: read them, then accept or refuse",
   "site-revisions.strip": "Revision",
   "site-revisions.strip-none": "not saved yet",
   "slash.revisions": "Flip through a website tile's versions, above it",

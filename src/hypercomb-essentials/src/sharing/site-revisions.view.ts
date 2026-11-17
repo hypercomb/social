@@ -34,6 +34,7 @@ import { EffectBus, I18N_IOC_KEY, requestConfirm, type I18nProvider } from '@hyp
 import type { BuildRecord } from '../history/builds-slot.js'
 import { conversationInLine, siteRevisionRecords } from '../assistant/chat-revisions.js'
 import { managedSiteSegments } from './managed-record.js'
+import { codeReviewButton } from './site-code-review.js'
 import { CHAT_THREADS_KEY, replicaChatConvoId, replicaConvoId, type ReplicaThreads } from './site-replica.js'
 import {
   discardChanges, lineKey, openRevision, readRevisions, saveRevision, stepOf,
@@ -388,11 +389,14 @@ export function mountRevisionStrip(host: HTMLElement, before: Node | null = null
     panel.toggle()
     button.setAttribute('aria-expanded', String(panel.open))
   })
-  strip.append(button, panel.element)
+  // The chat covers the card's bar, so the drafts waiting for the owner's hand
+  // have their door here too (site-code-review.ts).
+  const review = codeReviewButton('sr-strip-button sr-strip-review')
+  strip.append(button, review.element, panel.element)
   host.insertBefore(strip, before)
   say(panel.state)
   void panel.refresh()
-  return () => { panel.dispose(); strip.remove() }
+  return () => { panel.dispose(); review.dispose(); strip.remove() }
 }
 
 function ensureStyles(): void {
@@ -402,7 +406,7 @@ function ensureStyles(): void {
   const P = '.sr-panel'
   style.textContent = `
 hc-site-manage .sm-revisions { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sr-panel[hidden], .sr-panel [hidden] { display: none !important; }
+.sr-panel[hidden], .sr-panel [hidden], .sr-strip [hidden] { display: none !important; }
 ${P} {
   overflow: auto; padding: 0.6rem; border-radius: 4px;
   background: rgba(10, 12, 16, 0.96); color: #e8e8ea; border: 1px solid rgba(255, 255, 255, 0.14);
@@ -419,6 +423,7 @@ hc-site-manage ${P} {
   font: 500 0.75rem/1.4 var(--hc-mono, ui-monospace, monospace);
 }
 .sr-strip-button:hover, .sr-strip-button[aria-expanded="true"] { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.12); }
+.sr-strip-review { margin-top: 0.2rem; color: rgb(201, 162, 39); }
 .sr-strip-label { flex-shrink: 0; color: #a9adb5; }
 .sr-strip-words { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c8975a; }
 .sr-strip ${P} { margin-top: 0.35rem; max-height: 55vh; padding: 0.5rem; font-size: 0.74rem; }

@@ -2645,6 +2645,8 @@
   "site-revisions.here": "現在",
   "site-revisions.here-changed": "現在（変更あり）",
   "site-revisions.open": "開く",
+  "site-code-review.button": "確認待ちのコード · {waiting}",
+  "site-code-review.title": "ここでモデルが書いた下書きはあなたを待っています：読んでから、受け入れるか断ってください",
   "site-revisions.strip": "リビジョン",
   "site-revisions.strip-none": "まだ保存されていません",
   "slash.revisions": "ウェブサイトのタイルの版を、その上でめくる",

@@ -72,7 +72,7 @@ import { reminifyAfterRestart, reminifyLiveRegistration } from './reminify.js'
 import { changedUnits, dependencyUnits, packageUnits, readOffUnits, writeOffUnits } from './package-units.js'
 import {
   composeDependencies, enabledBees, isPath, layerAt, missingNamespaces, modulesOfWalk, movedPaths, namespaceOf, orderRevisions,
-  readPicks, releasedByTakeAll, sigsOf, walkTree, withAncestors, within, writePicks, type Picks, type RevisionSource,
+  isDraftRoot, readPicks, releasedByTakeAll, sigsOf, walkTree, withAncestors, within, writePicks, type Picks, type RevisionSource,
 } from './package-tree.js'
 
 // Store is reached STRUCTURALLY, never imported. Importing the module would
@@ -784,7 +784,7 @@ export const installPackage = async (
   if (opts.alone) picks = {}
   let released: string[] = []
   if (opts.takeAll && Object.keys(picks).length) {
-    const decided = await releasedByTakeAll(picks, path => layerAt(pkg.packageSig, path, layersIo))
+    const decided = await releasedByTakeAll(picks, path => layerAt(pkg.packageSig, path, layersIo), pick => isDraftRoot(pick.root, layersIo))
     picks = decided.kept
     released = decided.released
     if (released.length) console.info(`[acquire] Update all released the picks at ${released.join(', ')} — the new root runs there`)
