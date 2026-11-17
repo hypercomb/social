@@ -2213,16 +2213,26 @@ function packageLayerRefs(bytes) {
   const layers = sigs(record.cells, true)
   const bees = sigs(record.bees)
   const dependencies = sigs(record.dependencies)
-  return layers && bees && dependencies ? { layers, leaves: [...bees, ...dependencies] } : null
+  // A layer may name, in `typescript`, the atom that holds its folder's source
+  // as written. The slot is optional and no part of the package, so a value
+  // that is not a signature names nothing and never makes the layer anything
+  // other than a layer.
+  const source = bareSig(typeof record.typescript === 'string' ? record.typescript : '')
+  return layers && bees && dependencies
+    ? { layers, leaves: [...bees, ...dependencies], typescript: SIG_RE.test(source) ? source : null }
+    : null
 }
 
 /** Walk `root`'s package, reading each LAYER through `layerBytes` (leaves
- *  are never read): `{ layers, leaves, missing }`, or null when what was read
- *  is not a package, or is too large to be one. `onLeaf` hears each leaf the
- *  moment it is found, once. */
+ *  are never read): `{ layers, leaves, missing, sources }`, or null when what
+ *  was read is not a package, or is too large to be one. `onLeaf` hears each
+ *  leaf the moment it is found, once. `sources` are the source atoms the
+ *  layers name: hosted beside the package and never installed, so they are
+ *  not leaves — not counted, not headed, and a package is whole without them. */
 async function walkPackage(root, layerBytes, onLeaf) {
   const layers = new Set([root])
   const leaves = new Set()
+  const sources = new Set()
   const missing = []
   const queue = [root]
   let broken = false
@@ -2240,6 +2250,7 @@ async function walkPackage(root, layerBytes, onLeaf) {
       if (layers.has(leaf)) { broken = true; return }
       if (!leaves.has(leaf)) { leaves.add(leaf); onLeaf?.(leaf) }
     }
+    if (refs.typescript) sources.add(refs.typescript)
     if (layers.size + leaves.size > PACKAGE_CLOSURE_MAX) broken = true
   }
   const reading = new Set()
@@ -2254,7 +2265,7 @@ async function walkPackage(root, layerBytes, onLeaf) {
     await Promise.allSettled(reading)
     return null
   }
-  return { layers, leaves, missing }
+  return { layers, leaves, missing, sources }
 }
 
 /** Heads a stream of signatures through a sliding window. `add` as they are
@@ -4271,8 +4282,15 @@ function relayPassthrough(request, env, url) {
 // worker was deployed with, as the relay is.
 
 const FARM_MAX = 8
-// One deadline for the whole walk over the farm, however many hosts it asks.
+// One deadline for the whole walk over the farm, however many hosts it asks:
+// reaching each host, its headers, and any reply that declares no length. A
+// stream that declares its length runs on its own clock instead (readFromFarm),
+// and FARM_READ_MS is also the longest that stream may go without a byte.
 const FARM_READ_MS = 10_000
+// The slowest a declared-length stream may run, in bytes a second: that stream
+// is ended FARM_READ_MS plus a second for each this many bytes after its
+// headers, however steadily it is still arriving.
+const FARM_STREAM_FLOOR = 131_072
 // The largest file read through: the largest one the asset store holds. It is
 // streamed into the bucket, never held whole.
 const FARM_READ_MAX = 26_214_400
@@ -4309,8 +4327,10 @@ function farmOf(env, hostname) {
 // of a package the publisher put out: the root its signed `install:<installs>`
 // names, or the newest member of the farm's own `host:packages` pool — which
 // the publish appends to before it stamps, so a revision's files can be pulled
-// here BEFORE any index names it. A binding with a farm and no `installs` is a
-// heap mirror and reads through as before.
+// here BEFORE any index names it. A package's files include the source atoms
+// its layers name in `typescript`: the publisher put those out with it. A
+// binding with a farm and no `installs` is a heap mirror and reads through as
+// before.
 const FARM_HEAD_MS = 10_000
 
 /** May `sig` be read through `farm` for `binding`? */
@@ -4364,15 +4384,16 @@ async function farmPoolHead(env, farm) {
   return root
 }
 
-/** Every signature in `root`'s package, its layers read from the heap or the
- *  farm (each hashed, and KEPT NOWHERE — only the read-through stores). A
- *  whole walk is remembered; a partial one is used once. */
+/** Every signature in `root`'s package, and every source atom its layers
+ *  name, its layers read from the heap or the farm (each hashed, and KEPT
+ *  NOWHERE — only the read-through stores). A whole walk is remembered; a
+ *  partial one is used once. */
 async function farmPackageScope(env, farm, root) {
   const memo = packageMemo(env).scopes
   if (memo.has(root)) return memo.get(root)
   const walk = await walkPackage(root, async (sig) => (await heapLayer(env, sig)) ?? farmLayer(farm, sig))
   if (!walk) return null
-  const scope = new Set([...walk.layers, ...walk.leaves])
+  const scope = new Set([...walk.layers, ...walk.leaves, ...walk.sources])
   if (!walk.missing.length) remember(memo, root, scope)
   return scope
 }
@@ -4446,7 +4467,50 @@ async function readThroughFarm(env, hostname, sig) {
 }
 
 async function readFromFarm(env, farm, sig) {
-  const deadline = AbortSignal.timeout(FARM_READ_MS)
+  // The walk has FARM_READ_MS, counted once from here and never re-armed, so
+  // no host inherits time another was given. While a stream of a declared
+  // length is being read the walk's clock ends nothing: that stream has a
+  // clock of its own, and when it stops without being kept the walk is back
+  // under its first deadline, already over if that has passed.
+  const deadline = new AbortController()
+  const end = () => deadline.abort()
+  let over = false
+  let ceiling = null
+  let quiet = null
+  const walk = setTimeout(() => { over = true; if (ceiling === null) end() }, FARM_READ_MS)
+  const stream = {
+    // The size of a stream is only a host's claim until the bytes arrive, so
+    // it sets the most the stream may take, and the bytes themselves must
+    // keep coming: FARM_READ_MS without one ends it as a stalled read always
+    // ended.
+    begin(ms) {
+      ceiling = setTimeout(end, ms)
+      quiet = setTimeout(end, FARM_READ_MS)
+    },
+    arrived() {
+      clearTimeout(quiet)
+      quiet = setTimeout(end, FARM_READ_MS)
+    },
+    settle() {
+      clearTimeout(ceiling)
+      clearTimeout(quiet)
+      ceiling = quiet = null
+      if (over) end()
+    },
+  }
+  try {
+    return await farmCopy(env, farm, sig, deadline.signal, stream)
+  } finally {
+    clearTimeout(walk)
+    clearTimeout(ceiling)
+    clearTimeout(quiet)
+  }
+}
+
+/** The walk itself, ended by `deadline`. `stream` is the clock of a
+ *  declared-length stream: `begin(ms)` when its headers are in, `arrived()`
+ *  for each chunk, `settle()` when it stops. */
+async function farmCopy(env, farm, sig, deadline, stream) {
   for (const host of farm) {
     if (deadline.aborted) break
     try {
@@ -4470,11 +4534,24 @@ async function readFromFarm(env, farm, sig) {
           await response.body?.cancel()
           continue
         }
-        // Streamed straight into the bucket, which checks the bytes against
-        // their name and refuses any other. A host that hides a miss behind
-        // a 200 page fails there.
-        await env.CONTENT.put(sig, response.body.pipeThrough(new FixedLengthStream(length)), { ...store, sha256: sig })
-        return true
+        // The host answered and said how much it sends. One fixed deadline
+        // holds a multi-megabyte file to the time a small one has, so the
+        // stream gets time in proportion to its length.
+        stream.begin(FARM_READ_MS + Math.ceil(length / FARM_STREAM_FLOOR) * 1000)
+        try {
+          // Each chunk is seen on its way through, so a stream that stops
+          // arriving is told from one that is only long. The fixed length
+          // stays last: the bucket takes a stream whose length it knows.
+          const seen = new TransformStream({ transform(chunk, controller) {
+            if (chunk.byteLength) stream.arrived()
+            controller.enqueue(chunk)
+          } })
+          // Streamed straight into the bucket, which checks the bytes against
+          // their name and refuses any other. A host that hides a miss behind
+          // a 200 page fails there.
+          await env.CONTENT.put(sig, response.body.pipeThrough(seen).pipeThrough(new FixedLengthStream(length)), { ...store, sha256: sig })
+          return true
+        } finally { stream.settle() }
       }
       const bytes = await boundedBytes(response, FARM_BUFFER_MAX)
       if (!bytes || await sha256Hex(bytes) !== sig) continue
