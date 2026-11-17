@@ -103,7 +103,7 @@ import {
 } from './zone-door.js'
 import { batchOrder, driftedRows } from './publish-batch.js'
 import { switchInCommunity } from './community-switch.js'
-import { readSignedShowcase, showcaseHome, type ShowcaseItem } from './showcase-record.js'
+import { SHOWCASE_SIGNED_EFFECT, readSignedShowcase, showcaseHome, type ShowcaseItem } from './showcase-record.js'
 import type { OfferedInstance } from './community-candidates.js'
 
 /** English fallbacks for every way publishing can stop. Each one names what
@@ -165,6 +165,10 @@ const PASSIVE_SWEEP_MIN_MS = 120_000
 /** A window opened this soon after a look, with nothing changed since, shows
  *  that look as it is: no second sweep to prove what was just proved. */
 const OPEN_FRESH_MS = 30_000
+/** The community is read again on a look no oftener than this. */
+const COMMUNITY_LOOK_MS = 5_000
+/** An open window, in view, reads the community again this often. */
+const COMMUNITY_ON_SCREEN_MS = 15_000
 /** A verdict an earlier look left on disk (`writeObservation`) — shown for a
  *  row this session has not looked at yet, until the sweep reaches it. */
 const PROVISIONAL_VERDICTS: ReadonlySet<string> = new Set([
@@ -460,6 +464,14 @@ export class PublishStatusDrone extends Drone {
   readonly #communityBusy = new Set<string>()
   /** One community write at a time: each reads, changes and signs one record. */
   #communityLane: Promise<unknown> = Promise.resolve()
+  /** Moves each time a switch of this window's lands, so a read begun before it never paints over it. */
+  #communityWrites = 0
+  /** When the community was last read again on a look (#lookAgain). */
+  #communityLookedAt = 0
+  /** Each community read takes the next number; only the newest one asked may paint. */
+  #communityReads = 0
+  /** A look that came too soon, put off until it may run. */
+  #communityLookLater: ReturnType<typeof setTimeout> | undefined
   /** The row shown in the properties pane. Gap enumeration is expensive, so
    *  it follows this one subject instead of running for every list row. */
   #inspectedKey = ''
@@ -484,6 +496,18 @@ export class PublishStatusDrone extends Drone {
 
   constructor() {
     super()
+
+    // WHAT ANOTHER DEVICE SAVED SHOWS HERE (jwize 2026-11-16: "when I turn it off from my phone it doesn't affect my
+    // desktop … They have to be globally In Sync, Last one wins"). The window read the community only on a full look,
+    // so one left open never saw a phone's change. Now it reads it again whenever it is looked at again.
+    if (typeof document !== 'undefined' && typeof window !== 'undefined') {
+      document.addEventListener('visibilitychange', () => this.#lookAgain())
+      window.addEventListener('focus', () => this.#lookAgain())
+      // A window left open and in focus is told nothing when the phone changes the record: it asks every little while.
+      setInterval(() => { if (Date.now() - this.#communityLookedAt >= COMMUNITY_ON_SCREEN_MS - 1_000) this.#lookAgain() }, COMMUNITY_ON_SCREEN_MS)
+    }
+    // This hive signed the community itself (a phone beside it asked through the bridge): what was read is older.
+    this.onEffect(SHOWCASE_SIGNED_EFFECT, () => { this.#communityWrites++; this.#lookAgain(true) })
 
     // A PRESS IS A PRESS NOW, never the echo of one. The bus replays the last
     // toggle to a listener as it subscribes; a drone that loads (or reloads)
@@ -706,9 +730,24 @@ export class PublishStatusDrone extends Drone {
    *  answers for this open), and never over one just taken with nothing
    *  changed since. */
   #lookOnOpen(): void {
-    if (this.#refreshing) return
-    if (!this.#stale && Date.now() - this.#sweptAt < OPEN_FRESH_MS) return
+    // The community is read on every open: another device may have changed it since the last look.
+    if (this.#refreshing || (!this.#stale && Date.now() - this.#sweptAt < OPEN_FRESH_MS)) { this.#lookAgain(true); return }
     void this.#refresh()
+  }
+
+  /** The window was looked at again (its tab shown, the hive focused, or opened): the community is read again, at
+   *  most every few seconds and never over a switch of this window's own still being signed. */
+  #lookAgain(opened = false): void {
+    if (!this.#open || !this.#zone) return
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+    // Too soon, or a switch of this window's own still being signed: put off, never dropped.
+    const wait = this.#communityBusy.size > 0 ? COMMUNITY_LOOK_MS : opened ? 0 : this.#communityLookedAt + COMMUNITY_LOOK_MS - Date.now()
+    if (wait > 0) {
+      if (!this.#communityLookLater) this.#communityLookLater = setTimeout(() => { this.#communityLookLater = undefined; this.#lookAgain() }, wait)
+      return
+    }
+    this.#communityLookedAt = Date.now()
+    void this.#readShowcase()
   }
 
   /** Coalesced re-sweep. A burst of reasons to look again is ONE look. With
@@ -1099,11 +1138,15 @@ export class PublishStatusDrone extends Drone {
       return
     }
     if (this.#showcase.zone !== zone) this.#showcase = { zone, read: 'checking', live: [] }
+    const writes = this.#communityWrites
+    const asked = ++this.#communityReads
     const read = await beforeDeadline(
       readSignedShowcase(zone).then(record => ({ record }), () => null),
       null,
     )
-    if (this.#zone !== zone) return
+    // A switch of this window's landed while this read was out: what it signed is newer than what was read.
+    // And only the newest read asked paints: an older one answering late would put back what it saw.
+    if (this.#zone !== zone || this.#communityWrites !== writes || this.#communityReads !== asked) return
     this.#showcase = read
       ? { zone, read: read.record ? 'ok' : 'none', live: [...(read.record?.items ?? [])] }
       : { ...this.#showcase, read: 'unreachable' }
@@ -1164,6 +1207,7 @@ export class PublishStatusDrone extends Drone {
           return
         }
         landed = { changed: result.changed }
+        this.#communityWrites++
         if (this.#showcase.zone === zone) this.#showcase = { zone, read: 'ok', live: [...result.items] }
       } catch (error) {
         console.warn('[publish] the community switch failed:', error)

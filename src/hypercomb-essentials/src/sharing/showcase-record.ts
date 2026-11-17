@@ -281,6 +281,24 @@ const zoneSitesOf = async (zone: string): Promise<string[]> => {
   } catch { return [] }
 }
 
+/** Lineages whose signed doors name this zone. Null when the index cannot be read.
+ *  An absent door is not published here, matching the front door. */
+export const doorsOnZone = async (zone: string, pubkey: string): Promise<readonly ShowcaseItem[] | null> => {
+  // Read where the zone's visitors read (showcaseHome): a bare apex may be the owner's relay, holding a stray index.
+  const read = await fetchHiveIndex((await showcaseHome(zone).catch(() => null)) ?? zone, pubkey)
+  if (!read.ok) return null
+  const items: ShowcaseItem[] = []
+  for (const [lineage, listed] of Object.entries(read.manifest.doors ?? {})) {
+    if (!lineage || lineage.length > 200 || /[\s\x00-\x1f\x7f]/.test(lineage)) continue
+    const opens = listed.some(door => {
+      const name = door.toLowerCase()
+      return name === zone || zone.endsWith(`.${name}`)
+    })
+    if (opens) items.push({ pubkey, lineage })
+  }
+  return items
+}
+
 /**
  * WHERE A ZONE'S SHOWCASE IS SIGNED AND READ (jwize 2026-11-14: "I need the device that has a key to be able to
  * update a shared community ... either side if they have the key can add or remove items"). A zone's apex and its

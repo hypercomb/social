@@ -327,9 +327,13 @@ creation is its author's to promote. A creation that cannot be optimized does no
 **A republish optimizes itself too** (2026-11-16). A promotion names the head it was made for, so a creation already
 live that was published again read as not promoted until someone turned it off and on (games and camelflage on
 jwize.com). Now every hive publish (`publishBranch`) is followed, in the background and outside the publish lane, by
-`repromoteInCommunity` (`promote.ts`): each of the branch's domains whose live showcase names it as this key's has the
-new head promoted, one at a time across publishes. Staged items are left to the staged publish, which promotes them;
-a refusal is said in the activity log, and the publish it follows already stands.
+`repromoteInCommunity` (`promote.ts`). The zones asked are the branch's own marks, the community's domains, and the
+public host the participant named, because the community a creation is live in need not be one of its own domains. In
+each zone whose live showcase names it as this key's, the new head is promoted once that zone's visitors are handed it
+(asked a few times, a little longer each time): promoted any earlier, the old head would be read, its old promotion
+would match, and nothing would be done. One runs at a time across publishes, and one that never ends holds the queue
+for five minutes at most. Staged items are left to the staged publish, which promotes them; a refusal or a head that
+never arrived is said in the activity log, and the publish it follows already stands.
 
 **Nothing complicated: the root domain is strictly on and off** (jwize, 2026-11-13: "You shouldn't manage your
 revision on the root domain. This is strictly on and off. The revisions should be available in the development mode
@@ -675,6 +679,38 @@ What feeds the community: this hive's creations on in any of its domains, what t
 door's own staged list (`staged:<zone>`) is updated with the same difference when one is signed, so a phone that
 publishes what is staged does not undo a press made here. Locally the word is *stage* ("Stage changes", "staging");
 *publish* is the community's word alone.
+
+### One switch on every device, and the last one wins (jwize 2026-11-16)
+
+"When I turn it off from my phone it doesn't affect my desktop. Then when I turn off my desktop it doesn't affect my
+phone. They have to be globally in sync. Last one wins."
+
+What a creation's switch in your community says is one thing on every device: **lit is live**, in the owners' signed
+`showcase:<zone>`, and nothing else. The phone's own row is lit for what is live, as the hive's Publish window is (a
+live creation the staged list lacks, left by the old staging, is live and lit; there is no "leaving" state any more).
+Every switch changes what is live at once, with a compare-and-swap, so the last one to land is what both show:
+
+- **In or out of the community**, on either device, is the live record itself (`switchInCommunity` in the hive's
+  window, `applyToggle` when the phone asks the hive beside it, `openPublishOne` / `takeOutOne` on the phone), signed
+  expecting what was read and applied again to what is there when another device moved it; the staged list follows
+  the same difference.
+- **Off in a domain's row** takes a live creation out of the community at once, on the phone as in the hive, and so
+  does staging a creation that replaces one from the same subdomain.
+- **Publish only adds**: it puts what is staged and not yet live into the showcase and never takes anything out
+  (phone `publishChange`, hive `applyPublish`). A staged list that lacks a live creation (another device put it in
+  since) can therefore never undo that on a later Publish. Coming out is its own act, at once. The one exception is
+  the first record of a domain that has none: it is the staged list itself, which began as what the doors showed, so
+  what was taken out of that before stays out.
+- **A domain with no record yet** shows what its doors publish (`doorsOnZone`, read at the showcase home, never a bare
+  apex that may be the owner's relay). A switch there starts the first record from that: on is those and it, off is
+  those less it (hive `switchInCommunity` and `applyToggle`, phone `toggleChange`), never one creation alone and never
+  a Publish of the whole staged list, which would put whatever else is staged live unasked.
+- **Each device reads again when it is looked at, and while it is on screen**: the phone on a shown tab or a focused
+  window and every fifteen seconds while visible (`readAgain`, with the freshest ledger the host panel fetched); the
+  hive's Publish window likewise, on every open, and when this hive signs the community itself (`#lookAgain`). A look
+  that comes within five seconds of the last, or while one of its own switches is being signed, is put off, never
+  dropped; only the newest read asked may paint, and a read that was out while one of the window's own switches landed
+  is dropped.
 
 ### Every look uses the page it is on (jwize 2026-11-13)
 

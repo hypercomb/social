@@ -20,7 +20,7 @@
 import { ROOT_MOVED } from './hive-pointer.js'
 import { publisherKeyHex } from './key-list.client.js'
 import { promoteForCommunity, type CommunityPromotion } from './promote.js'
-import { readSignedAt, showcaseKey, signShowcase, stagedKey, type Showcase, type ShowcaseItem } from './showcase-record.js'
+import { doorsOnZone, readSignedAt, showcaseKey, signShowcase, stagedKey, type Showcase, type ShowcaseItem } from './showcase-record.js'
 
 const SIG = /^[0-9a-f]{64}$/
 const ZONE = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/
@@ -45,6 +45,8 @@ export type CommunitySwitchDeps = {
   readonly promote?: (zone: string, lineage: string) => Promise<CommunityPromotion>
   /** Wait before reading again after another device moved the record (tests pass 0). */
   readonly backoff?: (tries: number) => number
+  /** What this key's doors publish on the zone: what visitors see while it has no showcase record yet. */
+  readonly published?: (zone: string, pubkey: string) => Promise<readonly ShowcaseItem[] | null>
 }
 
 const same = (a: ShowcaseItem, b: ShowcaseItem): boolean => a.pubkey === b.pubkey && a.lineage === b.lineage
@@ -71,7 +73,7 @@ const withItems = (record: Showcase, items: readonly ShowcaseItem[]): Showcase =
  *  `create` says whether a zone with no record yet gets one (the showcase does; a staged list that was never
  *  started is left unstarted). */
 const settle = async (
-  zone: string, key: string, request: CommunitySwitch, create: boolean, deps: CommunitySwitchDeps,
+  zone: string, key: string, request: CommunitySwitch, create: boolean, deps: CommunitySwitchDeps, own = '',
 ): Promise<CommunitySwitchResult> => {
   const readAt = deps.readAt ?? readSignedAt
   const sign = deps.sign ?? signShowcase
@@ -80,7 +82,14 @@ const settle = async (
     let read: { sig: string | null; record: Showcase | null }
     try { read = await readAt(zone, key) } catch { return { ok: false, reason: 'could not read your community' } }
     if (!read.record && !create) return { ok: true, changed: false, items: [] }
-    const record = read.record ?? { zone, items: [], domains: [] }
+    // A zone with no record yet shows what the doors publish there: the first record starts from that, so one switch
+    // never takes every other tile off the page (2026-11-16).
+    let first: readonly ShowcaseItem[] | null = []
+    if (!read.record) {
+      first = await (deps.published ?? doorsOnZone)(zone, own).catch(() => null)
+      if (!first) return { ok: false, reason: 'could not read what is published here' }
+    }
+    const record = read.record ?? { zone, items: [...first], domains: [] }
     const items = switchedItems(record.items, request)
     const moved = items.length !== record.items.length || items.some(item => !record.items.some(row => same(row, item)))
     if (!moved) return { ok: true, changed: false, items }
@@ -105,7 +114,7 @@ export async function switchInCommunity(request: CommunitySwitch, deps: Communit
       .catch((): CommunityPromotion => ({ ok: false, reason: `${item.lineage} could not be optimized` }))
     if (!done.ok) return { ok: false, reason: done.reason }
   }
-  const live = await settle(zone, showcaseKey(zone), switched, true, deps)
+  const live = await settle(zone, showcaseKey(zone), switched, true, deps, own)
   if (!live.ok || !live.changed) return live
   // The front door's staged list follows, when it has one. Its failure never undoes what went live.
   await settle(zone, stagedKey(zone), switched, false, deps).catch(() => null)

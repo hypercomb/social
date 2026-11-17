@@ -18,12 +18,12 @@
 // MIRRORED: hypercomb-shim/src/bootstrap/owner-bridge.ts speaks this; the shim spec holds them together.
 
 import { EffectBus, requestConfirm } from '@hypercomb/core'
-import { ROOT_MOVED, fetchHiveIndex } from './hive-pointer.js'
+import { ROOT_MOVED } from './hive-pointer.js'
 import { allowAnother, publisherKeyHex, type KeysAllowResult } from './key-list.client.js'
 import { promoteForCommunity, type CommunityPromotion } from './promote.js'
 import { qrSvg } from './qr-code.js'
 import {
-  parseView, readSignedAt, readSignedShowcase, setView, showcaseKey, showcases, signShowcase, stagedKey, toggleItem, type Showcase, type ShowcaseItem,
+  doorsOnZone, parseView, readSignedAt, readSignedShowcase, setView, showcaseKey, showcases, signShowcase, stagedKey, toggleItem, type Showcase, type ShowcaseItem,
 } from './showcase-record.js'
 
 export const SHOWCASE_CHANNEL = 'hc:showcase'
@@ -46,22 +46,6 @@ export type BridgeDeps = {
   readonly promote?: (zone: string, lineage: string) => Promise<CommunityPromotion>
 }
 
-/** Lineages whose signed doors name this zone. Null when the index cannot be read.
- *  An absent door is not published here, matching the front door. */
-const doorsOnZone = async (zone: string, pubkey: string): Promise<readonly ShowcaseItem[] | null> => {
-  const read = await fetchHiveIndex(zone, pubkey)
-  if (!read.ok) return null
-  const items: ShowcaseItem[] = []
-  for (const [lineage, listed] of Object.entries(read.manifest.doors ?? {})) {
-    if (!lineage || lineage.length > 200 || /[\s\x00-\x1f\x7f]/.test(lineage)) continue
-    const opens = listed.some(door => {
-      const name = door.toLowerCase()
-      return name === zone || zone.endsWith(`.${name}`)
-    })
-    if (opens) items.push({ pubkey, lineage })
-  }
-  return items
-}
 
 const signResult = async (record: Showcase, deps: BridgeDeps): Promise<ToggleResult> => {
   const signed = await (deps.sign ?? signShowcase)(record)
@@ -162,9 +146,9 @@ export async function applyStage(request: { readonly zone: string; readonly on: 
 
 /**
  * PUBLISH, THE ONE FINAL ACT (jwize 2026-11-15: "the community items are compiled and made available for all visitors
- * no matter what computer"). The showcase names exactly what is staged (its look, its domains shown in full and its
- * communities stay, a community losing what left), and each of this key's creations newly going live is optimized
- * first. Nothing staged is nothing to publish. Signed expecting the showcase it read: another device's write meanwhile
+ * no matter what computer"). Every staged creation not yet live goes into the showcase (its look, its domains shown in
+ * full and its communities stay), and each of this key's creations newly going live is optimized first. PUBLISH ONLY
+ * ADDS (2026-11-16): nothing comes out here; the first record of a zone with none is the staged list itself. Nothing staged is nothing to publish. Signed expecting the showcase it read: another device's write meanwhile
  * is read and the publish applied again. MIRRORED: the shim's device-owner.ts publishChange.
  */
 export async function applyPublish(request: { readonly zone: string }, deps: BridgeDeps = {}): Promise<ToggleResult> {
@@ -178,16 +162,17 @@ export async function applyPublish(request: { readonly zone: string }, deps: Bri
     if (!staged) return { ok: true, changed: false }
     const now = await visibleNow(zone, own, deps)
     if (!now) return { ok: false, reason: 'could not read what is published here' }
-    if (now.record && sameSet(now.items, staged.items)) return { ok: true, changed: false }
-    const refused = await optimizeOwn(zone, staged.items.filter(item => !now.items.some(row => sameItem(row, item))), own, deps)
+    // PUBLISH ONLY ADDS (jwize 2026-11-16: "They have to be globally In Sync, Last one wins"): what comes out comes out at
+    // once, on whichever device takes it out, so a staged list lacking a live creation never takes it out again here.
+    const adding = staged.items.filter(item => !now.items.some(row => sameItem(row, item)))
+    if (now.record && !adding.length) return { ok: true, changed: false }
+    const refused = await optimizeOwn(zone, adding, own, deps)
     if (refused) return refused
+    // The FIRST record starts from the staged list itself: it began as what visitors saw, and what was taken out of
+    // it since must not go live again with the record that starts the showcase.
+    const items = now.record ? [...now.record.items, ...adding] : [...staged.items]
     const current = now.record ?? { zone, items: [...now.items], domains: [] }
-    const kept = (row: ShowcaseItem): boolean => staged!.items.some(item => sameItem(item, row))
-    const signed = await (deps.sign ?? signShowcase)({
-      ...current,
-      items: [...staged.items],
-      ...(current.communities ? { communities: current.communities.map(community => ({ ...community, items: community.items.filter(kept) })) } : {}),
-    }, showcaseKey(zone), now.sig)
+    const signed = await (deps.sign ?? signShowcase)({ ...current, items }, showcaseKey(zone), now.sig)
     return signed.ok ? { ok: true, changed: true } : { ok: false, reason: signed.reason }
   })
 }
@@ -205,45 +190,59 @@ export async function applyToggle(request: ToggleRequest, deps: BridgeDeps = {})
   const own = String(await (deps.own ?? (() => publisherKeyHex({ known: true })))().catch(() => '') ?? '').toLowerCase()
   if (!SIG.test(own)) return { ok: false, reason: 'no key on this device' }
   const item: ShowcaseItem = { pubkey, lineage }
-  let current: Showcase | null
-  try {
-    current = await (deps.read ?? readSignedShowcase)(zone)
-  } catch {
-    return { ok: false, reason: 'could not read the showcase' }
-  }
+  const on = request.on === true
   // GOING LIVE IS THE PROMOTE, AND IT OPTIMIZES BY ITSELF (jwize 2026-11-13): one of this key's own creations is
   // minified before the record names it. Another publisher's creation is theirs to promote; taking one out is never gated.
-  const optimize = async (): Promise<ToggleResult | null> => {
-    if (request.on !== true || pubkey !== own) return null
-    return optimizeOwn(zone, [item], own, deps)
-  }
-  if (current) {
-    if (showcases(current, item) === (request.on === true)) return { ok: true, changed: false }
-    const refused = await optimize()
-    if (refused) return refused
-    return signResult(toggleItem(current, item), deps)
-  }
-  // No record yet. Turning one on starts a showcase that names only that creation.
-  if (request.on === true) {
-    const refused = await optimize()
-    if (refused) return refused
-    return signResult(toggleItem({ zone, items: [], domains: [] }, item), deps)
-  }
-  // Turning one off records everything still published here. An explicit empty record is left alone above.
-  let open: readonly ShowcaseItem[] | null
-  try {
-    open = await (deps.published ?? doorsOnZone)(zone, pubkey)
-  } catch {
-    return { ok: false, reason: 'could not read what is published here' }
-  }
-  if (!open) return { ok: false, reason: 'could not read what is published here' }
-  if (!open.some(row => row.pubkey === pubkey && row.lineage === lineage)) return { ok: true, changed: false }
-  return signResult({
-    zone,
-    items: open.filter(row => !(row.pubkey === pubkey && row.lineage === lineage)),
-    domains: [],
-  }, deps)
+  let optimized = false
+  // LAST ONE WINS (jwize 2026-11-16: "They have to be globally In Sync"): read, change, and sign expecting what was
+  // read; when another device moved the record meanwhile, read again and apply the switch to what is there now.
+  const result = await untilSettled(async () => {
+    let read: ReadAt
+    try { read = await readAt(zone, showcaseKey(zone), deps) } catch { return { ok: false, reason: 'could not read the showcase' } }
+    let next: Showcase
+    if (read.record) {
+      if (showcases(read.record, item) === on) return { ok: true, changed: false }
+      next = toggleItem(read.record, item)
+    } else if (on) {
+      // No record yet: the first one names what visitors see now (what the doors publish here) and this creation too,
+      // so turning one on never takes every other tile off the page.
+      let open: readonly ShowcaseItem[] | null
+      try { open = await (deps.published ?? doorsOnZone)(zone, own) } catch { return { ok: false, reason: 'could not read what is published here' } }
+      if (!open) return { ok: false, reason: 'could not read what is published here' }
+      next = toggleItem({ zone, items: open.filter(row => !sameItem(row, item)), domains: [] }, item)
+    } else {
+      // Turning one off records everything still published here. An explicit empty record is left alone above.
+      let open: readonly ShowcaseItem[] | null
+      try { open = await (deps.published ?? doorsOnZone)(zone, pubkey) } catch { return { ok: false, reason: 'could not read what is published here' } }
+      if (!open) return { ok: false, reason: 'could not read what is published here' }
+      if (!open.some(row => sameItem(row, item))) return { ok: true, changed: false }
+      next = { zone, items: open.filter(row => !sameItem(row, item)), domains: [] }
+    }
+    if (on && pubkey === own && !optimized) {
+      const refused = await optimizeOwn(zone, [item], own, deps)
+      if (refused) return refused
+      optimized = true
+    }
+    const signed = await (deps.sign ?? signShowcase)(next, showcaseKey(zone), read.sig)
+    return signed.ok ? { ok: true, changed: true } : { ok: false, reason: signed.reason }
+  })
+  // The staged list follows the same difference, when there is one: a later Publish on any device then neither brings
+  // back what went out here nor misses what came in. Its failure never undoes the switch.
+  if (result.ok && result.changed) await followStaged(zone, item, on, deps).catch(() => null)
+  return result
 }
+
+/** Apply one switch to the staged list of `zone`, when one is signed; a list never started is left unstarted. */
+const followStaged = (zone: string, item: ShowcaseItem, on: boolean, deps: BridgeDeps): Promise<ToggleResult> => untilSettled(async () => {
+  let staged: ReadAt
+  try { staged = await readAt(zone, stagedKey(zone), deps) } catch { return { ok: false, reason: 'could not read what is staged' } }
+  if (!staged.record) return { ok: true, changed: false }
+  const base = staged.record.items
+  const items = on ? (base.some(row => sameItem(row, item)) ? [...base] : [...base, item]) : base.filter(row => !sameItem(row, item))
+  if (sameSet(base, items)) return { ok: true, changed: false }
+  const signed = await (deps.sign ?? signShowcase)({ ...staged.record, items }, stagedKey(zone), staged.sig)
+  return signed.ok ? { ok: true, changed: true } : { ok: false, reason: signed.reason }
+})
 
 /** Sign the look a visitor is shown on `zone` (jwize 2026-11-10: "if you have your private key you can publish").
  *  Hexagons is the absence of a view. A zone with no record yet keeps showing what this key publishes there: the

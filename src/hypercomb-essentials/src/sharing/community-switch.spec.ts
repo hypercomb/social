@@ -43,6 +43,8 @@ const deps = (s: ReturnType<typeof store>, promoted: string[] = []) => ({
   sign: s.sign,
   promote: async (_zone: string, lineage: string) => { promoted.push(lineage); return { ok: true as const, promoted: true } },
   backoff: () => 0,
+  // What the doors publish on the zone: one of mine, shown while it has no showcase record yet.
+  published: async () => [mine('camelflage')],
 })
 
 describe('the items after a press', () => {
@@ -73,8 +75,9 @@ describe('a press in the community', () => {
     const result = await switchInCommunity({ zone, item: theirs('arkanoid'), on: true }, deps(s, promoted))
     expect(result.ok).toBe(true)
     expect(promoted).toEqual([])
-    // a zone with no showcase yet gets one naming it
-    expect(s.held.get(showcaseKey(zone))?.record.items).toEqual([theirs('arkanoid')])
+    // A zone with no showcase yet gets one naming what visitors saw there (the doors) and it — never only it, which
+    // would take every other tile off the page (2026-11-16).
+    expect(s.held.get(showcaseKey(zone))?.record.items).toEqual([mine('camelflage'), theirs('arkanoid')])
   })
 
   it('a creation that cannot be optimized does not go live, and says why', async () => {

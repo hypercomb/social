@@ -1760,6 +1760,46 @@ describe('a tap visits, a hold toggles', () => {
     } finally { hero.remove(); bands.remove() }
   })
 
+  it('live is lit on every device, and the last switch wins (jwize 2026-11-16: "when I turn it off from my phone it doesn’t affect my desktop … They have to be globally In Sync, Last one wins")', async () => {
+    // dylan is live, and the staged list the old staging left lacks it: the hive's window draws it lit, so this does too.
+    const live: ShowcaseRecord = { ...record, items: [...record.items, { pubkey: a, lineage: 'dylan' }] }
+    let held: ZoneOwners = { ...owners(), showcase: live, staged: { zone: 'hypercomb.com', domains: [], items: [...record.items] } }
+    const owner = {
+      ...bridge(a),
+      stage: vi.fn(async () => ({ ok: true as const, changed: true })),
+      publish: vi.fn(async () => ({ ok: true as const, changed: true })),
+      toggle: vi.fn(async (request: { lineage: string; on: boolean }) => {
+        held = { ...held, showcase: { ...live, items: held.showcase!.items.filter(row => request.on || row.lineage !== request.lineage) } }
+        return { ok: true as const, changed: true }
+      }),
+    }
+    const { hero, bands } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => held,
+      owner, keepCommunity: vi.fn(async () => true),
+    })
+    document.body.append(hero, bands)
+    const publish = bands.querySelector('.publish-bar') as HTMLButtonElement
+    try {
+      await vi.waitFor(() => expect(owner.hello).toHaveBeenCalled())
+      await new Promise(resolve => setTimeout(resolve, 0))
+      manageOn(hero)
+      // In the community: lit, not "leaving" — and a Publish would take nothing out, so there is nothing to publish.
+      await openRowNamed(bands, 'hypercomb.com')
+      const inCommunity = await tileIn(bands, '.dex-row.own a.hex', 'dylan')
+      expect(inCommunity.classList.contains('off')).toBe(false)
+      expect(inCommunity.classList.contains('leaving')).toBe(false)
+      expect(publish.hidden).toBe(true)
+      // In its domain's row it is on as well, and switching it off there takes it out of what every visitor reads, at once.
+      await openRowNamed(bands, 'jwize.com')
+      const inDomain = await tileIn(bands, '.dex-row:not(.own) a.hex', 'dylan')
+      expect(inDomain.classList.contains('off')).toBe(false)
+      click(inDomain)
+      await vi.waitFor(() => expect(owner.toggle).toHaveBeenCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'dylan', on: false }))
+      expect(owner.publish).not.toHaveBeenCalled()
+    } finally { hero.remove(); bands.remove() }
+  })
+
   it('draws each creation once (jwize 2026-11-16: "I am seeing two business-card entries"): named by this host\'s ledger and a followed domain\'s own, it is one tile on the page, in the community while managing, and in that domain\'s row', async () => {
     // jwize.com's own ledger names the very dylan this host's ledger verified, and garden, which only it serves.
     const peer = parseLedger({ sites: [
@@ -1893,7 +1933,7 @@ describe('a tap visits, a hold toggles', () => {
     } finally { waiting.hero.remove(); waiting.bands.remove() }
   })
 
-  it('a zone with no showcase yet publishes its staged list for the one confirm — a toggle would start a record naming only that tile', async () => {
+  it('a zone with no showcase yet puts the one tile live with its toggle, which starts the record from what visitors see — nothing else staged goes live unasked (2026-11-16)', async () => {
     const owner = {
       ...bridge(a),
       stage: vi.fn(async (_request: { zone: string; on: readonly ShowcaseItem[]; off: readonly ShowcaseItem[] }) => ({ ok: true as const, changed: true })),
@@ -1920,9 +1960,43 @@ describe('a tap visits, a hold toggles', () => {
       click(dylan)
       expect(bar.textContent).toBe('Publish dylan to every visitor')
       bar.click()
-      await vi.waitFor(() => expect(owner.publish).toHaveBeenCalledWith({ zone: 'hypercomb.com' }))
+      await vi.waitFor(() => expect(owner.toggle).toHaveBeenCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'dylan', on: true }))
       expect(owner.stage).toHaveBeenCalledWith({ zone: 'hypercomb.com', on: [{ pubkey: a, lineage: 'dylan' }], off: [] })
-      expect(owner.toggle).not.toHaveBeenCalled()
+      // A Publish of the whole staged list would put whatever else is staged live with it.
+      expect(owner.publish).not.toHaveBeenCalled()
+    } finally { hero.remove(); bands.remove() }
+  })
+
+  it('a zone with no showcase yet takes one tile out with its toggle (the record starts from what visitors see, less it) — never a Publish of the staged list, which would put what else is staged live (2026-11-16)', async () => {
+    const owner = {
+      ...bridge(a),
+      stage: vi.fn(async (_request: { zone: string; on: readonly ShowcaseItem[]; off: readonly ShowcaseItem[] }) => ({ ok: true as const, changed: true })),
+      publish: vi.fn(async (_request: { zone: string }) => ({ ok: true as const, changed: true })),
+      toggle: vi.fn(async () => ({ ok: true as const, changed: true })),
+    }
+    const { hero, bands } = showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }),
+      // No record: visitors see what the doors open here — camelflage. dylan is staged and not live.
+      readOwners: async () => ({ ...owners(), showcase: null, doors: new Map([[a, new Map([['camelflage', ['hypercomb.com']]])]]),
+        staged: { zone: 'hypercomb.com', domains: [], items: [...record.items, { pubkey: a, lineage: 'dylan' }] } }),
+      owner, keepCommunity: vi.fn(async () => true),
+    })
+    document.body.append(hero, bands)
+    const bar = bands.querySelector('.confirm-bar') as HTMLButtonElement
+    try {
+      await vi.waitFor(() => expect(owner.hello).toHaveBeenCalled())
+      await new Promise(resolve => setTimeout(resolve, 0))
+      manageOn(hero)
+      await openRowNamed(bands, 'hypercomb.com')
+      const camelflage = await tileIn(bands, '.dex-row.own a.hex', 'camelflage')
+      expect(camelflage.classList.contains('off')).toBe(false)
+      click(camelflage)
+      expect(bar.textContent).toBe('Take camelflage out of my community')
+      bar.click()
+      await vi.waitFor(() => expect(owner.toggle).toHaveBeenCalledWith({ zone: 'hypercomb.com', pubkey: a, lineage: 'camelflage', on: false }))
+      expect(owner.stage).toHaveBeenCalledWith({ zone: 'hypercomb.com', on: [], off: [{ pubkey: a, lineage: 'camelflage' }] })
+      expect(owner.publish).not.toHaveBeenCalled()
     } finally { hero.remove(); bands.remove() }
   })
 

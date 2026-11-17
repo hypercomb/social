@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { firstKeyList, keyListTemplate, nextKeyList, verifyKeyListChain, type SignedKeyList } from '@hypercomb/core'
 import { allowInvite, captureDeviceInvite, heldInvite } from './device-invite'
 import { readDeviceBinding } from './device-binding'
-import { deviceOwner, eitherOwner } from './device-owner'
+import { deviceOwner, eitherOwner, publishChange } from './device-owner'
 import { readZoneOwners, showcaseBytes as shimBytes, type ShowcaseRecord } from './showcase-record'
 import { showcaseBytes as hiveBytes } from '../../../hypercomb-essentials/src/sharing/showcase-record'
 
@@ -188,7 +188,7 @@ describe('a phone takes its owner\'s invite, then promotes from its own key', ()
     expect(zone.puts.length).toBe(puts)
   })
 
-  it('stages, then publishes (jwize 2026-11-15): staging changes only the staged list every device reads; publishing makes it the showcase and optimizes what goes live', async () => {
+  it('stages, then publishes (jwize 2026-11-15): staging changes only the staged list every device reads; publishing puts what is staged live, takes nothing out, and optimizes what goes live', async () => {
     await zone.publish({ zone: ZONE, items: [{ pubkey: anchor, lineage: 'camelflage' }], domains: [], view: 'list' })
     await accept()
     const owner = deviceOwner(ZONE)
@@ -206,10 +206,11 @@ describe('a phone takes its owner\'s invite, then promotes from its own key', ()
     // Send camelflage back out; staging the same thing twice changes nothing.
     expect(await owner.stage!({ zone: ZONE, on: [], off: [{ pubkey: anchor, lineage: 'camelflage' }] })).toEqual({ ok: true, changed: true })
     expect(await owner.stage!({ zone: ZONE, on: [other], off: [] })).toEqual({ ok: true, changed: false })
-    // Publish: the showcase is exactly what is staged, its look kept, and the anchor's own creation going live is optimized.
+    // Publish: what is staged goes live, its look kept, and the anchor's own creation going live is optimized. PUBLISH ONLY
+    // ADDS (jwize 2026-11-16: "Last one wins"): camelflage, staged out, stays live — coming out is its own act, at once.
     expect(await owner.publish!({ zone: ZONE })).toEqual({ ok: true, changed: true })
     read = await readZoneOwners(ZONE, [anchor])
-    expect(read.showcase?.items).toEqual([other, { pubkey: anchor, lineage: 'dylan' }].sort((x, y) => `${x.pubkey}\n${x.lineage}` < `${y.pubkey}\n${y.lineage}` ? -1 : 1))
+    expect(read.showcase?.items).toEqual([other, { pubkey: anchor, lineage: 'camelflage' }, { pubkey: anchor, lineage: 'dylan' }].sort((x, y) => `${x.pubkey}\n${x.lineage}` < `${y.pubkey}\n${y.lineage}` ? -1 : 1))
     expect(read.showcase?.view).toBe('list')
     roots = (JSON.parse(String(zone.index!['content'])) as { roots: Record<string, string> }).roots
     expect(roots['promoted:dylan']).toMatch(/^[0-9a-f]{64}$/)
@@ -340,5 +341,22 @@ describe('the record\'s bytes', () => {
       communities: [{ name: 'Games', items: [{ pubkey: 'a'.repeat(64), lineage: 'alpha' }], domains: [], view: 'list' }],
     }
     expect(new TextDecoder().decode(shimBytes(record))).toBe(new TextDecoder().decode(hiveBytes(record)))
+  })
+})
+
+describe('publish only adds, and the first record is the staged list (jwize 2026-11-16: "Last one wins")', () => {
+  const me = 'a'.repeat(64)
+  const x = { pubkey: me, lineage: 'x' }
+  const y = { pubkey: me, lineage: 'y' }
+  const z = { pubkey: me, lineage: 'z' }
+  it('with a record, puts what is staged and not live into it and takes nothing out', () => {
+    const change = publishChange('example.com')({ showcase: { zone: 'example.com', items: [x, y], domains: [] }, staged: { zone: 'example.com', items: [y, z], domains: [] }, open: () => [] })
+    expect(change?.showcase?.items).toEqual([x, y, z])
+    expect(change?.live).toEqual([z])
+    expect(publishChange('example.com')({ showcase: { zone: 'example.com', items: [x, y], domains: [] }, staged: { zone: 'example.com', items: [y], domains: [] }, open: () => [] })).toBeNull()
+  })
+  it('without one, starts from the staged list: what was taken out of what the doors showed stays out', () => {
+    const change = publishChange('example.com')({ showcase: null, staged: { zone: 'example.com', items: [y], domains: [] }, open: () => [x, y] })
+    expect(change?.showcase?.items).toEqual([y])
   })
 })
