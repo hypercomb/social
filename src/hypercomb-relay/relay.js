@@ -294,7 +294,7 @@ if (cfg.accessCommand) {
 //
 // THE RELAY YOU MEET AT IS YOUR SWARM'S HOST. wss://<host> means
 // https://<host>/<sig>: every joined tab derives its upload target from the
-// relay it dials, so a meeting needs no host pick, no /publish and nothing
+// relay it dials, so a meeting needs no host pick, no /stage and nothing
 // stored. This relay's HTTP half is that host for the participants its
 // operator allows (--allow-participants); the mesh half is unchanged — events
 // stay memory-only, a meeting point and never a store. Bytes that land here

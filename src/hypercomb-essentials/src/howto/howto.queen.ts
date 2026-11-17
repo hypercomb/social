@@ -8,8 +8,8 @@
 //
 // The site is ONE tile, `how`, at the root of the hive, with a child tile for
 // every word the hive understands and a page on each (howto-page.ts makes the
-// pages from what each word declares about itself). Publish it once —
-// `publish /how on <domain>` — and the whole language has a front door.
+// pages from what each word declares about itself). Stage it once —
+// `stage /how on <domain>` — and the whole language has a front door.
 //
 // Idempotent: a tile that is already there is kept, and a page whose
 // signature has not changed is not rewritten, so saying it again after a new
@@ -56,7 +56,7 @@ export class HowToQueenBee extends QueenBee {
   override options = ['<word>']
   override examples = [
     { input: 'howto', result: 'The tile "how" is laid at the root of your hive with a page for every word, and you walk into it' },
-    { input: 'howto publish', result: 'The same, then you walk to the page for "publish"' },
+    { input: 'howto stage', result: 'The same, then you walk to the page for "stage"' },
   ]
 
   /** One run at a time: a second `howto` while one lays tiles would race the
@@ -99,7 +99,7 @@ export class HowToQueenBee extends QueenBee {
       const to = word ? [HOWTO_ROOT, word] : [HOWTO_ROOT]
       get<NavigationShape>('@hypercomb.social/Navigation')?.goRaw?.(to)
       this.#say(this.#t('howto.done',
-        `The how-to site is laid: ${made.pages} pages (${made.written} written), ${made.tiles} new tiles — publish it with: publish /${HOWTO_ROOT} on <domain>`,
+        `The how-to site is laid: ${made.pages} pages (${made.written} written), ${made.tiles} new tiles — stage it with: stage /${HOWTO_ROOT} on <domain>`,
         { pages: made.pages, written: made.written, tiles: made.tiles, root: HOWTO_ROOT }), 'success')
     } finally {
       this.#running = false

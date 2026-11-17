@@ -1,7 +1,7 @@
 // publish-branch.refused.spec.ts — A NODE THAT REFUSED IS NOT "STILL
 // UPLOADING" (TS-4, the 2026-10-10 long-tail hunt).
 //
-// `publish here` on a branch whose publish domain answers 403 (participants
+// `stage here` on a branch whose publish domain answers 403 (participants
 // closed, not a writer): host-sync pauses that host for ten minutes after one
 // refused PUT, so nothing is uploading — yet the publish polled for 120 s and
 // then toasted "still uploading … retry on their own; publish again in a

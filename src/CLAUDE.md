@@ -411,7 +411,7 @@ Or via slash behaviour: `/language ja`, `/language en`, `/lang jp`
 
 ### Community translations
 
-The language is the community's (`documentation/community-translations.md`, jwize 2026-09-23): a translator's own overrides become a signed catalog on a host (`language offer <locale>`, index key `i18n:<locale>`), a host lists every verified catalog at `/i18n/<locale>.json` and at `sign('i18n:<locale>')`, a hive HEALS from the hosts it follows (`language sync`: only keys the locale lacks, never a shipped string, kept in its translations pool), and says what it still lacks under its key (`language missing`, `i18n-missing:<locale>`). Jev is not asked. A sub-word of a queen must not be a behaviour word of its own — the command line runs every behaviour word on a line in order (`publish` is one; `offer` is not).
+The language is the community's (`documentation/community-translations.md`, jwize 2026-09-23): a translator's own overrides become a signed catalog on a host (`language offer <locale>`, index key `i18n:<locale>`), a host lists every verified catalog at `/i18n/<locale>.json` and at `sign('i18n:<locale>')`, a hive HEALS from the hosts it follows (`language sync`: only keys the locale lacks, never a shipped string, kept in its translations pool), and says what it still lacks under its key (`language missing`, `i18n-missing:<locale>`). Jev is not asked. A sub-word of a queen must not be a behaviour word of its own — the command line runs every behaviour word on a line in order (`stage` is one; `offer` is not).
 
 ### Key conventions
 

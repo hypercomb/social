@@ -38,6 +38,7 @@ import { lensOrigin, listingMembers } from '../sharing/community-lens.js'
 import { networkHosts } from '../sharing/network-hosts.js'
 import { askPoolListing } from '../sharing/pool-listing.js'
 import { readDoorsOf, zonesOf } from '../sharing/zone-door.js'
+import { liveShowcaseReadDeps, readZoneShowcase, type ShowcaseFound } from './hive-showcase-read.js'
 
 /** A pool a model may ask for: a colon meaning, lower case, no spaces. A bare
  *  word is a tile's name pool, which no host lists. */
@@ -87,6 +88,9 @@ export interface PoolReadDeps {
   listing(origin: string, address: string, signal?: AbortSignal): Promise<string | 'absent' | null>
   /** A one-file index's text; null for anything that is not one. */
   document(origin: string, address: string, signal?: AbortSignal): Promise<string | null>
+  /** A meaning that is an INDEX KEY, not a pool (`showcase:<zone>`), read where the zone's owners sign it
+   *  (hive-showcase-read.ts) — asked only when no host answers at the pool address. */
+  signed?(meaning: string, hosts: readonly string[], signal?: AbortSignal): Promise<ShowcaseFound | null>
 }
 
 export const livePoolReadDeps: PoolReadDeps = {
@@ -108,6 +112,7 @@ export const livePoolReadDeps: PoolReadDeps = {
       return !text || text.length > MAX_DOCUMENT_BYTES || text.trimStart().startsWith('<') ? null : text
     } catch { return null }
   },
+  signed: (meaning, hosts, signal) => readZoneShowcase(meaning, hosts, liveShowcaseReadDeps(livePoolReadDeps.document), signal),
 }
 
 // ── A LISTED MEMBER CAN BE OPENED ────────────────────────────────────────────
@@ -250,6 +255,22 @@ export const readPool = async (
     const added = (answer.members ?? []).filter(sig => !held.has(sig))
     return added.length ? [{ host: answer.host, state: 'listed', members: added }] : []
   })
+  // A SHOWCASE IS SIGNED, NOT POOLED (hive-showcase-read.ts): when no host
+  // answers anything at the address, the zone's owners' index is asked. The
+  // heads it names are content at their hosts' roots, not members kept in a
+  // pool, so they are not remembered as pool members.
+  let heads: readonly { readonly sig: string; readonly hosts: readonly string[] }[] = []
+  if (!answers.some(answer => answer.members?.length || answer.text !== undefined) && deps.signed) {
+    const found = await deps.signed(meaning, hosts, options.signal).catch(() => null)
+    if (options.signal?.aborted) throw new DOMException('The Hypercomb pool read was stopped', 'AbortError')
+    if (found) {
+      const at = answers.findIndex(answer => answer.host === found.host)
+      const signed: Said = { host: found.host, state: 'document', text: found.text }
+      heads = found.heads
+      if (at >= 0) answers[at] = signed
+      else answers.push(signed)
+    }
+  }
   const bySig = new Map<string, string[]>()
   const byText = new Map<string, string[]>()
   for (const answer of answers) {
@@ -270,10 +291,11 @@ export const readPool = async (
   // Every member, named or past the page: a model may read one it was told
   // of in an earlier page, and the listing is what says where it lives.
   noteMembers(address, members)
+  const named = [...members, ...heads.filter(head => !bySig.has(head.sig)).map(head => ({ sig: head.sig, hosts: [...head.hosts] }))]
   return {
     ok: true, root, meaning, address,
     hosts: answers.map(answer => ({ host: answer.host, state: answer.state })),
-    members: members.slice(0, MAX_MEMBERS), total: members.length, documents,
-    truncated: members.length > MAX_MEMBERS || documents.some(document => document.truncated),
+    members: named.slice(0, MAX_MEMBERS), total: named.length, documents,
+    truncated: named.length > MAX_MEMBERS || documents.some(document => document.truncated),
   }
 }

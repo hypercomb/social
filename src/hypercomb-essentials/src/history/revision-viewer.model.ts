@@ -26,6 +26,8 @@
 // pictures are the version's own bytes, inlined.
 
 import { extractPageRefSigs, rewritePageRefs } from '../sharing/decoration-closure.js'
+// The frame watches itself, first of all, and says what its page did (frame-watch.ts).
+import { FRAME_WATCH } from './frame-watch.js'
 
 const SIG_RE = /^[0-9a-f]{64}$/
 
@@ -326,7 +328,7 @@ export function frameDocument(pageHtml: string, data: FrameData, hosting: FrameH
   const html = inlinePictures(String(pageHtml), hosting.pictures)
   const entry = '/' + (data.entry ?? data.segments).join('/')
   const head = `<meta http-equiv="Content-Security-Policy" content="${FRAME_POLICY}"><meta name="referrer" content="no-referrer">`
-    + `<script type="application/json" id="hc-revision-data">${scriptSafeJson(data)}</script><script>${STAND_IN}</script>`
+    + `<script type="application/json" id="hc-revision-data">${scriptSafeJson(data)}</script><script>${FRAME_WATCH}</script><script>${STAND_IN}</script>`
 
   if (typeof DOMParser !== 'undefined') {
     const doc = new DOMParser().parseFromString(html, 'text/html')

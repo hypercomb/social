@@ -198,6 +198,30 @@ export async function mintBuildRecord(
   }
 
   const name = (label ?? '').trim() || `build-${existing.length + 1}`
+  const written = await appendBuildRecord(segments, seal, name)
+  if ('error' in written) return written
+  return { sig: written.sig, seal, label: name, unchanged: false }
+}
+
+/**
+ * Append a record that names a seal ALREADY TAKEN: the same record shape in
+ * the same slot, with no new seal. Two gestures need it (revision-lines.ts):
+ * a state that is given a second name ("start a new line from here", which
+ * `mintBuildRecord` declines because nothing changed), and a revision that is
+ * opened again, which is said in the list as a record under its name so the
+ * newest record always names the line being worked on. `mintBuildRecord`
+ * writes its own record through here, so there is one writer.
+ */
+export async function appendBuildRecord(
+  segments: readonly string[],
+  seal: string,
+  label: string,
+): Promise<{ sig: string } | { error: string }> {
+  const store = get<StoreLike>(STORE_KEY)
+  const committer = get<CommitterLike>(COMMITTER_KEY)
+  if (!store?.putResource || !committer?.commitSlotAppend) return { error: 'core services are not ready' }
+  const name = String(label ?? '').trim()
+  if (!SIG_RE.test(seal) || !name) return { error: 'the build record could not be written' }
   const record: BuildRecord = { seal, label: name, at: Date.now() }
   const sig = await store.putResource(
     new Blob([JSON.stringify(record)], { type: 'application/json' }),
@@ -205,7 +229,7 @@ export async function mintBuildRecord(
   if (!sig || !SIG_RE.test(sig)) return { error: 'the build record could not be written' }
 
   await committer.commitSlotAppend(segments, BUILDS_SLOT, sig)
-  return { sig, seal, label: name, unchanged: false }
+  return { sig }
 }
 
 /** The slot as the LayerSlotRegistry declares it; history.boot.drone.ts registers it. */

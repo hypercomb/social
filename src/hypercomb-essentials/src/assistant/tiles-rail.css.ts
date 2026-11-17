@@ -35,13 +35,13 @@ export const RAIL_CSS = `
 .hc-rail-head{display:flex;align-items:center;gap:0.25rem;flex:0 0 auto;
   box-sizing:border-box;height:2.875rem;padding:0 0.5rem;
   border-bottom:1px solid var(--hc-window-edge, rgba(${STEEL},0.28));}
-.hc-rail-back,.hc-rail-find-toggle,.hc-rail-convos-toggle{display:inline-grid;place-items:center;flex:0 0 auto;
+.hc-rail-back,.hc-rail-find-toggle,.hc-rail-convos-toggle,.hc-rail-code-toggle{display:inline-grid;place-items:center;flex:0 0 auto;
   width:1.75rem;height:1.75rem;padding:0;border:0;background:none;cursor:pointer;
   color:var(--hc-window-ink-quiet);border-radius:var(--hc-radius-control, 2px);
   transition:color 0.12s ease,background-color 0.12s ease;}
-.hc-rail-back:hover:not(:disabled),.hc-rail-find-toggle:hover,.hc-rail-convos-toggle:hover{
+.hc-rail-back:hover:not(:disabled),.hc-rail-find-toggle:hover,.hc-rail-convos-toggle:hover,.hc-rail-code-toggle:hover{
   color:var(--hc-window-ink-loud);background:var(--hc-window-tint, rgba(${STEEL},0.06));}
-.hc-rail-find-toggle[aria-pressed='true'],.hc-rail-convos-toggle[aria-pressed='true']{color:var(--hc-window-accent, rgb(${STEEL}));
+.hc-rail-find-toggle[aria-pressed='true'],.hc-rail-convos-toggle[aria-pressed='true'],.hc-rail-code-toggle[aria-pressed='true']{color:var(--hc-window-accent, rgb(${STEEL}));
   background:var(--hc-window-wash, rgba(${STEEL},0.1));}
 .hc-rail-back.root{cursor:default;color:rgb(${AMBER});}
 /* THE CONVERSATIONS ARE A TAB behind this icon, never stacked over the tiles.

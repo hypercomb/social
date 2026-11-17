@@ -216,12 +216,19 @@ const jpegBase64 = async (canvas: Drawable): Promise<string> => {
 
 /** A short reading of the picture, and a small JPEG a vision model can see.
  *  A blob that is not a picture yields neither. */
-export async function pictureContext(blob: Blob): Promise<{ reading: string; image?: { mime: string; base64: string } }> {
+export async function pictureContext(
+  blob: Blob,
+  options: { readonly side?: number; readonly maxBase64?: number } = {},
+): Promise<{ reading: string; image?: { mime: string; base64: string }; width?: number; height?: number }> {
   if (typeof createImageBitmap !== 'function') return { reading: '' }
+  // `side` is the longest edge the model is sent; a reviewer's glance needs
+  // 384, a model asked to scrutinize a picture needs more (assistant/picture-read.ts).
+  const side = Math.max(64, Math.min(2048, Math.floor(options.side ?? 384)))
+  const maxBase64 = options.maxBase64 ?? 300_000
   try {
     const bitmap = await createImageBitmap(blob)
     try {
-      const scale = Math.min(1, 384 / Math.max(bitmap.width, bitmap.height, 1))
+      const scale = Math.min(1, side / Math.max(bitmap.width, bitmap.height, 1))
       const width = Math.max(1, Math.round(bitmap.width * scale))
       const height = Math.max(1, Math.round(bitmap.height * scale))
       const drawn = canvas2d(width, height)
@@ -230,8 +237,9 @@ export async function pictureContext(blob: Blob): Promise<{ reading: string; ima
       const data = drawn.ctx.getImageData(0, 0, width, height).data
       const reading = pictureReading(bitmap.width, bitmap.height, data)
       const base64 = await jpegBase64(drawn.canvas)
-      const image = base64 && base64.length < 300_000 ? { mime: 'image/jpeg', base64 } : undefined
-      return image ? { reading, image } : { reading }
+      const image = base64 && base64.length < maxBase64 ? { mime: 'image/jpeg', base64 } : undefined
+      const size = { width: bitmap.width, height: bitmap.height }
+      return image ? { reading, image, ...size } : { reading, ...size }
     } finally {
       bitmap.close?.()
     }

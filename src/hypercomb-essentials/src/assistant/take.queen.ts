@@ -119,7 +119,7 @@ export class TakeQueenBee extends QueenBee {
     example: '/take <signature> at /recipes',
     reach: 'additive' as const,
     scope: 'hive' as const,
-    consequence: `Brings the published tile that signature names, and every tile under it, into this hive: onto the page the participant is on, or onto the page at /<route> names (at / is the first page). The signature is one a read gave: a tile's sig from explore, a publication's head from pool host:publications, or a child that read <signature> listed. It asks the hosts for those layers as a read does; nothing is signed or published, and code never comes: a tile that carries code is refused whole. A tile of that name already on the page keeps its own values and gains what it lacked. More than ${TAKE_MAX_TILES} tiles at once is refused: read into it and take a part. It is one step in that page's history.`,
+    consequence: `Brings the published tile that signature names, and every tile under it, into this hive: onto the page the participant is on, or onto the page at /<route> names (at / is the first page). The signature is one a read gave: a tile's sig from explore, a publication's head from pool host:publications or pool showcase:<zone>, or a child that read <signature> listed. It asks the hosts for those layers as a read does; nothing is signed or published, and code never comes: a tile that carries code is refused whole. A tile of that name already on the page keeps its own values and gains what it lacked. More than ${TAKE_MAX_TILES} tiles at once is refused: read into it and take a part. It is one step in that page's history.`,
     refuse: (args: string): string | undefined => {
       const asked = parseTake(args)
       return typeof asked === 'string' ? asked : undefined

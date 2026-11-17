@@ -2,7 +2,7 @@
 //
 // `/hosts` — the hosts you carry.
 //
-// Companion to `/publish`, with a clean ownership boundary. Publish is
+// Companion to `/stage`, with a clean ownership boundary. Staging is
 // branch-scoped: where this branch goes and what the world serves. Hosts is
 // the durable directory: which domains you carry and which packages they
 // offer, before any branch chooses a destination.

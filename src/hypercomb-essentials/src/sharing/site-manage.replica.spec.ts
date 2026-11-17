@@ -95,7 +95,7 @@ vi.hoisted(() => {
 const { EffectBus } = await import('@hypercomb/core')
 hive.emit = (name, payload) => EffectBus.emit(name, payload)
 const { SiteManageElement, SITE_MANAGE_SURFACE, RELIST_MS } = await import('./site-manage.view.js')
-const { SITE_REPLICA_POOL, isHusk, lagging, writeReceipt, readReceipt } = await import('./site-replica.js')
+const { SITE_REPLICA_POOL, isHusk, lagging, writeReceipt, readReceipt, replicaChatConvoId } = await import('./site-replica.js')
 if (!customElements.get(SITE_MANAGE_SURFACE)) customElements.define(SITE_MANAGE_SURFACE, SiteManageElement)
 
 const HEAD = sig('1'), NEWER = sig('7'), LOC = 'loc:/business-card'
@@ -409,7 +409,78 @@ describe('the chat', () => {
     const asked: unknown[] = []
     const off = EffectBus.on('chat:open', p => asked.push(p))
     ;(element.querySelector('.sm-chat') as HTMLButtonElement).click()
+    await settle()
     off()
     expect(asked).toEqual([{ convoId: 'chat:tile:/business-card' }])
+  })
+
+  // jwize, 2026-11-16: "archive doesn't seem to work on the subdomain ai
+  // chat". It had worked; the Chat button named the card's own conversation
+  // on every press and put the owner straight back into the one they filed.
+  describe('which conversation the Chat button opens', () => {
+    const OWN = 'chat:tile:/business-card'
+    const threads = (rows: { convoId: string; archived?: boolean; lastAt?: number }[]) => ({
+      tileConvoId: (segments: readonly string[]) => `chat:tile:/${segments.join('/')}`,
+      newTileConvoId: (segments: readonly string[]) => `chat:tile:/${segments.join('/')}::fresh`,
+      tilePathOf: (convoId: string) => (/^chat:tile:([^:]*)/.exec(convoId)?.[1] ?? ''),
+      listConversations: async () => rows,
+    })
+
+    it('is the card tile’s own while it is live, or has never been spoken in', async () => {
+      expect(await replicaChatConvoId('business-card', threads([{ convoId: OWN, lastAt: 5 }, { convoId: `${OWN}::a`, lastAt: 9 }]))).toBe(OWN)
+      expect(await replicaChatConvoId('business-card', threads([{ convoId: `${OWN}::a`, lastAt: 9 }]))).toBe(OWN)
+      expect(await replicaChatConvoId('business-card', threads([]))).toBe(OWN)
+    })
+
+    it('is the most recent live conversation on the card once its own was put away', async () => {
+      expect(await replicaChatConvoId('business-card', threads([
+        { convoId: OWN, archived: true, lastAt: 50 },
+        { convoId: `${OWN}::older`, lastAt: 10 },
+        { convoId: `${OWN}::newer`, lastAt: 30 },
+        { convoId: `${OWN}::filed`, archived: true, lastAt: 40 },
+        { convoId: 'chat:tile:/elsewhere::x', lastAt: 99 },
+      ]))).toBe(`${OWN}::newer`)
+    })
+
+    it('is a fresh one on the card when everything on it was put away', async () => {
+      expect(await replicaChatConvoId('business-card', threads([
+        { convoId: OWN, archived: true }, { convoId: 'chat:tile:/elsewhere::x', lastAt: 99 },
+      ]))).toBe(`${OWN}::fresh`)
+    })
+
+    // jwize, 2026-11-16: "only have the ai chats for that instance". A
+    // conversation of another revision is passed over as a filed one is.
+    it('passes over a conversation that belongs to another revision of the card', async () => {
+      const other = new Set([OWN, `${OWN}::red`])
+      const inRevision = (convo: { convoId: string }): boolean => !other.has(convo.convoId)
+      expect(await replicaChatConvoId('business-card', threads([
+        { convoId: OWN, lastAt: 50 }, { convoId: `${OWN}::red`, lastAt: 60 }, { convoId: `${OWN}::blue`, lastAt: 30 },
+      ]), inRevision)).toBe(`${OWN}::blue`)
+      expect(await replicaChatConvoId('business-card', threads([
+        { convoId: OWN, lastAt: 50 }, { convoId: `${OWN}::red`, lastAt: 60 },
+      ]), inRevision)).toBe(`${OWN}::fresh`)
+    })
+
+    // Seen on business-card.jwize.com, 2026-11-16: opening a revision whose
+    // card conversation had never been used landed on an empty chat while
+    // the revision's own conversation sat in the list.
+    it('once the card has revisions, an unspoken own conversation yields to the revision’s latest', async () => {
+      const inRevision = (convo: { convoId: string }): boolean => convo.convoId !== `${OWN}::blue`
+      expect(await replicaChatConvoId('business-card', threads([
+        { convoId: `${OWN}::red-old`, lastAt: 10 }, { convoId: `${OWN}::red-new`, lastAt: 40 }, { convoId: `${OWN}::blue`, lastAt: 90 },
+      ]), inRevision)).toBe(`${OWN}::red-new`)
+      // Its own, spoken in during this revision, is still the one opened.
+      expect(await replicaChatConvoId('business-card', threads([
+        { convoId: OWN, lastAt: 5 }, { convoId: `${OWN}::red-new`, lastAt: 40 },
+      ]), inRevision)).toBe(OWN)
+      // Nothing of this revision to open: the card's own, which begins now.
+      expect(await replicaChatConvoId('business-card', threads([{ convoId: `${OWN}::blue`, lastAt: 90 }]), inRevision)).toBe(OWN)
+      expect(await replicaChatConvoId('business-card', threads([]), () => false)).toBe(OWN)
+    })
+
+    it('is the card tile’s own when the list cannot be read, or there are no threads to ask', async () => {
+      expect(await replicaChatConvoId('business-card', { ...threads([]), listConversations: async () => { throw new Error('unreadable') } })).toBe(OWN)
+      expect(await replicaChatConvoId('business-card')).toBe(OWN)
+    })
   })
 })

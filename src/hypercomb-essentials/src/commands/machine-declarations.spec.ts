@@ -176,7 +176,7 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
   // Judged on arrival (2026-10-24, public history — "have that feature with
   // grant"). Only the history forms are a machine's; opening a branch's
   // history cannot be taken back, so the ceiling is destructive at the network.
-  publish: ['destructive', 'network'],
+  stage: ['destructive', 'network'],
   // Judged on arrival (2026-11-11, development by chat — "we follow a domain
   // get the creation and start making changes seamlessly").
   follow: ['additive', 'network'],         // adds a domain to the ones read from; `off` is refused,
@@ -209,8 +209,8 @@ describe('every machine declaration, as audited', () => {
 })
 
 describe('what the corrections refuse', () => {
-  it('/publish lets a machine say only the history forms', () => {
-    const refuse = declared.get('publish')!.refuse!
+  it('/stage lets a machine say only the history forms', () => {
+    const refuse = declared.get('stage')!.refuse!
     for (const line of ['history', 'history on', 'history off', '/a/b history on']) expect(refuse(line), line).toBeUndefined()
     for (const line of ['', 'here', 'on example.com', 'off example.com', 'as blog on example.com', '/a/b', 'history maybe']) {
       expect(refuse(line), line).toContain("participant's")

@@ -1,6 +1,6 @@
 // hypercomb-shared/ui/publish-panel/publish-panel.component.ts
 //
-// Right-docked "Publish" panel — TWO ACTS, NOTHING ELSE (jwize 2026-11-16: "you
+// Right-docked "Staging" panel — TWO ACTS, NOTHING ELSE (jwize 2026-11-16: "you
 // should have your own domain and the community separate since you are feeding
 // the community from all domains including yourself. Then there are only on off
 // no selected … This makes only two things you can do in the app here. Add to

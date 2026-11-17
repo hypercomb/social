@@ -1,12 +1,12 @@
-// publish-history-word.spec.ts — `publish history` is a SUB-WORD of publish.
+// publish-history-word.spec.ts — `stage history` is a SUB-WORD of stage.
 //
-//   publish history          status only — never changes anything
-//   publish history on       write the mark on the branch root, then republish
-//   publish history off      clear it, then republish
-//   publish /a/b history …   the same for a named tile
+//   stage history            status only — never changes anything
+//   stage history on         write the mark on the branch root, then re-stage
+//   stage history off        clear it, then re-stage
+//   stage /a/b history …     the same for a named tile
 //
-// A branch that is not published keeps the mark for its next publish and is
-// not published by this word. Turning ON says plainly that what is served
+// A branch that is not staged keeps the mark for its next staging and is
+// not staged by this word. Turning ON says plainly that what is served
 // while history is public may be copied elsewhere and cannot be taken back.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -56,10 +56,10 @@ beforeEach(() => {
 
 const bee = new PublishQueenBee()
 
-describe('publish history — status', () => {
+describe('stage history — status', () => {
   it('says head only when the branch carries no mark, and changes nothing', async () => {
     await bee.invoke('history')
-    expect(toasts().join(' ')).toMatch(/"garden" publishes its head only/)
+    expect(toasts().join(' ')).toMatch(/"garden" stages its head only/)
     expect(writePublicHistory).not.toHaveBeenCalled()
     expect(clearPublicHistory).not.toHaveBeenCalled()
     expect(hostCurrentBranch).not.toHaveBeenCalled()
@@ -68,7 +68,7 @@ describe('publish history — status', () => {
   it('says public when the mark is on', async () => {
     publicHistoryAt.mockResolvedValue(true)
     await bee.invoke('History')
-    expect(toasts().join(' ')).toMatch(/"garden" publishes its history/)
+    expect(toasts().join(' ')).toMatch(/"garden" stages its history/)
     expect(hostCurrentBranch).not.toHaveBeenCalled()
   })
 
@@ -80,7 +80,7 @@ describe('publish history — status', () => {
 
   it('answers a stray word with the usage and does nothing', async () => {
     await bee.invoke('history maybe')
-    expect(toasts().join(' ')).toMatch(/publish history on/)
+    expect(toasts().join(' ')).toMatch(/stage history on/)
     expect(publicHistoryAt).not.toHaveBeenCalled()
   })
 
@@ -93,7 +93,7 @@ describe('publish history — status', () => {
   })
 })
 
-describe('publish history on / off', () => {
+describe('stage history on / off', () => {
   it('on writes the mark, warns it cannot be taken back, and republishes a published branch', async () => {
     publishedKeys.add(lineageKey(['garden']))
     await bee.invoke('history on')
@@ -108,22 +108,22 @@ describe('publish history on / off', () => {
     await bee.invoke('history off')
     expect(clearPublicHistory).toHaveBeenCalledWith(['garden'])
     expect(writePublicHistory).not.toHaveBeenCalled()
-    expect(toasts().join(' ')).toMatch(/now publishes its head only/)
+    expect(toasts().join(' ')).toMatch(/now stages its head only/)
     expect(hostCurrentBranch).toHaveBeenCalledWith(['garden'])
   })
 
-  it('route-first: publish /a/b history on acts on that tile', async () => {
+  it('route-first: stage /a/b history on acts on that tile', async () => {
     publishedKeys.add(lineageKey(['a', 'b']))
     await bee.invoke('/a/b history on')
     expect(writePublicHistory).toHaveBeenCalledWith(['a', 'b'])
     expect(hostCurrentBranch).toHaveBeenCalledWith(['a', 'b'])
   })
 
-  it('an unpublished branch keeps the mark for its next publish and is not published by this word', async () => {
+  it('an unstaged branch keeps the mark for its next staging and is not staged by this word', async () => {
     await bee.invoke('history on')
     expect(writePublicHistory).toHaveBeenCalledWith(['garden'])
     expect(hostCurrentBranch).not.toHaveBeenCalled()
-    expect(toasts().join(' ')).toMatch(/not published yet/)
+    expect(toasts().join(' ')).toMatch(/not staged yet/)
   })
 
   it('asking for the state it is already in commits nothing and only says the status', async () => {

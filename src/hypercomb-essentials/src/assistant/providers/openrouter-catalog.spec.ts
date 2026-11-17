@@ -16,6 +16,15 @@ describe('decision model discovery', () => {
     await fetchOpenRouterCatalog()
     expect(fetcher).toHaveBeenCalledTimes(2)
   })
+  it('marks a model that takes pictures as input, and only that one', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/endpoints') ? { ok: false, status: 404 } : { ok: true, json: async () => ({ data: [
+      { id: 'example/sees', name: 'Sees', architecture: { input_modalities: ['text', 'image'] } },
+      { id: 'example/reads', name: 'Reads', architecture: { input_modalities: ['text'] } },
+    ] }) }))
+    const entries = await fetchOpenRouterCatalog()
+    expect(entries.find(e => e.id === 'example/sees')?.vision).toBe(true)
+    expect(entries.find(e => e.id === 'example/reads')).not.toHaveProperty('vision')
+  })
   it('keeps chat discovery working when the optional decision lookup fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.endsWith('/endpoints')) throw new Error('unavailable')

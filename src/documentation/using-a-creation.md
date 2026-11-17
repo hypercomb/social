@@ -185,7 +185,7 @@ How it is built:
   from the publisher whose index binds that address to a lineage (an own
   address, or the lineage's own name, with its door open), never for a
   domain's root.
-- **Your hive** (Publish panel, on each address a row is served at,
+- **Your hive** (Staging window, on each address a row is served at,
   "Entrances"): preview
   the page in a sealed frame that cannot reach your hive, then Turn on, Turn
   off or Skip. Turn on is offered only for the version you just previewed, and
@@ -243,7 +243,7 @@ The redirect from that earlier day is retired. A phone stays on hypercomb.io.
   creation runs on its host's domain, so your browser keeps its data for that
   domain alone. Nothing on another domain can read it, and it can't read your
   hive. That is what makes it safe to use apps on other people's domains.
-- **You choose what shows from your hive.** In the Publish panel, a domain's
+- **You choose what shows from your hive.** In the Staging window, a domain's
   row opens on the creations it hosts, and turning one on or off there puts
   it on your front page or takes it off. Everything you host shows up there
   by itself.
@@ -326,7 +326,7 @@ mode, or Single App Mode on a supervised iPhone).
 | An adopted peer's creation stays at the head you accepted | built |
 | Keeping your cards and scanning on a card door (someone without a host) | built, not deployed. A domain's participant turns it on from their hive for one page version they previewed; the host then serves that version as the whole page, with keeping and the camera allowed to it alone, and the page reads its own card and other cards' addresses with a reader built into it. Every kept value is checked as it loads ([read-only-deployment.md](read-only-deployment.md), "Values a card door keeps"). Scanning in the page needs Android (Chrome); on an iPhone the camera app opens the other person's link. Waits on the worker deploy and a turn-on. Elsewhere a door still keeps nothing |
 | The Hyperdex at its own address (`business-card.<domain>`) with its powers; the root a plain front door on every device | built, not deployed (`worker.js`, entrances). Needs only the worker deploy: `*.jwize.com` already reaches the worker |
-| Turning an address's page on or off from your hive, with a preview and your review; a newer version of the page you follow shown as an update | built (Publish panel, `setEntrance`, `entrance-scout.service.ts`). Reaches your hive with an essentials rebuild |
+| Turning an address's page on or off from your hive, with a preview and your review; a newer version of the page you follow shown as an update | built (Staging window, `setEntrance`, `entrance-scout.service.ts`). Reaches your hive with an essentials rebuild |
 | jwize.com as jwize's entrance, his machine a farm member at `relay.pluginthematrix.io` | prepared: the relay passthrough and the farm read-through are built, not deployed; the steps are in [hosting-from-a-machine.md](hosting-from-a-machine.md), "Moving your root off the machine" |
 | Held cards read and updated by address in the hive | built: essentials `CardReader` (`sharing/published-address.ts`, `commands/card-read.ts`) and the card page. An address's head is read from its door record and taken only when the publisher's signed index names it, binds that address to the lineage and opens a door there; an older head is never offered; a version from a file counts once its head is seen to carry its card. It reaches your hive with an essentials rebuild, and hypercomb.io with a revision publish. On a door, or with a root-path address (`hypercomb.com/<name>`), a held card waits unread |
 | A held item keeps the head you took: a newer head is an update notice; upgrade or skip; the item's versions in a list with the current one on top; deleting an inactive version is a local forget | built for the hive's own packages and adopted creations, and in the card page: a held card keeps its address and the versions you took, a newer head is offered as Update (Upgrade or Skip), Use this re-checks an older version, Forget keeps the bytes |

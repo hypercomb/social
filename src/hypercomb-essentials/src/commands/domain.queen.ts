@@ -29,7 +29,7 @@ import { DomainClaims, claimDomain, claimHost, decideRequest, liveClaimIo, readR
  * minute while it is open, and at every boot for a week; saying the word
  * again checks at once. When the host reads the domain active AND answers
  * the participant's own signed ask with it (the public reading never names
- * the key), it is theirs: it joins the hive's Hosts, so the Publish panel
+ * the key), it is theirs: it joins the hive's Hosts, so the Staging window
  * offers it as a switch, and `domain:claimed` { domain } is emitted. The
  * logic is sharing/domain-claim.ts; this word only says what it reports.
  *
@@ -207,7 +207,7 @@ const tell = (report: ClaimReport): void => {
       return
     }
     case 'active':
-      toast(say('domain.claim.active', '{domain} is yours. Any tile can be switched on there in the Publish panel.', { domain: report.domain }), 'success', 10_000)
+      toast(say('domain.claim.active', '{domain} is yours. Any tile can be switched on there in the Staging panel.', { domain: report.domain }), 'success', 10_000)
       // The hosts drone is the community pool's one writer; it normalizes the zone.
       // The claim does not change the outgoing firewall. Block and Resume there
       // are a click in the hosts panel.

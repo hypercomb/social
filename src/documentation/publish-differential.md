@@ -4,7 +4,7 @@
 
 ```
 hypercomb-essentials/src/sharing/
-  publish.queen.ts          ← `/publish` — toggles the surface, nothing else
+  publish.queen.ts          ← `/stage` — toggles the Staging window, nothing else
   publish-status.drone.ts   ← the differential: rows, verdict ladder, actions
   publish-branch.ts         ← publishBranch / unpublishBranch / confirmPublished
   publish-heads.ts          ← the `publish:heads` pool — the publish ledger
@@ -30,17 +30,17 @@ at their own hive:
 2. **Is it still what I have?** Every commit after the publish moves the local
    head. The published head does not move with it.
 
-`/publish` answers those questions and owns the row-scoped publish, republish
+`/stage` answers those questions and owns the row-scoped stage, restage
 and unpublish actions. `/hosts` is deliberately separate: it is the durable set
 of hosts the participant carries, while each branch chooses among those hosts
-from its own line in Publish. A host exists before any branch names it and
+from its own line in Staging. A host exists before any branch names it and
 outlives every branch that does, so host/package discovery does not depend on a
 publish sweep.
 
 **There is always a way to publish from a view (jwize, 2026-10-10).** Inside a
 takeover view the rail is not on screen, so a bare `p` (`publish.toggle` in
 `keyboard/default-keymap.ts`) toggles the panel through the same lane as the
-rail icon and `/publish`, on the layer the view shows, without leaving it. Over
+rail icon and `/stage`, on the layer the view shows, without leaving it. Over
 a view the panel is a POPUP: same place, rounded on all four corners, a margin
 on the right, and it reserves no edge, so the view keeps its full width under it
 (`overView` in `publish-panel.component.ts`). On the hexagons it docks as
@@ -258,7 +258,7 @@ another device, which is exactly why a failed read-back must REFUSE rather
 than fall back to it.
 
 The share-sheet gesture in `host-gesture.ts` surfaces the same signal as a
-follow-up toast pointing at `/publish`.
+follow-up toast pointing at `/stage`.
 
 ### Two writes, one index (2026-10-15)
 

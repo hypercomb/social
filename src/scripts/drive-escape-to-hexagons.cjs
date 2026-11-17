@@ -68,7 +68,7 @@ const CASES = [
   { command: '/files', id: 'files-viewer', name: 'files' },
   { command: '/sequence', id: 'sequence-viewer', name: 'arrangements' },
   { command: '/context', id: 'context-window', name: 'context' },
-  { command: '/publish', id: 'publish-panel', name: 'publish' },
+  { command: '/stage', id: 'publish-panel', name: 'staging' },
 ]
 const sel = (id) => `[hcdockedpanel="${id}"]`
 

@@ -1,6 +1,6 @@
 # Sealed audiences — one branch, a version per key
 
-**Status:** DESIGNED 2026-10-02. **Built 2026-10-26, as pure parts held by specs, not yet reachable from a switch or word:** the envelope (`sharing/sealed-envelope.ts`; NIP-44 seal per member, canonical bytes, parser) and the signer's `nip44Encrypt`/`nip44Decrypt` (extension passthrough, else this device's key, loaded lazily so the boot lane does not grow); the sealed closure (`sealed-closure.ts`: closure by presence, convergent seal of every atom, key index `{head, atoms: {plain sig: {c, k}}}` sealed under the door secret, every opened atom CHECKED against the signature it was asked by); the index (`hive-pointer.ts`: `sealed` is read, carried by EVERY writer through `signedContent`, pruned with its branch's root, omitted when empty so an index with no private versions is byte-identical, and set by `setHiveSealed`); publish and open (`sealed-publish.ts`: `publishSealed`, `openSealedVersion`, and the live acts `publishPrivate` / `openPrivate`). **Not built:** the private-branch switch in Publish and its words, a private version with NO public root (what the root names is still open), the audiences (NIP-51 lists), and a read-only visitor's page opening a sealed version by itself (an ADOPT opens one since 2026-11-05 — see "The adopter"). `publishPrivate` has not been run against a live host.
+**Status:** DESIGNED 2026-10-02. **Built 2026-10-26, as pure parts held by specs, not yet reachable from a switch or word:** the envelope (`sharing/sealed-envelope.ts`; NIP-44 seal per member, canonical bytes, parser) and the signer's `nip44Encrypt`/`nip44Decrypt` (extension passthrough, else this device's key, loaded lazily so the boot lane does not grow); the sealed closure (`sealed-closure.ts`: closure by presence, convergent seal of every atom, key index `{head, atoms: {plain sig: {c, k}}}` sealed under the door secret, every opened atom CHECKED against the signature it was asked by); the index (`hive-pointer.ts`: `sealed` is read, carried by EVERY writer through `signedContent`, pruned with its branch's root, omitted when empty so an index with no private versions is byte-identical, and set by `setHiveSealed`); publish and open (`sealed-publish.ts`: `publishSealed`, `openSealedVersion`, and the live acts `publishPrivate` / `openPrivate`). **Not built:** the private-branch switch in Staging and its words, a private version with NO public root (what the root names is still open), the audiences (NIP-51 lists), and a read-only visitor's page opening a sealed version by itself (an ADOPT opens one since 2026-11-05 — see "The adopter"). `publishPrivate` has not been run against a live host.
 
 jwize, 2026-10-02: *"We should have keys that also serve alternate content from
 directories that have encrypted content so we can have a different build for
@@ -81,7 +81,7 @@ adds the other way to hand it over: sealed to the people who should hold it.
 6. **The acts, each with a word**: name an audience and add or remove members
    (writes its NIP-51 list); publish a branch to an audience; withdraw it. The
    words are settled when this is built (`every-act-has-a-word`), and the
-   Publish panel shows one row per audience beside the per-domain switches.
+   Staging window shows one row per audience beside the per-domain switches.
 
 Three levels then exist for any branch: **public** (no key), **link** (the
 door secret in `#…`, "anyone with the link"), **audience** (the door secret
@@ -142,7 +142,7 @@ A host is a domain, so a participant's name is their name **at their host**:
    publishers (their `label`) and each active claim; a relay from its writers.
    The domain's primary publisher is `_`. CORS `*`, as NIP-05 requires.
 2. **The hive shows a name wherever it shows a key** (audience members, a
-   host's publishers, the Publish panel): a NIP-05 name verified against its
+   host's publishers, the Staging window): a NIP-05 name verified against its
    host first; else the profile's name, marked unverified; else a short npub.
 3. **A participant sets their own profile** with one word. The signed kind-0
    event is an atom, named in their index as `nostr:profile`.
@@ -177,7 +177,7 @@ domain — the publish path signs with the key bound to the domain it writes.
    does because envelopes are named by signature).
 4. The publish path for a sealed version.
 5. The read path: the hive and the visitor door, opening in memory.
-6. The words and the Publish panel's audience rows.
+6. The words and the Staging window's audience rows.
 7. NIP-46 remote signing (the phone), separately.
 
 ## Related

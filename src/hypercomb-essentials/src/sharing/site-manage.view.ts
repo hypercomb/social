@@ -26,6 +26,14 @@
 // an edited one ("Use it" takes it; the edits stay one step back in history).
 // The Chat opens on the card tile's own conversation.
 //
+// THE CARD'S REVISIONS (jwize, 2026-11-16: "save named revisions and then
+// incremental subitems … put our development away for a bit"): one button in
+// the bar names the revision in hand and its step, and opens the panel that
+// saves, opens and discards (site-revisions.view.ts). A conversation belongs
+// to the revision it was held in (assistant/chat-revisions.ts), so the Chat
+// opens a conversation of the revision in hand, and opening another revision
+// while the chat is up moves the chat to that revision's conversation.
+//
 // A dependency: it exports the element and registers nothing. The bee beside
 // it (site-manage.drone.ts) defines it and adds it to the shell, only on a
 // page that carries the record.
@@ -35,13 +43,15 @@
 
 import { EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, requestConfirm, type I18nProvider, type InstallProvider } from '@hypercomb/core'
 import { FRAME_MAX_ONE, versionFrame, type FrameReader, type FrameLayer } from '../history/revision-viewer.model.js'
+import { askFrame, type FrameReport } from '../history/frame-watch.js'
 // Whom builds follow here — the same record the scout read the offer from (the
 // Packages window reads it the same way: host-directory.view.ts #follow).
 import { readInstallFollow } from './update-scout.service.js'
 import { managedRecordText } from './managed-record.js'
+import { SiteRevisionsPanel, revisionButtonWords, siteChatConvoId } from './site-revisions.view.js'
 import {
-  BROKER_KEY, CHAT_THREADS_KEY, COMMITTER_KEY, HISTORY_KEY, LINEAGE_KEY, MANAGED_PUBLISH_KEY, STORE_KEY, SWARM_ADOPT_KEY,
-  notePublished, readState, reconcile, replicaConvoId, replicaLocation, takePublished, writeReceipt,
+  BROKER_KEY, COMMITTER_KEY, HISTORY_KEY, LINEAGE_KEY, MANAGED_PUBLISH_KEY, STORE_KEY, SWARM_ADOPT_KEY,
+  notePublished, readState, reconcile, replicaLocation, replicaRoute, takePublished, writeReceipt,
   type AdoptLike, type BrokerLike, type CommitterLike, type HistoryLike, type ManagedPublishLike, type ReplicaServices,
   type ReplicaSite, type ReplicaState, type StoreLike as ReplicaStoreLike,
 } from './site-replica.js'
@@ -112,6 +122,12 @@ const UPDATE_FAILED_MS = 8000
  *  emits, then sets the head), and a burst of commits is one re-read — the
  *  revision viewer's RELIST_MS. */
 export const RELIST_MS = 300
+/** WHAT THE PAGE DID (history/frame-watch.ts). After a write, how long to
+ *  wait for the card to begin running again (a write that changed nothing
+ *  the card carries never does), and how long a run is given before it is
+ *  asked what it did: long enough for its scripts to start and fail. */
+export const RUN_WAIT_MS = 2500
+export const RUN_SETTLE_MS = 1200
 
 /** The services the replica needs, once each is registered (the bees are up). */
 function whenServices(): Promise<ReplicaServices> {
@@ -171,6 +187,12 @@ export class SiteManageElement extends ElementBase {
   #status: HTMLSpanElement | null = null
   #publish: HTMLButtonElement | null = null
   #useNewer: HTMLButtonElement | null = null
+  /** The card's revisions: the bar's button and the panel it opens. */
+  #revisions: HTMLButtonElement | null = null
+  #panel: SiteRevisionsPanel | null = null
+  /** Whether the chat window is up, so opening a revision can move it. */
+  #chatOpen = false
+  #offChatState: (() => void) | null = null
   /** The replica's services and its location bag, once the bees are up. */
   #services: ReplicaServices | null = null
   #loc: string | null = null
@@ -204,6 +226,9 @@ export class SiteManageElement extends ElementBase {
   }
   #covering = false
   #offBack: (() => void) | null = null
+  /** How many times the card has started running, and when it last did. */
+  #runs = 0
+  #ranAt = 0
 
   connectedCallback(): void {
     ensureStyles()
@@ -222,6 +247,7 @@ export class SiteManageElement extends ElementBase {
       this.#offer = fresh ? sig : null
       this.#label()
     })
+    this.#offChatState ??= EffectBus.on<{ open?: unknown }>('chat:window-state', payload => { this.#chatOpen = payload?.open === true })
     void this.#show()
     void this.#begin()
   }
@@ -234,6 +260,8 @@ export class SiteManageElement extends ElementBase {
     clearTimeout(this.#relist)
     this.#offUpdate?.()
     this.#offUpdate = null
+    this.#offChatState?.()
+    this.#offChatState = null
     for (const off of this.#offHistory.splice(0)) off()
   }
 
@@ -320,8 +348,40 @@ export class SiteManageElement extends ElementBase {
       if (state?.layer) this.#refused = ''
       this.#state = state
       this.#label()
+      // Where the revisions stand moves with the card (a change makes the
+      // step in hand "changed"); read beside the card, never before it.
+      if (state?.layer) void this.#panel?.refresh()
     }
     await this.#show()
+  }
+
+  /**
+   * WHAT THE CARD'S PAGE DID WHEN IT LAST RAN: the errors it threw and what
+   * it shows (history/frame-watch.ts). Called after a write: the write's
+   * marker re-runs the card a moment later, so this waits for that run to
+   * begin, gives it time to start, and then asks the frame. `reran` is false
+   * when no run began in that time: the card does not carry what was
+   * written, and the report is of the run before it. Null when there is no
+   * card or it does not answer.
+   */
+  async pageReport(waits: { run?: number; settle?: number; answer?: number } = {}): Promise<(FrameReport & { readonly reran: boolean }) | null> {
+    const frame = this.#frame
+    if (!frame?.srcdoc) return null
+    const pause = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
+    const seen = this.#runs
+    const until = Date.now() + (waits.run ?? RUN_WAIT_MS)
+    while (this.#runs === seen && Date.now() < until) await pause(50)
+    const settle = waits.settle ?? RUN_SETTLE_MS
+    while (Date.now() - this.#ranAt < settle) await pause(50)
+    const reran = this.#runs !== seen
+    const report = await askFrame(frame, waits.answer ?? 1500)
+    return report ? { ...report, reran } : null
+  }
+
+  /** THE CONVERSATION THE CHAT OPENS: the card's, of the revision in hand
+   *  (site-replica replicaChatConvoId, assistant/chat-revisions.ts). */
+  #chatConvo(): Promise<string> {
+    return siteChatConvoId(this.#record?.lineage ?? '')
   }
 
   /** "Use it": the newer published card replaces the replica; the edits it
@@ -511,6 +571,7 @@ export class SiteManageElement extends ElementBase {
     // the parent or the hive, and (its document says so) no network.
     frame.setAttribute('sandbox', 'allow-scripts')
     frame.setAttribute('referrerpolicy', 'no-referrer')
+    frame.addEventListener('load', () => { this.#runs++; this.#ranAt = Date.now() })
 
     const bar = document.createElement('header')
     bar.className = 'sm-bar'
@@ -521,11 +582,30 @@ export class SiteManageElement extends ElementBase {
     chat.className = 'sm-btn sm-chat'
     // A command, never a state: transient, so it is not replayed to a late
     // listener. It opens on the card tile's own conversation, so the chat's
-    // subject — and every change it makes — is the card.
+    // subject — and every change it makes — is the card; a conversation the
+    // owner put away is not the one it opens (site-replica replicaChatConvoId).
     chat.addEventListener('click', () => {
       const lineage = this.#record?.lineage ?? ''
-      const threads = ioc()?.get?.<{ tileConvoId?(segments: readonly string[]): string }>(CHAT_THREADS_KEY)
-      EffectBus.emitTransient('chat:open', lineage ? { convoId: replicaConvoId(lineage, threads) } : {})
+      if (!lineage) { EffectBus.emitTransient('chat:open', {}); return }
+      void this.#chatConvo().then(convoId => EffectBus.emitTransient('chat:open', { convoId }))
+    })
+    const panel = this.#panel = new SiteRevisionsPanel({
+      segments: () => this.#record ? replicaRoute(this.#record.lineage) : null,
+      onState: () => this.#label(),
+      // Another revision is live: a chat that is up moves to its conversation.
+      onOpened: () => {
+        if (!this.#chatOpen) return
+        void this.#chatConvo().then(convoId => EffectBus.emitTransient('chat:open', { convoId }))
+      },
+    })
+    const revisions = this.#revisions = document.createElement('button')
+    revisions.type = 'button'
+    revisions.className = 'sm-btn sm-revisions'
+    revisions.hidden = true
+    revisions.setAttribute('aria-haspopup', 'dialog')
+    revisions.addEventListener('click', () => {
+      panel.toggle()
+      revisions.setAttribute('aria-expanded', String(panel.open))
     })
     const back = this.#back = document.createElement('a')
     back.className = 'sm-btn'
@@ -549,7 +629,7 @@ export class SiteManageElement extends ElementBase {
     publish.className = 'sm-btn sm-publish'
     publish.hidden = true
     publish.addEventListener('click', () => { void this.#publishNow() })
-    bar.append(title, status, useNewer, publish, update, chat, back)
+    bar.append(title, status, revisions, useNewer, publish, update, chat, back)
 
     const note = this.#note = document.createElement('div')
     note.className = 'sm-note'
@@ -561,7 +641,7 @@ export class SiteManageElement extends ElementBase {
     retry.addEventListener('click', () => { this.#missing.clear(); void this.#show() })
     note.append(document.createElement('span'), retry)
 
-    root.append(frame, bar, note)
+    root.append(frame, bar, note, panel.element)
     this.replaceChildren(root)
     this.#label()
     const words = ioc()?.get?.<EventTarget>(I18N_IOC_KEY)
@@ -603,6 +683,13 @@ export class SiteManageElement extends ElementBase {
       this.#publish.hidden = !state?.unpublished || typeof port?.publishRoot !== 'function'
       this.#publish.disabled = this.#busy !== ''
       this.#publish.textContent = this.#busy === 'publish' ? t('site-manage.publishing', 'Publishing…') : t('site-manage.publish', 'Publish')
+    }
+    if (this.#revisions) {
+      // Only once the card is this page's own tile: there is nothing to save
+      // a revision of before that.
+      this.#revisions.hidden = !state?.layer
+      this.#revisions.textContent = revisionButtonWords(this.#panel?.state ?? null)
+      this.#revisions.title = t('site-revisions.title', 'Revisions of this card')
     }
     this.#frame?.setAttribute('title', record?.title ?? '')
   }

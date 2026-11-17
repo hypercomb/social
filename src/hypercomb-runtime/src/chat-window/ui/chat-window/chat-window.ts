@@ -120,6 +120,7 @@ import {
 // hive runs it here as a draft (documentation/hive-read-fence.md, "Writing a
 // module"; runtime module-drafts.ts).
 import { applySectionEdits, draftModule } from '../../../module-drafts'
+import { changeLines } from './execution-change'
 import { installedPackageSig } from '../../../installed-package'
 import { fileFailedMessage, fileRanMessage, managedRule, pageChangeUnready, parseWriteBlock, readsAskedIn, routesNamedIn, sandboxRule, tileFileLabel, unreadAskedMessage, unreadClaimMessage, writeFailedMessage, writeRanMessage, writeSkippedMessage, type TileFileWriteRequest } from './hypercomb-work-fence'
 import { signalSession } from '../window-session'
@@ -155,6 +156,7 @@ import {
   executeHypercombObservationPlan,
   foreignReads,
   formatHypercombObservationReceipt,
+  picturesOf,
   MAX_OBSERVATIONS,
   OBSERVATION_VERBS,
   parseHypercombObservationGrammars,
@@ -1132,6 +1134,8 @@ type LlmMessageLike =
     readonly role: 'user' | 'assistant'
     readonly content: string
     readonly toolCalls?: readonly HypercombToolCall[]
+    /** Pictures a read saw, for a model that can see (essentials LlmImagePart). */
+    readonly images?: readonly { readonly mime: string; readonly base64: string }[]
   }
   | { readonly role: 'tool'; readonly content: string; readonly toolCallId: string }
 
@@ -1140,6 +1144,10 @@ type LlmRouterLike = {
   providerIdForModel?(model: string): string | undefined
   /** Published model capacity, when the provider catalog knows it. */
   contextLengthForModel?(model: string): number | undefined
+  /** The model takes pictures with a message; unknown is no. */
+  seesPicturesForModel?(model: string): boolean
+  /** A picture described by a model that sees, for one that does not. */
+  describePicture?(sig: string, image: { mime: string; base64: string }, signal?: AbortSignal): Promise<{ text: string; model: string } | undefined>
   /** The provider the mediator would pick for this need right now — so the
    *  shell can tell whether that pick has been granted hive access. */
   designatedProviderId?(need?: { tier?: string; streaming?: boolean; minContext?: number }): string | undefined
@@ -1274,6 +1282,8 @@ type ExecutionRequestLike = {
   readonly model: string
   readonly kind: ExecutionKindLike
   readonly lines: readonly string[]
+  /** What the change will do, for the eye (execution-change.ts). */
+  readonly changes?: readonly string[]
   readonly needsGrant: boolean
   /** A change that leaves the machine — waits for a hand, whatever the policy. */
   readonly leaves?: boolean
@@ -1302,6 +1312,8 @@ type ExecutionQueueLike = {
     readonly model: string
     readonly kind: ExecutionKindLike
     readonly lines: readonly string[]
+    /** What the change will do, for the eye; shown beside Run. */
+    readonly changes?: readonly string[]
     /** What each read resolved to; an allowed read is remembered by these. */
     readonly keys?: readonly string[]
     readonly needsGrant: boolean
@@ -2719,7 +2731,11 @@ export class ChatWindow {
       return
     }
     this.archiveArmed.set(true)
-    queueMicrotask(() => this.panel()?.nativeElement
+    // AFTER THE VIEW HAS DRAWN IT. The confirm does not exist until the view
+    // refreshes, and a microtask runs before that: the focus went nowhere,
+    // so Enter did not confirm and Escape did not take it back (seen on the
+    // managed card page, 2026-11-16).
+    afterNextRender(() => this.panel()?.nativeElement
       .querySelector<HTMLElement>('.chat-put-confirm')?.focus())
   }
 
@@ -3319,6 +3335,36 @@ export class ChatWindow {
     this.routeSideWanted.set(next)
     try { localStorage.setItem(ROUTE_SIDE_WANTED_KEY, next ? 'true' : 'false') } catch { /* private mode */ }
   }
+
+  // ── THE CODE VIEW: the main pane's other view ───────────────────────────
+  //
+  // jwize, 2026-11-16: "the code should be in the main pane as a different
+  // view to the chat, so a different view of the chat's target." The pane
+  // shows the conversation, or the code of the tile the conversation is
+  // about: its inner tiles, files and resources, the code that runs it and
+  // the platform beneath. The view is the package's (essentials
+  // assistant/chat-code.ts, drawn into `.chat-code-host`); this window only
+  // lends the pane and says which tile. Not kept across a reload: looking at
+  // code is something you are doing now.
+  readonly codeOpen = signal(false)
+  toggleCode(): void {
+    this.codeOpen.update(open => !open)
+    this.#sayCode()
+  }
+  /** The tile the conversation in hand is about, as route segments; empty for a free chat. */
+  #codeTarget(): string[] {
+    const convoId = this.activeId()
+    if (!convoId) return []
+    try { return String(this.#threads()?.tilePathOf?.(convoId) ?? '').split('/').filter(Boolean) } catch { return [] }
+  }
+  #sayCode(): void {
+    EffectBus.emit('chat:code', { open: this.codeOpen(), segments: this.#codeTarget() })
+  }
+  /** The code follows the conversation: another thread in hand, another tile's code. */
+  readonly #codeFollows = effect(() => {
+    this.activeId()
+    if (untracked(() => this.codeOpen())) untracked(() => this.#sayCode())
+  })
 
   // ── THE EXECUTION COLUMN (documentation/hive-read-fence.md §3) ──────────
   //
@@ -7765,6 +7811,21 @@ export class ChatWindow {
         EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for you in Execution' })
       }
 
+      // A PICTURE A READ SAW GOES WITH THE ANSWER (hypercomb-observation.ts
+      // picturesOf), to a model that can see: the next message carries it,
+      // and only the newest one does, so pictures are not sent again every
+      // round. A model that cannot see is given the reading in words.
+      let freshPictures: { readonly mime: string; readonly base64: string }[] = []
+      const withPictures = (content: string): LlmMessageLike => {
+        const images = freshPictures
+        freshPictures = []
+        if (!images.length) return { role: 'user', content }
+        for (let i = 0; i < messages.length; i++) {
+          const earlier = messages[i]!
+          if (earlier.role === 'user' && earlier.images?.length) messages[i] = { role: 'user', content: earlier.content }
+        }
+        return { role: 'user', content, images }
+      }
       const runRead = async (lines: readonly string[], providerId: string, model: string): Promise<string> => {
         if (!canRead || !treeReader || !queue) throw new WorkRefused('reading the hive is not available here')
         // CONTEXT LINES run here and now: the model's working set is its own
@@ -7868,7 +7929,20 @@ export class ChatWindow {
           // or read while the tree moved) never reaches the model, so it
           // must not count as one it has.
           const seenNow: ReadRepeats['memory'] = new Map(seenReads)
-          const content = (contextReceipt ? `${contextReceipt}\n\n` : '') + formatHypercombObservationReceipt(receipt, { memory: seenNow, round: rounds + 1 })
+          const sees = !!model && router.seesPicturesForModel?.(model) === true
+          // A MODEL THAT CANNOT SEE IS TOLD WHAT A MODEL THAT CAN SAW (jwize
+          // 2026-11-17), at most four pictures a read, on the participant's key.
+          const described = new Map<string, { text: string; model: string }>()
+          if (!sees && router.describePicture) {
+            const shown = receipt.results.flatMap(result => result.kind === 'bytes' && result.read.ok && result.read.picture?.image
+              ? [{ sig: result.read.sig, image: result.read.picture.image }] : []).slice(0, 4)
+            await Promise.all(shown.map(async ({ sig, image }) => {
+              const said = await router.describePicture!(sig, image, signal).catch(() => undefined)
+              if (said?.text) described.set(sig, said)
+            }))
+            if (signal?.aborted) throw stopped()
+          }
+          const content = (contextReceipt ? `${contextReceipt}\n\n` : '') + formatHypercombObservationReceipt(receipt, { memory: seenNow, round: rounds + 1 }, sees ? 'seen' : 'words', described)
             + (asides.length ? `\n\n${asides.join('\n')}` : '')
           if (content.length > remaining) {
             // A BLOCK LARGER THAN A WHOLE FRESH STRETCH IS NOT HANDED OVER.
@@ -7933,6 +8007,7 @@ export class ChatWindow {
           component.#readSignatures.set(convoId, known)
           queue.settle(entry.id, 'ran', `${content.length} characters`)
           lastRun = 'ran'
+          freshPictures = sees ? picturesOf(receipt).slice(0, 4) : []
           return readResultMessage(content, message)
         } catch (error) {
           queue.settle(entry.id, signal?.aborted ? 'skipped' : 'failed', error instanceof Error ? error.message : undefined)
@@ -8242,9 +8317,23 @@ export class ChatWindow {
           }
         }
         if (review) EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
+        // WHAT RUN WILL CHANGE (execution-change.ts): read from the file as
+        // it is now and the text this write would leave. For the eye only;
+        // the write itself is made again against the file when it runs.
+        let changes: string[] = []
+        try {
+          const now = await tileFiles.read(target)
+          if (now.ok) {
+            const made = !parsed.edits ? parsed.body
+              : now.text === null ? null
+                : (edited => 'error' in edited ? null : edited.body)(applySectionEdits(now.text, parsed.edits))
+            if (made !== null) changes = changeLines(now.text, made)
+          }
+        } catch { /* nothing to say; the row shows the command alone */ }
         const entry = queue.request({
           convoId, providerId, model, kind: 'editing', lines: [grammar], needsGrant: false, signal,
           forceReview: review, foreign: conversationForeign(),
+          ...(changes.length ? { changes } : {}),
         })
         if (!review) waitingOn(entry.id)
         if (await entry.decision === 'skip') {
@@ -8278,10 +8367,26 @@ export class ChatWindow {
         queue.settle(entry.id, 'ran')
         lastRun = 'ran'
         EffectBus.emit('toast:show', { type: 'success', message: outcome.unchanged ? `${label} unchanged` : `${label} ${outcome.created ? 'created' : 'updated'}` })
-        return fileRanMessage({
+        const written = fileRanMessage({
           label, sig: outcome.sig, created: outcome.created, unchanged: outcome.unchanged, trial: outcome.trial, vector: outcome.vector,
           ...(managed ? { managed: true } : {}),
         }, message)
+        // WHAT THE PAGE DID. On a managed site door the site's card runs
+        // again when the write lands; the essentials package watches that
+        // run (history/frame-watch.ts) and says what it threw and what it
+        // shows. The model is told with the write's own result: it could
+        // write a script and never learn that the page then failed. An
+        // unchanged write re-runs nothing, and elsewhere there is no card.
+        if (!managed || outcome.unchanged) return written
+        let page: readonly string[] = []
+        try {
+          if (signal?.aborted) return written
+          EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'watching the page run' })
+          page = await (get<{ say?(): Promise<readonly string[]> }>('@diamondcoreprocessor.com/SiteRunWatch')?.say?.() ?? Promise.resolve([]))
+        } catch { page = [] }
+        return page.length
+          ? `${written}\n\nWHAT THE PAGE DID after this write, as the frame that runs it reports (read it before you write again; a problem listed here is yours to fix):\n${page.join('\n')}`
+          : written
       }
 
       // THE PARTICIPANT SPEAKS THE HIVE'S LANGUAGE. A table question offers
@@ -8514,7 +8619,7 @@ export class ChatWindow {
                 ? blockRefusedMessage('read', (error as Error).message, message)
                 : unreadAskedMessage(askedLines.slice(0, 6), message)
             }
-            messages.push({ role: 'user', content: reply })
+            messages.push(withPictures(reply))
             EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: `ran ${askedLines[0]} itself: the model answered without running it` })
             continue
           }
@@ -8727,7 +8832,7 @@ export class ChatWindow {
           }
         }
         if (work.heldDo) reply = `${HELD_DO_NOTE}\n\n${reply}`
-        messages.push({ role: 'user', content: reply })
+        messages.push(withPictures(reply))
         // THE LEG ENDS WHEN ITS STRETCH IS FULL, NOT AT A COUNT. The window
         // is the model's own; when the rounds no longer fit, the older ones
         // fold into a ledger first, and only a leg that still cannot fit —

@@ -549,6 +549,8 @@ export interface ConversationSummary {
   readonly title: string
   readonly turnCount: number
   readonly lastAt: number
+  /** When its first turn landed: what places it in a revision (chat-revisions.ts). */
+  readonly startedAt?: number
   /** PUT AWAY, not thrown away — see the archive marker below. */
   readonly archived: boolean
   /** Set by a bridge responder when the conversation's requested outcome is complete. */
@@ -1094,6 +1096,7 @@ export const listConversationsWithLatest = async (options: ListOptions = {}): Pr
           title: await titleOfRaw(raw, store),
           turnCount: raw.length,
           lastAt,
+          startedAt: raw[0]?.at ?? 0,
           archived: read.archived,
           replied: repliedIn(raw),
           ...(!read.archived && askingIn(raw) ? { asking: true } : {}),
@@ -1174,6 +1177,8 @@ export interface TileConversation {
   /** The newest turn is a reply holding a question nobody has answered yet. */
   readonly asking?: boolean
   readonly lastAt: number
+  /** When its first turn landed (ConversationSummary.startedAt). */
+  readonly startedAt?: number
   /** The newest turn landed after the last time this thread was opened. */
   readonly unread: boolean
   /** PUT AWAY — hidden from the lists until they are asked to show it. */
@@ -1217,6 +1222,7 @@ export const listTileConversations = async (): Promise<TileConversation[]> => {
       replied: convo.replied,
       ...(convo.asking ? { asking: true } : {}),
       lastAt: convo.lastAt,
+      ...(convo.startedAt ? { startedAt: convo.startedAt } : {}),
       unread: convo.lastAt > (seen[convo.convoId] ?? 0),
       archived: convo.archived,
       ...(convo.owed ? { owed: convo.owed } : {}),
@@ -1250,6 +1256,7 @@ export const listRailConversations = async (): Promise<TileConversation[]> => {
       replied: convo.replied,
       ...(convo.asking ? { asking: true } : {}),
       lastAt: convo.lastAt,
+      ...(convo.startedAt ? { startedAt: convo.startedAt } : {}),
       unread: convo.lastAt > (seen[convo.convoId] ?? 0),
       archived: convo.archived,
       ...(convo.owed ? { owed: convo.owed } : {}),
@@ -1280,6 +1287,7 @@ export const readConversationSummary = async (convoId: string): Promise<TileConv
       convoId: id,
       title: await titleOfRaw(raw, store),
       turns: raw.length,
+      ...(raw[0]?.at ? { startedAt: raw[0].at } : {}),
       replied: repliedIn(raw),
       ...(!read?.archived && askingIn(raw) ? { asking: true } : {}),
       lastAt,
@@ -1312,6 +1320,7 @@ export const listGlobalConversations = async (): Promise<TileConversation[]> => 
       replied: convo.replied,
       ...(convo.asking ? { asking: true } : {}),
       lastAt: convo.lastAt,
+      ...(convo.startedAt ? { startedAt: convo.startedAt } : {}),
       unread: convo.lastAt > (seen[convo.convoId] ?? 0),
       archived: convo.archived,
       ...(convo.owed ? { owed: convo.owed } : {}),

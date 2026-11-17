@@ -126,6 +126,8 @@ export type LlmModelDescriptor = {
   readonly outputPerMillion?: number
   /** The model's context window in tokens, when published. */
   readonly contextLength?: number
+  /** The model takes pictures (LlmImagePart) as input, when published. */
+  readonly vision?: boolean
 }
 
 export type LlmSubscriptionUsage = {

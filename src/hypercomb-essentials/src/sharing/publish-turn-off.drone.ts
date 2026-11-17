@@ -50,9 +50,9 @@ const refusal = (request: TurnOffRequest, result: Extract<TurnOffResult, { ok: f
     case 'no-branch':
       return tr('turn-off.not-published', '"{title}" is no longer published — there is nothing to turn off.', title)
     case 'opens-everywhere':
-      return tr('turn-off.opens-everywhere', '"{title}" opens on every domain — choose its domains in Publish, or turn it off everywhere.', title)
+      return tr('turn-off.opens-everywhere', '"{title}" opens on every domain — choose its domains in Staging, or turn it off everywhere.', title)
     case 'no-host':
-      return tr('turn-off.no-host', 'This hive has no publishing host of its own to write through — set one in Publish first.')
+      return tr('turn-off.no-host', 'This hive has no publishing host of its own to write through — set one in Staging first.')
     case 'index-unsafe':
       return tr('turn-off.index-unsafe', 'Your published index could not be read safely, so nothing was written. Try again in a moment.')
     default:
@@ -135,10 +135,10 @@ export class PublishTurnOffDrone extends Drone {
     const yes = await requestConfirm({
       title: tr('turn-off.title', 'Turn off "{title}"?', { title: request.title }),
       message: request.scope === 'everywhere'
-        ? tr('turn-off.message-everywhere', '"{title}" stops opening on every domain. It stays published: you can turn a domain back on from Publish without publishing again.', { title: request.title })
+        ? tr('turn-off.message-everywhere', '"{title}" stops opening on every domain. It stays published: you can turn a domain back on from Staging without staging again.', { title: request.title })
         : stays
           ? tr('turn-off.message-here', '"{title}" stops opening on {zone}. It stays published and keeps opening on {stays}.', { title: request.title, zone: request.zone, stays })
-          : tr('turn-off.message-here-last', '"{title}" stops opening on {zone}, the last domain it opens on. It stays published: you can turn a domain back on from Publish.', { title: request.title, zone: request.zone }),
+          : tr('turn-off.message-here-last', '"{title}" stops opening on {zone}, the last domain it opens on. It stays published: you can turn a domain back on from Staging.', { title: request.title, zone: request.zone }),
       confirmLabel: request.scope === 'everywhere'
         ? tr('turn-off.confirm-everywhere', 'Turn off everywhere')
         : tr('turn-off.confirm-here', 'Turn off on {zone}', { zone: request.zone }),

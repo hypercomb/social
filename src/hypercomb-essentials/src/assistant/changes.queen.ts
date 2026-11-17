@@ -15,7 +15,7 @@
 // so no model can say it: a change from elsewhere runs only when a person
 // accepts it here. Each sentence goes through the same door Enter uses, so
 // every act it asks for is admitted, undone and consented to exactly as if it
-// had been typed; a publish still asks for its own consent.
+// had been typed; a stage still asks for its own consent.
 
 import { EffectBus, QueenBee } from '@hypercomb/core'
 import { normalizeChangeRecord } from './change-record.js'

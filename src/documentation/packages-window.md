@@ -242,15 +242,15 @@ input gate, the back gesture):
 - **Revisions open in a drawer** on the right and the columns stay where they were.
   Under about 1100px the drawer lies over them instead of squeezing them.
 - **Hosts are what comes in; Publish is what goes out.** They stay two windows.
-  A host's pane has one link, *Publish ›*, which closes the desk and opens
-  Publish. This origin is no destination, so it has no link, and the desk holds
-  none of Publish's acts. Beside the link, **how many branches that host names
+  A host's pane has one link, *Staging ›*, which closes the desk and opens
+  Staging. This origin is no destination, so it has no link, and the desk holds
+  none of Staging's acts. Beside the link, **how many branches that host names
   as live**: *2 published here*, or *Nothing published here yet*. It is read
   from your own signed index on that one host (`publishedCount` in the view) —
   one verified read when the host's pane first opens, kept until the desk
-  closes — and not from Publish's sweep, which seals and probes every branch.
+  closes — and not from Staging's sweep, which seals and probes every branch.
   A branch counts when the index names a head for it and its entry lists no
-  doors or lists this host, the rule Publish's rows use; `plan:…` and
+  doors or lists this host, the rule Staging's rows use; `plan:…` and
   `install:…` pointers are not branches. A host that did not answer, a device
   with no key (looking never mints one) and an index that does not verify show
   **no number** — an unreachable host is not an empty one. A host that answers

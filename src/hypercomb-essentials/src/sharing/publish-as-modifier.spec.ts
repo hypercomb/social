@@ -1,11 +1,11 @@
 // publish-as-modifier.spec.ts — the own address said at the END of the sentence.
 //
-//   publish /work/meetups on hypercomb.com              → its default address
-//   publish /work/meetups on hypercomb.com as meet-ups  → meet-ups.hypercomb.com
+//   stage /work/meetups on hypercomb.com                → its default address
+//   stage /work/meetups on hypercomb.com as meet-ups    → meet-ups.hypercomb.com
 //
 // jwize, 2026-10-25: "as should just be the modifier at the end". The label is
-// checked before anything is published, the consent is told the address, and
-// the address is set only once the publish landed.
+// checked before anything is staged, the consent is told the address, and
+// the address is set only once the staging landed.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -46,7 +46,7 @@ beforeEach(() => {
   listPublishRecords.mockClear(); listPublishRecords.mockResolvedValue([])
 })
 
-describe('publish … on <domain> as <label>', () => {
+describe('stage … on <domain> as <label>', () => {
   it('publishes there, tells the consent the address, then gives the tile that address', async () => {
     await bee.invoke('/work/meetups on hypercomb.com as meet-ups')
     expect(setBranchHosts).toHaveBeenCalledWith(['work', 'meetups'], ['hypercomb.com'])

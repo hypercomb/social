@@ -2,12 +2,12 @@
 // scripts/drive-publish-from-view.cjs
 //
 // THERE IS ALWAYS A WAY TO PUBLISH FROM A VIEW (jwize 2026-10-10). Inside a
-// view the rail is not on screen, so `p` raises the Publish panel on the layer
+// view the rail is not on screen, so `p` raises the Staging window on the layer
 // the view shows — without leaving the view — and over a view the panel is a
 // POPUP: same place, rounded on all four corners, a margin on the right.
 //
 //   1. a layer whose default view is postit opens AS postit
-//   2. `p` raises Publish over the view, and the view stays up
+//   2. `p` raises Staging over the view, and the view stays up
 //   3. over the view the panel is a popup — four rounded corners, inset right,
 //      and the view keeps its full width under it
 //   4. `p` again puts it away
@@ -114,7 +114,7 @@ async function main() {
     // 2.
     await pressP()
     const up = await settle(4000, publishUp)
-    check('`p` raises Publish over the view, and the view stays up',
+    check('`p` raises Staging over the view, and the view stays up',
       up && (await mode()) === 'postit', `panel=${up} mode=${await mode()}`)
     await page.waitForTimeout(600)
     await shot('02-publish-over-view')

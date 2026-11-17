@@ -581,7 +581,7 @@ export class PublishGroupsDrone extends Drone {
       // Nowhere at all: the page names no domain, and nothing stands in. Say
       // where the switch is, rather than the general "add a host".
       const message = why === 'no-host' && pageZones.length === 0
-        ? this.#t('publish-groups.no-host', 'Turn on a domain for this page in Publish — a group publishes where its page does')
+        ? this.#t('publish-groups.no-host', 'Turn on a domain for this page in Staging — a group publishes where its page does')
         : this.#t(`publish.failure.${why}`, why, { hosts: refusedHosts })
       this.#toast('error',
         this.#t('publish-groups.failed', `${name}: ${failures.length} not published`, { name, count: failures.length }),

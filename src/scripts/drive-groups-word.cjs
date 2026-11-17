@@ -11,7 +11,7 @@
 //   4. `groups add blog three` / `groups drop blog three`
 //   5. `groups color blog green`, `groups icon blog star`, `groups rename blog Notes`
 //   6. bare `groups` lists the groups and who is in them
-//   7. `groups publish notes` runs the group (and NOT the `publish` word itself)
+//   7. `groups publish notes` runs the group (and does NOT open the Staging window)
 //   8. unknown group / unknown tile / unknown sub-word are said, never guessed
 //   9. `groups ungroup notes`, then `groups off` puts the strip out
 //
@@ -162,12 +162,12 @@ async function main() {
     await settle(3000, async () => /Notes \(2\): one, two/.test(await lastToast()))
     check('bare `groups` lists the groups and who is in them', /Notes \(2\): one, two/.test(await lastToast()), await lastToast())
 
-    // 7. publish — the group, not the `publish` word
+    // 7. publish — the group, not the `stage` word (the Staging window stays shut)
     await say('/groups publish notes')
     const reported = await settle(20000, async () => (await page.evaluate(() =>
       window.__gw.toasts.some(t => /Notes/.test(String(t.title ?? '')) && /not published/.test(String(t.title ?? ''))))))
     const publishPanel = await page.evaluate(() => !!document.querySelector('.publish-panel'))
-    check('`groups publish notes` runs the group — and not the `publish` word', reported && !publishPanel,
+    check('`groups publish notes` runs the group — and does not open the Staging window', reported && !publishPanel,
       `reported=${reported} publishPanel=${publishPanel}`)
     await shot('07-after-publish')
 

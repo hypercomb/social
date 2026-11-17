@@ -138,7 +138,7 @@ primary window**, each carrying every behaviour that lives in that window:
 | `window-context` | context window | `/context`, attached-context (portal-drop) narrated |
 | `window-feedback` | feedback window | arrivals and open questions, reach, answering in the row |
 | `window-observe` | observe viewer | `/observe`, and `/host` / `/invite` narrated |
-| `window-publish` | publish panel | `/publish` — read-only, never fired |
+| `window-publish` | Staging window | `/stage` — read-only, never fired |
 | `room-host` | *(none — a behaviour)* | `room host <domain>`, `room host off` — narrated, never fired |
 
 **One lesson is not a window.** `room-host` finishes the sharing story the observe

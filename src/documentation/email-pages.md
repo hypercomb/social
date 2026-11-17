@@ -52,15 +52,15 @@ PowerShell has no such rewrite and refuses the prefix. With nothing changed in t
 already wears this build and changes nothing.
 
 The generator dresses each changed tile with its page (`website page`), keeps `/email` opening as a website,
-and records the pass as one restorable step (`builds email-pages-<sig>`). Then publish again, which the
-participant types in the hive (a session's `publish` is refused: every form but `publish history` is the
+and records the pass as one restorable step (`builds email-pages-<sig>`). Then stage again, which the
+participant types in the hive (a session's `stage` is refused: every form but `stage history` is the
 participant's):
 
 ```
-/publish /email on hypercomb.com
+/stage /email on hypercomb.com
 ```
 
-The first publish asks for consent in the hive; press **Allow**. To work on the published site from another
+The first stage asks for consent in the hive; press **Allow**. To work on the published site from another
 machine, replicate it from the host and edit it there in its own domain, then publish from that hive.
 
 `scripts/bridge/_email-site/seed.cjs` planted the draft (it makes missing tiles and files missing notes, and
@@ -83,7 +83,7 @@ words, not the look.
 
 ## Owed
 
-- The publish (`/publish /email on hypercomb.com`, then **Allow**), which is jwize's.
+- The staging (`/stage /email on hypercomb.com`, then **Allow**), which is jwize's.
 - The mail desk shows a device's key only while that device owns no mailbox. An operator who already reads mail
   finds their key in the host's configuration instead; a desk control that always shows the key would make
   *Give addresses from your hive* step 1 one line.

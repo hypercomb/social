@@ -77,11 +77,11 @@ describe('concealment — the doctrine, not a feature', () => {
     expect(PUBLISH_TS).not.toMatch(/@hypercomb\/essentials/)
   })
 
-  // THE SURFACE. The Publish window is one list of switches (jwize 2026-11-04:
+  // THE SURFACE. The Staging window is one list of switches (jwize 2026-11-04:
   // "none of the other stuff"), so it lists no versions and no longer offers
   // to hide or delete one: hiding and deleting live in the pool and in the host
   // directory, and nothing in the window reaches either.
-  it('the publish window lists no versions, so it offers neither hide nor delete', () => {
+  it('the Staging window lists no versions, so it offers neither hide nor delete', () => {
     expect(PUBLISH_HTML).not.toMatch(/hideVersion|destroyVersion|restoreVersion|THE DELETE AREA/)
     expect(PUBLISH_TS).not.toMatch(/hidden:conceal|hidden:delete|hidden:reveal/)
   })

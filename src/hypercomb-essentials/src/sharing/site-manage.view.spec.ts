@@ -48,6 +48,7 @@ vi.hoisted(() => {
 
 const { EffectBus } = await import('@hypercomb/core')
 const { SiteManageElement, SITE_MANAGE_OWNER, SITE_MANAGE_SURFACE, siteManageRecord, managedSiteZone, updateSources, restartPage } = await import('./site-manage.view.js')
+const watch = await import('./site-manage.drone.js')
 if (!customElements.get(SITE_MANAGE_SURFACE)) customElements.define(SITE_MANAGE_SURFACE, SiteManageElement)
 
 const HEAD = sig('1'), PAGE_RECORD = sig('2'), CARD_RECORD = sig('3'), CARD_DATA = sig('4'), PAGE = sig('a')
@@ -228,6 +229,8 @@ describe('the managed site door’s card', () => {
     const asked: unknown[] = []
     const off = EffectBus.on('chat:open', p => asked.push(p))
     ;(element.querySelector('.sm-chat') as HTMLButtonElement).click()
+    // The door first asks which of the card's conversations are put away.
+    await settle()
     off()
     expect(asked).toHaveLength(1)
   })
@@ -253,5 +256,60 @@ describe('the managed site door’s card', () => {
   it('draws nothing on a page that carries no record', async () => {
     await mount()
     expect(element.children).toHaveLength(0)
+  })
+})
+
+// WHAT THE PAGE DID (history/frame-watch.ts): after a write the chat asks
+// the card what its page threw and what it shows.
+describe('what the card’s page did', () => {
+  const { SiteRunWatch } = watch
+  /** The card's frame answers the question as a page with the watch would. */
+  const answering = (report: Record<string, unknown>): HTMLIFrameElement => {
+    const frame = element.querySelector('iframe.sm-frame') as HTMLIFrameElement
+    const inner = frame.contentWindow!
+    inner.postMessage = ((data: { id: string }) => {
+      queueMicrotask(() => dispatchEvent(new MessageEvent('message', { data: { hcRevisionReport: { ...report, id: data.id } }, source: inner })))
+    }) as typeof inner.postMessage
+    return frame
+  }
+  const quick = { run: 60, settle: 0, answer: 200 }
+
+  it('asks the frame, and says when the card did not run again', async () => {
+    script = record({ lineage: 'business-card', title: 'business-card', head: HEAD })
+    await mount()
+    answering({ ran: 900, errors: [{ kind: 'error', message: 'boom' }], more: 0, text: 'the card', textChars: 8, images: {}, canvases: [], elements: 4 })
+    const report = await element.pageReport(quick)
+    expect(report?.errors).toEqual([{ kind: 'error', message: 'boom' }])
+    expect(report?.reran).toBe(false)
+  })
+
+  it('waits for the run the write causes, and says it ran again', async () => {
+    script = record({ lineage: 'business-card', title: 'business-card', head: HEAD })
+    await mount()
+    const frame = answering({ ran: 300, errors: [], more: 0, text: '', textChars: 0, images: {}, canvases: [], elements: 2 })
+    const asked = element.pageReport({ run: 400, settle: 0, answer: 200 })
+    setTimeout(() => frame.dispatchEvent(new Event('load')), 40)
+    expect((await asked)?.reran).toBe(true)
+  })
+
+  it('is nothing with no card, or a frame that does not answer', async () => {
+    script = record({ lineage: 'business-card', title: 'business-card', head: null })
+    await mount()
+    expect(await element.pageReport(quick)).toBeNull()
+  })
+
+  it('is said to the chat in plain lines, and plainly when it is the run before the write', async () => {
+    script = record({ lineage: 'business-card', title: 'business-card', head: HEAD })
+    await mount()
+    const said = new SiteRunWatch()
+    const clean = { ran: 1200, errors: [], more: 0, text: 'the card', textChars: 8, images: { loaded: 0, failed: 0 }, canvases: [], elements: 4 }
+    element.pageReport = async () => ({ ...clean, reran: true })
+    expect(await said.say()).toEqual(['The page ran for 1.2 s and reported no errors.', 'It shows this text: “the card”'])
+    element.pageReport = async () => ({ ...clean, reran: false })
+    expect((await said.say())[0]).toBe('The page did not run again after this write (the card may not carry this file), so this is what its last run reported:')
+    element.pageReport = async () => null
+    expect(await said.say()).toEqual([])
+    element.remove()
+    expect(await said.say()).toEqual([])
   })
 })

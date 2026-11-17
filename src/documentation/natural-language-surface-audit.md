@@ -77,7 +77,7 @@ inline in `slash-behaviour.drone.ts` rather than in their queen files.
 **Twelve of ~109 participant-facing primary behaviours are machine-callable —
 about 11%.** Roughly 97 verbs are wordless to a model, including `/enroll` (the
 one verb by which artifacts belong together), `/reference`, `/requires`,
-`/move`, `/publish`, `/website`, `/frame`, `/layout`, `/template`, `/brief`.
+`/move`, `/stage`, `/website`, `/frame`, `/layout`, `/template`, `/brief`.
 
 ## The four surfaces do not agree, and it is a fork rather than a gradient
 

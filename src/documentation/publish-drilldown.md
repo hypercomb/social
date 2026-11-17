@@ -1,4 +1,4 @@
-# The Publish window: stage in a domain, publish in your community
+# The Staging window: stage in a domain, publish in your community
 
 jwize, 2026-11-04 (the drilldown), reshaped 2026-11-16: "You should have your own domain and the
 community separate since you are feeding the community from all domains including yourself. Then there
@@ -7,7 +7,7 @@ through domains and publish live. You stage and then publish in community. And y
 hypercomb.io or your host. So locally the publishing should now be called staging."
 
 ```
-Publish / <the tile you are on>                          ×
+Staging / <the tile you are on>                          ×
 [ search domains and apps                              ]
 [ Stage changes (3)                                    ]
 
@@ -37,7 +37,7 @@ DOMAINS
 
 Nothing is selected: there are no groups, no Ctrl-held domains, no mixed state and no Sync in this
 window (the groups stay in the hosts drone, `community:host-groups`, unused here). What feeds the
-community and how it stays in step with the front door is in `showcase.md`, "The hive's Publish window".
+community and how it stays in step with the front door is in `showcase.md`, "The hive's Staging window".
 
 ## The one input
 
