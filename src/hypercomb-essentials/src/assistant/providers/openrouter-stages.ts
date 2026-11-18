@@ -105,7 +105,7 @@ export const openRouterStages = new OpenRouterStagesStore()
 export class OpenRouterRangeStore extends EventTarget {
   get(): PriceRange {
     try {
-      const raw = JSON.parse(globalThis.localStorage?.getItem(RANGE_KEY) ?? 'null') as Record<string, unknown> | null
+      const raw = JSON.parse(globalThis.localStorage?.getItem(RANGE_KEY) ?? 'null') as Partial<Record<keyof PriceRange, unknown>> | null
       if (!raw || typeof raw !== 'object') return DEFAULT_RANGE
       const price = (value: unknown, fallback: number): number =>
         typeof value === 'number' && Number.isFinite(value) && value >= 0 ? tidyLoose(value) : fallback
