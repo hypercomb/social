@@ -35,10 +35,15 @@ export const riskOf = (record: BroodRecord): BroodRisk => {
 
   const readings = record.audits.filter(audit => audit.by !== 'scan')
   // A reader that held it (a flag placed by a reading) refused it as surely
-  // as one that only said so.
+  // as one that only said so. Two flags are not readings: the scan's (what
+  // the code reaches, counted above) and the draft door's 'trial' hold, which
+  // holds EVERY draft until a hand rules (runtime module-drafts.ts
+  // admitInBrood) — nobody read the code to place it, so it recommends
+  // nothing, and it used to make every untouched draft read "High — trial
+  // recommends refusing it".
   const refusers = new Set([
     ...readings.filter(audit => audit.recommends === 'refuse').map(audit => audit.by),
-    ...(record.flags ?? []).filter(flag => flag.by !== 'scan').map(flag => flag.by),
+    ...(record.flags ?? []).filter(flag => flag.by !== 'scan' && flag.by !== 'trial').map(flag => flag.by),
   ])
   const communityRefused = record.vouches.some(vouch => vouch.verdict === 'refused')
 
