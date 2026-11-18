@@ -48,6 +48,7 @@ import { composeDependencies, isOff, namespaceOf, ownerOf, readPicks, sigsOf, wa
 import { readOffUnits, writeOffUnits } from './package-units.js'
 import type { ReplicationIo } from './replication-walker.js'
 import { reminifyRegistered } from './reminify.js'
+import { managedPage } from './chat-window/core/managed-page.js'
 import { encodeTransferPack, gzipBytes } from './transfer-pack.js'
 
 const SIG_RE = /^[a-f0-9]{64}$/
@@ -227,6 +228,16 @@ export type DraftAdmission = {
 /** WHY AN UNTRIED DRAFT WAITS — the reason every draft carries until a hand rules. */
 export const UNTRIED_REASON = 'a model wrote it and nobody has tried it yet: commit it to a trial, try it there, then accept it here'
 
+/** WHY IT WAITS ON A MANAGED SITE PAGE. That page has no trial and no try-
+ *  address (core managedRule: "the card on this page is where it is seen"),
+ *  so the reason a hive gives sent the owner to a door that page does not
+ *  have. There, the draft waits only for the owner's reading and hand. */
+export const UNACCEPTED_REASON = 'a model wrote it on this page and you have not accepted it yet: read it, then accept it to let it run after a reload, or refuse it'
+
+/** The reason a draft that reaches nothing new is held, for this page. */
+export const untriedReason = (onManagedPage: boolean = !!managedPage()): string =>
+  onManagedPage ? UNACCEPTED_REASON : UNTRIED_REASON
+
 /** EVERY DRAFT IS HELD UNTIL YOU ACCEPT IT (jwize, 2026-10-26: "I have to
  *  decide whether to accept the changes always" · "there is no bot accepting
  *  going live in the hive" · "it is a human door"). A draft used to run here
@@ -237,7 +248,7 @@ export const UNTRIED_REASON = 'a model wrote it and nobody has tried it yet: com
 const admitInBrood = async ({ sig, section, path, reaches }: DraftAdmission): Promise<void> => {
   const source = { kind: 'own' as const, how: `a draft of ${section} at ${path}` }
   if (reaches.length) await flagInBrood(sig, { by: 'scan', reason: `it newly reaches ${reachPhrase(reaches)}`, reaches }, source, section)
-  else await flagInBrood(sig, { by: 'trial', reason: UNTRIED_REASON }, source, section)
+  else await flagInBrood(sig, { by: 'trial', reason: untriedReason() }, source, section)
 }
 
 /** Record the draft; null when it may be made live, else why not. */

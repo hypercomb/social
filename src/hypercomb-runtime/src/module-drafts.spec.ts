@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { SignatureService } from '@hypercomb/core'
-import { draftModule, listDrafts, parseProblemAsBody, type ModuleDraftDeps } from './module-drafts'
+import { UNACCEPTED_REASON, UNTRIED_REASON, draftModule, listDrafts, parseProblemAsBody, untriedReason, type ModuleDraftDeps } from './module-drafts'
 import type { Picks } from './package-tree'
 import type { ReplicationIo } from './replication-walker'
 
@@ -205,5 +205,13 @@ describe('draftModule', () => {
     const outcome = await draftModule({ beeSig: w.beeSig, section: 'src/games/solomon/labyrinth.ts', body: 'var rooms = "fresh";' }, deps)
     expect(outcome).toEqual({ ok: false, error: 'selection needs core 9' })
     expect(w.picksNow()).toEqual({})
+  })
+})
+
+describe('why an untried draft waits', () => {
+  it('sends a hive to a trial, and a managed site page — which has none — to its own reading and hand', () => {
+    expect(untriedReason(false)).toBe(UNTRIED_REASON)
+    expect(untriedReason(true)).toBe(UNACCEPTED_REASON)
+    expect(UNACCEPTED_REASON).not.toMatch(/trial/)
   })
 })
