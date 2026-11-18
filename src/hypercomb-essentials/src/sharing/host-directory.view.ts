@@ -2194,7 +2194,8 @@ export class HostDirectoryElement extends HTMLElement {
     // activation records the new root as running BEFORE the restart, and a
     // read in that gap used to take the bar away — a silent window that then
     // reset itself (jwize, 2026-11-12).
-    if (!zone && (trunk || runsSource()) && this.#next && (this.#held || this.#next.root !== trunk)) {
+    const base = this.#updateBase()
+    if (!zone && (trunk || runsSource()) && this.#next && (this.#held || this.#next.root !== base)) {
       const bar = make('div', 'hd-updates')
       bar.setAttribute('role', 'status')
       bar.append(glyph('updatesIcon', 'hd-updates-glyph'))
@@ -2212,7 +2213,7 @@ export class HostDirectoryElement extends HTMLElement {
         bar.append(take)
       }
       section.append(bar)
-    } else if (!zone && (trunk || runsSource()) && this.#named && this.#named !== trunk && !this.#reading) {
+    } else if (!zone && (trunk || runsSource()) && this.#named && this.#named !== base && !this.#reading) {
       // AN UPDATE NONE OF YOUR HOSTS CAN SERVE YET: said plainly, with the
       // hosts that are behind — never a button that would end in a refusal.
       const bar = make('div', 'hd-updates')
@@ -4057,8 +4058,7 @@ export class HostDirectoryElement extends HTMLElement {
     try {
       // The bar may still name the root the page opened on. Read what the
       // publisher names now and take that, before a single byte is asked for.
-      const trunk = this.#selection?.trunk ?? null
-      const named = await this.#namedRoot(trunk)
+      const named = await this.#namedRoot(this.#updateBase())
       if (named) {
         this.#named = named
         if (this.#next?.root !== named) {
@@ -4304,10 +4304,11 @@ export class HostDirectoryElement extends HTMLElement {
         this.#selection = await this.#selectionOf(reach)
         this.#render()
         const trunk = this.#selection?.trunk ?? null
-        const named = await this.#namedRoot(trunk)
+        const base = this.#updateBase()
+        const named = await this.#namedRoot(base)
         this.#named = named
         this.#offerable = this.#offerFor(named)
-        if (named && named !== trunk) {
+        if (named && named !== base) {
           const from = this.#channelSources()
           if (this.#next?.root !== named) this.#next = await this.#tree(named, from)
           this.#moved = reach.recursive
@@ -4368,6 +4369,19 @@ export class HostDirectoryElement extends HTMLElement {
    *  attests the announcement the same way, so Update all follows a stamp
    *  that landed after the page opened. When that read cannot say, the
    *  scout's announcement, else `''` (unknown — the window then cuts nothing). */
+  /** The root an update is measured from. A hive's is its trunk. A source
+   *  shell runs its working tree and has no trunk, but each take still records
+   *  the revision it followed (acquire's stamp). Measured from that record, a
+   *  page left open across a later stamp takes what the publisher names NOW,
+   *  not the root the scout announced once at boot, and a source shell already
+   *  on the named root is offered nothing. */
+  #updateBase(): string | null {
+    const trunk = this.#selection?.trunk ?? null
+    if (trunk || !runsSource()) return trunk
+    const recorded = port()?.install.installedSig() ?? null
+    return recorded && SIG_RE.test(recorded) ? recorded : null
+  }
+
   async #namedRoot(installedSig: string | null): Promise<string> {
     if (!installedSig) {
       const announced = this.#announced

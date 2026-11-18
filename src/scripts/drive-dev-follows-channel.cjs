@@ -14,6 +14,8 @@
 //   2. Pressing it opens Packages with the update on offer.
 //   3. Taking it records the root as this hive's package.
 //   4. After the restart the notice stays quiet — and the source note stays.
+//   5. With an older revision recorded and Packages opened before the scout
+//      speaks, Update all still takes the root the publisher names now.
 //
 //   node scripts/drive-dev-follows-channel.cjs [--url http://localhost:4250/]
 
@@ -29,6 +31,22 @@ const channelRoot = async () => {
       if (/^[a-f0-9]{64}$/.test(root ?? '')) return root
     } catch { /* next host */ }
   }
+  return null
+}
+
+/** A package the relay on this machine published before `root`: its pool of
+ *  packages, newest members first. Null when this machine hosts none. */
+const olderRoot = (root) => {
+  const fs = require('fs')
+  const path = require('path')
+  const pool = path.join(__dirname, '..', 'hypercomb-relay', 'content', require('crypto').createHash('sha256').update('host:packages').digest('hex'))
+  try {
+    const members = fs.readdirSync(pool).filter(name => /^\d+$/.test(name)).sort().reverse()
+    for (const name of members) {
+      const sig = fs.readFileSync(path.join(pool, name), 'utf8').split('\n')[0].trim()
+      if (/^[a-f0-9]{64}$/.test(sig) && sig !== root) return sig
+    }
+  } catch { /* no relay content here */ }
   return null
 }
 
@@ -105,6 +123,31 @@ const press = (page, rx) => H.evalSafe(() => page.evaluate((src) => {
   H.check('the record survives the restart', (await stamp(page)) === root)
   H.check('and the window still says the code comes from source', (after?.notes ?? []).some(n => /from source/i.test(n)) || !after?.panelOpen, JSON.stringify(after?.notes))
   H.check('nothing reads as running a package', (after?.running ?? 0) === 0, String(after?.running))
+
+  // 5. A page whose record is older, opened before the scout has said a word:
+  //    Update all still takes the root the publisher names NOW. The window
+  //    used to measure a source shell from nothing, so with no announcement it
+  //    took the scout's boot-time root or nothing (jwize's 4250, 2026-11-18).
+  const older = olderRoot(root)
+  if (!older) {
+    console.log('[driver] no older pool member on this machine — step 5 skipped')
+  } else {
+    await H.evalSafe(() => page.evaluate((sig) => localStorage.setItem('hc:shim:installed-package', sig), older))
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await H.waitForShell(page, 120000)
+    await H.evalSafe(() => page.evaluate(() => window.__hypercombEffectBus.emit('packages:open', {})))
+    const early = await H.waitFor(() => surface(page), s => !!s && s.panelOpen && s.pressable.some(p => /^Update all$/i.test(p)), 30000, 500)
+    const heard = await H.evalSafe(() => page.evaluate(() => {
+      let last = null
+      window.__hypercombEffectBus.on('update:available', p => { last = p })()
+      return !!last
+    }))
+    H.check('an older record is offered the named root before the scout speaks', early.ok, `after ${early.waitedMs}ms, scout had spoken: ${heard}`)
+    const again = await press(page, '^Update all$')
+    H.check('the window takes it again', again.ok, again.ok ? again.pressed : JSON.stringify(again.saw))
+    const moved = await H.waitFor(() => stamp(page), s => s === root, 120000, 1000)
+    H.check('the record moves to the named root, not the older one', moved.ok, `${String(moved.value).slice(0, 12)} after ${moved.waitedMs}ms`)
+  }
 
   console.log('\n========== dev follows the channel ==========')
   for (const r of H.results) console.log(`  ${r.ok ? '✓' : '✗'} ${r.name}${r.detail ? '  — ' + r.detail : ''}`)

@@ -158,7 +158,7 @@ describe('the host directory', () => {
     // The bar stays for the whole update — a re-read after activation records
     // the new root as running and used to take it away — and the restart is
     // announced, given time to be read, and said again on the other side.
-    expect(VIEW).toMatch(/this\.#next && \(this\.#held \|\| this\.#next\.root !== trunk\)/)
+    expect(VIEW).toMatch(/this\.#next && \(this\.#held \|\| this\.#next\.root !== base\)/)
     expect(VIEW).toMatch(/\} else if \(!this\.#held\) \{ this\.#next = null; this\.#moved = null \}/)
     expect(VIEW).toMatch(/setTimeout\(\(\) => location\.reload\(\), updating \? 1500 : 400\)/)
     expect(VIEW).toMatch(/if \(where\.updated === true\) \{\s+this\.#justUpdated = true/)
@@ -847,7 +847,7 @@ describe('the host directory', () => {
 
   it('an update no host can serve yet is said plainly, with the hosts behind — and no Update all button', () => {
     const section = VIEW.slice(VIEW.indexOf('#sectionBody(zone: string): HTMLElement {'), VIEW.indexOf('// ── the columns'))
-    const notHeld = section.slice(section.indexOf('} else if (!zone && (trunk || runsSource()) && this.#named && this.#named !== trunk && !this.#reading) {'), section.indexOf('if (reach && !trunk) {'))
+    const notHeld = section.slice(section.indexOf('} else if (!zone && (trunk || runsSource()) && this.#named && this.#named !== base && !this.#reading) {'), section.indexOf('if (reach && !trunk) {'))
     expect(notHeld).toMatch(/t\('packages\.updates\.not-held'/)
     expect(notHeld).toMatch(/this\.#isBehind\(host\)/)
     expect(notHeld).not.toMatch(/button\(|hosts\.update-all|#updateAll/)
@@ -899,8 +899,20 @@ describe('the host directory', () => {
     expect(VIEW).toMatch(/attestPackage\(announced, this\.#zones, \{ fresh: true \}\)/)
     expect(VIEW).toMatch(/namedWhenUninstalled\(announced, verdict\)/)
     const updateAll = VIEW.slice(VIEW.indexOf('async #updateAll()'), VIEW.indexOf('async #runningFiles('))
-    expect(updateAll).toMatch(/const named = await this\.#namedRoot\(trunk\)/)
-    expect(updateAll.indexOf('this.#namedRoot(trunk)')).toBeLessThan(updateAll.indexOf('install.acquire('))
+    expect(updateAll).toMatch(/const named = await this\.#namedRoot\(this\.#updateBase\(\)\)/)
+    expect(updateAll.indexOf('this.#namedRoot(this.#updateBase())')).toBeLessThan(updateAll.indexOf('install.acquire('))
+  })
+
+  it('a source shell measures an update from the revision its last take recorded', () => {
+    // It has no trunk, but a take stamps the revision it followed. Measured from
+    // nothing, the window took whatever the scout announced at boot: a page left
+    // open across a later stamp took the older root (jwize's 4250, 2026-11-18).
+    const base = VIEW.slice(VIEW.indexOf('#updateBase(): string | null {'), VIEW.indexOf('async #namedRoot('))
+    expect(base).toMatch(/if \(trunk \|\| !runsSource\(\)\) return trunk/)
+    expect(base).toMatch(/port\(\)\?\.install\.installedSig\(\)/)
+    const read = VIEW.slice(VIEW.indexOf('async #read(): Promise<void> {'))
+    expect(read.slice(0, 2400)).toMatch(/const named = await this\.#namedRoot\(base\)/)
+    expect(read.slice(0, 2400)).toMatch(/if \(named && named !== base\) \{/)
   })
 
   it('both sentences speak every language the window does', () => {
