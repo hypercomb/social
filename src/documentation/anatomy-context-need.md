@@ -141,9 +141,28 @@ easily done"*, then *"Yes, tiles only"*. This REPLACES the bag of §2a.
 - **Changing it is changing tiles.** A rule changes by editing its note,
   leaves by removing its tile (a hide takes it out for the session only: hides
   do not outlive a refresh), and comes back by the tile's history.
-  A model proposes such a change like any tile change. The participant's words
-  are `doctrine` (what the tiles hold, or why none) and `doctrine tiles` (lay
-  the build's copy out at the root — the tiles are made at the root only).
+  A model proposes such a change like any tile change, and it ALWAYS waits in
+  Execution for the participant's hand (2026-11-17, runtime
+  `doctrine-hold.ts`): a change that runs at or under `/doctrine`, or names
+  that tile, is held whatever the policy and whatever Jev scored, so a model
+  never writes the rules it is judged by. The participant's words are
+  `doctrine` (what the tiles hold, or why none) and `doctrine tiles` (lay the
+  build's copy out at the root — the tiles are made at the root only).
+- **A doctrine that does not hold is said (2026-11-17).** The read that finds
+  the tree broken (an order that breaks, a tile not on this device) says so at
+  once, once per distinct set of problems, and says when it holds again
+  (effect `doctrine:status`). Before, the model was silently sent the
+  mechanics alone.
+- **A package update's rules arrive by the participant's word (2026-11-17).**
+  A package never rewrites the tiles. `doctrine` names the rules the build's
+  copy has and the hive does not; `doctrine tiles`, said again, lays only
+  those, against what the tiles hold now by tier number and rule id. A rule
+  the hive holds is left as it reads here (lines that differ are named), so
+  saying it again can never give the tree one id twice.
+- **Jev's doctrine is not capped (2026-11-17).** The decision input used to
+  refuse more than twelve sections or 16,000 characters of doctrine, which the
+  hive's doctrine already filled. Each section rides in its own question, so it
+  is neither capped nor charged against the state budget.
 - **Retired:** the `system:doctrine` bag and its records (`doctrine back`,
   `drop <n>`, `seed`, `list`), the doctrine window, and the write fence's
   `doctrine <heading>` header. Nothing was deleted: a hive that holds the bag

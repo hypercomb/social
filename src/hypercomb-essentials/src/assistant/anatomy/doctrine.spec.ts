@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest'
 import { ANATOMY_CODEX, ANATOMY_MECHANICS, ANATOMY_SECTIONS, ANATOMY_TEXT } from './anatomy.generated.js'
 import { codexSections, parseCodex } from './codex.js'
 import { composeAnatomy, headingOf, sourceOf } from './doctrine.js'
-import { fromCodex, readDoctrineTree, walkDoctrine, type DoctrineTreeIo } from './doctrine-tree.js'
+import { fromCodex, readDoctrineLines, readDoctrineTree, walkDoctrine, type DoctrineTreeIo } from './doctrine-tree.js'
 import { queueDoctrineRecord, readDoctrineRecord, takeQueuedDoctrineRecords, writeDoctrineRecord, type DoctrineRecordStore } from './doctrine-record.js'
 import { SignatureService } from '@hypercomb/core'
 import { doctrineTilePlan } from '../doctrine-tiles.js'
@@ -183,5 +183,33 @@ describe('the doctrine page', () => {
   it('says why there is no doctrine, as the word does', () => {
     expect(doctrineMarkdown({ kind: 'absent' }, [])).toContain('This hive carries no doctrine')
     expect(doctrineMarkdown({ kind: 'broken', problems: ['B1 cites Z9, which does not come before it'] }, [])).toContain('- B1 cites Z9, which does not come before it')
+  })
+})
+
+describe('the lines the tiles hold', () => {
+  const tree = [
+    { path: ROOT },
+    { path: [...ROOT, 'one'], note: '@1 Identity ~doc.md' },
+    { path: [...ROOT, 'one', 'a'], note: 'I1: a rule' },
+    { path: [...ROOT, 'one', 'b'], note: 'I1: the same id a second time' },
+    { path: [...ROOT, 'one', 'c'], note: 'a thought, not a rule' },
+  ]
+
+  it('are read tile by tile even when the whole does not hold', async () => {
+    const io = hive(tree)
+    const walk = await walkDoctrine(io, ROOT)
+    if (!walk.ok) throw new Error('the walk should hold')
+    expect(await readDoctrineLines(io, walk)).toEqual([
+      { path: [...ROOT, 'one'], kind: 'tier', line: '@1 Identity ~doc.md' },
+      { path: [...ROOT, 'one', 'a'], kind: 'rule', line: 'I1: a rule' },
+      { path: [...ROOT, 'one', 'b'], kind: 'rule', line: 'I1: the same id a second time' },
+    ])
+  })
+
+  it('are null when a tile\'s notes are not on this device', async () => {
+    const io = hive(tree)
+    const walk = await walkDoctrine(io, ROOT)
+    if (!walk.ok) throw new Error('the walk should hold')
+    expect(await readDoctrineLines({ ...io, notes: async () => null }, walk)).toBeNull()
   })
 })

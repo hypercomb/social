@@ -27,12 +27,12 @@
 //
 // Design: documentation/anatomy-context-need.md §2, §2a, §6, §7.
 
-import { EffectBus, SignatureService, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, SignatureService, isMetaEnvelope, metaPayloadOf, type I18nProvider } from '@hypercomb/core'
 import { ANATOMY_MECHANICS, ANATOMY_SOURCES } from './anatomy.generated.js'
 import { codexSections, type CodexTier } from './codex.js'
 import { doctrineMarkdown } from './doctrine-page.js'
 import { composeAnatomy, headingOf, sourceOf } from './doctrine.js'
-import { DOCTRINE_ROOT, fromCodex, readDoctrineNotes, walkDoctrine, type DoctrineTreeIo, type DoctrineTreeRead } from './doctrine-tree.js'
+import { DOCTRINE_ROOT, fromCodex, readDoctrineLines, readDoctrineNotes, walkDoctrine, type DoctrineLine, type DoctrineTreeIo, type DoctrineTreeRead } from './doctrine-tree.js'
 import { queueDoctrineRecord, readDoctrineRecord, type DoctrineRecordStore } from './doctrine-record.js'
 
 export const ANATOMY_IOC_KEY = '@hypercomb.social/Anatomy'
@@ -46,6 +46,13 @@ export type DoctrineStatus =
   | { readonly kind: 'absent' }
   | { readonly kind: 'broken'; readonly problems: readonly string[] }
 
+/** The codex line each doctrine tile holds now, read without the order check
+ *  (so a tree that does not hold still says what it has), or why it cannot be
+ *  read. A hive with no doctrine tile holds no lines. */
+export type DoctrineHeld =
+  | { readonly ok: true; readonly lines: readonly DoctrineLine[] }
+  | { readonly ok: false; readonly problem: string }
+
 export type DoctrineLike = {
   /** Resolves once the doctrine tiles as they stand now have been read. */
   readonly ready: Promise<void>
@@ -58,6 +65,9 @@ export type DoctrineLike = {
   /** The doctrine as a page (markdown, the docs browser's), read now: what
    *  every model is sent, or why there is none. */
   markdown(): Promise<string>
+  /** What the doctrine tiles hold now, tile by tile (`doctrine tiles` lays the
+   *  build's copy against it). */
+  held(): Promise<DoctrineHeld>
 }
 
 export type AnatomyLike = {
@@ -232,6 +242,32 @@ const writeText = (value: string): Promise<string> => {
 let marker: Promise<string | undefined> = Promise.resolve(undefined)
 let anatomyRecorded = false
 
+// ── a doctrine that does not hold is SAID (2026-11-17) ─────────────────────
+//
+// A tree whose order breaks, or with a tile this device does not hold,
+// carries NO doctrine: every model is then sent the mechanics alone and Jev
+// has nothing to judge by. That used to be silent — the participant learned
+// it only by saying `doctrine`. Now the read that finds it says so, once per
+// distinct set of problems (the read is asked again by every message while it
+// does not hold), and says again when it holds. `doctrine:status` carries the
+// same for anything that draws it.
+let announced = ''
+const say = (key: string, fallback: string, params: Record<string, string | number>, type: string): void => {
+  const i18n = window.ioc?.get?.(I18N_IOC_KEY) as I18nProvider | undefined
+  const value = i18n?.t?.(key, params)
+  const message = value && value !== key ? value : fallback.replace(/\{(\w+)\}/g, (_, name: string) => String(params[name] ?? ''))
+  EffectBus.emit('toast:show', { type, message })
+}
+const announce = (): void => {
+  const now = status.kind === 'broken' ? status.problems.join('; ') : ''
+  if (now === announced) return
+  const was = announced
+  announced = now
+  EffectBus.emit('doctrine:status', status)
+  if (now) say('doctrine.broken', 'The doctrine tiles do not hold, so no model is taught them: {problems}.', { problems: now }, 'error')
+  else if (was && status.kind === 'read') say('doctrine.holds', 'The doctrine tiles hold again: {tiers} tiers, {rules} rules.', { tiers: status.tiers, rules: status.rules }, 'success')
+}
+
 /** A read of the tiles settled: compose the anatomy, write it, record it. */
 const settle = (read: DoctrineTreeRead | null, source = '', fromRecord = false): void => {
   tiersRead = read?.ok ? read.tiers : []
@@ -239,6 +275,7 @@ const settle = (read: DoctrineTreeRead | null, source = '', fromRecord = false):
   status = !read ? { kind: 'absent' }
     : read.ok ? { kind: 'read', tiers: read.tiers.length, rules: read.tiers.reduce((sum, tier) => sum + tier.axioms.length, 0), source, recorded: fromRecord }
       : read.reason === 'broken' ? { kind: 'broken', problems: read.problems } : { kind: 'absent' }
+  announce()
   const next = composeAnatomy(ANATOMY_MECHANICS, sections)
   if (anatomyRecorded && next === text) return
   anatomyRecorded = true
@@ -290,12 +327,27 @@ const current = (): Promise<void> => {
   return reading
 }
 
+const held = async (): Promise<DoctrineHeld> => {
+  const found = await store
+  const io = found ? treeIo(found) : null
+  if (!io) return { ok: false, problem: 'the hive cannot be read yet' }
+  try {
+    const walk = await walkDoctrine(io)
+    if (!walk.ok) return walk.reason === 'absent' ? { ok: true, lines: [] } : { ok: false, problem: walk.problems.join('; ') }
+    const lines = await readDoctrineLines(io, walk)
+    return lines ? { ok: true, lines } : { ok: false, problem: 'a doctrine tile is named but not on this device; adopt the doctrine branch again to fetch it' }
+  } catch (error) {
+    return { ok: false, problem: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 const doctrine: DoctrineLike = {
   get ready() { return current() },
   sections: () => sections.map((section, i) => ({ index: i + 1, heading: headingOf(section), source: sourceOf(section) })),
   status: () => status,
   root: DOCTRINE_ROOT,
   markdown: () => current().then(() => doctrineMarkdown(status, tiersRead)),
+  held,
 }
 
 export const anatomy: AnatomyLike = {

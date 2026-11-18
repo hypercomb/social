@@ -61,9 +61,12 @@ export interface JevRow {
 export const WRITE_REACH: JevReach = 'editing'
 /** A write's header, as the write fence accepts it (hypercomb-work-fence.ts). */
 const WRITE_HEADER = /^\/?(?:write\s+)?[a-f0-9]{64}\s+src\/\S+$/i
-/** A write whose target is the doctrine itself (anatomy/doctrine.ts). */
-export const isDoctrineWrite = (row: { readonly kind: JevRowKind; readonly lines: readonly string[] }): boolean =>
-  row.kind === 'write' && /^\/?(?:write\s+)?doctrine\s/i.test(row.lines[0] ?? '')
+// RETIRED 2026-11-17: `isDoctrineWrite` and its gates. The write block that
+// named a doctrine heading went with the doctrine bag (tiles only since
+// 2026-11-16), so no row could match it. What it protected is kept where the
+// change is actually made: a model's change at or under /doctrine waits for
+// the participant's hand in the chat's own gate (runtime doctrine-hold.ts),
+// whatever this table scored.
 export interface JevInput {
   readonly request: string
   /** The doctrine, one section per entry, each verbatim from the anatomy. */
@@ -182,12 +185,6 @@ export const JEV_REACH_GATES: Readonly<Record<JevReach, { readonly grounded: boo
   destructive: { grounded: true, automatic: false },
 }
 
-/** A WRITE TO THE DOCTRINE is never automatic: the rules Jev judges by are the
- *  participant's to change, so Jev's answers are shown and the participant
- *  decides. The doctrine's current text is in the worker's system prompt, not
- *  the evidence, so grounding is asked but not gated. */
-export const JEV_DOCTRINE_GATES = { grounded: false, automatic: false } as const
-
 /** THRESHOLDS SCALE WITH RISK (TypeSafe's confidence guidance, within our
  *  doctrine): how sure Jev's choice must be before its step runs on its own.
  *  Answering, asking and reading change nothing; a new tile is one undo away;
@@ -255,9 +252,15 @@ export const jevInput = (raw: unknown): JevInput => {
   const evidence = (Array.isArray(value['evidence']) ? value['evidence'] : [value['evidence']]).map(item => text(item, 16_000))
   if (!evidence.length || evidence.length > 12 || evidence.join('').length > 16_000) throw new Error('Jev evidence exceeds its budget')
   const doctrine = (Array.isArray(value['doctrine']) ? value['doctrine'] : [value['doctrine']]).map(item => text(item, 16_000))
-  if (!doctrine.length || doctrine.length > 12 || doctrine.join('').length > 16_000) throw new Error('Jev doctrine exceeds its budget')
+  // THE DOCTRINE IS NOT CAPPED (jwize, 2026-11-16: "lets get the most out of
+  // the least without capping ourselves"). It used to be twelve sections and
+  // 16,000 characters, which the hive's doctrine already filled: a thirteenth
+  // tier would have turned every decision into a refusal. It is not part of
+  // the state either (jevState): each section rides in its own question. So
+  // the state budget below measures what Jev is shown as state, without it.
+  if (!doctrine.length) throw new Error('Jev needs the doctrine to judge by')
   const input = { request: text(value['request'], 6_000), doctrine, evidence, rows }
-  if (JSON.stringify(input).length > JEV_MAX_STATE_CHARS) throw new Error('Jev context exceeds its budget; narrow the table')
+  if (JSON.stringify({ ...input, doctrine: [] }).length > JEV_MAX_STATE_CHARS) throw new Error('Jev context exceeds its budget; narrow the table')
   return input
 }
 
@@ -330,7 +333,7 @@ export const jevResult = (raw: unknown, input: JevInput, rubric: JevRubric = {})
     if (row.kind === 'read') { if (value(row, 'needed') >= G.readNeeded && value(row, 'known') <= G.readKnown) passes.add(row.id); continue }
     if (row.kind === 'answer') { if (value(row, 'answered') >= G.answered) passes.add(row.id); continue }
     if (row.kind === 'ask') { if (value(row, 'open') >= G.open) passes.add(row.id); continue }
-    const gates = isDoctrineWrite(row) ? JEV_DOCTRINE_GATES : JEV_REACH_GATES[row.kind === 'write' ? WRITE_REACH : row.reach ?? 'editing']
+    const gates = JEV_REACH_GATES[row.kind === 'write' ? WRITE_REACH : row.reach ?? 'editing']
     const rule = worst.get(row.id)!.score
     if (rule >= G.reject) rejected.add(row.id)
     if (gates.automatic && value(row, 'toward') >= G.toward && value(row, 'beyond') <= G.beyond && rule <= G.rule
@@ -346,7 +349,7 @@ export const jevResult = (raw: unknown, input: JevInput, rubric: JevRubric = {})
   const confidence = next['confidence'] === undefined ? undefined : probability(next['confidence'])
   const chosen = choice !== 'none' && confidence !== undefined && confidence >= G.floor ? byId.get(choice) : undefined
   const choiceGate = (row: JevRow): number => isChangeRow(row)
-    ? (row.reach === 'destructive' || isDoctrineWrite(row) ? Infinity : C[row.reach ?? 'editing'])
+    ? (row.reach === 'destructive' ? Infinity : C[row.reach ?? 'editing'])
     : C[row.kind as 'read' | 'answer' | 'ask']
   // THE NUMBERS, SHOWN. Gates are starting values; a participant who sees
   // "toward .72" next to a row they would have run can tell us where to move them.
@@ -372,11 +375,9 @@ export const jevResult = (raw: unknown, input: JevInput, rubric: JevRubric = {})
     reason = `Jev chose ${chosen.label}.`
   } else if (chosen && isChangeRow(chosen) && !rejected.has(chosen.id)) {
     plan = { kind: 'do', row: chosen.id, review: true }
-    reason = (isDoctrineWrite(chosen)
-      ? `Jev chose ${chosen.label}; it changes the doctrine, so the participant always reviews it.`
-      : JEV_REACH_GATES[chosen.reach ?? 'editing'].automatic
-        ? `Jev chose ${chosen.label}, but not every gate passed; the participant reviews it before it runs.`
-        : `Jev chose ${chosen.label}; it takes something away, so the participant always reviews it.`) + ` (${scoreboard})`
+    reason = (JEV_REACH_GATES[chosen.reach ?? 'editing'].automatic
+      ? `Jev chose ${chosen.label}, but not every gate passed; the participant reviews it before it runs.`
+      : `Jev chose ${chosen.label}; it takes something away, so the participant always reviews it.`) + ` (${scoreboard})`
   } else if (reads.length) {
     plan = { kind: 'read', rows: reads.slice(0, JEV_MAX_READS) }
     reason = (chosen && rejected.has(chosen.id)
