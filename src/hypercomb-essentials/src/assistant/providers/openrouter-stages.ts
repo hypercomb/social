@@ -49,9 +49,11 @@ export type ModelPrices = { readonly input?: number; readonly output?: number }
 export const STAGE_MIN = 0.01
 export const STAGE_MAX = 200
 
-/** Near DeepSeek V4 Flash ($0.08): quick work at that price, up to about
- *  double and triple for heavier work. */
-export const DEFAULT_STAGES: PriceStages = Object.freeze({ fast: 0.1, balanced: 0.2, deep: 0.3 })
+/** Near DeepSeek V4 Flash ($0.08): quick work at that price, about double
+ *  for everyday work, and heavy work up to a $2 ceiling (jwize, 2026-11-18:
+ *  "let cap it at $2 per million for now") — raised from $0.30, which left
+ *  out every stronger model. */
+export const DEFAULT_STAGES: PriceStages = Object.freeze({ fast: 0.1, balanced: 0.2, deep: 2 })
 
 export const DEFAULT_RANGE: PriceRange = Object.freeze({ basis: 'split', floor: 0, inputMin: 0, inputMax: Number.POSITIVE_INFINITY })
 

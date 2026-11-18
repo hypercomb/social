@@ -42,6 +42,7 @@ describe('price range', () => {
   it('starts as the stops alone: output measured, no floor, no input limit', () => {
     expect(openRouterRange.get()).toEqual(DEFAULT_RANGE)
     expect(placeModel(flash)).toBe('fast')
+    expect(placeModel({ input: 0.5, output: 1.5 })).toBe('deep') // under the $2 ceiling
     expect(placeModel(opus)).toBe('over')
   })
 
