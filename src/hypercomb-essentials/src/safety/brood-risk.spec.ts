@@ -29,6 +29,11 @@ describe('a risk level, and why', () => {
     expect(risk.reasons).toEqual(['it reaches secrets and keys', 'it reaches the network'])
   })
 
+  it('the hold the draft door puts on every untried draft is not a refusal: nobody read it', () => {
+    const held = record({ source: { kind: 'own', how: 'a draft of src/a.ts at commands' }, flags: [{ at: 1, by: 'trial', reason: 'untried' }] })
+    expect(riskOf(held)).toEqual({ level: 'unread', reasons: ['nothing has read it yet'] })
+  })
+
   it('a draft the door held for a grave reach is high too', () => {
     expect(riskOf(record({ flags: [{ at: 1, by: 'scan', reason: 'x', reaches: ['eval'] }] })).level).toBe('high')
   })
