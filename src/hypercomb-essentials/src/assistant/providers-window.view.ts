@@ -50,7 +50,7 @@ import { keyBelongsElsewhere } from './providers/key-owner.js'
 import { llmProviderRemoval } from './llm-provider-removal.js'
 import { foldedIntoOpenRouter } from './providers/openrouter-supersedes.js'
 import { instanceId } from './providers/openrouter-instances.js'
-import { openRouterStages, stageFor, stagePosition, stagePrice, type PriceStages } from './providers/openrouter-stages.js'
+import { STAGE_MAX, measuredPrice, noCeiling, openRouterRange, openRouterStages, outsideRange, placeModel, stagePosition, stagePrice, type ModelPrices, type PriceStages } from './providers/openrouter-stages.js'
 import {
   checkLocalServer,
   localServerReport,
@@ -127,11 +127,16 @@ const catalogBrandName = (entry: OpenRouterCatalogEntry): string =>
   entry.name.includes(': ') ? entry.name.slice(0, entry.name.indexOf(': ')) : catalogBrand(entry.id)
 const catalogModelName = (entry: OpenRouterCatalogEntry): string =>
   entry.name.includes(': ') ? entry.name.slice(entry.name.indexOf(': ') + 2) : entry.name
-/** Output price in dollars per million tokens, or undefined when unpublished. */
-const catalogOutput = (entry: OpenRouterCatalogEntry): number | undefined => {
-  const n = Number(entry.completionPrice)
-  return entry.completionPrice !== undefined && Number.isFinite(n) && n >= 0 ? n * 1_000_000 : undefined
+/** A price in dollars per million tokens, or undefined when unpublished. */
+const perMillionPrice = (raw: string | undefined): number | undefined => {
+  const n = Number(raw)
+  return raw !== undefined && Number.isFinite(n) && n >= 0 ? n * 1_000_000 : undefined
 }
+/** Input and output price per million tokens — what the price range reads. */
+const catalogPrices = (entry: OpenRouterCatalogEntry): ModelPrices => ({
+  input: perMillionPrice(entry.promptPrice),
+  output: perMillionPrice(entry.completionPrice),
+})
 
 /** The API quotes dollars per TOKEN; people read per MILLION. */
 const catalogPrice = (entry: OpenRouterCatalogEntry): string => {
@@ -562,9 +567,11 @@ export class ProvidersWindowView extends EventTarget {
     // always in view, grouped under a small company header, and OpenRouter
     // stays an ordinary row for its endpoint and key.
     const configurator = llmProviderRegistry().get('openrouter')
-    const lines = configurator && tabOf(configurator) === tab.id && !this.#removed(configurator)
-      ? llmModelChoice.saved(configurator.id)
-      : []
+    const configured = !!configurator && tabOf(configurator) === tab.id && !this.#removed(configurator)
+    const lines = configured ? llmModelChoice.saved(configurator.id) : []
+    // THE PRICE RANGE — the chat's setting for how dear a model it may ask,
+    // in view whenever OpenRouter is, never folded inside its row.
+    if (configured) body.appendChild(this.#rangeSection())
     if (configurator && lines.length) {
       // A line shows the model's exact catalogue name; load the catalogue
       // once so a fresh window never shows a bare id (redraws on arrival).
@@ -1433,9 +1440,10 @@ export class ProvidersWindowView extends EventTarget {
       this.#catalogHas(query) // warms the list; the console redraws when it lands
       return undefined
     }
-    // CAPPED BY THE PRICE STAGES: a model above the last stop is not offered.
+    // CAPPED BY THE PRICE RANGE: a model outside it is not offered.
     const stages = openRouterStages.get()
-    const all = catalogue.filter(entry => stageFor(catalogOutput(entry), stages) !== 'over')
+    const range = openRouterRange.get()
+    const all = catalogue.filter(entry => !outsideRange(placeModel(catalogPrices(entry), stages, range)))
     const hiddenByCap = catalogue.length - all.length
     const list = document.createElement('div')
     list.className = 'hc-provider-pick'
@@ -1482,7 +1490,7 @@ export class ProvidersWindowView extends EventTarget {
       if (hiddenByCap) {
         const capped = document.createElement('div')
         capped.className = 'hc-provider-label'
-        capped.textContent = this.#t('providers.capHidden', '{count} more above your price stages')
+        capped.textContent = this.#t('providers.capHidden', '{count} more outside your price range')
           .replace('{count}', String(hiddenByCap))
         list.appendChild(capped)
       }
@@ -1616,7 +1624,7 @@ export class ProvidersWindowView extends EventTarget {
     const catalogue = cachedOpenRouterCatalog()
     for (const modelId of llmModelChoice.saved('openrouter')) {
       const entry = catalogue?.find(e => e.id === modelId)
-      const price = entry ? catalogOutput(entry) : undefined
+      const price = entry ? measuredPrice(catalogPrices(entry)) : undefined
       if (price === undefined) continue
       const dot = document.createElement('span')
       dot.className = 'hc-provider-stage-dot'
@@ -1628,7 +1636,9 @@ export class ProvidersWindowView extends EventTarget {
     const legend = document.createElement('div')
     legend.className = 'hc-provider-stage-legend'
     const legendText = (values: PriceStages): string =>
-      tiers.map(tier => `${this.#t(`providers.tier.${tier}`, tier)} ≤ ${money(values[tier])}`).join(' · ')
+      tiers.map(tier => tier === 'deep' && values.deep >= STAGE_MAX
+        ? `${this.#t(`providers.tier.${tier}`, tier)} · ${this.#t('providers.rangeNoLimit', 'no limit')}`
+        : `${this.#t(`providers.tier.${tier}`, tier)} ≤ ${money(values[tier])}`).join(' · ')
     legend.textContent = legendText(stages)
 
     tiers.forEach((tier, index) => {
@@ -1684,9 +1694,129 @@ export class ProvidersWindowView extends EventTarget {
     hint.className = 'hc-provider-label'
     hint.textContent = this.#t(
       'providers.stagesHint',
-      'Drag a stop, or use the arrow keys. Output price per million tokens; models above the last stop are left out.',
+      "Drag a stop, or use the arrow keys. Price per million tokens, measured as the price range says; the last stop is the range's ceiling, and at the end of the track there is none.",
     )
     box.append(this.#label(this.#t('providers.stages', 'Price stages')), track, legend, hint)
+    return box
+  }
+
+  /**
+   * THE PRICE RANGE (jwize, 2026-11-18: "we need to be able to set the range
+   * … for token cost, total or in and out … that way can check the hive with
+   * a higher tier model and compare the difference"). Typed bounds per
+   * million tokens, measured as one TOTAL (input + output) or as IN AND OUT
+   * each with its own bounds. The ceiling is the last price stop — one value,
+   * typed here or dragged on the track — and an empty box is no limit, so the
+   * strongest models can be let in for a comparison and shut out again.
+   */
+  #rangeSection(): HTMLElement {
+    const box = document.createElement('div')
+    box.className = 'hc-provider-range'
+    const range = openRouterRange.get()
+    const stages = openRouterStages.get()
+
+    const head = document.createElement('div')
+    head.className = 'hc-provider-range-head'
+    const basis = document.createElement('div')
+    basis.className = 'hc-provider-range-basis'
+    basis.setAttribute('role', 'radiogroup')
+    basis.setAttribute('aria-label', this.#t('providers.rangeBasis', 'Measure the price as'))
+    const choices = [
+      ['total', 'providers.rangeTotal', 'Total'],
+      ['split', 'providers.rangeSplit', 'In and out'],
+    ] as const
+    for (const [value, key, fallback] of choices) {
+      const on = range.basis === value
+      const choice = document.createElement('button')
+      choice.type = 'button'
+      choice.className = `hc-provider-link hc-provider-range-choice${on ? ' is-on' : ''}`
+      choice.setAttribute('role', 'radio')
+      choice.setAttribute('aria-checked', String(on))
+      choice.textContent = this.#t(key, fallback)
+      choice.addEventListener('click', () => { openRouterRange.set({ basis: value }); this.#render() })
+      basis.appendChild(choice)
+    }
+    head.append(this.#label(this.#t('providers.range', 'Price range')), basis)
+
+    const noFloor = this.#t('providers.rangeNoFloor', 'none')
+    const noLimit = this.#t('providers.rangeNoLimit', 'no limit')
+    const field = (value: number | undefined, placeholder: string, label: string, commit: (next: number | undefined) => void): HTMLInputElement => {
+      const input = document.createElement('input')
+      input.type = 'number'
+      input.min = '0'
+      input.step = 'any'
+      input.inputMode = 'decimal'
+      input.className = 'hc-provider-input hc-provider-range-input'
+      input.placeholder = placeholder
+      input.setAttribute('aria-label', label)
+      input.value = value === undefined ? '' : String(value)
+      input.addEventListener('change', () => {
+        const raw = input.value.trim()
+        const next = raw === '' ? undefined : Number(raw)
+        if (next !== undefined && !(Number.isFinite(next) && next >= 0)) {
+          input.value = value === undefined ? '' : String(value)
+          return
+        }
+        commit(next)
+        this.#render()
+      })
+      return input
+    }
+    const row = (name: string, from: HTMLInputElement, to: HTMLInputElement): HTMLElement => {
+      const line = document.createElement('div')
+      line.className = 'hc-provider-range-row'
+      const label = document.createElement('span')
+      label.className = 'hc-provider-range-name'
+      label.textContent = name
+      const dash = document.createElement('span')
+      dash.className = 'hc-provider-range-dash'
+      dash.textContent = '–'
+      line.append(label, '$', from, dash, '$', to)
+      return line
+    }
+
+    const from = this.#t('providers.rangeFrom', 'from')
+    const to = this.#t('providers.rangeTo', 'to')
+    const measured = range.basis === 'total'
+      ? this.#t('providers.rangeTotalRow', 'In + out')
+      : this.#t('providers.rangeOut', 'Out')
+    const rows = [row(
+      measured,
+      field(range.floor > 0 ? range.floor : undefined, noFloor, `${measured} · ${from}`,
+        next => openRouterRange.set({ floor: next ?? 0 })),
+      field(noCeiling(stages) ? undefined : stages.deep, noLimit, `${measured} · ${to}`,
+        next => openRouterStages.setCeiling(next === undefined || next >= STAGE_MAX ? undefined : next)),
+    )]
+    if (range.basis === 'split') {
+      const input = this.#t('providers.rangeIn', 'In')
+      rows.push(row(
+        input,
+        field(range.inputMin > 0 ? range.inputMin : undefined, noFloor, `${input} · ${from}`,
+          next => openRouterRange.set({ inputMin: next ?? 0 })),
+        field(Number.isFinite(range.inputMax) ? range.inputMax : undefined, noLimit, `${input} · ${to}`,
+          next => openRouterRange.set({ inputMax: next ?? Number.POSITIVE_INFINITY })),
+      ))
+    }
+
+    box.append(head, ...rows)
+    // How much of the catalogue the range lets through, so a change is felt.
+    const catalogue = cachedOpenRouterCatalog()
+    if (!catalogue) this.#catalogHas('')
+    else {
+      const inside = catalogue.filter(entry => !outsideRange(placeModel(catalogPrices(entry), stages, range))).length
+      const count = document.createElement('div')
+      count.className = 'hc-provider-label hc-provider-range-count'
+      count.textContent = this.#t('providers.rangeCount', '{count} of {total} OpenRouter models in range')
+        .replace('{count}', String(inside)).replace('{total}', String(catalogue.length))
+      box.appendChild(count)
+    }
+    const hint = document.createElement('div')
+    hint.className = 'hc-provider-label'
+    hint.textContent = this.#t(
+      'providers.rangeHint',
+      'Dollars per million tokens. An empty box is no limit. Raise the ceiling to let the chat ask stronger models; the price stops place them by weight.',
+    )
+    box.appendChild(hint)
     return box
   }
 
@@ -1841,12 +1971,12 @@ export class ProvidersWindowView extends EventTarget {
       price.textContent = catalogPrice(entry)
       line.appendChild(price)
       // Which level of work its price puts it in.
-      const stage = stageFor(catalogOutput(entry))
+      const stage = placeModel(catalogPrices(entry))
       if (stage && !instance?.decisionOnly) {
         const word = document.createElement('span')
         word.className = 'hc-provider-catalog-price hc-provider-stage-word'
-        word.textContent = stage === 'over'
-          ? this.#t('providers.overCap', 'above your price stages')
+        word.textContent = outsideRange(stage)
+          ? this.#t('providers.overCap', 'outside your price range')
           : this.#t(`providers.tier.${stage}`, stage)
         line.appendChild(word)
       }
@@ -2271,6 +2401,15 @@ export class ProvidersWindowView extends EventTarget {
       }
       .hc-provider-company::after { content: ''; flex: 1; height: 1px; background: rgba(${STEEL}, 0.18); }
       .hc-provider-stages { margin: 0.6154em 0; }
+      .hc-provider-range { margin: 0.3077em 0 0.6154em; padding: 0 0.1538em; }
+      .hc-provider-range-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.9231em; }
+      .hc-provider-range-basis { display: flex; gap: 0.9231em; }
+      .hc-provider-range-choice { opacity: 0.55; }
+      .hc-provider-range-choice.is-on { opacity: 1; text-decoration: underline; text-underline-offset: 0.2308em; }
+      .hc-provider-range-row { display: flex; align-items: center; gap: 0.3077em; margin: 0.3077em 0; }
+      .hc-provider-range-name { min-width: 4.6em; opacity: 0.75; }
+      .hc-provider-range-input { flex: 1 1 0; width: 0; }
+      .hc-provider-range-dash { opacity: 0.5; padding: 0 0.1538em; }
       .hc-provider-stage-track {
         position: relative; height: 0.4615em; margin: 1.0769em 0.4615em 0.7692em;
         border-radius: var(--hc-radius-control, 2px); background: rgba(${STEEL}, 0.12);

@@ -16,7 +16,7 @@ import { llmModelChoice } from '../llm-model-choice.js'
 import { llmProviderRegistry } from '../llm-provider-registry.js'
 import type { LlmProviderDescriptor, LlmTier } from './llm-provider.types.js'
 import { cachedOpenRouterCatalog, isOpenRouterBatchModel, openRouterCatalogEvents } from './openrouter-catalog.js'
-import { openRouterStages, stageFor } from './openrouter-stages.js'
+import { openRouterRange, openRouterStages, outsideRange, placeModel } from './openrouter-stages.js'
 import { OPENROUTER_PROVIDER } from './openrouter.provider.js'
 import { JEV_ENDPOINT, JEV_MODEL } from '../jev-decision.js'
 
@@ -59,13 +59,20 @@ const saidTier = (modelId: string): LlmTier | undefined => llmModelChoice.tierOf
 const tiersFor = (modelId: string): readonly LlmTier[] => {
   const said = saidTier(modelId)
   if (said) return [said]
-  const stage = stageFor(metaFor(modelId).outputPerMillion)
-  return stage && stage !== 'over' ? [stage] : ['fast', 'balanced', 'deep']
+  const stage = placeOf(modelId)
+  return stage && !outsideRange(stage) ? [stage as LlmTier] : ['fast', 'balanced', 'deep']
 }
 
-/** Priced above the last stop: left out, never registered, never picked. */
+/** Where the price range puts a line (openrouter-stages.ts). */
+const placeOf = (modelId: string): ReturnType<typeof placeModel> => {
+  const meta = metaFor(modelId)
+  return placeModel({ input: meta.inputPerMillion, output: meta.outputPerMillion })
+}
+
+/** Priced outside the range (above the last stop, below the floor, or outside
+ *  the input range): left out, never registered, never picked. */
 export const aboveStages = (modelId: string): boolean =>
-  !saidTier(modelId) && stageFor(metaFor(modelId).outputPerMillion) === 'over'
+  !saidTier(modelId) && outsideRange(placeOf(modelId))
 
 export const openRouterInstance = (modelId: string): LlmProviderDescriptor => {
   const { configurator: _configurator, ...base } = OPENROUTER_PROVIDER
@@ -126,5 +133,6 @@ export const watchOpenRouterInstances = (): void => {
   llmModelChoice.addEventListener('change', syncOpenRouterInstances)
   openRouterCatalogEvents.addEventListener('loaded', syncOpenRouterInstances)
   openRouterStages.addEventListener('change', syncOpenRouterInstances)
+  openRouterRange.addEventListener('change', syncOpenRouterInstances)
   syncOpenRouterInstances()
 }

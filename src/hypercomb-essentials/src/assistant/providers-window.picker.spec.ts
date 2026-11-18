@@ -178,11 +178,47 @@ describe('price stages cap the list', () => {
     type('anthropic')
     await vi.waitFor(() => expect(pickItem('Anthropic')).toBeDefined())
     expect(pickItem('Anthropic')!.textContent).toContain('1 model')
-    expect($('.hc-provider-pick')?.textContent).toContain('1 more above your price stages')
+    expect($('.hc-provider-pick')?.textContent).toContain('1 more outside your price range')
     pickItem('Anthropic')!.click()
     expect(pickItem('Claude Haiku 4.5')).toBeDefined()
     expect(pickItem('Claude Sonnet 4.5')).toBeUndefined()
     $$<HTMLButtonElement>('.hc-provider-pick-chip .hc-provider-link')[0]?.click()
     openRouterStages.set({ fast: 1, balanced: 5, deep: 20 })
+  })
+})
+
+describe('the price range, typed', () => {
+  const rangeInputs = (): HTMLInputElement[] => $$<HTMLInputElement>('.hc-provider-range-input')
+  const setBox = (input: HTMLInputElement, value: string): void => {
+    input.value = value
+    input.dispatchEvent(new Event('change'))
+  }
+
+  it('a typed ceiling caps the search, an empty one lets every price in, and total adds the input price', async () => {
+    const { openRouterRange, openRouterStages } = await import('./providers/openrouter-stages.js')
+    // "In and out": an out row and an in row, two boxes each.
+    expect(rangeInputs()).toHaveLength(4)
+    setBox(rangeInputs()[1], '10')
+    expect(openRouterStages.get().deep).toBe(10)
+    type('anthropic')
+    await vi.waitFor(() => expect(pickItem('Anthropic')).toBeDefined())
+    expect(pickItem('Anthropic')!.textContent).toContain('1 model')
+
+    setBox(rangeInputs()[1], '')
+    expect(rangeInputs()[1].value).toBe('')
+    type('anthropic')
+    expect(pickItem('Anthropic')!.textContent).toContain('2 models')
+
+    // Total: one row, and Sonnet ($3 in + $15 out = $18) is over a $16 ceiling.
+    $$<HTMLButtonElement>('.hc-provider-range-choice').find(b => b.textContent === 'Total')!.click()
+    expect(openRouterRange.get().basis).toBe('total')
+    expect(rangeInputs()).toHaveLength(2)
+    setBox(rangeInputs()[1], '16')
+    type('anthropic')
+    expect(pickItem('Anthropic')!.textContent).toContain('1 model')
+
+    openRouterRange.set({ basis: 'split' })
+    openRouterStages.set({ fast: 1, balanced: 5, deep: 20 })
+    type('')
   })
 })

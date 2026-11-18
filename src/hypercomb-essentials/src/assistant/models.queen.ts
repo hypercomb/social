@@ -39,7 +39,7 @@ const ago = (at: number, now = Date.now()): string => {
 /** One line of the list, as the registry holds it now. */
 export const modelLine = (modelId: string): string => {
   const provider = llmProviderRegistry().get(instanceId(modelId))
-  if (!provider) return `${modelId} (held back: priced above the last stage; say models add ${modelId} deep to use it for deep work)`
+  if (!provider) return `${modelId} (held back: priced outside your price range; widen the range in the providers console, or say models add ${modelId} deep to use it for deep work)`
   const tiers = [...new Set(provider.models.map(model => model.tier))].join('/')
   const price = provider.models[0]?.outputPerMillion
   const said = llmModelChoice.tierOf(OWNER, modelId) ? ', said' : ''
