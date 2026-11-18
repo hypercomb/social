@@ -413,6 +413,10 @@ export class SwarmAdoptDrone extends Drone {
       void this.#onWand(String(p?.label ?? '').trim())
     })
 
+    // Something outside this drone queued an adopt (`private sync`, private-keep.ts): work the queue now, not at
+    // the next boot. Found live 2026-11-18: the tile's bytes were held and its entry sat at zero tries.
+    this.onEffect('adopt:drain', () => { void this.#drainAdoptQueue() })
+
     this.onEffect<TileActionPayload>('tile:action', (payload) => {
       const action = String(payload?.action ?? '')
 

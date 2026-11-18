@@ -218,6 +218,35 @@ a key is granted. Not run against a live host or in the live hive.
 
 ## The word (built 2026-10-26)
 
-`private` (`sharing/private.queen.ts`): alone, who the page you stand on is sealed to; `private <key> [<key> ...]` (64-hex or npub)
+**Set from the tile (2026-11-18, `sharing/tile-visibility.ts`, `sharing/private-keep.ts`):** `private` alone (or `private /a/b`)
+SETS the tile private, and answers the open question above for a participant's OWN tiles: a private tile with no public root
+is named in the signed index under a colon root, `private:<sign(key ⏎ lineage)>`, whose value is the envelope's signature. A
+colon root is a system root: never a place, a door or a community item. The sealed closure starts at a CARRIER atom
+`{ kind: 'private-tile', route, head }`, so the route travels inside the seal and the index spells no name. Hosts hold
+ciphertext only. A tile that was staged is switched off in each community, and once the sealed copy is kept its plain root is
+withdrawn and the hosts are asked to forget its plain bytes (remove-from-my-hosts.md), after the participant says yes; the
+sealed copy is always kept first, so a failure leaves the tile where it was. `private sync` on another device reads this
+key's index on the hosts that hive knows, opens each `private:` root with its own key, keeps every verified atom, and queues
+the tile as an adopt at its route. `private off` stops naming the private copy too. `public` (`sharing/public.queen.ts`) is
+the counterpart: staged on its hosts (with consent, when on none) and switched on in the community of each. The sealed head
+comes from `sealedHeadOf` in publish-branch.ts (the recursive seal, until the flat head map lands). Still open: a private
+tile offered to SOMEONE ELSE who holds no signature of it; bringing private tiles in without the word.
+
+`private on <domain>` names the host on the tile first (the mark only, nothing staged): where a never-staged tile is kept. The
+copy is sealed to the index's key AND to every key on its key list at that host, so a paired device opens it with its own key;
+a device added later opens only what is kept after it joined (say `private` again). `private sync` is LAST KEPT WINS: a tile
+the device already has at another version is replaced by the kept one as a new revision (`syncResolvedBranch`), and "already
+here" means the tile's sealed head equals the kept head, not that its bytes are held.
+
+**Run live 2026-11-18** against `relay.js` on loopback with two dev hives sharing one throwaway key: keep (10 sealed files, no
+plain text on disk, one `private:` root in the signed index), bring into an empty hive, an added child travelling on the next
+keep + sync, and staged → private (root withdrawn, 7 plain atoms forgotten by the host). The run found and fixed: the seal
+read resolved bytes (`getResource`) instead of the exact ones (`getResourceLocal`) — which the older `private <key>` path
+shared; a bring whose queue entry was never worked until the next boot (`adopt:drain`); held bytes mistaken for a placed
+tile; an update the adopt queue could not apply. NOT run: the cloud worker as host, and a paired device (key lists live on
+the worker only, `relay.js` refuses them). Left on the host after staged → private: the publish's link bundle
+(`hypercomb.hive-link`), which names the tile and its old root, is not in the forgotten set.
+
+`private` (`sharing/private.queen.ts`): `private who`, who the page you stand on is sealed to; `private <key> [<key> ...]` (64-hex or npub)
 seals it to them after asking in words (ciphertext to your host, an envelope named in the signed index); `private off` stops naming the
 private versions (ciphertext already on hosts stays, unnamed). The page must already be published. Not yet run against a live host.

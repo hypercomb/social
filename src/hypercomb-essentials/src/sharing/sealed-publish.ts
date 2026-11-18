@@ -99,7 +99,10 @@ export async function openSealedVersion(
 
 // ── the live collaborators ──
 
-type StoreLike = { getResource?: (sig: string) => Promise<Blob | null> }
+type StoreLike = {
+  getResource?: (sig: string) => Promise<Blob | null>
+  getResourceLocal?: (sig: string) => Promise<Blob | ArrayBuffer | Uint8Array | null>
+}
 type HostSyncLike = {
   publishAtoms?: (host: string, sigs: readonly string[], bytesOf: (sig: string) => Promise<Uint8Array | null>) =>
     Promise<{ ok: true } | { ok: false; error: string }>
@@ -118,12 +121,18 @@ export const liveNip44 = (): Nip44 | null => {
   return { encrypt: (peer, text) => signer.nip44Encrypt!(peer, text), decrypt: (peer, payload) => signer.nip44Decrypt!(peer, payload) }
 }
 
-/** Bytes by signature from the local store. */
+/** Bytes by signature from the local store, VERBATIM: the bytes that hash to `sig`. `getResourceLocal` first — measured
+ *  live 2026-11-18: `getResource` resolves a handle to what it stands for (a child layer's or a mark's sig came back as
+ *  null or as other bytes), and a seal needs the atom exactly as it is named. */
 export const liveGetBytes = async (sig: string): Promise<Uint8Array | null> => {
+  const store = get<StoreLike>('@hypercomb.social/Store')
+  const asBytes = async (value: Blob | ArrayBuffer | Uint8Array | null | undefined): Promise<Uint8Array | null> =>
+    !value ? null : value instanceof Uint8Array ? value : value instanceof ArrayBuffer ? new Uint8Array(value) : new Uint8Array(await value.arrayBuffer())
   try {
-    const blob = await get<StoreLike>('@hypercomb.social/Store')?.getResource?.(sig)
-    return blob ? new Uint8Array(await blob.arrayBuffer()) : null
-  } catch { return null }
+    const exact = await asBytes(await store?.getResourceLocal?.(sig))
+    if (exact) return exact
+  } catch { /* fall through to the resolving read */ }
+  try { return await asBytes(await store?.getResource?.(sig)) } catch { return null }
 }
 
 /** Upload by signature to one host through host sync. */

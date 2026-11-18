@@ -1085,6 +1085,17 @@ async function setBranchDoorsNow(
   return unreached.length ? { ok: true, unreached } : { ok: true }
 }
 
+/** The sealed head of a branch, as a publish would name it, with nothing marked public, staged or uploaded: what a
+ *  private copy is made from (private-keep.ts). It lives here because this file already rides the recursive seal; it
+ *  leaves with publish when the flat head map lands (doctrine.spec.ts, the sealSubtree ratchet). */
+export async function sealedHeadOf(segments: readonly string[]): Promise<string | null> {
+  const segs = segments.map(s => String(s ?? '').trim()).filter(Boolean)
+  const history = get<HistoryLike>(HISTORY_KEY)
+  if (segs.length === 0 || !history?.sealSubtree) return null
+  const sealed = await history.sealSubtree(segs).catch(() => null)
+  return sealed && SIG_RE.test(sealed) ? sealed : null
+}
+
 /** A creation whose doors or own address changed without a publish: one
  *  more result, so the list's last word on it is where it opens now. */
 function recordMovedDoor(

@@ -26,8 +26,13 @@ describe('private — reading the line', () => {
     expect(await memberKey(key.slice(1))).toBeNull()
   })
 
-  it('shows with nothing, turns off with off, and seals to every key it can read, naming the ones it cannot', async () => {
-    expect(await parsePrivateWord('')).toEqual({ form: 'show' })
+  it('sets with nothing or a route, shows with who, turns off with off, and seals to every key it can read, naming the ones it cannot', async () => {
+    expect(await parsePrivateWord('')).toEqual({ form: 'set' })
+    expect(await parsePrivateWord('/recipes/bread')).toEqual({ form: 'set', route: ['recipes', 'bread'] })
+    expect(await parsePrivateWord('on Example.com')).toEqual({ form: 'set', on: 'example.com' })
+    expect(await parsePrivateWord('/recipes/bread on example.com')).toEqual({ form: 'set', route: ['recipes', 'bread'], on: 'example.com' })
+    expect(await parsePrivateWord('who')).toEqual({ form: 'show' })
+    expect(await parsePrivateWord('sync')).toEqual({ form: 'sync' })
     expect(await parsePrivateWord('off')).toEqual({ form: 'off' })
     expect(await parsePrivateWord(`${key} ${npubEncode(key)} alice`)).toEqual({ form: 'seal', members: [key], unknown: ['alice'] })
   })
