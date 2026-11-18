@@ -103,7 +103,7 @@ import {
 } from './zone-door.js'
 import { batchOrder, driftedRows } from './publish-batch.js'
 import { switchInCommunity } from './community-switch.js'
-import { SHOWCASE_SIGNED_EFFECT, readSignedShowcase, showcaseHome, type ShowcaseItem } from './showcase-record.js'
+import { SHOWCASE_SIGNED_EFFECT, communityZoneIn, readSignedShowcase, showcaseHome, type ShowcaseItem } from './showcase-record.js'
 import type { OfferedInstance } from './community-candidates.js'
 
 /** English fallbacks for every way publishing can stop. Each one names what
@@ -196,6 +196,8 @@ interface HistoryLike {
 }
 interface HostSyncLike {
   publicHostDomain?: () => string
+  /** The own host as a public domain, '' when unset or this machine. */
+  ownHostDomain?: () => string
   probeServed?: (host: string, sig: string) => Promise<'served' | 'absent' | 'unknown'>
   closureGaps?: (sig: string, kind?: string, closure?: boolean, limit?: number) => Promise<string[]>
   isClosureAvailable?: (sig: string, kind: string, closure: boolean) => Promise<boolean>
@@ -820,16 +822,26 @@ export class PublishStatusDrone extends Drone {
       // The zone ROOT is the door: a setting stored as `content.<zone>`
       // before the face retired is read as its zone (zone-door.ts).
       const host = zoneDoor(hostSync?.publicHostDomain?.() || '')
-      this.#zone = host
       const readDoor = host || zoneDoor(PUBLIC_CONTENT_HOSTS[0] ?? '')
       this.#readDoor = readDoor
       // The domains come first: they are listed whether or not a key or a
       // tile is ready, so the panel is never an empty page.
       this.#community = await listCommunityHosts()
+      const pubkey = await publisherKeyHex()
+      // YOUR COMMUNITY IS THE LAST SAVE, AND ITS DOMAIN COMES WITH IT (jwize
+      // 2026-11-17: the phone's switches never reached the desktop once the
+      // named host was gone, and "you don't need to have the domain on both
+      // devices … that domain is included"). With no public host named, the
+      // community is the one your signed index names a showcase for — the
+      // own host you chose when it names several — and, before any device
+      // has saved one, that own host. Never a default.
+      const own = zoneDoor(hostSync?.ownHostDomain?.() || '')
+      this.#zone = host
+        || (SIG_RE.test(pubkey) ? zoneDoor(await communityZoneIn(readDoor, pubkey, own).catch(() => '')) : '')
+        || own
       // What the host serves is a NETWORK read: asked now, awaited only after
       // the list is painted (the last answer stands until it lands).
       const servedRead = servedZones(this.#zone)
-      const pubkey = await publisherKeyHex()
       if (!SIG_RE.test(pubkey)) {
         // No key yet (the signer may still be waking): the next pass looks again.
         this.#stale = true

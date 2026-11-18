@@ -332,6 +332,23 @@ export async function showcaseHome(zone: string): Promise<string | null> {
   return null
 }
 
+/** THE DOMAIN TRAVELS WITH THE RECORD (jwize 2026-11-17: "you don't need to have the domain on both devices. Just the
+ *  last devices data wins and that domain is included"). The zone this key's signed index, read at `host`, names a
+ *  showcase for (`showcase:<zone>`), so a device that never named a host still finds the community another device
+ *  saved. Among several, `prefer` when it is one of them, else the first by name. '' when the index names none. */
+export async function communityZoneIn(host: string, pubkey: string, prefer = ''): Promise<string> {
+  const read = await fetchHiveIndex(host, pubkey).catch(() => null)
+  if (!read?.ok) return ''
+  const roots = read.manifest.roots ?? {}
+  const zones = Object.keys(roots)
+    .filter(key => key.startsWith('showcase:') && SIG.test(String(roots[key] ?? '')))
+    .map(key => key.slice('showcase:'.length))
+    .filter(zone => ZONE.test(zone))
+    .sort()
+  const wanted = prefer.toLowerCase()
+  return zones.includes(wanted) ? wanted : zones[0] ?? ''
+}
+
 /** Send the showcase to where its domain's visitors read it (showcaseHome) and name it in the signed index as
  *  `showcase:<zone>` — what the front door reads. `key` names it elsewhere: `staged:<zone>` (stagedKey) for what is
  *  staged, which no visitor is shown. */

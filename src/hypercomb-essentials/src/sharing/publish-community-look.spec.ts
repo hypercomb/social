@@ -49,3 +49,31 @@ describe('the Publish window reads the community again when looked at', () => {
     expect(body('async #communitySwitch(')).toContain('this.#communityWrites++')
   })
 })
+
+// jwize 2026-11-17: "I still don't see the changes I make on my mobile … on my desktop". The hive's named public host
+// was gone and nothing could name it again, so the window had no community and never read one. The community is the
+// participant's own domain: the named public host, else the own host they chose — never this machine, never a default.
+describe('your community lives on your own domain', () => {
+  it('with no public host named, the window takes the zone the last save names, else the own host', () => {
+    expect(DRONE).toMatch(/this\.#zone = host\s+\|\| \(SIG_RE\.test\(pubkey\) \? zoneDoor\(await communityZoneIn\(readDoor, pubkey, own\)[^\n]*\n\s+\|\| own/)
+    // Found before the served read asks about it.
+    expect(DRONE.indexOf('communityZoneIn(readDoor')).toBeLessThan(DRONE.indexOf('const servedRead = servedZones(this.#zone)'))
+  })
+
+  it('the own host counts only as a public domain', async () => {
+    localStorage.clear()
+    const { hostSyncService } = await import('./host-sync.service.js')
+    expect(hostSyncService.ownHostDomain()).toBe('')
+    hostSyncService.setOwnHost('https://JWize.com/')
+    expect(hostSyncService.ownHostDomain()).toBe('jwize.com')
+    hostSyncService.setOwnHost('content.jwize.com')
+    expect(hostSyncService.ownHostDomain()).toBe('jwize.com')
+    for (const machine of ['localhost:4250', 'localhost', '127.0.0.1', 'not a host']) {
+      hostSyncService.setOwnHost(machine)
+      expect(hostSyncService.ownHostDomain(), machine).toBe('')
+    }
+    // Naming the own host never names a public host: writes still need one named.
+    expect(hostSyncService.publicHostDomain()).toBe('')
+    localStorage.clear()
+  })
+})

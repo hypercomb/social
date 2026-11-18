@@ -710,6 +710,16 @@ export class HostSyncService extends EventTarget {
     return HOST_DOMAIN_RE.test(stored) ? stored : DEFAULT_PUBLIC_HOST_DOMAIN
   }
 
+  /** YOUR OWN HOST as a public domain (`hc:nostrmesh:self-domain`, named by
+   *  `setOwnHost`), or '' when it is unset, this machine, or not a bare
+   *  hostname. Named by the participant, never a default — so a caller that
+   *  needs THEIR domain (the community, jwize 2026-11-17) may fall back to it
+   *  when no public host is named. */
+  public readonly ownHostDomain = (): string => {
+    const own = this.#hostBase().toLowerCase()
+    return HOST_DOMAIN_RE.test(own) && !isLoopbackHost(own) ? own : ''
+  }
+
   /** What "unset" resolves to — '' (there is no default host), so a caller
    *  shows it without hardcoding it a second time. */
   public readonly defaultPublicHostDomain = (): string => DEFAULT_PUBLIC_HOST_DOMAIN
