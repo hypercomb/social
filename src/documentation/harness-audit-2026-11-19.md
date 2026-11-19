@@ -18,7 +18,7 @@ The harness is strong where Claude Code is weakest and weak where Claude Code is
 
 **Ahead.** Every change is admitted by one default-deny gate, judged, held where it matters, run as a transaction, and reversible; receipts come from the hive and never from the model's account; long work survives a refresh; a second model judges changes against written rules; the loop's numbers are a signed record a hive can swap.
 
-**Behind.** The model works through one text block per reply, one kind of action per round, reads one after another, cannot search content, cannot run or see what it made outside one narrow case, keeps no plan, cannot split work, remembers nothing between conversations, and has no web. These are the things that make Claude Code feel capable, and most of them come from one cause: the reply protocol.
+**Behind.** The model works through one text block per reply, one kind of action per round, reads one after another, cannot search content, cannot run or see what it made outside one narrow case, keeps no plan, cannot split work, remembers nothing between conversations, and has no web. These are the things that make Claude Code feel capable, and several of them come from how little one round carries.
 
 **Corrected the same day.** This audit first said the first move was to replace the text protocol with native tool calls. That missed the record: the text fence was jwize's decision of 2026-09-13 (`hive-read-fence.md` §1.3, §2), made because many OpenRouter models call tools poorly and fail without saying why, and so that every model asks the same way. Asked on 2026-11-19 whether to also offer native tool calls, he said: "Keep text only." So the text fence stays, and the first move is to carry more in one round inside it. See "Order of work".
 
