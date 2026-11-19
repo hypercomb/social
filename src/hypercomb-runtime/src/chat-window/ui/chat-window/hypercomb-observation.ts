@@ -666,10 +666,16 @@ export const executeHypercombObservationPlan = async (
   const maxDepth = Math.max(0, Math.min(3, Math.floor(options.maxDepth ?? 2)))
   const maxNodes = Math.max(1, Math.min(64, Math.floor(options.maxNodes ?? 48)))
   const maxBytes = Math.max(1_024, Math.min(READ_PAGE_CHARS, Math.floor(options.maxBytes ?? 8_000)))
-  const results: Array<{ grammar: string } & HypercombRead> = []
-  const snapshots: string[] = []
-
-  for (const observation of plan.observations) {
+  type Answered = { grammar: string } & HypercombRead
+  // THE READS OF ONE BLOCK RUN TOGETHER (2026-11-19). Each read is its own
+  // question to the reader and shares nothing with its neighbours but the
+  // page size, which was divided among them before any began. They used to
+  // run one after another, so a block of eight cost eight waits; now it costs
+  // the slowest. The answers keep the order they were asked in, and one read
+  // that cannot be made still refuses the block, as before.
+  const readOne = async (observation: HypercombObservation): Promise<{ results: Answered[]; snapshots: string[] }> => {
+    const results: Answered[] = []
+    const snapshots: string[] = []
     if (options.signal?.aborted) {
       throw new DOMException('The Hypercomb tree read was stopped', 'AbortError')
     }
@@ -680,7 +686,7 @@ export const executeHypercombObservationPlan = async (
       results.push({ grammar, kind: 'unmoved', read: { ok: true, root, round: held.round } })
       // The heads it stood on are still part of what this turn rests on.
       if (held.snapshot) snapshots.push(held.snapshot)
-      continue
+      return { results, snapshots }
     }
     // OPEN WHAT A SIGNATURE NAMES (Jaime, 2026-09-13: "open and review every
     // resource and including the code"): a sig that is no layer is a module,
@@ -747,7 +753,11 @@ export const executeHypercombObservationPlan = async (
       results.push({ grammar, kind: 'node', read: verb === 'read' ? await withCodeNaming(await withProjection(read), reader, options.signal) : read })
       if (read.ok && read.snapshot) snapshots.push(read.snapshot)
     }
+    return { results, snapshots }
   }
+  const answered = await Promise.all(plan.observations.map(readOne))
+  const results = answered.flatMap(one => one.results)
+  const snapshots = answered.flatMap(one => one.snapshots)
   const signatures: { grammar: string; sig: string }[] = []
   for (const result of results) {
     if (result.kind === 'node' && result.read.ok) signatures.push({ grammar: result.grammar, sig: result.read.layerSig })
