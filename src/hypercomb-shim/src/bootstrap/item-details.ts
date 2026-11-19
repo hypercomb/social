@@ -19,7 +19,8 @@
 //
 // MIRRORED: hypercomb-essentials/src/sharing/item-details.ts holds the same key and the same bytes.
 
-import { SignatureService, listPoolNames } from '@hypercomb/core'
+import * as core from '@hypercomb/core'
+import { SignatureService } from '@hypercomb/core'
 import { readOwnerIndex, zoneOrigin, type ShowcaseItem } from './showcase-record'
 
 const SIG = /^[0-9a-f]{64}$/
@@ -91,8 +92,12 @@ export const parseDetails = (raw: unknown, item: ShowcaseItem): DetailPart[] | n
 }
 
 /** The keys a host lists in the item's pool, or none: a host with no such pool, or no listing at all, lists nobody. */
+// A page keeps the core it loaded for hours (the host caches it), and a NAMED import of an export that copy lacks
+// stops the whole page from running: it would fall back to the page before this one. So the listing helper is read
+// off the module, and a core without it lists nobody. The author is still asked by key.
+const listPoolNames = (core as { listPoolNames?: (base: string, pool: string) => Promise<string[]> }).listPoolNames
 const speakersOn = async (host: string, pool: string): Promise<string[]> =>
-  (await listPoolNames(zoneOrigin(host), pool)).map(name => name.toLowerCase()).filter(name => SIG.test(name)).slice(-SPEAKERS_SHOWN)
+  (await (listPoolNames?.(zoneOrigin(host), pool) ?? Promise.resolve([] as string[]))).map(name => name.toLowerCase()).filter(name => SIG.test(name)).slice(-SPEAKERS_SHOWN)
 
 /** What `by` says about the item on `host`: their own signed index names the record, and the record hashes to its name. */
 const wordOf = async (host: string, by: string, key: string, item: ShowcaseItem): Promise<DetailPart[] | null> => {
