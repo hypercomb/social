@@ -75,10 +75,9 @@
   .mh .big{font-weight:800;font-size:19px;line-height:1.15;margin-top:2px}
   .mh .agenda{border-top:1px solid var(--divider);padding:var(--s2) 0;font-size:13px;color:var(--n800)}
   .mh .agenda b{color:var(--text);font-weight:800}
-  .mh .actions{border-top:1px solid var(--divider);padding-top:var(--s3);display:flex;gap:var(--s2);flex-wrap:wrap}
-  .mh .actions .btn-primary{flex:1;justify-content:flex-start}
-  .mh .join{display:none;border-top:1px solid var(--divider);margin-top:var(--s3);padding-top:var(--s3)}
-  .mh .join.open{display:block}
+  .mh .agenda.hosts[hidden]{display:none}
+  .mh .join{border-top:1px solid var(--divider);padding-top:var(--s3)}
+  .mh .join[hidden]{display:none}
   .mh .join form{display:flex;gap:var(--s2);flex-wrap:wrap}
   .mh .join input{flex:1;min-width:0;min-height:44px;padding:var(--s2) var(--s3);border:1px solid var(--divider);border-radius:0;
     background:var(--bg);color:var(--text);font:400 16px/1.2 var(--font)}
@@ -86,6 +85,13 @@
   .mh .join .state{margin-top:var(--s2);font-size:13px;color:var(--n800);min-height:1.3em}
   .mh .join .state b{color:var(--text)}
   .mh .join .state a{word-break:break-all}
+  .mh .join .state .leave{cursor:pointer;border:0;padding:0;background:none;color:var(--n800);font:inherit;text-decoration:underline;text-underline-offset:3px}
+  .mh .join .state .leave:hover{color:var(--a700)}
+  .mh .join .sessions{margin:var(--s1) 0 var(--s3)}
+  .mh .join .sessions button{flex:1 1 auto;padding:10px 12px;font-size:13px;text-align:left}
+  .mh .join .sessions button span{font-weight:400;margin-left:6px;color:var(--n700)}
+  .mh .join .sessions button[aria-pressed="true"]::before{content:"\2713";margin-right:6px}
+  .mh .join .sessions[hidden]{display:none}
   .mh .who{border-top:1px solid var(--divider);margin-top:var(--s3);padding-top:var(--s3)}
   .mh .wall{list-style:none;display:flex;flex-wrap:wrap;gap:10px 8px;margin-top:8px}
   .mh .wall li{width:58px;display:grid;justify-items:center;gap:3px;text-align:center}
@@ -121,14 +127,12 @@
   .mh .search{display:block;width:100%;min-height:42px;margin-top:var(--s3);padding:var(--s2) var(--s3);
     border:1px solid var(--divider);border-radius:0;background:var(--bg);color:var(--text);font:400 15px/1.2 var(--font)}
   .mh .search::placeholder{color:var(--n700)}
+  .mh .search[hidden]{display:none}
   .mh .chips{display:flex;flex-wrap:wrap;gap:6px;margin:var(--s2) 0 var(--s3)}
   .mh .chips button{cursor:pointer;border:1px solid var(--divider);background:transparent;color:var(--n800);
     font:600 12px/1 var(--font);padding:7px 10px;border-radius:0}
   .mh .chips button[aria-pressed="true"]{border-color:var(--accent);color:var(--a700);box-shadow:inset 0 0 0 1px var(--accent)}
   .mh .ghead{padding:var(--s3) var(--s1) var(--s1)}
-  .mh .qrfoot{display:flex;gap:var(--s3);align-items:center;border-top:2px solid var(--divider);margin-top:var(--s4);padding-top:var(--s3);font-size:12px;color:var(--n700)}
-  .mh .qrfoot b{display:block;font-weight:800;color:var(--text);font-size:13px}
-  .mh .qrfoot .qr{flex:none;display:block;width:64px;height:64px;border:1px solid var(--divider);padding:3px;background:#fff}
 
   /* COMMUNITY / HOSTING panels */
   .mh .offer{display:grid;grid-template-columns:1fr 1fr;border-top:2px solid var(--divider);margin-top:var(--s3)}
@@ -143,17 +147,6 @@
   .mh code{font:600 12px/1.4 ui-monospace,Consolas,monospace;background:var(--surface);padding:2px 6px}
 
   /* MEMBERS — a normal list of people in a scroller */
-  .mh .people{list-style:none;display:grid;border-top:2px solid var(--divider);margin-top:var(--s3)}
-  .mh .people li{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:var(--s3);align-items:center;padding:var(--s2) var(--s1);border-bottom:1px solid var(--divider)}
-  .mh .people .ring{display:block;width:42px;aspect-ratio:8/9;padding:2px;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);background:transparent}
-  .mh .people li.here .ring{background:var(--accent)}
-  .mh .people .hex{display:grid;place-items:center;width:100%;height:100%;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);overflow:hidden;
-    background:color-mix(in srgb,var(--text) 9%,var(--bg));font-weight:800;font-size:15px;color:var(--n700)}
-  .mh .people .hex img{display:block;width:100%;height:100%;object-fit:cover}
-  .mh .people b{display:block;font-weight:800;font-size:15px;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .mh .people .ab{display:block;font-size:12px;color:var(--n700);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .mh .people .pm{font-size:12px;color:var(--n800);text-align:right;white-space:nowrap}
-  .mh .people .pm .now{color:var(--a700);font-weight:600}
 
   /* ABOUT panel */
   .mh .hero{width:100%;aspect-ratio:16/9;overflow:hidden;background:var(--n900);margin:var(--s3) 0}
@@ -213,59 +206,45 @@
           <div class="sub" data-where-sub>Free, all welcome</div>
         </div>
       </div>
+      <div class="agenda hosts" data-hosts hidden><b data-hosts-count></b> · <span data-hosts-names></span></div>
       <div class="agenda"><b>01</b> Say hello — coffee, small bites · <b>02</b> Hypercomb fundamentals, a live demo · <b>03</b> Your projects and questions</div>
-      <div class="agenda"><b>9:00</b> Arrive · <b>9:15</b> Networking · <b>9:30–10:45</b> The meetup · <b>10:45–11:00</b> Networking · <b>11:00–12:00</b> Focus group · <b>1:30–2:30</b> Workshop</div>
-      <div class="actions">
-        <button type="button" class="btn btn-primary" data-join><span data-join-label>Join the meeting</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></button>
-      </div>
+      <div class="agenda"><b>9:15</b> Networking · <b>9:30–10:45</b> The meetup · <b>10:45–11:00</b> Networking · <b>11:00–12:00</b> Break · <b>12:00–1:30</b> Workshop</div>
       <div class="join" data-join-panel>
-        <form data-join-form autocomplete="off">
-          <label class="sr" for="mh-name">Your name</label>
-          <input id="mh-name" name="name" type="text" maxlength="48" placeholder="Pick a name" required data-name>
-          <button type="submit" class="btn btn-primary" data-join-send>I'm coming</button>
-        </form>
+        <div data-join-open>
+          <div class="mini" data-join-title>Sign up</div>
+          <div class="chips sessions" data-sessions role="group" aria-label="Sessions to sign up for"></div>
+          <form data-join-form autocomplete="off">
+            <label class="sr" for="mh-name">Your name</label>
+            <input id="mh-name" name="name" type="text" maxlength="48" placeholder="Pick a name" required data-name>
+            <button type="submit" class="btn btn-primary" data-join-send>I'm coming</button>
+          </form>
+        </div>
         <p class="state" data-join-state></p>
       </div>
       <div class="who" data-who>
-        <div class="mini"><span data-who-title>Who's coming</span> <span data-who-count></span></div>
+        <div class="mini" data-who-title>Who's coming</div>
         <ul class="wall" data-who-list></ul>
-        <p class="none" data-who-none>Nobody has said yet. Be the first.</p>
-        <p class="hint">Hosted on Hypercomb? Join from your own hive and your picture and a line about you show here.</p>
       </div>
     </section>
 
     <!-- 2 · MEETINGS (the collapsed list) -->
     <section class="panel" data-panel="list" aria-label="Meetings">
       <span class="kicker">Meetings</span>
-      <p class="sub">Your index for meetings — this community's and the ones it follows, grouped as you grouped them.</p>
+      <p class="sub">Every meeting on this calendar. Choose one to see it and sign up.</p>
       <label class="sr" for="mh-q">Search meetings</label>
-      <input class="search" id="mh-q" type="search" placeholder="Search meetings…" data-search>
+      <input class="search" id="mh-q" type="search" placeholder="Search meetings…" data-search hidden>
       <div class="chips" data-filters role="group" aria-label="Groups"></div>
       <ul class="rows" data-rows></ul>
       <p class="none" data-empty hidden>No meetings on the calendar yet.</p>
       <p class="none" data-nomatch hidden>Nothing matches.</p>
-      <div class="qrfoot">
-        <img class="qr" src="qr.png" width="64" height="64" alt="QR code that opens this calendar">
-        <div><b>meetups.hypercomb.com</b>This calendar's permanent address — scan it to open your meetings anywhere.</div>
-      </div>
-    </section>
-
-    <!-- MEMBERS -->
-    <section class="panel" data-panel="members" aria-label="Members">
-      <span class="kicker">Members</span>
-      <h2 data-people-title>Who is coming.</h2>
-      <p class="sub" data-people-sub>Each meeting keeps its own list, so every week starts fresh. The organizers are always on it. Choose a meeting in the Meetings list to see who is coming to it.</p>
-      <ul class="people" data-people></ul>
-      <p class="none" data-people-none>Nobody has joined this meeting yet.</p>
     </section>
 
     <!-- 3 · COMMUNITY -->
     <section class="panel" data-panel="community" aria-label="Community">
       <span class="kicker">Community</span>
-      <h2>The communities this door follows.</h2>
-      <p class="sub">Their meetings show on this calendar, and everyone keeps the whole list — every door retains the meeting's data. Subscriptions are per application: following here follows <em>meetups</em>, nothing else.</p>
+      <h2>Communities on this calendar.</h2>
+      <p class="sub">Their meetings show here too, each joined at its own door.</p>
       <ul class="doors" data-doors></ul>
-      <p class="none" data-doors-none>This door follows no other community yet.</p>
       <p class="hint">Run a community on Hypercomb? From your hive: <code>hosts follow meetups.hypercomb.com @your-domain</code> — and tell us at a meeting so we follow you back. Hosted attendees' own meetings show here too, joined at their door.</p>
     </section>
 
@@ -455,7 +434,7 @@
           return Promise.all(rows.map(function (r) {
             if (!r.profile) return r;
             return readProfile(base, r.profile, r.signer).then(function (p) { if (p) { r.picture = p.picture; r.about = p.about; } return r; });
-          })).then(function (all) { return withOrganizers(ev, all); });
+          }));
         });
       });
       });
@@ -508,6 +487,8 @@
   var joinable = function (ev) { return !!ev && (!!baseFor(ev.record.host) || !!state.local[ev.sig]); };
 
   // ── state and the views ─────────────────────────────────────────────
+  var picked = {};
+  var SEARCH_FROM = 24;
   var state = { events: [], selected: null, coming: {}, mine: {}, local: {}, doors: null, q: '', group: 'all' };
   function today() {
     var d = new Date();
@@ -524,17 +505,16 @@
     var past = events.filter(function (e) { return e.record.date < t; }).sort(function (a, b) { return key(a) > key(b) ? -1 : 1; });
     return up.concat(past);
   }
-  // HOW MANY CAME IS NOT SAID YET (jwize, 2026-11-13: "remove the number of
-  // people who came until we get people"). A meeting behind us shows no count
-  // and never says nobody came; the names it really kept still show. A meeting
-  // still to come keeps its count. Set this true to bring the number back.
-  var SHOW_CAME = false;
-  var cameUnsaid = function (ev) { return !SHOW_CAME && !!ev && ev.record.date < today(); };
-  function countOf(ev, pastWord) {
-    if (cameUnsaid(ev)) return '';
-    if (!state.coming[ev.sig] || !joinable(ev)) return state.coming[ev.sig] ? 'at ' + ev.record.host : '…';
-    var rows = state.coming[ev.sig].filter(isComing);
-    return rows.length + (ev.record.date < today() ? (pastWord || ' came') : ' coming');
+  // A COUNT IS SAID ONLY WHEN IT IS POSITIVE (jwize, 2026-11-18: "only have
+  // this if the stats are positive"; 2026-11-13: "remove the number of people
+  // who came until we get people"). No meeting, past or still to come, ever
+  // says nobody came or nobody is coming: an empty list shows nothing.
+  var comingRows = function (ev) { return ev ? (state.coming[ev.sig] || []).filter(isComing) : []; };
+  function countOf(ev) {
+    if (!state.coming[ev.sig]) return '';
+    if (!joinable(ev)) return 'at ' + ev.record.host;
+    var n = comingCount(ev);
+    return n ? n + (ev.record.date < today() ? ' came' : ' coming') : '';
   }
 
   // The tabs: five icons, one view on screen. The view is state, so a tap,
@@ -554,8 +534,8 @@
   function renderMeeting() {
     var ev = state.selected;
     var isPast = ev && ev.record.date < today();
-    var onTheDay = !!ev && ev.record.date === today();
-    $('[data-next-kicker]').textContent = !ev ? 'Next meeting' : isPast ? 'Last meeting' : 'Next meeting';
+    var first = order(state.events)[0];
+    $('[data-next-kicker]').textContent = isPast ? 'Past meeting' : ev && first && ev.sig !== first.sig ? 'Coming up' : 'Next meeting';
     $('[data-title]').textContent = ev ? ev.record.title : '—';
     var chip = $('[data-type]');
     chip.hidden = !(ev && ev.record.type);
@@ -564,19 +544,34 @@
     $('[data-when-sub]').textContent = ev ? (ev.record.time ? (ev.record.ends ? ev.record.time + ' – ' + ev.record.ends : 'at ' + ev.record.time) : 'Time posted here') : 'Weekly · see the calendar';
     $('[data-where]').textContent = ev ? ev.record.where.split(',')[0] : '—';
     $('[data-where-sub]').textContent = ev ? (ev.record.where.split(',').slice(1).join(',').trim() || 'Free, all welcome') : 'Free, all welcome';
-    $('[data-join]').disabled = !ev || isPast;
-    $('[data-join-label]').textContent = onTheDay ? "I'm here" : 'Join the meeting';
-    $('[data-join-send]').textContent = onTheDay ? 'Check in' : "I'm coming";
+    renderHosts(ev);
+    renderJoin(ev);
     renderWho(ev);
   }
+  // THE SIGN-UP stands open under every session still to come: the day's
+  // sessions to pick from, a name, one button. A session behind us shows only
+  // a receipt, when one was opened; one hosted elsewhere points to its door.
+  function renderJoin(ev) {
+    var panel = $('[data-join-panel]'), st = $('[data-join-state]');
+    var open = !!ev && ev.record.date >= today();
+    var away = open && !joinable(ev) && state.coming[ev.sig] !== undefined;
+    var onTheDay = open && ev.record.date === today();
+    $('[data-join-open]').hidden = !open || away;
+    if (away) {
+      st.textContent = 'This meeting is hosted by ' + ev.record.host + '. ';
+      var a = document.createElement('a'); a.href = 'https://' + ev.record.host + '/'; a.textContent = 'Join it there'; st.appendChild(a); st.appendChild(document.createTextNode('.'));
+    }
+    panel.hidden = !open && !st.textContent;
+    $('[data-join-send]').textContent = onTheDay ? 'Check in' : "I'm coming";
+    renderSessions(onTheDay);
+  }
   function renderWho(ev) {
-    var list = $('[data-who-list]'), none = $('[data-who-none]'), count = $('[data-who-count]');
+    var list = $('[data-who-list]');
     list.textContent = '';
-    var rows = ev ? (state.coming[ev.sig] || []).filter(isComing) : [];
-    var here = rows.filter(function (r) { return r.going === 'here'; }).length;
-    count.textContent = rows.length && !cameUnsaid(ev) ? '(' + rows.length + (here ? ' · ' + here + ' here now' : '') + ')' : '';
-    // A meeting behind us with no names says nothing at all, not "nobody".
-    $('[data-who]').style.display = cameUnsaid(ev) && !rows.length ? 'none' : '';
+    var rows = comingRows(ev);
+    // A list with no names says nothing at all, never "nobody": the block
+    // shows only once someone has signed up.
+    $('[data-who]').style.display = rows.length ? '' : 'none';
     $('[data-who-title]').textContent = ev && ev.record.date < today() ? 'Who came' : "Who's coming";
     rows.forEach(function (r) {
       var li = document.createElement('li');
@@ -592,22 +587,9 @@
       } else hex.textContent = initial(r.who);
       ring.appendChild(hex); li.appendChild(ring);
       var nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = r.who; li.appendChild(nm);
-      li.title = r.who + (r.organizer ? ' — organizer' : '') + (r.about ? ' — ' + r.about : '') + (r.going === 'here' ? ' · here now' : '');
+      li.title = r.who + (r.about ? ' — ' + r.about : '') + (r.going === 'here' ? ' · here now' : '');
       list.appendChild(li);
     });
-    none.hidden = rows.length > 0;
-    none.textContent = !ev ? 'No meeting to join yet.' : ev.record.date < today() ? 'Nobody said they were coming.' : 'Nobody has said yet. Be the first.';
-    var away = ev && !joinable(ev) && state.coming[ev.sig] !== undefined;
-    var panel = $('[data-join-panel]');
-    if (away) {
-      panel.classList.add('open');
-      $('[data-join-form]').hidden = true;
-      var st = $('[data-join-state]');
-      st.textContent = 'This meeting is hosted by ' + ev.record.host + '. ';
-      var a = document.createElement('a'); a.href = 'https://' + ev.record.host + '/'; a.textContent = 'Join it there'; st.appendChild(a); st.appendChild(document.createTextNode('.'));
-    } else {
-      $('[data-join-form]').hidden = false;
-    }
   }
   var groupOf = function (ev) { return String(ev.record.type || 'General'); };
   function groups() {
@@ -725,7 +707,7 @@
   }
   $('[data-search]').addEventListener('input', function (e) { state.q = String(e.target.value || '').trim(); renderRows(); });
   function renderDoors() {
-    var list = $('[data-doors]'), none = $('[data-doors-none]');
+    var list = $('[data-doors]');
     list.textContent = '';
     (state.doors || []).forEach(function (zone) {
       var li = document.createElement('li');
@@ -733,88 +715,42 @@
       var a = document.createElement('a'); a.href = 'https://' + zone + '/'; a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'visit'; li.appendChild(a);
       list.appendChild(li);
     });
-    none.hidden = (state.doors || []).length > 0;
+    // The section is the list: following nobody, there is nothing to show.
+    root.querySelector('.panel[data-panel="community"]').style.display = (state.doors || []).length ? '' : 'none';
   }
-  // THE ORGANIZERS: always on the invites list of every meeting still to come.
-  // Said once by the organizer and published with this page — they are not
-  // claims anyone signed, so they are marked as organizers, never as people who
-  // joined, and a meeting already past keeps only the claims it really had.
-  var ORGANIZERS = [
-    { who: 'Jaime Weise' },
-    { who: 'Pavlos' },
-    { who: 'Lea L.' },
-    { who: 'Susan' },
-    { who: 'Ian' }
-  ];
-  function withOrganizers(ev, rows) {
-    if (!ev || ev.record.date < today()) return rows;
-    var named = {};
-    rows.forEach(function (r) { named[String(r.who || '').toLowerCase()] = true; });
-    var mine = ORGANIZERS.filter(function (o) { return !named[o.who.toLowerCase()]; }).map(function (o) {
-      return { who: o.who, going: 'yes', at: 0, signer: 'organizer:' + o.who.toLowerCase(), member: '', organizer: true };
-    });
-    return mine.concat(rows);
+  // THE TEAM COMES TO EVERY SESSION STILL TO COME, and two of them host it
+  // (jwize, 2026-11-19: "we don't want to be all shown as organizers as the
+  // only participants when the meeting link starts. But should be 5 coming
+  // paulo jaime hosting"). The team is COUNTED — a new session opens on
+  // "5 coming", never on nobody — but never LISTED: "who's coming" names only
+  // people who signed up. A session behind us counts only who came.
+  var TEAM = ['Jaime Weise', 'Pavlos', 'Lea L.', 'Susan', 'Ian'];
+  var HOSTS = ['Paulo', 'Jaime'];
+  function comingCount(ev) {
+    var rows = comingRows(ev);
+    if (!ev || ev.record.date < today()) return rows.length;
+    var team = {};
+    TEAM.forEach(function (n) { team[n.toLowerCase()] = true; });
+    return TEAM.length + rows.filter(function (r) { return !team[String(r.who || '').toLowerCase()]; }).length;
   }
-  function personRow(m, note) {
-    var li = document.createElement('li');
-    if (m.here) li.classList.add('here');
-    var ring = document.createElement('span'); ring.className = 'ring';
-    var hex = document.createElement('span'); hex.className = 'hex';
-    if (m.picture) {
-      var img = document.createElement('img');
-      img.alt = ''; img.loading = 'lazy'; img.src = m.picture;
-      img.onerror = function () { img.remove(); hex.textContent = initial(m.who); };
-      hex.appendChild(img);
-    } else hex.textContent = initial(m.who);
-    ring.appendChild(hex); li.appendChild(ring);
-    var mid = document.createElement('span');
-    var nm = document.createElement('b'); nm.textContent = m.who; mid.appendChild(nm);
-    if (m.about) { var ab = document.createElement('span'); ab.className = 'ab'; ab.textContent = m.about; mid.appendChild(ab); }
-    li.appendChild(mid);
-    var pm = document.createElement('span'); pm.className = 'pm';
-    pm.textContent = note;
-    if (m.here) { var now = document.createElement('span'); now.className = 'now'; now.textContent = ' · here now'; pm.appendChild(now); }
-    li.appendChild(pm);
-    return li;
+  function renderHosts(ev) {
+    var line = $('[data-hosts]');
+    line.hidden = !ev || ev.record.date < today();
+    var here = comingRows(ev).filter(function (r) { return r.going === 'here'; }).length;
+    $('[data-hosts-count]').textContent = comingCount(ev) + ' coming' + (here ? ', ' + here + ' here now' : '');
+    $('[data-hosts-names]').textContent = HOSTS.slice(0, -1).join(', ') + (HOSTS.length > 1 ? ' and ' : '') + HOSTS[HOSTS.length - 1] + ' hosting';
   }
-  // THE MEMBERS OF ONE MEETING: the list that meeting keeps, nothing from any
-  // other week. A new meeting is a new record and so a new, empty list — each
-  // week starts fresh. The newest claim names a person, a verified profile
-  // dresses them, and a check-in on the day marks them here now.
-  function membersOf() {
-    var ev = state.selected, by = {};
-    if (!ev) return [];
-    (state.coming[ev.sig] || []).forEach(function (r) {
-      if (!isComing(r)) return;
-      var m = by[r.signer] || (by[r.signer] = { who: r.who, picture: '', about: '', at: 0, here: false, organizer: !!r.organizer });
-      if (r.at >= m.at) { m.at = r.at; m.who = r.who; }
-      if (r.picture) m.picture = r.picture;
-      if (r.about) m.about = r.about;
-      if (r.going === 'here' && ev.record.date === today()) m.here = true;
-    });
-    return Object.keys(by).map(function (k) { return by[k]; })
-      .sort(function (a, b) { return ((b.organizer ? 1 : 0) - (a.organizer ? 1 : 0)) || (b.here - a.here) || (b.at - a.at); });
+  function render() {
+    $('[data-search]').hidden = state.events.length <= SEARCH_FROM;
+    renderMeeting(); renderRows(); renderDoors();
   }
-  function renderPeople() {
-    var list = $('[data-people]'), none = $('[data-people-none]');
-    list.textContent = '';
-    var ev = state.selected;
-    $('[data-people-title]').textContent = ev ? 'Who is coming — ' + dayOf(ev.record) + '.' : 'Who is coming.';
-    var rows = membersOf();
-    rows.forEach(function (m) {
-      list.appendChild(personRow(m, m.organizer ? 'organizer' : 'coming'));
-    });
-    none.hidden = rows.length > 0 || cameUnsaid(ev);
-  }
-  function render() { renderMeeting(); renderRows(); renderPeople(); renderDoors(); }
   function select(ev) {
-    // Another meeting: the join line and panel belong to the one that owned
-    // them, so they reset rather than stand under the new selection.
+    // Another meeting: the join line and the picked sessions belong to the one
+    // that owned them, so they reset rather than stand under the new selection.
     if ((state.selected && state.selected.sig) !== (ev && ev.sig)) {
-      var st = $('[data-join-state]');
-      if (st) st.textContent = '';
-      var jp = $('[data-join-panel]');
-      if (jp) jp.classList.remove('open');
+      $('[data-join-state]').textContent = '';
+      picked = {};
+      if (ev) picked[ev.sig] = true;
     }
     state.selected = ev;
     render();
@@ -823,7 +759,11 @@
     }
   }
   function load() {
-    return readEvents().then(function (events) {
+    return readEvents().then(function (all) {
+      // A CANCELLED MEETING is a record too: the calendar corrects, it never
+      // deletes, so a session that is off is replaced by one typed
+      // `cancelled` — and this page shows it nowhere.
+      var events = all.filter(function (e) { return String(e.record.type || '').toLowerCase() !== 'cancelled'; });
       state.events = events;
       var ordered = order(events);
       var upcoming = ordered.filter(function (e) { return e.record.date >= today(); });
@@ -842,67 +782,151 @@
   }
 
 
-  // ── joining: pick a name, you're in ─────────────────────────────────
-  var panel = $('[data-join-panel]'), form = $('[data-join-form]'), stateLine = $('[data-join-state]');
-  function openJoin() {
-    panel.classList.add('open');
-    var input = $('[data-name]');
-    if (!form.hidden) { input.focus(); }
+  // ── joining: pick the sessions, pick a name, you're in ──────────────
+  // A day can hold several sessions (the meetup, the focus group, the
+  // workshop). The sign-up offers every one still to come that day, the
+  // selected one already picked, and one "I'm coming" joins each picked
+  // session in turn — each is its own list, so each gets its own claim.
+  var form = $('[data-join-form]'), stateLine = $('[data-join-state]');
+  function sessionsOf(ev) {
+    if (!ev || ev.record.date < today()) return [];
+    return state.events
+      .filter(function (e) { return e.record.date === ev.record.date && joinable(e); })
+      .sort(function (a, b) { return (a.record.time || '') < (b.record.time || '') ? -1 : 1; });
   }
-  $('[data-join]').addEventListener('click', openJoin);
+  function chosenSessions() {
+    var day = sessionsOf(state.selected);
+    return day.length > 1 ? day.filter(function (e) { return picked[e.sig]; }) : (state.selected ? [state.selected] : []);
+  }
+  function renderSessions(onTheDay) {
+    var box = $('[data-sessions]');
+    var day = sessionsOf(state.selected);
+    box.textContent = '';
+    box.hidden = day.length < 2;
+    $('[data-join-title]').textContent = (onTheDay ? 'Check in' : 'Sign up') + (day.length > 1 ? ' — pick one or more sessions' : '');
+    day.forEach(function (e) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('aria-pressed', picked[e.sig] ? 'true' : 'false');
+      b.textContent = e.record.title;
+      if (e.record.time) { var t = document.createElement('span'); t.textContent = e.record.time + (e.record.ends ? '–' + e.record.ends : ''); b.appendChild(t); }
+      b.addEventListener('click', function () { picked[e.sig] = !picked[e.sig]; renderSessions(onTheDay); });
+      box.appendChild(b);
+    });
+    $('[data-join-send]').disabled = !chosenSessions().length;
+  }
   function receiptLink(ev, member) {
     return PAGE_URL + '?event=' + ev.sig + '&rsvp=' + member;
   }
-  function showReceipt(ev, who, member, going) {
+  function showReceipt(joined, who) {
     stateLine.textContent = '';
-    var b = document.createElement('b'); b.textContent = (going === 'here' ? "You're checked in, " : "You're in, ") + who + '.'; stateLine.appendChild(b);
-    stateLine.appendChild(document.createTextNode(' Keep your receipt: '));
-    var a = document.createElement('a'); a.href = receiptLink(ev, member); a.textContent = 'this link'; stateLine.appendChild(a);
-    stateLine.appendChild(document.createTextNode(' shows your name on the list whenever you open it.'));
+    var here = joined.every(function (j) { return j.going === 'here'; });
+    var b = document.createElement('b'); b.textContent = (here ? "You're checked in, " : "You're in, ") + who + '.'; stateLine.appendChild(b);
+    stateLine.appendChild(document.createTextNode(' Your receipt: '));
+    joined.forEach(function (j, i) {
+      if (i) stateLine.appendChild(document.createTextNode(' · '));
+      var a = document.createElement('a'); a.href = receiptLink(j.ev, j.member);
+      a.textContent = joined.length > 1 ? j.ev.record.title : 'keep this link';
+      stateLine.appendChild(a);
+    });
+    stateLine.appendChild(document.createTextNode(' · '));
+    stateLine.appendChild(leaveButton(joined, who));
+  }
+  // TAKING YOUR NAME OFF: the same claim, said again as "not coming". A list
+  // shows each key's newest answer, so the device that signed up is the one
+  // that can take the name off — its key signs the new answer.
+  function leaveButton(joined, who) {
+    var btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'leave'; btn.textContent = "Can't make it?";
+    btn.addEventListener('click', function () {
+      btn.disabled = true;
+      stateLine.textContent = 'Taking your name off…';
+      var kept = [];
+      var next = function (i) {
+        if (i < joined.length) {
+          return joinOne(joined[i].ev, who, 'no').then(function (r) {
+            if (r.unavailable) { stateLine.textContent = "That isn't available on this copy of the page. Open " + PAGE_URL + '.'; return; }
+            if (!r.ok) { stateLine.textContent = joined[i].ev.record.title + " didn't go through: " + (r.reason || 'the host said no') + '.'; return; }
+            delete state.mine[r.ev.sig];
+            delete state.coming[r.ev.sig];
+            return readComing(r.ev).then(function (rows) {
+              state.coming[r.ev.sig] = rows;
+              // Still listed: the name was signed by another device's key.
+              if (rows.filter(isComing).some(function (row) { return row.member === joined[i].member; })) kept.push(r.ev.record.title);
+              return next(i + 1);
+            });
+          });
+        }
+        stateLine.textContent = kept.length
+          ? 'Your name is still on ' + kept.join(', ') + ' — open this page on the device you signed up with to take it off.'
+          : "You're off the list, " + who + '. Hope to see you another week.';
+        say(stateLine.textContent);
+        render();
+      };
+      next(0);
+    });
+    return btn;
+  }
+  // One claim for one session. The hive's RsvpDrone hears `hc:rsvp`, signs
+  // the claim with this device's key, writes it to the meeting's host, and
+  // answers on the document.
+  function joinOne(ev, who, answer) {
+    return new Promise(function (resolve) {
+      var done = false;
+      var going = answer || (ev.record.date === today() ? 'here' : 'yes');
+      var finish = function (ok) { return function (evt) {
+        if (done || !evt.detail || evt.detail.event !== ev.sig) return;
+        done = true; cleanup();
+        resolve({ ev: ev, ok: ok, member: evt.detail.member, going: evt.detail.going || going, reason: evt.detail.reason });
+      }; };
+      var onDone = finish(true), onError = finish(false);
+      var cleanup = function () {
+        clearTimeout(timer);
+        document.removeEventListener('hc:rsvp:done', onDone);
+        document.removeEventListener('hc:rsvp:error', onError);
+      };
+      document.addEventListener('hc:rsvp:done', onDone);
+      document.addEventListener('hc:rsvp:error', onError);
+      var timer = setTimeout(function () {
+        if (done) return;
+        done = true; cleanup();
+        resolve({ ev: ev, ok: false, unavailable: true });
+      }, 12000);
+      var target = state.local[ev.sig] ? location.host : ev.record.host;
+      document.dispatchEvent(new CustomEvent('hc:rsvp', { detail: { event: ev.sig, host: target, name: who, going: going } }));
+    });
   }
   form.addEventListener('submit', function (e) {
     e.preventDefault();
-    var ev = state.selected;
     var who = $('[data-name]').value.trim();
-    if (!ev || !who) return;
+    var chosen = chosenSessions();
+    if (!chosen.length || !who) return;
     var send = $('[data-join-send]');
     send.disabled = true;
     stateLine.textContent = 'Signing your name…';
     say('Joining');
-    var done = false;
-    var finish = function (handler) { return function (evt) {
-      if (done || !evt.detail || evt.detail.event !== ev.sig) return;
-      done = true; cleanup(); handler(evt.detail);
-    }; };
-    var going = ev.record.date === today() ? 'here' : 'yes';
-    var onDone = finish(function (d) {
-      state.mine[ev.sig] = d.member;
-      showReceipt(ev, who, d.member, d.going || going);
+    var joined = [];
+    var next = function (i) {
+      if (i < chosen.length) {
+        return joinOne(chosen[i], who).then(function (r) {
+          if (r.unavailable) { stateLine.textContent = "Joining isn't available on this copy of the page. Open " + PAGE_URL + ' to join.'; send.disabled = false; return; }
+          if (!r.ok) {
+            stateLine.textContent = (joined.length ? "You're in for " + joined.map(function (j) { return j.ev.record.title; }).join(', ') + ', but ' : '') +
+              r.ev.record.title + " didn't go through: " + (r.reason || 'the host said no') + '.';
+            send.disabled = false; return;
+          }
+          state.mine[r.ev.sig] = r.member;
+          joined.push(r);
+          delete state.coming[r.ev.sig];
+          readComing(r.ev).then(function (rows) { state.coming[r.ev.sig] = rows; render(); });
+          return next(i + 1);
+        });
+      }
+      showReceipt(joined, who);
       say("You're in, " + who);
-      delete state.coming[ev.sig];
-      readComing(ev).then(function (rows) { state.coming[ev.sig] = rows; render(); });
-    });
-    var onError = finish(function (d) {
-      stateLine.textContent = "That didn't go through: " + (d.reason || 'the host said no') + '.';
-      send.disabled = false;
-    });
-    var cleanup = function () {
-      clearTimeout(timer);
-      document.removeEventListener('hc:rsvp:done', onDone);
-      document.removeEventListener('hc:rsvp:error', onError);
       send.disabled = false;
     };
-    document.addEventListener('hc:rsvp:done', onDone);
-    document.addEventListener('hc:rsvp:error', onError);
-    var timer = setTimeout(function () {
-      if (done) return;
-      done = true; cleanup();
-      stateLine.textContent = "Joining isn't available on this copy of the page. Open " + PAGE_URL + ' to join.';
-    }, 12000);
-    // The hive's RsvpDrone hears this, signs the claim with this device's key,
-    // writes it to the meeting's host, and answers on the document.
-    var target = state.local[ev.sig] ? location.host : ev.record.host;
-    document.dispatchEvent(new CustomEvent('hc:rsvp', { detail: { event: ev.sig, host: target, name: who, going: going } }));
+    next(0);
   });
 
   // A receipt link: the claim is read back from the pool it went into. No
@@ -922,8 +946,7 @@
     }).then(function (claim) {
       select(ev);
       show('meeting');
-      panel.classList.add('open');
-      if (!claim) { stateLine.textContent = 'That receipt is not on the list.'; return; }
+      if (!claim) { stateLine.textContent = 'That receipt is not on the list.'; render(); return; }
       var tag = function (k) { var t = (claim.tags || []).filter(function (t) { return t[0] === k; })[0]; return t ? String(t[1] || '') : ''; };
       state.mine[sig] = member;
       stateLine.textContent = '';
@@ -932,7 +955,11 @@
         : tag('going') === 'yes' ? "You're on the list for " + dayOf(ev.record, true) + ' as ' + tag('name') + '.'
         : 'You said you were not coming on ' + dayOf(ev.record, true) + '.';
       stateLine.appendChild(b);
-      renderWho(ev);
+      if (tag('going') !== 'no' && ev.record.date >= today()) {
+        stateLine.appendChild(document.createTextNode(' '));
+        stateLine.appendChild(leaveButton([{ ev: ev, member: member }], tag('name')));
+      }
+      render();
     });
   }
 
