@@ -2072,11 +2072,11 @@ class HostPanelElement extends HTMLElement {
    *  page keeps working; the next start runs it. Quiet: nothing to press, and
    *  nothing said unless it fails. */
   async #followDebugger(record: ManageRecord): Promise<void> {
-    const pkg = await debuggerPackage(record, siteDoorZone(location.host))
+    const pkg = await debuggerPackage(record, siteDoorZone(location.host, record.lineage))
     if (!pkg || pkg.packageSig === installedPackageSig() || this.#busy) return
     this.#busy = true
     try {
-      const outcome = await installPackage(pkg, [], { self: siteDoorZone(location.host) })
+      const outcome = await installPackage(pkg, [], { self: siteDoorZone(location.host, record.lineage) })
       if (!outcome.ok) console.warn('[shim] the debugger package did not replicate', outcome.error)
       else console.log(`[shim] debugger package ${pkg.packageSig.slice(0, 12)} is ready — the next start runs it`)
     } catch (error) {
@@ -2109,7 +2109,7 @@ class HostPanelElement extends HTMLElement {
     const install = async (): Promise<void> => {
       take.hidden = true
       // The zone root serves the publisher's packages; the site door itself does not.
-      const zone = siteDoorZone(location.host)
+      const zone = siteDoorZone(location.host, record.lineage)
       // The debugger's own package when its publisher keeps one (debugger-package.ts),
       // else the host's newest that is not the debugger's.
       const named = await debuggerPackage(record, zone)
@@ -2122,7 +2122,7 @@ class HostPanelElement extends HTMLElement {
       }
       const total = new Set([...pkg.layers, ...pkg.bees, ...pkg.dependencies].map(bareSig)).size
       // The page runs as its zone: the zone's package is its own (runsAs).
-      const self = siteDoorZone(location.host)
+      const self = siteDoorZone(location.host, record.lineage)
       await this.#replicate(pkg.packageSig, take, card, total, (onHeld, onPhase) => installPackage(pkg, [], { onHeld, onPhase, self }))
       // A failed install leaves the button to try again.
       if (!this.#busy) take.hidden = false

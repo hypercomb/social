@@ -551,7 +551,7 @@ const MARK_PATHS = new Set([
 function nothingHere(hostname, zone) {
   const name = zone ? hostname.slice(0, -(zone.length + 1)) : hostname
   return new Response(
-    `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="/favicon.ico" sizes="48x48"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><title>nothing here yet</title><body style="margin:0;display:grid;place-items:center;min-height:100vh;background:#0b1218;color:#dce7ef;font:16px/1.6 system-ui,sans-serif"><main style="text-align:center;padding:2rem"><h1 style="font-size:1.3rem;margin:0 0 .5rem">nothing published at ${name}${zone ? '.' + zone : ''}</h1><p style="opacity:.7;margin:0">Publishing a hive named “${name}” makes this address its website. <a href="https://${zone ?? hostname}/" style="color:#7eb6d6">${zone ?? hostname}</a></p></main>`,
+    `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="/favicon.ico" sizes="48x48"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><title>nothing here yet</title><body style="margin:0;display:grid;place-items:center;min-height:100vh;background:#0b1218;color:#dce7ef;font:16px/1.6 system-ui,sans-serif"><main style="text-align:center;padding:2rem"><h1 style="font-size:1.3rem;margin:0 0 .5rem">nothing published at ${name}${zone ? '.' + zone : ''}</h1><p style="opacity:.7;margin:0">Publishing a hive named “${zone ? name.split('.').reverse().join('/') : name}” makes this address its website. <a href="https://${zone ?? hostname}/" style="color:#7eb6d6">${zone ?? hostname}</a></p></main>`,
     { status: 404, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...CORS } },
   )
 }
@@ -1044,9 +1044,11 @@ const zoneOfHost = (zones, host) => zones.find((z) => host === z || host.endsWit
  * Two ways a door exists, in that order of authority:
  *   • an explicit binding naming this lineage — a hand-bound door, and the
  *     primary when there is one;
- *   • the wildcard rule — `<lineage>.<zone>`, for a TOP-LEVEL lineage only. A
- *     nested one (`games/arkanoid`) needs its own binding, because the wildcard
- *     maps a single label and never a path.
+ *   • the wildcard rule — the lineage read leaf first, under the zone:
+ *     `<lineage>.<zone>` for a top-level one, `arkanoid.games.<zone>` for
+ *     `games/arkanoid` (resolveSite, "at any depth"). A deep name resolves
+ *     here; whether it LOADS is the zone's certificate, which a `*` record
+ *     covers one label deep only.
  *
  * Four rules keep this honest, and each of them is a door the list must NOT
  * contain:
@@ -6186,6 +6188,13 @@ async function validOfferingLocations(evt) {
   return true
 }
 
+/** After the answer where the request can wait on it (attachDeepNames). */
+function nameDeepPlaces(env, pubkey, evt, ctx) {
+  const naming = attachDeepNames(env, pubkey, evt).catch(() => [])
+  if (ctx?.waitUntil) { ctx.waitUntil(naming); return null }
+  return naming
+}
+
 // PUT /<sign('hive:indexes')>/<pubkey> — NIP-98 proves the CALLER, the body event proves the
 // INDEX. Both must ACT AS the path pubkey: a valid guest can't plant an index
 // under someone else's key, and a leaked index event can't be replanted by
@@ -6216,6 +6225,7 @@ async function putHive(request, env, pubkey, ctx) {
   try { stored = JSON.parse((await heldIndexRaw(env, pubkey)) ?? 'null') } catch { stored = null }
   if (stored) {
     if (String(stored.id || '') === String(evt.id || '')) {
+      await nameDeepPlaces(env, pubkey, evt, ctx)
       return await advancePublishedLocations(env, pubkey, evt)
         ? text(200, 'index already current')
         : text(503, 'signed index is held but a route location is not current; retry this index')
@@ -6246,6 +6256,7 @@ async function putHive(request, env, pubkey, ctx) {
   if (!await advancePublishedLocations(env, pubkey, evt)) {
     return text(503, 'signed index is held but a route location is not current; retry this index')
   }
+  await nameDeepPlaces(env, pubkey, evt, ctx)
   if (headOnly(env)) {
     // After the answer: the publish is done; the walk only tidies what it left
     // (and records which branches keep their history public now).
@@ -6620,6 +6631,85 @@ async function cloudflare(env, method, path, body) {
     code: Number.isInteger(code) ? code : null,
     result: payload?.result ?? null,
   }
+}
+
+// ── a deep name gets its address by itself (jwize 2026-11-18) ────────────────
+//
+// "we need the domains for development contexts." A name is the workspace
+// location at any depth (resolveSite): `knowledge.hyperdex.<zone>` is the
+// lineage `hyperdex/knowledge`. The zone's `*` record and its certificate
+// reach ONE label, so a deeper name resolves here and never loads — unless the
+// exact name is a Workers custom domain, which Cloudflare gives a DNS record
+// and a certificate of its own at no cost (proved on jwize.com, 2026-11-18:
+// about three and a half minutes from the attach to the first answer).
+//
+// So an accepted index is the naming step here too. Every nested lineage it
+// publishes, on every wildcard zone that carries its publisher and opens it,
+// is attached by its exact name. Rules:
+//   • the name goes to CLAIM_SCRIPT, the forwarder, never to this worker: a
+//     deploy of this worker replaces what is attached to it (hosts-forwarder.js);
+//   • a name already attached, to any script, is left exactly as it is, and a
+//     zone whose list could not be read attaches nothing: never re-point blind;
+//   • nothing is detached. A name whose lineage went away answers the honest
+//     "nothing published" page, like any name under the wildcard;
+//   • a write attaches at most DEEP_NAMES_PER_WRITE names; the next write, or
+//     the same index sent again, carries on.
+// It rides the claims' token and account (CLAIM_API_TOKEN, CF_ACCOUNT_ID); the
+// token also needs Workers Scripts Edit. Without them no call is made.
+const DEEP_NAMES_PER_WRITE = 8
+
+/** The deep names a signed index gives an address: `{ host, zone }` for every
+ *  nested lineage of DNS labels this host would serve at that name. */
+function deepNamesOf(env, pubkey, content) {
+  const bindings = siteBindings(env)
+  const names = []
+  for (const zone of wildcardZones(bindings)) {
+    if (!bindings[zone].publishers?.some((p) => p.pubkey === pubkey)) continue
+    for (const [lineage, sig] of Object.entries(content?.roots ?? {})) {
+      if (!lineage.includes('/') || !SIG_RE.test(String(sig || '').toLowerCase())) continue
+      const segments = lineage.split('/')
+      if (!segments.every((l) => DNS_LABEL_RE.test(l))) continue
+      const host = `${[...segments].reverse().join('.')}.${zone}`
+      if (host.length > 253) continue
+      const resolved = resolveSite(env, host)
+      if (!resolved.implicit || resolved.site?.lineage !== lineage) continue
+      if (!opensOn(content, lineage, host, env)) continue
+      names.push({ host, zone })
+    }
+  }
+  return names
+}
+
+/** Attach the deep names of an accepted index that are not attached yet.
+ *  Answers the hosts it attached. Never throws, never blocks the publish. */
+async function attachDeepNames(env, pubkey, evt) {
+  if (!claimsConfigured(env)) return []
+  let content
+  try { content = JSON.parse(String(evt?.content ?? '')) } catch { return [] }
+  const wanted = deepNamesOf(env, pubkey, content)
+  if (!wanted.length) return []
+  const account = String(env.CF_ACCOUNT_ID).trim()
+  const zones = new Map()
+  const attached = []
+  for (const { host, zone } of wanted) {
+    if (attached.length >= DEEP_NAMES_PER_WRITE) break
+    if (!zones.has(zone)) {
+      const found = await cloudflare(env, 'GET', `/zones?${new URLSearchParams({ name: zone, 'account.id': account })}`)
+      const id = found.ok && Array.isArray(found.result) ? String(found.result[0]?.id || '') : ''
+      let held = null
+      if (ZONE_ID_RE.test(id)) {
+        const list = await cloudflare(env, 'GET', `/accounts/${account}/workers/domains?${new URLSearchParams({ zone_id: id })}`)
+        if (list.ok && Array.isArray(list.result)) held = new Set(list.result.map((d) => String(d?.hostname || '').toLowerCase()))
+      }
+      zones.set(zone, { id, held })
+    }
+    const { id, held } = zones.get(zone)
+    if (!held || held.has(host)) continue
+    const put = await cloudflare(env, 'PUT', `/accounts/${account}/workers/domains`,
+      { hostname: host, service: claimScript(env), environment: 'production', zone_id: id })
+    if (put.ok) { attached.push(host); held.add(host) }
+  }
+  return attached
 }
 
 /** A short reason a participant can read and an operator can act on. */

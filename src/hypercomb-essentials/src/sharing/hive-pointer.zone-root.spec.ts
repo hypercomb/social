@@ -67,6 +67,17 @@ describe('putHiveManifest at a site', () => {
     )
   })
 
+  it('climbs past the site a deep name sits under, to the zone root', async () => {
+    await withSigner(
+      (url, init) => init?.method === 'PUT' && new URL(url).host !== 'jwize.com' ? readOnly() : new Response('', { status: 200 }),
+      async (calls) => {
+        const result = await putHiveManifest('knowledge.hyperdex.jwize.com', { 'hyperdex/knowledge': OTHER })
+        expect(result.ok).toBe(true)
+        expect(calls.filter(c => c.startsWith('PUT'))).toEqual(['PUT knowledge.hyperdex.jwize.com', 'PUT hyperdex.jwize.com', 'PUT jwize.com'])
+      },
+    )
+  })
+
   it('does not move a write that failed for another reason', async () => {
     await withSigner(
       (_url, init) => init?.method === 'PUT' ? new Response('no\n', { status: 401, headers: { 'X-Reason': 'not allowed' } }) : new Response('', { status: 200 }),

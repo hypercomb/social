@@ -15,16 +15,23 @@
 // A dependency: it registers nothing and writes nothing.
 
 import { listCommunityHosts } from './community-hosts.js'
-import { isManagedSiteDoor } from './managed-record.js'
+import { isManagedSiteDoor, managedSiteSegments } from './managed-record.js'
 // Whom builds follow here — the same record the scout read the offer from (the
 // Packages window reads it the same way: host-directory.view.ts #follow).
 import { readInstallFollow } from './update-scout.service.js'
 
 /** The zone a site door hangs off (`business-card.jwize.com` → `jwize.com`):
- *  the address that serves its publisher's packages. MIRRORED from the shim's
- *  manage-record.ts siteDoorZone (a module may not import the shim). */
-export function managedSiteZone(host: string): string {
+ *  the address that serves its publisher's packages. A NAME IS THE ROUTE AT ANY
+ *  DEPTH (worker.js resolveSite): `knowledge.hyperdex.jwize.com` is the site
+ *  `hyperdex/knowledge`, so when the host begins with the site's own route read
+ *  leaf first, the zone is everything after it (`jwize.com`, never
+ *  `hyperdex.jwize.com`). A host that does not (an own address, or no record)
+ *  loses its first label, as before. MIRRORED from the shim's manage-record.ts
+ *  siteDoorZone (a module may not import the shim). */
+export function managedSiteZone(host: string, segments: readonly string[] | null = managedSiteSegments()): string {
   const bare = String(host || '').toLowerCase().replace(/:\d+$/, '')
+  const name = (segments ?? []).map(segment => segment.toLowerCase()).reverse().join('.')
+  if (name && bare.startsWith(`${name}.`) && bare.length > name.length + 1) return bare.slice(name.length + 1)
   const labels = bare.split('.').filter(Boolean)
   return labels.length >= 3 ? labels.slice(1).join('.') : bare
 }

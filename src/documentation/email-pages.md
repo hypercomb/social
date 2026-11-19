@@ -16,7 +16,9 @@ control a step names exists in the desk today.
 `*.hypercomb.com/*` already routes to the Worker that serves published hive creations, and a one-level name
 resolves to the top-level lineage of that name, so the creation `/email` opens at `email.hypercomb.com` with no
 DNS record and no deploy. `settings.email.hypercomb.com` was the first idea; a two-level name is not covered by
-the zone's universal certificate, and it would need a nested lineage the Worker does not resolve today.
+the zone's universal certificate. (The Worker has since learned to read a name at any depth as the route, leaf
+first, so `settings.email.hypercomb.com` would resolve to `email/settings`; the certificate is still what stops
+it. Checked 2026-11-18: `knowledge.hyperdex.jwize.com` fails its TLS handshake.)
 
 ## The shape
 

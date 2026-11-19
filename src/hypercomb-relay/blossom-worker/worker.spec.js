@@ -2807,7 +2807,7 @@ const ago = (secs) => Math.floor(Date.now() / 1000) - secs
  *  (DoH) that says where a domain is delegated. Every API call is logged. */
 function fakeCloudflare({ zones = [] } = {}) {
   const cf = { zones: new Map(), records: [], routes: [], calls: [], created: [], deleted: [], lookups: [], elsewhere: [],
-    dns: [], delegated: new Set(), dnsDown: false, fail: null, next: 1 }
+    dns: [], delegated: new Set(), dnsDown: false, fail: null, next: 1, domains: [] }
   const id = () => (cf.next++).toString(16).padStart(32, '0')
   for (const name of zones) cf.zones.set(id(), { name, status: 'active', name_servers: ['x.ns.cloudflare.com'] })
   const ok = (result) => Response.json({ success: true, errors: [], result })
@@ -2835,6 +2835,12 @@ function fakeCloudflare({ zones = [] } = {}) {
     if (new Headers(init.headers).get('authorization') !== 'Bearer cf-token') return no(403, 10000)
     if (cf.fail && cf.fail(method, path)) return no(500, 9999)
     const body = init.body ? JSON.parse(init.body) : null
+    // Workers custom domains: the exact names a deep place is attached by.
+    if (path === '/accounts/acct/workers/domains') {
+      if (method === 'GET') return ok(cf.domains.filter((d) => d.zone_id === url.searchParams.get('zone_id')))
+      cf.domains.push(body)
+      return ok(body)
+    }
     const [, zid, kind, sub, rid] = path.split('/').filter(Boolean)
     if (!zid) {
       if (method === 'GET') {
@@ -7889,4 +7895,63 @@ test('sixteen door reads that never settle leave every other door answering', as
   await new Promise((resolve) => setTimeout(resolve, 20))
   const page = await answersWithin(worker.fetch(new Request(`https://${hosts[16]}/`), env))
   assert.equal(page.status, 200)
+})
+
+// ── a deep name gets its address by itself (jwize 2026-11-18) ────────────────
+//
+// `knowledge.hyperdex.<zone>` is the lineage `hyperdex/knowledge`, and the
+// zone's `*` certificate reaches one label only. An accepted index attaches
+// each nested lineage's exact name as a custom domain on the forwarder.
+
+const DEEP = 'knowledge.hyperdex.pluginthematrix.com'
+const deepIndex = (at = 1_800_000_500, roots = { hyperdex: head, 'hyperdex/knowledge': head }) => signedIndex(roots, at)
+
+test('publishing a nested lineage attaches its exact name to the forwarder, once', async () => {
+  const cf = fakeCloudflare({ zones: ['pluginthematrix.com'] })
+  const env = claimEnv()
+  const zoneId = cf.zoneOf('pluginthematrix.com')
+  await onCloudflare(cf, async () => {
+    const event = await deepIndex()
+    assert.equal((await putIndexAt(env, 'pluginthematrix.com', event)).status, 201)
+    // A top-level lineage is under the wildcard already: only the deep name is attached.
+    assert.deepEqual(cf.domains, [{ hostname: DEEP, service: 'hypercomb-hosts', environment: 'production', zone_id: zoneId }])
+    // The same index again, and a later one, attach nothing a second time.
+    assert.equal((await putIndexAt(env, 'pluginthematrix.com', event)).status, 200)
+    assert.equal((await putIndexAt(env, 'pluginthematrix.com', await deepIndex(1_800_000_600))).status, 200)
+    assert.equal(cf.domains.length, 1)
+    // One level further down is the next exact name.
+    const deeper = await deepIndex(1_800_000_700, { hyperdex: head, 'hyperdex/knowledge': head, 'hyperdex/knowledge/part': head })
+    assert.equal((await putIndexAt(env, 'pluginthematrix.com', deeper)).status, 200)
+    assert.deepEqual(cf.domains.map((d) => d.hostname), [DEEP, `part.${DEEP}`])
+  })
+})
+
+test('a deep name is never attached without the token, and a publish with only top-level places asks nothing', async () => {
+  const cf = fakeCloudflare({ zones: ['pluginthematrix.com'] })
+  await onCloudflare(cf, async () => {
+    assert.equal((await putIndexAt(claimEnv({ CLAIM_API_TOKEN: '' }), 'pluginthematrix.com', await deepIndex())).status, 201)
+    assert.equal((await putIndexAt(claimEnv(), 'pluginthematrix.com', await deepIndex(1_800_000_500, { hyperdex: head }))).status, 201)
+  })
+  assert.deepEqual(cf.calls, [])
+})
+
+test('a deep name already attached is left as it is, and a list that cannot be read attaches nothing', async () => {
+  const cf = fakeCloudflare({ zones: ['pluginthematrix.com'] })
+  const zoneId = cf.zoneOf('pluginthematrix.com')
+  const elsewhere = { hostname: DEEP, service: 'another-script', environment: 'production', zone_id: zoneId }
+  cf.domains.push(elsewhere)
+  await onCloudflare(cf, async () => {
+    assert.equal((await putIndexAt(claimEnv(), 'pluginthematrix.com', await deepIndex())).status, 201)
+    assert.deepEqual(cf.domains, [elsewhere])
+    cf.domains.length = 0
+    cf.fail = (method, path) => method === 'GET' && path.endsWith('/workers/domains')
+    assert.equal((await putIndexAt(claimEnv(), 'pluginthematrix.com', await deepIndex())).status, 201)
+    assert.deepEqual(cf.domains, [])
+  })
+})
+
+test('the empty page under a deep name says the route to publish', async () => {
+  const page = await (await worker.fetch(new Request(`https://${DEEP}/`), { SITE_BINDINGS: JSON.stringify(ONE_ZONE), CONTENT: contentBag() })).text()
+  assert.match(page, /nothing published at knowledge\.hyperdex\.pluginthematrix\.com/)
+  assert.match(page, /Publishing a hive named “hyperdex\/knowledge”/)
 })

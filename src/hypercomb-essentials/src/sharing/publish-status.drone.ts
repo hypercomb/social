@@ -98,9 +98,10 @@ import {
   type ZoneEntranceIntent,
 } from './publish-branch.js'
 import {
-  APEX_LABEL, creationUrl, topOpenIn, entranceAddresses, entranceHost, foldDnsLabel, isPoweredEntrance, ownAddressRefusal, ownLabelOn,
+  APEX_LABEL, creationUrl, deepNameHost, originOf, topOpenIn, entranceAddresses, entranceHost, foldDnsLabel, isPoweredEntrance, ownAddressRefusal, ownLabelOn,
   zoneDoor, type ZoneEntrance,
 } from './zone-door.js'
+import { askDeepName, deepNameLive } from './deep-name-live.js'
 import { batchOrder, driftedRows } from './publish-batch.js'
 import { switchInCommunity } from './community-switch.js'
 import { SHOWCASE_SIGNED_EFFECT, communityZoneIn, readSignedShowcase, showcaseHome, type ShowcaseItem } from './showcase-record.js'
@@ -1472,12 +1473,33 @@ export class PublishStatusDrone extends Drone {
       urls[zone] = creationUrl(zone, row.segments, row.key, addresses, topOpenIn(index?.roots, index?.doors, zone))
       const label = ownLabelOn(addresses, zone, row.key)
       if (label) ownLabels[zone] = label
+      // A NESTED PLACE'S OWN NAME, once it answers (deep-name-live.ts): its own
+      // origin, where `<top>.<zone>/<rest>` shares the top place's. Only for a
+      // place the index publishes by itself, and never over a signed address.
+      const deep = !label && row.live ? deepNameHost(zone, row.key) : ''
+      if (!deep) continue
+      if (deepNameLive(deep)) urls[zone] = originOf(deep)
+      else void askDeepName(deep).then(live => { if (live) this.#deepNameCame(row.key, zone, deep) })
     }
     row.urls = urls
     row.ownLabels = ownLabels
+    this.#linkRow(row)
+  }
+
+  /** The row's link: its primary OPEN domain's address. */
+  #linkRow(row: PublishRow): void {
     const open = row.live ? (row.doors ?? row.zones) : []
     const primary = row.zones.find(z => open.includes(z)) ?? open[0] ?? ''
-    row.link = primary && row.segments.length > 0 ? (urls[primary] || null) : null
+    row.link = primary && row.segments.length > 0 ? (row.urls[primary] || null) : null
+  }
+
+  /** A deep name answered after its row was addressed: the row shown now takes it. */
+  #deepNameCame(key: string, zone: string, host: string): void {
+    const row = this.#rows.find(r => r.key === key)
+    if (!row || !row.live || row.ownLabels?.[zone]) return
+    row.urls = { ...row.urls, [zone]: originOf(host) }
+    this.#linkRow(row)
+    this.#emit()
   }
 
   /** The opens-as choices: the hexagons ground first, then every registered
