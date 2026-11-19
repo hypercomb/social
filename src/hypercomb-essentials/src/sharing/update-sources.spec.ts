@@ -15,6 +15,17 @@ describe('where an offered update is asked for', () => {
     expect(managedSiteZone('jwize.com')).toBe('jwize.com')
   })
 
+  it('names the zone under a deep name: the host is the route, leaf first', () => {
+    const deep = ['hyperdex', 'knowledge']
+    expect(managedSiteZone('knowledge.hyperdex.jwize.com', deep)).toBe('jwize.com')
+    expect(managedSiteZone('Knowledge.Hyperdex.jwize.com:443', deep)).toBe('jwize.com')
+    expect(managedSiteZone('part.knowledge.hyperdex.jwize.com', ['hyperdex', 'knowledge', 'part'])).toBe('jwize.com')
+    // An own address does not spell the route: it loses one label, as before.
+    expect(managedSiteZone('card.jwize.com', deep)).toBe('jwize.com')
+    // The route alone is no host under a zone.
+    expect(managedSiteZone('knowledge.hyperdex', deep)).toBe('knowledge.hyperdex')
+  })
+
   it('asks the site’s zone and the followed hosts, once each', () => {
     expect(updateSources('business-card.jwize.com', storage(follow(['hypercomb.com', 'jwize.com'])))).toEqual(['jwize.com', 'hypercomb.com'])
     expect(updateSources('business-card.jwize.com', storage('off'))).toEqual(['jwize.com'])

@@ -337,9 +337,17 @@ export async function putHiveManifest(
   // Core hosts are read-only" / "the host door is read-only — write at the
   // zone root"). A caller that still names a site gets its index carried to
   // the zone root once, instead of a publish that fails at its last step.
-  const zone = first.ok ? '' : zoneRootAfterRefusal(host, first.reason)
-  if (!zone) return first
-  return inWriteLane(zone, () => putHiveManifestNow(zone, roots, doors, replaces, previousContent, options))
+  // A DEEP NAME (`knowledge.hyperdex.<zone>`) sits under another site, which
+  // refuses the same way, so the write climbs one label at a time until a host
+  // takes it or answers anything else. Each step is one label shorter, so it ends.
+  let at = host
+  let result = first
+  for (;;) {
+    const zone = result.ok ? '' : zoneRootAfterRefusal(at, result.reason)
+    if (!zone) return result
+    at = zone
+    result = await inWriteLane(zone, () => putHiveManifestNow(zone, roots, doors, replaces, previousContent, options))
+  }
 }
 
 /** The zone root a read-only refusal points to: the host less its first label,

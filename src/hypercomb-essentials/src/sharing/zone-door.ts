@@ -509,6 +509,24 @@ export const implicitUrl = (
   return subdomainUrl(zone, parts)
 }
 
+/** A NESTED PLACE'S OWN NAME (jwize 2026-11-18: "opening it up on a child going
+ *  left is child.hyperdex"): the route read leaf first, under the zone —
+ *  `knowledge/hyperdex` on `jwize.com` is `hyperdex.knowledge.jwize.com`, the
+ *  way the host reads a name at any depth (worker resolveSite). Its own origin,
+ *  so its own place in the browser, where `<top>.<zone>/<the rest>` shares the
+ *  top place's. The host maps labels to the lineage VERBATIM, so only when
+ *  every segment of the key already is a DNS label. '' for a top-level place
+ *  (the wildcard has it), a loopback zone, or a name too long to be one.
+ *  Whether it ANSWERS yet is deep-name-live.ts's to say. */
+export const deepNameHost = (zone: unknown, key: string): string => {
+  const z = foldContentLabel(zone)
+  const segments = String(key ?? '').split('/')
+  if (!z || LOOPBACK_RE.test(z) || segments.length < 2) return ''
+  if (!segments.every(segment => DNS_LABEL_RE.test(segment))) return ''
+  const host = `${[...segments].reverse().join('.')}.${z}`
+  return host.length <= 253 ? host : ''
+}
+
 /** `<top>.<zone>/<the rest>` for a place, or '' when its top name cannot be a
  *  subdomain there (the hive root, a loopback zone, a reserved name). */
 export const subdomainUrl = (zone: unknown, segments: readonly string[]): string => {
