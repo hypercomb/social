@@ -1005,7 +1005,7 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
       // Where the owners stage, the sheet stages too: publishing stays the one press across the foot.
       const button = el('button', 'version-act')
       button.type = 'button'
-      button.textContent = inCommunity(entry) ? 'Take it out of my community' : 'Stage it for my community'
+      button.textContent = inCommunity(entry) ? 'Take it out of my community' : 'Add to my community (only you see it)'
       button.addEventListener('click', () => { closeVersions(); void stageTile(entry, row) })
       act = button
     } else if (item) {
@@ -1325,7 +1325,7 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
       const result = await owner.stage({ zone: options.self, on, off }).catch(() => ({ ok: false as const, reason: 'failed' }))
       staging = false
       if (!result.ok) { if (signed?.staged === next) signed = was; paint(); say(`Could not stage ${entry.title}: ${result.reason}.`); return }
-      say(into ? `${entry.title} is staged for your community. Publish to show it to every visitor.` : `${entry.title} is out of your community.`)
+      say(into ? `${entry.title} is in your community, for you only. Tap it there to share it with every visitor.` : `${entry.title} is out of your community.`)
       paint()
       // ONE PER SUBDOMAIN, AND OUT IS AT ONCE: what this one replaces comes out of what visitors read now, since a
       // Publish only adds — inside this stage, so a Publish pressed meanwhile neither refuses it nor runs before it.
@@ -1660,7 +1660,11 @@ ${entry.key}`
       }
       const name = el('span', 'hex-name')
       const address = el('span', 'hex-address')
-      label.append(name, address)
+      // IN YOUR COMMUNITY, NOT SHARED, SAYS SO (jwize 2026-11-18: "what are the dotted lines. This is so confusing
+      // especially on mobile"). A staged tile used to wear a dashed ring and nothing else; it now wears the words.
+      const state = el('span', 'hex-state')
+      state.textContent = 'Only you'
+      label.append(name, address, state)
       // How many people own this name — said on the tile only when it is more than one.
       const owners = el('span', 'hex-owners')
       tile.append(art, label, owners)
@@ -2941,7 +2945,10 @@ export const SHOWCASE_STYLE = `
 .owner-note[hidden] { display: none; }
 .hex.off { opacity: .35; filter: grayscale(1); }
 /* staged, not yet published: gray in the community, ringed; published but sent back: fading out */
-.hex.off.staged { opacity: .6; outline: 2px dashed var(--md-primary); outline-offset: 2px; }
+.hex.off.staged { opacity: .85; }
+.hex-state { display: none; padding: .08rem .4rem; border: 1px solid currentColor; border-radius: var(--hc-radius-control, 2px);
+  font: 600 .58rem/1.3 var(--md-font-ui, Inter, system-ui, sans-serif); letter-spacing: .06em; text-transform: uppercase; color: var(--md-primary); }
+.hex.staged .hex-state { display: inline-block; }
 .pager-label { padding: .2rem 0; border: 0; background: transparent; cursor: pointer; color: var(--md-on-surface-strong);
   font: 600 1rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); }
 .pager-label:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
