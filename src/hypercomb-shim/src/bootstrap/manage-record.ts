@@ -34,9 +34,15 @@ export const MANAGE_LEAVE_HREF = '/@hypercomb/leave'
 
 /** The zone a site door hangs off: `business-card.jwize.com` → `jwize.com`. A
  *  site door's own host:packages address is not a package host (it answers a raw
- *  listing); the zone root is the one that serves the publisher's packages. */
-export function siteDoorZone(host: string): string {
+ *  listing); the zone root is the one that serves the publisher's packages.
+ *  A NAME IS THE ROUTE AT ANY DEPTH (worker.js resolveSite):
+ *  `knowledge.hyperdex.jwize.com` is the site `hyperdex/knowledge`, so when the
+ *  host begins with the site's lineage read leaf first, the zone is everything
+ *  after it. A host that does not (an own address) loses its first label. */
+export function siteDoorZone(host: string, lineage = ''): string {
   const bare = String(host || '').toLowerCase().replace(/:\d+$/, '')
+  const name = String(lineage || '').toLowerCase().split('/').map(segment => segment.trim()).filter(Boolean).reverse().join('.')
+  if (name && bare.startsWith(`${name}.`) && bare.length > name.length + 1) return bare.slice(name.length + 1)
   const labels = bare.split('.').filter(Boolean)
   return labels.length >= 3 ? labels.slice(1).join('.') : bare
 }

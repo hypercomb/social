@@ -12,6 +12,13 @@ describe('siteDoorZone — where a site door\'s packages come from', () => {
     // A bare zone is its own root.
     expect(siteDoorZone('jwize.com')).toBe('jwize.com')
   })
+
+  it('is the zone under a deep name: the host is the lineage, leaf first', () => {
+    expect(siteDoorZone('knowledge.hyperdex.jwize.com', 'hyperdex/knowledge')).toBe('jwize.com')
+    expect(siteDoorZone('part.knowledge.hyperdex.jwize.com:443', 'hyperdex/knowledge/part')).toBe('jwize.com')
+    // An own address does not spell the lineage: it loses one label, as before.
+    expect(siteDoorZone('card.jwize.com', 'hyperdex/knowledge')).toBe('jwize.com')
+  })
 })
 
 describe('beesOnDisk — cold is what is on disk', () => {
