@@ -27,6 +27,9 @@ export type OwnerInvite = { readonly ok: true; readonly link: string; readonly u
  *  this term"). Creations brought into (`on`) or sent back out of (`off`) what is staged for the zone's community — the
  *  owners' signed `staged:<zone>` list, the same on every device of theirs. Nothing a visitor sees changes. */
 export type OwnerStage = { readonly zone: string; readonly on: readonly { pubkey: string; lineage: string }[]; readonly off: readonly { pubkey: string; lineage: string }[] }
+/** SAY MORE ABOUT AN ITEM (item-details.ts): the parts this key says about one creation, named in its own signed index
+ *  under the item's details pool. No parts takes the word back. */
+export type OwnerDetails = { readonly zone: string; readonly pubkey: string; readonly lineage: string; readonly parts: readonly { name: string; text: string }[] }
 export type OwnerResult = { readonly ok: true; readonly changed: boolean } | { readonly ok: false; readonly reason: string }
 
 export type OwnerBridge = {
@@ -39,6 +42,8 @@ export type OwnerBridge = {
   readonly stage?: (request: OwnerStage) => Promise<OwnerResult>
   /** THE ONE FINAL PUBLISH: what is staged becomes the showcase every visitor reads, its own creations optimized as they go. */
   readonly publish?: (request: { readonly zone: string }) => Promise<OwnerResult>
+  /** Say more about one item under this key. Absent where the owner cannot (an older hive never answers). */
+  readonly details?: (request: OwnerDetails) => Promise<OwnerResult>
   /** Ask the hive for an invite that lets a phone publish for its owner on this zone. Absent where there is no hive. */
   readonly invite?: (request: { readonly zone: string }) => Promise<OwnerInvite>
 }
@@ -72,6 +77,8 @@ export const ownerBridge = (waitMs = 1500, settleMs = 30_000, viewMs = 10_000): 
     publish: request => ask<OwnerResult>({ t: 'publish', ...request }, 'done', settleMs * 4, { ok: false, reason: 'the hive did not answer' },
       data => (data['ok'] === true ? { ok: true, changed: data['changed'] === true } : { ok: false, reason: String(data['reason'] ?? 'refused') })),
     view: request => ask<OwnerResult>({ t: 'view', ...request }, 'done', viewMs, { ok: false, reason: 'the hive did not answer' },
+      data => (data['ok'] === true ? { ok: true, changed: data['changed'] === true } : { ok: false, reason: String(data['reason'] ?? 'refused') })),
+    details: request => ask<OwnerResult>({ t: 'details', ...request }, 'done', viewMs, { ok: false, reason: 'the hive did not answer' },
       data => (data['ok'] === true ? { ok: true, changed: data['changed'] === true } : { ok: false, reason: String(data['reason'] ?? 'refused') })),
     invite: request => ask<OwnerInvite>({ t: 'invite', ...request }, 'invited', settleMs, { ok: false, reason: 'the hive did not answer' }, data => {
       const link = typeof data['link'] === 'string' ? data['link'] : ''

@@ -97,6 +97,20 @@ const parseLocation = async (raw: unknown): Promise<LocationOffering | null> => 
     route: route.origin + '/', lineage: o.lineage, pubkey: String(o.pubkey), location: o.location }
 }
 
+/**
+ * THE NAMES A HOST LISTS IN A POOL: `<base>/<sign(meaning)>/`, one name per line. Asked with `?held`, so a host
+ * that holds no pool there answers a quiet 204 instead of a 404 a browser would print; a page standing in for a
+ * miss lists nothing. Membership only: a name is never believed on its own, and every caller reads each member's
+ * own signed word. For a host page, which cannot import a module's listing helper (essentials pool-listing.ts).
+ */
+export const listPoolNames = async (base: string, pool: string, timeoutMs = 8_000): Promise<string[]> => {
+  try {
+    const listing = await fetch(`${base}/${pool}/?held`, { cache: 'no-store', signal: AbortSignal.timeout(timeoutMs) })
+    if (listing.status !== 200 || (listing.headers.get('content-type') ?? '').toLowerCase().includes('text/html')) return []
+    return [...new Set((await listing.text()).split(/\r?\n/).map(name => name.trim()).filter(Boolean))].slice(0, 1000)
+  } catch { return [] }
+}
+
 type LocationHead = { state: 'current'; head: string } | { state: 'absent' | 'invalid' }
 
 const latestLocationHead = async (route: string, location: string): Promise<LocationHead> => {

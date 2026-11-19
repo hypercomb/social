@@ -10,6 +10,7 @@
 //
 //   page → { t: 'hello', id }                                hive → { t: 'here', id, pubkey }
 //   page → { t: 'toggle', id, zone, pubkey, lineage, on }    hive → { t: 'done', id, ok, changed?, reason? }
+//   page → { t: 'details', id, zone, pubkey, lineage, parts } hive → { t: 'done', id, ok, changed?, reason? }
 //   page → { t: 'view', id, zone, view }                     hive → { t: 'done', id, ok, changed?, reason? }
 //   page → { t: 'stage', id, zone, on: [item], off: [item] } hive → { t: 'done', id, ok, changed?, reason? }
 //   page → { t: 'publish', id, zone }                        hive → { t: 'done', id, ok, changed?, reason? }
@@ -22,6 +23,7 @@ import { ROOT_MOVED } from './hive-pointer.js'
 import { allowAnother, publisherKeyHex, type KeysAllowResult } from './key-list.client.js'
 import { promoteForCommunity, type CommunityPromotion } from './promote.js'
 import { qrSvg } from './qr-code.js'
+import { applyDetails, type DetailsRequest, type DetailsResult } from './item-details.js'
 import {
   doorsOnZone, parseView, readSignedAt, readSignedShowcase, setView, showcaseKey, showcases, signShowcase, stagedKey, toggleItem, type Showcase, type ShowcaseItem,
 } from './showcase-record.js'
@@ -341,6 +343,12 @@ export function startShowcaseBridge(): void {
     } else if (message['t'] === 'publish') {
       lane = lane.then(async () => {
         const result = await applyPublish(message as unknown as { zone: string }).catch((): ToggleResult => ({ ok: false, reason: 'failed' }))
+        channel.postMessage({ t: 'done', id, ...result })
+      })
+    } else if (message['t'] === 'details') {
+      // What this key says about one item (item-details.ts): one more root in the same index, so the same lane.
+      lane = lane.then(async () => {
+        const result = await applyDetails(message as unknown as DetailsRequest).catch((): DetailsResult => ({ ok: false, reason: 'failed' }))
         channel.postMessage({ t: 'done', id, ...result })
       })
     } else if (message['t'] === 'invite') {

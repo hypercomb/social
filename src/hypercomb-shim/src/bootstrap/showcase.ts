@@ -26,6 +26,7 @@ import type { OwnerBridge } from './owner-bridge'
 import { showcaseHref } from './showcase-link'
 import { offerCopy } from './copy-text'
 import type { CommunityPick } from './community-tiles'
+import { ABOUT_PART, PART_TEXT_MAX, type DetailPart, type ItemDetails } from './item-details'
 import {
   LaneTouch, hostOf as laneHostOf, keepLaneOrientation, laneDrift, laneLayout, laneMaxShift, lanePosition, laneSnap, laneTileAt, onePerHost,
   keepTriedViews, readLaneOrientation, readTriedViews, type LaneLayout,
@@ -615,6 +616,9 @@ export type ShowcaseOptions = {
   readonly readCommunity?: () => Promise<readonly CommunityPick[]>
   readonly keepCommunity?: (picks: readonly CommunityPick[]) => Promise<boolean>
   readonly readPeerLedger?: (zone: string) => Promise<readonly LedgerSite[]>
+  /** What is said about one item (item-details.ts readDetails): its details pool, read on the hosts named, the author
+   *  first. Absent, a held tile says only what the ledger knows. */
+  readonly readDetails?: (hosts: readonly string[], item: ShowcaseItem, also?: readonly string[]) => Promise<readonly ItemDetails[]>
   /** Open this signature as files on the host page. */
   readonly onOpenHead?: (head: string, zone: string) => void
   /** The Files section (a signature to open, the latest revisions): kept out of the page's flow, opened as a sheet from the bar. */
@@ -902,7 +906,11 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     return mini
   }
 
-  // ── a held tile lists the domains that hold it differently; a click goes to their revision ──
+  // ── A HELD TILE OPENS ITS DETAILS (jwize 2026-11-18: "hold down on the item and open up the row's details … get more
+  //    information and share more information if you are the author"). What it is and whose, what its author and
+  //    others say about it, a way to pass it on, and the domains that hold it differently. What is SAID is the item's
+  //    details pool (item-details.ts), an extension point: any key adds a named part, and the sheet draws every part.
+  //    A key that answers here writes its own word in the sheet; the author's is drawn first. ──
   const backdrop = el('div', 'versions-backdrop')
   backdrop.hidden = true
   const sheet = el('div', 'versions')
@@ -914,9 +922,12 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   let opener: HTMLElement | null = null
   /** The click a hold ends with lands on the sheet that hold just opened: it is not a tap on the backdrop. */
   let heldOpen = false
+  /** Which opening of the sheet is on screen: what a slow read brings back for an earlier one is dropped. */
+  let detailsOpened = 0
   const closeVersions = (): void => {
     document.removeEventListener('keydown', onKey, true)
     backdrop.hidden = true
+    detailsOpened++
     sheet.replaceChildren()
     if (opener?.isConnected) opener.focus()
     opener = null
@@ -932,8 +943,16 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   })
   const openVersions = (entry: Aggregate, from: HTMLElement, row: string): void => {
     opener = from
+    const opened = ++detailsOpened
+    const lead = entry.versions.find(version => version.places.some(place => place.zone === row)) ?? entry.versions[0]!
+    const head = el('div', 'details-head')
     const heading = el('h3', 'versions-title')
     heading.textContent = entry.title
+    const whose = el('p', 'details-whose')
+    whose.textContent = [entry.kind === 'creation' ? 'Creation' : 'Hive', ownersLabel(lead.owners)].filter(Boolean).join(' · ')
+    const titles = el('div', 'details-titles')
+    titles.append(heading, whose)
+    head.append(miniOf(lead.head, lead.route), titles)
     // The domains that hold it as something else. A domain whose copy is signed the same as this
     // domain's own is the same thing, so it is not listed; a click goes to that domain's revision.
     // Only a tile that is IN the showcase has a copy of its own to overlap: take it out and every domain
@@ -1010,7 +1029,100 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
         }
       }
     }
-    sheet.replaceChildren(...[heading, act, list].filter((node): node is HTMLElement => !!node))
+    // PASS IT ON: the phone's own share sheet where there is one, else the link on the clipboard.
+    const place = placeFor(entry, row)
+    const share = el('button', 'version-share')
+    share.type = 'button'
+    if (typeof navigator.share === 'function') {
+      share.textContent = 'Share'
+      share.addEventListener('click', () => { void navigator.share({ title: entry.title, url: place.href }).catch(() => undefined) })
+    } else offerCopy(share, place.href, { idle: 'Copy the link', done: 'Link copied' })
+
+    // WHAT IS SAID ABOUT IT: the item's details pool, the author first. Drawn when it arrives; nothing waits on it.
+    const said = el('div', 'details-said')
+    const wrote = el('div', 'details-write')
+    const hosts = [signed?.from ?? '', options.self, laneHostOf(place.href, '')].filter(Boolean)
+    const partsView = (parts: readonly DetailPart[]): HTMLElement[] => parts.flatMap(part => {
+      const body = el('p', 'details-text')
+      body.textContent = part.text
+      if (part.name === ABOUT_PART) return [body]
+      const name = el('h4', 'details-part')
+      name.textContent = part.name
+      return [name, body]
+    })
+    const nameOfKey = (by: string): string =>
+      entry.versions.flatMap(version => version.owners).find(owner => owner.pubkey === by)?.label || `${by.slice(0, 8)}…`
+    let own: readonly DetailPart[] = []
+    let typed = false
+    const field = el('textarea', 'details-field')
+    const drawSaid = (all: readonly ItemDetails[]): void => {
+      if (opened !== detailsOpened || !item) return
+      const blocks: HTMLElement[] = []
+      const others: HTMLElement[] = []
+      for (const word of all) {
+        const block = el('section', 'details-word')
+        const author = word.by === item.pubkey
+        if (!author) {
+          const from = el('p', 'details-from')
+          from.textContent = word.by === ownerKey ? 'Your note' : `From ${nameOfKey(word.by)}`
+          block.append(from)
+        }
+        block.append(...partsView(word.parts))
+        // The author, this domain's owners and your own word are drawn; anybody else's is one press away.
+        if (author || word.by === ownerKey || signed?.doors.has(word.by)) blocks.push(block)
+        else others.push(block)
+      }
+      if (others.length) {
+        const more = el('details', 'details-more')
+        const summary = el('summary')
+        summary.textContent = `${count(others.length, 'more note', 'more notes')} from other people`
+        more.append(summary, ...others)
+        blocks.push(more)
+      }
+      said.replaceChildren(...blocks)
+      own = all.find(word => word.by === ownerKey)?.parts ?? []
+      if (!typed) field.value = own.find(part => part.name === ABOUT_PART)?.text ?? ''
+    }
+    const readSaid = (): void => {
+      if (!item || !options.readDetails) return
+      void options.readDetails(hosts, item, ownerKey ? [ownerKey] : []).catch((): readonly ItemDetails[] => []).then(drawSaid)
+    }
+    readSaid()
+    // SAY MORE, UNDER YOUR OWN KEY: the author's word leads the sheet for everybody; anybody else's is a note.
+    const write = options.owner?.details
+    if (item && ownerKey && write && options.readDetails) {
+      const label = el('label', 'details-label')
+      label.textContent = item.pubkey === ownerKey ? 'Say more about it' : 'Add your note'
+      field.rows = 3
+      field.maxLength = PART_TEXT_MAX
+      field.addEventListener('input', () => { typed = true })
+      label.append(field)
+      const save = el('button', 'version-save')
+      save.type = 'button'
+      save.textContent = 'Save'
+      const told = el('p', 'details-told')
+      told.setAttribute('role', 'status')
+      save.addEventListener('click', () => {
+        save.disabled = true
+        told.textContent = 'Saving…'
+        // Only the part the sheet writes changes: every other part this key named is carried as it is.
+        const text = field.value.trim()
+        const parts = [...(text ? [{ name: ABOUT_PART, text }] : []), ...own.filter(part => part.name !== ABOUT_PART)]
+        void write({ zone: options.self, pubkey: item.pubkey, lineage: item.lineage, parts })
+          .catch(() => ({ ok: false as const, reason: 'failed' }))
+          .then(result => {
+            save.disabled = false
+            told.textContent = result.ok ? (result.changed ? 'Saved.' : 'Nothing changed.') : `Not saved: ${result.reason}`
+            if (result.ok) { typed = false; readSaid() }
+          })
+      })
+      wrote.append(label, save, told)
+    }
+    const acts = el('div', 'details-acts')
+    acts.append(...[act, share].filter((node): node is HTMLElement => !!node))
+    const where = el('h4', 'details-part')
+    where.textContent = 'Where it differs'
+    sheet.replaceChildren(head, said, wrote, acts, where, list)
     sheet.tabIndex = -1
     backdrop.hidden = false
     document.addEventListener('keydown', onKey, true)
@@ -3080,6 +3192,32 @@ a.hex:focus-visible > .hex-art { inset: 4px; }
   background: var(--md-surface-c-low); color: var(--md-on-surface); border: 1px solid var(--md-outline-variant);
   border-radius: var(--hc-radius-card, 3px); outline: 0; }
 .versions-title { margin: 0 0 .6rem; overflow-wrap: anywhere; color: var(--md-on-surface-strong); }
+.details-head { display: flex; align-items: center; gap: .8rem; margin: 0 0 .7rem; }
+.details-head .mini { flex: none; width: 3.2rem; height: calc(3.2rem * 1.1547); }
+.details-titles { min-width: 0; }
+.details-head .versions-title { margin: 0; }
+.details-whose { margin: .15rem 0 0; font-size: .82rem; color: var(--md-on-surface-var); overflow-wrap: anywhere; }
+.details-said:empty, .details-write:empty { display: none; }
+.details-said { display: grid; gap: .7rem; margin: 0 0 .8rem; }
+.details-word { display: grid; gap: .3rem; }
+.details-text { margin: 0; white-space: pre-line; overflow-wrap: anywhere; font-size: .92rem; line-height: 1.45; }
+.details-part, .details-from { margin: .2rem 0 0; font: 600 .72rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); letter-spacing: .04em;
+  text-transform: uppercase; color: var(--md-on-surface-var); }
+.details-more > summary { cursor: pointer; font-size: .85rem; color: var(--md-primary); }
+.details-more[open] > summary { margin-bottom: .5rem; }
+.details-write { display: grid; gap: .45rem; margin: 0 0 .8rem; }
+.details-label { display: grid; gap: .3rem; font-size: .82rem; color: var(--md-on-surface-var); }
+.details-field { box-sizing: border-box; width: 100%; padding: .5rem .6rem; resize: vertical; border: 1px solid var(--md-outline-variant);
+  border-radius: var(--hc-radius-control, 2px); background: var(--md-surface); color: var(--md-on-surface); font: inherit; font-size: 1rem; }
+.details-told { margin: 0; min-height: 1.1em; font-size: .8rem; color: var(--md-on-surface-var); overflow-wrap: anywhere; }
+.details-acts { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: .5rem; margin: 0 0 .7rem; }
+.details-acts .version-act { margin: 0; }
+.version-share, .version-save { display: block; box-sizing: border-box; width: 100%; padding: .6rem .8rem; text-align: center; cursor: pointer;
+  border: 1px solid var(--md-outline-variant); border-radius: var(--hc-radius-control, 2px); background: transparent; color: var(--md-on-surface);
+  font: 600 .9rem/1.2 var(--md-font-ui, Inter, system-ui, sans-serif); }
+.version-save { border-color: var(--md-primary); color: var(--md-primary); }
+.version-save:disabled { opacity: .5; cursor: default; }
+.details-part + .version-list { margin-top: .35rem; }
 .version-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .35rem; }
 .version-cancel { display: block; width: 100%; padding: .55rem .8rem; border: 1px solid var(--md-outline-variant); border-radius: var(--hc-radius-control, 2px);
   background: transparent; color: var(--md-on-surface); font: inherit; cursor: pointer; }

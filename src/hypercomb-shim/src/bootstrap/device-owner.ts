@@ -21,7 +21,8 @@ import { SignatureService, deriveMinifiedLayer, minifyModuleBody, nip98Authoriza
 import { readDeviceBinding, type DeviceBinding } from './device-binding'
 import { putKeyChain, readKeyChain } from './device-invite'
 import { deviceSigner, type DeviceSigner } from './device-key'
-import type { OwnerBridge, OwnerResult, OwnerStage, OwnerToggle, OwnerView } from './owner-bridge'
+import type { OwnerBridge, OwnerDetails, OwnerResult, OwnerStage, OwnerToggle, OwnerView } from './owner-bridge'
+import { cleanParts, detailsBytes, detailsKey } from './item-details'
 import {
   parseView, readOwnerIndex, readShowcaseAtom, readZoneIndex, sameItems, showcaseBytes, showcaseKey, showcasesItem, stagedKey, toggleShowcaseItem,
   zoneOrigin, type ShowcaseItem, type ShowcaseRecord,
@@ -363,6 +364,32 @@ const attempt = async (home: string, zone: string, change: Change, anchor: strin
   return { ok: true, changed: true }
 }
 
+/** One read-change-sign of what the anchor says about one item (item-details.ts): the record goes up and the index
+ *  names it under the item's details pool; no parts takes the name out. 'stale' when the index moved: read again. */
+const detailsAttempt = async (home: string, request: OwnerDetails, anchor: string, signer: DeviceSigner): Promise<Attempt> => {
+  const read = await readOwnerIndex(home, anchor)
+  if (!read) return { ok: false, reason: `could not read your index on ${home}` }
+  const content: Record<string, unknown> = read === 'missing' ? { v: HIVE_LINK_VERSION, roots: {} } : read.content
+  const roots = { ...(content['roots'] && typeof content['roots'] === 'object' ? content['roots'] as Record<string, string> : {}) }
+  const item: ShowcaseItem = { pubkey: request.pubkey, lineage: request.lineage }
+  const key = await detailsKey(item)
+  const parts = cleanParts(request.parts)
+  if (!parts.length) {
+    if (!(key in roots)) return { ok: true, changed: false }
+    delete roots[key]
+  } else {
+    const bytes = detailsBytes(item, parts)
+    const sig = await sha(bytes)
+    if (roots[key] === sig) return { ok: true, changed: false }
+    const refused = await uploadAtom(home, bytes, sig, anchor, signer, 'the details')
+    if (refused) return { ok: false, reason: refused }
+    roots[key] = sig
+  }
+  const put = await putIndex(home, anchor, signIndex(signer, anchor, read === 'missing' ? null : read.event, { ...content, roots }), signer)
+  if (put === 'stale') return 'stale'
+  return put ? { ok: false, reason: put } : { ok: true, changed: true }
+}
+
 /** How many times a write that lost the race to another device is read and applied again before giving up. */
 const STALE_TRIES = 8
 
@@ -403,8 +430,11 @@ export const deviceOwner = (zone: string, deps: DeviceOwnerDeps = {}): OwnerBrid
   })().catch(() => null)
   let lane: Promise<unknown> = Promise.resolve()
   // One at a time: each is a read-change-sign of the same record.
-  const act = (valid: boolean, change: Change): Promise<OwnerResult> => {
-    const run = lane.then(async (): Promise<OwnerResult> => {
+  type Held = { signer: DeviceSigner; anchor: string; home: string }
+  const act = (valid: boolean, change: Change): Promise<OwnerResult> =>
+    run(valid, held => attempt(held.home, zone, change, held.anchor, held.signer))
+  const run = (valid: boolean, once: (held: Held) => Promise<Attempt>): Promise<OwnerResult> => {
+    const going = lane.then(async (): Promise<OwnerResult> => {
       const held = await ensure()
       if (!held) return { ok: false, reason: why }
       if (!valid) return { ok: false, reason: 'bad request' }
@@ -415,13 +445,13 @@ export const deviceOwner = (zone: string, deps: DeviceOwnerDeps = {}): OwnerBrid
       // device of yours writing at that moment only ever costs a retry, a moment later each time.
       for (let tries = 0; tries < STALE_TRIES; tries++) {
         if (tries) await new Promise(settle => setTimeout(settle, 150 * tries + Math.floor(Math.random() * 150)))
-        const result = await attempt(held.home, zone, change, held.anchor, held.signer).catch((): OwnerResult => ({ ok: false, reason: 'failed' }))
+        const result = await once(held).catch((): OwnerResult => ({ ok: false, reason: 'failed' }))
         if (result !== 'stale') return result
       }
       return { ok: false, reason: 'your index kept changing underneath; try again' }
     })
-    lane = run.catch(() => undefined)
-    return run
+    lane = going.catch(() => undefined)
+    return going
   }
   return {
     hello: async () => (await ensure())?.anchor ?? '',
@@ -429,6 +459,8 @@ export const deviceOwner = (zone: string, deps: DeviceOwnerDeps = {}): OwnerBrid
     view: request => act(request.zone === zone && !!parseView(request.view), viewChange(request)),
     stage: request => act(request.zone === zone && validItems(request.on) && validItems(request.off), stageChange(request)),
     publish: request => act(request.zone === zone, publishChange(zone)),
+    details: request => run(request.zone === zone && SIG.test(request.pubkey) && !!request.lineage && request.lineage.length <= 200
+      && Array.isArray(request.parts), held => detailsAttempt(held.home, request, held.anchor, held.signer)),
   }
 }
 
@@ -454,6 +486,7 @@ export const eitherOwner = (...owners: readonly (OwnerBridge | null)[]): OwnerBr
     view: request => chosen?.view ? chosen.view(request) : Promise.resolve({ ok: false, reason: 'no key of yours answers here' }),
     stage: request => chosen?.stage ? chosen.stage(request) : Promise.resolve({ ok: false, reason: 'no key of yours answers here' }),
     publish: request => chosen?.publish ? chosen.publish(request) : Promise.resolve({ ok: false, reason: 'no key of yours answers here' }),
+    details: request => chosen?.details ? chosen.details(request) : Promise.resolve({ ok: false, reason: 'no key of yours answers here' }),
     // Only a hive hands out invites; where the one that answered cannot, the page is told so.
     invite: request => chosen?.invite ? chosen.invite(request) : Promise.resolve({ ok: false, reason: 'only your hive can invite a phone' }),
   }

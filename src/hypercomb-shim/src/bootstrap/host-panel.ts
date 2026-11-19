@@ -28,6 +28,7 @@ import { ownerBridge } from './owner-bridge'
 import { allowInvite, captureDeviceInvite, dropInvite, heldInvite } from './device-invite'
 import { deviceOwner, eitherOwner } from './device-owner'
 import { readZoneOwners } from './showcase-record'
+import { readDetails } from './item-details'
 import { branchView } from './branch-view'
 import { beesOnDisk, MANAGE_LEAVE_HREF, manageRecord, siteDoorZone, type ManageRecord } from './manage-record'
 import { showManagedKey } from './managed-key'
@@ -730,6 +731,8 @@ class HostPanelElement extends HTMLElement {
           readPublicCreations(zone).catch(() => [])]).then(([offers, creations]) => ({ offers, creations })),
         readOwners: readZoneOwners,
         readLedgerAt,
+        // What is said about an item: its details pool, read where its owners' index and its own site are.
+        readDetails,
         // The hive beside this page signs when there is one; else this browser's own key, when it took its
         // owner's invite (device-owner.ts) — a phone, where no hive runs.
         // It signs where this domain's visitors read the index (device-owner.ts indexHomeFor): the ledger names
