@@ -20,15 +20,15 @@ The harness is strong where Claude Code is weakest and weak where Claude Code is
 
 **Behind.** The model works through one text block per reply, one kind of action per round, reads one after another, cannot search content, cannot run or see what it made outside one narrow case, keeps no plan, cannot split work, remembers nothing between conversations, and has no web. These are the things that make Claude Code feel capable, and most of them come from one cause: the reply protocol.
 
-So the first move is a replacement, not an addition. See "Order of work".
+**Corrected the same day.** This audit first said the first move was to replace the text protocol with native tool calls. That missed the record: the text fence was jwize's decision of 2026-09-13 (`hive-read-fence.md` §1.3, §2), made because many OpenRouter models call tools poorly and fail without saying why, and so that every model asks the same way. Asked on 2026-11-19 whether to also offer native tool calls, he said: "Keep text only." So the text fence stays, and the first move is to carry more in one round inside it. See "Order of work".
 
 ## Scorecard
 
 | Capability | Claude Code | Hive harness | Gap |
 |---|---|---|---|
-| Reply protocol | Native tool calls, many per step, run in parallel | One fenced text block per reply; `tools` is never sent | Large |
-| Mixing actions | Read, search and edit freely in one step | One kind per round; a read in the reply cancels the change | Large |
-| Reads | Parallel, any file, any size by range | Up to 8 per block, run in sequence; 48,000 characters each | Medium |
+| Reply protocol | Native tool calls, many per step, run in parallel | One fenced text block per reply, by decision (2026-09-13, kept 2026-11-19) | Decided: text |
+| Mixing actions | Read, search and edit freely in one step | One kind per round; a read in the reply holds the change (kept: read first, then change) | Medium |
+| Reads | Parallel, any file, any size by range | Up to 8 per block, run in sequence (together, after #200); 48,000 characters each | Small after #200 |
 | Content search | Regex and glob over everything | Tile names and running code only; notes and files unsearchable | Large |
 | Edit | Exact string replace on any file | Search/replace on module sections, tile pages, files, cards | Small |
 | Run and see | Shell, tests, type checks, logs, browser, screenshots | Nothing, except a page report after a file write on a managed site door | Large |
@@ -136,7 +136,12 @@ These are wrong today, whatever the direction. Each is from reading; none was re
 
 Replacement first, then what it unlocks. Each step is a package update.
 
-**1. Replace the reply protocol with native tool calls.** Define the read verbs, the do vocabulary and the write targets as tools; send them where the provider supports tools; let a step carry several calls, and run reads in parallel. Keep the text fence only as the fallback for providers without tools. Every tool call still enters the same admission gate, queue and holds, so nothing about review changes. This removes the one-kind-per-round rule and most of the spelling nets, and it is the plumbing that already exists with no caller.
+**1. Carry more in one round, inside the text fence.** The transport is decided: text only (see the correction above). The cost the audit measured was never the fence itself but how little one round carried.
+
+- Done in #200: the reads of one block run together, and one reply may write up to six files, each still its own row in Execution.
+- Still open: a do block and a write block in one reply; raising the 4,096-token output cap for a work round, which bounds what several write blocks can hold; several write blocks while Jev judges (today only the first is taken).
+- Not to do: mixing a read with a change in one reply. "Read first, then change" is a rule of the hive, and a change made before its read came back has not seen it.
+- The native tool plumbing with no caller (`asst/llm-dispatch.ts:583-640`, `asst/providers/openai-shape.ts:130`, the `tools` types in the chat window) is now dead by decision and can be removed.
 
 **2. Say what happened after every change.** Make the page report the general rule: after any change, the model receives what the hive observed, not only which lines ran. For module drafts that means a type check and the parse result; for pages, the frame watch in an ordinary hive as well as on a managed door; and a picture of the page for a model that sees.
 
