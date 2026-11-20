@@ -206,7 +206,7 @@
           <div class="sub" data-where-sub>Free, all welcome</div>
         </div>
       </div>
-      <div class="agenda hosts" data-hosts hidden><b>Hosted by</b> <span data-hosts-names></span></div>
+      <div class="agenda hosts" data-hosts hidden><b data-hosts-count></b> · <span data-hosts-names></span></div>
       <div class="agenda"><b>01</b> Say hello — coffee, small bites · <b>02</b> Hypercomb fundamentals, a live demo · <b>03</b> Your projects and questions</div>
       <div class="agenda"><b>9:15</b> Networking · <b>9:30–10:45</b> The meetup · <b>10:45–11:00</b> Networking · <b>11:00–12:00</b> Break · <b>12:00–1:30</b> Workshop</div>
       <div class="join" data-join-panel>
@@ -222,7 +222,7 @@
         <p class="state" data-join-state></p>
       </div>
       <div class="who" data-who>
-        <div class="mini"><span data-who-title>Who's coming</span> <span data-who-count></span></div>
+        <div class="mini" data-who-title>Who's coming</div>
         <ul class="wall" data-who-list></ul>
       </div>
     </section>
@@ -513,7 +513,7 @@
   function countOf(ev) {
     if (!state.coming[ev.sig]) return '';
     if (!joinable(ev)) return 'at ' + ev.record.host;
-    var n = comingRows(ev).length;
+    var n = comingCount(ev);
     return n ? n + (ev.record.date < today() ? ' came' : ' coming') : '';
   }
 
@@ -566,11 +566,9 @@
     renderSessions(onTheDay);
   }
   function renderWho(ev) {
-    var list = $('[data-who-list]'), count = $('[data-who-count]');
+    var list = $('[data-who-list]');
     list.textContent = '';
     var rows = comingRows(ev);
-    var here = rows.filter(function (r) { return r.going === 'here'; }).length;
-    count.textContent = rows.length ? '(' + rows.length + (here ? ' · ' + here + ' here now' : '') + ')' : '';
     // A list with no names says nothing at all, never "nobody": the block
     // shows only once someone has signed up.
     $('[data-who]').style.display = rows.length ? '' : 'none';
@@ -720,17 +718,27 @@
     // The section is the list: following nobody, there is nothing to show.
     root.querySelector('.panel[data-panel="community"]').style.display = (state.doors || []).length ? '' : 'none';
   }
-  // THE ORGANIZERS HOST EVERY SESSION STILL TO COME (jwize, 2026-11-19: "don't
-  // put all the organizers in the list … think about the optics if only
-  // organizers are coming"). They are named once, as the hosts, on each
-  // session of the day — the meetup, the focus group and the workshop alike.
-  // They are not sign-ups: no list holds them and no count includes them, so
-  // "who's coming" and every number speak only of people who joined.
-  var ORGANIZERS = ['Jaime Weise', 'Pavlos', 'Lea L.', 'Susan', 'Ian'];
+  // THE TEAM COMES TO EVERY SESSION STILL TO COME, and two of them host it
+  // (jwize, 2026-11-19: "we don't want to be all shown as organizers as the
+  // only participants when the meeting link starts. But should be 5 coming
+  // paulo jaime hosting"). The team is COUNTED — a new session opens on
+  // "5 coming", never on nobody — but never LISTED: "who's coming" names only
+  // people who signed up. A session behind us counts only who came.
+  var TEAM = ['Jaime Weise', 'Pavlos', 'Lea L.', 'Susan', 'Ian'];
+  var HOSTS = ['Paulo', 'Jaime'];
+  function comingCount(ev) {
+    var rows = comingRows(ev);
+    if (!ev || ev.record.date < today()) return rows.length;
+    var team = {};
+    TEAM.forEach(function (n) { team[n.toLowerCase()] = true; });
+    return TEAM.length + rows.filter(function (r) { return !team[String(r.who || '').toLowerCase()]; }).length;
+  }
   function renderHosts(ev) {
     var line = $('[data-hosts]');
     line.hidden = !ev || ev.record.date < today();
-    $('[data-hosts-names]').textContent = ORGANIZERS.slice(0, -1).join(', ') + ' and ' + ORGANIZERS[ORGANIZERS.length - 1];
+    var here = comingRows(ev).filter(function (r) { return r.going === 'here'; }).length;
+    $('[data-hosts-count]').textContent = comingCount(ev) + ' coming' + (here ? ', ' + here + ' here now' : '');
+    $('[data-hosts-names]').textContent = HOSTS.slice(0, -1).join(', ') + (HOSTS.length > 1 ? ' and ' : '') + HOSTS[HOSTS.length - 1] + ' hosting';
   }
   function render() {
     $('[data-search]').hidden = state.events.length <= SEARCH_FROM;
