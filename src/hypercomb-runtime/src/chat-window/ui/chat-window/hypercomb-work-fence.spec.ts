@@ -904,3 +904,43 @@ describe('an answer that claims a change nothing ran', () => {
     expect(loop).toContain("content: unranChangeMessage(message) }")
   })
 })
+
+// SEVERAL FILES IN ONE REPLY (core work-fence.ts WRITES_PER_REPLY).
+describe('several write blocks in one reply', () => {
+  const F = '`'.repeat(3)
+  const block = (header: string, body: string): string => [F + 'hypercomb-write', header, body, F].join('\n')
+
+  it('keeps each block whole and in the order written: the first as the request, the rest beside it', () => {
+    const split = splitWork(['Three files.', '', block('page /shop', '<html></html>'), '', block('file /shop app.js', 'run()'), block('file /shop app.css', 'body {}')].join('\n'))
+    expect(split.prose).toBe('Three files.')
+    expect(split.request).toEqual({
+      kind: 'write',
+      lines: ['page /shop', '<html></html>'],
+      more: [['file /shop app.js', 'run()'], ['file /shop app.css', 'body {}']],
+    })
+  })
+
+  it('says nothing of more when there is one block, exactly as before', () => {
+    expect(splitWork(block('page /shop', '<html></html>')).request).toEqual({ kind: 'write', lines: ['page /shop', '<html></html>'] })
+  })
+
+  it('runs none when any block was left open, or when there are more than the limit', () => {
+    const open = [block('page /shop', '<html></html>'), F + 'hypercomb-write', 'file /shop app.js', 'run()'].join('\n')
+    expect(splitWork(open).request).toEqual({ kind: 'write', lines: [] })
+    const many = Array.from({ length: 7 }, (_, at) => block(`file /shop f${at}.txt`, 'x')).join('\n')
+    expect(splitWork(many).request).toEqual({ kind: 'write', lines: [] })
+    const most = Array.from({ length: 6 }, (_, at) => block(`file /shop f${at}.txt`, 'x')).join('\n')
+    expect(splitWork(most).request?.more).toHaveLength(5)
+  })
+
+  it('still lets a read in the same reply win, and holds every write', () => {
+    const split = splitWork([F + 'hypercomb-read', 'read /shop', F, block('page /shop', 'a'), block('file /shop b.txt', 'b')].join('\n'))
+    expect(split).toMatchObject({ request: { kind: 'read' }, heldDo: true })
+    expect(split.request?.more).toBeUndefined()
+  })
+
+  it('teaches it only to a model that may write', () => {
+    expect(workInstruction({ canRead: true, readsRunFreely: true, canChange: true, vocabulary: '', canWrite: false, canWriteFiles: true })).toContain('SEVERAL FILES IN ONE REPLY')
+    expect(workInstruction({ canRead: true, readsRunFreely: true, canChange: true, vocabulary: '', canWrite: false, canWriteFiles: false })).not.toContain('SEVERAL FILES IN ONE REPLY')
+  })
+})

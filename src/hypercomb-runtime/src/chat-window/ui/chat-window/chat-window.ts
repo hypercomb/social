@@ -152,6 +152,7 @@ import {
   type HypercombToolCall,
 } from './hypercomb-grammar'
 import { DOCTRINE_HOLD, inDoctrine, touchesDoctrine } from './doctrine-hold'
+import { runSeveralWrites } from './several-writes'
 import { PlanTransaction, type PlanHistory } from './hypercomb-plan-transaction'
 import {
   executeHypercombObservationPlan,
@@ -8310,6 +8311,15 @@ export class ChatWindow {
         return writeRanMessage({ section: parsed.section, beeSig: outcome.beeSig, path: outcome.path, held, created: outcome.created === true, managed: onDoor }, message)
       }
 
+      // SEVERAL FILES IN ONE REPLY (several-writes.ts): each block is its own
+      // write, with its own row in Execution, in the order written.
+      const runWrites = (blocks: readonly (readonly string[])[], providerId: string, model: string): Promise<string> =>
+        runSeveralWrites(blocks, {
+          run: lines => runWrite(lines, providerId, model),
+          refused: isWorkRefusal,
+          stopped: () => !!signal?.aborted,
+        })
+
       // A FILE ON A TILE WRITTEN (essentials files/tile-files.drone.ts): the
       // tile's website page, or a text file attached to it by name. It waits
       // in Execution like a code write — the participant's policy or hand
@@ -8740,6 +8750,7 @@ export class ChatWindow {
         messages.push({ role: 'assistant', content: roundText })
 
         let reply: string
+        let ranEveryWrite = false
         try {
           stillHere()
           // JEV RUNS THE SHOW (jev-round.ts decides, this loop does).
@@ -8811,8 +8822,14 @@ export class ChatWindow {
             reply = work.request.kind === 'read'
               ? await runRead(work.request.lines, pinned, roundModel)
               : work.request.kind === 'write'
-                ? await runWrite(work.request.lines, pinned, roundModel)
+                ? await runWrites([work.request.lines, ...(work.request.more ?? [])], pinned, roundModel)
                 : await runDo(work.request.lines, pinned, roundModel)
+            ranEveryWrite = true
+          }
+          // While Jev judges, a write is one row of its table: the blocks
+          // after the first were not judged, so they were not run.
+          if (!ranEveryWrite && work.request.kind === 'write' && work.request.more?.length) {
+            reply += `\n\nOnly the first of the ${work.request.more.length + 1} write blocks was taken in this reply: while Jev judges, send one write block per reply. Send the next one now.`
           }
           refusedInARow = 0
         } catch (error) {

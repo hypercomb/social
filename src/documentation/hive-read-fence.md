@@ -432,3 +432,15 @@ Two more steps on the same memory (2026-11-16, "implement the ideas"):
 
 `hypercomb-runtime` `hypercomb-observation.ts` (`ReadRepeats`), used by
 `chat-window.ts`.
+
+## More in one round (2026-11-19)
+
+jwize, 2026-11-19: "we mainly want state of the art but not necessarily additive. We need to compete with claude-code at least from the harness side." The text fence stays: it is the one way every model can ask (§2), and that decision of 2026-09-13 is not reversed here. What changes is how much one round carries.
+
+- **The reads of one block run together.** Each read is its own question to the reader and shares nothing with its neighbours but the page size, which is divided among them before any begins. They used to run one after another, so a block of eight cost eight waits; now it costs the slowest. Answers keep the order they were asked in, and one read that cannot be made still refuses the block (`hypercomb-observation.ts` `executeHypercombObservationPlan`).
+- **One reply may write several files.** A reply used to carry exactly one write block, so a change across a page, its script and its styles cost three rounds. Now it may end with up to six (`WRITES_PER_REPLY`, core `work-fence.ts`), one file each, made in the order written. Each is still its own write: its own row in Execution, its own hold, its own hand. A block refused after an earlier one was made does not throw the earlier ones away; the model is told which was not made and that the rest were not tried (`several-writes.ts`). Any block left open, or more than six, and none is run. The lesson is taught only to a model that may write.
+- **While Jev judges, a write is still one row.** In a Jev turn only the first block is taken, and the model is told to send the next one.
+
+Unchanged: a read in the same reply still wins and holds every change (read first, then change), and a do block and a write block are still not run together.
+
+Not run in a browser yet: this is shell code (core and runtime), so it reaches a hive with a shell deploy.

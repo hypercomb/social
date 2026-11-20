@@ -36,7 +36,16 @@ export type WorkRequest = {
   readonly kind: WorkKind
   /** Canonical slash grammar, in the order the model wrote it. */
   readonly lines: readonly string[]
+  /** A write only: the write blocks after the first, each kept whole, in the
+   *  order written. One reply may write several files (WRITES_PER_REPLY). */
+  readonly more?: readonly (readonly string[])[]
 }
+
+/** How many write blocks one reply may carry. A reply used to carry exactly
+ *  one, so a change across a page, its script and its styles cost three
+ *  rounds; each block is still its own file, its own row in Execution and its
+ *  own hand. More than this, or any block left open, and none is run. */
+export const WRITES_PER_REPLY = 6
 
 export type SplitWork = {
   /** The reply with every work block removed. */
@@ -606,8 +615,9 @@ export const splitWork = (text: string): SplitWork => {
   const held = changes.length || tables.length || writes.length ? { heldDo: true as const } : {}
   if (reads.length) return { prose, request: { kind: 'read', lines: reads }, ...held, ...left }
   if (writes.length) {
-    const valid = writes.length === 1 && writes[0].end < lines.length
-    return { prose, request: { kind: 'write', lines: valid ? writes[0].body : [] }, ...(changes.length || tables.length ? { heldDo: true as const } : {}), ...left }
+    const valid = writes.length <= WRITES_PER_REPLY && writes.every(block => block.end < lines.length)
+    const more = valid ? writes.slice(1).map(block => block.body) : []
+    return { prose, request: { kind: 'write', lines: valid ? writes[0].body : [], ...(more.length ? { more } : {}) }, ...(changes.length || tables.length ? { heldDo: true as const } : {}), ...left }
   }
   if (tables.length) {
     const valid = tables.length === 1 && tables[0].end < lines.length
