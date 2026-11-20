@@ -242,4 +242,49 @@ export interface ModuleDraftsProvider {
    *  when any file is not held here or does not hash to its name. Optional,
    *  so a caller asks for it only where the runtime has it. */
   pack?(files: readonly string[]): Promise<{ readonly sig: string; readonly bytes: Uint8Array } | null>
+  /** HOME, HELD (jwize, 2026-11-20): the drafts a card's Publish carries —
+   *  this hive's own bee drafts over the trunk that runs here, none a hand
+   *  here refused. Signatures only; an acceptance never travels. Optional,
+   *  so a caller asks only where the runtime has it. */
+  carry?(): Promise<readonly CarriedModuleDraft[]>
+  /** Put the drafts a card carried back on this device, each HELD in the
+   *  brood before its bytes are written or its pick is made. `bytes` reads a
+   *  part by signature (each is hashed to its name again); `lineage` names
+   *  the card for the brood. Never writes a ruling. */
+  restore?(
+    carried: { readonly refs: readonly string[]; readonly drafts: readonly { readonly root: string; readonly layer: string }[] },
+    bytes: (sig: string) => Promise<Uint8Array | null>,
+    lineage: string,
+  ): Promise<readonly { readonly root: string; readonly outcome: DraftRestoreOutcome }[]>
 }
+
+/** One draft a card carries: its draft root, the layer its pick names, the
+ *  module it wrote, and the module it was written into ('' for a new file). */
+export interface CarriedModuleDraft {
+  readonly root: string
+  readonly layer: string
+  readonly to: string
+  readonly from: string
+  /** Every module the picked layer names that the trunk's layer at that path
+   *  does not: `to`, and any earlier draft in the same folder the layer still
+   *  names. Each travels and is held where the draft comes home. Absent: `to`. */
+  readonly parts?: readonly string[]
+  /** It came home with a card (put back held here), not written here. */
+  readonly carried?: true
+}
+
+/** What putting one carried draft back did.
+ *  - `applied`: held in the brood, its bytes written, its pick made.
+ *  - `present`: this very draft is already picked at its path here.
+ *  - `refused-here`: a hand on this device refused the module.
+ *  - `other-build`: drafted over another trunk; nothing written (retry after Update all).
+ *  - `older-build`: drafted over a build this device holds but does not run;
+ *    nothing written (said once; tried again, since holding a build never
+ *    proves it ran here).
+ *  - `path-busy`: another pick holds the path here; local work wins, nothing written.
+ *  - `gate`: a selection gate refused the pick; the selection is as it was.
+ *  - `unheld`: the hold could not be made or proved on disk; nothing written.
+ *  - `incomplete`: a part could not be read.
+ *  - `tampered`: the parts do not hold together, or do not hash to their names. */
+export type DraftRestoreOutcome =
+  | 'applied' | 'present' | 'refused-here' | 'other-build' | 'older-build' | 'path-busy' | 'gate' | 'unheld' | 'incomplete' | 'tampered'

@@ -283,6 +283,10 @@ export async function replaceDecoration<TPayload>(opts: {
 export async function listDecorations<TPayload>(opts: {
   kind: string
   segments: readonly string[]
+  /** Throw when a slot record's bytes cannot be read here, instead of leaving
+   *  it out: a reader that must tell "the cell carries none" from "it could
+   *  not be read" (site-drafts.ts planDrafts). A malformed record is still skipped. */
+  strict?: boolean
 }): Promise<Array<{ sig: string; record: DecorationRecord<TPayload> }>> {
   const store = window.ioc.get<StoreLike>('@hypercomb.social/Store')
   if (!store?.getResource) return []
@@ -305,9 +309,16 @@ export async function listDecorations<TPayload>(opts: {
   // cold cell instead of one per decoration (see decoration-kind-index.ts
   // hydrateLabel, which paid ~2.3 s this way on a published site's arrival).
   const read = await Promise.all(sigs.map(async sig => {
+    let blob: Blob | null
+    try { blob = await store.getResource(sig) } catch (error) {
+      if (opts.strict) throw error
+      return null
+    }
+    if (!blob) {
+      if (opts.strict) throw new Error(`[decoration-manifest] decoration ${sig} could not be read`)
+      return null
+    }
     try {
-      const blob = await store.getResource(sig)
-      if (!blob) return null
       const parsed = JSON.parse(await blob.text()) as DecorationRecord<TPayload>
       return parsed?.kind === opts.kind ? { sig, record: parsed } : null
     } catch {
