@@ -612,6 +612,28 @@ describe('refs this tab does not hold', () => {
     expect(host.fetch).not.toHaveBeenCalled()
   })
 
+  it('the parts of a module:drafts record are leaves: the trunk a draft root names is never asked for', async () => {
+    const TRUNK = 'd'.repeat(64), DEP = 'e'.repeat(64), TRUNK_BEE = 'f'.repeat(64), TO = '9'.repeat(64)
+    const host = makeHost()
+    vi.stubGlobal('fetch', host.fetch)
+    // The draft root and its folder layer are held here (a card taken on the
+    // hive restores them); each names the trunk and its other modules.
+    const root = await resource(JSON.stringify({ draft: { kind: 'bee', of: TRUNK, path: 'games/solomon', section: 'src/a.ts', from: '', to: TO, at: 1 }, dependencies: [DEP] }))
+    const folder = await resource(JSON.stringify({ name: 'solomon', cells: [], bees: [TO, TRUNK_BEE] }))
+    const record = await resource(JSON.stringify({ kind: 'module:drafts', appliesTo: ['business-card'], payload: { drafts: [{ root, layer: folder, from: '', parts: [TO] }] }, refs: [folder, root, TO].sort() }))
+    const branch = await layer({ name: 'business-card', decorations: [record] })
+    const zone = await hostHash('jwize.com')
+    for (const s of [branch, record, root, folder, TO]) await writeReceipt(`${s}.${zone}`)
+    const service = await make() as Service & { closureSigs: (sig: string, kind?: string) => Promise<{ sigs: Set<string>; complete: boolean }> }
+    expect(await service.isClosureAvailable(branch, 'layer', true)).toBe(true)
+    expect(await service.closureGaps(branch, 'layer', true)).toEqual([])
+    const keep = await service.closureSigs(branch, 'layer')
+    expect(keep.complete).toBe(false) // TO is served, not held here: as for any unheld resource
+    expect([...keep.sigs].some(s => s === TRUNK || s === DEP || s === TRUNK_BEE)).toBe(false)
+    const asked = host.fetch.mock.calls.map(([url]) => String(url))
+    expect(asked.some(url => url.includes(TRUNK) || url.includes(DEP) || url.includes(TRUNK_BEE))).toBe(false)
+  })
+
   it('an unheld ref the host lacks is a hole: unavailable, share:missing-local, and asked once', async () => {
     const lost = 'b'.repeat(64)
     const host = makeHost()

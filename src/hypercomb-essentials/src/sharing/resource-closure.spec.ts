@@ -152,3 +152,25 @@ describe('resource closure', () => {
     expect(fetched).toHaveLength(2)
   })
 })
+
+// HOME, HELD (jwize, 2026-11-20): a `module:drafts` record's parts are leaves.
+// A draft root names the trunk it was made over and the trunk's dependencies,
+// and its folder layer the trunk's other modules; the card's host holds none
+// of them, and a walk must not go asking for them.
+describe('a module:drafts record', () => {
+  it('holds its parts and never descends through them', async () => {
+    const RECORD = SIG('1'), ROOT = SIG('2'), LAYER = SIG('3'), PART = SIG('4')
+    const TRUNK = SIG('5'), TRUNK_DEPENDENCY = SIG('6'), TRUNK_BEE = SIG('7')
+    served = new Map<string, Uint8Array>([
+      [RECORD, json({ kind: 'module:drafts', appliesTo: ['card'], payload: { drafts: [{ root: ROOT, layer: LAYER, from: '', parts: [PART] }] }, refs: [LAYER, PART, ROOT] })],
+      [ROOT, json({ draft: { of: TRUNK, path: 'games', section: 's', from: '', to: PART, kind: 'bee', at: 1 }, dependencies: [TRUNK_DEPENDENCY] })],
+      [LAYER, json({ name: 'games', cells: [], bees: [`${PART}.js`, `${TRUNK_BEE}.js`] })],
+      [PART, new TextEncoder().encode('export const x = 1')],
+    ])
+    const broker = makeBroker()
+    const stats = await broker.adoptResources([RECORD], { deepResources: true, quiet: true })
+    for (const part of [ROOT, LAYER, PART]) expect(fetched).toContain(part)
+    for (const outside of [TRUNK, TRUNK_DEPENDENCY, TRUNK_BEE]) expect(fetched).not.toContain(outside)
+    expect(stats.failed).toBe(0)
+  })
+})

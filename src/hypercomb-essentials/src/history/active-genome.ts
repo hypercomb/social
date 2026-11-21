@@ -301,6 +301,25 @@ export async function collectActiveGenome(
           ? await decorationClosureSigs(bytes, async () => null)
           : nestedResourceSigs(bytes)
         for (const reachedSig of reached) {
+          // A `module:drafts` record's parts (sharing/site-drafts.ts) are
+          // leaves, never walked — as the publish closure treats them
+          // (hypercomb-shim managed-publish.ts `part`): a draft root or its
+          // folder layer, flat at the root, or a module in the bees pool. A
+          // draft root names the trunk it was made over and the modules it
+          // came from, and the folder layer the trunk's other modules; none of
+          // that is the card's to carry.
+          if (kind === 'module:drafts') {
+            let part = memo.resources.get(reachedSig) ?? null
+            if (!part) {
+              part = await source.resource(reachedSig)
+              if (part) memo.keep(memo.resources, reachedSig, part)
+            }
+            if (part) { share.objects.push({ kind: 'resource', sig: reachedSig, bytes: part.bytes }); continue }
+            const bytes = await poolBytes('bee', reachedSig)
+            if (bytes !== null) share.objects.push({ kind: 'bee', sig: reachedSig, bytes })
+            else share.missing.push({ kind: 'resource', sig: reachedSig })
+            continue
+          }
           const inner = await expandResource(reachedSig, seen)
           share.objects.push(...inner.objects)
           share.missing.push(...inner.missing)

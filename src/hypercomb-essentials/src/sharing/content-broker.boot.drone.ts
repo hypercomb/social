@@ -87,6 +87,17 @@ const STORE_KEY = '@hypercomb.social/Store'
 // alias registration at the bottom of the file.
 const RUNTIME_BROKER_KEY = '@ContentBrokerDrone'
 
+/** Is this a `module:drafts` decoration record (sharing/site-drafts.ts)? Its
+ *  parts are leaves to a walk. The kind is spelled here, not imported: the
+ *  broker's boot lane takes no import from the site modules. */
+const isDraftsRecord = (bytes: Uint8Array): boolean => {
+  if (bytes.byteLength > 1_048_576 || bytes[0] !== 0x7b /* { */) return false
+  try {
+    const text = new TextDecoder().decode(bytes)
+    return text.includes('module:drafts') && (JSON.parse(text) as { kind?: unknown })?.kind === 'module:drafts'
+  } catch { return false }
+}
+
 // KIND_FETCH_REQUEST (20400) — core nostr-kinds, the one vocabulary.
 // Responses are PARAMETERIZED-REPLACEABLE (30000-39999 range). The
 // relay enforces one stored event per (pubkey, kind, d-tag=sig), so
@@ -2307,6 +2318,8 @@ export class ContentBrokerDrone extends Drone {
     // would otherwise occupy a thousand queue slots before any of it is
     // recognised as already seen.
     const queued = new Set<string>(queue.map(q => q.sig))
+    /** Parts of a `module:drafts` record: held, never descended through. */
+    const partsOnly = new Set<string>()
     /** Key path a signature sat under, for anything reached below depth 0. */
     const atBy = new Map<string, string>()
     const enqueue = (sig: string, depth: number, from?: string, at?: string): void => {
@@ -2394,6 +2407,12 @@ export class ContentBrokerDrone extends Drone {
       // UI cue must climb as resources resolve.
       if (!opts.quiet) this.emitEffect('adopt:progress', { sig, ...stats })
       if (depth > 0 && !opts.deepResources) continue
+      if (partsOnly.has(sig)) continue
+      // A `module:drafts` record (sharing/site-drafts.ts) names its parts, and
+      // they are leaves, as the publish closure carries them: a draft root names
+      // the trunk it was made over and its folder layer the trunk's other
+      // modules, none of which the card's host holds.
+      const draftParts = isDraftsRecord(got)
 
       // Decoration-descent: a decoration record (e.g. a website page) is a
       // resource leaf to #collectSigs, but the content it points at — the
@@ -2402,6 +2421,7 @@ export class ContentBrokerDrone extends Drone {
       // the adopted site is self-contained, not a record that 404s its
       // assets. No-op for ordinary resources (decorationClosureSigs → []).
       for (const n of await decorationClosureSigs(got, s => this.fetchBySig(s, 'resource'))) {
+        if (draftParts) partsOnly.add(n)
         enqueue(n, depth + 1, sig)
       }
 
@@ -2410,7 +2430,10 @@ export class ContentBrokerDrone extends Drone {
         // its message body through `turns.[0].contentSig` is exactly the case
         // where knowing the key separates lost content from an identifier.
         const nested = new Map<string, string>()
-        for (const s of this.#recordSigs(got, nested)) enqueue(s, depth + 1, sig, nested.get(s))
+        for (const s of this.#recordSigs(got, nested)) {
+          if (draftParts) partsOnly.add(s)
+          enqueue(s, depth + 1, sig, nested.get(s))
+        }
       }
     }
   }

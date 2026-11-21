@@ -420,6 +420,15 @@ $bulb-warm: #ffcd64;
   &[data-kind='live'] { color: tw.ink(#ffd97a); }
 }
 
+.prow-take {
+  border: 1px solid currentColor;
+  border-radius: 0.6em;
+  background: none;
+  padding: 0.1em 0.6em;
+  font-family: inherit;
+  cursor: pointer;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .prow-word[data-kind='busy'] { animation: prow-pulse 1.4s ease-in-out infinite; }
 
