@@ -19,7 +19,14 @@
 //
 // A dependency: it exports, registers nothing.
 
-import { SignatureService, broodRecordOnDisk, type CarriedModuleDraft, type ModuleDraftsProvider } from '@hypercomb/core'
+import * as hypercombCore from '@hypercomb/core'
+import { SignatureService, broodRecord, type BroodRecord, type CarriedModuleDraft, type ModuleDraftsProvider } from '@hypercomb/core'
+
+// Read off the namespace, never named: a page whose core predates
+// broodRecordOnDisk must still load this package (it then reads the session
+// copy, which only makes "knows" less sure, never more).
+const recordOnDisk = (sig: string): Promise<BroodRecord | null> =>
+  ((hypercombCore as { broodRecordOnDisk?: (sig: string) => Promise<BroodRecord | null> }).broodRecordOnDisk ?? broodRecord)(sig)
 import { listDecorations, removeDecorationAndWait, writeDecoration } from '../commands/decoration-manifest.js'
 import { collectSigsDeep } from './decoration-closure.js'
 import { DRAFTS_KIND, DRAFTS_MAX, replicaLocation, replicaRoute, type CommitterLike, type HistoryLike } from './site-replica.js'
@@ -74,7 +81,7 @@ const liveDecorations: DraftDecorations = {
 const liveKnows: KnowsDraft = async parts => {
   if (!parts.length) return false
   for (const part of parts) {
-    const record = await broodRecordOnDisk(part).catch(() => null)
+    const record = await recordOnDisk(part).catch(() => null)
     if (record?.source.kind !== 'own' || !record.source.how?.startsWith('a draft of ') || record.source.how.includes(CARRIED_HOME)) return false
   }
   return true
