@@ -1729,7 +1729,10 @@ ${entry.key}`
     // creation the staged list lacks (left by the old staging) is live, and lit.
     const lit = ownStaging ? live : stagedView() ? inCommunity(entry) : live || picked(entry)
     view.tile.classList.toggle('off', row === options.self && !managing ? false : !lit)
-    view.tile.classList.toggle('staged', ownStaging && !live && inCommunity(entry))
+    // ONLY YOU: in your community and not shared. Managing, as the staged list draws it; on your page, only your own.
+    const onlyYou = row === options.self && !live && (managing ? ownStaging && inCommunity(entry)
+      : picked(entry) || (!!ownerKey && !!signed?.staged && names(signed.staged.items, entry)))
+    view.tile.classList.toggle('staged', onlyYou)
     if (managing) view.tile.setAttribute('aria-pressed', String(lit))
     else view.tile.removeAttribute('aria-pressed')
     if (view.head !== lead.head) {
@@ -2502,7 +2505,13 @@ ${entry.key}`
     // phone it should update on my desktop and all other devices should show my showcase as last saved"). Every device
     // draws what is published here and nothing else: what this browser picked or staged shows only while managing.
     // (Supersedes 2026-11-10, where a browser's own picks were added to the page it came back to.)
-    const everything = [...published].sort(byTitle)
+    // YOUR OWN "ONLY YOU" TILES STAY ON YOUR PAGE (jwize 2026-11-18: "promote from the expanded row to be only on your
+    // community view but not shared"; 2026-11-20: "build the Only you tiles outside Manage"). What you added to your
+    // community and did not share is drawn on your page too, marked Only you: the owners' staged list where a key of
+    // theirs answers here, and what this browser picked. A visitor has neither, and sees exactly what is published.
+    const onlyYou = unread || community ? [] : [...known.values()].filter(entry => !showcased(entry)
+      && (picked(entry) || (!!ownerKey && !!signed?.staged && names(signed.staged.items, entry))))
+    const everything = oncePerCreation([...published, ...onlyYou]).sort(byTitle)
     // The platform's doors are the first page's; a community is about what is shared.
     const links = community ? [] : options.links ?? []
     // HOW IT IS DRAWN: a try from this visit, else a community's own view, else All's

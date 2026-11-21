@@ -586,6 +586,14 @@ is what is published here and nothing else: what a browser picked or staged show
 is looked at again (`visibilitychange`, `focus`; at most every five seconds, never over a write of its own), so what
 another device saved shows without a reload.
 
+**Your own "Only you" tiles stay on your page (jwize 2026-11-18: "promote from the expanded row to be only on your
+community view but not shared"; 2026-11-20: "build the Only you tiles outside Manage").** A tile you added to your
+community from a domain's row and did not share is drawn on your page as well, marked **Only you** (`.hex.staged`,
+`.hex-state`), and a tap on it visits, like any tile there. It is your own in two ways: the owners' staged list
+(`staged:<zone>`) where a key of theirs answers on the page, and what this browser picked. A visitor has neither and is
+drawn exactly what is published. Sharing it is still the tap in the community row while managing. This narrows the
+paragraph above: every device still agrees on what is published; your own unshared tiles are added on your devices only.
+
 **With the key the community is the published list (jwize 2026-11-14).** When a key of yours answers on the page (the
 hive beside it, or a phone that took its owner's invite), a tile from another domain's row going into your community is
 signed into the list every visitor reads, not kept only in this browser (this replaces the 2026-11-12 "add to my
