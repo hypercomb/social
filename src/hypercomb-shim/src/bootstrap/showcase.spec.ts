@@ -2244,6 +2244,11 @@ describe('a tap visits, a hold toggles', () => {
       const dylan = await tileIn(mine.bands, '.dex-row.own a.hex', 'dylan')
       expect(dylan.classList.contains('staged')).toBe(true)
       expect(dylan.classList.contains('off')).toBe(false)
+      // The page says the key answers, managing or not.
+      const chip = mine.hero.querySelector('.key-chip') as HTMLElement
+      expect(chip.hidden).toBe(false)
+      expect(chip.classList.contains('has-key')).toBe(true)
+      expect(chip.textContent).toBe('Your key')
     } finally { mine.hero.remove(); mine.bands.remove() }
     const visitor = draw(null)
     document.body.append(visitor.hero, visitor.bands)
@@ -2251,6 +2256,13 @@ describe('a tap visits, a hold toggles', () => {
       await vi.waitFor(() => expect(namesIn(visitor.bands.querySelector('.dex-row.own') as HTMLElement).length).toBeGreaterThan(0))
       await new Promise(resolve => setTimeout(resolve, 20))
       expect(namesIn(visitor.bands.querySelector('.dex-row.own') as HTMLElement)).not.toContain('dylan')
+      // A visitor is shown no badge; managing, the page says no key answers here.
+      const chip = visitor.hero.querySelector('.key-chip') as HTMLElement
+      expect(chip.hidden).toBe(true)
+      manageOn(visitor.hero)
+      expect(chip.hidden).toBe(false)
+      expect(chip.classList.contains('has-key')).toBe(false)
+      expect(chip.textContent).toBe('No key here')
     } finally { visitor.hero.remove(); visitor.bands.remove() }
   })
 
