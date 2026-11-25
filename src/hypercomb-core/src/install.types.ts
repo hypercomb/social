@@ -245,8 +245,15 @@ export interface ModuleDraftsProvider {
   /** HOME, HELD (jwize, 2026-11-20): the drafts a card's Publish carries —
    *  this hive's own bee drafts over the trunk that runs here, none a hand
    *  here refused. Signatures only; an acceptance never travels. Optional,
-   *  so a caller asks only where the runtime has it. */
-  carry?(): Promise<readonly CarriedModuleDraft[]>
+   *  so a caller asks only where the runtime has it. Dependency drafts come
+   *  too only when asked for (`dependencies: true`), each marked `kind:
+   *  'dependency'`: a caller that does not ask is one that would put them
+   *  where an older reader settles them as tampered. */
+  carry?(options?: { readonly dependencies?: boolean }): Promise<readonly CarriedModuleDraft[]>
+  /** This runtime puts dependency drafts back too (a card's
+   *  `module:dependency-drafts` record). Absent: they are neither sent to `restore` nor
+   *  settled, so they are tried again once the runtime can. */
+  readonly restoresDependencies?: true
   /** Put the drafts a card carried back on this device, each HELD in the
    *  brood before its bytes are written or its pick is made. `bytes` reads a
    *  part by signature (each is hashed to its name again); `lineage` names
@@ -271,6 +278,8 @@ export interface CarriedModuleDraft {
   readonly parts?: readonly string[]
   /** It came home with a card (put back held here), not written here. */
   readonly carried?: true
+  /** What it drafts: a bee (absent) or a namespace dependency. */
+  readonly kind?: 'bee' | 'dependency'
 }
 
 /** What putting one carried draft back did.

@@ -612,7 +612,8 @@ describe('refs this tab does not hold', () => {
     expect(host.fetch).not.toHaveBeenCalled()
   })
 
-  it('the parts of a module:drafts record are leaves: the trunk a draft root names is never asked for', async () => {
+  // Dependency drafts ride in a record of their own kind, read the same way.
+  it.each(['module:drafts', 'module:dependency-drafts'])('the parts of a %s record are leaves: the trunk a draft root names is never asked for', async kind => {
     const TRUNK = 'd'.repeat(64), DEP = 'e'.repeat(64), TRUNK_BEE = 'f'.repeat(64), TO = '9'.repeat(64)
     const host = makeHost()
     vi.stubGlobal('fetch', host.fetch)
@@ -620,10 +621,17 @@ describe('refs this tab does not hold', () => {
     // hive restores them); each names the trunk and its other modules.
     const root = await resource(JSON.stringify({ draft: { kind: 'bee', of: TRUNK, path: 'games/solomon', section: 'src/a.ts', from: '', to: TO, at: 1 }, dependencies: [DEP] }))
     const folder = await resource(JSON.stringify({ name: 'solomon', cells: [], bees: [TO, TRUNK_BEE] }))
-    const record = await resource(JSON.stringify({ kind: 'module:drafts', appliesTo: ['business-card'], payload: { drafts: [{ root, layer: folder, from: '', parts: [TO] }] }, refs: [folder, root, TO].sort() }))
+    const drafts = [{ root, layer: folder, from: '', parts: [TO] }], refs = [folder, root, TO].sort()
+    // Dependency drafts sit behind one listing the record names alone (decoration-closure.ts).
+    const listing = kind === 'module:dependency-drafts'
+      ? await resource(`hypercomb module:dependency-drafts listing${String.fromCharCode(10)}${JSON.stringify({ drafts, refs })}`)
+      : ''
+    const record = await resource(JSON.stringify(listing
+      ? { kind, appliesTo: ['business-card'], payload: { listing }, refs: [listing] }
+      : { kind, appliesTo: ['business-card'], payload: { drafts }, refs }))
     const branch = await layer({ name: 'business-card', decorations: [record] })
     const zone = await hostHash('jwize.com')
-    for (const s of [branch, record, root, folder, TO]) await writeReceipt(`${s}.${zone}`)
+    for (const s of [branch, record, root, folder, TO, ...(listing ? [listing] : [])]) await writeReceipt(`${s}.${zone}`)
     const service = await make() as Service & { closureSigs: (sig: string, kind?: string) => Promise<{ sigs: Set<string>; complete: boolean }> }
     expect(await service.isClosureAvailable(branch, 'layer', true)).toBe(true)
     expect(await service.closureGaps(branch, 'layer', true)).toEqual([])

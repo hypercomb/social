@@ -352,4 +352,47 @@ describe('active genome: identities are never missing content', () => {
     expect(sigs.has(draftRoot) && sigs.has(draftLayer)).toBe(true)
     for (const outside of [trunk, trunkBee, trunkDependency]) expect(sigs.has(outside)).toBe(false)
   })
+
+  it('finds a dependency draft\'s module in the dependencies pool, not missing', async () => {
+    const root = s('a')
+    const draftsDecoration = s('b')
+    const draftRoot = s('c')
+    const trunkLayer = s('d')
+    const draftDependency = s('e')
+    const trunk = s('f'), fromDependency = s('3'), listing = s('4')
+    const layers = new Map([[root, { bytes: 100, value: { name: '/', decorations: [draftsDecoration] } }]])
+    // The record names its listing alone (sharing/decoration-closure.ts); the parts are listed in it.
+    const resources = new Map<string, { bytes: number; value?: unknown; listing?: string[] }>([
+      [draftsDecoration, { bytes: 40, value: { kind: 'module:dependency-drafts', payload: { listing }, refs: [listing] } }],
+      [listing, { bytes: 60, listing: [draftRoot, trunkLayer, fromDependency, draftDependency] }],
+      [draftRoot, { bytes: 20, value: { draft: { of: trunk, path: 'games', section: 'src/a.ts', from: fromDependency, to: draftDependency, kind: 'dependency', at: 1 }, dependencies: [draftDependency] } }],
+      [trunkLayer, { bytes: 20, value: { name: 'games', cells: [], bees: [] } }],
+    ])
+    const source: ActiveGenomeSource = {
+      epoch: () => 1,
+      root: async () => root,
+      lineage: async path => `lineage:${path.join('/')}`,
+      layer: async signature => layers.get(signature) ?? null,
+      head: async () => ({ marker: '00000000', layer: root, bytes: 10 }),
+      resource: async signature => resources.get(signature) ?? null,
+      beeBytes: async () => null,
+      dependencyBytes: async signature => signature === draftDependency || signature === fromDependency ? 300 : null,
+    }
+
+    const { record } = await collectActiveGenome(source)
+
+    expect(record?.missing).toEqual([])
+    expect(record?.complete).toBe(true)
+    expect(record?.objects.find(object => object.sig === draftDependency)?.kind).toBe('dependency')
+    expect(record?.objects.find(object => object.sig === fromDependency)?.kind).toBe('dependency')
+    expect(record?.objects.find(object => object.sig === listing)?.kind).toBe('resource')
+    expect(record?.objects.some(object => object.sig === trunk)).toBe(false)
+  })
+
+  it('reads a dependency drafts listing as the parts it names, and nothing else', async () => {
+    const { dependencyDraftsListingBytes, dependencyDraftsListingParts } = await import('../sharing/decoration-closure.js')
+    const bytes = dependencyDraftsListingBytes({ drafts: [{ root: s('c') }], refs: [s('c'), s('d'), 'not a sig'] })
+    expect(dependencyDraftsListingParts(bytes)).toEqual([s('c'), s('d')])
+    expect(dependencyDraftsListingParts(new TextEncoder().encode(JSON.stringify({ refs: [s('c')] })))).toEqual([])
+  })
 })

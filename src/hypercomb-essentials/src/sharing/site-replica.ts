@@ -40,6 +40,7 @@ import { isSandboxDoor, type DraftRestoreOutcome, type ModuleDraftsProvider } fr
 import { tileConvoId } from '../assistant/chat-thread.js'
 import { flattenLayerTree, type PlacementHistory } from '../history/layer-placement.js'
 import { isPublishedVisitorShell } from './behavior-enablement.js'
+import { readDependencyDraftsListing } from './decoration-closure.js'
 
 export const SITE_REPLICA_POOL = 'sites:replicas'
 /** SwarmAdopt's own receipt: adopted-root path → the publisher head folded
@@ -49,6 +50,10 @@ const SWARM_RECEIPTS_KEY = 'hc:synced-publisher-roots'
 const SIG_RE = /^[0-9a-f]{64}$/
 /** The decoration a card's Publish carries the owner's drafts in (site-drafts.ts). */
 export const DRAFTS_KIND = 'module:drafts'
+/** The decoration it carries the owner's DEPENDENCY drafts in: a kind of its
+ *  own, so an owner device on the essentials from before them, which lists
+ *  and rewrites only `module:drafts`, never takes them off the card. */
+export const DEPENDENCY_DRAFTS_KIND = 'module:dependency-drafts'
 
 export const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 export const SWARM_ADOPT_KEY = '@diamondcoreprocessor.com/SwarmAdoptDrone'
@@ -109,6 +114,8 @@ export type ManagedPublishLike = {
   /** Is this browser the card's owner's, and does his signed index name `layerSig` for `lineage`?
    *  Reads only; false on anything unknown (hypercomb-shim managed-publish.ts). Absent: never. */
   ownsThisCard?(lineage: string, layerSig: string): Promise<boolean>
+  /** It sends a dependency draft's bundles too (hypercomb-shim managed-publish.ts). Absent: never. */
+  readonly carriesDependencyParts?: boolean
 }
 
 export type ReplicaServices = {
@@ -121,7 +128,7 @@ export type ReplicaServices = {
    *  or on the hive its own signed index (hive-take.ts). */
   readonly publish?: Pick<ManagedPublishLike, 'ownsThisCard'>
   /** The runtime's module drafts: carries a card's drafts and puts them back held. */
-  readonly drafts?: Pick<ModuleDraftsProvider, 'carry' | 'restore'>
+  readonly drafts?: Pick<ModuleDraftsProvider, 'carry' | 'restore' | 'restoresDependencies'>
 }
 
 /** What the page record says (site-manage.view.ts siteManageRecord). */
@@ -490,11 +497,17 @@ const DRAFTS_SCAN_LANE = 8
 
 type CarriedRecord = { refs: string[]; drafts: { root: string; layer: string }[] }
 
-/** A `module:drafts` record that holds together, or null. */
+/** The two drafts kinds a card's root may wear (site-drafts.ts). */
+const DRAFTS_KINDS: readonly string[] = [DRAFTS_KIND, DEPENDENCY_DRAFTS_KIND]
+
+/** A `module:drafts` (or `module:dependency-drafts`) record that holds
+ *  together, or null. Both list their drafts in `payload.drafts` (a
+ *  dependency drafts record as its listing reads, decoration-closure.ts); the
+ *  kind says which they are. */
 const carriedRecord = (value: unknown): CarriedRecord | null => {
   if (!value || typeof value !== 'object') return null
   const record = value as { kind?: unknown; refs?: unknown; payload?: { drafts?: unknown } }
-  if (record.kind !== DRAFTS_KIND || !Array.isArray(record.refs)) return null
+  if (!DRAFTS_KINDS.includes(record.kind as string) || !Array.isArray(record.refs)) return null
   const refs = record.refs.map(s => String(s ?? ''))
   if (refs.some(s => !SIG_RE.test(s))) return null
   const listed = record.payload?.drafts
@@ -549,30 +562,52 @@ export async function restoreDrafts(
     // from this device only: a load never waits on the network to learn the
     // card carries no drafts. What is not here yet is read on a later load.
     const store = services.store
-    const decoration = options.local && typeof store.getResourceLocal === 'function'
-      ? async (sig: string): Promise<Uint8Array | null> => {
-        try {
-          const blob = await store.getResourceLocal!(sig)
-          return blob ? new Uint8Array(await blob.arrayBuffer()) : null
-        } catch { return null }
-      }
-      : bytes
-    const read = async (sig: string): Promise<{ drafts: boolean; carried: CarriedRecord | null }> => {
+    const here = async (sig: string): Promise<Uint8Array | null> => {
+      if (typeof store.getResourceLocal !== 'function') return null
+      try {
+        const blob = await store.getResourceLocal(sig)
+        return blob ? new Uint8Array(await blob.arrayBuffer()) : null
+      } catch { return null }
+    }
+    const decoration = options.local && typeof store.getResourceLocal === 'function' ? here : bytes
+    // Dependency drafts are looked for only by a runtime that puts them back:
+    // an older one would answer `tampered`, which settles. Not sent, they are
+    // not settled either, and come home once the runtime can.
+    const wanted = drafts.restoresDependencies === true ? DRAFTS_KINDS : [DRAFTS_KIND]
+    const read = (decoration: (sig: string) => Promise<Uint8Array | null>) => async (sig: string): Promise<{ kind: string; carried: CarriedRecord | null } | null> => {
       const held = await decoration(sig)
-      if (!held) return { drafts: false, carried: null }
+      if (!held) return null
       let parsed: unknown
-      try { parsed = JSON.parse(new TextDecoder().decode(held)) } catch { return { drafts: false, carried: null } }
-      if ((parsed as { kind?: unknown })?.kind !== DRAFTS_KIND) return { drafts: false, carried: null }
-      return { drafts: true, carried: carriedRecord(parsed) }
+      try { parsed = JSON.parse(new TextDecoder().decode(held)) } catch { return null }
+      const kind = (parsed as { kind?: unknown })?.kind
+      if (typeof kind !== 'string' || !wanted.includes(kind)) return null
+      if (kind !== DEPENDENCY_DRAFTS_KIND) return { kind, carried: carriedRecord(parsed) }
+      // Dependency drafts sit in the one resource the decoration names, its
+      // listing (decoration-closure.ts): read the same way the record is.
+      const listingSig = String((parsed as { payload?: { listing?: unknown } })?.payload?.listing ?? '')
+      const listing = SIG_RE.test(listingSig) ? readDependencyDraftsListing(await decoration(listingSig)) : null
+      return { kind, carried: listing ? carriedRecord({ kind, refs: listing.refs, payload: { drafts: listing.drafts } }) : null }
     }
-    // A few at a time, newest first within each round: the newest drafts
-    // record found is the one read, as one at a time would read it.
-    let carried: CarriedRecord | null = null
-    for (let at = 0; at < sigs.length; at += DRAFTS_SCAN_LANE) {
-      const found = (await Promise.all(sigs.slice(at, at + DRAFTS_SCAN_LANE).map(read))).find(entry => entry.drafts)
-      if (found) { carried = found.carried; break }
+    // A few at a time, newest first within each round: the newest record of
+    // each kind found is the one read, as one at a time would read it.
+    // Once a record is found, the rest of the slot is read from this device
+    // only: a card with bee drafts and no dependency drafts (every card today)
+    // never fetches its whole root to learn that, as PR-201's scan stopped at
+    // the first. One not here yet is read on a later load, as `local` reads.
+    const newest = new Map<string, CarriedRecord | null>()
+    for (let at = 0; at < sigs.length && newest.size < wanted.length; at += DRAFTS_SCAN_LANE) {
+      const reader = read(newest.size ? here : decoration)
+      for (const found of await Promise.all(sigs.slice(at, at + DRAFTS_SCAN_LANE).map(reader))) {
+        if (found && !newest.has(found.kind)) newest.set(found.kind, found.carried)
+      }
     }
-    if (!carried) return undefined
+    // Bee drafts first, as the kinds are listed.
+    const records = wanted.map(kind => newest.get(kind)).filter((record): record is CarriedRecord => !!record)
+    if (!records.length) return undefined
+    const carried: CarriedRecord = {
+      refs: [...new Set(records.flatMap(record => record.refs))],
+      drafts: records.flatMap(record => record.drafts),
+    }
     const settled = new Set(receipt.drafts ?? [])
     const behind = receipt.behind ?? []
     const owed = carried.drafts.filter(draft => !settled.has(draft.root))

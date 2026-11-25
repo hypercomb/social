@@ -3,6 +3,7 @@
 import { EffectBus } from '@hypercomb/core'
 import { Store } from './store'
 import { activeInstallIndex } from './install-index.js'
+import { heldDependencies, isHeldDependency } from './held-dependencies.js'
 
 /** Line 2 of an atom or atomized barrel, written by the essentials build
  *  (`LAZY_MARKER_LINE` in build-module.ts). */
@@ -37,8 +38,11 @@ export class DependencyLoader extends EventTarget {
     }
 
     const run = async (): Promise<void> => {
+      // What the brood is holding (held-dependencies.ts), asked once per load:
+      // a held dependency draft is never imported, whichever path named it.
+      const held = await heldDependencies()
       // Use cached alias map from resolveImportMap() if available (skips OPFS re-scan)
-      let pending = await this.#collectPending()
+      let pending = await this.#collectPending(held)
       if (!pending.length) {
         console.log('[dependency-loader] no pending dependencies')
         return
@@ -65,13 +69,14 @@ export class DependencyLoader extends EventTarget {
       // Verify signatures then import concurrently
       const results = await Promise.allSettled(
         pending.map(({ sig, alias }) =>
-          this.#verifyAndImport(sig, alias)
+          this.#verifyAndImport(sig, alias, held)
         )
       )
 
       const loadedSigs: string[] = []
       const failedSigs: string[] = []
       let lazyCount = 0
+      let heldCount = 0
 
       for (let i = 0; i < results.length; i++) {
         const r = results[i]
@@ -79,6 +84,8 @@ export class DependencyLoader extends EventTarget {
 
         if (r.status === 'fulfilled' && r.value === 'lazy') {
           lazyCount++
+        } else if (r.status === 'fulfilled' && r.value === 'held') {
+          heldCount++
         } else if (r.status === 'fulfilled') {
           this.#loaded.add(sig)
           loadedSigs.push(sig)
@@ -88,6 +95,7 @@ export class DependencyLoader extends EventTarget {
         }
       }
 
+      if (heldCount) console.warn(`[dependency-loader] ${heldCount} held dependency draft(s) not imported — they wait for your hand`)
       if (lazyCount) console.log(`[dependency-loader] ${lazyCount} atom(s) left to load through the import map on demand`)
 
       this.#dependencyCount = this.#dependencyCount + loadedSigs.length
@@ -106,10 +114,14 @@ export class DependencyLoader extends EventTarget {
     try { await this.#loading } finally { this.#loading = null }
   }
 
-  #collectPending = async (): Promise<{ sig: string; alias: string }[]> => {
+  #collectPending = async (held: ReadonlySet<string>): Promise<{ sig: string; alias: string }[]> => {
     // Fast path: use cached alias map from resolveImportMap() (web mode)
     const cachedMap = (globalThis as any).__hypercombAliasMap as Map<string, string> | undefined
-    if (cachedMap && cachedMap.size > 0) {
+    // A bag whose every leaf is held leaves the map EMPTY, yet it is still
+    // the bag's word: those namespaces wait for a hand, and a pool scan here
+    // would fill them with the previous trunk's bundle or any stale copy.
+    const heldAliases = (globalThis as any).__hypercombHeldAliases as ReadonlySet<string> | undefined
+    if (cachedMap && (cachedMap.size > 0 || (heldAliases?.size ?? 0) > 0)) {
       const pending: { sig: string; alias: string }[] = []
       for (const [alias, sig] of cachedMap) {
         if (this.#loaded.has(sig)) {
@@ -144,6 +156,9 @@ export class DependencyLoader extends EventTarget {
             console.log(`[dependency-loader] ${sig} already loaded, skipping`)
             continue
           }
+          // A held draft beside the trunk's bundle: never queued, so it can
+          // neither run nor shadow the namespace it drafts.
+          if (isHeldDependency(held, sig)) continue
 
           try {
             const file = await (entry as FileSystemFileHandle).getFile()
@@ -164,8 +179,12 @@ export class DependencyLoader extends EventTarget {
     return pending
   }
 
-  #verifyAndImport = async (sig: string, alias: string): Promise<'imported' | 'lazy'> => {
+  #verifyAndImport = async (sig: string, alias: string, held: ReadonlySet<string>): Promise<'imported' | 'lazy' | 'held'> => {
     const pureSig = sig.replace(/\.js$/i, '')
+    // THE BACKSTOP. The map is gated where it is made, but a map can be stale
+    // (an older shell's, or one minted before the hold landed): a held sig is
+    // never imported from here, whatever named it.
+    if (isHeldDependency(held, pureSig)) return 'held'
 
     // Import from verified OPFS bytes via a self-typed blob URL — the same
     // pattern Store.getBee uses for bees, and for the same reason: the

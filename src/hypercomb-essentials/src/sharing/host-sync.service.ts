@@ -105,7 +105,7 @@
 // read-back GET. Every other answer keeps the read-back.
 
 import { CHILD_SLOTS, EffectBus, NIP98_KIND, SignatureService, SWARM_LIFECYCLE_KIND, registerPoolMeaning, spellPoolMeaning, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
-import { decorationClosureSigs, nestedResourceSigs } from './decoration-closure.js'
+import { decorationClosureSigs, dependencyDraftsListingParts, nestedResourceSigs } from './decoration-closure.js'
 import { isJoinedHere, ownZone } from './membership.js'
 import { foldContentLabel, HOST_DOMAIN_RE, isLoopbackHost, isPublishNode, legacyContentFace, siteZoneOf } from './zone-door.js'
 import { swarmHosts, type SwarmHostChoice, type SwarmHostResolver, type SwarmHostSource } from './swarm-hosts.js'
@@ -135,7 +135,10 @@ const isDraftsRecord = (raw: ArrayBuffer | Uint8Array): boolean => {
   if (bytes.byteLength > 1_048_576 || bytes[0] !== 0x7b /* { */) return false
   try {
     const text = new TextDecoder().decode(bytes)
-    return text.includes('module:drafts') && (JSON.parse(text) as { kind?: unknown })?.kind === 'module:drafts'
+    if (!text.includes('module:drafts') && !text.includes('module:dependency-drafts')) return false
+    // Bee drafts, and dependency drafts in a record of their own (site-drafts.ts).
+    const kind = (JSON.parse(text) as { kind?: unknown })?.kind
+    return kind === 'module:drafts' || kind === 'module:dependency-drafts'
   } catch { return false }
 }
 
@@ -1139,7 +1142,13 @@ export class HostSyncService extends EventTarget {
    *  resource's nested sigs), read from local bytes; nothing for a part of a
    *  `module:drafts` record, which is a leaf. */
   readonly #resourceRefs = async (sig: string, bytes: ArrayBuffer): Promise<string[]> => {
-    if (this.#draftParts.has(sig)) return []
+    if (this.#draftParts.has(sig)) {
+      // A `module:dependency-drafts` record's one part is its listing
+      // (decoration-closure.ts): what it lists are parts too, never descended.
+      const listed = dependencyDraftsListingParts(bytes).filter(ref => ref !== sig)
+      for (const ref of listed) this.#draftParts.add(ref)
+      return listed
+    }
     const nested = [
       ...await decorationClosureSigs(bytes, r => this.#readLocalBytes(r, 'resource')),
       ...nestedResourceSigs(bytes),

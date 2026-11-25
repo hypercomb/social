@@ -64,6 +64,9 @@ export type ManagedPublish = {
    *  `lineage` at this site door? Reads only — no key list carried, nothing signed or written — and
    *  false on anything unknown. It proves a binding, not a live hand: a draft it lets home stays held. */
   ownsThisCard(lineage: string, layerSig: string): Promise<boolean>
+  /** A `part` is read from the dependencies pool too, so a card may carry dependency drafts (essentials
+   *  site-drafts.ts asks this before it puts one on the card). */
+  readonly carriesDependencyParts: true
 }
 
 const SIG = /^[0-9a-f]{64}$/
@@ -136,9 +139,27 @@ const envelopeChild = (record: Record<string, unknown>): [string, ClosureKind] |
   return [payload.sig, payload.kind === 'layer' ? 'layer' : 'resource']
 }
 
+/** A card's dependency drafts listing (essentials sharing/decoration-closure.ts, the same head): the
+ *  one part a `module:dependency-drafts` record names. Not JSON, so a walker from before dependency
+ *  drafts takes it for a leaf and never walks down through a draft root into its trunk. */
+const DEPENDENCY_DRAFTS_LISTING_HEAD = 'hypercomb module:dependency-drafts listing\n'
+
+/** The parts a listing names, each a `part` of its own; [] for any other bytes. */
+const listingParts = (bytes: Uint8Array): Array<[string, ClosureKind]> => {
+  if (bytes[0] !== DEPENDENCY_DRAFTS_LISTING_HEAD.charCodeAt(0)) return []
+  const text = decode(bytes)
+  if (!text.startsWith(DEPENDENCY_DRAFTS_LISTING_HEAD)) return []
+  try {
+    const refs = (JSON.parse(text.slice(DEPENDENCY_DRAFTS_LISTING_HEAD.length)) as { refs?: unknown })?.refs
+    return [...new Set((Array.isArray(refs) ? refs : []).map(sigOf).filter(Boolean))].map(sig => [sig, 'part'])
+  } catch { return [] }
+}
+
 /** What an atom names that must travel with it, and as what. */
 export const closureChildren = (kind: ClosureKind, bytes: Uint8Array): Array<[string, ClosureKind]> => {
-  if (kind === 'leaf' || kind === 'part') return []
+  if (kind === 'leaf') return []
+  // A part is never walked into; a dependency drafts listing only names more parts.
+  if (kind === 'part') return listingParts(bytes)
   if (kind === 'page') {
     const text = decode(bytes)
     return text.includes('�') ? [] : pageRefs(text).map(sig => [sig, 'leaf'])
@@ -162,7 +183,8 @@ export const closureChildren = (kind: ClosureKind, bytes: Uint8Array): Array<[st
     // Identity only: no bytes stand behind a group's or a creation's signature.
     if (recordKind === 'group' || recordKind === 'creation') return []
     const refs = Array.isArray(record['refs']) ? record['refs'].map(sigOf).filter(Boolean) : []
-    if (recordKind === 'module:drafts') return refs.map(sig => [sig, 'part'])
+    // A card's drafts (essentials site-drafts.ts): bee drafts, and dependency drafts in a record of their own.
+    if (recordKind === 'module:drafts' || recordKind === 'module:dependency-drafts') return refs.map(sig => [sig, 'part'])
     if (refs.length) return refs.map(sig => [sig, 'leaf'])
     const payload = record['payload'] && typeof record['payload'] === 'object' ? record['payload'] as Record<string, unknown> : {}
     if (recordKind === 'reference') { const bouquet = sigOf(payload['requiredBouquet']); return bouquet ? [[bouquet, 'leaf']] : [] }
@@ -228,6 +250,8 @@ type LocalStore = {
   /** A draft's module text: the parts of a `module:drafts` record are bees as well as layers. Read
    *  for a `part` only: a sig a note, a data blob or a page happens to quote is never a module sent. */
   getBeeBytes?: (sig: string) => Promise<Uint8Array | null>
+  /** A dependency draft's bundle: its parts sit in the dependencies pool. Read for a `part` only, after the bees pool. */
+  getDependencyBytes?: (sig: string) => Promise<Uint8Array | null>
 }
 
 const storeBytes: LocalBytes = async (sig, kind) => {
@@ -236,7 +260,8 @@ const storeBytes: LocalBytes = async (sig, kind) => {
   try { const layer = await store.getLayerPoolBytes?.(sig); if (layer) return layer } catch { /* a resource, perhaps */ }
   try { const blob = await store.getResourceLocal?.(sig); if (blob) return new Uint8Array(await blob.arrayBuffer()) } catch { /* a module, perhaps */ }
   if (kind !== 'part') return null
-  try { const bee = await store.getBeeBytes?.(sig); if (bee) return bee } catch { /* held nowhere here */ }
+  try { const bee = await store.getBeeBytes?.(sig); if (bee) return bee } catch { /* a dependency, perhaps */ }
+  try { const dependency = await store.getDependencyBytes?.(sig); if (dependency) return dependency } catch { /* held nowhere here */ }
   return null
 }
 
@@ -399,6 +424,8 @@ export const managedPublish = (deps: ManagedPublishDeps = {}): ManagedPublish =>
       return next
     },
     ownsThisCard: async (lineage, layerSig) => { try { return await owns(lineage, layerSig) } catch { return false } },
+    // A card's dependency drafts may ride: their bundles are read from the dependencies pool (storeBytes).
+    carriesDependencyParts: true,
   }
 }
 

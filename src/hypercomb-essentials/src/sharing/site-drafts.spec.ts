@@ -16,7 +16,7 @@ vi.mock('@hypercomb/core', async importOriginal => ({
   broodRecordOnDisk: async (sig: string) => brood.get(sig) ?? null,
 }))
 import { writeDecoration } from '../commands/decoration-manifest.js'
-import { DRAFTS_KIND, carryDrafts, composeDraftsRecord, draftsOwed, planDrafts, portCarriesDrafts, type ComposedDrafts, type DraftDecorations, type DraftsRecord, type KnowsDraft } from './site-drafts.js'
+import { DEPENDENCY_DRAFTS_KIND, DRAFTS_KIND, carryDrafts, composeDraftsRecord, draftsOwed, planDrafts, portCarriesDependencyParts, portCarriesDrafts, type ComposedDrafts, type DraftDecorations, type DraftsRecord, type KnowsDraft } from './site-drafts.js'
 import type { HistoryLike } from './site-replica.js'
 
 const sig = (ch: string): string => ch.repeat(64)
@@ -34,14 +34,22 @@ const history = (head: string | null): HistoryLike => ({
   commitLayer: async () => '',
 })
 
+/** The card's decorations: a bare signature is a bee drafts record (`module:drafts`) whose bytes are not read. */
 const decorations = (onCard: (string | ComposedDrafts)[]) => {
   const calls: string[] = []
+  const written: DraftsRecord[] = []
   const ops: DraftDecorations = {
-    list: async () => onCard.map(s => typeof s === 'string' ? { sig: s } : { sig: s.sig, record: s.record }),
-    write: async (record: DraftsRecord) => { calls.push(`write ${record.payload.drafts.length}`); return 'w' },
+    list: async (_segments, kind = DRAFTS_KIND) => onCard
+      .filter(s => (typeof s === 'string' ? kind === DRAFTS_KIND : s.record.kind === kind))
+      .map(s => typeof s === 'string' ? { sig: s } : { sig: s.sig, record: s.record }),
+    write: async (record: DraftsRecord) => {
+      written.push(record)
+      calls.push(record.kind === DEPENDENCY_DRAFTS_KIND ? `write dependencies ${record.payload.drafts.length}` : `write ${record.payload.drafts.length}`)
+      return 'w'
+    },
     remove: async (s: string) => { calls.push(`remove ${s}`) },
   }
-  return { ops, calls }
+  return { ops, calls, written }
 }
 
 describe('the drafts record', () => {
@@ -315,10 +323,171 @@ describe('a publish port from before drafts travelled', () => {
     expect(publishNow).toMatch(/if \(carries && typeof provider\?\.carry === 'function' && !plan\) \{ unread\(\); return \}/)
     expect(publishNow).toMatch(/\} catch \{ unread\(\); return \}/)
     expect(publishNow).not.toContain('published as it stands')
-    // Every draftsOwed asked on the page is asked behind the same gate.
+    // Every draftsOwed asked on the page is asked behind the same gate, of
+    // the page's own port, and says whether that port sends dependency drafts.
     const owed = view.split('await draftsOwed(').length - 1
-    const gated = view.split(/portCarriesDrafts\(ioc\(\)\?\.get\?\.<ManagedPublishLike>\(MANAGED_PUBLISH_KEY\)\)\s*\?\s*await draftsOwed\(/).length - 1
+    const gated = view.split(/const port = ioc\(\)\?\.get\?\.<ManagedPublishLike>\(MANAGED_PUBLISH_KEY\)\s*\n[^\n]*portCarriesDrafts\(port\)\s*\?\s*await draftsOwed\([^\n]*portCarriesDependencyParts\(port\)\)/).length - 1
     expect(owed).toBeGreaterThan(0)
     expect(gated).toBe(owed)
+    // Dependency drafts go on the card only through a port that sends their bundles.
+    expect(publishNow).toContain('const dependencyParts = portCarriesDependencyParts(port)')
+    expect(publishNow).toMatch(/planDrafts\([^\n]*settled, dependencyParts\)/)
+    expect(publishNow).toMatch(/carryDrafts\(\{[^}]*dependencyParts,/)
+  })
+
+  it('carries dependency drafts only through a port that says it sends their bundles', () => {
+    const publishRoot = async () => ({ ok: true })
+    const ownsThisCard = async () => true
+    expect(portCarriesDependencyParts({ publishRoot, ownsThisCard, carriesDependencyParts: true } as never)).toBe(true)
+    expect(portCarriesDependencyParts({ publishRoot, ownsThisCard } as never)).toBe(false)
+    // The flag alone, without the drafts closure, is not enough.
+    expect(portCarriesDependencyParts({ publishRoot, carriesDependencyParts: true } as never)).toBe(false)
+    expect(portCarriesDependencyParts(undefined)).toBe(false)
+  })
+})
+
+// DEPENDENCY DRAFTS (jwize, 2026-11-24): beside the bee drafts, in a record of
+// their own that neither a reader nor a writer from before them lists.
+describe('dependency drafts on the card', () => {
+  const D: CarriedModuleDraft = { root: sig('c'), layer: sig('6'), to: sig('7'), from: sig('8'), parts: [sig('7')], kind: 'dependency' }
+  const both = { carry: async (options?: { dependencies?: boolean }) => (options?.dependencies ? [A, D] : [A]) }
+
+  it('ride in a module:dependency-drafts record of their own, never in module:drafts, and ask the runtime for them', async () => {
+    const asked: unknown[] = []
+    const ask = { carry: async (options?: { dependencies?: boolean }) => { asked.push(options); return [A, D] } }
+    const bees = await composeDraftsRecord(ask, CARD)
+    const dependencies = await composeDraftsRecord(ask, CARD, DEPENDENCY_DRAFTS_KIND)
+    expect(asked).toEqual([{ dependencies: true }, { dependencies: true }])
+    expect(bees?.record).toMatchObject({ kind: DRAFTS_KIND, payload: { drafts: [{ root: A.root, layer: A.layer, from: A.from, parts: [A.to] }] } })
+    expect(dependencies?.record).toMatchObject({ kind: DEPENDENCY_DRAFTS_KIND, appliesTo: CARD, payload: { drafts: [{ root: D.root, layer: D.layer, from: D.from, parts: [D.to] }] } })
+    expect(new Set(dependencies?.record.refs)).toEqual(new Set([D.root, D.layer, D.to, D.from]))
+    // The kind is the record's: no entry carries a kind field of its own.
+    expect(JSON.stringify(dependencies?.record)).not.toContain('"kind":"dependency"')
+  })
+
+  it('a card carrying bee drafts alone keeps the record, and the signature, it had', async () => {
+    const beesOnly = await composeDraftsRecord(provider([A]), CARD)
+    const plan = await planDrafts(both, CARD, decorations([beesOnly!]).ops, known, [], false)
+    expect(plan).toMatchObject({ unchanged: true, dependencies: { composed: null, unchanged: true } })
+    expect(JSON.stringify(plan?.composed?.record)).not.toContain(D.root)
+  })
+
+  it('through an older port, this device\'s dependency drafts stay off the card and are not owed; the bee drafts still go', async () => {
+    const { ops } = decorations([])
+    const old = await planDrafts(both, CARD, ops, known, [], false)
+    expect(old?.composed?.record.payload.drafts.map(d => d.root)).toEqual([A.root])
+    expect(old?.dependencies.composed).toBeNull()
+    expect(await draftsOwed(both, 'business-card', ops, known, false)).toBe(true)
+    // Only the dependency draft is new here: nothing is owed through the older port.
+    const card = await composeDraftsRecord(provider([A]), CARD)
+    const onCard = decorations([card!])
+    expect(await draftsOwed(both, 'business-card', onCard.ops, known, false)).toBe(false)
+    expect(await draftsOwed(both, 'business-card', onCard.ops, known, true)).toBe(true)
+    // Through a port that sends them, both go on, each in its own record.
+    const plan = await planDrafts(both, CARD, onCard.ops, known, [], true)
+    expect(plan?.drafts).toBe(2)
+    expect(plan?.composed?.sig).toBe(card!.sig)
+    expect(plan?.dependencies.composed?.record.payload.drafts.map(d => d.root)).toEqual([D.root])
+    expect(plan?.running).toEqual([A.root, D.root].sort())
+    // Only the dependency record is written; the bee record stays as it is.
+    await carryDrafts({ history: history(sig('f')), drafts: both, dependencyParts: true }, 'business-card', onCard.ops, known)
+    expect(onCard.calls).toEqual(['write dependencies 1'])
+  })
+
+  it('one already on the card stays through an older port, and is read back with its kind', async () => {
+    const bees = await composeDraftsRecord(both, CARD)
+    const dependencies = await composeDraftsRecord(both, CARD, DEPENDENCY_DRAFTS_KIND)
+    const onCard = decorations([bees!, dependencies!])
+    const plan = await planDrafts(both, CARD, onCard.ops, known, [], false)
+    expect(plan?.unchanged).toBe(true)
+    expect(plan?.dropped).toBe(0)
+    // A device that runs neither keeps both, knowing nothing of them.
+    const none = await planDrafts(provider([]), CARD, onCard.ops, unknown, [], false)
+    expect(none?.dependencies.composed?.record.payload.drafts.map(d => d.root)).toEqual([D.root])
+    expect(none?.unchanged).toBe(true)
+  })
+
+  it('an owner device on the essentials from before them rewrites module:drafts alone, and the dependency drafts stay on the card', async () => {
+    const card = decorations([])
+    await carryDrafts({ history: history(sig('f')), drafts: both, dependencyParts: true }, 'business-card', card.ops, known)
+    expect(card.calls).toEqual(['write 1', 'write dependencies 1'])
+    // The older writer (PR 201) lists only the `module:drafts` records, reads
+    // only their `payload.drafts`, writes its own bee drafts and takes every
+    // record it listed off: whatever else the card wears, it never touches.
+    const beyondIt = card.written.filter(record => record.kind !== DRAFTS_KIND)
+    expect(JSON.stringify(beyondIt)).toContain(D.root)
+    expect(JSON.stringify(card.written.filter(record => record.kind === DRAFTS_KIND))).not.toContain(D.root)
+  })
+
+  describe('on the card, behind one listing', () => {
+    const before = (window as { ioc?: unknown }).ioc
+    afterEach(() => { (window as { ioc?: unknown }).ioc = before })
+
+    // A walker from before dependency drafts (PR 201 essentials) knows no
+    // `module:dependency-drafts` kind: it follows the decoration's refs, and on
+    // a deep walk harvests every signature the record holds and every one a
+    // fetched JSON record holds. Had the draft root sat in the decoration, it
+    // would have walked from it into the trunk it names (`draft.of`, every
+    // trunk dependency, the folder layer's cells) — none of it on the card's host.
+    it('names its listing alone, and a walker from before them takes the listing for a leaf', async () => {
+      const held = new Map<string, Uint8Array>()
+      const signOf = (bytes: Uint8Array) => SignatureService.sign(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
+      const store = {
+        putResource: async (blob: Blob) => {
+          const bytes = await new Promise<Uint8Array>(resolve => {
+            const reader = new FileReader()
+            reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer))
+            reader.readAsArrayBuffer(blob)
+          })
+          const put = await signOf(bytes)
+          held.set(put, bytes)
+          return put
+        },
+        getResource: async (s: string) => {
+          const bytes = held.get(s)
+          return bytes ? { text: async () => new TextDecoder().decode(bytes), arrayBuffer: async () => bytes.slice().buffer } : null
+        },
+      }
+      let slot: string[] = []
+      const historyService = { sign: async () => 'loc', currentLayerAt: async () => ({ decorations: slot }) }
+      const committer = { commitSlotAppend: async () => undefined, commitSlotRemove: async () => undefined }
+      ;(window as { ioc?: unknown }).ioc = {
+        get: (key: string) => key === '@hypercomb.social/Store' ? store
+          : key === '@diamondcoreprocessor.com/HistoryService' ? historyService
+          : key === '@diamondcoreprocessor.com/LayerCommitter' ? committer : undefined,
+      }
+      const composed = await composeDraftsRecord(both, CARD, DEPENDENCY_DRAFTS_KIND)
+      const plan = await planDrafts(both, CARD, undefined, known, [], true)
+      await carryDrafts({ history: history(sig('f')), drafts: both, dependencyParts: true, plan }, 'business-card', undefined, known)
+      const landed = held.get(composed!.sig)
+      expect(landed).toBeDefined()
+      const text = new TextDecoder().decode(landed!)
+      const record = JSON.parse(text) as { kind: string; payload: { listing: string }; refs: string[] }
+      expect(record.kind).toBe(DEPENDENCY_DRAFTS_KIND)
+      expect(record.refs).toEqual([record.payload.listing])
+      for (const part of [D.root, D.layer, D.to, D.from!]) expect(text).not.toContain(part)
+      // The listing is not JSON: the older walkers' every gate takes it for a leaf.
+      const listing = held.get(record.payload.listing)!
+      expect(String.fromCharCode(listing[0]!)).not.toMatch(/[[{]/)
+      const { decorationClosureSigs, nestedResourceSigs } = await import('./decoration-closure.js')
+      expect(await decorationClosureSigs(landed!, async () => null)).toEqual([record.payload.listing])
+      expect(await decorationClosureSigs(listing, async () => null)).toEqual([])
+      expect(nestedResourceSigs(listing)).toEqual([])
+      // Read back through the listing, the card carries exactly what was written.
+      slot = [composed!.sig]
+      const again = await planDrafts(both, CARD, undefined, known, [], true)
+      expect(again?.dependencies.unchanged).toBe(true)
+      expect(again?.dependencies.onCard[0]?.record).toMatchObject({ kind: DEPENDENCY_DRAFTS_KIND, payload: { drafts: [{ root: D.root, layer: D.layer, from: D.from, parts: [D.to] }] } })
+    })
+  })
+
+  it('each record never names more than a reader takes', async () => {
+    const many: CarriedModuleDraft[] = Array.from({ length: 140 }, (_, i) => ({
+      root: i.toString(16).padStart(64, '0'), layer: sig('9'), to: (i + 1000).toString(16).padStart(64, '0'), from: sig('8'),
+      ...(i % 2 ? { kind: 'dependency' as const } : {}),
+    }))
+    const provided = { carry: async () => many }
+    expect((await composeDraftsRecord(provided, CARD))?.record.payload.drafts.length).toBe(64)
+    expect((await composeDraftsRecord(provided, CARD, DEPENDENCY_DRAFTS_KIND))?.record.payload.drafts.length).toBe(64)
   })
 })
