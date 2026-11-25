@@ -5,9 +5,10 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  DRAFTS_KIND, LAG_WINDOW_MS, lagging, landed, notePublished, readReceipt, reconcile, replicaRoute, replicate, takePublished,
+  DEPENDENCY_DRAFTS_KIND, DRAFTS_KIND, LAG_WINDOW_MS, lagging, landed, notePublished, readReceipt, reconcile, replicaRoute, replicate, takePublished,
   type ReplicaReceipt, type ReplicaServices,
 } from './site-replica'
+import { dependencyDraftsListingBytes } from './decoration-closure'
 
 // The sandbox door is read off the page's hostname; a spec says it outright.
 const door = vi.hoisted(() => ({ sandbox: false }))
@@ -137,13 +138,15 @@ describe('drafts that come home with the card', () => {
     outcome?: string
     record?: unknown
     decorations?: string[]
+    /** More decorations on the card, by signature (a dependency drafts record). */
+    extra?: Record<string, unknown>
   } = {}) {
     const blob = (value: unknown): Blob => new NodeBlob([JSON.stringify(value)]) as unknown as Blob
     const docs = new Map<string, ArrayBuffer>()
     const pool = {} as FileSystemDirectoryHandle
     const heads = new Map<string, { marker: string; sig: string; layer: unknown }>()
     const layers: Record<string, unknown> = {
-      [HEAD]: { name: 'business-card', decorations: over.decorations ?? [sig('4'), DREC] },
+      [HEAD]: { name: 'business-card', decorations: over.decorations ?? [sig('4'), DREC, ...Object.keys(over.extra ?? {})] },
       [NEWER]: { name: 'business-card', decorations: [DREC] },
     }
     const restored: Array<{ drafts: unknown; lineage: string }> = []
@@ -169,7 +172,7 @@ describe('drafts that come home with the card', () => {
       adopt: {
         adoptResolvedBranch: async () => {
           const status = over.status ?? 'committed'
-          if (status !== 'unavailable') heads.set('loc:/business-card', { marker: '1', sig: sig('9'), layer: { name: 'business-card', decorations: [DREC] } })
+          if (status !== 'unavailable') heads.set('loc:/business-card', { marker: '1', sig: sig('9'), layer: { name: 'business-card', decorations: [DREC, ...Object.keys(over.extra ?? {})] } })
           return status
         },
       },
@@ -177,6 +180,7 @@ describe('drafts that come home with the card', () => {
         fetchBySig: async (k: string) => {
           fetched.push(k)
           if (k === DREC) return encode(over.record ?? carried)
+          if (over.extra && k in over.extra) { const v = over.extra[k]; return ArrayBuffer.isView(v) ? v as Uint8Array : encode(v) }
           if (k === sig('4')) return encode({ kind: 'visual:website:page', payload: {} })
           return null
         },
@@ -206,6 +210,39 @@ describe('drafts that come home with the card', () => {
     expect(done).toMatchObject({ kind: 'replicated', drafts: { home: 1, otherBuild: 0 } })
     expect(restored).toEqual([{ drafts: [{ root: ROOT, layer: LAYER }], lineage: 'business-card' }])
     expect((await readReceipt(s.store, 'business-card'))?.drafts).toEqual([ROOT])
+  })
+
+  it('a dependency draft in its own record goes only to a runtime that puts it back; to an older one it is neither sent nor settled', async () => {
+    const DROOT = sig('d'), DTO = sig('e'), DDREC = sig('6'), LISTING = sig('7')
+    // On the card the record names its listing alone; the drafts sit in it.
+    const dependencyRecord = { kind: DEPENDENCY_DRAFTS_KIND, appliesTo: ['business-card'], payload: { listing: LISTING }, refs: [LISTING] }
+    const listingOf = (refs: string[]) => dependencyDraftsListingBytes({ drafts: [{ root: DROOT, layer: LAYER }], refs })
+    const extra = { [DDREC]: dependencyRecord, [LISTING]: listingOf([DROOT, LAYER, DTO]) }
+    // An older runtime: the bee draft comes home, the dependency draft waits.
+    const old = home({ extra })
+    await replicate(old.s, SITE, WHERE)
+    expect(old.restored).toEqual([{ drafts: [{ root: ROOT, layer: LAYER }], lineage: 'business-card' }])
+    expect((await readReceipt(old.s.store, 'business-card'))?.drafts).toEqual([ROOT])
+    // Once the runtime can, the same card brings it home on its next load.
+    ;(old.s.drafts as { restoresDependencies?: true }).restoresDependencies = true
+    expect(await reconcile(old.s, SITE, WHERE)).toEqual({ kind: 'current', drafts: { home: 1, otherBuild: 0 } })
+    expect(old.restored.at(-1)).toEqual({ drafts: [{ root: DROOT, layer: LAYER }], lineage: 'business-card' })
+    expect((await readReceipt(old.s.store, 'business-card'))?.drafts).toEqual([ROOT, DROOT])
+    // A runtime that can takes both at once, bee drafts first.
+    const next = home({ extra })
+    ;(next.s.drafts as { restoresDependencies?: true }).restoresDependencies = true
+    await replicate(next.s, SITE, WHERE)
+    expect(next.restored).toEqual([{ drafts: [{ root: ROOT, layer: LAYER }, { root: DROOT, layer: LAYER }], lineage: 'business-card' }])
+    // A dependency entry its refs do not list makes that record unreadable, as a bee entry does; the bee record still comes home.
+    const torn = home({ extra: { [DDREC]: dependencyRecord, [LISTING]: listingOf([LAYER, DTO]) } })
+    ;(torn.s.drafts as { restoresDependencies?: true }).restoresDependencies = true
+    await replicate(torn.s, SITE, WHERE)
+    expect(torn.restored).toEqual([{ drafts: [{ root: ROOT, layer: LAYER }], lineage: 'business-card' }])
+    // A dependency entry in the bee record is not one: it is read as a bee draft, as an older reader reads it.
+    const inside = home({ record: { ...carried, payload: { ...carried.payload, dependencies: [{ root: DROOT, layer: LAYER }] }, refs: [ROOT, LAYER, TO, DROOT, DTO] } })
+    ;(inside.s.drafts as { restoresDependencies?: true }).restoresDependencies = true
+    await replicate(inside.s, SITE, WHERE)
+    expect(inside.restored).toEqual([{ drafts: [{ root: ROOT, layer: LAYER }], lineage: 'business-card' }])
   })
 
   it('runs after an adopt that found the card already here, and never after one that did not land', async () => {
@@ -352,6 +389,31 @@ describe('drafts that come home with the card', () => {
     expect(new Set(fetched)).toEqual(new Set(many))
     expect(most).toBeGreaterThan(1)
     expect(most).toBeLessThanOrEqual(8)
+  })
+
+  it('once the bee drafts record is found, the rest of the root is read from this device only', async () => {
+    // A card with bee drafts and no dependency drafts (every card today): the
+    // scan for the second kind never fetches the whole root over the network.
+    const many = Array.from({ length: 20 }, (_, i) => (i + 16).toString(16).padStart(2, '0').repeat(32))
+    const { s, fetched, restored } = home({ decorations: [...many, DREC] })
+    ;(s.drafts as { restoresDependencies?: true }).restoresDependencies = true
+    await replicate(s, SITE, WHERE)
+    expect(restored).toEqual([{ drafts: [{ root: ROOT, layer: LAYER }], lineage: 'business-card' }])
+    expect(fetched.length).toBeLessThanOrEqual(8)
+    expect(fetched).toContain(DREC)
+    // A dependency drafts record further down that is here is still read.
+    const DROOT = sig('d'), DDREC = sig('6'), LISTING = sig('7')
+    const dependencyRecord = { kind: DEPENDENCY_DRAFTS_KIND, appliesTo: ['business-card'], payload: { listing: LISTING }, refs: [LISTING] }
+    const listing = dependencyDraftsListingBytes({ drafts: [{ root: DROOT, layer: LAYER }], refs: [DROOT, LAYER, sig('e')] })
+    const local: Record<string, Uint8Array> = { [DDREC]: encode(dependencyRecord), [LISTING]: listing }
+    const deep = home({ decorations: [DDREC, ...many, DREC] })
+    ;(deep.s.drafts as { restoresDependencies?: true }).restoresDependencies = true
+    ;(deep.s.store as { getResourceLocal?: (k: string) => Promise<Blob | null> }).getResourceLocal = async (k: string) =>
+      (local[k] ? new NodeBlob([local[k]]) as unknown as Blob : null)
+    await replicate(deep.s, SITE, WHERE)
+    expect(deep.restored).toEqual([{ drafts: [{ root: ROOT, layer: LAYER }, { root: DROOT, layer: LAYER }], lineage: 'business-card' }])
+    expect(deep.fetched).not.toContain(DDREC)
+    expect(deep.fetched.length).toBeLessThanOrEqual(8)
   })
 
   it('reads the newest drafts record when several wear the root in one round', async () => {

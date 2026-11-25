@@ -286,7 +286,7 @@ describe('carryableDrafts — what a card carries', () => {
     expect(await carryableDrafts(s.deps)).toHaveLength(1)
   })
 
-  it('leaves out a refused draft, one not recorded as this hive\'s own draft, one over another trunk, and a dependency draft', async () => {
+  it('leaves out a refused draft, one not recorded as this hive\'s own draft, one over another trunk, and a dependency draft not asked for', async () => {
     const s = await source()
     const record = s.brood.cache.get(s.outcome.beeSig)!
     s.brood.cache.set(s.outcome.beeSig, { ...record, ruling: { at: 2, verdict: 'refused', warnings: [] } })
@@ -306,6 +306,9 @@ describe('carryableDrafts — what a card carries', () => {
     s.brood.cache.set(s.outcome.beeSig, record)
     const picks = { games: { layer: s.w.games, root: rootSig, hides: false, at: 1 } }
     expect(await carryableDrafts({ ...s.deps, picks: () => picks })).toEqual([])
+    // Asked for, this one still does not travel: its parts come from its
+    // root's dependencies, and that root lists none beyond the trunk's.
+    expect(await carryableDrafts({ ...s.deps, picks: () => picks }, { dependencies: true })).toEqual([])
   })
 })
 
@@ -472,7 +475,7 @@ describe('restoreDraft — home, held', () => {
     expect(await at(draft, s.refs, async sig => sig === draft.to ? encode('forged') : s.bytes(sig))).toBe('tampered')
     // A layer that does not name the drafted module.
     expect(await at({ root: draft.root, layer: s.w.solomon }, [...s.refs, s.w.solomon])).toBe('tampered')
-    // A root that is not a bee draft.
+    // A dependency draft whose module names no namespace on its first line.
     const dep = encode(JSON.stringify({ draft: { of: s.w.trunk, path: 'games/solomon', kind: 'dependency', section: SECTION, from: draft.from, to: draft.to, at: 1 }, dependencies: [] }))
     const depSig = await sigOf(dep)
     expect(await at({ root: depSig, layer: draft.layer }, [...s.refs, depSig], async sig => sig === depSig ? dep : s.bytes(sig))).toBe('tampered')
@@ -693,5 +696,212 @@ var rooms = "added";`)
     expect((await restoreDrafts({ refs, drafts }, bytes, 'card', a.deps)).map(r => r.outcome)).toEqual(['present', 'path-busy'])
     // Restored alone (a later card), the carried-home pick still gives way as before.
     expect(await restoreDraft(drafts[1]!, refs, bytes, 'card', a.deps)).toBe('applied')
+  })
+})
+
+// DEPENDENCY DRAFTS TRAVEL HOME TOO (jwize, 2026-11-24): a draft of a
+// namespace bundle keeps the trunk's layer and swaps the bundle in its root.
+
+const ROOMS_NS = '@hypercomb/essentials/games/solomon/rooms'
+const MAPS_NS = '@hypercomb/essentials/games/solomon/maps'
+const FAR_NS = '@hypercomb/essentials/games/far'
+const ROOMS = 'src/games/solomon/rooms.ts'
+const MAPS = 'src/games/solomon/maps.ts'
+const FAR = 'src/games/far/far.ts'
+const bundle = (ns: string, section: string, body: string): string => `// ${ns}\n// ${section}\n${body}\n`
+
+/** A trunk whose root lists three namespace bundles, two under games/solomon. */
+const depWorld = async () => {
+  const heap = new Map<string, Uint8Array<ArrayBuffer>>()
+  const bees = new Map<string, Uint8Array>()
+  const pool = new Map<string, Uint8Array>()
+  const put = async (text: string): Promise<string> => { const bytes = encode(text); const sig = await sigOf(bytes); heap.set(sig, bytes); return sig }
+  const dependency = async (text: string): Promise<string> => { const bytes = encode(text); const sig = await sigOf(bytes); pool.set(sig, bytes); return sig }
+  const beeSig = await sigOf(encode(BEE))
+  bees.set(beeSig, encode(BEE))
+  const rooms = await dependency(bundle(ROOMS_NS, ROOMS, 'var rooms = "remembered";'))
+  const maps = await dependency(bundle(MAPS_NS, MAPS, 'var maps = "drawn";'))
+  const far = await dependency(bundle(FAR_NS, FAR, 'var far = "away";'))
+  const solomon = await put(JSON.stringify({ name: 'solomon', cells: [], bees: [`${beeSig}.js`], dependencies: [] }))
+  const games = await put(JSON.stringify({ name: 'games', cells: [solomon], bees: [`${'b'.repeat(64)}.js`], dependencies: [] }))
+  const dependencies = [rooms, maps, far]
+  const trunk = await put(JSON.stringify({ name: 'root', cells: [games], bees: [], dependencies: dependencies.map(sig => `${sig}.js`) }))
+  const io: ReplicationIo = { read: async sig => heap.get(sig) ?? null, fetch: async () => null, write: async (sig, bytes) => { heap.set(sig, bytes) } }
+  let picks: Picks = {}
+  const applied: { trunk: string; admitted: readonly string[]; picks: Picks }[] = []
+  const acts: string[] = []
+  const brood = fakeBrood()
+  const deps: ModuleDraftDeps = {
+    trunk: () => trunk,
+    store: () => ({
+      getBeeBytes: async sig => bees.get(sig) ?? null,
+      getDependencyBytes: async sig => pool.get(sig) ?? null,
+      writeBeeBytes: async (sig, bytes) => { acts.push('write bee'); bees.set(sig, bytes) },
+      writeDependencyBytes: async (sig, bytes) => { acts.push('write dependency'); pool.set(sig, bytes) },
+      writeLayerBytes: async (sig, bytes) => { acts.push('write layer'); heap.set(sig, new Uint8Array(bytes) as Uint8Array<ArrayBuffer>) },
+    }),
+    layers: async () => io,
+    picks: () => picks,
+    apply: async (t, admitted, next) => { acts.push('apply'); applied.push({ trunk: t, admitted, picks: next }); picks = next; return { ok: true } },
+    now: () => 1_700_000_000_000,
+    ...brood.deps,
+  }
+  // Every act, the brood's own among them, in one list.
+  const allActs = (): string[] => acts
+  brood.acts.push = (...items: string[]) => acts.push(...items)
+  const bytes = async (sig: string): Promise<Uint8Array | null> => heap.get(sig) ?? bees.get(sig) ?? pool.get(sig) ?? null
+  const refsOf = (carried: readonly { root: string; layer: string; to: string; from: string; parts?: readonly string[] }[]): string[] =>
+    [...new Set(carried.flatMap(d => [d.root, d.layer, d.to, d.from, ...(d.parts ?? [])]).filter(Boolean))].sort()
+  return { heap, bees, pool, rooms, maps, far, solomon, games, trunk, dependencies, deps, applied, brood, acts: allActs, bytes, refsOf, picksNow: () => picks, put }
+}
+
+const draftOf = async (w: Awaited<ReturnType<typeof depWorld>>, sig: string, section: string, body: string) => {
+  const outcome = await draftModule({ beeSig: sig, section, body }, w.deps)
+  if (!outcome.ok) throw new Error(outcome.error)
+  return outcome
+}
+
+describe('dependency drafts — carried home, held', () => {
+  it('is carried only when asked for, marked a dependency, its parts read from its root', async () => {
+    const s = await depWorld()
+    const made = await draftOf(s, s.rooms, ROOMS, 'var rooms = "fresh";')
+    expect(made.of).toBe('dependency')
+    expect(made.layerSig).toBe(s.solomon)
+    // Not asked for: nothing, as before.
+    expect(await carryableDrafts(s.deps)).toEqual([])
+    expect(await carryableDrafts(s.deps, { dependencies: true })).toEqual([
+      { root: made.rootSig, layer: s.solomon, to: made.beeSig, from: s.rooms, parts: [made.beeSig], kind: 'dependency' },
+    ])
+    // Refused here: it stays.
+    const record = s.brood.cache.get(made.beeSig)!
+    s.brood.cache.set(made.beeSig, { ...record, ruling: { at: 2, verdict: 'refused', warnings: [] } })
+    expect(await carryableDrafts(s.deps, { dependencies: true })).toEqual([])
+  })
+
+  it('puts a single swap back held on disk before the bundle is written, keeps the trunk\'s layer, and picks it', async () => {
+    const s = await depWorld()
+    const made = await draftOf(s, s.rooms, ROOMS, 'var rooms = "fresh";')
+    const carried = await carryableDrafts(s.deps, { dependencies: true })
+    const a = await depWorld()
+    const announced: unknown[] = []
+    const off = EffectBus.on('module:drafted', (draft: unknown) => { announced.push(draft) })
+    const outcome = await restoreDraft(carried[0]!, s.refsOf(carried), s.bytes, 'card', a.deps)
+    off?.()
+    expect(outcome).toBe('applied')
+    // Held and read back before any byte; the bundle into the dependencies
+    // pool, never the bees pool; only the root written as a layer.
+    expect(a.acts()).toEqual(['read back', 'hold', 'read back', 'write dependency', 'write layer', 'apply'])
+    expect(a.pool.has(made.beeSig)).toBe(true)
+    expect(a.bees.has(made.beeSig)).toBe(false)
+    expect(a.applied[0]!.admitted).toEqual([made.beeSig])
+    expect(a.picksNow()).toEqual({ 'games/solomon': { layer: a.solomon, root: made.rootSig, hides: false, at: 1_700_000_000_000 } })
+    const record = a.brood.disk.get(made.beeSig)!
+    expect(record.source).toEqual({ kind: 'own', how: `a draft of ${ROOMS} at games/solomon, carried home with card` })
+    expect(record.ruling).toBeUndefined()
+    expect(announced.at(-1)).toMatchObject({ sig: made.beeSig, of: 'dependency', path: 'games/solomon' })
+    expect(await restoreDraft(carried[0]!, s.refsOf(carried), s.bytes, 'card', a.deps)).toBe('present')
+  })
+
+  it('stacked swaps at one path travel as one pick, both held; a draft of a draft keeps its source listed', async () => {
+    const s = await depWorld()
+    const rooms = await draftOf(s, s.rooms, ROOMS, 'var rooms = "fresh";')
+    const maps = await draftOf(s, s.maps, MAPS, 'var maps = "redrawn";')
+    const carried = await carryableDrafts(s.deps, { dependencies: true })
+    expect(carried).toHaveLength(1)
+    expect(carried[0]!.parts).toEqual([rooms.beeSig, maps.beeSig].sort())
+    const a = await depWorld()
+    expect(await restoreDraft(carried[0]!, s.refsOf(carried), s.bytes, 'card', a.deps)).toBe('applied')
+    for (const sig of [rooms.beeSig, maps.beeSig]) {
+      expect(a.pool.has(sig)).toBe(true)
+      expect(a.brood.disk.get(sig)?.flags?.length).toBe(1)
+    }
+    expect(a.acts().indexOf('write dependency')).toBeGreaterThan(a.acts().lastIndexOf('hold'))
+    // Without the other part listed, the root names code that did not travel.
+    expect(await restoreDraft(carried[0]!, s.refsOf(carried).filter(sig => sig !== rooms.beeSig), s.bytes, 'card', (await depWorld()).deps)).toBe('tampered')
+
+    // A draft of the drafted bundle: its source is no trunk bundle, and still travels.
+    const t = await depWorld()
+    const first = await draftOf(t, t.rooms, ROOMS, 'var rooms = "fresh";')
+    const second = await draftOf(t, first.beeSig, ROOMS, 'var rooms = "fresher";')
+    const [next] = await carryableDrafts(t.deps, { dependencies: true })
+    expect(next).toMatchObject({ from: first.beeSig, parts: [second.beeSig] })
+    expect(await restoreDraft(next!, t.refsOf([next!]), t.bytes, 'card', (await depWorld()).deps)).toBe('applied')
+  })
+
+  it('a busy dependency draft gives way to one written on top of it; local work still wins', async () => {
+    const s = await depWorld()
+    const first = await draftOf(s, s.rooms, ROOMS, 'var rooms = "fresh";')
+    const [one] = await carryableDrafts(s.deps, { dependencies: true })
+    const a = await depWorld()
+    expect(await restoreDraft(one!, s.refsOf([one!]), s.bytes, 'card', a.deps)).toBe('applied')
+    await draftOf(s, first.beeSig, ROOMS, 'var rooms = "fresher";')
+    const [two] = await carryableDrafts(s.deps, { dependencies: true })
+    expect(await restoreDraft(two!, s.refsOf([two!]), s.bytes, 'card', a.deps)).toBe('applied')
+    expect(a.picksNow()['games/solomon']!.root).toBe(two!.root)
+
+    const b = await depWorld()
+    const local = await draftOf(b, b.rooms, ROOMS, 'var rooms = "mine";')
+    expect(await restoreDraft(one!, s.refsOf([one!]), s.bytes, 'card', b.deps)).toBe('path-busy')
+    expect(b.picksNow()['games/solomon']!.root).toBe(local.rootSig)
+  })
+
+  it('refuses a root that is not the trunk\'s list with swaps, a moved namespace, one outside the path, another layer, or a module the trunk runs', async () => {
+    const s = await depWorld()
+    const fresh = encode(bundle(ROOMS_NS, ROOMS, 'var rooms = "fresh";'))
+    const freshSig = await sigOf(fresh)
+    const parts = new Map<string, Uint8Array>([[freshSig, fresh]])
+    const bytes = async (sig: string): Promise<Uint8Array | null> => parts.get(sig) ?? s.bytes(sig)
+    const rootOf = async (draft: Record<string, unknown>, dependencies: readonly string[], trunk = s.trunk) => {
+      const root = encode(JSON.stringify({ draft: { of: trunk, path: 'games/solomon', section: ROOMS, from: s.rooms, to: freshSig, kind: 'dependency', at: 1, ...draft }, dependencies }))
+      const sig = await sigOf(root)
+      parts.set(sig, root)
+      return sig
+    }
+    const swap = (out: readonly string[], ...into: string[]): string[] => [...s.dependencies.filter(sig => !out.includes(sig)), ...into]
+    const restore = async (root: string, refs: readonly string[], layer = s.solomon, deps?: ModuleDraftDeps) => {
+      const a = await depWorld()
+      const outcome = await restoreDraft({ root, layer }, [root, layer, ...refs], bytes, 'card', deps ?? a.deps)
+      return { outcome, a }
+    }
+    // The good one, for contrast.
+    expect((await restore(await rootOf({}, swap([s.rooms], freshSig)), [s.rooms, freshSig])).outcome).toBe('applied')
+    // An unrelated trunk dependency dropped beside the swap.
+    const dropped = await restore(await rootOf({}, swap([s.rooms, s.far], freshSig)), [s.rooms, freshSig])
+    expect(dropped.outcome).toBe('other-build')
+    expect(dropped.a.acts()).toEqual([])
+    // A bundle that names another namespace than the one it was written from.
+    const moved = encode(bundle('@hypercomb/essentials/games/solomon/halls', ROOMS, 'var rooms = "fresh";'))
+    const movedSig = await sigOf(moved)
+    parts.set(movedSig, moved)
+    expect((await restore(await rootOf({ to: movedSig }, swap([s.rooms], movedSig)), [s.rooms, movedSig])).outcome).toBe('tampered')
+    // A namespace outside the path it is picked at.
+    const farther = encode(bundle(FAR_NS, FAR, 'var far = "farther";'))
+    const fartherSig = await sigOf(farther)
+    parts.set(fartherSig, farther)
+    expect((await restore(await rootOf({ from: s.far, to: fartherSig, section: FAR }, swap([s.far], fartherSig)), [s.far, fartherSig])).outcome).toBe('tampered')
+    // A layer other than the trunk's own at the path.
+    const good = await rootOf({}, swap([s.rooms], freshSig))
+    const grafted = await restore(good, [s.rooms, freshSig], s.games)
+    expect(grafted.outcome).toBe('tampered')
+    expect(grafted.a.acts()).toEqual([])
+    // A bundle the trunk already runs as a module elsewhere: holding it would stop that module here.
+    const a = await depWorld()
+    const games = await a.put(JSON.stringify({ name: 'games', cells: [a.solomon], bees: [`${'b'.repeat(64)}.js`, `${freshSig}.js`], dependencies: [] }))
+    const trunk = await a.put(JSON.stringify({ name: 'root', cells: [games], bees: [], dependencies: a.dependencies.map(sig => `${sig}.js`) }))
+    const over = await rootOf({}, swap([s.rooms], freshSig), trunk)
+    expect(await restoreDraft({ root: over, layer: s.solomon }, [over, s.solomon, s.rooms, freshSig], bytes, 'card', { ...a.deps, trunk: () => trunk })).toBe('tampered')
+    expect(a.acts()).toEqual([])
+    // A dependency draft names the bundle it was written from.
+    expect((await restore(await rootOf({ from: '' }, swap([s.rooms], freshSig)), [freshSig])).outcome).toBe('tampered')
+  })
+
+  it('does not carry a bee draft written over a dependency draft at the same path: it could land nowhere', async () => {
+    const s = await depWorld()
+    await draftOf(s, s.rooms, ROOMS, 'var rooms = "fresh";')
+    const bee = await draftModule({ beeSig: await sigOf(encode(BEE)), section: SECTION, body: 'var rooms = "both";' }, s.deps)
+    if (!bee.ok) throw new Error(bee.error)
+    expect(bee.of).toBe('bee')
+    expect(await carryableDrafts(s.deps)).toEqual([])
+    expect(await carryableDrafts(s.deps, { dependencies: true })).toEqual([])
   })
 })

@@ -56,7 +56,7 @@ import { managedSiteZone, updateSources } from './update-sources.js'
 import { managedRecordText } from './managed-record.js'
 import { SiteRevisionsPanel, revisionButtonWords, siteChatConvoId } from './site-revisions.view.js'
 import { codeReviewButton } from './site-code-review.js'
-import { carryDrafts, draftsOwed, planDrafts, portCarriesDrafts } from './site-drafts.js'
+import { carryDrafts, draftsOwed, planDrafts, portCarriesDependencyParts, portCarriesDrafts } from './site-drafts.js'
 import {
   BROKER_KEY, COMMITTER_KEY, HISTORY_KEY, LINEAGE_KEY, MANAGED_PUBLISH_KEY, STORE_KEY, SWARM_ADOPT_KEY,
   landed, notePublished, readReceipt, readState, reconcile, replicaLocation, replicaRoute, takePublished,
@@ -366,8 +366,9 @@ export class SiteManageElement extends ElementBase {
       }
       if (state?.layer) this.#refused = ''
       this.#state = state
-      this.#draftsOwed = state?.layer && portCarriesDrafts(ioc()?.get?.<ManagedPublishLike>(MANAGED_PUBLISH_KEY))
-        ? await draftsOwed(moduleDrafts(), site.lineage).catch(() => false)
+      const port = ioc()?.get?.<ManagedPublishLike>(MANAGED_PUBLISH_KEY)
+      this.#draftsOwed = state?.layer && portCarriesDrafts(port)
+        ? await draftsOwed(moduleDrafts(), site.lineage, undefined, undefined, portCarriesDependencyParts(port)).catch(() => false)
         : false
       if (life !== this.#life) return
       this.#label()
@@ -406,8 +407,9 @@ export class SiteManageElement extends ElementBase {
     const life = this.#life
     const lineage = this.#record?.lineage
     if (!lineage || !this.#state?.layer) return
-    const owed = portCarriesDrafts(ioc()?.get?.<ManagedPublishLike>(MANAGED_PUBLISH_KEY))
-      ? await draftsOwed(moduleDrafts(), lineage).catch(() => false)
+    const port = ioc()?.get?.<ManagedPublishLike>(MANAGED_PUBLISH_KEY)
+    const owed = portCarriesDrafts(port)
+      ? await draftsOwed(moduleDrafts(), lineage, undefined, undefined, portCarriesDependencyParts(port)).catch(() => false)
       : false
     if (life !== this.#life || owed === this.#draftsOwed) return
     this.#draftsOwed = owed
@@ -453,20 +455,22 @@ export class SiteManageElement extends ElementBase {
     const settled = (await readReceipt(services.store, record.lineage).catch(() => null))?.drafts ?? []
     // A port from before drafts travelled cannot upload their modules: the card stays as it is.
     const carries = portCarriesDrafts(port)
+    // One from before dependency drafts travelled cannot send their bundles: the bee drafts still go.
+    const dependencyParts = portCarriesDependencyParts(port)
     const provider = moduleDrafts()
-    const plan = carries ? await planDrafts(provider, replicaRoute(record.lineage), undefined, undefined, settled).catch(() => undefined) : undefined
+    const plan = carries ? await planDrafts(provider, replicaRoute(record.lineage), undefined, undefined, settled, dependencyParts).catch(() => undefined) : undefined
     // The dialog tells what the card carries: drafts that cannot be read now
     // (the card may still carry a record a "Not yet" left on it) publish
     // nothing, rather than a card whose code goes out unannounced.
     const unread = (): void => this.#flash(t('site-manage.publish-drafts-unread', 'Nothing was published: the code drafts on this card could not be read just now. Try again in a moment.'))
     if (carries && typeof provider?.carry === 'function' && !plan) { unread(); return }
-    const drafts = plan?.composed?.drafts ?? 0
+    const drafts = plan?.drafts ?? 0
     const dropped = plan?.dropped ?? 0
     // The head Publish publishes is the card's after its drafts are on it:
     // the very plan the dialog shows is the one written, never planned again.
     let sig = this.#state?.sig ?? ''
     try {
-      if (carries) sig = (await carryDrafts({ history: services.history, committer: services.committer, drafts: provider, settled, ...(plan ? { plan } : {}) }, record.lineage)) ?? sig
+      if (carries) sig = (await carryDrafts({ history: services.history, committer: services.committer, drafts: provider, settled, dependencyParts, ...(plan ? { plan } : {}) }, record.lineage)) ?? sig
     } catch { unread(); return }
     const message = dropped
       ? (drafts ? 'site-manage.publish-confirm.drafts-off' : 'site-manage.publish-confirm.drafts-all-off')

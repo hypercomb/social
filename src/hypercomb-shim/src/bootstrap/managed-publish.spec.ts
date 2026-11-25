@@ -123,7 +123,7 @@ const world = () => {
 }
 
 /** This browser's own store: the binding pool, and the atoms the copy holds. */
-const browserStore = (held: Map<string, Uint8Array>, bees: Map<string, Uint8Array> = new Map()) => {
+const browserStore = (held: Map<string, Uint8Array>, bees: Map<string, Uint8Array> = new Map(), dependencies: Map<string, Uint8Array> = new Map()) => {
   const docs = new Map<FileSystemDirectoryHandle, ArrayBuffer>()
   const pools = new Map<string, FileSystemDirectoryHandle>()
   return {
@@ -133,6 +133,7 @@ const browserStore = (held: Map<string, Uint8Array>, bees: Map<string, Uint8Arra
     getLayerPoolBytes: async (sig: string) => held.get(sig) ?? null,
     getResourceLocal: async (sig: string) => held.has(sig) ? ({ arrayBuffer: async () => held.get(sig)!.slice().buffer } as unknown as Blob) : null,
     getBeeBytes: async (sig: string) => bees.get(sig) ?? null,
+    getDependencyBytes: async (sig: string) => dependencies.get(sig) ?? null,
   }
 }
 
@@ -159,14 +160,16 @@ describe('a managed site door publishes one root with its own listed key', () =>
   let place: ReturnType<typeof world>
   let held: Map<string, Uint8Array>
   let bees: Map<string, Uint8Array>
+  let pool: Map<string, Uint8Array>
   beforeEach(() => {
     localStorage.clear()
     dropInvite()
     place = world()
     held = new Map()
     bees = new Map()
+    pool = new Map()
     vi.stubGlobal('fetch', place.fetcher)
-    const store = browserStore(held, bees)
+    const store = browserStore(held, bees, pool)
     ;(window as unknown as { ioc: unknown }).ioc = { get: (key: string) => (key === '@hypercomb.social/Store' ? store : undefined) }
   })
   afterEach(() => { vi.unstubAllGlobals() })
@@ -350,6 +353,26 @@ describe('a managed site door publishes one root with its own listed key', () =>
     const uploaded = place.puts.filter(p => p.startsWith('atom:')).map(p => p.slice(5))
     expect(uploaded).not.toContain(quoted)
     expect(new Set(uploaded)).toEqual(new Set([head, details]))
+  })
+
+  it('carries a dependency draft\'s bundles from the dependencies pool, and says the port can', async () => {
+    place.publish(content())
+    await accept()
+    expect(publisher().carriesDependencyParts).toBe(true)
+    const put = async (text: string | Uint8Array, into = held) => { const bytes = typeof text === 'string' ? utf8(text) : text; const sig = await sha(bytes); into.set(sig, bytes); return sig }
+    const trunk = 'd'.repeat(64)
+    const from = await put('// @hypercomb/essentials/contact/card\nexport const a = 1\n', pool)
+    const to = await put('// @hypercomb/essentials/contact/card\nexport const a = 2\n', pool)
+    const layer = await put(JSON.stringify({ name: 'contact', bees: [] }))
+    const root = await put(JSON.stringify({ draft: { of: trunk, path: 'contact', section: 'src/contact/card.ts', from, to, kind: 'dependency', at: 1 }, dependencies: [to] }))
+    // On the card the record names its listing alone (essentials decoration-closure.ts); the parts sit in it.
+    const listing = await put(`hypercomb module:dependency-drafts listing${String.fromCharCode(10)}${JSON.stringify({ drafts: [{ root, layer, from, parts: [to] }], refs: [root, layer, to, from].sort() })}`)
+    const drafts = await put(JSON.stringify({ kind: 'module:dependency-drafts', appliesTo: ['business-card'], payload: { listing }, refs: [listing] }))
+    const head = await put(JSON.stringify({ name: 'business-card', decorations: [drafts] }))
+    const result = await publisher().publishRoot('business-card', head)
+    expect(result).toMatchObject({ ok: true, head, changed: true, uploaded: 7 })
+    const uploaded = place.puts.filter(p => p.startsWith('atom:')).map(p => p.slice(5))
+    expect(new Set(uploaded)).toEqual(new Set([head, drafts, listing, root, layer, to, from]))
   })
 
   it('refuses a card whose draft is missing a part, and uploads nothing', async () => {

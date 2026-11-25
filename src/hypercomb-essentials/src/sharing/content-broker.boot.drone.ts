@@ -72,7 +72,7 @@
 // canonical Store APIs.
 
 import { Drone, EffectBus, LEGACY_DIRECTORIES, isMetaEnvelope, KIND_FETCH_CANCEL, KIND_FETCH_REQUEST, KIND_FETCH_RESPONSE, registerPoolMeaning, roomPreimage, SWARM_LAYER_KIND } from '@hypercomb/core'
-import { decorationClosureSigs } from './decoration-closure.js'
+import { DEPENDENCY_DRAFTS_LISTING_HEAD, decorationClosureSigs, dependencyDraftsListingParts } from './decoration-closure.js'
 import { adoptDescendantsOf } from './adopt-descendants.js'
 import { firstAvailableHost } from './first-available-host.js'
 import { isJoinedHere } from './membership.js'
@@ -94,7 +94,10 @@ const isDraftsRecord = (bytes: Uint8Array): boolean => {
   if (bytes.byteLength > 1_048_576 || bytes[0] !== 0x7b /* { */) return false
   try {
     const text = new TextDecoder().decode(bytes)
-    return text.includes('module:drafts') && (JSON.parse(text) as { kind?: unknown })?.kind === 'module:drafts'
+    if (!text.includes('module:drafts') && !text.includes('module:dependency-drafts')) return false
+    // Bee drafts, and dependency drafts in a record of their own (site-drafts.ts).
+    const kind = (JSON.parse(text) as { kind?: unknown })?.kind
+    return kind === 'module:drafts' || kind === 'module:dependency-drafts'
   } catch { return false }
 }
 
@@ -2374,7 +2377,9 @@ export class ContentBrokerDrone extends Drone {
           let first: Uint8Array | null = null
           try { first = await sink.peek(sig, 1) } catch { first = null }
           const opener = first?.[0]
-          if (opener !== 0x7b /* { */ && opener !== 0x5b /* [ */) continue
+          // A dependency drafts listing (decoration-closure.ts) names parts too, and is read only as one.
+          const listing = partsOnly.has(sig) && opener === DEPENDENCY_DRAFTS_LISTING_HEAD.charCodeAt(0)
+          if (opener !== 0x7b /* { */ && opener !== 0x5b /* [ */ && !listing) continue
           try { got = await sink.read(sig) } catch { got = null }
           if (!got) continue
         }
@@ -2406,8 +2411,14 @@ export class ContentBrokerDrone extends Drone {
       // many images otherwise sits silent for the whole resource phase — the
       // UI cue must climb as resources resolve.
       if (!opts.quiet) this.emitEffect('adopt:progress', { sig, ...stats })
+      if (partsOnly.has(sig)) {
+        // A `module:dependency-drafts` record names one part, its listing
+        // (decoration-closure.ts); the parts listed in it are parts too —
+        // held, never descended through — and come as a record's parts come.
+        for (const n of dependencyDraftsListingParts(got)) { partsOnly.add(n); enqueue(n, depth + 1, sig) }
+        continue
+      }
       if (depth > 0 && !opts.deepResources) continue
-      if (partsOnly.has(sig)) continue
       // A `module:drafts` record (sharing/site-drafts.ts) names its parts, and
       // they are leaves, as the publish closure carries them: a draft root names
       // the trunk it was made over and its folder layer the trunk's other

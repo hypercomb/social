@@ -284,3 +284,49 @@ export async function decorationClosureSigs(
   } catch { /* body fetch threw — htmlSig still carried, assets not enumerated */ }
   return [...out]
 }
+
+// ── a card's dependency drafts listing (site-drafts.ts) ───────────────────────
+//
+// THE DEPENDENCY DRAFTS RIDE BEHIND ONE OPAQUE PART. A `module:dependency-drafts`
+// decoration names one resource, its LISTING, and nothing else: no draft root,
+// no folder layer, no bundle sits anywhere in the decoration itself. The
+// listing is a head line and then the drafts and their parts as JSON, so it
+// does not start with `{` — and every walker from before dependency drafts
+// (the PR 201 essentials: the broker's deep adopt, host-sync's push, the
+// genome census) takes a resource that does not open as a JSON object for a
+// leaf. Those readers know no `module:dependency-drafts` kind, so had the
+// parts sat in the decoration they would have walked down through a draft
+// root into the trunk it names — none of which the card's host holds. The
+// walkers that do know the kind read the listing here, and treat its parts as
+// the parts of a `module:drafts` record: held, never descended through.
+
+/** The listing's first line. No signature in it, and not JSON. */
+export const DEPENDENCY_DRAFTS_LISTING_HEAD = 'hypercomb module:dependency-drafts listing\n'
+
+export type DependencyDraftsListing = { readonly drafts: readonly unknown[]; readonly refs: readonly string[] }
+
+/** The listing's bytes, deterministic for the same drafts and parts. */
+export function dependencyDraftsListingBytes(listing: DependencyDraftsListing): Uint8Array {
+  return new TextEncoder().encode(`${DEPENDENCY_DRAFTS_LISTING_HEAD}${JSON.stringify({ drafts: listing.drafts, refs: listing.refs })}`)
+}
+
+/** A listing read back, or null for any other bytes. Never throws. */
+export function readDependencyDraftsListing(bytes: Bytes | null | undefined): DependencyDraftsListing | null {
+  if (!bytes) return null
+  const u8 = toU8(bytes)
+  if (u8.byteLength > 1_048_576 || u8[0] !== DEPENDENCY_DRAFTS_LISTING_HEAD.charCodeAt(0)) return null
+  try {
+    const text = decode(u8)
+    if (!text.startsWith(DEPENDENCY_DRAFTS_LISTING_HEAD)) return null
+    const parsed = JSON.parse(text.slice(DEPENDENCY_DRAFTS_LISTING_HEAD.length)) as { drafts?: unknown; refs?: unknown }
+    if (!parsed || !Array.isArray(parsed.drafts) || !Array.isArray(parsed.refs)) return null
+    return { drafts: parsed.drafts, refs: parsed.refs.map(r => String(r ?? '')) }
+  } catch { return null }
+}
+
+/** The parts a listing names (its `refs`, signatures only); [] for any other bytes. */
+export function dependencyDraftsListingParts(bytes: Bytes | null | undefined): string[] {
+  const listing = readDependencyDraftsListing(bytes)
+  if (!listing) return []
+  return [...new Set(listing.refs.map(r => r.toLowerCase()).filter(r => SIG_RE.test(r)))]
+}
