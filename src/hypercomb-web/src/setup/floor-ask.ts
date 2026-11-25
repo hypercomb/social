@@ -14,12 +14,15 @@ import { I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 /** Why the floor found the package below it (package-floor.ts). */
 export type FloorReason = 'door' | 'membership' | 'meeting point'
 
-// Top-centre, a step under the header — the door bar's slot. Above the Pixi
-// canvas (59989), below the shell chrome (controls 59999, header 60000).
+// Top-centre, a step under the header — the door bar's slot. It must take a
+// click whatever else is open: the first-run welcome (100000) and the highest
+// package views (2147483602) cover the whole page, and a question nobody can
+// answer is a floor that never moves. Only the shell's own install prompt and
+// intro lock (app.scss) sit above it.
 const STYLE = `
 .hc-floor-ask {
   position: fixed; top: calc(var(--hc-header-anchor, 0px) + 2.27rem); left: 50%; transform: translateX(-50%);
-  z-index: 59992; max-width: min(34rem, 92vw);
+  z-index: 2147483640; max-width: min(34rem, 92vw);
   display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0.35rem 0.7rem;
   padding: 0.4rem 0.75rem; background: rgba(var(--hc-panel-pane), 0.92); backdrop-filter: blur(8px);
   border: 1px solid var(--hc-window-line); border-top: 2px solid var(--hc-status-warn);
