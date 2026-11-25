@@ -16,7 +16,7 @@
 //   3. Make it the old kind of install: the stamp moves to the old key and the
 //      bags go, as an install from before 2026-08-31 never had them.
 //   4. Reload with the seed reachable. The door answers, `hosts:open` does not,
-//      and the floor must still move the install to the seed head.
+//      and the floor must still offer the seed head, and move to it on a yes.
 //
 //   node scripts/drive-package-floor-stranded.cjs [--url http://localhost:4260/] [--old <64-hex>]
 
@@ -137,7 +137,13 @@ const isLocal = (host) => host === 'localhost' || host === '127.0.0.1'
   H.check("the head's Packages window answers the door beside it", door > 0, `packages:open listeners ${door}`)
   H.check('and nothing opens that window — the stranded shape', opener === 0, `hosts:open listeners ${opener}`)
 
-  // The floor runs 15s after runtime-ready, acquires, waits for quiet, reloads.
+  // The floor asks (floor-ask.ts) and moves nothing until the participant says yes.
+  const asked = await waitFor('the floor asking', () => ask(() => !!document.querySelector('[data-floor-ask]') || null), 120000)
+  H.check('the floor asks before it takes anything', !!asked)
+  H.check('and nothing moved before the yes', (await installed()) === OLD, String(await installed()).slice(0, 12))
+  await page.click('[data-floor-ask] [data-take]')
+
+  // On the yes it acquires, waits for quiet, reloads.
   const moved = await waitFor('floor move', async () => {
     const now = await installed()
     return now && now !== OLD ? now : null
