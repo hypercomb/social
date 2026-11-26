@@ -1813,9 +1813,16 @@ async function routeMetaForIndex(env, pubkey, evt) {
     const selected = bindings[zone].publishers.find(p => p.primary) || bindings[zone].publishers[0]
     if (selected?.pubkey !== pubkey) continue
     for (const [lineage, rawHead] of Object.entries(index.roots)) {
-      if (!DNS_LABEL_RE.test(lineage) || lineage === 'content') continue
+      // A nested lineage of DNS labels is a deep name, leaf first
+      // (attachDeepNames): its door's bag is advanced like a one-label
+      // place's. Left out, a bag a door wrote once named that day's head
+      // forever, and a disagreeing bag closes the door (2026-11-26: four
+      // jwize.com deep names answered "nothing published" for weeks).
+      const segments = lineage.split('/')
+      if (!segments.every((label) => DNS_LABEL_RE.test(label)) || lineage === 'content') continue
       const head = String(rawHead || '').toLowerCase()
-      const host = `${lineage}.${zone}`
+      const host = `${[...segments].reverse().join('.')}.${zone}`
+      if (host.length > 253) continue
       const resolved = resolveSite(scoped, host)
       if (SIG_RE.test(head) && resolved.implicit && resolved.site?.lineage === lineage
         && opensOn(index, lineage, host, scoped)) found.set(host, locationMeta(resolved.site, pubkey, head, index))
@@ -3859,6 +3866,8 @@ function shareHead(title, request, base, description = '') {
     + (description ? `<meta name="description" content="${htmlText(description)}"><meta property="og:description" content="${htmlText(description)}">` : '')
 }
 
+const PACKAGE_MEMBER_RE = /^\/content\/([0-9a-f]{64})\/(?:[0-9]{8})?$/
+
 async function serveVisitorAsset(request, env, { spa = true, door = null, install = null, index = null, base = null, title = null } = {}) {
   if (!env.ASSETS?.fetch) return text(503, 'visitor engine is not deployed')
   // The asset store would answer a validator with its own 304, past every
@@ -3920,8 +3929,16 @@ async function serveVisitorAsset(request, env, { spa = true, door = null, instal
       && new URL(request.url).pathname.startsWith(`/content/${await poolAddress(INSTALL_INDEX_MEANING)}/`)) {
     headers.set('Content-Type', 'application/json; charset=utf-8')
   }
+  // THE PACKAGE POOL IS TEXT (reach A9): the asset store types the listing
+  // `/content/<sign('host:packages')>/` as its directory page, so a door
+  // answered `00000000` labelled text/html, where hypercomb.com and
+  // answerPackage say text/plain. The listing and its 8-digit markers are
+  // lines of text, and never a page this function dresses.
+  const packageMember = response.status === 200 && PACKAGE_MEMBER_RE.exec(new URL(request.url).pathname)
+  const packagePool = !!packageMember && packageMember[1] === await poolAddress(HOST_PACKAGES_MEANING)
+  if (packagePool) headers.set('Content-Type', 'text/plain; charset=utf-8')
   const name = String(door?.title || title || '').trim()
-  if ((door || name) && response.status === 200 && String(response.headers.get('content-type') || '').includes('text/html')) {
+  if (!packagePool && (door || name) && response.status === 200 && String(response.headers.get('content-type') || '').includes('text/html')) {
     let html = await response.text()
     if (name) html = html.replace(/<title>[^<]*<\/title>/, () => `<title>${htmlText(name)}</title>`)
     // A ROOT PLACE's page lives under its path: the document base moves there,
@@ -6243,6 +6260,12 @@ async function putHive(request, env, pubkey, ctx) {
   }
   if (!env.CONTENT?.put) return text(503, 'this host holds no pools')
   await holdIndex(env, pubkey, evt)
+  // Named the moment the index is held, before the bookkeeping below: a hive
+  // gives this write eight seconds (bounded-fetch FETCH_DEADLINE_MS), a big
+  // index takes longer than that to note, and a caller that hangs up cancels
+  // the handler — so naming last meant a held index whose deep names were
+  // never asked for (2026-11-25, 125 roots). waitUntil outlives the hang-up.
+  await nameDeepPlaces(env, pubkey, evt, ctx)
   await noteTranslators(env, pubkey, evt)
   await noteAssessors(env, pubkey, evt)
   await noteAttesters(env, pubkey, evt)
@@ -6256,7 +6279,6 @@ async function putHive(request, env, pubkey, ctx) {
   if (!await advancePublishedLocations(env, pubkey, evt)) {
     return text(503, 'signed index is held but a route location is not current; retry this index')
   }
-  await nameDeepPlaces(env, pubkey, evt, ctx)
   if (headOnly(env)) {
     // After the answer: the publish is done; the walk only tidies what it left
     // (and records which branches keep their history public now).

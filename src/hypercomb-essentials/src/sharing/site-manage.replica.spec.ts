@@ -30,6 +30,8 @@ const hive = vi.hoisted(() => ({
   reads: 0,
   confirm: true,
   emit: null as null | ((name: string, payload: unknown) => void),
+  /** Services a single spec adds (the module drafts, the committer). */
+  extra: {} as Record<string, unknown>,
 }))
 
 vi.hoisted(() => {
@@ -81,10 +83,12 @@ vi.hoisted(() => {
   }
   const publish = {
     publishRoot: async (lineage: string, layerSig: string) => { hive.published.push([lineage, layerSig]); return hive.publishResult },
+    // The current shim's port carries drafts; it answers no to the owner question here.
+    ownsThisCard: async () => false,
   }
   ;(window as unknown as { ioc: unknown }).ioc = {
     register: () => { /* noop */ },
-    get: (key: string) => (key === '@hypercomb.social/ManagedPublish' ? (hive.publishPort ? publish : undefined) : services[key]),
+    get: (key: string) => (key in hive.extra ? hive.extra[key] : key === '@hypercomb.social/ManagedPublish' ? (hive.publishPort ? publish : undefined) : services[key]),
     has: (key: string) => key in services,
     list: () => Object.keys(services),
     whenReady: () => { /* noop */ },
@@ -92,7 +96,8 @@ vi.hoisted(() => {
 })
 ;(globalThis as unknown as { NodeBlob: unknown }).NodeBlob = (await import('node:buffer')).Blob
 
-const { EffectBus } = await import('@hypercomb/core')
+const hypercombCore = await import('@hypercomb/core')
+const { EffectBus } = hypercombCore
 hive.emit = (name, payload) => EffectBus.emit(name, payload)
 const { SiteManageElement, SITE_MANAGE_SURFACE, RELIST_MS } = await import('./site-manage.view.js')
 const { SITE_REPLICA_POOL, isHusk, lagging, writeReceipt, readReceipt, replicaChatConvoId } = await import('./site-replica.js')
@@ -150,6 +155,7 @@ beforeEach(() => {
   hive.adoptStatus = 'committed'; hive.adoptLayer = ADOPTED
   hive.publishResult = { ok: true, head: sig('d') }; hive.publishPort = false; hive.staleOnce = false; hive.confirm = true
   hive.reads = 0
+  hive.extra = {}
   localStorage.removeItem('hc:synced-publisher-roots')
   EffectBus.on<{ id: string }>('confirm:request', req => { EffectBus.emit('confirm:response', { id: req.id, confirmed: hive.confirm }) })
 })
@@ -482,5 +488,163 @@ describe('the chat', () => {
       expect(await replicaChatConvoId('business-card', { ...threads([]), listConversations: async () => { throw new Error('unreadable') } })).toBe(OWN)
       expect(await replicaChatConvoId('business-card')).toBe(OWN)
     })
+  })
+})
+
+// HOME, HELD (jwize, 2026-11-20): Publish carries the owner's code drafts with
+// the card — offered for drafts alone, said in the dialog, and put on the card
+// before the head is published.
+describe('publishing carries the drafts', () => {
+  const DRAFT = { root: sig('8'), layer: sig('9'), to: sig('6'), from: '' }
+  const read = (blob: Blob): Promise<string> => new Promise(resolve => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.readAsText(blob)
+  })
+  const withDrafts = (drafts: unknown[]): void => {
+    const { SignatureService } = hypercombCore
+    const slot = (segments: readonly string[], change: (decorations: string[]) => string[]): void => {
+      const loc = `loc:/${segments.join('/')}`
+      const held = hive.heads.get(loc)!
+      const decorations = change([...((held.layer['decorations'] as string[] | undefined) ?? [])])
+      hive.heads.set(loc, { sig: 'f0'.repeat(32), marker: '00000009', layer: { ...held.layer, decorations } })
+    }
+    const store = window.ioc.get('@hypercomb.social/Store') as Record<string, unknown>
+    hive.extra = {
+      '@hypercomb.social/ModuleDrafts': { carry: async () => drafts },
+      '@hypercomb.social/Store': {
+        ...store,
+        putResource: async (blob: Blob) => {
+          const text = await read(blob)
+          const bytes = new TextEncoder().encode(text)
+          const key = await SignatureService.sign(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
+          hive.bytes.set(key, text)
+          return key
+        },
+      },
+      '@diamondcoreprocessor.com/LayerCommitter': {
+        commitSlotAppend: async (segments: readonly string[], _slot: string, s: string) => slot(segments, d => [...d, s]),
+        commitSlotRemove: async (segments: readonly string[], _slot: string, s: string) => slot(segments, d => d.filter(x => x !== s)),
+        settled: async () => { /* landed */ },
+      },
+    }
+  }
+  const asTaken = async (): Promise<void> => {
+    holdReplica(ADOPTED, 'aa')
+    await writeReceipt(window.ioc.get('@hypercomb.social/Store') as never, 'business-card', HEAD, 'aa'.repeat(32))
+    script = record(HEAD)
+  }
+
+  it('offers Publish for drafts alone, says them in the dialog, and publishes the card with them on it', async () => {
+    hive.publishPort = true
+    await asTaken()
+    withDrafts([DRAFT])
+    await mount()
+    expect(bar('.sm-publish').hidden).toBe(false)
+    expect(bar('.sm-state').textContent).toBe('Unpublished changes')
+    const asked: Array<{ message?: string; messageParams?: unknown }> = []
+    const onCardAtAsk: boolean[] = []
+    EffectBus.on<{ message?: string; messageParams?: unknown }>('confirm:request', req => {
+      asked.push(req)
+      onCardAtAsk.push(((hive.heads.get(LOC)!.layer['decorations'] as string[] | undefined) ?? []).some(d => hive.bytes.get(d)?.includes('module:drafts')))
+    })
+    asked.length = 0
+    onCardAtAsk.length = 0
+    ;(bar('.sm-publish') as HTMLButtonElement).click()
+    await settle()
+    expect(asked[0]).toMatchObject({ message: 'site-manage.publish-confirm.drafts', messageParams: { title: 'business-card', drafts: 1 } })
+    // The drafts went on before the owner was asked: nothing writes between
+    // his yes and the publish, which needs his tap still fresh.
+    expect(onCardAtAsk[0]).toBe(true)
+    // The head published is the card's after the drafts went on it.
+    expect(hive.published).toEqual([['business-card', 'f0'.repeat(32)]])
+    const decorations = hive.heads.get(LOC)!.layer['decorations'] as string[]
+    const carried = decorations.map(d => JSON.parse(hive.bytes.get(d) ?? '{}') as { kind?: string; payload?: unknown }).find(r => r.kind === 'module:drafts')
+    expect(carried?.payload).toEqual({ drafts: [{ root: DRAFT.root, layer: DRAFT.layer, from: '', parts: [DRAFT.to] }] })
+    expect(bar('.sm-publish').hidden).toBe(true)
+  })
+
+  it('through a port from before drafts travelled, owes nothing for drafts and publishes the card without them', async () => {
+    hive.publishPort = true
+    await asTaken()
+    withDrafts([DRAFT])
+    // The older shim: publishRoot alone, no drafts closure and no bees-pool read.
+    hive.extra['@hypercomb.social/ManagedPublish'] = {
+      publishRoot: async (lineage: string, layerSig: string) => { hive.published.push([lineage, layerSig]); return hive.publishResult },
+    }
+    await mount()
+    // Drafts alone owe no Publish through it.
+    expect(bar('.sm-publish').hidden).toBe(true)
+    // Publish for another change: the card goes as it stands, no drafts record put on it.
+    const before = hive.heads.get(LOC)!.layer['decorations']
+    const asked: Array<{ message?: string }> = []
+    EffectBus.on<{ message?: string }>('confirm:request', req => { asked.push(req) })
+    asked.length = 0
+    hive.heads.set(LOC, { ...hive.heads.get(LOC)!, layer: { ...hive.heads.get(LOC)!.layer, notes: ['edited here'] } })
+    ;(bar('.sm-publish') as HTMLButtonElement).click()
+    await settle()
+    const decorations = (hive.heads.get(LOC)!.layer['decorations'] as string[] | undefined) ?? []
+    expect(decorations).toEqual((before as string[] | undefined) ?? [])
+    expect(decorations.some(d => hive.bytes.get(d)?.includes('module:drafts'))).toBe(false)
+    expect(asked.map(a => a.message)).toEqual(['site-manage.publish-confirm.message'])
+    expect(hive.published).toHaveLength(1)
+  })
+
+  it('settles the drafts its own Publish carried, so one dropped here after it comes off on the next, said as drafts off alone', async () => {
+    hive.publishPort = true
+    await asTaken()
+    const drafts: unknown[] = [DRAFT]
+    withDrafts(drafts)
+    await mount()
+    const asked: Array<{ message?: string; messageParams?: unknown }> = []
+    EffectBus.on<{ message?: string; messageParams?: unknown }>('confirm:request', req => { asked.push(req) })
+    asked.length = 0
+    ;(bar('.sm-publish') as HTMLButtonElement).click()
+    await settle()
+    // Settled here: a reload never puts the dropped draft back.
+    expect((await receipt())?.drafts).toEqual([DRAFT.root])
+    // Dropped here; the next Publish takes it off, and carries none.
+    drafts.length = 0
+    asked.length = 0
+    ;(bar('.sm-publish') as HTMLButtonElement).click()
+    await settle()
+    expect(asked[0]).toMatchObject({ message: 'site-manage.publish-confirm.drafts-all-off', messageParams: { title: 'business-card', drafts: 0, dropped: 1, count: 1 } })
+    const decorations = (hive.heads.get(LOC)!.layer['decorations'] as string[] | undefined) ?? []
+    expect(decorations.some(d => hive.bytes.get(d)?.includes('module:drafts'))).toBe(false)
+  })
+
+  it('offers nothing when there are no drafts and nothing changed', async () => {
+    hive.publishPort = true
+    await asTaken()
+    withDrafts([])
+    await mount()
+    expect(bar('.sm-publish').hidden).toBe(true)
+  })
+
+  it('offers Publish once a draft is written, without a reload', async () => {
+    hive.publishPort = true
+    await asTaken()
+    const drafts: unknown[] = []
+    withDrafts(drafts)
+    await mount()
+    expect(bar('.sm-publish').hidden).toBe(true)
+    drafts.push(DRAFT)
+    EffectBus.emit('module:drafted', { sig: DRAFT.to, at: Date.now() })
+    await settle()
+    expect(bar('.sm-publish').hidden).toBe(false)
+  })
+})
+
+describe('a deferred adopt that lands brings the drafts home', () => {
+  it('pays the receipt through landed (receipt, then restoreDrafts) and says what came home', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const view = readFileSync(join(process.cwd(), 'hypercomb-essentials', 'src', 'sharing', 'site-manage.view.ts'), 'utf8')
+    const start = view.indexOf('if (state?.layer && this.#replicaOwed && site.head) {')
+    expect(start).toBeGreaterThan(-1)
+    const owed = view.slice(start, view.indexOf('\n      }\n', start))
+    expect(owed).toContain('await landed(services, { ...site, head: site.head }, state.sig)')
+    expect(owed).toContain('if (home.drafts) this.#draftsHome = draftsHomeWords(home.drafts)')
+    expect(owed).not.toContain('writeReceipt(')
   })
 })

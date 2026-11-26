@@ -527,6 +527,8 @@ connection: *your own machine, merely not running*, asserted from a string
 that cannot say so. It is now answer-only, like any host that left the
 machine, and covered by both specs.
 
+> **Retired 2026-11-25.** The provider wire no longer carries tools or tool calls at all (`hive-read-fence.md`, "The rest of it"): the two paragraphs below describe the tool path as it was, and the peer-swarm gap they name went with it.
+
 **A tool call is authorized only by a terminal `finish_reason: 'tool_calls'`.**
 A `length` or content-filter stop yields no `toolCalls` even when the arguments
 JSON looks complete; streamed calls accumulate as indexed deltas and are

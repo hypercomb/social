@@ -41,7 +41,7 @@
 // that reading may hold it too. Only the participant's hand lets held code
 // run, and a commit never folds it.
 
-import { EffectBus, MODULE_DRAFTS_IOC_KEY, SignatureService, flagInBrood, isSectionPath, mayRunBee, newReaches, reachPhrase, registerPoolMeaning, replaceSection, sectionIndex, sectionOf, type CodeReach, type ModuleCommitOutcome, type ModuleDraftsProvider } from '@hypercomb/core'
+import { EffectBus, MODULE_DRAFTS_IOC_KEY, SignatureService, broodRecord, broodRecordOnDisk, flagInBrood, isSectionPath, mayRunBee, newReaches, reachPhrase, registerPoolMeaning, replaceSection, sectionIndex, sectionOf, type BroodRecord, type CarriedModuleDraft, type CodeReach, type DraftRestoreOutcome, type ModuleCommitOutcome, type ModuleDraftsProvider } from '@hypercomb/core'
 import { applySelection, installedPackageSig, layersIoFor, unpickRevision, type SelectionOutcome } from './acquire.js'
 import { HOST_PACKAGES_MEANING, formatMember, markerIndices, poolEntryName } from './host-pool.js'
 import { composeDependencies, isOff, namespaceOf, ownerOf, readPicks, sigsOf, walkTree, within, type Picks, type TreeWalk } from './package-tree.js'
@@ -165,6 +165,15 @@ export type ModuleDraftDeps = {
   /** Why the drafted module would not even parse, or undefined. Absent:
    *  nothing is checked. */
   readonly parseProblem?: (text: string, before?: string) => Promise<string | undefined>
+  /** The brood record for a module (core broodRecord). Absent: nothing is
+   *  known to be this hive's own draft, so nothing is carried or restored. */
+  readonly held?: (sig: string) => Promise<BroodRecord | null>
+  /** Hold a carried draft (core flagInBrood). Throws when it cannot. Absent:
+   *  nothing is restored. */
+  readonly hold?: typeof flagInBrood
+  /** The record as stored, past the session copy (core broodRecordOnDisk).
+   *  Absent: no hold can be proved, so nothing is restored. */
+  readonly heldOnDisk?: (sig: string) => Promise<BroodRecord | null>
 }
 
 /**
@@ -300,6 +309,9 @@ const liveDeps = (): ModuleDraftDeps => ({
   mayRun: sig => mayRunBee(sig),
   admit: admitInBrood,
   parseProblem: parseProblemAsBody,
+  held: broodRecord,
+  hold: flagInBrood,
+  heldOnDisk: broodRecordOnDisk,
 })
 
 /** The refusal for a draft that does not parse, or null. */
@@ -400,6 +412,7 @@ export const draftModule = async (request: ModuleDraftRequest, deps: ModuleDraft
   const nextBytes = encode(nextText)
   const nextBeeSig = await sigOf(nextBytes)
   if (nextBeeSig === beeSig) return fail('the draft is byte-identical to the module it drafts from')
+  if (runsInWalk(walk, nextBeeSig)) return fail('a module with exactly this text already runs elsewhere in the package')
 
   const layerBytes = await local.read(node.layerSig)
   let record: LayerRecord
@@ -472,6 +485,7 @@ const draftNewBee = async (request: ModuleDraftRequest, besideSig: string, besid
   const bytes = encode(text)
   const sig = await sigOf(bytes)
   if (node.bees.includes(sig)) return fail('a module with exactly this text is already in the folder')
+  if (runsInWalk(context.walk, sig)) return fail('a module with exactly this text already runs elsewhere in the package')
 
   const layerBytes = await local.read(node.layerSig)
   let record: LayerRecord
@@ -595,6 +609,12 @@ export type ModuleDraft = {
   readonly rootSig: string
   readonly section: string
   readonly from: string
+  /** The module the draft wrote ('' when the record names none). */
+  readonly to: string
+  /** 'bee' (a section rewritten, or a new file: `from` is '') or 'dependency'. */
+  readonly kind: string
+  /** The trunk the draft was made over. */
+  readonly of: string
   readonly at: number
 }
 
@@ -606,11 +626,12 @@ export const listDrafts = async (deps: Pick<ModuleDraftDeps, 'picks' | 'layers'>
   for (const [path, pick] of Object.entries(deps.picks())) {
     try {
       const bytes = await io.read(pick.root)
-      const record = bytes ? JSON.parse(decode(bytes)) as { draft?: { section?: unknown; from?: unknown; at?: unknown } } : null
+      const record = bytes ? JSON.parse(decode(bytes)) as { draft?: DraftRecord } : null
       if (!record?.draft) continue
       out.push({
         path, layerSig: pick.layer, rootSig: pick.root,
         section: String(record.draft.section ?? ''), from: String(record.draft.from ?? ''),
+        to: String(record.draft.to ?? ''), kind: String(record.draft.kind ?? ''), of: String(record.draft.of ?? ''),
         at: Number(record.draft.at) || pick.at,
       })
     } catch { /* not a draft, or not readable — not listed */ }
@@ -620,6 +641,481 @@ export const listDrafts = async (deps: Pick<ModuleDraftDeps, 'picks' | 'layers'>
 
 /** Drop the draft at a path: the trunk's layer runs there again after a reload. */
 export const dropDraft = (path: string): Promise<SelectionOutcome> => unpickRevision(path)
+
+// HOME, HELD (jwize, 2026-11-20). Publish on a card carries the owner's
+// drafts with it; where the card arrives on the owner's hive or another of his
+// devices, each draft is put back HELD in the brood until he accepts it there.
+// Visitors never run it, and acceptance never travels: the hold is written
+// fresh on every device, and only that device's hand rules past it.
+
+/** How a draft put back from a card is recorded in the brood: after its
+ *  ordinary "a draft of …" words, so it still waits for the owner's hand
+ *  (site-code-review.ts), and it can be told from work written here. */
+const CARRIED_HOME = ', carried home with '
+
+/** A brood record that says the module is a draft of this hive's own. */
+const ownDraft = (record: BroodRecord | null | undefined): record is BroodRecord & { source: { how: string } } =>
+  !!record && record.source.kind === 'own' && !!record.source.how?.startsWith('a draft of ')
+
+/** The trunk's own walk, read from what is held here (no picks). */
+const trunkWalk = async (deps: ModuleDraftDeps, trunk: string): Promise<TreeWalk | null> => {
+  const io = await deps.layers()
+  if (!io) return null
+  const walk = await walkTree(trunk, { ...io, fetch: async () => null })
+  return walk.complete ? walk : null
+}
+
+/** Canonical JSON: object keys sorted at every depth. */
+const canonical = (value: unknown): string => JSON.stringify(value, (_key, v: unknown) =>
+  v && typeof v === 'object' && !Array.isArray(v)
+    ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+    : v)
+
+/** A layer record with its modules (`bees`, `docs.bees`) left out, canonical:
+ *  what a draft may not change in the trunk's layer it is laid over. */
+const withoutModules = (record: LayerRecord): string => {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) throw new Error('not a layer')
+  const { bees: _bees, docs, ...rest } = record
+  const otherDocs = docs && typeof docs === 'object' ? Object.fromEntries(Object.entries(docs).filter(([key]) => key !== 'bees')) : undefined
+  return canonical({ ...rest, ...(otherDocs && Object.keys(otherDocs).length ? { docs: otherDocs } : {}) })
+}
+
+/** Does a walk already run this module, on its root or in any folder? A
+ *  draft whose module is one of those would hold it, and stop it running
+ *  there, with no hand having acted on it. */
+const runsInWalk = (walk: TreeWalk, sig: string): boolean =>
+  walk.rootBees.includes(sig) || walk.nodes.some(node => node.bees.includes(sig))
+
+/** The modules a layer names that the trunk's layer at the same path does not. */
+const partsOver = (named: readonly string[], node: TreeWalk['nodes'][number]): string[] =>
+  [...new Set(named.filter(sig => !node.bees.includes(sig)))].sort()
+
+/** The drafts a card may carry: this hive's own drafts over the trunk that
+ *  runs here, whose modules the brood records as drafts of this hive's own
+ *  and that no hand here refused. Unruled and accepted drafts both travel;
+ *  the acceptance does not. A draft that came home with a card is marked
+ *  `carried`.
+ *
+ *  A BEE DRAFT (a section rewritten, or a new file): a pick is a whole folder
+ *  layer, so every module that layer names beyond the trunk's travels with it
+ *  (`parts`): two drafts in one folder are one pick, and the earlier one's
+ *  module must come home too. One whose root's dependencies are not the
+ *  trunk's (written over a dependency draft at the same path) is not carried:
+ *  it could not land anywhere (restoreDraft step 2).
+ *
+ *  A DEPENDENCY DRAFT, only when asked for (`dependencies: true`), marked
+ *  `kind: 'dependency'`: its pick keeps the trunk's layer and swaps
+ *  dependencies in its root, so its parts are every dependency that root
+ *  lists beyond the trunk's — stacked swaps at one path travel together. Not
+ *  asked for, none is given, so an older caller never puts one where an
+ *  older reader settles it as tampered. */
+export const carryableDrafts = async (deps: ModuleDraftDeps = liveDeps(), options: { readonly dependencies?: boolean } = {}): Promise<CarriedModuleDraft[]> => {
+  const trunk = deps.trunk()
+  if (!trunk || !deps.held) return []
+  const walk = await trunkWalk(deps, trunk)
+  const io = await deps.layers()
+  if (!walk || !io) return []
+  const trunkDependencies = new Set(walk.rootDependencies)
+  const out: CarriedModuleDraft[] = []
+  for (const draft of await listDrafts(deps)) {
+    const isDependency = draft.kind === 'dependency'
+    if (!(draft.kind === 'bee' || (isDependency && options.dependencies === true))) continue
+    if (draft.of !== trunk || !SIG_RE.test(draft.to)) continue
+    const node = walk.nodes.find(candidate => candidate.path === draft.path)
+    if (!node) continue
+    let rootDependencies: string[]
+    try { rootDependencies = sigsOf((JSON.parse(decode((await io.read(draft.rootSig))!)) as { dependencies?: unknown }).dependencies) } catch { continue }
+    let parts: string[]
+    if (isDependency) {
+      if (draft.layerSig !== node.layerSig) continue
+      parts = [...new Set(rootDependencies.filter(sig => !trunkDependencies.has(sig)))].sort()
+    } else {
+      if (!sameSet(rootDependencies, walk.rootDependencies)) continue
+      let named: string[]
+      try { named = sigsOf((JSON.parse(decode((await io.read(draft.layerSig))!)) as LayerRecord).bees) } catch { continue }
+      parts = partsOver(named, node)
+    }
+    if (!parts.includes(draft.to)) continue
+    let carried = false
+    let travels = true
+    for (const part of parts) {
+      const record = await deps.held(part).catch(() => null)
+      if (!ownDraft(record) || record.ruling?.verdict === 'refused') { travels = false; break }
+      if (part === draft.to && record.source.how.includes(CARRIED_HOME)) carried = true
+    }
+    if (!travels) continue
+    out.push({
+      root: draft.rootSig, layer: draft.layerSig, to: draft.to, from: draft.from, parts,
+      ...(carried ? { carried: true as const } : {}), ...(isDependency ? { kind: 'dependency' as const } : {}),
+    })
+  }
+  return out
+}
+
+/** The same signatures, in any order and with any repeats. */
+const sameSet = (a: readonly string[], b: readonly string[]): boolean =>
+  JSON.stringify([...new Set(a)].sort()) === JSON.stringify([...new Set(b)].sort())
+
+type DraftRecord = { of?: unknown; path?: unknown; section?: unknown; from?: unknown; to?: unknown; kind?: unknown; at?: unknown }
+
+/**
+ * PUT ONE CARRIED DRAFT BACK, HELD. In this order, stopping at the first step
+ * that fails:
+ *
+ *   1. it is a bee or a dependency draft whose parts hold together and hash
+ *      to their names (else `tampered`; a part that could not be read is
+ *      `incomplete`); a dependency draft names the module it was written
+ *      from, and the module it wrote names the same namespace, inside its
+ *      path;
+ *   2. it was made over the trunk that runs here, and over nothing else (else
+ *      `other-build`, nothing written; it comes back once Update all levels
+ *      the trunks — or `older-build` when the draft's build is one this
+ *      device holds but does not run: said once by the caller, and still
+ *      tried again, since holding a build's layers never proves it ran here).
+ *      A bee draft's root lists the trunk's dependencies. A dependency
+ *      draft's root lists the trunk's with swaps only: every dependency it
+ *      adds is a carried part inside its path, and takes the place of exactly
+ *      one trunk dependency of the same namespace, and it leaves out no other;
+ *   3. a bee draft's layer is the trunk's layer at its path with only carried
+ *      modules added: every module it names that the trunk's does not is a
+ *      part the card lists, and each is held below; every other field is the
+ *      trunk layer's own (no child layer grafted in); and it leaves out no
+ *      more trunk modules than it puts carried ones in, each one it leaves
+ *      out being the module the draft was written from or one a carried
+ *      module is a section rewrite of. A dependency draft's layer IS the
+ *      trunk's layer at its path. Neither puts in a module the trunk already
+ *      runs elsewhere (each else `tampered`);
+ *   4. no hand here refused any of its modules, read from disk (`refused-here`,
+ *      asked before the path: a refused draft settles, never `path-busy` or
+ *      `present`); a hand here that accepted one stands, and it is not
+ *      flagged again;
+ *   5. its path is free here (`present` when this very draft is picked there).
+ *      A pick there that this draft was written on top of, or one that itself
+ *      came home with a card, gives way; any other pick is local work, which
+ *      wins: `path-busy`;
+ *   6. every module is HELD: flagged in the brood, with the scan's reasons or
+ *      as untried, and the hold read back from disk (else `unheld`, and
+ *      nothing is written: code is never put where a reload runs it on a hold
+ *      that did not land);
+ *   7. the bytes are written: only the modules the draft adds (into the bees
+ *      pool, or the dependencies pool for a dependency draft), never the one
+ *      a draft was written into; then a bee draft's layer, and the root; and
+ *   8. the pick is made through every selection gate (`gate` when one refuses;
+ *      the selection is left as it was). A held dependency waits as a held
+ *      bee does: the selection leaves it out of the bag, and the import map's
+ *      scans never map it (held-dependencies.ts), so the trunk's bundle for
+ *      that namespace keeps running until a hand here accepts it.
+ *
+ * Never throws, and never writes a ruling.
+ */
+export const restoreDraft = async (
+  carried: { readonly root: string; readonly layer: string },
+  refs: readonly string[],
+  bytes: (sig: string) => Promise<Uint8Array | null>,
+  lineage: string,
+  deps: ModuleDraftDeps = liveDeps(),
+  siblings: ReadonlySet<string> = new Set(),
+): Promise<DraftRestoreOutcome> => {
+  try {
+    const listed = new Set(refs)
+    const { root, layer } = carried
+    if (!SIG_RE.test(root) || !SIG_RE.test(layer) || !listed.has(root) || !listed.has(layer)) return 'tampered'
+    // Every part is hashed to its name here: the reader's word is not taken for it.
+    const part: HashedPart = async sig => {
+      const held = await bytes(sig).catch(() => null)
+      if (!held) return null
+      const copy = new Uint8Array(held) as Uint8Array<ArrayBuffer>
+      return (await sigOf(copy)) === sig ? copy : 'forged'
+    }
+
+    // 1. A DRAFT THAT HOLDS TOGETHER.
+    const rootBytes = await part(root)
+    if (rootBytes === 'forged') return 'tampered'
+    if (!rootBytes) return 'incomplete'
+    let rootRecord: { draft?: DraftRecord; dependencies?: unknown }
+    try { rootRecord = JSON.parse(decode(rootBytes)) as { draft?: DraftRecord; dependencies?: unknown } } catch { return 'tampered' }
+    const draft = rootRecord?.draft
+    if (!draft || typeof draft !== 'object' || (draft.kind !== 'bee' && draft.kind !== 'dependency')) return 'tampered'
+    const ofDependency = draft.kind === 'dependency'
+    const of = String(draft.of ?? ''), path = String(draft.path ?? ''), section = String(draft.section ?? '')
+    const from = String(draft.from ?? ''), to = String(draft.to ?? '')
+    const at = Number(draft.at) || 0
+    if (!SIG_RE.test(of) || !path || !isSectionPath(section) || !SIG_RE.test(to) || !listed.has(to)) return 'tampered'
+    if (from && (!SIG_RE.test(from) || !listed.has(from))) return 'tampered'
+    // A dependency draft is always written from a module: a namespace has no new file.
+    if (ofDependency && !from) return 'tampered'
+    const layerBytes = await part(layer)
+    const toBytes = await part(to)
+    const fromBytes = from ? await part(from) : null
+    if (layerBytes === 'forged' || toBytes === 'forged' || fromBytes === 'forged') return 'tampered'
+    if (!layerBytes || !toBytes || (from && !fromBytes)) return 'incomplete'
+    let named: string[]
+    try { named = sigsOf((JSON.parse(decode(layerBytes)) as LayerRecord).bees) } catch { return 'tampered' }
+    if (!ofDependency && !named.includes(to)) return 'tampered'
+    //    A dependency's first line names its namespace: the draft may not move
+    //    it (draftDependency refuses that), nor carry it outside its path.
+    if (ofDependency) {
+      const ns = namespaceOf(toBytes)
+      if (!ns || ns !== namespaceOf(fromBytes) || !within(ns, path)) return 'tampered'
+    }
+    const toText = decode(toBytes)
+    const fromText = fromBytes ? decode(fromBytes) : ''
+    const toSection = sectionOf(toText, section)
+    if (!toSection || await unparsable(deps, toText, fromText, section)) return 'tampered'
+    const fromSection = fromBytes ? sectionOf(fromText, section) : null
+    if (fromBytes && !fromSection) return 'tampered'
+    const reaches = fromSection ? newReaches(bodyOf(fromText, fromSection), bodyOf(toText, toSection)) : newReaches('', toText)
+
+    // 2. THE TRUNK THAT RUNS HERE, and nothing laid over it. A build this
+    //    device holds but does not run is said so (`older-build`); holding its
+    //    layers never proves it ran here, so the caller tries it again.
+    const trunk = deps.trunk()
+    if (!trunk) return 'other-build'
+    if (of !== trunk) return (await (await deps.layers())?.read(of).catch(() => null)) ? 'older-build' : 'other-build'
+    const walk = await trunkWalk(deps, trunk)
+    if (!walk) return 'incomplete'
+    const rootDependencies = sigsOf(rootRecord.dependencies)
+    const node = walk.nodes.find(candidate => candidate.path === path)
+    const modules: HeldModule[] = [{ sig: to, bytes: toBytes, section, reaches }]
+    if (ofDependency) {
+      const swapped = await dependencySwaps(deps, walk, rootDependencies, to, path, listed, part)
+      if (typeof swapped === 'string') return swapped
+      // 3. THE TRUNK'S OWN LAYER: a dependency draft changes no folder.
+      if (!node || layer !== node.layerSig) return 'tampered'
+      if (swapped.some(added => runsInWalk(walk, added.sig))) return 'tampered'
+      for (const added of swapped) {
+        if (added.sig === to) continue
+        const text = decode(added.bytes)
+        if (await unparsable(deps, text, '', section)) return 'tampered'
+        modules.push({ sig: added.sig, bytes: added.bytes, section: sectionIndex(text)[0]?.path ?? section, reaches: newReaches('', text) })
+      }
+    } else {
+      if (!sameSet(rootDependencies, walk.rootDependencies)) return 'other-build'
+      // 3. THE TRUNK'S LAYER, with only carried modules added.
+      const shaped = await beeLayerOverTrunk(deps, walk, node, { named, layerBytes, to, toBytes, from, section, listed, part })
+      if (typeof shaped === 'string') return shaped
+      modules.push(...shaped)
+    }
+
+    // 4. NO HAND HERE REFUSED IT, read from disk, never from this tab's copy:
+    //    another tab's hand may have ruled since. Asked before the path, so a
+    //    refused draft settles whatever is picked there.
+    if (!deps.heldOnDisk) return 'unheld'
+    const onDisk = new Map<string, BroodRecord | null>()
+    for (const module of modules) {
+      const record = await deps.heldOnDisk(module.sig)
+      if (record?.ruling?.verdict === 'refused') return 'refused-here'
+      onDisk.set(module.sig, record)
+    }
+
+    // 5. A FREE PATH: local work wins.
+    const there = deps.picks()[path]
+    if (there) {
+      if (there.root === root) return 'present'
+      if (!(await givesWay(deps, there.root, ofDependency ? rootDependencies : named, from, siblings))) return 'path-busy'
+    }
+
+    // 6. HELD, and proved held on disk, before any byte is written.
+    const store = deps.store()
+    const writeModule = ofDependency ? store?.writeDependencyBytes?.bind(store) : store?.writeBeeBytes?.bind(store)
+    if (!writeModule || !store?.writeLayerBytes || !deps.hold) return 'unheld'
+    for (const module of modules) {
+      const record = onDisk.get(module.sig)
+      if (record?.ruling?.verdict === 'accepted') continue
+      if (!record?.flags?.length) {
+        const flag = module.reaches.length
+          ? { by: 'scan', reason: `it newly reaches ${reachPhrase(module.reaches)}`, reaches: module.reaches }
+          : { by: 'trial', reason: untriedReason() }
+        await deps.hold(module.sig, flag, { kind: 'own', how: `a draft of ${module.section} at ${path}${CARRIED_HOME}${lineage}` }, module.section)
+      }
+      const stored = await deps.heldOnDisk(module.sig)
+      if (!stored?.flags?.length || stored.ruling) return 'unheld'
+    }
+
+    // 7. THE BYTES: the modules the draft adds, then a bee draft's layer (a
+    //    dependency draft's is the trunk's own, held already), then the root.
+    for (const module of modules) await writeModule(module.sig, module.bytes)
+    if (!ofDependency) await store.writeLayerBytes(layer, layerBytes.buffer)
+    await store.writeLayerBytes(root, rootBytes.buffer)
+
+    // 8. THE PICK, through every gate. The root is not admitted as trusted:
+    //    only its draft fields and dependencies were checked, never the rest
+    //    of its tree, so it never vouches for any other revision here.
+    const admitted = ofDependency ? modules.map(module => module.sig) : [...modules.map(module => module.sig), layer]
+    const outcome = await deps.apply(trunk, admitted, { ...deps.picks(), [path]: { layer, root, hides: false, at } })
+    if (!outcome.ok) return 'gate'
+    // Announced as now, not as when it was drafted, so the reading starts fresh here.
+    announce({ sig: to, from, section, path, reaches, of: ofDependency ? 'dependency' : 'bee', at: deps.now() })
+    return 'applied'
+  } catch {
+    return 'unheld'
+  }
+}
+
+/** A part of a carried draft, read and hashed to its name ('forged' when it does not). */
+type HashedPart = (sig: string) => Promise<Uint8Array<ArrayBuffer> | null | 'forged'>
+
+/** A module a carried draft puts back, as it is held and written. */
+type HeldModule = { sig: string; bytes: Uint8Array<ArrayBuffer>; section: string; reaches: readonly CodeReach[] }
+
+/**
+ * STEP 2 FOR A DEPENDENCY DRAFT: the root lists the trunk's dependencies with
+ * swaps only. `added` is what it lists beyond the trunk's, `removed` the
+ * trunk's it leaves out. Every added one is a listed part that hashes to its
+ * name, `to` among them, its namespace inside the path; every removed one is a
+ * trunk dependency of the same namespace as exactly one added one, and every
+ * added one takes the place of exactly one. Stacked swaps at one path (two
+ * namespaces, or one drafted twice) hold to this; anything else was made over
+ * some other list (`other-build`). A part that is not listed or does not hash
+ * is `tampered`; one that cannot be read, `incomplete`.
+ */
+const dependencySwaps = async (
+  deps: ModuleDraftDeps, walk: TreeWalk, rootDependencies: readonly string[], to: string, path: string,
+  listed: ReadonlySet<string>, part: HashedPart,
+): Promise<{ sig: string; bytes: Uint8Array<ArrayBuffer> }[] | DraftRestoreOutcome> => {
+  const trunkDependencies = new Set(walk.rootDependencies)
+  const rootSet = new Set(rootDependencies)
+  const added = [...rootSet].filter(sig => !trunkDependencies.has(sig)).sort()
+  const removed = [...trunkDependencies].filter(sig => !rootSet.has(sig)).sort()
+  if (!added.includes(to) || added.some(sig => !listed.has(sig))) return 'tampered'
+  if (added.length !== removed.length) return 'other-build'
+  const out: { sig: string; bytes: Uint8Array<ArrayBuffer> }[] = []
+  const addedSpaces: string[] = []
+  for (const sig of added) {
+    const held = await part(sig)
+    if (held === 'forged') return 'tampered'
+    if (!held) return 'incomplete'
+    const ns = namespaceOf(held)
+    if (!ns || !within(ns, path)) return 'tampered'
+    addedSpaces.push(ns)
+    out.push({ sig, bytes: held })
+  }
+  // The trunk's own bundles, read from this device: they run here now.
+  const store = deps.store()
+  const removedSpaces: string[] = []
+  for (const sig of removed) {
+    const held = await store?.getDependencyBytes?.(sig).catch(() => null)
+    if (!held) return 'incomplete'
+    removedSpaces.push(namespaceOf(held))
+  }
+  const key = (spaces: readonly string[]): string => JSON.stringify([...spaces].sort())
+  if (new Set(addedSpaces).size !== addedSpaces.length || key(addedSpaces) !== key(removedSpaces)) return 'other-build'
+  return out
+}
+
+/**
+ * STEP 3 FOR A BEE DRAFT: its layer is the trunk's layer at its path with only
+ * carried modules added (restoreDraft, step 3). The modules beyond `to` it
+ * adds, read and hashed, or the outcome that stops it.
+ */
+const beeLayerOverTrunk = async (
+  deps: ModuleDraftDeps, walk: TreeWalk, node: TreeWalk['nodes'][number] | undefined,
+  draft: {
+    readonly named: readonly string[]; readonly layerBytes: Uint8Array; readonly to: string; readonly toBytes: Uint8Array<ArrayBuffer>
+    readonly from: string; readonly section: string; readonly listed: ReadonlySet<string>; readonly part: HashedPart
+  },
+): Promise<HeldModule[] | DraftRestoreOutcome> => {
+  const { named, layerBytes, to, toBytes, from, section, listed, part } = draft
+  if (!node) return 'tampered'
+  const added = partsOver(named, node)
+  if (!added.includes(to) || added.some(sig => !listed.has(sig))) return 'tampered'
+  //    None of them is a module the trunk already runs elsewhere (on its
+  //    root, or at another path): holding it would stop that module here.
+  if (added.some(sig => runsInWalk(walk, sig))) return 'tampered'
+  //    Nothing else in it differs from the trunk's layer: no child layer
+  //    grafted in (the walk follows `cells`, and what it reaches would run
+  //    unheld), no other field changed, and no trunk module left out that
+  //    a carried one does not take the place of.
+  const trunkLayer = await (await deps.layers())?.read(node.layerSig)
+  if (!trunkLayer) return 'incomplete'
+  let carriedShape: string, trunkShape: string
+  try {
+    carriedShape = withoutModules(JSON.parse(decode(layerBytes)) as LayerRecord)
+    trunkShape = withoutModules(JSON.parse(decode(trunkLayer)) as LayerRecord)
+  } catch { return 'tampered' }
+  if (carriedShape !== trunkShape) return 'tampered'
+  //    The drafted module takes the place of at most the one it was written
+  //    from (a trunk module, or an earlier draft that took one's place); any
+  //    other carried module (an earlier draft in the folder) at most one each.
+  const replaceable = (from && !named.includes(from) ? 1 : 0) + added.length - 1
+  if (node.bees.filter(sig => !named.includes(sig)).length > replaceable) return 'tampered'
+  //    And WHICH ones: each trunk module it leaves out is the one the draft
+  //    was written from, or one a carried module is a section rewrite of
+  //    (the same source sections, in order), one each. Never an unrelated
+  //    trunk module dropped beside an extra part: that would stop running
+  //    here with no hand here having accepted anything.
+  const leftOut = node.bees.filter(sig => !named.includes(sig) && sig !== from)
+  if (leftOut.length) {
+    const sectionsOf = (bytes: Uint8Array): string => sectionIndex(decode(bytes)).map(s => s.path).join('\n')
+    const takesFrom = !!from && node.bees.includes(from) && !named.includes(from)
+    const free: string[] = []
+    for (const sig of added) {
+      if (sig === to && takesFrom) continue
+      const held = sig === to ? toBytes : await part(sig)
+      if (held === 'forged') return 'tampered'
+      if (!held) return 'incomplete'
+      free.push(sectionsOf(held))
+    }
+    const trunkStore = deps.store()
+    for (const sig of leftOut) {
+      const held = await trunkStore?.getBeeBytes?.(sig).catch(() => null)
+      if (!held) return 'incomplete'
+      const key = sectionsOf(held)
+      const at = key ? free.indexOf(key) : -1
+      if (at < 0) return 'tampered'
+      free.splice(at, 1)
+    }
+  }
+  const modules: HeldModule[] = []
+  for (const sig of added) {
+    if (sig === to) continue
+    const held = await part(sig)
+    if (held === 'forged') return 'tampered'
+    if (!held) return 'incomplete'
+    const text = decode(held)
+    if (await unparsable(deps, text, '', section)) return 'tampered'
+    modules.push({ sig, bytes: held, section: sectionIndex(text)[0]?.path ?? section, reaches: newReaches('', text) })
+  }
+  return modules
+}
+
+/** Does the pick at a path give way to a carried draft? Only when it is not
+ *  local work: the carried draft was written on top of it (its layer — for a
+ *  dependency draft, its root's dependencies — still names the busy draft's
+ *  module, or it drafts from that module), or the busy draft itself came home
+ *  with a card — but not with this one: two drafts of one path the same card
+ *  carried, neither written on the other, do not take turns replacing each
+ *  other; the first runs, the other waits. */
+const givesWay = async (deps: ModuleDraftDeps, busyRoot: string, named: readonly string[], from: string, siblings: ReadonlySet<string>): Promise<boolean> => {
+  try {
+    const io = await deps.layers()
+    const bytes = await io?.read(busyRoot)
+    const busy = bytes ? (JSON.parse(decode(bytes)) as { draft?: DraftRecord }).draft : undefined
+    if (!busy || (busy.kind !== 'bee' && busy.kind !== 'dependency')) return false
+    const busyTo = String(busy.to ?? '')
+    if (!SIG_RE.test(busyTo)) return false
+    if (named.includes(busyTo) || from === busyTo) return true
+    if (siblings.has(busyRoot)) return false
+    const record = (await deps.heldOnDisk?.(busyTo)) ?? null
+    return ownDraft(record) && record.source.how.includes(CARRIED_HOME)
+  } catch { return false }
+}
+
+/** Every draft a card carried, put back one after another. */
+export const restoreDrafts = async (
+  carried: { readonly refs: readonly string[]; readonly drafts: readonly { readonly root: string; readonly layer: string }[] },
+  bytes: (sig: string) => Promise<Uint8Array | null>,
+  lineage: string,
+  deps: ModuleDraftDeps = liveDeps(),
+): Promise<{ readonly root: string; readonly outcome: DraftRestoreOutcome }[]> => {
+  const out: { root: string; outcome: DraftRestoreOutcome }[] = []
+  const siblings = new Set(carried.drafts.map(draft => draft.root))
+  for (const draft of carried.drafts) {
+    const others = new Set([...siblings].filter(root => root !== draft.root))
+    out.push({ root: draft.root, outcome: await restoreDraft(draft, carried.refs, bytes, lineage, deps, others) })
+  }
+  return out
+}
 
 type CellRecord = { name?: unknown; cells?: unknown } & Record<string, unknown>
 
@@ -904,6 +1400,9 @@ const provider: ModuleDraftsProvider = {
     return outcome.ok ? { ok: true, sig: outcome.beeSig, of: outcome.of, path: outcome.path, reaches: outcome.reaches } : { ok: false, error: outcome.error }
   },
   pack: files => packFiles(files),
+  carry: options => carryableDrafts(liveDeps(), options),
+  restoresDependencies: true,
+  restore: (carried, bytes, lineage) => restoreDrafts(carried, bytes, lineage),
 }
 try {
   ;(globalThis as { ioc?: { register?: (k: string, v: unknown) => void } }).ioc?.register?.(MODULE_DRAFTS_IOC_KEY, provider)

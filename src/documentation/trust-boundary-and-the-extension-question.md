@@ -388,6 +388,10 @@ may run *as you*. That is now a second question, asked of every surface:
 7. **A file opened as a page.** The service worker seals any `/@resource/`
    document (a tab, a frame, an object) of every type not known to run nothing,
    unless this hive authored it: a host picks the type of the bytes it serves.
+8. **Carried code is content.** Draft bytes a card carries home
+   (`module-sandbox.md`, Home, held) are content on every device they reach
+   until a hand on that device rules: they arrive held in the brood, a ruling
+   never travels with them, and a visitor's device never picks them.
 
 Left open, deliberately: a browser that ignores `webrtc 'block'` lets a sealed
 page open a peer connection, which can signal that it was opened (it holds only

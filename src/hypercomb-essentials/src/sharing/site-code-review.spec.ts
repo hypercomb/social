@@ -26,6 +26,8 @@ describe('code to review', () => {
     expect(waitsForYou(record({ flags: [] }))).toBe(false)
     expect(waitsForYou(record({ source: { kind: 'stranger', how: 'a draft of x' } }))).toBe(false)
     expect(waitsForYou(record({ how: 'package install' }))).toBe(false)
+    // A draft that came home with a card (module-drafts.ts restoreDraft) waits the same way.
+    expect(waitsForYou(record({ how: 'a draft of assistant at src/a.ts, carried home with business-card' }))).toBe(true)
     expect(await draftsWaiting(async () => [record(), record({ sig: 'b'.repeat(64) }), record({ flags: [] })])).toBe(2)
     expect(await draftsWaiting(async () => { throw new Error('no brood') })).toBe(0)
   })

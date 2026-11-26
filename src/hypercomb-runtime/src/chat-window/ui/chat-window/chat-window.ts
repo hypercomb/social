@@ -148,10 +148,9 @@ import {
   HypercombPlanQueue,
   type HypercombBehaviour,
   type HypercombBehaviourExecutor,
-  type HypercombFunctionTool,
-  type HypercombToolCall,
 } from './hypercomb-grammar'
 import { DOCTRINE_HOLD, inDoctrine, touchesDoctrine } from './doctrine-hold'
+import { runSeveralWrites } from './several-writes'
 import { PlanTransaction, type PlanHistory } from './hypercomb-plan-transaction'
 import {
   executeHypercombObservationPlan,
@@ -1088,7 +1087,6 @@ type DesignationLike = {
 
 type RoutedChunkLike = {
   readonly text: string
-  readonly toolCalls?: readonly HypercombToolCall[]
   readonly providerId: string
   readonly providerLabel: string
   readonly vendor: string
@@ -1130,15 +1128,12 @@ type SlashBehaviourDroneLike = {
   executePublicCanonical?(command: string, args: string): Promise<void> | void
 }
 
-type LlmMessageLike =
-  | {
-    readonly role: 'user' | 'assistant'
-    readonly content: string
-    readonly toolCalls?: readonly HypercombToolCall[]
-    /** Pictures a read saw, for a model that can see (essentials LlmImagePart). */
-    readonly images?: readonly { readonly mime: string; readonly base64: string }[]
-  }
-  | { readonly role: 'tool'; readonly content: string; readonly toolCallId: string }
+type LlmMessageLike = {
+  readonly role: 'user' | 'assistant'
+  readonly content: string
+  /** Pictures a read saw, for a model that can see (essentials LlmImagePart). */
+  readonly images?: readonly { readonly mime: string; readonly base64: string }[]
+}
 
 type LlmRouterLike = {
   ready?(call?: { providerId?: string; model?: string; preferModel?: string; need?: { tier?: string; streaming?: boolean; minContext?: number }; avoid?: readonly string[] }): boolean
@@ -1167,8 +1162,9 @@ type LlmRouterLike = {
     need?: { tier?: string; streaming?: boolean; minContext?: number }
     messages: readonly LlmMessageLike[]
     system?: string
-    tools?: readonly HypercombFunctionTool[]
     maxTokens?: number
+    /** Room the answer would like, when the host allows it; refused, the round is asked plainly. */
+    room?: number
     signal?: AbortSignal
     /** The system prompt is stable enough to be prefix-cached by the vendor. */
     cacheSystem?: boolean
@@ -1200,6 +1196,10 @@ const MODEL_ALIASES: Record<string, string> = { o: 'opus', s: 'sonnet', h: 'haik
 /** Which model each conversation was last held in, participant-local. Per
  *  CONVERSATION, not global: a thread is about one thing, and the tier you
  *  chose for it is part of what you set up. */
+/** Room a work round that may write asks for: six files of a page, its
+ *  script and its styles do not fit the 4096 every adapter sends unasked.
+ *  A host that refuses it answers the same round plainly (answer-room.ts). */
+const WORK_ROUND_TOKENS = 16_384
 const MODEL_KEY = 'hc:chat-models'
 const HOST_TIER_MODEL = 'haiku'
 const RAIL_WIDTH_KEY = 'hc:chat-rail-width'
@@ -8498,6 +8498,9 @@ export class ChatWindow {
           stream: router.stream!({
             ...(call as { providerId?: string; model?: string; preferModel?: string; fallbackWithin?: string; avoid?: string[]; effort?: MessageEffort }),
             need: routeNeed, cacheSystem: true, observeAttempt, messages, system, signal,
+            // ROOM FOR SEVERAL FILES (core WRITES_PER_REPLY): a round that may
+            // write asks for room, so six blocks are not cut at 4096 tokens.
+            ...(canWrite || canWriteFiles ? { room: WORK_ROUND_TOKENS } : {}),
           }),
           pinned, model: continuationModel, lead, silent: readAsked && readRounds === 0, signal,
           onProvider: (chunk, first) => {
@@ -8742,9 +8745,11 @@ export class ChatWindow {
         let reply: string
         try {
           stillHere()
-          // JEV RUNS THE SHOW (jev-round.ts decides, this loop does).
-          const table = tableFor(work.request, jevTurn)
-          if (table) {
+          // The provider this round is pinned to, held for the closures below.
+          const roundPinned = pinned
+          // JEV RUNS THE SHOW (jev-round.ts decides, this loop does). One
+          // table is judged, its plan made into the one step this round takes.
+          const decideTable = async (table: NonNullable<ReturnType<typeof tableFor>>) => {
             const prepared = prepareTable(table, census)
             // WHAT THE HIVE COULD NOT DO is recorded, not thrown away
             // (essentials assistant/machine-misses.ts; read with `misses`).
@@ -8761,7 +8766,7 @@ export class ChatWindow {
               const body = await contextStore.putResource(new Blob([write.join('\n')], { type: 'text/plain' }), { emit: false })
               return { ...row, body }
             }))
-            const decision = await judge(judged, pinned)
+            const decision = await judge(judged, roundPinned)
             const step = stepFor(decision, prepared, {
               which: word('chat.jev.which', 'Which step should the hive take?'),
               other: word('chat.jev.other', 'Something else'),
@@ -8777,6 +8782,44 @@ export class ChatWindow {
                 ...(decidedRow?.reach ? { reach: decidedRow.reach } : {}),
               })
             }
+            return { step, decision, reportOutcome }
+          }
+          // SEVERAL BLOCKS IN ONE REPLY (several-writes.ts): a mixed reply's
+          // steps, or a reply of several write blocks. While Jev judges, each
+          // block is a one-row table of its own and is judged before it runs.
+          const steps = work.request.steps
+            ?? (work.request.kind === 'write' && work.request.more?.length
+              ? [work.request.lines, ...work.request.more].map(lines => ({ kind: 'write' as const, lines }))
+              : undefined)
+          const runStep = async (step: { readonly kind: 'do' | 'write'; readonly lines: readonly string[] }): Promise<string> => {
+            if (!jevTurn) return step.kind === 'write' ? runWrite(step.lines, roundPinned, roundModel) : runDo(step.lines, roundPinned, roundModel)
+            const { step: judgedStep, decision, reportOutcome } = await decideTable(tableFor({ kind: step.kind, lines: step.lines }, true)!)
+            if (judgedStep.kind === 'refuse') { reportOutcome('refused'); throw new WorkRefused(judgedStep.reason) }
+            // JEV IS THE CHANGE GATE (jev-round.ts stepFor): a block it did
+            // not clear waits in Execution for the participant's hand; the
+            // participant is never handed a menu of the worker's steps.
+            const cleared = judgedStep.kind === 'write' || judgedStep.kind === 'do'
+            const review = cleared ? judgedStep.review : true
+            const note = cleared ? judgedStep.note : `Jev did not clear this change on its own (${decision.reason}); it waits in Execution for the participant's review. This decision grants no permission of its own.`
+            lastRun = 'failed'
+            try {
+              return judgedStep.kind === 'do'
+                ? `${note}\n\n${await runDo(judgedStep.grammars, roundPinned, roundModel, review)}`
+                : `${note}\n\n${await runWrite(judgedStep.kind === 'write' ? judgedStep.lines : step.lines, roundPinned, roundModel, review)}`
+            } finally {
+              if (!signal?.aborted) reportOutcome(lastRun)
+            }
+          }
+          const table = steps ? undefined : tableFor(work.request, jevTurn)
+          if (steps) {
+            reply = await runSeveralWrites(steps, {
+              run: step => runStep(step),
+              refused: isWorkRefusal,
+              stopped: () => !!signal?.aborted,
+              ...(work.request.steps ? { noun: 'Step' } : {}),
+            })
+          } else if (table) {
+            const { step, reportOutcome } = await decideTable(table)
             if (step.kind === 'refuse') { reportOutcome('refused'); throw new WorkRefused(step.reason) }
             if (step.kind === 'question') {
               reportOutcome('deferred')

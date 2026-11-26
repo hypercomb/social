@@ -10,6 +10,7 @@ import {
   type ActiveGenomeRecord,
   type ActiveGenomeSource,
 } from './active-genome.js'
+import { DEPENDENCY_DRAFTS_LISTING_HEAD, dependencyDraftsListingParts } from '../sharing/decoration-closure.js'
 
 export const ACTIVE_GENOME_KEY = '@diamondcoreprocessor.com/ActiveGenomeService'
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
@@ -84,6 +85,17 @@ const expandable = async (blob: Blob): Promise<unknown | undefined> => {
     return JSON.parse(await blob.text()) as unknown
   } catch {
     return undefined
+  }
+}
+
+/** The parts a dependency drafts listing names; [] for any other bytes, unread past its head. */
+const listingParts = async (blob: Blob): Promise<string[]> => {
+  try {
+    const head = await blob.slice(0, DEPENDENCY_DRAFTS_LISTING_HEAD.length).text()
+    if (head !== DEPENDENCY_DRAFTS_LISTING_HEAD) return []
+    return dependencyDraftsListingParts(new Uint8Array(await blob.arrayBuffer()))
+  } catch {
+    return []
   }
 }
 
@@ -311,9 +323,11 @@ export class ActiveGenomeService {
         const blob = await background(() => store.getResourceLocal(signature))
         if (!blob) return null
         const value = await expandable(blob)
+        const listing = value === undefined ? await listingParts(blob) : []
         return {
           bytes: blob.size,
           ...(value === undefined ? {} : { value }),
+          ...(listing.length ? { listing } : {}),
         } satisfies ActiveGenomeContent
       },
       beeBytes: signature => background(() => poolFileSize(signature, store.bees, store.legacyBees)),

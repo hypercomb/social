@@ -81,29 +81,6 @@ export type HypercombBehaviour = {
   readonly machine?: HypercombMachineGrammar
 }
 
-export type HypercombToolCall = {
-  readonly id?: string
-  /** Compact app shape, accepted for tests/alternate adapters. */
-  readonly name?: string
-  readonly arguments?: unknown
-  /** Normalized OpenAI-compatible shape emitted by the provider router. */
-  readonly type?: 'function'
-  readonly function?: {
-    readonly name: string
-    readonly arguments: unknown
-  }
-}
-
-export type HypercombFunctionTool = {
-  readonly type: 'function'
-  readonly function: {
-    readonly name: string
-    readonly description: string
-    readonly parameters: Record<string, unknown>
-    readonly strict?: boolean
-  }
-}
-
 export type HypercombAction = {
   readonly grammar: string
   readonly command: string

@@ -132,20 +132,31 @@ const write = async (record: BroodRecord): Promise<void> => {
   try { await writable.write(JSON.stringify(record)) } finally { await writable.close() }
 }
 
-/** The record for one signature, or null when it was never held. */
-export const broodRecord = async (sig: string): Promise<BroodRecord | null> => {
-  if (!SIG.test(sig)) return null
-  if (cache.has(sig)) return cache.get(sig) ?? null
-  let record: BroodRecord | null = null
+const readFromDisk = async (sig: string): Promise<BroodRecord | null> => {
   try {
     const dir = await broodDir(false)
     const file = dir && await (await dir.getFileHandle(sig)).getFile()
     const parsed = file ? JSON.parse(await file.text()) as unknown : null
-    if (isRecord(parsed)) record = { ...parsed, vouches: parsed.vouches ?? [] }
+    if (isRecord(parsed)) return { ...parsed, vouches: parsed.vouches ?? [] }
   } catch { /* never held */ }
+  return null
+}
+
+/** The record for one signature, or null when it was never held. */
+export const broodRecord = async (sig: string): Promise<BroodRecord | null> => {
+  if (!SIG.test(sig)) return null
+  if (cache.has(sig)) return cache.get(sig) ?? null
+  const record = await readFromDisk(sig)
   cache.set(sig, record)
   return record
 }
+
+/** THE RECORD AS STORED — read past the session copy, which it neither reads
+ *  nor fills. `write` keeps the session copy even when nothing reached disk
+ *  (no storage, a failed write), so a caller about to put held code where a
+ *  reload would run it asks here whether the hold will outlive the tab. */
+export const broodRecordOnDisk = async (sig: string): Promise<BroodRecord | null> =>
+  SIG.test(sig) ? readFromDisk(sig) : null
 
 /**
  * Hold an automaton: it is in the hive and it does not run. Idempotent, and it
