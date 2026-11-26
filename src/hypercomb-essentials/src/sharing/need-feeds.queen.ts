@@ -43,6 +43,7 @@
 
 import { EffectBus, I18N_IOC_KEY, QueenBee, isReservedPoolWord, normalizeCell, type I18nProvider } from '@hypercomb/core'
 import { feedNeed, foldValue, liveFeedDeps, mergeFeeds, type Feed, type NeedValue } from './need-feeds.js'
+import { networkHosts } from './network-hosts.js'
 import { contributeHere, standingSegments } from './contribute.js'
 import { GROUP_MIN_VALUES, groupKey, groupValues, liveGroupDeps, type ValueGroup } from './explore-groups.js'
 import { ENABLEMENT_CHANGED, readGlobalOnKinds, seedCohortOn } from './behavior-enablement.js'
@@ -216,7 +217,7 @@ export class ExploreQueenBee extends QueenBee {
       EffectBus.emit('toast:show', { type: 'tip', message: this.#t('need.stand', 'Stand on a tile first, or name one: explore recipes.') })
       return
     }
-    if (!liveFeedDeps().hosts().length) {
+    if (!(await networkHosts().catch(() => [] as string[])).length) {
       EffectBus.emit('toast:show', { type: 'tip', message: this.#t('need.no-hosts', 'No servers to ask yet — add one in the host directory (hosts).') })
       return
     }
@@ -251,20 +252,26 @@ export class ExploreQueenBee extends QueenBee {
   }
 
   /** Ask every host for the explored name. `fresh` asks past a remembered
-   *  miss — the participant's own contribution just landed a pool. */
+   *  miss — the participant's own contribution just landed a pool. The hosts
+   *  are the ones a model's `explore` asks (network-hosts.ts, reach A8): the
+   *  view and the model read the same sources. */
   #feed(fresh: boolean): void {
-    const deps = liveFeedDeps()
-    const hosts = [...new Set(deps.hosts())]
     const run = ++this.#run
     this.#feeds.clear()
-    this.#order = this.#name ? hosts : []
+    if (!this.#name) this.#order = []
     this.#render()
     if (!this.#name) return
-    void feedNeed(this.#name, feed => {
-      if (run !== this.#run || !this.#mount) return
-      this.#feeds.set(feed.host, feed)
+    void networkHosts().catch(() => [] as string[]).then(found => {
+      if (run !== this.#run || !this.#mount || !this.#name) return
+      const hosts = [...new Set(found)]
+      this.#order = hosts
       this.#render()
-    }, { ...deps, hosts: () => hosts }, { fresh })
+      void feedNeed(this.#name, feed => {
+        if (run !== this.#run || !this.#mount) return
+        this.#feeds.set(feed.host, feed)
+        this.#render()
+      }, { ...liveFeedDeps(), hosts: () => hosts }, { fresh })
+    })
   }
 
   /** Where `+` adds — where you stand — said in words. */

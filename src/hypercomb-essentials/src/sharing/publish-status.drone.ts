@@ -32,7 +32,7 @@
 // essentials, so everything crosses as `publish:render` payloads and comes
 // back as intents (publish:run, publish:unpublish, publish:inspect, …).
 
-import { Drone, EffectBus, get, I18N_IOC_KEY, isWindowShowing, requestConfirm, type I18nProvider, registerPoolMeaning } from '@hypercomb/core'
+import { Drone, EffectBus, get, I18N_IOC_KEY, isWindowShowing, MODULE_DRAFTS_IOC_KEY, requestConfirm, type I18nProvider, type ModuleDraftsProvider, registerPoolMeaning } from '@hypercomb/core'
 import { listDecorations } from '../commands/decoration-manifest.js'
 import { CARD_PAGE_KIND } from '../commands/card-wear.js'
 import { conceal, listConcealed, type ConcealedItem } from '../concealment/concealment.js'
@@ -49,7 +49,7 @@ import {
 import { PUBLIC_CONTENT_HOSTS, isReservedRootKey } from './hive-link.js'
 import { HOST_CONCURRENCY, mapBounded } from './bounded-fetch.js'
 import { sweepRows } from './publish-sweep.js'
-import type { HiveIndexResult } from './hive-pointer.js'
+import { fetchHiveIndex, type HiveIndexResult } from './hive-pointer.js'
 import { publisherKeyHex } from './key-list.client.js'
 import { arrivalPointer, publishArrivalPlan, readArrivalPlan, withdrawArrivalPlan } from './arrival-plan-publish.js'
 import { promoteBranch, promotedPointer, readyToPromote, promotesHead, readPromotionRecord } from './promote.js'
@@ -86,6 +86,7 @@ import { visualBeeIconSvg } from '../commands/visual-bee-icon-svg.js'
 import {
   publishBranch,
   readDoorIndexAt,
+  readerSiteOf,
   readerSitesByDoor,
   secureDeleteBranch,
   setBranchAddress,
@@ -102,7 +103,7 @@ import {
   zoneDoor, type ZoneEntrance,
 } from './zone-door.js'
 import { askDeepName, deepNameLive } from './deep-name-live.js'
-import { batchOrder, driftedRows } from './publish-batch.js'
+import { batchOrder, driftedElsewhere, driftedRows, mayPublishOver, sealedHere } from './publish-batch.js'
 import { switchInCommunity } from './community-switch.js'
 import { SHOWCASE_SIGNED_EFFECT, communityZoneIn, readSignedShowcase, showcaseHome, type ShowcaseItem } from './showcase-record.js'
 import type { OfferedInstance } from './community-candidates.js'
@@ -263,6 +264,16 @@ export interface PublishRow {
   promoted: boolean
   /** Ready to promote — live on a subdomain of its own (readyToPromote). */
   canPromote: boolean
+  /** Drift published from another device (driftedElsewhere): the head out
+   *  there is none this hive put there, so it is offered to take, never to
+   *  republish over. */
+  elsewhere?: boolean
+  /** The head this hive's replica receipt says the branch stands on — one it
+   *  took ("Take it"), so it is this hive's own past, not elsewhere. Read only
+   *  when the ledger does not name the live head. */
+  taken?: string | null
+  /** This hive's ledger names the live head, under any key (publish-batch.ts sealedHere). */
+  sealedHere?: boolean
   /** zone → the address this creation is shown at there: the zone's root
    *  path (`https://<zone>/<path>`) by default, its own address
    *  (`https://<label>.<zone>`) when the signed index gives it one. */
@@ -396,6 +407,21 @@ export interface PublishCommunity {
   busy: string[]
 }
 
+
+/** The fallback words for drafts a take left to be tried again. */
+const takeDraftsWaitingWords = (count: number): string => count === 1
+  ? '1 code draft did not come home yet. It is tried again while this card is the one published.'
+  : `${count} code drafts did not come home yet. They are tried again while this card is the one published.`
+
+/** The head this hive's replica receipt (site-replica.ts) says the branch at
+ *  `segments` stands on — written when the hive takes a card — or null. */
+const takenHead = async (segments: readonly string[]): Promise<string | null> => {
+  try {
+    const { STORE_KEY, readReceipt } = await import('./site-replica.js')
+    const store = (window as { ioc?: { get?: <T>(k: string) => T | undefined } }).ioc?.get?.<import('./site-replica.js').StoreLike>(STORE_KEY)
+    return store ? (await readReceipt(store, segments.join('/')))?.published ?? null : null
+  } catch { return null }
+}
 export class PublishStatusDrone extends Drone {
 
   readonly namespace = 'diamondcoreprocessor.com'
@@ -406,7 +432,7 @@ export class PublishStatusDrone extends Drone {
 
   protected override listens: string[] = [
     'publish:view-toggle', 'publish:shown', 'publish:close', 'publish:refresh', 'sync:state',
-    'publish:run', 'publish:run-many', 'publish:run-drifted', 'publish:unpublish', 'publish:make-live', 'publish:inspect', 'publish:copy-link',
+    'publish:run', 'publish:run-many', 'publish:run-drifted', 'publish:take', 'publish:unpublish', 'publish:make-live', 'publish:inspect', 'publish:copy-link',
     'publish:opens-as', 'publish:set-target', 'publish:door', 'publish:doors', 'publish:forget',
     'history:head-changed', 'share:receipt-revoked', 'behavior:enablement-changed',
     'hosts:render', 'publish:arrival', 'publish:promote', 'publish:participant', 'publish:participant-publish',
@@ -423,6 +449,10 @@ export class PublishStatusDrone extends Drone {
   /** Branches being published right now, by key — a sweep rebuilds rows with
    *  no busyPhase, so the rows cannot say it; this can. */
   #inFlight = new Set<string>()
+  /** Rows whose taken card's drafts are being tried again (#retryTakenDrafts). */
+  #draftsRetrying = new Set<string>()
+  /** When each taken row's drafts are tried again (hive-take.ts draftsRetryPace). */
+  #draftsPace: ReturnType<typeof import('./hive-take.js').draftsRetryPace> | null = null
 
   /** THE COMMUNITY — the hosts this participant carries, re-read from the
    *  `community:hosts` pool on every refresh. The panel's pick-list, and
@@ -604,6 +634,9 @@ export class PublishStatusDrone extends Drone {
     // WHAT CHANGED SINCE IT WENT OUT (`republish`): every published page whose head here has moved on from the one the
     // world sees — a new picture, a new note — republished in one go, after one question that names them.
     this.onEffect('publish:run-drifted', () => { void this.#runDrifted() })
+    // HOME, HELD (jwize 2026-11-20): a card published from its own page, taken
+    // into the hive, its drafts home held (hive-take.ts).
+    this.onEffect<{ key?: string }>('publish:take', (p) => { void this.#take(String(p?.key ?? '')) })
     this.onEffect<{ key?: string; zone?: string; on?: boolean }>('publish:door', (p) => {
       void this.#door(String(p?.key ?? ''), [String(p?.zone ?? '')], p?.on === true)
     })
@@ -1003,7 +1036,10 @@ export class PublishStatusDrone extends Drone {
       // Version history straight from the ledger: every record IS a head sig,
       // immutable, newest first — a version needs no storage beyond that.
       const versionsByKey = new Map<string, { sig: string; at: number }[]>()
-      for (const entry of await listPublishRecords()) {
+      const records = await listPublishRecords()
+      // Heads this hive sealed under any key: two branches that seal alike share one record.
+      const sealedByHere = sealedHere(records, pubkey)
+      for (const entry of records) {
         if (entry.record.pubkey !== pubkey) continue
         const list = versionsByKey.get(entry.record.lineageKey) ?? []
         if (list.length < VERSIONS_SHOWN) list.push({ sig: entry.sealed, at: entry.record.at })
@@ -1028,6 +1064,8 @@ export class PublishStatusDrone extends Drone {
         const fresh = this.#draftRow(key, segments, live, entry)
         fresh.doors = indexes.get(hostFor(key))?.doors[key] ?? null
         fresh.versions = versionsByKey.get(key) ?? []
+        fresh.sealedHere = !!live && sealedByHere.has(live)
+        fresh.taken = live && !fresh.sealedHere && !fresh.versions.some(v => v.sig === live) ? await takenHead(segments) : null
         this.#addressRow(fresh, indexes.get(hostFor(key)))
         this.#entranceRow(fresh, indexes.get(hostFor(key))?.addresses ?? {}, indexes.get(hostFor(key))?.entrances ?? {})
         const was = before.get(key)
@@ -1065,6 +1103,9 @@ export class PublishStatusDrone extends Drone {
       // The community's live list, read alongside the rows: one network read,
       // painted when it lands, never waited on.
       void this.#readShowcase()
+      // A card this hive took that the index still names: drafts it carries
+      // that did not come home with the take are tried again, never waited on.
+      for (const row of this.#rows) if (row.taken && row.taken === row.live) void this.#retryTakenDrafts(row)
 
       // A few rows at once, each asking its reads together; every seal waits
       // its turn in one lane (publish-sweep.ts). sealSubtree is O(1) while the
@@ -1337,6 +1378,8 @@ export class PublishStatusDrone extends Drone {
     was.zones = fresh.zones
     was.doors = fresh.doors
     was.versions = fresh.versions
+    was.taken = fresh.taken
+    was.sealedHere = fresh.sealedHere
     was.urls = fresh.urls
     was.ownLabels = fresh.ownLabels
     was.link = fresh.link
@@ -1715,6 +1758,28 @@ export class PublishStatusDrone extends Drone {
         'This entry was published from another device — this hive has no branch at that path to publish.')
       return null
     }
+    // A head another device published since this hive last did is never
+    // pushed back over from here unasked, by any path that runs one row
+    // (publish:run, the door switch, Make live): Take it brings it in, and
+    // when Take it cannot finish, a hand here may still put this hive's own
+    // over it. A batched run never asks (#runMany leaves such rows out).
+    const names = row.path || row.segments.join('/')
+    const over = batched ? driftedElsewhere([row]).length === 0 : await mayPublishOver(row, () => {
+      const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
+      return requestConfirm({
+        title: i18n?.t('publish.over.title') ?? 'Publish over what was published elsewhere?',
+        message: i18n?.t('publish.over.message', { names })
+          ?? `${names} was published from another device since this hive last did. Publishing from here puts what is here over it, for everyone who visits. Take it instead to bring that card in first.`,
+        confirmLabel: i18n?.t('publish.over.confirm') ?? 'Publish over it',
+        cancelLabel: i18n?.t('publish.over.cancel') ?? 'Not now',
+      })
+    })
+    if (!over) {
+      this.#toast('info', 'publish.drift.elsewhere', `${names} — published from another device since this hive last did. Left as it is.`, { names })
+      return null
+    }
+    // The question waited on a hand: another run may have started since.
+    if (this.#inFlight.has(key) || (this.#batch && !batched)) return null
     // `markPublic` short-circuits on sigs it marked this session, so a plain
     // retry after a failure would do nothing at all. Anything that is not a
     // clean forward publish re-verifies and re-stages.
@@ -1775,6 +1840,10 @@ export class PublishStatusDrone extends Drone {
       result.status === 'confirmed'
         ? 'Staged — its host is serving it. Publish it live from your community.'
         : 'Staged — its host has not served it back yet. This row re-checks on its own.')
+    // The branch left without a picture entry is named (reach A6).
+    if (result.pictureGap) this.#toast('info', 'publish.picture-gap',
+      `${result.pictureGap.branch} was published without its picture entry — ${result.pictureGap.unread.length} of its documents are neither on this device nor on its hosts.`,
+      { branch: result.pictureGap.branch, count: result.pictureGap.unread.length })
     // THE ACT IS THE TRUTH THE ROW PAINTS NOW (audit 2026-10-23): the index
     // write just landed, so the row says so at once — the republish button
     // goes with it — instead of waiting out a sweep that read its snapshots
@@ -1803,8 +1872,14 @@ export class PublishStatusDrone extends Drone {
     await this.#refresh()
     for (let waited = 0; this.#refreshing && waited < 60_000; waited += 250) await new Promise(resolve => setTimeout(resolve, 250))
     const drifted = driftedRows(this.#rows)
+    // Published from another device: never pushed back over from here.
+    const elsewhere = driftedElsewhere(this.#rows)
+    if (elsewhere.length > 0) {
+      const away = elsewhere.map(row => row.path || row.segments.join('/')).slice(0, 6).join(', ')
+      this.#toast('info', 'publish.drift.elsewhere', `${away} — published from another device since this hive last did. Left as it is.`, { names: away })
+    }
     if (drifted.length === 0) {
-      this.#toast('info', 'publish.drift.none', 'Everything published is up to date with what is here.')
+      if (elsewhere.length === 0) this.#toast('info', 'publish.drift.none', 'Everything published is up to date with what is here.')
       return
     }
     const names = drifted.map(row => row.path || row.segments.join('/'))
@@ -1826,6 +1901,14 @@ export class PublishStatusDrone extends Drone {
     // The plan carries each row's state as it was picked: a sweep mid-run
     // rebuilds rows as 'comparing', and a row the host lost still needs its
     // re-drain when its turn comes.
+    // Published from another device: never pushed back over from here (Take it brings it in).
+    const away = new Set(driftedElsewhere(this.#rows).map(row => row.key))
+    const left = batchOrder(this.#rows, keys).filter(row => away.has(row.key))
+    if (left.length > 0) {
+      const names = left.map(row => row.path || row.segments.join('/')).slice(0, 6).join(', ')
+      this.#toast('info', 'publish.drift.elsewhere', `${names} — published from another device since this hive last did. Left as it is.`, { names })
+      keys = keys.filter(key => !away.has(key))
+    }
     const plan = batchOrder(this.#rows, keys).map(row => ({ key: row.key, state: row.state }))
     if (plan.length === 0) return
     const total = plan.length
@@ -2234,6 +2317,138 @@ export class PublishStatusDrone extends Drone {
     return zoneDoor(this.#zonesFor(key)[0] ?? '')
   }
 
+  /**
+   * TAKE IT (jwize 2026-11-20, "when the card reaches your hive"): a drift row
+   * published from another device — the card's own page — is brought into the
+   * hive at its route, and the code drafts the card carries come home held.
+   * Only when this hive's own signed index, read fresh, names that head
+   * (hive-take.ts); a head this hive published is behind here and is never
+   * taken over what is here. One question first; what is here stays one step
+   * back in history.
+   */
+  async #take(key: string): Promise<void> {
+    const row = this.#rows.find(r => r.key === key)
+    if (!row || row.busyPhase || this.#inFlight.has(key) || this.#batch) return
+    if (driftedElsewhere([row]).length === 0) return
+    const pubkey = this.#payload.pubkey
+    const door = this.#hostByKey.get(key) ?? this.#readDoor
+    const name = row.path || row.segments.join('/')
+    const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
+    const ioc = (window as { ioc?: { get?: <T>(k: string) => T | undefined } }).ioc
+    const { takeFromElsewhere } = await import('./hive-take.js')
+    const { BROKER_KEY, COMMITTER_KEY, HISTORY_KEY, STORE_KEY } = await import('./site-replica.js')
+    const history = ioc?.get?.<import('./site-replica.js').HistoryLike>(HISTORY_KEY)
+    const store = ioc?.get?.<import('./site-replica.js').StoreLike>(STORE_KEY)
+    if (!history || !store) {
+      this.#toast('error', 'publish.take.failed', `${name} was not taken: the hive is still waking`, { name, reason: 'the hive is still waking' })
+      return
+    }
+    this.#inFlight.add(key)
+    row.busyPhase = 'taking'
+    this.#emit()
+    let outcome: Awaited<ReturnType<typeof takeFromElsewhere>>
+    try {
+      outcome = await takeFromElsewhere({
+        services: {
+          history, store,
+          broker: ioc?.get?.<import('./site-replica.js').BrokerLike>(BROKER_KEY),
+          committer: ioc?.get?.<import('./site-replica.js').CommitterLike>(COMMITTER_KEY),
+          drafts: ioc?.get?.<ModuleDraftsProvider>(MODULE_DRAFTS_IOC_KEY),
+        },
+        pubkey,
+        // The index a stranger reads at the branch's own address decides, as on every sweep (readDoorIndexAt).
+        fetchIndex: async (at, signer) => (await readDoorIndexAt(at, readerSiteOf(row.segments, [at]) || undefined, signer,
+          (host, k, signal) => fetchHiveIndex(host, k, signal, { fresh: true }))).read,
+        // Any key: the ledger keeps one record per sealed head, under the last key that sealed it.
+        ownHeads: async signer => sealedHere(await listPublishRecords(), signer),
+        confirm: () => requestConfirm({
+          title: i18n?.t('publish.take.title') ?? 'Take what was published elsewhere?',
+          message: i18n?.t('publish.take.message', { name })
+            ?? `${name} was published from another device since this hive last did. Taking it puts that card here in place of what is here now, which stays one step back in history. Code drafts it carries come home held until you accept them.`,
+          confirmLabel: i18n?.t('publish.take.confirm') ?? 'Take it',
+          cancelLabel: i18n?.t('publish.take.cancel') ?? 'Not now',
+        }),
+      }, { key, segments: row.segments, live: row.live, door, zones: row.zones })
+    } catch (error) {
+      outcome = { kind: 'failed', error: error instanceof Error ? error.message : String(error ?? '') }
+    } finally {
+      this.#inFlight.delete(key)
+      row.busyPhase = null
+      this.#emit()
+    }
+    switch (outcome.kind) {
+      case 'declined': return
+      case 'taken': {
+        this.#toast('success', 'publish.take.done', `${name} — taken from where it was published.`, { name })
+        const home = outcome.drafts?.home ?? 0
+        const other = outcome.drafts?.otherBuild ?? 0
+        if (home > 0) this.#toast('info', 'site-manage.drafts.home', home === 1 ? '1 code draft came home, held until you accept it.' : `${home} code drafts came home, held until you accept them.`, { drafts: home, count: home })
+        if (other > 0) this.#toast('warning', 'publish.take.other-build', other === 1 ? '1 code draft was written over another build and stays out of this hive.' : `${other} code drafts were written over another build and stay out of this hive.`, { drafts: other, count: other })
+        const older = outcome.drafts?.olderBuild ?? 0
+        if (older > 0) this.#toast('warning', 'site-manage.drafts.older-build', older === 1 ? '1 code draft was written over an older build than this device runs, so it cannot come home here: draft it again here.' : `${older} code drafts were written over an older build than this device runs, so they cannot come home here: draft them again here.`, { drafts: older, count: older })
+        const waiting = outcome.drafts?.waiting ?? 0
+        if (waiting > 0) this.#toast('warning', 'publish.take.drafts-waiting', takeDraftsWaitingWords(waiting), { drafts: waiting, count: waiting })
+        const tampered = outcome.drafts?.tampered ?? 0
+        if (tampered > 0) this.#toast('warning', 'site-manage.drafts.tampered', tampered === 1 ? '1 code draft the card carried did not pass the checks here, so it stays out: draft it again here.' : `${tampered} code drafts the card carried did not pass the checks here, so they stay out: draft them again here.`, { drafts: tampered, count: tampered })
+        void this.#refresh()
+        return
+      }
+      case 'not-yours':
+        this.#toast('warning', 'publish.take.not-yours', `${name}: this hive's own signed index does not name that card now. Nothing was taken.`, { name })
+        return
+      case 'ours':
+        this.#toast('info', 'publish.take.ours', `${name}: this hive published that card itself, and what is here has moved on from it. Nothing was taken.`, { name })
+        return
+      case 'cold':
+        this.#toast('warning', 'publish.take.cold', `${name}: not every part of the published card could be fetched. Nothing was taken — try again.`, { name })
+        return
+      case 'edited':
+        this.#toast('warning', 'publish.take.edited', `${name} changed here while the card was fetched. Nothing was taken.`, { name })
+        return
+      case 'failed':
+        this.#toast('error', 'publish.take.failed', `${name} was not taken: ${outcome.error}`, { name, reason: outcome.error })
+        return
+    }
+  }
+
+  /** DRAFTS TRIED AGAIN (hive-take.ts retryTakenDrafts): a taken card whose
+   *  drafts did not all come home with the take. Said only when one comes home. */
+  async #retryTakenDrafts(row: PublishRow): Promise<void> {
+    const key = row.key
+    if (this.#inFlight.has(key) || this.#draftsRetrying.has(key)) return
+    const pubkey = this.#payload.pubkey
+    if (!pubkey) return
+    this.#draftsRetrying.add(key)
+    try {
+      const ioc = (window as { ioc?: { get?: <T>(k: string) => T | undefined } }).ioc
+      const { retryTakenDrafts, draftsRetryPace } = await import('./hive-take.js')
+      const pace = this.#draftsPace ??= draftsRetryPace()
+      const head = row.live ?? ''
+      if (!pace.due(key, head)) return
+      pace.tried(key, head)
+      const { BROKER_KEY, COMMITTER_KEY, HISTORY_KEY, STORE_KEY } = await import('./site-replica.js')
+      const history = ioc?.get?.<import('./site-replica.js').HistoryLike>(HISTORY_KEY)
+      const store = ioc?.get?.<import('./site-replica.js').StoreLike>(STORE_KEY)
+      if (!history || !store) return
+      const door = this.#hostByKey.get(key) ?? this.#readDoor
+      const drafts = await retryTakenDrafts({
+        services: {
+          history, store,
+          broker: ioc?.get?.<import('./site-replica.js').BrokerLike>(BROKER_KEY),
+          committer: ioc?.get?.<import('./site-replica.js').CommitterLike>(COMMITTER_KEY),
+          drafts: ioc?.get?.<ModuleDraftsProvider>(MODULE_DRAFTS_IOC_KEY),
+        },
+        pubkey,
+        fetchIndex: async (at, signer) => (await readDoorIndexAt(at, readerSiteOf(row.segments, [at]) || undefined, signer,
+          (host, k, signal) => fetchHiveIndex(host, k, signal, { fresh: true }))).read,
+      }, { key, segments: row.segments, live: row.live, door, zones: row.zones })
+      const home = drafts?.home ?? 0
+      if (home > 0) this.#toast('info', 'site-manage.drafts.home', home === 1 ? '1 code draft came home, held until you accept it.' : `${home} code drafts came home, held until you accept them.`, { drafts: home, count: home })
+    } catch { /* tried again on the next look */ } finally {
+      this.#draftsRetrying.delete(key)
+    }
+  }
+
   /** A write with no host named: say so, send nothing. */
   #refuseNoHost(): void {
     this.#toast('warning', 'publish.write.no-host', 'Nothing was sent: this place names no host. Turn on a domain for it first.')
@@ -2252,7 +2467,8 @@ export class PublishStatusDrone extends Drone {
   }
 
   #emit(): void {
-    for (const row of this.#rows) row.canPromote = readyToPromote(row)
+    const away = new Set(driftedElsewhere(this.#rows).map(row => row.key))
+    for (const row of this.#rows) { row.canPromote = readyToPromote(row); row.elsewhere = away.has(row.key) }
     this.#payload = {
       ...this.#payload, open: this.#open, rows: this.#rows,
       entrancePreview: this.#preview, previewed: [...this.#previewed],

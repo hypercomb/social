@@ -478,3 +478,197 @@ describe('the stage lists ride the same index write', () => {
     })
   })
 })
+
+// REACH A6: the picture entry a Publish writes was read from this hive only,
+// so a head whose properties never landed here published no picture — and
+// said nothing. The walk now asks the hosts by signature, hash-checked, and a
+// branch it still cannot read is named in the receipt.
+describe('the pictures a publish offers', () => {
+  const ioc = (window as unknown as { ioc: { get: (k: string) => unknown } }).ioc
+  const original = ioc.get
+  beforeEach(() => { indexRead = { ok: false, reason: 'http', status: 404 } })
+  const bytesOf = (doc: unknown): Uint8Array => new TextEncoder().encode(JSON.stringify(doc))
+  const sigOf = async (bytes: Uint8Array): Promise<string> =>
+    SignatureService.sign(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
+
+  /** HEAD is held here; its properties sit only on a host. */
+  const withPictureStore = async (hostServes: (sig: string, bytes: Uint8Array) => Uint8Array | null, run: (propsSig: string) => Promise<void>): Promise<void> => {
+    const props = bytesOf({ small: { image: 'e'.repeat(64) } })
+    const propsSig = await sigOf(props)
+    const head = bytesOf({ name: 'hyperdex', properties: [propsSig] })
+    const fetched: string[] = []
+    ioc.get = (key: string): unknown => {
+      if (key === '@hypercomb.social/Store') return {
+        putResource: async () => BUNDLE,
+        getResourceLocal: async (sig: string) => sig === HEAD ? ({ text: async () => new TextDecoder().decode(head) } as unknown as Blob) : null,
+        fetchLayerFromHost: async (sig: string) => { fetched.push(sig); return sig === propsSig ? hostServes(sig, props) : null },
+      }
+      return original(key)
+    }
+    try { await run(propsSig) } finally { ioc.get = original }
+    expect(fetched).toContain(propsSig)
+  }
+
+  it('fetches properties that are not here by signature, and offers the picture under its name', async () => {
+    const { picturesKey } = await import('./picture-pools.js')
+    await withPictureStore((_sig, bytes) => bytes, async () => {
+      const result = await publishBranch(['knowledge', 'hyperdex'])
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(putCalls[putCalls.length - 1]![(await picturesKey('hyperdex'))!]).toBe(HEAD)
+      expect(result.pictureGap).toBeUndefined()
+    })
+  })
+
+  it('names the branch in the receipt when its properties cannot be read anywhere', async () => {
+    const { picturesKey } = await import('./picture-pools.js')
+    await withPictureStore(() => null, async propsSig => {
+      const result = await publishBranch(['knowledge', 'hyperdex'])
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(putCalls[putCalls.length - 1]![(await picturesKey('hyperdex'))!]).toBeUndefined()
+      expect(result.pictureGap).toEqual({ branch: 'knowledge/hyperdex', unread: [propsSig] })
+    })
+  })
+
+  it('takes no fetched byte that fails its signature', async () => {
+    await withPictureStore(() => bytesOf({ small: { image: 'f'.repeat(64) } }), async propsSig => {
+      const result = await publishBranch(['knowledge', 'hyperdex'])
+      expect(result.ok && result.pictureGap).toEqual({ branch: 'knowledge/hyperdex', unread: [propsSig] })
+    })
+  })
+})
+
+// REVIEW 2026-11-25: the walk fetches what is not here, and it waits on the
+// act, so it is bounded — a count and one deadline — and what the budget
+// leaves is named in `unread` like any other miss.
+describe('the picture walk is bounded on the act', () => {
+  const ioc = (window as unknown as { ioc: { get: (k: string) => unknown } }).ioc
+  const original = ioc.get
+  const childSig = (i: number): string => i.toString(16).padStart(64, '0')
+  const withMissingChildren = async (fetch: (sig: string) => Promise<Uint8Array | null>, run: (fetched: string[]) => Promise<void>): Promise<void> => {
+    const head = JSON.stringify({ name: 'hyperdex', children: Array.from({ length: 40 }, (_, i) => childSig(i + 1)) })
+    const fetched: string[] = []
+    ioc.get = (key: string): unknown => {
+      if (key === '@hypercomb.social/Store') return {
+        putResource: async () => BUNDLE,
+        getResourceLocal: async (sig: string) => sig === HEAD ? ({ text: async () => head } as unknown as Blob) : null,
+        fetchLayerFromHost: async (sig: string) => { fetched.push(sig); return fetch(sig) },
+      }
+      return original(key)
+    }
+    try { await run(fetched) } finally { ioc.get = original }
+  }
+
+  it('asks the hosts for at most its count, and names every layer it left', async () => {
+    const { branchPictureRoots, PICTURE_FETCH_BUDGET } = await import('./publish-branch.js')
+    await withMissingChildren(async () => null, async fetched => {
+      const out = await branchPictureRoots(HEAD)
+      expect(fetched.length).toBeLessThanOrEqual(PICTURE_FETCH_BUDGET.fetches)
+      expect(out.unread).toHaveLength(40)
+    })
+  })
+
+  it('stops waiting at its deadline when a host never answers', async () => {
+    const { branchPictureRoots } = await import('./publish-branch.js')
+    await withMissingChildren(() => new Promise<null>(() => void 0), async fetched => {
+      const started = Date.now()
+      const out = await branchPictureRoots(HEAD, { fetches: 12, ms: 60 })
+      expect(Date.now() - started).toBeLessThan(2_000)
+      expect(fetched.length).toBeGreaterThan(0)
+      expect(out.unread).toHaveLength(40)
+    })
+  }, 5_000)
+})
+
+// REVIEW 2026-11-25: the walk now reaches every descendant, and descendant
+// names repeat across branches. A name another publish already offers stays
+// its own; only THIS branch's previous offer is replaced.
+describe('a picture entry another publish made stays', () => {
+  const ioc = (window as unknown as { ioc: { get: (k: string) => unknown } }).ioc
+  const original = ioc.get
+  const CHILD_LAYER = '1'.repeat(64)
+  const ENVELOPE = '2'.repeat(64)
+  const PROPS = '3'.repeat(64)
+  const HOSTING_LAYER = '4'.repeat(64)
+  const docs = new Map<string, string>([
+    [HEAD, JSON.stringify({ name: 'hyperdex', children: [ENVELOPE] })],
+    [ENVELOPE, JSON.stringify({ meta: 1, layer: CHILD_LAYER, relation: 'children' })],
+    [CHILD_LAYER, JSON.stringify({ name: 'hosting', properties: [PROPS] })],
+    [PROPS, JSON.stringify({ small: { image: 'e'.repeat(64) } })],
+  ])
+  const withBranch = async (run: () => Promise<void>): Promise<void> => {
+    ioc.get = (key: string): unknown => {
+      if (key === '@hypercomb.social/Store') return {
+        putResource: async () => BUNDLE,
+        getResourceLocal: async (sig: string) => { const t = docs.get(sig); return t === undefined ? null : ({ text: async () => t } as unknown as Blob) },
+      }
+      return original(key)
+    }
+    try { await run() } finally { ioc.get = original }
+  }
+
+  it('a descendant named like another branch\'s pictured root does not take its entry', async () => {
+    const { picturesKey } = await import('./picture-pools.js')
+    const hosting = (await picturesKey('hosting'))!
+    indexRead = { ok: true, manifest: {
+      roots: { [lineageKey(['hosting'])]: HOSTING_LAYER, [hosting]: HOSTING_LAYER }, createdAt: 1_699_000_000, pubkey: PUBKEY,
+    } }
+    await withBranch(async () => {
+      expect((await publishBranch(['knowledge', 'hyperdex'])).ok).toBe(true)
+      expect(putCalls[putCalls.length - 1]![hosting]).toBe(HOSTING_LAYER)
+    })
+  })
+
+  it('a name this branch offered before is offered again for its new layer', async () => {
+    const { picturesKey } = await import('./picture-pools.js')
+    const hosting = (await picturesKey('hosting'))!
+    const OLD_HEAD = '5'.repeat(64)
+    const OLD_CHILD = '6'.repeat(64)
+    docs.set(OLD_HEAD, JSON.stringify({ name: 'hyperdex', children: [OLD_CHILD] }))
+    docs.set(OLD_CHILD, JSON.stringify({ name: 'hosting', properties: [PROPS] }))
+    indexRead = { ok: true, manifest: {
+      roots: { [lineageKey(['knowledge', 'hyperdex'])]: OLD_HEAD, [hosting]: OLD_CHILD }, createdAt: 1_699_000_000, pubkey: PUBKEY,
+    } }
+    await withBranch(async () => {
+      expect((await publishBranch(['knowledge', 'hyperdex'])).ok).toBe(true)
+      expect(putCalls[putCalls.length - 1]![hosting]).toBe(CHILD_LAYER)
+    })
+  })
+
+  it('an entry the previous head walk could not reach is replaced, never kept stale for good', async () => {
+    const { picturesKey } = await import('./picture-pools.js')
+    const hosting = (await picturesKey('hosting'))!
+    // The previous head is here; the descendant that held this branch's own
+    // `hosting` is neither here nor fetchable, so the walk of it is cut short.
+    const OLD_HEAD = '7'.repeat(64)
+    const OLD_ENVELOPE = '8'.repeat(64)
+    const OLD_CHILD = '9'.repeat(64)
+    docs.set(OLD_HEAD, JSON.stringify({ name: 'hyperdex', children: [OLD_ENVELOPE] }))
+    indexRead = { ok: true, manifest: {
+      roots: { [lineageKey(['knowledge', 'hyperdex'])]: OLD_HEAD, [hosting]: OLD_CHILD }, createdAt: 1_699_000_000, pubkey: PUBKEY,
+    } }
+    await withBranch(async () => {
+      expect((await publishBranch(['knowledge', 'hyperdex'])).ok).toBe(true)
+      expect(putCalls[putCalls.length - 1]![hosting]).toBe(CHILD_LAYER)
+    })
+  })
+
+  it('a walk cut short never takes an entry another branch holds', async () => {
+    const { picturesKey } = await import('./picture-pools.js')
+    const hosting = (await picturesKey('hosting'))!
+    // The previous head's walk leaves a document unread (undecided), yet the
+    // entry is the /hosting branch's own head: the index proves it another's.
+    const OLD_HEAD = '0a'.repeat(32)
+    const OLD_ENVELOPE = '0b'.repeat(32)
+    docs.set(OLD_HEAD, JSON.stringify({ name: 'hyperdex', children: [OLD_ENVELOPE] }))
+    indexRead = { ok: true, manifest: {
+      roots: { [lineageKey(['knowledge', 'hyperdex'])]: OLD_HEAD, [lineageKey(['hosting'])]: HOSTING_LAYER, [hosting]: HOSTING_LAYER },
+      createdAt: 1_699_000_000, pubkey: PUBKEY,
+    } }
+    await withBranch(async () => {
+      expect((await publishBranch(['knowledge', 'hyperdex'])).ok).toBe(true)
+      expect(putCalls[putCalls.length - 1]![hosting]).toBe(HOSTING_LAYER)
+    })
+  })
+})

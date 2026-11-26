@@ -83,4 +83,97 @@ describe('an uncontrolled shim page', () => {
     await cacheImportMap()
     expect(localStorage.getItem(IMPORT_MAP_STORAGE_KEY)).toContain('/opfs/')
   })
+
+  // THE BROOD GATE (held-dependencies.ts). A held dependency draft sits in the
+  // pool beside the trunk's bundle for its namespace; neither path may map it.
+  describe('a held dependency draft', () => {
+    const trunk = 'd'.repeat(64)
+    const draft = 'e'.repeat(64)
+    const pool = 'c'.repeat(64)
+    const file = (text: string) => {
+      const bytes = new TextEncoder().encode(text)
+      return { kind: 'file', getFile: async () => ({ slice: () => ({ arrayBuffer: async () => bytes.buffer }) }) }
+    }
+    const bagNaming = (leaf: string) => ({
+      kind: 'directory',
+      entries: async function* () { yield ['0000', { kind: 'file' }] },
+      getFileHandle: async () => ({ getFile: async () => ({ text: async () => `@x.com/ns\n${leaf}` }) }),
+    })
+    const boot = async (entries: [string, unknown][]) => {
+      const store = {
+        initialize: async () => {},
+        opfsAvailable: true,
+        dependencies: { entries: async function* () { yield* entries } },
+        legacyDependencies: null,
+        getDependencyBytes: async () => null,
+      }
+      ;(window as any).ioc = { get: (k: string) => (k === '@hypercomb.social/Store' ? store : undefined) }
+      Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { controller: {} } })
+      const { Store } = await import('@hypercomb/runtime/store') as any
+      Store.poolSignature = async () => pool
+      Store.DEPENDENCIES_MEANING = 'dependencies'
+      const { resolveImportMap } = await import('./import-map')
+      return resolveImportMap()
+    }
+
+    it('the flat scan skips it and maps the trunk, even when the draft is listed first', async () => {
+      const { flagInBrood } = await import('@hypercomb/core')
+      await flagInBrood(draft, { by: 'scan', reason: 'a draft of a dependency' }, { kind: 'own' })
+      const imports = await boot([
+        [`${draft}.js`, file('// @x.com/ns\nexport const v = 2\n')],
+        [`${trunk}.js`, file('// @x.com/ns\nexport const v = 1\n')],
+      ])
+      expect(imports['@x.com/ns']).toBe(`/opfs/${pool}/${trunk}.js`)
+      expect((globalThis as any).__hypercombAliasMap.get('@x.com/ns')).toBe(`${trunk}.js`)
+    })
+
+    it('a bag naming a held leaf keeps the rest of the bag, and leaves that namespace unmapped', async () => {
+      // A trunk bag can name a held bundle (composeDependencies keeps every
+      // trunk dependency; a dependency draft carried home held and then
+      // committed into the trunk elsewhere): only that leaf is left out. The
+      // other namespace still maps the bag's leaf, not an older file the pool
+      // lists first; and the held one is filled by NO other file of its
+      // namespace (the previous trunk's, a stale copy), which the trunk's bees
+      // were never built against.
+      const older = 'a'.repeat(64)
+      const current = 'b'.repeat(64)
+      const bag = {
+        kind: 'directory',
+        entries: async function* () { yield ['0000', { kind: 'file' }]; yield ['0001', { kind: 'file' }] },
+        getFileHandle: async (n: string) => ({
+          getFile: async () => ({ text: async () => (n === '0000' ? `@x.com/ns\n${draft}` : `@y.com/other\n${current}`) }),
+        }),
+      }
+      const imports = await boot([
+        [pool, bag],
+        [`${older}.js`, file('// @y.com/other\nexport const v = 0\n')],
+        [`${draft}.js`, file('// @x.com/ns\nexport const v = 2\n')],
+        [`${trunk}.js`, file('// @x.com/ns\nexport const v = 1\n')],
+        [`${current}.js`, file('// @y.com/other\nexport const v = 1\n')],
+      ])
+      expect(imports['@x.com/ns']).toBeUndefined()
+      expect((globalThis as any).__hypercombAliasMap.has('@x.com/ns')).toBe(false)
+      expect(imports['@y.com/other']).toBe(`/opfs/${pool}/${current}`)
+    })
+
+    it('a bag whose every leaf is held publishes its held namespaces, so the loader never scans an empty map', async () => {
+      const imports = await boot([
+        [pool, bagNaming(draft)],
+        [`${draft}.js`, file('// @x.com/ns\nexport const v = 2\n')],
+        [`${trunk}.js`, file('// @x.com/ns\nexport const v = 1\n')],
+      ])
+      expect(imports['@x.com/ns']).toBeUndefined()
+      expect((globalThis as any).__hypercombAliasMap.size).toBe(0)
+      expect([...(globalThis as any).__hypercombHeldAliases]).toEqual(['@x.com/ns'])
+    })
+
+    it('a bag naming the trunk still maps through the bag', async () => {
+      const imports = await boot([
+        [pool, bagNaming(trunk)],
+        [`${draft}.js`, file('// @x.com/ns\nexport const v = 2\n')],
+        [`${trunk}.js`, file('// @x.com/ns\nexport const v = 1\n')],
+      ])
+      expect(imports['@x.com/ns']).toBe(`/opfs/${pool}/${trunk}`)
+    })
+  })
 })

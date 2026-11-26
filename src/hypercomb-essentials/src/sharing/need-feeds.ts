@@ -25,10 +25,15 @@
 // Either way a publisher's word is read from their OWN signed index, never
 // from the listing, and every byte behind it is signature-addressed.
 //
+// A PUBLISHED CREATION WEARING NO PICTURE is in neither pool. When both are
+// empty for a name, `publishedUnder` asks the hosts' `host:publications`
+// ledger and `host:offerings` set instead, matched by molecule address
+// (reach A5, below).
+//
 // Pure apart from `liveFeedDeps`: the reads are handed in, so the walk is
 // tested without a network.
 
-import { SignatureService } from '@hypercomb/core'
+import { SignatureService, moleculeAddress } from '@hypercomb/core'
 import { fetchWithDeadline } from './bounded-fetch.js'
 import { fetchHiveIndex } from './hive-pointer.js'
 import { needListKey, needListOf, needListPoolAddress } from './need-lists.js'
@@ -86,6 +91,12 @@ export interface FeedDeps {
    *  it hangs from — where its bytes are sure to be when nothing else has them. */
   readJson(sig: string, host?: string): Promise<Record<string, unknown> | null>
   now(): number
+  /** A one-file index a host keeps at its root (`host:publications`), or null.
+   *  Only the published fallback asks it. */
+  document?(host: string, address: string): Promise<string | null>
+  /** One record a host keeps INSIDE a pool (`/<address>/<sig>`), believed
+   *  only when its bytes hash to `sig`, parsed; null otherwise. */
+  member?(host: string, address: string, sig: string): Promise<Record<string, unknown> | null>
 }
 
 const SIG_RE = /^[0-9a-f]{64}$/
@@ -243,6 +254,164 @@ export async function feedNeed(
   return [...rooted, ...shown.filter((feed): feed is Feed => feed !== null)]
 }
 
+// ── THE PUBLISHED FALLBACK (reach A5, 2026-11-25) ─────────────────────────
+//
+// `pictures:<m>` lists a publisher only for a tile that wears a picture, so a
+// published creation whose root wears none (knowledge/hyperdex, honey-garden)
+// could never be found by its name. Every host also keeps what it publishes:
+// the `host:publications` ledger (one file at the pool address: each site's
+// lineage and each publisher's head) and the `host:offerings` set (records
+// kept inside the pool: route, lineage, publisher). Asked only when both
+// feeds came back empty for the name.
+//
+// MATCHED BY MOLECULE ADDRESS, signature to signature: the last segment of a
+// lineage is folded and signed the way a tile name is (`moleculeAddress`, the
+// fold `isReservedPoolWord` uses) and compared with sign(name). Never a
+// substring: `honey` does not find `honey-garden`. An offering's head is read
+// from its publisher's own signed index, on the host that listed it, so a
+// read never reaches a host this hive does not already ask. Each found head
+// is said with the hosts that led to it; its bytes are hash-checked when read.
+
+export const PUBLICATIONS_MEANING = 'host:publications'
+export const OFFERINGS_MEANING = 'host:offerings'
+/** Ledger rows one host's answer is read to. */
+const LEDGER_ROWS_MAX = 500
+/** Offering records one host's set is read to. */
+const OFFERINGS_MAX = 64
+
+export interface PublishedTile {
+  readonly sig: string
+  /** The publisher whose head it is. */
+  readonly by: string
+  readonly hosts: readonly string[]
+  readonly via: 'publication'
+}
+
+const signText = (text: string): Promise<string> =>
+  SignatureService.sign(new TextEncoder().encode(text).buffer as ArrayBuffer)
+
+const within = (host: string, zone: string): boolean => host === zone || host.endsWith(`.${zone}`)
+
+const hostOfRoute = (route: unknown): string => {
+  try { return new URL(String(route ?? '')).host.toLowerCase() } catch { return '' }
+}
+
+/** The published heads whose lineage ends in a tile of this name, across the
+ *  hosts. Never throws for a host; bounded by `deadlineMs` like a feed. A
+ *  stop (`signal`) or the deadline ends the wait at once, and no read is
+ *  begun after either: what was found by then is the answer. */
+export async function publishedUnder(
+  name: string,
+  deps: FeedDeps,
+  options: FeedOptions & { readonly signal?: AbortSignal } = {},
+): Promise<PublishedTile[]> {
+  if (!deps.document && !deps.member) return []
+  if (options.signal?.aborted) return []
+  const over = new AbortController()
+  const stopped = (): boolean => over.signal.aborted
+  let want: string
+  try { want = await moleculeAddress(name) } catch { return [] }
+  const hosts = [...new Set(deps.hosts().map(host => String(host ?? '').trim().toLowerCase()).filter(Boolean))]
+  const [ledgerAddress, offeringsAddress] = await Promise.all([signText(PUBLICATIONS_MEANING), signText(OFFERINGS_MEANING)])
+  const fresh: FeedOptions = options.fresh ? { fresh: true } : {}
+  // One fold per distinct segment, one record read per member signature.
+  const folds = new Map<string, Promise<string>>()
+  const matches = async (lineage: unknown): Promise<boolean> => {
+    if (typeof lineage !== 'string') return false
+    const last = lineage.split('/').map(part => part.trim()).filter(Boolean).pop() ?? ''
+    if (!last) return false
+    let fold = folds.get(last)
+    if (!fold) { fold = moleculeAddress(last).catch(() => ''); folds.set(last, fold) }
+    return (await fold) === want
+  }
+  const records = new Map<string, Promise<Record<string, unknown> | null>>()
+  const found = new Map<string, { by: string; hosts: string[] }>()
+  const add = (sig: unknown, by: unknown, at: readonly string[]): void => {
+    const head = String(sig ?? '').trim().toLowerCase()
+    const key = String(by ?? '').trim().toLowerCase()
+    if (!SIG_RE.test(head) || !SIG_RE.test(key)) return
+    const seen = found.get(head)
+    if (!seen) { found.set(head, { by: key, hosts: [...new Set(at)] }); return }
+    for (const host of at) if (!seen.hosts.includes(host)) seen.hosts.push(host)
+  }
+  // A site of the host that said it is named beside it; any other host is not.
+  const sayers = (host: string, other: string): string[] =>
+    other && other !== host && within(other, host) ? [host, other] : [host]
+
+  // One signed index read per publisher at a host, shared by both branches.
+  const indexes = new Map<string, Promise<Readonly<Record<string, unknown>> | null>>()
+  const rootsAt = (host: string, pubkey: string): Promise<Readonly<Record<string, unknown>> | null> => {
+    const at = `${host}\u0000${pubkey}`
+    let read = indexes.get(at)
+    if (!read) { read = stopped() ? Promise.resolve(null) : deps.roots(host, pubkey, fresh).catch(() => null); indexes.set(at, read) }
+    return read
+  }
+
+  // The ledger is the host's unsigned document: it says WHERE to look, never
+  // whose head it is. A row is kept only when the publisher's own signed index
+  // on that host names the same head under the same lineage, as the offerings
+  // read below does; any host may write a ledger naming any key.
+  const fromLedger = async (host: string): Promise<void> => {
+    if (!deps.document || stopped()) return
+    const text = await deps.document(host, ledgerAddress).catch(() => null)
+    if (!text) return
+    let raw: unknown
+    try { raw = JSON.parse(text) } catch { return }
+    const rows = Array.isArray(raw) ? raw : Array.isArray((raw as { sites?: unknown })?.sites) ? (raw as { sites: unknown[] }).sites : []
+    const claims: { lineage: string; head: string; pubkey: string; at: string[] }[] = []
+    for (const row of rows.slice(0, LEDGER_ROWS_MAX)) {
+      if (!row || typeof row !== 'object') continue
+      const site = row as Record<string, unknown>
+      if (typeof site['lineage'] !== 'string' || !(await matches(site['lineage']))) continue
+      const at = sayers(host, String(site['host'] ?? '').trim().toLowerCase())
+      for (const publisher of Array.isArray(site['publishers']) ? site['publishers'] as unknown[] : []) {
+        if (!publisher || typeof publisher !== 'object') continue
+        const p = publisher as Record<string, unknown>
+        const head = String(p['head'] ?? '').trim().toLowerCase()
+        const pubkey = String(p['pubkey'] ?? '').trim().toLowerCase()
+        if (SIG_RE.test(head) && SIG_RE.test(pubkey)) claims.push({ lineage: site['lineage'], head, pubkey, at })
+      }
+    }
+    await eachLimited(claims, READS_AT_ONCE, async claim => {
+      if (stopped()) return
+      const roots = await rootsAt(host, claim.pubkey)
+      if (String(roots?.[claim.lineage] ?? '').trim().toLowerCase() === claim.head) add(claim.head, claim.pubkey, claim.at)
+    })
+  }
+  const fromOfferings = async (host: string): Promise<void> => {
+    const member = deps.member
+    if (!member || stopped()) return
+    const said = await deps.listing(host, offeringsAddress, fresh).catch((): PoolListing => ({ state: 'silent' }))
+    if (said.state !== 'listed') return
+    const names = said.text.split(/\r?\n/).map(line => line.trim().toLowerCase()).filter(line => SIG_RE.test(line)).slice(0, OFFERINGS_MAX)
+    await eachLimited(names, READS_AT_ONCE, async sig => {
+      if (stopped()) return
+      let read = records.get(sig)
+      if (!read) { read = member(host, offeringsAddress, sig).catch(() => null); records.set(sig, read) }
+      const record = await read
+      if (!record || record['kind'] !== 'host:offering' || typeof record['lineage'] !== 'string') return
+      const pubkey = String(record['pubkey'] ?? '').toLowerCase()
+      if (!SIG_RE.test(pubkey) || !(await matches(record['lineage']))) return
+      // The head is the publisher's own word, from their index on this host.
+      const roots = await rootsAt(host, pubkey)
+      add(roots?.[record['lineage']], pubkey, sayers(host, hostOfRoute(record['route'])))
+    })
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let onStop: (() => void) | undefined
+  await Promise.race([
+    Promise.all(hosts.map(host => Promise.all([fromLedger(host).catch(() => {}), fromOfferings(host).catch(() => {})]))),
+    new Promise<void>(resolve => { timer = setTimeout(resolve, options.deadlineMs ?? HOST_DEADLINE_MS) }),
+    new Promise<void>(resolve => { onStop = () => resolve(); options.signal?.addEventListener('abort', onStop, { once: true }) }),
+  ])
+  if (timer !== undefined) clearTimeout(timer)
+  if (onStop) options.signal?.removeEventListener('abort', onStop)
+  over.abort()
+  return [...found].map(([sig, tile]) => ({ sig, by: tile.by, hosts: [...tile.hosts].sort(), via: 'publication' as const }))
+    .sort((a, b) => b.hosts.length - a.hosts.length || (a.sig < b.sig ? -1 : 1))
+}
+
 /** What a site holds that its root does not, as the site's own feed — or
  *  null when it adds nothing. A value is the same when the same publisher
  *  gave the same text (folded); a tile is the same by its signature. */
@@ -295,6 +464,10 @@ export const mergeFeeds = (feeds: readonly Feed[]): NeedValue[] => {
 const ioc = (key: string): unknown =>
   (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key)
 
+/** A ledger larger than this is not read; a member record larger than this is not one. */
+const LEDGER_MAX_BYTES = 1_000_000
+const MEMBER_MAX_BYTES = 256_000
+
 const hostUrl = (host: string): string =>
   `${/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(host) ? 'http' : 'https'}://${host}`
 
@@ -330,4 +503,23 @@ export const liveFeedDeps = (): FeedDeps => ({
     try { return JSON.parse(text) as Record<string, unknown> } catch { return null }
   },
   now: () => performance.now(),
+  document: async (host, address) => {
+    try {
+      const response = await fetchWithDeadline(`${hostUrl(host)}/${address}?held`, { cache: 'no-store' }, { timeoutMs: 6_000 })
+      if (!response.ok || response.status === 204) return null
+      if ((response.headers?.get?.('content-type') ?? '').toLowerCase().includes('text/html')) return null
+      const text = await response.text()
+      return !text || text.length > LEDGER_MAX_BYTES || text.trimStart().startsWith('<') ? null : text
+    } catch { return null }
+  },
+  member: async (host, address, sig) => {
+    try {
+      const response = await fetchWithDeadline(`${hostUrl(host)}/${address}/${sig}`, { cache: 'no-store' }, { timeoutMs: 6_000 })
+      if (!response.ok || response.status === 204) return null
+      const bytes = await response.arrayBuffer()
+      if (!bytes.byteLength || bytes.byteLength > MEMBER_MAX_BYTES || (await SignatureService.sign(bytes)) !== sig) return null
+      const value = JSON.parse(new TextDecoder().decode(bytes)) as unknown
+      return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+    } catch { return null }
+  },
 })

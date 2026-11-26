@@ -72,7 +72,7 @@
 // canonical Store APIs.
 
 import { Drone, EffectBus, LEGACY_DIRECTORIES, isMetaEnvelope, KIND_FETCH_CANCEL, KIND_FETCH_REQUEST, KIND_FETCH_RESPONSE, registerPoolMeaning, roomPreimage, SWARM_LAYER_KIND } from '@hypercomb/core'
-import { decorationClosureSigs } from './decoration-closure.js'
+import { DEPENDENCY_DRAFTS_LISTING_HEAD, decorationClosureSigs, dependencyDraftsListingParts } from './decoration-closure.js'
 import { adoptDescendantsOf } from './adopt-descendants.js'
 import { firstAvailableHost } from './first-available-host.js'
 import { isJoinedHere } from './membership.js'
@@ -86,6 +86,20 @@ const STORE_KEY = '@hypercomb.social/Store'
 // The namespace-free key @hypercomb/runtime knows this capability by. See the
 // alias registration at the bottom of the file.
 const RUNTIME_BROKER_KEY = '@ContentBrokerDrone'
+
+/** Is this a `module:drafts` decoration record (sharing/site-drafts.ts)? Its
+ *  parts are leaves to a walk. The kind is spelled here, not imported: the
+ *  broker's boot lane takes no import from the site modules. */
+const isDraftsRecord = (bytes: Uint8Array): boolean => {
+  if (bytes.byteLength > 1_048_576 || bytes[0] !== 0x7b /* { */) return false
+  try {
+    const text = new TextDecoder().decode(bytes)
+    if (!text.includes('module:drafts') && !text.includes('module:dependency-drafts')) return false
+    // Bee drafts, and dependency drafts in a record of their own (site-drafts.ts).
+    const kind = (JSON.parse(text) as { kind?: unknown })?.kind
+    return kind === 'module:drafts' || kind === 'module:dependency-drafts'
+  } catch { return false }
+}
 
 // KIND_FETCH_REQUEST (20400) — core nostr-kinds, the one vocabulary.
 // Responses are PARAMETERIZED-REPLACEABLE (30000-39999 range). The
@@ -742,6 +756,12 @@ export class ContentBrokerDrone extends Drone {
   // See: project_public_navigation_lineage_filter.md / "The response
   // primitive: { bytes, domains }".
   #knownDomainsBySig = new Map<string, Set<string>>()
+  // The part of #knownDomainsBySig that only a HINT named (hintDomainsForSig):
+  // hosts a read saw listing the sig. They steer its fetch, but the closure
+  // attribution passes them on as hints too, never as hosts to learn.
+  #hintedDomainsBySig = new Map<string, Set<string>>()
+  // The same for #inferredDomainsBySig: a hint the closure passed on to a ref.
+  #hintedInferredBySig = new Map<string, Set<string>>()
 
   // INFERRED hosts — the §21.14 presumption that a host serving a layer
   // serves its closure (#attributeClosure). A guess, not an attribution:
@@ -983,7 +1003,7 @@ export class ContentBrokerDrone extends Drone {
   // Record a sig→domain mapping. Called whenever a response carrying
   // domain attributions arrives. Domains are deduped per-sig; the map
   // grows monotonically until the drone restarts.
-  #noteDomains = (sig: string, domains: string[], inferred = false): void => {
+  #noteDomains = (sig: string, domains: string[], inferred = false, durable = true): void => {
     if (!domains.length) return
     // Domain tags arrive in several equivalent forms (bare host, https://,
     // or wss://). Store the same fetch target only once so a re-announcement
@@ -995,7 +1015,17 @@ export class ContentBrokerDrone extends Drone {
     if (!normalizedDomains.length) return
     const map = inferred ? this.#inferredDomainsBySig : this.#knownDomainsBySig
     const set = map.get(sig) ?? new Set<string>()
-    const before = this.getKnownDomains(sig).length
+    const before = this.#fetchCandidateCount(sig)
+    {
+      const hints = inferred ? this.#hintedInferredBySig : this.#hintedDomainsBySig
+      const hinted = hints.get(sig) ?? new Set<string>()
+      for (const domain of normalizedDomains) {
+        if (durable) hinted.delete(domain)
+        else if (!set.has(domain)) hinted.add(domain)
+      }
+      if (hinted.size) hints.set(sig, hinted)
+      else hints.delete(sig)
+    }
     for (const domain of normalizedDomains) set.add(domain)
     map.set(sig, set)
     // Did we actually LEARN anything? Re-hearing a host we already had is not
@@ -1005,10 +1035,12 @@ export class ContentBrokerDrone extends Drone {
     // backoff cleared on each re-attribution, woke its consumers, missed
     // again, and went round — hundreds of requests for one dead sig in a
     // single tick, with the main thread pinned and the page never painting.
-    const learnedSomething = this.getKnownDomains(sig).length > before
+    const learnedSomething = this.#fetchCandidateCount(sig) > before
     // The HOST half of the knowledge is durable: persist + hand to the SW so
     // reloads and DOM-side /@resource/ fetches can still reach the publisher.
-    for (const domain of normalizedDomains) this.#learnHost(domain)
+    // A HINT (hintDomainsForSig) is not: it steers this sig's fetch and is
+    // never written to the persisted list.
+    if (durable) for (const domain of normalizedDomains) this.#learnHost(domain)
     // New address knowledge for this sig — its egg may now hatch; lift
     // the miss window AND reset the backoff so the next ask re-dials
     // immediately (not on the backed-off schedule).
@@ -1126,7 +1158,12 @@ export class ContentBrokerDrone extends Drone {
   #attributeClosure = (bytes: Uint8Array, host: string, layerSig = ''): void => {
     // The serving host, then every host the layer's publisher named for it:
     // a page's event names where its offered branches' subtrees went too.
-    const hosts = [host, ...(layerSig ? this.#knownDomainsBySig.get(layerSig) ?? [] : [])]
+    // A host a read only HINTED for the layer goes on as a hint: the fetch
+    // that gets its own bytes is what learns it.
+    const named = layerSig ? [...(this.#knownDomainsBySig.get(layerSig) ?? [])] : []
+    const hinted = layerSig ? this.#hintedDomainsBySig.get(layerSig) : undefined
+    const hosts = [host, ...named.filter(domain => !hinted?.has(domain))]
+    const hints = named.filter(domain => domain !== host && hinted?.has(domain))
     try {
       const layer = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>
       if (!layer || typeof layer !== 'object') return
@@ -1134,7 +1171,9 @@ export class ContentBrokerDrone extends Drone {
         if (!Array.isArray(value)) continue
         for (const raw of value) {
           const ref = String(raw ?? '').trim().toLowerCase()
-          if (/^[a-f0-9]{64}$/.test(ref)) this.#noteDomains(ref, hosts, true)
+          if (!/^[a-f0-9]{64}$/.test(ref)) continue
+          this.#noteDomains(ref, hosts, true)
+          if (hints.length) this.#noteDomains(ref, hints, true, false)
         }
       }
     } catch { /* not a JSON layer — nothing to attribute */ }
@@ -1640,11 +1679,21 @@ export class ContentBrokerDrone extends Drone {
    * have been observed yet for this sig.
    */
   public getKnownDomains = (sig: string): string[] => {
-    const known = this.#knownDomainsBySig.get(sig)
-    const inferred = this.#inferredDomainsBySig.get(sig)
-    if (!inferred) return known ? Array.from(known) : []
-    return [...new Set([...(known ?? []), ...inferred])]
+    // A HINT is not a host that served the sig: callers read [0] as the
+    // publisher's domain (the adopt fold learns it durably, the run gate
+    // trusts it), so only the fetch cascade (#knownDomainsBySig) sees hints.
+    const hinted = this.#hintedDomainsBySig.get(sig)
+    const known = [...(this.#knownDomainsBySig.get(sig) ?? [])].filter(domain => !hinted?.has(domain))
+    const hintedInferred = this.#hintedInferredBySig.get(sig)
+    const inferred = [...(this.#inferredDomainsBySig.get(sig) ?? [])].filter(domain => !hintedInferred?.has(domain))
+    if (!inferred.length) return known
+    return [...new Set([...known, ...inferred])]
   }
+
+  /** Every host a fetch of `sig` may ask, hints included: the measure of
+   *  whether new address knowledge arrived (#noteDomains). */
+  #fetchCandidateCount = (sig: string): number =>
+    new Set([...(this.#knownDomainsBySig.get(sig) ?? []), ...(this.#inferredDomainsBySig.get(sig) ?? [])]).size
 
   /**
    * Note a domain as a session-scoped HTTP-direct fetch source. Used by the
@@ -1687,6 +1736,21 @@ export class ContentBrokerDrone extends Drone {
     const clean = String(sig ?? '').trim().toLowerCase()
     if (!/^[a-f0-9]{64}$/.test(clean)) return
     this.#noteDomains(clean, Array.isArray(domains) ? domains : [])
+  }
+
+  /**
+   * WHERE A READ SAW A SIGNATURE, FOR THIS PAGE ONLY (found-hosts.ts). The
+   * same sig→host attribution as noteDomainsForSig, so a later fetch of this
+   * sig asks there, but the hosts are NOT learned: nothing joins the
+   * persisted `hc:known-domains` list (whose 24 places hold the hosts adopts
+   * learned), the service worker or `domain:learned`. A model's explore or
+   * pool read names dozens of hosts it merely listed; only a host that
+   * actually serves bytes is learned, by the fetch that got them.
+   */
+  public hintDomainsForSig = (sig: string, domains: string[]): void => {
+    const clean = String(sig ?? '').trim().toLowerCase()
+    if (!/^[a-f0-9]{64}$/.test(clean)) return
+    this.#noteDomains(clean, Array.isArray(domains) ? domains : [], false, false)
   }
 
   /**
@@ -2307,6 +2371,8 @@ export class ContentBrokerDrone extends Drone {
     // would otherwise occupy a thousand queue slots before any of it is
     // recognised as already seen.
     const queued = new Set<string>(queue.map(q => q.sig))
+    /** Parts of a `module:drafts` record: held, never descended through. */
+    const partsOnly = new Set<string>()
     /** Key path a signature sat under, for anything reached below depth 0. */
     const atBy = new Map<string, string>()
     const enqueue = (sig: string, depth: number, from?: string, at?: string): void => {
@@ -2361,7 +2427,9 @@ export class ContentBrokerDrone extends Drone {
           let first: Uint8Array | null = null
           try { first = await sink.peek(sig, 1) } catch { first = null }
           const opener = first?.[0]
-          if (opener !== 0x7b /* { */ && opener !== 0x5b /* [ */) continue
+          // A dependency drafts listing (decoration-closure.ts) names parts too, and is read only as one.
+          const listing = partsOnly.has(sig) && opener === DEPENDENCY_DRAFTS_LISTING_HEAD.charCodeAt(0)
+          if (opener !== 0x7b /* { */ && opener !== 0x5b /* [ */ && !listing) continue
           try { got = await sink.read(sig) } catch { got = null }
           if (!got) continue
         }
@@ -2393,7 +2461,19 @@ export class ContentBrokerDrone extends Drone {
       // many images otherwise sits silent for the whole resource phase — the
       // UI cue must climb as resources resolve.
       if (!opts.quiet) this.emitEffect('adopt:progress', { sig, ...stats })
+      if (partsOnly.has(sig)) {
+        // A `module:dependency-drafts` record names one part, its listing
+        // (decoration-closure.ts); the parts listed in it are parts too —
+        // held, never descended through — and come as a record's parts come.
+        for (const n of dependencyDraftsListingParts(got)) { partsOnly.add(n); enqueue(n, depth + 1, sig) }
+        continue
+      }
       if (depth > 0 && !opts.deepResources) continue
+      // A `module:drafts` record (sharing/site-drafts.ts) names its parts, and
+      // they are leaves, as the publish closure carries them: a draft root names
+      // the trunk it was made over and its folder layer the trunk's other
+      // modules, none of which the card's host holds.
+      const draftParts = isDraftsRecord(got)
 
       // Decoration-descent: a decoration record (e.g. a website page) is a
       // resource leaf to #collectSigs, but the content it points at — the
@@ -2402,6 +2482,7 @@ export class ContentBrokerDrone extends Drone {
       // the adopted site is self-contained, not a record that 404s its
       // assets. No-op for ordinary resources (decorationClosureSigs → []).
       for (const n of await decorationClosureSigs(got, s => this.fetchBySig(s, 'resource'))) {
+        if (draftParts) partsOnly.add(n)
         enqueue(n, depth + 1, sig)
       }
 
@@ -2410,7 +2491,10 @@ export class ContentBrokerDrone extends Drone {
         // its message body through `turns.[0].contentSig` is exactly the case
         // where knowing the key separates lost content from an identifier.
         const nested = new Map<string, string>()
-        for (const s of this.#recordSigs(got, nested)) enqueue(s, depth + 1, sig, nested.get(s))
+        for (const s of this.#recordSigs(got, nested)) {
+          if (draftParts) partsOnly.add(s)
+          enqueue(s, depth + 1, sig, nested.get(s))
+        }
       }
     }
   }

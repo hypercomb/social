@@ -236,8 +236,9 @@ pool <meaning> <from>   the next page of a long one-file index
 
 - **The model names a meaning, never a host.** The hosts asked are every host
   the hive can ask (2026-11-13, `sharing/network-hosts.ts`: the ones the
-  participant carries and the ones its content broker fetches from); with
-  none, the public content host is read, as `discover` does. A bare word is
+  participant carries and the ones its content broker fetches from), and
+  always the public content hosts too (2026-11-25: a managed door's list was
+  never empty, so `hypercomb.com` used to drop out). A bare word is
   refused: a tile's name pool is never listed.
 - **A name is asked with `explore`, not `pool`.** The pools behind a tile name
   (`list:`, `pictures:`) list publisher keys, which `read` cannot open;
@@ -246,6 +247,11 @@ pool <meaning> <from>   the next page of a long one-file index
   set, whose members come back as signatures that `read <signature>` opens;
   `/<address>` is a one-file index, returned as the host sent it, a page at a
   time. The answer says what each host said: listed, document, absent, silent.
+- **`host:packages` is not a set of signatures.** It is the install pool: a
+  host lists it by 8-digit markers under `/content/`, each naming a package
+  root, so a pool read finds no members there. The receipt says so instead of
+  leaving the model to read silent hosts as "no package". A door serves that
+  listing and its markers as `text/plain` (blossom worker, 2026-11-25).
 - **Read only.** Nothing is written, nothing is kept, and the meaning is not
   registered as a pool of this hive.
 - **Someone else's words.** A change that follows a pool read is held for the

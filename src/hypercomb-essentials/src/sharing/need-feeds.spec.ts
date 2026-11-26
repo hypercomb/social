@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { feedNeed, mergeFeeds, type Feed, type FeedDeps } from './need-feeds.js'
+import { SignatureService } from '@hypercomb/core'
+import { feedNeed, mergeFeeds, OFFERINGS_MEANING, PUBLICATIONS_MEANING, publishedUnder, type Feed, type FeedDeps } from './need-feeds.js'
 import { needListKey, needListPoolAddress } from './need-lists.js'
 import { picturesKey, picturesPoolAddress } from './picture-pools.js'
 import type { PoolListing } from './pool-listing.js'
@@ -216,5 +217,90 @@ describe('need feeds — the servers feeding a need', () => {
     const final = await feedNeed('', () => {}, await world(asked))
     expect(final.every(f => f.state === 'empty')).toBe(true)
     expect(asked.length).toBe(0)
+  })
+})
+
+describe('what the hosts published under a name (reach A5)', () => {
+  const addressOf = (meaning: string): Promise<string> =>
+    SignatureService.sign(new TextEncoder().encode(meaning).buffer as ArrayBuffer)
+  const H = sig(0x100)
+  const G = sig(0x200)
+  const OFFERED = sig(0x300)
+
+  /** one.test keeps a ledger naming knowledge/hyperdex (head H), honey-garden
+   *  and hyperdex-two, and an offerings set holding one honey-garden record
+   *  whose head Carol's own index names (G), and one forged record. */
+  const world = async (asked: string[] = []): Promise<FeedDeps> => {
+    const ledgerAddress = await addressOf(PUBLICATIONS_MEANING)
+    const offeringsAddress = await addressOf(OFFERINGS_MEANING)
+    const ledger = JSON.stringify({ sites: [
+      { host: 'hyperdex.one.test', lineage: 'knowledge/hyperdex', publishers: [{ pubkey: ALICE, head: H }, { pubkey: BOB, head: null }] },
+      { host: 'hyperdex-two.one.test', lineage: 'hyperdex-two', publishers: [{ pubkey: BOB, head: sig(0x101) }] },
+      { host: 'stranger.example', lineage: 'Hyperdex', publishers: [{ pubkey: DAVE, head: sig(0x102) }] },
+      // A hostile ledger row: Carol's own index names no such head, and Alice's names H.
+      { host: 'one.test', lineage: 'knowledge/hyperdex', publishers: [{ pubkey: CAROL, head: sig(0x103) }, { pubkey: ALICE, head: sig(0x104) }] },
+    ] })
+    const records: Record<string, Record<string, unknown>> = {
+      [OFFERED]: { kind: 'host:offering', title: 'honey', route: 'https://honey-garden.one.test/', lineage: 'honey-garden', pubkey: CAROL },
+    }
+    return {
+      hosts: () => ['one.test'],
+      listing: async (host, address) => {
+        asked.push(`listing ${host} ${address}`)
+        return address === offeringsAddress ? { state: 'listed', text: `${OFFERED}
+${sig(0x301)}
+` } : { state: 'absent' }
+      },
+      // Each publisher's own signed index on one.test: the word a ledger row is checked against.
+      roots: async (host, pubkey) => host !== 'one.test' ? null
+        : pubkey === CAROL ? { 'honey-garden': G }
+        : pubkey === ALICE ? { 'knowledge/hyperdex': H }
+        : pubkey === DAVE ? { Hyperdex: sig(0x102) }
+        : pubkey === BOB ? { 'hyperdex-two': sig(0x101) } : null,
+      readJson: async () => null,
+      now: () => 0,
+      document: async (host, address) => { asked.push(`document ${host} ${address}`); return address === ledgerAddress ? ledger : null },
+      // The live read checks the hash; a record that fails it comes back null.
+      member: async (_host, _address, s) => records[s] ?? null,
+    }
+  }
+
+  it('finds a ledger head by the molecule address of its last lineage segment, never by prefix', async () => {
+    expect(await publishedUnder('hyperdex', await world())).toEqual([
+      // Case folds the way a molecule address folds; a site of the host is named beside it, any other host is not.
+      { sig: sig(0x102), by: DAVE, hosts: ['one.test'], via: 'publication' },
+      { sig: H, by: ALICE, hosts: ['hyperdex.one.test', 'one.test'], via: 'publication' },
+    ].sort((a, b) => b.hosts.length - a.hosts.length || (a.sig < b.sig ? -1 : 1)))
+    // `hyperdex-two` is another name.
+    expect((await publishedUnder('hyperdex', await world())).map(tile => tile.sig)).not.toContain(sig(0x101))
+    expect(await publishedUnder('hyper', await world())).toEqual([])
+  })
+
+  it("keeps a ledger row only when the publisher's own signed index names that head", async () => {
+    const sigs = (await publishedUnder('hyperdex', await world())).map(tile => tile.sig)
+    // The ledger is the host's unsigned word: a head it pins on a real key is not that key's.
+    expect(sigs).not.toContain(sig(0x103))
+    expect(sigs).not.toContain(sig(0x104))
+    expect(sigs).toContain(H)
+  })
+
+  it("finds an offering by its lineage, its head read from the publisher's own index", async () => {
+    expect(await publishedUnder('honey-garden', await world())).toEqual([
+      { sig: G, by: CAROL, hosts: ['honey-garden.one.test', 'one.test'], via: 'publication' },
+    ])
+    expect(await publishedUnder('honey', await world())).toEqual([])
+  })
+
+  it('asks only the hosts it is given, at the two derived addresses', async () => {
+    const asked: string[] = []
+    await publishedUnder('hyperdex', await world(asked))
+    expect([...new Set(asked.map(line => line.split(' ')[1]))]).toEqual(['one.test'])
+    expect(new Set(asked.map(line => line.split(' ')[2])))
+      .toEqual(new Set([await addressOf(PUBLICATIONS_MEANING), await addressOf(OFFERINGS_MEANING)]))
+  })
+
+  it('reads nothing when the feed deps cannot read a ledger or a member', async () => {
+    const { document: _d, member: _m, ...plain } = await world()
+    expect(await publishedUnder('hyperdex', plain)).toEqual([])
   })
 })
