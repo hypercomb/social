@@ -65,7 +65,8 @@ for item in jobs:
     sf.write(f"{outdir}/{item['id']}.wav", wav.squeeze(0).cpu().numpy(), model.sr)
 
     got = wav.squeeze(0).cpu().numpy()
-    heard = listen(librosa.resample(got, orig_sr=model.sr, target_sr=ASR_SR))["text"].strip()
+    # a take past 30 s is long-form to Whisper, which then needs timestamps
+    heard = listen(librosa.resample(got, orig_sr=model.sr, target_sr=ASR_SR), return_timestamps=True)["text"].strip()
     rate = wer(words(item["text"]), words(heard))
     was = librosa.get_duration(path=item["source"])
     now = len(got) / model.sr

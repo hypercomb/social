@@ -46,5 +46,13 @@
     "seconds": 6.68,
     "at": "2026-08-05",
     "text": "Type a name, press Enter, and you have a hive. Hypercomb — the hive is yours."
+  },
+  "scene:02": {
+    "slot": "0d8ca1d24ae1ae06",
+    "similarity": 0.9587,
+    "wer": 0.0123,
+    "seconds": 27.03,
+    "at": "2026-11-25",
+    "text": "Hypercomb is not an app you sign up for. It is an open protocol: a shared way to name, keep and pass on what people make, that anyone can use and no one owns. Three ideas carry it. Every piece of work is named by a fingerprint of its own content. Every change is kept. And work travels between people directly, from device to device and domain to domain. The code is public, under a licence that keeps every copy open."
   }
 }

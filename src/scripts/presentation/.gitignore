@@ -15,6 +15,7 @@ capture-out/
 # a deliberate act, not a side effect of a commit. Raw takes are pre-master.
 voice/reference/
 voice/spoken/
+voice/voxtral/
 voice/lines.json
 *.log
 __pycache__/

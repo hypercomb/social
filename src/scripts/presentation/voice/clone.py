@@ -75,7 +75,8 @@ for item in lines:
         )
         cand = wav.squeeze(0).cpu().numpy()
         sim = float(np.dot(embed(cand, model.sr), ref_embed))
-        heard = listen(at16k(cand, model.sr))["text"].strip()
+        # a take past 30 s is long-form to Whisper, which then needs timestamps
+        heard = listen(at16k(cand, model.sr), return_timestamps=True)["text"].strip()
         rate = wer(want, words(heard))
         takes.append({"wav": wav, "sim": sim, "wer": rate, "heard": heard})
         print(f"    {item['id']} take {k + 1}: likeness {sim:.3f}  WER {rate * 100:5.1f}%"
