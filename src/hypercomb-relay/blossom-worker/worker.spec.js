@@ -7680,6 +7680,42 @@ test('a host\'s own people make its doors follow another host; a stranger cannot
   assert(!env.CONTENT.held.has(`${COMMUNITY}/${artifact}`), 'the last one out removes the member')
 })
 
+test('a late pass for an index already replaced stops: it never puts back a follow the newer index withdrew', async () => {
+  // The answer no longer waits for the notes, so the key's next index can land
+  // while the last one's notes still run (review of the waitUntil change).
+  const env = await calendarEnv()
+  const translators = await sha256Hex('i18n:ja')
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  const bag = env.CONTENT
+  env.CONTENT = new Proxy(bag, {
+    get(target, prop) {
+      const value = target[prop]
+      if (prop !== 'put') return typeof value === 'function' ? value.bind(target) : value
+      return async (key, ...rest) => {
+        if (String(key).startsWith(`${translators}/`)) await gate
+        return value.call(target, key, ...rest)
+      }
+    },
+  })
+  const artifact = await sha256Hex(hostArtifact('peer.example'))
+  const url = `https://content.hypercomb.com/${INDEXES}/${pubkey}`
+  const put = async (roots, at, handedOff) => {
+    const body = JSON.stringify(await signedIndex(roots, at, undefined, undefined, { listed: ['calendar:events'] }))
+    const ctx = { waitUntil: (work) => { handedOff.push(work) }, passThroughOnException() {} }
+    return worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', sk) }, body }), env, ctx)
+  }
+  const first = []
+  assert.equal((await put({ 'i18n:ja': 'f'.repeat(64), 'follow:peer.example': artifact }, 1_800_000_300, first)).status, 200)
+  // The first index's notes wait at their first pass; the next index lands and is noted in full.
+  const second = []
+  assert.equal((await put({}, 1_800_000_400, second)).status, 200)
+  await Promise.all(second)
+  release()
+  await Promise.all(first)
+  assert(!bag.held.has(`${COMMUNITY}/${artifact}`), 'the withdrawn follow is not put back by the older index\'s late pass')
+})
+
 test('only a host\'s own people put meetings and lists on its doors', async () => {
   const record = eventRecordText('2026-10-24')
   const sig = await sha256Hex(record)

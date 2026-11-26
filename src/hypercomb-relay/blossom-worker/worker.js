@@ -6216,17 +6216,29 @@ function nameDeepPlaces(env, pubkey, evt, ctx) {
 // race, as the created_at rule always could.
 /** What a held index's roots say about its publisher, written into the pools
  *  that list them (translators, assessors, attesters, pictures, contributions,
- *  details, lists, events, follows, shared pools). Each pass only adds what is
- *  missing, and one that fails leaves the rest to run. After the answer when
- *  the request can wait on it (ctx.waitUntil outlives a caller that hangs up);
- *  awaited otherwise, so a caller with no ctx sees them written. */
+ *  details, lists, events, follows, shared pools); one pass that fails leaves
+ *  the rest to run. After the answer when the request can wait on it
+ *  (ctx.waitUntil outlives a caller that hangs up); awaited otherwise, so a
+ *  caller with no ctx sees them written.
+ *  ONLY FOR THE INDEX STILL HELD: the answer no longer waits for the notes, so
+ *  the key's next index can land while these still run, and two passes also
+ *  TAKE AWAY (noteEvents drops a meeting a newer record replaces, noteFollows
+ *  drops a zone the index stopped following). A pass for an index already
+ *  replaced would put back what the newer one took away, so each pass first
+ *  reads the held index (from the pool, never the edge copy) and the notes stop
+ *  once it is another. */
 const INDEX_NOTES = [
   noteTranslators, noteAssessors, noteAttesters, notePicturePublishers, notePageContributors,
   noteDetailSpeakers, noteListOfferers, noteEvents, noteFollows, noteSharedPools,
 ]
 async function noteAfterAnswer(env, pubkey, evt, ctx) {
+  const stillHeld = async () => {
+    try { return String(JSON.parse((await readHeldIndex(env, pubkey)) ?? 'null')?.id || '') === String(evt.id || '') }
+    catch { return false }
+  }
   const noting = (async () => {
     for (const note of INDEX_NOTES) {
+      if (!(await stillHeld())) return
       try { await note(env, pubkey, evt) } catch { /* the next write of this index notes it again */ }
     }
   })()
