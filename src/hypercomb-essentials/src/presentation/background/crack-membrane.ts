@@ -30,6 +30,12 @@ const DPR_CAP = 1.5
 /** Toward the top left, the way the shell's panels are lit. */
 const LIGHT = { x: -0.6, y: -0.8 }
 const LIP = 1.6
+/** How fast the crack front runs, and the glow that rides it (px per ms). */
+const FRONT_SPEED = 0.72
+/** One slow pulse along the seams every this many ms, once a crack settles. */
+const PULSE_PERIOD = 7000
+/** How thick the travelling band of light is, in px. */
+const PULSE_BAND = 130
 
 type Rand = () => number
 type Strike = { x: number; y: number; seed: number }
@@ -47,7 +53,14 @@ export class CrackMembrane {
   #shadow: HTMLCanvasElement | null = null
   #light: HTMLCanvasElement | null = null
   #flashEl: HTMLDivElement | null = null
+  #glow: HTMLCanvasElement | null = null
   #mask = document.createElement('canvas')
+  /** The membrane, feathered wider, that the travelling light is cut from. */
+  #glowMask = document.createElement('canvas')
+  /** The last impact: where, how far it reaches, and when (ms). */
+  #origin = { x: 0, y: 0, reach: 0, at: 0 }
+  #reduce = false
+  #lastPulse = 0
   #visible = false
   #raf = 0
   #w = 0
@@ -84,6 +97,7 @@ export class CrackMembrane {
     this.#branches = []
     this.#clearMask()
     this.#compose()
+    this.#glow?.getContext('2d')?.clearRect(0, 0, this.#glow.width, this.#glow.height)
   }
 
   /** One impact, at the centre of the screen unless told otherwise
@@ -93,8 +107,9 @@ export class CrackMembrane {
     const s: Strike = { x, y, seed: (Math.random() * 2 ** 31) | 0 }
     this.#strikes.push(s)
     this.#grow(s)
-    const reduce = !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    if (reduce) { while (this.#branches.length) this.#step(999); this.#compose(); return }
+    this.#reduce = !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    if (this.#reduce) { while (this.#branches.length) this.#step(999); this.#compose(); return }
+    this.#origin.at = performance.now()
     this.#flash(x, y)
     if (!this.#raf) this.#raf = requestAnimationFrame(this.#tick)
   }
@@ -119,28 +134,33 @@ export class CrackMembrane {
     const shadow = document.createElement('canvas')
     const light = document.createElement('canvas')
     const flash = document.createElement('div')
-    for (const el of [shadow, light, flash]) Object.assign(el.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', display: 'block' })
+    const glow = document.createElement('canvas')
+    for (const el of [shadow, light, glow, flash]) Object.assign(el.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', display: 'block' })
     light.style.mixBlendMode = 'screen'
+    glow.style.mixBlendMode = 'screen'
     Object.assign(flash.style, { mixBlendMode: 'screen', opacity: '0', transition: 'opacity 900ms ease-out' })
-    root.append(shadow, light, flash)
+    root.append(shadow, light, glow, flash)
     document.body.prepend(root)
     this.#root = root
     this.#shadow = shadow
     this.#light = light
     this.#flashEl = flash
+    this.#glow = glow
   }
 
   #resize(): void {
-    if (!this.#shadow || !this.#light) return
+    if (!this.#shadow || !this.#light || !this.#glow) return
     const w = Math.max(1, window.innerWidth), h = Math.max(1, window.innerHeight)
     const dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP)
     if (w === this.#w && h === this.#h && dpr === this.#dpr) return
     this.#w = w; this.#h = h; this.#dpr = dpr
-    for (const c of [this.#shadow, this.#light, this.#mask]) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr) }
+    for (const c of [this.#shadow, this.#light, this.#glow, this.#mask, this.#glowMask]) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr) }
     this.#branches = []
     this.#clearMask()
     for (const s of this.#strikes) { this.#grow(s); while (this.#branches.length) this.#step(999) }
     this.#compose()
+    // A settled crack keeps its slow pulse after a resize.
+    if (this.#strikes.length && !this.#reduce && !this.#raf && this.#visible) this.#raf = requestAnimationFrame(this.#tick)
   }
 
   #clearMask(): void {
@@ -153,6 +173,7 @@ export class CrackMembrane {
     const rnd = mulberry(s.seed)
     const x = s.x * this.#w, y = s.y * this.#h
     const reach = Math.hypot(this.#w, this.#h) * (.3 + rnd() * .16)
+    this.#origin = { x, y, reach, at: this.#origin.at }
     const rays = 4 + Math.floor(rnd() * 3)
     const off = rnd() * Math.PI * 2
     for (let i = 0; i < rays; i++) {
@@ -188,12 +209,64 @@ export class CrackMembrane {
     }
   }
 
-  #tick = (): void => {
+  // THE LOOP. While a crack grows it runs every frame: a quick burst at the
+  // impact, then the front slows as it runs out. Once settled, only the slow
+  // pulse is left, drawn at about 30 frames a second. Hidden tabs get no
+  // frames at all; reduced motion gets no loop.
+  #tick = (now: number): void => {
     this.#raf = 0
     if (!this.#visible) return
-    if (this.#branches.length) this.#step(4)
-    this.#compose()
-    if (this.#branches.length) this.#raf = requestAnimationFrame(this.#tick)
+    const growing = this.#branches.length > 0
+    if (growing) {
+      const age = now - this.#origin.at
+      this.#step(age < 180 ? 4 : 2)
+      this.#compose()
+    }
+    if (growing || now - this.#lastPulse > 30) { this.#pulse(now); this.#lastPulse = now }
+    if (this.#strikes.length && !this.#reduce) this.#raf = requestAnimationFrame(this.#tick)
+  }
+
+  /** Light moving along the membrane: a warm band that rides the crack front
+   *  out from the impact, then a dim cool band every few seconds. The band is
+   *  a ring around the impact, cut to the membrane's shape. */
+  #pulse(now: number): void {
+    const g = this.#glow?.getContext('2d')
+    if (!g || !this.#glow) return
+    const W = this.#glow.width, H = this.#glow.height, d = this.#dpr
+    g.setTransform(1, 0, 0, 1, 0, 0)
+    g.globalCompositeOperation = 'source-over'
+    g.clearRect(0, 0, W, H)
+    const { x, y, reach, at } = this.#origin
+    if (!reach) return
+    const far = reach * 1.1
+    const age = now - at
+    const front = age * FRONT_SPEED
+    let r: number, alpha: number, tint: string
+    if (front < far) {
+      // the first pass: hot at the impact, cooling as it runs out
+      r = front
+      alpha = .55 * (1 - .6 * front / far)
+      tint = '255,196,140'
+    } else {
+      const phase = ((age - far / FRONT_SPEED) % PULSE_PERIOD) / PULSE_PERIOD
+      // travel for the first 60% of the period, then rest
+      if (phase > .6) return
+      const t = phase / .6
+      r = t * far
+      alpha = .2 * Math.sin(Math.PI * t)
+      tint = '170,200,236'
+    }
+    if (alpha < .01) return
+    g.drawImage(this.#glowMask, 0, 0)
+    g.globalCompositeOperation = 'source-in'
+    const band = PULSE_BAND
+    const ring = g.createRadialGradient(x * d, y * d, Math.max(0, r - band) * d, x * d, y * d, (r + band * .35) * d)
+    ring.addColorStop(0, `rgba(${tint},0)`)
+    ring.addColorStop(.72, `rgba(${tint},${alpha.toFixed(3)})`)
+    ring.addColorStop(1, `rgba(${tint},0)`)
+    g.fillStyle = ring
+    g.fillRect(0, 0, W, H)
+    g.globalCompositeOperation = 'source-over'
   }
 
   /** A soft warm bloom at the point of contact, fading on its own. */
@@ -241,5 +314,15 @@ export class CrackMembrane {
     li.globalCompositeOperation = 'source-in'
     li.fillStyle = 'rgba(200,216,236,.34)'; li.fillRect(0, 0, W, H)
     li.globalCompositeOperation = 'source-over'
+
+    // the membrane the travelling light is cut from: the seam, feathered wider
+    const gm = this.#glowMask.getContext('2d')
+    if (gm) {
+      gm.setTransform(1, 0, 0, 1, 0, 0)
+      gm.clearRect(0, 0, W, H)
+      gm.filter = `blur(${2.4 * d}px)`
+      gm.drawImage(this.#mask, 0, 0); gm.drawImage(this.#mask, 0, 0)
+      gm.filter = 'none'
+    }
   }
 }
