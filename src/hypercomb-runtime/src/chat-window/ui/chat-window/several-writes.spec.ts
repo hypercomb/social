@@ -10,6 +10,26 @@ const deps = (run: (lines: readonly string[]) => Promise<string>, stopped = fals
   stopped: () => stopped,
 })
 
+describe('steps of a reply that changes and writes', () => {
+  it('runs each step with its place and calls them steps', async () => {
+    const seen: string[] = []
+    const said = await runSeveralWrites([{ kind: 'do', lines: ['/create shop'] }, { kind: 'write', lines: ['page /shop'] }], {
+      run: async (step, at) => { seen.push(`${at}:${step.kind}`); return `${step.kind} done` },
+      refused: () => true, stopped: () => false, noun: 'Step',
+    })
+    expect(seen).toEqual(['0:do', '1:write'])
+    expect(said).toBe('Step 1 of 2:\ndo done\n\nStep 2 of 2:\nwrite done')
+  })
+
+  it('says which step was not made when a later one is refused', async () => {
+    const said = await runSeveralWrites(['a', 'b', 'c'], {
+      run: async (block) => { if (block === 'b') throw new Error('the tile does not exist'); return 'ok' },
+      refused: () => true, stopped: () => false, noun: 'Step',
+    })
+    expect(said).toBe('Step 1 of 3:\nok\n\nStep 2 of 3 was NOT made: the tile does not exist. The 1 after it was not tried.')
+  })
+})
+
 describe('several writes in one reply', () => {
   it('makes one block exactly as a single write always was, with no numbering', async () => {
     const d = deps(async lines => `made ${lines[0]}`)

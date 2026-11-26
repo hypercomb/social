@@ -944,3 +944,50 @@ describe('several write blocks in one reply', () => {
     expect(workInstruction({ canRead: true, readsRunFreely: true, canChange: true, vocabulary: '', canWrite: false, canWriteFiles: false })).not.toContain('SEVERAL FILES IN ONE REPLY')
   })
 })
+
+// CHANGE, THEN WRITE, IN ONE REPLY (core work-fence.ts WorkStep).
+describe('a change block and write blocks in one reply', () => {
+  const F = '`'.repeat(3)
+  const write = (header: string, body: string): string => [F + 'hypercomb-write', header, body, F].join('\n')
+  const change = (...lines: string[]): string => [F + 'hypercomb-do', ...lines, F].join('\n')
+
+  it('runs every block as its own step, in the order written', () => {
+    const split = splitWork(['Making the shop, then its page.', change('/create shop'), write('page /shop', '<html></html>'), write('file /shop app.css', 'body {}')].join('\n'))
+    expect(split.prose).toBe('Making the shop, then its page.')
+    expect(split.heldDo).toBeUndefined()
+    expect(split.request?.kind).toBe('write')
+    expect(split.request?.steps).toEqual([
+      { kind: 'do', lines: [workLineGrammar('/create shop', 'do')] },
+      { kind: 'write', lines: ['page /shop', '<html></html>'] },
+      { kind: 'write', lines: ['file /shop app.css', 'body {}'] },
+    ])
+    // The writes alone, as before, for whatever reads only them.
+    expect(split.request?.lines).toEqual(['page /shop', '<html></html>'])
+    expect(split.request?.more).toEqual([['file /shop app.css', 'body {}']])
+  })
+
+  it('keeps a change written after a write after it', () => {
+    const split = splitWork([write('page /shop', 'a'), change('/create shop/more')].join('\n'))
+    expect(split.request?.steps?.map(step => step.kind)).toEqual(['write', 'do'])
+  })
+
+  it('runs none when a write was left open or the blocks are more than the limit', () => {
+    const open = [change('/create shop'), F + 'hypercomb-write', 'page /shop', '<html>'].join('\n')
+    expect(splitWork(open).request).toEqual({ kind: 'write', lines: [] })
+    const many = [change('/create shop'), ...Array.from({ length: 6 }, (_, at) => write(`file /shop f${at}.txt`, 'x'))].join('\n')
+    expect(splitWork(many).request).toEqual({ kind: 'write', lines: [] })
+  })
+
+  it('still lets a read win over both, and holds them', () => {
+    const split = splitWork([F + 'hypercomb-read', 'read /shop', F, change('/create shop'), write('page /shop', 'a')].join('\n'))
+    expect(split).toMatchObject({ request: { kind: 'read' }, heldDo: true })
+    expect(split.request?.steps).toBeUndefined()
+  })
+
+  it('is taught to a model that may both change and write, and to no other', () => {
+    const powers = { canRead: true, readsRunFreely: true, vocabulary: '', canWrite: false }
+    expect(workInstruction({ ...powers, canChange: true, canWriteFiles: true })).toContain('CHANGE, THEN WRITE, IN ONE REPLY')
+    expect(workInstruction({ ...powers, canChange: false, canWriteFiles: true })).not.toContain('CHANGE, THEN WRITE')
+    expect(workInstruction({ ...powers, canChange: true, canWriteFiles: false })).not.toContain('CHANGE, THEN WRITE')
+  })
+})

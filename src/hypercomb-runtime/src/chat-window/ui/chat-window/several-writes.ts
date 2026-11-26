@@ -12,28 +12,36 @@
 // A refusal of the FIRST block is thrown as it always was, and so is a stop
 // or any failure that is not a refusal.
 //
-// Pure: the chat window hands it the blocks and the one-write runner.
+// A reply that mixes change blocks with write blocks (core work-fence.ts
+// WorkStep) runs here too, every block a step in the order written, so a
+// tile is made and its page written in one round. So does a Jev turn, where
+// each block is judged on its own before it runs.
+//
+// Pure: the chat window hands it the blocks and the one-block runner.
 
-export type SeveralWritesDeps = {
-  /** Make one write; resolves to what the model is told, rejects when it cannot be made. */
-  readonly run: (lines: readonly string[]) => Promise<string>
+export type SeveralWritesDeps<Block = readonly string[]> = {
+  /** Run one block; resolves to what the model is told, rejects when it cannot be made. */
+  readonly run: (block: Block, at: number) => Promise<string>
   /** A rejection the model can act on (a refused block), as opposed to a stop or a fault. */
   readonly refused: (error: unknown) => boolean
   /** The participant stopped the turn. */
   readonly stopped: () => boolean
+  /** What one block is called to the model: "Write" (the default) or "Step". */
+  readonly noun?: string
 }
 
-export const runSeveralWrites = async (blocks: readonly (readonly string[])[], deps: SeveralWritesDeps): Promise<string> => {
-  if (blocks.length === 1) return deps.run(blocks[0]!)
+export const runSeveralWrites = async <Block = readonly string[]>(blocks: readonly Block[], deps: SeveralWritesDeps<Block>): Promise<string> => {
+  if (blocks.length === 1) return deps.run(blocks[0]!, 0)
+  const noun = deps.noun ?? 'Write'
   const said: string[] = []
-  for (const [at, lines] of blocks.entries()) {
+  for (const [at, block] of blocks.entries()) {
     try {
-      said.push(`Write ${at + 1} of ${blocks.length}:\n${await deps.run(lines)}`)
+      said.push(`${noun} ${at + 1} of ${blocks.length}:\n${await deps.run(block, at)}`)
     } catch (error) {
       if (!said.length || deps.stopped() || !deps.refused(error)) throw error
       const after = blocks.length - at - 1
       const reason = error instanceof Error ? error.message : String(error)
-      said.push(`Write ${at + 1} of ${blocks.length} was NOT made: ${reason}.${after ? ` The ${after} after it ${after === 1 ? 'was' : 'were'} not tried.` : ''}`)
+      said.push(`${noun} ${at + 1} of ${blocks.length} was NOT made: ${reason}.${after ? ` The ${after} after it ${after === 1 ? 'was' : 'were'} not tried.` : ''}`)
       break
     }
   }
