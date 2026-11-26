@@ -145,8 +145,11 @@ const here = (): string[] =>
 /** Where the fold is kept: one current record, written only by a press. */
 const STATE_POOL = 'shelf:state'
 
-const t = (key: string, fallback: string): string =>
-  (ioc()?.get?.(I18N_IOC_KEY) as I18nProvider | undefined)?.t?.(key) ?? fallback
+const t = (key: string, fallback: string): string => {
+  const said = (ioc()?.get?.(I18N_IOC_KEY) as I18nProvider | undefined)?.t?.(key)
+  // A key the catalog lacks comes back as the key itself: say the fallback.
+  return said && said !== key ? said : fallback
+}
 
 /** THE DEFAULT IMAGE: a tile with no picture is drawn as a tile — a pointy-top
  *  hexagon, the hive's own cell, with the name's first letter inside, so a
@@ -256,8 +259,11 @@ const STYLE = `
    the rings hang under the bar inside the shelf, so the band it holds (and
    the breadcrumb below it) grows with them. */
 .shelf:not(.picks){height:auto;min-height:2.75rem;flex-direction:column;align-items:stretch;gap:0.35rem;padding:0.4rem 0.45rem 0.4rem 0.95rem;}
-.bar{position:relative;display:flex;align-items:flex-start;gap:0.6rem;min-width:0;}
-.bar>.legend,.bar>.add,.bar>.tools{height:2rem;align-self:flex-start;}
+.bar{position:relative;display:flex;align-items:flex-start;gap:0.6rem;min-width:0;--row:max(2rem,var(--item,2rem));}
+/* ONE CENTRE LINE: the head (2rem) and the first row of tiles (the size the
+   slider sets) are both centred on a row as tall as the taller of the two. */
+.bar>.legend,.bar>.add,.bar>.tools{height:2rem;align-self:flex-start;margin-top:calc((var(--row) - 2rem) / 2);}
+.bar>.items{margin-top:calc((var(--row) - var(--item,2rem)) / 2);}
 .bar>.add{flex:0 0 auto;}
 .items{flex:1 1 0;flex-wrap:wrap;align-content:flex-start;align-items:flex-start;gap:0.4rem;height:auto;
   max-height:calc(3 * var(--item,2rem) + 2 * 0.4rem);overflow-x:hidden;overflow-y:auto;scrollbar-width:thin;mask-image:none;-webkit-mask-image:none;}
@@ -595,7 +601,7 @@ export class QuickTrayElement extends HTMLElement {
     const members = entriesToMembers(this.#entries)
     if (members.length === 0) return
     const count = (await listGroups()).length + 1
-    await startGroup(`${t('shelf.ring.name', 'shelf')} ${count}`, members)
+    await startGroup(`${t('shelf.ring.name', 'ring')} ${count}`, members)
   }
 
   /** Bring a kept ring forward (`shelf:recall`). */
@@ -656,7 +662,7 @@ export class QuickTrayElement extends HTMLElement {
   async #newRing(): Promise<void> {
     const fromSession = this.#ringId === null && this.#entries.length > 0
     const members = fromSession ? entriesToMembers(this.#entries) : []
-    const ring = await startGroup(`${t('shelf.ring.name', 'shelf')} ${this.#rings.length + 1}`, members)
+    const ring = await startGroup(`${t('shelf.ring.name', 'ring')} ${this.#rings.length + 1}`, members)
     if (!ring) return
     // An empty ring stays only while pinned, so a fresh empty one starts
     // pinned; it can be unpinned like any other.
