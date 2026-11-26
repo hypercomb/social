@@ -85,6 +85,63 @@ describe('the run preview', () => {
     off()
   })
 
+  it('debugs: F10 starts paused, results list under each line, stop ends it', async () => {
+    const element = document.querySelector(TAG) as HTMLElement & { deps: () => unknown }
+    element.deps = () => ({ census: CENSUS, read: (text: string) => readUtterance(text, CENSUS), grant: { ...DEFAULT_MACHINE_GRANT, granted: [] } })
+    const sent: Array<{ effect: string; payload: unknown }> = []
+    const offs = ['external-call:debug', 'external-call:resume', EXTERNAL_ANSWER].map(effect =>
+      EffectBus.on(effect, payload => { if (payload) sent.push({ effect, payload }) }))
+    sent.length = 0
+    EffectBus.emit(EXTERNAL_ASK, { id: 'x3', from: 'agent', lines: ['go /a', 'go /b', 'go /c'], waiting: 0 })
+    // a breakpoint by its line number
+    element.querySelectorAll<HTMLElement>('.hc-run-gutter')[2]!.click()
+    expect(element.querySelector('.hc-run-gutter.has-break')?.textContent).toBe('3')
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 1500)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', bubbles: true }))
+    clock.mockRestore()
+    expect(sent).toEqual([
+      { effect: 'external-call:debug', payload: { id: 'x3', step: true, breakpoints: [2] } },
+      { effect: EXTERNAL_ANSWER, payload: { id: 'x3', decision: 'run' } },
+    ])
+    // the bee answers: the ask leaves the line, the run pauses before line 1
+    EffectBus.emit(EXTERNAL_ASK, null)
+    EffectBus.emitTransient('external-call:paused', { id: 'x3', at: 0, total: 3 })
+    expect(element.querySelector('.hc-run-line.is-here .hc-run-gutter')?.textContent).toBe('1')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', bubbles: true }))
+    expect(sent.at(-1)).toEqual({ effect: 'external-call:resume', payload: { id: 'x3', mode: 'step' } })
+    EffectBus.emitTransient('external-call:line', { id: 'x3', at: 0, text: 'go /a', verdict: 'ran /go', heard: ['Go: /a'] })
+    const results = [...element.querySelectorAll('.hc-run-line')[0]!.querySelectorAll('.hc-run-result')].map(r => r.textContent)
+    expect(results).toEqual(['ran /go', 'Go: /a'])
+    EffectBus.emitTransient('external-call:paused', { id: 'x3', at: 1, total: 3 })
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F5', shiftKey: true, bubbles: true }))
+    expect(sent.at(-1)).toEqual({ effect: 'external-call:resume', payload: { id: 'x3', mode: 'stop' } })
+    EffectBus.emitTransient('external-call:finished', { id: 'x3', kind: 'ran', stoppedAt: 1 })
+    expect(element.querySelectorAll('.hc-run-line.is-unsaid')).toHaveLength(2)
+    // finished: it stays to be read, Escape puts it away
+    expect(element.querySelector('.hc-run')).not.toBeNull()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(element.querySelector('.hc-run')).toBeNull()
+    offs.forEach(off => off())
+  })
+
+  it('shows your own line as you type it (F2), and puts it away', () => {
+    const element = document.querySelector(TAG) as HTMLElement & { deps: () => unknown }
+    element.deps = () => ({ census: CENSUS, read: (text: string) => readUtterance(text, CENSUS), grant: { ...DEFAULT_MACHINE_GRANT, granted: [] } })
+    let closed = 0
+    const off = EffectBus.on('run-preview:line-close', () => { closed++ })
+    closed = 0
+    EffectBus.emit('run-preview:line', { text: 'go /intro and record', line: '/go /intro and record', stance: 'command' })
+    expect(element.querySelector('.hc-run-title')?.textContent).toBe('Your line')
+    expect([...element.querySelectorAll('.hc-run-step .hc-tok-verb')].map(n => n.textContent)).toEqual(['go', 'record'])
+    EffectBus.emit('run-preview:line', { text: 'apple', line: 'apple', stance: 'tiles' })
+    expect(element.querySelector('.hc-run-reason')?.textContent).toMatch(/makes a tile/)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(closed).toBe(1)
+    expect(element.querySelector('.hc-run')).toBeNull()
+    EffectBus.emit('run-preview:line', { text: null })
+    off()
+  })
+
   it('leaves the keys to the command line while it has them', async () => {
     const element = document.querySelector(TAG)!
     const answers: ExternalAnswer[] = []

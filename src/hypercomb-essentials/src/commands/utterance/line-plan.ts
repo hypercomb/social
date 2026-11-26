@@ -54,6 +54,8 @@ export type PlanStep = {
   readonly description: string
   /** No live behaviour answers to the word: the line's own pipeline takes it. */
   readonly unknown?: boolean
+  /** A destructive word on the participant's own line: Enter asks first. */
+  readonly confirms?: boolean
 }
 
 export type LinePlan = {
@@ -63,8 +65,10 @@ export type LinePlan = {
    *  sentence   — plain language, read into behaviour words
    *  structure  — the line's own grammar (path, selection, sigil, mark, view)
    *  inert      — names nothing: refused, nothing runs
+   *  tiles      — the participant's own line in tiles stance: a tile name
+   *  find       — the participant's own line in find stance: a question
    */
-  readonly kind: 'word' | 'sentence' | 'structure' | 'inert'
+  readonly kind: 'word' | 'sentence' | 'structure' | 'inert' | 'tiles' | 'find'
   readonly steps: readonly PlanStep[]
   /** The reading's spans for a sentence — the view lights the words that run
    *  and dims what is thrown away. */
@@ -165,6 +169,59 @@ export const planLine = (text: string, deps: PlanDeps): LinePlan => {
     return plan('no word in this line matched a behaviour, so nothing will run — to make a tile, say: create <name>')
   }
   return plan()
+}
+
+/** The command line's stance, as it hands it over with the line. */
+export type Stance = 'tiles' | 'command' | 'find'
+
+const INERT_OWN = 'isn\'t a command — say create <name> to add it as a tile, or type > on an empty line to make tiles'
+
+/**
+ * THE PARTICIPANT'S OWN LINE, before their Enter (F2 on the command line).
+ *
+ * The keyboard is not the remote door: the participant's words are never
+ * judged against a machine's grant, a destructive word asks to be confirmed
+ * rather than being refused, and the stance decides how a plain line reads.
+ * `line` is the line as its register reads it (the command line's
+ * `#toRegister`): in command stance a plain line gains its slash there, and
+ * that change is what marks it as a sentence for the reader — exactly the
+ * test the keyboard's commit makes.
+ */
+export const planOwnLine = (text: string, line: string, stance: Stance, deps: PlanDeps): LinePlan => {
+  const census = deps.census
+  const trimmed = text.trim()
+  if (stance === 'find') return { text: trimmed, kind: 'find', steps: [] }
+  if (stance === 'tiles' && !trimmed.startsWith('/')) return { text: trimmed, kind: 'tiles', steps: [] }
+  // DESTRUCTIVE IS ASKED OF THE GATE, never weighed here (doctrine.spec.ts,
+  // "no door judges a machine call for itself"): a word the gate admits under
+  // the widest ceiling but refuses under one that stops at editing reaches
+  // further than editing — that is, it destroys.
+  const confirmed = (step: PlanStep): PlanStep => {
+    const verb = step.said ?? step.command
+    const entry = spokenEntry(verb, census)
+    if (!entry) return step
+    const widest = admitMachineCall(verb, entry, 'operator', { reach: 'destructive', scope: 'network', granted: [] })
+    const editing = admitMachineCall(verb, entry, 'operator', { reach: 'editing', scope: 'network', granted: [] })
+    return widest.admit && !editing.admit ? { ...step, confirms: true } : step
+  }
+  const sentence = stance === 'command' && line.trim() !== trimmed
+  const keeps = sentence && spokenEntry(firstWord(trimmed), census)?.rawArgs === true
+  if (sentence && !keeps) {
+    const reading = safeRead(deps.read, trimmed.toLowerCase())
+    if (!reading?.actions.length && !reading?.ambiguous) return { text: trimmed, kind: 'inert', steps: [], refused: `"${trimmed}" ${INERT_OWN}` }
+    const span = reading.spans.find(s => s.role === 'ambiguity')
+    return {
+      text: trimmed, kind: 'sentence', spans: reading.spans,
+      steps: reading.actions.map(action => confirmed(stepOf(action.command, action.args, census))),
+      ...(span ? { ambiguous: { word: span.text, candidates: (span.candidates ?? []).map(c => c.name) } } : {}),
+    }
+  }
+  const register = keeps ? '/' + trimmed : line.trim()
+  if (register.startsWith('/')) {
+    const call = slashCall(register)
+    return { text: trimmed, kind: 'word', steps: call.name ? [confirmed(stepOf(call.name, call.args, census))] : [] }
+  }
+  return { text: trimmed, kind: 'structure', steps: [] }
 }
 
 const safeRead = (read: PlanDeps['read'], text: string): UtteranceReading | null => {

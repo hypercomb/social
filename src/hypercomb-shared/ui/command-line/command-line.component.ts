@@ -2330,6 +2330,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#runPreviewUnsub = EffectBus.on<{ open?: boolean }>('run-preview:open', payload => {
       this.#runPreviewOpen.set(payload?.open === true)
     })
+    this.#linePreviewCloseUnsub = EffectBus.on('run-preview:line-close', () => { this.#setLinePreview(false) })
 
     this.#remoteSubmitUnsub = EffectBus.on<RemoteSubmitRequest>(REMOTE_SUBMIT, ({ text, accept, complete }) => {
       accept?.()
@@ -2776,6 +2777,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   #remoteSubmitUnsub?: () => void
   #externalUnsub?: () => void
   #runPreviewUnsub?: () => void
+  #linePreviewCloseUnsub?: () => void
   #historyForgetUnsub?: () => void
   // Location segments (bracket stripped) at the last navigate event.
   #lastNavKey = ''
@@ -2894,6 +2896,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#remoteSubmitUnsub?.()
     this.#externalUnsub?.()
     this.#runPreviewUnsub?.()
+    this.#linePreviewCloseUnsub?.()
+    this.#setLinePreview(false)
     this.#historyForgetUnsub?.()
     this.#voiceActiveUnsub?.()
     this.#pushToTalkUnsub?.()
@@ -3003,6 +3007,22 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   readonly #external = signal<ExternalAsk | null>(null)
   /** The run preview is showing the call (`run-preview:open`, replayed). */
   readonly #runPreviewOpen = signal(false)
+  /** The participant asked to see their own line in the run preview (F2). */
+  readonly #linePreview = signal(false)
+
+  #setLinePreview(on: boolean): void {
+    if (this.#linePreview() === on) return
+    this.#linePreview.set(on)
+    if (!on) EffectBus.emit('run-preview:line', { text: null })
+  }
+
+  /** While F2 holds it open, the line as typed, as its register reads it,
+   *  and the stance — everything the preview needs to read it as Enter will. */
+  readonly #linePreviewBroadcast = effect(() => {
+    if (!this.#linePreview()) return
+    const text = this.value()
+    EffectBus.emit('run-preview:line', { text, line: this.#toRegister(text), stance: this.#stance() })
+  })
   /** What the participant had on the line when a call took it over, given
    *  back when nothing waits any more. */
   #heldLine: string | null = null
@@ -3612,6 +3632,20 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         e.preventDefault()
         this.#answerExternal('decline')
       }
+      return
+    }
+    // F2 — SHOW ME WHAT THIS LINE WILL RUN (jwize, 2026-11-26: "opt-in key
+    // only"). The run preview (essentials run-preview.view.ts) draws the line
+    // as it is typed, read the way Enter will read it. Nothing about Enter
+    // changes; F2 again, or Escape, puts it away.
+    if (e.key === 'F2' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+      e.preventDefault()
+      this.#setLinePreview(!this.#linePreview())
+      return
+    }
+    if (e.key === 'Escape' && this.#linePreview()) {
+      e.preventDefault()
+      this.#setLinePreview(false)
       return
     }
     const v = this.value()

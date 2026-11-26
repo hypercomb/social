@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_MACHINE_GRANT, type MachineGrant } from '@hypercomb/core'
-import { planLine, type PlanEntry } from './line-plan.js'
+import { planLine, planOwnLine, type PlanEntry } from './line-plan.js'
 import { readUtterance } from './utterance-reading.js'
 
 const CENSUS: readonly PlanEntry[] = [
@@ -69,6 +69,25 @@ describe('planLine', () => {
   it('the participant\'s grant refuses before anything runs', () => {
     const plan = planLine('go /intro', deps({ ...DEFAULT_MACHINE_GRANT, reach: 'none', granted: [] }))
     expect(plan.refused).toMatch(/grants a machine nothing/)
+  })
+
+  it('the participant\'s own line is read by stance, with no grant gate', () => {
+    const none = { ...deps(), grant: { ...DEFAULT_MACHINE_GRANT, reach: 'none' as const, granted: [] } }
+    const sentence = planOwnLine('go /intro and record', '/go /intro and record', 'command', none)
+    expect(sentence.kind).toBe('sentence')
+    expect(sentence.refused).toBeUndefined()
+    expect(sentence.steps.map(s => s.command)).toEqual(['go', 'record'])
+    expect(planOwnLine('/go /x', '/go /x', 'command', none)).toMatchObject({ kind: 'word', steps: [{ command: 'go', args: '/x' }] })
+    expect(planOwnLine('apple', 'apple', 'tiles', none).kind).toBe('tiles')
+    expect(planOwnLine('apple', 'apple', 'find', none).kind).toBe('find')
+    expect(planOwnLine('please be nice', '/please be nice', 'command', none)).toMatchObject({ kind: 'inert' })
+    expect(planOwnLine('[a, b]', '[a, b]', 'command', none).kind).toBe('structure')
+  })
+
+  it('a destructive word on your own line asks first', () => {
+    const census: PlanEntry[] = [...CENSUS, { name: 'remove', description: 'Remove tiles', machine: { reach: 'destructive' } }]
+    const plan = planOwnLine('/remove a', '/remove a', 'command', { ...deps(), census })
+    expect(plan.steps[0]).toMatchObject({ command: 'remove', confirms: true })
   })
 
   it('an unknown slash word is planned for the line, not hidden', () => {

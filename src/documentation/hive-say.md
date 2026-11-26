@@ -115,6 +115,43 @@ there; anywhere else the preview takes Enter (run, after the same one-second
 arming) and Esc (decline). Run and Decline buttons do the same. The command
 line stops listing the lines under itself while the preview shows them.
 
+### Stepping through a call: the debugger
+
+jwize, 2026-11-26: "this should be a debugger as well if we want it to … we
+can step through and see the results in a sub list in each item after
+completed." Opt-in, per call:
+
+| Key | While the call waits | While a debugged run is paused |
+|---|---|---|
+| click a line number | set or clear a breakpoint | the same, heard by the run at once |
+| **F10** | run it paused before line 1 (Debug) | say this line, pause before the next |
+| **F5** | run it, pausing at breakpoints | run on to the next breakpoint |
+| **Shift+F5** / Esc | — / decline | stop: nothing more is said |
+
+Enter with a breakpoint set runs under the debugger too. Every line that has
+run gets its verdict, and everything the hive said while it ran, in a list
+under it; a walk back to where the call stands (the hive had moved) is listed
+there as well. A stopped run writes the lines it never said into its
+conversation, and the caller hears each as `refused: the participant stopped
+the run before this line`. While paused the hive is yours: look around, and
+on resume the call walks back to where it stood before its next line.
+
+The pauses are the external-call bee's: the preview sends
+`external-call:debug { id, step, breakpoints }` before its `run` answer and
+`external-call:resume { id, mode }` (step, continue, stop); the bee says
+`external-call:paused`, `external-call:line` (every call, debugged or not) and
+`external-call:finished`. A finished debugged run stays on screen until Esc or
+Close.
+
+### Your own line: F2
+
+jwize: "opt-in key only." **F2** on the command line draws the line you are
+typing in the same view, live as you type, read the way your own Enter will
+read it (`line-plan.ts` `planOwnLine`): by stance, with no machine grant (your
+own words are not a machine's), and a destructive word marked as asking first.
+Enter still runs it on the command line exactly as before; F2 again or Escape
+puts it away.
+
 ## Speaking as yourself
 
 `--participant` turns the gate off for a hive you drive alone: each sentence
