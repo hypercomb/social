@@ -314,10 +314,10 @@ const STYLE = `
 /* THE RINGS: one line each — the name, then what it holds, cut to the line. */
 .rings{position:relative;max-height:16rem;overflow-y:auto;margin:0;padding:0.3rem 0 0.1rem;list-style:none;
   border-top:1px solid rgba(var(--shelf),0.25);}
-.faces{display:flex;align-items:center;gap:0.2rem;padding:0 0.2rem 0.3rem;}
+.faces{display:flex;align-items:center;gap:0.5rem;padding:0 0.2rem 0.3rem;}
 .size{display:inline-flex;align-items:center;gap:0.35rem;margin-left:auto;font-family:var(--hc-mono,system-ui);font-size:0.65rem;letter-spacing:0.1em;text-transform:uppercase;opacity:0.8;}
 .size input{width:8rem;margin:0;accent-color:rgb(var(--shelf));cursor:pointer;}
-.face-btn{appearance:none;border:1px solid rgba(var(--shelf),0.3);border-radius:var(--hc-radius-control,2px);background:none;color:inherit;
+.face-btn{appearance:none;border:1px solid rgba(var(--shelf),0.3);border-radius:1px;background:none;color:inherit;
   font-family:var(--hc-mono,system-ui);font-size:0.65rem;letter-spacing:0.1em;text-transform:uppercase;padding:0.15rem 0.55rem;cursor:pointer;opacity:0.7;}
 .face-btn:hover{opacity:1;}
 .face-btn.on{opacity:1;color:rgb(var(--shelf));border-color:rgba(var(--shelf),0.8);background:rgba(var(--shelf),0.14);}
