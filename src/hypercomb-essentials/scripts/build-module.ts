@@ -492,10 +492,8 @@ const extractBeeDoc = (sourceText: string, sourcePath = ''): BeeDocEntry | null 
   const className = best.className
   const kind = best.kind as BeeDocEntry['kind']
 
-  // description — single-line or multi-line string literal
-  const descMatch = sourceText.match(
-    /(?:override\s+)?description\s*=\s*\n?\s*['"`]([^'"`]+)['"`]/
-  )
+  // description — single-line or multi-line string literal, escapes kept
+  const description = sourceDescription(sourceText) ?? ''
 
   // effects array
   const effectsMatch = sourceText.match(
@@ -548,7 +546,7 @@ const extractBeeDoc = (sourceText: string, sourcePath = ''): BeeDocEntry | null 
   return {
     className,
     kind,
-    description: descMatch?.[1]?.trim() ?? '',
+    description,
     effects,
     listens,
     emits,

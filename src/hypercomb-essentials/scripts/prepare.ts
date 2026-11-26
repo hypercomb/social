@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { basename, dirname, extname, join, resolve } from 'path'
 import ts from 'typescript'
 import { fileURLToPath } from 'url'
-import { effectSleeper, passiveQueen, viewSleeper } from './passive-queen.js'
+import { effectSleeper, passiveQueen, sourceDescription, viewSleeper } from './passive-queen.js'
 import { byCodeUnit } from './build-determinism.js'
 
 // -------------------------------------------------
@@ -669,7 +669,6 @@ else filesSkipped++
       .map(file => [relFrom(SRC_ROOT, file), readFileSync(file, 'utf8')]),
   )
   const COMMAND_RE = /readonly\s+command\s*=\s*['"]([^'"]+)['"]/
-  const DESCRIPTION_RE = /description\s*=\s*'([^']+)'|description\s*=\s*"([^"]+)"/
   const sleeperEntries: string[] = []
   const sleeping = new Set<string>()
   for (const file of sideEffectFiles.filter(f => !isPreload(f))) {
@@ -679,8 +678,7 @@ else filesSkipped++
     if (passiveQueen(rel, source, packageSources).passive) {
       const command = COMMAND_RE.exec(source)?.[1]
       if (!command) continue
-      const described = DESCRIPTION_RE.exec(source)
-      const description = described?.[1] ?? described?.[2] ?? command
+      const description = sourceDescription(source) ?? command
       sleeperEntries.push(`  { command: ${JSON.stringify(command)}, description: ${JSON.stringify(description)}, ${load} },`)
       sleeping.add(file)
       continue

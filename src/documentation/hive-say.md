@@ -83,6 +83,38 @@ a line sent over it waits for your Enter in exactly this way.
 Enter is taken only once a call has been on the line for a second, so an Enter
 you meant for your own line cannot run something that arrived under it.
 
+### The run preview: read it before you press Enter
+
+jwize, 2026-11-26: "a full screen view semi-transparent background so you can
+see the screen behind. The details in professional code formatted glory so you
+can see what the command line is going to execute with a clear description
+based on the behaviors."
+
+While a call waits, the run preview (`essentials/assistant/run-preview.view.ts`)
+draws it over the whole hive, the hive still visible behind it:
+
+- every line as code, numbered: the behaviour words lit, paths, signatures
+  (drawn short, whole on hover), strings and selections each in their own
+  ink, and the words a sentence throws away dimmed;
+- beside each line, the behaviour it will run and that behaviour's own
+  description, in your language; above, each behaviour the run uses once,
+  with how many lines use it;
+- a line the door will refuse is marked with the door's own reason, and a
+  word two behaviours claim is marked as a choice, before anything runs.
+
+Each line's reading is `commands/utterance/line-plan.ts`, which follows the
+door's own fork in the same order: a word that keeps its arguments, a slash
+word, a sentence read by the utterance reader, the structural grammar, or a
+sentence that names nothing (refused). Every verb is asked of core's machine
+admission with your grant, as the door asks it. So the preview shows what the
+door will do, including what you may not expect: `spotlight the history tile`
+also runs `history`, and `go to protocol` hands `go` the words `to protocol`.
+
+The answer is unchanged. While the command line has the keyboard it answers
+there; anywhere else the preview takes Enter (run, after the same one-second
+arming) and Esc (decline). Run and Decline buttons do the same. The command
+line stops listing the lines under itself while the preview shows them.
+
 ## Speaking as yourself
 
 `--participant` turns the gate off for a hive you drive alone: each sentence

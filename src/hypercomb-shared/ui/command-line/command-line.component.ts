@@ -1581,8 +1581,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   public readonly suggestions = computed<readonly string[]>(() => {
     // A call from outside lists its own lines, numbered, to be read. Nothing
     // in the list can be accepted: Enter answers the whole call.
+    // While the run preview (essentials run-preview.view.ts) draws the same
+    // lines over the hive, the list under the line would only repeat them.
     const external = this.#external()
-    if (external) return external.lines.map((line, i) => `${i + 1}. ${line}`)
+    if (external) return this.#runPreviewOpen() ? [] : external.lines.map((line, i) => `${i + 1}. ${line}`)
     if (this.shell?.suppressed()) return []
 
     // A pending utterance choice OWNS the dropdown: the claimants of an
@@ -2325,6 +2327,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#externalUnsub = EffectBus.on<ExternalAsk | null>(EXTERNAL_ASK, ask => {
       this.#showExternal(ask && typeof ask.id === 'string' ? ask : null)
     })
+    this.#runPreviewUnsub = EffectBus.on<{ open?: boolean }>('run-preview:open', payload => {
+      this.#runPreviewOpen.set(payload?.open === true)
+    })
 
     this.#remoteSubmitUnsub = EffectBus.on<RemoteSubmitRequest>(REMOTE_SUBMIT, ({ text, accept, complete }) => {
       accept?.()
@@ -2770,6 +2775,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   #commandSubmitUnsub?: () => void
   #remoteSubmitUnsub?: () => void
   #externalUnsub?: () => void
+  #runPreviewUnsub?: () => void
   #historyForgetUnsub?: () => void
   // Location segments (bracket stripped) at the last navigate event.
   #lastNavKey = ''
@@ -2887,6 +2893,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#commandSubmitUnsub?.()
     this.#remoteSubmitUnsub?.()
     this.#externalUnsub?.()
+    this.#runPreviewUnsub?.()
     this.#historyForgetUnsub?.()
     this.#voiceActiveUnsub?.()
     this.#pushToTalkUnsub?.()
@@ -2994,6 +3001,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   /** The call on the line, or null. Never persisted and never in the ring:
    *  the stance exists only while something from outside waits. */
   readonly #external = signal<ExternalAsk | null>(null)
+  /** The run preview is showing the call (`run-preview:open`, replayed). */
+  readonly #runPreviewOpen = signal(false)
   /** What the participant had on the line when a call took it over, given
    *  back when nothing waits any more. */
   #heldLine: string | null = null

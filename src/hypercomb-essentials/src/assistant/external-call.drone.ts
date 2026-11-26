@@ -364,3 +364,33 @@ export class ExternalCallDrone extends Drone {
 
 const _externalCall = new ExternalCallDrone()
 window.ioc.register('@diamondcoreprocessor.com/ExternalCallDrone', _externalCall)
+
+// THE RUN PREVIEW (run-preview.view.ts): every waiting call is also drawn over
+// the whole hive, as code, with what each line will do. This bee adds its tag
+// to the ShellSurfaceRegistry and defines it when the first call waits, so the
+// view is never on the boot path; the element upgrades in place and takes the
+// waiting ask from the bus's replay. The names are spelled here, as the view
+// spells them: importing even a constant would load the view at boot.
+const RUN_PREVIEW_SURFACE = 'hc-run-preview'
+const RUN_PREVIEW_OWNER = '@diamondcoreprocessor.com/RunPreviewView'
+
+;(window as { ioc?: { whenReady?: (k: string, cb: (v: { add(s: unknown): void }) => void) => void } })
+  .ioc?.whenReady?.('@hypercomb.social/ShellSurfaceRegistry', registry => {
+    try {
+      registry.add({ name: RUN_PREVIEW_SURFACE, owner: RUN_PREVIEW_OWNER, element: RUN_PREVIEW_SURFACE, order: 153 })
+    } catch {
+      // duplicate add (hot reload) — the mounted surface is already live
+    }
+  })
+
+let runPreview: Promise<void> | null = null
+EffectBus.on<ExternalAsk | null>(EXTERNAL_ASK, ask => {
+  if (!ask || typeof customElements === 'undefined' || customElements.get(RUN_PREVIEW_SURFACE)) return
+  runPreview ??= import('./run-preview.view.js').then(({ RunPreviewElement }) => {
+    if (!customElements.get(RUN_PREVIEW_SURFACE)) customElements.define(RUN_PREVIEW_SURFACE, RunPreviewElement)
+  }).catch((error: unknown) => {
+    // The line still holds the call; the next call tries the view again.
+    runPreview = null
+    console.warn('[external-call] the run preview did not load:', error)
+  })
+})

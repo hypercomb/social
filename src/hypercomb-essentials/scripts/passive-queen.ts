@@ -26,6 +26,21 @@
 // Deliberately strict and read from the source; a queen that fails it loads
 // exactly as before.
 
+/** THE DESCRIPTION A SOURCE DECLARES, as the string it is: `description = '…'`
+ *  in any quote, an escaped quote kept as the quote it stands for. The build
+ *  reads it from the source for a queen that sleeps (her stand-in shows it
+ *  until she wakes) and for every bee's doc. The old reading stopped at the
+ *  first quote of any kind, so `this tile\'s content` came out as `this
+ *  tile\` — four words (deposit, interest, contact, upgrade) showed a cut
+ *  sentence ending in a backslash (found by the run preview's audit,
+ *  2026-11-26). */
+export const sourceDescription = (source: string): string | undefined => {
+  const match = /(?:override\s+)?description\s*=\s*(['"`])((?:\\[\s\S]|(?!\1)[^\\])*)\1/.exec(source)
+  if (!match) return undefined
+  const text = match[2]!.replace(/\\(.)/g, '$1').trim()
+  return text || undefined
+}
+
 /** Does this queen offer herself to a machine? A false yes only keeps a
  *  queen awake, which is the safe direction. */
 export const declaresMachine = (source: string): boolean =>
