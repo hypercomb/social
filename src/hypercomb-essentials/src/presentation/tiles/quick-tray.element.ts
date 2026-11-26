@@ -110,6 +110,10 @@ const PEEK_MS = 4000
 /** A click's placement that has had no answer in this long comes back to the shelf. */
 const EJECT_TIMEOUT_MS = 8000
 const SIG_RE = /^[0-9a-f]{64}$/
+/** The shelf's tiles, in px a side: the size slider in the open panel sets it. */
+const ITEM_MIN = 24
+const ITEM_MAX = 72
+const ITEM_DEFAULT = 32
 
 type LineageLike = { explorerSegments?: () => readonly string[] }
 type OverlayLike = {
@@ -256,10 +260,10 @@ const STYLE = `
 .bar>.legend,.bar>.add,.bar>.tools{height:2rem;align-self:flex-start;}
 .bar>.add{flex:0 0 auto;}
 .items{flex:1 1 0;flex-wrap:wrap;align-content:flex-start;align-items:flex-start;gap:0.4rem;height:auto;
-  max-height:calc(3 * 2rem + 2 * 0.4rem);overflow-x:hidden;overflow-y:auto;scrollbar-width:thin;mask-image:none;-webkit-mask-image:none;}
-.items:empty{min-height:2rem;}
-.items .row{width:2rem;height:2rem;padding:0;gap:0;justify-content:center;transition:none;}
-.items .thumb,.items .glyph{width:1.7rem;height:1.7rem;}
+  max-height:calc(3 * var(--item,2rem) + 2 * 0.4rem);overflow-x:hidden;overflow-y:auto;scrollbar-width:thin;mask-image:none;-webkit-mask-image:none;}
+.items:empty{min-height:var(--item,2rem);}
+.items .row{width:var(--item,2rem);height:var(--item,2rem);padding:0;gap:0;justify-content:center;transition:none;}
+.items .thumb,.items .glyph{width:calc(var(--item,2rem) - 0.3rem);height:calc(var(--item,2rem) - 0.3rem);}
 .items .label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;}
 .items .remove{position:absolute;top:-0.35rem;right:-0.35rem;width:0.95rem;height:0.95rem;font-size:0.75rem;border-radius:50%;
   background:rgba(var(--hc-panel-pane,12,28,46),0.95);box-shadow:0 0 0 1px rgba(var(--shelf),0.55);transition:none;}
@@ -279,7 +283,9 @@ const STYLE = `
 /* THE RINGS: one line each — the name, then what it holds, cut to the line. */
 .rings{position:relative;max-height:16rem;overflow-y:auto;margin:0;padding:0.3rem 0 0.1rem;list-style:none;
   border-top:1px solid rgba(var(--shelf),0.25);}
-.faces{display:flex;gap:0.2rem;padding:0 0.2rem 0.3rem;}
+.faces{display:flex;align-items:center;gap:0.2rem;padding:0 0.2rem 0.3rem;}
+.size{display:inline-flex;align-items:center;gap:0.35rem;margin-left:auto;font-family:var(--hc-mono,system-ui);font-size:0.65rem;letter-spacing:0.1em;text-transform:uppercase;opacity:0.8;}
+.size input{width:8rem;margin:0;accent-color:rgb(var(--shelf));cursor:pointer;}
 .face-btn{appearance:none;border:1px solid rgba(var(--shelf),0.3);border-radius:var(--hc-radius-control,2px);background:none;color:inherit;
   font-family:var(--hc-mono,system-ui);font-size:0.65rem;letter-spacing:0.1em;text-transform:uppercase;padding:0.15rem 0.55rem;cursor:pointer;opacity:0.7;}
 .face-btn:hover{opacity:1;}
@@ -395,6 +401,8 @@ export class QuickTrayElement extends HTMLElement {
   #reach: 'local' | 'children' | 'global' = 'local'
   /** How the items show: the picture, the name, or both. Kept in `shelf:state`. */
   #face: 'image' | 'text' | 'both' = 'image'
+  /** How big the shelf's tiles are, px a side. Kept in `shelf:state`. */
+  #itemSize = ITEM_DEFAULT
   /** THE RINGS. The shelf is one of several named collections: the session's
    *  own (null, never stored) or a named ring (a context group, written
    *  through as rows come and go). A named ring that empties is removed,
@@ -1063,7 +1071,7 @@ export class QuickTrayElement extends HTMLElement {
     const search = esc(t('quick-tray.search', 'search'))
     const expandTip = esc(this.#expanded ? t('quick-tray.collapse', 'Close the rings') : t('quick-tray.expand', 'Open the rings'))
     this.#root.innerHTML = `<style>${STYLE}</style>
-      <section class="shelf face-${this.#face}${this.#expanded ? ' open' : ''}${this.#dragging ? ' dragging' : ''}" aria-label="${title}" data-consumes-wheel>
+      <section class="shelf face-${this.#face}${this.#expanded ? ' open' : ''}${this.#dragging ? ' dragging' : ''}" style="--item:${this.#itemSize}px" aria-label="${title}" data-consumes-wheel>
         <div class="bar">
           <span class="legend">${SHELF_ICON}<span class="word">${title}</span><span class="count">${this.#entries.length}</span></span>
           <input class="add" type="text" spellcheck="false" autocomplete="off" value="${esc(this.#filter)}" placeholder="${search}" aria-label="${search}">
@@ -1162,7 +1170,9 @@ export class QuickTrayElement extends HTMLElement {
       return `<button class="face-btn${this.#face === face ? ' on' : ''}" type="button" data-face="${face}" aria-pressed="${this.#face === face}">${word}</button>`
     }).join('')
     return `<ul class="rings" aria-label="${esc(t('quick-tray.rings', 'Named rings'))}">
-        <li class="faces" role="group" aria-label="${esc(t('quick-tray.face', 'Show the items as'))}">${faces}</li>${rows}
+        <li class="faces" role="group" aria-label="${esc(t('quick-tray.face', 'Show the items as'))}">${faces}
+          <label class="size">${esc(t('quick-tray.size', 'size'))}<input class="size-input" type="range" min="${ITEM_MIN}" max="${ITEM_MAX}" step="1" value="${this.#itemSize}" aria-label="${esc(t('quick-tray.size-tip', 'Size of the shelf\'s tiles'))}"></label>
+        </li>${rows}
         <li class="ring new"><button class="ring-new" type="button">${ADD_ICON}<span>${newTip}</span></button></li>
       </ul>`
   }
@@ -1215,6 +1225,12 @@ export class QuickTrayElement extends HTMLElement {
         this.#render()
       })
     }
+    const size = this.#root.querySelector<HTMLInputElement>('.size-input')
+    size?.addEventListener('input', () => {
+      this.#itemSize = Math.min(ITEM_MAX, Math.max(ITEM_MIN, Math.round(Number(size.value)) || ITEM_DEFAULT))
+      this.#root.querySelector<HTMLElement>('.shelf')?.style.setProperty('--item', `${this.#itemSize}px`)
+    })
+    size?.addEventListener('change', () => { void this.#keepState() })
     for (const button of this.#root.querySelectorAll<HTMLButtonElement>('.ring-name[data-ring]')) {
       button.addEventListener('click', () => { this.#renaming = button.dataset['ring'] ?? null; this.#render() })
     }
@@ -1325,7 +1341,7 @@ export class QuickTrayElement extends HTMLElement {
     const store = ioc()?.get?.(STORE_KEY) as StoreLike | undefined
     const pool = await store?.getPool?.(STATE_POOL)
     if (!pool || !store?.putPoolDoc) return
-    const record = { ...this.#stateExtra, folded: this.#folded, face: this.#face, pinned: [...this.#pinned], at: Date.now() }
+    const record = { ...this.#stateExtra, folded: this.#folded, face: this.#face, size: this.#itemSize, pinned: [...this.#pinned], at: Date.now() }
     const bytes = new TextEncoder().encode(JSON.stringify(record)).buffer as ArrayBuffer
     await store.putPoolDoc(pool, bytes, undefined, { keep: 'current' }).catch(() => undefined)
   }
@@ -1339,10 +1355,11 @@ export class QuickTrayElement extends HTMLElement {
       try {
         const bytes = await store.getPoolDoc(pool)
         if (!bytes) return
-        const record = JSON.parse(new TextDecoder().decode(bytes)) as { folded?: unknown; face?: unknown; pinned?: unknown } & Record<string, unknown>
-        const { folded: _f, face, labels: _l, pinned, at: _a, ...extra } = record
+        const record = JSON.parse(new TextDecoder().decode(bytes)) as { folded?: unknown; face?: unknown; size?: unknown; pinned?: unknown } & Record<string, unknown>
+        const { folded: _f, face, size, labels: _l, pinned, at: _a, ...extra } = record
         this.#stateExtra = extra
         if (face === 'image' || face === 'text' || face === 'both') this.#face = face
+        if (typeof size === 'number' && Number.isFinite(size)) this.#itemSize = Math.min(ITEM_MAX, Math.max(ITEM_MIN, Math.round(size)))
         if (Array.isArray(pinned)) for (const id of pinned) if (typeof id === 'string') this.#pinned.add(id)
         this.#render()
         if (this.#pressed) return

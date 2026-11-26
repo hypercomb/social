@@ -275,6 +275,8 @@
   "quick-tray.face-image": "image",
   "quick-tray.face-text": "text",
   "quick-tray.face-both": "both",
+  "quick-tray.size": "size",
+  "quick-tray.size-tip": "Size of the shelf's tiles",
   "quick-tray.rings": "Named rings",
   "quick-tray.ring-new": "name a new ring",
   "quick-tray.pin": "Pin: keep it when it empties",

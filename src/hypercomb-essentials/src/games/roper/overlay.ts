@@ -16,6 +16,7 @@
 
 import { RoperEngine, H, WEAPON_ORDER, WEAPON_META, type WeaponKind } from './engine.js'
 import { Renderer } from './renderer.js'
+import { isTyping } from '../../keyboard/typing-focus.js'
 
 const STYLE_ID = 'roper-overlay-styles'
 const Z = 2147483000
@@ -235,6 +236,7 @@ export class RoperOverlay {
   // ── input: keyboard (fully isolated) ─────────────────────
   #onKeyDown = (e: KeyboardEvent): void => {
     if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); this.#onClose(); return }
+    if (isTyping(e)) return
     if (e.ctrlKey || e.metaKey || e.altKey) return        // let OS/browser shortcuts pass
     const eng = this.#engine
     if (!eng) return
@@ -263,6 +265,7 @@ export class RoperOverlay {
   }
 
   #onKeyUp = (e: KeyboardEvent): void => {
+    if (isTyping(e)) return
     if (e.ctrlKey || e.metaKey || e.altKey) return
     e.stopImmediatePropagation()
     const eng = this.#engine

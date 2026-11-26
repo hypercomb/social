@@ -9,6 +9,8 @@
 // them — the picture, the title, the address, and where it is about to land —
 // and nothing is written until they say so.
 
+import { isTyping } from '../keyboard/typing-focus.js'
+
 const STYLE_ID = 'hc-link-card-styles'
 const OVERLAY_CLASS = 'hc-link-card'
 
@@ -72,7 +74,7 @@ export function confirmLinkDropCard(card: LinkDropCard): Promise<boolean> {
     }
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') { event.stopPropagation(); close(false) }
-      if (event.key === 'Enter') { event.stopPropagation(); close(true) }
+      if (event.key === 'Enter' && !isTyping(event)) { event.stopPropagation(); close(true) }
     }
 
     const panel = document.createElement('section')

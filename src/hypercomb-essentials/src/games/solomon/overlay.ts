@@ -17,6 +17,7 @@ import {
 import { Overworld, OverworldView, type NodeDef } from './overworld.js'
 import { Shaker, ParticleField, easeOutBack, ARCADE } from '../juice.js'
 import { GameAudio } from '../audio.js'
+import { isTyping } from '../../keyboard/typing-focus.js'
 
 const STYLE_ID = 'sol-overlay-styles'
 const Z = 2147483000
@@ -929,7 +930,7 @@ export class SolomonOverlay {
     if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); this.#onClose(); return }
     // While typing in a text field — the designer's name field, a resident
     // chat box — let the field have its keys instead of walking the player.
-    if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement) return
+    if (isTyping(e)) return
     // Let OS/browser shortcuts (Ctrl/Cmd/Alt combos) pass.
     if (e.ctrlKey || e.metaKey || e.altKey) return
     // Otherwise FULLY isolate — stop + preventDefault every plain key so none
@@ -992,7 +993,7 @@ export class SolomonOverlay {
   }
 
   #onKeyUp = (e: KeyboardEvent): void => {
-    if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement) return
+    if (isTyping(e)) return
     if (e.ctrlKey || e.metaKey || e.altKey) return
     e.stopImmediatePropagation()
     if (this.#mode === 'overworld') {

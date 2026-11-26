@@ -231,11 +231,9 @@
   </div>
 }
 
-<!-- THE ZOOM SLIDER — tile size, at the bottom left, just above the tags.
-     It reads the tags' live top (`--hc-tag-float-top`), so opening the tags
-     out pushes it up; with no tags it takes their place. -->
+<!-- THE ZOOM SLIDER — tile size, on the bottom band just left of undo. -->
 @if (!isMobile()) {
-  <div class="zoom-slider" [class.rail-left]="dockSide() === 'left'">
+  <div class="zoom-slider">
     <span class="mat-sym" aria-hidden="true">zoom_out</span>
     <input type="range" min="0" max="1000" step="1"
            [value]="zoomSliderValue()"
