@@ -36,6 +36,7 @@
 import { CHILD_SLOTS, isMetaEnvelope, isReferentField, lineageKey, metaPayloadOf } from '@hypercomb/core'
 import { readDeviceBinding, type DeviceBinding } from './device-binding'
 import { deviceSigner, type DeviceSigner } from './device-key'
+import { readKeyChain } from './device-invite'
 import { carryChain, heldOn, putIndex, signIndex, uploadAtom } from './device-owner'
 import { manageRecord, type ManageRecord } from './manage-record'
 import { readOwnerIndex } from './showcase-record'
@@ -59,6 +60,13 @@ export type ManagedPublishResult = {
 
 export type ManagedPublish = {
   publishRoot(lineage: string, layerSig: string): Promise<ManagedPublishResult>
+  /** Is this browser the card's owner's, and is `layerSig` the head the owner's signed index names for
+   *  `lineage` at this site door? Reads only — no key list carried, nothing signed or written — and
+   *  false on anything unknown. It proves a binding, not a live hand: a draft it lets home stays held. */
+  ownsThisCard(lineage: string, layerSig: string): Promise<boolean>
+  /** A `part` is read from the dependencies pool too, so a card may carry dependency drafts (essentials
+   *  site-drafts.ts asks this before it puts one on the card). */
+  readonly carriesDependencyParts: true
 }
 
 const SIG = /^[0-9a-f]{64}$/
@@ -77,11 +85,16 @@ const READ_BACK_PAUSE_MS = 1_500
 // declared parts (refs, a reference's bouquet, a page body and what it embeds),
 // a data blob's nested signatures (never a referent field — core edge-registry).
 // managed-publish.spec.ts holds it to the hive's on the same records.
-// Code (bees, dependencies) is never carried from here: a card that declares
-// code is refused on the way in (swarm-adopt), so a head that names some is
-// not this page's to push.
+// Code is never carried as a slot: a layer's `bees` and `dependencies` are not
+// walked, and a card that declares code is refused on the way in (swarm-adopt).
+// HOME, HELD (jwize, 2026-11-20): only the declared parts of a `module:drafts`
+// record travel — the owner's drafts, each part a `part`: it must be held (a
+// missing one refuses the publish, so a draft never ships incomplete) and it is
+// never walked into (a draft root's trunk and dependencies stay where they are).
+// The record goes on the card only through the owner's own Publish, and it
+// arrives held: nothing here makes a carried draft run anywhere.
 
-export type ClosureKind = 'layer' | 'resource' | 'page' | 'leaf'
+export type ClosureKind = 'layer' | 'resource' | 'page' | 'part' | 'leaf'
 
 const CHILD_SLOT_SET: ReadonlySet<string> = new Set(CHILD_SLOTS)
 const CODE_SLOTS: ReadonlySet<string> = new Set(['bees', 'dependencies'])
@@ -126,9 +139,27 @@ const envelopeChild = (record: Record<string, unknown>): [string, ClosureKind] |
   return [payload.sig, payload.kind === 'layer' ? 'layer' : 'resource']
 }
 
+/** A card's dependency drafts listing (essentials sharing/decoration-closure.ts, the same head): the
+ *  one part a `module:dependency-drafts` record names. Not JSON, so a walker from before dependency
+ *  drafts takes it for a leaf and never walks down through a draft root into its trunk. */
+const DEPENDENCY_DRAFTS_LISTING_HEAD = 'hypercomb module:dependency-drafts listing\n'
+
+/** The parts a listing names, each a `part` of its own; [] for any other bytes. */
+const listingParts = (bytes: Uint8Array): Array<[string, ClosureKind]> => {
+  if (bytes[0] !== DEPENDENCY_DRAFTS_LISTING_HEAD.charCodeAt(0)) return []
+  const text = decode(bytes)
+  if (!text.startsWith(DEPENDENCY_DRAFTS_LISTING_HEAD)) return []
+  try {
+    const refs = (JSON.parse(text.slice(DEPENDENCY_DRAFTS_LISTING_HEAD.length)) as { refs?: unknown })?.refs
+    return [...new Set((Array.isArray(refs) ? refs : []).map(sigOf).filter(Boolean))].map(sig => [sig, 'part'])
+  } catch { return [] }
+}
+
 /** What an atom names that must travel with it, and as what. */
 export const closureChildren = (kind: ClosureKind, bytes: Uint8Array): Array<[string, ClosureKind]> => {
   if (kind === 'leaf') return []
+  // A part is never walked into; a dependency drafts listing only names more parts.
+  if (kind === 'part') return listingParts(bytes)
   if (kind === 'page') {
     const text = decode(bytes)
     return text.includes('�') ? [] : pageRefs(text).map(sig => [sig, 'leaf'])
@@ -152,6 +183,8 @@ export const closureChildren = (kind: ClosureKind, bytes: Uint8Array): Array<[st
     // Identity only: no bytes stand behind a group's or a creation's signature.
     if (recordKind === 'group' || recordKind === 'creation') return []
     const refs = Array.isArray(record['refs']) ? record['refs'].map(sigOf).filter(Boolean) : []
+    // A card's drafts (essentials site-drafts.ts): bee drafts, and dependency drafts in a record of their own.
+    if (recordKind === 'module:drafts' || recordKind === 'module:dependency-drafts') return refs.map(sig => [sig, 'part'])
     if (refs.length) return refs.map(sig => [sig, 'leaf'])
     const payload = record['payload'] && typeof record['payload'] === 'object' ? record['payload'] as Record<string, unknown> : {}
     if (recordKind === 'reference') { const bouquet = sigOf(payload['requiredBouquet']); return bouquet ? [[bouquet, 'leaf']] : [] }
@@ -162,8 +195,9 @@ export const closureChildren = (kind: ClosureKind, bytes: Uint8Array): Array<[st
   return [...sigsDeep(record)].map(sig => [sig, 'leaf'])
 }
 
-/** Read this browser's copy of an atom by signature. Null when it holds none. */
-export type LocalBytes = (sig: string) => Promise<Uint8Array | null>
+/** Read this browser's copy of an atom by signature, told what the closure takes it for. Null when
+ *  it holds none. */
+export type LocalBytes = (sig: string, kind: ClosureKind) => Promise<Uint8Array | null>
 
 export type ClosurePlan = {
   /** What the host lacks and this browser holds, deepest first (`depth` from the root, 0) — a host
@@ -193,7 +227,7 @@ export const planClosure = async (root: string, local: LocalBytes, zone: string,
     await Promise.all(frontier.map(async ([sig, kind, depth]) => {
       if (await heldOn(zone, sig)) { held++; return }
       let bytes: Uint8Array | null = null
-      try { bytes = await local(sig) } catch { bytes = null }
+      try { bytes = await local(sig, kind) } catch { bytes = null }
       if (!bytes) { (kind === 'leaf' ? loose : missing).push(sig); return }
       put.push({ sig, bytes, depth })
       for (const [child, childKind] of closureChildren(kind, bytes)) {
@@ -213,13 +247,21 @@ export const planClosure = async (root: string, local: LocalBytes, zone: string,
 type LocalStore = {
   getLayerPoolBytes?: (sig: string) => Promise<Uint8Array | null>
   getResourceLocal?: (sig: string) => Promise<Blob | null>
+  /** A draft's module text: the parts of a `module:drafts` record are bees as well as layers. Read
+   *  for a `part` only: a sig a note, a data blob or a page happens to quote is never a module sent. */
+  getBeeBytes?: (sig: string) => Promise<Uint8Array | null>
+  /** A dependency draft's bundle: its parts sit in the dependencies pool. Read for a `part` only, after the bees pool. */
+  getDependencyBytes?: (sig: string) => Promise<Uint8Array | null>
 }
 
-const storeBytes: LocalBytes = async sig => {
+const storeBytes: LocalBytes = async (sig, kind) => {
   const store = (globalThis as { ioc?: { get?: <T>(key: string) => T | undefined } }).ioc?.get?.<LocalStore>('@hypercomb.social/Store')
   if (!store) return null
   try { const layer = await store.getLayerPoolBytes?.(sig); if (layer) return layer } catch { /* a resource, perhaps */ }
-  try { const blob = await store.getResourceLocal?.(sig); if (blob) return new Uint8Array(await blob.arrayBuffer()) } catch { /* held nowhere here */ }
+  try { const blob = await store.getResourceLocal?.(sig); if (blob) return new Uint8Array(await blob.arrayBuffer()) } catch { /* a module, perhaps */ }
+  if (kind !== 'part') return null
+  try { const bee = await store.getBeeBytes?.(sig); if (bee) return bee } catch { /* a dependency, perhaps */ }
+  try { const dependency = await store.getDependencyBytes?.(sig); if (dependency) return dependency } catch { /* held nowhere here */ }
   return null
 }
 
@@ -343,6 +385,37 @@ export const managedPublish = (deps: ManagedPublishDeps = {}): ManagedPublish =>
     return { ok: false, head, uploaded: plan.put.length, error: `${writes} took it, but ${siteDoor} does not show it yet; look again in a moment` }
   }
 
+  /** Is this browser's key still on the publisher's list? Read only: the
+   *  longest chain that verifies, at the write host and every host the
+   *  binding names (a host still serving a shorter one has not heard of the
+   *  latest change). A device taken off the list keeps its binding and its
+   *  key, so neither alone says it is still his. False when none can be read. */
+  const stillListed = async (zone: string, binding: DeviceBinding, pubkey: string): Promise<boolean> => {
+    let longest: { chain: readonly unknown[]; keys: readonly string[] } | null = null
+    for (const host of [...new Set([zone, ...binding.sources])]) {
+      const read = await readKeyChain(host, binding.anchor)
+      if (read && read !== 'none' && (!longest || read.chain.length > longest.chain.length)) longest = read
+    }
+    return !!longest && longest.keys.includes(pubkey)
+  }
+
+  const owns = async (lineage: string, layerSig: string): Promise<boolean> => {
+    const head = String(layerSig ?? '').trim().toLowerCase()
+    if (!SIG.test(head)) return false
+    const key = lineageKey(String(lineage ?? '').split('/').map(s => s.trim()).filter(Boolean))
+    if (!key || key.length > 200) return false
+    const record = recordOf()
+    const publisher = record?.publisher
+    const signer = signerOf()
+    if (!publisher || !signer) return false
+    const binding = await bindingOf()
+    if (!binding || binding.anchor !== publisher) return false
+    if (!await stillListed(record?.writes || siteDoorOf(), binding, signer.pubkey)) return false
+    const seen = await readOwnerIndex(siteDoorOf(), publisher)
+    if (!seen || seen === 'missing') return false
+    return String(rootsOf(seen.content)[key] ?? '').toLowerCase() === head
+  }
+
   let lane: Promise<unknown> = Promise.resolve()
   return {
     publishRoot: (lineage, layerSig) => {
@@ -350,6 +423,9 @@ export const managedPublish = (deps: ManagedPublishDeps = {}): ManagedPublish =>
       lane = next
       return next
     },
+    ownsThisCard: async (lineage, layerSig) => { try { return await owns(lineage, layerSig) } catch { return false } },
+    // A card's dependency drafts may ride: their bundles are read from the dependencies pool (storeBytes).
+    carriesDependencyParts: true,
   }
 }
 

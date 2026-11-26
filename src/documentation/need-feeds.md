@@ -197,23 +197,55 @@ the only host a fresh hive knows; see the first item below. No reachable host
 held a share for the names tried, so values and tiles are proven by the specs
 only, and `read <signature>` was not run live.
 
+### Reach: the model walks into another hive (2026-11-25)
+
+**Built, not yet published as a revision.** From a managed door alone a model
+could find a creation and open only its root. What changed:
+
+- **Depth.** Every child a published layer carries is a
+  `{meta:1, layer:<sig>, relation:'children'}` envelope. The reader
+  (`assistant/hive-tree-reader.ts` `layerOfSig`) awaits the hash-checked bytes
+  of a child or a cold head from the hosts and follows a layer envelope one
+  hop, so `read <signature>` lists named children at every depth and the
+  first read of a head in a fresh profile is a node, not raw bytes. Store
+  semantics are unchanged.
+- **The same hosts everywhere.** `networkHosts()` always includes the public
+  content hosts, and the zones a door's and its zone root's public
+  `community:hosts` name (one hop, members hash-checked, at most 16); the
+  explore view asks that same list.
+- **Found where, said to the broker.** Every tile `explore` lists, every
+  member and ledger head a `pool` read gives, and every showcase head is
+  remembered for the page with the hosts that named it
+  (`assistant/found-hosts.ts`) and handed to the content broker as a HINT
+  for this page (`hintDomainsForSig`): a later fetch of that signature asks
+  those hosts, but none is learned, persisted (`hc:known-domains`) or offered
+  as the signature's publisher (`getKnownDomains`); only the fetch that gets
+  its bytes learns a host. `take` names an adopt domain only when a found host
+  is one the broker already knows (`knownContentHosts()`, typically the one
+  whose bytes the walk just fetched); otherwise the adopt runs with no domain.
+  Attribution only: nothing is written or sent.
+- **Pictureless creations are found.** When a name's `pictures:` and `list:`
+  feeds are empty, `explore` matches the `host:publications` ledger and the
+  `host:offerings` members by molecule address (the last lineage segment,
+  folded and signed, compared to `sign(name)`), never by substring; such a tile
+  comes back `via: publication`.
+- **Publish writes the picture it can read.** The picture walk follows the
+  children envelopes of the sealed head, fetches a layer or properties document
+  that is not on this device by signature (hash-checked), and a branch it still
+  cannot read is named in the Publish receipt (`pictureGap`, a toast) instead of
+  silently publishing no `pictures:` entry. Owner's Publish only.
+
 ### Not yet
 
+- **Prefix names.** `explore honey` does not find `honey-garden`.
 - **`hypercomb.com` does not list pools until its worker is deployed.**
   Measured 2026-11-13: it answers any pool address with the site's own page
   (200, HTML), which reads as `no answer`, so a hive whose only host is the
   public fallback explores nothing. The cause and the fix are in
   `pools-across-hosts.md`, "The apex answers a pool at its address"; the fix
   is in the worker's source and waits for a deploy.
-- **`read <signature>` reaches only the hosts the store fetches from.** A tile
-  listed by a host the participant carries in `community:hosts` but the
-  content broker does not fetch from is named by `explore` and then answers
-  "no host this hive fetches from served it".
-- **The view asks the broker's hosts only.** It does not add `community:hosts`
-  or fall back to the public content host; the model's read does.
-- **Only pictured tiles are found.** Publish writes `pictures:<sign(name)>`
-  for a tile that wears a picture, at most 64 per publish. A public tile with
-  no picture is explorable only once its list is contributed.
+- **A branch published before 2026-11-25** may lack its `pictures:` entry
+  until its owner publishes it again.
 - **Page contributions** (`page:<base>`) are a third public share; a model has
   no read for them yet.
 - **The native host gathers none of these pools**, so it answers `empty`.

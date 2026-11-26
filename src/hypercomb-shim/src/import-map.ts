@@ -9,6 +9,7 @@
 // rather than a dependency; the two are expected to die, not to converge.
 
 import { Store } from '@hypercomb/runtime/store'
+import { heldDependencies, isHeldDependency } from '@hypercomb/runtime/held-dependencies'
 
 declare const __HC_PURE__: boolean
 
@@ -123,9 +124,17 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
     .filter((d): d is FileSystemDirectoryHandle => !!d)
   if (!depDirs.length) return imports
 
+  // WHAT THE BROOD IS HOLDING (held-dependencies.ts). A dependency draft sits
+  // in the pool beside the trunk's bundle for its namespace; no scan below may
+  // map it until a hand accepts it. Asked once, before either path.
+  const held = await heldDependencies()
+
   // Bag-discovery fast path. Iterate the pool (∪ legacy) once; the first
   // directory whose name is a 64-hex sig is the active bag.
   let bagPathSucceeded = false
+  // The bag's namespaces whose leaf the brood is holding: left out of the
+  // map, and filled by nothing else (see below).
+  const heldAliases = new Set<string>()
   try {
     // One pass: locate the active bag dir AND record the flat `<sig>.js`
     // leaf files present. We need both — the bag names the leaf sigs, but
@@ -173,12 +182,26 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
       const allLeavesPresent = valid.length > 0 && valid.every(e => flatNames.has(`${e.sig}.js`))
 
       if (allLeavesPresent) {
+        // A held leaf is NOT staleness: a trunk bag keeps every trunk
+        // dependency whatever the brood says (composeDependencies), so a
+        // bundle held as a stranger's, or a draft later shipped (carried
+        // home held, then committed into the trunk on another device), can be
+        // named here. Only that leaf is left out; the rest of the bag still
+        // maps. ITS NAMESPACE STAYS UNMAPPED: the trunk's bees were built
+        // against that bundle, and no other file in the pool is the trunk's —
+        // the first one listed for the alias could be the previous trunk's,
+        // or any stale copy. Held means it waits for a hand, as a held bee does.
         for (const entry of valid) {
           if (imports[entry.alias]) continue
+          if (isHeldDependency(held, entry.sig)) { heldAliases.add(entry.alias); continue }
           imports[entry.alias] = `${dependencyBasePath}/${entry.sig}`
           aliasSource.set(entry.alias, entry.sig)
         }
-        bagPathSucceeded = aliasSource.size > 0
+        for (const alias of aliasSource.keys()) heldAliases.delete(alias)
+        for (const alias of heldAliases) {
+          console.warn(`[resolveImportMap] ${alias} is held in the brood: this build's bundle for it waits for your hand, and what imports it does not load until you accept it`)
+        }
+        bagPathSucceeded = aliasSource.size > 0 || heldAliases.size > 0
       } else {
         console.warn('[resolveImportMap] dependency bag is stale (leaf sigs missing flat files) — falling back to flat scan')
         bagPathSucceeded = false
@@ -194,6 +217,7 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
   // to extract the namespace alias from the source-path comment. Same
   // pool ∪ legacy union; the alias-collision guard dedupes a leaf that
   // sits in both locations mid-drain.
+  // Never with a bag, not even for a namespace whose leaf is held (above).
   if (!bagPathSucceeded) {
     for (const depsDir of depDirs) {
       try {
@@ -207,6 +231,9 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
 
           const alias = firstLine.split(/\s+/)[1]
           if (!alias) continue
+          // Skipped before the alias is claimed, so the trunk's own file for
+          // the same namespace maps even when the held draft is listed first.
+          if (isHeldDependency(held, signature)) continue
 
           if (imports[alias]) {
             const existing = aliasSource.get(alias) ?? 'unknown'
@@ -226,6 +253,10 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
   // Cache the alias map for in-session reuse by DependencyLoader.
   // NOT consulted on the next boot — every cold boot re-derives from OPFS.
   ;(globalThis as any).__hypercombAliasMap = aliasSource
+  // The bag's namespaces held for a hand. The map stands even when they leave
+  // it empty: the loader must not read an empty map as "no map" and scan the
+  // pool, which would import the previous trunk's (or any stale) bundle.
+  ;(globalThis as any).__hypercombHeldAliases = heldAliases
 
   // A PAGE THE WORKER DOES NOT CONTROL — a hard reload, DevTools "bypass for
   // network", a browser without service workers. Nothing answers `/opfs/`

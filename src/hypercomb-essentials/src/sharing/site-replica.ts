@@ -27,9 +27,20 @@
 //
 // Services arrive through window.ioc (a module may not import the shell);
 // every function here takes them as arguments so a spec hands in its own.
+//
+// HOME, HELD (jwize, 2026-11-20): a card the owner published with drafts
+// (site-drafts.ts) carries them in one `module:drafts` decoration. When it
+// arrives here — a first adopt, or a newer card taken — and this browser is
+// the owner's (the publish port's read-only `ownsThisCard`), each draft is put
+// back HELD in the brood until a hand here accepts it (restoreDrafts). The
+// receipt remembers which drafts were settled here, so one dropped on this
+// device stays dropped.
 
+import { isSandboxDoor, type DraftRestoreOutcome, type ModuleDraftsProvider } from '@hypercomb/core'
 import { tileConvoId } from '../assistant/chat-thread.js'
 import { flattenLayerTree, type PlacementHistory } from '../history/layer-placement.js'
+import { isPublishedVisitorShell } from './behavior-enablement.js'
+import { readDependencyDraftsListing } from './decoration-closure.js'
 
 export const SITE_REPLICA_POOL = 'sites:replicas'
 /** SwarmAdopt's own receipt: adopted-root path → the publisher head folded
@@ -37,6 +48,12 @@ export const SITE_REPLICA_POOL = 'sites:replicas'
  *  a replica that was taken before this page kept receipts of its own. */
 const SWARM_RECEIPTS_KEY = 'hc:synced-publisher-roots'
 const SIG_RE = /^[0-9a-f]{64}$/
+/** The decoration a card's Publish carries the owner's drafts in (site-drafts.ts). */
+export const DRAFTS_KIND = 'module:drafts'
+/** The decoration it carries the owner's DEPENDENCY drafts in: a kind of its
+ *  own, so an owner device on the essentials from before them, which lists
+ *  and rewrites only `module:drafts`, never takes them off the card. */
+export const DEPENDENCY_DRAFTS_KIND = 'module:dependency-drafts'
 
 export const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 export const SWARM_ADOPT_KEY = '@diamondcoreprocessor.com/SwarmAdoptDrone'
@@ -78,10 +95,14 @@ export type AdoptLike = {
 }
 export type BrokerLike = {
   noteDomainsForSig?(sig: string, domains: string[]): void
-  adopt?(rootSig: string, opts?: { deepResources?: boolean; quiet?: boolean }): Promise<unknown>
+  /** Bytes by signature, hashed to it before they are returned (content-broker fetchBySig). */
+  fetchBySig?(sig: string, type: 'layer' | 'resource', timeoutMs?: number): Promise<Uint8Array | null>
+  adopt?(rootSig: string, opts?: { deepResources?: boolean; layersOnly?: boolean; quiet?: boolean }): Promise<unknown>
 }
 export type StoreLike = {
   getResource(sig: string): Promise<Blob | null>
+  /** This device's own copy only: never a host or network fetch. */
+  getResourceLocal?(sig: string): Promise<Blob | null>
   getPool?(meaning: string): Promise<FileSystemDirectoryHandle | null>
   /** The pool without creating it (a reader never makes a directory). */
   openPool?(meaning: string): Promise<FileSystemDirectoryHandle | null>
@@ -90,6 +111,11 @@ export type StoreLike = {
 }
 export type ManagedPublishLike = {
   publishRoot(lineage: string, layerSig: string): Promise<{ ok: boolean; error?: string; head?: string }>
+  /** Is this browser the card's owner's, and does his signed index name `layerSig` for `lineage`?
+   *  Reads only; false on anything unknown (hypercomb-shim managed-publish.ts). Absent: never. */
+  ownsThisCard?(lineage: string, layerSig: string): Promise<boolean>
+  /** It sends a dependency draft's bundles too (hypercomb-shim managed-publish.ts). Absent: never. */
+  readonly carriesDependencyParts?: boolean
 }
 
 export type ReplicaServices = {
@@ -98,6 +124,11 @@ export type ReplicaServices = {
   readonly adopt?: AdoptLike
   readonly broker?: BrokerLike
   readonly committer?: CommitterLike
+  /** Asked only whether this browser owns the card: the page's publish port,
+   *  or on the hive its own signed index (hive-take.ts). */
+  readonly publish?: Pick<ManagedPublishLike, 'ownsThisCard'>
+  /** The runtime's module drafts: carries a card's drafts and puts them back held. */
+  readonly drafts?: Pick<ModuleDraftsProvider, 'carry' | 'restore' | 'restoresDependencies'>
 }
 
 /** What the page record says (site-manage.view.ts siteManageRecord). */
@@ -117,10 +148,22 @@ export type ReplicaReceipt = {
   readonly past: readonly string[]
   /** When the receipt was written (ms) — bounds how long `past` means "lagging". */
   readonly at: number
+  /** The carried draft roots settled on this device (put back, already here,
+   *  or refused here): never put back again, so a draft dropped here stays
+   *  dropped. Absent on a receipt written before drafts travelled. */
+  readonly drafts?: readonly string[]
+  /** Carried draft roots read as over a build this device moved past: said
+   *  once, and never counted as known here, so a Publish from this device
+   *  keeps them on the card for the others. They are still tried again (a
+   *  build's layers held here never prove it ran here: an Update refused on
+   *  the shell's core keeps them), and one that comes home leaves this list. */
+  readonly behind?: readonly string[]
 }
 
 /** How many heads a receipt remembers moving on from. */
 const PAST_KEPT = 32
+/** How many settled draft roots a receipt remembers. */
+const DRAFTS_KEPT = 256
 /** How long a head the replica moved past still reads as the page record
  *  lagging behind (the worker's edge cache holds an index for seconds; a
  *  reload comes within minutes). After this, the same head named again is a
@@ -245,12 +288,18 @@ export async function readReceipt(store: StoreLike, lineage: string): Promise<Re
     const local = typeof value.local === 'string' && SIG_RE.test(value.local) ? value.local : null
     const past = Array.isArray(value.past) ? value.past.filter((s): s is string => typeof s === 'string' && SIG_RE.test(s)).slice(-PAST_KEPT) : []
     const at = typeof value.at === 'number' && Number.isFinite(value.at) ? value.at : 0
-    return { kind: 'site:replica', v: 1, lineage, published: value.published, local, past, at }
+    const sigList = (list: unknown): string[] => Array.isArray(list) ? list.filter((s): s is string => typeof s === 'string' && SIG_RE.test(s)).slice(-DRAFTS_KEPT) : []
+    const drafts = sigList(value.drafts), behind = sigList(value.behind)
+    return { kind: 'site:replica', v: 1, lineage, published: value.published, local, past, at, ...(drafts.length ? { drafts } : {}), ...(behind.length ? { behind } : {}) }
   } catch { return null }
 }
 
 /** Write the receipt: `published` is now what the replica stands on, and every
- *  head named in `left` (with the prior receipt's own) is one it moved past. */
+ *  head named in `left` (with the prior receipt's own) is one it moved past.
+ *  The drafts settled here are kept from the receipt already written unless
+ *  `drafts` names them: they are this device's, not the head's. `at` is when
+ *  the replica last moved (bounds `past`); a write that only settles drafts
+ *  keeps the prior receipt's, so it never reopens the lag window. */
 export async function writeReceipt(
   store: StoreLike,
   lineage: string,
@@ -258,11 +307,22 @@ export async function writeReceipt(
   local: string | null,
   prior: ReplicaReceipt | null = null,
   left: readonly (string | null | undefined)[] = [],
+  drafts?: readonly string[],
+  behind?: readonly string[],
+  at: number = Date.now(),
 ): Promise<ReplicaReceipt | null> {
   const moved = [...(prior?.past ?? []), prior?.published, ...left]
     .filter((s): s is string => typeof s === 'string' && SIG_RE.test(s) && s !== published)
   const past = [...new Set(moved.reverse())].reverse().slice(-PAST_KEPT)
-  const receipt: ReplicaReceipt = { kind: 'site:replica', v: 1, lineage, published, local, past, at: Date.now() }
+  const written = (drafts === undefined || behind === undefined) && !prior ? await readReceipt(store, lineage) : null
+  const kept = (list: readonly string[]): string[] => [...new Set(list.filter(s => SIG_RE.test(s)))].slice(-DRAFTS_KEPT)
+  const keptDrafts = kept(drafts ?? prior?.drafts ?? written?.drafts ?? [])
+  const keptBehind = kept(behind ?? prior?.behind ?? written?.behind ?? [])
+  const receipt: ReplicaReceipt = {
+    kind: 'site:replica', v: 1, lineage, published, local, past, at,
+    ...(keptDrafts.length ? { drafts: keptDrafts } : {}),
+    ...(keptBehind.length ? { behind: keptBehind } : {}),
+  }
   try {
     const pool = await store.getPool?.(SITE_REPLICA_POOL)
     if (!pool || !store.putPoolDoc) return null
@@ -332,7 +392,7 @@ const sourcesFor = (host: string, sources: readonly string[]): string[] => {
 }
 
 export type ReplicateOutcome =
-  | { readonly kind: 'replicated'; readonly receipt: ReplicaReceipt | null }
+  | { readonly kind: 'replicated'; readonly receipt: ReplicaReceipt | null; readonly drafts?: DraftsHome }
   | { readonly kind: 'refused'; readonly status: AdoptStatus | 'no-adopt' | 'failed'; readonly pending: boolean }
 
 /** Bring the published head in as the tile at /<lineage>: the ordinary adopt,
@@ -365,8 +425,224 @@ export async function replicate(
   }
   holdClosure(broker, site.head)
   const state = await readState(services, site)
-  const receipt = state.layer ? await writeReceipt(services.store, site.lineage, site.head, state.sig) : null
-  return { kind: 'replicated', receipt }
+  if (!state.layer) return { kind: 'replicated', receipt: null }
+  return { kind: 'replicated', ...(await landed(services, site, state.sig)) }
+}
+
+/**
+ * THE CARD IS HERE: write the receipt of the head it was taken from, then
+ * bring its drafts home (restoreDrafts) — after the receipt, so the card is
+ * here whatever its drafts do. An immediate adopt (replicate) and a deferred
+ * one that landed later (the managed page's #refresh, when replicate said
+ * `pending`) both arrive through here, so neither leaves the drafts behind.
+ */
+export async function landed(
+  services: ReplicaServices,
+  site: ReplicaSite & { head: string },
+  local: string | null,
+): Promise<{ receipt: ReplicaReceipt | null; drafts?: DraftsHome }> {
+  const receipt = await writeReceipt(services.store, site.lineage, site.head, local)
+  const drafts = receipt ? await restoreDrafts(services, site, await headLayer(services.store, site.head), receipt) : undefined
+  return { receipt, ...(drafts ? { drafts } : {}) }
+}
+
+/** The head's own layer as published, or null. */
+async function headLayer(store: StoreLike, head: string): Promise<ReplicaLayer | null> {
+  try {
+    const blob = await store.getResource(head)
+    const layer = blob ? JSON.parse(new TextDecoder().decode(new Uint8Array(await blob.arrayBuffer()))) as unknown : null
+    return layer && typeof layer === 'object' && !Array.isArray(layer) ? layer as ReplicaLayer : null
+  } catch { return null }
+}
+
+/** What bringing a card's drafts home did here: how many are held here now
+ *  (put back, or already here), how many wait for the same build, how many
+ *  did not come home yet and are tried again (`waiting`: a part not fetched,
+ *  a hold that did not land, a gate, a busy path), and how many failed the
+ *  checks here (`tampered`: settled, said once, never tried again). */
+export type DraftsHome = { readonly home: number; readonly otherBuild: number; readonly olderBuild?: number; readonly waiting?: number; readonly tampered?: number }
+
+/** How many drafts one card may carry; a record naming more is not read, so
+ *  the writer (site-drafts.ts recordOf) never names more. */
+export const DRAFTS_MAX = 64
+
+/** May drafts come home on this page? Fail closed: never on a sandbox door,
+ *  the published visitor shell, a read-only page or a visitor install; and
+ *  only when the publish port says this browser is the owner's and his signed
+ *  index names this head. Where the page stands (its door, its position) never
+ *  counts. */
+export async function draftsMayComeHome(services: ReplicaServices, site: ReplicaSite & { head: string }): Promise<boolean> {
+  try {
+    if (!pageMayHoldDrafts(services)) return false
+    return (await services.publish!.ownsThisCard!(site.lineage, site.head)) === true
+  } catch { return false }
+}
+
+/** The half of draftsMayComeHome that reads nothing: the page itself. Asked
+ *  before a card's decorations are fetched, so a visitor, a read-only page or
+ *  a page with no owner check never pays for the scan. */
+function pageMayHoldDrafts(services: ReplicaServices): boolean {
+  try {
+    if (isSandboxDoor() || isPublishedVisitorShell()) return false
+    const g = globalThis as { __HC_READONLY__?: unknown; __hcInstallIndex?: unknown }
+    if (g.__HC_READONLY__ === true || g.__hcInstallIndex) return false
+    return typeof services.publish?.ownsThisCard === 'function'
+  } catch { return false }
+}
+
+/** How many of a card's decorations are asked for at once while its drafts
+ *  record is looked for: the scan waits on a few rounds, never on one round
+ *  trip per decoration. */
+const DRAFTS_SCAN_LANE = 8
+
+type CarriedRecord = { refs: string[]; drafts: { root: string; layer: string }[] }
+
+/** The two drafts kinds a card's root may wear (site-drafts.ts). */
+const DRAFTS_KINDS: readonly string[] = [DRAFTS_KIND, DEPENDENCY_DRAFTS_KIND]
+
+/** A `module:drafts` (or `module:dependency-drafts`) record that holds
+ *  together, or null. Both list their drafts in `payload.drafts` (a
+ *  dependency drafts record as its listing reads, decoration-closure.ts); the
+ *  kind says which they are. */
+const carriedRecord = (value: unknown): CarriedRecord | null => {
+  if (!value || typeof value !== 'object') return null
+  const record = value as { kind?: unknown; refs?: unknown; payload?: { drafts?: unknown } }
+  if (!DRAFTS_KINDS.includes(record.kind as string) || !Array.isArray(record.refs)) return null
+  const refs = record.refs.map(s => String(s ?? ''))
+  if (refs.some(s => !SIG_RE.test(s))) return null
+  const listed = record.payload?.drafts
+  if (!Array.isArray(listed) || listed.length > DRAFTS_MAX) return null
+  const known = new Set(refs)
+  const drafts: { root: string; layer: string }[] = []
+  for (const entry of listed) {
+    const root = String((entry as { root?: unknown })?.root ?? ''), layer = String((entry as { layer?: unknown })?.layer ?? '')
+    if (!known.has(root) || !known.has(layer)) return null
+    drafts.push({ root, layer })
+  }
+  return { refs, drafts }
+}
+
+/**
+ * BRING THE CARD'S DRAFTS HOME, HELD. Only on the owner's own page
+ * (draftsMayComeHome); only drafts this device has not settled already (the
+ * receipt's `drafts`). Every byte is asked for by its signature and hashed to
+ * it (the broker's fetchBySig); the runtime then holds each draft in the brood
+ * before its bytes are written or its pick is made (module-drafts.ts
+ * restoreDraft). A draft that was put back, is already here, or a hand here
+ * refused is written into the receipt (one read as over a build this device
+ * moved past is noted as `behind`, and said once); every other one (over
+ * another build, `behind`, on a busy path, refused by a gate or not held) is
+ * tried again: on the next arrival, and on every load of the card while it is
+ * current (reconcile). Settling never moves the receipt's `at`. Never throws;
+ * undefined when nothing was tried.
+ */
+export async function restoreDrafts(
+  services: ReplicaServices,
+  site: ReplicaSite & { head: string },
+  layer: ReplicaLayer | null,
+  receipt: ReplicaReceipt,
+  options: { readonly local?: boolean } = {},
+): Promise<DraftsHome | undefined> {
+  try {
+    const slot = layer?.['decorations']
+    // Newest first: the drafts record is written at the END of the slot (it is
+    // taken off and appended again on every change, decoration-manifest.ts
+    // writeDecoration), so it is read first, however many the root wears.
+    const sigs = Array.isArray(slot) ? slot.map(s => String(s ?? '')).filter(s => SIG_RE.test(s)).reverse() : []
+    if (!sigs.length) return undefined
+    const drafts = services.drafts
+    const broker = services.broker
+    if (typeof drafts?.restore !== 'function' || typeof broker?.fetchBySig !== 'function') return undefined
+    // A page that may never hold drafts fetches none of the card to find out.
+    if (!pageMayHoldDrafts(services)) return undefined
+    const bytes = async (sig: string): Promise<Uint8Array | null> => {
+      try { return (await broker.fetchBySig!(sig, 'resource')) ?? null } catch { return null }
+    }
+    // On a load of a card already here (`local`), its decorations are read
+    // from this device only: a load never waits on the network to learn the
+    // card carries no drafts. What is not here yet is read on a later load.
+    const store = services.store
+    const here = async (sig: string): Promise<Uint8Array | null> => {
+      if (typeof store.getResourceLocal !== 'function') return null
+      try {
+        const blob = await store.getResourceLocal(sig)
+        return blob ? new Uint8Array(await blob.arrayBuffer()) : null
+      } catch { return null }
+    }
+    const decoration = options.local && typeof store.getResourceLocal === 'function' ? here : bytes
+    // Dependency drafts are looked for only by a runtime that puts them back:
+    // an older one would answer `tampered`, which settles. Not sent, they are
+    // not settled either, and come home once the runtime can.
+    const wanted = drafts.restoresDependencies === true ? DRAFTS_KINDS : [DRAFTS_KIND]
+    const read = (decoration: (sig: string) => Promise<Uint8Array | null>) => async (sig: string): Promise<{ kind: string; carried: CarriedRecord | null } | null> => {
+      const held = await decoration(sig)
+      if (!held) return null
+      let parsed: unknown
+      try { parsed = JSON.parse(new TextDecoder().decode(held)) } catch { return null }
+      const kind = (parsed as { kind?: unknown })?.kind
+      if (typeof kind !== 'string' || !wanted.includes(kind)) return null
+      if (kind !== DEPENDENCY_DRAFTS_KIND) return { kind, carried: carriedRecord(parsed) }
+      // Dependency drafts sit in the one resource the decoration names, its
+      // listing (decoration-closure.ts): read the same way the record is.
+      const listingSig = String((parsed as { payload?: { listing?: unknown } })?.payload?.listing ?? '')
+      const listing = SIG_RE.test(listingSig) ? readDependencyDraftsListing(await decoration(listingSig)) : null
+      return { kind, carried: listing ? carriedRecord({ kind, refs: listing.refs, payload: { drafts: listing.drafts } }) : null }
+    }
+    // A few at a time, newest first within each round: the newest record of
+    // each kind found is the one read, as one at a time would read it.
+    // Once a record is found, the rest of the slot is read from this device
+    // only: a card with bee drafts and no dependency drafts (every card today)
+    // never fetches its whole root to learn that, as PR-201's scan stopped at
+    // the first. One not here yet is read on a later load, as `local` reads.
+    const newest = new Map<string, CarriedRecord | null>()
+    for (let at = 0; at < sigs.length && newest.size < wanted.length; at += DRAFTS_SCAN_LANE) {
+      const reader = read(newest.size ? here : decoration)
+      for (const found of await Promise.all(sigs.slice(at, at + DRAFTS_SCAN_LANE).map(reader))) {
+        if (found && !newest.has(found.kind)) newest.set(found.kind, found.carried)
+      }
+    }
+    // Bee drafts first, as the kinds are listed.
+    const records = wanted.map(kind => newest.get(kind)).filter((record): record is CarriedRecord => !!record)
+    if (!records.length) return undefined
+    const carried: CarriedRecord = {
+      refs: [...new Set(records.flatMap(record => record.refs))],
+      drafts: records.flatMap(record => record.drafts),
+    }
+    const settled = new Set(receipt.drafts ?? [])
+    const behind = receipt.behind ?? []
+    const owed = carried.drafts.filter(draft => !settled.has(draft.root))
+    if (!owed.length) return undefined
+    // Asked only once something is owed: the record itself is the card's
+    // content, fetched as any part of it is; nothing is written before this.
+    if (!(await draftsMayComeHome(services, site))) return undefined
+    const outcomes = await drafts.restore({ refs: carried.refs, drafts: owed }, bytes, site.lineage)
+    // A draft that fails the checks here (`tampered`) fails them the same way
+    // on every try, for this build: it settles, so it is said once and never
+    // fetched or owner-checked again.
+    const settles = (outcome: DraftRestoreOutcome): boolean => outcome === 'applied' || outcome === 'present' || outcome === 'refused-here' || outcome === 'tampered'
+    const now = outcomes.filter(o => settles(o.outcome)).map(o => o.root)
+    // Said once: a root already noted behind is not told again.
+    const passed = outcomes.filter(o => o.outcome === 'older-build' && !behind.includes(o.root)).map(o => o.root)
+    if (now.length || passed.length) {
+      // Read again: the restore waited on the network, and a Publish here or
+      // another tab may have moved the receipt since. Only the drafts are
+      // added to what is written now; where the replica stands is never put back.
+      const latest = await readReceipt(services.store, site.lineage) ?? receipt
+      const latestBehind = latest.behind ?? []
+      const settledNow = [...(latest.drafts ?? []), ...now]
+      await writeReceipt(services.store, site.lineage, latest.published, latest.local, latest, [],
+        settledNow, [...latestBehind.filter(root => !settledNow.includes(root)), ...passed.filter(root => !latestBehind.includes(root))], latest.at)
+    }
+    const waiting = outcomes.filter(o => o.outcome === 'incomplete' || o.outcome === 'unheld' || o.outcome === 'gate' || o.outcome === 'path-busy').length
+    const tampered = outcomes.filter(o => o.outcome === 'tampered').length
+    return {
+      home: outcomes.filter(o => o.outcome === 'applied' || o.outcome === 'present').length,
+      otherBuild: outcomes.filter(o => o.outcome === 'other-build').length,
+      ...(passed.length ? { olderBuild: passed.length } : {}),
+      ...(waiting ? { waiting } : {}),
+      ...(tampered ? { tampered } : {}),
+    }
+  } catch { return undefined }
 }
 
 /** Hold the head's whole closure on this device (page html, card data, theme,
@@ -375,7 +651,7 @@ function holdClosure(broker: BrokerLike | undefined, head: string): void {
   try { void broker?.adopt?.(head, { deepResources: true, quiet: true })?.catch?.(() => { /* streams on demand */ }) } catch { /* streams on demand */ }
 }
 
-export type TakeOutcome = { readonly ok: true; readonly sig: string; readonly receipt: ReplicaReceipt | null } | { readonly ok: false; readonly error: string }
+export type TakeOutcome = { readonly ok: true; readonly sig: string; readonly receipt: ReplicaReceipt | null; readonly drafts?: DraftsHome } | { readonly ok: false; readonly error: string }
 
 /** Replace the replica with the published head — the whole tree, the card and
  *  every page under it, re-homed at the site's route the way the first adopt
@@ -424,17 +700,21 @@ export async function takePublished(
   try { void (window as { ioc?: { get?: <T>(k: string) => T | undefined } }).ioc?.get?.<{ onNewLayer?: () => Promise<void> }>(CURSOR_KEY)?.onNewLayer?.() } catch { /* best-effort */ }
   const prior = await readReceipt(store, site.lineage)
   const receipt = await writeReceipt(store, site.lineage, site.head, sig, prior)
-  return { ok: true, sig, receipt }
+  // After the receipt: the newer card is taken whatever its drafts do.
+  const drafts = receipt ? await restoreDrafts(services, site, layer, receipt) : undefined
+  return { ok: true, sig, receipt, ...(drafts ? { drafts } : {}) }
 }
 
 export type ReconcileOutcome =
   | { readonly kind: 'none' }
-  | { readonly kind: 'current' }
-  | { readonly kind: 'replicated' }
+  | { readonly kind: 'current'; readonly drafts?: DraftsHome }
+  | { readonly kind: 'replicated'; readonly drafts?: DraftsHome }
   | { readonly kind: 'refused'; readonly status: string; readonly pending: boolean }
-  | { readonly kind: 'taken' }
+  | { readonly kind: 'taken'; readonly drafts?: DraftsHome }
   | { readonly kind: 'take-failed'; readonly error: string }
   | { readonly kind: 'choice' }
+
+const current = (drafts: DraftsHome | undefined): ReconcileOutcome => ({ kind: 'current', ...(drafts ? { drafts } : {}) })
 
 /** The one decision made on every load (see the table at the top). */
 export async function reconcile(
@@ -447,7 +727,7 @@ export async function reconcile(
   const state = await readState(services, site)
   if (!state.layer) {
     const done = await replicate(services, { ...site, head }, where)
-    return done.kind === 'replicated' ? { kind: 'replicated' } : { kind: 'refused', status: done.status, pending: done.pending }
+    return done.kind === 'replicated' ? { kind: 'replicated', ...(done.drafts ? { drafts: done.drafts } : {}) } : { kind: 'refused', status: done.status, pending: done.pending }
   }
   const receipt = state.receipt
   if (!receipt) {
@@ -455,30 +735,37 @@ export async function reconcile(
     // head it came from. The same head → the replica is that head's, as it is
     // now. Anything else → edits cannot be ruled out: the owner chooses.
     if (swarmReceipt(site.lineage) === head) {
-      await writeReceipt(services.store, site.lineage, head, state.sig)
-      return { kind: 'current' }
+      const written = await writeReceipt(services.store, site.lineage, head, state.sig)
+      return current(written ? await restoreDrafts(services, { ...site, head }, await headLayer(services.store, head), written, { local: true }) : undefined)
     }
     return { kind: 'choice' }
   }
-  if (receipt.published === head || lagging(receipt, head)) return { kind: 'current' }
+  // The card is current: drafts it carries that did not settle here (another
+  // build until Update all, a fetch that failed, a hold that did not land)
+  // are tried again now, not only when a newer card arrives.
+  if (receipt.published === head) return current(await restoreDrafts(services, { ...site, head }, await headLayer(services.store, head), receipt, { local: true }))
+  if (lagging(receipt, head)) return { kind: 'current' }
   if (receipt.local && receipt.local === state.sig) {
     const taken = await takePublished(services, { ...site, head }, where, { marker: state.marker })
     // An edit landed while the newer card was fetched: never over it; the owner chooses.
     if (!taken.ok && taken.error === 'edited') return { kind: 'choice' }
-    return taken.ok ? { kind: 'taken' } : { kind: 'take-failed', error: taken.error }
+    return taken.ok ? { kind: 'taken', ...(taken.drafts ? { drafts: taken.drafts } : {}) } : { kind: 'take-failed', error: taken.error }
   }
   return { kind: 'choice' }
 }
 
 /** A publish from this page went live: the replica now stands on `published`
  *  as it is (`local`), and the head the page record still names is one it
- *  moved past — so a reload whose record lags never takes the old card back. */
+ *  moved past — so a reload whose record lags never takes the old card back.
+ *  The drafts this device's own Publish carried (`carried`: their roots) are
+ *  settled here, so one dropped here after the publish stays dropped. */
 export async function notePublished(
   store: StoreLike,
   site: ReplicaSite,
   published: string,
   local: string,
+  carried: readonly string[] = [],
 ): Promise<ReplicaReceipt | null> {
   const prior = await readReceipt(store, site.lineage)
-  return writeReceipt(store, site.lineage, published, local, prior, [site.head])
+  return writeReceipt(store, site.lineage, published, local, prior, [site.head], [...(prior?.drafts ?? []), ...carried])
 }

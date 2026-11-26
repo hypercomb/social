@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   foreignReads,
+  formatHypercombObservationReceipt,
   parseHypercombObservationGrammars,
   type HypercombObservationReceipt,
   type HypercombRead,
@@ -132,5 +133,21 @@ describe('reads that carried someone else\'s words', () => {
   it('a failed read carried nothing', () => {
     const failed: HypercombRead = { kind: 'node', read: { ok: false, root: '/theirs/note', code: 'not-found' } }
     expect(run(['/read /theirs/note'], [failed]).grammars).toEqual([])
+  })
+
+  it('host:packages is said to be an install pool listed by markers, not an empty set', () => {
+    const plan = parseHypercombObservationGrammars(['/pool host:packages'], [])
+    const pool: HypercombRead = {
+      kind: 'pool',
+      read: {
+        ok: true, root: 'pool host:packages', meaning: 'host:packages', address: MINE,
+        hosts: [{ host: 'hypercomb.com', state: 'silent' }],
+        members: [], total: 0, documents: [], truncated: false,
+      },
+    }
+    const text = formatHypercombObservationReceipt({ results: [{ grammar: plan.observations[0]!.grammar, ...pool }], snapshots: [], signatures: [] })
+    const note = String(JSON.parse(text).observations[0].note)
+    expect(note).toContain('INSTALL pool, not a set of signatures')
+    expect(note).toContain('8-digit markers')
   })
 })

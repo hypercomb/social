@@ -6,7 +6,7 @@ vi.mock('../files/files-attachment.js', () => ({
   listAttachments: async (segments: readonly string[]) => attachments.at.get(segments.join('/')) ?? [],
 }))
 
-import { FIND_WALK_NODES, HypercombHiveTreeReader } from './hive-tree-reader.js'
+import { FIND_WALK_NODES, HypercombHiveTreeReader, READ_FOLLOW_FETCHES, READ_FOLLOW_MS } from './hive-tree-reader.js'
 import type { CurrentLayerRef, LayerContent } from '../history/history.service.js'
 import { MAX_RECORD_DEPTH } from '../search/hive-search.js'
 
@@ -1359,5 +1359,158 @@ describe('a find whose matches outrun its limit says so', () => {
     const within = await fx.reader.find('small-5', [], { maxNodes: 48 })
     expect(within).toMatchObject({ ok: true, truncated: true, unfinished: ['/huge'] })
     expect(within).not.toHaveProperty('moreMatches')
+  })
+})
+
+// THE DEPTH WALL (reach A1, A2, 2026-11-25): every child a published hive
+// carries is the signature of a `{meta:1, layer, relation:'children'}`
+// envelope, and on a fresh device none of it is held — the history service
+// answers null and only starts a background heal.
+describe('a foreign hive read past its root', () => {
+  const encode = (value: unknown): Uint8Array => new TextEncoder().encode(JSON.stringify(value))
+  const sha = async (bytes: Uint8Array): Promise<string> => {
+    const digest = await crypto.subtle.digest('SHA-256', bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
+    return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('')
+  }
+  const remoteHive = async () => {
+    const host = new Map<string, Uint8Array>()
+    const put = async (value: unknown): Promise<string> => {
+      const bytes = encode(value)
+      const key = await sha(bytes)
+      host.set(key, bytes)
+      return key
+    }
+    const hosting = await put({ name: 'hosting', children: [] })
+    const information = await put({ name: 'information' })
+    const hostingEnvelope = await put({ meta: 1, layer: hosting, relation: 'children' })
+    const informationEnvelope = await put({ meta: 1, layer: information, relation: 'children' })
+    const head = await put({ name: 'hyperdex', children: [hostingEnvelope, informationEnvelope] })
+    const getLayerBySig = vi.fn(async (_: string): Promise<LayerContent | null> => null)
+    const fetchLayerFromHost = vi.fn(async (signature: string, _options?: { bypassMissWindow?: boolean }) => host.get(signature) ?? null)
+    const store = {
+      getResource: vi.fn(async (_: string): Promise<Blob | null> => null),
+      getLayerPoolBytes: vi.fn(async (_: string): Promise<Uint8Array | null> => null),
+      getResourceLocal: vi.fn(async (_: string): Promise<Blob | null> => null),
+      fetchLayerFromHost,
+    }
+    const services = new Map<string, unknown>([
+      [HISTORY, { getLayerBySig, treeEpoch: () => 1 }],
+      [STORE, store],
+    ])
+    const reader = new HypercombHiveTreeReader(<T>(key: string): T | undefined => services.get(key) as T | undefined)
+    return { reader, host, put, store, getLayerBySig, fetchLayerFromHost, head, hosting, information, hostingEnvelope, informationEnvelope }
+  }
+
+  it('awaits a cold head from the hosts and names each child through its envelope', async () => {
+    const hive = await remoteHive()
+    const read = await hive.reader.readNodeBySig(hive.head, { maxBytes: 8_000 })
+    expect(read).toMatchObject({
+      ok: true, root: hive.head, name: 'hyperdex', layerSig: hive.head,
+      children: [{ name: 'hosting', sig: hive.hostingEnvelope }, { name: 'information', sig: hive.informationEnvelope }],
+    })
+    expect(read.ok && read.unresolved).toBeUndefined()
+    // The same SHA-256-gated fetch a strict history read awaits, past a render miss window.
+    expect(hive.fetchLayerFromHost).toHaveBeenCalledWith(hive.head, { bypassMissWindow: true })
+  })
+
+  it('reads a cold head as a node when the history service has not warmed it (A2)', async () => {
+    const hive = await remoteHive()
+    const read = await hive.reader.readNodeBySig(hive.head, { maxBytes: 8_000, withContent: true })
+    expect(hive.getLayerBySig).toHaveBeenCalledWith(hive.head)
+    expect(read).toMatchObject({ ok: true, name: 'hyperdex' })
+    expect(read.ok && read.content).not.toHaveProperty('children')
+  })
+
+  it('reads a children envelope as the layer it declares, one hop and no further', async () => {
+    const hive = await remoteHive()
+    expect(await hive.reader.readNodeBySig(hive.hostingEnvelope, { maxBytes: 8_000 }))
+      .toMatchObject({ ok: true, root: hive.hostingEnvelope, name: 'hosting', children: [] })
+    // An envelope that names another envelope is not followed past the first hop.
+    const twice = await hive.put({ meta: 1, layer: hive.hostingEnvelope, relation: 'children' })
+    expect(await hive.reader.readNodeBySig(twice, { maxBytes: 8_000 })).toMatchObject({ ok: false, code: 'not-found' })
+  })
+
+  it('takes no byte that fails its hash: the envelope is not-found and the parent lists it unresolved', async () => {
+    const hive = await remoteHive()
+    hive.host.set(hive.hosting, encode({ name: 'forged', children: [] }))
+    expect(await hive.reader.readNodeBySig(hive.hostingEnvelope, { maxBytes: 8_000 })).toMatchObject({ ok: false, code: 'not-found' })
+    const parent = await hive.reader.readNodeBySig(hive.head, { maxBytes: 8_000 })
+    expect(parent).toMatchObject({ ok: true, children: [{ name: 'information', sig: hive.informationEnvelope }], unresolved: [hive.hostingEnvelope] })
+  })
+
+  // REVIEW 2026-11-25: a read waits on the hosts within ONE allowance — a
+  // count of fetches, inner hops included, and one deadline — and its signal
+  // ends a fetch in progress. A child is asked as a child: it joins the heal
+  // its history read started and keeps the miss window, never re-dials past it.
+  const wideHive = async (children: number) => {
+    const hive = await remoteHive()
+    const envelopes: string[] = []
+    for (let i = 0; i < children; i++) {
+      const layer = await hive.put({ name: `child-${i}` })
+      envelopes.push(await hive.put({ meta: 1, layer, relation: 'children' }))
+    }
+    const head = await hive.put({ name: 'wide', children: envelopes })
+    return { hive, head, envelopes }
+  }
+
+  it('counts every host fetch of one read, inner hops too, and asks a child without re-dialing past its miss window', async () => {
+    const { hive, head } = await wideHive(40)
+    const read = await hive.reader.readNodeBySig(head, { maxBytes: 64_000 })
+    expect(read.ok).toBe(true)
+    expect(hive.fetchLayerFromHost.mock.calls.length).toBeLessThanOrEqual(READ_FOLLOW_FETCHES)
+    expect(read.ok && (read.children.length + (read.unresolved?.length ?? 0))).toBe(40)
+    for (const [signature, options] of hive.fetchLayerFromHost.mock.calls) {
+      if (signature !== head) expect(options).toBeUndefined()
+    }
+  })
+
+  it('answers at its deadline when no host answers for the children', async () => {
+    const { hive, head } = await wideHive(40)
+    const served = hive.fetchLayerFromHost.getMockImplementation()!
+    hive.fetchLayerFromHost.mockImplementation(async (signature: string, options?: { bypassMissWindow?: boolean }) =>
+      signature === head ? served(signature, options) : new Promise<Uint8Array | null>(() => void 0))
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      let settled: Awaited<ReturnType<typeof hive.reader.readNodeBySig>> | undefined
+      void hive.reader.readNodeBySig(head, { maxBytes: 64_000 }).then(read => { settled = read })
+      await vi.advanceTimersByTimeAsync(READ_FOLLOW_MS + 1_000)
+      await vi.waitFor(() => expect(settled).toBeDefined())
+      expect(settled).toMatchObject({ ok: true, name: 'wide' })
+      expect(settled!.ok && settled!.unresolved?.length).toBe(40)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('a stopped read ends the fetch it is waiting on', async () => {
+    const { hive, head } = await wideHive(4)
+    const served = hive.fetchLayerFromHost.getMockImplementation()!
+    hive.fetchLayerFromHost.mockImplementation(async (signature: string, options?: { bypassMissWindow?: boolean }) =>
+      signature === head ? served(signature, options) : new Promise<Uint8Array | null>(() => void 0))
+    const stop = new AbortController()
+    const read = hive.reader.readNodeBySig(head, { maxBytes: 64_000, signal: stop.signal })
+    await vi.waitFor(() => expect(hive.fetchLayerFromHost.mock.calls.length).toBeGreaterThan(1))
+    stop.abort()
+    await expect(read).rejects.toMatchObject({ name: 'AbortError' })
+  }, 2_000)
+
+  it('opens a layer envelope as its layer by bytes, and a resource envelope still as its picture', async () => {
+    const hive = await remoteHive()
+    // The resource fetch already asked the hosts and keeps the envelope's bytes here.
+    hive.store.getResourceLocal.mockImplementation(async (signature: string) => {
+      const bytes = hive.host.get(signature)
+      return bytes ? new Blob([new Uint8Array(bytes)]) : null
+    })
+    const opened = await hive.reader.readBytesBySig(hive.hostingEnvelope)
+    expect(opened).toMatchObject({ ok: true, sig: hive.hostingEnvelope, of: 'resource', type: 'application/json' })
+    expect(opened.ok && JSON.parse(opened.text ?? '')).toEqual({ name: 'hosting', children: [] })
+
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0])
+    const pictureSig = await sha(png)
+    const pictureEnvelope = await hive.put({ meta: 1, resource: pictureSig, relation: 'image' })
+    hive.store.getResource.mockImplementation(async (signature: string) =>
+      signature === pictureEnvelope ? new Blob([png], { type: 'image/png' }) : null)
+    expect(await hive.reader.readNodeBySig(pictureEnvelope, { maxBytes: 8_000 })).toMatchObject({ ok: false, code: 'not-found' })
+    const picture = await hive.reader.readBytesBySig(pictureEnvelope)
+    expect(picture).toMatchObject({ ok: true, of: 'resource', size: png.byteLength })
+    expect(picture.ok && picture.text).toBeUndefined()
   })
 })

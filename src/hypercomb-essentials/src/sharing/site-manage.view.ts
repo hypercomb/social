@@ -34,6 +34,12 @@
 // opens a conversation of the revision in hand, and opening another revision
 // while the chat is up moves the chat to that revision's conversation.
 //
+// HOME, HELD (jwize, 2026-11-20): Publish carries the owner's code drafts
+// with the card (site-drafts.ts), so the bar offers Publish when the drafts
+// here are not the ones the card carries, even with no other change; on his
+// other devices they arrive held (site-replica.ts restoreDrafts), and the bar
+// says how many came home.
+//
 // A dependency: it exports the element and registers nothing. The bee beside
 // it (site-manage.drone.ts) defines it and adds it to the shell, only on a
 // page that carries the record.
@@ -41,7 +47,7 @@
 // MIRRORED: hypercomb-shim/src/bootstrap/manage-record.ts reads the same record
 // (a module may not import the shim). Every field is untrusted page text.
 
-import { EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, requestConfirm, type I18nProvider, type InstallProvider } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, MODULE_DRAFTS_IOC_KEY, requestConfirm, type I18nProvider, type InstallProvider, type ModuleDraftsProvider } from '@hypercomb/core'
 import { FRAME_MAX_ONE, versionFrame, type FrameReader, type FrameLayer } from '../history/revision-viewer.model.js'
 import { askFrame, type FrameReport } from '../history/frame-watch.js'
 // Where an offered update's bytes are asked for lives in its own file, so a
@@ -50,10 +56,11 @@ import { managedSiteZone, updateSources } from './update-sources.js'
 import { managedRecordText } from './managed-record.js'
 import { SiteRevisionsPanel, revisionButtonWords, siteChatConvoId } from './site-revisions.view.js'
 import { codeReviewButton } from './site-code-review.js'
+import { carryDrafts, draftsOwed, planDrafts, portCarriesDependencyParts, portCarriesDrafts } from './site-drafts.js'
 import {
   BROKER_KEY, COMMITTER_KEY, HISTORY_KEY, LINEAGE_KEY, MANAGED_PUBLISH_KEY, STORE_KEY, SWARM_ADOPT_KEY,
-  notePublished, readState, reconcile, replicaLocation, replicaRoute, takePublished, writeReceipt,
-  type AdoptLike, type BrokerLike, type CommitterLike, type HistoryLike, type ManagedPublishLike, type ReplicaServices,
+  landed, notePublished, readReceipt, readState, reconcile, replicaLocation, replicaRoute, takePublished,
+  type AdoptLike, type BrokerLike, type CommitterLike, type DraftsHome, type HistoryLike, type ManagedPublishLike, type ReplicaServices,
   type ReplicaSite, type ReplicaState, type StoreLike as ReplicaStoreLike,
 } from './site-replica.js'
 
@@ -95,6 +102,18 @@ type GestureLike = { register(entry: { owner: string; exact?: boolean; back: () 
 const gesture = (): GestureLike | undefined => ioc()?.get?.<GestureLike>('@diamondcoreprocessor.com/BackGesture')
 const install = (): Pick<InstallProvider, 'installedSig' | 'acquire'> | undefined =>
   ioc()?.get?.<Pick<InstallProvider, 'installedSig' | 'acquire'>>(INSTALL_IOC_KEY)
+const moduleDrafts = (): ModuleDraftsProvider | undefined => ioc()?.get?.<ModuleDraftsProvider>(MODULE_DRAFTS_IOC_KEY)
+
+/** What changes the drafts a Publish would carry: a draft written, a ruling made. */
+const DRAFTS_CHANGE_ON = ['module:drafted', 'brood:ruled'] as const
+
+/** What the bar says of drafts that came with the card, or ''. */
+const draftsHomeWords = (drafts: DraftsHome | undefined): string => [
+  drafts?.home ? t('site-manage.drafts.home', drafts.home === 1 ? '1 code draft came home, held until you accept it.' : '{drafts} code drafts came home, held until you accept them.', { drafts: drafts.home, count: drafts.home }) : '',
+  drafts?.otherBuild ? t('site-manage.drafts.other-build', drafts.otherBuild === 1 ? '1 code draft waits for the same build here: Update, then open the card again.' : '{drafts} code drafts wait for the same build here: Update, then open the card again.', { drafts: drafts.otherBuild, count: drafts.otherBuild }) : '',
+  drafts?.olderBuild ? t('site-manage.drafts.older-build', drafts.olderBuild === 1 ? '1 code draft was written over an older build than this device runs, so it cannot come home here: draft it again here.' : '{drafts} code drafts were written over an older build than this device runs, so they cannot come home here: draft them again here.', { drafts: drafts.olderBuild, count: drafts.olderBuild }) : '',
+  drafts?.tampered ? t('site-manage.drafts.tampered', drafts.tampered === 1 ? '1 code draft the card carried did not pass the checks here, so it stays out: draft it again here.' : '{drafts} code drafts the card carried did not pass the checks here, so they stay out: draft them again here.', { drafts: drafts.tampered, count: drafts.tampered }) : '',
+].filter(Boolean).join(' ')
 
 export { managedSiteZone, updateSources } from './update-sources.js'
 
@@ -129,6 +148,9 @@ function whenServices(): Promise<ReplicaServices> {
       broker: broker as BrokerLike,
       // Read when a take needs it (the whole tree in one queued step), never waited on.
       get committer() { return ioc()?.get?.<CommitterLike>(COMMITTER_KEY) },
+      // Read when drafts are carried or come home; either may arrive late.
+      get publish() { return ioc()?.get?.<ManagedPublishLike>(MANAGED_PUBLISH_KEY) },
+      get drafts() { return ioc()?.get?.<ModuleDraftsProvider>(MODULE_DRAFTS_IOC_KEY) },
     }))
 }
 
@@ -195,6 +217,11 @@ export class SiteManageElement extends ElementBase {
    *  and nothing saying why (jwize, 2026-11-15: "when I published … it
    *  wasn't updated"). */
   #publishFailed = ''
+  /** The drafts here are not the ones the card carries: Publish carries them. */
+  #draftsOwed = false
+  /** What the card's drafts did when it came onto this device. */
+  #draftsHome = ''
+  #offDrafts: Array<() => void> = []
   /** Bumped on every disconnect, so a continuation of an earlier life stops. */
   #life = 0
   #offHistory: Array<() => void> = []
@@ -233,6 +260,7 @@ export class SiteManageElement extends ElementBase {
       this.#label()
     })
     this.#offChatState ??= EffectBus.on<{ open?: unknown }>('chat:window-state', payload => { this.#chatOpen = payload?.open === true })
+    if (!this.#offDrafts.length) this.#offDrafts = DRAFTS_CHANGE_ON.map(effect => EffectBus.on(effect, () => { void this.#recountDrafts() }))
     void this.#show()
     void this.#begin()
   }
@@ -247,6 +275,7 @@ export class SiteManageElement extends ElementBase {
     this.#offUpdate = null
     this.#offChatState?.()
     this.#offChatState = null
+    for (const off of this.#offDrafts.splice(0)) off()
     for (const off of this.#offHistory.splice(0)) off()
   }
 
@@ -293,6 +322,8 @@ export class SiteManageElement extends ElementBase {
       this.#replicaOwed = outcome.pending
     } else if (outcome.kind === 'take-failed') {
       this.#flash(t('site-manage.take-failed', 'The newer card could not be taken. {reason}', { reason: outcome.error }).trim())
+    } else if (outcome.kind === 'replicated' || outcome.kind === 'taken' || outcome.kind === 'current') {
+      this.#draftsHome = draftsHomeWords(outcome.drafts)
     }
     await this.#refresh()
   }
@@ -326,12 +357,20 @@ export class SiteManageElement extends ElementBase {
       if (state?.layer && this.#replicaOwed && site.head) {
         this.#replicaOwed = false
         this.#refused = ''
-        await writeReceipt(services.store, site.lineage, site.head, state.sig)
+        // Its drafts come home with it, as an immediate adopt's do.
+        const home = await landed(services, { ...site, head: site.head }, state.sig)
+        if (life !== this.#life) return
+        if (home.drafts) this.#draftsHome = draftsHomeWords(home.drafts)
         state = await readState(services, site, loc).catch(() => state)
         if (life !== this.#life) return
       }
       if (state?.layer) this.#refused = ''
       this.#state = state
+      const port = ioc()?.get?.<ManagedPublishLike>(MANAGED_PUBLISH_KEY)
+      this.#draftsOwed = state?.layer && portCarriesDrafts(port)
+        ? await draftsOwed(moduleDrafts(), site.lineage, undefined, undefined, portCarriesDependencyParts(port)).catch(() => false)
+        : false
+      if (life !== this.#life) return
       this.#label()
       // Where the revisions stand moves with the card (a change makes the
       // step in hand "changed"); read beside the card, never before it.
@@ -363,6 +402,20 @@ export class SiteManageElement extends ElementBase {
     return report ? { ...report, reran } : null
   }
 
+  /** A draft was written or ruled on: whether Publish owes the card its drafts. */
+  async #recountDrafts(): Promise<void> {
+    const life = this.#life
+    const lineage = this.#record?.lineage
+    if (!lineage || !this.#state?.layer) return
+    const port = ioc()?.get?.<ManagedPublishLike>(MANAGED_PUBLISH_KEY)
+    const owed = portCarriesDrafts(port)
+      ? await draftsOwed(moduleDrafts(), lineage, undefined, undefined, portCarriesDependencyParts(port)).catch(() => false)
+      : false
+    if (life !== this.#life || owed === this.#draftsOwed) return
+    this.#draftsOwed = owed
+    this.#label()
+  }
+
   /** THE CONVERSATION THE CHAT OPENS: the card's, of the revision in hand
    *  (site-replica replicaChatConvoId, assistant/chat-revisions.ts). */
   #chatConvo(): Promise<string> {
@@ -381,21 +434,51 @@ export class SiteManageElement extends ElementBase {
       .catch((error: unknown) => ({ ok: false as const, error: error instanceof Error ? error.message : '' }))
     this.#busy = ''
     if (!taken.ok) this.#flash(t('site-manage.take-failed', 'The newer card could not be taken. {reason}', { reason: taken.error }).trim())
+    else this.#draftsHome = draftsHomeWords(taken.drafts)
     await this.#refresh()
   }
 
   /** PUBLISH: the owner's yes in the consent dialog, then the page's own
-   *  publish port (its listed key) moves the site's root to this replica's head. */
+   *  publish port (its listed key) moves the site's root to this replica's head.
+   *  The owner's code drafts go on the card first (site-drafts.ts), and the
+   *  dialog says how many, that their text can be read on the host, and how
+   *  many it takes off the card. They go on BEFORE the dialog: the port asks
+   *  for the owner's own tap (navigator.userActivation), which lasts only a
+   *  few seconds, so nothing may stand between the yes and the publish. A
+   *  "Not yet" leaves them on the card here, unpublished, as any edit is. */
   async #publishNow(): Promise<void> {
     const record = this.#record
     const services = this.#services
-    const sig = this.#state?.sig
     const port = ioc()?.get?.<ManagedPublishLike>(MANAGED_PUBLISH_KEY)
-    if (!record || !services || !sig || !port || this.#busy) return
+    if (!record || !services || !this.#state?.sig || !port || this.#busy) return
+    // Drafts that came home here and settled are this device's to drop.
+    const settled = (await readReceipt(services.store, record.lineage).catch(() => null))?.drafts ?? []
+    // A port from before drafts travelled cannot upload their modules: the card stays as it is.
+    const carries = portCarriesDrafts(port)
+    // One from before dependency drafts travelled cannot send their bundles: the bee drafts still go.
+    const dependencyParts = portCarriesDependencyParts(port)
+    const provider = moduleDrafts()
+    const plan = carries ? await planDrafts(provider, replicaRoute(record.lineage), undefined, undefined, settled, dependencyParts).catch(() => undefined) : undefined
+    // The dialog tells what the card carries: drafts that cannot be read now
+    // (the card may still carry a record a "Not yet" left on it) publish
+    // nothing, rather than a card whose code goes out unannounced.
+    const unread = (): void => this.#flash(t('site-manage.publish-drafts-unread', 'Nothing was published: the code drafts on this card could not be read just now. Try again in a moment.'))
+    if (carries && typeof provider?.carry === 'function' && !plan) { unread(); return }
+    const drafts = plan?.drafts ?? 0
+    const dropped = plan?.dropped ?? 0
+    // The head Publish publishes is the card's after its drafts are on it:
+    // the very plan the dialog shows is the one written, never planned again.
+    let sig = this.#state?.sig ?? ''
+    try {
+      if (carries) sig = (await carryDrafts({ history: services.history, committer: services.committer, drafts: provider, settled, dependencyParts, ...(plan ? { plan } : {}) }, record.lineage)) ?? sig
+    } catch { unread(); return }
+    const message = dropped
+      ? (drafts ? 'site-manage.publish-confirm.drafts-off' : 'site-manage.publish-confirm.drafts-all-off')
+      : drafts ? 'site-manage.publish-confirm.drafts' : 'site-manage.publish-confirm.message'
     const yes = await requestConfirm({
       title: 'site-manage.publish-confirm.title',
-      message: 'site-manage.publish-confirm.message',
-      messageParams: { title: record.title },
+      message,
+      messageParams: dropped ? { title: record.title, drafts, dropped, count: dropped } : drafts ? { title: record.title, drafts } : { title: record.title },
       confirmLabel: 'site-manage.publish',
       cancelLabel: 'site-manage.publish-confirm.cancel',
       danger: false,
@@ -406,7 +489,9 @@ export class SiteManageElement extends ElementBase {
     this.#publishFailed = ''
     this.#label()
     let result: { ok: boolean; error?: string; head?: string }
-    try { result = await port.publishRoot(record.lineage, sig) } catch (error) {
+    try {
+      result = SIG_RE.test(sig) ? await port.publishRoot(record.lineage, sig) : { ok: false, error: '' }
+    } catch (error) {
       result = { ok: false, error: error instanceof Error ? error.message : '' }
     }
     this.#busy = ''
@@ -416,7 +501,7 @@ export class SiteManageElement extends ElementBase {
     const written = typeof result.head === 'string' && /^[0-9a-f]{64}$/.test(result.head)
     if (result.ok || written) {
       const live = written ? result.head! : sig
-      if (before) await notePublished(services.store, before, live, sig)
+      if (before) await notePublished(services.store, before, live, sig, plan?.running ?? [])
       this.#liveHead = live
       this.#flash(result.ok
         ? t('site-manage.published', 'Your card is live.')
@@ -657,7 +742,8 @@ export class SiteManageElement extends ElementBase {
       // not complete, why, until the next one.
       const said = this.#refused
         || (state?.newer ? t('site-manage.newer', 'A newer card is published.') : '')
-        || (state?.unpublished ? this.#publishFailed || t('site-manage.unpublished', 'Unpublished changes') : '')
+        || (state?.unpublished || this.#draftsOwed ? this.#publishFailed || t('site-manage.unpublished', 'Unpublished changes') : '')
+        || this.#draftsHome
       this.#status.textContent = said
       this.#status.hidden = !said
     }
@@ -668,7 +754,7 @@ export class SiteManageElement extends ElementBase {
     }
     if (this.#publish) {
       const port = ioc()?.get?.<ManagedPublishLike>(MANAGED_PUBLISH_KEY)
-      this.#publish.hidden = !state?.unpublished || typeof port?.publishRoot !== 'function'
+      this.#publish.hidden = !(state?.unpublished || (this.#draftsOwed && !!state?.sig)) || typeof port?.publishRoot !== 'function'
       this.#publish.disabled = this.#busy !== ''
       this.#publish.textContent = this.#busy === 'publish' ? t('site-manage.publishing', 'Publishing…') : t('site-manage.publish', 'Publish')
     }

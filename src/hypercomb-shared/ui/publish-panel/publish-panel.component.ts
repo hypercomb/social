@@ -77,6 +77,9 @@ interface PublishRow {
    *  (unresolved, page, refused, full, unreachable); null when none. Optional:
    *  an older drone sends none. */
   hostTrouble?: { host: string; why: string } | null
+  /** Drift published from another device: offered to take, never restaged
+   *  over. Optional: an older drone sends none. */
+  elsewhere?: boolean
 }
 
 /** Mirrors PublishCommunity in sharing/publish-status.drone.ts. */
@@ -422,6 +425,17 @@ export class PublishPanelComponent implements OnDestroy {
     EffectBus.emit('publish:doors', { key: row.key, zones: [zone], on })
   }
 
+  /** HOME, HELD: published from another device — its card, and the code
+   *  drafts it carries, can be taken into this hive (never restaged over). */
+  canTake(row: PublishRow): boolean {
+    return !!row.elsewhere && row.state === 'drift' && !row.busyPhase && this.isOn(row)
+  }
+
+  take(row: PublishRow, event: Event): void {
+    event.stopPropagation()
+    if (this.canTake(row)) EffectBus.emit('publish:take', { key: row.key })
+  }
+
   rowKey(row: PublishRow, event: KeyboardEvent): void {
     pressKey(event, () => this.press(row))
   }
@@ -430,7 +444,8 @@ export class PublishPanelComponent implements OnDestroy {
   wordOf(row: PublishRow): RowWord | null {
     if (row.busyPhase) return { key: 'publish.state.pending', kind: 'busy' }
     if (!this.isOn(row)) return null
-    if (row.state === 'drift') return { key: 'publish.apps.changed', kind: 'changed' }
+    // Published from another device: the row offers Take it instead.
+    if (row.state === 'drift' && !row.elsewhere) return { key: 'publish.apps.changed', kind: 'changed' }
     if (row.state === 'gone') return { key: 'publish.state.gone', kind: 'gone' }
     return null
   }
@@ -542,7 +557,7 @@ export class PublishPanelComponent implements OnDestroy {
    *  not a row already being staged by its own press, and in a domain only
    *  what is on there. */
   readonly changed = computed<PublishRow[]>(() =>
-    this.#listed().filter(row => hasChanges(row) && !row.busyPhase && (this.drill()?.kind !== 'domain' || this.isOn(row))))
+    this.#listed().filter(row => hasChanges(row) && !row.elsewhere && !row.busyPhase && (this.drill()?.kind !== 'domain' || this.isOn(row))))
 
   /** STAGE CHANGES, at the top: every changed creation on the list, one after
    *  another (the drone runs them deepest first). */

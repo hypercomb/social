@@ -25,6 +25,12 @@
 //
 // A caller that named its own allowance is never overruled. What is learned
 // lasts for the page's session and is learned again from the first answer.
+//
+// ROOM FOR THE WORK (2026-11-25). A round that may write several files in one
+// reply cannot fit six of them in 4096 tokens. Such a call asks for room
+// (`wanted`) rather than naming an allowance, so it is the same request a
+// host already refused larger allowances from: a 400 or 422 asks again
+// plainly, and that host is not asked for room again.
 
 /** What every adapter sends when a call names no allowance. */
 export const ANSWER_TOKENS = 4096
@@ -44,10 +50,12 @@ export const noteThinking = (providerId: string, model: string, usage: Usage): v
 
 /** The allowance to send for a call that named `named` (or none). Undefined
  *  leaves the request exactly as the caller built it. */
-export const answerRoom = (providerId: string, model: string, named: number | undefined): number | undefined => {
+export const answerRoom = (providerId: string, model: string, named: number | undefined, wanted?: number): number | undefined => {
   if (named !== undefined) return undefined
   const key = keyOf(providerId, model)
-  return thinkers.has(key) && !refused.has(key) ? THINKING_ROOM : undefined
+  if (refused.has(key)) return undefined
+  const room = Math.max(thinkers.has(key) ? THINKING_ROOM : 0, wanted && wanted > ANSWER_TOKENS ? wanted : 0)
+  return room || undefined
 }
 
 /** An answer with nothing written whose whole output was thought. OpenAI's

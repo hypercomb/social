@@ -77,4 +77,20 @@ describe('picture pools — pictures travel only through hosts', () => {
     expect(Object.keys(await pictureRootsOf(sig(1), reader(docs)))).toHaveLength(MAX_PICTURE_ROOTS)
     expect(await pictureRootsOf('not-a-sig', reader(docs))).toEqual({})
   })
+
+  it('walks THROUGH the children envelopes a sealed head carries, naming each tile by its own layer', async () => {
+    const docs = {
+      [sig(1)]: { name: 'top', children: [sig(5)] },
+      // what a sealed head carries for each child
+      [sig(5)]: { meta: 1, layer: sig(2), relation: 'children' },
+      [sig(2)]: { name: 'rose', properties: [sig(20)], children: [sig(6)] },
+      [sig(20)]: { imageSig: sig(200) },
+      [sig(6)]: { meta: 1, layer: sig(4), relation: 'children' },
+      [sig(4)]: { name: 'tulip', properties: [sig(20)] },
+    }
+    expect(await pictureRootsOf(sig(1), reader(docs))).toEqual({
+      [(await picturesKey('rose'))!]: sig(2),
+      [(await picturesKey('tulip'))!]: sig(4),
+    })
+  })
 })

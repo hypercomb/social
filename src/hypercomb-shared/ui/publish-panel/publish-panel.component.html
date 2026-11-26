@@ -196,6 +196,8 @@
                 </span>
                 @if (wordOf(row); as word) {
                   <span class="prow-word" [attr.data-kind]="word.kind">{{ word.key | t }}</span>
+                } @else if (canTake(row)) {
+                  <button type="button" class="prow-word prow-take" data-kind="changed" [attr.title]="'publish.apps.take-tip' | t" (click)="take(row, $event)" (keydown)="$event.stopPropagation()">{{ 'publish.apps.take' | t }}</button>
                 }
               </li>
             }

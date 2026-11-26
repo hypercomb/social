@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  acceptIntoHive, attachAudit, broodRecord, broodRoster, forgetInBrood,
-  holdInBrood, mayRunBee, recordVouch, refuseInBrood,
+  acceptIntoHive, attachAudit, broodRecord, broodRecordOnDisk, broodRoster, flagInBrood, forgetInBrood,
+  holdInBrood, mayRunBee, recordVouch, refuseInBrood, BROOD_MEANING,
 } from './brood.js'
+import { registerPoolMeaning } from './pool-registry.js'
 import { BROOD_TRUST_IOC_KEY, setBroodRules } from './brood-rules.js'
 
 /** The participant follows these keys — the only ones whose word counts. */
@@ -114,5 +115,58 @@ describe('the brood — unverified automatons, held and inert', () => {
   it('ignores anything that is not a signature', async () => {
     expect(await holdInBrood('not-a-sig')).toBeNull()
     expect(await mayRunBee('not-a-sig')).toBe(true)
+  })
+})
+
+describe('broodRecordOnDisk — the hold as stored, past the session copy', () => {
+  /** A minimal OPFS: directories by name, files by name. */
+  const fakeOpfs = () => {
+    const dirs = new Map<string, Map<string, string>>()
+    const dirHandle = (files: Map<string, string>) => ({
+      getFileHandle: async (name: string, opts?: { create?: boolean }) => {
+        if (!files.has(name)) {
+          if (!opts?.create) throw new DOMException('missing', 'NotFoundError')
+          files.set(name, '')
+        }
+        return {
+          getFile: async () => ({ text: async () => files.get(name) ?? '' }),
+          createWritable: async () => ({ write: async (text: string) => { files.set(name, text) }, close: async () => {} }),
+        }
+      },
+    })
+    const root = {
+      getDirectoryHandle: async (name: string, opts?: { create?: boolean }) => {
+        let files = dirs.get(name)
+        if (!files) {
+          if (!opts?.create) throw new DOMException('missing', 'NotFoundError')
+          files = new Map(); dirs.set(name, files)
+        }
+        return dirHandle(files)
+      },
+    }
+    return { dirs, root }
+  }
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it('a flag that reached only the session copy is not on disk', async () => {
+    vi.stubGlobal('navigator', { storage: undefined })
+    const s = sig('d')
+    await flagInBrood(s, { by: 'trial', reason: 'untried' })
+    expect((await broodRecord(s))?.flags).toHaveLength(1)
+    expect(await broodRecordOnDisk(s)).toBeNull()
+  })
+
+  it('reads what is stored, not what this session remembers, and leaves the session copy alone', async () => {
+    const opfs = fakeOpfs()
+    vi.stubGlobal('navigator', { storage: { getDirectory: async () => opfs.root } })
+    const s = sig('e')
+    await flagInBrood(s, { by: 'scan', reason: 'reaches storage' })
+    expect((await broodRecordOnDisk(s))?.flags?.map(f => f.by)).toEqual(['scan'])
+    // The disk changes under the session copy (another context wrote it).
+    const files = opfs.dirs.get(await registerPoolMeaning(BROOD_MEANING))!
+    files.set(s, JSON.stringify({ sig: s, kind: 'bee', arrived: 1, source: { kind: 'own' }, audits: [] }))
+    expect((await broodRecordOnDisk(s))?.flags).toBeUndefined()
+    expect((await broodRecord(s))?.flags).toHaveLength(1)
+    expect(await broodRecordOnDisk('not-a-sig')).toBeNull()
   })
 })
