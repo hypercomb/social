@@ -251,8 +251,13 @@ const STYLE = `
 .remove:hover,.remove:focus-visible{opacity:1;background:rgba(var(--shelf),0.2);outline:none;}
 .row.tag{cursor:pointer;}
 .row.tag.lit{outline:1px solid currentColor;}
-.add{width:9rem;min-width:3rem;box-sizing:border-box;background:transparent;color:inherit;border:0;border-bottom:1px solid rgba(var(--shelf),0.45);opacity:0.9;font:inherit;padding:0.1em 0.3em;outline:none;}
-.add:focus{border-bottom-color:rgb(var(--shelf));}
+/* THE SEARCH: an inlaid box, not an underline — a darker well a shade below
+   the shelf, a light edge, padded, centred on the head's line. */
+.add{width:10rem;min-width:3rem;box-sizing:border-box;height:1.65rem;padding:0 0.6rem;color:inherit;font:inherit;outline:none;
+  background:rgba(0,0,0,0.22);border:1px solid rgba(var(--shelf),0.22);border-radius:var(--hc-radius-control,2px);
+  box-shadow:inset 0 1px 2px rgba(0,0,0,0.25);transition:border-color 120ms ease,background-color 120ms ease;}
+.add:hover{border-color:rgba(var(--shelf),0.38);}
+.add:focus{border-color:rgba(var(--shelf),0.7);background:rgba(0,0,0,0.3);}
 .add::placeholder{color:inherit;opacity:0.5;}
 /* THE STRIP: icon, name, count, search, the icons, the arrow — one bar. The
    icons are squares that wrap, three rows at most, then they scroll. Open,
@@ -264,7 +269,7 @@ const STYLE = `
    slider sets) are both centred on a row as tall as the taller of the two. */
 .bar>.legend,.bar>.add,.bar>.tools{height:2rem;align-self:flex-start;margin-top:calc((var(--row) - 2rem) / 2);}
 .bar>.items{margin-top:calc((var(--row) - var(--item,2rem)) / 2);}
-.bar>.add{flex:0 0 auto;}
+.bar>.add{flex:0 0 auto;height:1.65rem;margin-top:calc((var(--row) - 1.65rem) / 2);}
 .items{flex:1 1 0;flex-wrap:wrap;align-content:flex-start;align-items:flex-start;gap:0.4rem;height:auto;
   max-height:calc(3 * var(--item,2rem) + 2 * 0.4rem);overflow-x:hidden;overflow-y:auto;scrollbar-width:thin;mask-image:none;-webkit-mask-image:none;}
 .items:empty{min-height:var(--item,2rem);}
