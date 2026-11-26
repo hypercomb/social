@@ -30,6 +30,7 @@
 
 import { EffectBus } from '@hypercomb/core'
 import { isPublishedVisitorShell } from '../../sharing/behavior-enablement.js'
+import { CrackMembrane } from './crack-membrane.js'
 
 const STORAGE_KEY = 'hc:canvas-bg'
 
@@ -462,6 +463,15 @@ export class CanvasBackgroundService extends EventTarget {
   #glowEl: HTMLDivElement | null = null
   #previewEl: HTMLDivElement | null = null
   #previewing = false
+  /** THE CRACKS (jwize, 2026-11-26). A feathered membrane laid over whatever
+   *  the screen shows, in the dark world only. ON unless switched off: he
+   *  asked for the dark view to crack. The wall is clean until dark switches
+   *  ON — that moment is the one impact, at the centre. See crack-membrane.ts. */
+  #cracks = true
+  #membrane = new CrackMembrane()
+  /** Was the chrome dark at the last look? Only a change to dark strikes.
+   *  Read at the first paint, when the token sheet is certainly in. */
+  #wasDark: boolean | null = null
 
   constructor() {
     super()
@@ -469,11 +479,11 @@ export class CanvasBackgroundService extends EventTarget {
     this.#hydration = this.#hydrate()
     void this.#hydration.then(() => this.#followLineage())
     // Re-apply when the colour theme flips so an auto palette tracks it.
-    EffectBus.on('theme:changed', () => { this.apply() })
+    EffectBus.on('theme:changed', () => { this.apply(); this.#crackOnDark() })
     // matchMedia covers the 'system' theme (no data-theme attribute).
     try {
       window.matchMedia?.('(prefers-color-scheme: light)')
-        ?.addEventListener?.('change', () => { this.apply() })
+        ?.addEventListener?.('change', () => { this.apply(); this.#crackOnDark() })
     } catch { /* matchMedia unavailable */ }
     window.addEventListener('resize', () => {
       if (!this.#pictureUrl) return
@@ -497,6 +507,52 @@ export class CanvasBackgroundService extends EventTarget {
   get panX(): number { return this.#panX }
   get panY(): number { return this.#panY }
   get cascade(): boolean { return this.#cascade }
+  /** Is the crack membrane switched on? (It shows only in the dark world.) */
+  get cracks(): boolean { return this.#cracks }
+
+  /** Switch the cracks on or off. Off takes them away; on waits for an impact
+   *  (the next switch to dark, or `strike()`). */
+  setCracks(on: boolean): void {
+    if (this.#cracks === on) return
+    this.#cracks = on
+    if (!on) this.#membrane.clean()
+    this.#persist()
+    this.#syncCracks()
+    this.dispatchEvent(new CustomEvent('change'))
+  }
+
+  /** One impact at the centre, now. False when the cracks cannot show here
+   *  (switched off, or a bright chrome). */
+  strike(): boolean {
+    if (!this.#cracks) this.setCracks(true)
+    this.#syncCracks()
+    if (!this.#membrane.visible) return false
+    this.#membrane.strike()
+    return true
+  }
+
+  /** Back to an unbroken screen. */
+  mendCracks(): void { this.#membrane.clean() }
+
+  /** THE TRIGGER: the chrome moving INTO the dark world. The wall starts
+   *  clean and takes one impact at the centre. A reassert, a repeat of the
+   *  same theme, or a move between two dark themes strikes nothing. */
+  #crackOnDark(): void {
+    const dark = !this.#isLight()
+    const entered = dark && !this.#wasDark
+    this.#wasDark = dark
+    if (!dark) { this.#membrane.clean(); this.#syncCracks(); return }
+    if (!entered || !this.#cracks || isPublishedVisitorShell()) return
+    this.#syncCracks()
+    this.#membrane.clean()
+    // A beat for the new chrome to land before the screen splits.
+    setTimeout(() => { if (!this.#isLight()) this.#membrane.strike() }, 280)
+  }
+
+  #syncCracks(): void {
+    if (this.#cracks && !this.#isLight() && !isPublishedVisitorShell() && document.body) this.#membrane.show()
+    else this.#membrane.hide()
+  }
   /** The saved backdrops, by world. Signature arrays — resolve on demand. */
   get saved(): Record<BackdropWorld, readonly string[]> {
     return { light: [...this.#saved.light], dark: [...this.#saved.dark] }
@@ -787,6 +843,8 @@ export class CanvasBackgroundService extends EventTarget {
     if (isPublishedVisitorShell()) return
     const body = document.body
     if (!body) return
+    if (this.#wasDark === null) this.#wasDark = !this.#isLight()
+    this.#syncCracks()
     const s = body.style
     s.backgroundColor = ''
     s.backgroundImage = ''
@@ -1578,13 +1636,14 @@ export class CanvasBackgroundService extends EventTarget {
       if (!raw) return
       this.#hasPref = true
       const parsed = JSON.parse(raw) as {
-        archetype?: string; palette?: string | null; enabled?: boolean
+        archetype?: string; palette?: string | null; enabled?: boolean; cracks?: boolean
         picture?: string | null; dim?: number; zoom?: number; panX?: number; panY?: number; v?: number
         saved?: { light?: unknown; dark?: unknown }
       }
       if (parsed.archetype && CANVAS_BG_ARCHETYPES.includes(parsed.archetype as Archetype)) this.#archetype = parsed.archetype as Archetype
       if (parsed.palette && CANVAS_BG_PALETTES.includes(parsed.palette as Palette)) this.#palette = parsed.palette as Palette
       if (typeof parsed.enabled === 'boolean') this.#enabled = parsed.enabled
+      if (typeof parsed.cracks === 'boolean') this.#cracks = parsed.cracks
       // A signature, or nothing. Anything else in the slot is a corrupt pref,
       // not a picture, and asking the store for it would only fail later.
       if (typeof parsed.picture === 'string' && SIG_RE.test(parsed.picture)) {
@@ -1627,7 +1686,7 @@ export class CanvasBackgroundService extends EventTarget {
       // are network-queryable content and live in their pool of meaning —
       // `v` marks a pref this build wrote (the dim-amnesty reads it).
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        archetype: this.#archetype, palette: this.#palette, enabled: this.#enabled,
+        archetype: this.#archetype, palette: this.#palette, enabled: this.#enabled, cracks: this.#cracks,
         picture: this.#pictureSig, dim: this.#dim, zoom: this.#zoom,
         panX: this.#panX, panY: this.#panY, v: 3,
       }))
