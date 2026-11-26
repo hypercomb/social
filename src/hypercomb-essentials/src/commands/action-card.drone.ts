@@ -117,7 +117,7 @@ const GESTURE_CARDS: Record<string, { steps: I18nText[][]; description: I18nText
     description: { key: 'help.gesture.select', fallback: 'Hold Ctrl and click tiles to select them.' },
     detail: {
       key: 'help.gesture.select.detail',
-      fallback: 'Ctrl+Click adds or removes one tile; hold Ctrl and drag to paint over a whole area. Selected tiles are what Copy, Cut and Remove act on. On a Mac, use Cmd.',
+      fallback: 'Ctrl+Click adds or removes one tile; hold Ctrl and drag to paint over a whole area. Selected tiles are what To shelf and Remove act on. On a Mac, use Cmd.',
     },
   },
   more: {

@@ -129,8 +129,8 @@ function isSelectExecution(v: string): boolean {
   // Bare `[a,b]` (closed, no op) — BracketBehavior owns the Enter. `:tag`
   // executes here. A trailing `/op` executes here ONLY when op is a known
   // select op or behaviour; any other `/word` is answered just after this, as
-  // a word nothing answers to (the old `[items]/dest` cut-paste form is
-  // retired — cut and paste move tiles).
+  // a word nothing answers to (the old `[items]/dest` form is
+  // retired — the shelf moves tiles).
   if (v[close + 1] === ':') return true
   if (v[close + 1] !== '/') return false
   const m = v.slice(close + 2).match(/^([\w-]+)/)
