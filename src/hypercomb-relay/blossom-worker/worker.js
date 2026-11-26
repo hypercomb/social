@@ -3859,6 +3859,8 @@ function shareHead(title, request, base, description = '') {
     + (description ? `<meta name="description" content="${htmlText(description)}"><meta property="og:description" content="${htmlText(description)}">` : '')
 }
 
+const PACKAGE_MEMBER_RE = /^\/content\/([0-9a-f]{64})\/(?:[0-9]{8})?$/
+
 async function serveVisitorAsset(request, env, { spa = true, door = null, install = null, index = null, base = null, title = null } = {}) {
   if (!env.ASSETS?.fetch) return text(503, 'visitor engine is not deployed')
   // The asset store would answer a validator with its own 304, past every
@@ -3920,8 +3922,16 @@ async function serveVisitorAsset(request, env, { spa = true, door = null, instal
       && new URL(request.url).pathname.startsWith(`/content/${await poolAddress(INSTALL_INDEX_MEANING)}/`)) {
     headers.set('Content-Type', 'application/json; charset=utf-8')
   }
+  // THE PACKAGE POOL IS TEXT (reach A9): the asset store types the listing
+  // `/content/<sign('host:packages')>/` as its directory page, so a door
+  // answered `00000000` labelled text/html, where hypercomb.com and
+  // answerPackage say text/plain. The listing and its 8-digit markers are
+  // lines of text, and never a page this function dresses.
+  const packageMember = response.status === 200 && PACKAGE_MEMBER_RE.exec(new URL(request.url).pathname)
+  const packagePool = !!packageMember && packageMember[1] === await poolAddress(HOST_PACKAGES_MEANING)
+  if (packagePool) headers.set('Content-Type', 'text/plain; charset=utf-8')
   const name = String(door?.title || title || '').trim()
-  if ((door || name) && response.status === 200 && String(response.headers.get('content-type') || '').includes('text/html')) {
+  if (!packagePool && (door || name) && response.status === 200 && String(response.headers.get('content-type') || '').includes('text/html')) {
     let html = await response.text()
     if (name) html = html.replace(/<title>[^<]*<\/title>/, () => `<title>${htmlText(name)}</title>`)
     // A ROOT PLACE's page lives under its path: the document base moves there,

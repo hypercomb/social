@@ -26,7 +26,7 @@
 //   `confirmed`. A caller may render "published" on `unconfirmed`, but it must
 //   not render "live".
 
-import { EffectBus, get, mintMetaEnvelope } from '@hypercomb/core'
+import { EffectBus, SignatureService, get, mintMetaEnvelope } from '@hypercomb/core'
 import {
   HIVE_LINK_KIND,
   HIVE_LINK_VERSION,
@@ -103,19 +103,65 @@ const BUNDLE_RECEIPT_MS = 12_000
 interface StoreLike {
   putResource: (b: Blob, options?: { emit?: boolean }) => Promise<string>
   getResourceLocal?: (sig: string) => Promise<Blob | null>
+  /** Raw bytes asked of the hosts by signature (the broker's SHA-256-checked fetch). */
+  fetchLayerFromHost?: (sig: string, options?: { bypassMissWindow?: boolean }) => Promise<Uint8Array | null>
 }
-/** The picture entries a branch head offers (picture-pools.ts), read from
- *  this hive's own store. Empty when the store or a layer cannot be read: a
- *  picture offer is a courtesy to readers, never a gate on the act. */
-const branchPictureRoots = async (head: string): Promise<Record<string, string>> => {
+/** What the picture walk found for one branch: its entries, and the layers or
+ *  properties it could neither read here nor fetch by signature. */
+export interface BranchPictures {
+  roots: Record<string, string>
+  unread: string[]
+}
+const hashesTo = async (bytes: Uint8Array, sig: string): Promise<boolean> => {
+  if (bytes.byteLength === 0) return false
+  const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+  return (await SignatureService.sign(copy).catch(() => '')) === sig
+}
+/** What the picture walk may ask the hosts for, per branch: a count and one
+ *  deadline over all of them. The walk waits on the act, so a branch whose
+ *  closure never landed here costs a few seconds, never minutes; what the
+ *  budget leaves is named in `unread` like any other miss. */
+export interface PictureFetchBudget { fetches: number; ms: number }
+export const PICTURE_FETCH_BUDGET: PictureFetchBudget = { fetches: 12, ms: 6_000 }
+/** The picture entries a branch head offers (picture-pools.ts). Read from
+ *  this hive's own store first; a layer or properties document that is not
+ *  here is FETCHED BY SIGNATURE before the walk gives up on it (reach A6: a
+ *  head whose properties never landed here published no picture, silently),
+ *  every fetched byte re-hashed against its signature, within `budget`. What
+ *  still cannot be read is named in `unread`, so the receipt can say which
+ *  branch went without — a picture offer is a courtesy to readers, never a
+ *  gate on the act. */
+export const branchPictureRoots = async (head: string, budget: PictureFetchBudget = PICTURE_FETCH_BUDGET): Promise<BranchPictures> => {
   const store = get<StoreLike>(STORE_KEY)
-  if (!store?.getResourceLocal) return {}
-  const readJson = async (sig: string): Promise<Record<string, unknown> | null> => {
-    const blob = await store.getResourceLocal!(sig)
-    if (!blob) return null
-    try { return JSON.parse(await blob.text()) as Record<string, unknown> } catch { return null }
+  const unread = new Set<string>()
+  if (!store?.getResourceLocal) return { roots: {}, unread: [] }
+  const deadline = Date.now() + budget.ms
+  let fetches = 0
+  const fetchBounded = async (sig: string): Promise<Uint8Array | null> => {
+    const left = deadline - Date.now()
+    if (!store.fetchLayerFromHost || fetches >= budget.fetches || left <= 0) return null
+    fetches++
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const late = new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), left) })
+    try {
+      return await Promise.race([store.fetchLayerFromHost(sig, { bypassMissWindow: true }).catch(() => null), late])
+    } finally { clearTimeout(timer) }
   }
-  try { return await pictureRootsOf(head, readJson, props => !!imagePropsOf(props)) } catch { return {} }
+  const readJson = async (sig: string): Promise<Record<string, unknown> | null> => {
+    let text: string | null = null
+    const blob = await store.getResourceLocal!(sig).catch(() => null)
+    if (blob) text = await blob.text()
+    else {
+      const bytes = await fetchBounded(sig)
+      if (bytes && await hashesTo(bytes, sig)) text = new TextDecoder().decode(bytes)
+    }
+    if (text === null) { unread.add(sig); return null }
+    try { return JSON.parse(text) as Record<string, unknown> } catch { return null }
+  }
+  try {
+    const roots = await pictureRootsOf(head, readJson, props => !!imagePropsOf(props))
+    return { roots, unread: [...unread] }
+  } catch { return { roots: {}, unread: [...unread] } }
 }
 interface HistoryLike {
   sealSubtree: (segments: readonly string[]) => Promise<string | null>
@@ -211,6 +257,11 @@ export type PublishResult =
       /** Every advanced succession (and its envelopes) holds a receipt on the
        *  host — a stranger reading the pointer finds the atom. */
       stagesReceipted: boolean
+      /** THE BRANCH LEFT WITHOUT A PICTURE ROOT: the picture walk could not
+       *  read these layers or properties documents, here or by signature from
+       *  the hosts, so a picture under them is offered to no reader. Absent
+       *  when every document was read. */
+      pictureGap?: { branch: string; unread: string[] }
     }
   | {
       ok: false
@@ -714,10 +765,34 @@ async function publishBranchNow(
   // tile in this branch is offered under its name — `pictures:<sign(name)>`
   // naming the tile's own layer, which is already in the closure on the host.
   // This write is the only place one is made, so a picture is public only
-  // because its tile was published. An entry another publish made stays.
+  // because its tile was published. An entry another publish made stays: a
+  // name already offered for a layer is replaced only when THIS branch's
+  // previous head offered it (descendant names repeat across branches, and
+  // the walk reaches every descendant), so `explore hosting` keeps naming
+  // the /hosting tile after /knowledge/hyperdex publishes its own `hosting`.
+  // An entry stays only when the previous head's walk was WHOLE: a walk the
+  // budget cut short proves nothing about whose an entry is, and keeping one
+  // this branch made would keep it stale for good (the next head's walk names
+  // the new layer, never the old one), so an undecided entry is replaced —
+  // unless the index itself proves it another's: a layer some other entry of
+  // the index names (another branch's head) is never this branch's to take.
   const pictureRoots: Record<string, string> = {}
-  for (const [pictureKey, layerSig] of Object.entries(await branchPictureRoots(sealed))) {
-    if (existing[pictureKey] !== layerSig) pictureRoots[pictureKey] = layerSig
+  const pictures = await branchPictureRoots(sealed)
+  const taken = Object.entries(pictures.roots).filter(([k, sig]) => existing[k] !== undefined && existing[k] !== sig)
+  const previousHead = String(existing[key] ?? '').toLowerCase()
+  const before: BranchPictures = taken.length && SIG_RE.test(previousHead) && previousHead !== sealed
+    ? await branchPictureRoots(previousHead)
+    : { roots: {}, unread: [] }
+  const ownBefore = before.roots
+  const undecided = before.unread.length > 0
+  for (const [pictureKey, layerSig] of Object.entries(pictures.roots)) {
+    if (existing[pictureKey] === layerSig) continue
+    const held = existing[pictureKey]
+    if (held !== undefined && held !== previousHead && ownBefore[pictureKey] !== held) {
+      const another = Object.entries(existing).some(([k, v]) => k !== key && k !== pictureKey && String(v ?? '').toLowerCase() === String(held).toLowerCase())
+      if (!undecided || another) continue
+    }
+    pictureRoots[pictureKey] = layerSig
   }
 
   const roots = { ...nextRoots, ...stageRoots, ...planRoots, ...pictureRoots }
@@ -810,6 +885,9 @@ async function publishBranchNow(
     missingFromIndex,
     stages,
     stagesReceipted,
+    // Said, never dropped: a branch whose walk could not read a layer or its
+    // properties here or from its hosts may wear a picture no reader finds.
+    ...(pictures.unread.length ? { pictureGap: { branch: segs.join('/'), unread: pictures.unread } } : {}),
   }
 }
 
@@ -904,7 +982,7 @@ async function unpublishBranchNow(
   delete roots[key]
   // Its pictures go with it: an entry naming one of this branch's layers is
   // withdrawn in the same write, so no picture stays public after its tile.
-  for (const [pictureKey, layerSig] of Object.entries(await branchPictureRoots(head))) {
+  for (const [pictureKey, layerSig] of Object.entries((await branchPictureRoots(head)).roots)) {
     if (roots[pictureKey] === layerSig) delete roots[pictureKey]
   }
   const doors = { ...(read.manifest.doors ?? {}) }

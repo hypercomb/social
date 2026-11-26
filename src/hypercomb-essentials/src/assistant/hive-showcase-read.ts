@@ -30,6 +30,7 @@ import { SignatureService } from '@hypercomb/core'
 import { fetchWithDeadline } from '../sharing/bounded-fetch.js'
 import { lensOrigin } from '../sharing/community-lens.js'
 import { fetchHiveIndex } from '../sharing/hive-pointer.js'
+import { noteFoundAt } from './found-hosts.js'
 
 /** The meanings read this way: a zone's showcase, by its index key. */
 export const SHOWCASE_MEANING = /^showcase:([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+|localhost(?::\d+)?)$/
@@ -80,13 +81,8 @@ export const liveShowcaseReadDeps = (document: ShowcaseReadDeps['document']): Sh
     }
     return null
   },
-  note: (sig, hosts) => {
-    try {
-      const broker = (globalThis as { ioc?: { get?: (key: string) => unknown } }).ioc
-        ?.get?.('@diamondcoreprocessor.com/ContentBrokerDrone') as { noteDomainsForSig?: (s: string, d: string[]) => void } | undefined
-      broker?.noteDomainsForSig?.(sig, [...hosts])
-    } catch { /* no broker in this shell */ }
-  },
+  // Through the page's one attribution map, which tells the broker too.
+  note: (sig, hosts) => noteFoundAt(sig, hosts),
 })
 
 /** What the read found: the record's text with each item's head beside it, the host it was read on, and the heads. */

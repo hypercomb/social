@@ -13,7 +13,7 @@
 // allowing an action based on what the model saw. No bridge, navigation, view
 // state, content slot, or filesystem surface participates.
 
-import { CHILD_SLOTS, INSTALL_IOC_KEY, childSigsOfLayer, sectionIndex, sectionOf, type InstallProvider } from '@hypercomb/core'
+import { CHILD_SLOTS, INSTALL_IOC_KEY, SignatureService, childSigsOfLayer, isMetaEnvelope, metaPayloadOf, sectionIndex, sectionOf, type InstallProvider } from '@hypercomb/core'
 import type { CurrentLayerRef, LayerContent } from '../history/history.service.js'
 import { isPeerContentAt } from '../sharing/adopted-roots.js'
 import { managedSiteSegments } from '../sharing/managed-record.js'
@@ -121,6 +121,12 @@ type HiveStore = {
   getBeeBytes?(sig: string): Promise<Uint8Array | null>
   /** Verified dependency bytes from the `sign('dependencies')` pool. */
   getDependencyBytes?(sig: string): Promise<Uint8Array | null>
+  /** Raw bytes at the content root, a layer or a meta envelope alike. */
+  getLayerPoolBytes?(sig: string): Promise<Uint8Array | null>
+  /** Raw resource bytes held here, a meta envelope NOT followed. */
+  getResourceLocal?(sig: string): Promise<Blob | null>
+  /** Layer bytes asked of the hosts, SHA-256-checked by the broker. */
+  fetchLayerFromHost?(sig: string, options?: { bypassMissWindow?: boolean }): Promise<Uint8Array | null>
 }
 type LayerCommitter = { settled(): Promise<void> }
 type CodeArtifactEntry = { readonly name: string; readonly sig: string; readonly of?: 'bee' | 'dependency'; readonly type?: string }
@@ -463,6 +469,134 @@ const carriedChildren = async (
  *  when it is not: the walk marks its result truncated. */
 const unopened = new WeakSet<readonly CarriedChild[]>()
 
+/** Bytes the reader takes as a signature's, only when they hash to it. */
+const hashesTo = async (bytes: Uint8Array | null | undefined, sig: string): Promise<boolean> => {
+  if (!bytes || bytes.byteLength === 0) return false
+  const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+  return (await SignatureService.sign(copy).catch(() => '')) === sig
+}
+
+/**
+ * ONE READ'S ALLOWANCE FOR WAITING ON THE HOSTS (review 2026-11-25). Every
+ * host fetch a read makes, a child's envelope and its inner layer alike,
+ * spends one of `fetches`, and all of them end at `until`; the read's signal
+ * ends a fetch in progress, not only the next one. Past the allowance a child
+ * this device does not hold is listed unresolved, as it was before reads
+ * followed envelopes, so a hive whose children no host serves answers in
+ * seconds, never minutes.
+ */
+export interface FollowBudget { readonly until: number; fetches: number; readonly signal?: AbortSignal }
+/** How long one read may wait on the hosts, all of its fetches together. */
+export const READ_FOLLOW_MS = 6_000
+/** Host fetches one read may make, inner hops counted. */
+export const READ_FOLLOW_FETCHES = 24
+const followBudget = (signal?: AbortSignal): FollowBudget =>
+  ({ until: Date.now() + READ_FOLLOW_MS, fetches: READ_FOLLOW_FETCHES, signal })
+
+/** `work`, or null at `ms` or when `signal` aborts, whichever is first. */
+const boundedWait = <T,>(work: Promise<T | null>, ms: number, signal?: AbortSignal): Promise<T | null> =>
+  new Promise(resolve => {
+    const done = (value: T | null): void => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', aborted)
+      resolve(value)
+    }
+    const aborted = (): void => done(null)
+    const timer = setTimeout(() => done(null), Math.max(0, ms))
+    signal?.addEventListener('abort', aborted, { once: true })
+    work.then(done, () => done(null))
+  })
+
+/** The raw bytes a signature names, a layer or a meta envelope alike: held
+ *  here first, then asked of the hosts through the same SHA-256-gated
+ *  broker fetch a strict history read awaits, within the read's `budget`
+ *  (none: local only). Only `bypass` (the one signature a read was asked
+ *  for) re-dials past a recent miss; a child's fetch joins the heal its
+ *  history read started and keeps the miss window, so a child no host holds
+ *  is not asked again on every read. Every byte is re-hashed here against
+ *  the signature, whichever source answered. */
+const verifiedRawBytes = async (sig: string, store: HiveStore, budget: FollowBudget | null, bypass = false): Promise<Uint8Array | null> => {
+  const pooled = await store.getLayerPoolBytes?.(sig).catch(() => null)
+  if (await hashesTo(pooled, sig)) return pooled!
+  const held = await store.getResourceLocal?.(sig).catch(() => null)
+  const heldBytes = held ? await blobBytes(held).catch(() => null) : null
+  if (await hashesTo(heldBytes, sig)) return heldBytes!
+  if (!budget || !store.fetchLayerFromHost) return null
+  if (budget.signal?.aborted) throw stopped()
+  const left = budget.until - Date.now()
+  if (budget.fetches <= 0 || left <= 0) return null
+  budget.fetches--
+  const asked = bypass ? store.fetchLayerFromHost(sig, { bypassMissWindow: true }) : store.fetchLayerFromHost(sig)
+  const fetched = await boundedWait(asked.catch(() => null), left, budget.signal)
+  if (budget.signal?.aborted) throw stopped()
+  return (await hashesTo(fetched, sig)) ? fetched! : null
+}
+
+const parsedJson = (bytes: Uint8Array): unknown => {
+  try { return JSON.parse(new TextDecoder().decode(bytes)) } catch { return undefined }
+}
+
+/** A layer is a record that names itself or holds children; a meta envelope
+ *  is never one (it is followed, once, by the resolver below). */
+const asLayer = (value: unknown): LayerContent | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || isMetaEnvelope(value)) return null
+  const record = value as Record<string, unknown>
+  return typeof record['name'] === 'string' || Array.isArray(record['children']) ? value as LayerContent : null
+}
+
+type FollowedLayer = { readonly layer: LayerContent; readonly bytes?: Uint8Array }
+
+/**
+ * THE DEPTH WALL (reach, 2026-11-25). Every child a published hive carries is
+ * the signature of a `{meta:1, layer:<sig>, relation:'children'}` envelope.
+ * `getLayerBySig` follows an envelope only when its bytes are already on this
+ * device, and on a miss it starts a background heal and answers null — so a
+ * model read of someone else's hive stopped at its root. This asks the
+ * history service first, then awaits the hash-checked bytes, and follows a
+ * layer envelope ONE hop to the layer it declares (never past it). Store
+ * semantics are untouched: this is how the reader reads, nothing more.
+ */
+const layerOfSig = async (
+  sig: string,
+  history: HiveHistory,
+  store: HiveStore,
+  budget: FollowBudget,
+): Promise<FollowedLayer | null> => {
+  const local = await history.getLayerBySig(sig).catch(() => null)
+  return local ? { layer: local } : followedLayerOfSig(sig, store, budget, 'bypass')
+}
+
+/** The awaited half of `layerOfSig`: verified bytes, one envelope hop.
+ *  `outer` says how the named bytes are read: `local` from this device only
+ *  (a bytes read whose resource fetch already asked the hosts), `bypass`
+ *  past a recent miss (the signature the read was asked for), `join` as a
+ *  child (the heal its history read started); the hop may still fetch. */
+const followedLayerOfSig = async (
+  sig: string,
+  store: HiveStore,
+  budget: FollowBudget,
+  outer: 'join' | 'bypass' | 'local' = 'join',
+): Promise<FollowedLayer | null> => {
+  if (!store.fetchLayerFromHost && !store.getLayerPoolBytes && !store.getResourceLocal) return null
+  const outerBytes = await verifiedRawBytes(sig, store, outer === 'local' ? null : budget, outer === 'bypass')
+  if (!outerBytes) return null
+  const parsed = parsedJson(outerBytes)
+  const direct = asLayer(parsed)
+  if (direct) return { layer: direct, bytes: outerBytes }
+  const payload = isMetaEnvelope(parsed) ? metaPayloadOf(parsed) : null
+  if (payload?.kind !== 'layer' || payload.sig === sig) return null
+  const innerBytes = await verifiedRawBytes(payload.sig, store, budget)
+  const inner = innerBytes ? asLayer(parsedJson(innerBytes)) : null
+  return inner ? { layer: inner, bytes: innerBytes! } : null
+}
+
+/** How many children one read may wait on the hosts for; past it (or past
+ *  the read's FollowBudget, which counts inner hops too) a child the device
+ *  does not hold is listed unresolved, as before. */
+const MAX_FOLLOWED_CHILDREN = 32
+/** Children asked of the hosts at once. */
+const FOLLOW_CONCURRENCY = 8
+
 /**
  * ONE TILE'S CHILDREN, READ THE WAY THE CANVAS READS THEM (core level-roster
  * `childLayersOf`, "the single definition of the tiles inside this one"). A
@@ -477,6 +611,7 @@ const scannedChildren = async (
   layer: LayerContent,
   history: HiveHistory,
   store: HiveStore,
+  budget: FollowBudget,
 ): Promise<{ readonly children: readonly CarriedChild[]; readonly unresolved: readonly string[] }> => {
   const sigs = await childSigsOfLayer(layer as never, store).catch(() => [] as string[])
   if (sigs.length === 0) return { children: [], unresolved: [] }
@@ -489,11 +624,32 @@ const scannedChildren = async (
     }
   }
 
+  // Each child is resolved through the depth-wall resolver, a few at a time,
+  // and only the first MAX_FOLLOWED_CHILDREN may wait on a host.
+  const resolved: (LayerContent | null)[] = new Array(sigs.length).fill(null)
+  let cursor = 0
+  let followed = 0
+  const worker = async (): Promise<void> => {
+    while (cursor < sigs.length) {
+      const at = cursor++
+      const sig = sigs[at]
+      const carried = inlined.get(sig)
+      if (carried) { resolved[at] = carried; continue }
+      if (budget.signal?.aborted) throw stopped()
+      const local = await history.getLayerBySig(sig).catch(() => null)
+      if (local) { resolved[at] = local; continue }
+      if (followed >= MAX_FOLLOWED_CHILDREN || budget.fetches <= 0 || Date.now() >= budget.until) continue
+      followed++
+      resolved[at] = (await followedLayerOfSig(sig, store, budget))?.layer ?? null
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(FOLLOW_CONCURRENCY, sigs.length) }, worker))
+
   const seen = new Set<string>()
   const children: CarriedChild[] = []
   const unresolved: string[] = []
-  for (const sig of sigs) {
-    const child = inlined.get(sig) ?? await history.getLayerBySig(sig).catch(() => null)
+  for (const [at, sig] of sigs.entries()) {
+    const child = resolved[at]
     if (!child) { unresolved.push(sig); continue }
     const raw = typeof child.name === 'string' ? child.name.replace(CONTROL, '').trim().slice(0, 256) : ''
     const name = raw || sig.slice(0, 8)
@@ -933,7 +1089,7 @@ export class HypercombHiveTreeReader {
       if (!ref && stats.cold) throw new IncompleteReadError()
       if (!ref) return { ok: false, root, code: 'not-found' }
       if (history.treeEpoch() !== epoch) throw new StaleReadError()
-      const { children, unresolved } = await scannedChildren(ref.layer, history, store)
+      const { children, unresolved } = await scannedChildren(ref.layer, history, store, followBudget(signal))
       if (history.treeEpoch() !== epoch) throw new StaleReadError()
 
       let content: Record<string, unknown> | undefined
@@ -1033,9 +1189,13 @@ export class HypercombHiveTreeReader {
     const maxBytes = Math.max(512, boundedInteger(options.maxBytes, 8_000, MAX_BYTES))
     try {
       if (options.signal?.aborted) throw stopped()
-      const layer = await history.getLayerBySig(sig).catch(() => null)
+      // A COLD READ WAITS FOR THE BYTES (reach A1, A2): a head no read has
+      // warmed, or a children envelope, is fetched hash-checked and followed
+      // one hop here, instead of answering not-found while a heal runs.
+      const budget = followBudget(options.signal)
+      const layer = (await layerOfSig(sig, history, store, budget))?.layer
       if (!layer) return { ok: false, root, code: 'not-found' }
-      const { children, unresolved } = await scannedChildren(layer, history, store)
+      const { children, unresolved } = await scannedChildren(layer, history, store, budget)
       let content: Record<string, unknown> | undefined
       let truncated = false
       if (options.withContent !== false) {
@@ -1383,6 +1543,7 @@ export class HypercombHiveTreeReader {
       }
       if (!bytes) {
         of = 'resource'
+        let followed: FollowedLayer | null = null
         const blob = await store.getResource(sig).catch(() => null)
         if (blob) {
           type = blob.type
@@ -1395,6 +1556,17 @@ export class HypercombHiveTreeReader {
           // TypeScript is read through the package's hosts, into memory, or
           // not at all.
           if (!named?.known && isTypescriptAtomText(new TextDecoder().decode(bytes.subarray(0, 64)))) return { ok: false, root, code: 'not-found' }
+        } else if ((followed = await followedLayerOfSig(sig, store, followBudget(options.signal), 'local').catch(error => {
+          if (options.signal?.aborted) throw error
+          return null
+        }))?.bytes) {
+          // A LAYER ENVELOPE IS NO RESOURCE, AND NOT A MISS EITHER (reach
+          // A1): `getResource` answers null for `{meta:1, layer:<sig>}`, so
+          // a read of a child's signature said not-found. It answers with the
+          // layer the envelope declares, followed one hop, hash-checked: its
+          // name, its children, its slots, as JSON the next read can walk.
+          type = 'application/json'
+          bytes = followed.bytes!
         } else {
           // A POOL'S MEMBER, KEPT INSIDE THE POOL (hive-pool-read.ts): a
           // signature a `pool` read listed and no store or host root holds is

@@ -11,7 +11,14 @@
 //   · the lists participants CONTRIBUTED for the name (`list:<sign(name)>`);
 //   · the tiles of that name publishers PUBLISHED (`pictures:<sign(name)>`):
 //     their child names as values, and each tile's own layer by signature,
-//     which `read <signature>` opens to walk into that hive.
+//     which `read <signature>` opens to walk into that hive;
+//   · when neither pool holds anything for the name, the creations the hosts
+//     PUBLISHED under it (`host:publications`, `host:offerings`), matched by
+//     molecule address: a published root that wears no picture is in neither
+//     pool, and was never found by its name (reach A5).
+//
+// Every tile found is attributed to the hosts that led to it
+// (found-hosts.ts), so a later `read` or `take` asks there first.
 //
 // `pool` cannot answer this: those two pools list publisher KEYS, and each
 // key's word is read from that publisher's own signed index. This read does
@@ -24,9 +31,10 @@
 //
 // Pure apart from `liveExploreDeps`.
 
-import { feedNeed, liveFeedDeps, mergeFeeds, type Feed, type FeedDeps, type FeedOptions, type FeedVia } from '../sharing/need-feeds.js'
+import { HOST_DEADLINE_MS, feedNeed, liveFeedDeps, mergeFeeds, publishedUnder, type Feed, type FeedDeps, type FeedOptions, type FeedVia } from '../sharing/need-feeds.js'
 import { needListKey } from '../sharing/need-lists.js'
 import { networkHosts } from '../sharing/network-hosts.js'
+import { noteFoundAt } from './found-hosts.js'
 
 /** A name a model may explore: one tile name, never a route or an address. */
 export const EXPLORE_NAME_MAX = 64
@@ -52,17 +60,24 @@ export type HypercombExploreRead =
      *  list (`offer`), a published tile (`tile`), or both. */
     readonly values: readonly { readonly text: string; readonly hosts: readonly string[]; readonly publishers: number; readonly via: readonly FeedVia[] }[]
     readonly total: number
-    /** Published tiles of that name: each publisher's layer, by signature. */
-    readonly tiles: readonly { readonly sig: string; readonly by: string; readonly hosts: readonly string[] }[]
+    /** Published tiles of that name: each publisher's layer, by signature —
+     *  from a picture pool (`tile`), or, when both pools are empty, the head
+     *  of a creation a host published under the name (`publication`). */
+    readonly tiles: readonly { readonly sig: string; readonly by: string; readonly hosts: readonly string[]; readonly via: ExploreTileVia }[]
     readonly truncated: boolean
   }
   | { readonly ok: false; readonly root: string; readonly code: 'not-a-name' | 'no-hosts' | 'unavailable' }
+
+/** How a tile was found: a pictures pool, or a host's published creations. */
+export type ExploreTileVia = 'tile' | 'publication'
 
 export interface ExploreReadDeps {
   /** Every host this hive can ask. */
   hosts(): Promise<readonly string[]>
   /** The feed reads, asked of those hosts. */
   feed(hosts: readonly string[]): FeedDeps
+  /** Where a tile was found (found-hosts.ts). Defaults to the page's map. */
+  note?(sig: string, hosts: readonly string[]): void
 }
 
 export const liveExploreDeps: ExploreReadDeps = {
@@ -100,11 +115,27 @@ export const readExplore = async (
   } catch { return { ok: false, root, code: 'unavailable' } }
   if (!hosts.length) return { ok: false, root, code: 'no-hosts' }
 
-  let feeds: Feed[]
+  const feedDeps = deps.feed(hosts)
+  const timing = options.deadlineMs ? { deadlineMs: options.deadlineMs } : {}
+  // ONE DEADLINE FOR THE WHOLE READ: the published fallback gets what the
+  // feeds left of it, never a second window of its own.
+  const budget = options.deadlineMs ?? HOST_DEADLINE_MS
+  const started = feedDeps.now()
+  const stop = (): never => { throw new DOMException('The Hypercomb explore read was stopped', 'AbortError') }
+  // A stop ends the wait at once, whatever a host is still doing.
+  let onStop: (() => void) | undefined
+  const stopping = new Promise<'stopped'>(resolve => {
+    onStop = () => resolve('stopped')
+    options.signal?.addEventListener('abort', onStop, { once: true })
+  })
+  const release = (): void => { if (onStop) options.signal?.removeEventListener('abort', onStop) }
+  let said: Feed[] | 'stopped' | null
   try {
-    feeds = await feedNeed(name, () => {}, deps.feed(hosts), options.deadlineMs ? { deadlineMs: options.deadlineMs } : {})
-  } catch { return { ok: false, root, code: 'unavailable' } }
-  if (options.signal?.aborted) throw new DOMException('The Hypercomb explore read was stopped', 'AbortError')
+    said = await Promise.race([feedNeed(name, () => {}, feedDeps, timing), stopping])
+  } catch { said = null }
+  if (said === 'stopped' || options.signal?.aborted) { release(); stop() }
+  if (!said || said === 'stopped') { release(); return { ok: false, root, code: 'unavailable' } }
+  const feeds = said
 
   // Someone else's words: data. A value holding a control character is no
   // name; it is dropped, never cut, so nothing reads as a break in a prompt.
@@ -119,8 +150,18 @@ export const readExplore = async (
     }
   }
   // Most carried first, then by signature: stable, so two reads agree.
-  const tiles = [...bySig].map(([sig, tile]) => ({ sig, by: tile.by, hosts: tile.hosts.sort() }))
+  let tiles = [...bySig].map(([sig, tile]) => ({ sig, by: tile.by, hosts: tile.hosts.sort(), via: 'tile' as ExploreTileVia }))
     .sort((a, b) => b.hosts.length - a.hosts.length || (a.sig < b.sig ? -1 : 1))
+  // NOTHING IN EITHER POOL: what the hosts published under the name.
+  const left = budget - Math.max(0, feedDeps.now() - started)
+  if (!values.length && !tiles.length && left > 0) {
+    tiles = (await publishedUnder(name, feedDeps, { deadlineMs: left, ...(options.signal ? { signal: options.signal } : {}) }).catch(() => []))
+      .map(tile => ({ sig: tile.sig, by: tile.by, hosts: [...tile.hosts], via: tile.via as ExploreTileVia }))
+  }
+  release()
+  if (options.signal?.aborted) stop()
+  const note = deps.note ?? noteFoundAt
+  for (const tile of tiles) note(tile.sig, tile.hosts)
   return {
     ok: true, root: rootOf(name), name,
     hosts: feeds.map(feed => ({ host: feed.host, state: stateOf(feed), values: feed.values.length, publishers: feed.publishers }))

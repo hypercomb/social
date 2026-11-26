@@ -1840,6 +1840,10 @@ export class PublishStatusDrone extends Drone {
       result.status === 'confirmed'
         ? 'Staged — its host is serving it. Publish it live from your community.'
         : 'Staged — its host has not served it back yet. This row re-checks on its own.')
+    // The branch left without a picture entry is named (reach A6).
+    if (result.pictureGap) this.#toast('info', 'publish.picture-gap',
+      `${result.pictureGap.branch} was published without its picture entry — ${result.pictureGap.unread.length} of its documents are neither on this device nor on its hosts.`,
+      { branch: result.pictureGap.branch, count: result.pictureGap.unread.length })
     // THE ACT IS THE TRUTH THE ROW PAINTS NOW (audit 2026-10-23): the index
     // write just landed, so the row says so at once — the republish button
     // goes with it — instead of waiting out a sweep that read its snapshots
