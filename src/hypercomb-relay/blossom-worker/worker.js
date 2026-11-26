@@ -6214,6 +6214,26 @@ function nameDeepPlaces(env, pubkey, evt, ctx) {
 // so two places publishing at once cannot drop each other's change. `prev` is
 // honoured whenever present; two writes landing in the same instant can still
 // race, as the created_at rule always could.
+/** What a held index's roots say about its publisher, written into the pools
+ *  that list them (translators, assessors, attesters, pictures, contributions,
+ *  details, lists, events, follows, shared pools). Each pass only adds what is
+ *  missing, and one that fails leaves the rest to run. After the answer when
+ *  the request can wait on it (ctx.waitUntil outlives a caller that hangs up);
+ *  awaited otherwise, so a caller with no ctx sees them written. */
+const INDEX_NOTES = [
+  noteTranslators, noteAssessors, noteAttesters, notePicturePublishers, notePageContributors,
+  noteDetailSpeakers, noteListOfferers, noteEvents, noteFollows, noteSharedPools,
+]
+async function noteAfterAnswer(env, pubkey, evt, ctx) {
+  const noting = (async () => {
+    for (const note of INDEX_NOTES) {
+      try { await note(env, pubkey, evt) } catch { /* the next write of this index notes it again */ }
+    }
+  })()
+  if (typeof ctx?.waitUntil === 'function') { ctx.waitUntil(noting); return }
+  await noting
+}
+
 async function putHive(request, env, pubkey, ctx) {
   const auth = await verifyNip98(request, parseAuthEvent(request), 'PUT', env)
   if (!auth.ok) return text(401, auth.reason)
@@ -6236,6 +6256,9 @@ async function putHive(request, env, pubkey, ctx) {
   if (stored) {
     if (String(stored.id || '') === String(evt.id || '')) {
       await nameDeepPlaces(env, pubkey, evt, ctx)
+      // A retry of the index held: its notes may have been cut off with the
+      // first write, so they run again (each one only adds what is missing).
+      await noteAfterAnswer(env, pubkey, evt, ctx)
       return await advancePublishedLocations(env, pubkey, evt)
         ? text(200, 'index already current')
         : text(503, 'signed index is held but a route location is not current; retry this index')
@@ -6259,16 +6282,13 @@ async function putHive(request, env, pubkey, ctx) {
   // the handler — so naming last meant a held index whose deep names were
   // never asked for (2026-11-25, 125 roots). waitUntil outlives the hang-up.
   await nameDeepPlaces(env, pubkey, evt, ctx)
-  await noteTranslators(env, pubkey, evt)
-  await noteAssessors(env, pubkey, evt)
-  await noteAttesters(env, pubkey, evt)
-  await notePicturePublishers(env, pubkey, evt)
-  await notePageContributors(env, pubkey, evt)
-  await noteDetailSpeakers(env, pubkey, evt)
-  await noteListOfferers(env, pubkey, evt)
-  await noteEvents(env, pubkey, evt)
-  await noteFollows(env, pubkey, evt)
-  await noteSharedPools(env, pubkey, evt)
+  // The notes decide nothing about this answer, and on a big index they were
+  // most of its time: measured with jwize's 126-root index at 25 ms a storage
+  // call, 170 calls one after another (pictures and events nearly all of it),
+  // past the hive's eight seconds, so the hive said "host unreachable" for a
+  // write that had landed and the hang-up cut the notes off. They run after
+  // the answer now; only the check below can still refuse it.
+  await noteAfterAnswer(env, pubkey, evt, ctx)
   if (!await advancePublishedLocations(env, pubkey, evt)) {
     return text(503, 'signed index is held but a route location is not current; retry this index')
   }

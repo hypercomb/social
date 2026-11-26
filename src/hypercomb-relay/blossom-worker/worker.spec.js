@@ -2372,6 +2372,39 @@ test('writing an index that names i18n:<locale> lists its signer as a translator
   assert.equal(await member('hive:indexes', assessor), true)
 })
 
+test('an index write answers once the index is held: its notes run after the answer and still land', async () => {
+  // Measured with jwize's 126-root index: the notes took 170 storage calls one
+  // after another, past the hive's eight seconds, so a write that landed was
+  // reported "host unreachable" and the hang-up cut the notes off.
+  const CONTENT = contentBag()
+  const translators = await sha256Hex('i18n:ja')
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  const slowNotes = new Proxy(CONTENT, {
+    get(target, prop) {
+      const value = target[prop]
+      if (prop !== 'put') return typeof value === 'function' ? value.bind(target) : value
+      return async (key, ...rest) => {
+        if (String(key).startsWith(`${translators}/`)) await gate
+        return value.call(target, key, ...rest)
+      }
+    },
+  })
+  const env = { SITE_BINDINGS: '{}', HIVES: kvMap(), CONTENT: slowNotes }
+  const handedOff = []
+  const ctx = { waitUntil: (work) => { handedOff.push(work) }, passThroughOnException() {} }
+  const url = `https://content.hypercomb.com/${INDEXES}/${assessor}`
+  const body = JSON.stringify(await indexBy(assessorKey, { 'i18n:ja': 'f'.repeat(64) }))
+  const response = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', assessorKey) }, body }), env, ctx)
+  assert.equal(response.status, 201)
+  const member = () => CONTENT.held.has(`${translators}/${assessor}`)
+  assert.equal(member(), false, 'answered while the note still waits')
+  assert.ok(handedOff.length >= 1, 'the notes were handed to waitUntil')
+  release()
+  await Promise.all(handedOff)
+  assert.equal(member(), true, 'the note landed after the answer')
+})
+
 test('a locale is listed from every verified index, at the pool\'s own address, with the older KV lists drained in', async () => {
   const [catalog, missingRecord, stale] = ['c'.repeat(64), 'd'.repeat(64), 'e'.repeat(64)]
   const HIVES = kvMap(new Map([
@@ -8005,7 +8038,9 @@ test('a deep name is asked for as soon as the index is held, before the bookkeep
     worker.fetch(request, env, ctx)
     for (let i = 0; i < 50 && !handedOff.length; i++) await new Promise((resolve) => setTimeout(resolve, 5))
     assert.ok(held, 'the index was held')
-    assert.equal(handedOff.length, 1, 'the naming was handed off while the bookkeeping still stalls')
+    // The naming is handed off FIRST; the bookkeeping (stalled here) is handed
+    // off after it, so the answer never waits on it either.
+    assert.ok(handedOff.length >= 1, 'the naming was handed off while the bookkeeping still stalls')
     await handedOff[0]
     assert.deepEqual(cf.domains.map((d) => d.hostname), [DEEP])
   })
