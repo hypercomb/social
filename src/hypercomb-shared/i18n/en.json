@@ -222,6 +222,7 @@
   "camera.flip": "switch camera",
   "controls.zoom-out": "zoom out",
   "controls.zoom-in": "zoom in",
+  "controls.zoom-slider": "Tile size",
   "controls.pin": "pin",
   "controls.view-menu": "view",
   "controls.fit-now": "fit now",
