@@ -312,16 +312,18 @@ const STYLE = `
   border-radius:var(--hc-radius-control,2px);background:rgba(var(--hc-panel-pane,12,28,46),0.96);box-shadow:0 0 0 1px rgba(var(--shelf),0.5);
   color:var(--hc-window-ink-loud,currentColor);font-family:var(--hc-font,system-ui);font-size:0.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 /* THE RINGS: one line each — the name, then what it holds, cut to the line. */
-.rings{position:relative;max-height:16rem;overflow-y:auto;margin:0;padding:0.3rem 0 0.1rem;list-style:none;
+/* THE DIVIDER is balanced: one --inset above it (the gap under the top row)
+   and one below it, and the open content shares the top row's side edges. */
+.rings{position:relative;max-height:16rem;overflow-y:auto;margin:0;padding:var(--inset,0.6rem) 0 0;list-style:none;
   border-top:1px solid rgba(var(--shelf),0.25);}
-.faces{display:flex;align-items:center;gap:0.5rem;padding:0 0.2rem 0.3rem;}
+.faces{display:flex;align-items:center;gap:0.5rem;padding:0 0 0.3rem;}
 .size{display:inline-flex;align-items:center;gap:0.35rem;margin-left:auto;font-family:var(--hc-mono,system-ui);font-size:0.65rem;letter-spacing:0.1em;text-transform:uppercase;opacity:0.8;}
 .size input{width:8rem;margin:0;accent-color:rgb(var(--shelf));cursor:pointer;}
 .face-btn{appearance:none;border:1px solid rgba(var(--shelf),0.3);border-radius:1px;background:none;color:inherit;
   font-family:var(--hc-mono,system-ui);font-size:0.65rem;letter-spacing:0.1em;text-transform:uppercase;padding:0.15rem 0.55rem;cursor:pointer;opacity:0.7;}
 .face-btn:hover{opacity:1;}
 .face-btn.on{opacity:1;color:rgb(var(--shelf));border-color:rgba(var(--shelf),0.8);background:rgba(var(--shelf),0.14);}
-.ring{display:flex;align-items:center;gap:0.4rem;height:1.9rem;padding:0 0.2rem;border-radius:var(--hc-radius-control,2px);}
+.ring{display:flex;align-items:center;gap:0.4rem;height:1.9rem;padding:0;border-radius:var(--hc-radius-control,2px);}
 .ring.current{background:rgba(var(--shelf),0.14);}
 .ring-name,.ring-items,.ring-new{appearance:none;border:0;background:none;color:inherit;font:inherit;cursor:pointer;text-align:left;padding:0 0.3rem;height:1.6rem;border-radius:var(--hc-radius-control,2px);}
 .ring-name{flex:0 0 7rem;color:rgb(var(--shelf));overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
