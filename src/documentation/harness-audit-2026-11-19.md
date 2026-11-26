@@ -139,9 +139,9 @@ Replacement first, then what it unlocks. Each step is a package update.
 **1. Carry more in one round, inside the text fence.** The transport is decided: text only (see the correction above). The cost the audit measured was never the fence itself but how little one round carried.
 
 - Done in #200: the reads of one block run together, and one reply may write up to six files, each still its own row in Execution.
-- Still open: a do block and a write block in one reply; raising the 4,096-token output cap for a work round, which bounds what several write blocks can hold; several write blocks while Jev judges (today only the first is taken).
+- Done 2026-11-25: a do block and write blocks in one reply, each its own step in the order written; a work round that may write asks for 16,384 tokens of answer, and a host that refuses it answers plainly; several write blocks while Jev judges, each block judged on its own.
 - Not to do: mixing a read with a change in one reply. "Read first, then change" is a rule of the hive, and a change made before its read came back has not seen it.
-- The native tool plumbing with no caller (`asst/llm-dispatch.ts:583-640`, `asst/providers/openai-shape.ts:130`, the `tools` types in the chat window) is now dead by decision and can be removed.
+- The native tool plumbing with no caller (`asst/llm-dispatch.ts:583-640`, `asst/providers/openai-shape.ts:130`, the `tools` types in the chat window) was dead by decision and is removed (2026-11-25).
 
 **2. Say what happened after every change.** Make the page report the general rule: after any change, the model receives what the hive observed, not only which lines ran. For module drafts that means a type check and the parse result; for pages, the frame watch in an ordinary hive as well as on a managed door; and a picture of the page for a model that sees.
 

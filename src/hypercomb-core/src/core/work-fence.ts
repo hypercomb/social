@@ -39,12 +39,20 @@ export type WorkRequest = {
   /** A write only: the write blocks after the first, each kept whole, in the
    *  order written. One reply may write several files (WRITES_PER_REPLY). */
   readonly more?: readonly (readonly string[])[]
+  /** A reply that carried change blocks AND write blocks: every one of them,
+   *  in the order written. `lines` and `more` then hold its writes only. */
+  readonly steps?: readonly WorkStep[]
 }
+
+/** One block of a reply that changes several things: a change block's lines
+ *  as canonical grammar, or a write block kept whole. */
+export type WorkStep = { readonly kind: 'do' | 'write'; readonly lines: readonly string[] }
 
 /** How many write blocks one reply may carry. A reply used to carry exactly
  *  one, so a change across a page, its script and its styles cost three
  *  rounds; each block is still its own file, its own row in Execution and its
- *  own hand. More than this, or any block left open, and none is run. */
+ *  own hand. More than this, or any block left open, and none is run. A
+ *  reply that mixes change blocks with write blocks counts both. */
 export const WRITES_PER_REPLY = 6
 
 export type SplitWork = {
@@ -614,6 +622,22 @@ export const splitWork = (text: string): SplitWork => {
   const writes = blocks.filter(block => block.kind === 'write')
   const held = changes.length || tables.length || writes.length ? { heldDo: true as const } : {}
   if (reads.length) return { prose, request: { kind: 'read', lines: reads }, ...held, ...left }
+  // CHANGE AND WRITE IN ONE REPLY: make the tile, then write its page. Each
+  // block is its own step, run in the order written; a table still wins
+  // over both, and holds them.
+  if (writes.length && changes.length && !tables.length) {
+    const ordered = blocks.filter(block => block.kind === 'do' || block.kind === 'write')
+    const valid = ordered.length <= WRITES_PER_REPLY && writes.every(block => block.end < lines.length)
+    const steps: WorkStep[] = ordered
+      .map((block): WorkStep => block.kind === 'write'
+        ? { kind: 'write', lines: block.body }
+        : { kind: 'do', lines: block.body.map(line => workLineGrammar(line, 'do')).filter(Boolean) })
+      .filter(step => step.lines.length > 0)
+    const more = writes.slice(1).map(block => block.body)
+    return { prose, request: valid
+      ? { kind: 'write', lines: writes[0].body, ...(more.length ? { more } : {}), steps }
+      : { kind: 'write', lines: [] }, ...left }
+  }
   if (writes.length) {
     const valid = writes.length <= WRITES_PER_REPLY && writes.every(block => block.end < lines.length)
     const more = valid ? writes.slice(1).map(block => block.body) : []
