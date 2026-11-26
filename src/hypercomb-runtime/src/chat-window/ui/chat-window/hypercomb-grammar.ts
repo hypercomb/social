@@ -27,7 +27,7 @@ export {
   HypercombPlanQueue, HypercombGrammarError, HypercombActionExecutionError, executeHypercombPlan,
 } from '@hypercomb/core'
 export type {
-  HypercombMachineGrammar, HypercombBehaviour, HypercombToolCall, HypercombFunctionTool, HypercombAction, HypercombActionPlan, HypercombActionReceipt, HypercombBehaviourExecutor,
+  HypercombMachineGrammar, HypercombBehaviour, HypercombAction, HypercombActionPlan, HypercombActionReceipt, HypercombBehaviourExecutor,
 } from '@hypercomb/core'
 
 // THE GRANT THIS CHAT WORKS UNDER (core/managed-page.ts). Core's gate reads

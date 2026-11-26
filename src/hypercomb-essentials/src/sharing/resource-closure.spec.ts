@@ -7,6 +7,7 @@
 // backup can restore to nothing. These specs pin the descent.
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { dependencyDraftsListingBytes } from './decoration-closure.js'
 
 ;(window as unknown as { ioc: unknown }).ioc = {
   register: () => void 0,
@@ -150,5 +151,32 @@ describe('resource closure', () => {
 
     expect(stats).toEqual({ leaves: 2, failed: 0, truncated: 0, mirrored: 0, alreadyMirrored: 0, mirrorFailed: 0, unresolved: [] })
     expect(fetched).toHaveLength(2)
+  })
+})
+
+// HOME, HELD (jwize, 2026-11-20): a `module:drafts` record's parts are leaves.
+// A draft root names the trunk it was made over and the trunk's dependencies,
+// and its folder layer the trunk's other modules; the card's host holds none
+// of them, and a walk must not go asking for them.
+describe('a module:drafts record', () => {
+  // Dependency drafts ride in a record of their own kind, read the same way.
+  it.each(['module:drafts', 'module:dependency-drafts'])('holds its parts and never descends through them (%s)', async kind => {
+    const RECORD = SIG('1'), ROOT = SIG('2'), LAYER = SIG('3'), PART = SIG('4')
+    const TRUNK = SIG('5'), TRUNK_DEPENDENCY = SIG('6'), TRUNK_BEE = SIG('7'), LISTING = SIG('8')
+    const drafts = [{ root: ROOT, layer: LAYER, from: '', parts: [PART] }], refs = [LAYER, PART, ROOT]
+    // Dependency drafts sit behind one listing the record names alone (decoration-closure.ts).
+    const dependency = kind === 'module:dependency-drafts'
+    served = new Map<string, Uint8Array>([
+      [RECORD, json(dependency ? { kind, appliesTo: ['card'], payload: { listing: LISTING }, refs: [LISTING] } : { kind, appliesTo: ['card'], payload: { drafts }, refs })],
+      ...(dependency ? [[LISTING, dependencyDraftsListingBytes({ drafts, refs })] as [string, Uint8Array]] : []),
+      [ROOT, json({ draft: { of: TRUNK, path: 'games', section: 's', from: '', to: PART, kind: 'bee', at: 1 }, dependencies: [TRUNK_DEPENDENCY] })],
+      [LAYER, json({ name: 'games', cells: [], bees: [`${PART}.js`, `${TRUNK_BEE}.js`] })],
+      [PART, new TextEncoder().encode('export const x = 1')],
+    ])
+    const broker = makeBroker()
+    const stats = await broker.adoptResources([RECORD], { deepResources: true, quiet: true })
+    for (const part of [ROOT, LAYER, PART, ...(dependency ? [LISTING] : [])]) expect(fetched).toContain(part)
+    for (const outside of [TRUNK, TRUNK_DEPENDENCY, TRUNK_BEE]) expect(fetched).not.toContain(outside)
+    expect(stats.failed).toBe(0)
   })
 })

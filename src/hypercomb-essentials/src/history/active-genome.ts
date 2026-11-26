@@ -64,6 +64,9 @@ export type ActiveGenomeContent = {
   bytes: number
   /** Parsed JSON when the resource is expandable; absent for opaque bytes. */
   value?: unknown
+  /** The parts a dependency drafts listing names (sharing/decoration-closure.ts
+   *  `dependencyDraftsListingParts`); absent for any other resource. */
+  listing?: readonly string[]
 }
 
 export type ActiveGenomeSource = {
@@ -301,6 +304,40 @@ export async function collectActiveGenome(
           ? await decorationClosureSigs(bytes, async () => null)
           : nestedResourceSigs(bytes)
         for (const reachedSig of reached) {
+          // A `module:drafts` record's parts (sharing/site-drafts.ts) are
+          // leaves, never walked — as the publish closure treats them
+          // (hypercomb-shim managed-publish.ts `part`): a draft root or its
+          // folder layer, flat at the root, or a module in the bees pool. A
+          // draft root names the trunk it was made over and the modules it
+          // came from, and the folder layer the trunk's other modules; none of
+          // that is the card's to carry.
+          // A `module:dependency-drafts` record (dependency drafts) is read the
+          // same way: its one part is its listing, and what that lists are parts.
+          if (kind === 'module:drafts' || kind === 'module:dependency-drafts') {
+            const parts = new Set<string>()
+            const pushPart = async (partSig: string): Promise<void> => {
+              if (parts.has(partSig)) return
+              parts.add(partSig)
+              let part = memo.resources.get(partSig) ?? null
+              if (!part) {
+                part = await source.resource(partSig)
+                if (part) memo.keep(memo.resources, partSig, part)
+              }
+              if (part) {
+                share.objects.push({ kind: 'resource', sig: partSig, bytes: part.bytes })
+                if (kind === 'module:dependency-drafts') for (const listed of part.listing ?? []) await pushPart(listed)
+                return
+              }
+              const bytes = await poolBytes('bee', partSig)
+              if (bytes !== null) { share.objects.push({ kind: 'bee', sig: partSig, bytes }); return }
+              // A dependency draft's module sits in the dependencies pool.
+              const dependency = await poolBytes('dependency', partSig)
+              if (dependency !== null) share.objects.push({ kind: 'dependency', sig: partSig, bytes: dependency })
+              else share.missing.push({ kind: 'resource', sig: partSig })
+            }
+            await pushPart(reachedSig)
+            continue
+          }
           const inner = await expandResource(reachedSig, seen)
           share.objects.push(...inner.objects)
           share.missing.push(...inner.missing)

@@ -847,3 +847,48 @@ describe('a read the leg already answered', () => {
     expect(only(formatHypercombObservationReceipt(page(long), { memory, round: 2 }))['text']).toBe(long)
   })
 })
+
+// THE READS OF ONE BLOCK RUN TOGETHER (2026-11-19).
+describe('the reads of one block', () => {
+  const node = (segments: readonly string[]) => ({
+    ok: true as const, root: `/${segments.join('/')}`, name: segments[segments.length - 1] ?? 'hive',
+    layerSig: 'a'.repeat(64), children: [], snapshot: `snap-${segments.join('-')}`,
+  })
+
+  it('are all asked before any is answered, and answered in the order written', async () => {
+    let open = 0
+    let most = 0
+    const release: (() => void)[] = []
+    const reader: HypercombTreeReader = {
+      readTree: vi.fn(async () => ({ ok: false as const, root: '/', code: 'unavailable' as const })),
+      validateSnapshots: vi.fn(async () => true),
+      readNode: vi.fn(async segments => {
+        open++
+        most = Math.max(most, open)
+        await new Promise<void>(resolve => release.push(resolve))
+        open--
+        return node(segments)
+      }),
+    }
+    const plan = parseHypercombObservationGrammars(['/list /one', '/list /two', '/list /three'], [])
+    const running = executeHypercombObservationPlan(plan, reader)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(reader.readNode).toHaveBeenCalledTimes(3)
+    expect(most).toBe(3)
+    // Answered last to first: the receipt still reads first to last.
+    for (const done of release.reverse()) done()
+    const receipt = await running
+    expect(receipt.results.map(result => result.grammar)).toEqual(['/list /one', '/list /two', '/list /three'])
+    expect(receipt.snapshots).toEqual(['snap-one', 'snap-two', 'snap-three'])
+  })
+
+  it('refuse the block when one cannot be made', async () => {
+    const reader: HypercombTreeReader = {
+      readTree: vi.fn(async () => ({ ok: false as const, root: '/', code: 'unavailable' as const })),
+      validateSnapshots: vi.fn(async () => true),
+      readNode: vi.fn(async segments => node(segments)),
+    }
+    const plan = parseHypercombObservationGrammars(['/list /one', '/history /one'], [])
+    await expect(executeHypercombObservationPlan(plan, reader)).rejects.toThrow('cannot answer /history')
+  })
+})
