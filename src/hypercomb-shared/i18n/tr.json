@@ -1765,8 +1765,6 @@
   "move.rewound.message": "Geçmişe sarılmışken taşınamaz — düzenlemek için en son duruma dönün (Geri yükle).",
   "copy.rewound.title": "Geçmiş görüntüleniyor",
   "copy.rewound.message": "Geçmişe sarılmışken kopyalanamaz — düzenlemek için en son duruma dönün (Geri yükle).",
-  "controls.stage-private": "özel — paylaşmak istediklerini seçmek için tıkla",
-  "controls.stage-world": "neleri paylaştığını seç — host ve gizli anahtarı ayarlamak için tıkla",
   "controls.stage-host": "host, konum ve gizli anahtarı ayarla — özele dönmek için tıkla",
   "controls.leave-swarm": "sürüden ayrıl",
   "mesh-modal.skip-review": "bir dahaki sefere gizlilik incelemesini atla",

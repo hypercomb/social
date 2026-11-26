@@ -1765,8 +1765,6 @@
   "move.rewound.message": "Não é possível mover enquanto está no passado — volte ao mais recente (Restaurar) para editar.",
   "copy.rewound.title": "Visualizando histórico",
   "copy.rewound.message": "Não é possível copiar enquanto está no passado — volte ao mais recente (Restaurar) para editar.",
-  "controls.stage-private": "privado — clique para escolher o que compartilharia",
-  "controls.stage-world": "escolha o que está compartilhando — clique para definir host e segredo",
   "controls.stage-host": "defina host, localização e segredo — clique para voltar ao privado",
   "controls.leave-swarm": "sair do enxame",
   "mesh-modal.skip-review": "pular a revisão de privacidade na próxima vez",

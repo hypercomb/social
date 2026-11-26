@@ -1765,8 +1765,6 @@
   "move.rewound.message": "No se puede mover mientras se navega atrás — vuelve a lo último (Restaurar) para editar.",
   "copy.rewound.title": "Viendo historial",
   "copy.rewound.message": "No se puede copiar mientras se navega atrás — vuelve a lo último (Restaurar) para editar.",
-  "controls.stage-private": "privado — haz clic para elegir qué compartirías",
-  "controls.stage-world": "elige qué estás compartiendo — haz clic para establecer host y secreto",
   "controls.stage-host": "establece host, ubicación y secreto — haz clic para volver a privado",
   "controls.leave-swarm": "abandonar el enjambre",
   "mesh-modal.skip-review": "omitir la revisión de privacidad la próxima vez",

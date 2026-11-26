@@ -1765,8 +1765,6 @@
   "move.rewound.message": "Tidak bisa memindahkan saat menelusuri riwayat — kembali ke yang terbaru (Pulihkan) untuk mengedit.",
   "copy.rewound.title": "Melihat riwayat",
   "copy.rewound.message": "Tidak bisa menyalin saat menelusuri riwayat — kembali ke yang terbaru (Pulihkan) untuk mengedit.",
-  "controls.stage-private": "privat — klik untuk memilih apa yang ingin Anda bagikan",
-  "controls.stage-world": "pilih apa yang Anda bagikan — klik untuk mengatur host & rahasia",
   "controls.stage-host": "atur host, lokasi & rahasia — klik untuk kembali ke privat",
   "controls.leave-swarm": "tinggalkan swarm",
   "mesh-modal.skip-review": "lewati tinjauan privasi lain kali",

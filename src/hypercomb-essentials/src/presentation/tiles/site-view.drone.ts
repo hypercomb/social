@@ -14,7 +14,7 @@
 // page mounts. No bundle, no manifest, no path-table.
 
 import {
-  Drone, EffectBus, SITE_VIEW_IOC_KEY, RESOURCE_URL_PREFIX, I18N_IOC_KEY, THEME_IOC_KEY,
+  Drone, EffectBus, SITE_VIEW_IOC_KEY, RESOURCE_URL_PREFIX, I18N_IOC_KEY, THEME_IOC_KEY, isPostFragment,
   type I18nProvider,
 } from '@hypercomb/core'
 import { rewritePageRefs } from '../../sharing/decoration-closure.js'
@@ -812,7 +812,9 @@ export class SiteViewDrone extends Drone {
 
     // Strip any stale tile-selection hash so the address bar reads
     // cleanly while in website mode (where selection has no consumer).
-    if (window.location.hash) {
+    // An entry pool's code is not one: it stays, so a reload of the tab
+    // comes back to the form (documentation/open-entry-pools.md).
+    if (window.location.hash && !isPostFragment(window.location.hash)) {
       try {
         window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
       } catch { /* private mode / older browser — non-fatal */ }
@@ -2202,8 +2204,9 @@ export class SiteViewDrone extends Drone {
     // the address bar through every navigation (Navigation.go reads
     // `window.location.hash` and re-appends it on every push). Strip
     // it here before the lineage steps so the cleaned URL is what
-    // gets pushed.
-    if (window.location.hash) {
+    // gets pushed. An entry pool's code is kept, as in #reconcile: it
+    // rides every page of the site the phone walks.
+    if (window.location.hash && !isPostFragment(window.location.hash)) {
       try {
         window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
       } catch { /* private mode / older browser — non-fatal */ }

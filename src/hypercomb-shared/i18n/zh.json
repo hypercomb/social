@@ -1765,8 +1765,6 @@
   "move.rewound.message": "回溯时无法移动 — 返回到最新状态（恢复）后再编辑。",
   "copy.rewound.title": "正在查看历史",
   "copy.rewound.message": "回溯时无法复制 — 返回到最新状态（恢复）后再编辑。",
-  "controls.stage-private": "私密 — 点击选择要分享的内容",
-  "controls.stage-world": "选择要分享的内容 — 点击设置主机和密钥",
   "controls.stage-host": "设置主机、位置和密钥 — 点击返回私密模式",
   "controls.leave-swarm": "离开群组",
   "mesh-modal.skip-review": "下次跳过隐私审核",

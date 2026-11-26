@@ -1765,8 +1765,6 @@
   "move.rewound.message": "기록을 되돌린 상태에서는 이동할 수 없습니다 — 편집하려면 최신으로 돌아가세요 (복원).",
   "copy.rewound.title": "기록 보기 중",
   "copy.rewound.message": "기록을 되돌린 상태에서는 복사할 수 없습니다 — 편집하려면 최신으로 돌아가세요 (복원).",
-  "controls.stage-private": "비공개 — 클릭하여 공유할 항목 선택",
-  "controls.stage-world": "공유할 항목 선택 — 클릭하여 호스트 및 비밀키 설정",
   "controls.stage-host": "호스트, 위치 및 비밀키 설정 — 클릭하여 비공개로 돌아가기",
   "controls.leave-swarm": "스웜 나가기",
   "mesh-modal.skip-review": "다음에는 개인정보 검토 건너뛰기",
