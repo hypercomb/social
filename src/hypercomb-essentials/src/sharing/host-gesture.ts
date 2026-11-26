@@ -257,6 +257,15 @@ export const hostCurrentBranch = async (at?: readonly string[], own: Readonly<Re
           { count: result.missingFromIndex.length }))
     }
 
+    // A branch whose picture walk could not read a document (reach A6) is
+    // named, never dropped: its picture is offered to no reader yet.
+    if (result.pictureGap) {
+      toast('info', t(i18n, 'host.title', 'Publish branch'),
+        t(i18n, 'publish.picture-gap',
+          '{branch} was published without its picture entry — {count} of its documents are neither on this device nor on its hosts.',
+          { branch: result.pictureGap.branch, count: result.pictureGap.unread.length }))
+    }
+
     console.log(`[host] "${name}" sealed=${result.sealed.slice(0, 12)}… index=${result.host}/<sign('hive:indexes')>/${result.pubkey.slice(0, 12)}… link=${result.url} status=${result.status}`)
     return true
   }

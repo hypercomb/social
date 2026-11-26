@@ -284,6 +284,30 @@ test('a page carries the head of its package pool, and its bundled assets reuse 
   assert.deepEqual(reads, [])
 })
 
+test('a door labels its package pool listing and its markers as text, never a page', async () => {
+  const { env } = await fixture()
+  const pool = await sha256Hex('host:packages')
+  const pkg = 'e'.repeat(64)
+  // The asset store types the listing as its directory page (seen live on a
+  // card door, 2026-11-25), and the marker with no type at all.
+  env.ASSETS.fetch = async (request) => {
+    const path = new URL(request.url).pathname
+    if (path === `/content/${pool}/`) return new Response('00000000\n', { headers: { 'content-type': 'text/html' } })
+    if (path === `/content/${pool}/00000000`) return new Response(`${pkg}\nessentials`)
+    return new Response('<!doctype html><html><head><title>x</title></head><body></body></html>', { headers: { 'content-type': 'text/html' } })
+  }
+  const listing = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${pool}/`), env)
+  assert.equal(listing.status, 200)
+  assert.equal(listing.headers.get('content-type'), 'text/plain; charset=utf-8')
+  assert.equal(await listing.text(), '00000000\n')
+  const marker = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${pool}/00000000`), env)
+  assert.equal(marker.headers.get('content-type'), 'text/plain; charset=utf-8')
+  assert.equal(await marker.text(), `${pkg}\nessentials`)
+  // Another pool under /content/ keeps the type the store gave it.
+  const other = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${'b'.repeat(64)}/`), env)
+  assert.notEqual(other.headers.get('content-type'), 'text/plain; charset=utf-8')
+})
+
 test('every name reads one instance head, and a file missing from the asset copy comes from the shared bin', async () => {
   const { env } = await fixture()
   const pkg = 'ab'.repeat(32)
@@ -372,7 +396,8 @@ test('a name served minified boots the minified copy, only while it was derived 
 test('the install index goes out as JSON, so the edge compresses it', async () => {
   const { env } = await fixture()
   const pool = await sha256Hex('install:index')
-  const other = await sha256Hex('host:packages')
+  // Not host:packages: its listing and markers are text (the package pool test).
+  const other = await sha256Hex('install:other')
   // Bytes, not a string: the asset server sends this file with no type at all.
   env.ASSETS.fetch = async () => new Response(new TextEncoder().encode('{"package":"x"}'))
   const index = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${pool}/${'e'.repeat(64)}`), env)

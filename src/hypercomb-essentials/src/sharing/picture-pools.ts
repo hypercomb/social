@@ -19,7 +19,7 @@
 // as a picture (peer-images.ts `imagePropsOf`), so this file never imports the
 // reader that imports it.
 
-import { moleculeAddress, registerPoolMeaning } from '@hypercomb/core'
+import { metaPayloadOf, moleculeAddress, registerPoolMeaning } from '@hypercomb/core'
 
 export const PICTURES_PREFIX = 'pictures:'
 /** Picture entries one publish may add. The index is read by every reader of
@@ -70,6 +70,21 @@ export const layerProps = async (layer: Record<string, unknown>, read: ReadJson)
 const readAt = async (sig: string, read: ReadJson): Promise<Record<string, unknown> | null> =>
   sig ? await read(sig) : null
 
+/** The layer a signature names, through ONE children envelope: a sealed head
+ *  carries each child as `{ meta: 1, layer: <sig>, relation: 'children' }`,
+ *  so a walk that read the envelope as the tile stopped at the branch's root
+ *  and offered no picture below it. Answers the layer's OWN signature, the
+ *  one a picture entry names. Null when nothing can be read. */
+export const layerAt = async (sig: string, read: ReadJson): Promise<{ sig: string; layer: Record<string, unknown> } | null> => {
+  const doc = await read(sig)
+  if (!doc) return null
+  if (doc['meta'] !== 1) return { sig, layer: doc }
+  const payload = metaPayloadOf(doc)
+  if (payload?.kind !== 'layer' || payload.sig === sig) return null
+  const inner = await read(payload.sig)
+  return inner && inner['meta'] !== 1 ? { sig: payload.sig, layer: inner } : null
+}
+
 /** The picture a published layer wears, read the way the reader reads it:
  *  layer → its properties document (through the hop) → the image pointers. */
 export const layerPicture = async (layerSig: string, read: ReadJson, wears: WearsPicture): Promise<{ name: string; layer: Record<string, unknown> } | null> => {
@@ -97,13 +112,14 @@ export const pictureRootsOf = async (sealed: string, read: ReadJson, wears: Wear
     seen.add(sig)
     let layer: Record<string, unknown> | null = null
     try {
-      const pictured = await layerPicture(sig, read, wears)
-      if (pictured) {
-        layer = pictured.layer
-        const key = pictured.name ? await picturesKey(pictured.name) : null
-        if (key && !(key in roots)) roots[key] = sig
-      } else {
-        layer = await read(sig)
+      const found = await layerAt(sig, read)
+      if (!found) continue
+      layer = found.layer
+      const props = await layerProps(layer, read)
+      const name = String(layer['name'] ?? '').trim()
+      if (props && wears(props) && name) {
+        const key = await picturesKey(name)
+        if (key && !(key in roots)) roots[key] = found.sig
       }
     } catch { continue }
     for (const child of Array.isArray(layer?.['children']) ? layer['children'] as unknown[] : []) {

@@ -2,7 +2,8 @@
 // other hives contributed or published under it. It names a name, never a
 // host, and nothing of this hive goes out but the name's address.
 
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { forgetFoundHosts, foundHostsOf } from './found-hosts.js'
 import { readExplore, type ExploreReadDeps } from './hive-explore-read.js'
 import type { FeedDeps } from '../sharing/need-feeds.js'
 import { needListKey, needListPoolAddress } from '../sharing/need-lists.js'
@@ -81,8 +82,8 @@ describe('a name, explored across the hosts', () => {
     if (!read.ok) throw new Error('unreachable')
     // Alice's tile is on two hosts, so it comes first; a contributed list is not a tile.
     expect(read.tiles).toEqual([
-      { sig: sig(1), by: ALICE, hosts: ['one.test', 'two.test'] },
-      { sig: sig(2), by: BOB, hosts: ['one.test'] },
+      { sig: sig(1), by: ALICE, hosts: ['one.test', 'two.test'], via: 'tile' },
+      { sig: sig(2), by: BOB, hosts: ['one.test'], via: 'tile' },
     ])
   })
 
@@ -105,5 +106,102 @@ describe('a name, explored across the hosts', () => {
   it('says so when the hive can ask no hosts', async () => {
     expect(await readExplore('recipes', {}, { ...(await world()), hosts: async () => [] }))
       .toEqual({ ok: false, root: 'explore recipes', code: 'no-hosts' })
+  })
+})
+
+describe('where a tile was found is attributed (reach A4)', () => {
+  afterEach(() => { forgetFoundHosts(); delete (globalThis as { ioc?: unknown }).ioc })
+
+  it('tells the broker each tile with the hosts whose feed led to it, and remembers it for take', async () => {
+    const noted: [string, string[]][] = []
+    ;(globalThis as { ioc?: unknown }).ioc = {
+      get: (key: string) => key === '@diamondcoreprocessor.com/ContentBrokerDrone'
+        ? { hintDomainsForSig: (s: string, hosts: string[]) => { noted.push([s, hosts]) } }
+        : undefined,
+    }
+    await readExplore('recipes', {}, await world())
+    expect(noted).toContainEqual([sig(1), ['one.test', 'two.test']])
+    expect(noted).toContainEqual([sig(2), ['one.test']])
+    expect(foundHostsOf(sig(1))).toEqual(['one.test', 'two.test'])
+  })
+})
+
+describe('a published creation that wears no picture (reach A5)', () => {
+  afterEach(() => { forgetFoundHosts() })
+
+  it('is found among what the hosts published when both pools are empty', async () => {
+    const HEAD = 'd'.repeat(64)
+    const ledger = JSON.stringify({ sites: [
+      { host: 'hyperdex.one.test', lineage: 'knowledge/hyperdex', publishers: [{ pubkey: ALICE, head: HEAD }] },
+      { host: 'other.one.test', lineage: 'knowledge/hyperdex-two', publishers: [{ pubkey: BOB, head: sig(9) }] },
+    ] })
+    const note = vi.fn()
+    const read = await readExplore('hyperdex', {}, {
+      hosts: async () => ['one.test'],
+      note,
+      feed: hosts => ({
+        hosts: () => hosts,
+        listing: async () => ({ state: 'absent' }),
+        // The ledger says where to look; Alice's own signed index says it is her head.
+        roots: async (host, pubkey) => (host === 'one.test' && pubkey === ALICE ? { 'knowledge/hyperdex': HEAD } : null),
+        readJson: async () => null,
+        now: () => 0,
+        document: async () => ledger,
+      }),
+    })
+    if (!read.ok) throw new Error('unreachable')
+    expect(read.tiles).toEqual([{ sig: HEAD, by: ALICE, hosts: ['hyperdex.one.test', 'one.test'], via: 'publication' }])
+    expect(note).toHaveBeenCalledWith(HEAD, ['hyperdex.one.test', 'one.test'])
+  })
+
+  it('the fallback gets what the feeds left of the deadline, never a second window', async () => {
+    const started = Date.now()
+    const read = await readExplore('hyperdex', { deadlineMs: 400 }, {
+      hosts: async () => ['slow.test'],
+      note: () => {},
+      feed: hosts => ({
+        hosts: () => hosts,
+        // The pools take most of the window to say they are empty.
+        listing: async () => { await new Promise(resolve => setTimeout(resolve, 300)); return { state: 'absent' } },
+        roots: async () => null,
+        readJson: async () => null,
+        now: () => Date.now(),
+        // The ledger never answers.
+        document: () => new Promise<string | null>(() => {}),
+      }),
+    })
+    expect(read.ok).toBe(true)
+    // One 400 ms window for the whole read, not 300 + 400.
+    expect(Date.now() - started).toBeLessThan(600)
+  })
+
+  it('a stop during the fallback ends the read at once, and begins no further read', async () => {
+    const stop = new AbortController()
+    const asked: string[] = []
+    const reading = readExplore('hyperdex', { signal: stop.signal }, {
+      hosts: async () => ['one.test', 'two.test'],
+      note: () => {},
+      feed: hosts => ({
+        hosts: () => hosts,
+        listing: async (host, address) => { asked.push(`listing ${host} ${address.slice(0, 8)}`); return { state: 'absent' } },
+        roots: async () => null,
+        readJson: async () => null,
+        now: () => 0,
+        // one.test's ledger hangs; the stop lands while it does.
+        document: (host) => {
+          asked.push(`document ${host}`)
+          if (host === 'one.test') queueMicrotask(() => stop.abort())
+          return new Promise<string | null>(() => {})
+        },
+        member: async () => null,
+      }),
+    })
+    const started = Date.now()
+    await expect(reading).rejects.toMatchObject({ name: 'AbortError' })
+    // Held for no host's deadline (15 s by default).
+    expect(Date.now() - started).toBeLessThan(1_000)
+    const after = asked.length
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(asked.length).toBe(after)
   })
 })
