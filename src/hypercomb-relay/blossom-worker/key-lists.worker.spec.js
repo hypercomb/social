@@ -189,3 +189,24 @@ test('a listed key uploads as its anchor: the anchor is kept, the bytes are the 
   assert.equal(asAnchor.status, 201, asAnchor.headers.get('x-reason'))
   assert.equal(env.CONTENT.meta.get(sig)?.owner, ANCHOR)
 })
+
+test('a listed key writes a room member as its anchor: the member stays the device\'s own, the anchor is admitted and charged', async () => {
+  const env = hostEnv({ HOST_FRIENDS: ANCHOR })
+  await putChain(env, chain('the anchor adds a desktop'))
+  const pool = await sha256Hex('a classroom room')
+  const memberBy = async (name, room = pool) => {
+    const body = utf8.encode(JSON.stringify(await signed(name, 30567, [['pool', room], ['head', head]], '')))
+    return { body, url: `${HOST}/${room}/${await sha256Hex(body)}` }
+  }
+  const own = await memberBy('desktop')
+  const asSelf = await worker.fetch(new Request(own.url, { method: 'PUT', headers: { authorization: await nip98('desktop', own.url, 'PUT') }, body: own.body }), env)
+  assert.equal(asSelf.status, 403) // the desktop alone is nobody this host keeps
+  const asAnchor = await worker.fetch(new Request(own.url, { method: 'PUT', headers: { authorization: await nip98('desktop', own.url, 'PUT', ANCHOR) }, body: own.body }), env)
+  assert.equal(asAnchor.status, 201, asAnchor.headers.get('x-reason'))
+  assert.equal(env.CONTENT.meta.get(new URL(own.url).pathname.slice(1))?.owner, ANCHOR)
+  // Acting as the anchor never lets the device plant someone else's claim.
+  const other = await memberBy('phone', await sha256Hex('another room'))
+  const planted = await worker.fetch(new Request(other.url, { method: 'PUT', headers: { authorization: await nip98('desktop', other.url, 'PUT', ANCHOR) }, body: other.body }), env)
+  assert.equal(planted.status, 403)
+  assert.match(await planted.text(), /signed by another key/)
+})

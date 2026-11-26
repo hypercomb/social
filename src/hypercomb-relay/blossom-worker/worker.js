@@ -6685,7 +6685,11 @@ async function putRoomMember(request, env, pool, member) {
   let evt
   try { evt = JSON.parse(new TextDecoder().decode(body)) } catch { return text(400, 'body is not a JSON nostr event') }
   if (Number(evt?.kind) !== ROOM_MEMBER_KIND) return text(400, `wrong event kind (expected room member ${ROOM_MEMBER_KIND})`)
-  if (String(evt?.pubkey || '').toLowerCase() !== auth.pubkey) return text(403, 'member is signed by another key than the caller')
+  // The member is the signing DEVICE's own claim; the request may act as the
+  // anchor whose key list names that device (key-lists.js actingKey), and then
+  // the anchor is the one admitted and charged. For any other key the two are
+  // the same key, exactly as before.
+  if (String(evt?.pubkey || '').toLowerCase() !== (auth.signer ?? auth.pubkey)) return text(403, 'member is signed by another key than the caller')
   if (String(tagValue(evt, 'pool') || '').toLowerCase() !== pool) return text(400, 'member is not tagged with this pool')
   if (!(await verifyEventSig(evt))) return text(401, 'invalid member signature')
 

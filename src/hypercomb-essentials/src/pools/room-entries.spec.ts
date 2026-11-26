@@ -481,3 +481,37 @@ describe('roomAtom and roomStanding', () => {
     expect(roomStanding({ ...ana.deps, joined: () => false, host: () => '' })).toEqual({ joined: false, host: '', room })
   })
 })
+
+describe('a device that publishes for an anchor', () => {
+  it('asks the room\'s host for the anchor\'s key list before its first upload there', async () => {
+    // Seen live (11-26): a device added with `keys allow` meets the host as a
+    // stranger until the anchor's list is there, and every upload is refused.
+    const host = hostWorld()
+    const ana = participant(host, freshRoom())
+    const anchor = 'a'.repeat(64)
+    const world = globalThis as unknown as { ioc?: { get(key: string): unknown } }
+    const services: Record<string, unknown> = {
+      '@hypercomb.social/AnchorBinding': { ready: async () => undefined, anchor: () => anchor, sources: () => [] },
+      '@diamondcoreprocessor.com/NostrSigner': { knownPublicKeyHex: async () => ana.pubkey, getPublicKeyHex: async () => ana.pubkey },
+    }
+    world.ioc = { get: key => services[key] }
+    const order: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      order.push(`${init?.method ?? 'GET'} ${url}`)
+      if (url.endsWith(`/${anchor}`)) return new Response('', { status: 404 })
+      if (url.includes('?takes')) return Response.json({ takes: true })
+      return new Response('', { status: 201 })
+    }))
+    try {
+      const { putAtom: _atom, putMember: _member, ...overTheWire } = ana.deps
+      const shared = await shareRoomEntry(MEANING, { head: await ana.keep('soup'), page: pageOf('a') }, overTheWire)
+      expect(shared).toMatchObject({ ok: true })
+      const asked = order.findIndex(line => line.startsWith(`GET https://${HOST}/`) && line.endsWith(`/${anchor}`))
+      expect(asked).toBeGreaterThanOrEqual(0)
+      expect(asked).toBeLessThan(order.findIndex(line => line.includes('?takes') || line.startsWith('PUT ')))
+    } finally {
+      delete world.ioc
+      vi.unstubAllGlobals()
+    }
+  })
+})

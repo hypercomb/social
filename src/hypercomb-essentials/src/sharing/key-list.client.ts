@@ -222,6 +222,30 @@ export function anchorTagFor(url: string, own: string, deps: KeyListDeps = {}): 
   return anchorServes(host) ? ['anchor', anchor] : null
 }
 
+/** The tags a request to `url`, signed by this device, carries so the host takes
+ *  it as the anchor's: `[['anchor', <anchor>]]` once the host is seen holding the
+ *  anchor's list with this device on it, the list carried there FIRST when it has
+ *  not been seen yet (an upload that asks before the list is there meets a
+ *  stranger's key and is refused). `[]` for a device that is its own anchor, and
+ *  for a host the list cannot be carried to. Every signed upload asks this, so
+ *  no flow has to remember to carry before it writes. Never throws. */
+export async function anchorTagsFor(url: string, deps: KeyListDeps = {}): Promise<string[][]> {
+  try {
+    const binding = bindingOf(deps)
+    try { await binding?.ready?.() } catch { /* unbound */ }
+    if (!SIG_RE.test(String(binding?.anchor() ?? '').toLowerCase())) return []
+    const own = await ownKeyOf(signerOf(deps), true)
+    let tag = anchorTagFor(url, own, deps)
+    if (!tag) {
+      let host = ''
+      try { host = new URL(url).host } catch { return [] }
+      if (await carryKeyChain(host, deps) === 'unbound') return []
+      tag = anchorTagFor(url, own, deps)
+    }
+    return tag ? [tag] : []
+  } catch { return [] }
+}
+
 export type CarryResult = 'unbound' | 'held' | 'carried' | 'unlisted' | 'unreachable'
 
 /** Make sure `host` holds the anchor's chain with this device's key on it, by
