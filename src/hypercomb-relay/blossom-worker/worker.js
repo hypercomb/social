@@ -1813,9 +1813,16 @@ async function routeMetaForIndex(env, pubkey, evt) {
     const selected = bindings[zone].publishers.find(p => p.primary) || bindings[zone].publishers[0]
     if (selected?.pubkey !== pubkey) continue
     for (const [lineage, rawHead] of Object.entries(index.roots)) {
-      if (!DNS_LABEL_RE.test(lineage) || lineage === 'content') continue
+      // A nested lineage of DNS labels is a deep name, leaf first
+      // (attachDeepNames): its door's bag is advanced like a one-label
+      // place's. Left out, a bag a door wrote once named that day's head
+      // forever, and a disagreeing bag closes the door (2026-11-26: four
+      // jwize.com deep names answered "nothing published" for weeks).
+      const segments = lineage.split('/')
+      if (!segments.every((label) => DNS_LABEL_RE.test(label)) || lineage === 'content') continue
       const head = String(rawHead || '').toLowerCase()
-      const host = `${lineage}.${zone}`
+      const host = `${[...segments].reverse().join('.')}.${zone}`
+      if (host.length > 253) continue
       const resolved = resolveSite(scoped, host)
       if (SIG_RE.test(head) && resolved.implicit && resolved.site?.lineage === lineage
         && opensOn(index, lineage, host, scoped)) found.set(host, locationMeta(resolved.site, pubkey, head, index))
