@@ -7989,6 +7989,42 @@ test('a deep name already attached is left as it is, and a list that cannot be r
   })
 })
 
+// A hive gives the write eight seconds; a big index takes longer to note, and a
+// caller that hangs up cancels the handler. The naming is handed off the moment
+// the index is held, so bookkeeping that never finishes cannot stop it.
+test('a deep name is asked for as soon as the index is held, before the bookkeeping that follows', async () => {
+  const cf = fakeCloudflare({ zones: ['pluginthematrix.com'] })
+  const bag = contentBag()
+  let held = false
+  const stalled = new Proxy(bag, {
+    get(target, prop) {
+      const value = target[prop]
+      if (typeof value !== 'function') return value
+      return (...args) => {
+        if (held) return new Promise(() => {})
+        const answer = value.apply(target, args)
+        if (prop === 'put' && String(args[0]).startsWith(`${INDEXES}/`)) held = true
+        return answer
+      }
+    },
+  })
+  const env = claimEnv({ CONTENT: stalled })
+  const handedOff = []
+  const ctx = { waitUntil: (promise) => { handedOff.push(promise) }, passThroughOnException() {} }
+  await onCloudflare(cf, async () => {
+    const event = await deepIndex()
+    const url = `https://pluginthematrix.com/${INDEXES}/${event.pubkey}`
+    const request = new Request(url, { method: 'PUT',
+      headers: { authorization: await nip98(url, 'PUT', sk) }, body: JSON.stringify(event) })
+    worker.fetch(request, env, ctx)
+    for (let i = 0; i < 50 && !handedOff.length; i++) await new Promise((resolve) => setTimeout(resolve, 5))
+    assert.ok(held, 'the index was held')
+    assert.equal(handedOff.length, 1, 'the naming was handed off while the bookkeeping still stalls')
+    await handedOff[0]
+    assert.deepEqual(cf.domains.map((d) => d.hostname), [DEEP])
+  })
+})
+
 test('the empty page under a deep name says the route to publish', async () => {
   const page = await (await worker.fetch(new Request(`https://${DEEP}/`), { SITE_BINDINGS: JSON.stringify(ONE_ZONE), CONTENT: contentBag() })).text()
   assert.match(page, /nothing published at knowledge\.hyperdex\.pluginthematrix\.com/)
