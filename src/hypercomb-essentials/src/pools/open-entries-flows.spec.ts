@@ -241,6 +241,36 @@ describe('opening', () => {
     expect(!refused.ok && refused.reason).toContain('host said 413')
   })
 
+  it('carries on when the index write lost its answer but the key landed, keeping the nonce', async () => {
+    // Seen live: "host unreachable" while the host had already named the key.
+    const w = await world()
+    const write = w.deps.changeRoots!
+    w.deps.changeRoots = async (host, change) => {
+      await write(host, change)
+      return { ok: false, host: HOST, pubkey: '', createdAt: 0, dropped: {}, set: {}, reason: 'host unreachable' }
+    }
+    const opened = await openEntryPool(w.input, w.deps)
+    expect(opened.ok).toBe(true)
+    expect(w.nonces.size).toBe(1)
+    expect(w.records()).toHaveLength(1)
+  })
+
+  it('keeps the nonce and the record when the index write lost its answer and the index cannot be read again', async () => {
+    const w = await world()
+    const write = w.deps.changeRoots!
+    const read = w.deps.index!
+    let silent = false
+    w.deps.index = async (host, pubkey) => silent ? { ok: false, reason: 'unreachable' } : read(host, pubkey)
+    w.deps.changeRoots = async (host, change) => {
+      await write(host, change)
+      silent = true
+      return { ok: false, host: HOST, pubkey: '', createdAt: 0, dropped: {}, set: {}, reason: 'host unreachable' }
+    }
+    expect(await openEntryPool(w.input, w.deps)).toMatchObject({ ok: false, why: 'index-unknown' })
+    expect(w.nonces.size).toBe(1)
+    expect(w.records()).toHaveLength(1)
+  })
+
   it('refuses when the host does not take the first member', async () => {
     const w = await world({ put: () => ({ status: 403, said: 'this address belongs to another pool' }) })
     const opened = await openEntryPool(w.input, w.deps)

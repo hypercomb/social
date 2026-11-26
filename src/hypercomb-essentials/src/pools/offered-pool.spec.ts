@@ -7,6 +7,7 @@ import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
 import { SignatureService, registerPoolMeaning } from '@hypercomb/core'
 import {
   OFFERED_MAX_MEMBERS,
+  liveOfferedPublishDeps,
   offeredListBytes,
   offeredMembersOf,
   offeredRootKey,
@@ -214,6 +215,50 @@ describe('publishOfferedPool', () => {
     expect(done).toEqual({ ok: false, reason: 'example.com could not be reached' })
     expect(sent).toEqual([{ host: 'example.com', sig: one.sig, held: true }, { host: 'example.com', sig: listSig, held: true }])
     expect(kept.has(listSig)).toBe(true)
+  })
+
+  it('on a device that publishes for an anchor, asks the host for the anchor\'s key list before the first upload', async () => {
+    // Without the list there, the host meets this device's own key and refuses
+    // the upload ("does not accept uploads from this key"): seen live on a
+    // device added with `keys allow`, opening its first pool for posts.
+    const anchor = keyOf('a'), own = keyOf('d')
+    const order: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      order.push(`fetch ${String(input)}`)
+      return new Response('', { status: 404 })
+    }))
+    const services: Record<string, unknown> = {
+      '@hypercomb.social/Store': { putResource: async () => keyOf('0'), getResourceLocal: async () => null },
+      '@diamondcoreprocessor.com/HostSyncService': {
+        publishAtoms: async (host: string) => { order.push(`upload ${host}`); return { ok: true } },
+      },
+      '@hypercomb.social/AnchorBinding': { ready: async () => undefined, anchor: () => anchor, sources: () => [] },
+      '@diamondcoreprocessor.com/NostrSigner': { knownPublicKeyHex: async () => own, getPublicKeyHex: async () => own },
+    }
+    ;(globalThis as World).ioc = { get: key => services[key] }
+
+    const sent = await liveOfferedPublishDeps()!.publish('carry.example', [keyOf('1')], async () => null)
+
+    expect(sent).toEqual({ ok: true })
+    const asked = order.findIndex(line => line.startsWith('fetch ') && line.includes('carry.example') && line.endsWith(`/${anchor}`))
+    expect(asked).toBeGreaterThanOrEqual(0)
+    expect(asked).toBeLessThan(order.indexOf('upload carry.example'))
+  })
+
+  it('on a device that is its own anchor, uploads without asking for any key list', async () => {
+    const fetcher = vi.fn(async () => new Response('', { status: 404 }))
+    vi.stubGlobal('fetch', fetcher)
+    const uploads: string[] = []
+    const services: Record<string, unknown> = {
+      '@hypercomb.social/Store': { putResource: async () => keyOf('0'), getResourceLocal: async () => null },
+      '@diamondcoreprocessor.com/HostSyncService': { publishAtoms: async (host: string) => { uploads.push(host); return { ok: true } } },
+      '@diamondcoreprocessor.com/NostrSigner': { knownPublicKeyHex: async () => keyOf('d'), getPublicKeyHex: async () => keyOf('d') },
+    }
+    ;(globalThis as World).ioc = { get: key => services[key] }
+
+    expect(await liveOfferedPublishDeps()!.publish('own.example', [keyOf('1')], async () => null)).toEqual({ ok: true })
+    expect(uploads).toEqual(['own.example'])
+    expect(fetcher).not.toHaveBeenCalled()
   })
 })
 

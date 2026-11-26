@@ -4805,6 +4805,7 @@
   "pools.posts.refuse.hidden-unread": "非表示リストを読めなかったため、変更していません。",
   "pools.posts.refuse.hide-failed": "非表示リストを変更できませんでした。",
   "pools.posts.refuse.index": "ホスト上の署名付きインデックスが変更を受け付けませんでした ({said})。",
+  "pools.posts.refuse.index-unknown": "{host} の署名付きインデックスが応答しなかったため、プールが開いている可能性があります。プールバーに表示されているので、そこから閉じられます。",
   "pools.posts.refuse.index-unread": "{host} 上の署名付きインデックスを読めませんでした。",
   "pools.posts.refuse.index-unsafe": "{host} 上の署名付きインデックスを読めなかったため、何も変更していません。",
   "pools.posts.refuse.kept": "このハイブにプールを保存できませんでした。",

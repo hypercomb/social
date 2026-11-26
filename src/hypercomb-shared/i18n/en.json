@@ -5517,6 +5517,7 @@
   "pools.posts.refuse.hidden-unread": "Your list of hidden entries could not be read, so it was not changed.",
   "pools.posts.refuse.hide-failed": "The list of hidden entries could not be changed.",
   "pools.posts.refuse.index": "Your signed index on the host did not take the change ({said}).",
+  "pools.posts.refuse.index-unknown": "Your signed index on {host} did not answer, so the pool may be open. It is in the pools bar, where you can close it.",
   "pools.posts.refuse.index-unread": "Your signed index on {host} could not be read.",
   "pools.posts.refuse.index-unsafe": "Your signed index on {host} could not be read, so nothing was changed.",
   "pools.posts.refuse.kept": "The pool could not be kept in this hive.",

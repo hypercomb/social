@@ -620,9 +620,22 @@ export async function openEntryPool(input: OpenEntryPoolInput, deps?: OpenEntrie
       expect: { [keys.open]: null },
     }).catch((): ChangeHiveRootsResult => ({ ok: false, host, pubkey: '', createdAt: 0, dropped: {}, set: {}, reason: '' }))
     if (!written.ok) {
-      await live.records.write(before).catch(() => false)
-      live.nonces.drop(pool)
-      return indexRefusal(written)
+      // A write can land and still lose its answer (a bounded PUT that times out
+      // after the host took it): seen live, "host unreachable" with the key named.
+      // So the index is asked again before the nonce is let go. Named: the pool is
+      // open and this device carries on. Read and not named: the write did not
+      // land, so the nonce and the record go. Unread: nobody knows, so both stay
+      // and the pool is in the bar to close; dropping the nonce here would leave a
+      // pool the index names that can never show its code.
+      const after = await rootsOf(live, host, by)
+      if (after?.[keys.open] !== record) {
+        if (!after) {
+          return refused('index-unknown', t('pools.posts.refuse.index-unknown', 'Your signed index on {host} did not answer, so the pool may be open. It is in the pools bar, where you can close it.', { host }))
+        }
+        await live.records.write(before).catch(() => false)
+        live.nonces.drop(pool)
+        return indexRefusal(written)
+      }
     }
     if (input.replaces) {
       // The recycled pool's members go once the host has kept them 30 days: one listing asks.

@@ -28,7 +28,7 @@
 import { I18N_IOC_KEY, SignatureService, get, registerPoolMeaning, type I18nProvider } from '@hypercomb/core'
 import { HOST_CONCURRENCY, fetchWithDeadline, mapBounded } from '../sharing/bounded-fetch.js'
 import { clearHiveRoot, fetchHiveIndex, setHiveRoot } from '../sharing/hive-pointer.js'
-import { publisherKeyHex } from '../sharing/key-list.client.js'
+import { prepareAnchorHosts, publisherKeyHex } from '../sharing/key-list.client.js'
 import { isPublishNode, originOf, zoneDoor } from '../sharing/zone-door.js'
 import { readBodyCapped } from './bounded-body.js'
 
@@ -131,7 +131,15 @@ export const liveOfferedPublishDeps = (): OfferedPublishDeps | null => {
       const blob = await store.getResourceLocal?.(sig).catch(() => null) ?? await store.getResource?.(sig).catch(() => null) ?? null
       return blob ? new Uint8Array(await blob.arrayBuffer()) : null
     },
-    publish: (host, sigs, bytesOf) => publishAtoms(host, sigs, bytesOf),
+    // A device that publishes for an anchor uploads AS the anchor only to a host
+    // seen holding the anchor's key list with this device on it (anchorTagFor).
+    // The index write carries the list, but these atoms go up BEFORE it, so the
+    // list is carried here first; without it the host meets a stranger's key and
+    // refuses the upload. A no-op for a device that is its own anchor.
+    publish: async (host, sigs, bytesOf) => {
+      await prepareAnchorHosts([host]).catch(() => undefined)
+      return publishAtoms(host, sigs, bytesOf)
+    },
     stamp: (host, key, sig) => setHiveRoot(host, key, sig),
     clear: (host, key) => clearHiveRoot(host, key),
   }
