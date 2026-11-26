@@ -39,6 +39,14 @@
 // `shelf:placed` and the rows that landed leave the shelf; a row that failed
 // stays.
 //
+// THE STRIP (jwize, 2026-11-26): the shelf icon, a search, a names toggle, then
+// square icons that wrap to three rows (the name on hover, or on every icon
+// with the toggle on). A CLICK places the icon on the page on screen and it
+// leaves the strip in the same frame — a run of clicks must keep up with the
+// hand — while the placements go one at a time behind it. With names on, the
+// arrows walk the NAMED RINGS (context groups) and the list names, picks and
+// pins them; a ring that empties is used up and removed, unless pinned.
+//
 // A row let go on a Portals-window row adds the tile to that portal through
 // the index's own `portal-carry:drop`. A release back on the shelf is a
 // cancelled drag, never a write.
@@ -85,9 +93,9 @@
 // also shifted the canvas.) Rows on a slot already taken still update at once.
 
 import { EffectBus, I18N_IOC_KEY, POINTER_GESTURE_END, type I18nProvider } from '@hypercomb/core'
-import { listGroups, readGroup, startGroup } from '../../assistant/context-groups.js'
+import { deleteGroup, listGroups, readGroup, renameGroup, setGroupMembers, startGroup, type ContextGroup } from '../../assistant/context-groups.js'
 import { dropEntries, entryKey, takeEntries, type TrayEntry } from './quick-tray.entries.js'
-import { bouquetOf, entriesToMembers, membersToEntries, shelfType, tagSignature } from './quick-tray.ring.js'
+import { entriesToMembers, membersToEntries, tagSignature } from './quick-tray.ring.js'
 
 export const QUICK_TRAY_SURFACE = 'hc-quick-tray'
 
@@ -97,11 +105,8 @@ export const QUICK_TRAY_SURFACE = 'hc-quick-tray'
 const DRAG_THRESHOLD = 5
 /** How long a folded shelf stays open after a take, unless the pointer arrives. */
 const PEEK_MS = 4000
-/** A shelf this full asks to be kept as a group — the seven-tile flower: one
- *  at the heart and the six around it, the same shape as the quick menu ring. */
-const DEFAULT_FILL = 7
-const FILL_MIN = 2
-const FILL_MAX = 24
+/** A click's placement that has had no answer in this long comes back to the shelf. */
+const EJECT_TIMEOUT_MS = 8000
 const SIG_RE = /^[0-9a-f]{64}$/
 
 type LineageLike = { explorerSegments?: () => readonly string[] }
@@ -133,14 +138,6 @@ const here = (): string[] =>
     .map(s => String(s ?? '').trim()).filter(Boolean)
 /** Where the fold is kept: one current record, written only by a press. */
 const STATE_POOL = 'shelf:state'
-
-/** The tags set on this layer's tiles — the ones in use here, never the hive's
- *  whole list. A tag counts when a visible tile carries it. */
-const layerTags = (): string[] => {
-  const names = (ioc()?.get?.('@hypercomb.social/TagRegistry') as TagRegistryLike | undefined)?.names ?? []
-  const metrics = ioc()?.get?.('@diamondcoreprocessor.com/OverlapMetrics') as { tagCount?: (name: string) => number } | undefined
-  return names.filter(name => (metrics?.tagCount?.(name) ?? 0) > 0).sort((a, b) => a.localeCompare(b))
-}
 
 const t = (key: string, fallback: string): string =>
   (ioc()?.get?.(I18N_IOC_KEY) as I18nProvider | undefined)?.t?.(key) ?? fallback
@@ -237,12 +234,52 @@ const STYLE = `
 .remove:hover,.remove:focus-visible{opacity:1;background:rgba(var(--shelf),0.2);outline:none;}
 .row.tag{cursor:pointer;}
 .row.tag.lit{outline:1px solid currentColor;}
-.ask{display:inline-flex;align-items:center;gap:0.4rem;}
-.ask button{appearance:none;border:1px solid currentColor;border-radius:var(--hc-radius-control,2px);background:none;color:inherit;font:inherit;cursor:pointer;padding:0 0.5em;}
-.fill{width:3rem;box-sizing:border-box;background:transparent;color:inherit;border:0;border-bottom:1px solid currentColor;font:inherit;padding:0.1em 0.2em;opacity:0.8;outline:none;}
-.apply{appearance:none;border:1px solid currentColor;border-radius:var(--hc-radius-control,2px);background:none;color:inherit;font:inherit;letter-spacing:0.12em;text-transform:uppercase;cursor:pointer;padding:0 0.6em;}
-.kind{appearance:none;border:0;background:none;color:inherit;font:inherit;letter-spacing:0.12em;text-transform:uppercase;opacity:0.7;cursor:pointer;padding:0 0.4em;}
-.add{width:10rem;min-width:3rem;max-width:14rem;box-sizing:border-box;background:transparent;color:inherit;border:0;border-bottom:1px solid currentColor;opacity:0.85;font:inherit;padding:0.1em 0.3em;outline:none;}
+.add{width:9rem;min-width:3rem;box-sizing:border-box;background:transparent;color:inherit;border:0;border-bottom:1px solid rgba(var(--shelf),0.45);opacity:0.9;font:inherit;padding:0.1em 0.3em;outline:none;}
+.add:focus{border-bottom-color:rgb(var(--shelf));}
+.add::placeholder{color:inherit;opacity:0.5;}
+/* THE STRIP OF ICONS: squares that wrap, three rows at most, then they scroll. */
+.shelf:not(.picks){height:auto;min-height:2.75rem;align-items:flex-start;padding:0.4rem 0.45rem 0.4rem 0.95rem;}
+.shelf:not(.picks) .head{height:2rem;flex:0 0 auto;gap:0.5rem;}
+.shelf:not(.picks) .tools{height:2rem;}
+.items{flex:1 1 0;flex-wrap:wrap;align-content:flex-start;align-items:flex-start;gap:0.4rem;height:auto;
+  max-height:calc(3 * 2rem + 2 * 0.4rem);overflow-x:hidden;overflow-y:auto;scrollbar-width:thin;mask-image:none;-webkit-mask-image:none;}
+.items:empty{min-height:2rem;}
+.items .row{width:2rem;height:2rem;padding:0;gap:0;justify-content:center;transition:none;}
+.items .thumb,.items .glyph{width:1.7rem;height:1.7rem;}
+.items .label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;}
+.items .remove{position:absolute;top:-0.35rem;right:-0.35rem;width:0.95rem;height:0.95rem;font-size:0.75rem;border-radius:50%;
+  background:rgba(var(--hc-panel-pane,12,28,46),0.95);box-shadow:0 0 0 1px rgba(var(--shelf),0.55);transition:none;}
+.items .row:hover .remove{opacity:0.9;}
+.shelf.named .items .row{width:auto;max-width:12rem;padding:0 0.45rem 0 0.15rem;gap:0.35rem;justify-content:flex-start;}
+.shelf.named .items .label{position:static;width:auto;height:auto;clip:auto;max-width:9.5rem;overflow:hidden;text-overflow:ellipsis;}
+.tool{position:relative;appearance:none;width:1.6rem;height:1.6rem;flex:0 0 auto;display:inline-grid;place-items:center;border:0;padding:0;
+  border-radius:var(--hc-radius-control,2px);background:transparent;color:var(--hc-window-ink-plain,currentColor);opacity:0.65;cursor:pointer;}
+.tool:hover,.tool:focus-visible{opacity:1;background:rgba(var(--shelf),0.16);outline:none;}
+.tool.on{opacity:1;color:rgb(var(--shelf));background:rgba(var(--shelf),0.18);}
+.tool svg{width:1rem;height:1rem;display:block;}
+.tip{position:fixed;z-index:2147483600;pointer-events:none;transform:translateX(-50%);max-width:16rem;padding:0.2rem 0.5rem;
+  border-radius:var(--hc-radius-control,2px);background:rgba(var(--hc-panel-pane,12,28,46),0.96);box-shadow:0 0 0 1px rgba(var(--shelf),0.5);
+  color:var(--hc-window-ink-loud,currentColor);font-family:var(--hc-font,system-ui);font-size:0.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+/* THE RINGS: one line each — the name, then what it holds, cut to the line. */
+.rings{position:absolute;top:calc(100% + 0.45rem);left:0;z-index:1;width:min(26rem,70vw);max-height:16rem;overflow-y:auto;margin:0;padding:0.3rem;list-style:none;
+  border-radius:var(--hc-radius-floating,4px);background:rgba(var(--hc-panel-pane,12,28,46),0.97);
+  box-shadow:0 0 0 1px rgba(var(--shelf),0.35),0 8px 28px rgba(var(--hc-panel-shadow,0,0,0),0.35);}
+.ring{display:flex;align-items:center;gap:0.4rem;height:1.9rem;padding:0 0.2rem;border-radius:var(--hc-radius-control,2px);}
+.ring.current{background:rgba(var(--shelf),0.14);}
+.ring-name,.ring-items,.ring-new{appearance:none;border:0;background:none;color:inherit;font:inherit;cursor:pointer;text-align:left;padding:0 0.3rem;height:1.6rem;border-radius:var(--hc-radius-control,2px);}
+.ring-name{flex:0 0 7rem;color:rgb(var(--shelf));overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ring-name:disabled{cursor:default;}
+.ring-name-input{flex:0 0 7rem;width:7rem;box-sizing:border-box;background:transparent;color:inherit;border:0;border-bottom:1px solid rgb(var(--shelf));font:inherit;padding:0 0.3rem;outline:none;}
+.ring-items{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:0.85;}
+.ring-items .empty{opacity:0.5;}
+.ring-name:not(:disabled):hover,.ring-items:hover,.ring-new:hover{background:rgba(var(--shelf),0.14);}
+.pin,.pin-gap{flex:0 0 1.5rem;width:1.5rem;height:1.5rem;}
+.pin{appearance:none;display:inline-grid;place-items:center;border:0;padding:0;background:none;color:inherit;opacity:0.35;cursor:pointer;border-radius:var(--hc-radius-control,2px);}
+.pin:hover{opacity:0.8;}
+.pin.on{opacity:1;color:rgb(var(--shelf));}
+.pin svg{width:0.9rem;height:0.9rem;display:block;}
+.ring.new .ring-new{display:inline-flex;align-items:center;gap:0.35rem;opacity:0.75;width:100%;}
+.ring-new svg{width:0.9rem;height:0.9rem;}
 .fold{position:relative;appearance:none;width:1.75rem;height:1.75rem;display:inline-grid;place-items:center;border:0;padding:0;
   border-radius:var(--hc-radius-control,2px);background:transparent;color:var(--hc-window-ink-plain,currentColor);cursor:pointer;}
 .fold:hover,.fold:focus-visible{background:rgba(var(--shelf),0.16);color:var(--hc-window-ink-loud,currentColor);outline:none;}
@@ -250,7 +287,7 @@ const STYLE = `
 @keyframes hc-shelf-taken{from{background:rgba(var(--shelf),0.45);border-color:rgba(var(--shelf),0.9);}}
 .taken{animation:hc-shelf-taken 700ms ease-out;}
 @media (prefers-reduced-motion:reduce){.taken{animation:none;}.row,.remove{transition:none;}}
-@media (max-width:640px){.shelf{gap:0.5rem;padding-left:0.75rem;}.label{max-width:7rem;}.legend .word{display:none;}.fill-field,.kind{display:none;}}
+@media (max-width:640px){.shelf{gap:0.5rem;padding-left:0.75rem;}.label{max-width:7rem;}.legend .word{display:none;}.add{width:6rem;}}
 .ghost{position:fixed;z-index:2147483600;pointer-events:none;margin-left:0.8rem;margin-top:-0.9rem;max-width:14rem;
   padding:0.3rem 0.6rem;display:flex;align-items:center;gap:0.4rem;border-radius:var(--hc-radius-floating,4px);
   background:rgba(var(--hc-panel-pane,12,28,46),0.94);box-shadow:0 0 0 1px rgba(var(--shelf),0.55),0 6px 20px rgba(var(--hc-panel-shadow,0,0,0),0.3);
@@ -274,8 +311,13 @@ const icon = (d: string, rule = 'nonzero'): string =>
 const SHELF_ICON = icon('M19 3H4.99c-1.11 0-1.98.9-1.98 2L3 19c0 1.1.88 2 1.99 2H19c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 12h-4c0 1.66-1.35 3-3 3s-3-1.34-3-3H4.99V5H19v10zm-3-5h-2V7h-4v3H8l4 4 4-4z')
 /** The selection: a dashed marquee round a tile. */
 const SELECT_ICON = icon('M3 5h2V3c-1.1 0-2 .9-2 2zm0 8h2v-2H3v2zm4 8h2v-2H7v2zM3 9h2V7H3v2zm10-6h-2v2h2V3zm6 0v2h2c0-1.1-.9-2-2-2zM5 21v-2H3c0 1.1.9 2 2 2zm-2-4h2v-2H3v2zM9 3H7v2h2V3zm2 18h2v-2h-2v2zm8-8h2v-2h-2v2zm0 8c1.1 0 2-.9 2-2h-2v2zm0-12h2V7h-2v2zm0 8h2v-2h-2v2zm-4 4h2v-2h-2v2zm0-16h2V3h-2v2zM7 17h10V7H7v10zm2-8h6v6H9V9z')
-/** How many gather before the shelf asks: a hexagon ring, the group it becomes. */
-const GROUP_ICON = icon('M12 2l8.5 5v10L12 22l-8.5-5V7zm0 2.3L5.5 8.15v7.7L12 19.7l6.5-3.85v-7.7z', 'evenodd')
+const CHEVRON_LEFT = icon('M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z')
+const CHEVRON_RIGHT = icon('M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z')
+/** Names on every icon: a label tag. */
+const LABEL_ICON = icon('M17.63 5.84C17.27 5.33 16.67 5 16 5L5 5.01C3.9 5.01 3 5.9 3 7v10c0 1.1.9 1.99 2 1.99L16 19c.67 0 1.27-.33 1.63-.84L22 12l-4.37-6.16z')
+/** The named rings, as a list. */
+const LIST_ICON = icon('M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z')
+const PIN_ICON = icon('M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z')
 const ADD_ICON = icon('M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z')
 
 /** Owner of the shelf's reservation on the canvas (viewport:inset). */
@@ -288,7 +330,7 @@ export class QuickTrayElement extends HTMLElement {
   #entries: readonly TrayEntry[] = []
   #thumbs = new Map<string, string>()
   #offs: Array<() => void> = []
-  #pending: { entry: TrayEntry; x: number; y: number } | null = null
+  #pending: { entry: TrayEntry; x: number; y: number; row: HTMLElement | null } | null = null
   #dragging: TrayEntry | null = null
   #custody = false
   #ghost: HTMLDivElement | null = null
@@ -326,27 +368,41 @@ export class QuickTrayElement extends HTMLElement {
   /** The band should have changed hands, but a select was still in progress. */
   #switchOwed = false
   #queue: ImageQueue | null = null
-  /** The participant chose a number this session, so the saved one no longer speaks. */
-  #fillChosen = false
   /** Open for typing though empty: the shell's shelf button brought it up. */
   #opened = false
-  /** Which kept shelves the wheel walks, and the words that narrow them. Both
-   *  last the session only: a refresh starts on every shelf again. */
-  #type: 'all' | 'tags' | 'tiles' = 'all'
+  /** The words typed in the search: only the icons whose names hold them show. */
   #filter = ''
-  /** The kept shelf the wheel last brought back. */
-  #cycled: string | null = null
   /** The tags the hive is filtered on (the sticky `tags:filter`), and the reach
    *  they were set with. Mirrored, never owned: the shelf toggles, the hive filters. */
   #lens: readonly string[] = []
-  /** How many a shelf holds before it asks to become a group. The participant's
-   *  number, kept with the fold in `shelf:state`. */
-  #fill = DEFAULT_FILL
-  /** The size the shelf was at when it last asked, so it asks again only after
-   *  another full fill has gathered. */
-  #askedAt = 0
-  #asking = false
   #reach: 'local' | 'children' | 'global' = 'local'
+  /** Names shown on every icon, not only on hover. Kept in `shelf:state`. */
+  #labels = false
+  /** THE RINGS. The shelf is one of several named collections: the session's
+   *  own (null, never stored) or a named ring (a context group, written
+   *  through as rows come and go). A named ring that empties is removed,
+   *  unless pinned; a pinned one stays, and the arrows still reach it. */
+  #ringId: string | null = null
+  #rings: readonly ContextGroup[] = []
+  #pinned = new Set<string>()
+  /** The session shelf's rows while a named ring is forward. */
+  #sessionEntries: readonly TrayEntry[] = []
+  /** The vertical list of rings is open. */
+  #listOpen = false
+  /** The ring whose name is being typed in the list. */
+  #renaming: string | null = null
+  #ringWrite: ReturnType<typeof setTimeout> | undefined
+  /** The rows painted last, by position: a row's data-index reads this. */
+  #shown: readonly TrayEntry[] = []
+  /** THE CLICK THAT EJECTS. A clicked icon leaves the shelf at once and waits
+   *  here to be placed on the page; one placement is in flight at a time and
+   *  clicks made meanwhile go together in the next, so a burst of clicks never
+   *  races two commits on one page. A failure puts the row back. */
+  #ejectQueue: { entry: TrayEntry; custody: boolean }[] = []
+  #inflight: { entry: TrayEntry; custody: boolean }[] = []
+  #inflightTimer: ReturnType<typeof setTimeout> | undefined
+  /** The extra keys the state record carried that this shelf does not read, kept on write. */
+  #stateExtra: Record<string, unknown> = {}
 
   constructor() {
     super()
@@ -378,8 +434,12 @@ export class QuickTrayElement extends HTMLElement {
         .map(e => entryKey({ label: e.label, sourceSegments: e.sourceSegments ?? [] }))
       if (keys.length > 0) this.letGo(new Set(keys))
     }
-    this.#offs.push(EffectBus.on('shelf:placed', letGoOf))
+    this.#offs.push(EffectBus.on<{ placed?: { label?: string }[]; failed?: string[] } | undefined>('shelf:placed', (p) => {
+      letGoOf(p)
+      this.#settleEject(p)
+    }))
     this.#offs.push(EffectBus.on('shelf:let-go', letGoOf))
+    this.#offs.push(EffectBus.on('context:groups-changed', () => { void this.#loadRings() }))
     // The ring: keep what the shelf holds as a group, or bring a kept one back.
     // Both are presses, sent transient, so a shelf that mounts later never
     // replays one.
@@ -433,6 +493,7 @@ export class QuickTrayElement extends HTMLElement {
     this.#announce()
     this.#announcePicks()
     this.#recallFold()
+    void this.#loadRings()
   }
 
   disconnectedCallback(): void {
@@ -454,6 +515,8 @@ export class QuickTrayElement extends HTMLElement {
     this.#picks = []
     this.#picksPage = []
     clearTimeout(this.#peekTimer)
+    clearTimeout(this.#inflightTimer)
+    this.#flushRingWrite()
     cancelAnimationFrame(this.#measureFrame)
     EffectBus.emit('viewport:inset', { owner: INSET_OWNER, side: 'top', size: 0 })
     // Last-value: a late reader must not be told a shelf is on screen.
@@ -471,18 +534,10 @@ export class QuickTrayElement extends HTMLElement {
     this.#peek()
     this.#entries = takeEntries(this.#entries, incoming)
     for (const entry of this.#entries) void this.#loadThumb(entry)
-    this.#asking = this.#entries.length >= this.#askedAt + this.#fill
     this.#render()
     this.#answer(incoming)
     this.#announce()
-  }
-
-  /** Keep what the shelf holds as a group and clear it, so the next handful starts fresh. */
-  async #keepAndClear(): Promise<void> {
-    await this.#keepShelf()
-    this.#asking = false
-    this.#askedAt = 0
-    this.letGo(new Set(this.#entries.map(entryKey)))
+    this.#writeRing()
   }
 
   /** A tag onto the shelf, created if the hive does not know it yet. */
@@ -494,46 +549,14 @@ export class QuickTrayElement extends HTMLElement {
     this.take([{ label: name, sourceSegments: [], sig: await tagSignature(name), kind: 'tag' }])
   }
 
-  /** The wheel: the next kept shelf of the chosen type that matches the words
-   *  typed, brought back as what the shelf holds. */
-  async #cycle(step: 1 | -1): Promise<void> {
-    const kept = (await listGroups()).filter(group =>
-      (this.#type === 'all' || shelfType(group) === this.#type)
-      && group.label.toLowerCase().includes(this.#filter.toLowerCase()))
-    if (kept.length === 0) return
-    const at = kept.findIndex(group => group.id === this.#cycled)
-    const next = kept[(at + step + kept.length) % kept.length]
-    this.#cycled = next.id
-    await this.#recallShelf(next.id)
-  }
-
-  /** Put the shelf's tags to work: on the picked tiles at once, or, with none
-   *  picked, in hand for the hive to shade and the next click to scent. This is
-   *  the pheromone bridge's own lane (pheromone-tiles.drone.ts), unchanged. */
-  #applyBouquet(): void {
-    const tags = bouquetOf(this.#entries)
-    if (tags.length === 0) return
-    const picked = [...((ioc()?.get?.(SELECTION_KEY) as SelectionLike | undefined)?.selected ?? [])]
-    EffectBus.emitTransient('tags:apply-begin', { tags })
-    if (picked.length === 0) return
-    for (const label of picked) EffectBus.emitTransient('tags:apply-paint', { label, add: true })
-    EffectBus.emitTransient('tags:apply-commit', {})
-  }
-
   /** Toggle one tag in the hive's filter. The reach stays as it was set. */
   #filterBy(tag: string): void {
     const active = this.#lens.includes(tag) ? this.#lens.filter(t => t !== tag) : [...this.#lens, tag]
     EffectBus.emit('tags:filter', { active, scope: this.#reach })
   }
 
-  #turnType(): void {
-    this.#type = this.#type === 'all' ? 'tags' : this.#type === 'tags' ? 'tiles' : 'all'
-    this.#cycled = null
-    this.#render()
-  }
-
-  /** Keep the shelf as a new group on the ring. An empty shelf, or one whose
-   *  rows have no signature to name them by, keeps nothing. */
+  /** Keep the shelf as a new named ring (`shelf:save`). An empty shelf, or one
+   *  whose rows have no signature to name them by, keeps nothing. */
   async #keepShelf(): Promise<void> {
     const members = entriesToMembers(this.#entries)
     if (members.length === 0) return
@@ -541,15 +564,184 @@ export class QuickTrayElement extends HTMLElement {
     await startGroup(`${t('shelf.ring.name', 'shelf')} ${count}`, members)
   }
 
-  /** Bring a kept group back as what the shelf holds. */
+  /** Bring a kept ring forward (`shelf:recall`). */
   async #recallShelf(id: string): Promise<void> {
-    const group = await readGroup(id)
-    if (!group) return
-    this.#entries = membersToEntries(group.members)
-    for (const entry of this.#entries) void this.#loadThumb(entry)
+    await this.#loadRings()
+    if (!this.#rings.some(ring => ring.id === id)) return
     this.#peek()
+    await this.#switchRing(id)
+  }
+
+  // ── the rings ────────────────────────────────────────────────────────────
+
+  async #loadRings(): Promise<void> {
+    try { this.#rings = [...(await listGroups())].reverse() } catch { this.#rings = [] }
+    // A ring removed elsewhere while forward: the session shelf comes back.
+    if (this.#ringId && !this.#rings.some(ring => ring.id === this.#ringId)) {
+      this.#ringId = null
+      this.#entries = this.#sessionEntries
+      this.#sessionEntries = []
+      this.#announce()
+    }
+    if (this.isConnected) this.#render()
+  }
+
+  #ringName(): string {
+    if (!this.#ringId) return t('quick-tray.title', 'Shelf')
+    return this.#rings.find(ring => ring.id === this.#ringId)?.label ?? t('quick-tray.title', 'Shelf')
+  }
+
+  /** Bring a ring forward (null: the session shelf). The rows held now go
+   *  with the ring they belong to; the target's rows come up in their place. */
+  async #switchRing(id: string | null, stayOpen = true): Promise<void> {
+    if (id === this.#ringId) return
+    // Walked to on purpose, the shelf stays up even on an empty ring, so the
+    // arrows that brought it there are still under the pointer.
+    if (stayOpen) this.#opened = true
+    this.#endDrag()
+    this.#flushRingWrite()
+    if (this.#ringId === null) this.#sessionEntries = this.#entries
+    let next: readonly TrayEntry[]
+    if (id === null) next = this.#sessionEntries
+    else {
+      const ring = this.#rings.find(r => r.id === id) ?? await readGroup(id)
+      if (!ring) return
+      next = membersToEntries(ring.members)
+    }
+    this.#ringId = id
+    if (id === null) this.#sessionEntries = []
+    this.#entries = next
+    for (const entry of this.#entries) void this.#loadThumb(entry)
     this.#render()
     this.#announce()
+  }
+
+  /** The arrows: the session shelf, then every ring in the order it was named. */
+  #stepRing(step: 1 | -1): void {
+    const order: (string | null)[] = [null, ...this.#rings.map(ring => ring.id)]
+    const at = Math.max(0, order.indexOf(this.#ringId))
+    void this.#switchRing(order[(at + step + order.length) % order.length])
+  }
+
+  /** Name a new ring. On the session shelf the rows held become the ring (the
+   *  save is named); elsewhere it starts empty. Either way it comes forward
+   *  with its name ready to type. */
+  async #newRing(): Promise<void> {
+    const fromSession = this.#ringId === null && this.#entries.length > 0
+    const members = fromSession ? entriesToMembers(this.#entries) : []
+    const ring = await startGroup(`${t('shelf.ring.name', 'shelf')} ${this.#rings.length + 1}`, members)
+    if (!ring) return
+    // An empty ring stays only while pinned, so a fresh empty one starts
+    // pinned; it can be unpinned like any other.
+    if (members.length === 0) { this.#pinned.add(ring.id); void this.#keepState() }
+    await this.#loadRings()
+    if (fromSession) {
+      const keep = this.#entries
+      this.#entries = []
+      await this.#switchRing(ring.id)
+      // Rows with no signature cannot be stored, but are still in hand.
+      if (keep.length > membersToEntries(members).length) this.take(keep)
+    } else await this.#switchRing(ring.id)
+    this.#renaming = ring.id
+    this.#listOpen = true
+    this.#render()
+  }
+
+  #togglePin(id: string): void {
+    if (this.#pinned.has(id)) this.#pinned.delete(id)
+    else this.#pinned.add(id)
+    void this.#keepState()
+    const ring = this.#rings.find(r => r.id === id)
+    // Unpinned and empty: used up, so it goes now.
+    const empty = id === this.#ringId ? this.#entries.length === 0 : (ring?.members.length ?? 0) === 0
+    if (!this.#pinned.has(id) && empty) void this.#retireRing(id)
+    else this.#render()
+  }
+
+  async #retireRing(id: string): Promise<void> {
+    if (id === this.#ringId) await this.#switchRing(null, false)
+    this.#pinned.delete(id)
+    void this.#keepState()
+    await deleteGroup(id)
+    await this.#loadRings()
+  }
+
+  async #renameRing(id: string, label: string): Promise<void> {
+    this.#renaming = null
+    const name = label.trim()
+    if (name) await renameGroup(id, name)
+    await this.#loadRings()
+  }
+
+  /** The forward ring keeps what it holds — written a beat later, so a burst
+   *  of clicks is one write. A named ring that empties is used up: removed,
+   *  unless pinned. */
+  #writeRing(): void {
+    const id = this.#ringId
+    if (!id) return
+    clearTimeout(this.#ringWrite)
+    this.#ringWrite = undefined
+    if (this.#entries.length === 0 && !this.#pinned.has(id)) { void this.#retireRing(id); return }
+    const members = entriesToMembers(this.#entries)
+    this.#ringWrite = setTimeout(() => {
+      this.#ringWrite = undefined
+      void setGroupMembers(id, members)
+    }, 250)
+  }
+
+  #flushRingWrite(): void {
+    if (this.#ringWrite === undefined || !this.#ringId) return
+    clearTimeout(this.#ringWrite)
+    this.#ringWrite = undefined
+    void setGroupMembers(this.#ringId, entriesToMembers(this.#entries))
+  }
+
+  // ── the click that ejects ────────────────────────────────────────────────
+
+  /** A click on an icon: it leaves the shelf NOW (the icon goes from the strip
+   *  in this frame, nothing waits on the write) and is placed on the page on
+   *  screen, at its next open seat. Shift moves it, as on a drop. */
+  #eject(entry: TrayEntry, custody: boolean, row: HTMLElement | null): void {
+    this.#ejectQueue.push({ entry, custody: custody && !entry.loose })
+    row?.remove()
+    this.#hideTip()
+    this.#letGoQuietly(entryKey(entry))
+    this.#pumpEject()
+  }
+
+  #pumpEject(): void {
+    if (this.#inflight.length > 0 || this.#ejectQueue.length === 0) return
+    // Custody is per release: a run of clicks goes together while it agrees.
+    const custody = this.#ejectQueue[0].custody
+    const cut = this.#ejectQueue.findIndex(item => item.custody !== custody)
+    const send = this.#ejectQueue.splice(0, cut < 0 ? this.#ejectQueue.length : cut)
+    this.#inflight = send
+    clearTimeout(this.#inflightTimer)
+    this.#inflightTimer = setTimeout(() => this.#settleEject(undefined, true), EJECT_TIMEOUT_MS)
+    EffectBus.emit('shelf:place', {
+      entries: send.map(({ entry }) => ({
+        label: entry.label,
+        sourceSegments: [...entry.sourceSegments],
+        ...(entry.loose && entry.sig ? { sig: entry.sig } : {}),
+      })),
+      targetSegments: here(),
+      custody,
+    })
+  }
+
+  /** The worker answered (or never did): what failed comes back to the shelf,
+   *  and the next run of clicks goes. */
+  #settleEject(answer: { placed?: { label?: string }[]; failed?: string[] } | undefined, timedOut = false): void {
+    if (this.#inflight.length === 0) return
+    const placed = new Set((answer?.placed ?? []).map(e => e?.label))
+    const failed = new Set(answer?.failed ?? [])
+    const ours = this.#inflight.some(({ entry }) => placed.has(entry.label) || failed.has(entry.label))
+    if (!timedOut && !ours) return
+    clearTimeout(this.#inflightTimer)
+    const back = this.#inflight.filter(({ entry }) => timedOut || failed.has(entry.label))
+    this.#inflight = []
+    if (back.length > 0) this.take(back.map(({ entry }) => entry))
+    this.#pumpEject()
   }
 
   /** What the shelf holds, for every reader (last-value replayed, so a chat
@@ -570,22 +762,38 @@ export class QuickTrayElement extends HTMLElement {
    *  so without this the click looks dead. A folded shelf has no rows to light;
    *  its count travels on `shelf:changed` to the shell's button. */
   #answer(incoming: readonly TrayEntry[]): void {
+    if (this.#folded) return
     const keys = new Set(incoming.map(entryKey))
-    const lit = this.#folded ? [] : this.#entries.flatMap((entry, index) =>
-      keys.has(entryKey(entry)) ? [this.#root.querySelector(`.row[data-index="${index}"]`)] : [])
-    for (const element of lit) element?.classList.add('taken')
+    this.#shown.forEach((entry, index) => {
+      if (keys.has(entryKey(entry))) this.#root.querySelector(`.row[data-index="${index}"]`)?.classList.add('taken')
+    })
   }
 
   letGo(keys: ReadonlySet<string>): void {
+    const before = this.#entries.length
     this.#entries = dropEntries(this.#entries, keys)
-    this.#askedAt = Math.min(this.#askedAt, this.#entries.length)
-    if (this.#entries.length < this.#askedAt + this.#fill) this.#asking = false
+    this.#sessionEntries = dropEntries(this.#sessionEntries, keys)
+    if (this.#entries.length === before) return
     for (const key of keys) {
       const url = this.#thumbs.get(key)
       if (url) { URL.revokeObjectURL(url); this.#thumbs.delete(key) }
     }
     this.#render()
     this.#announce()
+    this.#writeRing()
+  }
+
+  /** Let go of a row whose icon is already off the strip: no repaint unless the
+   *  shelf has to close, so the next click lands on the strip as it stands. */
+  #letGoQuietly(key: string): void {
+    this.#entries = dropEntries(this.#entries, new Set([key]))
+    const url = this.#thumbs.get(key)
+    if (url) { URL.revokeObjectURL(url); this.#thumbs.delete(key) }
+    const count = this.#root.querySelector('.shelf:not(.picks) .legend .count')
+    if (count) count.textContent = String(this.#entries.length)
+    if (this.#entries.length === 0) this.#render()
+    this.#announce()
+    this.#writeRing()
   }
 
   async #loadThumb(entry: TrayEntry): Promise<void> {
@@ -597,7 +805,11 @@ export class QuickTrayElement extends HTMLElement {
     // The row may have left while the picture loaded — never leak its URL.
     if (!this.#entries.some(e => entryKey(e) === key)) { URL.revokeObjectURL(url); return }
     this.#thumbs.set(key, url)
-    this.#render()
+    // The picture goes into its icon where it stands: a repaint would trade
+    // every row under the pointer for a new one mid-click.
+    const index = this.#shown.findIndex(e => entryKey(e) === key)
+    const glyph = index < 0 ? null : this.#root.querySelector(`.row[data-index="${index}"] .glyph`)
+    if (glyph) glyph.outerHTML = `<span class="thumb"><img src="${url}" alt="" draggable="false"></span>`
   }
 
   // ── the selection shelf ──────────────────────────────────────────────────
@@ -825,124 +1037,209 @@ export class QuickTrayElement extends HTMLElement {
     // The shelf brought forward over a selection shows whatever it holds,
     // folded or empty: the pair of icons that bring the selection back is on it.
     const paired = this.#selected()
-    // Nothing held, nothing shown: an empty shelf is a band with no use.
-    if (!paired && (this.#folded || (this.#entries.length === 0 && !this.#opened))) {
+    // Nothing held, nothing shown: an empty shelf is a band with no use. A
+    // pinned ring is the exception — it is kept to be reached, empty or not.
+    const keptEmpty = this.#ringId !== null && this.#pinned.has(this.#ringId)
+    if (!paired && (this.#folded || (this.#entries.length === 0 && !this.#opened && !keptEmpty))) {
       this.#root.innerHTML = `<style>${STYLE}</style>`
+      this.#shown = []
       this.#reserve()
       return
     }
-    // Rows are addressed by POSITION, never by key: a key holds a NUL, which an
-    // HTML parser rewrites, so a key read back from an attribute matches nothing.
-    const drag = esc(t('quick-tray.drag', 'Drag onto the hive to place it · hold Shift to move it'))
-    const remove = esc(t('quick-tray.remove', 'Take it off the shelf'))
-    const rows = this.#entries.map((entry, index) => {
-      const key = entryKey(entry)
-      const thumb = this.#thumbs.get(key)
-      const face = entry.kind === 'tag'
-        ? `<span class="glyph" aria-hidden="true">#</span>`
-        : thumb
-        ? `<span class="thumb"><img src="${thumb}" alt="" draggable="false"></span>`
-        : `<span class="glyph" aria-hidden="true">⬢</span>`
-      const lit = entry.kind === 'tag' && this.#lens.includes(entry.label)
-      return `<li class="row${this.#dragging === entry ? ' lifted' : ''}${entry.kind === 'tag' ? ' tag' : ''}${lit ? ' lit' : ''}"${entry.kind === 'tag' ? ` aria-pressed="${lit}"` : ''} data-index="${index}" tabindex="0" title="${drag}">
-        ${face}<span class="label">${esc(entry.label)}</span>
-        <button class="remove" type="button" data-index="${index}" tabindex="-1" aria-label="${remove}: ${esc(entry.label)}" title="${remove}">×</button>
-      </li>`
-    }).join('')
-    const body = `<ul class="rows" aria-label="${esc(t('quick-tray.title', 'Shelf'))}">${rows}</ul>`
+    const title = esc(this.#ringName())
     const hide = esc(t('quick-tray.hide', 'Hide the shelf'))
-    const fillTip = esc(t('quick-tray.fill', 'How many gather before the shelf asks to keep them as a group'))
-    const addTip = esc(t('quick-tray.add', 'search or add a tag'))
+    const search = esc(t('quick-tray.search', 'search'))
+    const namesTip = esc(this.#labels ? t('quick-tray.names-off', 'Show icons only') : t('quick-tray.names-on', 'Show every name'))
+    const ringsTip = esc(t('quick-tray.rings', 'Named rings'))
+    const prevTip = esc(t('quick-tray.ring-prev', 'Previous ring'))
+    const nextTip = esc(t('quick-tray.ring-next', 'Next ring'))
+    const ringTools = this.#labels ? `
+          <button class="tool step" type="button" data-step="-1" title="${prevTip}" aria-label="${prevTip}">${CHEVRON_LEFT}</button>
+          <button class="tool step" type="button" data-step="1" title="${nextTip}" aria-label="${nextTip}">${CHEVRON_RIGHT}</button>
+          <button class="tool list-btn${this.#listOpen ? ' on' : ''}" type="button" aria-expanded="${this.#listOpen}" title="${ringsTip}" aria-label="${ringsTip}">${LIST_ICON}</button>` : ''
     this.#root.innerHTML = `<style>${STYLE}</style>
-      <section class="shelf${this.#dragging ? ' dragging' : ''}" aria-label="${esc(t('quick-tray.title', 'Shelf'))}" data-consumes-wheel>
-        <span class="legend">${SHELF_ICON}<span class="word">${esc(t('quick-tray.title', 'Shelf'))}</span><span class="count">${this.#entries.length}</span></span>
+      <section class="shelf${this.#labels ? ' named' : ''}${this.#dragging ? ' dragging' : ''}" aria-label="${title}" data-consumes-wheel>
         <span class="head">
-          ${this.#asking ? `<span class="ask"><span class="ask-word">${esc(t('quick-tray.ask', 'keep these as a group?'))}</span><button class="ask-keep" type="button">${esc(t('quick-tray.ask-keep', 'keep'))}</button><button class="ask-later" type="button">${esc(t('quick-tray.ask-later', 'not yet'))}</button></span>` : ''}
-          <label class="field fill-field" title="${fillTip}">${GROUP_ICON}<input class="fill" type="number" min="${FILL_MIN}" max="${FILL_MAX}" value="${this.#fill}" aria-label="${fillTip}"></label>
-          ${bouquetOf(this.#entries).length > 0 ? `<button class="apply" type="button" title="${esc(t('quick-tray.apply', 'Scent the picked tiles with these tags, or hold them for the next tile you click'))}">${esc(t('quick-tray.apply-word', 'apply'))}</button>` : ''}
-          <button class="kind" type="button" title="${esc(t('quick-tray.type', 'Wheel: next shelf · Shift+wheel: kind of shelf'))}">${esc(this.#type)}</button>
-          <label class="field add-field">${ADD_ICON}<input class="add" type="text" list="hc-shelf-tags" spellcheck="false" autocomplete="off" value="${esc(this.#filter)}" placeholder="${addTip}" aria-label="${addTip}"></label>
-          <datalist id="hc-shelf-tags">${layerTags().map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+          <span class="legend">${SHELF_ICON}<span class="word">${title}</span><span class="count">${this.#entries.length}</span></span>
+          <input class="add" type="text" spellcheck="false" autocomplete="off" value="${esc(this.#filter)}" placeholder="${search}" aria-label="${search}">
+          <button class="tool names${this.#labels ? ' on' : ''}" type="button" aria-pressed="${this.#labels}" title="${namesTip}" aria-label="${namesTip}">${LABEL_ICON}</button>${ringTools}
+          ${this.#listOpen && this.#labels ? this.#ringsHtml() : ''}
         </span>
-        ${body}
+        <ul class="rows items" aria-label="${title}"></ul>
         <span class="tools">${paired ? this.#swapHtml() : `<button class="fold" type="button" aria-expanded="true" title="${hide}" aria-label="${hide}">${CHEVRON_UP}</button>`}</span>
       </section>`
-    for (const row of this.#root.querySelectorAll<HTMLLIElement>('.row')) {
-      row.addEventListener('pointerdown', (e) => this.#onRowPointerDown(e, this.#entries[Number(row.dataset['index'])]))
-      // Delete or Backspace takes a focused row off, as its × does.
-      row.addEventListener('keydown', (e) => {
-        if (e.key !== 'Delete' && e.key !== 'Backspace') return
-        e.preventDefault()
-        const entry = this.#entries[Number(row.dataset['index'])]
-        if (entry) this.letGo(new Set([entryKey(entry)]))
-      })
-    }
-    // A tag is a lens: a click on its row filters the hive by it, a second click lets it go.
-    for (const row of this.#root.querySelectorAll<HTMLLIElement>('.row.tag')) {
-      row.addEventListener('click', (e) => {
-        if ((e.target as HTMLElement).closest('.remove')) return
-        const tag = this.#entries[Number(row.dataset['index'])]?.label
-        if (tag) this.#filterBy(tag)
-      })
-    }
-    for (const button of this.#root.querySelectorAll<HTMLButtonElement>('.remove')) {
-      button.addEventListener('pointerdown', (e) => e.stopPropagation())
-      button.addEventListener('click', (e) => {
-        e.stopPropagation()
-        const entry = this.#entries[Number(button.dataset['index'])]
-        if (entry) this.letGo(new Set([entryKey(entry)]))
-      })
-    }
-    this.#wireWheel()
+    this.#paintItems()
     this.#wireFold()
     this.#wireSwap()
     this.#wireHead()
     this.#reserve()
   }
 
-  /** The head's own acts: type to narrow the wheel's shelves, Enter to add the
-   *  word as a tag, the kind button to turn between kinds, the wheel to walk. */
+  /** The icons alone — repainted as the search narrows them, without touching
+   *  the head, so the search keeps its caret. */
+  #paintItems(): void {
+    const list = this.#root.querySelector<HTMLUListElement>('.items')
+    if (!list) return
+    // Rows are addressed by POSITION in what was painted, never by key: a key
+    // holds a NUL, which an HTML parser rewrites.
+    const words = this.#filter.trim().toLowerCase()
+    this.#shown = words ? this.#entries.filter(e => e.label.toLowerCase().includes(words)) : [...this.#entries]
+    const drag = esc(t('quick-tray.drag', 'Click to place it here · drag onto the hive · hold Shift to move it'))
+    const remove = esc(t('quick-tray.remove', 'Take it off the shelf'))
+    list.innerHTML = this.#shown.map((entry, index) => {
+      const thumb = this.#thumbs.get(entryKey(entry))
+      const face = entry.kind === 'tag'
+        ? `<span class="glyph" aria-hidden="true">#</span>`
+        : thumb
+        ? `<span class="thumb"><img src="${thumb}" alt="" draggable="false"></span>`
+        : `<span class="glyph" aria-hidden="true">⬢</span>`
+      const lit = entry.kind === 'tag' && this.#lens.includes(entry.label)
+      return `<li class="row${this.#dragging === entry ? ' lifted' : ''}${entry.kind === 'tag' ? ' tag' : ''}${lit ? ' lit' : ''}"${entry.kind === 'tag' ? ` aria-pressed="${lit}"` : ''} data-index="${index}" tabindex="0" aria-label="${esc(entry.label)} · ${drag}">
+        ${face}<span class="label">${esc(entry.label)}</span>
+        <button class="remove" type="button" data-index="${index}" tabindex="-1" aria-label="${remove}: ${esc(entry.label)}" title="${remove}">×</button>
+      </li>`
+    }).join('')
+    for (const row of list.querySelectorAll<HTMLLIElement>('.row')) {
+      const entry = (): TrayEntry | undefined => this.#shown[Number(row.dataset['index'])]
+      row.addEventListener('pointerdown', (e) => this.#onRowPointerDown(e, entry(), row))
+      row.addEventListener('pointerenter', () => { if (!this.#labels && !this.#dragging) this.#showTip(row, entry()?.label) })
+      row.addEventListener('pointerleave', () => this.#hideTip())
+      row.addEventListener('keydown', (e) => {
+        const it = entry()
+        if (!it) return
+        // Delete or Backspace takes a focused row off, as its × does; Enter places it here.
+        if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); this.letGo(new Set([entryKey(it)])) }
+        else if (e.key === 'Enter' && it.kind !== 'tag') { e.preventDefault(); this.#eject(it, e.shiftKey, row) }
+      })
+    }
+    // A tag is a lens: a click on it filters the hive by it, a second lets it go.
+    for (const row of list.querySelectorAll<HTMLLIElement>('.row.tag')) {
+      row.addEventListener('click', (e) => {
+        if ((e.target as HTMLElement).closest('.remove')) return
+        const tag = this.#shown[Number(row.dataset['index'])]?.label
+        if (tag) this.#filterBy(tag)
+      })
+    }
+    for (const button of list.querySelectorAll<HTMLButtonElement>('.remove')) {
+      button.addEventListener('pointerdown', (e) => e.stopPropagation())
+      button.addEventListener('click', (e) => {
+        e.stopPropagation()
+        const entry = this.#shown[Number(button.dataset['index'])]
+        if (entry) this.letGo(new Set([entryKey(entry)]))
+      })
+    }
+    this.#wireWheel()
+  }
+
+  /** The rings, one line each: the name on the left (a click types a new one),
+   *  then what the ring holds, cut to the line. A click on the line brings it
+   *  forward; the pin keeps it when it empties. */
+  #ringsHtml(): string {
+    const pinTip = esc(t('quick-tray.pin', 'Pin: keep it when it empties'))
+    const newTip = esc(t('quick-tray.ring-new', 'name a new ring'))
+    const line = (id: string | null, name: string, items: readonly string[]): string => {
+      const pinned = id !== null && this.#pinned.has(id)
+      const nameCell = id !== null && this.#renaming === id
+        ? `<input class="ring-name-input" type="text" spellcheck="false" autocomplete="off" value="${esc(name)}" data-ring="${esc(id)}" aria-label="${esc(name)}">`
+        : `<button class="ring-name" type="button"${id === null ? ' disabled' : ` data-ring="${esc(id)}"`}>${esc(name)}</button>`
+      return `<li class="ring${id === this.#ringId ? ' current' : ''}">
+          ${nameCell}
+          <button class="ring-items" type="button" data-pick-ring="${id === null ? '' : esc(id)}">${items.length ? esc(items.join(' · ')) : '<span class="empty">—</span>'}</button>
+          ${id === null ? '<span class="pin-gap"></span>' : `<button class="pin${pinned ? ' on' : ''}" type="button" data-pin="${esc(id)}" aria-pressed="${pinned}" title="${pinTip}" aria-label="${pinTip}">${PIN_ICON}</button>`}
+        </li>`
+    }
+    const session = this.#ringId === null ? this.#entries : this.#sessionEntries
+    const rows = [
+      line(null, t('quick-tray.title', 'Shelf'), session.map(e => e.label)),
+      ...this.#rings.map(ring => line(ring.id, ring.label,
+        ring.id === this.#ringId ? this.#entries.map(e => e.label) : membersToEntries(ring.members).map(e => e.label))),
+    ].join('')
+    return `<ul class="rings" aria-label="${esc(t('quick-tray.rings', 'Named rings'))}">${rows}
+        <li class="ring new"><button class="ring-new" type="button">${ADD_ICON}<span>${newTip}</span></button></li>
+      </ul>`
+  }
+
+  /** The name on hover, at once: the native title waits too long to read a strip by. */
+  #showTip(row: HTMLElement, label: string | undefined): void {
+    if (!label) return
+    let tip = this.#root.querySelector<HTMLDivElement>('.tip')
+    if (!tip) {
+      tip = document.createElement('div')
+      tip.className = 'tip'
+      tip.setAttribute('aria-hidden', 'true')
+      this.#root.appendChild(tip)
+    }
+    const box = row.getBoundingClientRect()
+    tip.textContent = label
+    tip.style.left = `${box.left + box.width / 2}px`
+    tip.style.top = `${box.bottom + 4}px`
+  }
+
+  #hideTip(): void { this.#root.querySelector('.tip')?.remove() }
+
+  /** The head's own acts: type to narrow the icons, Enter to add a word no
+   *  icon holds as a tag, the names toggle, the arrows and the rings list. */
   #wireHead(): void {
     const input = this.#root.querySelector<HTMLInputElement>('.add')
-    input?.addEventListener('input', () => { this.#filter = input.value; this.#cycled = null })
+    input?.addEventListener('input', () => { this.#filter = input.value; this.#paintItems(); this.#reserve() })
     input?.addEventListener('keydown', (e) => {
       e.stopPropagation()
+      if (e.key === 'Escape') { input.value = ''; this.#filter = ''; this.#paintItems(); return }
       if (e.key !== 'Enter' || !input.value.trim()) return
       e.preventDefault()
+      if (this.#shown.length > 0) return
       const name = input.value
       this.#filter = ''
       void this.#takeTag(name)
     })
-    this.#root.querySelector('.kind')?.addEventListener('click', () => this.#turnType())
-    this.#root.querySelector('.apply')?.addEventListener('click', () => this.#applyBouquet())
-    this.#root.querySelector('.ask-keep')?.addEventListener('click', () => { void this.#keepAndClear() })
-    this.#root.querySelector('.ask-later')?.addEventListener('click', () => {
-      this.#asking = false
-      this.#askedAt = this.#entries.length
+    this.#root.querySelector('.names')?.addEventListener('click', () => {
+      this.#labels = !this.#labels
+      if (!this.#labels) { this.#listOpen = false; this.#renaming = null }
+      void this.#keepState()
       this.#render()
     })
-    const fill = this.#root.querySelector<HTMLInputElement>('.fill')
-    fill?.addEventListener('keydown', (e) => e.stopPropagation())
-    fill?.addEventListener('change', () => {
-      const n = Math.round(Number(fill.value))
-      this.#fill = Number.isFinite(n) ? Math.min(FILL_MAX, Math.max(FILL_MIN, n)) : DEFAULT_FILL
-      this.#fillChosen = true
-      void this.#keepFold(this.#folded)
-      this.#render()
-    })
-    for (const head of this.#root.querySelectorAll('.legend, .kind, .add')) {
-      head.addEventListener('wheel', (e) => {
-        const ev = e as WheelEvent
-        ev.preventDefault()
-        if (ev.shiftKey) { if (ev.deltaY !== 0 || ev.deltaX !== 0) this.#turnType(); return }
-        void this.#cycle(ev.deltaY > 0 || ev.deltaX > 0 ? 1 : -1)
-      }, { passive: false })
+    for (const button of this.#root.querySelectorAll<HTMLButtonElement>('.step')) {
+      button.addEventListener('click', () => this.#stepRing(button.dataset['step'] === '-1' ? -1 : 1))
     }
+    this.#root.querySelector('.list-btn')?.addEventListener('click', () => {
+      this.#listOpen = !this.#listOpen
+      this.#renaming = null
+      if (this.#listOpen) void this.#loadRings()
+      this.#render()
+    })
+    for (const button of this.#root.querySelectorAll<HTMLButtonElement>('.ring-name[data-ring]')) {
+      button.addEventListener('click', () => { this.#renaming = button.dataset['ring'] ?? null; this.#render() })
+    }
+    const nameInput = this.#root.querySelector<HTMLInputElement>('.ring-name-input')
+    if (nameInput) {
+      nameInput.focus()
+      nameInput.select()
+      let done = false
+      const commit = (keep: boolean): void => {
+        if (done) return
+        done = true
+        if (keep) void this.#renameRing(nameInput.dataset['ring'] ?? '', nameInput.value)
+        else { this.#renaming = null; this.#render() }
+      }
+      nameInput.addEventListener('keydown', (e) => {
+        e.stopPropagation()
+        if (e.key === 'Enter') { e.preventDefault(); commit(true) }
+        else if (e.key === 'Escape') { e.preventDefault(); commit(false) }
+      })
+      nameInput.addEventListener('blur', () => commit(true))
+    }
+    for (const button of this.#root.querySelectorAll<HTMLButtonElement>('.ring-items')) {
+      button.addEventListener('click', () => { void this.#switchRing(button.dataset['pickRing'] || null) })
+    }
+    for (const button of this.#root.querySelectorAll<HTMLButtonElement>('.pin')) {
+      button.addEventListener('click', () => this.#togglePin(button.dataset['pin'] ?? ''))
+    }
+    this.#root.querySelector('.ring-new')?.addEventListener('click', () => { void this.#newRing() })
   }
 
   /** A wheel over the rows scrolls them sideways, so a long shelf reads with a mouse. */
   #wireWheel(): void {
-    this.#root.querySelector('.rows')?.addEventListener('wheel', (e) => {
+    this.#root.querySelector('.rows:not(.items)')?.addEventListener('wheel', (e) => {
       const rowsEl = e.currentTarget as HTMLElement
       const ev = e as WheelEvent
       if (Math.abs(ev.deltaY) <= Math.abs(ev.deltaX)) return
@@ -1004,14 +1301,16 @@ export class QuickTrayElement extends HTMLElement {
     this.#pressed = true
     if (folded === this.#folded) return
     this.#setFolded(folded)
-    void this.#keepFold(folded)
+    void this.#keepState()
   }
 
-  async #keepFold(folded: boolean): Promise<void> {
+  /** The fold, the names toggle and the pinned rings: one current record. */
+  async #keepState(): Promise<void> {
     const store = ioc()?.get?.(STORE_KEY) as StoreLike | undefined
     const pool = await store?.getPool?.(STATE_POOL)
     if (!pool || !store?.putPoolDoc) return
-    const bytes = new TextEncoder().encode(JSON.stringify({ folded, fill: this.#fill, at: Date.now() })).buffer as ArrayBuffer
+    const record = { ...this.#stateExtra, folded: this.#folded, labels: this.#labels, pinned: [...this.#pinned], at: Date.now() }
+    const bytes = new TextEncoder().encode(JSON.stringify(record)).buffer as ArrayBuffer
     await store.putPoolDoc(pool, bytes, undefined, { keep: 'current' }).catch(() => undefined)
   }
 
@@ -1024,11 +1323,12 @@ export class QuickTrayElement extends HTMLElement {
       try {
         const bytes = await store.getPoolDoc(pool)
         if (!bytes) return
-        const record = JSON.parse(new TextDecoder().decode(bytes)) as { folded?: unknown; fill?: unknown }
-        if (typeof record?.fill === 'number' && !this.#fillChosen) {
-          this.#fill = Math.min(FILL_MAX, Math.max(FILL_MIN, Math.round(record.fill)))
-          this.#render()
-        }
+        const record = JSON.parse(new TextDecoder().decode(bytes)) as { folded?: unknown; labels?: unknown; pinned?: unknown } & Record<string, unknown>
+        const { folded: _f, labels, pinned, at: _a, ...extra } = record
+        this.#stateExtra = extra
+        if (typeof labels === 'boolean') this.#labels = labels
+        if (Array.isArray(pinned)) for (const id of pinned) if (typeof id === 'string') this.#pinned.add(id)
+        this.#render()
         if (this.#pressed) return
         if (record?.folded === true) this.#setFolded(true)
       } catch { /* no record, or not ours: the shelf stays open */ }
@@ -1064,9 +1364,10 @@ export class QuickTrayElement extends HTMLElement {
 
   // ── the drop ─────────────────────────────────────────────────────────────
 
-  #onRowPointerDown(event: PointerEvent, entry: TrayEntry | undefined): void {
+  #onRowPointerDown(event: PointerEvent, entry: TrayEntry | undefined, row: HTMLElement | null = null): void {
     if (event.button !== 0 || !entry || entry.kind === 'tag') return
-    this.#pending = { entry, x: event.clientX, y: event.clientY }
+    if ((event.target as HTMLElement | null)?.closest?.('.remove')) return
+    this.#pending = { entry, x: event.clientX, y: event.clientY, row }
     document.addEventListener('pointermove', this.#onDragMove)
     document.addEventListener('pointerup', this.#onDragUp)
     document.addEventListener('pointercancel', this.#onDragCancel)
@@ -1100,6 +1401,7 @@ export class QuickTrayElement extends HTMLElement {
     if (!this.#dragging) {
       if (Math.hypot(event.clientX - p.x, event.clientY - p.y) < DRAG_THRESHOLD) return
       this.#dragging = p.entry
+      this.#hideTip()
       // Chrome sits at the header's level, under dialogs; only a row in flight
       // rises over every window, so its ghost reads above a Portals row too.
       this.classList.add('lifting')
@@ -1119,7 +1421,10 @@ export class QuickTrayElement extends HTMLElement {
     const p = this.#pending
     const wasDragging = this.#dragging !== null
     this.#endDrag()
-    if (!wasDragging || !p) return
+    if (!p) return
+    // No drag: a click. The icon leaves on the release, never on a later
+    // click event, so a run of clicks keeps up with the hand.
+    if (!wasDragging) { this.#eject(p.entry, event.shiftKey, p.row); return }
     this.#suppressTrailingClick()
     this.#drop(p.entry, event)
   }

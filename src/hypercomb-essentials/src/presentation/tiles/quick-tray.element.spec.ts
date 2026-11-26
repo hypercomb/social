@@ -115,6 +115,63 @@ describe('a take answers where it landed', () => {
   })
 })
 
+// A click on an icon places it on the page on screen. It must leave the strip
+// in the same frame — a participant moving many clicks through them fast — and
+// the placements go one at a time, so two commits never race on one page.
+describe('a click ejects', () => {
+  const press = (at: number, shiftKey = false): void => {
+    const row = tray.shadowRoot?.querySelectorAll('.row')[at] as HTMLElement
+    row.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 5, clientY: 5 }))
+    document.dispatchEvent(new MouseEvent('pointerup', { clientX: 5, clientY: 5, shiftKey }))
+  }
+  const placements = (): { entries: { label: string }[]; custody: boolean }[] => {
+    const heard: { entries: { label: string }[]; custody: boolean }[] = []
+    const off = EffectBus.on<{ entries: { label: string }[]; custody: boolean }>('shelf:place', p => { heard.push(p) })
+    afterHook.push(off)
+    return heard
+  }
+  const afterHook: Array<() => void> = []
+  beforeEach(() => { for (const off of afterHook.splice(0)) off() })
+
+  it('takes the icon off the strip at once and places it', () => {
+    const heard = placements()
+    heard.length = 0
+    press(1)
+    expect(shown(tray)).toEqual(['first', 'third'])
+    expect(tray.entries.map(e => e.label)).toEqual(['first', 'third'])
+    expect(heard.at(-1)?.entries.map(e => e.label)).toEqual(['second'])
+  })
+
+  it('holds the next clicks until the first lands, then sends them together', () => {
+    const heard = placements()
+    heard.length = 0
+    press(0); press(0); press(0)
+    expect(shown(tray)).toEqual([])
+    expect(heard).toHaveLength(1)
+    EffectBus.emit('shelf:placed', { placed: [{ label: 'first', sourceSegments: ['page', 'deep'] }], failed: [] })
+    expect(heard).toHaveLength(2)
+    expect(heard[1].entries.map(e => e.label)).toEqual(['second', 'third'])
+  })
+
+  it('puts back what failed to land', () => {
+    press(2)
+    EffectBus.emit('shelf:placed', { placed: [], failed: ['third'] })
+    expect(shown(tray)).toEqual(['first', 'second', 'third'])
+  })
+})
+
+describe('the names toggle', () => {
+  it('shows every name on the strip and brings the ring tools', () => {
+    expect(tray.shadowRoot?.querySelector('.shelf.named')).toBeNull()
+    expect(tray.shadowRoot?.querySelector('.list-btn')).toBeNull()
+    click(tray, '.names')
+    expect(tray.shadowRoot?.querySelector('.shelf.named')).not.toBeNull()
+    expect(tray.shadowRoot?.querySelectorAll('.step')).toHaveLength(2)
+    click(tray, '.list-btn')
+    expect(tray.shadowRoot?.querySelector('.rings .ring-items')?.textContent).toBe('first · second · third')
+  })
+})
+
 describe('hiding the shelf', () => {
   it('folds away entirely, says so, and lets go of nothing', () => {
     click(tray, '.fold')
