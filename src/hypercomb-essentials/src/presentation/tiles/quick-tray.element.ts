@@ -199,8 +199,9 @@ const STYLE = `
   --shelf-right:calc(var(--hc-inset-right,0px) + 0.5rem);}
 :host(.lifting){z-index:2147483600;}
 .shelf{pointer-events:auto;position:absolute;top:var(--shelf-top);left:var(--shelf-left);right:var(--shelf-right);
-  height:2.75rem;box-sizing:border-box;display:flex;align-items:center;
-  gap:0.75rem;padding:0 0.45rem 0 0.95rem;border-radius:var(--hc-radius-floating,4px);
+  --inset:0.6rem;
+  height:calc(2rem + 2 * var(--inset));box-sizing:border-box;display:flex;align-items:center;
+  gap:var(--inset);padding:0 var(--inset);border-radius:var(--hc-radius-floating,4px);
   background:rgba(var(--hc-panel-pane,12,28,46),0.9);
   backdrop-filter:blur(10px) saturate(1.1);-webkit-backdrop-filter:blur(10px) saturate(1.1);
   box-shadow:inset 0 0 2.75rem -1.25rem rgba(var(--shelf),0.55),0 8px 28px rgba(var(--hc-panel-shadow,0,0,0),0.28);
@@ -263,8 +264,11 @@ const STYLE = `
    icons are squares that wrap, three rows at most, then they scroll. Open,
    the rings hang under the bar inside the shelf, so the band it holds (and
    the breadcrumb below it) grows with them. */
-.shelf:not(.picks){height:auto;min-height:2.75rem;flex-direction:column;align-items:stretch;gap:0.35rem;padding:0.4rem 0.45rem 0.4rem 0.95rem;}
-.bar{position:relative;display:flex;align-items:flex-start;gap:0.6rem;min-width:0;--row:max(2rem,var(--item,2rem));}
+/* BALANCED: one inset (--inset) on all four sides, measured to what is SEEN
+   — the shelf glyph on the left, the arrow's glyph on the right, the row's
+   top and bottom — and the same inset between label, search, tiles, arrow. */
+.shelf:not(.picks){height:auto;min-height:calc(2rem + 2 * var(--inset));flex-direction:column;align-items:stretch;gap:var(--inset);padding:var(--inset);}
+.bar{position:relative;display:flex;align-items:flex-start;gap:var(--inset,0.6rem);min-width:0;--row:max(2rem,var(--item,2rem));}
 /* ONE CENTRE LINE: the head (2rem) and the first row of tiles (the size the
    slider sets) are both centred on a row as tall as the taller of the two. */
 .bar>.legend,.bar>.add,.bar>.tools{height:2rem;align-self:flex-start;margin-top:calc((var(--row) - 2rem) / 2);}
@@ -294,6 +298,11 @@ const STYLE = `
 .tool:hover,.tool:focus-visible{opacity:1;background:rgba(var(--shelf),0.16);outline:none;}
 .tool.on{opacity:1;color:rgb(var(--shelf));background:rgba(var(--shelf),0.18);}
 .tool svg{width:1rem;height:1rem;display:block;}
+/* The arrow is exactly as wide as its glyph (and the row's full height, to
+   hit easily), so the glyph stands one inset from the edge like the shelf
+   glyph opposite; it answers hover and open with colour, never a box. */
+.tool.expand{width:1rem;height:2rem;background:transparent;}
+.tool.expand:hover,.tool.expand:focus-visible,.tool.expand.on{background:transparent;color:rgb(var(--shelf));opacity:1;}
 .tip{position:fixed;z-index:2147483600;pointer-events:none;transform:translateX(-50%);max-width:16rem;padding:0.2rem 0.5rem;
   border-radius:var(--hc-radius-control,2px);background:rgba(var(--hc-panel-pane,12,28,46),0.96);box-shadow:0 0 0 1px rgba(var(--shelf),0.5);
   color:var(--hc-window-ink-loud,currentColor);font-family:var(--hc-font,system-ui);font-size:0.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -326,7 +335,7 @@ const STYLE = `
 @keyframes hc-shelf-taken{from{background:rgba(var(--shelf),0.45);border-color:rgba(var(--shelf),0.9);}}
 .taken{animation:hc-shelf-taken 700ms ease-out;}
 @media (prefers-reduced-motion:reduce){.taken{animation:none;}.row,.remove{transition:none;}}
-@media (max-width:640px){.shelf{gap:0.5rem;padding-left:0.75rem;}.label{max-width:7rem;}.legend .word{display:none;}.add{width:6rem;}}
+@media (max-width:640px){.shelf{--inset:0.5rem;}.label{max-width:7rem;}.legend .word{display:none;}.add{width:6rem;}}
 .ghost{position:fixed;z-index:2147483600;pointer-events:none;margin-left:0.8rem;margin-top:-0.9rem;max-width:14rem;
   padding:0.3rem 0.6rem;display:flex;align-items:center;gap:0.4rem;border-radius:var(--hc-radius-floating,4px);
   background:rgba(var(--hc-panel-pane,12,28,46),0.94);box-shadow:0 0 0 1px rgba(var(--shelf),0.55),0 6px 20px rgba(var(--hc-panel-shadow,0,0,0),0.3);

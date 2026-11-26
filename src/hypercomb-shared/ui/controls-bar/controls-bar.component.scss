@@ -43,14 +43,15 @@ $band-gap: 0.3rem;
 // often enough that they should not be buried in the rail's edit mode; the
 // compact cold-chrome treatment keeps them subordinate to both pieces of
 // primary chrome. Under the header they stand at the shelf's left end, centred
-// on its band (same top, same 2.75rem height), and publish their right edge as
+// on its band (same top, same 3.2rem height: the shelf's 2rem row plus its
+// 0.6rem inset above and below), and publish their right edge as
 // `--hc-seam-right` so the shelf starts after them.
 .seam-tools {
   position: fixed;
   top: calc(var(--hc-header-anchor, calc(2.75rem * var(--hc-header-zoom, 1.0))) + 0.375rem);
   left: 0.7rem;
   z-index: 59999;
-  height: 2.75rem;
+  height: 3.2rem;
 
   display: flex;
   align-items: center;
