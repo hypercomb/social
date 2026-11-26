@@ -29,6 +29,12 @@ let outcome: Outcome = 'committed'
 let explains = ''
 const adopted: { branch: Branch; opts: unknown }[] = []
 const walked: { sig: string; opts: unknown }[] = []
+/** What the broker was told, and when, beside the walk. */
+const events: string[] = []
+/** The hosts the broker knows (learned by the fetch that got their bytes). */
+let served: string[] = []
+/** The hosts whose bytes the walk gets. */
+let servesOnWalk: string[] = []
 
 const { HIVE_TREE_READER_IOC_KEY } = await import('./hive-tree-reader.js')
 const services: Record<string, unknown> = {
@@ -41,7 +47,10 @@ const services: Record<string, unknown> = {
     },
   },
   '@diamondcoreprocessor.com/ContentBrokerDrone': {
-    adopt: async (sig: string, opts: unknown) => { walked.push({ sig, opts }); return walk },
+    adopt: async (sig: string, opts: unknown) => { walked.push({ sig, opts }); events.push(`walk ${sig}`); served = [...served, ...servesOnWalk]; return walk },
+    noteDomainsForSig: (sig: string, domains: string[]) => { events.push(`note ${sig} ${domains.join(',')}`) },
+    hintDomainsForSig: (sig: string, domains: string[]) => { events.push(`hint ${sig} ${domains.join(',')}`) },
+    knownContentHosts: () => served,
   },
   '@diamondcoreprocessor.com/HistoryService': { getLayerBySig: async () => layer },
   [HIVE_TREE_READER_IOC_KEY]: {
@@ -54,6 +63,9 @@ const services: Record<string, unknown> = {
 ;(window as unknown as { ioc: { get(key: string): unknown } }).ioc.get = (key: string) => services[key]
 
 const { TakeQueenBee, parseTake, TAKE_MAX_TILES } = await import('./take.queen.js')
+const { forgetFoundHosts } = await import('./found-hosts.js')
+const { readExplore } = await import('./hive-explore-read.js')
+const { picturesKey, picturesPoolAddress } = await import('../sharing/picture-pools.js')
 type Runnable = { execute(args: string): Promise<void>; machine: { refuse(args: string): string | undefined; reach: string; scope: string } }
 const queen = (): Runnable => new TakeQueenBee() as unknown as Runnable
 
@@ -69,7 +81,11 @@ beforeEach(() => {
   explains = ''
   adopted.length = 0
   walked.length = 0
+  events.length = 0
   toasts.length = 0
+  served = []
+  servesOnWalk = []
+  forgetFoundHosts()
 })
 
 describe('what a take line asks for', () => {
@@ -107,6 +123,31 @@ describe('take <signature>', () => {
     // No host is named: the fold asks the hosts this hive already asks.
     expect(adopted).toEqual([{ branch: { layerSig: SIG, at: ['workshop'], label: 'recipes' }, opts: { silent: true } }])
     expect(toasts.at(-1)).toBe('took “recipes” and 2 tiles under it to /workshop')
+  })
+
+  it('a signature explore found is asked of the hosts that led to it, and learns only the one that served (reach A4)', async () => {
+    const PUBLISHER = 'e'.repeat(64)
+    const tileKey = (await picturesKey('recipes'))!
+    const tileAddress = (await picturesPoolAddress('recipes'))!
+    const found = await readExplore('recipes', {}, {
+      hosts: async () => ['a-listed.example', 'found.example'],
+      feed: hosts => ({
+        hosts: () => hosts,
+        listing: async (_host, address) => address === tileAddress ? { state: 'listed', text: PUBLISHER } : { state: 'absent' },
+        roots: async () => ({ [tileKey]: SIG }),
+        readJson: async sig => sig === SIG ? { name: 'recipes', children: [] } : null,
+        now: () => 0,
+      }),
+    })
+    expect(found).toMatchObject({ ok: true, tiles: [{ sig: SIG, hosts: ['a-listed.example', 'found.example'], via: 'tile' }] })
+    events.length = 0
+    // Only found.example's bytes arrive in the walk; the broker learns it by that fetch.
+    servesOnWalk = ['found.example']
+    await queen().execute(SIG)
+    // The broker is HINTED where it was found before the walk, never told to
+    // learn a host that only listed it; the fold is told the host that served.
+    expect(events).toEqual([`hint ${SIG} a-listed.example,found.example`, `walk ${SIG}`])
+    expect(adopted[0]!.branch).toEqual({ layerSig: SIG, at: [], label: 'recipes', domain: 'found.example' })
   })
 
   it('lands on the page a route names, and on the first page for `at /`', async () => {

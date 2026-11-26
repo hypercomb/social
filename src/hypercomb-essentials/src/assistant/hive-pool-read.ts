@@ -38,6 +38,7 @@ import { lensOrigin, listingMembers } from '../sharing/community-lens.js'
 import { networkHosts } from '../sharing/network-hosts.js'
 import { askPoolListing } from '../sharing/pool-listing.js'
 import { readDoorsOf, zonesOf } from '../sharing/zone-door.js'
+import { headsInDocument, noteFoundAt } from './found-hosts.js'
 import { liveShowcaseReadDeps, readZoneShowcase, type ShowcaseFound } from './hive-showcase-read.js'
 
 /** A pool a model may ask for: a colon meaning, lower case, no spaces. A bare
@@ -91,6 +92,9 @@ export interface PoolReadDeps {
   /** A meaning that is an INDEX KEY, not a pool (`showcase:<zone>`), read where the zone's owners sign it
    *  (hive-showcase-read.ts) — asked only when no host answers at the pool address. */
   signed?(meaning: string, hosts: readonly string[], signal?: AbortSignal): Promise<ShowcaseFound | null>
+  /** Where a signature was found (found-hosts.ts): a set's members, and the
+   *  heads a one-file index names. Defaults to the page's attribution map. */
+  note?(sig: string, hosts: readonly string[]): void
 }
 
 export const livePoolReadDeps: PoolReadDeps = {
@@ -291,6 +295,13 @@ export const readPool = async (
   // Every member, named or past the page: a model may read one it was told
   // of in an earlier page, and the listing is what says where it lives.
   noteMembers(address, members)
+  // WHERE EACH WAS FOUND (reach A4): every member, and every head a ledger or
+  // record names, is attributed to the hosts that said it, so a later read or
+  // take asks there first. Attribution only; nothing goes out.
+  const note = deps.note ?? noteFoundAt
+  for (const member of members) note(member.sig, member.hosts)
+  for (const [text, carriers] of byText) for (const head of headsInDocument(text)) note(head, carriers)
+  for (const head of heads) note(head.sig, head.hosts)
   const named = [...members, ...heads.filter(head => !bySig.has(head.sig)).map(head => ({ sig: head.sig, hosts: [...head.hosts] }))]
   return {
     ok: true, root, meaning, address,

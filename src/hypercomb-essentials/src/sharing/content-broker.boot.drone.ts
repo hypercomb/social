@@ -756,6 +756,12 @@ export class ContentBrokerDrone extends Drone {
   // See: project_public_navigation_lineage_filter.md / "The response
   // primitive: { bytes, domains }".
   #knownDomainsBySig = new Map<string, Set<string>>()
+  // The part of #knownDomainsBySig that only a HINT named (hintDomainsForSig):
+  // hosts a read saw listing the sig. They steer its fetch, but the closure
+  // attribution passes them on as hints too, never as hosts to learn.
+  #hintedDomainsBySig = new Map<string, Set<string>>()
+  // The same for #inferredDomainsBySig: a hint the closure passed on to a ref.
+  #hintedInferredBySig = new Map<string, Set<string>>()
 
   // INFERRED hosts — the §21.14 presumption that a host serving a layer
   // serves its closure (#attributeClosure). A guess, not an attribution:
@@ -997,7 +1003,7 @@ export class ContentBrokerDrone extends Drone {
   // Record a sig→domain mapping. Called whenever a response carrying
   // domain attributions arrives. Domains are deduped per-sig; the map
   // grows monotonically until the drone restarts.
-  #noteDomains = (sig: string, domains: string[], inferred = false): void => {
+  #noteDomains = (sig: string, domains: string[], inferred = false, durable = true): void => {
     if (!domains.length) return
     // Domain tags arrive in several equivalent forms (bare host, https://,
     // or wss://). Store the same fetch target only once so a re-announcement
@@ -1009,7 +1015,17 @@ export class ContentBrokerDrone extends Drone {
     if (!normalizedDomains.length) return
     const map = inferred ? this.#inferredDomainsBySig : this.#knownDomainsBySig
     const set = map.get(sig) ?? new Set<string>()
-    const before = this.getKnownDomains(sig).length
+    const before = this.#fetchCandidateCount(sig)
+    {
+      const hints = inferred ? this.#hintedInferredBySig : this.#hintedDomainsBySig
+      const hinted = hints.get(sig) ?? new Set<string>()
+      for (const domain of normalizedDomains) {
+        if (durable) hinted.delete(domain)
+        else if (!set.has(domain)) hinted.add(domain)
+      }
+      if (hinted.size) hints.set(sig, hinted)
+      else hints.delete(sig)
+    }
     for (const domain of normalizedDomains) set.add(domain)
     map.set(sig, set)
     // Did we actually LEARN anything? Re-hearing a host we already had is not
@@ -1019,10 +1035,12 @@ export class ContentBrokerDrone extends Drone {
     // backoff cleared on each re-attribution, woke its consumers, missed
     // again, and went round — hundreds of requests for one dead sig in a
     // single tick, with the main thread pinned and the page never painting.
-    const learnedSomething = this.getKnownDomains(sig).length > before
+    const learnedSomething = this.#fetchCandidateCount(sig) > before
     // The HOST half of the knowledge is durable: persist + hand to the SW so
     // reloads and DOM-side /@resource/ fetches can still reach the publisher.
-    for (const domain of normalizedDomains) this.#learnHost(domain)
+    // A HINT (hintDomainsForSig) is not: it steers this sig's fetch and is
+    // never written to the persisted list.
+    if (durable) for (const domain of normalizedDomains) this.#learnHost(domain)
     // New address knowledge for this sig — its egg may now hatch; lift
     // the miss window AND reset the backoff so the next ask re-dials
     // immediately (not on the backed-off schedule).
@@ -1140,7 +1158,12 @@ export class ContentBrokerDrone extends Drone {
   #attributeClosure = (bytes: Uint8Array, host: string, layerSig = ''): void => {
     // The serving host, then every host the layer's publisher named for it:
     // a page's event names where its offered branches' subtrees went too.
-    const hosts = [host, ...(layerSig ? this.#knownDomainsBySig.get(layerSig) ?? [] : [])]
+    // A host a read only HINTED for the layer goes on as a hint: the fetch
+    // that gets its own bytes is what learns it.
+    const named = layerSig ? [...(this.#knownDomainsBySig.get(layerSig) ?? [])] : []
+    const hinted = layerSig ? this.#hintedDomainsBySig.get(layerSig) : undefined
+    const hosts = [host, ...named.filter(domain => !hinted?.has(domain))]
+    const hints = named.filter(domain => domain !== host && hinted?.has(domain))
     try {
       const layer = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>
       if (!layer || typeof layer !== 'object') return
@@ -1148,7 +1171,9 @@ export class ContentBrokerDrone extends Drone {
         if (!Array.isArray(value)) continue
         for (const raw of value) {
           const ref = String(raw ?? '').trim().toLowerCase()
-          if (/^[a-f0-9]{64}$/.test(ref)) this.#noteDomains(ref, hosts, true)
+          if (!/^[a-f0-9]{64}$/.test(ref)) continue
+          this.#noteDomains(ref, hosts, true)
+          if (hints.length) this.#noteDomains(ref, hints, true, false)
         }
       }
     } catch { /* not a JSON layer — nothing to attribute */ }
@@ -1654,11 +1679,21 @@ export class ContentBrokerDrone extends Drone {
    * have been observed yet for this sig.
    */
   public getKnownDomains = (sig: string): string[] => {
-    const known = this.#knownDomainsBySig.get(sig)
-    const inferred = this.#inferredDomainsBySig.get(sig)
-    if (!inferred) return known ? Array.from(known) : []
-    return [...new Set([...(known ?? []), ...inferred])]
+    // A HINT is not a host that served the sig: callers read [0] as the
+    // publisher's domain (the adopt fold learns it durably, the run gate
+    // trusts it), so only the fetch cascade (#knownDomainsBySig) sees hints.
+    const hinted = this.#hintedDomainsBySig.get(sig)
+    const known = [...(this.#knownDomainsBySig.get(sig) ?? [])].filter(domain => !hinted?.has(domain))
+    const hintedInferred = this.#hintedInferredBySig.get(sig)
+    const inferred = [...(this.#inferredDomainsBySig.get(sig) ?? [])].filter(domain => !hintedInferred?.has(domain))
+    if (!inferred.length) return known
+    return [...new Set([...known, ...inferred])]
   }
+
+  /** Every host a fetch of `sig` may ask, hints included: the measure of
+   *  whether new address knowledge arrived (#noteDomains). */
+  #fetchCandidateCount = (sig: string): number =>
+    new Set([...(this.#knownDomainsBySig.get(sig) ?? []), ...(this.#inferredDomainsBySig.get(sig) ?? [])]).size
 
   /**
    * Note a domain as a session-scoped HTTP-direct fetch source. Used by the
@@ -1701,6 +1736,21 @@ export class ContentBrokerDrone extends Drone {
     const clean = String(sig ?? '').trim().toLowerCase()
     if (!/^[a-f0-9]{64}$/.test(clean)) return
     this.#noteDomains(clean, Array.isArray(domains) ? domains : [])
+  }
+
+  /**
+   * WHERE A READ SAW A SIGNATURE, FOR THIS PAGE ONLY (found-hosts.ts). The
+   * same sig→host attribution as noteDomainsForSig, so a later fetch of this
+   * sig asks there, but the hosts are NOT learned: nothing joins the
+   * persisted `hc:known-domains` list (whose 24 places hold the hosts adopts
+   * learned), the service worker or `domain:learned`. A model's explore or
+   * pool read names dozens of hosts it merely listed; only a host that
+   * actually serves bytes is learned, by the fetch that got them.
+   */
+  public hintDomainsForSig = (sig: string, domains: string[]): void => {
+    const clean = String(sig ?? '').trim().toLowerCase()
+    if (!/^[a-f0-9]{64}$/.test(clean)) return
+    this.#noteDomains(clean, Array.isArray(domains) ? domains : [], false, false)
   }
 
   /**

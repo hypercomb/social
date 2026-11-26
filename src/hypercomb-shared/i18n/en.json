@@ -2476,6 +2476,7 @@
   "publish.forget.still-open": "Switch every domain off first — a place that is shown cannot be deleted.",
   "publish.forget.keep-incomplete": "An open place is not fully held here, so nothing was deleted. Open it once, then try again.",
   "publish.forget.failed": "Nothing was deleted.",
+  "publish.picture-gap": "{branch} was published without its picture entry — {count} of its documents are neither on this device nor on its hosts.",
   "publish.done": "Staged — its host is serving it. Publish it live from your community.",
   "publish.done-unconfirmed": "Staged — its host has not served it back yet. This row re-checks on its own.",
   "publish.unpublished": "Removed from your hive index. The bytes stay hosted and links already shared still resolve — this stops it being advertised, it does not un-share it.",
