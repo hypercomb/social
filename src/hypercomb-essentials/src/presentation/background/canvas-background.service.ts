@@ -30,7 +30,7 @@
 
 import { EffectBus } from '@hypercomb/core'
 import { isPublishedVisitorShell } from '../../sharing/behavior-enablement.js'
-import { CrackMembrane } from './crack-membrane.js'
+import { PlasterWall } from './plaster-wall.js'
 
 const STORAGE_KEY = 'hc:canvas-bg'
 
@@ -463,15 +463,12 @@ export class CanvasBackgroundService extends EventTarget {
   #glowEl: HTMLDivElement | null = null
   #previewEl: HTMLDivElement | null = null
   #previewing = false
-  /** THE CRACKS (jwize, 2026-11-26). A feathered membrane laid over whatever
-   *  the screen shows, in the dark world only. ON unless switched off: he
-   *  asked for the dark view to crack. The wall is clean until dark switches
-   *  ON — that moment is the one impact, at the centre. See crack-membrane.ts. */
-  #cracks = true
-  #membrane = new CrackMembrane()
-  /** Was the chrome dark at the last look? Only a change to dark strikes.
-   *  Read at the first paint, when the token sheet is certainly in. */
-  #wasDark: boolean | null = null
+  /** THE CRACKING WALL (jwize, 2026-11-26). A lit plaster wall behind the
+   *  hive that takes random strikes, up to three, then mends and starts over
+   *  (plaster-wall.ts). It is the dark world's BARE screen, so a chosen look
+   *  or picture wins. OFF unless switched on: "not on by default". */
+  #cracks = false
+  #wall = new PlasterWall()
 
   constructor() {
     super()
@@ -479,11 +476,11 @@ export class CanvasBackgroundService extends EventTarget {
     this.#hydration = this.#hydrate()
     void this.#hydration.then(() => this.#followLineage())
     // Re-apply when the colour theme flips so an auto palette tracks it.
-    EffectBus.on('theme:changed', () => { this.apply(); this.#crackOnDark() })
+    EffectBus.on('theme:changed', () => { this.apply() })
     // matchMedia covers the 'system' theme (no data-theme attribute).
     try {
       window.matchMedia?.('(prefers-color-scheme: light)')
-        ?.addEventListener?.('change', () => { this.apply(); this.#crackOnDark() })
+        ?.addEventListener?.('change', () => { this.apply() })
     } catch { /* matchMedia unavailable */ }
     window.addEventListener('resize', () => {
       if (!this.#pictureUrl) return
@@ -507,51 +504,41 @@ export class CanvasBackgroundService extends EventTarget {
   get panX(): number { return this.#panX }
   get panY(): number { return this.#panY }
   get cascade(): boolean { return this.#cascade }
-  /** Is the crack membrane switched on? (It shows only in the dark world.) */
+  /** Is the cracking wall switched on? It shows on the dark world's bare
+   *  screen only. */
   get cracks(): boolean { return this.#cracks }
 
-  /** Switch the cracks on or off. Off takes them away; on waits for an impact
-   *  (the next switch to dark, or `strike()`). */
+  /** Switch the cracking wall on or off. */
   setCracks(on: boolean): void {
     if (this.#cracks === on) return
     this.#cracks = on
-    if (!on) this.#membrane.clean()
     this.#persist()
-    this.#syncCracks()
-    this.dispatchEvent(new CustomEvent('change'))
+    this.apply()
   }
 
-  /** One impact at the centre, now. False when the cracks cannot show here
-   *  (switched off, or a bright chrome). */
+  /** One impact now, at a random place. False when the wall cannot show
+   *  here: a bright chrome, or a look or picture on the screen. */
   strike(): boolean {
     if (!this.#cracks) this.setCracks(true)
-    this.#syncCracks()
-    if (!this.#membrane.visible) return false
-    this.#membrane.strike()
+    if (!this.#wall.visible) return false
+    this.#wall.strike()
     return true
   }
 
-  /** Back to an unbroken screen. */
-  mendCracks(): void { this.#membrane.clean() }
+  /** Mend the wall now; the cycle starts over. */
+  mendCracks(): void { this.#wall.mend() }
 
-  /** THE TRIGGER: the chrome moving INTO the dark world. The wall starts
-   *  clean and takes one impact at the centre. A reassert, a repeat of the
-   *  same theme, or a move between two dark themes strikes nothing. */
-  #crackOnDark(): void {
-    const dark = !this.#isLight()
-    const entered = dark && !this.#wasDark
-    this.#wasDark = dark
-    if (!dark) { this.#membrane.clean(); this.#syncCracks(); return }
-    if (!entered || !this.#cracks || isPublishedVisitorShell()) return
-    this.#syncCracks()
-    this.#membrane.clean()
-    // A beat for the new chrome to land before the screen splits.
-    setTimeout(() => { if (!this.#isLight()) this.#membrane.strike() }, 280)
-  }
-
-  #syncCracks(): void {
-    if (this.#cracks && !this.#isLight() && !isPublishedVisitorShell() && document.body) this.#membrane.show()
-    else this.#membrane.hide()
+  /** Should the wall show? Switched on, dark chrome, the screen bare, and not
+   *  a visitor's copy of a published site.
+   *
+   *  THE TRIGGER falls out of this: `apply()` runs on every theme change, so
+   *  moving INTO the dark world shows the wall clean and its first strike
+   *  lands a moment later, and leaving takes it away, cracks and all. A
+   *  reassert or a move between two dark themes finds it already showing and
+   *  changes nothing. */
+  #wallWanted(): boolean {
+    return this.#cracks && !this.#enabled && !this.#pictureUrl && !this.#picturePending
+      && !this.#isLight() && !isPublishedVisitorShell()
   }
   /** The saved backdrops, by world. Signature arrays — resolve on demand. */
   get saved(): Record<BackdropWorld, readonly string[]> {
@@ -843,8 +830,6 @@ export class CanvasBackgroundService extends EventTarget {
     if (isPublishedVisitorShell()) return
     const body = document.body
     if (!body) return
-    if (this.#wasDark === null) this.#wasDark = !this.#isLight()
-    this.#syncCracks()
     const s = body.style
     s.backgroundColor = ''
     s.backgroundImage = ''
@@ -854,6 +839,11 @@ export class CanvasBackgroundService extends EventTarget {
     s.backgroundAttachment = ''
     // Also hides a framing preview immediately when the picture was cleared.
     if (!this.#pictureUrl) this.#syncPreview()
+    // THE CRACKING WALL is the bare dark screen's; every other path takes it
+    // away. Same reason as the aurora for the transparent body: a negative-z
+    // layer paints under an opaque body, and the root keeps the surface colour.
+    if (this.#wallWanted() && this.#wall.show()) s.backgroundColor = 'transparent'
+    else this.#wall.hide()
     if (!this.#enabled) {
       this.#hideAurora()
       this.#hideGlow()
