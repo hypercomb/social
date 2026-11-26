@@ -47,7 +47,7 @@ describe('the × on a row', () => {
   it('takes the shelf away when the last row goes', () => {
     click(tray, '.remove'); click(tray, '.remove'); click(tray, '.remove')
     expect(tray.entries).toEqual([])
-    expect(tray.shadowRoot?.querySelector('.shelf, .fold')).toBeNull()
+    expect(tray.shadowRoot?.querySelector('.shelf')).toBeNull()
   })
 })
 
@@ -109,7 +109,7 @@ describe('a take answers where it landed', () => {
   })
 
   it('tells the shell button when the shelf is folded', () => {
-    click(tray, '.fold')
+    EffectBus.emitTransient('shelf:toggle', { open: false })
     expect(said()).toMatchObject({ folded: true })
     expect(said().entries).toHaveLength(3)
   })
@@ -160,23 +160,33 @@ describe('a click ejects', () => {
   })
 })
 
-describe('the names toggle', () => {
-  it('shows every name on the strip and brings the ring tools', () => {
-    expect(tray.shadowRoot?.querySelector('.shelf.named')).toBeNull()
-    expect(tray.shadowRoot?.querySelector('.list-btn')).toBeNull()
-    click(tray, '.names')
-    expect(tray.shadowRoot?.querySelector('.shelf.named')).not.toBeNull()
-    expect(tray.shadowRoot?.querySelectorAll('.step')).toHaveLength(2)
-    click(tray, '.list-btn')
-    expect(tray.shadowRoot?.querySelector('.rings .ring-items')?.textContent).toBe('first · second · third')
+describe('the arrow at the right end', () => {
+  it('opens the rings, the default shelf first, one line each', () => {
+    expect(tray.shadowRoot?.querySelector('.rings')).toBeNull()
+    click(tray, '.expand')
+    const lines = [...(tray.shadowRoot?.querySelectorAll('.ring:not(.new)') ?? [])]
+    expect(lines[0]?.querySelector('.ring-name')?.textContent).toBe('Shelf')
+    expect(lines[0]?.querySelector('.ring-items')?.textContent).toBe('first · second · third')
+    click(tray, '.expand')
+    expect(tray.shadowRoot?.querySelector('.rings')).toBeNull()
+  })
+
+  it('shows the items as image, text, or both', () => {
+    expect(tray.shadowRoot?.querySelector('.shelf.face-image')).not.toBeNull()
+    click(tray, '.expand')
+    click(tray, '.face-btn[data-face="text"]')
+    expect(tray.shadowRoot?.querySelector('.shelf.face-text')).not.toBeNull()
+    click(tray, '.face-btn[data-face="both"]')
+    expect(tray.shadowRoot?.querySelector('.shelf.face-both')).not.toBeNull()
+    expect(shown(tray)).toEqual(['first', 'second', 'third'])
   })
 })
 
 describe('hiding the shelf', () => {
   it('folds away entirely, says so, and lets go of nothing', () => {
-    click(tray, '.fold')
+    EffectBus.emitTransient('shelf:toggle', { open: false })
     expect(shown(tray)).toEqual([])
-    expect(tray.shadowRoot?.querySelector('.shelf, .fold')).toBeNull()
+    expect(tray.shadowRoot?.querySelector('.shelf')).toBeNull()
     expect(said()).toMatchObject({ folded: true })
     expect(tray.entries).toHaveLength(3)
   })
@@ -186,7 +196,7 @@ describe('hiding the shelf', () => {
   it('peeks open when a take lands, then folds back, with the count moving', () => {
     vi.useFakeTimers()
     try {
-      click(tray, '.fold')
+      EffectBus.emitTransient('shelf:toggle', { open: false })
       tray.take([{ label: 'fourth', sourceSegments: [] }])
       expect(shown(tray)).toEqual(['first', 'second', 'third', 'fourth'])
       vi.advanceTimersByTime(4000)
@@ -199,7 +209,7 @@ describe('hiding the shelf', () => {
   })
 
   it('comes back on shelf:toggle with every row', () => {
-    click(tray, '.fold')
+    EffectBus.emitTransient('shelf:toggle', { open: false })
     EffectBus.emitTransient('shelf:toggle', {})
     expect(shown(tray)).toEqual(['first', 'second', 'third'])
     expect(said()).toMatchObject({ folded: false })
@@ -240,7 +250,7 @@ describe('the fold is sticky', () => {
   })
 
   it('a press keeps the fold, and the next shelf comes up folded', async () => {
-    click(mount(), '.fold')
+    mount(); EffectBus.emitTransient('shelf:toggle', { open: false })
     await settle()
     expect(folded()).toBe(true)
     const next = mount()
@@ -250,7 +260,7 @@ describe('the fold is sticky', () => {
   })
 
   it('opening it again is kept too', async () => {
-    click(mount(), '.fold')
+    mount(); EffectBus.emitTransient('shelf:toggle', { open: false })
     await settle()
     EffectBus.emitTransient('shelf:toggle', {})
     await settle()
