@@ -8011,6 +8011,22 @@ test('a deep name is asked for as soon as the index is held, before the bookkeep
   })
 })
 
+// A door writes its bag on its first visit. Every accepted index must advance
+// it, or the head that visit saw stays the authority and a disagreeing bag
+// closes the door for good.
+test('every accepted index advances the door of a deep name, so a bag written earlier never closes it', async () => {
+  const env = claimEnv({ CLAIM_API_TOKEN: '' })
+  const bag = await sha256Hex(DEEP)
+  const older = 'b'.repeat(64)
+  await env.CONTENT.put(`${bag}/00000000`, JSON.stringify({ layer: older, pubkey: pubOf(sk), lineage: 'hyperdex/knowledge', title: 'knowledge' }))
+  assert.equal((await putIndexAt(env, 'pluginthematrix.com', await deepIndex())).status, 201)
+  const markers = [...env.CONTENT.held.keys()].filter((key) => key.startsWith(`${bag}/`)).sort()
+  assert.deepEqual(markers, [`${bag}/00000000`, `${bag}/00000001`])
+  assert.equal(JSON.parse(new TextDecoder().decode(env.CONTENT.held.get(markers[1]))).layer, head)
+  const page = await worker.fetch(new Request(`https://${DEEP}/`), env)
+  assert.doesNotMatch(await page.text(), /nothing published/)
+})
+
 test('the empty page under a deep name says the route to publish', async () => {
   const page = await (await worker.fetch(new Request(`https://${DEEP}/`), { SITE_BINDINGS: JSON.stringify(ONE_ZONE), CONTENT: contentBag() })).text()
   assert.match(page, /nothing published at knowledge\.hyperdex\.pluginthematrix\.com/)
