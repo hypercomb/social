@@ -49,10 +49,11 @@
   },
   "scene:02": {
     "slot": "0d8ca1d24ae1ae06",
-    "similarity": 0.9587,
+    "similarity": 0.9526,
     "wer": 0.0123,
-    "seconds": 27.03,
-    "at": "2026-11-25",
+    "seconds": 28.11,
+    "at": "2026-11-26",
+    "reference": "reference.m4a 5.0-29.2s, 2026-11-26",
     "text": "Hypercomb is not an app you sign up for. It is an open protocol: a shared way to name, keep and pass on what people make, that anyone can use and no one owns. Three ideas carry it. Every piece of work is named by a fingerprint of its own content. Every change is kept. And work travels between people directly, from device to device and domain to domain. The code is public, under a licence that keeps every copy open."
   }
 }
