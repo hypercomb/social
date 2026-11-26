@@ -144,11 +144,20 @@ const STATE_POOL = 'shelf:state'
 const t = (key: string, fallback: string): string =>
   (ioc()?.get?.(I18N_IOC_KEY) as I18nProvider | undefined)?.t?.(key) ?? fallback
 
+/** THE DEFAULT IMAGE: a tile with no picture is drawn as a tile — a pointy-top
+ *  hexagon, the hive's own cell, with the name's first letter inside, so a
+ *  shelf of pictureless tiles can still be told apart at a glance. */
+const tileIcon = (label: string): string => {
+  const letter = [...label.trim()][0]?.toUpperCase() ?? ''
+  return `<span class="glyph tile-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 1.8 20.8 6.9v10.2L12 22.2 3.2 17.1V6.9z" fill="rgba(var(--shelf),0.14)" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><text x="12" y="12.4" text-anchor="middle" dominant-baseline="central" fill="currentColor">${letter.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)}</text></svg></span>`
+}
+
 const esc = (s: string): string =>
   s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
 
 /** The thumbnail is the hex capture the hive draws, read-only: the placement
- *  worker's warm props lookup, then the picture it names. A miss shows ⬢. */
+ *  worker's warm props lookup, then the picture it names. A miss shows the
+ *  default tile icon (tileIcon). */
 const resolveThumb = async (entry: TrayEntry): Promise<string | null> => {
   const store = ioc()?.get?.('@hypercomb.social/Store') as StoreLike | undefined
   const placement = ioc()?.get?.('@diamondcoreprocessor.com/ShelfPlacementWorker') as PlacementLike | undefined
@@ -225,6 +234,8 @@ const STYLE = `
 .thumb,.glyph{width:1.4rem;height:1.4rem;flex:0 0 auto;display:inline-grid;place-items:center;overflow:hidden;}
 .thumb img{width:100%;height:100%;object-fit:contain;display:block;}
 .glyph{color:rgb(var(--shelf));font-size:0.95rem;line-height:1;}
+.tile-icon svg{width:100%;height:100%;display:block;overflow:visible;}
+.tile-icon text{font-family:var(--hc-font,system-ui);font-size:9px;font-weight:600;}
 .label{max-width:11rem;overflow:hidden;text-overflow:ellipsis;}
 .remove{appearance:none;width:1.25rem;height:1.25rem;display:inline-grid;place-items:center;border:0;padding:0;
   border-radius:var(--hc-radius-control,2px);background:transparent;color:var(--hc-window-ink-plain,currentColor);
@@ -994,7 +1005,7 @@ export class QuickTrayElement extends HTMLElement {
       const thumb = this.#pickThumbs.get(entryKey({ label, sourceSegments: this.#picksPage }))
       const face = thumb
         ? `<span class="thumb"><img src="${thumb}" alt="" draggable="false"></span>`
-        : `<span class="glyph" aria-hidden="true">⬢</span>`
+        : tileIcon(label)
       const isDone = done.has(label)
       const state = `${isDone ? ' done' : ''}${current === label ? ' current' : ''}`
       const mark = isDone ? `<span class="mark" title="${doneWord}" aria-label="${doneWord}">✓</span>` : ''
@@ -1084,7 +1095,7 @@ export class QuickTrayElement extends HTMLElement {
         ? `<span class="glyph" aria-hidden="true">#</span>`
         : thumb
         ? `<span class="thumb"><img src="${thumb}" alt="" draggable="false"></span>`
-        : `<span class="glyph" aria-hidden="true">⬢</span>`
+        : tileIcon(entry.label)
       const lit = entry.kind === 'tag' && this.#lens.includes(entry.label)
       return `<li class="row${this.#dragging === entry ? ' lifted' : ''}${entry.kind === 'tag' ? ' tag' : ''}${lit ? ' lit' : ''}"${entry.kind === 'tag' ? ` aria-pressed="${lit}"` : ''} data-index="${index}" tabindex="0" aria-label="${esc(entry.label)} · ${drag}">
         ${face}<span class="label">${esc(entry.label)}</span>
