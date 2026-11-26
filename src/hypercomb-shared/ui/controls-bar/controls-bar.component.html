@@ -452,13 +452,13 @@
                       data-ctrl-id="pin">
                 <span class="mat-sym" [class.filled]="locked()">push_pin</span>
               </button>
-              <!-- HOME — flies to the portal MARKED as home (the hive root until
-                   one is). Ctrl/⌘+click marks or releases the current location.
-                   The glyph turns into a pin once home is a portal, so the
+              <!-- HOME — the root, which shows the place pinned as home (the
+                   hive root itself until one is). Home is picked from Recent.
+                   The glyph turns into a pin once a home is pinned, so the
                    button says which of the two meanings it currently carries. -->
               <button class="ctl-btn rail-home"
                       [class.on-portal]="!!homePortal()"
-                      (click)="goHome($event)"
+                      (click)="goHome()"
                       [attr.aria-label]="homePortal()
                         ? ('controls.home.portal' | t: { portal: homeLabel() })
                         : ('controls.home' | t)"

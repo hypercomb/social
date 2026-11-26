@@ -2485,8 +2485,6 @@
   "aggregate.empty": "Burada henüz bir şey yok.",
   "aggregate.no-match": "Bu aramayla eşleşen bir şey yok.",
   "aggregate.home": "ana sayfa",
-  "aggregate.home.pin": "{name} sayfasını ana sayfan yap — Ana sayfa artık gittiğin yeri izlemez",
-  "aggregate.home.unpin": "{name} sayfasını ana sayfa olmaktan çıkar — Ana sayfa yeniden son portalı izler",
   "aggregate.carry.add": "{name} taşı — gittiğin yerde uygula",
   "aggregate.carry.remove": "{name} bırak",
   "aggregate.carry.clear": "Bırak",

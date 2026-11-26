@@ -2485,8 +2485,6 @@
   "aggregate.empty": "Ainda não há nada aqui.",
   "aggregate.no-match": "Nada corresponde a esta busca.",
   "aggregate.home": "início",
-  "aggregate.home.pin": "tornar {name} seu início — o Início deixa de seguir por onde você anda",
-  "aggregate.home.unpin": "soltar {name} como início — o Início volta a seguir o último portal",
   "aggregate.carry.add": "levar {name} — aplica onde fores",
   "aggregate.carry.remove": "pousar {name}",
   "aggregate.carry.clear": "Pousar",

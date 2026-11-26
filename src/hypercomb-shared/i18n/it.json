@@ -2485,8 +2485,6 @@
   "aggregate.empty": "Ancora niente qui.",
   "aggregate.no-match": "Niente corrisponde a questa ricerca.",
   "aggregate.home": "home",
-  "aggregate.home.pin": "rendi {name} la tua home — Home smette di seguirti dove vai",
-  "aggregate.home.unpin": "libera {name} da home — Home torna a seguire l'ultimo portale",
   "aggregate.carry.add": "porta {name} — applicalo dove vai",
   "aggregate.carry.remove": "posa {name}",
   "aggregate.carry.clear": "Posa",

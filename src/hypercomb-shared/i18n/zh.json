@@ -2485,8 +2485,6 @@
   "aggregate.empty": "这里还什么都没有。",
   "aggregate.no-match": "没有符合此搜索的内容。",
   "aggregate.home": "主页",
-  "aggregate.home.pin": "把 {name} 设为主页 —— 主页不再跟随你走到哪里",
-  "aggregate.home.unpin": "取消 {name} 作为主页 —— 主页重新跟随最近的门户",
   "aggregate.carry.add": "带上 {name} —— 走到哪里都能应用",
   "aggregate.carry.remove": "放下 {name}",
   "aggregate.carry.clear": "放下",

@@ -2485,8 +2485,6 @@
   "aggregate.empty": "Rien ici pour l'instant.",
   "aggregate.no-match": "Rien ne correspond à cette recherche.",
   "aggregate.home": "accueil",
-  "aggregate.home.pin": "faire de {name} votre accueil — Accueil cesse de suivre vos déplacements",
-  "aggregate.home.unpin": "libérer {name} comme accueil — Accueil suit à nouveau le dernier portail",
   "aggregate.carry.add": "emporter {name} — à appliquer où vous irez",
   "aggregate.carry.remove": "reposer {name}",
   "aggregate.carry.clear": "Reposer",

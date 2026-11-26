@@ -2485,8 +2485,6 @@
   "aggregate.empty": "لا شيء هنا بعد.",
   "aggregate.no-match": "لا شيء يطابق هذا البحث.",
   "aggregate.home": "الرئيسية",
-  "aggregate.home.pin": "اجعل {name} صفحتك الرئيسية — تتوقف الرئيسية عن تتبّع تنقّلك",
-  "aggregate.home.unpin": "حرّر {name} من الرئيسية — تتبع الرئيسية آخر بوابة مجددًا",
   "aggregate.carry.add": "احمل {name} — طبّقه أينما ذهبت",
   "aggregate.carry.remove": "ضع {name}",
   "aggregate.carry.clear": "ضعها",

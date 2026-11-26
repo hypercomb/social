@@ -1,34 +1,32 @@
 // hypercomb-shared/core/recent-portals.store.ts
 //
-// HOME — the portal you marked.
+// HOME — the root-level home page, and the Recent list it is chosen from.
 //
-// A portal is a reference tile: clicking it travels to another lineage. The
-// hive root stops being the place you keep landing back on and becomes what it
-// actually is — the thing everything else hangs off. Work you are not doing
-// stays out of sight.
+// ── the pin is the home page, at the root ─────────────────────────────
 //
-// ── home is MARKED, never inferred ────────────────────────────────────
+// Home is ONE place, pinned. While it is pinned the hive root SHOWS it and
+// the address stays `/` (home-root.ts): choosing a home puts you AT THE
+// ROOT, never at a nested address. The place keeps its real lineage behind
+// that `/`, so swarm and every cross-domain index and search still read where
+// it actually lives.
 //
-// Home is the lineage you MARKED from Portals or Ctrl/⌘+click on Home. It does
-// not follow where you walk. Walking is how you look around, and a home that
-// moved every time you looked at something was a home you could lose by
-// accident — you dip into one thing and home is no longer what you meant.
+// ── Recent is the pin's own history ───────────────────────────────────
 //
-// The mark is ONE SLOT, not a list, so mutual exclusivity is a property of the
-// shape rather than a rule anything has to enforce. Marking a second portal is
-// what releases the first, because there is nowhere else for it to go.
-//
-// It PERSISTS: a refresh must not cost you your focus. That is the whole point —
-// the mark outlives the page, so coming back puts you where you left.
-//
-// The walking trail beside it is retired: no tracking (jwize 2026-10-03).
+// There is no list to keep (jwize 2026-11-26: "we don't need to remember a
+// specific home page anymore, we just look through the history for this
+// pool"). Every pin is a document write, and a document write keeps its
+// versions: an atom plus a `000x` marker. So every home ever pinned is
+// already on disk in order, and `recent()` only reads the markers back,
+// newest first, one row per place. Choosing a row pins it again, which puts
+// it at the top. Nothing is tracked: a marker is written only when you pin.
+// The walking trail retired 2026-10-03 stays retired; this is not that.
 //
 // ── storage ───────────────────────────────────────────────────────────
 //
-// The mark is ONE DOCUMENT (sub-bucket `home`) in the participant's
-// `portals:recent` pool (participant-document.ts): synchronous to read,
-// hydrated from disk, written through. The old localStorage key is read once
-// as a fallback and never written again.
+// ONE DOCUMENT (sub-bucket `home`) in the participant's `portals:recent`
+// pool (participant-document.ts): synchronous to read, hydrated from disk,
+// written through, every version marked. The old localStorage key is read
+// once as a fallback and never written again.
 
 import { EffectBus } from '@hypercomb/core'
 import { ParticipantDocument, legacyJson, type ParticipantDocumentOptions } from './participant-document'
@@ -40,11 +38,11 @@ export const RECENT_PORTALS_MEANING = 'portals:recent'
 const HOME_SUBKEY = 'home'
 
 export interface RecentPortal {
-  /** The portal tile's name — what Home's tooltip shows. */
+  /** The place's name — what Home's tooltip and its Recent row show. */
   readonly label: string
   /** Where it leads. `[]` is the hive root. */
   readonly segments: readonly string[]
-  /** Epoch ms it was marked. */
+  /** Epoch ms it was pinned. */
   readonly at: number
 }
 
@@ -52,6 +50,7 @@ export interface RecentPortal {
 type HomeRecord = { home: RecentPortal | null }
 
 const pathKey = (segments: readonly string[]): string => segments.join('/')
+const clean = (segments: readonly string[]): string[] => segments.map(s => (s ?? '').trim()).filter(Boolean)
 
 const portal = (e: unknown): RecentPortal | null => {
   if (!e || typeof e !== 'object' || !Array.isArray((e as RecentPortal).segments)) return null
@@ -76,26 +75,14 @@ export class RecentPortalsStore extends EventTarget {
 
   readonly #mark: ParticipantDocument<HomeRecord>
 
-  /** The portal PINNED as home from the Portals toolwindow, if any.
-   *
-   *  ONE SLOT, not a list — pinning is mutually exclusive by construction
-   *  rather than by a rule someone has to remember to enforce. Pinning a second
-   *  portal is what unpins the first, because there is nowhere else for it to
-   *  go. */
-  public get pinned(): RecentPortal | undefined { return this.#mark.value.home ?? undefined }
-
-  /** WHERE HOME GOES — the MARKED portal, and nothing else.
-   *
-   *  Home does not follow where you walk. Walking is how you look around, and a
-   *  home that moved every time you looked at something was a home you could
-   *  lose by accident. Home is a thing you SAY, once, from the Portals
-   *  toolwindow. Nothing marked means the hive root, exactly as Home always
-   *  meant. */
+  /** WHERE HOME GOES — the pinned place, shown at the root. Nothing pinned
+   *  means the hive root itself, exactly as Home always meant. */
   public get home(): RecentPortal | undefined { return this.#mark.value.home ?? undefined }
 
-  public isPinned = (segments: readonly string[]): boolean => {
+  public isHome = (segments: readonly string[]): boolean => {
     const home = this.#mark.value.home
-    return !!home && pathKey(home.segments) === pathKey(segments.map(s => (s ?? '').trim()).filter(Boolean))
+    const here = clean(segments)
+    return home ? pathKey(home.segments) === pathKey(here) : here.length === 0
   }
 
   constructor(io: Pick<ParticipantDocumentOptions<unknown>, 'whenStore'> = {}) {
@@ -108,11 +95,13 @@ export class RecentPortalsStore extends EventTarget {
     this.#mark.addEventListener('change', this.#announce)
   }
 
-  /** Pin a portal as home. Replaces whatever was pinned — the slot holds one,
-   *  so mutual exclusivity is a property of the shape rather than a rule. */
+  /** Pin a place as the root-level home page. One slot: pinning a second
+   *  place is what releases the first. Each pin is a marker in the pool, so
+   *  it joins Recent. An empty path releases the pin (home = the hive root). */
   public pin = (label: string, segments: readonly string[]): void => {
-    const clean = segments.map(s => (s ?? '').trim()).filter(Boolean)
-    this.#mark.write({ home: { label: (label ?? '').trim(), segments: clean, at: Date.now() } })
+    const path = clean(segments)
+    if (path.length === 0) { this.unpin(); return }
+    this.#mark.write({ home: { label: (label ?? '').trim() || path[path.length - 1], segments: path, at: Date.now() } })
     this.#announce()
   }
 
@@ -123,10 +112,23 @@ export class RecentPortalsStore extends EventTarget {
     this.#announce()
   }
 
-  /** Pin if it is not home, release if it is. What the toolwindow toggle calls. */
-  public togglePin = (label: string, segments: readonly string[]): void => {
-    if (this.isPinned(segments)) this.unpin()
-    else this.pin(label, segments)
+  /** RECENT — every place ever pinned as home, newest first, one row per
+   *  place, read from the pool's own markers. The current pin, when it has
+   *  not reached disk yet, leads anyway: the slot is newer than the disk. */
+  public recent = async (): Promise<readonly RecentPortal[]> => {
+    const versions = await this.#mark.history()
+    const seen = new Set<string>()
+    const out: RecentPortal[] = []
+    const add = (p: RecentPortal | null | undefined): void => {
+      if (!p || p.segments.length === 0) return
+      const key = pathKey(p.segments)
+      if (seen.has(key)) return
+      seen.add(key)
+      out.push(p)
+    }
+    add(this.#mark.value.home)
+    for (const v of versions) add(v.home)
+    return out
   }
 
   #announce = (): void => {
