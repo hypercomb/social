@@ -268,6 +268,12 @@ const STYLE = `
 .items .remove{position:absolute;top:-0.35rem;right:-0.35rem;width:0.95rem;height:0.95rem;font-size:0.75rem;border-radius:50%;
   background:rgba(var(--hc-panel-pane,12,28,46),0.95);box-shadow:0 0 0 1px rgba(var(--shelf),0.55);transition:none;}
 .items .row:hover .remove{opacity:0.9;}
+/* Bare icons: a picture needs no frame. The frame comes back only where it
+   says something — under the pointer, pressed or focused, and lifted in a
+   drag — and always in text-only, where the frame is the item's edge. */
+.shelf:not(.face-text) .items .row{border-color:transparent;background:transparent;}
+.shelf:not(.face-text) .items .row:hover,.shelf:not(.face-text) .items .row:focus-visible,
+.shelf:not(.face-text) .items .row:active,.shelf:not(.face-text) .items .row.lifted{border-color:rgba(var(--shelf),0.6);background:rgba(var(--shelf),0.12);}
 .shelf.face-both .items .row,.shelf.face-text .items .row{width:auto;max-width:12rem;padding:0 0.45rem 0 0.15rem;gap:0.35rem;justify-content:flex-start;}
 .shelf.face-both .items .label,.shelf.face-text .items .label{position:static;width:auto;height:auto;clip:auto;max-width:9.5rem;overflow:hidden;text-overflow:ellipsis;}
 .shelf.face-text .items .thumb,.shelf.face-text .items .glyph{display:none;}
