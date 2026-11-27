@@ -37,6 +37,7 @@ import { DEFAULT_MENU, GAME_MENU_CSS, GameMenu, type MenuOption } from './game-m
 import type { StoryFacts } from './story-when.js'
 import { GainScreen, GAIN_CSS, type GainRequest } from './gain-screen.js'
 import { ItemsTable, ITEMS_CSS, type ItemsTab } from './items-table.js'
+import { isTyping } from '../../keyboard/typing-focus.js'
 
 const record = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
@@ -767,6 +768,7 @@ export class SolomonLabyrinthOverlay {
   #keyDown = (event: KeyboardEvent): void => {
     if (!this.#root || this.#designer || event.ctrlKey || event.metaKey || event.altKey) return
     const key = event.key.toLowerCase()
+    if (key !== 'escape' && isTyping(event)) return
     if (key === 'escape') {
       event.preventDefault(); event.stopPropagation()
       this.#back()
@@ -822,6 +824,7 @@ export class SolomonLabyrinthOverlay {
 
   #keyUp = (event: KeyboardEvent): void => {
     if (!this.#root || this.#designer) return
+    if (isTyping(event)) return
     const key = event.key.toLowerCase()
     if (key === 'arrowleft' || key === 'a') this.#input.left = false
     if (key === 'arrowright' || key === 'd') this.#input.right = false

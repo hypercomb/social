@@ -53,6 +53,7 @@ import { markSeen, unseenNow } from './image-updates.js'
 import { ImageQueue } from './image-queue.js'
 import { readThumbnail, type ThumbnailStore } from '../presentation/tiles/thumbnails.js'
 import { FILL_HEX_R, divideBySheet, fillFrame, readFillSheet, type FillDivision, type FillOrientation } from '../presentation/tiles/fill-sprite.js'
+import { isTyping } from '../keyboard/typing-focus.js'
 
 type Axial = { q: number; r: number }
 
@@ -290,6 +291,7 @@ export class ImageChoiceDrone extends Drone {
 
   #onKeyDown = (e: KeyboardEvent): void => {
     if (!this.#layer) return
+    if (e.key !== 'Escape' && isTyping(e)) return
     if ((e.key === 'Delete' || e.key === 'Backspace') && this.#hoverChoice && this.#canForget(this.#hoverChoice)) {
       e.preventDefault()
       e.stopPropagation()

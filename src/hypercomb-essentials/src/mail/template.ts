@@ -1013,7 +1013,8 @@ class Renderer {
       const inner = this.html(node.kids, node.tag, { anchor: where.anchor || node.tag === 'a', code: where.code || node.tag === 'code' })
       if (node.tag === 'a') {
         const target = node.href && 'url' in node.href ? node.href.url : node.href ? this.#value({ name: node.href.hole, resource: false }) : undefined
-        out += typeof target === 'string' ? `<a href="${escapeHtml(target)}" rel="noopener noreferrer">${inner}</a>` : `<a>${inner}</a>`
+        // A link with nowhere to go (its url hole left empty) is its words alone, never a link that does nothing.
+        out += typeof target === 'string' ? `<a href="${escapeHtml(target)}" rel="noopener noreferrer">${inner}</a>` : inner
         continue
       }
       out += `<${node.tag}${node.start !== undefined && node.start !== 1 ? ` start="${node.start}"` : ''}>${inner}</${node.tag}>`

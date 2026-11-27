@@ -46,6 +46,7 @@ import { TREE_VIEW } from './tree-view-target.js'
 import type { BriefBehavior } from './tile-brief.js'
 import type { VisualBeeDescriptor } from '../../commands/visual-bee-registry.js'
 import { isLongPressMenu } from '../../navigation/browser-menu.js'
+import { isTyping } from '../../keyboard/typing-focus.js'
 
 /** House palette — steel on ink, matching the other full-viewport views.
  *  A dark canvas is deliberate: the limb hues are the information here, and
@@ -498,7 +499,7 @@ export class TreeViewDrone extends Drone {
       vm.setMode('hexagons')
       return
     }
-    if (typing) return
+    if (isTyping(e)) return
     if (e.key === '+' || e.key === '=') { e.preventDefault(); this.#setZoom(this.#zoom * 1.25) }
     else if (e.key === '-' || e.key === '_') { e.preventDefault(); this.#setZoom(this.#zoom / 1.25) }
     else if (e.key === '0') { e.preventDefault(); this.#fit() }

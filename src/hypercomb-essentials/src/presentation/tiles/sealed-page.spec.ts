@@ -200,6 +200,18 @@ describe('what counts as this hive\'s own', () => {
     expect(read('website', 'parts.queen.ts')).not.toMatch(/commitPageSig\(/)
     expect(read('website', 'style.queen.ts')).not.toMatch(/commitPageSig\(/)
     // Written over someone else's page, a file keeps their scripts: it stays from elsewhere.
-    expect(read('files', 'tile-files.drone.ts')).toContain('if (!current || isAuthored(current)) markAuthored(htmlSig)')
+    const files = read('files', 'tile-files.drone.ts')
+    expect(files).toContain('const own = !current || isAuthored(current)')
+    // A TRIAL IS NOT AUTHORED (2026-11-27, inline-code-in-input-audit.md H1/H2):
+    // a model's page is marked when a person brings it home (try-page.ts
+    // releaseTrial), and at once only on a managed site door, where no trial is.
+    expect(files).toContain('rememberTrial(htmlSig, label, { own })')
+    expect(files.match(/markAuthored\(/g)?.length).toBe(1)
+    expect(files).toMatch(/if \(onManagedSiteDoor\(\)\) \{\s*if \(own\) markAuthored\(htmlSig\)/)
+    // A page rebuilt from a model's part is staged as a trial, and the rebuild marks nothing.
+    expect(files).toContain('await this.#stage(rebuild.page, rebuilt.sig, rebuilt.html, rebuilt.own)')
+    const parts = read('files', 'page-parts-commit.ts')
+    expect(parts).not.toMatch(/markAuthored\(|commitPageSigFrom\(/)
+    expect(read('files', 'try-page.ts')).toContain('if (mine) markAuthored(sig)')
   })
 })

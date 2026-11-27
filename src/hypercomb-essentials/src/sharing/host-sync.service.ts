@@ -4016,10 +4016,16 @@ export class HostSyncService extends EventTarget {
     // asked of a host that has not been seen to hold the list (it would refuse).
     // Loaded only for a device that has taken an anchor: this file is in the eager
     // boot-lane closure (doctrine.spec.ts), and every other device never needs it.
+    //
+    // A host not yet seen holding it is given the list FIRST, here, once (then
+    // remembered for a while by key-list.client.ts): every upload path ends in
+    // this signature, and before this the only carry was an index write, which
+    // most flows make AFTER their uploads, so a delegated device's first upload
+    // to a host went out under its own key and was refused ("does not accept
+    // uploads from this key"). Seen live opening a pool for posts.
     if (this.#ioc<{ anchor?: () => string | null }>(ANCHOR_BINDING_KEY)?.anchor?.()) {
-      const { anchorTagFor } = await import('./key-list.client.js')
-      const anchorTag = anchorTagFor(url, await this.#getOwnPubkey())
-      if (anchorTag) tags.push(anchorTag)
+      const { anchorTagsFor } = await import('./key-list.client.js')
+      tags.push(...await anchorTagsFor(url))
     }
     // LIVE HERE TOO (D7). A relay.js host takes a participant's upload only
     // from a key live on ITS socket; one this tab does not meet at answered

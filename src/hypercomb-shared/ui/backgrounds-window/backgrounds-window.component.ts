@@ -39,6 +39,7 @@ import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { accordion } from '../accordion'
 import { signalSession } from '../window-session'
+import { isTyping } from '../../core/typing-focus'
 
 /** Structural mirrors of the essentials shapes — shared cannot import them. */
 type ScreenHalf = { archetype: string; palette: string }
@@ -576,7 +577,7 @@ export class BackgroundsWindowComponent implements OnDestroy {
 
   @HostListener('window:keydown', ['$event'])
   beginSpacePan(event: KeyboardEvent): void {
-    if (!this.visible() || !this.hasPicture() || event.code !== 'Space' || this.#isTyping(event.target)) return
+    if (!this.visible() || !this.hasPicture() || event.code !== 'Space' || isTyping(event)) return
     event.preventDefault()
     this.spacePan.set(true)
   }
@@ -596,11 +597,6 @@ export class BackgroundsWindowComponent implements OnDestroy {
     this.spacePan.set(false)
     this.#panStart = null
     this.panning.set(false)
-  }
-
-  #isTyping(target: EventTarget | null): boolean {
-    const el = target as HTMLElement | null
-    return Boolean(el?.closest('input, textarea, select, [contenteditable="true"]'))
   }
 
   // ── the saved shelves ────────────────────────────────────────────────

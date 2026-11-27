@@ -4,6 +4,8 @@
 import { SignatureService } from './signature.service.js'
 import { registerPoolMeaning } from './pool-registry.js'
 import { isMetaEnvelope, metaPayloadOf } from './life-primitive.js'
+import { chainSigners, indexAsksForList, indexStandsWith, listedChainAt } from './index-signer.js'
+import type { SignedKeyList } from './key-list.js'
 
 const SIG = /^[a-f0-9]{64}$/
 const HOST = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*(:\d{1,5})?$/
@@ -21,6 +23,9 @@ export type HostOffering = {
   doors: string[]
   /** Stable revision location: sign(hostname). */
   location?: string
+  /** The publisher's signed key list, carried when a listed key (not the
+   *  publisher) signed `index`, so the offer proves itself offline. */
+  keyList?: SignedKeyList[]
 }
 
 /** A non-site creation explicitly offered by the publisher at one location. */
@@ -53,9 +58,22 @@ const routeOf = (raw: string): URL | null => {
     && (url.protocol === 'https:' || (loopback(url.host) && url.protocol === 'http:')) ? url : null
 }
 
-const signedHead = (index: Record<string, unknown>, pubkey: string, lineage: string,
+/** Does `index` stand as `pubkey`'s, read on `origin`? Its own signature, or a
+ *  key the publisher's list there names, for it (index-signer.ts). Answers the
+ *  verified chain too when the list was what it took. */
+const standsAt = async (index: Record<string, unknown>, pubkey: string, origin: string,
+  verify: VerifyHostIndex): Promise<{ stands: boolean; chain?: SignedKeyList[] }> => {
+  if (indexStandsWith(index, pubkey, null)) return { stands: true }
+  const listed = indexAsksForList(index, pubkey) ? await listedChainAt(origin, pubkey, verify) : null
+  return listed && indexStandsWith(index, pubkey, listed.keys)
+    ? { stands: true, chain: [...listed.chain] } : { stands: false }
+}
+
+/** `stands`: the index is the publisher's (its own signature, or a listed key's
+ *  for it). A resolved offer carried without its list is checked strictly. */
+const signedHead = (index: Record<string, unknown>, stands: boolean, lineage: string,
   route: URL, verify: VerifyHostIndex): { head: string; doors: string[] } | null => {
-  if (Number(index['kind']) !== 30564 || index['pubkey'] !== pubkey) return null
+  if (Number(index['kind']) !== 30564 || !stands) return null
   try { if (!verify(index)) return null } catch { return null }
   let content: { roots?: Record<string, unknown>; doors?: Record<string, unknown> }
   try { content = JSON.parse(String(index['content'] ?? '')) } catch { return null }
@@ -79,11 +97,15 @@ export const parseHostOffering = (raw: unknown, verify: VerifyHostIndex): HostOf
     || !SIG.test(String(o.pubkey)) || !SIG.test(String(o.head))) return null
   const route = routeOf(o.route)
   if (!route || !o.index || typeof o.index !== 'object' || Array.isArray(o.index)) return null
-  const signed = signedHead(o.index, String(o.pubkey), o.lineage, route, verify)
+  // Offline: the publisher's own signature, or a listed key's whose chain the
+  // offer carries and which walks here again (never a verdict taken on trust).
+  const keys = o.keyList ? chainSigners(String(o.pubkey), o.keyList, verify) : null
+  const signed = signedHead(o.index, indexStandsWith(o.index, String(o.pubkey), keys), o.lineage, route, verify)
   if (!signed || signed.head !== o.head) return null
   return { kind: 'host:offering', title: o.title.trim().slice(0, 80) || o.lineage,
     route: route.origin + '/', lineage: o.lineage, pubkey: String(o.pubkey), head: String(o.head),
-    index: o.index, doors: signed.doors, ...(o.location ? { location: o.location } : {}) }
+    index: o.index, doors: signed.doors, ...(o.location ? { location: o.location } : {}),
+    ...(keys && o.keyList ? { keyList: o.keyList } : {}) }
 }
 
 const parseLocation = async (raw: unknown): Promise<LocationOffering | null> => {
@@ -156,7 +178,8 @@ const resolveLocation = async (raw: unknown, sourceHost: string, verify: VerifyH
   const index = await pending
   if (!index) return null
   const route = new URL(entry.route)
-  const signed = signedHead(index, entry.pubkey, entry.lineage, route, verify)
+  const standing = await standsAt(index, entry.pubkey, route.origin, verify)
+  const signed = signedHead(index, standing.stands, entry.lineage, route, verify)
   if (!signed) return null
   const source = baseOf(sourceHost)
   const published = await latestLocationHead(source, entry.location)
@@ -164,7 +187,7 @@ const resolveLocation = async (raw: unknown, sourceHost: string, verify: VerifyH
   const current = published.state === 'absent' && portal
     ? await latestLocationHead(entry.route, entry.location) : published
   if (current.state !== 'current' || current.head !== signed.head) return null
-  return { ...entry, head: current.head, index, doors: signed.doors }
+  return { ...entry, head: current.head, index, doors: signed.doors, ...(standing.chain ? { keyList: standing.chain } : {}) }
 }
 
 /** Discover current, explicitly public locations; never execute their code. */
@@ -221,8 +244,8 @@ const creationMember = async (raw: unknown, host: string): Promise<CreationMembe
 }
 
 const declaredCreation = (index: Record<string, unknown>, member: CreationMember,
-  verify: VerifyHostIndex): string | null => {
-  if (Number(index['kind']) !== 30564 || index['pubkey'] !== member.pubkey) return null
+  stands: boolean, verify: VerifyHostIndex): string | null => {
+  if (Number(index['kind']) !== 30564 || !stands) return null
   try { if (!verify(index)) return null } catch { return null }
   let content: Record<string, unknown>
   try { content = JSON.parse(String(index['content'] ?? '')) } catch { return null }
@@ -262,7 +285,7 @@ const resolveCreation = async (raw: unknown, host: string, verify: VerifyHostInd
   }
   const index = await pending
   if (!index) return null
-  const head = declaredCreation(index, member, verify)
+  const head = declaredCreation(index, member, (await standsAt(index, member.pubkey, base, verify)).stands, verify)
   const current = await latestLocationHead(base, member.location)
   if (!head || current.state !== 'current' || current.head !== head) return null
   const metaBytes = await fetchAtom(base, head, 65_536)

@@ -48,6 +48,12 @@ export interface AggregateItem {
   /** Points at nothing a reference could name — an atom no page lists. The row
    *  does not drag; opening it is the source's own answer. */
   loose?: boolean
+  /** Drawn lit: the row is what is in effect now (Recent's current home). */
+  current?: boolean
+  /** A short reading beside the label: an i18n key, or text as it is (a path
+   *  that tells two rows of one name apart). Never load-bearing. */
+  noteKey?: string
+  noteText?: string
 }
 
 /** One selectable VERSION of a row.

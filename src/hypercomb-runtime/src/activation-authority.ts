@@ -79,7 +79,8 @@ export type ActivationQuestion = {
   /** Whoever registered under ATTESTATION_IOC_KEY, or nothing. */
   attester?: PackageAttestation | null
   /** The shell found the live package below its floor (package-floor.ts).
-   *  Only the shell sets it, and only the seed may answer it. */
+   *  Only the shell sets it, only on the participant's yes, and only the seed
+   *  may answer it. */
   floor?: boolean
   /** One revision at one path, picked by the participant's own hand. Only a
    *  pick sets it; what it admits is held in the brood (the HAND door). */

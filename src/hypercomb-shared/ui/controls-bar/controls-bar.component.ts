@@ -117,15 +117,14 @@ interface ControlItem {
 
 const CONTROL_REGISTRY: readonly ControlItem[] = [
   { id: 'back',         label: 'controls.back',         action: 'goBack',             visibleWhen: 'always' },
-  // Portals sits DIRECTLY after the installer: both are ways OUT of the current
-  // page — DCP into other domains, Portals into the collections index — so they
-  // read as one pair at the head of the rail, before the viewport controls.
-  // Navigates to the `sets/` layer, where each tile is a reference set (see
-  // documentation/entrances-and-sets.md). Not among the header aggregates — it
-  // manages referenced hives on different roots; it is not a launch group.
-  { id: 'pools',        label: 'collections-landing.title', action: 'openPools',      visibleWhen: 'always' },
-  // HOSTS sits DIRECTLY under Portals, completing that opening pair: Portals
-  // is the way out into the collections index, the host directory is the way
+  // RECENT sits DIRECTLY after the installer: both are ways OUT of the current
+  // page — DCP into other domains, Recent into the hive entrances you have
+  // pinned as home — so they read as one pair at the head of the rail, before
+  // the viewport controls. It replaced Portals (the Favorites window) here
+  // 2026-11-26; the id stays `pools` so a participant's rail settings carry.
+  { id: 'pools',        label: 'recent.title',              action: 'openPools',      visibleWhen: 'always' },
+  // HOSTS sits DIRECTLY under Recent, completing that opening pair: Recent
+  // is the way out into your hive's entrances, the host directory is the way
   // out onto the network — the machines serving what you publish. It is a
   // toggle, not a one-shot: the glyph lights while the directory is up
   // (`hosts:render` announces its own open state, mirrored below).
@@ -920,7 +919,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'image-only':   return 'image'
       // Not a map pin: Portals is a way OUT of this page into another root,
       // the same act as the installer beside it.
-      case 'pools':        return 'nearby'
+      case 'pools':        return 'history'
       case 'chat':         return 'chat'
       case 'sequences':    return 'schema'
       case 'publish':      return 'cloud_upload'
@@ -1294,6 +1293,25 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly tagScope = this.#tagScope.asReadonly()
   readonly tagsExpanded = this.#tagsExpanded.asReadonly()
 
+  // ── the zoom slider ──
+  // Above the tags at the bottom left, riding up when they open out. The
+  // slider is logarithmic over the drone's own range, so each step is the same
+  // feel at any size; it follows every zoom the hive takes (`viewport:scale`).
+  #zoomScale = signal({ scale: 1, min: 0.2, max: 12 })
+  #zoomScaleUnsub: (() => void) | null = null
+  readonly zoomSliderValue = computed(() => {
+    const { scale, min, max } = this.#zoomScale()
+    const at = Math.log(scale / min) / Math.log(max / min)
+    return Math.round(Math.min(1, Math.max(0, at)) * 1000)
+  })
+
+  readonly onZoomSlider = (event: Event): void => {
+    if (this.#locked()) return
+    const value = Number((event.target as HTMLInputElement).value) / 1000
+    const { min, max } = this.#zoomScale()
+    this.zoom?.zoomToScale?.(min * Math.pow(max / min, value), this.#viewportCenter(), 'user')
+  }
+
   /** The three reaches in cycle order — the tag strip's single head glyph
    *  walks this list. Same ids and glyphs as the pheromone panel — one
    *  vocabulary for reach, wherever you meet it. */
@@ -1365,13 +1383,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     EffectBus.emit('lanes:toggle', {})
   }
 
-  /** Pools of Meaning — just SHOW the collections window. Deliberately does NOT
-   *  navigate: the panel's first purpose is dragging collection references onto
-   *  the page you are already standing on, so sending you to `/sets` would take
-   *  away the very surface you meant to drop them on. Clicking a row still opens
-   *  that collection (to manage it), and the panel offers its way back. */
+  /** RECENT — show the hive entrances you have pinned as home. A toggle, and
+   *  it does not navigate by itself: choosing a row is what pins it and lands
+   *  you at the root showing it. */
   readonly openPools = (): void => {
-    EffectBus.emit('aggregate:view-toggle', { id: 'collections' })
+    EffectBus.emit('aggregate:view-toggle', { id: 'recent' })
   }
 
   readonly isTagFilterActive = (name: string): boolean => {
@@ -1536,6 +1552,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#pinToggleUnsub = EffectBus.on('viewport:pin-toggle', () => this.togglePin())
     this.#onDemandUnsub = EffectBus.on<{ on: boolean }>('command-line:on-demand', ({ on }) => {
       this.#commandLineOnDemand.set(!!on)
+    })
+    this.#zoomScaleUnsub = EffectBus.on<{ scale?: number; min?: number; max?: number }>('viewport:scale', (p) => {
+      const scale = Number(p?.scale)
+      if (!Number.isFinite(scale) || scale <= 0) return
+      const min = Number(p?.min) > 0 ? Number(p!.min) : 0.2
+      const max = Number(p?.max) > min ? Number(p!.max) : 12
+      this.#zoomScale.set({ scale, min, max })
     })
 
     // The Escape cascade force-clears the gate as last-resort recovery. On a
@@ -2290,6 +2313,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#configureControlUnsub?.()
     this.#pinToggleUnsub?.()
     this.#onDemandUnsub?.()
+    this.#zoomScaleUnsub?.()
     this.#titleTickUnsub?.()
     this.#localeTickUnsub?.()
     iconOverrides.removeEventListener('change', this.#onIconOverride)
@@ -2359,21 +2383,14 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.navigation.goRaw(segments)
   }
 
-  // ── home is the portal you marked ─────────────────────
+  // ── home is the root-level home page ──────────────────
   //
-  // Home used to mean the domain root, unconditionally. It now means THE PORTAL
-  // MARKED AS HOME in the Portals toolwindow — the thing you are actually
-  // working on, which you went through a portal to reach. The root is what
-  // everything hangs off, not a place worth landing on over and over; making
-  // the portal home is what lets the rest of the hive stay out of sight.
-  //
-  // Marked, never inferred: home does not follow where you walk, so looking at
-  // something else cannot cost you your home. It survives a refresh, because
-  // the focus is the point and a reload must not cost you it either.
-  //
-  // Ctrl/⌘+click marks the place you are standing as Home. Repeating the
-  // gesture there releases it. The one-slot mark is persisted by
-  // RecentPortalsStore, so this is both a toggle and sticky across reloads.
+  // Home is ONE pinned place, shown at the root while the address stays `/`
+  // (home-root.ts). It is chosen from RECENT, the rail's history glyph: every
+  // place ever pinned, read back from the pin's own markers. Nothing pinned
+  // means the hive root itself, exactly as Home always meant. The Ctrl/⌘+click
+  // toggle on this button retired with the pins kept elsewhere (2026-11-26):
+  // a home is picked in one place, from a list that never loses one.
 
   private get recentPortals(): RecentPortalsStore | undefined {
     return get('@hypercomb.social/RecentPortalsStore') as RecentPortalsStore | undefined
@@ -2384,14 +2401,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     () => this.recentPortals?.home,
   )
 
-  /** The portal Home flies to — the one MARKED as home in the Portals
-   *  toolwindow, or `undefined` while none is marked (Home means the hive root
-   *  then, exactly as it always did). Never inferred from where you have been. */
+  /** The place Home shows at the root, or `undefined` while none is pinned. */
   readonly homePortal = computed<RecentPortal | undefined>(
     () => { this.#portals$(); return this.recentPortals?.home },
   )
 
-  /** What the button says it will do — the portal's own name, so the tooltip
+  /** What the button says it will do — the place's own name, so the tooltip
    *  names the thing rather than the mechanism. */
   readonly homeLabel = computed<string>(() => {
     const portal = this.homePortal()
@@ -2399,29 +2414,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     return portal.label || '/' + portal.segments.join('/')
   })
 
-  /** Home. Plain click flies to the marked location (hive root until one is
-   *  marked). Ctrl/⌘+click toggles the CURRENT location as Home. Home-setting
-   *  belongs on the global control because it works at every lineage, not only
-   *  for rows which happen to be listed in the Portals window. */
-  readonly goHome = (event?: MouseEvent): void => {
-    if (event && (event.ctrlKey || event.metaKey)) {
-      event.preventDefault()
-      event.stopPropagation()
-      const segments = this.navigation.segmentsRaw()
-      if (segments.length === 0) {
-        // The unmarked state already means the hive root; Ctrl+clicking Home at
-        // root therefore releases any saved override instead of persisting a
-        // redundant empty-path pin.
-        this.recentPortals?.unpin()
-      } else {
-        this.recentPortals?.togglePin(segments[segments.length - 1], segments)
-      }
-      return
-    }
-    // Ask for the ROOT, never for the home's address. The root resolves to
-    // whatever is marked as home (home-redirect.ts), so this button, the
-    // leading breadcrumb crumb and a cold load of `/` are one behaviour rather
-    // than three that have to be kept agreeing.
+  /** Home. Asks for the ROOT, never for the home's address: the root resolves
+   *  to whatever is pinned (home-root.ts), so this button, the leading
+   *  breadcrumb crumb and a cold load of `/` are one behaviour. */
+  readonly goHome = (): void => {
     this.navigateTo([])
   }
 

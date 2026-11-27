@@ -9,7 +9,7 @@ import {
   KEY_LIST_MEANING, acceptKeyListChain, isListedKey, readKeyList, registerPoolMeaning, type SignedKeyList,
 } from '@hypercomb/core'
 import {
-  acceptInvite, allowAnother, anchorServes, anchorTagFor, anchoredTags, captureInvite, carryKeyChain, clearPendingInvite,
+  acceptInvite, allowAnother, anchorServes, anchorTagFor, anchorTagsFor, anchoredTags, captureInvite, carryKeyChain, clearPendingInvite,
   fetchKeyChain, forgetKeyReads, inviteLink, keyChainUrl, listKeys, listedKeys, parseInvite, pendingInvite,
   prepareAnchorHosts, publisherKeyHex, putKeyChain, removeKey, INVITE_SECONDS,
   type AnchorBindingLike, type KeyListDeps, type KeySigner,
@@ -323,6 +323,28 @@ describe('carrying the chain to another host', () => {
     expect(await carryKeyChain(TWO, depsFor(b, h))).toBe('held')
     expect(anchorTagFor(`https://${TWO}/x`, a.pubkey, depsFor(a, h))).toBeNull()
     expect(anchorTagFor('not a url', b.pubkey, depsFor(b, h))).toBeNull()
+  })
+
+  it('the tags a signed upload carries: the list carried to a host that lacks it first, then the tag naming the anchor', async () => {
+    const clock = { now: T0 }
+    const h = hosts(clock)
+    const a = place(1, clock)
+    const b = place(2, clock)
+    forgetKeyReads()
+    const allowed = await allowAnother([ONE], {}, depsFor(a, h))
+    if (!allowed.ok) throw new Error('allow failed')
+    await acceptInvite(allowed.link, { label: 'b.example' }, depsFor(b, h))
+    const THREE = 'three.example'
+    expect(h.chains.has(`${THREE}|${a.pubkey}`)).toBe(false)
+    expect(await anchorTagsFor(`https://${THREE}/${'c'.repeat(64)}`, depsFor(b, h))).toEqual([['anchor', a.pubkey]])
+    expect(h.chains.get(`${THREE}|${a.pubkey}`)).toHaveLength(3)
+    // Its own anchor signs as itself, and asks no host anything.
+    const before = h.writers.length
+    expect(await anchorTagsFor(`https://four.example/${'c'.repeat(64)}`, depsFor(a, h))).toEqual([])
+    expect(h.writers.length).toBe(before)
+    // A host the list cannot reach: no tag, no throw.
+    expect(await anchorTagsFor(`https://down.example/${'c'.repeat(64)}`, depsFor(b, h))).toEqual([])
+    expect(await anchorTagsFor('not a url', depsFor(b, h))).toEqual([])
   })
 
   it('does nothing for a place that is its own anchor, and says so when no host names it', async () => {

@@ -64,6 +64,7 @@ import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { cutRegions, type Region } from './markup-cut'
+import { isTyping } from '../../core/typing-focus'
 
 const OWNER = '@hypercomb.shared/MarkupOverlayComponent'
 
@@ -683,6 +684,7 @@ export class MarkupOverlayComponent implements OnInit, OnDestroy {
 
   #onKeyDown = (event: KeyboardEvent): void => {
     if (!this.active()) return
+    if (event.key !== 'Escape' && isTyping(event)) return
     if (event.key === 'Escape') {
       // ESCAPE SHOWS THE HEXAGONS. The sheet is the thing covering them.
       event.preventDefault()

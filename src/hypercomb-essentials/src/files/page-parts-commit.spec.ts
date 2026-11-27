@@ -132,9 +132,27 @@ describe('a part changed', () => {
     expect(plan).toMatchObject({ ok: true, page: ['card'] })
     if (!plan?.ok) throw new Error('no plan')
     expect(pageText()).toBe(PAGE)
-    expect(await plan.apply()).toEqual({ ok: true })
-    expect(pageText()).toBe(PAGE.replace(ANIMATION, 'start({ colour: "teal" })'))
+    const rebuilt = await plan.apply()
+    const html = PAGE.replace(ANIMATION, 'start({ colour: "teal" })')
+    expect(rebuilt).toEqual({ ok: true, sig: sigOfText(html), html, own: false })
+    expect(pageText()).toBe(html)
     expect((await shellAt(['card']))!.text).toContain(`resource:${next}/animation.js`)
+  })
+
+  // A part comes through a model's write, so the rebuilt page is a trial and is
+  // marked authored only when a person brings it home (tile-files.drone.ts).
+  it('marks nothing authored, and says the page is the hive\'s own only when the page it replaced was', async () => {
+    const { isAuthored, markAuthored } = await import('../sharing/authored-sigs.js')
+    await breakBlockOut(['card'], 'script-1', 'animation')
+    markAuthored(pages.get('card'))
+    const prior = filesOn('card/animation')['animation.js']
+    const plan = await planPartRebuild(['card', 'animation'], 'animation.js', prior, sigOfText('start({ colour: "blue" })'))
+    if (!plan?.ok) throw new Error('no plan')
+    const rebuilt = await plan.apply()
+    expect(rebuilt).toMatchObject({ ok: true, own: true })
+    if (!rebuilt.ok) throw new Error('not rebuilt')
+    expect(isAuthored(rebuilt.sig)).toBe(false)
+    localStorage.removeItem('hc:authored-sigs')
   })
 
   it('refuses, before anything is filed, a text the page cannot be assembled from', async () => {

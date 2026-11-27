@@ -71,7 +71,6 @@ type HistoryLike = {
 }
 type StoreLike = { getResource(sig: string): Promise<Blob | null> }
 type NavigationLike = { goRaw?: (segments: readonly string[]) => void }
-type RecentPortalsLike = { isPinned(segments: readonly string[]): boolean }
 type CommitterLike = {
   importTree?: (
     updates: Array<{ segments: readonly string[]; layer: { name?: string; [slot: string]: unknown } }>,
@@ -226,17 +225,10 @@ class CollectionsSource implements AggregateSource {
       return { name: nm, sig, segments: await this.#targetOf(nm) }
     }))
     const entries = resolved.filter((e): e is Entry => e !== null)
-    // The index is a working surface, not an alphabetized catalog. Pinned
-    // entries come first (the participant's own choice); everything else keeps
-    // the pool's order. No usage weight: nothing about where the participant
-    // goes is recorded (no tracking).
-    const portals = ioc()?.get('@hypercomb.social/RecentPortalsStore') as RecentPortalsLike | undefined
-    const ranked = entries.map((entry, index) => ({
-      entry, index,
-      pinned: portals?.isPinned(entry.segments) ? 1 : 0,
-    }))
-    ranked.sort((a, b) => (b.pinned - a.pinned) || (a.index - b.index))
-    const orderedEntries = ranked.map(row => row.entry)
+    // The pool's own order. Home is no longer chosen here (it is chosen from
+    // Recent), so no row is lifted for being home. No usage weight: nothing
+    // about where the participant goes is recorded (no tracking).
+    const orderedEntries = entries
     // Launch-group aggregates are NOT merged in any more. Each aggregate is its
     // own source with its own index now, so listing them here would be a second
     // representation of the same thing — and composing a write from a list that

@@ -20,6 +20,7 @@ import { Shaker, ParticleField } from '../juice.js'
 import { I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import type { StudyItem, Grade } from './deck.types.js'
 import type { GameContext, TutorGame, TutorGameDescriptor } from './game-registry.js'
+import { isTyping } from '../../keyboard/typing-focus.js'
 
 interface RegistryLike {
   all(): TutorGameDescriptor[]
@@ -279,6 +280,7 @@ export class TutorShell {
 
   readonly #onKeyDown = (e: KeyboardEvent): void => {
     if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); this.#onExit(); return }
+    if (isTyping(e)) return
     // Let OS / browser chords (Ctrl/Cmd/Alt) through; isolate everything else
     // so a typed answer never reaches the command line or keymap service.
     if (e.ctrlKey || e.metaKey || e.altKey) return

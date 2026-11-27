@@ -30,6 +30,7 @@
 
 import { EffectBus } from '@hypercomb/core'
 import { isPublishedVisitorShell } from '../../sharing/behavior-enablement.js'
+import { PlasterWall } from './plaster-wall.js'
 
 const STORAGE_KEY = 'hc:canvas-bg'
 
@@ -462,6 +463,12 @@ export class CanvasBackgroundService extends EventTarget {
   #glowEl: HTMLDivElement | null = null
   #previewEl: HTMLDivElement | null = null
   #previewing = false
+  /** THE CRACKING WALL (jwize, 2026-11-26). A lit plaster wall behind the
+   *  hive that takes random strikes, up to three, then mends and starts over
+   *  (plaster-wall.ts). It is the dark world's BARE screen, so a chosen look
+   *  or picture wins. OFF unless switched on: "not on by default". */
+  #cracks = false
+  #wall = new PlasterWall()
 
   constructor() {
     super()
@@ -497,6 +504,42 @@ export class CanvasBackgroundService extends EventTarget {
   get panX(): number { return this.#panX }
   get panY(): number { return this.#panY }
   get cascade(): boolean { return this.#cascade }
+  /** Is the cracking wall switched on? It shows on the dark world's bare
+   *  screen only. */
+  get cracks(): boolean { return this.#cracks }
+
+  /** Switch the cracking wall on or off. */
+  setCracks(on: boolean): void {
+    if (this.#cracks === on) return
+    this.#cracks = on
+    this.#persist()
+    this.apply()
+  }
+
+  /** One impact now, at a random place. False when the wall cannot show
+   *  here: a bright chrome, or a look or picture on the screen. */
+  strike(): boolean {
+    if (!this.#cracks) this.setCracks(true)
+    if (!this.#wall.visible) return false
+    this.#wall.strike()
+    return true
+  }
+
+  /** Mend the wall now; the cycle starts over. */
+  mendCracks(): void { this.#wall.mend() }
+
+  /** Should the wall show? Switched on, dark chrome, the screen bare, and not
+   *  a visitor's copy of a published site.
+   *
+   *  THE TRIGGER falls out of this: `apply()` runs on every theme change, so
+   *  moving INTO the dark world shows the wall clean and its first strike
+   *  lands a moment later, and leaving takes it away, cracks and all. A
+   *  reassert or a move between two dark themes finds it already showing and
+   *  changes nothing. */
+  #wallWanted(): boolean {
+    return this.#cracks && !this.#enabled && !this.#pictureUrl && !this.#picturePending
+      && !this.#isLight() && !isPublishedVisitorShell()
+  }
   /** The saved backdrops, by world. Signature arrays — resolve on demand. */
   get saved(): Record<BackdropWorld, readonly string[]> {
     return { light: [...this.#saved.light], dark: [...this.#saved.dark] }
@@ -796,6 +839,11 @@ export class CanvasBackgroundService extends EventTarget {
     s.backgroundAttachment = ''
     // Also hides a framing preview immediately when the picture was cleared.
     if (!this.#pictureUrl) this.#syncPreview()
+    // THE CRACKING WALL is the bare dark screen's; every other path takes it
+    // away. Same reason as the aurora for the transparent body: a negative-z
+    // layer paints under an opaque body, and the root keeps the surface colour.
+    if (this.#wallWanted() && this.#wall.show()) s.backgroundColor = 'transparent'
+    else this.#wall.hide()
     if (!this.#enabled) {
       this.#hideAurora()
       this.#hideGlow()
@@ -1578,13 +1626,14 @@ export class CanvasBackgroundService extends EventTarget {
       if (!raw) return
       this.#hasPref = true
       const parsed = JSON.parse(raw) as {
-        archetype?: string; palette?: string | null; enabled?: boolean
+        archetype?: string; palette?: string | null; enabled?: boolean; cracks?: boolean
         picture?: string | null; dim?: number; zoom?: number; panX?: number; panY?: number; v?: number
         saved?: { light?: unknown; dark?: unknown }
       }
       if (parsed.archetype && CANVAS_BG_ARCHETYPES.includes(parsed.archetype as Archetype)) this.#archetype = parsed.archetype as Archetype
       if (parsed.palette && CANVAS_BG_PALETTES.includes(parsed.palette as Palette)) this.#palette = parsed.palette as Palette
       if (typeof parsed.enabled === 'boolean') this.#enabled = parsed.enabled
+      if (typeof parsed.cracks === 'boolean') this.#cracks = parsed.cracks
       // A signature, or nothing. Anything else in the slot is a corrupt pref,
       // not a picture, and asking the store for it would only fail later.
       if (typeof parsed.picture === 'string' && SIG_RE.test(parsed.picture)) {
@@ -1627,7 +1676,7 @@ export class CanvasBackgroundService extends EventTarget {
       // are network-queryable content and live in their pool of meaning —
       // `v` marks a pref this build wrote (the dim-amnesty reads it).
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        archetype: this.#archetype, palette: this.#palette, enabled: this.#enabled,
+        archetype: this.#archetype, palette: this.#palette, enabled: this.#enabled, cracks: this.#cracks,
         picture: this.#pictureSig, dim: this.#dim, zoom: this.#zoom,
         panX: this.#panX, panY: this.#panY, v: 3,
       }))

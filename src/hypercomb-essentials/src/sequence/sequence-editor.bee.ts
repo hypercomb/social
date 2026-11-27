@@ -42,6 +42,7 @@ import { Worker } from '@hypercomb/core'
 import { Container, Graphics, Text, Point } from 'pixi.js'
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
 import { trackSceneText } from '../presentation/grid/screen-text-resolution.js'
+import { isTyping } from '../keyboard/typing-focus.js'
 
 const RETURN_KEY = 'hc:@diamondcoreprocessor.com/SequenceEditorBee:return'
 
@@ -389,7 +390,7 @@ export class SequenceEditorBee extends Worker {
       return
     }
     // Don't treat typing in the name field as canvas input.
-    if (e.target instanceof HTMLInputElement) return
+    if (isTyping(e)) return
     if (e.code === 'Space') this.#spaceHeld = true
   }
 

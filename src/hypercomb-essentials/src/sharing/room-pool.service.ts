@@ -139,7 +139,10 @@ export class RoomPool extends EventTarget {
     try { body = new TextEncoder().encode(JSON.stringify(await signer.signEvent(memberTemplate(pool, pageSig, head)))) } catch { return 'refused' }
     const name = await sha256(body)
     const url = `${this.#base(host)}/${pool}/${name}`
-    const auth = await nip98Header(signer as never, url, 'PUT')
+    // A device that publishes for an anchor writes AS the anchor (its list carried to the host first),
+    // so the host counts the member on the anchor's standing; the member stays signed by this device.
+    const { anchorTagsFor } = await import('./key-list.client.js')
+    const auth = await nip98Header(signer as never, url, 'PUT', undefined, await anchorTagsFor(url))
     if (!auth) return 'refused'
     try {
       const res = await fetch(url, { method: 'PUT', headers: { Authorization: auth }, body: body.slice().buffer as ArrayBuffer, signal: AbortSignal.timeout(FETCH_MS) })

@@ -26,6 +26,7 @@ import { Component, ElementRef, computed, effect, inject, signal, type AfterView
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { holdWindow, signalSession } from '../window-session'
+import { isTyping } from '../../core/typing-focus'
 
 type CursorState = {
   locationSig: string
@@ -283,6 +284,7 @@ export class RewindWindowComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly #onKeydown = (e: KeyboardEvent): void => {
     if (!this.visible()) return
     if (e.key === 'Escape') { this.hide(); return }
+    if (isTyping(e)) return
     if (e.key === 'ArrowLeft' && this.canStepBack()) { e.preventDefault(); this.stepBack() }
     if (e.key === 'ArrowRight' && this.canStepForward()) { e.preventDefault(); this.stepForward() }
   }

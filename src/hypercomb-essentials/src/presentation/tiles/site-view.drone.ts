@@ -14,7 +14,7 @@
 // page mounts. No bundle, no manifest, no path-table.
 
 import {
-  Drone, EffectBus, SITE_VIEW_IOC_KEY, RESOURCE_URL_PREFIX, I18N_IOC_KEY, THEME_IOC_KEY,
+  Drone, EffectBus, SITE_VIEW_IOC_KEY, RESOURCE_URL_PREFIX, I18N_IOC_KEY, THEME_IOC_KEY, isPostFragment,
   type I18nProvider,
 } from '@hypercomb/core'
 import { rewritePageRefs } from '../../sharing/decoration-closure.js'
@@ -46,7 +46,7 @@ import { closeSiteContextMenu, isOnSiteContextMenu, openSiteContextMenu, type Si
 import { browserKeepsMenu, isLongPressMenu } from '../../navigation/browser-menu.js'
 import type { BackGesture } from '../../navigation/back-gesture.service.js'
 import { myHiveOrigin, visitorDoorHref } from '../../sharing/visitor-door.view.js'
-import { listTrialVersions, pageHome, releaseTrial, stageTrial, trialBase, trialOf, trialOrigin, trialVersionLabel } from '../../files/try-page.js'
+import { listTrialVersions, pageHome, releaseTrial, stageTrial, trialBase, trialOf, trialOrigin, trialsReady, trialVersionLabel } from '../../files/try-page.js'
 import { PIXI3D_LENDER_KEY, Pixi3DLender } from './pixi3d-lender.js'
 
 type MountState = {
@@ -812,7 +812,9 @@ export class SiteViewDrone extends Drone {
 
     // Strip any stale tile-selection hash so the address bar reads
     // cleanly while in website mode (where selection has no consumer).
-    if (window.location.hash) {
+    // An entry pool's code is not one: it stays, so a reload of the tab
+    // comes back to the form (documentation/open-entry-pools.md).
+    if (window.location.hash && !isPostFragment(window.location.hash)) {
       try {
         window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
       } catch { /* private mode / older browser — non-fatal */ }
@@ -870,6 +872,10 @@ export class SiteViewDrone extends Drone {
         return
       }
 
+      // The trial ledger is read before it is asked: a fresh tab's first page
+      // would otherwise read an empty one and mount a trial as the hive.
+      await trialsReady()
+      if (gen !== this.#gen) return
       const trial = trialOf(cellPageSig)
       if (trial) {
         this.#removeReviewGate()
@@ -2202,8 +2208,9 @@ export class SiteViewDrone extends Drone {
     // the address bar through every navigation (Navigation.go reads
     // `window.location.hash` and re-appends it on every push). Strip
     // it here before the lineage steps so the cleaned URL is what
-    // gets pushed.
-    if (window.location.hash) {
+    // gets pushed. An entry pool's code is kept, as in #reconcile: it
+    // rides every page of the site the phone walks.
+    if (window.location.hash && !isPostFragment(window.location.hash)) {
       try {
         window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
       } catch { /* private mode / older browser — non-fatal */ }
