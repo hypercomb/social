@@ -1072,6 +1072,10 @@ export class ZoomDrone extends Drone {
 
   #saveZoom = (target: any, fit = false, source: ViewportSource = 'auto'): void => {
     this.vp?.setZoom(target.scale.x, target.position.x, target.position.y, fit, source)
+    // Every scale the viewport takes, said once, with the range it lives in:
+    // the control bar's zoom slider follows wheel, pinch and fit through this.
+    // Last-value, so a slider that mounts late starts where the hive is.
+    EffectBus.emit('viewport:scale', { scale: target.scale.x, min: this.minScale, max: this.maxScale })
   }
 
   // After any zoom-induced position/scale change, ensure at least one tile

@@ -23,6 +23,7 @@ import { LEVELS, cloneLevel, loadCustomLevels, upsertCustomLevel, deleteCustomLe
 import { Designer, TOOLS, type Tool } from './designer.js'
 import { Shaker, ParticleField, easeOutBack, ARCADE } from '../juice.js'
 import { arkanoidThemes } from './theme.js'
+import { isTyping } from '../../keyboard/typing-focus.js'
 
 const STYLE_ID = 'ark-overlay-styles'
 
@@ -643,7 +644,7 @@ export class ArkanoidOverlay {
   #onKeyDown = (e: KeyboardEvent): void => {
     if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); this.#onClose(); return }
     if (e.ctrlKey || e.metaKey || e.altKey) return       // let OS/browser shortcuts pass
-    if (document.activeElement === this.#nameInput) return // typing the level name
+    if (isTyping(e)) return // typing the level name
     e.preventDefault(); e.stopImmediatePropagation()
     if (this.#mode !== 'play') return
     const eng = this.#engine
@@ -664,7 +665,7 @@ export class ArkanoidOverlay {
 
   #onKeyUp = (e: KeyboardEvent): void => {
     if (e.ctrlKey || e.metaKey || e.altKey) return
-    if (document.activeElement === this.#nameInput) return
+    if (isTyping(e)) return
     e.stopImmediatePropagation()
     const eng = this.#engine
     if (!eng) return
