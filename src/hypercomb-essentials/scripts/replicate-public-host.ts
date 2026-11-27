@@ -71,6 +71,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { hostPackagesPool, poolAddress } from './pool-address.js'
 import { HIVE_INDEXES_MEANING, markerIndices, parseMember, parsePoolListing, poolEntryName } from '../../hypercomb-runtime/src/host-pool.js'
+import { indexStandsFor, listedSignersAt } from '../../hypercomb-core/src/core/index-signer.js'
 
 const ESSENTIALS = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const SIG_RE = /^[a-f0-9]{64}$/
@@ -707,7 +708,11 @@ async function signedRoot(host: string, publisher: Publisher): Promise<string | 
       if (!res.ok) continue
       event = await res.json() as typeof event
     } catch { continue }
-    if (event?.kind !== INDEX_KIND || event.pubkey !== pubkey || !verifyEvent(event)) {
+    // The publisher's own signature, or a key its list on this zone names, for
+    // it (core index-signer.ts): a phone's publish is the publisher's too.
+    const stands = event?.kind === INDEX_KIND && await indexStandsFor(event as Record<string, unknown>, pubkey,
+      () => listedSignersAt(`https://${zone}`, pubkey, candidate => verifyEvent(candidate)))
+    if (!stands || !verifyEvent(event)) {
       throw new Error(`${zone} serves an index that is not ${short(pubkey)}'s — refusing to replicate`)
     }
     const named = String((JSON.parse(String(event.content)) as { roots?: Record<string, string> })?.roots?.[`install:${channel}`] ?? '').toLowerCase()
