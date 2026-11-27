@@ -14,7 +14,7 @@
 // sharing/meeting-invite.ts (PENDING_INVITE_KEY).
 // Keep the two literals in sync.
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, POST_CODE_EFFECT, parsePostCode } from '@hypercomb/core'
 import { isAccessCode, meetingRelayOf, readMeshZone, relayDomainOf, writeMeshZone, type MeshZone } from './mesh-session'
 
 const PENDING_INVITE_KEY = 'hc:pending-invite' // mirror of essentials meeting-invite.ts
@@ -214,6 +214,25 @@ if (!captureTurnOff()) {
   try { if (sessionStorage.getItem(PENDING_TURN_OFF_KEY)) EffectBus.emit('publish:turn-off', { at: Date.now() }) } catch { /* no storage */ }
 }
 
+/** POST — `#post=<record>~<nonce>`: the code of an entry pool, on the page its
+ *  leader picked (documentation/open-entry-pools.md, "The page a phone sees").
+ *  ANNOUNCED AND LEFT WHERE IT IS: a visitor page keeps nothing (its
+ *  sessionStorage ends with the page), so the address bar is the only copy a
+ *  reload can come back to. The announcement is stored, so the post bee,
+ *  asleep until then, is handed the two parts when it wakes; it takes the
+ *  code from there, never from the address bar. The one reader of the
+ *  spelling is core's parsePostCode: a fragment that is not exactly a code is
+ *  not announced. True when there was one. */
+const announcePostCode = (): boolean => {
+  try {
+    const code = parsePostCode(window.location.hash ?? '')
+    if (!code) return false
+    EffectBus.emit(POST_CODE_EFFECT, code)
+    return true
+  } catch { return false } // never block boot on capture
+}
+announcePostCode()
+
 /** Take a `#meet=` fragment from the address bar. True when there was one. */
 const captureMeetLink = (): boolean => {
   try {
@@ -244,6 +263,10 @@ const onFragment = (): void => {
   // A link put back for a guest whose storage is blocked stays put — the
   // shell's own synthetic popstate (bootstrap-history) must not take it again.
   if (restoredLink) return
+  // A code scanned in a tab already on the page: only the fragment changed.
+  // The fragment stays, so every later popstate announces the same code
+  // again, and to the bee that is nothing new.
+  if (announcePostCode()) return
   if (captureTurnOff()) return
   if (captureSwarmLink()) { EffectBus.emitTransient('meet:pending', { at: Date.now() }); return }
   if (captureTakeLink()) { EffectBus.emitTransient('meet:pending', { at: Date.now() }); return }

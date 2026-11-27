@@ -297,10 +297,15 @@
 
 .mesh-modal-actions {
   display: flex;
+  // Four actions do not fit one row of a phone-width panel: they wrap, never clip.
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.5rem;
   padding: 0.5rem 1rem 0.75rem;
   border-top: 1px solid var(--hc-window-line);
+
+  // A little narrower here than elsewhere, so the four sit on one row of the desktop panel.
+  .mesh-modal-btn { padding-inline: 0.75rem; }
 }
 
 .mesh-modal-btn {

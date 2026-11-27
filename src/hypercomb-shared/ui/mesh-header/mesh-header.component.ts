@@ -28,12 +28,18 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
   // A single control that CYCLES, so entering a swarm is a deliberate journey
   // that always starts from safety:
   //   0 PRIVATE 'lock'   — secure. Nothing previewed, nothing being shared.
-  //   1 WORLD   'public' — sharing preview on: the canvas dims unshared tiles
-  //                        and the per-tile / branch scope controls appear, so
-  //                        you choose WHAT you'd share.
-  //   2 HOST    'hub'    — opens the selector (host, location, secret,
-  //                        participant). Clicking again WRAPS BACK to PRIVATE,
-  //                        so the safe direction is always one click away.
+  //   1 WORLD   'public' : POOLS MODE. The canvas dims the tiles that are
+  //                        off, a tap turns a tile on or off, and the pools
+  //                        bar (essentials, pools/pools-mode.drone.ts) offers
+  //                        Publish, Join the swarm and Close. A click here
+  //                        GOES BACK to PRIVATE: it is the Close. With a
+  //                        package that has no pools bar the click goes ON
+  //                        to HOST instead (#poolsBarAnswers).
+  //   2 HOST    'hub'    : the selector (host, location, secret, participant).
+  //                        Reached from pools mode's "Join the swarm", or
+  //                        straight from PRIVATE when the review is skipped.
+  //                        Clicking again WRAPS BACK to PRIVATE, so the safe
+  //                        direction is always one click away.
   // In a swarm the control reads 'groups' and a click leaves. Joining carries
   // the preview in (stage ≥ WORLD), so scope controls stay reachable there
   // without a second icon.
@@ -63,6 +69,34 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
 
   #openSelector(): void {
     EffectBus.emit('mesh:open-modal', { join: true })
+  }
+
+  // ── pools mode's commands ─────────────────────────────────────────
+  // The pools bar and the `pools` word live in essentials, which this shell
+  // cannot import, so the three names are spelled here: LIGHTS_ENTER,
+  // LIGHTS_LEAVE and LIGHTS_JOIN_SWARM in
+  // hypercomb-essentials/src/pools/lights-contract.ts. Each is sent transient
+  // (a command is never replayed) and none acts inside a swarm.
+
+  /** Into pools mode from any solo stage, the review skipped or not. */
+  #enterPools(): void {
+    if (this.meshPublic) return
+    if (this.#stage() === STAGE_HOST) EffectBus.emit('mesh:close-modal', {})
+    this.#setStage(STAGE_WORLD)
+  }
+
+  /** Back to private. From HOST the selector closes with it. */
+  #leavePools(): void {
+    if (this.meshPublic || this.#stage() === STAGE_PRIVATE) return
+    if (this.#stage() === STAGE_HOST) EffectBus.emit('mesh:close-modal', {})
+    this.#setStage(STAGE_PRIVATE)
+  }
+
+  /** On to the swarm: the step the second press of the globe used to be. */
+  #joinSwarm(): void {
+    if (this.meshPublic) return
+    this.#setStage(STAGE_HOST)
+    this.#openSelector()
   }
 
   // ── the socket, on the glyph ──────────────────────────────────────
@@ -118,6 +152,7 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
   #unsubDraft: (() => void) | null = null
   #unsubStepBack: (() => void) | null = null
   #unsubModal: (() => void) | null = null
+  #unsubPools: (() => void)[] = []
 
   readonly shieldColor = computed(() => {
     const draft = this.#draft()
@@ -137,8 +172,9 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
       this.#draft.set({ open: !!draft?.open, score: typeof draft?.score === 'number' ? draft.score : null })
     })
     // Unchecking "skip the privacy review" in the selector means "I DO want to
-    // review" — so step back to the WORLD stage. (Checking it changes nothing:
-    // you're already past the review.)
+    // review", so step back to the WORLD stage: pools mode, whose bar carries
+    // the way on to the swarm. (Checking it changes nothing: you're already
+    // past the review.)
     this.#unsubStepBack = EffectBus.on('mesh:privacy-step-back', () => {
       if (!this.meshPublic) this.#setStage(STAGE_WORLD)
     })
@@ -153,6 +189,11 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
       },
     )
     this.#unsubConn = EffectBus.on<MeshConnection>('mesh:connection', (c) => this.#onConnection(c, false))
+    this.#unsubPools = [
+      EffectBus.on('pools:enter', () => this.#enterPools()),
+      EffectBus.on('pools:leave', () => this.#leavePools()),
+      EffectBus.on('pools:join-swarm', () => this.#joinSwarm()),
+    ]
     // ALWAYS boot at PRIVATE — a refresh never carries a sharing posture.
     this.#setStage(STAGE_PRIVATE)
   }
@@ -209,11 +250,28 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
     this.#unsubStepBack?.()
     this.#unsubModal?.()
     this.#unsubConn?.()
+    for (const unsub of this.#unsubPools) unsub()
+    this.#unsubPools = []
     if (this.#downTimer) clearTimeout(this.#downTimer)
     if (this.#slowTimer) clearTimeout(this.#slowTimer)
   }
 
-  // One control, cycling PRIVATE → WORLD → HOST → (wrap) PRIVATE.
+  /**
+   * Does the installed package carry pools mode? The pools drone is the one
+   * listener of the bar's Publish (`pools:publish`, LIGHTS_PUBLISH in
+   * lights-contract.ts), so a bus with nobody on that name has no bar and no
+   * "Join the swarm". The header's own `pools:join-swarm` subscription cannot
+   * be the probe: it is always there. A last value is not a listener, and a
+   * bus too old to say who listens is taken as nobody.
+   */
+  #poolsBarAnswers(): boolean {
+    const bus = EffectBus as { listens?: (effect: string) => boolean }
+    return typeof bus.listens === 'function' && bus.listens('pools:publish')
+  }
+
+  // One control: PRIVATE to pools mode and back. The swarm is reached from
+  // pools mode's own "Join the swarm" (#joinSwarm). Where no package offers
+  // that bar, the second press is still the way on.
   readonly onToggle = (): void => {
     // In a swarm: the control LEAVES it. The controls-bar's single 'mesh:join'
     // listener owns the solo↔swarm flip; leaving goes through meshToggled.
@@ -225,23 +283,21 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
       // actually looked at what's private.
       if (this.#skipReview()) { this.#setStage(STAGE_HOST); this.#openSelector(); return }
       this.#setStage(STAGE_WORLD)
-      // The WORLD stage previews the tile axis only: the canvas dims unshared
-      // tiles. The behavior axis (Beehaviors roster) is NOT forced open here —
-      // it stays one explicit click away via the join selector's button.
+      // Pools mode shows the tile axis only: the canvas dims the tiles that
+      // are off. The behavior axis (Beehaviors roster) is NOT forced open
+      // here. It stays one explicit click away via the join selector's button.
       return
     }
 
-    if (this.#stage() === STAGE_WORLD) {
-      // Scopes vetted — now set host, location, secret + participant. The join
-      // itself happens on START inside the selector (JOIN mode → 'mesh:join').
-      this.#setStage(STAGE_HOST)
-      this.#openSelector()
-      return
-    }
+    // A package from before pools mode has no bar to offer the way on. The
+    // shell is raw source and the package is the participant's to update, so
+    // the two meet in that state: there the second press goes on to the
+    // selector as it always did, or the header could never reach it.
+    if (this.#stage() === STAGE_WORLD && !this.#poolsBarAnswers()) { this.#joinSwarm(); return }
 
-    // HOST → wrap back to secure. Closes the selector if it's still open, so
-    // the safe direction is always exactly one click away.
-    EffectBus.emit('mesh:close-modal', {})
-    this.#setStage(STAGE_PRIVATE)
+    // Pools mode: the globe is the Close. HOST wraps back to secure and
+    // closes the selector if it's still open. Either way the safe direction
+    // is exactly one click away.
+    this.#leavePools()
   }
 }
