@@ -1,4 +1,4 @@
-// pools/open-entries-panel.spec.ts : the "Open for posts" row and the control
+// pools/open-entries-panel.spec.ts : the "Collect from phones" card and the control
 // that runs it. The leader's side is played by the spec (its flows are
 // open-entries-leader.spec.ts's), so what is tested here is what the leader
 // sees and in what order things are asked.
@@ -24,7 +24,7 @@ vi.mock('./open-entries-leader.js', async importOriginal => ({
   showPostsCode: leader.code,
 }))
 
-const { EntryPostsControl, entryConfirmWords, entryPoolWords, entryPostsPanel } = await import('./open-entries-panel.js')
+const { EntryPostsControl, entryConfirmWords, entryPoolWords, entryPostsLine, entryPostsPanel } = await import('./open-entries-panel.js')
 
 const say = (_key: string, fallback: string, params?: Record<string, string | number>): string =>
   fallback.replace(/\{(\w+)\}/g, (_, name: string) => String(params?.[name] ?? ''))
@@ -111,7 +111,11 @@ describe('opening for posts', () => {
     expect([...find<HTMLSelectElement>('hc-posts-page').options].map(one => one.value)).toEqual([PAGE])
     expect(find<HTMLSelectElement>('hc-posts-days').value).toBe('1')
     expect([...find<HTMLSelectElement>('hc-posts-days').options].map(one => one.value).at(-1)).toBe('31')
-    expect(find<HTMLButtonElement>('hc-posts-open').disabled).toBe(true)
+    // The name is filled in already (the form's name and today), so Start can be pressed at once.
+    expect(control.state.choice.title).toMatch(/^Weeknight, /)
+    expect(find<HTMLInputElement>('hc-posts-name').value).toBe(control.state.choice.title)
+    expect(find<HTMLButtonElement>('hc-posts-open').disabled).toBe(false)
+    expect(find('hc-posts-hint').hidden).toBe(true)
     control.choose('title', 'Tuesday class')
     control.choose('days', '7')
     press('hc-posts-open')
@@ -322,5 +326,140 @@ describe('the confirm, to a keyboard and a screen reader', () => {
     expect(control.state.confirm).toBeNull()
     expect(leader.recycle).not.toHaveBeenCalled()
     expect(document.activeElement).toBe(recycle())
+  })
+})
+
+describe('the card asks one thing', () => {
+  it('says why Start cannot be pressed when the name is emptied, and keeps the end and the form folded until asked', async () => {
+    const { control, find, press } = mounted()
+    await control.start()
+    expect(find('hc-posts-extra').hidden).toBe(true)
+    expect(find('hc-posts-more').textContent).toBe('Ends in 1 day. People fill in "Weeknight". Change')
+    // One page: it is said, never asked.
+    expect(find('hc-posts-page').closest('label')?.hidden).toBe(true)
+    expect(find('hc-posts-on').textContent).toBe('People post on example.com.')
+    control.choose('title', '  ')
+    expect(find<HTMLButtonElement>('hc-posts-open').disabled).toBe(true)
+    expect(find('hc-posts-hint').hidden).toBe(false)
+    expect(find('hc-posts-hint').textContent).toBe('Give it a name to start.')
+    press('hc-posts-more')
+    expect(find('hc-posts-extra').hidden).toBe(false)
+    expect(find('hc-posts-more').hidden).toBe(true)
+  })
+
+  it('asks which page only when there are several', async () => {
+    leader.read.mockResolvedValue(read([], [PAGE, 'https://other.example.com']))
+    const { control, find } = mounted()
+    await control.start()
+    expect(find('hc-posts-page').closest('label')?.hidden).toBe(false)
+    expect(find('hc-posts-on').hidden).toBe(true)
+    expect([...find<HTMLSelectElement>('hc-posts-page').options].map(one => one.textContent)).toEqual(['example.com', 'other.example.com'])
+  })
+
+  it('keeps a typed name through a read, and names the next pool afresh once one has opened', async () => {
+    leader.open.mockResolvedValue({ ok: true, pool: pool().known, link: 'x', said: 'Open.', shown: true })
+    const { control } = mounted()
+    await control.start()
+    control.choose('title', 'Soup night')
+    await control.refresh()
+    expect(control.state.choice.title).toBe('Soup night')
+    await control.open()
+    await settle()
+    expect(control.state.choice.title).toMatch(/^Weeknight, /)
+  })
+
+  it('goes straight to the form when nothing takes posts, and shows what does when something is', async () => {
+    const first = mounted()
+    await first.control.begin()
+    expect(first.control.state.forming).toBe(true)
+    expect(first.find('hc-posts-now').hidden).toBe(true)
+    expect(leader.read).toHaveBeenCalledTimes(1)
+    document.body.replaceChildren()
+    leader.read.mockResolvedValue(read([pool(), pool({ pool: hexOf('c'), state: 'closed' })]))
+    const second = mounted()
+    await second.control.begin()
+    expect(second.control.state.forming).toBe(false)
+    expect(second.find('hc-posts-now').hidden).toBe(false)
+    expect(second.find('hc-posts-now').querySelectorAll('.hc-posts-pool')).toHaveLength(1)
+    // What ended or was closed folds under Earlier, with its count.
+    expect(second.find('hc-posts-earlier').hidden).toBe(false)
+    expect(second.find('hc-posts-earlier-words').textContent).toBe('Earlier (1)')
+    expect(second.find('hc-posts-old').querySelectorAll('.hc-posts-pool')).toHaveLength(1)
+    expect(second.find('hc-posts-start').textContent).toBe('Start another')
+    expect(second.find('hc-posts-start').hidden).toBe(false)
+  })
+
+  it('stays on the refusal, with no form, when the pools could not be read', async () => {
+    leader.read.mockResolvedValue({ ok: false, why: 'no-host', reason: 'Name the host your index is kept on first.', whose: 'leader' })
+    const { control, lead } = mounted()
+    await control.begin()
+    expect(control.state.forming).toBe(false)
+    expect(lead()).toBe('Name the host your index is kept on first.')
+  })
+})
+
+describe('the card, as a dialog', () => {
+  it('is a named modal dialog; Escape and a press on the dark close it, a press on the card does not', async () => {
+    const dismissed = vi.fn()
+    const control = new EntryPostsControl({ say, onChange: () => undefined })
+    const card = entryPostsPanel(say, control.actions, () => NOW * 1000, { onDismiss: dismissed })
+    card.update(control.state)
+    document.body.append(card.element)
+    expect(card.element.getAttribute('role')).toBe('dialog')
+    expect(card.element.getAttribute('aria-modal')).toBe('true')
+    expect(document.getElementById(card.element.getAttribute('aria-labelledby') ?? '')?.textContent).toBe('Collect from phones')
+    expect(card.element.hasAttribute('data-escape-local')).toBe(true)
+    card.element.querySelector<HTMLElement>('.hc-posts-card')!.click()
+    expect(dismissed).not.toHaveBeenCalled()
+    card.element.click()
+    expect(dismissed).toHaveBeenCalledTimes(1)
+    card.element.querySelector<HTMLButtonElement>('.hc-posts-dismiss')!.click()
+    expect(dismissed).toHaveBeenCalledTimes(2)
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    card.element.querySelector('.hc-posts-card')!.dispatchEvent(escape)
+    expect(dismissed).toHaveBeenCalledTimes(3)
+    expect(escape.defaultPrevented).toBe(true)
+  })
+
+  it('answers Escape with the confirm first: it cancels, and the card stays', async () => {
+    const dismissed = vi.fn()
+    let card: ReturnType<typeof entryPostsPanel> | null = null
+    const control = new EntryPostsControl({ say, onChange: state => card?.update(state) })
+    card = entryPostsPanel(say, control.actions, () => NOW * 1000, { onDismiss: dismissed })
+    document.body.append(card.element)
+    await control.recycle(pool())
+    card.element.querySelector('.hc-posts-confirm')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(control.state.confirm).toBeNull()
+    expect(dismissed).not.toHaveBeenCalled()
+  })
+
+  it('keeps a key from reaching the hive behind it', () => {
+    const heard = vi.fn()
+    document.body.addEventListener('keydown', heard)
+    const control = new EntryPostsControl({ say, onChange: () => undefined })
+    const card = entryPostsPanel(say, control.actions)
+    card.update(control.state)
+    document.body.append(card.element)
+    card.element.querySelector('.hc-posts-card')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true }))
+    expect(heard).not.toHaveBeenCalled()
+    document.body.removeEventListener('keydown', heard)
+  })
+})
+
+describe('the bar\'s one line', () => {
+  it('says how many pages take posts now, and its press opens the card', () => {
+    const opened = vi.fn()
+    const line = entryPostsLine(say, opened, () => NOW * 1000)
+    const control = new EntryPostsControl({ say, onChange: () => undefined })
+    line.update(control.state)
+    expect(line.element.querySelector('.hc-posts-bar-words')?.textContent).toBe('Phones can post to your page with a code.')
+    line.update({ ...control.state, pools: [pool(), pool({ pool: hexOf('c'), state: 'closed' })] })
+    expect(line.element.querySelector('.hc-posts-bar-words')?.textContent).toBe('1 page is taking posts from phones.')
+    line.update({ ...control.state, pools: [pool(), pool({ pool: hexOf('c') })] })
+    expect(line.element.querySelector('.hc-posts-bar-words')?.textContent).toBe('2 pages are taking posts from phones.')
+    const press = line.element.querySelector<HTMLButtonElement>('.hc-posts-bar-open')!
+    expect(press.textContent).toBe('Collect from phones')
+    press.click()
+    expect(opened).toHaveBeenCalledTimes(1)
   })
 })

@@ -34,17 +34,18 @@
 //     recipe template), and how its posted recipes are brought home
 //     (pools/open-entries-forms.ts, documentation/open-entry-pools.md).
 //
-// `recipe posts` opens the leader's "Open for posts" in pools mode: the page
-// to show a code for, when it ends, and the page's pool if it has one. The
-// pools bar does the opening; the word only asks. `posts` is no behaviour word
-// of its own, so the command line never runs it as one.
+// `recipe posts` opens the leader's "Collect from phones" card
+// (pools/open-entries-panel.ts): what it is for, the page that shows the form,
+// and what already takes posts. The pools mode drone puts the card up; the
+// word only asks, and asks for no pools mode. `posts` is no behaviour word of
+// its own, so the command line never runs it as one.
 //
 // Opening a recipe is a participant's own act: this queen declares no machine
 // grammar, and no alias (aliases are the participant's to give).
 
 import { EffectBus, I18N_IOC_KEY, QueenBee, get, type I18nProvider } from '@hypercomb/core'
 import type { VisualBeeRegistry } from '../commands/visual-bee-registry.js'
-import { LIGHTS_CHANGED, LIGHTS_ENTER } from '../pools/lights-contract.js'
+import { LIGHTS_CHANGED } from '../pools/lights-contract.js'
 import { litTileRoutes, liveChildrenOf } from '../pools/lit-tiles.js'
 import { ENTRY_POSTS_WANTED, registerEntryForm, type EntryFormTemplate } from '../pools/open-entries-forms.js'
 import type { EntryRow } from '../pools/open-entries.js'
@@ -88,7 +89,7 @@ export class RecipeQueenBee extends QueenBee {
   override options = [...WORDS]
   override examples = [
     { input: '/recipe', result: 'Opens the recipe of the one selected tile, or of the tile you are standing in' },
-    { input: '/recipe posts', result: 'Opens "Open for posts" in pools mode: a code phones can post recipes to' },
+    { input: '/recipe posts', result: 'Opens "Collect from phones": a code phones can post recipes to' },
   ]
 
   override slashComplete(args: string): readonly string[] {
@@ -99,8 +100,7 @@ export class RecipeQueenBee extends QueenBee {
   protected execute(args = ''): void {
     const word = String(args ?? '').trim().toLowerCase()
     if (word === 'posts') {
-      // Pools mode first, so the bar the form belongs to is up; the bar opens the form.
-      EffectBus.emitTransient(LIGHTS_ENTER, {})
+      // The card is its own full-screen dialog: it needs no pools mode under it.
       EffectBus.emitTransient(ENTRY_POSTS_WANTED, {})
       return
     }
