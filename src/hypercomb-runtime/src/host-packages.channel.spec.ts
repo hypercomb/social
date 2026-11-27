@@ -10,7 +10,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from 'nostr-tools/pure'
-import { registerPoolMeaning } from '@hypercomb/core'
+import { KEY_LIST_MEANING, firstKeyList, forgetListedChains, keyListTemplate, nextKeyList, readKeyList, registerPoolMeaning } from '@hypercomb/core'
 import {
   INSTALL_FOLLOW_KEY, indexDoors, installCandidates, readInstallChannel, readInstallFollow, type InstallFollow,
 } from './host-packages'
@@ -44,7 +44,7 @@ const PAGE = { body: '<!doctype html><html><title>Hypercomb</title></html>', typ
 
 const FOLLOW: InstallFollow = { pubkey: PUBLISHER, hosts: ['hypercomb.com'], channel: 'essentials' }
 
-beforeEach(() => { vi.unstubAllGlobals() })
+beforeEach(() => { vi.unstubAllGlobals(); forgetListedChains() })
 
 describe('readInstallFollow — the same record the update scout reads', () => {
   const storage = (value: string | null): Pick<Storage, 'getItem'> => ({ getItem: () => value })
@@ -179,5 +179,65 @@ describe('installCandidates — the order a cold shell tries', () => {
     const verdict = installCandidates({ state: 'forged', door: 'hypercomb.com' }, pool)
     expect(verdict.candidates).toEqual([])
     expect(verdict.refused).toMatch(/not the followed publisher's/)
+  })
+})
+
+// ── a key the publisher's list names publishes for it (2026-11-27) ──────────
+//
+// A phone signed jwize's index FOR his anchor ([['anchor', anchor], ['prev', …]]),
+// the worker took it (its key list names the phone), and the managed door
+// called it forged: business-card.jwize.com said "This site offers no package
+// yet". The channel reads it as the publisher's when the same door's list
+// names the signer, and still refuses it when the list does not.
+
+describe('readInstallChannel — an index a listed key signed for the publisher', () => {
+  const PHONE_KEY = generateSecretKey()
+  const PHONE = getPublicKey(PHONE_KEY)
+
+  /** The publisher's chain: list 0 (the publisher alone), then list 1 adding `added`. */
+  const chainAdding = (added: string): Record<string, unknown>[] => {
+    const zero = finalizeEvent(keyListTemplate(firstKeyList(PUBLISHER, 'laptop'), 1_791_000_000), PUBLISHER_KEY)
+    const one = nextKeyList(readKeyList(zero as never)!, zero.id, { op: 'add', pubkey: added, label: 'phone' })!
+    return [zero, finalizeEvent(keyListTemplate(one, 1_791_000_010), PUBLISHER_KEY)] as unknown as Record<string, unknown>[]
+  }
+  const forPublisher = (key: Uint8Array, roots: Record<string, string>, tags: string[][] = [['anchor', PUBLISHER]]) =>
+    finalizeEvent({ kind: 30564, created_at: 1_791_578_090, tags, content: JSON.stringify({ v: 1, roots }) }, key) as unknown as Record<string, unknown>
+  const listUrl = async (door: string): Promise<string> => `https://${door}/${await registerPoolMeaning(KEY_LIST_MEANING)}/${PUBLISHER}`
+  const phoneIndex = (tags?: string[][]) => ({ body: JSON.stringify(forPublisher(PHONE_KEY, { 'install:essentials': SIGNED_ROOT }, tags)) })
+
+  it("names the signed root when the door's list names the signer", async () => {
+    vi.stubGlobal('fetch', serving({
+      [await indexUrl('hypercomb.com')]: phoneIndex(),
+      [await listUrl('hypercomb.com')]: { body: JSON.stringify(chainAdding(PHONE)) },
+    }))
+    expect(await readInstallChannel(FOLLOW, verify)).toMatchObject({ state: 'named', packageSig: SIGNED_ROOT, zone: 'hypercomb.com' })
+  })
+
+  it('refuses it as forged when the list does not name the signer, or the door holds no list', async () => {
+    vi.stubGlobal('fetch', serving({
+      [await indexUrl('hypercomb.com')]: phoneIndex(),
+      [await listUrl('hypercomb.com')]: { body: JSON.stringify(chainAdding(getPublicKey(STRANGER_KEY))) },
+    }))
+    expect(await readInstallChannel(FOLLOW, verify)).toEqual({ state: 'forged', door: 'hypercomb.com' })
+    vi.stubGlobal('fetch', serving({ [await indexUrl('hypercomb.com')]: phoneIndex() }))
+    expect(await readInstallChannel(FOLLOW, verify)).toEqual({ state: 'forged', door: 'hypercomb.com' })
+  })
+
+  it("refuses a listed key's index that does not say it is for this publisher", async () => {
+    vi.stubGlobal('fetch', serving({
+      [await indexUrl('hypercomb.com')]: phoneIndex([]),
+      [await listUrl('hypercomb.com')]: { body: JSON.stringify(chainAdding(PHONE)) },
+    }))
+    expect(await readInstallChannel(FOLLOW, verify)).toEqual({ state: 'forged', door: 'hypercomb.com' })
+  })
+
+  it('refuses a list whose events do not verify', async () => {
+    const chain = chainAdding(PHONE)
+    chain[1] = { ...chain[1], sig: '0'.repeat(128) }
+    vi.stubGlobal('fetch', serving({
+      [await indexUrl('hypercomb.com')]: phoneIndex(),
+      [await listUrl('hypercomb.com')]: { body: JSON.stringify(chain) },
+    }))
+    expect(await readInstallChannel(FOLLOW, verify)).toEqual({ state: 'forged', door: 'hypercomb.com' })
   })
 })
