@@ -58,18 +58,28 @@ describe('the run preview', () => {
     })
     EffectBus.emit(EXTERNAL_ASK, { id: 'x1', from: 'living-blocks', lines: ['go /intro', `website page ${SIG}`, 'please be nice', 'record'], waiting: 0 })
 
-    const rows = [...element.querySelectorAll('.hc-run-line')]
-    expect(rows).toHaveLength(4)
+    const rows = () => [...element.querySelectorAll('.hc-run-line')]
+    expect(rows()).toHaveLength(4)
     expect(element.querySelector('.hc-run-from')?.textContent).toBe('living-blocks')
-    expect(rows[0]!.querySelector('.hc-tok-verb')?.textContent).toBe('go')
-    expect(rows[0]!.querySelector('.hc-run-reason')?.textContent).toBe('Walk the hive to a path')
+    expect(rows()[0]!.querySelector('.hc-tok-verb')?.textContent).toBe('go')
+    // one list: no meaning shown until the term is clicked, then it breaks out
+    expect(element.querySelector('.hc-run-breakout')).toBeNull()
+    rows()[0]!.querySelector<HTMLElement>('[data-term="go"]')!.click()
+    expect(rows()[0]!.querySelector('.hc-run-meaning')?.textContent?.trim()).toBe('Walk the hive to a path')
+    // exactly what it is handed: the reader drops the path's slash
+    expect(rows()[0]!.querySelector('.hc-run-handed-args')?.textContent).toBe('intro')
+    rows()[0]!.querySelector<HTMLElement>('[data-term="go"]')!.click()
+    expect(rows()[0]!.querySelector('.hc-run-breakout')).toBeNull()
     // a signature is drawn short and kept whole in its title
-    const sig = rows[1]!.querySelector<HTMLElement>('.hc-tok-sig')
+    const sig = rows()[1]!.querySelector<HTMLElement>('.hc-tok-sig')
     expect(sig?.title).toBe(SIG)
-    // prose that names nothing is refused before it runs
-    expect(rows[2]!.classList.contains('is-refused')).toBe(true)
+    // prose that names nothing is refused before it runs; its tag breaks out why
+    expect(rows()[2]!.classList.contains('is-refused')).toBe(true)
+    rows()[2]!.querySelector<HTMLElement>('.hc-run-tag')!.click()
+    expect(rows()[2]!.querySelector('.hc-run-breakout.is-alert')?.textContent).toMatch(/nothing will run/)
     // a behaviour that says nothing about itself is shown as missing
-    expect(rows[3]!.querySelector('.hc-run-reason')?.classList.contains('is-missing')).toBe(true)
+    rows()[3]!.querySelector<HTMLElement>('[data-term="record"]')!.click()
+    expect(rows()[3]!.querySelector('.hc-run-meaning')?.classList.contains('is-missing')).toBe(true)
 
     // armed after a second, as on the line
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
@@ -131,10 +141,11 @@ describe('the run preview', () => {
     const off = EffectBus.on('run-preview:line-close', () => { closed++ })
     closed = 0
     EffectBus.emit('run-preview:line', { text: 'go /intro and record', line: '/go /intro and record', stance: 'command' })
-    expect(element.querySelector('.hc-run-title')?.textContent).toBe('Your line')
-    expect([...element.querySelectorAll('.hc-run-step .hc-tok-verb')].map(n => n.textContent)).toEqual(['go', 'record'])
+    expect(element.querySelector('.hc-run-from')?.textContent).toBe('Your line')
+    expect([...element.querySelectorAll('[data-term]')].map(n => n.textContent)).toEqual(['go', 'record'])
     EffectBus.emit('run-preview:line', { text: 'apple', line: 'apple', stance: 'tiles' })
-    expect(element.querySelector('.hc-run-reason')?.textContent).toMatch(/makes a tile/)
+    element.querySelector<HTMLElement>('.hc-run-tag')!.click()
+    expect(element.querySelector('.hc-run-breakout')?.textContent).toMatch(/makes a tile/)
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     expect(closed).toBe(1)
     expect(element.querySelector('.hc-run')).toBeNull()

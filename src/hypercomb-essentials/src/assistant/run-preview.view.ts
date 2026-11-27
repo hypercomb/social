@@ -132,6 +132,7 @@ export class RunPreviewElement extends HTMLElement {
       if (waiting && waiting.id !== this.#ask?.id) {
         this.#shownAt = Date.now()
         this.#breakpoints = new Set()
+        this.#terms = new Set()
       }
       this.#ask = waiting
       this.#refresh()
@@ -234,6 +235,25 @@ export class RunPreviewElement extends HTMLElement {
     this.#render()
   }
 
+  /** Terms broken out, as `<line>:<term>`; folded again when a new call shows. */
+  #terms = new Set<string>()
+
+  #termsOpen(line: number): ReadonlySet<string> {
+    const open = new Set<string>()
+    for (const key of this.#terms) {
+      const cut = key.indexOf(':')
+      if (Number(key.slice(0, cut)) === line) open.add(key.slice(cut + 1))
+    }
+    return open
+  }
+
+  #toggleTerm(line: number, term: string): void {
+    const key = `${line}:${term}`
+    if (this.#terms.has(key)) this.#terms.delete(key)
+    else this.#terms.add(key)
+    this.#render()
+  }
+
   #toggleBreakpoint(at: number): void {
     const run = this.#debugged
     const set = this.#breakpoints
@@ -294,95 +314,61 @@ export class RunPreviewElement extends HTMLElement {
     sheet.classList.toggle('is-debugging', !!this.#debugged)
     const run = this.#debugged
     if (run) {
-      sheet.replaceChildren(this.#head(run.ask.from, run.plans, run.ask.waiting, run), this.#legend(run.plans), this.#body(run.plans, run), this.#foot(run))
+      sheet.replaceChildren(this.#head(run.ask.from, run.plans, run.ask.waiting, run), this.#body(run.plans, run), this.#foot(run))
       return
     }
     const ask = this.#ask
     if (ask) {
       const deps = this.deps()
       const plans = ask.lines.map(line => planLine(line, deps))
-      sheet.replaceChildren(this.#head(ask.from, plans, ask.waiting, null), this.#legend(plans), this.#body(plans, null), this.#foot(null))
+      sheet.replaceChildren(this.#head(ask.from, plans, ask.waiting, null), this.#body(plans, null), this.#foot(null))
       return
     }
     const own = this.#own
     if (own) sheet.replaceChildren(...this.#ownLine(own))
   }
 
+  /** One line: who asks, how many lines, and only the facts that need eyes. */
   #head(from: string, plans: readonly LinePlan[], waiting: number, run: Debugged | null): HTMLElement {
     const head = el('header', 'hc-run-head')
     head.appendChild(el('span', 'hc-run-sigil', '$'))
-    const title = el('div', 'hc-run-title')
-    title.appendChild(el('span', 'hc-run-from', from))
-    title.appendChild(el('span', 'hc-run-asks', ' ' + t('run-preview.asks', 'asks to run {count} lines', { count: plans.length })))
-    head.appendChild(title)
-    const facts = el('div', 'hc-run-facts')
+    head.appendChild(el('span', 'hc-run-from', from))
+    const facts: HTMLElement[] = []
     if (run) {
       const ran = [...run.results.values()].flat().filter(r => !r.extra)
       const refused = ran.filter(r => verdictKind(r.verdict) === 'alert').length
-      const state = run.state === 'paused'
+      facts.push(el('span', `is-state is-${run.state}`, run.state === 'paused'
         ? t('run-preview.debug.paused', 'paused before line {at} of {total}', { at: (run.at ?? 0) + 1, total: plans.length })
         : run.state === 'running'
           ? t('run-preview.debug.running', 'running…')
           : run.stoppedAt !== undefined
             ? t('run-preview.debug.stopped', 'stopped before line {at}', { at: run.stoppedAt + 1 })
-            : t('run-preview.debug.finished', 'finished')
-      facts.appendChild(el('span', `hc-run-fact is-state is-${run.state}`, state))
-      facts.appendChild(el('span', 'hc-run-fact', t('run-preview.debug.done', '{done} of {total} said', { done: ran.length, total: plans.length })))
-      if (refused) facts.appendChild(el('span', 'hc-run-fact is-alert', t('run-preview.refused-count', '{count} refused', { count: refused })))
-      head.appendChild(facts)
-      return head
+            : t('run-preview.debug.finished', 'finished')))
+      facts.push(el('span', '', t('run-preview.debug.done', '{done} of {total} said', { done: ran.length, total: plans.length })))
+      if (refused) facts.push(el('span', 'is-alert', t('run-preview.refused-count', '{count} refused', { count: refused })))
+    } else {
+      facts.push(el('span', '', t('run-preview.lines', '{count} lines', { count: plans.length })))
+      const refused = plans.filter(p => p.refused).length
+      const ambiguous = plans.filter(p => p.ambiguous && !p.refused).length
+      if (refused) facts.push(el('span', 'is-alert', t('run-preview.refused-count', '{count} refused', { count: refused })))
+      if (ambiguous) facts.push(el('span', 'is-warn', t('run-preview.ambiguous-count', '{count} need a choice', { count: ambiguous })))
+      if (waiting > 0) facts.push(el('span', '', t('run-preview.waiting', '+{count} waiting', { count: waiting })))
     }
-    const refused = plans.filter(p => p.refused).length
-    const ambiguous = plans.filter(p => p.ambiguous && !p.refused).length
-    const steps = plans.reduce((n, p) => n + (p.refused || p.ambiguous ? 0 : p.steps.length || (p.kind === 'structure' ? 1 : 0)), 0)
-    facts.appendChild(el('span', 'hc-run-fact', t('run-preview.steps', '{count} steps will run', { count: steps })))
-    if (refused) facts.appendChild(el('span', 'hc-run-fact is-alert', t('run-preview.refused-count', '{count} refused', { count: refused })))
-    if (ambiguous) facts.appendChild(el('span', 'hc-run-fact is-warn', t('run-preview.ambiguous-count', '{count} need a choice', { count: ambiguous })))
-    if (this.#breakpoints.size) facts.appendChild(el('span', 'hc-run-fact is-alert', t('run-preview.breakpoints', '{count} breakpoints', { count: this.#breakpoints.size })))
-    if (waiting > 0) facts.appendChild(el('span', 'hc-run-fact', t('run-preview.waiting', '+{count} waiting', { count: waiting })))
-    head.appendChild(facts)
+    for (const fact of facts) {
+      head.appendChild(el('span', 'hc-run-dot', '·'))
+      fact.classList.add('hc-run-fact')
+      head.appendChild(fact)
+    }
     return head
-  }
-
-  /** Each behaviour the run uses, once, with what it does and how often. */
-  #legend(plans: readonly LinePlan[]): HTMLElement {
-    const used = new Map<string, { description: string; count: number }>()
-    for (const plan of plans) {
-      if (plan.refused) continue
-      for (const step of plan.steps) {
-        if (step.unknown) continue
-        const seen = used.get(step.command)
-        if (seen) seen.count++
-        else used.set(step.command, { description: step.description, count: 1 })
-      }
-    }
-    const legend = el('div', 'hc-run-legend')
-    if (!used.size) return legend
-    legend.appendChild(el('div', 'hc-run-section', t('run-preview.behaviours', 'Behaviours in this run')))
-    const list = el('dl', 'hc-run-uses')
-    for (const [command, use] of used) {
-      const row = el('div', 'hc-run-use')
-      const name = el('dt', 'hc-run-use-name')
-      name.appendChild(el('span', 'hc-tok-verb', command))
-      if (use.count > 1) name.appendChild(el('span', 'hc-run-use-count', `×${use.count}`))
-      row.appendChild(name)
-      row.appendChild(el('dd', use.description ? 'hc-run-use-what' : 'hc-run-use-what is-missing',
-        use.description || t('run-preview.no-description', 'this behaviour says nothing about what it does')))
-      list.appendChild(row)
-    }
-    legend.appendChild(list)
-    return legend
   }
 
   #body(plans: readonly LinePlan[], run: Debugged | null): HTMLElement {
     const body = el('div', 'hc-run-body')
     const code = el('ol', 'hc-run-code')
     const width = String(plans.length).length
-    // A behaviour's description reads in full where it first appears; on its
-    // later lines it steps back, so the eye goes to what differs.
-    const told = new Set<string>()
     plans.forEach((plan, i) => {
-      const row = lineRow(plan, String(i + 1).padStart(width, ' '), told, {
+      const row = lineRow(plan, String(i + 1).padStart(width, ' '), {
+        open: this.#termsOpen(i), toggle: term => this.#toggleTerm(i, term),
         breakpoint: this.#breakpoints.has(i),
         here: run?.state === 'paused' && run.at === i,
         results: run?.results.get(i),
@@ -400,41 +386,21 @@ export class RunPreviewElement extends HTMLElement {
     return body
   }
 
+  /** The acts, as words with their keys: nothing else in the footer. */
   #foot(run: Debugged | null): HTMLElement {
     const foot = el('footer', 'hc-run-foot')
-    const keys = el('div', 'hc-run-keys')
-    const key = (k: string, said: string): void => {
-      keys.appendChild(el('kbd', 'hc-run-kbd', k))
-      keys.appendChild(el('span', '', ' ' + said + '   '))
-    }
+    const say = (key: string, label: string, act: () => void): void => { foot.appendChild(word(key, label, act)) }
     if (run?.state === 'paused') {
-      key('F10', t('run-preview.debug.step', 'step'))
-      key('F5', t('run-preview.debug.continue', 'continue'))
-      key('Shift+F5', t('run-preview.debug.stop', 'stop'))
-      foot.appendChild(keys)
-      foot.appendChild(button(t('run-preview.debug.stop-act', 'Stop'), 'hc-run-act', () => this.#resume('stop')))
-      foot.appendChild(button(t('run-preview.debug.continue-act', 'Continue'), 'hc-run-act', () => this.#resume('continue')))
-      foot.appendChild(button(t('run-preview.debug.step-act', 'Step'), 'hc-run-act is-go', () => this.#resume('step')))
-      return foot
+      say('F10', t('run-preview.debug.step', 'step'), () => this.#resume('step'))
+      say('F5', t('run-preview.debug.continue', 'continue'), () => this.#resume('continue'))
+      say('⇧F5', t('run-preview.debug.stop', 'stop'), () => this.#resume('stop'))
+    } else if (run?.state === 'finished') {
+      say('Esc', t('run-preview.close', 'close'), () => this.#putAway())
+    } else if (!run) {
+      say('Enter', t('run-preview.run-word', 'run'), () => this.#answer('run'))
+      say('F10', t('run-preview.debug.step', 'step'), () => this.#answer('run', true))
+      say('Esc', t('run-preview.decline-word', 'decline'), () => this.#answer('decline'))
     }
-    if (run?.state === 'running') {
-      keys.appendChild(el('span', '', t('run-preview.debug.wait', 'saying the line…')))
-      foot.appendChild(keys)
-      return foot
-    }
-    if (run?.state === 'finished') {
-      key('Esc', t('run-preview.close', 'closes'))
-      foot.appendChild(keys)
-      foot.appendChild(button(t('run-preview.close-act', 'Close'), 'hc-run-act is-go', () => this.#putAway()))
-      return foot
-    }
-    key('Enter', t('run-preview.enter', 'runs every line, in order'))
-    key('F10', t('run-preview.debug.start', 'steps through it'))
-    key('Esc', t('run-preview.esc', 'declines: nothing runs'))
-    foot.appendChild(keys)
-    foot.appendChild(button(t('run-preview.decline', 'Decline'), 'hc-run-act', () => this.#answer('decline')))
-    foot.appendChild(button(t('run-preview.debug.start-act', 'Debug'), 'hc-run-act', () => this.#answer('run', true)))
-    foot.appendChild(button(t('run-preview.run', 'Run'), 'hc-run-act is-go', () => this.#answer('run')))
     return foot
   }
 
@@ -442,46 +408,40 @@ export class RunPreviewElement extends HTMLElement {
   #ownLine(own: OwnLine): HTMLElement[] {
     const head = el('header', 'hc-run-head')
     head.appendChild(el('span', 'hc-run-sigil is-own', own.stance === 'find' ? '?' : own.stance === 'tiles' ? '>' : '/'))
-    head.appendChild(el('div', 'hc-run-title', t('run-preview.own.title', 'Your line')))
-    head.appendChild(el('div', 'hc-run-facts', t(`run-preview.own.${own.stance}`,
-      own.stance === 'command' ? 'command stance' : own.stance === 'find' ? 'find stance' : 'tiles stance')))
+    head.appendChild(el('span', 'hc-run-from', t('run-preview.own.title', 'Your line')))
     const body = el('div', 'hc-run-body')
-    const code = el('ol', 'hc-run-code')
     if (own.text.trim()) {
-      const plan = planOwnLine(own.text, own.line, own.stance, this.deps())
-      code.appendChild(lineRow(plan, '1', new Set(), {}))
+      const code = el('ol', 'hc-run-code')
+      code.appendChild(lineRow(planOwnLine(own.text, own.line, own.stance, this.deps()), '1', {
+        open: this.#termsOpen(0), toggle: term => this.#toggleTerm(0, term),
+      }))
       body.appendChild(code)
-      const parts = [head, this.#legend([plan]), body]
-      parts.push(this.#ownFoot())
-      return parts
+    } else {
+      body.appendChild(el('p', 'hc-run-quiet', t('run-preview.own.empty', 'Type a line: this shows what it will run, as you type.')))
     }
-    body.appendChild(el('p', 'hc-run-quiet', t('run-preview.own.empty', 'Type a line: this shows what it will run, as you type.')))
-    return [head, body, this.#ownFoot()]
-  }
-
-  #ownFoot(): HTMLElement {
     const foot = el('footer', 'hc-run-foot')
-    const keys = el('div', 'hc-run-keys')
-    keys.appendChild(el('kbd', 'hc-run-kbd', 'Enter'))
-    keys.appendChild(el('span', '', ' ' + t('run-preview.own.enter', 'runs it on the command line') + '   '))
-    keys.appendChild(el('kbd', 'hc-run-kbd', 'F2'))
-    keys.appendChild(el('span', '', ' ' + t('run-preview.own.close', 'or Esc puts this away')))
-    foot.appendChild(keys)
-    foot.appendChild(button(t('run-preview.close-act', 'Close'), 'hc-run-act', () => this.#putAway()))
-    return foot
+    foot.appendChild(word('Esc', t('run-preview.close', 'close'), () => this.#putAway()))
+    return [head, body, foot]
   }
 }
 
 // ── one line ───────────────────────────────────────────────────────────────
 
 type RowState = {
+  /** The terms broken out on this line (a behaviour word, or `why`). */
+  readonly open: ReadonlySet<string>
+  readonly toggle: (term: string) => void
   readonly breakpoint?: boolean
   readonly here?: boolean
   readonly results?: readonly LineResult[]
   readonly unsaid?: boolean
 }
 
-const lineRow = (plan: LinePlan, number: string, told: Set<string>, state: RowState): HTMLElement => {
+/** ONE LIST: each item is its line of code, nothing more, and a short tag
+ *  when the line will not simply run. Click a behaviour word, or the tag, and
+ *  its meaning breaks out in a row under the line; click again to fold it.
+ *  Once a line has run, its results are listed under it. */
+const lineRow = (plan: LinePlan, number: string, state: RowState): HTMLElement => {
   const classes = ['hc-run-line']
   if (plan.refused || plan.kind === 'inert') classes.push('is-refused')
   else if (plan.ambiguous) classes.push('is-ambiguous')
@@ -492,8 +452,27 @@ const lineRow = (plan: LinePlan, number: string, told: Set<string>, state: RowSt
   const gutter = el('span', state.breakpoint ? 'hc-run-gutter has-break' : 'hc-run-gutter', number)
   if (state.here) gutter.dataset['here'] = ''
   row.appendChild(gutter)
-  row.appendChild(codeOf(plan))
-  row.appendChild(whatOf(plan, told))
+  const flow = el('div', 'hc-run-flow')
+  const head = el('div', 'hc-run-head-line')
+  const code = codeOf(plan)
+  for (const term of code.querySelectorAll<HTMLElement>('[data-term]')) {
+    const name = term.dataset['term']!
+    term.classList.add('is-term')
+    if (state.open.has(name)) term.classList.add('is-open')
+    term.addEventListener('click', event => { event.stopPropagation(); state.toggle(name) })
+  }
+  head.appendChild(code)
+  const tag = tagOf(plan)
+  if (tag) {
+    if (state.open.has('why')) tag.classList.add('is-open')
+    tag.addEventListener('click', event => { event.stopPropagation(); state.toggle('why') })
+    head.appendChild(tag)
+  }
+  flow.appendChild(head)
+  for (const term of state.open) {
+    const breakout = breakoutOf(plan, term)
+    if (breakout) flow.appendChild(breakout)
+  }
   // WHAT IT CAME TO: once a line has run, its verdict and what the hive said
   // while it ran, in a list under it.
   if (state.results?.length) {
@@ -505,8 +484,9 @@ const lineRow = (plan: LinePlan, number: string, told: Set<string>, state: RowSt
       list.appendChild(item)
       for (const heard of result.heard ?? []) list.appendChild(el('li', 'hc-run-result is-heard', heard))
     }
-    row.appendChild(list)
+    flow.appendChild(list)
   }
+  row.appendChild(flow)
   return row
 }
 
@@ -522,6 +502,7 @@ const codeOf = (plan: LinePlan): HTMLElement => {
       if (span.role === 'action') {
         const verb = el('span', 'hc-tok-verb', piece)
         if (span.color) verb.style.color = span.color
+        verb.dataset['term'] = span.command ?? piece.toLowerCase()
         code.appendChild(verb)
       } else if (span.role === 'ambiguity') {
         code.appendChild(el('span', 'hc-tok-ambiguous', piece))
@@ -542,7 +523,9 @@ const codeOf = (plan: LinePlan): HTMLElement => {
     const word = rest.slice(lead.length).split(/[\s(]/, 1)[0] ?? ''
     if (slash) code.appendChild(el('span', 'hc-tok-slash', '/'))
     if (lead) code.appendChild(el('span', 'hc-tok-gap', lead))
-    code.appendChild(el('span', plan.steps[0]!.unknown ? 'hc-tok-unknown' : 'hc-tok-verb', word))
+    const verb = el('span', plan.steps[0]!.unknown ? 'hc-tok-unknown' : 'hc-tok-verb', word)
+    verb.dataset['term'] = plan.steps[0]!.command
+    code.appendChild(verb)
     for (const node of argTokens(rest.slice(lead.length + word.length))) code.appendChild(node)
     return code
   }
@@ -581,52 +564,57 @@ const argTokens = (text: string): Node[] => {
   return nodes
 }
 
-/** What the line will do, said from the behaviours it names. */
-const whatOf = (plan: LinePlan, told: Set<string>): HTMLElement => {
-  const what = el('div', 'hc-run-what')
-  if (plan.refused) {
-    what.appendChild(el('span', 'hc-run-flag is-alert', t('run-preview.refused', 'refused')))
-    what.appendChild(el('span', 'hc-run-reason', plan.refused))
-    return what
+/** The short tag a line wears when it will not simply run, or null. Click
+ *  it and the reason breaks out under the line (`why`). */
+const tagOf = (plan: LinePlan): HTMLElement | null => {
+  const tag = (label: string, kind: string): HTMLElement => {
+    const node = el('span', `hc-run-tag is-${kind}`, label)
+    node.setAttribute('role', 'button')
+    return node
   }
-  if (plan.ambiguous) {
-    what.appendChild(el('span', 'hc-run-flag is-warn', t('run-preview.ambiguous', 'choose')))
-    what.appendChild(el('span', 'hc-run-reason', t('run-preview.ambiguous-why',
-      '"{word}" is claimed by {candidates}: nothing on this line runs until it says which', {
+  if (plan.refused) return tag(t('run-preview.refused', 'refused'), 'alert')
+  if (plan.ambiguous) return tag(t('run-preview.ambiguous', 'choose'), 'warn')
+  if (plan.steps.some(s => s.unknown)) return tag(t('run-preview.unknown-tag', 'not a behaviour'), 'warn')
+  if (plan.steps.some(s => s.confirms)) return tag(t('run-preview.confirms', 'asks first'), 'warn')
+  if (plan.kind === 'structure' || plan.kind === 'tiles' || plan.kind === 'find') return tag(t(`run-preview.kind.${plan.kind}`, plan.kind), 'quiet')
+  return null
+}
+
+/** The row that breaks out under a line: a behaviour's meaning and exactly
+ *  what it is handed, or the reason behind the line's tag. */
+const breakoutOf = (plan: LinePlan, term: string): HTMLElement | null => {
+  const row = el('div', 'hc-run-breakout')
+  if (term === 'why') {
+    const why = plan.refused
+      ?? (plan.ambiguous ? t('run-preview.ambiguous-why', '"{word}" is claimed by {candidates}: nothing on this line runs until it says which', {
         word: plan.ambiguous.word, candidates: plan.ambiguous.candidates.join(', '),
-      })))
-    return what
+      }) : undefined)
+      ?? (plan.steps.some(s => s.unknown) ? t('run-preview.unknown', 'not a behaviour in this hive: the command line makes a tile of that name and goes into it') : undefined)
+      ?? (plan.steps.some(s => s.confirms) ? t('run-preview.confirms-why', 'a destructive word: Enter asks you to confirm before it runs') : undefined)
+      ?? (plan.kind === 'structure' ? t('run-preview.structure', 'the line\'s own grammar: a path, selection, tag or view, carried out by the command line itself')
+        : plan.kind === 'tiles' ? t('run-preview.tiles', 'tiles stance: makes a tile with this name here')
+        : plan.kind === 'find' ? t('run-preview.find', 'find stance: lists the tiles whose names hold these words; Enter walks to the one chosen')
+        : undefined)
+    if (!why) return null
+    row.classList.add(plan.refused ? 'is-alert' : 'is-warn')
+    row.textContent = why
+    return row
   }
-  if (plan.kind === 'structure') {
-    what.appendChild(el('span', 'hc-run-reason', t('run-preview.structure',
-      'the line\'s own grammar: a path, selection, tag or view, carried out by the command line itself')))
-    return what
+  const steps = plan.steps.filter(s => s.command === term)
+  if (!steps.length) return null
+  row.appendChild(el('span', 'hc-tok-verb', term))
+  if (steps[0]!.said) row.appendChild(el('span', 'hc-run-alias', ` (${steps[0]!.said})`))
+  const description = steps[0]!.unknown
+    ? t('run-preview.unknown', 'not a behaviour in this hive: the command line makes a tile of that name and goes into it')
+    : steps[0]!.description || t('run-preview.no-description', 'this behaviour says nothing about what it does')
+  row.appendChild(el('span', steps[0]!.description && !steps[0]!.unknown ? 'hc-run-meaning' : 'hc-run-meaning is-missing', '  ' + description))
+  for (const step of steps) {
+    const handed = el('div', 'hc-run-handed')
+    handed.appendChild(el('span', 'hc-run-handed-label', t('run-preview.handed', 'is handed') + ' '))
+    handed.appendChild(el('code', 'hc-run-handed-args', step.args ? step.args : t('run-preview.handed-nothing', '(nothing)')))
+    row.appendChild(handed)
   }
-  if (plan.kind === 'tiles') {
-    what.appendChild(el('span', 'hc-run-reason', t('run-preview.tiles', 'tiles stance: makes a tile with this name here')))
-    return what
-  }
-  if (plan.kind === 'find') {
-    what.appendChild(el('span', 'hc-run-reason', t('run-preview.find', 'find stance: lists the tiles whose names hold these words; Enter walks to the one chosen')))
-    return what
-  }
-  for (const step of plan.steps) {
-    const one = el('div', told.has(step.command) ? 'hc-run-step is-told' : 'hc-run-step')
-    told.add(step.command)
-    const name = el('span', step.unknown ? 'hc-tok-unknown' : 'hc-tok-verb', step.command)
-    one.appendChild(name)
-    if (step.said) one.appendChild(el('span', 'hc-run-alias', ` (${step.said})`))
-    if (step.confirms) one.appendChild(el('span', 'hc-run-flag is-warn', ' ' + t('run-preview.confirms', 'asks first')))
-    one.appendChild(el('span', 'hc-run-sep', '  '))
-    const description = step.unknown
-      ? t('run-preview.unknown', 'not a behaviour in this hive: the command line makes a tile of that name and goes into it')
-      : step.description || t('run-preview.no-description', 'this behaviour says nothing about what it does')
-    const said = el('span', step.unknown || !step.description ? 'hc-run-reason is-missing' : 'hc-run-reason', description)
-    said.title = description
-    one.appendChild(said)
-    what.appendChild(one)
-  }
-  return what
+  return row
 }
 
 const el = (tag: string, className: string, text?: string): HTMLElement => {
@@ -636,11 +624,13 @@ const el = (tag: string, className: string, text?: string): HTMLElement => {
   return node
 }
 
-const button = (label: string, className: string, run: () => void): HTMLButtonElement => {
+/** An act is a word with its key, not a bordered button. */
+const word = (key: string, label: string, run: () => void): HTMLButtonElement => {
   const node = document.createElement('button')
   node.type = 'button'
-  node.className = className
-  node.textContent = label
+  node.className = 'hc-run-word'
+  node.appendChild(el('span', 'hc-run-key', key))
+  node.appendChild(document.createTextNode(' ' + label))
   node.addEventListener('click', run)
   return node
 }
@@ -649,10 +639,8 @@ function ensureStyles(): void {
   if (typeof document === 'undefined' || document.getElementById(STYLE_ID)) return
   const style = document.createElement('style')
   style.id = STYLE_ID
-  // The tool-window ink roles (tool-window-colour-roles.md); the code inks are
-  // the status colours every theme sets, so a theme recolours them all. The
-  // backdrop is see-through on purpose: the hive the lines will change stays
-  // in view behind them.
+  // The tool-window ink roles (tool-window-colour-roles.md). Nearly opaque
+  // (jwize: "much less transparency"): the hive only shows faintly behind.
   style.textContent = `
     ${RUN_PREVIEW_SURFACE} { display: contents; }
     .hc-run {
@@ -660,14 +648,12 @@ function ensureStyles(): void {
       top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor, 0px));
       z-index: 100001; box-sizing: border-box;
       display: flex; flex-direction: column; align-items: stretch;
-      padding: 1.25rem max(1.25rem, calc((100vw - 84rem) / 2)) 0;
-      background: rgba(var(--hc-panel-pane, 9, 14, 20), 0.74);
-      backdrop-filter: blur(1.5px);
-      -webkit-backdrop-filter: blur(1.5px);
+      padding: 1rem max(1.25rem, calc((100vw - 72rem) / 2)) 0;
+      background: rgba(var(--hc-panel-pane, 9, 14, 20), 0.94);
       color: var(--hc-window-ink-plain, rgba(227, 237, 245, 0.86));
       font-family: var(--hc-mono, ui-monospace, monospace);
       font-size: calc(0.8125rem * var(--hc-panel-scale, 1));
-      line-height: 1.55;
+      line-height: 1.6;
       /* Mid-tone inks: legible on a light theme's pane and a dark one's. */
       --hc-ink-verb: var(--hc-status-ok, #2fa37a);
       --hc-ink-path: #3f8be0;
@@ -676,97 +662,77 @@ function ensureStyles(): void {
       --hc-ink-number: #d4692a;
       --hc-ink-select: #1f9fab;
     }
-    .hc-run-head { flex: 0 0 auto; display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap; padding-bottom: 0.75rem; }
-    .hc-run-sigil { font-weight: 700; font-size: 1.25rem; color: var(--hc-status-warn, #d9a441); }
-    .hc-run-title { font-size: 1.05rem; color: var(--hc-window-ink-loud, #eef2f5); }
-    .hc-run-from { font-weight: 700; }
-    .hc-run-asks { color: var(--hc-window-ink-plain, rgba(227, 237, 245, 0.86)); }
-    .hc-run-facts { margin-left: auto; display: flex; gap: 0.9rem; color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); }
+    .hc-run-head { flex: 0 0 auto; display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; padding: 0 0 0.6rem 0.25rem; }
+    .hc-run-sigil { font-weight: 700; color: var(--hc-status-warn, #d9a441); }
+    .hc-run-sigil.is-own { color: var(--hc-ink-verb); }
+    .hc-run-from { font-weight: 600; color: var(--hc-window-ink-loud, #eef2f5); }
+    .hc-run-dot, .hc-run-fact { color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); }
     .hc-run-fact.is-alert { color: var(--hc-status-alert, #e07a72); }
-    .hc-run-fact.is-warn { color: var(--hc-status-warn, #d9a441); }
-    .hc-run-legend { flex: 0 0 auto; max-height: 30vh; overflow: auto; }
-    .hc-run-section {
-      margin: 0 0 0.35rem; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em;
-      text-transform: uppercase; color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62));
-    }
-    .hc-run-uses { margin: 0 0 0.9rem; display: grid; grid-template-columns: max-content 1fr; gap: 0.15rem 1.25rem; }
-    .hc-run-use { display: contents; }
-    .hc-run-use-name { margin: 0; white-space: nowrap; }
-    .hc-run-use-count { margin-left: 0.4rem; color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); }
-    .hc-run-use-what { margin: 0; font-family: system-ui, sans-serif; }
-    .hc-run-body {
-      flex: 1 1 auto; min-height: 0; overflow: auto;
-      border-top: 1px solid var(--hc-window-line, rgba(227, 237, 245, 0.14));
-      border-bottom: 1px solid var(--hc-window-line, rgba(227, 237, 245, 0.14));
-    }
-    .hc-run-code { list-style: none; margin: 0; padding: 0.4rem 0; }
-    .hc-run-line {
-      display: grid; grid-template-columns: max-content minmax(0, 1.15fr) minmax(0, 1fr);
-      gap: 0 1.25rem; padding: 0.12rem 0.5rem 0.12rem 0; border-left: 2px solid transparent;
-    }
-    .hc-run-line:hover { background: rgba(255, 255, 255, 0.04); }
+    .hc-run-fact.is-warn, .hc-run-fact.is-paused { color: var(--hc-status-warn, #d9a441); }
+    .hc-run-fact.is-finished { color: var(--hc-status-ok, #2fa37a); }
+    .hc-run-body { flex: 1 1 auto; min-height: 0; overflow: auto; }
+    .hc-run-code { list-style: none; margin: 0; padding: 0; }
+    .hc-run-line { display: flex; align-items: flex-start; padding: 0.05rem 0; border-left: 2px solid transparent; }
+    .hc-run-line:hover { background: rgba(255, 255, 255, 0.035); }
     .hc-run-line.is-refused { border-left-color: var(--hc-status-alert, #e07a72); }
     .hc-run-line.is-ambiguous { border-left-color: var(--hc-status-warn, #d9a441); }
-    .hc-run-gutter { padding: 0 0.25rem 0 0.75rem; white-space: pre; text-align: right; color: var(--hc-window-ink-faint, rgba(227, 237, 245, 0.38)); user-select: none; }
-    .hc-run-text { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--hc-window-ink-plain, rgba(227, 237, 245, 0.86)); }
-    .hc-run-what { min-width: 0; font-family: system-ui, sans-serif; color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); }
-    .hc-run-step { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .hc-run-step.is-told .hc-run-reason { opacity: 0.55; }
-    .hc-run-step .hc-tok-verb, .hc-run-step .hc-tok-unknown { font-family: var(--hc-mono, ui-monospace, monospace); }
-    .hc-run-alias { color: var(--hc-window-ink-faint, rgba(227, 237, 245, 0.38)); }
-    .hc-run-reason.is-missing, .hc-run-use-what.is-missing { color: var(--hc-status-warn, #d9a441); font-style: italic; }
-    .hc-run-flag { margin-right: 0.5rem; font-weight: 700; text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.06em; }
-    .hc-run-flag.is-alert { color: var(--hc-status-alert, #e07a72); }
-    .hc-run-flag.is-warn { color: var(--hc-status-warn, #d9a441); }
-    .hc-run-line.is-refused .hc-run-reason { color: var(--hc-status-alert, #e07a72); }
+    .hc-run-line.is-here {
+      background: color-mix(in srgb, var(--hc-status-warn, #d9a441) 14%, transparent);
+      border-left-color: var(--hc-status-warn, #d9a441);
+    }
+    .hc-run-gutter {
+      flex: 0 0 auto; position: relative; box-sizing: border-box; min-width: calc(3ch + 1.5rem);
+      padding: 0 1rem 0 0.5rem; white-space: pre; text-align: right; user-select: none;
+      color: var(--hc-window-ink-faint, rgba(227, 237, 245, 0.38));
+    }
+    .hc-run-gutter.is-clickable { cursor: pointer; }
+    .hc-run-gutter.is-clickable:hover { color: var(--hc-window-ink-loud, #eef2f5); }
+    .hc-run-gutter.has-break { color: var(--hc-status-alert, #e07a72); font-weight: 700; }
+    .hc-run-gutter.has-break::before {
+      content: ''; position: absolute; left: 0.15rem; top: 0.8em; width: 0.45rem; height: 0.45rem;
+      margin-top: -0.225rem; border-radius: 50%; background: var(--hc-status-alert, #e07a72);
+    }
+    .hc-run-gutter[data-here]::after { content: '\\25B6'; position: absolute; right: 0.15rem; color: var(--hc-status-warn, #d9a441); }
+    .hc-run-flow { flex: 1 1 auto; min-width: 0; }
+    .hc-run-head-line { display: flex; align-items: baseline; gap: 0.75rem; }
+    .hc-run-text { flex: 1 1 auto; min-width: 0; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .hc-run-line.is-unsaid .hc-run-text { opacity: 0.45; text-decoration: line-through; }
     .hc-tok-verb { color: var(--hc-ink-verb); font-weight: 600; }
-    .hc-tok-slash { color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); }
     .hc-tok-unknown { color: var(--hc-status-warn, #d9a441); font-weight: 600; }
+    .is-term { cursor: pointer; border-bottom: 1px dotted transparent; }
+    .is-term:hover, .is-term.is-open { border-bottom-color: currentColor; }
+    .hc-tok-slash, .hc-tok-residue { color: var(--hc-window-ink-faint, rgba(227, 237, 245, 0.38)); }
     .hc-tok-ambiguous { color: var(--hc-status-warn, #d9a441); text-decoration: underline wavy; text-underline-offset: 3px; }
-    .hc-tok-residue { color: var(--hc-window-ink-faint, rgba(227, 237, 245, 0.38)); }
     .hc-tok-path { color: var(--hc-ink-path); }
     .hc-tok-sig { color: var(--hc-ink-sig); cursor: help; }
     .hc-tok-string { color: var(--hc-ink-string); }
     .hc-tok-number { color: var(--hc-ink-number); }
     .hc-tok-select { color: var(--hc-ink-select); }
-    .hc-run-foot { flex: 0 0 auto; display: flex; align-items: center; justify-content: flex-end; gap: 0.75rem; padding: 0.75rem 0 1rem; }
-    .hc-run-keys { margin-right: 0.75rem; color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); font-family: system-ui, sans-serif; white-space: pre; }
-    .hc-run-kbd {
-      display: inline-block; padding: 0 0.4rem; border-radius: 3px; font-family: var(--hc-mono, ui-monospace, monospace);
-      border: 1px solid var(--hc-window-line-firm, rgba(227, 237, 245, 0.26)); color: var(--hc-window-ink-loud, #eef2f5);
+    .hc-run-tag {
+      flex: 0 0 auto; cursor: pointer; font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase;
+      font-family: system-ui, sans-serif; padding-right: 0.5rem;
     }
-    .hc-run-act {
-      font: inherit; padding: 0.3rem 1rem; border-radius: var(--hc-radius-control, 2px); cursor: pointer;
-      background: none; color: var(--hc-window-ink-plain, rgba(227, 237, 245, 0.86));
-      border: 1px solid var(--hc-window-line-firm, rgba(227, 237, 245, 0.26));
+    .hc-run-tag.is-alert { color: var(--hc-status-alert, #e07a72); }
+    .hc-run-tag.is-warn { color: var(--hc-status-warn, #d9a441); }
+    .hc-run-tag.is-quiet { color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); }
+    .hc-run-tag:hover, .hc-run-tag.is-open { text-decoration: underline; }
+    .hc-run-breakout {
+      margin: 0.1rem 0 0.3rem; padding: 0.25rem 0.6rem; border-left: 2px solid var(--hc-window-line-firm, rgba(227, 237, 245, 0.26));
+      background: rgba(255, 255, 255, 0.04); font-family: system-ui, sans-serif;
+      color: var(--hc-window-ink-plain, rgba(227, 237, 245, 0.86));
     }
-    .hc-run-act:hover { color: var(--hc-window-ink-loud, #fff); background: rgba(255, 255, 255, 0.075); }
-    .hc-run-act.is-go { color: var(--hc-ink-verb); border-color: currentColor; }
-    /* The debugger: breakpoints in the gutter, the paused line, results. */
-    .hc-run.is-debugging { background: rgba(var(--hc-panel-pane, 9, 14, 20), 0.66); }
-    .hc-run-gutter.is-clickable { cursor: pointer; }
-    .hc-run-gutter.is-clickable:hover { color: var(--hc-window-ink-loud, #eef2f5); }
-    .hc-run-gutter.has-break { position: relative; color: var(--hc-status-alert, #e07a72); font-weight: 700; }
-    .hc-run-gutter.has-break::before {
-      content: ''; position: absolute; left: 0.2rem; top: 50%; width: 0.5rem; height: 0.5rem;
-      margin-top: -0.25rem; border-radius: 50%; background: var(--hc-status-alert, #e07a72);
-    }
-    .hc-run-gutter { position: relative; box-sizing: border-box; min-width: calc(3ch + 1.75rem); }
-    .hc-run-gutter[data-here]::after {
-      content: '\\25B6'; position: absolute; right: -1rem; color: var(--hc-status-warn, #d9a441);
-    }
-    .hc-run-line.is-here {
-      background: color-mix(in srgb, var(--hc-status-warn, #d9a441) 16%, transparent);
-      border-left-color: var(--hc-status-warn, #d9a441);
-    }
-    .hc-run-line.is-done .hc-run-text { opacity: 0.8; }
-    .hc-run-line.is-unsaid .hc-run-text, .hc-run-line.is-unsaid .hc-run-what { opacity: 0.45; text-decoration: line-through; }
+    .hc-run-breakout .hc-tok-verb { font-family: var(--hc-mono, ui-monospace, monospace); }
+    .hc-run-breakout.is-alert { border-left-color: var(--hc-status-alert, #e07a72); color: var(--hc-status-alert, #e07a72); }
+    .hc-run-breakout.is-warn { border-left-color: var(--hc-status-warn, #d9a441); }
+    .hc-run-alias, .hc-run-handed-label { color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); }
+    .hc-run-meaning.is-missing { color: var(--hc-status-warn, #d9a441); font-style: italic; }
+    .hc-run-handed-args { font-family: var(--hc-mono, ui-monospace, monospace); overflow-wrap: anywhere; }
     .hc-run-results {
-      grid-column: 2 / -1; list-style: none; margin: 0.15rem 0 0.35rem; padding: 0.2rem 0 0.2rem 0.75rem;
+      list-style: none; margin: 0.1rem 0 0.3rem; padding: 0 0 0 0.75rem;
       border-left: 1px solid var(--hc-window-line, rgba(227, 237, 245, 0.14));
       font-family: system-ui, sans-serif; font-size: 0.92em;
     }
-    .hc-run-result { margin: 0.05rem 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .hc-run-result { white-space: pre-wrap; overflow-wrap: anywhere; }
     .hc-run-result.is-ok .hc-run-verdict { color: var(--hc-status-ok, #2fa37a); }
     .hc-run-result.is-alert .hc-run-verdict { color: var(--hc-status-alert, #e07a72); }
     .hc-run-result.is-warn .hc-run-verdict { color: var(--hc-status-warn, #d9a441); }
@@ -776,15 +742,14 @@ function ensureStyles(): void {
     .hc-run-result.is-heard { color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); padding-left: 1.1rem; }
     .hc-run-result.is-extra { font-style: italic; }
     .hc-run-result-line { font-family: var(--hc-mono, ui-monospace, monospace); }
-    .hc-run-fact.is-state.is-paused { color: var(--hc-status-warn, #d9a441); font-weight: 600; }
-    .hc-run-fact.is-state.is-finished { color: var(--hc-status-ok, #2fa37a); }
-    .hc-run-sigil.is-own { color: var(--hc-ink-verb); }
-    .hc-run-quiet { margin: 0.75rem; color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); font-family: system-ui, sans-serif; }
-    @media (max-width: 760px) {
-      .hc-run { padding: 0.75rem 0.75rem 0; }
-      .hc-run-line { grid-template-columns: max-content minmax(0, 1fr); }
-      .hc-run-what { grid-column: 2; padding-bottom: 0.3rem; }
+    .hc-run-foot { flex: 0 0 auto; display: flex; justify-content: flex-end; gap: 1.25rem; padding: 0.6rem 0.25rem 0.9rem; }
+    .hc-run-word {
+      font: inherit; padding: 0; border: 0; background: none; cursor: pointer;
+      color: var(--hc-window-ink-plain, rgba(227, 237, 245, 0.86));
     }
+    .hc-run-word:hover { color: var(--hc-window-ink-loud, #fff); text-decoration: underline; }
+    .hc-run-key { color: var(--hc-window-ink-faint, rgba(227, 237, 245, 0.38)); }
+    .hc-run-quiet { margin: 0.5rem 0.25rem; color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); font-family: system-ui, sans-serif; }
   `
   document.head.appendChild(style)
 }

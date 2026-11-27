@@ -91,16 +91,18 @@ can see what the command line is going to execute with a clear description
 based on the behaviors."
 
 While a call waits, the run preview (`essentials/assistant/run-preview.view.ts`)
-draws it over the whole hive, the hive still visible behind it:
+draws it over the whole hive, nearly opaque (jwize: "much less transparency"),
+as ONE LIST (jwize: "a single list … if you click the term you can get a
+breakout row so you can see the meaning"):
 
-- every line as code, numbered: the behaviour words lit, paths, signatures
-  (drawn short, whole on hover), strings and selections each in their own
-  ink, and the words a sentence throws away dimmed;
-- beside each line, the behaviour it will run and that behaviour's own
-  description, in your language; above, each behaviour the run uses once,
-  with how many lines use it;
-- a line the door will refuse is marked with the door's own reason, and a
-  word two behaviours claim is marked as a choice, before anything runs.
+- each item is its line of code, numbered: the behaviour words lit, paths,
+  signatures (drawn short, whole on hover), strings and selections each in
+  their own ink, and the words a sentence throws away dimmed;
+- click a behaviour word and a row breaks out under the line: what the
+  behaviour does, in your language, and exactly what it is handed; click
+  again to fold it;
+- a line the door will refuse wears a short tag (`refused`, `choose`, `not a
+  behaviour`); click the tag for the door's own reason, before anything runs.
 
 Each line's reading is `commands/utterance/line-plan.ts`, which follows the
 door's own fork in the same order: a word that keeps its arguments, a slash
