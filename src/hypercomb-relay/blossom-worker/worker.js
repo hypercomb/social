@@ -1251,7 +1251,15 @@ async function servePublications(request, scoped) {
     }
   }
   sites.push(...await platesInOrder(derived, LOCATION_READS))
-  return json(200, { sites }, { 'Cache-Control': 'no-store' })
+  // THE DEEP NAMES THAT LOAD. A nested place's own name passes TLS only once
+  // it is attached (deep-names.md: the zone's certificate reaches one label),
+  // and most nested places are no plate here. So every attached name on every
+  // zone this host serves is listed once, with when it was attached (0: before
+  // the host kept times), and a hive asks a deep name only once it is here and
+  // its certificate can have arrived — never one no certificate covers.
+  const deepNames = {}
+  for (const zone of wildcardZones(bindings)) Object.assign(deepNames, await attachedDeepNames(env, zone))
+  return json(200, { sites, deepNames }, { 'Cache-Control': 'no-store' })
 }
 
 /** A root place as the ledger reports it: the zone root is its host, its
@@ -6739,23 +6747,107 @@ async function attachDeepNames(env, pubkey, evt) {
   const attached = []
   for (const { host, zone } of wanted) {
     if (attached.length >= DEEP_NAMES_PER_WRITE) break
-    if (!zones.has(zone)) {
-      const found = await cloudflare(env, 'GET', `/zones?${new URLSearchParams({ name: zone, 'account.id': account })}`)
-      const id = found.ok && Array.isArray(found.result) ? String(found.result[0]?.id || '') : ''
-      let held = null
-      if (ZONE_ID_RE.test(id)) {
-        const list = await cloudflare(env, 'GET', `/accounts/${account}/workers/domains?${new URLSearchParams({ zone_id: id })}`)
-        if (list.ok && Array.isArray(list.result)) held = new Set(list.result.map((d) => String(d?.hostname || '').toLowerCase()))
-      }
-      zones.set(zone, { id, held })
-    }
+    if (!zones.has(zone)) zones.set(zone, await zoneAttachments(env, account, zone))
     const { id, held } = zones.get(zone)
     if (!held || held.has(host)) continue
     const put = await cloudflare(env, 'PUT', `/accounts/${account}/workers/domains`,
       { hostname: host, service: claimScript(env), environment: 'production', zone_id: id })
     if (put.ok) { attached.push(host); held.add(host) }
   }
+  const now = Date.now()
+  for (const [zone, { held }] of zones) {
+    if (held) await keepAttachedDeepNames(env, zone, held, new Set(attached), now).catch(() => {})
+  }
   return attached
+}
+
+// WHAT IS ATTACHED, KEPT. The zone's list of attached names is read whenever a
+// write attaches (above); it is kept in HIVES as `deep-names:<zone>` =
+// { host: attachedAt }, so the ledger can say which nested names load without
+// asking Cloudflare on a read. Written only when it changes: the store allows
+// few writes a day.
+//
+// A time only ever errs LATE. A name with no kept time is stamped now, so a
+// stale or racing read can only make a hive wait for a certificate longer,
+// never ask a name before its certificate exists. The one exception is the
+// zone's FIRST keeping (its key never written): every name already attached
+// then predates the keeping and is stamped 0, "long since", so names that
+// loaded before this was kept go on loading.
+const DEEP_NAMES_TTL_MS = 60_000
+const deepNamesHeld = new Map()
+const deepNamesSeeded = new Map()
+const deepNamesKey = (zone) => `deep-names:${zone}`
+
+/** The zone's kept list straight from the store: the object, or null when the
+ *  key was never written. Throws when the store cannot be read. */
+async function readDeepNames(kv, zone) {
+  const raw = await kv.get(deepNamesKey(zone))
+  if (raw == null) return null
+  const parsed = JSON.parse(String(raw))
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+}
+
+/** The names attached on `zone`, with when: `{ host: attachedAt }`. Read at
+ *  most once a minute per isolate; an unreadable store answers {}. */
+async function attachedDeepNames(env, zone) {
+  const kv = env.HIVES
+  if (!kv?.get) return {}
+  const held = deepNamesHeld.get(zone)
+  if (held && held.kv === kv && Date.now() - held.at < DEEP_NAMES_TTL_MS) return held.value
+  let value = {}
+  try { value = (await readDeepNames(kv, zone)) ?? await seedDeepNames(env, zone) } catch { value = {} }
+  deepNamesHeld.set(zone, { at: Date.now(), kv, value })
+  return value
+}
+
+/** The zone's id and the names attached on it, from Cloudflare: `{ id, held }`,
+ *  held null when the list could not be read. */
+async function zoneAttachments(env, account, zone) {
+  const found = await cloudflare(env, 'GET', `/zones?${new URLSearchParams({ name: zone, 'account.id': account })}`)
+  const id = found.ok && Array.isArray(found.result) ? String(found.result[0]?.id || '') : ''
+  let held = null
+  if (ZONE_ID_RE.test(id)) {
+    const list = await cloudflare(env, 'GET', `/accounts/${account}/workers/domains?${new URLSearchParams({ zone_id: id })}`)
+    if (list.ok && Array.isArray(list.result)) held = new Set(list.result.map((d) => String(d?.hostname || '').toLowerCase()))
+  }
+  return { id, held }
+}
+
+/** A zone that has never been kept takes its list once, the first time the
+ *  ledger asks, so names attached before this was kept are listed without
+ *  waiting for the next publish. A failed or unconfigured try answers {} and
+ *  is not retried for a minute. */
+async function seedDeepNames(env, zone) {
+  if (!claimsConfigured(env)) return {}
+  const tried = deepNamesSeeded.get(zone)
+  if (tried && tried.kv === env.HIVES && Date.now() - tried.at < DEEP_NAMES_TTL_MS) return {}
+  deepNamesSeeded.set(zone, { at: Date.now(), kv: env.HIVES })
+  const { held } = await zoneAttachments(env, String(env.CF_ACCOUNT_ID).trim(), zone)
+  if (!held) return {}
+  return (await keepAttachedDeepNames(env, zone, held, new Set(), Date.now())) ?? {}
+}
+
+/** Keep the zone's attached names: everything its list now holds, a name just
+ *  attached stamped `now`, one already kept keeping its time, and one with no
+ *  kept time stamped `now` too, unless this is the zone's first keeping (0).
+ *  Read straight from the store, never the minute's cache. Answers the list. */
+async function keepAttachedDeepNames(env, zone, held, justAttached, now) {
+  const kv = env.HIVES
+  if (!kv?.put || !kv?.get) return null
+  const stored = await readDeepNames(kv, zone)
+  const first = stored === null
+  const before = stored ?? {}
+  const next = {}
+  for (const host of [...held].sort()) {
+    next[host] = justAttached.has(host) ? now
+      : Number.isFinite(before[host]) ? before[host]
+      : first ? 0 : now
+  }
+  const same = !first && Object.keys(next).length === Object.keys(before).length
+    && Object.entries(next).every(([host, at]) => before[host] === at)
+  if (!same) await kv.put(deepNamesKey(zone), JSON.stringify(next))
+  deepNamesHeld.set(zone, { at: Date.now(), kv, value: next })
+  return next
 }
 
 /** A short reason a participant can read and an operator can act on. */
