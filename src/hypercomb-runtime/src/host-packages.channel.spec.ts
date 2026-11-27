@@ -10,7 +10,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from 'nostr-tools/pure'
-import { registerPoolMeaning } from '@hypercomb/core'
+import { firstKeyList, keyListTemplate, nextKeyList, registerPoolMeaning, type KeyList } from '@hypercomb/core'
 import {
   INSTALL_FOLLOW_KEY, indexDoors, installCandidates, readInstallChannel, readInstallFollow, type InstallFollow,
 } from './host-packages'
@@ -179,5 +179,103 @@ describe('installCandidates — the order a cold shell tries', () => {
     const verdict = installCandidates({ state: 'forged', door: 'hypercomb.com' }, pool)
     expect(verdict.candidates).toEqual([])
     expect(verdict.refused).toMatch(/not the followed publisher's/)
+  })
+})
+
+// 2026-11-27: jwize's phone (a key his list names) published his index FOR his
+// key, tagged ['anchor', <his key>]. The host took it, but this reader called it
+// forged, so every managed door said "This site offers no package yet" until his
+// desktop signed again. A listed key's index for the anchor is the anchor's.
+describe('readInstallChannel — an index a listed device signed for the publisher', () => {
+  const PHONE_KEY = generateSecretKey()
+  const PHONE = getPublicKey(PHONE_KEY)
+  const T0 = 1_791_578_000
+
+  /** A signed key-list event. */
+  const signList = (key: Uint8Array, list: KeyList, at: number): Record<string, unknown> =>
+    finalizeEvent(keyListTemplate(list, at), key) as unknown as Record<string, unknown>
+
+  /** The publisher's chain: list 0 (the publisher alone), then the phone added. */
+  const chainWithPhone = (): Record<string, unknown>[] => {
+    const first = signList(PUBLISHER_KEY, firstKeyList(PUBLISHER, 'desktop'), T0)
+    const next = nextKeyList(firstKeyList(PUBLISHER, 'desktop'), String(first['id']), { op: 'add', pubkey: PHONE, label: 'phone' })!
+    return [first, signList(PUBLISHER_KEY, next, T0 + 60)]
+  }
+
+  /** An index event signed by `key`, carrying `tags`. */
+  const tagged = (key: Uint8Array, tags: string[][], roots: Record<string, string>): Record<string, unknown> =>
+    finalizeEvent({ kind: 30564, created_at: 1_791_578_080, tags, content: JSON.stringify({ v: 1, roots }) }, key) as unknown as Record<string, unknown>
+
+  const listUrl = async (door: string, anchor = PUBLISHER): Promise<string> =>
+    `https://${door}/${await registerPoolMeaning('keys:lists')}/${anchor}`
+
+  const serve = async (indexEvent: Record<string, unknown>, chain: unknown | null) => {
+    const routes: Record<string, { body: string }> = { [await indexUrl('hypercomb.com')]: { body: JSON.stringify(indexEvent) } }
+    if (chain !== null) routes[await listUrl('hypercomb.com')] = { body: JSON.stringify(chain) }
+    const fetchMock = serving(routes)
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  it("takes the root a key the publisher's list names signed for the publisher", async () => {
+    const fetchMock = await serve(tagged(PHONE_KEY, [['anchor', PUBLISHER]], { 'install:essentials': SIGNED_ROOT }), chainWithPhone())
+    expect(await readInstallChannel(FOLLOW, verify))
+      .toEqual({ state: 'named', packageSig: SIGNED_ROOT, zone: 'hypercomb.com', createdAt: 1_791_578_080 })
+    // The list is read from the door that served the index, and only because another key signed.
+    expect(fetchMock.mock.calls.map(call => String(call[0])))
+      .toEqual([await indexUrl('hypercomb.com'), await listUrl('hypercomb.com')])
+  })
+
+  it("never asks for the list when the publisher signed", async () => {
+    const fetchMock = await serve(index(PUBLISHER_KEY, { 'install:essentials': SIGNED_ROOT }), chainWithPhone())
+    expect(await readInstallChannel(FOLLOW, verify)).toMatchObject({ state: 'named', packageSig: SIGNED_ROOT })
+    expect(fetchMock.mock.calls.map(call => String(call[0]))).toEqual([await indexUrl('hypercomb.com')])
+  })
+
+  it('calls an index from a key the list does not name forged, even tagged for the publisher', async () => {
+    await serve(tagged(STRANGER_KEY, [['anchor', PUBLISHER]], { 'install:essentials': OTHER }), chainWithPhone())
+    expect(await readInstallChannel(FOLLOW, verify)).toEqual({ state: 'forged', door: 'hypercomb.com' })
+  })
+
+  it("calls a listed key's index forged when its tag names another anchor", async () => {
+    await serve(tagged(PHONE_KEY, [['anchor', getPublicKey(STRANGER_KEY)]], { 'install:essentials': OTHER }), chainWithPhone())
+    expect(await readInstallChannel(FOLLOW, verify)).toEqual({ state: 'forged', door: 'hypercomb.com' })
+  })
+
+  it("calls a listed key's index forged when it carries no anchor tag", async () => {
+    await serve(tagged(PHONE_KEY, [], { 'install:essentials': OTHER }), chainWithPhone())
+    expect(await readInstallChannel(FOLLOW, verify)).toEqual({ state: 'forged', door: 'hypercomb.com' })
+  })
+
+  it('fails closed when the door holds no list for the publisher', async () => {
+    await serve(tagged(PHONE_KEY, [['anchor', PUBLISHER]], { 'install:essentials': OTHER }), null)
+    expect(await readInstallChannel(FOLLOW, verify)).toEqual({ state: 'forged', door: 'hypercomb.com' })
+  })
+
+  it('fails closed when a list in the chain was tampered with', async () => {
+    const [first, second] = chainWithPhone()
+    const tampered = { ...second, created_at: Number(second['created_at']) + 1 }
+    await serve(tagged(PHONE_KEY, [['anchor', PUBLISHER]], { 'install:essentials': OTHER }), [first, tampered])
+    expect(await readInstallChannel(FOLLOW, verify)).toEqual({ state: 'forged', door: 'hypercomb.com' })
+  })
+
+  it('fails closed when the chain was not started by the publisher', async () => {
+    const forgedFirst = signList(STRANGER_KEY, { ...firstKeyList(PUBLISHER), keys: [{ pubkey: PUBLISHER }, { pubkey: PHONE }] }, T0)
+    await serve(tagged(PHONE_KEY, [['anchor', PUBLISHER]], { 'install:essentials': OTHER }), [forgedFirst])
+    expect(await readInstallChannel(FOLLOW, verify)).toEqual({ state: 'forged', door: 'hypercomb.com' })
+  })
+
+  it('refuses an over-long chain without checking a single signature', async () => {
+    const [first] = chainWithPhone()
+    await serve(tagged(PHONE_KEY, [['anchor', PUBLISHER]], { 'install:essentials': OTHER }), Array.from({ length: 257 }, () => first))
+    const counted = vi.fn(verify)
+    expect(await readInstallChannel(FOLLOW, counted)).toEqual({ state: 'forged', door: 'hypercomb.com' })
+    expect(counted).not.toHaveBeenCalled()
+  })
+
+  it('takes it through an async verifier too (the web shell imports nostr-tools lazily)', async () => {
+    await serve(tagged(PHONE_KEY, [['anchor', PUBLISHER]], { 'install:essentials': SIGNED_ROOT }), chainWithPhone())
+    const lazy = async (event: Record<string, unknown>): Promise<boolean> => verifyEvent(event as never)
+    expect(await readInstallChannel(FOLLOW, lazy)).toMatchObject({ state: 'named', packageSig: SIGNED_ROOT })
   })
 })

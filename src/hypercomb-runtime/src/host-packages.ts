@@ -27,7 +27,10 @@
 //
 // It reads nothing but public URLs and writes nothing anywhere.
 
-import { HOST_IOC_KEY, registerPoolMeaning, type HostProvider } from '@hypercomb/core'
+import {
+  HOST_IOC_KEY, KEY_LIST_MAX_CHAIN, KEY_LIST_MEANING, registerPoolMeaning, verifyKeyListChain,
+  type HostProvider, type SignedKeyList,
+} from '@hypercomb/core'
 import { HIVE_INDEXES_MEANING, HOST_PACKAGES_MEANING, markerIndices, parseMember, parsePoolListing, poolEntryName } from './host-pool.js'
 import { DEFAULT_HOST_ZONES, hostZone } from './host-zones.js'
 
@@ -524,16 +527,53 @@ const fetchIndexEvent = async (url: string): Promise<Record<string, unknown> | n
   } catch { return null }
 }
 
+/** The keys `door`'s key list for `anchor` names, or null when the door holds
+ *  no list, or holds one that does not verify. Every list in the chain must
+ *  carry a good signature (the shell's verifier, which may be async) and the
+ *  chain must hold together (core verifyKeyListChain); either failing names
+ *  nobody. Never throws. */
+const listedKeysAt = async (door: string, anchor: string, verify: VerifyIndexEvent): Promise<ReadonlySet<string> | null> => {
+  try {
+    const pool = await registerPoolMeaning(KEY_LIST_MEANING)
+    const res = await fetch(`${isLoopback(door) ? 'http' : 'https'}://${door}/${pool}/${anchor}`, { cache: 'no-store' })
+    if (!res.ok) return null
+    const chain = JSON.parse(await res.text()) as unknown
+    // The cap comes before any signature is checked: a door must not make the
+    // reader verify more lists than core would ever accept.
+    if (!Array.isArray(chain) || !chain.length || chain.length > KEY_LIST_MAX_CHAIN) return null
+    const signed = new Set<unknown>()
+    for (const event of chain) {
+      if (!event || typeof event !== 'object' || Array.isArray(event)) return null
+      if (!(await verify(event as Record<string, unknown>))) return null
+      signed.add(event)
+    }
+    const verdict = verifyKeyListChain(anchor, chain as SignedKeyList[], event => signed.has(event))
+    return verdict.ok ? new Set(verdict.keys.map(key => key.toLowerCase())) : null
+  } catch { return null }
+}
+
 /** One event, checked as essentials hive-pointer.ts checks it: the declared
  *  key must be the pinned one AND the signature must verify — either failing
- *  is substitution. A wrong kind or unreadable roots is not an index at all. */
+ *  is substitution. A wrong kind or unreadable roots is not an index at all.
+ *
+ *  The one other signer is a key the publisher's own key list names (a device
+ *  that took an invite publishes FOR the anchor, becoming-a-host.md), on an
+ *  event tagged `['anchor', <publisher>]` — the tag stops an index standing
+ *  under another anchor whose list also names that key. `listed` is asked for
+ *  only then, from the door that served the index. */
 const verifiedRoots = async (
   event: Record<string, unknown>,
   pubkey: string,
   verify: VerifyIndexEvent,
+  listed: () => Promise<ReadonlySet<string> | null>,
 ): Promise<{ roots: Record<string, string>; createdAt: number } | 'forged' | null> => {
   if (Number(event['kind']) !== HIVE_INDEX_KIND) return null
-  if (String(event['pubkey'] ?? '').toLowerCase() !== pubkey) return 'forged'
+  const signer = String(event['pubkey'] ?? '').toLowerCase()
+  if (signer !== pubkey) {
+    const tags = Array.isArray(event['tags']) ? event['tags'] as unknown[] : []
+    const forAnchor = tags.some(tag => Array.isArray(tag) && tag[0] === 'anchor' && String(tag[1] ?? '').toLowerCase() === pubkey)
+    if (!SIG_RE.test(signer) || !forAnchor || !(await listed())?.has(signer)) return 'forged'
+  }
   try { if (!(await verify(event))) return 'forged' } catch { return 'forged' }
   let content: unknown
   try { content = JSON.parse(String(event['content'] ?? '')) } catch { return null }
@@ -565,7 +605,8 @@ export const readInstallChannel = async (
   for (const door of indexDoors(follow.hosts)) {
     const event = await fetchIndexEvent(`${isLoopback(door) ? 'http' : 'https'}://${door}/${pool}/${follow.pubkey}`)
     if (!event) continue
-    const read = await verifiedRoots(event, follow.pubkey, verify)
+    const anchor = follow.pubkey
+    const read = await verifiedRoots(event, anchor, verify, () => listedKeysAt(door, anchor, verify))
     if (read === 'forged') { forged ??= door; continue }
     if (!read) continue
     const zone = hostZone(door)
