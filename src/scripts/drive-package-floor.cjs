@@ -3,8 +3,9 @@
 // THE FLOOR, end to end (hypercomb-web/src/setup/package-floor.ts).
 //
 // A throwaway profile is given an Aug 31 package on the CURRENT web shell and
-// must reach the seed's head without anyone touching it. The default package,
-// gen 171 13af419b…, has what a Mac was stuck on (2026-09-21): it imports
+// must be offered the seed's head, and reach it once the participant says
+// yes. The default package, gen 171 13af419b…, has what a Mac was stuck on
+// (2026-09-21): it imports
 // ATOMIZER_IOC_PREFIX, its CanvasBackground has no setPreview, nothing in it
 // answers `packages:open`, and it loads no attester.
 //
@@ -14,7 +15,7 @@
 //      the head member is the old one. `hypercomb.acquire` takes it through the
 //      SELF door, exactly as an origin takes its own build.
 //   3. Unblock and reload. The old package boots, answers no door, and the
-//      floor must take the seed head and reload onto it.
+//      floor must ask first, then take the seed head on the yes and reload.
 //   4. Reopen the profile in a FRESH browser process: the moved-to package
 //      stays, the floor stays quiet, and all of it runs, down to the world-mode
 //      share toggles. (Three loads in one headless Chromium exhaust its WebGL —
@@ -118,12 +119,18 @@ const isLocal = (host) => host === 'localhost' || host === '127.0.0.1'
   H.check('one broken surface no longer blocks the rest', !lines.some(t => /failed to load shell surfaces/.test(t)))
   H.check('nothing in it answers the update door', (await doorAnswered()) === false, String(await doorAnswered()))
 
-  // The floor runs 15s after runtime-ready, acquires, waits for quiet, reloads.
+  // The floor asks (floor-ask.ts) and moves nothing until the participant says yes.
+  const asked = await waitFor('the floor asking', () => ask(() => !!document.querySelector('[data-floor-ask]') || null), 120000)
+  H.check('the floor asks before it takes anything', !!asked)
+  H.check('and nothing moved before the yes', (await installed()) === OLD, String(await installed()).slice(0, 12))
+  await page.click('[data-floor-ask] [data-take]')
+
+  // On the yes it acquires, waits for quiet, reloads.
   const moved = await waitFor('floor move', async () => {
     const now = await installed()
     return now && now !== OLD ? now : null
   }, 240000)
-  H.check('the floor moved it off the old package by itself', !!moved, String(moved).slice(0, 12))
+  H.check('the yes moved it off the old package', !!moved, String(moved).slice(0, 12))
   await waitFor('shell after the move', () => H.waitForShell(page, 5000), 120000)
   await H.sleep(8000)
   H.check('the moved-to package answers the update door', (await doorAnswered()) === true, String(await doorAnswered()))
@@ -170,6 +177,7 @@ const isLocal = (host) => host === 'localhost' || host === '127.0.0.1'
   }), 60000)
   H.check('the share toggles are on offer in world mode', !!world, JSON.stringify(world))
   await H.sleep(12000)
+  H.check('and asks nothing', !(await ask(() => !!document.querySelector('[data-floor-ask]'))))
   H.check('and the floor stays quiet on it', !lines.some(t => /\[package-floor\]/.test(t)))
 
   await ctx.close()
