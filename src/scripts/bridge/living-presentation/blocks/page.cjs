@@ -669,6 +669,19 @@ const SCRIPT = `
   const toSite = page.querySelector('.to-site')
   if (toSite) toSite.onclick = () => page.dispatchEvent(new CustomEvent('hc-site-widen', { bubbles: true }))
   const KEY = 'hc-scene:' + location.pathname
+  // WATCH, CLICK, KEEP WATCHING (jwize 2026-11-27: "if completed and a new tab
+  // is opened it is still on and will auto play ... only stay on for sibling
+  // clicks"). A scene heard to its end leaves its parent's route here; the
+  // next page under the same parent starts by itself. A pause, a page left
+  // before its end, or a step up or down a layer leaves it off.
+  const CONTINUE = 'hc-scene-continue'
+  const parentOf = (p) => { while (p.endsWith('/')) p = p.slice(0, -1); return p ? p.slice(0, p.lastIndexOf('/')) : null }
+  const myParent = parentOf(location.pathname)
+  let continuing = false
+  try {
+    const was = sessionStorage.getItem(CONTINUE)
+    if (was !== null) { sessionStorage.removeItem(CONTINUE); continuing = myParent !== null && was === myParent }
+  } catch {}
   const returning = root instanceof Element && root.hasAttribute('data-hc-returning')
   let resumeAt = 0
   if (returning) { try { const n = Number(sessionStorage.getItem(KEY)); if (Number.isInteger(n) && n >= 0) resumeAt = n } catch {} }
@@ -796,7 +809,36 @@ const SCRIPT = `
     playing = false; quiet(); for (const v of videos) v.pause()
     if (gone()) { for (const a of warm.values()) drop(a); warm.clear() }
   }
-  const next = () => { if (gone()) return halt(); if (at < steps.length - 1) { show(at + 1); speak() } else { playing = false; paint(); idle() } }
+  // Heard to the end: the scene goes back to its start, so a press (or a
+  // visit) plays it again, and a sibling page opened next plays on.
+  const finish = () => {
+    playing = false; quiet(); show(0); paint(); idle()
+    if (myParent !== null) { try { sessionStorage.setItem(CONTINUE, myParent) } catch {} }
+  }
+  let auto = false
+  const next = () => { if (gone()) return halt(); if (at < steps.length - 1) { show(at + 1); speak() } else finish() }
+  // ONE VOICE AT A TIME (jwize 2026-11-27: "we need to stop all other audio
+  // when starting a new audio"). A player that starts its voice tells every
+  // other player on the page (and in the page that frames it, where it may
+  // reach it), and they stop; any other sound playing in the document is
+  // paused too. A page taken off the screen stops its own voice at once.
+  const me = {}
+  const hub = (() => { try { return window.top && window.top.document ? window.top : window } catch { return window } })()
+  const ONE = 'hc-voice-start'
+  const hush = (a) => {
+    const docs = [document]
+    try { if (hub !== window) docs.push(hub.document) } catch {}
+    for (const d of docs) for (const m of d.querySelectorAll('audio,video')) if (m !== a && !m.muted && !m.paused) m.pause()
+    try { hub.dispatchEvent(new hub.CustomEvent(ONE, { detail: me })) } catch { window.dispatchEvent(new CustomEvent(ONE, { detail: me })) }
+  }
+  const others = (e) => { if (e.detail !== me && playing) play(false) }
+  hub.addEventListener(ONE, others)
+  if (hub !== window) window.addEventListener(ONE, others)
+  const off = setInterval(() => {
+    if (!gone()) return
+    clearInterval(off); halt(); paint()
+    hub.removeEventListener(ONE, others); window.removeEventListener(ONE, others)
+  }, 400)
   // ONE SENTENCE ON SCREEN AT A TIME, like a film's subtitles. A scene's
   // sentences share its one voice: each plays its own stretch of it (from →
   // to), and the voice runs straight on from one sentence to the next while
@@ -829,11 +871,13 @@ const SCRIPT = `
     const from = dub ? 0 : (s.from ?? 0)
     const seek = () => { if (Math.abs(a.currentTime - from) > 0.35) { try { a.currentTime = from } catch {} } }
     if (a.readyState >= 1) seek(); else a.addEventListener('loadedmetadata', seek, { once: true })
-    if (a.paused) a.play().catch(() => { if (audio === a) { audio = null; hold() } })
+    // A page that starts by itself and is refused sound (no press yet) stays
+    // still, rather than running its words without the voice.
+    if (a.paused) { hush(a); a.play().then(() => { auto = false }, () => { if (audio !== a) return; if (auto) { auto = false; play(false); return } audio = null; hold() }) }
     if (!dub && s.to != null) {
       const follow = () => {
         if (audio !== a || !playing || gone()) return
-        if (a.currentTime >= s.to - 0.03) { if (at < steps.length - 1) { show(at + 1); speak() } else { a.pause(); playing = false; paint(); idle() } return }
+        if (a.currentTime >= s.to - 0.03) { if (at < steps.length - 1) { show(at + 1); speak() } else finish(); return }
         watch = requestAnimationFrame(follow)
       }
       watch = requestAnimationFrame(follow)
@@ -846,7 +890,9 @@ const SCRIPT = `
     else { quiet(); for (const v of videos) v.pause() }
   }
   const go = (i) => { const was = playing; quiet(); show(i); if (was) speak(); else idle() }
-  pp.onclick = () => play(!playing)
+  // The button is the one toggle: a press that pauses also turns the
+  // continuing off, so the next page waits to be asked.
+  pp.onclick = () => { auto = false; if (playing) { try { sessionStorage.removeItem(CONTINUE) } catch {} } play(!playing) }
   const back = el.querySelector('[data-act=back]'), fwd = el.querySelector('[data-act=next]')
   if (back) back.onclick = () => go(at - 1)
   if (fwd) fwd.onclick = () => go(at + 1)
@@ -900,7 +946,7 @@ const SCRIPT = `
   try { const b = bank(); if (b && typeof b.want === 'function') b.want(steps.map(s => s.key)) } catch {}
   // typing in a part to try holds the scene where it is
   el.addEventListener('focusin', (e) => { if (e.target instanceof HTMLInputElement && playing) play(false) })
-  show(returning ? resumeAt : 0)
+  show(returning && !continuing ? resumeAt : 0)
   el.classList.add('in')
   // The first voice, once the scene is on screen and the page is quiet.
   if (voiced && !saving && 'IntersectionObserver' in window) {
@@ -912,7 +958,8 @@ const SCRIPT = `
     })
     seen.observe(el)
   }
-  if (!voiced && !still && !returning) setTimeout(() => { if (!gone() && !started) play(true) }, 900)
+  if (continuing) setTimeout(() => { if (!gone() && !started) { auto = voiced; play(true) } }, 600)
+  else if (!voiced && !still && !returning) setTimeout(() => { if (!gone() && !started) play(true) }, 900)
   else idle()
   // The arrows and space step the scene while the page is on screen; once
   // the page is gone, the listener removes itself.
