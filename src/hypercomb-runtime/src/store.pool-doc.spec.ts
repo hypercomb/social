@@ -353,6 +353,34 @@ describe('putPoolDoc — a key never enters a pool', () => {
     }
   })
 
+  it('a document carrying the nonce of an entry pool this device opened is refused, in either case', async () => {
+    const { entryNonceStore } = await import('@hypercomb/core')
+    const H = 'ab'.repeat(32)
+    const NONCE = '5e'.repeat(16)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => { /* quiet */ })
+    try {
+      const pool = await colonPool('entries:opened')
+      // Not held yet: the same bytes are an ordinary document.
+      expect(await store.putPoolDoc(pool, bytesOf(`{"pools":[{"h":"${H}","nonce":"${NONCE}"}]}`))).toMatch(SIG)
+      const before = pool.files.size
+
+      expect(entryNonceStore.set(H, NONCE)).toBe(true)
+      expect(await store.putPoolDoc(pool, bytesOf(`{"pools":[{"h":"${H}","code":"~${NONCE.toUpperCase()}"}]}`))).toBeNull()
+      expect(await store.putPoolDoc(pool, bytesOf(`{"n":"${NONCE}"}`), 'one-sub', { keep: 'current' })).toBeNull()
+      expect(pool.files.size).toBe(before)
+      expect(pool.dirs.size).toBe(0)
+      const said = String(warn.mock.calls[0]?.[0] ?? '')
+      expect(said).toContain('entry pool')
+      expect(said).not.toContain(NONCE)
+
+      // The record without the nonce is written as before.
+      expect(await store.putPoolDoc(pool, bytesOf(`{"pools":[{"h":"${H}"}]}`))).toMatch(SIG)
+    } finally {
+      entryNonceStore.drop(H)
+      warn.mockRestore()
+    }
+  })
+
   it('a held placeholder never refuses a write', async () => {
     const { llmKeyStore } = await import('@hypercomb/core')
     try {

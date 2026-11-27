@@ -1,0 +1,121 @@
+{
+  "note": "Written by scripts/entry-pool-vector.mjs. Do not edit by hand: changing it is a protocol change.",
+  "kind": 30573,
+  "keys": {
+    "leader": {
+      "seed": "entry-pool vector: leader",
+      "pubkey": "50b62cb131ef1a7bbe5ee61c489bcfc44510ad628166bf7a1c229568f12b4d84"
+    },
+    "poster": {
+      "seed": "entry-pool vector: poster",
+      "pubkey": "be98f758325d1ceb2704cc2c8b3b4280f0527b3061d70103f920f2ef6fcdba18"
+    }
+  },
+  "names": {
+    "P": "50b62cb131ef1a7bbe5ee61c489bcfc44510ad628166bf7a1c229568f12b4d84",
+    "O": "f77b85f53511012a8cbdd75ffbb9584321d13e6d73f0ddeac032c50209d41669",
+    "nonce": "8ce2899aadb1c9f92b63495e76479342",
+    "until": 1795737600,
+    "A": "c2dc5d14ecfa5941a63062dca0b4e02a513764c0534bc31e5fb0c57af60ad36b",
+    "H": "7d01f84766d22e29f9d908cd7cba0afbf618ecf49d183afadba6d293a300fa54"
+  },
+  "record": "{\"entries:open\":1,\"meaning\":\"recipe:entry\",\"title\":\"Tuesday class\",\"template\":\"b39f64fb0dfa5c1b28145a30192f4f0ebe7baf2a5e879bea8504f9a3eda922cf\",\"by\":\"50b62cb131ef1a7bbe5ee61c489bcfc44510ad628166bf7a1c229568f12b4d84\",\"until\":1795737600}",
+  "code": "#post=f77b85f53511012a8cbdd75ffbb9584321d13e6d73f0ddeac032c50209d41669~8ce2899aadb1c9f92b63495e76479342",
+  "member": {
+    "event": {
+      "id": "ee3137cf27c29fedb718c4ee0c15205c62ddb1281b3273e901e52f58f272147a",
+      "pubkey": "be98f758325d1ceb2704cc2c8b3b4280f0527b3061d70103f920f2ef6fcdba18",
+      "created_at": 1795734000,
+      "kind": 30573,
+      "tags": [
+        [
+          "pool",
+          "7d01f84766d22e29f9d908cd7cba0afbf618ecf49d183afadba6d293a300fa54"
+        ],
+        [
+          "page",
+          "eb10cc65d006580a769fb56a37e42d48162960c345c0c7fb43d6630bfba571ce"
+        ],
+        [
+          "name",
+          "Ana"
+        ],
+        [
+          "title",
+          "Sunday soup"
+        ]
+      ],
+      "content": "{\"recipe\":1,\"values\":{\"story\":\"half/half, as my aunt made it\"}}",
+      "sig": "f324bce43c97a550641aaf3a73fbf022a377edaa821a3da53b2ebea3928af5ee583538b3391f4210ad55ef8e70b2a03d32bbb07086ffab3218c28a2ddf413c1a"
+    },
+    "body": "{\"id\":\"ee3137cf27c29fedb718c4ee0c15205c62ddb1281b3273e901e52f58f272147a\",\"pubkey\":\"be98f758325d1ceb2704cc2c8b3b4280f0527b3061d70103f920f2ef6fcdba18\",\"created_at\":1795734000,\"kind\":30573,\"tags\":[[\"pool\",\"7d01f84766d22e29f9d908cd7cba0afbf618ecf49d183afadba6d293a300fa54\"],[\"page\",\"eb10cc65d006580a769fb56a37e42d48162960c345c0c7fb43d6630bfba571ce\"],[\"name\",\"Ana\"],[\"title\",\"Sunday soup\"]],\"content\":\"{\\\"recipe\\\":1,\\\"values\\\":{\\\"story\\\":\\\"half/half, as my aunt made it\\\"}}\",\"sig\":\"f324bce43c97a550641aaf3a73fbf022a377edaa821a3da53b2ebea3928af5ee583538b3391f4210ad55ef8e70b2a03d32bbb07086ffab3218c28a2ddf413c1a\"}",
+    "name": "8028a65f75380022a3ede53a7e8a74584b138376a6766e1b84ac7bcaea48af3c"
+  },
+  "refused": [
+    {
+      "why": "a capital letter in sig",
+      "body": "{\"id\":\"ee3137cf27c29fedb718c4ee0c15205c62ddb1281b3273e901e52f58f272147a\",\"pubkey\":\"be98f758325d1ceb2704cc2c8b3b4280f0527b3061d70103f920f2ef6fcdba18\",\"created_at\":1795734000,\"kind\":30573,\"tags\":[[\"pool\",\"7d01f84766d22e29f9d908cd7cba0afbf618ecf49d183afadba6d293a300fa54\"],[\"page\",\"eb10cc65d006580a769fb56a37e42d48162960c345c0c7fb43d6630bfba571ce\"],[\"name\",\"Ana\"],[\"title\",\"Sunday soup\"]],\"content\":\"{\\\"recipe\\\":1,\\\"values\\\":{\\\"story\\\":\\\"half/half, as my aunt made it\\\"}}\",\"sig\":\"F324bce43c97a550641aaf3a73fbf022a377edaa821a3da53b2ebea3928af5ee583538b3391f4210ad55ef8e70b2a03d32bbb07086ffab3218c28a2ddf413c1a\"}",
+      "name": "a50a2772f36673dd067c75bcf859fa58d08772382a1a54a206db16e7134cd044"
+    },
+    {
+      "why": "a capital letter in id",
+      "body": "{\"id\":\"Ee3137cf27c29fedb718c4ee0c15205c62ddb1281b3273e901e52f58f272147a\",\"pubkey\":\"be98f758325d1ceb2704cc2c8b3b4280f0527b3061d70103f920f2ef6fcdba18\",\"created_at\":1795734000,\"kind\":30573,\"tags\":[[\"pool\",\"7d01f84766d22e29f9d908cd7cba0afbf618ecf49d183afadba6d293a300fa54\"],[\"page\",\"eb10cc65d006580a769fb56a37e42d48162960c345c0c7fb43d6630bfba571ce\"],[\"name\",\"Ana\"],[\"title\",\"Sunday soup\"]],\"content\":\"{\\\"recipe\\\":1,\\\"values\\\":{\\\"story\\\":\\\"half/half, as my aunt made it\\\"}}\",\"sig\":\"f324bce43c97a550641aaf3a73fbf022a377edaa821a3da53b2ebea3928af5ee583538b3391f4210ad55ef8e70b2a03d32bbb07086ffab3218c28a2ddf413c1a\"}",
+      "name": "7d7ea791608a9e2420c6c81c410a41ca904ef70463eb802e09995e1556f30835"
+    },
+    {
+      "why": "id as an array of one string",
+      "body": "{\"id\":[\"ee3137cf27c29fedb718c4ee0c15205c62ddb1281b3273e901e52f58f272147a\"],\"pubkey\":\"be98f758325d1ceb2704cc2c8b3b4280f0527b3061d70103f920f2ef6fcdba18\",\"created_at\":1795734000,\"kind\":30573,\"tags\":[[\"pool\",\"7d01f84766d22e29f9d908cd7cba0afbf618ecf49d183afadba6d293a300fa54\"],[\"page\",\"eb10cc65d006580a769fb56a37e42d48162960c345c0c7fb43d6630bfba571ce\"],[\"name\",\"Ana\"],[\"title\",\"Sunday soup\"]],\"content\":\"{\\\"recipe\\\":1,\\\"values\\\":{\\\"story\\\":\\\"half/half, as my aunt made it\\\"}}\",\"sig\":\"f324bce43c97a550641aaf3a73fbf022a377edaa821a3da53b2ebea3928af5ee583538b3391f4210ad55ef8e70b2a03d32bbb07086ffab3218c28a2ddf413c1a\"}",
+      "name": "0a2b46fbb6792f4e447e4b3e965ebd7ed392f7b57c415d73319db013c1146172"
+    },
+    {
+      "why": "a space after the opening brace",
+      "body": "{ \"id\":\"ee3137cf27c29fedb718c4ee0c15205c62ddb1281b3273e901e52f58f272147a\",\"pubkey\":\"be98f758325d1ceb2704cc2c8b3b4280f0527b3061d70103f920f2ef6fcdba18\",\"created_at\":1795734000,\"kind\":30573,\"tags\":[[\"pool\",\"7d01f84766d22e29f9d908cd7cba0afbf618ecf49d183afadba6d293a300fa54\"],[\"page\",\"eb10cc65d006580a769fb56a37e42d48162960c345c0c7fb43d6630bfba571ce\"],[\"name\",\"Ana\"],[\"title\",\"Sunday soup\"]],\"content\":\"{\\\"recipe\\\":1,\\\"values\\\":{\\\"story\\\":\\\"half/half, as my aunt made it\\\"}}\",\"sig\":\"f324bce43c97a550641aaf3a73fbf022a377edaa821a3da53b2ebea3928af5ee583538b3391f4210ad55ef8e70b2a03d32bbb07086ffab3218c28a2ddf413c1a\"}",
+      "name": "c772c7da2f8297142a83e128bc50e2ed537ea4517fbbf77ca7907b27cfd3666d"
+    },
+    {
+      "why": "a trailing newline",
+      "body": "{\"id\":\"ee3137cf27c29fedb718c4ee0c15205c62ddb1281b3273e901e52f58f272147a\",\"pubkey\":\"be98f758325d1ceb2704cc2c8b3b4280f0527b3061d70103f920f2ef6fcdba18\",\"created_at\":1795734000,\"kind\":30573,\"tags\":[[\"pool\",\"7d01f84766d22e29f9d908cd7cba0afbf618ecf49d183afadba6d293a300fa54\"],[\"page\",\"eb10cc65d006580a769fb56a37e42d48162960c345c0c7fb43d6630bfba571ce\"],[\"name\",\"Ana\"],[\"title\",\"Sunday soup\"]],\"content\":\"{\\\"recipe\\\":1,\\\"values\\\":{\\\"story\\\":\\\"half/half, as my aunt made it\\\"}}\",\"sig\":\"f324bce43c97a550641aaf3a73fbf022a377edaa821a3da53b2ebea3928af5ee583538b3391f4210ad55ef8e70b2a03d32bbb07086ffab3218c28a2ddf413c1a\"}\n",
+      "name": "18397d6f3a1bbef9b51b2f21de73f19767bdb1725b6879a3ff22a49161d2f6f7"
+    },
+    {
+      "why": "a byte order mark first",
+      "body": "﻿{\"id\":\"ee3137cf27c29fedb718c4ee0c15205c62ddb1281b3273e901e52f58f272147a\",\"pubkey\":\"be98f758325d1ceb2704cc2c8b3b4280f0527b3061d70103f920f2ef6fcdba18\",\"created_at\":1795734000,\"kind\":30573,\"tags\":[[\"pool\",\"7d01f84766d22e29f9d908cd7cba0afbf618ecf49d183afadba6d293a300fa54\"],[\"page\",\"eb10cc65d006580a769fb56a37e42d48162960c345c0c7fb43d6630bfba571ce\"],[\"name\",\"Ana\"],[\"title\",\"Sunday soup\"]],\"content\":\"{\\\"recipe\\\":1,\\\"values\\\":{\\\"story\\\":\\\"half/half, as my aunt made it\\\"}}\",\"sig\":\"f324bce43c97a550641aaf3a73fbf022a377edaa821a3da53b2ebea3928af5ee583538b3391f4210ad55ef8e70b2a03d32bbb07086ffab3218c28a2ddf413c1a\"}",
+      "name": "417762d49fe36f170e9bd1fc4683844b89d87a0c806d6c8b283e3ed46f482340"
+    },
+    {
+      "why": "an eighth field",
+      "body": "{\"id\":\"ee3137cf27c29fedb718c4ee0c15205c62ddb1281b3273e901e52f58f272147a\",\"pubkey\":\"be98f758325d1ceb2704cc2c8b3b4280f0527b3061d70103f920f2ef6fcdba18\",\"created_at\":1795734000,\"kind\":30573,\"tags\":[[\"pool\",\"7d01f84766d22e29f9d908cd7cba0afbf618ecf49d183afadba6d293a300fa54\"],[\"page\",\"eb10cc65d006580a769fb56a37e42d48162960c345c0c7fb43d6630bfba571ce\"],[\"name\",\"Ana\"],[\"title\",\"Sunday soup\"]],\"content\":\"{\\\"recipe\\\":1,\\\"values\\\":{\\\"story\\\":\\\"half/half, as my aunt made it\\\"}}\",\"sig\":\"f324bce43c97a550641aaf3a73fbf022a377edaa821a3da53b2ebea3928af5ee583538b3391f4210ad55ef8e70b2a03d32bbb07086ffab3218c28a2ddf413c1a\",\"note\":\"hello\"}",
+      "name": "42a99dfaa1e0e5f1152605bbbafc2983872bf67672ea1e7fb281ebfbe5261a5c"
+    },
+    {
+      "why": "the signing library's key order",
+      "body": "{\"created_at\":1795734000,\"kind\":30573,\"tags\":[[\"pool\",\"7d01f84766d22e29f9d908cd7cba0afbf618ecf49d183afadba6d293a300fa54\"],[\"page\",\"eb10cc65d006580a769fb56a37e42d48162960c345c0c7fb43d6630bfba571ce\"],[\"name\",\"Ana\"],[\"title\",\"Sunday soup\"]],\"content\":\"{\\\"recipe\\\":1,\\\"values\\\":{\\\"story\\\":\\\"half/half, as my aunt made it\\\"}}\",\"pubkey\":\"be98f758325d1ceb2704cc2c8b3b4280f0527b3061d70103f920f2ef6fcdba18\",\"id\":\"ee3137cf27c29fedb718c4ee0c15205c62ddb1281b3273e901e52f58f272147a\",\"sig\":\"f324bce43c97a550641aaf3a73fbf022a377edaa821a3da53b2ebea3928af5ee583538b3391f4210ad55ef8e70b2a03d32bbb07086ffab3218c28a2ddf413c1a\"}",
+      "name": "d9e629d2c25bd8e1b891ccaf5d1a3d627ff6fba2573612a7e78fc5c6119c6876"
+    },
+    {
+      "why": "created_at in exponent form",
+      "body": "{\"id\":\"ee3137cf27c29fedb718c4ee0c15205c62ddb1281b3273e901e52f58f272147a\",\"pubkey\":\"be98f758325d1ceb2704cc2c8b3b4280f0527b3061d70103f920f2ef6fcdba18\",\"created_at\":1.795734e9,\"kind\":30573,\"tags\":[[\"pool\",\"7d01f84766d22e29f9d908cd7cba0afbf618ecf49d183afadba6d293a300fa54\"],[\"page\",\"eb10cc65d006580a769fb56a37e42d48162960c345c0c7fb43d6630bfba571ce\"],[\"name\",\"Ana\"],[\"title\",\"Sunday soup\"]],\"content\":\"{\\\"recipe\\\":1,\\\"values\\\":{\\\"story\\\":\\\"half/half, as my aunt made it\\\"}}\",\"sig\":\"f324bce43c97a550641aaf3a73fbf022a377edaa821a3da53b2ebea3928af5ee583538b3391f4210ad55ef8e70b2a03d32bbb07086ffab3218c28a2ddf413c1a\"}",
+      "name": "ed94ca23a1d31cff56da52bf55f518244fe27b60bfa7c39ab800b30dd5e0c458"
+    },
+    {
+      "why": "created_at with a fraction",
+      "body": "{\"id\":\"ee3137cf27c29fedb718c4ee0c15205c62ddb1281b3273e901e52f58f272147a\",\"pubkey\":\"be98f758325d1ceb2704cc2c8b3b4280f0527b3061d70103f920f2ef6fcdba18\",\"created_at\":1795734000.0,\"kind\":30573,\"tags\":[[\"pool\",\"7d01f84766d22e29f9d908cd7cba0afbf618ecf49d183afadba6d293a300fa54\"],[\"page\",\"eb10cc65d006580a769fb56a37e42d48162960c345c0c7fb43d6630bfba571ce\"],[\"name\",\"Ana\"],[\"title\",\"Sunday soup\"]],\"content\":\"{\\\"recipe\\\":1,\\\"values\\\":{\\\"story\\\":\\\"half/half, as my aunt made it\\\"}}\",\"sig\":\"f324bce43c97a550641aaf3a73fbf022a377edaa821a3da53b2ebea3928af5ee583538b3391f4210ad55ef8e70b2a03d32bbb07086ffab3218c28a2ddf413c1a\"}",
+      "name": "e67df7f81217acd68b9e6451bb2923f31c51bf539ed1d9b569c657d12672e5f6"
+    },
+    {
+      "why": "an escaped slash in content",
+      "body": "{\"id\":\"ee3137cf27c29fedb718c4ee0c15205c62ddb1281b3273e901e52f58f272147a\",\"pubkey\":\"be98f758325d1ceb2704cc2c8b3b4280f0527b3061d70103f920f2ef6fcdba18\",\"created_at\":1795734000,\"kind\":30573,\"tags\":[[\"pool\",\"7d01f84766d22e29f9d908cd7cba0afbf618ecf49d183afadba6d293a300fa54\"],[\"page\",\"eb10cc65d006580a769fb56a37e42d48162960c345c0c7fb43d6630bfba571ce\"],[\"name\",\"Ana\"],[\"title\",\"Sunday soup\"]],\"content\":\"{\\\"recipe\\\":1,\\\"values\\\":{\\\"story\\\":\\\"half\\/half, as my aunt made it\\\"}}\",\"sig\":\"f324bce43c97a550641aaf3a73fbf022a377edaa821a3da53b2ebea3928af5ee583538b3391f4210ad55ef8e70b2a03d32bbb07086ffab3218c28a2ddf413c1a\"}",
+      "name": "1c5b373c67b779534b33b577c0a1be20403beabedc377478fec42a861b986a57"
+    },
+    {
+      "why": "a unicode escape in a tag",
+      "body": "{\"id\":\"ee3137cf27c29fedb718c4ee0c15205c62ddb1281b3273e901e52f58f272147a\",\"pubkey\":\"be98f758325d1ceb2704cc2c8b3b4280f0527b3061d70103f920f2ef6fcdba18\",\"created_at\":1795734000,\"kind\":30573,\"tags\":[[\"pool\",\"7d01f84766d22e29f9d908cd7cba0afbf618ecf49d183afadba6d293a300fa54\"],[\"page\",\"eb10cc65d006580a769fb56a37e42d48162960c345c0c7fb43d6630bfba571ce\"],[\"name\",\"\\u0041na\"],[\"title\",\"Sunday soup\"]],\"content\":\"{\\\"recipe\\\":1,\\\"values\\\":{\\\"story\\\":\\\"half/half, as my aunt made it\\\"}}\",\"sig\":\"f324bce43c97a550641aaf3a73fbf022a377edaa821a3da53b2ebea3928af5ee583538b3391f4210ad55ef8e70b2a03d32bbb07086ffab3218c28a2ddf413c1a\"}",
+      "name": "a41066d505996da00d64f60ebcc49137e86470a891fbb5250d4f3754b48015ac"
+    },
+    {
+      "why": "kind given twice",
+      "body": "{\"id\":\"ee3137cf27c29fedb718c4ee0c15205c62ddb1281b3273e901e52f58f272147a\",\"pubkey\":\"be98f758325d1ceb2704cc2c8b3b4280f0527b3061d70103f920f2ef6fcdba18\",\"created_at\":1795734000,\"kind\":1,\"kind\":30573,\"tags\":[[\"pool\",\"7d01f84766d22e29f9d908cd7cba0afbf618ecf49d183afadba6d293a300fa54\"],[\"page\",\"eb10cc65d006580a769fb56a37e42d48162960c345c0c7fb43d6630bfba571ce\"],[\"name\",\"Ana\"],[\"title\",\"Sunday soup\"]],\"content\":\"{\\\"recipe\\\":1,\\\"values\\\":{\\\"story\\\":\\\"half/half, as my aunt made it\\\"}}\",\"sig\":\"f324bce43c97a550641aaf3a73fbf022a377edaa821a3da53b2ebea3928af5ee583538b3391f4210ad55ef8e70b2a03d32bbb07086ffab3218c28a2ddf413c1a\"}",
+      "name": "dd1522e9b46e16e68add0d4bc3f99f7af4d672a9950b59644dfe7fe91589a8e6"
+    }
+  ]
+}

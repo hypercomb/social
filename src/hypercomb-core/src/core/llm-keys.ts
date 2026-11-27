@@ -46,8 +46,18 @@
 // besides this machine's own tools may use the Claude bridge
 // (documentation/claude-bridge-setup.md, "Who may use the bridge — codes").
 // The CODE itself is never stored — only its SHA-256 — and only `generate`
-// ever hands one back, once. Both stores write through `writeRaw`, so this
-// file keeps exactly one raw storage write.
+// ever hands one back, once.
+//
+// ── entry pool nonces ─────────────────────────────────────────────────
+//
+// The third (`EntryNonceStore`, at the end): the nonce of each entry pool
+// this device opened (documentation/open-entry-pools.md). The nonce is the
+// capability: with the opening record it gives the pool's address, so it is
+// kept here and never in the leader's record of the pool, which is a pool
+// document the folder backup copies.
+//
+// All three stores write through `writeRaw`, so this file keeps exactly one
+// raw storage write.
 
 import { register } from '../ioc/ioc.js'
 import { isSandboxDoor } from './sandbox-door.js'
@@ -89,7 +99,7 @@ const readRaw = (key: string): string => {
   try { return (globalThis.localStorage?.getItem(key) ?? '').trim() } catch { return '' }
 }
 
-/** THE ONE RAW WRITE in this file, for both stores. Without storage (a
+/** THE ONE RAW WRITE in this file, for every store in it. Without storage (a
  *  private window, node) the in-memory mirror still holds for the session. */
 const writeRaw = (key: string, value: string): void => {
   try { globalThis.localStorage?.setItem(key, value) } catch { /* session-only */ }
@@ -447,4 +457,146 @@ register(BRIDGE_CODE_STORE_IOC_KEY, bridgeCodeStore)
 try {
   (globalThis as unknown as { ioc?: { register?: (k: string, v: unknown) => void } })
     .ioc?.register?.(BRIDGE_CODE_STORE_IOC_KEY, bridgeCodeStore)
+} catch { /* no shell registry yet — core's map answers via ioc.get's bridge */ }
+
+// ── entry pool nonces ─────────────────────────────────────────────────
+//
+// THE CODE OF A POOL THIS DEVICE OPENED (documentation/open-entry-pools.md).
+// A leader opens an entry pool and shows a code, `#post=<O>~<nonce>`: `O` is
+// the signature of the public opening record and the nonce is 16 random
+// bytes. Together they hash to the pool's address, which is the invitation.
+// `O` is public, so the nonce alone is the secret, and it is kept the way a
+// key is: in this device's storage, never in a pool. The leader's own record
+// of the pool (`entries:opened`) holds everything else, and the pool write
+// path asks `carriedBy` so a document that carries a held nonce is refused
+// before the atom exists.
+//
+//   hc:entries:<H>:nonce     the nonce of the pool the index names as H
+//
+// Keyed by `H`, the name the leader's index gives the pool, because `H` is
+// what every device of the leader can read; a device that holds no nonce for
+// an `H` did not open that pool and cannot show its code again.
+
+/** IoC key. Resolve via `window.ioc.get(ENTRY_NONCE_STORE_IOC_KEY)`. */
+export const ENTRY_NONCE_STORE_IOC_KEY = '@hypercomb.social/EntryNonceStore'
+
+const ENTRY_NONCE_PREFIX = 'hc:entries:'
+const ENTRY_NONCE_SUFFIX = ':nonce'
+/** `H` and `O`: 64 lowercase hex. */
+const ENTRY_NAME_RE = /^[0-9a-f]{64}$/
+/** A nonce: 16 bytes as 32 lowercase hex. */
+const ENTRY_NONCE_RE = /^[0-9a-f]{32}$/
+
+const cleanHex = (raw: unknown): string => String(raw ?? '').trim().toLowerCase()
+
+/** Storage key for the nonce of the pool named `H`. The scheme, in one function. */
+export const entryNonceStorageKey = (pool: string): string =>
+  `${ENTRY_NONCE_PREFIX}${cleanHex(pool)}${ENTRY_NONCE_SUFFIX}`
+
+/** The pool name out of a storage key, or `''` if it is not one of this store's. */
+const poolOfNonceStorageKey = (key: string | null | undefined): string => {
+  if (typeof key !== 'string' || !key.startsWith(ENTRY_NONCE_PREFIX) || !key.endsWith(ENTRY_NONCE_SUFFIX)) return ''
+  const pool = key.slice(ENTRY_NONCE_PREFIX.length, key.length - ENTRY_NONCE_SUFFIX.length)
+  return ENTRY_NAME_RE.test(pool) ? pool : ''
+}
+
+/**
+ * The nonces of the entry pools this device opened, by the pool's index name.
+ *
+ * `change` fires on any mutation, and on a `storage` event for one of its
+ * keys, with NO detail: a nonce must never ride an event payload. A sandbox
+ * door holds nothing here: `set` does not store and `get` comes back empty.
+ */
+export class EntryNonceStore extends EventTarget {
+
+  /** H → nonce. Mirrors localStorage; re-read on a cross-tab change. */
+  readonly #held = new Map<string, string>()
+
+  constructor() {
+    super()
+    this.#load()
+    try {
+      globalThis.addEventListener?.('storage', (event: Event) => {
+        const key = (event as StorageEvent).key
+        // `null` = the whole store was cleared.
+        if (key !== null && !poolOfNonceStorageKey(key)) return
+        this.#load()
+        this.dispatchEvent(new Event('change'))
+      })
+    } catch { /* no window (tests, node) — the in-memory mirror still works */ }
+  }
+
+  /** The nonce of the pool named `H`, or `''` when this device holds none. */
+  get(pool: string): string {
+    if (isSandboxDoor()) return ''
+    return this.#held.get(cleanHex(pool)) ?? ''
+  }
+
+  /** Hold the nonce of the pool named `H`. False, and nothing kept, when
+   *  either is not the hex it must be or this page is a sandbox door. */
+  set(pool: string, nonce: string): boolean {
+    const name = cleanHex(pool)
+    const clean = cleanHex(nonce)
+    if (!ENTRY_NAME_RE.test(name) || !ENTRY_NONCE_RE.test(clean) || isSandboxDoor()) return false
+    if (this.#held.get(name) === clean) return true
+    this.#held.set(name, clean)
+    writeRaw(entryNonceStorageKey(name), clean)
+    this.dispatchEvent(new Event('change'))
+    return true
+  }
+
+  /** Forget the nonce of the pool named `H`: a recycled pool's code is gone
+   *  for good. Works at a sandbox door too, where forgetting is never the harm. */
+  drop(pool: string): void {
+    const name = cleanHex(pool)
+    if (!ENTRY_NAME_RE.test(name)) return
+    const had = this.#held.delete(name)
+    removeRaw(entryNonceStorageKey(name))
+    if (had) this.dispatchEvent(new Event('change'))
+  }
+
+  /**
+   * Which pool's held nonce these bytes carry: its `H`, never the nonce, or
+   * `''`. A nonce is hex, so it is looked for in either case; 32 hex
+   * characters do not turn up by chance. It reads `#held`, not `get()`, so
+   * the refusal still holds at a sandbox door.
+   */
+  carriedBy(content: ArrayBuffer | ArrayBufferView | string): string {
+    if (this.#held.size === 0) return ''
+    let text: string
+    try { text = (typeof content === 'string' ? content : new TextDecoder().decode(content)).toLowerCase() } catch { return '' }
+    for (const [pool, nonce] of this.#held) if (text.includes(nonce)) return pool
+    return ''
+  }
+
+  /** Re-read storage. Public so a test can force a refresh. */
+  reload(): void {
+    this.#load()
+    this.dispatchEvent(new Event('change'))
+  }
+
+  #load(): void {
+    this.#held.clear()
+    let storage: Storage | undefined
+    try { storage = globalThis.localStorage } catch { storage = undefined }
+    if (!storage) return
+    try {
+      for (let i = 0; i < storage.length; i++) {
+        const key = storage.key(i)
+        const pool = poolOfNonceStorageKey(key)
+        if (!key || !pool) continue
+        const nonce = readRaw(key)
+        if (ENTRY_NONCE_RE.test(nonce)) this.#held.set(pool, nonce)
+      }
+    } catch { /* enumeration unavailable — nothing held this session */ }
+  }
+}
+
+/** The singleton, registered on both registries as `llmKeyStore` is. */
+export const entryNonceStore = new EntryNonceStore()
+
+register(ENTRY_NONCE_STORE_IOC_KEY, entryNonceStore)
+try {
+  (globalThis as unknown as { ioc?: { register?: (k: string, v: unknown) => void } })
+    .ioc?.register?.(ENTRY_NONCE_STORE_IOC_KEY, entryNonceStore)
 } catch { /* no shell registry yet — core's map answers via ioc.get's bridge */ }

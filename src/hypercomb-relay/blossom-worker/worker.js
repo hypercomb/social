@@ -1889,8 +1889,15 @@ async function serveOfferingsPool(request, env, member) {
     : new Response(null, { status: 404, headers })
 }
 
-async function servePoolListing(request, env, sig) {
+async function servePoolListing(request, env, sig, ctx) {
   const headers = { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...CORS }
+  // AN ENTRY POOL is listed to whoever names its opener and its end beside the
+  // address (serveEntryListing). Without `by`, or for a pool this host does not
+  // know, nothing below changes.
+  if (new URL(request.url).searchParams.has('by')) {
+    const entries = await serveEntryListing(request, env, sig, ctx)
+    if (entries) return entries
+  }
   const listed = await listedPool(env, sig)
   // A MEETING'S LIST gathers what the network's other doors hold first.
   if (!listed && await isRsvpPool(env, sig)) await pickUpClaims(env, sig)
@@ -2099,7 +2106,7 @@ function servesOrigin(env, hostname) {
 //     has a listing of its own there. Its PAGE is not one: that is the site
 //     answering a path it does not hold, and it stays "no pool at this
 //     address" — 204 asked with `?held`, 404 without.
-async function originPoolListing(request, env, sig) {
+async function originPoolListing(request, env, sig, ctx) {
   if (sig === await poolAddress(HOST_PACKAGES_MEANING)) return null
   // THE OFFERING POOL IS A PROJECTION, never stored keys (offeredMembers): what
   // the zone's publishers signed open here. The heap's listing of that address
@@ -2107,7 +2114,7 @@ async function originPoolListing(request, env, sig) {
   // domain asks — said it published nothing while every door under it listed
   // itself. Its members were always the worker's (ORIGIN_OWNED_BY_WORKER).
   if (sig === await poolAddress(HOST_OFFERINGS_MEANING)) return serveOfferingsPool(request, env)
-  const mine = await servePoolListing(request, env, sig)
+  const mine = await servePoolListing(request, env, sig, ctx)
   if (mine.status === 200) return mine
   const theirs = await fetch(request)
   if (theirs.ok && !String(theirs.headers.get('content-type') || '').includes('text/html')) return theirs
@@ -2884,6 +2891,41 @@ const PICKUP_TTL_MS = 60_000
 const PICKUP_FETCH_MS = 3_000
 const PICKUP_PASS_MS = 6_000
 
+// AN OPEN ENTRY POOL (documentation/open-entry-pools.md): the other write a
+// stranger may make here. Its numbers, in one place; they are the owner's to
+// change, and the hive and the page read the same ones from the design.
+const ENTRY_KIND = 30573
+const ENTRY_MAX_BYTES = 4_096              // a whole member, words and all
+const ENTRY_POOL_CAP = 256                 // listed a pool; the write-side count is a brake
+const ENTRY_KEY_CAP = 8                    // a key in one pool
+const ENTRY_STAMP_SECS = 600               // created_at against the host's clock, either way
+const ENTRY_UNTIL_MAX_SECS = 31 * 86_400   // how far ahead a pool's end may be
+const ENTRY_KEPT_SECS = 30 * 86_400        // readable after its end; then it has expired
+const ENTRY_DROP_PER_REQUEST = 256         // an expired pool's members removed by one request
+// The pages of the store's listing one request reads at an entry address. R2
+// answers at most 1,000 keys a page, fewer when the page carries metadata, so
+// four pages hold a full pool (256) beside thousands of other pools' members;
+// an address holding more answers 503 rather than a count or a listing taken
+// from part of it. Every post and listing then costs at most four list calls.
+const ENTRY_LIST_PAGES = 4
+// The list calls an expired pool's drop makes in one request, the one-object
+// look at what the address holds among them: a drop is never a walk.
+const ENTRY_DROP_LISTS = 2
+const ENTRY_NAME_MAX = 48
+const ENTRY_TITLE_MAX = 120
+// The reader's own rule for one line of text (essentials recipe-template.ts
+// `line`), so nothing kept here is later refused for its name or title: a tab
+// passes there and here, a line break, another control character or a
+// direction embedding, override or isolate does not.
+const ENTRY_LINE_REFUSED = /[\u0000-\u0008\u000a-\u001f\u007f\u202a-\u202e\u2066-\u2069]/
+// A pool's end as the path spells it: whole seconds, decimal, no other form.
+const ENTRY_UNTIL_RE = /^[1-9][0-9]{0,11}$/
+// What an entry pool's listing says of its own (serveEntryListing), beside
+// X-Reason: the pool's state, the opener's hidden list, the host's clock.
+const ENTRY_STATE_HEADER = 'X-Entries-State'
+const ENTRY_HIDDEN_HEADER = 'X-Entries-Hidden'
+const HOST_TIME_HEADER = 'X-Host-Time'
+
 // THE HOST NETWORK FOR MEETINGS (jwize 2026-10-22: "we create a host network
 // for meetings"). A door follows other doors by its own people's signed word —
 // `follow:<zone>` in their index, naming the canonical host artifact of that
@@ -3269,6 +3311,253 @@ async function checkRsvpClaim(bytes, pool, member) {
   const pubkey = String(evt?.pubkey || '').toLowerCase()
   if (!SIG_RE.test(pubkey) || !(await verifyEventSig(evt))) return fail(401, 'invalid rsvp signature')
   return { ok: true, pubkey, theirHost, profile }
+}
+
+// ── open entry pools (documentation/open-entry-pools.md) ────────────────────
+//
+// ONE OF THE HOST'S PEOPLE OPENS A POOL by a key in their own signed index,
+// `entries:<H>`, and from then on anyone handed the pool's address may post a
+// small signed member there (kind ENTRY_KIND): no grant, no login. The address
+// A is the invitation and is never in the index: H is
+// sha256("entries:pool" NUL A NUL P NUL until), so only A, the opener's key P
+// and the pool's end together name it. The host keeps no list of open pools.
+// It asks P's index at every post and every listing, so a pool ends by its own
+// `until`, closes within seconds of `entries-closed:<H>` being named, and has
+// expired ENTRY_KEPT_SECS after its end, when its members are dropped.
+//
+// A member is marked with its H beside `member: '1'`. The existing member read
+// serves it by name, the two counts and the listing take only this pool's
+// members, and a second person opening the same address under their own key
+// neither spends this pool's count nor shows in its listing.
+
+/** Where an entry pool stands, from the path alone: `state` is 'open',
+ *  'closed', 'expired' or null (this host does not know the pool); `name` is
+ *  H, `hidden` the signature of the opener's hidden list when their index
+ *  names one, and `now` the clock reading the answer was taken at. */
+async function entryPoolState(env, address, by, until) {
+  const now = Math.floor(Date.now() / 1000)
+  const pool = { state: null, name: null, hidden: null, now }
+  if (!SIG_RE.test(String(address ?? '')) || !SIG_RE.test(String(by ?? '')) || !ENTRY_UNTIL_RE.test(String(until ?? ''))) return pool
+  pool.name = await poolAddress(`entries:pool\0${address}\0${by}\0${until}`)
+  const end = Number(until)
+  // EXPIRED is the clock's alone. The path proves which pool (only A, P and
+  // until hash to the H its members are marked with), so the leader's hive may
+  // drop the pool's keys first and still ask once for its members to go, and
+  // nothing but the members of this H can be dropped by asking.
+  if (now > end + ENTRY_KEPT_SECS) { pool.state = 'expired'; return pool }
+  // The index as the page gate reads it: signature and signer checked on this
+  // read, so a pool opened by a device since taken off the key list is gone.
+  const roots = (await verifiedIndex(env, by))?.roots ?? {}
+  const opened = Object.hasOwn(roots, `entries:${pool.name}`)
+  const closed = Object.hasOwn(roots, `entries-closed:${pool.name}`)
+  if (!opened && !closed) return pool
+  const hidden = String(roots[`entries-hidden:${pool.name}`] ?? '')
+  if (SIG_RE.test(hidden)) pool.hidden = hidden
+  // Closed wins when both keys are named. Only OPEN needs the host's standing:
+  // a leader no longer one of its people keeps a closed pool, hidden list and all.
+  if (closed || now >= end || !(await isHostPerson(env, by))) pool.state = 'closed'
+  else if (end - now <= ENTRY_UNTIL_MAX_SECS) pool.state = 'open'
+  return pool
+}
+
+const isEntryMember = (object) => object?.customMetadata?.member === '1' && SIG_RE.test(String(object.customMetadata.entry ?? ''))
+
+/** The members kept under `address` that are marked with this pool's H: name,
+ *  owner and the store's own upload time. Looped on `truncated`, because a
+ *  listing that carries metadata may answer fewer than its limit a page, but
+ *  never past `pages` pages: `whole` is false when the walk stopped there with
+ *  keys still behind it and fewer than `atMost` found, so the caller knows
+ *  `members` is a part. */
+async function entryMembers(env, address, name, { atMost = Infinity, pages = ENTRY_LIST_PAGES } = {}) {
+  const prefix = `${address}/`
+  const members = []
+  let cursor
+  for (let read = 1; ; read++) {
+    const page = await env.CONTENT.list({ prefix, cursor, limit: 1000, include: ['customMetadata'] })
+    for (const object of page.objects ?? []) {
+      const member = String(object.key ?? '').slice(prefix.length)
+      if (!SIG_RE.test(member) || !isEntryMember(object) || object.customMetadata.entry !== name) continue
+      const uploaded = new Date(object.uploaded ?? 0).getTime()
+      members.push({ name: member, owner: String(object.customMetadata.owner ?? ''), uploaded: Number.isFinite(uploaded) ? uploaded : 0 })
+    }
+    if (!page.truncated || !page.cursor || members.length >= atMost) return { members, whole: true }
+    if (read >= pages) return { members, whole: false }
+    cursor = page.cursor
+  }
+}
+
+/** An expired pool's members leave, ENTRY_DROP_PER_REQUEST a request. The
+ *  request proved which pool: only A, P and until together hash to the H the
+ *  members are marked with, so nothing of another pool at this address goes.
+ *  The clock alone says expired, so any address can be asked: one object is
+ *  looked at first, and an address whose first object is no entry member is
+ *  left at that one call. Otherwise ENTRY_DROP_LISTS calls in all, and the
+ *  next request for the pool takes the next part.
+ *  After the answer when the request can wait on it, as a claim's pick-up is. */
+function dropExpiredEntries(env, address, name, ctx) {
+  const drop = (async () => {
+    if (!env.CONTENT?.list || !env.CONTENT?.delete) return
+    const first = ((await env.CONTENT.list({ prefix: `${address}/`, limit: 1, include: ['customMetadata'] })).objects ?? [])[0]
+    if (!isEntryMember(first)) return
+    const { members } = await entryMembers(env, address, name, { atMost: ENTRY_DROP_PER_REQUEST, pages: ENTRY_DROP_LISTS - 1 })
+    await Promise.all(members.slice(0, ENTRY_DROP_PER_REQUEST).map((member) => env.CONTENT.delete(`${address}/${member.name}`)))
+  })().catch(() => { /* the next request for this pool goes on */ })
+  if (typeof ctx?.waitUntil === 'function') { ctx.waitUntil(drop); return null }
+  return drop
+}
+
+/** GET /<A>/?by=<P>&until=<until> — an entry pool's listing, or null when this
+ *  host does not know the pool (the caller then answers as it would without
+ *  `by`). The 256 members the host wrote FIRST, by the store's own upload time
+ *  and then by name: a poster chooses a member's name and its stamp, never
+ *  when the store took it, so entries posted before a flood stay in sight.
+ *  Three headers of the host's own say whether the pool is open, closed or
+ *  expired, name the opener's hidden list, and give the host's time. A pool
+ *  that holds nothing yet is an empty 200, which is how an opening is proved.
+ *  An address holding more than ENTRY_LIST_PAGES pages is a 503, never a
+ *  listing of the part read; a store that fails is a 503 in words too. */
+async function serveEntryListing(request, env, address, ctx) {
+  try {
+    const params = new URL(request.url).searchParams
+    const pool = await entryPoolState(env, address, params.get('by'), params.get('until'))
+    if (!pool.state) return null
+    const headers = {
+      'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...CORS,
+      [ENTRY_STATE_HEADER]: pool.state, [HOST_TIME_HEADER]: String(pool.now),
+      ...(pool.hidden ? { [ENTRY_HIDDEN_HEADER]: pool.hidden } : {}),
+    }
+    if (pool.state === 'expired') {
+      await dropExpiredEntries(env, address, pool.name, ctx)
+      return new Response(request.method === 'HEAD' ? null : '', { status: 200, headers: { ...headers, 'X-Reason': 'this one has expired' } })
+    }
+    const { members, whole } = env.CONTENT?.list ? await entryMembers(env, address, pool.name) : { members: [], whole: true }
+    if (!whole) return text(503, 'this address holds too much')
+    members.sort((a, b) => a.uploaded - b.uploaded || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    const names = members.slice(0, ENTRY_POOL_CAP).map((member) => member.name)
+    return new Response(request.method === 'HEAD' ? null : (names.length ? names.join('\n') + '\n' : ''), { status: 200, headers })
+  } catch {
+    return text(503, 'this host could not list the pool')
+  }
+}
+
+/** Do these tags carry exactly one each of pool, page, name and title, at
+ *  most one gone, and nothing else? Each tag is two strings. */
+function entryTags(tags) {
+  if (!Array.isArray(tags)) return null
+  const found = {}
+  for (const tag of tags) {
+    if (!Array.isArray(tag) || tag.length !== 2 || typeof tag[0] !== 'string' || typeof tag[1] !== 'string') return null
+    if (!['pool', 'page', 'name', 'title', 'gone'].includes(tag[0]) || Object.hasOwn(found, tag[0])) return null
+    found[tag[0]] = tag[1]
+  }
+  if (!['pool', 'page', 'name', 'title'].every((name) => Object.hasOwn(found, name))) return null
+  if (Object.hasOwn(found, 'gone') && found.gone !== '1') return null
+  return found
+}
+
+/** One line, as the reader rules it: not blank, no longer than `max` UTF-16
+ *  units, no line break, control character or direction override. */
+const entryLine = (value, max) => !!value.trim() && value.length <= max && !ENTRY_LINE_REFUSED.test(value)
+
+/** PUT /<A>/<member>?by=<P>&until=<until> — a poster's own signed entry into a
+ *  pool one of the host's people opened. No NIP-98 and no grant: holding the
+ *  address is the invitation and the member's signature is the proof. The
+ *  twelve checks of the design, in its order, and every way out is text(): a
+ *  body that will not parse is refused in words like any other, never thrown
+ *  to the platform's error page, which carries no CORS and no reason. */
+async function putEntryMember(request, env, address, member, ctx) {
+  try {
+    if (!env.CONTENT?.put || !env.CONTENT?.list) return text(503, 'this host holds no pools')
+    const params = new URL(request.url).searchParams
+
+    // 1. The pool is open: decided from the path alone, before the body is read.
+    const pool = await entryPoolState(env, address, params.get('by'), params.get('until'))
+    if (pool.state === 'expired') {
+      await dropExpiredEntries(env, address, pool.name, ctx)
+      return text(410, 'this one has expired')
+    }
+    if (pool.state === 'closed') return text(403, 'this one is closed')
+    if (pool.state !== 'open') return text(404, 'no pool is open at this address')
+
+    // 2. The address is free for it: never a pool the host lists, keeps private
+    // or writes itself, never an opened sign-up list, and what it already
+    // holds, if anything, is entry members. One address is never two kinds.
+    const reserved = await listedPool(env, address)
+      || (await Promise.all([...PRIVATE_POOL_MEANINGS, ...HOST_WRITTEN_POOL_MEANINGS].map(poolAddress))).includes(address)
+      || await isRsvpPool(env, address)
+    if (reserved) return text(403, 'this address belongs to another pool')
+    const first = ((await env.CONTENT.list({ prefix: `${address}/`, limit: 1, include: ['customMetadata'] })).objects ?? [])[0]
+    if (first && !isEntryMember(first)) return text(403, 'this address is not an entry pool')
+
+    // 3. The body, to a hard cap: more is refused before it is held.
+    const body = await readCapped(request, ENTRY_MAX_BYTES)
+    if (!body) return text(413, `an entry is at most ${ENTRY_MAX_BYTES} bytes`)
+
+    // 4. The bytes hash to the member's name.
+    if (await sha256Hex(body) !== member) return text(400, 'member bytes do not hash to their name')
+
+    // 5. Already held in this pool: nothing is written, whatever its stamp says now.
+    const key = `${address}/${member}`
+    if ((await env.CONTENT.head(key))?.customMetadata?.entry === pool.name) return text(200, `member ${member}`)
+
+    // 6. The seven fields in the fixed spelling. One signed event must have ONE
+    // name: any other spelling of it (a space, an escape, a capital letter in
+    // the signature) would be another member, and a copy of someone's entry
+    // would spend that key's count. So the raw bytes must be exactly what
+    // JSON.stringify gives for the fields in this order, and id and sig, which
+    // the signed hash does not cover, are held to lowercase hex by rule.
+    let evt
+    try { evt = JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(body)) } catch { return text(400, 'body is not a JSON nostr event') }
+    if (!evt || typeof evt !== 'object' || Array.isArray(evt)) return text(400, 'body is not a JSON nostr event')
+    if (evt.kind !== ENTRY_KIND) return text(400, `wrong event kind (expected entry ${ENTRY_KIND})`)
+    if (typeof evt.id !== 'string' || typeof evt.pubkey !== 'string' || !SIG_RE.test(evt.pubkey)
+      || !Number.isSafeInteger(evt.created_at) || typeof evt.content !== 'string'
+      || typeof evt.sig !== 'string' || !/^[0-9a-f]{128}$/.test(evt.sig)) {
+      return text(400, 'an entry is the seven fields id, pubkey, created_at, kind, tags, content, sig: lowercase hex and whole numbers')
+    }
+    const tags = entryTags(evt.tags)
+    if (!tags) return text(400, 'an entry carries one pool, page, name and title tag, at most one gone, and no other')
+    const spelled = new TextEncoder().encode(JSON.stringify({
+      id: evt.id, pubkey: evt.pubkey, created_at: evt.created_at, kind: evt.kind, tags: evt.tags, content: evt.content, sig: evt.sig,
+    }))
+    if (spelled.byteLength !== body.byteLength || spelled.some((byte, at) => byte !== body[at])) {
+      return text(400, 'an entry is spelled one way: the seven fields in order, as JSON.stringify writes them')
+    }
+    const id = await sha256Hex(new TextEncoder().encode(JSON.stringify([0, evt.pubkey, evt.created_at, evt.kind, evt.tags, evt.content])))
+    if (evt.id !== id) return text(400, 'the id is not the lowercase hash of this event')
+
+    // 7. Its pool tag is this H, never the address.
+    if (tags.pool !== pool.name) return text(400, 'entry is not tagged with this pool')
+
+    // 8. The stamp is the host's time, either way.
+    if (Math.abs(evt.created_at - pool.now) > ENTRY_STAMP_SECS) return text(409, 'entry stamp is more than ten minutes from this host\'s clock')
+
+    // 9. name, title and page keep the reader's rules.
+    if (!entryLine(tags.name, ENTRY_NAME_MAX)) return text(400, `an entry carries a name of one line, 1 to ${ENTRY_NAME_MAX} characters`)
+    if (!entryLine(tags.title, ENTRY_TITLE_MAX)) return text(400, `an entry carries a title of one line, 1 to ${ENTRY_TITLE_MAX} characters`)
+    if (!SIG_RE.test(tags.page)) return text(400, 'an entry names its page by 64 lowercase hex')
+
+    // 10. The signature is valid for its key.
+    if (!(await verifyEventSig(evt))) return text(401, 'invalid entry signature')
+
+    // 11. The two counts, of this pool's members only. A brake, not a bound:
+    // the store has no transaction, and the listing is what stops at the cap.
+    // An address holding more than the pages read is refused, never counted
+    // from the part read.
+    const { members, whole } = await entryMembers(env, address, pool.name)
+    if (!whole) return text(503, 'this address holds too much')
+    if (members.length >= ENTRY_POOL_CAP) return text(507, 'this one is full')
+    if (members.filter((held) => held.owner === evt.pubkey).length >= ENTRY_KEY_CAP) return text(429, `this key has posted its ${ENTRY_KEY_CAP} here`)
+
+    // 12. Written, marked as an entry member of this H.
+    await env.CONTENT.put(key, body, {
+      httpMetadata: { contentType: 'application/json; charset=utf-8' },
+      customMetadata: { owner: evt.pubkey, member: '1', entry: pool.name },
+    })
+    return text(201, `member ${member}`)
+  } catch {
+    return text(500, 'this host could not take the entry')
+  }
 }
 
 const PROFILE_MAX_BYTES = 8_192
@@ -4648,7 +4937,8 @@ const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, HEAD, PUT, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Authorization, Content-Type, Range, X-SHA-256, X-Content-Length',
-  'Access-Control-Expose-Headers': 'ETag, Accept-Ranges, Content-Range, Content-Length, X-Reason',
+  // The last three are an entry pool's listing saying its state (serveEntryListing).
+  'Access-Control-Expose-Headers': `ETag, Accept-Ranges, Content-Range, Content-Length, X-Reason, ${ENTRY_STATE_HEADER}, ${ENTRY_HIDDEN_HEADER}, ${HOST_TIME_HEADER}`,
   'Access-Control-Max-Age': '86400',
 }
 
@@ -6389,12 +6679,15 @@ async function putKeyList(request, env, anchor) {
 // already holding anything but room members — a room pool is made only by
 // room members. Listed by address (servePoolListing); read by name below.
 
-/** Does this address hold room members (and nothing else)? One object read. */
+/** Does this address hold room members (and nothing else)? One object read.
+ *  An entry pool's members wear the room mark beside their own, and an
+ *  address whose first object is one is an entry pool, never a room: its
+ *  members are listed and read only beside the pool's opener and end. */
 async function isRoomPool(env, sig) {
   if (!env.CONTENT?.list) return false
   const page = await env.CONTENT.list({ prefix: `${sig}/`, limit: 1, include: ['customMetadata'] })
   const first = (page.objects ?? [])[0]
-  return !!first && first.customMetadata?.member === '1'
+  return !!first && first.customMetadata?.member === '1' && !isEntryMember(first)
 }
 
 async function roomMemberNames(env, sig) {
@@ -6405,7 +6698,7 @@ async function roomMemberNames(env, sig) {
     const page = await env.CONTENT.list({ prefix, cursor, limit: 1000, include: ['customMetadata'] })
     for (const obj of page.objects ?? []) {
       const name = String(obj.key ?? '').slice(prefix.length)
-      if (SIG_RE.test(name) && obj.customMetadata?.member === '1') names.push(name)
+      if (SIG_RE.test(name) && obj.customMetadata?.member === '1' && !isEntryMember(obj)) names.push(name)
     }
     cursor = page.truncated ? page.cursor : undefined
   } while (cursor)
@@ -6421,6 +6714,9 @@ async function putRoomMember(request, env, pool, member) {
   if (reserved) return text(403, 'this pool belongs to the host')
   const first = ((await env.CONTENT.list({ prefix: `${pool}/`, limit: 1, include: ['customMetadata'] })).objects ?? [])[0]
   if (first && first.customMetadata?.member !== '1') return text(403, 'this address is not a room pool')
+  // An entry pool's members wear the same mark beside their own; a room member
+  // is never written among them, so one address is never both kinds.
+  if (isEntryMember(first)) return text(403, 'this address is an entry pool')
 
   const body = await request.arrayBuffer()
   if (body.byteLength > ROOM_MEMBER_MAX_BYTES) return text(413, 'a room member is a claim, not content')
@@ -6446,15 +6742,35 @@ async function putRoomMember(request, env, pool, member) {
 
 /** GET /<pool>/<member> — the member's bytes, or null when it is not one (the
  *  caller then falls through to the `/<sig>/<name>` read alias). Immutable:
- *  the name is the hash of the bytes. */
+ *  the name is the hash of the bytes. AN ENTRY POOL'S MEMBER is served only
+ *  beside the `by` and `until` of its own pool while that pool is open or
+ *  closed (entryPoolState): without them, or once the pool is expired or
+ *  recycled, it is answered as not held, so an old code reads nothing after
+ *  the leader recycles. Never stored by a cache, which would outlive that. */
 async function getRoomMember(request, env, pool, member) {
   const obj = await env.CONTENT?.get?.(`${pool}/${member}`)
   if (!obj || obj.customMetadata?.member !== '1') return null
+  const entry = isEntryMember(obj)
+  if (entry) {
+    const params = new URL(request.url).searchParams
+    let readable = false
+    try {
+      const at = await entryPoolState(env, pool, params.get('by'), params.get('until'))
+      readable = (at.state === 'open' || at.state === 'closed') && at.name === obj.customMetadata.entry
+    } catch {
+      try { await obj.body?.cancel?.() } catch { /* closed */ }
+      return text(503, 'this host could not read the pool')
+    }
+    if (!readable) {
+      try { await obj.body?.cancel?.() } catch { /* closed */ }
+      return text(404, 'no entry is held here for this pool')
+    }
+  }
   return new Response(request.method === 'HEAD' ? null : obj.body, {
     status: 200,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': IMMUTABLE,
+      'Cache-Control': entry ? 'no-store' : IMMUTABLE,
       'ETag': `"${member}"`,
       'X-Content-Type-Options': 'nosniff',
       ...CORS,
@@ -7610,6 +7926,12 @@ const router = {
         // join can reach no other face; putRsvpMember checks the claim as it
         // does at the zone root. Every other write stays refused.
         const claim = method === 'PUT' && /^\/([0-9a-f]{64})\/([0-9a-f]{64})$/.exec(requestUrl.pathname)
+        // AND A POSTER'S ENTRY (documentation/open-entry-pools.md), into a pool
+        // one of the host's people opened: `by` is what routes it, and
+        // putEntryMember refuses everything that pool is not open for. Never at
+        // a try- door or the swarm door, which take no writes of their own.
+        const writelessDoor = routed.implicit && (SANDBOX_LABEL_RE.test(routed.site.lineage) || routed.site.lineage === SWARM_DOOR_LABEL)
+        if (claim && !writelessDoor && requestUrl.searchParams.has('by')) return putEntryMember(request, env, claim[1], claim[2], ctx)
         if (claim && await isRsvpPool(env, claim[1])) return putRsvpMember(request, env, claim[1], claim[2], ctx)
         return text(405, 'published Core hosts are read-only')
       }
@@ -7626,7 +7948,7 @@ const router = {
       // A pool at its address is the worker's here too, all but the package
       // pool (originPoolListing).
       const pool = pathname.match(/^\/([0-9a-f]{64})\/$/)
-      const listing = pool ? await originPoolListing(request, env, pool[1]) : null
+      const listing = pool ? await originPoolListing(request, env, pool[1], ctx) : null
       if (listing) return listing
       return (await originHostRead(request, deployed, requestUrl, ctx?.waitUntil ? (work) => ctx.waitUntil(work) : undefined)) ?? fetch(request)
     }
@@ -7758,6 +8080,8 @@ const router = {
       // An EVENT'S RSVP POOL takes a stranger's signed claim (putRsvpMember);
       // every other address is a room, whose members come from admitted keys.
       if (method === 'PUT') {
+        // Named with its opener (`by`), it is an ENTRY POOL's member (putEntryMember).
+        if (requestUrl.searchParams.has('by')) return putEntryMember(request, env, roomMemberPath[1], roomMemberPath[2], ctx)
         return await isRsvpPool(env, roomMemberPath[1])
           ? putRsvpMember(request, env, roomMemberPath[1], roomMemberPath[2], ctx)
           : putRoomMember(request, env, roomMemberPath[1], roomMemberPath[2])
@@ -7866,7 +8190,7 @@ const router = {
     // derived, not chosen — no rewrite may answer it with a page.
     const poolMatch = pathname.match(/^\/([0-9a-f]{64})\/$/)
     if (poolMatch) {
-      if (method === 'GET' || method === 'HEAD') return servePoolListing(request, env, poolMatch[1])
+      if (method === 'GET' || method === 'HEAD') return servePoolListing(request, env, poolMatch[1], ctx)
       return text(405, 'method not allowed')
     }
 

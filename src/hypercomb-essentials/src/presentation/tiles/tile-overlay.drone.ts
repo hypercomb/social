@@ -1,5 +1,5 @@
 // pixi/tile-overlay.drone.ts
-import { Drone, EffectBus, consumePointerGesture, POINTER_GESTURE_END, type I18nProvider, I18N_IOC_KEY, type KeyMapLayer, ICON_PICK_REQUEST, type IconPickRequest } from '@hypercomb/core'
+import { Drone, EffectBus, consumePointerGesture, isPointerConsumed, POINTER_GESTURE_END, type I18nProvider, I18N_IOC_KEY, type KeyMapLayer, ICON_PICK_REQUEST, type IconPickRequest } from '@hypercomb/core'
 import { Application, Container, Graphics, Point, Sprite, Text, TextStyle } from 'pixi.js'
 import { containerScreenScale, followTextResolution, screenTextResolution } from '../grid/screen-text-resolution.js'
 import { HexIconButton } from './hex-icon-button.js'
@@ -13,6 +13,7 @@ import { peerDivergesAt } from '../../sharing/peer-divergence.js'
 import type { IconRegistryEntry } from './tile-actions.drone.js'
 import { ICON_SPACING, ICON_Y, computeIconPositions, iconRowY, raisedNameY } from './tile-action-icons.js'
 import { clickNeedsCoordinateHitTest, resolveTilePress, usesTileCloseUp } from './tile-tap-policy.js'
+import { BRANCH_HOLD_MS, offBandActions, poolsGateHeld, poolsHoldArms, poolsHoldLight, poolsTapLight } from './pools-tap-policy.js'
 import { openTileMenu } from './viewer-walk.js'
 import { isPublishedVisitorShell } from '../../sharing/behavior-enablement.js'
 import { hoverActionsSuppressed } from '../../quickmenu/quick-menu.tile-menu.js'
@@ -43,6 +44,13 @@ const NAV_GUARD_BACKSTOP_MS = 6000
 // (move/touch-move.input.ts), so arming here would fight it.
 const TILE_ENTER_HOLD_MS = 450
 const TILE_ENTER_HOLD_JITTER_PX = 8
+
+// POOLS MODE: THE BRANCH HOLD. While pools mode is up a tap is the tile's
+// light, and a finger that STAYS lights the whole branch (a pointer says the
+// same with Shift). How long it stays, and every other rule of when a press
+// lights, is pools-tap-policy.ts. Its jitter box is touch-move's, because a
+// finger rolls further than a mouse drifts.
+const POOLS_BRANCH_HOLD_JITTER_PX = 10
 
 // ── The touch grammar ─────────────────────────────────────────────────
 //
@@ -174,6 +182,10 @@ export type OverlayActionDescriptor = {
   /** IoC key of the bee that services this action. Until it registers, the
    *  overlay renders this affordance shaded + inert (feature not yet loaded). */
   backingKey?: string
+  /** Registered OFF the band: never an icon on a hexagon, but carried by the
+   *  surfaces that show a tile's actions in words (`actionsForTile`: the tile
+   *  page, the brief, a row of the list face). Pools mode's light is one. */
+  offBand?: boolean
 }
 
 export type OverlayVisibilityFn = (ctx: OverlayTileContext) => boolean
@@ -437,11 +449,30 @@ export class TileOverlayDrone extends Drone {
   #pressCapture: { generation: number; axial: Axial; label: string } | null = null
   /** Tracks the pointerId that triggered a pointerdown-navigation, so the trailing pointerup + click can be suppressed. */
   #consumedPointerId: number | null = null
+  /** The press now down, as pools mode reads it (pools-tap-policy.ts):
+   *  whether it travelled out of its jitter box, whether a reorder, a tile
+   *  drag or a pan began under it, and how many pointers were down together.
+   *  It is kept after the release until the next press begins, so the hold's
+   *  timer and the trailing click can both still ask. */
+  #lightPress: {
+    /** The pointer that began the press: its travel is the press's travel. */
+    pointerId: number
+    pointerType: string
+    origin: { x: number; y: number }
+    jitter: number
+    moved: boolean
+    dragged: boolean
+    /** The pointers of this press that are still down. */
+    live: Set<number>
+    /** The most that were down together. It never comes back down. */
+    pointers: number
+  } | null = null
   /** An armed HOLD-TO-ENTER press on a childless tile: it opens that tile's
    *  layer if the pointer stays down and still for TILE_ENTER_HOLD_MS.
    *  `generation` pins the axial map the press was taken against — a render
    *  underneath the pointer invalidates the hold rather than entering a tile
-   *  the user is no longer pressing. */
+   *  the user is no longer pressing. Pools mode arms the same record for its
+   *  branch hold (#beginLightHold): one press, one hold. */
   #enterHold: {
     label: string
     pointerId: number
@@ -453,10 +484,15 @@ export class TileOverlayDrone extends Drone {
     jitter: number
   } | null = null
   #meshPublic = false
-  // World mode (toggled on the control bar): when on, the overlay shows ONLY
-  // the two share-toggle icons (make-public / make-branch-public) — none of
-  // the regular actions. Init from localStorage so a refresh keeps the mode.
+  // Pools mode (the header's globe stage, `world:mode`): the band shows the
+  // 'world' profile, none of the regular actions, and the tap is the tile's
+  // light (#lighting). Init from localStorage so a refresh keeps the mode.
   #worldMode = (() => { try { return localStorage.getItem('hc:world-mode') === '1' } catch { return false } })()
+  /** POOLS MODE HAS THE TAP: the mode is up and the hexagons are showing. A
+   *  tap on one of your own tiles turns its light on or off instead of
+   *  walking in; Shift, or a finger that stays, does it for the whole branch
+   *  (see #onPointerDown / #onClick). A peer's tile is never yours to light. */
+  get #lighting(): boolean { return this.#worldMode && !this.#hiveHidden }
   #editing = false
   #editCooldown = false
   #editCooldownTimer: ReturnType<typeof setTimeout> | null = null
@@ -511,6 +547,9 @@ export class TileOverlayDrone extends Drone {
 
   /** Registered descriptors from provider bees, keyed by name */
   #registeredDescriptors = new Map<string, OverlayActionDescriptor>()
+  /** Descriptors registered OFF the band, keyed by profile and name. They
+   *  join no profile's order, so the band never draws them. */
+  #offBand = new Map<string, OverlayActionDescriptor>()
 
   /** Genotype visibility — missing key means visible (default-on) */
   #genotypeVisible = new Map<string, boolean>()
@@ -581,7 +620,7 @@ export class TileOverlayDrone extends Drone {
     'command:composing',
     'mesh:public-changed', 'world:mode', 'editor:mode', 'selection:changed',
     'overlay:register-action', 'overlay:unregister-action', 'overlay:neon-color',
-    'drop:dragging',
+    'drop:dragging', 'touch:dragging', 'move:drag',
     'overlay:arrange-mode', 'overlay:pool-icons',
     'bee:disposed', 'genotype:set-visible', 'mobile:mode',
     'substrate:applied', 'cell:removed', 'tile:saved', 'images:recounted',
@@ -679,7 +718,11 @@ export class TileOverlayDrone extends Drone {
 
       // ── External action registration ─────────────────────────────
       this.onEffect<OverlayActionDescriptor | OverlayActionDescriptor[]>('overlay:register-action', (payload) => {
-        const descs = Array.isArray(payload) ? payload : [payload]
+        const all = Array.isArray(payload) ? payload : [payload]
+        // An off-band action is kept beside the band's set and joins no
+        // profile's order: the band never draws it (see actionsForTile).
+        for (const desc of all) if (desc.offBand) this.#offBand.set(`${desc.profile}/${desc.name}`, desc)
+        const descs = all.filter(desc => !desc.offBand)
         for (const desc of descs) {
           this.#registeredDescriptors.set(desc.name, desc)
           // Hydrate genotype visibility from localStorage on first encounter
@@ -757,6 +800,7 @@ export class TileOverlayDrone extends Drone {
           this.#registeredDescriptors.delete(name)
           changed = true
         }
+        for (const [key, desc] of this.#offBand) if (desc.owner === iocKey) this.#offBand.delete(key)
         if (changed) this.#rebuildActiveProfile()
       })
 
@@ -1028,7 +1072,15 @@ export class TileOverlayDrone extends Drone {
 
       this.onEffect<{ active: boolean }>('touch:dragging', ({ active }) => {
         this.#touchDragging = active
+        if (active && this.#lightPress) this.#lightPress.dragged = true
         if (active && this.#overlay && !this.#arrangeMode) this.#overlay.visible = false
+      })
+
+      // A reorder or a tile drag began (MoveDrone.beginMove, by mouse or by
+      // finger). The press under it is a drag from here on: in pools mode its
+      // release must not also turn the dragged tile's light (#onClick).
+      this.onEffect<{ active?: boolean }>('move:drag', (payload) => {
+        if (payload?.active && this.#lightPress) this.#lightPress.dragged = true
       })
 
       // `/mobile on|off` flips which shell this is mid-session. The band is
@@ -1055,8 +1107,8 @@ export class TileOverlayDrone extends Drone {
         this.#updateVisibility()
       })
 
-      // World mode flips the overlay to the 'world' profile (the two share
-      // toggles only). Rebuild the active profile so the icon set swaps.
+      // Pools mode flips the overlay to the 'world' profile (Go inside only:
+      // the tap is the light). Rebuild the active profile so the icon set swaps.
       this.onEffect<{ active: boolean }>('world:mode', ({ active }) => {
         this.#worldMode = !!active
         this.#rebuildActiveProfile()
@@ -1557,6 +1609,13 @@ export class TileOverlayDrone extends Drone {
       const desc = this.#registeredDescriptors.get(name)
       if (!desc) continue
       if (desc.genotype && this.#genotypeVisible.get(desc.genotype) === false) continue
+      if (desc.visibleWhen && !desc.visibleWhen(ctx)) continue
+      out.push(desc)
+    }
+    // OFF THE BAND. A surface that reads this list has no tap on a hexagon,
+    // so what the band gave to a gesture is carried here in words: pools
+    // mode's light, on the tile page, the brief and the list face's rows.
+    for (const desc of offBandActions(this.#offBand.values(), profile, seen)) {
       if (desc.visibleWhen && !desc.visibleWhen(ctx)) continue
       out.push(desc)
     }
@@ -2472,7 +2531,10 @@ export class TileOverlayDrone extends Drone {
     // (browser gesture takeover, pen leaving range) or a window that loses
     // focus mid-press would otherwise navigate under a participant who is no
     // longer holding anything.
-    document.addEventListener('pointercancel', () => this.#cancelEnterHold())
+    document.addEventListener('pointercancel', (e) => {
+      this.#cancelEnterHold()
+      this.#lightPress?.live.delete(e.pointerId)
+    })
     window.addEventListener('blur', () => this.#cancelEnterHold())
     // CAPTURE-phase witness: records every raw click before any handler can
     // stopPropagation it. Read remotely via the bridge's `effect-last` —
@@ -2526,8 +2588,9 @@ export class TileOverlayDrone extends Drone {
     // always has the freshest cursor to re-derive from after a settle.
     this.#lastPointerClient = { x: e.clientX, y: e.clientY }
     // Before any guard: travel past the jitter box means this press is a drag,
-    // not a hold-to-enter.
+    // not a hold-to-enter, and in pools mode not a tap.
     this.#trackEnterHold(e)
+    this.#trackLightPress(e)
     if (this.#arrangeMode) return // arrange mode uses its own pointer handling
     if (!this.#renderContainer || !this.#overlay || !this.#renderer || !this.#canvas) return
 
@@ -2899,6 +2962,29 @@ export class TileOverlayDrone extends Drone {
     // ask on paths that don't, e.g. a ctrl press or a press with a live
     // selection.)
     this.#lastPressWasTouch = e.pointerType === 'touch'
+    // Pools mode reads the whole press (pools-tap-policy.ts), so it is
+    // recorded before any guard too. A primary pointer begins a press, and so
+    // does any pointer that lands with none of the last press still down; a
+    // pointer that lands beside one still down joins that press and is
+    // counted. Ids, not a count: a release can be lost, an id can be dropped.
+    const joined = this.#lightPress
+    if (e.isPrimary || !joined || joined.live.size === 0) {
+      this.#lightPress = {
+        pointerId: e.pointerId,
+        pointerType: e.pointerType,
+        origin: { x: e.clientX, y: e.clientY },
+        jitter: e.pointerType === 'mouse' ? TILE_ENTER_HOLD_JITTER_PX : POOLS_BRANCH_HOLD_JITTER_PX,
+        moved: false,
+        dragged: false,
+        live: new Set([e.pointerId]),
+        pointers: 1,
+      }
+    } else {
+      joined.live.add(e.pointerId)
+      joined.pointers = Math.max(joined.pointers, joined.live.size)
+    }
+    // A second pointer is a pan or a pinch, never a hold: one press, one hold.
+    if (this.#enterHold && e.pointerId !== this.#enterHold.pointerId) this.#cancelEnterHold()
     // Every new press invalidates the previous press-capture — a click must
     // only ever pair with ITS OWN pointerdown's capture.
     this.#pressCapture = null
@@ -2916,7 +3002,9 @@ export class TileOverlayDrone extends Drone {
     // and Ctrl-click is reserved for selection here). Mirrors the right-button
     // gesture: the trailing click is suppressed via #consumedPointerId.
     if (e.button === 0 && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      this.#beginBackGesture(e)
+      // Pools mode: Shift on one of your own tiles lights its whole branch on
+      // the release (#onClick). Anywhere else Shift is still the way back.
+      if (!this.#lightsAt(e)) this.#beginBackGesture(e)
       return
     }
     if (e.button !== 0) return
@@ -2989,6 +3077,14 @@ export class TileOverlayDrone extends Drone {
           return
         }
       }
+    }
+
+    // POOLS MODE: the press never walks in. The release lights the tile
+    // (#onClick), and a finger that stays lights its whole branch. A peer's
+    // tile is not yours to offer and keeps every gesture it had.
+    if (this.#lighting && !this.#externalLabels.has(entry.label)) {
+      this.#beginLightHold(e, entry.label)
+      return
     }
 
     // On a launch-group aggregator page EVERY tile is a launcher: a body press
@@ -3069,6 +3165,75 @@ export class TileOverlayDrone extends Drone {
     this.#enterHold = { label, pointerId, origin: { x: e.clientX, y: e.clientY }, generation, timer, jitter: TILE_ENTER_HOLD_JITTER_PX }
   }
 
+  // ── Hold-to-light-the-branch (pools mode, finger or pen) ───────────
+  // The same armed hold as hold-to-enter with a different ending: the whole
+  // branch under the tile is lit or unlit. A mouse has Shift for that and
+  // arms nothing, and neither does a finger that joins one already down.
+  // Maturing consumes the pointer, so the release lights nothing more and
+  // the quick-menu ring, a moment behind, stands down. Whether the matured
+  // hold lights is asked of pools-tap-policy.ts: the resting finger of a
+  // pinch, or a press under a gesture that owns the input, is not a hold.
+  #beginLightHold(e: PointerEvent, label: string): void {
+    this.#cancelEnterHold()
+    const pointerId = e.pointerId
+    const down = this.#lightPress
+    // The press is its first pointer's: a finger that joined it arms nothing.
+    if (down?.pointerId !== pointerId) return
+    if (!poolsHoldArms({ lighting: this.#lighting, own: true, pointerType: down.pointerType, pointers: down.pointers })) return
+    const generation = this.#mapGeneration
+    const timer = setTimeout(() => {
+      this.#enterHold = null
+      if (generation !== this.#mapGeneration) return
+      if (this.#arrangeMode || this.#navigationBlocked) return
+      if (this.#editing || this.#editCooldown) return
+      if (this.#hasSelection || this.#picking || this.#touchDragging) return
+      if (isPointerConsumed(pointerId)) return
+      // The same press, still: a newer one would have cancelled this timer.
+      const press = this.#lightPress
+      if (press?.pointerId !== pointerId) return
+      const light = poolsHoldLight({
+        lighting: this.#lighting,
+        own: !this.#externalLabels.has(label),
+        pointerType: press.pointerType,
+        moved: press.moved,
+        dragged: press.dragged,
+        pointers: press.pointers,
+        gateHeld: this.#gateHeldForLight(),
+        shiftKey: false,
+        ctrlKey: false,
+        metaKey: false,
+        // The timer is the clock: it was armed for the hold's length and
+        // nothing else fires it. A measured clock can be coarsened by the
+        // browser and read short.
+        heldMs: BRANCH_HOLD_MS,
+      })
+      if (light !== 'light-branch') return
+      this.#consumedPointerId = pointerId
+      consumePointerGesture(pointerId)
+      this.#pressCapture = null
+      try { navigator.vibrate?.(30) } catch { /* no haptics, no matter */ }
+      this.invokeActionForTile('make-branch-public', label)
+    }, BRANCH_HOLD_MS)
+    this.#enterHold = { label, pointerId, origin: { x: e.clientX, y: e.clientY }, generation, timer, jitter: POOLS_BRANCH_HOLD_JITTER_PX }
+  }
+
+  /** Whether a gesture or a modal owns the input, as pools mode's hold asks
+   *  it: a pinch or a pan that claimed the gate, the quick-menu ring, a
+   *  window that locked it. A pinned page does not, nor does drag-to-move's
+   *  reservation on a finger that has not travelled (poolsGateHeld). */
+  #gateHeldForLight(): boolean {
+    const gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate')
+    return poolsGateHeld(gate ? { locked: gate.locked, pinOnly: gate.lockedOnlyBy('pin'), owner: gate.owner } : null)
+  }
+
+  /** Is this press pools mode's to light: the mode has the tap and one of
+   *  your own tiles is under the pointer. */
+  #lightsAt(e: PointerEvent): boolean {
+    if (!this.#lighting || e.target !== this.#canvas) return false
+    const label = this.labelAtClient(e.clientX, e.clientY)
+    return !!label && !this.#externalLabels.has(label)
+  }
+
   #cancelEnterHold(): void {
     if (!this.#enterHold) return
     clearTimeout(this.#enterHold.timer)
@@ -3082,6 +3247,16 @@ export class TileOverlayDrone extends Drone {
     if (!hold || e.pointerId !== hold.pointerId) return
     if (Math.abs(e.clientX - hold.origin.x) > hold.jitter
       || Math.abs(e.clientY - hold.origin.y) > hold.jitter) this.#cancelEnterHold()
+  }
+
+  /** Mark the press as travelled once its pointer leaves the jitter box. In
+   *  pools mode a press that travelled is not a tap, whether or not a drag
+   *  began under it (pools-tap-policy.ts). */
+  #trackLightPress(e: PointerEvent): void {
+    const press = this.#lightPress
+    if (!press || press.moved || e.pointerId !== press.pointerId) return
+    if (Math.abs(e.clientX - press.origin.x) > press.jitter
+      || Math.abs(e.clientY - press.origin.y) > press.jitter) press.moved = true
   }
 
   #onClick = (e: MouseEvent): void => {
@@ -3323,6 +3498,38 @@ export class TileOverlayDrone extends Drone {
       }
     }
 
+    // ── POOLS MODE: THE TAP IS THE LIGHT ─────────────────────────────────
+    // The mode has the tap (#lighting): one of your own tiles is turned on or
+    // off where it stands, Shift does it for the whole branch, and nothing is
+    // entered. The tile actions drone carries it out and says so on
+    // `tile:public-changed`. Going inside is the band's one icon, handled
+    // above. A peer's tile falls through: it is not yours to offer.
+    //
+    // ONLY A TAP LIGHTS. The click that trails a reorder, a pan or a second
+    // finger reaches here like any other, and a light is what you offer: it
+    // must not turn because a tile was moved. The press answers for itself
+    // (pools-tap-policy.ts), and a press that was not a tap does nothing.
+    if (this.#lighting && !this.#externalLabels.has(entry.label)) {
+      const down = this.#lightPress
+      const light = poolsTapLight({
+        lighting: true,
+        own: true,
+        pointerType: down?.pointerType ?? '',
+        moved: down?.moved ?? false,
+        dragged: down?.dragged ?? false,
+        pointers: down?.pointers ?? 1,
+        gateHeld: false,
+        shiftKey: e.shiftKey,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        heldMs: 0,
+      })
+      if (light === 'none') { diag('pools-not-a-tap'); return }
+      this.invokeActionForTile(light === 'light-branch' ? 'make-branch-public' : 'make-public', entry.label)
+      diag('pools-light')
+      return
+    }
+
     // On a phone the hover band does not exist, so a LEAF tap opens the
     // tile's readable action hub — the same affordances as the desktop band.
     // A BRANCH tap goes inside, exactly as its row does on the list face
@@ -3395,11 +3602,14 @@ export class TileOverlayDrone extends Drone {
     // Any armed hold-to-enter dies on the release — it only ever fires from
     // its own timer, on a press that never moved and never let go.
     this.#cancelEnterHold()
+    this.#lightPress?.live.delete(e.pointerId)
     // Suppress orphaned pointerup from navigation gesture (click/contextmenu still pending)
     if (this.#consumedPointerId === e.pointerId) return
   }
 
   #onConsumedGestureEnd = (e: CustomEvent<{ pointerId?: number }>): void => {
+    // A consumed pointer's release never reaches #onPointerUp: it is gone all the same.
+    if (typeof e.detail?.pointerId === 'number') this.#lightPress?.live.delete(e.detail.pointerId)
     if (e.detail?.pointerId !== this.#consumedPointerId) return
     this.#consumedPointerId = null
     this.#pressCapture = null
