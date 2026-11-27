@@ -117,7 +117,7 @@ ONE of
 | **self** | the offering domain IS this origin | its code already runs here — nothing new can run |
 | **genesis** | no package ever activated here, no module is loaded, and the offer is from the ONE seed in `DEFAULT_HOST_ZONES` | the bootstrap trust the chain already rests on, spent once, before there is data to protect |
 | **attested** | a publisher the participant FOLLOWS has signed a sentinel naming it | authority (rule 3 above), enforced at the act |
-| **floor** | the shell found the live package below its floor (see below), no attester is loaded, and the offer is from the ONE seed | genesis again: the installed package can vouch for nothing and can never move itself |
+| **floor** | the shell found the live package below its floor (see below), the participant said yes to its offer, no attester is loaded, and the offer is from the ONE seed | genesis again: the installed package can vouch for nothing and can never move itself |
 | **hand** | a PICK — one revision at one path — the participant made by hand from a root no other door admits (a community trial, `module take`; decided 2026-09-22), and the index was not forged | nothing it brings runs: every bee and dependency bundle the trunk does not already run is HELD in the brood as a stranger's until the participant accepts it with the two warnings (core/brood.ts); the root is never recorded as trusted, so the next pick from it asks again; an install never asks this door |
 
 Everything else is refused by name, and the refusal says what to do instead.
@@ -146,13 +146,22 @@ running an Aug 31 package: its window answered nothing the pill emitted, its
 scout followed no publisher (the key landed 2026-09-11), and its own update
 button fired `hypercomb:apply-update`, which the shell had stopped hearing.
 
-The shell owns the one exception to "the human decides"
+So the shell offers the update the package cannot
 (`hypercomb-web/src/setup/package-floor.ts`). Fifteen seconds after
 `hypercomb:runtime-ready`, on participant web shells only, it asks one derived
 question: does anything answer `packages:open` (`EffectBus.listens`)? A
-package that answers is never touched, so updating it stays a choice. A
-package that answers nothing is **below the floor**, and the shell takes the
-seed's head for it through the **floor** door.
+package that answers is never offered anything here; its own Packages window
+updates it. A package that answers nothing is **below the floor**.
+
+**The floor asks; it never takes (2026-11-25, codex T4).** A package below the
+floor cannot draw its own offer, so the shell draws it in plain DOM that
+depends on nothing a package could replace (`floor-ask.ts`, the door bar's
+pattern): the version is too old to update itself, or too old to meet updated
+devices, and *Update* takes the current one. Only that yes takes the seed's
+head, through the **floor** door. *Not now* moves nothing, fetches no package,
+writes nothing, and the next boot asks again. Until 2026-11-25 the floor took
+the head without asking; that was the one exception to "the human decides",
+and it is gone.
 
 **Also below the floor (2026-10-09): a package that keeps swarm membership in
 the origin-wide flag.** A package from before per-tab membership gates every
@@ -171,9 +180,11 @@ in the index the update scout reads, `sign('hive:indexes')/<pubkey>`), then
 the seed's pool head when that root cannot be had from the seed yet — the
 pool alone lagged the channel for ten days. A forged index moves nothing.
 
+- one question per boot, asked before any package byte is fetched; a second
+  target (below) is tried on the same yes;
 - integrity and the core-surface gate apply exactly as for any install;
 - complete-or-absent: a failed move activates nothing, and the old package
-  keeps running until the next boot asks again;
+  keeps running until the next boot offers it again;
 - nothing is deleted: the old package's bytes stay, and the move is recorded
   in `hc:install:floor` (`{ from, to, zone, at }`);
 - the reload waits for three quiet seconds, and happens at most **once per

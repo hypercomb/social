@@ -149,7 +149,7 @@ hypercomb is **not** ephemeral. everything you author persists durably and local
 - lineage sigbags at the OPFS root (`<lineageSig>/` marker chains) — every undo/redo entry you've ever made (legacy `__history__/` is a read-fallback drain until `gcLegacyHistory` empties it)
 - sig-named content files at the OPFS root (layers, resources, tiles, body resources) plus the `sign(meaning)` pools (bees, dependencies, optimization) — the signature-addressed content (legacy `__layers__/`, `__resources__/`, `__bees__/`, `__dependencies__/`, `__optimization__/`, `__hive__/`, and `hypercomb.io/` dirs persist only as read-fallback drains until self-cleaning removes them)
 
-only the **network** is opt-in. nothing crosses the wire unless you publish. and a small set of values stay **participant-local on purpose** — presence, cursor, clipboard, selection, and viewport are kept *out* of the signed layer so they never skew the lineage signature across peers.
+only the **network** is opt-in. nothing crosses the wire unless you publish. and a small set of values stay **participant-local on purpose** — presence, cursor, shelf, selection, and viewport are kept *out* of the signed layer so they never skew the lineage signature across peers.
 
 ---
 

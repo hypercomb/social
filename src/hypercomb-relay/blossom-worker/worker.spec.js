@@ -6554,7 +6554,11 @@ test('the deployed config derives hypercomb.com\'s package from the followed pub
   const apex = bindings['hypercomb.com']
   assert.equal(apex.installs, publisher.channel)
   assert.equal(apex.publishers.find((p) => p.primary).pubkey, publisher.pubkey, 'the pool follows the key every install follows')
-  assert.deepEqual(apex.farm, ['jwize.com'])
+  // the machine's own name: jwize.com's apex is a front door on this worker
+  // now, so reading it would come back here instead of reaching the machine
+  assert.deepEqual(apex.farm, ['relay.pluginthematrix.io'])
+  assert.deepEqual(bindings['jwize.com'].farm, ['relay.pluginthematrix.io'])
+  assert.equal(bindings['jwize.com'].relay, 'relay.pluginthematrix.io')
 })
 
 // ── the shipped default meets at hypercomb.com (jwize 2026-10-11) ───────────
@@ -8005,7 +8009,7 @@ test('a deep name is asked for as soon as the index is held, before the bookkeep
     worker.fetch(request, env, ctx)
     for (let i = 0; i < 50 && !handedOff.length; i++) await new Promise((resolve) => setTimeout(resolve, 5))
     assert.ok(held, 'the index was held')
-    assert.equal(handedOff.length, 1, 'the naming was handed off while the bookkeeping still stalls')
+    assert.ok(handedOff.length >= 1, 'the naming was handed off while the bookkeeping still stalls')
     await handedOff[0]
     assert.deepEqual(cf.domains.map((d) => d.hostname), [DEEP])
   })
@@ -8025,6 +8029,39 @@ test('every accepted index advances the door of a deep name, so a bag written ea
   assert.equal(JSON.parse(new TextDecoder().decode(env.CONTENT.held.get(markers[1]))).layer, head)
   const page = await worker.fetch(new Request(`https://${DEEP}/`), env)
   assert.doesNotMatch(await page.text(), /nothing published/)
+})
+
+// One after another, a large index across several zones ran past the eight
+// seconds a hive gives the write, and the doors last in line missed that
+// publish. They advance side by side, and outlive a caller that hangs up.
+test('the doors of an index advance side by side, handed past a hang-up', async () => {
+  const bag = contentBag()
+  let inFlight = 0
+  let widest = 0
+  const list = bag.list.bind(bag)
+  bag.list = async (options) => {
+    inFlight++
+    widest = Math.max(widest, inFlight)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    try { return await list(options) } finally { inFlight-- }
+  }
+  const env = claimEnv({ CLAIM_API_TOKEN: '', CONTENT: bag })
+  const roots = { hyperdex: head, 'hyperdex/knowledge': head, 'hyperdex/knowledge/part': head, alpha: head, beta: head, gamma: head }
+  const event = await deepIndex(1_800_000_500, roots)
+  const url = `https://pluginthematrix.com/${INDEXES}/${event.pubkey}`
+  const handedOff = []
+  const ctx = { waitUntil: (promise) => { handedOff.push(promise) }, passThroughOnException() {} }
+  const response = await worker.fetch(new Request(url, { method: 'PUT',
+    headers: { authorization: await nip98(url, 'PUT', sk) }, body: JSON.stringify(event) }), env, ctx)
+  assert.equal(response.status, 201)
+  assert.ok(widest > 1, `doors advanced one at a time (widest ${widest})`)
+  const answers = await Promise.all(handedOff)
+  assert.ok(answers.includes(true), 'the door advance was handed to waitUntil')
+  for (const host of [DEEP, `part.${DEEP}`, 'alpha.pluginthematrix.com']) {
+    const door = await sha256Hex(host)
+    const markers = [...bag.held.keys()].filter((key) => key.startsWith(`${door}/`)).sort()
+    assert.equal(JSON.parse(new TextDecoder().decode(bag.held.get(markers.at(-1)))).layer, head, host)
+  }
 })
 
 test('the empty page under a deep name says the route to publish', async () => {

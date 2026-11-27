@@ -128,7 +128,6 @@ primary window**, each carrying every behaviour that lives in that window:
 | `window-files` | files viewer | `/files`, scope and reach |
 | `window-collections` | aggregate index | `/collections`, Add vs Move, `/requires`, `/hive` |
 | `window-filters` | filter configurations | `?` filter mode, saved filters, `/clear` |
-| `window-clipboard` | clipboard panel | copy, cut, the swap in both directions |
 | `window-sequence` | sequence viewer | `/sequence`, cycle, drop/paste targets |
 | `window-workflow` | workflow designer | `/workflow new\|run\|step\|stop\|list` |
 | `window-history` | history viewer | `/history`, `/revise`, marks |
