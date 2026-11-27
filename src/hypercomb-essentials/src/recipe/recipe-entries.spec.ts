@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { offeredListBytes, offeredRootKey, type OfferedReadIo } from '../pools/offered-pool.js'
 import type { RoomEntriesDeps, RoomHostAnswer } from '../pools/room-entries.js'
+import type { PoolNode } from '../pools/pool-node.js'
 import { readEntryMember, signEntryMember, type EntryRow } from '../pools/open-entries.js'
 import {
   RECIPE_ENTRY_MEANING,
@@ -999,5 +1000,38 @@ describe('a posted row: a member of an open entry pool', () => {
     const home = hive()
     expect(await takeRecipeHome(made.offer, opened, ['kitchen'], home.deps)).toEqual({ ok: true, segments: ['kitchen', 'sunday-soup'] })
     expect(home.puts).toEqual([{ sig: template, type: 'application/json' }, { sig: recipe, type: 'application/json' }])
+  })
+})
+
+describe('a domain that did not answer', () => {
+  it('is told by name, apart from one that answered with nothing, and the others still give their rows', async () => {
+    const world = domains()
+    await world.offer('up.example', [recipeEntryBytes({ name: 'soup', recipe: sigOf('a') })])
+    const io: OfferedReadIo = {
+      ...world.io,
+      keysOf: async host => {
+        if (host === 'down.example') throw new Error('offline')
+        return world.io.keysOf!(host)
+      },
+    }
+    const told: PoolNode[] = []
+    const answers = vi.fn(async (zone: string) => zone !== 'gone.example')
+    const offers = await findRecipeEntries(
+      { zones: ['up.example', 'down.example', 'quiet.example', 'gone.example'] },
+      { io, ownHost: () => '', answers, unanswered: node => { told.push(node) } },
+    )
+    expect(offers.map(offer => offer.entry.name)).toEqual(['soup'])
+    // A read that threw, and a host that does not answer at all: never read as offering nothing.
+    expect(told.map(node => node.id).sort()).toEqual(['down.example', 'gone.example'])
+    expect(told.every(node => node.kind === 'domain')).toBe(true)
+    // A host that offered rows is not asked again; one that threw needs no second question.
+    expect(answers.mock.calls.map(([zone]) => zone).sort()).toEqual(['gone.example', 'quiet.example'])
+  })
+
+  it('asks nothing more where nobody listens for it', async () => {
+    const world = domains()
+    const answers = vi.fn(async () => false)
+    expect(await findRecipeEntries({ zones: ['quiet.example'] }, { io: world.io, ownHost: () => '', answers })).toEqual([])
+    expect(answers).not.toHaveBeenCalled()
   })
 })

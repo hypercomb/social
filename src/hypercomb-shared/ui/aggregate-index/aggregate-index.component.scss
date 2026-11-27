@@ -641,12 +641,23 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   color: var(--hc-window-ink-loud);
 }
 
-// HOME — lit on the one portal pinned as home. Exactly one row in the list can
-// wear this, so unlike carry it does not stay half-visible when idle: it reads
-// as a standing statement about where home is, not as an available verb.
-.ai-action-home.is-home {
-  background: rgba(214, 176, 110, 0.22);
-  border-color: rgba(214, 176, 110, 0.85);
+// CURRENT — Recent's lit row: the home in effect now. State, not a verb, so
+// it stands lit without hovering. A note (where a row leads, or "here") reads
+// quieter than the name it follows.
+.ai-row.is-current { box-shadow: inset 2px 0 0 rgba(214, 176, 110, 0.85); }
+.ai-row.is-current .ai-label { color: var(--hc-window-ink-loud); }
+.ai-note {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8em;
+  opacity: 0.55;
+}
+.ai-current {
+  flex: none;
+  font-size: 1.05em;
   color: var(--hc-window-ink-loud);
 }
 
@@ -659,19 +670,20 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
 }
 .ai-row.is-linked { box-shadow: inset 2px 0 0 rgba(var(--acc), 0.85); }
 
-// ── PORTALS: actions on the hovered row only ─────────────────────────────────
+// ── PORTALS and RECENT: actions on the hovered row only ─────────────────────
 //
-// Scoped to this one source rather than changed globally — the standing-dim
+// Scoped to these two sources rather than changed globally — the standing-dim
 // default above is deliberate and was verified in a browser (see its comment:
-// hover-only once made rename/delete undiscoverable). Portals is different
-// because it is a LIST YOU READ. It is the picker for where home is and where
-// you are going, so four verbs standing on every row is noise against the one
+// hover-only once made rename/delete undiscoverable). These two are different
+// because each is a LIST YOU READ, the picker for where you are going (and, in
+// Recent, where home is), so four verbs standing on every row is noise against the one
 // thing the row is for: its name.
 //
 // The dimming moves from the strip to each button, because opacity composites —
 // a dimmed strip cannot have a bright child, and one child does have to stay
 // bright.
-.ai-panel[data-source='collections'] {
+.ai-panel[data-source='collections'],
+.ai-panel[data-source='recent'] {
   .ai-actions { opacity: 1; }
 
   .ai-action {
@@ -682,35 +694,10 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   .ai-row:hover .ai-action,
   .ai-row:focus-within .ai-action { opacity: 1; }
 
-  // The home mark is STATE, not a verb. It stays lit on the marked row whether
-  // or not you are hovering it — otherwise finding which portal is home means
-  // hovering every row in turn, which is the opposite of what a mark is for.
-  .ai-action-home.is-home { opacity: 1; }
   // While References manages a page, linking is THE verb here: every row shows
   // where to press, and the linked row stands lit.
   &.is-managing .ai-action-link { opacity: 0.55; }
   .ai-action-link.is-linked { opacity: 1; }
-
-  // RIGHT-ALIGNED while it stands alone. Invisible buttons still take up room,
-  // so the lone mark used to sit where the strip began — adrift in the middle
-  // of nothing, reading as a gap rather than as an edge. Collapsing the hidden
-  // verbs to zero width lets it fall against the row's right edge, which is
-  // where a status mark belongs and where the eye can run down the list to find
-  // it. On hover they take their space back and the verbs return.
-  //
-  // Only rows that CARRY the mark reflow. Doing it to every row would mean the
-  // label resized under the pointer on every row you passed over.
-  .ai-row:not(:hover):not(:focus-within):has(.ai-action-home.is-home) {
-    .ai-actions { gap: 0; }
-
-    .ai-action:not(.ai-action-home) {
-      width: 0;
-      padding: 0;
-      margin: 0;
-      border-width: 0;
-      overflow: hidden;
-    }
-  }
 }
 
 // MOVE — the second verb, and the heavier one: it takes custody, so the tiles
@@ -955,19 +942,8 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
     min-block-size: 44px;
   }
 
-  .ai-panel[data-source='collections'] {
+  .ai-panel[data-source='collections'],
+  .ai-panel[data-source='recent'] {
     .ai-action { opacity: 1; }
-
-    .ai-row:not(:hover):not(:focus-within):has(.ai-action-home.is-home) {
-      .ai-actions { gap: 0.2em; }
-
-      .ai-action:not(.ai-action-home) {
-        width: 1.4em;
-        padding: 0;
-        margin: 0;
-        border-width: 1px;
-        overflow: visible;
-      }
-    }
   }
 }

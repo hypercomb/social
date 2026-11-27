@@ -825,7 +825,7 @@ export async function readEntryPool(path: EntryPoolPath, pool: string, deps: Ent
     const known = heldFor(path.address)
     const unread = listing.names.filter(name => !known.has(name))
     const fetched = await mapBounded(unread, HOST_CONCURRENCY, async (name) => {
-      const response = await fetchOne(`${origin}/${path.address}/${name}`, { credentials: 'omit' })
+      const response = await fetchOne(`${origin}/${path.address}/${name}${entryPoolQuery(path.by, path.until)}`, { credentials: 'omit' })
       if (response.status !== 200) { await response.body?.cancel().catch(() => undefined); return undefined }
       const bytes = await readBodyCapped(response, ENTRY_LIMITS.memberBytes)
       // Bytes that are not the ones named may be a bad transfer: asked again next time, never remembered.

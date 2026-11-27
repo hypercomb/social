@@ -7,7 +7,7 @@
 // ASKS of the page and never how the page draws it.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY } from '@hypercomb/core'
 import { DOMAIN_SHELF_WANTED, SOURCES_CHANGED, SOURCES_COUNTED, SOURCES_NODES, SOURCES_QUERY } from '../pools/lights-contract.js'
 import type { PoolNode } from '../pools/pool-node.js'
 import { VIEW_SPAWN_EFFECT } from '../presentation/tiles/view-spawn.js'
@@ -31,6 +31,8 @@ type FakePage = { options: PageOptions; element: HTMLElement; statuses: [string,
 
 const fakes = vi.hoisted(() => ({
   byZone: new Map<string, unknown[]>(),
+  /** Zones that do not answer: the gathering tells the view so. */
+  down: new Set<string>(),
   room: [] as unknown[],
   asked: [] as { zones: string[]; room: boolean }[],
   open: vi.fn(),
@@ -46,8 +48,9 @@ vi.mock('@hypercomb/core', async importOriginal => ({
 }))
 vi.mock('./recipe-entries.js', async importOriginal => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  findRecipeEntries: async (sources: { zones: readonly string[]; room?: boolean }) => {
+  findRecipeEntries: async (sources: { zones: readonly string[]; room?: boolean }, deps?: { unanswered?: (node: PoolNode) => void }) => {
     fakes.asked.push({ zones: [...sources.zones], room: sources.room === true })
+    for (const zone of sources.zones) if (fakes.down.has(zone)) deps?.unanswered?.({ kind: 'domain', id: zone })
     return [...sources.zones.flatMap(zone => fakes.byZone.get(zone) ?? []), ...(sources.room === true ? fakes.room : [])]
   },
   openRecipeEntry: fakes.open,
@@ -191,6 +194,7 @@ describe('the catalogue view', () => {
     revoked = []
     drone = null
     fakes.byZone.clear()
+    fakes.down.clear()
     fakes.byZone.set('a.example', [SOUP])
     fakes.byZone.set('b.example', [BREAD])
     fakes.byZone.set(DOOR, [offer('pie', 'Plum pie', [domain(DOOR)])])
@@ -234,6 +238,19 @@ describe('the catalogue view', () => {
   })
 
   describe('in a hive', () => {
+    it('says a zone that did not answer by name, and never that nothing is published there', async () => {
+      fakes.down.add('a.example')
+      fakes.byZone.set('a.example', [])
+      sources(['a.example'])
+      await open()
+      await until(() => !!document.querySelector(`${HOST} [data-unanswered]`), 'the silence is said')
+      expect(document.querySelector(`${HOST} [data-unanswered]`)?.textContent).toBe('a.example did not answer.')
+      expect(document.querySelector<HTMLElement>(`${HOST} [data-none]`)?.hidden).toBe(true)
+      // Its count is not known, so the shelf is given none for it.
+      const counted = heardOn(SOURCES_COUNTED).at(-1) as { counts: Record<string, number> } | undefined
+      expect(counted?.counts).not.toHaveProperty('a.example')
+    })
+
     it('lists what the switched-on zones and the room offer, under the header, with the shelf asked into view', async () => {
       fakes.standing = { joined: true, host: 'meet.example', room: 'marble cove' }
       sources(['a.example'])
@@ -334,6 +351,32 @@ describe('the catalogue view', () => {
       await open()
       expect(note()).toBe('Switch a domain on in the shelf, or join a room, to see what is offered.')
       expect(fakes.asked).toEqual([])
+    })
+
+    it('says how to get someone when nobody is followed, and does not also call the page empty', async () => {
+      EffectBus.emit(SOURCES_CHANGED, { zones: [], all: [], query: '' })
+      await open()
+      expect(note()).toBe('Follow a host or join a room, and the recipes they offer appear here.')
+      expect(document.querySelector<HTMLElement>(`${HOST} [data-none]`)?.hidden).toBe(true)
+    })
+
+    it('draws the page again in a language chosen while it is up', async () => {
+      const was = document.documentElement.lang
+      services[I18N_IOC_KEY] = {
+        t: (key: string) => document.documentElement.lang === 'de' && key === 'recipe.catalogue.title' ? 'Rezepte aus deinen Knoten' : key,
+      }
+      try {
+        document.documentElement.lang = 'en'
+        sources(['a.example'])
+        await open()
+        expect(title()).toBe('Recipes from your nodes')
+        document.documentElement.lang = 'de'
+        EffectBus.emit('locale:changed', { locale: 'de' })
+        await until(() => title() === 'Rezepte aus deinen Knoten', 'the page is drawn in German')
+      } finally {
+        delete services[I18N_IOC_KEY]
+        document.documentElement.lang = was
+      }
     })
   })
 

@@ -866,6 +866,12 @@ export type PostEntryResult =
   }
   | (EntryRefused & { readonly status?: number })
 
+/** The stamp each entry was last posted with, this page load only: `<pool>/<page>`. */
+const lastPosted = new Map<string, number>()
+
+/** Forget the stamps posted on this page: a spec's reset between cases. */
+export const forgetEntryPosts = (): void => { lastPosted.clear() }
+
 /**
  * Post one member to the pool, at the page's own origin: stamped with the
  * host's time (this device's clock plus the offset the listing gave), signed
@@ -878,13 +884,19 @@ export async function postEntryMember(input: PostEntryInput, deps?: OpenEntriesD
   try {
     const live = withLive(deps)
     let offset = Number.isSafeInteger(input?.offset) ? input.offset : 0
+    // A change or a take-back made within the second of the one before it would
+    // tie on its stamp, and a tie is broken by the member's name: about half the
+    // time the older one would win. Each post of one entry moves past the last.
+    const entryOf = `${input.pool}/${input.entry.page}`
     for (let tried = 0; tried < 2; tried++) {
-      const signed = await signEntryMember({ ...input.entry, pool: input.pool, createdAt: nowSecondsOf(live) + offset }, input.secretKey)
+      const createdAt = Math.max(nowSecondsOf(live) + offset, (lastPosted.get(entryOf) ?? 0) + 1)
+      const signed = await signEntryMember({ ...input.entry, pool: input.pool, createdAt }, input.secretKey)
       if (!signed.ok) return refused('sign', signed.reason)
       const url = entryMemberUrl(input.path, signed.name)
       if (!url) return refused('path', t('pools.posts.refuse.path', 'This code does not name a pool.'))
       const answer = await live.putMember(url, signed.body).catch(() => ({ said: '' }) as { status?: number; said: string })
       if (answer.status === 200 || answer.status === 201) {
+        lastPosted.set(entryOf, createdAt)
         return { ok: true, name: signed.name, bytes: signed.body, event: signed.event, held: answer.status === 200, offset }
       }
       if (answer.status === 409 && tried === 0) {

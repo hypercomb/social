@@ -1251,7 +1251,15 @@ async function servePublications(request, scoped) {
     }
   }
   sites.push(...await platesInOrder(derived, LOCATION_READS))
-  return json(200, { sites }, { 'Cache-Control': 'no-store' })
+  // THE DEEP NAMES THAT LOAD. A nested place's own name passes TLS only once
+  // it is attached (deep-names.md: the zone's certificate reaches one label),
+  // and most nested places are no plate here. So every attached name on every
+  // zone this host serves is listed once, with when it was attached (0: before
+  // the host kept times), and a hive asks a deep name only once it is here and
+  // its certificate can have arrived — never one no certificate covers.
+  const deepNames = {}
+  for (const zone of wildcardZones(bindings)) Object.assign(deepNames, await attachedDeepNames(env, zone))
+  return json(200, { sites, deepNames }, { 'Cache-Control': 'no-store' })
 }
 
 /** A root place as the ledger reports it: the zone root is its host, its
@@ -1813,9 +1821,16 @@ async function routeMetaForIndex(env, pubkey, evt) {
     const selected = bindings[zone].publishers.find(p => p.primary) || bindings[zone].publishers[0]
     if (selected?.pubkey !== pubkey) continue
     for (const [lineage, rawHead] of Object.entries(index.roots)) {
-      if (!DNS_LABEL_RE.test(lineage) || lineage === 'content') continue
+      // A nested lineage of DNS labels is a deep name, leaf first
+      // (attachDeepNames): its door's bag is advanced like a one-label
+      // place's. Left out, a bag a door wrote once named that day's head
+      // forever, and a disagreeing bag closes the door (2026-11-26: four
+      // jwize.com deep names answered "nothing published" for weeks).
+      const segments = lineage.split('/')
+      if (!segments.every((label) => DNS_LABEL_RE.test(label)) || lineage === 'content') continue
       const head = String(rawHead || '').toLowerCase()
-      const host = `${lineage}.${zone}`
+      const host = `${[...segments].reverse().join('.')}.${zone}`
+      if (host.length > 253) continue
       const resolved = resolveSite(scoped, host)
       if (SIG_RE.test(head) && resolved.implicit && resolved.site?.lineage === lineage
         && opensOn(index, lineage, host, scoped)) found.set(host, locationMeta(resolved.site, pubkey, head, index))
@@ -1824,10 +1839,22 @@ async function routeMetaForIndex(env, pubkey, evt) {
   return found
 }
 
+// Each door's bag is its own location, so the doors advance side by side, a
+// few at a time: one after another, a 126-root index across four zones ran
+// past the eight seconds a hive gives the write (2026-11-26), and the doors
+// last in line missed that publish. Every door is tried; any one that could
+// not move makes the answer false, as before.
+const ROUTE_ADVANCE_WIDTH = 8
+
 async function advancePublishedLocations(env, pubkey, evt) {
-  for (const [host, meta] of await routeMetaForIndex(env, pubkey, evt)) {
-    if (!await advanceRouteMeta(env, host, meta)) return false
+  const routes = [...await routeMetaForIndex(env, pubkey, evt)]
+  let moved = true
+  for (let i = 0; i < routes.length; i += ROUTE_ADVANCE_WIDTH) {
+    const answers = await Promise.all(routes.slice(i, i + ROUTE_ADVANCE_WIDTH)
+      .map(([host, meta]) => advanceRouteMeta(env, host, meta).catch(() => false)))
+    if (answers.includes(false)) moved = false
   }
+  if (!moved) return false
   const scoped = await bindingsEnv(env)
   const { offerings = {} } = JSON.parse(evt.content)
   for (const [location, offer] of Object.entries(offerings)) {
@@ -6488,6 +6515,15 @@ async function validOfferingLocations(evt) {
   return true
 }
 
+/** `work`, handed to the request's waitUntil too, so a caller that hangs up
+ *  (a hive gives an index write eight seconds) does not cancel it. Answers
+ *  what `work` answers; a throw answers false. */
+function keptPastHangUp(work, ctx) {
+  const kept = Promise.resolve(work).catch(() => false)
+  if (ctx?.waitUntil) ctx.waitUntil(kept)
+  return kept
+}
+
 /** After the answer where the request can wait on it (attachDeepNames). */
 function nameDeepPlaces(env, pubkey, evt, ctx) {
   const naming = attachDeepNames(env, pubkey, evt).catch(() => [])
@@ -6504,6 +6540,38 @@ function nameDeepPlaces(env, pubkey, evt, ctx) {
 // so two places publishing at once cannot drop each other's change. `prev` is
 // honoured whenever present; two writes landing in the same instant can still
 // race, as the created_at rule always could.
+/** What a held index's roots say about its publisher, written into the pools
+ *  that list them (translators, assessors, attesters, pictures, contributions,
+ *  details, lists, events, follows, shared pools); one pass that fails leaves
+ *  the rest to run. After the answer when the request can wait on it
+ *  (ctx.waitUntil outlives a caller that hangs up); awaited otherwise, so a
+ *  caller with no ctx sees them written.
+ *  ONLY FOR THE INDEX STILL HELD: the answer no longer waits for the notes, so
+ *  the key's next index can land while these still run, and two passes also
+ *  TAKE AWAY (noteEvents drops a meeting a newer record replaces, noteFollows
+ *  drops a zone the index stopped following). A pass for an index already
+ *  replaced would put back what the newer one took away, so each pass first
+ *  reads the held index (from the pool, never the edge copy) and the notes stop
+ *  once it is another. */
+const INDEX_NOTES = [
+  noteTranslators, noteAssessors, noteAttesters, notePicturePublishers, notePageContributors,
+  noteDetailSpeakers, noteListOfferers, noteEvents, noteFollows, noteSharedPools,
+]
+async function noteAfterAnswer(env, pubkey, evt, ctx) {
+  const stillHeld = async () => {
+    try { return String(JSON.parse((await readHeldIndex(env, pubkey)) ?? 'null')?.id || '') === String(evt.id || '') }
+    catch { return false }
+  }
+  const noting = (async () => {
+    for (const note of INDEX_NOTES) {
+      if (!(await stillHeld())) return
+      try { await note(env, pubkey, evt) } catch { /* the next write of this index notes it again */ }
+    }
+  })()
+  if (typeof ctx?.waitUntil === 'function') { ctx.waitUntil(noting); return }
+  await noting
+}
+
 async function putHive(request, env, pubkey, ctx) {
   const auth = await verifyNip98(request, parseAuthEvent(request), 'PUT', env)
   if (!auth.ok) return text(401, auth.reason)
@@ -6526,7 +6594,10 @@ async function putHive(request, env, pubkey, ctx) {
   if (stored) {
     if (String(stored.id || '') === String(evt.id || '')) {
       await nameDeepPlaces(env, pubkey, evt, ctx)
-      return await advancePublishedLocations(env, pubkey, evt)
+      // A retry of the index held: its notes may have been cut off with the
+      // first write, so they run again (each one only adds what is missing).
+      await noteAfterAnswer(env, pubkey, evt, ctx)
+      return await keptPastHangUp(advancePublishedLocations(env, pubkey, evt), ctx)
         ? text(200, 'index already current')
         : text(503, 'signed index is held but a route location is not current; retry this index')
     }
@@ -6549,17 +6620,17 @@ async function putHive(request, env, pubkey, ctx) {
   // the handler — so naming last meant a held index whose deep names were
   // never asked for (2026-11-25, 125 roots). waitUntil outlives the hang-up.
   await nameDeepPlaces(env, pubkey, evt, ctx)
-  await noteTranslators(env, pubkey, evt)
-  await noteAssessors(env, pubkey, evt)
-  await noteAttesters(env, pubkey, evt)
-  await notePicturePublishers(env, pubkey, evt)
-  await notePageContributors(env, pubkey, evt)
-  await noteDetailSpeakers(env, pubkey, evt)
-  await noteListOfferers(env, pubkey, evt)
-  await noteEvents(env, pubkey, evt)
-  await noteFollows(env, pubkey, evt)
-  await noteSharedPools(env, pubkey, evt)
-  if (!await advancePublishedLocations(env, pubkey, evt)) {
+  // The doors advance from here and outlive a caller that hangs up: the
+  // answer still waits on them, and only they can still refuse it.
+  const advancing = keptPastHangUp(advancePublishedLocations(env, pubkey, evt), ctx)
+  // The notes decide nothing about this answer, and on a big index they were
+  // most of its time: measured with jwize's 126-root index at 25 ms a storage
+  // call, 170 calls one after another (pictures and events nearly all of it),
+  // past the hive's eight seconds, so the hive said "host unreachable" for a
+  // write that had landed and the hang-up cut the notes off. They run after
+  // the answer now.
+  await noteAfterAnswer(env, pubkey, evt, ctx)
+  if (!await advancing) {
     return text(503, 'signed index is held but a route location is not current; retry this index')
   }
   if (headOnly(env)) {
@@ -7028,23 +7099,107 @@ async function attachDeepNames(env, pubkey, evt) {
   const attached = []
   for (const { host, zone } of wanted) {
     if (attached.length >= DEEP_NAMES_PER_WRITE) break
-    if (!zones.has(zone)) {
-      const found = await cloudflare(env, 'GET', `/zones?${new URLSearchParams({ name: zone, 'account.id': account })}`)
-      const id = found.ok && Array.isArray(found.result) ? String(found.result[0]?.id || '') : ''
-      let held = null
-      if (ZONE_ID_RE.test(id)) {
-        const list = await cloudflare(env, 'GET', `/accounts/${account}/workers/domains?${new URLSearchParams({ zone_id: id })}`)
-        if (list.ok && Array.isArray(list.result)) held = new Set(list.result.map((d) => String(d?.hostname || '').toLowerCase()))
-      }
-      zones.set(zone, { id, held })
-    }
+    if (!zones.has(zone)) zones.set(zone, await zoneAttachments(env, account, zone))
     const { id, held } = zones.get(zone)
     if (!held || held.has(host)) continue
     const put = await cloudflare(env, 'PUT', `/accounts/${account}/workers/domains`,
       { hostname: host, service: claimScript(env), environment: 'production', zone_id: id })
     if (put.ok) { attached.push(host); held.add(host) }
   }
+  const now = Date.now()
+  for (const [zone, { held }] of zones) {
+    if (held) await keepAttachedDeepNames(env, zone, held, new Set(attached), now).catch(() => {})
+  }
   return attached
+}
+
+// WHAT IS ATTACHED, KEPT. The zone's list of attached names is read whenever a
+// write attaches (above); it is kept in HIVES as `deep-names:<zone>` =
+// { host: attachedAt }, so the ledger can say which nested names load without
+// asking Cloudflare on a read. Written only when it changes: the store allows
+// few writes a day.
+//
+// A time only ever errs LATE. A name with no kept time is stamped now, so a
+// stale or racing read can only make a hive wait for a certificate longer,
+// never ask a name before its certificate exists. The one exception is the
+// zone's FIRST keeping (its key never written): every name already attached
+// then predates the keeping and is stamped 0, "long since", so names that
+// loaded before this was kept go on loading.
+const DEEP_NAMES_TTL_MS = 60_000
+const deepNamesHeld = new Map()
+const deepNamesSeeded = new Map()
+const deepNamesKey = (zone) => `deep-names:${zone}`
+
+/** The zone's kept list straight from the store: the object, or null when the
+ *  key was never written. Throws when the store cannot be read. */
+async function readDeepNames(kv, zone) {
+  const raw = await kv.get(deepNamesKey(zone))
+  if (raw == null) return null
+  const parsed = JSON.parse(String(raw))
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+}
+
+/** The names attached on `zone`, with when: `{ host: attachedAt }`. Read at
+ *  most once a minute per isolate; an unreadable store answers {}. */
+async function attachedDeepNames(env, zone) {
+  const kv = env.HIVES
+  if (!kv?.get) return {}
+  const held = deepNamesHeld.get(zone)
+  if (held && held.kv === kv && Date.now() - held.at < DEEP_NAMES_TTL_MS) return held.value
+  let value = {}
+  try { value = (await readDeepNames(kv, zone)) ?? await seedDeepNames(env, zone) } catch { value = {} }
+  deepNamesHeld.set(zone, { at: Date.now(), kv, value })
+  return value
+}
+
+/** The zone's id and the names attached on it, from Cloudflare: `{ id, held }`,
+ *  held null when the list could not be read. */
+async function zoneAttachments(env, account, zone) {
+  const found = await cloudflare(env, 'GET', `/zones?${new URLSearchParams({ name: zone, 'account.id': account })}`)
+  const id = found.ok && Array.isArray(found.result) ? String(found.result[0]?.id || '') : ''
+  let held = null
+  if (ZONE_ID_RE.test(id)) {
+    const list = await cloudflare(env, 'GET', `/accounts/${account}/workers/domains?${new URLSearchParams({ zone_id: id })}`)
+    if (list.ok && Array.isArray(list.result)) held = new Set(list.result.map((d) => String(d?.hostname || '').toLowerCase()))
+  }
+  return { id, held }
+}
+
+/** A zone that has never been kept takes its list once, the first time the
+ *  ledger asks, so names attached before this was kept are listed without
+ *  waiting for the next publish. A failed or unconfigured try answers {} and
+ *  is not retried for a minute. */
+async function seedDeepNames(env, zone) {
+  if (!claimsConfigured(env)) return {}
+  const tried = deepNamesSeeded.get(zone)
+  if (tried && tried.kv === env.HIVES && Date.now() - tried.at < DEEP_NAMES_TTL_MS) return {}
+  deepNamesSeeded.set(zone, { at: Date.now(), kv: env.HIVES })
+  const { held } = await zoneAttachments(env, String(env.CF_ACCOUNT_ID).trim(), zone)
+  if (!held) return {}
+  return (await keepAttachedDeepNames(env, zone, held, new Set(), Date.now())) ?? {}
+}
+
+/** Keep the zone's attached names: everything its list now holds, a name just
+ *  attached stamped `now`, one already kept keeping its time, and one with no
+ *  kept time stamped `now` too, unless this is the zone's first keeping (0).
+ *  Read straight from the store, never the minute's cache. Answers the list. */
+async function keepAttachedDeepNames(env, zone, held, justAttached, now) {
+  const kv = env.HIVES
+  if (!kv?.put || !kv?.get) return null
+  const stored = await readDeepNames(kv, zone)
+  const first = stored === null
+  const before = stored ?? {}
+  const next = {}
+  for (const host of [...held].sort()) {
+    next[host] = justAttached.has(host) ? now
+      : Number.isFinite(before[host]) ? before[host]
+      : first ? 0 : now
+  }
+  const same = !first && Object.keys(next).length === Object.keys(before).length
+    && Object.entries(next).every(([host, at]) => before[host] === at)
+  if (!same) await kv.put(deepNamesKey(zone), JSON.stringify(next))
+  deepNamesHeld.set(zone, { at: Date.now(), kv, value: next })
+  return next
 }
 
 /** A short reason a participant can read and an operator can act on. */

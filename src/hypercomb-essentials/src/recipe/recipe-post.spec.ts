@@ -9,6 +9,7 @@ import {
   recipePostDocument,
   recipePostPage,
   recipePostRecipe,
+  recipePostRefusal,
   recipePostSections,
   type RecipePostPageOptions,
 } from './recipe-post.js'
@@ -125,6 +126,35 @@ describe('the changes a poster has left', () => {
   })
 })
 
+describe('the host\'s refusals, in the page\'s words', () => {
+  it('says each reason the host sends for an entry as a sentence of the page\'s, under its key', () => {
+    const keys: string[] = []
+    const keyed = (key: string, fallback: string, params?: Record<string, string | number>): string => {
+      keys.push(key)
+      return fallback.replace(/\{(\w+)\}/g, (hole, name: string) => params && name in params ? String(params[name]) : hole)
+    }
+    expect(recipePostRefusal('this one is closed', keyed)).toBe('This one is closed, so your entry was not posted.')
+    expect(recipePostRefusal('this one has expired', keyed)).toBe('This one has expired, so your entry was not posted.')
+    expect(recipePostRefusal('this one is full', keyed)).toBe('This one is full, so your entry was not posted.')
+    expect(recipePostRefusal('this key has posted its 8 here', keyed)).toBe('You have used all 8 changes here.')
+    expect(recipePostRefusal('an entry is at most 4096 bytes', keyed)).toBe('Your entry is too long for this host.')
+    expect(recipePostRefusal('entry stamp is more than ten minutes from this host\'s clock', keyed)).toContain('too far apart')
+    expect(recipePostRefusal('an entry carries a title of one line, 1 to 120 characters', keyed)).toContain('name or title')
+    expect(recipePostRefusal('no pool is open at this address', keyed)).toBe('This host is not taking posts for this code.')
+    expect(recipePostRefusal('this address is not an entry pool', keyed)).toBe('This host is not taking posts for this code.')
+    expect(recipePostRefusal('this host could not take the entry', keyed)).toContain('Try again in a moment')
+    expect(recipePostRefusal('invalid entry signature', keyed)).toBe('This host could not read the entry this page made, so it was not posted.')
+    expect(recipePostRefusal('the id is not the lowercase hash of this event', keyed)).toBe('This host could not read the entry this page made, so it was not posted.')
+    expect(keys.every(key => key.startsWith('recipe.post.refused.'))).toBe(true)
+    expect(keys).not.toContain('recipe.post.refused.other')
+  })
+
+  it('keeps a reason it does not know in the host\'s own words, inside a sentence of the page\'s, and says nothing for none', () => {
+    expect(recipePostRefusal('  the moon is\nin the way ', say)).toBe('The host did not take your entry. It said: the moon is in the way')
+    expect(recipePostRefusal('', say)).toBe('')
+  })
+})
+
 describe('the page', () => {
   const made: { dispose(): void }[] = []
   afterEach(() => { for (const page of made.splice(0)) page.dispose() })
@@ -177,6 +207,42 @@ describe('the page', () => {
     expect((root.querySelector('[role="form"]') as HTMLElement).hidden).toBe(true)
   })
 
+  it('puts focus on its heading, and offers Try again only when asked to', () => {
+    let retried = 0
+    const { handle, root } = page({ onRetry: () => { retried++ } })
+    handle.focus()
+    expect(document.activeElement).toBe(root.querySelector('h1'))
+    const retry = root.querySelector<HTMLButtonElement>('.hc-recipe-post-retry')!
+    expect(retry.hidden).toBe(true)
+    handle.setRetry(true)
+    expect(retry.hidden).toBe(false)
+    retry.click()
+    retry.click()
+    expect(retried).toBe(1)
+    expect(retry.hidden).toBe(true)
+    expect(document.activeElement).toBe(root.querySelector('h1'))
+  })
+
+  it('says the press under way on the press, and shuts both while it runs', () => {
+    const { handle, root, calls } = page()
+    handle.setForm(LAYOUT)
+    const [post, back] = [...root.querySelectorAll('.hc-recipe-post-actions button')] as HTMLButtonElement[]
+    // Take it back is a plain word: only Post carries a weight of its own.
+    expect(back!.className).toBe('hc-recipe-btn')
+    handle.setActions({ post: true, takeBack: true, posted: true, sending: 'post' })
+    expect(post!.textContent).toBe('Posting…')
+    expect(post!.disabled).toBe(true)
+    expect(back!.disabled).toBe(true)
+    post!.click()
+    expect(calls.post).toBe(0)
+    handle.setActions({ post: true, takeBack: true, posted: true, sending: 'back' })
+    expect(back!.textContent).toBe('Taking it back…')
+    handle.setActions({ post: true, takeBack: true, posted: true })
+    expect(post!.textContent).toBe('Post the change')
+    expect(back!.textContent).toBe('Take it back')
+    expect(post!.disabled).toBe(false)
+  })
+
   it('says the state and when it ends, and presses only what is open', () => {
     const { handle, root, calls } = page()
     handle.setState('This one is open.', 'Open until Tuesday.')
@@ -205,9 +271,17 @@ describe('the page', () => {
     handle.showRecipe({ title: 'Soup', recipe: { values: { story: { kind: 'text', text: 'Hi' } } }, template: LAYOUT })
     expect((root.querySelector('.hc-recipe-post-scroll') as HTMLElement).inert).toBe(true)
     expect(root.querySelectorAll(':scope > .hc-recipe').length).toBe(1)
+    // Focus goes in with it; Escape closes it, never the page, and focus comes back to the row.
+    const reading = root.querySelector(':scope > .hc-recipe') as HTMLElement
+    expect(reading.contains(document.activeElement)).toBe(true)
+    ;(document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(root.querySelectorAll(':scope > .hc-recipe').length).toBe(0)
+    expect(calls.close).toBe(0)
+    expect(document.activeElement).toBe(card)
+    expect((root.querySelector('.hc-recipe-post-scroll') as HTMLElement).inert).toBe(false)
+    handle.showRecipe({ title: 'Soup', recipe: { values: { story: { kind: 'text', text: 'Hi' } } }, template: LAYOUT })
     handle.closeRecipe()
     expect(root.querySelectorAll(':scope > .hc-recipe').length).toBe(0)
-    expect((root.querySelector('.hc-recipe-post-scroll') as HTMLElement).inert).toBe(false)
     handle.setPosted(null)
     expect((root.querySelector('.hc-recipe-post-posted') as HTMLElement).hidden).toBe(true)
   })

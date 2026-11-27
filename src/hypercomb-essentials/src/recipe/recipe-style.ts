@@ -33,7 +33,6 @@ export const RECIPE_STYLE_ID = 'hc-recipe-style'
 /** The caller's localisation: a key, the English words, and what fills their `{tokens}`. */
 export type RecipeSay = (key: string, fallback: string, params?: Record<string, string | number>) => string
 
-const BRIGHT = ':is([data-theme="light"],[data-theme="honey"],[data-theme="bloom"],[data-theme="sherbet"],[data-theme="beehive"])'
 const DESKS = ':is(.hc-recipe,.hc-recipe-picker)'
 const NARROW = '.hc-recipe[data-layout="narrow"]'
 
@@ -50,16 +49,16 @@ const RECIPE_STYLE = `
   --rp-line-firm:var(--hc-window-line-firm,rgba(var(--rp-ink),0.28));
   --rp-tint:var(--hc-window-tint,rgba(var(--rp-ink),0.045));
   --rp-tint-strong:var(--hc-window-tint-strong,rgba(var(--rp-ink),0.09));
-  --rp-acc:200,151,90;
-  --rp-accent:rgb(var(--rp-acc));
+  --rp-deepen:var(--hc-deepen,0%);
+  --rp-accent:color-mix(in srgb,rgb(200,151,90),rgb(var(--rp-ink)) var(--rp-deepen));
   --rp-on-accent:rgb(var(--rp-pane));
-  --rp-wash:rgba(var(--rp-acc),0.1);
-  --rp-wash-strong:rgba(var(--rp-acc),0.2);
-  --rp-edge:rgba(var(--rp-acc),0.28);
-  --rp-edge-firm:rgba(var(--rp-acc),0.62);
-  --rp-focus:color-mix(in srgb,rgb(var(--rp-acc)) 72%,white);
+  --rp-wash:color-mix(in srgb,var(--rp-accent) 10%,transparent);
+  --rp-wash-strong:color-mix(in srgb,var(--rp-accent) 20%,transparent);
+  --rp-edge:color-mix(in srgb,var(--rp-accent) 28%,transparent);
+  --rp-edge-firm:color-mix(in srgb,var(--rp-accent) 62%,transparent);
+  --rp-focus:color-mix(in srgb,var(--rp-accent) 72%,white);
   --rp-halo:color-mix(in srgb,var(--rp-ground) 85%,transparent);
-  --rp-good:color-mix(in srgb,rgb(var(--rp-lit)) 55%,rgb(var(--rp-ink)));
+  --rp-good:var(--hc-status-ok,color-mix(in srgb,rgb(var(--rp-lit)) 45%,rgb(var(--rp-ink))));
   --rp-warn:var(--hc-status-warn,#f0b05c);
   --rp-lit:111,211,154;
   --rp-plate:255,255,255;
@@ -74,8 +73,9 @@ const RECIPE_STYLE = `
   font-size:calc(1rem * var(--hc-panel-scale,1));line-height:1.4;
   color:var(--rp-plain);-webkit-text-size-adjust:100%;text-size-adjust:100%;
 }
-${BRIGHT} ${DESKS}{--rp-acc:116,81,39;}
-@media (prefers-color-scheme:light){:root:not([data-theme]) ${DESKS}{--rp-acc:116,81,39;}}
+/* With no shell tokens at all, a light machine still gets a light desk: its own ink, pane, deepen and caution, never brown on dark. */
+@media (prefers-color-scheme:light){:root:not([data-theme]) ${DESKS}{--rp-ink:var(--hc-panel-ink,26,33,48);--rp-pane:var(--hc-panel-pane,253,254,255);
+  --rp-deepen:var(--hc-deepen,46%);--rp-warn:var(--hc-status-warn,#7f4b04);}}
 .hc-recipe *,.hc-recipe *::before,.hc-recipe *::after,
 .hc-recipe-picker *,.hc-recipe-picker *::before,.hc-recipe-picker *::after{box-sizing:border-box;}
 .hc-recipe [hidden],.hc-recipe-picker [hidden]{display:none !important;}
@@ -98,7 +98,7 @@ ${BRIGHT} ${DESKS}{--rp-acc:116,81,39;}
 .hc-recipe-head-end{flex:1 1 auto;min-width:0;display:flex;align-items:center;justify-content:flex-end;gap:0.25em 0.5em;}
 .hc-recipe-head-end:has(.hc-recipe-shared:not([hidden])){flex-basis:20em;}
 .hc-recipe-status.is-good{color:var(--rp-good);}
-.hc-recipe-status.is-bad{color:var(--rp-warn);}
+.hc-recipe-status.is-bad{color:var(--rp-warn);white-space:normal;overflow:visible;text-overflow:clip;}
 .hc-recipe-sep{flex:none;align-self:center;width:1px;height:1.6em;margin:0 0.15em;background:var(--rp-line-firm);}
 .hc-recipe-head .hc-recipe-field{flex:0 1 14em;width:auto;}
 
@@ -106,10 +106,11 @@ ${BRIGHT} ${DESKS}{--rp-acc:116,81,39;}
   padding:0 0.85em;border:0;border-radius:var(--rp-control,2px);background:transparent;color:var(--rp-plain);
   font:inherit;font-size:0.82em;line-height:1.3;white-space:nowrap;cursor:pointer;transition:background-color 150ms ease,color 150ms ease;}
 .hc-recipe-btn:hover:not(:disabled){background:var(--rp-tint-strong);color:var(--rp-loud);}
-.hc-recipe-btn:disabled{color:var(--rp-quiet);cursor:default;opacity:0.6;}
-.hc-recipe-btn.is-line{box-shadow:inset 0 0 0 1px var(--rp-line-firm);}
+.hc-recipe-btn:disabled{color:var(--rp-quiet);cursor:default;}
 .hc-recipe-btn.is-solid{min-width:5.5em;background:var(--rp-accent);color:var(--rp-on-accent,Canvas);font-weight:600;}
 .hc-recipe-btn.is-solid:hover:not(:disabled){background:color-mix(in srgb,var(--rp-accent) 86%,rgb(var(--rp-ink)));color:var(--rp-on-accent,Canvas);}
+/* A filled press that cannot be pressed (Next on the last page) must not look pressable: it loses its fill, keeps its place. */
+.hc-recipe-btn.is-solid:disabled{background:transparent;color:var(--rp-quiet);outline:1px solid var(--rp-line);outline-offset:-1px;}
 .hc-recipe-btn-words{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .hc-recipe-template{flex:0 1 auto;min-width:4.5em;max-width:15em;padding-right:0.45em;box-shadow:inset 0 0 0 1px var(--rp-line);}
 .hc-recipe-tool{appearance:none;flex:none;display:inline-grid;place-items:center;width:1.9em;height:1.9em;margin:0;padding:0;border:0;
@@ -185,6 +186,17 @@ ${BRIGHT} ${DESKS}{--rp-acc:116,81,39;}
 .hc-recipe-dish{position:absolute;inset:0;display:grid;place-items:center;overflow:hidden;background:rgb(var(--rp-plate));cursor:pointer;
   border-radius:var(--rp-floating);box-shadow:0 0 0 1px rgba(var(--rp-ink),0.1),0 0.7em 1.8em rgba(var(--rp-shadow),0.1);}
 .hc-recipe-dish img{display:block;width:100%;height:100%;padding:4%;object-fit:contain;}
+/* A picture that did not arrive: the picture mark and its words on the plate's white, never a blank card. */
+.hc-recipe-missing{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0.35em;width:100%;min-width:0;min-height:4em;
+  aspect-ratio:4 / 3;padding:0.5em;border-radius:var(--rp-control);background:rgb(var(--rp-plate));color:rgba(var(--rp-on-plate),0.74);
+  font-family:var(--rp-read);font-size:0.8em;line-height:1.3;text-align:center;overflow:hidden;}
+.hc-recipe-missing .hc-recipe-mark{width:1.7em;height:1.7em;opacity:0.5;}
+.hc-recipe-missing-words{max-width:100%;overflow-wrap:anywhere;}
+.hc-recipe-dish .hc-recipe-missing{position:absolute;inset:0;aspect-ratio:auto;border-radius:0;font-size:0.9em;padding:12%;}
+.hc-recipe-strip-thumb .hc-recipe-missing{min-height:0;height:100%;aspect-ratio:auto;padding:0;border-radius:0;}
+.hc-recipe-strip-thumb .hc-recipe-missing .hc-recipe-mark{width:1.2em;height:1.2em;}
+.hc-recipe-strip-thumb .hc-recipe-missing-words{display:none;}
+.hc-recipe-picture .hc-recipe-missing{font-size:0.6em;}
 .hc-recipe-invite{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:46%;display:flex;flex-direction:column;align-items:center;
   gap:0.55em;text-align:center;color:rgba(var(--rp-on-plate),0.74);}
 .hc-recipe-invite .hc-recipe-mark{width:1.7em;height:1.7em;opacity:0.5;}
@@ -195,8 +207,7 @@ ${BRIGHT} ${DESKS}{--rp-acc:116,81,39;}
 .hc-recipe-invite-btn:hover{background:rgba(var(--rp-on-plate),0.16);}
 .hc-recipe-invite-btn .hc-recipe-mark{width:1.2em;height:1.2em;opacity:1;}
 .hc-recipe-figure-note{position:absolute;left:50%;bottom:8%;transform:translateX(-50%);padding:0.2em 0.6em;border-radius:var(--rp-control);
-  background:rgb(var(--rp-plate));color:rgba(var(--rp-on-plate),0.8);font-size:0.72em;white-space:nowrap;
-  animation:hc-recipe-storing 1.2s ease-in-out infinite alternate;}
+  background:rgb(var(--rp-plate));color:rgba(var(--rp-on-plate),0.8);font-size:0.72em;white-space:nowrap;}
 .hc-recipe.is-dropping .hc-recipe-figure{outline:2px dashed var(--rp-accent);outline-offset:0.5em;border-radius:var(--rp-floating);}
 
 /* ── a table set: a photographed table where the plate was ─────────────── */
@@ -204,25 +215,25 @@ ${BRIGHT} ${DESKS}{--rp-acc:116,81,39;}
 .hc-recipe[data-set] .hc-recipe-stage{grid-template-columns:minmax(0,1fr) var(--hc-recipe-figure-w,36em) minmax(0,1fr);}
 .hc-recipe[data-set] .hc-recipe-figure{width:var(--hc-recipe-figure-w,36em);height:var(--hc-recipe-figure-h,24em);}
 .hc-recipe[data-set] .hc-recipe-tools{max-width:var(--hc-recipe-figure-w,36em);}
-.hc-recipe-set{position:absolute;inset:0;overflow:hidden;border-radius:var(--rp-floating);background:rgb(24,25,27);
+.hc-recipe-set{position:absolute;inset:0;overflow:hidden;border-radius:var(--rp-floating);background:var(--rp-tint-strong);
   box-shadow:0 0 0 1px rgba(var(--rp-ink),0.1),0 0.9em 2.4em rgba(var(--rp-shadow),0.24);}
 .hc-recipe-set-canvas{position:absolute;left:0;top:0;transform-origin:0 0;}
 .hc-recipe-set-layer{position:absolute;left:0;top:0;display:block;width:100%;height:100%;pointer-events:none;user-select:none;}
 .hc-recipe-set-cards{position:absolute;inset:0;pointer-events:none;}
 /* A place card: a slip of washi laid flat on the glaze, the plate's colour a little through it, in the desk's own type. */
 .hc-recipe-placecard{position:absolute;left:0;top:0;transform-origin:0 0;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:0.14em;padding:0 0.7em;overflow:hidden;background:rgba(244,238,226,0.84);color:rgb(58,46,36);border-radius:2px;
+  gap:0.14em;padding:0 0.7em;overflow:hidden;background:rgba(244,238,226,0.84);color:rgb(58,46,36);border-radius:var(--rp-control);
   box-shadow:0 0 0 0.04em rgba(70,52,36,0.22),0 0.06em 0.22em rgba(0,0,0,0.32);font-family:var(--rp-mono);line-height:1.08;text-align:center;
   transition:opacity 150ms ease,box-shadow 150ms ease;}
 .hc-recipe-placecard-label{max-width:100%;font-size:1em;font-weight:600;letter-spacing:0.03em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .hc-recipe-placecard-said{max-width:100%;font-family:var(--rp-read);font-size:0.7em;color:rgba(58,46,36,0.7);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.hc-recipe-placecard[data-lit]{background:rgba(250,246,238,0.95);box-shadow:0 0 0 0.12em rgb(var(--rp-acc)),0 0.08em 0.25em rgba(0,0,0,0.28);}
+.hc-recipe-placecard[data-lit]{background:rgba(250,246,238,0.95);box-shadow:0 0 0 0.12em var(--rp-accent),0 0.08em 0.25em rgba(0,0,0,0.28);}
 .hc-recipe-set-hits{position:absolute;left:0;top:0;overflow:visible;}
 .hc-recipe-set-plate{fill:transparent;stroke:transparent;pointer-events:all;cursor:pointer;vector-effect:non-scaling-stroke;stroke-width:1.5px;
   stroke-linejoin:round;transition:fill 150ms ease,stroke 150ms ease;}
-.hc-recipe-set-plate[data-lit]{fill:rgba(var(--rp-acc),0.1);stroke:rgba(var(--rp-acc),0.75);}
-.hc-recipe-set-plate[data-lit="strong"]{stroke:rgb(var(--rp-acc));}
+.hc-recipe-set-plate[data-lit]{fill:var(--rp-wash);stroke:color-mix(in srgb,var(--rp-accent) 75%,transparent);}
+.hc-recipe-set-plate[data-lit="strong"]{stroke:var(--rp-accent);}
 .hc-recipe-lead.is-set circle{fill:rgb(var(--rp-plate));stroke:rgba(var(--rp-on-plate),0.72);}
 .hc-recipe-lead.is-set[data-lit] circle{fill:var(--rp-accent);stroke:rgb(var(--rp-plate));}
 
@@ -234,11 +245,10 @@ ${BRIGHT} ${DESKS}{--rp-acc:116,81,39;}
   max-height:60vh;overflow-y:auto;padding:2px;background:var(--rp-ground);border:1px solid var(--rp-edge-firm);border-radius:var(--rp-floating);
   box-shadow:0 0.6em 1.8em rgba(var(--rp-shadow),0.18);}
 .hc-recipe-table-item{justify-content:flex-start;width:100%;}
-.hc-recipe-table-item[aria-checked="true"]{background:var(--rp-wash);box-shadow:inset 2px 0 0 var(--rp-accent);}
+.hc-recipe-table-item[aria-pressed="true"]{background:var(--rp-wash);box-shadow:inset 2px 0 0 var(--rp-accent);}
 .hc-recipe-table-aside{margin-left:auto;padding-left:0.8em;font-size:0.86em;color:var(--rp-quiet);overflow:hidden;text-overflow:ellipsis;}
 .hc-recipe-table-head{margin:0;padding:0.6em 0.75em 0.25em;font-size:0.64em;font-weight:500;letter-spacing:0.12em;text-transform:uppercase;color:var(--rp-quiet);}
-.hc-recipe-table-note{margin:0;padding:0.3em 0.75em;font-family:var(--rp-read);font-size:0.76em;color:var(--rp-quiet);
-  animation:hc-recipe-storing 1.2s ease-in-out infinite alternate;}
+.hc-recipe-table-note{margin:0;padding:0.3em 0.75em;font-family:var(--rp-read);font-size:0.76em;color:var(--rp-quiet);}
 .hc-recipe-table-rule{display:block;height:1px;margin:2px 0.4em;background:var(--rp-line);}
 /* A kept set and its remove press, side by side: the set takes the row, the press its own small square. */
 .hc-recipe-table-kept{display:flex;align-items:center;gap:2px;}
@@ -285,15 +295,15 @@ ${BRIGHT} ${DESKS}{--rp-acc:116,81,39;}
   background:var(--rp-ground);color:var(--rp-quiet);font:inherit;text-align:left;cursor:pointer;
   transition:color 150ms ease,background-color 150ms ease,outline-color 150ms ease,opacity 150ms ease;}
 .hc-recipe-tab::after{content:"";position:absolute;left:0.6em;right:0.6em;bottom:1px;height:1px;background:transparent;transition:background-color 150ms ease;}
-.hc-recipe-tab-label{flex:0 0 auto;max-width:72%;font-size:0.86em;font-weight:600;letter-spacing:0.01em;color:var(--rp-plain);
+.hc-recipe-tab-label{flex:0 1 auto;min-width:0;max-width:100%;font-size:0.86em;font-weight:600;letter-spacing:0.01em;color:var(--rp-plain);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:color 150ms ease;}
-.hc-recipe-tab-value{flex:1 1 2em;min-width:0;font-size:0.76em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hc-recipe-tab-value{flex:1 1 0;min-width:0;font-size:0.76em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .hc-recipe-tab:focus-visible{outline:2px solid var(--rp-focus);outline-offset:1px;}
 [data-side="left"] > .hc-recipe-tab{grid-column:1;justify-self:end;flex-direction:row-reverse;text-align:right;}
 [data-side="right"] > .hc-recipe-tab{grid-column:3;justify-self:start;}
-.hc-recipe-tab[data-lit="soft"]{background:color-mix(in srgb,rgb(var(--rp-acc)) 10%,var(--rp-ground));outline-color:var(--rp-edge);color:var(--rp-loud);}
+.hc-recipe-tab[data-lit="soft"]{background:color-mix(in srgb,var(--rp-accent) 10%,var(--rp-ground));outline-color:var(--rp-edge);color:var(--rp-loud);}
 .hc-recipe-tab[data-lit="soft"]::after{background:var(--rp-edge-firm);}
-.hc-recipe-tab[data-lit="strong"]{background:color-mix(in srgb,rgb(var(--rp-acc)) 20%,var(--rp-ground));outline-color:var(--rp-edge-firm);color:var(--rp-loud);}
+.hc-recipe-tab[data-lit="strong"]{background:color-mix(in srgb,var(--rp-accent) 20%,var(--rp-ground));outline-color:var(--rp-edge-firm);color:var(--rp-loud);}
 .hc-recipe-tab[data-lit="strong"]::after{bottom:0;height:2px;background:var(--rp-accent);}
 .hc-recipe-tab[data-lit] .hc-recipe-tab-label{color:var(--rp-loud);}
 .hc-recipe[data-compact] .hc-recipe-tab-value{display:none;}
@@ -308,7 +318,7 @@ ${BRIGHT} ${DESKS}{--rp-acc:116,81,39;}
 .hc-recipe-callout-amount{flex:none;font-size:0.74em;color:var(--rp-quiet);white-space:nowrap;}
 .hc-recipe-callout-item{flex:0 1 auto;min-width:0;font-family:var(--rp-read);font-size:0.98em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .hc-recipe-callout.is-more .hc-recipe-callout-item{font-family:inherit;font-size:0.76em;color:var(--rp-quiet);}
-.hc-recipe-callout[data-lit]{background:color-mix(in srgb,rgb(var(--rp-acc)) 10%,var(--rp-ground));}
+.hc-recipe-callout[data-lit]{background:color-mix(in srgb,var(--rp-accent) 10%,var(--rp-ground));}
 .hc-recipe-callout[data-lit]::after{background:var(--rp-edge-firm);}
 
 .hc-recipe-also{align-self:end;width:min(100%,17em);margin:0;padding-top:0.35em;border-top:1px solid var(--rp-line);
@@ -318,7 +328,8 @@ ${BRIGHT} ${DESKS}{--rp-acc:116,81,39;}
 .hc-recipe-also[data-side="right"]{grid-column:3;justify-self:start;}
 
 .hc-recipe[data-open] .hc-recipe-part:not([data-open]) > :is(.hc-recipe-tab,.hc-recipe-callout):not([data-lit]),
-.hc-recipe[data-open] .hc-recipe-also{opacity:0.5;}
+.hc-recipe[data-open] .hc-recipe-part:not([data-open]) > :is(.hc-recipe-tab,.hc-recipe-callout):not([data-lit]) :is(.hc-recipe-tab-label,.hc-recipe-callout-item),
+.hc-recipe[data-open] .hc-recipe-also{color:var(--rp-quiet);}
 .hc-recipe[data-open] .hc-recipe-lead:not([data-lit]):not([data-own]){opacity:0.35;}
 
 /* ── the card: one part, opened down the middle ────────────────────────── */
@@ -375,8 +386,7 @@ select.hc-recipe-field option{background:rgb(var(--rp-pane));color:rgb(var(--rp-
 .hc-recipe-thumb .hc-recipe-tag{position:absolute;top:0.3em;left:0.3em;background:var(--rp-ground);}
 .hc-recipe-thumb-tools{display:flex;justify-content:space-between;}
 .hc-recipe-thumb.is-storing{display:grid;place-items:center;aspect-ratio:4 / 3;padding:0.5em;border-style:dashed;
-  font-family:var(--rp-read);font-size:0.8em;color:var(--rp-quiet);text-align:center;animation:hc-recipe-storing 1.2s ease-in-out infinite alternate;}
-@keyframes hc-recipe-storing{from{opacity:0.45;}to{opacity:1;}}
+  font-family:var(--rp-read);font-size:0.8em;color:var(--rp-quiet);text-align:center;}
 .hc-recipe-step-picture{width:11em;max-width:100%;}
 .hc-recipe-add{display:flex;flex-wrap:wrap;align-items:center;gap:0.3em 0.5em;width:100%;padding:0.5em;
   border:1px dashed var(--rp-line-firm);border-radius:var(--rp-control);}
@@ -401,11 +411,11 @@ select.hc-recipe-field option{background:rgb(var(--rp-pane));color:rgb(var(--rp-
   padding:2em max(1em,env(safe-area-inset-right,0px)) 4em max(1em,env(safe-area-inset-left,0px));}
 .hc-recipe-page{display:flex;flex-direction:column;gap:1.1em;min-width:0;font-family:var(--rp-read);
   font-size:clamp(1.15em,0.95em + 1vw,1.45em);line-height:1.6;color:var(--rp-loud);}
-.hc-recipe-page > .hc-recipe-btn{align-self:flex-start;font-family:var(--rp-mono);font-size:0.6em;}
+.hc-recipe-page > .hc-recipe-btn{align-self:flex-start;margin-left:-0.85em;font-family:var(--rp-mono);font-size:calc(0.82rem * var(--hc-panel-scale,1));}
 .hc-recipe-page-label{margin:0;font-family:var(--rp-mono);font-size:0.56em;font-weight:600;line-height:1.5;
   letter-spacing:0.12em;text-transform:uppercase;color:var(--rp-accent);}
 .hc-recipe-cover-title{margin:0;font-size:clamp(1.7em,1.2em + 2.4vw,2.6em);font-weight:400;line-height:1.1;overflow-wrap:anywhere;}
-.hc-recipe-picture{margin:0;padding:0.6em;background:rgb(var(--rp-plate));border-radius:var(--rp-floating);
+.hc-recipe-picture{margin:0;padding:0.6em;background:rgb(var(--rp-plate));border-radius:var(--rp-card);
   box-shadow:0 0 0 1px rgba(var(--rp-ink),0.1),0 0.5em 1.4em rgba(var(--rp-shadow),0.08);}
 .hc-recipe-picture img{display:block;max-width:100%;max-height:56vh;margin:0 auto;border-radius:var(--rp-control);}
 .hc-recipe-facts{display:flex;flex-wrap:wrap;gap:0.6em 2em;margin:0;}
@@ -413,7 +423,9 @@ select.hc-recipe-field option{background:rgb(var(--rp-pane));color:rgb(var(--rp-
 .hc-recipe-facts dt{font-family:var(--rp-mono);font-size:0.5em;letter-spacing:0.12em;text-transform:uppercase;color:var(--rp-quiet);}
 .hc-recipe-facts dd{margin:0;overflow-wrap:anywhere;}
 .hc-recipe-prose{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;}
-.hc-recipe-step-words{font-size:clamp(1.15em,0.95em + 1vw,1.4em);line-height:1.45;}
+.hc-recipe-step-words{font-size:1em;line-height:1.45;}
+/* Why a recipe did not open: plain words under the sentence that says so. */
+.hc-recipe-unreadable-why{font-family:var(--rp-read);font-size:0.72em;line-height:1.5;overflow-wrap:anywhere;}
 .hc-recipe-aside{margin:0;font-family:var(--rp-mono);font-size:0.56em;color:var(--rp-quiet);}
 .hc-recipe-check{display:flex;flex-direction:column;margin:0;padding:0;list-style:none;}
 .hc-recipe-check label{display:grid;grid-template-columns:1.4em minmax(0,1fr);gap:0.6em;align-items:start;min-height:2.4em;
@@ -463,9 +475,10 @@ ${NARROW} .hc-recipe-head{flex-wrap:wrap;gap:0.25em;padding:0.25em 0.5em;}
 ${NARROW} .hc-recipe-tool.hc-recipe-drawer-toggle{display:inline-grid;}
 ${NARROW} .hc-recipe-more.is-narrow-only{display:block;}
 ${NARROW} .hc-recipe-title{flex:1 1 5em;}
-${NARROW} .hc-recipe-address,${NARROW} .hc-recipe-shared-words,${NARROW} .hc-recipe-sep,${NARROW} .hc-recipe-browse{display:none;}
-${NARROW} .hc-recipe-head-end{display:contents;}
+${NARROW} .hc-recipe-address,${NARROW} .hc-recipe-sep,${NARROW} .hc-recipe-browse{display:none;}
+${NARROW} .hc-recipe-head-end,${NARROW} .hc-recipe-shared{display:contents;}
 ${NARROW} .hc-recipe-status{order:9;flex:1 1 100%;}
+${NARROW} .hc-recipe-shared-words{order:10;flex:1 1 100%;max-width:none;padding:0 0 0.2em 0.15em;white-space:normal;overflow:visible;text-overflow:clip;}
 ${NARROW} .hc-recipe-switch{margin-right:auto;}
 ${NARROW} .hc-recipe-btn.is-solid{min-width:0;}
 ${NARROW} .hc-recipe-menu .is-narrow-only{display:inline-flex;}
@@ -483,7 +496,7 @@ ${NARROW} .hc-recipe-figure{flex:none;align-self:center;position:sticky;top:0;z-
   box-shadow:0 0 0 100vmax var(--rp-ground);clip-path:inset(-0.6em -100vmax -0.3em);}
 ${NARROW} .hc-recipe-tools{flex:none;align-self:center;transform:none;flex-wrap:wrap;max-width:100%;margin-bottom:0.3em;}
 ${NARROW} .hc-recipe-part{display:block;flex:none;width:100%;max-width:36em;margin:0 auto;border:1px solid var(--rp-line);
-  border-radius:var(--rp-floating);background:var(--rp-ground);}
+  border-radius:var(--rp-card);background:var(--rp-ground);}
 ${NARROW} .hc-recipe-part[data-open]{border-color:var(--rp-edge-firm);}
 ${NARROW} .hc-recipe-tab{width:100%;height:auto;min-height:max(3em,44px);outline:0;gap:0.8em;padding:0 0.75em;flex-direction:row;text-align:left;}
 ${NARROW} .hc-recipe-tab:focus-visible{outline:2px solid var(--rp-focus);outline-offset:-2px;}
@@ -491,7 +504,7 @@ ${NARROW} .hc-recipe-tab::after{left:0.75em;right:0.75em;bottom:4px;}
 ${NARROW} .hc-recipe-tab-label{font-size:0.9em;}
 ${NARROW} .hc-recipe-tab-value{flex:1 1 auto;display:block;font-size:0.8em;text-align:right;}
 ${NARROW} .hc-recipe-also{flex:none;align-self:center;width:100%;max-width:36em;margin-top:0.8em;text-align:left;}
-${NARROW}[data-open] .hc-recipe-part:not([data-open]) > .hc-recipe-tab:not([data-lit]),${NARROW}[data-open] .hc-recipe-also{opacity:1;}
+${NARROW}[data-open] .hc-recipe-part:not([data-open]) > .hc-recipe-tab:not([data-lit]) .hc-recipe-tab-label{color:var(--rp-plain);}
 ${NARROW} .hc-recipe-card{position:static;transform:none;width:auto;max-height:none;outline:0;border-radius:0;box-shadow:none;background:transparent;}
 ${NARROW} .hc-recipe-card-head{padding-top:0.3em;}
 ${NARROW} .hc-recipe-card-head .hc-recipe-label{display:none;}
@@ -509,6 +522,7 @@ ${NARROW} .hc-recipe-link > .hc-recipe-marks{grid-row:3;}
 ${NARROW} .hc-recipe-fact{grid-template-columns:minmax(4.5em,2fr) minmax(0,3fr) 44px;}
 ${NARROW} .hc-recipe-strip-thumb{width:44px;height:44px;}
 ${NARROW} .hc-recipe-strip .hc-recipe-strip-remove{width:1.7em;height:1.7em;min-width:0;min-height:0;}
+${NARROW} .hc-recipe-strip-remove::before{content:"";position:absolute;left:50%;top:50%;width:44px;height:44px;transform:translate(-50%,-50%);}
 ${NARROW} .hc-recipe-nav .hc-recipe-btn{min-width:0;flex:1 1 0;}
 
 @media (pointer:coarse){
@@ -516,9 +530,10 @@ ${NARROW} .hc-recipe-nav .hc-recipe-btn{min-width:0;flex:1 1 0;}
   :is(.hc-recipe,.hc-recipe-picker) .hc-recipe-btn{min-height:44px;}
   :is(.hc-recipe,.hc-recipe-picker) .hc-recipe-field{min-height:44px;font-size:max(16px,1em);}
   .hc-recipe .hc-recipe-strip .hc-recipe-strip-remove{width:1.7em;height:1.7em;min-width:0;min-height:0;}
+  .hc-recipe .hc-recipe-strip-remove::before{content:"";position:absolute;left:50%;top:50%;width:44px;height:44px;transform:translate(-50%,-50%);}
   .hc-recipe .hc-recipe-strip-thumb{width:44px;height:44px;}
 }
-@media (max-width:560px){
+@media (max-width:35em){
   .hc-recipe-picker{padding:0;}
   .hc-recipe-picker-panel{width:100%;height:100%;outline:0;border-radius:0;}
 }
@@ -527,6 +542,7 @@ ${NARROW} .hc-recipe-nav .hc-recipe-btn{min-width:0;flex:1 1 0;}
 }
 @media (forced-colors:active){
   .hc-recipe-btn.is-solid{background:Highlight;color:HighlightText;forced-color-adjust:none;}
+  .hc-recipe-btn.is-solid:disabled{background:Canvas;color:GrayText;}
   .hc-recipe-lead .is-line,.hc-recipe-lead circle{stroke:CanvasText;}
   .hc-recipe-tab[data-lit],.hc-recipe-card{outline:2px solid Highlight;}
 }

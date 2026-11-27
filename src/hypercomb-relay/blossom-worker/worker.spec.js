@@ -2386,6 +2386,39 @@ test('writing an index that names i18n:<locale> lists its signer as a translator
   assert.equal(await member('hive:indexes', assessor), true)
 })
 
+test('an index write answers once the index is held: its notes run after the answer and still land', async () => {
+  // Measured with jwize's 126-root index: the notes took 170 storage calls one
+  // after another, past the hive's eight seconds, so a write that landed was
+  // reported "host unreachable" and the hang-up cut the notes off.
+  const CONTENT = contentBag()
+  const translators = await sha256Hex('i18n:ja')
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  const slowNotes = new Proxy(CONTENT, {
+    get(target, prop) {
+      const value = target[prop]
+      if (prop !== 'put') return typeof value === 'function' ? value.bind(target) : value
+      return async (key, ...rest) => {
+        if (String(key).startsWith(`${translators}/`)) await gate
+        return value.call(target, key, ...rest)
+      }
+    },
+  })
+  const env = { SITE_BINDINGS: '{}', HIVES: kvMap(), CONTENT: slowNotes }
+  const handedOff = []
+  const ctx = { waitUntil: (work) => { handedOff.push(work) }, passThroughOnException() {} }
+  const url = `https://content.hypercomb.com/${INDEXES}/${assessor}`
+  const body = JSON.stringify(await indexBy(assessorKey, { 'i18n:ja': 'f'.repeat(64) }))
+  const response = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', assessorKey) }, body }), env, ctx)
+  assert.equal(response.status, 201)
+  const member = () => CONTENT.held.has(`${translators}/${assessor}`)
+  assert.equal(member(), false, 'answered while the note still waits')
+  assert.ok(handedOff.length >= 1, 'the notes were handed to waitUntil')
+  release()
+  await Promise.all(handedOff)
+  assert.equal(member(), true, 'the note landed after the answer')
+})
+
 test('a locale is listed from every verified index, at the pool\'s own address, with the older KV lists drained in', async () => {
   const [catalog, missingRecord, stale] = ['c'.repeat(64), 'd'.repeat(64), 'e'.repeat(64)]
   const HIVES = kvMap(new Map([
@@ -6568,7 +6601,11 @@ test('the deployed config derives hypercomb.com\'s package from the followed pub
   const apex = bindings['hypercomb.com']
   assert.equal(apex.installs, publisher.channel)
   assert.equal(apex.publishers.find((p) => p.primary).pubkey, publisher.pubkey, 'the pool follows the key every install follows')
-  assert.deepEqual(apex.farm, ['jwize.com'])
+  // the machine's own name: jwize.com's apex is a front door on this worker
+  // now, so reading it would come back here instead of reaching the machine
+  assert.deepEqual(apex.farm, ['relay.pluginthematrix.io'])
+  assert.deepEqual(bindings['jwize.com'].farm, ['relay.pluginthematrix.io'])
+  assert.equal(bindings['jwize.com'].relay, 'relay.pluginthematrix.io')
 })
 
 // ── the shipped default meets at hypercomb.com (jwize 2026-10-11) ───────────
@@ -7661,6 +7698,42 @@ test('a host\'s own people make its doors follow another host; a stranger cannot
   assert(!env.CONTENT.held.has(`${COMMUNITY}/${artifact}`), 'the last one out removes the member')
 })
 
+test('a late pass for an index already replaced stops: it never puts back a follow the newer index withdrew', async () => {
+  // The answer no longer waits for the notes, so the key's next index can land
+  // while the last one's notes still run (review of the waitUntil change).
+  const env = await calendarEnv()
+  const translators = await sha256Hex('i18n:ja')
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  const bag = env.CONTENT
+  env.CONTENT = new Proxy(bag, {
+    get(target, prop) {
+      const value = target[prop]
+      if (prop !== 'put') return typeof value === 'function' ? value.bind(target) : value
+      return async (key, ...rest) => {
+        if (String(key).startsWith(`${translators}/`)) await gate
+        return value.call(target, key, ...rest)
+      }
+    },
+  })
+  const artifact = await sha256Hex(hostArtifact('peer.example'))
+  const url = `https://content.hypercomb.com/${INDEXES}/${pubkey}`
+  const put = async (roots, at, handedOff) => {
+    const body = JSON.stringify(await signedIndex(roots, at, undefined, undefined, { listed: ['calendar:events'] }))
+    const ctx = { waitUntil: (work) => { handedOff.push(work) }, passThroughOnException() {} }
+    return worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', sk) }, body }), env, ctx)
+  }
+  const first = []
+  assert.equal((await put({ 'i18n:ja': 'f'.repeat(64), 'follow:peer.example': artifact }, 1_800_000_300, first)).status, 200)
+  // The first index's notes wait at their first pass; the next index lands and is noted in full.
+  const second = []
+  assert.equal((await put({}, 1_800_000_400, second)).status, 200)
+  await Promise.all(second)
+  release()
+  await Promise.all(first)
+  assert(!bag.held.has(`${COMMUNITY}/${artifact}`), 'the withdrawn follow is not put back by the older index\'s late pass')
+})
+
 test('only a host\'s own people put meetings and lists on its doors', async () => {
   const record = eventRecordText('2026-10-24')
   const sig = await sha256Hex(record)
@@ -8019,10 +8092,61 @@ test('a deep name is asked for as soon as the index is held, before the bookkeep
     worker.fetch(request, env, ctx)
     for (let i = 0; i < 50 && !handedOff.length; i++) await new Promise((resolve) => setTimeout(resolve, 5))
     assert.ok(held, 'the index was held')
-    assert.equal(handedOff.length, 1, 'the naming was handed off while the bookkeeping still stalls')
+    // The naming is handed off FIRST; the bookkeeping (stalled here) is handed
+    // off after it, so the answer never waits on it either.
+    assert.ok(handedOff.length >= 1, 'the naming was handed off while the bookkeeping still stalls')
     await handedOff[0]
     assert.deepEqual(cf.domains.map((d) => d.hostname), [DEEP])
   })
+})
+
+// A door writes its bag on its first visit. Every accepted index must advance
+// it, or the head that visit saw stays the authority and a disagreeing bag
+// closes the door for good.
+test('every accepted index advances the door of a deep name, so a bag written earlier never closes it', async () => {
+  const env = claimEnv({ CLAIM_API_TOKEN: '' })
+  const bag = await sha256Hex(DEEP)
+  const older = 'b'.repeat(64)
+  await env.CONTENT.put(`${bag}/00000000`, JSON.stringify({ layer: older, pubkey: pubOf(sk), lineage: 'hyperdex/knowledge', title: 'knowledge' }))
+  assert.equal((await putIndexAt(env, 'pluginthematrix.com', await deepIndex())).status, 201)
+  const markers = [...env.CONTENT.held.keys()].filter((key) => key.startsWith(`${bag}/`)).sort()
+  assert.deepEqual(markers, [`${bag}/00000000`, `${bag}/00000001`])
+  assert.equal(JSON.parse(new TextDecoder().decode(env.CONTENT.held.get(markers[1]))).layer, head)
+  const page = await worker.fetch(new Request(`https://${DEEP}/`), env)
+  assert.doesNotMatch(await page.text(), /nothing published/)
+})
+
+// One after another, a large index across several zones ran past the eight
+// seconds a hive gives the write, and the doors last in line missed that
+// publish. They advance side by side, and outlive a caller that hangs up.
+test('the doors of an index advance side by side, handed past a hang-up', async () => {
+  const bag = contentBag()
+  let inFlight = 0
+  let widest = 0
+  const list = bag.list.bind(bag)
+  bag.list = async (options) => {
+    inFlight++
+    widest = Math.max(widest, inFlight)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    try { return await list(options) } finally { inFlight-- }
+  }
+  const env = claimEnv({ CLAIM_API_TOKEN: '', CONTENT: bag })
+  const roots = { hyperdex: head, 'hyperdex/knowledge': head, 'hyperdex/knowledge/part': head, alpha: head, beta: head, gamma: head }
+  const event = await deepIndex(1_800_000_500, roots)
+  const url = `https://pluginthematrix.com/${INDEXES}/${event.pubkey}`
+  const handedOff = []
+  const ctx = { waitUntil: (promise) => { handedOff.push(promise) }, passThroughOnException() {} }
+  const response = await worker.fetch(new Request(url, { method: 'PUT',
+    headers: { authorization: await nip98(url, 'PUT', sk) }, body: JSON.stringify(event) }), env, ctx)
+  assert.equal(response.status, 201)
+  assert.ok(widest > 1, `doors advanced one at a time (widest ${widest})`)
+  const answers = await Promise.all(handedOff)
+  assert.ok(answers.includes(true), 'the door advance was handed to waitUntil')
+  for (const host of [DEEP, `part.${DEEP}`, 'alpha.pluginthematrix.com']) {
+    const door = await sha256Hex(host)
+    const markers = [...bag.held.keys()].filter((key) => key.startsWith(`${door}/`)).sort()
+    assert.equal(JSON.parse(new TextDecoder().decode(bag.held.get(markers.at(-1)))).layer, head, host)
+  }
 })
 
 test('the empty page under a deep name says the route to publish', async () => {
@@ -8709,5 +8833,83 @@ test('an entry member is read only beside its open or closed pool: never plainly
     assert.ok(!after.body.includes(member.name))
     const byUntil = await listEntries(env)
     assert.ok(!byUntil.names.includes(member.name) && !byUntil.body.includes(member.name))
+  })
+})
+
+// A nested place's own name loads only once attached, so the ledger says which
+// ones are, with when: a hive asks a deep name only once its certificate can
+// have arrived, and never one no certificate covers (the console used to fill
+// with failed handshakes for names the host had never attached).
+const ledgerOf = async (env) => (await worker.fetch(new Request(`https://pluginthematrix.com/${PUBLICATIONS}`), env)).json()
+
+test('the ledger lists each attached deep name with when it was attached, and writes the store only on a change', async () => {
+  const cf = fakeCloudflare({ zones: ['pluginthematrix.com'] })
+  const hives = kvMap()
+  const env = claimEnv({ HIVES: hives })
+  await onCloudflare(cf, async () => {
+    assert.deepEqual((await ledgerOf(env)).deepNames, {})
+    const before = Date.now()
+    assert.equal((await putIndexAt(env, 'pluginthematrix.com', await deepIndex())).status, 201)
+    const kept = JSON.parse(hives.values.get('deep-names:pluginthematrix.com'))
+    assert.ok(kept[DEEP] >= before, 'the attach is kept with its time')
+    assert.deepEqual((await ledgerOf(env)).deepNames, { [DEEP]: kept[DEEP] })
+    // The same names again change nothing, so the store is not written again.
+    let writes = 0
+    const put = hives.put
+    hives.put = async (k, v) => { writes++; return put(k, v) }
+    assert.equal((await putIndexAt(env, 'pluginthematrix.com', await deepIndex(1_800_000_600))).status, 200)
+    assert.equal(writes, 0)
+  })
+})
+
+test('a name attached before the host kept times reads as attached long since, and with no attach the ledger lists none', async () => {
+  const cf = fakeCloudflare({ zones: ['pluginthematrix.com'] })
+  const zoneId = cf.zoneOf('pluginthematrix.com')
+  cf.domains.push({ hostname: DEEP, service: 'hypercomb-hosts', environment: 'production', zone_id: zoneId })
+  const hives = kvMap()
+  const env = claimEnv({ HIVES: hives })
+  await onCloudflare(cf, async () => {
+    assert.equal((await putIndexAt(env, 'pluginthematrix.com', await deepIndex())).status, 201)
+    assert.deepEqual((await ledgerOf(env)).deepNames, { [DEEP]: 0 })
+  })
+  const bare = claimEnv({ HIVES: kvMap(), CLAIM_API_TOKEN: '' })
+  assert.equal((await putIndexAt(bare, 'pluginthematrix.com', await deepIndex())).status, 201)
+  assert.deepEqual((await ledgerOf(bare)).deepNames, {})
+})
+
+test('a zone never kept takes its list the first time the ledger asks: names attached before are listed long since', async () => {
+  const cf = fakeCloudflare({ zones: ['pluginthematrix.com'] })
+  cf.domains.push({ hostname: DEEP, service: 'hypercomb-hosts', environment: 'production', zone_id: cf.zoneOf('pluginthematrix.com') })
+  const hives = kvMap()
+  const env = claimEnv({ HIVES: hives })
+  await onCloudflare(cf, async () => {
+    assert.deepEqual((await ledgerOf(env)).deepNames, { [DEEP]: 0 })
+    assert.deepEqual(JSON.parse(hives.values.get('deep-names:pluginthematrix.com')), { [DEEP]: 0 })
+  })
+})
+
+test('a zone whose list cannot be read is not asked again on every ledger read', async () => {
+  const cf = fakeCloudflare({ zones: ['pluginthematrix.com'] })
+  cf.fail = (method, path) => method === 'GET' && path.endsWith('/workers/domains')
+  const env = claimEnv({ HIVES: kvMap() })
+  await onCloudflare(cf, async () => {
+    assert.deepEqual((await ledgerOf(env)).deepNames, {})
+    const asked = cf.calls.filter((c) => c.endsWith('/workers/domains')).length
+    assert.deepEqual((await ledgerOf(env)).deepNames, {})
+    assert.equal(cf.calls.filter((c) => c.endsWith('/workers/domains')).length, asked)
+  })
+})
+
+test('a name with no kept time, once the zone is kept, is stamped now, never "long since"', async () => {
+  // Another isolate attached it a moment ago and its write is not seen yet:
+  // the stamp must err late, so no hive asks it before its certificate exists.
+  const cf = fakeCloudflare({ zones: ['pluginthematrix.com'] })
+  const hives = kvMap(new Map([['deep-names:pluginthematrix.com', '{}']]))
+  cf.domains.push({ hostname: DEEP, service: 'hypercomb-hosts', environment: 'production', zone_id: cf.zoneOf('pluginthematrix.com') })
+  const env = claimEnv({ HIVES: hives })
+  await onCloudflare(cf, async () => {
+    const before = Date.now()
+    assert.equal((await putIndexAt(env, 'pluginthematrix.com', await deepIndex())).status, 201)
+    assert.ok(JSON.parse(hives.values.get('deep-names:pluginthematrix.com'))[DEEP] >= before)
   })
 })

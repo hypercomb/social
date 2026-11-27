@@ -402,7 +402,7 @@ EXPERT_LESSONS.push({
     await stage.typeAndSubmit('/sequence', false)
     await stage.wait(1600)
     await stage.say('sequence-window-done', 'Also where things land',
-      'A sequence is also a target: it decides where a dropped file or a pasted branch comes to rest. Cycle it from the keyboard and the page rearranges under you — nothing is lost, only re-laid.')
+      'A sequence is also a target: it decides where a dropped file or a tile off the shelf comes to rest. Cycle it from the keyboard and the page rearranges under you — nothing is lost, only re-laid.')
     stage.emit('sequence:view-close', {})
     await stage.wait(600)
   },
@@ -620,7 +620,7 @@ EXPERT_LESSONS.push({
   async run(stage) {
     await stage.flyToRect(stage.commandInput())
     await stage.say('context-window', 'Context that stays attached',
-      'Drag a favorite out of the Favorites window onto a tile — an amber ring, not the teal one — and that whole branch becomes the tile’s ATTACHED CONTEXT: material every question asked there gets to read, tracking the branch as it grows. /context is the way back to what you attached.')
+      'Drag a collection out of the Collections window onto a tile — an amber ring, not the teal one — and that whole branch becomes the tile’s ATTACHED CONTEXT: material every question asked there gets to read, tracking the branch as it grows. /context is the way back to what you attached.')
     stage.highlight(null)
 
     await stage.typeAndSubmit('/context', false)

@@ -1,6 +1,6 @@
 // hypercomb-web/src/setup/package-floor.ts
 //
-// THE FLOOR: a package too old to update itself is updated by the shell.
+// THE FLOOR: a package too old to update itself is offered an update by the shell.
 //
 // Updating lives in the package. Its update scout announces a new build, the
 // shell's pill emits `packages:open`, and its Packages window takes the build.
@@ -13,8 +13,10 @@
 //
 // So once per boot, after the page settles, the shell asks one derived
 // question: does anything answer the door the pill emits? If nothing does, the
-// live package is below the floor, and the shell takes the ONE named seed's
-// head for it:
+// live package is below the floor, and the shell offers the ONE named seed's
+// head for it (floor-ask.ts). Only the participant's yes takes it (codex T4:
+// never push updates). Not now leaves everything as it is for this page,
+// writes nothing, and the next boot asks again. Once they say yes:
 //
 //   - trust: activation-authority's FLOOR door (seed only), genesis spent again
 //   - integrity: every atom is sha256-verified and the core surface is checked
@@ -27,8 +29,8 @@
 //     can be two: the signed root and the seed's pool head, and a guard that
 //     remembered only the last would alternate between them forever)
 //
-// A package that answers the door is never touched here. Updating it stays the
-// participant's choice (the Packages window), exactly as before.
+// A package that answers the door is never offered anything here. Updating it
+// stays with its own Packages window, exactly as before.
 //
 // Except when the install is known only by the bundled install's old stamp.
 // That package went live before the shared stamp existed (2026-08-31), so it
@@ -83,6 +85,7 @@ import { installCandidates, readInstallChannel, type ChannelRead } from '@hyperc
 import { cacheImportMap } from './resolve-import-map'
 import { shellInstallFollow, verifyIndexEvent } from './install-follow'
 import { loadedRoomIdentity, ROOM_IDENTITY } from '@hypercomb/shared/ui/presence-banner/presence-status'
+import { askFloorUpdate, type FloorReason } from './floor-ask'
 
 /** What the shell's update pill emits (upgrade-indicator.component.ts). */
 export const UPDATE_DOOR = 'packages:open'
@@ -387,8 +390,12 @@ const quiet = (): Promise<void> => new Promise(resolve => {
   tick()
 })
 
-/** One check. Moves the live package and reloads when it is below the floor. */
-export const checkPackageFloor = async (): Promise<FloorPlan> => {
+/** One check. When the live package is below the floor, asks the participant
+ *  (`ask`, the shell's own prompt by default) and, only on their yes, moves it
+ *  and reloads. */
+export const checkPackageFloor = async (
+  ask: (reason: FloorReason) => Promise<boolean> = askFloorUpdate,
+): Promise<FloorPlan> => {
   const installed = installedPackageSig()
   const legacyRecord = !!installed && !stamped()
   const answered = doorAnswered()
@@ -408,7 +415,7 @@ export const checkPackageFloor = async (): Promise<FloorPlan> => {
   // is below the floor, whatever its files say, on any device and any domain.
   const oldRooms = loadedRoomIdentity() < ROOM_IDENTITY
   const meetingPoint = oldRooms ? false : bytes.currentMeetingPoint
-  const reason = legacyRecord || answered === false ? 'door'
+  const reason: FloorReason | null = legacyRecord || answered === false ? 'door'
     : perTab === false ? 'membership'
     : meetingPoint === false ? 'meeting point'
     : null
@@ -416,14 +423,25 @@ export const checkPackageFloor = async (): Promise<FloorPlan> => {
   // Only a package below the floor costs a network call.
   const heads = installed && below ? await floorHeads() : []
   const reloadedFor = readSession(FLOOR_RELOADED_KEY)
-  const ask = (head: { packageSig: string; zone: string } | null): FloorPlan =>
+  const planFor = (head: { packageSig: string; zone: string } | null): FloorPlan =>
     planFloor({ installed, legacyRecord, doorAnswered: answered, perTabMembership: perTab, currentMeetingPoint: meetingPoint, head, reloadedFor })
 
-  let last = ask(heads[0] ?? null)
+  let last = planFor(heads[0] ?? null)
   let carried: string[] | null = null
+  let agreed = false
   for (const head of heads) {
-    const plan = ask(head)
+    const plan = planFor(head)
     if (!plan.act) { last = plan; continue }
+
+    // Asked once, before anything is fetched: the participant takes an update,
+    // the floor only offers it. A second head is tried on the same yes.
+    if (!agreed) {
+      agreed = await ask(reason ?? 'door')
+      if (!agreed) {
+        console.log('[package-floor] below the floor — not now, so nothing moves; the next boot asks again')
+        return { act: false, why: 'the participant said not now' }
+      }
+    }
 
     const why = reason === 'door' ? 'cannot answer the update door on this shell'
       : reason === 'membership' ? 'keeps swarm membership in the flag every tab shares'

@@ -223,8 +223,8 @@ STARTER_LESSONS.push({
   pheromones: ['tutorial', 'lesson', 'starter', 'navigation'],
   async run(stage) {
     // The aria-label is not a stable handle for this one: it becomes
-    // `controls.home.portal` ("home — {portal}") as soon as a home portal is
-    // marked, so `chrome('controls.home')` silently returned null and the bee
+    // `controls.home.portal` ("home — {portal}") as soon as a home is
+    // pinned, so `chrome('controls.home')` silently returned null and the bee
     // was dropped at screen centre with nothing ringed. Ask for the element.
     // There is also NO home button on a phone (the bar's centre slot is the
     // camera) or when the bar is docked right — then point at the address bar,

@@ -74,7 +74,7 @@ export class PoolsModeDrone extends Drone {
   protected override deps = {}
   protected override listens = [
     LIGHTS_MODE, LIGHTS_CHANGED, LIGHTS_PUBLISH, 'render:cell-count', 'render:set-hive-visible',
-    'view:active', 'select:mode', 'sample:mode', 'mesh:modal-open', 'global:escape', ENTRY_POSTS_WANTED,
+    'view:active', 'select:mode', 'sample:mode', 'mesh:modal-open', 'global:escape', ENTRY_POSTS_WANTED, 'locale:changed',
   ]
   protected override emits = [
     LIGHTS_PUBLISHED, LIGHTS_PUBLISH, LIGHTS_LEAVE, LIGHTS_JOIN_SWARM, DOMAIN_SHELF_WANTED, 'tile:action', 'activity:log',
@@ -162,6 +162,12 @@ export class PoolsModeDrone extends Drone {
     })
 
     this.onEffect(LIGHTS_PUBLISH, () => { void this.#publish() })
+    // A language chosen while the bar is up: its words are laid when it is built, so it is built again.
+    this.onEffect('locale:changed', () => {
+      if (!this.#bar || this.#builtIn === document.documentElement.lang) return
+      this.#teardown()
+      this.#reconcile()
+    })
 
     // Transient, so an old ask is never replayed into a new bar. The word asks
     // for pools mode first: when the mode did not come up the ask is dropped,
@@ -231,6 +237,9 @@ export class PoolsModeDrone extends Drone {
     viewMode.addEventListener('change', this.#onViewModeChange)
   }
 
+  /** The page's language when the bar was built. */
+  #builtIn = ''
+
   #reconcile(): void {
     if (!this.#wanted()) { this.#teardown(); return }
     if (!this.#bar) {
@@ -245,6 +254,7 @@ export class PoolsModeDrone extends Drone {
         onAllOn: () => this.#allHere(true),
         onAllOff: () => this.#allHere(false),
       })
+      this.#builtIn = document.documentElement.lang
       this.#frame = poolsFrame()
       document.body.append(this.#frame, this.#bar.element)
       this.#postsRow.update(control.state)

@@ -105,6 +105,7 @@ import { resolveLocalResourceReference } from './local-resource-reference.js'
 import type { VisualBeeDescriptor, VisualBeeRegistry } from '../../commands/visual-bee-registry.js'
 import { isKindGloballyOff } from '../../sharing/behavior-enablement.js'
 import { MOBILE_MODE_IOC_KEY } from '../../preferences/mobile-pheromones.js'
+import { isTyping } from '../../keyboard/typing-focus.js'
 
 const SIG = /^[0-9a-f]{64}$/
 /** The OFFER family — a view a tile does not CARRY but is offered (a branch
@@ -649,6 +650,7 @@ export class TileViewDrone extends Drone {
 
   #onKeyDown = (e: KeyboardEvent): void => {
     if (!this.#label || this.#suspended) return
+    if (e.key !== 'Escape' && isTyping(e)) return
     // The arrows are the swipe, for a keyboard — same row, same order.
     if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
       if (!this.#sibling(e.key === 'ArrowRight' ? 1 : -1)) return

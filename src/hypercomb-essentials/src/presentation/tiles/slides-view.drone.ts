@@ -144,6 +144,7 @@ import { resolveLocalResourceReference } from './local-resource-reference.js'
 import { mountViewerScroller, type ScrollerHandle, type ScrollerSection } from './viewer-scroller.js'
 import { MOBILE_MODE_IOC_KEY, MOBILE_MODE_EFFECT } from '../../preferences/mobile-pheromones.js'
 import { isLongPressMenu } from '../../navigation/browser-menu.js'
+import { isTyping } from '../../keyboard/typing-focus.js'
 
 const SLIDES_VIEW = 'slides'
 const SIG = /^[0-9a-f]{64}$/
@@ -409,6 +410,7 @@ export class SlidesViewDrone extends Drone {
   readonly #onKeyDown = (e: KeyboardEvent): void => {
     const vm = this.#vm()
     if (!vm || !this.#surface()) return
+    if (e.key !== 'Escape' && isTyping(e)) return
     switch (e.key) {
       case 'Escape':
         e.preventDefault(); e.stopImmediatePropagation(); vm.setMode('hexagons'); return

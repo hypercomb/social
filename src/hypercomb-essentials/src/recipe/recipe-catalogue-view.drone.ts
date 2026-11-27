@@ -144,9 +144,13 @@ type Mount = {
   zones: string[]
   /** The nodes switched on, when the shelf says which. */
   nodes: readonly PoolNode[] | undefined
+  /** How many hosts are followed, on or off: none means the shelf has nobody to switch on. */
+  followed: number
   /** What each zone asked so far offers, kept for the life of the view. */
   byZone: Map<string, readonly RecipeEntryOffer[]>
   asking: Set<string>
+  /** The zones that were asked and did not answer: said by name, never read as offering nothing. */
+  unanswered: Set<string>
   /** What the room offers. Null until it answered, and where no room is joined. */
   roomOffers: readonly RecipeEntryOffer[] | null
   roomAsking: boolean
@@ -208,8 +212,9 @@ const letGo = (url: string): void => {
 }
 
 /** How many rows each zone asked so far offers: what the shelf's chips say. */
-const countsOf = (byZone: ReadonlyMap<string, readonly RecipeEntryOffer[]>): Record<string, number> =>
-  Object.fromEntries([...byZone].map(([zone, offered]) => [zone, offered.length]))
+/** How many rows each zone offers. A zone that did not answer is not counted: its count is not known. */
+const countsOf = (byZone: ReadonlyMap<string, readonly RecipeEntryOffer[]>, unanswered: ReadonlySet<string> = new Set()): Record<string, number> =>
+  Object.fromEntries([...byZone].filter(([zone]) => !unanswered.has(zoneDoor(zone))).map(([zone, offered]) => [zone, offered.length]))
 
 export class RecipeCatalogueViewDrone extends Drone {
   /** THE VIEW THIS BEE RENDERS, and nowhere else does it act: it may sleep
@@ -225,7 +230,7 @@ export class RecipeCatalogueViewDrone extends Drone {
     lineage: '@hypercomb.social/Lineage',
     viewMode: '@hypercomb.social/ViewMode',
   }
-  protected override listens: string[] = [VIEW_SPAWN_EFFECT, SOURCES_CHANGED, CELLS_COUNTED]
+  protected override listens: string[] = [VIEW_SPAWN_EFFECT, SOURCES_CHANGED, CELLS_COUNTED, 'locale:changed']
   protected override emits: string[] = [
     'view:active', DOMAIN_SHELF_WANTED, SOURCES_QUERY, SOURCES_COUNTED, SOURCES_NODES,
     'keymap:hold', 'keymap:release', 'activity:log',
@@ -361,7 +366,8 @@ export class RecipeCatalogueViewDrone extends Drone {
       leavable: !door,
       zones: zone ? [zone] : [],
       nodes: undefined,
-      byZone: new Map(), asking: new Set(),
+      followed: 0,
+      byZone: new Map(), asking: new Set(), unanswered: new Set(),
       roomOffers: null, roomAsking: false,
       room: standing.room, joined: standing.joined,
       posted: new Map(), postedAsking: false, posterNames: new Map(), hiding: new Set(), entryTitles: new Map(),
@@ -380,6 +386,13 @@ export class RecipeCatalogueViewDrone extends Drone {
     }
     this.#raise(mount)
     document.body.appendChild(host)
+    // A language chosen while the page is up: the list is drawn again in it.
+    const builtIn = { lang: document.documentElement.lang }
+    mount.offs.push(EffectBus.on('locale:changed', () => {
+      if (this.#mount !== mount || builtIn.lang === document.documentElement.lang) return
+      builtIn.lang = document.documentElement.lang
+      this.#raise(mount)
+    }))
     this.#setViewActive(true)
     // The page's keys are its own while it is up: the hive's shortcuts stand aside.
     EffectBus.emitTransient('keymap:hold', { reason: OWNER })
@@ -446,7 +459,11 @@ export class RecipeCatalogueViewDrone extends Drone {
         ? t('pools.posts.catalogue.from.one', 'your pool open for posts', { count: opened })
         : t('pools.posts.catalogue.from.other', 'your {count} pools open for posts', { count: opened })
     if (!count && !room && !posts) {
-      return t('recipe.catalogue.from.none', 'Switch a domain on in the shelf, or join a room, to see what is offered.')
+      // Hosts followed but all switched off: switch one on. Nobody followed and no room: the shelf has nobody to
+      // switch on, so say how to get someone.
+      return mount.followed
+        ? t('recipe.catalogue.from.none', 'Switch a domain on in the shelf, or join a room, to see what is offered.')
+        : t('recipe.catalogue.from.nobody', 'Follow a host or join a room, and the recipes they offer appear here.')
     }
     const named = [count ? domains : '', room, posts].filter(Boolean)
     const sources = named.length === 1
@@ -485,7 +502,7 @@ export class RecipeCatalogueViewDrone extends Drone {
     }))
   }
 
-  #shown(mount: Mount): { title: string; note: string; rows: RecipeCatalogueRow[]; nodes: readonly PoolNode[] | undefined; loading: boolean; heldBack: RecipeCatalogueHeldBack[] } {
+  #shown(mount: Mount): { title: string; note: string; rows: RecipeCatalogueRow[]; nodes: readonly PoolNode[] | undefined; loading: boolean; heldBack: RecipeCatalogueHeldBack[]; unanswered: string[]; unsourced: boolean } {
     const here = t('recipe.catalogue.published', 'Published here')
     return {
       title: mount.door ? mount.zone || here : t('recipe.catalogue.title', 'Recipes from your nodes'),
@@ -494,6 +511,10 @@ export class RecipeCatalogueViewDrone extends Drone {
       nodes: mount.nodes,
       loading: mount.asking.size > 0 || mount.roomAsking || mount.postedAsking,
       heldBack: this.#heldBack(mount),
+      // Only the zones that are on: one switched off says nothing, answered or not.
+      unanswered: mount.zones.filter(zone => mount.unanswered.has(zoneDoor(zone))),
+      // No domain on, no room, no pool of posts: the note says how to get some, and nothing is called empty.
+      unsourced: !mount.door && !mount.said && !mount.zones.length && !mount.joined && !mount.posted.size,
     }
   }
 
@@ -516,6 +537,7 @@ export class RecipeCatalogueViewDrone extends Drone {
     if (this.#mount !== mount) return
     mount.zones = recipeViewZones(names(state?.zones))
     mount.nodes = Array.isArray(state?.nodes) ? state.nodes : undefined
+    mount.followed = names(state?.all).length
     const query = recipeViewQuery(typeof state?.query === 'string' ? state.query : '')
     // Words typed into the catalogue come back in the shelf's form: the field
     // is rewritten only when the words were typed somewhere else.
@@ -541,11 +563,11 @@ export class RecipeCatalogueViewDrone extends Drone {
     for (const zone of wanted) mount.asking.add(zone)
     this.#paint(mount)
     await mapBounded(wanted, ZONES_AT_ONCE, async zone => {
-      const offered = await findRecipeEntries({ zones: [zone] })
+      const offered = await findRecipeEntries({ zones: [zone] }, { unanswered: node => { mount.unanswered.add(zoneDoor(node.id)) } })
       mount.asking.delete(zone)
       mount.byZone.set(zone, offered)
       if (this.#mount !== mount) return
-      if (!mount.door) EffectBus.emit<SourcesCounted>(SOURCES_COUNTED, { meaning: RECIPE_ENTRY_MEANING, counts: countsOf(mount.byZone) })
+      if (!mount.door) EffectBus.emit<SourcesCounted>(SOURCES_COUNTED, { meaning: RECIPE_ENTRY_MEANING, counts: countsOf(mount.byZone, mount.unanswered) })
       this.#paint(mount)
     })
   }

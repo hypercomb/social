@@ -18,6 +18,7 @@
 
 import { recipeTemplateWords, type RecipeTemplateDocument } from './recipe-template.js'
 import { ensureRecipeStyles, recipeEl, recipeMark, recipeWords, type RecipeSay } from './recipe-style.js'
+import { recipeDefaultTemplateShown } from './recipe-defaults.js'
 
 export interface RecipePickerEntry {
   /** The template's signature: what a pick answers with. */
@@ -116,7 +117,11 @@ export function recipePicker(options: RecipePickerOptions): RecipePickerHandle {
   panel.append(head, searching, list)
   root.append(panel)
 
-  const entryOf = (entry: RecipePickerEntry): HTMLElement => {
+  /** A built-in template in the reader's language; any other in its author's words. Its bytes are never touched. */
+  const inWords = (template: RecipeTemplateDocument): RecipeTemplateDocument => recipeDefaultTemplateShown(template, options.say)
+
+  const entryOf = (given: RecipePickerEntry): HTMLElement => {
+    const entry: RecipePickerEntry = { ...given, template: inWords(given.template) }
     const line = recipeEl('li')
     const inUse = entry.sig === current
     const button = recipeEl('button', 'hc-recipe-picker-entry')
@@ -151,8 +156,9 @@ export function recipePicker(options: RecipePickerOptions): RecipePickerHandle {
     let shown = 0
     for (const group of groups) {
       // Narrowed here as well as by the caller: an entry stays only if it says every word asked for.
+      // A built-in is found by the words it is shown in as well as its own.
       const entries = group.entries.filter(entry => {
-        const words = recipeTemplateWords(entry.template)
+        const words = `${recipeTemplateWords(entry.template)} ${recipeTemplateWords(inWords(entry.template))}`
         return wanted.every(word => words.includes(word))
       })
       if (!entries.length) continue
@@ -167,7 +173,8 @@ export function recipePicker(options: RecipePickerOptions): RecipePickerHandle {
       nodes.push(section)
     }
     asking.hidden = !loading
-    nothing.hidden = shown > 0
+    // While the domains are still being asked, "none" is not yet true: only the asking is said.
+    nothing.hidden = shown > 0 || loading
     nothing.textContent = wanted.length
       ? say('recipe.picker.none', 'No template matches "{query}".', { query: query.trim() })
       : say('recipe.picker.empty', 'There are no templates here yet.')

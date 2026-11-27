@@ -91,7 +91,7 @@ export interface EntryPostsActions {
 const STYLE = `
 .hc-posts{display:grid;gap:0.35rem;padding:0.35rem 0 0 1.9rem;border-top:1px solid var(--hc-window-line,rgba(227,237,245,0.12));}
 .hc-posts-line{display:flex;flex-wrap:wrap;align-items:baseline;gap:0.3rem 0.6rem;min-width:0;}
-.hc-posts-title{flex:none;font-family:var(--hc-mono,ui-monospace,monospace);font-size:0.72em;letter-spacing:0.16em;text-transform:uppercase;color:#6fd39a;}
+.hc-posts-title{flex:none;font-family:var(--hc-mono,ui-monospace,monospace);font-size:0.72em;letter-spacing:0.16em;text-transform:uppercase;color:var(--hc-window-ink-quiet,rgba(227,237,245,0.68));}
 .hc-posts-say{flex:1 1 14rem;min-width:0;overflow-wrap:anywhere;}
 .hc-posts-say[data-tone="refused"]{color:var(--hc-status-warn,var(--hc-window-ink-loud,#eef2f5));font-weight:600;}
 .hc-posts-whose{flex:none;font-size:0.8em;padding:0 0.4rem;border:1px solid var(--hc-window-line,rgba(227,237,245,0.24));border-radius:var(--hc-radius-control,2px);}
@@ -107,6 +107,8 @@ const STYLE = `
 .hc-posts-form input{width:min(16rem,100%);}
 .hc-posts-confirm{display:flex;flex-wrap:wrap;align-items:center;gap:0.4rem 0.6rem;}
 .hc-posts-confirm p{flex:1 1 100%;margin:0;overflow-wrap:anywhere;}
+.hc-posts button:focus-visible{outline:2px solid var(--hc-focus,currentColor);outline-offset:2px;}
+.hc-posts button.hc-posts-open{padding:0 0.8rem;border:1px solid var(--hc-window-line-firm,rgba(227,237,245,0.26));}
 @media (max-width:560px){.hc-posts{padding-left:0;}.hc-posts-form label{flex:1 1 100%;}.hc-posts-form input,.hc-posts-form select{width:100%;}}
 `
 
@@ -123,7 +125,8 @@ const hasEnded = (pool: LeaderPool, nowSeconds: number): boolean => {
   return pool.state === 'closed' || (until > 0 && until <= nowSeconds)
 }
 
-/** One pool in words: its title, when it ends or that it is closed, and how many entries. */
+/** One pool in words: its title, when it ends or that it is closed, how many entries, and "full" once its listing
+ *  holds as many as a pool can list: a post past that is not read. */
 export function entryPoolWords(say: EntryPostsSay, pool: LeaderPool, nowSeconds: number): string {
   const known = pool.known
   const ended = hasEnded(pool, nowSeconds)
@@ -145,7 +148,8 @@ export function entryPoolWords(say: EntryPostsSay, pool: LeaderPool, nowSeconds:
     : pool.entries === 1
       ? say('pools.posts.pool.count.one', '1 entry', { count: 1 })
       : say('pools.posts.pool.count.other', '{count} entries', { count: pool.entries })
-  return [known.title, when, count].join(' · ')
+  const full = pool.full === true || (pool.entries !== null && pool.entries >= ENTRY_LIMITS.listed) ? [say('pools.posts.pool.full', 'full')] : []
+  return [known.title, when, count, ...full].join(' · ')
 }
 
 /** The sentence the confirm says before a pool is recycled: how many of its entries are not home, that all are, or
@@ -167,6 +171,8 @@ export const entryConfirmWords = (say: EntryPostsSay, kind: 'open' | 'recycle', 
     ? say('pools.posts.confirm.open', 'This page already has "{title}". Opening a new pool recycles it, and {count} of its entries are not in your hive yet.', { title, count })
     : say('pools.posts.confirm.recycle', 'Recycling "{title}" lets its entries go, and {count} of them are not in your hive yet.', { title, count })
 }
+
+let panelsMade = 0
 
 /** Build the row. `update` puts a state on the same nodes; `dispose` takes the element away. */
 export function entryPostsPanel(say: EntryPostsSay, actions: EntryPostsActions, now: () => number = Date.now): {
@@ -226,11 +232,22 @@ export function entryPostsPanel(say: EntryPostsSay, actions: EntryPostsActions, 
   form.append(pageLabel, daysLabel, nameLabel, formLabel, open, cancel)
 
   const confirmWords = piece('p', 'hc-posts-confirm-words')
+  confirmWords.id = `hc-posts-confirm-words-${++panelsMade}`
   const bring = button('hc-posts-bring', () => actions.onConfirm(true))
   const without = button('hc-posts-without', () => actions.onConfirm(false))
   const keep = button('hc-posts-keep', actions.onCancel)
   const confirm = piece('div', 'hc-posts-confirm')
   confirm.setAttribute('role', 'alertdialog')
+  confirm.setAttribute('aria-describedby', confirmWords.id)
+  // The confirm answers Escape itself: it cancels, and the hive's Escape does not also close the bar
+  // (keyboard/escape-cascade.ts).
+  confirm.setAttribute('data-escape-local', '')
+  confirm.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return
+    event.preventDefault()
+    event.stopPropagation()
+    if (!keep.disabled) actions.onCancel()
+  })
   confirm.append(confirmWords, bring, without, keep)
 
   element.append(style, line, list, form, confirm)
@@ -252,6 +269,15 @@ export function entryPostsPanel(say: EntryPostsSay, actions: EntryPostsActions, 
 
   let listStamp = ''
   let last: EntryPostsState | null = null
+  /** The confirm last shown, so the focus moves into it once as it comes up. */
+  let asked: EntryPostsState['confirm'] = null
+  /** Where the focus goes back to once the confirm is gone and nothing is running: the press that asked. */
+  let returnTo: { readonly kind: 'open' | 'recycle'; readonly pool: string } | null = null
+  /** Whether the focus was let go: on nothing, or on a press the confirm took off the page. */
+  const focusLost = (): boolean => {
+    const held = document.activeElement
+    return !held || held === document.body || confirm.contains(held) || !(held as HTMLElement).isConnected
+  }
   /** The wake at the next end the row shows, so "ends ..." turns to "closed" without anyone pressing anything. */
   let wake: ReturnType<typeof setTimeout> | null = null
   const rewake = (state: EntryPostsState, nowSeconds: number): void => {
@@ -287,6 +313,9 @@ export function entryPostsPanel(say: EntryPostsSay, actions: EntryPostsActions, 
     const stamp = JSON.stringify([state.pools.map(one => [one.pool, one.state, one.code !== '', one.entries, one.known?.until ?? one.until, one.known?.title ?? one.title, hasEnded(one, nowSeconds)]), busy])
     if (stamp !== listStamp) {
       listStamp = stamp
+      // A press the focus was on is made again: the focus goes to the one made in its place.
+      const holding = document.activeElement instanceof HTMLButtonElement && list.contains(document.activeElement) ? document.activeElement : null
+      const heldAt = holding ? { pool: holding.closest<HTMLElement>('li')?.dataset['pool'] ?? '', name: holding.className } : null
       list.replaceChildren(...state.pools.map(pool => {
         const item = piece('li', 'hc-posts-pool')
         item.dataset['pool'] = pool.pool
@@ -310,6 +339,11 @@ export function entryPostsPanel(say: EntryPostsSay, actions: EntryPostsActions, 
         item.append(recycle)
         return item
       }))
+      if (heldAt) {
+        const row = [...list.children].find(item => (item as HTMLElement).dataset['pool'] === heldAt.pool)
+        const again = [...(row?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(press => press.className === heldAt.name)
+        again?.focus()
+      }
     }
     list.hidden = !state.pools.length
     rewake(state, nowSeconds)
@@ -343,6 +377,27 @@ export function entryPostsPanel(say: EntryPostsSay, actions: EntryPostsActions, 
       : missing ? say('pools.posts.confirm.recycle-anyway', 'Recycle without them') : say('pools.posts.confirm.recycle-go', 'Recycle it')
     keep.textContent = say('pools.posts.form.cancel', 'Cancel')
     for (const node of [bring, without, keep]) node.disabled = !!state.busy
+    confirm.setAttribute('aria-label', state.confirm?.kind === 'open'
+      ? say('pools.posts.confirm.ask-open', 'Open a new pool on this page?')
+      : say('pools.posts.confirm.ask-recycle', 'Recycle this pool?'))
+
+    // The confirm takes the focus as it comes up, on the press that changes nothing, and gives it back to the
+    // press that asked once it is gone.
+    if (state.confirm && !asked) {
+      returnTo = { kind: state.confirm.kind, pool: state.confirm.pool.pool }
+      if (element.isConnected) keep.focus()
+    }
+    asked = state.confirm
+    if (!state.confirm && returnTo && !state.busy && !state.reading) {
+      const back = returnTo
+      returnTo = null
+      const row = [...list.children].find(item => (item as HTMLElement).dataset['pool'] === back.pool)
+      const target = [
+        back.kind === 'recycle' ? row?.querySelector<HTMLButtonElement>('.hc-posts-recycle') : open,
+        start,
+      ].find(press => !!press && !press.disabled && !press.hidden && !press.closest('[hidden]'))
+      if (target && focusLost()) target.focus()
+    }
   }
 
   return { element, update, dispose: () => { if (wake) clearTimeout(wake); wake = null; last = null; element.remove() } }

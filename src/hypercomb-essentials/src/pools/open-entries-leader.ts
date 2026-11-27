@@ -179,6 +179,9 @@ export interface LeaderPool {
   readonly notHome: number | null
   /** The rows as read: what Bring them brings. */
   readonly rows: readonly EntryRow[]
+  /** The host holds as many members as it lists (ENTRY_LIMITS.listed): it takes no new poster. Counted from the
+   *  listing, every change and take-back included, never from the rows drawn. */
+  readonly full?: boolean
 }
 
 export type LeaderPostsResult =
@@ -335,7 +338,8 @@ async function leaderPoolOf(
     return { ...base, code, ...(read ? { hostState: read.state } : {}), entries: null, notHome: null, rows: [] }
   }
   const notHome = await entriesNotHome(read.rows, live.held)
-  return { ...base, code, hostState: read.state, entries: read.rows.length, notHome, rows: read.rows }
+  const full = read.over || (read.members?.length ?? 0) >= ENTRY_LIMITS.listed
+  return { ...base, code, hostState: read.state, entries: read.rows.length, notHome, rows: read.rows, ...(full ? { full } : {}) }
 }
 
 /** The pool a page already has, as the leader's index names it, opened on this device or another: a page has one

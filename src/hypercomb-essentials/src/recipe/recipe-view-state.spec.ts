@@ -247,8 +247,8 @@ describe('where the recipe is offered', () => {
     expect(recipeViewShared(state({ outcome: 'kept' }), say)).toEqual({ lit: true, tone: 'good', words: 'Shared with class 4b \u00b7 class.example' })
     expect(recipeViewShared(state({ outcome: 'live' }), say))
       .toEqual({ lit: true, tone: 'warn', words: 'Shared live with class 4b. class.example keeps entries only for its own people' })
-    expect(recipeViewShared(state(), say)).toEqual({ lit: true, words: 'Sharing with class 4b...' })
-    expect(recipeViewShared(state({ outcome: 'failed' }), say)).toEqual({ lit: true, words: 'Sharing with class 4b...' })
+    expect(recipeViewShared(state(), say)).toEqual({ lit: true, words: 'Sharing with class 4b…' })
+    expect(recipeViewShared(state({ outcome: 'failed' }), say)).toEqual({ lit: true, words: 'Sharing with class 4b…' })
   })
 
   it('says an empty recipe is shared once it says something, and never that it is being shared', () => {

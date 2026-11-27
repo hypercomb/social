@@ -15,6 +15,7 @@
 // carried; the site view asked with its own copy of this question.
 
 import { featureNeedsReview, runsSealed } from '../../sharing/feature-availability.js'
+import { trialOf } from '../../files/try-page.js'
 import { FRAME_MAX_ONE, FRAME_POLICY, pageFrame, type FrameLayer, type FrameReader, type PageFrameOptions } from '../../history/revision-viewer.model.js'
 
 const BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
@@ -37,9 +38,16 @@ export const mayRunPage = (segments: readonly string[], sig: string, publisher: 
 /** Does a page that may run, run SEALED — in a frame of its own origin, with
  *  nothing of this hive in reach — because it is someone else's? The second
  *  question every page surface asks, after `mayRunPage` (feature-availability.ts
- *  runsSealed). A review lets a page run; it never lets it run as you. */
+ *  runsSealed). A review lets a page run; it never lets it run as you.
+ *
+ *  A TRIAL is sealed too, wherever it is asked (2026-11-27): a page a model
+ *  wrote runs in this hive only after a person brings it home (try-page.ts).
+ *  The site view shows a trial's own door before it asks this; every other
+ *  surface (the room view, a part seated in a page, a post-it) asked only this,
+ *  and ran the trial as the hive. Trials written before then were marked
+ *  authored, so the trial is asked here and not left to authorship. */
 export const pageRunsSealed = (segments: readonly string[], sig: string, publisher: string = pagePublisherDomain(sig)): boolean =>
-  runsSealed(segments, sig, publisher)
+  trialOf(sig) !== null || runsSealed(segments, sig, publisher)
 
 const BLOCKS = 'p,div,section,article,header,footer,main,aside,nav,h1,h2,h3,h4,h5,h6,li,tr,pre,blockquote,figure,figcaption,details,summary,dt,dd,br,hr'
 

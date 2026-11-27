@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { ENTRY_LISTING_HEADERS, entryPoolAddress, entryPoolName, entryRecordBytes, forgetEntryMembers, readEntryMember } from '../pools/open-entries.js'
+import { forgetEntryPosts } from '../pools/open-entries-flows.js'
 import { recipeBytes, recipeTemplateBytes, type RecipeTemplateDocument } from './recipe-template.js'
 
 const pages = vi.hoisted(() => [] as { title: string; recipe: unknown; template: { name: string }; element: HTMLElement }[])
@@ -77,6 +78,10 @@ const world = async (state: 'open' | 'closed' | 'expired' | null = 'open', meani
     lose: false,
     /** The host does not answer at all. */
     down: false,
+    /** The record and the template arrive, the listing does not. */
+    listingDown: false,
+    /** A PUT waits on this before it is answered. */
+    hold: null as null | Promise<void>,
     fetch: vi.fn(async (url: string, init: RequestInit = {}): Promise<Response> => {
       const at = new URL(url)
       const words = (status: number, reason: string): Response => new Response(`${reason}\n`, { status, headers: { 'X-Reason': reason } })
@@ -85,6 +90,7 @@ const world = async (state: 'open' | 'closed' | 'expired' | null = 'open', meani
       if (init.method === 'PUT') {
         const body = new Uint8Array(init.body as ArrayBuffer)
         puts.push({ url: at, body })
+        if (pool.hold) await pool.hold
         if (pool.refuse) return words(pool.refuse.status, pool.refuse.reason)
         if (pool.state !== 'open') return words(403, 'this one is closed')
         const name = at.pathname.split('/')[2] ?? ''
@@ -97,6 +103,7 @@ const world = async (state: 'open' | 'closed' | 'expired' | null = 'open', meani
         if (pool.lose) throw new TypeError('the answer was lost')
         return words(201, `member ${name}`)
       }
+      if (pool.listingDown && at.searchParams.has(ENTRY_LISTING_HEADERS.by)) throw new TypeError('the listing did not answer')
       if (at.pathname === `/${A}/` && at.searchParams.get(ENTRY_LISTING_HEADERS.by) === LEADER && at.searchParams.get('until') === String(until)) {
         const headers: Record<string, string> = { [ENTRY_LISTING_HEADERS.hostTime]: String(HOST_NOW) }
         if (pool.state) headers[ENTRY_LISTING_HEADERS.state] = pool.state
@@ -146,6 +153,7 @@ beforeEach(() => {
   asked.length = 0
   pages.length = 0
   forgetEntryMembers()
+  forgetEntryPosts()
 })
 
 afterEach(() => {
@@ -227,7 +235,8 @@ describe('the page a phone sees', () => {
     expect([...root.querySelectorAll('textarea')].map(area => area.dataset['kind'])).toEqual(['text', 'ingredients'])
     expect(root.textContent).toContain('so How it looks is left out')
     expect(root.textContent).toContain('What you post is kept by this host and can be read by anyone with this code.')
-    expect(root.querySelector('.hc-recipe-post-measure')?.textContent).toMatch(/^\d+ bytes of room left, and 8 of 8 changes left\.$/)
+    // The room is said as a share of what one entry holds, never as a count of bytes.
+    expect(root.querySelector('.hc-recipe-post-measure')?.textContent).toBe('100% of the room left, and 8 of 8 changes left.')
     // The listing is asked at the page's own origin, with the opener and the end.
     expect(String(pool.fetch.mock.calls.find(([url]) => String(url).includes('?by='))?.[0]))
       .toBe(`${ORIGIN}/${pool.A}/?by=${LEADER}&until=${pool.until}`)
@@ -339,11 +348,11 @@ describe('the page a phone sees', () => {
     await vi.waitFor(() => expect(said()).toContain('Write the name you go by'))
     expect(pool.puts).toHaveLength(0)
     fill('Ana', 'Sunday soup', 'x'.repeat(5_000))
-    await vi.waitFor(() => expect(page()!.querySelector('.hc-recipe-post-measure')?.textContent).toMatch(/bytes too many for one entry/))
+    await vi.waitFor(() => expect(page()!.querySelector('.hc-recipe-post-measure')?.textContent).toMatch(/^Too long for one entry, by about \d+%, and /))
     expect(press(0).disabled).toBe(true)
   })
 
-  it('shows the host\'s own words when it refuses, and asks again what the pool is now', async () => {
+  it('says the host\'s refusal in the page\'s words, and asks again what the pool is now', async () => {
     const pool = await world()
     await bee(pool).pulse('')
     announce(pool)
@@ -352,7 +361,7 @@ describe('the page a phone sees', () => {
     pool.refuse = { status: 403, reason: 'this one is closed' }
     pool.state = 'closed'
     press(0).click()
-    await vi.waitFor(() => expect(said()).toBe('this one is closed'))
+    await vi.waitFor(() => expect(said()).toBe('This one is closed, so your entry was not posted.'))
     await vi.waitFor(() => expect(stateText()).toBe('This one is closed. Here is what was posted.'))
     expect(formShown()).toBe(false)
   })
@@ -432,5 +441,156 @@ describe('what the review found', () => {
     await vi.waitFor(() => expect(said()).toBe('Your entry is taken back from Tuesday class at class.example.com.'))
     const read = await Promise.all(pool.members.map(name => readEntryMember(pool.held.get(name)!, pool.H, name)))
     expect(read.map(member => [member!.page, member!.gone, member!.title])).toEqual([['c'.repeat(64), false, 'Sunday soup'], ['c'.repeat(64), true, 'Sunday soup']])
+  })
+})
+
+describe('what the phone audit found', () => {
+  /** `count` members already posted by someone else, all on one page of theirs. */
+  const fillWith = async (pool: Pool, count: number): Promise<void> => {
+    const { signEntryMember } = await import('../pools/open-entries.js')
+    const poster = generateSecretKey()
+    const content = new TextDecoder().decode(recipeBytes({ template: pool.template, values: { story: { kind: 'text', text: 'Knead.' } } }))
+    for (let n = 0; n < count; n++) {
+      const signed = await signEntryMember({ pool: pool.H, page: 'd'.repeat(64), name: 'Ben', title: `Bread ${n}`, content, createdAt: HOST_NOW - count + n }, poster)
+      if (!signed.ok) throw new Error(signed.reason)
+      pool.held.set(signed.name, signed.body)
+      pool.members.push(signed.name)
+    }
+  }
+
+  it('says a pool holding all it lists, none of it this key\'s, is full, with what was posted and no form', async () => {
+    const pool = await world()
+    await fillWith(pool, 256)
+    await bee(pool).pulse('')
+    announce(pool)
+    await vi.waitFor(() => expect(stateText()).toBe('This one is full. Here is what was posted.'), { timeout: 10_000 })
+    expect(formShown()).toBe(false)
+    await vi.waitFor(() => expect(page()!.querySelector('.hc-recipe-catalogue-card')?.textContent).toContain('Bread'))
+  }, 20_000)
+
+  it('says a pool the host refuses as full is full, in the page\'s words', async () => {
+    const pool = await world()
+    await bee(pool).pulse('')
+    announce(pool)
+    await vi.waitFor(() => expect(formShown()).toBe(true))
+    fill('Ana', 'Sunday soup', 'Words.')
+    pool.refuse = { status: 507, reason: 'this one is full' }
+    press(0).click()
+    await vi.waitFor(() => expect(said()).toBe('This one is full, so your entry was not posted.'))
+    await vi.waitFor(() => expect(stateText()).toBe('This one is full. Here is what was posted.'))
+    expect(formShown()).toBe(false)
+  })
+
+  it('offers Try again when the host did not answer, and asks again for the same code with the same key', async () => {
+    const pool = await world()
+    pool.down = true
+    const keys = vi.fn(() => secret)
+    await bee(pool, { newSecretKey: keys }).pulse('')
+    announce(pool)
+    await vi.waitFor(() => expect(stateText()).toBe('This host did not answer. Try again in a moment.'))
+    const retry = page()!.querySelector<HTMLButtonElement>('.hc-recipe-post-retry')!
+    expect(retry.hidden).toBe(false)
+    expect(retry.textContent).toBe('Try again')
+    expect(retry.classList.contains('is-line') || retry.classList.contains('is-solid')).toBe(false)
+    pool.down = false
+    retry.click()
+    await vi.waitFor(() => expect(formShown()).toBe(true))
+    expect(retry.hidden).toBe(true)
+    expect(document.querySelectorAll('.hc-recipe-post')).toHaveLength(1)
+    // The same code announced now is the page already up.
+    const asksBefore = pool.fetch.mock.calls.length
+    announce(pool)
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(pool.fetch.mock.calls.length).toBe(asksBefore)
+    fill('Ana', 'Sunday soup', 'Slow.')
+    press(0).click()
+    await vi.waitFor(() => expect(said()).toBe('Posted to Tuesday class at class.example.com.'))
+    expect(keys).toHaveBeenCalledTimes(1)
+    expect((await readEntryMember(pool.puts[0]!.body, pool.H))?.signer).toBe(getPublicKey(secret))
+  })
+
+  it('offers Try again when the listing did not answer, and keeps the changes already spent', async () => {
+    const pool = await world()
+    await bee(pool).pulse('')
+    announce(pool)
+    await vi.waitFor(() => expect(formShown()).toBe(true))
+    fill('Ana', 'Sunday soup', 'First.')
+    press(0).click()
+    await vi.waitFor(() => expect(page()!.querySelector('.hc-recipe-post-measure')?.textContent).toContain('7 of 8 changes left'))
+    pool.listingDown = true
+    fill('Ana', 'Sunday soup', 'Second.')
+    await vi.waitFor(() => expect(press(0).disabled).toBe(false))
+    press(0).click()
+    await vi.waitFor(() => expect(stateText()).toBe('The host did not answer. Try again in a moment.'))
+    expect(formShown()).toBe(false)
+    pool.listingDown = false
+    page()!.querySelector<HTMLButtonElement>('.hc-recipe-post-retry')!.click()
+    await vi.waitFor(() => expect(formShown()).toBe(true))
+    expect(page()!.querySelector('.hc-recipe-post-measure')?.textContent).toContain('6 of 8 changes left')
+    expect(press(0).textContent).toBe('Post the change')
+  })
+
+  it('shuts Post while the entry is sent, says so on the press, and a second press sends nothing', async () => {
+    const pool = await world()
+    await bee(pool).pulse('')
+    announce(pool)
+    await vi.waitFor(() => expect(formShown()).toBe(true))
+    fill('Ana', 'Sunday soup', 'Words.')
+    let answer = (): void => undefined
+    pool.hold = new Promise<void>(resolve => { answer = resolve })
+    press(0).click()
+    press(0).click()
+    // Signing a member takes a moment on a loaded machine: the waits are given room, the assertions are not loosened.
+    await vi.waitFor(() => expect(pool.puts).toHaveLength(1), { timeout: 5_000 })
+    expect(press(0).disabled).toBe(true)
+    expect(press(0).textContent).toBe('Posting…')
+    press(0).dispatchEvent(new MouseEvent('click'))
+    pool.hold = null
+    answer()
+    await vi.waitFor(() => expect(said()).toBe('Posted to Tuesday class at class.example.com.'), { timeout: 5_000 })
+    expect(pool.puts).toHaveLength(1)
+    expect(press(0).textContent).toBe('Post the change')
+  })
+
+  it('puts focus on the heading, sets the shell under it inert while it is up, and gives that back when it leaves', async () => {
+    const shell = document.createElement('div')
+    shell.className = 'the-shell'
+    const kept = document.createElement('div')
+    kept.setAttribute('inert', '')
+    document.body.append(shell, kept)
+    const pool = await world()
+    await bee(pool).pulse('')
+    announce(pool)
+    await vi.waitFor(() => expect(page()).not.toBeNull())
+    expect(document.activeElement).toBe(page()!.querySelector('h1'))
+    expect(shell.hasAttribute('inert')).toBe(true)
+    expect(page()!.hasAttribute('inert')).toBe(false)
+    await vi.waitFor(() => expect(formShown()).toBe(true))
+    page()!.querySelector<HTMLButtonElement>('.hc-recipe-tool')!.click()
+    expect(page()).toBeNull()
+    expect(shell.hasAttribute('inert')).toBe(false)
+    // What was inert before the page came stays as it was.
+    expect(kept.hasAttribute('inert')).toBe(true)
+  })
+
+  it('moves focus into a read-along, closes it on Escape without closing the page, and returns focus to the row', async () => {
+    const pool = await world()
+    await fillWith(pool, 1)
+    await bee(pool).pulse('')
+    announce(pool)
+    await vi.waitFor(() => expect(page()!.querySelector('.hc-recipe-catalogue-card')).not.toBeNull())
+    const card = page()!.querySelector<HTMLButtonElement>('.hc-recipe-catalogue-card')!
+    card.focus()
+    card.click()
+    await vi.waitFor(() => expect(pages).toHaveLength(1))
+    const reading = pages[0]!.element
+    expect(document.activeElement).toBe(reading)
+    reading.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(reading.isConnected).toBe(false)
+    expect(page()).not.toBeNull()
+    expect(document.activeElement?.classList.contains('hc-recipe-catalogue-card')).toBe(true)
+    // Escape with nothing open leaves the page up.
+    page()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(page()).not.toBeNull()
   })
 })

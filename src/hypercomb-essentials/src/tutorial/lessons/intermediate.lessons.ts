@@ -9,6 +9,7 @@
 // Every lesson gates on the behaviour it teaches actually being registered
 // (`requires`), so a build without a behaviour simply has one lesson fewer.
 
+import { EffectBus } from '@hypercomb/core'
 import { type TutorialLesson, TUTORIAL_DEMO_MARK as PRACTICE_MARK } from '../tutorial-lesson.js'
 import { hasBehaviour, showFilter, subject, subjects } from './lesson-kit.js'
 
@@ -184,21 +185,20 @@ INTERMEDIATE_LESSONS.push({
     // The same act at hive scale. Shown, not performed: pressing Move needs a
     // real collection to land in, and making one would reach outside the
     // practice page.
-    // The button's aria-label is `collections-landing.title` ("Favorites"). It
-    // was `pools.title` until the Organizer → Places → Portals renames, after
-    // which `chrome('pools.title')` matched nothing and this whole beat — the
-    // hive-scale half of the lesson — was silently skipped.
-    const pools = stage.chrome('collections-landing.title')
+    // The rail button that opened this window opens Recent now (2026-11-26),
+    // so the window is opened the way `/collections` opens it and the bee
+    // rings it once it is up.
+    EffectBus.emit('aggregate:view-open', { id: 'collections' })
+    await stage.wait(900)
+    const pools = stage.element('hc-aggregate-index .ai-panel')
     if (pools) {
       await stage.flyToRect(pools)
-      await stage.ghostClick(pools.left + pools.width / 2, pools.top + pools.height / 2)
-      await stage.wait(900)
       await stage.say('into-organizer', 'Anywhere in the hive',
-        'The Favorites window does this across your whole hive. Walk into a collection, pick tiles wherever they are, and it offers both verbs: Add leaves them where they live, Move brings them in. Holding Ctrl while you drag one tile onto another is the same act again, on one page.')
-      await stage.ghostClick(pools.left + pools.width / 2, pools.top + pools.height / 2)
-      await stage.wait(400)
+        'The Collections window does this across your whole hive. Walk into a collection, pick tiles wherever they are, and it offers both verbs: Add leaves them where they live, Move brings them in. Holding Ctrl while you drag one tile onto another is the same act again, on one page.')
       stage.highlight(null)
     }
+    EffectBus.emit('aggregate:view-close', {})
+    await stage.wait(400)
   },
 })
 

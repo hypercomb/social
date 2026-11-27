@@ -259,12 +259,19 @@ export async function fetchHiveManifest(host: string, pubkey: string): Promise<H
 /** Ask the hosts (a few at once); the first verified index wins. The signature
  *  check makes order a matter of latency, never of trust. */
 /** The signed index the page this code runs in carries (#hc-index, written by
- *  the door that served it), verified exactly as a fetched one — or null. */
-function carriedHiveIndex(pubkey: string): HiveManifest | null {
+ *  the door that served it), verified exactly as a fetched one — or null. An
+ *  index a listed key signed for the publisher asks that door for the list. */
+async function carriedHiveIndex(pubkey: string): Promise<HiveManifest | null> {
   try {
     const raw = typeof document === 'undefined' ? null : document.getElementById('hc-index')?.textContent
     if (!raw) return null
-    const read = hiveIndexOf(JSON.parse(raw) as Record<string, unknown>, String(pubkey ?? '').trim().toLowerCase())
+    const evt = JSON.parse(raw) as Record<string, unknown>
+    const key = String(pubkey ?? '').trim().toLowerCase()
+    const signedBy = String(evt?.['pubkey'] ?? '').toLowerCase()
+    const door = typeof location === 'undefined' ? '' : location.host
+    const listed = SIG_RE.test(signedBy) && signedBy !== key && door
+      ? await (await keyList()).listedKeys(door, key).catch(() => null) : undefined
+    const read = hiveIndexOf(evt, key, listed)
     return read.ok ? read.manifest : null
   } catch { return null }
 }
@@ -272,7 +279,7 @@ function carriedHiveIndex(pubkey: string): HiveManifest | null {
 export async function fetchHiveManifestFromAny(hosts: readonly string[], pubkey: string): Promise<HiveManifest | null> {
   // The door's page carries its publisher's signed index: verified against
   // the pinned key, it answers with no round trip; otherwise ask the hosts.
-  const carried = carriedHiveIndex(pubkey)
+  const carried = await carriedHiveIndex(pubkey)
   if (carried) return carried
   // Zone roots only — the retired `content.<zone>` face serves the same heap
   // (zone-door.ts). Asked together, a few at a time: the first verified index

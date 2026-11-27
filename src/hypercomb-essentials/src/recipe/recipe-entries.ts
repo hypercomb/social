@@ -148,6 +148,11 @@ export interface RecipeEntriesDeps {
   ownHost?: () => string
   /** How the room this tab is joined to is read and written. Its signer is also whose key an entry's page is made with. */
   room?: RoomEntriesDeps
+  /** Told each domain that was asked and did not answer, so a reader hears it was not reached rather than empty. */
+  unanswered?: (node: PoolNode) => void
+  /** Whether a host answers at all: asked only of a domain that offered nothing. The live one asks the host's root,
+   *  and is used only where the reads are the live ones too. */
+  answers?: (zone: string) => Promise<boolean>
 }
 
 const t = (key: string, fallback: string, params?: Record<string, string | number>): string => {
@@ -433,6 +438,51 @@ export interface RecipeEntryPostedLine {
   readonly page: string
 }
 
+/** A host that answers anything at its root, within the deadline, answered: only a host never reached did not. */
+const liveAnswers = async (zone: string): Promise<boolean> => {
+  try {
+    await fetchWithDeadline(`${originOf(zone)}/`, { method: 'HEAD', cache: 'no-store' }, { timeoutMs: HOST_TIMEOUT_MS })
+    return true
+  } catch { return false }
+}
+
+/** The caller's read parts, each telling `failed` the host it threw for. The parts left to the live reader are left
+ *  as they are: a live read that fails says nothing, so the host is asked whether it answers at all. */
+const listening = (io: OfferedReadIo | undefined, failed: Set<string>): OfferedReadIo | undefined => {
+  if (!io) return undefined
+  const heard = async <T>(host: string, read: () => Promise<T>): Promise<T> => {
+    try { return await read() } catch (error) { failed.add(zoneDoor(host)); throw error }
+  }
+  const keysOf = io.keysOf
+  const indexOf = io.indexOf
+  const atom = io.atom
+  return {
+    ...io,
+    ...(keysOf ? { keysOf: (host: string) => heard(host, () => keysOf(host)) } : {}),
+    ...(indexOf ? { indexOf: (host: string, pubkey: string) => heard(host, () => indexOf(host, pubkey)) } : {}),
+    ...(atom ? { atom: (host: string, sig: string, limit: number) => heard(host, () => atom(host, sig, limit)) } : {}),
+  }
+}
+
+/** Tell the caller each zone asked that offered nothing and did not answer. Never throws. */
+const tellUnanswered = async (
+  zones: readonly string[],
+  offered: ReadonlySet<string>,
+  failed: ReadonlySet<string>,
+  deps: RecipeEntriesDeps,
+  own: string,
+): Promise<void> => {
+  const tell = deps.unanswered
+  if (!tell) return
+  const answers = deps.answers ?? (deps.io ? null : liveAnswers)
+  const quiet = [...new Set(zones.map(zone => zoneDoor(zone)).filter(Boolean))].filter(zone => !offered.has(zone))
+  await mapBounded(quiet, 4, async zone => {
+    const silent = failed.has(zone) || (answers ? !(await answers(zone).catch(() => false)) : false)
+    if (!silent) return
+    try { tell({ kind: 'domain', id: zone, ...(own && zone === own ? { you: true } : {}) }) } catch { /* the caller's ear */ }
+  })
+}
+
 const ownHostOf = (deps: RecipeEntriesDeps): string => {
   try {
     if (deps.ownHost) return zoneDoor(deps.ownHost())
@@ -447,7 +497,9 @@ const ownHostOf = (deps: RecipeEntriesDeps): string => {
  * entries. One offer per entry signature with every node that offers it, the
  * first one named; a member that does not read as an entry is left out. The
  * reader's own rows stay, marked `you` on their node. Newest first where a
- * time is known, then by name. Nothing is kept. Never throws.
+ * time is known, then by name. Nothing is kept. Never throws. A domain that
+ * offered nothing and did not answer is told to `deps.unanswered`, so it is
+ * never mistaken for one with nothing published.
  */
 export async function findRecipeEntries(
   sources: { zones: readonly string[]; room?: boolean },
@@ -458,10 +510,13 @@ export async function findRecipeEntries(
     const zones = Array.isArray(sources?.zones) ? sources.zones : []
     if (zones.length) {
       const own = ownHostOf(deps)
+      const failed = new Set<string>()
+      const io = deps.unanswered ? listening(deps.io, failed) : deps.io
       const members = await readOfferedPools(zones, RECIPE_ENTRY_MEANING, {
-        ...(deps.io ? { io: deps.io } : {}),
+        ...(io ? { io } : {}),
         maxMemberBytes: RECIPE_LIMITS.entryBytes,
       }).catch(() => [])
+      await tellUnanswered(zones, new Set(members.flatMap(member => member.hosts)), failed, deps, own)
       for (const member of members) {
         const parsed = await parseRecipeEntry(member.bytes, member.sig)
         if (!parsed.ok) continue

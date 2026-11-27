@@ -38,6 +38,8 @@
 // who has never pinned anything does not grow `sign('entrances:pinned')` by
 // booting. Only a write creates the pool.
 
+import { MARKER_NAME, readLayerMarker, registerPoolMeaning } from '@hypercomb/core'
+
 const STORE_KEY = '@hypercomb.social/Store'
 
 /** The slice of the runtime Store this class needs. Tests hand in a fake. */
@@ -131,6 +133,43 @@ export class ParticipantDocument<T> extends EventTarget {
     this.#edited = true
     this.#pending = { value }
     void this.#flush()
+  }
+
+  /** EVERY VERSION THIS DOCUMENT HAS BEEN, newest first.
+   *
+   *  A document write keeps its versions: each one is an atom named by its
+   *  bytes, and a `000x` marker in the same directory names it in order. So the
+   *  history is not something to record. It is already on disk, and this only
+   *  reads it back: the markers from the highest down, each to the atom it
+   *  names, each atom through `parse`. A marker that names nothing readable is
+   *  passed over, never repaired. `limit` caps how many markers are read.
+   *  Empty before the Store answers, and for a pool nobody has written. */
+  async history(limit = 200): Promise<T[]> {
+    const store = this.#store
+    if (!store?.openPool) return []
+    try {
+      await store.initialize?.()
+      const pool = await store.openPool(this.#meaning)
+      if (!pool) return []
+      const target = this.#subKey
+        ? await pool.getDirectoryHandle(await registerPoolMeaning(this.#subKey), { create: false })
+        : pool
+      const markers: string[] = []
+      for await (const [name, handle] of (target as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
+        if (handle.kind === 'file' && MARKER_NAME.test(name)) markers.push(name)
+      }
+      markers.sort().reverse()
+      const out: T[] = []
+      for (const name of markers.slice(0, limit)) {
+        try {
+          const { layer } = await readLayerMarker(target, name)
+          const file = await (await target.getFileHandle(layer, { create: false })).getFile()
+          const doc = file.size > 0 ? this.#parse(decode(await file.arrayBuffer())) : null
+          if (doc !== null) out.push(doc)
+        } catch { /* a marker naming nothing readable is passed over */ }
+      }
+      return out
+    } catch { return [] }
   }
 
   async #hydrate(): Promise<void> {
