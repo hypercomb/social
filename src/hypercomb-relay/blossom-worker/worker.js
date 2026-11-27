@@ -1831,10 +1831,22 @@ async function routeMetaForIndex(env, pubkey, evt) {
   return found
 }
 
+// Each door's bag is its own location, so the doors advance side by side, a
+// few at a time: one after another, a 126-root index across four zones ran
+// past the eight seconds a hive gives the write (2026-11-26), and the doors
+// last in line missed that publish. Every door is tried; any one that could
+// not move makes the answer false, as before.
+const ROUTE_ADVANCE_WIDTH = 8
+
 async function advancePublishedLocations(env, pubkey, evt) {
-  for (const [host, meta] of await routeMetaForIndex(env, pubkey, evt)) {
-    if (!await advanceRouteMeta(env, host, meta)) return false
+  const routes = [...await routeMetaForIndex(env, pubkey, evt)]
+  let moved = true
+  for (let i = 0; i < routes.length; i += ROUTE_ADVANCE_WIDTH) {
+    const answers = await Promise.all(routes.slice(i, i + ROUTE_ADVANCE_WIDTH)
+      .map(([host, meta]) => advanceRouteMeta(env, host, meta).catch(() => false)))
+    if (answers.includes(false)) moved = false
   }
+  if (!moved) return false
   const scoped = await bindingsEnv(env)
   const { offerings = {} } = JSON.parse(evt.content)
   for (const [location, offer] of Object.entries(offerings)) {
@@ -6205,6 +6217,15 @@ async function validOfferingLocations(evt) {
   return true
 }
 
+/** `work`, handed to the request's waitUntil too, so a caller that hangs up
+ *  (a hive gives an index write eight seconds) does not cancel it. Answers
+ *  what `work` answers; a throw answers false. */
+function keptPastHangUp(work, ctx) {
+  const kept = Promise.resolve(work).catch(() => false)
+  if (ctx?.waitUntil) ctx.waitUntil(kept)
+  return kept
+}
+
 /** After the answer where the request can wait on it (attachDeepNames). */
 function nameDeepPlaces(env, pubkey, evt, ctx) {
   const naming = attachDeepNames(env, pubkey, evt).catch(() => [])
@@ -6243,7 +6264,7 @@ async function putHive(request, env, pubkey, ctx) {
   if (stored) {
     if (String(stored.id || '') === String(evt.id || '')) {
       await nameDeepPlaces(env, pubkey, evt, ctx)
-      return await advancePublishedLocations(env, pubkey, evt)
+      return await keptPastHangUp(advancePublishedLocations(env, pubkey, evt), ctx)
         ? text(200, 'index already current')
         : text(503, 'signed index is held but a route location is not current; retry this index')
     }
@@ -6266,6 +6287,9 @@ async function putHive(request, env, pubkey, ctx) {
   // the handler — so naming last meant a held index whose deep names were
   // never asked for (2026-11-25, 125 roots). waitUntil outlives the hang-up.
   await nameDeepPlaces(env, pubkey, evt, ctx)
+  // The doors advance from here, beside the notes below, and outlive a caller
+  // that hangs up: the answer still waits on them.
+  const advancing = keptPastHangUp(advancePublishedLocations(env, pubkey, evt), ctx)
   await noteTranslators(env, pubkey, evt)
   await noteAssessors(env, pubkey, evt)
   await noteAttesters(env, pubkey, evt)
@@ -6276,7 +6300,7 @@ async function putHive(request, env, pubkey, ctx) {
   await noteEvents(env, pubkey, evt)
   await noteFollows(env, pubkey, evt)
   await noteSharedPools(env, pubkey, evt)
-  if (!await advancePublishedLocations(env, pubkey, evt)) {
+  if (!await advancing) {
     return text(503, 'signed index is held but a route location is not current; retry this index')
   }
   if (headOnly(env)) {
