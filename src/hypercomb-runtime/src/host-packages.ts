@@ -27,7 +27,7 @@
 //
 // It reads nothing but public URLs and writes nothing anywhere.
 
-import { HOST_IOC_KEY, registerPoolMeaning, type HostProvider } from '@hypercomb/core'
+import { HOST_IOC_KEY, indexStandsFor, listedSignersAt, registerPoolMeaning, type HostProvider } from '@hypercomb/core'
 import { HIVE_INDEXES_MEANING, HOST_PACKAGES_MEANING, markerIndices, parseMember, parsePoolListing, poolEntryName } from './host-pool.js'
 import { DEFAULT_HOST_ZONES, hostZone } from './host-zones.js'
 
@@ -524,16 +524,18 @@ const fetchIndexEvent = async (url: string): Promise<Record<string, unknown> | n
   } catch { return null }
 }
 
-/** One event, checked as essentials hive-pointer.ts checks it: the declared
- *  key must be the pinned one AND the signature must verify — either failing
- *  is substitution. A wrong kind or unreadable roots is not an index at all. */
+/** One event, checked as essentials hive-pointer.ts checks it: it must stand
+ *  as the pinned key's (signed by it, or by a key its list on the same door
+ *  names, for it: core index-signer.ts) AND the signature must verify — either
+ *  failing is substitution. A wrong kind or unreadable roots is not an index. */
 const verifiedRoots = async (
   event: Record<string, unknown>,
   pubkey: string,
   verify: VerifyIndexEvent,
+  origin: string,
 ): Promise<{ roots: Record<string, string>; createdAt: number } | 'forged' | null> => {
   if (Number(event['kind']) !== HIVE_INDEX_KIND) return null
-  if (String(event['pubkey'] ?? '').toLowerCase() !== pubkey) return 'forged'
+  if (!await indexStandsFor(event, pubkey, () => listedSignersAt(origin, pubkey, verify))) return 'forged'
   try { if (!(await verify(event))) return 'forged' } catch { return 'forged' }
   let content: unknown
   try { content = JSON.parse(String(event['content'] ?? '')) } catch { return null }
@@ -562,10 +564,12 @@ export const readInstallChannel = async (
   let pool: string
   try { pool = await registerPoolMeaning(HIVE_INDEXES_MEANING) } catch { return { state: 'unreachable' } }
   let forged: string | null = null
+  const pubkey = String(follow.pubkey ?? '').toLowerCase()
   for (const door of indexDoors(follow.hosts)) {
-    const event = await fetchIndexEvent(`${isLoopback(door) ? 'http' : 'https'}://${door}/${pool}/${follow.pubkey}`)
+    const origin = `${isLoopback(door) ? 'http' : 'https'}://${door}`
+    const event = await fetchIndexEvent(`${origin}/${pool}/${pubkey}`)
     if (!event) continue
-    const read = await verifiedRoots(event, follow.pubkey, verify)
+    const read = await verifiedRoots(event, pubkey, verify, origin)
     if (read === 'forged') { forged ??= door; continue }
     if (!read) continue
     const zone = hostZone(door)

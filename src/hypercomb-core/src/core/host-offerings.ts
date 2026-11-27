@@ -4,6 +4,7 @@
 import { SignatureService } from './signature.service.js'
 import { registerPoolMeaning } from './pool-registry.js'
 import { isMetaEnvelope, metaPayloadOf } from './life-primitive.js'
+import { indexStandsFor, listedSignersAt } from './index-signer.js'
 
 const SIG = /^[a-f0-9]{64}$/
 const HOST = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*(:\d{1,5})?$/
@@ -53,9 +54,16 @@ const routeOf = (raw: string): URL | null => {
     && (url.protocol === 'https:' || (loopback(url.host) && url.protocol === 'http:')) ? url : null
 }
 
-const signedHead = (index: Record<string, unknown>, pubkey: string, lineage: string,
+/** Does `index` stand as `pubkey`'s, read on `origin`? Its own signature, or a
+ *  key the publisher's list there names, for it (index-signer.ts). */
+const standsAt = (index: Record<string, unknown>, pubkey: string, origin: string, verify: VerifyHostIndex): Promise<boolean> =>
+  indexStandsFor(index, pubkey, () => listedSignersAt(origin, pubkey, verify))
+
+/** `stands`: the index is the publisher's (its own signature, or a listed key's
+ *  for it). A resolved offer carried without its list is checked strictly. */
+const signedHead = (index: Record<string, unknown>, stands: boolean, lineage: string,
   route: URL, verify: VerifyHostIndex): { head: string; doors: string[] } | null => {
-  if (Number(index['kind']) !== 30564 || index['pubkey'] !== pubkey) return null
+  if (Number(index['kind']) !== 30564 || !stands) return null
   try { if (!verify(index)) return null } catch { return null }
   let content: { roots?: Record<string, unknown>; doors?: Record<string, unknown> }
   try { content = JSON.parse(String(index['content'] ?? '')) } catch { return null }
@@ -79,7 +87,7 @@ export const parseHostOffering = (raw: unknown, verify: VerifyHostIndex): HostOf
     || !SIG.test(String(o.pubkey)) || !SIG.test(String(o.head))) return null
   const route = routeOf(o.route)
   if (!route || !o.index || typeof o.index !== 'object' || Array.isArray(o.index)) return null
-  const signed = signedHead(o.index, String(o.pubkey), o.lineage, route, verify)
+  const signed = signedHead(o.index, o.index['pubkey'] === o.pubkey, o.lineage, route, verify)
   if (!signed || signed.head !== o.head) return null
   return { kind: 'host:offering', title: o.title.trim().slice(0, 80) || o.lineage,
     route: route.origin + '/', lineage: o.lineage, pubkey: String(o.pubkey), head: String(o.head),
@@ -156,7 +164,7 @@ const resolveLocation = async (raw: unknown, sourceHost: string, verify: VerifyH
   const index = await pending
   if (!index) return null
   const route = new URL(entry.route)
-  const signed = signedHead(index, entry.pubkey, entry.lineage, route, verify)
+  const signed = signedHead(index, await standsAt(index, entry.pubkey, route.origin, verify), entry.lineage, route, verify)
   if (!signed) return null
   const source = baseOf(sourceHost)
   const published = await latestLocationHead(source, entry.location)
@@ -221,8 +229,8 @@ const creationMember = async (raw: unknown, host: string): Promise<CreationMembe
 }
 
 const declaredCreation = (index: Record<string, unknown>, member: CreationMember,
-  verify: VerifyHostIndex): string | null => {
-  if (Number(index['kind']) !== 30564 || index['pubkey'] !== member.pubkey) return null
+  stands: boolean, verify: VerifyHostIndex): string | null => {
+  if (Number(index['kind']) !== 30564 || !stands) return null
   try { if (!verify(index)) return null } catch { return null }
   let content: Record<string, unknown>
   try { content = JSON.parse(String(index['content'] ?? '')) } catch { return null }
@@ -262,7 +270,7 @@ const resolveCreation = async (raw: unknown, host: string, verify: VerifyHostInd
   }
   const index = await pending
   if (!index) return null
-  const head = declaredCreation(index, member, verify)
+  const head = declaredCreation(index, member, await standsAt(index, member.pubkey, base, verify), verify)
   const current = await latestLocationHead(base, member.location)
   if (!head || current.state !== 'current' || current.head !== head) return null
   const metaBytes = await fetchAtom(base, head, 65_536)
