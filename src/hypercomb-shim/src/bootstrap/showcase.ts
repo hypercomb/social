@@ -1254,6 +1254,35 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     : version.lineage ? version.owners.map(owner => ({ pubkey: owner.pubkey, lineage: version.lineage! })) : [])
   const sameItem = (a: ShowcaseItem, b: ShowcaseItem): boolean => a.pubkey === b.pubkey && a.lineage === b.lineage
   const names = (items: readonly ShowcaseItem[], entry: Aggregate): boolean => itemsOfEntry(entry).some(item => items.some(row => sameItem(row, item)))
+  /** Does this version carry the item: a claim the ledger verified, or, claimless, an owner under its lineage. */
+  const versionNames = (version: Version, item: ShowcaseItem): boolean => version.claims.length
+    ? version.claims.some(claim => sameItem(claim, item))
+    : !!version.lineage && version.lineage === item.lineage && version.owners.some(owner => owner.pubkey === item.pubkey)
+  /**
+   * THE VERSION A TILE'S PICTURE COMES FROM: THE ONE ITS SHARER PUT IN THE COMMUNITY (jwize 2026-11-25: "on the mobile
+   * launcher view it looks as though the images are intermittently changing. they should just use the first one that
+   * the sharer has put in their community"). A name with several versions used to wear `versions[0]`, and that order
+   * turns with every read — how many places have answered so far decides it — so the picture swapped back and forth.
+   * Now: the first item the owners' records name, in their order, picks the version; among versions carrying that item
+   * the one already worn stays, else a live one. With no record naming it, the tile keeps what it wears while that
+   * version is still offered, and only a tile wearing nothing yet takes the lead.
+   */
+  const faceOf = (entry: Aggregate, wearing: string): Version => {
+    const items = [
+      ...(signed?.showcase?.items ?? []),
+      ...(signed?.showcase?.communities ?? []).flatMap(community => community.items),
+      ...(signed?.staged?.items ?? []),
+      ...(signed?.staged?.communities ?? []).flatMap(community => community.items),
+    ]
+    for (const item of items) {
+      const carrying = entry.versions.filter(version => versionNames(version, item))
+      if (!carrying.length) continue
+      return carrying.find(version => version.head === wearing)
+        ?? carrying.find(version => signed?.live?.has(version.head))
+        ?? carrying[0]!
+    }
+    return entry.versions.find(version => version.head === wearing) ?? entry.versions[0]!
+  }
   /** Each creation once, the first naming of it kept. */
   const uniqueItems = (items: readonly ShowcaseItem[]): ShowcaseItem[] =>
     items.filter((item, at) => items.findIndex(other => sameItem(other, item)) === at)
@@ -1653,7 +1682,6 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   /** A name's tile in one row: the same name may show in your domain's row and
    *  in the row of the domain it came from, each its own link. */
   const tileView = (entry: Aggregate, row: string): HTMLAnchorElement => {
-    const lead = entry.versions[0]!
     const id = `${row}
 ${entry.key}`
     let view = tileViews.get(id)
@@ -1744,8 +1772,9 @@ ${entry.key}`
     view.tile.classList.toggle('staged', onlyYou)
     if (managing) view.tile.setAttribute('aria-pressed', String(lit))
     else view.tile.removeAttribute('aria-pressed')
+    const lead = faceOf(entry, view.head)
     if (view.head !== lead.head) {
-      // A new lead version: its own cover and picture, and the old head forgets this box.
+      // A new face version: its own cover and picture, and the old head forgets this box.
       wearers.get(view.head)?.delete(view.art)
       view.art.replaceChildren()
       view.art.classList.remove('has-picture')
