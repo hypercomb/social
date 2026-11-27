@@ -93,6 +93,9 @@ const sceneParts = (n, media, sayInstead = null, ownFigure = false) => {
   }
 }
 
+/** How long a sentence's words show before its voice starts, in seconds. */
+const TEXT_LEAD = 0.2
+
 /** A scene's narration as the sentences a reader sees one at a time, each
  *  with where it sits in the voice (seconds; `to` is where the next sentence
  *  starts, so the voice plays straight through). The timing is the shared
@@ -109,10 +112,14 @@ const linesOf = (say, voice) => {
       if (spoken.length === shown.length) spans = sentenceTimes(voice, spoken).spans
     } catch { spans = null }
   }
+  // A sentence's words show TEXT_LEAD before its voice starts (jwize
+  // 2026-11-26: "start a 200 ms delay after show text"), never earlier than
+  // the moment the sentence before it stops speaking.
+  const fromOf = (i) => i === 0 ? 0 : Math.max(spans[i - 1].end, spans[i].start - TEXT_LEAD)
   return shown.map((text, i) => ({
     say: text,
-    from: spans ? Math.max(0, i === 0 ? 0 : spans[i].start) : null,
-    to: spans ? (spans[i + 1] ? spans[i + 1].start : null) : null,
+    from: spans ? Math.max(0, fromOf(i)) : null,
+    to: spans ? (spans[i + 1] ? fromOf(i + 1) : null) : null,
   }))
 }
 
