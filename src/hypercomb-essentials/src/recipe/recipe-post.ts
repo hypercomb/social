@@ -194,6 +194,41 @@ export function recipePostChanges(used: number, standing: RecipePostStanding): {
   }
 }
 
+/**
+ * The host's refusal of an entry PUT, as a sentence in the page's language.
+ * The Cloudflare host (hypercomb-relay/blossom-worker/worker.js, putEntryMember)
+ * says why in English on X-Reason; each reason it sends is matched here, and
+ * one it does not know is kept in the host's own words inside a sentence of ours.
+ */
+export function recipePostRefusal(said: string, say: RecipeSay): string {
+  const words = String(said ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 200)
+  const reason = words.toLowerCase()
+  if (!reason) return ''
+  if (reason === 'this one is closed') return recipeWords(say, 'recipe.post.refused.closed', 'This one is closed, so your entry was not posted.')
+  if (reason === 'this one has expired') return recipeWords(say, 'recipe.post.refused.expired', 'This one has expired, so your entry was not posted.')
+  if (reason === 'this one is full') return recipeWords(say, 'recipe.post.refused.full', 'This one is full, so your entry was not posted.')
+  if (/^this key has posted its \d+ here/.test(reason)) {
+    return recipeWords(say, 'recipe.post.refused.changes', 'You have used all {max} changes here.', { max: ENTRY_LIMITS.perKey })
+  }
+  if (/^an entry is at most \d+ bytes/.test(reason)) return recipeWords(say, 'recipe.post.refused.size', 'Your entry is too long for this host.')
+  if (reason.startsWith('entry stamp is more than')) {
+    return recipeWords(say, 'recipe.post.refused.clock', 'This host\'s clock and this phone\'s are too far apart. Try again.')
+  }
+  if (/^an entry carries a (name|title)/.test(reason)) {
+    return recipeWords(say, 'recipe.post.refused.lines', 'The host did not take your name or title as written. Keep each to one short line.')
+  }
+  if (['no pool is open at this address', 'this host holds no pools', 'this address belongs to another pool', 'this address is not an entry pool'].includes(reason)) {
+    return recipeWords(say, 'recipe.post.refused.unknown', 'This host is not taking posts for this code.')
+  }
+  if (reason === 'this address holds too much' || reason === 'this host could not take the entry') {
+    return recipeWords(say, 'recipe.post.refused.busy', 'This host could not take your entry just now. Try again in a moment.')
+  }
+  if (/^(member bytes do not hash|body is not a json|wrong event kind|an entry is the seven fields|an entry carries one pool|an entry is spelled|the id is not|entry is not tagged|an entry names its page|invalid entry signature)/.test(reason)) {
+    return recipeWords(say, 'recipe.post.refused.unread', 'This host could not read the entry this page made, so it was not posted.')
+  }
+  return recipeWords(say, 'recipe.post.refused.other', 'The host did not take your entry. It said: {said}', { said: words })
+}
+
 /** When a pool ends, as this reader's clock and language say it. */
 export function recipePostEnds(until: number, locale?: string): string {
   const when = new Date(Math.floor(Number(until)) * 1000)
@@ -214,6 +249,8 @@ export interface RecipePostPageOptions {
   onTakeBack(): void
   /** A posted row was chosen. */
   onOpen(sig: string): void
+  /** Try again: ask the host once more for the same code. */
+  onRetry?(): void
 }
 
 /** What a recipe opened from the list is shown with. */
@@ -228,20 +265,25 @@ export interface RecipePostPageHandle {
   setTitle(title: string): void
   /** The pool's state as one sentence, and when it ends ('' for no end line). */
   setState(words: string, ends?: string): void
+  /** Offer Try again under the state (after the host did not answer), or take it away. */
+  setRetry(on: boolean): void
+  /** Put focus on the page's heading: where a reader starts. */
+  focus(): void
   /** Draw the form for this template, or take it away (null). The same template again keeps what was typed. */
   setForm(template: RecipeTemplateDocument | null): void
   /** What is typed now. */
   fields(): RecipePostFields
-  /** The plain measure: room left in bytes and changes left. `over` when the entry does not fit. */
+  /** The plain measure: room left and changes left. `over` when the entry does not fit. */
   setMeasure(words: string, over?: boolean): void
-  /** Which presses are open now. `posted` names the press for a change. */
-  setActions(actions: { readonly post: boolean; readonly takeBack: boolean; readonly posted: boolean }): void
+  /** Which presses are open now. `posted` names the press for a change; `sending` names the press under way. */
+  setActions(actions: { readonly post: boolean; readonly takeBack: boolean; readonly posted: boolean; readonly sending?: 'post' | 'back' | null }): void
   /** Where the entry went, or the host's own words. */
   setSaid(words: string, tone?: 'plain' | 'good' | 'bad'): void
   /** What has been posted, with one quiet line about it; null takes the list away. */
   setPosted(rows: readonly RecipeCatalogueRow[] | null, note?: string): void
-  /** A posted recipe in the read-along, over the page, until it is closed. */
+  /** A posted recipe in the read-along, over the page, until it is closed. Focus moves into it. */
   showRecipe(reading: RecipePostReading): void
+  /** Close the read-along: focus goes back to the row it was opened from. */
   closeRecipe(): void
   dispose(): void
 }
@@ -272,7 +314,7 @@ export function recipePostPage(options: RecipePostPageOptions): RecipePostPageHa
   let catalogue: RecipeCatalogueHandle | null = null
   let reading: RecipePageHandle | null = null
   const offs: (() => void)[] = []
-  const on = (target: EventTarget, type: string, handler: () => void): void => {
+  const on = (target: EventTarget, type: string, handler: (event: Event) => void): void => {
     target.addEventListener(type, handler)
     offs.push(() => target.removeEventListener(type, handler))
   }
@@ -285,6 +327,8 @@ export function recipePostPage(options: RecipePostPageOptions): RecipePostPageHa
   root.setAttribute('data-consumes-wheel', '')
   const heading = recipeEl('h1', 'hc-recipe-title', options.title)
   heading.id = `${serial}-title`
+  // Focus lands here when the page opens, so a reader starts at the pool's name.
+  heading.tabIndex = -1
   const closeWords = say('recipe.post.close', 'Close')
   const close = recipeEl('button', 'hc-recipe-tool')
   close.type = 'button'
@@ -299,6 +343,16 @@ export function recipePostPage(options: RecipePostPageOptions): RecipePostPageHa
   state.setAttribute('role', 'status')
   const ends = recipeEl('p', 'hc-recipe-post-quiet')
   ends.hidden = true
+  const retry = recipeEl('button', 'hc-recipe-btn hc-recipe-post-retry', say('recipe.post.retry', 'Try again'))
+  retry.type = 'button'
+  retry.hidden = true
+  on(retry, 'click', () => {
+    if (retry.hidden) return
+    retry.hidden = true
+    // The press goes away under the finger: focus waits on the heading, not on nothing.
+    heading.focus()
+    options.onRetry?.()
+  })
 
   // ── the form ────────────────────────────────────────────────────────────
 
@@ -338,7 +392,7 @@ export function recipePostPage(options: RecipePostPageOptions): RecipePostPageHa
   measure.setAttribute('aria-live', 'polite')
   const post = recipeEl('button', 'hc-recipe-btn is-solid', say('recipe.post.post', 'Post'))
   post.type = 'button'
-  const takeBack = recipeEl('button', 'hc-recipe-btn is-line', say('recipe.post.take-back', 'Take it back'))
+  const takeBack = recipeEl('button', 'hc-recipe-btn', say('recipe.post.take-back', 'Take it back'))
   takeBack.type = 'button'
   takeBack.hidden = true
   on(post, 'click', () => { if (!post.disabled) options.onPost() })
@@ -362,7 +416,7 @@ export function recipePostPage(options: RecipePostPageOptions): RecipePostPageHa
   posted.hidden = true
 
   const column = recipeEl('main', 'hc-recipe-post-column')
-  column.append(state, ends, form, said, posted)
+  column.append(state, ends, retry, form, said, posted)
   const scroll = recipeEl('div', 'hc-recipe-post-scroll')
   scroll.append(column)
   root.append(head, scroll)
@@ -393,14 +447,28 @@ export function recipePostPage(options: RecipePostPageOptions): RecipePostPageHa
 
   // ── the list and the read-along ─────────────────────────────────────────
 
-  const closeRecipe = (): void => {
+  /** Take the read-along away. `back`: the person closed it, so focus returns to the row it was opened from. */
+  const closeRecipe = (back = false): void => {
     if (!reading) return
-    reading.dispose()
-    reading.element.remove()
+    const leaving = reading
     reading = null
+    leaving.dispose()
+    leaving.element.remove()
     scroll.inert = false
     head.inert = false
+    if (back && !disposed) {
+      if (catalogue) catalogue.focus()
+      else heading.focus()
+    }
   }
+
+  // Escape closes an open read-along and nothing more: the page itself stays until its Close.
+  on(root, 'keydown', event => {
+    if (!reading || !(event instanceof KeyboardEvent) || event.key !== 'Escape' || event.defaultPrevented) return
+    event.preventDefault()
+    event.stopPropagation()
+    closeRecipe(true)
+  })
 
   return {
     element: root,
@@ -410,6 +478,8 @@ export function recipePostPage(options: RecipePostPageOptions): RecipePostPageHa
       ends.textContent = end
       ends.hidden = !end
     },
+    setRetry: on => { retry.hidden = !on || !options.onRetry },
+    focus: () => { if (!disposed) heading.focus({ preventScroll: true }) },
     setForm: next => {
       if (disposed) return
       if (!next) { form.hidden = true; return }
@@ -426,10 +496,14 @@ export function recipePostPage(options: RecipePostPageOptions): RecipePostPageHa
       measure.classList.toggle('is-over', over)
     },
     setActions: next => {
-      post.disabled = !next.post
-      post.textContent = next.posted ? say('recipe.post.change', 'Post the change') : say('recipe.post.post', 'Post')
+      const sending = next.sending ?? null
+      post.disabled = !next.post || sending !== null
+      post.textContent = sending === 'post' ? say('recipe.post.posting-press', 'Posting…')
+        : next.posted ? say('recipe.post.change', 'Post the change') : say('recipe.post.post', 'Post')
       takeBack.hidden = !next.posted
-      takeBack.disabled = !next.takeBack
+      takeBack.disabled = !next.takeBack || sending !== null
+      takeBack.textContent = sending === 'back' ? say('recipe.post.taking-back-press', 'Taking it back…') : say('recipe.post.take-back', 'Take it back')
+      actions.setAttribute('aria-busy', String(sending !== null))
     },
     setSaid: (words, tone = 'plain') => {
       said.textContent = words
@@ -465,14 +539,18 @@ export function recipePostPage(options: RecipePostPageOptions): RecipePostPageHa
         readOnly: true,
         say: options.say,
         pictureUrl: () => '',
-        onClose: () => closeRecipe(),
+        onClose: () => closeRecipe(true),
       })
       // The page under the recipe stands aside, so its keys and fields are not reached through it.
       scroll.inert = true
       head.inert = true
       root.append(reading.element)
+      // Focus goes in with it, so a reader is where the recipe is and Escape reaches it.
+      const into = reading.element
+      if (!into.hasAttribute('tabindex')) into.tabIndex = -1
+      into.focus({ preventScroll: true })
     },
-    closeRecipe,
+    closeRecipe: () => closeRecipe(true),
     dispose: () => {
       if (disposed) return
       disposed = true

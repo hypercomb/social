@@ -118,7 +118,7 @@ describe('poolsBar', () => {
     const { bar, text } = built()
     bar.update(state({ here: 3, total: 12, pools: [{ meaning: 'recipe:template', count: 2, label: recipes }] }))
     expect(text('hc-pools-title')).toBe('Pools')
-    expect(text('hc-pools-say')).toBe('Tap a tile to turn it on. What is on is yours to offer.')
+    expect(text('hc-pools-say')).toBe('Click a tile to turn it on. What is on is yours to offer.')
     expect(text('hc-pools-counts')).toBe('3 on here · 12 on in all · leaves 2 recipe templates')
     expect(text('hc-pools-publish')).toBe('Publish')
     expect(text('hc-pools-join')).toBe('Join the swarm')
@@ -128,10 +128,22 @@ describe('poolsBar', () => {
     expect(text('hc-pools-hint')).toBe('Shift-tap: the whole branch')
   })
 
-  it('names the hold, not Shift, where a finger is the pointer', () => {
+  it('names the hold, not Shift, and the tap, not the click, where a finger is the pointer', () => {
     const { bar, text } = built()
     bar.update(state({ touch: true }))
     expect(text('hc-pools-hint')).toBe('Hold a tile: the whole branch')
+    expect(text('hc-pools-say')).toBe('Tap a tile to turn it on. What is on is yours to offer.')
+  })
+
+  it("paints from the shell's roles: the on green, a ring that shows on every press, and no border on a plain word", () => {
+    const { bar } = built()
+    const sheet = bar.element.querySelector('style')?.textContent ?? ''
+    expect(sheet).not.toMatch(/#6fd39a(?!\))|#04180f|outline:none/)
+    expect(sheet).toContain('var(--hc-pools-on,#6fd39a)')
+    expect(sheet).toContain('.hc-pools-bar button:focus-visible{outline:2px solid var(--hc-focus,currentColor);outline-offset:2px;}')
+    expect(sheet).toMatch(/\.hc-pools-bar button\{[^}]*border:0;/)
+    expect(sheet).toContain('@media (pointer:coarse)')
+    expect(sheet).not.toMatch(/opacity:/)
   })
 
   it('says it is publishing and takes no second press while busy, then publishes again', () => {
@@ -172,7 +184,7 @@ describe('poolsBar', () => {
     bar.update(state())
     expect(say_.dataset['tone']).toBeUndefined()
     expect(mark.hidden).toBe(true)
-    expect(text('hc-pools-say')).toBe('Tap a tile to turn it on. What is on is yours to offer.')
+    expect(text('hc-pools-say')).toBe('Click a tile to turn it on. What is on is yours to offer.')
   })
 
   it('draws a refusal in the shell\'s own warning tone, with the window ink where a shell names none', () => {

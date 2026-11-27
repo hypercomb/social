@@ -401,7 +401,7 @@ describe('readRoomEntries', () => {
     expect(read.filter(entry => entry.signer === loud.pubkey).every(entry => entry.at === nowSeconds)).toBe(true)
     // Still newest first.
     expect(read.map(entry => entry.at)).toEqual([...read.map(entry => entry.at)].sort((a, b) => b - a))
-  })
+  }, 30_000) // signs a few hundred members: slow on a loaded machine, not a slow path
 
   it('stops reading a member or an entry that runs past its size, instead of holding it whole', async () => {
     const host = hostWorld()

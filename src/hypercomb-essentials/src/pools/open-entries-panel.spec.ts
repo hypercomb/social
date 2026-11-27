@@ -76,6 +76,11 @@ describe('the row', () => {
     expect(entryPoolWords(say, pool({ known: null }), NOW)).toMatch(/^Tuesday class · ends .+ · opened on another device$/)
   })
 
+  it('says full when the host\'s listing is full, though changes and take-backs leave fewer rows drawn', () => {
+    expect(entryPoolWords(say, pool({ entries: 40, full: true }), NOW)).toMatch(/· 40 entries · full$/)
+    expect(entryPoolWords(say, pool({ entries: 40 }), NOW)).not.toMatch(/full/)
+  })
+
   it('gives each pool its code, Close while open, and Recycle; a pool of another device Close and Recycle', async () => {
     leader.read.mockResolvedValue(read([pool(), pool({ pool: hexOf('c'), known: null, code: '', entries: null, notHome: null })]))
     const { control, row } = mounted()
@@ -286,5 +291,36 @@ describe('the row keeps time', () => {
     await vi.advanceTimersByTimeAsync(3_000)
     expect(words()).toMatch(/· closed ·/)
     row.dispose()
+  })
+})
+
+describe('a full pool', () => {
+  it('says "full" once the pool holds as many entries as a listing gives, and not one before', async () => {
+    const { ENTRY_LIMITS } = await import('./open-entries.js')
+    expect(entryPoolWords(say, pool({ entries: ENTRY_LIMITS.listed }), NOW)).toMatch(new RegExp(`· ${ENTRY_LIMITS.listed} entries · full$`))
+    expect(entryPoolWords(say, pool({ entries: ENTRY_LIMITS.listed - 1 }), NOW)).not.toMatch(/full/)
+    expect(entryPoolWords(say, pool({ entries: null }), NOW)).not.toMatch(/full/)
+  })
+})
+
+describe('the confirm, to a keyboard and a screen reader', () => {
+  it('is named and described, takes the focus on Cancel, cancels on Escape, and gives the focus back to Recycle', async () => {
+    const one = pool()
+    leader.read.mockResolvedValue(read([one]))
+    const { control, find, row } = mounted()
+    await control.refresh()
+    const recycle = (): HTMLButtonElement => row.element.querySelector<HTMLButtonElement>('.hc-posts-recycle')!
+    recycle().focus()
+    recycle().click()
+    await settle()
+    const confirm = find('hc-posts-confirm')
+    expect(confirm.getAttribute('role')).toBe('alertdialog')
+    expect(confirm.getAttribute('aria-label')).toBe('Recycle this pool?')
+    expect(document.getElementById(confirm.getAttribute('aria-describedby') ?? '')).toBe(find('hc-posts-confirm-words'))
+    expect(document.activeElement).toBe(find('hc-posts-keep'))
+    confirm.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(control.state.confirm).toBeNull()
+    expect(leader.recycle).not.toHaveBeenCalled()
+    expect(document.activeElement).toBe(recycle())
   })
 })

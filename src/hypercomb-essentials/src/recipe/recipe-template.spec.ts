@@ -1,5 +1,6 @@
 // recipe/recipe-template.spec.ts
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+import { I18N_IOC_KEY } from '@hypercomb/core'
 import {
   RECIPE_LIMITS,
   emptyRecipeValue,
@@ -11,16 +12,18 @@ import {
   recipeBytes,
   recipeCover,
   recipeEntryBytes,
+  recipeKeyWords,
   recipeLinkUrl,
   recipePages,
   recipeSignatures,
   recipeTemplateBytes,
   recipeTemplateFrom,
+  recipeTemplateRefusalWords,
   recipeTemplateWords,
   type RecipeDocument,
   type RecipeTemplateDocument,
 } from './recipe-template.js'
-import { DEFAULT_RECIPE_TEMPLATES, RECIPE_TEMPLATE_FAMILY, RECIPE_TEMPLATE_WEEKNIGHT } from './recipe-defaults.js'
+import { DEFAULT_RECIPE_TEMPLATES, RECIPE_TEMPLATE_FAMILY, RECIPE_TEMPLATE_WEEKNIGHT, recipeDefaultTemplateId, recipeDefaultTemplateShown } from './recipe-defaults.js'
 
 const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text)
 const SIG_A = 'a'.repeat(64)
@@ -259,5 +262,93 @@ describe('the read-along', () => {
     const pages = recipePages(projectRecipe(RECIPE_TEMPLATE_FAMILY, more))
     expect(pages.filter(p => p.kind === 'pictures')).toHaveLength(1)
     expect(recipePages(projectRecipe(RECIPE_TEMPLATE_FAMILY, { values: {} }))).toEqual([{ kind: 'cover', facts: [] }])
+  })
+})
+
+describe("a refusal, in the participant's language", () => {
+  /** A catalog that knows a few keys and echoes the rest back, as the shell's does. */
+  const speak = (words: Record<string, string>): void => {
+    (globalThis as { ioc?: unknown }).ioc = {
+      get: (key: string) => (key === I18N_IOC_KEY ? { t: (name: string) => words[name] ?? name } : undefined),
+    }
+  }
+  afterEach(() => { delete (globalThis as { ioc?: unknown }).ioc })
+
+  it('carries a code, its key and what fills its holes, and says it in English with no catalogue', async () => {
+    const parsed = await parseRecipeTemplate(template({ sections: [{ key: 'a', kind: 'text', label: 'x' }, { key: 'a', kind: 'text', label: 'y' }] }))
+    expect(parsed.ok).toBe(false)
+    if (parsed.ok) return
+    expect(parsed.refusal).toEqual({ code: 'sharedKey', key: 'recipe.template.refusal.sharedKey', params: { key: 'a' } })
+    expect(parsed.reason).toBe('two sections share the key "a"')
+  })
+
+  it("says the reason in the catalog's words, its holes filled, for a template, a recipe and an entry", async () => {
+    speak({
+      'recipe.template.refusal.notJson': 'JSON ではありません',
+      'recipe.template.refusal.tooLong': '「{field}」が {max} 文字を超えています',
+      'recipe.template.refusal.notSignature': '「{field}」は署名ではありません',
+    })
+    expect(await reason(utf8('not json'))).toBe('JSON ではありません')
+    expect(await reason(template({ name: 'x'.repeat(RECIPE_LIMITS.name + 1) }))).toBe(`「name」が ${RECIPE_LIMITS.name} 文字を超えています`)
+    const recipe = await parseRecipe(utf8(JSON.stringify({ recipe: 1, template: 'nope', values: {} })))
+    expect(recipe.ok ? 'ok' : recipe.reason).toBe('「template」は署名ではありません')
+    const entry = await parseRecipeEntry(utf8(JSON.stringify({ 'recipe:entry': 1, name: 'Soup', recipe: 'nope' })))
+    expect(entry.ok ? 'ok' : entry.reason).toBe('「recipe」は署名ではありません')
+    // A key the catalog does not know is said in English.
+    expect(await reason(template({ sections: [] }))).toBe('it has no sections: a template arranges at least one')
+  })
+
+  it('is said again in any language through a reader’s own words', async () => {
+    const parsed = await parseRecipe(utf8(JSON.stringify({ recipe: 1, values: { soup: { kind: 'video' } } })))
+    if (parsed.ok) throw new Error('read a value of no kind')
+    expect(parsed.refusal.code).toBe('valueKind')
+    const said = recipeTemplateRefusalWords(parsed.refusal, (key, fallback, params) => (key === parsed.refusal.key ? `${params?.['key']} : genre inconnu` : fallback))
+    expect(said).toBe('soup : genre inconnu')
+    expect(recipeTemplateRefusalWords(parsed.refusal, key => key)).toBe(parsed.reason)
+  })
+})
+
+describe('a key said as words', () => {
+  it('is what a value no section names is labelled by', () => {
+    expect(recipeKeyWords('swaps')).toBe('Swaps')
+    expect(recipeKeyWords('make-ahead')).toBe('Make ahead')
+    expect(recipeKeyWords('make_ahead')).toBe('Make ahead')
+    expect(recipeKeyWords('makeAhead')).toBe('Make ahead')
+    const kept = projectRecipe(RECIPE_TEMPLATE_WEEKNIGHT, { values: { pairing_notes: { kind: 'text', text: 'Cider.' } } }).find(p => p.kept)
+    expect(kept?.section.label).toBe('Pairing notes')
+  })
+})
+
+describe("a built-in template, shown in the reader's language", () => {
+  const words: Record<string, string> = {
+    'recipe.default.weeknight.name': '平日',
+    'recipe.default.weeknight.description': '短いもの',
+    'recipe.default.weeknight.swaps.label': '代わりに',
+    'recipe.default.weeknight.swaps.prompt': '何を省けますか？',
+    'recipe.default.weeknight.facts.fields.effort': '手間',
+  }
+  const say = (key: string, fallback: string): string => words[key] ?? key
+
+  it('translates its name, description, labels, prompts and fact fields, and leaves its bytes and signature as they were', async () => {
+    const before = recipeTemplateBytes(RECIPE_TEMPLATE_WEEKNIGHT)
+    const shown = recipeDefaultTemplateShown(RECIPE_TEMPLATE_WEEKNIGHT, say)
+    expect(shown.name).toBe('平日')
+    expect(shown.description).toBe('短いもの')
+    const swaps = shown.sections.find(section => section.key === 'swaps')
+    expect([swaps?.label, swaps?.prompt]).toEqual(['代わりに', '何を省けますか？'])
+    expect(shown.sections.find(section => section.key === 'facts')?.fields).toEqual(['Serves', 'Time', '手間'])
+    // The keys and kinds are the built-in's: a recipe's values still land in the same holes.
+    expect(shown.sections.map(section => [section.key, section.kind])).toEqual(RECIPE_TEMPLATE_WEEKNIGHT.sections.map(section => [section.key, section.kind]))
+    expect(recipeTemplateBytes(RECIPE_TEMPLATE_WEEKNIGHT)).toEqual(before)
+    const held = await parseRecipeTemplate(before)
+    expect(held.ok && held.template.name).toBe('Weeknight')
+  })
+
+  it('knows a built-in by its bytes, and leaves every other template as its author wrote it', () => {
+    const copy = JSON.parse(JSON.stringify(RECIPE_TEMPLATE_FAMILY)) as RecipeTemplateDocument
+    expect(recipeDefaultTemplateId(copy)).toBe('family')
+    const edited: RecipeTemplateDocument = { ...RECIPE_TEMPLATE_FAMILY, description: 'Mine now.' }
+    expect(recipeDefaultTemplateId(edited)).toBe('')
+    expect(recipeDefaultTemplateShown(edited, say)).toBe(edited)
   })
 })

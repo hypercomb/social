@@ -301,7 +301,7 @@ describe('the recipe desk, the drawing', () => {
     expect(divider.textContent).toBe('Also in this recipe')
     expect(divider.nextElementSibling).toBe(part(root, 'pairing'))
     expect(summary(root, 'pairing')).toBe('A dry cider.')
-    expect(tab(root, 'pairing').querySelector('.hc-recipe-tab-label')?.textContent).toBe('pairing')
+    expect(tab(root, 'pairing').querySelector('.hc-recipe-tab-label')?.textContent).toBe('Pairing')
     expect(mount({ recipe: SOUP }).root.querySelector('.hc-recipe-also')).toBeNull()
   })
 
@@ -1100,7 +1100,7 @@ describe('the recipe desk, through another template', () => {
     expect(values['story-text']).toEqual({ kind: 'text', text: 'Kept words.' })
     // The kept part now writes under the key its words moved to, and says so on its tab.
     expect(partKeys(root)).toEqual(['story', 'story-text'])
-    expect(tab(root, 'story-text').querySelector('.hc-recipe-tab-label')?.textContent).toBe('story text')
+    expect(tab(root, 'story-text').querySelector('.hc-recipe-tab-label')?.textContent).toBe('Story text')
     type(at<HTMLTextAreaElement>(cards[1], '0:text'), 'Kept words, edited.')
     expect(last(onChange).values['story-text']).toEqual({ kind: 'text', text: 'Kept words, edited.' })
     expect(last(onChange).values['story']).toEqual({ kind: 'facts', facts: [{ label: 'Year', value: '1962' }] })
@@ -1247,7 +1247,7 @@ describe('the recipe desk, arranging', () => {
     expect(onChange).not.toHaveBeenCalled()
     expect(page.recipe().values).toEqual(SOUP.values)
     expect(root.querySelector('.hc-recipe-also')).not.toBeNull()
-    expect(root.querySelector('.hc-recipe-kept-name')?.textContent).toBe('story')
+    expect(root.querySelector('.hc-recipe-kept-name')?.textContent).toBe('Story')
 
     // The filled button ends the arranging. It does not close the desk.
     must(root.querySelector<HTMLButtonElement>('.hc-recipe-done'), 'done').click()
@@ -2269,7 +2269,7 @@ describe('the recipe desk on a table set', () => {
       control(root).click()
       expect(actions.open).toHaveBeenCalledTimes(1)
       expect(items(root)).toEqual(['Your table sets', 'Slate, four plates', 'From your domains', 'Cedar, two bowlsfriend.example', '', 'Add a table set', 'The drawn plate'])
-      expect(root.querySelector('.hc-recipe-table-menu [aria-checked="true"]')?.textContent).toBe('Slate, four plates')
+      expect(root.querySelector('.hc-recipe-table-menu [aria-pressed="true"]')?.textContent).toBe('Slate, four plates')
       expect(document.activeElement?.textContent).toBe('Slate, four plates')
     })
 
@@ -2331,5 +2331,138 @@ describe('the recipe desk on a table set', () => {
       expect(document.activeElement).toBe(control(root))
       expect(onClose).not.toHaveBeenCalled()
     })
+  })
+})
+
+describe('the recipe desk, when something does not arrive or does not read', () => {
+  it('says a recipe that does not read could not be opened, and why, never that nothing is written', () => {
+    const { root, page } = mount({ readOnly: true, mode: 'read', unreadable: 'its bytes are not held here' })
+    const sheet = must(root.querySelector<HTMLElement>('.hc-recipe-page'), 'page')
+    expect(sheet.dataset['page']).toBe('unreadable')
+    expect(sheet.querySelector('.hc-recipe-prose')?.textContent).toBe('This recipe could not be opened.')
+    expect(sheet.querySelector('.hc-recipe-unreadable-why')?.textContent).toBe('its bytes are not held here')
+    expect(sheet.textContent).not.toContain('Nothing is written here yet.')
+    expect(root.querySelector('.hc-recipe-nav')?.hasAttribute('hidden')).toBe(true)
+    // Another tile that reads takes the desk: the recipe is shown again.
+    page.setUnreadable(null)
+    page.setRecipe(SOUP, { fresh: true })
+    expect(root.querySelector<HTMLElement>('.hc-recipe-page')?.dataset['page']).toBe('cover')
+    page.setUnreadable('the tile could not be read')
+    expect(root.querySelector('.hc-recipe-unreadable-why')?.textContent).toBe('the tile could not be read')
+  })
+
+  it("offers one filled button on an empty read-along: the header's, with plain words to start writing", () => {
+    const { root } = mount({ mode: 'read' })
+    const sheet = must(root.querySelector('.hc-recipe-page'), 'page')
+    expect(button(sheet, 'Start writing')?.classList.contains('is-solid')).toBe(false)
+    expect([...root.querySelectorAll<HTMLElement>('.hc-recipe-btn.is-solid')].filter(each => !each.closest('[hidden]'))).toHaveLength(1)
+  })
+
+  it("draws the picture mark and the picture's words where a picture has no address or fails to arrive", () => {
+    const { root } = mount({ recipe: SOUP, pictureUrl: sig => (sig === SIG_B ? '' : `blob:local/${sig.slice(0, 4)}`) })
+    // The step's picture has no address at all: what stands in for it, at once, read by the same words.
+    const steps = openCard(root, 'steps')
+    const stand = must(steps.querySelector<HTMLElement>('.hc-recipe-missing'), 'the stand-in')
+    expect(stand.getAttribute('role')).toBe('img')
+    expect(stand.getAttribute('aria-label')).toBe('Picture of step 2')
+    expect(stand.querySelector('.hc-recipe-missing-words')?.textContent).toBe('Picture of step 2')
+    expect(stand.querySelector('svg.hc-recipe-mark')).not.toBeNull()
+    // The cover fails to arrive: the dish shows the mark and its words, never a blank white card.
+    const cover = must(root.querySelector<HTMLImageElement>('.hc-recipe-dish img'), 'cover')
+    cover.dispatchEvent(new Event('error'))
+    expect(cover.hidden).toBe(true)
+    const dishStand = must(root.querySelector<HTMLElement>('.hc-recipe-dish .hc-recipe-missing'), 'the cover stand-in')
+    expect(dishStand.hidden).toBe(false)
+    expect(dishStand.textContent).toBe('Cover picture of Onion soup')
+    // A thumbnail that fails is replaced in place.
+    const thumb = must(openCard(root, 'pictures').querySelector<HTMLImageElement>('img[data-sig]'), 'thumbnail')
+    const frame = must(thumb.parentElement, 'its frame')
+    thumb.dispatchEvent(new Event('error'))
+    expect(thumb.isConnected).toBe(false)
+    expect(frame.querySelector('.hc-recipe-missing')?.getAttribute('aria-label')).toBe(thumb.alt)
+  })
+})
+
+describe('the recipe desk, an open card holds the keyboard', () => {
+  it('makes everything behind an open card inert, and gives focus back to the tab that opened it', () => {
+    const { root } = mount({ recipe: SOUP })
+    const story = tab(root, 'story')
+    story.focus()
+    story.click()
+    expect(shownCards(root)).toEqual(['story'])
+    // The other parts, the plate and its tools are out of reach; the open part and the header are not.
+    for (const each of root.querySelectorAll<HTMLElement>('.hc-recipe-part')) {
+      expect(each.hasAttribute('inert'), each.dataset['key']).toBe(each.dataset['key'] !== 'story')
+    }
+    expect(root.querySelector('.hc-recipe-figure')?.hasAttribute('inert')).toBe(true)
+    expect(root.querySelector('.hc-recipe-tools')?.hasAttribute('inert')).toBe(true)
+    expect(root.querySelector('.hc-recipe-head')?.hasAttribute('inert')).toBe(false)
+    button(card(root, 'story'), 'Done')?.click()
+    expect(shownCards(root)).toEqual([])
+    expect(root.querySelectorAll('[inert]')).toHaveLength(0)
+    expect(document.activeElement).toBe(tab(root, 'story'))
+    // Escape closes the same way.
+    tab(root, 'steps').click()
+    key(card(root, 'steps'), 'Escape')
+    expect(root.querySelectorAll('[inert]')).toHaveLength(0)
+    expect(document.activeElement).toBe(tab(root, 'steps'))
+  })
+
+  it('leaves the narrow desk reachable: its card opens in place, over nothing', () => {
+    const { root } = mount({ recipe: SOUP })
+    root.dataset['layout'] = 'narrow'
+    tab(root, 'story').click()
+    expect(root.querySelectorAll('[inert]')).toHaveLength(0)
+  })
+
+  it('closes the More and Table lists when focus leaves them, and leaves focus where it went', () => {
+    const { root } = mount({ table: { choose: vi.fn(), add: vi.fn() } })
+    const more = must(root.querySelector<HTMLButtonElement>('.hc-recipe-more > .hc-recipe-tool'), 'More')
+    more.click()
+    const menu = must(root.querySelector<HTMLElement>('.hc-recipe-menu'), 'menu')
+    expect(menu.hidden).toBe(false)
+    const elsewhere = must(root.querySelector<HTMLButtonElement>('.hc-recipe-switch button'), 'the mode switch')
+    must(menu.querySelector<HTMLButtonElement>('button'), 'an item').dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: elsewhere }))
+    expect(menu.hidden).toBe(true)
+    const control = must(root.querySelector<HTMLButtonElement>('.hc-recipe-table'), 'Table')
+    control.click()
+    const list = must(root.querySelector<HTMLElement>('.hc-recipe-table-menu'), 'the Table list')
+    expect(list.hidden).toBe(false)
+    // Its items are plain buttons, the set in use pressed: no menu role owed arrow keys.
+    expect(list.querySelector('[role^="menuitem"]')).toBeNull()
+    expect(list.querySelector('[aria-pressed="true"]')?.textContent).toBe('The drawn plate')
+    must(list.querySelector<HTMLButtonElement>('button'), 'an item').dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: elsewhere }))
+    expect(list.hidden).toBe(true)
+  })
+})
+
+describe("the recipe desk, a built-in template in the reader's language", () => {
+  const japanese: Record<string, string> = {
+    'recipe.default.family.name': '家族のレシピ',
+    'recipe.default.family.story.label': '物語',
+    'recipe.default.family.story.prompt': '最初に作ったのは誰？',
+    'recipe.default.family.facts.fields.serves': '人数',
+  }
+  const speak = (key: string, fallback: string, params?: Record<string, string | number>): string => japanese[key] ?? say(key, fallback, params)
+
+  it("says a built-in's names, labels, prompts and fact fields in the reader's words, and leaves its bytes untouched", () => {
+    const { root, onLayout } = mount({ say: speak })
+    expect(root.querySelector('.hc-recipe-template')?.textContent).toBe('家族のレシピ')
+    expect(tab(root, 'story').querySelector('.hc-recipe-tab-label')?.textContent).toBe('物語')
+    expect(at<HTMLTextAreaElement>(openCard(root, 'story'), '0:text').placeholder).toBe('最初に作ったのは誰？')
+    // Words the catalogue does not hold stay the built-in's own.
+    expect(tab(root, 'ingredients').querySelector('.hc-recipe-tab-label')?.textContent).toBe('What you need')
+    expect([...openCard(root, 'facts').querySelectorAll('input')].map(field => field.value)).toContain('人数')
+    // Shown, never written: the built-in's bytes are what they were.
+    expect(RECIPE_TEMPLATE_FAMILY.name).toBe('Family recipe')
+    expect(RECIPE_TEMPLATE_FAMILY.sections[0].label).toBe('The story')
+    expect(onLayout).not.toHaveBeenCalled()
+  })
+
+  it("leaves a template that is not a built-in in its author's words, even one that borrows a built-in's keys", () => {
+    const borrowed: RecipeTemplateDocument = { ...RECIPE_TEMPLATE_FAMILY, name: 'My family recipe' }
+    const { root } = mount({ say: speak, template: borrowed })
+    expect(root.querySelector('.hc-recipe-template')?.textContent).toBe('My family recipe')
+    expect(tab(root, 'story').querySelector('.hc-recipe-tab-label')?.textContent).toBe('The story')
   })
 })

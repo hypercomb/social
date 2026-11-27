@@ -72,6 +72,7 @@ import {
   recipePostEnds,
   recipePostPage,
   recipePostRecipe,
+  recipePostRefusal,
   type RecipePostPageHandle,
   type RecipePostStanding,
 } from './recipe-post.js'
@@ -120,7 +121,15 @@ type Session = {
   offset: number
   offers: Map<string, RecipeEntryOffer>
   busy: boolean
+  /** Which press is under way while `busy`. */
+  sending: 'post' | 'back'
+  /** The host is being asked about the code: a second Try again waits for this one. */
+  asking: boolean
+  /** The host refused a post because the pool is full: nothing more is written to it, by any key. */
+  full: boolean
   gone: boolean
+  /** The shell's own elements this page set inert while it is up, given back when it leaves. */
+  aside: HTMLElement[]
 }
 
 const t = (key: string, fallback: string, params?: Record<string, string | number>): string => {
@@ -138,6 +147,12 @@ const exact = (bytes: Uint8Array): ArrayBuffer =>
   bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
 
 const oneLine = (text: string): string => String(text ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 200)
+
+/** A share of the room, as the page's language writes a percentage. */
+const percentOf = (share: number, locale: string): string => {
+  const whole = Math.max(0, Math.round(share * 100))
+  try { return new Intl.NumberFormat(locale || undefined, { style: 'percent', maximumFractionDigits: 0 }).format(whole / 100) } catch { return `${whole}%` }
+}
 
 export class RecipePostDrone extends Drone {
   /** THE EFFECT THAT WAKES THIS BEE: the shell's announcement of a code. The
@@ -196,7 +211,8 @@ export class RecipePostDrone extends Drone {
         try {
           const response = await this.#fetch(url, { method: 'PUT', body: exact(bytes), credentials: 'omit' })
           const said = response.headers.get('X-Reason') ?? await response.text().catch(() => '')
-          return { status: response.status, said: oneLine(said) }
+          // A refusal is said in the page's language; the host's own words stay inside it when they are not known.
+          return { status: response.status, said: response.ok ? oneLine(said) : recipePostRefusal(said, t) }
         } catch { return { said: '' } }
       },
     }
@@ -234,25 +250,51 @@ export class RecipePostDrone extends Drone {
         onPost: () => { void this.#post(session, false) },
         onTakeBack: () => { void this.#post(session, true) },
         onOpen: sig => { void this.#open(session, sig) },
+        onRetry: () => { void this.#retry(session) },
       }),
       record: null, path: null, pool: '', template: null, templateBytes: null, read: null,
-      offset: 0, offers: new Map(), busy: false, gone: false,
+      offset: 0, offers: new Map(), busy: false, sending: 'post', asking: false, full: false, gone: false, aside: [],
     }
     this.#session = session
-    ;(this.#deps.mount?.() ?? document.body).appendChild(session.page.element)
+    const element = session.page.element
+    ;(this.#deps.mount?.() ?? document.body).appendChild(element)
+    // The page is the whole screen while it is up: what is under it is not reached by touch, keys or a screen reader.
+    for (const sibling of Array.from(element.parentElement?.children ?? [])) {
+      if (sibling === element || !(sibling instanceof HTMLElement) || sibling.hasAttribute('inert')) continue
+      sibling.setAttribute('inert', '')
+      session.aside.push(sibling)
+    }
+    session.page.focus()
     EffectBus.emitTransient('keymap:hold', { reason: OWNER })
+    await this.#begin(session)
+  }
+
+  /** Try again, after the host did not answer: the same code asked from the start, with the same key and the changes
+   *  already spent, which live outside the session. */
+  async #retry(session: Session): Promise<void> {
+    if (session.gone || session.asking || session.busy || this.#session !== session) return
+    // The code is taken again: an announcement of it now is the page already up.
+    this.#code = session.key
     await this.#begin(session)
   }
 
   /** Steps 1 and 2: the record, the names, then the host's word on the pool. */
   async #begin(session: Session): Promise<void> {
+    session.asking = true
+    try { await this.#ask(session) } finally { session.asking = false }
+  }
+
+  async #ask(session: Session): Promise<void> {
+    session.page.setRetry(false)
     session.page.setState(t('recipe.post.state.asking', 'Asking this host about the code.'))
     const answer = await readEntryAtomAnswer(session.origin, session.code.record, ENTRY_LIMITS.recordBytes, this.#readDeps())
     if (session.gone) return
     if (!answer.bytes && !answer.reached) {
-      // Not an answer about the code: the host did not answer. The next announcement of this code asks again.
+      // Not an answer about the code: the host did not answer. The next announcement of this code asks again, and so
+      // does Try again.
       if (this.#session === session) this.#code = ''
       session.page.setState(t('recipe.post.state.record-unreachable', 'This host did not answer. Try again in a moment.'))
+      session.page.setRetry(true)
       session.page.setForm(null)
       session.page.setPosted(null)
       return
@@ -292,13 +334,21 @@ export class RecipePostDrone extends Drone {
     session.offset = read.offset
     const page = session.page
     if (!read.reached) {
-      page.setState(t('recipe.post.state.unreachable', 'The host did not answer. Reload the page to try again.'))
+      page.setState(t('recipe.post.state.unreachable', 'The host did not answer. Try again in a moment.'))
+      page.setRetry(true)
       page.setForm(null)
       page.setPosted(null)
       return
     }
+    page.setRetry(false)
     if (read.state === null) { this.#unknown(session); return }
     if (read.state === 'open' || read.state === 'closed') this.#derive(session, read)
+    if (read.state === 'open' && this.#full(session, read)) {
+      page.setState(t('recipe.post.state.full', 'This one is full. Here is what was posted.'))
+      page.setForm(null)
+      await this.#list(session, read)
+      return
+    }
     if (read.state === 'expired') {
       page.setState(t('recipe.post.state.expired', 'This one has expired.'))
       page.setForm(null)
@@ -313,7 +363,8 @@ export class RecipePostDrone extends Drone {
       const template = await this.#template(session)
       if (session.gone) return
       if (!template) {
-        page.setState(t('recipe.post.state.no-form', 'This one is open, but its form did not arrive. Reload the page to try again.'), ends)
+        page.setState(t('recipe.post.state.no-form', 'This one is open, but its form did not arrive. Try again in a moment.'), ends)
+        page.setRetry(true)
         page.setForm(null)
       } else {
         page.setState(t('recipe.post.state.open', 'This one is open. Write your entry below.'), ends)
@@ -322,6 +373,17 @@ export class RecipePostDrone extends Drone {
     }
     await this.#list(session, read)
     this.#measure(session)
+  }
+
+  /**
+   * No room for anyone: the listing holds as many as a pool lists and none of them is this key's (the host takes no
+   * more, and none of it is this person's to change), or the host already refused a post because the pool is full.
+   */
+  #full(session: Session, read: EntryPoolRead): boolean {
+    if (session.full) return true
+    const members = read.members ?? []
+    if (!read.over && members.length < ENTRY_LIMITS.listed) return false
+    return !members.some(member => member.signer === this.#pubkey)
   }
 
   /**
@@ -394,7 +456,7 @@ export class RecipePostDrone extends Drone {
 
   // ── the form ─────────────────────────────────────────────────────────────
 
-  /** Step 7: the room left in bytes and the changes left, and which presses are open. */
+  /** Step 7: the room left, as a share of what one entry holds, and the changes left, and which presses are open. */
   #measure(session: Session): void {
     const mine = this.#mine.get(session.pool)
     const template = session.template
@@ -403,10 +465,15 @@ export class RecipePostDrone extends Drone {
     const { recipe } = recipePostDocument(template, fields, t)
     const content = Object.keys(recipe.values).length ? new TextDecoder().decode(recipeBytes(recipe)) : ''
     const room = entryRoomLeft({ pool: session.pool, page: mine.page, name: fields.name.trim(), title: fields.title.trim(), content })
+    // The whole room is what an entry with nothing typed has: a person reads a share of it, never a count of bytes.
+    const whole = Math.max(1, entryRoomLeft({ pool: session.pool, page: mine.page, name: '', title: '', content: '' }))
     const changes = recipePostChanges(mine.used, mine.standing)
+    const locale = localeOf()
+    // Some room, however little, is never said as none.
+    const share = room > 0 ? Math.max(0.01, room / whole) : 0
     const space = room >= 0
-      ? t('recipe.post.measure.room', '{bytes} bytes of room left', { bytes: room })
-      : t('recipe.post.measure.over', '{bytes} bytes too many for one entry', { bytes: -room })
+      ? t('recipe.post.measure.room-share', '{share} of the room left', { share: percentOf(share, locale) })
+      : t('recipe.post.measure.over-share', 'Too long for one entry, by about {share}', { share: percentOf(Math.max(0.01, -room / whole), locale) })
     const left = t('recipe.post.measure.changes', '{left} of {max} changes left', { left: changes.left, max: RECIPE_POST_CHANGES })
     const measured = t('recipe.post.measure', '{room}, and {changes}.', { room: space, changes: left })
     const kept = !changes.post && changes.takeBack ? ` ${t('recipe.post.measure.kept', 'The last one is kept for taking your entry back.')}` : ''
@@ -415,6 +482,7 @@ export class RecipePostDrone extends Drone {
       post: changes.post && room >= 0 && !session.busy,
       takeBack: changes.takeBack && !session.busy,
       posted: mine.standing === 'posted',
+      sending: session.busy ? session.sending : null,
     })
   }
 
@@ -422,18 +490,27 @@ export class RecipePostDrone extends Drone {
   async #post(session: Session, back: boolean): Promise<void> {
     const mine = this.#mine.get(session.pool)
     const { path, template, record } = session
-    if (session.busy || session.gone || !mine || !path || !template || !record || session.read?.state !== 'open') return
+    if (session.busy || session.asking || session.gone || session.full || !mine || !path || !template || !record || session.read?.state !== 'open') return
     const changes = recipePostChanges(mine.used, mine.standing)
     if (back ? !changes.takeBack : !changes.post) return
+    // Busy from the press itself, before the entry is made: a second press while it is made, signed or sent is nothing.
+    session.busy = true
+    session.sending = back ? 'back' : 'post'
+    this.#measure(session)
     let entry: { page: string; name: string; title: string; content: string; gone?: boolean }
     if (back) entry = { page: mine.page, name: mine.name, title: mine.title, content: '', gone: true }
     else {
       const built = await recipePostRecipe(template, session.page.fields(), t)
-      if (!built.ok) { session.page.setSaid(built.reason, 'bad'); return }
+      if (!built.ok) {
+        session.busy = false
+        if (session.gone) return
+        session.page.setSaid(built.reason, 'bad')
+        this.#measure(session)
+        return
+      }
       entry = { page: mine.page, name: built.name, title: built.title, content: built.content }
     }
-    session.busy = true
-    this.#measure(session)
+    if (session.gone) { session.busy = false; return }
     session.page.setSaid(back ? t('recipe.post.taking-back', 'Taking your entry back.') : t('recipe.post.posting', 'Posting your entry.'))
     // A change stands over the last one only when it is newer: two presses in one second would tie, and a tie
     // is decided by the member's name. So each is stamped at least a second after the one before.
@@ -443,8 +520,10 @@ export class RecipePostDrone extends Drone {
     if (session.gone) return
     if (!result.ok) {
       session.page.setSaid(result.reason, 'bad')
-      // The host said the pool is no longer open: ask it again, so the page says what it is now.
-      if (result.status === 403 || result.status === 404 || result.status === 410) await this.#refresh(session)
+      if (result.status === 507) session.full = true
+      // The host said the pool is no longer open, or is full, or this key has posted its count: ask it again, so the
+      // page says what it is now.
+      if ([403, 404, 410, 429, 507].includes(result.status ?? 0)) await this.#refresh(session)
       // The answer never came: the host may have kept it. What it holds is read back.
       else if (result.status === undefined) await this.#recount(session)
       else this.#measure(session)
@@ -499,6 +578,7 @@ export class RecipePostDrone extends Drone {
     this.#session = null
     session.gone = true
     session.page.dispose()
+    for (const sibling of session.aside.splice(0)) sibling.removeAttribute('inert')
     EffectBus.emitTransient('keymap:release', { reason: OWNER })
   }
 }

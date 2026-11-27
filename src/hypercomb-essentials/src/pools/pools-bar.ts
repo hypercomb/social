@@ -67,8 +67,11 @@ export interface PoolsBarOptions {
  *  select pill uses (selection/select-mode.drone.ts explains the number). The
  *  two never show together: the pools bar stands down while tiles are picked. */
 const BAR_Z = 59992
-/** The colour of a tile that is on, as the hover band and the badge draw it. */
-const ON = '#6fd39a'
+/** The colour of a tile that is on, as the hover band and the badge draw it: the shell's role, which
+ *  deepens on a bright pane (_material-tokens.scss), with the authored green where a shell names none. */
+const ON = 'var(--hc-pools-on,#6fd39a)'
+/** Words on the green: the pane, dark on the pale green of a dark theme and light on the deep green of a bright one. */
+const ON_INK = 'rgb(var(--hc-panel-pane,12,19,27))'
 
 const BULB_PATH = 'M9 21c0 .5.4 1 1 1h4c.6 0 1-.5 1-1v-1H9v1zm3-19C8.1 2 5 5.1 5 9c0 2.4 1.2 4.5 3 5.7V17c0 .5.4 1 1 1h6c.6 0 1-.5 1-1v-2.3c1.8-1.3 3-3.4 3-5.7 0-3.9-3.1-7-7-7z'
 const CLOSE_PATH = 'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z'
@@ -76,34 +79,42 @@ const LEAVE_PATH = 'M5 4v2h14V4H5zm0 10h4v6h6v-6h4l-7-7-7 7z'
 const ONWARD_PATH = 'M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z'
 const REFUSED_PATH = 'M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z'
 
+// The bar stands above the bottom controls row (zoom, undo, draw): it is wider than the gap between
+// the corner clusters, so resting on the row put its last line under the zoom slider. That cluster
+// is in no published reservation (--hc-controls-bottom is 0 on the desktop), so 3rem is its floor.
+// Every press is a plain word but Publish, the bar's one primary press, and
+// the posts row's Open (open-entries-panel.ts), which draws its own line.
 const STYLE = `
 .hc-pools-bar{position:fixed;left:50%;transform:translateX(-50%);z-index:${BAR_Z};
-  bottom:calc(max(var(--hc-controls-bottom, 0px), env(safe-area-inset-bottom,0px)) + var(--hc-mobile-row-lift, 0px) + 0.6rem);
+  bottom:calc(max(var(--hc-controls-bottom, 0px), 3rem, env(safe-area-inset-bottom,0px)) + var(--hc-mobile-row-lift, 0px) + 0.6rem);
   box-sizing:border-box;width:min(54rem,94vw);padding:0.6rem 0.7rem 0.5rem 0.85rem;display:grid;gap:0.3rem;
   border-radius:var(--hc-radius-floating,4px);background:rgba(var(--hc-panel-pane,12,19,27),0.94);backdrop-filter:blur(10px);
-  border:1px solid var(--hc-window-line,rgba(227,237,245,0.16));border-top:2px solid ${ON};box-shadow:0 10px 30px rgba(0,0,0,0.45);
+  border:1px solid var(--hc-window-line,rgba(227,237,245,0.16));border-top:2px solid ${ON};box-shadow:var(--md-elev-3,0 10px 30px rgba(0,0,0,0.45));
   font-family:var(--hc-font,system-ui,sans-serif);font-size:calc(0.9rem * var(--hc-panel-scale,1));line-height:1.35;
   color:var(--hc-window-ink-plain,rgba(227,237,245,0.86));pointer-events:auto;}
 .hc-pools-bar svg{flex:none;width:1.05rem;height:1.05rem;fill:currentColor;}
 .hc-pools-row{display:flex;align-items:center;gap:0.55rem;flex-wrap:wrap;}
 .hc-pools-bulb{flex:none;display:inline-flex;color:${ON};}
 .hc-pools-bulb svg{width:1.35rem;height:1.35rem;}
-.hc-pools-title{flex:none;font-family:var(--hc-mono,ui-monospace,monospace);font-size:0.72em;letter-spacing:0.16em;text-transform:uppercase;color:${ON};}
+.hc-pools-title{flex:none;font-family:var(--hc-mono,ui-monospace,monospace);font-size:0.72em;letter-spacing:0.16em;text-transform:uppercase;color:var(--hc-window-ink-quiet,rgba(227,237,245,0.68));}
 .hc-pools-say{flex:1 1 14rem;min-width:0;color:var(--hc-window-ink-loud,#eef2f5);overflow-wrap:anywhere;}
 .hc-pools-refused{flex:none;display:inline-flex;color:var(--hc-status-alert,var(--hc-window-ink-loud,#eef2f5));}
 .hc-pools-refused[hidden]{display:none;}
 .hc-pools-say[data-tone="refused"]{color:var(--hc-status-warn,var(--hc-window-ink-loud,#eef2f5));font-weight:600;}
 .hc-pools-counts{flex:1 1 14rem;min-width:0;padding-left:1.9rem;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;}
 .hc-pools-quiet{padding-left:1.9rem;gap:0.2rem 0.75rem;font-size:0.84em;color:var(--hc-window-ink-quiet,rgba(227,237,245,0.68));}
-.hc-pools-bar button{appearance:none;font:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:0.4rem;white-space:nowrap;
-  min-height:2.1rem;padding:0 0.8rem;border-radius:var(--hc-radius-control,2px);background:transparent;
-  border:1px solid var(--hc-window-line,rgba(227,237,245,0.18));color:var(--hc-window-ink-loud,#eef2f5);}
-.hc-pools-bar button:hover,.hc-pools-bar button:focus-visible{border-color:${ON};outline:none;}
-.hc-pools-bar button[disabled]{opacity:0.5;cursor:default;border-color:var(--hc-window-line,rgba(227,237,245,0.18));}
-.hc-pools-bar button.hc-pools-publish{background:${ON};border-color:transparent;color:#04180f;font-weight:600;}
-.hc-pools-bar button.hc-pools-text{min-height:1.5rem;padding:0;border:0;color:inherit;text-decoration:underline;text-underline-offset:0.2em;}
-.hc-pools-bar button.hc-pools-text:hover,.hc-pools-bar button.hc-pools-text:focus-visible{color:${ON};}
-.hc-pools-bar button.hc-pools-text[disabled]{text-decoration:none;}
+.hc-pools-bar button{appearance:none;font:inherit;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:0.4rem;white-space:nowrap;
+  min-height:2.1rem;padding:0 0.3rem;border:0;border-radius:var(--hc-radius-control,2px);background:transparent;
+  color:var(--hc-window-ink-loud,#eef2f5);text-underline-offset:0.2em;}
+.hc-pools-bar button:hover{text-decoration:underline;}
+.hc-pools-bar button:focus-visible{outline:2px solid var(--hc-focus,currentColor);outline-offset:2px;}
+.hc-pools-bar button[disabled]{color:var(--hc-window-ink-quiet,rgba(227,237,245,0.68));cursor:not-allowed;text-decoration:none;}
+.hc-pools-bar button.hc-pools-publish{padding:0 0.8rem;background:${ON};color:${ON_INK};font-weight:600;}
+.hc-pools-bar button.hc-pools-publish[disabled]{background:var(--hc-window-tint-strong,rgba(227,237,245,0.09));color:var(--hc-window-ink-quiet,rgba(227,237,245,0.68));}
+.hc-pools-bar button.hc-pools-text{min-height:1.5rem;padding:0;color:inherit;text-decoration:underline;}
+.hc-pools-bar button.hc-pools-text:hover{color:var(--hc-window-ink-loud,#eef2f5);}
+.hc-pools-bar button.hc-pools-text[disabled]{text-decoration:none;color:inherit;}
+@media (pointer:coarse){.hc-pools-bar button,.hc-pools-bar button.hc-pools-text{min-height:2.75rem;min-width:2.75rem;}}
 `
 
 /** The words for a key from the hive's catalog, the English when it has none, with `{name}` holes filled either way. */
@@ -182,9 +193,9 @@ export function poolsFrame(): HTMLElement {
   const frame = document.createElement('div')
   frame.id = 'hc-pools-frame'
   frame.setAttribute('aria-hidden', 'true')
-  frame.style.cssText =
-    `position:fixed;inset:0;z-index:${BAR_Z - 1};pointer-events:none;border:2px solid ${ON};` +
-    'box-shadow:inset 0 0 0 1px rgba(111,211,154,0.25), inset 0 0 34px rgba(111,211,154,0.13);'
+  frame.style.cssText = `position:fixed;inset:0;z-index:${BAR_Z - 1};pointer-events:none;`
+  // Set on its own: a parser that cannot read a var() in a shorthand drops that one line, not the frame.
+  frame.style.setProperty('border', `2px solid ${ON}`)
   return frame
 }
 
@@ -246,7 +257,9 @@ export function poolsBar(options: PoolsBarOptions): { element: HTMLElement; upda
     title.textContent = say('pools.bar.title', 'Pools')
     lead.textContent = state.busy
       ? say('pools.bar.busy', 'Leaving what is on in your pools...')
-      : state.outcome?.text ?? say('pools.bar.lead', 'Tap a tile to turn it on. What is on is yours to offer.')
+      : state.outcome?.text ?? (state.touch
+        ? say('pools.bar.lead', 'Tap a tile to turn it on. What is on is yours to offer.')
+        : say('pools.bar.lead-click', 'Click a tile to turn it on. What is on is yours to offer.'))
     const refusal = !state.busy && !!state.outcome && !state.outcome.ok
     if (refusal) lead.dataset['tone'] = 'refused'
     else delete lead.dataset['tone']

@@ -36,6 +36,7 @@ import type { RecipePickerEntry, RecipePickerGroup } from './recipe-picker.js'
 import type { RecipeTemplateOffer } from './recipe-pool.js'
 import type { RecipeSay } from './recipe-style.js'
 import { recipeBytes, recipeTemplateWords, type RecipeDocument, type RecipeTemplateDocument } from './recipe-template.js'
+import { recipeDefaultTemplateShown } from './recipe-defaults.js'
 
 /** The view's owner in the mode registry and the back gesture: one string, so the entry is live exactly while the view is up. */
 export const RECIPE_VIEW_OWNER = 'recipe-view'
@@ -138,10 +139,11 @@ export function recipeViewZones(zones: readonly string[]): string[] {
  * are narrowed to those that say every word of the query; a group left empty
  * is left out.
  */
-export function recipeViewPickerGroups(sources: RecipeViewSources, query: string, words: RecipeViewGroupWords): RecipePickerGroup[] {
+export function recipeViewPickerGroups(sources: RecipeViewSources, query: string, words: RecipeViewGroupWords, say?: RecipeSay): RecipePickerGroup[] {
   const wanted = recipeViewQuery(query).split(/\s+/).filter(Boolean)
   const says = (template: RecipeTemplateDocument): boolean => {
-    const said = recipeTemplateWords(template)
+    // A built-in is found by the words the reader sees it in, as well as its own.
+    const said = `${recipeTemplateWords(template)}${say ? ` ${recipeTemplateWords(recipeDefaultTemplateShown(template, say))}` : ''}`
     return wanted.every(word => said.includes(word))
   }
   const once = (entries: readonly RecipeViewTemplate[], skip: ReadonlySet<string>, kept: boolean): RecipePickerEntry[] => {
@@ -258,7 +260,7 @@ export function recipeViewShared(state: RecipeViewSharing, say: RecipeSay): Reci
   if (state.outcome === 'live') {
     return { lit: true, tone: 'warn', words: say('recipe.shared.live', 'Shared live with {room}. {host} keeps entries only for its own people', { room, host }) }
   }
-  return { lit: true, words: say('recipe.shared.sharing', 'Sharing with {room}...', { room }) }
+  return { lit: true, words: say('recipe.shared.sharing', 'Sharing with {room}…', { room }) }
 }
 
 // ── the bulb ────────────────────────────────────────────────────────────────

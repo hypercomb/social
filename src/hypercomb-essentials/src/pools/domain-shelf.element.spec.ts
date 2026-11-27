@@ -347,7 +347,7 @@ describe('the room\'s participants', () => {
     expect(chips(shelf)).toHaveLength(3)
   })
 
-  it('show forty-eight, then say how many more in a chip that is not a switch', async () => {
+  it('show forty-eight, then a press that shows the rest and is not a switch', async () => {
     const crowd: PoolNode[] = Array.from({ length: 53 }, (_, at) => ({
       kind: 'participant', id: at.toString(16).padStart(64, '0'), name: `Guest ${at}`,
     }))
@@ -358,15 +358,22 @@ describe('the room\'s participants', () => {
     const more = shelf.shadowRoot!.querySelector<HTMLElement>('.more')!
     expect(more.textContent).toBe('+5')
     expect(more.title).toBe('And 5 more in the room, all drawn from')
-    expect(more.tagName).toBe('SPAN')
+    expect(more.tagName).toBe('BUTTON')
     expect(more.hasAttribute('aria-pressed')).toBe(false)
-    expect(more.tabIndex).toBe(-1)
+    expect(more.getAttribute('aria-expanded')).toBe('false')
     expect(more.parentElement?.classList.contains('people')).toBe(true)
-    // The people past the last chip cannot be switched, so they stay drawn from.
+    // The people past the last chip stay drawn from, shown or not.
     expect(said.at(-1)?.nodes).toHaveLength(3 + 53)
     expect(count(shelf)).toBe('56 of 56')
     more.click()
     expect(said.at(-1)?.nodes).toHaveLength(3 + 53)
+    expect(shelf.shadowRoot?.querySelectorAll('.chip.person')).toHaveLength(53)
+    const fewer = shelf.shadowRoot!.querySelector<HTMLElement>('.more')!
+    expect(fewer.textContent).toBe('Fewer')
+    expect(fewer.getAttribute('aria-expanded')).toBe('true')
+    fewer.click()
+    expect(shelf.shadowRoot?.querySelectorAll('.chip.person')).toHaveLength(48)
+    expect(shelf.shadowRoot!.querySelector<HTMLElement>('.more')?.textContent).toBe('+5')
   })
 
   it('show no such chip for exactly forty-eight', async () => {

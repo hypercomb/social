@@ -136,7 +136,7 @@ const INSET_GAP = 6
 /** How long the field waits for the next key before it speaks. */
 const TYPING_MS = 150
 const QUERY_MAX = 80
-/** Participants given a chip. The rest of a large room stay on and are counted in one last chip. */
+/** Participants given a chip. The rest of a large room stay on, behind one press that shows them all. */
 const PEOPLE_SHOWN = 48
 
 const t = (key: string, fallback: string, params?: Record<string, string | number>): string => {
@@ -179,7 +179,8 @@ const SEARCH_PATH = 'M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 
 // above this strip; above the canvas, banners and the participants' hive.
 const STYLE = `
 :host{position:fixed;inset:0;z-index:59997;pointer-events:none;
-  --domains:111,211,154;--domains-ink:12,28,46;
+  --domains:111,211,154;
+  --domains-on:var(--hc-pools-on,rgb(111,211,154));--domains-on-ink:rgb(var(--hc-panel-pane,12,28,46));
   --shelf-left:calc(max(var(--hc-controls-left,0px),var(--hc-inset-left,0px),var(--hc-seam-right,0px)) + 0.5rem);
   --shelf-right:calc(var(--hc-inset-right,0px) + 0.5rem);}
 [hidden]{display:none !important;}
@@ -199,7 +200,7 @@ const STYLE = `
     repeating-linear-gradient(180deg,var(--cut) 0 7px,transparent 7px 14px);
   background-size:100% 1px,100% 1px,1px 100%,1px 100%;background-position:0 0,0 100%,0 0,100% 0;background-repeat:no-repeat;}
 .legend{position:relative;flex:0 0 auto;display:inline-flex;align-items:center;gap:0.45rem;letter-spacing:0.12em;text-transform:uppercase;
-  font-family:var(--hc-mono,ui-monospace,monospace);font-size:0.68rem;font-weight:600;color:rgb(var(--domains));white-space:nowrap;}
+  font-family:var(--hc-mono,ui-monospace,monospace);font-size:0.7rem;font-weight:600;color:var(--hc-window-ink-quiet,currentColor);white-space:nowrap;}
 .legend svg{width:1rem;height:1rem;display:block;flex:0 0 auto;}
 .count{height:1.4em;box-sizing:border-box;display:inline-grid;place-items:center;padding:0 0.45em;
   border-radius:var(--hc-radius-control,2px);background:rgba(var(--domains),0.16);color:var(--hc-window-ink-loud,currentColor);
@@ -211,22 +212,24 @@ const STYLE = `
 .group{flex:0 0 auto;display:inline-flex;align-items:center;gap:0.4rem;}
 .divider{flex:0 0 auto;width:1px;height:1.4rem;background:rgba(var(--domains),0.45);}
 .chip{position:relative;flex:0 0 auto;appearance:none;display:inline-grid;place-items:center;width:1.9rem;height:1.9rem;
-  box-sizing:border-box;padding:0;border-radius:var(--hc-radius-control,2px);border:1px dashed rgba(var(--domains),0.7);
-  background:transparent;color:var(--hc-window-ink-plain,currentColor);opacity:0.6;cursor:pointer;outline:none;
-  font-family:var(--hc-mono,ui-monospace,monospace);font-size:0.68rem;font-weight:600;line-height:1;letter-spacing:0.04em;white-space:nowrap;
-  transition:border-color 120ms ease,background-color 120ms ease,opacity 120ms ease;}
+  box-sizing:border-box;padding:0;border-radius:var(--hc-radius-control,2px);border:1px dashed var(--hc-window-line-firm,rgba(227,237,245,0.26));
+  background:transparent;color:var(--hc-window-ink-quiet,currentColor);cursor:pointer;outline:none;
+  font-family:var(--hc-mono,ui-monospace,monospace);font-size:0.7rem;font-weight:600;line-height:1;letter-spacing:0.04em;white-space:nowrap;
+  transition:border-color 120ms ease,background-color 120ms ease;}
 .chip.person{border-radius:50%;}
-.chip[aria-pressed="true"]{opacity:1;color:var(--hc-window-ink-loud,currentColor);
-  background:rgba(var(--domains),0.24);border-style:solid;border-color:rgba(var(--domains),0.65);}
-.chip.you{box-shadow:0 0 0 1px rgba(var(--domains),0.9);border-color:rgba(var(--domains),0.9);}
-.chip:hover{opacity:1;border-color:rgb(var(--domains));}
-.chip:focus-visible{opacity:1;outline:2px solid rgb(var(--domains));outline-offset:2px;}
-.badge{position:absolute;top:-0.35rem;right:-0.4rem;min-width:0.95rem;height:0.95rem;box-sizing:border-box;display:grid;place-items:center;
-  padding:0 0.2rem;border-radius:var(--hc-radius-control,2px);background:rgb(var(--domains));color:rgb(var(--domains-ink));
-  font-size:0.56rem;font-weight:700;letter-spacing:0;font-variant-numeric:tabular-nums;}
-.more{flex:0 0 auto;display:inline-grid;place-items:center;height:1.9rem;padding:0 0.25rem;color:var(--hc-window-ink-plain,currentColor);
-  font-family:var(--hc-mono,ui-monospace,monospace);font-size:0.68rem;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;}
-.empty{color:var(--hc-window-ink-plain,currentColor);opacity:0.8;white-space:nowrap;}
+.chip[aria-pressed="true"]{color:var(--hc-window-ink-loud,currentColor);
+  background:color-mix(in srgb,var(--domains-on) 24%,transparent);border-style:solid;border-color:var(--domains-on);}
+.chip.you{box-shadow:0 0 0 1px var(--domains-on);border-color:var(--domains-on);}
+.chip:hover{border-color:var(--domains-on);}
+.chip:focus-visible,.more:focus-visible{outline:2px solid var(--hc-focus,currentColor);outline-offset:2px;}
+.badge{position:absolute;top:-0.4rem;right:-0.45rem;min-width:1.1rem;height:1.1rem;box-sizing:border-box;display:grid;place-items:center;
+  padding:0 0.2rem;border-radius:var(--hc-radius-control,2px);background:var(--domains-on);color:var(--domains-on-ink);
+  font-size:0.7rem;font-weight:700;letter-spacing:0;font-variant-numeric:tabular-nums;}
+.more{flex:0 0 auto;appearance:none;display:inline-grid;place-items:center;height:1.9rem;padding:0 0.25rem;border:0;border-radius:var(--hc-radius-control,2px);
+  background:transparent;color:var(--hc-window-ink-plain,currentColor);cursor:pointer;outline:none;
+  font-family:var(--hc-mono,ui-monospace,monospace);font-size:0.7rem;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;text-underline-offset:0.2em;}
+.more:hover{text-decoration:underline;}
+.empty{color:var(--hc-window-ink-quiet,currentColor);white-space:nowrap;}
 .tip{position:absolute;top:calc(100% + 0.35rem);left:0;transform:translateX(-50%);box-sizing:border-box;max-width:min(22rem,80vw);
   padding:0.2rem 0.5rem;border-radius:var(--hc-radius-control,2px);border:1px solid rgba(var(--domains),0.55);
   background:rgba(var(--hc-panel-pane,12,28,46),0.96);color:var(--hc-window-ink-loud,currentColor);
@@ -235,9 +238,10 @@ const STYLE = `
 .search svg{width:0.95rem;height:0.95rem;display:block;flex:0 0 auto;}
 .query{flex:1 1 auto;width:100%;min-width:0;box-sizing:border-box;background:transparent;color:var(--hc-window-ink-loud,currentColor);
   border:0;border-bottom:1px solid var(--hc-window-line,currentColor);font:inherit;padding:0.15em 0.3em;outline:none;}
-.query:focus{border-bottom-color:rgb(var(--domains));}
-.query::placeholder{color:var(--hc-window-ink-plain,currentColor);opacity:0.6;}
+.query:focus{border-bottom-color:var(--domains-on);}
+.query::placeholder{color:var(--hc-window-ink-quiet,currentColor);opacity:1;}
 @media (prefers-reduced-motion:reduce){.chip{transition:none;}}
+@media (pointer:coarse){.chip,.more{min-width:2.75rem;min-height:2.75rem;}}
 @media (max-width:640px){.strip{gap:0.5rem;padding-left:0.75rem;}.legend .word{display:none;}.search{flex-basis:8rem;min-width:4rem;}}
 `
 
@@ -283,6 +287,8 @@ export class DomainShelfElement extends HTMLElement {
   #chips = new Map<string, Chip>()
   /** The nodes the row was last laid out for, so it is laid again only when they change. */
   #laid = ''
+  /** Every participant has a chip, past the first forty-eight: the reader pressed "+n". */
+  #everyone = false
   /** The chip the Tab key lands on: one stop for the row, arrows move along it. */
   #cursor = ''
   /** Whether the keymap was asked to stand down, so it is asked and released once each. */
@@ -325,6 +331,12 @@ export class DomainShelfElement extends HTMLElement {
     // Read by the escape cascade off the focused element, which from outside a
     // shadow root is this element whenever anything inside it holds the focus.
     this.setAttribute('data-escape-local', '')
+    // A language chosen while the strip is up: its words are laid when it is built, so it is built again.
+    this.#offs.push(EffectBus.on('locale:changed', () => {
+      if (!this.#parts || this.#builtIn === document.documentElement.lang) return
+      this.#clear()
+      this.#render()
+    }))
     // A want is a command, sent transient: a strip that mounts later never
     // replays one and stands there for a surface long gone.
     this.#offs.push(EffectBus.on<DomainShelfWanted | undefined>(DOMAIN_SHELF_WANTED, (p) => {
@@ -481,6 +493,7 @@ export class DomainShelfElement extends HTMLElement {
     this.#parts = null
     this.#chips = new Map()
     this.#laid = ''
+    this.#everyone = false
     this.#root.replaceChildren()
   }
 
@@ -491,7 +504,11 @@ export class DomainShelfElement extends HTMLElement {
     EffectBus.emitTransient(held ? 'keymap:suppress' : 'keymap:unsuppress', { reason: KEYS_REASON })
   }
 
+  /** The page's language when the strip was built. */
+  #builtIn = ''
+
   #build(): void {
+    this.#builtIn = document.documentElement.lang
     const style = document.createElement('style')
     style.textContent = STYLE
     const strip = make('section', 'strip')
@@ -629,7 +646,7 @@ export class DomainShelfElement extends HTMLElement {
     const held = row.contains(this.#root.activeElement)
     const places = all.filter(node => node.kind === 'domain')
     const people = all.filter(node => node.kind === 'participant')
-    const shown = people.slice(0, PEOPLE_SHOWN)
+    const shown = this.#everyone ? people : people.slice(0, PEOPLE_SHOWN)
     this.#chips = new Map([...places, ...shown].map(node => [poolNodeKey(node), this.#chip(node)]))
     parts.tip.hidden = true
     if (this.#chips.size === 0) {
@@ -648,18 +665,33 @@ export class DomainShelfElement extends HTMLElement {
     }
     if (shown.length) {
       const group = this.#group('people', t('pools.domains.group-people', 'People in the room'), buttons(shown))
-      const rest = people.length - shown.length
-      if (rest > 0) {
-        // Not a switch: the people past the last chip stay on.
-        const more = make('span', 'more', t('pools.domains.more', '+{n}', { n: rest }))
-        more.title = t('pools.domains.more-title', 'And {n} more in the room, all drawn from', { n: rest })
-        group.append(more)
-      }
+      const rest = people.length - PEOPLE_SHOWN
+      if (rest > 0) group.append(this.#more(rest))
       laid.push(group)
     }
     row.replaceChildren(...laid)
     if (!this.#chips.has(this.#cursor)) this.#cursor = this.#chips.keys().next().value ?? ''
     if (held) this.#chips.get(this.#cursor)?.button.focus()
+  }
+
+  /** The press past the forty-eighth chip: "+n" shows everyone, "Fewer" folds them again. Not a switch: the people
+   *  past the last chip stay on either way. */
+  #more(rest: number): HTMLButtonElement {
+    const more = document.createElement('button')
+    more.type = 'button'
+    more.className = 'more'
+    more.setAttribute('aria-expanded', String(this.#everyone))
+    more.textContent = this.#everyone ? t('pools.domains.fewer', 'Fewer') : t('pools.domains.more', '+{n}', { n: rest })
+    more.title = this.#everyone
+      ? t('pools.domains.fewer-title', 'Show only the first {n} again', { n: PEOPLE_SHOWN })
+      : t('pools.domains.more-title', 'And {n} more in the room, all drawn from', { n: rest })
+    more.addEventListener('click', () => {
+      this.#everyone = !this.#everyone
+      this.#laid = ''
+      this.#paint()
+      this.#parts?.chips.querySelector<HTMLButtonElement>('.more')?.focus()
+    })
+    return more
   }
 
   /** How many members a node offers, when somebody counted: by its key, or by its bare zone or key. */

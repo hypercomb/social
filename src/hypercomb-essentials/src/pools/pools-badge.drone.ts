@@ -27,21 +27,61 @@ type CellCountPayload = { labels?: string[]; coords?: Axial[]; externalLabels?: 
 
 /** Under the new-pictures dot (9997), the presence badge (9998) and the action overlay (9999). */
 const BADGE_Z = 9996
-/** The colour of a tile that is on, as the hover band draws it. */
+/** The colour of a tile that is on, where the shell names none: the authored green, and the dark ink on it. */
 const LIT = 0x6fd39a
 const INK = 0x0c1c2e
 const PLATE = 6.5
 /** How far outside the plate the branch ring sits. */
 const RING_GAP = 2.6
 
+/** The badge's two colours: the plate, and the bulb and rim drawn on it. */
+export type BulbColours = { readonly lit: number; readonly ink: number }
+
+/** A CSS colour as the computed style says it (`rgb(r, g, b)` or `color(srgb r g b)`), as the number a canvas draws
+ *  with. Null for anything else. */
+export const colourNumber = (said: string): number | null => {
+  const rgb = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/.exec(said.trim())
+  const srgb = rgb ? null : /^color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/.exec(said.trim())
+  const parts = rgb ? rgb.slice(1, 4).map(Number) : srgb ? srgb.slice(1, 4).map(part => Number(part) * 255) : null
+  if (!parts || parts.some(part => !Number.isFinite(part))) return null
+  const [r, g, b] = parts.map(part => Math.max(0, Math.min(255, Math.round(part)))) as [number, number, number]
+  return (r << 16) | (g << 8) | b
+}
+
+/** A colour the page's own tokens name, as a canvas number: the token's value painted on a probe and read back, so a
+ *  `color-mix()` comes back resolved. Null where the shell names no such token. */
+const tokenColour = (token: string, wrap: (value: string) => string = value => value): number | null => {
+  try {
+    const root = document.documentElement
+    const value = getComputedStyle(root).getPropertyValue(token).trim()
+    if (!value || !document.body) return null
+    const probe = document.createElement('span')
+    probe.style.color = wrap(value)
+    if (!probe.style.color) return null
+    probe.style.display = 'none'
+    document.body.append(probe)
+    const said = getComputedStyle(probe).color
+    probe.remove()
+    return colourNumber(said)
+  } catch { return null }
+}
+
+/** The colours the shell gives a tile that is on (_material-tokens.scss `--hc-pools-on`, deep on a bright look and
+ *  pale on a dark one) and the pane as the ink on it, as every accent takes. The authored pair where it names none. */
+export const bulbColours = (): BulbColours => {
+  const lit = tokenColour('--hc-pools-on')
+  const ink = lit === null ? null : tokenColour('--hc-panel-pane', value => `rgb(${value})`)
+  return lit === null || ink === null ? { lit: LIT, ink: INK } : { lit, ink }
+}
+
 /** One badge: the plate, the bulb on it, and the second ring when the whole branch is lit. */
-const drawBulb = (g: Graphics, branch: boolean): void => {
+const drawBulb = (g: Graphics, branch: boolean, { lit, ink }: BulbColours): void => {
   g.clear()
-  if (branch) g.circle(0, 0, PLATE + RING_GAP).stroke({ color: LIT, width: 1.4, alpha: 0.95 })
-  g.circle(0, 0, PLATE).fill({ color: LIT, alpha: 1 }).stroke({ color: INK, width: 1.1, alpha: 0.9 })
-  g.circle(0, -1.3, 2.9).fill({ color: INK, alpha: 1 })
-  g.roundRect(-1.7, 1.1, 3.4, 1.9, 0.5).fill({ color: INK, alpha: 1 })
-  g.rect(-1.1, 3.5, 2.2, 0.9).fill({ color: INK, alpha: 1 })
+  if (branch) g.circle(0, 0, PLATE + RING_GAP).stroke({ color: lit, width: 1.4, alpha: 0.95 })
+  g.circle(0, 0, PLATE).fill({ color: lit, alpha: 1 }).stroke({ color: ink, width: 1.1, alpha: 0.9 })
+  g.circle(0, -1.3, 2.9).fill({ color: ink, alpha: 1 })
+  g.roundRect(-1.7, 1.1, 3.4, 1.9, 0.5).fill({ color: ink, alpha: 1 })
+  g.rect(-1.1, 3.5, 2.2, 0.9).fill({ color: ink, alpha: 1 })
 }
 
 export class PoolsBadgeDrone extends Drone {
@@ -54,7 +94,7 @@ export class PoolsBadgeDrone extends Drone {
   protected override deps = {}
   protected override listens: string[] = [
     'render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:geometry-changed',
-    'render:set-orientation', 'render:set-hive-visible', LIGHTS_MODE, LIGHTS_CHANGED,
+    'render:set-orientation', 'render:set-hive-visible', LIGHTS_MODE, LIGHTS_CHANGED, 'theme:changed',
   ]
   protected override emits: string[] = []
 
@@ -65,6 +105,8 @@ export class PoolsBadgeDrone extends Drone {
   #active = false
   #hiveHidden = false
   #initialized = false
+  /** The colours the bulbs are drawn in: read when pools mode comes up and again when the theme changes. */
+  #colours: BulbColours = { lit: LIT, ink: INK }
 
   protected override sense = () => true
 
@@ -103,12 +145,30 @@ export class PoolsBadgeDrone extends Drone {
     })
     this.onEffect<LightsMode>(LIGHTS_MODE, (mode) => {
       this.#active = mode?.active === true
+      if (this.#active) this.#colours = bulbColours()
       this.#refresh()
     })
     this.onEffect(LIGHTS_CHANGED, () => this.#refresh())
+    // A theme of its own, or the system's turning dark or light: the green deepens or pales, and every bulb with it.
+    this.onEffect('theme:changed', () => this.#recolour())
+    try { this.#scheme = matchMedia('(prefers-color-scheme: dark)') } catch { this.#scheme = null }
+    this.#scheme?.addEventListener?.('change', this.#onScheme)
+  }
+
+  #scheme: MediaQueryList | null = null
+  #onScheme = (): void => { this.#recolour() }
+
+  /** Read the colours again, and draw every bulb in them when they moved. */
+  #recolour(): void {
+    const next = bulbColours()
+    if (next.lit === this.#colours.lit && next.ink === this.#colours.ink) return
+    this.#colours = next
+    for (const badge of this.#badges.values()) drawBulb(badge.g, badge.branch, next)
   }
 
   protected override dispose(): void {
+    this.#scheme?.removeEventListener?.('change', this.#onScheme)
+    this.#scheme = null
     this.#clear()
     this.#layer.destroy()
   }
@@ -133,12 +193,12 @@ export class PoolsBadgeDrone extends Drone {
       if (!badge) {
         const g = new Graphics()
         g.eventMode = 'none'
-        drawBulb(g, branch)
+        drawBulb(g, branch, this.#colours)
         layer.addChild(g)
         badge = { g, branch }
         this.#badges.set(label, badge)
       } else if (badge.branch !== branch) {
-        drawBulb(badge.g, branch)
+        drawBulb(badge.g, branch, this.#colours)
         badge.branch = branch
       }
       this.#layer.place(badge.g, coord, BADGE_CORNER.topRight)

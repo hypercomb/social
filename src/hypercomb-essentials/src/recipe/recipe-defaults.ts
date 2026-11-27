@@ -12,9 +12,10 @@
 // convention the same way a pool's meaning is: spell it the same and it is the
 // same column (documentation/pools-as-relational-database.md).
 //
-// Pure data. Nothing here is written anywhere until a recipe uses one.
+// Pure data, and the words it is shown in. Nothing here is written anywhere
+// until a recipe uses one.
 
-import type { RecipeTemplateDocument } from './recipe-template.js'
+import { recipeTemplateBytes, type RecipeTemplateDocument } from './recipe-template.js'
 
 /** Story first: where a dish comes from, then how it is made, then how it is eaten. */
 export const RECIPE_TEMPLATE_FAMILY: RecipeTemplateDocument = Object.freeze({
@@ -66,3 +67,68 @@ export const DEFAULT_RECIPE_TEMPLATES: readonly RecipeTemplateDocument[] = Objec
   RECIPE_TEMPLATE_WEEKNIGHT,
   RECIPE_TEMPLATE_TASTING,
 ])
+
+// ── said in the participant's language ──────────────────────────────────────
+//
+// The built-in bytes never change: a recipe names them by signature, and a
+// participant who turns one on offers exactly these bytes. Their words are put
+// into the reader's language where they are SHOWN, and only for a template whose
+// bytes are a built-in's (the same bytes are the same signature, I1): the key is
+// `recipe.default.<template>.<section>.label|prompt`, its fact fields under
+// `.fields.<field>`, the template's own under `recipe.default.<template>.name|description`.
+
+/** The name each built-in's words are kept under. */
+const DEFAULT_IDS: ReadonlyMap<RecipeTemplateDocument, string> = new Map([
+  [RECIPE_TEMPLATE_FAMILY, 'family'],
+  [RECIPE_TEMPLATE_WEEKNIGHT, 'weeknight'],
+  [RECIPE_TEMPLATE_TASTING, 'tasting'],
+])
+
+const bytesText = (template: RecipeTemplateDocument): string => {
+  try { return new TextDecoder().decode(recipeTemplateBytes(template)) } catch { return '' }
+}
+
+let builtInBytes: ReadonlyMap<string, string> | null = null
+
+/** Which built-in a template is, by its bytes; '' for any other. */
+export function recipeDefaultTemplateId(template: RecipeTemplateDocument): string {
+  const known = DEFAULT_IDS.get(template)
+  if (known) return known
+  builtInBytes ??= new Map([...DEFAULT_IDS].map(([doc, id]) => [bytesText(doc), id]))
+  return builtInBytes.get(bytesText(template)) ?? ''
+}
+
+/** How a caller says a key: the fallback, its {holes} filled, when it knows no better. */
+export type RecipeDefaultSay = (key: string, fallback: string, params?: Record<string, string | number>) => string
+
+/** A key's words, or the English when the catalogue echoes the key back, says nothing, or throws. */
+const wordsOf = (say: RecipeDefaultSay, key: string, english: string): string => {
+  let said = ''
+  try { said = say(key, english) } catch { said = '' }
+  return said && said !== key && said.trim() ? said : english
+}
+
+/** A fact field as the last part of its key: "Serves" is `serves`. */
+const fieldKey = (field: string): string => field.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+
+/**
+ * The template as it is SHOWN: a built-in in the reader's language, any other
+ * template exactly as its author wrote it (the same object). Never written
+ * anywhere: the bytes a recipe names are the built-in's own.
+ */
+export function recipeDefaultTemplateShown(template: RecipeTemplateDocument, say: RecipeDefaultSay): RecipeTemplateDocument {
+  const id = recipeDefaultTemplateId(template)
+  if (!id) return template
+  const base = `recipe.default.${id}`
+  return {
+    name: wordsOf(say, `${base}.name`, template.name),
+    ...(template.description !== undefined ? { description: wordsOf(say, `${base}.description`, template.description) } : {}),
+    sections: template.sections.map(section => ({
+      key: section.key,
+      kind: section.kind,
+      label: wordsOf(say, `${base}.${section.key}.label`, section.label),
+      ...(section.prompt !== undefined ? { prompt: wordsOf(say, `${base}.${section.key}.prompt`, section.prompt) } : {}),
+      ...(section.fields !== undefined ? { fields: section.fields.map(field => wordsOf(say, `${base}.${section.key}.fields.${fieldKey(field)}`, field)) } : {}),
+    })),
+  }
+}

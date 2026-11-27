@@ -534,6 +534,19 @@ describe('posting', () => {
     expect(w.posted).toHaveLength(2)
   })
 
+  it('stamps a change and a take-back past the post they replace, though they come within one second', async () => {
+    const w = await world()
+    const secretKey = generateSecretKey()
+    const own = { ...entry, page: hexOf('f') }
+    const first = await postEntryMember({ path, pool, secretKey, offset: 0, entry: own }, w.deps)
+    const change = await postEntryMember({ path, pool, secretKey, offset: 0, entry: { ...own, title: 'Soup, again' } }, w.deps)
+    const back = await postEntryMember({ path, pool, secretKey, offset: 0, entry: { ...own, gone: true } }, w.deps)
+    if (!first.ok || !change.ok || !back.ok) throw new Error('a post was refused')
+    expect(first.event.created_at).toBe(Math.floor(START / 1000))
+    expect(change.event.created_at).toBe(first.event.created_at + 1)
+    expect(back.event.created_at).toBe(change.event.created_at + 1)
+  })
+
   it('answers in the host\'s own words, and says when it never answered', async () => {
     const w = await world({ put: () => ({ status: 507, said: 'this one is full' }) })
     expect(await postEntryMember({ path, pool, secretKey: generateSecretKey(), offset: 0, entry }, w.deps)).toMatchObject({ ok: false, why: 'host', reason: 'this one is full', status: 507 })

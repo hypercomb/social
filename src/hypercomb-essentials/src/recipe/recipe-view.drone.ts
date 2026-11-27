@@ -329,7 +329,7 @@ export class RecipeViewDrone extends Drone {
     lineage: '@hypercomb.social/Lineage',
     viewMode: '@hypercomb.social/ViewMode',
   }
-  protected override listens: string[] = [RECIPE_OPEN_FOR_TILE, VIEW_SPAWN_EFFECT, SOURCES_CHANGED, LIGHTS_CHANGED, ROOM_CHANGED]
+  protected override listens: string[] = [RECIPE_OPEN_FOR_TILE, VIEW_SPAWN_EFFECT, SOURCES_CHANGED, LIGHTS_CHANGED, ROOM_CHANGED, 'locale:changed']
   protected override emits: string[] = [
     'view:active', DOMAIN_SHELF_WANTED, SOURCES_QUERY, SOURCES_COUNTED,
     'keymap:hold', 'keymap:release', 'activity:log', 'tile:action',
@@ -426,6 +426,9 @@ export class RecipeViewDrone extends Drone {
       this.#roomStep(mount)
       this.#paintShared(mount)
     })
+    // A language chosen while the desk is up: its words are laid when the page is built, so the page is saved
+    // and built again on the same tile, in the same breath (the hive's chrome and keys stay as they are).
+    this.onEffect('locale:changed', () => { void this.#relocale() })
 
     // One registration feeds the right button and browser / hardware BACK
     // (navigation/back-gesture.service.ts). The owner is the one the view
@@ -627,6 +630,7 @@ export class RecipeViewDrone extends Drone {
     const holding = this.#marked(segments.slice(0, -1), labels)
     const shared = own ? this.#sharedOf({ ...state, readOnly }) : undefined
     let mount: Mount
+    this.#builtIn = document.documentElement.lang
     const page = recipePage({
       title: loaded.name || segments[segments.length - 1] || '',
       address: recipeViewAddress(segments),
@@ -655,6 +659,8 @@ export class RecipeViewDrone extends Drone {
       onClose: () => { void this.#backOut() },
       setting: this.#setting,
       settings: this.#tableMenu(),
+      // A recipe that does not read says so, and why, where the recipe would be.
+      ...(loaded.reason ? { unreadable: loaded.reason } : {}),
       ...(readOnly ? {} : {
         table: {
           open: () => { void this.#openTable(mount) },
@@ -747,6 +753,7 @@ export class RecipeViewDrone extends Drone {
     mount.page.setTitle(loaded.name || label)
     mount.page.setAddress(recipeViewAddress(segments))
     mount.page.setTemplate(shown.template)
+    mount.page.setUnreadable(loaded.reason || null)
     // Another recipe is on the desk now: the page forgets pictures still arriving for the one that left.
     mount.page.setRecipe(recipe, { fresh: true })
     mount.page.setStatus(loaded.reason ? t('recipe.view.unreadable', 'This recipe could not be opened: {reason}', { reason: loaded.reason }) : '', loaded.reason ? 'bad' : 'plain')
@@ -1196,8 +1203,11 @@ export class RecipeViewDrone extends Drone {
     if (!picker) return
     this.#picker = null
     picker.off()
+    const held = picker.handle?.element.contains(document.activeElement) === true
     // Taken down here, or the page under it stays deaf to its own keys.
     picker.handle?.dispose()
+    // Focus was in the panel: it goes back to the button that opened it, never to the body.
+    if (held && this.#mount === picker.mount) picker.mount.page.element.querySelector<HTMLElement>('.hc-recipe-template')?.focus()
     if (!picker.community) return
     EffectBus.emitTransient<DomainShelfWanted>(DOMAIN_SHELF_WANTED, { owner: RECIPE_PICKER_OWNER, wanted: false })
     // The pool is no longer on screen: the chips stop counting it.
@@ -1208,7 +1218,7 @@ export class RecipeViewDrone extends Drone {
     return recipeViewPickerGroups(this.#sources(picker), picker.query, {
       builtIn: t('recipe.picker.built-in', 'Built in'),
       yours: t('recipe.picker.yours', 'Yours'),
-    })
+    }, t)
   }
 
   /** Show the picker what it now has. `query` is passed only to put the shelf's words in its field. */
@@ -1361,6 +1371,18 @@ export class RecipeViewDrone extends Drone {
   #leave(): void {
     this.#target = null
     this.#vm()?.setMode(HEXAGONS)
+  }
+
+  /** The page's language when the desk was built. */
+  #builtIn = ''
+
+  async #relocale(): Promise<void> {
+    const mount = this.#mount
+    if (!mount || this.#builtIn === document.documentElement.lang) return
+    await this.#flush(mount)
+    if (this.#mount !== mount) return
+    this.#teardown(true)
+    await this.#reconcile()
   }
 
   async #teardownSaving(): Promise<void> {

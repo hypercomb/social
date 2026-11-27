@@ -406,7 +406,8 @@ describe('reading a pool', () => {
         })
       }
       const name = at.pathname.split('/')[2]
-      if (at.pathname.startsWith(`/${A}/`) && members.has(name)) return new Response(members.get(name)!.slice())
+      // As the worker does (getRoomMember): a member is read only beside its pool, so with by and until.
+      if (at.pathname.startsWith(`/${A}/`) && members.has(name) && at.search === `?by=${P}&until=${until}`) return new Response(members.get(name)!.slice())
       if (options.hidden?.bytes && at.pathname === `/${options.hidden.sig}`) return new Response(options.hidden.bytes.slice())
       return new Response('not here', { status: 404 })
     }

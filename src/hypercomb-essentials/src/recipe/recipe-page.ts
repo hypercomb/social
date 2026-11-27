@@ -49,6 +49,7 @@ import {
   RECIPE_SECTION_KINDS,
   isEmptyRecipeValue,
   projectRecipe,
+  recipeKeyWords,
   recipeLinkUrl,
   recipePages,
   recipeTemplateFrom,
@@ -90,6 +91,7 @@ import {
   type RecipeDeskTab,
 } from './recipe-desk.js'
 import { floorMatrix, recipeFloorBox, recipeFloorInset, type RecipeSettingDocument, type RecipeSettingPoint } from './recipe-setting.js'
+import { recipeDefaultTemplateShown } from './recipe-defaults.js'
 
 /** Where this recipe is offered, said beside the light-bulb switch. */
 export interface RecipeShared {
@@ -194,6 +196,8 @@ export interface RecipePageShown {
   settings?: RecipeSettingMenu
   /** The Table control's actions. Without them there is no Table control. */
   table?: RecipeTableActions
+  /** Why the recipe on this tile could not be read: the read-along says so, and why, in place of the recipe. */
+  unreadable?: string
 }
 
 /**
@@ -218,6 +222,8 @@ export interface RecipePageHandle {
   setRecipe(recipe: RecipeDocument, how?: { readonly fresh?: boolean }): void
   /** The same recipe through another layout. */
   setTemplate(template: RecipeTemplateDocument): void
+  /** The recipe on the tile could not be read, and why ('' or null: it reads). Set before `setRecipe` for another tile. */
+  setUnreadable(reason: string | null): void
   setTitle(title: string): void
   setMode(mode: 'write' | 'read'): void
   mode(): 'write' | 'read'
@@ -433,14 +439,31 @@ interface Editor {
 const tellFull = (tools: Tools, max: number): void =>
   tools.tell(tools.words('recipe.full', 'This section is full: it holds at most {max}.', { max }), 'bad')
 
-function pictureOf(tools: Tools, sig: string, alt: string): HTMLImageElement {
+/**
+ * What stands where a picture did not arrive: the picture mark and the words
+ * the picture is read by, on the plate's white. Never a blank card.
+ */
+function missingOf(sig: string, alt: string, className = 'hc-recipe-missing'): HTMLElement {
+  const node = recipeEl('span', className)
+  if (sig) node.dataset['sig'] = sig
+  node.dataset['missing'] = ''
+  node.setAttribute('role', 'img')
+  node.setAttribute('aria-label', alt)
+  node.append(recipeMark('picture'), recipeEl('span', 'hc-recipe-missing-words', alt))
+  return node
+}
+
+/** A picture by signature, or, when it has no address or fails to arrive, what stands in for it. */
+function pictureOf(tools: Tools, sig: string, alt: string): HTMLElement {
+  const src = tools.pictureUrl(sig)
+  if (!src) return missingOf(sig, alt)
   const img = recipeEl('img')
   img.alt = alt
   img.draggable = false
   img.decoding = 'async'
   img.dataset['sig'] = sig
-  const src = tools.pictureUrl(sig)
-  if (src) img.src = src
+  img.addEventListener('error', () => { img.replaceWith(missingOf(sig, alt)) }, { once: true })
+  img.src = src
   return img
 }
 
@@ -1039,7 +1062,11 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
   const serial = ++pagesMade
 
   let recipe: RecipeDocument = { ...(options.recipe.template !== undefined ? { template: options.recipe.template } : {}), values: { ...options.recipe.values } }
-  let template = options.template
+  /** A built-in template is shown in the reader's language; its bytes, and every other template, are left as they are. */
+  const shownTemplate = (given: RecipeTemplateDocument): RecipeTemplateDocument => recipeDefaultTemplateShown(given, options.say)
+  let template = shownTemplate(options.template)
+  /** Why the recipe could not be read, or '' when it reads. */
+  let unreadable = options.unreadable ?? ''
   let title = options.title
   let mode: 'write' | 'read' = readOnly ? 'read' : options.mode ?? 'write'
   let arranging = false
@@ -1094,6 +1121,8 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
   drawerToggle.setAttribute('aria-controls', list.id)
 
   const heading = recipeEl('h1', 'hc-recipe-title', title)
+  // The title is cut to an ellipsis on a full header: the whole of it is a hover away.
+  heading.title = title
   const addressWords = recipeEl('span', 'hc-recipe-address')
 
   const naming = lineField('name', say('recipe.arrange.name', 'Template name'), L.name, template.name)
@@ -1215,8 +1244,18 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
   const dishPicture = recipeEl('img')
   dishPicture.draggable = false
   dishPicture.decoding = 'async'
+  // A cover that does not arrive is the picture mark and its words on the plate, never a blank white card.
+  const dishMissing = missingOf('', '', 'hc-recipe-missing hc-recipe-dish-missing')
+  dishMissing.hidden = true
+  const coverMissing = (missing: boolean): void => {
+    dishPicture.hidden = missing
+    dishMissing.hidden = !missing
+    dish.toggleAttribute('data-missing', missing)
+  }
+  dishPicture.addEventListener('error', () => { if (dishPicture.getAttribute('src')) coverMissing(true) })
+  dishPicture.addEventListener('load', () => coverMissing(false))
   const dish = recipeEl('div', 'hc-recipe-dish')
-  dish.append(dishPicture)
+  dish.append(dishPicture, dishMissing)
   const upload = recipeEl('button', 'hc-recipe-invite-btn')
   upload.type = 'button'
   upload.append(recipeMark('upload'), recipeEl('span', '', say('recipe.invite.upload', 'upload')))
@@ -1251,7 +1290,7 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
   scroll.append(column)
 
 
-  const previous = pressable(say('recipe.read.previous', 'Previous'), 'left', 'hc-recipe-btn is-line')
+  const previous = pressable(say('recipe.read.previous', 'Previous'), 'left')
   const next = pressable(say('recipe.read.next', 'Next'), undefined, 'hc-recipe-btn is-solid')
   next.append(recipeMark('right'))
   const position = recipeEl('span', 'hc-recipe-position')
@@ -1279,6 +1318,9 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
 
   const setStatus = (words: string, tone: 'plain' | 'good' | 'bad' = 'plain'): void => {
     status.textContent = words
+    // A long line is cut to an ellipsis on a full header: the whole of it is a hover away.
+    if (words) status.title = words
+    else status.removeAttribute('title')
     status.classList.toggle('is-good', tone === 'good')
     status.classList.toggle('is-bad', tone === 'bad')
   }
@@ -1321,13 +1363,16 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
     tableButton.title = setting ? setting.name : say('recipe.setting.none', 'The drawn plate')
   }
 
-  /** The Table control's list: the kept sets, what the followed hosts offer, bringing one in, and the drawn plate. */
+  /**
+   * The Table control's list: the kept sets, what the followed hosts offer,
+   * bringing one in, and the drawn plate. Plain buttons the Tab key walks, the
+   * set the desk sits on pressed: no menu role it would owe arrow keys to.
+   */
   const drawTableMenu = (): void => {
     const current = settingsMenu.current
-    const row = (words: string, checked: boolean, act: () => void, aside?: string): HTMLButtonElement => {
+    const row = (words: string, chosen: boolean, act: () => void, aside?: string): HTMLButtonElement => {
       const item = pressable(words, undefined, 'hc-recipe-btn hc-recipe-table-item')
-      item.setAttribute('role', 'menuitemradio')
-      item.setAttribute('aria-checked', String(checked))
+      item.setAttribute('aria-pressed', String(chosen))
       if (aside) item.append(recipeEl('span', 'hc-recipe-table-aside', aside))
       item.addEventListener('click', () => { openTableMenu(false, true); act() })
       return item
@@ -1348,7 +1393,6 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
         // Each kept set wears its own remove press, so a full list can always be made room in.
         const forget = tool('close', say('recipe.setting.remove', 'Take {name} off your table sets', { name: choice.name }))
         forget.classList.add('hc-recipe-table-forget')
-        forget.setAttribute('role', 'menuitem')
         forget.addEventListener('click', () => { openTableMenu(false, true); remove(choice) })
         const pair = recipeEl('div', 'hc-recipe-table-kept')
         pair.append(item, forget)
@@ -1378,7 +1422,7 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
     if (show) {
       drawTableMenu()
       options.table?.open?.()
-      ;(tableMenu.querySelector<HTMLElement>('[aria-checked="true"]') ?? tableMenu.querySelector<HTMLElement>('button'))?.focus()
+      ;(tableMenu.querySelector<HTMLElement>('[aria-pressed="true"]') ?? tableMenu.querySelector<HTMLElement>('button'))?.focus()
     } else if (refocus) tableButton.focus()
   }
 
@@ -1730,6 +1774,8 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
       root.style.setProperty('--hc-recipe-figure-h', `${fit.figure.height}px`)
       if (setting) setCanvas.style.transform = `scale(${fit.figure.width / setting.size[0]})`
       if (fit.layout === 'wide' && drawer) setDrawer(false)
+      // Turning wide or narrow with a card open changes what lies under it.
+      if (open) guard()
     }
     seat()
     drawLeaders()
@@ -1759,14 +1805,24 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
     invite.hidden = cover !== undefined || arranging || onSet
     figure.dataset['state'] = onSet ? 'set' : cover ? 'picture' : 'empty'
     drawSet()
-    dishPicture.alt = say('recipe.cover.alt', 'Cover picture of {title}', { title })
+    const coverWords = say('recipe.cover.alt', 'Cover picture of {title}', { title })
+    dishPicture.alt = coverWords
+    dishMissing.setAttribute('aria-label', coverWords)
+    const missingWords = dishMissing.querySelector('.hc-recipe-missing-words')
+    if (missingWords) missingWords.textContent = coverWords
     if (cover) {
       const src = tools.pictureUrl(cover)
-      if (dishPicture.dataset['sig'] !== cover || (src && dishPicture.getAttribute('src') !== src)) {
+      if (!src) {
+        // No address for it at all: what stands in for it, at once.
         dishPicture.dataset['sig'] = cover
-        if (src) dishPicture.src = src
+        dishPicture.removeAttribute('src')
+        coverMissing(true)
+      } else if (dishPicture.dataset['sig'] !== cover || dishPicture.getAttribute('src') !== src) {
+        dishPicture.dataset['sig'] = cover
+        coverMissing(false)
+        dishPicture.src = src
       }
-    }
+    } else coverMissing(false)
     const shelf = arranging ? undefined : shelfOf()
     const held = shelf?.editor.value()
     const sigs = held?.kind === 'pictures' ? [...held.pictures] : []
@@ -1811,7 +1867,7 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
     part.key = key
     part.element.dataset['key'] = key
     part.card.dataset['key'] = key
-    const words = key.replace(/[-_]+/g, ' ')
+    const words = recipeKeyWords(key)
     part.heading.textContent = words
     part.name.textContent = words
   }
@@ -1925,7 +1981,21 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
     part.tab.setAttribute('aria-expanded', 'false')
   }
 
-  /** Close the open card back to the drawing. Answers whether one was open. */
+  /**
+   * While a card is open over the wide drawing, what lies behind it is out of
+   * reach: the other parts, the divider and the plate with its tools are inert,
+   * so Tab walks the card, its tab and the header only. The narrow desk opens a
+   * card in place, with nothing over the rest, so nothing there is inert.
+   */
+  function guard(): void {
+    const covering = open !== null && root.dataset['layout'] !== 'narrow'
+    for (const part of parts) part.element.toggleAttribute('inert', covering && part !== open)
+    also?.toggleAttribute('inert', covering)
+    figure.toggleAttribute('inert', covering)
+    toolsRow.toggleAttribute('inert', covering)
+  }
+
+  /** Close the open card back to the drawing, and focus the tab that opened it. Answers whether one was open. */
   const closeCard = (refocus = true): boolean => {
     const was = open
     if (!was) return false
@@ -1933,6 +2003,7 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
     open = null
     delete root.dataset['open']
     veil.hidden = true
+    guard()
     drawLeaders()
     if (refocus) was.tab.focus()
     return true
@@ -1947,6 +2018,7 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
     part.tab.setAttribute('aria-expanded', 'true')
     root.dataset['open'] = part.key
     veil.hidden = false
+    guard()
     for (const area of part.card.querySelectorAll('textarea')) grow(area)
     drawLeaders()
     if (!focus) return
@@ -1974,6 +2046,8 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
     tab.type = 'button'
     tab.dataset['at'] = 'tab'
     tab.dataset['id'] = id
+    // The label is cut short only where the tab is narrow: its whole name stays on hover.
+    tab.title = section.label
     tab.append(name, said)
 
     const card = recipeEl('section', 'hc-recipe-card')
@@ -2004,7 +2078,7 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
     const top = recipeEl('div', 'hc-recipe-card-head')
     top.append(label)
     if (section.prompt && section.kind !== 'text') top.append(recipeEl('p', 'hc-recipe-hint', section.prompt))
-    const done = pressable(say('recipe.card.done', 'Done'), undefined, 'hc-recipe-btn is-line')
+    const done = pressable(say('recipe.card.done', 'Done'))
     done.dataset['at'] = 'done'
     done.addEventListener('click', () => closeCard())
     const foot = recipeEl('div', 'hc-recipe-card-foot')
@@ -2033,6 +2107,7 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
     // The same part stays open across a redraw; the cook's focus is put back by whoever asked for it.
     const again = wasOpen === undefined ? undefined : parts.find(part => part.key === wasOpen)
     if (again) openPart(again, undefined, false)
+    else guard()
     drawFigure()
     layOut()
   }
@@ -2051,6 +2126,7 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
     open = null
     delete root.dataset['open']
     veil.hidden = true
+    guard()
     const sections = template.sections
     const keys = new Set(sections.map(section => section.key))
     const full = sections.length >= L.sections
@@ -2138,7 +2214,7 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
       line.dataset['key'] = section.key
       line.append(recipeEl('span', 'hc-recipe-kept-name', section.label), recipeEl('span', 'hc-recipe-tag', kindWords(section.kind)))
       if (full || keys.has(section.key)) return
-      const give = pressable(say('recipe.arrange.give', 'Make it a section'), undefined, 'hc-recipe-btn is-line')
+      const give = pressable(say('recipe.arrange.give', 'Make it a section'))
       give.addEventListener('click', () => {
         const label = section.label.charAt(0).toUpperCase() + section.label.slice(1)
         relayout([...template.sections, { key: section.key, kind: section.kind, label: oneLine(label, L.label) || section.key }])
@@ -2257,8 +2333,22 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
     also = null
     delete root.dataset['open']
     veil.hidden = true
+    guard()
     partsHost.replaceChildren()
     leaders.replaceChildren()
+    if (unreadable) {
+      // A recipe that does not read is not an empty one: the page says it could not be opened, and why.
+      nav.hidden = progress.hidden = true
+      const node = recipeEl('article', 'hc-recipe-page')
+      node.dataset['page'] = 'unreadable'
+      node.append(
+        recipeEl('h2', 'hc-recipe-cover-title', title),
+        recipeEl('p', 'hc-recipe-prose', say('recipe.read.unreadable', 'This recipe could not be opened.')),
+        recipeEl('p', 'hc-recipe-aside hc-recipe-unreadable-why', unreadable),
+      )
+      column.replaceChildren(node)
+      return
+    }
     const projected = projectRecipe(template, recipe)
     const pages = recipePages(projected)
     const total = pages.length
@@ -2270,7 +2360,8 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
       node.dataset['page'] = 'empty'
       node.append(recipeEl('h2', 'hc-recipe-cover-title', title), recipeEl('p', 'hc-recipe-prose', say('recipe.read.empty', 'Nothing is written here yet.')))
       if (!readOnly) {
-        const start = pressable(say('recipe.read.start', 'Start writing'), undefined, 'hc-recipe-btn is-solid')
+        // Plain words: the header's Done is the desk's one filled button.
+        const start = pressable(say('recipe.read.start', 'Start writing'))
         start.addEventListener('click', () => chooseMode('write'))
         node.append(start)
       }
@@ -2602,6 +2693,11 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
     if (!menu.hidden && !(event.target instanceof Node && moreWrap.contains(event.target))) openMenu(false)
     if (!tableMenu.hidden && !(event.target instanceof Node && tableWrap.contains(event.target))) openTableMenu(false)
   })
+  // Tab out of an open list and it closes: focus went somewhere else on purpose, so it is left there.
+  const leaving = (wrap: HTMLElement, event: FocusEvent): boolean =>
+    event.relatedTarget instanceof Node && !wrap.contains(event.relatedTarget)
+  moreWrap.addEventListener('focusout', event => { if (!menu.hidden && leaving(moreWrap, event)) openMenu(false) })
+  tableWrap.addEventListener('focusout', event => { if (!tableMenu.hidden && leaving(tableWrap, event)) openTableMenu(false) })
   stage.addEventListener('pointerover', event => { const id = drawingId(event.target); if (id !== hot) { hot = id; light() } })
   stage.addEventListener('pointerleave', () => { if (hot) { hot = ''; light() } })
   stage.addEventListener('focusin', event => { const id = drawingId(event.target); if (id !== focused) { focused = id; light() } })
@@ -2700,20 +2796,33 @@ export function recipePage(options: RecipePageOptions): RecipePageHandle {
         describe(part, value)
       })
       for (const img of root.querySelectorAll<HTMLImageElement>('img[data-sig]')) {
+        if (img === dishPicture) continue
         const src = tools.pictureUrl(img.dataset['sig'] ?? '')
         if (src && img.getAttribute('src') !== src) img.src = src
+      }
+      // A picture that had no address may have one now.
+      for (const stand of root.querySelectorAll<HTMLElement>('.hc-recipe-missing[data-sig]')) {
+        const sig = stand.dataset['sig'] ?? ''
+        if (tools.pictureUrl(sig)) stand.replaceWith(pictureOf(tools, sig, stand.getAttribute('aria-label') ?? ''))
       }
       drawFigure()
       layOut()
     },
     setTemplate(to) {
-      template = to
+      template = shownTemplate(to)
       showTemplate()
       keepingPlace(render)
+    },
+    setUnreadable(reason) {
+      const to = reason ?? ''
+      if (to === unreadable) return
+      unreadable = to
+      if (mode === 'read') renderRead()
     },
     setTitle(to) {
       title = to
       heading.textContent = to
+      heading.title = to
       if (mode === 'read') renderRead()
       else drawFigure()
     },

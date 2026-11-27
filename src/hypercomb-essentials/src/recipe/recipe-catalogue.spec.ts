@@ -251,6 +251,15 @@ describe('the catalogue', () => {
     expect(none(root).textContent).toBe('Nothing is published here yet.')
   })
 
+  it('does not call itself empty when there is nothing to draw from: the note says how to get some', () => {
+    const { root, catalogue } = mount({ rows: [], loading: false, unsourced: true })
+    expect(none(root).hidden).toBe(true)
+    // Once a source is on, an empty answer is said again.
+    catalogue.update({ unsourced: false })
+    expect(none(root).hidden).toBe(false)
+    expect(none(root).textContent).toBe('Nothing is published here yet.')
+  })
+
   it('falls back to English when the catalogue of words echoes the key or answers nothing', () => {
     const echo = mount({ say: key => key, rows: [], loading: true })
     expect(asking(echo.root).textContent).toBe('Asking the nodes you draw from')
@@ -495,7 +504,7 @@ describe('the catalogue', () => {
     mount()
     const sheet = document.getElementById(RECIPE_CATALOGUE_STYLE_ID)?.textContent ?? ''
     expect(sheet).not.toMatch(/url\(|@import|@font-face|https?:/)
-    expect([...sheet.matchAll(/border-radius:([^;}]+)/g)].map(found => found[1])).toEqual(['var(--rp-control)', 'var(--rp-control)', '50%', 'var(--rp-control)'])
+    expect([...sheet.matchAll(/border-radius:([^;}]+)/g)].map(found => found[1])).toEqual(['var(--rp-control)', 'var(--rp-control)', '50%', 'var(--hc-radius-card,3px)'])
     expect(sheet).toContain('prefers-reduced-motion:reduce')
   })
 
@@ -518,7 +527,10 @@ describe('a press beside a node, and the nodes held back (the leader\'s Hide)', 
     const presses = [...root.querySelectorAll<HTMLButtonElement>('.hc-recipe-catalogue-node-action')]
     expect(presses.map(press => press.dataset['node'])).toEqual([`participant:${ANA.id}`, `participant:${BEN.id}`])
     expect(presses[0].closest('h2')).toBeNull()
-    expect(presses[0].getAttribute('aria-label')).toBe('Hide Ana Maria Lopez')
+    // Named by the words it shows; what it does, to whom, is said beside them.
+    expect(presses[0].hasAttribute('aria-label')).toBe(false)
+    expect(presses[0].textContent).toBe('Hide')
+    expect(presses[0].getAttribute('aria-description')).toBe('Hide Ana Maria Lopez')
     presses[1].click()
     expect(pressed).toEqual([BEN.id])
   })
@@ -561,7 +573,8 @@ describe('a press under a row, and one held-back entry (the leader\'s Hide on on
     expect(presses.map(press => [press.dataset['node'], press.dataset['sig']])).toEqual([[`participant:${ANA.id}`, SIG_LASAGNE]])
     expect(presses[0]!.closest('.hc-recipe-catalogue-card')).toBeNull()
     expect(presses[0]!.closest('li')?.querySelector<HTMLElement>('.hc-recipe-catalogue-card')?.dataset['sig']).toBe(SIG_LASAGNE)
-    expect(presses[0]!.getAttribute('aria-label')).toBe('Hide Sunday lasagne')
+    expect(presses[0]!.hasAttribute('aria-label')).toBe(false)
+    expect(presses[0]!.getAttribute('aria-description')).toBe('Hide Sunday lasagne')
     presses[0]!.click()
     expect(pressed).toEqual([SIG_LASAGNE])
     expect(onOpen).not.toHaveBeenCalled()
@@ -577,5 +590,24 @@ describe('a press under a row, and one held-back entry (the leader\'s Hide on on
     expect(names(root)).toContain('Sunday lasagne')
     held.querySelector<HTMLButtonElement>('.hc-recipe-catalogue-node-action')!.click()
     expect(onPress).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('a node that did not answer', () => {
+  it('is said by name, and the page is never called empty while one is', () => {
+    const { root, catalogue } = mount({ rows: [], unanswered: ['down.example'] })
+    expect([...root.querySelectorAll('[data-unanswered]')].map(line => line.textContent)).toEqual(['down.example did not answer.'])
+    expect(none(root).hidden).toBe(true)
+
+    // Beside rows the others offer, it is still said.
+    catalogue.update({ rows: ROWS })
+    expect(names(root).length).toBeGreaterThan(0)
+    expect(root.querySelector('[data-unanswered]')?.textContent).toBe('down.example did not answer.')
+
+    // Once it answers, empty is empty again.
+    catalogue.update({ rows: [], unanswered: [] })
+    expect(root.querySelector('[data-unanswered]')).toBeNull()
+    expect(none(root).hidden).toBe(false)
+    expect(none(root).textContent).toBe('Nothing is published here yet.')
   })
 })

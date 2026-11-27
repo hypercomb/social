@@ -31,7 +31,15 @@
 // from its own heap, and a link is http or https with no credentials. Reading
 // one can make this browser contact nobody (T7).
 //
-// Pure: no DOM, no network, no storage. It exports and never registers.
+// A refusal is a CODE with what fills its holes (field names, keys and numbers,
+// never words), the way recipe-setting.ts says its own: `reason` is the
+// sentence in the participant's language when the shell's catalogue is up,
+// English when it is not, and `refusal` lets any reader say it in its own.
+//
+// Pure: no DOM, no network, no storage. It exports and never registers; the one
+// thing it asks of the hive is the catalogue's words for a refusal.
+
+import { I18N_IOC_KEY, get, type I18nProvider } from '@hypercomb/core'
 
 /** The self-declaring key of a template document; its value is the format version. */
 export const RECIPE_TEMPLATE_KEY = 'recipe:template'
@@ -159,17 +167,97 @@ export interface RecipeEntry extends RecipeEntryDocument {
   readonly sig: string
 }
 
+/** Why a template, a recipe or an entry was refused, as a code a reader puts into its own language (`recipeTemplateRefusalWords`). */
+export type RecipeTemplateRefusalCode = keyof typeof REFUSALS
+
+export interface RecipeTemplateRefusal {
+  readonly code: RecipeTemplateRefusalCode
+  /** The i18n key of its sentence: `recipe.template.refusal.<code>`. */
+  readonly key: string
+  /** What fills the sentence's {holes}: field names, keys and numbers, never words. */
+  readonly params: Readonly<Record<string, string | number>>
+}
+
+/** `reason` says the refusal in the participant's language (English without a catalogue); `refusal` says it in any. */
 export type ParsedRecipeEntry =
   | { readonly ok: true; readonly entry: RecipeEntry; readonly sig: string }
-  | { readonly ok: false; readonly reason: string }
+  | { readonly ok: false; readonly reason: string; readonly refusal: RecipeTemplateRefusal }
 
 export type ParsedRecipeTemplate =
   | { readonly ok: true; readonly template: RecipeTemplate; readonly sig: string }
-  | { readonly ok: false; readonly reason: string }
+  | { readonly ok: false; readonly reason: string; readonly refusal: RecipeTemplateRefusal }
 
 export type ParsedRecipe =
   | { readonly ok: true; readonly recipe: Recipe; readonly sig: string }
-  | { readonly ok: false; readonly reason: string }
+  | { readonly ok: false; readonly reason: string; readonly refusal: RecipeTemplateRefusal }
+
+// ── refusals ────────────────────────────────────────────────────────────────
+
+/** Every refusal, in English, with {holes} for what it names. Each is the fallback of `recipe.template.refusal.<code>`. */
+const REFUSALS = Object.freeze({
+  notBytes: 'it is not bytes',
+  tooLarge: 'it is larger than {kb} KB',
+  notUtf8: 'it is not UTF-8',
+  notJson: 'it is not JSON',
+  forbiddenKey: 'the key "{key}" is not allowed anywhere in it',
+  repeatedKey: 'it repeats the key "{key}", so two readers could see two documents',
+  sigMismatch: 'its bytes do not match the signature they were held under',
+  notObject: 'it is not a JSON object',
+  version: 'it does not say "{key}": 1, the one version this reader knows',
+  notText: '"{field}" must be text',
+  empty: '"{field}" is empty',
+  tooLong: '"{field}" is longer than {max} characters',
+  notOneLine: '"{field}" has a line break, control characters or direction overrides in it',
+  notProse: '"{field}" has control characters or direction overrides in it',
+  notList: '"{field}" must be a list',
+  tooMany: '"{field}" holds more than {max}',
+  unknownField: 'it has an unknown field "{key}"',
+  sectionUnknownField: 'section {n} has an unknown field "{key}"',
+  valueUnknownField: 'the value {value} has an unknown field "{key}"',
+  itemUnknownField: '{field} has an unknown field "{key}"',
+  sectionNotObject: 'section {n} is not an object',
+  sectionKey: "section {n}'s key must be lowercase letters, digits, - or _ (up to 40), starting with a letter",
+  sharedKey: 'two sections share the key "{key}"',
+  sectionKind: 'the section {key} has no kind this format knows ({kinds})',
+  fieldsNotFacts: 'only a facts section suggests fields: {key}',
+  noSections: 'it has no sections: a template arranges at least one',
+  valueNotObject: 'the value {key} is not an object',
+  valueKind: 'the value {key} has no kind this format knows ({kinds})',
+  itemNotObject: '{field} is not an object',
+  itemNotSignature: '{field} is not a signature (64 lowercase hex)',
+  minutes: '{field} must be a number from 0 to {max}',
+  itemEmpty: '{field} is empty',
+  notLink: '{field} is not an http or https link',
+  notSignature: '"{field}" must be a signature (64 lowercase hex)',
+  valuesNotObject: '"values" must be an object (it may be empty)',
+  tooManyValues: 'it holds more than {max} values',
+  valueKey: "a value's key must be lowercase letters, digits, - or _ (up to 40), starting with a letter: {key}",
+  unread: 'it could not be read',
+})
+
+const fill = (text: string, params: Readonly<Record<string, string | number>>): string =>
+  text.replace(/\{(\w+)\}/g, (hole, name: string) => (name in params ? String(params[name]) : hole))
+
+const refusalOf = (code: RecipeTemplateRefusalCode, params: Readonly<Record<string, string | number>> = {}): RecipeTemplateRefusal =>
+  Object.freeze({ code, key: `recipe.template.refusal.${code}`, params: Object.freeze({ ...params }) })
+
+/** How a reader says a key in its own language: the fallback, its {holes} filled, when it knows no better. */
+export type RecipeTemplateSay = (key: string, fallback: string, params?: Record<string, string | number>) => string
+
+/** The shell's catalogue, when it is up. A key it does not know is echoed back, and then the English is used. */
+const catalogue: RecipeTemplateSay = (key, fallback, params) => {
+  let said: string | undefined
+  try { said = get<I18nProvider>(I18N_IOC_KEY)?.t(key, params) } catch { said = undefined }
+  return said && said !== key ? said : fallback
+}
+
+/** A refusal in the reader's language, through its own `say` (the shell's catalogue by default); the English sentence when neither knows it. */
+export function recipeTemplateRefusalWords(refusal: RecipeTemplateRefusal, say: RecipeTemplateSay = catalogue): string {
+  const english = fill(REFUSALS[refusal.code], refusal.params)
+  let said = ''
+  try { said = say(refusal.key, REFUSALS[refusal.code], { ...refusal.params }) } catch { said = '' }
+  return said && said !== refusal.key ? fill(said, refusal.params) : english
+}
 
 // ── reading ─────────────────────────────────────────────────────────────────
 
@@ -200,9 +288,17 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> => {
 const sha256Hex = async (bytes: Uint8Array): Promise<string> =>
   Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as BufferSource)), b => b.toString(16).padStart(2, '0')).join('')
 
-class Refusal extends Error {}
+class Refusal extends Error {
+  readonly refusal: RecipeTemplateRefusal
+  constructor(refusal: RecipeTemplateRefusal) {
+    super(fill(REFUSALS[refusal.code], refusal.params))
+    this.refusal = refusal
+  }
+}
 // A declaration, not an arrow, so the compiler knows the code after a refusal is unreachable.
-function refuse(reason: string): never { throw new Refusal(reason) }
+function refuse(code: RecipeTemplateRefusalCode, params: Readonly<Record<string, string | number>> = {}): never {
+  throw new Refusal(refusalOf(code, params))
+}
 
 /** Bytes from any realm: a test runner's TextEncoder and its Uint8Array need not be the same class. */
 const isBytes = (value: unknown): value is Uint8Array =>
@@ -211,7 +307,7 @@ const isBytes = (value: unknown): value is Uint8Array =>
 /** JSON with every key checked as it is read: a forbidden key refuses the whole document. */
 function parseJson(text: string): unknown {
   return JSON.parse(text, function reviver(key: string, value: unknown) {
-    if (FORBIDDEN_KEYS.has(key)) refuse(`the key "${key}" is not allowed anywhere in it`)
+    if (FORBIDDEN_KEYS.has(key)) refuse('forbiddenKey', { key })
     return value
   })
 }
@@ -248,28 +344,38 @@ function repeatedKey(text: string): string | null {
 /** One line of text: no line break, no control character, no direction override. */
 const line = (value: unknown, field: string, max: number, required: boolean): string | undefined => {
   if (value === undefined && !required) return undefined
-  if (typeof value !== 'string') return refuse(`"${field}" must be text`)
-  if (required && !value.trim()) refuse(`"${field}" is empty`)
-  if (value.length > max) refuse(`"${field}" is longer than ${max} characters`)
-  if (CONTROL.test(value) || /[\r\n]/.test(value) || BIDI.test(value)) refuse(`"${field}" has a line break, control characters or direction overrides in it`)
+  if (typeof value !== 'string') return refuse('notText', { field })
+  if (required && !value.trim()) refuse('empty', { field })
+  if (value.length > max) refuse('tooLong', { field, max })
+  if (CONTROL.test(value) || /[\r\n]/.test(value) || BIDI.test(value)) refuse('notOneLine', { field })
   return value
 }
 
 /** Text that may run over lines: line feeds and tabs only. */
 const prose = (value: unknown, field: string, max: number): string => {
-  if (typeof value !== 'string') return refuse(`"${field}" must be text`)
-  if (value.length > max) refuse(`"${field}" is longer than ${max} characters`)
-  if (CONTROL.test(value) || value.includes('\r') || BIDI.test(value)) refuse(`"${field}" has control characters or direction overrides in it`)
+  if (typeof value !== 'string') return refuse('notText', { field })
+  if (value.length > max) refuse('tooLong', { field, max })
+  if (CONTROL.test(value) || value.includes('\r') || BIDI.test(value)) refuse('notProse', { field })
   return value
 }
 
-const onlyKeys = (value: Record<string, unknown>, allowed: ReadonlySet<string>, where: string): void => {
-  for (const key of Object.keys(value)) if (!allowed.has(key)) refuse(`${where} has an unknown field "${clip(key)}"`)
+/** Where an unknown field was found: the document, a section by number, a value by key, or an item by its path. */
+type Where = { readonly section: number } | { readonly value: string } | { readonly item: string } | null
+
+const onlyKeys = (value: Record<string, unknown>, allowed: ReadonlySet<string>, where: Where): void => {
+  for (const name of Object.keys(value)) {
+    if (allowed.has(name)) continue
+    const key = clip(name)
+    if (!where) refuse('unknownField', { key })
+    if ('section' in where) refuse('sectionUnknownField', { n: where.section, key })
+    if ('value' in where) refuse('valueUnknownField', { value: where.value, key })
+    refuse('itemUnknownField', { field: where.item, key })
+  }
 }
 
 const list = (value: unknown, field: string, max: number): unknown[] => {
-  if (!Array.isArray(value)) return refuse(`"${field}" must be a list`)
-  if (value.length > max) refuse(`"${field}" holds more than ${max}`)
+  if (!Array.isArray(value)) return refuse('notList', { field })
+  if (value.length > max) refuse('tooMany', { field, max })
   return value
 }
 
@@ -285,19 +391,19 @@ export function recipeLinkUrl(candidate: string): string | null {
 }
 
 function readSection(value: unknown, at: number, seen: Set<string>): RecipeSection {
-  if (!isPlainObject(value)) return refuse(`section ${at + 1} is not an object`)
-  onlyKeys(value, SECTION_KEYS, `section ${at + 1}`)
+  if (!isPlainObject(value)) return refuse('sectionNotObject', { n: at + 1 })
+  onlyKeys(value, SECTION_KEYS, { section: at + 1 })
   const key = value['key']
-  if (typeof key !== 'string' || !KEY.test(key) || FORBIDDEN_KEYS.has(key)) refuse(`section ${at + 1}'s key must be lowercase letters, digits, - or _ (up to 40), starting with a letter`)
-  if (seen.has(key as string)) refuse(`two sections share the key "${key as string}"`)
+  if (typeof key !== 'string' || !KEY.test(key) || FORBIDDEN_KEYS.has(key)) refuse('sectionKey', { n: at + 1 })
+  if (seen.has(key as string)) refuse('sharedKey', { key: key as string })
   seen.add(key as string)
   const kind = value['kind']
-  if (typeof kind !== 'string' || !KINDS.has(kind)) refuse(`the section ${key as string} has no kind this format knows (${RECIPE_SECTION_KINDS.join(', ')})`)
+  if (typeof kind !== 'string' || !KINDS.has(kind)) refuse('sectionKind', { key: key as string, kinds: RECIPE_SECTION_KINDS.join(', ') })
   const label = line(value['label'], `${key as string}.label`, L.label, true) as string
   const prompt = line(value['prompt'], `${key as string}.prompt`, L.prompt, false)
   let fields: string[] | undefined
   if (value['fields'] !== undefined) {
-    if (kind !== 'facts') refuse(`only a facts section suggests fields: ${key as string}`)
+    if (kind !== 'facts') refuse('fieldsNotFacts', { key: key as string })
     fields = list(value['fields'], `${key as string}.fields`, L.fields).map((field, i) => line(field, `${key as string}.fields[${i}]`, L.factLabel, true) as string)
   }
   return Object.freeze({
@@ -310,22 +416,22 @@ function readSection(value: unknown, at: number, seen: Set<string>): RecipeSecti
 }
 
 function readTemplateDocument(doc: unknown, sig: string): RecipeTemplate {
-  if (!isPlainObject(doc)) return refuse('it is not a JSON object')
-  onlyKeys(doc, TEMPLATE_KEYS, 'it')
-  if (doc[RECIPE_TEMPLATE_KEY] !== 1) refuse(`it does not say "${RECIPE_TEMPLATE_KEY}": 1, the one version this reader knows`)
+  if (!isPlainObject(doc)) return refuse('notObject')
+  onlyKeys(doc, TEMPLATE_KEYS, null)
+  if (doc[RECIPE_TEMPLATE_KEY] !== 1) refuse('version', { key: RECIPE_TEMPLATE_KEY })
   const name = line(doc['name'], 'name', L.name, true) as string
   const description = line(doc['description'], 'description', L.description, false)
   const raw = list(doc['sections'], 'sections', L.sections)
-  if (!raw.length) refuse('it has no sections: a template arranges at least one')
+  if (!raw.length) refuse('noSections')
   const seen = new Set<string>()
   const sections = raw.map((section, at) => readSection(section, at, seen))
   return Object.freeze({ sig, name, ...(description !== undefined ? { description } : {}), sections: Object.freeze(sections) })
 }
 
 function readValue(key: string, value: unknown): RecipeValue {
-  if (!isPlainObject(value)) return refuse(`the value ${key} is not an object`)
+  if (!isPlainObject(value)) return refuse('valueNotObject', { key })
   const kind = value['kind']
-  const where = `the value ${key}`
+  const where: Where = { value: key }
   switch (kind) {
     case 'text': {
       onlyKeys(value, new Set(['kind', 'text']), where)
@@ -334,8 +440,8 @@ function readValue(key: string, value: unknown): RecipeValue {
     case 'ingredients': {
       onlyKeys(value, new Set(['kind', 'items']), where)
       const items = list(value['items'], `${key}.items`, L.ingredients).map((item, i): RecipeIngredient => {
-        if (!isPlainObject(item)) return refuse(`${key}.items[${i}] is not an object`)
-        onlyKeys(item, new Set(['amount', 'item', 'note']), `${key}.items[${i}]`)
+        if (!isPlainObject(item)) return refuse('itemNotObject', { field: `${key}.items[${i}]` })
+        onlyKeys(item, new Set(['amount', 'item', 'note']), { item: `${key}.items[${i}]` })
         const amount = line(item['amount'], `${key}.items[${i}].amount`, L.amount, false)
         const note = line(item['note'], `${key}.items[${i}].note`, L.note, false)
         return Object.freeze({
@@ -349,14 +455,14 @@ function readValue(key: string, value: unknown): RecipeValue {
     case 'steps': {
       onlyKeys(value, new Set(['kind', 'steps']), where)
       const steps = list(value['steps'], `${key}.steps`, L.steps).map((step, i): RecipeStep => {
-        if (!isPlainObject(step)) return refuse(`${key}.steps[${i}] is not an object`)
-        onlyKeys(step, new Set(['text', 'picture', 'minutes']), `${key}.steps[${i}]`)
+        if (!isPlainObject(step)) return refuse('itemNotObject', { field: `${key}.steps[${i}]` })
+        onlyKeys(step, new Set(['text', 'picture', 'minutes']), { item: `${key}.steps[${i}]` })
         const picture = step['picture']
-        if (picture !== undefined && (typeof picture !== 'string' || !SIG.test(picture))) refuse(`${key}.steps[${i}].picture is not a signature (64 lowercase hex)`)
+        if (picture !== undefined && (typeof picture !== 'string' || !SIG.test(picture))) refuse('itemNotSignature', { field: `${key}.steps[${i}].picture` })
         const minutes = step['minutes']
-        if (minutes !== undefined && (typeof minutes !== 'number' || !Number.isFinite(minutes) || minutes < 0 || minutes > L.minutes)) refuse(`${key}.steps[${i}].minutes must be a number from 0 to ${L.minutes}`)
+        if (minutes !== undefined && (typeof minutes !== 'number' || !Number.isFinite(minutes) || minutes < 0 || minutes > L.minutes)) refuse('minutes', { field: `${key}.steps[${i}].minutes`, max: L.minutes })
         const text = prose(step['text'], `${key}.steps[${i}].text`, L.step)
-        if (!text.trim()) refuse(`${key}.steps[${i}].text is empty`)
+        if (!text.trim()) refuse('itemEmpty', { field: `${key}.steps[${i}].text` })
         return Object.freeze({
           text,
           ...(picture !== undefined ? { picture: picture as string } : {}),
@@ -368,7 +474,7 @@ function readValue(key: string, value: unknown): RecipeValue {
     case 'pictures': {
       onlyKeys(value, new Set(['kind', 'pictures']), where)
       const pictures = list(value['pictures'], `${key}.pictures`, L.pictures).map((picture, i) => {
-        if (typeof picture !== 'string' || !SIG.test(picture)) return refuse(`${key}.pictures[${i}] is not a signature (64 lowercase hex)`)
+        if (typeof picture !== 'string' || !SIG.test(picture)) return refuse('itemNotSignature', { field: `${key}.pictures[${i}]` })
         return picture
       })
       return Object.freeze({ kind, pictures: Object.freeze([...new Set(pictures)]) })
@@ -376,10 +482,10 @@ function readValue(key: string, value: unknown): RecipeValue {
     case 'links': {
       onlyKeys(value, new Set(['kind', 'links']), where)
       const links = list(value['links'], `${key}.links`, L.links).map((link, i): RecipeLink => {
-        if (!isPlainObject(link)) return refuse(`${key}.links[${i}] is not an object`)
-        onlyKeys(link, new Set(['url', 'label']), `${key}.links[${i}]`)
+        if (!isPlainObject(link)) return refuse('itemNotObject', { field: `${key}.links[${i}]` })
+        onlyKeys(link, new Set(['url', 'label']), { item: `${key}.links[${i}]` })
         const url = typeof link['url'] === 'string' ? recipeLinkUrl(link['url']) : null
-        if (!url) return refuse(`${key}.links[${i}].url is not an http or https link`)
+        if (!url) return refuse('notLink', { field: `${key}.links[${i}].url` })
         const label = line(link['label'], `${key}.links[${i}].label`, L.label, false)
         return Object.freeze({ url, ...(label !== undefined ? { label } : {}) })
       })
@@ -388,8 +494,8 @@ function readValue(key: string, value: unknown): RecipeValue {
     case 'facts': {
       onlyKeys(value, new Set(['kind', 'facts']), where)
       const facts = list(value['facts'], `${key}.facts`, L.facts).map((fact, i): RecipeFact => {
-        if (!isPlainObject(fact)) return refuse(`${key}.facts[${i}] is not an object`)
-        onlyKeys(fact, new Set(['label', 'value']), `${key}.facts[${i}]`)
+        if (!isPlainObject(fact)) return refuse('itemNotObject', { field: `${key}.facts[${i}]` })
+        onlyKeys(fact, new Set(['label', 'value']), { item: `${key}.facts[${i}]` })
         return Object.freeze({
           label: line(fact['label'], `${key}.facts[${i}].label`, L.factLabel, true) as string,
           value: line(fact['value'], `${key}.facts[${i}].value`, L.factValue, true) as string,
@@ -398,55 +504,56 @@ function readValue(key: string, value: unknown): RecipeValue {
       return Object.freeze({ kind, facts: Object.freeze(facts) })
     }
     default:
-      return refuse(`${where} has no kind this format knows (${RECIPE_SECTION_KINDS.join(', ')})`)
+      return refuse('valueKind', { key, kinds: RECIPE_SECTION_KINDS.join(', ') })
   }
 }
 
 function readRecipeDocument(doc: unknown, sig: string): Recipe {
-  if (!isPlainObject(doc)) return refuse('it is not a JSON object')
-  onlyKeys(doc, RECIPE_KEYS, 'it')
-  if (doc[RECIPE_KEY] !== 1) refuse(`it does not say "${RECIPE_KEY}": 1, the one version this reader knows`)
+  if (!isPlainObject(doc)) return refuse('notObject')
+  onlyKeys(doc, RECIPE_KEYS, null)
+  if (doc[RECIPE_KEY] !== 1) refuse('version', { key: RECIPE_KEY })
   const template = doc['template']
-  if (template !== undefined && (typeof template !== 'string' || !SIG.test(template))) refuse('"template" must be a signature (64 lowercase hex)')
+  if (template !== undefined && (typeof template !== 'string' || !SIG.test(template))) refuse('notSignature', { field: 'template' })
   const raw = doc['values']
-  if (!isPlainObject(raw)) return refuse('"values" must be an object (it may be empty)')
+  if (!isPlainObject(raw)) return refuse('valuesNotObject')
   const keys = Object.keys(raw)
-  if (keys.length > L.sections * 2) refuse(`it holds more than ${L.sections * 2} values`)
+  if (keys.length > L.sections * 2) refuse('tooManyValues', { max: L.sections * 2 })
   const values: Record<string, RecipeValue> = {}
   for (const key of keys) {
-    if (!KEY.test(key) || FORBIDDEN_KEYS.has(key)) refuse(`a value's key must be lowercase letters, digits, - or _ (up to 40), starting with a letter: ${clip(key)}`)
+    if (!KEY.test(key) || FORBIDDEN_KEYS.has(key)) refuse('valueKey', { key: clip(key) })
     values[key] = readValue(key, raw[key])
   }
   return Object.freeze({ sig, ...(template !== undefined ? { template: template as string } : {}), values: Object.freeze(values) })
 }
 
 function readEntryDocument(doc: unknown, sig: string): RecipeEntry {
-  if (!isPlainObject(doc)) return refuse('it is not a JSON object')
-  onlyKeys(doc, ENTRY_KEYS, 'it')
-  if (doc[RECIPE_ENTRY_KEY] !== 1) refuse(`it does not say "${RECIPE_ENTRY_KEY}": 1, the one version this reader knows`)
+  if (!isPlainObject(doc)) return refuse('notObject')
+  onlyKeys(doc, ENTRY_KEYS, null)
+  if (doc[RECIPE_ENTRY_KEY] !== 1) refuse('version', { key: RECIPE_ENTRY_KEY })
   const name = line(doc['name'], 'name', L.name, true) as string
   const recipe = doc['recipe']
-  if (typeof recipe !== 'string' || !SIG.test(recipe)) refuse('"recipe" must be a signature (64 lowercase hex)')
+  if (typeof recipe !== 'string' || !SIG.test(recipe)) refuse('notSignature', { field: 'recipe' })
   const cover = doc['cover']
-  if (cover !== undefined && (typeof cover !== 'string' || !SIG.test(cover))) refuse('"cover" must be a signature (64 lowercase hex)')
+  if (cover !== undefined && (typeof cover !== 'string' || !SIG.test(cover))) refuse('notSignature', { field: 'cover' })
   return Object.freeze({ sig, name, recipe: recipe as string, ...(cover !== undefined ? { cover: cover as string } : {}) })
 }
 
-async function read<T>(bytes: Uint8Array, expectedSig: string | undefined, limit: number, shape: (doc: unknown, sig: string) => T): Promise<{ ok: true; value: T; sig: string } | { ok: false; reason: string }> {
+async function read<T>(bytes: Uint8Array, expectedSig: string | undefined, limit: number, shape: (doc: unknown, sig: string) => T): Promise<{ ok: true; value: T; sig: string } | { ok: false; reason: string; refusal: RecipeTemplateRefusal }> {
   try {
-    if (!isBytes(bytes)) refuse('it is not bytes')
-    if (bytes.length > limit) refuse(`it is larger than ${limit / 1024} KB`)
+    if (!isBytes(bytes)) refuse('notBytes')
+    if (bytes.length > limit) refuse('tooLarge', { kb: limit / 1024 })
     let text: string
-    try { text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) } catch { return refuse('it is not UTF-8') }
+    try { text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) } catch { return refuse('notUtf8') }
     let doc: unknown
-    try { doc = parseJson(text) } catch (error) { if (error instanceof Refusal) throw error; return refuse('it is not JSON') }
+    try { doc = parseJson(text) } catch (error) { if (error instanceof Refusal) throw error; return refuse('notJson') }
     const repeated = repeatedKey(text)
-    if (repeated !== null) refuse(`it repeats the key "${clip(repeated)}", so two readers could see two documents`)
+    if (repeated !== null) refuse('repeatedKey', { key: clip(repeated) })
     const sig = await sha256Hex(bytes)
-    if (expectedSig !== undefined && sig !== expectedSig) refuse('its bytes do not match the signature they were held under')
+    if (expectedSig !== undefined && sig !== expectedSig) refuse('sigMismatch')
     return { ok: true, value: shape(doc, sig), sig }
   } catch (error) {
-    return { ok: false, reason: error instanceof Refusal ? error.message : 'it could not be read' }
+    const refusal = error instanceof Refusal ? error.refusal : refusalOf('unread')
+    return { ok: false, reason: recipeTemplateRefusalWords(refusal), refusal }
   }
 }
 
@@ -581,6 +688,16 @@ export interface RecipeProjectedSection {
 }
 
 /**
+ * A key said as words, for a value no section names: `swaps` is "Swaps", and
+ * `make-ahead`, `make_ahead` and `makeAhead` are all "Make ahead".
+ */
+export function recipeKeyWords(key: string): string {
+  const raw = String(key ?? '')
+  const words = raw.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[-_\s]+/g, ' ').trim().toLowerCase()
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : raw
+}
+
+/**
  * A recipe seen through a template: the template's sections in its order, each
  * with the recipe's value of the same key and kind (or an empty one), then every
  * value the template did not ask for, in key order, under its own key. Nothing
@@ -596,7 +713,7 @@ export function projectRecipe(template: Pick<RecipeTemplateDocument, 'sections'>
   for (const key of Object.keys(recipe.values).sort()) {
     const value = recipe.values[key]
     if (!value || used.has(key) || isEmptyRecipeValue(value)) continue
-    out.push({ section: { key, kind: value.kind, label: key.replace(/[-_]+/g, ' ') }, value, kept: true })
+    out.push({ section: { key, kind: value.kind, label: recipeKeyWords(key) }, value, kept: true })
   }
   return out
 }

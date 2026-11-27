@@ -541,6 +541,19 @@ describe('the recipe view', () => {
     expect(mode.mode).toBe(RECIPE_VIEW)
   })
 
+  it('gives focus back to the template button when the picker closes', async () => {
+    layers.set(keyOf(['kitchen', 'soup']), { name: 'Onion soup' })
+    await open()
+    const opener = document.querySelector<HTMLButtonElement>(`${HOST} .hc-recipe-template`) as HTMLButtonElement
+    opener.focus()
+    opener.click()
+    const search = document.querySelector<HTMLInputElement>(`${HOST} .hc-recipe-picker input[type="search"]`) as HTMLInputElement
+    expect(document.activeElement).toBe(search)
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(document.querySelector('.hc-recipe-picker')).toBeNull()
+    expect(document.activeElement).toBe(opener)
+  })
+
   it('saves the unfinished words on close, takes the page down and returns to the hexagons', async () => {
     layers.set(keyOf(['kitchen', 'soup']), { name: 'Onion soup' })
     await open()
@@ -618,6 +631,11 @@ describe('the recipe view', () => {
     await open()
     expect(status()).toBe('This recipe could not be opened: its bytes are not held here')
     expect(document.querySelector(`${HOST} textarea`)).toBeNull()
+    // The read-along says so too, and why, where the recipe would be: never that nothing is written.
+    const sheet = document.querySelector<HTMLElement>(`${HOST} .hc-recipe-page`)
+    expect(sheet?.dataset['page']).toBe('unreadable')
+    expect(sheet?.querySelector('.hc-recipe-unreadable-why')?.textContent).toBe('its bytes are not held here')
+    expect(sheet?.textContent).not.toContain('Nothing is written here yet.')
 
     document.querySelector<HTMLButtonElement>(`${HOST} [aria-label="Close the recipe"]`)?.click()
     await until(() => mode.mode === 'hexagons', 'the view leaves')
@@ -859,7 +877,7 @@ describe('the recipe view', () => {
 
       // The tab joins a room: a lit recipe is an entry there, first on its way, then kept.
       join()
-      expect(lastOf(desk.shared)).toEqual({ lit: true, words: 'Sharing with class 4b...' })
+      expect(lastOf(desk.shared)).toEqual({ lit: true, words: 'Sharing with class 4b…' })
       await until(() => lastOf<Shared>(desk.shared)?.tone === 'good', 'the host kept the entry')
       expect(lastOf(desk.shared)).toEqual({ lit: true, tone: 'good', words: 'Shared with class 4b \u00b7 class.example' })
       expect(room.shared).toEqual(['kitchen/soup'])
@@ -871,7 +889,7 @@ describe('the recipe view', () => {
       // Another room is owed the entry anew: what the first room's host answered says nothing about it.
       ;(services['@hypercomb.social/RoomStore'] as { value: string }).value = 'class 5a'
       join()
-      expect(lastOf(desk.shared)).toEqual({ lit: true, words: 'Sharing with class 5a...' })
+      expect(lastOf(desk.shared)).toEqual({ lit: true, words: 'Sharing with class 5a…' })
       await until(() => words() === 'Shared with class 5a \u00b7 class.example', 'the other room keeps it')
       expect(room.shared).toEqual(['kitchen/soup', 'kitchen/soup'])
 
@@ -892,7 +910,7 @@ describe('the recipe view', () => {
       room.answer = { ok: false, live: true, reason: 'class.example keeps entries only for its own people. Your entry is shared live while you are here.' } satisfies RoomAnswer
       await open()
       // Opened lit, in a room: on its way before the host has answered.
-      expect(asked().shared).toEqual({ lit: true, words: 'Sharing with class 4b...' })
+      expect(asked().shared).toEqual({ lit: true, words: 'Sharing with class 4b…' })
       await until(() => lastOf<Shared>(desk.shared)?.tone === 'warn', 'the host refused the key')
       expect(lastOf(desk.shared)).toEqual({ lit: true, tone: 'warn', words: 'Shared live with class 4b. class.example keeps entries only for its own people' })
       expect(status()).toBe('')
@@ -900,7 +918,7 @@ describe('the recipe view', () => {
       room.answer = { ok: false, reason: 'class.example did not answer. The entry was not kept there.' } satisfies RoomAnswer
       type('Now with leeks.')
       await until(() => status() === 'class.example did not answer. The entry was not kept there.', 'the reason is said')
-      expect(lastOf(desk.shared)).toEqual({ lit: true, words: 'Sharing with class 4b...' })
+      expect(lastOf(desk.shared)).toEqual({ lit: true, words: 'Sharing with class 4b…' })
       expect(room.shared).toEqual(['kitchen/soup', 'kitchen/soup'])
     })
 

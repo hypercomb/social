@@ -190,6 +190,6 @@ describe('publish', () => {
     await vi.waitFor(() => expect(words('hc-pools-say')).toMatch(/Name your home domain first/))
     expect((bar()?.querySelector('.hc-pools-say') as HTMLElement).dataset['tone']).toBe('refused')
     EffectBus.emit(LIGHTS_CHANGED, { cell: 'soup', location: '/kitchen', public: true })
-    expect(words('hc-pools-say')).toMatch(/^Tap a tile/)
+    expect(words('hc-pools-say')).toMatch(/^(Tap|Click) a tile/)
   })
 })

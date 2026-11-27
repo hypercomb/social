@@ -1,6 +1,6 @@
 # Recipes: a desk, templates you leave in a pool, and entries your nodes offer
 
-**Status, 2026-11-24.** Every section says **built**, **built, not run against a real host**, or **design**.
+**Status, 2026-11-26.** Every section says **built**, **built, not run against a real host**, or **design**.
 Built means it has specs and was driven in the dev shell. Nothing here has been run against a deployed
 host: the dev shell names no home domain, so publishing and reading across hosts are proven by specs with
 injected hosts only.
@@ -71,6 +71,12 @@ around it, never a stacked form.
 A pasted list of ingredients becomes rows, with a leading quantity split off. Pasted steps become steps with
 their numbering removed. Links are never embedded and nothing is fetched to show one.
 
+A picture that does not arrive, or has no address here, is drawn as the picture mark and the words it is
+read by, never as a blank card. A recipe that does not read opens in the read-along only, saying that it
+could not be opened and why, in place of the recipe; nothing is saved over it. While a card is open on the
+wide desk, everything behind it is inert, and closing it puts focus back on its tab. Closing the template
+picker puts focus back on the template button.
+
 Under about 56em wide the same desk rearranges as the tile editor does: the plate stays at the top, the tabs
 become rows that open in place, the list becomes a drawer.
 
@@ -84,6 +90,42 @@ that names it still reads.
 The picker groups templates as **Built in**, **Yours**, then one group per domain switched on in the shelf.
 Choosing a domain's template is the press that keeps it (T4), by its publisher's own bytes: another spelling
 would be another signature.
+
+The three built-in templates are shown in the participant's language, and only where they are shown
+(`recipeDefaultTemplateShown`, `recipe/recipe-defaults.ts`). A template is a built-in when its bytes are a
+built-in's, so its signature is one; its words come from `recipe.default.<template>.name|description`,
+`recipe.default.<template>.<section>.label|prompt` and `.fields.<field>`. The bytes recipes name never change.
+A template that borrows a built-in's keys but says anything else is shown in its author's words.
+
+## Table sets (built, `recipe/recipe-setting.ts`, `recipe/recipe-setting-pool.ts`)
+
+A table set is a photographed table the desk can sit on in place of the drawn plate. It is one document,
+`{ "recipe:setting": 1, name, size, table, utensils?, plates }`, read as strictly as a template: the bare
+table, each plate alone on transparency, and the utensils over everything are layer pictures named by
+signature, each the full picture's size. A plate also says where its flat floor lands in the picture (four
+corners, read into reading order so a card laid on it is upright) and its centre. Plates are only the
+surface: no food is drawn on them, and a dish will be an artifact of its own.
+
+- **The Table control** sits beside the template button. Its list holds the sets this hive keeps, each with
+  its own remove press, then what the domains it follows offer, then "Add a table set" and "The drawn
+  plate". The set in use is pressed. Opening the list asks the followed domains; only the set documents are
+  fetched, and nothing is kept until one is chosen (T4).
+- **The pool `recipe:setting`** holds the kept sets as one list document, at most 64 members, as the template
+  pool does. Removing a set hides it (H4). Which set the desk sits on is one current document in
+  `recipe:desk`. Choosing a domain's set first fetches each of its layers from the host that offered it,
+  checks every one against its signature, and only then keeps and lays it. Publishing a lit hive leaves its
+  kept sets in the pool with every layer travelling with them.
+- **Add a table set** takes a render folder (`tableware/setting.py` writes `setting.json` and the layer
+  pictures it names). Every named picture must be there, be a PNG or a WebP, and be within one layer's size.
+  Everything is checked before anything is written, so a refusal leaves nothing behind.
+- **On the desk** the set stands where the plate was, at its own aspect. The sections sit on its plates in
+  order, each seated plate wearing a place card with the section's label and what it holds, and each tab's
+  leader runs to its plate. Pressing a plate opens its card.
+- **When the pictures do not arrive**, the drawn plate stands in, the status line says so, and the Table
+  control is marked and says why. Choosing the same set again tries its pictures once more, and so does
+  opening the desk on another recipe.
+
+A set's refusals are coded (`recipe.setting.refusal.<code>`) and said in the participant's language.
 
 ## Pools mode (built, `pools/`)
 
@@ -184,8 +226,10 @@ relies on the opposite.
   room, or in another tab, keeps its entry on the room's host until it is unlit again while joined.
 - **Publish holds when a lit tile cannot be read.** A lit tile whose layer is not here yet is never taken for
   "nothing to offer": the publish is refused with the tile's name and what the host holds is left as it is.
-- **The strict readers' refusals are English.** A reason such as "it is not JSON" reaches the page inside a
-  translated sentence, as `mail/template.ts` does it.
+- **The strict readers' refusals are coded.** A template, recipe, entry or table set that does not read is
+  refused with a code and what fills its holes (`recipe.template.refusal.<code>`,
+  `recipe.setting.refusal.<code>`), said in the participant's language when the catalogue holds the key and
+  in English when it does not, inside a translated sentence.
 - **On a package from before pools mode** the globe's second press still opens the swarm selector, because
   that package has no bar to offer the way on. Its tooltip there says "click to go back".
 
@@ -198,6 +242,7 @@ relies on the opposite.
 - **Covers in the catalogue list** show as initials until a row has been opened.
 - **A published door** shows recipes only once a revision that contains the recipe view has been published
   to that host, because a door runs the package its host signed.
-- **The other catalogues.** Every word is in `en.json`; the other thirteen fall back to English, and two
-  reworded header tooltips (`controls.stage-private`, `controls.stage-world`) still carry their old meaning
+- **The other catalogues.** Every word is in `en.json`, and `ja.json` is complete. The other catalogues are
+  being translated in this change; until a word reaches one it falls back to English. Two reworded header
+  tooltips (`controls.stage-private`, `controls.stage-world`) still carry their old meaning
   in them.

@@ -101,10 +101,16 @@ export interface RecipeCatalogueOptions {
   rowAction?(row: RecipeCatalogueRow, node: PoolNode): RecipeCatalogueNodeAction | null
   /** Nodes that head an empty group of their own, under the others. */
   heldBack?: readonly RecipeCatalogueHeldBack[]
+  /** The names of the nodes that were asked and did not answer. Each is said, and nothing here is called empty while
+   *  any is: a node that did not answer is not a node with nothing published. */
+  unanswered?: readonly string[]
+  /** Nothing to draw from at all: no domain, no room, no pool. The note already says how to get some, so the list
+   *  does not also call itself empty. */
+  unsourced?: boolean
 }
 
 /** What changed. A field left out keeps the value it had; `note` and `nodes` given as undefined are cleared. */
-export type RecipeCatalogueUpdate = Partial<Pick<RecipeCatalogueOptions, 'title' | 'note' | 'rows' | 'nodes' | 'query' | 'loading' | 'heldBack'>>
+export type RecipeCatalogueUpdate = Partial<Pick<RecipeCatalogueOptions, 'title' | 'note' | 'rows' | 'nodes' | 'query' | 'loading' | 'heldBack' | 'unanswered' | 'unsourced'>>
 
 export interface RecipeCatalogueHandle {
   readonly element: HTMLElement
@@ -212,10 +218,13 @@ const RECIPE_CATALOGUE_STYLE = `
 .hc-recipe-catalogue-from-name{min-width:0;overflow-wrap:anywhere;}
 .hc-recipe-catalogue-count{flex:none;font-size:0.85rem;font-weight:400;color:var(--rp-quiet);white-space:nowrap;}
 .hc-recipe-catalogue-from-row{display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;min-width:0;}
-.hc-recipe-catalogue-node-action,.hc-recipe-catalogue-row-action{appearance:none;flex:none;margin-left:auto;min-height:2rem;padding:0 0.7rem;border:1px solid var(--rp-line-firm);
-  border-radius:var(--rp-control);background:transparent;color:var(--rp-plain);font:inherit;font-size:0.85rem;font-weight:400;cursor:pointer;}
-.hc-recipe-catalogue-node-action:hover,.hc-recipe-catalogue-row-action:hover{background:var(--rp-tint-strong);}
-.hc-recipe-catalogue-node-action[disabled],.hc-recipe-catalogue-row-action[disabled]{opacity:0.55;cursor:default;}
+.hc-recipe-catalogue-node-action,.hc-recipe-catalogue-row-action{appearance:none;flex:none;margin-left:auto;min-height:2rem;padding:0 0.3rem;border:0;
+  border-radius:var(--rp-control);background:transparent;color:var(--rp-plain);font:inherit;font-size:0.85rem;font-weight:400;cursor:pointer;text-underline-offset:0.2em;}
+.hc-recipe-catalogue-node-action:hover,.hc-recipe-catalogue-row-action:hover{text-decoration:underline;color:var(--rp-loud);}
+.hc-recipe-catalogue .hc-recipe-catalogue-node-action:focus-visible,.hc-recipe-catalogue .hc-recipe-catalogue-row-action:focus-visible,
+.hc-recipe-catalogue .hc-recipe-catalogue-card:focus-visible{outline:2px solid var(--hc-focus,currentColor);outline-offset:2px;}
+.hc-recipe-catalogue-node-action[disabled],.hc-recipe-catalogue-row-action[disabled]{color:var(--rp-quiet);cursor:not-allowed;text-decoration:none;}
+@media (pointer:coarse){.hc-recipe-catalogue-node-action,.hc-recipe-catalogue-row-action{min-height:2.75rem;min-width:2.75rem;}}
 
 .hc-recipe-catalogue-chip{flex:none;display:inline-grid;place-items:center;width:1.75rem;height:1.75rem;border:1px solid var(--rp-line-firm);
   border-radius:var(--rp-control);background:var(--rp-tint-strong);color:var(--rp-loud);
@@ -229,7 +238,7 @@ const RECIPE_CATALOGUE_STYLE = `
 .hc-recipe-catalogue-grid li > .hc-recipe-catalogue-card{flex:1 1 auto;}
 .hc-recipe-catalogue-row-action{margin-left:0;align-self:flex-start;}
 .hc-recipe-catalogue-card{appearance:none;display:flex;flex-direction:column;width:100%;min-width:0;min-height:3.5rem;margin:0;padding:0;
-  border:1px solid var(--rp-line);border-radius:var(--rp-control);background:var(--rp-tint);color:var(--rp-plain);
+  border:1px solid var(--rp-line);border-radius:var(--hc-radius-card,3px);background:var(--rp-tint);color:var(--rp-plain);
   font:inherit;text-align:left;cursor:pointer;overflow:hidden;transition:border-color 120ms ease,background-color 120ms ease;}
 .hc-recipe-catalogue-card:hover{border-color:var(--rp-line-firm);background:var(--rp-tint-strong);}
 .hc-recipe-catalogue-cover{flex:none;display:grid;place-items:center;width:100%;aspect-ratio:4 / 3;background:var(--rp-tint-strong);overflow:hidden;}
@@ -238,7 +247,7 @@ const RECIPE_CATALOGUE_STYLE = `
 .hc-recipe-catalogue-words{display:flex;flex-direction:column;gap:0.45rem;min-width:0;padding:0.7rem 0.8rem 0.8rem;}
 .hc-recipe-catalogue-name{font-size:1.05rem;font-weight:500;line-height:1.3;color:var(--rp-loud);overflow-wrap:anywhere;}
 .hc-recipe-catalogue-also{display:flex;flex-wrap:wrap;align-items:center;gap:0.3rem;}
-.hc-recipe-catalogue-also .hc-recipe-catalogue-chip{width:1.5rem;height:1.5rem;font-size:0.62rem;}
+.hc-recipe-catalogue-also .hc-recipe-catalogue-chip{width:1.6rem;height:1.6rem;font-size:0.7rem;}
 .hc-recipe-catalogue-more{font-size:0.8rem;color:var(--rp-quiet);}
 .hc-recipe-catalogue-quiet{margin:0;font-size:0.95rem;color:var(--rp-quiet);overflow-wrap:anywhere;}
 
@@ -290,6 +299,8 @@ export function recipeCatalogue(options: RecipeCatalogueOptions): RecipeCatalogu
   let rows = options.rows
   let nodes = options.nodes
   let heldBack = options.heldBack ?? []
+  let unanswered = options.unanswered ?? []
+  let unsourced = options.unsourced === true
   let query = options.query ?? ''
   let loading = options.loading === true
   let disposed = false
@@ -436,9 +447,10 @@ export function recipeCatalogue(options: RecipeCatalogueOptions): RecipeCatalogu
     press.type = 'button'
     press.dataset['node'] = node
     if (sig) press.dataset['sig'] = sig
+    // The press is named by the words it shows; what it does, to whom, is said beside them.
     if (action.title) {
       press.title = action.title
-      press.setAttribute('aria-label', action.title)
+      press.setAttribute('aria-description', action.title)
     }
     press.disabled = action.busy === true
     const run = action.onPress
@@ -529,18 +541,28 @@ export function recipeCatalogue(options: RecipeCatalogueOptions): RecipeCatalogu
       sections.push(section)
     })
 
+    // A node that did not answer is said, one line each: what it holds is not known, so it is never "nothing".
+    const silent = [...new Set(unanswered.map(name => String(name ?? '').trim()).filter(Boolean))]
+    const unheard = silent.map(name => {
+      const line = recipeEl('p', 'hc-recipe-catalogue-quiet', say('recipe.catalogue.unanswered', '{node} did not answer.', { node: name }))
+      line.dataset['unanswered'] = ''
+      return line
+    })
+
     const asked = query.trim()
     asking.hidden = !loading
-    // While the nodes are still being asked, "nothing" would be said too soon.
-    nothing.hidden = groups.length > 0 || loading
+    const matching = asked ? recipeCatalogueGroups(rows, nodes).length > 0 : false
+    // While the nodes are still being asked, "nothing" would be said too soon; and it is not said for a node that
+    // did not answer, unless what is shown is a search that matched nothing.
+    nothing.hidden = groups.length > 0 || loading || (silent.length > 0 && !matching) || (unsourced && !asked)
     if (!groups.length) {
-      nothing.textContent = asked && recipeCatalogueGroups(rows, nodes).length
+      nothing.textContent = matching
         ? say('recipe.catalogue.none', 'Nothing matches "{query}".', { query: asked })
         : nodes && rows.length
           ? say('recipe.catalogue.off', 'The nodes you switched on offer nothing here.')
           : say('recipe.catalogue.empty', 'Nothing is published here yet.')
     }
-    column.replaceChildren(...sections, nothing, asking)
+    column.replaceChildren(...sections, ...unheard, nothing, asking)
 
     // The lists were rebuilt: focus goes back to the card it was on, or to the same row under another node.
     if (!active) return
@@ -643,6 +665,8 @@ export function recipeCatalogue(options: RecipeCatalogueOptions): RecipeCatalogu
       if (next.rows !== undefined) rows = next.rows
       if ('nodes' in next) nodes = next.nodes
       if (next.heldBack !== undefined) heldBack = next.heldBack
+      if (next.unanswered !== undefined) unanswered = next.unanswered
+      if (next.unsourced !== undefined) unsourced = next.unsourced
       if (next.loading !== undefined) loading = next.loading
       if (next.query !== undefined && next.query !== query) {
         query = next.query
