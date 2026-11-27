@@ -106,9 +106,12 @@ function contentBag(held = new Map()) {
   const meta = new Map()
   // As R2 does: every write is a new version, stamped with its upload time.
   const written = new Map()
-  return {
+  const bag = {
     held,
     written,
+    // As R2 may when a listing carries metadata: a page of fewer than `limit`.
+    // A spec sets this to see that a count goes on past the first page.
+    listCap: Infinity,
     head: async key => held.has(key) ? { size: held.get(key).byteLength, customMetadata: meta.get(key), ...written.get(key) } : null,
     get: async key => held.has(key) ? {
       size: held.get(key).byteLength,
@@ -131,13 +134,24 @@ function contentBag(held = new Map()) {
     },
     // Each object's etag is a digest of its bytes, as R2's is: a record
     // rewritten by hand is a new etag, the same bytes are the same one.
-    list: async ({ prefix }) => ({
-      objects: await Promise.all([...held.keys()].filter(key => key.startsWith(prefix)).map(async key =>
-        ({ key, customMetadata: meta.get(key), etag: hex(new Uint8Array(await crypto.subtle.digest('SHA-256', held.get(key)))) }))),
-      truncated: false,
-    }),
+    // A page is `limit` keys in key order, as R2 lists them, and a page that
+    // leaves keys behind is `truncated` with a cursor: the last key it gave, so
+    // a walk that deletes as it goes still continues where it stopped. Each
+    // object carries the upload time its write was stamped with.
+    list: async ({ prefix, limit = 1000, cursor }) => {
+      const keys = [...held.keys()].filter(key => key.startsWith(prefix) && (cursor === undefined || key > cursor)).sort()
+      const page = keys.slice(0, Math.min(limit, bag.listCap))
+      const truncated = page.length < keys.length
+      return {
+        objects: await Promise.all(page.map(async key =>
+          ({ key, customMetadata: meta.get(key), etag: hex(new Uint8Array(await crypto.subtle.digest('SHA-256', held.get(key)))), uploaded: written.get(key)?.uploaded }))),
+        truncated,
+        ...(truncated ? { cursor: page.at(-1) } : {}),
+      }
+    },
     delete: async key => { held.delete(key) },
   }
+  return bag
 }
 
 /** A door's meta, read the one way there is: the newest marker of the bag at
@@ -8068,6 +8082,687 @@ test('the empty page under a deep name says the route to publish', async () => {
   const page = await (await worker.fetch(new Request(`https://${DEEP}/`), { SITE_BINDINGS: JSON.stringify(ONE_ZONE), CONTENT: contentBag() })).text()
   assert.match(page, /nothing published at knowledge\.hyperdex\.pluginthematrix\.com/)
   assert.match(page, /Publishing a hive named “hyperdex\/knowledge”/)
+})
+
+// ── open entry pools (documentation/open-entry-pools.md) ─────────────────────
+//
+// One of the host's people opens a pool by `entries:<H>` in their own signed
+// index, and anyone holding the address A posts a small signed member there.
+// The shared vector (entry-pool.vector.json, written by
+// scripts/entry-pool-vector.mjs) pins A, H and one signed member for the hive,
+// the page and this host, so every test here runs at the vector's own clock.
+
+const ENTRY_VECTOR = JSON.parse(readFileSync(new URL('./entry-pool.vector.json', import.meta.url), 'utf8'))
+const seedKey = async (seed) => new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(seed)))
+const LEADER = await seedKey(ENTRY_VECTOR.keys.leader.seed)
+const POSTER = await seedKey(ENTRY_VECTOR.keys.poster.seed)
+const LEADER_KEY = ENTRY_VECTOR.names.P
+const ENTRY_A = ENTRY_VECTOR.names.A
+const ENTRY_H = ENTRY_VECTOR.names.H
+const ENTRY_UNTIL = ENTRY_VECTOR.names.until
+const ENTRY_NOW = ENTRY_VECTOR.member.event.created_at
+const RSVP_POOLS = await sha256Hex('rsvp:pools')
+const entryName = (address, by, until) => sha256Hex(`entries:pool\0${address}\0${by}\0${until}`)
+
+/** Run with the clock frozen at `seconds`. */
+async function atClock(seconds, run) {
+  const real = Date.now
+  Date.now = () => seconds * 1000
+  try { return await run() } finally { Date.now = real }
+}
+
+/** A host whose people are its bound publisher (the spec's own key) and the
+ *  vector's leader, listed as a friend. */
+const entryEnv = (extra = {}) => ({ SITE_BINDINGS: JSON.stringify(ONE_ZONE), HOST_FRIENDS: LEADER_KEY, CONTENT: ledgerBag(), ...extra })
+
+/** A signed index naming `roots`, held as putHive holds it: under `as`, which
+ *  is the signer's own key unless a spec says otherwise. */
+async function holdEntryIndex(env, roots, key = LEADER, as) {
+  const event = { pubkey: pubOf(key), created_at: ENTRY_NOW - 60, kind: 30564, tags: [], content: JSON.stringify({ roots }) }
+  event.id = await sha256Hex(JSON.stringify([0, event.pubkey, event.created_at, event.kind, event.tags, event.content]))
+  event.sig = hex(schnorr.sign(event.id, key))
+  await env.CONTENT.put(`${INDEXES}/${as ?? event.pubkey}`, JSON.stringify(event))
+}
+
+/** One member in the fixed spelling: the seven keys in order, signed by `key`. */
+async function entryMember(pool, { key = POSTER, page = 'e'.repeat(64), name = 'Ana', title = 'Sunday soup', content = '{"recipe":1}', at = ENTRY_NOW, kind = 30573, tags } = {}) {
+  const pubkey = pubOf(key)
+  tags ??= [['pool', pool], ['page', page], ['name', name], ['title', title]]
+  const id = await sha256Hex(JSON.stringify([0, pubkey, at, kind, tags, content]))
+  return JSON.stringify({ id, pubkey, created_at: at, kind, tags, content, sig: hex(schnorr.sign(id, key)) })
+}
+
+/** PUT /<A>/<member>?by=&until= with no authorization: a poster's write. */
+async function postEntry(env, address, body, { by = LEADER_KEY, until = ENTRY_UNTIL, name, host = WRITE_FACE, ctx } = {}) {
+  const query = by === null ? '' : `?by=${by}&until=${until}`
+  const url = `https://${host}/${address}/${name ?? await sha256Hex(body)}${query}`
+  const res = await worker.fetch(new Request(url, { method: 'PUT', body }), env, ctx)
+  return { status: res.status, text: (await res.text()).trim(), reason: res.headers.get('x-reason'), cors: res.headers.get('access-control-allow-origin') }
+}
+
+/** GET /<A>/?by=&until=: the listing and the three headers of the host's own. */
+async function listEntries(env, address = ENTRY_A, { by = LEADER_KEY, until = ENTRY_UNTIL, host = WRITE_FACE, method = 'GET', ctx } = {}) {
+  const res = await worker.fetch(new Request(`https://${host}/${address}/?by=${by}&until=${until}`, { method }), env, ctx)
+  const body = await res.text()
+  return {
+    status: res.status, body, names: body.split('\n').filter(Boolean),
+    state: res.headers.get('x-entries-state'), hidden: res.headers.get('x-entries-hidden'), time: res.headers.get('x-host-time'),
+    reason: res.headers.get('x-reason'), expose: res.headers.get('access-control-expose-headers'),
+  }
+}
+
+/** `count` members written straight into the store, marked with `pool`, each
+ *  stamped with the upload time `uploaded(i)` gives when a spec names one. */
+async function seedEntries(env, address, pool, count, { owner = pubOf(keyOf(90)), tag = 'seeded', uploaded } = {}) {
+  const names = []
+  for (let i = 0; i < count; i++) {
+    const name = await sha256Hex(`${tag} ${pool} ${i}`)
+    await env.CONTENT.put(`${address}/${name}`, `${tag} ${i}`, { customMetadata: { owner, member: '1', entry: pool } })
+    if (uploaded) env.CONTENT.written.get(`${address}/${name}`).uploaded = uploaded(i)
+    names.push(name)
+  }
+  return names
+}
+
+const entryKeys = (env, address) => [...env.CONTENT.held.keys()].filter((key) => key.startsWith(`${address}/`))
+
+test('an open entry pool takes the shared vector\'s member under its name, marked with its pool, and serves it back', async () => {
+  await atClock(ENTRY_NOW, async () => {
+    const env = entryEnv()
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O })
+    const { member } = ENTRY_VECTOR
+    // The host's H is the vector's: the member is tagged with it and is taken.
+    const taken = await postEntry(env, ENTRY_A, member.body)
+    assert.equal(taken.status, 201, taken.text)
+    assert.equal(taken.text, `member ${member.name}`)
+    assert.equal(await sha256Hex(member.body), member.name)
+    // 12. Marked as an entry member of this H, beside the room mark the
+    // member read serves, with its owner.
+    assert.deepEqual((await env.CONTENT.head(`${ENTRY_A}/${member.name}`)).customMetadata,
+      { owner: ENTRY_VECTOR.keys.poster.pubkey, member: '1', entry: ENTRY_H })
+    // Read beside its pool's opener and end, as the hive asks (entryMemberUrl).
+    for (const host of [WRITE_FACE, 'revolucion.pluginthematrix.com']) {
+      const read = await worker.fetch(new Request(`https://${host}/${ENTRY_A}/${member.name}?by=${LEADER_KEY}&until=${ENTRY_UNTIL}`), env)
+      assert.equal(read.status, 200, host)
+      assert.equal(await read.text(), member.body, host)
+    }
+    const listing = await listEntries(env)
+    assert.deepEqual({ status: listing.status, names: listing.names, state: listing.state, time: listing.time, hidden: listing.hidden },
+      { status: 200, names: [member.name], state: 'open', time: String(ENTRY_NOW), hidden: null })
+  })
+})
+
+test('each of the vector\'s thirteen other spellings of the same signed event is refused, and nothing of them is kept', async () => {
+  await atClock(ENTRY_NOW, async () => {
+    const env = entryEnv()
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O })
+    assert.equal(ENTRY_VECTOR.refused.length, 13)
+    for (const spelling of ENTRY_VECTOR.refused) {
+      assert.equal(await sha256Hex(spelling.body), spelling.name, spelling.why)
+      const refused = await postEntry(env, ENTRY_A, spelling.body, { name: spelling.name })
+      assert.equal(refused.status, 400, `${spelling.why}: ${refused.text}`)
+      assert.equal(env.CONTENT.held.has(`${ENTRY_A}/${spelling.name}`), false, spelling.why)
+    }
+    // The pool was open all along: the one spelling is taken.
+    assert.equal((await postEntry(env, ENTRY_A, ENTRY_VECTOR.member.body)).status, 201)
+    assert.deepEqual(entryKeys(env, ENTRY_A), [`${ENTRY_A}/${ENTRY_VECTOR.member.name}`])
+  })
+})
+
+test('1. a post is taken only while a host person\'s verified index names the pool, before its end and at most 31 days ahead', async () => {
+  await atClock(ENTRY_NOW, async () => {
+    const env = entryEnv()
+    // No index names it: no pool, decided before the body is read.
+    const nothing = await postEntry(env, ENTRY_A, await entryMember(ENTRY_H))
+    assert.deepEqual([nothing.status, nothing.text], [404, 'no pool is open at this address'])
+    assert.equal((await postEntry(env, ENTRY_A, 'x'.repeat(5_000))).status, 404, 'the path decides before the body is held')
+    // An index under P whose signer is not P is not P's word.
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O }, keyOf(70), LEADER_KEY)
+    assert.equal((await postEntry(env, ENTRY_A, await entryMember(ENTRY_H))).status, 404, 'an index another key signed opens nothing')
+    // The end in the path, as P's index names each.
+    const longest = ENTRY_NOW + 31 * DAY
+    const tooLong = longest + 1
+    const ended = ENTRY_NOW
+    const H = {}
+    for (const until of [ENTRY_UNTIL, longest, tooLong, ended]) H[until] = await entryName(ENTRY_A, LEADER_KEY, until)
+    await holdEntryIndex(env, Object.fromEntries(Object.values(H).map((name) => [`entries:${name}`, ENTRY_VECTOR.names.O])))
+    assert.equal((await postEntry(env, ENTRY_A, await entryMember(H[ENTRY_UNTIL]))).status, 201)
+    assert.equal((await postEntry(env, ENTRY_A, await entryMember(H[longest], { page: 'f'.repeat(64) }), { until: longest })).status, 201, '31 days ahead is open')
+    const far = await postEntry(env, ENTRY_A, await entryMember(H[tooLong]), { until: tooLong })
+    assert.equal(far.status, 404, 'more than 31 days ahead is no pool')
+    assert.equal((await listEntries(env, ENTRY_A, { until: tooLong })).state, null)
+    const past = await postEntry(env, ENTRY_A, await entryMember(H[ended]), { until: ended })
+    assert.deepEqual([past.status, past.text], [403, 'this one is closed'], 'at its end it is closed')
+    assert.equal((await listEntries(env, ENTRY_A, { until: ended })).state, 'closed')
+    // The path's own spelling of by and until, and nothing else.
+    for (const until of [`0${ENTRY_UNTIL}`, `${ENTRY_UNTIL}.0`, '1.7957376e9', `-${ENTRY_UNTIL}`, '']) {
+      assert.equal((await postEntry(env, ENTRY_A, await entryMember(H[ENTRY_UNTIL]), { until })).status, 404, `until ${until}`)
+    }
+    assert.equal((await postEntry(env, ENTRY_A, await entryMember(H[ENTRY_UNTIL]), { by: LEADER_KEY.toUpperCase() })).status, 404)
+  })
+})
+
+test('a key that is not one of the host\'s people cannot open a pool, and a dropped one\'s pool reads closed, hidden list and all', async () => {
+  await atClock(ENTRY_NOW, async () => {
+    const stranger = keyOf(71)
+    const env = entryEnv()
+    const theirs = await entryName(ENTRY_A, pubOf(stranger), ENTRY_UNTIL)
+    await holdEntryIndex(env, { [`entries:${theirs}`]: ENTRY_VECTOR.names.O }, stranger)
+    const refused = await postEntry(env, ENTRY_A, await entryMember(theirs), { by: pubOf(stranger) })
+    assert.deepEqual([refused.status, refused.text], [403, 'this one is closed'])
+    assert.equal((await listEntries(env, ENTRY_A, { by: pubOf(stranger) })).state, 'closed', 'never open')
+
+    // The leader opens while a friend, posts, hides a list; then the operator drops them.
+    const hidden = 'b'.repeat(64)
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O, [`entries-hidden:${ENTRY_H}`]: hidden })
+    assert.equal((await postEntry(env, ENTRY_A, ENTRY_VECTOR.member.body)).status, 201)
+    const dropped = { ...env, HOST_FRIENDS: '' }
+    const listing = await listEntries(dropped)
+    assert.deepEqual([listing.status, listing.state, listing.hidden, listing.names], [200, 'closed', hidden, [ENTRY_VECTOR.member.name]])
+    const after = await postEntry(dropped, ENTRY_A, await entryMember(ENTRY_H, { page: 'f'.repeat(64) }))
+    assert.deepEqual([after.status, after.text], [403, 'this one is closed'])
+  })
+})
+
+test('closed wins: an index naming entries-closed:<H>, beside entries:<H> or alone, takes no post and keeps what was posted listed', async () => {
+  await atClock(ENTRY_NOW, async () => {
+    const env = entryEnv()
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O })
+    assert.equal((await postEntry(env, ENTRY_A, ENTRY_VECTOR.member.body)).status, 201)
+    for (const roots of [
+      { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O, [`entries-closed:${ENTRY_H}`]: ENTRY_VECTOR.names.O },
+      { [`entries-closed:${ENTRY_H}`]: ENTRY_VECTOR.names.O },
+    ]) {
+      await holdEntryIndex(env, roots)
+      const posted = await postEntry(env, ENTRY_A, await entryMember(ENTRY_H, { page: 'f'.repeat(64) }))
+      assert.deepEqual([posted.status, posted.text], [403, 'this one is closed'], Object.keys(roots).join(' '))
+      const listing = await listEntries(env)
+      assert.deepEqual([listing.status, listing.state, listing.names], [200, 'closed', [ENTRY_VECTOR.member.name]])
+    }
+  })
+})
+
+test('2. the address is free for it: never a listed, private or host-written pool, an opened sign-up list, or an address holding anything else', async () => {
+  await atClock(ENTRY_NOW, async () => {
+    const env = entryEnv()
+    const room = await sha256Hex('swarm:lecture\0a-secret\0hypercomb.com')
+    await env.CONTENT.put(`${room}/${await sha256Hex('a room claim')}`, 'a room claim', { customMetadata: { owner: pubkey, member: '1' } })
+    const atoms = 'c'.repeat(64)
+    await env.CONTENT.put(`${atoms}/landing.webp`, 'a picture')
+    const signup = await sha256Hex(`rsvp:${'d'.repeat(64)}`)
+    await env.CONTENT.put(`${RSVP_POOLS}/${signup}`, '{}')
+    const taken = {
+      'a listed pool': [await sha256Hex('community:hosts'), 'this address belongs to another pool'],
+      'a private pool': [await sha256Hex('host:claims'), 'this address belongs to another pool'],
+      'a pool the host writes': [await sha256Hex('host:plans'), 'this address belongs to another pool'],
+      'an opened sign-up list': [signup, 'this address belongs to another pool'],
+      'a room': [room, 'this address is not an entry pool'],
+      'an address holding other bytes': [atoms, 'this address is not an entry pool'],
+    }
+    const names = {}
+    for (const [why, [address]] of Object.entries(taken)) names[why] = await entryName(address, LEADER_KEY, ENTRY_UNTIL)
+    await holdEntryIndex(env, Object.fromEntries(Object.values(names).map((name) => [`entries:${name}`, ENTRY_VECTOR.names.O])))
+    for (const [why, [address, said]] of Object.entries(taken)) {
+      const refused = await postEntry(env, address, await entryMember(names[why]))
+      assert.deepEqual([refused.status, refused.text], [403, said], why)
+    }
+    // A free address that already holds entry members takes more.
+    const free = await sha256Hex('a free address')
+    const freeName = await entryName(free, LEADER_KEY, ENTRY_UNTIL)
+    await holdEntryIndex(env, { [`entries:${freeName}`]: ENTRY_VECTOR.names.O })
+    assert.equal((await postEntry(env, free, await entryMember(freeName))).status, 201)
+    assert.equal((await postEntry(env, free, await entryMember(freeName, { page: 'f'.repeat(64) }))).status, 201)
+  })
+})
+
+test('3, 4, 5. the body is capped at 4096 bytes before it is held, hashes to its name, and one already held is answered as held whatever its stamp says now', async () => {
+  await atClock(ENTRY_NOW, async () => {
+    const env = entryEnv()
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O })
+    const bare = (await entryMember(ENTRY_H, { content: '' })).length
+    const sized = (bytes, key) => entryMember(ENTRY_H, { content: 'x'.repeat(bytes - bare), key })
+    const whole = await sized(4_096, keyOf(72))
+    assert.equal(new TextEncoder().encode(whole).byteLength, 4_096)
+    assert.equal((await postEntry(env, ENTRY_A, whole)).status, 201, 'exactly 4096 bytes is taken')
+    const over = await sized(4_097, keyOf(73))
+    const refused = await postEntry(env, ENTRY_A, over)
+    assert.deepEqual([refused.status, refused.text], [413, 'an entry is at most 4096 bytes'])
+    assert.equal(env.CONTENT.held.has(`${ENTRY_A}/${await sha256Hex(over)}`), false)
+
+    const member = await entryMember(ENTRY_H)
+    const misnamed = await postEntry(env, ENTRY_A, member, { name: 'e'.repeat(64) })
+    assert.deepEqual([misnamed.status, misnamed.text], [400, 'member bytes do not hash to their name'])
+    assert.equal(env.CONTENT.held.has(`${ENTRY_A}/${'e'.repeat(64)}`), false)
+
+    assert.equal((await postEntry(env, ENTRY_A, member)).status, 201)
+  })
+  // Later, its stamp now far from the clock and the pool still open: held.
+  await atClock(ENTRY_NOW + 1_800, async () => {
+    const env2 = entryEnv()
+    await holdEntryIndex(env2, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O })
+    const member = await entryMember(ENTRY_H)
+    await env2.CONTENT.put(`${ENTRY_A}/${await sha256Hex(member)}`, member, { customMetadata: { owner: pubOf(POSTER), member: '1', entry: ENTRY_H } })
+    const again = await postEntry(env2, ENTRY_A, member)
+    assert.deepEqual([again.status, again.text], [200, `member ${await sha256Hex(member)}`])
+    assert.equal(entryKeys(env2, ENTRY_A).length, 1)
+  })
+})
+
+test('6. a member is the seven fields in the fixed spelling, kind 30573, with one each of pool, page, name and title, at most one gone, and no other tag', async () => {
+  await atClock(ENTRY_NOW, async () => {
+    const env = entryEnv()
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O })
+    const page = 'e'.repeat(64)
+    const base = [['pool', ENTRY_H], ['page', page], ['name', 'Ana'], ['title', 'Sunday soup']]
+    const refusedTags = {
+      'no title': base.slice(0, 3),
+      'no page': [base[0], base[2], base[3]],
+      'two names': [...base, ['name', 'Bea']],
+      'another tag': [...base, ['e', 'c'.repeat(64)]],
+      'gone that is not 1': [...base, ['gone', '0']],
+      'gone twice': [...base, ['gone', '1'], ['gone', '1']],
+      'a tag of three strings': [base[0], base[1], ['name', 'Ana', 'extra'], base[3]],
+      'a tag that is not text': [base[0], base[1], base[2], ['title', 7]],
+    }
+    let n = 100
+    for (const [why, tags] of Object.entries(refusedTags)) {
+      const refused = await postEntry(env, ENTRY_A, await entryMember(ENTRY_H, { tags, key: keyOf(n++) }))
+      assert.equal(refused.status, 400, `${why}: ${refused.text}`)
+    }
+    const kind = await postEntry(env, ENTRY_A, await entryMember(ENTRY_H, { kind: 30568 }))
+    assert.deepEqual([kind.status, kind.text], [400, 'wrong event kind (expected entry 30573)'])
+    const fraction = await postEntry(env, ENTRY_A, (await entryMember(ENTRY_H, { at: ENTRY_NOW + 0.5 })))
+    assert.equal(fraction.status, 400, 'a stamp is a whole number')
+    // A take-back carries gone 1 and is taken.
+    const gone = await entryMember(ENTRY_H, { tags: [...base, ['gone', '1']], key: keyOf(n++) })
+    assert.equal((await postEntry(env, ENTRY_A, gone)).status, 201)
+    assert.equal(entryKeys(env, ENTRY_A).length, 1, 'only the take-back was kept')
+  })
+})
+
+test('a malformed body is refused in words with the answer\'s usual headers, and a store that fails is answered, never thrown', async () => {
+  await atClock(ENTRY_NOW, async () => {
+    const env = entryEnv()
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O })
+    for (const body of ['{"kind":30573}', '{"kind":30573,"tags":"pool"}', 'null', '[]', '"entry"', '', '{']) {
+      const refused = await postEntry(env, ENTRY_A, body)
+      assert.equal(refused.status, 400, body)
+      assert.ok(refused.text.length > 0 && refused.reason, `${body}: worded`)
+      assert.equal(refused.cors, '*', `${body}: with the usual headers`)
+    }
+    const notText = Uint8Array.of(0xff, 0xfe, 0x7b, 0x7d)
+    assert.equal((await postEntry(env, ENTRY_A, notText, { name: hex(new Uint8Array(await crypto.subtle.digest('SHA-256', notText))) })).status, 400)
+    // Every way out of the rule is an answer, even a store that throws.
+    const failing = { ...env, CONTENT: { ...env.CONTENT, head: async () => { throw new Error('store down') } } }
+    const failed = await postEntry(failing, ENTRY_A, ENTRY_VECTOR.member.body)
+    assert.deepEqual([failed.status, failed.text, failed.cors], [500, 'this host could not take the entry', '*'])
+  })
+})
+
+test('7, 8. a member is tagged with this pool\'s H, never the address, and stamped within ten minutes of the host\'s clock either way', async () => {
+  await atClock(ENTRY_NOW, async () => {
+    const env = entryEnv()
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O })
+    for (const pool of [ENTRY_A, await entryName(ENTRY_A, LEADER_KEY, ENTRY_UNTIL + 1), await entryName(ENTRY_A, pubkey, ENTRY_UNTIL)]) {
+      const refused = await postEntry(env, ENTRY_A, await entryMember(pool))
+      assert.deepEqual([refused.status, refused.text], [400, 'entry is not tagged with this pool'])
+    }
+    let n = 110
+    for (const at of [ENTRY_NOW - 601, ENTRY_NOW + 601]) {
+      const refused = await postEntry(env, ENTRY_A, await entryMember(ENTRY_H, { at, key: keyOf(n++) }))
+      assert.deepEqual([refused.status, refused.text], [409, 'entry stamp is more than ten minutes from this host\'s clock'], String(at - ENTRY_NOW))
+    }
+    for (const at of [ENTRY_NOW - 600, ENTRY_NOW + 600]) {
+      assert.equal((await postEntry(env, ENTRY_A, await entryMember(ENTRY_H, { at, key: keyOf(n++) }))).status, 201, String(at - ENTRY_NOW))
+    }
+  })
+})
+
+test('9, 10. name and title keep the reader\'s one-line rule, page is 64 lowercase hex, and the signature is valid for its key', async () => {
+  await atClock(ENTRY_NOW, async () => {
+    const env = entryEnv()
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O })
+    let n = 120
+    const post = async (fields) => postEntry(env, ENTRY_A, await entryMember(ENTRY_H, { key: keyOf(n++), ...fields }))
+    const refused = {
+      'an empty name': { name: '' },
+      'a blank name': { name: '   ' },
+      'a name of 49': { name: 'x'.repeat(49) },
+      'a name over two lines': { name: 'Ana\nBea' },
+      'a name with a carriage return': { name: 'Ana\r' },
+      'a name with a bell': { name: 'Ana\u0007' },
+      'a name with a direction override': { name: 'Ana\u202e' },
+      'a name with a direction isolate': { name: '\u2066Ana' },
+      'a blank title': { title: ' ' },
+      'a title of 121': { title: 't'.repeat(121) },
+      'a title with a line break': { title: 'Sunday\nsoup' },
+      'a page in capitals': { page: 'E'.repeat(64) },
+      'a short page': { page: 'e'.repeat(63) },
+    }
+    for (const [why, fields] of Object.entries(refused)) assert.equal((await post(fields)).status, 400, why)
+    for (const [why, fields] of Object.entries({
+      'a name of 48': { name: 'x'.repeat(48) },
+      'a title of 120': { title: 't'.repeat(120) },
+      'a tab, which the reader allows': { name: 'Ana\tB' },
+      'letters of any script': { name: 'アナ', title: 'スープ' },
+    })) assert.equal((await post(fields)).status, 201, why)
+    const member = JSON.parse(await entryMember(ENTRY_H, { key: keyOf(n++) }))
+    const forged = JSON.stringify({ ...member, sig: hex(schnorr.sign(member.id, keyOf(n++))) })
+    const bad = await postEntry(env, ENTRY_A, forged)
+    assert.deepEqual([bad.status, bad.text], [401, 'invalid entry signature'])
+  })
+})
+
+test('11. a pool takes fewer than 256 members and a key fewer than 8, counting only this pool\'s members, past every page of the listing', async () => {
+  await atClock(ENTRY_NOW, async () => {
+    const env = entryEnv()
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O })
+    // A listing that answers a few a page is walked to its end.
+    env.CONTENT.listCap = 7
+    await seedEntries(env, ENTRY_A, ENTRY_H, 7, { owner: pubOf(POSTER), tag: 'mine' })
+    assert.equal((await postEntry(env, ENTRY_A, await entryMember(ENTRY_H))).status, 201, 'the eighth of a key')
+    const ninth = await postEntry(env, ENTRY_A, await entryMember(ENTRY_H, { page: 'f'.repeat(64) }))
+    assert.deepEqual([ninth.status, ninth.text], [429, 'this key has posted its 8 here'])
+    assert.equal((await postEntry(env, ENTRY_A, await entryMember(ENTRY_H, { key: keyOf(130) }))).status, 201, 'another key is its own count')
+    // Members of another pool at this address are not this pool's. Pages
+    // that still fit the host's page cap for one request (ENTRY_LIST_PAGES).
+    env.CONTENT.listCap = 200
+    await seedEntries(env, ENTRY_A, await entryName(ENTRY_A, pubkey, ENTRY_UNTIL), 300, { tag: 'theirs' })
+    await seedEntries(env, ENTRY_A, ENTRY_H, 256 - 10, { tag: 'others' })
+    assert.equal((await postEntry(env, ENTRY_A, await entryMember(ENTRY_H, { key: keyOf(131) }))).status, 201, 'the 256th')
+    const full = await postEntry(env, ENTRY_A, await entryMember(ENTRY_H, { key: keyOf(132) }))
+    assert.deepEqual([full.status, full.text], [507, 'this one is full'])
+  })
+})
+
+test('a second opener at the same address neither spends this pool\'s count nor shows in its listing', async () => {
+  await atClock(ENTRY_NOW, async () => {
+    const env = entryEnv()
+    const second = await entryName(ENTRY_A, pubkey, ENTRY_UNTIL)
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O })
+    await holdEntryIndex(env, { [`entries:${second}`]: ENTRY_VECTOR.names.O }, sk)
+    // The spec's own key is a bound publisher, one of the host's people.
+    const theirs = await entryMember(second, { key: keyOf(140) })
+    assert.equal((await postEntry(env, ENTRY_A, theirs, { by: pubkey })).status, 201)
+    await seedEntries(env, ENTRY_A, second, 300, { tag: 'second' })
+    assert.equal((await postEntry(env, ENTRY_A, ENTRY_VECTOR.member.body)).status, 201, 'the leader\'s pool is not full')
+    assert.deepEqual((await listEntries(env)).names, [ENTRY_VECTOR.member.name])
+    const listed = await listEntries(env, ENTRY_A, { by: pubkey })
+    assert.equal(listed.names.length, 256)
+    assert.ok(!listed.names.includes(ENTRY_VECTOR.member.name))
+  })
+})
+
+test('the listing is the first 256 members of this pool by the store\'s upload time, ties by name, with the host\'s three headers exposed to pages', async () => {
+  await atClock(ENTRY_NOW, async () => {
+    const env = entryEnv()
+    const hidden = 'b'.repeat(64)
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O })
+    // Open and holding nothing yet: an empty 200, which is how an opening is proved.
+    const empty = await listEntries(env)
+    assert.deepEqual([empty.status, empty.body, empty.state, empty.time, empty.hidden], [200, '', 'open', String(ENTRY_NOW), null])
+    for (const header of ['X-Entries-State', 'X-Entries-Hidden', 'X-Host-Time', 'X-Reason']) {
+      assert.ok(empty.expose.split(/,\s*/).includes(header), header)
+    }
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O, [`entries-hidden:${ENTRY_H}`]: hidden })
+    // Written in reverse of their names' order, two of them in one instant.
+    const at = (i) => new Date((ENTRY_NOW - 10_000 + (i === 1 ? 298 : 300 - i)) * 1000)
+    const names = await seedEntries(env, ENTRY_A, ENTRY_H, 300, { uploaded: at })
+    await seedEntries(env, ENTRY_A, await entryName(ENTRY_A, pubkey, ENTRY_UNTIL), 20, { tag: 'earlier', uploaded: () => new Date(0) })
+    env.CONTENT.listCap = 100
+    const order = names.map((name, i) => ({ name, at: at(i).getTime() }))
+      .sort((a, b) => a.at - b.at || (a.name < b.name ? -1 : 1)).map((member) => member.name)
+    const listing = await listEntries(env)
+    assert.equal(listing.hidden, hidden)
+    assert.equal(listing.names.length, 256)
+    assert.deepEqual(listing.names, order.slice(0, 256))
+    assert.notDeepEqual(listing.names, [...listing.names].sort(), 'not in name order')
+    const headOnly = await listEntries(env, ENTRY_A, { method: 'HEAD' })
+    assert.deepEqual([headOnly.status, headOnly.body, headOnly.state], [200, '', 'open'])
+    // At the site's own door, as the page asks it.
+    assert.deepEqual((await listEntries(env, ENTRY_A, { host: 'revolucion.pluginthematrix.com' })).names, order.slice(0, 256))
+    // Without by, or for a pool this host does not know, the listing is what it was.
+    const plain = await worker.fetch(new Request(`https://${WRITE_FACE}/${ENTRY_A}/`), env)
+    assert.equal(plain.headers.get('x-entries-state'), null)
+    const unknown = await listEntries(env, 'd'.repeat(64))
+    assert.deepEqual([unknown.status, unknown.state], [404, null])
+  })
+})
+
+test('a pool 30 days past its end answers that it has expired and drops its own members, a bounded number a request', async () => {
+  const env = entryEnv()
+  const other = await entryName(ENTRY_A, pubkey, ENTRY_UNTIL)
+  await atClock(ENTRY_NOW, async () => {
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O })
+    assert.equal((await postEntry(env, ENTRY_A, ENTRY_VECTOR.member.body)).status, 201)
+  })
+  await seedEntries(env, ENTRY_A, ENTRY_H, 299)
+  await seedEntries(env, ENTRY_A, other, 5, { tag: 'another pool' })
+  const ours = () => entryKeys(env, ENTRY_A).length
+  assert.equal(ours(), 305)
+  // Thirty days after its end it is still readable: closed, not expired.
+  await atClock(ENTRY_UNTIL + 30 * DAY, async () => {
+    const kept = await listEntries(env)
+    assert.deepEqual([kept.state, kept.names.length], ['closed', 256])
+  })
+  await atClock(ENTRY_UNTIL + 30 * DAY + 1, async () => {
+    const first = await listEntries(env)
+    assert.deepEqual([first.status, first.state, first.reason, first.body], [200, 'expired', 'this one has expired', ''])
+    assert.equal(ours(), 305 - 256, 'one request drops a bounded number')
+    // A post is answered the same, and drops the rest; another pool's members stay.
+    const posted = await postEntry(env, ENTRY_A, await entryMember(ENTRY_H, { at: ENTRY_UNTIL + 30 * DAY + 1 }))
+    assert.deepEqual([posted.status, posted.text], [410, 'this one has expired'])
+    assert.equal(ours(), 5)
+    const left = await env.CONTENT.list({ prefix: `${ENTRY_A}/`, include: ['customMetadata'] })
+    assert.ok(left.objects.every((object) => object.customMetadata.entry === other))
+    // The leader's hive may drop the pool's keys first and still ask: the path proves the pool.
+    await holdEntryIndex(env, {})
+    await seedEntries(env, ENTRY_A, ENTRY_H, 3, { tag: 'late' })
+    const pending = []
+    const asked = await listEntries(env, ENTRY_A, { ctx: { waitUntil: (work) => pending.push(work) } })
+    assert.equal(asked.state, 'expired')
+    assert.ok(pending.length >= 1, 'the drop is the request\'s own work, after the answer')
+    await Promise.all(pending)
+    assert.equal(ours(), 5)
+  })
+})
+
+test('one address is never both kinds: a room member is refused in an entry pool, an entry member in a room', async () => {
+  await atClock(ENTRY_NOW, async () => {
+    const env = entryEnv({ AUTO_GRANT: '1', DEFAULT_QUOTA_BYTES: '65536' })
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O })
+    assert.equal((await postEntry(env, ENTRY_A, ENTRY_VECTOR.member.body)).status, 201)
+    const claim = await roomMember(ENTRY_A, 'c'.repeat(64))
+    assert.deepEqual(await putMember(env, ENTRY_A, claim), { status: 403, text: 'this address is an entry pool' })
+    assert.equal(env.CONTENT.held.has(`${ENTRY_A}/${await sha256Hex(claim)}`), false)
+    // Without by the same path is a room's, exactly as it was: the stranger's write is unsigned.
+    assert.equal((await postEntry(env, ENTRY_A, await entryMember(ENTRY_H, { page: 'f'.repeat(64) }), { by: null })).status, 401)
+
+    const room = await sha256Hex('swarm:lecture\0a-secret\0hypercomb.com')
+    assert.equal((await putMember(env, room, await roomMember(room, 'c'.repeat(64)))).status, 201)
+    const roomName = await entryName(room, LEADER_KEY, ENTRY_UNTIL)
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O, [`entries:${roomName}`]: ENTRY_VECTOR.names.O })
+    const refused = await postEntry(env, room, await entryMember(roomName))
+    assert.deepEqual([refused.status, refused.text], [403, 'this address is not an entry pool'])
+  })
+})
+
+test('a poster\'s entry is taken at a site door and at the zone root; a host door still refuses, and without by a site door takes nothing new', async () => {
+  const bindings = { ...ONE_ZONE, 'pluginthematrix.com': { ...ONE_ZONE['pluginthematrix.com'], frontDoor: true } }
+  await atClock(ENTRY_NOW, async () => {
+    const env = entryEnv({ SITE_BINDINGS: JSON.stringify(bindings) })
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O })
+    const door = 'revolucion.pluginthematrix.com'
+    assert.equal((await postEntry(env, ENTRY_A, ENTRY_VECTOR.member.body, { host: door })).status, 201, 'a site door')
+    assert.equal((await postEntry(env, ENTRY_A, await entryMember(ENTRY_H, { page: 'f'.repeat(64) }), { host: 'pluginthematrix.com' })).status, 201, 'the zone root')
+    const hostDoor = await postEntry(env, ENTRY_A, await entryMember(ENTRY_H, { page: '0'.repeat(64) }), { host: 'host.pluginthematrix.com' })
+    assert.deepEqual([hostDoor.status, hostDoor.text], [405, 'the host door is read-only — write at the zone root'])
+    const unrouted = await postEntry(env, ENTRY_A, await entryMember(ENTRY_H, { page: '1'.repeat(64) }), { host: door, by: null })
+    assert.deepEqual([unrouted.status, unrouted.text], [405, 'published Core hosts are read-only'])
+    assert.equal((await listEntries(env, ENTRY_A, { host: door })).names.length, 2)
+  })
+})
+
+/** Count the store's list calls under `address/` from here on. */
+function countEntryLists(env, address) {
+  const calls = []
+  const list = env.CONTENT.list
+  env.CONTENT.list = async (options) => {
+    if (String(options?.prefix ?? '') === `${address}/`) calls.push(options)
+    return list(options)
+  }
+  return calls
+}
+
+test('an expired request is never a walk: an address of other bytes costs one list call, an entry address at most two', async () => {
+  // `until=1` reads expired by the clock alone, on any address, under any key.
+  const env = entryEnv()
+  const stranger = 'c'.repeat(64)
+  const atoms = await sha256Hex('an address full of other bytes')
+  for (let i = 0; i < 50; i++) await env.CONTENT.put(`${atoms}/${await sha256Hex(`atom ${i}`)}`, `atom ${i}`)
+  env.CONTENT.listCap = 5
+  const calls = countEntryLists(env, atoms)
+  const listed = await listEntries(env, atoms, { by: stranger, until: 1 })
+  assert.equal(listed.state, 'expired')
+  assert.ok(calls.length <= 1, `a listing: ${calls.length} list calls`)
+  calls.length = 0
+  const posted = await postEntry(env, atoms, 'x', { by: stranger, until: 1 })
+  assert.equal(posted.status, 410)
+  assert.ok(calls.length <= 1, `a post: ${calls.length} list calls`)
+  assert.equal(entryKeys(env, atoms).length, 50, 'nothing of other bytes goes')
+
+  // An address of entry members, many pages of them, none of the asked pool's.
+  const pooled = await sha256Hex('an address of entry members')
+  await seedEntries(env, pooled, await entryName(pooled, LEADER_KEY, ENTRY_UNTIL), 50, { tag: 'another' })
+  const entryCalls = countEntryLists(env, pooled)
+  assert.equal((await listEntries(env, pooled, { by: stranger, until: 1 })).state, 'expired')
+  assert.ok(entryCalls.length <= 2, `an entry address: ${entryCalls.length} list calls`)
+  assert.equal(entryKeys(env, pooled).length, 50, 'another pool\'s members stay')
+
+  // The asked pool's own members still go, from the one page a drop reads.
+  const expired = await entryName(pooled, stranger, 1)
+  await seedEntries(env, pooled, expired, 12, { tag: 'expired' })
+  env.CONTENT.listCap = Infinity
+  entryCalls.length = 0
+  await listEntries(env, pooled, { by: stranger, until: 1 })
+  assert.ok(entryCalls.length <= 2, `a drop: ${entryCalls.length} list calls`)
+  assert.equal(entryKeys(env, pooled).length, 50, 'the expired pool\'s members are dropped, another\'s stay')
+})
+
+test('a post and a listing read at most four pages of an address, and say 503 rather than count part of it', async () => {
+  await atClock(ENTRY_NOW, async () => {
+    const env = entryEnv()
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O })
+    // A full pool beside three thousand of another pool's members, at R2's
+    // 1,000 a page, is four pages: listed whole, and counted full.
+    await seedEntries(env, ENTRY_A, ENTRY_H, 256, { tag: 'ours' })
+    await seedEntries(env, ENTRY_A, await entryName(ENTRY_A, pubkey, ENTRY_UNTIL + 1), 3_000, { tag: 'theirs' })
+    const calls = countEntryLists(env, ENTRY_A)
+    const listing = await listEntries(env)
+    assert.deepEqual([listing.status, listing.names.length], [200, 256])
+    const full = await postEntry(env, ENTRY_A, ENTRY_VECTOR.member.body)
+    assert.deepEqual([full.status, full.text], [507, 'this one is full'])
+
+    // Pages short enough that the walk would need a fifth: neither counted nor listed.
+    env.CONTENT.listCap = 600
+    calls.length = 0
+    const tooMuch = await listEntries(env)
+    assert.deepEqual([tooMuch.status, tooMuch.reason, tooMuch.state], [503, 'this address holds too much', null])
+    assert.ok(calls.length <= 4, `a listing: ${calls.length} list calls`)
+    calls.length = 0
+    const refused = await postEntry(env, ENTRY_A, await entryMember(ENTRY_H, { key: keyOf(150) }))
+    assert.deepEqual([refused.status, refused.text, refused.cors], [503, 'this address holds too much', '*'])
+    assert.ok(calls.length <= 5, `a post: ${calls.length} list calls (one look at the first object, four pages)`)
+    assert.equal(env.CONTENT.held.has(`${ENTRY_A}/${await sha256Hex(await entryMember(ENTRY_H, { key: keyOf(150) }))}`), false)
+  })
+})
+
+test('a listing whose store fails answers in words, with CORS', async () => {
+  await atClock(ENTRY_NOW, async () => {
+    const env = entryEnv()
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O })
+    env.CONTENT.list = async () => { throw new Error('store down') }
+    const res = await worker.fetch(new Request(`https://${WRITE_FACE}/${ENTRY_A}/?by=${LEADER_KEY}&until=${ENTRY_UNTIL}`), env)
+    assert.deepEqual([res.status, (await res.text()).trim(), res.headers.get('x-reason'), res.headers.get('access-control-allow-origin')],
+      [503, 'this host could not list the pool', 'this host could not list the pool', '*'])
+  })
+})
+
+test('an entry body is capped while it streams: the read stops just past 4096 bytes', async () => {
+  await atClock(ENTRY_NOW, async () => {
+    const env = entryEnv()
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O })
+    const chunk = 512
+    let pulled = 0
+    // A megabyte offered a chunk at a time, with no length said ahead.
+    const body = new ReadableStream({
+      pull(controller) {
+        if (pulled >= 1_048_576) { controller.close(); return }
+        pulled += chunk
+        controller.enqueue(new Uint8Array(chunk).fill(0x7b))
+      },
+    }, { highWaterMark: 0 })
+    const res = await worker.fetch(new Request(`https://${WRITE_FACE}/${ENTRY_A}/${'e'.repeat(64)}?by=${LEADER_KEY}&until=${ENTRY_UNTIL}`,
+      { method: 'PUT', body, duplex: 'half' }), env)
+    assert.deepEqual([res.status, (await res.text()).trim()], [413, 'an entry is at most 4096 bytes'])
+    assert.ok(pulled > 4096 && pulled <= 4096 + 2 * chunk, `pulled ${pulled} bytes`)
+  })
+})
+
+test('a try- door and the swarm door take no entry, as they take no other write', async () => {
+  await atClock(ENTRY_NOW, async () => {
+    const env = entryEnv()
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O })
+    for (const host of ['try-rooms.pluginthematrix.com', 'swarm.pluginthematrix.com']) {
+      const refused = await postEntry(env, ENTRY_A, ENTRY_VECTOR.member.body, { host })
+      assert.deepEqual([refused.status, refused.text], [405, 'published Core hosts are read-only'], host)
+    }
+    assert.deepEqual(entryKeys(env, ENTRY_A), [])
+    // The same post at a site door is taken: the pool is open.
+    assert.equal((await postEntry(env, ENTRY_A, ENTRY_VECTOR.member.body, { host: 'revolucion.pluginthematrix.com' })).status, 201)
+  })
+})
+
+test('an entry member is read only beside its open or closed pool: never plainly, never as a room, never once recycled', async () => {
+  await atClock(ENTRY_NOW, async () => {
+    const env = entryEnv()
+    await holdEntryIndex(env, { [`entries:${ENTRY_H}`]: ENTRY_VECTOR.names.O })
+    const { member } = ENTRY_VECTOR
+    assert.equal((await postEntry(env, ENTRY_A, member.body)).status, 201)
+    const read = async (query = '') => {
+      const res = await worker.fetch(new Request(`https://${WRITE_FACE}/${ENTRY_A}/${member.name}${query}`), env)
+      return { status: res.status, body: await res.text(), reason: res.headers.get('x-reason'), cache: res.headers.get('cache-control') }
+    }
+    const plainListing = async () => {
+      const res = await worker.fetch(new Request(`https://${WRITE_FACE}/${ENTRY_A}/`), env)
+      return { status: res.status, body: await res.text() }
+    }
+    const beside = `?by=${LEADER_KEY}&until=${ENTRY_UNTIL}`
+    // While open: the by/until read serves it, and no cache keeps it.
+    const open = await read(beside)
+    assert.deepEqual([open.status, open.body, open.cache], [200, member.body, 'no-store'])
+    // A plain read, or one beside another pool's opener or end, is as if nothing were held.
+    for (const query of ['', `?by=${pubkey}&until=${ENTRY_UNTIL}`, `?by=${LEADER_KEY}&until=${ENTRY_UNTIL + 1}`, `?by=${LEADER_KEY}`]) {
+      const refused = await read(query)
+      assert.deepEqual([refused.status, refused.reason], [404, 'no entry is held here for this pool'], query || 'plain')
+      assert.ok(!refused.body.includes(member.body), query || 'plain')
+    }
+    // The plain listing is no room's: no pool at this address.
+    const listedPlain = await plainListing()
+    assert.equal(listedPlain.status, 404)
+    assert.ok(!listedPlain.body.includes(member.name))
+    // Closed by its leader, it is still read beside its pool.
+    await holdEntryIndex(env, { [`entries-closed:${ENTRY_H}`]: ENTRY_VECTOR.names.O })
+    assert.equal((await read(beside)).status, 200, 'closed is still readable')
+    // Recycled: the leader's index drops the pool's keys. Nothing of it is read again.
+    await holdEntryIndex(env, {})
+    for (const query of ['', beside]) assert.equal((await read(query)).status, 404, query || 'plain')
+    const after = await plainListing()
+    assert.equal(after.status, 404)
+    assert.ok(!after.body.includes(member.name))
+    const byUntil = await listEntries(env)
+    assert.ok(!byUntil.names.includes(member.name) && !byUntil.body.includes(member.name))
+  })
 })
 
 // A nested place's own name loads only once attached, so the ledger says which

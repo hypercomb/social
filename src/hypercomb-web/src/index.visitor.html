@@ -89,6 +89,13 @@
     />
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#08090c" />
+    <!-- THIS SHELL TAKES A POST CODE. A leader's hive reads this page before
+         it shows the code of an entry pool, and shows none for a shell
+         without this mark: an older shell opens the leader's site and says
+         nothing about posting (documentation/open-entry-pools.md, "Who ships
+         what"). The capture is hypercomb-shared core/invite-capture.ts; the
+         one reader of the mark is core's shellTakesPostCode. -->
+    <meta name="hypercomb-takes" content="post" />
 
     <!-- The mark answers on every published door. A site is a Hypercomb
          creation wherever it is served from, so the hexagon is the DEFAULT
