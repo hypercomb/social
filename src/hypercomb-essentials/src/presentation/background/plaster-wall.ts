@@ -107,7 +107,9 @@ void main(){
 
 type Rand = () => number
 type Strike = { x: number; y: number; seed: number }
-type Branch = { x: number; y: number; a: number; a0: number; w: number; left: number; reach: number; rnd: Rand; live: boolean }
+/** A crack tip. `w0` is its starting width and `run` its whole length, so
+ *  the width can follow what is left of the run. */
+type Branch = { x: number; y: number; a: number; a0: number; w: number; w0: number; left: number; run: number; reach: number; rnd: Rand; live: boolean }
 type Particle = { chip: boolean; x: number; y: number; vx: number; vy: number; life: number; decay: number; r: number; rot: number; vr: number }
 
 const mulberry = (seed: number): Rand => () => {
@@ -117,6 +119,14 @@ const mulberry = (seed: number): Rand => () => {
   return ((t ^ t >>> 14) >>> 0) / 4294967296
 }
 const between = ([lo, hi]: [number, number]): number => lo + Math.random() * (hi - lo)
+/** Lean a heading toward the horizon: the vertical part is squashed and the
+ *  horizontal part pushed out, so a straight-up heading comes out at about
+ *  45° and a level one stays level. (Squashing alone leaves vertical
+ *  vertical.) The crack's own wander can still bend it steeper. */
+const flatten = (a: number): number => {
+  const c = Math.cos(a)
+  return Math.atan2(Math.sin(a) * .35, c + (c < 0 ? -.35 : .35))
+}
 
 export class PlasterWall {
   #root: HTMLDivElement | null = null
@@ -365,17 +375,24 @@ export class PlasterWall {
     const rnd = mulberry(s.seed)
     const x = s.x * this.#w, y = s.y * this.#h
     const reach = Math.hypot(this.#w, this.#h) * (.32 + rnd() * .2)
-    const rays = 5 + Math.floor(rnd() * 5)
+    // FEWER, THINNER MAIN VEINS, RUNNING WIDE (jwize: "fewer large veins,
+    // reduce slightly as well, and more horizontal reach"). Each heading is
+    // flattened toward the horizon, and the closer a vein runs to level, the
+    // further it goes.
+    const rays = 3 + Math.floor(rnd() * 3)
     const off = rnd() * Math.PI * 2
     for (let i = 0; i < rays; i++) {
-      const a = off + i / rays * Math.PI * 2 + (rnd() - .5) * .9
-      this.#branches.push({ x, y, a, a0: a, w: 3.4 + rnd() * 2.4, left: reach * (.45 + rnd() * .65), reach, rnd, live })
+      const a = flatten(off + i / rays * Math.PI * 2 + (rnd() - .5) * .9)
+      const w = 2.6 + rnd() * 1.6
+      const left = reach * (.45 + rnd() * .65) * (.75 + .65 * Math.abs(Math.cos(a)))
+      this.#branches.push({ x, y, a, a0: a, w, w0: w, left, run: left, reach, rnd, live })
     }
     // a ring of hairlines spalled around the impact
     for (let i = 0; i < 14; i++) {
       const a = rnd() * Math.PI * 2, r0 = 5 + rnd() * 18
       const na = a + Math.PI / 2 + (rnd() - .5)
-      this.#branches.push({ x: x + Math.cos(a) * r0, y: y + Math.sin(a) * r0, a: na, a0: na, w: .9, left: 10 + rnd() * 26, reach, rnd, live })
+      const left = 10 + rnd() * 26
+      this.#branches.push({ x: x + Math.cos(a) * r0, y: y + Math.sin(a) * r0, a: na, a0: na, w: .9, w0: .9, left, run: left, reach, rnd, live })
     }
   }
 
@@ -402,12 +419,18 @@ export class PlasterWall {
           if (b.live && !this.#reduce && r() < .5) this.#chip(nx, ny, pa, b.w)
         }
         if (b.live && !this.#reduce && r() < .03) this.#dust(nx, ny, 2)
-        b.x = nx; b.y = ny; b.left -= seg; b.w *= .987
-        if (b.w > 1.1 && r() < .045) {
-          const na = b.a + (r() < .5 ? -1 : 1) * (.45 + r() * .6)
-          next.push({ ...b, a: na, a0: na, w: b.w * .58, left: b.left * (.35 + r() * .35) })
+        b.x = nx; b.y = ny; b.left -= seg
+        // NARROWING ON THE WAY OUT: the width follows how much of its run is
+        // left, so every crack ends in a hairline rather than stopping blunt.
+        b.w = Math.max(.5, b.w0 * Math.pow(Math.max(0, b.left) / b.run, .7))
+        if (b.w > 1 && r() < .04) {
+          // branches lean level too, and thin ones are the long reachers
+          const na = flatten(b.a + (r() < .5 ? -1 : 1) * (.45 + r() * .6))
+          const left = b.left * (.45 + r() * .4) * (.8 + .6 * Math.abs(Math.cos(na)))
+          const w = b.w * .58
+          next.push({ ...b, a: na, a0: na, w, w0: w, left, run: left })
         }
-        if (b.left > 0 && b.w > .45 && nx > -20 && ny > -20 && nx < this.#w + 20 && ny < this.#h + 20) next.push(b)
+        if (b.left > 0 && nx > -20 && ny > -20 && nx < this.#w + 20 && ny < this.#h + 20) next.push(b)
       }
       this.#branches = next
     }
