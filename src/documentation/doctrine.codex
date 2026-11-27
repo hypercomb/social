@@ -60,7 +60,7 @@ D2<D1,P6: Derived records live in derived-cache pools. Recomputable and wipe-saf
 D3<D2: Litmus: could a cold client rebuild it from layers alone? Yes: derived cache. No: it is state and needs its own pool of meaning.
 D4<D2: Caches are minted only in the optimize phase (idle, after synchronize). Never mint truth there: no layers, markers, lineage writes or gating. synchronize is dispatched only by the processor.
 D5<D2: A summary is a derived record keyed by the signature of what it summarises. If summary and subtree disagree, the subtree is truth.
-@9 Reach ~install-by-replication.md pools-across-hosts.md intake-filter.md no-third-party-requests.md
+@9 Reach ~install-by-replication.md pools-across-hosts.md intake-filter.md no-third-party-requests.md pools-as-relational-database.md
 T1<I1: Bytes reach a reader by replicate(root), the one verb, from a host. Sharing requires hosting. A relay is a meeting point, not a store.
 T2<T1,S3: Verify at admission, never at runtime. Integrity: every atom hashes to its name. Completeness: a tree runs only when its closure has no holes. Authority: a root advances only on a publisher-signed sentinel. Then runtime trusts the heap.
 T3<T2: Never activate a package no followed publisher signed, nor one the shell core cannot serve.
@@ -69,6 +69,7 @@ T5<T1: Three gates, never conflated: selection (whom I take from), intake (what 
 T6<T1: Carry the selected closure, not a source build. Verify each signature-named byte before use.
 T7: Nothing served may make a visitor's browser contact a host we do not control: no font, stylesheet, script, image or preconnect from elsewhere.
 T8<T1: Every hive reads the network; only what it publishes or offers is read.
+T9<N1,N4,P1,A3,M3,T5: The pools are one relational database that everyone writes. A table is a name: sign(meaning), the same address on every host. A row is a member atom, keyed by its own signature. Its columns are the holes of a layout. A join is a name or a mark two members share, never a pairing table. Insert is leaving a member in the pool on your own host; there is no update and no delete, only a new signature or a withdrawal. A query is selection, then marks: the hosts you take from, then the members whose marks match. No host runs it for you.
 @10 Interest ~pheromones.md intake-filter.md
 R1<I1: A pheromone is an authored, signed interest-signal deposited on a signature. The author may be a person or an agent that read the content. It travels with the content.
 R2<R1,N1: A pheromone never labels what something is: that is the name's job. A new grouping needs a name, never a pheromone kind.
