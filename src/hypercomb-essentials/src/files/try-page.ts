@@ -14,6 +14,7 @@
 
 import { isSandboxLabel } from '@hypercomb/core'
 import { extractPageRefSigs } from '../sharing/decoration-closure.js'
+import { markAuthored } from '../sharing/authored-sigs.js'
 
 /** Pool of meaning for the pages that run as trials. Colon-scoped so it can never be a tile's bag. */
 const TRIAL_MEANING = 'trials:pages'
@@ -110,6 +111,13 @@ const ledgerStore = (): TrialLedgerStore | undefined => {
 // synchronously, so the ledger is held here and loaded from the pool the first
 // time it is asked; a load never overwrites what was remembered meanwhile.
 let ledger: Record<string, string> = {}
+// A TRIAL IS NOT AUTHORED (2026-11-27, documentation/inline-code-in-input-audit.md
+// H1 and H2). A page a model writes runs as this hive only once a person brings
+// it home, and only when it is the hive's own words: written where no page
+// stood, or over a page of the hive's own. Those are kept here and marked
+// authored on release. One written over someone else's page is not here: it
+// stays from elsewhere and runs sealed after it comes home too.
+let own = new Set<string>()
 let loading: Promise<void> | null = null
 /** Released before the load landed, so the stored copy cannot bring them back. */
 const released = new Set<string>()
@@ -123,6 +131,16 @@ const clean = (parsed: unknown): Record<string, string> => {
   return out
 }
 
+/** The stored document: `{ trials, own }`, or the older bare `{ sig: label }`,
+ *  which names no page as the hive's own (it comes home sealed: fail closed). */
+const parseLedger = (parsed: unknown): { trials: Record<string, string>; own: Set<string> } => {
+  const doc = parsed && typeof parsed === 'object' ? parsed as { trials?: unknown; own?: unknown } : null
+  if (!doc || !doc.trials || typeof doc.trials !== 'object') return { trials: clean(parsed), own: new Set() }
+  const trials = clean(doc.trials)
+  const mine = Array.isArray(doc.own) ? doc.own.filter((sig): sig is string => typeof sig === 'string' && sig in trials) : []
+  return { trials, own: new Set(mine) }
+}
+
 const load = (): void => {
   if (loading) return
   const store = ledgerStore()
@@ -132,9 +150,11 @@ const load = (): void => {
       const pool = await store.getPool!(TRIAL_MEANING)
       const bytes = pool ? await store.getPoolDoc!(pool) : null
       if (!bytes) return
-      const stored = clean(JSON.parse(new TextDecoder().decode(bytes)))
-      for (const sig of released) delete stored[sig]
-      ledger = { ...stored, ...ledger }
+      const stored = parseLedger(JSON.parse(new TextDecoder().decode(bytes)))
+      for (const sig of released) { delete stored.trials[sig]; stored.own.delete(sig) }
+      // What this tab remembered meanwhile wins, its own flag included.
+      for (const sig of stored.own) if (!(sig in ledger)) own.add(sig)
+      ledger = { ...stored.trials, ...ledger }
     } catch { /* nothing stored yet */ }
   })()
 }
@@ -142,7 +162,8 @@ const load = (): void => {
 const save = (): void => {
   const store = ledgerStore()
   if (!store?.getPool || !store.putPoolDoc) return
-  const bytes = new TextEncoder().encode(JSON.stringify(ledger)).buffer as ArrayBuffer
+  const doc = { trials: ledger, own: [...own].filter(sig => sig in ledger) }
+  const bytes = new TextEncoder().encode(JSON.stringify(doc)).buffer as ArrayBuffer
   void (async () => {
     try {
       await loading
@@ -158,13 +179,23 @@ const read = (): Record<string, string> => {
 }
 
 /** Forget every remembered trial in this tab. For tests. */
-export const forgetTrials = (): void => { ledger = {}; loading = null; released.clear() }
+export const forgetTrials = (): void => { ledger = {}; own = new Set(); loading = null; released.clear() }
 
-/** Remember that this resource is a trial, so the site view will not mount it. */
-export const rememberTrial = (sig: string, label: string): void => {
+/** The ledger as stored, once it has been read. Ask it before a page is
+ *  mounted, so a fresh tab never takes a trial for a page of the hive. */
+export const trialsReady = async (): Promise<void> => {
+  load()
+  try { await loading } catch { /* nothing stored yet */ }
+}
+
+/** Remember that this resource is a trial, so no surface runs it in this hive.
+ *  `own`: it will be the hive's own words when a person brings it home. */
+export const rememberTrial = (sig: string, label: string, options: { readonly own?: boolean } = {}): void => {
   if (!SIG.test(sig) || !isSandboxLabel(label)) return
   load()
   ledger[sig] = label
+  if (options.own) own.add(sig)
+  else own.delete(sig)
   released.delete(sig)
   save()
 }
@@ -184,16 +215,23 @@ export const pageHome = (): { where: 'localhost' | 'domain'; name: string } => {
   try { return pageHomeOf(globalThis.location?.hostname ?? '') } catch { return { where: 'localhost', name: 'localhost' } }
 }
 
-/** A person takes the page out of the trial, so the hive may mount it.
- *  Returns false when it was not a trial. Nothing here decides that the
- *  click was a person's. */
+/** A person takes the page out of the trial, so the hive may mount it. A page
+ *  that is the hive's own words becomes authored here, and runs as the hive
+ *  from now on; any other runs sealed. Returns false when it was not a trial.
+ *  Nothing here decides that the click was a person's. */
 export const releaseTrial = (sig: string): boolean => {
   if (!SIG.test(sig) || !trialOf(sig)) return false
+  const mine = own.has(sig)
   delete ledger[sig]
+  own.delete(sig)
   released.add(sig)
   save()
+  if (mine) markAuthored(sig)
   return trialOf(sig) === null
 }
+
+/** Will this trial be the hive's own words when it comes home? */
+export const trialIsOwn = (sig: string): boolean => trialOf(sig) !== null && own.has(sig)
 
 export type TrialStage = { ok: boolean; version: number | null; label: string; vector?: string | null }
 export type TrialPool = { base: string; versions: number[]; latest: number | null }

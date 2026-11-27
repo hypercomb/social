@@ -46,7 +46,7 @@ import { closeSiteContextMenu, isOnSiteContextMenu, openSiteContextMenu, type Si
 import { browserKeepsMenu, isLongPressMenu } from '../../navigation/browser-menu.js'
 import type { BackGesture } from '../../navigation/back-gesture.service.js'
 import { myHiveOrigin, visitorDoorHref } from '../../sharing/visitor-door.view.js'
-import { listTrialVersions, pageHome, releaseTrial, stageTrial, trialBase, trialOf, trialOrigin, trialVersionLabel } from '../../files/try-page.js'
+import { listTrialVersions, pageHome, releaseTrial, stageTrial, trialBase, trialOf, trialOrigin, trialsReady, trialVersionLabel } from '../../files/try-page.js'
 import { PIXI3D_LENDER_KEY, Pixi3DLender } from './pixi3d-lender.js'
 
 type MountState = {
@@ -872,6 +872,10 @@ export class SiteViewDrone extends Drone {
         return
       }
 
+      // The trial ledger is read before it is asked: a fresh tab's first page
+      // would otherwise read an empty one and mount a trial as the hive.
+      await trialsReady()
+      if (gen !== this.#gen) return
       const trial = trialOf(cellPageSig)
       if (trial) {
         this.#removeReviewGate()
