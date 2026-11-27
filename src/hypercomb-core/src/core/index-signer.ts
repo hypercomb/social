@@ -83,19 +83,27 @@ export function chainSigners(anchor: string, chain: unknown, verify: (event: Rec
   return verdict.ok ? new Set(verdict.keys) : null
 }
 
-const readList = async (origin: string, anchor: string, verify: IndexEventVerifier): Promise<ListedSigners | null> => {
+/** A list read and whether its answer may be remembered: a host's definite
+ *  answer (a verified list, none held, one that does not verify) may; a read
+ *  that could not be made (offline, a 5xx, a timeout) may not. */
+type ListRead = { listed: ListedSigners | null; keep: boolean }
+
+const readList = async (origin: string, anchor: string, verify: IndexEventVerifier): Promise<ListRead> => {
+  const refused: ListRead = { listed: null, keep: true }
   let chain: unknown
   try {
     const pool = await registerPoolMeaning(KEY_LIST_MEANING)
     const response = await fetch(`${origin}/${pool}/${anchor}`, { cache: 'no-store' })
-    if (!response.ok || Number(response.headers?.get?.('content-length') ?? 0) > LIST_MAX_BYTES) return null
+    if (response.status === 404) return refused
+    if (!response.ok) return { listed: null, keep: false }
+    if (Number(response.headers?.get?.('content-length') ?? 0) > LIST_MAX_BYTES) return refused
     const body = await response.text()
-    if (body.length > LIST_MAX_BYTES) return null
+    if (body.length > LIST_MAX_BYTES) return refused
     chain = JSON.parse(body)
-  } catch { return null }
+  } catch { return { listed: null, keep: false } }
   // Bounded BEFORE any signature is checked: a door cannot make a reader
   // verify more than one chain's worth of events.
-  if (!Array.isArray(chain) || !chain.length || chain.length > KEY_LIST_MAX_CHAIN) return null
+  if (!Array.isArray(chain) || !chain.length || chain.length > KEY_LIST_MAX_CHAIN) return refused
   // Verified first, in order, with whatever verifier the caller holds (it may
   // be async), stopping at the first that fails; the walk then reads the
   // verdicts. A copy keeps a verifier that caches its verdict on the object
@@ -108,12 +116,13 @@ const readList = async (origin: string, anchor: string, verify: IndexEventVerifi
     if (!ok) break
   }
   const verdict = verifyKeyListChain(anchor, chain as SignedKeyList[], event => verdicts.get(event) === true)
-  return verdict.ok ? { keys: new Set(verdict.keys), chain: chain as SignedKeyList[] } : null
+  return verdict.ok ? { listed: { keys: new Set(verdict.keys), chain: chain as SignedKeyList[] }, keep: true } : refused
 }
 
 /** The verified key list `anchor` holds on `origin` (its keys and the chain),
  *  or null when that host holds none, it does not verify, or it could not be
- *  read. Remembered for a minute per door and anchor. */
+ *  read. A host's definite answer is remembered for a minute per door and
+ *  anchor; a read that could not be made is not. */
 export function listedChainAt(origin: string, anchor: string, verify: IndexEventVerifier): Promise<ListedSigners | null> {
   const key = String(anchor ?? '').toLowerCase()
   if (!SIG.test(key)) return Promise.resolve(null)
@@ -122,9 +131,14 @@ export function listedChainAt(origin: string, anchor: string, verify: IndexEvent
   const held = reads.get(id)
   if (held && Date.now() - held.at < LIST_READ_TTL_MS) return held.read
   if (reads.size >= LIST_READS_MAX) reads.clear()
-  const read = readList(base, key, verify)
-  reads.set(id, { at: Date.now(), read })
-  return read
+  const entry = { at: Date.now(), read: Promise.resolve<ListedSigners | null>(null) }
+  entry.read = readList(base, key, verify).then(({ listed, keep }) => {
+    // A read that could not be made is asked again next time, never remembered.
+    if (!keep && reads.get(id) === entry) reads.delete(id)
+    return listed
+  })
+  reads.set(id, entry)
+  return entry.read
 }
 
 /** The keys `anchor`'s key list on `origin` names now, or null. */

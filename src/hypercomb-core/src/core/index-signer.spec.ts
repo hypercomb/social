@@ -59,6 +59,20 @@ describe('listedChainAt — bounded before anything is verified', () => {
     expect(verify).toHaveBeenCalledTimes(1)
   })
 
+  it('asks again after a read that could not be made, never remembering it', async () => {
+    const fetcher = vi.fn(async () => new Response(null, { status: 503 }))
+    vi.stubGlobal('fetch', fetcher)
+    await listedChainAt('https://door.example', ANCHOR, () => true)
+    await listedChainAt('https://door.example', ANCHOR, () => true)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('offline') }))
+    expect(await listedChainAt('https://door.example', ANCHOR, () => true)).toBeNull()
+    const again = vi.fn(async () => new Response(null, { status: 404 }))
+    vi.stubGlobal('fetch', again)
+    await listedChainAt('https://door.example', ANCHOR, () => true)
+    expect(again).toHaveBeenCalledTimes(1)
+  })
+
   it('reads one door and anchor once a minute', async () => {
     const fetcher = vi.fn(async () => new Response(null, { status: 404 }))
     vi.stubGlobal('fetch', fetcher)
