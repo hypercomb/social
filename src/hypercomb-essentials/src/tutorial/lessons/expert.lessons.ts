@@ -402,7 +402,7 @@ EXPERT_LESSONS.push({
     await stage.typeAndSubmit('/sequence', false)
     await stage.wait(1600)
     await stage.say('sequence-window-done', 'Also where things land',
-      'A sequence is also a target: it decides where a dropped file or a pasted branch comes to rest. Cycle it from the keyboard and the page rearranges under you — nothing is lost, only re-laid.')
+      'A sequence is also a target: it decides where a dropped file or a tile off the shelf comes to rest. Cycle it from the keyboard and the page rearranges under you — nothing is lost, only re-laid.')
     stage.emit('sequence:view-close', {})
     await stage.wait(600)
   },
