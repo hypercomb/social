@@ -445,7 +445,7 @@ const bootstrap = async (): Promise<void> => {
   window.dispatchEvent(new Event('hypercomb:runtime-ready'))
 
   // THE FLOOR (package-floor.ts): a package too old to answer the update door
-  // cannot move itself, so the shell moves it to the seed's head.
+  // cannot move itself, so the shell offers it the seed's head (only a yes takes it).
   if (!readonlyVisitor && !nativeAvailable()) watchPackageFloor()
 
   // First-run "Start" — the welcome card's single button, fully unattended.

@@ -23,7 +23,7 @@ import { savedRoots } from '../history/saved-roots.js'
 export class TraitQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'trait'
-  override description = 'The traits this tile leaves open for a filler'
+  override description = 'Give the tile you stand in traits for other tiles to fill: trait <word> makes a filler tile, trait ~ <word> forgets one, bare trait lists them'
   override descriptionKey = 'slash.trait'
   override options = ['<word>', 'own <word>', '~ <word>']
   override examples = [

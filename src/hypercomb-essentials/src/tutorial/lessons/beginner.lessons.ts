@@ -1,12 +1,12 @@
 // tutorial/lessons/beginner.lessons.ts
 //
 // THE BEGINNER COURSE — the everyday verbs, once you can move and make.
-// Select, edit, note, copy, paste, remove, undo, fit, arrange. Every one runs
+// Select, edit, note, shelf, remove, undo, fit, arrange. Every one runs
 // through the participant's own binding (`keymap:invoke`), so what the bee
 // demonstrates is exactly what the keystroke does.
 //
 // Ordered most obvious and simplest first: you must be able to SELECT before
-// copy or remove mean anything, so selection leads.
+// to shelf or remove mean anything, so selection leads.
 
 import { type TutorialLesson } from '../tutorial-lesson.js'
 import { cover, subject, subjects } from './lesson-kit.js'
@@ -49,7 +49,7 @@ BEGINNER_LESSONS.push({
     }
 
     await stage.say('selected', 'Selected',
-      'Two tiles picked. Selection is what every command acts on — copy, cut, remove, keywords. Ctrl+click a selected tile again to drop it.')
+      'Two tiles picked. Selection is what every command acts on — to shelf, remove, keywords. Ctrl+click a selected tile again to drop it.')
 
     stage.clearSelection()
     await stage.wait(200)

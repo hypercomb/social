@@ -851,6 +851,41 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // only while the replica holds no local edits. Participant-local intent,
   // written by the software (`keep: 'current'`), never replicated.
   'sites:replicas',
+  // RECIPES YOU WRITE INTO (documentation/recipe-templates.md). Members are
+  // template artifacts named by their own signature (I1): the layout a recipe
+  // is written into, its sections and what each asks. A SET: the row a
+  // participant leaves in the pool on their own host, read as the union of
+  // the hosts a reader follows (documentation/pools-as-relational-database.md).
+  // TRUTH POOL: a cook's kept templates, never minted from the optimize phase.
+  'recipe:template',
+  // TABLE SETS A RECIPE DESK SITS ON (essentials recipe/recipe-setting.ts).
+  // Members are set artifacts named by their own signature (I1): a photographed
+  // table, each plate's layer and where its floor lands, every picture by
+  // signature. A SET, left on a participant's own host with the pictures it
+  // names and read as the union of the hosts a reader follows. TRUTH POOL: a
+  // leader's kept sets, never minted from the optimize phase.
+  'recipe:setting',
+  // WHICH TABLE SET THE RECIPE DESK SITS ON (essentials recipe/recipe-setting-
+  // pool.ts): one current record naming a kept set, or none for the drawn
+  // plate. The participant's own choice, never replicated.
+  'recipe:desk',
+  // RECIPES SOMEONE OFFERS. Members are entry artifacts: a recipe tile as a
+  // row, its name and the recipe it holds by signature. Left by a lit recipe
+  // tile, gathered per node: a domain you follow, or a classmate on one host.
+  // A SET, federated by union (M3). TRUTH POOL: never minted from the optimize phase.
+  'recipe:entry',
+  // WHICH FOLLOWED HOSTS A HIVE DRAWS FROM (essentials pools/pool-sources.ts,
+  // the domain shelf): one current record naming the hosts switched off. The
+  // participant's own choice of source (T5, selection), never replicated.
+  'pools:sources',
+  // THE ENTRY POOLS A LEADER OPENED (documentation/open-entry-pools.md,
+  // essentials pools/open-entries.ts): one current record of each pool's
+  // opening record, its index name, host, page and title. NEVER the nonce: a
+  // pool is copied off the device by the folder backup, so the nonce is kept
+  // with the hive's other secrets (core llm-keys.ts) and the store refuses a
+  // document that carries one. The pool's own address is a capability and is
+  // never a meaning here: this registry is a public census.
+  'entries:opened',
 ])
 
 /**

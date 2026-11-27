@@ -214,6 +214,13 @@
       <button class="mesh-modal-btn share" type="button" (click)="copyShareLink()" [class.copied]="copiedFlash()">
         {{ copiedFlash() ? ('mesh-modal.share-copied' | t) : ('mesh-modal.share' | t) }}
       </button>
+      <!-- Only a queen that draws the code is offered it (codeSupported). -->
+      @if (codeSupported()) {
+        <button class="mesh-modal-btn share code" type="button" (click)="showRoomCode()"
+                [attr.title]="'mesh-modal.show-code-title' | t">
+          {{ 'mesh-modal.show-code' | t }}
+        </button>
+      }
       <button class="mesh-modal-btn primary" type="button" (click)="save()">
         {{ (joinMode() ? 'mesh-modal.start' : 'mesh-modal.save') | t }}
       </button>

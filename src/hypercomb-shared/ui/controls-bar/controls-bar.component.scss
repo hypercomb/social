@@ -12,6 +12,10 @@ $rail-width: 2.55rem;
 // right:5.1rem, and the feedback FAB inboard of them). The tag strip stops
 // short of this so a long list is clipped rather than run under them.
 $actions-corner: 12rem;
+$zoom-slider-width: 11rem;
+// The bottom band: one row height (an undo button's) and one gap between its pieces.
+$band-row: 1.875rem;
+$band-gap: 0.3rem;
 
 :host {
   display: contents;
@@ -39,14 +43,15 @@ $actions-corner: 12rem;
 // often enough that they should not be buried in the rail's edit mode; the
 // compact cold-chrome treatment keeps them subordinate to both pieces of
 // primary chrome. Under the header they stand at the shelf's left end, centred
-// on its band (same top, same 2.75rem height), and publish their right edge as
+// on its band (same top, same 3.2rem height: the shelf's 2rem row plus its
+// 0.6rem inset above and below), and publish their right edge as
 // `--hc-seam-right` so the shelf starts after them.
 .seam-tools {
   position: fixed;
   top: calc(var(--hc-header-anchor, calc(2.75rem * var(--hc-header-zoom, 1.0))) + 0.375rem);
   left: 0.7rem;
   z-index: 59999;
-  height: 2.75rem;
+  height: 3.2rem;
 
   display: flex;
   align-items: center;
@@ -335,11 +340,15 @@ $actions-corner: 12rem;
   // the tags neatly beside the panel instead of a corner's worth short of it.
   // 1.275rem = the cluster's own 0.675rem edge offset + the gap between them.
   width: fit-content;
+  // The zoom slider stands just left of that corner, so the row stops before
+  // it too (`$zoom-slider-width` + its gap; the slider is hidden on mobile,
+  // where the strip is too).
   max-width: calc(
     100vw - var(--tag-left)
     - var(--hc-inset-right, 0px)
     - var(--hc-actions-width, #{$actions-corner})
-    - 1.275rem
+    - 0.675rem - #{$zoom-slider-width}
+    - 2 * #{$band-gap}
   );
   // border-box or the opened-out surface's padding is ADDED to max-width and
   // the panel overhangs the corner it was told to keep clear of.
@@ -385,6 +394,15 @@ $actions-corner: 12rem;
 // The cap is one line of text plus the crumb's vertical padding, in `em` of the
 // strip — so it tracks the font size at every breakpoint with no magic numbers.
 .tag-float:not(.expanded) .tag-strip { max-height: calc(1.35em + 0.2rem); }
+// ONE LINE ALONG THE BOTTOM. Collapsed, the strip is centred on the same line
+// as the zoom slider and the undo buttons (all three stand on the band's
+// 0.525rem foot, `$band-row` tall), so the row reads as one seam from the
+// tags to undo. Opened out it grows upward from the band, as before.
+.tag-float:not(.expanded) {
+  min-height: $band-row;
+  bottom: calc(0.525rem + var(--hc-band-bottom, 0px));
+  align-items: center;
+}
 
 // Left-docked menu: start the row just inside the rail rather than under it.
 // The rail's LIVE inner edge (`--hc-controls-left`, published by
@@ -449,6 +467,43 @@ $actions-corner: 12rem;
 // touch size. One exposure, not two competing ones.
 .tag-float.mobile {
   display: none;
+}
+
+// ── the zoom slider ───────────────────────────────────────
+// Tile size, on the bottom band just left of the undo corner (jwize,
+// 2026-11-26). The corner is measured (`--hc-actions-width`, published by
+// edit-actions) and hugs an open toolwindow (`--hc-inset-right`), so the
+// slider moves with it; the tags' row stops before the slider.
+.zoom-slider {
+  position: fixed;
+  right: calc(0.675rem + var(--hc-inset-right, 0px) + var(--hc-actions-width, #{$actions-corner}) + #{$band-gap});
+  bottom: calc(0.525rem + var(--hc-band-bottom, 0px));
+  z-index: 59995;
+  box-sizing: border-box;
+  width: $zoom-slider-width;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  height: $band-row;
+  padding: 0 0.45rem;
+  border-radius: var(--hc-radius-floating, 4px);
+  background: rgba(var(--hc-panel-pane, 12, 28, 46), 0.55);
+  color: var(--hc-window-ink-plain, currentColor);
+  opacity: 0.7;
+  transition: opacity 120ms ease;
+
+  &:hover, &:focus-within { opacity: 1; }
+
+  .mat-sym { font-size: 0.95rem; line-height: 1; opacity: 0.8; }
+
+  input[type='range'] {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    accent-color: var(--hc-accent, currentColor);
+    cursor: pointer;
+  }
 }
 
 // ── universal icon protocol: edit-mode jiggle ──

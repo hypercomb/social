@@ -28,7 +28,7 @@ import { TRANSFER_PACKS_MEANING, encodeTransferPack, gzipBytes } from '../../hyp
 import { hostPackagesPool, poolAddress } from './pool-address.js'
 import { knowledgeAtoms } from './knowledge-atoms.js'
 import { buildInputsDigest, buildScriptPaths, byCodeUnit, fileContentSig, inputsMoved, sortedNames, writeBuildStamp } from './build-determinism.js'
-import { effectSleeper, passiveQueen, viewSleeper } from './passive-queen.js'
+import { effectSleeper, passiveQueen, sourceDescription, viewSleeper } from './passive-queen.js'
 import { isCarriedSource, isEntry, isIndexFile, isKeysFile, isSource, isSpecFile } from './source-filters.js'
 import { TYPESCRIPT_STAGING, carriedFiles, typescriptAtoms, typescriptDigest, typescriptSlotErrors, unresolvedSections } from './typescript-atoms.js'
 import { TYPESCRIPT_SLOT } from '../src/assistant/package-typescript.js'
@@ -492,10 +492,8 @@ const extractBeeDoc = (sourceText: string, sourcePath = ''): BeeDocEntry | null 
   const className = best.className
   const kind = best.kind as BeeDocEntry['kind']
 
-  // description — single-line or multi-line string literal
-  const descMatch = sourceText.match(
-    /(?:override\s+)?description\s*=\s*\n?\s*['"`]([^'"`]+)['"`]/
-  )
+  // description — single-line or multi-line string literal, escapes kept
+  const description = sourceDescription(sourceText) ?? ''
 
   // effects array
   const effectsMatch = sourceText.match(
@@ -548,7 +546,7 @@ const extractBeeDoc = (sourceText: string, sourcePath = ''): BeeDocEntry | null 
   return {
     className,
     kind,
-    description: descMatch?.[1]?.trim() ?? '',
+    description,
     effects,
     listens,
     emits,

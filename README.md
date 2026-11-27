@@ -33,7 +33,7 @@ This repo is the snapshot of Hypercomb at the moment it became self-sustaining. 
 
 All documentation lives in [src/documentation/](src/documentation/). Start with:
 
-- [src/documentation/architecture-overview.md](src/documentation/architecture-overview.md) — high-level architecture
+- [src/documentation/network-architecture.md](src/documentation/network-architecture.md) — participants, hosts and content flow
 - [src/documentation/protocol-spec.md](src/documentation/protocol-spec.md) — the Hypercomb protocol
 - [src/documentation/signature-algebra.md](src/documentation/signature-algebra.md) — the signature composition model
 - [src/documentation/glossary.md](src/documentation/glossary.md) — terminology
@@ -46,7 +46,7 @@ Signatures (SHA-256 hashes of canonical content) are the universal identity prim
 ## License
 
 - **Code:** [GNU AGPL v3.0 only](LICENSE) (`SPDX-License-Identifier: AGPL-3.0-only`)
-- **Documentation and media:** [CC BY-SA 4.0](src/documentation/license-docs.md)
+- **Documentation and media:** [CC BY-SA 4.0](src/documentation/licensing.md)
 
 Public instances running modified versions must link to their corresponding source, per the AGPL network clause.
 

@@ -487,8 +487,9 @@ const svg = (body: string): string =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${body}</svg>`
 
 const ICONS: Record<LinkIcon | 'search' | 'arrow' | 'chevron' | 'hive' | 'sparkle' | 'heart' | 'share' | 'globe' | 'link'
-  | 'people' | 'close' | 'sliders' | 'folder', string> = {
+  | 'people' | 'close' | 'sliders' | 'folder' | 'key', string> = {
   folder: svg('<path d="M3.5 6.5A1.5 1.5 0 0 1 5 5h4.2l2 2.2H19a1.5 1.5 0 0 1 1.5 1.5v8.8A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5Z"/>'),
+  key: svg('<circle cx="8" cy="14.5" r="3.8"/><path d="m10.7 11.8 8.3-8.3M15.5 7.3l2.4 2.4M13.3 9.5l1.8 1.8"/>'),
   sliders: svg('<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>'),
   people: svg('<circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19c.6-3.3 2.8-5.2 5.5-5.2s4.9 1.9 5.5 5.2"/><circle cx="16.8" cy="9.5" r="2.6"/><path d="M15.6 14.1c2.6.2 4.4 1.9 4.9 4.9"/>'),
   close: svg('<path d="m6 6 12 12M18 6 6 18"/>'),
@@ -796,7 +797,15 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     })
     tools.append(filesButton)
   }
-  tools.append(manageButton)
+  // WHETHER YOUR KEY ANSWERS HERE (jwize 2026-11-24: "how do I know I have a key or not. There is no visual cue"). Lit
+  // "Your key" whenever a key of yours signs on this page (the hive beside it, or this browser's own after an invite);
+  // "No key here" while managing without one, where taps change only this browser. A visitor not managing sees nothing.
+  const keyChip = el('span', 'key-chip')
+  keyChip.setAttribute('role', 'status')
+  keyChip.hidden = true
+  const keyWords = el('span', 'key-words')
+  keyChip.append(iconOf('key'), keyWords)
+  tools.append(keyChip, manageButton)
   searchBox.append(tools)
   // The Add button is fixed to the foot of the screen wherever it sits in the page; it is kept beside the search it belongs to.
   hero.append(brand, searchBox, searchAdd)
@@ -1245,6 +1254,35 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
     : version.lineage ? version.owners.map(owner => ({ pubkey: owner.pubkey, lineage: version.lineage! })) : [])
   const sameItem = (a: ShowcaseItem, b: ShowcaseItem): boolean => a.pubkey === b.pubkey && a.lineage === b.lineage
   const names = (items: readonly ShowcaseItem[], entry: Aggregate): boolean => itemsOfEntry(entry).some(item => items.some(row => sameItem(row, item)))
+  /** Does this version carry the item: a claim the ledger verified, or, claimless, an owner under its lineage. */
+  const versionNames = (version: Version, item: ShowcaseItem): boolean => version.claims.length
+    ? version.claims.some(claim => sameItem(claim, item))
+    : !!version.lineage && version.lineage === item.lineage && version.owners.some(owner => owner.pubkey === item.pubkey)
+  /**
+   * THE VERSION A TILE'S PICTURE COMES FROM: THE ONE ITS SHARER PUT IN THE COMMUNITY (jwize 2026-11-25: "on the mobile
+   * launcher view it looks as though the images are intermittently changing. they should just use the first one that
+   * the sharer has put in their community"). A name with several versions used to wear `versions[0]`, and that order
+   * turns with every read — how many places have answered so far decides it — so the picture swapped back and forth.
+   * Now: the first item the owners' records name, in their order, picks the version; among versions carrying that item
+   * the one already worn stays, else a live one. With no record naming it, the tile keeps what it wears while that
+   * version is still offered, and only a tile wearing nothing yet takes the lead.
+   */
+  const faceOf = (entry: Aggregate, wearing: string): Version => {
+    const items = [
+      ...(signed?.showcase?.items ?? []),
+      ...(signed?.showcase?.communities ?? []).flatMap(community => community.items),
+      ...(signed?.staged?.items ?? []),
+      ...(signed?.staged?.communities ?? []).flatMap(community => community.items),
+    ]
+    for (const item of items) {
+      const carrying = entry.versions.filter(version => versionNames(version, item))
+      if (!carrying.length) continue
+      return carrying.find(version => version.head === wearing)
+        ?? carrying.find(version => signed?.live?.has(version.head))
+        ?? carrying[0]!
+    }
+    return entry.versions.find(version => version.head === wearing) ?? entry.versions[0]!
+  }
   /** Each creation once, the first naming of it kept. */
   const uniqueItems = (items: readonly ShowcaseItem[]): ShowcaseItem[] =>
     items.filter((item, at) => items.findIndex(other => sameItem(other, item)) === at)
@@ -1644,7 +1682,6 @@ export const showcase = (options: ShowcaseOptions): Showcase => {
   /** A name's tile in one row: the same name may show in your domain's row and
    *  in the row of the domain it came from, each its own link. */
   const tileView = (entry: Aggregate, row: string): HTMLAnchorElement => {
-    const lead = entry.versions[0]!
     const id = `${row}
 ${entry.key}`
     let view = tileViews.get(id)
@@ -1729,11 +1766,15 @@ ${entry.key}`
     // creation the staged list lacks (left by the old staging) is live, and lit.
     const lit = ownStaging ? live : stagedView() ? inCommunity(entry) : live || picked(entry)
     view.tile.classList.toggle('off', row === options.self && !managing ? false : !lit)
-    view.tile.classList.toggle('staged', ownStaging && !live && inCommunity(entry))
+    // ONLY YOU: in your community and not shared. Managing, as the staged list draws it; on your page, only your own.
+    const onlyYou = row === options.self && !live && (managing ? ownStaging && inCommunity(entry)
+      : picked(entry) || (!!ownerKey && !!signed?.staged && names(signed.staged.items, entry)))
+    view.tile.classList.toggle('staged', onlyYou)
     if (managing) view.tile.setAttribute('aria-pressed', String(lit))
     else view.tile.removeAttribute('aria-pressed')
+    const lead = faceOf(entry, view.head)
     if (view.head !== lead.head) {
-      // A new lead version: its own cover and picture, and the old head forgets this box.
+      // A new face version: its own cover and picture, and the old head forgets this box.
       wearers.get(view.head)?.delete(view.art)
       view.art.replaceChildren()
       view.art.classList.remove('has-picture')
@@ -2468,6 +2509,12 @@ ${entry.key}`
     templateNote.hidden = !managing
     templateNote.textContent = managing ? viewLabel(shape) : ''
     hint.hidden = !managing
+    keyChip.hidden = !ownerKey && !managing
+    keyChip.classList.toggle('has-key', !!ownerKey)
+    keyWords.textContent = ownerKey ? 'Your key' : 'No key here'
+    keyChip.title = ownerKey
+      ? 'A key of yours signs on this page: what you share here is shared for every visitor, and Only you tiles follow you to your other devices.'
+      : 'No key of yours answers on this page: what you turn on stays in this browser. On your computer, Manage → Add a phone gives this device a key.'
     publishLook.hidden = !managing || !ownerKey || !options.owner?.view || lookSigning || !!page || shape === (signed?.showcase?.view ?? 'hex')
     addPhone.hidden = !managing || !ownerKey || !options.owner?.invite || onPhone()
     // A phone with no key is told the one thing that gives it one.
@@ -2502,7 +2549,13 @@ ${entry.key}`
     // phone it should update on my desktop and all other devices should show my showcase as last saved"). Every device
     // draws what is published here and nothing else: what this browser picked or staged shows only while managing.
     // (Supersedes 2026-11-10, where a browser's own picks were added to the page it came back to.)
-    const everything = [...published].sort(byTitle)
+    // YOUR OWN "ONLY YOU" TILES STAY ON YOUR PAGE (jwize 2026-11-18: "promote from the expanded row to be only on your
+    // community view but not shared"; 2026-11-20: "build the Only you tiles outside Manage"). What you added to your
+    // community and did not share is drawn on your page too, marked Only you: the owners' staged list where a key of
+    // theirs answers here, and what this browser picked. A visitor has neither, and sees exactly what is published.
+    const onlyYou = unread || community ? [] : [...known.values()].filter(entry => !showcased(entry)
+      && (picked(entry) || (!!ownerKey && !!signed?.staged && names(signed.staged.items, entry))))
+    const everything = oncePerCreation([...published, ...onlyYou]).sort(byTitle)
     // The platform's doors are the first page's; a community is about what is shared.
     const links = community ? [] : options.links ?? []
     // HOW IT IS DRAWN: a try from this visit, else a community's own view, else All's
@@ -2871,6 +2924,12 @@ export const SHOWCASE_STYLE = `
 /* the options sit beside the search, at the top: Files (while managing) and Manage */
 .page-tools { flex: none; display: flex; align-items: center; gap: .45rem; margin-left: .5rem; }
 .page-tools button[hidden] { display: none; }
+.key-chip { display: inline-flex; align-items: center; gap: .3rem; height: 2rem; padding: 0 .6rem; white-space: nowrap;
+  border: 1px dashed var(--md-outline-variant); border-radius: var(--hc-radius-control, 2px); color: var(--md-on-surface-var);
+  font: 600 .72rem/1 var(--md-font-ui, Inter, system-ui, sans-serif); }
+.key-chip[hidden] { display: none; }
+.key-chip svg { width: 1rem; height: 1rem; }
+.key-chip.has-key { border-style: solid; border-color: var(--md-primary); color: var(--md-primary); }
 .page-tools button { display: grid; place-items: center; width: 2.75rem; height: 2.75rem; margin: 0; padding: 0; cursor: pointer;
   border: 1px solid color-mix(in srgb, var(--md-primary) 32%, var(--md-outline-variant)); border-radius: 999px;
   background: var(--md-surface-c-lowest); color: var(--md-on-surface); }

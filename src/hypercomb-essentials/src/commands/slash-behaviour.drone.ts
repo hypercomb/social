@@ -244,12 +244,19 @@ export class SlashBehaviourDrone extends EventTarget {
     return results
   }
 
+  /** A behaviour's description in the participant's language. Its declared
+   *  key first; with none declared, the key the convention gives every
+   *  behaviour, `slash.<name>`. A sleeping queen's stand-in is built from the
+   *  build's table, which carries her word and English only, so without the
+   *  convention every word asleep read English while its catalog line sat
+   *  unused (35 of 48 sleeping words, audited 2026-11-26). A key the catalog
+   *  lacks changes nothing. */
   #localize(behaviour: SlashBehaviour): SlashBehaviour {
-    if (!behaviour.descriptionKey) return behaviour
+    const key = behaviour.descriptionKey || `slash.${behaviour.name}`
     const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
     if (!i18n) return behaviour
-    const translated = i18n.t(behaviour.descriptionKey)
-    if (translated === behaviour.descriptionKey) return behaviour
+    const translated = i18n.t(key)
+    if (!translated || translated === key) return behaviour
     return { ...behaviour, description: translated }
   }
 

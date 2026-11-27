@@ -67,7 +67,7 @@ export const TUTORIAL_COURSES: readonly TutorialCourse[] = Object.freeze([
   { level: 'starter', title: 'Starter',
     summary: 'Your first flight — make a tile, go in, come back out, and find your way home.' },
   { level: 'beginner', title: 'Beginner',
-    summary: 'The everyday verbs: select, edit, note, copy, remove, undo, fit and arrange.' },
+    summary: 'The everyday verbs: select, edit, note, shelf, remove, undo, fit and arrange.' },
   { level: 'intermediate', title: 'Intermediate',
     summary: 'Meaning and time — marks, filters, titles, references, filing, and walking your history.' },
   { level: 'expert', title: 'The windows',

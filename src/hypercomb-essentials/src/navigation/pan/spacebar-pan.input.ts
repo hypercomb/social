@@ -1,6 +1,7 @@
 // input/pan/spacebar-pan.input.ts
 import type { InputGate } from '../input-gate.service.js'
 import { framedHere, scrollFramedBy, stepWidthOnScreen } from '../../sequence/frame-lock.js'
+import { isTyping } from '../../keyboard/typing-focus.js'
 
 type Point = { x: number; y: number }
 
@@ -110,21 +111,13 @@ export class SpacebarPanInput {
     // the user has clicked on the canvas (or otherwise blurred any
     // text input) AND has the cursor over the grid.
     if (!this.mouseOverCanvas) return
-    if (this.isInteractiveFocus()) return
+    if (isTyping(e)) return
 
     // prevent page scroll AND prevent the focused element from receiving the space
     e.preventDefault()
 
     this.spaceHeld = true
     this.setCursor('grab')
-  }
-
-  private isInteractiveFocus = (): boolean => {
-    const el = document.activeElement
-    if (!el) return false
-    return !!el.closest(
-      'input, textarea, select, [contenteditable="true"], [contenteditable=""], [role="textbox"]'
-    )
   }
 
   private onCanvasEnter = (): void => {

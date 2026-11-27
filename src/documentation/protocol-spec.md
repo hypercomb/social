@@ -7,7 +7,7 @@ Hypercomb is a decentralized, content-addressed hive. Identity is anchored in **
 Two zones, two ownerships:
 
 - **Durable, local-by-default.** Everything you author is content-addressed and versioned in OPFS — history marker chains plus the layer/resource/bee/dependency pools and the `hypercomb.io` tree (§12). This is the source of truth, and it persists with no network involved.
-- **Ephemeral / opt-in network.** Presence, cursor, clipboard, selection, and viewport are participant-local and never enter the signed layer (so they can't skew the lineage signature). Relays are stateless forwarders; nothing crosses the network unless you publish.
+- **Ephemeral / opt-in network.** Presence, cursor, shelf, selection, and viewport are participant-local and never enter the signed layer (so they can't skew the lineage signature). Relays are stateless forwarders; nothing crosses the network unless you publish.
 
 This document specifies the wire protocol, message formats, addressing, storage model, signing, and lifecycle.
 

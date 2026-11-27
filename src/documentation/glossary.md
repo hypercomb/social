@@ -119,10 +119,10 @@ a binding between a drone name and a cell. syntax: `cell#DroneName` in the comma
 a `/behaviour` pattern typed into the command line. `SlashBehaviourBehavior` matches the input, looks up queen bees via duck-typing (checks for `command` property and `invoke()` method on all IoC entries), and dispatches directly. falls through to path-based behaviors if no queen matches. `SlashBehaviourDrone` in `@hypercomb/essentials` provides the provider registry.
 
 ### clipboard
-cut/copy/paste system for cells. `ClipboardWorker` (a `Worker` in `@hypercomb/essentials`) captures selected cells, persists metadata to OPFS, and pastes by copying cell directories to the current location. `ClipboardService` tracks entries with `label` and `sourceSegments`. operations: copy, cut, paste, place, clear. emits `clipboard:captured`, `clipboard:paste-start`, `clipboard:paste-done`. integrates with `HistoryService` for revert support.
+retired 2026-11-02. tiles are no longer cut, copied or pasted: the **shelf** holds references to tiles, and the drop decides whether a tile also appears here or moves here (`recents-and-the-quick-tray.md`). the word survives in two places: `system:clipboard` is a reserved pool name, and `ImagePasteWorker` takes a picture pasted from the operating system's clipboard onto a tile.
 
 ### activity log
-auto-dismissing notification feed in `@hypercomb/shared` (`ActivityLogComponent`). subscribes to operational effects (`cell:added`, `cell:removed`, `clipboard:paste-done`, `move:committed`, `mesh:public-changed`) and displays recent operations with revert buttons. entries expire after 10 seconds. max 20 visible.
+auto-dismissing notification feed in `@hypercomb/shared` (`ActivityLogComponent`). subscribes to operational effects (`cell:added`, `cell:removed`, `move:committed`, `mesh:public-changed`) and displays recent operations with revert buttons. entries expire after 10 seconds. max 20 visible.
 
 ### avatar swarm drone
 gpu-instanced real-time peer presence. `AvatarSwarmDrone` in `@hypercomb/essentials` renders up to 2048 live peer avatars on the hex grid using a custom `BeeSwarmShader`. deterministic colors derived from nostr pubkeys via DJB2 hashing. peers fade out after 15 seconds of inactivity. publishes local position every 3 seconds. emits `swarm:peer-count`.

@@ -165,6 +165,17 @@ export const removeFromGroup = async (id: string, path: string): Promise<Context
   return (await writeAll(groups)) ? next : null
 }
 
+/** REPLACE THE MEMBERS — same identity and label, the set as it now stands.
+ *  The shelf's named rings write through this as rows come and go. */
+export const setGroupMembers = async (id: string, members: readonly ContextMember[]): Promise<ContextGroup | null> => {
+  const groups = await readAll()
+  const group = groups[String(id ?? '')]
+  if (!group) return null
+  const next: ContextGroup = { ...group, members: [...members] }
+  groups[next.id] = next
+  return (await writeAll(groups)) ? next : null
+}
+
 /** Rename — the whole point of two groups over one set is that their names
  *  differ, so renaming is a first-class act rather than an edit. */
 export const renameGroup = async (id: string, label: string): Promise<ContextGroup | null> => {
@@ -197,6 +208,7 @@ export class ContextGroups {
   readonly addToGroup = addToGroup
   readonly removeFromGroup = removeFromGroup
   readonly renameGroup = renameGroup
+  readonly setGroupMembers = setGroupMembers
   readonly deleteGroup = deleteGroup
   readonly setSignature = setSignature
   readonly groupsHolding = groupsHolding

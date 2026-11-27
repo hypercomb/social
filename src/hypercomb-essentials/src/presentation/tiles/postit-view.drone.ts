@@ -29,6 +29,7 @@ import { readTilePropertiesAt, tilePictureCandidates } from '../../editor/tile-p
 import { resolveLocalResourceReference } from './local-resource-reference.js'
 import { trackScrollGutter } from './scroll-gutter.js'
 import { SEALED_PAGE_SANDBOX, inertPageText, mayRunPage, pageRunsSealed, sealedPageDocument } from './page-run-gate.js'
+import { trialsReady } from '../../files/try-page.js'
 import { POSTIT_KIND, POSTIT_VIEW, POSTIT_SIZE_KEY } from '../../commands/postit-kind.js'
 import type { PostitPayload } from '../../commands/postit.queen.js'
 import type { BackGesture } from '../../navigation/back-gesture.service.js'
@@ -666,6 +667,8 @@ export class PostitViewDrone extends Drone {
     const blob = payload?.htmlSig ? await store?.getResource(payload.htmlSig) : null
     const page = blob ? await blob.text() : null
     const imageSig = payload?.htmlSig || payload?.text ? null : await this.#tileImageSig(segments)
+    // A trial runs sealed (pageRunsSealed): read the trial ledger before asking.
+    if (payload?.htmlSig) await trialsReady()
     // THE GATE (T5 activation, page-run-gate.ts): a page from elsewhere that
     // has not been reviewed here is shown as text, inert — never run, never
     // blank. The site view asks the same question of the same helper.
