@@ -791,6 +791,8 @@ function shootStrip(html, rows, stripPng) {
   fs.writeFileSync(htmlPath, html)
   try { fs.unlinkSync(stripPng) } catch {}
   execFileSync(EDGE, ['--headless=new', '--disable-gpu', '--hide-scrollbars',
+    // its own throwaway profile, so a desk with Edge already open is never touched
+    `--user-data-dir=${path.join(require('os').tmpdir(), 'hc-concepts-edge')}`,
     ...(process.getuid && process.getuid() === 0 ? ['--no-sandbox'] : []),   // a root container refuses the sandbox
     `--window-size=${W},${H * rows}`, '--virtual-time-budget=4000',
     `--screenshot=${stripPng}`, require('url').pathToFileURL(htmlPath).href], { stdio: 'ignore' })
