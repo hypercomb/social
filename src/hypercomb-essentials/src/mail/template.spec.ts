@@ -394,11 +394,13 @@ describe('rendering escapes each value by its type', () => {
       + '<p><a href="https://a.example/" rel="noopener noreferrer">https://b.example/</a></p><p><code>https://b.example/</code></p>')
   })
 
-  it('leaves an optional hole empty, and a link to a missing url without an href', async () => {
+  it('leaves an optional hole empty, and a link to a missing url as its words alone', async () => {
     const out = renderTemplate(await parsed(THANKS), { name: 'Ana' }, deps('unknown'))
     expect(out.ok).toBe(true)
     if (!out.ok) return
-    expect(out.html).toContain('<p><a>read more</a> &amp; ')
+    expect(out.html).toContain('<p>read more &amp; ')
+    expect(out.html).not.toContain('<a>')
+    expect(out.html).toContain('<a href="https://hypercomb.com/" rel="noopener noreferrer">home</a>')
     expect(out.html).toContain('<ul></ul>')
     expect(out.text).toContain('More: \n')
   })
