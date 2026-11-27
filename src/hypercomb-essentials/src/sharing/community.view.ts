@@ -16,6 +16,7 @@ import { EffectBus, requestConfirm } from '@hypercomb/core'
 import { communityCandidates, type CommunityCandidate, type OfferedInstance } from './community-candidates.js'
 import { CommunityDraft } from './community.draft.js'
 import { publisherKeyHex } from './key-list.client.js'
+import { isTyping } from '../keyboard/typing-focus.js'
 import { promoteForCommunity } from './promote.js'
 import {
   addCommunity, communityKey, readSignedShowcase, removeCommunity, renameCommunity, setCommunityView, setView,
@@ -178,11 +179,14 @@ export class CommunityView extends EventTarget {
   }
 
   #key(event: KeyboardEvent): void {
-    const typing = event.target instanceof HTMLInputElement
+    // A key pressed in one of the window's own fields is that field's: Ctrl+Z
+    // there is the text's undo, never the community's (isTyping sees a
+    // textarea, an editable region and a field in a shadow root too).
+    const typing = isTyping(event)
     const mod = event.ctrlKey || event.metaKey
     const letter = event.key.toLowerCase()
-    if (mod && !event.shiftKey && letter === 'z') { event.preventDefault(); this.#undo() }
-    else if (mod && (letter === 'y' || (event.shiftKey && letter === 'z'))) { event.preventDefault(); this.#redo() }
+    if (!typing && mod && !event.shiftKey && letter === 'z') { event.preventDefault(); this.#undo() }
+    else if (!typing && mod && (letter === 'y' || (event.shiftKey && letter === 'z'))) { event.preventDefault(); this.#redo() }
     else if (!typing && event.key === 'ArrowRight') { event.preventDefault(); if (this.#managing) this.#stepTemplate(1); else this.#turn(1) }
     else if (!typing && event.key === 'ArrowLeft') { event.preventDefault(); if (this.#managing) this.#stepTemplate(-1); else this.#turn(-1) }
     else if (!typing && this.#managing && event.key === 'ArrowDown') { event.preventDefault(); this.#turn(1) }

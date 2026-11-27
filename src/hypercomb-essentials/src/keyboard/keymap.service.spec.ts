@@ -159,3 +159,47 @@ describe('the hold', () => {
     expect(fired()).toEqual(['test.pierce'])
   })
 })
+
+// A key pressed while a text field has focus belongs to the field. The shelf's
+// search lives in a shadow root, where the page sees only the host element —
+// the case that let `h` and friends fire mid-word.
+describe('typing in a field', () => {
+  const field = (inShadow: boolean): HTMLInputElement => {
+    const input = document.createElement('input')
+    if (inShadow) {
+      const host = document.createElement('div')
+      document.body.appendChild(host)
+      host.attachShadow({ mode: 'open' }).appendChild(input)
+    } else document.body.appendChild(input)
+    input.focus()
+    return input
+  }
+  const typeIn = (input: HTMLInputElement, key: string, extra: KeyboardEventInit = {}): void => {
+    input.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, composed: true, cancelable: true, ...extra }))
+  }
+
+  it('fires no shortcut from a plain field', () => {
+    typeIn(field(false), 'q')
+    expect(fired()).toEqual([])
+    document.body.innerHTML = ''
+  })
+
+  it('fires no shortcut from a field inside a shadow root', () => {
+    typeIn(field(true), 'q')
+    expect(fired()).toEqual([])
+    document.body.innerHTML = ''
+  })
+
+  it('fires not even a pierce binding: Ctrl+Y is the text\'s, not the hive\'s', () => {
+    typeIn(field(true), 'y', { ctrlKey: true })
+    expect(fired()).toEqual([])
+    document.body.innerHTML = ''
+  })
+
+  it('still lets Escape leave the field', () => {
+    service.addLayer({ id: 'context', priority: 30, bindings: [{ cmd: 'global.escape', sequence: [[{ key: 'escape' }]], pierce: true }] })
+    typeIn(field(true), 'Escape')
+    expect(fired()).toEqual(['global.escape'])
+    document.body.innerHTML = ''
+  })
+})

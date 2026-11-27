@@ -284,6 +284,17 @@
   // wraps the expression so call sites stay readable.
   --hc-deepen: 46%;
 
+  // ── THE "ON" GREEN ────────────────────────────────────────────────
+  // The colour of a tile that is on in pools mode: the pools bar's rule and
+  // hover, the frame round the viewport, the node shelf's chips that are on,
+  // the bulb on the canvas. Authored for near-black (#6fd39a) and pulled
+  // toward the panel's ink by the knob above, so it carries weight on a
+  // bright pane and stays itself on a dark one: it re-resolves with every
+  // theme on <html>, so a shadow root reads it deepened with no selector of
+  // its own. A mark and a line, never body text. Text ON it is the pane,
+  // rgb(var(--hc-panel-pane)), as on any accent.
+  --hc-pools-on: color-mix(in srgb, #6fd39a, rgb(var(--hc-panel-ink)) var(--hc-deepen));
+
   // ── CHROME STATUS ─────────────────────────────────────────────────
   // The chrome's SEMANTIC colours: live/ok, warning, alert, information,
   // a branch, a secret. Every one of them used to be a literal picked to

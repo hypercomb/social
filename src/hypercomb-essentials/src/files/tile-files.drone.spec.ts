@@ -292,7 +292,8 @@ describe('a tile\'s card', () => {
 // ON A MANAGED SITE DOOR a page is changed where it is: no trial is staged or
 // remembered, and the receipt names no try- address — none exists there.
 const { onManagedSiteDoor } = await import('./tile-files.drone.js')
-const { forgetTrials, trialOf } = await import('./try-page.js')
+const { forgetTrials, releaseTrial, trialIsOwn, trialOf } = await import('./try-page.js')
+const { isAuthored, markAuthored } = await import('../sharing/authored-sigs.js')
 
 describe('a page on a managed site door', () => {
   const mark = (): void => {
@@ -303,7 +304,7 @@ describe('a page on a managed site door', () => {
     document.head.appendChild(script)
   }
 
-  beforeEach(() => { forgetTrials(); document.getElementById('hc-manage')?.remove() })
+  beforeEach(() => { forgetTrials(); localStorage.removeItem('hc:authored-sigs'); document.getElementById('hc-manage')?.remove() })
 
   it('is told by the page record, and by nothing else', () => {
     expect(onManagedSiteDoor()).toBe(false)
@@ -322,6 +323,8 @@ describe('a page on a managed site door', () => {
     expect(done).toMatchObject({ ok: true, created: true, unchanged: false })
     expect(done).not.toHaveProperty('trial')
     expect(trialOf(await sha(html))).toBeNull()
+    // Changed where it is, a page of the hive's own runs as the hive at once.
+    expect(isAuthored(await sha(html))).toBe(true)
     expect(fetched).not.toHaveBeenCalled()
     fetched.mockRestore()
     document.getElementById('hc-manage')?.remove()
@@ -335,5 +338,59 @@ describe('a page on a managed site door', () => {
     expect(trialOf(await sha(html))).toBe('try-plan')
     expect(fetched).toHaveBeenCalled()
     fetched.mockRestore()
+  })
+})
+
+// A TRIAL IS NOT AUTHORED (2026-11-27, inline-code-in-input-audit.md H1/H2):
+// marked at once, a model's page ran as the hive on every surface that did not
+// ask about trials. It is marked when a person brings it home, and only when it
+// is the hive's own words.
+describe('a page a model writes', () => {
+  beforeEach(() => { forgetTrials(); localStorage.removeItem('hc:authored-sigs'); fake.page.clear() })
+
+  it('is a trial and is not authored until a person brings it home', async () => {
+    const fetched = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 404 }))
+    const html = '<h1>New</h1><script>run()</script>'
+    await new TileFilesDrone().write({ route: ['Proposal', 'plan'], kind: 'page' }, html)
+    const sig = await sha(html)
+    expect(trialOf(sig)).toBe('try-plan')
+    expect(trialIsOwn(sig)).toBe(true)
+    expect(isAuthored(sig)).toBe(false)
+    expect(releaseTrial(sig)).toBe(true)
+    expect(isAuthored(sig)).toBe(true)
+    fetched.mockRestore()
+  })
+
+  it('written over someone else\'s page, it comes home still sealed', async () => {
+    const fetched = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 404 }))
+    fake.page.set('Proposal/plan', '7'.repeat(64))
+    const html = '<h1>Over theirs</h1>'
+    await new TileFilesDrone().write({ route: ['Proposal', 'plan'], kind: 'page' }, html)
+    const sig = await sha(html)
+    expect(trialIsOwn(sig)).toBe(false)
+    releaseTrial(sig)
+    expect(isAuthored(sig)).toBe(false)
+    fetched.mockRestore()
+  })
+
+  it('written over a page of the hive\'s own, it is the hive\'s own when it comes home', async () => {
+    const fetched = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 404 }))
+    fake.page.set('Proposal/plan', '6'.repeat(64))
+    markAuthored('6'.repeat(64))
+    const html = '<h1>Over mine</h1>'
+    await new TileFilesDrone().write({ route: ['Proposal', 'plan'], kind: 'page' }, html)
+    const sig = await sha(html)
+    expect(isAuthored(sig)).toBe(false)
+    expect(trialIsOwn(sig)).toBe(true)
+    fetched.mockRestore()
+  })
+
+  it('on a tile whose name cannot be a door, gets no trial and no mark, so it runs sealed', async () => {
+    const html = '<h1>No door</h1>'
+    fake.tree.set('', [...(fake.tree.get('') ?? []), '東京'])
+    const done = await new TileFilesDrone().write({ route: ['東京'], kind: 'page' }, html)
+    expect(done).toMatchObject({ ok: true })
+    expect(done).not.toHaveProperty('trial')
+    expect(isAuthored(await sha(html))).toBe(false)
   })
 })

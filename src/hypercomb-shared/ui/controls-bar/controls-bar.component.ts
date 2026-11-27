@@ -1293,6 +1293,25 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly tagScope = this.#tagScope.asReadonly()
   readonly tagsExpanded = this.#tagsExpanded.asReadonly()
 
+  // ── the zoom slider ──
+  // Above the tags at the bottom left, riding up when they open out. The
+  // slider is logarithmic over the drone's own range, so each step is the same
+  // feel at any size; it follows every zoom the hive takes (`viewport:scale`).
+  #zoomScale = signal({ scale: 1, min: 0.2, max: 12 })
+  #zoomScaleUnsub: (() => void) | null = null
+  readonly zoomSliderValue = computed(() => {
+    const { scale, min, max } = this.#zoomScale()
+    const at = Math.log(scale / min) / Math.log(max / min)
+    return Math.round(Math.min(1, Math.max(0, at)) * 1000)
+  })
+
+  readonly onZoomSlider = (event: Event): void => {
+    if (this.#locked()) return
+    const value = Number((event.target as HTMLInputElement).value) / 1000
+    const { min, max } = this.#zoomScale()
+    this.zoom?.zoomToScale?.(min * Math.pow(max / min, value), this.#viewportCenter(), 'user')
+  }
+
   /** The three reaches in cycle order — the tag strip's single head glyph
    *  walks this list. Same ids and glyphs as the pheromone panel — one
    *  vocabulary for reach, wherever you meet it. */
@@ -1533,6 +1552,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#pinToggleUnsub = EffectBus.on('viewport:pin-toggle', () => this.togglePin())
     this.#onDemandUnsub = EffectBus.on<{ on: boolean }>('command-line:on-demand', ({ on }) => {
       this.#commandLineOnDemand.set(!!on)
+    })
+    this.#zoomScaleUnsub = EffectBus.on<{ scale?: number; min?: number; max?: number }>('viewport:scale', (p) => {
+      const scale = Number(p?.scale)
+      if (!Number.isFinite(scale) || scale <= 0) return
+      const min = Number(p?.min) > 0 ? Number(p!.min) : 0.2
+      const max = Number(p?.max) > min ? Number(p!.max) : 12
+      this.#zoomScale.set({ scale, min, max })
     })
 
     // The Escape cascade force-clears the gate as last-resort recovery. On a
@@ -2287,6 +2313,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#configureControlUnsub?.()
     this.#pinToggleUnsub?.()
     this.#onDemandUnsub?.()
+    this.#zoomScaleUnsub?.()
     this.#titleTickUnsub?.()
     this.#localeTickUnsub?.()
     iconOverrides.removeEventListener('change', this.#onIconOverride)

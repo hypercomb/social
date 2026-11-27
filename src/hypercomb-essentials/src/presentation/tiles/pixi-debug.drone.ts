@@ -2,6 +2,7 @@
 import { Drone } from '@hypercomb/core'
 import { Application, Container, Mesh, Text, Graphics, Sprite, Point } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
+import { isTyping } from '../../keyboard/typing-focus.js'
 
 type DisplayObject = Container
 
@@ -235,8 +236,7 @@ export class PixiDebugDrone extends Drone {
   #onKey = (e: KeyboardEvent): void => {
     // 'D' toggles the debug overlay (unless an input is focused)
     if (e.key === 'd' || e.key === 'D') {
-      const tag = (e.target as HTMLElement)?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      if (isTyping(e)) return
       this.#active = !this.#active
       ;(window as any).__pixiDebug.active = this.#active
       this.#updatePanelVisibility()

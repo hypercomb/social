@@ -8,6 +8,8 @@
 //   /background screen.picture         — put a picture of your own behind it
 //   /background screen.picture.remove  — back to a drawn look
 //   /background screen.opacity.60      — how much of the picture shows
+//   /background screen.cracks.on       — the bare dark screen becomes a wall that cracks
+//   /background screen.cracks          — strike it now; .mend / .off
 //   /background screen.off             — bare surface
 //   /background tiles                  — the tiles half, in the window
 //   /background tiles.ember            — fill blank tiles from the Ember group
@@ -128,8 +130,20 @@ function screenMembers(svc: BackgroundThemeService, path: readonly string[]): re
         leaf: true,
       })
     }
+    // THE CRACKING WALL is what the bare dark screen becomes, a switch on
+    // the bare screen rather than a look, so it is its own member.
+    out.push({ name: 'cracks', description: canvas?.cracks ? 'a cracking wall on the bare dark screen · on' : 'a cracking wall on the bare dark screen · off' })
     out.push({ name: 'off', description: 'bare surface', leaf: true })
     return out
+  }
+
+  if (path[0] === 'cracks' && path.length === 1) {
+    return [
+      { name: 'on', description: 'random strikes 30s apart, three, then it mends', leaf: true },
+      { name: 'strike', description: 'one impact now', leaf: true },
+      { name: 'mend', description: 'back to an unbroken wall', leaf: true },
+      { name: 'off', description: 'the plain surface', leaf: true },
+    ]
   }
 
   if (path[0] === 'picture' && path.length === 1) {
@@ -199,7 +213,7 @@ export class BackgroundQueenBee extends QueenBee {
   override description = 'Choose what is behind the hive and what fills a blank tile'
   override descriptionKey = 'slash.background'
   override options = [
-    'screen', 'screen.<look>', 'screen.picture', 'screen.opacity.<0-100>', 'screen.off',
+    'screen', 'screen.<look>', 'screen.picture', 'screen.opacity.<0-100>', 'screen.cracks.<on|strike|mend|off>', 'screen.off',
     'tiles', 'tiles.<group>', 'tiles.<group>.<picture>', 'tiles.<group>.force', 'tiles.<group>.items',
     'tiles.off', 'tiles.hidden',
   ]
@@ -273,6 +287,20 @@ export class BackgroundQueenBee extends QueenBee {
       if (!Number.isFinite(value)) { this.#log(`wash is 0–100 — got "${words[1] ?? ''}"`); return }
       canvas.setDim(value / 100)
       this.#log(canvas.status())
+      return
+    }
+
+    if (words[0] === 'cracks') {
+      if (!canvas) { this.#log('the screen is not ready'); return }
+      const act = words[1] ?? 'strike'
+      if (act === 'off') { canvas.setCracks(false); this.#log('screen cracks → off'); return }
+      if (act === 'on') { canvas.setCracks(true); this.#log('screen cracks → on · the bare dark screen is a wall that cracks'); return }
+      if (act === 'mend') { canvas.mendCracks(); this.#log('screen cracks → mended'); return }
+      if (act === 'strike') {
+        this.#log(canvas.strike() ? 'screen cracks → struck' : 'the wall shows on the bare dark screen only: a dark theme and screen.off')
+        return
+      }
+      this.#log(`cracks takes on, strike, mend or off — got "${act}"`)
       return
     }
 

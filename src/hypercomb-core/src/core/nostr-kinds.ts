@@ -93,6 +93,9 @@ export const KEY_LIST_EVENT_KIND = KEY_LIST_KIND
 export const DEVICE_DELEGATION_KIND = 30571
 /** Device proof: the paired device's handshake proof. */
 export const DEVICE_PROOF_KIND = 30572
+/** Open entry pool member: one small signed entry, its words inline, posted
+ *  by anyone handed the pool's code (documentation/open-entry-pools.md). */
+export const OPEN_ENTRY_KIND = 30573
 
 export type NostrKindEntry = {
   readonly kind: number
@@ -141,6 +144,7 @@ export const NOSTR_KINDS: readonly NostrKindEntry[] = Object.freeze([
   { kind: KEY_LIST_EVENT_KIND, name: 'KEY_LIST_EVENT_KIND', meaning: 'key list: who may sign for an anchor' },
   { kind: DEVICE_DELEGATION_KIND, name: 'DEVICE_DELEGATION_KIND', meaning: 'device delegation: an anchor lets a device publish for it' },
   { kind: DEVICE_PROOF_KIND, name: 'DEVICE_PROOF_KIND', meaning: 'device proof: the paired device\'s handshake proof' },
+  { kind: OPEN_ENTRY_KIND, name: 'OPEN_ENTRY_KIND', meaning: 'open entry pool member: a signed entry posted with the pool\'s code' },
 ])
 
 /** The vocabulary's row for a kind, or undefined for a number nobody named. */

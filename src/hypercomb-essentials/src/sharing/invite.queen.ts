@@ -17,6 +17,10 @@
 //     `https://<host>/<sig>` link — and that path keeps its availability
 //     gate: the bundle must be host-served before anything is minted.
 //
+//   • `invite qr` → THE SAME MEETING LINK AS A CODE, drawn large on this
+//     screen for a room of people to point their phones at (room-qr.view.ts).
+//     Nothing is copied and nothing is sent: the code is the link.
+//
 // Either way the invite encodes (segments, room, secret) so a recipient
 // reproduces the exact swarm channel. SlashBehaviourDrone auto-wraps this
 // registered object into a slash provider (command/description/invoke).
@@ -54,6 +58,7 @@ import {
 } from './meeting-invite.js'
 import { isJoinedHere, readTabZone } from './membership.js'
 import { landingOrigin, sealedRoomLink } from './swarm-door-landing.js'
+import { showRoomQr } from './room-qr.view.js'
 import { writeDecoration } from '../commands/decoration-manifest.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
@@ -94,8 +99,15 @@ export class InviteQueenBee {
   readonly descriptionKey = 'slash.invite'
   readonly examples = [
     { input: '/invite', result: 'Shares a meeting link to this room and page, through your device’s share sheet or else your clipboard. Whoever opens it is asked to join and lands on this page. It needs a room and secret set first' },
+    { input: '/invite qr', result: 'Shows the same meeting link as a large code on this screen, so people in the room can point a phone at it and join. Nothing is copied or sent. It needs a room and secret set first' },
     { input: '/invite party', result: 'With one or more tiles selected, stamps each as a swarm junction labelled "party" and shares a link to the first; it needs a room and secret set and host sync on' },
   ]
+
+  /** This queen draws the meeting link as a code: meetingLink('qr'). The shell
+   *  is versioned apart from the package and reads this before it offers its
+   *  'show code' button; a queen from before the code has no such field, and
+   *  handed 'qr' she would share the link or label a junction with the word. */
+  readonly meetingCode = true
 
   /** THE MEETING LINK, whatever is selected — the entry point for the
    *  status line's Invite and the mesh modal's share button. Those are about
@@ -103,8 +115,9 @@ export class InviteQueenBee {
    *  through invoke('') a selection turned them into the junction-bundle path
    *  (which needs host sync, or refuses). */
   /** The meeting link, copied — or, only when asked (a Share button the
-   *  person pressed), offered through the device's share sheet. */
-  async meetingLink(how: 'copy' | 'share' = 'copy'): Promise<void> {
+   *  person pressed), offered through the device's share sheet — or, for a
+   *  room of people standing in front of this screen, drawn as a code. */
+  async meetingLink(how: 'copy' | 'share' | 'qr' = 'copy'): Promise<void> {
     const room = (get<CredStoreLike>(ROOM_KEY)?.value ?? '').trim()
     const secret = (get<CredStoreLike>(SECRET_KEY)?.value ?? '').trim()
     const nav = get<NavLike>(NAV_KEY)
@@ -132,6 +145,12 @@ export class InviteQueenBee {
     // `invite wss://…` / `invite code`: the facilitator's meeting point, set
     // in the selector — never a code on this line.
     const tokens = (args ?? '').trim().split(/\s+/).filter(Boolean)
+    // `invite qr`: the room's link as a code, whatever is selected. It is
+    // about the room, never about a tile (the meetingLink rule).
+    if (tokens.length === 1 && tokens[0]!.toLowerCase() === 'qr') {
+      await this.meetingLink('qr')
+      return
+    }
     const pointToken = tokens.find(t => /^wss?:\/\//i.test(t))
     const codeAt = tokens.findIndex(t => t.toLowerCase() === 'code')
     if (pointToken !== undefined || codeAt >= 0) {
@@ -275,7 +294,7 @@ export class InviteQueenBee {
   #signedLink = (room: string, secret: string, relay: string, code: string | undefined, page: readonly string[]): Promise<string> =>
     sealedRoomLink(room, secret, relay, code, page)
 
-  #deliverMeetingLink = async (room: string, secret: string, nav: NavLike, how: 'copy' | 'share' = 'share'): Promise<void> => {
+  #deliverMeetingLink = async (room: string, secret: string, nav: NavLike, how: 'copy' | 'share' | 'qr' = 'share'): Promise<void> => {
     let segs: readonly string[] | undefined
     if (isJoinedHere()) {
       try { segs = get<SwarmLike>(SWARM_KEY)?.currentSegments?.() } catch { segs = undefined }
@@ -318,6 +337,27 @@ export class InviteQueenBee {
     const signed = await this.#signedLink(room, secret, relay, zone?.code, segments)
     const url = signed || `${await landingOrigin(meetingPointKey(relay))}/${fragment}`
     const point = relay.replace(/^wss?:\/\//, '')
+
+    // THE CODE. The link, drawn for phones to read; the copy stays one press
+    // away for whoever is at the keyboard. A link too long to draw is said so,
+    // and copied instead, so asking for a code never ends with nothing.
+    if (how === 'qr') {
+      const shown = showRoomQr(url, {
+        title: this.#tr('invite.qr.title', `Join ${room}`, { room }),
+        note: point
+          ? this.#tr('invite.qr.note-at', `Point a phone's camera at this. Whoever opens it is asked to join ${room} at ${point}, on this page.`, { room, point })
+          : this.#tr('invite.qr.note', `Point a phone's camera at this. Whoever opens it is asked to join ${room}, on this page.`, { room }),
+        copy: this.#tr('invite.qr.copy', 'Copy the link'),
+        copied: this.#tr('invite.qr.copied', 'Link copied'),
+        close: this.#tr('invite.qr.close', 'Close'),
+      }, () => copyLink(url))
+      console.log(`[invite] meeting code ${url.slice(0, url.indexOf('#'))}#…${point ? ` at ${point}` : ''}${shown ? '' : ' (too long to draw)'}`)
+      if (shown) return
+      this.#toast('warning', this.#tr('invite.meet.title', 'Meeting link'), this.#tr('invite.qr.too-long',
+        'This meeting link is too long to draw as a code, so it was copied instead. Invite from a page higher up for a shorter one.'))
+      await copyLink(url)
+      return
+    }
 
     const delivery = how === 'copy' ? await copyLink(url) : await deliverLink(url, 'Hypercomb meeting')
     // 'offered' already put the URL on screen behind a fresh-tap button.

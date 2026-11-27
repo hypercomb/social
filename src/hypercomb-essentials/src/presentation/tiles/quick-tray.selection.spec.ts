@@ -78,11 +78,11 @@ describe('the selection shelf', () => {
     expect(tray.shadowRoot?.querySelector('.legend .count')?.textContent).toBe('2')
     // Never both at once, and no fold: it is what you are about to act on.
     expect(tray.shadowRoot?.querySelectorAll('.shelf')).toHaveLength(1)
-    expect(tray.shadowRoot?.querySelector('.fold')).toBeNull()
+    expect(tray.shadowRoot?.querySelector('.expand')).toBeNull()
   })
 
   it('shows whatever the shelf held, and however it was folded', () => {
-    ;(tray.shadowRoot?.querySelector('.fold') as HTMLElement).click()
+    ;EffectBus.emitTransient('shelf:toggle', { open: false })
     selection.replace(['alpha', 'beta', 'gamma'])
     flush()
     expect(labels(tray)).toEqual(['alpha', 'beta', 'gamma'])
@@ -120,7 +120,7 @@ describe('the × on a selection row', () => {
     flush()
     expect(tray.shadowRoot?.querySelector('.shelf.picks')).toBeNull()
     expect(labels(tray)).toEqual(['held-one', 'held-two'])
-    expect(tray.shadowRoot?.querySelector('.fold')).not.toBeNull()
+    expect(tray.shadowRoot?.querySelector('.expand')).not.toBeNull()
   })
 })
 
@@ -167,7 +167,7 @@ describe('the canvas under the selection shelf', () => {
   })
 
   it('reserves nothing when the shelf is folded', () => {
-    ;(tray.shadowRoot?.querySelector('.fold') as HTMLElement).click()
+    ;EffectBus.emitTransient('shelf:toggle', { open: false })
     settle()
     const band = watchBand()
     expect(band.last()).toBe(0)
@@ -205,7 +205,7 @@ describe('the shelf and the selection shelf, one forward at a time', () => {
     selection.add('alpha')
     flush()
     expect(tray.shadowRoot?.querySelector('.swap')).toBeNull()
-    expect(tray.shadowRoot?.querySelector('.fold')).not.toBeNull()
+    expect(tray.shadowRoot?.querySelector('.expand')).not.toBeNull()
   })
 
   it('brings the selection forward at two, with the pair standing where the fold was', () => {
@@ -213,7 +213,7 @@ describe('the shelf and the selection shelf, one forward at a time', () => {
     flush()
     expect(tray.shadowRoot?.querySelectorAll('.swap-btn')).toHaveLength(2)
     expect(lit()).toEqual(['picks'])
-    expect(tray.shadowRoot?.querySelector('.fold')).toBeNull()
+    expect(tray.shadowRoot?.querySelector('.expand')).toBeNull()
   })
 
   it('brings the shelf forward on a press, and the selection back on another', () => {
@@ -262,7 +262,7 @@ describe('the shelf and the selection shelf, one forward at a time', () => {
     selection.replace(['alpha'])
     flush()
     expect(tray.shadowRoot?.querySelector('.swap')).toBeNull()
-    expect(tray.shadowRoot?.querySelector('.fold')).not.toBeNull()
+    expect(tray.shadowRoot?.querySelector('.expand')).not.toBeNull()
     selection.replace(['gamma', 'delta'])
     flush()
     expect(labels(tray)).toEqual(['gamma', 'delta'])
@@ -270,7 +270,7 @@ describe('the shelf and the selection shelf, one forward at a time', () => {
   })
 
   it('shows the shelf brought forward though it is folded, so the pair never vanishes', () => {
-    ;(tray.shadowRoot?.querySelector('.fold') as HTMLElement).click()
+    ;EffectBus.emitTransient('shelf:toggle', { open: false })
     expect(tray.shadowRoot?.querySelector('.shelf')).toBeNull()
     selection.replace(['alpha', 'beta'])
     flush()

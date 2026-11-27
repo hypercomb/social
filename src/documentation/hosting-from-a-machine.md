@@ -344,8 +344,15 @@ The host worker carries the machine's two jobs over, both set per domain in
   is local. A signature is a right to use; nothing else is ever read through.
 
 **Still tied to the machine:** the relay itself (a meeting needs it on), and
-any bytes only it holds until they are read once or copied. Until the relay
-runs somewhere always on, a demo needs the machine awake.
+any bytes only it holds until they are read once or copied (step 4 copies
+them). Until the relay runs somewhere always on, a demo needs the machine
+awake.
+
+**Done for `jwize.com` on 2026-11-26.** The root is a front door on the worker,
+the machine answers as `relay.pluginthematrix.io`, and all 69,507 of its
+signatures were copied into the worker's storage first. `hypercomb.com`'s farm
+names `relay.pluginthematrix.io` too: reading `jwize.com` would now come back
+to the worker instead of reaching the machine.
 
 **What changes after the move:** uploads at `https://jwize.com/<sig>`,
 including a meeting's, land in the worker's storage under its upload rules
@@ -357,9 +364,10 @@ Each step is the owner's act; nothing here deploys by itself.
 
 1. **Workers Paid** on the Cloudflare account ($5 a month). It removes the
    100,000-requests-a-day cliff that takes every site down at once.
-2. **Deploy the worker** with the entrance, relay and farm code
-   (`npm run deploy:pluginthematrix` in `hypercomb-relay/blossom-worker`). It
-   changes nothing until a binding or a signed index asks for it.
+2. **Deploy the worker** with the entrance, relay and farm code, staged at 0%
+   first, from a clean worktree, never the shared checkout. Leave the root's
+   route (step 5) commented out until step 7: a custom domain collides with the
+   tunnel's DNS record.
 3. **Give the machine its own name.** The ingress for
    `relay.pluginthematrix.io` is already in `~/.cloudflared/config.yml`. Add
    its DNS route, then restart the tunnel:
@@ -367,21 +375,33 @@ Each step is the owner's act; nothing here deploys by itself.
    cloudflared tunnel route dns 88ceb5a9-fd5f-47de-9fd1-9bb8be2c3e7d relay.pluginthematrix.io
    ```
    Check: `curl -s -H "Accept: application/nostr+json" https://relay.pluginthematrix.io`.
-4. **Bind and route the root** in `wrangler.pluginthematrix.toml`. Add the route
+4. **Copy what only the machine holds.** Put `"farm":["relay.pluginthematrix.io"]`
+   on the `jwize.com` binding (keep `"routed":false` for now), then send
+   `HEAD https://<name>.jwize.com/<sig>` for every signature in the relay's
+   content folder and the host shell. Each miss is read through the farm into
+   storage, checked against its name. Verify with
+   `HEAD https://pluginthematrix.com/<sig>?held` (200 held, 204 missing); never
+   verify on a jwize.com name, where a HEAD copies. A farm miss is remembered
+   for 60 s, so wait before retrying. Through a staged version, use the
+   `Cloudflare-Workers-Version-Overrides` header, and watch for another deploy
+   replacing the stage: every read then misses at once.
+5. **Bind and route the root** in `wrangler.pluginthematrix.toml`. Add the route
    `{ pattern = "jwize.com", custom_domain = true }`. In the `jwize.com` binding,
    drop `"routed":false` and add:
    ```json
    "frontDoor":true,"relay":"relay.pluginthematrix.io","farm":["relay.pluginthematrix.io"]
    ```
-5. **Free the root from the tunnel.** Remove the `jwize.com` tunnel DNS record
-   in the dashboard (it collides with a custom domain at deploy) and the
-   `jwize.com` ingress in `config.yml`, then restart the tunnel.
-6. **Deploy the worker again**, then check:
+   Point `hypercomb.com`'s farm at `relay.pluginthematrix.io` in the same edit.
+6. **Free the root from the tunnel.** Remove the `jwize.com` tunnel DNS record
+   in the dashboard (it collides with a custom domain at deploy). The ingress
+   in `config.yml` can stay; nothing reaches it once the record is gone.
+7. **Attach the root**: `npx wrangler triggers deploy -c wrangler.pluginthematrix.toml`
+   (a version upload never changes routes), then check:
    - `https://jwize.com/` answers as a front door;
-   - `https://jwize.com/<the current install root>` answers 200, read through
-     the farm;
-   - `node scripts/swarm-preflight.cjs --relay wss://jwize.com` meets.
-7. **Check:** `https://jwize.com/` shows your front door on every device.
+   - `https://jwize.com/<any sig>` answers 200 from storage (no
+     `X-Read-Through` after step 4) while the tunnel's request count stays put;
+   - a WebSocket to `wss://jwize.com` is answered by the relay.
+8. **Check:** `https://jwize.com/` shows your front door on every device.
 
 The Hyperdex needs none of this cutover. It runs at its own address,
 `business-card.jwize.com`, and `*.jwize.com` already reaches the worker, so it
@@ -392,9 +412,11 @@ needs only step 2:
    then Turn on.
 4. `https://business-card.jwize.com/` now runs your Hyperdex on any device.
 
-**To undo:** remove the route, put back the DNS record and the ingress
-(`config.yml.bak-2026-10-07` holds the old file), restart the tunnel, and
-deploy.
+**To undo:** roll the worker back, remove the `jwize.com` custom domain, and
+put back the DNS record (`cloudflared tunnel route dns
+88ceb5a9-fd5f-47de-9fd1-9bb8be2c3e7d jwize.com`, the cert is scoped to
+jwize.com). `config.yml.bak-2026-11-26-apex` holds the tunnel config as it was
+at the move.
 
 ## Related
 
