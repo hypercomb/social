@@ -5,8 +5,9 @@
 // kinds of file live on a tile:
 //
 //   page — the tile's website page. The bytes are a resource. A page written
-//          here is a trial: it opens at try-<name>.<this host> and the site
-//          view does not mount it in this hive.
+//          here is a trial: it opens at try-<name>.<this host> and no surface
+//          runs it as this hive until a person brings it home. It is not marked
+//          authored before then (try-page.ts releaseTrial).
 //   file — an attachment by name: a `files:attachment` decoration whose
 //          payload points at the bytes (files-attachment.ts).
 //   card — the tile's business card: its details or its theme, each a JSON
@@ -14,8 +15,9 @@
 //
 // A PAGE IN PARTS (page-parts.ts): once a block of a page has been moved out
 // into a file of its own, the page is rebuilt from its shell and its parts.
-// A write of a part's file, or of the shell, rebuilds the page with it; a
-// write of the whole page is refused and names the files to change instead.
+// A write of a part's file, or of the shell, rebuilds the page with it, and
+// the rebuilt page is a trial exactly as a page written whole is; a write of
+// the whole page is refused and names the files to change instead.
 //
 // ON A MANAGED SITE DOOR (the page carries <script id="hc-manage">) the hive
 // holds a replica of its owner's card and a change is made where it is: a
@@ -191,17 +193,29 @@ export class TileFilesDrone extends Drone {
     // replaces nothing, or a page of the hive's own. Written over someone
     // else's page — a section edit keeps all of its scripts — it stays from
     // elsewhere and runs sealed (page-commit.ts commitPageSigFrom, 2026-11-16).
-    if (!current || isAuthored(current)) markAuthored(htmlSig)
-    return { ok: true, tile: segments, sig: htmlSig, created: !current, unchanged: false, ...await this.#stage(segments, htmlSig, html) }
+    const own = !current || isAuthored(current)
+    return { ok: true, tile: segments, sig: htmlSig, created: !current, unchanged: false, ...await this.#stage(segments, htmlSig, html, own) }
   }
 
   /** The page is already a resource. Mark it as a trial and hand the same
-   *  bytes to the sandbox host. A host that is down does not fail the write. */
-  async #stage(segments: readonly string[], htmlSig: string, html: string): Promise<{ trial: string; vector?: string } | Record<string, never>> {
-    if (onManagedSiteDoor()) return {}
+   *  bytes to the sandbox host. A host that is down does not fail the write.
+   *
+   *  A TRIAL IS NOT AUTHORED (2026-11-27, inline-code-in-input-audit.md H1,
+   *  H2). Marked authored at once, a model's page ran as this hive wherever
+   *  the trial was not asked: the room view, a part seated in a page, the
+   *  page opened at /@resource/ (the service worker seals only what is not
+   *  authored). It becomes authored when a person brings it home, and only
+   *  when `own` (try-page.ts releaseTrial). A tile whose name cannot be a
+   *  door gets no trial and no mark: its page runs sealed. On a managed site
+   *  door there is no trial: the page is changed where it is. */
+  async #stage(segments: readonly string[], htmlSig: string, html: string, own: boolean): Promise<{ trial: string; vector?: string } | Record<string, never>> {
+    if (onManagedSiteDoor()) {
+      if (own) markAuthored(htmlSig)
+      return {}
+    }
     const label = trialLabel(segments)
     if (!label) return {}
-    rememberTrial(htmlSig, label)
+    rememberTrial(htmlSig, label, { own })
     const staged = await stageTrial(label, html)
     return { trial: `${trialOrigin(label)}/`, ...(staged.vector ? { vector: staged.vector } : {}) }
   }
@@ -227,6 +241,10 @@ export class TileFilesDrone extends Drone {
     if (rebuild) {
       const rebuilt = await rebuild.apply()
       if (!rebuilt.ok) return { ok: false, error: `${payload.name} was written, but the page on /${rebuild.page.join('/')} was not rebuilt: ${rebuilt.error}` }
+      // The page rebuilt with a model's part is a trial, as a page written
+      // whole is: before 2026-11-27 it was marked authored and ran as the hive.
+      const staged = await this.#stage(rebuild.page, rebuilt.sig, rebuilt.html, rebuilt.own)
+      return { ok: true, tile: segments, sig: payload.sig, created: !same.length, unchanged: false, ...staged }
     }
     return { ok: true, tile: segments, sig: payload.sig, created: !same.length, unchanged: false }
   }
