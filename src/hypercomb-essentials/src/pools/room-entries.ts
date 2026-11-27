@@ -40,6 +40,7 @@
 import { I18N_IOC_KEY, SignatureService, get, roomPreimage, type I18nProvider } from '@hypercomb/core'
 import { HOST_CONCURRENCY, fetchWithDeadline, mapBounded } from '../sharing/bounded-fetch.js'
 import { nip98Header } from '../sharing/hive-pointer.js'
+import { anchorTagsFor } from '../sharing/key-list.client.js'
 import { isJoinedHere } from '../sharing/membership.js'
 import { readPoolListing } from '../sharing/pool-listing.js'
 import { listingNames, memberTemplate, readMember, standingMembers, type RoomMember } from '../sharing/room-pool.js'
@@ -170,9 +171,13 @@ const liveBytes = async (url: string, limit: number): Promise<Uint8Array | null>
   return readBodyCapped(response, limit)
 }
 
-/** A PUT signed by the participant's own key (NIP-98), answered with the host's code and words. */
+/** A PUT signed by the participant's own key (NIP-98), answered with the host's code and words.
+ *  A device that publishes for an anchor (`keys allow`) signs it AS the anchor (anchorTagsFor carries
+ *  the anchor's key list to the host first): the host counts the write on the anchor's standing, and a
+ *  member stays signed by this device. Without the tag the host meets a stranger's key and refuses. */
 const signedPut = async (url: string, bytes: Uint8Array, signer: RoomEntriesSigner | null): Promise<RoomHostAnswer> => {
-  const auth = signer ? await within(nip98Header(signer, url, 'PUT'), SIGN_TIMEOUT_MS).catch(() => null) : null
+  const tags = signer ? await within(anchorTagsFor(url), SIGN_TIMEOUT_MS).catch(() => [] as string[][]) : []
+  const auth = signer ? await within(nip98Header(signer, url, 'PUT', undefined, tags), SIGN_TIMEOUT_MS).catch(() => null) : null
   if (!auth) return { ok: false, unsigned: true }
   let response: Response
   try {
@@ -193,7 +198,9 @@ const takers = new Set<string>()
  */
 const askTakes = async (host: string, url: string, signer: RoomEntriesSigner | null): Promise<RoomHostAnswer | null> => {
   const ask = `${url}?takes&held`
-  const auth = signer ? await within(nip98Header(signer, ask, 'GET'), SIGN_TIMEOUT_MS).catch(() => null) : null
+  // Asked as the upload will be signed: as the anchor, for a device that publishes for one.
+  const tags = signer ? await within(anchorTagsFor(ask), SIGN_TIMEOUT_MS).catch(() => [] as string[][]) : []
+  const auth = signer ? await within(nip98Header(signer, ask, 'GET', undefined, tags), SIGN_TIMEOUT_MS).catch(() => null) : null
   if (!auth) return { ok: false, unsigned: true }
   try {
     const response = await fetchWithDeadline(ask, { headers: { Authorization: auth }, cache: 'no-store' }, { timeoutMs: HOST_TIMEOUT_MS })

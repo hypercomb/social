@@ -4024,15 +4024,8 @@ export class HostSyncService extends EventTarget {
     // to a host went out under its own key and was refused ("does not accept
     // uploads from this key"). Seen live opening a pool for posts.
     if (this.#ioc<{ anchor?: () => string | null }>(ANCHOR_BINDING_KEY)?.anchor?.()) {
-      const { anchorTagFor, carryKeyChain } = await import('./key-list.client.js')
-      const own = await this.#getOwnPubkey()
-      let anchorTag = anchorTagFor(url, own)
-      if (!anchorTag) {
-        let host = ''
-        try { host = new URL(url).host } catch { /* not a URL: nothing to carry to */ }
-        if (host && await carryKeyChain(host).catch(() => 'unreachable') !== 'unbound') anchorTag = anchorTagFor(url, own)
-      }
-      if (anchorTag) tags.push(anchorTag)
+      const { anchorTagsFor } = await import('./key-list.client.js')
+      tags.push(...await anchorTagsFor(url))
     }
     // LIVE HERE TOO (D7). A relay.js host takes a participant's upload only
     // from a key live on ITS socket; one this tab does not meet at answered
