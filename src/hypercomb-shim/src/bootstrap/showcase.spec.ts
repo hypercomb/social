@@ -2207,7 +2207,7 @@ describe('a tap visits, a hold toggles', () => {
     } finally { hero.remove(); bands.remove() }
   })
 
-  it('what this browser turned on is kept across a visit, lit in its own row while editing, and never added to the page every device sees (jwize 2026-11-16: "show my showcase as last saved")', async () => {
+  it('what this browser turned on is kept across a visit, lit in its own row while editing, and on its own page marked Only you (jwize 2026-11-20: "build the Only you tiles outside Manage")', async () => {
     const { hero, bands } = showcase({
       self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: ['jwize.com'],
       ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => owners(),
@@ -2215,13 +2215,55 @@ describe('a tap visits, a hold toggles', () => {
     })
     document.body.append(hero, bands)
     try {
-      await vi.waitFor(() => expect(namesIn(bands.querySelector('.dex-row.own') as HTMLElement)).toEqual(['camelflage']))
+      await vi.waitFor(() => expect(namesIn(bands.querySelector('.dex-row.own') as HTMLElement)).toEqual(['camelflage', 'dylan']))
+      // Only this browser picked it: it is on this browser's page, said to be its own, and nothing about it is published.
+      const mine = await tileIn(bands, '.dex-row.own a.hex', 'dylan')
+      expect(mine.classList.contains('staged')).toBe(true)
+      expect(mine.querySelector('.hex-state')?.textContent).toBe('Only you')
+      expect((await tileIn(bands, '.dex-row.own a.hex', 'camelflage')).classList.contains('staged')).toBe(false)
       manageOn(hero)
       expect(rowNamed(bands, 'Community')).toBeUndefined()
       const row = await openRowNamed(bands, 'jwize.com')
       expect(namesIn(row)).toContain('dylan')
       expect((await tileIn(bands, '.dex-row:not(.own) a.hex', 'dylan')).classList.contains('off')).toBe(false)
     } finally { hero.remove(); bands.remove() }
+  })
+
+  it('what the owners staged and did not share is on the page of a key that answers, marked Only you, and never on a visitor page', async () => {
+    const stagedOwners = (): ZoneOwners => ({ ...owners(), staged: { zone: 'hypercomb.com', domains: [], items: [...record.items, { pubkey: a, lineage: 'dylan' }] } })
+    const draw = (owner: ReturnType<typeof bridge> | null) => showcase({
+      self: 'hypercomb.com', title: 'hypercomb', tagline: '', sources: [],
+      ledger: Promise.resolve(sites), readShared: async () => ({ offers: [], creations: [] }), readOwners: async () => stagedOwners(),
+      ...(owner ? { owner } : {}),
+    })
+    const owner = bridge(a)
+    const mine = draw(owner)
+    document.body.append(mine.hero, mine.bands)
+    try {
+      await vi.waitFor(() => expect(namesIn(mine.bands.querySelector('.dex-row.own') as HTMLElement)).toContain('dylan'))
+      const dylan = await tileIn(mine.bands, '.dex-row.own a.hex', 'dylan')
+      expect(dylan.classList.contains('staged')).toBe(true)
+      expect(dylan.classList.contains('off')).toBe(false)
+      // The page says the key answers, managing or not.
+      const chip = mine.hero.querySelector('.key-chip') as HTMLElement
+      expect(chip.hidden).toBe(false)
+      expect(chip.classList.contains('has-key')).toBe(true)
+      expect(chip.textContent).toBe('Your key')
+    } finally { mine.hero.remove(); mine.bands.remove() }
+    const visitor = draw(null)
+    document.body.append(visitor.hero, visitor.bands)
+    try {
+      await vi.waitFor(() => expect(namesIn(visitor.bands.querySelector('.dex-row.own') as HTMLElement).length).toBeGreaterThan(0))
+      await new Promise(resolve => setTimeout(resolve, 20))
+      expect(namesIn(visitor.bands.querySelector('.dex-row.own') as HTMLElement)).not.toContain('dylan')
+      // A visitor is shown no badge; managing, the page says no key answers here.
+      const chip = visitor.hero.querySelector('.key-chip') as HTMLElement
+      expect(chip.hidden).toBe(true)
+      manageOn(visitor.hero)
+      expect(chip.hidden).toBe(false)
+      expect(chip.classList.contains('has-key')).toBe(false)
+      expect(chip.textContent).toBe('No key here')
+    } finally { visitor.hero.remove(); visitor.bands.remove() }
   })
 
   it('on a phone with no key a tap is the switch itself: no question, kept in this browser, and a published tile says whose it is', async () => {

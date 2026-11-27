@@ -41,6 +41,7 @@ import {
 import { stripPart } from '../strip/strip.js'
 import { installKeyboardDeskStyles } from './keyboard-desk.styles.js'
 import { closeWhenDark, refuseWhileDark } from '../../commands/word-enablement.js'
+import { isTyping } from '../../keyboard/typing-focus.js'
 
 const DESK = 'keyboard-desk'
 /** The word this desk belongs to: its light is the desk's (commands/word-enablement.ts). */
@@ -430,7 +431,7 @@ export class KeyboardDeskElement extends HTMLElement {
   #onKeyDown = (event: KeyboardEvent): void => {
     if (event.isComposing) return
     const target = event.target
-    const typing = target instanceof HTMLElement && !!target.closest('input, textarea, [contenteditable="true"]')
+    const typing = isTyping(event)
     const plain = !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
 
     if (event.key === 'Escape' && plain) {

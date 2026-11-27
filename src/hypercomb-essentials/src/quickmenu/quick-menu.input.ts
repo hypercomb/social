@@ -63,6 +63,7 @@ import type { QuickMenuRegistry } from './quick-menu-registry.service.js'
 import { selectionMenuWanted } from './quick-menu.tile-menu.js'
 import { altProvenUp } from './quick-menu.alt-held.js'
 import { MANY_TILES_MENU, SELECTION_MENU, currentOperands, manyCount, menuForOperands } from './quick-menu.operands.js'
+import { isTyping } from '../keyboard/typing-focus.js'
 import {
   HEX_RADIUS,
   OPPOSITE_DIRECTION,
@@ -1049,7 +1050,7 @@ export class QuickMenuInput {
     }
     this.#reconcileAlt(e)
     if (this.#flight?.active) {
-      if (e.key === 'Enter') {
+      if (e.key === 'Enter' && !isTyping(e)) {
         e.preventDefault()
         e.stopPropagation()
         this.#flight.confirm()

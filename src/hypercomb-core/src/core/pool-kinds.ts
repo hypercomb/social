@@ -193,6 +193,11 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   ['substrate:references', 'set'],
   ['substrate:sources', 'set'],
   ['websites:menu', 'set'],
+  // The recipe templates a hive keeps, and offers (documentation/recipe-templates.md).
+  ['recipe:template', 'set'],
+  ['recipe:entry', 'set'],
+  // The table sets a recipe desk can sit on (essentials recipe/recipe-setting.ts).
+  ['recipe:setting', 'set'],
   // DOCUMENTS — one CURRENT record, per-participant. Every earlier version of
   // a SAVE is kept and a numbered marker names the current one; a write the
   // software makes on its own keeps only the current (Store.putPoolDoc). They
@@ -229,6 +234,13 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   ['roots:saved', 'document'],
   // The tile editor's drawn size (essentials editor/editor-size.ts): one number.
   ['editor:size', 'document'],
+  // Which followed hosts the domain shelf has switched off (essentials pools/pool-sources.ts).
+  ['pools:sources', 'document'],
+  // Which table set the recipe desk sits on (essentials recipe/recipe-setting-pool.ts).
+  ['recipe:desk', 'document'],
+  // The entry pools a leader opened, without their nonces (essentials
+  // pools/open-entries.ts): one current record, never offered or listed.
+  ['entries:opened', 'document'],
   // What participants make, moved out of localStorage the same way
   // (essentials preferences/participant-document.ts).
   ['sequences:palette', 'document'],

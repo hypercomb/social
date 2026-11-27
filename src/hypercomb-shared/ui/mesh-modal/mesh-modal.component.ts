@@ -67,7 +67,18 @@ import { pendingMeetCredentials } from '../../core/invite-capture'
 const INVITE_QUEEN_KEY = '@diamondcoreprocessor.com/InviteQueenBee'
 const MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 
-interface InviteQueenLike { invoke: (args: string) => Promise<void>; meetingLink?: () => Promise<void> }
+interface InviteQueenLike {
+  invoke: (args: string) => Promise<void>
+  meetingLink?: (how?: 'copy' | 'share' | 'qr') => Promise<void>
+  /** True on a queen that draws the meeting link as a code: meetingLink('qr'). */
+  meetingCode?: boolean
+}
+
+/** Whether this queen draws the room as a code. She says so herself: an older
+ *  queen's meetingLink takes 'qr' for a share, and her invoke takes it for a
+ *  junction's label, so neither is ever guessed at. */
+const drawsCode = (invite: InviteQueenLike | undefined): boolean =>
+  invite?.meetingCode === true && typeof invite.meetingLink === 'function'
 interface MeshRelayApi {
   configureRelays?: (urls: string[], persist?: boolean) => void
   getDebug?: () => { relays?: readonly string[] } | undefined
@@ -154,6 +165,11 @@ export class MeshModalComponent implements OnInit, OnDestroy {
   readonly pointSupported = signal(true)
   /** Where this page's own relay list would meet (ownMeetingPoint). */
   readonly #ownPoint = signal('')
+  /** Whether the loaded invite queen draws the room as a code (drawsCode):
+   *  the 'show code' button is drawn only then. True while no queen is loaded
+   *  yet, the way the share button stands: a press then says the behaviour is
+   *  not loaded, and the queen that does load is asked again at the press. */
+  readonly codeSupported = signal(true)
 
   /** THE ROOM'S TWO WORDS — the same pair the breadcrumb and the presence
    *  line show, live from the drafts: the room's address read aloud, with
@@ -265,6 +281,8 @@ export class MeshModalComponent implements OnInit, OnDestroy {
       this.pointSupported.set(!mesh || typeof mesh.ownRelays === 'function')
       const listPoint = ownMeetingPoint(mesh)
       this.#ownPoint.set(listPoint)
+      const invite = get(INVITE_QUEEN_KEY) as InviteQueenLike | undefined
+      this.codeSupported.set(!invite || drawsCode(invite))
       // THIS tab's point — else the point this device last met at (never its
       // code), else the relay the page's own list names (as chosen): the
       // field is the only place the host comes from, so it is never hidden
@@ -443,7 +461,18 @@ export class MeshModalComponent implements OnInit, OnDestroy {
    *  outcome.
    *
    *  The method keeps its name: the template binds `copyShareLink()`. */
-  readonly copyShareLink = async (): Promise<void> => {
+  readonly copyShareLink = (): Promise<void> => this.#handOutMeeting('copy')
+
+  /** SHOW THIS ROOM AS A CODE: the same meeting link, drawn large on this
+   *  screen for the people standing in front of it to scan
+   *  (essentials sharing/room-qr.view.ts). Everything up to the delivery is
+   *  the share button's: the same guards, the same messages, the drafts
+   *  committed first. */
+  readonly showRoomCode = (): Promise<void> => this.#handOutMeeting('qr')
+
+  /** Commit the drafts, then have the invite queen deliver the meeting link:
+   *  copied, or drawn as a code. */
+  #handOutMeeting = async (how: 'copy' | 'qr'): Promise<void> => {
     const room = this.roomDraft().trim()
     const secret = this.secretDraft().trim()
     // An invite IS (room, secret) — without both there is nothing to share.
@@ -467,17 +496,26 @@ export class MeshModalComponent implements OnInit, OnDestroy {
       })
       return
     }
+    // THE CODE HAS NO OLDER DOOR. A queen from before it is never handed the
+    // word: the button goes, and nothing is written, shared or stamped.
+    if (how === 'qr') {
+      this.codeSupported.set(drawsCode(invite))
+      if (!this.codeSupported()) return
+    }
     // The invite names the credentials in the STORES; make them the ones on
     // screen so the link never points at a stale pair.
     this.#commitDrafts()
     this.#sharing = true
     // The meeting link, whatever is selected (an older queen: invoke('')).
-    try { await (invite.meetingLink ? invite.meetingLink() : invite.invoke('')) }
+    try {
+      if (how === 'qr') await invite.meetingLink?.('qr')
+      else await (invite.meetingLink ? invite.meetingLink() : invite.invoke(''))
+    }
     catch (e) { console.warn('[mesh-modal] invite mint failed:', e) }
     finally { this.#sharing = false }
   }
 
-  /** Re-entrancy latch for the share button — one mint at a time. */
+  /** Re-entrancy latch for the share and code buttons: one mint at a time. */
   #sharing = false
 
   /** Template hook retained (`[class.copied]` / the "copied!" label). The

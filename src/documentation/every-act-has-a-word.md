@@ -56,8 +56,6 @@ mechanism.
 |---|---|---|
 | `/hide <tile>`, `/hide ~<tile>` | a tile-overlay icon | HIDE FIRST, DELETE SECOND — the gentle half of the pair had no word while the harsh half did. Also mints `unhide` as an action name; `break-apart` reached it because the overlay reuses that icon slot |
 | `/undo`, `/redo` | keystroke, control bar, phone deck | walks `HistoryCursorService`; the one wholly reversible verb in the language |
-| `/copy`, `/cut` | keystroke, control bar | NAME their tiles on the machine seam — the button acts on the selection, which a speaker cannot see |
-| `/paste` | keystroke, control bar | bare means something entire: place what is held, where you are |
 | `/card`, `/card wear <template>`, `/card <tile> wear <template>` | writing a tile's `card:data` and page records over the bridge | a card wears a template by reference: the template's page and theme, its own details and picture. Bare `card` says what a card wears. Added 2026-10-05 with card templates (business-card.md) |
 | `/opens <tile> as <view>`, `/opens <tile> as hexagons` | ctrl+click on a tile's view icon, the header rail's ctrl+click | the same `features:default` toggle the icon emits; bare `opens <tile>` says how it opens. Added 2026-10-04 with the tile-icon gesture, in the same pass |
 | `/groups` — `on`, `off`, `new`, `add`, `drop`, `rename`, `color`, `icon`, `publish`, `ungroup` | the publish-groups strip at the top of the hive (taps, hover, its editor) | the same acts the strip calls (`PublishGroupsDrone`); `on`/`off` emit the panel's own `features:enable`/`features:remove`, `silent` so the panel stays shut. `rawArgs`, because `publish` is itself a behaviour word. A model may say it (2026-10-13): `machine` at editing/network, `ungroup` and selection-acting forms refused. Added 2026-10-11 (publish-groups.md) |
@@ -86,7 +84,7 @@ the list is mechanical, not curated.
 
 **Probably not verbs** (view chrome, or already covered elsewhere): `close`,
 `fullscreen`, `list`, `library`, `new`, `save`, `camera`, `sync`, `apply`,
-`adopt-selected`, `pheromones`, `clear-clipboard`.
+`adopt-selected`, `pheromones`.
 
 The point of listing them anyway is that "probably not" is a judgement someone
 should make out loud, once, rather than by omission.
@@ -128,8 +126,8 @@ use a COLD bag or it proves nothing.
 ### Right about the wrapping
 
 Beehaviors are the wrappers over that one primitive, and that is already the
-architecture: `/create`, `/remove`, `/title`, `/keyword`, `/into`, `/cut` and
-`/paste` all end in a layer commit. Nothing needs restructuring for this to be
+architecture: `/create`, `/remove`, `/title`, `/keyword` and `/into`
+all end in a layer commit. Nothing needs restructuring for this to be
 true. What the verbs add on top is the part a desired-state payload could not
 carry — a `refuse` message in the author's own words, a per-line receipt, an
 honest `reach`, and a target the participant can name.

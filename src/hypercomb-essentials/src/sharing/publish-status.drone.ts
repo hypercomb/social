@@ -461,6 +461,11 @@ export class PublishStatusDrone extends Drone {
   #community: string[] = []
   /** The domains your host actually SERVES, read from its own ledger. */
   #served: string[] = []
+  /** The nested places' own names the host says are ATTACHED (deep-names.md),
+   *  each with when, from the same ledger. A deep name not here is never asked:
+   *  until the host attaches it, no certificate covers it, and asking only
+   *  fills the console with failed handshakes. */
+  #attachedDeep = new Map<string, number>()
 
   /** Where each branch says it publishes — the marks it wears, by key. */
   readonly #branchHosts = new Map<string, string[]>()
@@ -968,7 +973,10 @@ export class PublishStatusDrone extends Drone {
         }
         this.#emit()
       }
-      this.#served = await servedRead
+      const served = await servedRead
+      this.#served = served.zones
+      // A ledger that could not be read says nothing: what was known stands.
+      if (served.read) this.#attachedDeep = served.attached
 
       // ONE index read per door answers every row behind that door.
       const indexes = new Map<string, {
@@ -1519,10 +1527,15 @@ export class PublishStatusDrone extends Drone {
       // A NESTED PLACE'S OWN NAME, once it answers (deep-name-live.ts): its own
       // origin, where `<top>.<zone>/<rest>` shares the top place's. Only for a
       // place the index publishes by itself, and never over a signed address.
+      // Asked only once the host says the name is attached, and its certificate
+      // has had time to arrive: the host alone knows, and a name it has not
+      // attached fails its TLS handshake before any page answers.
       const deep = !label && row.live ? deepNameHost(zone, row.key) : ''
       if (!deep) continue
-      if (deepNameLive(deep)) urls[zone] = originOf(deep)
-      else void askDeepName(deep).then(live => { if (live) this.#deepNameCame(row.key, zone, deep) })
+      // A name already proven on this page asks nothing again.
+      if (deepNameLive(deep)) { urls[zone] = originOf(deep); continue }
+      if (!deepNameReady(this.#attachedDeep.get(deep))) continue
+      void askDeepName(deep).then(live => { if (live) this.#deepNameCame(row.key, zone, deep) })
     }
     row.urls = urls
     row.ownLabels = ownLabels
@@ -2500,22 +2513,62 @@ const _publishStatus = new PublishStatusDrone()
 /** Every domain a host serves, read from its publications at sign('host:publications'): each door
  *  is `<name>.<zone>`, so the zones are the doors less their first label.
  *  Best-effort and bounded — no answer means no extra domains, never an error. */
-async function servedZones(zone: string): Promise<string[]> {
+type ServedRead = { zones: string[]; attached: Map<string, number>; read: boolean }
+
+/** The zones the host serves, and the deep names it has attached, from its
+ *  ledger. A door's zone is its host with the PLACE's own labels taken off: an
+ *  implicit door of a nested place (`part.hyperdex.knowledge.jwize.com` for
+ *  `knowledge/hyperdex/part`) hangs off `jwize.com`, never off the name one
+ *  label in, which used to make `hyperdex.knowledge.jwize.com` a "zone" and
+ *  every name under it a doubled one. Any other door loses its first label,
+ *  as before. The attached names are the ledger's `deepNames`, host → when
+ *  (0: before the host kept times); a host that predates it lists none. */
+export function readServedLedger(apex: string, ledger: unknown): ServedRead {
+  const zones = new Set<string>([apex])
+  const attached = new Map<string, number>()
+  const body = (ledger ?? {}) as { sites?: unknown; deepNames?: unknown }
+  if (body.deepNames && typeof body.deepNames === 'object' && !Array.isArray(body.deepNames)) {
+    for (const [host, at] of Object.entries(body.deepNames as Record<string, unknown>)) {
+      const when = Number(at)
+      if (typeof at === 'number' && Number.isFinite(when) && when >= 0) attached.set(host.toLowerCase(), when)
+    }
+  }
+  const sites = body.sites
+  if (!Array.isArray(sites)) return { zones: [...zones].map(hostZone).filter(Boolean), attached, read: true }
+  for (const site of sites as { lineage?: unknown; hosts?: { host?: unknown; implicit?: unknown }[] }[]) {
+    const segments = String(site?.lineage ?? '').split('/').filter(Boolean)
+    for (const door of Array.isArray(site?.hosts) ? site.hosts : []) {
+      const host = String(door?.host ?? '').toLowerCase()
+      const labels = host.split('.').filter(Boolean)
+      const place = [...segments].reverse().join('.')
+      const own = door?.implicit === true && segments.length > 0
+        && labels.length >= segments.length + 2 && labels.slice(0, segments.length).join('.') === place
+      if (own) { zones.add(labels.slice(segments.length).join('.')); continue }
+      if (door?.implicit === true) continue   // an implicit door that is not its place's own name names no zone
+      const dot = host.indexOf('.')
+      if (dot > 0 && host.slice(dot + 1).includes('.')) zones.add(host.slice(dot + 1))
+    }
+  }
+  return { zones: [...zones].map(hostZone).filter(Boolean), attached, read: true }
+}
+
+/** How long a newly attached name's certificate takes (deep-names.md: about
+ *  three and a half minutes), with room to spare. */
+const DEEP_CERT_MS = 6 * 60_000
+
+/** May a deep name be asked yet: attached by the host, and long enough ago for
+ *  its certificate. An attach time of 0 means attached before the host kept
+ *  times, so long since. */
+export const deepNameReady = (attachedAt: number | undefined, now: number = Date.now()): boolean =>
+  attachedAt !== undefined && (attachedAt === 0 || now - attachedAt >= DEEP_CERT_MS)
+
+async function servedZones(zone: string): Promise<ServedRead> {
   const apex = String(zone ?? '').trim().toLowerCase()
-  if (!apex || LOOPBACK_RE.test(apex)) return []
+  const none: ServedRead = { zones: [], attached: new Map(), read: false }
+  if (!apex || LOOPBACK_RE.test(apex)) return none
   try {
     const res = await fetch(`https://${apex}/${await registerPoolMeaning('host:publications')}`, { cache: 'no-store', signal: AbortSignal.timeout(6000) })
-    if (!res.ok) return []
-    const sites = (await res.json() as { sites?: { hosts?: { host?: string }[] }[] })?.sites
-    if (!Array.isArray(sites)) return []
-    const zones = new Set<string>([apex])
-    for (const site of sites) {
-      for (const door of site?.hosts ?? []) {
-        const host = String(door?.host ?? '').toLowerCase()
-        const dot = host.indexOf('.')
-        if (dot > 0 && host.slice(dot + 1).includes('.')) zones.add(host.slice(dot + 1))
-      }
-    }
-    return [...zones].map(hostZone).filter(Boolean)
-  } catch { return [] }
+    if (!res.ok) return none
+    return readServedLedger(apex, await res.json())
+  } catch { return none }
 }

@@ -33,7 +33,8 @@
 import { TRAIT_WANT_KIND, get, isReservedPoolWord, sameTraitWord, traitWords, type TraitWant } from '@hypercomb/core'
 import { listDecorations, removeDecorationAndWait, writeDecoration } from '../commands/decoration-manifest.js'
 import { FILES_ATTACHMENT_KIND, listAttachments, writeAttachment, type AttachmentPayload } from './files-attachment.js'
-import { commitPageSigFrom } from './page-commit.js'
+import { commitPageSig } from './page-commit.js'
+import { isAuthored } from '../sharing/authored-sigs.js'
 import {
   SHELL_FILE, assemblePage, blockIdOf, moveBlockOut, partExtension, partTextRefusal, repinPart, shellParts,
 } from './page-parts.js'
@@ -173,8 +174,14 @@ async function wearTrait(segments: readonly string[], word: string): Promise<voi
   await writeDecoration<TraitWant>({ kind: TRAIT_WANT_KIND, appliesTo: segments, segments, payload, mark: 'persistent' })
 }
 
+/** The page rebuilt: its signature and text, and whether it is the hive's own
+ *  words (the page it replaced was, or none stood). Nothing here marks it. */
+export type PartRebuilt =
+  | { readonly ok: true; readonly sig: string; readonly html: string; readonly own: boolean }
+  | { readonly ok: false; readonly error: string }
+
 export type PartRebuild =
-  | { readonly ok: true; readonly page: readonly string[]; apply(): Promise<{ ok: true } | { ok: false; error: string }> }
+  | { readonly ok: true; readonly page: readonly string[]; apply(): Promise<PartRebuilt> }
   | { readonly ok: false; readonly error: string }
 
 /** A file named `name` on `segments` is about to go from `prior` to `next`.
@@ -212,12 +219,15 @@ export async function planPartRebuild(
   return null
 }
 
-async function commit(segments: readonly string[], html: string): Promise<{ ok: true } | { ok: false; error: string }> {
+async function commit(segments: readonly string[], html: string): Promise<PartRebuilt> {
   const page = await put(html, 'html')
   // Rebuilt from its files, the page is as much this hive's own as the page it
-  // replaces (page-commit.ts commitPageSigFrom).
+  // replaces. It is not marked authored here: the part came through a model's
+  // write, so the page is a trial until a person brings it home, and is marked
+  // then (tile-files.drone.ts #stage, try-page.ts releaseTrial; 2026-11-27).
   const before = await get<SiteViewLike>('@diamondcoreprocessor.com/SiteViewDrone')?.resolvePageSig?.(segments).catch(() => null) ?? null
-  return commitPageSigFrom(segments, page.sig, before)
+  const committed = await commitPageSig(segments, page.sig)
+  return committed.ok ? { ok: true, sig: page.sig, html, own: !before || isAuthored(before) } : committed
 }
 
 /** The files the page `pageSig` on this tile is made of, when its shell still

@@ -73,7 +73,7 @@ The complete reference. Every page is also reachable through `/help` in the app 
 
 ## CLI & Commands
 
-- [command-line-reference.md](command-line-reference.md) — All command-line operations: create, navigate, filter, batch, cut-paste, markers
+- [command-line-reference.md](command-line-reference.md) — All command-line operations: create, navigate, filter, batch, shelf, markers
 - [slash-behaviour-reference.md](slash-behaviour-reference.md) — All `/slash` commands with aliases, grouped by category
 - [slash-command-authoring.md](slash-command-authoring.md) — How to add a new slash command
 

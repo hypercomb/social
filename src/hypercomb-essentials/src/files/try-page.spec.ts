@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { forgetTrials, pageHomeOf, releaseTrial, rememberTrial, stageTrial, trialBase, trialLabel, trialOf, trialOrigin, trialVector, trialVersion, trialVersionLabel, trialZone } from './try-page.js'
+import { forgetTrials, pageHomeOf, releaseTrial, rememberTrial, stageTrial, trialBase, trialIsOwn, trialLabel, trialOf, trialOrigin, trialsReady, trialVector, trialVersion, trialVersionLabel, trialZone } from './try-page.js'
+import { isAuthored } from '../sharing/authored-sigs.js'
 
-afterEach(() => forgetTrials())
+afterEach(() => { forgetTrials(); localStorage.removeItem('hc:authored-sigs') })
 
 describe('a page trial', () => {
   it('names the door from the tile, as one try- label', () => {
@@ -50,6 +51,63 @@ describe('a page trial', () => {
     rememberTrial(sig, 'try-studio')
     expect(releaseTrial(sig)).toBe(true)
     expect(trialOf(sig)).toBeNull()
+  })
+
+  // A TRIAL IS NOT AUTHORED (2026-11-27): a model's page runs as the hive only
+  // once a person brings it home, and only when it is the hive's own words.
+  it('is not authored while it is a trial, and becomes authored when a person brings home the hive\'s own words', () => {
+    const sig = 'c'.repeat(64)
+    rememberTrial(sig, 'try-studio', { own: true })
+    expect(trialIsOwn(sig)).toBe(true)
+    expect(isAuthored(sig)).toBe(false)
+    expect(releaseTrial(sig)).toBe(true)
+    expect(isAuthored(sig)).toBe(true)
+  })
+
+  it('comes home still sealed when it was written over someone else\'s page', () => {
+    const sig = 'd'.repeat(64)
+    rememberTrial(sig, 'try-studio')
+    expect(trialIsOwn(sig)).toBe(false)
+    expect(releaseTrial(sig)).toBe(true)
+    expect(isAuthored(sig)).toBe(false)
+  })
+
+  it('a later write of the same page as someone else\'s takes back the own mark', () => {
+    const sig = 'e'.repeat(64)
+    rememberTrial(sig, 'try-studio', { own: true })
+    rememberTrial(sig, 'try-studio')
+    releaseTrial(sig)
+    expect(isAuthored(sig)).toBe(false)
+  })
+
+  it('reads the stored ledger before it answers, and an older one names no page as the hive\'s own', async () => {
+    const own = 'f'.repeat(64)
+    const old = '9'.repeat(64)
+    const docs: string[] = [
+      JSON.stringify({ trials: { [own]: 'try-studio' }, own: [own] }),
+      JSON.stringify({ [old]: 'try-notes' }),
+    ]
+    const prior = window.ioc
+    let doc = docs[0]
+    window.ioc = {
+      get: (key: string) => (key === '@hypercomb.social/Store'
+        ? { getPool: async () => ({}), getPoolDoc: async () => new TextEncoder().encode(doc).buffer, putPoolDoc: async () => null }
+        : undefined),
+    } as unknown as Window['ioc']
+    try {
+      await trialsReady()
+      expect(trialOf(own)).toBe('try-studio')
+      expect(trialIsOwn(own)).toBe(true)
+      forgetTrials()
+      doc = docs[1]
+      await trialsReady()
+      expect(trialOf(old)).toBe('try-notes')
+      expect(trialIsOwn(old)).toBe(false)
+      releaseTrial(old)
+      expect(isAuthored(old)).toBe(false)
+    } finally {
+      window.ioc = prior
+    }
   })
 
   it('copies a page picture onto the trial after the page is accepted', async () => {

@@ -34,6 +34,7 @@ import {
 } from './guide-place.js'
 import { GUIDE_SURFACE, GuideOverlayElement, type GuideBoardMode } from './guide-overlay.view.js'
 import { GuideStage } from './guide-stage.js'
+import { isTyping } from '../keyboard/typing-focus.js'
 
 type LineageApi = { explorerSegments?: () => readonly string[] }
 type Hover = { label?: string | null }
@@ -205,6 +206,7 @@ export class GuideDrone extends Drone {
   }
 
   #key(event: KeyboardEvent): void {
+    if (event.key !== 'Escape' && isTyping(event)) return
     const seat = this.#seat
     if (event.repeat) return
     if (event.key === 'Enter' && seat?.landed && seat.chosen.size > 0) {

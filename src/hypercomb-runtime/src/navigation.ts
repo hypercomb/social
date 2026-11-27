@@ -5,7 +5,7 @@
 // no lineage and no navigation, so a page there had no "where you stand": a
 // create committed nothing and said it ran. This file imports no Angular and
 // nothing of the shell; the shell file of the same name re-exports it.
-import { addressSegment, hypercomb } from '@hypercomb/core'
+import { addressSegment, hypercomb, isPostFragment } from '@hypercomb/core'
 // The completions this file reads from ioc are registered by loading that
 // file. Only its type is named below, so a plain import is dropped by the
 // bundler: the framework-free shell then had no CompletionUtility, and the
@@ -168,6 +168,10 @@ export class Navigation extends hypercomb {
     if (bracket && bracket.length > 0) return bracket
 
     const raw = window.location.hash ?? ''
+    // An entry pool's code (`#post=…`, documentation/open-entry-pools.md)
+    // stays in the address bar so a reload comes back to the form. It is a
+    // code, never a tile's name.
+    if (isPostFragment(raw)) return []
     const h = raw.startsWith('#') ? raw.slice(1) : raw
     if (!h.trim()) return []
 

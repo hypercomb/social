@@ -311,13 +311,14 @@ async function handleLayerRequest(request) {
 // it serves, and any +xml type, or one a browser sniffs, can run script. Only
 // two things are left as they are: a type known to run nothing (a PDF, a
 // picture, a video, plain text — sealing a PDF only blanks it), and a page this
-// hive authored (the sign('authored') pool, authored-sigs.ts), which
-// opens as it always did. Pictures, sheets and scripts a page of the hive
-// itself loads are not documents and are served as before.
+// hive authored (the sign('authored') pool, authored-sigs.ts) that is not a
+// trial, which opens as it always did. Pictures, sheets and scripts a page of
+// the hive itself loads are not documents and are served as before.
 const SEALED_DESTINATIONS = new Set(['document', 'iframe', 'frame', 'embed', 'object'])
 const SEALED_DOCUMENT_POLICY = 'sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads'
 const INERT_DOCUMENT_TYPE = /^\s*(image\/(png|jpeg|gif|webp|avif|bmp|x-icon)|video\/[\w.+-]+|audio\/[\w.+-]+|font\/[\w.+-]+|application\/pdf|text\/plain|text\/css|text\/markdown|application\/javascript|application\/json)\s*(;|$)/i
 const AUTHORED_MEANING = 'authored'
+const TRIAL_MEANING = 'trials:pages'
 
 function opensAsDocument(request) {
   return request.mode === 'navigate' || SEALED_DESTINATIONS.has(request.destination)
@@ -332,11 +333,36 @@ async function authoredHere(sig) {
   } catch { return false }
 }
 
-async function sealedIfDocument(request, response, authored = authoredHere) {
+// A TRIAL IS SEALED EVEN WHEN IT WAS MARKED AUTHORED (2026-11-27,
+// documentation/inline-code-in-input-audit.md H2). A page a model writes is a
+// trial until a person brings it home (try-page.ts), and is marked authored
+// only then. Trials written before that day were marked at once, and nothing
+// takes a mark back, so the trial ledger is asked as well. It is one current
+// document in sign('trials:pages'): `{ trials: { sig: label }, own }`, or the
+// older bare `{ sig: label }`. Every document there is read, so a ledger caught
+// mid-write seals more, never less; a pool that cannot be read, other than one
+// that is not there, seals too.
+async function trialHere(sig) {
+  try {
+    const root = await self.navigator.storage.getDirectory()
+    const pool = await root.getDirectoryHandle(await sha256Hex(new TextEncoder().encode(TRIAL_MEANING)), { create: false })
+    const wanted = String(sig).toLowerCase()
+    for await (const [name, handle] of pool.entries()) {
+      if (handle.kind !== 'file' || !/^[a-f0-9]{64}$/.test(name)) continue
+      let doc = null
+      try { doc = JSON.parse(await (await handle.getFile()).text()) } catch { continue }
+      const trials = doc && typeof doc.trials === 'object' && doc.trials ? doc.trials : doc
+      if (trials && typeof trials === 'object' && Object.prototype.hasOwnProperty.call(trials, wanted)) return true
+    }
+    return false
+  } catch (err) { return err?.name !== 'NotFoundError' }
+}
+
+async function sealedIfDocument(request, response, authored = authoredHere, trial = trialHere) {
   if (!opensAsDocument(request)) return response
   if (INERT_DOCUMENT_TYPE.test(response.headers.get('content-type') || '')) return response
   const sig = new URL(request.url).pathname.slice(SITE_RESOURCE_PREFIX.length).split('/')[0] || ''
-  if (await authored(sig)) return response
+  if (await authored(sig) && !(await trial(sig))) return response
   const headers = new Headers(response.headers)
   headers.set('content-security-policy', SEALED_DOCUMENT_POLICY)
   headers.set('x-content-type-options', 'nosniff')

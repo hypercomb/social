@@ -2,6 +2,12 @@
 import { EffectBus, type KeyBinding, type KeyChord, type KeyMapLayer } from '@hypercomb/core'
 import { USER_KEYMAP_LAYER, chordFits, pressOfEvent } from './chord-match.js'
 import { globalKeyMap, defaultKeyMap } from './default-keymap.js'
+import { isTyping } from './typing-focus.js'
+
+/** While a text field has focus every key is the field's: no shortcut fires,
+ *  pierce or not — Ctrl+Z is the text's undo, not the hive's. Only the keys
+ *  that LEAVE the field get through: Escape, and the command line's toggle. */
+const LEAVES_THE_FIELD: ReadonlySet<string> = new Set(['global.escape', 'history.exit-revise', 'ui.commandLineToggle'])
 
 const SEQUENCE_TIMEOUT_MS = 500
 
@@ -173,7 +179,8 @@ export class KeyMapService extends EventTarget {
     if (this.#isModifierOnly(e)) return
     if (this.#holds.size) return
 
-    const isSuppressed = this.suppressed || this.#isInteractiveFocus()
+    const typing = isTyping(e)
+    const isSuppressed = this.suppressed || typing
     const bindings = this.getEffective()
     let anyAdvanced = false
     let matched = false
@@ -188,6 +195,11 @@ export class KeyMapService extends EventTarget {
     for (const binding of bindings) {
       // when suppressed, only pierce bindings fire
       if (isSuppressed && !binding.pierce) {
+        this.#sequenceState.delete(binding.cmd)
+        continue
+      }
+      // typing, not even those: only a key that leaves the field
+      if (typing && !LEAVES_THE_FIELD.has(binding.cmd)) {
         this.#sequenceState.delete(binding.cmd)
         continue
       }
@@ -288,13 +300,6 @@ export class KeyMapService extends EventTarget {
     return k === 'control' || k === 'shift' || k === 'alt' || k === 'meta'
   }
 
-  #isInteractiveFocus(): boolean {
-    const el = document.activeElement
-    if (!el) return false
-    return !!el.closest(
-      'input, textarea, select, [contenteditable="true"], [contenteditable=""], [role="textbox"]'
-    )
-  }
 }
 
 // keyboard/keyboard.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

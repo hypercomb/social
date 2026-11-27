@@ -118,7 +118,7 @@ src/
 │   └── src/
 │       ├──    # Core processor domain — feature-oriented tree
 │       │   ├── assistant/              # AI assistant integration (ClaudeBridgeWorker)
-│       │   ├── clipboard/              # Copy, cut, paste (ClipboardWorker, ClipboardService)
+│       │   ├── clipboard/              # A picture pasted from the OS clipboard (ImagePasteWorker)
 │       │   ├── commands/               # Command palette, slash behaviours, help, shortcut sheet
 │       │   ├── editor/                 # Tile content editing + image manipulation
 │       │   ├── history/                # Change tracking / undo-redo (HistoryRecorder, HistoryService)

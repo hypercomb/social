@@ -8,6 +8,7 @@ import {
   SignatureService,
   classifyDirectoryEntry,
   documentSweepVeto,
+  entryNonceStore,
   isMetaEnvelope,
   isSignature,
   llmKeyStore,
@@ -514,6 +515,14 @@ export class Store extends EventTarget {
       const carried = llmKeyStore.carriedBy?.(bytes)
       if (carried) {
         console.warn(`[pool] refused a document in ${String(pool?.name ?? '').slice(0, 8)}… — it carries this device's ${carried} key; a key never enters a pool`)
+        return null
+      }
+      // NOR DOES THE NONCE OF AN OPENED ENTRY POOL (documentation/
+      // open-entry-pools.md): with the public opening record it is the
+      // pool's address, and the folder backup copies every pool.
+      const opened = entryNonceStore.carriedBy(bytes)
+      if (opened) {
+        console.warn(`[pool] refused a document in ${String(pool?.name ?? '').slice(0, 8)}… — it carries the code of the entry pool ${opened.slice(0, 8)}… this device opened; a code never enters a pool`)
         return null
       }
       const target = subKey

@@ -259,12 +259,19 @@ export async function fetchHiveManifest(host: string, pubkey: string): Promise<H
 /** Ask the hosts (a few at once); the first verified index wins. The signature
  *  check makes order a matter of latency, never of trust. */
 /** The signed index the page this code runs in carries (#hc-index, written by
- *  the door that served it), verified exactly as a fetched one — or null. */
-function carriedHiveIndex(pubkey: string): HiveManifest | null {
+ *  the door that served it), verified exactly as a fetched one — or null. An
+ *  index a listed key signed for the publisher asks that door for the list. */
+async function carriedHiveIndex(pubkey: string): Promise<HiveManifest | null> {
   try {
     const raw = typeof document === 'undefined' ? null : document.getElementById('hc-index')?.textContent
     if (!raw) return null
-    const read = hiveIndexOf(JSON.parse(raw) as Record<string, unknown>, String(pubkey ?? '').trim().toLowerCase())
+    const evt = JSON.parse(raw) as Record<string, unknown>
+    const key = String(pubkey ?? '').trim().toLowerCase()
+    const signedBy = String(evt?.['pubkey'] ?? '').toLowerCase()
+    const door = typeof location === 'undefined' ? '' : location.host
+    const listed = SIG_RE.test(signedBy) && signedBy !== key && door
+      ? await (await keyList()).listedKeys(door, key).catch(() => null) : undefined
+    const read = hiveIndexOf(evt, key, listed)
     return read.ok ? read.manifest : null
   } catch { return null }
 }
@@ -272,7 +279,7 @@ function carriedHiveIndex(pubkey: string): HiveManifest | null {
 export async function fetchHiveManifestFromAny(hosts: readonly string[], pubkey: string): Promise<HiveManifest | null> {
   // The door's page carries its publisher's signed index: verified against
   // the pinned key, it answers with no round trip; otherwise ask the hosts.
-  const carried = carriedHiveIndex(pubkey)
+  const carried = await carriedHiveIndex(pubkey)
   if (carried) return carried
   // Zone roots only — the retired `content.<zone>` face serves the same heap
   // (zone-door.ts). Asked together, a few at a time: the first verified index
@@ -728,6 +735,89 @@ export async function clearHiveRoot(host: string, key: string, deps: SetHiveRoot
     read.ok ? read.manifest.createdAt : 0, read.ok ? read.manifest.signedContent : undefined)
   if (!put.ok) return refuse(put.reason ?? 'index write failed')
   return { ok: true, key: cleanKey, sig: String(gone), host, pubkey: put.pubkey, createdAt: put.createdAt }
+}
+
+/** Several roots changed by ONE index write (changeHiveRoots). */
+export interface HiveRootsChange {
+  /** Keys the write takes out. One already absent is no change. */
+  readonly drop?: readonly string[]
+  /** Keys the write names, each with the signature it holds afterwards. */
+  readonly set?: Readonly<Record<string, string>>
+  /** What the caller counted on: the signature a key must hold now (null: no such root), touched by this write or
+   *  not. When one holds anything else nothing is signed and the answer is ROOT_MOVED. */
+  readonly expect?: Readonly<Record<string, string | null>>
+}
+
+export interface ChangeHiveRootsResult {
+  ok: boolean
+  host: string
+  /** Publisher pubkey the write went out under ('' on refusal). */
+  pubkey: string
+  /** created_at of the signed index (freshness stamp; 0 on refusal). */
+  createdAt: number
+  /** key → the signature it held, for each key this write took out. */
+  dropped: Record<string, string>
+  /** key → signature, for each key this write named or moved. */
+  set: Record<string, string>
+  /** Refusal reason, or 'unchanged' on the idempotent no-op. */
+  reason?: string
+}
+
+/** Change SEVERAL roots of the participant's OWN index on `host` in ONE signed write. Some changes are only safe whole:
+ *  closing an entry pool takes `entries:<H>` out and names `entries-closed:<H>`, and halfway is either a pool still
+ *  open or a record no key reaches (documentation/open-entry-pools.md, "Ending, closing, recycling"). setHiveRoot and
+ *  clearHiveRoot change one key a write, so two of them cannot do it. The same rules as those two, exactly:
+ *
+ *  - only a verified read, or a 404, is a baseline; an unreachable, malformed or forged read refuses the write;
+ *  - the write touches exactly the named keys, so it never resurrects or drops another root;
+ *  - an index already as asked no-ops without re-signing (`reason: 'unchanged'`);
+ *  - every touched key rides `expectRoots` at the signature it was just read at, so when another place moved one
+ *    before the write signs, nothing is signed and the answer is ROOT_MOVED. The caller reads again. */
+export async function changeHiveRoots(host: string, change: HiveRootsChange, deps: SetHiveRootDeps = {}): Promise<ChangeHiveRootsResult> {
+  const fetchIndex = deps.fetchIndex ?? fetchHiveIndex
+  const putManifest = deps.putManifest ?? putHiveManifest
+  const publicKey = deps.publicKey ?? (async () => (await keyList()).publisherKeyHex())
+  const refuse = (reason: string): ChangeHiveRootsResult => ({ ok: false, host, pubkey: '', createdAt: 0, dropped: {}, set: {}, reason })
+
+  const drops = [...new Set((change.drop ?? []).map(key => String(key ?? '').trim()))]
+  const sets = Object.entries(change.set ?? {}).map(([key, sig]) => [key.trim(), String(sig ?? '').trim().toLowerCase()] as const)
+  if (drops.some(key => !key) || sets.some(([key]) => !key)) return refuse('empty key')
+  if (drops.length + sets.length === 0) return refuse('no key named')
+  if (sets.some(([, sig]) => !SIG_RE.test(sig))) return refuse('sig is not a 64-hex signature')
+  if (new Set(sets.map(([key]) => key)).size !== sets.length || sets.some(([key]) => drops.includes(key))) return refuse('a key is named twice')
+
+  const pubkey = String((await publicKey().catch(() => null)) ?? '').toLowerCase()
+  if (!SIG_RE.test(pubkey)) return refuse('no signer')
+
+  const read = await fetchIndex(host, pubkey)
+  if (!read.ok && !(read.reason === 'http' && read.status === 404)) return refuse(`index-unsafe: ${read.reason}`)
+  const existing = read.ok ? read.manifest.roots : {}
+  const held = (key: string): string | null => String(existing[key] ?? '').toLowerCase() || null
+
+  const dropped: Record<string, string> = {}
+  for (const key of drops) if (key in existing) dropped[key] = existing[key]
+  const named: Record<string, string> = {}
+  for (const [key, sig] of sets) if (held(key) !== sig) named[key] = sig
+  if (Object.keys(dropped).length + Object.keys(named).length === 0) {
+    return { ok: true, host, pubkey, createdAt: read.ok ? read.manifest.createdAt : 0, dropped: {}, set: {}, reason: 'unchanged' }
+  }
+
+  const expectRoots: Record<string, string | null> = {}
+  for (const [key, expected] of Object.entries(change.expect ?? {})) {
+    const want = expected ? String(expected).trim().toLowerCase() : null
+    if (held(key.trim()) !== want) return refuse(ROOT_MOVED)
+    expectRoots[key.trim()] = want
+  }
+  // Every touched key, at what this read found: the write's own fresh read checks them once more, right before signing.
+  for (const key of [...drops, ...sets.map(([key]) => key)]) expectRoots[key] = held(key)
+
+  const next: Record<string, string> = { ...existing }
+  for (const key of drops) delete next[key]
+  for (const [key, sig] of sets) next[key] = sig
+  const put = await putManifest(host, next, read.ok ? read.manifest.doors ?? {} : {},
+    read.ok ? read.manifest.createdAt : 0, read.ok ? read.manifest.signedContent : undefined, { expectRoots })
+  if (!put.ok) return refuse(put.reason ?? 'index write failed')
+  return { ok: true, host, pubkey: put.pubkey, createdAt: put.createdAt, dropped, set: named }
 }
 
 /** The pool meanings the participant's signed index asks `host` to LIST past

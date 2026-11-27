@@ -77,4 +77,32 @@ describe('publishAtoms', () => {
     expect(await publishAtoms('example.com', [b.sig], async () => new TextEncoder().encode('other'))).toMatchObject({ ok: false, error: `${b.sig.slice(0, 12)}… held here does not hash to its name` })
     vi.unstubAllGlobals()
   })
+
+  it('on a device that publishes for an anchor, asks the host for the anchor\'s key list before its first upload there', async () => {
+    // Without the list there the upload goes out under the device's own key and
+    // the host refuses it: seen live on a device added with `keys allow`.
+    const anchor = 'a'.repeat(64), own = 'd'.repeat(64)
+    const signer = registry.get('@diamondcoreprocessor.com/NostrSigner')
+    registry.set('@diamondcoreprocessor.com/NostrSigner', { ...(signer as object), getPublicKeyHex: async () => own, knownPublicKeyHex: async () => own })
+    registry.set('@hypercomb.social/AnchorBinding', { ready: async () => undefined, anchor: () => anchor, sources: () => [] })
+    try {
+      const c = await file('export const anchored = 1')
+      const order: string[] = []
+      const serve = host(new Map())
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+        order.push(`${init?.method ?? 'GET'} ${url}`)
+        // The anchor's key list: none held here yet.
+        if (url.endsWith(`/${anchor}`)) return new Response(null, { status: 404 })
+        return serve(url, init)
+      }))
+      expect(await publishAtoms('anchored.example', [c.sig], async () => c.bytes)).toMatchObject({ ok: true, sent: 1 })
+      const asked = order.findIndex(line => line.startsWith('GET https://anchored.example/') && line.endsWith(`/${anchor}`))
+      expect(asked).toBeGreaterThanOrEqual(0)
+      expect(asked).toBeLessThan(order.findIndex(line => line.startsWith('PUT ')))
+    } finally {
+      registry.delete('@hypercomb.social/AnchorBinding')
+      registry.set('@diamondcoreprocessor.com/NostrSigner', signer)
+      vi.unstubAllGlobals()
+    }
+  })
 })

@@ -29,6 +29,7 @@ import type { BackGesture } from '../../navigation/back-gesture.service.js'
 import { onPageCellsChanged, pageCellsAt, whenPageCells, type PageCell, type PageCells } from './page-cells.js'
 import { readThumbnail, type ThumbnailStore } from './thumbnails.js'
 import { resolveLocalResourceReference } from './local-resource-reference.js'
+import { isTyping } from '../../keyboard/typing-focus.js'
 import {
   bootSpriteMaterial, bootSpriteSignature, readBootSprite, spriteSliceStyle,
 } from './boot-sprite.js'
@@ -155,8 +156,7 @@ export class LauncherViewDrone extends Drone {
   }
   readonly #onKey = (event: KeyboardEvent): void => {
     if (this.#vm()?.mode !== LAUNCHER_VIEW) return
-    const target = event.target as HTMLElement | null
-    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+    if (isTyping(event)) return
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
     event.preventDefault()
     this.#turn(event.key === 'ArrowLeft' ? -1 : 1)

@@ -59,7 +59,7 @@ A hole is `{ type, of?, required?, label?, max? }`:
 | type | a value is | shown in html | shown in text |
 |---|---|---|---|
 | `text` | a string, ≤ `max` (default 2,000, at most 20,000), no control or direction-override characters | escaped; line breaks become `<br>` | as written |
-| `url` | http, https or mailto that parses, ≤ 2,048, no `user:pass@` | a link to itself; plain text inside a link or `<code>`; the whole of an `href` | the URL |
+| `url` | http, https or mailto that parses, ≤ 2,048, no `user:pass@` | a link to itself; plain text inside a link or `<code>`; the whole of an `href` (left empty, the link is its words alone) | the URL |
 | `number` | a finite number | formatted for the locale | formatted |
 | `date` | ISO 8601: a real date, or a date and time **with its zone** | a long date (a date alone is never shifted by a zone) | the same |
 | `resource` | a 64-hex signature | a picture, only when the reader holds the bytes (below); otherwise words naming the signature | `[picture: label]` |

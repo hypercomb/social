@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { declaresMachine, effectSleeper, passiveQueen, viewSleeper } from './passive-queen'
+import { declaresMachine, effectSleeper, passiveQueen, sourceDescription, viewSleeper } from './passive-queen'
 
 const queen = (body = ''): string => `
 import { QueenBee } from '@hypercomb/core'
@@ -142,5 +142,18 @@ describe('effect sleeper', () => {
   it('stays awake when its effect is sent without replay', () => {
     const others = new Map([['b/x.ts', "EffectBus.emitTransient('expand:layer', {})"]])
     expect(effectSleeper('a/expand.drone.ts', effectDrone(), others)).toMatchObject({ sleeps: false })
+  })
+})
+
+describe('source description', () => {
+  it('keeps an escaped quote as the quote it stands for', () => {
+    expect(sourceDescription(String.raw`  override description = 'Deposit on a tile\'s exact content'`)).toBe('Deposit on a tile\'s exact content')
+    expect(sourceDescription(String.raw`  override description =
+    "Say \"hello\" twice"`)).toBe('Say "hello" twice')
+    expect(sourceDescription('  description = `a — b`')).toBe('a — b')
+  })
+
+  it('reads nothing where nothing is declared', () => {
+    expect(sourceDescription('readonly command = \'x\'')).toBeUndefined()
   })
 })
