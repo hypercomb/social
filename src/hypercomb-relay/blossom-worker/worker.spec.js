@@ -6554,7 +6554,11 @@ test('the deployed config derives hypercomb.com\'s package from the followed pub
   const apex = bindings['hypercomb.com']
   assert.equal(apex.installs, publisher.channel)
   assert.equal(apex.publishers.find((p) => p.primary).pubkey, publisher.pubkey, 'the pool follows the key every install follows')
-  assert.deepEqual(apex.farm, ['jwize.com'])
+  // the machine's own name: jwize.com's apex is a front door on this worker
+  // now, so reading it would come back here instead of reaching the machine
+  assert.deepEqual(apex.farm, ['relay.pluginthematrix.io'])
+  assert.deepEqual(bindings['jwize.com'].farm, ['relay.pluginthematrix.io'])
+  assert.equal(bindings['jwize.com'].relay, 'relay.pluginthematrix.io')
 })
 
 // ── the shipped default meets at hypercomb.com (jwize 2026-10-11) ───────────
