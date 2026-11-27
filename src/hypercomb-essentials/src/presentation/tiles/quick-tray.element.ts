@@ -207,7 +207,7 @@ const STYLE = `
   box-shadow:inset 0 0 2.75rem -1.25rem rgba(var(--shelf),0.55),0 8px 28px rgba(var(--hc-panel-shadow,0,0,0),0.28);
   font-family:var(--hc-font,system-ui);font-size:0.85rem;font-weight:400;color:var(--hc-window-ink-loud,currentColor);user-select:none;}
 .shelf::before{content:'';position:absolute;inset:0.25rem;pointer-events:none;border-radius:var(--hc-radius-control,2px);
-  --cut:rgba(var(--shelf),0.6);
+  --cut:rgba(var(--shelf),0.45);
   background-image:repeating-linear-gradient(90deg,var(--cut) 0 7px,transparent 7px 14px),
     repeating-linear-gradient(90deg,var(--cut) 0 7px,transparent 7px 14px),
     repeating-linear-gradient(180deg,var(--cut) 0 7px,transparent 7px 14px),
@@ -324,7 +324,7 @@ const STYLE = `
 .face-btn:hover{opacity:1;}
 .face-btn.on{opacity:1;color:rgb(var(--shelf));border-color:rgba(var(--shelf),0.8);background:rgba(var(--shelf),0.14);}
 .ring{display:flex;align-items:center;gap:0.4rem;height:1.9rem;padding:0;border-radius:var(--hc-radius-control,2px);}
-.ring.current{background:rgba(var(--shelf),0.14);}
+.ring.current{background:rgba(var(--shelf),0.07);box-shadow:inset 2px 0 0 rgb(var(--shelf));}
 .ring-name,.ring-items,.ring-new{appearance:none;border:0;background:none;color:inherit;font:inherit;cursor:pointer;text-align:left;padding:0 0.3rem;height:1.6rem;border-radius:var(--hc-radius-control,2px);}
 .ring-name{flex:0 0 7rem;color:rgb(var(--shelf));overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .ring-name:disabled{cursor:default;}
@@ -341,7 +341,30 @@ const STYLE = `
 .ring-new svg{width:0.9rem;height:0.9rem;}
 @keyframes hc-shelf-taken{from{background:rgba(var(--shelf),0.45);border-color:rgba(var(--shelf),0.9);}}
 .taken{animation:hc-shelf-taken 700ms ease-out;}
-@media (prefers-reduced-motion:reduce){.taken{animation:none;}.row,.remove{transition:none;}}
+/* A LITTLE LIFE, NOTHING SLOW. A tile lifts a pixel under the pointer and
+   gives on the press; the arrow turns when the rings open or close; the
+   rings settle in; the count bumps when it changes. Each plays only where
+   something happened — never on an ordinary repaint — and none of it delays
+   a click: the tile has already left by the time a press would show. */
+.items .row{transition:transform 90ms ease,box-shadow 120ms ease,border-color 120ms ease,background-color 120ms ease;}
+.shelf:not(.face-text) .items .row:hover{transform:translateY(-1px);box-shadow:0 4px 10px -6px rgba(var(--shelf),0.8);}
+.items .row:active{transform:scale(0.94);transition-duration:40ms;}
+.tile-icon path{transition:fill 120ms ease;}
+.items .row:hover .tile-icon path{fill:rgba(var(--shelf),0.28);}
+.tool.expand svg{transition:transform 160ms ease;}
+.tool.expand.on svg{transform:rotate(90deg);}
+@keyframes hc-shelf-turn-open{from{transform:rotate(0deg);}to{transform:rotate(90deg);}}
+@keyframes hc-shelf-turn-close{from{transform:rotate(90deg);}to{transform:rotate(0deg);}}
+.tool.expand.turning-open svg{animation:hc-shelf-turn-open 160ms ease;}
+.tool.expand.turning-close svg{animation:hc-shelf-turn-close 160ms ease;}
+@keyframes hc-shelf-settle{from{opacity:0;transform:translateY(-4px);}to{opacity:1;transform:none;}}
+.rings.settling{animation:hc-shelf-settle 150ms ease-out;}
+@keyframes hc-shelf-bump{0%{transform:scale(1);}40%{transform:scale(1.18);background:rgba(var(--shelf),0.38);}100%{transform:scale(1);}}
+.count.bump{animation:hc-shelf-bump 220ms ease-out;}
+@media (prefers-reduced-motion:reduce){.taken{animation:none;}.row,.remove{transition:none;}
+  .items .row,.items .row:hover,.items .row:active{transform:none;transition:none;}
+  .tool.expand svg,.tile-icon path{transition:none;}
+  .tool.expand.turning-open svg,.tool.expand.turning-close svg,.rings.settling,.count.bump{animation:none;}}
 @media (max-width:640px){.shelf{--inset:0.5rem;--inset-x:0.7rem;}.label{max-width:7rem;}.legend .word{display:none;}.add{width:6rem;}}
 .ghost{position:fixed;z-index:2147483600;pointer-events:none;margin-left:0.8rem;margin-top:-0.9rem;max-width:14rem;
   padding:0.3rem 0.6rem;display:flex;align-items:center;gap:0.4rem;border-radius:var(--hc-radius-floating,4px);
@@ -367,7 +390,6 @@ const SHELF_ICON = icon('M19 3H4.99c-1.11 0-1.98.9-1.98 2L3 19c0 1.1.88 2 1.99 2
 /** The selection: a dashed marquee round a tile. */
 const SELECT_ICON = icon('M3 5h2V3c-1.1 0-2 .9-2 2zm0 8h2v-2H3v2zm4 8h2v-2H7v2zM3 9h2V7H3v2zm10-6h-2v2h2V3zm6 0v2h2c0-1.1-.9-2-2-2zM5 21v-2H3c0 1.1.9 2 2 2zm-2-4h2v-2H3v2zM9 3H7v2h2V3zm2 18h2v-2h-2v2zm8-8h2v-2h-2v2zm0 8c1.1 0 2-.9 2-2h-2v2zm0-12h2V7h-2v2zm0 8h2v-2h-2v2zm-4 4h2v-2h-2v2zm0-16h2V3h-2v2zM7 17h10V7H7v10zm2-8h6v6H9V9z')
 const CHEVRON_RIGHT = icon('M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z')
-const CHEVRON_DOWN = icon('M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z')
 const PIN_ICON = icon('M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z')
 const ADD_ICON = icon('M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z')
 
@@ -447,6 +469,10 @@ export class QuickTrayElement extends HTMLElement {
   #sessionEntries: readonly TrayEntry[] = []
   /** The arrow at the right end opened the rings. */
   #expanded = false
+  /** The rings were just opened or closed: the next paint turns the arrow. */
+  #turn: 'open' | 'close' | null = null
+  /** The count as last painted, so a change can bump it. */
+  #paintedCount = -1
   /** The ring whose name is being typed in the list. */
   #renaming: string | null = null
   #ringWrite: ReturnType<typeof setTimeout> | undefined
@@ -636,14 +662,20 @@ export class QuickTrayElement extends HTMLElement {
   // ── the rings ────────────────────────────────────────────────────────────
 
   async #loadRings(): Promise<void> {
+    const before = JSON.stringify(this.#rings)
     try { this.#rings = [...(await listGroups())].reverse() } catch { this.#rings = [] }
+    let moved = false
     // A ring removed elsewhere while forward: the session shelf comes back.
     if (this.#ringId && !this.#rings.some(ring => ring.id === this.#ringId)) {
       this.#ringId = null
       this.#entries = this.#sessionEntries
       this.#sessionEntries = []
       this.#announce()
+      moved = true
     }
+    // The same rings as painted: no repaint, so the open's turn and settle play
+    // out instead of being replaced mid-way by an identical shelf.
+    if (!moved && JSON.stringify(this.#rings) === before) return
     if (this.isConnected) this.#render()
   }
 
@@ -750,6 +782,15 @@ export class QuickTrayElement extends HTMLElement {
     void setGroupMembers(this.#ringId, entriesToMembers(this.#entries))
   }
 
+  /** The count answers a change with a small bump, restarted on each change. */
+  #bumpCount(): void {
+    const count = this.#root.querySelector<HTMLElement>('.shelf:not(.picks) .legend .count')
+    if (!count || this.#paintedCount < 0) return
+    count.classList.remove('bump')
+    void count.offsetWidth
+    count.classList.add('bump')
+  }
+
   // ── the click that ejects ────────────────────────────────────────────────
 
   /** A click on an icon: it leaves the shelf NOW (the icon goes from the strip
@@ -844,7 +885,7 @@ export class QuickTrayElement extends HTMLElement {
     const url = this.#thumbs.get(key)
     if (url) { URL.revokeObjectURL(url); this.#thumbs.delete(key) }
     const count = this.#root.querySelector('.shelf:not(.picks) .legend .count')
-    if (count) count.textContent = String(this.#entries.length)
+    if (count) { count.textContent = String(this.#entries.length); this.#paintedCount = this.#entries.length; this.#bumpCount() }
     if (this.#entries.length === 0) this.#render()
     this.#announce()
     this.#writeRing()
@@ -1109,10 +1150,16 @@ export class QuickTrayElement extends HTMLElement {
           <span class="legend">${SHELF_ICON}<span class="word">${title}</span><span class="count">${this.#entries.length}</span></span>
           <input class="add" type="text" spellcheck="false" autocomplete="off" value="${esc(this.#filter)}" placeholder="${search}" aria-label="${search}">
           <ul class="rows items" aria-label="${title}"></ul>
-          <span class="tools">${paired ? this.#swapHtml() : ''}<button class="tool expand${this.#expanded ? ' on' : ''}" type="button" aria-expanded="${this.#expanded}" title="${expandTip}" aria-label="${expandTip}">${this.#expanded ? CHEVRON_DOWN : CHEVRON_RIGHT}</button></span>
+          <span class="tools">${paired ? this.#swapHtml() : ''}<button class="tool expand${this.#expanded ? ' on' : ''}${this.#turn ? ` turning-${this.#turn}` : ''}" type="button" aria-expanded="${this.#expanded}" title="${expandTip}" aria-label="${expandTip}">${CHEVRON_RIGHT}</button></span>
         </div>
         ${this.#expanded ? this.#ringsHtml() : ''}
       </section>`
+    // The turn and the settle belong to the press that opened or closed the
+    // rings, so they are spent on this paint and never replay on the next.
+    if (this.#turn === 'open') this.#root.querySelector('.rings')?.classList.add('settling')
+    this.#turn = null
+    if (this.#entries.length !== this.#paintedCount) this.#bumpCount()
+    this.#paintedCount = this.#entries.length
     this.#paintItems()
     this.#wireSwap()
     this.#wireHead()
@@ -1245,6 +1292,7 @@ export class QuickTrayElement extends HTMLElement {
     })
     this.#root.querySelector('.expand')?.addEventListener('click', () => {
       this.#expanded = !this.#expanded
+      this.#turn = this.#expanded ? 'open' : 'close'
       this.#renaming = null
       if (this.#expanded) void this.#loadRings()
       this.#render()
