@@ -12,6 +12,7 @@ import {
   checkPackageFloor, FLOOR_RECORD_KEY, MEETING_POINT, packageBytes, perTabMembership, planFloor,
   NO_DEFAULT_HOST_MARK, refuseOldMeetingPoint, scanMeetingPoint, scanMembership, UPDATE_DOOR,
 } from './package-floor'
+import { askFloorUpdate } from './floor-ask'
 
 // The move itself needs a browser store; the decision cases need nothing.
 vi.mock('@hypercomb/runtime/acquire', () => ({ acquire: vi.fn(), headPackage: vi.fn(), layersIoFor: vi.fn() }))
@@ -238,8 +239,10 @@ const holdTrunk = (tag: string): string => {
 const pickAt = (path: string): void =>
   localStorage.setItem(PICKS_KEY, JSON.stringify({ [path]: { layer: '0'.repeat(64), root: 'f'.repeat(64), hides: false, at: 1 } }))
 
-describe('checkPackageFloor — a package below the floor is moved forward', () => {
+describe('checkPackageFloor — a package below the floor is moved forward on a yes', () => {
   const reload = vi.fn()
+  // The participant's answer. Every move below is one they agreed to.
+  const yes = vi.fn(async () => true)
   let offDoor: () => void = () => {}
 
   beforeEach(() => {
@@ -248,6 +251,7 @@ describe('checkPackageFloor — a package below the floor is moved forward', () 
     localStorage.clear()
     sessionStorage.clear()
     reload.mockReset()
+    yes.mockClear()
     vi.mocked(acquire).mockReset()
     vi.mocked(layersIoFor).mockReset()
     vi.mocked(headPackage).mockReset().mockImplementation(async zone => ({
@@ -272,7 +276,7 @@ describe('checkPackageFloor — a package below the floor is moved forward', () 
       ? { ok: false, packageSig: sig, fetched: 0, present: 0, holes: [], refused: [], error: 'no carried domain publishes it' }
       : { ok: true, packageSig: sig, fetched: 1, present: 0, holes: [], refused: [] })
 
-    const plan = await checkPackageFloor()
+    const plan = await checkPackageFloor(yes)
 
     expect(vi.mocked(acquire).mock.calls.map(call => [call[0], call[1], call[2]])).toEqual([
       [SIGNED_ROOT, ['hypercomb.com'], { floor: true }],
@@ -284,15 +288,37 @@ describe('checkPackageFloor — a package below the floor is moved forward', () 
     expect(Object.keys(localStorage).filter(key => key.includes('membership'))).toEqual([])
     expect(sessionStorage.getItem('hc:install:floor-reloaded')).toBe(HEAD.packageSig)
     expect(reload).toHaveBeenCalledOnce()
+    // Asked once, for both heads, and before anything was fetched.
+    expect(yes).toHaveBeenCalledOnce()
+    expect(yes).toHaveBeenCalledWith('membership')
+    expect(yes.mock.invocationCallOrder[0]!).toBeLessThan(vi.mocked(acquire).mock.invocationCallOrder[0]!)
+  })
+
+  it('takes nothing on Not now — no fetch of the package, no record, no reload', async () => {
+    installOld("if (localStorage.getItem('hc:mesh-public') !== 'true') return")
+    const notNow = vi.fn(async () => false)
+
+    const plan = await checkPackageFloor(notNow)
+
+    expect(notNow).toHaveBeenCalledOnce()
+    expect(plan).toEqual({ act: false, why: 'the participant said not now' })
+    expect(acquire).not.toHaveBeenCalled()
+    expect(reload).not.toHaveBeenCalled()
+    expect(localStorage.getItem(FLOOR_RECORD_KEY)).toBeNull()
+    // Nothing remembers the answer: the next boot asks again.
+    expect(sessionStorage.getItem('hc:install:floor-reloaded')).toBeNull()
+    expect((await checkPackageFloor(notNow)).act).toBe(false)
+    expect(notNow).toHaveBeenCalledTimes(2)
   })
 
   it('leaves a package that keeps membership per tab alone — and asks no host', async () => {
     const current = '9'.repeat(64)
     installOld("sessionStorage.getItem('hc:mesh-session') === 'true'", current)
 
-    const plan = await checkPackageFloor()
+    const plan = await checkPackageFloor(yes)
 
     expect(plan.act).toBe(false)
+    expect(yes).not.toHaveBeenCalled()
     expect(acquire).not.toHaveBeenCalled()
     expect(fetch).not.toHaveBeenCalled()
     expect(reload).not.toHaveBeenCalled()
@@ -317,12 +343,13 @@ describe('checkPackageFloor — a package below the floor is moved forward', () 
         : { ok: true, packageSig: sig, fetched: 1, present: 0, holes: [], refused: [] }
     })
 
-    const plan = await checkPackageFloor()
+    const plan = await checkPackageFloor(yes)
 
     expect(await packageBytes(home)).toEqual({ perTabMembership: true, currentMeetingPoint: false })
     expect(vi.mocked(acquire).mock.calls.map(call => call[0])).toEqual([SIGNED_ROOT, HEAD.packageSig])
     expect(vi.mocked(acquire).mock.calls.every(call => call[2]?.floor === true && call[2]?.refuse === refuseOldMeetingPoint)).toBe(true)
     expect(plan).toEqual({ act: true, from: home, to: HEAD.packageSig, zone: 'hypercomb.com' })
+    expect(yes).toHaveBeenCalledWith('meeting point')
     expect(JSON.parse(localStorage.getItem(FLOOR_RECORD_KEY)!)).toMatchObject({ from: home, to: HEAD.packageSig })
     expect(sessionStorage.getItem('hc:install:floor-reloaded')).toBe(HEAD.packageSig)
     expect(reload).toHaveBeenCalledOnce()
@@ -339,7 +366,7 @@ describe('checkPackageFloor — a package below the floor is moved forward', () 
     swarmSays({})
     vi.mocked(acquire).mockImplementation(async sig => ({ ok: true, packageSig: sig, fetched: 1, present: 0, holes: [], refused: [] }))
 
-    const plan = await checkPackageFloor()
+    const plan = await checkPackageFloor(yes)
 
     expect(plan).toEqual({ act: true, from: unsaid, to: SIGNED_ROOT, zone: 'hypercomb.com' })
     expect(vi.mocked(acquire).mock.calls[0]?.[2]?.refuse).toBe(refuseOldMeetingPoint)
@@ -350,7 +377,7 @@ describe('checkPackageFloor — a package below the floor is moved forward', () 
     installSelection('5'.repeat(64), {})
     swarmSays({ roomIdentity: 2 })
 
-    expect((await checkPackageFloor()).act).toBe(false)
+    expect((await checkPackageFloor(yes)).act).toBe(false)
     expect(acquire).not.toHaveBeenCalled()
     expect(fetch).not.toHaveBeenCalled()
   })
@@ -358,7 +385,7 @@ describe('checkPackageFloor — a package below the floor is moved forward', () 
   it('leaves a package that dials the shipped meeting point alone — and asks no host', async () => {
     installOld(SHIPPED_MESH + perTab, '2'.repeat(64))
 
-    expect((await checkPackageFloor()).act).toBe(false)
+    expect((await checkPackageFloor(yes)).act).toBe(false)
     expect(acquire).not.toHaveBeenCalled()
     expect(fetch).not.toHaveBeenCalled()
     expect(reload).not.toHaveBeenCalled()
@@ -367,7 +394,7 @@ describe('checkPackageFloor — a package below the floor is moved forward', () 
   it('leaves a package that names both alone — the shipped point wins whatever else it names', async () => {
     installOld(`${HOME_MESH}\nconst SELF = "wss://jwize.com"; const MARK = "${NO_DEFAULT_HOST_MARK}"${perTab}`, '3'.repeat(64))
 
-    expect((await checkPackageFloor()).act).toBe(false)
+    expect((await checkPackageFloor(yes)).act).toBe(false)
     expect(acquire).not.toHaveBeenCalled()
     expect(fetch).not.toHaveBeenCalled()
   })
@@ -376,7 +403,7 @@ describe('checkPackageFloor — a package below the floor is moved forward', () 
     const plain = '4'.repeat(64)
     installOld('export const journal = 1', plain)
 
-    expect((await checkPackageFloor()).act).toBe(false)
+    expect((await checkPackageFloor(yes)).act).toBe(false)
     expect(await packageBytes(plain)).toEqual({ perTabMembership: null, currentMeetingPoint: null })
     expect(acquire).not.toHaveBeenCalled()
     expect(fetch).not.toHaveBeenCalled()
@@ -386,10 +413,11 @@ describe('checkPackageFloor — a package below the floor is moved forward', () 
     installOld(HOME_MESH + perTab, '5'.repeat(64))
     sessionStorage.setItem('hc:install:floor-reloaded', 'f'.repeat(64))
 
-    const plan = await checkPackageFloor()
+    const plan = await checkPackageFloor(yes)
 
     // The rule fired (the heads were asked for) and the guard is what stopped it.
     expect(plan).toEqual({ act: false, why: expect.stringMatching(/already moved once/) })
+    expect(yes).not.toHaveBeenCalled()
     expect(fetch).toHaveBeenCalled()
     expect(acquire).not.toHaveBeenCalled()
     expect(reload).not.toHaveBeenCalled()
@@ -405,7 +433,7 @@ describe('checkPackageFloor — a package below the floor is moved forward', () 
     installSelection(trunk, { [PICKED_BEE]: HOME_MESH + perTab, [JOURNAL_BEE]: 'export const journal = 1' })
 
     expect(await packageBytes(trunk)).toEqual({ perTabMembership: true, currentMeetingPoint: null })
-    expect((await checkPackageFloor()).act).toBe(false)
+    expect((await checkPackageFloor(yes)).act).toBe(false)
     expect(acquire).not.toHaveBeenCalled()
     expect(fetch).not.toHaveBeenCalled()
     expect(reload).not.toHaveBeenCalled()
@@ -418,7 +446,7 @@ describe('checkPackageFloor — a package below the floor is moved forward', () 
     vi.mocked(acquire).mockImplementation(async sig => ({ ok: true, packageSig: sig, fetched: 1, present: 0, holes: [], refused: [] }))
 
     expect(await packageBytes(trunk)).toEqual({ perTabMembership: true, currentMeetingPoint: false })
-    expect(await checkPackageFloor()).toEqual({ act: true, from: trunk, to: SIGNED_ROOT, zone: 'hypercomb.com' })
+    expect(await checkPackageFloor(yes)).toEqual({ act: true, from: trunk, to: SIGNED_ROOT, zone: 'hypercomb.com' })
     expect(reload).toHaveBeenCalledOnce()
   })
 
@@ -429,5 +457,28 @@ describe('checkPackageFloor — a package below the floor is moved forward', () 
     installSelection(trunk, { [MESH_BEE]: HOME_MESH + perTab })
 
     expect(await packageBytes(trunk)).toEqual({ perTabMembership: true, currentMeetingPoint: null })
+  })
+})
+
+describe('askFloorUpdate — the shell asks, the participant answers', () => {
+  afterEach(() => { document.body.replaceChildren() })
+
+  const prompt = (): HTMLElement => document.querySelector('[data-floor-ask]') as HTMLElement
+
+  it('resolves true only when Update is pressed, and takes itself down', async () => {
+    const answer = askFloorUpdate('door')
+    expect(prompt().getAttribute('role')).toBe('dialog')
+    expect(prompt().textContent).toMatch(/too old to update itself/)
+    ;(prompt().querySelector('[data-take]') as HTMLButtonElement).click()
+    expect(await answer).toBe(true)
+    expect(prompt()).toBeNull()
+  })
+
+  it('resolves false on Not now, and says why for a package that cannot meet', async () => {
+    const answer = askFloorUpdate('meeting point')
+    expect(prompt().textContent).toMatch(/too old to meet updated devices/)
+    ;(prompt().querySelector('[data-later]') as HTMLButtonElement).click()
+    expect(await answer).toBe(false)
+    expect(prompt()).toBeNull()
   })
 })

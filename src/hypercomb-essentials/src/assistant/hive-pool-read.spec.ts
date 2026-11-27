@@ -1,7 +1,8 @@
 // A model asks the hosts this hive follows for one pool of meaning, at the
 // address every host carries it at. It names a meaning, never a host.
 
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { forgetFoundHosts, foundHostsOf } from './found-hosts.js'
 import { forgetPoolMembers, poolMemberSource, readPool, readPoolMember, type PoolReadDeps } from './hive-pool-read.js'
 
 const ADDRESS = 'a'.repeat(64)
@@ -134,5 +135,40 @@ describe('a listed member can be opened', () => {
     expect(await readPoolMember(MEMBER, undefined, { member, sign: hashOf })).toEqual({ bytes: RECORD, type: '' })
     expect(member).toHaveBeenCalledTimes(2)
     expect(await readPoolMember(MEMBER, undefined, { member: async () => null, sign: hashOf })).toBeNull()
+  })
+})
+
+describe('where a pool read found a signature is attributed (reach A4)', () => {
+  beforeEach(() => { forgetFoundHosts() })
+  afterEach(() => { forgetFoundHosts(); forgetPoolMembers(); delete (globalThis as { ioc?: unknown }).ioc })
+
+  const brokerDouble = (): [string, string[]][] => {
+    const noted: [string, string[]][] = []
+    ;(globalThis as { ioc?: unknown }).ioc = {
+      get: (key: string) => key === '@diamondcoreprocessor.com/ContentBrokerDrone'
+        ? { hintDomainsForSig: (sig: string, hosts: string[]) => { noted.push([sig, hosts]) } }
+        : undefined,
+    }
+    return noted
+  }
+
+  it("tells the broker each set member with the hosts that listed it", async () => {
+    const noted = brokerDouble()
+    const listing = vi.fn(async (origin: string) => origin.includes('a.example') ? `${MEMBER}
+${OTHER}
+` : `${MEMBER}
+`)
+    await readPool('host:offerings', {}, deps({ listing }))
+    expect(noted).toContainEqual([MEMBER, ['a.example', 'b.example']])
+    expect(noted).toContainEqual([OTHER, ['a.example']])
+    expect(foundHostsOf(OTHER)).toEqual(['a.example'])
+  })
+
+  it('tells the broker every head a ledger names, with the hosts that served the ledger', async () => {
+    const noted = brokerDouble()
+    await readPool('host:publications', {}, deps({ document: async () => LEDGER }))
+    expect(noted).toContainEqual([MEMBER, ['a.example', 'b.example']])
+    // A publisher key is not a head.
+    expect(noted.map(([sig]) => sig)).not.toContain(OTHER)
   })
 })

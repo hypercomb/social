@@ -29,7 +29,7 @@
 
 import { EffectBus, llmKeyStore } from '@hypercomb/core'
 import { llmActivation } from './llm-activation.js'
-import { THINKING_ROOM, allThought, answerRoom, noteThinking, refuseAnswerRoom } from './answer-room.js'
+import { allThought, answerRoom, noteThinking, refuseAnswerRoom } from './answer-room.js'
 import {
   localModelServerUp,
   localTierReason,
@@ -45,24 +45,19 @@ import { llmProviderRegistry, type LlmProviderRegistry } from './llm-provider-re
 import type {
   LlmCallResult,
   LlmChatMessage,
-  LlmFunctionTool,
   LlmProviderDescriptor,
   LlmRequest,
   LlmTier,
-  LlmToolCall,
 } from './providers/llm-provider.types.js'
 
 export type {
   LlmCallResult,
   LlmChatMessage,
-  LlmFunctionTool,
   LlmModelDescriptor,
   LlmProviderDescriptor,
   LlmRequest,
   LlmStreamEvent,
   LlmTier,
-  LlmToolCall,
-  LlmToolCallDelta,
   LlmTransport,
 } from './providers/llm-provider.types.js'
 
@@ -85,8 +80,9 @@ export type LlmCall = {
   readonly messages: readonly LlmChatMessage[]
   readonly system?: string
   readonly maxTokens?: number
-  /** OpenAI-style functions available to a supporting provider. */
-  readonly tools?: readonly LlmFunctionTool[]
+  /** Room the answer would like, when the host allows it (answer-room.ts):
+   *  unlike maxTokens, a host that refuses it is asked again plainly. */
+  readonly room?: number
   /** Hint that `system` is stable and worth prompt-caching where supported. */
   readonly cacheSystem?: boolean
   /** false = answer without a reasoning pass. Honoured by the local provider only. */
@@ -185,7 +181,6 @@ const rememberLocalChoice = (provider: LlmProviderDescriptor, model: string): vo
 /** One routed stream delta, carrying the truth about who actually answered. */
 export type LlmRoutedChunk = {
   readonly text: string
-  readonly toolCalls?: readonly LlmToolCall[]
   readonly providerId: string
   readonly providerLabel: string
   readonly vendor: string
@@ -364,7 +359,6 @@ export const buildRequest = (
     messages: call.messages,
     system: call.system,
     maxTokens: call.maxTokens,
-    tools: call.tools,
     cacheSystem: call.cacheSystem,
     // Passed through only when set, so a request that names none of them is
     // the same object it always was. Only the local adapter reads them.
@@ -545,7 +539,7 @@ async function* streamProvider(
   provider: LlmProviderDescriptor,
   call: LlmCall,
   suppliedRequest?: LlmRequest,
-): AsyncGenerator<{ text: string; toolCalls?: readonly LlmToolCall[]; model: string; usage?: LlmAttemptUsage }> {
+): AsyncGenerator<{ text: string; model: string; usage?: LlmAttemptUsage }> {
   if (provider.transport === 'peer-swarm' || !provider.fromStreamEvent) {
     const request = suppliedRequest ?? buildRequest(provider, call)
     let result: LlmCallResult
@@ -569,7 +563,6 @@ async function* streamProvider(
     // how the router tells thought that used up the allowance from silence.
     yield {
       text: result.text,
-      ...(result.toolCalls?.length ? { toolCalls: result.toolCalls } : {}),
       model: result.model || request.model,
       usage: attemptUsage(provider, result, request.model),
     }
@@ -580,12 +573,6 @@ async function* streamProvider(
   emitLocalUse(provider)
   const response = await send(provider, request, call.signal)
   rememberLocalChoice(provider, request.model)
-  const pendingToolCalls = new Map<number, {
-    id?: string
-    name: string
-    arguments: string
-  }>()
-  let toolStreamFinished = false
   const idleMs = machineLocalEndpoint(provider) ? 0 : STREAM_IDLE_MS
   const frames = sseFrames(response, call.signal, idleMs)
   const nextFrame = async (): Promise<IteratorResult<unknown>> => {
@@ -604,40 +591,8 @@ async function* streamProvider(
     }
     const frameUsage = attemptUsage(provider, decoded, request.model)
     if (decoded.text || frameUsage) yield { text: decoded.text ?? '', model: request.model, ...(frameUsage ? { usage: frameUsage } : {}) }
-    if (decoded.finishReason === 'tool_calls') toolStreamFinished = true
-    for (const delta of decoded.toolCallDeltas ?? []) {
-      const pending = pendingToolCalls.get(delta.index) ?? { name: '', arguments: '' }
-      if (delta.id !== undefined) pending.id = delta.id
-      if (delta.name !== undefined) pending.name += delta.name
-      if (delta.arguments !== undefined) pending.arguments += delta.arguments
-      pendingToolCalls.set(delta.index, pending)
-    }
   }
-  // A cancelled or severed stream may already contain JSON that happens to
-  // look complete. It is not a completed model turn and must never cross the
-  // action boundary. OpenAI-shaped providers send a terminal finish_reason;
-  // only then can accumulated function arguments become a normalized call.
   if (call.signal?.aborted) throw new DOMException('The model request was aborted', 'AbortError')
-  if (pendingToolCalls.size > 0 && !toolStreamFinished) {
-    throw new LlmDispatchError(
-      `${provider.label} ended an incomplete tool call`, provider.id, request.model,
-    )
-  }
-  const orderedToolCalls = [...pendingToolCalls.entries()]
-    .sort(([left], [right]) => left - right)
-  if (orderedToolCalls.some(([, call]) => !call.name.trim())) {
-    throw new LlmDispatchError(
-      `${provider.label} returned a malformed tool call`, provider.id, request.model,
-    )
-  }
-  const toolCalls = orderedToolCalls.map(([, call]): LlmToolCall => ({
-    ...(call.id !== undefined ? { id: call.id } : {}),
-    name: call.name,
-    arguments: call.arguments,
-  }))
-  if (toolCalls.length) {
-    yield { text: '', toolCalls, model: request.model }
-  }
 }
 
 const finite = (value: unknown): number | undefined =>
@@ -910,7 +865,7 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
       let roomy = false
       try {
         request = buildRequest(provider, passCall, { stream: !!provider.fromStreamEvent })
-        const room = plainRoom.has(provider.id) ? undefined : answerRoom(provider.id, request.model, call.maxTokens)
+        const room = plainRoom.has(provider.id) ? undefined : answerRoom(provider.id, request.model, call.maxTokens, call.room)
         if (room !== undefined) {
           request = { ...request, maxTokens: room }
           roomy = true
@@ -938,16 +893,15 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
           // Usage-only terminal frames are informative, not visible output and
           // must not disable automatic fallback or turn an empty answer into a
           // success.
-          emitted = emitted || !!chunk.text || !!chunk.toolCalls?.length
+          emitted = emitted || !!chunk.text
           usage = chunk.usage
             ? attemptUsage(provider, { ...(usage ?? {}), ...chunk.usage }, request.model)
             : usage
-          if (!chunk.text && !chunk.toolCalls?.length) continue
+          if (!chunk.text) continue
           answeredModel = chunk.model || answeredModel
           coolingUntil.delete(provider.id)
           yield {
             text: chunk.text,
-            ...(chunk.toolCalls?.length ? { toolCalls: chunk.toolCalls } : {}),
             providerId: provider.id,
             providerLabel: provider.label,
             vendor: provider.vendor,
@@ -962,7 +916,7 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
           const thought = allThought(usage)
           if (thought) thinkLess.add(provider.id)
           const spent = thought
-            ? `thought for ${usage?.reasoningTokens} tokens, which used up its answer${roomy ? ` of ${THINKING_ROOM}` : ''}, and `
+            ? `thought for ${usage?.reasoningTokens} tokens, which used up its answer${roomy ? ` of ${request.maxTokens}` : ''}, and `
             : ''
           throw new LlmDispatchError(
             `${provider.label} ${spent}${EMPTY_ANSWER}`, provider.id,
@@ -1060,8 +1014,8 @@ export async function* streamModel(call: LlmCall): AsyncGenerator<string> {
 export const LLM_ROUTER_IOC_KEY = '@diamondcoreprocessor.com/LlmRouter'
 export const llmRouter = {
   /** Resolve a model without exposing the provider registry across the shell
-   * boundary. The chat surface uses this to keep an explicitly named remote
-   * model answer-only while granting grammar tools only to `local`. */
+   * boundary. The chat surface uses it to tell which provider a named model
+   * belongs to. */
   providerIdForModel: (model: string): string | undefined =>
     registry().providerForModel(model)?.id,
   /** Published capacity for the exact model, when its provider declared it. */

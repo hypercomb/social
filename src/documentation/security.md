@@ -11,7 +11,7 @@ hypercomb is presence-first. the system is designed so that being present in a
 shared space is itself the permission model. there is no user database, no
 account system, no credential store — there is no server-side store of you to
 breach. *shared* presence is what evaporates: a participant's live presence,
-cursor, selection, and clipboard exist while they are present and leave nothing
+cursor, selection, and shelf exist while they are present and leave nothing
 behind on a relay when they go.
 
 locally, though, everything you author is content-addressed and versioned in

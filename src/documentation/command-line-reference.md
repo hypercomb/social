@@ -102,7 +102,7 @@ the run, it is not the gate.
 | [delete-cell](#delete-cell) | `~name` or `~[a,b]` | Enter | pluggable |
 | [bracket-select](#bracket-select) | `[a,b]` | Enter | built-in |
 | [bracket-item-ops](#bracket-item-ops) | `[+new, ~old, keep]` | Enter | built-in |
-| [select-op](#select-op) | `[a,b]/cut` etc. | Enter | built-in |
+| [select-op](#select-op) | `[a,b]/shelf` etc. | Enter | built-in |
 | [hash-marker](#hash-marker) | `cell#Drone` | Enter | pluggable |
 | [slash-behaviour](#slash-behaviour) | `/behaviour args` | Enter | pluggable |
 
@@ -248,16 +248,17 @@ items select. Mix freely in one bracket.
 **Trigger** — Enter · **Type** — built-in
 
 A known operation after the bracket executes it on the selection. Known ops:
-`cut`, `copy`, `move(N)`/`move[swapTile]`, `remove`/`rm`/`delete`/`del`,
+`shelf`, `move(N)`/`move[swapTile]`, `remove`,
 `keyword`/`kw`/`tag`, `format`/`fmt`/`fp`, `opus`/`o`, `sonnet`/`s`,
 `haiku`/`h`; `:tag` tags the selection, and any registered behaviour runs on
 it. A word after `/` that no behaviour answers to is reported in the activity
-strip and the line is kept. (The `[items]/destination` cut-paste form is
+strip and the line is kept. (The `[items]/destination` form is
 retired, 2026-10-15 — it never placed anything once tiles became layers. To
-move tiles, cut them and paste where they belong.)
+move tiles, send them to the shelf and hold Shift as you drop them where they
+belong.)
 
 ```
-[a,b]/cut       → cuts a and b to the clipboard
+[a,b]/shelf     → sends a and b to the shelf
 [a,b]/remove    → removes a and b
 [a,b]:urgent    → tags a and b with "urgent"
 [a]/move(3)     → moves a to index 3
@@ -322,11 +323,10 @@ event so Shift-gated behaviours can match.
 1. **GoParentBehavior** — `..` parent navigation (fastest escape hatch)
 2. **SlashBehaviourBehavior** — `/behaviour` slash dispatch
 3. **RemoveCellBehavior** — `~` prefix
-4. **CutPasteBehavior** — `[items]/path` bracket-path copy (non-select-op destinations)
-5. **HashMarkerBehavior** — `cell#Drone` binding
-6. **PasteUrlNavigateBehavior** — pasted URL navigation
-7. **BracketBehavior** — bare `[...]` selection
-8. **ShiftEnterNavigateBehavior** — navigate-only with Shift+Enter
+4. **HashMarkerBehavior** — `cell#Drone` binding
+5. **PasteUrlNavigateBehavior** — pasted URL navigation
+6. **BracketBehavior** — bare `[...]` selection
+7. **ShiftEnterNavigateBehavior** — navigate-only with Shift+Enter
 
 ---
 

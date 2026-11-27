@@ -105,7 +105,7 @@
 // read-back GET. Every other answer keeps the read-back.
 
 import { CHILD_SLOTS, EffectBus, NIP98_KIND, SignatureService, SWARM_LIFECYCLE_KIND, registerPoolMeaning, spellPoolMeaning, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
-import { decorationClosureSigs, nestedResourceSigs } from './decoration-closure.js'
+import { decorationClosureSigs, dependencyDraftsListingParts, nestedResourceSigs } from './decoration-closure.js'
 import { isJoinedHere, ownZone } from './membership.js'
 import { foldContentLabel, HOST_DOMAIN_RE, isLoopbackHost, isPublishNode, legacyContentFace, siteZoneOf } from './zone-door.js'
 import { swarmHosts, type SwarmHostChoice, type SwarmHostResolver, type SwarmHostSource } from './swarm-hosts.js'
@@ -123,6 +123,24 @@ const SIG_RE = /^[a-f0-9]{64}$/
  *  `relation` values a meta envelope can carry to mean "I am held as a
  *  child" — the privacy gate reads the relation exactly as it reads a slot. */
 const CHILD_SLOT_SET: ReadonlySet<string> = new Set(CHILD_SLOTS)
+
+/** Is this a `module:drafts` record (sharing/site-drafts.ts)? Its parts are
+ *  leaves to every walk here, as to the broker's deep adopt and the publish
+ *  closure: a draft root names the trunk it was made over and its folder
+ *  layer the trunk's other modules, none of which the card's host holds. The
+ *  kind is spelled here, not imported: this boot lane takes no import from
+ *  the site modules. */
+const isDraftsRecord = (raw: ArrayBuffer | Uint8Array): boolean => {
+  const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw)
+  if (bytes.byteLength > 1_048_576 || bytes[0] !== 0x7b /* { */) return false
+  try {
+    const text = new TextDecoder().decode(bytes)
+    if (!text.includes('module:drafts') && !text.includes('module:dependency-drafts')) return false
+    // Bee drafts, and dependency drafts in a record of their own (site-drafts.ts).
+    const kind = (JSON.parse(text) as { kind?: unknown })?.kind
+    return kind === 'module:drafts' || kind === 'module:dependency-drafts'
+  } catch { return false }
+}
 
 /** The one incidence a META ENVELOPE (Life Primitive) references.
  *
@@ -1117,6 +1135,27 @@ export class HostSyncService extends EventTarget {
    *  Dedups the descent so a chrome stylesheet shared across many pages is
    *  parsed once, not once per page. */
   #walkedResources = new Set<string>()
+  /** Parts of a `module:drafts` record met by any walk: never descended. */
+  readonly #draftParts = new Set<string>()
+
+  /** What a resource names below itself (a decoration's closure, a data
+   *  resource's nested sigs), read from local bytes; nothing for a part of a
+   *  `module:drafts` record, which is a leaf. */
+  readonly #resourceRefs = async (sig: string, bytes: ArrayBuffer): Promise<string[]> => {
+    if (this.#draftParts.has(sig)) {
+      // A `module:dependency-drafts` record's one part is its listing
+      // (decoration-closure.ts): what it lists are parts too, never descended.
+      const listed = dependencyDraftsListingParts(bytes).filter(ref => ref !== sig)
+      for (const ref of listed) this.#draftParts.add(ref)
+      return listed
+    }
+    const nested = [
+      ...await decorationClosureSigs(bytes, r => this.#readLocalBytes(r, 'resource')),
+      ...nestedResourceSigs(bytes),
+    ]
+    if (isDraftsRecord(bytes)) for (const ref of nested) if (ref !== sig) this.#draftParts.add(ref)
+    return nested
+  }
 
   /** Refs the closure walks could not read from ANY local store AND no
    *  enabled target holds a receipt for — the never-pushed-content hole
@@ -1214,10 +1253,7 @@ export class HostSyncService extends EventTarget {
   readonly #enqueueResourceClosure = async (sig: string, recordBytes: ArrayBuffer): Promise<void> => {
     if (this.#walkedResources.has(sig)) return
     this.#walkedResources.add(sig)
-    const nested = [
-      ...await decorationClosureSigs(recordBytes, s => this.#readLocalBytes(s, 'resource')),
-      ...nestedResourceSigs(recordBytes),
-    ]
+    const nested = await this.#resourceRefs(sig, recordBytes)
     for (const ref of nested) {
       if (!SIG_RE.test(ref) || ref === sig) continue
       try {
@@ -1694,10 +1730,7 @@ export class HostSyncService extends EventTarget {
       // Content descent — a website page body + its embedded assets, or a
       // properties blob's nested image sig, are part of the public closure
       // too (same reasoning as #enqueueResourceClosure).
-      const nested = [
-        ...await decorationClosureSigs(bytes, r => this.#readLocalBytes(r, 'resource')),
-        ...nestedResourceSigs(bytes),
-      ]
+      const nested = await this.#resourceRefs(s, bytes)
       for (const raw of nested) {
         const ref = String(raw ?? '').trim().toLowerCase()
         if (!SIG_RE.test(ref) || ref === s) continue
@@ -2998,10 +3031,7 @@ export class HostSyncService extends EventTarget {
         }
       }
     } else if (kind === 'resource') {
-      const nested = [
-        ...await decorationClosureSigs(bytes, r => this.#readLocalBytes(r, 'resource')),
-        ...nestedResourceSigs(bytes),
-      ]
+      const nested = await this.#resourceRefs(sig, bytes)
       for (const ref of nested) {
         if (!SIG_RE.test(ref) || ref === sig) continue
         const stop = await judge(await this.#closureReceipted(ref, 'resource', closure, visited, at ? undefined : only, at, holder))
@@ -3226,10 +3256,7 @@ export class HostSyncService extends EventTarget {
           }
         }
       } else if (k === 'resource') {
-        const nested = [
-          ...await decorationClosureSigs(bytes, r => this.#readLocalBytes(r, 'resource')),
-          ...nestedResourceSigs(bytes),
-        ]
+        const nested = await this.#resourceRefs(s, bytes)
         for (const ref of nested) {
           if (!SIG_RE.test(ref) || ref === s) continue
           await walk(ref, 'resource')
@@ -3281,10 +3308,7 @@ export class HostSyncService extends EventTarget {
           }
         }
       } else if (k === 'resource') {
-        const nested = [
-          ...await decorationClosureSigs(bytes, r => this.#readLocalBytes(r, 'resource')),
-          ...nestedResourceSigs(bytes),
-        ]
+        const nested = await this.#resourceRefs(s, bytes)
         for (const ref of nested) {
           if (SIG_RE.test(ref) && ref !== s) await walk(ref, 'resource')
         }

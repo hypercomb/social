@@ -63,11 +63,12 @@ const thoughtfulAnswer = (text: string): Partial<Result> => ({
   text, outputTokens: 900, usage: { inputTokens: 10, outputTokens: 900, reasoningTokens: 700 },
 })
 
-const ask = async (providerId: string, maxTokens?: number): Promise<string> => {
+const ask = async (providerId: string, maxTokens?: number, room?: number): Promise<string> => {
   let text = ''
   for await (const chunk of streamRoutedModel({
     providerId, messages: [{ role: 'user', content: 'change the stylesheet' }],
     ...(maxTokens !== undefined ? { maxTokens } : {}),
+    ...(room !== undefined ? { room } : {}),
   })) text += chunk.text
   return text
 }
@@ -91,6 +92,18 @@ describe('room for the answer', () => {
     expect(answerRoom('p', 'other', undefined)).toBeUndefined()
     refuseAnswerRoom('p', 'm')
     expect(answerRoom('p', 'm', undefined)).toBeUndefined()
+  })
+
+  it('gives a call the room it wants, but never over its own allowance or a host that refused', () => {
+    const WORK = 16_384
+    expect(answerRoom('p', 'm', undefined, WORK)).toBe(WORK)
+    expect(answerRoom('p', 'm', undefined, ANSWER_TOKENS)).toBeUndefined()
+    expect(answerRoom('p', 'm', 300, WORK)).toBeUndefined()
+    noteThinking('p', 'm', { outputTokens: 900, reasoningTokens: 700 })
+    expect(answerRoom('p', 'm', undefined, 8_000)).toBe(THINKING_ROOM)
+    expect(answerRoom('p', 'm', undefined, 32_000)).toBe(32_000)
+    refuseAnswerRoom('p', 'm')
+    expect(answerRoom('p', 'm', undefined, WORK)).toBeUndefined()
   })
 
   it('knows an answer that was all thought, counted inside the output or beside it', () => {
@@ -168,5 +181,24 @@ describe('a model that thought its answer away', () => {
     expect(sent).toEqual([undefined, THINKING_ROOM, undefined])
     expect(await ask('small-host')).toBe('done')
     expect(sent).toEqual([undefined, THINKING_ROOM, undefined, undefined])
+  })
+
+  // ROOM FOR THE WORK: a work round that may write six files asks for room,
+  // and a host that cannot give it answers the same round plainly.
+  it('asks a work round with the room it wants, and plainly when the host refuses it', async () => {
+    const WORK = 16_384
+    const roomy = thinker('roomy-host', [{ text: 'six files' }])
+    registry.register(roomy.descriptor)
+    expect(await ask('roomy-host', undefined, WORK)).toBe('six files')
+    expect(roomy.sent).toEqual([WORK])
+
+    const small = thinker('eight-k-host', [{ text: 'done' }])
+    registry.register(small.descriptor)
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => String(url).includes(`allowance-${WORK}`)
+      ? new Response('{"error":{"message":"max_tokens is too large"}}', { status: 400 })
+      : new Response('{}', { status: 200 })))
+    expect(await ask('eight-k-host', undefined, WORK)).toBe('done')
+    expect(await ask('eight-k-host', undefined, WORK)).toBe('done')
+    expect(small.sent).toEqual([WORK, undefined, undefined])
   })
 })

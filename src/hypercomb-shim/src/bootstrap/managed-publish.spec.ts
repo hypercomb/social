@@ -107,6 +107,14 @@ const world = () => {
       chain = [first, finalizeEvent(keyListTemplate(next, until - 600) as never, desktopSecret) as unknown as SignedKeyList]
       return hex(secret)
     },
+    /** The desktop takes a key off its list ("keys off <place>"). */
+    remove: (pubkey: string) => {
+      const verdict = verifyKeyListChain(anchor, chain!, e => verifyEvent(structuredClone(e) as never))
+      if (!verdict.ok) throw new Error('the chain does not verify')
+      const at = Math.floor(Date.now() / 1000)
+      const next = nextKeyList(verdict.head, verdict.headId, { op: 'remove', pubkey }, at)!
+      chain = [...chain!, finalizeEvent(keyListTemplate(next, at) as never, desktopSecret) as unknown as SignedKeyList]
+    },
     /** The desktop publishes its index: the card and everything else it keeps. */
     publish: (content: Record<string, unknown>, at?: number) => { index = sign(content, at) },
     /** A stranger serves an index of the anchor's that the site does not read. */
@@ -115,7 +123,7 @@ const world = () => {
 }
 
 /** This browser's own store: the binding pool, and the atoms the copy holds. */
-const browserStore = (held: Map<string, Uint8Array>) => {
+const browserStore = (held: Map<string, Uint8Array>, bees: Map<string, Uint8Array> = new Map(), dependencies: Map<string, Uint8Array> = new Map()) => {
   const docs = new Map<FileSystemDirectoryHandle, ArrayBuffer>()
   const pools = new Map<string, FileSystemDirectoryHandle>()
   return {
@@ -124,6 +132,8 @@ const browserStore = (held: Map<string, Uint8Array>) => {
     putPoolDoc: async (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer) => { docs.set(pool, bytes); return 'ok' },
     getLayerPoolBytes: async (sig: string) => held.get(sig) ?? null,
     getResourceLocal: async (sig: string) => held.has(sig) ? ({ arrayBuffer: async () => held.get(sig)!.slice().buffer } as unknown as Blob) : null,
+    getBeeBytes: async (sig: string) => bees.get(sig) ?? null,
+    getDependencyBytes: async (sig: string) => dependencies.get(sig) ?? null,
   }
 }
 
@@ -149,13 +159,17 @@ const record = (over: Partial<ManageRecord> = {}): ManageRecord =>
 describe('a managed site door publishes one root with its own listed key', () => {
   let place: ReturnType<typeof world>
   let held: Map<string, Uint8Array>
+  let bees: Map<string, Uint8Array>
+  let pool: Map<string, Uint8Array>
   beforeEach(() => {
     localStorage.clear()
     dropInvite()
     place = world()
     held = new Map()
+    bees = new Map()
+    pool = new Map()
     vi.stubGlobal('fetch', place.fetcher)
-    const store = browserStore(held)
+    const store = browserStore(held, bees, pool)
     ;(window as unknown as { ioc: unknown }).ioc = { get: (key: string) => (key === '@hypercomb.social/Store' ? store : undefined) }
   })
   afterEach(() => { vi.unstubAllGlobals() })
@@ -296,6 +310,157 @@ describe('a managed site door publishes one root with its own listed key', () =>
     expect((await readDeviceBinding())?.anchor).toBe(anchor)
   })
 
+  /** A card whose root wears a `module:drafts` record: one bee draft, its module text held only in the bees pool. */
+  const cardWithDrafts = async (keep: { to?: boolean } = {}) => {
+    const put = async (text: string | Uint8Array, into = held) => { const bytes = typeof text === 'string' ? utf8(text) : text; const sig = await sha(bytes); into.set(sig, bytes); return sig }
+    const trunk = 'd'.repeat(64)
+    const dependency = '9'.repeat(64)
+    const from = await put('export const a = 1\n', bees)
+    const toBytes = utf8('export const a = 2\n')
+    const to = await sha(toBytes)
+    if (keep.to !== false) bees.set(to, toBytes)
+    const layer = await put(JSON.stringify({ name: 'contact', bees: [to] }))
+    const root = await put(JSON.stringify({ draft: { of: trunk, path: 'contact', section: 'contact', from, to, kind: 'bee', at: 1 }, dependencies: [dependency] }))
+    const drafts = await put(JSON.stringify({ kind: 'module:drafts', appliesTo: ['business-card'], refs: [root, layer, to, from].sort(), payload: { drafts: [{ root, layer }] } }))
+    const head = await put(JSON.stringify({ name: 'business-card', decorations: [drafts] }))
+    return { head, drafts, root, layer, to, from, trunk, dependency }
+  }
+
+  it('carries a card\'s drafts as declared parts, module text included, and never walks into them', async () => {
+    place.publish(content())
+    await accept()
+    const card = await cardWithDrafts()
+    const result = await publisher().publishRoot('business-card', card.head)
+    expect(result).toMatchObject({ ok: true, head: card.head, changed: true, uploaded: 6 })
+    const uploaded = place.puts.filter(p => p.startsWith('atom:')).map(p => p.slice(5))
+    expect(new Set(uploaded)).toEqual(new Set([card.head, card.drafts, card.root, card.layer, card.to, card.from]))
+    // A draft root names its trunk and its dependencies; a part is not walked, so neither is asked for.
+    expect(uploaded).not.toContain(card.trunk)
+    expect(uploaded).not.toContain(card.dependency)
+    expect(result.loose).toBeUndefined()
+  })
+
+  it('never sends a module a note or a data blob only quotes: the bees pool is read for the parts of a draft alone', async () => {
+    place.publish(content())
+    await accept()
+    const put = async (text: string | Uint8Array, into = held) => { const bytes = typeof text === 'string' ? utf8(text) : text; const sig = await sha(bytes); into.set(sig, bytes); return sig }
+    // A module this device holds (a refused or dropped draft, say), quoted by sig in the card's data.
+    const quoted = await put('export const secret = 1\n', bees)
+    const details = await put(JSON.stringify({ note: 'brood accept', sig: quoted }))
+    const head = await put(JSON.stringify({ name: 'business-card', properties: [details] }))
+    const result = await publisher().publishRoot('business-card', head)
+    expect(result).toMatchObject({ ok: true, head })
+    const uploaded = place.puts.filter(p => p.startsWith('atom:')).map(p => p.slice(5))
+    expect(uploaded).not.toContain(quoted)
+    expect(new Set(uploaded)).toEqual(new Set([head, details]))
+  })
+
+  it('carries a dependency draft\'s bundles from the dependencies pool, and says the port can', async () => {
+    place.publish(content())
+    await accept()
+    expect(publisher().carriesDependencyParts).toBe(true)
+    const put = async (text: string | Uint8Array, into = held) => { const bytes = typeof text === 'string' ? utf8(text) : text; const sig = await sha(bytes); into.set(sig, bytes); return sig }
+    const trunk = 'd'.repeat(64)
+    const from = await put('// @hypercomb/essentials/contact/card\nexport const a = 1\n', pool)
+    const to = await put('// @hypercomb/essentials/contact/card\nexport const a = 2\n', pool)
+    const layer = await put(JSON.stringify({ name: 'contact', bees: [] }))
+    const root = await put(JSON.stringify({ draft: { of: trunk, path: 'contact', section: 'src/contact/card.ts', from, to, kind: 'dependency', at: 1 }, dependencies: [to] }))
+    // On the card the record names its listing alone (essentials decoration-closure.ts); the parts sit in it.
+    const listing = await put(`hypercomb module:dependency-drafts listing${String.fromCharCode(10)}${JSON.stringify({ drafts: [{ root, layer, from, parts: [to] }], refs: [root, layer, to, from].sort() })}`)
+    const drafts = await put(JSON.stringify({ kind: 'module:dependency-drafts', appliesTo: ['business-card'], payload: { listing }, refs: [listing] }))
+    const head = await put(JSON.stringify({ name: 'business-card', decorations: [drafts] }))
+    const result = await publisher().publishRoot('business-card', head)
+    expect(result).toMatchObject({ ok: true, head, changed: true, uploaded: 7 })
+    const uploaded = place.puts.filter(p => p.startsWith('atom:')).map(p => p.slice(5))
+    expect(new Set(uploaded)).toEqual(new Set([head, drafts, listing, root, layer, to, from]))
+  })
+
+  it('refuses a card whose draft is missing a part, and uploads nothing', async () => {
+    place.publish(content())
+    await accept()
+    const card = await cardWithDrafts({ to: false })
+    const result = await publisher().publishRoot('business-card', card.head)
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('held neither in this browser nor on') })
+    expect(result.error).toContain(card.to.slice(0, 8))
+    expect(place.puts.filter(p => p.startsWith('atom:') || p === 'index')).toEqual([])
+  })
+
+  describe('ownsThisCard reads only, and fails closed', () => {
+    const writes = () => place.fetcher.mock.calls.filter(([, init]) => !['GET', 'HEAD'].includes((init as RequestInit | undefined)?.method ?? 'GET'))
+
+    it('is true only when this browser is bound to the publisher and the site door\'s index names that head', async () => {
+      place.publish(content())
+      await accept()
+      place.fetcher.mockClear()
+      const puts = place.puts.length
+      expect(await publisher().ownsThisCard('business-card', OLD_HEAD)).toBe(true)
+      expect(await publisher().ownsThisCard('/business-card/', OLD_HEAD.toUpperCase())).toBe(true)
+      // The index names another head for this card: not the owner's card as published.
+      expect(await publisher().ownsThisCard('business-card', OTHER)).toBe(false)
+      expect(await publisher().ownsThisCard('elsewhere', OLD_HEAD)).toBe(false)
+      expect(await publisher().ownsThisCard('business-card', 'not-a-sig')).toBe(false)
+      // No key list carried, nothing signed, nothing written anywhere.
+      expect(writes()).toEqual([])
+      expect(place.puts.length).toBe(puts)
+    })
+
+    it('is false once the owner takes this browser off his key list, though its binding and key stay', async () => {
+      place.publish(content())
+      await accept()
+      expect(await publisher().ownsThisCard('business-card', OLD_HEAD)).toBe(true)
+      place.remove(deviceSigner(false)!.pubkey)
+      expect(await readDeviceBinding()).toMatchObject({ anchor })
+      expect(deviceSigner(false)).toBeTruthy()
+      place.fetcher.mockClear()
+      expect(await publisher().ownsThisCard('business-card', OLD_HEAD)).toBe(false)
+      expect(writes()).toEqual([])
+    })
+
+    it('is false with no key in this browser, and asks no host', async () => {
+      place.publish(content())
+      expect(await publisher().ownsThisCard('business-card', OLD_HEAD)).toBe(false)
+      expect(place.fetcher).not.toHaveBeenCalled()
+    })
+
+    it('is false for a site of another anchor\'s, and for a page that is not a managed site door', async () => {
+      place.publish(content())
+      await accept()
+      expect(await publisher({ publisher: getPublicKey(generateSecretKey()) }).ownsThisCard('business-card', OLD_HEAD)).toBe(false)
+      expect(await publisher({ publisher: null }).ownsThisCard('business-card', OLD_HEAD)).toBe(false)
+      expect(await managedPublish({ record: () => null }).ownsThisCard('business-card', OLD_HEAD)).toBe(false)
+    })
+
+    it('is false when the site door\'s index does not verify', async () => {
+      place.publish(content())
+      await accept()
+      const real = place.fetcher.getMockImplementation()!
+      const indexes = await sha('hive:indexes')
+      place.fetcher.mockImplementation(async (input: string, init?: RequestInit) => {
+        const url = new URL(input)
+        if (url.host === SITE && url.pathname === `/${indexes}/${anchor}`) {
+          const forged = { ...place.index!, content: JSON.stringify({ ...content(), roots: { 'business-card': OTHER } }) }
+          return new Response(JSON.stringify(forged))
+        }
+        return real(input, init)
+      })
+      place.fetcher.mockClear()
+      expect(await publisher().ownsThisCard('business-card', OTHER)).toBe(false)
+      expect(await publisher().ownsThisCard('business-card', OLD_HEAD)).toBe(false)
+      expect(writes()).toEqual([])
+    })
+
+    it('is false when anything throws', async () => {
+      place.publish(content())
+      await accept()
+      const throwing = managedPublish({ record: () => record(), siteDoor: () => SITE, binding: async () => { throw new Error('no store') } })
+      expect(await throwing.ownsThisCard('business-card', OLD_HEAD)).toBe(false)
+      const brokenRecord = managedPublish({ record: () => { throw new Error('unreadable') }, siteDoor: () => SITE })
+      expect(await brokenRecord.ownsThisCard('business-card', OLD_HEAD)).toBe(false)
+      place.fetcher.mockImplementation(async () => { throw new Error('offline') })
+      expect(await publisher().ownsThisCard('business-card', OLD_HEAD)).toBe(false)
+    })
+  })
+
   it('is lent through ioc on a managed page only', () => {
     const registered = new Map<string, unknown>()
     ;(window as unknown as { ioc: unknown }).ioc = { get: (key: string) => registered.get(key), register: (key: string, value: unknown) => registered.set(key, value) }
@@ -311,6 +476,7 @@ describe('a managed site door publishes one root with its own listed key', () =>
     try {
       registerManagedPublish()
       expect(typeof (registered.get(MANAGED_PUBLISH_KEY) as { publishRoot?: unknown })?.publishRoot).toBe('function')
+      expect(typeof (registered.get(MANAGED_PUBLISH_KEY) as { ownsThisCard?: unknown })?.ownsThisCard).toBe('function')
     } finally { script.remove(); forgetManageRecordForTests() }
   })
 })
@@ -328,6 +494,7 @@ describe('the closure is the one the hive pushes', () => {
       { kind: 'reference', payload: { requiredBouquet: sig('5'), targetSig: sig('6') } },
       { kind: 'group', refs: [sig('7')] },
       { kind: 'creation', refs: [sig('8')] },
+      { kind: 'module:drafts', appliesTo: ['business-card'], refs: [sig('a'), sig('b')], payload: { drafts: [{ root: sig('a'), layer: sig('b') }] } },
     ]) {
       const bytes = utf8(JSON.stringify(record))
       const ours = closureChildren('resource', bytes)
@@ -346,6 +513,30 @@ describe('the closure is the one the hive pushes', () => {
       const bytes = utf8(JSON.stringify(record))
       expect(kinds(closureChildren('resource', bytes))).toEqual(nestedResourceSigs(bytes).sort())
     }
+  })
+
+  it('takes a module:drafts record\'s refs as parts, and never walks into a part', () => {
+    const drafts = utf8(JSON.stringify({ kind: 'module:drafts', refs: [sig('2'), sig('1'), 'not-a-sig'], payload: { drafts: [{ root: sig('1'), layer: sig('2') }] } }))
+    expect(closureChildren('resource', drafts)).toEqual([[sig('2'), 'part'], [sig('1'), 'part']])
+    // Another decoration's refs stay loose leaves.
+    expect(closureChildren('resource', utf8(JSON.stringify({ kind: 'files:attachment', refs: [sig('1')] })))).toEqual([[sig('1'), 'leaf']])
+    const root = utf8(JSON.stringify({ draft: { of: sig('3'), path: 'x', section: 'x', from: sig('4'), to: sig('5'), kind: 'bee', at: 1 }, dependencies: [sig('6')] }))
+    expect(closureChildren('part', root)).toEqual([])
+    expect(closureChildren('part', utf8(JSON.stringify({ name: 'x', children: [sig('7')], bees: [sig('5')] })))).toEqual([])
+  })
+
+  it('refuses a publish whose declared part is held neither here nor on the host', async () => {
+    const held = new Map<string, Uint8Array>()
+    const put = async (text: string) => { const bytes = utf8(text); const s = await sha(bytes); held.set(s, bytes); return s }
+    const lost = sig('e')
+    const drafts = await put(JSON.stringify({ kind: 'module:drafts', refs: [lost], payload: { drafts: [] } }))
+    const root = await put(JSON.stringify({ name: 'root', decorations: [drafts] }))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 204 })))
+    try {
+      const plan = await planClosure(root, async s => held.get(s) ?? null, WRITES)
+      expect(plan.missing).toEqual([lost])
+      expect(plan.loose).toEqual([])
+    } finally { vi.unstubAllGlobals() }
   })
 
   it('walks a layer\'s slots, and its envelopes, but never its code', () => {

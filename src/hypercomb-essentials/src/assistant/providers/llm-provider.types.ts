@@ -47,49 +47,13 @@ export type LlmImagePart = {
   readonly base64: string
 }
 
-/** One turn of a conversation. Function results are first-class turns so a
- *  model can observe, receive the bounded result, and then answer or act. */
-export type LlmChatMessage =
-  | { readonly role: 'user' | 'assistant'; readonly content: string; readonly toolCalls?: undefined; readonly images?: readonly LlmImagePart[] }
-  | {
-    readonly role: 'assistant'
-    readonly content: string
-    readonly toolCalls: readonly LlmToolCall[]
-  }
-  | {
-    readonly role: 'tool'
-    readonly content: string
-    readonly toolCallId: string
-  }
-
-/** An OpenAI-style function the model may ask the host to call. */
-export type LlmFunctionTool = {
-  readonly type: 'function'
-  readonly function: {
-    readonly name: string
-    readonly description?: string
-    /** JSON Schema for the function arguments. */
-    readonly parameters?: Readonly<Record<string, unknown>>
-    readonly strict?: boolean
-  }
-}
-
-/** One complete, normalized function call returned by any supporting provider. */
-export type LlmToolCall = {
-  /** Some OpenAI-compatible local servers omit ids; callers must tolerate that. */
-  readonly id?: string
-  readonly name: string
-  /** JSON text exactly as emitted by the model. Parsing belongs to the caller. */
-  readonly arguments: string
-}
-
-/** A partial tool call carried by one streaming frame. */
-export type LlmToolCallDelta = {
-  /** OpenAI streams interleaved calls by numeric index. */
-  readonly index: number
-  readonly id?: string
-  readonly name?: string
-  readonly arguments?: string
+/** One turn of a conversation. The hive's work travels as text in fenced
+ *  blocks (core work-fence.ts), never as native tool calls: jwize decided
+ *  "keep text only" on 2026-11-19, so the provider wire carries no tools. */
+export type LlmChatMessage = {
+  readonly role: 'user' | 'assistant'
+  readonly content: string
+  readonly images?: readonly LlmImagePart[]
 }
 
 /** Token accounting reported by a provider, when the wire response includes it. */
@@ -105,7 +69,6 @@ export type LlmTokenUsage = {
 /** Normalized output of one provider streaming frame. */
 export type LlmStreamEvent = {
   readonly text?: string
-  readonly toolCallDeltas?: readonly LlmToolCallDelta[]
   /** Usage is normally present only on the terminal usage frame. */
   readonly usage?: LlmTokenUsage
   /** Present only on the provider's terminal choice frame. */
@@ -152,8 +115,6 @@ export type LlmRequest = {
   readonly messages: readonly LlmChatMessage[]
   readonly system?: string
   readonly maxTokens?: number
-  /** Optional functions available to providers that speak the OpenAI tool shape. */
-  readonly tools?: readonly LlmFunctionTool[]
   /** Ask the vendor to stream. Only meaningful with `fromStreamEvent`. */
   readonly stream?: boolean
   /**
@@ -182,7 +143,6 @@ export type LlmRequest = {
 /** The one answer shape the rest of the app knows. */
 export type LlmCallResult = {
   readonly text: string
-  readonly toolCalls?: readonly LlmToolCall[]
   readonly stopReason: string
   readonly inputTokens: number
   readonly outputTokens: number

@@ -1,6 +1,6 @@
 /**
  * Is `[items]/xxx` an OPERATION on the selection? (It was once that or a
- * cut-paste DESTINATION; the destination form is retired — cut and paste move
+ * DESTINATION; the destination form is retired — the shelf moves
  * tiles — so a word nothing answers to is now reported, never moved into.)
  *
  * The registry answers first. `SlashBehaviourDrone.has()` knows every

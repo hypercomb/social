@@ -284,6 +284,30 @@ test('a page carries the head of its package pool, and its bundled assets reuse 
   assert.deepEqual(reads, [])
 })
 
+test('a door labels its package pool listing and its markers as text, never a page', async () => {
+  const { env } = await fixture()
+  const pool = await sha256Hex('host:packages')
+  const pkg = 'e'.repeat(64)
+  // The asset store types the listing as its directory page (seen live on a
+  // card door, 2026-11-25), and the marker with no type at all.
+  env.ASSETS.fetch = async (request) => {
+    const path = new URL(request.url).pathname
+    if (path === `/content/${pool}/`) return new Response('00000000\n', { headers: { 'content-type': 'text/html' } })
+    if (path === `/content/${pool}/00000000`) return new Response(`${pkg}\nessentials`)
+    return new Response('<!doctype html><html><head><title>x</title></head><body></body></html>', { headers: { 'content-type': 'text/html' } })
+  }
+  const listing = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${pool}/`), env)
+  assert.equal(listing.status, 200)
+  assert.equal(listing.headers.get('content-type'), 'text/plain; charset=utf-8')
+  assert.equal(await listing.text(), '00000000\n')
+  const marker = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${pool}/00000000`), env)
+  assert.equal(marker.headers.get('content-type'), 'text/plain; charset=utf-8')
+  assert.equal(await marker.text(), `${pkg}\nessentials`)
+  // Another pool under /content/ keeps the type the store gave it.
+  const other = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${'b'.repeat(64)}/`), env)
+  assert.notEqual(other.headers.get('content-type'), 'text/plain; charset=utf-8')
+})
+
 test('every name reads one instance head, and a file missing from the asset copy comes from the shared bin', async () => {
   const { env } = await fixture()
   const pkg = 'ab'.repeat(32)
@@ -372,7 +396,8 @@ test('a name served minified boots the minified copy, only while it was derived 
 test('the install index goes out as JSON, so the edge compresses it', async () => {
   const { env } = await fixture()
   const pool = await sha256Hex('install:index')
-  const other = await sha256Hex('host:packages')
+  // Not host:packages: its listing and markers are text (the package pool test).
+  const other = await sha256Hex('install:other')
   // Bytes, not a string: the asset server sends this file with no type at all.
   env.ASSETS.fetch = async () => new Response(new TextEncoder().encode('{"package":"x"}'))
   const index = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${pool}/${'e'.repeat(64)}`), env)
@@ -6529,7 +6554,11 @@ test('the deployed config derives hypercomb.com\'s package from the followed pub
   const apex = bindings['hypercomb.com']
   assert.equal(apex.installs, publisher.channel)
   assert.equal(apex.publishers.find((p) => p.primary).pubkey, publisher.pubkey, 'the pool follows the key every install follows')
-  assert.deepEqual(apex.farm, ['jwize.com'])
+  // the machine's own name: jwize.com's apex is a front door on this worker
+  // now, so reading it would come back here instead of reaching the machine
+  assert.deepEqual(apex.farm, ['relay.pluginthematrix.io'])
+  assert.deepEqual(bindings['jwize.com'].farm, ['relay.pluginthematrix.io'])
+  assert.equal(bindings['jwize.com'].relay, 'relay.pluginthematrix.io')
 })
 
 // ── the shipped default meets at hypercomb.com (jwize 2026-10-11) ───────────
@@ -7948,6 +7977,58 @@ test('a deep name already attached is left as it is, and a list that cannot be r
     assert.equal((await putIndexAt(claimEnv(), 'pluginthematrix.com', await deepIndex())).status, 201)
     assert.deepEqual(cf.domains, [])
   })
+})
+
+// A hive gives the write eight seconds; a big index takes longer to note, and a
+// caller that hangs up cancels the handler. The naming is handed off the moment
+// the index is held, so bookkeeping that never finishes cannot stop it.
+test('a deep name is asked for as soon as the index is held, before the bookkeeping that follows', async () => {
+  const cf = fakeCloudflare({ zones: ['pluginthematrix.com'] })
+  const bag = contentBag()
+  let held = false
+  const stalled = new Proxy(bag, {
+    get(target, prop) {
+      const value = target[prop]
+      if (typeof value !== 'function') return value
+      return (...args) => {
+        if (held) return new Promise(() => {})
+        const answer = value.apply(target, args)
+        if (prop === 'put' && String(args[0]).startsWith(`${INDEXES}/`)) held = true
+        return answer
+      }
+    },
+  })
+  const env = claimEnv({ CONTENT: stalled })
+  const handedOff = []
+  const ctx = { waitUntil: (promise) => { handedOff.push(promise) }, passThroughOnException() {} }
+  await onCloudflare(cf, async () => {
+    const event = await deepIndex()
+    const url = `https://pluginthematrix.com/${INDEXES}/${event.pubkey}`
+    const request = new Request(url, { method: 'PUT',
+      headers: { authorization: await nip98(url, 'PUT', sk) }, body: JSON.stringify(event) })
+    worker.fetch(request, env, ctx)
+    for (let i = 0; i < 50 && !handedOff.length; i++) await new Promise((resolve) => setTimeout(resolve, 5))
+    assert.ok(held, 'the index was held')
+    assert.equal(handedOff.length, 1, 'the naming was handed off while the bookkeeping still stalls')
+    await handedOff[0]
+    assert.deepEqual(cf.domains.map((d) => d.hostname), [DEEP])
+  })
+})
+
+// A door writes its bag on its first visit. Every accepted index must advance
+// it, or the head that visit saw stays the authority and a disagreeing bag
+// closes the door for good.
+test('every accepted index advances the door of a deep name, so a bag written earlier never closes it', async () => {
+  const env = claimEnv({ CLAIM_API_TOKEN: '' })
+  const bag = await sha256Hex(DEEP)
+  const older = 'b'.repeat(64)
+  await env.CONTENT.put(`${bag}/00000000`, JSON.stringify({ layer: older, pubkey: pubOf(sk), lineage: 'hyperdex/knowledge', title: 'knowledge' }))
+  assert.equal((await putIndexAt(env, 'pluginthematrix.com', await deepIndex())).status, 201)
+  const markers = [...env.CONTENT.held.keys()].filter((key) => key.startsWith(`${bag}/`)).sort()
+  assert.deepEqual(markers, [`${bag}/00000000`, `${bag}/00000001`])
+  assert.equal(JSON.parse(new TextDecoder().decode(env.CONTENT.held.get(markers[1]))).layer, head)
+  const page = await worker.fetch(new Request(`https://${DEEP}/`), env)
+  assert.doesNotMatch(await page.text(), /nothing published/)
 })
 
 test('the empty page under a deep name says the route to publish', async () => {

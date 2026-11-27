@@ -1,7 +1,9 @@
 # Deep names: a child's own address
 
-Status: **the worker code is written and specced, 2026-11-18; not deployed.**
-Of the setup below, the forwarder is on the live account; the token is not.
+Status: **deployed 2026-11-19 (PR 198); the token was set 2026-11-25.** The
+first live publish after the token held the index and attached nothing: the
+naming ran last, after a hive's eight-second write had hung up, so it is now
+asked for the moment the index is held (below).
 
 > "opening it up on a child going left is child.hyperdex that way we have a new
 > revision that is more focused" — jwize, 2026-11-18
@@ -62,6 +64,11 @@ when the same index is sent again):
   published", like any name under the wildcard;
 - a write attaches at most eight names; the next write carries on;
 - it never blocks or fails the publish.
+- it is asked for **the moment the index is held**, before the bookkeeping that
+  follows, and handed to `waitUntil`. A hive gives the write eight seconds
+  (`bounded-fetch.ts` `FETCH_DEADLINE_MS`); noting a large index takes longer,
+  and a caller that hangs up cancels the handler, so a naming step that came
+  last was never reached.
 
 A top-level lineage needs nothing: the wildcard already serves it.
 

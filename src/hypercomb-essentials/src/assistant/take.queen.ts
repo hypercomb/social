@@ -35,6 +35,7 @@
 // for nothing.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
+import { foundHostsOf } from './found-hosts.js'
 import { HIVE_TREE_READER_IOC_KEY } from './hive-tree-reader.js'
 
 const SWARM_ADOPT_KEY = '@diamondcoreprocessor.com/SwarmAdoptDrone'
@@ -81,6 +82,8 @@ type SwarmAdoptLike = {
 }
 type BrokerLike = {
   adopt?: (rootSig: string, opts?: { layersOnly?: boolean; silent?: boolean; quiet?: boolean }) => Promise<{ layers: number; failed: number }>
+  hintDomainsForSig?: (sig: string, domains: string[]) => void
+  knownContentHosts?: () => readonly string[]
 }
 type HistoryLike = { getLayerBySig?: (sig: string) => Promise<{ name?: unknown } | null> }
 type LineageLike = { explorerSegments?: () => readonly string[] }
@@ -151,6 +154,19 @@ export class TakeQueenBee extends QueenBee {
         : `this page could not be read; nothing was taken. Name the page: ${TAKE_FORMS}`)
     }
 
+    // FROM WHERE IT WAS FOUND (reach A4): the hosts the read that named this
+    // signature led to are hinted to the broker again before the walk, so
+    // bytes kept only on a host outside the broker's tiers are asked there.
+    // A hint, never a note: those hosts only LISTED the signature, and the
+    // broker learns a host only by the fetch that got its bytes, so a take
+    // of a popular head cannot push the hosts earlier adopts rely on out of
+    // the persisted list. Attribution only; every byte is still hash-checked,
+    // and nothing goes out but the request.
+    const found = foundHostsOf(sig)
+    if (found.length) {
+      try { broker.hintDomainsForSig?.(sig, [...found]) } catch { /* attribution only */ }
+    }
+
     // WHAT, and how much: the layers under the signature, never its pictures.
     // The same walk the branch door counts with; what it fetched stays in the
     // layer pool whether or not the take goes on, as a read's would.
@@ -170,6 +186,10 @@ export class TakeQueenBee extends QueenBee {
       throw new Error(`${sig.slice(0, 8)}… does not name a tile; nothing was taken`)
     }
     const under = walk.layers - 1
+    // The fold's domain is a found host the broker now KNOWS, one whose bytes
+    // arrived (or one it already asked), never merely the first that listed it.
+    const known = new Set((() => { try { return broker.knownContentHosts?.() ?? [] } catch { return [] } })())
+    const domain = found.find(host => known.has(host))
     const held = page.children.some(child => child.name === name)
 
     // WHY THE FOLD SAID NO, in its own words. It explains itself on
@@ -183,7 +203,7 @@ export class TakeQueenBee extends QueenBee {
     joined = true
     let outcome: AdoptOutcome
     try {
-      outcome = await adopt.adoptResolvedBranch({ layerSig: sig, at: [...at], label: name }, { silent: true })
+      outcome = await adopt.adoptResolvedBranch({ layerSig: sig, at: [...at], label: name, ...(domain ? { domain } : {}) }, { silent: true })
     } finally {
       off()
     }
