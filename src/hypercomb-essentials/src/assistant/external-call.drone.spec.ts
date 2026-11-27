@@ -261,3 +261,83 @@ describe('external calls', () => {
     expect(c.outcome()).toEqual({ kind: 'refused', reason: 'no line to say' })
   })
 })
+
+// THE DEBUGGER (jwize 2026-11-26: "step through and see the results in a sub
+// list in each item after completed"): a debugged call pauses before a
+// breakpoint or every line while stepping, says each line's result as it
+// lands, and a stop says nothing more.
+describe('debugging a call', () => {
+  const heard = () => {
+    const paused: number[] = []
+    const lines: Array<{ at: number; verdict: string }> = []
+    const finished: Array<{ kind: string; stoppedAt?: number }> = []
+    const offs = [
+      EffectBus.on<{ at: number }>('external-call:paused', p => { if (p) paused.push(p.at) }),
+      EffectBus.on<{ at: number; verdict: string; extra?: boolean }>('external-call:line', l => { if (l && !l.extra) lines.push({ at: l.at, verdict: l.verdict }) }),
+      EffectBus.on<{ kind: string; stoppedAt?: number }>('external-call:finished', f => { if (f) finished.push(f) }),
+    ]
+    return { paused, lines, finished, off: () => offs.forEach(off => off()) }
+  }
+
+  it('steps line by line, continues to a breakpoint, and reports each result', async () => {
+    const h = heard()
+    const c = call('agent', ['/create a', '/create b', '/create c', '/create d'])
+    const id = lastAsk()!.id
+    EffectBus.emitTransient('external-call:debug', { id, step: true, breakpoints: [3] })
+    EffectBus.emitTransient(EXTERNAL_ANSWER, { id, decision: 'run' })
+    await flush(); await flush()
+    expect(h.paused).toEqual([0])
+    expect(said).toEqual([])
+    EffectBus.emitTransient('external-call:resume', { id, mode: 'step' })
+    await flush(); await flush()
+    expect(said).toEqual(['/create a'])
+    expect(h.lines).toEqual([{ at: 0, verdict: 'ran /create' }])
+    expect(h.paused).toEqual([0, 1])
+    EffectBus.emitTransient('external-call:resume', { id, mode: 'continue' })
+    await flush(); await flush(); await flush()
+    expect(said).toEqual(['/create a', '/create b', '/create c'])
+    expect(h.paused).toEqual([0, 1, 3])
+    EffectBus.emitTransient('external-call:resume', { id, mode: 'continue' })
+    await flush(); await flush(); await flush()
+    expect(said).toEqual(['/create a', '/create b', '/create c', '/create d'])
+    expect(h.finished).toEqual([{ id, kind: 'ran' }])
+    expect(c.outcome()?.kind).toBe('ran')
+    h.off()
+  })
+
+  it('stops before a line and says nothing more', async () => {
+    const h = heard()
+    const c = call('agent', ['/create a', '/create b', '/create c'])
+    const id = lastAsk()!.id
+    EffectBus.emitTransient('external-call:debug', { id, step: false, breakpoints: [1] })
+    EffectBus.emitTransient(EXTERNAL_ANSWER, { id, decision: 'run' })
+    await flush(); await flush()
+    expect(said).toEqual(['/create a'])
+    expect(h.paused).toEqual([1])
+    EffectBus.emitTransient('external-call:resume', { id, mode: 'stop' })
+    await flush(); await flush()
+    expect(said).toEqual(['/create a'])
+    expect(h.finished).toEqual([{ id, kind: 'ran', stoppedAt: 1 }])
+    const outcome = c.outcome()
+    expect(outcome?.kind).toBe('ran')
+    if (outcome?.kind === 'ran') {
+      expect(outcome.results.map(r => r.verdict)).toEqual([
+        'ran /create',
+        'refused: the participant stopped the run before this line',
+        'refused: the participant stopped the run before this line',
+      ])
+    }
+    h.off()
+  })
+
+  it('a call nobody debugs never pauses', async () => {
+    const h = heard()
+    call('agent', ['/create a', '/create b'])
+    EffectBus.emitTransient(EXTERNAL_ANSWER, { id: lastAsk()!.id, decision: 'run' })
+    await flush(); await flush(); await flush()
+    expect(said).toEqual(['/create a', '/create b'])
+    expect(h.paused).toEqual([])
+    expect(h.lines.map(l => l.at)).toEqual([0, 1])
+    h.off()
+  })
+})

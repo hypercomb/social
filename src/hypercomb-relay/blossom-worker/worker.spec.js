@@ -8764,3 +8764,81 @@ test('an entry member is read only beside its open or closed pool: never plainly
     assert.ok(!byUntil.names.includes(member.name) && !byUntil.body.includes(member.name))
   })
 })
+
+// A nested place's own name loads only once attached, so the ledger says which
+// ones are, with when: a hive asks a deep name only once its certificate can
+// have arrived, and never one no certificate covers (the console used to fill
+// with failed handshakes for names the host had never attached).
+const ledgerOf = async (env) => (await worker.fetch(new Request(`https://pluginthematrix.com/${PUBLICATIONS}`), env)).json()
+
+test('the ledger lists each attached deep name with when it was attached, and writes the store only on a change', async () => {
+  const cf = fakeCloudflare({ zones: ['pluginthematrix.com'] })
+  const hives = kvMap()
+  const env = claimEnv({ HIVES: hives })
+  await onCloudflare(cf, async () => {
+    assert.deepEqual((await ledgerOf(env)).deepNames, {})
+    const before = Date.now()
+    assert.equal((await putIndexAt(env, 'pluginthematrix.com', await deepIndex())).status, 201)
+    const kept = JSON.parse(hives.values.get('deep-names:pluginthematrix.com'))
+    assert.ok(kept[DEEP] >= before, 'the attach is kept with its time')
+    assert.deepEqual((await ledgerOf(env)).deepNames, { [DEEP]: kept[DEEP] })
+    // The same names again change nothing, so the store is not written again.
+    let writes = 0
+    const put = hives.put
+    hives.put = async (k, v) => { writes++; return put(k, v) }
+    assert.equal((await putIndexAt(env, 'pluginthematrix.com', await deepIndex(1_800_000_600))).status, 200)
+    assert.equal(writes, 0)
+  })
+})
+
+test('a name attached before the host kept times reads as attached long since, and with no attach the ledger lists none', async () => {
+  const cf = fakeCloudflare({ zones: ['pluginthematrix.com'] })
+  const zoneId = cf.zoneOf('pluginthematrix.com')
+  cf.domains.push({ hostname: DEEP, service: 'hypercomb-hosts', environment: 'production', zone_id: zoneId })
+  const hives = kvMap()
+  const env = claimEnv({ HIVES: hives })
+  await onCloudflare(cf, async () => {
+    assert.equal((await putIndexAt(env, 'pluginthematrix.com', await deepIndex())).status, 201)
+    assert.deepEqual((await ledgerOf(env)).deepNames, { [DEEP]: 0 })
+  })
+  const bare = claimEnv({ HIVES: kvMap(), CLAIM_API_TOKEN: '' })
+  assert.equal((await putIndexAt(bare, 'pluginthematrix.com', await deepIndex())).status, 201)
+  assert.deepEqual((await ledgerOf(bare)).deepNames, {})
+})
+
+test('a zone never kept takes its list the first time the ledger asks: names attached before are listed long since', async () => {
+  const cf = fakeCloudflare({ zones: ['pluginthematrix.com'] })
+  cf.domains.push({ hostname: DEEP, service: 'hypercomb-hosts', environment: 'production', zone_id: cf.zoneOf('pluginthematrix.com') })
+  const hives = kvMap()
+  const env = claimEnv({ HIVES: hives })
+  await onCloudflare(cf, async () => {
+    assert.deepEqual((await ledgerOf(env)).deepNames, { [DEEP]: 0 })
+    assert.deepEqual(JSON.parse(hives.values.get('deep-names:pluginthematrix.com')), { [DEEP]: 0 })
+  })
+})
+
+test('a zone whose list cannot be read is not asked again on every ledger read', async () => {
+  const cf = fakeCloudflare({ zones: ['pluginthematrix.com'] })
+  cf.fail = (method, path) => method === 'GET' && path.endsWith('/workers/domains')
+  const env = claimEnv({ HIVES: kvMap() })
+  await onCloudflare(cf, async () => {
+    assert.deepEqual((await ledgerOf(env)).deepNames, {})
+    const asked = cf.calls.filter((c) => c.endsWith('/workers/domains')).length
+    assert.deepEqual((await ledgerOf(env)).deepNames, {})
+    assert.equal(cf.calls.filter((c) => c.endsWith('/workers/domains')).length, asked)
+  })
+})
+
+test('a name with no kept time, once the zone is kept, is stamped now, never "long since"', async () => {
+  // Another isolate attached it a moment ago and its write is not seen yet:
+  // the stamp must err late, so no hive asks it before its certificate exists.
+  const cf = fakeCloudflare({ zones: ['pluginthematrix.com'] })
+  const hives = kvMap(new Map([['deep-names:pluginthematrix.com', '{}']]))
+  cf.domains.push({ hostname: DEEP, service: 'hypercomb-hosts', environment: 'production', zone_id: cf.zoneOf('pluginthematrix.com') })
+  const env = claimEnv({ HIVES: hives })
+  await onCloudflare(cf, async () => {
+    const before = Date.now()
+    assert.equal((await putIndexAt(env, 'pluginthematrix.com', await deepIndex())).status, 201)
+    assert.ok(JSON.parse(hives.values.get('deep-names:pluginthematrix.com'))[DEEP] >= before)
+  })
+})

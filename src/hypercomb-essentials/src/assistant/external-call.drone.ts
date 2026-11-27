@@ -49,6 +49,27 @@ const LINE_DEADLINE_MS = 60_000
 // state of this run, never replayed to a command line that mounts later.
 const CHAT_ACTIVITY = 'chat:activity'
 
+// THE DEBUGGER (jwize, 2026-11-26: "this should be a debugger as well if we
+// want it to … we can step through and see the results in a sub list in each
+// item after completed"). Opt-in, per call, from the run preview
+// (run-preview.view.ts spells the same names):
+//   DEBUG    { id, step, breakpoints }   sent just before the `run` answer
+//   PAUSED   { id, at, total }           the call waits before line `at`
+//   RESUME   { id, mode }                step | continue | stop
+//   LINE     { id, at, text, verdict, heard?, extra? }   a line's result
+//   FINISHED { id, kind, stoppedAt? }    the run is over
+// All transient: a replay would pause or resume a run that is not there.
+// Every call also reports LINE and FINISHED, debugged or not, so the preview
+// can show each line's result under it.
+export const EXTERNAL_CALL_DEBUG = 'external-call:debug'
+export const EXTERNAL_CALL_PAUSED = 'external-call:paused'
+export const EXTERNAL_CALL_RESUME = 'external-call:resume'
+export const EXTERNAL_CALL_LINE = 'external-call:line'
+export const EXTERNAL_CALL_FINISHED = 'external-call:finished'
+
+type Debugging = { step: boolean; breakpoints: ReadonlySet<number> }
+type ResumeMode = 'step' | 'continue' | 'stop'
+
 type Pending = {
   readonly id: string
   readonly from: string
@@ -167,14 +188,23 @@ export class ExternalCallDrone extends Drone {
   public override description =
     'Holds lines sent from outside until you answer them on the command line, then says them through the machine door and writes the run into a conversation.'
 
-  protected override listens: string[] = [EXTERNAL_CALL, EXTERNAL_ANSWER]
-  protected override emits: string[] = [EXTERNAL_ASK, REMOTE_SUBMIT, 'ask:chat-reply', 'toast:show', 'activity:log']
+  protected override listens: string[] = [EXTERNAL_CALL, EXTERNAL_ANSWER, EXTERNAL_CALL_DEBUG, EXTERNAL_CALL_RESUME]
+  protected override emits: string[] = [
+    EXTERNAL_ASK, REMOTE_SUBMIT, 'ask:chat-reply', 'toast:show', 'activity:log',
+    EXTERNAL_CALL_PAUSED, EXTERNAL_CALL_LINE, EXTERNAL_CALL_FINISHED,
+  ]
 
   #bound = false
   #queue: Pending[] = []
   #busy = false
   #count = 0
   #saying: string | null = null
+  /** Calls the participant asked to debug, by id, until they run. */
+  readonly #debugging = new Map<string, Debugging>()
+  /** The paused call and how to wake it. */
+  #paused: { id: string; wake: (mode: ResumeMode) => void } | null = null
+  /** The line a debugged run was stopped before, while its answer is sent. */
+  #stoppedAt: number | undefined
 
   protected override sense = () => true
   protected override heartbeat = async (): Promise<void> => { this.#bind() }
@@ -197,6 +227,43 @@ export class ExternalCallDrone extends Drone {
     this.#bound = true
     EffectBus.on<ExternalCallRequest>(EXTERNAL_CALL, request => { this.#arrive(request) })
     EffectBus.on<ExternalAnswer>(EXTERNAL_ANSWER, answer => { void this.#answer(answer) })
+    EffectBus.on<{ id?: string; step?: boolean; breakpoints?: readonly number[] }>(EXTERNAL_CALL_DEBUG, asked => {
+      // A queued call may be debugged; a call already debugged may change its
+      // breakpoints while it runs, and keeps its stepping unless told.
+      const was = asked?.id ? this.#debugging.get(asked.id) : undefined
+      if (!asked?.id || (!was && !this.#queue.some(call => call.id === asked.id))) return
+      const breakpoints = new Set((asked.breakpoints ?? []).filter(n => Number.isInteger(n) && n >= 0))
+      if (was) {
+        // In place: a pause holds this very record and sets its stepping on wake.
+        was.breakpoints = breakpoints
+        if (typeof asked.step === 'boolean') was.step = asked.step
+      } else {
+        this.#debugging.set(asked.id, { step: asked.step === true, breakpoints })
+      }
+    })
+    EffectBus.on<{ id?: string; mode?: string }>(EXTERNAL_CALL_RESUME, asked => {
+      const paused = this.#paused
+      if (!paused || asked?.id !== paused.id) return
+      const mode = asked.mode === 'step' || asked.mode === 'stop' ? asked.mode : 'continue'
+      this.#paused = null
+      paused.wake(mode)
+    })
+  }
+
+  /** Before line `at`: wait for the participant when they are stepping or
+   *  a breakpoint stands here. Answers how to go on. */
+  #maybePause(id: string, at: number, total: number): Promise<ResumeMode> {
+    const debugging = this.#debugging.get(id)
+    if (!debugging || (!debugging.step && !debugging.breakpoints.has(at))) return Promise.resolve('continue')
+    return new Promise(resolve => {
+      this.#paused = {
+        id, wake: mode => {
+          debugging.step = mode === 'step'
+          resolve(mode)
+        },
+      }
+      EffectBus.emitTransient(EXTERNAL_CALL_PAUSED, { id, at, total })
+    })
   }
 
   #arrive(request: ExternalCallRequest | undefined): void {
@@ -254,7 +321,12 @@ export class ExternalCallDrone extends Drone {
       outcome = { kind: 'refused', reason: String((error as Error)?.message ?? error) }
     } finally {
       EffectBus.emitTransient(CHAT_ACTIVITY, { from: head.from, writing: false })
+      this.#debugging.delete(head.id)
+      this.#paused = null
     }
+    const stoppedAt = this.#stoppedAt
+    this.#stoppedAt = undefined
+    EffectBus.emitTransient(EXTERNAL_CALL_FINISHED, { id: head.id, kind: outcome.kind, ...(stoppedAt !== undefined ? { stoppedAt } : {}) })
     try { head.complete?.(outcome) } catch { /* a caller's own failure is not ours */ }
     this.#busy = false
     this.#show()
@@ -274,6 +346,7 @@ export class ExternalCallDrone extends Drone {
       let verdict: string
       try { verdict = await call.perform() } catch (error) { verdict = `failed: ${String((error as Error)?.message ?? error)}` }
       await deliverTurn(convoId, 'assistant', `${text}\n→ ${verdict}`)
+      EffectBus.emitTransient(EXTERNAL_CALL_LINE, { id: call.id, at: 0, text, verdict, act: true })
       return { kind: 'ran', convoId, results: [{ text, verdict }] }
     }
     const results: ExternalLineResult[] = []
@@ -311,7 +384,17 @@ export class ExternalCallDrone extends Drone {
       await settled()
       return outcome
     }
-    for (const text of call.lines) {
+    for (const [at, text] of call.lines.entries()) {
+      // A DEBUGGED RUN WAITS HERE before a breakpoint, or before every line
+      // while the participant steps. Stopping says nothing more: the lines
+      // left are written as not said, and the caller hears it.
+      if (await this.#maybePause(call.id, at, total) === 'stop') {
+        this.#stoppedAt = at
+        const left = call.lines.slice(at)
+        record(`Stopped by the participant before line ${at + 1}. Not said:\n${left.join('\n')}`)
+        for (const unsaid of left) results.push({ text: unsaid, verdict: 'refused: the participant stopped the run before this line' })
+        break
+      }
       if (callStandsAt && verbOf(text) !== 'go' && !samePlace(standingNow(), callStandsAt)) {
         const back = `go /${callStandsAt.join('/')}`
         const verdict = formatRemoteSubmitOutcome(await walkTo(back))
@@ -319,6 +402,7 @@ export class ExternalCallDrone extends Drone {
         results.push({ text: back, verdict, heard: [note] })
         record(`${back}\n→ ${verdict}\n${note}`)
         progress(back, verdict)
+        EffectBus.emitTransient(EXTERNAL_CALL_LINE, { id: call.id, at, text: back, verdict, heard: [note], extra: true })
       }
       const walking = verbOf(text) === 'go' ? goReported() : null
       // WHAT THE HIVE SAYS WHILE THE LINE RUNS — a word that answers (`read`,
@@ -343,6 +427,7 @@ export class ExternalCallDrone extends Drone {
       record([`${text}\n→ ${verdict}`, ...heard].join('\n'))
       done++
       progress(text, verdict)
+      EffectBus.emitTransient(EXTERNAL_CALL_LINE, { id: call.id, at, text, verdict, ...(heard.length ? { heard } : {}) })
     }
     await written
     const refused = results.filter(r => r.verdict.startsWith('refused')).length
@@ -364,3 +449,36 @@ export class ExternalCallDrone extends Drone {
 
 const _externalCall = new ExternalCallDrone()
 window.ioc.register('@diamondcoreprocessor.com/ExternalCallDrone', _externalCall)
+
+// THE RUN PREVIEW (run-preview.view.ts): every waiting call is also drawn over
+// the whole hive, as code, with what each line will do. This bee adds its tag
+// to the ShellSurfaceRegistry and defines it when the first call waits, so the
+// view is never on the boot path; the element upgrades in place and takes the
+// waiting ask from the bus's replay. The names are spelled here, as the view
+// spells them: importing even a constant would load the view at boot.
+const RUN_PREVIEW_SURFACE = 'hc-run-preview'
+const RUN_PREVIEW_OWNER = '@diamondcoreprocessor.com/RunPreviewView'
+
+;(window as { ioc?: { whenReady?: (k: string, cb: (v: { add(s: unknown): void }) => void) => void } })
+  .ioc?.whenReady?.('@hypercomb.social/ShellSurfaceRegistry', registry => {
+    try {
+      registry.add({ name: RUN_PREVIEW_SURFACE, owner: RUN_PREVIEW_OWNER, element: RUN_PREVIEW_SURFACE, order: 153 })
+    } catch {
+      // duplicate add (hot reload) — the mounted surface is already live
+    }
+  })
+
+let runPreview: Promise<void> | null = null
+const loadRunPreview = (): void => {
+  if (typeof customElements === 'undefined' || customElements.get(RUN_PREVIEW_SURFACE)) return
+  runPreview ??= import('./run-preview.view.js').then(({ RunPreviewElement }) => {
+    if (!customElements.get(RUN_PREVIEW_SURFACE)) customElements.define(RUN_PREVIEW_SURFACE, RunPreviewElement)
+  }).catch((error: unknown) => {
+    // The line still holds the call; the next call tries the view again.
+    runPreview = null
+    console.warn('[external-call] the run preview did not load:', error)
+  })
+}
+EffectBus.on<ExternalAsk | null>(EXTERNAL_ASK, ask => { if (ask) loadRunPreview() })
+// F2 on the command line: the participant's own line (run-preview.view.ts).
+EffectBus.on<{ text?: string | null }>('run-preview:line', own => { if (typeof own?.text === 'string') loadRunPreview() })
