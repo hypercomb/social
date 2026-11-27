@@ -362,7 +362,7 @@ export class WebsiteQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'website'
   override description =
-    'Toggle the website view, export the current subtree as JSON, or trigger a Claude codegen build. Bundle stamping was removed; per-cell pages live on each cell\'s `context` slot.'
+    'Show tiles as web pages: website toggles the view, website page <sig> gives the tile you stand in that page, export / build / list work on the pages below'
   override descriptionKey = 'slash.website'
   override options = ['on', 'off', 'here', 'save', 'load', 'export', '<name-or-path>', 'upgrade', 'upgrade *', 'upgrade <name>', 'new', 'build', 'list']
   override examples = [
