@@ -106,6 +106,11 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // TRUTH POOL — the participant's own preference, never replicated, never
   // minted from the optimize phase.
   'confirm:muted',
+  // THE HIVE BACKUP'S RECOVERY KEY (essentials sharing/hive-backup.ts): one
+  // document, the PUBLIC half of the key every host backup is also sealed to,
+  // and the index it was made for. The secret is never here — it lives only in
+  // the participant's offline recovery file.
+  'backup:recovery',
   // THE FEATURES ONLY A PARTICIPANT USES (essentials
   // sharing/participant-features.ts): members are artifacts named by their
   // own content, each naming a feature by its layer name. `features publish`
