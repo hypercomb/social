@@ -33,7 +33,7 @@ export interface ShortcutSheetState {
 }
 
 const CATEGORY_ORDER = [
-  'Navigation', 'Clipboard', 'View',
+  'Navigation', 'View',
 ]
 
 type CommandLineOperationMeta = {
