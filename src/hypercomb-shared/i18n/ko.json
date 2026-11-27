@@ -2657,8 +2657,6 @@
   "aggregate.empty": "아직 아무것도 없습니다.",
   "aggregate.no-match": "이 검색과 일치하는 것이 없습니다.",
   "aggregate.home": "홈",
-  "aggregate.home.pin": "{name}을(를) 홈으로 지정 — 홈이 이동을 따라다니지 않습니다",
-  "aggregate.home.unpin": "{name}을(를) 홈에서 해제 — 홈이 다시 마지막 포털을 따라갑니다",
   "aggregate.carry.add": "{name} 가져가기 — 이동한 곳에 적용",
   "aggregate.carry.remove": "{name} 내려놓기",
   "aggregate.carry.clear": "내려놓기",

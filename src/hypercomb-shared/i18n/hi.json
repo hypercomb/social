@@ -2657,8 +2657,6 @@
   "aggregate.empty": "अभी यहाँ कुछ नहीं।",
   "aggregate.no-match": "इस खोज से कुछ मेल नहीं खाता।",
   "aggregate.home": "होम",
-  "aggregate.home.pin": "{name} को अपना होम बनाएँ — Home अब आपके चलने के साथ नहीं बदलेगा",
-  "aggregate.home.unpin": "{name} को होम से मुक्त करें — Home फिर से आख़िरी पोर्टल के साथ चलेगा",
   "aggregate.carry.add": "{name} साथ ले जाएँ — जहाँ जाएँ वहाँ लगाएँ",
   "aggregate.carry.remove": "{name} रख दें",
   "aggregate.carry.clear": "रख दें",

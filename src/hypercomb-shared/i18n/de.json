@@ -2657,8 +2657,6 @@
   "aggregate.empty": "Hier ist noch nichts.",
   "aggregate.no-match": "Nichts passt zu dieser Suche.",
   "aggregate.home": "Start",
-  "aggregate.home.pin": "{name} zu deinem Start machen — Start folgt dann nicht mehr, wohin du gehst",
-  "aggregate.home.unpin": "{name} als Start freigeben — Start folgt wieder dem letzten Portal",
   "aggregate.carry.add": "{name} mitnehmen — überall anwendbar, wohin du gehst",
   "aggregate.carry.remove": "{name} ablegen",
   "aggregate.carry.clear": "Ablegen",

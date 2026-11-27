@@ -41,20 +41,20 @@ import {
 import { dropReferenceTile, dropTagsOnTile, safeCellName } from './aggregate-drop'
 import type { DropTarget } from './aggregate-drop'
 import { onSelection, withSelectionService } from '../../core/selection-context'
-import type { RecentPortalsStore } from '../../core/recent-portals.store'
-// Recents — a hive's atoms by date — registers itself as a source here rather
-// than from the shell-surfaces barrel: that barrel is a ratchet that may only
-// shrink, and a source is data for THIS panel, not chrome of its own.
+// Recents (a hive's atoms by date) and Recent (the homes you pinned) register
+// themselves as sources here rather than from the shell-surfaces barrel: that
+// barrel is a ratchet that may only shrink, and a source is data for THIS
+// panel, not chrome of its own.
 import './sources/recents.source'
+import './sources/recent.source'
 
 /** Movement before a press counts as a drag rather than a click — small enough
  *  to feel immediate, large enough that a click that jitters still opens. */
 const DRAG_THRESHOLD = 5
 
-/** The Portals view. The only source whose rows may be pinned as home — every
- *  source's `segments` is "what this row points at", so the mechanism would
- *  work anywhere, but a home that is a tag row or a search hit is not a place
- *  you meant to keep. */
+/** The Portals view (the `sets/` collections), the source whose rows accept a
+ *  carried tile and pair with References. Home is no longer pinned here: it is
+ *  chosen from Recent (sources/recent.source.ts). */
 const PORTALS_SOURCE_ID = 'collections'
 
 type LineageLike = EventTarget & { explorerSegments?: () => readonly string[] }
@@ -202,22 +202,6 @@ export class AggregateIndexComponent implements OnDestroy {
   /** Are the rows portals? Only the Portals view accepts a carried tile —
    *  every other aggregate's rows mean something else. */
   readonly portalDropView = computed(() => this.source()?.id === PORTALS_SOURCE_ID)
-
-  /** The Portals row names the real location to show at `/`. */
-  isHome(item: AggregateItem): boolean {
-    return !!(ioc()?.get('@hypercomb.social/RecentPortalsStore') as RecentPortalsStore | undefined)
-      ?.isPinned(item.segments)
-  }
-
-  toggleHome(item: AggregateItem, event: Event): void {
-    event.stopPropagation()
-    const portals = ioc()?.get('@hypercomb.social/RecentPortalsStore') as RecentPortalsStore | undefined
-    if (!portals) return
-    portals.togglePin(item.label, item.segments)
-    const navigation = ioc()?.get('@hypercomb.social/Navigation') as NavigationLike | undefined
-    if (navigation?.segmentsRaw?.().length === 0) window.dispatchEvent(new Event('navigate'))
-    void this.reload() // the chosen portal leads the index
-  }
 
   /** Labels currently selected on the canvas, with the location they were
    *  selected AT. Captured rather than derived on read: a selection outlives
@@ -402,9 +386,6 @@ export class AggregateIndexComponent implements OnDestroy {
       'gather:page-links', (p) => {
         this.#linkedKeys.set(new Set((p?.from ?? []).map(route => route.join('/'))))
       }))
-    // The home pin can move from outside this window (Ctrl/⌘+click on the
-    // rail's Home), and the lit row has to follow it.
-    this.#cleanups.push(EffectBus.on('portals:recent-changed', () => this.#cdr.markForCheck()))
     this.#cleanups.push(EffectBus.on<{ active?: readonly string[]; scope?: string }>('tags:filter', (p) => {
       this.#activeTags.set(new Set((p?.active ?? []).map(String).filter(Boolean)))
       const s = p?.scope

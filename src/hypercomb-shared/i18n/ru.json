@@ -2657,8 +2657,6 @@
   "aggregate.empty": "Здесь пока пусто.",
   "aggregate.no-match": "Ничего не найдено по этому запросу.",
   "aggregate.home": "начало",
-  "aggregate.home.pin": "сделать {name} вашей главной — «Главная» перестанет следовать за вами",
-  "aggregate.home.unpin": "снять {name} с роли главной — «Главная» снова следует за последним порталом",
   "aggregate.carry.add": "взять {name} — применить там, куда придёте",
   "aggregate.carry.remove": "положить {name}",
   "aggregate.carry.clear": "Положить",

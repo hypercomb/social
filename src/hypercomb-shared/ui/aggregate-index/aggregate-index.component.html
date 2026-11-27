@@ -224,6 +224,7 @@
                 [class.is-linked]="managingPage() && isLinked(item)"
                 [class.is-selected]="isSelected(item)"
                 [class.is-shaded]="item.shaded === true"
+                [class.is-current]="item.current === true"
                 [class.is-portal-drop]="portalDropView() && portalCarryActive()"
                 [attr.data-portal-drop]="portalDropView() ? item.key : null"
                 [style.--accent]="accent(item.label)">
@@ -242,6 +243,9 @@
                 </span>
                 @if (renaming() !== item.key) {
                   <span class="ai-label">{{ item.label }}</span>
+                  @if (item.noteKey) { <span class="ai-note">{{ item.noteKey | t }}</span> }
+                  @else if (item.noteText) { <span class="ai-note">{{ item.noteText }}</span> }
+                  @if (item.current) { <span class="mat-sym ai-current" aria-hidden="true">home_pin</span> }
                 }
               </button>
 
@@ -267,14 +271,6 @@
                     </button>
                   }
                   @if (portalDropView()) {
-                    <button class="ai-action ai-action-home" type="button"
-                            [class.is-home]="isHome(item)"
-                            (click)="toggleHome(item, $event)"
-                            [attr.aria-pressed]="isHome(item)"
-                            [attr.aria-label]="(isHome(item) ? 'aggregate.home.unpin' : 'aggregate.home.pin') | t: { name: item.label }"
-                            [title]="(isHome(item) ? 'aggregate.home.unpin' : 'aggregate.home.pin') | t: { name: item.label }">
-                      <span class="mat-sym">{{ isHome(item) ? 'home_pin' : 'home' }}</span>
-                    </button>
                     <!-- Portals stay intentionally spare: + is the whole
                          reference act. A staged tile makes this pool its
                          target; otherwise the pool itself is picked up. -->

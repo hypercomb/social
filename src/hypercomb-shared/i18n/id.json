@@ -2657,8 +2657,6 @@
   "aggregate.empty": "Belum ada apa-apa di sini.",
   "aggregate.no-match": "Tidak ada yang cocok dengan pencarian ini.",
   "aggregate.home": "beranda",
-  "aggregate.home.pin": "jadikan {name} beranda Anda — Beranda berhenti mengikuti ke mana Anda melangkah",
-  "aggregate.home.unpin": "lepaskan {name} sebagai beranda — Beranda mengikuti portal terakhir lagi",
   "aggregate.carry.add": "bawa {name} — terapkan ke mana pun kamu pergi",
   "aggregate.carry.remove": "letakkan {name}",
   "aggregate.carry.clear": "Letakkan",
