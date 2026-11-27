@@ -2,9 +2,13 @@
 //
 // voice.cjs clones a whole line in one breath, and a clone runs sentences
 // together: on the protocol tile only four of six pauses were long enough for
-// timing.cjs to hear, so its words drifted from the voice. Here every sentence
-// is cloned on its own (clone.py: best of N takes, right first, then closest
-// to the reference), the sentences are joined with GAP_MS of silence, and the
+// timing.cjs to hear, so its words drifted from the voice. A sentence cloned
+// on its own is worse the other way: too short for the clone to hold the
+// voice, it drifts in accent (0.89 to 0.92 likeness against 0.953 for the
+// whole 28-second tile). So lines are cloned in PASSAGES of up to
+// PASSAGE_CHARS (clone.py: best of N takes, right first, then closest to the
+// reference), split.py cuts each passage at its sentence ends by Whisper's
+// word timestamps, the sentences are joined with GAP_MS of silence, and the
 // whole is mastered by master.cjs's chain into the tour's format (24 kHz mono,
 // 48 kbit/s, the rate blocks/build.cjs reads a narration's length from). It
 // lands in the line's own audio-cache slot, so the page build needs no flag;
@@ -15,6 +19,7 @@
 //   node reclone.cjs --beats  [--under protocol] [--takes 2]     page beats, captions and figure lines
 //   node reclone.cjs ... --only scene:13,scene:14                just those lines
 //   node reclone.cjs ... --skip scene:02                         all but those
+//   node reclone.cjs ... --again                                 cut, join and master again, even lines already done
 //   node reclone.cjs ... --check                                 list what would be spoken; clone nothing
 //
 // A line already spoken from the same reference with the same words is
@@ -35,6 +40,8 @@ const REFERENCE = path.join(ROOT, 'voice', 'reference', 'reference.wav')
 const SPOKEN = path.join(ROOT, 'voice', 'spoken.json')
 const WORK = path.join(ROOT, 'voice', 'voxtral', 'reclone')
 const GAP_MS = 350
+const PASSAGE_CHARS = 420            // the protocol tile's whole narration, cloned in one take
+const METHOD = 'passage'
 const SR = 24000
 
 const arg = name => {
@@ -138,25 +145,49 @@ function main() {
   const ref = refSig()
   const ledger = fs.existsSync(SPOKEN) ? JSON.parse(fs.readFileSync(SPOKEN, 'utf8')) : {}
   const all = lines()
-  const todo = all.filter(l => !(ledger[l.id]?.via === 'reclone' && ledger[l.id]?.reference === ref && ledger[l.id]?.text === l.text))
+  const todo = has('again') ? all : all.filter(l => !(ledger[l.id]?.via === 'reclone' && ledger[l.id]?.method === METHOD && ledger[l.id]?.reference === ref && ledger[l.id]?.text === l.text))
   const sentences = todo.flatMap(l => l.sentences)
   console.log(`${all.length} line(s), ${todo.length} to speak, ${sentences.length} sentence(s), reference ${ref}`)
   if (has('check') || !todo.length) { todo.forEach(l => console.log(`  ${l.id}  ${l.sentences.length} sentence(s)`)); return }
 
   const takes = parseInt(arg('takes'), 10) || (has('scenes') ? 3 : 2)
-  const dir = path.join(WORK, has('scenes') ? 'scenes' : 'beats')
+  const dir = path.join(WORK, has('scenes') ? 'scenes-passages' : 'beats-passages')
   fs.mkdirSync(dir, { recursive: true })
-  const list = path.join(dir, 'lines.json')
-  // clone.py writes every sentence it finishes; a sentence already on disk is not spoken again
-  const pending = sentences.filter(s => !fs.existsSync(path.join(dir, `${s.key}.wav`)))
-  fs.writeFileSync(list, JSON.stringify(pending.map(s => ({ id: s.key, text: s.text })), null, 2))
-  if (pending.length) {
-    console.log(`cloning ${pending.length} sentence(s), ${takes} takes each`)
-    execFileSync(PYTHON, [path.join(ROOT, 'voice', 'clone.py'), REFERENCE, list, dir, String(takes)], { stdio: 'inherit' })
+
+  // PASSAGES: a scene's sentences stay in its own passages; page lines, each a
+  // sentence or two, are grouped in order. Each passage is named by its words.
+  const passages = []
+  let open = null
+  for (const line of todo) {
+    if (has('scenes')) open = null
+    for (const s of line.sentences) {
+      const words = (s.text.match(/[A-Za-z0-9']+/g) || []).length
+      if (!open || open.text.length + 1 + s.text.length > PASSAGE_CHARS) { open = { text: '', sentences: [] }; passages.push(open) }
+      open.text = open.text ? `${open.text} ${s.text}` : s.text
+      open.sentences.push({ key: s.key, words })
+    }
   }
-  const scoresOf = () => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'scores.json'), 'utf8')) } catch { return {} } }
-  const scores = { ...(fs.existsSync(path.join(dir, 'scores.all.json')) ? JSON.parse(fs.readFileSync(path.join(dir, 'scores.all.json'), 'utf8')) : {}), ...scoresOf() }
-  fs.writeFileSync(path.join(dir, 'scores.all.json'), JSON.stringify(scores, null, 2))
+  for (const p of passages) p.id = `passage-${crypto.createHash('sha256').update(p.text).digest('hex').slice(0, 12)}`
+  const done = p => p.sentences.every(s => fs.existsSync(path.join(dir, `${s.key}.wav`)))
+  const toClone = passages.filter(p => !done(p) && !fs.existsSync(path.join(dir, `${p.id}.wav`)))
+  console.log(`${passages.length} passage(s), ${toClone.length} to clone, ${takes} takes each`)
+  if (toClone.length) {
+    const list = path.join(dir, 'lines.json')
+    fs.writeFileSync(list, JSON.stringify(toClone.map(p => ({ id: p.id, text: p.text })), null, 2))
+    execFileSync(PYTHON, [path.join(ROOT, 'voice', 'clone.py'), REFERENCE, list, dir, String(takes)], { stdio: 'inherit' })
+    const fresh = (() => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'scores.json'), 'utf8')) } catch { return {} } })()
+    const keptPath = path.join(dir, 'scores.all.json')
+    const kept = fs.existsSync(keptPath) ? JSON.parse(fs.readFileSync(keptPath, 'utf8')) : {}
+    fs.writeFileSync(keptPath, JSON.stringify({ ...kept, ...fresh }, null, 2))
+  }
+  const toSplit = passages.filter(p => !done(p) && fs.existsSync(path.join(dir, `${p.id}.wav`)))
+  if (toSplit.length) {
+    const jobs = path.join(dir, 'split.json')
+    fs.writeFileSync(jobs, JSON.stringify(toSplit.map(p => ({ wav: `${p.id}.wav`, sentences: p.sentences })), null, 2))
+    execFileSync(PYTHON, [path.join(ROOT, 'voice', 'split.py'), jobs, dir], { stdio: 'inherit' })
+  }
+  const scores = (() => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'scores.all.json'), 'utf8')) } catch { return {} } })()
+  const passageOf = Object.fromEntries(passages.flatMap(p => p.sentences.map(s => [s.key, p.id])))
 
   const generated = path.join(ROOT, 'audio-cache', 'generated')
   fs.mkdirSync(generated, { recursive: true })
@@ -165,10 +196,10 @@ function main() {
     const keep = path.join(generated, `${line.slot}.mp3`)
     if (fs.existsSync(out) && !fs.existsSync(keep)) fs.copyFileSync(out, keep)
     masterInto(stitch(line, dir), out)
-    const got = line.sentences.map(s => scores[s.key] || {})
-    const flagged = line.sentences.filter((s, k) => got[k].flagged).map(s => s.key)
+    const got = line.sentences.map(s => scores[passageOf[s.key]] || {})
+    const flagged = [...new Set(line.sentences.filter((s, k) => got[k].flagged).map(s => passageOf[s.key]))]
     ledger[line.id] = {
-      slot: line.slot, via: 'reclone', reference: ref,
+      slot: line.slot, via: 'reclone', method: METHOD, reference: ref,
       similarity: +Math.min(...got.map(g => g.similarity ?? 1)).toFixed(4),
       wer: +Math.max(...got.map(g => g.wer ?? 0)).toFixed(4),
       seconds: +durationOf(out).toFixed(2), at: new Date().toISOString().slice(0, 10), text: line.text,
