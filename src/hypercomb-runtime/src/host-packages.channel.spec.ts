@@ -10,7 +10,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from 'nostr-tools/pure'
-import { KEY_LIST_MEANING, firstKeyList, keyListTemplate, nextKeyList, readKeyList, registerPoolMeaning } from '@hypercomb/core'
+import { KEY_LIST_MEANING, firstKeyList, forgetListedChains, keyListTemplate, nextKeyList, readKeyList, registerPoolMeaning } from '@hypercomb/core'
 import {
   INSTALL_FOLLOW_KEY, indexDoors, installCandidates, readInstallChannel, readInstallFollow, type InstallFollow,
 } from './host-packages'
@@ -44,7 +44,7 @@ const PAGE = { body: '<!doctype html><html><title>Hypercomb</title></html>', typ
 
 const FOLLOW: InstallFollow = { pubkey: PUBLISHER, hosts: ['hypercomb.com'], channel: 'essentials' }
 
-beforeEach(() => { vi.unstubAllGlobals() })
+beforeEach(() => { vi.unstubAllGlobals(); forgetListedChains() })
 
 describe('readInstallFollow — the same record the update scout reads', () => {
   const storage = (value: string | null): Pick<Storage, 'getItem'> => ({ getItem: () => value })

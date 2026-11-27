@@ -1,7 +1,8 @@
 // index-signer.spec.ts — whose index is this? The anchor's own signature, or a
 // key the anchor's list names, signing for it.
-import { describe, expect, it, vi } from 'vitest'
-import { indexStandsFor } from './index-signer.js'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { forgetListedChains, indexStandsFor, listedChainAt } from './index-signer.js'
+import { KEY_LIST_MAX_CHAIN } from './key-list.js'
 
 const ANCHOR = 'a'.repeat(64)
 const PHONE = 'b'.repeat(64)
@@ -37,5 +38,32 @@ describe('indexStandsFor', () => {
   it('refuses a malformed signer or anchor', async () => {
     expect(await indexStandsFor(event('nope', [['anchor', ANCHOR]]), ANCHOR, async () => new Set(['nope']))).toBe(false)
     expect(await indexStandsFor(event(ANCHOR), 'nope', async () => null)).toBe(false)
+  })
+})
+
+describe('listedChainAt — bounded before anything is verified', () => {
+  afterEach(() => { vi.unstubAllGlobals(); forgetListedChains() })
+
+  it('verifies nothing in a chain longer than a host may hold', async () => {
+    const long = Array.from({ length: KEY_LIST_MAX_CHAIN + 1 }, (_, n) => ({ id: String(n), kind: 30570 }))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(long))))
+    const verify = vi.fn(() => true)
+    expect(await listedChainAt('https://door.example', ANCHOR, verify)).toBeNull()
+    expect(verify).not.toHaveBeenCalled()
+  })
+
+  it('stops verifying at the first event that fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([{ id: '0' }, { id: '1' }, { id: '2' }]))))
+    const verify = vi.fn(() => false)
+    expect(await listedChainAt('https://door.example', ANCHOR, verify)).toBeNull()
+    expect(verify).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads one door and anchor once a minute', async () => {
+    const fetcher = vi.fn(async () => new Response(null, { status: 404 }))
+    vi.stubGlobal('fetch', fetcher)
+    await listedChainAt('https://door.example/', ANCHOR, () => true)
+    await listedChainAt('https://door.example', ANCHOR, () => true)
+    expect(fetcher).toHaveBeenCalledTimes(1)
   })
 })

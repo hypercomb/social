@@ -27,7 +27,8 @@
 //
 // It reads nothing but public URLs and writes nothing anywhere.
 
-import { HOST_IOC_KEY, indexStandsFor, listedSignersAt, registerPoolMeaning, type HostProvider } from '@hypercomb/core'
+import * as core from '@hypercomb/core'
+import { HOST_IOC_KEY, registerPoolMeaning, type HostProvider } from '@hypercomb/core'
 import { HIVE_INDEXES_MEANING, HOST_PACKAGES_MEANING, markerIndices, parseMember, parsePoolListing, poolEntryName } from './host-pool.js'
 import { DEFAULT_HOST_ZONES, hostZone } from './host-zones.js'
 
@@ -535,7 +536,14 @@ const verifiedRoots = async (
   origin: string,
 ): Promise<{ roots: Record<string, string>; createdAt: number } | 'forged' | null> => {
   if (Number(event['kind']) !== HIVE_INDEX_KIND) return null
-  if (!await indexStandsFor(event, pubkey, () => listedSignersAt(origin, pubkey, verify))) return 'forged'
+  // Read off core's namespace, never a named import: the shim bootstrap bundles
+  // this file with core external, and a returning browser may still hold a core
+  // from before these names existed. That core answers strictly, as before.
+  const { indexStandsFor, listedSignersAt } = core as Partial<typeof core>
+  const stands = indexStandsFor && listedSignersAt
+    ? await indexStandsFor(event, pubkey, () => listedSignersAt(origin, pubkey, verify))
+    : String(event['pubkey'] ?? '').toLowerCase() === pubkey
+  if (!stands) return 'forged'
   try { if (!(await verify(event))) return 'forged' } catch { return 'forged' }
   let content: unknown
   try { content = JSON.parse(String(event['content'] ?? '')) } catch { return null }
