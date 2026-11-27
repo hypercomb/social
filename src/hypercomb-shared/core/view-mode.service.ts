@@ -83,6 +83,13 @@ const TRANSIENT_MODES = new Set<ViewMode>([
   // beside what the servers hold for it (sharing/need-feeds.queen.ts), on the
   // same location and tiles as the grid.
   'explore',
+  // A recipe takes the whole surface: the page a cook writes into and reads
+  // along from (recipe/recipe-view.drone.ts), over the tile it belongs to.
+  'recipe',
+  // The catalogue takes the whole surface: what is published at a location,
+  // listed by who offers it (recipe/recipe-catalogue-view.drone.ts). It is the
+  // face a published place opens on when it names no view of its own.
+  'catalogue',
 ])
 
 /** True when `mode` is a full-surface (canvas-covering) view. The shells

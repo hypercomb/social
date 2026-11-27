@@ -1755,8 +1755,6 @@
   "move.rewound.message": "Non è possibile spostare mentre si sta navigando nel passato — torna al più recente (Ripristina) per modificare.",
   "copy.rewound.title": "Visualizzazione cronologia",
   "copy.rewound.message": "Non è possibile copiare mentre si sta navigando nel passato — torna al più recente (Ripristina) per modificare.",
-  "controls.stage-private": "privato — clicca per scegliere cosa condividere",
-  "controls.stage-world": "scegli cosa condividere — clicca per impostare host e segreto",
   "controls.stage-host": "imposta host, posizione e segreto — clicca per tornare a privato",
   "controls.leave-swarm": "lascia lo sciame",
   "mesh-modal.skip-review": "salta la revisione privacy la prossima volta",

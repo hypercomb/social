@@ -1755,8 +1755,6 @@
   "move.rewound.message": "Impossible de déplacer en mode rembobiné — revenez au plus récent (Restaurer) pour éditer.",
   "copy.rewound.title": "Visualisation de l'historique",
   "copy.rewound.message": "Impossible de copier en mode rembobiné — revenez au plus récent (Restaurer) pour éditer.",
-  "controls.stage-private": "privé — cliquez pour choisir ce que vous partageriez",
-  "controls.stage-world": "choisissez ce que vous partagez — cliquez pour définir hôte et secret",
   "controls.stage-host": "définissez hôte, emplacement et secret — cliquez pour revenir en privé",
   "controls.leave-swarm": "quitter l'essaim",
   "mesh-modal.skip-review": "passer la vérification de confidentialité la prochaine fois",

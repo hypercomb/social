@@ -108,6 +108,8 @@ const ICONS = {
   sync: md('M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z'),
   // public/globe — Material Icons Filled (make THIS tile public: "the world")
   public: md('M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z'),
+  // subdirectory_arrow_right: Material Icons Filled (pools mode: go inside this tile)
+  goInside: md('M19 15l-6 6-1.42-1.42L15.17 16H4V4h2v10h9.17l-3.59-3.58L13 9l6 6z'),
   // share — Material Icons Filled (make this tile + its whole BRANCH public)
   share: md('M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z'),
 } as const
@@ -146,6 +148,10 @@ export type IconRegistryEntry = {
   labelKey?: string
   /** i18n key for the expanded description (shown on sustained hover) */
   descriptionKey?: string
+  /** While this entry is not on its profile's band it is still registered,
+   *  OFF the band (see OverlayActionDescriptor): never an icon on a hexagon,
+   *  but carried by the surfaces that show a tile's actions in words. */
+  offBand?: boolean
 }
 
 // True when a tile carries a swarm invite — either a LOCAL `swarm:invite`
@@ -204,22 +210,43 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   // Shown only when there IS a parent (not at the root). MoveDrone owns the
   // tile:action directly (NOT in HANDLED_ACTIONS), like swarm-adopt's 'adopt'.
   { name: 'promote-to-parent', svgMarkup: ICONS.arrowUpward, hoverTint: 0xc8d4ff, profile: 'private', visibleWhen: () => (window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? []).length > 0, labelKey: 'action.promote-to-parent', descriptionKey: 'action.promote-to-parent.description' },
-  // ── world profile ──
-  // Active ONLY while world mode is on (see tile-overlay #resolveProfileKey).
-  // The hover overlay then shows NOTHING but these two share-toggles — no
-  // edit/remove/etc. Each tints green when its scope is already public, dim
-  // otherwise, and click toggles it (emitting tile:public-changed → repaint).
+  // ── world profile (pools mode) ──
+  // Active ONLY while pools mode is up (see tile-overlay #resolveProfileKey).
+  // There a TAP is the light: it turns the tile on or off, and Shift or a
+  // still finger does the same for the whole branch (tile-overlay #lighting).
+  // A tap therefore no longer walks into a branch, so the band carries the ONE
+  // thing the tap gave up: Go inside, on a tile that has an inside.
+  {
+    name: 'pools-enter',
+    svgMarkup: ICONS.goInside,
+    hoverTint: 0x6fd39a,
+    profile: 'world',
+    visibleWhen: (ctx: OverlayTileContext) => ctx.isBranch,
+    labelKey: 'pools.inside',
+    descriptionKey: 'pools.inside.description',
+  },
+  // The two scopes stay in this profile's catalog, outside its default
+  // arrangement: the tap drives their handlers, and the arrange pool can still
+  // put either one back on the band.
   //   make-public        → this tile only
   //   make-branch-public → this tile + its entire sub-tree
+  //
+  // THE LIGHT, IN WORDS. A surface with no tap on a hexagon (the tile page,
+  // the brief, a row of the phone's list face) still has to turn ONE tile on
+  // or off, so the tile's own scope is registered off the band: one worded
+  // action there, never an icon on a hexagon. It is offered on your own
+  // tiles only, and it says what the pools bar says: on, or off.
   {
     name: 'make-public',
     svgMarkup: ICONS.public,
     hoverTint: 0x6fd39a,
     profile: 'world',
+    offBand: true,
+    visibleWhen: (ctx: OverlayTileContext) => !ctx.isExternal,
     // Individual scope — matches what the click toggles (not branch cover).
     tintWhen: (ctx: OverlayTileContext) => isIndividuallyPublic(currentExplorerLabel(), ctx.label) ? 0x6fd39a : 0x9aa6b8,
-    labelKey: 'action.make-public',
-    descriptionKey: 'action.make-public.description',
+    labelKey: 'pools.light',
+    descriptionKey: 'pools.light.description',
   },
   {
     name: 'make-branch-public',
@@ -319,8 +346,8 @@ const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
   // `remove` is last: the overlay orders dangerRow icons to the end, so delete
   // sits at the tail of the bottom row rather than under the entering pointer.
   'private': ['command', 'edit', 'break-apart', 'features', 'files', 'invite', 'remove'],
-  // World mode: ONLY the two share-toggles, none of the regular icons.
-  'world': ['make-public', 'make-branch-public'],
+  // Pools mode: the tap is the light, so the band carries only Go inside.
+  'world': ['pools-enter'],
   // Your own tile in public mode. `remove` rides the same ordering rule
   // as private. (No `sync`, no `adopt` icon — taking is the wand.) The
   // globe leads: offering a tile to the room is the act a meeting needs.
@@ -347,7 +374,7 @@ type IconArrangement = Partial<Record<OverlayProfileKey, string[]>>
 // (now buttonless, programmatic/spec-only) adopt verb directly via its
 // own tile:action listener. The legacy paired-channel 'adopt' / 'import'
 // handlers were retired with the paired-channel subsystem.
-const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'hide', 'unhide', 'break-apart', 'block', 'remove', 'make-public', 'make-branch-public'])
+const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'hide', 'unhide', 'break-apart', 'block', 'remove', 'make-public', 'make-branch-public', 'pools-enter'])
 
 type TileActionPayload = {
   action: string; label: string; q: number; r: number; index: number
@@ -369,7 +396,7 @@ export class TileActionsDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'overlay:request-register', 'render:cell-count', 'tile:action', 'controls:action', 'overlay:icons-reordered', 'overlay:arrange-mode', 'substrate:applied', 'substrate:rerolled', 'cell:removed']
-  protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'command:focus', 'tile:hidden', 'tile:unhidden', 'tile:blocked', 'tile:public-changed', 'cell:removed', 'visibility:show-hidden', 'substrate:rerolled']
+  protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'command:focus', 'tile:hidden', 'tile:unhidden', 'tile:blocked', 'tile:public-changed', 'tile:enter-request', 'cell:removed', 'visibility:show-hidden', 'substrate:rerolled']
 
   #registered = false
   #effectsRegistered = false
@@ -547,10 +574,19 @@ export class TileActionsDrone extends Drone {
     for (const profile of ['private', 'public-own', 'public-external', 'world'] as OverlayProfileKey[]) {
       const activeNames = this.#getActiveNames(profile)
       const positions = computeIconPositions(activeNames)
+      // Off the band: an entry that asks for it and has no place in this
+      // profile's arrangement is registered all the same, with no position.
+      // The overlay keeps it out of the band's order, and no reorder
+      // withdraws it (#registerProfileIcons sweeps the band's names only).
+      const offBand = merged
+        .filter(e => e.profile === profile && e.offBand && !activeNames.includes(e.name))
+        .map(e => e.name)
+      const names = [...activeNames, ...offBand]
 
-      for (let i = 0; i < activeNames.length; i++) {
-        const entry = merged.find(e => e.name === activeNames[i] && e.profile === profile)
+      for (let i = 0; i < names.length; i++) {
+        const entry = merged.find(e => e.name === names[i] && e.profile === profile)
         if (!entry) continue
+        const at = positions[i]
 
         descriptors.push({
           name: entry.name,
@@ -570,12 +606,13 @@ export class TileActionsDrone extends Drone {
           // Feature-readiness shade: the overlay dims + disables this affordance
           // until its backing bee registers. undefined for self-backed actions.
           backingKey: BACKING_KEY_BY_ACTION[entry.name],
-          x: positions[i].x,
-          y: positions[i].y,
+          offBand: at ? undefined : true,
+          x: at?.x ?? 0,
+          y: at?.y ?? 0,
         })
       }
       this.#announcedByProfile.set(profile, new Set(
-        descriptors.filter(d => d.profile === profile).map(d => d.name)))
+        descriptors.filter(d => d.profile === profile && !d.offBand).map(d => d.name)))
     }
 
     return descriptors
@@ -730,7 +767,8 @@ export class TileActionsDrone extends Drone {
         break
 
       case 'make-public': {
-        // World-mode: choose THIS tile's individual public scope. The two
+        // Pools mode's tap, and the swarm's globe: THIS tile's individual
+        // public scope. The two
         // visibility scopes are exclusive for the clicked tile: tile-only
         // means the root tile is shared, but its descendants are not covered
         // by this branch root anymore.
@@ -755,6 +793,13 @@ export class TileActionsDrone extends Drone {
         EffectBus.emit('tile:public-changed', { cell: label, location, public: !isOn, branch: true })
         break
       }
+
+      case 'pools-enter':
+        // Pools mode: the tap lights, so walking in is asked of the overlay's
+        // one entry choke point (#navigateInto), by the name the page shows.
+        // Transient: a command, never replayed to a surface that wakes later.
+        EffectBus.emitTransient('tile:enter-request', { label: rawLabel })
+        break
 
       case 'remove':
         void this.#removeTile(label)
