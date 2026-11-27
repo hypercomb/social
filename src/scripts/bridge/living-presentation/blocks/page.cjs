@@ -275,7 +275,10 @@ svg.g{width:1em;height:1em;display:inline-block;vertical-align:-.15em;fill:none;
 .caption{position:relative;margin:clamp(10px,2vh,22px) 0 0;padding:12px 0 0;text-align:left;min-height:calc(2 * 1.5em + 12px);
   font-size:clamp(16px,1.95cqi,21px);line-height:1.5;color:var(--ink);text-wrap:pretty;max-height:26vh;overflow:auto;overscroll-behavior:contain}
 .caption.more{-webkit-mask-image:linear-gradient(#000 calc(100% - 2.2em),transparent);mask-image:linear-gradient(#000 calc(100% - 2.2em),transparent)}
-.caption::before{content:"";position:sticky;display:block;top:-12px;left:0;right:0;height:1px;margin:-12px 0 11px;background:var(--line)}
+/* THE RULES FRAME THE SLIDE (jwize 2026-11-27: "add a horizontal rule at the bottom to raise up the button and remove
+   the middle horizontal rule ... The bottom is the same width as the top divider"): no hairline over the caption; one
+   under the transport, as wide as the sibling row's (the stage, 100cqw), with room beneath it so the button sits up. */
+.dock::after{content:"";display:block;height:1px;margin:12px calc((100% - 100cqw) / 2) clamp(10px,2vh,20px);background:var(--line)}
 .caption.long{font-size:clamp(14px,1.5cqi,16px);line-height:1.5}
 .caption p{margin:0}
 .caption p.rise{animation:rise .5s var(--ease)}
@@ -834,10 +837,23 @@ const SCRIPT = `
   const others = (e) => { if (e.detail !== me && playing) play(false) }
   hub.addEventListener(ONE, others)
   if (hub !== window) window.addEventListener(ONE, others)
+  // LEAVING A TAB RESETS IT (jwize 2026-11-27: "changing tabs needs to reset
+  // the audio and presentation for the previous tab"): a page taken off the
+  // screen, or kept but hidden, stops its voice and goes back to its first
+  // sentence, so it starts over when it is opened again, back included.
+  const leave = () => {
+    halt(); paint()
+    if (!gone()) show(0)
+    try { sessionStorage.removeItem(KEY) } catch {}
+  }
+  let hiddenTicks = 0
   const off = setInterval(() => {
-    if (!gone()) return
-    clearInterval(off); halt(); paint()
-    hub.removeEventListener(ONE, others); window.removeEventListener(ONE, others)
+    if (gone()) {
+      clearInterval(off); leave()
+      hub.removeEventListener(ONE, others); window.removeEventListener(ONE, others)
+      return
+    }
+    if (page.getClientRects().length === 0) { if (++hiddenTicks === 2) leave() } else hiddenTicks = 0
   }, 400)
   // ONE SENTENCE ON SCREEN AT A TIME, like a film's subtitles. A scene's
   // sentences share its one voice: each plays its own stretch of it (from →

@@ -27,8 +27,16 @@ import soundfile as sf
 import torch
 from transformers import pipeline
 
+import numpy as np
+
 jobs_path, folder = sys.argv[1], sys.argv[2]
 BEFORE, AFTER = 0.10, 0.15   # seconds kept before a sentence's first word and after its last
+# ALMOST NO INHALE (jwize 2026-11-27: "Almost no inhale volume please"): every
+# pause between two heard words longer than GAP_MIN, inside a sentence or
+# between two, is turned down to DUCK (about -30 dB). The pause keeps its
+# length, so the rhythm stays; only the breath in it goes quiet. TAIL and HEAD
+# keep a margin either side, so a word's last sound and next onset are untouched.
+DUCK, GAP_MIN, TAIL, HEAD, RAMP = 0.03, 0.18, 0.06, 0.04, 0.02
 jobs = json.load(open(jobs_path, encoding="utf-8"))
 device = "cuda" if torch.cuda.is_available() else "cpu"
 asr = pipeline("automatic-speech-recognition", model="openai/whisper-base.en", device=device)
@@ -40,6 +48,18 @@ for job in jobs:
     out = asr(librosa.resample(y, orig_sr=sr, target_sr=16000), return_timestamps="word", chunk_length_s=30)
     words = [(c["text"].strip(), c["timestamp"][0], c["timestamp"][1]) for c in out["chunks"]]
     heard, want = len(words), sum(s["words"] for s in sentences)
+    gain, ramp, ducked = np.ones(len(y), dtype=np.float32), int(RAMP * sr), 0
+    for (_, _, end), (_, start, _) in zip(words, words[1:]):
+        if end is None or start is None or start - end < GAP_MIN:
+            continue
+        a, b = int((end + TAIL) * sr), min(len(y), int((start - HEAD) * sr))
+        if b - a <= 2 * ramp:
+            continue
+        gain[a:b] = DUCK
+        gain[a:a + ramp] = np.linspace(1, DUCK, ramp)
+        gain[b - ramp:b] = np.linspace(DUCK, 1, ramp)
+        ducked += 1
+    y = (y * gain).astype(y.dtype)
     cuts, cum = [], 0
     for s in sentences[:-1]:
         cum += s["words"]
@@ -73,5 +93,5 @@ for job in jobs:
         if b - a < int(0.2 * sr):
             a, b = edges[k], edges[k + 1]
         sf.write(os.path.join(folder, f"{s['key']}.wav"), y[a:b], sr)
-    print(f"  {job['wav']}: {len(sentences)} sentences, heard {heard} of {want} words", flush=True)
+    print(f"  {job['wav']}: {len(sentences)} sentences, heard {heard} of {want} words, {ducked} breath(s) turned down", flush=True)
 print("split done", flush=True)

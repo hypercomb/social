@@ -21,6 +21,7 @@
 //   node reclone.cjs ... --skip scene:02                         all but those
 //   node reclone.cjs ... --again                                 cut, join and master again, even lines already done
 //   node reclone.cjs ... --check                                 list what would be spoken; clone nothing
+//   node reclone.cjs ... --reference voice/reference/x.wav       clone from another voice than the basis
 //
 // A line already spoken from the same reference with the same words is
 // skipped, so a run that stops can be started again.
@@ -36,7 +37,13 @@ const { sentencesOf } = require('./timing.cjs')
 const ROOT = __dirname
 const HOME = process.env.HYPERCOMB_VOICE_HOME || path.join(os.homedir(), '.hcvoice')
 const PYTHON = path.join(HOME, 'venv', 'Scripts', process.platform === 'win32' ? 'python.exe' : 'python')
-const REFERENCE = path.join(ROOT, 'voice', 'reference', 'reference.wav')
+// THE BASIS (jwize 2026-11-27: "That needs to be the bases for all"): the
+// protocol tile's take he chose, itself cloned from his own recording
+// (voice/reference/reference.wav, from reference.m4a). Cloned from the raw
+// recording, the longer lines drifted toward an Australian accent; cloned
+// from this take, they keep the voice he heard as his. Kept with the
+// recording, outside git; --reference <wav> clones from another.
+const BASIS = path.join(ROOT, 'voice', 'reference', 'basis.wav')
 const SPOKEN = path.join(ROOT, 'voice', 'spoken.json')
 const WORK = path.join(ROOT, 'voice', 'voxtral', 'reclone')
 const GAP_MS = 350
@@ -52,6 +59,7 @@ const arg = name => {
   return next && !next.startsWith('--') ? next : ''
 }
 const has = name => arg(name) !== undefined
+const REFERENCE = arg('reference') ? path.resolve(arg('reference')) : BASIS
 
 const PAUSE = /\[pause(?::(\d+))?\]/g
 const clean = s => s.replace(PAUSE, ' ').replace(/\s+/g, ' ').trim()
@@ -141,7 +149,7 @@ function main() {
     console.log(fs.readFileSync(__filename, 'utf8').split('\n').filter(l => l.startsWith('//')).join('\n'))
     return
   }
-  if (!fs.existsSync(REFERENCE)) throw new Error('no reference: voice/reference/reference.wav')
+  if (!fs.existsSync(REFERENCE)) throw new Error(`no reference: ${path.relative(ROOT, REFERENCE)}`)
   const ref = refSig()
   const ledger = fs.existsSync(SPOKEN) ? JSON.parse(fs.readFileSync(SPOKEN, 'utf8')) : {}
   const all = lines()
@@ -151,7 +159,8 @@ function main() {
   if (has('check') || !todo.length) { todo.forEach(l => console.log(`  ${l.id}  ${l.sentences.length} sentence(s)`)); return }
 
   const takes = parseInt(arg('takes'), 10) || (has('scenes') ? 3 : 2)
-  const dir = path.join(WORK, has('scenes') ? 'scenes-passages' : 'beats-passages')
+  // each reference clones into its own folder, so a take of one is never cut as another's
+  const dir = path.join(WORK, ref, has('scenes') ? 'scenes-passages' : 'beats-passages')
   fs.mkdirSync(dir, { recursive: true })
 
   // PASSAGES: a scene's sentences stay in its own passages; page lines, each a
