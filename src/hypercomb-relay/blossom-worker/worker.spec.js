@@ -2386,6 +2386,39 @@ test('writing an index that names i18n:<locale> lists its signer as a translator
   assert.equal(await member('hive:indexes', assessor), true)
 })
 
+test('an index write answers once the index is held: its notes run after the answer and still land', async () => {
+  // Measured with jwize's 126-root index: the notes took 170 storage calls one
+  // after another, past the hive's eight seconds, so a write that landed was
+  // reported "host unreachable" and the hang-up cut the notes off.
+  const CONTENT = contentBag()
+  const translators = await sha256Hex('i18n:ja')
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  const slowNotes = new Proxy(CONTENT, {
+    get(target, prop) {
+      const value = target[prop]
+      if (prop !== 'put') return typeof value === 'function' ? value.bind(target) : value
+      return async (key, ...rest) => {
+        if (String(key).startsWith(`${translators}/`)) await gate
+        return value.call(target, key, ...rest)
+      }
+    },
+  })
+  const env = { SITE_BINDINGS: '{}', HIVES: kvMap(), CONTENT: slowNotes }
+  const handedOff = []
+  const ctx = { waitUntil: (work) => { handedOff.push(work) }, passThroughOnException() {} }
+  const url = `https://content.hypercomb.com/${INDEXES}/${assessor}`
+  const body = JSON.stringify(await indexBy(assessorKey, { 'i18n:ja': 'f'.repeat(64) }))
+  const response = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', assessorKey) }, body }), env, ctx)
+  assert.equal(response.status, 201)
+  const member = () => CONTENT.held.has(`${translators}/${assessor}`)
+  assert.equal(member(), false, 'answered while the note still waits')
+  assert.ok(handedOff.length >= 1, 'the notes were handed to waitUntil')
+  release()
+  await Promise.all(handedOff)
+  assert.equal(member(), true, 'the note landed after the answer')
+})
+
 test('a locale is listed from every verified index, at the pool\'s own address, with the older KV lists drained in', async () => {
   const [catalog, missingRecord, stale] = ['c'.repeat(64), 'd'.repeat(64), 'e'.repeat(64)]
   const HIVES = kvMap(new Map([
@@ -7665,6 +7698,42 @@ test('a host\'s own people make its doors follow another host; a stranger cannot
   assert(!env.CONTENT.held.has(`${COMMUNITY}/${artifact}`), 'the last one out removes the member')
 })
 
+test('a late pass for an index already replaced stops: it never puts back a follow the newer index withdrew', async () => {
+  // The answer no longer waits for the notes, so the key's next index can land
+  // while the last one's notes still run (review of the waitUntil change).
+  const env = await calendarEnv()
+  const translators = await sha256Hex('i18n:ja')
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  const bag = env.CONTENT
+  env.CONTENT = new Proxy(bag, {
+    get(target, prop) {
+      const value = target[prop]
+      if (prop !== 'put') return typeof value === 'function' ? value.bind(target) : value
+      return async (key, ...rest) => {
+        if (String(key).startsWith(`${translators}/`)) await gate
+        return value.call(target, key, ...rest)
+      }
+    },
+  })
+  const artifact = await sha256Hex(hostArtifact('peer.example'))
+  const url = `https://content.hypercomb.com/${INDEXES}/${pubkey}`
+  const put = async (roots, at, handedOff) => {
+    const body = JSON.stringify(await signedIndex(roots, at, undefined, undefined, { listed: ['calendar:events'] }))
+    const ctx = { waitUntil: (work) => { handedOff.push(work) }, passThroughOnException() {} }
+    return worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', sk) }, body }), env, ctx)
+  }
+  const first = []
+  assert.equal((await put({ 'i18n:ja': 'f'.repeat(64), 'follow:peer.example': artifact }, 1_800_000_300, first)).status, 200)
+  // The first index's notes wait at their first pass; the next index lands and is noted in full.
+  const second = []
+  assert.equal((await put({}, 1_800_000_400, second)).status, 200)
+  await Promise.all(second)
+  release()
+  await Promise.all(first)
+  assert(!bag.held.has(`${COMMUNITY}/${artifact}`), 'the withdrawn follow is not put back by the older index\'s late pass')
+})
+
 test('only a host\'s own people put meetings and lists on its doors', async () => {
   const record = eventRecordText('2026-10-24')
   const sig = await sha256Hex(record)
@@ -8023,6 +8092,8 @@ test('a deep name is asked for as soon as the index is held, before the bookkeep
     worker.fetch(request, env, ctx)
     for (let i = 0; i < 50 && !handedOff.length; i++) await new Promise((resolve) => setTimeout(resolve, 5))
     assert.ok(held, 'the index was held')
+    // The naming is handed off FIRST; the bookkeeping (stalled here) is handed
+    // off after it, so the answer never waits on it either.
     assert.ok(handedOff.length >= 1, 'the naming was handed off while the bookkeeping still stalls')
     await handedOff[0]
     assert.deepEqual(cf.domains.map((d) => d.hostname), [DEEP])
