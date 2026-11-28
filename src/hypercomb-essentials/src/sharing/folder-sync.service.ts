@@ -369,7 +369,7 @@ const readJson = async <T>(
   }
 }
 
-const writeFile = async (
+export const writeFile = async (
   dir: FileSystemDirectoryHandle,
   name: string,
   bytes: ArrayBuffer | ArrayBufferView | Blob | string,
@@ -383,7 +383,7 @@ const writeFile = async (
   }
 }
 
-const readFileBytes = async (
+export const readFileBytes = async (
   dir: FileSystemDirectoryHandle,
   name: string,
 ): Promise<ArrayBuffer | null> => {

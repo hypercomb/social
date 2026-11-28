@@ -3,7 +3,10 @@
 // `/backup` — keep the whole hive, as it is now, on your hosts as ciphertext.
 //
 //   /backup           → asks once, then seals the hive and keeps it on every host the root publishes to
-//   /backup restore   → asks once, then opens a recovery file and makes the kept hive live again
+//   /backup folder    → the same, and also into a folder you pick (a disk, a USB stick, a OneDrive folder); every
+//                       later /backup keeps it there too. With no host turned on, /backup asks for a folder.
+//   /backup restore   → asks once, then opens a recovery file and makes the kept hive live again — from the hosts it
+//                       names, or from the backup folder when they do not hold it
 //
 // One gesture, one confirm. It backs up the GENOME — the seal of the current tree, one signature — never the history,
 // and it sends only what the host does not already hold (sharing/hive-backup.ts says why both are true).
@@ -23,6 +26,9 @@ import {
   backupHive, liveBackupDeps, liveBackupHosts, liveRestoreDeps, mintRecoveryKey, parseRecoveryFile,
   readRecoveryRecord, recoveryFileText, restoreHive, writeRecoveryRecord, type BackupResult, type RestoreResult,
 } from '../sharing/hive-backup.js'
+import {
+  folderFetcher, folderRoots, folderTarget, hasBackupFolder, liveFolderIo, pickBackupFolder, rememberedBackupFolder,
+} from '../sharing/backup-folder.js'
 
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
 const SNAPSHOT_QUEEN_KEY = '@diamondcoreprocessor.com/SnapshotQueenBee'
@@ -35,9 +41,10 @@ export class BackupQueenBee extends QueenBee {
   readonly command = 'backup'
   override description = 'Keep the whole hive as it is now on your hosts, encrypted — only what changed is sent'
   override descriptionKey = 'slash.backup'
-  override options = ['restore']
+  override options = ['restore', 'folder']
   override examples = [
     { input: '/backup', result: 'Seals the hive and keeps it on your hosts as ciphertext only you can open' },
+    { input: '/backup folder', result: 'Also keeps it in a folder you pick, as ciphertext; later backups keep it there too' },
     { input: '/backup restore', result: 'Opens your recovery file and makes the kept hive live again' },
   ]
 
@@ -49,21 +56,32 @@ export class BackupQueenBee extends QueenBee {
     try {
       const word = String(args ?? '').trim().toLowerCase()
       if (word === 'restore') await this.#restore()
-      else await this.#backup()
+      else await this.#backup(word === 'folder')
     } finally { this.#running = false }
   }
 
   // ── back up ─────────────────────────────────────────────
 
-  async #backup(): Promise<void> {
+  async #backup(pickFolder: boolean): Promise<void> {
     const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
     const title = this.#t(i18n, 'backup.title', 'Backup')
     const hosts = await liveBackupHosts().catch(() => [] as string[])
-    if (!hosts.length) {
-      this.#toast('error', title, this.#t(i18n, 'backup.no-host',
-        'No host takes your uploads yet — turn on a host for your hive, then run /backup again.'))
-      return
+    const remembered = await hasBackupFolder().catch(() => false)
+    // No host and no folder yet: a folder is where it goes.
+    if (!hosts.length && !remembered) pickFolder = true
+    if (pickFolder && !this.#canPickFolder()) {
+      if (!hosts.length) {
+        this.#toast('error', title, this.#t(i18n, 'backup.no-host',
+          'No host takes your uploads yet — turn on a host for your hive, then run /backup again.'))
+        return
+      }
+      this.#toast('info', title, this.#t(i18n, 'backup.folder.unsupported', 'This browser cannot write to a folder, so only your hosts are used.'))
+      pickFolder = false
     }
+    const folderWord = pickFolder
+      ? this.#t(i18n, 'backup.folder.pick-next', 'a folder you pick next')
+      : remembered ? this.#t(i18n, 'backup.folder.yours', 'your backup folder') : ''
+    const places = [...hosts, ...(folderWord ? [folderWord] : [])].join(', ')
 
     const { publisherKeyHex } = await import('../sharing/key-list.client.js')
     const publisher = String((await publisherKeyHex().catch(() => '')) ?? '').toLowerCase()
@@ -77,12 +95,18 @@ export class BackupQueenBee extends QueenBee {
     const confirmed = await requestConfirm({
       title: 'backup.confirm.title',
       message: 'backup.confirm.message',
-      messageParams: { hosts: hosts.join(', ') },
+      messageParams: { hosts: places },
       ...(needsRecovery ? { warning: 'backup.confirm.recovery' } : {}),
       confirmLabel: 'backup.confirm.go',
       cancelLabel: 'backup.confirm.cancel',
     })
     if (!confirmed) return
+
+    // The folder first, while the confirm click still counts as the participant's gesture (the browser asks for it).
+    const handle = pickFolder ? await pickBackupFolder('readwrite') : remembered ? await rememberedBackupFolder().catch(() => null) : null
+    if (pickFolder && !handle && !hosts.length) return
+    if ((pickFolder || remembered) && !handle) this.#activity(this.#t(i18n, 'backup.folder.skipped', 'backup folder not opened — keeping it on your hosts only'), '✕')
+    const io = handle ? await liveFolderIo(handle, true).catch(() => null) : null
 
     // The recovery key first: a backup sealed to a key nobody saved could not be opened after a clear.
     if (needsRecovery) {
@@ -104,8 +128,13 @@ export class BackupQueenBee extends QueenBee {
       if (!(await snapshot.createRestorePoint(label))) return null
       return (await readSnapshots()).at(-1)?.seal ?? null
     }
-    this.#activity(this.#t(i18n, 'backup.sending', 'keeping it on {hosts}…', { hosts: hosts.join(', ') }), '●')
-    const result = await backupHive(await liveBackupDeps(seal))
+    const sendingTo = [...hosts, ...(io && handle ? [handle.name] : [])].join(', ')
+    this.#activity(this.#t(i18n, 'backup.sending', 'keeping it on {hosts}…', { hosts: sendingTo }), '●')
+    const result = await backupHive({
+      ...(await liveBackupDeps(seal)),
+      hosts: async () => hosts,
+      folder: async () => io && handle ? folderTarget(io, handle.name) : null,
+    })
     this.#reportBackup(i18n, title, result)
   }
 
@@ -114,7 +143,7 @@ export class BackupQueenBee extends QueenBee {
       for (const miss of result.failed) this.#activity(`${miss.host}: ${miss.reason}`, '✕')
       this.#toast(result.failed.length ? 'info' : 'success', title, this.#t(i18n, 'backup.done',
         'Backed up {seal} to {hosts} — {atoms} files, only the new ones sent.',
-        { seal: result.head.slice(0, 8), hosts: result.hosts.join(', '), atoms: result.atoms }))
+        { seal: result.head.slice(0, 8), hosts: [...result.hosts, ...(result.folder ? [result.folder] : [])].join(', '), atoms: result.atoms }))
       return
     }
     for (const miss of result.failed ?? []) this.#activity(`${miss.host}: ${miss.reason}`, '✕')
@@ -150,8 +179,34 @@ export class BackupQueenBee extends QueenBee {
       return
     }
 
-    this.#activity(this.#t(i18n, 'backup.restore.fetching', 'opening your backup on {hosts}…', { hosts: file.hosts.join(', ') }), '●')
-    const result = await restoreHive(file, await liveRestoreDeps())
+    const live = await liveRestoreDeps()
+    let result: RestoreResult = { ok: false, reason: 'no-backup', unread: [] }
+    if (file.hosts.length) {
+      this.#activity(this.#t(i18n, 'backup.restore.fetching', 'opening your backup on {hosts}…', { hosts: file.hosts.join(', ') }), '●')
+      result = await restoreHive(file, live)
+    }
+    // Not on the hosts (or none named, or no network): the backup folder. A fresh confirm, because picking a folder
+    // needs the participant's own gesture.
+    if (!result.ok && result.reason !== 'write-failed' && this.#canPickFolder()) {
+      const fromFolder = await requestConfirm({
+        title: 'backup.restore.folder.title',
+        message: file.hosts.length ? 'backup.restore.folder.message' : 'backup.restore.folder.only',
+        confirmLabel: 'backup.restore.folder.go',
+        cancelLabel: 'backup.restore.confirm.cancel',
+      })
+      const handle = fromFolder ? await pickBackupFolder('read') : null
+      const io = handle ? await liveFolderIo(handle, false).catch(() => null) : null
+      if (handle && !io) {
+        this.#toast('error', title, this.#t(i18n, 'backup.restore.folder.none', 'That folder holds no Hypercomb backup — pick the folder you backed up to.'))
+        return
+      }
+      if (io && handle) {
+        this.#activity(this.#t(i18n, 'backup.restore.fetching', 'opening your backup on {hosts}…', { hosts: handle.name }), '●')
+        result = await restoreHive({ ...file, hosts: [handle.name] }, {
+          ...live, roots: (_host, publisher) => folderRoots(io, publisher), fetcher: () => folderFetcher(io),
+        })
+      } else if (!file.hosts.length) return
+    }
     if (!result.ok) return this.#reportRestoreFailure(i18n, title, result)
 
     // A way back that is one gesture — only when there is a hive here to come back to.
@@ -183,6 +238,8 @@ export class BackupQueenBee extends QueenBee {
   }
 
   // ── helpers ─────────────────────────────────────────────
+
+  #canPickFolder = (): boolean => typeof (window as unknown as { showDirectoryPicker?: unknown }).showDirectoryPicker === 'function'
 
   /** Hand the participant their recovery file: their own download, never an upload. */
   #save(text: string): void {

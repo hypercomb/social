@@ -110,7 +110,8 @@ export const parseRecoveryFile = (text: string): RecoveryFile | null => {
     ? [...new Set((raw['hosts'] as unknown[]).map(host => String(host ?? '').trim().toLowerCase()).filter(host => HOST.test(host)))].slice(0, 16)
     : []
   if (raw?.['kind'] !== RECOVERY_FILE_KIND || raw?.['v'] !== 1) return null
-  if (!SIG.test(publisher) || !SIG.test(recovery) || !SIG.test(secret) || hosts.length === 0) return null
+  // No hosts is a folder-only backup: the restore opens it from the folder.
+  if (!SIG.test(publisher) || !SIG.test(recovery) || !SIG.test(secret)) return null
   return { kind: RECOVERY_FILE_KIND, v: 1, publisher, hosts, recovery, secret, made: String(raw['made'] ?? '') }
 }
 
@@ -152,11 +153,24 @@ export type BackupDeps = {
   readonly upload: (host: string) => SealedPublishDeps['upload']
   /** Name the envelope under `key` in this key's signed index on `host`. */
   readonly setRoot: (host: string, key: string, sig: string) => Promise<{ ok: boolean; reason?: string }>
+  /** A folder to keep the backup in as well (backup-folder.ts), or null when there is none. */
+  readonly folder?: () => Promise<BackupTarget | null>
   readonly now?: () => number
 }
 
+/** A place a backup is kept: a host, or a folder the participant picked. */
+export type BackupTarget = {
+  readonly kind: 'host' | 'folder'
+  readonly name: string
+  /** The keys this key's list names there: each device of the participant's. */
+  readonly devices: () => Promise<readonly string[]>
+  readonly upload: SealedPublishDeps['upload']
+  /** Name the envelope under `key` for `publisher` there. */
+  readonly setRoot: (publisher: string, key: string, sig: string) => Promise<{ ok: boolean; reason?: string }>
+}
+
 export type BackupResult =
-  | { ok: true; head: string; hosts: string[]; atoms: number; failed: { host: string; reason: string }[] }
+  | { ok: true; head: string; hosts: string[]; folder: string | null; atoms: number; failed: { host: string; reason: string }[] }
   | { ok: false; reason: 'no-nip44' | 'no-signer' | 'no-host' | 'no-seal' | 'no-recovery' | 'nowhere'; failed?: { host: string; reason: string }[] }
 
 /** Keep the whole current hive on every upload host, as ciphertext only this key, its devices and the recovery key
@@ -170,7 +184,8 @@ export async function backupHive(deps: BackupDeps): Promise<BackupResult> {
   const recovery = String((await deps.recovery(publisher).catch(() => null)) ?? '').toLowerCase()
   if (!SIG.test(recovery)) return { ok: false, reason: 'no-recovery' }
   const hosts = [...new Set(await deps.hosts().catch(() => [] as string[]))]
-  if (!hosts.length) return { ok: false, reason: 'no-host' }
+  const folder = deps.folder ? await deps.folder().catch(() => null) : null
+  if (!hosts.length && !folder) return { ok: false, reason: 'no-host' }
   const head = String((await deps.seal().catch(() => null)) ?? '').toLowerCase()
   if (!SIG.test(head)) return { ok: false, reason: 'no-seal' }
 
@@ -184,20 +199,34 @@ export async function backupHive(deps: BackupDeps): Promise<BackupResult> {
   if (!closure.has(head)) return { ok: false, reason: 'no-seal' }
   const held = async (sig: string): Promise<Uint8Array | null> => closure.get(sig) ?? null
 
-  const kept: string[] = []
+  const targets: BackupTarget[] = [
+    ...hosts.map((host): BackupTarget => ({
+      kind: 'host', name: host,
+      devices: () => deps.devices(host, publisher),
+      upload: deps.upload(host),
+      setRoot: (_publisher, key, sig) => deps.setRoot(host, key, sig),
+    })),
+    ...(folder ? [folder] : []),
+  ]
+  const kept: BackupTarget[] = []
   const failed: { host: string; reason: string }[] = []
   let atoms = 0
-  for (const host of hosts) {
-    const devices = (await deps.devices(host, publisher).catch(() => [] as string[])).map(key => key.toLowerCase()).filter(key => SIG.test(key))
+  for (const target of targets) {
+    const devices = (await target.devices().catch(() => [] as string[])).map(key => key.toLowerCase()).filter(key => SIG.test(key))
     const result = await publishSealed(carrierSig, [...new Set([publisher, recovery, ...devices])], {
-      getBytes: held, upload: deps.upload(host), nip44, publisher: own, limit: Infinity,
+      getBytes: held, upload: target.upload, nip44, publisher: own, limit: Infinity,
       // One backup per key: the newest envelope replaces the last, never a list. Not history — the genome.
-      setSealed: async envelopes => deps.setRoot(host, BACKUP_ROOT_KEY, envelopes[0]!),
+      setSealed: async envelopes => target.setRoot(publisher, BACKUP_ROOT_KEY, envelopes[0]!),
     })
-    if (result.ok) { kept.push(host); atoms = result.atoms }
-    else failed.push({ host, reason: result.detail ? `${result.reason}: ${result.detail}` : result.reason })
+    if (result.ok) { kept.push(target); atoms = result.atoms }
+    else failed.push({ host: target.name, reason: result.detail ? `${result.reason}: ${result.detail}` : result.reason })
   }
-  return kept.length ? { ok: true, head, hosts: kept, atoms, failed } : { ok: false, reason: 'nowhere', failed }
+  if (!kept.length) return { ok: false, reason: 'nowhere', failed }
+  return {
+    ok: true, head, atoms, failed,
+    hosts: kept.filter(target => target.kind === 'host').map(target => target.name),
+    folder: kept.find(target => target.kind === 'folder')?.name ?? null,
+  }
 }
 
 // ── restore ──

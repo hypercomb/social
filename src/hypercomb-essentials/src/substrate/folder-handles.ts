@@ -83,6 +83,16 @@ export async function linkFolder(label?: string): Promise<Entry | null> {
   return entry
 }
 
+/** Keep a handle under a fixed id the caller owns (one place, replaced on every pick). */
+export async function saveHandle(id: string, handle: FileSystemDirectoryHandle, label?: string): Promise<boolean> {
+  try {
+    await txn('readwrite', (store) => store.put({ id, handle, label: label ?? handle.name, createdAt: Date.now() }) as IDBRequest<any>)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export async function getHandle(id: string): Promise<Entry | null> {
   try {
     const result = await txn<Entry | undefined>('readonly', (store) => store.get(id))
@@ -112,9 +122,9 @@ type PermissionState = 'granted' | 'denied' | 'prompt'
  * Check current read permission for a handle. Returns `'granted'` when
  * silent access is permitted (no user gesture needed).
  */
-export async function queryPermission(handle: FileSystemDirectoryHandle): Promise<PermissionState> {
+export async function queryPermission(handle: FileSystemDirectoryHandle, mode: 'read' | 'readwrite' = 'read'): Promise<PermissionState> {
   try {
-    const state = await (handle as any).queryPermission({ mode: 'read' }) as PermissionState
+    const state = await (handle as any).queryPermission({ mode }) as PermissionState
     return state
   } catch {
     return 'denied'
@@ -125,9 +135,9 @@ export async function queryPermission(handle: FileSystemDirectoryHandle): Promis
  * Request read permission for a handle. Must be called from a user gesture
  * when current state is `'prompt'`.
  */
-export async function requestPermission(handle: FileSystemDirectoryHandle): Promise<PermissionState> {
+export async function requestPermission(handle: FileSystemDirectoryHandle, mode: 'read' | 'readwrite' = 'read'): Promise<PermissionState> {
   try {
-    const state = await (handle as any).requestPermission({ mode: 'read' }) as PermissionState
+    const state = await (handle as any).requestPermission({ mode }) as PermissionState
     return state
   } catch {
     return 'denied'

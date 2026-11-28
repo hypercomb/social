@@ -8,6 +8,7 @@ import {
   parseRecoveryFile, recoveryFileText, restoreHive, type BackupDeps, type RestoreDeps,
 } from './hive-backup.js'
 import { CLOSURE_ATOMS_MAX, signBytes } from './sealed-closure.js'
+import { BACKUP_FOLDER_INDEX, folderFetcher, folderRoots, folderTarget, type FolderIo } from './backup-folder.js'
 
 const enc = (text: string): Uint8Array => new TextEncoder().encode(text)
 const bytesOf = (data: Uint8Array | undefined): number[] => data ? [...data] : []
@@ -237,8 +238,66 @@ describe('the files a backup is made of', () => {
     const good = recoveryFileText({ publisher: key.recovery, hosts: ['Jwize.com', 'localhost:7777'], recovery: key.recovery, secret: key.secret, made: 'x' })
     expect(parseRecoveryFile(good)).toMatchObject({ hosts: ['jwize.com', 'localhost:7777'], secret: key.secret })
     expect(parseRecoveryFile(good.replace(key.secret, 'short'))).toBeNull()
-    expect(parseRecoveryFile(recoveryFileText({ publisher: key.recovery, hosts: [], recovery: key.recovery, secret: key.secret, made: '' }))).toBeNull()
+    // No hosts is a folder-only backup, still a whole file.
+    expect(parseRecoveryFile(recoveryFileText({ publisher: key.recovery, hosts: [], recovery: key.recovery, secret: key.secret, made: '' }))).toMatchObject({ hosts: [] })
     expect(parseRecoveryFile('{}')).toBeNull()
     expect(parseRecoveryFile('not json')).toBeNull()
+  })
+})
+
+describe('a backup kept in a folder', () => {
+  const memoryFolder = () => {
+    const files = new Map<string, Uint8Array>()
+    let writes = 0
+    const io: FolderIo = {
+      has: async (name, size) => files.get(name)?.byteLength === size,
+      read: async name => files.get(name) ?? null,
+      write: async (name, bytes) => { files.set(name, bytes); writes++ },
+    }
+    return { files, io, writes: () => writes }
+  }
+
+  it('keeps ciphertext only, with no host at all, and opens on a cleared browser from the folder', async () => {
+    const world = await makeWorld()
+    const folder = memoryFolder()
+    const result = await backupHive(world.backup({ hosts: async () => [], folder: async () => folderTarget(folder.io, 'Backups') }))
+    expect(result).toMatchObject({ ok: true, hosts: [], folder: 'Backups', head: world.head })
+    for (const sig of [world.head, world.noteSig, world.pictureSig]) expect(folder.files.has(sig)).toBe(false)
+    const everything = [...folder.files.values()].map(bytes => new TextDecoder().decode(bytes)).join(' ')
+    expect(everything).not.toContain('bread rises')
+    expect(Object.values(world.hosts).every(host => host.bytes.size === 0)).toBe(true)
+
+    const { store, deps } = world.cleared()
+    const file = parseRecoveryFile(recoveryFileText({
+      publisher: world.device.recovery, hosts: [], recovery: world.recovery.recovery, secret: world.recovery.secret, made: 'now',
+    }))!
+    const restored = await restoreHive({ ...file, hosts: ['Backups'] }, {
+      ...deps, roots: (_host, publisher) => folderRoots(folder.io, publisher), fetcher: () => folderFetcher(folder.io),
+    })
+    expect(restored).toMatchObject({ ok: true, head: world.head })
+    expect(bytesOf(store.get(world.noteSig))).toEqual(bytesOf(world.note))
+    expect(bytesOf(store.get(world.pictureSig))).toEqual(bytesOf(world.picture))
+  })
+
+  it('is kept beside the hosts, and the next backup writes only what changed', async () => {
+    const world = await makeWorld()
+    const folder = memoryFolder()
+    const withFolder = () => world.backup({ folder: async () => folderTarget(folder.io, 'Backups') })
+    const first = await backupHive(withFolder())
+    expect(first).toMatchObject({ ok: true, hosts: ['one.example', 'two.example'], folder: 'Backups' })
+    const firstWrites = folder.writes()
+
+    await backupHive(withFolder())
+    // Same hive: the atoms are the same files; only the carrier, door, envelope and index are new.
+    expect(folder.writes() - firstWrites).toBeLessThanOrEqual(4)
+  })
+
+  it('names nothing for another key', async () => {
+    const world = await makeWorld()
+    const folder = memoryFolder()
+    await backupHive(world.backup({ hosts: async () => [], folder: async () => folderTarget(folder.io, 'Backups') }))
+    expect(folder.files.has(BACKUP_FOLDER_INDEX)).toBe(true)
+    expect(await folderRoots(folder.io, world.device.recovery)).not.toBeNull()
+    expect(await folderRoots(folder.io, 'b'.repeat(64))).toBeNull()
   })
 })
