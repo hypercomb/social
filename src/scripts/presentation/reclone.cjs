@@ -177,7 +177,10 @@ function main() {
     }
   }
   for (const p of passages) p.id = `passage-${crypto.createHash('sha256').update(p.text).digest('hex').slice(0, 12)}`
-  const done = p => p.sentences.every(s => fs.existsSync(path.join(dir, `${s.key}.wav`)))
+  // A sentence's cut is named by its place, not its words, so it only counts
+  // while the passage it was cut from (named by its words) is still there:
+  // a reworded or respelled line is cloned again, never stitched from old cuts.
+  const done = p => fs.existsSync(path.join(dir, `${p.id}.wav`)) && p.sentences.every(s => fs.existsSync(path.join(dir, `${s.key}.wav`)))
   const toClone = passages.filter(p => !done(p) && !fs.existsSync(path.join(dir, `${p.id}.wav`)))
   console.log(`${passages.length} passage(s), ${toClone.length} to clone, ${takes} takes each`)
   if (toClone.length) {

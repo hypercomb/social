@@ -52,5 +52,13 @@
       "behavior"
     ],
     "note": "the pun is a homophone; the ear cannot hear the bee"
+  },
+  {
+    "match": " many",
+    "say": " menny",
+    "hear": [
+      "many"
+    ],
+    "note": "the cloned voice said many as \"mini\" (jwize 2026-11-27); the respelling holds the short e"
   }
 ]

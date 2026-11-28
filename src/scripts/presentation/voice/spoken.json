@@ -125,15 +125,15 @@
     "text": "Every change you make becomes a new layer: a complete record of that place at that moment. Nothing is overwritten. The history of a place is a numbered list, and the newest entry is how it looks now. Undo is simply reading an earlier step. You can rewind a page, restore any moment, or save a snapshot before you try something bold. It works like version control, for everything you make, not only for code."
   },
   "scene:08": {
-    "slot": "77e15f68205ac676",
+    "slot": "94ce7c78a3ffeb85",
     "via": "reclone",
     "method": "passage",
     "reference": "2f369e19ee2c5adf",
-    "similarity": 0.9744,
-    "wer": 0.0149,
-    "seconds": 49.74,
-    "at": "2026-11-27",
-    "text": "Hypercomb uses a few exact words, and each means one thing. A hive is your own place, kept on your device. A tile is one piece of content. A layer is one moment of a place, kept for good. A signature is the name content gives itself. A bee is a small piece of behaviour that acts when it is needed, or when you say its word. A pheromone is a signed mark of interest left on content, so people with matching interests can find it; carrying it to them is still being built. Replication is how work moves between hives, checked byte by byte. The brood is where code from someone else waits, and never runs, until you accept it. And a colony is a domain with the hives it hosts; there are many, and none of them is in charge."
+    "similarity": 0.9727,
+    "wer": 0.0267,
+    "seconds": 46.99,
+    "at": "2026-11-28",
+    "text": "Hypercomb uses a few exact words, and each means one thing. A hive is your own place, kept on your device. A tile is one piece of content. A layer is one moment of a place, kept for good. A signature is the name content gives itself. A bee is a small piece of behaviour that acts when it is needed, or when you say its word. A pheromone is a signed mark of interest left on content, so people with matching interests can find it; carrying it to them is still being built. Replication is how work moves between hives, checked byte by byte. The brood is where code from someone else waits, and never runs, until you accept it. And a colony is a domain with the hives it hosts; there are menny, and none of them is in charge."
   },
   "scene:09": {
     "slot": "f8ff2fe03eceaeed",
@@ -172,15 +172,15 @@
     "text": "You can do almost everything by saying it. The command line reads plain words: type a name to make a tile, or a slash and a word to act. Say website, and a hive's pages show as a site. Because every act is a sentence, you can see what it will touch before it runs, repeat it, and teach it to someone else. The sentence is the program. Communities translate the words into their own languages."
   },
   "scene:13": {
-    "slot": "0f3b410016a7df3f",
+    "slot": "ff8c2f1945723b9c",
     "via": "reclone",
     "method": "passage",
     "reference": "2f369e19ee2c5adf",
-    "similarity": 0.9778,
-    "wer": 0,
-    "seconds": 21.2,
-    "at": "2026-11-27",
-    "text": "Everything has its place by its name, and every byte can be checked, so nothing has to be taken on trust. When someone shares work with you, you receive signatures, and your device checks each piece as it arrives. Content used in many places is stored once, and any host that holds it can hand you a copy. A copy from any host is as good as the original, because it proves itself."
+    "similarity": 0.9784,
+    "wer": 0.0137,
+    "seconds": 21.97,
+    "at": "2026-11-28",
+    "text": "Everything has its place by its name, and every byte can be checked, so nothing has to be taken on trust. When someone shares work with you, you receive signatures, and your device checks each piece as it arrives. Content used in menny places is stored once, and any host that holds it can hand you a copy. A copy from any host is as good as the original, because it proves itself."
   },
   "scene:14": {
     "slot": "54f5b5cc19dcd760",
@@ -205,15 +205,15 @@
     "text": "Your domain is your front door. Hypercomb takes you there in steps: start in your browser, share through a friend's host, then run your own host under your own domain. The people who follow your domain get your work straight from you, and your community can connect to the communities it cares about most, domain to domain. No platform stands between you and the people you choose."
   },
   "scene:16": {
-    "slot": "92115bc90d6e77a3",
+    "slot": "a8e357a831f145a9",
     "via": "reclone",
     "method": "passage",
     "reference": "2f369e19ee2c5adf",
     "similarity": 0.9725,
-    "wer": 0,
-    "seconds": 49.86,
-    "at": "2026-11-27",
-    "text": "And here is the first thing anyone sees. Remember the simplest pattern: a name, and what it holds, named by its own signature. Read from outside, every hive is exactly that: an index of names and signatures. That index is called a Hyperdex, from hyper and index. It is not something built beside your hive. It is your hive, seen from the door. The root of your domain serves it, signed, and it is the first impression anyone has of you. What it shows depends on who is looking: a stranger sees your showcase, and you see your whole network, one domain to a row. And it can take many shapes, a list, a honeycomb, a wall of cards, with your business card as one entry among them. Visit someone's domain, and their Hyperdex is how they greet you."
+    "wer": 0.0132,
+    "seconds": 47.83,
+    "at": "2026-11-28",
+    "text": "And here is the first thing anyone sees. Remember the simplest pattern: a name, and what it holds, named by its own signature. Read from outside, every hive is exactly that: an index of names and signatures. That index is called a Hyperdex, from hyper and index. It is not something built beside your hive. It is your hive, seen from the door. The root of your domain serves it, signed, and it is the first impression anyone has of you. What it shows depends on who is looking: a stranger sees your showcase, and you see your whole network, one domain to a row. And it can take menny shapes, a list, a honeycomb, a wall of cards, with your business card as one entry among them. Visit someone's domain, and their Hyperdex is how they greet you."
   },
   "scene:17": {
     "slot": "d0dcb18a78e78e05",
@@ -836,15 +836,15 @@
     "text": "An origin can be a chain: bo's simple reached you through ann, and its thread runs back through both."
   },
   "beat:protocol/simple/opening/spread#6": {
-    "slot": "f597a0468a5ed1b9",
+    "slot": "24393b26f3894ef8",
     "via": "reclone",
     "method": "passage",
     "reference": "2f369e19ee2c5adf",
-    "similarity": 0.9666,
-    "wer": 0.0625,
-    "seconds": 2.11,
-    "at": "2026-11-27",
-    "text": "The same word can come from many hands."
+    "similarity": 0.9709,
+    "wer": 0.0794,
+    "seconds": 2.53,
+    "at": "2026-11-28",
+    "text": "The same word can come from menny hands."
   },
   "beat:protocol/simple/opening/fill#1": {
     "slot": "1a92475e4c29e9e8",
@@ -979,15 +979,15 @@
     "text": "Here is what it looks like. Your work sits on a grid of tiles. A tile can hold anything: a note, a picture, a document, a game, a whole website. Open a tile and you step inside it, and every tile can hold a grid of its own. These tiles come from a hive in use: a cigar journal, a library of knowledge, a room for hosting. Tiles inside tiles, as deep as you need."
   },
   "beat:protocol/accessible#1": {
-    "slot": "d99c33a84f01465b",
+    "slot": "885cec09790a6268",
     "via": "reclone",
     "method": "passage",
     "reference": "2f369e19ee2c5adf",
-    "similarity": 0.9725,
-    "wer": 0,
-    "seconds": 5.52,
-    "at": "2026-11-27",
-    "text": "Accessible means this is for as many people as possible, and for everyone if we can manage it."
+    "similarity": 0.9709,
+    "wer": 0.0794,
+    "seconds": 5.85,
+    "at": "2026-11-28",
+    "text": "Accessible means this is for as menny people as possible, and for everyone if we can manage it."
   },
   "beat:protocol/accessible#2": {
     "slot": "da36a93036a4996b",
@@ -1166,15 +1166,15 @@
     "text": "One layer with 478 versions, newest on top. Each is a step you can go back to, and none is ever removed."
   },
   "beat:protocol/organized/build#1": {
-    "slot": "74b254fb7b53a004",
+    "slot": "0eaf3d22ba35e073",
     "via": "reclone",
     "method": "passage",
     "reference": "2f369e19ee2c5adf",
-    "similarity": 0.971,
-    "wer": 0.0448,
-    "seconds": 5.63,
-    "at": "2026-11-27",
-    "text": "One pass of work often changes many tiles at once: here, three of the opening's seven moves."
+    "similarity": 0.9709,
+    "wer": 0.0794,
+    "seconds": 6.12,
+    "at": "2026-11-28",
+    "text": "One pass of work often changes menny tiles at once: here, three of the opening's seven moves."
   },
   "beat:protocol/organized/build#2": {
     "slot": "1057e55efaf818bd",
@@ -2497,15 +2497,15 @@
     "text": "The rule binds the builders too: no update and no test may wipe your tiles, your history or your pools."
   },
   "beat:protocol/organized/shelf#1": {
-    "slot": "6b89631533b5af30",
+    "slot": "24de2cfac56ecad2",
     "via": "reclone",
     "method": "passage",
     "reference": "2f369e19ee2c5adf",
-    "similarity": 0.9671,
-    "wer": 0,
-    "seconds": 6.1,
-    "at": "2026-11-27",
-    "text": "A tile is stored once, and a page only lists it, so the same tile can show in many places."
+    "similarity": 0.9709,
+    "wer": 0.0794,
+    "seconds": 6,
+    "at": "2026-11-28",
+    "text": "A tile is stored once, and a page only lists it, so the same tile can show in menny places."
   },
   "beat:protocol/organized/shelf#2": {
     "slot": "6a23d22f1bae7203",
