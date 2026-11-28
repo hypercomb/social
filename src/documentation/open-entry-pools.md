@@ -404,7 +404,7 @@ Phones posting from a page is, for now, the Cloudflare host.
 | `recipe/recipe-post.*` (new) | the form built from a template, and the bee that wakes on the code |
 | `recipe/recipe-entries.ts` | a posted member is one more source of `RecipeEntryOffer`, carrying its own bytes |
 | `recipe/recipe-catalogue-view.drone.ts` | rows from opened pools; Hide and Show again for the leader |
-| `pools/pools-mode.drone.ts`, `pools-bar.ts` | "Open for posts": the page's pool, when it ends, the code, the count, Close, Recycle |
+| `pools/open-entries-panel.ts`, `pools-mode.drone.ts` | "Collect from phones": one full-screen card (`recipe posts`, or the pools bar's one line). It asks what the pool is for, with a name filled in; says the page, and asks only when there are several; keeps the end and the form folded at their defaults. What takes posts now stands first, each with its code, "Stop taking posts" and Recycle; what ended folds under "Earlier" |
 | `presentation/tiles/site-view.drone.ts` | its two fragment strips leave `#post=` alone |
 | `hypercomb-shared` `core/invite-capture.ts` | recognise `#post=` and announce it |
 | `hypercomb-runtime` `navigation.ts` | the selection reader ignores a `#post=` fragment |

@@ -24,10 +24,11 @@
 // and imports none of them. Commands go out transient; what happened
 // (LIGHTS_PUBLISHED) goes out as a last value.
 //
-// OPEN FOR POSTS is the bar's last row (open-entries-panel.ts): the leader's
-// pools opened for posts on their own host, read each time the mode comes up,
-// and the way to open a page for posts. The word `recipe posts` asks for its
-// form (ENTRY_POSTS_WANTED); the form comes up with the bar.
+// POSTS are one line of the bar (open-entries-panel.ts `entryPostsLine`): how
+// many pages take posts from phones, read each time the mode comes up, and the
+// press that opens the "Collect from phones" card. The card is its own
+// full-screen dialog, put up by this drone with or without the bar: the word
+// `recipe posts` asks for it (ENTRY_POSTS_WANTED) and needs no pools mode.
 
 import { Drone, EffectBus, get } from '@hypercomb/core'
 import { isBranchPublic, isCellPublic, isIndividuallyPublic } from '../presentation/tiles/tile-public.js'
@@ -39,7 +40,7 @@ import {
 import { litCountHere } from './lit-tiles.js'
 import { ENTRY_POSTS_WANTED } from './open-entries-forms.js'
 import type { EntryLeaderDeps } from './open-entries-leader.js'
-import { EntryPostsControl, entryPostsPanel } from './open-entries-panel.js'
+import { EntryPostsControl, entryPostsLine, entryPostsPanel } from './open-entries-panel.js'
 import { litPoolPreview, poolContributions, publishLitPools } from './pool-contributions.js'
 import { PoolsBackgroundProvider } from './pools-background.provider.js'
 import { poolsBar, poolsBarOutcome, poolsFrame, poolsSay, type PoolsBarPool, type PoolsBarState } from './pools-bar.js'
@@ -49,6 +50,8 @@ const LINEAGE_KEY = '@hypercomb.social/Lineage'
 const BACKGROUND_KEY = '@diamondcoreprocessor.com/BackgroundDrone'
 /** The name this drone asks for the domain shelf under. */
 const SHELF_OWNER = 'pools-mode'
+/** The name the hive's keymap is held under while the posts card is up. */
+const POSTS_KEYMAP_REASON = 'pools-posts-card'
 /** How long the lights settle before the counts are read again: a lit tile's record lands a moment after its mark. */
 const RECOUNT_MS = 180
 
@@ -78,6 +81,7 @@ export class PoolsModeDrone extends Drone {
   ]
   protected override emits = [
     LIGHTS_PUBLISHED, LIGHTS_PUBLISH, LIGHTS_LEAVE, LIGHTS_JOIN_SWARM, DOMAIN_SHELF_WANTED, 'tile:action', 'activity:log',
+    'keymap:hold', 'keymap:release',
   ]
 
   #bound = false
@@ -97,9 +101,10 @@ export class PoolsModeDrone extends Drone {
   #frame: HTMLElement | null = null
   /** The leader's pools opened for posts: its own state, kept while the drone lives, drawn while the bar is up. */
   #posts: EntryPostsControl | null = null
-  #postsRow: ReturnType<typeof entryPostsPanel> | null = null
-  /** The word asked for the form before the bar was up. */
-  #postsWanted = false
+  /** The bar's one line about posts. */
+  #postsRow: ReturnType<typeof entryPostsLine> | null = null
+  /** The "Collect from phones" card: its own full-screen dialog, up with or without the bar. */
+  #postsCard: ReturnType<typeof entryPostsPanel> | null = null
   /** What the leader's side runs with: a spec hands its own in. */
   postsDeps: EntryLeaderDeps = {}
 
@@ -164,6 +169,8 @@ export class PoolsModeDrone extends Drone {
     this.onEffect(LIGHTS_PUBLISH, () => { void this.#publish() })
     // A language chosen while the bar is up: its words are laid when it is built, so it is built again.
     this.onEffect('locale:changed', () => {
+      // The card says every word again on each state it is handed.
+      if (this.#postsCard && this.#posts) this.#postsCard.update(this.#posts.state)
       if (!this.#bar || this.#builtIn === document.documentElement.lang) return
       this.#teardown()
       this.#reconcile()
@@ -172,10 +179,7 @@ export class PoolsModeDrone extends Drone {
     // Transient, so an old ask is never replayed into a new bar. The word asks
     // for pools mode first: when the mode did not come up the ask is dropped,
     // and while something else holds the bar down it waits for the bar.
-    this.onEffect(ENTRY_POSTS_WANTED, () => {
-      if (this.#bar && this.#postsRow) { void this.#postsControl().start(); return }
-      this.#postsWanted = this.#active
-    })
+    this.onEffect(ENTRY_POSTS_WANTED, () => this.#openPostsCard())
 
     this.onEffect<{ active?: boolean }>('view:active', payload => { this.#viewActive = !!payload?.active; this.#reconcile() })
     this.onEffect<{ visible?: boolean }>('render:set-hive-visible', payload => { this.#hiveHidden = payload?.visible === false; this.#reconcile() })
@@ -187,6 +191,7 @@ export class PoolsModeDrone extends Drone {
   }
 
   protected override dispose(): void {
+    this.#closePostsCard()
     if (this.#recountTimer) clearTimeout(this.#recountTimer)
     this.#recountTimer = null
     this.#viewMode?.removeEventListener('change', this.#onViewModeChange)
@@ -205,7 +210,7 @@ export class PoolsModeDrone extends Drone {
     // Sources are part of this experience: which hosts you draw from sits
     // beside which tiles you offer. Another package builds the shelf.
     EffectBus.emitTransient<DomainShelfWanted>(DOMAIN_SHELF_WANTED, { owner: SHELF_OWNER, wanted: active })
-    if (!active) { this.#outcome = null; this.#postsWanted = false }
+    if (!active) this.#outcome = null
     this.#recountHere()
     this.#recountSoon()
     this.#reconcile()
@@ -244,7 +249,7 @@ export class PoolsModeDrone extends Drone {
     if (!this.#wanted()) { this.#teardown(); return }
     if (!this.#bar) {
       const control = this.#postsControl()
-      this.#postsRow = entryPostsPanel(poolsSay, control.actions)
+      this.#postsRow = entryPostsLine(poolsSay, () => this.#openPostsCard())
       this.#bar = poolsBar({
         posts: this.#postsRow.element,
         say: poolsSay,
@@ -258,9 +263,8 @@ export class PoolsModeDrone extends Drone {
       this.#frame = poolsFrame()
       document.body.append(this.#frame, this.#bar.element)
       this.#postsRow.update(control.state)
-      // The leader's pools are read each time the bar comes up; the word's ask opens the form.
-      if (this.#postsWanted) { this.#postsWanted = false; void control.start() }
-      else void control.refresh()
+      // The leader's pools are read each time the bar comes up, unless the card is up and reading them itself.
+      if (!this.#postsCard) void control.refresh()
     }
     this.#paint()
   }
@@ -269,8 +273,30 @@ export class PoolsModeDrone extends Drone {
     return this.#posts ??= new EntryPostsControl({
       say: poolsSay,
       deps: this.postsDeps,
-      onChange: state => this.#postsRow?.update(state),
+      onChange: state => { this.#postsRow?.update(state); this.#postsCard?.update(state) },
     })
+  }
+
+  /** Put the "Collect from phones" card up: once, over everything but the code it shows. The hive's keymap is held
+   *  while it is up, so a letter typed into its name is never a shortcut. */
+  #openPostsCard(): void {
+    if (this.#postsCard) return
+    const control = this.#postsControl()
+    const opener = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null
+    this.#postsCard = entryPostsPanel(poolsSay, control.actions, Date.now, { onDismiss: () => this.#closePostsCard(opener) })
+    document.body.append(this.#postsCard.element)
+    EffectBus.emitTransient('keymap:hold', { reason: POSTS_KEYMAP_REASON })
+    this.#postsCard.update(control.state)
+    void control.begin()
+  }
+
+  #closePostsCard(opener: HTMLElement | null = null): void {
+    if (!this.#postsCard) return
+    this.#posts?.cancel()
+    this.#postsCard.dispose()
+    this.#postsCard = null
+    EffectBus.emitTransient('keymap:release', { reason: POSTS_KEYMAP_REASON })
+    if (opener?.isConnected) opener.focus()
   }
 
   #teardown(): void {
