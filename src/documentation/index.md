@@ -18,6 +18,7 @@ The complete reference. Every page is also reachable through `/help` in the app 
 
 - [tree-of-life-core.md](tree-of-life-core.md) — Core participation doctrine: stores hold DNA, relays carry signals, Core metabolizes signatures into beehavior
 - [concepts.md](concepts.md) — The hive is a computer: junction-as-computer, the byte-sandwich dataflow, six-pile radix scheduling, geometry-as-processor, and nested exponential reach
+- [hive-intelligence.md](hive-intelligence.md) — *(design — agreed 2026-11-03; the group folder, the east cube, and one scroll edge are in place)* A pure brain agents address in sentences. Only verifiable truths govern it. Private use teaches an anonymous graph; the lineage of science is the public brain of solved proofs, one stamp at a time, growing faster and more mature as the frontier advances. A resource stays on a host: a domain and the hash of the arguments retrieve it, and this disk keeps only the group
 - [emergence.md](emergence.md) — Brooding and eclosion — the visual lifecycle of tiles
 - [simple-naming-initiative.md](simple-naming-initiative.md) — Verb-first, consistent, human-readable naming
 

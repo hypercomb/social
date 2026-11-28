@@ -1086,6 +1086,7 @@
   "slash.grant": "Set how far a machine may go in this hive",
   "slash.help": "Open the reference sheet: every keyboard shortcut and what it does",
   "slash.providers": "Manage AI providers and API keys",
+  "slash.intelligence": "Ask Windows for a folder, keep intelligence groups there, and start",
   "slash.history": "Show or hide the history panel: this page's past changes, to step back through",
   "slash.hide": "Take tiles out of view here, keeping everything they hold",
   "slash.organism": "See this page by density — the thickest tile at the centre, the rest crowding around it",

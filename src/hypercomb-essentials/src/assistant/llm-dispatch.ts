@@ -41,6 +41,7 @@ import { isOpenRouterBatchModel } from './providers/openrouter-catalog.js'
 import { catalogueSees, describePicture, DESCRIBE_PROMPT, type PictureDescription } from './picture-describe.js'
 import { OPENROUTER_PROVIDER } from './providers/openrouter.provider.js'
 import { credentialOwner } from './providers/credential-owner.js'
+import { keepIntelligence, recallIntelligence } from '../intelligence/intelligence-lookup.js'
 import { llmProviderRegistry, type LlmProviderRegistry } from './llm-provider-registry.js'
 import type {
   LlmCallResult,
@@ -427,10 +428,65 @@ const send = async (
   return response
 }
 
+const askedModel = (provider: LlmProviderDescriptor, call: LlmCall): string => {
+  if (call.model) return registry().resolveModelId(provider, call.model)
+  if (call.preferModel && registry().providerForModel(call.preferModel)?.id === provider.id) {
+    return registry().resolveModelId(provider, call.preferModel)
+  }
+  return modelForTier(provider, call.need?.tier ?? 'balanced')
+}
+
+/** The object `intelligence get` would hash. A call that carries a picture stays open. */
+const intelligenceArguments = (providerId: string, model: string, call: LlmCall): Record<string, unknown> | null => {
+  const messages: { role: string; content: string }[] = []
+  for (const message of call.messages) {
+    if ('images' in message && message.images?.length) return null
+    if (typeof message.content !== 'string') return null
+    messages.push({ role: message.role, content: message.content })
+  }
+  if (!messages.length || !providerId || !model) return null
+  return {
+    provider: providerId,
+    model,
+    messages,
+    ...(call.system !== undefined ? { system: call.system } : {}),
+    ...(call.temperature !== undefined ? { temperature: call.temperature } : {}),
+    ...(call.maxTokens !== undefined ? { maxTokens: call.maxTokens } : {}),
+    ...(call.thinking === false ? { thinking: false } : {}),
+    ...(call.effort ? { effort: call.effort } : {}),
+    ...(call.jsonSchema ? { jsonSchema: call.jsonSchema } : {}),
+  }
+}
+
+/** A granted folder may already hold this ask. Null leaves the model call as it was. */
+const retainIntelligence = (provider: LlmProviderDescriptor, call: LlmCall, model: string, text: string): void => {
+  if (!text) return
+  const args = intelligenceArguments(provider.id, model, call)
+  if (!args) return
+  void keepIntelligence(args, text)
+}
+
+const spokenIntelligence = async (provider: LlmProviderDescriptor, call: LlmCall): Promise<{ text: string; model: string } | null> => {
+  try {
+    const model = askedModel(provider, call)
+    const args = intelligenceArguments(provider.id, model, call)
+    if (!args) return null
+    const text = await recallIntelligence(args, { signal: call.signal })
+    return text ? { text, model } : null
+  } catch {
+    return null
+  }
+}
+
 /** Ask a model. The normalized answer, whoever answered it — including a
- *  participant on the other side of the swarm. */
+ *  participant on the other side of the swarm. A member of the granted
+ *  intelligence folder answers before any provider is touched. */
 export const callModel = async (call: LlmCall): Promise<LlmCallResult> => {
   const provider = resolveProvider(call)
+  const remembered = await spokenIntelligence(provider, call)
+  if (remembered) {
+    return { text: remembered.text, stopReason: 'intelligence', inputTokens: 0, outputTokens: 0, model: remembered.model }
+  }
   const request = buildRequest(provider, call)
 
   // SOMEONE ELSE'S MACHINE. Routed rather than fetched, and refused clearly
@@ -460,7 +516,9 @@ export const callModel = async (call: LlmCall): Promise<LlmCallResult> => {
   }
 
   const response = await send(provider, request, call.signal)
-  return provider.fromResponse(await response.json(), request)
+  const result = provider.fromResponse(await response.json(), request)
+  retainIntelligence(provider, call, request.model, result.text)
+  return result
 }
 
 /**
@@ -566,6 +624,7 @@ async function* streamProvider(
       model: result.model || request.model,
       usage: attemptUsage(provider, result, request.model),
     }
+    retainIntelligence(provider, call, request.model, result.text)
     return
   }
 
@@ -573,6 +632,7 @@ async function* streamProvider(
   emitLocalUse(provider)
   const response = await send(provider, request, call.signal)
   rememberLocalChoice(provider, request.model)
+  let gathered = ''
   const idleMs = machineLocalEndpoint(provider) ? 0 : STREAM_IDLE_MS
   const frames = sseFrames(response, call.signal, idleMs)
   const nextFrame = async (): Promise<IteratorResult<unknown>> => {
@@ -586,13 +646,18 @@ async function* streamProvider(
     const frame = step.value
     const decoded = provider.fromStreamEvent(frame)
     if (typeof decoded === 'string') {
-      if (decoded) yield { text: decoded, model: request.model }
+      if (decoded) {
+        gathered += decoded
+        yield { text: decoded, model: request.model }
+      }
       continue
     }
     const frameUsage = attemptUsage(provider, decoded, request.model)
+    if (decoded.text) gathered += decoded.text
     if (decoded.text || frameUsage) yield { text: decoded.text ?? '', model: request.model, ...(frameUsage ? { usage: frameUsage } : {}) }
   }
   if (call.signal?.aborted) throw new DOMException('The model request was aborted', 'AbortError')
+  if (gathered) retainIntelligence(provider, call, request.model, gathered)
 }
 
 const finite = (value: unknown): number | undefined =>
@@ -793,6 +858,18 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
     throw new LlmDispatchError(
       'no callable AI provider is available for this request', call.providerId ?? '', call.model ?? '',
     )
+  }
+  const remembered = await spokenIntelligence(candidates[0], call)
+  if (remembered) {
+    const provider = candidates[0]
+    yield {
+      text: remembered.text,
+      providerId: provider.id,
+      providerLabel: provider.label,
+      vendor: provider.vendor,
+      model: remembered.model,
+    }
+    return
   }
 
   const automatic = !call.providerId && !call.model
@@ -1005,6 +1082,11 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
  */
 export async function* streamModel(call: LlmCall): AsyncGenerator<string> {
   const provider = resolveProvider(call)
+  const remembered = await spokenIntelligence(provider, call)
+  if (remembered) {
+    yield remembered.text
+    return
+  }
   for await (const chunk of streamProvider(provider, call)) {
     if (chunk.text) yield chunk.text
   }
