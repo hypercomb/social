@@ -33,6 +33,8 @@ export type SealedPublishDeps = {
   readonly publisher: string
   /** Envelopes the branch already names; the new one is tried first and these follow. */
   readonly previous?: readonly string[]
+  /** The most atoms the closure walk takes (sealed-closure.ts CLOSURE_ATOMS_MAX when absent). */
+  readonly limit?: number
 }
 
 export type SealedPublishResult =
@@ -40,7 +42,7 @@ export type SealedPublishResult =
   | { ok: false; reason: 'no-head' | 'seal-failed' | 'envelope-failed' | 'upload-failed' | 'index-failed'; detail?: string }
 
 export async function publishSealed(head: string, members: readonly string[], deps: SealedPublishDeps): Promise<SealedPublishResult> {
-  const closure = await collectClosure(head, deps.getBytes)
+  const closure = await collectClosure(head, deps.getBytes, deps.limit)
   if (!closure.has(head)) return { ok: false, reason: 'no-head' }
   const sealed = await sealClosure(closure, head)
   if (!sealed) return { ok: false, reason: 'seal-failed' }

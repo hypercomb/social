@@ -124,7 +124,6 @@ export class BackupQueenBee extends QueenBee {
       'no-host': 'No host takes your uploads yet — turn on a host for your hive, then run /backup again.',
       'no-seal': 'The hive could not be sealed, so nothing was backed up.',
       'no-recovery': 'There is no recovery key for this hive yet — run /backup again.',
-      'too-large': 'The hive is larger than one backup can carry, so nothing was backed up.',
       nowhere: 'No host took the backup — see the activity log.',
     }
     this.#toast('error', title, this.#t(i18n, `backup.failed.${result.reason}`, reasons[result.reason] ?? result.reason))

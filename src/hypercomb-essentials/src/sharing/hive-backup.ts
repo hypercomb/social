@@ -31,7 +31,7 @@
 //
 // The orchestration takes its collaborators as arguments; `live*` wires them to the running hive.
 
-import { CLOSURE_ATOMS_MAX, collectClosure, signBytes } from './sealed-closure.js'
+import { collectClosure, signBytes } from './sealed-closure.js'
 import { openSealedVersion, publishSealed, type SealedPublishDeps } from './sealed-publish.js'
 import type { Nip44 } from './sealed-envelope.js'
 
@@ -157,7 +157,7 @@ export type BackupDeps = {
 
 export type BackupResult =
   | { ok: true; head: string; hosts: string[]; atoms: number; failed: { host: string; reason: string }[] }
-  | { ok: false; reason: 'no-nip44' | 'no-signer' | 'no-host' | 'no-seal' | 'no-recovery' | 'too-large' | 'nowhere'; failed?: { host: string; reason: string }[] }
+  | { ok: false; reason: 'no-nip44' | 'no-signer' | 'no-host' | 'no-seal' | 'no-recovery' | 'nowhere'; failed?: { host: string; reason: string }[] }
 
 /** Keep the whole current hive on every upload host, as ciphertext only this key, its devices and the recovery key
  *  open. The newest backup replaces the last one in the index; atoms the host already holds are not sent again. */
@@ -177,11 +177,11 @@ export async function backupHive(deps: BackupDeps): Promise<BackupResult> {
   const carrier = backupCarrierBytes(head, (deps.now ?? Date.now)())
   const carrierSig = await signBytes(carrier)
   const getBytes = async (sig: string): Promise<Uint8Array | null> => sig === carrierSig ? carrier : deps.getBytes(sig)
-  // Walked once, then sealed from memory for every host. A walk that hit the ceiling stopped early: a backup that
-  // silently leaves part of the tree out is worse than a loud refusal.
-  const closure = await collectClosure(carrierSig, getBytes)
+  // Walked once, then sealed from memory for every host. NO CEILING: the sharing walk stops at CLOSURE_ATOMS_MAX, and
+  // jwize's own hive (12,634 places, ~22,000 atoms on 2026-11-27) is past it, so a capped backup refused the very hive
+  // it exists for. A backup that keeps part of the tree would be worse than none; this one keeps all of it.
+  const closure = await collectClosure(carrierSig, getBytes, Infinity)
   if (!closure.has(head)) return { ok: false, reason: 'no-seal' }
-  if (closure.size >= CLOSURE_ATOMS_MAX) return { ok: false, reason: 'too-large' }
   const held = async (sig: string): Promise<Uint8Array | null> => closure.get(sig) ?? null
 
   const kept: string[] = []
@@ -190,7 +190,7 @@ export async function backupHive(deps: BackupDeps): Promise<BackupResult> {
   for (const host of hosts) {
     const devices = (await deps.devices(host, publisher).catch(() => [] as string[])).map(key => key.toLowerCase()).filter(key => SIG.test(key))
     const result = await publishSealed(carrierSig, [...new Set([publisher, recovery, ...devices])], {
-      getBytes: held, upload: deps.upload(host), nip44, publisher: own,
+      getBytes: held, upload: deps.upload(host), nip44, publisher: own, limit: Infinity,
       // One backup per key: the newest envelope replaces the last, never a list. Not history — the genome.
       setSealed: async envelopes => deps.setRoot(host, BACKUP_ROOT_KEY, envelopes[0]!),
     })

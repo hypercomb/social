@@ -42,12 +42,20 @@ export async function applySealAt(
 
   let changed = 0
   let failed = 0
-  const seen = new Set<string>()
+  // A CYCLE GUARD, NEVER A VISITED SET. The same sealed layer legitimately sits at many locations: two tiles with the
+  // same name and the same (empty, or identical) content seal to ONE signature. A global `seen` restored such a layer
+  // at its first location only, and every other location kept no head at all — on jwize's hive (2026-11-27) 12,634
+  // places sealed to 3,139 distinct layers, and a restore brought back 3,139 of them. Only the recursion stack is
+  // guarded, as sealSubtree guards it on the way out (history.service.ts `activeLayers`).
+  const active = new Set<string>()
 
   const visit = async (segments: readonly string[], sealedSig: string, isRoot: boolean): Promise<void> => {
-    if (seen.has(sealedSig)) return
-    seen.add(sealedSig)
+    if (active.has(sealedSig)) { failed++; return }
+    active.add(sealedSig)
+    try { await place(segments, sealedSig, isRoot) } finally { active.delete(sealedSig) }
+  }
 
+  const place = async (segments: readonly string[], sealedSig: string, isRoot: boolean): Promise<void> => {
     const layer = await history.getLayerBySig(sealedSig)
     if (!layer) { failed++; return }
 

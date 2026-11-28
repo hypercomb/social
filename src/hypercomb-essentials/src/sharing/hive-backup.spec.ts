@@ -157,16 +157,25 @@ describe('what a backup refuses', () => {
     expect(await backupHive(world.backup({ nip44: () => null }))).toEqual({ ok: false, reason: 'no-nip44' })
   })
 
-  it('refuses loudly when the tree reaches the closure ceiling instead of keeping part of it', async () => {
+  it('keeps a hive past the sharing ceiling whole, and it opens whole', async () => {
     const world = await makeWorld()
-    const many = Array.from({ length: CLOSURE_ATOMS_MAX }, (_, i) => i.toString(16).padStart(64, '0'))
-    const big = enc(JSON.stringify({ name: '', notes: many }))
+    // Real atoms, each named by its own signature: one more than a shared branch may carry.
+    const notes = await Promise.all(Array.from({ length: CLOSURE_ATOMS_MAX }, async (_, i) => {
+      const bytes = enc(`note ${i}`)
+      const sig = await signBytes(bytes)
+      world.local.set(sig, bytes)
+      return sig
+    }))
+    const big = enc(JSON.stringify({ name: '', notes }))
     const bigSig = await signBytes(big)
     world.local.set(bigSig, big)
-    for (const sig of many) world.local.set(sig, enc('x'))
     world.setSeal(bigSig)
-    expect(await backupHive(world.backup())).toEqual({ ok: false, reason: 'too-large' })
-  }, 60_000)
+    const kept = await backupHive(world.backup({ hosts: async () => ['one.example'] }))
+    expect(kept).toMatchObject({ ok: true, atoms: CLOSURE_ATOMS_MAX + 2 }) // the notes, the root, the carrier
+    const { store, deps } = world.cleared()
+    expect(await restoreHive(world.file(), deps)).toMatchObject({ ok: true, head: bigSig })
+    expect(store.size).toBe(CLOSURE_ATOMS_MAX + 1) // the notes and the root; the carrier is not hive content
+  }, 240_000)
 
   it('names one host failing and keeps on the rest', async () => {
     const world = await makeWorld()

@@ -33,14 +33,20 @@ const unhex = (text: string): Uint8Array => Uint8Array.from(text.match(/../g)!.m
 const toBuffer = (bytes: Uint8Array): ArrayBuffer => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
 export const signBytes = (bytes: Uint8Array): Promise<string> => SignatureService.sign(toBuffer(bytes))
 
-/** Every atom `head` reaches that `getBytes` holds, by presence: JSON atoms are searched for the signatures they name. */
-export async function collectClosure(head: string, getBytes: (sig: string) => Promise<Uint8Array | null>): Promise<Map<string, Uint8Array>> {
+/** Every atom `head` reaches that `getBytes` holds, by presence: JSON atoms are searched for the signatures they name.
+ *  `limit` stops the walk at that many atoms (a shared branch); a whole-hive backup passes Infinity. */
+export async function collectClosure(
+  head: string,
+  getBytes: (sig: string) => Promise<Uint8Array | null>,
+  limit: number = CLOSURE_ATOMS_MAX,
+): Promise<Map<string, Uint8Array>> {
   const found = new Map<string, Uint8Array>()
   if (!SIG.test(head)) return found
   const queue = [head]
   const seen = new Set<string>(queue)
-  while (queue.length && found.size < CLOSURE_ATOMS_MAX) {
-    const sig = queue.shift()!
+  let at = 0
+  while (at < queue.length && found.size < limit) {
+    const sig = queue[at++]!
     const bytes = await getBytes(sig)
     if (!bytes) continue
     found.set(sig, bytes)
