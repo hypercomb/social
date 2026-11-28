@@ -48,15 +48,25 @@ describe('authored-sigs', () => {
   })
 
   it('markLayerAuthoredPageSigs picks the website and context slots only', () => {
+    const written = new Set([SIG_A, SIG_B, SIG_C])
     markLayerAuthoredPageSigs({
       name: 'cell',
       website: [SIG_A],
       context: [SIG_B, 'junk'],
       decorations: [SIG_C],   // decoration path records its htmlSig separately
       children: [SIG_C],
-    })
+    }, written)
     expect(isAuthored(SIG_A)).toBe(true)
     expect(isAuthored(SIG_B)).toBe(true)
+    expect(isAuthored(SIG_C)).toBe(false)
+  })
+
+  it('markLayerAuthoredPageSigs marks only what the writer put: a page it only names stays what it was (M1)', () => {
+    // SIG_B is a peer's page the layer points at; the writer put SIG_A alone.
+    markLayerAuthoredPageSigs({ name: 'cell', website: [SIG_B, SIG_A], context: [SIG_B.toUpperCase()] }, new Set([SIG_A]))
+    expect(isAuthored(SIG_A)).toBe(true)
+    expect(isAuthored(SIG_B)).toBe(false)
+    markLayerAuthoredPageSigs({ name: 'cell', website: [SIG_C] }, new Set())
     expect(isAuthored(SIG_C)).toBe(false)
   })
 

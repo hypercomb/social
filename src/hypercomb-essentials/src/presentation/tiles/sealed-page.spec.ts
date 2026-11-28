@@ -173,11 +173,13 @@ describe('the post-it view', () => {
 })
 
 describe('the views that run in the hive and cannot seal', () => {
-  it('the lounge runs only a room that is the hive\'s own, and a room named by hand is', () => {
+  it('the lounge runs only a room that is the hive\'s own, and naming a bundle by hand does not make it so (M1)', () => {
     const view = read('revolucionstyle.com', 'lounge', 'lounge-view.drone.ts')
     expect(view).toContain('if (runsSealed(segments, bundle, pagePublisherDomain(bundle))) {')
     expect(view.indexOf('runsSealed(segments, bundle')).toBeLessThan(view.indexOf('this.#build(segments, payload)'))
-    expect(read('revolucionstyle.com', 'lounge', 'lounge.queen.ts')).toContain('markAuthored(bundleSig)')
+    const queen = read('revolucionstyle.com', 'lounge', 'lounge.queen.ts')
+    expect(queen).not.toMatch(/markAuthored|markManyAuthored/)
+    expect(body(queen, 'async #attach(')).toContain('isAuthored(bundleSig)')
   })
 
   it('the room view never runs a page that runs sealed or may not run', () => {
@@ -188,6 +190,37 @@ describe('the views that run in the hive and cannot seal', () => {
 })
 
 describe('what counts as this hive\'s own', () => {
+  // NAMING A SIGNATURE NEVER MAKES IT YOURS (2026-11-28, inline-code-in-input-
+  // audit.md M1). A typed or requested signature can name any held page, a
+  // peer's among them, and `changes accept` types received sentences through
+  // the participant's own door. Only writing the bytes marks them.
+  it('website page <sig> dresses the tile and marks nothing; the console door marks what it writes', () => {
+    const queen = read('commands', 'website.queen.ts')
+    const page = body(queen, 'async #page(')
+    expect(page).not.toMatch(/markAuthored|markManyAuthored/)
+    expect(page).toContain('const own = isAuthored(sig)')
+    const own = body(queen, 'async writeOwnPage(')
+    expect(own).toContain('const sig = await store.putResource(')
+    expect(own.indexOf('store.putResource(')).toBeLessThan(own.indexOf('markAuthored(sig)'))
+    expect(queen.match(/markAuthored\(/g)?.length).toBe(1)
+    // The living presentation's console snippet stores its pages through that door.
+    const plant = readFileSync(join(process.cwd(), 'scripts', 'bridge', 'living-presentation', 'plant.cjs'), 'utf8')
+    expect(plant).toContain('const sig = await writePage(b.page)')
+  })
+
+  it('the bridge marks only the bytes it put, never a signature a request names', () => {
+    const bridge = read('assistant', 'claude-bridge.worker.ts')
+    const put = body(bridge, 'async #putResource(')
+    expect(put).toContain('this.#wrote.add(sig)')
+    // Every mark the bridge makes is filtered by what it put.
+    expect(bridge.match(/markAuthored\(/g)?.length).toBe(1)
+    expect(bridge).toContain('if (this.#wrote.has(sig)) markAuthored(sig)')
+    const layers = bridge.match(/markLayerAuthoredPageSigs\([^\n]*\)/g) ?? []
+    expect(layers.length).toBe(3)
+    for (const call of layers) expect(call).toMatch(/, this\.#wrote\)$/)
+    expect(bridge).not.toMatch(/markManyAuthored/)
+  })
+
   it('nothing is marked as the hive\'s own by walking: the grandfathering walk is retired', () => {
     const walk = read('sharing', 'authored-bootstrap.worker.ts')
     expect(walk).not.toMatch(/markManyAuthored|markAuthored\(/)

@@ -151,9 +151,10 @@ export class LoungeViewDrone extends Drone {
     // A ROOM RUNS AS THE HIVE (2026-11-16). Its bundle borrows the hive's own
     // Pixi through window.ioc, so it cannot run sealed the way a page from
     // elsewhere does: a room that is not this hive's own does not run at all.
-    // Its own exactly as a page is: by signature, authored here (`/lounge here`
-    // marks the bundle it names) — never by where the tile sits, which a cut and
-    // paste or a new device forgets (feature-availability.ts runsSealed).
+    // Its own exactly as a page is: by signature, authored here (the bridge
+    // marks a bundle it put; naming one with `/lounge here` marks nothing, M1)
+    // — never by where the tile sits, which a cut and paste or a new device
+    // forgets (feature-availability.ts runsSealed).
     const bundle = payload.bundleSig
     if (runsSealed(segments, bundle, pagePublisherDomain(bundle))) {
       this.#targetSegments = null

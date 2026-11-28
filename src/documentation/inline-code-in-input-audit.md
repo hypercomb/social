@@ -112,6 +112,11 @@ signature becomes "ours" because someone typed it.
 a page made from it inherits its source (`commitPageSigFrom`), so someone else's page dressed onto a tile
 still runs sealed.
 
+**Fixed, 2026-11-28.** Naming a signature marks nothing. `website page <sig>` and `/lounge here <sig>` dress
+the tile and say when the bytes are not this hive's own. The bridge marks only the bytes it put itself
+(`put-resource`). A snippet in the hive tab's console writes its pages through `writeOwnPage`. Details, and
+what community trust will grant instead, in `community-safety-index.md`.
+
 ### M2. Code fetched by signature, run without hashing it (checked by hand)
 
 On the read-only visitor, a dependency the store does not hold is fetched from the host by its signature.

@@ -157,6 +157,8 @@ type BridgeRequest = {
 type BridgeResponse = { id: string; ok: boolean; data?: unknown; error?: string }
 
 const RECONNECT_MS = 3_000
+/** How many of the bytes it put the bridge remembers as its own writes (#wrote). */
+const WROTE_KEPT = 4096
 // A tab that opted into the bridge but came up BEFORE the broker must keep
 // dialling — that is the whole reason a renderer goes missing. Backing off to
 // a ceiling is what keeps "keep dialling" from becoming a red console line
@@ -209,6 +211,15 @@ export class ClaudeBridgeWorker extends Worker {
   ]
 
   public override effects = [] as const
+
+  /** THE BYTES THIS BRIDGE PUT (`put-resource`), newest last. Only these are
+   *  marked as this hive's own when a page writer names them (decoration-add,
+   *  bag-set, bag-add, update). A request may name any signature the hive
+   *  holds, a peer's page among them, and naming bytes never made them yours
+   *  (inline-code-in-input-audit.md M1, 2026-11-28). Kept for this tab's life,
+   *  the newest WROTE_KEPT: a build puts a page and dresses a tile with it
+   *  moments later. */
+  readonly #wrote = new Set<string>()
 
   #ws: WebSocket | null = null
   /** THE RENDERER STAYS AWAKE. This tab is the only thing that can answer
@@ -788,6 +799,9 @@ export class ClaudeBridgeWorker extends Worker {
 
     const blob = new Blob([bytes as BlobPart])
     const sig = await store.putResource(blob)
+    this.#wrote.delete(sig)
+    this.#wrote.add(sig)
+    if (this.#wrote.size > WROTE_KEPT) this.#wrote.delete(this.#wrote.values().next().value as string)
     return { id: req.id, ok: true, data: { sig, bytes: bytes.byteLength } }
   }
 
@@ -1437,11 +1451,15 @@ export class ClaudeBridgeWorker extends Worker {
     // dropped when the body wasn't readable at push time — the exact reason a
     // travelled page rendered unstyled (htmlSig carried, chromeSig lost).
     const htmlSig = String((payload as Record<string, unknown>)['htmlSig'] ?? '').toLowerCase()
+    // A page (htmlSig) or a room's bundle (bundleSig, lounge-view.drone.ts) this
+    // bridge put is this hive's own: recorded in the allow-set so the gate runs
+    // it as the hive (feature-availability.isLocallyAuthored). Bytes it did not
+    // put stay what they were (M1, 2026-11-28).
+    for (const key of ['htmlSig', 'bundleSig']) {
+      const sig = String((payload as Record<string, unknown>)[key] ?? '').toLowerCase()
+      if (this.#wrote.has(sig)) markAuthored(sig)
+    }
     if (/^[0-9a-f]{64}$/.test(htmlSig)) {
-      // Locally-authored page content → record it in the participant's own-
-      // content allow-set so the verification gate never quarantines your own
-      // website (the escape hatch for feature-availability.isLocallyAuthored).
-      markAuthored(htmlSig)
       if (store.getResource) {
         try {
           const body = await store.getResource(htmlSig)
@@ -1566,9 +1584,10 @@ export class ClaudeBridgeWorker extends Worker {
     }>('@diamondcoreprocessor.com/LayerCommitter')
     if (!committer?.update) return { id: req.id, ok: false, error: 'LayerCommitter.update not available' }
 
-    // Record locally-authored page sigs written to a page slot (parity with
-    // #bagSet / #update / #decorationAdd) so the gate never quarantines them.
-    markLayerAuthoredPageSigs({ [slot]: next })
+    // Record the page sigs this bridge put, written to a page slot (parity with
+    // #bagSet / #update / #decorationAdd), so the gate runs them as the hive.
+    // A sig the request only names stays what it was (M1).
+    markLayerAuthoredPageSigs({ [slot]: next }, this.#wrote)
     // SET ONE SLOT, TOUCH NO OTHER — see #bagSet. `committer.update` reads a
     // `{ name, [slot] }` object as the cell's FULL new layer state ("absent ≡
     // empty"), so mutating one bag wiped `children` and every other slot the
@@ -1624,10 +1643,11 @@ export class ClaudeBridgeWorker extends Worker {
     }>('@diamondcoreprocessor.com/LayerCommitter')
     if (!committer?.update) return { id: req.id, ok: false, error: 'LayerCommitter.update not available' }
 
-    // A page written to a page-bearing slot (`website`/`context`) is locally-
-    // authored content — record its sigs so the gate treats your own pages as
-    // own. One helper across every local slot-writer keeps coverage from drifting.
-    markLayerAuthoredPageSigs({ [slot]: next })
+    // A page this bridge put, written to a page-bearing slot (`website`/
+    // `context`), is this hive's own — record its sigs so the gate treats it as
+    // own. A sig the request only names stays what it was (M1). One helper
+    // across every slot-writer keeps coverage from drifting.
+    markLayerAuthoredPageSigs({ [slot]: next }, this.#wrote)
     // SET ONE SLOT, TOUCH NO OTHER — via `commitSlotSet`, never `update`.
     //
     // `LayerCommitter.update` is the layer-as-primitive write: the caller
@@ -2192,10 +2212,11 @@ export class ClaudeBridgeWorker extends Worker {
 
     // Raw layer writes can author a page directly into the `website`/`context`
     // slots (e.g. a page refresh writing context:[htmlSig,...] alongside
-    // children, which bag-set can't do). Record those page sigs so the gate
-    // treats them as the participant's own — the generic-update coverage the
-    // decoration / bag-set paths would otherwise miss.
-    markLayerAuthoredPageSigs(layer)
+    // children, which bag-set can't do). Record those this bridge put so the
+    // gate treats them as the participant's own — the generic-update coverage
+    // the decoration / bag-set paths would otherwise miss. A sig the request
+    // only names stays what it was (M1).
+    markLayerAuthoredPageSigs(layer, this.#wrote)
     if (req.replace === true) {
       await committer.update(parentSegments, layer)
       return { id: req.id, ok: true, data: { count: children.length, segments: parentSegments } }

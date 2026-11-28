@@ -23,6 +23,9 @@
 //                                      be in the hive — a file that rode in
 //                                      with the sentence, or a drop). One page
 //                                      per tile: an earlier page is replaced.
+//                                      Naming the page never makes it yours:
+//                                      bytes this hive did not write run
+//                                      sealed (M1, 2026-11-28).
 //   /website here | mark             — flag THIS cell for the next gen pass
 //                                      (drops a visual:website:pending
 //                                      decoration; re-run to unflag)
@@ -64,7 +67,7 @@ import { ensureWebsiteBoundAt } from './website-binding.js'
 // the decoration-manifest module (slot registration) against tree-shaking.
 import { writeDecoration, listDecorations, removeDecoration, replaceDecoration } from './decoration-manifest.js'
 import { extractPageRefSigs } from '../sharing/decoration-closure.js'
-import { markAuthored } from '../sharing/authored-sigs.js'
+import { isAuthored, markAuthored } from '../sharing/authored-sigs.js'
 // Side-effect imports: ensure foundational modules load at startup.
 // Some bundler configurations drop modules whose value exports aren't
 // directly imported elsewhere; the explicit imports here anchor them
@@ -504,10 +507,33 @@ export class WebsiteQueenBee extends QueenBee {
     }
   }
 
+  /** THE PARTICIPANT'S OWN PAGE, WRITTEN FROM THIS TAB. Stores `html` and
+   *  records it as this hive's own (authored-sigs.ts), so `website page <sig>`
+   *  then dresses a tile with a page that runs as the hive. For code already
+   *  running in the hive's own tab, such as a snippet the participant pastes
+   *  into its console (scripts/bridge/living-presentation/plant.cjs --blocks):
+   *  writing the bytes is what makes a page yours, never naming them. Nothing
+   *  typed and nothing sealed reaches it. Returns the page's signature. */
+  async writeOwnPage(html: string): Promise<string> {
+    const store = get('@hypercomb.social/Store') as { putResource?: (blob: Blob) => Promise<string> } | undefined
+    if (!store?.putResource) throw new Error('the store is not available')
+    const sig = await store.putResource(new Blob([String(html ?? '')], { type: 'text/html' }))
+    markAuthored(sig)
+    return sig
+  }
+
   /** Dress the tile you stand on with the page whose HTML is resource `sig`.
    *  The same record the website build writes: `visual:website:page` with the
    *  body's own embedded resources declared as its closure, so the page
-   *  travels whole when the branch is published. */
+   *  travels whole when the branch is published.
+   *
+   *  NAMING A PAGE NEVER MAKES IT YOURS (2026-11-28, inline-code-in-input-
+   *  audit.md M1). This marked any held resource authored, a peer's page among
+   *  them, and an authored page runs as this hive, with its key and storage in
+   *  reach. A signature can be typed from anywhere: `changes accept` types
+   *  received sentences through the participant's own door. So the tile wears
+   *  the page and the page stays what it was: this hive's own when this hive
+   *  wrote it, sealed otherwise, and the line says which. */
   async #page(sig: string): Promise<void> {
     const lineage = get('@hypercomb.social/Lineage') as { explorerSegments?: () => readonly string[] } | undefined
     const segments = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
@@ -521,7 +547,7 @@ export class WebsiteQueenBee extends QueenBee {
     const body = await store?.getResource?.(sig)
     if (!body) fail(`There is no resource ${sig.slice(0, 12)}… in this hive yet.`)
     const refs = [sig, ...extractPageRefSigs(await body!.text())]
-    markAuthored(sig)
+    const own = isAuthored(sig)
     const name = segments[segments.length - 1]
     await replaceDecoration({
       kind: 'visual:website:page',
@@ -531,7 +557,12 @@ export class WebsiteQueenBee extends QueenBee {
       mark: 'persistent',
       refs,
     })
-    EffectBus.emit('activity:log', { message: `website page: "${name}" now wears page ${sig.slice(0, 12)}…`, icon: '◫' })
+    EffectBus.emit('activity:log', {
+      message: own
+        ? `website page: "${name}" now wears page ${sig.slice(0, 12)}…`
+        : `website page: "${name}" now wears page ${sig.slice(0, 12)}…, sealed: this hive did not write it, so it runs apart from your hive`,
+      icon: '◫',
+    })
   }
 
   async #export(targetSpec: string | null): Promise<void> {
