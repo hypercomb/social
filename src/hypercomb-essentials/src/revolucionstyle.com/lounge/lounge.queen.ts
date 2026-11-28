@@ -11,6 +11,12 @@
 // is the hand-authoring path; the Revolución site build writes the record
 // over the bridge as part of the same pass that mints the bundle.
 //
+// A room runs as the hive, so only a bundle this hive WROTE runs
+// (lounge-view.drone.ts): one the bridge put and attached in the same pass
+// (claude-bridge.worker.ts). Naming a bundle never makes it yours (2026-11-28,
+// inline-code-in-input-audit.md M1): `/lounge here` with a bundle written
+// elsewhere makes the cell a room that says it will not run.
+//
 // The behaviour is DOMAIN-GENERIC on purpose. Nothing here says "cigar" —
 // the record names its own bundle and its own art, so a second room is a
 // second record on a second tile. Same logical piece, different world.
@@ -26,7 +32,7 @@ import {
   ENABLEMENT_CHANGED, readGlobalOnKinds, seedCohortOn,
 } from '../../sharing/behavior-enablement.js'
 import { LOUNGE_KIND, LOUNGE_VIEW, type LoungeRoomPayload } from './lounge-room.js'
-import { markAuthored } from '../../sharing/authored-sigs.js'
+import { isAuthored } from '../../sharing/authored-sigs.js'
 
 const HEXAGONS = 'hexagons'
 const SIG_RE = /^[0-9a-f]{64}$/
@@ -97,10 +103,14 @@ export class LoungeQueenBee extends QueenBee {
       payload,
       mark: 'persistent',
     })
-    // The participant named this bundle to paint their own room: it is theirs
-    // to run in the hive (lounge-view.drone.ts).
-    markAuthored(bundleSig)
-    EffectBus.emit('activity:log', { message: 'This cell is a room now', icon: 'chair' })
+    // Naming the bundle does not make it this hive's own: it runs only if this
+    // hive wrote it (lounge-view.drone.ts), and the line says so when it did not.
+    EffectBus.emit('activity:log', {
+      message: isAuthored(bundleSig)
+        ? 'This cell is a room now'
+        : 'This cell is a room now, but its bundle was not written by this hive, so it does not run here',
+      icon: 'chair',
+    })
   }
 
   async #remove(): Promise<void> {

@@ -22,13 +22,19 @@
 // authored ∧ public (documentation/resource-offload-relays.md).
 //
 // ── STATUS: LIVE ──────────────────────────────────────────────────────────
-// Producers (RECORD ON WRITE): the bridge marks on every local page write —
-// `#decorationAdd` (visual:website:page htmlSig), `#bagSet` / `#bagMutate`
-// (website/context slots), `#update` (whole-layer). ONE-TIME BOOTSTRAP:
-// authored-bootstrap.worker.ts walks the lineage EXCLUDING adopted roots and
-// grandfathers pre-existing page sigs. `featureNeedsReview` consults
-// `isLocallyAuthored` as the per-sig rescue for your own pages under adopted
-// roots.
+// Producers (RECORD ON WRITE, and only on a write): a signature is marked
+// where this hive wrote its bytes — the website, howto and tile-file writers,
+// a page made from one of yours (page-commit.ts commitPageSigFrom), the
+// participant's own console (website.queen.ts writeOwnPage), and the bridge for
+// the bytes IT put (claude-bridge.worker.ts). NAMING A SIGNATURE NEVER MARKS IT
+// (2026-11-28, inline-code-in-input-audit.md M1): `website page <sig>`,
+// `/lounge here <sig>` and a bridge request naming bytes it did not put dress
+// the tile and leave the bytes what they were. A typed signature can arrive
+// from anywhere (`changes accept` types received sentences through the
+// participant's own door), and a held page from a peer would have run as this
+// hive. The grandfathering walk is retired (authored-bootstrap.worker.ts).
+// `featureNeedsReview` consults `isLocallyAuthored` as the per-sig rescue for
+// your own pages under adopted roots.
 
 const KEY = 'hc:authored-sigs'
 const SIG_RE = /^[a-f0-9]{64}$/
@@ -130,20 +136,21 @@ export function authoredSigs(): Set<string> {
   return read()
 }
 
-/** Record the LOCALLY-AUTHORED page signatures a layer write carries. The
+/** Record the page signatures a layer write carries THAT THE WRITER PUT. The
  *  `website` and `context` slots hold page/resource sigs DIRECTLY — the two
  *  slots the verification gate resolves a page from (alongside the decoration
- *  path, which records its htmlSig separately). Call this from EVERY local
- *  slot-writer (bridge #update / #bagSet / #bagMutate) so authoring coverage
- *  can't drift: any page you write locally is treated as your own. Marking a
- *  non-page context resource is inert — a sig only ever gates when it IS the
- *  resolved page sig, and a resource you never render as a page is never
- *  checked. */
-export function markLayerAuthoredPageSigs(layer: unknown): void {
+ *  path, which records its htmlSig separately). The bridge's slot writers
+ *  (#update / #bagSet / #bagMutate) call this with the bytes they put
+ *  themselves (`written`): a slot also names pages the request only points at —
+ *  a peer's page among them — and pointing at a page never makes it yours (M1,
+ *  2026-11-28). Marking a non-page context resource is inert — a sig only ever
+ *  gates when it IS the resolved page sig, and a resource you never render as
+ *  a page is never checked. */
+export function markLayerAuthoredPageSigs(layer: unknown, written: ReadonlySet<string>): void {
   if (!layer || typeof layer !== 'object') return
   const l = layer as Record<string, unknown>
   for (const slot of ['website', 'context']) {
     const v = l[slot]
-    if (Array.isArray(v)) markManyAuthored(v)
+    if (Array.isArray(v)) markManyAuthored(v.filter(s => written.has(String(s ?? '').trim().toLowerCase())))
   }
 }

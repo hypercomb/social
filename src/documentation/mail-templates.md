@@ -340,6 +340,11 @@ templateForm(template: MailTemplate, say: (key, fallback, params?) => string,
 
 ## The three gates, and exactly what "admitted" will mean (design)
 
+**jwize, 2026-11-27:** a recipient gets **their own fallback template** by default, and a sender's template is
+admitted when community-signed safety claims meet the recipient's own requirements, up to any level of dynamic
+content. The recipient can always put their own template in place. How that reading works, for mail and for
+every other asset: `community-safety-index.md`.
+
 The trust function `renderTemplate` asks answers for one signature (T5: selection, intake and activation, never
 conflated):
 

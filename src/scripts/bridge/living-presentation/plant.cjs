@@ -57,11 +57,14 @@
 // included files (the documents and source it explains), for the tiles under
 // the route that have content (blocks/content.cjs). A file's text cannot ride a
 // command line, so this writes one snippet to paste into the hive tab's
-// console: it stores each page, attaches each file through the hive's own
-// tile-files door, then puts `go` and `website page <sig>` lines on the
-// command line: dressing a tile with its page is the participant's own word,
-// so one Enter says them all (a page a model writes is a trial instead, shown
-// as a door to its sandbox). Plant the tiles first; a page needs its tile.
+// console: it stores each page as the hive's own (the website queen's
+// writeOwnPage: the participant's console wrote those bytes, so they run as the
+// hive; naming a page with `website page` never makes it yours, M1), attaches
+// each file through the hive's own tile-files door, then puts `go` and
+// `website page <sig>` lines on the command line: dressing a tile with its
+// page is the participant's own word, so one Enter says them all (a page a
+// model writes is a trial instead, shown as a door to its sandbox). Plant the
+// tiles first; a page needs its tile.
 // Saying the notes twice files them twice, so re-run with --tiles-only.
 
 const path = require('path')
@@ -121,6 +124,12 @@ if (args.includes('--blocks')) {
   const bus = globalThis.__hypercombEffectBus
   const store = ioc?.get?.('@hypercomb.social/Store')
   const door = ioc?.get?.('@diamondcoreprocessor.com/TileFilesDrone')
+  // Each page is stored as this hive's own: the console wrote it. An older hive
+  // without the door marks the page when the website page line names it.
+  const website = ioc?.get?.('@diamondcoreprocessor.com/WebsiteQueenBee')
+  const writePage = (html) => typeof website?.writeOwnPage === 'function'
+    ? website.writeOwnPage(html)
+    : store.putResource(new Blob([html], { type: 'text/html' }))
   if (!bus || !store?.putResource || !door?.write) { console.error('Open this in the hive tab: the hive is not here.'); return }
   // 1. The media, each by its signature, before any page names it.
   const media = ${JSON.stringify(media.map(m => ({ sig: m.sig, name: m.name, type: m.type })))}
@@ -144,7 +153,7 @@ if (args.includes('--blocks')) {
   let files = 0, failed = 0
   for (const b of blocks) {
     const at = '/' + b.route.join('/')
-    const sig = await store.putResource(new Blob([b.page], { type: 'text/html' }))
+    const sig = await writePage(b.page)
     lines.push('go ' + at, 'website page ' + sig)
     for (const f of b.files) {
       const file = await door.write({ route: b.route, kind: 'file', name: f.name }, texts[f.path])

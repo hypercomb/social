@@ -364,10 +364,13 @@ may run *as you*. That is now a second question, asked of every surface:
    they never make a page yours (`feature-availability.ts` `runsSealed`). On a
    published visitor shell the publisher's own pages run as their own origin, as
    any website does.
-2. **What makes a page yours.** This hive wrote it: the bridge, the website and
-   tile-file writers, `/lounge here`, and a page made from one of yours
-   (`page-commit.ts` `commitPageSigFrom`). A page written over someone else's (a
-   section edit keeps their scripts) stays theirs. The grandfathering walk is
+2. **What makes a page yours.** This hive wrote it: the bridge (the bytes it put),
+   the website, howto and tile-file writers, a snippet in the hive tab's console
+   (`writeOwnPage`), and a page made from one of yours (`page-commit.ts`
+   `commitPageSigFrom`). Naming a page never makes it yours (2026-11-28, M1):
+   `website page <sig>`, `/lounge here <sig>` and a bridge request that only
+   points at bytes leave them what they were. A page written over someone
+   else's (a section edit keeps their scripts) stays theirs. The grandfathering walk is
    retired: nothing in a walk can tell a peer's page from your own. An older page
    of yours that was never marked runs sealed until it is written again.
 3. **Sealed.** The page runs in the frame a version runs in
