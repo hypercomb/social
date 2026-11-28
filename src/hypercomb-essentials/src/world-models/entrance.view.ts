@@ -9,6 +9,7 @@
 // cascade parks it with every other window.
 
 import { EffectBus, I18N_IOC_KEY, holdWindow, type I18nProvider, type WindowSession } from '@hypercomb/core'
+import { deviceSubscriptions, SUBSCRIPTION_EFFECT } from './subscription.js'
 import {
   WORLD_MODEL_COPY,
   WORLD_MODEL_NAMESPACE,
@@ -129,7 +130,19 @@ export class WorldModelsEntrance extends HTMLElement {
       const line = document.createElement('p')
       line.className = 'wm-line'
       line.dataset['seat'] = word
-      item.append(hex, line)
+      if (word === 'subscription') {
+        const connect = document.createElement('button')
+        connect.type = 'button'
+        connect.className = 'wm-connect'
+        connect.dataset['seat'] = word
+        connect.append(hex, line)
+        connect.addEventListener('click', () => {
+          EffectBus.emitTransient('providers:open', { tab: 'api' })
+        })
+        item.append(connect)
+      } else {
+        item.append(hex, line)
+      }
       seats.append(item)
     }
 
@@ -152,11 +165,23 @@ export class WorldModelsEntrance extends HTMLElement {
     if (lead) lead.textContent = say('world-models.lead')
     const invitation = this.querySelector('.wm-invite')
     if (invitation) invitation.textContent = say('world-models.invitation')
+    const connected = deviceSubscriptions()
     for (const state of this.querySelectorAll('.wm-state')) state.textContent = say('world-models.unfilled')
     for (const line of this.querySelectorAll<HTMLElement>('.wm-line')) {
       const word = line.dataset['seat'] ?? ''
+      if (word === 'subscription' && connected.length > 0) {
+        line.textContent = connected.map(item => item.label).join(', ')
+        const state = line.parentElement?.querySelector('.wm-state')
+        if (state) state.textContent = say('world-models.connected')
+        continue
+      }
       line.textContent = say(`world-models.seat.${word}`)
     }
+  }
+
+  /** Names on the subscription seat follow the device store while the page is open. */
+  refresh(): void {
+    if (this.classList.contains('wm-open')) this.#fill()
   }
 
   #away(): void {
@@ -188,6 +213,10 @@ export class WorldModelsEntrance extends HTMLElement {
 EffectBus.on('world-models:open', () => {
   if (page) page.show()
   else waiting = true
+})
+
+EffectBus.on(SUBSCRIPTION_EFFECT, () => {
+  page?.refresh()
 })
 
 if (typeof customElements !== 'undefined' && !customElements.get(WORLD_MODELS_SURFACE)) {
@@ -224,10 +253,15 @@ ${WORLD_MODELS_SURFACE} .wm-lead{
 }
 ${WORLD_MODELS_SURFACE} .wm-seats{
   list-style:none;margin:0;padding:0;
-  display:grid;grid-template-columns:repeat(auto-fit,minmax(9.5rem,1fr));
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(8.4rem,1fr));
   gap:1.6rem 1rem;
 }
 ${WORLD_MODELS_SURFACE} .wm-seat{display:flex;flex-direction:column;align-items:center;text-align:center;gap:0.75rem;}
+${WORLD_MODELS_SURFACE} .wm-connect{
+  appearance:none;border:0;background:transparent;color:inherit;font:inherit;
+  cursor:pointer;padding:0;width:100%;
+  display:flex;flex-direction:column;align-items:center;text-align:center;gap:0.75rem;
+}
 ${WORLD_MODELS_SURFACE} .wm-hex{
   width:7.5rem;height:8.25rem;
   background:var(--md-outline,rgba(231,237,245,0.45));

@@ -11,9 +11,10 @@ export const WORLD_MODELS_SURFACE = 'hc-world-models'
 export const WORLD_MODELS_WINDOW = 'world-models'
 export const WORLD_MODEL_NAMESPACE = 'diamondcoreprocessor.com'
 
-/** The open requirements. Every one is needed: there is no own version. */
+/** subscription has its own version (subscription.drone.ts). The other four
+ *  are still reminders: there is no version of their own. */
 export const WORLD_MODEL_TRAITS: readonly TraitDeclaration[] = [
-  { word: 'subscription', needs: true },
+  'subscription',
   { word: 'language-model', needs: true },
   { word: 'world', needs: true },
   { word: 'clip', needs: true },
@@ -28,6 +29,7 @@ export const WORLD_MODEL_COPY: Record<string, string> = {
   'world-models.invitation': 'This door is where you connect a subscription and a language model you already have. The conversation arrives with the door.',
   'world-models.close': 'Close',
   'world-models.unfilled': 'Open',
+  'world-models.connected': 'Connected',
   'world-models.seat.subscription': 'Connect a subscription you already pay for. It stays on your device.',
   'world-models.seat.language-model': 'Name the language model you bring. The conversation on this door speaks with it.',
   'world-models.seat.world': 'A durable world, kept as its own artifact. A splat, a mesh, a panorama.',
