@@ -18,7 +18,6 @@ const services = new Map<string, unknown>()
 
 const { poolContributions } = await import('../pools/pool-contributions.js')
 const { ENTRY_POSTS_WANTED, entryForms } = await import('../pools/open-entries-forms.js')
-const { LIGHTS_ENTER } = await import('../pools/lights-contract.js')
 const { RECIPE_SETTING_MEANING } = await import('./recipe-setting-pool.js')
 const { defaultRecipeTemplates } = await import('./recipe-pool.js')
 await import('./recipe.queen.js')
@@ -50,17 +49,16 @@ describe('the entry form a pool opened for posts asks a phone to fill', () => {
 })
 
 describe('recipe posts', () => {
-  it('asks for pools mode and then for the "Open for posts" form, and nothing else', async () => {
+  it('asks for the "Collect from phones" card and nothing else: no pools mode under it', async () => {
     const heard: string[] = []
     const offs = [
-      EffectBus.on(LIGHTS_ENTER, () => heard.push('enter')),
       EffectBus.on(ENTRY_POSTS_WANTED, () => heard.push('posts')),
       EffectBus.on('view:open-for-tile', () => heard.push('open')),
     ]
     heard.length = 0
     await queen.invoke('posts')
     for (const off of offs) off()
-    expect(heard).toEqual(['enter', 'posts'])
+    expect(heard).toEqual(['posts'])
   })
 
   it('offers posts as its one word, and posts is no behaviour word of its own', () => {

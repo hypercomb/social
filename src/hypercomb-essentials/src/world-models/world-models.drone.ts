@@ -1,9 +1,9 @@
 // world-models/world-models.drone.ts
 //
-// THE ENTRANCE. One behaviour, five traits, no fillers. Each trait is a
-// reminder that the behaviour works properly once something is provided, and
-// the name of the layer that will fill it later. Extruding one is a later
-// layer of its own, named that word. The words and the copy live in
+// THE ENTRANCE. One behaviour, five traits. subscription is extruded: its own
+// version is subscription.drone.ts. The other four are reminders that the
+// behaviour works properly once something is provided, and the name of the
+// layer that will fill each one later. The words and the copy live in
 // world-models.words.ts.
 // The page (entrance.view.ts) draws them. Nothing here reaches a vendor, a
 // key, or a store.

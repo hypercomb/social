@@ -31,71 +31,85 @@ const page = (labels: string[], externalLabels: string[] = []): void => {
   EffectBus.emit('render:cell-count', { count: labels.length, labels, coords: labels.map((_, q) => ({ q, r: 0 })), externalLabels })
 }
 const turned = (): void => { EffectBus.emit(LIGHTS_CHANGED, {}) }
+const hover = (label: string | null): void => { EffectBus.emit('tile:hover', { label }) }
 
 beforeEach(() => {
   localStorage.clear()
   mode(false)
+  hover(null)
   page([])
 })
 
 describe('the lit badge', () => {
-  it('wears nothing outside pools mode, whatever is on', () => {
+  it('wears nothing outside pools mode, whatever is on or hovered', () => {
     setCellPublic('/kitchen', 'soup', true)
     page(['soup', 'bread'])
+    hover('soup')
     expect(layer().children).toHaveLength(0)
   })
 
-  it('puts one badge on each of your own tiles that is on, and none on a peer\'s', () => {
-    setCellPublic('/kitchen', 'soup', true)
-    setCellPublic('/kitchen', 'visitor', true)
-    mode(true)
-    page(['soup', 'bread', 'visitor'], ['visitor'])
-    expect(layer().children).toHaveLength(1)
-    expect(layer().eventMode).toBe('none')
-    expect(layer().children[0].eventMode).toBe('none')
-  })
-
-  it('follows a light as it turns, keeping the badges that did not change', () => {
-    setCellPublic('/kitchen', 'soup', true)
-    mode(true)
-    page(['soup', 'bread'])
-    const first = layer().children[0]
-    setCellPublic('/kitchen', 'bread', true)
-    turned()
-    expect(layer().children).toHaveLength(2)
-    expect(layer().children[0]).toBe(first)
-    setCellPublic('/kitchen', 'soup', false)
-    turned()
-    expect(layer().children).toHaveLength(1)
-    expect(layer().children[0]).not.toBe(first)
-  })
-
-  it('draws a branch lit whole wider than a single lit tile: the second ring', () => {
+  it('wears nothing at rest in pools mode: the dimming alone says what is on', () => {
     setCellPublic('/kitchen', 'soup', true)
     setBranchPublic('/kitchen', 'bread', true)
     mode(true)
     page(['soup', 'bread'])
-    const [single, branch] = layer().children
-    expect(branch.width).toBeGreaterThan(single.width)
+    expect(layer().children).toHaveLength(0)
     setBranchPublic('/kitchen', 'bread', false)
-    setCellPublic('/kitchen', 'bread', true)
-    turned()
-    expect(layer().children[1]).toBe(branch)
-    expect(branch.width).toBeCloseTo(single.width, 5)
   })
 
-  it('badges a tile under a lit branch as on', () => {
-    setBranchPublic('/', 'kitchen', true)
+  it("puts one badge on the tile under the pointer, on or off, and none on a peer's", () => {
+    setCellPublic('/kitchen', 'soup', true)
+    setCellPublic('/kitchen', 'visitor', true)
     mode(true)
-    page(['soup'])
+    page(['soup', 'bread', 'visitor'], ['visitor'])
+    hover('soup')
     expect(layer().children).toHaveLength(1)
-    setBranchPublic('/', 'kitchen', false)
+    expect(layer().eventMode).toBe('none')
+    expect(layer().children[0].eventMode).toBe('none')
+    hover('bread')
+    expect(layer().children).toHaveLength(1)
+    hover('visitor')
+    expect(layer().children).toHaveLength(0)
+    hover('bread')
+    hover(null)
+    expect(layer().children).toHaveLength(0)
   })
 
-  it('clears every badge when the mode ends, and hides with the hive', () => {
+  it("follows the hovered tile's light as it turns, on the same badge", () => {
+    mode(true)
+    page(['soup', 'bread'])
+    hover('soup')
+    const badge = layer().children[0]
+    setCellPublic('/kitchen', 'soup', true)
+    turned()
+    expect(layer().children).toHaveLength(1)
+    expect(layer().children[0]).toBe(badge)
+    setCellPublic('/kitchen', 'soup', false)
+    turned()
+    expect(layer().children[0]).toBe(badge)
+  })
+
+  it('draws a branch lit whole wider than a single lit tile: the second ring', () => {
     setCellPublic('/kitchen', 'soup', true)
     mode(true)
     page(['soup'])
+    hover('soup')
+    const badge = layer().children[0]
+    const single = badge.width
+    setBranchPublic('/kitchen', 'soup', true)
+    turned()
+    expect(layer().children[0]).toBe(badge)
+    expect(badge.width).toBeGreaterThan(single)
+    setBranchPublic('/kitchen', 'soup', false)
+    turned()
+    expect(badge.width).toBeCloseTo(single, 5)
+  })
+
+  it('clears the badge when the mode ends, and hides with the hive', () => {
+    setCellPublic('/kitchen', 'soup', true)
+    mode(true)
+    page(['soup'])
+    hover('soup')
     EffectBus.emit('render:set-hive-visible', { visible: false })
     expect(layer().visible).toBe(false)
     EffectBus.emit('render:set-hive-visible', { visible: true })

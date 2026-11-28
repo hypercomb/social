@@ -1,10 +1,12 @@
 // pools/pools-badge.drone.ts
 //
-// THE LIT BADGE. While pools mode is up, every tile on the page that is ON
-// wears a small light bulb on its right shoulder, always visible, so what is
-// offered reads at a glance without hovering anything. A tile lit as a whole
-// branch wears the same bulb inside a second ring: this, and everything under
-// it. A tile that is off wears nothing: the renderer already dims it.
+// THE LIT BADGE, ON THE TILE UNDER THE POINTER ONLY (jwize 2026-11-27: "what
+// are the lightbulbs for? Just have a hover state ... The off and on
+// transparency are sufficient while at rest"). At rest a page in pools mode
+// wears no badge at all: the renderer's own dimming says what is on and what is
+// off. The one tile the pointer is over wears a small light bulb on its right
+// shoulder that says what a tap would change: filled when the tile is on,
+// hollow when it is off, inside a second ring when its whole branch is lit.
 //
 // Being on is a mark the participant keeps (presentation/tiles/tile-public.ts),
 // membership and never truth (P6), and this drone only READS it. It draws its
@@ -74,34 +76,41 @@ export const bulbColours = (): BulbColours => {
   return lit === null || ink === null ? { lit: LIT, ink: INK } : { lit, ink }
 }
 
-/** One badge: the plate, the bulb on it, and the second ring when the whole branch is lit. */
-const drawBulb = (g: Graphics, branch: boolean, { lit, ink }: BulbColours): void => {
+/** How the hovered tile stands: off, on, or on with its whole branch. */
+type BulbLook = 'off' | 'on' | 'branch'
+
+/** One badge: the plate, the bulb on it, and the second ring when the whole branch is lit. A tile that is off
+ *  wears the same bulb hollow: the plate in the ink, the bulb and rim in the green. */
+const drawBulb = (g: Graphics, look: BulbLook, { lit, ink }: BulbColours): void => {
   g.clear()
-  if (branch) g.circle(0, 0, PLATE + RING_GAP).stroke({ color: lit, width: 1.4, alpha: 0.95 })
-  g.circle(0, 0, PLATE).fill({ color: lit, alpha: 1 }).stroke({ color: ink, width: 1.1, alpha: 0.9 })
-  g.circle(0, -1.3, 2.9).fill({ color: ink, alpha: 1 })
-  g.roundRect(-1.7, 1.1, 3.4, 1.9, 0.5).fill({ color: ink, alpha: 1 })
-  g.rect(-1.1, 3.5, 2.2, 0.9).fill({ color: ink, alpha: 1 })
+  const [plate, mark] = look === 'off' ? [ink, lit] : [lit, ink]
+  if (look === 'branch') g.circle(0, 0, PLATE + RING_GAP).stroke({ color: lit, width: 1.4, alpha: 0.95 })
+  g.circle(0, 0, PLATE).fill({ color: plate, alpha: look === 'off' ? 0.88 : 1 }).stroke({ color: mark, width: 1.1, alpha: 0.9 })
+  g.circle(0, -1.3, 2.9).fill({ color: mark, alpha: 1 })
+  g.roundRect(-1.7, 1.1, 3.4, 1.9, 0.5).fill({ color: mark, alpha: 1 })
+  g.rect(-1.1, 3.5, 2.2, 0.9).fill({ color: mark, alpha: 1 })
 }
 
 export class PoolsBadgeDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'presentation'
   public override description =
-    'Per-tile light bulb while pools mode is up: a tile that is on wears it, and a branch lit whole wears it inside a second ring.'
+    'The light bulb on the tile under the pointer while pools mode is up: filled when the tile is on, hollow when it is off, ringed when its whole branch is lit.'
   public override effects = ['render'] as const
 
   protected override deps = {}
   protected override listens: string[] = [
     'render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:geometry-changed',
-    'render:set-orientation', 'render:set-hive-visible', LIGHTS_MODE, LIGHTS_CHANGED, 'theme:changed',
+    'render:set-orientation', 'render:set-hive-visible', LIGHTS_MODE, LIGHTS_CHANGED, 'theme:changed', 'tile:hover',
   ]
   protected override emits: string[] = []
 
   #layer = new TileBadgeLayer(BADGE_Z)
   /** Your own tiles on this page, by label. A peer's tile is never yours to light. */
   #coordByLabel = new Map<string, Axial>()
-  #badges = new Map<string, { g: Graphics; branch: boolean }>()
+  #badges = new Map<string, { g: Graphics; look: BulbLook }>()
+  /** The tile the pointer is over, '' for none: the one tile that wears a badge. */
+  #hovered = ''
   #active = false
   #hiveHidden = false
   #initialized = false
@@ -149,6 +158,12 @@ export class PoolsBadgeDrone extends Drone {
       this.#refresh()
     })
     this.onEffect(LIGHTS_CHANGED, () => this.#refresh())
+    this.onEffect<{ label?: string | null }>('tile:hover', (payload) => {
+      const label = String(payload?.label ?? '')
+      if (label === this.#hovered) return
+      this.#hovered = label
+      this.#refresh()
+    })
     // A theme of its own, or the system's turning dark or light: the green deepens or pales, and every bulb with it.
     this.onEffect('theme:changed', () => this.#recolour())
     try { this.#scheme = matchMedia('(prefers-color-scheme: dark)') } catch { this.#scheme = null }
@@ -163,7 +178,7 @@ export class PoolsBadgeDrone extends Drone {
     const next = bulbColours()
     if (next.lit === this.#colours.lit && next.ink === this.#colours.ink) return
     this.#colours = next
-    for (const badge of this.#badges.values()) drawBulb(badge.g, badge.branch, next)
+    for (const badge of this.#badges.values()) drawBulb(badge.g, badge.look, next)
   }
 
   protected override dispose(): void {
@@ -178,28 +193,30 @@ export class PoolsBadgeDrone extends Drone {
     this.#badges.clear()
   }
 
-  /** Put a bulb on every tile that is on, take it off every tile that is not. Nothing is up outside pools mode. */
+  /** Put the bulb on the tile under the pointer, drawn as that tile stands, and take every other one off. Nothing is
+   *  up outside pools mode, and a peer's tile is never yours to light. */
   #refresh(): void {
     const layer = this.#layer.layer
     if (!layer) return
     if (!this.#active) { this.#clear(); return }
     const location = get<{ explorerLabel?(): string }>('@hypercomb.social/Lineage')?.explorerLabel?.() ?? '/'
     const wanted = new Set<string>()
-    for (const [label, coord] of this.#coordByLabel) {
-      if (!isCellPublic(location, label)) continue
+    const coord = this.#hovered ? this.#coordByLabel.get(this.#hovered) : undefined
+    if (coord) {
+      const label = this.#hovered
       wanted.add(label)
-      const branch = isBranchPublic(location, label)
+      const look: BulbLook = isBranchPublic(location, label) ? 'branch' : isCellPublic(location, label) ? 'on' : 'off'
       let badge = this.#badges.get(label)
       if (!badge) {
         const g = new Graphics()
         g.eventMode = 'none'
-        drawBulb(g, branch, this.#colours)
+        drawBulb(g, look, this.#colours)
         layer.addChild(g)
-        badge = { g, branch }
+        badge = { g, look }
         this.#badges.set(label, badge)
-      } else if (badge.branch !== branch) {
-        drawBulb(badge.g, branch, this.#colours)
-        badge.branch = branch
+      } else if (badge.look !== look) {
+        drawBulb(badge.g, look, this.#colours)
+        badge.look = look
       }
       this.#layer.place(badge.g, coord, BADGE_CORNER.topRight)
     }

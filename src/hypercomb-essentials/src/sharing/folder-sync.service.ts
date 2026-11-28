@@ -2104,6 +2104,15 @@ export class FolderSyncService {
     })
     db.close()
   }
+
+  /** Intelligence groups reuse this writer. The storage allowance stays here. */
+  async writeGrantedFile(
+    dir: FileSystemDirectoryHandle,
+    name: string,
+    bytes: ArrayBuffer | ArrayBufferView | Blob | string,
+  ): Promise<void> {
+    await writeFile(dir, name, bytes)
+  }
 }
 
 const _folderSync = new FolderSyncService()
